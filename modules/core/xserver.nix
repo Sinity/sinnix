@@ -4,12 +4,10 @@
     xserver = {
       enable = true;
       xkb.layout = "us,pl";
+      displayManager.lightdm.enable = false;
+      videoDrivers = [ "nvidia" ];
     };
 
-    displayManager.autoLogin = {
-      enable = true;
-      user = "${username}";
-    };
     libinput = {
       enable = true;
       # mouse = {

@@ -13,5 +13,6 @@
 
   environment.systemPackages = with pkgs; [
     # xwaylandvideobridge
+    wlr-randr # xrandr equivalent, for reading/setting display modes (resolution, refresh rate)
   ];
 }

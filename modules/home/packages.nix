@@ -57,6 +57,8 @@ in
     sl
     tty-clock                         # cli clock
 
+    weechat 			      # IRC client
+
     ## GUI Apps
     audacity
     bleachbit                         # cache cleaner

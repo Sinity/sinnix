@@ -24,7 +24,7 @@
       ];
 
       input = {
-        kb_layout = "us,fr";
+        kb_layout = "us,pl";
         kb_options ="grp:alt_caps_toggle"; 
         numlock_by_default = true;
         follow_mouse = 0;
@@ -74,6 +74,10 @@
         new_status = "master";
         special_scale_factor = 1;
         no_gaps_when_only = false;
+      };
+
+      debug = {
+        disable_logs = false;
       };
 
       decoration = {
@@ -328,8 +332,7 @@
     };
 
     extraConfig = "
-      monitor=,preferred,auto,auto
-
+      monitor=DP-4,3840x2160@119.999001,0x0,1
       xwayland {
         force_zero_scaling = true
       }
