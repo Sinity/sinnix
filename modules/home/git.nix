@@ -1,14 +1,13 @@
-{ pkgs, ... }: 
+{ pkgs, ... }:
 {
   programs.git = {
     enable = true;
     
-    userName = "Frost-Phoenix";
-    userEmail = "redacted@example.com";
+    userName = "Sinity";
+    userEmail = "ezo.dev@gmail.com";
     
     extraConfig = { 
-      init.defaultBranch = "main";
-      credential.helper = "store";
+      init.defaultBranch = "master";
       merge.conflictstyle = "diff3";
       diff.colorMoved = "default";
     };
@@ -17,10 +16,15 @@
       enable = true;
       options = {
         line-numbers = true;
-        # side-by-side = true;
+        side-by-side = true;
         navigate = true;
       };
     };
+  };
+
+  programs.ssh = {
+    enable = true;
+    matchBlocks."github.com".identityFile = "~/.ssh/id_ed25519"; # TODO: look into secret mgmt solutions like agenix or secrix.
   };
 
   home.packages = [ pkgs.gh ]; # pkgs.git-lfs
