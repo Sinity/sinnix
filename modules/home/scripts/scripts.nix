@@ -3,7 +3,6 @@
   wallpaper-picker = pkgs.writeShellScriptBin "wallpaper-picker" (builtins.readFile ./scripts/wallpaper-picker.sh);
   
   runbg = pkgs.writeShellScriptBin "runbg" (builtins.readFile ./scripts/runbg.sh);
-  music = pkgs.writeShellScriptBin "music" (builtins.readFile ./scripts/music.sh);
   lofi = pkgs.writeScriptBin "lofi" (builtins.readFile ./scripts/lofi.sh);
   
   toggle_blur = pkgs.writeScriptBin "toggle_blur" (builtins.readFile ./scripts/toggle_blur.sh);
@@ -33,7 +32,6 @@ in {
     wallpaper-picker
     
     runbg
-    music
     lofi
   
     toggle_blur

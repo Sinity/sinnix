@@ -17,12 +17,18 @@
       programs.home-manager.enable = true;
     };
   };
-
+  
+  users.mutableUsers = false;
   users.users.${username} = {
     isNormalUser = true;
-    description = "${username}";
     extraGroups = [ "networkmanager" "wheel" ];
     shell = pkgs.zsh;
+    hashedPassword = "REDACTED_HASH";
   };
   nix.settings.allowed-users = [ "${username}" ];
+  users.users.root = {
+    shell = pkgs.zsh;
+    home = "/root";
+    hashedPassword = "REDACTED_HASH"; 
+  };
 }

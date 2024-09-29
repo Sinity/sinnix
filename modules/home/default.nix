@@ -1,7 +1,5 @@
 {inputs, username, host, ...}: {
   imports = [
-    ./aseprite/aseprite.nix           # pixel art editor
-    ./audacious.nix                   # music player
     ./bat.nix                         # better cat command
     ./btop.nix                        # resouces monitor 
     ./cava.nix                        # audio visualizer
@@ -16,7 +14,6 @@
     ./hyprland                        # window manager
     ./kitty.nix                       # terminal
     ./swaync/swaync.nix               # notification deamon
-    ./micro.nix                       # nano replacement
     ./nvim.nix                        # neovim editor
     ./packages.nix                    # other packages
     ./retroarch.nix  
@@ -25,7 +22,7 @@
     ./spicetify.nix                   # spotify client
     ./starship.nix                    # shell prompt
     ./swaylock.nix                    # lock screen
-    ./vscodium.nix                    # vscode forck
+    ./vscodium.nix                    # vscode fork
     ./waybar                          # status bar
     ./xdg-mimes.nix                   # xdg config
     ./zsh.nix                         # shell

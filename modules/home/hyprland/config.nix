@@ -2,20 +2,19 @@
 {
   wayland.windowManager.hyprland = {
     settings = {
-      
-      # autostart
       exec-once = [
         "systemctl --user import-environment &"
         "hash dbus-update-activation-environment 2>/dev/null &"
         "dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP &"
         "nm-applet &"
         "wl-clip-persist --clipboard both"
-        "swaybg -m fill -i $(find ~/Pictures/wallpapers/ -maxdepth 1 -type f) &"
+        "swaybg -m fill -i $(find ~/pic/wallpaper/ -maxdepth 1 -type f) &"
         "hyprctl setcursor Bibata-Modern-Ice 24 &"
         "poweralertd &"
         "waybar &"
         "swaync &"
-        "wl-paste --watch cliphist store &"
+        "wl-paste --watch cliphist store -max-items 99999 -max-dedupe-search 20 &"
+        # "wl-paste --primary --watch ???" # TODO: set this up when I figure out where to store these
         "hyprlock"
 
         ## App auto start
@@ -24,40 +23,54 @@
       ];
 
       input = {
-        kb_layout = "us,pl";
-        kb_options ="grp:alt_caps_toggle"; 
+        kb_layout = "pl";
+        kb_options = "";
         numlock_by_default = true;
-        follow_mouse = 0;
-        float_switch_override_focus = 0;
-        mouse_refocus = 0;
+
+	repeat_rate = 40;
+	repeat_delay = 250;
+
         sensitivity = 0;
-        touchpad = {
-          natural_scroll = true;
-        };
+	accel_profile = "flat";
+        force_no_accel = 0;
+
+	scroll_factor = 1;
+	emulate_discrete_scroll = 1;
+
+        follow_mouse = 1;
+	focus_on_close = 0;
+        mouse_refocus = false;
+        float_switch_override_focus = 2;
+	special_fallthrough = true;
       };
 
       general = {
-        "$mainMod" = "SUPER";
-        layout = "dwindle";
-        gaps_in = 0;
-        gaps_out = 0;
-        border_size = 2;
-        "col.active_border" = "rgb(98971a) rgb(cc241d) 45deg";
+        border_size = 3;
+        gaps_in = 10;
+        gaps_out = 20;
         "col.inactive_border" = "0x00000000";
-        border_part_of_window = false;
-        no_border_on_floating = false;
+        "col.active_border" = "rgb(98971a) rgb(cc241d) 45deg";
+        layout = "dwindle";
+	resize_on_border = true;
       };
 
       misc = {
-        disable_autoreload = true;
-        disable_hyprland_logo = true;
+        disable_hyprland_logo = false;
+	vrr = 2;
+	mouse_move_enables_dpms = true;
+	key_press_enables_dpms = true;
         always_follow_on_dnd = true;
         layers_hog_keyboard_focus = true;
         animate_manual_resizes = false;
+	animate_mouse_windowdragging = false;
+        disable_autoreload = true;
         enable_swallow = true;
+	swallow_regex = "^(kitty)$";
         focus_on_activate = true;
+	# render_ahead_of_time = true;
+	# render_ahead_safezone = 2;
         new_window_takes_over_fullscreen = 2;
-        middle_click_paste = false;
+        middle_click_paste = true;
       };
 
       dwindle = {
@@ -75,38 +88,48 @@
         special_scale_factor = 1;
         no_gaps_when_only = false;
       };
+      
+      group = {
+        insert_after_current = true;
+	focus_removed_window = true;
+
+	groupbar = {
+          enabled = true;
+	  gradients = true;
+	  height = 14;
+	  render_titles = true;
+	  scrolling = true;
+	};
+      };
 
       debug = {
         disable_logs = false;
+	disable_time = false;
+	enable_stdout_logs = true;
       };
 
       decoration = {
         rounding = 0;
-        # active_opacity = 0.90;
-        # inactive_opacity = 0.90;
-        # fullscreen_opacity = 1.0;
-
-        blur = {
-          enabled = true;
-          size = 2;
-          passes = 2;
-          # size = 4;
-          # passes = 2;
-          brightness = 1;
-          contrast = 1.400;
-          ignore_opacity = true;
-          noise = 0;
-          new_optimizations = true;
-          xray = true;
-        };
+        active_opacity = 1.00;
+        inactive_opacity = 0.90;
+        fullscreen_opacity = 1.00;
 
         drop_shadow = true;
-
         shadow_ignore_window = true;
         shadow_offset = "0 2";
         shadow_range = 20;
         shadow_render_power = 3;
         "col.shadow" = "rgba(00000055)";
+
+        blur = {
+          enabled = true;
+          size = 4;
+          passes = 2;
+          contrast = 1.400;
+          brightness = 1;
+	  vibrancy = 0.5;
+	  special = true;
+        };
       };
 
       animations = {
@@ -122,113 +145,110 @@
         animation = [
           # Windows
           "windowsIn, 1, 3, easeOutCubic, popin 30%" # window open
-          "windowsOut, 1, 3, fluent_decel, popin 70%" # window close.
-          "windowsMove, 1, 2, easeinoutsine, slide" # everything in between, moving, dragging, resizing.
+          "windowsOut, 1, 3, fluent_decel, popin 70%" # window close
+          "windowsMove, 1, 2, easeinoutsine, slide" # window move
 
           # Fade
           "fadeIn, 1, 3, easeOutCubic" # fade in (open) -> layers and windows
           "fadeOut, 1, 2, easeOutCubic" # fade out (close) -> layers and windows
-          "fadeSwitch, 0, 1, easeOutCirc" # fade on changing activewindow and its opacity
-          "fadeShadow, 1, 10, easeOutCirc" # fade on changing activewindow for shadows
-          "fadeDim, 1, 4, fluent_decel" # the easing of the dimming of inactive windows
-          "border, 1, 2.7, easeOutCirc" # for animating the border's color switch speed
-          "borderangle, 1, 30, fluent_decel, once" # for animating the border's gradient angle - styles: once (default), loop
-          "workspaces, 1, 4, easeOutCubic, fade" # styles: slide, slidevert, fade, slidefade, slidefadevert
+          "fadeSwitch, 0, 1, easeOutCirc" # fade on changing activewindow
+          "fadeShadow, 1, 10, easeOutCirc" # shadow fade on changing activewindow
+          "fadeDim, 1, 4, fluent_decel" # dimming fade of inactive windows
+          "border, 1, 2.7, easeOutCirc" # border color switch speed
+          "borderangle, 1, 30, fluent_decel, once" # once (default), loop
+          "workspaces, 1, 4, easeOutCubic, fade" # slide, fade, slidefade...
         ];
       };
 
       bind = [
-        # show keybinds list
-        "$mainMod, F1, exec, show-keybinds"
-
-        # keybindings
-        "$mainMod, Return, exec, kitty"
+        "SUPER, F1, exec, show-keybinds" # keybinds cheatsheet 
+        "SUPER, Return, exec, kitty"
         "ALT, Return, exec, kitty --title float_kitty"
-        "$mainMod SHIFT, Return, exec, kitty --start-as=fullscreen -o 'font_size=16'"
-        "$mainMod, B, exec, hyprctl dispatch exec '[workspace 1 silent] floorp'"
-        "$mainMod, Q, killactive,"
-        "$mainMod, F, fullscreen, 0"
-        "$mainMod SHIFT, F, fullscreen, 1"
-        "$mainMod, Space, togglefloating,"
-        "$mainMod, Space, centerwindow,"
-        "$mainMod, Space, resizeactive, exact 950 600"
-        "$mainMod, D, exec, rofi -show drun || pkill rofi"
-        "$mainMod SHIFT, D, exec, hyprctl dispatch exec '[workspace 4 silent] discord --enable-features=UseOzonePlatform --ozone-platform=wayland'"
-        "$mainMod SHIFT, S, exec, hyprctl dispatch exec '[workspace 5 silent] SoundWireServer'"
-        "$mainMod, Escape, exec, swaylock"
+        "SUPER SHIFT, Return, exec, kitty --start-as=fullscreen -o 'font_size=16'"
+        "SUPER, B, exec, hyprctl dispatch exec '[workspace 1 silent] floorp'"
+        "SUPER, Q, killactive,"
+        "SUPER, F, fullscreen, 0"
+        "SUPER SHIFT, F, fullscreen, 1"
+        "SUPER, Space, togglefloating,"
+        "SUPER, Space, centerwindow,"
+        "SUPER, Space, resizeactive, exact 950 600"
+        "SUPER, D, exec, rofi -show drun || pkill rofi"
+        "SUPER SHIFT, D, exec, hyprctl dispatch exec '[workspace 4 silent] discord --enable-features=UseOzonePlatform --ozone-platform=wayland'"
+        "SUPER SHIFT, S, exec, hyprctl dispatch exec '[workspace 5 silent] SoundWireServer'"
+        "SUPER, Escape, exec, swaylock"
         "ALT, Escape, exec, hyprlock"
-        "$mainMod SHIFT, Escape, exec, power-menu"
-        "$mainMod, P, pseudo,"
-        "$mainMod, J, togglesplit,"
-        "$mainMod, T, exec, toggle_oppacity"
-        "$mainMod, E, exec, nautilus"
-        "$mainMod SHIFT, B, exec, toggle_waybar"
-        "$mainMod, C ,exec, hyprpicker -a"
-        "$mainMod, W,exec, wallpaper-picker"
-        "$mainMod, N, exec, swaync-client -t -sw"
-        "$mainMod SHIFT, W, exec, vm-start"
+        "SUPER SHIFT, Escape, exec, power-menu"
+        "SUPER, P, pseudo,"
+        "SUPER, Y, togglesplit,"
+        "SUPER, T, exec, toggle_oppacity"
+        "SUPER, E, exec, nautilus"
+        "SUPER SHIFT, B, exec, toggle_waybar"
+        "SUPER, C ,exec, hyprpicker -a"
+        "SUPER, W,exec, wallpaper-picker"
+        "SUPER, N, exec, swaync-client -t -sw"
+        "SUPER SHIFT, W, exec, vm-start"
 
         # screenshot
-        "$mainMod, Print, exec, grimblast --notify --cursor --freeze save area ~/Pictures/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
-        ",Print, exec, grimblast --notify --cursor --freeze copy area"
+        "SUPER, Print, exec, grimblast --notify --cursor copysave output ~/pic/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
+        ", Print, exec, grimblast --notify --cursor --freeze copysave area ~/pic/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
 
         # switch focus
-        "$mainMod, left, movefocus, l"
-        "$mainMod, right, movefocus, r"
-        "$mainMod, up, movefocus, u"
-        "$mainMod, down, movefocus, d"
+        "SUPER, H, movefocus, l"
+        "SUPER, J, movefocus, d"
+        "SUPER, K, movefocus, u"
+        "SUPER, L, movefocus, r"
 
         # switch workspace
-        "$mainMod, 1, workspace, 1"
-        "$mainMod, 2, workspace, 2"
-        "$mainMod, 3, workspace, 3"
-        "$mainMod, 4, workspace, 4"
-        "$mainMod, 5, workspace, 5"
-        "$mainMod, 6, workspace, 6"
-        "$mainMod, 7, workspace, 7"
-        "$mainMod, 8, workspace, 8"
-        "$mainMod, 9, workspace, 9"
-        "$mainMod, 0, workspace, 10"
+        "SUPER, 1, workspace, 1"
+        "SUPER, 2, workspace, 2"
+        "SUPER, 3, workspace, 3"
+        "SUPER, 4, workspace, 4"
+        "SUPER, 5, workspace, 5"
+        "SUPER, 6, workspace, 6"
+        "SUPER, 7, workspace, 7"
+        "SUPER, 8, workspace, 8"
+        "SUPER, 9, workspace, 9"
+        "SUPER, 0, workspace, 10"
 
         # same as above, but switch to the workspace
-        "$mainMod SHIFT, 1, movetoworkspacesilent, 1" # movetoworkspacesilent
-        "$mainMod SHIFT, 2, movetoworkspacesilent, 2"
-        "$mainMod SHIFT, 3, movetoworkspacesilent, 3"
-        "$mainMod SHIFT, 4, movetoworkspacesilent, 4"
-        "$mainMod SHIFT, 5, movetoworkspacesilent, 5"
-        "$mainMod SHIFT, 6, movetoworkspacesilent, 6"
-        "$mainMod SHIFT, 7, movetoworkspacesilent, 7"
-        "$mainMod SHIFT, 8, movetoworkspacesilent, 8"
-        "$mainMod SHIFT, 9, movetoworkspacesilent, 9"
-        "$mainMod SHIFT, 0, movetoworkspacesilent, 10"
-        "$mainMod CTRL, c, movetoworkspace, empty"
+        "SUPER SHIFT, 1, movetoworkspacesilent, 1" # movetoworkspacesilent
+        "SUPER SHIFT, 2, movetoworkspacesilent, 2"
+        "SUPER SHIFT, 3, movetoworkspacesilent, 3"
+        "SUPER SHIFT, 4, movetoworkspacesilent, 4"
+        "SUPER SHIFT, 5, movetoworkspacesilent, 5"
+        "SUPER SHIFT, 6, movetoworkspacesilent, 6"
+        "SUPER SHIFT, 7, movetoworkspacesilent, 7"
+        "SUPER SHIFT, 8, movetoworkspacesilent, 8"
+        "SUPER SHIFT, 9, movetoworkspacesilent, 9"
+        "SUPER SHIFT, 0, movetoworkspacesilent, 10"
+        "SUPER CTRL, c, movetoworkspace, empty"
 
         # window control
-        "$mainMod SHIFT, left, movewindow, l"
-        "$mainMod SHIFT, right, movewindow, r"
-        "$mainMod SHIFT, up, movewindow, u"
-        "$mainMod SHIFT, down, movewindow, d"
-        "$mainMod CTRL, left, resizeactive, -80 0"
-        "$mainMod CTRL, right, resizeactive, 80 0"
-        "$mainMod CTRL, up, resizeactive, 0 -80"
-        "$mainMod CTRL, down, resizeactive, 0 80"
-        "$mainMod ALT, left, moveactive,  -80 0"
-        "$mainMod ALT, right, moveactive, 80 0"
-        "$mainMod ALT, up, moveactive, 0 -80"
-        "$mainMod ALT, down, moveactive, 0 80"
+        "SUPER SHIFT, H, movewindow, l"
+        "SUPER SHIFT, L, movewindow, r"
+        "SUPER SHIFT, K, movewindow, u"
+        "SUPER SHIFT, J, movewindow, d"
+        "SUPER CTRL, H, resizeactive, -80 0"
+        "SUPER CTRL, L, resizeactive, 80 0"
+        "SUPER CTRL, K, resizeactive, 0 -80"
+        "SUPER CTRL, J, resizeactive, 0 80"
+        "SUPER ALT, H, moveactive,  -80 0"
+        "SUPER ALT, L, moveactive, 80 0"
+        "SUPER ALT, K, moveactive, 0 -80"
+        "SUPER ALT, J, moveactive, 0 80"
 
         # media and volume controls
-        ",XF86AudioMute,exec, pamixer -t"
-        ",XF86AudioPlay,exec, playerctl play-pause"
-        ",XF86AudioNext,exec, playerctl next"
-        ",XF86AudioPrev,exec, playerctl previous"
+        ",XF86AudioMute, exec, pamixer -t"
+        ",XF86AudioPlay, exec, playerctl play-pause"
+        ",XF86AudioNext, exec, playerctl next"
+        ",XF86AudioPrev, exec, playerctl previous"
         ",XF86AudioStop, exec, playerctl stop"
 
-        "$mainMod, mouse_down, workspace, e-1"
-        "$mainMod, mouse_up, workspace, e+1"
+        "SUPER, mouse_down, workspace, e-1"
+        "SUPER, mouse_up, workspace, e+1"
 
         # clipboard manager
-        "$mainMod, V, exec, cliphist list | rofi -dmenu -theme-str 'window {width: 50%;}' | cliphist decode | wl-copy"
+        "SUPER, V, exec, cliphist list | rofi -dmenu -theme-str 'window {width: 50%;}' | cliphist decode | wl-copy"
       ];
 
       # binds active in lockscreen
@@ -236,8 +256,8 @@
         # laptop brigthness
         ",XF86MonBrightnessUp, exec, brightnessctl set 5%+"
         ",XF86MonBrightnessDown, exec, brightnessctl set 5%-"
-        "$mainMod, XF86MonBrightnessUp, exec, brightnessctl set 100%+"
-        "$mainMod, XF86MonBrightnessDown, exec, brightnessctl set 100%-"
+        "SUPER, XF86MonBrightnessUp, exec, brightnessctl set 100%+"
+        "SUPER, XF86MonBrightnessDown, exec, brightnessctl set 100%-"
       ];
 
       # binds that repeat when held
@@ -248,8 +268,8 @@
 
       # mouse binding
       bindm = [
-        "$mainMod, mouse:272, movewindow"
-        "$mainMod, mouse:273, resizewindow"
+        "SUPER, mouse:272, movewindow"
+        "SUPER, mouse:273, resizewindow"
       ];
 
       # windowrule
@@ -260,10 +280,10 @@
         "float,imv"
         "center,imv"
         "size 1200 725,imv"
-        "float,mpv"
-        "center,mpv"
+        # "float,mpv"
+        # "center,mpv"
         "tile,Aseprite"
-        "size 1200 725,mpv"
+        # "size 1200 725,mpv"
         "float,title:^(float_kitty)$"
         "center,title:^(float_kitty)$"
         "size 950 600,title:^(float_kitty)$"
@@ -333,9 +353,6 @@
 
     extraConfig = "
       monitor=DP-4,3840x2160@119.999001,0x0,1
-      xwayland {
-        force_zero_scaling = true
-      }
     ";
   };
 }

@@ -1,5 +1,5 @@
 {
-  description = "FrostPhoenix's nixos configuration";
+  description = "Sinity's nixos configuration";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
