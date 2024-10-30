@@ -10,6 +10,16 @@
     };
   };
   nixpkgs = {
+    config = {
+      allowUnfreePredicate = pkg: builtins.elem (lib.getName pkg) [
+        "discord"
+        "spotify"
+        "obsidian"
+      ];
+      permittedInsecurePackages = [
+        "electron-25.9.0" # obsidian
+      ];
+    };
     overlays = [
       inputs.nur.overlay
     ];

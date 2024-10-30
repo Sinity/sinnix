@@ -1,5 +1,6 @@
 {inputs, username, host, ...}: {
   imports = [
+    ./activity_watch.nix              # self-inflicted telemetry
     ./bat.nix                         # better cat command
     ./btop.nix                        # resouces monitor 
     ./cava.nix                        # audio visualizer
@@ -13,6 +14,7 @@
     ./gtk.nix                         # gtk theme
     ./hyprland                        # window manager
     ./kitty.nix                       # terminal
+    ./ranger.nix                      # TUI file manager
     ./swaync/swaync.nix               # notification deamon
     ./nvim.nix                        # neovim editor
     ./packages.nix                    # other packages
@@ -26,5 +28,6 @@
     ./waybar                          # status bar
     ./xdg-mimes.nix                   # xdg config
     ./zsh.nix                         # shell
+    ./mpv.nix
   ];
 }

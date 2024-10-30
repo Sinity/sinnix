@@ -19,13 +19,15 @@
 
     oh-my-zsh = {
       enable = true;
-      plugins = [ ];
+      plugins = [ "git" "python" "man" ];
     };
+
     initExtraFirst = ''
       DISABLE_AUTO_UPDATE=true
       DISABLE_MAGIC_FUNCTIONS=true
       export "MICRO_TRUECOLOR=1"
     '';
+
     initExtra = ''
       # use vi-like keybinds in shell
       set -o vi
@@ -55,12 +57,58 @@
           *)            fzf --preview "$show_file_or_dir_preview" "$@" ;;
         esac
       }
+
+      # pywal setup
+      # (cat ~/.cache/wallust/sequences &)
+      # source ~/.cache/wal/colors.sh
+      # source ~/.cache/wal/colors-tty.sh
+
+      # fpath+=~/.zfunc
+
+      # Fix Ctrl+S in terminal
+      stty -ixon
+
+      # Function to update terminal title
+      update_terminal_title() {
+        LAST_CMD=$1
+        TITLE="\033]2;$(pwd); $(date "+%Y-%m-%d %H:%M:%S") $LAST_CMD\007"
+        echo -ne $TITLE
+      }
+
+      # Hook functions
+      preexec() { update_terminal_title "$1" }
+      precmd() { update_terminal_title "" }
+
+      autoload -U add-zsh-hook
+      add-zsh-hook preexec preexec
+      add-zsh-hook precmd precmd
+
+      zmodload zsh/zpty
+
+      # fix url params
+      autoload -Uz bracketed-paste-magic
+      zle -N bracketed-paste bracketed-paste-magic
+      autoload -Uz url-quote-magic
+      zle -N self-insert url-quote-magic
+
+      # broot
+      # source ~/.config/broot/launcher/bash/br
     '';
 
     sessionVariables = {
       EDITOR = "nvim";
+      VISUAL = "nvim";
+      PAGER = "less";
       BROWSER = "floorp";
       TERM = "kitty";
+      TERMINAL = "kitty";
+      PYTHONDONTWRITEBYTECODE = "1";
+      SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS = "0";
+      # OPENAI_API_KEY = "";
+      # RAINDROP_API_KEY = "";
+      # GTK_THEME = "Adwaita:dark";
+      # QT_STYLE_OVERRIDE = "adwaita-dark";
+      LD_LIBRARY_PATH = "$(nix build --print-out-paths --no-link nixpkgs#libGL)/lib";
     };
 
     shellAliases = {
@@ -94,11 +142,48 @@
       # python
       piv = "python -m venv .venv";
       psv = "source .venv/bin/activate";
+
+      # mine
+      cal = "cal -myw";
+      cp = "cp -rv";
+      df = "df -h";
+      findbig = "ncdu";
+      du = "du -h";
+      hp = "pacmd set-default-sink 0";
+      ls = "ls -AhN --color=auto --group-directories-first";
+      mkdir = "mkdir -p";
+      pingg = "ping 8.8.8.8";
+      ps = "ps --forest -F --ppid 2 -p 1,2 --deselect";
+      rm = "rm -R";
+      scroff = "xset dpms force off";
+      sp = "pacmd set-default-sink 1";
+      top = "htop";
+      vwp = "xwinwrap -ov -fs -- mpv -wid WID --profile=wallpaper";
+      wp = "~/scripts/set_random_wallpaper.sh /mnt/data/content/wallpapers/anime_3440_1440 -a 97";
+      wtf = "dmesg";
+      ytd = "yt-dlp";
+      theme-tool = "java -jar ~/scripts/redacted.jar";
+      d = "dunstify --urgency=critical --timeout=60000";
+      er = "sudo -e";
+      whisper = "conda activate whisperx; whisperx --model large-v3 --output_format txt --task transcribe --segment_resolution chunk";
+      gpt = "node /home/sinity/workdir/dev/cloned/AI-scripts/chatsh.mjs g";
     };
   };
+
+  home.sessionPath = [
+    "$HOME/scripts"
+    "$HOME/scripts/yeelight"
+    "$HOME/.local/bin"
+    "$HOME/.cargo/bin"
+  ];
 
   programs.zoxide = {
     enable = true;
     enableZshIntegration = true;
+  };
+
+  programs.broot = {
+    enable = true;
+    settings.modal = true;
   };
 }

@@ -1,10 +1,15 @@
 { inputs, pkgs, ... }: 
-let 
-  _2048 = pkgs.callPackage ../../pkgs/2048/default.nix {}; 
-in
 {
   home.packages = (with pkgs; [
-    _2048
+    google-chrome
+
+    # new
+    screen-pipe
+    # code-cursor
+    obsidian # obsidian-wrapper
+
+    # awatcher
+    nix-diff
 
     ## CLI utility
     ani-cli
@@ -25,7 +30,7 @@ in
     lazygit
     libnotify
 	  man-pages					            	  # extra man pages
-    mpv                               # video player
+    # mpv                               # video player
     ncdu                              # disk space
     nitch                             # systhem fetch util
     openssl
@@ -46,7 +51,7 @@ in
     wl-clipboard                      # clipboard utils for wayland (wl-copy, wl-paste)
     wget
     yazi                              # terminal file manager
-    yt-dlp-light
+    # yt-dlp-light
     xdg-utils
     xxd
 

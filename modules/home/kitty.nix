@@ -7,17 +7,21 @@
     
     font = {
       name = "FiraCode Nerd Font";
-      size = if (host == "laptop") then 14 else 16;
+      size = 16;
     };
 
     settings = {
+      allow_remote_control = "yes";
+      listen_on = "unix:/tmp/kitty";
       confirm_os_window_close = 0;
       background_opacity = "0.75";
       window_padding_width = 10;
       scrollback_lines = 10000;
       enable_audio_bell = false;
       mouse_hide_wait = 60;
-      
+      wheel_scroll_multiplier = 1;
+      touch_scroll_multiplier = 1;
+
       ## Tabs
       tab_title_template = "{index}";
       active_tab_font_style = "normal";
