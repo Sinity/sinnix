@@ -4,7 +4,7 @@
     google-chrome
 
     # new
-    screen-pipe
+    # screen-pipe
     # code-cursor
     obsidian # obsidian-wrapper
 

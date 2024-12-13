@@ -27,21 +27,21 @@
         kb_options = "";
         numlock_by_default = true;
 
-	repeat_rate = 40;
-	repeat_delay = 300;
+      	repeat_rate = 40;
+      	repeat_delay = 400;
 
         sensitivity = 0;
-	accel_profile = "flat";
+      	accel_profile = "flat";
         force_no_accel = 0;
 
-	scroll_factor = 1;
-	emulate_discrete_scroll = 1;
+      	scroll_factor = 1;
+      	emulate_discrete_scroll = 1;
 
         follow_mouse = 1;
-	focus_on_close = 0;
+      	# focus_on_close = 0;
         mouse_refocus = false;
         float_switch_override_focus = 2;
-	special_fallthrough = true;
+      	special_fallthrough = true;
       };
 
       general = {
@@ -51,24 +51,24 @@
         "col.inactive_border" = "0x00000000";
         "col.active_border" = "rgb(98971a) rgb(cc241d) 45deg";
         layout = "dwindle";
-	resize_on_border = true;
+      	resize_on_border = true;
       };
 
       misc = {
         disable_hyprland_logo = false;
-	vrr = 2;
-	mouse_move_enables_dpms = true;
-	key_press_enables_dpms = true;
+	      vrr = 2;
+	      mouse_move_enables_dpms = true;
+	      key_press_enables_dpms = true;
         always_follow_on_dnd = true;
         layers_hog_keyboard_focus = true;
         animate_manual_resizes = false;
-	animate_mouse_windowdragging = false;
+	      animate_mouse_windowdragging = false;
         disable_autoreload = true;
         enable_swallow = true;
-	# swallow_regex = "^(kitty(?!.*ranger))$";
+      	# swallow_regex = "^(kitty(?!.*ranger))$";
         focus_on_activate = true;
-	# render_ahead_of_time = true;
-	# render_ahead_safezone = 2;
+	      # render_ahead_of_time = true;
+	      # render_ahead_safezone = 2;
         new_window_takes_over_fullscreen = 2;
         middle_click_paste = true;
       };
@@ -91,21 +91,21 @@
       
       group = {
         insert_after_current = true;
-	focus_removed_window = true;
+	      focus_removed_window = true;
 
-	groupbar = {
+      	groupbar = {
           enabled = true;
-	  gradients = true;
-	  height = 14;
-	  render_titles = true;
-	  scrolling = true;
-	};
+	        gradients = true;
+	        height = 14;
+	        render_titles = true;
+      	  scrolling = true;
+      	};
       };
 
       debug = {
         disable_logs = false;
-	disable_time = false;
-	enable_stdout_logs = true;
+      	disable_time = false;
+      	enable_stdout_logs = true;
       };
 
       decoration = {
@@ -114,12 +114,12 @@
         inactive_opacity = 0.90;
         fullscreen_opacity = 1.00;
 
-        drop_shadow = true;
-        shadow_ignore_window = true;
-        shadow_offset = "0 2";
-        shadow_range = 20;
-        shadow_render_power = 3;
-        "col.shadow" = "rgba(00000055)";
+        # drop_shadow = true;
+        # shadow_ignore_window = true;
+        # shadow_offset = "0 2";
+        # shadow_range = 20;
+        # shadow_render_power = 3;
+        # "col.shadow" = "rgba(00000055)";
 
         blur = {
           enabled = true;
@@ -127,8 +127,8 @@
           passes = 2;
           contrast = 1.400;
           brightness = 1;
-	  vibrancy = 0.5;
-	  special = true;
+	        vibrancy = 0.5;
+	        special = true;
         };
       };
 

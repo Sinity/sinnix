@@ -3,6 +3,7 @@
   networking = {
     hostName = "${host}";
     networkmanager.enable = true;
+    networkmanager.insertNameservers = [ "1.1.1.1" "8.8.8.8" ];
     nameservers = [ "1.1.1.1#one.one.one.one" "8.8.8.8" ];
     firewall.enable = false;
   };

@@ -19,13 +19,12 @@
     fontDir.enable = true;
 
     packages = with pkgs; [
-      nerdfonts terminus-nerdfont inconsolata-nerdfont
       noto-fonts noto-fonts-extra
       source-code-pro source-sans-pro source-serif-pro
       source-han-code-jp source-han-mono source-han-sans source-han-serif
-      hermit terminus-nerdfont
+      hermit
       roboto roboto-mono roboto-slab
-    ];
+    ] ++ builtins.filter lib.attrsets.isDerivation (builtins.attrValues pkgs.nerd-fonts);
 
     fontconfig = {
       defaultFonts = {
