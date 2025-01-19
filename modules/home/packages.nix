@@ -8,8 +8,14 @@
     # code-cursor
     obsidian # obsidian-wrapper
 
+    openai-whisper-cpp
+
+    ueberzugpp
+
     # awatcher
     nix-diff
+
+    zathura
 
     ## CLI utility
     ani-cli

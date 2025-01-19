@@ -80,17 +80,19 @@
     plugins = {
       # Enable web-devicons explicitly
       web-devicons.enable = true;
-
-      # UI Enhancements
-      noice = {
+      notify = {
         enable = true;
-        settings.presets = {
-          bottom_search = true;
-          command_palette = true;
-          long_message_to_split = true;
-          inc_rename = true;
-        };
       };
+      # UI Enhancements
+      # noice = {
+      #   enable = true;
+      #   settings.presets = {
+      #     bottom_search = true;
+      #     command_palette = true;
+      #     long_message_to_split = true;
+      #     inc_rename = true;
+      #   };
+      # };
 
       # Smart splits
       smart-splits.enable = true;
@@ -186,7 +188,59 @@
           "c" "cpp" "rust" "python" "lua" "nix"
           "bash" "markdown" "regex" "markdown_inline"
           "toml" "json" "yaml" "cmake" "make"
+          "vim"
         ];
+      };
+
+      avante = {
+        enable = true;
+        settings = {
+          provider = "claude";
+          claude = {
+            endpoint = "https://api.anthropic.com";
+            model = "claude-3-5-sonnet-latest";
+            temperature = 0;
+            max_tokens = 8192;
+          };
+          
+          # Keyboard mappings
+          mappings = {
+            diff = {
+              ours = "co";     # Choose our version
+              theirs = "ct";   # Choose their version
+              none = "c0";     # Choose neither
+              both = "cb";     # Choose both
+              next = "]x";     # Next difference
+              prev = "[x";     # Previous difference
+            };
+          };
+
+          # Enable AI-powered hints
+          hints.enabled = true;
+
+          # Window configuration
+          windows = {
+            wrap = true;      # Enable text wrapping
+            width = 30;       # Sidebar width
+            sidebar_header = {
+              align = "center";
+              rounded = true;
+            };
+          };
+
+          # Highlighting configuration
+          highlights.diff = {
+            current = "DiffText";
+            incoming = "DiffAdd";
+          };
+
+          # Diff settings
+          diff = {
+            debug = false;     # Disable debug mode
+            autojump = true;   # Auto-jump to differences
+            list_opener = "copen";  # Use quickfix list for differences
+          };
+        };
       };
     };
 
@@ -243,19 +297,6 @@
     ];
 
     extraConfigLua = ''
-      -- Build system configuration
-      vim.o.makeprg = "make"
-      
-      -- Quick build command
-      vim.keymap.set("n", "<leader>c", function()
-        vim.cmd("cd ../build")
-        vim.cmd("silent !cmake ..")
-        vim.cmd("silent make -j9")
-        vim.cmd("cd ../CukierniaRecepty")
-        vim.cmd("copen")
-        vim.cmd("redraw!")
-      end)
-      
       -- Expand region configuration
       vim.g.expand_region_text_objects = {
         ['i,w'] = 0,
@@ -283,6 +324,13 @@
       
       -- Enable faster loading
       vim.loader.enable()
+
+      -- Set up additional keymaps for Avante
+      vim.keymap.set('n', '<leader>aa', '<cmd>AvanteSuggest<CR>', { desc = 'Get AI suggestions' })
+      vim.keymap.set('n', '<leader>ac', '<cmd>AvanteComplete<CR>', { desc = 'Complete with AI' })
+      vim.keymap.set('v', '<leader>ae', '<cmd>AvanteExplain<CR>', { desc = 'Explain selected code' })
+      vim.keymap.set('n', '<leader>ar', '<cmd>AvanteRefactor<CR>', { desc = 'Refactor code with AI' })
+      vim.keymap.set('n', '<leader>at', '<cmd>AvanteTest<CR>', { desc = 'Generate tests with AI' })
     '';
   };
 }

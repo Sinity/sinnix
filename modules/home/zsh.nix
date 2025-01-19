@@ -117,7 +117,6 @@
       cd = "z";
       tt = "gtrash put";
       cat = "bat";
-      code = "codium";
       py = "python";
       icat = "kitten icat";
       dsize = "du -hs";
@@ -131,7 +130,6 @@
       tree = "eza --icons --tree --group-directories-first";
 
       # Nixos
-      cdnix = "cd ~/nixos-config && codium ~/nixos-config";
       ns = "nom-shell --run zsh";
       nix-switch = "nh os switch";
       nix-update = "nh os switch --update";
@@ -149,24 +147,19 @@
       df = "df -h";
       findbig = "ncdu";
       du = "du -h";
-      hp = "pacmd set-default-sink 0";
       ls = "ls -AhN --color=auto --group-directories-first";
       mkdir = "mkdir -p";
       pingg = "ping 8.8.8.8";
-      ps = "ps --forest -F --ppid 2 -p 1,2 --deselect";
-      rm = "rm -R";
+      # ps = "ps --forest -F --ppid 2 -p 1,2 --deselect";
+      # rm = "rm -R";
       scroff = "xset dpms force off";
-      sp = "pacmd set-default-sink 1";
       top = "htop";
-      vwp = "xwinwrap -ov -fs -- mpv -wid WID --profile=wallpaper";
       wp = "~/scripts/set_random_wallpaper.sh /mnt/data/content/wallpapers/anime_3440_1440 -a 97";
       wtf = "dmesg";
       ytd = "yt-dlp";
       theme-tool = "java -jar ~/scripts/redacted.jar";
       d = "dunstify --urgency=critical --timeout=60000";
       er = "sudo -e";
-      whisper = "conda activate whisperx; whisperx --model large-v3 --output_format txt --task transcribe --segment_resolution chunk";
-      gpt = "node /home/sinity/workdir/dev/cloned/AI-scripts/chatsh.mjs g";
     };
   };
 

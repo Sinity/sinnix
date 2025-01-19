@@ -64,8 +64,11 @@
         animate_manual_resizes = false;
 	      animate_mouse_windowdragging = false;
         disable_autoreload = true;
-        enable_swallow = true;
-      	# swallow_regex = "^(kitty(?!.*ranger))$";
+
+        # enable_swallow = true;
+        # swallow_regex = "^(kitty)$";
+        # swallow_executable = "^(mpv|imv|feh)$";  # Only these programs can swallow
+
         focus_on_activate = true;
 	      # render_ahead_of_time = true;
 	      # render_ahead_safezone = 2;
@@ -347,6 +350,7 @@
         "noinitialfocus,class:^(xwaylandvideobridge)$"
         "maxsize 1 1,class:^(xwaylandvideobridge)$"
         "noblur,class:^(xwaylandvideobridge)$"
+        "noanim,class:^(ueberzug)$"
       ];
 
     };

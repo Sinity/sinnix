@@ -28,5 +28,7 @@
     ./xdg-mimes.nix                   # xdg config
     ./zsh.nix                         # shell
     ./mpv.nix
+    ./hydrus.nix
+    ./hydrus-dev.nix
   ];
 }
