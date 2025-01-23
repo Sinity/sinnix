@@ -17,12 +17,16 @@
     QT_QPA_PLATFORMTHEME = "qt5ct";
     QT_STYLE_OVERRIDE = "kvantum";
     MOZ_ENABLE_WAYLAND = "1";
-    WLR_BACKEND = "vulkan";
-    WLR_RENDERER = "vulkan";
+    # WLR_BACKEND = "vulkan";
+    # WLR_RENDERER = "vulkan";
     WLR_NO_HARDWARE_CURSORS = "1";
     XDG_SESSION_TYPE = "wayland";
     SDL_VIDEODRIVER = "wayland";
     CLUTTER_BACKEND = "wayland";
     GTK_THEME = "Gruvbox-Dark";
+
+    # LIBVA_DRIVER_NAME = "nvidia";
+    # GBM_BACKEND = "nvidia-drm"; 
+    # __GLX_VENDOR_LIBRARY_NAME = "nvidia";
   };
 }

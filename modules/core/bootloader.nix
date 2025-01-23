@@ -3,7 +3,11 @@
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = true;
   boot.loader.systemd-boot.configurationLimit = null;
-  boot.kernelPackages = pkgs.linuxPackages_latest;
+
+  # 6.13 unable to build recent NVIDIA drivers,
+  #   they fall back to 550, which makes Hyprland unusable
+  # boot.kernelPackages = pkgs.linuxPackages_latest;
+  boot.kernelPackages = pkgs.linuxPackages_6_12;
 
   boot.kernel.sysctl."vm.swappiness" = 10;
   boot.kernelParams = [
