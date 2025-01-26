@@ -5,7 +5,6 @@
     networkmanager.enable = true;
     networkmanager.insertNameservers = [ "1.1.1.1" "8.8.8.8" ];
     nameservers = [ "1.1.1.1#one.one.one.one" "8.8.8.8" ];
-    firewall.enable = false;
   };
 
   services = {
@@ -37,7 +36,26 @@
 
   environment.systemPackages = with pkgs; [
     networkmanagerapplet
-    # cloudflare-warp # Free VPN; "Replaces the connection between your device and the Internet with a modern, optimized, protocol"
     mullvad-closest # benchmark latency to Mullvad relays
+    # cloudflare-warp # Free VPN; "Replaces the connection between your device and the Internet with a modern, optimized, protocol"
   ];
+
+  hardware = {
+    bluetooth = {
+      enable = true;
+      settings = {
+        General = {
+          Name = "Sinity-PC-BT";
+          DiscoverableTimeout = 0;
+          AlwaysPairable = true;
+          PairableTimeout = 0;
+          FastConnectable = true;
+        };
+
+        Policy = {
+          AutoEnable = true;
+        };
+      };
+    };
+  };
 }

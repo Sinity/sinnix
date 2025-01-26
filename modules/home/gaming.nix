@@ -1,4 +1,4 @@
-{ pkgs, config, inputs, ... }: 
+{ pkgs, config, inputs, lib, ... }: 
 
 let
   factorio-auth = pkgs.factorio.override {
@@ -32,5 +32,16 @@ in
     snes9x
     # cemu
     # dolphin-emu
+  ];
+
+  # programs.steam = {
+  #   enable = true;
+  #   protontricks.enable = true;
+  # };
+  # programs.gamemode.enable = true;
+  nixpkgs.config.allowUnfreePredicate = pkg: builtins.elem (lib.getName pkg) [
+    "steam"
+    "steam-original"
+    "steam-runtime"
   ];
 }

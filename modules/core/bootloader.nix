@@ -9,6 +9,8 @@
   # boot.kernelPackages = pkgs.linuxPackages_latest;
   boot.kernelPackages = pkgs.linuxPackages_6_12;
 
+  boot.initrd.availableKernelModules = [ "xhci_pci" "ahci" "nvme" "usbhid" "usb_storage" "sd_mod" ];
+  boot.kernelModules = [ "kvm-intel" ];
   boot.kernel.sysctl."vm.swappiness" = 10;
   boot.kernelParams = [
     "quiet"

@@ -8,34 +8,17 @@ let
       hash = "sha256-86UWUuWKT6adx4hw4OJw3cSZxWZKLH4uLTO+Ssg75gY=";
     };
   };
-  # sainnhe.gruvbox-material = pkgs.vscode-utils.buildVscodeMarketplaceExtension {
-  #   mktplcRef = {
-  #     name = "gruvbox-material";
-  #     publisher = "sainnhe";
-  #     version = "6.5.2";
-  #     hash = "sha256-D+SZEQQwjZeuyENOYBJGn8tqS3cJiWbEkmEqhNRY/i4=";
-  #   };
-  # };
 in
 {
   programs.vscode = {
     enable = true;
     package = pkgs.vscodium;
     extensions = with pkgs.vscode-extensions; [
-      # nix language
       bbenoist.nix
-      # nix-shell suport 
-      arrterian.nix-env-selector
-      # python
+      arrterian.nix-env-selector # nix-shell suport 
       ms-python.python
-      # C/C++
       ms-vscode.cpptools
-      # OCaml
-      ocamllabs.ocaml-platform
-
-      # Color theme
       jdinhlife.gruvbox
-      # sainnhe.gruvbox-material
       jonathanharty.gruvbox-material-icon-theme
     ];
     userSettings = {

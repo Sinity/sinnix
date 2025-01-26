@@ -14,26 +14,6 @@
   };
 
   services = {
-    gvfs.enable = true;
-    gnome.gnome-keyring.enable = true;
-    dbus.enable = true;
-    fstrim.enable = true;
-    openssh.enable = true;
-
-    earlyoom = {
-      enable = true;
-      enableNotifications = true;
-      freeMemThreshold = 5;
-      freeSwapThreshold = 5;
-      reportInterval = 5;
-      extraArgs = [
-        "-g" # kill entire process groups
-	"-p" # set earlyoom niceness to -20
-        "--prefer '(^|/)(java|chromium|floorp)$'"
-        "--avoid '(^|/)(init|systemd|sshd)$'"
-      ];
-    };
-
     journald = {
       extraConfig = ''
         SystemMaxUse=20G

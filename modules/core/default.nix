@@ -5,14 +5,13 @@
     ./hardware.nix
     ./network.nix
     ./nh.nix
-    ./pipewire.nix
-    ./program.nix
+    ./audio.nix
     ./security.nix
     ./services.nix
     ./system.nix
+    ./storage.nix
     ./user.nix
     ./x.nix
-    ./virtualization.nix
     ./nginx.nix
   ];
 }

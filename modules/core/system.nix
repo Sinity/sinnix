@@ -1,6 +1,5 @@
-{ self, pkgs, lib, inputs, ...}: 
+{ self, pkgs, lib, inputs, username, ...}: 
 {
-  # imports = [ inputs.nix-gaming.nixosModules.default ];
   nix = {
     settings = {
       auto-optimise-store = true;
@@ -28,7 +27,22 @@
   environment.systemPackages = with pkgs; [
     wget
     git
+    nix-output-monitor
+    nvd
   ];
+
+  programs.nh = {
+    enable = true;
+    clean = {
+      enable = true;
+      extraArgs = "--keep-since 7d --keep 5";
+    };
+    flake = "/home/${username}/workdir/nixos-config";
+  };
+
+  programs.nix-ld.enable = true;
+  # programs.nix-ld.libraries = with pkgs; [];
+  services.dbus.enable = true;
 
   # locale
   services.xserver.xkb.layout = "pl";
@@ -46,6 +60,20 @@
     LC_PAPER = "pl_PL.UTF-8";
     LC_TELEPHONE = "pl_PL.UTF-8";
     LC_TIME = "pl_PL.UTF-8";
+  };
+
+  services.earlyoom = {
+    enable = true;
+    enableNotifications = true;
+    freeMemThreshold = 5;
+    freeSwapThreshold = 5;
+    reportInterval = 5;
+    extraArgs = [
+      "-g" # kill entire process groups
+     	"-p" # set earlyoom niceness to -20
+      "--prefer '(^|/)(java|chromium|floorp)$'"
+      "--avoid '(^|/)(init|systemd|sshd)$'"
+    ];
   };
 
   nixpkgs.config.allowUnfree = true;

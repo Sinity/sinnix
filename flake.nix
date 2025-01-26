@@ -19,7 +19,7 @@
 
     nixvim = {
       url = "github:nix-community/nixvim";
-      # inputs.nixpkgs.follows = "nixpkgs";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
     
     spicetify-nix = {
@@ -28,18 +28,22 @@
     };
   };
 
-  outputs = { nixpkgs, self, ...} @ inputs:
+  outputs = { nixpkgs, self, ... } @ inputs:
   let
     username = "sinity";
     system = "x86_64-linux";
   in
   {
-    nixosConfigurations = {
-      desktop = nixpkgs.lib.nixosSystem {
-        inherit system;
-        modules = [ ./hosts/desktop ];
-        specialArgs = { host="desktop"; inherit self inputs username; };
+    nixosConfigurations.desktop = nixpkgs.lib.nixosSystem {
+      inherit system;
+      modules = [ 
+        ./modules/core/default.nix
+      ];
+      specialArgs = { 
+        host = "desktop"; 
+        inherit self inputs username; 
       };
     };
   };
 }
+
