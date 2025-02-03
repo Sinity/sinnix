@@ -26,17 +26,17 @@
       };
     };
 
-    mullvad-vpn = {
-      enable = true;
-      package = pkgs.mullvad-vpn;
-    };
+    # mullvad-vpn = {
+    #   enable = true;
+    #   package = pkgs.mullvad-vpn;
+    # };
   };
 
   programs.mosh.enable = true;
 
   environment.systemPackages = with pkgs; [
     networkmanagerapplet
-    mullvad-closest # benchmark latency to Mullvad relays
+    # mullvad-closest # benchmark latency to Mullvad relays
     # cloudflare-warp # Free VPN; "Replaces the connection between your device and the Internet with a modern, optimized, protocol"
   ];
 

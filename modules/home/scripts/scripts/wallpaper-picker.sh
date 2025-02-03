@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-wallpaper_path=$HOME/pic/wallpaper
-wallpapers_folder=$HOME/pic/wallpaper/other
+wallpaper_path=$HOME/wallpaper
+wallpapers_folder=$HOME/wallpaper/stash
 wallpaper_name="$(ls $wallpapers_folder | rofi -dmenu || pkill rofi)"
 if [[ -f $wallpapers_folder/$wallpaper_name ]]; then
     find ~/pic/wallpaper -maxdepth 1 -type f -delete

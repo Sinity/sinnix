@@ -15,11 +15,7 @@
         "swaync &"
         "wl-paste --watch cliphist store -max-items 99999 -max-dedupe-search 20 &"
         # "wl-paste --primary --watch ???" # TODO: set this up when I figure out where to store these
-        "hyprlock"
-
-        ## App auto start
-        "[workspace 1 silent] floorp"
-        "[workspace 2 silent] kitty"
+        # "hyprlock"
       ];
 
       input = {

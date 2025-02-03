@@ -7,7 +7,6 @@
     nautilus                                      # file manager
   ]);
 
-  programs.dconf.enable = true;
   dconf.settings = {
     "org/gnome/TextEditor" = {
       custom-font = "FiraCode Nerd Font 15";

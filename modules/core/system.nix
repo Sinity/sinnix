@@ -34,14 +34,15 @@
   programs.nh = {
     enable = true;
     clean = {
-      enable = true;
+      enable = false;
       extraArgs = "--keep-since 7d --keep 5";
     };
     flake = "/home/${username}/workdir/nixos-config";
   };
 
+  programs.dconf.enable = true;
   programs.nix-ld.enable = true;
-  # programs.nix-ld.libraries = with pkgs; [];
+  programs.nix-ld.libraries = with pkgs; [];
   services.dbus.enable = true;
 
   # locale
@@ -69,10 +70,10 @@
     freeSwapThreshold = 5;
     reportInterval = 5;
     extraArgs = [
-      "-g" # kill entire process groups
-     	"-p" # set earlyoom niceness to -20
-      "--prefer '(^|/)(java|chromium|floorp)$'"
-      "--avoid '(^|/)(init|systemd|sshd)$'"
+      "-g"
+        "-p"
+        "--prefer" "(^|/)(java|chromium|floorp)$"
+        "--avoid" "(^|/)(init|systemd|sshd)$"
     ];
   };
 

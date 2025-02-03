@@ -1,12 +1,13 @@
 { pkgs, ... }:
 {
+  programs.hyprland.enable = true;
   hardware = {
     nvidia = {
       modesetting.enable = true;
-      powerManagement.enable = false;
-      powerManagement.finegrained = false;
-      open = false;
+      powerManagement.enable = true;
+      open = true;
       nvidiaSettings = true;
+      forceFullCompositionPipeline = true;
     };
 
     graphics = {
@@ -16,7 +17,7 @@
       ];
     };
   };
-  
+
   xdg.portal = {
     enable = true;
     wlr.enable = true;

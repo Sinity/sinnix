@@ -2,7 +2,11 @@
 {
   home.packages = (with pkgs; [
     floorp
+    inputs.zen-browser.packages.x86_64-linux.beta
+
     google-chrome
+
+    spotify
 
     # new
     # screen-pipe

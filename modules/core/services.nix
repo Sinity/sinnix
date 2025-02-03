@@ -42,5 +42,10 @@
         # rpc-url = "/transmission/";
       };
     };
+
+    ollama = {
+      enable = true;
+      acceleration = "cuda";
+    };
   };
 }

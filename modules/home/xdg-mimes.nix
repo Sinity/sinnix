@@ -2,7 +2,7 @@
 with lib;
 let
   defaultApps = {
-    browser = [ "floorp.desktop" ];
+    browser = [ "zen.desktop" ];
     text = [ "org.gnome.TextEditor.desktop" ];
     image = [ "com.interversehq.qView.desktop" ];
     audio = [ "mpv.desktop" ];
@@ -91,7 +91,10 @@ in
   xdg.mimeApps.associations.added = associations;
   xdg.mimeApps.defaultApplications = associations;
 
-  home.packages = with pkgs; [ junction ];
+  home.packages = with pkgs; [ 
+    junction
+    # xdg-desktop-portal-hyprland
+  ];
 
   home.sessionVariables = {
     # prevent wine from creating file associations

@@ -29,6 +29,7 @@
 
   home.sessionVariables = {
     NIXOS_OZONE_WL = "1";
+    NIXPKGS_ALLOW_UNFREE = "1";
     __GL_GSYNC_ALLOWED = "0";
     __GL_VRR_ALLOWED = "0";
     _JAVA_AWT_WM_NONEREPARENTING = "1";
@@ -51,6 +52,10 @@
     SDL_VIDEODRIVER = "wayland";
     CLUTTER_BACKEND = "wayland";
     GTK_THEME = "Gruvbox-Dark";
+
+    XDG_CURRENT_DESKTOP = "Hyprland";
+    XDG_SESSION_DESKTOP = "Hyprland";
+    # XDG_DESKTOP_PORTAL_DIR = "/run/current-system/sw/share/xdg-desktop-portal/portals";
 
     # LIBVA_DRIVER_NAME = "nvidia";
     # GBM_BACKEND = "nvidia-drm"; 
