@@ -1,24 +1,30 @@
-{ pkgs, config, inputs, lib, ... }: 
-
-let
+{
+  pkgs,
+  lib,
+  ...
+}: let
   factorio-auth = pkgs.factorio.override {
     username = "Sinityy";
     token = "TOKEN_REMOVED";
   };
-in 
-{
-  home.packages = with pkgs;[
+in {
+  home.packages = with pkgs; [
+    mangohud
     steam-tui
     steam-run
 
+    protonup
+    bottles
+
     factorio-auth
+
     # prismlauncher # minecraft
 
     ## Cli games
     _2048-in-terminal
     vitetris
     nethack
-    
+
     ## Celeste
     celeste-classic
     celeste-classic-pm
@@ -34,14 +40,10 @@ in
     # dolphin-emu
   ];
 
-  # programs.steam = {
-  #   enable = true;
-  #   protontricks.enable = true;
-  # };
-  # programs.gamemode.enable = true;
-  nixpkgs.config.allowUnfreePredicate = pkg: builtins.elem (lib.getName pkg) [
-    "steam"
-    "steam-original"
-    "steam-runtime"
-  ];
+  nixpkgs.config.allowUnfreePredicate = pkg:
+    builtins.elem (lib.getName pkg) [
+      "steam"
+      "steam-original"
+      "steam-runtime"
+    ];
 }

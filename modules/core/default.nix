@@ -1,5 +1,11 @@
-{ inputs, nixpkgs, self, username, host, ...}:
 {
+  inputs,
+  nixpkgs,
+  self,
+  username,
+  host,
+  ...
+}: {
   imports = [
     ./bootloader.nix
     ./hardware.nix
@@ -12,5 +18,6 @@
     ./user.nix
     ./x.nix
     ./nginx.nix
+    ./nix-ld.nix
   ];
 }

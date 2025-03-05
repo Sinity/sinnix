@@ -1,6 +1,9 @@
-{ inputs, pkgs, ... }: 
 {
-  home.packages = (with pkgs; [
+  inputs,
+  pkgs,
+  ...
+}: {
+  home.packages = with pkgs; [
     floorp
     inputs.zen-browser.packages.x86_64-linux.beta
 
@@ -9,7 +12,7 @@
     spotify
 
     # new
-    # screen-pipe
+    screen-pipe
     # code-cursor
     obsidian # obsidian-wrapper
 
@@ -20,72 +23,113 @@
     # awatcher
     nix-diff
 
+    nodejs_23
+
+    neovim
+    nil
+    nixd
+    rust-analyzer
+
+    nushell
+    nushellPlugins.net
+    nushellPlugins.units
+    nushellPlugins.query
+    nushellPlugins.gstat
+    nushellPlugins.formats
+    nushellPlugins.highlight
+
+    markdown-oxide
+
+    sqlite
+    sqlite-vec
+    sqlite-utils
+    sqlitestudio
+
+    transmission-gtk
+
+    # lua-language-server
+    nixfmt
+    # prettier
+    # nodePackages.typescript-language-server
+    # clang-tools
+    # cmake
+
+    ripgrep
+    # python3Packages.python-lsp-server
+    python3Packages.pip
+    # python3Packages.ruff-lsp
+    # marksman
+
+    # rustup
+    cargo
+    # pkg-config
+
     zathura
 
     hydrus
 
     ## CLI utility
     ani-cli
-    bitwise                           # cli tool for bit / hex manipulation
-    caligula                          # User-friendly, lightweight TUI for disk imaging
-    cliphist                          # clipboard manager
-    eza                               # ls replacement
-    entr                              # perform action when file change
-    fd                                # find replacement
+    bitwise # cli tool for bit / hex manipulation
+    caligula # User-friendly, lightweight TUI for disk imaging
+    cliphist # clipboard manager
+    eza # ls replacement
+    entr # perform action when file change
+    fd # find replacement
     ffmpeg
-    file                              # Show file information 
-    gtt                               # google translate TUI
-    gifsicle                          # gif utility
-    gtrash                            # rm replacement, put deleted files in system trash
+    file # Show file information
+    gtt # google translate TUI
+    gifsicle # gif utility
+    gtrash # rm replacement, put deleted files in system trash
     hexdump
-    imv                               # image viewer
+    imv # image viewer
     killall
     lazygit
     libnotify
-	  man-pages					            	  # extra man pages
+    man-pages # extra man pages
     # mpv                               # video player
-    ncdu                              # disk space
-    nitch                             # systhem fetch util
+    ncdu # disk space
+    nitch # systhem fetch util
     openssl
-    onefetch                          # fetch utility for git repo
-    pamixer                           # pulseaudio command line mixer
-    playerctl                         # controller for media players
+    onefetch # fetch utility for git repo
+    pamixer # pulseaudio command line mixer
+    playerctl # controller for media players
     poweralertd
     programmer-calculator
-    qview                             # minimal image viewer
-    ripgrep                           # grep replacement
-    tdf                               # cli pdf viewer
+    qview # minimal image viewer
+    ripgrep # grep replacement
+    tdf # cli pdf viewer
     tldr
-    todo                              # cli todo list
-    toipe                             # typing test in the terminal
-    ttyper                            # cli typing test
+    todo # cli todo list
+    toipe # typing test in the terminal
+    ttyper # cli typing test
     unzip
-    valgrind                          # c memory analyzer
-    wl-clipboard                      # clipboard utils for wayland (wl-copy, wl-paste)
+    valgrind # c memory analyzer
+    wl-clipboard # clipboard utils for wayland (wl-copy, wl-paste)
     wget
-    yazi                              # terminal file manager
+    yazi # terminal file manager
     # yt-dlp-light
     xdg-utils
     xxd
 
-    ## CLI 
-    cbonsai                           # terminal screensaver
+    ## CLI
+    cbonsai # terminal screensaver
     cmatrix
-    pipes                             # terminal screensaver
+    pipes # terminal screensaver
     sl
-    tty-clock                         # cli clock
+    tty-clock # cli clock
 
-    weechat 			      # IRC client
+    weechat # IRC client
 
     ## GUI Apps
     audacity
-    bleachbit                         # cache cleaner
+    bleachbit # cache cleaner
     gimp
     libreoffice
     nix-prefetch-github
-    pavucontrol                       # pulseaudio volume controle (GUI)
-    qalculate-gtk                     # calculator
-    soundwireserver                   # pass audio to android phone
+    pavucontrol # pulseaudio volume controle (GUI)
+    qalculate-gtk # calculator
+    soundwireserver # pass audio to android phone
     vlc
     winetricks
     wineWowPackages.wayland
@@ -101,9 +145,8 @@
     python312Packages.ipython
 
     inputs.alejandra.defaultPackage.${system}
-  ]);
+  ];
 }
-
 #   home.packages = (with pkgs; [
 #     ranger ueberzugpp
 #
@@ -116,7 +159,7 @@
 #     entr                              # perform action when file change
 #     fd                                # find replacement
 #     ffmpeg
-#     file                              # Show file information 
+#     file                              # Show file information
 #     gtt                               # google translate TUI
 #     gifsicle                          # gif utility
 #     gtrash                            # rm replacement, put deleted files in system trash
@@ -151,7 +194,7 @@
 #     xdg-utils
 #     xxd
 #
-#     ## CLI 
+#     ## CLI
 #     cbonsai                           # terminal screensaver
 #     cmatrix
 #     pipes                             # terminal screensaver

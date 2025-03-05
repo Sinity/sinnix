@@ -1,5 +1,4 @@
-{ hostname, config, pkgs, host, ...}: 
-{
+{...}: {
   programs.zsh = {
     enable = true;
     enableCompletion = true;
@@ -19,7 +18,7 @@
 
     oh-my-zsh = {
       enable = true;
-      plugins = [ "git" "python" "man" ];
+      plugins = ["git" "python" "man"];
     };
 
     initExtraFirst = ''
@@ -104,11 +103,13 @@
       TERMINAL = "kitty";
       PYTHONDONTWRITEBYTECODE = "1";
       SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS = "0";
+      OBSIDIAN_REST_API_KEY = "OBSIDIAN_REST_API_KEY_PLACEHOLDER";
       # OPENAI_API_KEY = "";
       # RAINDROP_API_KEY = "";
       # GTK_THEME = "Adwaita:dark";
       # QT_STYLE_OVERRIDE = "adwaita-dark";
       LD_LIBRARY_PATH = "$(nix build --print-out-paths --no-link nixpkgs#libGL)/lib";
+      FLAKE = "/mnt/ssd_storage/home/nixos-config";
     };
 
     shellAliases = {

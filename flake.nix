@@ -7,48 +7,44 @@
 
     hypr-contrib.url = "github:hyprwm/contrib";
     hyprpicker.url = "github:hyprwm/hyprpicker";
-  
+
     alejandra.url = "github:kamadorueda/alejandra/3.0.0";
-  
+
     nix-gaming.url = "github:fufexan/nix-gaming";
 
     zen-browser = {
       url = "github:0xc000022070/zen-browser-flake";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-  
+
     home-manager = {
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    nixvim = {
-      url = "github:nix-community/nixvim";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    
-    spicetify-nix = {
-      url = "github:gerg-l/spicetify-nix";
+    nvchad4nix = {
+      url = "github:nix-community/nix4nvchad";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
-  outputs = { nixpkgs, self, ... } @ inputs:
-  let
+  outputs = {
+    nixpkgs,
+    self,
+    ...
+  } @ inputs: let
     username = "sinity";
     system = "x86_64-linux";
-  in
-  {
+  in {
     nixosConfigurations.desktop = nixpkgs.lib.nixosSystem {
       inherit system;
-      modules = [ 
+      modules = [
         ./modules/core/default.nix
       ];
-      specialArgs = { 
-        host = "desktop"; 
-        inherit self inputs username; 
+      specialArgs = {
+        host = "desktop";
+        inherit self inputs username;
       };
     };
   };
 }
-

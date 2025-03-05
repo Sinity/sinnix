@@ -19,8 +19,9 @@
       scrollback_lines = 10000;
       enable_audio_bell = false;
       mouse_hide_wait = 60;
-      wheel_scroll_multiplier = 1;
-      touch_scroll_multiplier = 1;
+      wheel_scroll_multiplier = 0.5;
+      touch_scroll_multiplier = 0.5;
+      cursor_trail = 3;
 
       ## Tabs
       tab_title_template = "{index}";

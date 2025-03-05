@@ -1,6 +1,17 @@
-{ pkgs, ... }:
-{
+{pkgs, ...}: {
   programs.hyprland.enable = true;
+  programs.steam.enable = true;
+  programs.steam.gamescopeSession.enable = true;
+  programs.gamemode.enable = true;
+
+  services = {
+    xserver = {
+      enable = true;
+      displayManager.lightdm.enable = false;
+      videoDrivers = ["nvidia"];
+    };
+  };
+
   hardware = {
     nvidia = {
       modesetting.enable = true;
@@ -18,6 +29,10 @@
     };
   };
 
+  environment.systemPackages = with pkgs; [
+    wlr-randr # xrandr equivalent, for reading/setting display modes (resolution, refresh rate)
+  ];
+
   xdg.portal = {
     enable = true;
     wlr.enable = true;
@@ -28,36 +43,34 @@
     ];
   };
 
-  environment.systemPackages = with pkgs; [
-    wlr-randr # xrandr equivalent, for reading/setting display modes (resolution, refresh rate)
-  ];
-
   fonts = {
     fontDir.enable = true;
 
-    packages = with pkgs; [
-      noto-fonts noto-fonts-extra
-      source-code-pro source-sans-pro source-serif-pro
-      source-han-code-jp source-han-mono source-han-sans source-han-serif
-      hermit
-      roboto roboto-mono roboto-slab
-    ] ++ builtins.filter lib.attrsets.isDerivation (builtins.attrValues pkgs.nerd-fonts);
+    packages = with pkgs;
+      [
+        noto-fonts
+        noto-fonts-extra
+        source-code-pro
+        source-sans-pro
+        source-serif-pro
+        source-han-code-jp
+        source-han-mono
+        source-han-sans
+        source-han-serif
+        hermit
+        roboto
+        roboto-mono
+        roboto-slab
+      ]
+      ++ builtins.filter lib.attrsets.isDerivation (builtins.attrValues pkgs.nerd-fonts);
 
     fontconfig = {
       defaultFonts = {
-        monospace = [ "SauceCodePro Nerd Font Mono" ];
-        sansSerif = [ "Arimo" ];
-        serif     = [ "Tinos" ];
-        emoji     = [ "Noto Color Emoji" ];
+        monospace = ["SauceCodePro Nerd Font Mono"];
+        sansSerif = ["Arimo"];
+        serif = ["Tinos"];
+        emoji = ["Noto Color Emoji"];
       };
-    };
-  };
-
-  services = {
-    xserver = {
-      enable = true;
-      displayManager.lightdm.enable = false;
-      videoDrivers = [ "nvidia" ];
     };
   };
 }
