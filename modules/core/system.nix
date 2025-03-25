@@ -21,6 +21,9 @@
           "discord"
           "spotify"
           "obsidian"
+          "steam"
+          "steam-original"
+          "steam-runtime"
         ];
       permittedInsecurePackages = [
         "electron-25.9.0" # obsidian

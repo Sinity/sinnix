@@ -40,10 +40,5 @@ in {
     # dolphin-emu
   ];
 
-  nixpkgs.config.allowUnfreePredicate = pkg:
-    builtins.elem (lib.getName pkg) [
-      "steam"
-      "steam-original"
-      "steam-runtime"
-    ];
+  # Unfree packages are now allowed at the system level
 }

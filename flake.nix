@@ -26,11 +26,17 @@
       url = "github:nix-community/nix4nvchad";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    
+    agenix = {
+      url = "github:ryantm/agenix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = {
     nixpkgs,
     self,
+    agenix,
     ...
   } @ inputs: let
     username = "sinity";
@@ -40,6 +46,7 @@
       inherit system;
       modules = [
         ./modules/core/default.nix
+        agenix.nixosModules.default
       ];
       specialArgs = {
         host = "desktop";

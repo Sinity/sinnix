@@ -47,10 +47,10 @@
     sqlite-utils
     sqlitestudio
 
-    transmission-gtk
+    transmission_3-gtk
 
     # lua-language-server
-    nixfmt
+    nixfmt-classic
     # prettier
     # nodePackages.typescript-language-server
     # clang-tools

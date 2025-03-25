@@ -19,5 +19,6 @@
     ./x.nix
     ./nginx.nix
     ./nix-ld.nix
+    ./secrets.nix
   ];
 }

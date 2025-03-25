@@ -98,14 +98,11 @@
       EDITOR = "nvim";
       VISUAL = "nvim";
       PAGER = "less";
-      BROWSER = "floorp";
+      BROWSER = "zen";
       TERM = "kitty";
       TERMINAL = "kitty";
       PYTHONDONTWRITEBYTECODE = "1";
       SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS = "0";
-      OBSIDIAN_REST_API_KEY = "OBSIDIAN_REST_API_KEY_PLACEHOLDER";
-      # OPENAI_API_KEY = "";
-      # RAINDROP_API_KEY = "";
       # GTK_THEME = "Adwaita:dark";
       # QT_STYLE_OVERRIDE = "adwaita-dark";
       LD_LIBRARY_PATH = "$(nix build --print-out-paths --no-link nixpkgs#libGL)/lib";
