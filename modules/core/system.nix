@@ -1,20 +1,27 @@
-{ self, pkgs, lib, inputs, username, ...}: 
 {
+  self,
+  pkgs,
+  lib,
+  inputs,
+  username,
+  ...
+}: {
   nix = {
     settings = {
       auto-optimise-store = true;
-      experimental-features = [ "nix-command" "flakes" ];
-      substituters = [ "https://nix-gaming.cachix.org" ];
-      trusted-public-keys = [ "nix-gaming.cachix.org-1:nbjlureqMbRAxR1gJ/f3hxemL9svXaZF/Ees8vCUUs4=" ];
+      experimental-features = ["nix-command" "flakes"];
+      substituters = ["https://nix-gaming.cachix.org"];
+      trusted-public-keys = ["nix-gaming.cachix.org-1:nbjlureqMbRAxR1gJ/f3hxemL9svXaZF/Ees8vCUUs4="];
     };
   };
   nixpkgs = {
     config = {
-      allowUnfreePredicate = pkg: builtins.elem (lib.getName pkg) [
-        "discord"
-        "spotify"
-        "obsidian"
-      ];
+      allowUnfreePredicate = pkg:
+        builtins.elem (lib.getName pkg) [
+          "discord"
+          "spotify"
+          "obsidian"
+        ];
       permittedInsecurePackages = [
         "electron-25.9.0" # obsidian
       ];
@@ -42,7 +49,7 @@
 
   programs.dconf.enable = true;
   programs.nix-ld.enable = true;
-  programs.nix-ld.libraries = with pkgs; [];
+  programs.nix-ld.libraries = [];
   services.dbus.enable = true;
 
   # locale
@@ -71,9 +78,11 @@
     reportInterval = 5;
     extraArgs = [
       "-g"
-        "-p"
-        "--prefer" "(^|/)(java|chromium|floorp)$"
-        "--avoid" "(^|/)(init|systemd|sshd)$"
+      "-p"
+      "--prefer"
+      "(^|/)(java|chromium|zen)$"
+      "--avoid"
+      "(^|/)(init|systemd|sshd)$"
     ];
   };
 

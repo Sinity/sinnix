@@ -1,0 +1,4 @@
+#!/bin/sh
+date
+sensors | grep -A 1 Pack
+nvidia-smi -a | grep -iE 'GPU Current temp' | awk '{$1=$1};1'

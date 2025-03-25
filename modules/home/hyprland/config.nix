@@ -1,5 +1,4 @@
-{ ... }: 
-{
+{...}: {
   wayland.windowManager.hyprland = {
     settings = {
       exec-once = [
@@ -23,21 +22,21 @@
         kb_options = "";
         numlock_by_default = true;
 
-      	repeat_rate = 40;
-      	repeat_delay = 400;
+        repeat_rate = 40;
+        repeat_delay = 400;
 
         sensitivity = 0;
-      	accel_profile = "flat";
+        accel_profile = "flat";
         force_no_accel = 0;
 
-      	scroll_factor = 1;
-      	emulate_discrete_scroll = 1;
+        scroll_factor = 1;
+        emulate_discrete_scroll = 1;
 
         follow_mouse = 1;
-      	# focus_on_close = 0;
+        # focus_on_close = 0;
         mouse_refocus = false;
         float_switch_override_focus = 2;
-      	special_fallthrough = true;
+        special_fallthrough = true;
       };
 
       general = {
@@ -47,18 +46,18 @@
         "col.inactive_border" = "0x00000000";
         "col.active_border" = "rgb(98971a) rgb(cc241d) 45deg";
         layout = "dwindle";
-      	resize_on_border = true;
+        resize_on_border = true;
       };
 
       misc = {
         disable_hyprland_logo = false;
-	      vrr = 2;
-	      mouse_move_enables_dpms = true;
-	      key_press_enables_dpms = true;
+        vrr = 2;
+        mouse_move_enables_dpms = true;
+        key_press_enables_dpms = true;
         always_follow_on_dnd = true;
         layers_hog_keyboard_focus = true;
         animate_manual_resizes = false;
-	      animate_mouse_windowdragging = false;
+        animate_mouse_windowdragging = false;
         disable_autoreload = true;
 
         # enable_swallow = true;
@@ -66,8 +65,8 @@
         # swallow_executable = "^(mpv|imv|feh)$";  # Only these programs can swallow
 
         focus_on_activate = true;
-	      # render_ahead_of_time = true;
-	      # render_ahead_safezone = 2;
+        # render_ahead_of_time = true;
+        # render_ahead_safezone = 2;
         new_window_takes_over_fullscreen = 2;
         middle_click_paste = true;
       };
@@ -87,24 +86,24 @@
         special_scale_factor = 1;
         # no_gaps_when_only = false;
       };
-      
+
       group = {
         insert_after_current = true;
-	      focus_removed_window = true;
+        focus_removed_window = true;
 
-      	groupbar = {
+        groupbar = {
           enabled = true;
-	        gradients = true;
-	        height = 14;
-	        render_titles = true;
-      	  scrolling = true;
-      	};
+          gradients = true;
+          height = 14;
+          render_titles = true;
+          scrolling = true;
+        };
       };
 
       debug = {
         disable_logs = false;
-      	disable_time = false;
-      	enable_stdout_logs = true;
+        disable_time = false;
+        enable_stdout_logs = true;
       };
 
       decoration = {
@@ -126,8 +125,8 @@
           passes = 2;
           contrast = 1.400;
           brightness = 1;
-	        vibrancy = 0.5;
-	        special = true;
+          vibrancy = 0.5;
+          special = true;
         };
       };
 
@@ -160,11 +159,11 @@
       };
 
       bind = [
-        "SUPER, F1, exec, show-keybinds" # keybinds cheatsheet 
+        "SUPER, F1, exec, show-keybinds" # keybinds cheatsheet
         "SUPER, Return, exec, kitty"
         "ALT, Return, exec, kitty --title float_kitty"
         "SUPER SHIFT, Return, exec, kitty --start-as=fullscreen -o 'font_size=16'"
-        "SUPER, B, exec, hyprctl dispatch exec '[workspace 1 silent] floorp'"
+        "SUPER, B, exec, hyprctl dispatch exec '[workspace 1 silent] zen'"
         "SUPER, Q, killactive,"
         "SUPER, F, fullscreen, 0"
         "SUPER SHIFT, F, fullscreen, 1"
@@ -189,7 +188,7 @@
 
         # screenshot
         "SUPER, Print, exec, grimblast --notify --cursor copysave output ~/pic/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
-        ", Print, exec, grimblast --notify --cursor --freeze copysave area ~/pic/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
+        ", Print, exec, grimblast --notify --freeze copysave area ~/pic/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
 
         # switch focus
         "SUPER, H, movefocus, l"
@@ -308,9 +307,9 @@
         "opacity 1.0 override 1.0 override, title:^(.*mpv.*)$"
         "opacity 1.0 override 1.0 override, class:(Aseprite)"
         "opacity 1.0 override 1.0 override, class:(Unity)"
-        "opacity 1.0 override 1.0 override, class:(floorp)"
+        "opacity 1.0 override 1.0 override, class:(zen)"
         "opacity 1.0 override 1.0 override, class:(evince)"
-        "workspace 1, class:^(floorp)$"
+        "workspace 1, class:^(zen)$"
         "workspace 4, class:^(discord)$"
         "workspace 4, class:^(Gimp-2.10)$"
         "workspace 4, class:^(Aseprite)$"
@@ -348,7 +347,6 @@
         "noblur,class:^(xwaylandvideobridge)$"
         "noanim,class:^(ueberzug)$"
       ];
-
     };
 
     extraConfig = "

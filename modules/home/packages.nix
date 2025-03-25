@@ -12,13 +12,15 @@
     spotify
 
     # new
-    screen-pipe
+    # screen-pipe
     # code-cursor
     obsidian # obsidian-wrapper
 
     openai-whisper-cpp
 
     ueberzugpp
+
+    claude-code
 
     # awatcher
     nix-diff
