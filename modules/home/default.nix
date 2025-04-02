@@ -11,9 +11,8 @@
     ./discord/discord.nix # discord with catppuccin theme
     ./fzf.nix # fuzzy finder
     ./gaming.nix # packages related to gaming
-    ./git.nix # version control
-    ./gnome.nix # gnome apps
     ./gtk.nix # gtk theme
+    ./hydrus.nix # hydrus with custom setup
     ./hyprland # window manager
     ./kitty.nix # terminal
     ./ranger.nix # TUI file manager
@@ -25,7 +24,6 @@
     ./vscodium.nix # vscode fork
     ./waybar # status bar
     ./xdg-mimes.nix # xdg config
-    ./zsh.nix # shell
     ./mpv.nix
   ];
 }

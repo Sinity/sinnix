@@ -1,5 +1,4 @@
-{ config, pkgs, lib, ... }:
-{
+{pkgs, ...}: {
   # Self-inflicted telemetry
   services.activitywatch = {
     enable = true;
@@ -8,11 +7,11 @@
     watchers = {
       awatcher = {
         package = pkgs.awatcher;
-	settings = {
+        settings = {
           idle-timeout-seconds = 60;
           poll-time-idle-seconds = 1;
           poll-time-window-seconds = 1;
-	};
+        };
       };
       # aw-watcher-afk = {
       #   package = pkgs.aw-watcher-afk; # pkgs.activitywatch
@@ -36,16 +35,16 @@
       #   settingsFilename = "config.toml";
       # };
     };
-    
+
     # settings = {
     #   timeout = 5;
-      # host = "localhost";
-      # port = 3012;
+    # host = "localhost";
+    # port = 3012;
 
-      # custom_static = {
-      #   my-custom-watcher = "${pkgs.my-custom-watcher}/share/my-custom-watcher/static";
-      #   aw-keywatcher = "${pkgs.aw-keywatcher}/share/aw-keywatcher/static";
-      # };
+    # custom_static = {
+    #   my-custom-watcher = "${pkgs.my-custom-watcher}/share/my-custom-watcher/static";
+    #   aw-keywatcher = "${pkgs.aw-keywatcher}/share/aw-keywatcher/static";
+    # };
     # };
 
     # extraOptions = ''
@@ -73,7 +72,7 @@
       Requisite = [target];
       PartOf = [target];
     };
-    Install = { WantedBy = [target]; };
+    Install = {WantedBy = [target];};
   };
 
   home.packages = with pkgs; [

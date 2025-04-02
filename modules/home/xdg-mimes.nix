@@ -1,24 +1,27 @@
-{ pkgs, lib, ... }:
-with lib;
-let
+{
+  pkgs,
+  lib,
+  ...
+}:
+with lib; let
   defaultApps = {
-    browser = [ "zen.desktop" ];
-    text = [ "org.gnome.TextEditor.desktop" ];
-    image = [ "com.interversehq.qView.desktop" ];
-    audio = [ "mpv.desktop" ];
-    video = [ "mpv.desktop" ];
+    browser = ["zen.desktop"];
+    text = ["org.gnome.TextEditor.desktop"];
+    image = ["com.interversehq.qView.desktop"];
+    audio = ["mpv.desktop"];
+    video = ["mpv.desktop"];
     directory = [
       "nautilus.desktop"
       "org.gnome.Nautilus.desktop"
     ];
-    office = [ "libreoffice.desktop" ];
-    pdf = [ "org.gnome.Evince.desktop" ];
-    terminal = [ "kitty.desktop" ];
-    archive = [ "org.gnome.FileRoller.desktop" ];
+    office = ["libreoffice.desktop"];
+    pdf = ["org.gnome.Evince.desktop"];
+    terminal = ["kitty.desktop"];
+    archive = ["org.gnome.FileRoller.desktop"];
   };
 
   mimeMap = {
-    text = [ "text/plain" ];
+    text = ["text/plain"];
     image = [
       "image/bmp"
       "image/gif"
@@ -49,7 +52,7 @@ let
       "video/x-matroska"
       "video/x-msvideo"
     ];
-    directory = [ "inode/directory" ];
+    directory = ["inode/directory"];
     browser = [
       "text/html"
       "x-scheme-handler/about"
@@ -69,8 +72,8 @@ let
       "application/vnd.ms-powerpoint"
       "application/rtf"
     ];
-    pdf = [ "application/pdf" ];
-    terminal = [ "terminal" ];
+    pdf = ["application/pdf"];
+    terminal = ["terminal"];
     archive = [
       "application/zip"
       "application/rar"
@@ -79,19 +82,17 @@ let
     ];
   };
 
-  associations =
-    with lists;
+  associations = with lists;
     listToAttrs (
       flatten (mapAttrsToList (key: map (type: attrsets.nameValuePair type defaultApps."${key}")) mimeMap)
     );
-in
-{
+in {
   xdg.configFile."mimeapps.list".force = true;
   xdg.mimeApps.enable = true;
   xdg.mimeApps.associations.added = associations;
   xdg.mimeApps.defaultApplications = associations;
 
-  home.packages = with pkgs; [ 
+  home.packages = with pkgs; [
     junction
     # xdg-desktop-portal-hyprland
   ];

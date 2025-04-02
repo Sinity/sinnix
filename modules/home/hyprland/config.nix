@@ -187,8 +187,8 @@
         "SUPER SHIFT, W, exec, vm-start"
 
         # screenshot
-        "SUPER, Print, exec, grimblast --notify --cursor copysave output ~/pic/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
-        ", Print, exec, grimblast --notify --freeze copysave area ~/pic/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
+        "SUPER, Print, exec, grimblast --notify --cursor copysave output ~/home/inbox/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
+        ", Print, exec, grimblast --notify --freeze copysave area ~/home/inbox/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
 
         # switch focus
         "SUPER, H, movefocus, l"

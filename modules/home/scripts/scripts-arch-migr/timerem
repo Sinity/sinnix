@@ -1,2 +1,0 @@
-#!/usr/bin/env zsh
-while true; do dunstify --urgency=critical --timeout=10000 "${1:-30m} passed" "$(date)"; sleep ${1:-30m}; done

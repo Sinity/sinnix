@@ -24,6 +24,21 @@
         file = ../../secrets/obsidian-api-key.age;
         owner = "sinity";
       };
+      
+      # SSH keys
+      ssh-id-ed25519 = {
+        file = ../../secrets/ssh-id-ed25519.age;
+        path = "/home/sinity/.ssh/id_ed25519";
+        owner = "sinity";
+        mode = "0600";
+      };
+      
+      ssh-id-ed25519-github = {
+        file = ../../secrets/ssh-id-ed25519-github.age;
+        path = "/home/sinity/.ssh/id_ed25519_github";
+        owner = "sinity";
+        mode = "0600";
+      };
     };
   };
 }

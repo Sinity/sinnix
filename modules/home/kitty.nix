@@ -1,10 +1,13 @@
-{ pkgs, host, ... }:
 {
+  pkgs,
+  host,
+  ...
+}: {
   programs.kitty = {
     enable = true;
-    
+
     theme = "Gruvbox Dark Hard";
-    
+
     font = {
       name = "FiraCode Nerd Font";
       size = 16;
@@ -22,6 +25,11 @@
       wheel_scroll_multiplier = 0.5;
       touch_scroll_multiplier = 0.5;
       cursor_trail = 3;
+      open_url_with = "zen";
+      detect_urls = "yes";
+      url_prefixes = "http https file ftp";
+      url_style = "single";
+      allow_hyperlinks = "yes";
 
       ## Tabs
       tab_title_template = "{index}";
@@ -35,7 +43,7 @@
       inactive_tab_background = "#3C3836";
     };
 
-    keybindings = {  
+    keybindings = {
       ## Tabs
       "alt+1" = "goto_tab 1";
       "alt+2" = "goto_tab 2";

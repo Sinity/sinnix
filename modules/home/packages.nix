@@ -4,34 +4,31 @@
   ...
 }: {
   home.packages = with pkgs; [
-    floorp
     inputs.zen-browser.packages.x86_64-linux.beta
-
     google-chrome
 
+    obsidian # obsidian-wrapper
     spotify
 
-    # new
-    # screen-pipe
-    # code-cursor
-    obsidian # obsidian-wrapper
-
+    # ai
+    claude-code
     openai-whisper-cpp
 
-    ueberzugpp
-
-    claude-code
-
-    # awatcher
-    nix-diff
-
-    nodejs_23
-
+    # nvim, language servers
     neovim
+    nix-diff
+    nodejs_23
     nil
     nixd
+    nixfmt-classic
     rust-analyzer
+    markdown-oxide
+    cargo
 
+    ripgrep
+    python3Packages.pip
+
+    # nushell
     nushell
     nushellPlugins.net
     nushellPlugins.units
@@ -40,61 +37,31 @@
     nushellPlugins.formats
     nushellPlugins.highlight
 
-    markdown-oxide
-
     sqlite
     sqlite-vec
     sqlite-utils
     sqlitestudio
 
+    nautilus
     transmission_3-gtk
-
-    # lua-language-server
-    nixfmt-classic
-    # prettier
-    # nodePackages.typescript-language-server
-    # clang-tools
-    # cmake
-
-    ripgrep
-    # python3Packages.python-lsp-server
-    python3Packages.pip
-    # python3Packages.ruff-lsp
-    # marksman
-
-    # rustup
-    cargo
-    # pkg-config
-
     zathura
-
-    hydrus
+    # hydrus is now managed in hydrus.nix
 
     ## CLI utility
     ani-cli
-    bitwise # cli tool for bit / hex manipulation
-    caligula # User-friendly, lightweight TUI for disk imaging
     cliphist # clipboard manager
     eza # ls replacement
     entr # perform action when file change
     fd # find replacement
     ffmpeg
     file # Show file information
-    gtt # google translate TUI
-    gifsicle # gif utility
-    gtrash # rm replacement, put deleted files in system trash
-    hexdump
     imv # image viewer
     killall
-    lazygit
     libnotify
     man-pages # extra man pages
-    # mpv                               # video player
     ncdu # disk space
     nitch # systhem fetch util
     openssl
-    onefetch # fetch utility for git repo
-    pamixer # pulseaudio command line mixer
     playerctl # controller for media players
     poweralertd
     programmer-calculator
@@ -146,9 +113,27 @@
     python3
     python312Packages.ipython
 
+    # Dotfiles related
+    stow      # dotfiles management
+    
+    # Git related (moved from git.nix)
+    git
+    delta     # Enhanced git diff tool
+    lazygit
+    onefetch  # fetch utility for git repo
+    gh        # GitHub CLI
+    
+    # Zsh related (moved from zsh.nix)
+    zsh
+    oh-my-zsh
+    zoxide
+    fzf
+    bat
+    
     inputs.alejandra.defaultPackage.${system}
   ];
 }
+# TODO extract useful stuff from this
 #   home.packages = (with pkgs; [
 #     ranger ueberzugpp
 #
