@@ -18,7 +18,7 @@ display_help() {
   echo "Examples:"
   echo "  $0 deploy nvim     - Deploy neovim config"
   echo "  $0 deploy          - Deploy all packages"
-  echo "  $0 collect zsh     - Collect zsh config from home to dots"
+  echo "  $0 collect git     - Collect git config from home to dots"
 }
 
 list_packages() {
@@ -84,19 +84,6 @@ collect_package() {
       fi
       if [ -d "$HOME/.config/git" ]; then
         rsync -av --delete "$HOME/.config/git/" "$DOTS_DIR/git/.config/git/"
-      fi
-      ;;
-    zsh)
-      mkdir -p "$DOTS_DIR/zsh/.config/zsh"
-      
-      # Collect zshenv from home directory
-      if [ -f "$HOME/.zshenv" ]; then
-        rsync -av "$HOME/.zshenv" "$DOTS_DIR/zsh/"
-      fi
-      
-      # Collect config directory
-      if [ -d "$HOME/.config/zsh" ]; then
-        rsync -av --delete "$HOME/.config/zsh/" "$DOTS_DIR/zsh/.config/zsh/"
       fi
       ;;
     ssh)

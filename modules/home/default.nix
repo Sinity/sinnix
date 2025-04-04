@@ -16,14 +16,15 @@
     ./hyprland # window manager
     ./kitty.nix # terminal
     ./ranger.nix # TUI file manager
+    ./starship.nix # prompt
     ./swaync/swaync.nix # notification deamon
     ./packages.nix # other packages
     ./rofi.nix # launcher
     ./scripts/scripts.nix # personal scripts
-    ./starship.nix # shell prompt
     ./vscodium.nix # vscode fork
     ./waybar # status bar
     ./xdg-mimes.nix # xdg config
     ./mpv.nix
+    ./zsh.nix # shell
   ];
 }

@@ -6,7 +6,7 @@
   programs.kitty = {
     enable = true;
 
-    theme = "Gruvbox Dark Hard";
+    theme = "Gruvbox Dark";
 
     font = {
       name = "FiraCode Nerd Font";
