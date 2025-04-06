@@ -3,6 +3,9 @@
   pkgs,
   ...
 }: {
+  # SSH configuration managed by dotfiles and secrets by agenix
+  programs.ssh.enable = true;
+
   home.packages = with pkgs; [
     inputs.zen-browser.packages.x86_64-linux.beta
     google-chrome
@@ -116,14 +119,14 @@
     # Dotfiles related
     stow      # dotfiles management
     
-    # Git related (moved from git.nix)
-    git
-    delta     # Enhanced git diff tool
-    lazygit
-    onefetch  # fetch utility for git repo
+    # Git related
     gh        # GitHub CLI
+    git       # Git version control
+    git-delta # Better diffs
+    lazygit   # TUI for git
+    onefetch  # Git repo stats
     
-    # Zsh related (moved from zsh.nix)
+    # Zsh related
     zsh
     oh-my-zsh
     zoxide
