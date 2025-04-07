@@ -77,6 +77,36 @@ collect_package() {
       mkdir -p "$DOTS_DIR/nvim/.config"
       rsync -av --delete "$HOME/.config/nvim/" "$DOTS_DIR/nvim/.config/nvim/"
       ;;
+    kitty)
+      mkdir -p "$DOTS_DIR/kitty/.config"
+      rsync -av --delete "$HOME/.config/kitty/" "$DOTS_DIR/kitty/.config/kitty/"
+      ;;
+    btop)
+      mkdir -p "$DOTS_DIR/btop/.config/btop"
+      rsync -av --delete "$HOME/.config/btop/" "$DOTS_DIR/btop/.config/btop/"
+      ;;
+    bat)
+      mkdir -p "$DOTS_DIR/bat/.config/bat"
+      rsync -av --delete "$HOME/.config/bat/" "$DOTS_DIR/bat/.config/bat/"
+      ;;
+    mpv)
+      mkdir -p "$DOTS_DIR/mpv/.config/mpv"
+      rsync -av --delete "$HOME/.config/mpv/" "$DOTS_DIR/mpv/.config/mpv/"
+      ;;
+    ranger)
+      mkdir -p "$DOTS_DIR/ranger/.config/ranger"
+      rsync -av --delete "$HOME/.config/ranger/" "$DOTS_DIR/ranger/.config/ranger/"
+      ;;
+    fzf)
+      mkdir -p "$DOTS_DIR/fzf/.config"
+      if [ -f "$HOME/.config/fzf.conf" ]; then
+        rsync -av --delete "$HOME/.config/fzf.conf" "$DOTS_DIR/fzf/.config/"
+      fi
+      ;;
+    rofi)
+      mkdir -p "$DOTS_DIR/rofi/.config/rofi"
+      rsync -av --delete "$HOME/.config/rofi/" "$DOTS_DIR/rofi/.config/rofi/"
+      ;;
     git)
       mkdir -p "$DOTS_DIR/git/.config/git"
       if [ -f "$HOME/.gitconfig" ]; then

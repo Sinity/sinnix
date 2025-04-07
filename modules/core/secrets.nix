@@ -1,7 +1,10 @@
-{config, pkgs, lib, ...}:
-
 {
-  imports = [ ];
+  config,
+  pkgs,
+  lib,
+  ...
+}: {
+  imports = [];
 
   # Define environment variables that use the decrypted secrets
   environment.sessionVariables = {
@@ -10,52 +13,43 @@
     GEMINI_API_KEY = "$(cat ${config.age.secrets.gemini-api-key.path})";
     ANTHROPIC_API_KEY = "$(cat ${config.age.secrets.anthropic-api-key.path})";
     RAINDROP_TOKEN = "$(cat ${config.age.secrets.raindrop-token.path})";
+    ASSEMBLYAI_API_KEY = "$(cat ${config.age.secrets.raindrop-token.path})";
   };
-  
+
   # Add decryption configuration
   age = {
-    identityPaths = [ "/home/sinity/.ssh/id_ed25519" ];
-    
+    identityPaths = ["/home/sinity/.ssh/id_ed25519"];
+
     secrets = {
       # API keys
       openai-api-key = {
         file = ../../secrets/openai-api-key.age;
-        owner = "sinity"; 
+        owner = "sinity";
       };
-      
+
       obsidian-api-key = {
         file = ../../secrets/obsidian-api-key.age;
         owner = "sinity";
       };
-      
+
       gemini-api-key = {
         file = ../../secrets/gemini-api-key.age;
         owner = "sinity";
       };
-      
+
       anthropic-api-key = {
         file = ../../secrets/anthropic-api-key.age;
         owner = "sinity";
       };
-      
+
+      assemblyai-api-key = {
+        file = ../../secrets/assemblyai-api-key.age;
+        owner = "sinity";
+      };
+
       raindrop-token = {
         file = ../../secrets/raindrop-token.age;
         owner = "sinity";
-      };
-      
-      # SSH keys
-      ssh-id-ed25519 = {
-        file = ../../secrets/ssh-id-ed25519.age;
-        path = "/home/sinity/.ssh/id_ed25519";
-        owner = "sinity";
-        mode = "0600";
-      };
-      
-      ssh-id-ed25519-github = {
-        file = ../../secrets/ssh-id-ed25519-github.age;
-        path = "/home/sinity/.ssh/id_ed25519_github";
-        owner = "sinity";
-        mode = "0600";
       };
     };
   };

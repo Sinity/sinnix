@@ -2,6 +2,19 @@
 
 This directory contains configuration files (dotfiles) managed with GNU Stow.
 
+## Available Packages
+
+- **bat**: A cat clone with syntax highlighting
+- **btop**: System resource monitor with fancy UI
+- **fzf**: Command-line fuzzy finder
+- **git**: Git version control configuration
+- **kitty**: Fast, feature-rich terminal emulator
+- **mpv**: Video player with high quality playback
+- **nvim**: Neovim text editor
+- **ranger**: Terminal file manager with image previews
+- **rofi**: Application launcher for Linux
+- **ssh**: SSH client configuration (no keys)
+
 ## Structure
 
 Each subdirectory represents a package/application with its configuration files. The directory structure inside each package mirrors the structure in your home directory.

@@ -3,15 +3,23 @@
   pkgs,
   ...
 }: {
-  # SSH configuration managed by dotfiles and secrets by agenix
-  programs.ssh.enable = true;
-
   home.packages = with pkgs; [
     inputs.zen-browser.packages.x86_64-linux.beta
     google-chrome
 
     obsidian # obsidian-wrapper
     spotify
+
+    openssh
+    
+    # Terminal and core tools
+    kitty # terminal emulator
+    btop # system monitor
+    bat # better cat command
+    fzf # fuzzy finder
+    ranger # terminal file manager
+    mpv # media player
+    rofi-wayland # application launcher
 
     # ai
     claude-code
@@ -117,22 +125,23 @@
     python312Packages.ipython
 
     # Dotfiles related
-    stow      # dotfiles management
-    
+    stow # dotfiles management
+
     # Git related
-    gh        # GitHub CLI
-    git       # Git version control
-    git-delta # Better diffs
-    lazygit   # TUI for git
-    onefetch  # Git repo stats
-    
+    gh # GitHub CLI
+    git # Git version control
+    # git-delta # Better diffs
+    delta
+    lazygit # TUI for git
+    onefetch # Git repo stats
+
     # Zsh related
     zsh
     oh-my-zsh
     zoxide
     fzf
     bat
-    
+
     inputs.alejandra.defaultPackage.${system}
   ];
 }
@@ -329,7 +338,6 @@
 #     ocl-icd  # OpenCL ICD Bindings
 #     # opencl-nvidia  # OpenCL implemention for NVIDIA (Use nixos.nvidia.package instead)
 #     openmpi  # High performance message passing library (MPI)
-#     openssh  # SSH protocol implementation for remote login, command execution and file transfer
 #     os-prober  # Utility to detect other OSes on a set of drives
 #     latin-modern-math  # Improved version of Computer Modern fonts as used in LaTeX
 #     pamixer  # Pulseaudio command-line mixer like amixer
