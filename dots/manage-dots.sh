@@ -52,7 +52,7 @@ remove_package() {
 deploy_all() {
   echo "Deploying all dotfiles packages..."
   cd "$DOTS_DIR" || exit 1
-  
+
   # Use fd if available, otherwise fall back to find
   if command -v fd >/dev/null 2>&1; then
     fd --max-depth 1 --type d --exec basename {} \; . | grep -v "^\\." | while read -r dir; do
@@ -71,98 +71,103 @@ deploy_all() {
 collect_package() {
   package="$1"
   echo "Collecting $package configuration..."
-  
+
   case "$package" in
-    nvim)
-      mkdir -p "$DOTS_DIR/nvim/.config"
-      rsync -av --delete "$HOME/.config/nvim/" "$DOTS_DIR/nvim/.config/nvim/"
-      ;;
-    kitty)
-      mkdir -p "$DOTS_DIR/kitty/.config"
-      rsync -av --delete "$HOME/.config/kitty/" "$DOTS_DIR/kitty/.config/kitty/"
-      ;;
-    btop)
-      mkdir -p "$DOTS_DIR/btop/.config/btop"
-      rsync -av --delete "$HOME/.config/btop/" "$DOTS_DIR/btop/.config/btop/"
-      ;;
-    bat)
-      mkdir -p "$DOTS_DIR/bat/.config/bat"
-      rsync -av --delete "$HOME/.config/bat/" "$DOTS_DIR/bat/.config/bat/"
-      ;;
-    mpv)
-      mkdir -p "$DOTS_DIR/mpv/.config/mpv"
-      rsync -av --delete "$HOME/.config/mpv/" "$DOTS_DIR/mpv/.config/mpv/"
-      ;;
-    ranger)
-      mkdir -p "$DOTS_DIR/ranger/.config/ranger"
-      rsync -av --delete "$HOME/.config/ranger/" "$DOTS_DIR/ranger/.config/ranger/"
-      ;;
-    fzf)
-      mkdir -p "$DOTS_DIR/fzf/.config"
-      if [ -f "$HOME/.config/fzf.conf" ]; then
-        rsync -av --delete "$HOME/.config/fzf.conf" "$DOTS_DIR/fzf/.config/"
-      fi
-      ;;
-    rofi)
-      mkdir -p "$DOTS_DIR/rofi/.config/rofi"
-      rsync -av --delete "$HOME/.config/rofi/" "$DOTS_DIR/rofi/.config/rofi/"
-      ;;
-    git)
-      mkdir -p "$DOTS_DIR/git/.config/git"
-      if [ -f "$HOME/.gitconfig" ]; then
-        rsync -av --delete "$HOME/.gitconfig" "$DOTS_DIR/git/"
-      fi
-      if [ -d "$HOME/.config/git" ]; then
-        rsync -av --delete "$HOME/.config/git/" "$DOTS_DIR/git/.config/git/"
-      fi
-      ;;
-    ssh)
-      mkdir -p "$DOTS_DIR/ssh/.ssh"
-      
-      # Only collect configuration files, not keys
-      if [ -f "$HOME/.ssh/config" ]; then
-        rsync -av "$HOME/.ssh/config" "$DOTS_DIR/ssh/.ssh/"
-      fi
-      ;;
-    *)
-      echo "Error: Collection for $package is not yet configured"
-      echo "Add your package to the collect_package function in this script"
-      exit 1
-      ;;
+  nvim)
+    mkdir -p "$DOTS_DIR/nvim/.config"
+    rsync -av --delete "$HOME/.config/nvim/" "$DOTS_DIR/nvim/.config/nvim/"
+    ;;
+  kitty)
+    mkdir -p "$DOTS_DIR/kitty/.config"
+    rsync -av --delete "$HOME/.config/kitty/" "$DOTS_DIR/kitty/.config/kitty/"
+    ;;
+  btop)
+    mkdir -p "$DOTS_DIR/btop/.config/btop"
+    rsync -av --delete "$HOME/.config/btop/" "$DOTS_DIR/btop/.config/btop/"
+    ;;
+  bat)
+    mkdir -p "$DOTS_DIR/bat/.config/bat"
+    rsync -av --delete "$HOME/.config/bat/" "$DOTS_DIR/bat/.config/bat/"
+    ;;
+  mpv)
+    mkdir -p "$DOTS_DIR/mpv/.config/mpv"
+    rsync -av --delete "$HOME/.config/mpv/" "$DOTS_DIR/mpv/.config/mpv/"
+    ;;
+  fzf)
+    mkdir -p "$DOTS_DIR/fzf/.config"
+    if [ -f "$HOME/.config/fzf.conf" ]; then
+      rsync -av --delete "$HOME/.config/fzf.conf" "$DOTS_DIR/fzf/.config/"
+    fi
+    ;;
+  rofi)
+    mkdir -p "$DOTS_DIR/rofi/.config/rofi"
+    rsync -av --delete "$HOME/.config/rofi/" "$DOTS_DIR/rofi/.config/rofi/"
+    ;;
+  nushell)
+    mkdir -p "$DOTS_DIR/nushell/.config/nushell"
+    # Only sync config files, not history
+    rsync -av --delete "$HOME/.config/nushell/config.nu" "$DOTS_DIR/nushell/.config/nushell/" 2>/dev/null || true
+    rsync -av --delete "$HOME/.config/nushell/env.nu" "$DOTS_DIR/nushell/.config/nushell/" 2>/dev/null || true
+    rsync -av --delete "$HOME/.config/nushell/starship.nu" "$DOTS_DIR/nushell/.config/nushell/" 2>/dev/null || true
+    rsync -av --delete "$HOME/.config/nushell/zoxide.nu" "$DOTS_DIR/nushell/.config/nushell/" 2>/dev/null || true
+    rsync -av --delete "$HOME/.config/nushell/atuin.nu" "$DOTS_DIR/nushell/.config/nushell/" 2>/dev/null || true
+    ;;
+  git)
+    mkdir -p "$DOTS_DIR/git/.config/git"
+    if [ -f "$HOME/.gitconfig" ]; then
+      rsync -av --delete "$HOME/.gitconfig" "$DOTS_DIR/git/"
+    fi
+    if [ -d "$HOME/.config/git" ]; then
+      rsync -av --delete "$HOME/.config/git/" "$DOTS_DIR/git/.config/git/"
+    fi
+    ;;
+  ssh)
+    mkdir -p "$DOTS_DIR/ssh/.ssh"
+
+    # Only collect configuration files, not keys
+    if [ -f "$HOME/.ssh/config" ]; then
+      rsync -av "$HOME/.ssh/config" "$DOTS_DIR/ssh/.ssh/"
+    fi
+    ;;
+  *)
+    echo "Error: Collection for $package is not yet configured"
+    echo "Add your package to the collect_package function in this script"
+    exit 1
+    ;;
   esac
-  
+
   echo "Collection complete!"
 }
 
 # Main execution
 case "$1" in
-  deploy)
-    if [ -z "$2" ]; then
-      deploy_all
-    else
-      deploy_package "$2"
-    fi
-    ;;
-  remove)
-    if [ -z "$2" ]; then
-      echo "Error: Please specify a package to remove"
-      exit 1
-    else
-      remove_package "$2"
-    fi
-    ;;
-  collect)
-    if [ -z "$2" ]; then
-      echo "Error: Please specify a package to collect"
-      exit 1
-    else
-      collect_package "$2"
-    fi
-    ;;
-  list)
-    list_packages
-    ;;
-  *)
-    display_help
-    ;;
+deploy)
+  if [ -z "$2" ]; then
+    deploy_all
+  else
+    deploy_package "$2"
+  fi
+  ;;
+remove)
+  if [ -z "$2" ]; then
+    echo "Error: Please specify a package to remove"
+    exit 1
+  else
+    remove_package "$2"
+  fi
+  ;;
+collect)
+  if [ -z "$2" ]; then
+    echo "Error: Please specify a package to collect"
+    exit 1
+  else
+    collect_package "$2"
+  fi
+  ;;
+list)
+  list_packages
+  ;;
+*)
+  display_help
+  ;;
 esac

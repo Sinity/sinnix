@@ -144,10 +144,26 @@
   programs.zoxide = {
     enable = true;
     enableZshIntegration = true;
+    enableNushellIntegration = true;
   };
 
   programs.broot = {
     enable = true;
     settings.modal = true;
+  };
+
+  programs.atuin = {
+    enable = true;
+    enableNushellIntegration = true;
+    enableZshIntegration = true;
+    settings = {
+      auto_sync = false;
+      search_mode = "fuzzy"; # Or "prefix", "fulltext"
+      filter_mode = "host";
+      style = "compact";
+      inline_height = 200; # Max lines for inline history Ctrl+R
+      show_preview = true; # Show command preview in search UI
+      invert = true; # Search UI layout preference
+    };
   };
 }

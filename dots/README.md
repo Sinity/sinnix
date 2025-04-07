@@ -11,7 +11,6 @@ This directory contains configuration files (dotfiles) managed with GNU Stow.
 - **kitty**: Fast, feature-rich terminal emulator
 - **mpv**: Video player with high quality playback
 - **nvim**: Neovim text editor
-- **ranger**: Terminal file manager with image previews
 - **rofi**: Application launcher for Linux
 - **ssh**: SSH client configuration (no keys)
 
@@ -20,6 +19,7 @@ This directory contains configuration files (dotfiles) managed with GNU Stow.
 Each subdirectory represents a package/application with its configuration files. The directory structure inside each package mirrors the structure in your home directory.
 
 Example:
+
 ```
 dots/
 ├── nvim/
@@ -54,18 +54,21 @@ Use the `manage-dots.sh` script to deploy, remove, or collect dotfiles:
 ## Adding New Configurations
 
 1. Create a new directory for your application:
+
    ```bash
    mkdir -p dots/app_name/.config/app_name
    ```
 
 2. Copy configuration files, maintaining the same structure as in your home directory
+
    ```bash
    cp -r ~/.config/app_name/* dots/app_name/.config/app_name/
    ```
 
 3. Update the `collect_package` function in `manage-dots.sh` to support your new package
-   
+
 4. Deploy using the script:
+
    ```bash
    ./manage-dots.sh deploy app_name
    ```
@@ -79,3 +82,4 @@ This dotfiles setup works alongside your NixOS configuration:
 - **Sensitive configs**: Encrypted with agenix
 
 When you want to switch from home-manager to dotfiles for a specific config, make sure to disable the home-manager module first to avoid conflicts.
+

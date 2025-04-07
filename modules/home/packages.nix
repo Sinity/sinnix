@@ -11,13 +11,12 @@
     spotify
 
     openssh
-    
+
     # Terminal and core tools
     kitty # terminal emulator
     btop # system monitor
     bat # better cat command
     fzf # fuzzy finder
-    ranger # terminal file manager
     mpv # media player
     rofi-wayland # application launcher
 
@@ -371,7 +370,6 @@
 #     python3Packages.urwid  # Curses-based user interface library
 #     qpwgraph  # PipeWire Graph Qt GUI Interface
 #     qutebrowser  # A keyboard-driven, vim-like browser based on Python and Qt
-#     ranger  # Simple, vim-like file manager
 #     read-edid  # Program that can get information from a PNP monitor
 #     redshift  # Adjusts the color temperature of your screen according to your surroundings.
 #     ripgrep  # A search tool that combines the usability of ag with the raw speed of grep
@@ -571,7 +569,6 @@
 #     pv  # A terminal-based tool for monitoring the progress of data through a pipeline
 #     qpwgraph  # PipeWire Graph Qt GUI Interface
 #     qutebrowser  # A keyboard-driven, vim-like browser based on Python and Qt
-#     ranger  # Simple, vim-like file manager
 #     redshift  # Adjusts the color temperature of your screen according to your surroundings.
 #     ripgrep  # A search tool that combines the usability of ag with the raw speed of grep
 #     rofi  # A window switcher, application launcher and dmenu replacement
