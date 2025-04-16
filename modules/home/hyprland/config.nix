@@ -190,6 +190,8 @@
         "SUPER, Print, exec, grimblast --notify --cursor copysave output ~/home/inbox/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
         ", Print, exec, grimblast --notify --freeze copysave area ~/home/inbox/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
 
+        ", F8, exec, ~/scripts/log-to-obsidian.sh"
+
         # switch focus
         "SUPER, H, movefocus, l"
         "SUPER, J, movefocus, d"

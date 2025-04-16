@@ -40,13 +40,21 @@ export-env {
                 $version.version | split row '.' | into int
             }
         }
+        
+        # Add our custom settings to atuin search
+        let custom_flags = [
+            '--inline-height', '30',  # Set reasonable number of results
+            '--filter-mode', 'host',  # Filter by host
+            '--search-mode', 'fuzzy'  # Use fuzzy search
+        ]
+        
         [
             $ATUIN_KEYBINDING_TOKEN,
             ([
                 `with-env { ATUIN_LOG: error, ATUIN_QUERY: (commandline) } {`,
                     (if $nu_version.0 <= 0 and $nu_version.1 <= 90 { 'commandline' } else { 'commandline edit' }),
                     (if $nu_version.1 >= 92 { '(run-external atuin search' } else { '(run-external --redirect-stderr atuin search' }),
-                        ($flags | append [--interactive] | each {|e| $'"($e)"'}),
+                        ($flags | append $custom_flags | append [--interactive] | each {|e| $'"($e)"'}),
                     (if $nu_version.1 >= 92 { ' e>| str trim)' } else {' | complete | $in.stderr | str substring ..-1)'}),
                 `}`,
             ] | flatten | str join ' '),
@@ -80,22 +88,8 @@ export-env {
         )
     )
 
-    $env.config = (
-        $env.config | upsert keybindings (
-            $env.config.keybindings
-            | append {
-                name: atuin
-                modifier: none
-                keycode: up
-                mode: [emacs, vi_normal, vi_insert]
-                event: {
-                    until: [
-                        {send: menuup}
-                        {send: executehostcommand cmd: (_atuin_search_cmd '--shell-up-key-binding') }
-                    ]
-                }
-            }
-        )
-    )
+    # Up arrow key binding for atuin is removed
+    # This keeps the normal behavior for the up arrow key
+    # But still enables history tracking through atuin
 }
 

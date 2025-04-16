@@ -13,7 +13,7 @@
     GEMINI_API_KEY = "$(cat ${config.age.secrets.gemini-api-key.path})";
     ANTHROPIC_API_KEY = "$(cat ${config.age.secrets.anthropic-api-key.path})";
     RAINDROP_TOKEN = "$(cat ${config.age.secrets.raindrop-token.path})";
-    ASSEMBLYAI_API_KEY = "$(cat ${config.age.secrets.raindrop-token.path})";
+    ASSEMBLYAI_API_KEY = "$(cat ${config.age.secrets.assemblyai-api-key.path})";
   };
 
   # Add decryption configuration

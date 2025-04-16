@@ -1,18 +1,18 @@
 local HOME = os.getenv("HOME")
 return {
   -- Obsidian Bridge for Sync of Obsidian <=> nvim active buffer
-  {
-    "oflisback/obsidian-bridge.nvim",
-    -- lazy = true,
-    -- event = { "BufReadPre ~/home/obsidian/*.md", "BufNewFile ~/home/obsidian/*.md" },
-    dependencies = { "nvim-lua/plenary.nvim" },
-    opts = {
-      obsidian_server_address = "https://127.0.0.1:27124",
-      cert_path = HOME .. "/.ssl/obsidian.crt",
-      scroll_sync = false,
-      warnings = true,
-    },
-  },
+  -- {
+  --   "oflisback/obsidian-bridge.nvim",
+  --   -- lazy = true,
+  --   -- event = { "BufReadPre ~/home/obsidian/*.md", "BufNewFile ~/home/obsidian/*.md" },
+  --   dependencies = { "nvim-lua/plenary.nvim" },
+  --   opts = {
+  --     obsidian_server_address = "https://127.0.0.1:27124",
+  --     cert_path = HOME .. "/.ssl/obsidian.crt",
+  --     scroll_sync = false,
+  --     warnings = true,
+  --   },
+  -- },
 
   -- Markdown Oxide LSP
   {
@@ -43,7 +43,7 @@ return {
   {
     "epwalsh/obsidian.nvim",
     -- version = "*", -- recommended, use latest release instead of latest commit
-    lazy = true,
+    lazy = false,
     ft = "markdown",
     event = {
       "BufReadPre *.md",
@@ -62,14 +62,14 @@ return {
           path = "~/home/obsidian",
         },
       },
-      search_max_lines = 100000,
+      search_max_lines = 1000000,
       templates = {
-        folder = "template",
+        folder = "60_templates",
         date_format = "%Y-%m-%d-%a",
         time_format = "%H:%M",
       },
       attachments = {
-        img_folder = "asset/img",
+        img_folder = "80_media",
       },
       ui = {
         enable = false,

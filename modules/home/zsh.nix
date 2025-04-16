@@ -154,16 +154,18 @@
 
   programs.atuin = {
     enable = true;
-    enableNushellIntegration = true;
+    enableNushellIntegration = false; # Handle nushell separately via dotfiles
     enableZshIntegration = true;
     settings = {
       auto_sync = false;
       search_mode = "fuzzy"; # Or "prefix", "fulltext"
       filter_mode = "host";
       style = "compact";
-      inline_height = 200; # Max lines for inline history Ctrl+R
+      inline_height = 30; # number of lines for inline history Ctrl+R
       show_preview = true; # Show command preview in search UI
       invert = true; # Search UI layout preference
+      keymap_mode = "auto"; # Default key map style
+      up_arrow_key_binding = false; # Disable up arrow for atuin search, keep normal behavior
     };
   };
 }
