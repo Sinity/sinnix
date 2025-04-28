@@ -26,10 +26,16 @@
       url = "github:ryantm/agenix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    crane = {
+      url = "github:ipetkov/crane";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = {
     nixpkgs,
+    crane,
     self,
     agenix,
     ...
@@ -48,5 +54,25 @@
         inherit self inputs username;
       };
     };
+
+    # Expose packages for the specified system
+    packages.${system} = let
+      pkgs = nixpkgs.legacyPackages.${system};
+      # Access crane explicitly via the 'inputs' argument
+      craneLib = inputs.crane.lib.${system};
+    in {
+      # Define the screen-pipe package using the default.nix file
+      # Ensure the source code for screen-pipe v0.2.74 and the Cargo.lock
+      # are located within the ./screenpipe-0.2.74 directory.
+      screen-pipe = pkgs.callPackage ./screenpipe-0.2.74/default.nix {
+        inherit pkgs craneLib;
+      };
+
+      # You can add other packages here if needed
+      # default = self.packages.${system}.screen-pipe; # Optionally set a default package
+    };
+
+    # You might want a default package for `nix build`
+    # defaultPackage.${system} = self.packages.${system}.screen-pipe;
   };
 }
