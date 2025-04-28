@@ -42,7 +42,7 @@ return {
   },
   {
     "epwalsh/obsidian.nvim",
-    -- version = "*", -- recommended, use latest release instead of latest commit
+    version = "*",
     lazy = false,
     ft = "markdown",
     event = {
@@ -59,7 +59,7 @@ return {
       workspaces = {
         {
           name = "obsidian",
-          path = "~/home/obsidian",
+          path = "~/realm/obsidian",
         },
       },
       search_max_lines = 1000000,

@@ -10,8 +10,30 @@
     settings = {
       auto-optimise-store = true;
       experimental-features = ["nix-command" "flakes"];
-      substituters = ["https://nix-gaming.cachix.org"];
-      trusted-public-keys = ["nix-gaming.cachix.org-1:nbjlureqMbRAxR1gJ/f3hxemL9svXaZF/Ees8vCUUs4="];
+
+      # constrain builds from melting my system down
+      max-jobs = 12;
+      cores = 0;
+
+      # Likely hallucinations, but don't fail config build so...
+      use-sqlite-wal = true;
+      build-dir = "/mnt/smol_ssd/tmp-nix-build";
+      http-connections = 50;
+      preallocate-contents = true;
+    };
+
+    daemonCPUSchedPolicy = "batch"; # Lower priority than interactive tasks
+    daemonIOSchedPriority = 5; # Medium I/O priority (lower number = higher priority)
+
+    gc = {
+      automatic = true;
+      dates = "weekly";
+      options = "--delete-older-than 30d";
+    };
+
+    optimise = {
+      automatic = true;
+      dates = ["weekly"];
     };
   };
   nixpkgs = {
@@ -83,7 +105,7 @@
       "-g"
       "-p"
       "--prefer"
-      "(^|/)(java|chromium|zen)$"
+      "(^|/)(java|chromium|obsidian|google-chrome-stable)$"
       "--avoid"
       "(^|/)(init|systemd|sshd)$"
     ];

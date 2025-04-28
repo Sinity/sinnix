@@ -4,7 +4,7 @@
       exec-once = [
         "systemctl --user import-environment &"
         "hash dbus-update-activation-environment 2>/dev/null &"
-        "dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP &"
+        "dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE XDG_SESSION_DESKTOP &"
         "nm-applet &"
         "wl-clip-persist --clipboard both"
         "swaybg -m fill -i $(find ~/pic/wallpaper/ -maxdepth 1 -type f) &"
@@ -14,7 +14,11 @@
         "swaync &"
         "wl-paste --watch cliphist store -max-items 99999 -max-dedupe-search 20 &"
         # "wl-paste --primary --watch ???" # TODO: set this up when I figure out where to store these
-        # "hyprlock"
+        # hyprlock
+        "systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP &"
+        "systemctl --user restart pipewire &"
+        "systemctl --user restart xdg-desktop-portal.service &"
+        "systemctl --user restart xdg-desktop-portal-hyprland.service &"
       ];
 
       input = {
@@ -163,7 +167,6 @@
         "SUPER, Return, exec, kitty"
         "ALT, Return, exec, kitty --title float_kitty"
         "SUPER SHIFT, Return, exec, kitty --start-as=fullscreen -o 'font_size=16'"
-        "SUPER, B, exec, hyprctl dispatch exec '[workspace 1 silent] zen'"
         "SUPER, Q, killactive,"
         "SUPER, F, fullscreen, 0"
         "SUPER SHIFT, F, fullscreen, 1"
@@ -187,8 +190,8 @@
         "SUPER SHIFT, W, exec, vm-start"
 
         # screenshot
-        "SUPER, Print, exec, grimblast --notify --cursor copysave output ~/home/inbox/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
-        ", Print, exec, grimblast --notify --freeze copysave area ~/home/inbox/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
+        "SUPER, Print, exec, grimblast --notify --cursor copysave output ~/realm/inbox/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
+        ", Print, exec, grimblast --notify --freeze copysave area ~/realm/inbox/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
 
         ", F8, exec, ~/scripts/log-to-obsidian.sh"
 
@@ -243,6 +246,8 @@
         ",XF86AudioNext, exec, playerctl next"
         ",XF86AudioPrev, exec, playerctl previous"
         ",XF86AudioStop, exec, playerctl stop"
+        ",XF86AudioRaiseVolume, exec, pamixer -i 2"
+        ",XF86AudioLowerVolume, exec, pamixer -d 2"
 
         "SUPER, mouse_down, workspace, e-1"
         "SUPER, mouse_up, workspace, e+1"
@@ -262,8 +267,6 @@
 
       # binds that repeat when held
       binde = [
-        ",XF86AudioRaiseVolume,exec, pamixer -i 2"
-        ",XF86AudioLowerVolume,exec, pamixer -d 2"
       ];
 
       # mouse binding
@@ -272,53 +275,51 @@
         "SUPER, mouse:273, resizewindow"
       ];
 
-      # windowrule
       windowrule = [
-        "float,qView"
-        "center,qView"
-        "size 1200 725,qView"
-        "float,imv"
-        "center,imv"
-        "size 1200 725,imv"
-        # "float,mpv"
-        # "center,mpv"
-        "tile,Aseprite"
-        # "size 1200 725,mpv"
+        # Converted v1 rules to v2 format
+        "float,class:qView"
+        "center,class:qView"
+        "size 1200 725,class:qView"
+        "float,class:imv"
+        "center,class:imv"
+        "size 1200 725,class:imv"
+        # "float,class:mpv"
+        # "center,class:mpv"
+        "tile,class:Aseprite"
+        # "size 1200 725,class:mpv"
         "float,title:^(float_kitty)$"
         "center,title:^(float_kitty)$"
         "size 950 600,title:^(float_kitty)$"
-        "float,audacious"
-        "pin,rofi"
-        "tile, neovide"
-        "idleinhibit focus,mpv"
-        "float,udiskie"
+        "float,class:audacious"
+        "pin,class:rofi"
+        "tile,class:neovide"
+        "idleinhibit focus,class:mpv"
+        "float,class:udiskie"
         "float,title:^(Transmission)$"
         "float,title:^(Volume Control)$"
         "float,title:^(Firefox — Sharing Indicator)$"
         "move 0 0,title:^(Firefox — Sharing Indicator)$"
         "size 700 450,title:^(Volume Control)$"
         "move 40 55%,title:^(Volume Control)$"
-      ];
 
-      # windowrulev2
-      windowrulev2 = [
-        "float, title:^(Picture-in-Picture)$"
-        "opacity 1.0 override 1.0 override, title:^(Picture-in-Picture)$"
-        "pin, title:^(Picture-in-Picture)$"
-        "opacity 1.0 override 1.0 override, title:^(.*imv.*)$"
-        "opacity 1.0 override 1.0 override, title:^(.*mpv.*)$"
-        "opacity 1.0 override 1.0 override, class:(Aseprite)"
-        "opacity 1.0 override 1.0 override, class:(Unity)"
-        "opacity 1.0 override 1.0 override, class:(zen)"
-        "opacity 1.0 override 1.0 override, class:(evince)"
-        "workspace 1, class:^(zen)$"
-        "workspace 4, class:^(discord)$"
-        "workspace 4, class:^(Gimp-2.10)$"
-        "workspace 4, class:^(Aseprite)$"
-        "workspace 5, class:^(Audacious)$"
-        "workspace 5, class:^(Spotify)$"
-        "idleinhibit focus, class:^(mpv)$"
-        "idleinhibit fullscreen, class:^(firefox)$"
+        # Former windowrulev2 entries - these are already in the correct format
+        "float,title:^(Picture-in-Picture)$"
+        "opacity 1.0 override 1.0 override,title:^(Picture-in-Picture)$"
+        "pin,title:^(Picture-in-Picture)$"
+        "opacity 1.0 override 1.0 override,title:^(.*imv.*)$"
+        "opacity 1.0 override 1.0 override,title:^(.*mpv.*)$"
+        "opacity 1.0 override 1.0 override,class:(Aseprite)"
+        "opacity 1.0 override 1.0 override,class:(Unity)"
+        "opacity 1.0 override 1.0 override,class:(google-chrome)"
+        "opacity 1.0 override 1.0 override,class:(evince)"
+        "workspace 1,class:^(zen)$"
+        "workspace 4,class:^(discord)$"
+        "workspace 4,class:^(Gimp-2.10)$"
+        "workspace 4,class:^(Aseprite)$"
+        "workspace 5,class:^(Audacious)$"
+        "workspace 5,class:^(Spotify)$"
+        "idleinhibit focus,class:^(mpv)$"
+        "idleinhibit fullscreen,class:^(firefox)$"
         "float,class:^(zenity)$"
         "center,class:^(zenity)$"
         "size 850 500,class:^(zenity)$"
@@ -341,7 +342,6 @@
         "float,title:^(branchdialog)$"
         "float,title:^(Confirm to replace files)$"
         "float,title:^(File Operation Progress)$"
-
         "opacity 0.0 override,class:^(xwaylandvideobridge)$"
         "noanim,class:^(xwaylandvideobridge)$"
         "noinitialfocus,class:^(xwaylandvideobridge)$"
@@ -352,7 +352,7 @@
     };
 
     extraConfig = "
-      monitor=DP-4,3840x2160@119.999001,0x0,1
+      monitor=DP-4,3840x2160@119.999001,0x0,1, bitdepth, 10, cm, hdr, sdrbrightness, 1.4, sdrsaturation, 1.0
     ";
   };
 }

@@ -85,11 +85,11 @@
       EDITOR = "nvim";
       VISUAL = "nvim";
       PAGER = "less";
-      BROWSER = "zen";
+      BROWSER = "google-chrome-stable";
       TERM = "kitty";
       TERMINAL = "kitty";
 
-      FLAKE = "/mnt/ssd_storage/home/nixos-config";
+      NH_FLAKE = "/home/sinity/realm/nixos-config";
 
       PYTHONDONTWRITEBYTECODE = "1";
       SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS = "0";
@@ -105,7 +105,6 @@
       icat = "kitten icat";
       dsize = "du -hs";
       open = "xdg-open";
-      man = "BAT_THEME='default' batman";
 
       l = "eza --icons  -a --group-directories-first -1"; #EZA_ICON_SPACING=2
       ll = "eza --icons  -a --group-directories-first -1 --no-user --long";

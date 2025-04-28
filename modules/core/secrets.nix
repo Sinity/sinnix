@@ -14,6 +14,7 @@
     ANTHROPIC_API_KEY = "$(cat ${config.age.secrets.anthropic-api-key.path})";
     RAINDROP_TOKEN = "$(cat ${config.age.secrets.raindrop-token.path})";
     ASSEMBLYAI_API_KEY = "$(cat ${config.age.secrets.assemblyai-api-key.path})";
+    FACTORIO_TOKEN = "$(cat ${config.age.secrets.factorio-token.path})";
   };
 
   # Add decryption configuration
@@ -49,6 +50,11 @@
 
       raindrop-token = {
         file = ../../secrets/raindrop-token.age;
+        owner = "sinity";
+      };
+
+      factorio-token = {
+        file = ../../secrets/factorio-token.age;
         owner = "sinity";
       };
     };

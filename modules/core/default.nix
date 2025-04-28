@@ -20,5 +20,6 @@
     ./nginx.nix
     ./nix-ld.nix
     ./secrets.nix
+    ./asbl-no-moar.nix
   ];
 }

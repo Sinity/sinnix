@@ -11,7 +11,8 @@ This directory contains SSH configuration managed by GNU Stow.
 ## Integration with Agenix
 
 The actual SSH private keys are managed by Agenix and deployed to:
+
 - `/home/sinity/.ssh/id_ed25519` - Default SSH key
-- `/home/sinity/.ssh/id_ed25519_github` - GitHub-specific SSH key
 
 See `modules/core/secrets.nix` for the key deployment configuration.
+

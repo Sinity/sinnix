@@ -22,7 +22,7 @@ return {
           settings = {
             nixd = {
               formatting = {
-                command = "alejandra",
+                command = { "alejandra" },
               },
               options = {
                 enable = true,

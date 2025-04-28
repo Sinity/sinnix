@@ -1,16 +1,13 @@
-{ pkgs, ... }:
-{
+{pkgs, ...}: {
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = true;
   boot.loader.systemd-boot.configurationLimit = null;
 
-  # 6.13 unable to build recent NVIDIA drivers,
-  #   they fall back to 550, which makes Hyprland unusable
   # boot.kernelPackages = pkgs.linuxPackages_latest;
-  boot.kernelPackages = pkgs.linuxPackages_6_12;
+  boot.kernelPackages = pkgs.linuxPackages_6_6;
 
-  boot.initrd.availableKernelModules = [ "xhci_pci" "ahci" "nvme" "usbhid" "usb_storage" "sd_mod" ];
-  boot.kernelModules = [ "kvm-intel" ];
+  boot.initrd.availableKernelModules = ["xhci_pci" "ahci" "nvme" "usbhid" "usb_storage" "sd_mod"];
+  boot.kernelModules = ["kvm-intel"];
   boot.kernel.sysctl."vm.swappiness" = 10;
   boot.kernelParams = [
     "quiet"

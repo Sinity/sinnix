@@ -1,5 +1,8 @@
-{ inputs, pkgs, ... }: 
 {
+  inputs,
+  pkgs,
+  ...
+}: {
   imports = [
     ./config.nix
     ./hyprlock.nix
@@ -7,7 +10,8 @@
 
   home.packages = with pkgs; [
     swaybg
-    grim slurp
+    grim
+    slurp
     grimblast
     wl-screenrec
     hyprpicker
@@ -15,10 +19,11 @@
     glib
     wayland
     direnv
+    hyprsunset
   ];
 
-  systemd.user.targets.hyprland-session.Unit.Wants = [ "xdg-desktop-autostart.target" ];
-  
+  systemd.user.targets.hyprland-session.Unit.Wants = ["xdg-desktop-autostart.target"];
+
   wayland.windowManager.hyprland = {
     enable = true;
     xwayland = {
@@ -55,10 +60,10 @@
 
     XDG_CURRENT_DESKTOP = "Hyprland";
     XDG_SESSION_DESKTOP = "Hyprland";
-    # XDG_DESKTOP_PORTAL_DIR = "/run/current-system/sw/share/xdg-desktop-portal/portals";
+    XDG_DESKTOP_PORTAL_DIR = "/run/current-system/sw/share/xdg-desktop-portal/portals";
 
     # LIBVA_DRIVER_NAME = "nvidia";
-    # GBM_BACKEND = "nvidia-drm"; 
+    # GBM_BACKEND = "nvidia-drm";
     # __GLX_VENDOR_LIBRARY_NAME = "nvidia";
   };
 }
