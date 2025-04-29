@@ -1,4 +1,4 @@
-{...}: {
+{lib, ...}: {
   programs.zsh = {
     enable = true;
     enableCompletion = true;
@@ -21,13 +21,13 @@
       plugins = ["git" "python" "man"];
     };
 
-    initExtraFirst = ''
+    # Combined initExtraFirst and initExtra into initContent
+    # Use lib.mkBefore for content that should come first
+    initContent = lib.mkBefore ''
       DISABLE_AUTO_UPDATE=true
       DISABLE_MAGIC_FUNCTIONS=true
       export "MICRO_TRUECOLOR=1"
-    '';
 
-    initExtra = ''
       # use vi-like keybinds in shell
       set -o vi
 
@@ -79,7 +79,9 @@
       zle -N bracketed-paste bracketed-paste-magic
       autoload -Uz url-quote-magic
       zle -N self-insert url-quote-magic
-    '';
+    ''; # End of initContent
+
+    # Removed deprecated initExtraFirst and initExtra
 
     sessionVariables = {
       EDITOR = "nvim";

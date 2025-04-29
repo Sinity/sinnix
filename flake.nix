@@ -29,7 +29,14 @@
 
     crane = {
       url = "github:ipetkov/crane";
-      inputs.nixpkgs.follows = "nixpkgs";
+      # Remove the follows line as it causes a warning if crane doesn't declare nixpkgs
+      # inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    # Add the intercept-bounce flake as an input
+    intercept-bounce = {
+      url = "github:sinity/intercept-bounce"; # Assuming it's hosted here
+      inputs.nixpkgs.follows = "nixpkgs"; # Ensure it uses the same nixpkgs
     };
   };
 
@@ -38,6 +45,7 @@
     crane,
     self,
     agenix,
+    intercept-bounce, # Add intercept-bounce to the arguments here
     ...
   } @ inputs: let
     username = "sinity";
@@ -48,10 +56,16 @@
       modules = [
         ./modules/core/default.nix
         agenix.nixosModules.default
+        # Import the module from the intercept-bounce flake here
+        # Access the module via the system attribute set
+        inputs.intercept-bounce.nixosModules.${system}.intercept-bounce # Use inputs.intercept-bounce here
       ];
       specialArgs = {
         host = "desktop";
         inherit self inputs username;
+        # Pass the intercept-bounce package derivation to modules
+        # Use .default if that's the main package
+        intercept-bounce = inputs.intercept-bounce.packages.${system}.default;
       };
     };
 

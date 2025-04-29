@@ -9,6 +9,9 @@ This directory contains configuration files (dotfiles) managed with GNU Stow.
 - **fzf**: Command-line fuzzy finder
 - **git**: Git version control configuration
 - **kitty**: Fast, feature-rich terminal emulator
+- **git**: Git version control configuration
+- **gtk**: GTK theme and cursor configuration
+- **kitty**: Fast, feature-rich terminal emulator
 - **mpv**: Video player with high quality playback
 - **nvim**: Neovim text editor
 - **rofi**: Application launcher for Linux

@@ -22,4 +22,7 @@
     ./secrets.nix
     ./asbl-no-moar.nix
   ];
+
+  # Enable the intercept-bounce program
+  programs.intercept-bounce.enable = true;
 }

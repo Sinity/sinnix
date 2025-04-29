@@ -6,6 +6,11 @@
   ...
 }: {
   home.packages = with pkgs; [
+    # GTK Themeing Packages (moved from gtk.nix)
+    (gruvbox-gtk-theme.override { colorVariants = ["dark"]; })
+    (papirus-icon-theme.override { color = "black"; })
+    bibata-cursors
+
     # Gaming packages
     mangohud
     steam-run

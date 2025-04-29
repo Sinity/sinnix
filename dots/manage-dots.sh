@@ -129,6 +129,21 @@ collect_package() {
       rsync -av "$HOME/.ssh/config" "$DOTS_DIR/ssh/.ssh/"
     fi
     ;;
+  # Add the gtk case here:
+  gtk)
+    mkdir -p "$DOTS_DIR/gtk/.config/gtk-3.0"
+    mkdir -p "$DOTS_DIR/gtk/.config/gtk-4.0"
+    mkdir -p "$DOTS_DIR/gtk/.icons/default"
+    if [ -f "$HOME/.config/gtk-3.0/settings.ini" ]; then
+      rsync -av "$HOME/.config/gtk-3.0/settings.ini" "$DOTS_DIR/gtk/.config/gtk-3.0/"
+    fi
+    if [ -f "$HOME/.config/gtk-4.0/settings.ini" ]; then
+      rsync -av "$HOME/.config/gtk-4.0/settings.ini" "$DOTS_DIR/gtk/.config/gtk-4.0/"
+    fi
+     if [ -f "$HOME/.icons/default/index.theme" ]; then
+      rsync -av "$HOME/.icons/default/index.theme" "$DOTS_DIR/gtk/.icons/default/"
+    fi
+    ;;
   *)
     echo "Error: Collection for $package is not yet configured"
     echo "Add your package to the collect_package function in this script"

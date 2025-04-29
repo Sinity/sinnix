@@ -7,7 +7,6 @@
   imports = [
     ./activity_watch.nix # self-inflicted telemetry
     ./discord/discord.nix # discord with catppuccin theme
-    ./gtk.nix # gtk theme
     ./hydrus.nix # hydrus with custom setup
     ./enhanced-imv.nix # image viewer, with support of common formats
     ./hyprland # window manager
