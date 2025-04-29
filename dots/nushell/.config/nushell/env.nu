@@ -13,6 +13,12 @@ $env.PYTHONDONTWRITEBYTECODE = "1"
 $env.SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS = "0"
 $env.MICRO_TRUECOLOR = "1"
 
+$env.AIDER_OPENAI_API_KEY = $env.OPENAI_API_KEY
+$env.AIDER_ANTHROPIC_API_KEY = $env.ANTHROPIC_API_KEY
+# $env.AIDER_API_KEY = gemini?
+# $env.AIDER_MODEL = "gemini/gemini-2.5-pro-exp-03-25"
+$env.AIDER_MODEL = "gemini/gemini-2.5-flash-preview-04-17"
+
 # Ensure your local scripts/bin directories exist in PATH
 let custom_paths = [
   ($env.HOME | path join ".local" "bin"),

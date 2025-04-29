@@ -19,7 +19,8 @@
     glib
     wayland
     direnv
-    hyprsunset
+    wl-gammactl
+    wlsunset
   ];
 
   systemd.user.targets.hyprland-session.Unit.Wants = ["xdg-desktop-autostart.target"];

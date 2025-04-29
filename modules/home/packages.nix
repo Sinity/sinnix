@@ -49,7 +49,14 @@
     claude-code
     codex
     openai-whisper-cpp
-    # screen-pipe
+
+    # temp, for building screen-pipe
+    crane
+    openssl
+    pkg-config
+    oniguruma
+    alsa-lib
+    gcc
 
     gpu-screen-recorder
     gpu-screen-recorder-gtk
