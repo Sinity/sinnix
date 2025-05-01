@@ -56,9 +56,6 @@
       modules = [
         ./modules/core/default.nix
         agenix.nixosModules.default
-        # Import the module from the intercept-bounce flake here
-        # Access the module via the system attribute set
-        inputs.intercept-bounce.nixosModules.${system}.intercept-bounce # Use inputs.intercept-bounce here
       ];
       specialArgs = {
         host = "desktop";

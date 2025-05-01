@@ -7,8 +7,8 @@
 }: {
   home.packages = with pkgs; [
     # GTK Themeing Packages (moved from gtk.nix)
-    (gruvbox-gtk-theme.override { colorVariants = ["dark"]; })
-    (papirus-icon-theme.override { color = "black"; })
+    (gruvbox-gtk-theme.override {colorVariants = ["dark"];})
+    (papirus-icon-theme.override {color = "black";})
     bibata-cursors
 
     # Gaming packages
@@ -77,6 +77,7 @@
     rust-analyzer
     markdown-oxide
     cargo
+    clippy
     inputs.alejandra.defaultPackage.${system}
 
     # nushell
