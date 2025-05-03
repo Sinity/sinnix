@@ -8,3 +8,11 @@
 -- e.g. vim.api.nvim_del_augroup_by_name("lazyvim_wrap_spell")
 
 vim.api.nvim_del_augroup_by_name("lazyvim_wrap_spell")
+
+vim.api.nvim_create_autocmd("FileType", {
+  group = vim.api.nvim_create_augroup("CopilotChatMappings", { clear = true }),
+  pattern = "copilot-chat",
+  callback = function()
+    vim.api.nvim_buf_set_keymap(0, "i", "<CR>", "<C-s>", { noremap = true, silent = true })
+  end,
+})

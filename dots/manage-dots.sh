@@ -77,40 +77,15 @@ collect_package() {
     mkdir -p "$DOTS_DIR/nvim/.config"
     rsync -av --delete "$HOME/.config/nvim/" "$DOTS_DIR/nvim/.config/nvim/"
     ;;
-  kitty)
-    mkdir -p "$DOTS_DIR/kitty/.config"
-    rsync -av --delete "$HOME/.config/kitty/" "$DOTS_DIR/kitty/.config/kitty/"
-    ;;
-  btop)
-    mkdir -p "$DOTS_DIR/btop/.config/btop"
-    rsync -av --delete "$HOME/.config/btop/" "$DOTS_DIR/btop/.config/btop/"
-    ;;
   bat)
     mkdir -p "$DOTS_DIR/bat/.config/bat"
     rsync -av --delete "$HOME/.config/bat/" "$DOTS_DIR/bat/.config/bat/"
-    ;;
-  mpv)
-    mkdir -p "$DOTS_DIR/mpv/.config/mpv"
-    rsync -av --delete "$HOME/.config/mpv/" "$DOTS_DIR/mpv/.config/mpv/"
     ;;
   fzf)
     mkdir -p "$DOTS_DIR/fzf/.config"
     if [ -f "$HOME/.config/fzf.conf" ]; then
       rsync -av --delete "$HOME/.config/fzf.conf" "$DOTS_DIR/fzf/.config/"
     fi
-    ;;
-  rofi)
-    mkdir -p "$DOTS_DIR/rofi/.config/rofi"
-    rsync -av --delete "$HOME/.config/rofi/" "$DOTS_DIR/rofi/.config/rofi/"
-    ;;
-  nushell)
-    mkdir -p "$DOTS_DIR/nushell/.config/nushell"
-    # Only sync config files, not history
-    rsync -av --delete "$HOME/.config/nushell/config.nu" "$DOTS_DIR/nushell/.config/nushell/" 2>/dev/null || true
-    rsync -av --delete "$HOME/.config/nushell/env.nu" "$DOTS_DIR/nushell/.config/nushell/" 2>/dev/null || true
-    rsync -av --delete "$HOME/.config/nushell/starship.nu" "$DOTS_DIR/nushell/.config/nushell/" 2>/dev/null || true
-    rsync -av --delete "$HOME/.config/nushell/zoxide.nu" "$DOTS_DIR/nushell/.config/nushell/" 2>/dev/null || true
-    rsync -av --delete "$HOME/.config/nushell/atuin.nu" "$DOTS_DIR/nushell/.config/nushell/" 2>/dev/null || true
     ;;
   git)
     mkdir -p "$DOTS_DIR/git/.config/git"
@@ -129,7 +104,6 @@ collect_package() {
       rsync -av "$HOME/.ssh/config" "$DOTS_DIR/ssh/.ssh/"
     fi
     ;;
-  # Add the gtk case here:
   gtk)
     mkdir -p "$DOTS_DIR/gtk/.config/gtk-3.0"
     mkdir -p "$DOTS_DIR/gtk/.config/gtk-4.0"

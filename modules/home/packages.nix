@@ -67,27 +67,19 @@
     gpu-screen-recorder-gtk
     wf-recorder
 
-    # nvim, language servers
-    neovim
-    nix-diff
-    nodejs_23
-    nil
+    # Language Servers, Formatters, Linters (ensure these are needed outside nvim)
+    markdown-oxide # Used by obsidian.nvim
+    inputs.alejandra.defaultPackage.${system} # Used by nix LSP/formatter
     nixd
+    nil
+    nix-diff
     nixfmt-classic
-    rust-analyzer
-    markdown-oxide
-    cargo
-    clippy
-    inputs.alejandra.defaultPackage.${system}
-
-    # nushell
-    nushell # nushellFull
-    nushellPlugins.net
-    nushellPlugins.units
-    nushellPlugins.query
-    nushellPlugins.gstat
-    nushellPlugins.formats
-    nushellPlugins.highlight
+    rustup
+    # rust-analyzer # incompatible with rustup
+    cargo-fuzz
+    cargo-bump
+    cargo-audit
+    nodejs_23 # Needed for some LSPs/Linters
 
     # Database
     sqlite
@@ -110,6 +102,7 @@
     imgur-screenshot # Take screenshot selection, upload to imgur + more cool things
 
     ## CLI utility
+    neovim
     asciinema
     eza # ls replacement
     entr # perform action when file change
@@ -144,6 +137,9 @@
     csvkit
     csvq
     pamixer
+    procps
+    psmisc
+    evemu
 
     ## GUI Apps
     audacity
@@ -173,12 +169,12 @@
     # Zsh related
     zsh
     oh-my-zsh
-    zoxide
-    fzf
+    zoxide # Managed via programs.zoxide in shell.nix
+    fzf    # Managed via programs.fzf in shell.nix
     skim # Fuzzy Finder in Rust!
-    bat
+    bat    # Managed via programs.bat in shell.nix
 
-    openssh
+    openssh # Managed via programs.ssh
     openssl
 
     # Arch ones
