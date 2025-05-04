@@ -7,8 +7,7 @@
   programs.ssh = {
     enable = true;
     addKeysToAgent = "yes";
-    # Ensure openssh is installed if not already via system packages
-    # package = pkgs.openssh;
+    package = pkgs.openssh;
 
     # # Translates ~/.ssh/config entries
     # matchBlocks = {

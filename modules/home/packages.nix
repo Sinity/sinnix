@@ -170,11 +170,10 @@
     zsh
     oh-my-zsh
     zoxide # Managed via programs.zoxide in shell.nix
-    fzf    # Managed via programs.fzf in shell.nix
+    fzf # Managed via programs.fzf in shell.nix
     skim # Fuzzy Finder in Rust!
-    bat    # Managed via programs.bat in shell.nix
+    bat # Managed via programs.bat in shell.nix
 
-    openssh # Managed via programs.ssh
     openssl
 
     # Arch ones

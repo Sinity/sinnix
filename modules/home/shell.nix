@@ -150,7 +150,7 @@
       TERM = "kitty";
       TERMINAL = "kitty";
 
-      NH_FLAKE = "/home/sinity/realm/nixos-config"; # Consider making this dynamic or removing if not needed globally
+      NH_FLAKE = "/home/sinity/realm/nixos-config";
 
       PYTHONDONTWRITEBYTECODE = "1";
       SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS = "0";
@@ -331,22 +331,14 @@
 
     # Basic environment variables from env.nu
     environmentVariables = {
-      # EDITOR, VISUAL, PAGER, BROWSER, TERM, TERMINAL are often inherited or set elsewhere (e.g., hyprland module)
-      # Ensure they are set correctly in the final environment if removing from here.
-      # EDITOR = "nvim";
-      # VISUAL = "nvim";
-      # PAGER = "less";
-      # BROWSER = "google-chrome-stable";
-      # TERM = "kitty";
-      # TERMINAL = "kitty";
-      NU_FLAKE = "/mnt/ssd_storage/home/nixos-config"; # Consider if this path is stable/correct
+      NU_FLAKE = "/mnt/ssd_storage/home/nixos-config";
       PYTHONDONTWRITEBYTECODE = "1";
       SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS = "0";
       MICRO_TRUECOLOR = "1";
-      # Secrets should be sourced securely, e.g., via agenix or environment files not committed
-      # AIDER_OPENAI_API_KEY = "$OPENAI_API_KEY";
-      # AIDER_ANTHROPIC_API_KEY = "$ANTHROPIC_API_KEY";
-      # AIDER_MODEL = "gemini/gemini-2.5-flash-preview-04-17";
+
+      AIDER_OPENAI_API_KEY = "$OPENAI_API_KEY";
+      AIDER_ANTHROPIC_API_KEY = "$ANTHROPIC_API_KEY";
+      AIDER_MODEL = "gemini/gemini-2.5-flash-preview-04-17";
     };
 
     # Basic config settings from env.nu

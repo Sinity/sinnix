@@ -21,7 +21,8 @@
 
     openssh = {
       enable = true;
-      startWhenNeeded = true;
+      startWhenNeeded = false;
+      # ports = 22;
       settings = {
         PermitRootLogin = "yes";
         PasswordAuthentication = true;
