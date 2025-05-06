@@ -4,7 +4,7 @@
   boot.loader.systemd-boot.configurationLimit = null;
 
   # boot.kernelPackages = pkgs.linuxPackages_latest;
-  boot.kernelPackages = pkgs.linuxPackages_6_6;
+  # boot.kernelPackages = pkgs.linuxPackages_6_6;
 
   boot.initrd.availableKernelModules = ["xhci_pci" "ahci" "nvme" "usbhid" "usb_storage" "sd_mod"];
   boot.kernelModules = ["kvm-intel"];
@@ -24,7 +24,5 @@
     "rd.udev.log-priority=3"
     "acpi_enforce_resources=lax"
     "vga=current"
-    "nowatchdog"
-    "pti=off"
   ];
 }

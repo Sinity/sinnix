@@ -33,19 +33,17 @@
       # inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Add the intercept-bounce flake as an input
     intercept-bounce = {
-      url = "github:sinity/intercept-bounce"; # Assuming it's hosted here
-      inputs.nixpkgs.follows = "nixpkgs"; # Ensure it uses the same nixpkgs
+      url = "github:sinity/intercept-bounce";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
   outputs = {
     nixpkgs,
-    crane,
     self,
     agenix,
-    intercept-bounce, # Add intercept-bounce to the arguments here
+    intercept-bounce,
     ...
   } @ inputs: let
     username = "sinity";
@@ -60,30 +58,8 @@
       specialArgs = {
         host = "desktop";
         inherit self inputs username;
-        # Pass the intercept-bounce package derivation to modules
-        # Use .default if that's the main package
         intercept-bounce = inputs.intercept-bounce.packages.${system}.default;
       };
     };
-
-    # Expose packages for the specified system
-    packages.${system} = let
-      pkgs = nixpkgs.legacyPackages.${system};
-      # Access crane explicitly via the 'inputs' argument
-      craneLib = inputs.crane.lib.${system};
-    in {
-      # Define the screen-pipe package using the default.nix file
-      # Ensure the source code for screen-pipe v0.2.74 and the Cargo.lock
-      # are located within the ./screenpipe-0.2.74 directory.
-      screen-pipe = pkgs.callPackage ./screenpipe-0.2.74/default.nix {
-        inherit pkgs craneLib;
-      };
-
-      # You can add other packages here if needed
-      # default = self.packages.${system}.screen-pipe; # Optionally set a default package
-    };
-
-    # You might want a default package for `nix build`
-    # defaultPackage.${system} = self.packages.${system}.screen-pipe;
   };
 }

@@ -1,11 +1,19 @@
-{ config, pkgs, ... }:
 {
+  config,
+  pkgs,
+  ...
+}: {
   # Enable NGINX
   services.nginx = {
     enable = true;
-    
+
     virtualHosts."_" = {
-      listen = [{ addr = "0.0.0.0"; port = 80; }];
+      listen = [
+        {
+          addr = "0.0.0.0";
+          port = 80;
+        }
+      ];
       root = "/var/www/simple-site";
     };
   };

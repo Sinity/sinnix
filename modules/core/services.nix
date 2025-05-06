@@ -1,8 +1,8 @@
-{ ... }: 
-{
+{...}: {
   # To prevent getting stuck at shutdown
   systemd.extraConfig = "DefaultTimeoutStopSec=5s";
-  systemd.sleep = { # TODO: verify hibernation works
+  systemd.sleep = {
+    # TODO: verify hibernation works
     extraConfig = ''
       AllowSuspend=yes
       AllowHibernation=yes
@@ -16,19 +16,19 @@
   services = {
     journald = {
       extraConfig = ''
-        SystemMaxUse=20G
-        SystemKeepFree=10G
+        SystemMaxUse=50G
+        SystemKeepFree=25G
         SystemMaxFileSize=10M
-        SystemMaxFiles=2500
-        RuntimeMaxUse=1G
+        SystemMaxFiles=5000000
+        RuntimeMaxUse=2G
       '';
     };
 
-    monero = {
-      enable = true;
-      dataDir = "/mnt/ssd_storage/monero";
-      extraConfig = "log-level=3";
-    };
+    # monero = {
+    #   enable = true;
+    #   dataDir = "/realm/monero/";
+    #   extraConfig = "log-level=3";
+    # };
 
     transmission = {
       enable = true;
@@ -36,7 +36,7 @@
         script-torrent-done-enabled = false;
         ratio-limit-enabled = false;
         umask = 18; # 002
-        download-dir = "/mnt/hdd_storage/inbox";
+        download-dir = "/outer-realm/inbox";
         incomplete-dir-enabled = false;
         rpc-port = 9091;
         # rpc-url = "/transmission/";

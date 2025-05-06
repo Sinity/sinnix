@@ -190,8 +190,8 @@
         "SUPER SHIFT, W, exec, vm-start"
 
         # screenshot
-        "SUPER, Print, exec, grimblast --notify --cursor copysave output ~/realm/inbox/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
-        ", Print, exec, grimblast --notify --freeze copysave area ~/realm/inbox/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
+        "SUPER, Print, exec, grimblast --notify --cursor copysave output /realm/inbox/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
+        ", Print, exec, grimblast --notify --freeze copysave area /realm/inbox/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
 
         ", F8, exec, ~/scripts/log-to-obsidian.sh"
 

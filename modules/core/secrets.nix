@@ -7,6 +7,7 @@
   imports = [];
 
   # Define environment variables that use the decrypted secrets
+  # Use environment.sessionVariables for user sessions
   environment.sessionVariables = {
     OPENAI_API_KEY = "$(cat ${config.age.secrets.openai-api-key.path})";
     OBSIDIAN_REST_API_KEY = "$(cat ${config.age.secrets.obsidian-api-key.path})";
@@ -15,6 +16,9 @@
     RAINDROP_TOKEN = "$(cat ${config.age.secrets.raindrop-token.path})";
     ASSEMBLYAI_API_KEY = "$(cat ${config.age.secrets.assemblyai-api-key.path})";
     FACTORIO_TOKEN = "$(cat ${config.age.secrets.factorio-token.path})";
+
+    GITHUB_TOKEN = "$(cat ${config.age.secrets.github-token.path})";
+    NIX_GITHUB_TOKEN = "$(cat ${config.age.secrets.github-token.path})";
   };
 
   # Add decryption configuration
@@ -55,6 +59,11 @@
 
       factorio-token = {
         file = ../../secrets/factorio-token.age;
+        owner = "sinity";
+      };
+
+      github-token = {
+        file = ../../secrets/github-token.age;
         owner = "sinity";
       };
     };

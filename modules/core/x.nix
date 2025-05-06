@@ -14,6 +14,7 @@
 
   hardware = {
     nvidia = {
+      #package = pkgs.nvidiaPackages.stable;
       modesetting.enable = true;
       powerManagement.enable = true;
       open = true;

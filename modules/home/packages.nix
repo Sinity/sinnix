@@ -21,13 +21,13 @@
     # bottles
 
     # Factorio with authentication token
-    (factorio.override {
-      username = "Sinityy";
-      token = "$FACTORIO_TOKEN";
-    })
-    (pkgs.writeShellScriptBin "factorio-steam" ''
-      exec ${steam-run}/bin/steam-run ${factorio}/bin/factorio "$@"
-    '')
+    # (factorio.override {
+    #   username = "Sinityy";
+    #   token = "$FACTORIO_TOKEN";
+    # })
+    # (pkgs.writeShellScriptBin "factorio-steam" ''
+    #   exec ${steam-run}/bin/steam-run ${factorio}/bin/factorio "$@"
+    # '')
 
     google-chrome
     qutebrowser # A keyboard-driven, vim-like browser based on Python and Qt
@@ -56,12 +56,12 @@
     openai-whisper-cpp
 
     # temp, for building screen-pipe
-    crane
-    openssl
-    pkg-config
-    oniguruma
-    alsa-lib
-    gcc
+    # crane
+    # openssl
+    # pkg-config
+    # oniguruma
+    # gcc
+    # screen-pipe
 
     gpu-screen-recorder
     gpu-screen-recorder-gtk
@@ -79,7 +79,8 @@
     cargo-fuzz
     cargo-bump
     cargo-audit
-    nodejs_23 # Needed for some LSPs/Linters
+    nodejs # Needed for some LSPs/Linters
+    nodejs_latest
 
     # Database
     sqlite
@@ -136,10 +137,17 @@
     csvtool
     csvkit
     csvq
-    pamixer
     procps
     psmisc
     evemu
+    usbutils
+    sysstat # iostat, pidstat …
+    iotop
+    bpftrace # for quick 'iosnoop', 'funccount' etc.
+
+    cachix
+    nix-direnv
+    nix-direnv-flakes
 
     ## GUI Apps
     audacity
@@ -147,7 +155,6 @@
     gimp
     libreoffice
     nix-prefetch-github
-    pavucontrol # pulseaudio volume controle (GUI)
     soundwireserver # pass audio to android phone
     vlc
 

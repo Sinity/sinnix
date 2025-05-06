@@ -150,7 +150,7 @@
       TERM = "kitty";
       TERMINAL = "kitty";
 
-      NH_FLAKE = "/home/sinity/realm/nixos-config";
+      NH_FLAKE = "/realm/nixos-config";
 
       PYTHONDONTWRITEBYTECODE = "1";
       SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS = "0";
@@ -331,7 +331,7 @@
 
     # Basic environment variables from env.nu
     environmentVariables = {
-      NU_FLAKE = "/mnt/ssd_storage/home/nixos-config";
+      NU_FLAKE = "/realm/nixos-config";
       PYTHONDONTWRITEBYTECODE = "1";
       SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS = "0";
       MICRO_TRUECOLOR = "1";
@@ -393,9 +393,9 @@
       # Record terminal sessions w/ asciinema (Conditional logic might be complex here)
       # This logic might be better suited for a manual start or a separate script.
       # if ($env.ASCIINEMA_REC? | is-empty) {
-      #   mkdir ~/realm/asciinema_recordings | ignore
+      #   mkdir /realm/asciinema_recordings | ignore
       #   let timestamp = (date now | format date '%Y-%m-%d_%H-%M-%S')
-      #   let file = $"($nu.home-path)/realm/asciinema_recordings/($timestamp).cast"
+      #   let file = $"/realm/asciinema_recordings/($timestamp).cast"
       #   # Ensure asciinema is in PATH
       #   # Using ^ might be needed if not aliased/wrapped
       #   # Consider backgrounding this: exec nohup asciinema rec -c nu $file &

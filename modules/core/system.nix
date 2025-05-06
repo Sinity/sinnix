@@ -10,20 +10,18 @@
     settings = {
       auto-optimise-store = true;
       experimental-features = ["nix-command" "flakes"];
+      trusted-users = ["sinity" "root" "@wheel"];
+      substituters = ["https://cache.nixos.org/" "https://sinity.cachix.org" "https://nix-gaming.cachix.org"];
+      trusted-public-keys = ["cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" "sinity.cachix.org-1:i5YsUuuRv9r790gdwwE+FiJiUcWULV1lEOmKE50Y+TI=" "nix-gaming.cachix.org-1:nbjlureqMbRAxR1gJ/f3hxemL9svXaZF/Ees8vCUUs4="];
 
       # constrain builds from melting my system down
-      max-jobs = 12;
+      max-jobs = 2;
       cores = 0;
-
-      # Likely hallucinations, but don't fail config build so...
-      use-sqlite-wal = true;
-      build-dir = "/mnt/smol_ssd/tmp-nix-build";
-      http-connections = 50;
-      preallocate-contents = true;
     };
 
-    daemonCPUSchedPolicy = "batch"; # Lower priority than interactive tasks
-    daemonIOSchedPriority = 5; # Medium I/O priority (lower number = higher priority)
+    daemonCPUSchedPolicy = "idle"; # Use only surplus resources for system builds
+    daemonIOSchedClass = "idle";
+    daemonIOSchedPriority = 6; # 6/7, Low I/O priority (lower number = higher priority)
 
     gc = {
       automatic = true;
@@ -36,21 +34,22 @@
       dates = ["weekly"];
     };
   };
+
   nixpkgs = {
-    config = {
-      allowUnfreePredicate = pkg:
-        builtins.elem (lib.getName pkg) [
-          "discord"
-          "spotify"
-          "obsidian"
-          "steam"
-          "steam-original"
-          "steam-runtime"
-        ];
-      permittedInsecurePackages = [
-        "electron-25.9.0" # obsidian
-      ];
-    };
+    # config = {
+    #   allowUnfreePredicate = pkg:
+    #     builtins.elem (lib.getName pkg) [
+    #       "discord"
+    #       "spotify"
+    #       "obsidian"
+    #       "steam"
+    #       "steam-original"
+    #       "steam-runtime"
+    #     ];
+    #   permittedInsecurePackages = [
+    #     "electron-25.9.0" # obsidian
+    #   ];
+    # };
     overlays = [
       inputs.nur.overlays.default
     ];
@@ -61,6 +60,10 @@
     git
     nix-output-monitor
     nvd
+
+    cachix
+    nix-direnv
+    nix-direnv-flakes
   ];
 
   programs.nh = {
@@ -70,6 +73,14 @@
       extraArgs = "--keep-since 7d --keep 5";
     };
     flake = "/home/${username}/workdir/nixos-config";
+  };
+
+  programs.direnv = {
+    enable = true;
+    silent = false;
+    enableZshIntegration = true;
+    enableBashIntegration = true;
+    nix-direnv.enable = true;
   };
 
   programs.dconf.enable = true;

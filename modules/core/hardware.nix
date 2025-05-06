@@ -14,11 +14,12 @@
         #     LINK: "/dev/input/by-id/usb-Logitech_G915_WIRELESS_RGB_MECHANICAL_GAMING_KEYBOARD_87516961-event-kbd"
 
         - JOB: "${pkgs.interception-tools}/bin/intercept -g $DEVNODE \
-              | ${intercept-bounce}/bin/intercept-bounce -t 25 --log-interval 1800 --log-bounces --stats-json \
+              | ${intercept-bounce}/bin/intercept-bounce -t 25ms --log-interval 1800s --log-bounces --stats-json \
               | ${pkgs.interception-tools-plugins.caps2esc}/bin/caps2esc -m 1 \
               | ${pkgs.interception-tools}/bin/uinput -d $DEVNODE"
           DEVICE:
-            LINK: "/dev/input/by-id/usb-Logitech_G915_WIRELESS_RGB_MECHANICAL_GAMING_KEYBOARD_87516961-event-kbd"
+            LINK: "/dev/input/by-id/usb-Logitech_USB_Receiver-if01-event-kbd"
+            # LINK: "/dev/input/by-id/usb-Logitech_G915_WIRELESS_RGB_MECHANICAL_GAMING_KEYBOARD_87516961-event-kbd" # wiredt stats-json
 
       #   - JOB: "${pkgs.interception-tools}/bin/intercept -g $DEVNODE \
       #         | ${pkgs.interception-tools-plugins.caps2esc}/bin/caps2esc \

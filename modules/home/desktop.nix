@@ -1,7 +1,10 @@
 # modules/home/desktop.nix
-{ pkgs, lib, config, ... }:
-
-let
+{
+  pkgs,
+  lib,
+  config,
+  ...
+}: let
   # Waybar custom variables (from former waybar/default.nix)
   customWaybar = {
     font = "JetBrainsMono Nerd Font";
@@ -21,8 +24,7 @@ let
     opacity = "1";
     indicator_height = "2px";
   };
-in
-{
+in {
   # --- GTK Config (from former gtk.nix) ---
   gtk = {
     enable = true;
@@ -49,75 +51,85 @@ in
 
   # --- Waybar Config (from former waybar/default.nix) ---
   # Note the import path change for style.nix
-  imports = [ ./waybar/style.nix ];
+  imports = [./waybar/style.nix];
 
   programs.waybar = {
     enable = true;
     package = pkgs.waybar.overrideAttrs (oa: {
-        mesonFlags = (oa.mesonFlags or [ ]) ++ [ "-Dexperimental=true" ];
+      mesonFlags = (oa.mesonFlags or []) ++ ["-Dexperimental=true"];
     });
 
     settings.mainBar = with customWaybar; {
-      position= "bottom";
-      layer= "top";
-      height= 30;
-      margin-top= 0;
-      margin-bottom= 0;
-      margin-left= 0;
-      margin-right= 0;
-      modules-left= [
+      position = "bottom";
+      layer = "top";
+      height = 30;
+      margin-top = 0;
+      margin-bottom = 0;
+      margin-left = 0;
+      margin-right = 0;
+      modules-left = [
         "custom/launcher"
-          "hyprland/workspaces"
-          "tray"
+        "hyprland/workspaces"
+        "tray"
       ];
-      modules-center= [
+      modules-center = [
         "clock"
       ];
-      modules-right= [
+      modules-right = [
         "cpu"
-          "memory"
-          "disk"
-          "pulseaudio"
-          "network"
-          "battery"
-          "custom/notification"
+        "memory"
+        "disk"
+        "pulseaudio"
+        "network"
+        "custom/notification"
       ];
-      clock= {
+      clock = {
         calendar = {
-          format = { today = "<span color='#98971A'><b>{}</b></span>"; };
+          format = {today = "<span color='#98971A'><b>{}</b></span>";};
         };
         format = "  {:%H:%M}";
-        tooltip= "true";
-        tooltip-format= "<big>{:%Y %B}</big>\n<tt><small>{calendar}</small></tt>";
-        format-alt= "  {:%d/%m}";
+        tooltip = "true";
+        tooltip-format = "<big>{:%Y %B}</big>\n<tt><small>{calendar}</small></tt>";
+        format-alt = "  {:%d/%m}";
       };
-      "hyprland/workspaces"= {
-        active-only= false;
-        disable-scroll= true;
+      "hyprland/workspaces" = {
+        active-only = false;
+        disable-scroll = true;
         format = "{icon}";
-        on-click= "activate";
-        format-icons= {
-          "1"= "I"; "2"= "II"; "3"= "III"; "4"= "IV"; "5"= "V";
-          "6"= "VI"; "7"= "VII"; "8"= "VII"; "9"= "IX";
-          sort-by-number= true;
+        on-click = "activate";
+        format-icons = {
+          "1" = "I";
+          "2" = "II";
+          "3" = "III";
+          "4" = "IV";
+          "5" = "V";
+          "6" = "VI";
+          "7" = "VII";
+          "8" = "VII";
+          "9" = "IX";
+          sort-by-number = true;
         };
         persistent-workspaces = {
-          "1"= []; "2"= []; "3"= []; "4"= []; "5"= [];
+          "1" = [];
+          "2" = [];
+          "3" = [];
+          "4" = [];
+          "5" = [];
         };
       };
-      cpu= {
-        format= "<span foreground='${green}'> </span> {usage}%";
-        format-alt= "<span foreground='${green}'> </span> {avg_frequency} GHz";
-        interval= 2;
+      cpu = {
+        format = "<span foreground='${green}'> </span> {usage}%";
+        format-alt = "<span foreground='${green}'> </span> {avg_frequency} GHz";
+        interval = 2;
       };
-      memory= {
-        format= "<span foreground='${cyant}'>󰟜 </span>{}%";
-        format-alt= "<span foreground='${cyant}'>󰟜 </span>{used} GiB";
-          interval= 2;
+      memory = {
+        format = "<span foreground='${cyant}'>󰟜 </span>{}%";
+        format-alt = "<span foreground='${cyant}'>󰟜 </span>{used} GiB";
+        interval = 2;
       };
       disk = {
         format = "<span foreground='${orange}'>󰋊 </span>{percentage_used}%";
-        interval= 60;
+        interval = 60;
       };
       network = {
         format-wifi = "<span foreground='${magenta}'> </span> {signalStrength}%";
@@ -126,36 +138,24 @@ in
         format-linked = "{ifname} (No IP)";
         format-disconnected = "<span foreground='${magenta}'>󰖪 </span>";
       };
-      tray= {
-        icon-size= 20;
-        spacing= 8;
+      tray = {
+        icon-size = 20;
+        spacing = 8;
       };
-      pulseaudio= {
-        format= "{icon} {volume}%";
-        format-muted= "<span foreground='${blue}'> </span> {volume}%";
-        format-icons= {
-          default= ["<span foreground='${blue}'> </span>"];
+      pulseaudio = {
+        format = "{icon} {volume}%";
+        format-muted = "<span foreground='${blue}'> </span> {volume}%";
+        format-icons = {
+          default = ["<span foreground='${blue}'> </span>"];
         };
-        scroll-step= 5;
-        on-click= "pamixer -t";
+        scroll-step = 5;
+        on-click = "pamixer -t";
       };
-      battery = {
-        format = "<span foreground='${yellow}'>{icon}</span> {capacity}%";
-        format-icons = [" " " " " " " " " "];
-        format-charging = "<span foreground='${yellow}'> </span>{capacity}%";
-        format-full = "<span foreground='${yellow}'> </span>{capacity}%";
-        format-warning = "<span foreground='${yellow}'> </span>{capacity}%";
-        interval = 5;
-        states = { warning = 20; };
-        format-time = "{H}h{M}m";
-        tooltip = true;
-        tooltip-format = "{time}";
-      };
-      "custom/launcher"= {
-        format= "";
-        on-click= "rofi -show drun";
-        on-click-right= "wallpaper-picker";
-        tooltip= "false";
+      "custom/launcher" = {
+        format = "";
+        on-click = "rofi -show drun";
+        on-click-right = "wallpaper-picker";
+        tooltip = "false";
       };
       "custom/notification" = {
         tooltip = false;
@@ -181,8 +181,7 @@ in
   };
 
   # --- SwayNC Config (from former swaync/swaync.nix) ---
-  home.packages = [ pkgs.swaynotificationcenter ]; # Merged from swaync.nix
+  home.packages = [pkgs.swaynotificationcenter]; # Merged from swaync.nix
   xdg.configFile."swaync/style.css".source = ./swaync/style.css; # Adjusted path
   xdg.configFile."swaync/config.json".source = ./swaync/config.json; # Adjusted path
-
 }

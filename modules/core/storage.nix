@@ -3,19 +3,21 @@
   services.gvfs.enable = true; # dynamic mount
 
   fileSystems."/" = {
-    device = "/dev/disk/by-uuid/9fd1aa14-f137-4a90-8c00-e25770496374";
+    device = "/dev/disk/by-uuid/481e214e-7bb6-49fa-bc87-ccb1f2c1e3c3";
     fsType = "ext4";
     options = ["strictatime" "lazytime"];
   };
+
   fileSystems."/boot" = {
-    device = "/dev/disk/by-uuid/91A2-0DC7";
+    device = "/dev/disk/by-uuid/1C27-5679";
     fsType = "vfat";
-    options = ["fmask=0077" "dmask=0077"];
+    options = ["fmask=0022" "dmask=0022"];
   };
+
   swapDevices = [{device = "/dev/disk/by-uuid/9f79240e-f78e-4d8c-bdd0-4eafba396781";}];
 
   boot.supportedFilesystems = ["btrfs" "ntfs"];
-  fileSystems."/mnt/ssd_storage" = {
+  fileSystems."/realm" = {
     device = "/dev/disk/by-uuid/bd19092f-a195-47ab-9c0d-c923d1e5bfea";
     fsType = "btrfs";
     options = [
@@ -24,7 +26,8 @@
       "nofail"
     ];
   };
-  fileSystems."/mnt/hdd_storage" = {
+
+  fileSystems."/outer-realm" = {
     device = "/dev/disk/by-uuid/5119B4113C747C42";
     fsType = "ntfs";
     options = [
@@ -36,19 +39,5 @@
       "umask=000"
       "big_writes"
     ];
-  };
-  fileSystems."/mnt/smol_ssd" = {
-    device = "/dev/disk/by-uuid/481e214e-7bb6-49fa-bc87-ccb1f2c1e3c3";
-    fsType = "ext4";
-    options = [
-      "strictatime"
-      "lazytime"
-      "nofail"
-    ];
-  };
-
-  fileSystems."/home/sinity/realm" = {
-    device = "/mnt/ssd_storage/home";
-    options = ["bind"];
   };
 }

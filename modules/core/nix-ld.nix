@@ -1,8 +1,6 @@
-{ pkgs, ... }:
-{
+{pkgs, ...}: {
   # Enable nix ld
   programs.nix-ld = {
-
     enable = true;
 
     libraries = with pkgs; [
@@ -39,7 +37,7 @@
       openssl
       pango
       pipewire
-      stdenv.cc.cc 
+      stdenv.cc.cc
       systemd
       vulkan-loader
       xorg.libX11
