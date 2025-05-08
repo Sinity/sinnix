@@ -33,6 +33,11 @@
       # inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    browser-previews = {
+      url = "github:nix-community/browser-previews";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     intercept-bounce = {
       url = "github:sinity/intercept-bounce";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -44,6 +49,7 @@
     self,
     agenix,
     intercept-bounce,
+    browser-previews,
     ...
   } @ inputs: let
     username = "sinity";

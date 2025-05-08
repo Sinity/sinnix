@@ -29,7 +29,7 @@
     #   exec ${steam-run}/bin/steam-run ${factorio}/bin/factorio "$@"
     # '')
 
-    google-chrome
+    inputs.browser-previews.packages.${pkgs.system}.google-chrome-beta
     qutebrowser # A keyboard-driven, vim-like browser based on Python and Qt
     tor-browser-bundle-bin # Securely and easily download, verify, install, and launch Tor Browser in Linux
     yt-dlp
