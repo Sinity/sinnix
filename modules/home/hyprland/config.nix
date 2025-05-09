@@ -55,7 +55,7 @@
 
       misc = {
         disable_hyprland_logo = false;
-        vrr = 2;
+        vrr = 1;
         mouse_move_enables_dpms = true;
         key_press_enables_dpms = true;
         always_follow_on_dnd = true;
@@ -352,7 +352,7 @@
     };
 
     extraConfig = "
-      monitor=DP-4,3840x2160@119.999001,0x0,1, bitdepth, 10, cm, hdr, sdrbrightness, 1.4, sdrsaturation, 1.0
+      monitor=DP-3,3840x2160@119.999001,0x0,1, bitdepth, 10, cm, hdr, sdrbrightness, 1.4, sdrsaturation, 1.0
     ";
   };
 }

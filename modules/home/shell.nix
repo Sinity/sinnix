@@ -143,14 +143,18 @@
     ''; # End of initContent
 
     sessionVariables = {
+      NH_FLAKE = "/realm/nixos-config";
+      XDG_CONFIG_HOME = "${config.home.homeDirectory}/.config";
+      XDG_CACHE_HOME = "${config.home.homeDirectory}/.cache";
+      XDG_DATA_HOME = "${config.home.homeDirectory}/.local/share";
+      XDG_STATE_HOME = "${config.home.homeDirectory}/.local/state";
+
       EDITOR = "nvim";
       VISUAL = "nvim";
       PAGER = "less";
       BROWSER = "google-chrome-stable";
       TERM = "kitty";
       TERMINAL = "kitty";
-
-      NH_FLAKE = "/realm/nixos-config";
 
       PYTHONDONTWRITEBYTECODE = "1";
       SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS = "0";

@@ -3,13 +3,13 @@
   services.gvfs.enable = true; # dynamic mount
 
   fileSystems."/" = {
-    device = "/dev/disk/by-uuid/481e214e-7bb6-49fa-bc87-ccb1f2c1e3c3";
+    device = "/dev/disk/by-uuid/9fd1aa14-f137-4a90-8c00-e25770496374";
     fsType = "ext4";
     options = ["strictatime" "lazytime"];
   };
 
   fileSystems."/boot" = {
-    device = "/dev/disk/by-uuid/1C27-5679";
+    device = "/dev/disk/by-uuid/91A2-0DC7";
     fsType = "vfat";
     options = ["fmask=0022" "dmask=0022"];
   };
@@ -39,5 +39,11 @@
       "umask=000"
       "big_writes"
     ];
+  };
+
+  fileSystems."/mnt/smol_ssd" = {
+    device = "/dev/disk/by-uuid/481e214e-7bb6-49fa-bc87-ccb1f2c1e3c3";
+    fsType = "ext4";
+    options = ["strictatime" "lazytime"];
   };
 }

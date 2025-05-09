@@ -59,7 +59,7 @@ return {
       workspaces = {
         {
           name = "obsidian",
-          path = "~/realm/obsidian",
+          path = "/realm/obsidian",
         },
       },
       search_max_lines = 1000000,

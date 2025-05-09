@@ -1,18 +1,17 @@
 {pkgs, ...}: {
-  services.pulseaudio.enable = false;
   services.pipewire = {
     enable = true;
     audio.enable = true;
     alsa.enable = true;
     pulse.enable = true;
-    jack.enable = true;
+    # jack.enable = true;
 
-    extraConfig.pipewire."context.properties" = {
-      "default.clock.rate" = 48000;
-      "default.clock.quantum" = 64;
-      "default.clock.min-quantum" = 32;
-      "default.clock.max-quantum" = 128;
-    };
+    # extraConfig.pipewire."context.properties" = {
+    #   "default.clock.rate" = 48000;
+    #   "default.clock.quantum" = 64;
+    #   "default.clock.min-quantum" = 32;
+    #   "default.clock.max-quantum" = 128;
+    # };
   };
 
   environment.systemPackages = with pkgs; [
@@ -22,8 +21,8 @@
     pamixer
   ];
 
-  security.rtkit.enable = true;
   systemd.user.services.pipewire.serviceConfig = {
+    LimitRTPRIO = 95;
     LimitMEMLOCK = "infinity";
     Nice = -11;
     CPUSchedulingPolicy = "fifo";
@@ -33,9 +32,27 @@
   security.pam.loginLimits = [
     {
       domain = "@audio";
+      type = "soft";
+      item = "rtprio";
+      value = "95";
+    }
+    {
+      domain = "@audio";
+      type = "hard";
+      item = "rtprio";
+      value = "95";
+    }
+    {
+      domain = "@audio";
+      type = "soft";
+      item = "memlock";
+      value = "unlimited";
+    }
+    {
+      domain = "@audio";
       type = "hard";
       item = "memlock";
-      value = "infinity";
+      value = "unlimited";
     }
   ];
 

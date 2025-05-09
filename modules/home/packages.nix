@@ -15,7 +15,7 @@
     mangohud
     steam-run
 
-    # Commented gaming packages
+    # Commented out gaming packages
     # steam-tui
     # protonup
     # bottles
@@ -30,6 +30,9 @@
     # '')
 
     inputs.browser-previews.packages.${pkgs.system}.google-chrome-beta
+    inputs.browser-previews.packages.${pkgs.system}.google-chrome-dev
+    # google-chrome
+    #
     qutebrowser # A keyboard-driven, vim-like browser based on Python and Qt
     tor-browser-bundle-bin # Securely and easily download, verify, install, and launch Tor Browser in Linux
     yt-dlp
@@ -140,11 +143,95 @@
     procps
     psmisc
     evemu
-    usbutils
-    sysstat # iostat, pidstat …
     iotop
     bpftrace # for quick 'iosnoop', 'funccount' etc.
+    chrome-export
+    android-tools
+    android-file-transfer
 
+    # graphics stuff
+    mesa-demos
+    vulkan-tools # For `vulkaninfo`, `vkcube`
+    vulkan-validation-layers # For validating Vulkan API usage
+    wayland-utils # For `wayland-info`, `weston-info`
+    libva-utils # For VAAPI diagnostics
+    glxinfo # OpenGL info
+    egl-wayland
+    drm_info # Detailed info about Direct Rendering Manager
+    sysstat # GPU memory usage and system stats
+    usbview
+    hw-probe
+    hwdata
+    graphicsmagick
+    strace # For tracing system calls
+    ltrace # For tracing library calls
+    htop # For monitoring GPU utilization
+    extundelete # extundelete is a utility that can recover deleted files from an ext3 or ext4 partition.
+    nvitop
+    cage
+    wayland-protocols
+    vkmark
+
+    # other hw stuff Suggested By GPT ###
+    # Core Hardware Diagnostics
+    pciutils
+    usbutils
+    hwinfo
+    inxi
+    dmidecode
+    lshw
+    smartmontools
+    nvme-cli
+    udisks2
+
+    # CPU and Memory
+    cpuid
+    i7z # A better i7 (and now i3, i5) reporting tool for Linux
+    mcelog
+    memtester
+    numactl
+
+    # Storage
+    btrfs-progs
+    xfsprogs
+    e2fsprogs
+    lvm2
+    hdparm
+    parted
+    fio
+    ioping
+    bonnie
+
+    # Networking
+    iputils
+    iproute2
+    ethtool
+    iftop
+    iperf3
+    nmap
+    tcpdump
+    wireshark-cli
+    traceroute
+    mtr
+
+    # Peripheral & Input
+    evtest
+    libinput
+    powertop
+    fwupd
+    acpi
+
+    # Benchmarking
+    sysbench
+    stress-ng
+    fio
+    glmark2
+    phoronix-test-suite
+    ### END
+    ###
+    #########
+
+    # nix stuff
     cachix
     nix-direnv
     nix-direnv-flakes
@@ -194,20 +281,17 @@
     calc # Arbitrary precision console calculator
 
     ddcutil # Query and change Linux monitor settings using DDC/CI and USB.
-    dmidecode # Desktop Management Interface table related utilities
     evtest # Input device event monitor and query tool
     flex # A tool for generating text-scanning programs
     glances # CLI curses-based monitoring tool
     highlight # Fast and flexible source code highlighter (CLI version)
     httpie # human-friendly CLI HTTP client for the API era
-    i7z # A better i7 (and now i3, i5) reporting tool for Linux
     # imwheel  # Mouse wheel configuration tool for XFree86/Xorg
     # unclutter-xfixes  # A small program for hiding the mouse cursor
     inxi # Full featured CLI system information tool
     iotop # View I/O usage of processes
     libratbag # A DBus daemon to configure gaming mice
 
-    lshw # A small tool to provide detailed information on the hardware configuration of the machine.
     meld # Compare files, directories and working copies
     # nvtop  # GPUs process monitoring for AMD, Intel and NVIDIA
     piper # GTK application to configure gaming mice
@@ -224,9 +308,7 @@
     # inconsolata-nerdfont # Patched font Inconsolata Go from nerd fonts library
 
     # digimend-kernel-drivers-dkms  # Linux kernel modules (DKMS) for non-Wacom USB graphics tablets
-    extundelete # extundelete is a utility that can recover deleted files from an ext3 or ext4 partition.
     # googler  # Google from the command-line
-    # gputest  # cross-platform GPU stress test and OpenGL benchmark. Contains FurMark, TessMark
     hledger # Command-line interface for the hledger accounting system
     llm # Run inference for Large Language Models on CPU, with Rust
     mosh # Mobile shell, surviving disconnects with local echo and line editing
