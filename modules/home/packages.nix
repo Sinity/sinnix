@@ -72,7 +72,7 @@
 
     # Language Servers, Formatters, Linters (ensure these are needed outside nvim)
     markdown-oxide # Used by obsidian.nvim
-    inputs.alejandra.defaultPackage.${system} # Used by nix LSP/formatter
+    alejandra
     nixd
     nil
     nix-diff
