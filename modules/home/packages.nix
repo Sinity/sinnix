@@ -52,8 +52,9 @@
     wallust # generate colors from an image
 
     # ai
-    # aider-chat-full
-    aider-chat
+    # aider-chat-full # Temporarily disabled due to spacy dependency issues
+    aider-chat # Use minimal version without problematic dependencies
+    inputs.claude-desktop.packages.${system}.claude-desktop-with-fhs
     claude-code
     codex
     openai-whisper-cpp

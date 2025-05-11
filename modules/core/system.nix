@@ -36,20 +36,13 @@
   };
 
   nixpkgs = {
-    # config = {
-    #   allowUnfreePredicate = pkg:
-    #     builtins.elem (lib.getName pkg) [
-    #       "discord"
-    #       "spotify"
-    #       "obsidian"
-    #       "steam"
-    #       "steam-original"
-    #       "steam-runtime"
-    #     ];
-    #   permittedInsecurePackages = [
-    #     "electron-25.9.0" # obsidian
-    #   ];
-    # };
+    config = {
+      allowUnfree = true;
+      # Allow broken packages - needed for spacy dependency issues
+      allowBroken = true;
+      # Add allowAliases for perl packages
+      allowAliases = true;
+    };
     overlays = [
       inputs.nur.overlays.default
     ];
@@ -122,6 +115,5 @@
     ];
   };
 
-  nixpkgs.config.allowUnfree = true;
   system.stateVersion = "24.05";
 }

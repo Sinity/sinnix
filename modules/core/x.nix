@@ -73,6 +73,7 @@
       ++ builtins.filter lib.attrsets.isDerivation (builtins.attrValues pkgs.nerd-fonts);
 
     fontconfig = {
+      enable = true;
       defaultFonts = {
         monospace = ["SauceCodePro Nerd Font Mono"];
         sansSerif = ["Arimo"];

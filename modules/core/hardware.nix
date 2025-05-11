@@ -14,7 +14,7 @@
         #     LINK: "/dev/input/by-id/usb-Logitech_G915_WIRELESS_RGB_MECHANICAL_GAMING_KEYBOARD_87516961-event-kbd"
 
         - JOB: "${pkgs.interception-tools}/bin/intercept -g $DEVNODE \
-              | ${intercept-bounce}/bin/intercept-bounce -t 25ms --log-interval 1800s --log-bounces --stats-json \
+              | ${intercept-bounce}/bin/intercept-bounce -t 40ms --log-interval 6h --log-bounces --stats-json \
               | ${pkgs.interception-tools-plugins.caps2esc}/bin/caps2esc -m 1 \
               | ${pkgs.interception-tools}/bin/uinput -d $DEVNODE"
           DEVICE:

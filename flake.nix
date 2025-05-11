@@ -24,6 +24,11 @@
       url = "github:sinity/intercept-bounce";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    claude-desktop = {
+      url = "github:k3d3/claude-desktop-linux-flake";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = {
@@ -39,10 +44,13 @@
   in {
     nixosConfigurations.desktop = nixpkgs.lib.nixosSystem {
       inherit system;
+
       modules = [
-        ./modules/core/default.nix
         agenix.nixosModules.default
+        ./modules/core/overlays.nix
+        ./modules/core/default.nix
       ];
+
       specialArgs = {
         host = "desktop";
         inherit self inputs username;
