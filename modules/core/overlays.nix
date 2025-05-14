@@ -15,11 +15,13 @@
             meta = old.meta // {broken = false;};
           });
         };
-      
+
       # Disable the package causing the issue until a fix is available
       aider-chat-full = prev.aider-chat-full.override {
         pythonPackages = final.python3Packages;
       };
+
+      claude-code-logger = prev.callPackage ../../pkgs/claude-code-logger.nix {};
     })
   ];
 }

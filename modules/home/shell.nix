@@ -75,11 +75,13 @@
     history = {
       save = 9999999;
       size = 9999999;
+      # path = "${config.xdg.dataHome}/zsh/history"; # Explicit path
       append = true;
       share = true;
       expireDuplicatesFirst = true;
       extended = true;
       ignoreDups = true;
+      # ignoreSpace = true; # Ignore commands starting with a space
     };
     historySubstringSearch.enable = true;
 
@@ -170,6 +172,7 @@
       icat = "kitten icat";
       dsize = "du -hs";
       open = "xdg-open";
+      grep = "rg"; # ripgrep alias
 
       l = "eza --icons  -a --group-directories-first -1"; #EZA_ICON_SPACING=2
       ll = "eza --icons  -a --group-directories-first -1 --no-user --long";
@@ -194,9 +197,13 @@
       du = "du -h";
       mkdir = "mkdir -p";
       pingg = "ping 8.8.8.8";
-      scroff = "xset dpms force off"; # Note: xset is for X11, won't work in Wayland
+      # scroff = "xset dpms force off"; # Note: xset is for X11, won't work in Wayland
       wtf = "dmesg";
       ytd = "yt-dlp";
+
+      # Claude Code Logger alias
+      claude = "claude-log";
+      cl = "claude-log";
     };
   };
 
@@ -228,8 +235,7 @@
       inline_height = 30; # number of lines for inline history Ctrl+R
       show_preview = true; # Show command preview in search UI
       invert = true; # Search UI layout preference
-      keymap_mode = "auto"; # Default key map style
-      up_arrow_key_binding = false; # Disable up arrow for atuin search, keep normal behavior
+      keymap_mode = "auto"; # Default key map style up_arrow_key_binding = false; # Disable up arrow for atuin search, keep normal behavior
     };
   };
 

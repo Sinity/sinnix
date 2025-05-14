@@ -1,15 +1,19 @@
-{pkgs, ...}: {
-  programs.hyprland.enable = true;
-  programs.steam.enable = true;
-  programs.steam.gamescopeSession.enable = true;
-  programs.gamemode.enable = true;
+{
+  pkgs,
+  lib,
+  ...
+}: {
+  programs = {
+    hyprland.enable = true;
+    steam.enable = true;
+    steam.gamescopeSession.enable = true;
+    gamemode.enable = true;
+  };
 
-  services = {
-    xserver = {
-      enable = true;
-      displayManager.lightdm.enable = false;
-      videoDrivers = ["nvidia"];
-    };
+  services.xserver = {
+    enable = true;
+    displayManager.lightdm.enable = false; # Using Hyprland's direct login
+    videoDrivers = ["nvidia"];
   };
 
   hardware = {
@@ -25,15 +29,16 @@
     graphics = {
       enable = true;
       extraPackages = with pkgs; [
-        edid-decode # for decoding EDID (display capabilities metadata, e.g. avaiable modes)
+        edid-decode # For decoding display capabilities metadata
       ];
     };
   };
 
   environment.systemPackages = with pkgs; [
-    wlr-randr # xrandr equivalent, for reading/setting display modes (resolution, refresh rate)
+    wlr-randr # Wayland equivalent to xrandr for setting display modes
   ];
 
+  # XDG Desktop Portal for application integration
   xdg.portal = {
     enable = true;
     wlr.enable = true;
@@ -56,22 +61,31 @@
 
     packages = with pkgs;
       [
+        # General purpose fonts
         noto-fonts
         noto-fonts-extra
+
+        # Source family
         source-code-pro
         source-sans-pro
         source-serif-pro
+
+        # CJK fonts
         source-han-code-jp
         source-han-mono
         source-han-sans
         source-han-serif
+
+        # Additional fonts
         hermit
         roboto
         roboto-mono
         roboto-slab
       ]
+      # Include all nerd fonts
       ++ builtins.filter lib.attrsets.isDerivation (builtins.attrValues pkgs.nerd-fonts);
 
+    # Font default settings
     fontconfig = {
       enable = true;
       defaultFonts = {

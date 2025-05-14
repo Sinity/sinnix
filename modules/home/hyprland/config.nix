@@ -174,7 +174,6 @@
         "SUPER, Space, centerwindow,"
         "SUPER, Space, resizeactive, exact 950 600"
         "SUPER, D, exec, rofi -show drun || pkill rofi"
-        "SUPER SHIFT, D, exec, hyprctl dispatch exec '[workspace 4 silent] discord --enable-features=UseOzonePlatform --ozone-platform=wayland'"
         "SUPER SHIFT, S, exec, hyprctl dispatch exec '[workspace 5 silent] SoundWireServer'"
         "SUPER, Escape, exec, swaylock"
         "ALT, Escape, exec, hyprlock"
