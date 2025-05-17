@@ -65,3 +65,7 @@
 - `development.nix`: Development tools and languages
 - `system-utils.nix`: System utility programs
 
+## Advanced Configuration Notes
+
+- `internal/` contains some advanced configuration files, created by you, which for now I've reverted. These are for future reference. They may be out-of-sync/out-of-date with the repo proper.
+

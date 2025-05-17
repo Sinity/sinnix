@@ -1,4 +1,4 @@
-{...}: {
+_: {
   # To prevent getting stuck at shutdown
   systemd.extraConfig = "DefaultTimeoutStopSec=5s";
   systemd.sleep = {
@@ -49,3 +49,4 @@
     };
   };
 }
+

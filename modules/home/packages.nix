@@ -40,5 +40,7 @@
     lnch
     at
     soundwireserver
+
+    weechat
   ];
 }

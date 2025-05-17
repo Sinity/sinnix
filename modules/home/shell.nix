@@ -166,7 +166,6 @@
     shellAliases = {
       # Utils
       c = "clear";
-      cd = "z"; # Assuming zoxide is used
       cat = "bat";
       py = "python";
       icat = "kitten icat";
@@ -200,10 +199,6 @@
       # scroff = "xset dpms force off"; # Note: xset is for X11, won't work in Wayland
       wtf = "dmesg";
       ytd = "yt-dlp";
-
-      # Claude Code Logger alias
-      claude = "claude-log";
-      cl = "claude-log";
     };
   };
 

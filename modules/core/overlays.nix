@@ -1,4 +1,9 @@
-{lib, ...}: {
+{
+  lib,
+  pkgs,
+  inputs,
+  ...
+}: {
   nixpkgs.overlays = [
     (final: prev: {
       # Override spacy to use a working version
@@ -21,7 +26,14 @@
         pythonPackages = final.python3Packages;
       };
 
-      claude-code-logger = prev.callPackage ../../pkgs/claude-code-logger.nix {};
+      claude-desktop-wayland = final.symlinkJoin {
+        name = "claude-desktop-wayland";
+        paths = [inputs.claude-desktop.packages.${pkgs.system}.claude-desktop-with-fhs];
+        buildInputs = [final.makeWrapper];
+        postBuild = ''
+          wrapProgram $out/bin/claude-desktop --add-flags "--enable-features=WaylandWindowDecorations --no-sandbox"
+        '';
+      };
     })
   ];
 }

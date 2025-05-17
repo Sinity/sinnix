@@ -29,6 +29,16 @@
       url = "github:k3d3/claude-desktop-linux-flake";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    claude-squad = {
+      url = "github:sinity/claude-squad/add-nix-support";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    claude-code-logger = {
+      url = "github:sinity/claude-code-logger";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = {
@@ -37,6 +47,8 @@
     agenix,
     intercept-bounce,
     browser-previews,
+    claude-squad,
+    claude-code-logger,
     ...
   } @ inputs: let
     username = "sinity";

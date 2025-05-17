@@ -65,8 +65,13 @@
     SDL_VIDEODRIVER = "wayland";
     CLUTTER_BACKEND = "wayland";
     MOZ_ENABLE_WAYLAND = "1";
-    NIXOS_OZONE_WL = "1"; # Electron apps
     ANKI_WAYLAND = "1"; # Anki
+
+    # Electron apps
+    NIXOS_OZONE_WL = "1";
+    ELECTRON_OZONE_PLATFORM_HINT = "wayland";
+    OZONE_PLATFORM = "wayland";
+    OZONE_PLATFORM_HINT = "wayland";
 
     # NVIDIA-specific settings
     LIBVA_DRIVER_NAME = "nvidia";
