@@ -1,6 +1,33 @@
+# Nix
+result
+result-*
+.direnv
+.envrc.local
+
+# Development
+.devenv/
+devenv.local.nix
+
+# AI
 .aider*
-
-# Added by cargo
-/target
-
 **/.claude/settings.local.json
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Backup
+*.bak
+*~
+\#*\#
+.\#*
+
+# Only ignore unencrypted secrets
+*.key
+*.pem
+*.env
+*.gpg
