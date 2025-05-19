@@ -1,5 +1,5 @@
-# modules/home/kitty.nix
-{ pkgs, lib, ... }:
+# module/home/kitty.nix
+_:
 let
   # Gruvbox Dark theme content
   gruvboxDarkTheme = ''

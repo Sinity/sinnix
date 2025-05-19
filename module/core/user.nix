@@ -24,7 +24,7 @@
   };
 
   programs.zsh.enable = true;
-  
+
   # User configuration
   users = {
     mutableUsers = false;
@@ -47,7 +47,7 @@
       };
     };
   };
-  
+
   # Nix settings
   nix.settings = {
     allowed-users = [ "${username}" ];

@@ -59,16 +59,23 @@
     overlays = [ inputs.nur.overlays.default ];
   };
 
-  environment.systemPackages = with pkgs; [
-    wget
-    git
-    nix-output-monitor
-    nvd
+  environment = {
+    systemPackages = with pkgs; [
+      wget
+      git
+      nix-output-monitor
+      nvd
 
-    cachix
-    nix-direnv
-    nix-direnv-flakes
-  ];
+      cachix
+      nix-direnv
+      nix-direnv-flakes
+    ];
+
+    # Set global environment variables
+    variables = {
+      FLAKE = "/realm/nixos-config";
+    };
+  };
 
   programs = {
     direnv = {

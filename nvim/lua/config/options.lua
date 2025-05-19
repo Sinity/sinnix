@@ -5,3 +5,6 @@
 vim.opt.title = true
 vim.opt.titlestring =
   "%{&readonly?'🔒':''}%{&modified?'✱':''}%f %{&filetype!=#''?'['.&filetype.']':''} ⟪ %{fnamemodify(getcwd(),':~')} ⟫"
+
+-- Configure LSP logging to be less verbose (prevent lsp.log from growing too large)
+vim.lsp.set_log_level("error")

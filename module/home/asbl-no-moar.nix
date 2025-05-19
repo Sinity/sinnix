@@ -1,4 +1,4 @@
-# modules/home/asbl-no-moar.nix
+# module/home/asbl-no-moar.nix
 { pkgs, ... }:
 let
   asbl-fooler = pkgs.writeShellApplication {

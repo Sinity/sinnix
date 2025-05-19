@@ -1,5 +1,5 @@
-# modules/home/ssh.nix
-{ pkgs, lib, ... }:
+# module/home/ssh.nix
+{ pkgs, ... }:
 {
   programs.ssh = {
     enable = true;

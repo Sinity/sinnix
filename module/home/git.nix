@@ -1,6 +1,5 @@
-# modules/home/git.nix
-{ pkgs, ... }:
-{
+# module/home/git.nix
+_: {
   programs.git = {
     enable = true;
     # Ensure git and delta are installed if not already via home.packages

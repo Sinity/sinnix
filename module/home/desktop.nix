@@ -1,8 +1,6 @@
-# modules/home/desktop.nix
+# module/home/desktop.nix
 {
   pkgs,
-  lib,
-  config,
   ...
 }:
 let

@@ -32,6 +32,7 @@ return {
                   installable = true,
                 },
               },
+              loglevel = "error", -- Reduce logging to only errors
             },
           },
         },
