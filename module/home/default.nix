@@ -1,19 +1,14 @@
 {
-  inputs,
-  username,
-  host,
   ...
 }:
 {
   imports = [
     # Core configuration
-    ./shell.nix
-    ./desktop.nix
-    ./kitty.nix
+    ../shell # Shell environment configuration
+    ../desktop # Desktop environment configuration
     ./git.nix
     ./ssh.nix
     ./neovim.nix # Manual symlink-based neovim config
-    ./rofi.nix # Application launcher
 
     # Consolidated modules (new organization)
     ./system.nix # System utilities and tools
@@ -25,7 +20,6 @@
     # Specialized modules
     ./activity_watch.nix # Self-inflicted telemetry
     ./hydrus.nix # Hydrus with custom setup
-    ./hyprland # Window manager
     ./scripts/scripts.nix # Personal scripts
     ./xdg-mimes.nix # XDG config (possibly unnecessary)
 

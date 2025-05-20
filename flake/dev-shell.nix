@@ -14,6 +14,7 @@
     { pkgs, system, ... }:
     {
       # Development environment with devenv.sh
+      # Note: Requires use flake . --no-pure-eval in .envrc for directory detection
       devShells.default = inputs.devenv.lib.mkShell {
         inherit inputs pkgs;
         modules = [

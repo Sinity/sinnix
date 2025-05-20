@@ -19,8 +19,11 @@
         # Load overlays first to make packages available everywhere
         ../module/core/overlays.nix
 
+        # Import host-specific configuration
+        { imports = [ ../host/desktop ]; }
+
         # Import all core system modules
-        ../module/core/default.nix
+        { imports = [ ../module/core/default.nix ]; }
       ];
 
       # Make these values available to all modules

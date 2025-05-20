@@ -15,7 +15,7 @@
     }:
     let
       # Helper to create runnable commands
-      mkApp = name: command: {
+      mkApp = name: command: description: {
         type = "app";
         program =
           (pkgs.writeShellScriptBin name ''
@@ -24,6 +24,7 @@
           '').outPath
           + "/bin/"
           + name;
+        meta.description = description;
       };
     in
     {
@@ -38,7 +39,7 @@
           ${pkgs.nix}/bin/nix flake check --no-build
           find . -name "*.nix" -type f -print0 | xargs -0 -n1 ${pkgs.nix}/bin/nix-instantiate --parse >/dev/null
           echo "Configuration check complete!"
-        '';
+        '' "Validate NixOS configuration syntax and structure";
 
         # Format Nix files
         format = mkApp "format" ''
@@ -46,14 +47,14 @@
           ${pkgs.findutils}/bin/find . -name "*.nix" -type f -not -path "*/nix/store/*" -print0 | \
           ${pkgs.findutils}/bin/xargs -0 -P 4 -I{} ${pkgs.nixfmt-rfc-style}/bin/nixfmt {}
           echo "Formatting complete!"
-        '';
+        '' "Format Nix files according to the RFC style";
 
         # Lint Nix files
         lint = mkApp "lint" ''
           echo "Linting Nix files..."
           ${pkgs.statix}/bin/statix check
           echo "Linting complete!"
-        '';
+        '' "Lint Nix files for common issues and anti-patterns";
 
         # Test configuration without applying
         test = mkApp "test" ''
@@ -63,7 +64,7 @@
           fi
           ${pkgs.nixos-rebuild}/bin/nixos-rebuild test --flake .#desktop \
             --log-format internal-json -v 2>&1 | ${pkgs.nix-output-monitor}/bin/nom --json
-        '';
+        '' "Test configuration without applying it to the system";
 
         # Apply configuration to system
         switch = mkApp "switch" ''
@@ -73,14 +74,14 @@
           fi
           ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --flake .#desktop \
             --log-format internal-json -v 2>&1 | ${pkgs.nix-output-monitor}/bin/nom --json
-        '';
+        '' "Apply configuration changes to the system";
 
         # Update flake dependencies
         update = mkApp "update" ''
           echo "Updating flake inputs..."
           ${pkgs.nix}/bin/nix flake update
           echo "Flake inputs updated. Run 'sudo nix run .#switch' to apply."
-        '';
+        '' "Update flake dependencies to their latest versions";
 
         # Clean up old generations
         clean = mkApp "clean" ''
@@ -98,12 +99,12 @@
           nix store gc
 
           echo "System cleanup complete."
-        '';
+        '' "Clean up old system generations and optimize nix store";
 
         # Secret management
         agenix = mkApp "agenix" ''
           ${inputs.agenix.packages.${system}.default}/bin/agenix "$@"
-        '';
+        '' "Manage encrypted secrets with agenix";
       };
     };
 }

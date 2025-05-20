@@ -1,10 +1,7 @@
-# module/home/desktop.nix
-{
-  pkgs,
-  ...
-}:
+# module/desktop/waybar/default.nix
+{ pkgs, ... }:
 let
-  # Waybar custom variables (from former waybar/default.nix)
+  # Waybar custom variables
   customWaybar = {
     font = "JetBrainsMono Nerd Font";
     font_size = "18px";
@@ -25,33 +22,8 @@ let
   };
 in
 {
-  # --- GTK Config (from former gtk.nix) ---
-  gtk = {
-    enable = true;
-    theme = {
-      name = "Gruvbox-Dark";
-      package = pkgs.gruvbox-gtk-theme.override { colorVariants = [ "dark" ]; };
-    };
-    iconTheme = {
-      name = "Papirus-Dark";
-      package = pkgs.papirus-icon-theme.override { color = "black"; };
-    };
-    cursorTheme = {
-      name = "Bibata-Modern-Ice";
-      size = 24;
-      package = pkgs.bibata-cursors;
-    };
-    # font = { name = "JetBrainsMono NF"; size = 11; }; # Uncomment if needed
-  };
-
-  home.file.".icons/default/index.theme".text = ''
-    [Icon Theme]
-    Inherits=Bibata-Modern-Ice
-  '';
-
-  # --- Waybar Config (from former waybar/default.nix) ---
-  # Note the import path change for style.nix
-  imports = [ ./waybar/style.nix ];
+  # Import waybar style
+  imports = [ ./style.nix ];
 
   programs.waybar = {
     enable = true;
@@ -87,12 +59,12 @@ in
             today = "<span color='#98971A'><b>{}</b></span>";
           };
         };
-        format = "  {:%H:%M}";
+        format = "  {:%H:%M}";
         tooltip = "true";
         tooltip-format = ''
           <big>{:%Y %B}</big>
           <tt><small>{calendar}</small></tt>'';
-        format-alt = "  {:%d/%m}";
+        format-alt = "  {:%d/%m}";
       };
       "hyprland/workspaces" = {
         active-only = false;
@@ -124,8 +96,8 @@ in
         };
       };
       cpu = {
-        format = "<span foreground='${green}'> </span> {usage}%";
-        format-alt = "<span foreground='${green}'> </span> {avg_frequency} GHz";
+        format = "<span foreground='${green}'> </span> {usage}%";
+        format-alt = "<span foreground='${green}'> </span> {avg_frequency} GHz";
         interval = 2;
       };
       memory = {
@@ -138,7 +110,7 @@ in
         interval = 60;
       };
       network = {
-        format-wifi = "<span foreground='${magenta}'> </span> {signalStrength}%";
+        format-wifi = "<span foreground='${magenta}'> </span> {signalStrength}%";
         format-ethernet = "<span foreground='${magenta}'>󰀂 </span>";
         tooltip-format = "Connected to {essid} {ifname} via {gwaddr}";
         format-linked = "{ifname} (No IP)";
@@ -150,15 +122,15 @@ in
       };
       pulseaudio = {
         format = "{icon} {volume}%";
-        format-muted = "<span foreground='${blue}'> </span> {volume}%";
+        format-muted = "<span foreground='${blue}'> </span> {volume}%";
         format-icons = {
-          default = [ "<span foreground='${blue}'> </span>" ];
+          default = [ "<span foreground='${blue}'> </span>" ];
         };
         scroll-step = 5;
         on-click = "pamixer -t";
       };
       "custom/launcher" = {
-        format = "";
+        format = "";
         on-click = "rofi -show drun";
         on-click-right = "wallpaper-picker";
         tooltip = "false";
@@ -167,14 +139,14 @@ in
         tooltip = false;
         format = "{icon} ";
         format-icons = {
-          notification = "<span foreground='red'><sup></sup></span>  <span foreground='${red}'></span>";
-          none = "  <span foreground='${red}'></span>";
-          dnd-notification = "<span foreground='red'><sup></sup></span>  <span foreground='${red}'></span>";
-          dnd-none = "  <span foreground='${red}'></span>";
-          inhibited-notification = "<span foreground='red'><sup></sup></span>  <span foreground='${red}'></span>";
-          inhibited-none = "  <span foreground='${red}'></span>";
-          dnd-inhibited-notification = "<span foreground='red'><sup></sup></span>  <span foreground='${red}'></span>";
-          dnd-inhibited-none = "  <span foreground='${red}'></span>";
+          notification = "<span foreground='red'><sup></sup></span>  <span foreground='${red}'></span>";
+          none = "  <span foreground='${red}'></span>";
+          dnd-notification = "<span foreground='red'><sup></sup></span>  <span foreground='${red}'></span>";
+          dnd-none = "  <span foreground='${red}'></span>";
+          inhibited-notification = "<span foreground='red'><sup></sup></span>  <span foreground='${red}'></span>";
+          inhibited-none = "  <span foreground='${red}'></span>";
+          dnd-inhibited-notification = "<span foreground='red'><sup></sup></span>  <span foreground='${red}'></span>";
+          dnd-inhibited-none = "  <span foreground='${red}'></span>";
         };
         return-type = "json";
         exec-if = "which swaync-client";
@@ -185,9 +157,4 @@ in
       };
     };
   };
-
-  # --- SwayNC Config (from former swaync/swaync.nix) ---
-  home.packages = [ pkgs.swaynotificationcenter ]; # Merged from swaync.nix
-  xdg.configFile."swaync/style.css".source = ./swaync/style.css; # Adjusted path
-  xdg.configFile."swaync/config.json".source = ./swaync/config.json; # Adjusted path
 }

@@ -8,16 +8,19 @@
 }:
 {
   imports = [
-    ./bootloader.nix
-    ./hardware.nix
+    # Host-specific modules have been moved to host/desktop/
+    # ./bootloader.nix
+    # ./hardware.nix
+    # ./audio.nix
+    # ./storage.nix
+    # ./x.nix
+
+    # Core modules that remain
     ./network.nix
-    ./audio.nix
     ./security.nix
     ./services.nix
     ./system.nix
-    ./storage.nix
     ./user.nix
-    ./x.nix
     ./nginx.nix
     ./nix-ld.nix
   ];
