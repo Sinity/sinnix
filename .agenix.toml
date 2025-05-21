@@ -5,10 +5,10 @@
 # User and system keys that can decrypt all secrets
 public_keys = [
   # User key - used for accessing secrets when logged in as a user
-  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDwD8IB2eVfw6X7z9AqBBGjrqOIOCJ4tden1we7mCqOy sinity@desktop",
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDwD8IB2eVfw6X7z9AqBBGjrqOIOCJ4tden1we7mCqOy sinity@sinnix-prime",
   
   # System key - used for accessing secrets during system activation
-  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA8aHYDIVHK5J4pkbtIPq8AbWH3Jc2HW28UHfGBrg50P root@desktop"
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA8aHYDIVHK5J4pkbtIPq8AbWH3Jc2HW28UHfGBrg50P root@sinnix-prime"
 ]
 # Global access pattern for all secret files
 paths = ["secret/*.age"]

@@ -1,4 +1,4 @@
-# Host-specific audio configuration for desktop
+# Host-specific audio configuration for sinnix-prime
 { pkgs, lib, ... }:
 {
   services.pipewire = {

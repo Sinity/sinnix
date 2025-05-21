@@ -13,7 +13,7 @@
     backupFileExtension = "backup";
     extraSpecialArgs = { inherit inputs username host; };
     users.${username} = {
-      imports = [ ./../home/default.nix ];
+      imports = [ ../home/default.nix ];
       home = {
         username = "${username}";
         homeDirectory = "/home/${username}";

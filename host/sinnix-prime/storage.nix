@@ -1,3 +1,4 @@
+# Host-specific storage configuration for sinnix-prime
 { pkgs, ... }:
 {
   # Storage-related services

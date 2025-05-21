@@ -1,5 +1,4 @@
-{ config, pkgs, ... }:
-{
+_: {
   # Enable NGINX
   services.nginx = {
     enable = true;

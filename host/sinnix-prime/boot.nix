@@ -1,3 +1,4 @@
+# Host-specific boot configuration for sinnix-prime
 { pkgs, ... }:
 {
   boot = {

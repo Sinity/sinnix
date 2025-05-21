@@ -6,44 +6,61 @@ This repository implements a modular NixOS configuration built with flake-parts.
 
 1. `flake.nix` - Entry point and dependency declaration
 2. `flake/*.nix` - Modular flake outputs (development, apps, system config)
-3. `module/core/*.nix` - System-level NixOS modules
-4. `module/home/*.nix` - User-level home-manager modules
+3. `module/system/*.nix` - System-level NixOS modules
+4. `module/home/*.nix` - User-level home-manager modules (includes desktop and shell config)
+5. `host/sinnix-prime/*.nix` - Host-specific hardware configuration
 
 Critical design relationships:
-- nixos.nix references core modules
-- core modules import each other with explicit dependencies
-- home-manager modules are imported within core/default.nix
+- nixos.nix references system modules and host-specific configuration
+- system modules import each other with explicit dependencies
+- home-manager modules are imported within system/user.nix
 
 ## MODULE DEPENDENCY GRAPH
 
 ```
 flake.nix
-├─ flake/nixos.nix → module/core/overlays.nix (MUST LOAD FIRST)
-└─ flake/nixos.nix → module/core/default.nix
-   ├─ module/core/bootloader.nix
-   ├─ module/core/hardware.nix
-   ├─ module/core/network.nix
-   ├─ module/core/security.nix (HANDLES SECRETS)
-   ├─ module/core/services.nix
-   ├─ module/core/storage.nix
-   ├─ module/core/system.nix
-   ├─ module/core/user.nix → module/home/default.nix
-   │  ├─ module/home/desktop.nix
-   │  ├─ module/home/development.nix
-   │  ├─ module/home/media.nix
-   │  ├─ module/home/desktop-apps.nix
-   │  ├─ module/home/packages.nix
-   │  ├─ module/home/shell.nix
-   │  ├─ module/home/git.nix
-   │  └─ module/home/neovim.nix
-   └─ module/core/x.nix
+├─ flake/nixos.nix → module/system/overlays.nix (MUST LOAD FIRST)
+├─ flake/nixos.nix → host/sinnix-prime/default.nix (HOST-SPECIFIC)
+│  ├─ host/sinnix-prime/audio.nix
+│  ├─ host/sinnix-prime/boot.nix
+│  ├─ host/sinnix-prime/display.nix
+│  ├─ host/sinnix-prime/hardware.nix
+│  └─ host/sinnix-prime/storage.nix
+└─ flake/nixos.nix → module/system/default.nix
+   ├─ module/system/network.nix
+   ├─ module/system/security.nix (HANDLES SECRETS)
+   ├─ module/system/services.nix
+   ├─ module/system/system.nix
+   ├─ module/system/nginx.nix
+   ├─ module/system/nix-ld.nix
+   └─ module/system/user.nix → module/home/default.nix
+      ├─ module/home/desktop/default.nix (CONSOLIDATED DESKTOP)
+      │  ├─ module/home/desktop/hyprland/
+      │  ├─ module/home/desktop/waybar/
+      │  ├─ module/home/desktop/swaync/
+      │  ├─ module/home/desktop/rofi.nix
+      │  └─ module/home/desktop/themes.nix
+      ├─ module/home/environment.nix (SHELL CONFIG)
+      ├─ module/home/kitty.nix
+      ├─ module/home/git.nix
+      ├─ module/home/ssh.nix
+      ├─ module/home/neovim.nix
+      ├─ module/home/development.nix
+      ├─ module/home/media.nix
+      ├─ module/home/desktop-apps.nix
+      ├─ module/home/packages.nix
+      ├─ module/home/system.nix
+      ├─ module/home/activity_watch.nix
+      ├─ module/home/hydrus.nix
+      ├─ module/home/scripts/scripts.nix
+      └─ module/home/xdg-mimes.nix
 ```
 
 ## KEY IMPLEMENTATION PATTERNS
 
 1. **Secret Management**: 
-   - Secrets stored in `secrets/*.age` 
-   - Automatically discovered via `module/core/security.nix`
+   - Secrets stored in `secret/*.age` 
+   - Automatically discovered via `module/system/security.nix`
    - Environment variables created using pattern: `dash-case-name.age` → `DASH_CASE_NAME`
    - Access pattern: `config.age.secrets.<name>.path`
 

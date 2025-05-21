@@ -5,7 +5,6 @@
   fetchurl,
   unzip,
   addDriverRunpath,
-  patchelf,
 }:
 stdenv.mkDerivation rec {
   name = "svpflow-${version}";

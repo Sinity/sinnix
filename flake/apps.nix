@@ -62,7 +62,7 @@
             echo "Error: This command must be run as root (use 'sudo nix run .#test')"
             exit 1
           fi
-          ${pkgs.nixos-rebuild}/bin/nixos-rebuild test --flake .#desktop \
+          ${pkgs.nixos-rebuild}/bin/nixos-rebuild test --flake .#sinnix-prime \
             --log-format internal-json -v 2>&1 | ${pkgs.nix-output-monitor}/bin/nom --json
         '' "Test configuration without applying it to the system";
 
@@ -72,7 +72,7 @@
             echo "Error: This command must be run as root (use 'sudo nix run .#switch')"
             exit 1
           fi
-          ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --flake .#desktop \
+          ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --flake .#sinnix-prime \
             --log-format internal-json -v 2>&1 | ${pkgs.nix-output-monitor}/bin/nom --json
         '' "Apply configuration changes to the system";
 

@@ -1,4 +1,4 @@
-# Host-specific display configuration for desktop
+# Host-specific display configuration for sinnix-prime
 { pkgs, lib, ... }:
 {
   programs = {

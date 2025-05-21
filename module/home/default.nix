@@ -4,11 +4,12 @@
 {
   imports = [
     # Core configuration
-    ../shell # Shell environment configuration
-    ../desktop # Desktop environment configuration
+    ./environment.nix # Shell environment configuration
+    ./desktop # Desktop environment configuration
     ./git.nix
     ./ssh.nix
     ./neovim.nix # Manual symlink-based neovim config
+    ./kitty.nix # Terminal emulator configuration
 
     # Consolidated modules (new organization)
     ./system.nix # System utilities and tools

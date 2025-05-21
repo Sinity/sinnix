@@ -1,3 +1,4 @@
+# Host-specific hardware configuration for sinnix-prime
 { pkgs, intercept-bounce, ... }:
 {
   environment.systemPackages = with pkgs; [

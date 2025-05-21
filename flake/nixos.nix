@@ -8,7 +8,7 @@
 {
   flake = {
     # Define available NixOS configurations
-    nixosConfigurations.desktop = inputs.nixpkgs.lib.nixosSystem {
+    nixosConfigurations.sinnix-prime = inputs.nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
 
       # Import modules in priority order
@@ -17,18 +17,18 @@
         inputs.agenix.nixosModules.default
 
         # Load overlays first to make packages available everywhere
-        ../module/core/overlays.nix
+        ../module/system/overlays.nix
 
         # Import host-specific configuration
-        { imports = [ ../host/desktop ]; }
+        { imports = [ ../host/sinnix-prime ]; }
 
-        # Import all core system modules
-        { imports = [ ../module/core/default.nix ]; }
+        # Import all system modules
+        { imports = [ ../module/system/default.nix ]; }
       ];
 
       # Make these values available to all modules
       specialArgs = {
-        host = "desktop";
+        host = "sinnix-prime";
         username = "sinity";
         inherit inputs;
 

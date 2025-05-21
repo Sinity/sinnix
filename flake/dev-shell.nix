@@ -22,6 +22,9 @@
             # Basic shell information
             name = "nixos-config-dev";
 
+            # Set root directory for devenv
+            devenv.root = "/realm/nixos-config";
+
             # Environment variables
             env.GITHUB_TOKEN = builtins.getEnv "GITHUB_TOKEN";
 
@@ -85,7 +88,7 @@
                   echo "Error: This command must be run as root (use 'sudo')"
                   exit 1
                 fi
-                ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --flake .#desktop \
+                ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --flake .#sinnix-prime \
                   --log-format internal-json -v 2>&1 | ${pkgs.nix-output-monitor}/bin/nom --json
               '';
             };
