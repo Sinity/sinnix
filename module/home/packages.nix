@@ -1,8 +1,5 @@
 {
-  inputs,
   pkgs,
-  config,
-  lib,
   ...
 }:
 {
@@ -42,6 +39,6 @@
     at
     soundwireserver
 
-    weechat
+    # weechat # Moved to communication domain
   ];
 }

@@ -16,14 +16,14 @@
         # Enable agenix for secret management
         inputs.agenix.nixosModules.default
 
-        # Load overlays first to make packages available everywhere
-        ../module/system/overlays.nix
-
         # Import host-specific configuration
         { imports = [ ../host/sinnix-prime ]; }
 
         # Import all system modules
         { imports = [ ../module/system/default.nix ]; }
+
+        # NEW: Import domain modules (initially empty)
+        { imports = [ ../module/default.nix ]; }
       ];
 
       # Make these values available to all modules

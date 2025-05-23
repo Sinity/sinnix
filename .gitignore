@@ -31,3 +31,6 @@ Thumbs.db
 *.pem
 *.env
 *.gpg
+
+# Recovery efforts - temporary data
+recovery_efforts/

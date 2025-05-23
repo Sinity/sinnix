@@ -383,6 +383,7 @@
         # Basic utilities
         c = "clear";
         cat = "bat";
+        claude = "/home/sinity/.claude/local/node_modules/.bin/claude";
         py = "python";
         icat = "kitten icat";
         dsize = "du -hs";

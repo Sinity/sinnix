@@ -1,7 +1,5 @@
 {
   pkgs,
-  config,
-  lib,
   ...
 }:
 {
@@ -44,14 +42,14 @@
     man-pages # extra man pages
     ncdu # disk space
     nitch # system fetch util
-    playerctl # controller for media players
+    # playerctl # Moved to media domain
     ripgrep # grep replacement
     tldr
     toipe # typing test in the terminal
     ttyper # cli typing test
     unzip
     unrar
-    wget
+    # wget # Moved to communication domain
     xdg-utils
     xxd
 

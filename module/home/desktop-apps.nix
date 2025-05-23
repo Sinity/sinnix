@@ -1,23 +1,16 @@
 {
-  inputs,
   pkgs,
-  config,
-  lib,
   ...
 }:
 {
   # Desktop applications
   home.packages = with pkgs; [
-    # Web browsers
-    inputs.browser-previews.packages.${pkgs.system}.google-chrome-beta
-    inputs.browser-previews.packages.${pkgs.system}.google-chrome-dev
-    qutebrowser
-    tor-browser-bundle-bin
+    # Web browsers - moved to communication domain
 
     # Document and office applications
     libreoffice
-    audacity
-    gimp
+    # audacity # Moved to media domain
+    # gimp # Moved to media domain
 
     # Gaming
     mangohud
