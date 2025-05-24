@@ -32,5 +32,5 @@ Thumbs.db
 *.env
 *.gpg
 
-# Recovery efforts - temporary data
-recovery_efforts/
+blueprint_v0.3.md
+git_log.md

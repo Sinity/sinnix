@@ -16,13 +16,13 @@
         # Enable agenix for secret management
         inputs.agenix.nixosModules.default
 
+        # Import system-wide overlay
+        (import ./overlay.nix)
+
         # Import host-specific configuration
         { imports = [ ../host/sinnix-prime ]; }
 
-        # Import all system modules
-        { imports = [ ../module/system/default.nix ]; }
-
-        # NEW: Import domain modules (initially empty)
+        # Import domain modules (all functionality now consolidated here)
         { imports = [ ../module/default.nix ]; }
       ];
 

@@ -3,37 +3,302 @@
 # Consolidates: system.nix, user.nix, security.nix
 
 {
+  pkgs,
+  inputs,
+  username,
+  host,
   config,
   lib,
-  username, # Used in imported modules
   ...
 }:
-with lib;
+let
+  # Find all .age files in the secret directory
+  secretFiles = lib.filterAttrs (name: _: lib.hasSuffix ".age" name) (builtins.readDir ../secret);
+in
 {
-  imports = [
-    # Temporarily import existing modules during migration
-    ./system/system.nix
-    ./system/user.nix
-    ./system/security.nix
-    # Note: nix-ld.nix moved to development domain
-    # Note: network.nix will go to communication domain
-    # Note: services.nix will be split across domains
-  ];
+  imports = [ inputs.home-manager.nixosModules.home-manager ];
 
-  # Foundation configuration will be consolidated here incrementally
   config = {
-    # Phase 2 marker - foundation domain active
     system.nixos.tags = [ "foundation-domain-v0.3" ];
 
-    # Username is used by imported modules
-    assertions = [
-      {
-        assertion = username != "";
-        message = "Username must be set";
-      }
-    ];
+    # === SYSTEM CONFIGURATION (from system/system.nix) ===
+    nix = {
+      settings = {
+        auto-optimise-store = true;
+        experimental-features = [
+          "nix-command"
+          "flakes"
+        ];
+        trusted-users = [
+          "sinity"
+          "root"
+          "@wheel"
+        ];
+        substituters = [
+          "https://cache.nixos.org/"
+          "https://sinity.cachix.org"
+          "https://nix-gaming.cachix.org"
+        ];
+        trusted-public-keys = [
+          "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
+          "sinity.cachix.org-1:i5YsUuuRv9r790gdwwE+FiJiUcWULV1lEOmKE50Y+TI="
+          "nix-gaming.cachix.org-1:nbjlureqMbRAxR1gJ/f3hxemL9svXaZF/Ees8vCUUs4="
+        ];
+        max-jobs = 2;
+        cores = 0;
+        allowed-users = [ "${username}" ];
+      };
 
-    # Core systemd configuration (from services.nix)
+      daemonCPUSchedPolicy = "idle";
+      daemonIOSchedClass = "idle";
+      daemonIOSchedPriority = 6;
+
+      gc = {
+        automatic = true;
+        dates = "weekly";
+        options = "--delete-older-than 30d";
+      };
+
+      optimise = {
+        automatic = true;
+        dates = [ "weekly" ];
+      };
+    };
+
+    nixpkgs = {
+      config = {
+        allowUnfree = true;
+        allowBroken = true;
+        allowAliases = true;
+      };
+      overlays = [ inputs.nur.overlays.default ];
+    };
+
+    environment = {
+      systemPackages = with pkgs; [
+        wget
+        git
+        nix-output-monitor
+        nvd
+        cachix
+        nix-direnv
+        nix-direnv-flakes
+
+        # Core system utilities from home/system.nix
+        killall
+        procps
+        psmisc
+        iotop
+
+        # Hardware management from home/system.nix
+        hwinfo
+        inxi
+        dmidecode
+        lshw
+        pciutils
+        usbutils
+
+        # Storage utilities from home/system.nix
+        btrfs-progs
+        hdparm
+        smartmontools
+        nvme-cli
+
+        # Networking from home/system.nix
+        iputils
+        ethtool
+        iftop
+        iperf3
+
+        # System-level graphics packages from home/system.nix
+        mesa
+        libGL
+        libglvnd
+
+        # Hardware diagnostics from home/system.nix
+        cpuid
+        i7z
+        mcelog
+        memtester
+        numactl
+        hw-probe
+        hwdata
+
+        # Storage utilities from home/system.nix
+        xfsprogs
+        e2fsprogs
+        lvm2
+        parted
+        fio
+        ioping
+        udisks2
+        extundelete
+
+        # System utilities from home/system.nix
+        bpftrace
+        entr # Perform action when file changes
+        file # Show file information
+        tldr
+        xdg-utils
+        xxd
+        graphicsmagick
+      ];
+      variables = {
+        FLAKE = "/realm/nixos-config";
+      };
+    };
+
+    programs = {
+      direnv = {
+        enable = true;
+        silent = false;
+        enableZshIntegration = true;
+        enableBashIntegration = true;
+        nix-direnv.enable = true;
+      };
+      dconf.enable = true;
+      zsh.enable = true;
+    };
+
+    services = {
+      dbus.enable = true;
+      xserver.xkb.layout = "pl";
+      earlyoom = {
+        enable = true;
+        enableNotifications = true;
+        freeMemThreshold = 5;
+        freeSwapThreshold = 5;
+        reportInterval = 5;
+        extraArgs = [
+          "-g"
+          "-p"
+          "--prefer"
+          "(^|/)(java|chromium|obsidian|google-chrome-stable)$"
+          "--avoid"
+          "(^|/)(init|systemd|sshd)$"
+        ];
+      };
+    };
+
+    console.keyMap = "pl2";
+    console.font = "Lat2-Terminus16";
+    time.timeZone = "Europe/Warsaw";
+    i18n.defaultLocale = "en_US.UTF-8";
+    i18n.extraLocaleSettings = {
+      LC_ADDRESS = "pl_PL.UTF-8";
+      LC_IDENTIFICATION = "pl_PL.UTF-8";
+      LC_MEASUREMENT = "pl_PL.UTF-8";
+      LC_MONETARY = "pl_PL.UTF-8";
+      LC_NAME = "pl_PL.UTF-8";
+      LC_NUMERIC = "pl_PL.UTF-8";
+      LC_PAPER = "pl_PL.UTF-8";
+      LC_TELEPHONE = "pl_PL.UTF-8";
+      LC_TIME = "pl_PL.UTF-8";
+    };
+
+    system.stateVersion = "24.05";
+
+    # === USER CONFIGURATION (from system/user.nix) ===
+    home-manager = {
+      useUserPackages = true;
+      useGlobalPkgs = true;
+      backupFileExtension = "backup";
+      extraSpecialArgs = { inherit inputs username host; };
+      users.${username} = {
+        imports = [ ];
+        home = {
+          username = "${username}";
+          homeDirectory = "/home/${username}";
+          stateVersion = "24.05";
+
+          sessionVariables = {
+            # Core system paths from environment.nix
+            FLAKE = "/realm/nixos-config";
+
+            # XDG directories
+            XDG_CONFIG_HOME = "\${HOME}/.config";
+            XDG_CACHE_HOME = "\${HOME}/.cache";
+            XDG_DATA_HOME = "\${HOME}/.local/share";
+            XDG_STATE_HOME = "\${HOME}/.local/state";
+          };
+
+          sessionPath = [
+            "$HOME/scripts"
+            "$HOME/scripts/yeelight"
+          ];
+        };
+        programs.home-manager.enable = true;
+      };
+    };
+
+    users = {
+      mutableUsers = false;
+      users = {
+        ${username} = {
+          isNormalUser = true;
+          extraGroups = [
+            "networkmanager"
+            "wheel"
+            "users"
+            "video"
+          ];
+          shell = pkgs.zsh;
+          hashedPassword = "REDACTED_HASH";
+        };
+        root = {
+          shell = pkgs.zsh;
+          home = "/root";
+          hashedPassword = "REDACTED_HASH";
+        };
+      };
+    };
+
+    # === SECURITY CONFIGURATION (from system/security.nix) ===
+    security = {
+      rtkit.enable = true;
+      sudo.wheelNeedsPassword = false;
+      pam.services.hyprlock = { };
+      wrappers.bubblewrap = {
+        source = "${pkgs.bubblewrap}/bin/bwrap";
+        owner = "root";
+        group = "root";
+        setuid = true;
+      };
+    };
+
+    networking.firewall.enable = false;
+    services.gnome.gnome-keyring.enable = true;
+
+    programs.gnupg.agent = {
+      enable = true;
+      enableSSHSupport = true;
+    };
+
+    boot.kernel.sysctl."kernel.unprivileged_userns_clone" = 1;
+
+    age = {
+      identityPaths = [ "/home/sinity/.ssh/id_ed25519" ];
+      secrets = lib.mapAttrs' (filename: _: {
+        name = lib.removeSuffix ".age" filename;
+        value = {
+          file = ../secret/${filename};
+          owner = "sinity";
+        };
+      }) secretFiles;
+    };
+
+    programs.zsh.loginShellInit = lib.concatStringsSep "\n" (
+      lib.mapAttrsToList (
+        filename: _:
+        let
+          secretName = lib.removeSuffix ".age" filename;
+          envName = lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] secretName);
+        in
+        ''export ${envName}="$(<${config.age.secrets.${secretName}.path})"''
+      ) secretFiles
+    );
+
+    # === FOUNDATION SYSTEMD CONFIGURATION ===
     systemd.extraConfig = "DefaultTimeoutStopSec=5s";
     systemd.sleep = {
       extraConfig = ''

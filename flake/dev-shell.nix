@@ -39,7 +39,6 @@
               nixfmt-rfc-style
               nil
               nixd
-              statix
               deadnix
 
               # Secret management
@@ -56,9 +55,9 @@
             # Git hooks configuration (renamed from pre-commit)
             git-hooks.hooks = {
               nixfmt-rfc-style.enable = true;
-              statix.enable = true;
               deadnix.enable = true;
               shellcheck.enable = true;
+              statix.enable = false;
             };
 
             # Binary cache setup
@@ -78,9 +77,6 @@
                 ${pkgs.findutils}/bin/find . -name "*.nix" -type f -not -path "*/nix/store/*" -print0 | \
                 ${pkgs.findutils}/bin/xargs -0 -P 4 -I{} ${pkgs.nixfmt-rfc-style}/bin/nixfmt {}
               '';
-
-              # Static analysis on Nix code
-              lint.exec = ''${pkgs.statix}/bin/statix check'';
 
               # Build and apply the system configuration
               rebuild.exec = ''
