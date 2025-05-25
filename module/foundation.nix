@@ -222,10 +222,7 @@ in
             XDG_STATE_HOME = "\${HOME}/.local/state";
           };
 
-          sessionPath = [
-            "$HOME/scripts"
-            "$HOME/scripts/yeelight"
-          ];
+          # Removed ~/scripts from PATH - scripts now embedded in automation.nix
         };
         programs.home-manager.enable = true;
       };

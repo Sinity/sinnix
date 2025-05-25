@@ -4,29 +4,23 @@
 
 { pkgs, ... }:
 let
-  # Scripts inlined from module/home/scripts/scripts/*
-  wall-change = pkgs.writeShellScriptBin "wall-change" ''
-    #!/usr/bin/env bash
-    DIR="$HOME/pic/wallpaper"
-    PICS=($(find "$DIR" -type f \( -name "*.jpg" -o -name "*.jpeg" -o -name "*.png" -o -name "*.gif" \)))
-    RANDOMPICS="''${PICS[ $RANDOM % ''${#PICS[@]} ]}"
-    ${pkgs.swaybg}/bin/swaybg -m fill -i "$RANDOMPICS"
-  '';
-
-  wallpaper-picker = pkgs.writeShellScriptBin "wallpaper-picker" ''
-    #!/usr/bin/env bash
-    DIR="$HOME/pic/wallpaper"
-    cd "$DIR"
-    selected=$(find . -type f \( -name "*.jpg" -o -name "*.jpeg" -o -name "*.png" -o -name "*.gif" \) | sed 's|\./||' | rofi -dmenu -p "🖼️")
-    if [[ -n "$selected" ]]; then
-        ${pkgs.swaybg}/bin/swaybg -m fill -i "$DIR/$selected" &
-    fi
-  '';
-
   runbg = pkgs.writeShellScriptBin "runbg" ''
     #!/usr/bin/env bash
-    $@ &
-    disown
+
+    [ $# -eq 0 ] && {  # $# is number of args
+        echo "$(${pkgs.coreutils}/bin/basename $0): missing command" >&2
+        exit 1
+    }
+    prog="$(${pkgs.which}/bin/which "$1")"  # Validate command exists
+    [ -z "$prog" ] && {
+        echo "$(${pkgs.coreutils}/bin/basename $0): unknown command: $1" >&2
+        exit 1
+    }
+    shift  # remove $1, now $prog, from args
+    ${pkgs.coreutils}/bin/tty -s && exec </dev/null      # if stdin is a terminal, redirect from null
+    ${pkgs.coreutils}/bin/tty -s <&1 && exec >/dev/null  # if stdout is a terminal, redirect to null
+    ${pkgs.coreutils}/bin/tty -s <&2 && exec 2>&1        # stderr to stdout (which might not be null)
+    "$prog" "$@" &  # $@ is all args
   '';
 
   lofi = pkgs.writeScriptBin "lofi" ''
@@ -62,15 +56,6 @@ let
     else
         ${pkgs.waybar}/bin/waybar &
     fi
-  '';
-
-  maxfetch = pkgs.writeScriptBin "maxfetch" ''
-    #!/usr/bin/env bash
-    echo "System Information:"
-    echo "OS: $(${pkgs.coreutils}/bin/uname -o)"
-    echo "Kernel: $(${pkgs.coreutils}/bin/uname -r)"
-    echo "Uptime: $(${pkgs.procps}/bin/uptime -p)"
-    echo "Shell: $SHELL"
   '';
 
   compress = pkgs.writeScriptBin "compress" ''
@@ -109,57 +94,12 @@ let
     esac
   '';
 
-  shutdown-script = pkgs.writeScriptBin "shutdown-script" ''
-    #!/usr/bin/env bash
-    ${pkgs.systemd}/bin/systemctl poweroff
-  '';
-
   show-keybinds = pkgs.writeScriptBin "show-keybinds" ''
     #!/usr/bin/env bash
-    ${pkgs.rofi-wayland}/bin/rofi -dmenu -p "Keybinds" <<EOF
-    SUPER + Return: Open terminal
-    SUPER + D: Application launcher
-    SUPER + Q: Close window
-    SUPER + F: Fullscreen
-    SUPER + Space: Toggle floating
-    EOF
-  '';
-
-  ascii = pkgs.writeScriptBin "ascii" ''
-    #!/usr/bin/env bash
-    echo "    ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄"
-    echo "    ██ ▄▄▄▄▄ █▀▄▀█ ▄▄▄▄▄ ██ ▄▄▄▄▄ █ ▄▄▀█ ▄▄▄▄ █ ▄▄▄▄▄ █"
-    echo "    ██ █████ █ █▀█ █████ ██ █████ █ ██ █ ████ █ █████ █"
-    echo "    ██▄▄▄▄▄▄▄█▄▄▄█▄▄▄▄▄▄▄██▄▄▄▄▄▄▄█▄██▄█▄▄▄▄▄▄█▄▄▄▄▄▄▄█"
-  '';
-
-  record = pkgs.writeScriptBin "record" ''
-    #!/usr/bin/env bash
-    if ${pkgs.procps}/bin/pgrep -x "wl-screenrec" > /dev/null; then
-        ${pkgs.procps}/bin/pkill wl-screenrec
-        ${pkgs.libnotify}/bin/notify-send "Recording stopped"
-    else
-        ${pkgs.wl-screenrec}/bin/wl-screenrec -f "/realm/inbox/recording_$(${pkgs.coreutils}/bin/date +'%Y-%m-%d_%H-%M-%S').mp4" &
-        ${pkgs.libnotify}/bin/notify-send "Recording started"
-    fi
-  '';
-
-  rofi-power-menu = pkgs.writeScriptBin "rofi-power-menu" ''
-    #!/usr/bin/env bash
-    options="Shutdown\nReboot\nSuspend\nLogout"
-    selected=$(echo -e "$options" | ${pkgs.rofi-wayland}/bin/rofi -dmenu -p "Power Menu")
-
-    case "$selected" in
-        "Shutdown") ${pkgs.systemd}/bin/systemctl poweroff ;;
-        "Reboot") ${pkgs.systemd}/bin/systemctl reboot ;;
-        "Suspend") ${pkgs.systemd}/bin/systemctl suspend ;;
-        "Logout") ${pkgs.hyprland}/bin/hyprctl dispatch exit ;;
-    esac
-  '';
-
-  power-menu = pkgs.writeScriptBin "power-menu" ''
-    #!/usr/bin/env bash
-    rofi-power-menu
+    config_file=~/.config/hypr/hyprland.conf
+    keybinds=$(${pkgs.gnugrep}/bin/grep -oP '(?<=bind=).*' $config_file)
+    keybinds=$(echo "$keybinds" | ${pkgs.gnused}/bin/sed 's/,\([^,]*\)$/ = \1/' | ${pkgs.gnused}/bin/sed 's/, exec//g' | ${pkgs.gnused}/bin/sed 's/^,//g')
+    ${pkgs.rofi-wayland}/bin/rofi -dmenu -theme-str 'window {width: 50%;}' <<< "$keybinds"
   '';
 
   vm-start = pkgs.writeShellScriptBin "vm-start" ''
@@ -189,12 +129,284 @@ let
       echo "Gamma is back to 1.0"
     '';
   };
+
+  # Scripts from ~/scripts
+  combine-files = pkgs.writeShellScriptBin "combine-files" ''
+    #!/usr/bin/env bash
+    #
+    # combine-files.sh — Combine multiple text files into a single structured document
+    # Usage: ./combine-files.sh [options]
+
+    set -euo pipefail
+    IFS=$'\n\t'
+
+    # ------------------------
+    #  Dependencies check
+    # ------------------------
+    for cmd in fd fzf bat file stat date getopt; do
+      command -v "$cmd" &>/dev/null || {
+        echo "❌  '$cmd' is required but not installed." >&2
+        exit 1
+      }
+    done
+
+    # ------------------------
+    #  Defaults & help
+    # ------------------------
+    directory="."
+    output_file="combined.md"
+    output_format="markdown"
+
+    print_help() {
+      cat <<EOF
+    Usage: $(${pkgs.coreutils}/bin/basename "$0") [options]
+
+    Combine multiple text files into a single structured document.
+
+    Options:
+      -d, --directory DIR   Directory to scan (default: current directory)
+      -o, --output FILE     Output file (default: combined_configs.txt)
+      -f, --format FORMAT   Output format: text, markdown (default: markdown)
+      -h, --help            Show this help message
+    EOF
+      exit 0
+    }
+
+    # ------------------------
+    #  Parse arguments
+    # ------------------------
+    OPTIONS=d:o:f:h
+    LONGOPTS=directory:,output:,format:,help
+
+    ! PARSED=$(${pkgs.util-linux}/bin/getopt --options=$OPTIONS --longoptions=$LONGOPTS --name "$0" -- "$@") && exit 2
+    eval set -- "$PARSED"
+
+    while true; do
+      case "$1" in
+      -d | --directory)
+        directory="$2"
+        shift 2
+        ;;
+      -o | --output)
+        output_file="$2"
+        shift 2
+        ;;
+      -f | --format)
+        output_format="$2"
+        shift 2
+        ;;
+      -h | --help) print_help ;;
+      --)
+        shift
+        break
+        ;;
+      *) break ;;
+      esac
+    done
+
+    # ------------------------
+    #  Validate directory
+    # ------------------------
+    if [[ ! -d "$directory" ]]; then
+      echo "Error: Directory '$directory' does not exist." >&2
+      exit 1
+    fi
+
+    # ------------------------
+    #  Gather & filter files
+    # ------------------------
+    # fd will respect .gitignore and skip hidden by default; we re‑include hidden but then
+    # explicitly exclude a few infra dirs:
+    mapfile -t all_files < <(
+      ${pkgs.fd}/bin/fd --type f --hidden \
+        --exclude .git --exclude .obsidian --exclude node_modules --exclude vendor --exclude build \
+        . "$directory"
+    )
+
+    # remove non-text files
+    files=()
+    for f in "''${all_files[@]}"; do
+      if ${pkgs.file}/bin/file --mime-type -b "$f" | ${pkgs.gnugrep}/bin/grep -q '^text/'; then
+        files+=("$f")
+      fi
+    done
+
+    if [[ ''${#files[@]} -eq 0 ]]; then
+      echo "No suitable text files found in '$directory'." >&2
+      exit 1
+    fi
+
+    # ------------------------
+    #  fzf selection
+    # ------------------------
+    echo "Select files to include:"
+    mapfile -t selected_files < <(
+      printf '%s\n' "''${files[@]}" |
+        ${pkgs.fzf}/bin/fzf --multi --layout=reverse \
+          --preview 'sz=$(${pkgs.coreutils}/bin/stat -c%s {}); tk=$((sz/4)); \
+                       printf "Size: %d bytes | Tokens: %d\n\n" "$sz" "$tk"; \
+                       ${pkgs.bat}/bin/bat --style=numbers --color=always {}' \
+          --preview-window=right:60%:wrap \
+          --prompt="› "
+    )
+
+    if [[ ''${#selected_files[@]} -eq 0 ]]; then
+      echo "No files selected. Exiting."
+      exit 0
+    fi
+
+    # ------------------------
+    #  Compute totals & header
+    # ------------------------
+    current_date=$(${pkgs.coreutils}/bin/date -u +"%Y-%m-%dT%H:%M:%SZ")
+    total_files=''${#selected_files[@]}
+    total_tokens=0
+
+    # precompute size & token per file
+    declare -A size_map token_map
+    for f in "''${selected_files[@]}"; do
+      sz=$(${pkgs.coreutils}/bin/stat -c%s "$f")
+      tk=$((sz / 4))
+      size_map["$f"]=$sz
+      token_map["$f"]=$tk
+      total_tokens=$((total_tokens + tk))
+    done
+
+    # ------------------------
+    #  Write output
+    # ------------------------
+    : >"$output_file"
+
+    if [[ "$output_format" == "markdown" ]]; then
+      {
+        echo '---'
+        echo "generated: $current_date"
+        echo "base_directory: $directory"
+        echo "total_files: $total_files"
+        echo "total_tokens_est: $total_tokens"
+        echo '---'
+        echo
+        echo "## Table of Contents"
+        echo
+        i=1
+        for f in "''${selected_files[@]}"; do
+          rel=''${f#"$directory"/}
+          echo "$i. [$rel](#file-$i)"
+          i=$((i + 1))
+        done
+        echo
+      } >>"$output_file"
+    else
+      # plain‑text header
+      {
+        echo "COMBINED FILES"
+        echo "Generated: $current_date"
+        echo "Directory: $directory"
+        echo
+      } >>"$output_file"
+    fi
+
+    # ------------------------
+    #  Append each file
+    # ------------------------
+    i=1
+    for f in "''${selected_files[@]}"; do
+      rel=''${f#"$directory"/}
+      sz=''${size_map["$f"]}
+      tk=''${token_map["$f"]}
+      typ=$(${pkgs.file}/bin/file -b "$f" | ${pkgs.coreutils}/bin/cut -d, -f1)
+
+      if [[ "$output_format" == "markdown" ]]; then
+        echo "<a id=\"file-$i\"></a>" >>"$output_file"
+        echo "## File: $rel" >>"$output_file"
+        echo >>"$output_file"
+        echo "- Size: $sz bytes" >>"$output_file"
+        echo "- Tokens: $tk" >>"$output_file"
+        echo "- Type: $typ" >>"$output_file"
+        echo >>"$output_file"
+        # code‑block language detection (unchanged)
+        ext=''${f##*.}
+        case "$ext" in
+        js | ts) lang=javascript ;;
+        py) lang=python ;;
+        rb) lang=ruby ;;
+        sh | bash) lang=bash ;;
+        nix) lang=nix ;;
+        md) lang=markdown ;;
+        html) lang=html ;;
+        css) lang=css ;;
+        json) lang=json ;;
+        xml) lang=xml ;;
+        lua) lang=lua ;;
+        *) lang="" ;;
+        esac
+        echo '```'"$lang" >>"$output_file"
+        ${pkgs.coreutils}/bin/cat "$f" >>"$output_file"
+        echo '```' >>"$output_file"
+        echo >>"$output_file"
+      else
+        # plain‑text
+        echo "========================================" >>"$output_file"
+        echo "FILE: $rel" >>"$output_file"
+        echo "Size: $sz bytes | Tokens: $tk | Type: $typ" >>"$output_file"
+        echo "========================================" >>"$output_file"
+        echo >>"$output_file"
+        ${pkgs.coreutils}/bin/cat "$f" >>"$output_file"
+        echo -e "\n" >>"$output_file"
+      fi
+
+      i=$((i + 1))
+    done
+
+    echo "Done! Combined configuration saved to '$output_file'."
+  '';
+
+  log-to-knowledgebase = pkgs.writeShellScriptBin "log-to-knowledgebase" ''
+    #!/usr/bin/env bash
+
+    # Define file path
+    LOG_FILE=/realm/knowledgebase/50_logs/raw-log.md
+    DATETIME=$(${pkgs.coreutils}/bin/date "+%Y-%m-%d %H:%M:%S")
+
+    # Extract recent entries (up to 1000) from the log file
+    RECENT_ENTRIES=$(${pkgs.coreutils}/bin/tac "$LOG_FILE" | ${pkgs.coreutils}/bin/head -1000)
+
+    # Get user input using rofi with recent entries as suggestions
+    SELECTED=$(echo -e "$RECENT_ENTRIES" | ${pkgs.rofi-wayland}/bin/rofi -dmenu -p "Log entry:" -theme-str 'window {width: 80%; lines: 15;}')
+
+    # Exit if canceled
+    if [ -z "$SELECTED" ]; then
+      exit 0
+    fi
+
+    # Check if user selected an existing entry or typed a new one
+    if echo "$RECENT_ENTRIES" | ${pkgs.gnugrep}/bin/grep -q "^$SELECTED$"; then
+      # User selected an existing entry - extract just the content part
+      ENTRY=$(echo "$SELECTED" | ${pkgs.gnused}/bin/sed -E 's/^- \*\*[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\*\* //')
+    else
+      # User typed a new entry
+      ENTRY="$SELECTED"
+    fi
+
+    # Format the log entry with bolded timestamp
+    FORMATTED_ENTRY="- **$DATETIME** $ENTRY"
+
+    # Add the log entry at the end of the log file
+    echo -e "$FORMATTED_ENTRY" >>"$LOG_FILE"
+
+    # Create a more informative notification
+    TRUNCATED_ENTRY=$(echo "$ENTRY" | ${pkgs.coreutils}/bin/cut -c 1-50)
+    if [ ''${#ENTRY} -gt 50 ]; then
+      TRUNCATED_ENTRY="$TRUNCATED_ENTRY..."
+    fi
+
+    ${pkgs.libnotify}/bin/notify-send "Log Entry Added" "Time: $DATETIME\nEntry: $TRUNCATED_ENTRY\nFile: $LOG_FILE" -t 3000
+  '';
 in
 {
   system.nixos.tags = [ "automation-domain-v0.3" ];
 
   services = {
-
     transmission = {
       enable = true;
       settings = {
@@ -221,8 +433,6 @@ in
 
   home-manager.users.sinity = {
     home.packages = with pkgs; [
-      wall-change
-      wallpaper-picker
       vm-start
 
       runbg
@@ -232,24 +442,16 @@ in
       toggle_opacity
       toggle_waybar
 
-      # System information
-      maxfetch
-
       # File management automation
       compress
       extract
-
-      # Power management
-      shutdown-script
-      power-menu
-      rofi-power-menu
+      combine-files
 
       # Documentation and help
       show-keybinds
-      ascii
 
-      # Media recording
-      record
+      # Knowledge management
+      log-to-knowledgebase
 
       # ASBL mitigation
       asbl-fooler
@@ -258,6 +460,11 @@ in
       btop
       ncdu # disk space
       nitch # system fetch util
+
+      # Modern file utilities
+      dua # Disk usage analyzer (like ncdu but faster)
+      yazi # Terminal file manager
+      fselect # SQL-like file search
 
       # From home/system.nix - CLI utilities
       toipe # typing test in the terminal
@@ -281,8 +488,8 @@ in
       unzip # For extract.sh
       unrar # For extract.sh
       p7zip # For extract.sh
-      zenity # For record.sh dialogs
-      rofi-wayland # For various scripts (wallpaper-picker, show-keybinds)
+      zenity # For dialogs
+      rofi-wayland # For various scripts (show-keybinds, log-to-knowledgebase)
 
       # VM management dependencies (for vm-start)
       virt-viewer
@@ -294,6 +501,7 @@ in
     ];
 
     # Activity monitoring and tracking
+
     # From home/system.nix - btop configuration
     programs.btop = {
       enable = true;
@@ -331,7 +539,6 @@ in
       };
     };
 
-    # ASBL mitigation and ActivityWatch systemd configuration
     systemd.user = {
       services = {
         asbl-no-moar = {

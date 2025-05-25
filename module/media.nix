@@ -110,6 +110,7 @@
 
       packages = with pkgs; [
         spotify
+        ncspot # Terminal Spotify client
         mpv
         mpvc
         svp # SmoothVideo Project 4 (SVP4) vlc
@@ -143,6 +144,14 @@
         # steam-tui
         # protonup
         # bottles
+        # Factorio with authentication token
+        (factorio.override {
+          username = "Sinityy";
+          token = "$FACTORIO_TOKEN";
+        })
+        (pkgs.writeShellScriptBin "factorio-steam" ''
+          exec ${steam-run}/bin/steam-run ${factorio}/bin/factorio "$@"
+        '')
 
         # Hydrus with custom setup (from hydrus.nix)
         (pkgs.hydrus.overrideAttrs (oldAttrs: {

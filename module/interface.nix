@@ -54,7 +54,6 @@
           source-han-sans
           source-han-serif
 
-          fira-code-nerdfont
           font-awesome
 
           hermit
@@ -109,7 +108,7 @@
           bibata-cursors
 
           # Fonts (from packages.nix)
-          fira-code # Monospaced font with programming ligatures
+          # fira-code # Monospaced font with programming ligatures
           hack-font # Patched font Hack from nerd fonts library
 
           # Dependencies and libraries
@@ -349,19 +348,17 @@
             "SUPER SHIFT, S, exec, hyprctl dispatch exec '[workspace 5 silent] SoundWireServer'"
             "SUPER, Escape, exec, swaylock"
             "ALT, Escape, exec, hyprlock"
-            "SUPER SHIFT, Escape, exec, power-menu"
             "SUPER, P, pseudo,"
             "SUPER, Y, togglesplit,"
             "SUPER, T, exec, toggle_opacity"
             "SUPER, E, exec, nautilus"
             "SUPER SHIFT, B, exec, toggle_waybar"
             "SUPER, C ,exec, hyprpicker -a"
-            "SUPER, W,exec, wallpaper-picker"
             "SUPER, N, exec, swaync-client -t -sw"
             "SUPER SHIFT, W, exec, vm-start"
             "SUPER, Print, exec, grimblast --notify --cursor copysave output /realm/inbox/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
             ", Print, exec, grimblast --notify --freeze copysave area /realm/inbox/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
-            ", F8, exec, ~/scripts/log-to-obsidian.sh"
+            ", F8, exec, log-to-knowledgebase"
             "SUPER, H, movefocus, l"
             "SUPER, J, movefocus, d"
             "SUPER, K, movefocus, u"
@@ -736,7 +733,6 @@
           "custom/launcher" = {
             format = "";
             on-click = "rofi -show drun";
-            on-click-right = "wallpaper-picker";
             tooltip = "false";
           };
           "custom/notification" = {
@@ -959,28 +955,6 @@
                   {
                     label = "󰩭  Window / Region";
                     command = "grimblast --notify --cursor --freeze copy area";
-                  }
-                ];
-              };
-              "menu#record" = {
-                label = " 󰕧 ";
-                position = "left";
-                actions = [
-                  {
-                    label = "  Record screen";
-                    command = "record screen & ; swaync-client -t";
-                  }
-                  {
-                    label = "  Record selection";
-                    command = "record area & ; swaync-client -t";
-                  }
-                  {
-                    label = "  Record GIF";
-                    command = "record gif & ; swaync-client -t";
-                  }
-                  {
-                    label = "󰻃  Stop";
-                    command = "record stop";
                   }
                 ];
               };
