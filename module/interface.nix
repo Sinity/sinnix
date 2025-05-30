@@ -2,12 +2,78 @@
 # Complete UI experience (system + desktop)
 # Consolidates: desktop environment, themes, terminal, compositor
 
-{ lib, pkgs, ... }:
+{
+  lib,
+  pkgs,
+  config,
+  inputs,
+  ...
+}:
 {
   config = {
     system.nixos.tags = [ "interface-domain-v0.3" ];
 
-    programs.hyprland.enable = true;
+    # === STYLIX SYSTEM-WIDE THEMING ===
+    stylix = {
+      enable = true;
+
+      # Use gruvbox dark theme
+      base16Scheme = "${pkgs.base16-schemes}/share/themes/gruvbox-dark-medium.yaml";
+
+      image = ./asset/forest.jpg;
+
+      fonts = {
+        monospace = {
+          package = pkgs.nerd-fonts.sauce-code-pro;
+          name = "SauceCodePro Nerd Font Mono";
+        };
+        sansSerif = {
+          package = pkgs.liberation_ttf; # Arimo is part of liberation fonts
+          name = "Arimo";
+          # name = "Noto Sans";  # Alternative
+        };
+        serif = {
+          package = pkgs.liberation_ttf; # Tinos is part of liberation fonts
+          name = "Tinos";
+          # name = "Noto Serif";  # Alternative
+        };
+        emoji = {
+          package = pkgs.noto-fonts-emoji;
+          name = "Noto Color Emoji";
+        };
+        sizes = {
+          applications = 12;
+          desktop = 11;
+          popups = 11;
+          terminal = 16;
+        };
+      };
+
+      cursor = {
+        package = pkgs.bibata-cursors;
+        name = "Bibata-Modern-Ice";
+        size = 24;
+      };
+
+      opacity = {
+        applications = 1.0;
+        desktop = 1.0;
+        popups = 1.0;
+        terminal = 0.9;
+      };
+
+      polarity = "dark";
+    };
+
+    programs.hyprland = {
+      enable = true;
+      withUWSM = true;
+      package = inputs.hyprland.packages.${pkgs.system}.hyprland;
+    };
+
+    programs.uwsm = {
+      enable = true;
+    };
 
     xdg.portal = {
       enable = true;
@@ -15,7 +81,6 @@
       xdgOpenUsePortal = true;
       extraPortals = with pkgs; [
         xdg-desktop-portal
-        xdg-desktop-portal-hyprland
         xdg-desktop-portal-gtk
       ];
       config = {
@@ -36,50 +101,14 @@
       wlr-randr # Wayland equivalent to xrandr
     ];
 
-    fonts = {
-      fontDir.enable = true;
-      packages =
-        with pkgs;
-        [
-          noto-fonts
-          noto-fonts-extra
-          noto-fonts-emoji
-
-          source-code-pro
-          source-sans-pro
-          source-serif-pro
-
-          source-han-code-jp
-          source-han-mono
-          source-han-sans
-          source-han-serif
-
-          font-awesome
-
-          hermit
-          roboto
-          roboto-mono
-          roboto-slab
-        ]
-        ++ builtins.filter lib.attrsets.isDerivation (builtins.attrValues pkgs.nerd-fonts);
-
-      fontconfig = {
-        enable = true;
-        defaultFonts = {
-          monospace = [ "SauceCodePro Nerd Font Mono" ];
-          sansSerif = [ "Arimo" ];
-          serif = [ "Tinos" ];
-          emoji = [ "Noto Color Emoji" ];
-        };
-      };
-    };
-
     # === HOME MANAGER CONFIGURATION FOR INTERFACE DOMAIN ===
     home-manager.users.sinity = {
 
       # === DESKTOP ENVIRONMENT (from home/desktop) ===
       home = {
         packages = with pkgs; [
+          # Pyprland for advanced scratchpad management
+          pyprland
           # Screenshot and screen recording utilities
           grim # Screenshot utility
           slurp # Region selection tool
@@ -89,8 +118,7 @@
           # Clipboard management
           wl-clip-persist # Keep clipboard content after application closes
           wl-clipboard # Wayland clipboard utilities
-          cliphist # Clipboard history manager
-          clipboard-jh # Cut, copy, and paste anything in your terminal
+          clipse # TUI clipboard manager with persistent history
 
           # Notification center from swaync/default.nix
           swaynotificationcenter
@@ -101,15 +129,6 @@
           wl-gammactl # Adjust gamma
           wlsunset # Night light/blue light filter
           redshift # Adjust color temperature (X11/Wayland)
-
-          # GTK Theming Packages (from packages.nix)
-          (gruvbox-gtk-theme.override { colorVariants = [ "dark" ]; })
-          (papirus-icon-theme.override { color = "black"; })
-          bibata-cursors
-
-          # Fonts (from packages.nix)
-          # fira-code # Monospaced font with programming ligatures
-          hack-font # Patched font Hack from nerd fonts library
 
           # Dependencies and libraries
           glib # GLib library
@@ -130,7 +149,17 @@
           ddcutil # Query and change Linux monitor settings
           transmission_3-gtk # BitTorrent client
 
-          # Additional desktop apps from desktop-apps.nix
+          # Audio control alternatives
+          pulsemixer # TUI alternative to pavucontrol
+          pwvucontrol # Modern pipewire GUI
+
+          # Bluetooth alternatives
+          bluetuith # Better TUI bluetooth manager
+          blueman # GUI bluetooth manager
+
+          # Music
+          ncspot # Terminal Spotify client
+
           evtest # Input device event monitor
           meld # Diff tool
           piper # Mouse configuration
@@ -143,7 +172,6 @@
           bc # Calculator
           calc # Another calculator
 
-          # Additional packages from packages.nix
           soundwireserver # Audio streaming (used by hyprland keybind)
           imgur-screenshot
           usbview
@@ -159,133 +187,102 @@
         ];
       };
 
-      # === GTK THEME CONFIGURATION (from desktop/themes.nix) ===
-      gtk = {
-        enable = true;
-        theme = {
-          name = "Gruvbox-Dark";
-          package = pkgs.gruvbox-gtk-theme.override { colorVariants = [ "dark" ]; };
-        };
-        iconTheme = {
-          name = "Papirus-Dark";
-          package = pkgs.papirus-icon-theme.override { color = "black"; };
-        };
-        cursorTheme = {
-          name = "Bibata-Modern-Ice";
-          size = 24;
-          package = pkgs.bibata-cursors;
-        };
-
-        gtk3.extraConfig = {
-          gtk-icon-theme-name = "Papirus-Dark";
-          gtk-theme-name = "Gruvbox-Dark";
-          gtk-cursor-theme-name = "Bibata-Modern-Ice";
+      # UWSM systemd services for autostart applications
+      systemd.user.services = {
+        wl-clip-persist = {
+          Unit = {
+            Description = "Wayland clipboard persistence";
+            After = [ "graphical-session.target" ];
+            PartOf = [ "graphical-session.target" ];
+          };
+          Service = {
+            Type = "simple";
+            ExecStart = "${pkgs.wl-clip-persist}/bin/wl-clip-persist --clipboard both";
+            Restart = "on-failure";
+            RestartSec = 1;
+          };
+          Install = {
+            WantedBy = [ "graphical-session.target" ];
+          };
         };
 
-        gtk4.extraConfig = {
-          gtk-icon-theme-name = "Papirus-Dark";
-          gtk-theme-name = "Gruvbox-Dark";
-          gtk-cursor-theme-name = "Bibata-Modern-Ice";
+        nm-applet = {
+          Unit = {
+            Description = "NetworkManager applet";
+            After = [ "graphical-session.target" ];
+            PartOf = [ "graphical-session.target" ];
+          };
+          Service = {
+            Type = "simple";
+            ExecStart = "${pkgs.networkmanagerapplet}/bin/nm-applet";
+            Restart = "on-failure";
+            RestartSec = 1;
+          };
+          Install = {
+            WantedBy = [ "graphical-session.target" ];
+          };
         };
       };
-
-      home.file.".icons/default/index.theme".text = ''
-        [Icon Theme]
-        Inherits=Bibata-Modern-Ice
-      '';
-
-      systemd.user.targets.hyprland-session.Unit.Wants = [ "xdg-desktop-autostart.target" ];
 
       wayland.windowManager.hyprland = {
         enable = true;
         xwayland.enable = true;
-        systemd.enable = true;
+        systemd.enable = false;
+
+        # Hyprland plugins
+        plugins = [ ];
 
         settings = {
           exec-once = [
-            "systemctl --user import-environment &"
-            "hash dbus-update-activation-environment 2>/dev/null &"
-            "dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE XDG_SESSION_DESKTOP &"
-            "nm-applet &"
-            "wl-clip-persist --clipboard both"
-            "swaybg -m fill -i $(find ~/pic/wallpaper/ -maxdepth 1 -type f) &"
-            "hyprctl setcursor Bibata-Modern-Ice 24 &"
-            "poweralertd &"
-            "waybar &"
-            "swaync &"
-            "wl-paste --watch cliphist store -max-items 99999 -max-dedupe-search 20 &"
-            "systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP &"
-            "systemctl --user restart pipewire &"
-            "systemctl --user restart xdg-desktop-portal.service &"
-            "systemctl --user restart xdg-desktop-portal-hyprland.service &"
+            # UWSM handles most of the environment and service management
+            "uwsm finalize"
+          ];
+
+          # Monitor configuration for 4K HDR display
+          monitor = [
+            "DP-3,3840x2160@119.999001,0x0,1,bitdepth,10,cm,hdr,sdrbrightness,1.4,sdrsaturation,1.0"
           ];
 
           input = {
             kb_layout = "pl";
-            kb_options = "";
-            numlock_by_default = true;
             repeat_rate = 40;
             repeat_delay = 400;
+            mouse_refocus = true; # Refocus when mouse moves
             sensitivity = 0;
             accel_profile = "flat";
             force_no_accel = 0;
             scroll_factor = 1;
-            emulate_discrete_scroll = 1;
             follow_mouse = 1;
-            mouse_refocus = false;
-            float_switch_override_focus = 2;
-            special_fallthrough = true;
           };
 
           general = {
             border_size = 3;
             gaps_in = 10;
             gaps_out = 20;
-            "col.inactive_border" = "0x00000000";
-            "col.active_border" = "rgb(98971a) rgb(cc241d) 45deg";
-            layout = "dwindle";
+            layout = "master"; # Default to master layout as requested
             resize_on_border = true;
           };
 
+          master = {
+            new_status = "slave"; # New windows go to stack
+            new_on_active = "none"; # Don't disturb current window
+            mfact = 0.6; # Master takes 60% of screen as requested
+            orientation = "left"; # Master on left side as requested
+            special_scale_factor = 1;
+            always_keep_position = true; # Keep master position even when alone
+            # Note: With orientation left, master is on left, slaves on right
+          };
+
           misc = {
-            disable_hyprland_logo = false;
-            vrr = 1;
+            disable_hyprland_logo = true;
+            vrr = 2; # Fullscreen only VRR for better performance
             mouse_move_enables_dpms = true;
             key_press_enables_dpms = true;
             always_follow_on_dnd = true;
-            layers_hog_keyboard_focus = true;
-            animate_manual_resizes = false;
-            animate_mouse_windowdragging = false;
-            disable_autoreload = true;
             focus_on_activate = true;
-            new_window_takes_over_fullscreen = 2;
-            middle_click_paste = true;
-          };
-
-          dwindle = {
-            force_split = 0;
-            special_scale_factor = 1.0;
-            split_width_multiplier = 1.0;
-            use_active_for_splits = true;
-            pseudotile = "yes";
-            preserve_split = "yes";
-          };
-
-          master = {
-            new_status = "master";
-            special_scale_factor = 1;
-          };
-
-          group = {
-            insert_after_current = true;
-            focus_removed_window = true;
-            groupbar = {
-              enabled = true;
-              gradients = true;
-              height = 14;
-              render_titles = true;
-              scrolling = true;
-            };
+            middle_click_paste = true; # Enable middle-click paste
+            enable_swallow = true; # Terminal window swallowing
+            swallow_regex = "^(kitty)$"; # Your terminal
           };
 
           debug = {
@@ -297,72 +294,59 @@
           decoration = {
             rounding = 0;
             active_opacity = 1.0;
-            inactive_opacity = 0.9;
-            fullscreen_opacity = 1.0;
+            inactive_opacity = 0.7; # More dramatic focus hierarchy
+            dim_inactive = true;
+            dim_strength = 0.3; # Stronger dimming for better focus
+
             blur = {
               enabled = true;
-              size = 4;
-              passes = 2;
-              contrast = 1.4;
-              brightness = 1;
-              vibrancy = 0.5;
-              special = true;
+              size = 8; # Increased for RTX 3080
+              passes = 3; # Higher quality blur
+              new_optimizations = true;
+              vibrancy = 0.15; # Subtle color enhancement
+              vibrancy_darkness = 0.2;
+            };
+
+            shadow = {
+              enabled = true;
+              range = 20;
+              render_power = 3;
+              offset = "0 8";
             };
           };
 
           animations = {
-            enabled = true;
-            bezier = [
-              "fluent_decel, 0, 0.2, 0.4, 1"
-              "easeOutCirc, 0, 0.55, 0.45, 1"
-              "easeOutCubic, 0.33, 1, 0.68, 1"
-              "easeinoutsine, 0.37, 0, 0.63, 1"
-            ];
-            animation = [
-              "windowsIn, 1, 3, easeOutCubic, popin 30%"
-              "windowsOut, 1, 3, fluent_decel, popin 70%"
-              "windowsMove, 1, 2, easeinoutsine, slide"
-              "fadeIn, 1, 3, easeOutCubic"
-              "fadeOut, 1, 2, easeOutCubic"
-              "fadeSwitch, 0, 1, easeOutCirc"
-              "fadeShadow, 1, 10, easeOutCirc"
-              "fadeDim, 1, 4, fluent_decel"
-              "border, 1, 2.7, easeOutCirc"
-              "borderangle, 1, 30, fluent_decel, once"
-              "workspaces, 1, 4, easeOutCubic, fade"
-            ];
+            enabled = false;
           };
 
           bind = [
-            "SUPER, F1, exec, show-keybinds"
+            # === CORE FUNCTIONALITY ===
             "SUPER, Return, exec, kitty"
-            "ALT, Return, exec, kitty --title float_kitty"
-            "SUPER SHIFT, Return, exec, kitty --start-as=fullscreen -o 'font_size=16'"
-            "SUPER, Q, killactive,"
+            "SUPER, Q, killactive"
             "SUPER, F, fullscreen, 0"
-            "SUPER SHIFT, F, fullscreen, 1"
-            "SUPER, Space, togglefloating,"
-            "SUPER, Space, centerwindow,"
-            "SUPER, Space, resizeactive, exact 950 600"
-            "SUPER, D, exec, rofi -show drun || pkill rofi"
-            "SUPER SHIFT, S, exec, hyprctl dispatch exec '[workspace 5 silent] SoundWireServer'"
-            "SUPER, Escape, exec, swaylock"
-            "ALT, Escape, exec, hyprlock"
-            "SUPER, P, pseudo,"
-            "SUPER, Y, togglesplit,"
-            "SUPER, T, exec, toggle_opacity"
-            "SUPER, E, exec, nautilus"
-            "SUPER SHIFT, B, exec, toggle_waybar"
-            "SUPER, C ,exec, hyprpicker -a"
-            "SUPER, N, exec, swaync-client -t -sw"
-            "SUPER SHIFT, W, exec, vm-start"
-            "SUPER, Print, exec, grimblast --notify --cursor copysave output /realm/inbox/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
-            ", Print, exec, grimblast --notify --freeze copysave area /realm/inbox/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
-            ", F8, exec, log-to-knowledgebase"
+            "SUPER, D, exec, tofi-drun --drun-launch=true"
+            "SUPER, Escape, exec, hyprlock"
+
+            # === WINDOW MANAGEMENT ===
+            # Focus movement (vim-style) - works for all layouts
             "SUPER, H, movefocus, l"
             "SUPER, J, movefocus, d"
             "SUPER, K, movefocus, u"
             "SUPER, L, movefocus, r"
+
+            # Window movement - works for all layouts
+            "SUPER SHIFT, H, movewindow, l"
+            "SUPER SHIFT, L, movewindow, r"
+            "SUPER SHIFT, K, movewindow, u"
+            "SUPER SHIFT, J, movewindow, d"
+
+            # Master layout control (defined in extraConfig for more options)
+
+            # Floating
+            "SUPER, Space, togglefloating"
+            "SUPER, Space, centerwindow"
+
+            # === WORKSPACES ===
             "SUPER, 1, workspace, 1"
             "SUPER, 2, workspace, 2"
             "SUPER, 3, workspace, 3"
@@ -372,40 +356,54 @@
             "SUPER, 7, workspace, 7"
             "SUPER, 8, workspace, 8"
             "SUPER, 9, workspace, 9"
-            "SUPER, 0, workspace, 10"
-            "SUPER SHIFT, 1, movetoworkspacesilent, 1"
-            "SUPER SHIFT, 2, movetoworkspacesilent, 2"
-            "SUPER SHIFT, 3, movetoworkspacesilent, 3"
-            "SUPER SHIFT, 4, movetoworkspacesilent, 4"
-            "SUPER SHIFT, 5, movetoworkspacesilent, 5"
-            "SUPER SHIFT, 6, movetoworkspacesilent, 6"
-            "SUPER SHIFT, 7, movetoworkspacesilent, 7"
-            "SUPER SHIFT, 8, movetoworkspacesilent, 8"
-            "SUPER SHIFT, 9, movetoworkspacesilent, 9"
-            "SUPER SHIFT, 0, movetoworkspacesilent, 10"
-            "SUPER CTRL, c, movetoworkspace, empty"
-            "SUPER SHIFT, H, movewindow, l"
-            "SUPER SHIFT, L, movewindow, r"
-            "SUPER SHIFT, K, movewindow, u"
-            "SUPER SHIFT, J, movewindow, d"
+
+            # Move to workspace
+            "SUPER SHIFT, 1, movetoworkspace, 1"
+            "SUPER SHIFT, 2, movetoworkspace, 2"
+            "SUPER SHIFT, 3, movetoworkspace, 3"
+            "SUPER SHIFT, 4, movetoworkspace, 4"
+            "SUPER SHIFT, 5, movetoworkspace, 5"
+
+            # === SPECIAL WORKSPACES ===
+            # Terminal scratchpad
+            "SUPER, grave, exec, pypr toggle term"
+
+            # Music scratchpad
+            "SUPER, S, exec, pypr toggle spotify"
+
+            # Pypr scratchpad notes (replaces native special workspace)
+            "SUPER, N, exec, pypr toggle notes"
+
+            # === UTILITIES ===
+            "SUPER, V, exec, kitty --class clipse -e clipse"
+            ", Print, exec, grimblast --notify --freeze copysave area /realm/inbox/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
+            "SUPER, Print, exec, grimblast --notify --cursor copysave output /realm/inbox/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
+            ", F8, exec, log-to-knowledgebase"
+
+            "SUPER SHIFT, P, pin" # Picture-in-Picture: pin window on top of all workspaces
+
+            # === MEDIA KEYS WITH VISUAL FEEDBACK ===
+            ",XF86AudioMute, exec, pamixer -t && notify-send -t 800 '🔇 Audio' 'Muted: '$(pamixer --get-mute)"
+            ",XF86AudioPlay, exec, playerctl play-pause && notify-send -t 1000 '♪ Media' '$(playerctl status)'"
+            ",XF86AudioNext, exec, playerctl next && notify-send -t 1000 '♪ Next' '$(playerctl metadata title 2>/dev/null || echo \"Unknown\")'"
+            ",XF86AudioPrev, exec, playerctl previous && notify-send -t 1000 '♪ Previous' '$(playerctl metadata title 2>/dev/null || echo \"Unknown\")'"
+            ",XF86AudioRaiseVolume, exec, pamixer -i 2 && notify-send -t 800 '🔊 Volume' '$(pamixer --get-volume)%'"
+            ",XF86AudioLowerVolume, exec, pamixer -d 2 && notify-send -t 800 '🔉 Volume' '$(pamixer --get-volume)%'"
+
+            # === QUICK RESIZE (for 4K) ===
             "SUPER CTRL, H, resizeactive, -80 0"
             "SUPER CTRL, L, resizeactive, 80 0"
             "SUPER CTRL, K, resizeactive, 0 -80"
             "SUPER CTRL, J, resizeactive, 0 80"
-            "SUPER ALT, H, moveactive,  -80 0"
-            "SUPER ALT, L, moveactive, 80 0"
-            "SUPER ALT, K, moveactive, 0 -80"
-            "SUPER ALT, J, moveactive, 0 80"
-            ",XF86AudioMute, exec, pamixer -t"
-            ",XF86AudioPlay, exec, playerctl play-pause"
-            ",XF86AudioNext, exec, playerctl next"
-            ",XF86AudioPrev, exec, playerctl previous"
-            ",XF86AudioStop, exec, playerctl stop"
-            ",XF86AudioRaiseVolume, exec, pamixer -i 2"
-            ",XF86AudioLowerVolume, exec, pamixer -d 2"
-            "SUPER, mouse_down, workspace, e-1"
-            "SUPER, mouse_up, workspace, e+1"
-            "SUPER, V, exec, cliphist list | rofi -dmenu -theme-str 'window {width: 50%;}' | cliphist decode | wl-copy"
+
+            # === MASTER LAYOUT MANAGEMENT ===
+            "SUPER, comma, layoutmsg, addmaster"
+            "SUPER, period, layoutmsg, removemaster"
+            "SUPER, M, layoutmsg, swapwithmaster"
+            "SUPER SHIFT, M, layoutmsg, focusmaster"
+            "SUPER, O, layoutmsg, orientationcycle"
+            "SUPER, minus, splitratio, -0.05"
+            "SUPER, equal, splitratio, +0.05"
           ];
 
           bindl = [
@@ -423,84 +421,100 @@
           ];
 
           windowrule = [
-            "float,class:qView"
-            "center,class:qView"
-            "size 1200 725,class:qView"
-            "float,class:imv"
-            "center,class:imv"
-            "size 1200 725,class:imv"
-            "tile,class:Aseprite"
-            "float,title:^(float_kitty)$"
-            "center,title:^(float_kitty)$"
-            "size 950 600,title:^(float_kitty)$"
-            "float,class:audacious"
-            "pin,class:rofi"
-            "tile,class:neovide"
-            "idleinhibit focus,class:mpv"
-            "float,class:udiskie"
-            "float,title:^(Transmission)$"
-            "float,title:^(Volume Control)$"
-            "float,title:^(Firefox — Sharing Indicator)$"
-            "move 0 0,title:^(Firefox — Sharing Indicator)$"
-            "size 700 450,title:^(Volume Control)$"
-            "move 40 55%,title:^(Volume Control)$"
-            "float,title:^(Picture-in-Picture)$"
-            "opacity 1.0 override 1.0 override,title:^(Picture-in-Picture)$"
-            "pin,title:^(Picture-in-Picture)$"
-            "opacity 1.0 override 1.0 override,title:^(.*imv.*)$"
-            "opacity 1.0 override 1.0 override,title:^(.*mpv.*)$"
-            "opacity 1.0 override 1.0 override,class:(Aseprite)"
-            "opacity 1.0 override 1.0 override,class:(Unity)"
-            "opacity 1.0 override 1.0 override,class:(google-chrome)"
-            "opacity 1.0 override 1.0 override,class:(evince)"
-            "workspace 1,class:^(zen)$"
-            "workspace 4,class:^(discord)$"
-            "workspace 4,class:^(Gimp-2.10)$"
-            "workspace 4,class:^(Aseprite)$"
-            "workspace 5,class:^(Audacious)$"
-            "workspace 5,class:^(Spotify)$"
+            # === CORE RULES ===
+
+            # Media should not dim screen
             "idleinhibit focus,class:^(mpv)$"
             "idleinhibit fullscreen,class:^(firefox)$"
-            "float,class:^(zenity)$"
-            "center,class:^(zenity)$"
-            "size 850 500,class:^(zenity)$"
-            "float,class:^(org.gnome.FileRoller)$"
-            "center,class:^(org.gnome.FileRoller)$"
-            "size 850 500,class:^(org.gnome.FileRoller)$"
-            "size 850 500,title:^(File Upload)$"
-            "float,class:^(pavucontrol)$"
-            "float,class:^(SoundWireServer)$"
-            "float,class:^(.sameboy-wrapped)$"
-            "float,class:^(file_progress)$"
-            "float,class:^(confirm)$"
-            "float,class:^(dialog)$"
-            "float,class:^(download)$"
-            "float,class:^(notification)$"
-            "float,class:^(error)$"
-            "float,class:^(confirmreset)$"
+            "idleinhibit fullscreen,class:^(google-chrome)$"
+
+            # === FLOATING WINDOWS ===
+            # Dialogs and popups
             "float,title:^(Open File)$"
-            "float,title:^(File Upload)$"
-            "float,title:^(branchdialog)$"
-            "float,title:^(Confirm to replace files)$"
-            "float,title:^(File Operation Progress)$"
-            "opacity 0.0 override,class:^(xwaylandvideobridge)$"
-            "noanim,class:^(xwaylandvideobridge)$"
-            "noinitialfocus,class:^(xwaylandvideobridge)$"
-            "maxsize 1 1,class:^(xwaylandvideobridge)$"
-            "noblur,class:^(xwaylandvideobridge)$"
-            "noanim,class:^(ueberzug)$"
+            "float,title:^(Save As)$"
+            "float,class:^(pavucontrol)$"
+            "float,class:^(nm-connection-editor)$"
+
+            # Center floating windows
+            "center,floating:1"
+
+            # Smart Picture-in-Picture positioning
+            "float,title:^(Picture-in-Picture)$"
+            "pin,title:^(Picture-in-Picture)$"
+            "size 480 270,title:^(Picture-in-Picture)$"
+            "move 100%-500 50,title:^(Picture-in-Picture)$" # Smart corner positioning
+
+            # Music apps to special:music
+            "workspace special:music,class:^(Spotify)$"
+            "workspace special:music,class:^(spotify)$" # Sometimes lowercase
+            "workspace special:music,class:^(music)$" # Our kitty music instances
+            "workspace special:music,title:^(ncspot)$"
+            "workspace special:music,class:^(pavucontrol)$"
+            "workspace special:music,class:^(pwvucontrol)$"
+            "workspace special:music,class:^(blueman-manager)$"
+
+            # Audio and bluetooth opacity - pypr handles positioning
+            "opacity 0.8 0.8,class:^(pwvucontrol)$"
+            "opacity 0.8 0.8,class:^(blueman-manager)$"
+
+            # === CLIPBOARD MANAGER ===
+            "float,class:(clipse)"
+            "center,class:(clipse)"
+            "size 2000 1000,class:(clipse)"
+
+            # === GAMING OPTIMIZATIONS ===
+            # Steam games get immediate mode and dedicated workspace
+            "immediate,class:^(steam_app_.*)$"
+            "fullscreen,class:^(steam_app_.*)$"
+            "workspace 9,class:^(steam_app_.*)$"
+
+            # === UTILITIES ===
+            # File picker should float
+            "float,class:^(xdg-desktop-portal-gtk)$"
+            "size 1200 800,class:^(xdg-desktop-portal-gtk)$"
+
+            # Image viewers
+            "float,class:^(imv)$"
+            "center,class:^(imv)$"
           ];
         };
 
-        extraConfig = "\n      monitor=DP-3,3840x2160@119.999001,0x0,1, bitdepth, 10, cm, hdr, sdrbrightness, 1.4, sdrsaturation, 1.0\n    ";
+        extraConfig = '''';
+      };
+
+      # === PYPRLAND CONFIGURATION ===
+      xdg.configFile."hypr/pyprland.toml".text = builtins.readFile ../pyprland.toml;
+
+      # PYPRLAND systemd service
+      systemd.user.services.pyprland = {
+        Unit = {
+          Description = "Pyprland daemon for advanced scratchpad management";
+          After = [ "graphical-session.target" ];
+          PartOf = [ "graphical-session.target" ];
+          Wants = [ "graphical-session.target" ];
+        };
+        Service = {
+          Type = "simple";
+          ExecStart = "${pkgs.pyprland}/bin/pypr";
+          ExecReload = "${pkgs.coreutils}/bin/kill -HUP $MAINPID";
+          Restart = "on-failure";
+          RestartSec = 2;
+          KillMode = "mixed";
+          TimeoutStopSec = 5;
+          # Clean up any stale socket files in the hypr runtime directory
+          ExecStartPre = "${pkgs.bash}/bin/bash -c 'rm -f /run/user/$UID/hypr/*/.pyprland.sock'";
+          # Ensure runtime directory exists
+          RuntimeDirectory = "pyprland";
+          RuntimeDirectoryMode = "0755";
+        };
+        Install = {
+          WantedBy = [ "graphical-session.target" ];
+        };
       };
 
       # Environment variables for proper Wayland/Hyprland operation
       home.sessionVariables = {
-        INTERFACE_DOMAIN = "v0.3";
-
-        # Default applications from environment.nix
-        BROWSER = "google-chrome-stable";
+        BROWSER = "google-chrome-beta";
         TERM = "kitty";
         TERMINAL = "kitty";
 
@@ -529,6 +543,43 @@
         DIRENV_LOG_FORMAT = "";
         NIXPKGS_ALLOW_UNFREE = "1";
         WINEDLLOVERRIDES = "winemenubuilder.exe=d";
+      };
+
+      # === CLIPSE CONFIGURATION ===
+      services.clipse = {
+        enable = true;
+        historySize = 99999;
+        allowDuplicates = false;
+        systemdTarget = "graphical-session.target";
+
+        imageDisplay = {
+          type = "kitty";
+          scaleX = 9;
+          scaleY = 9;
+          heightCut = 2;
+        };
+
+        keyBindings = {
+          choose = "enter";
+          clearSelected = "D"; # Vim-like: D for delete to end
+          down = "j"; # Vim navigation
+          up = "k"; # Vim navigation
+          end = "G"; # Vim: go to end
+          home = "g"; # Single g for beginning (practical compromise)
+          filter = "/"; # Already vim-like
+          more = "?"; # Already vim-like
+          nextPage = "l"; # Vim: right
+          prevPage = "h"; # Vim: left
+          preview = "v"; # Vim-like: v for visual
+          quit = "q"; # Already vim-like
+          remove = "d"; # Single d for delete (practical)
+          selectDown = "J"; # Shift+j for selection
+          selectUp = "K"; # Shift+k for selection
+          selectSingle = "V"; # Vim: visual line mode
+          togglePin = "m"; # Vim-like: m for mark
+          togglePinned = "M"; # Show marked items
+          yankFilter = "y"; # Vim: yank
+        };
       };
 
       # === HYPRLOCK (from home/desktop/hyprland/hyprlock.nix) ===
@@ -628,6 +679,10 @@
       # === WAYBAR (from home/desktop/waybar) ===
       programs.waybar = {
         enable = true;
+        systemd = {
+          enable = true;
+          target = "graphical-session.target";
+        };
         package = pkgs.waybar.overrideAttrs (oa: {
           mesonFlags = (oa.mesonFlags or [ ]) ++ [ "-Dexperimental=true" ];
         });
@@ -672,6 +727,7 @@
             disable-scroll = false;
             format = "{icon}";
             on-click = "activate";
+            show-special = true; # Show special workspaces
             format-icons = {
               "1" = "I";
               "2" = "II";
@@ -682,6 +738,9 @@
               "7" = "VII";
               "8" = "VIII";
               "9" = "IX";
+              "active" = "󰮯";
+              "default" = "󰊠";
+              "special" = "󰠱";
               sort-by-number = true;
             };
             persistent-workspaces = {
@@ -732,7 +791,7 @@
           };
           "custom/launcher" = {
             format = "";
-            on-click = "rofi -show drun";
+            on-click = "tofi-drun --drun-launch=true";
             tooltip = "false";
           };
           "custom/notification" = {
@@ -763,14 +822,9 @@
       # === KITTY CONFIGURATION (from home/kitty.nix) ===
       programs.kitty = {
         enable = true;
-        font = {
-          name = "FiraCode Nerd Font";
-          size = 16;
-        };
         settings = {
-          background_opacity = "0.90";
           window_padding_width = 10;
-          scrollback_lines = 10000;
+          scrollback_lines = 9999999;
           enable_audio_bell = "no";
           mouse_hide_wait = 60;
           wheel_scroll_multiplier = 0.5;
@@ -791,60 +845,6 @@
           tab_powerline_style = "angled";
         };
         extraConfig = ''
-          # Gruvbox Dark theme for Kitty
-          # Based on https://github.com/morhetz/gruvbox
-
-          # Basic colors
-          foreground            #ebdbb2
-          background            #282828
-          selection_foreground  #928374
-          selection_background  #ebdbb2
-
-          # Cursor colors
-          cursor                #bdae93
-          cursor_text_color     #665c54
-
-          # URL underline color when hovering
-          url_color             #83a598
-
-          # Window border colors
-          active_border_color   #d3869b
-          inactive_border_color #665c54
-
-          # Tab bar colors
-          active_tab_foreground #fbf1c7
-          active_tab_background #7c6f64
-          inactive_tab_foreground #fbf1c7
-          inactive_tab_background #3c3836
-
-          # Normal colors
-          color0                #282828
-          color1                #cc241d
-          color2                #98971a
-          color3                #d79921
-          color4                #458588
-          color5                #b16286
-          color6                #689d6a
-          color7                #a89984
-
-          # Bright colors
-          color8                #928374
-          color9                #fb4934
-          color10               #b8bb26
-          color11               #fabd2f
-          color12               #83a598
-          color13               #d3869b
-          color14               #8ec07c
-          color15               #ebdbb2
-
-          # Extended colors
-          color16               #fe8019
-          color17               #d65d0e
-          color18               #3c3836
-          color19               #504945
-          color20               #bdae93
-          color21               #ebdbb2
-
           map ctrl+shift+f12 debug_config
         '';
         keybindings = {
@@ -857,26 +857,45 @@
         };
       };
 
-      # === ROFI CONFIGURATION ===
-      programs.rofi = {
+      # === TOFI CONFIGURATION ===
+      programs.tofi = {
         enable = true;
-        package = pkgs.rofi-wayland;
-        terminal = "\${pkgs.kitty}/bin/kitty";
-        theme = "gruvbox-dark";
-        font = "JetBrainsMono Nerd Font 12";
-        extraConfig = {
-          disable-history = false;
-          display-Network = " 󰤨  Network";
-          display-drun = "   Apps ";
-          display-run = "   Run ";
-          display-window = " 﩯  Window";
-          drun-display-format = "{icon} {name}";
-          hide-scrollbar = true;
-          icon-theme = "Papirus-Dark";
-          location = 0;
-          modi = "run,drun,window";
-          show-icons = true;
-          sidebar-mode = true;
+        settings = {
+          # Window sizing (similar to clipboard manager)
+          width = 2000;
+          height = 1000;
+
+          # Font configuration
+          font = "SauceCodePro Nerd Font Mono";
+          font-size = lib.mkForce 16;
+
+          # Layout
+          anchor = "center";
+          horizontal = false;
+          num-results = 0;
+          result-spacing = 4;
+
+          # Padding and spacing
+          padding-top = 20;
+          padding-bottom = 20;
+          padding-left = 20;
+          padding-right = 20;
+
+          # Prompt
+          prompt-text = "❯ ";
+          prompt-padding = 8;
+
+          # Behavior
+          history = true;
+          hide-cursor = true;
+          text-cursor = true;
+          matching-algorithm = "fuzzy";
+
+          # Performance
+          late-keyboard-init = false;
+          multi-instance = false;
+
+          # Terminal for applications
           terminal = "kitty";
         };
       };
@@ -1037,11 +1056,11 @@
               "nautilus.desktop"
               "org.gnome.Nautilus.desktop"
             ];
-            "text/html" = [ "google-chrome.desktop" ];
-            "x-scheme-handler/about" = [ "google-chrome.desktop" ];
-            "x-scheme-handler/http" = [ "google-chrome.desktop" ];
-            "x-scheme-handler/https" = [ "google-chrome.desktop" ];
-            "x-scheme-handler/unknown" = [ "google-chrome.desktop" ];
+            "text/html" = [ "google-chrome-beta.desktop" ];
+            "x-scheme-handler/about" = [ "google-chrome-beta.desktop" ];
+            "x-scheme-handler/http" = [ "google-chrome-beta.desktop" ];
+            "x-scheme-handler/https" = [ "google-chrome-beta.desktop" ];
+            "x-scheme-handler/unknown" = [ "google-chrome-beta.desktop" ];
             "application/vnd.oasis.opendocument.text" = [ "libreoffice.desktop" ];
             "application/vnd.oasis.opendocument.spreadsheet" = [ "libreoffice.desktop" ];
             "application/vnd.oasis.opendocument.presentation" = [ "libreoffice.desktop" ];
@@ -1093,11 +1112,11 @@
               "nautilus.desktop"
               "org.gnome.Nautilus.desktop"
             ];
-            "text/html" = [ "google-chrome.desktop" ];
-            "x-scheme-handler/about" = [ "google-chrome.desktop" ];
-            "x-scheme-handler/http" = [ "google-chrome.desktop" ];
-            "x-scheme-handler/https" = [ "google-chrome.desktop" ];
-            "x-scheme-handler/unknown" = [ "google-chrome.desktop" ];
+            "text/html" = [ "google-chrome-beta.desktop" ];
+            "x-scheme-handler/about" = [ "google-chrome-beta.desktop" ];
+            "x-scheme-handler/http" = [ "google-chrome-beta.desktop" ];
+            "x-scheme-handler/https" = [ "google-chrome-beta.desktop" ];
+            "x-scheme-handler/unknown" = [ "google-chrome-beta.desktop" ];
             "application/vnd.oasis.opendocument.text" = [ "libreoffice.desktop" ];
             "application/vnd.oasis.opendocument.spreadsheet" = [ "libreoffice.desktop" ];
             "application/vnd.oasis.opendocument.presentation" = [ "libreoffice.desktop" ];

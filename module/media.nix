@@ -145,13 +145,13 @@
         # protonup
         # bottles
         # Factorio with authentication token
-        (factorio.override {
-          username = "Sinityy";
-          token = "$FACTORIO_TOKEN";
-        })
-        (pkgs.writeShellScriptBin "factorio-steam" ''
-          exec ${steam-run}/bin/steam-run ${factorio}/bin/factorio "$@"
-        '')
+        # (factorio.override {
+        #   username = "Sinityy";
+        #   token = "$FACTORIO_TOKEN";
+        # })
+        # (pkgs.writeShellScriptBin "factorio-steam" ''
+        #   exec ${steam-run}/bin/steam-run ${factorio}/bin/factorio "$@"
+        # '')
 
         # Hydrus with custom setup (from hydrus.nix)
         (pkgs.hydrus.overrideAttrs (oldAttrs: {

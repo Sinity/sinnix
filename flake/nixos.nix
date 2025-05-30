@@ -16,6 +16,12 @@
         # Enable agenix for secret management
         inputs.agenix.nixosModules.default
 
+        # Enable stylix for system-wide theming
+        inputs.stylix.nixosModules.stylix
+
+        # Enable sinex (exocortex)
+        inputs.sinex.nixosModules.default
+
         # Import system-wide overlay
         (import ./overlay.nix)
 

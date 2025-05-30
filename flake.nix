@@ -37,6 +37,21 @@
 
     claude-code-logger.url = "github:sinity/claude-code-logger/add-nix-support";
     claude-code-logger.inputs.nixpkgs.follows = "nixpkgs";
+
+    sinex.url = "git+ssh://git@github.com/Sinity/sinex";
+    sinex.inputs.nixpkgs.follows = "nixpkgs";
+
+    # System-wide theming
+    stylix.url = "github:danth/stylix";
+    stylix.inputs.nixpkgs.follows = "nixpkgs";
+
+    # Hyprland and plugins
+    hyprland.url = "github:hyprwm/Hyprland";
+
+    hyprland-plugins = {
+      url = "github:hyprwm/hyprland-plugins";
+      inputs.hyprland.follows = "hyprland";
+    };
   };
 
   outputs =

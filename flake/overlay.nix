@@ -5,6 +5,9 @@
 }:
 {
   nixpkgs.overlays = [
+    # Apply sinex overlay
+    inputs.sinex.overlays.default
+
     (final: prev: {
       # Override spacy to use a working version
       python3Packages = prev.python3Packages // {

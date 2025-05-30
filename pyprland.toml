@@ -1,0 +1,39 @@
+# Pyprland Configuration
+# Simple scratchpad setup with proper naming
+
+[pyprland]
+plugins = ["scratchpads"]
+
+# === TERMINAL WORKSPACE ===
+# Simple terminal scratchpad
+[scratchpads.term]
+command = "kitty --class scratchpad-terminal"
+class = "scratchpad-terminal"
+size = "85% 85%"
+margin = 60
+animation = ""
+lazy = true  # Don't autostart
+single = true  # Only one instance allowed
+
+# === NOTES WORKSPACE ===
+[scratchpads.notes]
+command = "kitty --class notes-scratch -d /realm/knowledgebase nvim"
+class = "notes-scratch"
+size = "80% 80%"
+animation = ""
+center = true
+margin = 60
+unfocus = "hide"
+lazy = true
+single = true  # Only one instance allowed
+
+# === MUSIC WORKSPACE ===
+# Spotify scratchpad
+[scratchpads.spotify]
+command = "spotify"
+class = "[Ss]potify"
+size = "85% 85%"
+margin = 60
+animation = ""
+lazy = true
+single = true  # Only one instance allowed

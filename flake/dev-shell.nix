@@ -23,10 +23,15 @@
             name = "nixos-config-dev";
 
             # Set root directory for devenv
-            devenv.root = "/realm/nixos-config";
+            devenv.root = "/realm/project/sinnix";
+
+            # Disable task output to reduce noise
+            tasks."devenv:enterShell".after = [ ];
+            devenv.flakesIntegration = true;
 
             # Environment variables
             env.GITHUB_TOKEN = builtins.getEnv "GITHUB_TOKEN";
+            env.DEVENV_TASKS_QUIET = "1";
 
             # Development packages
             packages = with pkgs; [

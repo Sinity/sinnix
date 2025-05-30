@@ -25,6 +25,11 @@
       nix-diff
       nix-tree
       nix-prefetch-git
+      nix-health
+      nix-zsh-completions
+      nix-fast-build
+      nix-doc
+      nix-index
 
       # Build systems
       cmake
@@ -161,6 +166,8 @@
           sqlite-vec
           sqlite-utils
           sqlitestudio
+          pgcli
+          postgresql_16
 
           # AI development tools
           aider-chat # aider-chat-full # Temporarily disabled due to spacy dependency issues
@@ -211,7 +218,7 @@
             ''
               mkdir -p $HOME/.config
               echo "Creating symlink for Neovim configuration..."
-              ln -sfn /realm/nixos-config/nvim $HOME/.config/nvim
+              ln -sfn /realm/project/sinnix/nvim $HOME/.config/nvim
             '';
       };
 
@@ -375,7 +382,6 @@
         bat = {
           enable = true;
           config = {
-            theme = "gruvbox-dark";
             pager = "less -FR";
           };
         };
@@ -428,20 +434,6 @@
               "$cmd_duration"
               "[](fg:color_bg3) "
             ];
-
-            palette = "gruvbox_dark";
-            palettes.gruvbox_dark = {
-              color_fg0 = "#fbf1c7";
-              color_bg1 = "#3c3836";
-              color_bg3 = "#665c54";
-              color_blue = "#458588";
-              color_aqua = "#689d6a";
-              color_green = "#98971a";
-              color_orange = "#d65d0e";
-              color_purple = "#b16286";
-              color_red = "#cc241d";
-              color_yellow = "#d79921";
-            };
 
             os = {
               disabled = false;

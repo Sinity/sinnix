@@ -144,14 +144,14 @@ in
         graphicsmagick
       ];
       variables = {
-        FLAKE = "/realm/nixos-config";
+        FLAKE = "/realm/project/sinnix";
       };
     };
 
     programs = {
       direnv = {
         enable = true;
-        silent = false;
+        silent = true;
         enableZshIntegration = true;
         enableBashIntegration = true;
         nix-direnv.enable = true;
@@ -176,6 +176,47 @@ in
           "(^|/)(java|chromium|obsidian|google-chrome-stable)$"
           "--avoid"
           "(^|/)(init|systemd|sshd)$"
+        ];
+      };
+
+      # PostgreSQL with TimescaleDB for Sinnix Exocortex
+      postgresql = {
+        enable = true;
+        package = pkgs.postgresql_16;
+        dataDir = "/var/lib/postgresql/16";
+        settings = {
+          shared_preload_libraries = "timescaledb";
+          max_connections = 100;
+          shared_buffers = "256MB";
+          effective_cache_size = "1GB";
+          maintenance_work_mem = "64MB";
+          checkpoint_completion_target = 0.9;
+          wal_buffers = "16MB";
+          default_statistics_target = 100;
+          random_page_cost = 1.1;
+          effective_io_concurrency = 200;
+          work_mem = "4MB";
+          min_wal_size = "1GB";
+          max_wal_size = "4GB";
+        };
+        extensions = ps: with ps; [ timescaledb ];
+        authentication = pkgs.lib.mkOverride 10 ''
+          # TYPE  DATABASE        USER            ADDRESS                 METHOD
+          local   all             all                                     trust
+          host    all             all             127.0.0.1/32            trust
+          host    all             all             ::1/128                 trust
+        '';
+        ensureDatabases = [ "sinity" ];
+        ensureUsers = [
+          {
+            name = "sinity";
+            ensureDBOwnership = true;
+            ensureClauses = {
+              superuser = true;
+              createrole = true;
+              createdb = true;
+            };
+          }
         ];
       };
     };
@@ -213,7 +254,7 @@ in
 
           sessionVariables = {
             # Core system paths from environment.nix
-            FLAKE = "/realm/nixos-config";
+            FLAKE = "/realm/project/sinnix";
 
             # XDG directories
             XDG_CONFIG_HOME = "\${HOME}/.config";
@@ -285,7 +326,15 @@ in
     };
 
     programs.zsh.loginShellInit = lib.concatStringsSep "\n" (
-      lib.mapAttrsToList (
+      [
+        # Auto-start Hyprland with UWSM on TTY1
+        ''
+          if [ -z "$DISPLAY" ] && [ "$XDG_VTNR" = 1 ]; then
+            exec uwsm start hyprland-uwsm.desktop
+          fi
+        ''
+      ]
+      ++ lib.mapAttrsToList (
         filename: _:
         let
           secretName = lib.removeSuffix ".age" filename;

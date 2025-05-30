@@ -74,65 +74,11 @@ This repository implements domain-unified NixOS configuration:
 **Extension Points**:
 
 - New functionality goes in appropriate domain module
-- Host-specific config only in `host/sinnix-prime/`
-- Cross-cutting concerns handled by stylix + domain extension points
+- Host-specific config in `host/sinnix-prime/`
+- Cross-cutting concerns handled by stylix
 
 ## 🎯 SUCCESS CRITERIA
 
 - Zero cognitive overhead asking "is this system or user config?"
 - Single source of truth for each functional domain
 - All changes follow domain boundaries, not implementation layers
-- System ready for Blueprint 0.5+ extensions
-
----
-*Domain-unified architecture eliminates implementation detail leakage via functional organization*
-
-# Information regarding refactoring issues
-
-**2. Lost Configurations and Functionality:**
-
-- **Hyprlock Background Image**: The specific `forest.jpg` for `hyprlock` is deleted. The `hyprlock` configuration itself is commented out in `interface.nix` and references a placeholder path (`/tmp/nixos-fallback-background.png`).
-- **Rofi Configuration**: The `programs.rofi` block from the deleted `module/home/desktop/rofi.nix` (which configured theme, font, extra Rofi settings) has not been reintegrated into `module/interface.nix` or elsewhere. The `rofi-wayland` package is also not explicitly added to `home.packages` in `interface.nix` or `automation.nix`.
-- **SwayNC Customization**: The `config.json` and `style.css` for `swaynotificationcenter` (from `module/home/desktop/swaync/`) are deleted and not reintegrated. The package is installed via `interface.nix`, but will use default settings.
-- **`vm-start.sh` Script**: This script (for starting a VM with virsh/virt-viewer) was deleted from `module/home/scripts/scripts/` and its functionality was not inlined or moved. Dependencies like `virt-manager` or `virt-viewer` would also be implicitly lost if not pulled in elsewhere.
-- **Specific Package Removals/Non-Migrations**:
-  - **Dependencies for inlined scripts**:
-    - `extract.sh` (now in `automation.nix`) requires `unzip`, `unrar`, `p7zip`. These were in the deleted `module/home/system.nix` but not re-added to `automation.nix`'s `home.packages`.
-    - `record.sh` (now in `automation.nix`) requires `zenity`. This package was not present previously and was not added.
-    - `rofi-wayland` for `wallpaper-picker.sh` and `show-keybinds.sh` (as noted above).
-  - **From `module/home/system.nix`**:
-    - `bpftrace`
-    - `entr` (perform action when file changes)
-    - `file` (Show file information)
-    - `tldr`
-    - `xdg-utils`
-    - `xxd`
-    - Wayland/desktop utilities: `wl-clipboard` (though `wl-clip-persist` is added), `clipboard-jh` (Cut, copy, and paste anything in your terminal), `redshift` (Adjust color temperature). `cliphist` is installed via `home.packages` in `interface.nix`.
-    - Hardware diagnostics: `cpuid`, `i7z`, `mcelog`, `memtester`, `numactl`.
-    - Storage utilities: `xfsprogs`, `e2fsprogs`, `lvm2`, `parted`, `fio`, `ioping`, `udisks2`, `extundelete`.
-    - Networking utility: `mtr`. (Note: `iproute2` is generally a core part of NixOS. `nmap`, `tcpdump`, `traceroute` are in `communication.nix -> home.packages`).
-    - System-level graphics packages: `mesa`, `libGL`, `libglvnd` (these are often implicitly pulled by drivers or compositors, but explicit system-wide installation is gone).
-    - Graphics/HW utils: `hw-probe`, `hwdata`, `graphicsmagick`.
-  - **From `module/home/desktop-apps.nix`**:
-    - Commented-out Factorio setup.
-    - `evtest` (Input device event monitor)
-    - `meld` (Diff tool)
-    - `piper` (Mouse configuration)
-    - `android-tools`, `android-file-transfer`
-    - `hledger` (Accounting)
-    - `llm` (CLI for LLMs)
-    - `single-file-cli` (Save web pages)
-    - `programmer-calculator`, `bc`, `calc`
-  - **From `module/home/packages.nix`** (misc utilities not fitting other categories):
-    - `imgur-screenshot`
-    - `usbview`
-    - `strace`, `ltrace` (Debugging tools)
-    - `nvitop` (NVIDIA GPU monitoring)
-    - `cage` (Wayland kiosk)
-    - `wayland-protocols` (often a build input, explicit install might be for development)
-    - `vkmark` (Vulkan benchmark)
-    - `dtach` (Screen alternative)
-    - `lnch` (Application launcher)
-    - `at` (Job scheduler)
-    - `soundwireserver`: This package was installed via the deleted `module/home/packages.nix`. A Hyprland keybind `SUPER SHIFT, S, exec, hyprctl dispatch exec '[workspace 5 silent] SoundWireServer'` exists. If `soundwireserver` is not re-added (e.g., in `automation.nix` or `media.nix` `home.packages`), this keybind will fail. It's currently missing.
-
