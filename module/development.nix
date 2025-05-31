@@ -224,8 +224,8 @@
 
       programs = {
         claude-code-logger = {
-          enable = true;
-          logDir = "/realm/observability/claude-code-api-log";
+          enable = false;
+          logDir = "/realm/data/claude-code-api-log";
           enableSessionFolders = true;
           enableConversationGrouping = true;
           maxInteractionsPerFile = 100;
