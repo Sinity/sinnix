@@ -831,8 +831,7 @@
           touch_scroll_multiplier = 0.5;
           cursor_trail = 3;
           confirm_os_window_close = 0;
-          allow_remote_control = "yes";
-          listen_on = "unix:/tmp/kitty";
+          # allow_remote_control and listen_on are now handled by Sinex auto-configuration
           open_url_with = "xdg-open";
           detect_urls = "yes";
           url_prefixes = "http https file ftp";

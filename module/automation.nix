@@ -540,20 +540,44 @@ in
     #   dataDir = "/var/lib/monero";
     # };
 
-    # Sinex (exocortex) configuration
     sinex = {
       enable = true;
-      systemUser = "sinity"; # User running Hyprland
-      database = {
-        url = "postgresql://sinity@localhost/sinex";
-        name = "sinex";
-        user = "sinity";
-        ensureExists = true;
-      };
+      systemUser = "sinity";
+
+      autoConfigureSystem = true;
+
       ingestors = {
         hyprland = {
           enable = true;
-          interval = 30; # Poll every 30 seconds
+          interval = 1;
+        };
+
+        filesystem = {
+          enable = true;
+          watchDirectories = [
+            "~"
+            "/realm"
+          ];
+          excludePatterns = [
+            "*.tmp"
+            "*.log"
+            "*.cache"
+            ".git/**"
+            "node_modules/**"
+            "__pycache__/**"
+            "*.swp"
+            "*.swo"
+            "target/**"
+            ".direnv/**"
+          ];
+          debounceMs = 200;
+        };
+
+        kitty = {
+          enable = true;
+          captureCommands = true;
+          captureOutput = true; # Maximalist approach - capture everything
+          shellIntegration = true; # Automatic shell markers for command tracking
         };
       };
     };
