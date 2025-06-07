@@ -35,52 +35,58 @@
 
         # Validate NixOS configuration
         check = mkApp "check" ''
-          echo "Checking NixOS configuration..."
-          ${pkgs.nix}/bin/nix flake check --no-build
-          find . -name "*.nix" -type f -print0 | xargs -0 -n1 ${pkgs.nix}/bin/nix-instantiate --parse >/dev/null
+          flake_dir="''${PRJ_ROOT:-/realm/project/sinnix}"
+          echo "Checking NixOS configuration at $flake_dir..."
+          ${pkgs.nix}/bin/nix flake check --no-build "$flake_dir"
+          find "$flake_dir" -name "*.nix" -type f -print0 | xargs -0 -n1 ${pkgs.nix}/bin/nix-instantiate --parse >/dev/null
           echo "Configuration check complete!"
         '' "Validate NixOS configuration syntax and structure";
 
         # Format Nix files
         format = mkApp "format" ''
-          echo "Formatting Nix files..."
-          ${pkgs.findutils}/bin/find . -name "*.nix" -type f -not -path "*/nix/store/*" -print0 | \
+          flake_dir="''${PRJ_ROOT:-/realm/project/sinnix}"
+          echo "Formatting Nix files in $flake_dir..."
+          ${pkgs.findutils}/bin/find "$flake_dir" -name "*.nix" -type f -not -path "*/nix/store/*" -print0 | \
           ${pkgs.findutils}/bin/xargs -0 -P 4 -I{} ${pkgs.nixfmt-rfc-style}/bin/nixfmt {}
           echo "Formatting complete!"
         '' "Format Nix files according to the RFC style";
 
         # Lint Nix files
         lint = mkApp "lint" ''
-          echo "Linting Nix files..."
-          ${pkgs.statix}/bin/statix check
+          flake_dir="''${PRJ_ROOT:-/realm/project/sinnix}"
+          echo "Linting Nix files in $flake_dir..."
+          cd "$flake_dir" && ${pkgs.statix}/bin/statix check
           echo "Linting complete!"
         '' "Lint Nix files for common issues and anti-patterns";
 
         # Test configuration without applying
         test = mkApp "test" ''
+          flake_dir="''${PRJ_ROOT:-/realm/project/sinnix}"
           if [ "$(id -u)" -ne 0 ]; then
-            echo "Error: This command must be run as root (use 'sudo nix run .#test')"
+            echo "Error: This command must be run as root (use 'sudo nix run $flake_dir#test')"
             exit 1
           fi
-          ${pkgs.nixos-rebuild}/bin/nixos-rebuild test --flake .#sinnix-prime \
+          ${pkgs.nixos-rebuild}/bin/nixos-rebuild test --flake "$flake_dir#sinnix-prime" \
             --log-format internal-json -v 2>&1 | ${pkgs.nix-output-monitor}/bin/nom --json
         '' "Test configuration without applying it to the system";
 
         # Apply configuration to system
         switch = mkApp "switch" ''
+          flake_dir="''${PRJ_ROOT:-/realm/project/sinnix}"
           if [ "$(id -u)" -ne 0 ]; then
-            echo "Error: This command must be run as root (use 'sudo nix run .#switch')"
+            echo "Error: This command must be run as root (use 'sudo nix run $flake_dir#switch')"
             exit 1
           fi
-          ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --flake .#sinnix-prime \
+          ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --flake "$flake_dir#sinnix-prime" \
             --log-format internal-json -v 2>&1 | ${pkgs.nix-output-monitor}/bin/nom --json
         '' "Apply configuration changes to the system";
 
         # Update flake dependencies
         update = mkApp "update" ''
-          echo "Updating flake inputs..."
-          ${pkgs.nix}/bin/nix flake update
-          echo "Flake inputs updated. Run 'sudo nix run .#switch' to apply."
+          flake_dir="''${PRJ_ROOT:-/realm/project/sinnix}"
+          echo "Updating flake inputs for $flake_dir..."
+          ${pkgs.nix}/bin/nix flake update "$flake_dir"
+          echo "Flake inputs updated. Run 'sudo nix run $flake_dir#switch' to apply."
         '' "Update flake dependencies to their latest versions";
 
         # Clean up old generations

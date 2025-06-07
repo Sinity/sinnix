@@ -155,10 +155,44 @@
           nodejs
           nodejs_latest
 
-          # Python
-          python3
-          python3Packages.pip
-          python312Packages.ipython
+          # Python with packages bundled
+          (python3.withPackages (
+            ps: with ps; [
+              pip
+              ipython
+              rich
+              click
+              questionary
+              fuzzywuzzy
+              fastapi
+              uvicorn
+              aiofiles
+              pydantic
+              python-Levenshtein
+              ujson
+              tiktoken
+              # Add commonly used packages
+              pandas
+              numpy
+              requests
+              matplotlib
+              seaborn
+              jupyter
+              notebook
+              black
+              mypy
+              pytest
+              httpx
+              beautifulsoup4
+              lxml
+              python-dotenv
+              tqdm
+              typer
+              pyyaml
+              toml
+              tabulate
+            ]
+          ))
 
           # Database tools
           sqlite
@@ -167,7 +201,7 @@
           sqlite-utils
           sqlitestudio
           pgcli
-          postgresql_16
+          # postgresql_16
 
           # AI development tools
           aider-chat # aider-chat-full # Temporarily disabled due to spacy dependency issues
@@ -312,6 +346,9 @@
             zle -N bracketed-paste bracketed-paste-magic
             autoload -Uz url-quote-magic
             zle -N self-insert url-quote-magic
+
+            # Override atuin initialization to disable up arrow
+            eval "$(atuin init zsh --disable-up-arrow)"
           '';
 
           shellAliases = {
@@ -322,6 +359,7 @@
             icat = "kitten icat";
             dsize = "du -hs";
             open = "xdg-open";
+            cl = "bash ~/.claude/local/claude";
 
             l = "eza --icons  -a --group-directories-first -1"; # EZA_ICON_SPACING=2
             ll = "eza --icons  -a --group-directories-first -1 --no-user --long";
@@ -365,17 +403,19 @@
 
         atuin = {
           enable = true;
-          enableNushellIntegration = true;
-          enableZshIntegration = true;
+          enableNushellIntegration = false;
+          enableZshIntegration = false;
+          flags = [ "--disable-up-arrow" ];
           settings = {
             auto_sync = false;
             search_mode = "fuzzy";
-            filter_mode = "host";
+            filter_mode = "global";
             style = "compact";
             inline_height = 30;
+            up_arrow = false;
             show_preview = true;
             invert = true;
-            keymap_mode = "auto";
+            keymap_mode = "vim-normal";
           };
         };
 

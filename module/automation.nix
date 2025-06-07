@@ -538,8 +538,20 @@ in
     # monero = {
     #   enable = true;
     #   dataDir = "/var/lib/monero";
-    # };
-
+    # };.
+    postgresql = {
+      enable = true;
+      package = pkgs.postgresql_16;
+      extensions =
+        ps: with ps; [
+          timescaledb
+          pgvector
+          pgx_ulid # This is a custom package built from source
+        ];
+      settings = {
+        shared_preload_libraries = "timescaledb";
+      };
+    };
     sinex = {
       enable = true;
       systemUser = "sinity";

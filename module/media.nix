@@ -6,6 +6,17 @@
 {
   system.nixos.tags = [ "media-domain-v0.3" ];
 
+  # Override libplacebo to force SPIR-V 1.0 compatibility for Vulkan
+  nixpkgs.overlays = [
+    (_final: prev: {
+      libplacebo = prev.libplacebo.overrideAttrs (oldAttrs: {
+        cmakeFlags = (oldAttrs.cmakeFlags or [ ]) ++ [
+          "-DSPIRV_TARGET_ENV=SPV_ENV_VULKAN_1_0"
+        ];
+      });
+    })
+  ];
+
   services.pipewire = {
     enable = true;
     audio.enable = true;
@@ -221,10 +232,10 @@
 
         screenshot-format = "png";
         screenshot-png-compression = 9;
-        screenshot-template = "~/Pictures/mpv-screenshots/%F-%P-%n";
+        screenshot-template = "/realm/inbox/mpv-screenshots/%F-%P-%n";
 
         save-position-on-quit = true;
-        hdr-compute-peak = false;
+        hdr-compute-peak = true;
 
         sub-auto = "fuzzy";
         sub-file-paths = "sub:subs:subtitles";

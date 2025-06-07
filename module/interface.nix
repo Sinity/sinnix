@@ -259,18 +259,17 @@
             border_size = 3;
             gaps_in = 10;
             gaps_out = 20;
-            layout = "master"; # Default to master layout as requested
+            layout = "dwindle"; # Restored to original dwindle layout
             resize_on_border = true;
           };
 
-          master = {
-            new_status = "slave"; # New windows go to stack
-            new_on_active = "none"; # Don't disturb current window
-            mfact = 0.6; # Master takes 60% of screen as requested
-            orientation = "left"; # Master on left side as requested
-            special_scale_factor = 1;
-            always_keep_position = true; # Keep master position even when alone
-            # Note: With orientation left, master is on left, slaves on right
+          dwindle = {
+            force_split = 0;
+            special_scale_factor = 1.0;
+            split_width_multiplier = 1.0;
+            use_active_for_splits = true;
+            pseudotile = "yes";
+            preserve_split = "yes";
           };
 
           misc = {
@@ -352,10 +351,7 @@
             "SUPER, 3, workspace, 3"
             "SUPER, 4, workspace, 4"
             "SUPER, 5, workspace, 5"
-            "SUPER, 6, workspace, 6"
-            "SUPER, 7, workspace, 7"
-            "SUPER, 8, workspace, 8"
-            "SUPER, 9, workspace, 9"
+            # Workspaces 6-9 removed as requested
 
             # Move to workspace
             "SUPER SHIFT, 1, movetoworkspace, 1"
@@ -396,14 +392,16 @@
             "SUPER CTRL, K, resizeactive, 0 -80"
             "SUPER CTRL, J, resizeactive, 0 80"
 
-            # === MASTER LAYOUT MANAGEMENT ===
-            "SUPER, comma, layoutmsg, addmaster"
-            "SUPER, period, layoutmsg, removemaster"
-            "SUPER, M, layoutmsg, swapwithmaster"
-            "SUPER SHIFT, M, layoutmsg, focusmaster"
-            "SUPER, O, layoutmsg, orientationcycle"
-            "SUPER, minus, splitratio, -0.05"
-            "SUPER, equal, splitratio, +0.05"
+            # === MOVE ACTIVE WINDOW ===
+            "SUPER ALT, H, moveactive, -80 0"
+            "SUPER ALT, L, moveactive, 80 0"
+            "SUPER ALT, K, moveactive, 0 -80"
+            "SUPER ALT, J, moveactive, 0 80"
+
+            # === DWINDLE LAYOUT MANAGEMENT ===
+            "SUPER, P, pseudo" # Toggle pseudo tiling
+            "SUPER, Y, togglesplit" # Toggle split direction
+
           ];
 
           bindl = [
@@ -418,6 +416,7 @@
           bindm = [
             "SUPER, mouse:272, movewindow"
             "SUPER, mouse:273, resizewindow"
+            "SUPER ALT, mouse:272, resizewindow" # Alternative resize with ALT
           ];
 
           windowrule = [
@@ -466,7 +465,7 @@
             # Steam games get immediate mode and dedicated workspace
             "immediate,class:^(steam_app_.*)$"
             "fullscreen,class:^(steam_app_.*)$"
-            "workspace 9,class:^(steam_app_.*)$"
+            "workspace 5,class:^(steam_app_.*)$" # Changed from 9 to 5
 
             # === UTILITIES ===
             # File picker should float
@@ -727,17 +726,13 @@
             disable-scroll = false;
             format = "{icon}";
             on-click = "activate";
-            show-special = true; # Show special workspaces
+            show-special = false; # Hide special workspaces
             format-icons = {
               "1" = "I";
               "2" = "II";
               "3" = "III";
               "4" = "IV";
               "5" = "V";
-              "6" = "VI";
-              "7" = "VII";
-              "8" = "VIII";
-              "9" = "IX";
               "active" = "󰮯";
               "default" = "󰊠";
               "special" = "󰠱";
@@ -749,10 +744,6 @@
               "3" = [ ];
               "4" = [ ];
               "5" = [ ];
-              "6" = [ ];
-              "7" = [ ];
-              "8" = [ ];
-              "9" = [ ];
             };
           };
           cpu = {
@@ -826,6 +817,7 @@
           window_padding_width = 10;
           scrollback_lines = 9999999;
           enable_audio_bell = "no";
+          background = "#000000"; # Pure black background
           mouse_hide_wait = 60;
           wheel_scroll_multiplier = 0.5;
           touch_scroll_multiplier = 0.5;

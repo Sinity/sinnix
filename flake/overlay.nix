@@ -39,6 +39,54 @@
           wrapProgram $out/bin/claude-desktop --add-flags "--enable-features=WaylandWindowDecorations --no-sandbox"
         '';
       };
+
+      hyprNStack = final.stdenv.mkDerivation {
+        pname = "hyprNStack";
+        version = "unstable-2024-12-01";
+
+        src = final.fetchFromGitHub {
+          owner = "zakk4223";
+          repo = "hyprNStack";
+          rev = "main";
+          sha256 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        };
+
+        nativeBuildInputs = with final; [
+          pkg-config
+          meson
+          ninja
+        ];
+
+        buildInputs = with final; [
+          hyprland.dev
+          wayland
+          wayland-protocols
+          libxkbcommon
+          cairo
+          pango
+          pixman
+        ];
+
+        configurePhase = ''
+          meson setup build --buildtype=release
+        '';
+
+        buildPhase = ''
+          ninja -C build
+        '';
+
+        installPhase = ''
+          mkdir -p $out/lib
+          cp build/hyprNStack.so $out/lib/
+        '';
+
+        meta = with final.lib; {
+          description = "Hyprland plugin for ncolumn/nstack layouts";
+          homepage = "https://github.com/zakk4223/hyprNStack";
+          license = licenses.bsd3;
+          platforms = platforms.linux;
+        };
+      };
     })
   ];
 }
