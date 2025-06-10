@@ -44,7 +44,7 @@ in
           "sinity.cachix.org-1:i5YsUuuRv9r790gdwwE+FiJiUcWULV1lEOmKE50Y+TI="
           "nix-gaming.cachix.org-1:nbjlureqMbRAxR1gJ/f3hxemL9svXaZF/Ees8vCUUs4="
         ];
-        max-jobs = 2;
+        max-jobs = 4;
         cores = 0;
         allowed-users = [ "${username}" ];
       };
@@ -145,6 +145,7 @@ in
       ];
       variables = {
         FLAKE = "/realm/project/sinnix";
+        REALM_ROOT = "/realm";
       };
     };
 

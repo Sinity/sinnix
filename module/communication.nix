@@ -43,7 +43,7 @@
       ports = [ 22 ];
       settings = {
         PermitRootLogin = "yes";
-        PasswordAuthentication = true;
+        PasswordAuthentication = false;
         LogLevel = "VERBOSE";
       };
     };

@@ -23,7 +23,7 @@
             name = "nixos-config-dev";
 
             # Set root directory for devenv
-            devenv.root = "/realm/project/sinnix";
+            devenv.root = "${./.}";
 
             # Disable task output to reduce noise
             tasks."devenv:enterShell".after = [ ];

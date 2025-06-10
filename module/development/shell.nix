@@ -1,134 +1,18 @@
-# Development Domain Module
-# Complete dev workflow (tools + environment)
-# Consolidates: programming languages, dev tools, editors, git, nix-ld
+# Development Shell Configuration
+# Shell environments, terminal tools, and shell configurations
 
 {
   config,
   lib,
   pkgs,
-  inputs,
   ...
 }:
 {
   config = {
-    system.nixos.tags = [ "development-domain-v0.3" ];
-
-    # Core development packages available system-wide
-    environment.systemPackages = with pkgs; [
-      # Essential development tools
-      git
-      gnumake
-      gcc
-      gdb
-
-      # Nix development
-      nix-diff
-      nix-tree
-      nix-prefetch-git
-      nix-health
-      nix-zsh-completions
-      nix-fast-build
-      nix-doc
-      nix-index
-
-      # Build systems
-      cmake
-      meson
-      ninja
-      uv
-
-      # Documentation
-      man-pages
-      man-pages-posix
-    ];
-
-    # nix-ld configuration for running unpatched binaries
-    programs.nix-ld = {
-      enable = true;
-      libraries = with pkgs; [
-        # Original libraries
-        stdenv.cc.cc
-        openssl
-        curl
-        glib
-        util-linux
-        glibc
-        icu
-        libunwind
-        libuuid
-        zlib
-        libsecret
-        freetype
-        libglvnd
-        libnotify
-        SDL2
-        vulkan-loader
-        gdk-pixbuf
-        pipewire
-        pulseaudio
-
-        alsa-lib
-        at-spi2-atk
-        at-spi2-core
-        atk
-        cairo
-        cups
-        dbus
-        expat
-        fontconfig
-        fuse3
-        gtk3
-        libGL
-        libappindicator-gtk3
-        libdrm
-        libpulseaudio
-        libuuid
-        nspr
-        nss
-        pango
-        systemd
-        xorg.libX11
-        xorg.libXScrnSaver
-        xorg.libXcomposite
-        xorg.libXcursor
-        xorg.libXdamage
-        xorg.libXext
-        xorg.libXfixes
-        xorg.libXi
-        xorg.libXrandr
-        xorg.libXrender
-        xorg.libXtst
-        xorg.libxcb
-        xorg.libxkbfile
-        xorg.libxshmfence
-      ];
-    };
-
     home-manager.users.sinity = {
-      imports = [
-        inputs.claude-code-logger.homeManagerModules.default
-      ];
-
-      # Consolidate all home configuration
       home = {
-        # Development environment variables
-        sessionVariables = {
-          DEVELOPMENT_DOMAIN = "v0.3";
-
-          # Development settings from environment.nix
-          EDITOR = "nvim";
-          VISUAL = "nvim";
-          PAGER = lib.mkForce "less -R";
-          MANPAGER = "nvim +Man!";
-          PYTHONDONTWRITEBYTECODE = "1";
-          SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS = "0";
-          MICRO_TRUECOLOR = "1";
-          LD_LIBRARY_PATH = "$(nix build --print-out-paths --no-link nixpkgs#libGL)/lib";
-        };
-
-        # Consolidated development packages
+        # Consolidated shell development packages
         packages = with pkgs; [
-          # Language Servers, Formatters, Linters
           # Shell tools
           bat
           eza
@@ -139,78 +23,6 @@
           # Dotfiles management (from packages.nix)
           stow # For transitioning from GNU Stow
 
-          markdown-oxide # Used by obsidian.nvim
-          nixfmt-rfc-style # Preferred Nix formatter
-          nixd
-          nil
-          nix-diff
-
-          # Rust development
-          rustup
-          cargo-fuzz
-          cargo-bump
-          cargo-audit
-
-          # JavaScript/Node.js
-          nodejs
-          nodejs_latest
-
-          # Python with packages bundled
-          (python3.withPackages (
-            ps: with ps; [
-              pip
-              ipython
-              rich
-              click
-              questionary
-              fuzzywuzzy
-              fastapi
-              uvicorn
-              aiofiles
-              pydantic
-              python-Levenshtein
-              ujson
-              tiktoken
-              # Add commonly used packages
-              pandas
-              numpy
-              requests
-              matplotlib
-              seaborn
-              jupyter
-              notebook
-              black
-              mypy
-              pytest
-              httpx
-              beautifulsoup4
-              lxml
-              python-dotenv
-              tqdm
-              typer
-              pyyaml
-              toml
-              tabulate
-            ]
-          ))
-
-          # Database tools
-          sqlite
-          sqlitebrowser
-          sqlite-vec
-          sqlite-utils
-          sqlitestudio
-          pgcli
-          # postgresql_16
-
-          # AI development tools
-          aider-chat # aider-chat-full # Temporarily disabled due to spacy dependency issues
-          claude-code
-          inputs.claude-squad.packages.${pkgs.system}.default # Manage multiple AI coding assistants
-          claude-desktop-wayland
-          codex
-          openai-whisper-cpp
-
           # Development utilities
           jq
           yq
@@ -220,16 +32,6 @@
           httpie
           curlie
           websocat
-
-          # Git tools
-          gh # GitHub CLI
-          delta
-          lazygit # TUI for git
-          onefetch # Git repo stats
-          gitui
-
-          # Editor
-          neovim
 
           # HTTP/API tools
           xh # Modern HTTP client like HTTPie but faster
@@ -244,29 +46,13 @@
           # Terminal multiplexers and process management
           zellij # Modern terminal workspace
           mprocs # Run multiple processes in parallel
-        ];
 
-        # Neovim configuration link
-        activation.linkNeovimConfig =
-          config.home-manager.users.sinity.lib.dag.entryAfter [ "writeBoundary" ]
-            ''
-              mkdir -p $HOME/.config
-              echo "Creating symlink for Neovim configuration..."
-              ln -sfn /realm/project/sinnix/nvim $HOME/.config/nvim
-            '';
+          # Editor
+          neovim
+        ];
       };
 
       programs = {
-        claude-code-logger = {
-          enable = false;
-          logDir = "/realm/data/claude-code-api-log";
-          enableSessionFolders = true;
-          enableConversationGrouping = true;
-          maxInteractionsPerFile = 100;
-          maxLogSizeMB = 10;
-          createAlias = true;
-        };
-
         # === SHELL CONFIGURATION (from home/environment.nix) ===
         zsh = {
           enable = true;
@@ -461,25 +247,25 @@
 
           settings = {
             format = lib.concatStrings [
-              "[](color_orange)"
+              "[](color_orange)"
               "$os"
-              "[](bg:color_yellow fg:color_orange)"
+              "[](bg:color_yellow fg:color_orange)"
               "$directory"
-              "[](fg:color_yellow bg:color_aqua)"
+              "[](fg:color_yellow bg:color_aqua)"
               "$git_branch"
               "$git_status"
-              "[](fg:color_aqua bg:color_blue)"
+              "[](fg:color_aqua bg:color_blue)"
               "$nix_shell"
-              "[](fg:color_blue bg:color_bg3)"
+              "[](fg:color_blue bg:color_bg3)"
               "$cmd_duration"
-              "[](fg:color_bg3) "
+              "[](fg:color_bg3) "
             ];
 
             os = {
               disabled = false;
               style = "bg:color_orange bold fg:color_fg0";
               symbols = {
-                NixOS = " ";
+                NixOS = " ";
               };
             };
 
@@ -490,7 +276,7 @@
             };
 
             git_branch = {
-              symbol = "";
+              symbol = "";
               style = "bg:color_aqua";
               format = "[[ $symbol $branch ](bold fg:color_fg0 bg:color_aqua)]($style)";
             };
@@ -509,7 +295,7 @@
               disabled = false;
               time_format = "%R";
               style = "bg:color_bg1";
-              format = "[[   $time ](fg:color_fg0 bg:color_bg1)]($style)";
+              format = "[[   $time ](fg:color_fg0 bg:color_bg1)]($style)";
             };
 
             cmd_duration = {
@@ -526,8 +312,8 @@
 
             character = {
               disabled = false;
-              success_symbol = "[  ](bold fg:color_green)";
-              error_symbol = "[  ](bold fg:color_red)";
+              success_symbol = "[  ](bold fg:color_green)";
+              error_symbol = "[  ](bold fg:color_red)";
             };
           };
         };
@@ -594,52 +380,6 @@
             # Make sure directory exists for asciinema
             mkdir ~/.asciinema_recordings | ignore
           '';
-        };
-
-        git = {
-          enable = true;
-          delta.enable = true; # Installs delta and sets it as pager
-
-          userName = "Sinity";
-          userEmail = "ezo.dev@gmail.com";
-
-          aliases = {
-            a = "add";
-            aa = "add --all";
-            s = "status";
-            b = "branch";
-            m = "merge";
-            d = "diff";
-            pl = "pull";
-            plo = "pull origin";
-            ps = "push";
-            pso = "push origin";
-            pst = "push --follow-tags";
-            cl = "clone";
-            c = "commit";
-            cm = "commit -m";
-            tag = "tag -ma";
-            ch = "checkout";
-            chb = "checkout -b";
-            log = "log --oneline --decorate --graph";
-            lol = "log --graph --pretty='%Cred%h%Creset -%C(auto)%d%Creset %s %Cgreen(%ar) %C(bold blue)<%an>%Creset'";
-            lola = "log --graph --pretty='%Cred%h%Creset -%C(auto)%d%Creset %s %Cgreen(%ar) %C(bold blue)<%an>%Creset' --all";
-            lols = "log --graph --pretty='%Cred%h%Creset -%C(auto)%d%Creset %s %Cgreen(%ar) %C(bold blue)<%an>%Creset' --stat";
-          };
-
-          extraConfig = {
-            init.defaultBranch = "master";
-            merge.conflictstyle = "diff3";
-            diff.colorMoved = "default";
-
-            delta = {
-              line-numbers = true;
-              side-by-side = true;
-              navigate = true;
-            };
-
-            alias.cma = "!git add --all && git commit -m";
-          };
         };
       };
     };

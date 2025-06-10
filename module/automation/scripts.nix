@@ -1,6 +1,5 @@
-# Automation Domain Module
-# Complete orchestration (services + scripts)
-# Consolidates: scripts, services, monitoring, scheduling
+# Automation Scripts
+# Custom shell scripts and utilities
 
 { pkgs, ... }:
 let
@@ -141,7 +140,7 @@ let
     text = ''
       #!/usr/bin/env bash
 
-      SHADER_DIR="/realm/project/sinnix/module"
+      SHADER_DIR="''${FLAKE:-/realm/project/sinnix}/module"
 
       case "$1" in
         matrix)
@@ -474,7 +473,7 @@ let
     #!/usr/bin/env bash
 
     # Define file path
-    LOG_FILE=/realm/knowledgebase/50_logs/raw-log.md
+    LOG_FILE=''${REALM_ROOT:-/realm}/knowledgebase/50_logs/raw-log.md
     DATETIME=$(${pkgs.coreutils}/bin/date "+%Y-%m-%d %H:%M:%S")
 
     # Extract recent entries (up to 1000) from the log file
@@ -514,242 +513,44 @@ let
   '';
 in
 {
-  system.nixos.tags = [ "automation-domain-v0.3" ];
+  config = {
+    home-manager.users.sinity = {
+      home.packages = with pkgs; [
+        vm-start
 
-  services = {
-    transmission = {
-      enable = true;
-      settings = {
-        script-torrent-done-enabled = false;
-        ratio-limit-enabled = false;
-        umask = 18; # 002
-        download-dir = "/outer-realm/inbox";
-        incomplete-dir-enabled = false;
-        rpc-port = 9091;
-      };
-    };
+        runbg
+        lofi
 
-    ollama = {
-      enable = true;
-      acceleration = "cuda";
-    };
+        toggle_blur
+        toggle_opacity
+        toggle_waybar
 
-    # Monero service (commented out for easy enablement)
-    # monero = {
-    #   enable = true;
-    #   dataDir = "/var/lib/monero";
-    # };.
-    postgresql = {
-      enable = true;
-      package = pkgs.postgresql_16;
-      extensions =
-        ps: with ps; [
-          timescaledb
-          pgvector
-          pgx_ulid # This is a custom package built from source
-        ];
-      settings = {
-        shared_preload_libraries = "timescaledb";
-      };
-    };
-    sinex = {
-      enable = true;
-      systemUser = "sinity";
+        # File management automation
+        compress
+        extract
+        combine-files
 
-      autoConfigureSystem = true;
+        # Documentation and help
+        show-keybinds
 
-      ingestors = {
-        hyprland = {
-          enable = true;
-          interval = 1;
-        };
+        # Knowledge management
+        log-to-knowledgebase
 
-        filesystem = {
-          enable = true;
-          watchDirectories = [
-            "~"
-            "/realm"
-          ];
-          excludePatterns = [
-            "*.tmp"
-            "*.log"
-            "*.cache"
-            ".git/**"
-            "node_modules/**"
-            "__pycache__/**"
-            "*.swp"
-            "*.swo"
-            "target/**"
-            ".direnv/**"
-          ];
-          debounceMs = 200;
-        };
+        # ASBL mitigation and gamma control
+        asbl-fooler
+        hyperfx
 
-        kitty = {
-          enable = true;
-          captureCommands = true;
-          captureOutput = true; # Maximalist approach - capture everything
-          shellIntegration = true; # Automatic shell markers for command tracking
-        };
-      };
-    };
-  };
+        # Script dependencies
+        unzip # For extract.sh
+        unrar # For extract.sh
+        p7zip # For extract.sh
+        zenity # For dialogs
+        tofi # For various scripts (show-keybinds, log-to-knowledgebase)
 
-  home-manager.users.sinity = {
-    home.packages = with pkgs; [
-      vm-start
-
-      runbg
-      lofi
-
-      toggle_blur
-      toggle_opacity
-      toggle_waybar
-
-      # File management automation
-      compress
-      extract
-      combine-files
-
-      # Documentation and help
-      show-keybinds
-
-      # Knowledge management
-      log-to-knowledgebase
-
-      # ASBL mitigation and gamma control
-      asbl-fooler
-      hyperfx
-
-      # From home/system.nix - system monitoring
-      btop
-      ncdu # disk space
-      nitch # system fetch util
-
-      # Modern file utilities
-      dua # Disk usage analyzer (like ncdu but faster)
-      yazi # Terminal file manager
-      fselect # SQL-like file search
-
-      # From home/system.nix - CLI utilities
-      toipe # typing test in the terminal
-      ttyper # cli typing test
-
-      # From home/system.nix - Terminal toys
-      cbonsai
-      pipes
-      tty-clock
-
-      # From home/system.nix - Graphics tools
-      mesa-demos
-      vulkan-tools
-      vulkan-validation-layers
-      wayland-utils
-      libva-utils
-      glxinfo
-      drm_info
-
-      # Script dependencies
-      unzip # For extract.sh
-      unrar # For extract.sh
-      p7zip # For extract.sh
-      zenity # For dialogs
-      tofi # For various scripts (show-keybinds, log-to-knowledgebase)
-
-      # VM management dependencies (for vm-start)
-      virt-viewer
-      libvirt
-
-      # ActivityWatch watchers
-      aw-watcher-window-wayland
-      aw-watcher-afk
-    ];
-
-    # Activity monitoring and tracking
-
-    # From home/system.nix - btop configuration
-    programs.btop = {
-      enable = true;
-      settings = {
-        vim_keys = true;
-        update_ms = 2000;
-        show_cpu_freq = true;
-        show_gpu = true;
-        mem_graphs = true;
-        proc_sorting = "cpu direct";
-        proc_filter = false;
-        tree_view = false;
-        proc_per_core = true;
-        proc_mem_bytes = true;
-        cpu_graph_upper = "total";
-        cpu_graph_lower = "user";
-        cpu_invert_lower = true;
-      };
-    };
-
-    services.activitywatch = {
-      enable = true;
-      package = pkgs.aw-server-rust;
-
-      watchers = {
-        awatcher = {
-          package = pkgs.awatcher;
-          settings = {
-            idle-timeout-seconds = 60;
-            poll-time-idle-seconds = 1;
-            poll-time-window-seconds = 1;
-          };
-        };
-      };
-    };
-
-    systemd.user = {
-      services = {
-        asbl-no-moar = {
-          Unit = {
-            Description = "Wayland gamma poke to mitigate ASBL";
-            After = [ "graphical-session.target" ];
-          };
-          Service = {
-            Type = "simple";
-            ExecStart = "${asbl-fooler}/bin/asbl-no-moar";
-            Restart = "no";
-          };
-          Install = {
-            WantedBy = [ "default.target" ];
-          };
-        };
-
-        activitywatch-watcher-awatcher =
-          let
-            target = "graphical-session.target";
-          in
-          {
-            Unit = {
-              After = [ target ];
-              Requisite = [ target ];
-              PartOf = [ target ];
-            };
-            Install = {
-              WantedBy = [ target ];
-            };
-          };
-      };
-
-      timers.asbl-no-moar = {
-        Unit = {
-          Description = "Timer for asbl-no-moar service";
-        };
-        Timer = {
-          OnBootSec = "2min";
-          OnUnitActiveSec = "150s";
-          AccuracySec = "1s";
-          Persistent = true;
-        };
-        Install = {
-          WantedBy = [ "timers.target" ];
-        };
-      };
+        # VM management dependencies (for vm-start)
+        virt-viewer
+        libvirt
+      ];
     };
   };
 }
