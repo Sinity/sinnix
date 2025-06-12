@@ -23,6 +23,7 @@
     environment.systemPackages = with pkgs; [
       # Essential development tools
       git
+      git-annex
       gnumake
       gcc
       gdb

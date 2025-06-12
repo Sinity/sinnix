@@ -26,7 +26,6 @@
 
           # JavaScript/Node.js
           nodejs
-          nodejs_latest
 
           # Python with packages bundled
           (python3.withPackages (

@@ -211,6 +211,14 @@
             "idleinhibit focus,class:^(mpv)$"
             "idleinhibit fullscreen,class:^(firefox)$"
             "idleinhibit fullscreen,class:^(google-chrome)$"
+            # YouTube and video content inhibit rules (focus-based, works with waybar visible)
+            "idleinhibit focus,title:.*[Yy]ou[Tt]ube.*"
+            "idleinhibit focus,title:.*- YouTube$"
+            "idleinhibit focus,title:.*YouTube.*"
+            # Additional video streaming sites
+            "idleinhibit focus,title:.*Netflix.*"
+            "idleinhibit focus,title:.*Twitch.*"
+            "idleinhibit focus,title:.*Prime Video.*"
 
             # === FLOATING WINDOWS ===
             # Dialogs and popups
@@ -389,6 +397,26 @@
           valign = center
         }
       '';
+
+      # === HYPRIDLE CONFIGURATION ===
+      services.hypridle = {
+        enable = true;
+        settings = {
+          general = {
+            after_sleep_cmd = "hyprctl dispatch dpms on";
+            ignore_dbus_inhibit = false;
+            lock_cmd = "hyprlock";
+          };
+
+          listener = [
+            {
+              timeout = 300; # 5 minutes
+              on-timeout = "hyprctl dispatch dpms off"; # Screen blanking only, no system sleep
+              on-resume = "hyprctl dispatch dpms on"; # Instant wake
+            }
+          ];
+        };
+      };
 
       home.packages = with pkgs; [
         # Pyprland for advanced scratchpad management

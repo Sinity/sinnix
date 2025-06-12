@@ -8,6 +8,7 @@
     ./scripts.nix
     ./services.nix
     ./monitoring.nix
+    ./observability.nix
   ];
 
   config = {

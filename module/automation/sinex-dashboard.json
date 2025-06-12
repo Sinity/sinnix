@@ -1,0 +1,186 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Sinex Exocortex Monitoring",
+    "tags": ["sinex", "exocortex", "monitoring"],
+    "style": "dark",
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Event Processing Rate",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "rate(sinex_events_processed_total[5m])",
+            "legendFormat": "{{source}} - {{event_type}}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0},
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"],
+            "fields": ""
+          },
+          "orientation": "auto",
+          "textMode": "auto",
+          "colorMode": "value",
+          "graphMode": "area"
+        }
+      },
+      {
+        "id": 2,
+        "title": "Failed Events",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "rate(sinex_events_failed_total[5m])",
+            "legendFormat": "{{error_type}}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0},
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"],
+            "fields": ""
+          },
+          "orientation": "auto",
+          "textMode": "auto",
+          "colorMode": "value",
+          "graphMode": "area"
+        }
+      },
+      {
+        "id": 3,
+        "title": "DLQ Writes",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "rate(sinex_dlq_writes_total[5m])",
+            "legendFormat": "{{reason}}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0},
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"],
+            "fields": ""
+          },
+          "orientation": "auto",
+          "textMode": "auto",
+          "colorMode": "value",
+          "graphMode": "area"
+        }
+      },
+      {
+        "id": 4,
+        "title": "Event Processing Duration",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(sinex_event_processing_duration_seconds_bucket[5m]))",
+            "legendFormat": "95th percentile - {{operation}}"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(sinex_event_processing_duration_seconds_bucket[5m]))",
+            "legendFormat": "50th percentile - {{operation}}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+        "yAxes": [
+          {
+            "label": "Duration (seconds)",
+            "min": 0
+          },
+          {
+            "show": false
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Active Sources",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sinex_sources_active",
+            "legendFormat": "{{source_type}}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"],
+            "fields": ""
+          },
+          "orientation": "auto",
+          "textMode": "auto",
+          "colorMode": "value",
+          "graphMode": "none"
+        }
+      },
+      {
+        "id": 6,
+        "title": "System Memory Usage",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sinex_memory_usage_bytes{component=\"used\"}",
+            "legendFormat": "Used Memory"
+          },
+          {
+            "expr": "sinex_memory_usage_bytes{component=\"total\"}",
+            "legendFormat": "Total Memory"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+        "yAxes": [
+          {
+            "label": "Bytes",
+            "min": 0
+          },
+          {
+            "show": false
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Event Lag",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(sinex_event_lag_seconds_bucket[5m]))",
+            "legendFormat": "95th percentile - {{source}}"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(sinex_event_lag_seconds_bucket[5m]))",
+            "legendFormat": "50th percentile - {{source}}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+        "yAxes": [
+          {
+            "label": "Lag (seconds)",
+            "min": 0
+          },
+          {
+            "show": false
+          }
+        ]
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "10s",
+    "schemaVersion": 27,
+    "version": 1,
+    "links": []
+  }
+}

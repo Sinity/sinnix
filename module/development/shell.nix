@@ -49,6 +49,9 @@
 
           # Editor
           neovim
+
+          graphviz
+          mermaid-cli
         ];
       };
 
@@ -145,7 +148,8 @@
             icat = "kitten icat";
             dsize = "du -hs";
             open = "xdg-open";
-            cl = "bash ~/.claude/local/claude";
+            cl = "~/.claude/local/node_modules/.bin/claude";
+            claude = "~/.claude/local/node_modules/.bin/claude";
 
             l = "eza --icons  -a --group-directories-first -1"; # EZA_ICON_SPACING=2
             ll = "eza --icons  -a --group-directories-first -1 --no-user --long";
@@ -247,25 +251,25 @@
 
           settings = {
             format = lib.concatStrings [
-              "[](color_orange)"
+              "[](color_orange)"
               "$os"
-              "[](bg:color_yellow fg:color_orange)"
+              "[](bg:color_yellow fg:color_orange)"
               "$directory"
-              "[](fg:color_yellow bg:color_aqua)"
+              "[](fg:color_yellow bg:color_aqua)"
               "$git_branch"
               "$git_status"
-              "[](fg:color_aqua bg:color_blue)"
+              "[](fg:color_aqua bg:color_blue)"
               "$nix_shell"
-              "[](fg:color_blue bg:color_bg3)"
+              "[](fg:color_blue bg:color_bg3)"
               "$cmd_duration"
-              "[](fg:color_bg3) "
+              "[](fg:color_bg3) "
             ];
 
             os = {
               disabled = false;
               style = "bg:color_orange bold fg:color_fg0";
               symbols = {
-                NixOS = " ";
+                NixOS = " ";
               };
             };
 
@@ -276,7 +280,7 @@
             };
 
             git_branch = {
-              symbol = "";
+              symbol = "";
               style = "bg:color_aqua";
               format = "[[ $symbol $branch ](bold fg:color_fg0 bg:color_aqua)]($style)";
             };
@@ -295,11 +299,11 @@
               disabled = false;
               time_format = "%R";
               style = "bg:color_bg1";
-              format = "[[   $time ](fg:color_fg0 bg:color_bg1)]($style)";
+              format = "[[   $time ](fg:color_fg0 bg:color_bg1)]($style)";
             };
 
             cmd_duration = {
-              format = "[ 󰔛 $duration ]($style)";
+              format = "[ ﰔ� $duration ]($style)";
               disabled = false;
               style = "bg:color_bg3 fg:color_fg0";
               show_notifications = false;
@@ -312,8 +316,8 @@
 
             character = {
               disabled = false;
-              success_symbol = "[  ](bold fg:color_green)";
-              error_symbol = "[  ](bold fg:color_red)";
+              success_symbol = "[](bold fg:color_green)";
+              error_symbol = "[](bold fg:color_red)";
             };
           };
         };
