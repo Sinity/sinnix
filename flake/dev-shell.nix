@@ -57,9 +57,9 @@
               ripgrep
             ];
 
-            # Git hooks configuration (renamed from pre-commit)
+            # Git hooks configuration (nixfmt disabled per user preference)
             git-hooks.hooks = {
-              nixfmt-rfc-style.enable = true;
+              nixfmt-rfc-style.enable = false;
               deadnix.enable = true;
               shellcheck.enable = true;
               statix.enable = false;

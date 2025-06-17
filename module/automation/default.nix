@@ -5,7 +5,11 @@
 { ... }:
 {
   imports = [
-    ./scripts.nix
+    ./hyprland-scripts.nix
+    ./knowledge-scripts.nix
+    ./media-scripts.nix
+    ./utility-scripts.nix
+    ./vm-scripts.nix
     ./services.nix
     ./monitoring.nix
     ./observability.nix

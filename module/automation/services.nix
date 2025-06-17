@@ -1,7 +1,7 @@
 # Automation Services
 # System services and daemons
 
-{ pkgs, ... }:
+{ ... }:
 {
   config = {
     services = {
@@ -27,58 +27,48 @@
       #   enable = true;
       #   dataDir = "/var/lib/monero";
       # };.
-      postgresql = {
-        enable = true;
-        package = pkgs.postgresql_16;
-        extensions =
-          ps: with ps; [
-            timescaledb
-            pgvector
-            pgx_ulid # This is a custom package built from source
-          ];
-        settings = {
-          shared_preload_libraries = "timescaledb";
-        };
-      };
+      # postgresql = {
+      #   enable = true;
+      #   package = pkgs.postgresql_16;
+      #   extensions =
+      #     ps: with ps; [
+      #       timescaledb
+      #       pgvector
+      #       pgx_ulid
+      #     ];
+      #   settings = {
+      #     shared_preload_libraries = "timescaledb";
+      #   };
+      # };
       sinex = {
         enable = true;
-        systemUser = "sinity";
+        preset = "production";
+        unifiedCollector.sources.filesystem = {
+          enable = true;
+          watchDirectories = [
+            "~"
+            "/realm"
+          ];
+          excludePatterns = [
+            "*.tmp"
+            "*.log"
+            "*.cache"
+            ".git/**"
+            "node_modules/**"
+            "__pycache__/**"
+            "*.swp"
+            "*.swo"
+            "target/**"
+            ".direnv/**"
+          ];
+          debounceMs = 200;
+        };
 
-        autoConfigureSystem = true;
-
-        ingestors = {
-          hyprland = {
-            enable = true;
-            interval = 1;
-          };
-
-          filesystem = {
-            enable = true;
-            watchDirectories = [
-              "~"
-              "/realm"
-            ];
-            excludePatterns = [
-              "*.tmp"
-              "*.log"
-              "*.cache"
-              ".git/**"
-              "node_modules/**"
-              "__pycache__/**"
-              "*.swp"
-              "*.swo"
-              "target/**"
-              ".direnv/**"
-            ];
-            debounceMs = 200;
-          };
-
-          kitty = {
-            enable = true;
-            captureCommands = true;
-            captureOutput = true; # Maximalist approach - capture everything
-            shellIntegration = true; # Automatic shell markers for command tracking
-          };
+        unifiedCollector.sources.kitty = {
+          enable = true;
+          captureCommands = true;
+          captureOutput = true; # Maximalist approach - capture everything
+          shellIntegration = true; # Automatic shell markers for command tracking
         };
       };
     };

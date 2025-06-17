@@ -149,7 +149,8 @@
             dsize = "du -hs";
             open = "xdg-open";
             cl = "~/.claude/local/node_modules/.bin/claude";
-            claude = "~/.claude/local/node_modules/.bin/claude";
+            claude = "~/.claude/local/node_modules/.bin/claude --add-dir /realm /home/sinity";
+            nvim = "nvim --listen /tmp/nvim-$$";
 
             l = "eza --icons  -a --group-directories-first -1"; # EZA_ICON_SPACING=2
             ll = "eza --icons  -a --group-directories-first -1 --no-user --long";
@@ -349,6 +350,7 @@
             icat = "kitten icat";
             dsize = "du -hs";
             open = "xdg-open";
+            nvim = "nvim --listen /tmp/nvim-$$";
 
             # Enhanced ls (eza)
             l = "eza --icons -a --group-directories-first -1";

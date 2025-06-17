@@ -7,7 +7,15 @@
   imports = [
     ./system.nix
     ./hyprland.nix
-    ./desktop.nix
+    ./apps.nix
+    ./clipboard.nix
+    ./display.nix
+    ./environment.nix
+    ./launcher.nix
+    ./notifications.nix
+    ./panel.nix
+    ./services.nix
+    ./terminal.nix
   ];
 
   config = {

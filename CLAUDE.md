@@ -24,7 +24,7 @@
 ## 🏗️ DOMAIN-UNIFIED ARCHITECTURE PRINCIPLES
 
 - **🎯 Domain Ownership**: Eliminate system/user cognitive splits via unified domain modules
-- **🔗 Sinity Alias**: Use `sinity.programs.X` instead of `home-manager.users.sinity.programs.X`
+- **🏠 Home Manager**: Use standard home-manager patterns for user configuration
 - **🎨 Stylix Integration**: System-wide theming, no custom abstractions
 - **📈 Incremental Migration**: Validate each phase, preserve functionality always
 - **🧪 Bottom-up Design**: Solve real friction, avoid over-abstraction trap
@@ -69,7 +69,7 @@ This repository implements domain-unified NixOS configuration:
 **Package Management**:
 
 - System packages: `environment.systemPackages` in appropriate domain
-- User packages: `sinity.home.packages` in appropriate domain
+- User packages: `home-manager.users.sinity.home.packages` in appropriate domain
 
 **Extension Points**:
 
