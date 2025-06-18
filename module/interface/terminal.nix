@@ -11,7 +11,6 @@
           window_padding_width = 10;
           scrollback_lines = 9999999;
           enable_audio_bell = "no";
-          background = "#000000"; # Pure black background
           mouse_hide_wait = 60;
           wheel_scroll_multiplier = 0.5;
           touch_scroll_multiplier = 0.5;

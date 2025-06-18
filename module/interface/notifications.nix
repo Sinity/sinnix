@@ -1,5 +1,5 @@
 # Notification System Configuration
-# SwayNC notification center with custom styling
+# fnott notification daemon with custom styling
 
 { pkgs, ... }:
 {
@@ -7,109 +7,61 @@
     home-manager.users.sinity = {
       home = {
         packages = with pkgs; [
-          swaynotificationcenter
+          fnott
+          libnotify
         ];
       };
 
-      # === SWAYNC (from swaync/default.nix) ===
-      services.swaync = {
+      services.fnott = {
         enable = true;
         settings = {
-          "$schema" = "/etc/xdg/swaync/configSchema.json";
-          positionX = "right";
-          positionY = "top";
-          layer = "overlay";
-          cssPriority = "application";
-          control-center-layer = "top";
-          control-center-margin-top = 8;
-          control-center-margin-bottom = 8;
-          control-center-margin-right = 8;
-          control-center-margin-left = 8;
-          notification-2fa-action = true;
-          notification-inline-replies = false;
-          notification-icon-size = 64;
-          notification-body-image-height = 100;
-          notification-body-image-width = 200;
-          timeout = 10;
-          timeout-low = 5;
-          timeout-critical = 0;
-          fit-to-screen = true;
-          relative-timestamps = true;
-          control-center-width = 500;
-          control-center-height = 600;
-          notification-window-width = 500;
-          keyboard-shortcuts = true;
-          image-visibility = "when-available";
-          transition-time = 200;
-          hide-on-clear = false;
-          hide-on-action = true;
-          script-fail-notify = true;
-          scripts = {
-            example-script = {
-              exec = "echo 'Do something...'";
-              urgency = "Normal";
-            };
-            example-action-script = {
-              exec = "echo 'Do something actionable!'";
-              urgency = "Normal";
-            };
+          main = {
+            notification-margin = 8;
+            anchor = "top-right";
+            layer = "overlay";
+            
+            
+            # Dimensions
+            max-width = 400;
+            max-height = 200;
+            min-width = 300;
+            
+            # Positioning
+            margin-top = 8;
+            margin-right = 8;
+            margin-bottom = 8;
+            margin-left = 8;
+            
+            # Styling
+            border-size = 2;
+            border-radius = 8;
+            padding-horizontal = 12;
+            padding-vertical = 8;
+            
+            # Icon
+            icon-size = 32;
+            max-icon-size = 64;
+            
+            # Progress bar
+            progress-bar-height = 4;
+            progress-bar-border-size = 0;
           };
-
-          notification-visibility = {
-            example-name = {
-              state = "muted";
-              urgency = "Low";
-              app-name = "Spotify";
-            };
+          
+          # Low urgency notifications
+          low = {
+            timeout = 5;
           };
-
-          widgets = [
-            "inhibitors"
-            "title"
-            "dnd"
-            "notifications"
-            "mpris"
-            "volume"
-          ];
-
-          widget-config = {
-            inhibitors = {
-              text = "Inhibitors";
-              button-text = "Clear All";
-              clear-all-button = true;
-            };
-            title = {
-              text = "Notifications";
-              clear-all-button = true;
-              button-text = "Clear All";
-            };
-            dnd = {
-              text = " Do Not Disturb";
-            };
-            label = {
-              max-lines = 5;
-              text = "Label Text";
-            };
-            mpris = {
-              image-size = 85;
-              image-radius = 5;
-            };
-            volume = {
-              label = "";
-              expand-button-label = "";
-              collapse-button-label = "";
-              show-per-app = true;
-              show-per-app-icon = true;
-              show-per-app-label = false;
-            };
-            "backlight#mobile" = {
-              label = " 󰃠 ";
-              device = "panel";
-            };
+          
+          # Normal urgency notifications  
+          normal = {
+            timeout = 10;
+          };
+          
+          # Critical urgency notifications
+          critical = {
+            timeout = 0;
           };
         };
-
-        style = builtins.readFile ../asset/swaync-style.css;
       };
     };
   };

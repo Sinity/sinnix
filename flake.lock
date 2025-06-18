@@ -1390,6 +1390,7 @@
         "url": "ssh://git@github.com/Sinity/sinex"
       },
       "original": {
+        "rev": "6f034719f5aa423f20ca6c6f6e4231da85771b0d",
         "type": "git",
         "url": "ssh://git@github.com/Sinity/sinex"
       }

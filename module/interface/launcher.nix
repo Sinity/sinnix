@@ -1,7 +1,7 @@
 # Application Launcher Configuration (Tofi)
 # Fuzzy application launcher with custom styling
 
-{ lib, ... }:
+{ ... }:
 {
   config = {
     home-manager.users.sinity = {
@@ -12,9 +12,6 @@
           width = 2000;
           height = 1000;
 
-          # Font configuration
-          font = "SauceCodePro Nerd Font Mono";
-          font-size = lib.mkForce 16;
 
           # Layout
           anchor = "center";

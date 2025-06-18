@@ -19,8 +19,8 @@
         # Enable stylix for system-wide theming
         inputs.stylix.nixosModules.stylix
 
-        # Enable sinex (exocortex)
-        inputs.sinex.nixosModules.default
+        # Temporarily disabled due to internal module conflicts
+        # inputs.sinex.nixosModules.default
 
         # Import system-wide overlay
         (import ./overlay.nix)

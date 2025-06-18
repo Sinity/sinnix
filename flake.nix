@@ -38,7 +38,7 @@
     claude-code-logger.url = "github:sinity/claude-code-logger/add-nix-support";
     claude-code-logger.inputs.nixpkgs.follows = "nixpkgs";
 
-    sinex.url = "git+ssh://git@github.com/Sinity/sinex";
+    sinex.url = "git+ssh://git@github.com/Sinity/sinex?rev=6f034719f5aa423f20ca6c6f6e4231da85771b0d";
     sinex.inputs.nixpkgs.follows = "nixpkgs";
 
     # System-wide theming

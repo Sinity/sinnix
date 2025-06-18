@@ -161,21 +161,6 @@
       enable = true;
       addKeysToAgent = "yes";
       package = pkgs.openssh;
-
-      # # SSH match blocks can be configured here
-      # matchBlocks = {
-      #   "*" = {
-      #     ForwardAgent = "no";
-      #     ServerAliveInterval = 0;
-      #     ServerAliveCountMax = 3;
-      #     HashKnownHosts = "no";
-      #     UserKnownHostsFile = "~/.ssh/known_hosts";
-      #     ControlMaster = "no";
-      #     ControlPath = "~/.ssh/master-%r@%n:%p";
-      #     ControlPersist = "no";
-      #     IdentitiesOnly = "yes";
-      #   };
-      # };
     };
   };
 }
