@@ -41,6 +41,28 @@
           };
         };
 
+        claude-usage-monitor = {
+          Unit = {
+            Description = "Claude Code usage monitor";
+            After = [ "graphical-session.target" ];
+            PartOf = [ "graphical-session.target" ];
+          };
+          Service = {
+            Type = "forking";
+            ExecStart = "${pkgs.zellij}/bin/zellij --session ccusage-monitor attach -c -- ${pkgs.claude-code-usage-monitor}/bin/ccmonitor --refresh-rate 1 --refresh-per-second 20";
+            ExecStop = "${pkgs.zellij}/bin/zellij kill-session ccusage-monitor";
+            Restart = "on-failure";
+            RestartSec = 5;
+            Environment = [
+              "TERM=xterm-256color"
+              "COLORTERM=truecolor"
+            ];
+          };
+          Install = {
+            WantedBy = [ "graphical-session.target" ];
+          };
+        };
+
         polkit-gnome-authentication-agent-1 = {
           Unit = {
             Description = "polkit-gnome-authentication-agent-1";

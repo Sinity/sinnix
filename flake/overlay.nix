@@ -1,11 +1,9 @@
 {
-  pkgs,
   inputs,
   ...
 }:
 {
   nixpkgs.overlays = [
-    # Apply sinex overlay
     inputs.sinex.overlays.default
 
     (final: prev: {
@@ -29,15 +27,47 @@
         pythonPackages = final.python3Packages;
       };
 
-      claude-desktop-wayland = final.symlinkJoin {
-        name = "claude-desktop-wayland";
-        paths = [
-          inputs.claude-desktop.packages.${pkgs.system}.claude-desktop-with-fhs
+      # claude-desktop-wayland = final.symlinkJoin {
+      #   name = "claude-desktop-wayland";
+      #   paths = [
+      #     inputs.claude-desktop.packages.${pkgs.system}.claude-desktop-with-fhs
+      #   ];
+      #   buildInputs = [ final.makeWrapper ];
+      #   postBuild = ''
+      #     wrapProgram $out/bin/claude-desktop --add-flags "--enable-features=WaylandWindowDecorations --no-sandbox"
+      #   '';
+      # };
+
+      claude-code-usage-monitor = final.python3Packages.buildPythonApplication {
+        pname = "claude-code-usage-monitor";
+        version = "unstable";
+        src = inputs.claude-code-usage-monitor-src;
+
+        pyproject = true;
+        build-system = with final.python3Packages; [ setuptools ];
+
+        propagatedBuildInputs = with final.python3Packages; [
+          pytz
+          requests
+          beautifulsoup4
+          lxml
+          numpy
+          pydantic
+          pydantic-settings
+          pyyaml
+          rich
         ];
-        buildInputs = [ final.makeWrapper ];
-        postBuild = ''
-          wrapProgram $out/bin/claude-desktop --add-flags "--enable-features=WaylandWindowDecorations --no-sandbox"
+
+        # Use standard Python package installation instead of custom script install
+        postInstall = ''
+          # The package should install the console script via setuptools entry points
         '';
+
+        meta = with final.lib; {
+          description = "Real-time terminal monitoring tool for tracking Claude AI token usage";
+          homepage = "https://github.com/Maciek-roboblog/Claude-Code-Usage-Monitor";
+          license = licenses.mit;
+        };
       };
     })
   ];

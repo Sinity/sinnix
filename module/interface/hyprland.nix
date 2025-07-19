@@ -4,6 +4,7 @@
 {
   pkgs,
   config,
+  inputs,
   ...
 }:
 {
@@ -414,6 +415,8 @@
         slurp # Region selection tool
         grimblast # Screenshot tool using grim and slurp
         wl-screenrec # Screen recording
+        # Modern Qt/QML based status bar
+        inputs.quickshell.packages.${pkgs.system}.default
       ];
     };
   };

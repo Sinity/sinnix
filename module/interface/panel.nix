@@ -1,7 +1,7 @@
 # Panel Configuration (Waybar)
 # Status bar with system information, workspaces, and notifications
 
-{ pkgs, ... }:
+{ pkgs, lib, ... }:
 {
   config = {
     home-manager.users.sinity = {
@@ -14,6 +14,35 @@
         package = pkgs.waybar.overrideAttrs (oa: {
           mesonFlags = (oa.mesonFlags or [ ]) ++ [ "-Dexperimental=true" ];
         });
+        
+        # Use stylix theming with better font weight and color-coded indicators
+        style = lib.mkAfter ''
+          * {
+            font-family: "SauceCodePro Nerd Font Mono", monospace;
+            font-weight: 600;
+          }
+          
+          /* Constant colorful system indicators for easy distinction */
+          #cpu {
+            color: #fb4934; /* Red */
+          }
+          
+          #memory {
+            color: #fabd2f; /* Yellow */
+          }
+          
+          #disk {
+            color: #b8bb26; /* Green */
+          }
+          
+          #pulseaudio {
+            color: #83a598; /* Blue */
+          }
+          
+          #pulseaudio.muted {
+            color: #665c54; /* Gray when muted */
+          }
+        '';
 
         settings.mainBar = {
           position = "bottom";
@@ -34,7 +63,6 @@
             "memory"
             "disk"
             "pulseaudio"
-            "network"
             "custom/notification"
           ];
           clock = {
@@ -71,36 +99,26 @@
             };
           };
           cpu = {
-            format = "  {usage}%";
-            format-alt = "  {avg_frequency} GHz";
+            format = " {usage}%";
+            format-alt = " {avg_frequency}GHz";
             interval = 2;
           };
           memory = {
-            format = "󰟜 {}%";
-            format-alt = "󰟜 {used} GiB";
+            format = " {percentage}%";
+            format-alt = " {used}GB";
             interval = 2;
           };
           disk = {
-            format = "󰋊 {percentage_used}%";
+            format = " {percentage_used}%";
             interval = 60;
-          };
-          network = {
-            format-wifi = "  {signalStrength}%";
-            format-ethernet = "󰀂 ";
-            tooltip-format = "Connected to {essid} {ifname} via {gwaddr}";
-            format-linked = "{ifname} (No IP)";
-            format-disconnected = "󰖪 ";
           };
           tray = {
             icon-size = 20;
             spacing = 8;
           };
           pulseaudio = {
-            format = "{icon} {volume}%";
-            format-muted = "  {volume}%";
-            format-icons = {
-              default = [ " " ];
-            };
+            format = " {volume}%";
+            format-muted = " MUTED";
             scroll-step = 5;
             on-click = "pamixer -t";
           };

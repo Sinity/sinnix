@@ -226,6 +226,23 @@ in
 
           # Removed ~/scripts from PATH - scripts now embedded in automation.nix
         };
+        
+        # Load secrets into environment via shell profile
+        programs.zsh.initContent = lib.concatStringsSep "\n" (
+          lib.mapAttrsToList (
+            filename: _:
+            let
+              secretName = lib.removeSuffix ".age" filename;
+              envName = lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] secretName);
+            in
+            ''
+              if [[ -r "${config.age.secrets.${secretName}.path}" ]]; then
+                export ${envName}="$(cat ${config.age.secrets.${secretName}.path})"
+              fi
+            ''
+          ) secretFiles
+        );
+        
         programs.home-manager.enable = true;
       };
     };
@@ -286,24 +303,12 @@ in
       }) secretFiles;
     };
 
-    programs.zsh.loginShellInit = lib.concatStringsSep "\n" (
-      [
-        # Auto-start Hyprland with UWSM on TTY1
-        ''
-          if [ -z "$DISPLAY" ] && [ "$XDG_VTNR" = 1 ]; then
-            exec uwsm start hyprland-uwsm.desktop
-          fi
-        ''
-      ]
-      ++ lib.mapAttrsToList (
-        filename: _:
-        let
-          secretName = lib.removeSuffix ".age" filename;
-          envName = lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] secretName);
-        in
-        ''export ${envName}="$(<${config.age.secrets.${secretName}.path})"''
-      ) secretFiles
-    );
+    programs.zsh.loginShellInit = ''
+      if [ -z "$DISPLAY" ] && [ "$XDG_VTNR" = 1 ]; then
+        exec uwsm start hyprland-uwsm.desktop
+      fi
+    '';
+
 
     # === FOUNDATION SYSTEMD CONFIGURATION ===
     systemd.extraConfig = "DefaultTimeoutStopSec=5s";

@@ -12,7 +12,6 @@
           hyprpicker # Color picker
           wl-gammactl # Adjust gamma
           wlsunset # Night light/blue light filter
-          redshift # Adjust color temperature (X11/Wayland)
         ];
       };
     };

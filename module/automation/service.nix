@@ -1,7 +1,7 @@
 # Services
 # System services and daemons
 
-{ ... }:
+{ pkgs, ... }:
 {
   config = {
     services = {
@@ -22,9 +22,59 @@
         acceleration = "cuda";
       };
 
+      postgresql = {
+        enable = true;
+        package = pkgs.postgresql_16;
+
+        # Install required extensions
+        extensions = with pkgs.postgresql16Packages; [
+          timescaledb
+          pg_jsonschema # From Sinex overlay
+          pgx_ulid
+          pgvector
+        ];
+
+        # Configure PostgreSQL
+        settings = {
+          # Required for TimescaleDB
+          shared_preload_libraries = "timescaledb";
+
+          # Performance settings optimized for Sinex
+          max_connections = 200;
+          shared_buffers = "256MB";
+          effective_cache_size = "1GB";
+          maintenance_work_mem = "256MB";
+          checkpoint_completion_target = 0.9;
+          wal_buffers = "16MB";
+          default_statistics_target = 100;
+          random_page_cost = 1.1;
+          effective_io_concurrency = 200;
+          max_prepared_transactions = 256;
+
+          # Timeouts
+          statement_timeout = "60s";
+          lock_timeout = "30s";
+          idle_in_transaction_session_timeout = "300s";
+
+          # Logging
+          log_statement = "mod";
+          log_duration = true;
+          log_min_duration_statement = "1000ms";
+        };
+
+        # Create database and user
+        ensureDatabases = [ "sinex" ];
+        ensureUsers = [
+          {
+            name = "sinex";
+            ensureDBOwnership = true;
+          }
+        ];
+      };
       # Temporarily disabled due to module conflicts
       # sinex = {
-      #   enable = true;
+      # enable = true;
+      # targetUser = "sinity";
       #   preset = "normal";
       #   blobStorage.repositoryPath = /realm/annex;
       #   blobStorage.healthCheck.wantedSize = null;

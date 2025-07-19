@@ -46,6 +46,7 @@
           # Terminal multiplexers and process management
           zellij # Modern terminal workspace
           mprocs # Run multiple processes in parallel
+          tmux
 
           # Editor
           neovim
@@ -53,59 +54,12 @@
           graphviz
           mermaid-cli
 
-          ### IMPORT FROM MONITORING.NIX!!!!!
-          # system monitoring
-          btop
-          ncdu # disk space
-          nitch # system fetch util
-
-          # Modern file utilities
-          dua # Disk usage analyzer (like ncdu but faster)
-          yazi # Terminal file manager
-          fselect # SQL-like file search
-
-          # CLI utilities
-          toipe # typing test in the terminal
-          ttyper # cli typing test
-
-          # Terminal toys
-          cbonsai
-          pipes
-          tty-clock
-
-          # Graphics tools
-          mesa-demos
-          vulkan-tools
-          vulkan-validation-layers
-          wayland-utils
-          libva-utils
-          glxinfo
-          drm_info
+          # Custom packages
+          claude-code-usage-monitor
         ];
-
       };
 
       programs = {
-        #IMPORT FROM MONITORING.NIX
-        btop = {
-          enable = true;
-          settings = {
-            vim_keys = true;
-            update_ms = 2000;
-            show_cpu_freq = true;
-            show_gpu = true;
-            mem_graphs = true;
-            proc_sorting = "cpu direct";
-            proc_filter = false;
-            tree_view = false;
-            proc_per_core = true;
-            proc_mem_bytes = true;
-            cpu_graph_upper = "total";
-            cpu_graph_lower = "user";
-            cpu_invert_lower = true;
-          };
-        };
-
         # === SHELL CONFIGURATION (from home/environment.nix) ===
         zsh = {
           enable = true;
@@ -201,6 +155,12 @@
             cl = "~/.claude/local/node_modules/.bin/claude";
             claude = "~/.claude/local/node_modules/.bin/claude --add-dir /realm /home/sinity";
             nvim = "nvim --listen /tmp/nvim-$$";
+            
+            # Usage monitoring
+            ccm = "ccmonitor --refresh-rate 1 --refresh-per-second 20";
+            ccm-attach = "zellij attach ccusage-monitor";
+            ccusage = "npx --yes ccusage@latest";
+            gemini-cli = "npx --yes https://github.com/google-gemini/gemini-cli";
 
             l = "eza --icons  -a --group-directories-first -1"; # EZA_ICON_SPACING=2
             ll = "eza --icons  -a --group-directories-first -1 --no-user --long";
@@ -271,6 +231,10 @@
           enable = true;
           defaultCommand = "fd --hidden --strip-cwd-prefix --exclude .git";
           defaultOptions = [
+            "--color=fg:-1,fg+:#FBF1C7,bg:-1,bg+:#282828"
+            "--color=hl:#98971A,hl+:#B8BB26,info:#928374,marker:#D65D0E"
+            "--color=prompt:#CC241D,spinner:#689D6A,pointer:#D65D0E,header:#458588"
+            "--color=border:#665C54,label:#aeaeae,query:#FBF1C7"
             "--border='rounded'"
             "--border-label=''"
             "--preview-window='border-rounded'"
@@ -397,6 +361,12 @@
             dsize = "du -hs";
             open = "xdg-open";
             nvim = "nvim --listen /tmp/nvim-$$";
+            
+            # Usage monitoring
+            ccm = "ccmonitor --refresh-rate 1 --refresh-per-second 20";
+            ccm-attach = "zellij attach ccusage-monitor";
+            ccusage = "npx --yes ccusage@latest";
+            gemini-cli = "npx --yes https://github.com/google-gemini/gemini-cli";
 
             # Enhanced ls (eza)
             l = "eza --icons -a --group-directories-first -1";

@@ -47,6 +47,9 @@
       # Documentation
       man-pages
       man-pages-posix
+
+      # Claude tooling
+      claude-code-usage-monitor
     ];
 
     # nix-ld configuration for running unpatched binaries
@@ -154,6 +157,7 @@
           createAlias = true;
         };
       };
+
     };
   };
 }

@@ -38,9 +38,9 @@
           name = "Noto Color Emoji";
         };
         sizes = {
-          applications = 12;
-          desktop = 11;
-          popups = 11;
+          applications = 16;
+          desktop = 16;
+          popups = 16;
           terminal = 16;
         };
       };
@@ -59,6 +59,9 @@
       };
 
       polarity = "dark";
+      
+      # Ensure fonts are properly applied system-wide
+      autoEnable = true;
     };
 
     programs.hyprland = {

@@ -14,6 +14,7 @@
     ./launcher.nix
     ./notifications.nix
     ./panel.nix
+    ./quickshell.nix
     ./services.nix
     ./terminal.nix
   ];

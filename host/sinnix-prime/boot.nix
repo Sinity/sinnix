@@ -1,5 +1,5 @@
 # Host-specific boot configuration for sinnix-prime
-{ pkgs, ... }:
+{ ... }:
 {
   boot = {
     loader = {
@@ -21,7 +21,18 @@
       "usb_storage"
       "sd_mod"
     ];
-    blacklistedKernelModules = [ "i915" ];
+    blacklistedKernelModules = [
+      "i915"
+      "snd_sof_pci_intel_tgl"
+      "snd_sof_intel_hda_common"
+      "snd_sof_intel_hda"
+      "snd_sof_pci"
+      "snd_sof"
+      "snd_soc_avs"
+    ];
+    extraModprobeConfig = ''
+      options snd-hda-intel dmic_detect=0
+    '';
     kernelModules = [ "kvm-intel" ];
     kernel.sysctl."vm.swappiness" = 10;
     kernelParams = [

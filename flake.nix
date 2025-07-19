@@ -38,6 +38,11 @@
     claude-code-logger.url = "github:sinity/claude-code-logger/add-nix-support";
     claude-code-logger.inputs.nixpkgs.follows = "nixpkgs";
 
+    claude-code-usage-monitor-src = {
+      url = "github:Maciek-roboblog/Claude-Code-Usage-Monitor";
+      flake = false;
+    };
+
     sinex.url = "git+ssh://git@github.com/Sinity/sinex?rev=6f034719f5aa423f20ca6c6f6e4231da85771b0d";
     sinex.inputs.nixpkgs.follows = "nixpkgs";
 
@@ -51,6 +56,12 @@
     hyprland-plugins = {
       url = "github:hyprwm/hyprland-plugins";
       inputs.hyprland.follows = "hyprland";
+    };
+
+    # Modern Qt/QML based desktop shell toolkit
+    quickshell = {
+      url = "git+https://git.outfoxxed.me/outfoxxed/quickshell";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
 
   };
