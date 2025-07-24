@@ -31,7 +31,8 @@
       "snd_soc_avs"
     ];
     extraModprobeConfig = ''
-      options snd-hda-intel dmic_detect=0
+      options snd-intel-dspcfg dsp_driver=1
+      options snd-hda-intel model=generic
     '';
     kernelModules = [ "kvm-intel" ];
     kernel.sysctl."vm.swappiness" = 10;

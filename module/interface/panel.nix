@@ -22,6 +22,15 @@
             font-weight: 600;
           }
           
+          /* Add spacing between modules */
+          #waybar .modules-right > widget > * {
+            margin: 0 8px;
+          }
+          
+          #waybar .modules-right > widget:last-child > * {
+            margin-right: 0;
+          }
+          
           /* Constant colorful system indicators for easy distinction */
           #cpu {
             color: #fb4934; /* Red */
@@ -66,12 +75,12 @@
             "custom/notification"
           ];
           clock = {
-            format = "  {:%H:%M}";
+            format = "<span font_family='SauceCodePro Nerd Font Mono'>󱑎</span> {:%H:%M}";
             tooltip = "true";
             tooltip-format = ''
               <big>{:%Y %B}</big>
               <tt><small>{calendar}</small></tt>'';
-            format-alt = "  {:%d/%m}";
+            format-alt = "<span font_family='SauceCodePro Nerd Font Mono'>󱑎</span> {:%d/%m}";
           };
           "hyprland/workspaces" = {
             active-only = false;
@@ -99,17 +108,17 @@
             };
           };
           cpu = {
-            format = " {usage}%";
-            format-alt = " {avg_frequency}GHz";
+            format = "<span font_family='SauceCodePro Nerd Font Mono'>󰍛</span> {usage}%";
+            format-alt = "<span font_family='SauceCodePro Nerd Font Mono'>󰍛</span> {avg_frequency}GHz";
             interval = 2;
           };
           memory = {
-            format = " {percentage}%";
-            format-alt = " {used}GB";
+            format = "<span font_family='SauceCodePro Nerd Font Mono'>󰟜</span> {percentage}%";
+            format-alt = "<span font_family='SauceCodePro Nerd Font Mono'>󰟜</span> {used}GB";
             interval = 2;
           };
           disk = {
-            format = " {percentage_used}%";
+            format = "<span font_family='SauceCodePro Nerd Font Mono'>󰋊</span> {percentage_used}%";
             interval = 60;
           };
           tray = {
@@ -117,19 +126,27 @@
             spacing = 8;
           };
           pulseaudio = {
-            format = " {volume}%";
-            format-muted = " MUTED";
+            format = "<span font_family='SauceCodePro Nerd Font Mono'>󰕾</span> {volume}%";
+            format-muted = "<span font_family='SauceCodePro Nerd Font Mono'>󰖁</span> MUTED";
             scroll-step = 5;
             on-click = "pamixer -t";
           };
           "custom/launcher" = {
-            format = "";
+            format = "<span font_family='SauceCodePro Nerd Font Mono'>󰀻</span>";
             on-click = "tofi-drun --drun-launch=true";
             tooltip = "false";
           };
           "custom/notification" = {
             tooltip = false;
-            format = "  ";
+            format = "{}";
+            exec = "${pkgs.writeShellScript "notification-status" ''
+              if ${pkgs.fnott}/bin/fnottctl list | grep -q .; then
+                echo "<span font_family='SauceCodePro Nerd Font Mono'>󱅫</span>"
+              else
+                echo "<span font_family='SauceCodePro Nerd Font Mono'>󰂚</span>"
+              fi
+            ''}";
+            interval = 1;
             on-click = "fnottctl dismiss";
             on-click-right = "fnottctl actions";
           };

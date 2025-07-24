@@ -56,6 +56,8 @@
           dtach # Screen alternative
           lnch # Application launcher
           at # Job scheduler
+          yazi
+          glow
         ];
       };
 
