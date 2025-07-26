@@ -162,9 +162,6 @@
             ccusage = "npx --yes ccusage@latest";
             gemini-cli = "npx --yes https://github.com/google-gemini/gemini-cli";
 
-            # Sinex development tools
-            sinex-attach = "tmux attach-session -t sinex-mprocs";
-
             l = "eza --icons  -a --group-directories-first -1"; # EZA_ICON_SPACING=2
             ll = "eza --icons  -a --group-directories-first -1 --no-user --long";
             tree = "eza --icons --tree --group-directories-first";
@@ -370,9 +367,6 @@
             ccm-attach = "zellij attach ccusage-monitor";
             ccusage = "npx --yes ccusage@latest";
             gemini-cli = "npx --yes https://github.com/google-gemini/gemini-cli";
-
-            # Sinex development tools
-            sinex-attach = "tmux attach-session -t sinex-mprocs";
 
             # Enhanced ls (eza)
             l = "eza --icons -a --group-directories-first -1";

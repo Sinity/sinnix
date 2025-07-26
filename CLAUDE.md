@@ -12,7 +12,7 @@
 - **📝 Issues**: Track work via GitHub issues for complex features (break into sub-issues)
 - **🔀 PRs**: Use pull requests for review-worthy changes with clear context
 - **💫 Commits**: Atomic, descriptive commits with `Co-authored-by: Claude <noreply@anthropic.com>`
-- **✅ Testing**: Validate with `nix run .#test` before switching, `nix flake check` always
+- **✅ Testing**: Validate with `nix-switch`, `nix flake check` always
 
 ## 👤 IDENTITY PATTERN
 
@@ -40,7 +40,7 @@
 
 ```bash
 nix flake check                                    # Syntax validation
-sudo nixos-rebuild test --flake .#sinnix-prime   # Functional validation
+nix-switch                                        # Functional validation
 # Test: login, desktop, audio, development, networking, automation
 ```
 

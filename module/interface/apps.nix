@@ -87,7 +87,7 @@
             "video/mkv" = [ "mpv.desktop" ];
             "video/webm" = [ "mpv.desktop" ];
             "video/x-matroska" = [ "mpv.desktop" ];
-            "application/pdf" = [ "firefox.desktop" ];
+            "application/pdf" = [ "google-chrome-beta.desktop" ];
           };
           defaultApplications = {
             "text/plain" = [ "org.gnome.TextEditor.desktop" ];
@@ -110,12 +110,12 @@
             "video/mkv" = [ "mpv.desktop" ];
             "video/webm" = [ "mpv.desktop" ];
             "video/x-matroska" = [ "mpv.desktop" ];
-            "application/pdf" = [ "firefox.desktop" ];
-            "text/html" = [ "firefox.desktop" ];
-            "x-scheme-handler/http" = [ "firefox.desktop" ];
-            "x-scheme-handler/https" = [ "firefox.desktop" ];
-            "x-scheme-handler/about" = [ "firefox.desktop" ];
-            "x-scheme-handler/unknown" = [ "firefox.desktop" ];
+            "application/pdf" = [ "google-chrome-beta.desktop" ];
+            "text/html" = [ "google-chrome-beta.desktop" ];
+            "x-scheme-handler/http" = [ "google-chrome-beta.desktop" ];
+            "x-scheme-handler/https" = [ "google-chrome-beta.desktop" ];
+            "x-scheme-handler/about" = [ "google-chrome-beta.desktop" ];
+            "x-scheme-handler/unknown" = [ "google-chrome-beta.desktop" ];
           };
         };
       };
