@@ -40,8 +40,8 @@
 
 ```bash
 nix flake check                                    # Syntax validation
-nix-switch                                        # Functional validation
-# Test: login, desktop, audio, development, networking, automation
+nix-switch                                        # Apply configuration (NEVER use nixos-rebuild test)
+# Verify: login, desktop, audio, development, networking, automation
 ```
 
 ## 🏛️ ARCHITECTURE OVERVIEW

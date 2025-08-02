@@ -6,6 +6,10 @@
 {
   system.nixos.tags = [ "media-domain-v0.3" ];
 
+  # Enable Intel HDA audio with SOF firmware
+  boot.kernelModules = [ "snd-hda-intel" ];
+  hardware.firmware = with pkgs; [ sof-firmware ];
+
   # Override libplacebo to force SPIR-V 1.0 compatibility for Vulkan
   nixpkgs.overlays = [
     (_final: prev: {
@@ -142,7 +146,7 @@
 
         zotero # Research sources management
 
-        audacity
+        # audacity
         gimp
         inkscape
         # krita
@@ -168,17 +172,15 @@
         (pkgs.hydrus.overrideAttrs (oldAttrs: {
           doCheck = false;
           doInstallCheck = false;
-          installPhase =
-            oldAttrs.installPhase
-            + ''
-              mv $out/bin/hydrus-client $out/bin/hydrus-client-original
-              cat > $out/bin/hydrus-client << EOF
-              #!${pkgs.stdenv.shell}
-              cd /realm/hydrus
-              exec $out/bin/hydrus-client-original -d="/realm/hydrus/db" "\$@"
-              EOF
-              chmod +x $out/bin/hydrus-client
-            '';
+          installPhase = oldAttrs.installPhase + ''
+            mv $out/bin/hydrus-client $out/bin/hydrus-client-original
+            cat > $out/bin/hydrus-client << EOF
+            #!${pkgs.stdenv.shell}
+            cd /realm/hydrus
+            exec $out/bin/hydrus-client-original -d="/realm/hydrus/db" "\$@"
+            EOF
+            chmod +x $out/bin/hydrus-client
+          '';
           preFixup = ''
             ${oldAttrs.preFixup or ""}
             makeWrapperArgs+=(--unset WAYLAND_DISPLAY --unset QT_QPA_PLATFORM)
