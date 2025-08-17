@@ -54,10 +54,10 @@
 
           nix_shell = {
             format = "[$symbol]($style)";
-            symbol = "❄️";
+            symbol = "N";
             style = "blue bold";
-            impure_msg = "[❄️](red bold)";
-            pure_msg = "[❄️](blue bold)";
+            impure_msg = "[N](red bold)";
+            pure_msg = "[N](blue bold)";
           };
 
           cmd_duration = {

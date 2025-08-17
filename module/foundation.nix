@@ -226,7 +226,7 @@ in
 
           # Removed ~/scripts from PATH - scripts now embedded in automation.nix
         };
-        
+
         # Load secrets into environment via shell profile
         programs.zsh.initContent = lib.concatStringsSep "\n" (
           lib.mapAttrsToList (
@@ -242,7 +242,7 @@ in
             ''
           ) secretFiles
         );
-        
+
         programs.home-manager.enable = true;
       };
     };
@@ -309,9 +309,8 @@ in
       fi
     '';
 
-
     # === FOUNDATION SYSTEMD CONFIGURATION ===
-    systemd.extraConfig = "DefaultTimeoutStopSec=5s";
+    # systemd.settings.Manager = "DefaultTimeoutStopSec=5s";
     systemd.sleep = {
       extraConfig = ''
         AllowSuspend=yes

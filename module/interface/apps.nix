@@ -58,6 +58,8 @@
           at # Job scheduler
           yazi
           glow
+
+          aria2
         ];
       };
 

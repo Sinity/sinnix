@@ -188,6 +188,10 @@
             pingg = "ping 8.8.8.8";
             wtf = "dmesg";
             ytd = "yt-dlp";
+            
+            # Git analysis tools  
+            git-theseus = "nix-shell -p python3 python3Packages.pip python3Packages.numpy python3Packages.matplotlib gcc stdenv.cc.cc.lib --run 'pip install --user git-of-theseus && ~/.local/bin/git-of-theseus-analyze'";
+            git-inspector = "nix-shell -p python3 python3Packages.pip --run 'pip install --user gitinspector && ~/.local/bin/gitinspector'";
           };
         };
 

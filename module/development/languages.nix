@@ -63,6 +63,22 @@
               pyyaml
               toml
               tabulate
+              gitpython  # For git analysis tools
+              # Data visualization and analysis
+              plotly
+              bokeh
+              altair
+              pygal
+              holoviews
+              # Time series analysis
+              statsmodels
+              # Git analysis
+              # pydriller  # Git repository mining (not in nixpkgs)
+              # Diagram generation
+              diagrams  # Diagram as code
+              graphviz  # Graph visualization
+              pydot  # Graphviz interface
+              networkx  # Network analysis
             ]
           ))
 
