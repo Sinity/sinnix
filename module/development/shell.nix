@@ -257,76 +257,7 @@
           enableZshIntegration = true;
         };
 
-        nushell = {
-          enable = true;
-          environmentVariables = {
-            AIDER_OPENAI_API_KEY = "$OPENAI_API_KEY";
-            AIDER_ANTHROPIC_API_KEY = "$ANTHROPIC_API_KEY";
-            AIDER_MODEL = "gemini/gemini-2.5-flash-preview-04-17";
-            MICRO_TRUECOLOR = "1";
-          };
-
-          settings = {
-            show_banner = false;
-            edit_mode = "vi";
-            completions = {
-              case_sensitive = false;
-              quick = true;
-              partial = true;
-            };
-          };
-
-          shellAliases = {
-            # Basic utilities
-            c = "clear";
-            cat = "bat";
-            py = "python";
-            icat = "kitten icat";
-            dsize = "du -hs";
-            open = "xdg-open";
-            nvim = "nvim --listen /tmp/nvim-$$";
-
-            # Usage monitoring
-            ccm = "ccmonitor --refresh-rate 1 --refresh-per-second 20";
-            ccm-attach = "zellij attach ccusage-monitor";
-            ccusage = "npx --yes ccusage@latest";
-            gemini-cli = "npx --yes https://github.com/google-gemini/gemini-cli";
-
-            # Enhanced ls (eza)
-            l = "eza --icons -a --group-directories-first -1";
-            ll = "eza --icons -a --group-directories-first -1 --no-user --long";
-            tree = "eza --icons --tree --group-directories-first";
-
-            # NixOS operations using flake apps
-            nix-switch = "sudo nix run $env.FLAKE#switch";
-            nix-test = "sudo nix run $env.FLAKE#test";
-            nix-check = "nix run $env.FLAKE#check";
-
-            # Package search
-            nix-search = "nix search nixpkgs";
-
-            # Python
-            piv = "python -m venv .venv";
-            psv = "source .venv/bin/activate";
-
-            # Other utilities
-            pingg = "^ping 8.8.8.8";
-            wtf = "^dmesg";
-            ytd = "yt-dlp";
-          };
-
-          extraConfig = ''
-            # Prevent Ctrl+S terminal freezing (safe wrapped call)
-            try {
-              ^stty -ixon
-            } catch {
-              print $"[Warn] stty -ixon failed: ($in)"
-            }
-
-            # Make sure directory exists for asciinema
-            mkdir ~/.asciinema_recordings | ignore
-          '';
-        };
+        
       };
     };
   };

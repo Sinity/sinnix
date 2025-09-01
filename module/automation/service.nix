@@ -88,5 +88,52 @@
       #   # unifiedCollector.sources.filesystem.excludePatterns = [ ];
       # };
     };
+
+    # User-level services
+    home-manager.users.sinity = {
+      # ActivityWatch - automatic time tracking
+      services.activitywatch = {
+        enable = true;
+        package = pkgs.aw-server-rust;
+
+        watchers = {
+          awatcher = {
+            package = pkgs.awatcher;
+            settings = {
+              idle-timeout-seconds = 60;
+              poll-time-idle-seconds = 1;
+              poll-time-window-seconds = 1;
+            };
+          };
+        };
+      };
+
+      # User systemd services
+      systemd.user = {
+        services = {
+          # Ensure ActivityWatch awatcher starts with graphical session
+          activitywatch-watcher-awatcher =
+            let
+              target = "graphical-session.target";
+            in
+            {
+              Unit = {
+                After = [ target ];
+                Requisite = [ target ];
+                PartOf = [ target ];
+              };
+              Install = {
+                WantedBy = [ target ];
+              };
+            };
+        };
+      };
+
+      # ActivityWatch watchers packages
+      home.packages = with pkgs; [
+        aw-watcher-window-wayland
+        aw-watcher-afk
+      ];
+    };
   };
 }

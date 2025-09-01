@@ -50,6 +50,10 @@
     stylix.url = "github:danth/stylix";
     stylix.inputs.nixpkgs.follows = "nixpkgs";
 
+    # VSCode extensions overlay (community-maintained)
+    nix-vscode-extensions.url = "github:nix-community/nix-vscode-extensions";
+    nix-vscode-extensions.inputs.nixpkgs.follows = "nixpkgs";
+
     # Hyprland and plugins
     hyprland.url = "github:hyprwm/Hyprland";
 

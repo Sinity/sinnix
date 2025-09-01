@@ -8,12 +8,8 @@
     ./system.nix
     ./hyprland.nix
     ./apps.nix
-    ./clipboard.nix
     ./display.nix
     ./environment.nix
-    ./launcher.nix
-    ./notifications.nix
-    ./panel.nix
     ./quickshell.nix
     ./services.nix
     ./terminal.nix

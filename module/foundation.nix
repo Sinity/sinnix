@@ -208,6 +208,8 @@ in
       extraSpecialArgs = { inherit inputs username host; };
       users.${username} = {
         imports = [ ];
+        # Disable Stylix theming for VSCode to avoid conflicts with custom settings
+        stylix.targets.vscode.enable = false;
         home = {
           username = "${username}";
           homeDirectory = "/home/${username}";

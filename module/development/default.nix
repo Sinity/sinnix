@@ -116,6 +116,32 @@
       # Development session management
       dtach
       mprocs
+
+      # System monitoring and performance tools
+      btop
+      ncdu # disk space analyzer
+      nitch # system fetch util
+      dua # Disk usage analyzer (like ncdu but faster)
+      yazi # Terminal file manager
+      fselect # SQL-like file search
+
+      # CLI utilities
+      toipe # typing test in the terminal
+      ttyper # cli typing test
+
+      # Terminal toys
+      cbonsai
+      pipes
+      tty-clock
+
+      # Graphics diagnostic tools
+      mesa-demos
+      vulkan-tools
+      vulkan-validation-layers
+      wayland-utils
+      libva-utils
+      glxinfo
+      drm_info
     ];
 
     # nix-ld configuration for running unpatched binaries
@@ -221,6 +247,26 @@
           maxInteractionsPerFile = 100;
           maxLogSizeMB = 10;
           createAlias = true;
+        };
+
+        # btop - system monitor configuration
+        btop = {
+          enable = true;
+          settings = {
+            vim_keys = true;
+            update_ms = 2000;
+            show_cpu_freq = true;
+            show_gpu = true;
+            mem_graphs = true;
+            proc_sorting = "cpu direct";
+            proc_filter = false;
+            tree_view = false;
+            proc_per_core = true;
+            proc_mem_bytes = true;
+            cpu_graph_upper = "total";
+            cpu_graph_lower = "user";
+            cpu_invert_lower = true;
+          };
         };
       };
 

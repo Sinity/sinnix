@@ -3,12 +3,15 @@
 
 {
   pkgs,
+  config,
   inputs,
   ...
 }:
 {
   config = {
     home-manager.users.sinity = {
+      imports = [ ./vscode.nix ];
+
       home = {
         packages = with pkgs; [
           # Language Servers, Formatters, Linters
@@ -18,104 +21,94 @@
           nil
           nix-diff
 
-          # Rust development
+          # Rust Development
           rustup
           cargo-fuzz
           cargo-bump
           cargo-audit
 
-          # JavaScript/Node.js
+          # Web Development
           nodejs
 
-          # Python with packages bundled
-          (python3.withPackages (
-            ps: with ps; [
-              pip
-              ipython
-              rich
-              click
-              questionary
-              fuzzywuzzy
-              fastapi
-              uvicorn
-              aiofiles
-              pydantic
-              python-Levenshtein
-              ujson
-              tiktoken
-              # Add commonly used packages
-              pandas
-              numpy
-              requests
-              matplotlib
-              seaborn
-              jupyter
-              notebook
-              black
-              mypy
-              pytest
-              httpx
-              beautifulsoup4
-              lxml
-              python-dotenv
-              tqdm
-              typer
-              pyyaml
-              toml
-              tabulate
-              gitpython  # For git analysis tools
-              # Data visualization and analysis
-              plotly
-              bokeh
-              altair
-              pygal
-              holoviews
-              # Time series analysis
-              statsmodels
-              # Git analysis
-              # pydriller  # Git repository mining (not in nixpkgs)
-              # Diagram generation
-              diagrams  # Diagram as code
-              graphviz  # Graph visualization
-              pydot  # Graphviz interface
-              networkx  # Network analysis
-            ]
-          ))
+          # Python Development
+          (python3.withPackages (ps: with ps; [
+            # Core
+            pip
+            ipython
+            # CLI & TUI
+            rich
+            click
+            questionary
+            typer
+            tqdm
+            # Web & API
+            fastapi
+            uvicorn
+            aiofiles
+            httpx
+            beautifulsoup4
+            requests
+            # Data Science & ML
+            pandas
+            numpy
+            matplotlib
+            seaborn
+            jupyter
+            notebook
+            plotly
+            bokeh
+            altair
+            pygal
+            holoviews
+            statsmodels
+            # Data Formats
+            pydantic
+            pyyaml
+            toml
+            ujson
+            # Tooling
+            black
+            mypy
+            pytest
+            python-dotenv
+            # Misc
+            fuzzywuzzy
+            python-Levenshtein
+            tiktoken
+            tabulate
+            gitpython # For git analysis tools
+            # Diagramming
+            diagrams
+            graphviz
+            pydot
+            networkx
+          ]))
 
-          # Database tools
+          # Database Tools
           sqlite
           sqlitebrowser
           sqlite-vec
           sqlite-utils
           sqlitestudio
           pgcli
-          # postgresql_16
 
-          # AI development tools
-          aider-chat # aider-chat-full # Temporarily disabled due to spacy dependency issues
+          # AI Development
+          aider-chat
           claude-code
-          inputs.claude-squad.packages.${pkgs.system}.default # Manage multiple AI coding assistants
+          inputs.claude-squad.packages.${pkgs.system}.default
           codex
           openai-whisper-cpp
 
-          # Git tools
-          gh # GitHub CLI
+          # Git Tools
+          gh
           delta
-          lazygit # TUI for git
-          onefetch # Git repo stats
+          lazygit
+          onefetch
           gitui
-          
-        ];
-      };
 
-      # VS Code - installed but not configured by Nix
-      programs.vscode = {
-        enable = true;
-        # Extensions and settings are now managed manually in ~/.config/Code/User/
-        # To restore configuration:
-        # 1. Extensions: code --install-extension <extension-id>
-        # 2. Settings: copy to ~/.config/Code/User/settings.json
-        # 3. Keybindings: copy to ~/.config/Code/User/keybindings.json
+          # Fonts
+          jetbrains-mono
+        ];
       };
     };
   };

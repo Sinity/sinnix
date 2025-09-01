@@ -4,6 +4,9 @@
 }:
 {
   nixpkgs.overlays = [
+    # Community overlay providing large set of VSCode extensions
+    inputs.nix-vscode-extensions.overlays.default
+
     inputs.sinex.overlays.default
 
     (final: prev: {
