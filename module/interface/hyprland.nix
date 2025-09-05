@@ -160,9 +160,25 @@
             "SUPER, V, exec, kitty --class clipse -e clipse"
             ", Print, exec, grimblast --notify --freeze copysave area /realm/inbox/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
             "SUPER, Print, exec, grimblast --notify --cursor copysave output /realm/inbox/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
-            ", F8, exec, log-to-knowledgebase"
+            # Raw log capture on F8 (append to KB raw-log)
+            ", F8, exec, ~/.local/bin/rawlog"
+            # Keep previous logger alias on Shift+F8 (compat)
+            ", SHIFT+F8, exec, log-to-knowledgebase"
 
             "SUPER SHIFT, P, pin" # Picture-in-Picture: pin window on top of all workspaces
+
+            # === LAUNCHERS ===
+            # VS Code (prefer code if present, fallback to codium)
+            "SUPER, C, exec, ${pkgs.bash}/bin/bash -lc 'command -v code >/dev/null && code --reuse-window || codium --reuse-window'"
+            # Chrome Beta (and Unstable as alternate)
+            "SUPER, G, exec, google-chrome-beta"
+            "SUPER SHIFT, G, exec, google-chrome-unstable"
+
+            # Knowledgebase quick capture (zk)
+            "SUPER SHIFT, N, exec, ~/.local/bin/kb-capture"
+
+            # Workspace menu (discoverable launcher for Code workspaces)
+            "SUPER, W, exec, ~/.local/bin/workspace-menu"
 
             # === MEDIA KEYS WITH VISUAL FEEDBACK ===
             ",XF86AudioMute, exec, pamixer -t && notify-send -t 800 '🔇 Audio' 'Muted: '$(pamixer --get-mute)"
@@ -275,6 +291,25 @@
 
       # === PYPRLAND CONFIGURATION ===
       xdg.configFile."hypr/pyprland.toml".text = builtins.readFile ../asset/pyprland.toml;
+
+      # Install helper scripts into ~/.local/bin
+      home.file.".local/bin/kb-capture" = {
+        source = ../../scripts/kb-capture;
+        executable = true;
+      };
+      home.file.".local/bin/workspace-menu" = {
+        source = ../../scripts/workspace-menu;
+        executable = true;
+      };
+      home.file.".local/bin/rawlog" = {
+        source = ../../scripts/rawlog;
+        executable = true;
+      };
+      # Back-compat alias for legacy binding
+      home.file.".local/bin/log-to-knowledgebase" = {
+        source = ../../scripts/rawlog;
+        executable = true;
+      };
 
       # PYPRLAND systemd service
       systemd.user.services.pyprland = {

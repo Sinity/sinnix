@@ -1,5 +1,5 @@
 # Host-specific storage configuration for sinnix-prime
-{ pkgs, ... }:
+{ ... }:
 {
   # Storage-related services
   services = {
@@ -51,14 +51,14 @@
       ];
     };
 
-    "/mnt/smol_ssd" = {
-      device = "/dev/disk/by-uuid/481e214e-7bb6-49fa-bc87-ccb1f2c1e3c3";
-      fsType = "ext4";
-      options = [
-        "strictatime"
-        "lazytime"
-      ];
-    };
+    # "/mnt/smol_ssd" = {
+    #   device = "/dev/disk/by-uuid/481e214e-7bb6-49fa-bc87-ccb1f2c1e3c3";
+    #   fsType = "btrfs";
+    #   options = [
+    #     "strictatime"
+    #     "lazytime"
+    #   ];
+    # };
   };
 
   # Swap configuration

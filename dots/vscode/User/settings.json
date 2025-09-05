@@ -9,19 +9,21 @@
   "editor.inlayHints.fontFamily": "SauceCodePro Nerd Font Mono",
   "editor.inlineSuggest.fontFamily": "SauceCodePro Nerd Font Mono",
   "editor.minimap.sectionHeaderFontSize": 13.714285714285714,
-  "markdown.preview.fontFamily": "Arimo",
+  "markdown.preview.fontFamily": "Liberation Sans",
   "markdown.preview.fontSize": 21.333333333333332,
   "scm.inputFontFamily": "SauceCodePro Nerd Font Mono",
   "scm.inputFontSize": 19.809523809523807,
   "screencastMode.fontSize": 85.33333333333333,
   "terminal.integrated.fontSize": 21.333333333333332,
-  "workbench.colorTheme": "Stylix",
+  "workbench.colorTheme": "Tokyo Night",
+  "workbench.iconTheme": "vscode-icons",
 
   // ——— VSCode-Neovim integration ———
   // Rely on PATH for nvim, avoid hard-coding Nix path.
   // Remove any composite jk escape. Keep Linux key handling sane.
   "vscode-neovim.compositeKeys": {},
   "keyboard.dispatch": "keyCode",
+  "vscode-neovim.useCtrlKeys": true,
 
   // ——— Editor ergonomics ———
   "editor.lineNumbers": "relative",
@@ -40,7 +42,7 @@
 
   // ——— Terminal ———
   "terminal.integrated.inheritEnv": true,
-  "terminal.integrated.defaultProfile.linux": "bash",
+  "terminal.integrated.defaultProfile.linux": "zsh",
 
   // ——— Performance ———
   "files.watcherExclude": {
@@ -60,5 +62,92 @@
   "editor.rulers": [100],
   "explorer.excludeGitIgnore": true,
   "search.useIgnoreFiles": true,
-  "telemetry.telemetryLevel": "off"
+  "telemetry.telemetryLevel": "off",
+
+  // ——— Spellcheck (global) ———
+  "cSpell.language": "en,pl,pl_PL",
+  "cSpell.enabledLanguageIds": [
+    "markdown",
+    "plaintext",
+    "git-commit",
+    "git-rebase"
+  ],
+
+  // ——— Git ergonomics ———
+  "git.autofetch": true,
+  "git.confirmSync": false,
+
+  // ——— Files hygiene ———
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+  "files.trimFinalNewlines": true,
+
+  // ——— WhichKey menu (VS Code) ———
+  "whichkey.bindings": [
+    { "key": "?", "name": "Commands", "type": "command", "command": "workbench.action.showCommands" },
+    { "key": "f", "name": "Files", "type": "bindings", "bindings": [
+      { "key": "f", "name": "Quick Open", "type": "command", "command": "workbench.action.quickOpen" },
+      { "key": "e", "name": "Explorer",   "type": "command", "command": "workbench.view.explorer" },
+      { "key": "r", "name": "Open Recent", "type": "command", "command": "workbench.action.openRecent" },
+      { "key": "s", "name": "Save All",    "type": "command", "command": "workbench.action.files.saveAll" }
+    ] },
+    { "key": "s", "name": "Search", "type": "bindings", "bindings": [
+      { "key": "s", "name": "Find in Files",      "type": "command", "command": "workbench.action.findInFiles" },
+      { "key": "/", "name": "Find in Files",      "type": "command", "command": "workbench.action.findInFiles" },
+      { "key": "h", "name": "Search: Focus View", "type": "command", "command": "workbench.view.search" }
+    ] },
+    { "key": "g", "name": "Git", "type": "bindings", "bindings": [
+      { "key": "g", "name": "Source Control", "type": "command", "command": "workbench.view.scm" },
+      { "key": "b", "name": "GitLens: Toggle Blame", "type": "command", "command": "gitlens.toggleLineBlame" }
+    ] },
+    { "key": "x", "name": "Diagnostics", "type": "bindings", "bindings": [
+      { "key": "x", "name": "Problems",     "type": "command", "command": "workbench.actions.view.problems" },
+      { "key": "n", "name": "Next Problem", "type": "command", "command": "editor.action.marker.next" },
+      { "key": "p", "name": "Prev Problem", "type": "command", "command": "editor.action.marker.prev" }
+    ] },
+    { "key": "t", "name": "Terminal/Tasks", "type": "bindings", "bindings": [
+      { "key": "t", "name": "Toggle Terminal", "type": "command", "command": "workbench.action.terminal.toggleTerminal" },
+      { "key": "n", "name": "New Terminal",    "type": "command", "command": "workbench.action.terminal.new" },
+      { "key": "r", "name": "Run Task…",       "type": "command", "command": "workbench.action.tasks.runTask" }
+    ] },
+    { "key": "d", "name": "Debug", "type": "bindings", "bindings": [
+      { "key": "d", "name": "Debug View",       "type": "command", "command": "workbench.view.debug" },
+      { "key": "b", "name": "Toggle Breakpoint", "type": "command", "command": "editor.debug.action.toggleBreakpoint" },
+      { "key": "c", "name": "Continue",          "type": "command", "command": "workbench.action.debug.continue" },
+      { "key": "o", "name": "Step Over",         "type": "command", "command": "workbench.action.debug.stepOver" },
+      { "key": "i", "name": "Step Into",         "type": "command", "command": "workbench.action.debug.stepInto" }
+    ] },
+    { "key": "r", "name": "Rust", "type": "bindings", "bindings": [
+      { "key": "a", "name": "Code Action", "type": "command", "command": "editor.action.codeAction" },
+      { "key": "r", "name": "RA: Run",    "type": "command", "command": "rust-analyzer.run" },
+      { "key": "t", "name": "Run All Tests", "type": "command", "command": "testing.runAll" }
+    ] },
+    { "key": "n", "name": "Nix", "type": "bindings", "bindings": [
+      { "key": "c", "name": "Run Task…",         "type": "command", "command": "workbench.action.tasks.runTask" },
+      { "key": "s", "name": "nix: switch",       "type": "command", "command": "workbench.action.tasks.runTask", "args": "nix: switch" },
+      { "key": "f", "name": "nix: flake check",  "type": "command", "command": "workbench.action.tasks.runTask", "args": "nix: flake check" }
+    ] },
+    { "key": "m", "name": "Notes", "type": "bindings", "bindings": [
+      { "key": "p", "name": "Markdown Preview", "type": "command", "command": "markdown.showPreviewToSide" },
+      { "key": "g", "name": "Foam: Show Graph",  "type": "command", "command": "foam-vscode.show-graph" }
+    ] },
+    { "key": "a", "name": "AI / Copilot", "type": "bindings", "bindings": [
+      { "key": "c", "name": "Open Chat",    "type": "command", "command": "workbench.action.copilot.chat.open" },
+      { "key": "i", "name": "Inline Chat",  "type": "command", "command": "editor.action.copilot.inlineChat.start" }
+    ] },
+    { "key": "w", "name": "Window", "type": "bindings", "bindings": [
+      { "key": "v", "name": "Split Right",     "type": "command", "command": "workbench.action.splitEditorRight" },
+      { "key": "s", "name": "Split Down",      "type": "command", "command": "workbench.action.splitEditorDown" },
+      { "key": "=", "name": "Even Widths",     "type": "command", "command": "workbench.action.evenEditorWidths" },
+      { "key": "h", "name": "Focus Left",      "type": "command", "command": "workbench.action.focusLeftGroup" },
+      { "key": "j", "name": "Focus Down",      "type": "command", "command": "workbench.action.focusBelowGroup" },
+      { "key": "k", "name": "Focus Up",        "type": "command", "command": "workbench.action.focusAboveGroup" },
+      { "key": "l", "name": "Focus Right",     "type": "command", "command": "workbench.action.focusRightGroup" }
+    ] },
+    { "key": "b", "name": "Buffers", "type": "bindings", "bindings": [
+      { "key": "n", "name": "Next Editor",     "type": "command", "command": "workbench.action.nextEditor" },
+      { "key": "p", "name": "Prev Editor",     "type": "command", "command": "workbench.action.previousEditor" },
+      { "key": "d", "name": "Close Editor",    "type": "command", "command": "workbench.action.closeActiveEditor" }
+    ] }
+  ]
 }

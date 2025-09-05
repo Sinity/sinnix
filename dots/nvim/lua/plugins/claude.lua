@@ -1,9 +1,11 @@
 local HOME = os.getenv("HOME")
+local in_vscode = vim.g.vscode
 return {
   {
     "coder/claudecode.nvim",
     config = true,
-    keys = {
+    -- Disable keymaps in VSCode mode; rely on VS Code side bindings/UI
+    keys = in_vscode and {} or {
       { "<leader>a", nil, desc = "AI/Claude Code" },
       { "<leader>ac", "<cmd>ClaudeCode<cr>", desc = "Toggle Claude" },
       { "<leader>af", "<cmd>ClaudeCodeFocus<cr>", desc = "Focus Claude" },
@@ -22,4 +24,3 @@ return {
     },
   },
 }
-

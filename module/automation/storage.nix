@@ -13,8 +13,7 @@
     # OneDrive
     onedrive
     
-    # Google Drive (via rclone or ocamlfuse)
-    google-drive-ocamlfuse
+    # Google Drive (using rclone)
     
     # Encryption
     gocryptfs
@@ -62,7 +61,8 @@
     description = "Mount Nextcloud via WebDAV";
     after = [ "network-online.target" ];
     wants = [ "network-online.target" ];
-    wantedBy = [ "multi-user.target" ];
+    # Avoid activation failures when not configured; mount manually via gd-mount
+    wantedBy = [ ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
@@ -77,7 +77,9 @@
     description = "OneDrive Selective Synchronization";
     after = [ "network-online.target" ];
     wants = [ "network-online.target" ];
-    wantedBy = [ "multi-user.target" ];
+    # Avoid activation failures when not configured; mount manually via gd-mount
+    wantedBy = [ ];
+    enable = false;
     
     # Copy config files to writable location on first run
     preStart = ''
@@ -127,13 +129,16 @@
     description = "Mount Google Drive via rclone";
     after = [ "network-online.target" ];
     wants = [ "network-online.target" ];
-    wantedBy = [ "multi-user.target" ];
+    wantedBy = [ ];
+    enable = false;
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
       User = "sinity";
+      # Only start if rclone config exists
+      ConditionPathExists = "/home/sinity/.config/rclone/rclone.conf";
       ExecStartPre = "${pkgs.coreutils}/bin/mkdir -p /mnt/gdrive";
-      ExecStart = "${pkgs.rclone}/bin/rclone mount gdrive: /mnt/gdrive --daemon --vfs-cache-mode full --vfs-cache-max-size 5G --vfs-cache-max-age 72h --buffer-size 256M --vfs-read-ahead 512M --dir-cache-time 72h --poll-interval 1m --allow-other --uid 1000 --gid 100 --umask 022";
+      ExecStart = "${pkgs.rclone}/bin/rclone mount gdrive: /mnt/gdrive --config /home/sinity/.config/rclone/rclone.conf --daemon --vfs-cache-mode full --vfs-cache-max-size 5G --vfs-cache-max-age 72h --buffer-size 256M --vfs-read-ahead 512M --dir-cache-time 72h --poll-interval 1m --allow-other --uid 1000 --gid 100 --umask 022";
       ExecStop = "${pkgs.fuse}/bin/fusermount -u /mnt/gdrive";
     };
   };

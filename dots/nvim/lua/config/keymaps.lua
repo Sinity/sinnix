@@ -2,6 +2,11 @@
 -- Default keymaps that are always set: https://github.com/LazyVim/LazyVim/blob/main/lua/lazyvim/config/keymaps.lua
 -- Add any additional keymaps here
 
+-- In VSCode mode, defer to VSCode keybindings for notes/AI; skip Obsidian maps
+if vim.g.vscode then
+  return
+end
+
 -- Keymaps for Obsidian plugin
 local map = vim.keymap.set
 local opts = { noremap = true, silent = true }

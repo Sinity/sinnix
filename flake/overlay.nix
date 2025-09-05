@@ -10,6 +10,25 @@
     inputs.sinex.overlays.default
 
     (final: prev: {
+      # Override Codex CLI to a newer upstream tag
+      codex = prev.codex.overrideAttrs (_old: let
+        version = "0.30.0";
+        newSrc = final.fetchFromGitHub {
+          owner = "openai";
+          repo = "codex";
+          rev = "refs/tags/rust-v" + version;
+          sha256 = "sha256-9dWVf5Q7sDfAbRIGvUqqwEouJRnS//ujlFvqZ/a8zBk=";
+        };
+        newCargo = final.rustPlatform.fetchCargoVendor {
+          src = newSrc;
+          sourceRoot = "source/codex-rs";
+          hash = "sha256-qJn2oN/9LVLhHnaNp+x9cUEMODrGrgV3SiR0ykIx7B4=";
+        };
+      in {
+        inherit version;
+        src = newSrc;
+        cargoDeps = newCargo;
+      });
       # Override spacy to use a working version
       python3Packages = prev.python3Packages // {
         spacy = prev.python3Packages.spacy.overrideAttrs (old: rec {

@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Quick append-only logger for knowledgebase raw-log
+# Usage: rawlog [message...]
+
+KB_ROOT=${KB_ROOT:-/realm/knowledgebase}
+LOG_DIR="$KB_ROOT/50_logs"
+LOG_FILE="$LOG_DIR/raw-log.md"
+
+die() { echo "rawlog: $*" >&2; exit 1; }
+
+[ -d "$KB_ROOT" ] || die "KB root not found: $KB_ROOT"
+mkdir -p "$LOG_DIR"
+
+prompt_text() {
+  local prompt="$1"
+  if command -v rofi >/dev/null 2>&1; then
+    rofi -dmenu -p "$prompt" <<< ""
+  elif command -v wofi >/dev/null 2>&1; then
+    wofi --dmenu --prompt "$prompt"
+  elif command -v tofi >/dev/null 2>&1; then
+    tofi --prompt "$prompt: " --horizontal=false --fuzzy-match=false <<< "" | sed 's/\r$//'
+  else
+    read -rp "$prompt: " ans; echo "$ans"
+  fi
+}
+
+msg="${*:-}"
+if [ -z "$msg" ]; then
+  msg=$(prompt_text "Raw log")
+fi
+
+# Trim message
+msg=$(echo -n "$msg" | sed -e 's/^\s\+//' -e 's/\s\+$//')
+[ -n "$msg" ] || exit 0
+
+ts=$(date +"%Y-%m-%d %H:%M:%S")
+line="- **$ts** $msg"
+
+# Ensure file exists with a minimal header if missing
+if [ ! -f "$LOG_FILE" ]; then
+  {
+    echo "---"
+    echo "id: raw-log"
+    echo "aliases: []"
+    echo "tags:"
+    echo "  - log"
+    echo "  - self"
+    echo "dr-contextualization: Append-only raw thought log."
+    echo "---"
+    echo
+    echo "# Raw log"
+    echo
+  } >>"$LOG_FILE"
+fi
+
+echo "$line" >>"$LOG_FILE"
+
+if command -v notify-send >/dev/null 2>&1; then
+  notify-send -t 1200 "Raw log saved" "$msg"
+fi
+
+echo "$line"
+

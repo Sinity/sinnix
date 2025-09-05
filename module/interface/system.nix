@@ -24,14 +24,12 @@
           name = "SauceCodePro Nerd Font Mono";
         };
         sansSerif = {
-          package = pkgs.liberation_ttf; # Arimo is part of liberation fonts
-          name = "Arimo";
-          # name = "Noto Sans";  # Alternative
+          package = pkgs.liberation_ttf;
+          name = "Liberation Sans";
         };
         serif = {
-          package = pkgs.liberation_ttf; # Tinos is part of liberation fonts
-          name = "Tinos";
-          # name = "Noto Serif";  # Alternative
+          package = pkgs.liberation_ttf;
+          name = "Liberation Serif";
         };
         emoji = {
           package = pkgs.noto-fonts-emoji;
@@ -100,5 +98,55 @@
     environment.systemPackages = with pkgs; [
       wlr-randr # Wayland equivalent to xrandr
     ];
+
+    # System-wide font configuration and packages
+    fonts = {
+      packages = with pkgs; [
+        noto-fonts
+        noto-fonts-emoji
+        dejavu_fonts
+        liberation_ttf
+        nerd-fonts.sauce-code-pro
+      ];
+
+      fontconfig = {
+        enable = true;
+        # Prevent picking up webfont formats as system fonts
+        localConf = ''
+          <?xml version="1.0"?>
+          <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+          <fontconfig>
+            <selectfont>
+              <rejectfont><glob>*.woff</glob></rejectfont>
+              <rejectfont><glob>*.woff2</glob></rejectfont>
+            </selectfont>
+
+            <!-- Reasonable defaults to keep Chrome and UI consistent -->
+            <alias>
+              <family>sans-serif</family>
+              <prefer>
+                <family>Liberation Sans</family>
+                <family>DejaVu Sans</family>
+              </prefer>
+            </alias>
+            <alias>
+              <family>serif</family>
+              <prefer>
+                <family>Liberation Serif</family>
+                <family>DejaVu Serif</family>
+              </prefer>
+            </alias>
+            <alias>
+              <family>monospace</family>
+              <prefer>
+                <family>SauceCodePro Nerd Font Mono</family>
+                <family>DejaVu Sans Mono</family>
+                <family>Liberation Mono</family>
+              </prefer>
+            </alias>
+          </fontconfig>
+        '';
+      };
+    };
   };
 }

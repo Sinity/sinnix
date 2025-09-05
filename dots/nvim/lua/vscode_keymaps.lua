@@ -14,7 +14,8 @@ local function map(lhs, cmd, desc)
 end
 
 -- Discovery / palette
-map("<leader>?",  "workbench.action.showCommands", "Command Palette")
+map("<leader>?",  "whichkey.show", "WhichKey")
+map("<leader>p",  "workbench.action.showCommands", "Command Palette")
 
 -- Files / Search
 map("<leader>f",  "workbench.action.quickOpen",   "Quick Open")
@@ -60,3 +61,12 @@ map("<leader>w=", "workbench.action.evenEditorWidths",       "Even Widths")
 
 -- Hover on K to mirror LSP hover
 map("K",         "editor.action.showHover",                  "Show Hover")
+
+-- LSP-like navigation (VS Code actions) on <leader>l…
+map("<leader>ld", "editor.action.revealDefinition",          "Go to Definition")
+map("<leader>lD", "editor.action.revealDeclaration",         "Go to Declaration")
+map("<leader>lI", "editor.action.goToImplementation",        "Go to Implementation")
+map("<leader>lT", "editor.action.goToTypeDefinition",        "Go to Type Definition")
+map("<leader>lR", "editor.action.referenceSearch.trigger",   "Find References")
+map("<leader>lp", "editor.action.peekDefinition",            "Peek Definition")
+map("<leader>lr", "editor.action.rename",                    "Rename Symbol")

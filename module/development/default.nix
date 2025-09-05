@@ -124,6 +124,7 @@
       dua # Disk usage analyzer (like ncdu but faster)
       yazi # Terminal file manager
       fselect # SQL-like file search
+      zk # Plain text Zettelkasten CLI
 
       # CLI utilities
       toipe # typing test in the terminal
@@ -234,7 +235,7 @@
             ''
               mkdir -p $HOME/.config
               echo "Creating symlink for Neovim configuration..."
-              ln -sfn ''${FLAKE:-/realm/project/sinnix}/nvim $HOME/.config/nvim
+              ln -sfn ''${FLAKE:-/realm/project/sinnix}/dots/nvim $HOME/.config/nvim
             '';
       };
 

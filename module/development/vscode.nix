@@ -1,37 +1,9 @@
-{
-  pkgs,
-  lib,
-  config,
-  ...}:
-let
-  # Helper function to generate keybindings for vscode-neovim
-  mkSendKey = key: {
-    inherit key;
-    command = "vscode-neovim.send";
-    args = key;
-    when = "editorTextFocus && neovim.mode != 'insert'";
-  };
-  mkCtrlSendKey = key: {
-    key = "ctrl+${key}";
-    command = "vscode-neovim.send";
-    args = "<C-${key}>";
-    when = "editorTextFocus && neovim.mode != 'insert'";
-  };
-
-  # Lists of keys to forward
-  letters = [ "a" "b" "c" "d" "e" "f" "g" "h" "i" "j" "k" "l" "m" "n" "o" "p" "q" "r" "s" "t" "u" "v" "w" "x" "y" "z" ];
-  upperCaseLetters = [ "A" "B" "C" "D" "E" "F" "G" "H" "I" "J" "K" "L" "M" "N" "O" "P" "Q" "R" "S" "T" "U" "V" "W" "X" "Y" "Z" ];
-  numbers = [ "0" "1" "2" "3" "4" "5" "6" "7" "8" "9" ];
-  symbols = [ "-" "=" "[" "]" "\"" ";" "'" "," "." "/" "`" "!" "@" "#" "$" "%" "^" "&" "*" "(" ")" ];
-  ctrlKeys = [ "[" "]" "f" "b" "d" "u" "w" "h" "j" "k" "l" ];
-  specialKeys = [
-    { key = "space"; command = "vscode-neovim.send"; args = " "; when = "editorTextFocus && neovim.mode != 'insert'"; }
-  ];
-in
+{ pkgs, ... }:
 {
   programs.vscode = {
     enable = true;
 
+    # Only manage extensions; do not manage user settings or keybindings
     profiles.default = {
       extensions =
         (with pkgs.vscode-extensions; [
@@ -53,63 +25,29 @@ in
           editorconfig.editorconfig
         ])
         ++ [
+          # Marketplace extensions
           pkgs.nix-vscode-extensions.vscode-marketplace.rlivings39.fzf-quick-open
           pkgs.nix-vscode-extensions.vscode-marketplace.zaidalsaheb.search-preview
+          pkgs.nix-vscode-extensions.vscode-marketplace.mkhl.direnv
+
+          # WhichKey UI for leader key menus (matches your settings.json bindings)
+          pkgs.nix-vscode-extensions.vscode-marketplace.vspacecode.whichkey
+
+          # Git ergonomics and inline diagnostics
+          pkgs.nix-vscode-extensions.vscode-marketplace.eamodio.gitlens
+          pkgs.nix-vscode-extensions.vscode-marketplace.usernamehw.errorlens
+
+          # Markdown/Notes and spell checking
+          pkgs.nix-vscode-extensions.vscode-marketplace.foam.foam-vscode
+          pkgs.nix-vscode-extensions.vscode-marketplace.yzhang.markdown-all-in-one
+          pkgs.nix-vscode-extensions.vscode-marketplace.streetsidesoftware.code-spell-checker
+
+          # Rust quality-of-life
+          pkgs.nix-vscode-extensions.vscode-marketplace.serayuzgur.crates
         ];
 
-      userSettings = {
-        # Theme & Font
-        "workbench.iconTheme" = "vscode-icons";
-        "workbench.colorTheme" = "Tokyo Night";
-        "editor.fontFamily" = "JetBrains Mono";
-        "editor.fontLigatures" = true;
-        "editor.fontSize" = 14;
-
-        # Advanced Styling
-        "editor.bracketPairColorization.enabled" = true;
-        "editor.guides.bracketPairs" = "active";
-        "editor.guides.indentation" = true;
-        "editor.guides.highlightActiveIndentation" = true;
-
-        # Editor Control
-        "files.autoSave" = "onFocusChange";
-        "editor.smoothScrolling" = true;
-        "editor.linkedEditing" = true;
-        "editor.formatOnPaste" = true;
-        "editor.codeActionsOnSave" = {
-          "source.fixAll" = true;
-          "source.organizeImports" = true;
-        };
-
-        # UI Layout
-        "workbench.activityBar.visible" = false;
-        "breadcrumbs.enabled" = true;
-        "editor.renderWhitespace" = "selection";
-        "editor.renderControlCharacters" = true;
-        "workbench.editor.labelFormat" = "medium";
-
-        # Terminal & Git
-        "terminal.integrated.fontFamily" = "JetBrains Mono";
-        "git.autofetch" = true;
-        "git.confirmSync" = false;
-
-        # Nix Language Server
-        "nix.enable" = true;
-        "nix.serverPath" = "nixd";
-        "nix.formatterPath" = "nixfmt-rfc-style";
-
-        # NeoVim Extension
-        "vscode-neovim.neovimInitVimPaths.linux" = "${config.home.homeDirectory}/.config/nvim/init.lua";
-      };
-
-      keybindings = lib.concatLists [
-        (lib.map mkSendKey letters)
-        (lib.map mkSendKey upperCaseLetters)
-        (lib.map mkSendKey numbers)
-        (lib.map mkSendKey symbols)
-        (lib.map mkCtrlSendKey ctrlKeys)
-        specialKeys
-      ];
+      # Intentionally do not set userSettings or keybindings here to avoid
+      # clobbering repo-managed dotfiles in ~/.config/Code/User.
     };
   };
 }
