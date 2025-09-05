@@ -1,0 +1,52 @@
+{
+	"servers": {
+		"github": {
+			"type": "http",
+			"url": "https://api.githubcopilot.com/mcp/",
+			"gallery": true
+		},
+		"playwright": {
+			"type": "stdio",
+			"command": "npx",
+			"args": [
+				"@playwright/mcp@latest"
+			],
+			"gallery": true
+		},
+		"context7": {
+			"type": "stdio",
+			"command": "npx",
+			"args": [
+				"-y",
+				"@upstash/context7-mcp@latest"
+			],
+			"gallery": true
+		},
+		"firecrawl": {
+			"type": "stdio",
+			"command": "npx",
+			"args": [
+				"-y",
+				"firecrawl-mcp@latest"
+			],
+			"env": {
+				"FIRECRAWL_API_KEY": "${input:firecrawl_api_key}"
+			},
+			"gallery": true
+		},
+		"prisma-postgres": {
+			"type": "http",
+			"url": "https://mcp.prisma.io/mcp",
+			"gallery": true
+		}
+	},
+	"inputs": [
+		{
+			"id": "firecrawl_api_key",
+			"type": "promptString",
+			"description": "Firecrawl API Key (get from https://www.firecrawl.dev/app/api-keys)",
+			"password": true
+		}
+	]
+}
+

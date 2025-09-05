@@ -237,9 +237,7 @@
             "size 480 270,title:^(Picture-in-Picture)$"
             "move 100%-500 50,title:^(Picture-in-Picture)$" # Smart corner positioning
 
-            # Music apps to special:music
-            "workspace special:music,class:^(Spotify)$"
-            "workspace special:music,class:^(spotify)$" # Sometimes lowercase
+            # Music apps to special:music (scratchpad manages Spotify)
             "workspace special:music,class:^(music)$" # Our kitty music instances
             "workspace special:music,title:^(ncspot)$"
             "workspace special:music,class:^(pavucontrol)$"

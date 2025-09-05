@@ -48,7 +48,7 @@
       cargo-llvm-lines # Count lines of LLVM IR per function
       cargo-udeps # Find unused dependencies
       cargo-depgraph # Generate dependency graphs
-      cargo-geiger # Detect unsafe code usage
+      # cargo-geiger # Detect unsafe code usage (temporarily disabled due to build failure)
       cargo-machete # Remove unused dependencies
       
       # General code analysis

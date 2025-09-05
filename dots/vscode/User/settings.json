@@ -1,0 +1,64 @@
+{
+  // ——— Existing preferences preserved ———
+  "chat.editor.fontFamily": "SauceCodePro Nerd Font Mono",
+  "chat.editor.fontSize": 21.333333333333332,
+  "debug.console.fontFamily": "SauceCodePro Nerd Font Mono",
+  "debug.console.fontSize": 21.333333333333332,
+  "editor.fontFamily": "SauceCodePro Nerd Font Mono",
+  "editor.fontSize": 21.333333333333332,
+  "editor.inlayHints.fontFamily": "SauceCodePro Nerd Font Mono",
+  "editor.inlineSuggest.fontFamily": "SauceCodePro Nerd Font Mono",
+  "editor.minimap.sectionHeaderFontSize": 13.714285714285714,
+  "markdown.preview.fontFamily": "Arimo",
+  "markdown.preview.fontSize": 21.333333333333332,
+  "scm.inputFontFamily": "SauceCodePro Nerd Font Mono",
+  "scm.inputFontSize": 19.809523809523807,
+  "screencastMode.fontSize": 85.33333333333333,
+  "terminal.integrated.fontSize": 21.333333333333332,
+  "workbench.colorTheme": "Stylix",
+
+  // ——— VSCode-Neovim integration ———
+  // Rely on PATH for nvim, avoid hard-coding Nix path.
+  // Remove any composite jk escape. Keep Linux key handling sane.
+  "vscode-neovim.compositeKeys": {},
+  "keyboard.dispatch": "keyCode",
+
+  // ——— Editor ergonomics ———
+  "editor.lineNumbers": "relative",
+  "workbench.editor.enablePreview": false,
+
+  // ——— Copilot / Chat Agent ———
+  "chat.agent.enabled": true,
+
+  // ——— Rust Analyzer ———
+  "rust-analyzer.check.command": "clippy",
+  "rust-analyzer.cargo.allFeatures": true,
+  "rust-analyzer.procMacro.enable": true,
+
+  // ——— Nix ———
+  "nix.formatterPath": "nixpkgs-fmt",
+
+  // ——— Terminal ———
+  "terminal.integrated.inheritEnv": true,
+  "terminal.integrated.defaultProfile.linux": "bash",
+
+  // ——— Performance ———
+  "files.watcherExclude": {
+    "**/target/**": true,
+    "**/.direnv/**": true,
+    "**/node_modules/**": true
+  },
+
+  // ——— Foam / Markdown ———
+  "foam.edit.linkReferenceDefinitions": "withExtensions",
+  "markdown.references.preferredLocation": "endOfFile",
+
+  // ——— Editor QoL ———
+  "breadcrumbs.enabled": true,
+  "editor.stickyScroll.enabled": true,
+  "editor.renderWhitespace": "selection",
+  "editor.rulers": [100],
+  "explorer.excludeGitIgnore": true,
+  "search.useIgnoreFiles": true,
+  "telemetry.telemetryLevel": "off"
+}

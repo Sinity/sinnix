@@ -1,0 +1,1 @@
+{"id":"github","name":"github","displayName":"GitHub","description":"Access GitHub repositories, issues, and pull requests through secure API integration.","publisher":"github","publisherDisplayName":"GitHub","repositoryUrl":"https://github.com/github/github-mcp-server","codicon":"codicon-github","manifest":{"remotes":[{"url":"https://api.githubcopilot.com/mcp/"}]}}

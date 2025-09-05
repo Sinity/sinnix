@@ -1,0 +1,1 @@
+{"id":"prisma-postgres","name":"prisma-postgres","displayName":"Prisma Postgres","description":"Database operations with Prisma ORM and PostgreSQL. Schema management, query execution, migrations, and data modeling.","publisher":"prisma-postgres","publisherDisplayName":"Prisma","codicon":"codicon-database","manifest":{"remotes":[{"url":"https://mcp.prisma.io/mcp"}]}}
