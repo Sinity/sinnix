@@ -1,4 +1,5 @@
 local HOME = os.getenv("HOME")
+local in_vscode = vim.g.vscode
 return {
   {
     "neovim/nvim-lspconfig",
@@ -12,20 +13,23 @@ return {
     },
   },
 
+  -- Disable nvim-lint in VSCode mode
   {
     "mfussenegger/nvim-lint",
+    enabled = not in_vscode,
     optional = true,
     opts = {
       linters = {
         ["markdownlint-cli2"] = {
-          -- TODO: configure it w/o relying on magic dotfiles I'll forget about eventually
           args = { "--config", HOME .. "/.config/.markdownlint-cli2.yaml", "--" },
         },
       },
     },
   },
+  -- Disable Obsidian.nvim in VSCode mode
   {
     "epwalsh/obsidian.nvim",
+    enabled = not in_vscode,
     version = "*",
     lazy = false,
     ft = "markdown",

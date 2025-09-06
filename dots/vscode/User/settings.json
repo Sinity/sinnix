@@ -92,13 +92,31 @@
       { "key": "s", "name": "Save All",    "type": "command", "command": "workbench.action.files.saveAll" }
     ] },
     { "key": "s", "name": "Search", "type": "bindings", "bindings": [
-      { "key": "s", "name": "Find in Files",      "type": "command", "command": "workbench.action.findInFiles" },
-      { "key": "/", "name": "Find in Files",      "type": "command", "command": "workbench.action.findInFiles" },
-      { "key": "h", "name": "Search: Focus View", "type": "command", "command": "workbench.view.search" }
+      { "key": "s", "name": "Find in Files",       "type": "command", "command": "workbench.action.findInFiles" },
+      { "key": "/", "name": "Find in Files",       "type": "command", "command": "workbench.action.findInFiles" },
+      { "key": "h", "name": "Search: Focus View",  "type": "command", "command": "workbench.view.search" },
+      { "key": "i", "name": "Symbols in File",     "type": "command", "command": "workbench.action.gotoSymbol" },
+      { "key": "w", "name": "Symbols in Workspace", "type": "command", "command": "workbench.action.showAllSymbols" }
+    ] },
+    { "key": "l", "name": "LSP", "type": "bindings", "bindings": [
+      { "key": "d", "name": "Go to Definition",        "type": "command", "command": "editor.action.revealDefinition" },
+      { "key": "D", "name": "Go to Declaration",       "type": "command", "command": "editor.action.revealDeclaration" },
+      { "key": "I", "name": "Go to Implementation",    "type": "command", "command": "editor.action.goToImplementation" },
+      { "key": "T", "name": "Go to Type Definition",   "type": "command", "command": "editor.action.goToTypeDefinition" },
+      { "key": "R", "name": "Find References",         "type": "command", "command": "editor.action.referenceSearch.trigger" },
+      { "key": "p", "name": "Peek Definition",          "type": "command", "command": "editor.action.peekDefinition" },
+      { "key": "r", "name": "Rename Symbol",            "type": "command", "command": "editor.action.rename" },
+      { "key": "f", "name": "Format Document",          "type": "command", "command": "editor.action.formatDocument" },
+      { "key": "a", "name": "Code Actions",              "type": "command", "command": "editor.action.codeAction" }
     ] },
     { "key": "g", "name": "Git", "type": "bindings", "bindings": [
-      { "key": "g", "name": "Source Control", "type": "command", "command": "workbench.view.scm" },
-      { "key": "b", "name": "GitLens: Toggle Blame", "type": "command", "command": "gitlens.toggleLineBlame" }
+      { "key": "g", "name": "Source Control",       "type": "command", "command": "workbench.view.scm" },
+      { "key": "b", "name": "GitLens: Toggle Blame", "type": "command", "command": "gitlens.toggleLineBlame" },
+      { "key": "f", "name": "Fetch",                 "type": "command", "command": "git.fetch" },
+      { "key": "p", "name": "Pull",                  "type": "command", "command": "git.pull" },
+      { "key": "u", "name": "Push",                  "type": "command", "command": "git.push" },
+      { "key": "h", "name": "File History (GitLens)", "type": "command", "command": "gitlens.showQuickFileHistory" },
+      { "key": "r", "name": "Repo History (GitLens)", "type": "command", "command": "gitlens.showQuickRepoHistory" }
     ] },
     { "key": "x", "name": "Diagnostics", "type": "bindings", "bindings": [
       { "key": "x", "name": "Problems",     "type": "command", "command": "workbench.actions.view.problems" },

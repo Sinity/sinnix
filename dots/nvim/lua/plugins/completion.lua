@@ -1,6 +1,8 @@
+local in_vscode = vim.g.vscode
 return {
   {
     "saghen/blink.cmp",
+    enabled = not in_vscode,
     opts = {
       completion = {
         menu = {
@@ -9,9 +11,10 @@ return {
       },
     },
   },
-  -- Make blink.cmp toogleable
+  -- Make blink.cmp toggleable (non-VSCode only)
   {
     "saghen/blink.cmp",
+    enabled = not in_vscode,
     opts = function(_, opts)
       vim.b.completion = true
 

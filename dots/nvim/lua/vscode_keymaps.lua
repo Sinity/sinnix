@@ -22,6 +22,9 @@ map("<leader>f",  "workbench.action.quickOpen",   "Quick Open")
 map("<leader>e",  "workbench.view.explorer",     "Explorer")
 map("<leader>/",  "workbench.action.findInFiles", "Find in Files")
 map("<leader>s",  "workbench.view.search",       "Search View")
+-- Symbols
+map("<leader>si", "workbench.action.gotoSymbol",   "Symbols in File")
+map("<leader>sw", "workbench.action.showAllSymbols","Symbols in Workspace")
 
 -- Git
 map("<leader>gg", "workbench.view.scm",           "Source Control")
@@ -70,3 +73,5 @@ map("<leader>lT", "editor.action.goToTypeDefinition",        "Go to Type Definit
 map("<leader>lR", "editor.action.referenceSearch.trigger",   "Find References")
 map("<leader>lp", "editor.action.peekDefinition",            "Peek Definition")
 map("<leader>lr", "editor.action.rename",                    "Rename Symbol")
+map("<leader>lf", "editor.action.formatDocument",           "Format Document")
+map("<leader>la", "editor.action.codeAction",               "Code Actions")

@@ -3,6 +3,7 @@ local in_vscode = vim.g.vscode
 return {
   {
     "coder/claudecode.nvim",
+    enabled = not in_vscode,
     config = true,
     -- Disable keymaps in VSCode mode; rely on VS Code side bindings/UI
     keys = in_vscode and {} or {
