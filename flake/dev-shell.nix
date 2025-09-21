@@ -22,6 +22,17 @@
             # Basic shell information
             name = "nixos-config-dev";
 
+            # Set project root explicitly (prefer direnv-provided path to avoid /nix/store)
+            devenv.root = let
+              envRoot = builtins.getEnv "DEVENV_ROOT";
+              pwd = builtins.getEnv "PWD";
+              usePath = path:
+                path != "" && builtins.match "^/nix/store/.*" path == null;
+            in
+              if usePath envRoot then envRoot
+              else if usePath pwd then pwd
+              else builtins.toString ./.;
+
             # Disable task output to reduce noise
             tasks."devenv:enterShell".after = [ ];
             devenv.flakesIntegration = true;
@@ -75,6 +86,16 @@
                 find . -name "*.nix" -type f -print0 | xargs -0 -n1 ${pkgs.nix}/bin/nix-instantiate --parse >/dev/null
               '';
 
+              # Run code quality checks (without modifying files)
+              lint.exec = ''
+                set -euo pipefail
+                echo "Running deadnix..."
+                ${pkgs.deadnix}/bin/deadnix --fail .
+
+                echo "Running shellcheck on .sh files..."
+                ${pkgs.fd}/bin/fd -t f -e sh -x ${pkgs.shellcheck}/bin/shellcheck {}
+              '';
+
               # Format Nix code according to standard
               format.exec = ''
                 ${pkgs.findutils}/bin/find . -name "*.nix" -type f -not -path "*/nix/store/*" -print0 | \
@@ -94,6 +115,14 @@
 
             # Welcome message with available commands
             enterShell = ''
+              # Ensure devenv git-hooks state config is valid JSON
+              GH_STATE_DIR=.devenv/state/git-hooks
+              GH_CFG=$GH_STATE_DIR/config.json
+              if [ ! -e "$GH_CFG" ] || ! ${pkgs.jq}/bin/jq . "$GH_CFG" >/dev/null 2>&1; then
+                mkdir -p "$GH_STATE_DIR"
+                printf '%s\n' '{"configPath": ".pre-commit-config.yaml"}' > "$GH_CFG"
+              fi
+
               echo ""
               echo "NixOS Configuration Development Environment"
               echo ""
@@ -108,4 +137,4 @@
         ];
       };
     };
-}
+} 
