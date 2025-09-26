@@ -3,7 +3,6 @@
 
 {
   pkgs,
-  config,
   inputs,
   ...
 }:
@@ -31,58 +30,60 @@
           nodejs
 
           # Python Development
-          (python3.withPackages (ps: with ps; [
-            # Core
-            pip
-            ipython
-            # CLI & TUI
-            rich
-            click
-            questionary
-            typer
-            tqdm
-            # Web & API
-            fastapi
-            uvicorn
-            aiofiles
-            httpx
-            beautifulsoup4
-            requests
-            # Data Science & ML
-            pandas
-            numpy
-            matplotlib
-            seaborn
-            jupyter
-            notebook
-            plotly
-            bokeh
-            altair
-            pygal
-            holoviews
-            statsmodels
-            # Data Formats
-            pydantic
-            pyyaml
-            toml
-            ujson
-            # Tooling
-            black
-            mypy
-            pytest
-            python-dotenv
-            # Misc
-            fuzzywuzzy
-            python-Levenshtein
-            tiktoken
-            tabulate
-            gitpython # For git analysis tools
-            # Diagramming
-            diagrams
-            graphviz
-            pydot
-            networkx
-          ]))
+          (python3.withPackages (
+            ps: with ps; [
+              # Core
+              pip
+              ipython
+              # CLI & TUI
+              rich
+              click
+              questionary
+              typer
+              tqdm
+              # Web & API
+              fastapi
+              uvicorn
+              aiofiles
+              httpx
+              beautifulsoup4
+              requests
+              # Data Science & ML
+              pandas
+              numpy
+              matplotlib
+              seaborn
+              jupyter
+              notebook
+              plotly
+              bokeh
+              altair
+              pygal
+              holoviews
+              statsmodels
+              # Data Formats
+              pydantic
+              pyyaml
+              toml
+              ujson
+              # Tooling
+              black
+              mypy
+              pytest
+              python-dotenv
+              # Misc
+              fuzzywuzzy
+              ps."python-Levenshtein"
+              tiktoken
+              tabulate
+              gitpython # For git analysis tools
+              # Diagramming
+              diagrams
+              graphviz
+              pydot
+              networkx
+            ]
+          ))
 
           # Database Tools
           sqlite

@@ -7,23 +7,17 @@ set -euo pipefail
 KB_ROOT=${KB_ROOT:-/realm/knowledgebase}
 LOG_DIR="$KB_ROOT/50_logs"
 LOG_FILE="$LOG_DIR/raw-log.md"
+PICKER=${PICKER:-tofi}
 
 die() { echo "rawlog: $*" >&2; exit 1; }
 
 [ -d "$KB_ROOT" ] || die "KB root not found: $KB_ROOT"
 mkdir -p "$LOG_DIR"
+command -v "$PICKER" >/dev/null 2>&1 || die "picker '$PICKER' not found"
 
 prompt_text() {
   local prompt="$1"
-  if command -v rofi >/dev/null 2>&1; then
-    rofi -dmenu -p "$prompt" <<< ""
-  elif command -v wofi >/dev/null 2>&1; then
-    wofi --dmenu --prompt "$prompt"
-  elif command -v tofi >/dev/null 2>&1; then
-    tofi --prompt "$prompt: " --horizontal=false --fuzzy-match=false <<< "" | sed 's/\r$//'
-  else
-    read -rp "$prompt: " ans; echo "$ans"
-  fi
+  "$PICKER" --prompt "$prompt: " --horizontal=false <<< "" | sed 's/\r$//'
 }
 
 msg="${*:-}"
@@ -32,7 +26,7 @@ if [ -z "$msg" ]; then
 fi
 
 # Trim message
-msg=$(echo -n "$msg" | sed -e 's/^\s\+//' -e 's/\s\+$//')
+msg=$(echo -n "$msg" | sed -e 's/^[[:space:]]\+//' -e 's/[[:space:]]\+$//')
 [ -n "$msg" ] || exit 0
 
 ts=$(date +"%Y-%m-%d %H:%M:%S")
@@ -62,4 +56,3 @@ if command -v notify-send >/dev/null 2>&1; then
 fi
 
 echo "$line"
-

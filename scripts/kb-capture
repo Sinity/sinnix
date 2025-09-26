@@ -2,43 +2,27 @@
 set -euo pipefail
 
 KB_ROOT=${KB_ROOT:-/realm/knowledgebase}
+PICKER=${PICKER:-tofi}
 
 die() { echo "kb-capture: $*" >&2; exit 1; }
 
 command -v zk >/dev/null 2>&1 || die "zk not found. Install with Nix (e.g., add pkgs.zk) or nix profile install nixpkgs#zk."
+command -v "$PICKER" >/dev/null 2>&1 || die "picker '$PICKER' not found"
 [ -d "$KB_ROOT" ] || die "KB root not found: $KB_ROOT"
 
-# dmenu-like picker with best-effort fallbacks: rofi, wofi, tofi, fzf, or read
 pick_one() {
   local prompt="$1"; shift
   local input="$1"
-  if command -v rofi >/dev/null 2>&1; then
-    echo -e "$input" | rofi -dmenu -p "$prompt"
-  elif command -v wofi >/dev/null 2>&1; then
-    echo -e "$input" | wofi --dmenu --prompt "$prompt"
-  elif command -v tofi >/dev/null 2>&1; then
-    echo -e "$input" | tofi --prompt "$prompt: " --horizontal=false --fuzzy-match=true | sed 's/\\r$//'
-  elif command -v fzf >/dev/null 2>&1; then
-    echo -e "$input" | fzf --prompt "$prompt> "
-  else
-    printf "%s\n> " "$prompt"
-    printf "%s\n" "$input" | nl -ba
-    read -r choice
-    echo "$choice"
-  fi
+  printf '%s\n' "$input" | "$PICKER" --prompt "$prompt: " --horizontal=false --fuzzy-match=true |
+    sed 's/\r$//' |
+    sed -e 's/^[[:space:]]\+//' -e 's/[[:space:]]\+$//'
 }
 
 prompt_text() {
   local prompt="$1"
-  if command -v rofi >/dev/null 2>&1; then
-    rofi -dmenu -p "$prompt" <<< ""
-  elif command -v wofi >/dev/null 2>&1; then
-    wofi --dmenu --prompt "$prompt"
-  elif command -v tofi >/dev/null 2>&1; then
-    tofi --prompt "$prompt: " --horizontal=false --fuzzy-match=false <<< "" | sed 's/\\r$//'
-  else
-    read -rp "$prompt: " ans; echo "$ans"
-  fi
+  "$PICKER" --prompt "$prompt: " --horizontal=false <<< "" |
+    sed 's/\r$//' |
+    sed -e 's/^[[:space:]]\+//' -e 's/[[:space:]]\+$//'
 }
 
 # Build category list from top-level dirs
@@ -51,19 +35,8 @@ category=$(pick_one "Category" "$categories")
 title=$(prompt_text "Title")
 [ -n "$title" ] || exit 0
 
-# Tags: prefer comma-separated input (universal). If rofi available, allow multi-select fallback list.
-tag_input=""
-if command -v rofi >/dev/null 2>&1; then
-  # simple preset; user can type comma list if they cancel
-  preset_tags="rust\nnix\nwork\nlife\nideas"
-  sel=$(echo -e "$preset_tags" | rofi -dmenu -multi-select -p "Tags (multi-select, Enter=done)") || true
-  if [ -n "$sel" ]; then
-    tag_input=$(echo "$sel" | tr '\n' ',' | sed 's/,$//')
-  fi
-fi
-if [ -z "$tag_input" ]; then
-  tag_input=$(prompt_text "Tags (comma-separated, optional)")
-fi
+# Tags: simple comma-separated input
+tag_input=$(prompt_text "Tags (comma-separated, optional)")
 
 args=(new --notebook "$KB_ROOT" --group "$category" --title "$title" --print-path)
 if [ -n "$tag_input" ]; then args+=(--tag "$tag_input"); fi
@@ -78,4 +51,3 @@ elif command -v codium >/dev/null 2>&1; then
 fi
 
 echo "Created: $note_path"
-

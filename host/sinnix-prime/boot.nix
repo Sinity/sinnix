@@ -1,6 +1,5 @@
 # Host-specific boot configuration for sinnix-prime
-{ ... }:
-{
+_: {
   boot = {
     loader = {
       systemd-boot = {
@@ -60,7 +59,7 @@
       "rd.udev.log-priority=3"
       "acpi_enforce_resources=lax"
       "vga=current"
-      
+
       # Force Intel HDA to use legacy driver for aux/line-in support
       "snd-intel-dspcfg.dsp_driver=1"
     ];

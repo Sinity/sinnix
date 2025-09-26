@@ -14,6 +14,24 @@
 let
   # Find all .age files in the secret directory
   secretFiles = lib.filterAttrs (name: _: lib.hasSuffix ".age" name) (builtins.readDir ../secret);
+  secretNames = lib.mapAttrsToList (name: _: lib.removeSuffix ".age" name) secretFiles;
+  secretsExcludedFromEnv = [
+    "sinity-password"
+    "root-password"
+    "davfs2-secrets"
+  ];
+  exportableSecrets = lib.filter (name: !(lib.elem name secretsExcludedFromEnv)) secretNames;
+  mkSecretExport =
+    secretName:
+    let
+      envName = lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] secretName);
+    in
+    ''
+      if [[ -r "${config.age.secrets.${secretName}.path}" ]]; then
+        export ${envName}="$(<${config.age.secrets.${secretName}.path})"
+      fi
+    '';
+  exportScript = lib.concatStringsSep "\n" (map mkSecretExport exportableSecrets);
 in
 {
   imports = [ inputs.home-manager.nixosModules.home-manager ];
@@ -68,7 +86,6 @@ in
     nixpkgs = {
       config = {
         allowUnfree = true;
-        allowBroken = true;
         allowAliases = true;
       };
       overlays = [ inputs.nur.overlays.default ];
@@ -174,7 +191,7 @@ in
           "-g"
           "-p"
           "--prefer"
-          "(^|/)(java|chromium|obsidian|google-chrome-stable)$"
+          "(^|/)(java|chromium|obsidian|google-chrome-(stable|beta))$"
           "--avoid"
           "(^|/)(init|systemd|sshd)$"
         ];
@@ -227,23 +244,36 @@ in
           };
 
           # Removed ~/scripts from PATH - scripts now embedded in automation.nix
+          file = {
+            ".config/secrets/export-env.zsh" = {
+              text = ''
+                # shellcheck disable=SC2148
+
+                ${exportScript}
+              '';
+            };
+          };
         };
 
-        # Load secrets into environment via shell profile
-        programs.zsh.initContent = lib.concatStringsSep "\n" (
-          lib.mapAttrsToList (
-            filename: _:
-            let
-              secretName = lib.removeSuffix ".age" filename;
-              envName = lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] secretName);
-            in
-            ''
-              if [[ -r "${config.age.secrets.${secretName}.path}" ]]; then
-                export ${envName}="$(cat ${config.age.secrets.${secretName}.path})"
+        programs.zsh = {
+          initContent = lib.mkAfter ''
+            load_secrets() {
+              local export_file="$HOME/.config/secrets/export-env.zsh"
+              if [ ! -r "$export_file" ]; then
+                echo "load_secrets: export file not found" >&2
+                return 1
               fi
-            ''
-          ) secretFiles
-        );
+              # shellcheck disable=SC1090
+              source "$export_file"
+            }
+
+            # Load secrets as early as possible in the interactive shell lifecycle
+            load_secrets || true
+          '';
+          shellAliases = {
+            load-secrets = "load_secrets";
+          };
+        };
 
         programs.home-manager.enable = true;
       };
@@ -261,12 +291,12 @@ in
             "video"
           ];
           shell = pkgs.zsh;
-          hashedPassword = "REDACTED_HASH";
+          hashedPasswordFile = "/run/agenix/sinity-password";
         };
         root = {
           shell = pkgs.zsh;
           home = "/root";
-          hashedPassword = "REDACTED_HASH";
+          hashedPasswordFile = "/run/agenix/root-password";
         };
       };
     };
@@ -284,7 +314,10 @@ in
       };
     };
 
-    networking.firewall.enable = false;
+    networking.firewall = {
+      enable = true;
+      allowedTCPPorts = [ 22 ];
+    };
     services.gnome.gnome-keyring.enable = true;
 
     programs.gnupg.agent = {
@@ -295,13 +328,41 @@ in
     boot.kernel.sysctl."kernel.unprivileged_userns_clone" = 1;
 
     age = {
-      identityPaths = [ "/home/sinity/.ssh/id_ed25519" ];
+      identityPaths = [
+        "/etc/ssh/ssh_host_ed25519_key"
+        "/home/${username}/.ssh/id_ed25519"
+      ];
       secrets = lib.mapAttrs' (filename: _: {
         name = lib.removeSuffix ".age" filename;
-        value = {
-          file = ../secret/${filename};
-          owner = "sinity";
-        };
+        value =
+          let
+            secretName = lib.removeSuffix ".age" filename;
+            defaultSpec = {
+              owner = username;
+              mode = "0400";
+            };
+            rootOwnedSpec = defaultSpec // {
+              owner = "root";
+              group = "root";
+            };
+          in
+          {
+            file = ../secret/${filename};
+          }
+          // (
+            if secretName == "davfs2-secrets" then
+              rootOwnedSpec
+              // {
+                mode = "0600";
+                path = "/run/agenix/davfs2-secrets";
+              }
+            else if secretName == "sinity-password" then
+              rootOwnedSpec // { path = "/run/agenix/sinity-password"; }
+            else if secretName == "root-password" then
+              rootOwnedSpec // { path = "/run/agenix/root-password"; }
+            else
+              defaultSpec
+          );
       }) secretFiles;
     };
 
@@ -324,14 +385,20 @@ in
       '';
     };
 
+    systemd.tmpfiles.rules = [
+      "d /realm/inbox 0755 ${username} users -"
+      "d /realm/inbox/screenshot 0755 ${username} users -"
+      "d /realm/inbox/mpv-screenshots 0755 ${username} users -"
+    ];
+
     # Journald configuration (from services.nix)
     services.journald = {
       extraConfig = ''
-        SystemMaxUse=50G
-        SystemKeepFree=25G
-        SystemMaxFileSize=10M
-        SystemMaxFiles=5000000
-        RuntimeMaxUse=2G
+        SystemMaxUse=5G
+        SystemKeepFree=2G
+        SystemMaxFileSize=50M
+        SystemMaxFiles=100000
+        RuntimeMaxUse=1G
       '';
     };
   };

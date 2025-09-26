@@ -35,7 +35,7 @@
 
         # Validate NixOS configuration
         check = mkApp "check" ''
-          flake_dir="''${PRJ_ROOT:-/realm/project/sinnix}"
+          flake_dir="''${PRJ_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
           echo "Checking NixOS configuration at $flake_dir..."
           ${pkgs.nix}/bin/nix flake check --no-build "$flake_dir"
           find "$flake_dir" -name "*.nix" -type f -print0 | xargs -0 -n1 ${pkgs.nix}/bin/nix-instantiate --parse >/dev/null
@@ -44,7 +44,7 @@
 
         # Format Nix files
         format = mkApp "format" ''
-          flake_dir="''${PRJ_ROOT:-/realm/project/sinnix}"
+          flake_dir="''${PRJ_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
           echo "Formatting Nix files in $flake_dir..."
           ${pkgs.findutils}/bin/find "$flake_dir" -name "*.nix" -type f -not -path "*/nix/store/*" -print0 | \
           ${pkgs.findutils}/bin/xargs -0 -P 4 -I{} ${pkgs.nixfmt-rfc-style}/bin/nixfmt {}
@@ -53,7 +53,7 @@
 
         # Lint Nix files
         lint = mkApp "lint" ''
-          flake_dir="''${PRJ_ROOT:-/realm/project/sinnix}"
+          flake_dir="''${PRJ_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
           echo "Linting Nix files in $flake_dir..."
           cd "$flake_dir" && ${pkgs.statix}/bin/statix check
           echo "Linting complete!"
@@ -61,7 +61,7 @@
 
         # Test configuration without applying
         test = mkApp "test" ''
-          flake_dir="''${PRJ_ROOT:-/realm/project/sinnix}"
+          flake_dir="''${PRJ_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
           if [ "$(id -u)" -ne 0 ]; then
             echo "Error: This command must be run as root (use 'sudo nix run $flake_dir#test')"
             exit 1
@@ -72,7 +72,7 @@
 
         # Apply configuration to system
         switch = mkApp "switch" ''
-          flake_dir="''${PRJ_ROOT:-/realm/project/sinnix}"
+          flake_dir="''${PRJ_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
           if [ "$(id -u)" -ne 0 ]; then
             echo "Error: This command must be run as root (use 'sudo nix run $flake_dir#switch')"
             exit 1
@@ -83,7 +83,7 @@
 
         # Update flake dependencies
         update = mkApp "update" ''
-          flake_dir="''${PRJ_ROOT:-/realm/project/sinnix}"
+          flake_dir="''${PRJ_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
           echo "Updating flake inputs for $flake_dir..."
           ${pkgs.nix}/bin/nix flake update "$flake_dir"
           echo "Flake inputs updated. Run 'sudo nix run $flake_dir#switch' to apply."

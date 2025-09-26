@@ -7,6 +7,7 @@
     services = {
       transmission = {
         enable = true;
+        openFirewall = true;
         settings = {
           script-torrent-done-enabled = false;
           ratio-limit-enabled = false;
@@ -14,6 +15,9 @@
           download-dir = "/outer-realm/inbox";
           incomplete-dir-enabled = false;
           rpc-port = 9091;
+          rpc-bind-address = "127.0.0.1";
+          rpc-whitelist-enabled = false;
+          rpc-authentication-required = false;
         };
       };
 

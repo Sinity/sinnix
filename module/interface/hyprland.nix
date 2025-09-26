@@ -3,7 +3,6 @@
 
 {
   pkgs,
-  config,
   inputs,
   ...
 }:
@@ -293,22 +292,24 @@
       xdg.configFile."hypr/pyprland.toml".text = builtins.readFile ../asset/pyprland.toml;
 
       # Install helper scripts into ~/.local/bin
-      home.file.".local/bin/kb-capture" = {
-        source = ../../scripts/kb-capture;
-        executable = true;
-      };
-      home.file.".local/bin/workspace-menu" = {
-        source = ../../scripts/workspace-menu;
-        executable = true;
-      };
-      home.file.".local/bin/rawlog" = {
-        source = ../../scripts/rawlog;
-        executable = true;
-      };
-      # Back-compat alias for legacy binding
-      home.file.".local/bin/log-to-knowledgebase" = {
-        source = ../../scripts/rawlog;
-        executable = true;
+      home.file = {
+        ".local/bin/kb-capture" = {
+          source = ../../scripts/kb-capture;
+          executable = true;
+        };
+        ".local/bin/workspace-menu" = {
+          source = ../../scripts/workspace-menu;
+          executable = true;
+        };
+        ".local/bin/rawlog" = {
+          source = ../../scripts/rawlog;
+          executable = true;
+        };
+        # Back-compat alias for legacy binding
+        ".local/bin/log-to-knowledgebase" = {
+          source = ../../scripts/rawlog;
+          executable = true;
+        };
       };
 
       # PYPRLAND systemd service

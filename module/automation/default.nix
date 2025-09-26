@@ -8,7 +8,6 @@
     ./service.nix
     ./script.nix
     ./storage.nix
-    ./cloud-optimize.nix
   ];
 
   config = {

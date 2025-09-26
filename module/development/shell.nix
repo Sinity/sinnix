@@ -2,7 +2,6 @@
 # Shell environments, terminal tools, and shell configurations
 
 {
-  config,
   lib,
   pkgs,
   ...
@@ -94,6 +93,8 @@
 
             # use vi-like keybinds in shell
             set -o vi
+
+            show_file_or_dir_preview='if [ -d {} ]; then eza --tree --color=always {} | head -200; else bat -n --color=always --line-range :500 {}; fi'
 
             # Use fd (https://github.com/sharkdp/fd) for listing path candidates.
             _fzf_compgen_path() {
@@ -188,8 +189,8 @@
             pingg = "ping 8.8.8.8";
             wtf = "dmesg";
             ytd = "yt-dlp";
-            
-            # Git analysis tools  
+
+            # Git analysis tools
             git-theseus = "nix-shell -p python3 python3Packages.pip python3Packages.numpy python3Packages.matplotlib gcc stdenv.cc.cc.lib --run 'pip install --user git-of-theseus && ~/.local/bin/git-of-theseus-analyze'";
             git-inspector = "nix-shell -p python3 python3Packages.pip --run 'pip install --user gitinspector && ~/.local/bin/gitinspector'";
           };
@@ -257,7 +258,6 @@
           enableZshIntegration = true;
         };
 
-        
       };
     };
   };

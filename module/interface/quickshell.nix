@@ -117,9 +117,9 @@ let
         
         function getCommand() {
           if (monitorType === "cpu") {
-            return ["sh", "-c", "top -bn1 | grep 'Cpu(s)' | awk '{print int(100-$8)}'"]
+            return ["sh", "-c", "LC_ALL=C top -bn1 | grep 'Cpu(s)' | awk '{print int(100-$8)}'"]
           } else if (monitorType === "memory") {
-            return ["sh", "-c", "free | grep Mem | awk '{printf \"%.0f\", $3/$2 * 100.0}'"]
+            return ["sh", "-c", "LC_ALL=C free | grep Mem | awk '{printf \"%.0f\", $3/$2 * 100.0}'"]
           }
           return ["echo", "0"]
         }
@@ -239,10 +239,10 @@ in
           WantedBy = [ "graphical-session.target" ];
         };
       };
-      
-      # Create initial quickshell config for live development  
+
+      # Create initial quickshell config for live development
       xdg.configFile."quickshell/shell.qml".source = quickshellConfigFile;
-      
+
       # Development convenience: alias for quick config editing
       home.shellAliases = {
         qs-edit = "$EDITOR ~/.config/quickshell/shell.qml";

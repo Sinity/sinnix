@@ -1,8 +1,7 @@
 # Terminal Configuration (Kitty)
 # Terminal emulator with Sinex integration and custom settings
 
-{ ... }:
-{
+_: {
   config = {
     home-manager.users.sinity = {
       programs.kitty = {

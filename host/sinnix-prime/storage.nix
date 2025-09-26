@@ -1,6 +1,5 @@
 # Host-specific storage configuration for sinnix-prime
-{ ... }:
-{
+_: {
   # Storage-related services
   services = {
     fstrim.enable = true; # periodically TRIM ssd storage devices
@@ -46,7 +45,7 @@
         "nofail"
         "uid=1000"
         "gid=100"
-        "umask=000"
+        "umask=022"
         "big_writes"
       ];
     };

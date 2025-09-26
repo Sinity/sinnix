@@ -4,6 +4,9 @@ set -euo pipefail
 # Determine where to look for .code-workspace files.
 # Prefer explicit WS_DIR, then FLAKE repo root, then fallback path.
 WS_DIR=${WS_DIR:-${FLAKE:-/realm/project/sinnix}}
+PICKER=${PICKER:-tofi}
+
+command -v "$PICKER" >/dev/null 2>&1 || { echo "workspace-menu: picker '$PICKER' not found" >&2; exit 1; }
 
 entries=()
 add() { entries+=("$1") ; }
@@ -17,22 +20,7 @@ add() { entries+=("$1") ; }
 
 menu_input=$(printf "%s\n" "${entries[@]}")
 
-pick_menu() {
-  local prompt="$1" input="$2"
-  if command -v rofi >/dev/null 2>&1; then
-    echo "$input" | rofi -dmenu -p "$prompt"
-  elif command -v wofi >/dev/null 2>&1; then
-    echo "$input" | wofi --dmenu --prompt "$prompt"
-  elif command -v tofi >/dev/null 2>&1; then
-    echo "$input" | tofi --prompt "$prompt: " --horizontal=false --fuzzy-match=true | sed 's/\r$//'
-  elif command -v fzf >/dev/null 2>&1; then
-    echo "$input" | fzf --prompt "$prompt> "
-  else
-    printf "%s\n> " "$prompt"; echo "$input" | nl -ba; read -r choice; echo "$choice"
-  fi
-}
-
-choice=$(pick_menu "Workspace" "$menu_input")
+choice=$(printf "%s\n" "$menu_input" | "$PICKER" --prompt "Workspace: " --horizontal=false --fuzzy-match=true | sed 's/\r$//')
 [ -z "$choice" ] && exit 0
 
 target=${choice#*→ }

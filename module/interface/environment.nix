@@ -1,8 +1,7 @@
 # Desktop Environment Variables
 # Wayland, Hyprland, and application-specific environment configuration
 
-{ ... }:
-{
+_: {
   config = {
     home-manager.users.sinity = {
       home = {
@@ -37,7 +36,6 @@
 
           # Other environment settings
           _JAVA_AWT_WM_NONEREPARENTING = "1";
-          SSH_AUTH_SOCK = "/run/user/1000/keyring/ssh";
           DIRENV_LOG_FORMAT = "";
           NIXPKGS_ALLOW_UNFREE = "1";
           WINEDLLOVERRIDES = "winemenubuilder.exe=d";

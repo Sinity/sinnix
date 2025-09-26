@@ -42,8 +42,9 @@
       startWhenNeeded = false;
       ports = [ 22 ];
       settings = {
-        PermitRootLogin = "yes";
+        PermitRootLogin = "no";
         PasswordAuthentication = false;
+        KbdInteractiveAuthentication = false;
         LogLevel = "VERBOSE";
       };
     };
@@ -53,7 +54,7 @@
       virtualHosts."_" = {
         listen = [
           {
-            addr = "0.0.0.0";
+            addr = "127.0.0.1";
             port = 80;
           }
         ];
@@ -68,16 +69,10 @@
     # };
   };
 
-  # Create web directory
-  system.activationScripts = {
-    createWebDir = {
-      text = ''
-        mkdir -p /var/www/simple-site
-        chown -R nginx:nginx /var/www/simple-site
-      '';
-      deps = [ ];
-    };
-  };
+  # Ensure web root exists with correct ownership
+  systemd.tmpfiles.rules = [
+    "d /var/www/simple-site 0750 nginx nginx -"
+  ];
 
   programs.mosh.enable = true;
 

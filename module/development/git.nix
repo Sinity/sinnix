@@ -1,8 +1,7 @@
 # Git Configuration
 # Git settings, aliases, and git-related tools
 
-{ ... }:
-{
+_: {
   config = {
     home-manager.users.sinity = {
       programs.git = {

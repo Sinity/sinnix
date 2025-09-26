@@ -20,10 +20,11 @@
   config = {
     system.nixos.tags = [ "development-domain-v0.3" ];
 
-    # Add user scripts directory to PATH
-    environment.sessionVariables = {
-      PATH = "$PATH:$HOME/scripts";
-    };
+    # Add user scripts directory to PATH at shell init time
+    environment.extraInit = ''
+      PATH="$PATH:$HOME/scripts"
+      export PATH
+    '';
 
     # Core development packages available system-wide
     environment.systemPackages = with pkgs; [
@@ -33,11 +34,11 @@
       gnumake
       gcc
       gdb
-      
+
       # Git analysis and visualization
       scc # Accurate source code counter
       gource # Software version control visualization
-      
+
       # Rust-specific analysis tools
       cargo-audit # Audit Cargo.lock for security vulnerabilities
       cargo-outdated # Display when dependencies are out of date
@@ -50,20 +51,20 @@
       cargo-depgraph # Generate dependency graphs
       # cargo-geiger # Detect unsafe code usage (temporarily disabled due to build failure)
       cargo-machete # Remove unused dependencies
-      
+
       # General code analysis
       tokei # Count code, fast (better than scc for some cases)
       onefetch # Git repo summary in terminal
       git-cliff # Changelog generator
       cocogitto # Conventional commit tooling
       hyperfine # Command-line benchmarking tool
-      
+
       # Advanced visualization and analysis
       gitui # Terminal UI for git
       lazygit # Another terminal UI for git with graphs
       # git-stats # Local git statistics generator (not in nixpkgs)
       gitstats # Generate git history statistics (generates HTML reports)
-      
+
       # Diagram generation
       graphviz # Graph visualization software
       plantuml # UML diagram generator
@@ -71,19 +72,19 @@
       mermaid-cli # Generate diagrams from Mermaid definitions
       pikchr # Diagram markup language
       structurizr-cli # C4 architecture diagrams
-      
+
       # Time-series and plotting tools
       gnuplot # Plotting tool
       ploticus # Script-driven plotting
-      
+
       # Code structure visualization
       # codevis # Code visualization tool (not in nixpkgs)
       # codecharta # 3D visualization of code metrics (not in nixpkgs)
-      
+
       # Database for metrics storage
       sqlite # For storing historical metrics
       duckdb # Analytics database
-      
+
       # Data analysis
       jq # JSON processor
       miller # CSV/JSON/etc data processing
@@ -226,7 +227,10 @@
           PYTHONDONTWRITEBYTECODE = "1";
           SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS = "0";
           MICRO_TRUECOLOR = "1";
-          LD_LIBRARY_PATH = "$(nix build --print-out-paths --no-link nixpkgs#libGL)/lib";
+          LD_LIBRARY_PATH = lib.makeLibraryPath [
+            pkgs.libGL
+            pkgs.libglvnd
+          ];
         };
 
         # Neovim configuration link

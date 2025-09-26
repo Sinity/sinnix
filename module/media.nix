@@ -87,7 +87,6 @@
   ];
 
   environment.systemPackages = with pkgs; [
-    pulseaudioFull
     alsa-utils
     pavucontrol
     pamixer
@@ -117,7 +116,7 @@
     home = {
       sessionVariables = {
         MEDIA_DOMAIN = "v0.3";
-        MPV_SCREENSHOT_DIR = "$HOME/Pictures/mpv-screenshots";
+        MPV_SCREENSHOT_DIR = "/realm/inbox/mpv-screenshots";
 
         # Wine settings from environment.nix
         WINEDLLOVERRIDES = "winemenubuilder.exe=d"; # prevent wine from creating file associations
