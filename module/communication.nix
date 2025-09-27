@@ -13,15 +13,16 @@
 
   networking = {
     hostName = "${host}";
-    networkmanager.enable = true;
-    networkmanager.insertNameservers = [
-      "1.1.1.1"
-      "8.8.8.8"
-    ];
-    nameservers = [
-      "1.1.1.1#one.one.one.one"
-      "8.8.8.8"
-    ];
+    networkmanager = {
+      enable = true;
+      dns = "systemd-resolved";
+      settings.connection = {
+        "ipv4.ignore-auto-dns" = true;
+        "ipv6.ignore-auto-dns" = true;
+        "ipv4.dns" = "1.1.1.1;8.8.8.8;";
+        "ipv6.dns" = "2606:4700:4700::1111;2001:4860:4860::8888;";
+      };
+    };
   };
 
   services = {
@@ -30,11 +31,17 @@
       enable = true;
       dnssec = "allow-downgrade";
       domains = [ "~." ];
-      fallbackDns = [
-        "1.1.1.1#one.one.one.one"
-        "8.8.8.8"
-      ];
       dnsovertls = "true";
+      fallbackDns = [
+        "1.0.0.1#one.one.one.one"
+        "8.8.4.4#dns.google"
+        "2606:4700:4700::1001#one.one.one.one"
+        "2001:4860:4860::8844#dns.google"
+      ];
+      extraConfig = ''
+        DNS=1.1.1.1#one.one.one.one 8.8.8.8#dns.google 2606:4700:4700::1111#one.one.one.one 2001:4860:4860::8888#dns.google
+        FallbackDNS=1.0.0.1#one.one.one.one 8.8.4.4#dns.google 2606:4700:4700::1001#one.one.one.one 2001:4860:4860::8844#dns.google
+      '';
     };
 
     openssh = {

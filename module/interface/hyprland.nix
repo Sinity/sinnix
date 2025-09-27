@@ -270,6 +270,13 @@ in
             "opacity 0.8 0.8,class:^(pwvucontrol)$"
             "opacity 0.8 0.8,class:^(blueman-manager)$"
 
+            # Scratchpads should stay floating in place
+            "float,class:^(scratchpad-terminal)$"
+            "center,class:^(scratchpad-terminal)$"
+            "float,class:^(notes-scratch)$"
+            "center,class:^(notes-scratch)$"
+            "size 80% 80%,class:^(notes-scratch)$"
+
             # === CLIPBOARD MANAGER ===
             "float,class:(clipse)"
             "center,class:(clipse)"
