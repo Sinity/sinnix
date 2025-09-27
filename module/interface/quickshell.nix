@@ -2,7 +2,7 @@
 # Modern Qt/QML based status bar and widgets
 # Structured for rapid development with modular components
 
-{ pkgs, ... }:
+{ pkgs, inputs, ... }:
 let
   quickshellConfigFile = pkgs.writeText "shell.qml" ''
     import QtQuick
@@ -70,108 +70,109 @@ let
         Component.onCompleted: updateTime()
       }
 
-      // System Monitor Component  
-      component SystemMonitor: Text {
-        id: monitorText
-        
-        property string monitorType: "cpu"
-        property string displayText: monitorType.toUpperCase() + " --"
-        
-        text: displayText
+      // CPU monitor with persistent sampler (no process respawn)
+      component CpuWidget: Text {
+        id: cpuText
         font.family: "SauceCodePro Nerd Font Mono"
         font.pointSize: 14
         font.weight: Font.DemiBold
         color: "#d5c4a1"
-        
-        Timer {
-          interval: 2000
-          running: true
-          repeat: true
-          onTriggered: updateMonitor()
-        }
-        
+        text: "CPU --%"
+
         Process {
-          id: monitorProcess
-          command: getCommand()
-          
-          Component.onCompleted: {
-            finished.connect(function() {
-              if (exitCode === 0) {
-                var value = parseInt(stdout.trim())
-                displayText = monitorType.toUpperCase() + " " + value + "%"
-                
-                // Color coding based on thresholds
-                if (monitorType === "cpu") {
-                  if (value > 90) monitorText.color = "#fb4934"      // Red
-                  else if (value > 70) monitorText.color = "#fabd2f" // Yellow  
-                  else monitorText.color = "#d5c4a1"                 // Normal
-                } else if (monitorType === "memory") {
-                  if (value > 85) monitorText.color = "#fb4934"      // Red
-                  else if (value > 70) monitorText.color = "#fabd2f" // Yellow
-                  else monitorText.color = "#d5c4a1"                 // Normal
-                }
+          id: cpuSampler
+          command: [
+            "bash",
+            "-lc",
+            "prev_total=0; prev_idle=0; while true; do read cpu user nice system idle iowait irq softirq steal guest guest_nice < /proc/stat; total=$((user+nice+system+idle+iowait+irq+softirq+steal)); idle_all=$((idle+iowait)); if [ $prev_total -ne 0 ]; then totald=$((total-prev_total)); idled=$((idle_all-prev_idle)); if [ $totald -gt 0 ]; then usage=$((1000*(totald-idled)/totald)); printf '%s\\n' $usage; fi; fi; prev_total=$total; prev_idle=$idle_all; sleep 2; done"
+          ]
+          running: true
+          stdout: SplitParser {
+            splitMarker: "\n"
+            onRead: function(line) {
+              var raw = parseInt(line)
+              if (!isNaN(raw)) {
+                var value = Math.max(0, Math.min(100, Math.round(raw / 10)))
+                cpuText.text = "CPU " + value + "%"
+                cpuText.color = value > 90 ? "#fb4934" : (value > 70 ? "#fabd2f" : "#d5c4a1")
               }
-            })
+            }
           }
-        }
-        
-        function getCommand() {
-          if (monitorType === "cpu") {
-            return ["sh", "-c", "LC_ALL=C top -bn1 | grep 'Cpu(s)' | awk '{print int(100-$8)}'"]
-          } else if (monitorType === "memory") {
-            return ["sh", "-c", "LC_ALL=C free | grep Mem | awk '{printf \"%.0f\", $3/$2 * 100.0}'"]
-          }
-          return ["echo", "0"]
-        }
-        
-        function updateMonitor() {
-          monitorProcess.running = true
+          onRunningChanged: if (!running) running = true
         }
       }
 
-      // Volume Control Component
-      component VolumeControl: Text {
-        id: volText
-        text: "VOL --"
+      // Memory monitor using /proc/meminfo (avoids spawning external tools)
+      component MemoryWidget: Text {
+        id: memText
         font.family: "SauceCodePro Nerd Font Mono"
         font.pointSize: 14
         font.weight: Font.DemiBold
         color: "#d5c4a1"
-        
-        Timer {
-          interval: 1000
-          running: true
-          repeat: true
-          onTriggered: volumeProcess.running = true
-        }
-        
+        text: "RAM --%"
+
         Process {
-          id: volumeProcess
-          command: ["pamixer", "--get-volume"]
-          
-          Component.onCompleted: {
-            finished.connect(function() {
-              if (exitCode === 0) {
-                var vol = parseInt(stdout.trim())
-                volText.text = "VOL " + vol + "%"
-                volText.color = vol === 0 ? "#665c54" : "#d5c4a1"
+          id: memSampler
+          command: [
+            "bash",
+            "-lc",
+            "while true; do eval $(awk '/MemTotal/ {printf \"total=%d;\", $2} /MemAvailable/ {printf \"avail=%d;\", $2}' /proc/meminfo); used=$((total-avail)); if [ $total -gt 0 ]; then pct=$((1000*used/total)); printf '%s\\n' $pct; fi; sleep 3; done"
+          ]
+          running: true
+          stdout: SplitParser {
+            splitMarker: "\n"
+            onRead: function(line) {
+              var raw = parseInt(line)
+              if (!isNaN(raw)) {
+                var value = Math.max(0, Math.min(100, Math.round(raw / 10)))
+                memText.text = "RAM " + value + "%"
+                memText.color = value > 90 ? "#fb4934" : (value > 75 ? "#fabd2f" : "#d5c4a1")
               }
-            })
+            }
           }
+          onRunningChanged: if (!running) running = true
         }
-        
+      }
+
+      // Volume widget subscribing to PulseAudio/PipeWire sink updates
+      component VolumeWidget: Text {
+        id: volText
+        font.family: "SauceCodePro Nerd Font Mono"
+        font.pointSize: 14
+        font.weight: Font.DemiBold
+        color: "#d5c4a1"
+        text: "VOL --%"
+
+        Process {
+          id: volumeWatcher
+          command: [
+            "bash",
+            "-lc",
+            "print_vol(){ if command -v pamixer >/dev/null 2>&1; then pamixer --get-volume; else wpctl get-volume @DEFAULT_AUDIO_SINK@ | awk '{print int(($2)*100 + 0.5)}'; fi; }\nprint_vol\npactl subscribe | while read -r line; do case $line in *'on sink'*|*'on server'* ) print_vol;; esac; done"
+          ]
+          running: true
+          stdout: SplitParser {
+            splitMarker: "\n"
+            onRead: function(line) {
+              var raw = parseInt(line)
+              if (!isNaN(raw)) {
+                var value = Math.max(0, Math.min(100, raw))
+                volText.text = "VOL " + value + "%"
+                volText.color = value === 0 ? "#665c54" : "#d5c4a1"
+              }
+            }
+          }
+          onRunningChanged: if (!running) running = true
+        }
+
         Process {
           id: toggleProcess
           command: ["pamixer", "-t"]
         }
-        
+
         MouseArea {
           anchors.fill: parent
-          onClicked: {
-            toggleProcess.running = true
-            // Refresh volume display after toggle
-            volumeProcess.running = true
-          }
+          onClicked: toggleProcess.running = true
         }
       }
 
@@ -206,9 +207,9 @@ let
           anchors.rightMargin: 12
           spacing: 16
           
-          SystemMonitor { monitorType: "cpu" }
-          SystemMonitor { monitorType: "memory" }
-          VolumeControl {}
+          CpuWidget {}
+          MemoryWidget {}
+          VolumeWidget {}
         }
       }
     }
@@ -227,7 +228,7 @@ in
         };
         Service = {
           Type = "simple";
-          ExecStart = "/etc/profiles/per-user/sinity/bin/quickshell";
+          ExecStart = "${inputs.quickshell.packages.${pkgs.system}.default}/bin/quickshell";
           Restart = "on-failure";
           RestartSec = 2;
           Environment = [

@@ -64,7 +64,11 @@ in
         ];
         max-jobs = 4;
         cores = 0;
-        allowed-users = [ "${username}" ];
+        allowed-users = [
+          "root"
+          "@wheel"
+          username
+        ];
       };
 
       daemonCPUSchedPolicy = "idle";
@@ -328,10 +332,11 @@ in
     boot.kernel.sysctl."kernel.unprivileged_userns_clone" = 1;
 
     age = {
-      identityPaths = [
-        "/etc/ssh/ssh_host_ed25519_key"
-        "/home/${username}/.ssh/id_ed25519"
-      ];
+      identityPaths =
+        [ "/etc/ssh/ssh_host_ed25519_key" ]
+        ++ lib.optionals (builtins.pathExists "/home/${username}/.ssh/id_ed25519") [
+          "/home/${username}/.ssh/id_ed25519"
+        ];
       secrets = lib.mapAttrs' (filename: _: {
         name = lib.removeSuffix ".age" filename;
         value =

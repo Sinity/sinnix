@@ -10,17 +10,6 @@
   boot.kernelModules = [ "snd-hda-intel" ];
   hardware.firmware = with pkgs; [ sof-firmware ];
 
-  # Override libplacebo to force SPIR-V 1.0 compatibility for Vulkan
-  nixpkgs.overlays = [
-    (_final: prev: {
-      libplacebo = prev.libplacebo.overrideAttrs (oldAttrs: {
-        cmakeFlags = (oldAttrs.cmakeFlags or [ ]) ++ [
-          "-DSPIRV_TARGET_ENV=SPV_ENV_VULKAN_1_0"
-        ];
-      });
-    })
-  ];
-
   services.pipewire = {
     enable = true;
     audio.enable = true;

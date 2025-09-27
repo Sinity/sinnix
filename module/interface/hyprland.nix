@@ -6,6 +6,15 @@
   inputs,
   ...
 }:
+let
+  pyprlandCleanup = pkgs.writeShellScript "pyprland-sock-cleanup" ''
+    set -eu
+    HYPR_RUNTIME="/run/user/$UID/hypr"
+    if [ -d "$HYPR_RUNTIME" ]; then
+      ${pkgs.findutils}/bin/find "$HYPR_RUNTIME" -maxdepth 2 -name ".pyprland.sock" -delete || true
+    fi
+  '';
+in
 {
   config = {
     home-manager.users.sinity = {
@@ -13,9 +22,6 @@
         enable = true;
         xwayland.enable = true;
         systemd.enable = false;
-
-        # Hyprland plugins
-        plugins = [ ];
 
         settings = {
           exec-once = [
@@ -25,7 +31,8 @@
 
           # Monitor configuration for 4K HDR display
           monitor = [
-            "DP-3,3840x2160@119.999001,0x0,1,bitdepth,10,cm,hdr,sdrbrightness,1.4,sdrsaturation,1.0"
+            # Apply preferred mode dynamically; avoids hard-coding connector names while keeping HDR tweaks
+            ",preferred,auto,1,bitdepth,10,cm,hdr,sdrbrightness,1.4,sdrsaturation,1.0"
           ];
 
           input = {
@@ -329,7 +336,7 @@
           KillMode = "mixed";
           TimeoutStopSec = 5;
           # Clean up any stale socket files in the hypr runtime directory
-          ExecStartPre = "${pkgs.bash}/bin/bash -c 'rm -f /run/user/$UID/hypr/*/.pyprland.sock'";
+          ExecStartPre = pyprlandCleanup;
           # Ensure runtime directory exists
           RuntimeDirectory = "pyprland";
           RuntimeDirectoryMode = "0755";

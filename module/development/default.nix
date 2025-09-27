@@ -20,12 +20,6 @@
   config = {
     system.nixos.tags = [ "development-domain-v0.3" ];
 
-    # Add user scripts directory to PATH at shell init time
-    environment.extraInit = ''
-      PATH="$PATH:$HOME/scripts"
-      export PATH
-    '';
-
     # Core development packages available system-wide
     environment.systemPackages = with pkgs; [
       # Essential development tools

@@ -57,9 +57,6 @@
 
       polarity = "dark";
 
-      # Ensure fonts are properly applied system-wide
-      autoEnable = true;
-
     };
 
     programs.hyprland = {

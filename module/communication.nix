@@ -39,8 +39,6 @@
 
     openssh = {
       enable = true;
-      startWhenNeeded = false;
-      ports = [ 22 ];
       settings = {
         PermitRootLogin = "no";
         PasswordAuthentication = false;
@@ -160,7 +158,6 @@
           addKeysToAgent = "yes";
         };
       };
-      package = pkgs.openssh;
     };
   };
 }

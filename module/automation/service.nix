@@ -14,16 +14,8 @@
           umask = 18; # 002
           download-dir = "/outer-realm/inbox";
           incomplete-dir-enabled = false;
-          rpc-port = 9091;
-          rpc-bind-address = "127.0.0.1";
-          rpc-whitelist-enabled = false;
-          rpc-authentication-required = false;
+          rpc-enabled = false;
         };
-      };
-
-      ollama = {
-        enable = false;
-        acceleration = "cuda";
       };
 
       postgresql = {
