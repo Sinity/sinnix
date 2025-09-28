@@ -448,8 +448,13 @@ in
           listener = [
             {
               timeout = 300; # 5 minutes
-              on-timeout = "hyprctl dispatch dpms off"; # Screen blanking only, no system sleep
-              on-resume = "hyprctl dispatch dpms on"; # Instant wake
+              # NOTE 2025-09-27: Upstream Hyprland commit 4e785d12 still crashes when
+              # `dpms off/on` is dispatched immediately after a wake event
+              # (see hyprwm/Hyprland#7510, crash reproduced locally in coredump PID 2407).
+              # Instead of using the DPMS dispatcher, toggle the monitor directly; the
+              # commands below can be reverted to `dpms off/on` once the upstream fix is merged.
+              on-timeout = "hyprctl keyword monitor DP-3,disable";
+              on-resume = "hyprctl keyword monitor DP-3,preferred,auto,1,bitdepth,10";
             }
           ];
         };
