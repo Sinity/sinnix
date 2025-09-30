@@ -1,20 +1,23 @@
 # Services
 # System services and daemons
 
-{ pkgs, ... }:
+{ pkgs, lib, ... }:
 {
   config = {
     services = {
       transmission = {
         enable = true;
-        openFirewall = true;
+        openFirewall = false;
         settings = {
           script-torrent-done-enabled = false;
           ratio-limit-enabled = false;
           umask = 18; # 002
           download-dir = "/outer-realm/inbox";
           incomplete-dir-enabled = false;
-          rpc-enabled = false;
+          rpc-enabled = true;
+          rpc-bind-address = "127.0.0.1";
+          rpc-port = 9091;
+          rpc-authentication-required = false;
         };
       };
 
@@ -23,15 +26,23 @@
         package = pkgs.postgresql_16;
 
         # Install required extensions
-        extensions = with pkgs.postgresql16Packages; [
-          timescaledb
-          pg_jsonschema # From Sinex overlay
-          pgx_ulid
-          pgvector
-        ];
+        extensions =
+          let
+            dbPkgs = pkgs.postgresql16Packages;
+          in
+          with dbPkgs;
+          [
+            timescaledb
+          ]
+          ++ lib.optional (dbPkgs ? pg_jsonschema) dbPkgs.pg_jsonschema
+          ++ [
+            pgx_ulid
+            pgvector
+          ];
 
         # Configure PostgreSQL
         settings = {
+          listen_addresses = "localhost";
           # Required for TimescaleDB
           shared_preload_libraries = "timescaledb";
 
@@ -57,6 +68,16 @@
           log_duration = true;
           log_min_duration_statement = "1000ms";
         };
+
+        authentication = ''
+          # Local unix socket connections rely on peer authentication.
+          local   all             all                                     peer
+          # Explicitly reject accidental TCP exposure; override via
+          # `services.postgresql.authentication` in host overrides when
+          # remote access is required.
+          host    all             all             0.0.0.0/0               reject
+          host    all             all             ::/0                    reject
+        '';
 
         # Create database and user
         ensureDatabases = [ "sinex" ];

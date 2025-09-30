@@ -35,16 +35,19 @@
     claude-squad.url = "github:sinity/claude-squad/add-nix-support";
     claude-squad.inputs.nixpkgs.follows = "nixpkgs";
 
-    claude-code-logger.url = "github:sinity/claude-code-logger/add-nix-support";
-    claude-code-logger.inputs.nixpkgs.follows = "nixpkgs";
-
     claude-code-usage-monitor-src = {
       url = "github:Maciek-roboblog/Claude-Code-Usage-Monitor";
       flake = false;
     };
 
-    sinex.url = "git+ssh://git@github.com/Sinity/sinex?rev=6f034719f5aa423f20ca6c6f6e4231da85771b0d";
-    sinex.inputs.nixpkgs.follows = "nixpkgs";
+    # Optional Sinex overlay; defaults to a local stub so evaluation works without
+    # access to the private repository. Override with
+    # `nix flake lock --update-input sinex git+ssh://git@github.com/Sinity/sinex`
+    # on machines that have the deploy key.
+    sinex = {
+      url = "path:./vendor/sinex";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
 
     # System-wide theming
     stylix.url = "github:danth/stylix";

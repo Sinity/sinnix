@@ -13,14 +13,18 @@ command -v "$PICKER" >/dev/null 2>&1 || die "picker '$PICKER' not found"
 pick_one() {
   local prompt="$1"; shift
   local input="$1"
-  printf '%s\n' "$input" | "$PICKER" --prompt "$prompt: " --horizontal=false --fuzzy-match=true |
+  local selection
+  selection=$(printf '%s\n' "$input" | "$PICKER" --prompt-text "$prompt: " --horizontal false --require-match false --fuzzy-match true || true)
+  printf '%s' "$selection" |
     sed 's/\r$//' |
     sed -e 's/^[[:space:]]\+//' -e 's/[[:space:]]\+$//'
 }
 
 prompt_text() {
   local prompt="$1"
-  "$PICKER" --prompt "$prompt: " --horizontal=false <<< "" |
+  local result
+  result=$(printf ' \n' | "$PICKER" --prompt-text "$prompt: " --horizontal false --require-match false || true)
+  printf '%s' "$result" |
     sed 's/\r$//' |
     sed -e 's/^[[:space:]]\+//' -e 's/[[:space:]]\+$//'
 }

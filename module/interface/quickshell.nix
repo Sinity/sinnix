@@ -2,8 +2,15 @@
 # Modern Qt/QML based status bar and widgets
 # Structured for rapid development with modular components
 
-{ pkgs, inputs, ... }:
+{
+  pkgs,
+  inputs,
+  lib,
+  config,
+  ...
+}:
 let
+  cfg = config.sinnix.interface.quickshell;
   quickshellConfigFile = pkgs.writeText "shell.qml" ''
     import QtQuick
     import Quickshell
@@ -98,7 +105,14 @@ let
               }
             }
           }
-          onRunningChanged: if (!running) running = true
+          onRunningChanged: if (!running) restartTimer.restart()
+          Timer {
+            id: restartTimer
+            interval: 2000
+            repeat: false
+            running: false
+            onTriggered: cpuSampler.running = true
+          }
         }
       }
 
@@ -130,7 +144,14 @@ let
               }
             }
           }
-          onRunningChanged: if (!running) running = true
+          onRunningChanged: if (!running) restartTimer.restart()
+          Timer {
+            id: restartTimer
+            interval: 2000
+            repeat: false
+            running: false
+            onTriggered: memSampler.running = true
+          }
         }
       }
 
@@ -162,7 +183,14 @@ let
               }
             }
           }
-          onRunningChanged: if (!running) running = true
+          onRunningChanged: if (!running) restartTimer.restart()
+          Timer {
+            id: restartTimer
+            interval: 2000
+            repeat: false
+            running: false
+            onTriggered: volumeWatcher.running = true
+          }
         }
 
         Process {
@@ -216,7 +244,13 @@ let
   '';
 in
 {
-  config = {
+  options.sinnix.interface.quickshell.enable = lib.mkOption {
+    type = lib.types.bool;
+    default = false;
+    description = "Enable the Quickshell status bar.";
+  };
+
+  config = lib.mkIf cfg.enable {
     home-manager.users.sinity = {
       # Quickshell systemd service
       systemd.user.services.quickshell = {

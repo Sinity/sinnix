@@ -8,6 +8,7 @@ KB_ROOT=${KB_ROOT:-/realm/knowledgebase}
 LOG_DIR="$KB_ROOT/50_logs"
 LOG_FILE="$LOG_DIR/raw-log.md"
 PICKER=${PICKER:-tofi}
+RECENT_COUNT=${RECENT_COUNT:-5}
 
 die() { echo "rawlog: $*" >&2; exit 1; }
 
@@ -17,12 +18,54 @@ command -v "$PICKER" >/dev/null 2>&1 || die "picker '$PICKER' not found"
 
 prompt_text() {
   local prompt="$1"
-  "$PICKER" --prompt "$prompt: " --horizontal=false <<< "" | sed 's/\r$//'
+  local input_data="$2"
+  local selection
+  selection=$(printf '%s\n' "${input_data:- }" |
+    "$PICKER" \
+      --prompt-text "$prompt" \
+      --horizontal false \
+      --require-match false \
+      --print-query || true)
+  printf '%s' "$selection" | sed 's/\r$//'
+}
+
+recent_entries() {
+  if [ ! -f "$LOG_FILE" ]; then
+    return
+  fi
+  # Extract the Markdown bullet entries and turn them into compact lines with timestamp context
+  tail -n 200 "$LOG_FILE" |
+    sed -En 's/^- \*\*([^*]+)\*\* (.*)$/[\1] \2/p' |
+    tail -n "$RECENT_COUNT"
+}
+
+show_context() {
+  local history
+  history=$(recent_entries)
+  [ -z "$history" ] && return
+
+  if command -v hyprctl >/dev/null 2>&1; then
+    hyprctl notify 0 6000 "Recent raw log entries:\n$history" >/dev/null 2>&1 || true
+  elif command -v notify-send >/dev/null 2>&1; then
+    notify-send -t 6000 "Raw log — recent entries" "$history"
+  fi
+}
+
+pick_message() {
+  local history
+  history=$(recent_entries)
+  local prompt_suffix="Type a new entry"
+  if [ -n "$history" ]; then
+    last_line=$(printf '%s\n' "$history" | tail -n 1)
+    prompt_suffix="Last: ${last_line}"
+  fi
+  show_context
+  prompt_text "Raw log — ${prompt_suffix}:" ""
 }
 
 msg="${*:-}"
 if [ -z "$msg" ]; then
-  msg=$(prompt_text "Raw log")
+  msg=$(pick_message)
 fi
 
 # Trim message
@@ -52,7 +95,12 @@ fi
 echo "$line" >>"$LOG_FILE"
 
 if command -v notify-send >/dev/null 2>&1; then
-  notify-send -t 1200 "Raw log saved" "$msg"
+  recent_preview=$(recent_entries | tail -n "$RECENT_COUNT")
+  notify_body="$msg"
+  if [ -n "$recent_preview" ]; then
+    notify_body="$msg\n\nRecent:\n$recent_preview"
+  fi
+  notify-send -t 1200 "Raw log saved" "$notify_body"
 fi
 
 echo "$line"

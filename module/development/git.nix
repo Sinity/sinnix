@@ -26,7 +26,7 @@ _: {
           cl = "clone";
           c = "commit";
           cm = "commit -m";
-          tag = "tag -ma";
+          tag = "tag -a";
           ch = "checkout";
           chb = "checkout -b";
           log = "log --oneline --decorate --graph";

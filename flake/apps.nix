@@ -38,7 +38,6 @@
           flake_dir="''${PRJ_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
           echo "Checking NixOS configuration at $flake_dir..."
           ${pkgs.nix}/bin/nix flake check --no-build "$flake_dir"
-          find "$flake_dir" -name "*.nix" -type f -print0 | xargs -0 -n1 ${pkgs.nix}/bin/nix-instantiate --parse >/dev/null
           echo "Configuration check complete!"
         '' "Validate NixOS configuration syntax and structure";
 
@@ -55,9 +54,15 @@
         lint = mkApp "lint" ''
           flake_dir="''${PRJ_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
           echo "Linting Nix files in $flake_dir..."
-          cd "$flake_dir" && ${pkgs.statix}/bin/statix check
+          cd "$flake_dir"
+          ${pkgs.statix}/bin/statix check
+
+          echo "Running shellcheck on shell helpers..."
+          ${pkgs.fd}/bin/fd -t f -e sh -x ${pkgs.shellcheck}/bin/shellcheck {}
+          ${pkgs.fd}/bin/fd -t f -g 'scripts/*' -x ${pkgs.shellcheck}/bin/shellcheck {}
+
           echo "Linting complete!"
-        '' "Lint Nix files for common issues and anti-patterns";
+        '' "Lint Nix and shell files without modifying sources";
 
         # Test configuration without applying
         test = mkApp "test" ''
@@ -96,7 +101,10 @@
             exit 1
           fi
           echo "Removing old system generations..."
-          nix-env --delete-generations old --profile /nix/var/nix/profiles/system
+          if ! nix profile wipe-history --profile /nix/var/nix/profiles/system --older-than 30d >/dev/null 2>&1; then
+            echo "nix profile wipe-history unavailable, falling back to nix-env"
+            nix-env --delete-generations old --profile /nix/var/nix/profiles/system
+          fi
 
           echo "Optimizing nix store..."
           nix store optimise

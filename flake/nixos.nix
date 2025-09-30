@@ -40,6 +40,7 @@
 
         # Provide compiled packages directly
         intercept-bounce = inputs.intercept-bounce.packages.x86_64-linux.default;
+        flakeRoot = ../.;
       };
     };
   };

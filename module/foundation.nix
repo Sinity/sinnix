@@ -9,29 +9,65 @@
   host,
   config,
   lib,
+  flakeRoot,
   ...
 }:
 let
-  # Find all .age files in the secret directory
-  secretFiles = lib.filterAttrs (name: _: lib.hasSuffix ".age" name) (builtins.readDir ../secret);
+  secretDir = ../secret;
+  journaldBaseDir = "/realm/data/syslog";
+  bootMetricsDir = "${journaldBaseDir}/boot-metrics";
+  captureBootMetrics = pkgs.writeShellApplication {
+    name = "capture-boot-metrics";
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.findutils
+      pkgs.util-linux
+      pkgs.systemd
+    ];
+    text = ''
+      set -euo pipefail
+
+      BOOT_ID="$(cat /proc/sys/kernel/random/boot_id)"
+      OUT_DIR="${bootMetricsDir}/''${BOOT_ID}"
+      mkdir -p "''${OUT_DIR}"
+
+      systemd-analyze time > "''${OUT_DIR}/time.txt"
+      systemd-analyze blame > "''${OUT_DIR}/blame.txt"
+      systemd-analyze critical-chain > "''${OUT_DIR}/critical-chain.txt"
+      systemd-analyze plot > "''${OUT_DIR}/boot.svg"
+
+      journalctl -b -p 0..3 > "''${OUT_DIR}/journal-errors.log" || true
+      dmesg > "''${OUT_DIR}/dmesg.log"
+
+    '';
+  };
+
+  secretFiles =
+    if builtins.pathExists secretDir then
+      lib.filterAttrs (name: _: lib.hasSuffix ".age" name) (builtins.readDir secretDir)
+    else
+      { };
+
   secretNames = lib.mapAttrsToList (name: _: lib.removeSuffix ".age" name) secretFiles;
+
   secretsExcludedFromEnv = [
     "sinity-password"
     "root-password"
     "davfs2-secrets"
   ];
-  exportableSecrets = lib.filter (name: !(lib.elem name secretsExcludedFromEnv)) secretNames;
+
   mkSecretExport =
     secretName:
     let
       envName = lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] secretName);
     in
-    ''
+    lib.optionalString (!lib.elem secretName secretsExcludedFromEnv) ''
       if [[ -r "${config.age.secrets.${secretName}.path}" ]]; then
         export ${envName}="$(<${config.age.secrets.${secretName}.path})"
       fi
     '';
-  exportScript = lib.concatStringsSep "\n" (map mkSecretExport exportableSecrets);
+
+  exportScript = lib.concatStringsSep "\n" (lib.filter (s: s != "") (map mkSecretExport secretNames));
 in
 {
   imports = [ inputs.home-manager.nixosModules.home-manager ];
@@ -165,7 +201,6 @@ in
         graphicsmagick
       ];
       variables = {
-        FLAKE = "/realm/project/sinnix";
         REALM_ROOT = "/realm";
       };
     };
@@ -237,8 +272,7 @@ in
           stateVersion = "24.05";
 
           sessionVariables = {
-            # Core system paths from environment.nix
-            FLAKE = "/realm/project/sinnix";
+            FLAKE = "${flakeRoot}";
 
             # XDG directories
             XDG_CONFIG_HOME = "\${HOME}/.config";
@@ -247,31 +281,13 @@ in
             XDG_STATE_HOME = "\${HOME}/.local/state";
           };
 
-          # Removed ~/scripts from PATH - scripts now embedded in automation.nix
-          file = {
-            ".config/secrets/export-env.zsh" = {
-              text = ''
-                # shellcheck disable=SC2148
-
-                ${exportScript}
-              '';
-            };
-          };
         };
 
         programs.zsh = {
-          initContent = lib.mkAfter ''
+          initContent = lib.mkBefore ''
             load_secrets() {
-              local export_file="$HOME/.config/secrets/export-env.zsh"
-              if [ ! -r "$export_file" ]; then
-                echo "load_secrets: export file not found" >&2
-                return 1
-              fi
-              # shellcheck disable=SC1090
-              source "$export_file"
+              ${lib.optionalString (exportScript != "") exportScript}
             }
-
-            # Load secrets as early as possible in the interactive shell lifecycle
             load_secrets || true
           '';
           shellAliases = {
@@ -293,6 +309,7 @@ in
             "wheel"
             "users"
             "video"
+            "wireshark"
           ];
           shell = pkgs.zsh;
           hashedPasswordFile = "/run/agenix/sinity-password";
@@ -310,17 +327,17 @@ in
       rtkit.enable = true;
       sudo.wheelNeedsPassword = false;
       pam.services.hyprlock = { };
-      wrappers.bubblewrap = {
-        source = "${pkgs.bubblewrap}/bin/bwrap";
-        owner = "root";
-        group = "root";
-        setuid = true;
-      };
     };
 
     networking.firewall = {
       enable = true;
       allowedTCPPorts = [ 22 ];
+      allowedUDPPortRanges = [
+        {
+          from = 60000;
+          to = 61000;
+        }
+      ];
     };
     services.gnome.gnome-keyring.enable = true;
 
@@ -332,11 +349,12 @@ in
     boot.kernel.sysctl."kernel.unprivileged_userns_clone" = 1;
 
     age = {
-      identityPaths =
-        [ "/etc/ssh/ssh_host_ed25519_key" ]
-        ++ lib.optionals (builtins.pathExists "/home/${username}/.ssh/id_ed25519") [
-          "/home/${username}/.ssh/id_ed25519"
-        ];
+      identityPaths = [
+        "/etc/ssh/ssh_host_ed25519_key"
+      ]
+      ++ lib.optionals (builtins.pathExists "/home/${username}/.ssh/id_ed25519") [
+        "/home/${username}/.ssh/id_ed25519"
+      ];
       secrets = lib.mapAttrs' (filename: _: {
         name = lib.removeSuffix ".age" filename;
         value =
@@ -372,39 +390,61 @@ in
     };
 
     programs.zsh.loginShellInit = ''
-      if [ -z "$DISPLAY" ] && [ "$XDG_VTNR" = 1 ]; then
-        exec uwsm start hyprland-uwsm.desktop
+      if [ "$(id -un)" = "${username}" ] && [ -z "$DISPLAY" ]; then
+        current_tty=$(tty 2>/dev/null || true)
+        if [ "$current_tty" = "/dev/tty1" ]; then
+          exec uwsm start hyprland-uwsm.desktop
+        fi
       fi
     '';
 
     # === FOUNDATION SYSTEMD CONFIGURATION ===
-    # systemd.settings.Manager = "DefaultTimeoutStopSec=5s";
-    systemd.sleep = {
-      extraConfig = ''
+    systemd = {
+      # settings.Manager = "DefaultTimeoutStopSec=5s";
+      sleep.extraConfig = ''
         AllowSuspend=yes
         AllowHibernation=yes
         AllowSuspendThenHibernate=yes
         AllowHybridSleep=yes
-        HibernateMode=reboot
         HibernateState=disk
       '';
-    };
 
-    systemd.tmpfiles.rules = [
-      "d /realm/inbox 0755 ${username} users -"
-      "d /realm/inbox/screenshot 0755 ${username} users -"
-      "d /realm/inbox/mpv-screenshots 0755 ${username} users -"
-    ];
+      tmpfiles.rules = [
+        "d ${journaldBaseDir} 0750 systemd-journal systemd-journal -"
+        "d ${journaldBaseDir}/journal 2750 systemd-journal systemd-journal -"
+        "d ${bootMetricsDir} 0750 root root -"
+        "d /realm/inbox 0755 ${username} users -"
+        "d /realm/inbox/screenshot 0755 ${username} users -"
+        "d /realm/inbox/mpv-screenshots 0755 ${username} users -"
+      ];
+
+      services.capture-boot-metrics = {
+        description = "Capture boot timing metrics";
+        after = [
+          "multi-user.target"
+          "systemd-journald.service"
+        ];
+        wantedBy = [ "multi-user.target" ];
+        serviceConfig = {
+          Type = "oneshot";
+          ExecStart = "${captureBootMetrics}/bin/capture-boot-metrics";
+        };
+      };
+    };
 
     # Journald configuration (from services.nix)
     services.journald = {
       extraConfig = ''
-        SystemMaxUse=5G
-        SystemKeepFree=2G
-        SystemMaxFileSize=50M
-        SystemMaxFiles=100000
+        Storage=persistent
+        SystemMaxUse=250G
+        SystemKeepFree=10G
+        SystemMaxFileSize=200M
+        SystemMaxFiles=0
         RuntimeMaxUse=1G
+        Compress=yes
+        SplitMode=uid
       '';
     };
+
   };
 }

@@ -14,10 +14,12 @@
             | ${pkgs.interception-tools-plugins.caps2esc}/bin/caps2esc -m 1 \
             | ${pkgs.interception-tools}/bin/uinput -d $DEVNODE"
         DEVICE:
-          LINK: "/dev/input/by-id/usb-Logitech_USB_Receiver-if01-event-kbd"
+          LINK: "/dev/input/by-id/.*Logitech.*event-kbd"
+          NAME: ".*Logitech.*"
     '';
   };
 
-  powerManagement.cpuFreqGovernor = "performance";
+  # Let the kernel's schedutil governor balance responsiveness with power draw.
+  powerManagement.cpuFreqGovernor = "schedutil";
   hardware.enableRedistributableFirmware = true;
 }

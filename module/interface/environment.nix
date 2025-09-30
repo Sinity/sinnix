@@ -25,6 +25,7 @@ _: {
           ELECTRON_OZONE_PLATFORM_HINT = "wayland";
           OZONE_PLATFORM = "wayland";
           OZONE_PLATFORM_HINT = "wayland";
+          KITTY_LISTEN_ON = "unix:\${XDG_RUNTIME_DIR}/kitty-\${USER}";
 
           # NVIDIA specific
           LIBVA_DRIVER_NAME = "nvidia";

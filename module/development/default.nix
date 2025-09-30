@@ -7,6 +7,7 @@
   lib,
   pkgs,
   inputs,
+  flakeRoot,
   ...
 }:
 {
@@ -138,6 +139,24 @@
       libva-utils
       glxinfo
       drm_info
+
+      # System diagnostics and benchmarking
+      inxi
+      hwinfo
+      dmidecode
+      lm_sensors
+      nvme-cli
+      smartmontools
+      powertop
+      stressapptest
+      sysbench
+      phoronix-test-suite
+      glmark2
+      vkmark
+      fio
+      perf
+      sysstat
+      linuxPackages.cpupower
     ];
 
     # nix-ld configuration for running unpatched binaries
@@ -203,10 +222,6 @@
     };
 
     home-manager.users.sinity = {
-      imports = [
-        inputs.claude-code-logger.homeManagerModules.default
-      ];
-
       # Consolidate all home configuration
       home = {
         # Development environment variables
@@ -233,21 +248,19 @@
             ''
               mkdir -p $HOME/.config
               echo "Creating symlink for Neovim configuration..."
-              ln -sfn ''${FLAKE:-/realm/project/sinnix}/dots/nvim $HOME/.config/nvim
+              ln -sfn ''${FLAKE:-${flakeRoot}}/dots/nvim $HOME/.config/nvim
+            '';
+        activation.ensureClaudeDir =
+          config.home-manager.users.sinity.lib.dag.entryAfter [ "linkNeovimConfig" ]
+            ''
+              if [ -L "$HOME/.claude" ] && [ "$(readlink "$HOME/.claude")" = ".config/claude" ]; then
+                rm "$HOME/.claude"
+              fi
+              mkdir -p "$HOME/.claude"
             '';
       };
 
       programs = {
-        claude-code-logger = {
-          enable = false;
-          logDir = "/realm/data/claude-code-api-log";
-          enableSessionFolders = true;
-          enableConversationGrouping = true;
-          maxInteractionsPerFile = 100;
-          maxLogSizeMB = 10;
-          createAlias = true;
-        };
-
         # btop - system monitor configuration
         btop = {
           enable = true;

@@ -2,33 +2,44 @@
   inputs,
   ...
 }:
+let
+  sinexOverlays =
+    if builtins.getEnv "SINEX_DISABLE" == "1" then
+      [ ]
+    else if inputs ? sinex && inputs.sinex ? overlays && inputs.sinex.overlays ? default then
+      [ inputs.sinex.overlays.default ]
+    else
+      [ ];
+in
 {
-  nixpkgs.overlays = [
+  nixpkgs.overlays = sinexOverlays ++ [
     # Community overlay providing large set of VSCode extensions
     inputs.nix-vscode-extensions.overlays.default
 
-    inputs.sinex.overlays.default
-
     (final: prev: {
       # Override Codex CLI to a newer upstream tag
-      codex = prev.codex.overrideAttrs (_old: let
-        version = "0.30.0";
-        newSrc = final.fetchFromGitHub {
-          owner = "openai";
-          repo = "codex";
-          rev = "refs/tags/rust-v" + version;
-          sha256 = "sha256-9dWVf5Q7sDfAbRIGvUqqwEouJRnS//ujlFvqZ/a8zBk=";
-        };
-        newCargo = final.rustPlatform.fetchCargoVendor {
+      codex = prev.codex.overrideAttrs (
+        _old:
+        let
+          version = "0.42.0";
+          newSrc = final.fetchFromGitHub {
+            owner = "openai";
+            repo = "codex";
+            rev = "refs/tags/rust-v" + version;
+            sha256 = "sha256-YyI4quZ1vcwzDx38EzqycnUQDBOg9SfEemR4zdKYYIw=";
+          };
+          newCargo = final.rustPlatform.fetchCargoVendor {
+            src = newSrc;
+            sourceRoot = "source/codex-rs";
+            hash = "sha256-No6/WmaCI+w1cVD+PsLJ1jK0zZDYziGlm9DD9E3hA58=";
+          };
+        in
+        {
+          inherit version;
           src = newSrc;
-          sourceRoot = "source/codex-rs";
-          hash = "sha256-qJn2oN/9LVLhHnaNp+x9cUEMODrGrgV3SiR0ykIx7B4=";
-        };
-      in {
-        inherit version;
-        src = newSrc;
-        cargoDeps = newCargo;
-      });
+          cargoDeps = newCargo;
+        }
+      );
       # Override spacy to use a working version
       python3Packages = prev.python3Packages // {
         spacy = prev.python3Packages.spacy.overrideAttrs (old: rec {

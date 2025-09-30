@@ -12,7 +12,7 @@ _: {
       device = "/dev/disk/by-uuid/9fd1aa14-f137-4a90-8c00-e25770496374";
       fsType = "ext4";
       options = [
-        "strictatime"
+        "relatime"
         "lazytime"
       ];
     };
@@ -30,10 +30,17 @@ _: {
       device = "/dev/disk/by-uuid/bd19092f-a195-47ab-9c0d-c923d1e5bfea";
       fsType = "btrfs";
       options = [
-        "strictatime"
+        "relatime"
         "lazytime"
         "nofail"
       ];
+    };
+
+    "/var/log/journal" = {
+      device = "/realm/data/syslog/journal";
+      fsType = "none";
+      options = [ "bind" ];
+      depends = [ "/realm" ];
     };
 
     "/outer-realm" = {

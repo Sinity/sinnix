@@ -1,1 +1,17 @@
-/nix/store/48vz0y27mmin49qpa700y7h0ybsq4qbp-pre-commit-config.json
+repos:
+  - repo: local
+    hooks:
+      - id: deadnix
+        name: deadnix
+        entry: deadnix --fail
+        language: system
+        stages: [pre-commit]
+        files: \\\.nix$
+      - id: shellcheck
+        name: shellcheck
+        entry: nix run --quiet nixpkgs#shellcheck --
+        language: system
+        types: [shell]
+        pass_filenames: true
+        stages: [pre-commit]
+default_stages: [pre-commit]

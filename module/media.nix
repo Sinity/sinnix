@@ -44,8 +44,6 @@
     LimitRTPRIO = 95;
     LimitMEMLOCK = "infinity";
     Nice = -11;
-    CPUSchedulingPolicy = "fifo";
-    CPUSchedulingPriority = 90;
   };
 
   security.pam.loginLimits = [
@@ -89,6 +87,11 @@
       "bluetooth"
     ];
   };
+
+  systemd.tmpfiles.rules = [
+    "d /realm/hydrus 0750 sinity users -"
+    "d /realm/hydrus/db 0750 sinity users -"
+  ];
 
   # This is for generic audio quantum forcing
   environment.etc."wireplumber/60-force-quantum.lua".text = ''

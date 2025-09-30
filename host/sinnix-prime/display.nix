@@ -1,6 +1,10 @@
 # Host-specific display configuration for sinnix-prime
 # Hardware-specific GPU, gaming, and driver configuration
-{ pkgs, ... }:
+{
+  pkgs,
+  config,
+  ...
+}:
 {
   # Gaming and GPU-accelerated applications
   programs = {
@@ -19,7 +23,7 @@
   # NVIDIA hardware configuration
   hardware = {
     nvidia = {
-      #package = pkgs.nvidiaPackages.stable;
+      package = config.boot.kernelPackages.nvidiaPackages.production;
       modesetting.enable = true;
       powerManagement.enable = true;
       open = true;

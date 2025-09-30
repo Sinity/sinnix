@@ -4,6 +4,7 @@
 {
   pkgs,
   inputs,
+  lib,
   ...
 }:
 {
@@ -73,23 +74,23 @@
       enable = true;
       wlr.enable = true;
       xdgOpenUsePortal = true;
-      extraPortals = with pkgs; [
-        xdg-desktop-portal
-        xdg-desktop-portal-gtk
-      ];
+      extraPortals = lib.mkAfter [ pkgs.xdg-desktop-portal-gtk ];
       config = {
         common = {
           default = [
-            "gtk"
             "hyprland"
+            "gtk"
           ];
           "org.freedesktop.portal.OpenURI" = [
-            "gtk"
             "hyprland"
+            "gtk"
           ];
         };
       };
     };
+
+    services.ratbagd.enable = true;
+    services.udev.packages = [ pkgs.solaar ];
 
     environment.systemPackages = with pkgs; [
       wlr-randr # Wayland equivalent to xrandr

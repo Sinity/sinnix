@@ -4,6 +4,8 @@
 {
   pkgs,
   inputs,
+  lib,
+  config,
   ...
 }:
 let
@@ -34,6 +36,10 @@ in
             # Apply preferred mode dynamically; avoids hard-coding connector names while keeping HDR tweaks
             ",preferred,auto,1,bitdepth,10,cm,hdr,sdrbrightness,1.4,sdrsaturation,1.0"
           ];
+
+          xwayland = {
+            force_zero_scaling = true;
+          };
 
           input = {
             kb_layout = "pl";
@@ -134,8 +140,8 @@ in
             # Master layout control (defined in extraConfig for more options)
 
             # Floating
-            "SUPER, Space, togglefloating"
-            "SUPER, Space, centerwindow"
+            # Toggle floating and recentre in one go so the old double binding stops clobbering itself.
+            "SUPER, Space, exec, hyprctl dispatch togglefloating && hyprctl dispatch centerwindow"
 
             # === WORKSPACES ===
             "SUPER, 1, workspace, 1"
@@ -178,7 +184,6 @@ in
             "SUPER, C, exec, ${pkgs.bash}/bin/bash -lc 'command -v code >/dev/null && code --reuse-window || codium --reuse-window'"
             # Chrome Beta (and Unstable as alternate)
             "SUPER, G, exec, google-chrome-beta"
-            "SUPER SHIFT, G, exec, google-chrome-unstable"
 
             # Knowledgebase quick capture (zk)
             "SUPER SHIFT, N, exec, ~/.local/bin/kb-capture"
@@ -448,29 +453,29 @@ in
           listener = [
             {
               timeout = 300; # 5 minutes
-              # NOTE 2025-09-27: Upstream Hyprland commit 4e785d12 still crashes when
-              # `dpms off/on` is dispatched immediately after a wake event
-              # (see hyprwm/Hyprland#7510, crash reproduced locally in coredump PID 2407).
-              # Instead of using the DPMS dispatcher, toggle the monitor directly; the
-              # commands below can be reverted to `dpms off/on` once the upstream fix is merged.
-              on-timeout = "hyprctl keyword monitor DP-3,disable";
-              on-resume = "hyprctl keyword monitor DP-3,preferred,auto,1,bitdepth,10";
+              on-timeout = "hyprctl dispatch dpms off";
+              on-resume = "hyprctl dispatch dpms on";
             }
           ];
         };
       };
 
-      home.packages = with pkgs; [
-        # Pyprland for advanced scratchpad management
-        pyprland
-        # Screenshot and screen recording utilities
-        grim # Screenshot utility
-        slurp # Region selection tool
-        grimblast # Screenshot tool using grim and slurp
-        wl-screenrec # Screen recording
-        # Modern Qt/QML based status bar
-        inputs.quickshell.packages.${pkgs.system}.default
-      ];
+      home.packages =
+        (with pkgs; [
+          # Pyprland for advanced scratchpad management
+          pyprland
+          brightnessctl # Brightness keybind target
+          hyprlock # Ensure the locker command exists for hypridle bindings
+          # Screenshot and screen recording utilities
+          grim # Screenshot utility
+          slurp # Region selection tool
+          grimblast # Screenshot tool using grim and slurp
+          wl-screenrec # Screen recording
+        ])
+        ++ lib.optionals config.sinnix.interface.quickshell.enable [
+          # Modern Qt/QML based status bar
+          inputs.quickshell.packages.${pkgs.system}.default
+        ];
     };
   };
 }

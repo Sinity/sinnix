@@ -1,5 +1,6 @@
 # Host-specific boot configuration for sinnix-prime
-_: {
+{ pkgs, ... }:
+{
   boot = {
     loader = {
       systemd-boot = {
@@ -9,8 +10,10 @@ _: {
       efi.canTouchEfiVariables = true;
     };
 
-    # kernelPackages = pkgs.linuxPackages_latest;
-    # kernelPackages = pkgs.linuxPackages_6_6;
+    # Switch to the bleeding-edge kernel set so we pick up the
+    # 6.13 tree, which includes the upstream fix for the NVMe/ext4
+    # writeback soft-lockups we've been hitting.
+    kernelPackages = pkgs.linuxPackages_testing;
 
     initrd.availableKernelModules = [
       "xhci_pci"
@@ -30,26 +33,17 @@ _: {
       # "snd_sof"
       # "snd_soc_avs"
     ];
-    extraModprobeConfig = ''
-      # Intel HDA audio troubleshooting attempts (none worked for binding issue):
-      # - dsp_driver=1: Forces legacy HDA mode (non-SOF)
-      # - model=generic/auto: Different codec detection methods
-      # - position_fix=3: Workaround for some Intel chips
-      # - probe_mask=1: Forces probing first codec only
-      # - dmic_detect=0: Disables digital microphone detection
-      # - enable=1,0: Enables first device, disables second (HDMI)
-      # Error persists: "couldn't bind with audio component"
-      options snd-intel-dspcfg dsp_driver=1
-      options snd-hda-intel model=auto dmic_detect=0 enable=1,0
-    '';
     kernelModules = [ "kvm-intel" ];
-    kernel.sysctl."vm.swappiness" = 10;
+    kernel.sysctl = {
+      "vm.swappiness" = 10;
+      # Flush dirty pages earlier to avoid the huge writeback spikes
+      # that were triggering the kernel spin-lock regression on 6.12.x.
+      "vm.dirty_ratio" = 10;
+      "vm.dirty_background_ratio" = 5;
+    };
     kernelParams = [
       "quiet"
       "rw"
-      "intel_pstate=disable"
-      "cpufreq.default_governor=performance"
-
       "vconsole.keymap=pl"
       "vconsole.font=Lat2-Terminus16"
       "vconsole.font_map=8859-2"
@@ -59,9 +53,6 @@ _: {
       "rd.udev.log-priority=3"
       "acpi_enforce_resources=lax"
       "vga=current"
-
-      # Force Intel HDA to use legacy driver for aux/line-in support
-      "snd-intel-dspcfg.dsp_driver=1"
     ];
   };
 }

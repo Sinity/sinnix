@@ -38,7 +38,7 @@
   "rust-analyzer.procMacro.enable": true,
 
   // ——— Nix ———
-  "nix.formatterPath": "nixpkgs-fmt",
+  "nix.formatterPath": "nixfmt",
 
   // ——— Terminal ———
   "terminal.integrated.inheritEnv": true,

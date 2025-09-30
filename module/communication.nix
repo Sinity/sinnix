@@ -8,6 +8,43 @@
   inputs,
   ...
 }:
+let
+  chromeBetaPkg = inputs.browser-previews.packages.${pkgs.system}.google-chrome-beta;
+  chromeBetaLauncher = pkgs.writeShellApplication {
+    name = "google-chrome-beta";
+    text = ''
+      set -euo pipefail
+
+      if [[ "''${CHROME_NO_HDR_WRAPPER:-}" == "1" ]]; then
+        exec "${chromeBetaPkg}/bin/google-chrome-beta" "$@"
+      fi
+
+      extra_flags=(
+        --force-color-profile=srgb
+        --disable-features=HighDynamicRange
+      )
+
+      if [[ "''${CHROME_WAYLAND:-}" != "1" ]]; then
+        extra_flags+=(
+          --ozone-platform=x11
+          --ozone-platform-hint=x11
+        )
+      fi
+
+      exec "${chromeBetaPkg}/bin/google-chrome-beta" "''${extra_flags[@]}" "$@"
+    '';
+  };
+  chromeBetaWrapped = pkgs.runCommand "google-chrome-beta-wrapped" { } ''
+    mkdir -p $out/bin
+    ln -s ${chromeBetaLauncher}/bin/google-chrome-beta $out/bin/google-chrome-beta
+
+    cp -r ${chromeBetaPkg}/share $out/share
+    chmod -R u+w $out/share
+    substituteInPlace $out/share/applications/google-chrome-beta.desktop \
+      --replace "${chromeBetaPkg}/bin/google-chrome-beta" "$out/bin/google-chrome-beta"
+    chmod -R u-w $out/share
+  '';
+in
 {
   system.nixos.tags = [ "communication-domain-v0.3" ];
 
@@ -16,12 +53,6 @@
     networkmanager = {
       enable = true;
       dns = "systemd-resolved";
-      settings.connection = {
-        "ipv4.ignore-auto-dns" = true;
-        "ipv6.ignore-auto-dns" = true;
-        "ipv4.dns" = "1.1.1.1;8.8.8.8;";
-        "ipv6.dns" = "2606:4700:4700::1111;2001:4860:4860::8888;";
-      };
     };
   };
 
@@ -54,19 +85,6 @@
       };
     };
 
-    nginx = {
-      enable = true;
-      virtualHosts."_" = {
-        listen = [
-          {
-            addr = "127.0.0.1";
-            port = 80;
-          }
-        ];
-        root = "/var/www/simple-site";
-      };
-    };
-
     # VPN configuration (commented for now)
     # mullvad-vpn = {
     #   enable = true;
@@ -75,27 +93,12 @@
   };
 
   # Ensure web root exists with correct ownership
-  systemd.tmpfiles.rules = [
-    "d /var/www/simple-site 0750 nginx nginx -"
-  ];
-
   programs.mosh.enable = true;
 
   # Bluetooth configuration
   hardware.bluetooth = {
     enable = true;
-    settings = {
-      General = {
-        Name = "Sinity-PC-BT";
-        DiscoverableTimeout = 0;
-        AlwaysPairable = true;
-        PairableTimeout = 0;
-        FastConnectable = true;
-      };
-      Policy = {
-        AutoEnable = true;
-      };
-    };
+    settings.Policy.AutoEnable = true;
   };
 
   # System communication packages
@@ -119,8 +122,7 @@
 
       packages = with pkgs; [
         # Web browsers
-        inputs.browser-previews.packages.${pkgs.system}.google-chrome-beta
-        inputs.browser-previews.packages.${pkgs.system}.google-chrome-dev
+        chromeBetaWrapped
         qutebrowser
         tor-browser-bundle-bin
         firefox

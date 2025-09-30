@@ -20,7 +20,8 @@ add() { entries+=("$1") ; }
 
 menu_input=$(printf "%s\n" "${entries[@]}")
 
-choice=$(printf "%s\n" "$menu_input" | "$PICKER" --prompt "Workspace: " --horizontal=false --fuzzy-match=true | sed 's/\r$//')
+selection=$(printf "%s\n" "$menu_input" | "$PICKER" --prompt-text "Workspace: " --horizontal false --require-match false --fuzzy-match true || true)
+choice=$(printf '%s' "$selection" | sed 's/\r$//')
 [ -z "$choice" ] && exit 0
 
 target=${choice#*→ }

@@ -1,6 +1,9 @@
 # Storage Automation - Nextcloud and Encryption
-{ pkgs, ... }:
+{ pkgs, lib, ... }:
 
+let
+  nextcloudCert = builtins.readFile ../asset/nextcloud-cert.crt;
+in
 {
   # Cloud storage and encryption support
   environment = {
@@ -22,6 +25,7 @@
       cryptsetup
       fuse
       fuse3
+      rsync
     ];
 
     etc = {
@@ -30,6 +34,17 @@
         mode = "0600";
         user = "root";
         group = "root";
+      };
+
+      "davfs2/certs/nextcloud-host.pem" = {
+        mode = "0644";
+        text = nextcloudCert;
+      };
+
+      "davfs2/servers/nextcloud-host" = {
+        text = ''
+          servercert sha256:0E:BA:10:DB:78:60:43:37:BD:5C:0A:60:BA:71:04:4A:FD:BF:84:D4:62:40:4A:63:8D:CD:12:5F:D4:BE:7E:8D
+        '';
       };
 
       "onedrive/config" = {
@@ -57,6 +72,8 @@
     };
   };
 
+  security.pki.certificates = lib.mkAfter [ nextcloudCert ];
+
   # Enable davfs2 for WebDAV mounting with caching
   services.davfs2 = {
     enable = true;
@@ -74,11 +91,12 @@
   systemd = {
     tmpfiles.rules = [
       "d /mnt/nextcloud 0755 root root -"
-      "d /mnt/gdrive 0755 root root -"
+      "d /mnt/gdrive 0755 sinity users -"
       "d /var/lib/onedrive 0755 sinity users -"
       "L /mnt/onedrive - - - - /var/lib/onedrive"
       # OneDrive auth files need to be writable
       "d /var/lib/onedrive-auth 0700 sinity users -"
+      "d /outer-realm/inbox 2775 sinity users -"
     ];
 
     services = {
@@ -121,14 +139,12 @@
           User = "sinity";
           ConditionPathExists = "/home/sinity/.config/rclone/rclone.conf";
           ExecStartPre = "${pkgs.coreutils}/bin/mkdir -p /mnt/gdrive";
-          ExecStart = "${pkgs.rclone}/bin/rclone mount gdrive: /mnt/gdrive --config /home/sinity/.config/rclone/rclone.conf --daemon --vfs-cache-mode full --vfs-cache-max-size 5G --vfs-cache-max-age 72h --buffer-size 256M --vfs-read-ahead 512M --dir-cache-time 72h --poll-interval 1m --allow-other --uid 1000 --gid 100 --umask 022";
+          ExecStart = "${pkgs.rclone}/bin/rclone mount gdrive: /mnt/gdrive --config /home/sinity/.config/rclone/rclone.conf --daemon --vfs-cache-mode full --vfs-cache-max-size 5G --vfs-cache-max-age 72h --buffer-size 256M --vfs-read-ahead 512M --dir-cache-time 72h --poll-interval 1m --uid 1000 --gid 100 --umask 022";
           ExecStop = "${pkgs.fuse3}/bin/fusermount3 -u /mnt/gdrive";
         };
       };
     };
   };
-
-  programs.fuse.userAllowOther = true;
 
   # Automount Nextcloud on demand via davfs2
   fileSystems."/mnt/nextcloud" = {
@@ -158,7 +174,7 @@
         # Convenience scripts
         (writeShellScriptBin "encrypt-folder" ''
           #!/usr/bin/env bash
-          set -e
+          set -euo pipefail
 
           if [ $# -ne 2 ]; then
             echo "Usage: encrypt-folder <source-folder> <encrypted-folder>"
@@ -199,7 +215,7 @@
 
         (writeShellScriptBin "decrypt-folder" ''
           #!/usr/bin/env bash
-          set -e
+          set -euo pipefail
 
           if [ $# -ne 2 ]; then
             echo "Usage: decrypt-folder <encrypted-folder> <mount-point>"
@@ -226,7 +242,7 @@
 
         (writeShellScriptBin "mount-nextcloud" ''
           #!/usr/bin/env bash
-          set -e
+          set -euo pipefail
 
           # Check if already mounted
           if mountpoint -q /mnt/nextcloud; then
@@ -242,6 +258,7 @@
 
         (writeShellScriptBin "umount-nextcloud" ''
           #!/usr/bin/env bash
+          set -euo pipefail
 
           if ! mountpoint -q /mnt/nextcloud; then
             echo "Nextcloud is not mounted"
@@ -257,6 +274,7 @@
 
         (writeShellScriptBin "onedrive-auth" ''
           #!/usr/bin/env bash
+          set -euo pipefail
 
           echo "=== OneDrive Authentication ==="
           echo
@@ -287,13 +305,23 @@
 
         (writeShellScriptBin "onedrive-status" ''
           #!/usr/bin/env bash
+          set -euo pipefail
 
           echo "OneDrive Status:"
           echo "================"
 
+          sync_dirs=""
+          if [ -f /etc/onedrive/sync_list ]; then
+            sync_dirs=$(grep -v '^#' /etc/onedrive/sync_list 2>/dev/null | xargs || true)
+          fi
+
           if [ -L /mnt/onedrive ] && [ -d "$(readlink /mnt/onedrive)" ]; then
             echo "✓ Sync location: /var/lib/onedrive (via /mnt/onedrive symlink)"
-            echo "✓ Selective sync: $(cat /etc/onedrive/sync_list 2>/dev/null | grep -v '^#' | xargs)"
+            if [ -n "$sync_dirs" ]; then
+              echo "✓ Selective sync: $sync_dirs"
+            else
+              echo "✓ Selective sync: (none configured)"
+            fi
             echo "✓ Current size: $(du -sh /var/lib/onedrive 2>/dev/null | cut -f1)"
             echo
             systemctl status onedrive-sync --no-pager
@@ -305,6 +333,7 @@
 
         (writeShellScriptBin "umount-onedrive" ''
           #!/usr/bin/env bash
+          set -euo pipefail
 
           echo "Stopping OneDrive synchronization service..."
           if sudo systemctl stop onedrive-sync; then
@@ -318,7 +347,7 @@
         # Google Drive scripts
         (writeShellScriptBin "setup-gdrive" ''
           #!/usr/bin/env bash
-          set -e
+          set -euo pipefail
 
           echo "Setting up Google Drive with rclone..."
           echo "Follow the prompts to authenticate"
@@ -331,7 +360,15 @@
 
         (writeShellScriptBin "mount-gdrive" ''
           #!/usr/bin/env bash
-          set -e
+          set -euo pipefail
+
+          command -v rclone >/dev/null 2>&1 || { echo "rclone not found" >&2; exit 1; }
+          command -v fusermount3 >/dev/null 2>&1 || { echo "fusermount3 not found" >&2; exit 1; }
+
+          if [ ! -f "$HOME/.config/rclone/rclone.conf" ]; then
+            echo "rclone config not found at $HOME/.config/rclone/rclone.conf" >&2
+            exit 1
+          fi
 
           if mountpoint -q /mnt/gdrive; then
             echo "Google Drive is already mounted"
@@ -343,7 +380,7 @@
           sleep 1
 
           echo "Mounting Google Drive..."
-          sudo rclone mount gdrive: /mnt/gdrive \
+          rclone mount gdrive: /mnt/gdrive \
             --daemon \
             --vfs-cache-mode full \
             --vfs-cache-max-size 5G \
@@ -352,7 +389,6 @@
             --vfs-read-ahead 512M \
             --dir-cache-time 72h \
             --poll-interval 1m \
-            --allow-other \
             --uid $(id -u) \
             --gid $(id -g) \
             --umask 022 \
@@ -369,6 +405,9 @@
 
         (writeShellScriptBin "umount-gdrive" ''
           #!/usr/bin/env bash
+          set -euo pipefail
+
+          command -v fusermount3 >/dev/null 2>&1 || { echo "fusermount3 not found" >&2; exit 1; }
 
           if ! mountpoint -q /mnt/gdrive; then
             echo "Google Drive is not mounted"
@@ -383,6 +422,7 @@
         # Universal cloud storage manager
         (writeShellScriptBin "cloud-status" ''
           #!/usr/bin/env bash
+          set -euo pipefail
 
           echo "Cloud Storage Status:"
           echo "===================="
@@ -403,7 +443,11 @@
           echo ""
           echo "Encryption Status:"
           echo "=================="
-          mount | grep gocryptfs | awk '{print "✓", $3}' || echo "No encrypted folders mounted"
+          if mount | grep -q gocryptfs; then
+            mount | awk '/gocryptfs/ {print "✓", $3}'
+          else
+            echo "No encrypted folders mounted"
+          fi
         '')
       ];
 

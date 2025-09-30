@@ -16,8 +16,8 @@ _: {
           cursor_trail = 3;
           confirm_os_window_close = 0;
           # Enable remote control for Sinex integration
-          allow_remote_control = "yes";
-          listen_on = "unix:/tmp/kitty";
+          allow_remote_control = "socket-only";
+          listen_on = "unix:\${XDG_RUNTIME_DIR}/kitty-\${USER}";
           open_url_with = "xdg-open";
           detect_urls = "yes";
           url_prefixes = "http https file ftp";

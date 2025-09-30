@@ -19,10 +19,10 @@
         pwvucontrol
         bluetuith
         blueman
-        ncspot
         evtest
         meld
         piper
+        solaar
         android-tools
         android-file-transfer
         hledger
@@ -110,7 +110,6 @@
               padding-horizontal = 12;
               padding-vertical = 8;
               progress-bar-height = 4;
-              progress-bar-border-size = 0;
             };
             low = {
               timeout = 5;

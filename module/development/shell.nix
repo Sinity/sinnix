@@ -94,6 +94,32 @@
             # use vi-like keybinds in shell
             set -o vi
 
+            _sinnix_flake_root() {
+              if [ -n "$FLAKE" ]; then
+                printf '%s\n' "$FLAKE"
+                return 0
+              fi
+              if command -v git >/dev/null 2>&1; then
+                if git_root=$(git rev-parse --show-toplevel 2>/dev/null); then
+                  printf '%s\n' "$git_root"
+                  return 0
+                fi
+              fi
+              if [ -n "$PRJ_ROOT" ]; then
+                printf '%s\n' "$PRJ_ROOT"
+                return 0
+              fi
+              if [ -n "$DEVENV_ROOT" ]; then
+                printf '%s\n' "$DEVENV_ROOT"
+                return 0
+              fi
+              printf '%s\n' "$PWD"
+            }
+
+            if [ -z "$FLAKE" ]; then
+              export FLAKE="$(_sinnix_flake_root)"
+            fi
+
             show_file_or_dir_preview='if [ -d {} ]; then eza --tree --color=always {} | head -200; else bat -n --color=always --line-range :500 {}; fi'
 
             # Use fd (https://github.com/sharkdp/fd) for listing path candidates.
@@ -169,9 +195,9 @@
 
             # NixOS operations using flake apps
             ns = "nom-shell --run zsh";
-            nix-switch = "sudo nix run $FLAKE#switch";
-            nix-test = "sudo nix run $FLAKE#test";
-            nix-check = "nix run $FLAKE#check";
+            nix-switch = "sudo nix run \"\$(_sinnix_flake_root)#switch\"";
+            nix-test = "sudo nix run \"\$(_sinnix_flake_root)#test\"";
+            nix-check = "nix run \"\$(_sinnix_flake_root)#check\"";
 
             # Package search
             nix-search = "nix search nixpkgs";
@@ -189,10 +215,6 @@
             pingg = "ping 8.8.8.8";
             wtf = "dmesg";
             ytd = "yt-dlp";
-
-            # Git analysis tools
-            git-theseus = "nix-shell -p python3 python3Packages.pip python3Packages.numpy python3Packages.matplotlib gcc stdenv.cc.cc.lib --run 'pip install --user git-of-theseus && ~/.local/bin/git-of-theseus-analyze'";
-            git-inspector = "nix-shell -p python3 python3Packages.pip --run 'pip install --user gitinspector && ~/.local/bin/gitinspector'";
           };
         };
 

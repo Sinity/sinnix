@@ -30,12 +30,13 @@
           nodejs
 
           # Python Development
+          # Lean Python toolchain; project-specific data-science stacks can be
+          # layered with `uv`/virtualenvs on demand.
           (python3.withPackages (
             ps: with ps; [
-              # Core
+              # Core tooling
               pip
               ipython
-              # CLI & TUI
               rich
               click
               questionary
@@ -48,40 +49,20 @@
               httpx
               beautifulsoup4
               requests
-              # Data Science & ML
-              pandas
-              numpy
-              matplotlib
-              seaborn
-              jupyter
-              notebook
-              plotly
-              bokeh
-              altair
-              pygal
-              holoviews
-              statsmodels
-              # Data Formats
               pydantic
+              pydantic-settings
+              python-dotenv
+              # Data formats & utilities
               pyyaml
               toml
               ujson
-              # Tooling
+              tabulate
+              tiktoken
+              gitpython
+              # Quality
               black
               mypy
               pytest
-              python-dotenv
-              # Misc
-              fuzzywuzzy
-              ps."python-Levenshtein"
-              tiktoken
-              tabulate
-              gitpython # For git analysis tools
-              # Diagramming
-              diagrams
-              graphviz
-              pydot
-              networkx
             ]
           ))
 

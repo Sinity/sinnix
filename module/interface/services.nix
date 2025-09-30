@@ -2,11 +2,78 @@
 # Systemd user services for desktop functionality
 
 { pkgs, ... }:
+let
+  logitechMaintenance = pkgs.writeShellScript "logitech-maintenance" ''
+    #!/usr/bin/env bash
+    set -uo pipefail
+
+    SOLAAR="${pkgs.solaar}/bin/solaar"
+    RATBAGCTL="${pkgs.libratbag}/bin/ratbagctl"
+    MKTEMP="${pkgs.coreutils}/bin/mktemp"
+    RM="${pkgs.coreutils}/bin/rm"
+
+    tmp=$($MKTEMP 2>/dev/null || true)
+    if [ -n "$tmp" ]; then
+      if "$SOLAAR" show >"$tmp" 2>/dev/null; then
+        for name in "Powerplay Wireless Charging System" "Wireless Charging System" "POWERPLAY" "Powerplay"; do
+          "$SOLAAR" config "$name" charge_control_mode max >/dev/null 2>&1 && break
+        done
+        for name in "G502 Wireless" "G502" "Wireless Gaming Mouse"; do
+          if "$SOLAAR" config "$name" battery_saver off >/dev/null 2>&1; then
+            "$SOLAAR" config "$name" battery_alert_threshold 10 >/dev/null 2>&1 || true
+            break
+          fi
+        done
+      fi
+      "$RM" -f "$tmp" >/dev/null 2>&1 || true
+    fi
+
+    if "$RATBAGCTL" list >/dev/null 2>&1; then
+      "$RATBAGCTL" list | while IFS=: read -r dev desc; do
+        case "$desc" in
+          *G502*|*G-POWERPLAY*|*Powerplay*)
+            for led in 0 1; do
+              "$RATBAGCTL" "$dev" led "$led" set mode on >/dev/null 2>&1 || true
+              "$RATBAGCTL" "$dev" led "$led" set color ff9900 >/dev/null 2>&1 || true
+              "$RATBAGCTL" "$dev" led "$led" set brightness 8 >/dev/null 2>&1 || true
+            done
+            ;;
+        esac
+      done
+    fi
+
+    exit 0
+  '';
+in
 {
   config = {
     home-manager.users.sinity = {
       # UWSM systemd services for autostart applications
       systemd.user.services = {
+        logitech-maintenance = {
+          Unit = {
+            Description = "Ensure Logitech G502/Powerplay charge and LED state";
+            After = [
+              "graphical-session.target"
+              "ratbagd.service"
+            ];
+            Wants = [
+              "graphical-session.target"
+              "ratbagd.service"
+            ];
+          };
+          Service = {
+            Type = "oneshot";
+            ExecStartPre = "${pkgs.coreutils}/bin/sleep 5";
+            ExecStart = logitechMaintenance;
+            Restart = "on-failure";
+            RestartSec = 10;
+          };
+          Install = {
+            WantedBy = [ "graphical-session.target" ];
+          };
+        };
+
         wl-clip-persist = {
           Unit = {
             Description = "Wayland clipboard persistence";
