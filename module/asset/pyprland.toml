@@ -27,6 +27,17 @@ unfocus = "hide"
 lazy = true
 single = true  # Only one instance allowed
 
+[scratchpads.rawlog]
+command = "kitty --class rawlog-capture --instance-group rawlog --single-instance --override font_size=26 sh -lc '~/.local/bin/rawlog-capture-session'"
+class = "rawlog-capture"
+size = "70% 65%"
+animation = ""
+center = true
+margin = 80
+unfocus = "hide"
+lazy = false
+single = true
+
 # === MUSIC WORKSPACE ===
 # Spotify scratchpad
 [scratchpads.spotify]

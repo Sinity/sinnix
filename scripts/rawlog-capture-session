@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Persistent rawlog capture loop for the kitty scratchpad.
+# Delegates to rawlog-capture repeatedly so the window stays warm.
+
+RAWLOG_CAPTURE_BIN=${RAWLOG_CAPTURE_BIN:-$HOME/.local/bin/rawlog-capture}
+
+if [ ! -x "$RAWLOG_CAPTURE_BIN" ]; then
+  echo "rawlog-capture-session: capture binary not executable: $RAWLOG_CAPTURE_BIN" >&2
+  exit 1
+fi
+
+while true; do
+  # Clear the terminal so each capture starts fresh.
+  printf '\033c'
+  if ! "$RAWLOG_CAPTURE_BIN"; then
+    exit $?
+  fi
+done

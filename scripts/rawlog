@@ -20,13 +20,13 @@ prompt_text() {
   local prompt="$1"
   local input_data="$2"
   local selection
-  selection=$(printf '%s\n' "${input_data:- }" |
+  selection=$(printf '%s\n' "$input_data" |
     "$PICKER" \
       --prompt-text "$prompt" \
       --horizontal false \
       --require-match false \
       --print-query || true)
-  printf '%s' "$selection" | sed 's/\r$//'
+  printf '%s\n' "$selection" | tail -n 1 | sed 's/\r$//'
 }
 
 recent_entries() {

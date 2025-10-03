@@ -172,8 +172,8 @@ in
             "SUPER, V, exec, kitty --class clipse -e clipse"
             ", Print, exec, grimblast --notify --freeze copysave area /realm/inbox/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
             "SUPER, Print, exec, grimblast --notify --cursor copysave output /realm/inbox/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
-            # Raw log capture on F8 (append to KB raw-log)
-            ", F8, exec, ~/.local/bin/rawlog"
+            # Raw log capture scratchpad on F8
+            ", F8, exec, pypr toggle rawlog"
             # Keep previous logger alias on Shift+F8 (compat)
             ", SHIFT+F8, exec, log-to-knowledgebase"
 
@@ -322,6 +322,14 @@ in
         };
         ".local/bin/rawlog" = {
           source = ../../scripts/rawlog;
+          executable = true;
+        };
+        ".local/bin/rawlog-capture" = {
+          source = ../../scripts/rawlog-capture;
+          executable = true;
+        };
+        ".local/bin/rawlog-capture-session" = {
+          source = ../../scripts/rawlog-capture-session;
           executable = true;
         };
         # Back-compat alias for legacy binding
