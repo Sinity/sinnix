@@ -27,7 +27,6 @@
         ++ [
           # Marketplace extensions
           pkgs.nix-vscode-extensions.vscode-marketplace.rlivings39.fzf-quick-open
-          pkgs.nix-vscode-extensions.vscode-marketplace.zaidalsaheb.search-preview
           pkgs.nix-vscode-extensions.vscode-marketplace.mkhl.direnv
 
           # WhichKey UI for leader key menus (matches your settings.json bindings)

@@ -43,6 +43,13 @@ _: {
       depends = [ "/realm" ];
     };
 
+    "/home/sinity" = {
+      device = "/realm/home";
+      fsType = "none";
+      options = [ "bind" ];
+      depends = [ "/realm" ];
+    };
+
     "/outer-realm" = {
       device = "/dev/disk/by-uuid/5119B4113C747C42";
       fsType = "ntfs";

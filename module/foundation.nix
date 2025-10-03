@@ -73,8 +73,6 @@ in
   imports = [ inputs.home-manager.nixosModules.home-manager ];
 
   config = {
-    system.nixos.tags = [ "foundation-domain-v0.3" ];
-
     # === SYSTEM CONFIGURATION (from system/system.nix) ===
     nix = {
       settings = {
@@ -292,6 +290,14 @@ in
           '';
           shellAliases = {
             load-secrets = "load_secrets";
+          };
+        };
+
+        nix = {
+          gc = {
+            automatic = true;
+            dates = "weekly";
+            options = "--delete-older-than 30d";
           };
         };
 

@@ -7,9 +7,9 @@ set -euo pipefail
 
 KB_ROOT=${KB_ROOT:-/realm/knowledgebase}
 RAWLOG_BIN=${RAWLOG_BIN:-$HOME/.local/bin/rawlog}
-RECENT_COUNT=${RECENT_COUNT:-5}
-GUM_WIDTH=${GUM_WIDTH:-90}
-GUM_HEIGHT=${GUM_HEIGHT:-18}
+CANCEL_CODE=${RAWLOG_CANCEL_CODE:-130}
+GUM_WIDTH=${GUM_WIDTH:-0}
+GUM_HEIGHT=${GUM_HEIGHT:-0}
 
 die() { echo "rawlog-capture: $*" >&2; exit 1; }
 
@@ -17,21 +17,11 @@ die() { echo "rawlog-capture: $*" >&2; exit 1; }
 [ -x "$RAWLOG_BIN" ] || die "rawlog script not executable at $RAWLOG_BIN"
 command -v gum >/dev/null 2>&1 || die "gum CLI not available (need pkg gum)"
 
-LOG_FILE="$KB_ROOT/50_logs/raw-log.md"
-
-if [ -f "$LOG_FILE" ]; then
-  history=$(tail -n 200 "$LOG_FILE" \
-    | sed -En 's/^- \*\*([^*]+)\*\* (.*)$/[\1] \2/p' \
-    | tail -n "$RECENT_COUNT") || history=""
-
-  if [ -n "${history:-}" ]; then
-    gum style \
-      --border normal \
-      --margin "1 0" \
-      --padding "0 2" \
-      "Recent rawlog entries:" "" "$history"
+cancel_and_hide() {
+  if [ "${RAWLOG_NO_AUTOHIDE:-0}" != "1" ] && command -v pypr >/dev/null 2>&1; then
+    pypr toggle rawlog >/dev/null 2>&1 || true
   fi
-fi
+}
 
 if ! entry=$(gum write \
   --show-help \
@@ -39,17 +29,23 @@ if ! entry=$(gum write \
   --height "$GUM_HEIGHT" \
   --placeholder "Capture a rawlog entry…" \
 ); then
-  exit $?
+  cancel_and_hide
+  exit "$CANCEL_CODE"
 fi
 
 # gum write returns with a trailing newline; trim without touching
 # internal formatting.
 entry=${entry%$'\n'}
 
-[ -n "$entry" ] || exit 0
+[ -n "$entry" ] || {
+  cancel_and_hide
+  exit "$CANCEL_CODE"
+}
 
-"$RAWLOG_BIN" "$entry"
-
-if [ "${RAWLOG_NO_AUTOHIDE:-0}" != "1" ] && command -v pypr >/dev/null 2>&1; then
-  pypr toggle rawlog >/dev/null 2>&1 || true
+if ! "$RAWLOG_BIN" "$entry"; then
+  cancel_and_hide
+  exit 1
 fi
+
+cancel_and_hide
+exit 0

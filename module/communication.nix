@@ -10,44 +10,9 @@
 }:
 let
   chromeBetaPkg = inputs.browser-previews.packages.${pkgs.system}.google-chrome-beta;
-  chromeBetaLauncher = pkgs.writeShellApplication {
-    name = "google-chrome-beta";
-    text = ''
-      set -euo pipefail
-
-      if [[ "''${CHROME_NO_HDR_WRAPPER:-}" == "1" ]]; then
-        exec "${chromeBetaPkg}/bin/google-chrome-beta" "$@"
-      fi
-
-      extra_flags=(
-        --force-color-profile=srgb
-        --disable-features=HighDynamicRange
-      )
-
-      if [[ "''${CHROME_WAYLAND:-}" != "1" ]]; then
-        extra_flags+=(
-          --ozone-platform=x11
-          --ozone-platform-hint=x11
-        )
-      fi
-
-      exec "${chromeBetaPkg}/bin/google-chrome-beta" "''${extra_flags[@]}" "$@"
-    '';
-  };
-  chromeBetaWrapped = pkgs.runCommand "google-chrome-beta-wrapped" { } ''
-    mkdir -p $out/bin
-    ln -s ${chromeBetaLauncher}/bin/google-chrome-beta $out/bin/google-chrome-beta
-
-    cp -r ${chromeBetaPkg}/share $out/share
-    chmod -R u+w $out/share
-    substituteInPlace $out/share/applications/google-chrome-beta.desktop \
-      --replace "${chromeBetaPkg}/bin/google-chrome-beta" "$out/bin/google-chrome-beta"
-    chmod -R u-w $out/share
-  '';
+  chromeStablePkg = inputs.browser-previews.packages.${pkgs.system}.google-chrome;
 in
 {
-  system.nixos.tags = [ "communication-domain-v0.3" ];
-
   networking = {
     hostName = "${host}";
     networkmanager = {
@@ -120,43 +85,44 @@ in
         # Default browser is set via XDG mime associations
       };
 
-      packages = with pkgs; [
-        # Web browsers
-        chromeBetaWrapped
-        qutebrowser
-        tor-browser-bundle-bin
-        firefox
-        # chromium
+      packages =
+        [ chromeBetaPkg chromeStablePkg ]
+        ++ (with pkgs; [
+          # Web browsers
+          qutebrowser
+          tor-browser-bundle-bin
+          firefox
+          # chromium
 
-        # Communication tools
-        weechat # IRC client
-        # discord
-        # slack
-        # telegram-desktop
-        # signal-desktop
-        # element-desktop # Matrix client
-        # thunderbird # Email client
-        # zoom-us
-        # teams
+          # Communication tools
+          weechat # IRC client
+          # discord
+          # slack
+          # telegram-desktop
+          # signal-desktop
+          # element-desktop # Matrix client
+          # thunderbird # Email client
+          # zoom-us
+          # teams
 
-        # Network tools
-        curl
-        wget
-        nmap
-        dig
-        traceroute
-        whois
-        netcat
-        socat
-        tcpdump
-        mtr # Network diagnostic tool
-        wireshark
+          # Network tools
+          curl
+          wget
+          nmap
+          dig
+          traceroute
+          whois
+          netcat
+          socat
+          tcpdump
+          mtr # Network diagnostic tool
+          wireshark
 
-        # SSH/Remote tools
-        openssh
-        mosh
-        # remmina # Remote desktop client
-      ];
+          # SSH/Remote tools
+          openssh
+          mosh
+          # remmina # Remote desktop client
+        ]);
     };
 
     programs.ssh = {

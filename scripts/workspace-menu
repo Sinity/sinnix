@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Determine where to look for .code-workspace files.
 # Prefer explicit WS_DIR, then FLAKE repo root, then fallback path.
-WS_DIR=${WS_DIR:-${FLAKE:-/realm/project/sinnix}}
+WS_DIR=${WS_DIR:-${FLAKE:-/realm/sinnix}}
 PICKER=${PICKER:-tofi}
 
 command -v "$PICKER" >/dev/null 2>&1 || { echo "workspace-menu: picker '$PICKER' not found" >&2; exit 1; }

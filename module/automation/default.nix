@@ -9,8 +9,4 @@
     ./script.nix
     ./storage.nix
   ];
-
-  config = {
-    system.nixos.tags = [ "automation-domain-v0.3" ];
-  };
 }

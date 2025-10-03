@@ -145,7 +145,7 @@
             history = true;
             hide-cursor = true;
             text-cursor = true;
-            matching-algorithm = "fuzzy";
+            fuzzy-match = true;
             late-keyboard-init = false;
             multi-instance = false;
             terminal = "kitty";

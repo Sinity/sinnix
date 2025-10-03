@@ -19,8 +19,6 @@
   ];
 
   config = {
-    system.nixos.tags = [ "development-domain-v0.3" ];
-
     # Core development packages available system-wide
     environment.systemPackages = with pkgs; [
       # Essential development tools
@@ -149,6 +147,7 @@
       smartmontools
       powertop
       stressapptest
+      stress-ng
       sysbench
       phoronix-test-suite
       glmark2
@@ -156,6 +155,20 @@
       fio
       perf
       sysstat
+      memtester
+      rt-tests
+      linuxPackages.turbostat
+      hdparm
+      ethtool
+      iperf3
+      netperf
+      s-tui
+      intel-gpu-tools
+      python312Packages.speedtest-cli
+      breakpad
+      flent
+      gum
+      google-cloud-sdk
       linuxPackages.cpupower
     ];
 
@@ -253,10 +266,10 @@
         activation.ensureClaudeDir =
           config.home-manager.users.sinity.lib.dag.entryAfter [ "linkNeovimConfig" ]
             ''
-              if [ -L "$HOME/.claude" ] && [ "$(readlink "$HOME/.claude")" = ".config/claude" ]; then
-                rm "$HOME/.claude"
+              if [ -e "$HOME/.claude" ] && ! [ -L "$HOME/.claude" ]; then
+                rm -rf "$HOME/.claude"
               fi
-              mkdir -p "$HOME/.claude"
+              ln -sfn .config/claude "$HOME/.claude"
             '';
       };
 

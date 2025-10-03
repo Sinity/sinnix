@@ -4,8 +4,6 @@
 
 { pkgs, ... }:
 {
-  system.nixos.tags = [ "media-domain-v0.3" ];
-
   # Enable Intel HDA audio with SOF firmware
   boot.kernelModules = [ "snd-hda-intel" ];
   hardware.firmware = with pkgs; [ sof-firmware ];

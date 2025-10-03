@@ -14,8 +14,4 @@
     ./services.nix
     ./terminal.nix
   ];
-
-  config = {
-    system.nixos.tags = [ "interface-domain-v0.3" ];
-  };
 }
