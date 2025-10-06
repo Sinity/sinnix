@@ -133,17 +133,6 @@ in
       systemPackages = with pkgs; [
         wget
         git
-        nix-output-monitor
-        nvd
-        cachix
-        nix-direnv
-        nix-direnv-flakes
-
-        # Core system utilities from home/system.nix
-        killall
-        procps
-        psmisc
-        iotop
 
         # Hardware management from home/system.nix
         hwinfo
@@ -191,12 +180,6 @@ in
 
         # System utilities from home/system.nix
         bpftrace
-        entr # Perform action when file changes
-        file # Show file information
-        tldr
-        xdg-utils
-        xxd
-        graphicsmagick
       ];
       variables = {
         REALM_ROOT = "/realm";
@@ -228,7 +211,7 @@ in
           "-g"
           "-p"
           "--prefer"
-          "(^|/)(java|chromium|obsidian|google-chrome-(stable|beta))$"
+          "(^|/)(java|chromium|obsidian|google-chrome(-stable)?)$"
           "--avoid"
           "(^|/)(init|systemd|sshd)$"
         ];
@@ -278,6 +261,24 @@ in
             XDG_DATA_HOME = "\${HOME}/.local/share";
             XDG_STATE_HOME = "\${HOME}/.local/state";
           };
+
+          packages = lib.mkAfter (with pkgs; [
+            nix-output-monitor
+            nvd
+            cachix
+            nix-direnv
+            nix-direnv-flakes
+            killall
+            procps
+            psmisc
+            iotop
+            entr # Perform action when file changes
+            file # Show file information
+            tldr
+            xdg-utils
+            xxd
+            graphicsmagick
+          ]);
 
         };
 

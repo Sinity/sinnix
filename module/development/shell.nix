@@ -195,7 +195,6 @@
 
             # NixOS operations using flake apps
             ns = "nom-shell --run zsh";
-            nix-switch = "sudo nix run \"\$(_sinnix_flake_root)#switch\"";
             nix-test = "sudo nix run \"\$(_sinnix_flake_root)#test\"";
             nix-check = "nix run \"\$(_sinnix_flake_root)#check\"";
 

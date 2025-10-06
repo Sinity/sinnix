@@ -7,7 +7,7 @@ _: {
       home = {
         # Environment variables for proper Wayland/Hyprland operation
         sessionVariables = {
-          BROWSER = "google-chrome-beta";
+          BROWSER = "google-chrome";
           TERM = "kitty";
           TERMINAL = "kitty";
 
@@ -40,6 +40,11 @@ _: {
           DIRENV_LOG_FORMAT = "";
           NIXPKGS_ALLOW_UNFREE = "1";
           WINEDLLOVERRIDES = "winemenubuilder.exe=d";
+
+          # Session orchestration
+          SESSION_HISTORY_FILE = "/home/sinity/.zsh_history";
+          SESSION_CODEX_LOG = "/home/sinity/.codex/log/codex-tui.log";
+          SESSION_CODEX_LOG_DIR = "/home/sinity/.codex/sessions";
         };
       };
     };

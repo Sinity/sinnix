@@ -20,7 +20,8 @@ let
         done
         for name in "G502 Wireless" "G502" "Wireless Gaming Mouse"; do
           if "$SOLAAR" config "$name" battery_saver off >/dev/null 2>&1; then
-            "$SOLAAR" config "$name" battery_alert_threshold 10 >/dev/null 2>&1 || true
+            # Drop the firmware alert threshold so the mouse never switches to the red warning state.
+            "$SOLAAR" config "$name" battery_alert_threshold 0 >/dev/null 2>&1 || true
             break
           fi
         done
@@ -36,6 +37,7 @@ let
               "$RATBAGCTL" "$dev" led "$led" set mode on >/dev/null 2>&1 || true
               "$RATBAGCTL" "$dev" led "$led" set color ff9900 >/dev/null 2>&1 || true
               "$RATBAGCTL" "$dev" led "$led" set brightness 8 >/dev/null 2>&1 || true
+              "$RATBAGCTL" "$dev" led "$led" set duration 0 >/dev/null 2>&1 || true
             done
             ;;
         esac
@@ -161,6 +163,24 @@ in
           };
           Install = {
             WantedBy = [ "graphical-session.target" ];
+          };
+        };
+      };
+
+      systemd.user.timers = {
+        logitech-maintenance = {
+          Unit = {
+            Description = "Keep Logitech G502 LEDs locked to the desired state";
+          };
+          Timer = {
+            OnBootSec = "45s";
+            OnUnitActiveSec = "5m";
+            RandomizedDelaySec = "30s";
+            Unit = "logitech-maintenance.service";
+            Persistent = true;
+          };
+          Install = {
+            WantedBy = [ "timers.target" ];
           };
         };
       };

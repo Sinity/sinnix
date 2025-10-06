@@ -17,6 +17,10 @@ in
     inputs.nix-vscode-extensions.overlays.default
 
     (final: prev: {
+      hyprland = prev.hyprland.overrideAttrs (old: {
+        patches = (old.patches or []) ++ [ ../patches/hyprland/suppress-color-warning.patch ];
+      });
+
       # Override Codex CLI to a newer upstream tag
       codex = prev.codex.overrideAttrs (
         _old:

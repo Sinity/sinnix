@@ -1,5 +1,10 @@
 # Host-specific hardware configuration for sinnix-prime
-{ pkgs, intercept-bounce, scribe-tap, ... }:
+{
+  pkgs,
+  intercept-bounce,
+  scribe-tap,
+  ...
+}:
 {
   environment.systemPackages = with pkgs; [
     intercept-bounce
@@ -13,6 +18,7 @@
       - JOB: "${pkgs.interception-tools}/bin/intercept -g $DEVNODE \
             | ${intercept-bounce}/bin/intercept-bounce -t 40ms --log-interval 6h --log-bounces --stats-json \
             | ${scribe-tap}/bin/scribe-tap --log-dir /realm/data/keylog/logs --snapshot-dir /realm/data/keylog/snapshots \
+                --log-mode both --context hyprland --hypr-user sinity --translate xkb --xkb-layout pl \
             | ${pkgs.interception-tools-plugins.caps2esc}/bin/caps2esc -m 1 \
             | ${pkgs.interception-tools}/bin/uinput -d $DEVNODE"
         DEVICE:

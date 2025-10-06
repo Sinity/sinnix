@@ -188,8 +188,9 @@ in
             # Knowledgebase quick capture (zk)
             "SUPER SHIFT, N, exec, ~/.local/bin/kb-capture"
 
-            # Workspace menu (discoverable launcher for Code workspaces)
-            "SUPER, W, exec, ~/.local/bin/workspace-menu"
+            # Session launcher (VS Code orchestrator)
+            "SUPER, W, exec, kitty --class session-menu --title SessionMenu -e idea-session menu"
+            "SUPER SHIFT, W, exec, kitty --class session-menu --title SessionNew -e idea-session new"
 
             # === MEDIA KEYS WITH VISUAL FEEDBACK ===
             ",XF86AudioMute, exec, pamixer -t && notify-send -t 800 '🔇 Audio' 'Muted: '$(pamixer --get-mute)"
@@ -302,6 +303,16 @@ in
             "float,class:^(imv)$"
             "center,class:^(imv)$"
           ];
+
+          windowrulev2 = [
+            # VS Code session windows launched via idea-session (custom title prefix)
+            "size 60% 100%,title:^(session: )"
+            "move 0% 0%,title:^(session: )"
+
+            # Browsers in the reference column when working on sessions
+            "size 40% 100%,class:^(google-chrome|google-chrome-beta|firefox|qutebrowser)$"
+            "move 60% 0%,class:^(google-chrome|google-chrome-beta|firefox|qutebrowser)$"
+          ];
         };
 
         extraConfig = '''';
@@ -316,9 +327,12 @@ in
           source = ../../scripts/kb-capture;
           executable = true;
         };
-        ".local/bin/workspace-menu" = {
-          source = ../../scripts/workspace-menu;
+        ".local/bin/idea-session" = {
+          source = ../../scripts/idea-session;
           executable = true;
+        };
+        ".config/idea-session/base-agents.md" = {
+          source = ../asset/session/base-agents.md;
         };
         ".local/bin/rawlog" = {
           source = ../../scripts/rawlog;

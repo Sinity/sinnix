@@ -2,7 +2,7 @@
 # Complete audio/video (system + applications)
 # Consolidates: audio system, media players, production tools, viewers
 
-{ pkgs, ... }:
+{ pkgs, lib, ... }:
 {
   # Enable Intel HDA audio with SOF firmware
   boot.kernelModules = [ "snd-hda-intel" ];
@@ -79,12 +79,10 @@
     playerctl # Media control
   ];
 
-  users.users.sinity = {
-    extraGroups = [
-      "audio"
-      "bluetooth"
-    ];
-  };
+  users.users.sinity.extraGroups = lib.mkAfter [
+    "audio"
+    "bluetooth"
+  ];
 
   systemd.tmpfiles.rules = [
     "d /realm/hydrus 0750 sinity users -"

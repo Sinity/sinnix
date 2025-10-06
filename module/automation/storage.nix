@@ -479,8 +479,8 @@ in
     };
   };
 
-  # Add user to davfs2 group
-  users.users.sinity.extraGroups = [ "davfs2" ];
+  # Add user to davfs2 group without clobbering other group membership
+  users.users.sinity.extraGroups = lib.mkAfter [ "davfs2" ];
 
   # Exclude cloud mounts from file indexers to prevent slowdowns
   environment.etc."xdg/autostart/tracker-miner-fs-3.desktop".text = ''

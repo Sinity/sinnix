@@ -9,7 +9,6 @@
   ...
 }:
 let
-  chromeBetaPkg = inputs.browser-previews.packages.${pkgs.system}.google-chrome-beta;
   chromeStablePkg = inputs.browser-previews.packages.${pkgs.system}.google-chrome;
 in
 {
@@ -27,7 +26,8 @@ in
       enable = true;
       dnssec = "allow-downgrade";
       domains = [ "~." ];
-      dnsovertls = "true";
+      # Allow opportunistic fallback when upstream lacks DoT support.
+      dnsovertls = "opportunistic";
       fallbackDns = [
         "1.0.0.1#one.one.one.one"
         "8.8.4.4#dns.google"
@@ -85,44 +85,45 @@ in
         # Default browser is set via XDG mime associations
       };
 
-      packages =
-        [ chromeBetaPkg chromeStablePkg ]
-        ++ (with pkgs; [
-          # Web browsers
-          qutebrowser
-          tor-browser-bundle-bin
-          firefox
-          # chromium
+      packages = [
+        chromeStablePkg
+      ]
+      ++ (with pkgs; [
+        # Web browsers
+        qutebrowser
+        tor-browser-bundle-bin
+        firefox
+        # chromium
 
-          # Communication tools
-          weechat # IRC client
-          # discord
-          # slack
-          # telegram-desktop
-          # signal-desktop
-          # element-desktop # Matrix client
-          # thunderbird # Email client
-          # zoom-us
-          # teams
+        # Communication tools
+        weechat # IRC client
+        # discord
+        # slack
+        # telegram-desktop
+        # signal-desktop
+        # element-desktop # Matrix client
+        # thunderbird # Email client
+        # zoom-us
+        # teams
 
-          # Network tools
-          curl
-          wget
-          nmap
-          dig
-          traceroute
-          whois
-          netcat
-          socat
-          tcpdump
-          mtr # Network diagnostic tool
-          wireshark
+        # Network tools
+        curl
+        wget
+        nmap
+        dig
+        traceroute
+        whois
+        netcat
+        socat
+        tcpdump
+        mtr # Network diagnostic tool
+        wireshark
 
-          # SSH/Remote tools
-          openssh
-          mosh
-          # remmina # Remote desktop client
-        ]);
+        # SSH/Remote tools
+        openssh
+        mosh
+        # remmina # Remote desktop client
+      ]);
     };
 
     programs.ssh = {
