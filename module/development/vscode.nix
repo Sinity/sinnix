@@ -33,7 +33,7 @@
           pkgs.nix-vscode-extensions.vscode-marketplace.vspacecode.whichkey
 
           # Git ergonomics and inline diagnostics
-          pkgs.nix-vscode-extensions.vscode-marketplace.eamodio.gitlens
+          pkgs.vscode-extensions.eamodio.gitlens
           pkgs.nix-vscode-extensions.vscode-marketplace.usernamehw.errorlens
 
           # Markdown/Notes and spell checking

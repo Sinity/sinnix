@@ -34,7 +34,7 @@ in
           # Monitor configuration for 4K HDR display
           monitor = [
             # Apply preferred mode dynamically; avoids hard-coding connector names while keeping HDR tweaks
-            ",preferred,auto,1,bitdepth,10,cm,hdr,sdrbrightness,1.4,sdrsaturation,1.0"
+            ",3840x2160@120,auto,1,bitdepth,10,cm,hdr,sdrbrightness,1.4,sdrsaturation,1.0"
           ];
 
           xwayland = {

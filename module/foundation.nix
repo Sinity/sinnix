@@ -54,6 +54,7 @@ let
     "sinity-password"
     "root-password"
     "davfs2-secrets"
+    "photoprism-admin-password"
   ];
 
   mkSecretExport =
@@ -198,6 +199,8 @@ in
       zsh.enable = true;
     };
 
+    systemd.coredump.enable = true;
+
     services = {
       dbus.enable = true;
       xserver.xkb.layout = "pl";
@@ -262,23 +265,26 @@ in
             XDG_STATE_HOME = "\${HOME}/.local/state";
           };
 
-          packages = lib.mkAfter (with pkgs; [
-            nix-output-monitor
-            nvd
-            cachix
-            nix-direnv
-            nix-direnv-flakes
-            killall
-            procps
-            psmisc
-            iotop
-            entr # Perform action when file changes
-            file # Show file information
-            tldr
-            xdg-utils
-            xxd
-            graphicsmagick
-          ]);
+          packages = lib.mkAfter (
+            with pkgs;
+            [
+              nix-output-monitor
+              nvd
+              cachix
+              nix-direnv
+              nix-direnv-flakes
+              killall
+              procps
+              psmisc
+              iotop
+              entr # Perform action when file changes
+              file # Show file information
+              tldr
+              xdg-utils
+              xxd
+              graphicsmagick
+            ]
+          );
 
         };
 
@@ -386,6 +392,8 @@ in
                 mode = "0600";
                 path = "/run/agenix/davfs2-secrets";
               }
+            else if secretName == "photoprism-admin-password" then
+              rootOwnedSpec // { path = "/run/agenix/photoprism-admin-password"; }
             else if secretName == "sinity-password" then
               rootOwnedSpec // { path = "/run/agenix/sinity-password"; }
             else if secretName == "root-password" then

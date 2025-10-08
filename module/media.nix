@@ -85,8 +85,8 @@
   ];
 
   systemd.tmpfiles.rules = [
-    "d /realm/hydrus 0750 sinity users -"
-    "d /realm/hydrus/db 0750 sinity users -"
+    "d /realm/home/.hydrus 0750 sinity users -"
+    "d /realm/home/.hydrus/db 0750 sinity users -"
   ];
 
   # This is for generic audio quantum forcing
@@ -163,8 +163,8 @@
             mv $out/bin/hydrus-client $out/bin/hydrus-client-original
             cat > $out/bin/hydrus-client << EOF
             #!${pkgs.stdenv.shell}
-            cd /realm/hydrus
-            exec $out/bin/hydrus-client-original -d="/realm/hydrus/db" "\$@"
+            cd /realm/home/.hydrus
+            exec $out/bin/hydrus-client-original -d="/realm/home/.hydrus/db" "\$@"
             EOF
             chmod +x $out/bin/hydrus-client
           '';
@@ -197,6 +197,15 @@
             ];
           })
         )
+
+        # Additional viewers and DAM tooling explored during Hydrus replacement
+        nsxiv
+        qimgv
+        qview
+        gthumb
+        nomacs
+        geeqie
+        xnviewmp
       ];
     };
 

@@ -1,34 +1,32 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `flake.nix` is the entrypoint; `flake/` contains CLI apps, the dev shell, and overlay wiring that glue the system together.
-- Keep domain modules within `module/` and import them through the nearest `default.nix`; machine-specific overrides belong in `host/sinnix-prime/`.
-- Shared dotfiles stay in `dots/`, reusable assets in `module/asset/`, and repeatable tasks should become `flake/apps.nix` apps before landing in `scripts/`.
+- `flake.nix` is the entrypoint; the `flake/` directory wires CLI apps, dev shells, and overlays.
+- Domain modules live under `module/` (e.g., `module/interface`, `module/automation`). Import changes through the nearest `default.nix`.
+- Machine-specific overrides reside in `host/` (notably `host/sinnix-prime/`).
+- Shared dotfiles live in `dots/`; reusable assets belong in `module/asset/`. Add repeatable scripts to `module/automation/script.nix` or promote them to `flake/apps.nix` apps.
 
 ## Build, Test, and Development Commands
-- `direnv allow` or `nix develop` loads the devenv shell (see `flake/dev-shell.nix`) with hooks and helper scripts.
-- `check` runs `nix flake check` plus parser validation; run it before committing or opening a PR.
-- `nix run .#format` applies `nixfmt-rfc-style`, while `nix run .#lint` runs `deadnix` and ShellCheck without modifying sources.
-- `sudo nix run .#test` performs `nixos-rebuild test` for `sinnix-prime`; only follow with `sudo nix run .#switch` after reviewing the output.
-- `nix run .#update` refreshes flake inputs; commit the resulting `flake.lock` alongside related code.
+- `direnv allow` / `nix develop` – enter the dev shell with hooks and helper commands.
+- `nix run .#format` – run `nixfmt-rfc-style` over all Nix sources.
+- `nix run .#lint` – execute `deadnix` and ShellCheck (read-only).
+- `nix run .#check` – run `nix flake check` plus parser validation.
+- `sudo nix run .#test` – `nixos-rebuild test` for `sinnix-prime`; review streamed `nom` logs before switching.
+- `sudo nix run .#switch` – apply the NixOS configuration after testing.
+- `nix run .#update` – refresh flake inputs; commit the resulting `flake.lock` with related changes.
 
 ## Coding Style & Naming Conventions
-- Nix files use two-space indentation, kebab-case names (e.g. `interface/system.nix`), and must pass `nixfmt-rfc-style`.
-- Remove unused bindings with `deadnix` and prefer explicit `inherit (pkgs) foo bar` over blanket imports.
-- Python utilities follow the `pyproject.toml` rules (Black, Ruff, 88-character lines on Python 3.11).
-- Bash helpers start with `#!/usr/bin/env bash`, enable `set -euo pipefail`, and satisfy `shellcheck`.
+- Nix: two-space indentation, kebab-case filenames, prefer `inherit (pkgs) foo bar`, and keep sources `nixfmt-rfc-style` formatted.
+- Python: follow `pyproject.toml` (Black + Ruff, 88 columns, Python 3.11).
+- Bash: begin with `#!/usr/bin/env bash`, enable `set -euo pipefail`, and satisfy ShellCheck; remove unused bindings with `deadnix`.
 
 ## Testing Guidelines
-- Always run `check`; it guards against evaluation regressions and syntax errors.
-- Exercise host-level tweaks with `sudo nix run .#test` and inspect the streamed `nom` logs before switching.
-- Smoke-test updated dotfiles or scripts (e.g. `scripts/rawlog --help`) and record the result in the pull request notes.
-- Add ad-hoc nixos tests when introducing critical services or timers, even though extra coverage tooling is optional.
+- Run `nix run .#check` before every PR or commit to catch evaluation regressions.
+- For host tweaks, use `sudo nix run .#test` and inspect the streamed `nom` logs.
+- Smoke-test user-facing scripts (e.g., `nix run .#apps.rawlog -- --help`) and record results in PR notes.
+- Add ad-hoc NixOS tests when introducing new services or timers with higher risk.
 
 ## Commit & Pull Request Guidelines
-- Mirror existing history: ≤60-character, imperative, lowercase subjects (`tighten dns routing`), with fixups squashed locally.
-- Document context plus the verification commands you ran in commit bodies when touching services, secrets, or host modules.
-- Pull requests should link issues when available, list affected modules (`module/interface/hyprland.nix`, `host/sinnix-prime/*`), and include UI screenshots or logs when relevant.
-
-## Secrets & Configuration Tips
-- Manage encrypted secrets in `secrets/` via agenix; edit with `nix run .#agenix -- -e secrets/<name>.age` and never commit plaintext.
-- Reference new secrets from the owning module, update `secrets.nix`, and keep environment-specific values in host modules rather than shared logic.
+- Commit subjects: ≤60 characters, imperative lowercase (e.g., `tighten dns routing`); squash fixups locally.
+- Bodies touching services, secrets, or host modules should note context and verification commands run.
+- Pull requests should link issues when available, list affected modules (e.g., `module/interface/hyprland.nix`, `host/sinnix-prime/*`), and include logs or screenshots for UI-impacting changes.
