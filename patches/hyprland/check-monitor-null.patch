@@ -1,0 +1,13 @@
+diff --git a/src/render/Renderer.cpp b/src/render/Renderer.cpp
+index f8f4cec5..c245af13 100644
+--- a/src/render/Renderer.cpp
++++ b/src/render/Renderer.cpp
+@@ -1937,7 +1937,7 @@ void CHyprRenderer::damageWindow(PHLWINDOW pWindow, bool forceFull) {
+ }
+ 
+ void CHyprRenderer::damageMonitor(PHLMONITOR pMonitor) {
+-    if (g_pCompositor->m_unsafeState || pMonitor->isMirror())
++    if (g_pCompositor->m_unsafeState || !pMonitor || pMonitor->isMirror())
+         return;
+ 
+     CBox damageBox = {0, 0, INT16_MAX, INT16_MAX};

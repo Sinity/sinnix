@@ -29,7 +29,7 @@
         { imports = [ ../host/sinnix-prime ]; }
 
         # Import domain modules (all functionality now consolidated here)
-        { imports = [ ../module/default.nix ]; }
+        { imports = [ ../modules/default.nix ]; }
       ];
 
       # Make these values available to all modules

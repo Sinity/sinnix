@@ -72,7 +72,16 @@ in
       in
       {
         hyprland = prev.hyprland.overrideAttrs (old: {
-          patches = (old.patches or [ ]) ++ [ ../patches/hyprland/suppress-color-warning.patch ];
+          patches = (old.patches or [ ]) ++ [
+            ../patches/hyprland/suppress-color-warning.patch
+            ../patches/hyprland/check-monitor-null.patch
+          ];
+        });
+
+        pwvucontrol = prev.pwvucontrol.overrideAttrs (old: {
+          patches = (old.patches or [ ]) ++ [
+            ../patches/pwvucontrol/graceful-format-missing-data.patch
+          ];
         });
 
         libutp = prev.libutp.overrideAttrs (old: {
@@ -113,11 +122,25 @@ in
 
         autopanosiftc = prev.autopanosiftc.overrideAttrs (old: {
           cmakeFlags = (old.cmakeFlags or [ ]) ++ [ "-DCMAKE_POLICY_VERSION=3.5" ];
+          postPatch = (old.postPatch or "") + ''
+            substituteInPlace CMakeLists.txt \
+              --replace "cmake_minimum_required(VERSION 2.8.12 FATAL_ERROR)" "cmake_minimum_required(VERSION 3.5 FATAL_ERROR)" \
+              --replace "cmake_minimum_required(VERSION 2.8)" "cmake_minimum_required(VERSION 3.5)" \
+              --replace "cmake_minimum_required(VERSION 2.6)" "cmake_minimum_required(VERSION 3.5)" \
+              --replace "cmake_minimum_required(VERSION 2.4)" "cmake_minimum_required(VERSION 3.5)"
+          '';
         });
 
         libsForQt5 = prev.libsForQt5 // {
           autopanosiftc = prev.libsForQt5.autopanosiftc.overrideAttrs (old: {
             cmakeFlags = (old.cmakeFlags or [ ]) ++ [ "-DCMAKE_POLICY_VERSION=3.5" ];
+            postPatch = (old.postPatch or "") + ''
+              substituteInPlace CMakeLists.txt \
+                --replace "cmake_minimum_required(VERSION 2.8.12 FATAL_ERROR)" "cmake_minimum_required(VERSION 3.5 FATAL_ERROR)" \
+                --replace "cmake_minimum_required(VERSION 2.8)" "cmake_minimum_required(VERSION 3.5)" \
+                --replace "cmake_minimum_required(VERSION 2.6)" "cmake_minimum_required(VERSION 3.5)" \
+                --replace "cmake_minimum_required(VERSION 2.4)" "cmake_minimum_required(VERSION 3.5)"
+            '';
           });
         };
 
