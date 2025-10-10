@@ -2,10 +2,14 @@
   pkgs,
   inputs,
   lib,
+  flakeRoot,
+  projectLib,
   quickshellEnable ? false,
   ...
 }:
 let
+  asset = projectLib.mkAssetPath flakeRoot;
+  script = projectLib.mkScriptPath flakeRoot;
   pyprlandCleanup = pkgs.writeShellScript "pyprland-sock-cleanup" ''
     set -eu
     HYPR_RUNTIME="/run/user/$UID/hypr"
@@ -153,12 +157,12 @@ in
         "SUPER, W, exec, kitty --class session-menu --title SessionMenu -e idea-session menu"
         "SUPER SHIFT, W, exec, kitty --class session-menu --title SessionNew -e idea-session new"
 
-        ",XF86AudioMute, exec, pamixer -t && notify-send -t 800 '🔇 Audio' 'Muted: '$(pamixer --get-mute)"
+        ",XF86AudioMute, exec, pamixer -t"
         ",XF86AudioPlay, exec, playerctl play-pause && notify-send -t 1000 '♪ Media' '$(playerctl status)'"
         ",XF86AudioNext, exec, playerctl next && notify-send -t 1000 '♪ Next' '$(playerctl metadata title 2>/dev/null || echo \"Unknown\")'"
         ",XF86AudioPrev, exec, playerctl previous && notify-send -t 1000 '♪ Previous' '$(playerctl metadata title 2>/dev/null || echo \"Unknown\")'"
-        ",XF86AudioRaiseVolume, exec, pamixer -i 2 && notify-send -t 800 '🔊 Volume' '$(pamixer --get-volume)%'"
-        ",XF86AudioLowerVolume, exec, pamixer -d 2 && notify-send -t 800 '🔉 Volume' '$(pamixer --get-volume)%'"
+        ",XF86AudioRaiseVolume, exec, pamixer -i 2"
+        ",XF86AudioLowerVolume, exec, pamixer -d 2"
 
         "SUPER CTRL, H, resizeactive, -80 0"
         "SUPER CTRL, L, resizeactive, 80 0"
@@ -212,6 +216,9 @@ in
         "workspace special:music,class:^(pavucontrol)$"
         "workspace special:music,class:^(pwvucontrol)$"
         "workspace special:music,class:^(blueman-manager)$"
+        "float,class:^(blueman-manager)$"
+        "size 40% 45%,class:^(blueman-manager)$"
+        "move 2% 55%,class:^(blueman-manager)$"
         "opacity 0.8 0.8,class:^(pwvucontrol)$"
         "opacity 0.8 0.8,class:^(blueman-manager)$"
         "float,class:^(scratchpad-terminal)$"
@@ -236,40 +243,44 @@ in
         "move 0% 0%,title:^(session: )"
         "size 40% 100%,class:^(google-chrome|google-chrome-beta|firefox|qutebrowser)$"
         "move 60% 0%,class:^(google-chrome|google-chrome-beta|firefox|qutebrowser)$"
+        "float,class:^(google-chrome|google-chrome-beta)$,windowtype:=notification"
+        "size 28% 24%,class:^(google-chrome|google-chrome-beta)$,windowtype:=notification"
+        "move 70% 6%,class:^(google-chrome|google-chrome-beta)$,windowtype:=notification"
+        "float,class:^(google-chrome|google-chrome-beta)$,windowtype:=popup"
+        "size 28% 24%,class:^(google-chrome|google-chrome-beta)$,windowtype:=popup"
+        "move 70% 6%,class:^(google-chrome|google-chrome-beta)$,windowtype:=popup"
       ];
-
-      extraConfig = '''';
     };
   };
 
-  xdg.configFile."hypr/pyprland.toml".text = builtins.readFile ../../../module/asset/pyprland.toml;
+  xdg.configFile."hypr/pyprland.toml".text = builtins.readFile (asset "pyprland.toml");
 
   home.file = {
     ".local/bin/kb-capture" = {
-      source = ../../../scripts/kb-capture;
+      source = script "kb-capture";
       executable = true;
     };
     ".local/bin/idea-session" = {
-      source = ../../../scripts/idea-session;
+      source = script "idea-session";
       executable = true;
     };
     ".config/idea-session/base-agents.md" = {
-      source = ../../../module/asset/session/base-agents.md;
+      source = asset "session/base-agents.md";
     };
     ".local/bin/rawlog" = {
-      source = ../../../scripts/rawlog;
+      source = script "rawlog";
       executable = true;
     };
     ".local/bin/rawlog-capture" = {
-      source = ../../../scripts/rawlog-capture;
+      source = script "rawlog-capture";
       executable = true;
     };
     ".local/bin/rawlog-capture-session" = {
-      source = ../../../scripts/rawlog-capture-session;
+      source = script "rawlog-capture-session";
       executable = true;
     };
     ".local/bin/log-to-knowledgebase" = {
-      source = ../../../scripts/rawlog;
+      source = script "rawlog";
       executable = true;
     };
   };
@@ -302,7 +313,7 @@ in
     # BACKGROUND
     background {
       monitor =
-      path = ${../../../module/asset/forest.jpg}
+      path = ${asset "forest.jpg"}
       blur_passes = 1
       contrast = 0.8916
       brightness = 0.8172

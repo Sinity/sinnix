@@ -1,9 +1,13 @@
 # Host-specific storage configuration for sinnix-prime
-_: {
+{ pkgs, ... }: {
   # Storage-related services
   services = {
     fstrim.enable = true; # periodically TRIM ssd storage devices
     gvfs.enable = true; # dynamic mount
+    udev.extraRules = ''
+      ACTION=="add", SUBSYSTEM=="block", ENV{DEVTYPE}=="partition", ENV{ID_FS_UUID}=="36213474-7e7f-4df7-8fb6-264d9a2e9643", RUN+="${pkgs.systemd}/bin/systemctl start mnt-pendrv.mount"
+      ACTION=="remove", SUBSYSTEM=="block", ENV{DEVTYPE}=="partition", ENV{ID_FS_UUID}=="36213474-7e7f-4df7-8fb6-264d9a2e9643", RUN+="${pkgs.systemd}/bin/systemctl stop mnt-pendrv.mount"
+    '';
   };
 
   # Filesystem configuration
@@ -61,6 +65,16 @@ _: {
         "gid=100"
         "umask=022"
         "big_writes"
+      ];
+    };
+
+    "/mnt/pendrv" = {
+      device = "/dev/disk/by-uuid/36213474-7e7f-4df7-8fb6-264d9a2e9643";
+      fsType = "btrfs";
+      options = [
+        "nofail"
+        "x-systemd.automount"
+        "x-systemd.device-timeout=5s"
       ];
     };
 

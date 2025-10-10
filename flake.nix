@@ -45,6 +45,11 @@
       flake = false;
     };
 
+    polylogue = {
+      url = "github:Sinity/polylogue";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     # Optional Sinex overlay; defaults to a local stub so evaluation works without
     # access to the private repository. Override with
     # `nix flake lock --update-input sinex git+ssh://git@github.com/Sinity/sinex`

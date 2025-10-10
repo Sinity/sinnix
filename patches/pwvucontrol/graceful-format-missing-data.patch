@@ -1,13 +1,6 @@
---- a/src/backend/pwnodeobject.rs
-+++ b/src/backend/pwnodeobject.rs
-@@ -339,13 +339,15 @@
- 
-         node.enum_params(Some("Format"), None, gtk::gio::Cancellable::NONE, clone!(@weak self as widget, @weak node => move |res| {
-             if let Ok(Some(iter)) = res {
--
-                 for a in iter {
-                     let pod: wp::spa::SpaPod = a.get().unwrap();
-                     if !pod.is_object() {
+--- a/src/backend/pwnodeobject.rs	2025-10-10 01:11:51.762421270 +0200
++++ b/src/backend/pwnodeobject.rs	2025-10-10 01:18:14.256301183 +0200
+@@ -346,6 +346,9 @@
                          continue;
                      }
  
@@ -17,7 +10,7 @@
                      fn get_pod_maybe_choice(pod: wp::spa::SpaPod) -> wp::spa::SpaPod {
                          if pod.is_choice() {
                              pod.choice_child().unwrap()
-@@ -354,35 +356,108 @@
+@@ -354,35 +357,103 @@
                          }
                      }
  
@@ -35,9 +28,8 @@
 +                        );
 +                        continue;
 +                    };
-+
 +                    let format = match get_pod_maybe_choice(choice).id() {
-+                        Ok(0) => {
++                        Some(0) => {
 +                            pwvucontrol_warning!(
 +                                "Skipping format update for node {} ({}): format id is 0",
 +                                node_id,
@@ -45,10 +37,10 @@
 +                            );
 +                            continue;
 +                        }
-+                        Ok(format) => format,
-+                        Err(err) => {
++                        Some(value) => value,
++                        None => {
 +                            pwvucontrol_warning!(
-+                                "Skipping format update for node {} ({}): cannot read format id ({err:?})",
++                                "Skipping format update for node {} ({}): cannot read format id",
 +                                node_id,
 +                                node_name.as_str()
 +                            );
@@ -58,34 +50,36 @@
  
                      let channels = match pod.find_spa_property(&wp::spa::ffi::SPA_FORMAT_AUDIO_channels) {
 -                        Some(pod) => get_pod_maybe_choice(pod).int().expect("Channels int"),
+-                        None => 0
 +                        Some(pod) => match get_pod_maybe_choice(pod).int() {
-+                            Ok(value) => value,
-+                            Err(err) => {
++                            Some(value) => value,
++                            None => {
 +                                pwvucontrol_warning!(
-+                                    "Skipping format update for node {} ({}): cannot read channel count ({err:?})",
++                                    "Skipping format update for node {} ({}): cannot read channel count",
 +                                    node_id,
 +                                    node_name.as_str()
 +                                );
 +                                continue;
 +                            }
 +                        },
-                         None => 0
++                        None => 0,
                      };
  
                      let rate = match pod.find_spa_property(&wp::spa::ffi::SPA_FORMAT_AUDIO_rate) {
 -                        Some(pod) => get_pod_maybe_choice(pod).int().expect("Rate int"),
+-                        None => 0
 +                        Some(pod) => match get_pod_maybe_choice(pod).int() {
-+                            Ok(value) => value,
-+                            Err(err) => {
++                            Some(value) => value,
++                            None => {
 +                                pwvucontrol_warning!(
-+                                    "Skipping format update for node {} ({}): cannot read sample rate ({err:?})",
++                                    "Skipping format update for node {} ({}): cannot read sample rate",
 +                                    node_id,
 +                                    node_name.as_str()
 +                                );
 +                                continue;
 +                            }
 +                        },
-                         None => 0
++                        None => 0,
                      };
  
 -                    let choice = pod.find_spa_property(&wp::spa::ffi::SPA_FORMAT_AUDIO_position).expect("Position!");
@@ -107,8 +101,10 @@
 +                        continue;
 +                    }
                      let vec: Vec<u32> = positionpod.array_iterator().map(|x: i32| x as u32).collect();
-                     let mut a = [0u32;64];
-                     for (i,v) in (0..).zip(vec.iter()) {
+-                    let mut a = [0u32;64];
+-                    for (i,v) in (0..).zip(vec.iter()) {
++                    let mut a = [0u32; 64];
++                    for (i, v) in (0..).zip(vec.iter()) {
                          a[i] = *v;
                      }
  
@@ -122,21 +118,16 @@
 +                        node_id
 +                    );
 +
-+                    let Some(t_format) = wp::spa::SpaIdTable::from_name("Spa:Enum:AudioFormat") else {
-+                        pwvucontrol_warning!(
-+                            "Skipping format update for node {} ({}): cannot load audio format table",
-+                            node_id,
-+                            node_name.as_str()
-+                        );
-+                        continue;
-+                    };
-+                    let formatname = t_format
-+                        .values()
-+                        .into_iter()
-+                        .find(|x| x.number() == format)
-+                        .and_then(|x| x.short_name())
-+                        .unwrap_or("Unknown");
++                    let formatname = wp::spa::SpaIdTable::from_name("Spa:Enum:AudioFormat")
++                        .and_then(|table| {
++                            table
++                                .values()
++                                .into_iter()
++                                .find(|x| x.number() == format)
++                                .and_then(|x| x.short_name())
++                                .map(|name| name.to_string())
++                        })
++                        .unwrap_or_else(|| "Unknown".to_string());
  
                      widget.set_formatstr(format!("{}ch {}Hz {}", channels, rate, formatname));
  
- EOF

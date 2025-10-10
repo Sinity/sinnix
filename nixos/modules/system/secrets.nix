@@ -2,10 +2,11 @@
   lib,
   username,
   config,
+  flakeRoot,
   ...
 }:
 let
-  secretDir = ../../secret;
+  secretDir = builtins.toString flakeRoot + "/secret";
 
   secretFiles =
     if builtins.pathExists secretDir then
@@ -70,7 +71,7 @@ in
             };
           in
           {
-            file = ../../secret/${filename};
+            file = secretDir + "/" + filename;
           }
           // (
             if secretName == "davfs2-secrets" then

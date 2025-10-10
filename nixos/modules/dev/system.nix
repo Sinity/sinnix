@@ -1,6 +1,10 @@
-{ pkgs, ... }:
+{ pkgs, inputs, ... }:
+let
+  polyloguePackage = inputs.polylogue.packages.${pkgs.stdenv.system}.polylogue;
+in
 {
-  environment.systemPackages = with pkgs; [
+  environment.systemPackages =
+    (with pkgs; [
     git
     git-annex
     gnumake
@@ -107,7 +111,8 @@
     gum
     google-cloud-sdk
     linuxPackages.cpupower
-  ];
+  ])
+    ++ [ polyloguePackage ];
 
   programs.nix-ld = {
     enable = true;

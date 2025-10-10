@@ -1,6 +1,6 @@
-{ pkgs, lib, ... }:
+{ pkgs, lib, flakeRoot, projectLib, ... }:
 let
-  nextcloudCert = builtins.readFile ../../module/asset/nextcloud-cert.crt;
+  nextcloudCert = builtins.readFile (projectLib.mkAssetPath flakeRoot "nextcloud-cert.crt");
 in
 {
   environment = {

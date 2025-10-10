@@ -3,6 +3,7 @@
   username,
   host,
   flakeRoot,
+  projectLib,
   lib,
   config,
   ...
@@ -20,12 +21,13 @@
         username
         host
         flakeRoot
+        projectLib
         ;
       secretsExportScript = config.sinnix.secrets.exportScript;
       quickshellEnable = config.sinnix.interface.quickshell.enable;
     };
     users.${username} = {
-      imports = [ ../../home/sinity ];
+      imports = [ ../../../home/profiles/sinity ];
       stylix.targets.vscode.enable = false;
     };
   };

@@ -1,6 +1,6 @@
 # Scripts
 
-{ pkgs, ... }:
+{ pkgs, flakeRoot, projectLib, ... }:
 let
   toggle_waybar = pkgs.writeScriptBin "toggle_waybar" ''
     #!/usr/bin/env bash
@@ -877,7 +877,7 @@ let
       kitty
       python3
     ];
-    text = builtins.readFile ../../module/asset/kitty-image-grid.sh;
+    text = builtins.readFile (projectLib.mkAssetPath flakeRoot "kitty-image-grid.sh");
   };
 
   visionModelsSync = pkgs.writeShellApplication {

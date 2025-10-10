@@ -45,25 +45,24 @@ let
       icon="󰓃"
       class="speaker"
 
-      if [[ "$lowered" == *"headphone"* || "$lowered" == *"headset"* ]]; then
+      if [[ "$lowered" == *"wh-1000xm5"* || "$lowered" == *"galaxy buds2 pro"* ]]; then
+        icon="󰋋"
+        class="headphones"
+      elif [[ "$lowered" == *"headphone"* || "$lowered" == *"headset"* ]]; then
         icon="󰋋"
         class="headphones"
       elif [[ "$lowered" == *"bluetooth"* || "$lowered" == *"bt"* ]]; then
         icon="󰂯"
         class="bluetooth"
-      elif [[ "$lowered" == *"hdmi"* || "$lowered" == *"digital"* || "$lowered" == *"display"* || "$lowered" == *"monitor"* ]]; then
+      elif [[ "$lowered" == *"monitor"* || "$lowered" == *"display"* ]]; then
+        icon="󰹑"
+        class="monitor"
+      elif [[ "$lowered" == *"hdmi"* || "$lowered" == *"digital"* ]]; then
         icon="󰡁"
         class="hdmi"
-      elif [[ "$lowered" == *"usb"* || "$lowered" == *"dac"* || "$lowered" == *"ifi"* ]]; then
-        icon="󰂰"
-        class="usb"
-      fi
-
-      short_label="$label"
-      max_chars=28
-      limit=$((max_chars - 1))
-      if (( ''${#short_label} > max_chars )); then
-        short_label="$(printf '%s' "$short_label" | cut -c1-"$limit")..."
+      elif [[ "$lowered" == *"usb"* || "$lowered" == *"dac"* || "$lowered" == *"ifi"* || "$lowered" == *"fiio"* || "$lowered" == *"e10k"* || "$lowered" == *"ultima 40"* ]]; then
+        icon="󰓃"
+        class="speaker"
       fi
 
       tooltip="$label"
@@ -71,7 +70,7 @@ let
         tooltip="$label"$'\n'"$device"
       fi
 
-      text_output="$icon $short_label"
+      text_output="$icon"
       jq -n --arg text "$text_output" --arg tooltip "$tooltip" --arg class "$class" '{text:$text, tooltip:$tooltip, class:$class}'
     '';
   };
@@ -293,6 +292,7 @@ in
       #custom-audio-output.headphones { color: #d3869b; }
       #custom-audio-output.bluetooth { color: #8ec07c; }
       #custom-audio-output.hdmi { color: #fe8019; }
+      #custom-audio-output.monitor { color: #fe8019; }
       #custom-audio-output.usb { color: #b8bb26; }
     '';
     settings.mainBar = {
@@ -369,7 +369,7 @@ in
         spacing = 8;
       };
       "custom/audio-output" = {
-        format = "{}";
+        format = "{text}";
         return-type = "json";
         interval = 2;
         exec = "${audioOutputStatus}/bin/audio-output-status";
