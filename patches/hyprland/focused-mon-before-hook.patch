@@ -1,0 +1,16 @@
+diff --git a/src/Compositor.cpp b/src/Compositor.cpp
+index 4ca74b30..c4e187a9 100644
+--- a/src/Compositor.cpp
++++ b/src/Compositor.cpp
+@@ -2677,8 +2677,10 @@ void CCompositor::setActiveMonitor(PHLMONITOR pMonitor) {
+ 
+     g_pEventManager->postEvent(SHyprIPCEvent{.event = "focusedmon", .data = pMonitor->m_name + "," + WORKSPACE_NAME});
+     g_pEventManager->postEvent(SHyprIPCEvent{.event = "focusedmonv2", .data = pMonitor->m_name + "," + WORKSPACE_ID});
++
++    m_lastMonitor = pMonitor->m_self;
+ 
+     EMIT_HOOK_EVENT("focusedMon", pMonitor);
+-    m_lastMonitor = pMonitor->m_self;
+ }
+ 
+ bool CCompositor::isWorkspaceSpecial(const WORKSPACEID& id) {

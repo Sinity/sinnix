@@ -1,0 +1,17 @@
+diff --git a/src/hyprerror/HyprError.cpp b/src/hyprerror/HyprError.cpp
+index ffb716c6..ee58826a 100644
+--- a/src/hyprerror/HyprError.cpp
++++ b/src/hyprerror/HyprError.cpp
+@@ -18,7 +18,11 @@ CHyprError::CHyprError() {
+         if (!m_isCreated)
+             return;
+ 
+-        g_pHyprRenderer->damageMonitor(g_pCompositor->m_lastMonitor.lock());
++        const auto PMONITOR = std::any_cast<PHLMONITOR>(param);
++        if (!PMONITOR)
++            return;
++
++        g_pHyprRenderer->damageMonitor(PMONITOR);
+         m_monitorChanged = true;
+     });
+ 

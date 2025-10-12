@@ -1,6 +1,7 @@
 { pkgs, inputs, ... }:
 let
   polyloguePackage = inputs.polylogue.packages.${pkgs.stdenv.system}.polylogue;
+  sinevecPackage = inputs.sinevec.packages.${pkgs.stdenv.system}.sinevec;
 in
 {
   environment.systemPackages =
@@ -112,7 +113,7 @@ in
     google-cloud-sdk
     linuxPackages.cpupower
   ])
-    ++ [ polyloguePackage ];
+    ++ [ polyloguePackage sinevecPackage ];
 
   programs.nix-ld = {
     enable = true;
