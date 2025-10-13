@@ -2,17 +2,13 @@
 
 ## Project Structure & Module Organization
 - `flake.nix` is the entrypoint; the `flake/` directory wires CLI apps, dev shells, and overlays.
-- System modules live under `nixos/modules/` (e.g., `nixos/modules/system`, `nixos/modules/automation`). Import changes through the nearest `default.nix`.
-- Home profile modules live under `home/profiles/<user>/` (e.g., `home/profiles/sinity/desktop`, `home/profiles/sinity/dev`).
-- Machine-specific overrides reside in `nixos/hosts/` (notably `nixos/hosts/sinnix-prime/`).
-- Shared dotfiles live in `dots/`; reusable assets belong in `nixos/assets/`. Add repeatable scripts to `nixos/modules/automation/scripts.nix` or promote them to `flake/apps.nix` apps.
+- System modules live under `modules/` (e.g., `modules/system`, `modules/services`). Import changes through the nearest `default.nix`.
+- Home profile modules live under `home/` (e.g., `home/desktop`, `home/dev`).
+- Machine-specific overrides reside in `hosts/` (notably `hosts/sinnix-prime/`).
+- Shared dotfiles live in `dots/`; reusable assets belong in `assets/`. Add repeatable scripts to `modules/automation/scripts.nix` or promote them to `flake/apps.nix` apps.
 
-### Feature Toggles
-- Enable infra through Nix options instead of editing modules in-place:
-  - `sinnix.media.pipewire.enable` – PipeWire/WirePlumber audio stack.
-  - `sinnix.networking.enable` – NetworkManager/resolved/SSH/Bluetooth defaults.
-  - `sinnix.services.<name>.enable` – per-service toggles for `transmission`, `postgresql`, `photoprism`, and `qdrant`.
-- Hosts (e.g. `nixos/hosts/sinnix-prime/default.nix`) opt-in to features by setting these options; defaults remain off so modules stay reusable.
+### Services & Features
+- Core audio, networking, and desktop plumbing are enabled in the shared modules; hosts only import the service modules they need (see `hosts/sinnix-prime`).
 
 ## Build, Test, and Development Commands
 - `direnv allow` / `nix develop` – enter the dev shell with hooks and helper commands.
@@ -37,4 +33,4 @@
 ## Commit & Pull Request Guidelines
 - Commit subjects: ≤60 characters, imperative lowercase (e.g., `tighten dns routing`); squash fixups locally.
 - Bodies touching services, secrets, or host modules should note context and verification commands run.
-- Pull requests should link issues when available, list affected modules (e.g., `nixos/modules/ui/system.nix`, `home/profiles/sinity/desktop/hyprland.nix`, `nixos/hosts/sinnix-prime/*`), and include logs or screenshots for UI-impacting changes.
+- Pull requests should link issues when available, list affected modules (e.g., `modules/ui.nix`, `home/desktop/hyprland.nix`, `hosts/sinnix-prime/*`), and include logs or screenshots for UI-impacting changes.

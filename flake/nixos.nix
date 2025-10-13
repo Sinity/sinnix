@@ -26,10 +26,10 @@
         (import ./overlay.nix)
 
         # Import host-specific configuration
-        { imports = [ ../nixos/hosts/sinnix-prime ]; }
+        { imports = [ ../hosts/sinnix-prime ]; }
 
         # Import domain modules (all functionality now consolidated here)
-        { imports = [ ../nixos/modules/default.nix ]; }
+        { imports = [ ../modules/default.nix ]; }
       ];
 
       # Make these values available to all modules
@@ -41,8 +41,6 @@
         # Provide compiled packages directly
         intercept-bounce = inputs.intercept-bounce.packages.x86_64-linux.default;
         scribe-tap = inputs.scribe-tap.packages.x86_64-linux.default;
-        flakeRoot = ../.;
-        projectLib = import ../lib { lib = inputs.nixpkgs.lib; };
       };
     };
   };

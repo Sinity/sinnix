@@ -1,0 +1,261 @@
+#!/usr/bin/env python3
+"""Evaluate package usage heuristics for configured system and home packages."""
+import argparse
+import json
+import os
+import shlex
+import subprocess
+from collections import defaultdict
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
+
+DEFAULT_ATTRS: Sequence[Tuple[str, str]] = (
+    (
+        "system",
+        "nixosConfigurations.sinnix-prime.config.environment.systemPackages",
+    ),
+    (
+        "home",
+        "nixosConfigurations.sinnix-prime.config.home-manager.users.sinity.home.packages",
+    ),
+)
+
+
+def nix_eval_packages(attr: str, root: Path) -> List[Dict[str, str]]:
+    def eval_selector(selector: str) -> List[str]:
+        expr = f"(pkgs: builtins.map (pkg: {selector}) pkgs)"
+        result = subprocess.run(
+            ["nix", "eval", "--json", f".#{attr}", "--apply", expr],
+            check=True,
+            capture_output=True,
+            text=True,
+            cwd=root,
+        )
+        return json.loads(result.stdout)
+
+    names = eval_selector('(pkg.pname or pkg.name or "")')
+    out_paths = eval_selector('(pkg.outPath or "")')
+    return [
+        {"name": name, "outPath": out_path}
+        for name, out_path in zip(names, out_paths)
+    ]
+
+
+def bin_commands(out_path: str) -> Set[str]:
+    if not out_path:
+        return set()
+    bin_dir = Path(out_path) / "bin"
+    if not bin_dir.is_dir():
+        return set()
+    cmds: Set[str] = set()
+    for entry in bin_dir.iterdir():
+        try:
+            if entry.is_file() and os.access(entry, os.X_OK):
+                cmds.add(entry.name)
+        except OSError:
+            continue
+    return cmds
+
+
+def parse_command_tokens(raw: str) -> Optional[str]:
+    raw = raw.strip()
+    if not raw:
+        return None
+    # Drop systemd prefixes
+    while raw and raw[0] in "-+@!:":
+        raw = raw[1:]
+    try:
+        tokens = shlex.split(raw, posix=True)
+    except ValueError:
+        return None
+    if not tokens:
+        return None
+
+    idx = 0
+    # Skip KEY=VALUE assignments (desktop files often start with env vars)
+    while idx < len(tokens) and "=" in tokens[idx] and not tokens[idx].startswith("/" ):
+        idx += 1
+    if idx >= len(tokens):
+        return None
+    cmd = tokens[idx]
+    idx += 1
+
+    while cmd in {"env", "sudo"} and idx < len(tokens):
+        cmd = tokens[idx]
+        idx += 1
+
+    if cmd.startswith("/"):
+        cmd = Path(cmd).name
+    if cmd.startswith("$") or cmd.startswith("%"):
+        return None
+    if cmd:
+        return cmd
+    return None
+
+
+def collect_history_commands(paths: Iterable[Path]) -> Set[str]:
+    cmds: Set[str] = set()
+    for path in paths:
+        try:
+            with path.open("r", errors="ignore") as handle:
+                for line in handle:
+                    if ";" in line:
+                        _, _, tail = line.partition(";")
+                        candidate = tail.strip()
+                    else:
+                        candidate = line.strip()
+                    if not candidate:
+                        continue
+                    first = candidate.split()[0]
+                    if first:
+                        cmds.add(first)
+        except FileNotFoundError:
+            continue
+    return cmds
+
+
+def collect_desktop_commands(base_dirs: Iterable[Path]) -> Set[str]:
+    cmds: Set[str] = set()
+    for base in base_dirs:
+        if not base.is_dir():
+            continue
+        for desktop in base.glob("*.desktop"):
+            try:
+                for line in desktop.read_text(errors="ignore").splitlines():
+                    if not line.lower().startswith("exec="):
+                        continue
+                    _, _, exec_line = line.partition("=")
+                    cmd = parse_command_tokens(exec_line)
+                    if cmd:
+                        cmds.add(cmd)
+            except OSError:
+                continue
+    return cmds
+
+
+def collect_service_commands(base_dirs: Iterable[Path]) -> Set[str]:
+    keys = ("execstart", "execstartpre", "execstartpost", "execstop", "execreload")
+    cmds: Set[str] = set()
+    for base in base_dirs:
+        if not base.is_dir():
+            continue
+        for service in base.glob("*.service"):
+            try:
+                for line in service.read_text(errors="ignore").splitlines():
+                    lower = line.lower().strip()
+                    if not lower:
+                        continue
+                    for key in keys:
+                        if lower.startswith(f"{key}="):
+                            _, _, exec_line = line.partition("=")
+                            # systemd allows multiple commands separated by ';'
+                            for segment in exec_line.split(";"):
+                                cmd = parse_command_tokens(segment)
+                                if cmd:
+                                    cmds.add(cmd)
+                            break
+            except OSError:
+                continue
+    return cmds
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Audit package usage heuristics")
+    parser.add_argument(
+        "--attr",
+        action="append",
+        help="Label=flakeAttrPath (defaults to system and home packages)",
+    )
+    parser.add_argument(
+        "--root",
+        default="/realm/sinnix",
+        help="Repository root for nix evaluation (defaults to /realm/sinnix)",
+    )
+    args = parser.parse_args()
+
+    attrs: List[Tuple[str, str]] = []
+    if args.attr:
+        for item in args.attr:
+            if "=" not in item:
+                parser.error("--attr expects label=attr-path")
+            label, attr = item.split("=", 1)
+            attrs.append((label.strip(), attr.strip()))
+    else:
+        attrs = list(DEFAULT_ATTRS)
+
+    repo_root = Path(args.root).expanduser().resolve()
+
+    packages: Dict[Tuple[str, str], Dict[str, str]] = {}
+    pkg_commands: Dict[Tuple[str, str], Set[str]] = {}
+    command_to_packages: Dict[str, Set[Tuple[str, str]]] = defaultdict(set)
+
+    for label, attr in attrs:
+        records = nix_eval_packages(attr, repo_root)
+        for record in records:
+            name = record.get("name") or "<unknown>"
+            out_path = record.get("outPath") or ""
+            key = (label, name)
+            packages[key] = {"outPath": out_path, "attr": attr}
+            cmds = bin_commands(out_path)
+            if cmds:
+                pkg_commands[key] = cmds
+                for cmd in cmds:
+                    command_to_packages[cmd].add(key)
+            else:
+                pkg_commands[key] = set()
+
+    history = collect_history_commands([
+        Path.home() / ".zsh_history",
+        Path.home() / ".bash_history",
+    ])
+    desktop_cmds = collect_desktop_commands(
+        [Path.home() / ".local/share/applications"]
+    )
+    service_cmds = collect_service_commands(
+        [
+            Path("/etc/systemd/system"),
+            Path("/etc/systemd/user"),
+            Path.home() / ".config/systemd/user",
+        ]
+    )
+
+    signals: Dict[Tuple[str, str], Set[str]] = defaultdict(set)
+    for pkg, cmds in pkg_commands.items():
+        for cmd in cmds:
+            if cmd in history:
+                signals[pkg].add("history")
+            if cmd in desktop_cmds:
+                signals[pkg].add("desktop")
+            if cmd in service_cmds:
+                signals[pkg].add("service")
+
+    unused: List[Tuple[str, str]] = []
+    hinted: List[Tuple[str, str, Set[str]]] = []
+    for pkg in sorted(packages.keys()):
+        reasons = signals.get(pkg, set())
+        if reasons:
+            hinted.append((pkg[0], pkg[1], reasons))
+        else:
+            unused.append(pkg)
+
+    print("== No usage signals detected ==")
+    for label, name in unused:
+        cmds = sorted(pkg_commands.get((label, name)) or [])
+        cmd_display = ", ".join(cmds[:5])
+        if len(cmds) > 5:
+            cmd_display += ", …"
+        print(f"- [{label}] {name}" + (f" (commands: {cmd_display})" if cmd_display else ""))
+
+    print("\n== Possible usage indicators ==")
+    for label, name, reason_set in hinted:
+        reason_list = ",".join(sorted(reason_set))
+        print(f"- [{label}] {name} ← {reason_list}")
+
+    print("\nSignals summary:")
+    print(f"  history commands: {len(history)}")
+    print(f"  desktop Exec commands: {len(desktop_cmds)}")
+    print(f"  systemd Exec commands: {len(service_cmds)}")
+
+
+if __name__ == "__main__":
+    main()

@@ -30,7 +30,7 @@
     intercept-bounce.inputs.nixpkgs.follows = "nixpkgs";
 
     scribe-tap = {
-      url = "path:/realm/project/scribe-tap";
+      url = "github:Sinity/scribe-tap";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -60,7 +60,7 @@
     # `nix flake lock --update-input sinex git+ssh://git@github.com/Sinity/sinex`
     # on machines that have the deploy key.
     sinex = {
-      url = "path:./vendor/sinex";
+      url = "git+ssh://git@github.com/Sinity/sinex";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 

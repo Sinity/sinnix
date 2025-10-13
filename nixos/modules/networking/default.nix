@@ -1,6 +1,0 @@
-{ ... }:
-{
-  imports = [
-    ./connectivity.nix
-  ];
-}
