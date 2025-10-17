@@ -15,10 +15,17 @@
   };
 
   systemd.tmpfiles.rules = lib.mkBefore [
-    "d /realm/data/media 0755 sinity users -"
-    "d /realm/data/media/import 2770 photoprism users -"
-    "d /realm/data/media/photoprism 2770 photoprism photoprism -"
+    "d /realm/data/media 0750 sinity media -"
+    "d /realm/data/media/import 2770 photoprism media -"
+    "d /realm/data/media/photoprism 2770 photoprism media -"
   ];
+
+  users.groups.media = {
+    members = [
+      "sinity"
+      "photoprism"
+    ];
+  };
 
   users.groups.photoprism = { };
 
@@ -26,7 +33,7 @@
     isSystemUser = true;
     group = "photoprism";
     home = "/var/lib/photoprism";
-    extraGroups = [ "users" ];
+    extraGroups = [ "media" ];
   };
 
   systemd.services.photoprism.serviceConfig.LoadCredential = lib.mkForce [

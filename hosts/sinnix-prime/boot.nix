@@ -10,10 +10,7 @@
       efi.canTouchEfiVariables = true;
     };
 
-    # Switch to the bleeding-edge kernel set so we pick up the
-    # 6.13 tree, which includes the upstream fix for the NVMe/ext4
-    # writeback soft-lockups we've been hitting.
-    kernelPackages = pkgs.linuxPackages_testing;
+    kernelPackages = pkgs.linuxPackages;
 
     initrd.availableKernelModules = [
       "xhci_pci"
@@ -25,21 +22,10 @@
     ];
     blacklistedKernelModules = [
       "i915"
-      # Removing SOF/AVS blacklist to test if it helps with binding
-      # "snd_sof_pci_intel_tgl"
-      # "snd_sof_intel_hda_common"
-      # "snd_sof_intel_hda"
-      # "snd_sof_pci"
-      # "snd_sof"
-      # "snd_soc_avs"
     ];
     kernelModules = [ "kvm-intel" ];
     kernel.sysctl = {
       "vm.swappiness" = 10;
-      # Flush dirty pages earlier to avoid the huge writeback spikes
-      # that were triggering the kernel spin-lock regression on 6.12.x.
-      "vm.dirty_ratio" = 10;
-      "vm.dirty_background_ratio" = 5;
     };
     kernelParams = [
       "quiet"
@@ -55,4 +41,7 @@
       "vga=current"
     ];
   };
+
+  powerManagement.cpuFreqGovernor = "schedutil";
+  hardware.enableRedistributableFirmware = true;
 }

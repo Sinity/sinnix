@@ -18,7 +18,7 @@
       secretsExportScript = config.sinnix.secrets.exportScript;
     };
     users.${username} = {
-      imports = [ ../../home ];
+      imports = [ ../user ];
       stylix.targets.vscode.enable = false;
     };
   };

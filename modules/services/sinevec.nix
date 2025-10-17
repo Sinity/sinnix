@@ -3,25 +3,49 @@ let
   dataRoot = "/realm/data";
   sinevecDataDir = "${dataRoot}/sinevec";
   sinevecStateDir = "${sinevecDataDir}/state";
-  sinevecLogDir = "/var/log/sinevec";
+  sinevecLogDir = "${sinevecDataDir}/logs";
   sinevecPkg = inputs.sinevec.packages.${pkgs.system}.sinevec;
+  sinevecUser = "sinevec";
+  sinevecGroup = "sinevec";
 in
 {
   environment.systemPackages = [ sinevecPkg ];
+
+  users.groups.${sinevecGroup} = {
+    members = [ "sinity" ];
+  };
+
+  users.users.${sinevecUser} = {
+    isSystemUser = true;
+    group = sinevecGroup;
+    description = "Service user for Sinevec contextual embeddings";
+    home = sinevecDataDir;
+    createHome = false;
+    extraGroups = [ ];
+  };
 
   systemd.services.sinevec = {
     description = "Sinevec contextual embeddings API";
     after = lib.mkAfter [ "qdrant.service" ];
     wants = [ "qdrant.service" ];
+    wantedBy = [ "multi-user.target" ];
     serviceConfig = {
       Type = "simple";
-      User = "sinity";
-      Group = "users";
+      User = sinevecUser;
+      Group = sinevecGroup;
       ExecStart = "${sinevecPkg}/bin/sinevec serve";
       Restart = "on-failure";
       RestartSec = 5;
       WorkingDirectory = sinevecDataDir;
       Environment = "PYTHONUNBUFFERED=1";
+      CacheDirectory = "sinevec";
+      LogsDirectory = "sinevec";
+      ReadWritePaths = [
+        sinevecDataDir
+        sinevecStateDir
+        sinevecLogDir
+      ];
+      RuntimeDirectory = "sinevec";
     };
     environment = {
       SINEVEC_DATA_ROOT = dataRoot;
@@ -37,8 +61,8 @@ in
   systemd.tmpfiles.rules = [
     "d ${dataRoot}/raindrop 0750 sinity users -"
     "d ${dataRoot}/chatlog 0750 sinity users -"
-    "d ${sinevecDataDir} 0750 sinity users -"
-    "d ${sinevecStateDir} 0750 sinity users -"
-    "d ${sinevecLogDir} 0750 sinity users -"
+    "d ${sinevecDataDir} 0750 ${sinevecUser} ${sinevecGroup} -"
+    "d ${sinevecStateDir} 0750 ${sinevecUser} ${sinevecGroup} -"
+    "d ${sinevecLogDir} 0750 ${sinevecUser} ${sinevecGroup} -"
   ];
 }

@@ -42,7 +42,7 @@ in
 {
   home.sessionVariables = {
     MEDIA_DOMAIN = "v0.3";
-    MPV_SCREENSHOT_DIR = "/realm/inbox/mpv-screenshots";
+    MPV_SCREENSHOT_DIR = "/realm/data/screenshot/mpv";
     WINEDLLOVERRIDES = "winemenubuilder.exe=d";
   };
 
@@ -96,7 +96,7 @@ in
 
       screenshot-format = "png";
       screenshot-png-compression = 9;
-      screenshot-template = "/realm/inbox/mpv-screenshots/%F-%P-%n";
+      screenshot-template = "/realm/data/screenshot/mpv/%F-%P-%n";
 
       save-position-on-quit = true;
       hdr-compute-peak = true;

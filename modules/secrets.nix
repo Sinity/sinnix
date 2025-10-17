@@ -77,6 +77,8 @@ in
             if secretName == "github-token" then
               defaultSpec
               // {
+                group = "nixbld";
+                mode = "0440";
                 path = "/run/agenix/github-token";
               }
             else if secretName == "davfs2-secrets" then

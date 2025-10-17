@@ -144,8 +144,8 @@ in
         "SUPER, N, exec, pypr toggle notes"
 
         "SUPER, V, exec, kitty --class clipse -e clipse"
-        ", Print, exec, grimblast --notify --freeze copysave area /realm/inbox/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
-        "SUPER, Print, exec, grimblast --notify --cursor copysave output /realm/inbox/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
+        ", Print, exec, grimblast --notify --freeze copysave area /realm/data/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
+        "SUPER, Print, exec, grimblast --notify --cursor copysave output /realm/data/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
         ", F8, exec, pypr toggle rawlog"
         ", SHIFT+F8, exec, log-to-knowledgebase"
 
@@ -240,8 +240,6 @@ in
       windowrulev2 = [
         "size 60% 100%,title:^(session: )"
         "move 0% 0%,title:^(session: )"
-        "size 40% 100%,class:^(google-chrome|google-chrome-beta|firefox|qutebrowser)$"
-        "move 60% 0%,class:^(google-chrome|google-chrome-beta|firefox|qutebrowser)$"
         "float,class:^(google-chrome|google-chrome-beta)$,windowtype:=notification"
         "size 28% 24%,class:^(google-chrome|google-chrome-beta)$,windowtype:=notification"
         "move 70% 6%,class:^(google-chrome|google-chrome-beta)$,windowtype:=notification"
@@ -266,8 +264,16 @@ in
     ".config/idea-session/base-agents.md" = {
       source = asset "session/base-agents.md";
     };
+    ".local/bin/toggle-waybar" = {
+      source = script "toggle-waybar";
+      executable = true;
+    };
     ".local/bin/rawlog" = {
       source = script "rawlog";
+      executable = true;
+    };
+    ".local/bin/combine-files" = {
+      source = script "combine-files";
       executable = true;
     };
     ".local/bin/rawlog-capture" = {

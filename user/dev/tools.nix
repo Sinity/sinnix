@@ -1,0 +1,91 @@
+{
+  pkgs,
+  lib,
+  ...
+}:
+{
+  # Developer-focused toolchain packages kept in the user's profile to reduce
+  # system-wide rebuild churn while preserving the previous package set.
+  home.packages = lib.mkAfter (
+    with pkgs;
+    [
+      breakpad
+      cargo-bloat
+      cargo-deny
+      cargo-depgraph
+      cargo-expand
+      cargo-flamegraph
+      cargo-llvm-lines
+      cargo-machete
+      cargo-outdated
+      cargo-udeps
+      cbonsai
+      cmake
+      cocogitto
+      d2
+      drm_info
+      dua
+      duckdb
+      flent
+      fselect
+      gcc
+      gdb
+      git-annex
+      git-cliff
+      gitstats
+      glmark2
+      glxinfo
+      gnumake
+      gnuplot
+      google-cloud-sdk
+      gource
+      hyperfine
+      intel-gpu-tools
+      libva-utils
+      linuxPackages.cpupower
+      linuxPackages.turbostat
+      lm_sensors
+      man-pages
+      man-pages-posix
+      mesa-demos
+      meson
+      miller
+      ncdu
+      netperf
+      ninja
+      nitch
+      nix-doc
+      nix-fast-build
+      nix-health
+      nix-index
+      nix-prefetch-git
+      nix-tree
+      perf
+      phoronix-test-suite
+      pikchr
+      pipes
+      plantuml
+      ploticus
+      powertop
+      python312Packages.speedtest-cli
+      rt-tests
+      s-tui
+      scc
+      stress-ng
+      stressapptest
+      structurizr-cli
+      sysbench
+      sysstat
+      toipe
+      tty-clock
+      ttyper
+      uv
+      visidata
+      vulkan-tools
+      vulkan-validation-layers
+      wayland-utils
+      xan
+      zk
+    ]
+  );
+}

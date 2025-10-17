@@ -69,7 +69,7 @@
     system.activationScripts.githubNetrc = ''
       if [ -r /run/agenix/github-token ]; then
         token="$(tr -d '\r\n' < /run/agenix/github-token)"
-        install -m 0600 -o root -g root -D /dev/null /etc/nix/netrc
+        install -m 0640 -o root -g nixbld -D /dev/null /etc/nix/netrc
         printf 'machine github.com login x-access-token password %s\n' "$token" > /etc/nix/netrc
         printf 'machine api.github.com login x-access-token password %s\n' "$token" >> /etc/nix/netrc
       else
@@ -100,7 +100,6 @@
     security = {
       rtkit.enable = true;
       sudo.wheelNeedsPassword = false;
-      pam.services.hyprlock = { };
     };
 
     networking.firewall = {

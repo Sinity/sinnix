@@ -4,9 +4,6 @@
   ...
 }:
 {
-  boot.kernelModules = [ "snd-hda-intel" ];
-  hardware.firmware = with pkgs; [ sof-firmware ];
-
   services.pipewire = {
     enable = true;
     audio.enable = true;

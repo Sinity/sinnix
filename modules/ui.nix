@@ -9,7 +9,7 @@
     stylix = {
       enable = true;
       base16Scheme = "${pkgs.base16-schemes}/share/themes/gruvbox-dark-medium.yaml";
-      image = "${inputs.self}/assets/forest.jpg";
+      image = null;
 
       fonts = {
         monospace = {
@@ -52,14 +52,6 @@
       polarity = "dark";
     };
 
-    programs.hyprland = {
-      enable = true;
-      withUWSM = true;
-      package = inputs.hyprland.packages.${pkgs.system}.hyprland;
-    };
-
-    programs.uwsm.enable = true;
-
     xdg.portal = {
       enable = true;
       wlr.enable = true;
@@ -76,13 +68,6 @@
         ];
       };
     };
-
-    services.ratbagd.enable = true;
-    services.udev.packages = [ pkgs.solaar ];
-
-    environment.systemPackages = with pkgs; [
-      wlr-randr
-    ];
 
     fonts = {
       packages = with pkgs; [

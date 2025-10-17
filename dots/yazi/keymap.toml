@@ -1,0 +1,4 @@
+[manager]
+append_keymap = [
+  { on = ["right"], run = "open" }
+]

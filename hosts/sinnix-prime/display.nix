@@ -3,15 +3,18 @@
 {
   pkgs,
   config,
+  inputs,
   ...
 }:
 {
-  # Gaming and GPU-accelerated applications
-  programs = {
-    steam.enable = true;
-    steam.gamescopeSession.enable = true;
-    gamemode.enable = true;
+
+  programs.hyprland = {
+    enable = true;
+    withUWSM = true;
+    package = inputs.hyprland.packages.${pkgs.system}.hyprland;
   };
+
+  programs.uwsm.enable = true;
 
   # X11 server for compatibility and NVIDIA drivers
   services.xserver = {
@@ -38,4 +41,7 @@
       ];
     };
   };
+
+  security.pam.services.hyprlock = {};
+
 }

@@ -1,0 +1,9 @@
+[opener]
+open = [
+  { run = "nvim \"$@\"", desc = "Neovim", block = true }
+]
+
+[open]
+rules = [
+  { name = "*", use = "open" }
+]

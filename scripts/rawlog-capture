@@ -8,8 +8,13 @@ set -euo pipefail
 KB_ROOT=${KB_ROOT:-/realm/knowledgebase}
 RAWLOG_BIN=${RAWLOG_BIN:-$HOME/.local/bin/rawlog}
 CANCEL_CODE=${RAWLOG_CANCEL_CODE:-130}
-GUM_WIDTH=${GUM_WIDTH:-0}
-GUM_HEIGHT=${GUM_HEIGHT:-0}
+GUM_WIDTH=${GUM_WIDTH:-80}
+
+if [ -n "${RAWLOG_HEIGHT_OVERRIDE:-}" ]; then
+  GUM_HEIGHT=$RAWLOG_HEIGHT_OVERRIDE
+else
+  GUM_HEIGHT=$(tput lines 2>/dev/null || echo 24)
+fi
 
 die() { echo "rawlog-capture: $*" >&2; exit 1; }
 
@@ -33,8 +38,6 @@ if ! entry=$(gum write \
   exit "$CANCEL_CODE"
 fi
 
-# gum write returns with a trailing newline; trim without touching
-# internal formatting.
 entry=${entry%$'\n'}
 
 [ -n "$entry" ] || {

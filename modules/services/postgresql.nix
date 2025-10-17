@@ -47,6 +47,13 @@ in
         name = "sinex";
         ensureDBOwnership = true;
       }
+      {
+        name = "sinity";
+        ensureClauses = {
+          login = true;
+          createdb = true;
+        };
+      }
     ];
   };
 }

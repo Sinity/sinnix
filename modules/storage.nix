@@ -73,8 +73,8 @@ in
       description = "OneDrive Selective Synchronization";
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
-      wantedBy = [ ];
-      enable = false;
+      wantedBy = [ "multi-user.target" ];
+      enable = true;
       preStart = ''
         if [ ! -f /var/lib/onedrive-auth/config ]; then
           cp -r /etc/onedrive/* /var/lib/onedrive-auth/ || true
@@ -98,8 +98,8 @@ in
       description = "Mount Google Drive via rclone";
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
-      wantedBy = [ ];
-      enable = false;
+      wantedBy = [ "multi-user.target" ];
+      enable = true;
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;

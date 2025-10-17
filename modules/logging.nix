@@ -41,8 +41,8 @@ in
       "d ${journaldBaseDir}/journal 2750 root systemd-journal -"
       "d ${bootMetricsDir} 0750 ${username} users -"
       "d /realm/inbox 0755 ${username} users -"
-      "d /realm/inbox/screenshot 0755 ${username} users -"
-      "d /realm/inbox/mpv-screenshots 0755 ${username} users -"
+      "d /realm/data/screenshot 0755 ${username} users -"
+      "d /realm/data/screenshot/mpv 0755 ${username} users -"
     ];
 
     services.journald.extraConfig = ''

@@ -29,8 +29,8 @@ prompt_text() {
     sed -e 's/^[[:space:]]\+//' -e 's/[[:space:]]\+$//'
 }
 
-# Build category list from top-level dirs
-categories=$(find "$KB_ROOT" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' | sort)
+# Build category list from top-level dirs (skip dot folders).
+categories=$(find "$KB_ROOT" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' | grep -v '^\.' | sort)
 [ -n "$categories" ] || categories="inbox\nnotes\nlogs"
 
 category=$(pick_one "Category" "$categories")

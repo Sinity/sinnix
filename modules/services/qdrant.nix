@@ -50,7 +50,7 @@
     "z /realm/data/qdrant/snapshots 0750 qdrant qdrant - -"
   ];
 
-  users.groups.qdrant = { };
+  users.groups.qdrant.members = [ "sinity" ];
 
   users.users.qdrant = {
     isSystemUser = true;
