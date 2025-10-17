@@ -35,21 +35,6 @@ in
     ln -sfn .config/claude "$HOME/.claude"
   '';
 
-  # Keep bat's syntax/theme cache aligned with the packaged version to avoid runtime errors.
-  home.activation.refreshBatCache = lib.hm.dag.entryAfter [ "ensureClaudeDir" ] ''
-    if command -v bat >/dev/null 2>&1; then
-      cache_dir="$HOME/.cache/bat"
-      sentinel="''${cache_dir}/.nix-managed-${pkgs.bat.version}"
-      if [ ! -e "$sentinel" ]; then
-        ${pkgs.bat}/bin/bat cache --clear >/dev/null 2>&1 || true
-        ${pkgs.bat}/bin/bat cache --build >/dev/null 2>&1 || true
-        mkdir -p "$cache_dir"
-        rm -f "$cache_dir"/.nix-managed-*
-        touch "$sentinel"
-      fi
-    fi
-  '';
-
   programs.btop = {
     enable = true;
     settings = {

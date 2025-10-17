@@ -28,4 +28,8 @@
     home = "/var/lib/photoprism";
     extraGroups = [ "users" ];
   };
+
+  systemd.services.photoprism.serviceConfig.LoadCredential = lib.mkForce [
+    "PHOTOPRISM_ADMIN_PASSWORD_FILE:/run/agenix/photoprism-admin-password"
+  ];
 }

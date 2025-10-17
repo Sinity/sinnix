@@ -25,11 +25,11 @@
         # Import system-wide overlay
         (import ./overlay.nix)
 
-        # Import host-specific configuration
-        { imports = [ ../hosts/sinnix-prime ]; }
-
         # Import domain modules (all functionality now consolidated here)
         { imports = [ ../modules/default.nix ]; }
+
+        # Import host-specific configuration last so it can override shared defaults
+        { imports = [ ../hosts/sinnix-prime ]; }
       ];
 
       # Make these values available to all modules
@@ -37,10 +37,6 @@
         host = "sinnix-prime";
         username = "sinity";
         inherit inputs;
-
-        # Provide compiled packages directly
-        intercept-bounce = inputs.intercept-bounce.packages.x86_64-linux.default;
-        scribe-tap = inputs.scribe-tap.packages.x86_64-linux.default;
       };
     };
   };

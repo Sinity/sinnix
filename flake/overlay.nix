@@ -75,12 +75,19 @@ in
           patches = (old.patches or [ ]) ++ [
             ../patches/hyprland/suppress-color-warning.patch
             ../patches/hyprland/check-monitor-null.patch
+            ../patches/hyprland/special-workspace-damage.patch
           ];
         });
 
         pwvucontrol = prev.pwvucontrol.overrideAttrs (old: {
           patches = (old.patches or [ ]) ++ [
             ../patches/pwvucontrol/graceful-format-missing-data.patch
+          ];
+        });
+
+        uwsm = prev.uwsm.overrideAttrs (old: {
+          patches = (old.patches or [ ]) ++ [
+            ../patches/uwsm/fix-systemd-unit-escaping.patch
           ];
         });
 

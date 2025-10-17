@@ -75,7 +75,7 @@ in
           }
           // (
             if secretName == "github-token" then
-              rootOwnedSpec
+              defaultSpec
               // {
                 path = "/run/agenix/github-token";
               }

@@ -6,6 +6,6 @@
     ./dev
     ./media.nix
     ./networking.nix
-    ./automation
+    ./storage.nix
   ];
 }

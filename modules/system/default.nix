@@ -8,5 +8,6 @@
     ./home-manager.nix
     ./users.nix
     ./access-tokens.nix
+    ./interception.nix
   ];
 }

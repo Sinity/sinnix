@@ -1,0 +1,34 @@
+diff --git a/uwsm/main.py b/uwsm/main.py
+index 7a17910..de729f2 100644
+--- a/uwsm/main.py
++++ b/uwsm/main.py
+@@ -2750,6 +2750,7 @@ def finalize(additional_vars=None):
+         print_error(
+             f'Finalization: Unit conflict, active: "{wm_id}", but another is activating: "{activating_wm_id}"!'
+         )
+         sys.exit(1)
++    wm_id_unit_string = simple_systemd_escape(wm_id, start=False)
+ 
+     # append vars to cleanup file
+     try:
+         append_to_cleanup_file(export_vars_names, create=False)
+@@ -2768,7 +2769,7 @@ def finalize(additional_vars=None):
+         os.execlp("systemd-notify", "systemd-notify", "READY=1", "NOTIFYACCESS=exec")
+     else:
+         if (
+             bus_session.get_unit_property(
+-                f"wayland-wm@{wm_id}.service", "NotifyAccess", skip_generic=True
++                f"wayland-wm@{wm_id_unit_string}.service", "NotifyAccess", skip_generic=True
+             )
+             == "all"
+         ):
+             print_normal(
+@@ -5444,7 +5445,7 @@ def finalize(additional_vars=None):
+                         else:
+                             if (
+                                 bus_session.get_unit_property(
+-                                    f"wayland-wm@{CompGlobals.id}.service",
++                                    f"wayland-wm@{CompGlobals.id_unit_string}.service",
+                                     "NotifyAccess",
+                                     skip_generic=True,
+                                 )

@@ -206,7 +206,6 @@ in
         "float,title:^(Save As)$"
         "float,class:^(pavucontrol)$"
         "float,class:^(nm-connection-editor)$"
-        "center,floating:1"
         "float,title:^(Picture-in-Picture)$"
         "pin,title:^(Picture-in-Picture)$"
         "size 480 270,title:^(Picture-in-Picture)$"

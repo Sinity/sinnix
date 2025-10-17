@@ -51,10 +51,6 @@ in
   services = {
     fstrim.enable = true; # periodically TRIM ssd storage devices
     gvfs.enable = true; # dynamic mount
-    udev.extraRules = ''
-      ACTION=="add", SUBSYSTEM=="block", ENV{DEVTYPE}=="partition", ENV{ID_FS_UUID}=="36213474-7e7f-4df7-8fb6-264d9a2e9643", RUN+="${pkgs.systemd}/bin/systemctl start mnt-pendrv.mount"
-      ACTION=="remove", SUBSYSTEM=="block", ENV{DEVTYPE}=="partition", ENV{ID_FS_UUID}=="36213474-7e7f-4df7-8fb6-264d9a2e9643", RUN+="${pkgs.systemd}/bin/systemctl stop mnt-pendrv.mount"
-    '';
   };
 
   fileSystems = {
@@ -135,17 +131,6 @@ in
       ];
     };
 
-    "/mnt/pendrv" = {
-      device = "/dev/disk/by-uuid/36213474-7e7f-4df7-8fb6-264d9a2e9643";
-      fsType = "btrfs";
-      options = [
-        "nofail"
-        "x-systemd.automount"
-        "x-systemd.device-timeout=5s"
-        "compress=zstd"
-      ];
-    };
-
     # "/mnt/smol_ssd" = {
     #   device = "/dev/disk/by-uuid/481e214e-7bb6-49fa-bc87-ccb1f2c1e3c3";
     #   fsType = "btrfs";
@@ -164,6 +149,14 @@ in
     description = "Prepare Btrfs swapfile";
     requiredBy = [ "swap-swapfile.swap" ];
     before = [ "swap-swapfile.swap" ];
+    after = [
+      "systemd-remount-fs.service"
+      "local-fs.target"
+    ];
+    unitConfig = {
+      # Avoid sysinit ↔ swap.target ordering cycles by taking explicit deps.
+      DefaultDependencies = false;
+    };
     serviceConfig = {
       Type = "oneshot";
       ExecStart = "${prepareSwapfile}/bin/prepare-swapfile";
@@ -173,6 +166,28 @@ in
   swapDevices = [
     {
       device = "/swap/swapfile";
+    }
+  ];
+
+  systemd.automounts = [
+    {
+      where = "/mnt/pendrv";
+      wantedBy = [ "multi-user.target" ];
+      automountConfig = {
+        TimeoutIdleSec = "600s";
+      };
+    }
+  ];
+
+  systemd.mounts = [
+    {
+      what = "/dev/disk/by-uuid/36213474-7e7f-4df7-8fb6-264d9a2e9643";
+      where = "/mnt/pendrv";
+      type = "btrfs";
+      options = "nofail,compress=zstd,x-systemd.device-timeout=5s";
+      unitConfig = {
+        StopWhenUnneeded = true;
+      };
     }
   ];
 

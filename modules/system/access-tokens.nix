@@ -18,6 +18,9 @@ in
 
   nix.settings.access-tokens =
     lib.mkMerge [
-      (lib.mkIf (githubTokenPath != "") [ "github.com=@${githubTokenPath}" ])
+      (lib.mkIf (githubTokenPath != "") [
+        "github.com=@${githubTokenPath}"
+        "api.github.com=@${githubTokenPath}"
+      ])
     ];
 }

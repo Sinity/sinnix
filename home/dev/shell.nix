@@ -5,6 +5,7 @@
     eza
     fd
     ripgrep
+    gum
     fzf
     stow
     jq

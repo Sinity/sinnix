@@ -30,6 +30,7 @@
           "sinity.cachix.org-1:i5YsUuuRv9r790gdwwE+FiJiUcWULV1lEOmKE50Y+TI="
           "nix-gaming.cachix.org-1:nbjlureqMbRAxR1gJ/f3hxemL9svXaZF/Ees8vCUUs4="
         ];
+        netrc-file = "/etc/nix/netrc";
         max-jobs = 4;
         cores = 0;
         allowed-users = [
@@ -64,6 +65,17 @@
     };
 
     services.xserver.xkb.layout = "pl";
+
+    system.activationScripts.githubNetrc = ''
+      if [ -r /run/agenix/github-token ]; then
+        token="$(tr -d '\r\n' < /run/agenix/github-token)"
+        install -m 0600 -o root -g root -D /dev/null /etc/nix/netrc
+        printf 'machine github.com login x-access-token password %s\n' "$token" > /etc/nix/netrc
+        printf 'machine api.github.com login x-access-token password %s\n' "$token" >> /etc/nix/netrc
+      else
+        rm -f /etc/nix/netrc
+      fi
+    '';
 
     console.keyMap = "pl2";
     console.font = "Lat2-Terminus16";
@@ -101,7 +113,5 @@
         }
       ];
     };
-
-    boot.kernel.sysctl."kernel.unprivileged_userns_clone" = 1;
   };
 }

@@ -8,6 +8,7 @@
     ../../modules/services/postgresql.nix
     ../../modules/services/photoprism.nix
     ../../modules/services/qdrant.nix
+    ../../modules/services/sinevec.nix
   ];
 
 }

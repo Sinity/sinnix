@@ -115,6 +115,7 @@ in
   fileSystems."/mnt/nextcloud" = {
     device = "https://nextcloud-host/remote.php/dav/files/USER/";
     fsType = "davfs";
+    noCheck = true;
     options = [
       "noauto"
       "x-systemd.automount"

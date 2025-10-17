@@ -2,46 +2,60 @@
 {
   pkgs,
   lib,
-  intercept-bounce,
-  scribe-tap,
+  inputs,
+  config,
   ...
 }:
+let
+  interceptTools = pkgs.interception-tools;
+  capsPlugin = pkgs.interception-tools-plugins.caps2esc;
+  interceptCmd = lib.escapeShellArgs [ "${interceptTools}/bin/intercept" "-g" "$DEVNODE" ];
+  bounceCmd = config.services.interceptBounce.commandString;
+  scribeCmd = config.services.scribeTap.commandString;
+  capsCmd = lib.escapeShellArgs [ "${capsPlugin}/bin/caps2esc" "-m" "1" ];
+  uinputCmd = lib.escapeShellArgs [ "${interceptTools}/bin/uinput" "-d" "$DEVNODE" ];
+  pipeline = lib.concatStringsSep " | " [ interceptCmd bounceCmd scribeCmd capsCmd uinputCmd ];
+in
 {
   environment.systemPackages = with pkgs; [
-    intercept-bounce
     interception-tools
     interception-tools-plugins.caps2esc
-    scribe-tap
   ];
+
+  services.interceptBounce = {
+    enable = true;
+    debounceTime = "40ms";
+    logInterval = "6h";
+    logBounces = true;
+    statsJson = true;
+    package = inputs.intercept-bounce.packages.${pkgs.system}.intercept-bounce;
+  };
+
+  services.scribeTap = {
+    enable = true;
+    dataDir = "/realm/data/keylog";
+    logDir = "/realm/data/keylog/logs";
+    snapshotDir = "/realm/data/keylog/snapshots";
+    logMode = "both";
+    contextMode = "hyprland";
+    translateMode = "xkb";
+    hyprUser = "sinity";
+    xkbLayout = "pl";
+    directoryMode = "0700";
+    directoryUser = "sinity";
+    directoryGroup = "users";
+    package = inputs.scribe-tap.packages.${pkgs.system}.default;
+  };
+
   services.interception-tools = {
     enable = true;
     udevmonConfig = ''
-      - JOB: "${pkgs.interception-tools}/bin/intercept -g $DEVNODE \
-            | ${intercept-bounce}/bin/intercept-bounce -t 40ms --log-interval 6h --log-bounces --stats-json \
-            | ${scribe-tap}/bin/scribe-tap --log-dir /realm/data/keylog/logs --snapshot-dir /realm/data/keylog/snapshots \
-                --log-mode both --context hyprland --hypr-user sinity --translate xkb --xkb-layout pl \
-            | ${pkgs.interception-tools-plugins.caps2esc}/bin/caps2esc -m 1 \
-            | ${pkgs.interception-tools}/bin/uinput -d $DEVNODE"
+      - JOB: "${pipeline}"
         DEVICE:
           LINK: "/dev/input/by-id/.*Logitech.*event-kbd"
           NAME: ".*Logitech.*"
     '';
   };
-
-  systemd.tmpfiles.rules = lib.mkAfter [
-    "d /realm/data/keylog 0700 sinity users - -"
-    "d /realm/data/keylog/logs 0700 sinity users - -"
-    "d /realm/data/keylog/snapshots 0700 sinity users - -"
-    "z /realm/data/keylog 0700 sinity users - -"
-    "z /realm/data/keylog/logs 0700 sinity users - -"
-    "z /realm/data/keylog/snapshots 0700 sinity users - -"
-  ];
-
-  system.activationScripts.scribeTapDirectories.text = ''
-    install -d -m 0700 -o sinity -g users /realm/data/keylog
-    install -d -m 0700 -o sinity -g users /realm/data/keylog/logs
-    install -d -m 0700 -o sinity -g users /realm/data/keylog/snapshots
-  '';
 
   # Let the kernel's schedutil governor balance responsiveness with power draw.
   powerManagement.cpuFreqGovernor = "schedutil";

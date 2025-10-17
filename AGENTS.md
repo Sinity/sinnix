@@ -5,7 +5,7 @@
 - System modules live under `modules/` (e.g., `modules/system`, `modules/services`). Import changes through the nearest `default.nix`.
 - Home profile modules live under `home/` (e.g., `home/desktop`, `home/dev`).
 - Machine-specific overrides reside in `hosts/` (notably `hosts/sinnix-prime/`).
-- Shared dotfiles live in `dots/`; reusable assets belong in `assets/`. Add repeatable scripts to `modules/automation/scripts.nix` or promote them to `flake/apps.nix` apps.
+- Shared dotfiles live in `dots/`; reusable assets belong in `assets/`. Add repeatable scripts through `modules/system/programs.nix` or promote them to `flake/apps.nix` apps.
 
 ### Services & Features
 - Core audio, networking, and desktop plumbing are enabled in the shared modules; hosts only import the service modules they need (see `hosts/sinnix-prime`).
