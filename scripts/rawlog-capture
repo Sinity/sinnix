@@ -13,7 +13,12 @@ GUM_WIDTH=${GUM_WIDTH:-80}
 if [ -n "${RAWLOG_HEIGHT_OVERRIDE:-}" ]; then
   GUM_HEIGHT=$RAWLOG_HEIGHT_OVERRIDE
 else
-  GUM_HEIGHT=$(tput lines 2>/dev/null || echo 24)
+  lines=$(tput lines 2>/dev/null || echo 24)
+  lines=$(( lines - 3 ))
+  if [ "$lines" -lt 8 ]; then
+    lines=8
+  fi
+  GUM_HEIGHT=$lines
 fi
 
 die() { echo "rawlog-capture: $*" >&2; exit 1; }

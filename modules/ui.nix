@@ -9,7 +9,7 @@
     stylix = {
       enable = true;
       base16Scheme = "${pkgs.base16-schemes}/share/themes/gruvbox-dark-medium.yaml";
-      image = null;
+      image = "${inputs.self}/assets/forest.jpg";
 
       fonts = {
         monospace = {
@@ -50,9 +50,6 @@
       };
 
       polarity = "dark";
-      targets = {
-        vscode.enable = false;
-      };
     };
 
     xdg.portal = {

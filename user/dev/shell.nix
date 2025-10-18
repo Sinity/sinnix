@@ -134,7 +134,7 @@
         eval "$(atuin init zsh --disable-up-arrow)"
       '';
 
-      loginShellInit = ''
+      loginExtra = ''
         if [ "$(id -un)" = "${username}" ] && [ -z "$DISPLAY" ]; then
           current_tty=$(tty 2>/dev/null || true)
           if [ "$current_tty" = "/dev/tty1" ]; then

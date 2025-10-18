@@ -33,4 +33,6 @@ in
         ];
     };
   };
+
+  stylix.targets.vscode.enable = false;
 }

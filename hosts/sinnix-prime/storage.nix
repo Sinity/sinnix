@@ -143,6 +143,9 @@ in
 
   systemd.tmpfiles.rules = lib.mkAfter [
     "d /mnt/pendrv 0755 root root -"
+    "d /realm/inbox 0755 sinity users -"
+    "d /realm/data/screenshot 0755 sinity users -"
+    "d /realm/data/screenshot/mpv 0755 sinity users -"
   ];
 
   systemd.services.prepare-swapfile = {

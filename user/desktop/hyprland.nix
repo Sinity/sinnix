@@ -10,6 +10,7 @@ let
     rel: "${flakePath}/assets/${rel}";
   script =
     rel: "${flakePath}/scripts/${rel}";
+  hyprlandShare = "${pkgs.hyprland}/share/hypr";
   pyprlandCleanup = pkgs.writeShellScript "pyprland-sock-cleanup" ''
     set -eu
     HYPR_RUNTIME="/run/user/$UID/hypr"
@@ -65,7 +66,7 @@ in
       };
 
       misc = {
-        disable_hyprland_logo = true;
+        disable_hyprland_logo = lib.mkForce false;
         vrr = 2;
         mouse_move_enables_dpms = true;
         key_press_enables_dpms = true;
@@ -115,15 +116,15 @@ in
         "SUPER, D, exec, tofi-drun --drun-launch=true"
         "SUPER, Escape, exec, hyprlock"
 
-        "SUPER, H, movefocus, l"
-        "SUPER, J, movefocus, d"
-        "SUPER, K, movefocus, u"
-        "SUPER, L, movefocus, r"
+        "SUPER, H, exec, ${script "kitty-hypr-nav"} focus left"
+        "SUPER, J, exec, ${script "kitty-hypr-nav"} focus down"
+        "SUPER, K, exec, ${script "kitty-hypr-nav"} focus up"
+        "SUPER, L, exec, ${script "kitty-hypr-nav"} focus right"
 
-        "SUPER SHIFT, H, movewindow, l"
-        "SUPER SHIFT, L, movewindow, r"
-        "SUPER SHIFT, K, movewindow, u"
-        "SUPER SHIFT, J, movewindow, d"
+        "SUPER SHIFT, H, exec, ${script "kitty-hypr-nav"} move left"
+        "SUPER SHIFT, L, exec, ${script "kitty-hypr-nav"} move right"
+        "SUPER SHIFT, K, exec, ${script "kitty-hypr-nav"} move up"
+        "SUPER SHIFT, J, exec, ${script "kitty-hypr-nav"} move down"
 
         "SUPER, Space, exec, hyprctl dispatch togglefloating && hyprctl dispatch centerwindow"
 
@@ -132,12 +133,22 @@ in
         "SUPER, 3, workspace, 3"
         "SUPER, 4, workspace, 4"
         "SUPER, 5, workspace, 5"
+        "SUPER, 6, workspace, 6"
+        "SUPER, 7, workspace, 7"
+        "SUPER, 8, workspace, 8"
+        "SUPER, 9, workspace, 9"
+        "SUPER, 0, workspace, 10"
 
         "SUPER SHIFT, 1, movetoworkspace, 1"
         "SUPER SHIFT, 2, movetoworkspace, 2"
         "SUPER SHIFT, 3, movetoworkspace, 3"
         "SUPER SHIFT, 4, movetoworkspace, 4"
         "SUPER SHIFT, 5, movetoworkspace, 5"
+        "SUPER SHIFT, 6, movetoworkspace, 6"
+        "SUPER SHIFT, 7, movetoworkspace, 7"
+        "SUPER SHIFT, 8, movetoworkspace, 8"
+        "SUPER SHIFT, 9, movetoworkspace, 9"
+        "SUPER SHIFT, 0, movetoworkspace, 10"
 
         "SUPER, grave, exec, pypr toggle term"
         "SUPER, S, exec, pypr toggle spotify"
@@ -164,10 +175,10 @@ in
         ",XF86AudioRaiseVolume, exec, pamixer -i 2"
         ",XF86AudioLowerVolume, exec, pamixer -d 2"
 
-        "SUPER CTRL, H, resizeactive, -80 0"
-        "SUPER CTRL, L, resizeactive, 80 0"
-        "SUPER CTRL, K, resizeactive, 0 -80"
-        "SUPER CTRL, J, resizeactive, 0 80"
+        "SUPER CTRL, H, exec, ${script "kitty-hypr-nav"} resize left"
+        "SUPER CTRL, L, exec, ${script "kitty-hypr-nav"} resize right"
+        "SUPER CTRL, K, exec, ${script "kitty-hypr-nav"} resize up"
+        "SUPER CTRL, J, exec, ${script "kitty-hypr-nav"} resize down"
 
         "SUPER ALT, H, moveactive, -80 0"
         "SUPER ALT, L, moveactive, 80 0"
@@ -240,12 +251,13 @@ in
       windowrulev2 = [
         "size 60% 100%,title:^(session: )"
         "move 0% 0%,title:^(session: )"
-        "float,class:^(google-chrome|google-chrome-beta)$,windowtype:=notification"
-        "size 28% 24%,class:^(google-chrome|google-chrome-beta)$,windowtype:=notification"
-        "move 70% 6%,class:^(google-chrome|google-chrome-beta)$,windowtype:=notification"
-        "float,class:^(google-chrome|google-chrome-beta)$,windowtype:=popup"
-        "size 28% 24%,class:^(google-chrome|google-chrome-beta)$,windowtype:=popup"
-        "move 70% 6%,class:^(google-chrome|google-chrome-beta)$,windowtype:=popup"
+        "tile,class:^(google-chrome|google-chrome-beta)$"
+        "float,class:^(google-chrome|google-chrome-beta)$,windowtype:notification,initialTitle:^(?!Untitled - Google Chrome$).*"
+        "size 28% 24%,class:^(google-chrome|google-chrome-beta)$,windowtype:notification,initialTitle:^(?!Untitled - Google Chrome$).*"
+        "move 70% 6%,class:^(google-chrome|google-chrome-beta)$,windowtype:notification,initialTitle:^(?!Untitled - Google Chrome$).*"
+        "float,class:^(google-chrome|google-chrome-beta)$,windowtype:popup,initialTitle:^(?!Untitled - Google Chrome$).*"
+        "size 28% 24%,class:^(google-chrome|google-chrome-beta)$,windowtype:popup,initialTitle:^(?!Untitled - Google Chrome$).*"
+        "move 70% 6%,class:^(google-chrome|google-chrome-beta)$,windowtype:popup,initialTitle:^(?!Untitled - Google Chrome$).*"
       ];
     };
   };
@@ -313,6 +325,14 @@ in
       WantedBy = [ "graphical-session.target" ];
     };
   };
+
+  xdg.configFile."hypr/hyprpaper.conf".text = ''
+    splash = true
+    preload = ${hyprlandShare}/wall0.png
+    preload = ${hyprlandShare}/wall1.png
+    preload = ${hyprlandShare}/wall2.png
+    wallpaper = ,${hyprlandShare}/wall0.png
+  '';
 
   xdg.configFile."hypr/hyprlock.conf".text = ''
     # BACKGROUND
@@ -423,5 +443,6 @@ in
       slurp
       grimblast
       wl-screenrec
+      hyprpaper
     ]);
 }

@@ -76,6 +76,7 @@ in
             ../patches/hyprland/suppress-color-warning.patch
             ../patches/hyprland/check-monitor-null.patch
             ../patches/hyprland/special-workspace-damage.patch
+            ../patches/hyprland/guard-last-monitor.patch
           ];
         });
 

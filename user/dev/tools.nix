@@ -32,6 +32,7 @@
       gdb
       git-annex
       git-cliff
+      git-filter-repo
       gitstats
       glmark2
       glxinfo

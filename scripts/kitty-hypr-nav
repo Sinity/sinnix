@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF' >&2
+Usage: kitty-hypr-nav (focus|move|resize) <left|right|up|down>
+EOF
+  exit 1
+}
+
+[[ $# -eq 2 ]] || usage
+
+action="$1"
+direction="$2"
+
+case "$action" in
+  focus|move|resize) ;;
+  *) usage ;;
+esac
+
+normalize_direction() {
+  case "$1" in
+    left|l)   echo "left" ;;
+    right|r)  echo "right" ;;
+    up|u)     echo "top" ;;
+    down|d)   echo "bottom" ;;
+    *) usage ;;
+  esac
+}
+
+kitty_dir="$(normalize_direction "$direction")"
+
+case "$kitty_dir" in
+  left)  hypr_dir="l";  resize_axis="horizontal"; resize_inc="-2"; hypr_resize="-80 0" ;;
+  right) hypr_dir="r";  resize_axis="horizontal"; resize_inc="2";  hypr_resize="80 0" ;;
+  top)   hypr_dir="u";  resize_axis="vertical";   resize_inc="-2"; hypr_resize="0 -80" ;;
+  bottom)hypr_dir="d";  resize_axis="vertical";   resize_inc="2";  hypr_resize="0 80" ;;
+esac
+
+for bin in hyprctl jq; do
+  command -v "$bin" >/dev/null || {
+    echo "kitty-hypr-nav: missing dependency '$bin'" >&2
+    exit 1
+  }
+done
+
+try_kitty() {
+  command -v kitty >/dev/null || return 1
+  local info class pid socket
+  info="$(hyprctl activewindow -j 2>/dev/null)" || return 1
+  class="$(jq -r '.class // empty' <<<"$info")"
+  [[ "$class" == "kitty" ]] || return 1
+  pid="$(jq -r '.pid // empty' <<<"$info")"
+  [[ -n "$pid" && -r "/proc/$pid/environ" ]] || return 1
+  socket="$(tr '\0' '\n' <"/proc/$pid/environ" | sed -n 's/^KITTY_LISTEN_ON=//p' | head -n1)"
+  [[ -n "$socket" ]] || return 1
+
+  case "$action" in
+    focus)
+      kitty @ --to "$socket" focus-window --match "neighbor:$kitty_dir" || return 1
+      ;;
+    move)
+      kitty @ --to "$socket" action move_window "$kitty_dir" || return 1
+      ;;
+    resize)
+      kitty @ --to "$socket" resize-window --axis "$resize_axis" --increment "$resize_inc" || return 1
+      ;;
+  esac
+  return 0
+}
+
+if try_kitty; then
+  exit 0
+fi
+
+case "$action" in
+  focus)
+    hyprctl dispatch movefocus "$hypr_dir"
+    ;;
+  move)
+    hyprctl dispatch movewindow "$hypr_dir"
+    ;;
+  resize)
+    hyprctl dispatch resizeactive "$hypr_resize"
+    ;;
+esac

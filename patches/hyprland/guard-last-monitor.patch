@@ -39,3 +39,85 @@ index f8f4cec5..d9155041 100644
              }
  
              if (dirty)
+diff --git a/src/managers/KeybindManager.cpp b/src/managers/KeybindManager.cpp
+index c9008c2f..e0d73810 100644
+--- a/src/managers/KeybindManager.cpp
++++ b/src/managers/KeybindManager.cpp
+@@ -2109,8 +2109,20 @@ SDispatchResult CKeybindManager::toggleSpecialWorkspace(std::string args) {
+     }
+ 
+     bool       requestedWorkspaceIsAlreadyOpen = false;
+-    const auto PMONITOR                        = g_pCompositor->m_lastMonitor;
+-    auto       specialOpenOnMonitor            = PMONITOR->activeSpecialWorkspaceID();
++    PHLMONITOR PMONITOR                        = g_pCompositor->m_lastMonitor.lock();
++
++    if (!PMONITOR) {
++        if (g_pCompositor->m_monitors.empty()) {
++            Debug::log(ERR, "toggleSpecialWorkspace monitor doesn't exist!");
++            return {.success = false, .error = "toggleSpecialWorkspace monitor doesn't exist!"};
++        }
++
++        PMONITOR = g_pCompositor->m_monitors.front();
++        Debug::log(WARN, "[sinnix] toggleSpecialWorkspace recovered monitor by selecting \"{}\"", PMONITOR->m_name);
++        g_pCompositor->setActiveMonitor(PMONITOR);
++    }
++
++    auto specialOpenOnMonitor = PMONITOR->activeSpecialWorkspaceID();
+ 
+     for (auto const& m : g_pCompositor->m_monitors) {
+         if (m->activeSpecialWorkspaceID() == workspaceID) {
+
+diff --git a/src/Compositor.cpp b/src/Compositor.cpp
+index 5ea88b11..378987b7 100644
+--- a/src/Compositor.cpp
++++ b/src/Compositor.cpp
+@@ -1167,8 +1167,20 @@ void CCompositor::focusWindow(PHLWINDOW pWindow, SP<CWLSurfaceResource> pSurface
+     if (m_lastWindow.lock() == pWindow && g_pSeatManager->m_state.keyboardFocus == pSurface && g_pSeatManager->m_state.keyboardFocus)
+         return;
+ 
++    auto pLastMonitor = m_lastMonitor.lock();
++    if (!pLastMonitor) {
++        if (m_monitors.empty()) {
++            Debug::log(WARN, "[sinnix] focusWindow aborted: no available monitors for focusWindow request");
++            return;
++        }
++
++        pLastMonitor = m_monitors.front();
++        Debug::log(WARN, "[sinnix] focusWindow recovered last monitor by selecting \"{}\"", pLastMonitor->m_name);
++        setActiveMonitor(pLastMonitor);
++    }
++
+     if (pWindow->m_pinned)
+-        pWindow->m_workspace = m_lastMonitor->m_activeWorkspace;
++        pWindow->m_workspace = pLastMonitor->m_activeWorkspace;
+ 
+     const auto PMONITOR = pWindow->m_monitor.lock();
+ 
+@@ -1176,10 +1188,10 @@ void CCompositor::focusWindow(PHLWINDOW pWindow, SP<CWLSurfaceResource> pSurface
+         const auto PWORKSPACE = pWindow->m_workspace;
+         // This is to fix incorrect feedback on the focus history.
+         PWORKSPACE->m_lastFocusedWindow = pWindow;
+-        if (m_lastMonitor->m_activeWorkspace)
+-            PWORKSPACE->rememberPrevWorkspace(m_lastMonitor->m_activeWorkspace);
++        if (pLastMonitor->m_activeWorkspace)
++            PWORKSPACE->rememberPrevWorkspace(pLastMonitor->m_activeWorkspace);
+         if (PWORKSPACE->m_isSpecialWorkspace)
+-            m_lastMonitor->changeWorkspace(PWORKSPACE, false, true); // if special ws, open on current monitor
++            pLastMonitor->changeWorkspace(PWORKSPACE, false, true); // if special ws, open on current monitor
+         else if (PMONITOR)
+             PMONITOR->changeWorkspace(PWORKSPACE, false, true);
+         // changeworkspace already calls focusWindow
+diff --git a/src/helpers/Monitor.cpp b/src/helpers/Monitor.cpp
+index 273bc1c7..cbeda314 100644
+--- a/src/helpers/Monitor.cpp
++++ b/src/helpers/Monitor.cpp
+@@ -1266,7 +1266,8 @@ void CMonitor::changeWorkspace(const PHLWORKSPACE& pWorkspace, bool internal, bo
+                 w->moveToWorkspace(pWorkspace);
+         }
+ 
+-        if (!noFocus && !g_pCompositor->m_lastMonitor->m_activeSpecialWorkspace &&
++        const auto PLASTMONITOR = g_pCompositor->m_lastMonitor.lock();
++        if (!noFocus && (!(PLASTMONITOR && PLASTMONITOR->m_activeSpecialWorkspace)) &&
+             !(g_pCompositor->m_lastWindow.lock() && g_pCompositor->m_lastWindow->m_pinned && g_pCompositor->m_lastWindow->m_monitor == m_self)) {
+             static auto PFOLLOWMOUSE = CConfigValue<Hyprlang::INT>("input:follow_mouse");
+             auto        pWindow      = pWorkspace->m_hasFullscreenWindow ? pWorkspace->getFullscreenWindow() : pWorkspace->getLastFocusedWindow();

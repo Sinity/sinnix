@@ -73,6 +73,9 @@ in
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
       wantedBy = [ "multi-user.target" ];
+      unitConfig = {
+        ConditionPathExists = "/var/lib/onedrive-auth/refresh_token";
+      };
       enable = true;
       preStart = ''
         if [ ! -f /var/lib/onedrive-auth/config ]; then
@@ -98,18 +101,38 @@ in
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
       wantedBy = [ "multi-user.target" ];
+      unitConfig = {
+        ConditionPathExists = "/home/sinity/.config/rclone/rclone.conf";
+      };
       enable = true;
       serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
+        Type = "simple";
         User = "sinity";
-        ConditionPathExists = "/home/sinity/.config/rclone/rclone.conf";
-        ExecStartPre = "${pkgs.coreutils}/bin/mkdir -p /mnt/gdrive";
-        ExecStart = "${pkgs.rclone}/bin/rclone mount gdrive: /mnt/gdrive --config /home/sinity/.config/rclone/rclone.conf --daemon --vfs-cache-mode full --vfs-cache-max-size 5G --vfs-cache-max-age 72h --buffer-size 256M --vfs-read-ahead 512M --dir-cache-time 72h --poll-interval 1m --uid 1000 --gid 100 --umask 022";
+        PermissionsStartOnly = true;
+        ExecStartPre = [
+          "${pkgs.coreutils}/bin/mkdir -p /mnt/gdrive"
+          (pkgs.writeShellScript "fix-rclone-config-perms" ''
+            set -euo pipefail
+            if [ -f /home/sinity/.config/rclone/rclone.conf ]; then
+              chown sinity:users /home/sinity/.config/rclone /home/sinity/.config/rclone/rclone.conf 2>/dev/null || true
+              chmod 600 /home/sinity/.config/rclone/rclone.conf 2>/dev/null || true
+            fi
+          '')
+        ];
+        ExecStart = "${pkgs.rclone}/bin/rclone mount gdrive: /mnt/gdrive --config /home/sinity/.config/rclone/rclone.conf --vfs-cache-mode full --vfs-cache-max-size 5G --vfs-cache-max-age 72h --buffer-size 256M --vfs-read-ahead 512M --dir-cache-time 72h --poll-interval 1m --uid 1000 --gid 100 --umask 022";
         ExecStop = "${pkgs.fuse3}/bin/fusermount3 -u /mnt/gdrive";
+        Restart = "on-failure";
+        RestartSec = 5;
       };
     };
   };
+
+  system.activationScripts.fixRclonePermissions.text = ''
+    if [ -f /home/sinity/.config/rclone/rclone.conf ]; then
+      chown sinity:users /home/sinity/.config/rclone /home/sinity/.config/rclone/rclone.conf 2>/dev/null || true
+      chmod 600 /home/sinity/.config/rclone/rclone.conf 2>/dev/null || true
+    fi
+  '';
 
   fileSystems."/mnt/nextcloud" = {
     device = "https://nextcloud-host/remote.php/dav/files/USER/";
