@@ -65,7 +65,6 @@ in
     "d /var/lib/onedrive 0755 sinity users -"
     "L /mnt/onedrive - - - - /var/lib/onedrive"
     "d /var/lib/onedrive-auth 0700 sinity users -"
-    "d /outer-realm/inbox 2775 sinity users -"
   ];
 
   systemd.services = {

@@ -19,7 +19,6 @@
     };
     users.${username} = {
       imports = [ ../user ];
-      stylix.targets.vscode.enable = false;
     };
   };
 }

@@ -11,9 +11,7 @@
     nixosConfigurations.sinnix-prime =
       let
         lib = inputs.nixpkgs.lib;
-        sinexEnabled = builtins.getEnv "SINEX_DISABLE" != "1";
-        sinexModule =
-          if sinexEnabled then inputs.sinex.nixosModules.default else null;
+        sinexModule = inputs.sinex.nixosModules.default;
       in
       inputs.nixpkgs.lib.nixosSystem {
         system = "x86_64-linux";
@@ -32,24 +30,24 @@
             # Import domain modules directly (single-host setup)
             {
               imports = [
-              ../modules/core.nix
-              ../modules/programs.nix
-              ../modules/logging.nix
-              ../modules/secrets.nix
-              ../modules/home-manager.nix
-              ../modules/users.nix
-              ../modules/ui.nix
-              ../modules/dev
-              ../modules/media.nix
-              ../modules/networking.nix
-              ../modules/storage.nix
-            ];
+                ../modules/core.nix
+                ../modules/programs.nix
+                ../modules/logging.nix
+                ../modules/secrets.nix
+                ../modules/home-manager.nix
+                ../modules/users.nix
+                ../modules/ui.nix
+                ../modules/nix-ld.nix
+                ../modules/audio.nix
+                ../modules/networking.nix
+                ../modules/storage.nix
+              ];
             }
 
             # Import host-specific configuration last so it can override shared defaults
             { imports = [ ../hosts/sinnix-prime ]; }
           ]
-          ++ lib.optionals (sinexModule != null) [ sinexModule ];
+          ++ [ sinexModule ];
 
       # Make these values available to all modules
       specialArgs = {

@@ -35,6 +35,12 @@ in
     ln -sfn .config/claude "$HOME/.claude"
   '';
 
+  programs.direnv = {
+    enable = true;
+    nix-direnv.enable = true;
+    silent = true;
+  };
+
   programs.btop = {
     enable = true;
     settings = {

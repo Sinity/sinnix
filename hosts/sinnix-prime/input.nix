@@ -80,13 +80,6 @@ let
   '';
 in
 {
-  environment.systemPackages = with pkgs; [
-    interception-tools
-    interception-tools-plugins.caps2esc
-    interceptBouncePkg
-    scribePkg
-  ];
-
   services.interception-tools = {
     enable = true;
     udevmonConfig = ''

@@ -1,4 +1,4 @@
-{ pkgs, inputs, username, lib, ... }:
+{ pkgs, inputs, lib, ... }:
 let
   baseCli = with pkgs; [
     wget
@@ -112,36 +112,12 @@ in
     };
 
     programs = {
-      direnv = {
-        enable = true;
-        silent = true;
-        enableZshIntegration = true;
-        enableBashIntegration = true;
-        nix-direnv.enable = true;
-      };
-
       steam = {
         enable = true;
         gamescopeSession.enable = true;
       };
 
       gamemode.enable = true;
-
-      zsh =
-        let
-          ttyAutostart = ''
-            if [ "$(id -un)" = "${username}" ] && [ -z "$DISPLAY" ]; then
-              current_tty=$(tty 2>/dev/null || true)
-              if [ "$current_tty" = "/dev/tty1" ]; then
-                exec uwsm start hyprland-uwsm.desktop
-              fi
-            fi
-          '';
-        in
-        {
-          enable = true;
-          loginShellInit = ttyAutostart;
-        };
 
       gnupg.agent = {
         enable = true;

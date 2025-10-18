@@ -1,4 +1,4 @@
-{ ... }:
+{ lib, ... }:
 {
   services.transmission = {
     enable = true;
@@ -15,4 +15,8 @@
       rpc-authentication-required = false;
     };
   };
+
+  systemd.tmpfiles.rules = lib.mkAfter [
+    "d /outer-realm/inbox 2775 sinity users -"
+  ];
 }

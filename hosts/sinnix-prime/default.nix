@@ -4,7 +4,6 @@
     ./input.nix
     ./storage.nix
     ./display.nix
-    ../../modules/services/postgresql.nix
     ../../modules/services/transmission.nix
     ../../modules/services/photoprism.nix
     ../../modules/services/qdrant.nix
@@ -14,14 +13,11 @@
   services.sinex = {
     enable = false;
     targetUser = "sinity";
-    database.additionalUsers = [
-      {
-        name = "sinity";
-        ensureClauses = {
-          login = true;
-          createdb = true;
-        };
-      }
-    ];
+    directories = {
+      state = "/realm/data/sinex";
+      logs = "/realm/data/sinex/logs";
+    };
+    dlq.failureStoragePath = "/realm/data/sinex/failures";
+    satellite.enable = false;
   };
 }

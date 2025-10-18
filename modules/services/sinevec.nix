@@ -61,6 +61,7 @@ in
   systemd.tmpfiles.rules = [
     "d ${dataRoot}/raindrop 0750 sinity users -"
     "d ${dataRoot}/chatlog 0750 sinity users -"
+    "d ${dataRoot}/model 0750 sinity users -"
     "d ${sinevecDataDir} 0750 ${sinevecUser} ${sinevecGroup} -"
     "d ${sinevecStateDir} 0750 ${sinevecUser} ${sinevecGroup} -"
     "d ${sinevecLogDir} 0750 ${sinevecUser} ${sinevecGroup} -"

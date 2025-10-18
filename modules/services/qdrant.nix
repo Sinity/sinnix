@@ -41,7 +41,6 @@
   };
 
   systemd.tmpfiles.rules = lib.mkBefore [
-    "d /realm/data/model 0750 sinity users -"
     "d /realm/data/qdrant 0750 qdrant qdrant -"
     "d /realm/data/qdrant/storage 0750 qdrant qdrant -"
     "d /realm/data/qdrant/snapshots 0750 qdrant qdrant -"

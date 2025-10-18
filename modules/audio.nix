@@ -72,11 +72,6 @@
     "bluetooth"
   ];
 
-  systemd.tmpfiles.rules = lib.mkAfter [
-    "d /realm/home/.hydrus 0750 sinity users -"
-    "d /realm/home/.hydrus/db 0750 sinity users -"
-  ];
-
   environment.etc."wireplumber/60-force-quantum.lua".text = ''
     rule = {
       matches = {

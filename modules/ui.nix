@@ -50,6 +50,9 @@
       };
 
       polarity = "dark";
+      targets = {
+        vscode.enable = false;
+      };
     };
 
     xdg.portal = {
