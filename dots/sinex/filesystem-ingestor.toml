@@ -1,0 +1,19 @@
+[database]
+url = "postgresql:///sinex?host=/run/postgresql&user=sinity"
+max_connections = 5
+
+[logging]
+level = "info"
+format = "json"
+
+[filesystem]
+watch_directories = ["~", "/realm"]
+exclude_patterns = ["*.tmp", "*.log", "*.cache", ".git/**", "node_modules/**", "__pycache__/**", "*.swp", "*.swo", "target/**", ".direnv/**"]
+debounce_ms = 200
+batch_size_events = 50
+batch_timeout_ms = 5000
+hash_files = true
+max_hash_size_bytes = 10485760
+heartbeat_interval_secs = 60
+max_retries = 3
+retry_delay_secs = 5

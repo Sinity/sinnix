@@ -1,6 +1,8 @@
+
 {
   pkgs,
   lib,
+  dotsPath,
   ...
 }:
 {
@@ -89,4 +91,31 @@
       zk
     ]
   );
+
+  xdg.configFile."sqlitebrowser/sqlitebrowser.conf".source =
+    dotsPath + "/sqlitebrowser/sqlitebrowser.conf";
+
+  xdg.configFile."ripgrep-all/config.jsonc".source =
+    dotsPath + "/ripgrep-all/config.jsonc";
+
+  xdg.configFile."sinex" = {
+    source = dotsPath + "/sinex";
+    recursive = true;
+  };
+
+  home.activation.restoreConfigstore = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    if [ -f /run/agenix/configstore-update-notifier ]; then
+      mkdir -p "$HOME/.config/configstore"
+      rm -rf "$HOME/.config/configstore/update-notifier-@google"
+      tar -xzf /run/agenix/configstore-update-notifier -C "$HOME/.config/configstore"
+    fi
+  '';
+
+  home.activation.restoreGcloud = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    if [ -f /run/agenix/gcloud-config.tar.gz ]; then
+      mkdir -p "$HOME/.config"
+      rm -rf "$HOME/.config/gcloud"
+      tar -xzf /run/agenix/gcloud-config.tar.gz -C "$HOME/.config"
+    fi
+  '';
 }

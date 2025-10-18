@@ -215,7 +215,6 @@ in
 
         "float,title:^(Open File)$"
         "float,title:^(Save As)$"
-        "float,class:^(pavucontrol)$"
         "float,class:^(nm-connection-editor)$"
         "float,title:^(Picture-in-Picture)$"
         "pin,title:^(Picture-in-Picture)$"
@@ -223,7 +222,6 @@ in
         "move 100%-500 50,title:^(Picture-in-Picture)$"
         "workspace special:music,class:^(music)$"
         "workspace special:music,title:^(ncspot)$"
-        "workspace special:music,class:^(pavucontrol)$"
         "workspace special:music,class:^(pwvucontrol)$"
         "workspace special:music,class:^(blueman-manager)$"
         "float,class:^(blueman-manager)$"

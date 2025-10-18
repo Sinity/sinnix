@@ -1,5 +1,12 @@
 { pkgs, lib, dotsPath, config, ... }:
 let
+  kvantumPkg =
+    if lib.hasAttrByPath [ "qt6Packages" "qtstyleplugin-kvantum" ] pkgs then
+      pkgs.qt6Packages.qtstyleplugin-kvantum
+    else if lib.hasAttrByPath [ "libsForQt5" "kvantum" ] pkgs then
+      pkgs.libsForQt5.kvantum
+    else
+      null;
   waybarAudioSignal = 12;
   audioOutputStatus = pkgs.writeShellApplication {
     name = "audio-output-status";
@@ -183,6 +190,41 @@ in
       audioOutputStatus
     ];
 
+  programs.mullvad-vpn = {
+    enable = true;
+    settings = {
+      preferredLocale = "system";
+      autoConnect = false;
+      enableSystemNotifications = true;
+      monochromaticIcon = false;
+      startMinimized = true;
+      unpinnedWindow = true;
+      browsedForSplitTunnelingApplications = [ ];
+      changelogDisplayedForVersion = "2025.2";
+      animateMap = true;
+    };
+  };
+
+  qt = {
+    enable = true;
+    platformTheme = {
+      name = "qtct";
+    };
+    style =
+      {
+        name = "kvantum";
+      }
+      // lib.optionalAttrs (kvantumPkg != null) {
+        package = kvantumPkg;
+      };
+  };
+
+  home.activation.cleanupKvantum =
+    lib.hm.dag.entryBefore [ "linkGeneration" ] ''
+      rm -rf "$HOME/.config/Kvantum"
+    '';
+
+
   services.clipse = {
     enable = true;
     historySize = 99999;
@@ -245,35 +287,35 @@ in
           padding-vertical = 10;
           progress-bar-height = 4;
           dpi-aware = true;
-          background = bg;
-          border-color = border;
-          title-font = fontMono;
-          title-color = text;
-          summary-font = fontMono;
-          summary-color = text;
-          body-font = fontMono;
-          body-color = subtle;
-          progress-color = accent;
+          background = lib.mkForce bg;
+          border-color = lib.mkForce border;
+          title-font = lib.mkForce fontMono;
+          title-color = lib.mkForce text;
+          summary-font = lib.mkForce fontMono;
+          summary-color = lib.mkForce text;
+          body-font = lib.mkForce fontMono;
+          body-color = lib.mkForce subtle;
+          progress-color = lib.mkForce accent;
         };
         low = {
-          background = bg;
-          title-color = subtle;
-          summary-color = subtle;
-          body-color = subtle;
+          background = lib.mkForce bg;
+          title-color = lib.mkForce subtle;
+          summary-color = lib.mkForce subtle;
+          body-color = lib.mkForce subtle;
           default-timeout = 5;
         };
         normal = {
-          background = bg;
-          title-color = text;
-          summary-color = text;
-          body-color = subtle;
+          background = lib.mkForce bg;
+          title-color = lib.mkForce text;
+          summary-color = lib.mkForce text;
+          body-color = lib.mkForce subtle;
           default-timeout = 10;
         };
         critical = {
-          background = criticalBg;
-          border-color = accent;
-          title-color = text;
-          summary-color = text;
+          background = lib.mkForce criticalBg;
+          border-color = lib.mkForce accent;
+          title-color = lib.mkForce text;
+          summary-color = lib.mkForce text;
           body-color = text;
           default-timeout = 0;
         };
@@ -438,6 +480,20 @@ in
         source = dotsPath + "/yazi/keymap.toml";
         force = true;
       };
+      "audacity/audacity.cfg".source = dotsPath + "/audacity/audacity.cfg";
+      "qt5ct/qt5ct.conf".source = dotsPath + "/qt5ct/qt5ct.conf";
+      "qt6ct/qt6ct.conf".source = dotsPath + "/qt6ct/qt6ct.conf";
+      "Kvantum" = {
+        source = dotsPath + "/Kvantum";
+        recursive = true;
+      };
+      "transmission/settings.json".source = dotsPath + "/transmission/settings.json";
+      "autostart/mullvad-vpn.desktop".text = ''
+        [Desktop Entry]
+        Type=Application
+        Name=Mullvad VPN (disabled)
+        Hidden=true
+      '';
       "mimeapps.list".force = true;
     };
     mimeApps = {

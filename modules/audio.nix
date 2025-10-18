@@ -61,7 +61,6 @@
 
   environment.systemPackages = with pkgs; [
     alsa-utils
-    pavucontrol
     pamixer
     bluez
     playerctl

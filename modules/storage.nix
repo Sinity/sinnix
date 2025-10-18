@@ -98,8 +98,14 @@ in
 
     gdrive-mount = {
       description = "Mount Google Drive via rclone";
-      after = [ "network-online.target" ];
-      wants = [ "network-online.target" ];
+      after = [
+        "network-online.target"
+        "home-manager-sinity.service"
+      ];
+      wants = [
+        "network-online.target"
+        "home-manager-sinity.service"
+      ];
       wantedBy = [ "multi-user.target" ];
       unitConfig = {
         ConditionPathExists = "/home/sinity/.config/rclone/rclone.conf";

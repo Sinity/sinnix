@@ -6,6 +6,7 @@
     ./languages.nix
     ./git.nix
     ./starship.nix
+    ./htop.nix
     ./tools.nix
   ];
 }
