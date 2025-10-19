@@ -16,7 +16,7 @@
           "flakes"
         ];
         trusted-users = [
-          "sinity"
+          username
           "root"
           "@wheel"
         ];
@@ -112,5 +112,11 @@
         }
       ];
     };
+
+    systemd.tmpfiles.rules = lib.mkAfter [
+      "d /realm/inbox 0755 ${username} users -"
+      "d /realm/data 0755 ${username} users -"
+      "d /realm/data/screenshot 0755 ${username} users -"
+    ];
   };
 }

@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Pre-commit validation script for sinnix
+# Catches common issues before they reach git history
+
+echo "Running pre-commit checks..."
+
+# Check 1: Nix syntax and evaluation
+echo "→ Checking nix syntax and evaluation..."
+if ! nix flake check --no-build 2>&1 | tee /tmp/flake-check.log; then
+  echo "❌ Flake check failed!"
+  echo "Review output above or see /tmp/flake-check.log"
+  exit 1
+fi
+
+# Check 2: Look for potential service conflicts
+echo "→ Scanning for potential service conflicts..."
+conflicts_found=0
+
+# Check for manual systemd services that might conflict with package defaults
+if git diff --cached --name-only | grep -q ".nix$"; then
+  for service in hyprpaper waybar mako fnott; do
+    if git diff --cached | grep -q "systemd.user.services.$service" && \
+       git diff --cached | grep -q "home.packages.*$service"; then
+      echo "⚠️  Warning: Found both systemd service definition AND package for $service"
+      echo "   This might cause conflicts. Verify the service isn't auto-provided."
+      conflicts_found=1
+    fi
+  done
+fi
+
+# Check 3: Verify critical directories are still created
+echo "→ Verifying critical directory tmpfiles rules..."
+required_dirs=(
+  "/realm/inbox"
+  "/realm/data/screenshot"
+)
+
+for dir in "${required_dirs[@]}"; do
+  if ! rg -q "\"d $dir" modules/ user/ hosts/ 2>/dev/null && \
+     ! rg -q "'d $dir" modules/ user/ hosts/ 2>/dev/null; then
+    echo "⚠️  Warning: No tmpfiles rule found for $dir"
+    echo "   Verify this directory is created elsewhere or add it back"
+    conflicts_found=1
+  fi
+done
+
+# Check 4: Ensure no untracked Nix files that should be committed
+echo "→ Checking for untracked .nix files..."
+untracked=$(git ls-files --others --exclude-standard "*.nix" || true)
+if [ -n "$untracked" ]; then
+  echo "⚠️  Warning: Found untracked .nix files:"
+  echo "$untracked"
+  echo "   These won't be included in nix builds. Add them or add to .gitignore"
+  conflicts_found=1
+fi
+
+if [ $conflicts_found -eq 1 ]; then
+  echo ""
+  echo "⚠️  Warnings found. Review above. Continue? [y/N]"
+  read -r response
+  if [[ ! "$response" =~ ^[Yy]$ ]]; then
+    echo "Aborting commit."
+    exit 1
+  fi
+fi
+
+echo "✓ All checks passed"

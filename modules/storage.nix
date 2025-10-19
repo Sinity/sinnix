@@ -1,4 +1,4 @@
-{ pkgs, lib, inputs, ... }:
+{ pkgs, lib, inputs, username, ... }:
 let
   nextcloudCert = builtins.readFile "${inputs.self}/assets/nextcloud-cert.crt";
 in
@@ -61,10 +61,10 @@ in
 
   systemd.tmpfiles.rules = lib.mkAfter [
     "d /mnt/nextcloud 0755 root root -"
-    "d /mnt/gdrive 0755 sinity users -"
-    "d /var/lib/onedrive 0755 sinity users -"
+    "d /mnt/gdrive 0755 ${username} users -"
+    "d /var/lib/onedrive 0755 ${username} users -"
     "L /mnt/onedrive - - - - /var/lib/onedrive"
-    "d /var/lib/onedrive-auth 0700 sinity users -"
+    "d /var/lib/onedrive-auth 0700 ${username} users -"
   ];
 
   systemd.services = {
@@ -84,7 +84,7 @@ in
       '';
       serviceConfig = {
         Type = "simple";
-        User = "sinity";
+        User = username;
         Group = "users";
         ExecStart = "${pkgs.onedrive}/bin/onedrive --monitor --confdir /var/lib/onedrive-auth";
         Restart = "on-failure";
@@ -100,32 +100,32 @@ in
       description = "Mount Google Drive via rclone";
       after = [
         "network-online.target"
-        "home-manager-sinity.service"
+        "home-manager-${username}.service"
       ];
       wants = [
         "network-online.target"
-        "home-manager-sinity.service"
+        "home-manager-${username}.service"
       ];
       wantedBy = [ "multi-user.target" ];
       unitConfig = {
-        ConditionPathExists = "/home/sinity/.config/rclone/rclone.conf";
+        ConditionPathExists = "/home/${username}/.config/rclone/rclone.conf";
       };
-      enable = true;
+      enable = false;
       serviceConfig = {
         Type = "simple";
-        User = "sinity";
+        User = username;
         PermissionsStartOnly = true;
         ExecStartPre = [
           "${pkgs.coreutils}/bin/mkdir -p /mnt/gdrive"
           (pkgs.writeShellScript "fix-rclone-config-perms" ''
             set -euo pipefail
-            if [ -f /home/sinity/.config/rclone/rclone.conf ]; then
-              chown sinity:users /home/sinity/.config/rclone /home/sinity/.config/rclone/rclone.conf 2>/dev/null || true
-              chmod 600 /home/sinity/.config/rclone/rclone.conf 2>/dev/null || true
+            if [ -f /home/${username}/.config/rclone/rclone.conf ]; then
+              chown ${username}:users /home/${username}/.config/rclone /home/${username}/.config/rclone/rclone.conf 2>/dev/null || true
+              chmod 600 /home/${username}/.config/rclone/rclone.conf 2>/dev/null || true
             fi
           '')
         ];
-        ExecStart = "${pkgs.rclone}/bin/rclone mount gdrive: /mnt/gdrive --config /home/sinity/.config/rclone/rclone.conf --vfs-cache-mode full --vfs-cache-max-size 5G --vfs-cache-max-age 72h --buffer-size 256M --vfs-read-ahead 512M --dir-cache-time 72h --poll-interval 1m --uid 1000 --gid 100 --umask 022";
+        ExecStart = "${pkgs.rclone}/bin/rclone mount gdrive: /mnt/gdrive --config /home/${username}/.config/rclone/rclone.conf --vfs-cache-mode full --vfs-cache-max-size 5G --vfs-cache-max-age 72h --buffer-size 256M --vfs-read-ahead 512M --dir-cache-time 72h --poll-interval 1m --uid 1000 --gid 100 --umask 022";
         ExecStop = "${pkgs.fuse3}/bin/fusermount3 -u /mnt/gdrive";
         Restart = "on-failure";
         RestartSec = 5;
@@ -134,9 +134,9 @@ in
   };
 
   system.activationScripts.fixRclonePermissions.text = ''
-    if [ -f /home/sinity/.config/rclone/rclone.conf ]; then
-      chown sinity:users /home/sinity/.config/rclone /home/sinity/.config/rclone/rclone.conf 2>/dev/null || true
-      chmod 600 /home/sinity/.config/rclone/rclone.conf 2>/dev/null || true
+    if [ -f /home/${username}/.config/rclone/rclone.conf ]; then
+      chown ${username}:users /home/${username}/.config/rclone /home/${username}/.config/rclone/rclone.conf 2>/dev/null || true
+      chmod 600 /home/${username}/.config/rclone/rclone.conf 2>/dev/null || true
     fi
   '';
 

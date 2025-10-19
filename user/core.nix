@@ -47,13 +47,15 @@ in
   };
 
   programs.zsh = {
-    initContent = lib.mkBefore ''
+    initExtra = lib.mkBefore ''
       load_secrets() {
         ${lib.optionalString (secretsExportScript != "") secretsExportScript}
       }
       load_secrets || true
     '';
-    shellAliases.load-secrets = "load_secrets";
+    shellAliases = {
+      load-secrets = "load_secrets";
+    };
   };
 
   nix.gc = {

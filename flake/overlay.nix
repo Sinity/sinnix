@@ -166,17 +166,17 @@ in
         codex = prev.codex.overrideAttrs (
           _old:
           let
-            version = "0.45.0";
+            version = "0.47.0";
             newSrc = final.fetchFromGitHub {
               owner = "openai";
               repo = "codex";
               rev = "refs/tags/rust-v" + version;
-              sha256 = "sha256-HRVfUK+ZH/Q2xEQ16wboA56q9Ia3Xx5LpdqKSpjr5hI=";
+              sha256 = "sha256-5AyatNXgHuia656OuSDozQzQv80bNHncgLN1X23bfM4=";
             };
             newCargo = final.rustPlatform.fetchCargoVendor {
               src = newSrc;
               sourceRoot = "source/codex-rs";
-              hash = "sha256-7uO7I84kthMh4UQUioW7gf1E0IB+9ov/tDvXdiCdK2s=";
+              hash = "sha256-PQ1NxwNBaI48gQ4GGoricA/j7vpsnaLlL6st5P+CTHk=";
             };
           in
           {

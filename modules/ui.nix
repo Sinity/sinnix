@@ -1,3 +1,20 @@
+# System-wide UI theme configuration
+#
+# STYLIX MANAGES:
+#   - Color scheme (base16)
+#   - Wallpaper (via hyprpaper service)
+#   - System fonts
+#   - Cursor theme
+#   - GTK theme
+#   - QT theme
+#   - Application colors (vscode, kitty, etc - see targets)
+#
+# DO NOT manually configure:
+#   - hyprpaper service/config (stylix provides it)
+#   - Application color schemes (use stylix.targets.<app>.enable)
+#
+# To disable stylix for specific apps:
+#   stylix.targets.<app>.enable = false;
 {
   pkgs,
   inputs,

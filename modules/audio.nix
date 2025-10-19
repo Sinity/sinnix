@@ -1,6 +1,14 @@
+# System audio configuration
+#
+# Configures PipeWire audio subsystem with:
+# - PipeWire/WirePlumber for audio routing
+# - Bluetooth audio (A2DP, SBC-XQ, mSBC)
+# - Real-time priority for low latency
+# - USB DAC quantum settings
 {
   lib,
   pkgs,
+  username,
   ...
 }:
 {
@@ -66,7 +74,7 @@
     playerctl
   ];
 
-  users.users.sinity.extraGroups = lib.mkAfter [
+  users.users.${username}.extraGroups = lib.mkAfter [
     "audio"
     "bluetooth"
   ];

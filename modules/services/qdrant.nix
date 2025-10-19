@@ -1,10 +1,14 @@
-{ lib, pkgs, ... }:
+{ lib, pkgs, username, ... }:
+let
+  dataRoot = "/realm/data";
+  qdrantDataDir = "${dataRoot}/qdrant";
+in
 {
   environment.etc."qdrant/config.yaml".text = ''
     log_level: "INFO"
     storage:
-      storage_path: "/realm/data/qdrant/storage"
-      snapshots_path: "/realm/data/qdrant/snapshots"
+      storage_path: "${qdrantDataDir}/storage"
+      snapshots_path: "${qdrantDataDir}/snapshots"
       on_disk_payload: true
     service:
       api:
@@ -29,27 +33,27 @@
       Group = "qdrant";
       ExecStart = "${pkgs.qdrant}/bin/qdrant --config-path /etc/qdrant/config.yaml";
       Restart = "on-failure";
-      WorkingDirectory = "/realm/data/qdrant";
+      WorkingDirectory = qdrantDataDir;
       RuntimeDirectory = "qdrant";
       LimitNOFILE = 1048576;
       ReadWritePaths = [
-        "/realm/data/qdrant"
-        "/realm/data/qdrant/storage"
-        "/realm/data/qdrant/snapshots"
+        qdrantDataDir
+        "${qdrantDataDir}/storage"
+        "${qdrantDataDir}/snapshots"
       ];
     };
   };
 
   systemd.tmpfiles.rules = lib.mkBefore [
-    "d /realm/data/qdrant 0750 qdrant qdrant -"
-    "d /realm/data/qdrant/storage 0750 qdrant qdrant -"
-    "d /realm/data/qdrant/snapshots 0750 qdrant qdrant -"
-    "z /realm/data/qdrant 0750 qdrant qdrant - -"
-    "z /realm/data/qdrant/storage 0750 qdrant qdrant - -"
-    "z /realm/data/qdrant/snapshots 0750 qdrant qdrant - -"
+    "d ${qdrantDataDir} 0750 qdrant qdrant -"
+    "d ${qdrantDataDir}/storage 0750 qdrant qdrant -"
+    "d ${qdrantDataDir}/snapshots 0750 qdrant qdrant -"
+    "z ${qdrantDataDir} 0750 qdrant qdrant - -"
+    "z ${qdrantDataDir}/storage 0750 qdrant qdrant - -"
+    "z ${qdrantDataDir}/snapshots 0750 qdrant qdrant - -"
   ];
 
-  users.groups.qdrant.members = [ "sinity" ];
+  users.groups.qdrant.members = [ username ];
 
   users.users.qdrant = {
     isSystemUser = true;

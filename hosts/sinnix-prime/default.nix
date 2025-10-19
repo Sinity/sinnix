@@ -1,3 +1,7 @@
+{ username, ... }:
+let
+  dataRoot = "/realm";
+in
 {
   imports = [
     ./boot.nix
@@ -12,12 +16,12 @@
 
   services.sinex = {
     enable = false;
-    targetUser = "sinity";
+    targetUser = username;
     directories = {
-      state = "/realm/data/sinex";
-      logs = "/realm/data/sinex/logs";
+      state = "${dataRoot}/data/sinex";
+      logs = "${dataRoot}/data/sinex/logs";
     };
-    dlq.failureStoragePath = "/realm/data/sinex/failures";
+    dlq.failureStoragePath = "${dataRoot}/data/sinex/failures";
     satellite.enable = false;
   };
 }

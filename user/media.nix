@@ -1,5 +1,8 @@
 { pkgs, lib, ... }:
 let
+  homeRoot = "/realm/home";
+  dataRoot = "/realm/data";
+
   hydrusWithProfile = pkgs.hydrus.overrideAttrs (oldAttrs: {
     doCheck = false;
     doInstallCheck = false;
@@ -7,8 +10,8 @@ let
       mv $out/bin/hydrus-client $out/bin/hydrus-client-original
       cat > $out/bin/hydrus-client << EOF
       #!${pkgs.stdenv.shell}
-      cd /realm/home/.hydrus
-      exec $out/bin/hydrus-client-original -d="/realm/home/.hydrus/db" "\$@"
+      cd ${homeRoot}/.hydrus
+      exec $out/bin/hydrus-client-original -d="${homeRoot}/.hydrus/db" "\$@"
       EOF
       chmod +x $out/bin/hydrus-client
     '';
@@ -42,7 +45,7 @@ in
 {
   home.sessionVariables = {
     MEDIA_DOMAIN = "v0.3";
-    MPV_SCREENSHOT_DIR = "/realm/data/screenshot/mpv";
+    MPV_SCREENSHOT_DIR = "${dataRoot}/screenshot/mpv";
     WINEDLLOVERRIDES = "winemenubuilder.exe=d";
   };
 
@@ -96,7 +99,7 @@ in
 
       screenshot-format = "png";
       screenshot-png-compression = 9;
-      screenshot-template = "/realm/data/screenshot/mpv/%F-%P-%n";
+      screenshot-template = "${dataRoot}/screenshot/mpv/%F-%P-%n";
 
       save-position-on-quit = true;
       hdr-compute-peak = true;

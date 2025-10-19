@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v wpctl >/dev/null 2>&1; then
+  jq -n --arg text "󰓃" --arg tooltip "wpctl unavailable" --arg class "unavailable" '{text:$text, tooltip:$tooltip, class:$class}'
+  exit 0
+fi
+
+inspect=$(wpctl inspect @DEFAULT_AUDIO_SINK@ 2>/dev/null || true)
+if [[ -z "$inspect" ]]; then
+  jq -n --arg text "󰓃" --arg tooltip "No default audio sink" --arg class "missing" '{text:$text, tooltip:$tooltip, class:$class}'
+  exit 0
+fi
+
+description=$(printf '%s\n' "$inspect" | awk -F ' = ' '/node.description/ {gsub(/"/, "", $2); print $2; exit}')
+nick=$(printf '%s\n' "$inspect" | awk -F ' = ' '/node.nick/ {gsub(/"/, "", $2); print $2; exit}')
+name=$(printf '%s\n' "$inspect" | awk -F ' = ' '/node.name/ {gsub(/"/, "", $2); print $2; exit}')
+device=$(printf '%s\n' "$inspect" | awk -F ' = ' '/device.description/ {gsub(/"/, "", $2); print $2; exit}')
+
+label="$description"
+if [[ -z "$label" ]]; then
+  label="$nick"
+fi
+if [[ -z "$label" ]]; then
+  label="$name"
+fi
+if [[ -z "$label" ]]; then
+  label="Audio Sink"
+fi
+
+lowered=$(printf '%s' "$label" | tr '[:upper:]' '[:lower:]')
+
+icon="󰓃"
+class="speaker"
+
+if [[ "$lowered" == *"wh-1000xm5"* || "$lowered" == *"galaxy buds2 pro"* ]]; then
+  icon="󰋋"
+  class="headphones"
+elif [[ "$lowered" == *"headphone"* || "$lowered" == *"headset"* ]]; then
+  icon="󰋋"
+  class="headphones"
+elif [[ "$lowered" == *"bluetooth"* || "$lowered" == *"bt"* ]]; then
+  icon="󰂯"
+  class="bluetooth"
+elif [[ "$lowered" == *"monitor"* || "$lowered" == *"display"* ]]; then
+  icon="󰹑"
+  class="monitor"
+elif [[ "$lowered" == *"hdmi"* || "$lowered" == *"digital"* ]]; then
+  icon="󰡁"
+  class="hdmi"
+elif [[ "$lowered" == *"usb"* || "$lowered" == *"dac"* || "$lowered" == *"ifi"* || "$lowered" == *"fiio"* || "$lowered" == *"e10k"* || "$lowered" == *"ultima 40"* ]]; then
+  icon="󰓃"
+  class="speaker"
+fi
+
+tooltip="$label"
+if [[ -n "$device" && "$device" != "$label" ]]; then
+  tooltip="$label"$'\n'"$device"
+fi
+
+text_output="$icon"
+jq -n --arg text "$text_output" --arg tooltip "$tooltip" --arg class "$class" '{text:$text, tooltip:$tooltip, class:$class}'

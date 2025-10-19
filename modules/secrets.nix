@@ -26,7 +26,7 @@ let
   mkSecretExport =
     secretName:
     let
-      envName = lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] secretName);
+      envName = lib.toUpper (lib.replaceStrings [ "-" "." ] [ "_" "_" ] secretName);
     in
     lib.optionalString (!lib.elem secretName secretsExcludedFromEnv) ''
       if [[ -r "${config.age.secrets.${secretName}.path}" ]]; then

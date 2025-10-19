@@ -107,7 +107,7 @@
     if [ -f /run/agenix/configstore-update-notifier ]; then
       mkdir -p "$HOME/.config/configstore"
       rm -rf "$HOME/.config/configstore/update-notifier-@google"
-      tar -xzf /run/agenix/configstore-update-notifier -C "$HOME/.config/configstore"
+      ${pkgs.gzip}/bin/gzip -dc /run/agenix/configstore-update-notifier | ${pkgs.gnutar}/bin/tar -xC "$HOME/.config/configstore"
     fi
   '';
 
@@ -115,7 +115,7 @@
     if [ -f /run/agenix/gcloud-config.tar.gz ]; then
       mkdir -p "$HOME/.config"
       rm -rf "$HOME/.config/gcloud"
-      tar -xzf /run/agenix/gcloud-config.tar.gz -C "$HOME/.config"
+      ${pkgs.gzip}/bin/gzip -dc /run/agenix/gcloud-config.tar.gz | ${pkgs.gnutar}/bin/tar -xC "$HOME/.config"
     fi
   '';
 }

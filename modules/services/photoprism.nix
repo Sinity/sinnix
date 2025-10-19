@@ -1,13 +1,17 @@
-{ lib, ... }:
+{ lib, username, ... }:
+let
+  dataRoot = "/realm/data";
+  mediaDir = "${dataRoot}/media";
+in
 {
   services.photoprism = {
     enable = true;
-    originalsPath = "/realm/data/media";
-    importPath = "/realm/data/media/import";
-    storagePath = "/realm/data/media/photoprism";
+    originalsPath = mediaDir;
+    importPath = "${mediaDir}/import";
+    storagePath = "${mediaDir}/photoprism";
     passwordFile = "/run/agenix/photoprism-admin-password";
     settings = {
-      PHOTOPRISM_ADMIN_USER = "sinity";
+      PHOTOPRISM_ADMIN_USER = username;
       PHOTOPRISM_SITE_CAPTION = "Realm Library";
       PHOTOPRISM_DISABLE_FACES = "false";
       PHOTOPRISM_DISABLE_CLASSIFICATION = "false";
@@ -15,14 +19,14 @@
   };
 
   systemd.tmpfiles.rules = lib.mkBefore [
-    "d /realm/data/media 0750 sinity media -"
-    "d /realm/data/media/import 2770 photoprism media -"
-    "d /realm/data/media/photoprism 2770 photoprism media -"
+    "d ${mediaDir} 0750 ${username} media -"
+    "d ${mediaDir}/import 2770 photoprism media -"
+    "d ${mediaDir}/photoprism 2770 photoprism media -"
   ];
 
   users.groups.media = {
     members = [
-      "sinity"
+      username
       "photoprism"
     ];
   };

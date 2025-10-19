@@ -1,4 +1,4 @@
-{ inputs, lib, pkgs, ... }:
+{ inputs, lib, pkgs, username, ... }:
 let
   dataRoot = "/realm/data";
   sinevecDataDir = "${dataRoot}/sinevec";
@@ -12,7 +12,7 @@ in
   environment.systemPackages = [ sinevecPkg ];
 
   users.groups.${sinevecGroup} = {
-    members = [ "sinity" ];
+    members = [ username ];
   };
 
   users.users.${sinevecUser} = {
@@ -59,9 +59,9 @@ in
   };
 
   systemd.tmpfiles.rules = [
-    "d ${dataRoot}/raindrop 0750 sinity users -"
-    "d ${dataRoot}/chatlog 0750 sinity users -"
-    "d ${dataRoot}/model 0750 sinity users -"
+    "d ${dataRoot}/raindrop 0750 ${username} users -"
+    "d ${dataRoot}/chatlog 0750 ${username} users -"
+    "d ${dataRoot}/model 0750 ${username} users -"
     "d ${sinevecDataDir} 0750 ${sinevecUser} ${sinevecGroup} -"
     "d ${sinevecStateDir} 0750 ${sinevecUser} ${sinevecGroup} -"
     "d ${sinevecLogDir} 0750 ${sinevecUser} ${sinevecGroup} -"

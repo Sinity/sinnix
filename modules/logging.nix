@@ -5,7 +5,8 @@
   ...
 }:
 let
-  journaldBaseDir = "/realm/data/syslog";
+  dataRoot = "/realm";
+  journaldBaseDir = "${dataRoot}/data/syslog";
   bootMetricsDir = "${journaldBaseDir}/boot-metrics";
   captureBootMetrics = pkgs.writeShellApplication {
     name = "capture-boot-metrics";

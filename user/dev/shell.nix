@@ -57,7 +57,7 @@
         ];
       };
 
-      initContent = lib.mkBefore ''
+      initExtra = lib.mkBefore ''
         DISABLE_AUTO_UPDATE=true
         DISABLE_MAGIC_FUNCTIONS=true
         export "MICRO_TRUECOLOR=1"

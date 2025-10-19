@@ -4,9 +4,11 @@
   lib,
   inputs,
   config,
+  username,
   ...
 }:
 let
+  dataRoot = "/realm";
   interceptTools = pkgs.interception-tools;
   capsPlugin = pkgs.interception-tools-plugins.caps2esc;
   interceptBouncePkg = inputs.intercept-bounce.packages.${pkgs.system}.intercept-bounce;
@@ -22,13 +24,13 @@ let
   );
   scribeCmd = lib.escapeShellArgs (
     [ "${scribePkg}/bin/scribe-tap"
-      "--data-dir" "/realm/data/keylog"
-      "--log-dir" "/realm/data/keylog/logs"
-      "--snapshot-dir" "/realm/data/keylog/snapshots"
+      "--data-dir" "${dataRoot}/data/keylog"
+      "--log-dir" "${dataRoot}/data/keylog/logs"
+      "--snapshot-dir" "${dataRoot}/data/keylog/snapshots"
       "--log-mode" "both"
       "--context" "hyprland"
       "--translate" "xkb"
-      "--hypr-user" "sinity"
+      "--hypr-user" username
       "--xkb-layout" "pl"
     ]
   );
@@ -94,9 +96,9 @@ in
   programs.dconf.enable = true;
 
   systemd.tmpfiles.rules = [
-    "d /realm/data/keylog 0700 sinity users -"
-    "d /realm/data/keylog/logs 0700 sinity users -"
-    "d /realm/data/keylog/snapshots 0700 sinity users -"
+    "d ${dataRoot}/data/keylog 0700 ${username} users -"
+    "d ${dataRoot}/data/keylog/logs 0700 ${username} users -"
+    "d ${dataRoot}/data/keylog/snapshots 0700 ${username} users -"
   ];
 
   systemd.user.services.logitech-maintenance = {

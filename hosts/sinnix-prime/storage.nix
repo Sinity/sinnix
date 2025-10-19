@@ -1,6 +1,7 @@
 # Host-specific storage configuration for sinnix-prime
 { pkgs, lib, ... }:
 let
+  dataRoot = "/realm";
   swapFileSizeGiB = 32;
 
   prepareSwapfile =
@@ -93,7 +94,7 @@ in
       ];
     };
 
-    "/realm" = {
+    "${dataRoot}" = {
       device = "/dev/disk/by-uuid/bd19092f-a195-47ab-9c0d-c923d1e5bfea";
       fsType = "btrfs";
       options = [
@@ -104,17 +105,17 @@ in
     };
 
     "/var/log/journal" = {
-      device = "/realm/data/syslog/journal";
+      device = "${dataRoot}/data/syslog/journal";
       fsType = "none";
       options = [ "bind" ];
-      depends = [ "/realm" ];
+      depends = [ dataRoot ];
     };
 
     "/home/sinity" = {
-      device = "/realm/home";
+      device = "${dataRoot}/home";
       fsType = "none";
       options = [ "bind" ];
-      depends = [ "/realm" ];
+      depends = [ dataRoot ];
     };
 
     "/outer-realm" = {
@@ -143,9 +144,9 @@ in
 
   systemd.tmpfiles.rules = lib.mkAfter [
     "d /mnt/pendrv 0755 root root -"
-    "d /realm/inbox 0755 sinity users -"
-    "d /realm/data/screenshot 0755 sinity users -"
-    "d /realm/data/screenshot/mpv 0755 sinity users -"
+    "d ${dataRoot}/inbox 0755 sinity users -"
+    "d ${dataRoot}/data/screenshot 0755 sinity users -"
+    "d ${dataRoot}/data/screenshot/mpv 0755 sinity users -"
   ];
 
   systemd.services.prepare-swapfile = {

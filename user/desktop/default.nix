@@ -3,9 +3,9 @@
   imports = [
     ./hyprland.nix
     ./apps.nix
+    ./waybar.nix
     ./display.nix
     ./environment.nix
-    ./services.nix
     ./terminal.nix
   ];
 }

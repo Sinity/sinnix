@@ -7,5 +7,6 @@
     ./media.nix
     ./networking.nix
     ./storage.nix
+    ./services
   ];
 }
