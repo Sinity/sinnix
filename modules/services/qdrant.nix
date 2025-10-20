@@ -1,5 +1,6 @@
-{ lib, pkgs, username, ... }:
+{ lib, pkgs, ... }:
 let
+  username = "sinity";
   dataRoot = "/realm/data";
   qdrantDataDir = "${dataRoot}/qdrant";
 in

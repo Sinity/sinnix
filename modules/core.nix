@@ -1,11 +1,13 @@
 {
   pkgs,
   inputs,
-  username,
-  host,
   lib,
+  config,
   ...
 }:
+let
+  username = "sinity";
+in
 {
   config = {
     nix = {
@@ -67,8 +69,8 @@
     services.xserver.xkb.layout = "pl";
 
     system.activationScripts.githubNetrc = ''
-      if [ -r /run/agenix/github-token ]; then
-        token="$(tr -d '\r\n' < /run/agenix/github-token)"
+      if [ -r ${config.sinnix.secrets.paths."github-token"} ]; then
+        token="$(tr -d '\r\n' < ${config.sinnix.secrets.paths."github-token"})"
         install -m 0640 -o root -g nixbld -D /dev/null /etc/nix/netrc
         printf 'machine github.com login x-access-token password %s\n' "$token" > /etc/nix/netrc
         printf 'machine api.github.com login x-access-token password %s\n' "$token" >> /etc/nix/netrc

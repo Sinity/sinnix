@@ -51,8 +51,6 @@
 
       # Make these values available to all modules
       specialArgs = {
-        host = "sinnix-prime";
-        username = "sinity";
         inherit inputs;
       };
     };

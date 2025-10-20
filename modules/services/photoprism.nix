@@ -1,7 +1,8 @@
-{ lib, username, ... }:
+{ lib, config, ... }:
 let
   dataRoot = "/realm/data";
   mediaDir = "${dataRoot}/media";
+  username = "sinity";
 in
 {
   services.photoprism = {
@@ -9,7 +10,7 @@ in
     originalsPath = mediaDir;
     importPath = "${mediaDir}/import";
     storagePath = "${mediaDir}/photoprism";
-    passwordFile = "/run/agenix/photoprism-admin-password";
+    passwordFile = config.sinnix.secrets.paths.photoprism-admin-password;
     settings = {
       PHOTOPRISM_ADMIN_USER = username;
       PHOTOPRISM_SITE_CAPTION = "Realm Library";
@@ -41,6 +42,6 @@ in
   };
 
   systemd.services.photoprism.serviceConfig.LoadCredential = lib.mkForce [
-    "PHOTOPRISM_ADMIN_PASSWORD_FILE:/run/agenix/photoprism-admin-password"
+    "PHOTOPRISM_ADMIN_PASSWORD_FILE:${config.sinnix.secrets.paths.photoprism-admin-password}"
   ];
 }

@@ -140,6 +140,7 @@
         "idea-session" = mkApp "idea-session" ''
           exec ${pkgs.bash}/bin/bash ${../scripts/idea-session} "$@"
         '' "Manage idea sessions from the terminal";
+
       };
     };
 }

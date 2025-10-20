@@ -49,9 +49,8 @@ let
     libglvnd
   ];
 
-  perfScan = pkgs.writeShellApplication {
-    name = "perf-scan";
-    runtimeInputs = with pkgs; [
+  perfScanRuntimeInputs =
+    with pkgs; [
       bash
       bc
       coreutils
@@ -90,8 +89,22 @@ let
       vkmark
       glmark2
     ];
+
+  perfScan = pkgs.writeShellApplication {
+    name = "perf-scan";
+    runtimeInputs = perfScanRuntimeInputs;
     text = builtins.readFile "${inputs.self}/scripts/perf-scan";
   };
+
+  heavyToolPackages =
+    hardwareDiagnostics
+    ++ storageMaintenance
+    ++ networkingTools
+    ++ graphicsStacks
+    ++ (with pkgs; [ bpftrace ]);
+
+  filteredToolPackages =
+    builtins.filter (pkg: !(lib.elem pkg perfScanRuntimeInputs)) heavyToolPackages;
 
 in
 {
@@ -100,11 +113,7 @@ in
       systemPackages =
         lib.unique (
           baseCli
-          ++ hardwareDiagnostics
-          ++ storageMaintenance
-          ++ networkingTools
-          ++ graphicsStacks
-          ++ (with pkgs; [ bpftrace ])
+          ++ filteredToolPackages
         )
         ++ [
           perfScan

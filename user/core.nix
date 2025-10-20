@@ -2,17 +2,17 @@
   config,
   pkgs,
   lib,
-  username,
   inputs,
   secretsExportScript ? "",
   ...
 }:
 let
+  username = "sinity";
   flakePath = "${inputs.self}";
 in
 {
   home = {
-    inherit username;
+    username = username;
     homeDirectory = "/home/${username}";
     stateVersion = "24.05";
 
@@ -47,12 +47,14 @@ in
   };
 
   programs.zsh = {
-    initExtra = lib.mkBefore ''
-      load_secrets() {
-        ${lib.optionalString (secretsExportScript != "") secretsExportScript}
-      }
-      load_secrets || true
-    '';
+    initContent = lib.mkMerge [
+      (lib.mkBefore ''
+        load_secrets() {
+          ${lib.optionalString (secretsExportScript != "") secretsExportScript}
+        }
+        load_secrets || true
+      '')
+    ];
     shellAliases = {
       load-secrets = "load_secrets";
     };

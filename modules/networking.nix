@@ -1,12 +1,11 @@
 {
   lib,
   pkgs,
-  host,
   ...
 }:
 {
   networking = {
-    hostName = host;
+    hostName = "sinnix-prime";
     networkmanager = {
       enable = true;
       dns = "systemd-resolved";

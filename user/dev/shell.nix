@@ -1,4 +1,7 @@
-{ lib, pkgs, username, ... }:
+{ lib, pkgs, ... }:
+let
+  username = "sinity";
+in
 {
   home.packages = with pkgs; [
     bat
@@ -57,7 +60,8 @@
         ];
       };
 
-      initExtra = lib.mkBefore ''
+      initContent = lib.mkMerge [
+        (lib.mkBefore ''
         DISABLE_AUTO_UPDATE=true
         DISABLE_MAGIC_FUNCTIONS=true
         export "MICRO_TRUECOLOR=1"
@@ -132,7 +136,8 @@
         zle -N self-insert url-quote-magic
 
         eval "$(atuin init zsh --disable-up-arrow)"
-      '';
+      '')
+      ];
 
       loginExtra = ''
         if [ "$(id -un)" = "${username}" ] && [ -z "$DISPLAY" ]; then
@@ -160,6 +165,7 @@
         l = "eza --icons  -a --group-directories-first -1";
         ll = "eza --icons  -a --group-directories-first -1 --no-user --long";
         tree = "eza --icons --tree --group-directories-first";
+        mosh-sinity-ephemeral = "mosh --ssh=\"ssh -p 22\" sinity@sinnix-ethereal";
         ns = "nom-shell --run zsh";
         nix-switch = "sudo nix run \"\$(_sinnix_flake_root)#switch\"";
         nix-test = "sudo nix run \"\$(_sinnix_flake_root)#test\"";

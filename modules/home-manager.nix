@@ -1,11 +1,12 @@
 {
   inputs,
-  username,
-  host,
   lib,
   config,
   ...
 }:
+let
+  username = "sinity";
+in
 {
   imports = [ inputs.home-manager.nixosModules.home-manager ];
 
@@ -14,9 +15,11 @@
     useGlobalPkgs = true;
     backupFileExtension = "backup";
     extraSpecialArgs = {
-      inherit inputs username host;
+      inherit inputs;
+      username = "sinity";
       secretsExportScript = config.sinnix.secrets.exportScript;
       dotsPath = "${inputs.self}/dots";
+      secretPaths = config.sinnix.secrets.paths;
     };
     users.${username} = {
       imports = [ ../user ];

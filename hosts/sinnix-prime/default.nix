@@ -1,7 +1,4 @@
-{ username, ... }:
-let
-  dataRoot = "/realm";
-in
+{ ... }:
 {
   imports = [
     ./boot.nix
@@ -12,16 +9,6 @@ in
     ../../modules/services/photoprism.nix
     ../../modules/services/qdrant.nix
     ../../modules/services/sinevec.nix
+    ../../modules/services/sinex.nix
   ];
-
-  services.sinex = {
-    enable = false;
-    targetUser = username;
-    directories = {
-      state = "${dataRoot}/data/sinex";
-      logs = "${dataRoot}/data/sinex/logs";
-    };
-    dlq.failureStoragePath = "${dataRoot}/data/sinex/failures";
-    satellite.enable = false;
-  };
 }

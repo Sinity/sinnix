@@ -4,11 +4,11 @@
   lib,
   inputs,
   config,
-  username,
   ...
 }:
 let
   dataRoot = "/realm";
+  username = "sinity";
   interceptTools = pkgs.interception-tools;
   capsPlugin = pkgs.interception-tools-plugins.caps2esc;
   interceptBouncePkg = inputs.intercept-bounce.packages.${pkgs.system}.intercept-bounce;

@@ -1,0 +1,68 @@
+# Configuration Structure
+
+This repository is organised so that the active host (`sinnix-prime`) pulls
+modules directly; there is no additional aggregation layer.  When you need to
+introduce a new capability, import the module from the host (or user profile)
+and keep ownership with that module.
+
+## System Modules (`modules/`)
+
+- **Core stack** – `modules/core.nix`, `modules/programs.nix`, `modules/networking.nix`,
+  `modules/storage.nix`, etc. provide system-wide defaults.  They expect to be
+  imported together from `flake/nixos.nix`, and each module owns its domain.
+- **Services** – Each service lives in its own file under
+  `modules/services/` (`photoprism.nix`, `qdrant.nix`, `sinevec.nix`,
+  `sinex.nix`, `transmission.nix`).  Service-specific state, users, tmpfiles,
+  and advanced tuning stay beside the service definition.  The host chooses
+  which services to enable by importing the corresponding file.
+- **Secrets** – `modules/secrets.nix` renders every `.age` file and exposes two
+  read-only helpers:
+  - `config.sinnix.secrets.paths.NAME` – resolved runtime path for the secret.
+  - `config.sinnix.secrets.exportScript` – shell snippet for selective export.
+  Service modules reference `config.sinnix.secrets.paths` so secret usage is
+  documented alongside the rest of the service configuration. Home modules
+  receive the same mapping via `secretPaths` and should prefer it to literal
+  `/run/agenix/...` paths.
+
+## Host (`hosts/sinnix-prime`)
+
+- Imports the required hardware overrides (`boot.nix`, `input.nix`, `display.nix`,
+  `storage.nix`) and selects the services to activate.
+- Direct overrides (e.g. toggling `services.sinex.enable`) belong here – the
+  host remains the single point of control by virtue of the modules it chooses.
+
+## User Profiles (`user/`)
+
+- `user/default.nix` brings together profile facets (`core`, `desktop`, `dev`,
+  `media`, `networking`, `storage`).
+- Dev tooling that should not trigger system rebuilds lives under `user/dev/`.
+  The system modules only keep the operational minimum (e.g. CLI basics,
+  perf-scan wrapper).
+
+## Storage Responsibilities
+
+- `modules/storage.nix` owns systemd services, mounts, and system-level packages
+  required for Always-On sync (davfs2, OneDrive, rclone).  User-facing helpers
+  (gocryptfs, mount scripts) remain in `user/storage.nix`.
+- The module also relies on `config.sinnix.secrets.paths.davfs2-secrets` for the
+  davfs2 credentials so the secret location is defined exactly once.
+
+## Sinex Service
+
+- `modules/services/sinex.nix` ships a full, resource-heavy configuration that
+  stays disabled by default.  It sets aggressive defaults for database tuning,
+  blob storage, monitoring, security, and a wide range of event sources.
+- Enabling the service from the host automatically prepares the working
+  directories (`/realm/data/sinex` hierarchy) and exposes the CLI utilities.
+- The configuration assumes PostgreSQL 16 with optional extensions
+  (`pg_trgm`, `pg_jsonschema`, `pg_stat_statements`) and keeps update,
+  preflight, and monitoring subsystems ready for when the service is toggled on.
+
+## Workflow Expectations
+
+- Import a module where the behaviour logically belongs (host vs system vs user).
+- Use `config.sinnix.secrets.paths` instead of hard-coding `/run/agenix/...`.
+- When adding tooling, prefer the user profile unless the binary must be
+  available before login; perf-scan already encapsulates heavy diagnostics.
+- Document new cross-cutting contracts (paths, data roots, service ownership)
+  here to keep the topology obvious.

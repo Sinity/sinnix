@@ -3,6 +3,7 @@
   pkgs,
   lib,
   dotsPath,
+  secretPaths,
   ...
 }:
 {
@@ -104,18 +105,18 @@
   };
 
   home.activation.restoreConfigstore = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-    if [ -f /run/agenix/configstore-update-notifier ]; then
+    if [ -f ${secretPaths."configstore-update-notifier"} ]; then
       mkdir -p "$HOME/.config/configstore"
       rm -rf "$HOME/.config/configstore/update-notifier-@google"
-      ${pkgs.gzip}/bin/gzip -dc /run/agenix/configstore-update-notifier | ${pkgs.gnutar}/bin/tar -xC "$HOME/.config/configstore"
+      ${pkgs.gzip}/bin/gzip -dc ${secretPaths."configstore-update-notifier"} | ${pkgs.gnutar}/bin/tar -xC "$HOME/.config/configstore"
     fi
   '';
 
   home.activation.restoreGcloud = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-    if [ -f /run/agenix/gcloud-config.tar.gz ]; then
+    if [ -f ${secretPaths."gcloud-config.tar.gz"} ]; then
       mkdir -p "$HOME/.config"
       rm -rf "$HOME/.config/gcloud"
-      ${pkgs.gzip}/bin/gzip -dc /run/agenix/gcloud-config.tar.gz | ${pkgs.gnutar}/bin/tar -xC "$HOME/.config"
+      ${pkgs.gzip}/bin/gzip -dc ${secretPaths."gcloud-config.tar.gz"} | ${pkgs.gnutar}/bin/tar -xC "$HOME/.config"
     fi
   '';
 }

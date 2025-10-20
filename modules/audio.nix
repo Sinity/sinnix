@@ -8,7 +8,6 @@
 {
   lib,
   pkgs,
-  username,
   ...
 }:
 {
@@ -74,7 +73,7 @@
     playerctl
   ];
 
-  users.users.${username}.extraGroups = lib.mkAfter [
+  users.users.sinity.extraGroups = lib.mkAfter [
     "audio"
     "bluetooth"
   ];

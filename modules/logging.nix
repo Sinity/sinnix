@@ -1,13 +1,13 @@
 {
   pkgs,
   lib,
-  username,
   ...
 }:
 let
   dataRoot = "/realm";
   journaldBaseDir = "${dataRoot}/data/syslog";
   bootMetricsDir = "${journaldBaseDir}/boot-metrics";
+  username = "sinity";
   captureBootMetrics = pkgs.writeShellApplication {
     name = "capture-boot-metrics";
     runtimeInputs = [
