@@ -32,6 +32,7 @@
               imports = [
                 ../modules/core.nix
                 ../modules/programs.nix
+                ../modules/diagnostics.nix
                 ../modules/logging.nix
                 ../modules/secrets.nix
                 ../modules/home-manager.nix
@@ -51,6 +52,8 @@
 
       # Make these values available to all modules
       specialArgs = {
+        host = "sinnix-prime";
+        username = "sinity";
         inherit inputs;
       };
     };

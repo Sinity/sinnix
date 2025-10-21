@@ -1,18 +1,39 @@
-{ pkgs, lib, inputs, config, ... }:
+{
+  pkgs,
+  lib,
+  inputs,
+  username,
+  config,
+  ...
+}:
 let
   nextcloudCert = builtins.readFile "${inputs.self}/assets/nextcloud-cert.crt";
-  username = "sinity";
+  baseStoragePackages = with pkgs; [
+    davfs2
+    rclone
+    onedrive
+    fuse
+    fuse3
+    rsync
+  ];
+  storageMaintenancePackages = with pkgs; [
+    btrfs-progs
+    hdparm
+    smartmontools
+    nvme-cli
+    parted
+    fio
+    ioping
+    udisks2
+    extundelete
+    lvm2
+    xfsprogs
+    e2fsprogs
+  ];
 in
 {
   environment = {
-    systemPackages = with pkgs; [
-      davfs2
-      rclone
-      onedrive
-      fuse
-      fuse3
-      rsync
-    ];
+    systemPackages = lib.mkAfter (baseStoragePackages ++ storageMaintenancePackages);
 
     etc = {
       "davfs2/secrets" = {

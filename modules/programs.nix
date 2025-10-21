@@ -1,124 +1,13 @@
-{ pkgs, inputs, lib, ... }:
+{ pkgs, lib, ... }:
 let
-  baseCli = with pkgs; [
-    wget
+  coreCliPackages = with pkgs; [
     git
+    wget
   ];
-
-  hardwareDiagnostics = with pkgs; [
-    hwinfo
-    inxi
-    dmidecode
-    lshw
-    pciutils
-    usbutils
-    cpuid
-    i7z
-    mcelog
-    memtester
-    numactl
-    hw-probe
-    hwdata
-  ];
-
-  storageMaintenance = with pkgs; [
-    btrfs-progs
-    hdparm
-    smartmontools
-    nvme-cli
-    parted
-    fio
-    ioping
-    udisks2
-    extundelete
-    lvm2
-    xfsprogs
-    e2fsprogs
-  ];
-
-  networkingTools = with pkgs; [
-    iputils
-    ethtool
-    iftop
-    iperf3
-  ];
-
-  graphicsStacks = with pkgs; [
-    mesa
-    libGL
-    libglvnd
-  ];
-
-  perfScanRuntimeInputs =
-    with pkgs; [
-      bash
-      bc
-      coreutils
-      findutils
-      gawk
-      gnugrep
-      gum
-      hdparm
-      intel-gpu-tools
-      inxi
-      iperf3
-      iproute2
-      jq
-      ethtool
-      flent
-      lm_sensors
-      memtester
-      netperf
-      nvme-cli
-      pciutils
-      perf
-      linuxPackages.turbostat
-      phoronix-test-suite
-      powertop
-      procps
-      python3
-      python312Packages.speedtest-cli
-      rt-tests
-      s-tui
-      smartmontools
-      stress-ng
-      stressapptest
-      sysbench
-      sysstat
-      util-linux
-      vkmark
-      glmark2
-    ];
-
-  perfScan = pkgs.writeShellApplication {
-    name = "perf-scan";
-    runtimeInputs = perfScanRuntimeInputs;
-    text = builtins.readFile "${inputs.self}/scripts/perf-scan";
-  };
-
-  heavyToolPackages =
-    hardwareDiagnostics
-    ++ storageMaintenance
-    ++ networkingTools
-    ++ graphicsStacks
-    ++ (with pkgs; [ bpftrace ]);
-
-  filteredToolPackages =
-    builtins.filter (pkg: !(lib.elem pkg perfScanRuntimeInputs)) heavyToolPackages;
-
 in
 {
   config = {
-    environment = {
-      systemPackages =
-        lib.unique (
-          baseCli
-          ++ filteredToolPackages
-        )
-        ++ [
-          perfScan
-        ];
-    };
+    environment.systemPackages = lib.mkAfter coreCliPackages;
 
     programs = {
       zsh.enable = true;

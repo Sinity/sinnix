@@ -38,6 +38,9 @@
       enable = true;
       extraPackages = with pkgs; [
         edid-decode # For decoding display capabilities metadata
+        mesa
+        libGL
+        libglvnd
       ];
     };
   };

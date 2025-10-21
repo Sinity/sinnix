@@ -4,9 +4,7 @@
 }:
 let
   sinexOverlays =
-    if builtins.getEnv "SINEX_DISABLE" == "1" then
-      [ ]
-    else if inputs ? sinex && inputs.sinex ? overlays && inputs.sinex.overlays ? default then
+    if inputs ? sinex && inputs.sinex ? overlays && inputs.sinex.overlays ? default then
       [ inputs.sinex.overlays.default ]
     else
       [ ];

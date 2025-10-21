@@ -1,11 +1,25 @@
 {
   lib,
   pkgs,
+  host,
   ...
 }:
+let
+  baseNetworkingPackages = with pkgs; [
+    networkmanagerapplet
+    bluez
+    bluez-tools
+  ];
+  networkingToolPackages = with pkgs; [
+    iputils
+    ethtool
+    iftop
+    iperf3
+  ];
+in
 {
   networking = {
-    hostName = "sinnix-prime";
+    hostName = host;
     networkmanager = {
       enable = true;
       dns = "systemd-resolved";
@@ -53,9 +67,5 @@
     FastConnectable = lib.mkDefault true;
   };
 
-  environment.systemPackages = with pkgs; [
-    networkmanagerapplet
-    bluez
-    bluez-tools
-  ];
+  environment.systemPackages = lib.mkAfter (baseNetworkingPackages ++ networkingToolPackages);
 }
