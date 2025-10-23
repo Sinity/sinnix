@@ -2,11 +2,11 @@
   pkgs,
   lib,
   inputs,
-  username,
   config,
   ...
 }:
 let
+  username = "sinity";
   nextcloudCert = builtins.readFile "${inputs.self}/assets/nextcloud-cert.crt";
   baseStoragePackages = with pkgs; [
     davfs2
@@ -86,97 +86,97 @@ in
     "d /var/lib/onedrive-auth 0700 ${username} users -"
   ];
 
-    systemd.services = {
-      onedrive-sync = {
-        description = "OneDrive Selective Synchronization";
-        after = [ "network-online.target" ];
-        wants = [ "network-online.target" ];
-        wantedBy = [ "multi-user.target" ];
-        enable = true;
-        serviceConfig = {
-          Type = "simple";
-          User = username;
-          Group = "users";
-          ExecStart = "${pkgs.writeShellScript "onedrive-sync-service" ''
-            set -euo pipefail
+  systemd.services = {
+    onedrive-sync = {
+      description = "OneDrive Selective Synchronization";
+      after = [ "network-online.target" ];
+      wants = [ "network-online.target" ];
+      wantedBy = [ "multi-user.target" ];
+      enable = true;
+      serviceConfig = {
+        Type = "simple";
+        User = username;
+        Group = "users";
+        ExecStart = "${pkgs.writeShellScript "onedrive-sync-service" ''
+          set -euo pipefail
 
-            if [ ! -d /var/lib/onedrive-auth ]; then
-              mkdir -p /var/lib/onedrive-auth
-              chown ${username}:users /var/lib/onedrive-auth
-              chmod 700 /var/lib/onedrive-auth
+          if [ ! -d /var/lib/onedrive-auth ]; then
+            mkdir -p /var/lib/onedrive-auth
+            chown ${username}:users /var/lib/onedrive-auth
+            chmod 700 /var/lib/onedrive-auth
+          fi
+
+          if [ ! -f /var/lib/onedrive-auth/config ]; then
+            cp -r /etc/onedrive/* /var/lib/onedrive-auth/ || true
+            chown -R ${username}:users /var/lib/onedrive-auth/
+          fi
+
+          warned=0
+          while [ ! -f /var/lib/onedrive-auth/refresh_token ]; do
+            if [ "$warned" -eq 0 ]; then
+              echo "onedrive-sync: waiting for /var/lib/onedrive-auth/refresh_token (run 'onedrive-auth' to authorise)" >&2
+              warned=1
             fi
+            sleep 30
+          done
 
-            if [ ! -f /var/lib/onedrive-auth/config ]; then
-              cp -r /etc/onedrive/* /var/lib/onedrive-auth/ || true
-              chown -R ${username}:users /var/lib/onedrive-auth/
-            fi
-
-            warned=0
-            while [ ! -f /var/lib/onedrive-auth/refresh_token ]; do
-              if [ "$warned" -eq 0 ]; then
-                echo "onedrive-sync: waiting for /var/lib/onedrive-auth/refresh_token (run 'onedrive-auth' to authorise)" >&2
-                warned=1
-              fi
-              sleep 30
-            done
-
-            exec ${pkgs.onedrive}/bin/onedrive --monitor --confdir /var/lib/onedrive-auth
-          ''}";
-          Restart = "on-failure";
-          RestartSec = 3;
-          ReadWritePaths = [
-            "/var/lib/onedrive"
-            "/var/lib/onedrive-auth"
+          exec ${pkgs.onedrive}/bin/onedrive --monitor --confdir /var/lib/onedrive-auth
+        ''}";
+        Restart = "on-failure";
+        RestartSec = 3;
+        ReadWritePaths = [
+          "/var/lib/onedrive"
+          "/var/lib/onedrive-auth"
         ];
       };
     };
 
-      gdrive-mount = {
-        description = "Mount Google Drive via rclone";
-        after = [
-          "network-online.target"
-        ];
-        wants = [
-          "network-online.target"
-        ];
-        wantedBy = [ "multi-user.target" ];
+    gdrive-mount = {
+      description = "Mount Google Drive via rclone";
+      after = [
+        "network-online.target"
+      ];
+      wants = [
+        "network-online.target"
+      ];
+      wantedBy = [ "multi-user.target" ];
       enable = true;
-        serviceConfig = {
-          Type = "simple";
-          User = username;
-          ExecStart = "${pkgs.writeShellScript "gdrive-mount-service" ''
-            set -euo pipefail
+      serviceConfig = {
+        Type = "simple";
+        User = username;
+        ExecStart = "${pkgs.writeShellScript "gdrive-mount-service" ''
+          set -euo pipefail
 
-            warned=0
-            while [ ! -f /home/${username}/.config/rclone/rclone.conf ]; do
-              if [ "$warned" -eq 0 ]; then
-                echo "gdrive-mount: waiting for /home/${username}/.config/rclone/rclone.conf; run 'setup-gdrive' to create it" >&2
-                warned=1
-              fi
-              sleep 30
-            done
+          warned=0
+          while [ ! -f /home/${username}/.config/rclone/rclone.conf ]; do
+            if [ "$warned" -eq 0 ]; then
+              echo "gdrive-mount: waiting for /home/${username}/.config/rclone/rclone.conf; run 'setup-gdrive' to create it" >&2
+              warned=1
+            fi
+            sleep 30
+          done
 
-            ${pkgs.coreutils}/bin/mkdir -p /mnt/gdrive
-            chown ${username}:users /mnt/gdrive || true
+          ${pkgs.coreutils}/bin/mkdir -p /mnt/gdrive
+          chown ${username}:users /mnt/gdrive || true
 
-            exec ${pkgs.rclone}/bin/rclone mount gdrive: /mnt/gdrive \
-              --config /home/${username}/.config/rclone/rclone.conf \
-              --vfs-cache-mode full \
-              --vfs-cache-max-size 5G \
-              --vfs-cache-max-age 72h \
-              --buffer-size 256M \
-              --vfs-read-ahead 512M \
-              --dir-cache-time 72h \
-              --poll-interval 1m \
-              --uid 1000 \
-              --gid 100 \
-              --umask 022
-          ''}";
-          ExecStop = "${pkgs.fuse3}/bin/fusermount3 -u /mnt/gdrive";
-          Restart = "on-failure";
-          RestartSec = 5;
-        };
+          exec ${pkgs.rclone}/bin/rclone mount gdrive: /mnt/gdrive \
+            --config /home/${username}/.config/rclone/rclone.conf \
+            --vfs-cache-mode full \
+            --vfs-cache-max-size 5G \
+            --vfs-cache-max-age 72h \
+            --buffer-size 256M \
+            --vfs-read-ahead 512M \
+            --dir-cache-time 72h \
+            --poll-interval 1m \
+            --uid 1000 \
+            --gid 100 \
+            --umask 022
+        ''}";
+        ExecStop = "${pkgs.fuse3}/bin/fusermount3 -u /mnt/gdrive";
+        Restart = "on-failure";
+        RestartSec = 5;
       };
+    };
   };
 
   system.activationScripts.fixRclonePermissions.text = ''

@@ -4,49 +4,48 @@ let
   dataRoot = "/realm";
   swapFileSizeGiB = 32;
 
-  prepareSwapfile =
-    pkgs.writeShellApplication {
-      name = "prepare-swapfile";
-      runtimeInputs = [
-        pkgs.btrfs-progs
-        pkgs.coreutils
-        pkgs.e2fsprogs
-        pkgs.util-linux
-      ];
-      text = ''
-        set -euo pipefail
+  prepareSwapfile = pkgs.writeShellApplication {
+    name = "prepare-swapfile";
+    runtimeInputs = [
+      pkgs.btrfs-progs
+      pkgs.coreutils
+      pkgs.e2fsprogs
+      pkgs.util-linux
+    ];
+    text = ''
+      set -euo pipefail
 
-        swap_dir="/swap"
-        swap_file="/swap/swapfile"
-        desired_size=$(( ${toString swapFileSizeGiB} * 1024 * 1024 * 1024 ))
+      swap_dir="/swap"
+      swap_file="/swap/swapfile"
+      desired_size=$(( ${toString swapFileSizeGiB} * 1024 * 1024 * 1024 ))
 
-        mkdir -p "$swap_dir"
-        chmod 700 "$swap_dir"
-        chattr +C "$swap_dir" >/dev/null 2>&1 || true
-        btrfs property set -ts "$swap_dir" compression none >/dev/null 2>&1 || true
+      mkdir -p "$swap_dir"
+      chmod 700 "$swap_dir"
+      chattr +C "$swap_dir" >/dev/null 2>&1 || true
+      btrfs property set -ts "$swap_dir" compression none >/dev/null 2>&1 || true
 
-        create_swap=0
+      create_swap=0
 
-        if [ -e "$swap_file" ]; then
-          current_size=$(stat --printf=%s "$swap_file" 2>/dev/null || echo 0)
-          if [ "$current_size" -ne "$desired_size" ]; then
-            swapoff "$swap_file" >/dev/null 2>&1 || true
-            rm -f "$swap_file"
-            create_swap=1
-          fi
-        else
+      if [ -e "$swap_file" ]; then
+        current_size=$(stat --printf=%s "$swap_file" 2>/dev/null || echo 0)
+        if [ "$current_size" -ne "$desired_size" ]; then
+          swapoff "$swap_file" >/dev/null 2>&1 || true
+          rm -f "$swap_file"
           create_swap=1
         fi
+      else
+        create_swap=1
+      fi
 
-        if [ "$create_swap" -eq 1 ]; then
-          btrfs filesystem mkswapfile --size ${toString swapFileSizeGiB}g "$swap_file"
-          chmod 600 "$swap_file"
-          mkswap "$swap_file" >/dev/null 2>&1
-        else
-          chmod 600 "$swap_file"
-        fi
-      '';
-    };
+      if [ "$create_swap" -eq 1 ]; then
+        btrfs filesystem mkswapfile --size ${toString swapFileSizeGiB}g "$swap_file"
+        chmod 600 "$swap_file"
+        mkswap "$swap_file" >/dev/null 2>&1
+      else
+        chmod 600 "$swap_file"
+      fi
+    '';
+  };
 in
 {
   services = {
@@ -144,6 +143,7 @@ in
 
   systemd.tmpfiles.rules = lib.mkAfter [
     "d /mnt/pendrv 0755 root root -"
+    "d ${dataRoot}/knowledgebase 0755 sinity users -"
     "d ${dataRoot}/inbox 0755 sinity users -"
     "d ${dataRoot}/data/screenshot 0755 sinity users -"
     "d ${dataRoot}/data/screenshot/mpv 0755 sinity users -"

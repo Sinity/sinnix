@@ -61,7 +61,8 @@
         tree_sort_direction = 1;
         tree_view_always_by_pid = false;
         all_branches_collapsed = false;
-        "screen:Main" = "PID USER PRIORITY NICE M_VIRT M_RESIDENT M_SHARE STATE PERCENT_CPU PERCENT_MEM TIME Command";
+        "screen:Main" =
+          "PID USER PRIORITY NICE M_VIRT M_RESIDENT M_SHARE STATE PERCENT_CPU PERCENT_MEM TIME Command";
         "screen:Main.sort_key" = "PERCENT_CPU";
         "screen:Main.tree_sort_key" = "PID";
         "screen:Main.tree_view_always_by_pid" = "0";
@@ -69,7 +70,8 @@
         "screen:Main.sort_direction" = "-1";
         "screen:Main.tree_sort_direction" = "1";
         "screen:Main.all_branches_collapsed" = "0";
-        "screen:I/O" = "PID USER IO_PRIORITY IO_RATE IO_READ_RATE IO_WRITE_RATE PERCENT_SWAP_DELAY PERCENT_IO_DELAY Command";
+        "screen:I/O" =
+          "PID USER IO_PRIORITY IO_RATE IO_READ_RATE IO_WRITE_RATE PERCENT_SWAP_DELAY PERCENT_IO_DELAY Command";
         "screen:I/O.sort_key" = "IO_RATE";
         "screen:I/O.tree_sort_key" = "PID";
         "screen:I/O.tree_view_always_by_pid" = "0";
@@ -78,16 +80,22 @@
         "screen:I/O.tree_sort_direction" = "1";
         "screen:I/O.all_branches_collapsed" = "0";
       }
-      // (with config.lib.htop; leftMeters [
-        (bar "LeftCPUs4")
-        (bar "Memory")
-        (bar "Swap")
-      ])
-      // (with config.lib.htop; rightMeters [
-        (bar "RightCPUs4")
-        (text "Tasks")
-        (text "LoadAverage")
-        (text "Uptime")
-      ]);
+      // (
+        with config.lib.htop;
+        leftMeters [
+          (bar "LeftCPUs4")
+          (bar "Memory")
+          (bar "Swap")
+        ]
+      )
+      // (
+        with config.lib.htop;
+        rightMeters [
+          (bar "RightCPUs4")
+          (text "Tasks")
+          (text "LoadAverage")
+          (text "Uptime")
+        ]
+      );
   };
 }

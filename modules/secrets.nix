@@ -16,48 +16,47 @@ let
 
   secretNames = lib.mapAttrsToList (name: _: lib.removeSuffix ".age" name) secretFiles;
 
-  secretSpecs =
-    lib.mapAttrs' (filename: _: {
-      name = lib.removeSuffix ".age" filename;
-      value =
-        let
-          secretName = lib.removeSuffix ".age" filename;
-          defaultSpec = {
-            owner = username;
-            mode = "0400";
-          };
-          rootOwnedSpec = defaultSpec // {
-            owner = "root";
-            group = "root";
-          };
-        in
-        {
-          file = secretDir + "/" + filename;
-        }
-        // (
-          if secretName == "github-token" then
-            defaultSpec
-            // {
-              group = "nixbld";
-              mode = "0440";
-              path = "/run/agenix/github-token";
-            }
-          else if secretName == "davfs2-secrets" then
-            rootOwnedSpec
-            // {
-              mode = "0600";
-              path = "/run/agenix/davfs2-secrets";
-            }
-          else if secretName == "photoprism-admin-password" then
-            rootOwnedSpec // { path = "/run/agenix/photoprism-admin-password"; }
-          else if secretName == "sinity-password" then
-            rootOwnedSpec // { path = "/run/agenix/sinity-password"; }
-          else if secretName == "root-password" then
-            rootOwnedSpec // { path = "/run/agenix/root-password"; }
-          else
-            defaultSpec // { path = "/run/agenix/${secretName}"; }
-        );
-    }) secretFiles;
+  secretSpecs = lib.mapAttrs' (filename: _: {
+    name = lib.removeSuffix ".age" filename;
+    value =
+      let
+        secretName = lib.removeSuffix ".age" filename;
+        defaultSpec = {
+          owner = username;
+          mode = "0400";
+        };
+        rootOwnedSpec = defaultSpec // {
+          owner = "root";
+          group = "root";
+        };
+      in
+      {
+        file = secretDir + "/" + filename;
+      }
+      // (
+        if secretName == "github-token" then
+          defaultSpec
+          // {
+            group = "nixbld";
+            mode = "0440";
+            path = "/run/agenix/github-token";
+          }
+        else if secretName == "davfs2-secrets" then
+          rootOwnedSpec
+          // {
+            mode = "0600";
+            path = "/run/agenix/davfs2-secrets";
+          }
+        else if secretName == "photoprism-admin-password" then
+          rootOwnedSpec // { path = "/run/agenix/photoprism-admin-password"; }
+        else if secretName == "sinity-password" then
+          rootOwnedSpec // { path = "/run/agenix/sinity-password"; }
+        else if secretName == "root-password" then
+          rootOwnedSpec // { path = "/run/agenix/root-password"; }
+        else
+          defaultSpec // { path = "/run/agenix/${secretName}"; }
+      );
+  }) secretFiles;
 
   secretsExcludedFromEnv = [
     "sinity-password"

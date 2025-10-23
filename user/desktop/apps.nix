@@ -8,7 +8,13 @@
 #
 # Note: fnott colors are derived from stylix (see config.lib.stylix.colors)
 #       but we manually configure layout/behavior
-{ pkgs, lib, dotsPath, config, ... }:
+{
+  pkgs,
+  lib,
+  dotsPath,
+  config,
+  ...
+}:
 let
   kvantumPkg =
     if lib.hasAttrByPath [ "qt6Packages" "qtstyleplugin-kvantum" ] pkgs then
@@ -85,20 +91,17 @@ in
     platformTheme = {
       name = "qtct";
     };
-    style =
-      {
-        name = "kvantum";
-      }
-      // lib.optionalAttrs (kvantumPkg != null) {
-        package = kvantumPkg;
-      };
+    style = {
+      name = "kvantum";
+    }
+    // lib.optionalAttrs (kvantumPkg != null) {
+      package = kvantumPkg;
+    };
   };
 
-  home.activation.cleanupKvantum =
-    lib.hm.dag.entryBefore [ "linkGeneration" ] ''
-      rm -rf "$HOME/.config/Kvantum"
-    '';
-
+  home.activation.cleanupKvantum = lib.hm.dag.entryBefore [ "linkGeneration" ] ''
+    rm -rf "$HOME/.config/Kvantum"
+  '';
 
   services.clipse = {
     enable = true;
@@ -139,7 +142,12 @@ in
   services.fnott =
     let
       stylixColors = config.lib.stylix.colors;
-      toRgba = alpha: color: let hex = lib.removePrefix "#" color; in "${hex}${alpha}";
+      toRgba =
+        alpha: color:
+        let
+          hex = lib.removePrefix "#" color;
+        in
+        "${hex}${alpha}";
       bg = toRgba "f0" stylixColors.base00;
       border = toRgba "ff" stylixColors.base03;
       text = toRgba "ff" stylixColors.base06;
@@ -248,7 +256,6 @@ in
         Name=Mullvad VPN (disabled)
         Hidden=true
       '';
-      "mimeapps.list".force = true;
     };
     mimeApps = {
       enable = true;

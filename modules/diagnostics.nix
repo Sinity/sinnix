@@ -25,46 +25,45 @@ let
     bpftrace
   ];
 
-  perfScanRuntimeInputs =
-    with pkgs; [
-      bash
-      bc
-      coreutils
-      ethtool
-      findutils
-      flent
-      gawk
-      gnugrep
-      gum
-      hdparm
-      intel-gpu-tools
-      inxi
-      iperf3
-      iproute2
-      jq
-      linuxPackages.turbostat
-      lm_sensors
-      memtester
-      netperf
-      nvme-cli
-      pciutils
-      perf
-      phoronix-test-suite
-      powertop
-      procps
-      python3
-      python312Packages.speedtest-cli
-      rt-tests
-      s-tui
-      smartmontools
-      stress-ng
-      stressapptest
-      sysbench
-      sysstat
-      util-linux
-      vkmark
-      glmark2
-    ];
+  perfScanRuntimeInputs = with pkgs; [
+    bash
+    bc
+    coreutils
+    ethtool
+    findutils
+    flent
+    gawk
+    gnugrep
+    gum
+    hdparm
+    intel-gpu-tools
+    inxi
+    iperf3
+    iproute2
+    jq
+    linuxPackages.turbostat
+    lm_sensors
+    memtester
+    netperf
+    nvme-cli
+    pciutils
+    perf
+    phoronix-test-suite
+    powertop
+    procps
+    python3
+    python312Packages.speedtest-cli
+    rt-tests
+    s-tui
+    smartmontools
+    stress-ng
+    stressapptest
+    sysbench
+    sysstat
+    util-linux
+    vkmark
+    glmark2
+  ];
 
   perfScan = pkgs.writeShellApplication {
     name = "perf-scan";
@@ -73,10 +72,7 @@ let
   };
 in
 {
-  config.environment.systemPackages =
-    lib.mkAfter (
-      hardwareDiagnostics
-      ++ observabilityPackages
-      ++ [ perfScan ]
-    );
+  config.environment.systemPackages = lib.mkAfter (
+    hardwareDiagnostics ++ observabilityPackages ++ [ perfScan ]
+  );
 }

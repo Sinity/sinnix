@@ -13,6 +13,11 @@ let
   defaultDlqDir = "${defaultStateDir}/failures";
   sinexDotsDir = "${inputs.self}/dots/sinex";
   cfg = config.services.sinex;
+  collectorConfigFile = pkgs.writeText "sinex-collector-placeholder.toml" ''
+    # This file is managed by NixOS (modules/services/sinex.nix).
+    # Sinex loads configuration through nixos_config.rs; this placeholder ensures
+    # the expected configuration path exists for diagnostics.
+  '';
 in
 {
   config =
@@ -61,8 +66,8 @@ in
 
           database = {
             package = lib.mkDefault pkgs.postgresql_16;
-            listenAddress = lib.mkDefault "/run/postgresql";
-            host = lib.mkDefault "/run/postgresql";
+            listenAddress = lib.mkDefault "127.0.0.1";
+            host = lib.mkDefault "127.0.0.1";
             port = lib.mkDefault 5432;
             name = lib.mkDefault "sinex";
             user = lib.mkDefault "sinex";
@@ -84,9 +89,9 @@ in
             filesystem = {
               enable = lib.mkDefault true;
               watchPaths = lib.mkDefault [
-                "${inputs.self}/docs"
                 "/realm/data"
                 "/home/${username}/Projects"
+                "/realm/sinnix/docs"
               ];
               excludePatterns = lib.mkDefault [
                 "**/.git/**"
@@ -253,7 +258,7 @@ in
 
           update = {
             enable = lib.mkDefault true;
-            gracePeriod = lib.mkDefault "5m";
+            gracePeriod = lib.mkDefault 300;
             rollbackOnFailure = lib.mkDefault true;
             preserveData = lib.mkDefault true;
           };
@@ -273,15 +278,21 @@ in
 
       (lib.mkIf cfg.enable {
         systemd.tmpfiles.rules = [
-          "d ${cfg.directories.state} 0750 ${cfg.targetUser} users -"
-          "d ${cfg.directories.logs} 0750 ${cfg.targetUser} users -"
-          "d ${cfg.dlq.failureStoragePath} 0750 ${cfg.targetUser} users -"
-          "d ${cfg.blobStorage.repositoryPath} 0750 ${cfg.targetUser} users -"
+          "d ${cfg.directories.state} 0755 ${cfg.database.user} ${cfg.database.user} -"
+          "d ${cfg.directories.logs} 0755 ${cfg.database.user} ${cfg.database.user} -"
+        ]
+        ++ lib.optionals (cfg.dlq.enable or false) [
+          "d ${cfg.dlq.failureStoragePath} 0755 ${cfg.database.user} ${cfg.database.user} -"
+        ]
+        ++ lib.optionals (cfg.blobStorage.enable or false) [
+          "d ${cfg.blobStorage.repositoryPath} 0755 ${cfg.database.user} ${cfg.database.user} -"
         ];
 
         environment.systemPackages = lib.mkAfter (
-          lib.optional (cfg.cliPackage != null) cfg.cliPackage
+          lib.optional (cfg ? cliPackage && cfg.cliPackage != null) cfg.cliPackage
         );
+
+        environment.etc."sinex/collector.toml".source = collectorConfigFile;
       })
     ];
 }

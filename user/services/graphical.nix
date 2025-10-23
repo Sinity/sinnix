@@ -6,6 +6,7 @@ let
     After = [ graphicalTarget ];
     PartOf = [ graphicalTarget ];
   };
+
 in
 {
   services.activitywatch = {
@@ -15,29 +16,30 @@ in
       package = pkgs.awatcher;
       settings = {
         idle-timeout-seconds = 60;
-        poll-time-idle-seconds = 1;
-        poll-time-window-seconds = 1;
+        poll-time-idle-seconds = 5;
+        # Allow a little more than the default 1s to reduce transient timeouts.
+        poll-time-window-seconds = 2;
       };
     };
   };
 
   systemd.user.services = {
     activitywatch-watcher-awatcher = {
-      Unit =
-        baseGraphicalUnit
-        // {
-          Requisite = [ graphicalTarget ];
-          PartOf = [ graphicalTarget ];
-        };
+      Unit = baseGraphicalUnit // {
+        Requisite = [ graphicalTarget ];
+        PartOf = [ graphicalTarget ];
+      };
+      Service = {
+        Restart = "on-failure";
+        RestartSec = 5;
+      };
       Install.WantedBy = [ graphicalTarget ];
     };
 
     wl-clip-persist = {
-      Unit =
-        baseGraphicalUnit
-        // {
-          Description = "Wayland clipboard persistence";
-        };
+      Unit = baseGraphicalUnit // {
+        Description = "Wayland clipboard persistence";
+      };
       Service = {
         Type = "simple";
         ExecStart = "${pkgs.wl-clip-persist}/bin/wl-clip-persist --clipboard both";
@@ -48,11 +50,9 @@ in
     };
 
     nm-applet = {
-      Unit =
-        baseGraphicalUnit
-        // {
-          Description = "NetworkManager applet";
-        };
+      Unit = baseGraphicalUnit // {
+        Description = "NetworkManager applet";
+      };
       Service = {
         Type = "simple";
         ExecStart = "${pkgs.networkmanagerapplet}/bin/nm-applet";
@@ -63,11 +63,9 @@ in
     };
 
     polkit-gnome-authentication-agent-1 = {
-      Unit =
-        baseGraphicalUnit
-        // {
-          Description = "polkit-gnome-authentication-agent-1";
-        };
+      Unit = baseGraphicalUnit // {
+        Description = "polkit-gnome-authentication-agent-1";
+      };
       Service = {
         Type = "simple";
         ExecStart = "${pkgs.polkit_gnome}/libexec/polkit-gnome-authentication-agent-1";
@@ -78,11 +76,9 @@ in
     };
 
     blueman-applet = {
-      Unit =
-        baseGraphicalUnit
-        // {
-          Description = "Blueman applet";
-        };
+      Unit = baseGraphicalUnit // {
+        Description = "Blueman applet";
+      };
       Service = {
         Type = "simple";
         ExecStart = "${pkgs.blueman}/bin/blueman-applet";
@@ -93,8 +89,11 @@ in
     };
   };
 
-  home.packages = lib.mkBefore (with pkgs; [
-    aw-watcher-window-wayland
-    aw-watcher-afk
-  ]);
+  home.packages = lib.mkBefore (
+    with pkgs;
+    [
+      aw-watcher-window-wayland
+      aw-watcher-afk
+    ]
+  );
 }

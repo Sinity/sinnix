@@ -13,30 +13,48 @@ let
   capsPlugin = pkgs.interception-tools-plugins.caps2esc;
   interceptBouncePkg = inputs.intercept-bounce.packages.${pkgs.system}.intercept-bounce;
   scribePkg = inputs.scribe-tap.packages.${pkgs.system}.default;
-  interceptCmd = lib.escapeShellArgs [ "${interceptTools}/bin/intercept" "-g" "$DEVNODE" ];
-  bounceCmd = lib.escapeShellArgs (
-    [ "${interceptBouncePkg}/bin/intercept-bounce"
-      "--debounce-time" "40ms"
-      "--log-interval" "6h"
-      "--log-bounces"
-      "--stats-json"
-    ]
-  );
-  scribeCmd = lib.escapeShellArgs (
-    [ "${scribePkg}/bin/scribe-tap"
-      "--data-dir" "${dataRoot}/data/keylog"
-      "--log-dir" "${dataRoot}/data/keylog/logs"
-      "--snapshot-dir" "${dataRoot}/data/keylog/snapshots"
-      "--log-mode" "both"
-      "--context" "hyprland"
-      "--translate" "xkb"
-      "--hypr-user" username
-      "--xkb-layout" "pl"
-    ]
-  );
-  capsCmd = lib.escapeShellArgs [ "${capsPlugin}/bin/caps2esc" "-m" "1" ];
-  uinputCmd = lib.escapeShellArgs [ "${interceptTools}/bin/uinput" "-d" "$DEVNODE" ];
-  pipeline = lib.concatStringsSep " | " [ interceptCmd bounceCmd scribeCmd capsCmd uinputCmd ];
+  interceptCmd = ''${interceptTools}/bin/intercept -g $DEVNODE'';
+  bounceCmd = lib.escapeShellArgs ([
+    "${interceptBouncePkg}/bin/intercept-bounce"
+    "--debounce-time"
+    "40ms"
+    "--log-interval"
+    "6h"
+    "--log-bounces"
+    "--stats-json"
+  ]);
+  scribeCmd = lib.escapeShellArgs ([
+    "${scribePkg}/bin/scribe-tap"
+    "--data-dir"
+    "${dataRoot}/data/keylog"
+    "--log-dir"
+    "${dataRoot}/data/keylog/logs"
+    "--snapshot-dir"
+    "${dataRoot}/data/keylog/snapshots"
+    "--log-mode"
+    "both"
+    "--context"
+    "hyprland"
+    "--translate"
+    "xkb"
+    "--hypr-user"
+    username
+    "--xkb-layout"
+    "pl"
+  ]);
+  capsCmd = lib.escapeShellArgs [
+    "${capsPlugin}/bin/caps2esc"
+    "-m"
+    "1"
+  ];
+  uinputCmd = ''${interceptTools}/bin/uinput -d $DEVNODE'';
+  pipeline = lib.concatStringsSep " | " [
+    interceptCmd
+    bounceCmd
+    scribeCmd
+    capsCmd
+    uinputCmd
+  ];
 
   logitechMaintenance = pkgs.writeShellScript "logitech-maintenance" ''
     #!/usr/bin/env bash
@@ -103,8 +121,14 @@ in
 
   systemd.user.services.logitech-maintenance = {
     description = "Ensure Logitech G502/Powerplay charge and LED state";
-    after = [ "graphical-session.target" "ratbagd.service" ];
-    wants = [ "graphical-session.target" "ratbagd.service" ];
+    after = [
+      "graphical-session.target"
+      "ratbagd.service"
+    ];
+    wants = [
+      "graphical-session.target"
+      "ratbagd.service"
+    ];
     serviceConfig = {
       Type = "oneshot";
       ExecStartPre = "${pkgs.coreutils}/bin/sleep 5";

@@ -1,21 +1,40 @@
 # Waybar status bar configuration
-{ pkgs, lib, inputs, ... }:
+{
+  pkgs,
+  lib,
+  inputs,
+  ...
+}:
 let
   script = rel: "${inputs.self}/scripts/${rel}";
   waybarAudioSignal = 12;
   audioOutputStatus = pkgs.writeShellApplication {
     name = "audio-output-status";
-    runtimeInputs = with pkgs; [ coreutils gawk jq pipewire ];
+    runtimeInputs = with pkgs; [
+      coreutils
+      gawk
+      jq
+      pipewire
+    ];
     text = builtins.readFile (script "audio-output-status");
   };
   audioOutputToggle = pkgs.writeShellApplication {
     name = "toggle-audio-output";
-    runtimeInputs = with pkgs; [ coreutils gawk jq pipewire procps ];
+    runtimeInputs = with pkgs; [
+      coreutils
+      gawk
+      jq
+      pipewire
+      procps
+    ];
     text = builtins.readFile (script "toggle-audio-output");
   };
 in
 {
-  home.packages = [ audioOutputToggle audioOutputStatus ];
+  home.packages = [
+    audioOutputToggle
+    audioOutputStatus
+  ];
 
   programs.waybar = {
     enable = true;
@@ -78,11 +97,12 @@ in
         on-scroll-down = "hyprctl dispatch workspace e-1";
         format = "{name}";
         sort-by-number = true;
-        persistent-workspaces =
-          builtins.listToAttrs (map (n: {
+        persistent-workspaces = builtins.listToAttrs (
+          map (n: {
             name = toString n;
             value = [ ];
-          }) (lib.range 1 10));
+          }) (lib.range 1 10)
+        );
       };
       cpu = {
         format = "<span font_family='SauceCodePro Nerd Font Mono'>󰍛</span> {usage}%";

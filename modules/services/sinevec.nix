@@ -1,4 +1,9 @@
-{ inputs, lib, pkgs, ... }:
+{
+  inputs,
+  lib,
+  pkgs,
+  ...
+}:
 let
   dataRoot = "/realm/data";
   sinevecDataDir = "${dataRoot}/sinevec";

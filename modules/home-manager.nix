@@ -4,9 +4,6 @@
   config,
   ...
 }:
-let
-  username = "sinity";
-in
 {
   imports = [ inputs.home-manager.nixosModules.home-manager ];
 
@@ -16,12 +13,11 @@ in
     backupFileExtension = "backup";
     extraSpecialArgs = {
       inherit inputs;
-      username = "sinity";
       secretsExportScript = config.sinnix.secrets.exportScript;
       dotsPath = "${inputs.self}/dots";
       secretPaths = config.sinnix.secrets.paths;
     };
-    users.${username} = {
+    users.sinity = {
       imports = [ ../user ];
     };
   };

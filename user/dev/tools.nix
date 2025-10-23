@@ -1,4 +1,3 @@
-
 {
   pkgs,
   lib,
@@ -96,8 +95,7 @@
   xdg.configFile."sqlitebrowser/sqlitebrowser.conf".source =
     dotsPath + "/sqlitebrowser/sqlitebrowser.conf";
 
-  xdg.configFile."ripgrep-all/config.jsonc".source =
-    dotsPath + "/ripgrep-all/config.jsonc";
+  xdg.configFile."ripgrep-all/config.jsonc".source = dotsPath + "/ripgrep-all/config.jsonc";
 
   xdg.configFile."sinex" = {
     source = dotsPath + "/sinex";
@@ -108,7 +106,9 @@
     if [ -f ${secretPaths."configstore-update-notifier"} ]; then
       mkdir -p "$HOME/.config/configstore"
       rm -rf "$HOME/.config/configstore/update-notifier-@google"
-      ${pkgs.gzip}/bin/gzip -dc ${secretPaths."configstore-update-notifier"} | ${pkgs.gnutar}/bin/tar -xC "$HOME/.config/configstore"
+      ${pkgs.gzip}/bin/gzip -dc ${
+        secretPaths."configstore-update-notifier"
+      } | ${pkgs.gnutar}/bin/tar -xC "$HOME/.config/configstore"
     fi
   '';
 
@@ -116,7 +116,9 @@
     if [ -f ${secretPaths."gcloud-config.tar.gz"} ]; then
       mkdir -p "$HOME/.config"
       rm -rf "$HOME/.config/gcloud"
-      ${pkgs.gzip}/bin/gzip -dc ${secretPaths."gcloud-config.tar.gz"} | ${pkgs.gnutar}/bin/tar -xC "$HOME/.config"
+      ${pkgs.gzip}/bin/gzip -dc ${
+        secretPaths."gcloud-config.tar.gz"
+      } | ${pkgs.gnutar}/bin/tar -xC "$HOME/.config"
     fi
   '';
 }

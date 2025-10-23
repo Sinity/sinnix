@@ -17,45 +17,42 @@
         system = "x86_64-linux";
 
         # Import modules in priority order
-        modules =
-          [
-            # Enable agenix for secret management
-            inputs.agenix.nixosModules.default
+        modules = [
+          # Enable agenix for secret management
+          inputs.agenix.nixosModules.default
 
-            # Enable stylix for system-wide theming
-            inputs.stylix.nixosModules.stylix
-            # Import system-wide overlay
-            (import ./overlay.nix)
+          # Enable stylix for system-wide theming
+          inputs.stylix.nixosModules.stylix
+          # Import system-wide overlay
+          (import ./overlay.nix)
 
-            # Import domain modules directly (single-host setup)
-            {
-              imports = [
-                ../modules/core.nix
-                ../modules/programs.nix
-                ../modules/diagnostics.nix
-                ../modules/logging.nix
-                ../modules/secrets.nix
-                ../modules/home-manager.nix
-                ../modules/users.nix
-                ../modules/ui.nix
-                ../modules/nix-ld.nix
-                ../modules/audio.nix
-                ../modules/networking.nix
-                ../modules/storage.nix
-              ];
-            }
+          # Import domain modules directly (single-host setup)
+          {
+            imports = [
+              ../modules/core.nix
+              ../modules/programs.nix
+              ../modules/diagnostics.nix
+              ../modules/logging.nix
+              ../modules/secrets.nix
+              ../modules/home-manager.nix
+              ../modules/users.nix
+              ../modules/ui.nix
+              ../modules/nix-ld.nix
+              ../modules/audio.nix
+              ../modules/networking.nix
+              ../modules/storage.nix
+            ];
+          }
 
-            # Import host-specific configuration last so it can override shared defaults
-            { imports = [ ../hosts/sinnix-prime ]; }
-          ]
-          ++ [ sinexModule ];
+          # Import host-specific configuration last so it can override shared defaults
+          { imports = [ ../hosts/sinnix-prime ]; }
+        ]
+        ++ [ sinexModule ];
 
-      # Make these values available to all modules
-      specialArgs = {
-        host = "sinnix-prime";
-        username = "sinity";
-        inherit inputs;
+        # Make these values available to all modules
+        specialArgs = {
+          inherit inputs;
+        };
       };
-    };
   };
 }

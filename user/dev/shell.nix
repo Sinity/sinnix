@@ -62,81 +62,81 @@ in
 
       initContent = lib.mkMerge [
         (lib.mkBefore ''
-        DISABLE_AUTO_UPDATE=true
-        DISABLE_MAGIC_FUNCTIONS=true
-        export "MICRO_TRUECOLOR=1"
+          DISABLE_AUTO_UPDATE=true
+          DISABLE_MAGIC_FUNCTIONS=true
+          export "MICRO_TRUECOLOR=1"
 
-        set -o vi
+          set -o vi
 
-        _sinnix_flake_root() {
-          if [ -n "$FLAKE" ]; then
-            printf '%s\n' "$FLAKE"
-            return 0
-          fi
-          if command -v git >/dev/null 2>&1; then
-            if git_root=$(git rev-parse --show-toplevel 2>/dev/null); then
-              printf '%s\n' "$git_root"
+          _sinnix_flake_root() {
+            if [ -n "$FLAKE" ]; then
+              printf '%s\n' "$FLAKE"
               return 0
             fi
+            if command -v git >/dev/null 2>&1; then
+              if git_root=$(git rev-parse --show-toplevel 2>/dev/null); then
+                printf '%s\n' "$git_root"
+                return 0
+              fi
+            fi
+            if [ -n "$PRJ_ROOT" ]; then
+              printf '%s\n' "$PRJ_ROOT"
+              return 0
+            fi
+            if [ -n "$DEVENV_ROOT" ]; then
+              printf '%s\n' "$DEVENV_ROOT"
+              return 0
+            fi
+            printf '%s\n' "$PWD"
+          }
+
+          if [ -z "$FLAKE" ]; then
+            export FLAKE="$(_sinnix_flake_root)"
           fi
-          if [ -n "$PRJ_ROOT" ]; then
-            printf '%s\n' "$PRJ_ROOT"
-            return 0
-          fi
-          if [ -n "$DEVENV_ROOT" ]; then
-            printf '%s\n' "$DEVENV_ROOT"
-            return 0
-          fi
-          printf '%s\n' "$PWD"
-        }
 
-        if [ -z "$FLAKE" ]; then
-          export FLAKE="$(_sinnix_flake_root)"
-        fi
+          show_file_or_dir_preview='if [ -d {} ]; then eza --tree --color=always {} | head -200; else bat -n --color=always --line-range :500 {}; fi'
 
-        show_file_or_dir_preview='if [ -d {} ]; then eza --tree --color=always {} | head -200; else bat -n --color=always --line-range :500 {}; fi'
+          _fzf_compgen_path() {
+            fd --hidden --exclude .git . "$1"
+          }
 
-        _fzf_compgen_path() {
-          fd --hidden --exclude .git . "$1"
-        }
+          _fzf_compgen_dir() {
+            fd --type=d --hidden --exclude .git . "$1"
+          }
 
-        _fzf_compgen_dir() {
-          fd --type=d --hidden --exclude .git . "$1"
-        }
+          _fzf_comprun() {
+            local command=$1
+            shift
 
-        _fzf_comprun() {
-          local command=$1
-          shift
+            case "$command" in
+              cd)           fzf --preview 'eza --tree --color=always {} | head -200' "$@" ;;
+              ssh)          fzf --preview 'dig {}'                   "$@" ;;
+              *)            fzf --preview "$show_file_or_dir_preview" "$@" ;;
+            esac
+          }
 
-          case "$command" in
-            cd)           fzf --preview 'eza --tree --color=always {} | head -200' "$@" ;;
-            ssh)          fzf --preview 'dig {}'                   "$@" ;;
-            *)            fzf --preview "$show_file_or_dir_preview" "$@" ;;
-          esac
-        }
+          stty -ixon
 
-        stty -ixon
+          update_terminal_title() {
+            LAST_CMD=$1
+            TITLE="\033]2;$(pwd); $(date "+%Y-%m-%d %H:%M:%S") $LAST_CMD\007"
+            echo -ne $TITLE
+          }
+          preexec() { update_terminal_title "$1" }
+          precmd() { update_terminal_title "" }
 
-        update_terminal_title() {
-          LAST_CMD=$1
-          TITLE="\033]2;$(pwd); $(date "+%Y-%m-%d %H:%M:%S") $LAST_CMD\007"
-          echo -ne $TITLE
-        }
-        preexec() { update_terminal_title "$1" }
-        precmd() { update_terminal_title "" }
+          autoload -U add-zsh-hook
+          add-zsh-hook preexec preexec
+          add-zsh-hook precmd precmd
+          zmodload zsh/zpty
 
-        autoload -U add-zsh-hook
-        add-zsh-hook preexec preexec
-        add-zsh-hook precmd precmd
-        zmodload zsh/zpty
+          autoload -Uz bracketed-paste-magic
+          zle -N bracketed-paste bracketed-paste-magic
+          autoload -Uz url-quote-magic
+          zle -N self-insert url-quote-magic
 
-        autoload -Uz bracketed-paste-magic
-        zle -N bracketed-paste bracketed-paste-magic
-        autoload -Uz url-quote-magic
-        zle -N self-insert url-quote-magic
-
-        eval "$(atuin init zsh --disable-up-arrow)"
-      '')
+          eval "$(atuin init zsh --disable-up-arrow)"
+        '')
       ];
 
       loginExtra = ''
