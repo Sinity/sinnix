@@ -17,7 +17,7 @@ in
     (
       final: prev:
       let
-        pythonOverrides = self: super: {
+        pythonOverrides = _self: super: {
           spacy = super.spacy.overrideAttrs (old: rec {
             version = "3.8.4"; # last revision that still builds
             src = prev.fetchPypi {
@@ -37,7 +37,7 @@ in
         pgJsonschemaFor =
           postgresql:
           prev.buildPgrxExtension (
-            finalAttrs:
+            _:
             let
               version = "0.3.3";
             in
@@ -63,7 +63,7 @@ in
                 description = "PostgreSQL extension for JSON Schema validation";
                 homepage = "https://github.com/supabase/pg_jsonschema";
                 license = final.lib.licenses.postgresql;
-                platforms = postgresql.meta.platforms;
+                inherit (postgresql.meta) platforms;
               };
             }
           );
@@ -84,11 +84,12 @@ in
           ];
         });
 
-        uwsm = prev.uwsm.overrideAttrs (old: {
-          patches = (old.patches or [ ]) ++ [
-            ../patches/uwsm/fix-systemd-unit-escaping.patch
-          ];
-        });
+        beam = prev.beam // {
+          beamLib =
+            prev.beam.beamLib or {
+              inherit (prev.lib) callPackageWith;
+            };
+        };
 
         libutp = prev.libutp.overrideAttrs (old: {
           cmakeFlags = (old.cmakeFlags or [ ]) ++ [ "-DCMAKE_POLICY_VERSION=3.5" ];

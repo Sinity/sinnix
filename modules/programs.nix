@@ -2,12 +2,22 @@
 let
   coreCliPackages = with pkgs; [
     git
+    taskwarrior3
+    timewarrior
     wget
+  ];
+
+  optionalCliPackages = lib.filter (pkg: pkg != null) [
+    (pkgs.tasksh or null)
+    (pkgs.taskwarrior-tui or null)
+    (pkgs.bugwarrior or null)
+    (pkgs.timewarrior-all-reports or null)
   ];
 in
 {
   config = {
     environment.systemPackages = lib.mkAfter coreCliPackages;
+    sinnix.optionalPackages.cli = optionalCliPackages;
 
     programs = {
       zsh.enable = true;

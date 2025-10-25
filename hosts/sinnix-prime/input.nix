@@ -3,7 +3,6 @@
   pkgs,
   lib,
   inputs,
-  config,
   ...
 }:
 let
@@ -14,7 +13,7 @@ let
   interceptBouncePkg = inputs.intercept-bounce.packages.${pkgs.system}.intercept-bounce;
   scribePkg = inputs.scribe-tap.packages.${pkgs.system}.default;
   interceptCmd = ''${interceptTools}/bin/intercept -g $DEVNODE'';
-  bounceCmd = lib.escapeShellArgs ([
+  bounceCmd = lib.escapeShellArgs [
     "${interceptBouncePkg}/bin/intercept-bounce"
     "--debounce-time"
     "40ms"
@@ -22,8 +21,8 @@ let
     "6h"
     "--log-bounces"
     "--stats-json"
-  ]);
-  scribeCmd = lib.escapeShellArgs ([
+  ];
+  scribeCmd = lib.escapeShellArgs [
     "${scribePkg}/bin/scribe-tap"
     "--data-dir"
     "${dataRoot}/data/keylog"
@@ -41,7 +40,7 @@ let
     username
     "--xkb-layout"
     "pl"
-  ]);
+  ];
   capsCmd = lib.escapeShellArgs [
     "${capsPlugin}/bin/caps2esc"
     "-m"
@@ -100,54 +99,60 @@ let
   '';
 in
 {
-  services.interception-tools = {
-    enable = true;
-    udevmonConfig = ''
-      - JOB: "${pipeline}"
-        DEVICE:
-          LINK: "/dev/input/by-id/.*Logitech.*event-kbd"
-          NAME: ".*Logitech.*"
-    '';
+  services = {
+    interception-tools = {
+      enable = true;
+      udevmonConfig = ''
+        - JOB: "${pipeline}"
+          DEVICE:
+            LINK: "/dev/input/by-id/.*Logitech.*event-kbd"
+            NAME: ".*Logitech.*"
+      '';
+    };
+    ratbagd.enable = true;
+    udev.packages = [ pkgs.solaar ];
   };
-  services.ratbagd.enable = true;
-  services.udev.packages = [ pkgs.solaar ];
   programs.dconf.enable = true;
 
-  systemd.tmpfiles.rules = [
-    "d ${dataRoot}/data/keylog 0700 ${username} users -"
-    "d ${dataRoot}/data/keylog/logs 0700 ${username} users -"
-    "d ${dataRoot}/data/keylog/snapshots 0700 ${username} users -"
-  ];
-
-  systemd.user.services.logitech-maintenance = {
-    description = "Ensure Logitech G502/Powerplay charge and LED state";
-    after = [
-      "graphical-session.target"
-      "ratbagd.service"
+  systemd = {
+    tmpfiles.rules = [
+      "d ${dataRoot}/data/keylog 0700 ${username} users -"
+      "d ${dataRoot}/data/keylog/logs 0700 ${username} users -"
+      "d ${dataRoot}/data/keylog/snapshots 0700 ${username} users -"
     ];
-    wants = [
-      "graphical-session.target"
-      "ratbagd.service"
-    ];
-    serviceConfig = {
-      Type = "oneshot";
-      ExecStartPre = "${pkgs.coreutils}/bin/sleep 5";
-      ExecStart = logitechMaintenance;
-      Restart = "on-failure";
-      RestartSec = 10;
-    };
-    wantedBy = [ "graphical-session.target" ];
-  };
 
-  systemd.user.timers.logitech-maintenance = {
-    description = "Keep Logitech G502 LEDs locked to the desired state";
-    timerConfig = {
-      OnBootSec = "45s";
-      OnUnitActiveSec = "5m";
-      RandomizedDelaySec = "30s";
-      Unit = "logitech-maintenance.service";
-      Persistent = true;
+    user = {
+      services.logitech-maintenance = {
+        description = "Ensure Logitech G502/Powerplay charge and LED state";
+        after = [
+          "graphical-session.target"
+          "ratbagd.service"
+        ];
+        wants = [
+          "graphical-session.target"
+          "ratbagd.service"
+        ];
+        serviceConfig = {
+          Type = "oneshot";
+          ExecStartPre = "${pkgs.coreutils}/bin/sleep 5";
+          ExecStart = logitechMaintenance;
+          Restart = "on-failure";
+          RestartSec = 10;
+        };
+        wantedBy = [ "graphical-session.target" ];
+      };
+
+      timers.logitech-maintenance = {
+        description = "Keep Logitech G502 LEDs locked to the desired state";
+        timerConfig = {
+          OnBootSec = "45s";
+          OnUnitActiveSec = "5m";
+          RandomizedDelaySec = "30s";
+          Unit = "logitech-maintenance.service";
+          Persistent = true;
+        };
+        wantedBy = [ "timers.target" ];
+      };
     };
-    wantedBy = [ "timers.target" ];
   };
 }

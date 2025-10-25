@@ -1,6 +1,5 @@
 {
   lib,
-  config,
   inputs,
   ...
 }:
@@ -63,6 +62,8 @@ let
     "root-password"
     "davfs2-secrets"
     "photoprism-admin-password"
+    "configstore-update-notifier"
+    "gcloud-config.tar.gz"
   ];
 
   mkSecretExport =

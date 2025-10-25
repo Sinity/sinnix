@@ -19,29 +19,34 @@ in
     };
   };
 
-  systemd.tmpfiles.rules = lib.mkBefore [
-    "d ${mediaDir} 0750 ${username} media -"
-    "d ${mediaDir}/import 2770 photoprism media -"
-    "d ${mediaDir}/photoprism 2770 photoprism media -"
-  ];
+  users = {
+    groups = {
+      media = {
+        members = [
+          username
+          "photoprism"
+        ];
+      };
+      photoprism = { };
+    };
 
-  users.groups.media = {
-    members = [
-      username
-      "photoprism"
+    users.photoprism = {
+      isSystemUser = true;
+      group = "photoprism";
+      home = "/var/lib/photoprism";
+      extraGroups = [ "media" ];
+    };
+  };
+
+  systemd = {
+    tmpfiles.rules = lib.mkBefore [
+      "d ${mediaDir} 0750 ${username} media -"
+      "d ${mediaDir}/import 2770 photoprism media -"
+      "d ${mediaDir}/photoprism 2770 photoprism media -"
+    ];
+
+    services.photoprism.serviceConfig.LoadCredential = lib.mkForce [
+      "PHOTOPRISM_ADMIN_PASSWORD_FILE:${config.sinnix.secrets.paths.photoprism-admin-password}"
     ];
   };
-
-  users.groups.photoprism = { };
-
-  users.users.photoprism = {
-    isSystemUser = true;
-    group = "photoprism";
-    home = "/var/lib/photoprism";
-    extraGroups = [ "media" ];
-  };
-
-  systemd.services.photoprism.serviceConfig.LoadCredential = lib.mkForce [
-    "PHOTOPRISM_ADMIN_PASSWORD_FILE:${config.sinnix.secrets.paths.photoprism-admin-password}"
-  ];
 }

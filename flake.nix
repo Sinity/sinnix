@@ -18,6 +18,11 @@
     agenix.url = "github:ryantm/agenix";
     agenix.inputs.nixpkgs.follows = "nixpkgs";
 
+    disko = {
+      url = "github:nix-community/disko";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     # Development tools
     browser-previews.url = "github:nix-community/browser-previews?rev=59f351f061440cc26d5c74d574910c256e43a017";
     browser-previews.inputs.nixpkgs.follows = "nixpkgs";

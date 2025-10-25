@@ -7,6 +7,12 @@
 {
   imports = [ inputs.home-manager.nixosModules.home-manager ];
 
+  options.sinnix.home.userImports = lib.mkOption {
+    type = lib.types.listOf lib.types.path;
+    default = [ ../user ];
+    description = "Home Manager modules to import for the primary user.";
+  };
+
   config.home-manager = {
     useUserPackages = true;
     useGlobalPkgs = true;
@@ -17,8 +23,6 @@
       dotsPath = "${inputs.self}/dots";
       secretPaths = config.sinnix.secrets.paths;
     };
-    users.sinity = {
-      imports = [ ../user ];
-    };
+    users.sinity.imports = config.sinnix.home.userImports;
   };
 }

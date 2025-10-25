@@ -5,15 +5,21 @@
   ...
 }:
 let
-  hardwareDiagnostics = with pkgs; [
+  coreDiagnostics = with pkgs; [
+    hwinfo
+    inxi
+    lshw
+    smartmontools
+    nvme-cli
+    hdparm
+  ];
+
+  optionalDiagnostics = with pkgs; [
     cpuid
     dmidecode
     hw-probe
     hwdata
-    hwinfo
     i7z
-    inxi
-    lshw
     mcelog
     memtester
     numactl
@@ -21,8 +27,16 @@ let
     usbutils
   ];
 
-  observabilityPackages = with pkgs; [
-    bpftrace
+  optionalPerfSuites = with pkgs; [
+    flent
+    netperf
+    phoronix-test-suite
+    stress-ng
+    stressapptest
+    sysbench
+    s-tui
+    lm_sensors
+    perf
   ];
 
   perfScanRuntimeInputs = with pkgs; [
@@ -72,7 +86,19 @@ let
   };
 in
 {
-  config.environment.systemPackages = lib.mkAfter (
-    hardwareDiagnostics ++ observabilityPackages ++ [ perfScan ]
-  );
+  options.sinnix.optionalPackages = lib.mkOption {
+    type = lib.types.attrsOf (lib.types.listOf lib.types.package);
+    default = { };
+    description = "Optional package groups that are not installed by default.";
+    readOnly = true;
+  };
+
+  config = {
+    environment.systemPackages = lib.mkAfter (coreDiagnostics ++ [ perfScan ]);
+    sinnix.optionalPackages = {
+      diagnostics = optionalDiagnostics;
+      perfSuites = optionalPerfSuites;
+      perfScanRuntime = perfScanRuntimeInputs;
+    };
+  };
 }

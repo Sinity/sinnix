@@ -8,32 +8,36 @@ let
   flakePath = "${inputs.self}";
 in
 {
-  home.sessionVariables = {
-    DEVELOPMENT_DOMAIN = "v0.3";
-    EDITOR = "nvim";
-    VISUAL = "nvim";
-    PAGER = lib.mkForce "less -R";
-    MANPAGER = "nvim +Man!";
-    PYTHONDONTWRITEBYTECODE = "1";
-    SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS = "0";
-    MICRO_TRUECOLOR = "1";
-    LD_LIBRARY_PATH = lib.makeLibraryPath [
-      pkgs.libGL
-      pkgs.libglvnd
-    ];
+  home = {
+    sessionVariables = {
+      DEVELOPMENT_DOMAIN = "v0.3";
+      EDITOR = "nvim";
+      VISUAL = "nvim";
+      PAGER = lib.mkForce "less -R";
+      MANPAGER = "nvim +Man!";
+      PYTHONDONTWRITEBYTECODE = "1";
+      SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS = "0";
+      MICRO_TRUECOLOR = "1";
+      LD_LIBRARY_PATH = lib.makeLibraryPath [
+        pkgs.libGL
+        pkgs.libglvnd
+      ];
+    };
+
+    activation = {
+      linkNeovimConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+        mkdir -p "$HOME/.config"
+        ln -sfn ''${FLAKE:-${flakePath}}/dots/nvim "$HOME/.config/nvim"
+      '';
+
+      ensureClaudeDir = lib.hm.dag.entryAfter [ "linkNeovimConfig" ] ''
+        if [ -e "$HOME/.claude" ] && ! [ -L "$HOME/.claude" ]; then
+          rm -rf "$HOME/.claude"
+        fi
+        ln -sfn .config/claude "$HOME/.claude"
+      '';
+    };
   };
-
-  home.activation.linkNeovimConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-    mkdir -p "$HOME/.config"
-    ln -sfn ''${FLAKE:-${flakePath}}/dots/nvim "$HOME/.config/nvim"
-  '';
-
-  home.activation.ensureClaudeDir = lib.hm.dag.entryAfter [ "linkNeovimConfig" ] ''
-    if [ -e "$HOME/.claude" ] && ! [ -L "$HOME/.claude" ]; then
-      rm -rf "$HOME/.claude"
-    fi
-    ln -sfn .config/claude "$HOME/.claude"
-  '';
 
   programs.direnv = {
     enable = true;

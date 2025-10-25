@@ -141,59 +141,58 @@ in
     # };
   };
 
-  systemd.tmpfiles.rules = lib.mkAfter [
-    "d /mnt/pendrv 0755 root root -"
-    "d ${dataRoot}/knowledgebase 0755 sinity users -"
-    "d ${dataRoot}/inbox 0755 sinity users -"
-    "d ${dataRoot}/data/screenshot 0755 sinity users -"
-    "d ${dataRoot}/data/screenshot/mpv 0755 sinity users -"
-  ];
-
-  systemd.services.prepare-swapfile = {
-    description = "Prepare Btrfs swapfile";
-    requiredBy = [ "swap-swapfile.swap" ];
-    before = [ "swap-swapfile.swap" ];
-    after = [
-      "systemd-remount-fs.service"
-      "local-fs.target"
-    ];
-    unitConfig = {
-      # Avoid sysinit ↔ swap.target ordering cycles by taking explicit deps.
-      DefaultDependencies = false;
-    };
-    serviceConfig = {
-      Type = "oneshot";
-      ExecStart = "${prepareSwapfile}/bin/prepare-swapfile";
-    };
-  };
-
   swapDevices = [
     {
       device = "/swap/swapfile";
     }
   ];
 
-  systemd.automounts = [
-    {
-      where = "/mnt/pendrv";
-      wantedBy = [ "multi-user.target" ];
-      automountConfig = {
-        TimeoutIdleSec = "600s";
-      };
-    }
-  ];
+  systemd = {
+    tmpfiles.rules = lib.mkAfter [
+      "d /mnt/pendrv 0755 root root -"
+      "d ${dataRoot}/knowledgebase 0755 sinity users -"
+      "d ${dataRoot}/inbox 0755 sinity users -"
+      "d ${dataRoot}/data/screenshot 0755 sinity users -"
+      "d ${dataRoot}/data/screenshot/mpv 0755 sinity users -"
+    ];
 
-  systemd.mounts = [
-    {
-      what = "/dev/disk/by-uuid/36213474-7e7f-4df7-8fb6-264d9a2e9643";
-      where = "/mnt/pendrv";
-      type = "btrfs";
-      options = "nofail,compress=zstd,x-systemd.device-timeout=5s";
+    services.prepare-swapfile = {
+      description = "Prepare Btrfs swapfile";
+      requiredBy = [ "swap-swapfile.swap" ];
+      before = [ "swap-swapfile.swap" ];
+      after = [
+        "systemd-remount-fs.service"
+        "local-fs.target"
+      ];
       unitConfig = {
-        StopWhenUnneeded = true;
+        # Avoid sysinit ↔ swap.target ordering cycles by taking explicit deps.
+        DefaultDependencies = false;
       };
-    }
-  ];
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${prepareSwapfile}/bin/prepare-swapfile";
+      };
+    };
+
+    automounts = [
+      {
+        where = "/mnt/pendrv";
+        wantedBy = [ "multi-user.target" ];
+        automountConfig = {
+          TimeoutIdleSec = "600s";
+        };
+      }
+    ];
+
+    mounts = [
+      {
+        what = "/dev/disk/by-uuid/36213474-7e7f-4df7-8fb6-264d9a2e9643";
+        where = "/mnt/pendrv";
+        type = "btrfs";
+        options = "nofail,compress=zstd,x-systemd.device-timeout=5s";
+      }
+    ];
+  };
 
   boot.supportedFilesystems = [
     "btrfs"

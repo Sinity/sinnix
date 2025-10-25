@@ -132,50 +132,7 @@ in
     };
 
     gdrive-mount = {
-      description = "Mount Google Drive via rclone";
-      after = [
-        "network-online.target"
-      ];
-      wants = [
-        "network-online.target"
-      ];
-      wantedBy = [ "multi-user.target" ];
-      enable = true;
-      serviceConfig = {
-        Type = "simple";
-        User = username;
-        ExecStart = "${pkgs.writeShellScript "gdrive-mount-service" ''
-          set -euo pipefail
-
-          warned=0
-          while [ ! -f /home/${username}/.config/rclone/rclone.conf ]; do
-            if [ "$warned" -eq 0 ]; then
-              echo "gdrive-mount: waiting for /home/${username}/.config/rclone/rclone.conf; run 'setup-gdrive' to create it" >&2
-              warned=1
-            fi
-            sleep 30
-          done
-
-          ${pkgs.coreutils}/bin/mkdir -p /mnt/gdrive
-          chown ${username}:users /mnt/gdrive || true
-
-          exec ${pkgs.rclone}/bin/rclone mount gdrive: /mnt/gdrive \
-            --config /home/${username}/.config/rclone/rclone.conf \
-            --vfs-cache-mode full \
-            --vfs-cache-max-size 5G \
-            --vfs-cache-max-age 72h \
-            --buffer-size 256M \
-            --vfs-read-ahead 512M \
-            --dir-cache-time 72h \
-            --poll-interval 1m \
-            --uid 1000 \
-            --gid 100 \
-            --umask 022
-        ''}";
-        ExecStop = "${pkgs.fuse3}/bin/fusermount3 -u /mnt/gdrive";
-        Restart = "on-failure";
-        RestartSec = 5;
-      };
+      enable = false;
     };
   };
 

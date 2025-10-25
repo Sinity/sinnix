@@ -22,6 +22,12 @@ in
     networkmanager = {
       enable = true;
       dns = "systemd-resolved";
+      connectionConfig = {
+        "ipv4.ignore-auto-dns" = true;
+        "ipv6.ignore-auto-dns" = true;
+        "ipv4.dns" = "1.1.1.1;8.8.8.8;";
+        "ipv6.dns" = "2606:4700:4700::1111;2001:4860:4860::8888;";
+      };
     };
   };
 
@@ -57,13 +63,16 @@ in
   hardware.bluetooth = {
     enable = lib.mkDefault true;
     powerOnBoot = lib.mkDefault true;
+    package = lib.mkDefault (pkgs.bluez.override { enableExperimental = true; });
     settings.Policy.AutoEnable = true;
   };
 
   hardware.bluetooth.settings.General = {
     ControllerMode = lib.mkDefault "dual";
     DiscoverableTimeout = lib.mkDefault 0;
+    Experimental = lib.mkDefault true;
     FastConnectable = lib.mkDefault true;
+    MultiProfile = lib.mkDefault "multiple";
   };
 
   environment.systemPackages = lib.mkAfter (baseNetworkingPackages ++ networkingToolPackages);

@@ -1,6 +1,5 @@
 {
   config,
-  lib,
   ...
 }:
 {
@@ -8,7 +7,13 @@
     enable = true;
     settings =
       let
-        fields = config.lib.htop.fields;
+        inherit (config.lib.htop)
+          fields
+          leftMeters
+          rightMeters
+          bar
+          text
+          ;
       in
       {
         fields = with fields; [
@@ -80,22 +85,16 @@
         "screen:I/O.tree_sort_direction" = "1";
         "screen:I/O.all_branches_collapsed" = "0";
       }
-      // (
-        with config.lib.htop;
-        leftMeters [
-          (bar "LeftCPUs4")
-          (bar "Memory")
-          (bar "Swap")
-        ]
-      )
-      // (
-        with config.lib.htop;
-        rightMeters [
-          (bar "RightCPUs4")
-          (text "Tasks")
-          (text "LoadAverage")
-          (text "Uptime")
-        ]
-      );
+      // (leftMeters [
+        (bar "LeftCPUs4")
+        (bar "Memory")
+        (bar "Swap")
+      ])
+      // (rightMeters [
+        (bar "RightCPUs4")
+        (text "Tasks")
+        (text "LoadAverage")
+        (text "Uptime")
+      ]);
   };
 }

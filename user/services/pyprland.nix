@@ -34,9 +34,7 @@ in
     };
   };
 
-  xdg.configFile."hypr/pyprland.toml".text = builtins.readFile (
-    "${inputs.self}/assets/pyprland.toml"
-  );
+  xdg.configFile."hypr/pyprland.toml".text = builtins.readFile "${inputs.self}/assets/pyprland.toml";
 
   home.packages = [ pkgs.pyprland ];
 }

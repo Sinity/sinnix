@@ -5,54 +5,67 @@
 # packages into a cohesive system configuration.
 
 { inputs, ... }:
+let
+  inherit (inputs.nixpkgs) lib;
+  baseModules = [
+    inputs.agenix.nixosModules.default
+    (import ./overlay.nix)
+  ];
+  sinexModule = inputs.sinex.nixosModules.default;
+  sharedSpecialArgs = {
+    inherit inputs;
+  };
+in
 {
-  flake = {
-    # Define available NixOS configurations
-    nixosConfigurations.sinnix-prime =
-      let
-        lib = inputs.nixpkgs.lib;
-        sinexModule = inputs.sinex.nixosModules.default;
-      in
-      inputs.nixpkgs.lib.nixosSystem {
-        system = "x86_64-linux";
+  flake.nixosConfigurations = {
+    sinnix-prime = lib.nixosSystem {
+      system = "x86_64-linux";
+      modules = baseModules ++ [
+        inputs.stylix.nixosModules.stylix
+        {
+          imports = [
+            ../modules/core.nix
+            ../modules/programs.nix
+            ../modules/diagnostics.nix
+            ../modules/logging.nix
+            ../modules/secrets.nix
+            ../modules/home-manager.nix
+            ../modules/users.nix
+            ../modules/ui.nix
+            ../modules/nix-ld.nix
+            ../modules/audio.nix
+            ../modules/networking.nix
+            ../modules/storage.nix
+          ];
+        }
+        { imports = [ ../hosts/sinnix-prime ]; }
+        sinexModule
+      ];
+      specialArgs = sharedSpecialArgs;
+    };
 
-        # Import modules in priority order
-        modules = [
-          # Enable agenix for secret management
-          inputs.agenix.nixosModules.default
-
-          # Enable stylix for system-wide theming
-          inputs.stylix.nixosModules.stylix
-          # Import system-wide overlay
-          (import ./overlay.nix)
-
-          # Import domain modules directly (single-host setup)
-          {
-            imports = [
-              ../modules/core.nix
-              ../modules/programs.nix
-              ../modules/diagnostics.nix
-              ../modules/logging.nix
-              ../modules/secrets.nix
-              ../modules/home-manager.nix
-              ../modules/users.nix
-              ../modules/ui.nix
-              ../modules/nix-ld.nix
-              ../modules/audio.nix
-              ../modules/networking.nix
-              ../modules/storage.nix
-            ];
-          }
-
-          # Import host-specific configuration last so it can override shared defaults
-          { imports = [ ../hosts/sinnix-prime ]; }
-        ]
-        ++ [ sinexModule ];
-
-        # Make these values available to all modules
-        specialArgs = {
-          inherit inputs;
-        };
-      };
+    sinnix-ethereal = lib.nixosSystem {
+      system = "x86_64-linux";
+      modules = baseModules ++ [
+        inputs.stylix.nixosModules.stylix
+        inputs.disko.nixosModules.disko
+        {
+          imports = [
+            ../modules/core.nix
+            ../modules/programs.nix
+            ../modules/diagnostics.nix
+            ../modules/logging.nix
+            ../modules/secrets.nix
+            ../modules/home-manager.nix
+            ../modules/users.nix
+            ../modules/ui.nix
+            ../modules/nix-ld.nix
+          ];
+        }
+        { imports = [ ../hosts/sinnix-ethereal ]; }
+        sinexModule
+      ];
+      specialArgs = sharedSpecialArgs;
+    };
   };
 }

@@ -19,15 +19,31 @@
     wireplumber = {
       enable = true;
       extraConfig = {
-        "11-bluetooth-policy"."wireplumber.settings"."bluetooth.autoswitch-to-headset-profile" = false;
-        "10-bluez"."monitor.bluez.properties" = {
-          "bluez5.enable-sbc-xq" = true;
-          "bluez5.enable-msbc" = true;
-          "bluez5.enable-hw-volume" = true;
-          "bluez5.roles" = [
-            "a2dp_sink"
-            "a2dp_source"
-          ];
+        "09-bluetooth-features"."wireplumber.profiles".main = {
+          "monitor.bluez.seat-monitoring" = "disabled";
+          "monitor.bluez-midi.seat-monitoring" = "disabled";
+        };
+        "10-bluez" = {
+          "monitor.bluez.seat-monitoring" = false;
+          "monitor.bluez.properties" = {
+            "bluez5.enable-sbc-xq" = true;
+            "bluez5.enable-msbc" = true;
+            "bluez5.enable-hw-volume" = true;
+            "bluez5.roles" = [
+              "a2dp_sink"
+              "a2dp_source"
+              "bap_sink"
+              "bap_source"
+              "hsp_hs"
+              "hsp_ag"
+              "hfp_hf"
+              "hfp_ag"
+            ];
+          };
+        };
+        "11-bluetooth-policy"."wireplumber.settings" = {
+          "bluetooth.autoswitch-to-headset-profile" = false;
+          "bluetooth.use-persistent-storage" = true;
         };
       };
     };

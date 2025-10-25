@@ -23,6 +23,13 @@ and keep ownership with that module.
   documented alongside the rest of the service configuration. Home modules
   receive the same mapping via `secretPaths` and should prefer it to literal
   `/run/agenix/...` paths.
+- **Diagnostics** – `modules/diagnostics.nix` keeps essential hardware tools
+  installed by default and publishes `config.sinnix.optionalPackages` so you can
+  see (and quickly re-enable) the trimmed “nice to have” suites without keeping
+  them in the base closure.
+- **Perf Shell** – `nix develop .#perf-tools` drops you into a shell with those
+  optional diagnostics/perf suites on demand, so you can keep the system build
+  lean and only bring the heavy tooling in when needed.
 
 ## Host (`hosts/sinnix-prime`)
 

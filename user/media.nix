@@ -1,4 +1,4 @@
-{ pkgs, lib, ... }:
+{ pkgs, ... }:
 let
   homeRoot = "/realm/home";
   dataRoot = "/realm/data";
@@ -49,34 +49,31 @@ in
     WINEDLLOVERRIDES = "winemenubuilder.exe=d";
   };
 
-  home.packages = (
-    with pkgs;
-    [
-      spotify
-      ncspot
-      mpv
-      mpvc
-      svp
-      ani-cli
-      trackma
-      fanficfare
-      gpu-screen-recorder
-      gpu-screen-recorder-gtk
-      wf-recorder
-      ffmpeg
-      yt-dlp
-      tdf
-      zathura
-      epy
-      zotero
-      gimp
-      inkscape
-      mangohud
-      steam-run
-      hydrusWithProfile
-      imvWithExtras
-    ]
-  );
+  home.packages = with pkgs; [
+    spotify
+    ncspot
+    mpv
+    mpvc
+    svp
+    ani-cli
+    trackma
+    fanficfare
+    gpu-screen-recorder
+    gpu-screen-recorder-gtk
+    wf-recorder
+    ffmpeg
+    yt-dlp
+    tdf
+    zathura
+    epy
+    zotero
+    gimp
+    inkscape
+    mangohud
+    steam-run
+    hydrusWithProfile
+    imvWithExtras
+  ];
 
   programs.mpv = {
     enable = true;
