@@ -47,12 +47,12 @@
   windowrulev2 = [
     "size 60% 100%,title:^(session: )"
     "move 0% 0%,title:^(session: )"
-    "tile,class:^(google-chrome|google-chrome-beta)$"
-    "float,class:^(google-chrome|google-chrome-beta)$,windowtype:notification,initialTitle:^(?!Untitled - Google Chrome$).*"
-    "size 28% 24%,class:^(google-chrome|google-chrome-beta)$,windowtype:notification,initialTitle:^(?!Untitled - Google Chrome$).*"
-    "move 70% 6%,class:^(google-chrome|google-chrome-beta)$,windowtype:notification,initialTitle:^(?!Untitled - Google Chrome$).*"
-    "float,class:^(google-chrome|google-chrome-beta)$,windowtype:popup,initialTitle:^(?!Untitled - Google Chrome$).*"
-    "size 28% 24%,class:^(google-chrome|google-chrome-beta)$,windowtype:popup,initialTitle:^(?!Untitled - Google Chrome$).*"
-    "move 70% 6%,class:^(google-chrome|google-chrome-beta)$,windowtype:popup,initialTitle:^(?!Untitled - Google Chrome$).*"
+    "tile,class:^(google-chrome)$"
+    "float,class:^(google-chrome)$,windowtype:notification,initialTitle:^(?!Untitled - Google Chrome$).*"
+    "size 28% 24%,class:^(google-chrome)$,windowtype:notification,initialTitle:^(?!Untitled - Google Chrome$).*"
+    "move 70% 6%,class:^(google-chrome)$,windowtype:notification,initialTitle:^(?!Untitled - Google Chrome$).*"
+    "float,class:^(google-chrome)$,windowtype:popup,initialTitle:^(?!Untitled - Google Chrome$).*"
+    "size 28% 24%,class:^(google-chrome)$,windowtype:popup,initialTitle:^(?!Untitled - Google Chrome$).*"
+    "move 70% 6%,class:^(google-chrome)$,windowtype:popup,initialTitle:^(?!Untitled - Google Chrome$).*"
   ];
 }

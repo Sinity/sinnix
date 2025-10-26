@@ -55,6 +55,9 @@
           flake_dir="''${PRJ_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
           echo "Linting Nix files in $flake_dir..."
           cd "$flake_dir"
+          echo "Running deadnix..."
+          ${pkgs.deadnix}/bin/deadnix --fail .
+          echo "Running statix..."
           ${pkgs.statix}/bin/statix check
 
           echo "Running shellcheck on shell helpers..."

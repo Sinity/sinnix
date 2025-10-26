@@ -46,7 +46,7 @@ in
     services.journald.extraConfig = ''
       Compress=yes
       Storage=persistent
-      SystemMaxUse=250G
+      SystemMaxUse=50G
       SystemKeepFree=10G
       SystemMaxFileSize=200M
       SystemMaxFiles=0

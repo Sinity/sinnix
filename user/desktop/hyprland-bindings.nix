@@ -58,7 +58,7 @@ in
     "SUPER SHIFT, P, pin"
 
     "SUPER, C, exec, ${pkgs.bash}/bin/bash -lc 'command -v code >/dev/null && code --reuse-window || codium --reuse-window'"
-    "SUPER, G, exec, google-chrome-beta"
+    "SUPER, G, exec, google-chrome"
     "SUPER SHIFT, N, exec, ~/.local/bin/kb-capture"
     "SUPER, W, exec, kitty --class session-menu --title SessionMenu -e idea-session menu"
     "SUPER SHIFT, W, exec, kitty --class session-menu --title SessionNew -e idea-session new"
