@@ -19,12 +19,11 @@ in
 
   home.packages = with pkgs; [
     qutebrowser
-    mpv
     yt-dlp
     fzf
     jq
     curl
-    single-file
+    single-file-cli
     wl-clipboard
     neovim-remote
     libnotify

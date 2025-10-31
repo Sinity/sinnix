@@ -52,7 +52,6 @@ in
   home.packages = with pkgs; [
     spotify
     ncspot
-    mpv
     mpvc
     svp
     ani-cli

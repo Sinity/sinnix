@@ -172,9 +172,9 @@ in
         tree = "eza --icons --tree --group-directories-first";
         mosh-sinity-ephemeral = "mosh --ssh=\"ssh -p 22\" sinity@sinnix-ethereal";
         ns = "nom-shell --run zsh";
-        nix-switch = "sudo nix run \"\$(_sinnix_flake_root)#switch\"";
-        nix-test = "sudo nix run \"\$(_sinnix_flake_root)#test\"";
-        nix-check = "nix run \"\$(_sinnix_flake_root)#check\"";
+        nix-switch = "sudo nix run --accept-flake-config \"\$(_sinnix_flake_root)#switch\"";
+        nix-test = "sudo nix run --accept-flake-config \"\$(_sinnix_flake_root)#test\"";
+        nix-check = "nix run --accept-flake-config \"\$(_sinnix_flake_root)#check\"";
         nix-search = "nix search nixpkgs";
         piv = "python -m venv .venv";
         psv = "source .venv/bin/activate";

@@ -4,10 +4,11 @@
   ...
 }:
 let
-  baseNetworkingPackages = with pkgs; [
-    networkmanagerapplet
-    bluez
-    bluez-tools
+  bluezExperimental = pkgs.bluez.override { enableExperimental = true; };
+  baseNetworkingPackages = [
+    pkgs.networkmanagerapplet
+    bluezExperimental
+    pkgs.bluez-tools
   ];
   networkingToolPackages = with pkgs; [
     iputils
@@ -63,7 +64,7 @@ in
   hardware.bluetooth = {
     enable = lib.mkDefault true;
     powerOnBoot = lib.mkDefault true;
-    package = lib.mkDefault (pkgs.bluez.override { enableExperimental = true; });
+    package = lib.mkDefault bluezExperimental;
     settings.Policy.AutoEnable = true;
   };
 

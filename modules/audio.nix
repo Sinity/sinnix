@@ -85,7 +85,6 @@
   environment.systemPackages = with pkgs; [
     alsa-utils
     pamixer
-    bluez
     playerctl
   ];
 
