@@ -1,6 +1,6 @@
-{ lib, pkgs, ... }:
+{ lib, pkgs, sinnix, ... }:
 let
-  username = "sinity";
+  username = sinnix.user.name;
 in
 {
   home.packages = with pkgs; [
@@ -162,6 +162,11 @@ in
         ccm-attach = "zellij attach ccusage-monitor";
         ccusage = "npx --yes ccusage@latest";
         gemini-cli = "npx --yes https://github.com/google-gemini/gemini-cli";
+        marimo-edit = "marimo edit --mcp";
+        marimo-edit-remote = "marimo edit --mcp --host 0.0.0.0 --port 2718";
+        aionui-web = "aionui --webui";
+        aionui-web-remote = "aionui --webui --remote";
+        aionui-reset-pass = "aionui --resetpass";
         l = "eza --icons  -a --group-directories-first -1";
         ll = "eza --icons  -a --group-directories-first -1 --no-user --long";
         tree = "eza --icons --tree --group-directories-first";

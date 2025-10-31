@@ -2,11 +2,12 @@
   pkgs,
   lib,
   inputs,
+  sinnix,
   secretsExportScript ? "",
   ...
 }:
 let
-  username = "sinity";
+  username = sinnix.user.name;
   flakePath = "${inputs.self}";
 in
 {
@@ -30,7 +31,6 @@ in
         nvd
         cachix
         nix-direnv
-        nix-direnv-flakes
         killall
         procps
         psmisc

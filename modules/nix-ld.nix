@@ -37,7 +37,6 @@
       libappindicator-gtk3
       libdrm
       libpulseaudio
-      libuuid
       nspr
       nss
       pango

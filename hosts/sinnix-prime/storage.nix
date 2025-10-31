@@ -1,7 +1,10 @@
 # Host-specific storage configuration for sinnix-prime
-{ pkgs, lib, ... }:
+{ pkgs, lib, config, ... }:
 let
-  dataRoot = "/realm";
+  realmRoot = config.sinnix.paths.realmRoot;
+  dataRoot = config.sinnix.paths.dataRoot;
+  username = config.sinnix.user.name;
+  outerRealm = config.sinnix.paths.outerRealm;
   swapFileSizeGiB = 32;
 
   prepareSwapfile = pkgs.writeShellApplication {
@@ -104,20 +107,20 @@ in
     };
 
     "/var/log/journal" = {
-      device = "${dataRoot}/data/syslog/journal";
+      device = "${dataRoot}/syslog/journal";
       fsType = "none";
       options = [ "bind" ];
       depends = [ dataRoot ];
     };
 
-    "/home/sinity" = {
-      device = "${dataRoot}/home";
+    "/home/${username}" = {
+      device = "${realmRoot}/home";
       fsType = "none";
       options = [ "bind" ];
-      depends = [ dataRoot ];
+      depends = [ realmRoot ];
     };
 
-    "/outer-realm" = {
+    "${outerRealm}" = {
       device = "/dev/disk/by-uuid/5119B4113C747C42";
       fsType = "ntfs";
       options = [
@@ -150,10 +153,10 @@ in
   systemd = {
     tmpfiles.rules = lib.mkAfter [
       "d /mnt/pendrv 0755 root root -"
-      "d ${dataRoot}/knowledgebase 0755 sinity users -"
-      "d ${dataRoot}/inbox 0755 sinity users -"
-      "d ${dataRoot}/data/screenshot 0755 sinity users -"
-      "d ${dataRoot}/data/screenshot/mpv 0755 sinity users -"
+      "d ${realmRoot}/knowledgebase 0755 ${username} users -"
+      "d ${realmRoot}/inbox 0755 ${username} users -"
+      "d ${dataRoot}/screenshot 0755 ${username} users -"
+      "d ${dataRoot}/screenshot/mpv 0755 ${username} users -"
     ];
 
     services.prepare-swapfile = {

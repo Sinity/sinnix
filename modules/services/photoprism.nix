@@ -1,8 +1,8 @@
 { lib, config, ... }:
 let
-  dataRoot = "/realm/data";
-  mediaDir = "${dataRoot}/media";
-  username = "sinity";
+  username = config.sinnix.user.name;
+  inherit (config.sinnix.paths) dataRoot mediaRoot;
+  mediaDir = mediaRoot;
 in
 {
   services.photoprism = {

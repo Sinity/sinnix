@@ -1,4 +1,4 @@
-{ pkgs, lib, ... }:
+{ pkgs, lib, config, ... }:
 let
   graphicalTarget = "graphical-session.target";
 
@@ -87,6 +87,41 @@ in
       };
       Install.WantedBy = [ graphicalTarget ];
     };
+
+    kdeconnectd = {
+      Unit = baseGraphicalUnit // {
+        Description = "KDE Connect daemon";
+      };
+      Service = {
+        Type = "dbus";
+        BusName = "org.kde.kdeconnect";
+        ExecStart = "${pkgs.kdePackages.kdeconnect-kde}/libexec/kdeconnectd";
+        Restart = "on-failure";
+        RestartSec = 5;
+      };
+      Install.WantedBy = [ graphicalTarget ];
+    };
+
+    borg-backup = {
+      Unit = baseGraphicalUnit // {
+        Description = "Borg archive rotation";
+      };
+      Service = {
+        Type = "oneshot";
+        ExecStart = "${config.home.homeDirectory}/.local/bin/borg-run";
+      };
+      Install.WantedBy = [ "timers.target" ];
+    };
+  };
+
+  systemd.user.timers.borg-backup = {
+    Unit.Description = "Daily Borg backup";
+    Timer = {
+      OnCalendar = "daily";
+      Persistent = true;
+      RandomizedDelaySec = 300;
+    };
+    Install.WantedBy = [ "timers.target" ];
   };
 
   home.packages = lib.mkBefore (

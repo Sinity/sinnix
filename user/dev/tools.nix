@@ -38,7 +38,6 @@
         git-filter-repo
         gitstats
         glmark2
-        glxinfo
         gnumake
         gnuplot
         google-cloud-sdk
@@ -85,6 +84,7 @@
         ttyper
         uv
         visidata
+        zed-editor
         vulkan-tools
         vulkan-validation-layers
         wayland-utils
@@ -113,13 +113,20 @@
           } | ${pkgs.gnutar}/bin/tar -xC "$HOME/.config"
         fi
       '';
+
     };
   };
 
   xdg.configFile = {
+    ".codex/config.toml".source = dotsPath + "/codex/config.toml";
+
+    "opencode/opencode.json".source = dotsPath + "/opencode/opencode.json";
+
     "sqlitebrowser/sqlitebrowser.conf".source = dotsPath + "/sqlitebrowser/sqlitebrowser.conf";
 
     "ripgrep-all/config.jsonc".source = dotsPath + "/ripgrep-all/config.jsonc";
+
+    "marimo/marimo.toml".source = dotsPath + "/marimo/marimo.toml";
 
     "sinex" = {
       source = dotsPath + "/sinex";

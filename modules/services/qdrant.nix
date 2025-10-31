@@ -1,7 +1,7 @@
-{ lib, pkgs, ... }:
+{ lib, pkgs, config, ... }:
 let
-  username = "sinity";
-  dataRoot = "/realm/data";
+  username = config.sinnix.user.name;
+  dataRoot = config.sinnix.paths.dataRoot;
   qdrantDataDir = "${dataRoot}/qdrant";
 in
 {

@@ -49,6 +49,7 @@ in
     bc
     calc
     soundwireserver
+    kdePackages.kdeconnect-kde
     imgur-screenshot
     usbview
     strace
@@ -280,7 +281,7 @@ in
         "video/mkv" = [ "mpv.desktop" ];
         "video/webm" = [ "mpv.desktop" ];
         "video/x-matroska" = [ "mpv.desktop" ];
-        "application/pdf" = [ "google-chrome.desktop" ];
+        "application/pdf" = [ "org.qutebrowser.qutebrowser.desktop" ];
       };
       defaultApplications = {
         "text/plain" = [ "org.gnome.TextEditor.desktop" ];
@@ -303,12 +304,12 @@ in
         "video/mkv" = [ "mpv.desktop" ];
         "video/webm" = [ "mpv.desktop" ];
         "video/x-matroska" = [ "mpv.desktop" ];
-        "application/pdf" = [ "google-chrome.desktop" ];
-        "text/html" = [ "google-chrome.desktop" ];
-        "x-scheme-handler/http" = [ "google-chrome.desktop" ];
-        "x-scheme-handler/https" = [ "google-chrome.desktop" ];
-        "x-scheme-handler/about" = [ "google-chrome.desktop" ];
-        "x-scheme-handler/unknown" = [ "google-chrome.desktop" ];
+        "application/pdf" = [ "org.qutebrowser.qutebrowser.desktop" ];
+        "text/html" = [ "org.qutebrowser.qutebrowser.desktop" ];
+        "x-scheme-handler/http" = [ "org.qutebrowser.qutebrowser.desktop" ];
+        "x-scheme-handler/https" = [ "org.qutebrowser.qutebrowser.desktop" ];
+        "x-scheme-handler/about" = [ "org.qutebrowser.qutebrowser.desktop" ];
+        "x-scheme-handler/unknown" = [ "org.qutebrowser.qutebrowser.desktop" ];
       };
     };
   };

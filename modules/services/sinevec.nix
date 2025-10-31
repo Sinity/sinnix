@@ -2,17 +2,18 @@
   inputs,
   lib,
   pkgs,
+  config,
   ...
 }:
 let
-  dataRoot = "/realm/data";
+  dataRoot = config.sinnix.paths.dataRoot;
   sinevecDataDir = "${dataRoot}/sinevec";
   sinevecStateDir = "${sinevecDataDir}/state";
   sinevecLogDir = "${sinevecDataDir}/logs";
   sinevecPkg = inputs.sinevec.packages.${pkgs.system}.sinevec;
   sinevecUser = "sinevec";
   sinevecGroup = "sinevec";
-  username = "sinity";
+  username = config.sinnix.user.name;
 in
 {
   environment.systemPackages = [ sinevecPkg ];

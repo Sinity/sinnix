@@ -7,6 +7,9 @@
 - Machine-specific overrides reside in `hosts/` (notably `hosts/sinnix-prime/`).
 - Shared dotfiles live in `dots/`; reusable assets belong in `assets/`. Add repeatable scripts through `modules/programs.nix` or promote them to `flake/apps.nix` apps.
 
+### Single-User Assumption
+- The configuration is intentionally opinionated for a single human (`sinity`) across two machines. Do **not** spend effort making modules multi-user pluggable or adding enable/disable switches for hypothetical users. If a change must differ between hosts, wire it through the host directories instead.
+
 ### Services & Features
 - Core audio, networking, and desktop plumbing are enabled in the shared modules; hosts only import the service modules they need (see `hosts/sinnix-prime`).
 

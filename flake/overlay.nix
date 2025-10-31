@@ -34,6 +34,12 @@ in
             disabledTests = (old.disabledTests or [ ]) ++ [ "test_print_with_style" ];
           });
         };
+        hyprlandPatches = builtins.path {
+          path = ../patches/hyprland;
+          name = "sinnix-hyprland-patches";
+        };
+        hyprlandPatch =
+          name: builtins.toPath "${hyprlandPatches}/${name}";
         pgJsonschemaFor =
           postgresql:
           prev.buildPgrxExtension (
@@ -71,10 +77,33 @@ in
       {
         hyprland = prev.hyprland.overrideAttrs (old: {
           patches = (old.patches or [ ]) ++ [
-            ../patches/hyprland/suppress-color-warning.patch
-            ../patches/hyprland/check-monitor-null.patch
-            ../patches/hyprland/special-workspace-damage.patch
-            ../patches/hyprland/guard-last-monitor.patch
+            (hyprlandPatch "suppress-color-warning.patch")
+            (hyprlandPatch "check-monitor-null.patch")
+            (hyprlandPatch "special-workspace-damage.patch")
+            (hyprlandPatch "guard-last-monitor.patch")
+          ];
+          postPatch = (old.postPatch or "") + ''
+            substituteInPlace src/Compositor.cpp \
+              --replace '        if (pw->m_isMapped)
+            g_pHyprRenderer->damageMonitor(pw->m_monitor.lock());
+
+    };' '        if (pw->m_isMapped) {
+            if (m_monitors.empty()) {
+                Debug::log(WARN, "[sinnix] skip z-order damage: no active monitors");
+            } else if (const auto PMONITOR = pw->m_monitor.lock()) {
+                g_pHyprRenderer->damageMonitor(PMONITOR);
+            } else {
+                Debug::log(WARN, "[sinnix] skip z-order damage: window monitor vanished");
+            }
+        }
+
+    };'
+          '';
+        });
+
+        uwsm = prev.uwsm.overrideAttrs (old: {
+          patches = (old.patches or [ ]) ++ [
+            ../patches/uwsm/fix-systemd-unit-escaping.patch
           ];
         });
 
@@ -161,21 +190,112 @@ in
           });
         };
 
+        aionui =
+          let
+            pname = "aionui";
+            version = "1.4.2";
+            src = final.fetchurl {
+              url = "https://github.com/iOfficeAI/AionUi/releases/download/v${version}/AionUi-${version}-linux-x86_64.AppImage";
+              hash = "sha256-7/eoVSyQoA9M3YUxlHRvvXBWeA0JelfHTupg98XzTus=";
+            };
+            appimageContents = final.appimageTools.extractType2 {
+              inherit pname version src;
+            };
+            waylandFlags = "\${WAYLAND_DISPLAY:+--ozone-platform-hint=auto --enable-features=WaylandWindowDecorations --enable-wayland-ime}";
+          in
+          final.appimageTools.wrapType2 {
+            inherit pname version src;
+            nativeBuildInputs = [ final.makeWrapper ];
+            extraPkgs =
+              pkgs:
+              with pkgs;
+              [
+                alsa-lib
+                at-spi2-atk
+                at-spi2-core
+                bash
+                brotli
+                cairo
+                cups
+                curl
+                dbus
+                expat
+                fontconfig
+                freetype
+                gdk-pixbuf
+                glib
+                glibc
+                gsettings-desktop-schemas
+                gtk3
+                krb5
+                libdrm
+                libglvnd
+                libnotify
+                libpulseaudio
+                libsecret
+                libuuid
+                libxkbcommon
+                mesa
+                nspr
+                nss
+                pango
+                systemd
+                util-linux
+                wayland
+                xdg-utils
+                zlib
+                xorg.libX11
+                xorg.libXcomposite
+                xorg.libXcursor
+                xorg.libXdamage
+                xorg.libXext
+                xorg.libXfixes
+                xorg.libXi
+                xorg.libXrandr
+                xorg.libxcb
+              ];
+
+            extraInstallCommands = ''
+              wrapProgram "$out/bin/${pname}" \
+                --set-default QT_QPA_PLATFORM xcb \
+                --add-flags "${waylandFlags}" \
+                --set-default ELECTRON_FORCE_IS_PACKAGED 1
+
+              install -m 444 -D ${appimageContents}/AionUi.desktop $out/share/applications/AionUi.desktop
+              install -m 444 -D ${appimageContents}/AionUi.png $out/share/icons/hicolor/512x512/apps/AionUi.png
+              substituteInPlace $out/share/applications/AionUi.desktop \
+                --replace-fail 'Exec=AppRun' 'Exec=${pname}'
+
+              if [ -d ${appimageContents}/usr/share/icons ]; then
+                mkdir -p $out/share
+                cp -R ${appimageContents}/usr/share/icons $out/share/
+              fi
+            '';
+
+            meta = with final.lib; {
+              description = "Desktop interface for managing Aion CLI coding agents";
+              homepage = "https://github.com/iOfficeAI/AionUi";
+              license = licenses.asl20;
+              platforms = [ "x86_64-linux" ];
+              mainProgram = pname;
+            };
+          };
+
         # Override Codex CLI to a newer upstream tag
         codex = prev.codex.overrideAttrs (
           _old:
           let
-            version = "0.47.0";
+            version = "0.50.0";
             newSrc = final.fetchFromGitHub {
               owner = "openai";
               repo = "codex";
               rev = "refs/tags/rust-v" + version;
-              sha256 = "sha256-5AyatNXgHuia656OuSDozQzQv80bNHncgLN1X23bfM4=";
+              sha256 = "sha256-8qNQ92VV0aog3USzeAMqWXws7kaQ//6/A/M85USTTXY=";
             };
             newCargo = final.rustPlatform.fetchCargoVendor {
               src = newSrc;
               sourceRoot = "source/codex-rs";
-              hash = "sha256-PQ1NxwNBaI48gQ4GGoricA/j7vpsnaLlL6st5P+CTHk=";
+              hash = "sha256-T6Zt5U2aCJWflwKzTbJXwK+BeE7L6IP4WAmISitrpRg=";
             };
           in
           {

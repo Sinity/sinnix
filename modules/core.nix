@@ -5,7 +5,8 @@
   ...
 }:
 let
-  username = "sinity";
+  username = config.sinnix.user.name;
+  paths = config.sinnix.paths;
 in
 {
   config = {
@@ -115,9 +116,9 @@ in
     };
 
     systemd.tmpfiles.rules = lib.mkAfter [
-      "d /realm/inbox 0755 ${username} users -"
-      "d /realm/data 0755 ${username} users -"
-      "d /realm/data/screenshot 0755 ${username} users -"
+      "d ${paths.outerRealm}/inbox 0755 ${username} users -"
+      "d ${paths.dataRoot} 0755 ${username} users -"
+      "d ${paths.dataRoot}/screenshot 0755 ${username} users -"
     ];
   };
 }

@@ -1,4 +1,8 @@
-{ lib, ... }:
+{ lib, config, ... }:
+let
+  torrentInbox = config.sinnix.paths.torrentInbox;
+  username = config.sinnix.user.name;
+in
 {
   services.transmission = {
     enable = true;
@@ -7,7 +11,7 @@
       script-torrent-done-enabled = false;
       ratio-limit-enabled = false;
       umask = 18;
-      download-dir = "/outer-realm/inbox";
+      download-dir = torrentInbox;
       incomplete-dir-enabled = false;
       rpc-enabled = true;
       rpc-bind-address = "127.0.0.1";
@@ -17,6 +21,6 @@
   };
 
   systemd.tmpfiles.rules = lib.mkAfter [
-    "d /outer-realm/inbox 2775 sinity users -"
+    "d ${torrentInbox} 2775 ${username} users -"
   ];
 }

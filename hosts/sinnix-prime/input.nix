@@ -3,11 +3,13 @@
   pkgs,
   lib,
   inputs,
+  config,
   ...
 }:
 let
-  dataRoot = "/realm";
-  username = "sinity";
+  realmRoot = config.sinnix.paths.realmRoot;
+  dataRoot = realmRoot;
+  username = config.sinnix.user.name;
   interceptTools = pkgs.interception-tools;
   capsPlugin = pkgs.interception-tools-plugins.caps2esc;
   interceptBouncePkg = inputs.intercept-bounce.packages.${pkgs.system}.intercept-bounce;
@@ -25,11 +27,11 @@ let
   scribeCmd = lib.escapeShellArgs [
     "${scribePkg}/bin/scribe-tap"
     "--data-dir"
-    "${dataRoot}/data/keylog"
+    "${realmRoot}/data/keylog"
     "--log-dir"
-    "${dataRoot}/data/keylog/logs"
+    "${realmRoot}/data/keylog/logs"
     "--snapshot-dir"
-    "${dataRoot}/data/keylog/snapshots"
+    "${realmRoot}/data/keylog/snapshots"
     "--log-mode"
     "both"
     "--context"

@@ -1,0 +1,33 @@
+layout default {
+  default_tab_template {
+    pane size=1 borderless=false {
+      command "zsh"
+    }
+  }
+}
+
+keybinds {
+  normal {
+    bind "Alt h" { MoveFocus "Left"; }
+    bind "Alt j" { MoveFocus "Down"; }
+    bind "Alt k" { MoveFocus "Up"; }
+    bind "Alt l" { MoveFocus "Right"; }
+
+    bind "Alt H" { MovePane "Left"; }
+    bind "Alt J" { MovePane "Down"; }
+    bind "Alt K" { MovePane "Up"; }
+    bind "Alt L" { MovePane "Right"; }
+
+    bind "Alt n" { NewPane; }
+    bind "Alt t" { NewTab; }
+    bind "Alt w" { CloseTab; }
+    bind "Alt f" { ToggleFocusFullscreen; }
+    bind "Alt s" { SwitchToMode "Scroll"; }
+  }
+
+  scroll {
+    bind "Escape" { SwitchToMode "Normal"; }
+    bind "Alt h" { MoveFocus "Left"; }
+    bind "Alt l" { MoveFocus "Right"; }
+  }
+}

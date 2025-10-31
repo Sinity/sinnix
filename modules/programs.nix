@@ -4,6 +4,7 @@ let
     git
     taskwarrior3
     timewarrior
+    unzip
     wget
   ];
 
@@ -13,11 +14,16 @@ let
     (pkgs.bugwarrior or null)
     (pkgs.timewarrior-all-reports or null)
   ];
+
+  aiDesktopPackages = with pkgs; [
+    aionui
+  ];
 in
 {
   config = {
-    environment.systemPackages = lib.mkAfter coreCliPackages;
+    environment.systemPackages = lib.mkAfter (coreCliPackages ++ aiDesktopPackages);
     sinnix.optionalPackages.cli = optionalCliPackages;
+    sinnix.optionalPackages.aiDesktop = aiDesktopPackages;
 
     programs = {
       zsh.enable = true;

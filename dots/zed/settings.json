@@ -1,0 +1,27 @@
+{
+  "theme": "Gruvbox Dark",
+  "buffer_font_size": 16,
+  "buffer_line_height": 1.4,
+  "tabs": {
+    "visible": false
+  },
+  "vim_mode": true,
+  "terminal": {
+    "shell": {
+      "program": "zed-terminal",
+      "args": []
+    }
+  },
+  "assistant": {
+    "default_provider": "anthropic",
+    "providers": {
+      "anthropic": {
+        "api_key": { "env": "ANTHROPIC_API_KEY" }
+      }
+    }
+  },
+  "telemetry": {
+    "diagnostics": false,
+    "metrics": false
+  }
+}

@@ -1,0 +1,118 @@
+window {
+  font-family: "SauceCodePro Nerd Font Mono", "FiraCode Nerd Font", monospace;
+  font-size: 14px;
+  color: #ebdbb2;
+  background: transparent;
+}
+
+.bar {
+  background-color: rgba(29, 32, 33, 0.88);
+  border: 1px solid rgba(235, 219, 178, 0.15);
+  border-radius: 16px;
+  padding: 6px 12px;
+  box-shadow: 0 6px 30px rgba(0, 0, 0, 0.36);
+}
+
+.workspaces .item {
+  padding: 4px 12px;
+  border-radius: 10px;
+  margin-right: 6px;
+  background: transparent;
+  transition: all 120ms ease;
+}
+
+.workspaces .item.focused,
+.workspaces .item.visible {
+  background-color: rgba(142, 192, 124, 0.22);
+  color: #b8bb26;
+}
+
+.workspaces .item.urgent {
+  background-color: rgba(251, 97, 63, 0.28);
+  color: #fb4934;
+}
+
+.workspaces .item.inactive {
+  opacity: 0.45;
+}
+
+.focused {
+  padding: 0 12px;
+  color: #d5c4a1;
+}
+
+.bindmode {
+  background-color: rgba(177, 98, 134, 0.25);
+  color: #d3869b;
+  padding: 4px 10px;
+  border-radius: 10px;
+}
+
+.custom.audio-output button {
+  padding: 4px 10px;
+  border-radius: 8px;
+  background-color: rgba(131, 165, 152, 0.2);
+  color: #83a598;
+}
+
+.volume {
+  padding: 0 10px;
+}
+
+.music {
+  padding: 0 10px;
+  min-width: 140px;
+}
+
+.music .label {
+  color: #8ec07c;
+}
+
+.battery {
+  padding: 0 10px;
+  color: #fabd2f;
+}
+
+.sys-info {
+  padding: 0 10px;
+  color: #d5c4a1;
+}
+
+.custom.quick-actions button {
+  border-radius: 10px;
+  padding: 4px 10px;
+  background-color: rgba(104, 157, 106, 0.2);
+  color: #8ec07c;
+}
+
+.custom.quick-actions .popup {
+  background-color: rgba(29, 32, 33, 0.95);
+  border-radius: 12px;
+  border: 1px solid rgba(235, 219, 178, 0.18);
+  padding: 12px;
+}
+
+.custom.quick-actions .quick-action {
+  margin: 4px 0;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background-color: rgba(60, 56, 54, 0.9);
+  color: #ebdbb2;
+}
+
+.clipboard {
+  padding: 0 10px;
+}
+
+.notifications {
+  padding: 0 10px;
+}
+
+.tray {
+  padding: 0 10px;
+}
+
+.clock {
+  padding: 0 12px 0 6px;
+  font-weight: 500;
+}

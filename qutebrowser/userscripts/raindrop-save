@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+token="${RAINDROP_TOKEN:-}"
+collection="${RAINDROP_COLLECTION:-0}"
+url="${QUTE_URL:-}"
+title="${QUTE_TITLE:-}"
+
+if [[ -z "${token}" ]]; then
+  notify-send "raindrop-save" "RAINDROP_TOKEN not set."
+  exit 1
+fi
+
+if [[ -z "${url}" ]]; then
+  url="${QUTE_SELECTED_TEXT:-}"
+fi
+
+if [[ -z "${url}" ]]; then
+  notify-send "raindrop-save" "No URL to send to Raindrop."
+  exit 0
+fi
+
+payload=$(
+  jq -n \
+    --arg link "${url}" \
+    --arg title "${title:-${url}}" \
+    --argjson collection "${collection}" \
+    '{
+      link: $link,
+      title: $title,
+      tags: ["qutebrowser", "capture"],
+      please_parse: true,
+      collection: (if $collection == 0 then null else { id: $collection } end)
+    }'
+)
+
+response="$(
+  curl -fsS \
+    -H "Authorization: Bearer ${token}" \
+    -H "Content-Type: application/json" \
+    -X POST \
+    -d "${payload}" \
+    "https://api.raindrop.io/rest/v1/raindrop"
+)"
+
+if [[ -n "${response}" ]]; then
+  notify-send "raindrop-save" "Saved to Raindrop."
+else
+  notify-send "raindrop-save" "Request sent (empty response)."
+fi

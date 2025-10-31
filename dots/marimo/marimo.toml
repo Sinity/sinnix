@@ -1,0 +1,12 @@
+# This file is managed by Nix; edit via dots/marimo/marimo.toml in the flake.
+# See https://docs.marimo.io/guides/editor_features/mcp.html for details.
+
+[mcp]
+# Enable the built-in documentation preset plus Context7 for IDE-style lookups.
+presets = ["marimo", "context7"]
+
+[ai.models]
+# Default models are safe placeholders; configure provider credentials via the UI.
+chat_model = "anthropic/claude-3-7-sonnet-latest"
+edit_model = "anthropic/claude-3-7-sonnet-latest"
+

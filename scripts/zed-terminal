@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_name="${ZED_PROJECT_NAME:-}" # Provided by Zed when available
+project_root="${ZED_PROJECT_ROOT:-$PWD}"
+if [[ -z "${project_name}" ]]; then
+  project_name="$(basename "${project_root}")"
+fi
+[[ -z "${project_name}" ]] && project_name="zed"
+
+exec zellij-session "zed-${project_name}" "$@"

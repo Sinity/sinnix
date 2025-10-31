@@ -6,7 +6,7 @@
   ...
 }:
 let
-  username = "sinity";
+  username = config.sinnix.user.name;
   nextcloudCert = builtins.readFile "${inputs.self}/assets/nextcloud-cert.crt";
   baseStoragePackages = with pkgs; [
     davfs2

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if systemctl --user --quiet is-active waybar.service; then
-  systemctl --user stop waybar.service
+if systemctl --user --quiet is-active ironbar.service; then
+  systemctl --user stop ironbar.service
 else
-  systemctl --user start waybar.service
+  systemctl --user start ironbar.service
 fi

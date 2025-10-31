@@ -6,8 +6,8 @@
   ...
 }:
 let
-  username = "sinity";
-  defaultStateDir = "/realm/data/sinex";
+  username = config.sinnix.user.name;
+  defaultStateDir = "${config.sinnix.paths.dataRoot}/sinex";
   defaultLogsDir = "${defaultStateDir}/logs";
   defaultBlobRepo = "${defaultStateDir}/blob-repository";
   defaultDlqDir = "${defaultStateDir}/failures";
@@ -88,7 +88,7 @@ in
           filesystem = {
             enable = lib.mkDefault true;
             watchPaths = lib.mkDefault [
-              "/realm"
+              config.sinnix.paths.realmRoot
             ];
             excludePatterns = lib.mkDefault [
               "**/.git/**"

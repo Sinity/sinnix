@@ -1,13 +1,14 @@
 {
   pkgs,
   lib,
+  config,
   ...
 }:
 let
-  dataRoot = "/realm";
-  journaldBaseDir = "${dataRoot}/data/syslog";
+  dataRoot = config.sinnix.paths.dataRoot;
+  journaldBaseDir = "${dataRoot}/syslog";
   bootMetricsDir = "${journaldBaseDir}/boot-metrics";
-  username = "sinity";
+  username = config.sinnix.user.name;
   captureBootMetrics = pkgs.writeShellApplication {
     name = "capture-boot-metrics";
     runtimeInputs = [

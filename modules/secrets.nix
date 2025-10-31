@@ -1,10 +1,11 @@
 {
   lib,
   inputs,
+  config,
   ...
 }:
 let
-  username = "sinity";
+  username = config.sinnix.user.name;
   secretDir = "${inputs.self}/secret";
 
   secretFiles =

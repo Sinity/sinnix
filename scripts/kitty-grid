@@ -1,0 +1,520 @@
+#!/usr/bin/env python3
+# Arrange Hyprland windows (with kitty integration) into a grid.
+#
+# By default this targets kitty, leveraging its remote control socket to launch
+# extra windows when needed, but it can also arrange any other class (e.g.
+# qutebrowser) purely via Hyprland dispatchers. It defaults to workspace 1
+# with a 3x2 grid, all of which are customisable.
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+from itertools import islice
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+
+
+class KittyGridError(RuntimeError):
+    """Raised when arranging kitty windows fails."""
+
+
+def run(
+    args: Sequence[str],
+    *,
+    capture: bool = False,
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    """Run a subprocess and return the completed process."""
+
+    try:
+        return subprocess.run(  # type: ignore[return-value]
+            list(args),
+            check=check,
+            capture_output=capture,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        raise KittyGridError(f"missing executable: {args[0]}") from exc
+
+
+def hyprctl_json(command: str, *command_args: str) -> Any:
+    """Run `hyprctl -j <command>` and parse the JSON output."""
+
+    proc = run(["hyprctl", "-j", command, *command_args], capture=True)
+    if proc.returncode != 0:
+        details = proc.stderr.strip() or proc.stdout.strip()
+        raise KittyGridError(f"hyprctl {command} failed: {details}")
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise KittyGridError(f"failed to parse hyprctl {command} output: {exc}") from exc
+
+
+def hyprctl_dispatch(dispatcher: str, *dispatcher_args: str) -> None:
+    """Call `hyprctl dispatch`."""
+
+    run(["hyprctl", "dispatch", dispatcher, *dispatcher_args])
+
+
+def kitty_remote(socket: str, *kitty_args: str, capture: bool = False) -> subprocess.CompletedProcess[str]:
+    """Call `kitty @` with the provided args."""
+
+    return run(["kitty", "@", "--to", socket, *kitty_args], capture=capture)
+
+
+def parse_grid(args: argparse.Namespace) -> Tuple[int, int]:
+    """Resolve grid dimensions."""
+
+    if args.grid:
+        parts = args.grid.lower().split("x", 1)
+        if len(parts) != 2:
+            raise KittyGridError(f"invalid grid specification: {args.grid!r}")
+        try:
+            cols = int(parts[0])
+            rows = int(parts[1])
+        except ValueError as exc:
+            raise KittyGridError(f"invalid grid specification: {args.grid!r}") from exc
+        if cols <= 0 or rows <= 0:
+            raise KittyGridError(f"grid dimensions must be positive: {args.grid!r}")
+        return cols, rows
+
+    cols = args.cols or 3
+    rows = args.rows or 2
+    if cols <= 0 or rows <= 0:
+        raise KittyGridError("rows and cols must be positive")
+    return cols, rows
+
+
+def parse_reserved(reserved: Any) -> Tuple[int, int, int, int]:
+    """Return (top, right, bottom, left) reserved space."""
+
+    if isinstance(reserved, dict):
+        return (
+            int(reserved.get("top", 0)),
+            int(reserved.get("right", 0)),
+            int(reserved.get("bottom", 0)),
+            int(reserved.get("left", 0)),
+        )
+    if isinstance(reserved, list) and len(reserved) == 4:
+        top, right, bottom, left = reserved
+        return int(top), int(right), int(bottom), int(left)
+    return 0, 0, 0, 0
+
+
+def workspace_matches(entry: Dict[str, Any], target_name: str, target_id: Optional[int]) -> bool:
+    """Check whether a Hyprland workspace entry matches the given target."""
+
+    entry_id = entry.get("id")
+    entry_name = entry.get("name")
+    if target_id is not None and entry_id == target_id:
+        return True
+    if entry_name == target_name:
+        return True
+    # Some Hyprland builds expose workspace id as a string.
+    if target_id is not None and isinstance(entry_id, str):
+        try:
+            return int(entry_id) == target_id
+        except ValueError:
+            pass
+    return False
+
+
+def load_clients() -> List[Dict[str, Any]]:
+    """Fetch the Hyprland clients list."""
+
+    result = hyprctl_json("clients")
+    if not isinstance(result, list):
+        raise KittyGridError("unexpected hyprctl clients payload")
+    return result
+
+
+def load_workspace_info(workspace: str) -> Tuple[Optional[int], Optional[int]]:
+    """Return (workspace_id, monitor_id)."""
+
+    try:
+        workspace_id = int(workspace)
+    except ValueError:
+        workspace_id = None
+
+    workspaces = hyprctl_json("workspaces")
+    if isinstance(workspaces, list):
+        for entry in workspaces:
+            if not isinstance(entry, dict):
+                continue
+            if workspace_matches(entry, workspace, workspace_id):
+                monitor_id = entry.get("monitorID")
+                try:
+                    monitor_id_int = int(monitor_id)
+                except (TypeError, ValueError):
+                    monitor_id_int = None
+                return workspace_id, monitor_id_int
+    return workspace_id, None
+
+
+def load_monitor(monitor_id: Optional[int]) -> Dict[str, Any]:
+    """Return monitor info for the provided monitor id or the first one."""
+
+    monitors = hyprctl_json("monitors")
+    candidates: List[Dict[str, Any]] = []
+    if isinstance(monitors, list):
+        for entry in monitors:
+            if isinstance(entry, dict):
+                candidates.append(entry)
+
+    if not candidates:
+        raise KittyGridError("no monitors reported by hyprctl")
+
+    if monitor_id is not None:
+        for entry in candidates:
+            entry_id = entry.get("id")
+            try:
+                if int(entry_id) == monitor_id:
+                    return entry
+            except (TypeError, ValueError):
+                continue
+
+    return candidates[0]
+
+
+def get_option_int(name: str, default: int) -> int:
+    """Return an integer Hyprland option value."""
+
+    try:
+        payload = hyprctl_json("getoption", name)
+    except KittyGridError:
+        return default
+
+    for key in ("int", "float", "str"):
+        if isinstance(payload, dict) and key in payload:
+            try:
+                return int(float(payload[key]))
+            except (TypeError, ValueError):
+                continue
+    return default
+
+
+def kitty_socket_path(args: argparse.Namespace) -> str:
+    """Resolve the kitty remote socket path."""
+
+    socket = args.socket or os.environ.get("KITTY_LISTEN_ON")
+    if not socket:
+        raise KittyGridError(
+            "KITTY_LISTEN_ON is not set; ensure kitty is running with remote control enabled"
+        )
+    return socket
+
+
+def collect_target_windows(
+    clients: Iterable[Dict[str, Any]],
+    workspace: str,
+    workspace_id: Optional[int],
+    target_class: Optional[str],
+) -> List[Dict[str, Any]]:
+    """Filter clients that live on the target workspace (and optionally class)."""
+
+    result: List[Dict[str, Any]] = []
+    for client in clients:
+        win_class = client.get("class")
+        if target_class and win_class != target_class:
+            continue
+        ws = client.get("workspace") or {}
+        if isinstance(ws, dict) and workspace_matches(ws, workspace, workspace_id):
+            result.append(client)
+    return result
+
+
+def ensure_windows(
+    args: argparse.Namespace,
+    target_count: int,
+    workspace: str,
+    workspace_id: Optional[int],
+) -> List[Dict[str, Any]]:
+    """Return matching windows, launching kitty instances if required."""
+
+    clients = load_clients()
+    windows = collect_target_windows(clients, workspace, workspace_id, args.window_class)
+    if args.window_class != "kitty":
+        return windows
+
+    if len(windows) >= target_count or args.arrange_only:
+        return windows
+
+    socket = kitty_socket_path(args)
+    needed = target_count - len(windows)
+
+    existing_addresses = {
+        client.get("address") for client in clients if client.get("class") == "kitty"
+    }
+
+    launch_command: List[str] = ["kitty", "@", "--to", socket, "launch", "--type", "os-window"]
+    if args.launch:
+        launch_command.extend(["sh", "-lc", args.launch])
+
+    for _ in range(needed):
+        run(launch_command)
+
+    deadline = time.time() + args.timeout
+    new_addresses: List[str] = []
+    while time.time() < deadline:
+        clients = load_clients()
+        windows = collect_target_windows(clients, workspace, workspace_id, args.window_class)
+        addresses = [
+            client.get("address") for client in clients if client.get("class") == args.window_class
+        ]
+        new_addresses = [
+            addr for addr in addresses if addr not in existing_addresses and addr is not None
+        ]
+        if len(windows) >= target_count:
+            break
+        time.sleep(args.poll_interval)
+    else:
+        raise KittyGridError("timed out waiting for kitty windows to appear")
+
+    for addr in new_addresses:
+        hyprctl_dispatch("movetoworkspacesilent", f"{workspace},address:{addr}")
+
+    time.sleep(args.poll_interval)
+    clients = load_clients()
+    return collect_kitty_windows(clients, workspace, workspace_id)
+
+
+def compute_grid(
+    monitor: Dict[str, Any],
+    cols: int,
+    rows: int,
+    gaps_out: int,
+    gaps_in: int,
+) -> Dict[str, Any]:
+    """Calculate usable geometry and cell metrics."""
+
+    try:
+        mon_x = int(monitor.get("x", 0))
+        mon_y = int(monitor.get("y", 0))
+        width = int(monitor.get("width"))
+        height = int(monitor.get("height"))
+    except (TypeError, ValueError) as exc:
+        raise KittyGridError("invalid monitor geometry from hyprctl") from exc
+
+    top_res, right_res, bottom_res, left_res = parse_reserved(monitor.get("reserved"))
+
+    usable_width = max(
+        1,
+        width - left_res - right_res - 2 * gaps_out,
+    )
+    usable_height = max(
+        1,
+        height - top_res - bottom_res - 2 * gaps_out,
+    )
+
+    base_x = mon_x + left_res + gaps_out
+    base_y = mon_y + top_res + gaps_out
+
+    window_band_w = max(1, usable_width - gaps_in * (cols - 1))
+    window_band_h = max(1, usable_height - gaps_in * (rows - 1))
+
+    cell_width = max(80, window_band_w / cols)
+    cell_height = max(120, window_band_h / rows)
+
+    return {
+        "base_x": base_x,
+        "base_y": base_y,
+        "cell_width": cell_width,
+        "cell_height": cell_height,
+        "gaps_in": gaps_in,
+    }
+
+
+def arrange_windows(
+    windows: List[Dict[str, Any]],
+    cols: int,
+    rows: int,
+    geometry: Dict[str, Any],
+) -> List[Tuple[Dict[str, Any], int, int, int, int]]:
+    """Assign windows to grid slots and return placement data."""
+
+    base_x = geometry["base_x"]
+    base_y = geometry["base_y"]
+    cell_width = geometry["cell_width"]
+    cell_height = geometry["cell_height"]
+    gap = geometry["gaps_in"]
+
+    ordered = sorted(
+        windows,
+        key=lambda item: (
+            (item.get("at") or [0, 0])[1],
+            (item.get("at") or [0, 0])[0],
+            item.get("address", ""),
+        ),
+    )
+
+    placements: List[Tuple[Dict[str, Any], int, int, int, int]] = []
+    for index, window in enumerate(islice(ordered, rows * cols)):
+        row = index // cols
+        col = index % cols
+        x = base_x + round(col * (cell_width + gap))
+        y = base_y + round(row * (cell_height + gap))
+        width = max(50, round(cell_width))
+        height = max(50, round(cell_height))
+        placements.append((window, x, y, width, height))
+    return placements
+
+
+def apply_layout(
+    placements: List[Tuple[Dict[str, Any], int, int, int, int]],
+    workspace: str,
+) -> None:
+    """Apply the computed placement to windows via hyprctl dispatchers."""
+
+    for window, x, y, width, height in placements:
+        addr = window.get("address")
+        if not isinstance(addr, str):
+            continue
+        hyprctl_dispatch("setfloating", f"address:{addr}")
+        hyprctl_dispatch("movetoworkspacesilent", f"{workspace},address:{addr}")
+        hyprctl_dispatch("resizewindowpixel", f"exact {width} {height},address:{addr}")
+        hyprctl_dispatch("movewindowpixel", f"exact {x} {y},address:{addr}")
+
+
+def rename_windows(
+    args: argparse.Namespace,
+    placements: List[Tuple[Dict[str, Any], int, int, int, int]],
+) -> None:
+    """Rename kitty windows for easier identification."""
+
+    if not args.rename_titles or args.window_class != "kitty":
+        return
+
+    socket = kitty_socket_path(args)
+    for idx, (window, _, _, _, _) in enumerate(placements, start=1):
+        pid = window.get("pid")
+        if not isinstance(pid, int):
+            continue
+        row = (idx - 1) // args.cols + 1
+        col = (idx - 1) % args.cols + 1
+        title = f"{args.title_prefix} R{row}C{col}"
+        kitty_remote(
+            socket,
+            "set-window-title",
+            "--match",
+            f"pid:{pid}",
+            title,
+        )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Arrange kitty windows into a grid on a Hyprland workspace.",
+    )
+    parser.add_argument(
+        "--workspace",
+        default="1",
+        help="Workspace id or name to arrange (default: 1).",
+    )
+    parser.add_argument(
+        "--grid",
+        help="Grid layout as COLSxROWS (e.g. 3x3). Overrides --cols/--rows.",
+    )
+    parser.add_argument(
+        "--cols",
+        type=int,
+        default=3,
+        help="Grid columns when --grid is not provided (default: 3).",
+    )
+    parser.add_argument(
+        "--rows",
+        type=int,
+        default=2,
+        help="Grid rows when --grid is not provided (default: 2).",
+    )
+    parser.add_argument(
+        "--class",
+        dest="window_class",
+        default="kitty",
+        help="Only manage surfaces whose class matches (default: kitty).",
+    )
+    parser.add_argument(
+        "--arrange-only",
+        action="store_true",
+        help="Do not launch additional kitty windows.",
+    )
+    parser.add_argument(
+        "--launch",
+        metavar="COMMAND",
+        help="Shell command to run in newly created windows.",
+    )
+    parser.add_argument(
+        "--socket",
+        help="Explicit kitty remote socket (defaults to KITTY_LISTEN_ON).",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=6.0,
+        help="Seconds to wait for new kitty windows (default: 6).",
+    )
+    parser.add_argument(
+        "--poll-interval",
+        type=float,
+        default=0.15,
+        help="Polling interval in seconds while waiting for new windows (default: 0.15).",
+    )
+    parser.add_argument(
+        "--title-prefix",
+        default="Grid",
+        help="Prefix for window titles when renaming (default: Grid).",
+    )
+    parser.add_argument(
+        "--no-title",
+        dest="rename_titles",
+        action="store_false",
+        help="Disable renaming kitty window titles.",
+    )
+    parser.set_defaults(rename_titles=True)
+    return parser
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    try:
+        cols, rows = parse_grid(args)
+        args.cols = cols
+        args.rows = rows
+        target_count = cols * rows
+
+        workspace_id, monitor_id = load_workspace_info(args.workspace)
+        monitor = load_monitor(monitor_id)
+        windows = ensure_windows(args, target_count, args.workspace, workspace_id)
+
+        if not windows:
+            raise KittyGridError(
+                f"no windows found matching class {args.window_class!r} on workspace {args.workspace!r}"
+            )
+
+        gaps_out = get_option_int("general:gaps_out", 20)
+        gaps_in = get_option_int("general:gaps_in", 10)
+
+        geometry = compute_grid(monitor, cols, rows, gaps_out, gaps_in)
+        placements = arrange_windows(windows, cols, rows, geometry)
+
+        if not placements:
+            raise KittyGridError("unable to compute placements for kitty windows")
+
+        apply_layout(placements, args.workspace)
+        rename_windows(args, placements)
+
+        return 0
+    except KittyGridError as exc:
+        parser.error(str(exc))
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr.strip() if exc.stderr else ""
+        stdout = exc.stdout.strip() if exc.stdout else ""
+        details = stderr or stdout or str(exc)
+        parser.error(details)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
