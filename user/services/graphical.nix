@@ -1,4 +1,4 @@
-{ pkgs, lib, config, ... }:
+{ pkgs, lib, ... }:
 let
   graphicalTarget = "graphical-session.target";
 
@@ -102,26 +102,6 @@ in
       Install.WantedBy = [ graphicalTarget ];
     };
 
-    borg-backup = {
-      Unit = baseGraphicalUnit // {
-        Description = "Borg archive rotation";
-      };
-      Service = {
-        Type = "oneshot";
-        ExecStart = "${config.home.homeDirectory}/.local/bin/borg-run";
-      };
-      Install.WantedBy = [ "timers.target" ];
-    };
-  };
-
-  systemd.user.timers.borg-backup = {
-    Unit.Description = "Daily Borg backup";
-    Timer = {
-      OnCalendar = "daily";
-      Persistent = true;
-      RandomizedDelaySec = 300;
-    };
-    Install.WantedBy = [ "timers.target" ];
   };
 
   home.packages = lib.mkBefore (

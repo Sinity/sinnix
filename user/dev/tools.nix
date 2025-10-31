@@ -1,10 +1,20 @@
 {
   pkgs,
   lib,
+  inputs,
   dotsPath,
   secretPaths,
   ...
 }:
+let
+  mcpPython = pkgs.python3.withPackages (ps: [ ps.fastmcp ps.qdrant-client ps.psycopg ]);
+  mcpQdrantBin = pkgs.writeShellScriptBin "mcp-qdrant" ''
+    exec ${mcpPython}/bin/python3 ${inputs.self}/scripts/mcp-qdrant.py "$@"
+  '';
+  mcpPostgresBin = pkgs.writeShellScriptBin "mcp-postgres" ''
+    exec ${mcpPython}/bin/python3 ${inputs.self}/scripts/mcp-postgres.py "$@"
+  '';
+in
 {
   # Developer-focused toolchain packages kept in the user's profile to reduce
   # system-wide rebuild churn while preserving the previous package set.
@@ -90,6 +100,9 @@
         wayland-utils
         xan
         zk
+      ] ++ [
+        mcpQdrantBin
+        mcpPostgresBin
       ]
     );
 
@@ -132,5 +145,10 @@
       source = dotsPath + "/sinex";
       recursive = true;
     };
+  };
+
+  home.file = {
+    ".local/bin/mcp-qdrant".source = "${mcpQdrantBin}/bin/mcp-qdrant";
+    ".local/bin/mcp-postgres".source = "${mcpPostgresBin}/bin/mcp-postgres";
   };
 }

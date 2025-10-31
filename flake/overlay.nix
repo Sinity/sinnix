@@ -201,7 +201,6 @@ in
             appimageContents = final.appimageTools.extractType2 {
               inherit pname version src;
             };
-            waylandFlags = "\${WAYLAND_DISPLAY:+--ozone-platform-hint=auto --enable-features=WaylandWindowDecorations --enable-wayland-ime}";
           in
           final.appimageTools.wrapType2 {
             inherit pname version src;
@@ -258,7 +257,9 @@ in
             extraInstallCommands = ''
               wrapProgram "$out/bin/${pname}" \
                 --set-default QT_QPA_PLATFORM xcb \
-                --add-flags "${waylandFlags}" \
+                --run 'if [ -n ''${WAYLAND_DISPLAY:-} ]; then
+                  set -- --ozone-platform-hint=auto --enable-features=WaylandWindowDecorations --enable-wayland-ime "$@"
+                fi' \
                 --set-default ELECTRON_FORCE_IS_PACKAGED 1
 
               install -m 444 -D ${appimageContents}/AionUi.desktop $out/share/applications/AionUi.desktop
