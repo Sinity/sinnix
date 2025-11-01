@@ -59,7 +59,7 @@ in
       "$HOME/.local/share/qutebrowser/userscripts/research-capture"
     do
       if [ -e "$script" ]; then
-        chmod +x "$script"
+        chmod +x "$script" 2>/dev/null || true
       fi
     done
   '';

@@ -1,4 +1,4 @@
-{ lib, config, ... }:
+{ lib, pkgs, config, ... }:
 let
   torrentInbox = config.sinnix.paths.torrentInbox;
   username = config.sinnix.user.name;
@@ -7,6 +7,7 @@ in
   services.transmission = {
     enable = true;
     openFirewall = false;
+    package = pkgs.transmission_4;
     settings = {
       script-torrent-done-enabled = false;
       ratio-limit-enabled = false;

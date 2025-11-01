@@ -27,6 +27,6 @@ let
   home.sessionVariables.ZELLIJ_AUTO_ATTACH = "disable";
 
   home.activation."zellij-binary-perms" = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-    chmod +x "$HOME/.local/bin/zellij-session" "$HOME/.local/bin/zed-terminal"
+    chmod +x "$HOME/.local/bin/zellij-session" "$HOME/.local/bin/zed-terminal" 2>/dev/null || true
   '';
 }

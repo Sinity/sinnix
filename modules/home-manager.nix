@@ -16,7 +16,7 @@
   config.home-manager = {
     useUserPackages = true;
     useGlobalPkgs = true;
-    backupFileExtension = "backup";
+    backupFileExtension = "hm-bak";
     extraSpecialArgs = {
       inherit inputs;
       secretsExportScript = config.sinnix.secrets.exportScript;

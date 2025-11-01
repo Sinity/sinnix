@@ -32,7 +32,7 @@ in
     taskwarrior3
     timewarrior
     bleachbit
-    transmission_3-gtk
+    transmission_4-gtk
     pwvucontrol
     bluetuith
     blueman

@@ -96,7 +96,7 @@ in
       ];
     };
 
-    "${dataRoot}" = {
+    "${realmRoot}" = {
       device = "/dev/disk/by-uuid/bd19092f-a195-47ab-9c0d-c923d1e5bfea";
       fsType = "btrfs";
       options = [
@@ -104,13 +104,6 @@ in
         "lazytime"
         "nofail"
       ];
-    };
-
-    "/var/log/journal" = {
-      device = "${dataRoot}/syslog/journal";
-      fsType = "none";
-      options = [ "bind" ];
-      depends = [ dataRoot ];
     };
 
     "/home/${username}" = {
@@ -187,14 +180,27 @@ in
       }
     ];
 
-    mounts = [
-      {
-        what = "/dev/disk/by-uuid/36213474-7e7f-4df7-8fb6-264d9a2e9643";
-        where = "/mnt/pendrv";
-        type = "btrfs";
-        options = "nofail,compress=zstd,x-systemd.device-timeout=5s";
-      }
-    ];
+    mounts = lib.mkAfter (
+      [
+        {
+          what = "${dataRoot}/syslog/journal";
+          where = "/var/log/journal";
+          type = "none";
+          options = "bind,x-systemd.requires-mounts-for=${realmRoot}";
+          wantedBy = [ "local-fs.target" ];
+          requires = [ "realm.mount" ];
+          after = [ "realm.mount" ];
+        }
+      ]
+      ++ [
+        {
+          what = "/dev/disk/by-uuid/36213474-7e7f-4df7-8fb6-264d9a2e9643";
+          where = "/mnt/pendrv";
+          type = "btrfs";
+          options = "nofail,compress=zstd,x-systemd.device-timeout=5s";
+        }
+      ]
+    );
   };
 
   boot.supportedFilesystems = [

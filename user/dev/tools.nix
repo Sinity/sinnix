@@ -111,9 +111,11 @@ in
         if [ -f ${secretPaths."configstore-update-notifier"} ]; then
           mkdir -p "$HOME/.config/configstore"
           rm -rf "$HOME/.config/configstore/update-notifier-@google"
-          ${pkgs.gzip}/bin/gzip -dc ${
+          if ! ${pkgs.gzip}/bin/gzip -dc ${
             secretPaths."configstore-update-notifier"
-          } | ${pkgs.gnutar}/bin/tar -xC "$HOME/.config/configstore"
+          } | ${pkgs.gnutar}/bin/tar -xC "$HOME/.config/configstore"; then
+            echo "warning: unable to restore configstore notifier archive" >&2
+          fi
         fi
       '';
 
@@ -121,9 +123,11 @@ in
         if [ -f ${secretPaths."gcloud-config.tar.gz"} ]; then
           mkdir -p "$HOME/.config"
           rm -rf "$HOME/.config/gcloud"
-          ${pkgs.gzip}/bin/gzip -dc ${
+          if ! ${pkgs.gzip}/bin/gzip -dc ${
             secretPaths."gcloud-config.tar.gz"
-          } | ${pkgs.gnutar}/bin/tar -xC "$HOME/.config"
+          } | ${pkgs.gnutar}/bin/tar -xC "$HOME/.config"; then
+            echo "warning: unable to restore gcloud config archive" >&2
+          fi
         fi
       '';
 
