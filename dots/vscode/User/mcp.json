@@ -34,10 +34,10 @@
 			},
 			"gallery": true
 		},
-		"prisma-postgres": {
-			"type": "http",
-			"url": "https://mcp.prisma.io/mcp",
-			"gallery": true
+		"postgres-local": {
+			"type": "stdio",
+			"command": "/home/sinity/.local/bin/mcp-postgres",
+			"gallery": false
 		}
 	},
 	"inputs": [
@@ -49,4 +49,3 @@
 		}
 	]
 }
-

@@ -5,7 +5,7 @@
   ...
 }:
 let
-  dataRoot = config.sinnix.paths.dataRoot;
+  inherit (config.sinnix.paths) dataRoot realmRoot;
   journaldBaseDir = "${dataRoot}/syslog";
   bootMetricsDir = "${journaldBaseDir}/boot-metrics";
   username = config.sinnix.user.name;
@@ -65,6 +65,9 @@ in
       serviceConfig = {
         Type = "oneshot";
         ExecStart = "${captureBootMetrics}/bin/capture-boot-metrics";
+      };
+      unitConfig = {
+        RequiresMountsFor = [ bootMetricsDir ];
       };
     };
   };

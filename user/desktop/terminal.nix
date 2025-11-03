@@ -26,6 +26,9 @@
     extraConfig = ''
       map ctrl+shift+f12 debug_config
 
+      map ctrl+shift+enter launch --type=tab --cwd=current zellij-session project
+      map ctrl+shift+space launch --type=overlay --cwd=current zellij-session scratch
+
       shell_integration enabled
     '';
   };

@@ -19,6 +19,10 @@ _: {
               "noatime"
               "discard"
             ];
+            extraArgs = [
+              "-L"
+              "nixos-root"
+            ];
           };
         };
       };

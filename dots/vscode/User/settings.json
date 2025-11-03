@@ -4,17 +4,20 @@
   "chat.editor.fontSize": 21.333333333333332,
   "debug.console.fontFamily": "SauceCodePro Nerd Font Mono",
   "debug.console.fontSize": 21.333333333333332,
-  "editor.fontFamily": "SauceCodePro Nerd Font Mono",
-  "editor.fontSize": 21.333333333333332,
+  "editor.fontFamily": "SauceCodePro Nerd Font Mono, 'Sauce Code Pro', monospace",
+  "editor.fontSize": 16,
+  "editor.fontLigatures": false,
   "editor.inlayHints.fontFamily": "SauceCodePro Nerd Font Mono",
+  "editor.inlineSuggest.enabled": true,
   "editor.inlineSuggest.fontFamily": "SauceCodePro Nerd Font Mono",
+  "editor.guides.bracketPairs": "active",
+  "editor.minimap.enabled": false,
   "editor.minimap.sectionHeaderFontSize": 13.714285714285714,
   "markdown.preview.fontFamily": "Liberation Sans",
   "markdown.preview.fontSize": 21.333333333333332,
   "scm.inputFontFamily": "SauceCodePro Nerd Font Mono",
   "scm.inputFontSize": 19.809523809523807,
   "screencastMode.fontSize": 85.33333333333333,
-  "terminal.integrated.fontSize": 21.333333333333332,
   "workbench.colorTheme": "Tokyo Night",
   "workbench.iconTheme": "vscode-icons",
 
@@ -24,10 +27,14 @@
   "vscode-neovim.compositeKeys": {},
   "keyboard.dispatch": "keyCode",
   "vscode-neovim.useCtrlKeys": true,
+  "vscode-neovim.neovimExecutablePaths.linux": "/run/current-system/sw/bin/nvim",
 
   // ——— Editor ergonomics ———
   "editor.lineNumbers": "relative",
+  "workbench.editor.showTabs": false,
   "workbench.editor.enablePreview": false,
+  "workbench.startupEditor": "none",
+  "workbench.commandCenter": false,
 
   // ——— Copilot / Chat Agent ———
   "chat.agent.enabled": true,
@@ -42,7 +49,23 @@
 
   // ——— Terminal ———
   "terminal.integrated.inheritEnv": true,
-  "terminal.integrated.defaultProfile.linux": "zsh",
+  "terminal.integrated.fontFamily": "SauceCodePro Nerd Font Mono",
+  "terminal.integrated.fontSize": 16,
+  "terminal.integrated.drawBoldTextInBrightColors": false,
+  "terminal.integrated.enableFileLinks": "off",
+  "terminal.integrated.enableMultiLinePasteWarning": false,
+  "terminal.integrated.defaultProfile.linux": "zellij",
+  "terminal.integrated.profiles.linux": {
+    "zellij": {
+      "path": "bash",
+      "args": [
+        "-lc",
+        "zellij-session \"code-${workspaceFolderBasename}\""
+      ]
+    },
+    "opencode": { "path": "opencode" },
+    "codex": { "path": "codex" }
+  },
 
   // ——— Performance ———
   "files.watcherExclude": {
@@ -60,9 +83,14 @@
   "editor.stickyScroll.enabled": true,
   "editor.renderWhitespace": "selection",
   "editor.rulers": [100],
+  "explorer.autoReveal": false,
   "explorer.excludeGitIgnore": true,
   "search.useIgnoreFiles": true,
   "telemetry.telemetryLevel": "off",
+  "update.mode": "manual",
+  "window.titleBarStyle": "custom",
+  "window.openFoldersInNewWindow": "off",
+  "window.restoreWindows": "none",
 
   // ——— Spellcheck (global) ———
   "cSpell.language": "en,pl,pl_PL",

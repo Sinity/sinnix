@@ -9,6 +9,8 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
+DEFAULT_USER = os.environ.get("SINNIX_USER", "sinity")
+
 DEFAULT_ATTRS: Sequence[Tuple[str, str]] = (
     (
         "system",
@@ -16,7 +18,7 @@ DEFAULT_ATTRS: Sequence[Tuple[str, str]] = (
     ),
     (
         "home",
-        "nixosConfigurations.sinnix-prime.config.home-manager.users.sinity.home.packages",
+        f"nixosConfigurations.sinnix-prime.config.home-manager.users.{DEFAULT_USER}.home.packages",
     ),
 )
 

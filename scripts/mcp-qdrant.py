@@ -44,9 +44,8 @@ def _create_client() -> QdrantClient:
 client = _create_client()
 
 mcp = FastMCP(
-    "Local Qdrant",
-    description="Inspect and query the local Qdrant vector store",
-    version="0.1.0",
+    name="Local Qdrant",
+    instructions="Inspect and query the local Qdrant vector store.",
 )
 
 

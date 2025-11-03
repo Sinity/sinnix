@@ -1,6 +1,15 @@
 {
   description = "Sinity's nixos configuration";
 
+  nixConfig = {
+    extra-substituters = [
+      "https://numtide.cachix.org"
+    ];
+    extra-trusted-public-keys = [
+      "numtide.cachix.org-1:2ps1kLBUWjxIneOy1Ik6cQjb41X0iXVXeHigGmycPPE="
+    ];
+  };
+
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     nur.url = "github:nix-community/NUR";
@@ -60,10 +69,8 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Optional Sinex overlay; defaults to a local stub so evaluation works without
-    # access to the private repository. Override with
-    # `nix flake lock --update-input sinex git+ssh://git@github.com/Sinity/sinex`
-    # on machines that have the deploy key.
+    # Private Sinex overlay; intentionally expects SSH access to the upstream
+    # repository so evaluation fails cleanly when the key is missing.
     sinex = {
       url = "git+ssh://git@github.com/Sinity/sinex";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -88,6 +95,11 @@
     # Modern Qt/QML based desktop shell toolkit
     quickshell = {
       url = "git+https://git.outfoxxed.me/outfoxxed/quickshell";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    nix-ai-tools = {
+      url = "github:numtide/nix-ai-tools";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 

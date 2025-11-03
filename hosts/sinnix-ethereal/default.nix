@@ -31,11 +31,10 @@
 
   systemd.services."serial-getty@ttyS0".enable = true;
 
-  home-manager.users.sinity.imports = [
+  sinnix.home.userImports = [
     ../../user/core.nix
-    ../../user/dev/core.nix
-    ../../user/dev/shell.nix
   ];
 
   programs.hyprland.enable = lib.mkForce false;
+  programs.zsh.enable = true;
 }

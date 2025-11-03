@@ -3,7 +3,7 @@
   ...
 }:
 let
-  inherit (lib) types mkOption mkDefault mkIf;
+  inherit (lib) types mkOption;
 in
 {
   options.sinnix = {

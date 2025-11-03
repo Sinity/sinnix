@@ -46,30 +46,95 @@ in
       * {
         font-family: "SauceCodePro Nerd Font Mono", monospace;
         font-weight: 600;
+        font-size: 18px;
       }
+
+      window#waybar {
+        background-color: rgba(18, 19, 24, 0.9);
+        border: 1px solid rgba(160, 175, 205, 0.22);
+        border-radius: 12px;
+        margin: 10px 22px;
+        padding: 10px 16px;
+      }
+
       #waybar .modules-right > widget > * {
-        margin: 0 8px;
+        margin: 0 10px;
       }
+
       #waybar .modules-right > widget:last-child > * {
         margin-right: 0;
       }
+
+      #workspaces button {
+        padding: 4px 10px;
+        margin: 0 4px;
+        border-radius: 8px;
+        border: 1px solid transparent;
+        color: rgba(232, 230, 223, 0.7);
+        background-color: transparent;
+      }
+
+      #workspaces button.focused {
+        color: #8ec07c;
+        border-color: rgba(142, 192, 124, 0.5);
+        background-color: rgba(142, 192, 124, 0.18);
+      }
+
+      #workspaces button.visible:not(.focused) {
+        color: #fbf1c7;
+        background-color: rgba(142, 192, 124, 0.12);
+      }
+
+      #workspaces button.urgent {
+        color: #fb4934;
+        border-color: rgba(251, 73, 52, 0.6);
+        background-color: rgba(251, 73, 52, 0.18);
+      }
+
+      #workspaces button:hover {
+        color: #fbf1c7;
+        border-color: rgba(142, 192, 124, 0.4);
+      }
+
+      #custom-launcher,
+      #cpu,
+      #memory,
+      #disk,
+      #custom-audio,
+      #custom-notification,
+      #tray {
+        background-color: rgba(40, 42, 54, 0.75);
+        border-radius: 10px;
+        border: 1px solid rgba(120, 132, 162, 0.35);
+        padding: 4px 10px;
+      }
+
       #cpu { color: #fb4934; }
       #memory { color: #fabd2f; }
       #disk { color: #b8bb26; }
-      #pulseaudio { color: #83a598; }
-      #pulseaudio.muted { color: #665c54; }
-      #custom-audio-output { color: #83a598; }
-      #custom-audio-output.speaker { color: #83a598; }
-      #custom-audio-output.headphones { color: #d3869b; }
-      #custom-audio-output.bluetooth { color: #8ec07c; }
-      #custom-audio-output.hdmi { color: #fe8019; }
-      #custom-audio-output.monitor { color: #fe8019; }
-      #custom-audio-output.usb { color: #b8bb26; }
+      #custom-audio { color: #83a598; }
+      #custom-audio.muted { color: #665c54; }
+      #custom-audio.headphones { color: #d3869b; }
+      #custom-audio.bluetooth { color: #8ec07c; }
+      #custom-audio.hdmi,
+      #custom-audio.monitor { color: #fe8019; }
+      #custom-audio.usb { color: #b8bb26; }
+
+      #tray button,
+      #tray .item {
+        border-radius: 6px;
+        padding: 2px 4px;
+      }
+
+      #tray button:hover,
+      #tray .item:hover {
+        background-color: rgba(55, 57, 68, 0.9);
+      }
     '';
     settings.mainBar = {
       position = "bottom";
       layer = "top";
-      height = 30;
+      height = 42;
       margin-top = 0;
       margin-bottom = 0;
       margin-left = 0;
@@ -84,12 +149,11 @@ in
         "cpu"
         "memory"
         "disk"
-        "custom/audio-output"
-        "pulseaudio"
+        "custom/audio"
         "custom/notification"
       ];
       clock = {
-        format = "<span font_family='SauceCodePro Nerd Font Mono'>󱑎</span> {:%H:%M}";
+        format = "<span font_family='SauceCodePro Nerd Font Mono'>󱑎</span> {:%a %d · %H:%M}";
         tooltip = "true";
       };
       "hyprland/workspaces" = {
@@ -108,37 +172,37 @@ in
         format = "<span font_family='SauceCodePro Nerd Font Mono'>󰍛</span> {usage}%";
         format-alt = "<span font_family='SauceCodePro Nerd Font Mono'>󰍛</span> {avg_frequency}GHz";
         interval = 2;
+        on-click = "kitty -e btop";
       };
       memory = {
         format = "<span font_family='SauceCodePro Nerd Font Mono'>󰟜</span> {percentage}%";
         format-alt = "<span font_family='SauceCodePro Nerd Font Mono'>󰟜</span> {used}GB";
         interval = 2;
+        on-click = "kitty -e btop";
       };
       disk = {
         format = "<span font_family='SauceCodePro Nerd Font Mono'>󰋊</span> {percentage_used}%";
         interval = 60;
+        on-click = "kitty -e ncdu ~";
       };
       tray = {
         icon-size = 20;
         spacing = 8;
       };
-      "custom/audio-output" = {
+      "custom/audio" = {
         format = "{text}";
         return-type = "json";
         interval = 2;
-        exec = "${audioOutputStatus}/bin/audio-output-status";
         signal = waybarAudioSignal;
+        exec = "${audioOutputStatus}/bin/audio-output-status";
         env = {
           WAYBAR_AUDIO_OUTPUT_SIGNAL = toString waybarAudioSignal;
         };
         on-click = "${audioOutputToggle}/bin/toggle-audio-output";
-        on-click-right = "pwvucontrol";
-      };
-      pulseaudio = {
-        format = "<span font_family='SauceCodePro Nerd Font Mono'>󰕾</span> {volume}%";
-        format-muted = "<span font_family='SauceCodePro Nerd Font Mono'>󰖁</span> MUTED";
-        scroll-step = 5;
-        on-click = "pamixer -t";
+        on-click-right = "pamixer -t";
+        on-scroll-up = "pamixer -i 2";
+        on-scroll-down = "pamixer -d 2";
+        on-click-middle = "pwvucontrol";
       };
       "custom/launcher" = {
         format = "<span font_family='SauceCodePro Nerd Font Mono'>󰀻</span>";

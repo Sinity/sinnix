@@ -1,10 +1,8 @@
 # Host-specific storage configuration for sinnix-prime
 { pkgs, lib, config, ... }:
 let
-  realmRoot = config.sinnix.paths.realmRoot;
-  dataRoot = config.sinnix.paths.dataRoot;
+  inherit (config.sinnix.paths) realmRoot dataRoot outerRealm;
   username = config.sinnix.user.name;
-  outerRealm = config.sinnix.paths.outerRealm;
   swapFileSizeGiB = 32;
 
   prepareSwapfile = pkgs.writeShellApplication {

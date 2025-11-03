@@ -40,9 +40,9 @@ def run(
 
 
 def hyprctl_json(command: str, *command_args: str) -> Any:
-    """Run `hyprctl -j <command>` and parse the JSON output."""
+    """Run `hyprctl <command> ... -j` and parse the JSON output."""
 
-    proc = run(["hyprctl", "-j", command, *command_args], capture=True)
+    proc = run(["hyprctl", command, *command_args, "-j"], capture=True)
     if proc.returncode != 0:
         details = proc.stderr.strip() or proc.stdout.strip()
         raise KittyGridError(f"hyprctl {command} failed: {details}")

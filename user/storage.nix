@@ -1,5 +1,10 @@
-{ pkgs, ... }:
+{
+  pkgs,
+  sinnix,
+  ...
+}:
 let
+  username = sinnix.user.name;
   encryptFolder = pkgs.writeShellScriptBin "encrypt-folder" ''
     #!/usr/bin/env bash
     set -euo pipefail
@@ -18,13 +23,28 @@ let
     fi
 
     mkdir -p "$ENCRYPTED"
+
+    if [ -f "$ENCRYPTED/gocryptfs.conf" ] || find "$ENCRYPTED" -mindepth 1 -print -quit >/dev/null 2>&1; then
+      echo "Error: Encrypted folder already initialised or non-empty"
+      exit 1
+    fi
+
     gocryptfs -init "$ENCRYPTED"
     MOUNT_POINT="/tmp/encrypt-mount-$$"
     mkdir -p "$MOUNT_POINT"
+
+    cleanup() {
+      if mountpoint -q "$MOUNT_POINT"; then
+        fusermount -u "$MOUNT_POINT" || true
+      fi
+      rmdir "$MOUNT_POINT" 2>/dev/null || true
+    }
+    trap cleanup EXIT
+
     gocryptfs "$ENCRYPTED" "$MOUNT_POINT"
     rsync -av --progress "$SOURCE/" "$MOUNT_POINT/"
-    fusermount -u "$MOUNT_POINT"
-    rmdir "$MOUNT_POINT"
+    trap - EXIT
+    cleanup
   '';
 
   decryptFolder = pkgs.writeShellScriptBin "decrypt-folder" ''
@@ -71,11 +91,11 @@ let
     #!/usr/bin/env bash
     set -euo pipefail
     sudo mkdir -p /var/lib/onedrive-auth
-    sudo chown sinity:users /var/lib/onedrive-auth
+    sudo chown ${username}:users /var/lib/onedrive-auth
     sudo chmod 700 /var/lib/onedrive-auth
     if [ ! -f /var/lib/onedrive-auth/config ]; then
       sudo cp -r /etc/onedrive/* /var/lib/onedrive-auth/
-      sudo chown -R sinity:users /var/lib/onedrive-auth/
+      sudo chown -R ${username}:users /var/lib/onedrive-auth/
     fi
     onedrive --confdir /var/lib/onedrive-auth
   '';
@@ -95,6 +115,10 @@ let
   setupGdrive = pkgs.writeShellScriptBin "setup-gdrive" ''
     #!/usr/bin/env bash
     set -euo pipefail
+    if rclone listremotes 2>/dev/null | grep -q '^gdrive:'; then
+      echo "setup-gdrive: remote 'gdrive' already exists" >&2
+      exit 1
+    fi
     rclone config create gdrive drive scope drive
   '';
 

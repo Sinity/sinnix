@@ -13,6 +13,7 @@
   lib,
   dotsPath,
   config,
+  sinnix,
   ...
 }:
 let
@@ -71,6 +72,14 @@ in
     libnotify
     wlr-randr
   ];
+
+  gtk = {
+    enable = true;
+    iconTheme = {
+      package = pkgs.papirus-icon-theme;
+      name = "Papirus-Dark";
+    };
+  };
 
   programs.mullvad-vpn = {
     enable = true;
@@ -250,7 +259,15 @@ in
         source = dotsPath + "/Kvantum";
         recursive = true;
       };
-      "transmission/settings.json".source = dotsPath + "/transmission/settings.json";
+      "transmission/settings.json".text =
+        let
+          torrentInbox = sinnix.paths.torrentInbox;
+          baseSettings = builtins.readFile (dotsPath + "/transmission/settings.json");
+        in
+        lib.replaceStrings
+          [ "/home/sinity/Downloads" "/home/sinity" ]
+          [ torrentInbox config.home.homeDirectory ]
+          baseSettings;
       "autostart/mullvad-vpn.desktop".text = ''
         [Desktop Entry]
         Type=Application

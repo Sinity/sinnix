@@ -68,9 +68,11 @@
         "Authorization": "Bearer {env:GITHUB_TOKEN}"
       }
     },
-    "prisma-postgres": {
-      "type": "remote",
-      "url": "https://mcp.prisma.io/mcp"
+    "postgres-local": {
+      "type": "local",
+      "command": [
+        "/home/sinity/.local/bin/mcp-postgres"
+      ]
     },
     "playwright": {
       "type": "local",
@@ -101,8 +103,7 @@
     "qdrant": {
       "type": "local",
       "command": [
-        "python3",
-        "/realm/sinnix/scripts/mcp-qdrant.py"
+        "/home/sinity/.local/bin/mcp-qdrant"
       ],
       "environment": {
         "QDRANT_URL": "http://127.0.0.1:6333"

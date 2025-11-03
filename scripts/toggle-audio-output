@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-default_signal="12"
-signal="${WAYBAR_AUDIO_OUTPUT_SIGNAL:-$default_signal}"
-
 inspect=$(wpctl inspect @DEFAULT_AUDIO_SINK@ 2>/dev/null || true)
 if [[ -z "$inspect" ]]; then
   exit 1
@@ -41,4 +38,7 @@ for stream in "${streams[@]}"; do
   wpctl set-target "$stream" "$next" || true
 done
 
-pkill -RTMIN+"$signal" waybar 2>/dev/null || true
+# Allow the status bar to poll for the new sink; Waybar refreshes every couple seconds.
+if command -v pkill >/dev/null 2>&1; then
+  pkill -RTMIN+12 waybar || true
+fi

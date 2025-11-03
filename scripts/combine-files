@@ -49,6 +49,8 @@ while true; do
     --) shift; break ;;
     *) break ;;
   esac
+done
+
 detailed_args=("$@")
 
 if [[ ! -d "$directory" ]]; then

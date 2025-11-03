@@ -1,6 +1,13 @@
 {
+  config,
+  ...
+}:
+let
+  homeDir = config.home.homeDirectory;
+in
+{
   home.sessionVariables = {
-    BROWSER = "google-chrome";
+    BROWSER = "qutebrowser";
     TERM = "kitty";
     TERMINAL = "kitty";
 
@@ -31,8 +38,8 @@
     NIXPKGS_ALLOW_UNFREE = "1";
     WINEDLLOVERRIDES = "winemenubuilder.exe=d";
 
-    SESSION_HISTORY_FILE = "/home/sinity/.zsh_history";
-    SESSION_CODEX_LOG = "/home/sinity/.codex/log/codex-tui.log";
-    SESSION_CODEX_LOG_DIR = "/home/sinity/.codex/sessions";
+    SESSION_HISTORY_FILE = "${homeDir}/.zsh_history";
+    SESSION_CODEX_LOG = "${homeDir}/.codex/log/codex-tui.log";
+    SESSION_CODEX_LOG_DIR = "${homeDir}/.codex/sessions";
   };
 }

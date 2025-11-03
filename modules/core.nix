@@ -6,7 +6,7 @@
 }:
 let
   username = config.sinnix.user.name;
-  paths = config.sinnix.paths;
+  inherit (config.sinnix) paths;
 in
 {
   config = {
@@ -115,10 +115,17 @@ in
       ];
     };
 
-    systemd.tmpfiles.rules = lib.mkAfter [
-      "d ${paths.outerRealm}/inbox 0755 ${username} users -"
-      "d ${paths.dataRoot} 0755 ${username} users -"
-      "d ${paths.dataRoot}/screenshot 0755 ${username} users -"
-    ];
+    systemd.tmpfiles.rules =
+      lib.mkAfter (
+        [
+          "d ${paths.outerRealm}/inbox 0755 ${username} users -"
+          "d ${paths.dataRoot} 0755 ${username} users -"
+          "d ${paths.dataRoot}/screenshot 0755 ${username} users -"
+          "d ${paths.dataRoot}/screenshot/mpv 0755 ${username} users -"
+        ]
+        ++ lib.optional (paths.realmRoot or "" == "/realm") "d /realm/inbox 0755 ${username} users -"
+        ++ lib.optional (paths.dataRoot == "/realm/data") "d /realm/data/screenshot 0755 ${username} users -"
+        ++ lib.optional (paths.dataRoot == "/realm/data") "d /realm/data/screenshot/mpv 0755 ${username} users -"
+      );
   };
 }

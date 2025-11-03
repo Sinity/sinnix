@@ -7,6 +7,14 @@
 }:
 let
   username = config.sinnix.user.name;
+  userCfg = lib.attrByPath [ "users" "users" username ] config { };
+  userUid =
+    if userCfg ? uid then builtins.toString userCfg.uid else "1000";
+  primaryGroupName =
+    if userCfg ? group then userCfg.group else "users";
+  groupCfg = lib.attrByPath [ "users" "groups" primaryGroupName ] config { };
+  primaryGroupId =
+    if groupCfg ? gid then builtins.toString groupCfg.gid else "100";
   nextcloudCert = builtins.readFile "${inputs.self}/assets/nextcloud-cert.crt";
   baseStoragePackages = with pkgs; [
     davfs2
@@ -80,65 +88,79 @@ in
 
   systemd.tmpfiles.rules = lib.mkAfter [
     "d /mnt/nextcloud 0755 root root -"
-    "d /mnt/gdrive 0755 ${username} users -"
-    "d /var/lib/onedrive 0755 ${username} users -"
+    "d /mnt/gdrive 0755 ${username} ${primaryGroupName} -"
+    "d /var/lib/onedrive 0755 ${username} ${primaryGroupName} -"
     "L /mnt/onedrive - - - - /var/lib/onedrive"
-    "d /var/lib/onedrive-auth 0700 ${username} users -"
+    "d /var/lib/onedrive-auth 0700 ${username} ${primaryGroupName} -"
   ];
 
-  systemd.services = {
-    onedrive-sync = {
-      description = "OneDrive Selective Synchronization";
-      after = [ "network-online.target" ];
-      wants = [ "network-online.target" ];
-      wantedBy = [ "multi-user.target" ];
-      enable = true;
-      serviceConfig = {
-        Type = "simple";
-        User = username;
-        Group = "users";
-        ExecStart = "${pkgs.writeShellScript "onedrive-sync-service" ''
-          set -euo pipefail
+  systemd.services =
+    let
+      ensureOnedriveState = pkgs.writeShellScript "onedrive-sync-setup" ''
+        set -euo pipefail
 
-          if [ ! -d /var/lib/onedrive-auth ]; then
-            mkdir -p /var/lib/onedrive-auth
-            chown ${username}:users /var/lib/onedrive-auth
-            chmod 700 /var/lib/onedrive-auth
+        data_dir=/var/lib/onedrive
+        auth_dir=/var/lib/onedrive-auth
+
+        install -d -m755 -o ${username} -g ${primaryGroupName} "$data_dir"
+        install -d -m700 -o ${username} -g ${primaryGroupName} "$auth_dir"
+
+        if [ ! -f "$auth_dir/config" ]; then
+          if [ -d /etc/onedrive ]; then
+            cp -r /etc/onedrive/. "$auth_dir"/
           fi
+          chown -R ${username}:${primaryGroupName} "$auth_dir"
+        fi
+      '';
 
-          if [ ! -f /var/lib/onedrive-auth/config ]; then
-            cp -r /etc/onedrive/* /var/lib/onedrive-auth/ || true
-            chown -R ${username}:users /var/lib/onedrive-auth/
+      launchOnedrive = pkgs.writeShellScript "onedrive-sync-service" ''
+        set -euo pipefail
+
+        auth_dir=/var/lib/onedrive-auth
+
+        warned=0
+        while [ ! -f "$auth_dir/refresh_token" ]; do
+          if [ "$warned" -eq 0 ]; then
+            echo "onedrive-sync: waiting for $auth_dir/refresh_token (run 'onedrive-auth' to authorise)" >&2
+            warned=1
           fi
+          sleep 30
+        done
 
-          warned=0
-          while [ ! -f /var/lib/onedrive-auth/refresh_token ]; do
-            if [ "$warned" -eq 0 ]; then
-              echo "onedrive-sync: waiting for /var/lib/onedrive-auth/refresh_token (run 'onedrive-auth' to authorise)" >&2
-              warned=1
-            fi
-            sleep 30
-          done
-
-          exec ${pkgs.onedrive}/bin/onedrive --monitor --confdir /var/lib/onedrive-auth
-        ''}";
-        Restart = "on-failure";
-        RestartSec = 3;
-        ReadWritePaths = [
-          "/var/lib/onedrive"
-          "/var/lib/onedrive-auth"
-        ];
+        exec ${pkgs.onedrive}/bin/onedrive --monitor --confdir "$auth_dir"
+      '';
+    in
+    {
+      onedrive-sync = {
+        description = "OneDrive Selective Synchronization";
+        after = [ "network-online.target" ];
+        wants = [ "network-online.target" ];
+        wantedBy = [ "multi-user.target" ];
+        enable = true;
+        serviceConfig = {
+          Type = "simple";
+          User = username;
+          Group = primaryGroupName;
+          PermissionsStartOnly = true;
+          ExecStartPre = [ ensureOnedriveState ];
+          ExecStart = launchOnedrive;
+          Restart = "on-failure";
+          RestartSec = 3;
+          ReadWritePaths = [
+            "/var/lib/onedrive"
+            "/var/lib/onedrive-auth"
+          ];
+        };
       };
-    };
 
-    gdrive-mount = {
+      gdrive-mount = {
       enable = false;
     };
   };
 
   system.activationScripts.fixRclonePermissions.text = ''
     if [ -f /home/${username}/.config/rclone/rclone.conf ]; then
-      chown ${username}:users /home/${username}/.config/rclone /home/${username}/.config/rclone/rclone.conf 2>/dev/null || true
+      chown ${username}:${primaryGroupName} /home/${username}/.config/rclone /home/${username}/.config/rclone/rclone.conf 2>/dev/null || true
       chmod 600 /home/${username}/.config/rclone/rclone.conf 2>/dev/null || true
     fi
   '';
@@ -152,8 +174,8 @@ in
       "x-systemd.automount"
       "x-systemd.idle-timeout=600"
       "_netdev"
-      "uid=1000"
-      "gid=100"
+      "uid=${userUid}"
+      "gid=${primaryGroupId}"
       "dir_mode=0755"
       "file_mode=0644"
     ];

@@ -1,7 +1,7 @@
 { lib, config, ... }:
 let
   username = config.sinnix.user.name;
-  inherit (config.sinnix.paths) dataRoot mediaRoot;
+  inherit (config.sinnix.paths) mediaRoot;
   mediaDir = mediaRoot;
 in
 {
@@ -48,5 +48,6 @@ in
     services.photoprism.serviceConfig.LoadCredential = lib.mkForce [
       "PHOTOPRISM_ADMIN_PASSWORD_FILE:${config.sinnix.secrets.paths.photoprism-admin-password}"
     ];
+    services.photoprism.unitConfig.RequiresMountsFor = [ mediaDir ];
   };
 }

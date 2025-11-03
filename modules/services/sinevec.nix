@@ -6,7 +6,7 @@
   ...
 }:
 let
-  dataRoot = config.sinnix.paths.dataRoot;
+  inherit (config.sinnix.paths) dataRoot;
   sinevecDataDir = "${dataRoot}/sinevec";
   sinevecStateDir = "${sinevecDataDir}/state";
   sinevecLogDir = "${sinevecDataDir}/logs";
@@ -54,6 +54,7 @@ in
       ];
       RuntimeDirectory = "sinevec";
     };
+    unitConfig.RequiresMountsFor = [ dataRoot ];
     environment = {
       SINEVEC_DATA_ROOT = dataRoot;
       SINEVEC_STATE_DIR = sinevecStateDir;

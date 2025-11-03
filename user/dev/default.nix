@@ -8,5 +8,7 @@
     ./starship.nix
     ./htop.nix
     ./tools.nix
+    ./zellij.nix
+    ./zed.nix
   ];
 }

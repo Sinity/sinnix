@@ -37,7 +37,7 @@
         check = mkApp "check" ''
           flake_dir="''${PRJ_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
           echo "Checking NixOS configuration at $flake_dir..."
-          ${pkgs.nix}/bin/nix flake check --no-build "$flake_dir"
+          ${pkgs.nix}/bin/nix flake check "$flake_dir"
           echo "Configuration check complete!"
         '' "Validate NixOS configuration syntax and structure";
 
@@ -62,7 +62,12 @@
 
           echo "Running shellcheck on shell helpers..."
           ${pkgs.fd}/bin/fd -t f -e sh -x ${pkgs.shellcheck}/bin/shellcheck {}
-          ${pkgs.fd}/bin/fd -t f -g 'scripts/*' -x ${pkgs.shellcheck}/bin/shellcheck {}
+          shellcheck_targets="$(${pkgs.ripgrep}/bin/rg -Il '^#!.*\\b(bash|sh|zsh)\\b' scripts || true)"
+          if [ -n "$shellcheck_targets" ]; then
+            while IFS= read -r target; do
+              [ -n "$target" ] && ${pkgs.shellcheck}/bin/shellcheck "$target"
+            done <<<"$shellcheck_targets"
+          fi
 
           echo "Linting complete!"
         '' "Lint Nix and shell files without modifying sources";

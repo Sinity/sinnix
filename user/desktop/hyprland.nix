@@ -142,10 +142,6 @@ in
     ".config/idea-session/base-agents.md" = {
       source = asset "session/base-agents.md";
     };
-    ".local/bin/toggle-waybar" = {
-      source = script "toggle-waybar";
-      executable = true;
-    };
     ".local/bin/rawlog" = {
       source = script "rawlog";
       executable = true;
@@ -156,6 +152,10 @@ in
     };
     ".local/bin/rawlog-capture" = {
       source = script "rawlog-capture";
+      executable = true;
+    };
+    ".local/bin/kitty-grid" = {
+      source = script "kitty-grid";
       executable = true;
     };
     ".local/bin/rawlog-capture-session" = {

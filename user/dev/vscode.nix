@@ -1,4 +1,4 @@
-{ pkgs, inputs, ... }:
+{ pkgs, inputs, dotsPath, ... }:
 let
   pkgsWithMarketplace = pkgs.extend inputs.nix-vscode-extensions.overlays.default;
   marketplace = pkgsWithMarketplace.nix-vscode-extensions.vscode-marketplace;
@@ -30,7 +30,20 @@ in
           marketplace.yzhang.markdown-all-in-one
           marketplace.streetsidesoftware.code-spell-checker
           marketplace.serayuzgur.crates
+          marketplace."sst-dev".opencode
+          marketplace.xiangz19.codex-ratelimit
         ];
+    };
+  };
+
+  xdg.configFile = {
+    "Code/User/settings.json".source = dotsPath + "/vscode/User/settings.json";
+    "Code/User/keybindings.json".source = dotsPath + "/vscode/User/keybindings.json";
+    "Code/User/mcp.json".source = dotsPath + "/vscode/User/mcp.json";
+    "Code/User/mcp" = {
+      source = dotsPath + "/vscode/User/mcp";
+      recursive = true;
+      force = true;
     };
   };
 

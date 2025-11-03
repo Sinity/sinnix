@@ -9,6 +9,13 @@
 let
   username = sinnix.user.name;
   flakePath = "${inputs.self}";
+  hasSecrets = secretsExportScript != "";
+  secretsProfilePath = ".config/profile.d/agenix-secrets.sh";
+  secretsSourceSnippet = ''if [ -f "$HOME/${secretsProfilePath}" ]; then . "$HOME/${secretsProfilePath}"; fi'';
+  secretsScript = lib.optionalString hasSecrets ''
+    # shellcheck shell=bash
+${secretsExportScript}
+  '';
 in
 {
   home = {
@@ -43,21 +50,38 @@ in
         graphicsmagick
       ]
     );
-  };
 
-  programs.zsh = {
-    initContent = lib.mkMerge [
-      (lib.mkBefore ''
-        load_secrets() {
-          ${lib.optionalString (secretsExportScript != "") secretsExportScript}
-        }
-        load_secrets || true
-      '')
-    ];
-    shellAliases = {
-      load-secrets = "load_secrets";
+    file."${secretsProfilePath}" = lib.mkIf hasSecrets {
+      text = secretsScript;
     };
   };
+
+  programs =
+    {
+      zsh = {
+        initContent = lib.mkMerge [
+          (lib.mkBefore (lib.optionalString hasSecrets ''
+${secretsSourceSnippet}
+          ''))
+        ];
+        shellAliases = lib.optionalAttrs hasSecrets {
+          load-secrets = secretsSourceSnippet;
+        };
+      };
+
+      home-manager.enable = true;
+    }
+    // lib.optionalAttrs hasSecrets {
+      bash = {
+        enable = true;
+        bashrcExtra = ''
+${secretsSourceSnippet}
+        '';
+        profileExtra = ''
+${secretsSourceSnippet}
+        '';
+      };
+    };
 
   nix.gc = {
     automatic = true;
@@ -65,5 +89,4 @@ in
     options = "--delete-older-than 30d";
   };
 
-  programs.home-manager.enable = true;
 }

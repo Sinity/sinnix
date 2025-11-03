@@ -56,14 +56,13 @@ and keep ownership with that module.
 
 ## Sinex Service
 
-- `modules/services/sinex.nix` ships a full, resource-heavy configuration that
-  stays disabled by default.  It sets aggressive defaults for database tuning,
-  blob storage, monitoring, security, and a wide range of event sources.
-- Enabling the service from the host automatically prepares the working
-  directories (`/realm/data/sinex` hierarchy) and exposes the CLI utilities.
-- The configuration assumes PostgreSQL 16 with optional extensions
-  (`pg_trgm`, `pg_jsonschema`, `pg_stat_statements`) and keeps update,
-  preflight, and monitoring subsystems ready for when the service is toggled on.
+- `modules/services/sinex.nix` now simply fixes a handful of local defaults
+  (data root under `/realm/data/sinex`, `database.autoSetup = true`, desktop
+  filesystem watch roots). All of the heavy wiring continues to come from the
+  upstream Sinex module.
+- The host still chooses when to enable the service; toggling it on prepares
+  the working directories and exposes the CLI binaries exactly as the upstream
+  module expects.
 
 ## Workflow Expectations
 

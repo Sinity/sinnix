@@ -1,7 +1,7 @@
 { lib, pkgs, config, ... }:
 let
   username = config.sinnix.user.name;
-  dataRoot = config.sinnix.paths.dataRoot;
+  inherit (config.sinnix.paths) dataRoot;
   qdrantDataDir = "${dataRoot}/qdrant";
 in
 {
@@ -54,6 +54,7 @@ in
           "${qdrantDataDir}/snapshots"
         ];
       };
+      unitConfig.RequiresMountsFor = [ qdrantDataDir ];
     };
 
     tmpfiles.rules = lib.mkBefore [

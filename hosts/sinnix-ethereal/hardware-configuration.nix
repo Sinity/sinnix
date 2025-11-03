@@ -21,13 +21,8 @@
   };
 
   fileSystems."/" = {
-    device = lib.mkDefault "/dev/disk/by-partlabel/disk-vda-root";
+    device = lib.mkDefault "/dev/disk/by-label/nixos-root";
     fsType = "ext4";
-  };
-
-  fileSystems."/boot" = {
-    device = lib.mkDefault "/dev/disk/by-partlabel/disk-vda-ESP";
-    fsType = "vfat";
   };
 
   swapDevices = [ ];

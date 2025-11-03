@@ -30,6 +30,22 @@ fi
 
 lowered=$(printf '%s' "$label" | tr '[:upper:]' '[:lower:]')
 
+status=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null || true)
+volume_raw=""
+muted="false"
+if [[ -n "$status" ]]; then
+  volume_raw=$(printf '%s\n' "$status" | awk '{for (i=1; i<=NF; i++) if ($i ~ /^[0-9.]+$/) {print $i; exit}}')
+  if printf '%s\n' "$status" | grep -q '\[MUTED\]'; then
+    muted="true"
+  fi
+fi
+
+if [[ -z "$volume_raw" ]]; then
+  volume_raw="0"
+fi
+
+percent=$(awk -v vol="$volume_raw" 'BEGIN {printf "%.0f", vol * 100 }')
+
 icon="󰓃"
 class="speaker"
 
@@ -57,6 +73,29 @@ tooltip="$label"
 if [[ -n "$device" && "$device" != "$label" ]]; then
   tooltip="$label"$'\n'"$device"
 fi
+display="$label"
+case "$lowered" in
+  *"xm4"*) display="XM4" ;;
+  *"xm5"*) display="XM5" ;;
+  *"headphone"*|*"headset"*) display="Headphones" ;;
+  *"bluetooth"*) display="Bluetooth" ;;
+  *"speaker"*|*"monitor"*|*"display"*) display="Speakers" ;;
+  *"dac"*|*"usb"*) display="DAC" ;;
+esac
 
-text_output="$icon"
-jq -n --arg text "$text_output" --arg tooltip "$tooltip" --arg class "$class" '{text:$text, tooltip:$tooltip, class:$class}'
+display=$(printf '%s' "$display" | awk '{print $1}')
+
+if [[ "$muted" == "true" ]]; then
+  icon="󰖁"
+  class="$class muted"
+fi
+
+text_output="$icon ${percent}% · $display"
+
+jq -nc \
+  --arg text "$text_output" \
+  --arg tooltip "$tooltip" \
+  --arg class "$class" \
+  --arg volume "$percent" \
+  --arg muted "$muted" \
+  '{text:$text, tooltip:$tooltip, class:$class, volume:($volume|tonumber), muted:($muted == "true")}'

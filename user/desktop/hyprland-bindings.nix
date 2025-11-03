@@ -58,7 +58,12 @@ in
     "SUPER SHIFT, P, pin"
 
     "SUPER, C, exec, ${pkgs.bash}/bin/bash -lc 'command -v code >/dev/null && code --reuse-window || codium --reuse-window'"
-    "SUPER, G, exec, google-chrome"
+    "SUPER, B, exec, qutebrowser --target window"
+    "SUPER SHIFT, B, exec, qutebrowser --target window"
+    "SUPER, G, togglegroup"
+    "SUPER SHIFT, G, exec, ${script "kitty-grid"}"
+    "SUPER CTRL, G, exec, ${script "kitty-grid"} --grid 3x3"
+    "SUPER SHIFT, C, exec, ${script "kitty-grid"} --class qutebrowser --grid 3x2 --arrange-only"
     "SUPER SHIFT, N, exec, ~/.local/bin/kb-capture"
     "SUPER, W, exec, kitty --class session-menu --title SessionMenu -e idea-session menu"
     "SUPER SHIFT, W, exec, kitty --class session-menu --title SessionNew -e idea-session new"
@@ -69,6 +74,11 @@ in
     ",XF86AudioPrev, exec, playerctl previous && notify-send -t 1000 '♪ Previous' '$(playerctl metadata title 2>/dev/null || echo \"Unknown\")'"
     ",XF86AudioRaiseVolume, exec, pamixer -i 2"
     ",XF86AudioLowerVolume, exec, pamixer -d 2"
+
+    "SUPER, Tab, changegroupactive, f"
+    "SUPER SHIFT, Tab, changegroupactive, b"
+    "SUPER, T, togglegroup"
+    "SUPER SHIFT, T, lockactivegroup, toggle"
 
     "SUPER CTRL, H, exec, ${script "kitty-hypr-nav"} resize left"
     "SUPER CTRL, L, exec, ${script "kitty-hypr-nav"} resize right"

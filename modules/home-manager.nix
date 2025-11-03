@@ -22,8 +22,10 @@
       secretsExportScript = config.sinnix.secrets.exportScript;
       dotsPath = "${inputs.self}/dots";
       secretPaths = config.sinnix.secrets.paths;
-      sinnix = config.sinnix;
+      inherit (config) sinnix;
     };
-    users.sinity.imports = config.sinnix.home.userImports;
+    users."${config.sinnix.user.name}" = {
+      imports = config.sinnix.home.userImports;
+    };
   };
 }

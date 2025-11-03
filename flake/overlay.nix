@@ -38,8 +38,7 @@ in
           path = ../patches/hyprland;
           name = "sinnix-hyprland-patches";
         };
-        hyprlandPatch =
-          name: builtins.toPath "${hyprlandPatches}/${name}";
+        hyprlandPatch = name: hyprlandPatches + "/${name}";
         pgJsonschemaFor =
           postgresql:
           prev.buildPgrxExtension (

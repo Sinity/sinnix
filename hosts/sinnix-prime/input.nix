@@ -7,8 +7,7 @@
   ...
 }:
 let
-  realmRoot = config.sinnix.paths.realmRoot;
-  dataRoot = realmRoot;
+  keylogRoot = "${config.sinnix.paths.dataRoot}/keylog";
   username = config.sinnix.user.name;
   interceptTools = pkgs.interception-tools;
   capsPlugin = pkgs.interception-tools-plugins.caps2esc;
@@ -27,11 +26,11 @@ let
   scribeCmd = lib.escapeShellArgs [
     "${scribePkg}/bin/scribe-tap"
     "--data-dir"
-    "${realmRoot}/data/keylog"
+    "${keylogRoot}"
     "--log-dir"
-    "${realmRoot}/data/keylog/logs"
+    "${keylogRoot}/logs"
     "--snapshot-dir"
-    "${realmRoot}/data/keylog/snapshots"
+    "${keylogRoot}/snapshots"
     "--log-mode"
     "both"
     "--context"
@@ -118,9 +117,9 @@ in
 
   systemd = {
     tmpfiles.rules = [
-      "d ${dataRoot}/data/keylog 0700 ${username} users -"
-      "d ${dataRoot}/data/keylog/logs 0700 ${username} users -"
-      "d ${dataRoot}/data/keylog/snapshots 0700 ${username} users -"
+      "d ${keylogRoot} 0700 ${username} users -"
+      "d ${keylogRoot}/logs 0700 ${username} users -"
+      "d ${keylogRoot}/snapshots 0700 ${username} users -"
     ];
 
     user = {
@@ -156,5 +155,18 @@ in
         wantedBy = [ "timers.target" ];
       };
     };
+  };
+
+  systemd.services.interception-tools = {
+    unitConfig.RequiresMountsFor = [ keylogRoot ];
+    serviceConfig.ExecStartPre = [
+      (pkgs.writeShellScript "interception-tools-init" ''
+        #!/usr/bin/env bash
+        set -euo pipefail
+        install -d -m700 -o ${username} -g users "${keylogRoot}"
+        install -d -m700 -o ${username} -g users "${keylogRoot}/logs"
+        install -d -m700 -o ${username} -g users "${keylogRoot}/snapshots"
+      '')
+    ];
   };
 }

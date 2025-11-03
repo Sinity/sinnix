@@ -1,8 +1,0 @@
-[notebooks.default]
-path = "/realm/knowledgebase"
-default = true
-
-[lsp.diagnostics]
-dead-link = "error"
-wiki-title = "hint"
-

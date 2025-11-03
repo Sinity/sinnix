@@ -4,9 +4,11 @@
   inputs,
   dotsPath,
   secretPaths,
+  config,
   ...
 }:
 let
+  homeDir = config.home.homeDirectory;
   mcpPython = pkgs.python3.withPackages (ps: [ ps.fastmcp ps.qdrant-client ps.psycopg ]);
   mcpQdrantBin = pkgs.writeShellScriptBin "mcp-qdrant" ''
     exec ${mcpPython}/bin/python3 ${inputs.self}/scripts/mcp-qdrant.py "$@"
@@ -135,20 +137,27 @@ in
   };
 
   xdg.configFile = {
-    ".codex/config.toml".source = dotsPath + "/codex/config.toml";
+    ".codex/config.toml".text =
+      lib.replaceStrings
+        [ "/home/sinity" ]
+        [ homeDir ]
+        (builtins.readFile (dotsPath + "/codex/config.toml"));
 
-    "opencode/opencode.json".source = dotsPath + "/opencode/opencode.json";
+    "opencode/opencode.json".text =
+      lib.replaceStrings
+        [ "/home/sinity" ]
+        [ homeDir ]
+        (builtins.readFile (dotsPath + "/opencode/opencode.json"));
 
-    "sqlitebrowser/sqlitebrowser.conf".source = dotsPath + "/sqlitebrowser/sqlitebrowser.conf";
+    "sqlitebrowser/sqlitebrowser.conf".text =
+      lib.replaceStrings
+        [ "/home/sinity" ]
+        [ homeDir ]
+        (builtins.readFile (dotsPath + "/sqlitebrowser/sqlitebrowser.conf"));
 
     "ripgrep-all/config.jsonc".source = dotsPath + "/ripgrep-all/config.jsonc";
 
     "marimo/marimo.toml".source = dotsPath + "/marimo/marimo.toml";
-
-    "sinex" = {
-      source = dotsPath + "/sinex";
-      recursive = true;
-    };
   };
 
   home.file = {

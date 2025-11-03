@@ -1,5 +1,5 @@
 # Pyprland - Advanced scratchpad management for Hyprland
-{ pkgs, inputs, ... }:
+{ pkgs, inputs, lib, config, ... }:
 let
   pyprlandCleanup = pkgs.writeShellScript "pyprland-sock-cleanup" ''
     set -eu
@@ -27,14 +27,18 @@ in
       TimeoutStopSec = 5;
       ExecStartPre = pyprlandCleanup;
       RuntimeDirectory = "pyprland";
-      RuntimeDirectoryMode = "0755";
+      RuntimeDirectoryMode = "0700";
     };
     Install = {
       WantedBy = [ "graphical-session.target" ];
     };
   };
 
-  xdg.configFile."hypr/pyprland.toml".text = builtins.readFile "${inputs.self}/assets/pyprland.toml";
+  xdg.configFile."hypr/pyprland.toml".text =
+    lib.replaceStrings
+      [ "/home/sinity" ]
+      [ config.home.homeDirectory ]
+      (builtins.readFile "${inputs.self}/assets/pyprland.toml");
 
   home.packages = [ pkgs.pyprland ];
 }

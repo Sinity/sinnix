@@ -1,4 +1,4 @@
-{ lib, pkgs, sinnix, ... }:
+{ lib, pkgs, sinnix, config, ... }:
 let
   username = sinnix.user.name;
 in
@@ -156,7 +156,7 @@ in
         dsize = "du -hs";
         open = "xdg-open";
         cl = "~/.claude/local/node_modules/.bin/claude";
-        claude = "~/.claude/local/node_modules/.bin/claude --add-dir /realm /home/sinity";
+        claude = "~/.claude/local/node_modules/.bin/claude --add-dir /realm ${config.home.homeDirectory}";
         nvim = "nvim --listen /tmp/nvim-$$";
         ccm = "ccmonitor --refresh-rate 1 --refresh-per-second 20";
         ccm-attach = "zellij attach ccusage-monitor";

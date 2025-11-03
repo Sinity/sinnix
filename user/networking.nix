@@ -10,7 +10,7 @@ in
   ]
   ++ (with pkgs; [
     qutebrowser
-    tor-browser-bundle-bin
+    tor-browser
     firefox
     weechat
     curl

@@ -18,13 +18,12 @@ from psycopg.rows import dict_row
 from mcp.server.fastmcp import FastMCP
 
 
-DEFAULT_DSN = "postgresql:///sinex?host=/run/postgresql&user=sinity"
+DEFAULT_DSN = "postgresql:///sinex?host=/run/postgresql"
 MCP_POSTGRES_DSN = os.environ.get("MCP_POSTGRES_DSN", DEFAULT_DSN)
 
 mcp = FastMCP(
-    "Local PostgreSQL",
-    description="Inspect and query the local PostgreSQL instance",
-    version="0.1.0",
+    name="Local PostgreSQL",
+    instructions="Inspect and query the local PostgreSQL instance.",
 )
 
 
