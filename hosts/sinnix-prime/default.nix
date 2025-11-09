@@ -11,4 +11,7 @@
     ../../modules/services/sinevec.nix
     ../../modules/services/sinex.nix
   ];
+
+  networking.hostName = "sinnix-prime";
+  sinnix.machine.isDesktop = true;
 }

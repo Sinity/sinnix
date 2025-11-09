@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+require() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    notify-send "research-capture" "Missing dependency: $1"
+    exit 1
+  fi
+}
+
+require single-file
+require jq
+require curl
+
+fifo="${QUTE_FIFO:-}"
+url="${QUTE_URL:-}"
+title="${QUTE_TITLE:-}"
+
+if [[ -z "${url}" ]]; then
+  notify-send "research-capture" "No page URL detected."
+  exit 0
+fi
+
+timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+base_dir="${RESEARCH_CAPTURE_DIR:-${HOME}/archive/research}"
+mkdir -p "${base_dir}"
+
+snapshot="${base_dir}/${timestamp}.html"
+log_file="${base_dir}/captures.log"
+
+single-file "${url}" --output "${snapshot}"
+
+if [[ -p "${fifo}" ]]; then
+  printf 'open -w https://web.archive.org/save/%s\n' "${url}" >> "${fifo}"
+  printf 'open -w https://archive.today/?run=1&url=%s\n' "${url}" >> "${fifo}"
+fi
+
+if [[ -n "${RAINDROP_TOKEN:-}" ]]; then
+  payload=$(
+    jq -n \
+      --arg link "${url}" \
+      --arg title "${title:-${url}}" \
+      --arg note "${snapshot}" \
+      '{
+        link: $link,
+        title: $title,
+        tags: ["qutebrowser", "research"],
+        please_parse: true,
+        note: ("Snapshot: " + $note)
+      }'
+  )
+  curl -fsS \
+    -H "Authorization: Bearer ${RAINDROP_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -X POST \
+    -d "${payload}" \
+    "https://api.raindrop.io/rest/v1/raindrop" >/dev/null 2>&1 || true
+fi
+
+printf "%s\t%s\t%s\n" "${timestamp}" "${url}" "${snapshot}" >> "${log_file}"
+
+notify-send "research-capture" "Snapshot saved → ${snapshot}"

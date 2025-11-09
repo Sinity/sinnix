@@ -4,7 +4,16 @@ set -euo pipefail
 # Quick append-only logger for knowledgebase raw-log
 # Usage: rawlog [message...]
 
-KB_ROOT=${KB_ROOT:-/realm/knowledgebase}
+DEFAULT_REALM_ROOT=${REALM_ROOT:-/realm}
+if [ -z "${KB_ROOT:-}" ]; then
+  for candidate in "${DEFAULT_REALM_ROOT}/knowledgebase" "$HOME/knowledgebase"; do
+    if [ -d "$candidate" ]; then
+      KB_ROOT="$candidate"
+      break
+    fi
+  done
+fi
+KB_ROOT=${KB_ROOT:-${DEFAULT_REALM_ROOT}/knowledgebase}
 LOG_DIR="$KB_ROOT/50_logs"
 LOG_FILE="$LOG_DIR/raw-log.md"
 PICKER=${PICKER:-tofi}

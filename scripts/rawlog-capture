@@ -5,7 +5,16 @@ set -euo pipefail
 # Renders recent entries, collects a new note via gum, then
 # forwards to the core rawlog appender.
 
-KB_ROOT=${KB_ROOT:-/realm/knowledgebase}
+DEFAULT_REALM_ROOT=${REALM_ROOT:-/realm}
+if [ -z "${KB_ROOT:-}" ]; then
+  for candidate in "${DEFAULT_REALM_ROOT}/knowledgebase" "$HOME/knowledgebase"; do
+    if [ -d "$candidate" ]; then
+      KB_ROOT="$candidate"
+      break
+    fi
+  done
+fi
+KB_ROOT=${KB_ROOT:-${DEFAULT_REALM_ROOT}/knowledgebase}
 RAWLOG_BIN=${RAWLOG_BIN:-$HOME/.local/bin/rawlog}
 CANCEL_CODE=${RAWLOG_CANCEL_CODE:-130}
 GUM_WIDTH=${GUM_WIDTH:-80}

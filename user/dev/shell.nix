@@ -156,7 +156,7 @@ in
         dsize = "du -hs";
         open = "xdg-open";
         cl = "~/.claude/local/node_modules/.bin/claude";
-        claude = "~/.claude/local/node_modules/.bin/claude --add-dir /realm ${config.home.homeDirectory}";
+        claude = ''REALM_DIR="${sinnix.paths.realmRoot}"; if [ -d "$REALM_DIR" ]; then ~/.claude/local/node_modules/.bin/claude --add-dir "$REALM_DIR" ${config.home.homeDirectory}; else ~/.claude/local/node_modules/.bin/claude ${config.home.homeDirectory}; fi'';
         nvim = "nvim --listen /tmp/nvim-$$";
         ccm = "ccmonitor --refresh-rate 1 --refresh-per-second 20";
         ccm-attach = "zellij attach ccusage-monitor";

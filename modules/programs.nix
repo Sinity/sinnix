@@ -55,7 +55,7 @@ in
           "-g"
           "-p"
           "--prefer"
-          "(^|/)(java|chromium|obsidian|google-chrome(-stable)?)$"
+          "(^|/)(java|chromium|google-chrome(-stable)?)$"
           "--avoid"
           "(^|/)(init|systemd|sshd)$"
         ];

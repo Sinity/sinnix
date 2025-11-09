@@ -1,0 +1,10 @@
+{
+  "security": {
+    "auth": {
+      "selectedType": "gemini-api-key"
+    }
+  },
+  "ui": {
+    "theme": "Default"
+  }
+}

@@ -1,11 +1,13 @@
 {
   lib,
   pkgs,
+  config,
   ...
 }:
 let
+  isDesktop = config.sinnix.machine.isDesktop;
   bluezExperimental = pkgs.bluez.override { enableExperimental = true; };
-  baseNetworkingPackages = [
+  desktopNetworkingPackages = [
     pkgs.networkmanagerapplet
     bluezExperimental
     pkgs.bluez-tools
@@ -19,7 +21,6 @@ let
 in
 {
   networking = {
-    hostName = "sinnix-prime";
     networkmanager = {
       enable = true;
       dns = "systemd-resolved";
@@ -61,20 +62,26 @@ in
 
   programs.mosh.enable = true;
 
-  hardware.bluetooth = {
+  services.mullvad-vpn = lib.mkIf isDesktop {
+    enable = true;
+  };
+
+  hardware.bluetooth = lib.mkIf isDesktop {
     enable = lib.mkDefault true;
     powerOnBoot = lib.mkDefault true;
     package = lib.mkDefault bluezExperimental;
-    settings.Policy.AutoEnable = true;
+    settings = {
+      Policy.AutoEnable = true;
+      General = {
+        ControllerMode = lib.mkDefault "dual";
+        DiscoverableTimeout = lib.mkDefault 0;
+        Experimental = lib.mkDefault true;
+        FastConnectable = lib.mkDefault true;
+        MultiProfile = lib.mkDefault "multiple";
+      };
+    };
   };
 
-  hardware.bluetooth.settings.General = {
-    ControllerMode = lib.mkDefault "dual";
-    DiscoverableTimeout = lib.mkDefault 0;
-    Experimental = lib.mkDefault true;
-    FastConnectable = lib.mkDefault true;
-    MultiProfile = lib.mkDefault "multiple";
-  };
-
-  environment.systemPackages = lib.mkAfter (baseNetworkingPackages ++ networkingToolPackages);
+  environment.systemPackages =
+    lib.mkAfter (networkingToolPackages ++ lib.optionals isDesktop desktopNetworkingPackages);
 }

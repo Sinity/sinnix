@@ -59,7 +59,6 @@ in
       description = "Capture boot metrics and logs";
       wantedBy = [ "multi-user.target" ];
       after = [
-        "multi-user.target"
         "systemd-journald.service"
       ];
       serviceConfig = {

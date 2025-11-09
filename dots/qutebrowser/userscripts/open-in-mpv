@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+url="${1:-${QUTE_URL:-}}"
+
+if [[ -z "${url}" ]]; then
+  url="${QUTE_SELECTED_TEXT:-}"
+fi
+
+if [[ -z "${url}" ]]; then
+  url="$(wl-paste 2>/dev/null || true)"
+fi
+
+if [[ -z "${url}" ]]; then
+  notify-send "qutebrowser/mpv" "No URL to open."
+  exit 0
+fi
+
+mpv --no-terminal --force-window=immediate "$url" >/dev/null 2>&1 &
+disown
+
+notify-send "qutebrowser/mpv" "Playing media in mpv."

@@ -1,6 +1,7 @@
 # Pyprland - Advanced scratchpad management for Hyprland
 { pkgs, inputs, lib, config, ... }:
 let
+  realmRoot = config.sinnix.paths.realmRoot;
   pyprlandCleanup = pkgs.writeShellScript "pyprland-sock-cleanup" ''
     set -eu
     HYPR_RUNTIME="/run/user/$UID/hypr"
@@ -36,8 +37,8 @@ in
 
   xdg.configFile."hypr/pyprland.toml".text =
     lib.replaceStrings
-      [ "/home/sinity" ]
-      [ config.home.homeDirectory ]
+      [ "/home/sinity" "/realm/knowledgebase" ]
+      [ config.home.homeDirectory "${realmRoot}/knowledgebase" ]
       (builtins.readFile "${inputs.self}/assets/pyprland.toml");
 
   home.packages = [ pkgs.pyprland ];

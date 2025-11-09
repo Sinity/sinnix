@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-KB_ROOT=${KB_ROOT:-/realm/knowledgebase}
+DEFAULT_REALM_ROOT=${REALM_ROOT:-/realm}
+if [ -z "${KB_ROOT:-}" ]; then
+  for candidate in "${DEFAULT_REALM_ROOT}/knowledgebase" "$HOME/knowledgebase"; do
+    if [ -d "$candidate" ]; then
+      KB_ROOT="$candidate"
+      break
+    fi
+  done
+fi
+KB_ROOT=${KB_ROOT:-${DEFAULT_REALM_ROOT}/knowledgebase}
 PICKER=${PICKER:-tofi}
 
 die() { echo "kb-capture: $*" >&2; exit 1; }

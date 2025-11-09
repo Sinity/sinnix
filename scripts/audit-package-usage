@@ -161,6 +161,27 @@ def collect_service_commands(base_dirs: Iterable[Path]) -> Set[str]:
     return cmds
 
 
+def detect_repo_root(arg: Optional[str]) -> Path:
+    if arg:
+        return Path(arg).expanduser().resolve()
+    env_root = os.environ.get("PRJ_ROOT")
+    if env_root:
+        return Path(env_root).expanduser().resolve()
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        git_root = result.stdout.strip()
+        if git_root:
+            return Path(git_root).resolve()
+    except Exception:
+        pass
+    return Path(__file__).resolve().parent.parent
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Audit package usage heuristics")
     parser.add_argument(
@@ -170,8 +191,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--root",
-        default="/realm/sinnix",
-        help="Repository root for nix evaluation (defaults to /realm/sinnix)",
+        default=None,
+        help="Repository root for nix evaluation (defaults to PRJ_ROOT or current git repo)",
     )
     args = parser.parse_args()
 
@@ -185,7 +206,7 @@ def main() -> None:
     else:
         attrs = list(DEFAULT_ATTRS)
 
-    repo_root = Path(args.root).expanduser().resolve()
+    repo_root = detect_repo_root(args.root)
 
     packages: Dict[Tuple[str, str], Dict[str, str]] = {}
     pkg_commands: Dict[Tuple[str, str], Set[str]] = {}

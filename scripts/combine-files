@@ -3,6 +3,7 @@
 # Usage: combine-files [--directory DIR] [--output FILE] [--format text|markdown]
 
 set -euo pipefail
+shopt -s extglob
 IFS=$'\n\t'
 
 require() {
@@ -88,7 +89,7 @@ normalise_path() {
 if [[ ${#selected[@]} -eq 0 ]]; then
   mapfile -t candidates < <(
     fd --type f --hidden --absolute-path \
-       --exclude .git --exclude .obsidian --exclude node_modules --exclude vendor --exclude build \
+       --exclude .git --exclude node_modules --exclude vendor --exclude build \
        . "$directory"
   )
 

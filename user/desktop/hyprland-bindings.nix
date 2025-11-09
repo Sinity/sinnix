@@ -1,7 +1,8 @@
 # Hyprland keybindings configuration
-{ inputs, pkgs, ... }:
+{ inputs, pkgs, sinnix, ... }:
 let
   script = rel: "${inputs.self}/scripts/${rel}";
+  screenshotDir = "${sinnix.paths.dataRoot}/screenshot";
 in
 {
   bind = [
@@ -50,8 +51,8 @@ in
     "SUPER, N, exec, pypr toggle notes"
 
     "SUPER, V, exec, kitty --class clipse -e clipse"
-    ", Print, exec, grimblast --notify --freeze copysave area /realm/data/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
-    "SUPER, Print, exec, grimblast --notify --cursor copysave output /realm/data/screenshot/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
+    ", Print, exec, grimblast --notify --freeze copysave area ${screenshotDir}/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
+    "SUPER, Print, exec, grimblast --notify --cursor copysave output ${screenshotDir}/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
     ", F8, exec, pypr toggle rawlog"
     ", SHIFT+F8, exec, log-to-knowledgebase"
 

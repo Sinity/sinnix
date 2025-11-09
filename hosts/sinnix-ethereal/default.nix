@@ -11,6 +11,7 @@
   ];
 
   networking.hostName = "sinnix-ethereal";
+  sinnix.machine.isDesktop = false;
 
   services = {
     qemuGuest.enable = true;

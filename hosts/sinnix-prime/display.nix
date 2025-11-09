@@ -16,10 +16,10 @@
 
   programs.uwsm.enable = true;
 
-  # X11 server for compatibility and NVIDIA drivers
+  # X11 stack stays disabled; Hyprland is launched directly via UWSM, but we still
+  # declare the desired driver so the NVIDIA kernel modules are available.
   services.xserver = {
-    enable = true;
-    displayManager.lightdm.enable = false; # Using Hyprland's direct login
+    enable = false;
     videoDrivers = [ "nvidia" ];
   };
 

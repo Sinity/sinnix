@@ -7,11 +7,27 @@ set -euo pipefail
 echo "Running pre-commit checks..."
 
 # Check 1: Nix syntax and evaluation
-echo "→ Checking nix syntax and evaluation..."
-if ! nix flake check --no-build 2>&1 | tee /tmp/flake-check.log; then
-  echo "❌ Flake check failed!"
-  echo "Review output above or see /tmp/flake-check.log"
-  exit 1
+SKIP_FLAKE=${PRE_COMMIT_SKIP_FLAKE:-0}
+
+should_run_flake() {
+  if [ "$SKIP_FLAKE" = "1" ]; then
+    echo "→ PRE_COMMIT_SKIP_FLAKE=1 set; skipping nix flake check."
+    return 1
+  fi
+  if git diff --cached --name-only | grep -Eq '\\.(nix|lock)$|flake\\.nix'; then
+    return 0
+  fi
+  echo "→ No staged Nix changes detected; skipping nix flake check."
+  return 1
+}
+
+if should_run_flake; then
+  echo "→ Checking nix syntax and evaluation..."
+  if ! nix flake check --no-build 2>&1 | tee /tmp/flake-check.log; then
+    echo "❌ Flake check failed!"
+    echo "Review output above or see /tmp/flake-check.log"
+    exit 1
+  fi
 fi
 
 # Check 2: Look for potential service conflicts
@@ -32,9 +48,11 @@ fi
 
 # Check 3: Verify critical directories are still created
 echo "→ Verifying critical directory tmpfiles rules..."
+REALM_ROOT=${REALM_ROOT:-/realm}
+DATA_ROOT=${DATA_ROOT:-${REALM_ROOT}/data}
 required_dirs=(
-  "/realm/inbox"
-  "/realm/data/screenshot"
+  "${REALM_ROOT}/inbox"
+  "${DATA_ROOT}/screenshot"
 )
 
 for dir in "${required_dirs[@]}"; do

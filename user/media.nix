@@ -1,7 +1,8 @@
-{ pkgs, ... }:
+{ pkgs, config, sinnix, lib, ... }:
 let
-  homeRoot = "/realm/home";
-  dataRoot = "/realm/data";
+  homeRoot = config.home.homeDirectory;
+  dataRoot = sinnix.paths.dataRoot;
+  hydrusProfileDir = "${homeRoot}/.hydrus";
 
   hydrusWithProfile = pkgs.hydrus.overrideAttrs (oldAttrs: {
     doCheck = false;
@@ -10,8 +11,8 @@ let
       mv $out/bin/hydrus-client $out/bin/hydrus-client-original
       cat > $out/bin/hydrus-client << EOF
       #!${pkgs.stdenv.shell}
-      cd ${homeRoot}/.hydrus
-      exec $out/bin/hydrus-client-original -d="${homeRoot}/.hydrus/db" "\$@"
+      cd ${hydrusProfileDir}
+      exec $out/bin/hydrus-client-original -d="${hydrusProfileDir}/db" "\$@"
       EOF
       chmod +x $out/bin/hydrus-client
     '';
@@ -73,6 +74,11 @@ in
     hydrusWithProfile
     imvWithExtras
   ];
+
+  home.activation.ensureHydrusProfile = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    install -d -m700 "${hydrusProfileDir}"
+    install -d -m700 "${hydrusProfileDir}/db"
+  '';
 
   programs.mpv = {
     enable = true;

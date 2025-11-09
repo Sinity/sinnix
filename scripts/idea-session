@@ -14,15 +14,20 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-SESSION_BASE = Path(os.environ.get("SESSION_BASE", "/realm/session")).expanduser()
+REALM_ROOT = Path(os.environ.get("REALM_ROOT", "/realm")).expanduser()
+SESSION_BASE = Path(os.environ.get("SESSION_BASE", str(REALM_ROOT / "session"))).expanduser()
 CONFIG_HOME = Path(os.environ.get("SESSION_CONFIG_HOME", Path.home() / ".config/idea-session")).expanduser()
 BASE_AGENTS = Path(os.environ.get("BASE_AGENTS", str(CONFIG_HOME / "base-agents.md"))).expanduser()
 PATH_PICKER = os.environ.get("SESSION_PATH_PICKER", "").strip()
 SESSION_HISTORY_FILE = os.environ.get("SESSION_HISTORY_FILE")
 SESSION_CODEX_LOG = os.environ.get("SESSION_CODEX_LOG")
 SESSION_CODEX_LOG_DIR = os.environ.get("SESSION_CODEX_LOG_DIR")
-SESSION_EXPORT_ROOT = Path(os.environ.get("SESSION_EXPORT_ROOT", "/realm/sinnix/docs/sessions")).expanduser()
-SESSION_ARCHIVE_ROOT = Path(os.environ.get("SESSION_ARCHIVE", str(SESSION_BASE / "archive"))).expanduser()
+SESSION_EXPORT_ROOT = Path(
+    os.environ.get("SESSION_EXPORT_ROOT", str(REALM_ROOT / "sinnix/docs/sessions"))
+).expanduser()
+SESSION_ARCHIVE_ROOT = Path(
+    os.environ.get("SESSION_ARCHIVE", str(SESSION_BASE / "archive"))
+).expanduser()
 
 PERSONA_TEMPLATES: Dict[str, Dict[str, str]] = {
     "focus": {

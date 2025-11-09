@@ -29,7 +29,6 @@ in
   home.packages = with pkgs; [
     junction
     nautilus
-    obsidian
     taskwarrior3
     timewarrior
     bleachbit
@@ -265,8 +264,8 @@ in
           baseSettings = builtins.readFile (dotsPath + "/transmission/settings.json");
         in
         lib.replaceStrings
-          [ "/home/sinity/Downloads" "/home/sinity" ]
-          [ torrentInbox config.home.homeDirectory ]
+          [ "/home/sinity/Downloads" "/home/sinity" "/realm" ]
+          [ torrentInbox config.home.homeDirectory sinnix.paths.realmRoot ]
           baseSettings;
       "autostart/mullvad-vpn.desktop".text = ''
         [Desktop Entry]

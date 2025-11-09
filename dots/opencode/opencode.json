@@ -139,7 +139,7 @@
         "npx",
         "-y",
         "mcp-remote",
-        "https://mcp.exa.ai/mcp?exaApiKey=EXA_API_KEY_PLACEHOLDER"
+        "https://mcp.exa.ai/mcp?exaApiKey={env:EXA_API_KEY}"
       ]
     }
   }

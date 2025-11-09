@@ -4,6 +4,11 @@ let
   inherit (config.sinnix.paths) realmRoot dataRoot outerRealm;
   username = config.sinnix.user.name;
   swapFileSizeGiB = 32;
+  userCfg = config.users.users.${username} or { };
+  userUid = builtins.toString (userCfg.uid or 1000);
+  primaryGroupName = userCfg.group or "users";
+  groupCfg = lib.attrByPath [ "users" "groups" primaryGroupName ] config { };
+  primaryGroupId = builtins.toString (groupCfg.gid or 100);
 
   prepareSwapfile = pkgs.writeShellApplication {
     name = "prepare-swapfile";
@@ -118,8 +123,8 @@ in
         "strictatime"
         "lazytime"
         "nofail"
-        "uid=1000"
-        "gid=100"
+        "uid=${userUid}"
+        "gid=${primaryGroupId}"
         "umask=022"
         "big_writes"
       ];

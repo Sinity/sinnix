@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+require() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    notify-send "yt-related" "Missing dependency: $1"
+    exit 1
+  fi
+}
+
+require yt-dlp
+require jq
+require fzf
+require mpv
+
+url="${QUTE_URL:-}"
+if [[ -z "${url}" ]]; then
+  notify-send "yt-related" "No active YouTube video."
+  exit 0
+fi
+
+if [[ "${url}" != *"youtube.com/watch"* && "${url}" != *"youtu.be/"* ]]; then
+  notify-send "yt-related" "This page does not look like a YouTube watch URL."
+  exit 0
+fi
+
+json="$(yt-dlp --skip-download --dump-json --no-warnings "$url")"
+related="$(printf '%s\n' "${json}" | jq -r '.related_videos[] | [.id, .title, (.author // "Unknown")] | @tsv')"
+
+if [[ -z "${related}" ]]; then
+  notify-send "yt-related" "No related videos found."
+  exit 0
+fi
+
+choice="$(
+  printf '%s\n' "${related}" \
+    | fzf --delimiter=$'\t' --with-nth=2,3 --preview-window=down:3 \
+          --bind 'enter:accept' \
+          --prompt='Related videos> '
+)"
+
+if [[ -z "${choice}" ]]; then
+  exit 0
+fi
+
+video_id="$(printf '%s' "${choice}" | cut -f1)"
+title="$(printf '%s' "${choice}" | cut -f2)"
+author="$(printf '%s' "${choice}" | cut -f3)"
+
+target_url="https://www.youtube.com/watch?v=${video_id}"
+
+mpv --no-terminal --force-window=immediate "${target_url}" >/dev/null 2>&1 &
+disown
+
+notify-send "yt-related" "Now playing: ${title}\nby ${author}"

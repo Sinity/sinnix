@@ -5,10 +5,12 @@
   dotsPath,
   secretPaths,
   config,
+  sinnix,
   ...
 }:
 let
   homeDir = config.home.homeDirectory;
+  realmRoot = sinnix.paths.realmRoot;
   mcpPython = pkgs.python3.withPackages (ps: [ ps.fastmcp ps.qdrant-client ps.psycopg ]);
   mcpQdrantBin = pkgs.writeShellScriptBin "mcp-qdrant" ''
     exec ${mcpPython}/bin/python3 ${inputs.self}/scripts/mcp-qdrant.py "$@"
@@ -16,6 +18,64 @@ let
   mcpPostgresBin = pkgs.writeShellScriptBin "mcp-postgres" ''
     exec ${mcpPython}/bin/python3 ${inputs.self}/scripts/mcp-postgres.py "$@"
   '';
+  mkDotsRepoLink = rel: dotsPath + "/" + rel;
+  codexProjectPaths = [
+    "${realmRoot}/project/sinnix"
+    "${realmRoot}/project/sinex"
+    "${realmRoot}/data/finance/jpk/finale"
+    "${realmRoot}/project/voyage-embeddings"
+    homeDir
+    "${homeDir}/.local/share/weechat/logs"
+    "${realmRoot}/knowledgebase"
+    "${homeDir}/.codex/sessions"
+    "${realmRoot}/sinnix"
+    "${homeDir}/session-snapshots/20251013T000834"
+    "${realmRoot}/project/knowledge-extract"
+  ];
+  codexProjects = builtins.listToAttrs (map (path: {
+    name = path;
+    value = { trust_level = "trusted"; };
+  }) codexProjectPaths);
+  codexConfig = {
+    model = "gpt-5-codex";
+    model_reasoning_effort = "high";
+    projects = codexProjects;
+    mcp_servers = {
+      github = {
+        url = "https://api.githubcopilot.com/mcp/";
+        bearer_token_env_var = "GITHUB_TOKEN";
+      };
+      "postgres-local" = {
+        command = "${homeDir}/.local/bin/mcp-postgres";
+        args = [ ];
+      };
+      playwright = {
+        command = "npx";
+        args = [ "@playwright/mcp@latest" ];
+      };
+      context7 = {
+        command = "npx";
+        args = [ "-y" "@upstash/context7-mcp@latest" ];
+      };
+      firecrawl = {
+        command = "npx";
+        args = [ "-y" "firecrawl-mcp@latest" ];
+        env = {
+          FIRECRAWL_API_KEY = "$FIRECRAWL_API_KEY";
+        };
+      };
+      qdrant = {
+        command = "${homeDir}/.local/bin/mcp-qdrant";
+        args = [ ];
+        env = {
+          QDRANT_URL = "http://127.0.0.1:6333";
+        };
+      };
+    };
+    features.rmcp_client = true;
+  };
+  codexToml = pkgs.formats.toml { };
+  codexConfigFile = codexToml.generate "codex-config.toml" codexConfig;
 in
 {
   # Developer-focused toolchain packages kept in the user's profile to reduce
@@ -137,12 +197,6 @@ in
   };
 
   xdg.configFile = {
-    ".codex/config.toml".text =
-      lib.replaceStrings
-        [ "/home/sinity" ]
-        [ homeDir ]
-        (builtins.readFile (dotsPath + "/codex/config.toml"));
-
     "opencode/opencode.json".text =
       lib.replaceStrings
         [ "/home/sinity" ]
@@ -161,7 +215,9 @@ in
   };
 
   home.file = {
+    ".codex/config.toml".source = codexConfigFile;
     ".local/bin/mcp-qdrant".source = "${mcpQdrantBin}/bin/mcp-qdrant";
     ".local/bin/mcp-postgres".source = "${mcpPostgresBin}/bin/mcp-postgres";
+    ".gemini/settings.json".source = mkDotsRepoLink "gemini/settings.json";
   };
 }

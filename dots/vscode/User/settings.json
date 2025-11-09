@@ -31,7 +31,7 @@
 
   // ——— Editor ergonomics ———
   "editor.lineNumbers": "relative",
-  "workbench.editor.showTabs": false,
+  "workbench.editor.showTabs": "single",
   "workbench.editor.enablePreview": false,
   "workbench.startupEditor": "none",
   "workbench.commandCenter": false,
@@ -195,5 +195,8 @@
       { "key": "p", "name": "Prev Editor",     "type": "command", "command": "workbench.action.previousEditor" },
       { "key": "d", "name": "Close Editor",    "type": "command", "command": "workbench.action.closeActiveEditor" }
     ] }
-  ]
+  ],
+  "gitlens.ai.model": "vscode",
+  "gitlens.ai.vscode.model": "copilot:gpt-4.1",
+  "gitlens.ai.largePromptWarningThreshold": 100000
 }

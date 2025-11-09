@@ -21,6 +21,7 @@
   pkgs,
   inputs,
   lib,
+  sinnix,
   ...
 }:
 let
@@ -28,7 +29,7 @@ let
   asset = rel: "${flakePath}/assets/${rel}";
   script = rel: "${flakePath}/scripts/${rel}";
 
-  bindings = import ./hyprland-bindings.nix { inherit inputs pkgs; };
+  bindings = import ./hyprland-bindings.nix { inherit inputs pkgs sinnix; };
   rules = import ./hyprland-rules.nix;
 in
 {

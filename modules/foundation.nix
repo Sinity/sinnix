@@ -18,6 +18,14 @@ in
       };
     };
 
+    machine = {
+      isDesktop = mkOption {
+        type = types.bool;
+        default = true;
+        description = "Whether this host runs the desktop stack (Hyprland, Mullvad, Transmission, etc.).";
+      };
+    };
+
     paths = mkOption {
       type = types.submodule (
         { config, ... }:

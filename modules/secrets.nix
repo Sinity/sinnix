@@ -48,7 +48,11 @@ let
             path = "/run/agenix/davfs2-secrets";
           }
         else if secretName == "photoprism-admin-password" then
-          rootOwnedSpec // { path = "/run/agenix/photoprism-admin-password"; }
+          defaultSpec // {
+            owner = "photoprism";
+            group = "photoprism";
+            path = "/run/agenix/photoprism-admin-password";
+          }
         else if secretName == "sinity-password" then
           rootOwnedSpec // { path = "/run/agenix/sinity-password"; }
         else if secretName == "root-password" then
