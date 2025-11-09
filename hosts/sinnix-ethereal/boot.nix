@@ -1,14 +1,24 @@
-{ pkgs, ... }:
+{ pkgs, lib, ... }:
 {
   boot = {
     loader = {
-      systemd-boot.enable = true;
-      efi = {
-        canTouchEfiVariables = false;
-        efiSysMountPoint = "/boot";
+      systemd-boot.enable = false;
+      efi.canTouchEfiVariables = false;
+      grub = {
+        enable = true;
+        devices = [ "/dev/vda" ];
+        mirroredBoots = lib.mkForce (
+          lib.singleton {
+            path = "/boot";
+            efiSysMountPoint = "/boot";
+            efiBootloaderId = null;
+            devices = [ "/dev/vda" ];
+          }
+        );
       };
-      timeout = 5;
     };
+
+    loader.timeout = 5;
 
     kernelPackages = pkgs.linuxPackages;
     kernelParams = [

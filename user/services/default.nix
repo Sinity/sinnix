@@ -3,6 +3,6 @@
 {
   imports = [
     ./graphical.nix
-    ./pyprland.nix
+    # ./pyprland.nix  # temporarily disable Pyprland scratchpads
   ];
 }

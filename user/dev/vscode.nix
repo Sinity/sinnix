@@ -1,4 +1,4 @@
-{ pkgs, inputs, dotsPath, ... }:
+{ pkgs, inputs, dotsPath, lib, config, ... }:
 let
   pkgsWithMarketplace = pkgs.extend inputs.nix-vscode-extensions.overlays.default;
   marketplace = pkgsWithMarketplace.nix-vscode-extensions.vscode-marketplace;
@@ -39,7 +39,11 @@ in
   xdg.configFile = {
     "Code/User/settings.json".source = dotsPath + "/vscode/User/settings.json";
     "Code/User/keybindings.json".source = dotsPath + "/vscode/User/keybindings.json";
-    "Code/User/mcp.json".source = dotsPath + "/vscode/User/mcp.json";
+    "Code/User/mcp.json".text =
+      lib.replaceStrings
+        [ "/home/sinity" ]
+        [ config.home.homeDirectory ]
+        (builtins.readFile (dotsPath + "/vscode/User/mcp.json"));
     "Code/User/mcp" = {
       source = dotsPath + "/vscode/User/mcp";
       recursive = true;
