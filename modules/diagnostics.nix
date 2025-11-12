@@ -86,19 +86,6 @@ let
   };
 in
 {
-  options.sinnix.optionalPackages = lib.mkOption {
-    type = lib.types.attrsOf (lib.types.listOf lib.types.package);
-    default = { };
-    description = "Optional package groups that are not installed by default.";
-    readOnly = true;
-  };
-
-  config = {
-    environment.systemPackages = lib.mkAfter (coreDiagnostics ++ [ perfScan ]);
-    sinnix.optionalPackages = {
-      diagnostics = optionalDiagnostics;
-      perfSuites = optionalPerfSuites;
-      perfScanRuntime = perfScanRuntimeInputs;
-    };
-  };
+  config.environment.systemPackages =
+    lib.mkAfter (coreDiagnostics ++ optionalDiagnostics ++ optionalPerfSuites ++ [ perfScan ]);
 }

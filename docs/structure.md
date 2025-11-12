@@ -23,13 +23,9 @@ and keep ownership with that module.
   documented alongside the rest of the service configuration. Home modules
   receive the same mapping via `secretPaths` and should prefer it to literal
   `/run/agenix/...` paths.
-- **Diagnostics** – `modules/diagnostics.nix` keeps essential hardware tools
-  installed by default and publishes `config.sinnix.optionalPackages` so you can
-  see (and quickly re-enable) the trimmed “nice to have” suites without keeping
-  them in the base closure.
-- **Perf Shell** – `nix develop .#perf-tools` drops you into a shell with those
-  optional diagnostics/perf suites on demand, so you can keep the system build
-  lean and only bring the heavy tooling in when needed.
+- **Diagnostics** – `modules/diagnostics.nix` keeps the full hardware/perf tool
+  stack installed by default so `perf-scan` and other scripts always have their
+  dependencies ready without extra toggles.
 
 ## Host (`hosts/sinnix-prime`)
 
@@ -69,6 +65,7 @@ and keep ownership with that module.
 - Import a module where the behaviour logically belongs (host vs system vs user).
 - Use `config.sinnix.secrets.paths` instead of hard-coding `/run/agenix/...`.
 - When adding tooling, prefer the user profile unless the binary must be
-  available before login; perf-scan already encapsulates heavy diagnostics.
+  available before login; the shared modules already carry the full diagnostics
+  and performance suite for `perf-scan`.
 - Document new cross-cutting contracts (paths, data roots, service ownership)
   here to keep the topology obvious.

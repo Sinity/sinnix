@@ -14,16 +14,10 @@ let
     (pkgs.bugwarrior or null)
     (pkgs.timewarrior-all-reports or null)
   ];
-
-  aiDesktopPackages = with pkgs; [
-    aionui
-  ];
 in
 {
   config = {
-    environment.systemPackages = lib.mkAfter (coreCliPackages ++ aiDesktopPackages);
-    sinnix.optionalPackages.cli = optionalCliPackages;
-    sinnix.optionalPackages.aiDesktop = aiDesktopPackages;
+    environment.systemPackages = lib.mkAfter (coreCliPackages ++ optionalCliPackages);
 
     programs = {
       zsh.enable = true;
@@ -43,7 +37,11 @@ in
     systemd.coredump.enable = true;
 
     services = {
-      dbus.enable = true;
+      dbus = {
+        enable = true;
+        implementation = "broker";
+        brokerPackage = pkgs.dbus-broker;
+      };
 
       earlyoom = {
         enable = true;
@@ -61,7 +59,9 @@ in
         ];
       };
 
-      gnome.gnome-keyring.enable = true;
+      gnome.gnome-keyring.enable = lib.mkForce false;
     };
+
+    security.pam.services.login.enableGnomeKeyring = lib.mkForce false;
   };
 }

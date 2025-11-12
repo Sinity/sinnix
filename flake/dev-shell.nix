@@ -156,32 +156,5 @@
         ];
       };
 
-      devShells."perf-tools" = pkgs.mkShell {
-        name = "sinnix-perf-tools";
-        packages = with pkgs; [
-          # Optional diagnostics bundle
-          cpuid
-          dmidecode
-          hw-probe
-          hwdata
-          i7z
-          mcelog
-          memtester
-          numactl
-          pciutils
-          usbutils
-
-          # Extended performance / stress tooling
-          flent
-          netperf
-          phoronix-test-suite
-          stress-ng
-          stressapptest
-          sysbench
-          s-tui
-          lm_sensors
-          perf
-        ];
-      };
     };
 }

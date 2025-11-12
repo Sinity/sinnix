@@ -19,6 +19,7 @@ devenv.local.nix
 *.swo
 .DS_Store
 Thumbs.db
+*.hm-bak
 
 # Backup
 *.bak
@@ -26,9 +27,13 @@ Thumbs.db
 \#*\#
 .\#*
 
+# Transient build logs / scratch files
+build.log
+compilation.log
+_tmp_do_not_include_in_version_control.md
+
 # Only ignore unencrypted secrets
 *.key
 *.pem
 *.env
 *.gpg
-

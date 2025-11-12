@@ -17,6 +17,7 @@ in
     (
       final: prev:
       let
+        inherit (final) lib;
         pythonOverrides = _self: super: {
           spacy = super.spacy.overrideAttrs (old: rec {
             version = "3.8.4"; # last revision that still builds
@@ -72,6 +73,28 @@ in
               };
             }
           );
+        modernizeCmake =
+          {
+            package,
+            replacements,
+            target ? "CMakeLists.txt",
+            addPolicyFlag ? false,
+          }:
+          let
+            replacementFlags =
+              lib.concatStringsSep " \\\n+                  " (map (rep: ''--replace "${rep.from}" "${rep.to}"'') replacements);
+          in
+          package.overrideAttrs (old:
+            (lib.optionalAttrs addPolicyFlag {
+              cmakeFlags = (old.cmakeFlags or [ ]) ++ [ "-DCMAKE_POLICY_VERSION=3.5" ];
+            })
+            // {
+              postPatch = (old.postPatch or "") + ''
+                substituteInPlace ${target} \
+                  ${replacementFlags}
+              '';
+            }
+          );
       in
       {
         hyprland = prev.hyprland.overrideAttrs (old: {
@@ -119,13 +142,16 @@ in
             };
         };
 
-        libutp = prev.libutp.overrideAttrs (old: {
-          cmakeFlags = (old.cmakeFlags or [ ]) ++ [ "-DCMAKE_POLICY_VERSION=3.5" ];
-          postPatch = (old.postPatch or "") + ''
-            substituteInPlace CMakeLists.txt \
-              --replace "cmake_minimum_required(VERSION 2.8" "cmake_minimum_required(VERSION 3.5"
-          '';
-        });
+        libutp = modernizeCmake {
+          package = prev.libutp;
+          addPolicyFlag = true;
+          replacements = [
+            {
+              from = "cmake_minimum_required(VERSION 2.8";
+              to = "cmake_minimum_required(VERSION 3.5";
+            }
+          ];
+        };
 
         pamixer = prev.pamixer.override {
           cxxopts = prev.cxxopts.override { enableUnicodeHelp = false; };
@@ -139,54 +165,84 @@ in
           doCheck = false;
         });
 
-        transmission_3 = prev.transmission_3.overrideAttrs (old: {
-          postPatch = (old.postPatch or "") + ''
-            substituteInPlace CMakeLists.txt \
-              --replace "cmake_minimum_required(VERSION 2.8.12 FATAL_ERROR)" \
-                       "cmake_minimum_required(VERSION 3.5 FATAL_ERROR)"
-          '';
-        });
+        transmission_3 = modernizeCmake {
+          package = prev.transmission_3;
+          replacements = [
+            {
+              from = "cmake_minimum_required(VERSION 2.8.12 FATAL_ERROR)";
+              to = "cmake_minimum_required(VERSION 3.5 FATAL_ERROR)";
+            }
+          ];
+        };
 
-        interception-tools = prev.interception-tools.overrideAttrs (old: {
-          postPatch = (old.postPatch or "") + ''
-            substituteInPlace CMakeLists.txt \
-              --replace "cmake_minimum_required(VERSION 3.0)" \
-                       "cmake_minimum_required(VERSION 3.5)"
-          '';
-        });
+        interception-tools = modernizeCmake {
+          package = prev.interception-tools;
+          replacements = [
+            {
+              from = "cmake_minimum_required(VERSION 3.0)";
+              to = "cmake_minimum_required(VERSION 3.5)";
+            }
+          ];
+        };
 
-        autopanosiftc = prev.autopanosiftc.overrideAttrs (old: {
-          cmakeFlags = (old.cmakeFlags or [ ]) ++ [ "-DCMAKE_POLICY_VERSION=3.5" ];
-          postPatch = (old.postPatch or "") + ''
-            substituteInPlace CMakeLists.txt \
-              --replace "cmake_minimum_required(VERSION 2.8.12 FATAL_ERROR)" "cmake_minimum_required(VERSION 3.5 FATAL_ERROR)" \
-              --replace "cmake_minimum_required(VERSION 2.8)" "cmake_minimum_required(VERSION 3.5)" \
-              --replace "cmake_minimum_required(VERSION 2.6)" "cmake_minimum_required(VERSION 3.5)" \
-              --replace "cmake_minimum_required(VERSION 2.4)" "cmake_minimum_required(VERSION 3.5)"
-          '';
-        });
+        autopanosiftc = modernizeCmake {
+          package = prev.autopanosiftc;
+          addPolicyFlag = true;
+          replacements = [
+            {
+              from = "cmake_minimum_required(VERSION 2.8.12 FATAL_ERROR)";
+              to = "cmake_minimum_required(VERSION 3.5 FATAL_ERROR)";
+            }
+            {
+              from = "cmake_minimum_required(VERSION 2.8)";
+              to = "cmake_minimum_required(VERSION 3.5)";
+            }
+            {
+              from = "cmake_minimum_required(VERSION 2.6)";
+              to = "cmake_minimum_required(VERSION 3.5)";
+            }
+            {
+              from = "cmake_minimum_required(VERSION 2.4)";
+              to = "cmake_minimum_required(VERSION 3.5)";
+            }
+          ];
+        };
 
         libsForQt5 = prev.libsForQt5 // {
-          autopanosiftc = prev.libsForQt5.autopanosiftc.overrideAttrs (old: {
-            cmakeFlags = (old.cmakeFlags or [ ]) ++ [ "-DCMAKE_POLICY_VERSION=3.5" ];
-            postPatch = (old.postPatch or "") + ''
-              substituteInPlace CMakeLists.txt \
-                --replace "cmake_minimum_required(VERSION 2.8.12 FATAL_ERROR)" "cmake_minimum_required(VERSION 3.5 FATAL_ERROR)" \
-                --replace "cmake_minimum_required(VERSION 2.8)" "cmake_minimum_required(VERSION 3.5)" \
-                --replace "cmake_minimum_required(VERSION 2.6)" "cmake_minimum_required(VERSION 3.5)" \
-                --replace "cmake_minimum_required(VERSION 2.4)" "cmake_minimum_required(VERSION 3.5)"
-            '';
-          });
+          autopanosiftc = modernizeCmake {
+            package = prev.libsForQt5.autopanosiftc;
+            addPolicyFlag = true;
+            replacements = [
+              {
+                from = "cmake_minimum_required(VERSION 2.8.12 FATAL_ERROR)";
+                to = "cmake_minimum_required(VERSION 3.5 FATAL_ERROR)";
+              }
+              {
+                from = "cmake_minimum_required(VERSION 2.8)";
+                to = "cmake_minimum_required(VERSION 3.5)";
+              }
+              {
+                from = "cmake_minimum_required(VERSION 2.6)";
+                to = "cmake_minimum_required(VERSION 3.5)";
+              }
+              {
+                from = "cmake_minimum_required(VERSION 2.4)";
+                to = "cmake_minimum_required(VERSION 3.5)";
+              }
+            ];
+          };
         };
 
         interception-tools-plugins = prev.interception-tools-plugins // {
-          caps2esc = prev.interception-tools-plugins.caps2esc.overrideAttrs (old: {
-            postPatch = (old.postPatch or "") + ''
-              substituteInPlace CMakeLists.txt \
-                --replace "cmake_minimum_required(VERSION 3.0)" \
-                         "cmake_minimum_required(VERSION 3.5)"
-            '';
-          });
+          caps2esc = modernizeCmake {
+            package = prev.interception-tools-plugins.caps2esc;
+            replacements = [
+              {
+                from = "cmake_minimum_required(VERSION 3.0)";
+                to = "cmake_minimum_required(VERSION 3.5)";
+              }
+            ];
+          };
         };
 
         aionui =
