@@ -35,3 +35,25 @@ The shell profile now sources the agenix export snippet automatically; use the
 3. Launch Codex and confirm the servers appear in the CLI's tool picker. Try
    `codex mcp call postgres-local list-tables` and
    `codex mcp call qdrant list-collections` to verify connectivity.
+
+## Context7 workflow
+
+The Context7 MCP server exposes two tools:
+
+- `resolve-library-id` – maps human names to Context7 IDs such as `/vercel/next.js`
+- `get-library-docs` – fetches focused documentation for a given ID
+
+Both read credentials from `CONTEXT7_API_KEY`, which is exported automatically by
+the agenix secrets profile. To discover a project and grab its docs:
+
+```
+codex mcp call context7 resolve-library-id --arg libraryName="nextjs"
+codex mcp call context7 get-library-docs \
+  --arg context7CompatibleLibraryID="/vercel/next.js" \
+  --arg topic="routing"
+```
+
+The resolve step accepts any fuzzy library name and returns a list of IDs. Pass
+whichever `/org/repo` slug you need into `get-library-docs` (optionally with a
+`topic` or `tokens` override) and Codex will load the docs directly into the
+conversation—no separate CLI wrapper required.

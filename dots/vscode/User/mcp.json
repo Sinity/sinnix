@@ -15,23 +15,32 @@
 		},
 		"context7": {
 			"type": "stdio",
-			"command": "npx",
+			"command": "bash",
 			"args": [
-				"-y",
-				"@upstash/context7-mcp@latest"
+				"-lc",
+				"exec npx -y @upstash/context7-mcp@latest --api-key \"$CONTEXT7_API_KEY\""
 			],
 			"gallery": true
 		},
-		"firecrawl": {
+		"cclsp": {
 			"type": "stdio",
 			"command": "npx",
 			"args": [
 				"-y",
-				"firecrawl-mcp@latest"
+				"cclsp@latest"
 			],
 			"env": {
-				"FIRECRAWL_API_KEY": "${input:firecrawl_api_key}"
+				"CCLSP_CONFIG_PATH": "/home/sinity/.config/claude/cclsp.json"
 			},
+			"gallery": true
+		},
+		"firecrawl": {
+			"type": "stdio",
+			"command": "bash",
+			"args": [
+				"-lc",
+				"exec env FIRECRAWL_API_KEY=\"$FIRECRAWL_API_KEY\" npx -y firecrawl-mcp@latest"
+			],
 			"gallery": true
 		},
 		"postgres-local": {
@@ -39,13 +48,5 @@
 			"command": "/home/sinity/.local/bin/mcp-postgres",
 			"gallery": false
 		}
-	},
-	"inputs": [
-		{
-			"id": "firecrawl_api_key",
-			"type": "promptString",
-			"description": "Firecrawl API Key (get from https://www.firecrawl.dev/app/api-keys)",
-			"password": true
-		}
-	]
+	}
 }

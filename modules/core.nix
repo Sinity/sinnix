@@ -16,6 +16,7 @@ in
         experimental-features = [
           "nix-command"
           "flakes"
+          "cgroups"
         ];
         trusted-users = [
           username
@@ -33,8 +34,9 @@ in
           "nix-gaming.cachix.org-1:nbjlureqMbRAxR1gJ/f3hxemL9svXaZF/Ees8vCUUs4="
         ];
         netrc-file = "/etc/nix/netrc";
-        max-jobs = 4;
+        max-jobs = lib.mkDefault 4;
         cores = 0;
+        use-cgroups = true;
         allowed-users = [
           "root"
           "@wheel"
@@ -115,17 +117,39 @@ in
       ];
     };
 
-    systemd.tmpfiles.rules =
-      lib.mkAfter (
-        [
-          "d ${paths.outerRealm}/inbox 0755 ${username} users -"
-          "d ${paths.dataRoot} 0755 ${username} users -"
-          "d ${paths.dataRoot}/screenshot 0755 ${username} users -"
-          "d ${paths.dataRoot}/screenshot/mpv 0755 ${username} users -"
-        ]
-        ++ lib.optional (paths.realmRoot or "" == "/realm") "d /realm/inbox 0755 ${username} users -"
-        ++ lib.optional (paths.dataRoot == "/realm/data") "d /realm/data/screenshot 0755 ${username} users -"
-        ++ lib.optional (paths.dataRoot == "/realm/data") "d /realm/data/screenshot/mpv 0755 ${username} users -"
-      );
+    systemd = {
+      tmpfiles.rules =
+        lib.mkAfter (
+          [
+            "d ${paths.outerRealm}/inbox 0755 ${username} users -"
+            "d ${paths.dataRoot} 0755 ${username} users -"
+            "d ${paths.dataRoot}/screenshot 0755 ${username} users -"
+            "d ${paths.dataRoot}/screenshot/mpv 0755 ${username} users -"
+          ]
+          ++ lib.optional (paths.realmRoot or "" == "/realm") "d /realm/inbox 0755 ${username} users -"
+          ++ lib.optional (paths.dataRoot == "/realm/data") "d /realm/data/screenshot 0755 ${username} users -"
+          ++ lib.optional (paths.dataRoot == "/realm/data") "d /realm/data/screenshot/mpv 0755 ${username} users -"
+        );
+
+      slices."nix-daemon.slice".sliceConfig = {
+        Description = "Resource limits for nix-daemon builds";
+        CPUWeight = 40;
+        IOWeight = 40;
+        MemoryHigh = "28G";
+        MemoryMax = "30G";
+        ManagedOOMMemoryPressure = "kill";
+        ManagedOOMMemoryPressureLimit = "85%";
+      };
+
+      services.nix-daemon.serviceConfig = {
+        Slice = "nix-daemon.slice";
+        CPUAccounting = true;
+        MemoryAccounting = true;
+        IOAccounting = true;
+        TasksAccounting = true;
+      };
+    };
+
+    systemd.oomd.enableSystemSlice = true;
   };
 }

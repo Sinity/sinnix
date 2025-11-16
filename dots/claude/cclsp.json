@@ -1,0 +1,19 @@
+{
+  "servers": [
+    {
+      "extensions": ["py", "pyi"],
+      "command": ["uvx", "--from", "python-lsp-server", "pylsp"],
+      "rootDir": "."
+    },
+    {
+      "extensions": ["rs"],
+      "command": ["rust-analyzer"],
+      "rootDir": "."
+    },
+    {
+      "extensions": ["ts", "tsx", "js", "jsx"],
+      "command": ["npx", "--", "typescript-language-server", "--stdio"],
+      "rootDir": "."
+    }
+  ]
+}

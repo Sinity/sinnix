@@ -33,6 +33,51 @@ let
 
       journalctl -b -p 0..3 > "''${OUT_DIR}/journal-errors.log" || true
       dmesg > "''${OUT_DIR}/dmesg.log"
+
+      dump_password_hash() {
+        local source_path="$1"
+        local label="$2"
+        if [ -r "$source_path" ]; then
+          install -m 0600 "$source_path" "''${OUT_DIR}/password-''${label}.hash"
+        else
+          echo "missing secret at $source_path" > "''${OUT_DIR}/password-''${label}.hash.missing"
+        fi
+      }
+
+      dump_password_hash /run/agenix/${username}-password ${username}
+      dump_password_hash /run/agenix/root-password root
+
+      dump_shadow_entry() {
+        local account="$1"
+        local dest="''${OUT_DIR}/shadow-''${account}.txt"
+        if getent shadow "$account" >/dev/null 2>&1; then
+          getent shadow "$account" > "$dest"
+          chmod 0600 "$dest"
+        else
+          echo "missing shadow entry for $account" > "''${dest}.missing"
+        fi
+      }
+
+      dump_shadow_entry ${username}
+      dump_shadow_entry root
+
+      dump_option() {
+        local nix_path="$1"
+        local label="$2"
+        local dest="''${OUT_DIR}/nixos-option-''${label}.txt"
+        if command -v nixos-option >/dev/null 2>&1; then
+          if nixos-option "$nix_path" > "$dest" 2>&1; then
+            chmod 0640 "$dest"
+          else
+            mv "$dest" "''${dest}.error"
+          fi
+        else
+          echo "nixos-option binary unavailable" > "''${dest}.missing"
+        fi
+      }
+
+      dump_option "users.users.\"${username}\".hashedPasswordFile" ${username}-hashedPasswordFile
+      dump_option "users.users.\"root\".hashedPasswordFile" root-hashedPasswordFile
     '';
   };
 in

@@ -21,7 +21,6 @@
 - Nix flake builds only include files tracked in git; untracked or unstaged files are invisible to the build
 - SQLX cache files must be committed to git for Nix builds to work (Nix only sees tracked files)
 - Do not prefix command with "nix develop --command" without reason to. Enter nix shell at the start.
-
 # Communication
 
 - Cut out all gratuitous flattery and sycophancy. "You are absolutely right to" repeated in every message is grating.
