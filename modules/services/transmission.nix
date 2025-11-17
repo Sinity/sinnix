@@ -1,8 +1,13 @@
-{ lib, pkgs, config, ... }:
+{
+  lib,
+  pkgs,
+  config,
+  ...
+}:
 let
   inherit (config.sinnix.paths) torrentInbox outerRealm;
   username = config.sinnix.user.name;
-  isDesktop = config.sinnix.machine.isDesktop;
+  inherit (config.sinnix.machine) isDesktop;
 in
 lib.mkIf isDesktop {
   services.transmission = {
@@ -33,7 +38,10 @@ lib.mkIf isDesktop {
 
   systemd.services.transmission.unitConfig.RequiresMountsFor =
     let
-      needs = lib.unique [ torrentInbox outerRealm ];
+      needs = lib.unique [
+        torrentInbox
+        outerRealm
+      ];
     in
     needs;
 }

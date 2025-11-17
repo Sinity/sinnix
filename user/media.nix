@@ -1,7 +1,13 @@
-{ pkgs, config, sinnix, lib, ... }:
+{
+  pkgs,
+  config,
+  sinnix,
+  lib,
+  ...
+}:
 let
   homeRoot = config.home.homeDirectory;
-  dataRoot = sinnix.paths.dataRoot;
+  inherit (sinnix.paths) dataRoot;
   hydrusProfileDir = "${homeRoot}/.hydrus";
 
   hydrusWithProfile = pkgs.hydrus.overrideAttrs (oldAttrs: {
@@ -44,41 +50,43 @@ let
     });
 in
 {
-  home.sessionVariables = {
-    MEDIA_DOMAIN = "v0.3";
-    MPV_SCREENSHOT_DIR = "${dataRoot}/screenshot/mpv";
-    WINEDLLOVERRIDES = "winemenubuilder.exe=d";
+  home = {
+    sessionVariables = {
+      MEDIA_DOMAIN = "v0.3";
+      MPV_SCREENSHOT_DIR = "${dataRoot}/screenshot/mpv";
+      WINEDLLOVERRIDES = "winemenubuilder.exe=d";
+    };
+
+    packages = with pkgs; [
+      spotify
+      ncspot
+      mpvc
+      svp
+      ani-cli
+      trackma
+      fanficfare
+      gpu-screen-recorder
+      gpu-screen-recorder-gtk
+      wf-recorder
+      ffmpeg
+      yt-dlp
+      tdf
+      zathura
+      epy
+      zotero
+      gimp
+      inkscape
+      mangohud
+      steam-run
+      hydrusWithProfile
+      imvWithExtras
+    ];
+
+    activation.ensureHydrusProfile = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+      install -d -m700 "${hydrusProfileDir}"
+      install -d -m700 "${hydrusProfileDir}/db"
+    '';
   };
-
-  home.packages = with pkgs; [
-    spotify
-    ncspot
-    mpvc
-    svp
-    ani-cli
-    trackma
-    fanficfare
-    gpu-screen-recorder
-    gpu-screen-recorder-gtk
-    wf-recorder
-    ffmpeg
-    yt-dlp
-    tdf
-    zathura
-    epy
-    zotero
-    gimp
-    inkscape
-    mangohud
-    steam-run
-    hydrusWithProfile
-    imvWithExtras
-  ];
-
-  home.activation.ensureHydrusProfile = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-    install -d -m700 "${hydrusProfileDir}"
-    install -d -m700 "${hydrusProfileDir}/db"
-  '';
 
   programs.mpv = {
     enable = true;

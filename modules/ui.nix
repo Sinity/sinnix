@@ -48,8 +48,18 @@ let
     terminal = 16;
   };
 
-  primaryFontPackages = lib.filter (pkg: pkg != null) (map (name: (lib.getAttr name stylixFontSpec).package) [ "monospace" "sansSerif" "serif" "emoji" ]);
-  fallbackFontPackages = [ pkgs.noto-fonts pkgs.dejavu_fonts ];
+  primaryFontPackages = lib.filter (pkg: pkg != null) (
+    map (name: (lib.getAttr name stylixFontSpec).package) [
+      "monospace"
+      "sansSerif"
+      "serif"
+      "emoji"
+    ]
+  );
+  fallbackFontPackages = [
+    pkgs.noto-fonts
+    pkgs.dejavu_fonts
+  ];
   allFontPackages = lib.unique (primaryFontPackages ++ fallbackFontPackages);
 
   monospaceName = stylixFontSpec.monospace.name;
@@ -63,7 +73,9 @@ in
       base16Scheme = "${pkgs.base16-schemes}/share/themes/gruvbox-dark-medium.yaml";
       image = "${inputs.self}/assets/forest.jpg";
 
-      fonts = stylixFontSpec // { sizes = fontSizes; };
+      fonts = stylixFontSpec // {
+        sizes = fontSizes;
+      };
 
       cursor = {
         package = pkgs.bibata-cursors;

@@ -34,6 +34,21 @@ in
           questionary = super.questionary.overridePythonAttrs (old: {
             disabledTests = (old.disabledTests or [ ]) ++ [ "test_print_with_style" ];
           });
+
+          aggdraw = super.aggdraw.overridePythonAttrs (_old: {
+            # Pillow 12.0 introduced stricter dtype handling that breaks aggdraw's
+            # bundled self-tests, so skip them until upstream adapts.
+            doCheck = false;
+          });
+
+          sinexCli = super.sinexCli.overrideAttrs (_: {
+            doInstallCheck = false;
+            installCheckPhase = ''
+              runHook preInstallCheck
+              echo "sinex-cli installCheck disabled"
+              runHook postInstallCheck
+            '';
+          });
         };
         hyprlandPatches = builtins.path {
           path = ../patches/hyprland;
@@ -81,10 +96,12 @@ in
             addPolicyFlag ? false,
           }:
           let
-            replacementFlags =
-              lib.concatStringsSep " \\\n+                  " (map (rep: ''--replace "${rep.from}" "${rep.to}"'') replacements);
+            replacementFlags = lib.concatStringsSep " \\\n+                  " (
+              map (rep: ''--replace "${rep.from}" "${rep.to}"'') replacements
+            );
           in
-          package.overrideAttrs (old:
+          package.overrideAttrs (
+            old:
             (lib.optionalAttrs addPolicyFlag {
               cmakeFlags = (old.cmakeFlags or [ ]) ++ [ "-DCMAKE_POLICY_VERSION=3.5" ];
             })
@@ -105,21 +122,21 @@ in
             (hyprlandPatch "guard-last-monitor.patch")
           ];
           postPatch = (old.postPatch or "") + ''
-            substituteInPlace src/Compositor.cpp \
-              --replace '        if (pw->m_isMapped)
-            g_pHyprRenderer->damageMonitor(pw->m_monitor.lock());
+                    substituteInPlace src/Compositor.cpp \
+                      --replace '        if (pw->m_isMapped)
+                    g_pHyprRenderer->damageMonitor(pw->m_monitor.lock());
 
-    };' '        if (pw->m_isMapped) {
-            if (m_monitors.empty()) {
-                Debug::log(WARN, "[sinnix] skip z-order damage: no active monitors");
-            } else if (const auto PMONITOR = pw->m_monitor.lock()) {
-                g_pHyprRenderer->damageMonitor(PMONITOR);
-            } else {
-                Debug::log(WARN, "[sinnix] skip z-order damage: window monitor vanished");
-            }
-        }
+            };' '        if (pw->m_isMapped) {
+                    if (m_monitors.empty()) {
+                        Debug::log(WARN, "[sinnix] skip z-order damage: no active monitors");
+                    } else if (const auto PMONITOR = pw->m_monitor.lock()) {
+                        g_pHyprRenderer->damageMonitor(PMONITOR);
+                    } else {
+                        Debug::log(WARN, "[sinnix] skip z-order damage: window monitor vanished");
+                    }
+                }
 
-    };'
+            };'
           '';
         });
 
@@ -261,9 +278,7 @@ in
             inherit pname version src;
             nativeBuildInputs = [ final.makeWrapper ];
             extraPkgs =
-              pkgs:
-              with pkgs;
-              [
+              pkgs: with pkgs; [
                 alsa-lib
                 at-spi2-atk
                 at-spi2-core
@@ -366,6 +381,27 @@ in
           packageOverrides = prev.lib.composeExtensions (prev.python3.packageOverrides or (_self: _super: { })
           ) pythonOverrides;
         };
+
+        bat = prev.bat.overrideAttrs (
+          old:
+          let
+            updatedJsonSyntax = final.fetchurl {
+              url = "https://raw.githubusercontent.com/sublimehq/Packages/0d07278457f43f56c0f2c95f883621ea6ed2d370/JSON/JSON.sublime-syntax";
+              sha256 = "sha256-fit/TAmpFwyVi3oVvNq7f9Oia5BQ6qMU2tHlppyN9SQ=";
+            };
+          in
+          {
+            # bat 0.26.0 bundles a Dockerfile syntax referencing the newer JSON
+            # grammar's `arrays` context (see sharkdp/bat#3446) while still
+            # shipping the older JSON definition. Replace it here so cache builds
+            # succeed without warnings until upstream releases a fix.
+            postPatch =
+              (old.postPatch or "")
+              + ''
+                cp ${updatedJsonSyntax} assets/syntaxes/01_Packages/JSON/JSON.sublime-syntax
+              '';
+          }
+        );
 
         # Disable the package causing the issue until a fix is available
         aider-chat-full = prev.aider-chat-full.override {

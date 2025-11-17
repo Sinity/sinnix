@@ -5,7 +5,7 @@
   ...
 }:
 let
-  isDesktop = config.sinnix.machine.isDesktop;
+  inherit (config.sinnix.machine) isDesktop;
   bluezExperimental = pkgs.bluez.override { enableExperimental = true; };
   desktopNetworkingPackages = [
     pkgs.networkmanagerapplet
@@ -33,38 +33,40 @@ in
     };
   };
 
-  services.resolved = {
-    enable = true;
-    dnssec = "allow-downgrade";
-    domains = [ "~." ];
-    dnsovertls = "opportunistic";
-    fallbackDns = [
-      "1.0.0.1#one.one.one.one"
-      "8.8.4.4#dns.google"
-      "2606:4700:4700::1001#one.one.one.one"
-      "2001:4860:4860::8844#dns.google"
-    ];
-    extraConfig = ''
-      DNS=1.1.1.1#one.one.one.one 8.8.8.8#dns.google 2606:4700:4700::1111#one.one.one.one 2001:4860:4860::8888#dns.google
-      FallbackDNS=1.0.0.1#one.one.one.one 8.8.4.4#dns.google 2606:4700:4700::1001#one.one.one.one 2001:4860:4860::8844#dns.google
-    '';
-  };
+  services = {
+    resolved = {
+      enable = true;
+      dnssec = "allow-downgrade";
+      domains = [ "~." ];
+      dnsovertls = "opportunistic";
+      fallbackDns = [
+        "1.0.0.1#one.one.one.one"
+        "8.8.4.4#dns.google"
+        "2606:4700:4700::1001#one.one.one.one"
+        "2001:4860:4860::8844#dns.google"
+      ];
+      extraConfig = ''
+        DNS=1.1.1.1#one.one.one.one 8.8.8.8#dns.google 2606:4700:4700::1111#one.one.one.one 2001:4860:4860::8888#dns.google
+        FallbackDNS=1.0.0.1#one.one.one.one 8.8.4.4#dns.google 2606:4700:4700::1001#one.one.one.one 2001:4860:4860::8844#dns.google
+      '';
+    };
 
-  services.openssh = {
-    enable = true;
-    settings = {
-      PermitRootLogin = "no";
-      PasswordAuthentication = false;
-      KbdInteractiveAuthentication = false;
-      LogLevel = "VERBOSE";
+    openssh = {
+      enable = true;
+      settings = {
+        PermitRootLogin = "no";
+        PasswordAuthentication = false;
+        KbdInteractiveAuthentication = false;
+        LogLevel = "VERBOSE";
+      };
+    };
+
+    mullvad-vpn = lib.mkIf isDesktop {
+      enable = true;
     };
   };
 
   programs.mosh.enable = true;
-
-  services.mullvad-vpn = lib.mkIf isDesktop {
-    enable = true;
-  };
 
   hardware.bluetooth = lib.mkIf isDesktop {
     enable = lib.mkDefault true;
@@ -82,6 +84,7 @@ in
     };
   };
 
-  environment.systemPackages =
-    lib.mkAfter (networkingToolPackages ++ lib.optionals isDesktop desktopNetworkingPackages);
+  environment.systemPackages = lib.mkAfter (
+    networkingToolPackages ++ lib.optionals isDesktop desktopNetworkingPackages
+  );
 }

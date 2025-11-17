@@ -1,5 +1,10 @@
 # Host-specific storage configuration for sinnix-prime
-{ pkgs, lib, config, ... }:
+{
+  pkgs,
+  lib,
+  config,
+  ...
+}:
 let
   inherit (config.sinnix.paths) realmRoot dataRoot outerRealm;
   username = config.sinnix.user.name;

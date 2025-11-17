@@ -1,4 +1,10 @@
-{ lib, pkgs, sinnix, config, ... }:
+{
+  lib,
+  pkgs,
+  sinnix,
+  config,
+  ...
+}:
 let
   username = sinnix.user.name;
 in

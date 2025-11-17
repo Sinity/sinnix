@@ -62,7 +62,6 @@ in
       "${qutePath}/greasemonkey/cookie-nag-zapper.user.js";
     "qutebrowser/greasemonkey/readable-medium.user.js".source =
       "${qutePath}/greasemonkey/readable-medium.user.js";
-    "qutebrowser/greasemonkey/template.user.js".source =
-      "${qutePath}/greasemonkey/template.user.js";
+    "qutebrowser/greasemonkey/template.user.js".source = "${qutePath}/greasemonkey/template.user.js";
   };
 }

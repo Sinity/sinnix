@@ -1,5 +1,10 @@
 # Hyprland keybindings configuration
-{ inputs, pkgs, sinnix, ... }:
+{
+  inputs,
+  pkgs,
+  sinnix,
+  ...
+}:
 let
   script = rel: "${inputs.self}/scripts/${rel}";
   screenshotDir = "${sinnix.paths.dataRoot}/screenshot";

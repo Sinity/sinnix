@@ -6,7 +6,6 @@ IFS=$'\n\t'
 
 ROOT=${1:-$(pwd)}
 OUTPUT_DIR=${2:-combined-bundles}
-OUTPUT_FORMAT="markdown"
 
 # Directories to exclude entirely
 EXCLUDES=(

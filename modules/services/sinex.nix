@@ -1,6 +1,5 @@
 {
   config,
-  lib,
   pkgs,
   ...
 }:
@@ -9,7 +8,10 @@ let
 in
 {
   config = {
-    systemd.services."sinex-blob-init".path = [ pkgs.git pkgs.git-annex ];
+    systemd.services."sinex-blob-init".path = [
+      pkgs.git
+      pkgs.git-annex
+    ];
 
     services.sinex = {
       enable = false;

@@ -1,4 +1,9 @@
-{ lib, pkgs, config, ... }:
+{
+  lib,
+  pkgs,
+  config,
+  ...
+}:
 let
   username = config.sinnix.user.name;
   inherit (config.sinnix.paths) dataRoot;

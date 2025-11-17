@@ -5,7 +5,7 @@
   ...
 }:
 let
-  inherit (config.sinnix.paths) dataRoot realmRoot;
+  inherit (config.sinnix.paths) dataRoot;
   journaldBaseDir = "${dataRoot}/syslog";
   bootMetricsDir = "${journaldBaseDir}/boot-metrics";
   username = config.sinnix.user.name;

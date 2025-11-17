@@ -13,8 +13,8 @@ let
   secretsProfilePath = ".config/profile.d/agenix-secrets.sh";
   secretsSourceSnippet = ''if [ -f "$HOME/${secretsProfilePath}" ]; then . "$HOME/${secretsProfilePath}"; fi'';
   secretsScript = lib.optionalString hasSecrets ''
-    # shellcheck shell=bash
-${secretsExportScript}
+        # shellcheck shell=bash
+    ${secretsExportScript}
   '';
 in
 {
@@ -56,32 +56,33 @@ in
     };
   };
 
-  programs =
-    {
-      zsh = {
-        initContent = lib.mkMerge [
-          (lib.mkBefore (lib.optionalString hasSecrets ''
-${secretsSourceSnippet}
-          ''))
-        ];
-        shellAliases = lib.optionalAttrs hasSecrets {
-          load-secrets = secretsSourceSnippet;
-        };
-      };
-
-      home-manager.enable = true;
-    }
-    // lib.optionalAttrs hasSecrets {
-      bash = {
-        enable = true;
-        bashrcExtra = ''
-${secretsSourceSnippet}
-        '';
-        profileExtra = ''
-${secretsSourceSnippet}
-        '';
+  programs = {
+    zsh = {
+      initContent = lib.mkMerge [
+        (lib.mkBefore (
+          lib.optionalString hasSecrets ''
+            ${secretsSourceSnippet}
+          ''
+        ))
+      ];
+      shellAliases = lib.optionalAttrs hasSecrets {
+        load-secrets = secretsSourceSnippet;
       };
     };
+
+    home-manager.enable = true;
+  }
+  // lib.optionalAttrs hasSecrets {
+    bash = {
+      enable = true;
+      bashrcExtra = ''
+        ${secretsSourceSnippet}
+      '';
+      profileExtra = ''
+        ${secretsSourceSnippet}
+      '';
+    };
+  };
 
   nix.gc = {
     automatic = true;

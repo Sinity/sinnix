@@ -1,7 +1,13 @@
 # Pyprland - Advanced scratchpad management for Hyprland
-{ pkgs, inputs, lib, config, ... }:
+{
+  pkgs,
+  inputs,
+  lib,
+  config,
+  ...
+}:
 let
-  realmRoot = config.sinnix.paths.realmRoot;
+  inherit (config.sinnix.paths) realmRoot;
   pyprlandCleanup = pkgs.writeShellScript "pyprland-sock-cleanup" ''
     set -eu
     HYPR_RUNTIME="/run/user/$UID/hypr"

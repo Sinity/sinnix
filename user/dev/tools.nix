@@ -10,8 +10,12 @@
 }:
 let
   homeDir = config.home.homeDirectory;
-  realmRoot = sinnix.paths.realmRoot;
-  mcpPython = pkgs.python3.withPackages (ps: [ ps.fastmcp ps.qdrant-client ps.psycopg ]);
+  inherit (sinnix.paths) realmRoot;
+  mcpPython = pkgs.python3.withPackages (ps: [
+    ps.fastmcp
+    ps.qdrant-client
+    ps.psycopg
+  ]);
   mcpQdrantBin = pkgs.writeShellScriptBin "mcp-qdrant" ''
     exec ${mcpPython}/bin/python3 ${inputs.self}/scripts/mcp-qdrant.py "$@"
   '';
@@ -32,10 +36,14 @@ let
     "${homeDir}/session-snapshots/20251013T000834"
     "${realmRoot}/project/knowledge-extract"
   ];
-  codexProjects = builtins.listToAttrs (map (path: {
-    name = path;
-    value = { trust_level = "trusted"; };
-  }) codexProjectPaths);
+  codexProjects = builtins.listToAttrs (
+    map (path: {
+      name = path;
+      value = {
+        trust_level = "trusted";
+      };
+    }) codexProjectPaths
+  );
   codexConfig = {
     model = "gpt-5-codex";
     model_reasoning_effort = "high";
@@ -55,11 +63,17 @@ let
       };
       context7 = {
         command = "npx";
-        args = [ "-y" "@upstash/context7-mcp@latest" ];
+        args = [
+          "-y"
+          "@upstash/context7-mcp@latest"
+        ];
       };
       firecrawl = {
         command = "npx";
-        args = [ "-y" "firecrawl-mcp@latest" ];
+        args = [
+          "-y"
+          "firecrawl-mcp@latest"
+        ];
         env = {
           FIRECRAWL_API_KEY = "$FIRECRAWL_API_KEY";
         };
@@ -162,7 +176,8 @@ in
         wayland-utils
         xan
         zk
-      ] ++ [
+      ]
+      ++ [
         mcpQdrantBin
         mcpPostgresBin
       ]
@@ -197,17 +212,13 @@ in
   };
 
   xdg.configFile = {
-    "opencode/opencode.json".text =
-      lib.replaceStrings
-        [ "/home/sinity" ]
-        [ homeDir ]
-        (builtins.readFile (dotsPath + "/opencode/opencode.json"));
+    "opencode/opencode.json".text = lib.replaceStrings [ "/home/sinity" ] [ homeDir ] (
+      builtins.readFile (dotsPath + "/opencode/opencode.json")
+    );
 
-    "sqlitebrowser/sqlitebrowser.conf".text =
-      lib.replaceStrings
-        [ "/home/sinity" ]
-        [ homeDir ]
-        (builtins.readFile (dotsPath + "/sqlitebrowser/sqlitebrowser.conf"));
+    "sqlitebrowser/sqlitebrowser.conf".text = lib.replaceStrings [ "/home/sinity" ] [ homeDir ] (
+      builtins.readFile (dotsPath + "/sqlitebrowser/sqlitebrowser.conf")
+    );
 
     "ripgrep-all/config.jsonc".source = dotsPath + "/ripgrep-all/config.jsonc";
 

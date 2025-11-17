@@ -86,6 +86,7 @@ let
   };
 in
 {
-  config.environment.systemPackages =
-    lib.mkAfter (coreDiagnostics ++ optionalDiagnostics ++ optionalPerfSuites ++ [ perfScan ]);
+  config.environment.systemPackages = lib.mkAfter (
+    coreDiagnostics ++ optionalDiagnostics ++ optionalPerfSuites ++ [ perfScan ]
+  );
 }

@@ -40,11 +40,64 @@ in
         dwt = "diff --word-diff=color --word-diff-regex=[^[:space:],]+";
         dststat = "diff --staged --stat";
         dstd = "difftool --staged --tool=difftastic --prompt=false";
+
+        # Clean history views (merge-commits workflow)
+        lg = "log --first-parent --oneline --decorate";
+        lgg = "log --first-parent --graph --oneline --decorate";
+        lga = "log --graph --oneline --decorate --all";
+        lgf = "log --graph --oneline --decorate";
+
+        # PR/branch management
+        review = "log --first-parent --graph --oneline --decorate @{upstream}..HEAD";
+        incoming = "log --first-parent --oneline --decorate ..@{upstream}";
+        outgoing = "log --first-parent --oneline --decorate @{upstream}..";
+
+        # Better blame and bisect
+        blamef = "blame --first-parent";
+        bisectf = "bisect start --first-parent";
+
+        # Branch cleanup
+        cleanup = "!git branch --merged | grep -v '\\*\\|master\\|main' | xargs -n 1 git branch -d";
+
+        # Interactive rebase helper
+        tidy = "rebase -i @{upstream}";
+
+        # Force merge commit
+        mergeff = "merge --no-ff";
       };
 
       init.defaultBranch = "master";
-      merge.conflictStyle = "diff3";
-      diff.colorMoved = "default";
+
+      # Merge settings
+      merge = {
+        conflictStyle = "zdiff3"; # Better than diff3, shows common ancestor
+        ff = false; # Always create merge commits to preserve branch structure
+      };
+
+      # Diff settings
+      diff = {
+        colorMoved = "default";
+        algorithm = "histogram"; # Better diff algorithm
+      };
+
+      # Pull/fetch behavior
+      pull.rebase = true; # Rebase local commits when pulling
+      fetch.prune = true; # Auto-prune deleted remote branches
+
+      # Rebase settings
+      rebase = {
+        autoStash = true; # Automatically stash/unstash when rebasing
+        autoSquash = true; # Automatically mark fixup! commits during interactive rebase
+      };
+
+      # Push settings
+      push.autoSetupRemote = true; # Automatically set up remote tracking on first push
+
+      # Branch settings
+      branch.autoSetupMerge = "always"; # Always set up tracking when creating branches
+
+      # Rerere (reuse recorded resolution)
+      rerere.enabled = true; # Remember how conflicts were resolved
 
       delta = {
         "line-numbers" = true;

@@ -260,12 +260,12 @@ in
       };
       "transmission/settings.json".text =
         let
-          torrentInbox = sinnix.paths.torrentInbox;
+          inherit (sinnix.paths) torrentInbox realmRoot;
           baseSettings = builtins.readFile (dotsPath + "/transmission/settings.json");
         in
         lib.replaceStrings
           [ "/home/sinity/Downloads" "/home/sinity" "/realm" ]
-          [ torrentInbox config.home.homeDirectory sinnix.paths.realmRoot ]
+          [ torrentInbox config.home.homeDirectory realmRoot ]
           baseSettings;
       "autostart/mullvad-vpn.desktop".text = ''
         [Desktop Entry]

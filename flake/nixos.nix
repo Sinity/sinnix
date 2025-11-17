@@ -47,22 +47,20 @@ in
 
     sinnix-ethereal = lib.nixosSystem {
       system = "x86_64-linux";
-      modules =
-        baseModules
-        ++ [
-          inputs.disko.nixosModules.disko
-          {
-            imports = [
-              ../modules/foundation.nix
-              ../modules/core.nix
-              ../modules/logging.nix
-              ../modules/secrets.nix
-              ../modules/home-manager.nix
-              ../modules/users.nix
-            ];
-          }
-          { imports = [ ../hosts/sinnix-ethereal ]; }
-        ];
+      modules = baseModules ++ [
+        inputs.disko.nixosModules.disko
+        {
+          imports = [
+            ../modules/foundation.nix
+            ../modules/core.nix
+            ../modules/logging.nix
+            ../modules/secrets.nix
+            ../modules/home-manager.nix
+            ../modules/users.nix
+          ];
+        }
+        { imports = [ ../hosts/sinnix-ethereal ]; }
+      ];
       specialArgs = sharedSpecialArgs;
     };
   };

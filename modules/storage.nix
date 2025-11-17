@@ -8,13 +8,10 @@
 let
   username = config.sinnix.user.name;
   userCfg = lib.attrByPath [ "users" "users" username ] config { };
-  userUid =
-    if userCfg ? uid then builtins.toString userCfg.uid else "1000";
-  primaryGroupName =
-    if userCfg ? group then userCfg.group else "users";
+  userUid = builtins.toString (userCfg.uid or 1000);
+  primaryGroupName = userCfg.group or "users";
   groupCfg = lib.attrByPath [ "users" "groups" primaryGroupName ] config { };
-  primaryGroupId =
-    if groupCfg ? gid then builtins.toString groupCfg.gid else "100";
+  primaryGroupId = builtins.toString (groupCfg.gid or 100);
   nextcloudCert = builtins.readFile "${inputs.self}/assets/nextcloud-cert.crt";
   baseStoragePackages = with pkgs; [
     davfs2
@@ -154,9 +151,9 @@ in
       };
 
       gdrive-mount = {
-      enable = false;
+        enable = false;
+      };
     };
-  };
 
   system.activationScripts.fixRclonePermissions.text = ''
     if [ -f /home/${username}/.config/rclone/rclone.conf ]; then
