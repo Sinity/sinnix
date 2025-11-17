@@ -86,62 +86,6 @@ let
     fi
     sudo umount /mnt/nextcloud
   '';
-
-  onedriveAuth = pkgs.writeShellScriptBin "onedrive-auth" ''
-    #!/usr/bin/env bash
-    set -euo pipefail
-    sudo mkdir -p /var/lib/onedrive-auth
-    sudo chown ${username}:users /var/lib/onedrive-auth
-    sudo chmod 700 /var/lib/onedrive-auth
-    if [ ! -f /var/lib/onedrive-auth/config ]; then
-      sudo cp -r /etc/onedrive/* /var/lib/onedrive-auth/
-      sudo chown -R ${username}:users /var/lib/onedrive-auth/
-    fi
-    onedrive --confdir /var/lib/onedrive-auth
-  '';
-
-  onedriveStatus = pkgs.writeShellScriptBin "onedrive-status" ''
-    #!/usr/bin/env bash
-    set -euo pipefail
-    systemctl status onedrive-sync --no-pager
-  '';
-
-  umountOnedrive = pkgs.writeShellScriptBin "umount-onedrive" ''
-    #!/usr/bin/env bash
-    set -euo pipefail
-    sudo systemctl stop onedrive-sync
-  '';
-
-  setupGdrive = pkgs.writeShellScriptBin "setup-gdrive" ''
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if rclone listremotes 2>/dev/null | grep -q '^gdrive:'; then
-      echo "setup-gdrive: remote 'gdrive' already exists" >&2
-      exit 1
-    fi
-    rclone config create gdrive drive scope drive
-  '';
-
-  mountGdrive = pkgs.writeShellScriptBin "mount-gdrive" ''
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if mountpoint -q /mnt/gdrive; then
-      exit 0
-    fi
-    rclone mount gdrive: /mnt/gdrive \
-      --daemon \
-      --vfs-cache-mode full \
-      --vfs-cache-max-size 5G \
-      --vfs-cache-max-age 72h \
-      --buffer-size 256M \
-      --vfs-read-ahead 512M \
-      --dir-cache-time 72h \
-      --poll-interval 1m \
-      --uid $(id -u) \
-      --gid $(id -g) \
-      --umask 022 \
-      --config "$HOME/.config/rclone/rclone.conf"
-  '';
 in
 {
   home.packages = with pkgs; [
@@ -152,10 +96,5 @@ in
     decryptFolder
     mountNextcloud
     umountNextcloud
-    onedriveAuth
-    onedriveStatus
-    umountOnedrive
-    setupGdrive
-    mountGdrive
   ];
 }

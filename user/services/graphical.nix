@@ -95,7 +95,7 @@ in
       Service = {
         Type = "dbus";
         BusName = "org.kde.kdeconnect";
-        ExecStart = "${pkgs.kdePackages.kdeconnect-kde}/libexec/kdeconnectd";
+        ExecStart = "${pkgs.kdePackages.kdeconnect-kde}/bin/kdeconnectd";
         Restart = "on-failure";
         RestartSec = 5;
       };

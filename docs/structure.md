@@ -45,8 +45,8 @@ and keep ownership with that module.
 ## Storage Responsibilities
 
 - `modules/storage.nix` owns systemd services, mounts, and system-level packages
-  required for Always-On sync (davfs2, OneDrive, rclone).  User-facing helpers
-  (gocryptfs, mount scripts) remain in `user/storage.nix`.
+  required for Always-On sync (davfs2, rclone-backed remotes).  User-facing
+  helpers (gocryptfs, mount scripts) remain in `user/storage.nix`.
 - The module also relies on `config.sinnix.secrets.paths.davfs2-secrets` for the
   davfs2 credentials so the secret location is defined exactly once.
 

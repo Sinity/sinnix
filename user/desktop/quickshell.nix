@@ -204,7 +204,7 @@ in
     };
     Service = {
       Type = "simple";
-      ExecStart = "${inputs.quickshell.packages.${pkgs.system}.default}/bin/quickshell";
+      ExecStart = "${inputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default}/bin/quickshell";
       Restart = "on-failure";
       RestartSec = 2;
       Environment = [

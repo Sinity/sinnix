@@ -11,8 +11,8 @@ let
   username = config.sinnix.user.name;
   interceptTools = pkgs.interception-tools;
   capsPlugin = pkgs.interception-tools-plugins.caps2esc;
-  interceptBouncePkg = inputs.intercept-bounce.packages.${pkgs.system}.intercept-bounce;
-  scribePkg = inputs.scribe-tap.packages.${pkgs.system}.default;
+  interceptBouncePkg = inputs.intercept-bounce.packages.${pkgs.stdenv.hostPlatform.system}.intercept-bounce;
+  scribePkg = inputs.scribe-tap.packages.${pkgs.stdenv.hostPlatform.system}.default;
   interceptCmd = ''${interceptTools}/bin/intercept -g $DEVNODE'';
   bounceCmd = lib.escapeShellArgs [
     "${interceptBouncePkg}/bin/intercept-bounce"

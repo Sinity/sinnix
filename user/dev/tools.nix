@@ -226,9 +226,15 @@ in
   };
 
   home.file = {
-    ".codex/config.toml".source = codexConfigFile;
+    ".codex/config.toml" = {
+      source = codexConfigFile;
+      force = true;
+    };
     ".local/bin/mcp-qdrant".source = "${mcpQdrantBin}/bin/mcp-qdrant";
     ".local/bin/mcp-postgres".source = "${mcpPostgresBin}/bin/mcp-postgres";
-    ".gemini/settings.json".source = mkDotsRepoLink "gemini/settings.json";
+    ".gemini/settings.json" = {
+      source = mkDotsRepoLink "gemini/settings.json";
+      force = true;
+    };
   };
 }

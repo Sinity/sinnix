@@ -10,7 +10,7 @@ let
   sinevecDataDir = "${dataRoot}/sinevec";
   sinevecStateDir = "${sinevecDataDir}/state";
   sinevecLogDir = "${sinevecDataDir}/logs";
-  sinevecPkg = inputs.sinevec.packages.${pkgs.system}.sinevec;
+  sinevecPkg = inputs.sinevec.packages.${pkgs.stdenv.hostPlatform.system}.sinevec;
   sinevecUser = "sinevec";
   sinevecGroup = "sinevec";
   username = config.sinnix.user.name;

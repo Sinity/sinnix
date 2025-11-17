@@ -398,6 +398,7 @@ in
             postPatch =
               (old.postPatch or "")
               + ''
+                mkdir -p assets/syntaxes/01_Packages/JSON
                 cp ${updatedJsonSyntax} assets/syntaxes/01_Packages/JSON/JSON.sublime-syntax
               '';
           }

@@ -1,6 +1,6 @@
 { pkgs, inputs, ... }:
 let
-  chromeStablePkg = inputs.browser-previews.packages.${pkgs.system}.google-chrome;
+  chromeStablePkg = inputs.browser-previews.packages.${pkgs.stdenv.hostPlatform.system}.google-chrome;
 in
 {
   home.sessionVariables.COMMUNICATION_DOMAIN = "v0.3";

@@ -6,8 +6,8 @@
       scrollback_lines = 9999999;
       enable_audio_bell = "no";
       mouse_hide_wait = 60;
-      wheel_scroll_multiplier = 0.5;
-      touch_scroll_multiplier = 0.5;
+      wheel_scroll_multiplier = 5.0;
+      touch_scroll_multiplier = 5.0;
       cursor_trail = 3;
       confirm_os_window_close = 0;
       allow_remote_control = "socket-only";
