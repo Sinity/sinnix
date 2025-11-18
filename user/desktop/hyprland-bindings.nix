@@ -51,14 +51,14 @@ in
     "SUPER SHIFT, 9, movetoworkspace, 9"
     "SUPER SHIFT, 0, movetoworkspace, 10"
 
-    "SUPER, grave, exec, pypr toggle term"
-    "SUPER, S, exec, pypr toggle spotify"
-    "SUPER, N, exec, pypr toggle notes"
+    "SUPER, grave, exec, ${script "toggle-scratch"} term"
+    "SUPER, S, exec, ${script "toggle-scratch"} spotify"
+    "SUPER, N, exec, ${script "toggle-scratch"} notes"
 
     "SUPER, V, exec, kitty --class clipse -e clipse"
     ", Print, exec, grimblast --notify --freeze copysave area ${screenshotDir}/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
     "SUPER, Print, exec, grimblast --notify --cursor copysave output ${screenshotDir}/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
-    ", F8, exec, pypr toggle rawlog"
+    ", F8, exec, ${script "toggle-scratch"} rawlog"
     ", SHIFT+F8, exec, log-to-knowledgebase"
 
     "SUPER SHIFT, P, pin"

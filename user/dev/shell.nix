@@ -1,6 +1,7 @@
 {
   lib,
   pkgs,
+  inputs,
   sinnix,
   config,
   ...
@@ -161,8 +162,8 @@ in
         icat = "kitten icat";
         dsize = "du -hs";
         open = "xdg-open";
-        cl = "~/.claude/local/node_modules/.bin/claude";
-        claude = ''REALM_DIR="${sinnix.paths.realmRoot}"; if [ -d "$REALM_DIR" ]; then ~/.claude/local/node_modules/.bin/claude --add-dir "$REALM_DIR" ${config.home.homeDirectory}; else ~/.claude/local/node_modules/.bin/claude ${config.home.homeDirectory}; fi'';
+        cl = "~/.local/bin/claude";
+        claude = "~/.local/bin/claude";
         nvim = "nvim --listen /tmp/nvim-$$";
         ccm = "ccmonitor --refresh-rate 1 --refresh-per-second 20";
         ccm-attach = "zellij attach ccusage-monitor";
@@ -254,5 +255,23 @@ in
       changeDirWidgetOptions = [ "--preview 'eza --tree --color=always {} | head -200'" ];
       enableZshIntegration = true;
     };
+  };
+
+  home.file.".local/bin/claude" = {
+    text = ''
+      #!/usr/bin/env bash
+      set -euo pipefail
+
+      CLAUDE_BIN="${inputs.nix-ai-tools.packages.${pkgs.stdenv.hostPlatform.system}.claude-code}/bin/claude"
+      REALM_DIR="${sinnix.paths.realmRoot}"
+      HOME_DIR="${config.home.homeDirectory}"
+
+      if [ -d "$REALM_DIR" ]; then
+        exec "$CLAUDE_BIN" --add-dir "$REALM_DIR" "$HOME_DIR" "$@"
+      else
+        exec "$CLAUDE_BIN" "$HOME_DIR" "$@"
+      fi
+    '';
+    executable = true;
   };
 }

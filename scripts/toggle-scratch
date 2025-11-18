@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONFIG_DIR=${SCRATCHPAD_CONFIG_DIR:-$HOME/.config/scratchpads}
+SPECIAL_PREFIX=${SCRATCHPAD_SPECIAL_PREFIX:-scratch}
+
+usage() {
+  echo "Usage: toggle-scratch <name>" >&2
+  exit 1
+}
+
+NAME=${1:-}
+[ -n "$NAME" ] || usage
+CONFIG_FILE="$CONFIG_DIR/${NAME}.conf"
+
+if [ ! -f "$CONFIG_FILE" ]; then
+  echo "toggle-scratch: config not found: $CONFIG_FILE" >&2
+  exit 1
+fi
+
+# shellcheck disable=SC1090
+source "$CONFIG_FILE"
+
+: "${CLASS:?toggle-scratch: CLASS not set in $CONFIG_FILE}"
+WORKSPACE=${WORKSPACE:-${SPECIAL_PREFIX}_${NAME}}
+CLASS_PATTERN=${CLASS_PATTERN:-}
+if ! declare -p COMMAND >/dev/null 2>&1; then
+  echo "toggle-scratch: COMMAND array not set in $CONFIG_FILE" >&2
+  exit 1
+fi
+
+command -v hyprctl >/dev/null 2>&1 || {
+  echo "toggle-scratch: hyprctl not found" >&2
+  exit 1
+}
+
+has_window() {
+  local clients
+  clients=$(hyprctl -j clients 2>/dev/null) || return 1
+  [ -n "$clients" ] || return 1
+  if HYPR_CLIENTS="$clients" python3 - "$CLASS" "$CLASS_PATTERN" <<'PY'
+import json, os, re, sys
+class_name = sys.argv[1]
+pattern = sys.argv[2]
+use_pattern = bool(pattern)
+try:
+    clients = json.loads(os.environ.get("HYPR_CLIENTS") or "[]")
+except json.JSONDecodeError:
+    sys.exit(1)
+for client in clients:
+    name = client.get("class") or ""
+    if use_pattern:
+        try:
+            if re.search(pattern, name):
+                sys.exit(0)
+        except re.error:
+            pass
+    elif name == class_name:
+        sys.exit(0)
+sys.exit(1)
+PY
+  then
+    return 0
+  else
+    return 1
+  fi
+}
+
+spawn_window() {
+  if [ -n "${WORKDIR:-}" ]; then
+    (cd "$WORKDIR" && "${COMMAND[@]}") &
+  else
+    "${COMMAND[@]}" &
+  fi
+  disown
+}
+
+wait_for_window() {
+  local tries=${WAIT_FOR_WINDOW_TRIES:-30}
+  local delay=${WAIT_FOR_WINDOW_DELAY:-0.1}
+  while [ "$tries" -gt 0 ]; do
+    if has_window; then
+      return 0
+    fi
+    tries=$(( tries - 1 ))
+    sleep "$delay"
+  done
+  echo "toggle-scratch: timed out waiting for $CLASS" >&2
+  return 1
+}
+
+if ! has_window; then
+  spawn_window
+  wait_for_window || exit 1
+fi
+
+hyprctl dispatch togglespecialworkspace "$WORKSPACE" >/dev/null

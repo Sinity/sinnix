@@ -147,6 +147,10 @@ in
       source = script "rawlog";
       executable = true;
     };
+    ".local/bin/toggle-scratch" = {
+      source = script "toggle-scratch";
+      executable = true;
+    };
     ".local/bin/combine-files" = {
       source = script "combine-files";
       executable = true;
@@ -166,6 +170,41 @@ in
     ".local/bin/log-to-knowledgebase" = {
       source = script "rawlog";
       executable = true;
+    };
+    ".config/scratchpads/term.conf" = {
+      text = ''
+        # shellcheck shell=bash
+        COMMAND=(${pkgs.kitty}/bin/kitty --class scratchpad-terminal)
+        CLASS="scratchpad-terminal"
+        WORKSPACE="scratch_term"
+      '';
+    };
+    ".config/scratchpads/notes.conf" = {
+      text = ''
+        # shellcheck shell=bash
+        COMMAND=(${pkgs.kitty}/bin/kitty --class notes-scratch -d /realm/knowledgebase ${pkgs.neovim}/bin/nvim)
+        CLASS="notes-scratch"
+        WORKSPACE="scratch_notes"
+      '';
+    };
+    ".config/scratchpads/rawlog.conf" = {
+      text = ''
+        # shellcheck shell=bash
+        COMMAND=(${pkgs.kitty}/bin/kitty --class rawlog-capture --instance-group rawlog --single-instance --override font_size=22 sh -lc "$HOME/.local/bin/rawlog-capture-session")
+        CLASS="rawlog-capture"
+        WORKSPACE="scratch_rawlog"
+        WAIT_FOR_WINDOW_TRIES=50
+      '';
+    };
+    ".config/scratchpads/spotify.conf" = {
+      text = ''
+        # shellcheck shell=bash
+        COMMAND=(spotify)
+        CLASS="Spotify"
+        CLASS_PATTERN="(?i)^spotify$"
+        WORKSPACE="scratch_spotify"
+        WAIT_FOR_WINDOW_TRIES=100
+      '';
     };
   };
 
