@@ -62,7 +62,7 @@ in
     };
 
     mullvad-vpn = lib.mkIf isDesktop {
-      enable = true;
+      enable = false;
     };
   };
 

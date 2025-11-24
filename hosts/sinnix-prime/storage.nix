@@ -151,7 +151,7 @@ in
     }
   ];
 
-  systemd = {
+    systemd = {
     tmpfiles.rules = lib.mkAfter [
       "d /mnt/pendrv 0755 root root -"
       "d ${realmRoot}/knowledgebase 0755 ${username} users -"
@@ -163,11 +163,11 @@ in
     services.prepare-swapfile = {
       description = "Prepare Btrfs swapfile";
       requiredBy = [ "swap-swapfile.swap" ];
-      before = [ "swap-swapfile.swap" ];
-      after = [
-        "systemd-remount-fs.service"
-        "local-fs.target"
+      before = [
+        "swap-swapfile.swap"
+        "swap.target"
       ];
+      after = [ "systemd-remount-fs.service" ];
       unitConfig = {
         # Avoid sysinit ↔ swap.target ordering cycles by taking explicit deps.
         DefaultDependencies = false;

@@ -20,7 +20,7 @@
     extraSpecialArgs = {
       inherit inputs;
       secretsExportScript = config.sinnix.secrets.exportScript;
-      dotsPath = "${inputs.self}/dots";
+      dotsRepoPath = config.sinnix.paths.dotsRoot;
       secretPaths = config.sinnix.secrets.paths;
       inherit (config) sinnix;
     };

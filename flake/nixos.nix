@@ -11,7 +11,7 @@ let
     inputs.agenix.nixosModules.default
     (import ./overlay.nix)
   ];
-  sinexModule = inputs.sinex.nixosModules.default;
+  #sinexModule = inputs.sinex.nixosModules.default;
   sharedSpecialArgs = {
     inherit inputs;
   };
@@ -40,7 +40,7 @@ in
           ];
         }
         { imports = [ ../hosts/sinnix-prime ]; }
-        sinexModule
+        # sinexModule
       ];
       specialArgs = sharedSpecialArgs;
     };

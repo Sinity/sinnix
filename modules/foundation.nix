@@ -46,7 +46,7 @@ in
             mediaRoot = mkOption {
               type = types.str;
               default = "${config.dataRoot}/media";
-              description = "Directory storing primary media libraries managed by photoprism and similar services.";
+              description = "Directory storing primary media libraries for desktop-managed media workflows.";
             };
 
             outerRealm = mkOption {
@@ -59,6 +59,18 @@ in
               type = types.str;
               default = "${config.outerRealm}/inbox";
               description = "Download directory for transmission and other ingest pipelines.";
+            };
+
+            projectRoot = mkOption {
+              type = types.str;
+              default = "${config.realmRoot}/sinnix";
+              description = "Location of the Sinnix git checkout used for editable dotfiles and dev helpers.";
+            };
+
+            dotsRoot = mkOption {
+              type = types.str;
+              default = "${config.projectRoot}/dots";
+              description = "Directory containing tracked dotfiles that should be symlinked into $HOME.";
             };
           };
         }

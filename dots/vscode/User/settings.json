@@ -1,9 +1,9 @@
 {
   // ——— Existing preferences preserved ———
   "chat.editor.fontFamily": "SauceCodePro Nerd Font Mono",
-  "chat.editor.fontSize": 21.333333333333332,
+  "chat.editor.fontSize": 22,
   "debug.console.fontFamily": "SauceCodePro Nerd Font Mono",
-  "debug.console.fontSize": 21.333333333333332,
+  "debug.console.fontSize": 22,
   "editor.fontFamily": "SauceCodePro Nerd Font Mono, 'Sauce Code Pro', monospace",
   "editor.fontSize": 16,
   "editor.fontLigatures": false,
@@ -12,13 +12,12 @@
   "editor.inlineSuggest.fontFamily": "SauceCodePro Nerd Font Mono",
   "editor.guides.bracketPairs": "active",
   "editor.minimap.enabled": false,
-  "editor.minimap.sectionHeaderFontSize": 13.714285714285714,
+  "editor.minimap.sectionHeaderFontSize": 14,
   "markdown.preview.fontFamily": "Liberation Sans",
-  "markdown.preview.fontSize": 21.333333333333332,
+  "markdown.preview.fontSize": 22,
   "scm.inputFontFamily": "SauceCodePro Nerd Font Mono",
-  "scm.inputFontSize": 19.809523809523807,
-  "screencastMode.fontSize": 85.33333333333333,
-  "workbench.colorTheme": "Tokyo Night",
+  "scm.inputFontSize": 20,
+  "screencastMode.fontSize": 85,
   "workbench.iconTheme": "vscode-icons",
 
   // ——— VSCode-Neovim integration ———
@@ -27,14 +26,13 @@
   "vscode-neovim.compositeKeys": {},
   "keyboard.dispatch": "keyCode",
   "vscode-neovim.useCtrlKeys": true,
-  "vscode-neovim.neovimExecutablePaths.linux": "/run/current-system/sw/bin/nvim",
+  "vscode-neovim.neovimExecutablePaths.linux": "/run/current-system/sw/bin/cSpell",
 
   // ——— Editor ergonomics ———
   "editor.lineNumbers": "relative",
   "workbench.editor.showTabs": "single",
   "workbench.editor.enablePreview": false,
   "workbench.startupEditor": "none",
-  "workbench.commandCenter": false,
 
   // ——— Copilot / Chat Agent ———
   "chat.agent.enabled": true,
@@ -53,7 +51,7 @@
   "terminal.integrated.fontSize": 16,
   "terminal.integrated.drawBoldTextInBrightColors": false,
   "terminal.integrated.enableFileLinks": "off",
-  "terminal.integrated.enableMultiLinePasteWarning": false,
+  "terminal.integrated.enableMultiLinePasteWarning": "auto",
   "terminal.integrated.defaultProfile.linux": "zellij",
   "terminal.integrated.profiles.linux": {
     "zellij": {
@@ -91,15 +89,6 @@
   "window.titleBarStyle": "custom",
   "window.openFoldersInNewWindow": "off",
   "window.restoreWindows": "none",
-
-  // ——— Spellcheck (global) ———
-  "cSpell.language": "en,pl,pl_PL",
-  "cSpell.enabledLanguageIds": [
-    "markdown",
-    "plaintext",
-    "git-commit",
-    "git-rebase"
-  ],
 
   // ——— Git ergonomics ———
   "git.autofetch": true,
@@ -198,5 +187,12 @@
   ],
   "gitlens.ai.model": "vscode",
   "gitlens.ai.vscode.model": "copilot:gpt-4.1",
-  "gitlens.ai.largePromptWarningThreshold": 100000
+  "gitlens.ai.largePromptWarningThreshold": 100000,
+  "claudeCode.allowDangerouslySkipPermissions": true,
+  "workbench.colorTheme": "Tokyo Night Storm",
+  "github.copilot.nextEditSuggestions.enabled": true,
+  "editor.inlineSuggest.experimental.showOnSuggestConflict": "always",
+  "extensions.experimental.affinity": {
+    "asvetliakov.vscode-neovim": 1
+  }
 }

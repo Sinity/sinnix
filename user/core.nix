@@ -23,6 +23,9 @@ in
     homeDirectory = "/home/${username}";
     stateVersion = "24.05";
 
+    # Ensure user-local scripts are discoverable by default
+    sessionPath = [ "$HOME/.local/bin" ];
+
     sessionVariables = {
       FLAKE = flakePath;
       XDG_CONFIG_HOME = "\${HOME}/.config";

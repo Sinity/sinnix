@@ -352,29 +352,6 @@ in
             };
           };
 
-        # Override Codex CLI to a newer upstream tag
-        codex = prev.codex.overrideAttrs (
-          _old:
-          let
-            version = "0.50.0";
-            newSrc = final.fetchFromGitHub {
-              owner = "openai";
-              repo = "codex";
-              rev = "refs/tags/rust-v" + version;
-              sha256 = "sha256-8qNQ92VV0aog3USzeAMqWXws7kaQ//6/A/M85USTTXY=";
-            };
-            newCargo = final.rustPlatform.fetchCargoVendor {
-              src = newSrc;
-              sourceRoot = "source/codex-rs";
-              hash = "sha256-T6Zt5U2aCJWflwKzTbJXwK+BeE7L6IP4WAmISitrpRg=";
-            };
-          in
-          {
-            inherit version;
-            src = newSrc;
-            cargoDeps = newCargo;
-          }
-        );
         python313Packages = prev.python313Packages.overrideScope pythonOverrides;
 
         python3 = prev.python3.override {
@@ -395,12 +372,10 @@ in
             # grammar's `arrays` context (see sharkdp/bat#3446) while still
             # shipping the older JSON definition. Replace it here so cache builds
             # succeed without warnings until upstream releases a fix.
-            postPatch =
-              (old.postPatch or "")
-              + ''
-                mkdir -p assets/syntaxes/01_Packages/JSON
-                cp ${updatedJsonSyntax} assets/syntaxes/01_Packages/JSON/JSON.sublime-syntax
-              '';
+            postPatch = (old.postPatch or "") + ''
+              mkdir -p assets/syntaxes/01_Packages/JSON
+              cp ${updatedJsonSyntax} assets/syntaxes/01_Packages/JSON/JSON.sublime-syntax
+            '';
           }
         );
 
@@ -409,48 +384,144 @@ in
           pythonPackages = final.python3Packages;
         };
 
-        # claude-desktop-wayland = final.symlinkJoin {
-        #   name = "claude-desktop-wayland";
-        #   paths = [
-        #     inputs.claude-desktop.packages.${pkgs.system}.claude-desktop-with-fhs
-        #   ];
-        #   buildInputs = [ final.makeWrapper ];
-        #   postBuild = ''
-        #     wrapProgram $out/bin/claude-desktop --add-flags "--enable-features=WaylandWindowDecorations --no-sandbox"
-        #   '';
-        # };
+        antigravity =
+          let
+            version = "1.11.5-1763627318";
+            buildId = "8c0426ef5d23bfd70393626b41210e0b";
+            src = final.fetchurl {
+              url = "https://us-central1-apt.pkg.dev/projects/antigravity-auto-updater-dev/pool/antigravity-debian/antigravity_${version}_amd64_${buildId}.deb";
+              sha256 = "1bak8hfhvgk183gcfvkl9rdkgkmcqwy3cqqym84k25bnlvnlpcq1";
+            };
 
-        claude-code-usage-monitor = final.python3Packages.buildPythonApplication {
-          pname = "claude-code-usage-monitor";
-          version = "unstable";
-          src = inputs.claude-code-usage-monitor-src;
+            xorgDeps = with final.xorg; [
+              libX11
+              libXcomposite
+              libXcursor
+              libXdamage
+              libXext
+              libXfixes
+              libXi
+              libXinerama
+              libXrandr
+              libXrender
+              libXScrnSaver
+              libXxf86vm
+              libXtst
+              libxkbfile
+              libxcb
+            ];
 
-          pyproject = true;
-          build-system = with final.python3Packages; [ setuptools ];
+            commonDeps = [
+              final.alsa-lib
+              final.at-spi2-atk
+              final.cairo
+              final.cups
+              final.expat
+              final.fontconfig.lib
+              final.gdk-pixbuf
+              final.glib
+              final.gtk3
+              final.libappindicator-gtk3
+              final.libdbusmenu
+              final.libdrm
+              final.libgbm
+              final.libnotify
+              final.libsecret
+              final.libxkbcommon
+              final.libxshmfence
+              final.mesa
+              final.nspr
+              final.nss
+              final.pango
+              final.pulseaudio
+              final.systemd
+              final.util-linux
+              final.zlib
+              final.stdenv.cc.cc.lib
+            ]
+            ++ xorgDeps;
 
-          propagatedBuildInputs = with final.python3Packages; [
-            pytz
-            requests
-            beautifulsoup4
-            lxml
-            numpy
-            pydantic
-            pydantic-settings
-            pyyaml
-            rich
-          ];
+            libPath = final.lib.makeLibraryPath (
+              commonDeps
+              ++ [
+                final.vulkan-loader
+                final.libGL
+                final.libglvnd
+                final.openssl
+              ]
+            );
+            binPath = final.lib.makeBinPath [
+              final.coreutils
+              final.findutils
+              final.gnugrep
+              final.glib
+            ];
+          in
+          final.stdenv.mkDerivation {
+            pname = "antigravity";
+            inherit version src;
 
-          # Use standard Python package installation instead of custom script install
-          postInstall = ''
-            # The package should install the console script via setuptools entry points
-          '';
+            nativeBuildInputs = [
+              final.autoPatchelfHook
+              final.dpkg
+              final.makeBinaryWrapper
+            ];
 
-          meta = with final.lib; {
-            description = "Real-time terminal monitoring tool for tracking Claude AI token usage";
-            homepage = "https://github.com/Maciek-roboblog/Claude-Code-Usage-Monitor";
-            license = licenses.mit;
+            buildInputs = commonDeps ++ [
+              final.libGL
+              final.libglvnd
+              final.vulkan-loader
+              final.openssl
+            ];
+
+            runtimeDependencies = [
+              (final.lib.getLib final.systemd)
+              final.libnotify
+              final.libappindicator-gtk3
+              final.libsecret
+            ];
+
+            dontConfigure = true;
+            dontBuild = true;
+            unpackPhase = ''
+              runHook preUnpack
+              dpkg-deb --fsys-tarfile $src | tar -x --no-same-owner --no-same-permissions
+              runHook postUnpack
+            '';
+
+            installPhase = ''
+              runHook preInstall
+
+              mkdir -p $out
+              cp -r usr/* $out/
+              rm -rf $out/share/doc
+
+              substituteInPlace $out/share/applications/antigravity.desktop \
+                --replace-fail /usr/share/antigravity/antigravity $out/bin/antigravity
+              substituteInPlace $out/share/applications/antigravity-url-handler.desktop \
+                --replace-fail /usr/share/antigravity/antigravity $out/bin/antigravity
+
+              sed -i "/ELECTRON=/iVSCODE_PATH='$out/share/antigravity'" \
+                $out/share/antigravity/bin/antigravity
+
+              mkdir -p $out/bin
+              makeBinaryWrapper $out/share/antigravity/bin/antigravity $out/bin/antigravity \
+                --prefix LD_LIBRARY_PATH : ${libPath} \
+                --prefix PATH : ${binPath} \
+                --add-flags "\''${NIXOS_OZONE_WL:+\''${WAYLAND_DISPLAY:+--ozone-platform-hint=auto --enable-features=WaylandWindowDecorations --enable-wayland-ime=true --wayland-text-input-version=3}}"
+
+              runHook postInstall
+            '';
+
+            meta = with final.lib; {
+              description = "Google's Antigravity IDE";
+              homepage = "https://antigravity.google";
+              sourceProvenance = with sourceTypes; [ binaryNativeCode ];
+              license = licenses.unfree;
+              platforms = [ "x86_64-linux" ];
+              mainProgram = "antigravity";
+            };
           };
-        };
 
         postgresqlPackages = prev.postgresqlPackages // {
           pg_jsonschema = pgJsonschemaFor prev.postgresql;

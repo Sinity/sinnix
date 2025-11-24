@@ -37,7 +37,8 @@ in
     neovim
     graphviz
     mermaid-cli
-    claude-code-usage-monitor
+
+    antigravity # TODO: It's not the greatest placement for this
   ];
 
   programs = {
@@ -46,7 +47,6 @@ in
       enableCompletion = true;
       autosuggestion.enable = true;
       syntaxHighlighting.enable = true;
-
       history = {
         save = 9999999;
         size = 9999999;
@@ -262,7 +262,9 @@ in
       #!/usr/bin/env bash
       set -euo pipefail
 
-      CLAUDE_BIN="${inputs.nix-ai-tools.packages.${pkgs.stdenv.hostPlatform.system}.claude-code}/bin/claude"
+      CLAUDE_BIN="${
+        inputs.nix-ai-tools.packages.${pkgs.stdenv.hostPlatform.system}.claude-code
+      }/bin/claude"
       REALM_DIR="${sinnix.paths.realmRoot}"
       HOME_DIR="${config.home.homeDirectory}"
 

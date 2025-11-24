@@ -47,13 +47,6 @@ let
             mode = "0600";
             path = "/run/agenix/davfs2-secrets";
           }
-        else if secretName == "photoprism-admin-password" then
-          defaultSpec
-          // {
-            owner = "photoprism";
-            group = "photoprism";
-            path = "/run/agenix/photoprism-admin-password";
-          }
         else if secretName == "sinity-password" then
           rootOwnedSpec // { path = "/run/agenix/sinity-password"; }
         else if secretName == "root-password" then
@@ -67,9 +60,7 @@ let
     "sinity-password"
     "root-password"
     "davfs2-secrets"
-    "photoprism-admin-password"
     "configstore-update-notifier"
-    "gcloud-config.tar.gz"
   ];
 
   mkSecretExport =
@@ -106,10 +97,10 @@ in
     sinnix.secrets.paths = lib.mapAttrs (_: spec: spec.path) secretSpecs;
 
     age = {
+      # Always include the user's SSH key so we can decrypt even if the host
+      # key rotates; the file must exist on the target system.
       identityPaths = [
         "/etc/ssh/ssh_host_ed25519_key"
-      ]
-      ++ lib.optionals (builtins.pathExists "/home/${username}/.ssh/id_ed25519") [
         "/home/${username}/.ssh/id_ed25519"
       ];
 

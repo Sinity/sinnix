@@ -11,7 +11,7 @@
 {
   pkgs,
   lib,
-  dotsPath,
+  dotsRepoPath,
   config,
   sinnix,
   ...
@@ -24,6 +24,7 @@ let
       pkgs.libsForQt5.kvantum
     else
       null;
+  mkDotsRepoLink = rel: config.lib.file.mkOutOfStoreSymlink (dotsRepoPath + rel);
 in
 {
   home.packages = with pkgs; [
@@ -147,6 +148,7 @@ in
   };
 
   stylix.targets.fnott.enable = false;
+  stylix.targets.qt.enable = false;
 
   services.fnott =
     let
@@ -244,29 +246,20 @@ in
   xdg = {
     configFile = {
       "yazi/opener.toml" = {
-        source = dotsPath + "/yazi/opener.toml";
+        source = mkDotsRepoLink "/yazi/opener.toml";
         force = true;
       };
       "yazi/keymap.toml" = {
-        source = dotsPath + "/yazi/keymap.toml";
+        source = mkDotsRepoLink "/yazi/keymap.toml";
         force = true;
       };
-      "audacity/audacity.cfg".source = dotsPath + "/audacity/audacity.cfg";
-      "qt5ct/qt5ct.conf".source = dotsPath + "/qt5ct/qt5ct.conf";
-      "qt6ct/qt6ct.conf".source = dotsPath + "/qt6ct/qt6ct.conf";
+      "audacity/audacity.cfg".source = mkDotsRepoLink "/audacity/audacity.cfg";
+      "qt5ct/qt5ct.conf".source = mkDotsRepoLink "/qt5ct/qt5ct.conf";
+      "qt6ct/qt6ct.conf".source = mkDotsRepoLink "/qt6ct/qt6ct.conf";
       "Kvantum" = {
-        source = dotsPath + "/Kvantum";
-        recursive = true;
+        source = mkDotsRepoLink "/Kvantum";
       };
-      "transmission/settings.json".text =
-        let
-          inherit (sinnix.paths) torrentInbox realmRoot;
-          baseSettings = builtins.readFile (dotsPath + "/transmission/settings.json");
-        in
-        lib.replaceStrings
-          [ "/home/sinity/Downloads" "/home/sinity" "/realm" ]
-          [ torrentInbox config.home.homeDirectory realmRoot ]
-          baseSettings;
+      "transmission/settings.json".source = mkDotsRepoLink "/transmission/settings.json";
       "autostart/mullvad-vpn.desktop".text = ''
         [Desktop Entry]
         Type=Application

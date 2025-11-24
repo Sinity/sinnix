@@ -8,17 +8,28 @@ import urllib.request
 from functools import partial
 from typing import Dict, Optional
 
-from qutebrowser.api import config, hook, message
+from qutebrowser.api import hook, message
 from qutebrowser.qt.core import QTimer, QUrl
 from qutebrowser.utils import objreg
 
+try:
+    config  # provided by qutebrowser at runtime
+except NameError:  # pragma: no cover - fallback for linting/tests
+    from qutebrowser.api import config as _config_stub
 
-config.load_autoconfig(False)
+    config = _config_stub
 
-c = config.config
+try:
+    config.load_autoconfig(False)
+except AttributeError:
+    from qutebrowser.config import configfiles
 
-# Core browsing behaviour -------------------------------------------------- #
-c.auto_save.session = True
+    configfiles.read_autoconfig()
+
+try:
+    c = config.config  # old API
+except AttributeError:
+    c = config  # new ConfigAPI provides what we need directly
 c.session.lazy_restore = True
 c.new_instance_open_target = "window"
 c.new_instance_open_target_window = "last-opened"

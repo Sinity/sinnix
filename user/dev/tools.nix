@@ -2,7 +2,7 @@
   pkgs,
   lib,
   inputs,
-  dotsPath,
+  dotsRepoPath,
   secretPaths,
   config,
   sinnix,
@@ -22,10 +22,18 @@ let
   mcpPostgresBin = pkgs.writeShellScriptBin "mcp-postgres" ''
     exec ${mcpPython}/bin/python3 ${inputs.self}/scripts/mcp-postgres.py "$@"
   '';
-  mkDotsRepoLink = rel: dotsPath + "/" + rel;
+  mcpSqliteBin = pkgs.writeShellScriptBin "mcp-sqlite" ''
+    exec ${mcpPython}/bin/python3 ${inputs.self}/scripts/mcp-sqlite.py "$@"
+  '';
+  mkDotsRepoLink = rel: config.lib.file.mkOutOfStoreSymlink (dotsRepoPath + "/" + rel);
   codexProjectPaths = [
     "${realmRoot}/project/sinnix"
     "${realmRoot}/project/sinex"
+    "${realmRoot}/project/sinity-analysis"
+    "${realmRoot}/project/polylogue"
+    "${realmRoot}/project/intercept-bounce"
+    "${realmRoot}/project/sinevec"
+    "${realmRoot}/project/scribe-tap"
     "${realmRoot}/data/finance/jpk/finale"
     "${realmRoot}/project/voyage-embeddings"
     homeDir
@@ -83,6 +91,13 @@ let
         args = [ ];
         env = {
           QDRANT_URL = "http://127.0.0.1:6333";
+        };
+      };
+      sqlite = {
+        command = "${homeDir}/.local/bin/mcp-sqlite";
+        args = [ ];
+        env = {
+          MCP_SQLITE_DB = "${homeDir}/.local/share/atuin/history.db";
         };
       };
     };
@@ -180,6 +195,7 @@ in
       ++ [
         mcpQdrantBin
         mcpPostgresBin
+        mcpSqliteBin
       ]
     );
 
@@ -195,34 +211,17 @@ in
           fi
         fi
       '';
-
-      restoreGcloud = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-        if [ -f ${secretPaths."gcloud-config.tar.gz"} ]; then
-          mkdir -p "$HOME/.config"
-          rm -rf "$HOME/.config/gcloud"
-          if ! ${pkgs.gzip}/bin/gzip -dc ${
-            secretPaths."gcloud-config.tar.gz"
-          } | ${pkgs.gnutar}/bin/tar -xC "$HOME/.config"; then
-            echo "warning: unable to restore gcloud config archive" >&2
-          fi
-        fi
-      '';
-
     };
   };
 
   xdg.configFile = {
-    "opencode/opencode.json".text = lib.replaceStrings [ "/home/sinity" ] [ homeDir ] (
-      builtins.readFile (dotsPath + "/opencode/opencode.json")
-    );
+    "opencode/opencode.json".source = mkDotsRepoLink "opencode/opencode.json";
 
-    "sqlitebrowser/sqlitebrowser.conf".text = lib.replaceStrings [ "/home/sinity" ] [ homeDir ] (
-      builtins.readFile (dotsPath + "/sqlitebrowser/sqlitebrowser.conf")
-    );
+    "sqlitebrowser/sqlitebrowser.conf".source = mkDotsRepoLink "sqlitebrowser/sqlitebrowser.conf";
 
-    "ripgrep-all/config.jsonc".source = dotsPath + "/ripgrep-all/config.jsonc";
+    "ripgrep-all/config.jsonc".source = mkDotsRepoLink "ripgrep-all/config.jsonc";
 
-    "marimo/marimo.toml".source = dotsPath + "/marimo/marimo.toml";
+    "marimo/marimo.toml".source = mkDotsRepoLink "marimo/marimo.toml";
   };
 
   home.file = {
@@ -232,6 +231,7 @@ in
     };
     ".local/bin/mcp-qdrant".source = "${mcpQdrantBin}/bin/mcp-qdrant";
     ".local/bin/mcp-postgres".source = "${mcpPostgresBin}/bin/mcp-postgres";
+    ".local/bin/mcp-sqlite".source = "${mcpSqliteBin}/bin/mcp-sqlite";
     ".gemini/settings.json" = {
       source = mkDotsRepoLink "gemini/settings.json";
       force = true;

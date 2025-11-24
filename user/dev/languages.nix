@@ -7,7 +7,6 @@
       aiToolsBase = inputs.nix-ai-tools.packages.${pkgs.stdenv.hostPlatform.system};
       aiTools = aiToolsBase;
       externalTools = [
-        inputs.claude-squad.packages.${pkgs.stdenv.hostPlatform.system}.default
         inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.polylogue
         inputs.sinevec.packages.${pkgs.stdenv.hostPlatform.system}.sinevec
       ];

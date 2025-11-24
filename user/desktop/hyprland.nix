@@ -127,7 +127,7 @@ in
       animations.enabled = false;
 
       inherit (bindings) bind bindl bindm;
-      inherit (rules) windowrule windowrulev2;
+      inherit (rules) windowrule;
     };
   };
 
