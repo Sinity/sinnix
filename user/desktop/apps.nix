@@ -314,11 +314,11 @@ in
         "video/webm" = [ "mpv.desktop" ];
         "video/x-matroska" = [ "mpv.desktop" ];
         "application/pdf" = [ "org.qutebrowser.qutebrowser.desktop" ];
-        "text/html" = [ "org.qutebrowser.qutebrowser.desktop" ];
-        "x-scheme-handler/http" = [ "org.qutebrowser.qutebrowser.desktop" ];
-        "x-scheme-handler/https" = [ "org.qutebrowser.qutebrowser.desktop" ];
-        "x-scheme-handler/about" = [ "org.qutebrowser.qutebrowser.desktop" ];
-        "x-scheme-handler/unknown" = [ "org.qutebrowser.qutebrowser.desktop" ];
+        "text/html" = [ "google-chrome.desktop" ];
+        "x-scheme-handler/http" = [ "google-chrome.desktop" ];
+        "x-scheme-handler/https" = [ "google-chrome.desktop" ];
+        "x-scheme-handler/about" = [ "google-chrome.desktop" ];
+        "x-scheme-handler/unknown" = [ "google-chrome.desktop" ];
       };
     };
   };

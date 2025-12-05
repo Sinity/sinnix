@@ -2,16 +2,9 @@
   inputs,
   ...
 }:
-let
-  sinexOverlays =
-    if inputs ? sinex && inputs.sinex ? overlays && inputs.sinex.overlays ? default then
-      [ inputs.sinex.overlays.default ]
-    else
-      [ ];
-in
 {
-  nixpkgs.overlays = sinexOverlays ++ [
-    # Community overlay providing large set of VSCode extensions
+  nixpkgs.overlays = [
+    inputs.sinex.overlays.default
     inputs.nix-vscode-extensions.overlays.default
 
     (
@@ -19,35 +12,9 @@ in
       let
         inherit (final) lib;
         pythonOverrides = _self: super: {
-          spacy = super.spacy.overrideAttrs (old: rec {
-            version = "3.8.4"; # last revision that still builds
-            src = prev.fetchPypi {
-              pname = "spacy";
-              inherit version;
-              sha256 = "sha256-G92R3l0MP2tqdnSX6uQyH3fF9qqoj4Tns5w8QAM3YCM";
-            };
-            meta = old.meta // {
-              broken = false;
-            };
-          });
-
-          questionary = super.questionary.overridePythonAttrs (old: {
-            disabledTests = (old.disabledTests or [ ]) ++ [ "test_print_with_style" ];
-          });
-
+          # Upstream aggdraw test suite flakes on Python 3.13; keep disabled to avoid eval/switch failures.
           aggdraw = super.aggdraw.overridePythonAttrs (_old: {
-            # Pillow 12.0 introduced stricter dtype handling that breaks aggdraw's
-            # bundled self-tests, so skip them until upstream adapts.
             doCheck = false;
-          });
-
-          sinexCli = super.sinexCli.overrideAttrs (_: {
-            doInstallCheck = false;
-            installCheckPhase = ''
-              runHook preInstallCheck
-              echo "sinex-cli installCheck disabled"
-              runHook postInstallCheck
-            '';
           });
         };
         hyprlandPatches = builtins.path {
@@ -55,63 +22,6 @@ in
           name = "sinnix-hyprland-patches";
         };
         hyprlandPatch = name: hyprlandPatches + "/${name}";
-        pgJsonschemaFor =
-          postgresql:
-          prev.buildPgrxExtension (
-            _:
-            let
-              version = "0.3.3";
-            in
-            {
-              inherit postgresql;
-              cargo-pgrx = prev.cargo-pgrx_0_12_6;
-
-              pname = "pg_jsonschema";
-              inherit version;
-
-              src = final.fetchFromGitHub {
-                owner = "supabase";
-                repo = "pg_jsonschema";
-                rev = "v${version}";
-                hash = "sha256-Au1mqatoFKVq9EzJrpu1FVq5a1kBb510sfC980mDlsU=";
-              };
-
-              cargoHash = "sha256-FXqofhh89m6SFkOCdE4OCT/FgwzkM/ywyyv62mySODQ=";
-
-              doCheck = false;
-
-              meta = {
-                description = "PostgreSQL extension for JSON Schema validation";
-                homepage = "https://github.com/supabase/pg_jsonschema";
-                license = final.lib.licenses.postgresql;
-                inherit (postgresql.meta) platforms;
-              };
-            }
-          );
-        modernizeCmake =
-          {
-            package,
-            replacements,
-            target ? "CMakeLists.txt",
-            addPolicyFlag ? false,
-          }:
-          let
-            replacementFlags = lib.concatStringsSep " \\\n+                  " (
-              map (rep: ''--replace "${rep.from}" "${rep.to}"'') replacements
-            );
-          in
-          package.overrideAttrs (
-            old:
-            (lib.optionalAttrs addPolicyFlag {
-              cmakeFlags = (old.cmakeFlags or [ ]) ++ [ "-DCMAKE_POLICY_VERSION=3.5" ];
-            })
-            // {
-              postPatch = (old.postPatch or "") + ''
-                substituteInPlace ${target} \
-                  ${replacementFlags}
-              '';
-            }
-          );
       in
       {
         hyprland = prev.hyprland.overrideAttrs (old: {
@@ -152,115 +62,6 @@ in
           ];
         });
 
-        beam = prev.beam // {
-          beamLib =
-            prev.beam.beamLib or {
-              inherit (prev.lib) callPackageWith;
-            };
-        };
-
-        libutp = modernizeCmake {
-          package = prev.libutp;
-          addPolicyFlag = true;
-          replacements = [
-            {
-              from = "cmake_minimum_required(VERSION 2.8";
-              to = "cmake_minimum_required(VERSION 3.5";
-            }
-          ];
-        };
-
-        pamixer = prev.pamixer.override {
-          cxxopts = prev.cxxopts.override { enableUnicodeHelp = false; };
-        };
-
-        bpftrace = prev.bpftrace.override {
-          llvmPackages = prev.llvmPackages_20;
-        };
-
-        ltrace = prev.ltrace.overrideAttrs (_old: {
-          doCheck = false;
-        });
-
-        transmission_3 = modernizeCmake {
-          package = prev.transmission_3;
-          replacements = [
-            {
-              from = "cmake_minimum_required(VERSION 2.8.12 FATAL_ERROR)";
-              to = "cmake_minimum_required(VERSION 3.5 FATAL_ERROR)";
-            }
-          ];
-        };
-
-        interception-tools = modernizeCmake {
-          package = prev.interception-tools;
-          replacements = [
-            {
-              from = "cmake_minimum_required(VERSION 3.0)";
-              to = "cmake_minimum_required(VERSION 3.5)";
-            }
-          ];
-        };
-
-        autopanosiftc = modernizeCmake {
-          package = prev.autopanosiftc;
-          addPolicyFlag = true;
-          replacements = [
-            {
-              from = "cmake_minimum_required(VERSION 2.8.12 FATAL_ERROR)";
-              to = "cmake_minimum_required(VERSION 3.5 FATAL_ERROR)";
-            }
-            {
-              from = "cmake_minimum_required(VERSION 2.8)";
-              to = "cmake_minimum_required(VERSION 3.5)";
-            }
-            {
-              from = "cmake_minimum_required(VERSION 2.6)";
-              to = "cmake_minimum_required(VERSION 3.5)";
-            }
-            {
-              from = "cmake_minimum_required(VERSION 2.4)";
-              to = "cmake_minimum_required(VERSION 3.5)";
-            }
-          ];
-        };
-
-        libsForQt5 = prev.libsForQt5 // {
-          autopanosiftc = modernizeCmake {
-            package = prev.libsForQt5.autopanosiftc;
-            addPolicyFlag = true;
-            replacements = [
-              {
-                from = "cmake_minimum_required(VERSION 2.8.12 FATAL_ERROR)";
-                to = "cmake_minimum_required(VERSION 3.5 FATAL_ERROR)";
-              }
-              {
-                from = "cmake_minimum_required(VERSION 2.8)";
-                to = "cmake_minimum_required(VERSION 3.5)";
-              }
-              {
-                from = "cmake_minimum_required(VERSION 2.6)";
-                to = "cmake_minimum_required(VERSION 3.5)";
-              }
-              {
-                from = "cmake_minimum_required(VERSION 2.4)";
-                to = "cmake_minimum_required(VERSION 3.5)";
-              }
-            ];
-          };
-        };
-
-        interception-tools-plugins = prev.interception-tools-plugins // {
-          caps2esc = modernizeCmake {
-            package = prev.interception-tools-plugins.caps2esc;
-            replacements = [
-              {
-                from = "cmake_minimum_required(VERSION 3.0)";
-                to = "cmake_minimum_required(VERSION 3.5)";
-              }
-            ];
-          };
-        };
 
         aionui =
           let
@@ -357,6 +158,18 @@ in
         python3 = prev.python3.override {
           packageOverrides = prev.lib.composeExtensions (prev.python3.packageOverrides or (_self: _super: { })
           ) pythonOverrides;
+        };
+
+        postgresql16Packages = prev.postgresql16Packages // {
+          timescaledb = prev.postgresql16Packages.timescaledb.overrideAttrs (_old: rec {
+            version = "2.23.0";
+            src = final.fetchFromGitHub {
+              owner = "timescale";
+              repo = "timescaledb";
+              tag = version;
+              hash = "sha256-wgRaWxGr48p8xMc+yOQEN196KAKyptMCk/UFKn23cos=";
+            };
+          });
         };
 
         bat = prev.bat.overrideAttrs (
@@ -523,24 +336,6 @@ in
             };
           };
 
-        postgresqlPackages = prev.postgresqlPackages // {
-          pg_jsonschema = pgJsonschemaFor prev.postgresql;
-        };
-        postgresql14Packages = prev.postgresql14Packages // {
-          pg_jsonschema = pgJsonschemaFor prev.postgresql_14;
-        };
-        postgresql15Packages = prev.postgresql15Packages // {
-          pg_jsonschema = pgJsonschemaFor prev.postgresql_15;
-        };
-        postgresql16Packages = prev.postgresql16Packages // {
-          pg_jsonschema = pgJsonschemaFor prev.postgresql_16;
-        };
-        postgresql17Packages = prev.postgresql17Packages // {
-          pg_jsonschema = pgJsonschemaFor prev.postgresql_17;
-        };
-        postgresql18Packages = prev.postgresql18Packages // {
-          pg_jsonschema = pgJsonschemaFor prev.postgresql_18;
-        };
       }
     )
   ];

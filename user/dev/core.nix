@@ -28,6 +28,10 @@ in
       linkNeovimConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
         mkdir -p "$HOME/.config"
         ln -sfn ''${FLAKE:-${flakePath}}/dots/nvim "$HOME/.config/nvim"
+        # Link claude config directory so cclsp can read cclsp.json from
+        # $HOME/.config/claude. This makes the setup deterministic from dots/.
+        mkdir -p "$HOME/.config/claude"
+        ln -sfn ''${FLAKE:-${flakePath}}/dots/claude "$HOME/.config/claude"
       '';
 
       ensureClaudeDir = lib.hm.dag.entryAfter [ "linkNeovimConfig" ] ''

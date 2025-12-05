@@ -65,6 +65,7 @@ in
         allowUnfree = true;
         allowAliases = true;
       };
+      hostPlatform = lib.mkDefault "x86_64-linux";
       overlays = [ inputs.nur.overlays.default ];
     };
 

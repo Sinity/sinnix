@@ -1,10 +1,6 @@
-layout default {
-  default_tab_template {
-    pane size=1 borderless=false {
-      command "zsh"
-    }
-  }
-}
+// Zellij config (minimal): use zsh by default and custom Alt-based navigation.
+
+default_shell "zsh"
 
 keybinds {
   normal {
@@ -26,7 +22,7 @@ keybinds {
   }
 
   scroll {
-    bind "Escape" { SwitchToMode "Normal"; }
+    bind "Esc" { SwitchToMode "Normal"; }
     bind "Alt h" { MoveFocus "Left"; }
     bind "Alt l" { MoveFocus "Right"; }
   }

@@ -36,7 +36,6 @@ in
           marketplace.usernamehw.errorlens
           marketplace.foam.foam-vscode
           marketplace.yzhang.markdown-all-in-one
-          marketplace.streetsidesoftware.code-spell-checker
           marketplace.serayuzgur.crates
           marketplace."sst-dev".opencode
           marketplace.xiangz19.codex-ratelimit

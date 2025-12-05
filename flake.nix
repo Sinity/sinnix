@@ -60,10 +60,10 @@
 
     # Private Sinex overlay; intentionally expects SSH access to the upstream
     # repository so evaluation fails cleanly when the key is missing.
-    # sinex = {
-    #  url = "git+ssh://git@github.com/Sinity/sinex";
-    #  inputs.nixpkgs.follows = "nixpkgs";
-   # };
+    sinex = {
+      url = "git+ssh://git@github.com/Sinity/sinex";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
 
     # System-wide theming
     stylix.url = "github:danth/stylix";

@@ -14,9 +14,6 @@
 #   - hyprland-bindings.nix: All keybindings (bind, bindl, bindm)
 #   - hyprland-rules.nix: Window rules (windowrule, windowrulev2)
 #   - hyprland-lock.nix: Screen locking and idle management (hypridle, hyprlock)
-#
-# SERVICES:
-#   - Pyprland configured in ../services/pyprland.nix
 {
   pkgs,
   inputs,

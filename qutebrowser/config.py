@@ -30,72 +30,100 @@ try:
     c = config.config  # old API
 except AttributeError:
     c = config  # new ConfigAPI provides what we need directly
-c.session.lazy_restore = True
-c.new_instance_open_target = "window"
-c.new_instance_open_target_window = "last-opened"
-c.tabs.show = "never"
-c.tabs.tabs_are_windows = True
-c.tabs.focus_stack_size = 30
-c.tabs.last_close = "close"
-c.tabs.new_position.related = "next"
-c.tabs.new_position.unrelated = "next"
-c.tabs.select_on_remove = "prev"
-c.tabs.background = True
-c.tabs.close_mouse_button = "middle"
-c.tabs.close_mouse_button_on_bar = "ignore"
+
+
+def _set(key: str, value):
+    # Prefer the modern setter; fall back to attribute walks for older builds.
+    try:
+        config.set(key, value)
+        return
+    except Exception:
+        pass
+    target = c
+    parts = key.split(".")
+    for part in parts[:-1]:
+        target = getattr(target, part)
+    setattr(target, parts[-1], value)
+
+
+# Core browsing behaviour -------------------------------------------------- #
+_set("auto_save.session", True)
+_set("session.lazy_restore", True)
+_set("new_instance_open_target", "window")
+_set("new_instance_open_target_window", "last-opened")
+_set("tabs.show", "never")
+_set("tabs.tabs_are_windows", True)
+_set("tabs.focus_stack_size", 30)
+_set("tabs.last_close", "close")
+_set("tabs.new_position.related", "next")
+_set("tabs.new_position.unrelated", "next")
+_set("tabs.select_on_remove", "prev")
+_set("tabs.background", True)
+_set("tabs.close_mouse_button", "middle")
+_set("tabs.close_mouse_button_on_bar", "ignore")
 
 # Content controls --------------------------------------------------------- #
-c.content.blocking.enabled = True
-c.content.blocking.method = "both"
-c.content.blocking.hosts.lists = [
-    "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
-]
-c.content.blocking.adblock.lists = [
-    "https://easylist.to/easylist/easylist.txt",
-    "https://easylist.to/easylist/easyprivacy.txt",
-    "https://secure.fanboy.co.nz/fanboy-cookiemonster.txt",
-    "https://raw.githubusercontent.com/brave/adblock-lists/master/brave-lists/brave-social.txt",
-    "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/annoyances.txt",
-]
-c.content.blocking.whitelist = [
-    "https://pay.google.com/*",
-    "https://payments.google.com/*",
-]
-c.content.cookies.accept = "no-3rdparty"
-c.content.autoplay = False
-c.content.notifications.default = False
-c.content.webrtc_ip_handling_policy = "default-public-interface-only"
-c.content.websocket_accept_all_requests = False
-c.content.pdfjs = True
-c.content.headers.accept_language = "en-US,en;q=0.9"
-c.content.geolocation = False
-c.content.javascript.clipboard = "access"
-c.content.javascript.can_access_clipboard = True
+_set("content.blocking.enabled", True)
+_set("content.blocking.method", "both")
+_set(
+    "content.blocking.hosts.lists",
+    [
+        "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
+    ],
+)
+_set(
+    "content.blocking.adblock.lists",
+    [
+        "https://easylist.to/easylist/easylist.txt",
+        "https://easylist.to/easylist/easyprivacy.txt",
+        "https://secure.fanboy.co.nz/fanboy-cookiemonster.txt",
+        "https://raw.githubusercontent.com/brave/adblock-lists/master/brave-lists/brave-social.txt",
+        "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/annoyances.txt",
+    ],
+)
+_set(
+    "content.blocking.whitelist",
+    [
+        "https://pay.google.com/*",
+        "https://payments.google.com/*",
+    ],
+)
+_set("content.cookies.accept", "no-3rdparty")
+_set("content.autoplay", False)
+_set("content.notifications.enabled", False)
+_set("content.webrtc_ip_handling_policy", "default-public-interface-only")
+_set("content.pdfjs", True)
+_set("content.headers.accept_language", "en-US,en;q=0.9")
+_set("content.geolocation", False)
+_set("content.javascript.clipboard", "access")
 
 # Appearance --------------------------------------------------------------- #
-c.window.title_format = "{perc}{audio}{title} — {host}"
-c.statusbar.padding = {"top": 2, "bottom": 2, "left": 8, "right": 8}
-c.scrolling.smooth = True
-c.fonts.default_size = "11pt"
-c.fonts.web.family.standard = "Inter"
-c.content.user_stylesheets = ["~/.config/qutebrowser/user.css"]
+_set("window.title_format", "{perc}{audio}{current_title} — {host}")
+_set("statusbar.padding", {"top": 2, "bottom": 2, "left": 8, "right": 8})
+_set("scrolling.smooth", True)
+_set("fonts.default_size", "11pt")
+_set("fonts.web.family.standard", "Inter")
+_set("content.user_stylesheets", ["~/.config/qutebrowser/user.css"])
 
 # Pages & search ----------------------------------------------------------- #
-c.url.default_page = "about:blank"
-c.url.start_pages = ["about:blank"]
-c.url.searchengines = {
-    "DEFAULT": "https://duckduckgo.com/?q={}",
-    "ddg": "https://duckduckgo.com/?q={}",
-    "g": "https://google.com/search?q={}",
-    "gh": "https://github.com/search?q={}",
-    "hn": "https://hn.algolia.com/?q={}",
-    "man": "https://man.archlinux.org/search?q={}",
-    "nix": "https://search.nixos.org/packages?query={}",
-    "yt": "https://www.youtube.com/results?search_query={}",
-    "ytm": "https://music.youtube.com/search?q={}",
-    "rd": "https://www.reddit.com/search/?q={}",
-    "w": "https://en.wikipedia.org/wiki/Special:Search?search={}",
-}
+_set("url.default_page", "about:blank")
+_set("url.start_pages", ["about:blank"])
+_set(
+    "url.searchengines",
+    {
+        "DEFAULT": "https://duckduckgo.com/?q={}",
+        "ddg": "https://duckduckgo.com/?q={}",
+        "g": "https://google.com/search?q={}",
+        "gh": "https://github.com/search?q={}",
+        "hn": "https://hn.algolia.com/?q={}",
+        "man": "https://man.archlinux.org/search?q={}",
+        "nix": "https://search.nixos.org/packages?query={}",
+        "yt": "https://www.youtube.com/results?search_query={}",
+        "ytm": "https://music.youtube.com/search?q={}",
+        "rd": "https://www.reddit.com/search/?q={}",
+        "w": "https://en.wikipedia.org/wiki/Special:Search?search={}",
+    },
+)
 
 # Editor integration ------------------------------------------------------- #
 c.editor.command = [

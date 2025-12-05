@@ -18,7 +18,6 @@
   "scm.inputFontFamily": "SauceCodePro Nerd Font Mono",
   "scm.inputFontSize": 20,
   "screencastMode.fontSize": 85,
-  "workbench.iconTheme": "vscode-icons",
 
   // ——— VSCode-Neovim integration ———
   // Rely on PATH for nvim, avoid hard-coding Nix path.
@@ -26,7 +25,6 @@
   "vscode-neovim.compositeKeys": {},
   "keyboard.dispatch": "keyCode",
   "vscode-neovim.useCtrlKeys": true,
-  "vscode-neovim.neovimExecutablePaths.linux": "/run/current-system/sw/bin/cSpell",
 
   // ——— Editor ergonomics ———
   "editor.lineNumbers": "relative",
@@ -52,15 +50,8 @@
   "terminal.integrated.drawBoldTextInBrightColors": false,
   "terminal.integrated.enableFileLinks": "off",
   "terminal.integrated.enableMultiLinePasteWarning": "auto",
-  "terminal.integrated.defaultProfile.linux": "zellij",
+  "terminal.integrated.defaultProfile.linux": "bash",
   "terminal.integrated.profiles.linux": {
-    "zellij": {
-      "path": "bash",
-      "args": [
-        "-lc",
-        "zellij-session \"code-${workspaceFolderBasename}\""
-      ]
-    },
     "opencode": { "path": "opencode" },
     "codex": { "path": "codex" }
   },
@@ -189,10 +180,14 @@
   "gitlens.ai.vscode.model": "copilot:gpt-4.1",
   "gitlens.ai.largePromptWarningThreshold": 100000,
   "claudeCode.allowDangerouslySkipPermissions": true,
-  "workbench.colorTheme": "Tokyo Night Storm",
   "github.copilot.nextEditSuggestions.enabled": true,
   "editor.inlineSuggest.experimental.showOnSuggestConflict": "always",
   "extensions.experimental.affinity": {
     "asvetliakov.vscode-neovim": 1
-  }
+  },
+  "update.showReleaseNotes": false,
+  "workbench.colorTheme": "GitHub Dark",
+  "wakatime.apiKey": "REDACTED_WAKATIME_KEY",
+  "explorer.confirmDelete": false,
+  "workbench.sideBar.location": "right"
 }

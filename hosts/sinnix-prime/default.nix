@@ -8,7 +8,7 @@
     ../../modules/services/transmission.nix
     ../../modules/services/qdrant.nix
     ../../modules/services/sinevec.nix
-#    ../../modules/services/sinex.nix
+    ../../modules/services/sinex.nix
   ];
 
   networking.hostName = "sinnix-prime";

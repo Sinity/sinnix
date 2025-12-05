@@ -1,4 +1,5 @@
 {
+	"inputs": [],
 	"servers": {
 		"github": {
 			"type": "http",
@@ -22,18 +23,6 @@
 			],
 			"gallery": true
 		},
-		"cclsp": {
-			"type": "stdio",
-			"command": "npx",
-			"args": [
-				"-y",
-				"cclsp@latest"
-			],
-			"env": {
-				"CCLSP_CONFIG_PATH": "/home/sinity/.config/claude/cclsp.json"
-			},
-			"gallery": true
-		},
 		"firecrawl": {
 			"type": "stdio",
 			"command": "bash",
@@ -47,6 +36,10 @@
 			"type": "stdio",
 			"command": "/home/sinity/.local/bin/mcp-postgres",
 			"gallery": false
+		},
+		"Parallel Search MCP": {
+			"type": "http",
+			"url": "https://search-mcp.parallel.ai/mcp"
 		}
 	}
 }

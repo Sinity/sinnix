@@ -7,7 +7,7 @@ let
 in
 {
   home.sessionVariables = {
-    BROWSER = "qutebrowser";
+    BROWSER = "google-chrome-stable";
     TERM = "kitty";
     TERMINAL = "kitty";
 

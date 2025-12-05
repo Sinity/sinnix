@@ -22,13 +22,10 @@ else
   shift
 fi
 
-cmd=( "$@" )
-if [[ ${#cmd[@]} -eq 0 ]]; then
-  if [[ -n "${SHELL:-}" ]]; then
-    cmd=( "${SHELL}" )
-  else
-    cmd=( "zsh" )
-  fi
+# zellij 0.43+ no longer supports `-- <cmd>` after `--session`.
+# If a command is provided, ignore it for now rather than erroring.
+if [[ $# -gt 0 ]]; then
+  printf 'zellij-session: command arguments are ignored with zellij >=0.43\n' >&2
 fi
 
 sanitize() {
@@ -41,5 +38,5 @@ session="$(sanitize "${session}")"
 if zellij list-sessions 2>/dev/null | awk '{print $1}' | grep -qx "${session}"; then
   exec zellij attach "${session}"
 else
-  exec zellij --session "${session}" -- "${cmd[@]}"
+  exec zellij attach --create "${session}"
 fi

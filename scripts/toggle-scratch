@@ -89,9 +89,49 @@ wait_for_window() {
   return 1
 }
 
+center_and_focus_window() {
+  local regex="$1"
+  local clients address cx cy
+  clients=$(hyprctl -j clients 2>/dev/null) || return 0
+  read -r address cx cy <<EOF || true
+$(HYPR_CLIENTS="$clients" python3 - "$regex" <<'PY'
+import json, os, re, sys
+regex = sys.argv[1]
+clients_raw = os.environ.get("HYPR_CLIENTS") or "[]"
+try:
+    clients = json.loads(clients_raw)
+except json.JSONDecodeError:
+    sys.exit(0)
+for client in clients:
+    cls = client.get("class") or ""
+    addr = client.get("address")
+    if not re.search(regex, cls):
+        continue
+    at = client.get("at") or [0, 0]
+    size = client.get("size") or [0, 0]
+    cx = at[0] + size[0] / 2
+    cy = at[1] + size[1] / 2
+    print(f"{addr} {cx} {cy}")
+    break
+PY
+)
+EOF
+  if [ -n "${address:-}" ]; then
+    hyprctl dispatch focuswindow "$address" >/dev/null 2>&1 || true
+    if [ -n "${cx:-}" ] && [ -n "${cy:-}" ]; then
+      hyprctl dispatch movecursor "$cx" "$cy" >/dev/null 2>&1 || true
+    fi
+  fi
+}
+
 if ! has_window; then
   spawn_window
   wait_for_window || exit 1
 fi
 
+current_ws=$(hyprctl -j activeworkspace 2>/dev/null | python3 -c 'import json,sys; d=json.loads(sys.stdin.read() or "{}"); print(d.get("name",""))' 2>/dev/null || true)
 hyprctl dispatch togglespecialworkspace "$WORKSPACE" >/dev/null
+if [ "special:${WORKSPACE}" != "${current_ws}" ]; then
+  pattern=${CLASS_PATTERN:-^${CLASS}$}
+  center_and_focus_window "$pattern"
+fi

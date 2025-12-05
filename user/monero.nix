@@ -3,6 +3,8 @@ let
   dataDir = "/monero";
   moneroConfig = ''
     data-dir=${dataDir}
+    p2p-bind-ip=0.0.0.0
+    p2p-bind-port=18080
     db-sync-mode=fast:async:10000
     out-peers=32
     in-peers=8
