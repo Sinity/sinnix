@@ -11,16 +11,24 @@ let
     inputs.agenix.nixosModules.default
     (import ./overlay.nix)
   ];
-  sinexModule = inputs.sinex.nixosModules.default;
   sharedSpecialArgs = {
     inherit inputs;
   };
+  mkHost =
+    {
+      system ? "x86_64-linux",
+      modules,
+    }:
+    lib.nixosSystem {
+      inherit system;
+      modules = baseModules ++ modules;
+      specialArgs = sharedSpecialArgs;
+    };
 in
 {
   flake.nixosConfigurations = {
-    sinnix-prime = lib.nixosSystem {
-      system = "x86_64-linux";
-      modules = baseModules ++ [
+    sinnix-prime = mkHost {
+      modules = [
         inputs.stylix.nixosModules.stylix
         {
           imports = [
@@ -40,14 +48,12 @@ in
           ];
         }
         { imports = [ ../hosts/sinnix-prime ]; }
-        sinexModule
+        inputs.sinex.nixosModules.default
       ];
-      specialArgs = sharedSpecialArgs;
     };
 
-    sinnix-ethereal = lib.nixosSystem {
-      system = "x86_64-linux";
-      modules = baseModules ++ [
+    sinnix-ethereal = mkHost {
+      modules = [
         inputs.disko.nixosModules.disko
         {
           imports = [
@@ -61,7 +67,6 @@ in
         }
         { imports = [ ../hosts/sinnix-ethereal ]; }
       ];
-      specialArgs = sharedSpecialArgs;
     };
   };
 }

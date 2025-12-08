@@ -62,6 +62,8 @@
           ];
         });
 
+        polylogue = inputs.polylogue.packages.${final.stdenv.hostPlatform.system}.polylogue;
+
 
         aionui =
           let

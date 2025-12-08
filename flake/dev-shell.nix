@@ -96,37 +96,22 @@
               scripts = {
                 # Check configuration syntax and structure
                 check.exec = ''
-                  ${pkgs.nix}/bin/nix flake check --no-build
-                  find . -name "*.nix" -type f -print0 | xargs -0 -n1 ${pkgs.nix}/bin/nix-instantiate --parse >/dev/null
+                  ${pkgs.nix}/bin/nix run ${resolvedRoot}#check
                 '';
 
                 # Run code quality checks (without modifying files)
                 lint.exec = ''
-                  set -euo pipefail
-                  echo "Running deadnix..."
-                  ${pkgs.deadnix}/bin/deadnix --fail .
-
-                  echo "Running shellcheck on .sh files..."
-                  ${pkgs.fd}/bin/fd -t f -e sh -x ${pkgs.shellcheck}/bin/shellcheck {}
-
-                  echo "Running shellcheck on scripts/..."
-                  ${pkgs.fd}/bin/fd -t f -g 'scripts/*' -x ${pkgs.shellcheck}/bin/shellcheck {}
+                  ${pkgs.nix}/bin/nix run ${resolvedRoot}#lint
                 '';
 
                 # Format Nix code according to standard
                 format.exec = ''
-                  ${pkgs.findutils}/bin/find . -name "*.nix" -type f -not -path "*/nix/store/*" -print0 | \
-                  ${pkgs.findutils}/bin/xargs -0 -P 4 -I{} ${pkgs.nixfmt-rfc-style}/bin/nixfmt {}
+                  ${pkgs.nix}/bin/nix run ${resolvedRoot}#format
                 '';
 
                 # Build and apply the system configuration
                 rebuild.exec = ''
-                  if [ "$(id -u)" -ne 0 ]; then
-                    echo "Error: This command must be run as root (use 'sudo')"
-                    exit 1
-                  fi
-                  ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --flake .#sinnix-prime \
-                    --log-format internal-json -v 2>&1 | ${pkgs.nix-output-monitor}/bin/nom --json
+                  ${pkgs.nix}/bin/nix run ${resolvedRoot}#switch
                 '';
               };
 

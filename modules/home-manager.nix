@@ -19,7 +19,6 @@
     backupFileExtension = null;
     extraSpecialArgs = {
       inherit inputs;
-      secretsExportScript = config.sinnix.secrets.exportScript;
       dotsRepoPath = config.sinnix.paths.dotsRoot;
       secretPaths = config.sinnix.secrets.paths;
       inherit (config) sinnix;

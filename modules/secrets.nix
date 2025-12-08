@@ -106,5 +106,21 @@ in
 
       secrets = secretSpecs;
     };
+
+    # Export decrypted secrets into shells via /etc/profile.d
+    environment.etc."profile.d/agenix-secrets.sh" = lib.mkIf (secretNames != [ ]) {
+      mode = "0444";
+      text = ''
+        # shellcheck shell=bash
+        ${secretsExportScript}
+      '';
+    };
+
+    environment.shellInit = ''
+      if [ -f /etc/profile.d/agenix-secrets.sh ]; then
+        # shellcheck disable=SC1091
+        . /etc/profile.d/agenix-secrets.sh
+      fi
+    '';
   };
 }
