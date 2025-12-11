@@ -2,11 +2,11 @@
 {
   pkgs,
   lib,
-  inputs,
+  sinnix,
   ...
 }:
 let
-  script = rel: "${inputs.self}/scripts/${rel}";
+  scriptPath = rel: "${sinnix.paths.projectRoot}/scripts/${rel}";
   waybarAudioSignal = 12;
   audioOutputStatus = pkgs.writeShellApplication {
     name = "audio-output-status";
@@ -16,7 +16,9 @@ let
       jq
       pipewire
     ];
-    text = builtins.readFile (script "audio-output-status");
+    text = ''
+      exec ${pkgs.bash}/bin/bash ${scriptPath "audio-output-status"} "$@"
+    '';
   };
   audioOutputToggle = pkgs.writeShellApplication {
     name = "toggle-audio-output";
@@ -27,7 +29,9 @@ let
       pipewire
       procps
     ];
-    text = builtins.readFile (script "toggle-audio-output");
+    text = ''
+      exec ${pkgs.bash}/bin/bash ${scriptPath "toggle-audio-output"} "$@"
+    '';
   };
 in
 {
@@ -35,6 +39,15 @@ in
     audioOutputToggle
     audioOutputStatus
   ];
+
+  # Restart Waybar on every Home Manager activation so rebuilds do not leave
+  # older processes hanging around (systemd stop/start ensures a single bar).
+  home.activation.restartWaybar = lib.hm.dag.entryAfter [ "reloadSystemd" ] ''
+    if systemctl --user --plain status basic.target >/dev/null 2>&1; then
+      systemctl --user stop waybar.service >/dev/null 2>&1 || true
+      systemctl --user start waybar.service >/dev/null 2>&1 || true
+    fi
+  '';
 
   programs.waybar = {
     enable = true;

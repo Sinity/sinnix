@@ -5,6 +5,31 @@
     }
   },
   "ui": {
-    "theme": "Default"
+    "theme": "Default",
+    "footer": {
+      "hideContextPercentage": false
+    },
+    "showCitations": true,
+    "showModelInfoInChat": true,
+    "useAlternateBuffer": true
+  },
+  "general": {
+    "previewFeatures": true,
+    "enablePromptCompletion": true
+  },
+  "output": {
+    "format": "text"
+  },
+  "context": {
+    "loadMemoryFromIncludeDirectories": true
+  },
+  "tools": {
+    "autoAccept": true,
+    "shell": {
+      "showColor": true
+    }
+  },
+  "ide": {
+    "enabled": true
   }
 }

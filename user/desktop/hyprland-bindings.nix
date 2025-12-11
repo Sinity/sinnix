@@ -1,12 +1,11 @@
 # Hyprland keybindings configuration
 {
-  inputs,
   pkgs,
   sinnix,
   ...
 }:
 let
-  script = rel: "${inputs.self}/scripts/${rel}";
+  script = rel: "${sinnix.paths.projectRoot}/scripts/${rel}";
   screenshotDir = "${sinnix.paths.dataRoot}/screenshot";
 in
 {
@@ -71,8 +70,6 @@ in
     "SUPER CTRL, G, exec, ${script "kitty-grid"} --grid 3x3"
     "SUPER SHIFT, C, exec, ${script "kitty-grid"} --class qutebrowser --grid 3x2 --arrange-only"
     "SUPER SHIFT, N, exec, ~/.local/bin/kb-capture"
-    "SUPER, W, exec, kitty --class session-menu --title SessionMenu -e idea-session menu"
-    "SUPER SHIFT, W, exec, kitty --class session-menu --title SessionNew -e idea-session new"
 
     ",XF86AudioMute, exec, pamixer -t"
     ",XF86AudioPlay, exec, playerctl play-pause && notify-send -t 1000 '♪ Media' '$(playerctl status)'"

@@ -1,13 +1,12 @@
 {
   pkgs,
   lib,
-  inputs,
   sinnix,
   ...
 }:
 let
   username = sinnix.user.name;
-  flakePath = "${inputs.self}";
+  flakePath = "${sinnix.paths.projectRoot}";
 in
 {
   home = {

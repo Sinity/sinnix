@@ -12,7 +12,16 @@
     },
     {
       "extensions": ["ts", "tsx", "js", "jsx"],
-      "command": ["npx", "--", "typescript-language-server", "--stdio"],
+      "command": [
+        "npx",
+        "-y",
+        "-p",
+        "typescript",
+        "-p",
+        "typescript-language-server",
+        "typescript-language-server",
+        "--stdio"
+      ],
       "rootDir": "."
     }
   ]

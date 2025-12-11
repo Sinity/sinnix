@@ -7,7 +7,6 @@
       aiToolsBase = inputs.nix-ai-tools.packages.${pkgs.stdenv.hostPlatform.system};
       aiTools = aiToolsBase;
       externalTools = [
-        inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.polylogue
         inputs.sinevec.packages.${pkgs.stdenv.hostPlatform.system}.sinevec
       ];
     in

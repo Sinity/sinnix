@@ -1,11 +1,15 @@
 {
-  inputs,
+  config,
+  dotsRepoPath,
   ...
 }:
+let
+  mkDotsRepoLink = rel: config.lib.file.mkOutOfStoreSymlink (dotsRepoPath + rel);
+in
 {
   xdg.configFile = {
-    "Zed/settings.json".source = "${inputs.self}/dots/zed/settings.json";
-    "Zed/keymap.json".source = "${inputs.self}/dots/zed/keymap.json";
+    "Zed/settings.json".source = mkDotsRepoLink "/zed/settings.json";
+    "Zed/keymap.json".source = mkDotsRepoLink "/zed/keymap.json";
   };
 
   home.file.".local/bin/zed" = {

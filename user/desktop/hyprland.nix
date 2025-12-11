@@ -16,17 +16,53 @@
 #   - hyprland-lock.nix: Screen locking and idle management (hypridle, hyprlock)
 {
   pkgs,
-  inputs,
   lib,
   sinnix,
   ...
 }:
 let
-  flakePath = inputs.self;
-  asset = rel: "${flakePath}/assets/${rel}";
-  script = rel: "${flakePath}/scripts/${rel}";
+  repoRoot = sinnix.paths.projectRoot;
+  scriptPath = rel: "${repoRoot}/scripts/${rel}";
+  scriptLinks = [
+    {
+      target = "kb-capture";
+      source = "kb-capture";
+    }
+    {
+      target = "rawlog";
+      source = "rawlog";
+    }
+    {
+      target = "toggle-scratch";
+      source = "toggle-scratch";
+    }
+    {
+      target = "combine-files";
+      source = "combine-files";
+    }
+    {
+      target = "rawlog-capture";
+      source = "rawlog-capture";
+    }
+    {
+      target = "kitty-grid";
+      source = "kitty-grid";
+    }
+    {
+      target = "rawlog-loop";
+      source = "rawlog-loop";
+    }
+    {
+      target = "log-to-knowledgebase";
+      source = "rawlog";
+    }
+  ];
+  mkLinkCmd = link: ''
+    ln -sf ${scriptPath link.source} "$HOME/.local/bin/${link.target}"
+    chmod +x "$HOME/.local/bin/${link.target}"
+  '';
 
-  bindings = import ./hyprland-bindings.nix { inherit inputs pkgs sinnix; };
+  bindings = import ./hyprland-bindings.nix { inherit pkgs sinnix; };
   rules = import ./hyprland-rules.nix;
 in
 {
@@ -128,90 +164,58 @@ in
     };
   };
 
-  home.file = {
-    ".local/bin/kb-capture" = {
-      source = script "kb-capture";
-      executable = true;
+  home = {
+    file = {
+      ".config/scratchpads/term.conf" = {
+        text = ''
+          # shellcheck shell=bash
+          COMMAND=(${pkgs.kitty}/bin/kitty --class scratchpad-terminal)
+          CLASS="scratchpad-terminal"
+          WORKSPACE="scratch_term"
+        '';
+      };
+      ".config/scratchpads/notes.conf" = {
+        text = ''
+          # shellcheck shell=bash
+          COMMAND=(${pkgs.kitty}/bin/kitty --class notes-scratch -d /realm/knowledgebase ${pkgs.neovim}/bin/nvim)
+          CLASS="notes-scratch"
+          WORKSPACE="scratch_notes"
+        '';
+      };
+      ".config/scratchpads/rawlog.conf" = {
+        text = ''
+          # shellcheck shell=bash
+          COMMAND=(${pkgs.kitty}/bin/kitty --class rawlog-capture --instance-group rawlog --single-instance --override font_size=22 sh -lc "$HOME/.local/bin/rawlog-loop")
+          CLASS="rawlog-capture"
+          WORKSPACE="scratch_rawlog"
+          WAIT_FOR_WINDOW_TRIES=50
+        '';
+      };
+      ".config/scratchpads/spotify.conf" = {
+        text = ''
+          # shellcheck shell=bash
+          COMMAND=(spotify)
+          CLASS="Spotify"
+          CLASS_PATTERN="(?i)^spotify$"
+          WORKSPACE="scratch_spotify"
+          WAIT_FOR_WINDOW_TRIES=100
+        '';
+      };
     };
-    ".local/bin/idea-session" = {
-      source = script "idea-session";
-      executable = true;
-    };
-    ".config/idea-session/base-agents.md" = {
-      source = asset "session/base-agents.md";
-    };
-    ".local/bin/rawlog" = {
-      source = script "rawlog";
-      executable = true;
-    };
-    ".local/bin/toggle-scratch" = {
-      source = script "toggle-scratch";
-      executable = true;
-    };
-    ".local/bin/combine-files" = {
-      source = script "combine-files";
-      executable = true;
-    };
-    ".local/bin/rawlog-capture" = {
-      source = script "rawlog-capture";
-      executable = true;
-    };
-    ".local/bin/kitty-grid" = {
-      source = script "kitty-grid";
-      executable = true;
-    };
-    ".local/bin/rawlog-capture-session" = {
-      source = script "rawlog-capture-session";
-      executable = true;
-    };
-    ".local/bin/log-to-knowledgebase" = {
-      source = script "rawlog";
-      executable = true;
-    };
-    ".config/scratchpads/term.conf" = {
-      text = ''
-        # shellcheck shell=bash
-        COMMAND=(${pkgs.kitty}/bin/kitty --class scratchpad-terminal)
-        CLASS="scratchpad-terminal"
-        WORKSPACE="scratch_term"
-      '';
-    };
-    ".config/scratchpads/notes.conf" = {
-      text = ''
-        # shellcheck shell=bash
-        COMMAND=(${pkgs.kitty}/bin/kitty --class notes-scratch -d /realm/knowledgebase ${pkgs.neovim}/bin/nvim)
-        CLASS="notes-scratch"
-        WORKSPACE="scratch_notes"
-      '';
-    };
-    ".config/scratchpads/rawlog.conf" = {
-      text = ''
-        # shellcheck shell=bash
-        COMMAND=(${pkgs.kitty}/bin/kitty --class rawlog-capture --instance-group rawlog --single-instance --override font_size=22 sh -lc "$HOME/.local/bin/rawlog-capture-session")
-        CLASS="rawlog-capture"
-        WORKSPACE="scratch_rawlog"
-        WAIT_FOR_WINDOW_TRIES=50
-      '';
-    };
-    ".config/scratchpads/spotify.conf" = {
-      text = ''
-        # shellcheck shell=bash
-        COMMAND=(spotify)
-        CLASS="Spotify"
-        CLASS_PATTERN="(?i)^spotify$"
-        WORKSPACE="scratch_spotify"
-        WAIT_FOR_WINDOW_TRIES=100
-      '';
-    };
-  };
 
-  home.packages = with pkgs; [
-    brightnessctl
-    grim
-    slurp
-    grimblast
-    wl-screenrec
-  ];
+    activation.hyprlandScriptLinks = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+      mkdir -p "$HOME/.local/bin"
+      ${lib.concatMapStrings mkLinkCmd scriptLinks}
+    '';
+
+    packages = with pkgs; [
+      brightnessctl
+      grim
+      slurp
+      grimblast
+      wl-screenrec
+    ];
+  };
 
   systemd.user.services.hyprpaper.Unit.X-Restart-Triggers = lib.mkForce [ ];
 }

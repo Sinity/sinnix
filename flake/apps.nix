@@ -127,28 +127,6 @@
         agenix = mkApp "agenix" ''
           ${inputs.agenix.packages.${system}.default}/bin/agenix "$@"
         '' "Manage encrypted secrets with agenix";
-
-        # Knowledgebase and capture helpers
-        rawlog = mkApp "rawlog" ''
-          exec ${pkgs.bash}/bin/bash ${../scripts/rawlog} "$@"
-        '' "Append an entry to the knowledgebase raw log";
-
-        "rawlog-capture" = mkApp "rawlog-capture" ''
-          exec ${pkgs.bash}/bin/bash ${../scripts/rawlog-capture} "$@"
-        '' "Capture clipboard contents into the raw log";
-
-        "rawlog-capture-session" = mkApp "rawlog-capture-session" ''
-          exec ${pkgs.bash}/bin/bash ${../scripts/rawlog-capture-session} "$@"
-        '' "Record a timestamped session snippet into the raw log";
-
-        "kb-capture" = mkApp "kb-capture" ''
-          exec ${pkgs.bash}/bin/bash ${../scripts/kb-capture} "$@"
-        '' "Send clipboard selection to the knowledgebase inbox";
-
-        "idea-session" = mkApp "idea-session" ''
-          exec ${pkgs.bash}/bin/bash ${../scripts/idea-session} "$@"
-        '' "Manage idea sessions from the terminal";
-
       };
     };
 }

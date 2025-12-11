@@ -34,9 +34,7 @@ in
           marketplace.vspacecode.whichkey
           pkgs.vscode-extensions.eamodio.gitlens
           marketplace.usernamehw.errorlens
-          marketplace.foam.foam-vscode
           marketplace.yzhang.markdown-all-in-one
-          marketplace.serayuzgur.crates
           marketplace."sst-dev".opencode
           marketplace.xiangz19.codex-ratelimit
         ];

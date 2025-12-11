@@ -1,4 +1,4 @@
-{ inputs, pkgs, ... }:
+{ ... }:
 {
   imports = [
     ./boot.nix
@@ -14,8 +14,6 @@
 
   networking.hostName = "sinnix-prime";
   sinnix.machine.isDesktop = true;
-
-  # Polylogue configured via ../../modules/services/polylogue.nix
 
   services.polylogue-watch.enable = true;
 }

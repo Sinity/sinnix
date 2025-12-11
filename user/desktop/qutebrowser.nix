@@ -1,14 +1,15 @@
 {
   pkgs,
-  inputs,
   lib,
+  config,
+  dotsRepoPath,
   ...
 }:
 let
-  repoRoot = inputs.self;
-  qutePath = "${repoRoot}/qutebrowser";
+  mkDotsRepoLink = rel: config.lib.file.mkOutOfStoreSymlink (dotsRepoPath + rel);
+  quteDots = rel: mkDotsRepoLink ("/qutebrowser" + rel);
   mkUserScript = name: {
-    source = "${qutePath}/userscripts/${name}";
+    source = quteDots ("/userscripts/" + name);
   };
 in
 {
@@ -56,12 +57,12 @@ in
   };
 
   xdg.configFile = {
-    "qutebrowser/config.py".source = "${qutePath}/config.py";
-    "qutebrowser/user.css".source = "${qutePath}/user.css";
+    "qutebrowser/config.py".source = quteDots "/config.py";
+    "qutebrowser/user.css".source = quteDots "/user.css";
     "qutebrowser/greasemonkey/cookie-nag-zapper.user.js".source =
-      "${qutePath}/greasemonkey/cookie-nag-zapper.user.js";
+      quteDots "/greasemonkey/cookie-nag-zapper.user.js";
     "qutebrowser/greasemonkey/readable-medium.user.js".source =
-      "${qutePath}/greasemonkey/readable-medium.user.js";
-    "qutebrowser/greasemonkey/template.user.js".source = "${qutePath}/greasemonkey/template.user.js";
+      quteDots "/greasemonkey/readable-medium.user.js";
+    "qutebrowser/greasemonkey/template.user.js".source = quteDots "/greasemonkey/template.user.js";
   };
 }

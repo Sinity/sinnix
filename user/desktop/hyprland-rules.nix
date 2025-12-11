@@ -34,8 +34,6 @@
 
     "float 1, size 1200 800, center 1, match:class ^(xdg-desktop-portal-gtk)$"
 
-    "size monitor_w*0.60 monitor_h, match:title ^(session: )"
-    "move 0 0, match:title ^(session: )"
     "tile 1, match:class ^(qutebrowser)$"
     "group set, match:class ^(qutebrowser)$"
     "float 1, size monitor_w*0.28 monitor_h*0.24, move monitor_w*0.70 monitor_h*0.06, match:class ^(qutebrowser)$, match:float true"

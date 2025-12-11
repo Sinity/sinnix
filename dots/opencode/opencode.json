@@ -93,13 +93,10 @@
     "firecrawl": {
       "type": "local",
       "command": [
-        "npx",
-        "-y",
-        "firecrawl-mcp@latest"
-      ],
-      "environment": {
-        "FIRECRAWL_API_KEY": "{env:FIRECRAWL_API_KEY}"
-      }
+        "bash",
+        "-lc",
+        "exec env FIRECRAWL_API_KEY=\"$(< /run/agenix/firecrawl-api-key)\" npx -y firecrawl-mcp@latest"
+      ]
     },
     "qdrant": {
       "type": "local",

@@ -31,7 +31,6 @@ in
     diffsitter
     difftastic
     ast-grep
-    zellij
     mprocs
     tmux
     neovim
@@ -166,7 +165,6 @@ in
         claude = "~/.local/bin/claude";
         nvim = "nvim --listen /tmp/nvim-$$";
         ccm = "ccmonitor --refresh-rate 1 --refresh-per-second 20";
-        ccm-attach = "zellij attach ccusage-monitor";
         ccusage = "npx --yes ccusage@latest";
         gemini-cli = "npx --yes https://github.com/google-gemini/gemini-cli";
         marimo-edit = "marimo edit --mcp";

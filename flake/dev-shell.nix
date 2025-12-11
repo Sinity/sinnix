@@ -90,7 +90,10 @@
 
               # Binary cache setup
               cachix.enable = true;
-              cachix.pull = [ "sinity" "nix-community" ];
+              cachix.pull = [
+                "sinity"
+                "nix-community"
+              ];
 
               # Helper scripts available in the shell
               scripts = {

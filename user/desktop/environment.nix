@@ -39,7 +39,5 @@ in
     WINEDLLOVERRIDES = "winemenubuilder.exe=d";
 
     SESSION_HISTORY_FILE = "${homeDir}/.zsh_history";
-    SESSION_CODEX_LOG = "${homeDir}/.codex/log/codex-tui.log";
-    SESSION_CODEX_LOG_DIR = "${homeDir}/.codex/sessions";
   };
 }

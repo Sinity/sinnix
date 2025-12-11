@@ -1,7 +1,7 @@
 {
   pkgs,
-  inputs,
   lib,
+  config,
   ...
 }:
 let
@@ -82,7 +82,9 @@ let
   perfScan = pkgs.writeShellApplication {
     name = "perf-scan";
     runtimeInputs = perfScanRuntimeInputs;
-    text = builtins.readFile "${inputs.self}/scripts/perf-scan";
+    text = ''
+      exec ${pkgs.bash}/bin/bash ${config.sinnix.paths.projectRoot}/scripts/perf-scan "$@"
+    '';
   };
 in
 {

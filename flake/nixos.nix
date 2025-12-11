@@ -9,7 +9,7 @@ let
   inherit (inputs.nixpkgs) lib;
   baseModules = [
     inputs.agenix.nixosModules.default
-    (import ./overlay.nix)
+    (import ./overlay)
   ];
   sharedSpecialArgs = {
     inherit inputs;

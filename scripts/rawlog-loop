@@ -8,7 +8,7 @@ RAWLOG_CAPTURE_BIN=${RAWLOG_CAPTURE_BIN:-$HOME/.local/bin/rawlog-capture}
 CANCEL_CODE=${RAWLOG_CANCEL_CODE:-130}
 
 if [ ! -x "$RAWLOG_CAPTURE_BIN" ]; then
-  echo "rawlog-capture-session: capture binary not executable: $RAWLOG_CAPTURE_BIN" >&2
+  echo "rawlog-loop: capture binary not executable: $RAWLOG_CAPTURE_BIN" >&2
   exit 1
 fi
 
