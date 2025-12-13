@@ -15,6 +15,7 @@ in
     patches = (old.patches or [ ]) ++ [
       (codexPatch "prompt-subcommand.patch")
     ];
+    patchFlags = (old.patchFlags or [ "-p1" ]) ++ [ "--fuzz=0" ];
     passthru = (old.passthru or { }) // {
       inherit upstream;
     };
