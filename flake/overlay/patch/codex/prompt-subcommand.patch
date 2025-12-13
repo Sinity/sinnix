@@ -1,0 +1,443 @@
+diff --git a/cli/src/main.rs b/cli/src/main.rs
+index 5d3e072..c7aeaa5 100644
+--- a/cli/src/main.rs
++++ b/cli/src/main.rs
+@@ -33,14 +33,16 @@ use codex_tui::update_action::UpdateAction;
+ use codex_tui2 as tui2;
+ use owo_colors::OwoColorize;
+ use std::path::PathBuf;
+ use supports_color::Stream;
+ 
+ mod mcp_cmd;
++mod prompt_cmd;
+ #[cfg(not(windows))]
+ mod wsl_paths;
+ 
+ use crate::mcp_cmd::McpCli;
++use crate::prompt_cmd::PromptCli;
+ 
+ use codex_core::config::Config;
+ use codex_core::config::ConfigOverrides;
+ use codex_core::config::find_codex_home;
+@@ -84,6 +86,9 @@ enum Subcommand {
+     /// [experimental] Run the Codex MCP server (stdio transport).
+     McpServer,
+ 
++    /// Run a single prompt directly against the configured model API.
++    Prompt(PromptCli),
++
+     /// [experimental] Run the app server or related tooling.
+     AppServer(AppServerCommand),
+ 
+@@ -475,7 +480,14 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
+         Some(Subcommand::McpServer) => {
+             codex_mcp_server::run_main(codex_linux_sandbox_exe, root_config_overrides).await?;
+         }
++        Some(Subcommand::Prompt(mut prompt_cli)) => {
++            prepend_config_flags(
++                &mut prompt_cli.config_overrides,
++                root_config_overrides.clone(),
++            );
++            prompt_cmd::run_prompt_command(prompt_cli).await?;
++        }
+         Some(Subcommand::Mcp(mut mcp_cli)) => {
+             // Propagate any root-level config overrides (e.g. `-c key=value`).
+             prepend_config_flags(&mut mcp_cli.config_overrides, root_config_overrides.clone());
+             mcp_cli.run().await?;
+diff --git a/cli/src/prompt_cmd.rs b/cli/src/prompt_cmd.rs
+new file mode 100644
+index 0000000..43b6c1c
+--- /dev/null
++++ b/cli/src/prompt_cmd.rs
+@@ -0,0 +1,362 @@
++use anyhow::Context;
++use clap::Parser;
++use clap::ValueHint;
++use codex_common::CliConfigOverrides;
++use codex_core::AuthManager;
++use codex_core::CodexAuth;
++use codex_core::ModelClient;
++use codex_core::OtelEventManager;
++use codex_core::Prompt;
++use codex_core::ResponseEvent;
++use codex_core::ResponseStream;
++use codex_core::auth::enforce_login_restrictions;
++use codex_core::config::Config;
++use codex_core::config::ConfigOverrides;
++use codex_core::openai_models::models_manager::ModelsManager;
++use codex_core::terminal;
++use codex_protocol::ConversationId;
++use codex_protocol::models::ContentItem;
++use codex_protocol::models::ResponseItem;
++use codex_protocol::protocol::SessionSource;
++use codex_protocol::protocol::TokenUsage;
++use std::io::IsTerminal;
++use std::io::Read;
++use std::io::Write;
++use std::sync::Arc;
++
++/// Run a single prompt directly against the configured model.
++#[derive(Debug, Parser)]
++pub struct PromptCli {
++    #[clap(flatten)]
++    pub config_overrides: CliConfigOverrides,
++
++    /// Model to use for this request.
++    #[arg(long, short = 'm', value_name = "MODEL")]
++    pub model: Option<String>,
++
++    /// Override the developer/system instructions for this request.
++    #[arg(long = "system", short = 's', value_name = "SYSTEM_PROMPT")]
++    pub system_prompt: Option<String>,
++
++    /// List models that can be used with `codex prompt`.
++    #[arg(long = "models", conflicts_with = "prompt", default_value_t = false)]
++    pub list_models: bool,
++
++    /// Prompt to send to the model. Use `-` to read from stdin.
++    #[arg(value_name = "PROMPT", value_hint = ValueHint::Other)]
++    pub prompt: Option<String>,
++}
++
++const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful assistant. Respond directly to the user request without running tools or shell commands.";
++
++pub async fn run_prompt_command(cli: PromptCli) -> anyhow::Result<()> {
++    let config = Arc::new(load_config(&cli).await?);
++    let auth_manager = AuthManager::shared(
++        config.codex_home.clone(),
++        true,
++        config.cli_auth_credentials_store_mode,
++    );
++
++    if cli.list_models {
++        let models_manager = ModelsManager::new(auth_manager.clone());
++        let models = models_manager.list_models(&config).await;
++        print_models(&models);
++        return Ok(());
++    }
++
++    let prompt_text = read_prompt(cli.prompt.clone())?;
++    let system_prompt = cli
++        .system_prompt
++        .clone()
++        .unwrap_or_else(|| DEFAULT_SYSTEM_PROMPT.to_string());
++
++    if let Err(err) = enforce_login_restrictions(&config).await {
++        eprintln!("{err}");
++        std::process::exit(1);
++    }
++
++    run_prompt(prompt_text, system_prompt, config, auth_manager).await
++}
++
++async fn load_config(cli: &PromptCli) -> anyhow::Result<Config> {
++    let overrides = ConfigOverrides {
++        model: cli.model.clone(),
++        review_model: None,
++        cwd: None,
++        approval_policy: None,
++        sandbox_mode: None,
++        model_provider: None,
++        config_profile: None,
++        codex_linux_sandbox_exe: None,
++        base_instructions: None,
++        developer_instructions: None,
++        compact_prompt: None,
++        include_apply_patch_tool: Some(false),
++        show_raw_agent_reasoning: None,
++        tools_web_search_request: Some(false),
++        additional_writable_roots: Vec::new(),
++    };
++
++    let cli_overrides = cli
++        .config_overrides
++        .parse_overrides()
++        .map_err(anyhow::Error::msg)?;
++
++    Config::load_with_cli_overrides(cli_overrides, overrides)
++        .await
++        .map_err(anyhow::Error::from)
++}
++
++fn read_prompt(prompt: Option<String>) -> anyhow::Result<String> {
++    match prompt {
++        Some(p) if p != "-" => Ok(p),
++        other => {
++            let force_stdin = matches!(other.as_deref(), Some("-"));
++            if std::io::stdin().is_terminal() && !force_stdin {
++                anyhow::bail!("No prompt provided. Pass one as an argument or pipe it via stdin.");
++            }
++            if !force_stdin {
++                eprintln!("Reading prompt from stdin...");
++            }
++            let mut buffer = String::new();
++            std::io::stdin()
++                .read_to_string(&mut buffer)
++                .context("Failed to read prompt from stdin")?;
++            if buffer.trim().is_empty() {
++                anyhow::bail!("No prompt provided via stdin.");
++            }
++            Ok(buffer)
++        }
++    }
++}
++
++fn print_models(models: &[codex_protocol::openai_models::ModelPreset]) {
++    if models.is_empty() {
++        println!("No models are currently available.");
++        return;
++    }
++
++    println!("Available models:");
++    for preset in models {
++        let default_marker = if preset.is_default { " (default)" } else { "" };
++        println!("  {}{} - {}", preset.model, default_marker, preset.description);
++        println!(
++            "    Default reasoning effort: {}",
++            preset.default_reasoning_effort
++        );
++        if !preset.supported_reasoning_efforts.is_empty() {
++            println!("    Supported reasoning efforts:");
++            for option in &preset.supported_reasoning_efforts {
++                println!("      - {}: {}", option.effort, option.description);
++            }
++        }
++    }
++}
++
++async fn run_prompt(
++    prompt_text: String,
++    system_prompt: String,
++    config: Arc<Config>,
++    auth_manager: Arc<AuthManager>,
++) -> anyhow::Result<()> {
++    let auth_snapshot = auth_manager.auth();
++    let models_manager = ModelsManager::new(auth_manager.clone());
++    let model = models_manager.get_model(&config.model, &config).await;
++    let model_family = models_manager
++        .construct_model_family(model.as_str(), &config)
++        .await;
++
++    let conversation_id = ConversationId::new();
++    let otel_event_manager = OtelEventManager::new(
++        conversation_id,
++        model.as_str(),
++        model_family.slug.as_str(),
++        auth_snapshot
++            .as_ref()
++            .and_then(codex_core::CodexAuth::get_account_id),
++        auth_snapshot
++            .as_ref()
++            .and_then(codex_core::CodexAuth::get_account_email),
++        auth_snapshot.as_ref().map(|auth| auth.mode),
++        config.otel.log_user_prompt,
++        terminal::user_agent(),
++    );
++
++    let client = ModelClient::new(
++        Arc::clone(&config),
++        Some(auth_manager),
++        model_family,
++        otel_event_manager,
++        config.model_provider.clone(),
++        config.model_reasoning_effort,
++        config.model_reasoning_summary,
++        conversation_id,
++        SessionSource::Cli,
++    );
++
++    let mut prompt = Prompt::default();
++    prompt.input = build_prompt_inputs(&system_prompt, &prompt_text);
++    prompt.base_instructions_override = config.base_instructions.clone();
++
++    let mut stream = client.stream(&prompt).await?;
++
++    consume_stream(&mut stream).await
++}
++
++fn build_prompt_inputs(system_prompt: &str, prompt_text: &str) -> Vec<ResponseItem> {
++    vec![
++        ResponseItem::Message {
++            id: None,
++            role: "developer".to_string(),
++            content: vec![ContentItem::InputText {
++                text: system_prompt.to_string(),
++            }],
++        },
++        ResponseItem::Message {
++            id: None,
++            role: "user".to_string(),
++            content: vec![ContentItem::InputText {
++                text: prompt_text.to_string(),
++            }],
++        },
++    ]
++}
++
++async fn consume_stream(stream: &mut ResponseStream) -> anyhow::Result<()> {
++    let mut stdout = std::io::stdout();
++    let mut stderr = std::io::stderr();
++    let mut printed_response = false;
++    let mut reasoning_summary_line = String::new();
++    let mut summary_active = false;
++
++    let flush_summary =
++        |summary_active: &mut bool, reasoning_summary_line: &mut String| -> bool {
++            if *summary_active {
++                eprintln!();
++                reasoning_summary_line.clear();
++                *summary_active = false;
++                true
++            } else {
++                false
++            }
++        };
++
++    while let Some(event) = stream.next_event().await {
++        match event? {
++            ResponseEvent::Created => {}
++            ResponseEvent::OutputTextDelta(delta) => {
++                if flush_summary(&mut summary_active, &mut reasoning_summary_line) {
++                    stderr.flush()?;
++                }
++                stdout.write_all(delta.as_bytes())?;
++                stdout.flush()?;
++                printed_response = true;
++            }
++            ResponseEvent::OutputItemAdded(item) | ResponseEvent::OutputItemDone(item) => {
++                if flush_summary(&mut summary_active, &mut reasoning_summary_line) {
++                    stderr.flush()?;
++                }
++                if let Some(text) = assistant_text(&item)
++                    && !printed_response
++                {
++                    stdout.write_all(text.as_bytes())?;
++                    stdout.flush()?;
++                    printed_response = true;
++                }
++            }
++            ResponseEvent::ReasoningSummaryDelta { delta, .. } => {
++                reasoning_summary_line.push_str(&delta);
++                summary_active = true;
++                eprint!("\r(reasoning summary) {reasoning_summary_line}");
++                stderr.flush()?;
++            }
++            ResponseEvent::ReasoningSummaryPartAdded { .. } => {
++                if flush_summary(&mut summary_active, &mut reasoning_summary_line) {
++                    stderr.flush()?;
++                }
++            }
++            ResponseEvent::ReasoningContentDelta { delta, .. } => {
++                eprintln!("(reasoning detail) {delta}");
++            }
++            ResponseEvent::RateLimits(snapshot) => {
++                eprintln!("Rate limits: {snapshot:?}");
++            }
++            ResponseEvent::Completed { token_usage, .. } => {
++                if flush_summary(&mut summary_active, &mut reasoning_summary_line) {
++                    stderr.flush()?;
++                }
++
++                if printed_response {
++                    stdout.write_all(b"\n")?;
++                    stdout.flush()?;
++                    printed_response = false;
++                }
++
++                if let Some(usage) = token_usage {
++                    print_token_usage(&usage);
++                }
++            }
++        }
++    }
++
++    if printed_response {
++        stdout.write_all(b"\n")?;
++        stdout.flush()?;
++    }
++    if flush_summary(&mut summary_active, &mut reasoning_summary_line) {
++        stderr.flush()?;
++    }
++    Ok(())
++}
++
++fn assistant_text(item: &ResponseItem) -> Option<String> {
++    if let ResponseItem::Message { role, content, .. } = item
++        && role == "assistant"
++    {
++        let mut text = String::new();
++        for chunk in content {
++            match chunk {
++                ContentItem::InputText { text: value }
++                | ContentItem::OutputText { text: value } => text.push_str(value),
++                _ => {}
++            }
++        }
++        if !text.is_empty() {
++            return Some(text);
++        }
++    }
++    None
++}
++
++fn print_token_usage(usage: &TokenUsage) {
++    eprintln!(
++        "Token usage: total={} input={} cached_input={} output={} reasoning_output={}",
++        usage.total_tokens,
++        usage.input_tokens,
++        usage.cached_input_tokens,
++        usage.output_tokens,
++        usage.reasoning_output_tokens
++    );
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn assistant_text_handles_basic_message() {
++        let item = ResponseItem::Message {
++            id: None,
++            role: "assistant".to_string(),
++            content: vec![
++                ContentItem::OutputText {
++                    text: "Hello".to_string(),
++                },
++                ContentItem::OutputText {
++                    text: " world".to_string(),
++                },
++            ],
++        };
++        assert_eq!(assistant_text(&item), Some("Hello world".to_string()));
++    }
++}
+diff --git a/core/src/client_common.rs b/core/src/client_common.rs
+index c7ac79a..463bf72 100644
+--- a/core/src/client_common.rs
++++ b/core/src/client_common.rs
+@@ -243,6 +243,12 @@ pub struct ResponseStream {
+     pub(crate) rx_event: mpsc::Receiver<Result<ResponseEvent>>,
+ }
+ 
++impl ResponseStream {
++    pub async fn next_event(&mut self) -> Option<Result<ResponseEvent>> {
++        self.rx_event.recv().await
++    }
++}
++
+ impl Stream for ResponseStream {
+     type Item = Result<ResponseEvent>;
+ 
+diff --git a/core/src/lib.rs b/core/src/lib.rs
+index 222b254..86bbd9e 100644
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -105,6 +105,7 @@ pub use client_common::Prompt;
+ pub use client_common::REVIEW_PROMPT;
+ pub use client_common::ResponseEvent;
+ pub use client_common::ResponseStream;
++pub use codex_otel::otel_event_manager::OtelEventManager;
+ pub use codex_protocol::models::ContentItem;
+ pub use codex_protocol::models::LocalShellAction;
+ pub use codex_protocol::models::LocalShellExecAction;
