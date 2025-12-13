@@ -1,5 +1,5 @@
-_:
-final: _prev:
+{ ... }:
+final: prev:
 let
   pname = "aionui";
   version = "1.4.2";

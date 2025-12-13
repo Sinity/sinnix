@@ -1,5 +1,5 @@
-_:
-_final: prev:
+{ ... }:
+final: prev:
 let
   pythonOverrides = _self: super: {
     # Upstream aggdraw test suite flakes on Python 3.13; keep disabled to avoid eval/switch failures.

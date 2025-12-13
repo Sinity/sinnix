@@ -73,7 +73,7 @@
     ++ externalTools
     ++ [
       aiTools.claude-code
-      aiTools.codex
       aiTools.opencode
+      pkgs.codex
     ];
 }

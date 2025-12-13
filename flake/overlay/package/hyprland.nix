@@ -1,5 +1,5 @@
-_:
-_final: prev:
+{ ... }:
+final: prev:
 let
   hyprlandPatches = builtins.path {
     path = ../patch/hyprland;

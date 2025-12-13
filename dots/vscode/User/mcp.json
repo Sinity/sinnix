@@ -28,7 +28,7 @@
 			"command": "bash",
 			"args": [
 				"-lc",
-				"exec env FIRECRAWL_API_KEY=\"$(< /run/agenix/firecrawl-api-key)\" npx -y firecrawl-mcp@latest"
+				"exec env FIRECRAWL_API_KEY=\"$FIRECRAWL_API_KEY\" npx -y firecrawl-mcp@latest"
 			],
 			"gallery": true
 		},

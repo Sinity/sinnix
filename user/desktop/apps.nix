@@ -13,6 +13,7 @@
   lib,
   dotsRepoPath,
   config,
+  sinnix,
   ...
 }:
 let

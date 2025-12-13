@@ -9,6 +9,7 @@
   ...
 }:
 let
+  inherit (sinnix.paths) realmRoot;
   repoRoot = sinnix.paths.projectRoot;
   devenvPkg = inputs.devenv.packages.${pkgs.stdenv.hostPlatform.system}.devenv;
   mcpPython = pkgs.python3.withPackages (ps: [

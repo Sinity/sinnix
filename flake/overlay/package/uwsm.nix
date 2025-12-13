@@ -1,4 +1,4 @@
-_:
+{ ... }:
 _final: prev: {
   uwsm = prev.uwsm.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [
