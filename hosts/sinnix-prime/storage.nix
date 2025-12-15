@@ -10,10 +10,16 @@ let
   username = config.sinnix.user.name;
   swapFileSizeGiB = 32;
   userCfg = config.users.users.${username} or { };
-  userUid = builtins.toString (userCfg.uid or 1000);
-  primaryGroupName = userCfg.group or "users";
+  getAttrOrFallback =
+    set: attr: fallback:
+      let
+        value = if set ? ${attr} then set.${attr} else null;
+      in
+      if value == null then fallback else value;
+  userUid = builtins.toString (getAttrOrFallback userCfg "uid" 1000);
+  primaryGroupName = getAttrOrFallback userCfg "group" "users";
   groupCfg = lib.attrByPath [ "users" "groups" primaryGroupName ] config { };
-  primaryGroupId = builtins.toString (groupCfg.gid or 100);
+  primaryGroupId = builtins.toString (getAttrOrFallback groupCfg "gid" 100);
 
   prepareSwapfile = pkgs.writeShellApplication {
     name = "prepare-swapfile";

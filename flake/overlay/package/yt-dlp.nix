@@ -1,4 +1,4 @@
-{ ... }:
+_:
 final: prev: {
   yt-dlp = prev.yt-dlp.overrideAttrs (_old: {
     version = "2025.12.08";

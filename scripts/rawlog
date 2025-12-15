@@ -14,8 +14,8 @@ if [ -z "${KB_ROOT:-}" ]; then
   done
 fi
 KB_ROOT=${KB_ROOT:-${DEFAULT_REALM_ROOT}/knowledgebase}
-LOG_DIR="$KB_ROOT/50_logs"
-LOG_FILE="$LOG_DIR/raw-log.md"
+LOG_DIR="$KB_ROOT"
+LOG_FILE="$LOG_DIR/logs.raw-log.md"
 PICKER=${PICKER:-tofi}
 RECENT_COUNT=${RECENT_COUNT:-5}
 
@@ -88,7 +88,7 @@ line="- **$ts** $msg"
 if [ ! -f "$LOG_FILE" ]; then
   {
     echo "---"
-    echo "id: raw-log"
+    echo "id: logs.raw-log"
     echo "aliases: []"
     echo "tags:"
     echo "  - log"

@@ -18,7 +18,6 @@
   pkgs,
   lib,
   sinnix,
-  config,
   ...
 }:
 let
@@ -165,56 +164,58 @@ in
     };
   };
 
-  home.file = {
-    ".config/scratchpads/term.conf" = {
-      text = ''
-        # shellcheck shell=bash
-        COMMAND=(${pkgs.kitty}/bin/kitty --class scratchpad-terminal)
-        CLASS="scratchpad-terminal"
-        WORKSPACE="scratch_term"
-      '';
+  home = {
+    file = {
+      ".config/scratchpads/term.conf" = {
+        text = ''
+          # shellcheck shell=bash
+          COMMAND=(${pkgs.kitty}/bin/kitty --class scratchpad-terminal)
+          CLASS="scratchpad-terminal"
+          WORKSPACE="scratch_term"
+        '';
+      };
+      ".config/scratchpads/notes.conf" = {
+        text = ''
+          # shellcheck shell=bash
+          COMMAND=(${pkgs.kitty}/bin/kitty --class notes-scratch -d /realm/knowledgebase ${pkgs.neovim}/bin/nvim)
+          CLASS="notes-scratch"
+          WORKSPACE="scratch_notes"
+        '';
+      };
+      ".config/scratchpads/rawlog.conf" = {
+        text = ''
+          # shellcheck shell=bash
+          COMMAND=(${pkgs.kitty}/bin/kitty --class rawlog-capture --instance-group rawlog --single-instance --override font_size=22 sh -lc "$HOME/.local/bin/rawlog-loop")
+          CLASS="rawlog-capture"
+          WORKSPACE="scratch_rawlog"
+          WAIT_FOR_WINDOW_TRIES=50
+        '';
+      };
+      ".config/scratchpads/spotify.conf" = {
+        text = ''
+          # shellcheck shell=bash
+          COMMAND=(spotify)
+          CLASS="Spotify"
+          CLASS_PATTERN="(?i)^spotify$"
+          WORKSPACE="scratch_spotify"
+          WAIT_FOR_WINDOW_TRIES=100
+        '';
+      };
     };
-    ".config/scratchpads/notes.conf" = {
-      text = ''
-        # shellcheck shell=bash
-        COMMAND=(${pkgs.kitty}/bin/kitty --class notes-scratch -d /realm/knowledgebase ${pkgs.neovim}/bin/nvim)
-        CLASS="notes-scratch"
-        WORKSPACE="scratch_notes"
-      '';
-    };
-    ".config/scratchpads/rawlog.conf" = {
-      text = ''
-        # shellcheck shell=bash
-        COMMAND=(${pkgs.kitty}/bin/kitty --class rawlog-capture --instance-group rawlog --single-instance --override font_size=22 sh -lc "$HOME/.local/bin/rawlog-loop")
-        CLASS="rawlog-capture"
-        WORKSPACE="scratch_rawlog"
-        WAIT_FOR_WINDOW_TRIES=50
-      '';
-    };
-    ".config/scratchpads/spotify.conf" = {
-      text = ''
-        # shellcheck shell=bash
-        COMMAND=(spotify)
-        CLASS="Spotify"
-        CLASS_PATTERN="(?i)^spotify$"
-        WORKSPACE="scratch_spotify"
-        WAIT_FOR_WINDOW_TRIES=100
-      '';
-    };
+
+    activation.hyprlandScriptLinks = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+      mkdir -p "$HOME/.local/bin"
+      ${lib.concatMapStrings mkLinkCmd scriptLinks}
+    '';
+
+    packages = with pkgs; [
+      brightnessctl
+      grim
+      slurp
+      grimblast
+      wl-screenrec
+    ];
   };
-
-  home.activation.hyprlandScriptLinks = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-        mkdir -p "$HOME/.local/bin"
-    ${lib.concatMapStrings mkLinkCmd scriptLinks}
-  '';
-
-  home.packages = with pkgs; [
-    brightnessctl
-    grim
-    slurp
-    grimblast
-    wl-screenrec
-  ];
 
   systemd.user.services.hyprpaper.Unit.X-Restart-Triggers = lib.mkForce [ ];
 }

@@ -8,11 +8,7 @@
 let
   inherit (lib) mkEnableOption mkIf;
   cfg = config.services.polylogue-watch;
-  polyloguePkg =
-    if pkgs ? polylogue then
-      pkgs.polylogue
-    else
-      inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.polylogue;
+  polyloguePkg = pkgs.polylogue or inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.polylogue;
 in
 {
   options.services.polylogue-watch.enable = mkEnableOption "Polylogue watch services";

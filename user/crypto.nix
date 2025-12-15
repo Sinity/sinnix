@@ -59,21 +59,22 @@ let
   '';
 in
 {
-  home.packages = with pkgs; [
-    monero-cli
-    monero-gui
-    moneroImportRaw
-    moneroDaemon
-    electrum
-    btcWallet
-  ];
+  home = {
+    packages = with pkgs; [
+      monero-cli
+      monero-gui
+      moneroImportRaw
+      moneroDaemon
+      electrum
+      btcWallet
+    ];
 
-  home.activation.ensureCryptoDirs = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-    mkdir -p ${moneroDataDir}
-    mkdir -p ${bitcoinWalletDir}
-  '';
+    activation.ensureCryptoDirs = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+      mkdir -p ${moneroDataDir}
+      mkdir -p ${bitcoinWalletDir}
+    '';
 
-  home.file.".bitmonero/bitmonero.conf".text = moneroConfig;
-
-  home.sessionVariables.MONERO_DATA_DIR = moneroDataDir;
+    file.".bitmonero/bitmonero.conf".text = moneroConfig;
+    sessionVariables.MONERO_DATA_DIR = moneroDataDir;
+  };
 }

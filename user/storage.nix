@@ -1,10 +1,8 @@
 {
   pkgs,
-  sinnix,
   ...
 }:
 let
-  username = sinnix.user.name;
   encryptFolder = pkgs.writeShellScriptBin "encrypt-folder" ''
     #!/usr/bin/env bash
     set -euo pipefail
