@@ -1698,15 +1698,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1765790417,
-        "narHash": "sha256-zvLK0C4G5Jla1Ig+1uIaJxkbzG2hmLG733SJNDdoL0Q=",
-        "ref": "refs/heads/master",
-        "rev": "e464204e55baa343cd548df1d9f3e6f25025a4cb",
-        "revCount": 1712,
+        "lastModified": 1766049781,
+        "narHash": "sha256-G1gmnX7sJk86+Rtuext0Aw+bMNZRilhnwK8yYwzlCiA=",
+        "ref": "fix/ci-harness-dbpool-sqlx",
+        "rev": "e58e448420394e4907e4c9f4eab2a090f0da1e1f",
+        "revCount": 1717,
         "type": "git",
         "url": "ssh://git@github.com/Sinity/sinex"
       },
       "original": {
+        "ref": "fix/ci-harness-dbpool-sqlx",
         "type": "git",
         "url": "ssh://git@github.com/Sinity/sinex"
       }
