@@ -15,6 +15,7 @@ in
       VISUAL = "nvim";
       PAGER = lib.mkForce "less -R";
       MANPAGER = "nvim +Man!";
+      POLYLOGUE_CONFIG = "/realm/data/chatlog/config/config.json";
       PYTHONDONTWRITEBYTECODE = "1";
       SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS = "0";
       MICRO_TRUECOLOR = "1";

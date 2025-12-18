@@ -10,12 +10,12 @@ let
   username = config.sinnix.user.name;
   swapFileSizeGiB = 32;
   userCfg = config.users.users.${username} or { };
-  getAttrOrFallback =
-    set: attr: fallback:
-      let
-        value = if set ? ${attr} then set.${attr} else null;
-      in
-      if value == null then fallback else value;
+	  getAttrOrFallback =
+	    set: attr: fallback:
+	    let
+	      value = set.${attr} or null;
+	    in
+	    if value == null then fallback else value;
   userUid = builtins.toString (getAttrOrFallback userCfg "uid" 1000);
   primaryGroupName = getAttrOrFallback userCfg "group" "users";
   groupCfg = lib.attrByPath [ "users" "groups" primaryGroupName ] config { };

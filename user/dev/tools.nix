@@ -105,6 +105,7 @@ in
         toipe
         tty-clock
         ttyper
+        polylogue
         uv
         visidata
         zed-editor

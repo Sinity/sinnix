@@ -44,7 +44,7 @@ new file mode 100644
 index 0000000..43b6c1c
 --- /dev/null
 +++ b/cli/src/prompt_cmd.rs
-@@ -0,0 +1,362 @@
+@@ -0,0 +1,363 @@
 +use anyhow::Context;
 +use clap::Parser;
 +use clap::ValueHint;
@@ -52,7 +52,7 @@ index 0000000..43b6c1c
 +use codex_core::AuthManager;
 +use codex_core::CodexAuth;
 +use codex_core::ModelClient;
-+use codex_core::OtelEventManager;
++use codex_core::OtelManager;
 +use codex_core::Prompt;
 +use codex_core::ResponseEvent;
 +use codex_core::ResponseStream;
@@ -149,7 +149,7 @@ index 0000000..43b6c1c
 +        .parse_overrides()
 +        .map_err(anyhow::Error::msg)?;
 +
-+    Config::load_with_cli_overrides(cli_overrides, overrides)
++    Config::load_with_cli_overrides_and_harness_overrides(cli_overrides, overrides)
 +        .await
 +        .map_err(anyhow::Error::from)
 +}
@@ -214,26 +214,27 @@ index 0000000..43b6c1c
 +        .await;
 +
 +    let conversation_id = ConversationId::new();
-+    let otel_event_manager = OtelEventManager::new(
++    let otel_manager = OtelManager::new(
 +        conversation_id,
 +        model.as_str(),
 +        model_family.slug.as_str(),
 +        auth_snapshot
 +            .as_ref()
-+            .and_then(codex_core::CodexAuth::get_account_id),
++            .and_then(CodexAuth::get_account_id),
 +        auth_snapshot
 +            .as_ref()
-+            .and_then(codex_core::CodexAuth::get_account_email),
++            .and_then(CodexAuth::get_account_email),
 +        auth_snapshot.as_ref().map(|auth| auth.mode),
 +        config.otel.log_user_prompt,
 +        terminal::user_agent(),
++        SessionSource::Cli,
 +    );
 +
 +    let client = ModelClient::new(
 +        Arc::clone(&config),
 +        Some(auth_manager),
 +        model_family,
-+        otel_event_manager,
++        otel_manager,
 +        config.model_provider.clone(),
 +        config.model_reasoning_effort,
 +        config.model_reasoning_summary,
@@ -432,7 +433,7 @@ index 11b49c7..6eba009 100644
  pub use client_common::REVIEW_PROMPT;
  pub use client_common::ResponseEvent;
  pub use client_common::ResponseStream;
-+pub use codex_otel::otel_event_manager::OtelEventManager;
++pub use codex_otel::otel_manager::OtelManager;
  pub use codex_protocol::models::ContentItem;
  pub use codex_protocol::models::LocalShellAction;
  pub use codex_protocol::models::LocalShellExecAction;

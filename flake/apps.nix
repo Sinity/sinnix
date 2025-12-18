@@ -98,7 +98,8 @@
         update = mkApp "update" ''
           flake_dir="''${PRJ_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
           echo "Updating flake inputs for $flake_dir..."
-          ${pkgs.nix}/bin/nix flake update "$flake_dir"
+          cd "$flake_dir"
+          ${pkgs.nix}/bin/nix flake update
           echo "Flake inputs updated. Run 'sudo nix run $flake_dir#switch' to apply."
         '' "Update flake dependencies to their latest versions";
 

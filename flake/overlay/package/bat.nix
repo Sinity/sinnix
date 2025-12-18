@@ -1,5 +1,4 @@
-_:
-final: prev:
+_: final: prev:
 let
   updatedJsonSyntax = final.fetchurl {
     url = "https://raw.githubusercontent.com/sublimehq/Packages/0d07278457f43f56c0f2c95f883621ea6ed2d370/JSON/JSON.sublime-syntax";
