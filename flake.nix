@@ -61,7 +61,7 @@
     # Private Sinex overlay; intentionally expects SSH access to the upstream
     # repository so evaluation fails cleanly when the key is missing.
     sinex = {
-      url = "git+ssh://git@github.com/Sinity/sinex?ref=fix/ci-harness-dbpool-sqlx";
+      url = "git+ssh://git@github.com/Sinity/sinex?ref=master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
