@@ -7,6 +7,7 @@ in
   (mkOverlay ./aionui.nix)
   (mkOverlay ./bat.nix)
   (mkOverlay ./codex.nix)
+  (mkOverlay ./diffsitter.nix)
   (mkOverlay ./hyprland.nix)
   (mkOverlay ./polylogue.nix)
   (mkOverlay ./pwvucontrol.nix)
