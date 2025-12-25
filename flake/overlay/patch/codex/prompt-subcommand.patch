@@ -59,7 +59,7 @@ index 0000000..43b6c1c
 +use codex_core::auth::enforce_login_restrictions;
 +use codex_core::config::Config;
 +use codex_core::config::ConfigOverrides;
-+use codex_core::openai_models::models_manager::ModelsManager;
++use codex_core::models_manager::manager::ModelsManager;
 +use codex_core::terminal;
 +use codex_protocol::ConversationId;
 +use codex_protocol::models::ContentItem;

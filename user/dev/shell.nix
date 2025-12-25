@@ -74,30 +74,8 @@ in
 
           set -o vi
 
-          _sinnix_flake_root() {
-            if [ -n "$FLAKE" ]; then
-              printf '%s\n' "$FLAKE"
-              return 0
-            fi
-            if command -v git >/dev/null 2>&1; then
-              if git_root=$(git rev-parse --show-toplevel 2>/dev/null); then
-                printf '%s\n' "$git_root"
-                return 0
-              fi
-            fi
-            if [ -n "$PRJ_ROOT" ]; then
-              printf '%s\n' "$PRJ_ROOT"
-              return 0
-            fi
-            if [ -n "$DEVENV_ROOT" ]; then
-              printf '%s\n' "$DEVENV_ROOT"
-              return 0
-            fi
-            printf '%s\n' "$PWD"
-          }
-
           if [ -z "$FLAKE" ]; then
-            export FLAKE="$(_sinnix_flake_root)"
+            export FLAKE="$(find-flake-root)"
           fi
 
           show_file_or_dir_preview='if [ -d {} ]; then eza --tree --color=always {} | head -200; else bat -n --color=always --line-range :500 {}; fi'
@@ -140,8 +118,6 @@ in
           zle -N bracketed-paste bracketed-paste-magic
           autoload -Uz url-quote-magic
           zle -N self-insert url-quote-magic
-
-          eval "$(atuin init zsh --disable-up-arrow)"
         '')
       ];
 
@@ -177,9 +153,9 @@ in
         tree = "eza --icons --tree --group-directories-first";
         mosh-sinity-ephemeral = "mosh --ssh=\"ssh -p 22\" sinity@sinnix-ethereal";
         ns = "nom-shell --run zsh";
-        nix-switch = "sudo nix run --accept-flake-config \"\$(_sinnix_flake_root)#switch\"";
-        nix-test = "sudo nix run --accept-flake-config \"\$(_sinnix_flake_root)#test\"";
-        nix-check = "nix run --accept-flake-config \"\$(_sinnix_flake_root)#check\"";
+        nix-switch = "sudo nix run --accept-flake-config \"$(find-flake-root)#switch\"";
+        nix-test = "sudo nix run --accept-flake-config \"$(find-flake-root)#test\"";
+        nix-check = "nix run --accept-flake-config \"$(find-flake-root)#check\"";
         nix-search = "nix search nixpkgs";
         piv = "python -m venv .venv";
         psv = "source .venv/bin/activate";
@@ -208,7 +184,7 @@ in
     atuin = {
       enable = true;
       enableNushellIntegration = false;
-      enableZshIntegration = false;
+      enableZshIntegration = true;
       flags = [ "--disable-up-arrow" ];
       settings = {
         auto_sync = false;
@@ -255,6 +231,11 @@ in
     };
   };
 
+  home.file.".local/bin/find-flake-root" = {
+    source = ../../scripts/find-flake-root;
+    executable = true;
+  };
+
   home.file.".local/bin/claude" = {
     text = ''
       #!/usr/bin/env bash
@@ -274,4 +255,22 @@ in
     '';
     executable = true;
   };
+
+  home.file.".bashrc" = {
+    text = ''
+      # Automatically load direnv-provided environment for any bash shell
+      if command -v direnv >/dev/null 2>&1; then
+        eval "$(direnv export bash)" || true
+      fi
+    '';
+  };
+
+  home.file.".bash_profile" = {
+    text = ''
+      if [ -f "$HOME/.bashrc" ]; then
+        . "$HOME/.bashrc"
+      fi
+    '';
+  };
+
 }

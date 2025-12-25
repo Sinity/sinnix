@@ -30,17 +30,28 @@ in
         mkdir -p "$HOME/.config"
         DOTS_ROOT=''${DOTS_ROOT:-${dotsRoot}}
         ln -sfn "$DOTS_ROOT/nvim" "$HOME/.config/nvim"
-        # Link claude config directory so cclsp can read cclsp.json from
-        # $HOME/.config/claude. This makes the setup deterministic from dots/.
-        mkdir -p "$HOME/.config/claude"
-        ln -sfn "$DOTS_ROOT/claude" "$HOME/.config/claude"
       '';
 
-      ensureClaudeDir = lib.hm.dag.entryAfter [ "linkNeovimConfig" ] ''
+      linkClaudeConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+        DOTS_ROOT=''${DOTS_ROOT:-${dotsRoot}}
+        mkdir -p "$HOME/.config/claude"
+        # Link individual Claude config files from dots
+        ln -sfn "$DOTS_ROOT/claude/settings.json" "$HOME/.config/claude/settings.json"
+        ln -sfn "$DOTS_ROOT/claude/cclsp.json" "$HOME/.config/claude/cclsp.json"
+        ln -sfn "$DOTS_ROOT/claude/CLAUDE.md" "$HOME/.config/claude/CLAUDE.md"
+      '';
+
+      ensureClaudeDir = lib.hm.dag.entryAfter [ "linkClaudeConfig" ] ''
         if [ -e "$HOME/.claude" ] && ! [ -L "$HOME/.claude" ]; then
           rm -rf "$HOME/.claude"
         fi
         ln -sfn .config/claude "$HOME/.claude"
+      '';
+
+      linkSerenaConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+        DOTS_ROOT=''${DOTS_ROOT:-${dotsRoot}}
+        mkdir -p "$HOME/.serena"
+        ln -sfn "$DOTS_ROOT/serena/serena_config.yml" "$HOME/.serena/serena_config.yml"
       '';
 
     };

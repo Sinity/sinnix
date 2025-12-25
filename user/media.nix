@@ -6,27 +6,7 @@
   ...
 }:
 let
-  homeRoot = config.home.homeDirectory;
   inherit (sinnix.paths) dataRoot;
-  hydrusProfileDir = "${homeRoot}/.hydrus";
-
-  hydrusWithProfile = pkgs.hydrus.overrideAttrs (oldAttrs: {
-    doCheck = false;
-    doInstallCheck = false;
-    installPhase = oldAttrs.installPhase + ''
-      mv $out/bin/hydrus-client $out/bin/hydrus-client-original
-      cat > $out/bin/hydrus-client << EOF
-      #!${pkgs.stdenv.shell}
-      cd ${hydrusProfileDir}
-      exec $out/bin/hydrus-client-original -d="${hydrusProfileDir}/db" "\$@"
-      EOF
-      chmod +x $out/bin/hydrus-client
-    '';
-    preFixup = ''
-      ${oldAttrs.preFixup or ""}
-      makeWrapperArgs+=(--unset WAYLAND_DISPLAY --unset QT_QPA_PLATFORM)
-    '';
-  });
 
   imvWithExtras =
     let
@@ -78,14 +58,8 @@ in
       inkscape
       mangohud
       steam-run
-      hydrusWithProfile
       imvWithExtras
     ];
-
-    activation.ensureHydrusProfile = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-      install -d -m700 "${hydrusProfileDir}"
-      install -d -m700 "${hydrusProfileDir}/db"
-    '';
   };
 
   programs.mpv = {

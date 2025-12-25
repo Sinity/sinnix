@@ -8,6 +8,7 @@
     ../../modules/services/transmission.nix
     ../../modules/services/qdrant.nix
     ../../modules/services/sinevec.nix
+    ../../modules/services/asciinema.nix
     ../../modules/services/sinex.nix
     ../../modules/services/polylogue.nix
   ];

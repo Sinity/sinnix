@@ -41,23 +41,23 @@ let
 
   perfScanRuntimeInputs = with pkgs; [
     bash
-    bc
     coreutils
     ethtool
-    findutils
+    fio
     flent
     gawk
     gnugrep
     gum
-    hdparm
     intel-gpu-tools
     inxi
     iperf3
     iproute2
+    iw
     jq
     linuxPackages.turbostat
     lm_sensors
     memtester
+    ncurses
     netperf
     nvme-cli
     pciutils

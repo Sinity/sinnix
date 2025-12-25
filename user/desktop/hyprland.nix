@@ -18,6 +18,7 @@
   pkgs,
   lib,
   sinnix,
+  inputs,
   ...
 }:
 let
@@ -72,6 +73,7 @@ in
 
   wayland.windowManager.hyprland = {
     enable = true;
+    package = inputs.hyprland.packages.${pkgs.stdenv.hostPlatform.system}.hyprland;
     xwayland.enable = true;
     systemd.enable = false;
 

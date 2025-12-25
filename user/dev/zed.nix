@@ -8,8 +8,9 @@ let
 in
 {
   xdg.configFile = {
-    "Zed/settings.json".source = mkDotsRepoLink "/zed/settings.json";
-    "Zed/keymap.json".source = mkDotsRepoLink "/zed/keymap.json";
+    # Zed uses lowercase 'zed' for its config directory
+    "zed/settings.json".source = mkDotsRepoLink "/zed/settings.json";
+    "zed/keymap.json".source = mkDotsRepoLink "/zed/keymap.json";
   };
 
   home.file.".local/bin/zed" = {

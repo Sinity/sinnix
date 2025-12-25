@@ -31,5 +31,8 @@
   },
   "ide": {
     "enabled": true
+  },
+  "model": {
+    "name": "auto-gemini-3"
   }
 }
