@@ -3,18 +3,19 @@
 {
   pkgs,
   config,
-  inputs,
+  lib,
   ...
 }:
+let
+  hyprlandPkg = pkgs.hyprland;
+in
 {
 
   programs.hyprland = {
     enable = true;
     withUWSM = true;
-    package = inputs.hyprland.packages.${pkgs.stdenv.hostPlatform.system}.hyprland;
+    package = hyprlandPkg;
   };
-
-  programs.uwsm.enable = true;
 
   # X11 stack stays disabled; Hyprland is launched directly via UWSM, but we still
   # declare the desired driver so the NVIDIA kernel modules are available.

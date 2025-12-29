@@ -1,8 +1,7 @@
 diff --git a/uwsm/main.py b/uwsm/main.py
-index 7a17910..c61cc1e 100644
 --- a/uwsm/main.py
 +++ b/uwsm/main.py
-@@ -17,6 +17,7 @@ Special thanks to @skewballfox for help with python and pointing me to useful to
+@@ -17,6 +17,7 @@
  """
  
  import os
@@ -10,30 +9,20 @@ index 7a17910..c61cc1e 100644
  import sys
  import shlex
  import argparse
-@@ -2761,6 +2762,8 @@ def finalize(additional_vars=None):
-         )
-         sys.exit(1)
- 
-+    wm_id_unit_string = simple_systemd_escape(wm_id, start=False)
-+
-     # append vars to cleanup file
-     try:
-         append_to_cleanup_file(export_vars_names, create=False)
-@@ -2777,12 +2780,21 @@ def finalize(additional_vars=None):
+@@ -2802,10 +2803,21 @@
          )
          os.execlp("systemd-notify", "systemd-notify", "READY=1", "NOTIFYACCESS=exec")
      else:
 -        if (
--            bus_session.get_unit_property(
--                f"wayland-wm@{wm_id}.service", "NotifyAccess", skip_generic=True
-+        try:
-+            notify_access = bus_session.get_unit_property(
-+                f"wayland-wm@{wm_id_unit_string}.service",
-+                "NotifyAccess",
-+                skip_generic=True,
-             )
+-            bus_session.get_unit_property(wm_unit, "NotifyAccess", skip_generic=True)
 -            == "all"
 -        ):
++        try:
++            notify_access = bus_session.get_unit_property(
++                wm_unit,
++                "NotifyAccess",
++                skip_generic=True,
++            )
 +        except dbus.exceptions.DBusException as caught_exception:
 +            if getattr(caught_exception, "get_dbus_name", lambda: None)() == "org.freedesktop.systemd1.NoSuchUnit" or "org.freedesktop.systemd1.NoSuchUnit" in str(caught_exception):
 +                print_debug(
@@ -46,16 +35,15 @@ index 7a17910..c61cc1e 100644
              print_normal(
                  f"Unit for {wm_id} is already active, restricting notification access."
              )
-@@ -5446,14 +5458,21 @@ def finalize(additional_vars=None):
+@@ -5515,14 +5527,21 @@
                                  "NOTIFYACCESS=exec",
                              )
                          else:
 -                            if (
 -                                bus_session.get_unit_property(
--                                    f"wayland-wm@{CompGlobals.id}.service",
 +                            try:
 +                                notify_access = bus_session.get_unit_property(
-+                                    f"wayland-wm@{CompGlobals.id_unit_string}.service",
+                                     f"wayland-wm@{CompGlobals.id_unit_string}.service",
                                      "NotifyAccess",
                                      skip_generic=True,
                                  )

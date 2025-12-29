@@ -32,9 +32,7 @@
 
   systemd.services."serial-getty@ttyS0".enable = true;
 
-  sinnix.home.userImports = [
-    ../../user/core.nix
-  ];
+  sinnix.features.cli.core.enable = true;
 
   programs.hyprland.enable = lib.mkForce false;
   programs.zsh.enable = true;

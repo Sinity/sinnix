@@ -50,14 +50,18 @@ fi
 echo "→ Verifying critical directory tmpfiles rules..."
 REALM_ROOT=${REALM_ROOT:-/realm}
 DATA_ROOT=${DATA_ROOT:-${REALM_ROOT}/data}
+search_paths=(modules hosts)
+if [ -d user ]; then
+  search_paths+=(user)
+fi
 required_dirs=(
   "${REALM_ROOT}/inbox"
   "${DATA_ROOT}/screenshot"
 )
 
 for dir in "${required_dirs[@]}"; do
-  if ! rg -q "\"d $dir" modules/ user/ hosts/ 2>/dev/null && \
-     ! rg -q "'d $dir" modules/ user/ hosts/ 2>/dev/null; then
+  if ! rg -q "\"d $dir" "${search_paths[@]}" 2>/dev/null && \
+     ! rg -q "'d $dir" "${search_paths[@]}" 2>/dev/null; then
     echo "⚠️  Warning: No tmpfiles rule found for $dir"
     echo "   Verify this directory is created elsewhere or add it back"
     conflicts_found=1

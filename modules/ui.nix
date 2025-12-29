@@ -19,6 +19,7 @@
   pkgs,
   inputs,
   lib,
+  config,
   ...
 }:
 let
@@ -65,9 +66,15 @@ let
   monospaceName = stylixFontSpec.monospace.name;
   sansName = stylixFontSpec.sansSerif.name;
   serifName = stylixFontSpec.serif.name;
+
+  cfg = config.sinnix.ui;
 in
 {
-  config = {
+  options.sinnix.ui = {
+    enable = lib.mkEnableOption "Sinity's Graphical User Interface Stack";
+  };
+
+  config = lib.mkIf cfg.enable {
     stylix = {
       enable = true;
       base16Scheme = "${pkgs.base16-schemes}/share/themes/gruvbox-dark-medium.yaml";

@@ -30,7 +30,7 @@ into `~/.local/bin` automatically.
 ## MCP + data access
 
 - `mcp-postgres.py`, `mcp-qdrant.py`, `mcp-sqlite.py` – expose local datasources
-  to MCP-capable agents (Codex, Claude Desktop, etc.). `user/dev/tools.nix`
+  to MCP-capable agents (Codex, Claude Desktop, etc.). `modules/features/dev/utilities.nix`
   ships thin wrappers (`mcp-<name>`) in `~/.local/bin`.
 
 ## Developer tooling
@@ -46,7 +46,7 @@ into `~/.local/bin` automatically.
 ## Misc
 
 - `audio-output-status`, `mic-status`, etc. are used by Waybar modules (see
-  `user/desktop/waybar.nix`).
+  `modules/features/desktop/waybar/default.nix`).
 - `toggle-audio-output` and `mic-toggle` are bound via Hyprland keybindings.
 
 Scripts that manipulate Kitty or Hyprland rely on the remote control hints

@@ -1,9 +1,9 @@
 # Configuration Structure
 
-This repository is organised so that the active host (`sinnix-prime`) pulls
-modules directly; there is no additional aggregation layer.  When you need to
-introduce a new capability, import the module from the host (or user profile)
-and keep ownership with that module.
+This repository uses `modules/default.nix` as the shared module entrypoint, with
+hosts layering host-specific overrides and feature bundles. When you need to
+introduce a new capability, add it to the appropriate module and enable it via
+the host or a bundle so ownership stays with that module.
 
 ## System Modules (`modules/`)
 
@@ -12,9 +12,10 @@ and keep ownership with that module.
   imported together from `flake/nixos.nix`, and each module owns its domain.
 - **Services** – Each service lives in its own file under
   `modules/services/` (`qdrant.nix`, `sinevec.nix`, `sinex.nix`,
-  `transmission.nix`).  Service-specific state, users, tmpfiles, and advanced
-  tuning stay beside the service definition.  The host chooses which services
-  to enable by importing the corresponding file.
+  `transmission.nix`). Service-specific state, users, tmpfiles, and advanced
+  tuning stay beside the service definition. Hosts enable services by toggling
+  `sinnix.services.*` (the service module set is imported via
+  `modules/services/default.nix`).
 - **Secrets** – `modules/secrets.nix` renders every `.age` file and exposes two
   read-only helpers:
   - `config.sinnix.secrets.paths.NAME` – resolved runtime path for the secret.
@@ -34,28 +35,30 @@ and keep ownership with that module.
 - Direct overrides (e.g. toggling `services.sinex.enable`) belong here – the
   host remains the single point of control by virtue of the modules it chooses.
 
-## User Profiles (`user/`)
+## Home-Manager Features (`modules/features/`)
 
-- `user/default.nix` brings together profile facets (`core`, `desktop`, `dev`,
-  `media`, `networking`, `storage`).
-- Dev tooling that should not trigger system rebuilds lives under `user/dev/`.
-  The system modules only keep the operational minimum (e.g. CLI basics,
-  perf-scan wrapper).
+- Feature modules live under `modules/features/` and are grouped by domain
+  (`cli`, `desktop`, `dev`). `modules/bundles/` toggles cohesive sets of
+  features for a host.
+- Dev tooling that should not trigger system rebuilds lives under
+  `modules/features/dev/`. Desktop UI config lives under
+  `modules/features/desktop/`.
 
 ## Storage Responsibilities
 
 - `modules/storage.nix` owns systemd services, mounts, and system-level packages
   required for Always-On sync (davfs2, rclone-backed remotes).  User-facing
-  helpers (gocryptfs, mount scripts) remain in `user/storage.nix`.
+  helpers (gocryptfs, mount scripts) live in
+  `modules/features/desktop/storage/default.nix`.
 - The module also relies on `config.sinnix.secrets.paths.davfs2-secrets` for the
   davfs2 credentials so the secret location is defined exactly once.
 
 ## Sinex Service
 
-- `modules/services/sinex.nix` now simply fixes a handful of local defaults
-  (data root under `/realm/data/sinex`, `database.autoSetup = true`, desktop
-  filesystem watch roots). All of the heavy wiring continues to come from the
-  upstream Sinex module.
+- `modules/services/sinex.nix` now fixes a handful of local defaults (data root
+  under `/realm/data/sinex`, desktop filesystem watch roots) and supports
+  `sinnix.services.sinex.provisionDatabase` so the PostgreSQL setup can be
+  kept ready without enabling the full service.
 - The host still chooses when to enable the service; toggling it on prepares
   the working directories and exposes the CLI binaries exactly as the upstream
   module expects.

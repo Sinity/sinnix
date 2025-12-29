@@ -4,7 +4,7 @@
 
 - `flake.nix` is the entrypoint; the `flake/` directory wires CLI apps, dev shells, and overlays.
 - System modules live under `modules/` (e.g., `modules/core.nix`, `modules/services`). Import changes through the nearest `default.nix`.
-- Home profile modules live under `user/` (e.g., `user/desktop`, `user/dev`).
+- Home profile modules live under `modules/features/` (e.g., `modules/features/desktop`, `modules/features/dev`, `modules/features/cli`).
 - Machine-specific overrides reside in `hosts/` (notably `hosts/sinnix-prime/`).
 - Shared dotfiles live in `dots/`; reusable assets belong in `assets/`. Add repeatable scripts through `modules/programs.nix` or promote them to `flake/apps.nix` apps.
 
@@ -43,4 +43,4 @@
 
 - Commit subjects: ≤60 characters, imperative lowercase (e.g., `tighten dns routing`); squash fixups locally.
 - Bodies touching services, secrets, or host modules should note context and verification commands run.
-- Pull requests should link issues when available, list affected modules (e.g., `modules/ui.nix`, `user/desktop/hyprland.nix`, `hosts/sinnix-prime/*`), and include logs or screenshots for UI-impacting changes.
+- Pull requests should link issues when available, list affected modules (e.g., `modules/ui.nix`, `modules/features/desktop/hyprland/default.nix`, `hosts/sinnix-prime/*`), and include logs or screenshots for UI-impacting changes.

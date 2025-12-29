@@ -1,4 +1,5 @@
 {
+  "cleanupPeriodDays": 99999,
   "permissions": {
     "allow": [
       "Bash",
@@ -12,16 +13,15 @@
     "deny": [],
     "defaultMode": "default"
   },
-  "model": "opus",
   "enabledPlugins": {
     "context7@claude-plugins-official": true,
-    "serena@claude-plugins-official": true,
-    "github@claude-plugins-official": true,
+    "serena@claude-plugins-official": false,
+    "github@claude-plugins-official": false,
     "frontend-design@claude-plugins-official": true,
     "feature-dev@claude-plugins-official": true,
     "agent-sdk-dev@claude-plugins-official": true,
     "hookify@claude-plugins-official": true,
-    "greptile@claude-plugins-official": true,
+    "greptile@claude-plugins-official": false,
     "rust-analyzer-lsp@claude-plugins-official": true,
     "plugin-dev@claude-plugins-official": true
   },

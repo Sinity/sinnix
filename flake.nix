@@ -33,9 +33,6 @@
     };
 
     # Development tools
-    browser-previews.url = "github:nix-community/browser-previews?rev=59f351f061440cc26d5c74d574910c256e43a017";
-    browser-previews.inputs.nixpkgs.follows = "nixpkgs";
-
     devenv.url = "github:cachix/devenv";
     devenv.inputs.nixpkgs.follows = "nixpkgs";
 
@@ -58,7 +55,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Private Sinex overlay; intentionally expects SSH access to the upstream
+    # Private Sinex repository; intentionally expects SSH access to the upstream
     # repository so evaluation fails cleanly when the key is missing.
     sinex = {
       url = "git+ssh://git@github.com/Sinity/sinex?ref=master";
@@ -72,14 +69,6 @@
     # VSCode extensions overlay (community-maintained)
     nix-vscode-extensions.url = "github:nix-community/nix-vscode-extensions";
     nix-vscode-extensions.inputs.nixpkgs.follows = "nixpkgs";
-
-    # Hyprland and plugins
-    hyprland.url = "github:hyprwm/Hyprland";
-
-    hyprland-plugins = {
-      url = "github:hyprwm/hyprland-plugins";
-      inputs.hyprland.follows = "hyprland";
-    };
 
     # Modern Qt/QML based desktop shell toolkit
     quickshell = {

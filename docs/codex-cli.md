@@ -1,9 +1,10 @@
 # Codex CLI MCP configuration
 
-Codex' CLI config lives under `dots/codex/config.toml`. Home Manager now links
-this file to `~/.codex/config.toml`, so updates to the dotfile are picked up on
-the next `home-manager switch`. If you prefer to experiment ad-hoc, copy the
-rendered file elsewhere first so you can diff and merge changes back.
+Codex' CLI config lives under `dots/codex/config.toml`, and skills are checked
+into `dots/codex/skills`. Home Manager links both to `~/.codex`, so updates to
+the dotfiles are picked up on the next `home-manager switch`. If you prefer to
+experiment ad-hoc, copy the rendered files elsewhere first so you can diff and
+merge changes back.
 
 ## Deploying the config
 
@@ -11,12 +12,14 @@ The managed link is created automatically, but if you ever need to repair it:
 
 ```
 ln -sfv /realm/sinnix/dots/codex/config.toml ~/.codex/config.toml
+ln -sfn /realm/sinnix/dots/codex/skills ~/.codex/skills
 ```
 
 The template contains:
 
 - `model = "gpt-5-codex"` and `model_reasoning_effort = "high"`
 - The shared trusted project list
+- `dots/codex/skills` linked into `~/.codex/skills`
 - MCP servers aligned with VS Code: GitHub (expects `GITHUB_TOKEN`), a local
   PostgreSQL bridge (no auth required, talks to the socket at
   `/run/postgresql`), Playwright, Context7, Firecrawl (with

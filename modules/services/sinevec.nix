@@ -6,6 +6,7 @@
   ...
 }:
 let
+  cfg = config.sinnix.services.sinevec;
   inherit (config.sinnix.paths) dataRoot;
   sinevecDataDir = "${dataRoot}/sinevec";
   sinevecStateDir = "${sinevecDataDir}/state";
@@ -16,59 +17,65 @@ let
   username = config.sinnix.user.name;
 in
 {
-  environment.systemPackages = [ sinevecPkg ];
-
-  users.groups.${sinevecGroup} = {
-    members = [ username ];
+  options.sinnix.services.sinevec = {
+    enable = lib.mkEnableOption "Sinevec contextual embeddings service";
   };
 
-  users.users.${sinevecUser} = {
-    isSystemUser = true;
-    group = sinevecGroup;
-    description = "Service user for Sinevec contextual embeddings";
-    home = sinevecDataDir;
-    createHome = false;
-    extraGroups = [ ];
-  };
+  config = lib.mkIf cfg.enable {
+    environment.systemPackages = [ sinevecPkg ];
 
-  systemd.services.sinevec = {
-    description = "Sinevec contextual embeddings API";
-    after = lib.mkAfter [ "qdrant.service" ];
-    wants = [ "qdrant.service" ];
-    wantedBy = [ "multi-user.target" ];
-    serviceConfig = {
-      Type = "simple";
-      User = sinevecUser;
-      Group = sinevecGroup;
-      ExecStart = "${sinevecPkg}/bin/sinevec serve";
-      Restart = "on-failure";
-      RestartSec = 5;
-      WorkingDirectory = sinevecDataDir;
-      Environment = "PYTHONUNBUFFERED=1";
-      CacheDirectory = "sinevec";
-      LogsDirectory = "sinevec";
-      ReadWritePaths = [
-        sinevecDataDir
-        sinevecStateDir
-        sinevecLogDir
-      ];
-      RuntimeDirectory = "sinevec";
+    users.groups.${sinevecGroup} = {
+      members = [ username ];
     };
-    unitConfig.RequiresMountsFor = [ dataRoot ];
-    environment = {
-      SINEVEC_DATA_ROOT = dataRoot;
-      SINEVEC_STATE_DIR = sinevecStateDir;
-      SINEVEC_LOG_DIR = sinevecLogDir;
-      QDRANT_HOST = "127.0.0.1";
-      QDRANT_HTTP_PORT = "6333";
-      QDRANT_GRPC_PORT = "6334";
-      QDRANT_USE_HTTPS = "0";
-    };
-  };
 
-  systemd.tmpfiles.rules = [
-    "d ${sinevecDataDir} 0750 ${sinevecUser} ${sinevecGroup} -"
-    "d ${sinevecStateDir} 0750 ${sinevecUser} ${sinevecGroup} -"
-    "d ${sinevecLogDir} 0750 ${sinevecUser} ${sinevecGroup} -"
-  ];
+    users.users.${sinevecUser} = {
+      isSystemUser = true;
+      group = sinevecGroup;
+      description = "Service user for Sinevec contextual embeddings";
+      home = sinevecDataDir;
+      createHome = false;
+      extraGroups = [ ];
+    };
+
+    systemd.services.sinevec = {
+      description = "Sinevec contextual embeddings API";
+      after = lib.mkAfter [ "qdrant.service" ];
+      wants = [ "qdrant.service" ];
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig = {
+        Type = "simple";
+        User = sinevecUser;
+        Group = sinevecGroup;
+        ExecStart = "${sinevecPkg}/bin/sinevec serve";
+        Restart = "on-failure";
+        RestartSec = 5;
+        WorkingDirectory = sinevecDataDir;
+        Environment = "PYTHONUNBUFFERED=1";
+        CacheDirectory = "sinevec";
+        LogsDirectory = "sinevec";
+        ReadWritePaths = [
+          sinevecDataDir
+          sinevecStateDir
+          sinevecLogDir
+        ];
+        RuntimeDirectory = "sinevec";
+      };
+      unitConfig.RequiresMountsFor = [ dataRoot ];
+      environment = {
+        SINEVEC_DATA_ROOT = dataRoot;
+        SINEVEC_STATE_DIR = sinevecStateDir;
+        SINEVEC_LOG_DIR = sinevecLogDir;
+        QDRANT_HOST = "127.0.0.1";
+        QDRANT_HTTP_PORT = "6333";
+        QDRANT_GRPC_PORT = "6334";
+        QDRANT_USE_HTTPS = "0";
+      };
+    };
+
+    systemd.tmpfiles.rules = [
+      "d ${sinevecDataDir} 0750 ${sinevecUser} ${sinevecGroup} -"
+      "d ${sinevecStateDir} 0750 ${sinevecUser} ${sinevecGroup} -"
+      "d ${sinevecLogDir} 0750 ${sinevecUser} ${sinevecGroup} -"
+    ];
+  };
 }
