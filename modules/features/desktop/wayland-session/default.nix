@@ -44,13 +44,6 @@ in
           OZONE_PLATFORM_HINT = "wayland";
           KITTY_LISTEN_ON = "unix:" + "\${XDG_RUNTIME_DIR}/kitty-" + "\${USER}";
 
-          LIBVA_DRIVER_NAME = "nvidia";
-          GBM_BACKEND = "nvidia-drm";
-          __GLX_VENDOR_LIBRARY_NAME = "nvidia";
-          WLR_NO_HARDWARE_CURSORS = "1";
-          __GL_GSYNC_ALLOWED = "1";
-          __GL_VRR_ALLOWED = "1";
-
           _JAVA_AWT_WM_NONEREPARENTING = "1";
           DIRENV_LOG_FORMAT = "";
           NIXPKGS_ALLOW_UNFREE = "1";

@@ -9,8 +9,6 @@ in
 
   config = lib.mkIf cfg.enable {
     sinnix = {
-      machine.isDesktop = true;
-      
       # Enable core desktop capabilities
       ui.enable = true;
       audio.enable = true;
@@ -31,16 +29,6 @@ in
       features.desktop.activitywatch.enable = true;
       features.desktop.kdeconnect.enable = true;
       features.desktop.reboot-notifier.enable = true;
-
-      # Enable standard desktop services
-      services = {
-        transmission.enable = true;
-        # qdrant/sinevec/etc are heavy, maybe keep them optional or separate?
-        # For now, let's keep the bundle focused on "Desktop Infrastructure".
-      };
     };
-    
-    # Enable networking (already defaults to true, but good to be explicit)
-    sinnix.networking.enable = true;
   };
 }

@@ -8,6 +8,8 @@
   ];
 
   networking.hostName = "sinnix-prime";
+
+  sinnix.machine.isDesktop = true;
   
   sinnix.bundles.desktop.enable = true;
   sinnix.bundles.dev.enable = true;
@@ -21,7 +23,7 @@
     qdrant.enable = true;
     sinevec.enable = true;
     asciinema.enable = true;
-    polylogue-watch.enable = true;
+    polylogue.enable = true;
     sinex = {
       enable = false;
       provisionDatabase = true;

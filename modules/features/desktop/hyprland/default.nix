@@ -7,6 +7,7 @@
 let
   cfg = config.sinnix.features.desktop.hyprland;
   user = config.sinnix.user.name;
+  hyprlandPkg = config.programs.hyprland.package or pkgs.hyprland;
   
   # Helpers for home-manager config
   repoRoot = config.sinnix.paths.projectRoot;
@@ -46,31 +47,34 @@ in
     # -------------------------------------------------------------------------
     programs.hyprland = {
       enable = lib.mkDefault true;
+      withUWSM = lib.mkForce true;
       package = lib.mkDefault pkgs.hyprland;
       portalPackage = lib.mkDefault pkgs.xdg-desktop-portal-hyprland;
     };
     
-    # Ensure UI stack is active
-    sinnix.ui.enable = true;
-
     # -------------------------------------------------------------------------
     # User Level Configuration (Home Manager)
     # -------------------------------------------------------------------------
     home-manager.users.${user} = { pkgs, lib, ... }: {
       imports = [ ./lock.nix ];
+
+      programs.zsh.loginExtra = lib.mkBefore ''
+        if [ "$(id -un)" = "${user}" ] && [ -z "$DISPLAY" ]; then
+          current_tty=$(tty 2>/dev/null || true)
+          if [ "$current_tty" = "/dev/tty1" ] && command -v uwsm >/dev/null 2>&1; then
+            exec uwsm start hyprland-uwsm.desktop
+          fi
+        fi
+      '';
       
       wayland.windowManager.hyprland = {
         enable = true;
-        package = pkgs.hyprland;
+        package = hyprlandPkg;
         xwayland.enable = true;
         systemd.enable = false;
 
         settings = {
           exec-once = [ "uwsm finalize" ];
-
-          monitor = [
-            ",3840x2160@120,auto,1,bitdepth,10,cm,hdr,sdrbrightness,1.4,sdrsaturation,1.0"
-          ];
 
           xwayland.force_zero_scaling = true;
 

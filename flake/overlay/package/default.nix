@@ -11,5 +11,6 @@ in
   (mkOverlay ./pwvucontrol.nix)
   (mkOverlay ./python.nix)
   (mkOverlay ./uwsm.nix)
+  (mkOverlay ./xdg-desktop-portal-hyprland.nix)
   (mkOverlay ./yt-dlp.nix)
 ]
