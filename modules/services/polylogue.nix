@@ -1,11 +1,11 @@
 { config, lib, pkgs, ... }:
 let
-  inherit (lib) mkEnableOption mkIf;
+  inherit (lib) mkEnableOption mkIf mkOption types;
   cfg = config.sinnix.services.polylogue;
   user = config.sinnix.user.name;
   userGroup = config.users.users.${user}.group or user;
 
-  chatlogRoot = "/realm/data/chatlog";
+  chatlogRoot = "${config.sinnix.paths.dataRoot}/chatlog";
   inboxRoot = "${chatlogRoot}/inbox";
   archiveRoot = "${chatlogRoot}/archive";
   configRoot = "${chatlogRoot}/config";
@@ -23,6 +23,8 @@ let
     POLYLOGUE_FORCE_PLAIN = "1";
     POLYLOGUE_CREDENTIAL_PATH = "${configRoot}/credentials.json";
     POLYLOGUE_TOKEN_PATH = "${configRoot}/token.json";
+    POLYLOGUE_DRIVE_RETRIES = toString cfg.drive.retries;
+    POLYLOGUE_DRIVE_RETRY_BASE = toString cfg.drive.retryBase;
   };
 
   dirs =
@@ -52,10 +54,24 @@ let
     ];
   };
 
-  runArgs = [ "--plain" "run" "--no-plan" ];
+  runArgs = [ "--plain" "run" ];
 in
 {
-  options.sinnix.services.polylogue.enable = mkEnableOption "Polylogue ingestion pipeline";
+  options.sinnix.services.polylogue = {
+    enable = mkEnableOption "Polylogue ingestion pipeline";
+    drive = {
+      retries = mkOption {
+        type = types.int;
+        default = 3;
+        description = "Drive retry attempts for sync requests.";
+      };
+      retryBase = mkOption {
+        type = types.float;
+        default = 0.5;
+        description = "Base delay (seconds) for Drive retry backoff.";
+      };
+    };
+  };
 
   config = mkIf cfg.enable {
     system.activationScripts.polylogueConfig = ''
@@ -75,6 +91,7 @@ EOF
       description = "Polylogue ingest/render/index";
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
+      unitConfig.RequiresMountsFor = [ chatlogRoot ];
       environment = envVars;
       serviceConfig = {
         Type = "oneshot";
@@ -98,6 +115,8 @@ EOF
       POLYLOGUE_CONFIG = configPath;
       POLYLOGUE_CREDENTIAL_PATH = "${configRoot}/credentials.json";
       POLYLOGUE_TOKEN_PATH = "${configRoot}/token.json";
+      POLYLOGUE_DRIVE_RETRIES = toString cfg.drive.retries;
+      POLYLOGUE_DRIVE_RETRY_BASE = toString cfg.drive.retryBase;
     };
 
     environment.systemPackages = lib.mkAfter [ pkgs.polylogue ];

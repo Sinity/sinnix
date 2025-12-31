@@ -2,23 +2,24 @@
 {
   imports = [
     ./cli/default.nix
-    ./desktop/activitywatch/default.nix
-    ./desktop/background-services/default.nix
-    ./desktop/browser/default.nix
-    ./desktop/clipse/default.nix
-    ./desktop/common-apps/default.nix
-    ./desktop/crypto/default.nix
-    ./desktop/fnott/default.nix
+    ./desktop/activitywatch.nix
+    ./desktop/background-services.nix
+    ./desktop/browser.nix
+    ./desktop/clipse.nix
+    ./desktop/common-apps.nix
+    ./desktop/crypto.nix
+    ./desktop/fnott.nix
     ./desktop/hyprland/default.nix
-    ./desktop/kdeconnect/default.nix
-    ./desktop/media/default.nix
-    ./desktop/quickshell/default.nix
-    ./desktop/reboot-notifier/default.nix
-    ./desktop/storage/default.nix
-    ./desktop/terminal/default.nix
-    ./desktop/tofi/default.nix
-    ./desktop/waybar/default.nix
-    ./desktop/wayland-session/default.nix
+    ./desktop/kdeconnect.nix
+    ./desktop/media.nix
+    ./desktop/mullvad.nix
+    ./desktop/quickshell.nix
+    ./desktop/reboot-notifier.nix
+    ./desktop/storage.nix
+    ./desktop/terminal.nix
+    ./desktop/tofi.nix
+    ./desktop/waybar.nix
+    ./desktop/wayland-session.nix
     ./dev/default.nix
   ];
 }

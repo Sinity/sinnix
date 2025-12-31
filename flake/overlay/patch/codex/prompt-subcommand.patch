@@ -44,7 +44,7 @@ new file mode 100644
 index 0000000..43b6c1c
 --- /dev/null
 +++ b/cli/src/prompt_cmd.rs
-@@ -0,0 +1,363 @@
+@@ -0,0 +1,383 @@
 +use anyhow::Context;
 +use clap::Parser;
 +use clap::ValueHint;
@@ -89,6 +89,10 @@ index 0000000..43b6c1c
 +    #[arg(long = "models", conflicts_with = "prompt", default_value_t = false)]
 +    pub list_models: bool,
 +
++    /// Print reasoning details, token usage, and other metadata.
++    #[arg(long, short = 'v', default_value_t = false)]
++    pub verbose: bool,
++
 +    /// Prompt to send to the model. Use `-` to read from stdin.
 +    #[arg(value_name = "PROMPT", value_hint = ValueHint::Other)]
 +    pub prompt: Option<String>,
@@ -111,7 +115,7 @@ index 0000000..43b6c1c
 +        return Ok(());
 +    }
 +
-+    let prompt_text = read_prompt(cli.prompt.clone())?;
++    let prompt_text = read_prompt(cli.prompt.clone(), cli.verbose)?;
 +    let system_prompt = cli
 +        .system_prompt
 +        .clone()
@@ -122,7 +126,14 @@ index 0000000..43b6c1c
 +        std::process::exit(1);
 +    }
 +
-+    run_prompt(prompt_text, system_prompt, config, auth_manager).await
++    run_prompt(
++        prompt_text,
++        system_prompt,
++        config,
++        auth_manager,
++        cli.verbose,
++    )
++    .await
 +}
 +
 +async fn load_config(cli: &PromptCli) -> anyhow::Result<Config> {
@@ -154,7 +165,7 @@ index 0000000..43b6c1c
 +        .map_err(anyhow::Error::from)
 +}
 +
-+fn read_prompt(prompt: Option<String>) -> anyhow::Result<String> {
++fn read_prompt(prompt: Option<String>, verbose: bool) -> anyhow::Result<String> {
 +    match prompt {
 +        Some(p) if p != "-" => Ok(p),
 +        other => {
@@ -162,7 +173,7 @@ index 0000000..43b6c1c
 +            if std::io::stdin().is_terminal() && !force_stdin {
 +                anyhow::bail!("No prompt provided. Pass one as an argument or pipe it via stdin.");
 +            }
-+            if !force_stdin {
++            if !force_stdin && verbose {
 +                eprintln!("Reading prompt from stdin...");
 +            }
 +            let mut buffer = String::new();
@@ -205,6 +216,7 @@ index 0000000..43b6c1c
 +    system_prompt: String,
 +    config: Arc<Config>,
 +    auth_manager: Arc<AuthManager>,
++    verbose: bool,
 +) -> anyhow::Result<()> {
 +    let auth_snapshot = auth_manager.auth();
 +    let models_manager = ModelsManager::new(auth_manager.clone());
@@ -248,7 +260,7 @@ index 0000000..43b6c1c
 +
 +    let mut stream = client.stream(&prompt).await?;
 +
-+    consume_stream(&mut stream).await
++    consume_stream(&mut stream, verbose).await
 +}
 +
 +fn build_prompt_inputs(system_prompt: &str, prompt_text: &str) -> Vec<ResponseItem> {
@@ -270,7 +282,7 @@ index 0000000..43b6c1c
 +    ]
 +}
 +
-+async fn consume_stream(stream: &mut ResponseStream) -> anyhow::Result<()> {
++async fn consume_stream(stream: &mut ResponseStream, verbose: bool) -> anyhow::Result<()> {
 +    let mut stdout = std::io::stdout();
 +    let mut stderr = std::io::stderr();
 +    let mut printed_response = false;
@@ -293,7 +305,7 @@ index 0000000..43b6c1c
 +        match event? {
 +            ResponseEvent::Created => {}
 +            ResponseEvent::OutputTextDelta(delta) => {
-+                if flush_summary(&mut summary_active, &mut reasoning_summary_line) {
++                if verbose && flush_summary(&mut summary_active, &mut reasoning_summary_line) {
 +                    stderr.flush()?;
 +                }
 +                stdout.write_all(delta.as_bytes())?;
@@ -301,7 +313,7 @@ index 0000000..43b6c1c
 +                printed_response = true;
 +            }
 +            ResponseEvent::OutputItemAdded(item) | ResponseEvent::OutputItemDone(item) => {
-+                if flush_summary(&mut summary_active, &mut reasoning_summary_line) {
++                if verbose && flush_summary(&mut summary_active, &mut reasoning_summary_line) {
 +                    stderr.flush()?;
 +                }
 +                if let Some(text) = assistant_text(&item)
@@ -313,24 +325,30 @@ index 0000000..43b6c1c
 +                }
 +            }
 +            ResponseEvent::ReasoningSummaryDelta { delta, .. } => {
-+                reasoning_summary_line.push_str(&delta);
-+                summary_active = true;
-+                eprint!("\r(reasoning summary) {reasoning_summary_line}");
-+                stderr.flush()?;
++                if verbose {
++                    reasoning_summary_line.push_str(&delta);
++                    summary_active = true;
++                    eprint!("\r(reasoning summary) {reasoning_summary_line}");
++                    stderr.flush()?;
++                }
 +            }
 +            ResponseEvent::ReasoningSummaryPartAdded { .. } => {
-+                if flush_summary(&mut summary_active, &mut reasoning_summary_line) {
++                if verbose && flush_summary(&mut summary_active, &mut reasoning_summary_line) {
 +                    stderr.flush()?;
 +                }
 +            }
 +            ResponseEvent::ReasoningContentDelta { delta, .. } => {
-+                eprintln!("(reasoning detail) {delta}");
++                if verbose {
++                    eprintln!("(reasoning detail) {delta}");
++                }
 +            }
 +            ResponseEvent::RateLimits(snapshot) => {
-+                eprintln!("Rate limits: {snapshot:?}");
++                if verbose {
++                    eprintln!("Rate limits: {snapshot:?}");
++                }
 +            }
 +            ResponseEvent::Completed { token_usage, .. } => {
-+                if flush_summary(&mut summary_active, &mut reasoning_summary_line) {
++                if verbose && flush_summary(&mut summary_active, &mut reasoning_summary_line) {
 +                    stderr.flush()?;
 +                }
 +
@@ -340,8 +358,10 @@ index 0000000..43b6c1c
 +                    printed_response = false;
 +                }
 +
-+                if let Some(usage) = token_usage {
-+                    print_token_usage(&usage);
++                if verbose {
++                    if let Some(usage) = token_usage {
++                        print_token_usage(&usage);
++                    }
 +                }
 +            }
 +        }
@@ -351,7 +371,7 @@ index 0000000..43b6c1c
 +        stdout.write_all(b"\n")?;
 +        stdout.flush()?;
 +    }
-+    if flush_summary(&mut summary_active, &mut reasoning_summary_line) {
++    if verbose && flush_summary(&mut summary_active, &mut reasoning_summary_line) {
 +        stderr.flush()?;
 +    }
 +    Ok(())

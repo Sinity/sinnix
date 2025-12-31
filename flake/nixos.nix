@@ -7,13 +7,16 @@
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;
+  featureLib = import ../modules/lib/features.nix { inherit lib; };
   baseModules = [
     inputs.agenix.nixosModules.default
     inputs.stylix.nixosModules.stylix
+    inputs.sinex.nixosModules.default
     (import ./overlay)
   ];
   sharedSpecialArgs = {
     inherit inputs;
+    inherit (featureLib) mkFeatureModule;
   };
   mkHost =
     {
@@ -30,7 +33,6 @@ in
   flake.nixosConfigurations = {
     sinnix-prime = mkHost {
       modules = [
-        inputs.sinex.nixosModules.default
         ../modules/default.nix
         { imports = [ ../hosts/sinnix-prime ]; }
       ];

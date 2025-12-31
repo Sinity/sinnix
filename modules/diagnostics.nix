@@ -5,6 +5,7 @@
   ...
 }:
 let
+  inherit (config.sinnix.machine) isDesktop;
   coreDiagnostics = with pkgs; [
     hwinfo
     inxi
@@ -13,82 +14,12 @@ let
     nvme-cli
     hdparm
   ];
-
-  optionalDiagnostics = with pkgs; [
-    cpuid
-    dmidecode
-    hw-probe
-    hwdata
-    i7z
-    mcelog
-    memtester
-    numactl
-    pciutils
-    usbutils
-  ];
-
-  optionalPerfSuites = with pkgs; [
-    flent
-    netperf
-    phoronix-test-suite
-    stress-ng
-    stressapptest
-    sysbench
-    s-tui
-    lm_sensors
-    perf
-  ];
-
-  perfScanRuntimeInputs = with pkgs; [
-    bash
-    coreutils
-    ethtool
-    fio
-    flent
-    gawk
-    gnugrep
-    gum
-    intel-gpu-tools
-    inxi
-    iperf3
-    iproute2
-    iw
-    jq
-    linuxPackages.turbostat
-    lm_sensors
-    memtester
-    ncurses
-    netperf
-    nvme-cli
-    pciutils
-    perf
-    phoronix-test-suite
-    powertop
-    procps
-    python3
-    python312Packages.speedtest-cli
-    rt-tests
-    s-tui
-    smartmontools
-    stress-ng
-    stressapptest
-    sysbench
-    sysstat
-    util-linux
-    vkmark
-    glmark2
-  ];
-
-  perfScan = pkgs.writeShellApplication {
-    name = "perf-scan";
-    runtimeInputs = perfScanRuntimeInputs;
-    text = ''
-      exec ${pkgs.bash}/bin/bash ${config.sinnix.paths.projectRoot}/scripts/perf-scan "$@"
-    '';
-  };
+  perfScan = pkgs."perf-scan";
 in
 {
-  config.environment.systemPackages = lib.mkAfter (
-    coreDiagnostics ++ optionalDiagnostics ++ optionalPerfSuites ++ [ perfScan ]
-  );
+  config = lib.mkIf isDesktop {
+    environment.systemPackages = lib.mkAfter (
+      coreDiagnostics ++ [ perfScan ]
+    );
+  };
 }

@@ -161,9 +161,6 @@ in
     tmpfiles.rules = lib.mkAfter [
       "d /mnt/pendrv 0755 root root -"
       "d ${realmRoot}/knowledgebase 0755 ${username} users -"
-      "d ${realmRoot}/inbox 0755 ${username} users -"
-      "d ${dataRoot}/screenshot 0755 ${username} users -"
-      "d ${dataRoot}/screenshot/mpv 0755 ${username} users -"
     ];
 
     services.prepare-swapfile = {

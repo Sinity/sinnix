@@ -24,9 +24,9 @@ the host or a bundle so ownership stays with that module.
   documented alongside the rest of the service configuration. Home modules
   receive the same mapping via `secretPaths` and should prefer it to literal
   `/run/agenix/...` paths.
-- **Diagnostics** – `modules/diagnostics.nix` keeps the full hardware/perf tool
-  stack installed by default so `perf-scan` and other scripts always have their
-  dependencies ready without extra toggles.
+- **Diagnostics** – `modules/diagnostics.nix` installs the core hardware tools
+  plus the `perf-scan` wrapper; the heavier perf suite dependencies live inside
+  the packaged `perf-scan` derivation instead of the global system profile.
 
 ## Host (`hosts/sinnix-prime`)
 
@@ -49,7 +49,7 @@ the host or a bundle so ownership stays with that module.
 - `modules/storage.nix` owns systemd services, mounts, and system-level packages
   required for Always-On sync (davfs2, rclone-backed remotes).  User-facing
   helpers (gocryptfs, mount scripts) live in
-  `modules/features/desktop/storage/default.nix`.
+  `modules/features/desktop/storage.nix`.
 - The module also relies on `config.sinnix.secrets.paths.davfs2-secrets` for the
   davfs2 credentials so the secret location is defined exactly once.
 
@@ -68,7 +68,7 @@ the host or a bundle so ownership stays with that module.
 - Import a module where the behaviour logically belongs (host vs system vs user).
 - Use `config.sinnix.secrets.paths` instead of hard-coding `/run/agenix/...`.
 - When adding tooling, prefer the user profile unless the binary must be
-  available before login; the shared modules already carry the full diagnostics
-  and performance suite for `perf-scan`.
+  available before login; the shared modules install `perf-scan`, which bundles
+  its own perf suite dependencies.
 - Document new cross-cutting contracts (paths, data roots, service ownership)
   here to keep the topology obvious.

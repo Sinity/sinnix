@@ -37,8 +37,7 @@ into `~/.local/bin` automatically.
 
 - `audit-package-usage` – inspects shell history, desktop files, and units to
   flag unused packages vs. configured ones.
-- `perf-scan` – wrapper around perf `stat`/`record` modes with templated report
-  output.
+- `perf-scan` – system diagnostics/benchmark runner with bundled dependencies.
 - `pre-commit-check` – runs `nix flake check`, warns about tmpfiles/services,
   and ensures staged `.nix` files are tracked.
 - `setup-git-hooks` – installs repo-specific pre-commit hooks.
@@ -46,7 +45,7 @@ into `~/.local/bin` automatically.
 ## Misc
 
 - `audio-output-status`, `mic-status`, etc. are used by Waybar modules (see
-  `modules/features/desktop/waybar/default.nix`).
+  `modules/features/desktop/waybar.nix`).
 - `toggle-audio-output` and `mic-toggle` are bound via Hyprland keybindings.
 
 Scripts that manipulate Kitty or Hyprland rely on the remote control hints

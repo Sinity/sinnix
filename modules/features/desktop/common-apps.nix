@@ -78,21 +78,6 @@ in
           };
         };
 
-        programs.mullvad-vpn = {
-          enable = true;
-          settings = {
-            preferredLocale = "system";
-            autoConnect = false;
-            enableSystemNotifications = true;
-            monochromaticIcon = false;
-            startMinimized = true;
-            unpinnedWindow = true;
-            browsedForSplitTunnelingApplications = [ ];
-            changelogDisplayedForVersion = "2025.2";
-            animateMap = true;
-          };
-        };
-
         qt = {
           enable = true;
           platformTheme = {
@@ -131,12 +116,6 @@ in
               source = mkDotsRepoLink "/Kvantum";
             };
             "transmission/settings.json".source = mkDotsRepoLink "/transmission/settings.json";
-            "autostart/mullvad-vpn.desktop".text = ''
-              [Desktop Entry]
-              Type=Application
-              Name=Mullvad VPN (disabled)
-              Hidden=true
-            '';
           };
           mimeApps = {
             enable = true;

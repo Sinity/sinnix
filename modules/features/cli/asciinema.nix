@@ -51,15 +51,15 @@ in
               fi
 
               _sinnix_asciinema_log_command_start() {
-                local now cmd
+                local now cmd pwd
                 now="$(date -Is)"
                 cmd="$1"
+                pwd="$PWD"
                 (( SINNIX_ASCIINEMA_CMD_COUNT += 1 ))
                 SINNIX_ASCIINEMA_LAST_CMD_ID=$SINNIX_ASCIINEMA_CMD_COUNT
                 SINNIX_ASCIINEMA_LAST_CMD="$cmd"
                 SINNIX_ASCIINEMA_CMD_START_REALTIME=$EPOCHREALTIME
-                printf '{"type":"command_start","id":%d,"time":"%s","cmd":%q,"pwd":%q}\n' \
-                  "$SINNIX_ASCIINEMA_LAST_CMD_ID" "$now" "$cmd" "$PWD" >>"$SINNIX_ASCIINEMA_META"
+                printf '{"type":"command_start","id":%d,"time":"%s","cmd":%q,"pwd":%q}\n' "$SINNIX_ASCIINEMA_LAST_CMD_ID" "$now" "$cmd" "$pwd" >>"$SINNIX_ASCIINEMA_META"
               }
 
               _sinnix_asciinema_log_command_end() {
@@ -67,22 +67,25 @@ in
                 if [[ -z ''${SINNIX_ASCIINEMA_LAST_CMD_ID:-} || ''${SINNIX_ASCIINEMA_LAST_CMD_ID:-0} -eq 0 ]]; then
                   return
                 fi
-                local now duration_ms
+                local now duration_ms last_cmd last_id
                 now="$(date -Is)"
                 if [[ -n ''${SINNIX_ASCIINEMA_CMD_START_REALTIME:-} && ''${SINNIX_ASCIINEMA_CMD_START_REALTIME} -ne 0 ]]; then
                   duration_ms=$(( (EPOCHREALTIME - SINNIX_ASCIINEMA_CMD_START_REALTIME) * 1000 ))
                 else
                   duration_ms=0
                 fi
-                printf '{"type":"command_end","time":"%s","status":%d,"id":%d,"duration_ms":%.3f,"cmd":%q}\n' \
-                  "$now" "$last_status" "$SINNIX_ASCIINEMA_LAST_CMD_ID" "$duration_ms" "$SINNIX_ASCIINEMA_LAST_CMD" >>"$SINNIX_ASCIINEMA_META"
+                last_cmd="$SINNIX_ASCIINEMA_LAST_CMD"
+                last_id="$SINNIX_ASCIINEMA_LAST_CMD_ID"
+                printf '{"type":"command_end","time":"%s","status":%d,"id":%d,"duration_ms":%.3f,"cmd":%q}\n' "$now" "$last_status" "$last_id" "$duration_ms" "$last_cmd" >>"$SINNIX_ASCIINEMA_META"
                 SINNIX_ASCIINEMA_CMD_START_REALTIME=0
               }
 
               _sinnix_asciinema_log_history() {
-                  printf '{"type":"history","time":"%s","line":%q,"cmd_id":%d}\n' \
-                    "$(date -Is)" "$1" "''${SINNIX_ASCIINEMA_LAST_CMD_ID:-0}" >>"$SINNIX_ASCIINEMA_META"
-                  return 0
+                local now="$(date -Is)"
+                local line="$1"
+                local cmd_id="''${SINNIX_ASCIINEMA_LAST_CMD_ID:-0}"
+                printf '{"type":"history","time":"%s","line":%q,"cmd_id":%d}\n' "$now" "$line" "$cmd_id" >>"$SINNIX_ASCIINEMA_META"
+                return 0
               }
 
               _sinnix_asciinema_log_repo_context() {
@@ -108,8 +111,8 @@ in
                   SINNIX_ASCIINEMA_LAST_REPO_BRANCH="$branch"
                   SINNIX_ASCIINEMA_LAST_REPO_COMMIT="$commit"
                   SINNIX_ASCIINEMA_LAST_REPO_DIRTY="$dirty"
-                  printf '{"type":"repo","time":"%s","root":%q,"branch":%q,"commit":%q,"dirty":%q}\n' \
-                    "$(date -Is)" "$root" "$branch" "$commit" "$dirty_flag" >>"$SINNIX_ASCIINEMA_META"
+                  local now="$(date -Is)"
+                  printf '{"type":"repo","time":"%s","root":%q,"branch":%q,"commit":%q,"dirty":%q}\n' "$now" "$root" "$branch" "$commit" "$dirty_flag" >>"$SINNIX_ASCIINEMA_META"
                 fi
               }
 
@@ -125,8 +128,9 @@ in
                 if [[ ''${SINNIX_ASCIINEMA_HAS_HYPRCTL:-0} -eq 1 ]]; then
                   ws="$(hyprctl -j activeworkspace 2>/dev/null || printf '{}')"
                 fi
-                printf '{"type":"prompt","time":"%s","status":%d,"pwd":%q,"workspace":%q}\n' \
-                  "$(date -Is)" "$last_status" "$PWD" "$ws" >>"$SINNIX_ASCIINEMA_META"
+                local now="$(date -Is)"
+                local pwd="$PWD"
+                printf '{"type":"prompt","time":"%s","status":%d,"pwd":%q,"workspace":%q}\n' "$now" "$last_status" "$pwd" "$ws" >>"$SINNIX_ASCIINEMA_META"
               }
 
               _sinnix_asciinema_log_periodic() {
@@ -140,8 +144,9 @@ in
                 if ps_out="$(ps -p $$ -o pcpu= -o pmem= 2>/dev/null)"; then
                   read -r cpu mem <<<"$ps_out"
                 fi
-                printf '{"type":"heartbeat","time":"%s","pwd":%q,"load":%q,"uptime":%q,"cpu":%q,"mem":%q}\n' \
-                  "$(date -Is)" "$PWD" "$loadavg" "$uptime" "$cpu" "$mem" >>"$SINNIX_ASCIINEMA_META"
+                local now="$(date -Is)"
+                local pwd="$PWD"
+                printf '{"type":"heartbeat","time":"%s","pwd":%q,"load":%q,"uptime":%q,"cpu":%q,"mem":%q}\n' "$now" "$pwd" "$loadavg" "$uptime" "$cpu" "$mem" >>"$SINNIX_ASCIINEMA_META"
               }
 
               _sinnix_asciinema_log_exit() {
@@ -154,12 +159,10 @@ in
                 else
                   elapsed=0
                 fi
-                printf '{"type":"session_end","time":"%s","status":%d,"elapsed":%d,"commands":%d}\n' \
-                  "$end" "$last_status" "$elapsed" "''${SINNIX_ASCIINEMA_CMD_COUNT:-0}" >>"$SINNIX_ASCIINEMA_META"
+                printf '{"type":"session_end","time":"%s","status":%d,"elapsed":%d,"commands":%d}\n' "$end" "$last_status" "$elapsed" "''${SINNIX_ASCIINEMA_CMD_COUNT:-0}" >>"$SINNIX_ASCIINEMA_META"
                 if command -v sha256sum >/dev/null 2>&1; then
                   if read -r hash _ < <(sha256sum "$SINNIX_ASCIINEMA_FILE" 2>/dev/null); then
-                    printf '{"type":"digest","time":"%s","algo":"sha256","hash":%q}\n' \
-                      "$end" "$hash" >>"$SINNIX_ASCIINEMA_META"
+                    printf '{"type":"digest","time":"%s","algo":"sha256","hash":%q}\n' "$end" "$hash" >>"$SINNIX_ASCIINEMA_META"
                   fi
                 fi
               }
@@ -215,10 +218,8 @@ ltk/}"
             export SINNIX_ASCIINEMA_META="$meta_path"
             export SINNIX_ASCIINEMA_START_EPOCH="$start_epoch"
 
-            printf '{"type":"session_start","time":"%s","host":%q,"user":%q,"tty":%q,"pwd":%q,"shell_pid":%q,"parent_pid":%q,"term":%q,"tmux":%q,"ssh_connection":%q,"ssh_tty":%q,"display":%q,"wayland":%q,"session_type":%q,"project_root":%q,"flake":%q,"devenv":%q}\n' \
-              "$ts" "$host" "$USER" "$tty_path" "$PWD" "$shell_pid" "$parent_pid" "$term_env" "$tmux_context" "$ssh_conn" "$ssh_tty" "$display_env" "$wayland_env" "$session_type" "$project_root" "$flake_root" "$devshell_root" >"$meta_path"
-            printf '{"type":"recorder","time":"%s","file":%q,"pid":%d}\n' \
-              "$ts" "$cast_path" "$$" >>"$meta_path"
+            printf '{"type":"session_start","time":"%s","host":%q,"user":%q,"tty":%q,"pwd":%q,"shell_pid":%q,"parent_pid":%q,"term":%q,"tmux":%q,"ssh_connection":%q,"ssh_tty":%q,"display":%q,"wayland":%q,"session_type":%q,"project_root":%q,"flake":%q,"devenv":%q}\n' "$ts" "$host" "$USER" "$tty_path" "$PWD" "$shell_pid" "$parent_pid" "$term_env" "$tmux_context" "$ssh_conn" "$ssh_tty" "$display_env" "$wayland_env" "$session_type" "$project_root" "$flake_root" "$devshell_root" >"$meta_path"
+            printf '{"type":"recorder","time":"%s","file":%q,"pid":%d}\n' "$ts" "$cast_path" "$$" >>"$meta_path"
 
             shell_bin="''${SHELL:-${fallbackShell}}"
             record_cmd=$(printf '%q' "$shell_bin")

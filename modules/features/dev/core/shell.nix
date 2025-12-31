@@ -6,8 +6,15 @@
   config,
   ...
 }:
+let
+  findFlakeRoot = pkgs.writeTextFile {
+    name = "find-flake-root";
+    executable = true;
+    text = builtins.readFile ../../../../scripts/find-flake-root;
+  };
+in
 {
-  home.packages = with pkgs; [
+  home.packages = (with pkgs; [
     bat
     eza
     fd
@@ -35,7 +42,7 @@
     mermaid-cli
 
     antigravity # TODO: It's not the greatest placement for this
-  ];
+  ]) ++ [ findFlakeRoot ];
 
   programs = {
     zsh = {
@@ -128,7 +135,6 @@
         cl = "~/.local/bin/claude";
         claude = "~/.local/bin/claude";
         nvim = "nvim --listen /tmp/nvim-$$";
-        ccm = "ccmonitor --refresh-rate 1 --refresh-per-second 20";
         ccusage = "npx --yes ccusage@latest";
         gemini-cli = "npx --yes https://github.com/google-gemini/gemini-cli";
         marimo-edit = "marimo edit --mcp";
@@ -214,11 +220,6 @@
       changeDirWidgetOptions = [ "--preview 'eza --tree --color=always {} | head -200'" ];
       enableZshIntegration = true;
     };
-  };
-
-  home.file.".local/bin/find-flake-root" = {
-    source = ../../../../scripts/find-flake-root;
-    executable = true;
   };
 
   home.file.".local/bin/claude" = {

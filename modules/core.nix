@@ -7,6 +7,7 @@
 let
   username = config.sinnix.user.name;
   inherit (config.sinnix) paths;
+  inherit (config.sinnix.machine) isDesktop;
 in
 {
   config = {
@@ -64,7 +65,6 @@ in
       config = {
         allowUnfree = true;
         allowAliases = true;
-        allowBroken = true;
       };
       hostPlatform = lib.mkDefault "x86_64-linux";
       overlays = [ inputs.nur.overlays.default ];
@@ -109,14 +109,29 @@ in
     };
 
     networking.firewall = {
-      enable = false;
+      enable = true;
+      allowPing = true;
       allowedTCPPorts = [ 22 ];
-      allowedUDPPortRanges = [
-        {
-          from = 60000;
-          to = 61000;
-        }
-      ];
+      allowedTCPPortRanges =
+        lib.optionals isDesktop [
+          {
+            from = 1714;
+            to = 1764;
+          }
+        ];
+      allowedUDPPortRanges =
+        [
+          {
+            from = 60000;
+            to = 61000;
+          }
+        ]
+        ++ lib.optionals isDesktop [
+          {
+            from = 1714;
+            to = 1764;
+          }
+        ];
     };
 
     systemd = {

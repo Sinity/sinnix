@@ -8,16 +8,17 @@
 let
   username = config.sinnix.user.name;
   userCfg = lib.attrByPath [ "users" "users" username ] config { };
-	  getAttrOrFallback =
-	    set: attr: fallback:
-	    let
-	      value = set.${attr} or null;
-	    in
-	    if value == null then fallback else value;
+  getAttrOrFallback =
+    set: attr: fallback:
+    let
+      value = set.${attr} or null;
+    in
+    if value == null then fallback else value;
   userUid = builtins.toString (getAttrOrFallback userCfg "uid" 1000);
   primaryGroupName = getAttrOrFallback userCfg "group" "users";
   groupCfg = lib.attrByPath [ "users" "groups" primaryGroupName ] config { };
   primaryGroupId = builtins.toString (getAttrOrFallback groupCfg "gid" 100);
+  userHome = getAttrOrFallback userCfg "home" "/home/${username}";
   nextcloudCert = builtins.readFile "${inputs.self}/assets/nextcloud-cert.crt";
   baseStoragePackages = with pkgs; [
     davfs2
@@ -81,9 +82,9 @@ in
   ];
 
   system.activationScripts.fixRclonePermissions.text = ''
-    if [ -f /home/${username}/.config/rclone/rclone.conf ]; then
-      chown ${username}:${primaryGroupName} /home/${username}/.config/rclone /home/${username}/.config/rclone/rclone.conf 2>/dev/null || true
-      chmod 600 /home/${username}/.config/rclone/rclone.conf 2>/dev/null || true
+    if [ -f ${userHome}/.config/rclone/rclone.conf ]; then
+      chown ${username}:${primaryGroupName} ${userHome}/.config/rclone ${userHome}/.config/rclone/rclone.conf 2>/dev/null || true
+      chmod 600 ${userHome}/.config/rclone/rclone.conf 2>/dev/null || true
     fi
   '';
 

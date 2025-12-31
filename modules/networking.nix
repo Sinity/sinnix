@@ -70,9 +70,6 @@ in
         };
       };
 
-      mullvad-vpn = lib.mkIf isDesktop {
-        enable = false;
-      };
     };
 
     programs.mosh.enable = true;

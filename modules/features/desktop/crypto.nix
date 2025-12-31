@@ -7,6 +7,7 @@
 let
   cfg = config.sinnix.features.desktop.crypto;
   user = config.sinnix.user.name;
+  userGroup = config.users.users.${user}.group or user;
 
   moneroDataDir = "/monero";
   moneroConfig = ''
@@ -83,14 +84,17 @@ in
           btcWallet
         ];
 
-        activation.ensureCryptoDirs = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-          mkdir -p ${moneroDataDir}
-          mkdir -p ${bitcoinWalletDir}
-        '';
-
         file.".bitmonero/bitmonero.conf".text = moneroConfig;
         sessionVariables.MONERO_DATA_DIR = moneroDataDir;
       };
     };
+
+    systemd.tmpfiles.rules = lib.mkAfter [
+      "d ${moneroDataDir} 0700 ${user} ${userGroup} -"
+      "d ${bitcoinDataDir} 0700 ${user} ${userGroup} -"
+      "d ${bitcoinWalletDir} 0700 ${user} ${userGroup} -"
+    ];
+
+    networking.firewall.allowedTCPPorts = lib.mkAfter [ 18080 ];
   };
 }

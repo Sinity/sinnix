@@ -1,7 +1,7 @@
 { ... }:
 {
   imports = [
-    ./core/default.nix
-    ./asciinema/default.nix
+    ./core.nix
+    ./asciinema.nix
   ];
 }

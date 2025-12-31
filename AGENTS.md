@@ -36,7 +36,7 @@
 
 - Run `nix run .#check` before every PR or commit to catch evaluation regressions.
 - For host tweaks, use `sudo nix run .#test` and inspect the streamed `nom` logs.
-- Smoke-test user-facing scripts (e.g., `nix run .#rawlog -- --help`) and record results in PR notes.
+- Smoke-test user-facing scripts (e.g., `scripts/rawlog --help`) and record results in PR notes.
 - Add ad-hoc NixOS tests when introducing new services or timers with higher risk.
 
 ## Commit & Pull Request Guidelines

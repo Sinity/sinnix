@@ -1,39 +1,31 @@
-{
-  lib,
-  config,
-  ...
-}:
-let
-  cfg = config.sinnix.features.desktop.fnott;
-  user = config.sinnix.user.name;
-in
-{
-  options.sinnix.features.desktop.fnott = {
-    enable = lib.mkEnableOption "Fnott Notification Daemon";
-  };
-
-  config = lib.mkIf cfg.enable {
-    home-manager.users.${user} = { config, lib, ... }: {
-      stylix.targets.fnott.enable = false;
-      
-      services.fnott =
+{ mkFeatureModule, lib, ... }@args:
+mkFeatureModule {
+  path = [ "desktop" "fnott" ];
+  description = "Fnott notification daemon";
+  configFn =
+    { config, lib, ... }:
+    let
+      user = config.sinnix.user.name;
+      stylixColors = config.lib.stylix.colors;
+      toRgba =
+        alpha: color:
         let
-          stylixColors = config.lib.stylix.colors;
-          toRgba =
-            alpha: color:
-            let
-              hex = lib.removePrefix "#" color;
-            in
-            "${hex}${alpha}";
-          bg = toRgba "f0" stylixColors.base00;
-          border = toRgba "ff" stylixColors.base03;
-          text = toRgba "ff" stylixColors.base06;
-          subtle = toRgba "ff" stylixColors.base04;
-          accent = toRgba "ff" stylixColors.base0D;
-          criticalBg = toRgba "f0" stylixColors.base08;
-          fontMono = "SauceCodePro Nerd Font Mono:size=16";
+          hex = lib.removePrefix "#" color;
         in
-        {
+        "${hex}${alpha}";
+      bg = toRgba "f0" stylixColors.base00;
+      border = toRgba "ff" stylixColors.base03;
+      text = toRgba "ff" stylixColors.base06;
+      subtle = toRgba "ff" stylixColors.base04;
+      accent = toRgba "ff" stylixColors.base0D;
+      criticalBg = toRgba "f0" stylixColors.base08;
+      fontMono = "SauceCodePro Nerd Font Mono:size=16";
+    in
+    {
+      home-manager.users.${user} = { config, lib, ... }: {
+        stylix.targets.fnott.enable = false;
+
+        services.fnott = {
           enable = true;
           settings = {
             main = {
@@ -83,6 +75,6 @@ in
             };
           };
         };
+      };
     };
-  };
-}
+} args

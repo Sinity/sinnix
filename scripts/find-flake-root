@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Finds the root of the current flake/project context.
+set -euo pipefail
 
-if [ -n "$FLAKE" ]; then
+if [ -n "${FLAKE:-}" ]; then
   printf '%s\n' "$FLAKE"
   exit 0
 fi
@@ -11,11 +12,11 @@ if command -v git >/dev/null 2>&1; then
     exit 0
   fi
 fi
-if [ -n "$PRJ_ROOT" ]; then
+if [ -n "${PRJ_ROOT:-}" ]; then
   printf '%s\n' "$PRJ_ROOT"
   exit 0
 fi
-if [ -n "$DEVENV_ROOT" ]; then
+if [ -n "${DEVENV_ROOT:-}" ]; then
   printf '%s\n' "$DEVENV_ROOT"
   exit 0
 fi
