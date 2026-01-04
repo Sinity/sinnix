@@ -1,25 +1,29 @@
 diff --git a/uwsm/main.py b/uwsm/main.py
+index 8f90c53..d4f9c82 100644
 --- a/uwsm/main.py
 +++ b/uwsm/main.py
-@@ -17,6 +17,7 @@
- """
- 
- import os
+@@
+-import os
+-import sys
++import os
++import sys
 +import dbus
- import sys
- import shlex
- import argparse
-@@ -2802,10 +2803,21 @@
+@@
+     if activating_wm_id:
+         print_normal(
+             f"Declaring unit for {wm_id} ready and restricting notification access."
          )
          os.execlp("systemd-notify", "systemd-notify", "READY=1", "NOTIFYACCESS=exec")
      else:
 -        if (
--            bus_session.get_unit_property(wm_unit, "NotifyAccess", skip_generic=True)
+-            bus_session.get_unit_property(
+-                f"wayland-wm@{wm_id}.service", "NotifyAccess", skip_generic=True
+-            )
 -            == "all"
 -        ):
 +        try:
 +            notify_access = bus_session.get_unit_property(
-+                wm_unit,
++                f"wayland-wm@{wm_id}.service",
 +                "NotifyAccess",
 +                skip_generic=True,
 +            )
@@ -35,20 +39,34 @@ diff --git a/uwsm/main.py b/uwsm/main.py
              print_normal(
                  f"Unit for {wm_id} is already active, restricting notification access."
              )
-@@ -5515,14 +5527,21 @@
+@@
+                         if get_active_wm_unit(
+                             active=False, activating=True, bus_session=bus_session
+                         ):
+                             print_normal(
+                                 f"Autoready: Declaring unit for {CompGlobals.id} ready and restricting notification access."
+                             )
+                             os.execlp(
+                                 "systemd-notify",
+                                 "systemd-notify",
+                                 "READY=1",
                                  "NOTIFYACCESS=exec",
                              )
                          else:
 -                            if (
 -                                bus_session.get_unit_property(
-+                            try:
-+                                notify_access = bus_session.get_unit_property(
-                                     f"wayland-wm@{CompGlobals.id_unit_string}.service",
-                                     "NotifyAccess",
-                                     skip_generic=True,
-                                 )
+-                                    f"wayland-wm@{CompGlobals.id}.service",
+-                                    "NotifyAccess",
+-                                    skip_generic=True,
+-                                )
 -                                == "all"
 -                            ):
++                            try:
++                                notify_access = bus_session.get_unit_property(
++                                    f"wayland-wm@{CompGlobals.id}.service",
++                                    "NotifyAccess",
++                                    skip_generic=True,
++                                )
 +                            except dbus.exceptions.DBusException as caught_exception:
 +                                if getattr(caught_exception, "get_dbus_name", lambda: None)() == "org.freedesktop.systemd1.NoSuchUnit" or "org.freedesktop.systemd1.NoSuchUnit" in str(caught_exception):
 +                                    print_debug(

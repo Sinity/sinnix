@@ -139,16 +139,33 @@ in
         [
           "d ${paths.outerRealm}/inbox 0755 ${username} users -"
           "d ${paths.dataRoot} 0755 ${username} users -"
-          "d ${paths.dataRoot}/screenshot 0755 ${username} users -"
-          "d ${paths.dataRoot}/screenshot/mpv 0755 ${username} users -"
+          "d ${paths.capturesRoot} 0755 ${username} users -"
+          "d ${paths.capturesRoot}/shell 0755 ${username} users -"
+          "d ${paths.capturesRoot}/shell/zsh 0700 ${username} users -"
+          "d ${paths.capturesRoot}/comms 0755 ${username} users -"
+          "d ${paths.capturesRoot}/comms/irc 0755 ${username} users -"
+          "d ${paths.exportsRoot} 0755 ${username} users -"
+          "d ${paths.librariesRoot} 0755 ${username} users -"
+          "d ${paths.indicesRoot} 0755 ${username} users -"
+          "d ${paths.capturesRoot}/activitywatch 0755 ${username} users -"
+          "d ${paths.capturesRoot}/activitywatch/raw 0755 ${username} users -"
+          "d ${paths.capturesRoot}/audio 0755 ${username} users -"
+          "d ${paths.capturesRoot}/audio/raw 0755 ${username} users -"
+          "d ${paths.capturesRoot}/audio/archive 0755 ${username} users -"
+          "d ${paths.capturesRoot}/asciinema 0755 ${username} users -"
+          "d ${paths.capturesRoot}/keylog 0755 ${username} users -"
+          "d ${paths.capturesRoot}/screenshot 0755 ${username} users -"
+          "d ${paths.capturesRoot}/screenshot/mpv 0755 ${username} users -"
+          "d ${paths.exportsRoot}/lastpass 0755 ${username} users -"
+          "d ${paths.exportsRoot}/lastpass/raw 0755 ${username} users -"
         ]
         ++ lib.optional (paths.realmRoot or "" == "/realm") "d /realm/inbox 0755 ${username} users -"
         ++ lib.optional (
           paths.dataRoot == "/realm/data"
-        ) "d /realm/data/screenshot 0755 ${username} users -"
+        ) "d /realm/data/captures/screenshot 0755 ${username} users -"
         ++ lib.optional (
           paths.dataRoot == "/realm/data"
-        ) "d /realm/data/screenshot/mpv 0755 ${username} users -"
+        ) "d /realm/data/captures/screenshot/mpv 0755 ${username} users -"
       );
 
       slices."nix-daemon.slice".sliceConfig = {

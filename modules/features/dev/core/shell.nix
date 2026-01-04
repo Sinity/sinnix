@@ -7,11 +7,7 @@
   ...
 }:
 let
-  findFlakeRoot = pkgs.writeTextFile {
-    name = "find-flake-root";
-    executable = true;
-    text = builtins.readFile ../../../../scripts/find-flake-root;
-  };
+  findFlakeRoot = pkgs.writeShellScriptBin "find-flake-root" (builtins.readFile ../../../../scripts/find-flake-root);
 in
 {
   home.packages = (with pkgs; [
@@ -51,6 +47,7 @@ in
       autosuggestion.enable = true;
       syntaxHighlighting.enable = true;
       history = {
+        path = "${sinnix.paths.capturesRoot}/shell/zsh/history";
         save = 9999999;
         size = 9999999;
         append = true;
@@ -221,6 +218,12 @@ in
       enableZshIntegration = true;
     };
   };
+
+  home.activation.rebuildBatCache = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+    if [ -d "$HOME/.config/bat/themes" ] || [ -d "$HOME/.config/bat/syntaxes" ]; then
+      ${lib.getExe pkgs.bat} cache --build
+    fi
+  '';
 
   home.file.".local/bin/claude" = {
     text = ''
