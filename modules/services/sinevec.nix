@@ -7,8 +7,8 @@
 }:
 let
   cfg = config.sinnix.services.sinevec;
-  inherit (config.sinnix.paths) dataRoot;
-  sinevecDataDir = "${dataRoot}/sinevec";
+  inherit (config.sinnix.paths) dataRoot indicesRoot;
+  sinevecDataDir = "${indicesRoot}/sinevec";
   sinevecStateDir = "${sinevecDataDir}/state";
   sinevecLogDir = "${sinevecDataDir}/logs";
   sinevecPkg = inputs.sinevec.packages.${pkgs.stdenv.hostPlatform.system}.sinevec;
@@ -60,7 +60,7 @@ in
         ];
         RuntimeDirectory = "sinevec";
       };
-      unitConfig.RequiresMountsFor = [ dataRoot ];
+      unitConfig.RequiresMountsFor = [ dataRoot indicesRoot ];
       environment = {
         SINEVEC_DATA_ROOT = dataRoot;
         SINEVEC_STATE_DIR = sinevecStateDir;

@@ -1,14 +1,12 @@
 # Host-specific storage configuration for sinnix-prime
 {
-  pkgs,
   lib,
   config,
   ...
 }:
 let
-  inherit (config.sinnix.paths) realmRoot dataRoot outerRealm;
+  inherit (config.sinnix.paths) realmRoot dataRoot capturesRoot outerRealm;
   username = config.sinnix.user.name;
-  swapFileSizeGiB = 32;
   userCfg = config.users.users.${username} or { };
 	  getAttrOrFallback =
 	    set: attr: fallback:
@@ -21,48 +19,6 @@ let
   groupCfg = lib.attrByPath [ "users" "groups" primaryGroupName ] config { };
   primaryGroupId = builtins.toString (getAttrOrFallback groupCfg "gid" 100);
 
-  prepareSwapfile = pkgs.writeShellApplication {
-    name = "prepare-swapfile";
-    runtimeInputs = [
-      pkgs.btrfs-progs
-      pkgs.coreutils
-      pkgs.e2fsprogs
-      pkgs.util-linux
-    ];
-    text = ''
-      set -euo pipefail
-
-      swap_dir="/swap"
-      swap_file="/swap/swapfile"
-      desired_size=$(( ${toString swapFileSizeGiB} * 1024 * 1024 * 1024 ))
-
-      mkdir -p "$swap_dir"
-      chmod 700 "$swap_dir"
-      chattr +C "$swap_dir" >/dev/null 2>&1 || true
-      btrfs property set -ts "$swap_dir" compression none >/dev/null 2>&1 || true
-
-      create_swap=0
-
-      if [ -e "$swap_file" ]; then
-        current_size=$(stat --printf=%s "$swap_file" 2>/dev/null || echo 0)
-        if [ "$current_size" -ne "$desired_size" ]; then
-          swapoff "$swap_file" >/dev/null 2>&1 || true
-          rm -f "$swap_file"
-          create_swap=1
-        fi
-      else
-        create_swap=1
-      fi
-
-      if [ "$create_swap" -eq 1 ]; then
-        btrfs filesystem mkswapfile --size ${toString swapFileSizeGiB}g "$swap_file"
-        chmod 600 "$swap_file"
-        mkswap "$swap_file" >/dev/null 2>&1
-      else
-        chmod 600 "$swap_file"
-      fi
-    '';
-  };
 in
 {
   services = {
@@ -153,7 +109,7 @@ in
 
   swapDevices = [
     {
-      device = "/swap/swapfile";
+      device = "/dev/nvme1n1p1";
     }
   ];
 
@@ -162,24 +118,6 @@ in
       "d /mnt/pendrv 0755 root root -"
       "d ${realmRoot}/knowledgebase 0755 ${username} users -"
     ];
-
-    services.prepare-swapfile = {
-      description = "Prepare Btrfs swapfile";
-      requiredBy = [ "swap-swapfile.swap" ];
-      before = [
-        "swap-swapfile.swap"
-        "swap.target"
-      ];
-      after = [ "systemd-remount-fs.service" ];
-      unitConfig = {
-        # Avoid sysinit ↔ swap.target ordering cycles by taking explicit deps.
-        DefaultDependencies = false;
-      };
-      serviceConfig = {
-        Type = "oneshot";
-        ExecStart = "${prepareSwapfile}/bin/prepare-swapfile";
-      };
-    };
 
     automounts = [
       {
@@ -194,7 +132,7 @@ in
     mounts = lib.mkAfter (
       [
         {
-          what = "${dataRoot}/syslog/journal";
+          what = "${capturesRoot}/syslog/journal";
           where = "/var/log/journal";
           type = "none";
           options = "bind,x-systemd.requires-mounts-for=${realmRoot}";

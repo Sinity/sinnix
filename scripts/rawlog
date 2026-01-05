@@ -4,9 +4,9 @@ set -euo pipefail
 # Quick append-only logger for knowledgebase raw-log
 # Usage: rawlog [message...]
 
-DEFAULT_REALM_ROOT=${REALM_ROOT:-/realm}
+DEFAULT_REALM_ROOT=${REALM_ROOT:-/realm/project}
 if [ -z "${KB_ROOT:-}" ]; then
-  for candidate in "${DEFAULT_REALM_ROOT}/knowledgebase" "$HOME/knowledgebase"; do
+  for candidate in "${DEFAULT_REALM_ROOT}/knowledgebase" "/realm/knowledgebase" "$HOME/knowledgebase"; do
     if [ -d "$candidate" ]; then
       KB_ROOT="$candidate"
       break

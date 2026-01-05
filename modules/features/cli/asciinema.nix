@@ -16,8 +16,8 @@ in
   config = lib.mkIf cfg.enable {
     home-manager.users.${user} = { config, pkgs, lib, sinnix, ... }:
       let
-        inherit (sinnix.paths) dataRoot;
-        recordingsDir = "${dataRoot}/asciinema_recording";
+        inherit (sinnix.paths) capturesRoot;
+        recordingsDir = "${capturesRoot}/asciinema";
         asciinemaBin = "${pkgs.asciinema_3}/bin/asciinema";
         fallbackShell = "${pkgs.zsh}/bin/zsh";
       in

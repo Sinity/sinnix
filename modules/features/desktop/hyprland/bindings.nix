@@ -6,7 +6,7 @@
 }:
 let
   script = rel: "${sinnix.paths.projectRoot}/scripts/${rel}";
-  screenshotDir = "${sinnix.paths.dataRoot}/screenshot";
+  screenshotDir = "${sinnix.paths.capturesRoot}/screenshot";
 in
 {
   bind = [

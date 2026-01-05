@@ -21,11 +21,18 @@ mkFeatureModule {
 
             log "Starting reboot check..."
 
+            state_dir="''${XDG_STATE_HOME:-$HOME/.local/state}/reboot-notifier"
+            state_file="$state_dir/last-notified"
+            mkdir -p "$state_dir"
+
             booted_kernel=$(readlink /run/booted-system/kernel || echo "unknown")
             current_kernel=$(readlink /run/current-system/kernel || echo "unknown")
+            current_system=$(readlink /run/current-system || echo "unknown")
+            last_notified=$(cat "$state_file" 2>/dev/null || echo "")
 
             log "Booted kernel: $booted_kernel"
             log "Current kernel: $current_kernel"
+            log "Current system: $current_system"
 
             if [[ "$booted_kernel" != "unknown" && "$current_kernel" != "unknown" && "$booted_kernel" != "$current_kernel" ]]; then
               log "Kernel update detected."
@@ -67,6 +74,11 @@ mkFeatureModule {
             fi
 
             if [[ "$needs_reboot" -eq 1 ]]; then
+              if [[ -n "$current_system" && "$current_system" == "$last_notified" ]]; then
+                log "Notification for $current_system already sent; skipping."
+                exit 0
+              fi
+
               log "Reboot required: $reasons"
               ${pkgs.libnotify}/bin/notify-send \
                 --urgency=critical \
@@ -74,8 +86,13 @@ mkFeatureModule {
                 --icon=system-reboot \
                 "Reboot Required" \
                 "$reasons - system may be unstable"
+
+              if [[ "$current_system" != "unknown" ]]; then
+                echo "$current_system" > "$state_file"
+              fi
             else
               log "No reboot needed."
+              rm -f "$state_file"
             fi
           '';
         in
@@ -89,24 +106,12 @@ mkFeatureModule {
               Type = "oneshot";
               ExecStart = "${checkScript}";
             };
-          };
-
-          systemd.user.timers.reboot-notifier = {
-            Unit = {
-              Description = "Periodically check if reboot is needed";
-              After = [ "graphical-session.target" ];
-            };
-            Timer = {
-              OnStartupSec = "30sec";
-              OnUnitActiveSec = "5min";
-              Unit = "reboot-notifier.service";
-            };
-            Install.WantedBy = [ "timers.target" ];
+            Install.WantedBy = [ "default.target" ];
           };
 
           systemd.user.paths.reboot-notifier-watch = {
             Unit.Description = "Watch for system updates";
-            pathConfig = {
+            Path = {
               PathChanged = "/run/current-system";
               Unit = "reboot-notifier.service";
             };

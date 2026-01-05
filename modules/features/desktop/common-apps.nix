@@ -45,7 +45,7 @@ in
           hledger
           llm
           single-file-cli
-          programmer-calculator
+          # programmer-calculator  # Broken with glibc 2.40, temporarily disabled
           bc
           calc
           soundwireserver
@@ -53,11 +53,11 @@ in
           imgur-screenshot
           usbview
           strace
-          ltrace
+          # ltrace  # Broken build, temporarily disabled
           nvitop
           cage
           wayland-protocols
-          vkmark
+          # vkmark  # Broken build, temporarily disabled
           dtach
           lnch
           at
@@ -69,6 +69,33 @@ in
           libnotify
           wlr-randr
         ];
+
+        home.file = {
+          ".local/bin/imgur-screenshot" = {
+            text = ''
+              #!/usr/bin/env bash
+              set -euo pipefail
+
+              NO_NOTIFY_DIR="$HOME/.local/lib/imgur-screenshot/no-notify"
+              if [ -d "$NO_NOTIFY_DIR" ]; then
+                export PATH="$NO_NOTIFY_DIR:$PATH"
+              fi
+
+              exec "${lib.getExe pkgs.imgur-screenshot}" "$@"
+            '';
+            executable = true;
+          };
+          ".local/lib/imgur-screenshot/no-notify/notify-send" = {
+            text = ''
+              #!/usr/bin/env bash
+              set -euo pipefail
+
+              # Silence notifications for imgur-screenshot to avoid DBus errors.
+              exit 0
+            '';
+            executable = true;
+          };
+        };
 
         gtk = {
           enable = true;
@@ -101,6 +128,11 @@ in
 
         xdg = {
           configFile = {
+            "imgur-screenshot/settings.conf".text = ''
+              OPEN="false"
+              EDIT="false"
+              CHECK_UPDATE="false"
+            '';
             "yazi/opener.toml" = {
               source = mkDotsRepoLink "/yazi/opener.toml";
               force = true;

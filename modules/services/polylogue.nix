@@ -14,6 +14,7 @@ let
   inboxRoot = "${chatlogRoot}/raw/inbox";
   chatgptRoot = "${chatlogRoot}/raw/chatgpt";
   claudeRoot = "${chatlogRoot}/raw/claude";
+  geminiLocalRoot = "${chatlogRoot}/raw/gemini_ai_studio";
   archiveRoot = "${chatlogRoot}/archive";
   renderRoot = "${chatlogRoot}/processed/markdown";
   codexRoot = "${userHome}/.codex/sessions";
@@ -53,6 +54,7 @@ let
     claudeCodeRoot
     chatgptRoot
     claudeRoot
+    geminiLocalRoot
   ];
 
   tmpfilesRules =
@@ -83,6 +85,10 @@ let
       {
         name = "claude";
         path = claudeRoot;
+      }
+      {
+        name = "gemini-local";
+        path = geminiLocalRoot;
       }
       {
         name = "gemini";

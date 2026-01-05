@@ -24,6 +24,8 @@ source "$CONFIG_FILE"
 : "${CLASS:?toggle-scratch: CLASS not set in $CONFIG_FILE}"
 WORKSPACE=${WORKSPACE:-${SPECIAL_PREFIX}_${NAME}}
 CLASS_PATTERN=${CLASS_PATTERN:-}
+WIDTH_RATIO=${WIDTH_RATIO:-}
+HEIGHT_RATIO=${HEIGHT_RATIO:-}
 if ! declare -p COMMAND >/dev/null 2>&1; then
   echo "toggle-scratch: COMMAND array not set in $CONFIG_FILE" >&2
   exit 1
@@ -89,6 +91,8 @@ wait_for_window() {
   return 1
 }
 
+LAST_WINDOW_ADDRESS=""
+
 center_and_focus_window() {
   local regex="$1"
   local clients address cx cy
@@ -117,11 +121,47 @@ PY
 )
 EOF
   if [ -n "${address:-}" ]; then
+    LAST_WINDOW_ADDRESS="$address"
     hyprctl dispatch focuswindow "$address" >/dev/null 2>&1 || true
     if [ -n "${cx:-}" ] && [ -n "${cy:-}" ]; then
       hyprctl dispatch movecursor "$cx" "$cy" >/dev/null 2>&1 || true
     fi
   fi
+}
+
+resize_window_if_needed() {
+  local width_ratio height_ratio address monitors dims width height
+  width_ratio=${WIDTH_RATIO:-}
+  height_ratio=${HEIGHT_RATIO:-}
+  address=${LAST_WINDOW_ADDRESS:-}
+  if [ -z "$width_ratio" ] || [ -z "$height_ratio" ] || [ -z "$address" ]; then
+    return 0
+  fi
+  monitors=$(hyprctl -j monitors 2>/dev/null) || return 0
+  read -r width height <<EOF || return 0
+$(HYPR_MONITORS="$monitors" python3 - "$width_ratio" "$height_ratio" <<'PY'
+import json, os, sys
+try:
+    monitors = json.loads(os.environ.get("HYPR_MONITORS") or "[]")
+except json.JSONDecodeError:
+    sys.exit(0)
+try:
+    ratio_w = float(sys.argv[1])
+    ratio_h = float(sys.argv[2])
+except Exception:
+    sys.exit(0)
+focused = next((m for m in monitors if m.get("focused")), None)
+if not focused:
+    sys.exit(0)
+width_px = focused.get("width") or 0
+height_px = focused.get("height") or 0
+width = max(1, int(width_px * ratio_w))
+height = max(1, int(height_px * ratio_h))
+print(width, height)
+PY
+)
+EOF
+  hyprctl dispatch resizewindowpixel exact "$width" "${height},address:${address}" >/dev/null 2>&1 || true
 }
 
 if ! has_window; then
@@ -133,5 +173,7 @@ current_ws=$(hyprctl -j activeworkspace 2>/dev/null | python3 -c 'import json,sy
 hyprctl dispatch togglespecialworkspace "$WORKSPACE" >/dev/null
 if [ "special:${WORKSPACE}" != "${current_ws}" ]; then
   pattern=${CLASS_PATTERN:-^${CLASS}$}
+  center_and_focus_window "$pattern"
+  resize_window_if_needed
   center_and_focus_window "$pattern"
 fi

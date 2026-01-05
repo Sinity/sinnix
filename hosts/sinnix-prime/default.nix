@@ -10,6 +10,8 @@
   networking.hostName = "sinnix-prime";
 
   sinnix.machine.isDesktop = true;
+
+  sinnix.paths.projectRoot = "/realm/project/sinnix";
   
   sinnix.bundles.desktop.enable = true;
   sinnix.bundles.dev.enable = true;

@@ -6,9 +6,9 @@
 }:
 let
   cfg = config.sinnix.services.asciinema;
-  inherit (config.sinnix.paths) dataRoot;
+  inherit (config.sinnix.paths) capturesRoot;
   username = config.sinnix.user.name;
-  recordingsDir = "${dataRoot}/asciinema_recording";
+  recordingsDir = "${capturesRoot}/asciinema";
 in
 {
   options.sinnix.services.asciinema = {

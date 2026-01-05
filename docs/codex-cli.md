@@ -11,8 +11,8 @@ merge changes back.
 The managed link is created automatically, but if you ever need to repair it:
 
 ```
-ln -sfv /realm/sinnix/dots/codex/config.toml ~/.codex/config.toml
-ln -sfn /realm/sinnix/dots/codex/skills ~/.codex/skills
+ln -sfv /realm/project/sinnix/dots/codex/config.toml ~/.codex/config.toml
+ln -sfn /realm/project/sinnix/dots/codex/skills ~/.codex/skills
 ```
 
 The template contains:

@@ -12,81 +12,74 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    nixpkgs-patched = {
-      url = "path:./flake/nixpkgs-patched";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
     nur = {
       url = "github:nix-community/NUR";
-      inputs.nixpkgs.follows = "nixpkgs-patched";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
 
     flake-parts = {
       url = "github:hercules-ci/flake-parts";
-      inputs.nixpkgs-lib.follows = "nixpkgs-patched";
+      inputs.nixpkgs-lib.follows = "nixpkgs";
     };
 
     # User environment management
     home-manager.url = "github:nix-community/home-manager";
-    home-manager.inputs.nixpkgs.follows = "nixpkgs-patched";
+    home-manager.inputs.nixpkgs.follows = "nixpkgs";
 
     # Secret management with age encryption
     agenix.url = "github:ryantm/agenix";
-    agenix.inputs.nixpkgs.follows = "nixpkgs-patched";
+    agenix.inputs.nixpkgs.follows = "nixpkgs";
 
     disko = {
       url = "github:nix-community/disko";
-      inputs.nixpkgs.follows = "nixpkgs-patched";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
 
     # Development tools
-    devenv.url = "github:cachix/devenv";
-    devenv.inputs.nixpkgs.follows = "nixpkgs-patched";
+    devenv.url = "github:cachix/devenv/85b34019389c192e10e3508745c15b98060216f5";
+    devenv.inputs.nixpkgs.follows = "nixpkgs";
 
     # Custom tools and integrations
     intercept-bounce.url = "github:sinity/intercept-bounce";
-    intercept-bounce.inputs.nixpkgs.follows = "nixpkgs-patched";
+    intercept-bounce.inputs.nixpkgs.follows = "nixpkgs";
 
     scribe-tap = {
       url = "github:Sinity/scribe-tap";
-      inputs.nixpkgs.follows = "nixpkgs-patched";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
 
     polylogue = {
       url = "github:Sinity/polylogue";
-      inputs.nixpkgs.follows = "nixpkgs-patched";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
 
     sinevec = {
       url = "github:Sinity/sinevec";
-      inputs.nixpkgs.follows = "nixpkgs-patched";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
 
     # Private Sinex repository; intentionally expects SSH access to the upstream
     # repository so evaluation fails cleanly when the key is missing.
     sinex = {
       url = "git+ssh://git@github.com/Sinity/sinex?ref=master";
-      inputs.nixpkgs.follows = "nixpkgs-patched";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
 
     # System-wide theming
     stylix.url = "github:danth/stylix";
-    stylix.inputs.nixpkgs.follows = "nixpkgs-patched";
+    stylix.inputs.nixpkgs.follows = "nixpkgs";
 
     # VSCode extensions overlay (community-maintained)
     nix-vscode-extensions.url = "github:nix-community/nix-vscode-extensions";
-    nix-vscode-extensions.inputs.nixpkgs.follows = "nixpkgs-patched";
+    nix-vscode-extensions.inputs.nixpkgs.follows = "nixpkgs";
 
     # Modern Qt/QML based desktop shell toolkit
     quickshell = {
       url = "git+https://git.outfoxxed.me/outfoxxed/quickshell";
-      inputs.nixpkgs.follows = "nixpkgs-patched";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    nix-ai-tools = {
-      url = "github:numtide/nix-ai-tools";
-      inputs.nixpkgs.follows = "nixpkgs-patched";
-    };
+    nix-ai-tools.url = "github:numtide/nix-ai-tools";
 
   };
 

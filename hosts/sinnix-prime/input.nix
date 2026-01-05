@@ -7,7 +7,7 @@
   ...
 }:
 let
-  keylogRoot = "${config.sinnix.paths.dataRoot}/keylog";
+  keylogRoot = "${config.sinnix.paths.capturesRoot}/keylog";
   username = config.sinnix.user.name;
   interceptTools = pkgs.interception-tools;
   capsPlugin = pkgs.interception-tools-plugins.caps2esc;

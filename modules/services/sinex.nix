@@ -7,7 +7,7 @@
 }:
 let
   cfg = config.sinnix.services.sinex;
-  inherit (config.sinnix.paths) dataRoot realmRoot;
+  inherit (config.sinnix.paths) indicesRoot realmRoot;
   dbProvision = cfg.enable || cfg.provisionDatabase;
   sinexPkgs = inputs.sinex.packages.${pkgs.stdenv.hostPlatform.system};
 in
@@ -48,7 +48,7 @@ in
         storage.dlq.enable = true;
         shell.asciinema.autoRecord = true;
 
-        stateRoot = "${dataRoot}/sinex";
+        stateRoot = "${indicesRoot}/sinex";
         satellites.filesystem.watchPaths = [ realmRoot ];
         # satellites.defaults.instances = 2; # I want to test whether these mechanisms work first
       };

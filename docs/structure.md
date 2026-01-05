@@ -55,8 +55,8 @@ the host or a bundle so ownership stays with that module.
 
 ## Sinex Service
 
-- `modules/services/sinex.nix` now fixes a handful of local defaults (data root
-  under `/realm/data/sinex`, desktop filesystem watch roots) and supports
+- `modules/services/sinex.nix` now fixes a handful of local defaults (state root
+  under `/realm/data/indices/sinex`, desktop filesystem watch roots) and supports
   `sinnix.services.sinex.provisionDatabase` so the PostgreSQL setup can be
   kept ready without enabling the full service.
 - The host still chooses when to enable the service; toggling it on prepares

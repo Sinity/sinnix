@@ -44,10 +44,25 @@ in
     "float, size monitor_w*0.40 monitor_h*0.45, move monitor_w*0.02 monitor_h*0.55, opacity 0.8 0.8, class:^(blueman-manager)$"
     "opacity 0.8 0.8, class:^(pwvucontrol)$"
 
-    "float, center, size monitor_w*0.85 monitor_h*0.85, workspace special:scratch_term silent, class:^(scratchpad-terminal)$"
-    "float, center, size monitor_w*0.80 monitor_h*0.80, workspace special:scratch_notes silent, class:^(notes-scratch)$"
-    "float, center, size monitor_w*0.70 monitor_h*0.40, workspace special:scratch_rawlog silent, class:^(rawlog-capture)$"
-    "float, center, size monitor_w*0.85 monitor_h*0.85, workspace special:scratch_spotify silent, class:^([Ss]potify)$"
+    "workspace special:scratch_term silent, class:^(scratchpad-terminal)$"
+    "float, class:^(scratchpad-terminal)$"
+    "center, class:^(scratchpad-terminal)$"
+    "size monitor_w*0.75 monitor_h*0.55, class:^(scratchpad-terminal)$"
+
+    "workspace special:scratch_notes silent, class:^(notes-scratch)$"
+    "float, class:^(notes-scratch)$"
+    "center, class:^(notes-scratch)$"
+    "size monitor_w*0.70 monitor_h*0.50, class:^(notes-scratch)$"
+
+    "workspace special:scratch_rawlog silent, class:^(rawlog-capture)$"
+    "float, class:^(rawlog-capture)$"
+    "center, class:^(rawlog-capture)$"
+    "size monitor_w*0.72 monitor_h*0.48, class:^(rawlog-capture)$"
+
+    "workspace special:scratch_spotify silent, class:^([Ss]potify)$"
+    "float, class:^([Ss]potify)$"
+    "center, class:^([Ss]potify)$"
+    "size monitor_w*0.85 monitor_h*0.85, class:^([Ss]potify)$"
 
     "float, center, size 2000 1000, class:(clipse)"
 

@@ -7,8 +7,8 @@
 let
   cfg = config.sinnix.services.qdrant;
   username = config.sinnix.user.name;
-  inherit (config.sinnix.paths) dataRoot;
-  qdrantDataDir = "${dataRoot}/qdrant";
+  inherit (config.sinnix.paths) indicesRoot;
+  qdrantDataDir = "${indicesRoot}/qdrant";
 in
 {
   options.sinnix.services.qdrant = {

@@ -96,7 +96,7 @@ in
               pikchr
               pipes
               plantuml
-              ploticus
+              # ploticus  # Broken build, temporarily disabled
               powertop
               python312Packages.speedtest-cli
               rt-tests

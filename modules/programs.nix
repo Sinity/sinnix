@@ -51,7 +51,7 @@ in
           freeSwapThreshold = 5;
           reportInterval = 5;
           extraArgs = [
-            "-g"
+            # Killing whole process groups nuked the entire Hyprland session when Chrome was the victim.
             "-p"
             "--prefer"
             "(^|/)(java|chromium|google-chrome(-stable)?)$"

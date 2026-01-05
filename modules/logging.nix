@@ -5,8 +5,8 @@
   ...
 }:
 let
-  inherit (config.sinnix.paths) dataRoot;
-  journaldBaseDir = "${dataRoot}/syslog";
+  inherit (config.sinnix.paths) capturesRoot;
+  journaldBaseDir = "${capturesRoot}/syslog";
   bootMetricsDir = "${journaldBaseDir}/boot-metrics";
   username = config.sinnix.user.name;
   captureBootMetrics = pkgs.writeShellApplication {

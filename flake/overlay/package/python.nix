@@ -5,6 +5,12 @@ let
     aggdraw = super.aggdraw.overridePythonAttrs (_old: {
       doCheck = false;
     });
+    # Fix llm logs fragment filtering when prompt/system fragments are combined.
+    llm = super.llm.overridePythonAttrs (old: {
+      patches = (old.patches or []) ++ [
+        ./patches/llm-fix-logs-fragments-filter.patch
+      ];
+    });
   };
   composeOverrides = prev.lib.composeExtensions (prev.python3.packageOverrides or (_self: _super: { })
   ) pythonOverrides;

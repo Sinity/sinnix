@@ -4,7 +4,6 @@ let
 in
 [
   (mkOverlay ./lowdown.nix)
-  (mkOverlay ./bat.nix)
   (mkOverlay ./codex.nix)
   (mkOverlay ./diffsitter.nix)
   (mkOverlay ./chromium.nix)
@@ -13,6 +12,6 @@ in
   (mkOverlay ./pwvucontrol.nix)
   (mkOverlay ./re2.nix)
   (mkOverlay ./python.nix)
+  (mkOverlay ./uwsm.nix)
   (mkOverlay ./xdg-desktop-portal-hyprland.nix)
-  (mkOverlay ./yt-dlp.nix)
 ]

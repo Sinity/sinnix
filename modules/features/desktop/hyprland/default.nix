@@ -8,23 +8,23 @@ let
   cfg = config.sinnix.features.desktop.hyprland;
   user = config.sinnix.user.name;
   hyprlandPkg = config.programs.hyprland.package or pkgs.hyprland;
-  
+
   # Helpers for home-manager config
   repoRoot = config.sinnix.paths.projectRoot;
   scriptPath = rel: "${repoRoot}/scripts/${rel}";
-  
+
   # Helper to import sub-modules which might need args
   bindings = import ./bindings.nix { inherit pkgs; sinnix = config.sinnix; };
-  rules = import ./rules.nix;
-  
+  rules = import ./rules.nix { inherit lib hyprlandPkg; };
+
   # Lock configuration needs to be adapted since it was a HM module
   # We will inline or import it within the HM block
-  
+
   mkLinkCmd = link: ''
     ln -sf ${scriptPath link.source} "$HOME/.local/bin/${link.target}"
     chmod +x "$HOME/.local/bin/${link.target}"
   '';
-  
+
   scriptLinks = [
     { target = "kb-capture"; source = "kb-capture"; }
     { target = "rawlog"; source = "rawlog"; }
@@ -51,7 +51,7 @@ in
       package = lib.mkDefault pkgs.hyprland;
       portalPackage = lib.mkDefault pkgs.xdg-desktop-portal-hyprland;
     };
-    
+
     # -------------------------------------------------------------------------
     # User Level Configuration (Home Manager)
     # -------------------------------------------------------------------------
@@ -66,7 +66,7 @@ in
           fi
         fi
       '';
-      
+
       wayland.windowManager.hyprland = {
         enable = true;
         package = hyprlandPkg;
@@ -153,6 +153,7 @@ in
 
           inherit (bindings) bind bindl bindm;
           inherit (rules) windowrule;
+          windowrulev2 = rules.windowrulev2 or [ ];
         };
       };
 
@@ -161,17 +162,23 @@ in
           COMMAND=(${pkgs.kitty}/bin/kitty --class scratchpad-terminal)
           CLASS="scratchpad-terminal"
           WORKSPACE="scratch_term"
+          WIDTH_RATIO=0.75
+          HEIGHT_RATIO=0.55
         '';
         ".config/scratchpads/notes.conf".text = ''
-          COMMAND=(${pkgs.kitty}/bin/kitty --class notes-scratch -d /realm/knowledgebase ${pkgs.neovim}/bin/nvim)
+          COMMAND=(${pkgs.kitty}/bin/kitty --class notes-scratch -d /realm/project/knowledgebase ${pkgs.neovim}/bin/nvim)
           CLASS="notes-scratch"
           WORKSPACE="scratch_notes"
+          WIDTH_RATIO=0.70
+          HEIGHT_RATIO=0.50
         '';
         ".config/scratchpads/rawlog.conf".text = ''
           COMMAND=(${pkgs.kitty}/bin/kitty --class rawlog-capture --instance-group rawlog --single-instance --override font_size=22 sh -lc "$HOME/.local/bin/rawlog-loop")
           CLASS="rawlog-capture"
           WORKSPACE="scratch_rawlog"
           WAIT_FOR_WINDOW_TRIES=50
+          WIDTH_RATIO=0.72
+          HEIGHT_RATIO=0.48
         '';
         ".config/scratchpads/spotify.conf".text = ''
           COMMAND=(spotify)
@@ -193,8 +200,10 @@ in
         slurp
         grimblast
         wl-screenrec
+        gum
+        jq
       ];
-      
+
       systemd.user.services.hyprpaper.Unit.X-Restart-Triggers = lib.mkForce [ ];
     };
   };

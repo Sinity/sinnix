@@ -20,7 +20,7 @@ into `~/.local/bin` automatically.
 
 ## Knowledgebase logging
 
-- `rawlog`* – append a timestamped entry to `/realm/knowledgebase/logs.raw-log.md`.
+- `rawlog`* – append a timestamped entry to `/realm/project/knowledgebase/logs.raw-log.md`.
 - `rawlog-capture`/`rawlog-loop`* – gum-powered TUI logger that keeps the kitty
   scratchpad hot.
 - `kb-capture`* – capture clipboard/text snippets into the knowledgebase.

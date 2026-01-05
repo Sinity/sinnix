@@ -7,7 +7,7 @@
 let
   cfg = config.sinnix.features.desktop.media;
   user = config.sinnix.user.name;
-  inherit (config.sinnix.paths) dataRoot;
+  inherit (config.sinnix.paths) capturesRoot;
 
   imvWithExtras =
     let
@@ -40,7 +40,7 @@ in
       home = {
         sessionVariables = {
           MEDIA_DOMAIN = "v0.3";
-          MPV_SCREENSHOT_DIR = "${dataRoot}/screenshot/mpv";
+          MPV_SCREENSHOT_DIR = "${capturesRoot}/screenshot/mpv";
         };
 
         packages = with pkgs; [
@@ -89,7 +89,7 @@ in
 
           screenshot-format = "png";
           screenshot-png-compression = 9;
-          screenshot-template = "${dataRoot}/screenshot/mpv/%F-%P-%n";
+          screenshot-template = "${capturesRoot}/screenshot/mpv/%F-%P-%n";
 
           save-position-on-quit = true;
           resume-playback = "yes";
