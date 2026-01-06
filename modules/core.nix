@@ -35,8 +35,8 @@ in
           "nix-gaming.cachix.org-1:nbjlureqMbRAxR1gJ/f3hxemL9svXaZF/Ees8vCUUs4="
         ];
         netrc-file = "/etc/nix/netrc";
-        max-jobs = lib.mkDefault 4;
-        cores = 0;
+        max-jobs = lib.mkDefault 2;
+        cores = 8;
         use-cgroups = true;
         allowed-users = [
           "root"
@@ -172,10 +172,16 @@ in
         Description = "Resource limits for nix-daemon builds";
         CPUWeight = 40;
         IOWeight = 40;
-        MemoryHigh = "28G";
-        MemoryMax = "30G";
+        MemoryHigh = "20G";
+        MemoryMax = "24G";
         ManagedOOMMemoryPressure = "kill";
-        ManagedOOMMemoryPressureLimit = "85%";
+        ManagedOOMMemoryPressureLimit = "80%";
+      };
+
+      slices."user.slice".sliceConfig = {
+        Description = "High priority for user session (UI, terminals)";
+        CPUWeight = 500;
+        IOWeight = 500;
       };
 
       services.nix-daemon.serviceConfig = {

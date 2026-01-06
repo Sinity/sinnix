@@ -40,6 +40,7 @@ let
     POLYLOGUE_TOKEN_PATH = tokenPath;
     POLYLOGUE_DRIVE_RETRIES = toString cfg.drive.retries;
     POLYLOGUE_DRIVE_RETRY_BASE = toString cfg.drive.retryBase;
+    QDRANT_URL = cfg.qdrant.url;
   };
 
   dataDirs = [
@@ -113,6 +114,13 @@ in
         default = 0.5;
         description = "Base delay (seconds) for Drive retry backoff.";
       };
+    }
+    qdrant = {
+      url = mkOption {
+        type = types.str;
+        default = "http://localhost:6333";
+        description = "Qdrant server URL.";
+      };
     };
   };
 
@@ -163,6 +171,7 @@ EOF
       POLYLOGUE_RENDER_ROOT = renderRoot;
       POLYLOGUE_DRIVE_RETRIES = toString cfg.drive.retries;
       POLYLOGUE_DRIVE_RETRY_BASE = toString cfg.drive.retryBase;
+      QDRANT_URL = cfg.qdrant.url;
     };
 
     environment.systemPackages = lib.mkAfter [ pkgs.polylogue ];
