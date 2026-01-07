@@ -32,6 +32,35 @@ in
         mcpSqliteBin = pkgs.writeShellScriptBin "mcp-sqlite" ''
           exec ${mcpPython}/bin/python3 ${repoRoot}/scripts/mcp-sqlite.py "$@"
         '';
+        mcpContext7Bin = pkgs.writeShellScriptBin "mcp-context7" ''
+          set -euo pipefail
+
+          if [ -z "''${CONTEXT7_API_KEY:-}" ]; then
+            echo "CONTEXT7_API_KEY is not set" >&2
+            exit 1
+          fi
+
+          exec npx -y @upstash/context7-mcp@latest --api-key "$CONTEXT7_API_KEY"
+        '';
+        mcpFirecrawlBin = pkgs.writeShellScriptBin "mcp-firecrawl" ''
+          set -euo pipefail
+
+          api_key="''${FIRECRAWL_API_KEY:-}"
+          if [ -z "$api_key" ] && [ -r /run/agenix/firecrawl-api-key ]; then
+            api_key="$(< /run/agenix/firecrawl-api-key)"
+          fi
+
+          if [ -z "$api_key" ]; then
+            echo "FIRECRAWL_API_KEY not set and /run/agenix/firecrawl-api-key missing" >&2
+            exit 1
+          fi
+
+          exec env FIRECRAWL_API_KEY="$api_key" npx -y firecrawl-mcp@latest
+        '';
+        mcpPlaywrightBin = pkgs.writeShellScriptBin "mcp-playwright" ''
+          set -euo pipefail
+          exec npx -y @playwright/mcp@latest
+        '';
         mkDotsRepoLink = rel: config.lib.file.mkOutOfStoreSymlink (dotsRepoPath + "/" + rel);
       in
       {
@@ -112,7 +141,9 @@ in
               ttyper
               polylogue
               uv
-              visidata
+              # visidata # Broken due to arrow-cpp build failure
+              yt-dlp
+              gallery-dl
               zed-editor
               vulkan-tools
               vulkan-validation-layers
@@ -124,6 +155,9 @@ in
               mcpQdrantBin
               mcpPostgresBin
               mcpSqliteBin
+              mcpContext7Bin
+              mcpFirecrawlBin
+              mcpPlaywrightBin
             ]
           );
 
@@ -148,6 +182,10 @@ in
         };
 
         xdg.configFile = {
+          "ai" = {
+            source = mkDotsRepoLink "ai";
+            recursive = true;
+          };
           "opencode/opencode.json".source = mkDotsRepoLink "opencode/opencode.json";
 
           "sqlitebrowser/sqlitebrowser.conf".source = mkDotsRepoLink "sqlitebrowser/sqlitebrowser.conf";
@@ -167,9 +205,14 @@ in
             force = true;
             recursive = true;
           };
+          ".local/bin/ai".source =
+            config.lib.file.mkOutOfStoreSymlink (repoRoot + "/scripts/ai");
           ".local/bin/mcp-qdrant".source = "${mcpQdrantBin}/bin/mcp-qdrant";
           ".local/bin/mcp-postgres".source = "${mcpPostgresBin}/bin/mcp-postgres";
           ".local/bin/mcp-sqlite".source = "${mcpSqliteBin}/bin/mcp-sqlite";
+          ".local/bin/mcp-context7".source = "${mcpContext7Bin}/bin/mcp-context7";
+          ".local/bin/mcp-firecrawl".source = "${mcpFirecrawlBin}/bin/mcp-firecrawl";
+          ".local/bin/mcp-playwright".source = "${mcpPlaywrightBin}/bin/mcp-playwright";
           ".gemini/settings.json" = {
             source = mkDotsRepoLink "gemini/settings.json";
             force = true;

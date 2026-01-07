@@ -8,33 +8,30 @@
 		},
 		"playwright": {
 			"type": "stdio",
-			"command": "npx",
-			"args": [
-				"@playwright/mcp@latest"
-			],
+			"command": "/home/sinity/.local/bin/mcp-playwright",
+			"args": [],
 			"gallery": true
 		},
 		"context7": {
 			"type": "stdio",
-			"command": "bash",
-			"args": [
-				"-lc",
-				"exec npx -y @upstash/context7-mcp@latest --api-key \"$CONTEXT7_API_KEY\""
-			],
+			"command": "/home/sinity/.local/bin/mcp-context7",
+			"args": [],
 			"gallery": true
 		},
 		"firecrawl": {
 			"type": "stdio",
-			"command": "bash",
-			"args": [
-				"-lc",
-				"exec env FIRECRAWL_API_KEY=\"$(< /run/agenix/firecrawl-api-key)\" npx -y firecrawl-mcp@latest"
-			],
+			"command": "/home/sinity/.local/bin/mcp-firecrawl",
+			"args": [],
 			"gallery": true
 		},
 		"postgres-local": {
 			"type": "stdio",
 			"command": "/home/sinity/.local/bin/mcp-postgres",
+			"gallery": false
+		},
+		"qdrant": {
+			"type": "stdio",
+			"command": "/home/sinity/.local/bin/mcp-qdrant",
 			"gallery": false
 		},
 		"Parallel Search MCP": {

@@ -1,0 +1,99 @@
+# Custom Dark 256-color Theme for Taskwarrior
+# Designed for modern terminal emulators with 256-color support
+
+# General Color Rules
+rule.precedence.color=deleted,completed,active,keyword.,tag.,project.,overdue,scheduled,due.today,due,blocked,blocking,recurring,tagged,uda.
+
+# Color Palette
+color.label=
+color.label.sort=
+color.alternate=on color236
+color.header=color4
+color.footnote=color6
+color.warning=color0 on color226
+color.error=white on color9
+color.debug=color6
+
+# Task State Colors
+color.completed=color245
+color.deleted=color240
+color.active=color255 on color237
+color.recurring=color4
+color.scheduled=on color237
+color.until=color235 on color245
+color.blocked=white on color8
+color.blocking=white on color9
+
+# Due Date Colors
+color.due.today=color15 on color202
+color.due=color1
+color.overdue=color9
+
+# Tag Colors
+color.tagged=color14
+color.tag.next=color4
+color.tag.inbox=color11
+color.tag.waiting=color8
+color.tag.someday=color245
+color.tag.blocking=color9
+color.tag.blocked=color240
+color.tag.work=color12
+color.tag.home=color10
+color.tag.errands=color13
+color.tag.online=color14
+color.tag.coding=color39
+color.tag.writing=color13
+color.tag.learning=color11
+color.tag.review=color208
+
+# Project Colors
+color.project.none=
+color.project.work=color12
+color.project.home=color10
+color.project.personal=color13
+color.project.dev=color39
+
+# UDA Colors
+color.uda.priority.H=color255 on color52
+color.uda.priority.M=color250 on color17
+color.uda.priority.L=
+color.uda.energy.high=color10
+color.uda.energy.medium=color11
+color.uda.energy.low=color8
+color.uda.impact.critical=bold color9
+color.uda.impact.high=color202
+color.uda.impact.medium=color11
+color.uda.impact.low=color8
+color.uda.complexity.complex=color9
+color.uda.complexity.moderate=color11
+color.uda.complexity.simple=color10
+color.uda.complexity.trivial=color14
+
+# Report Colors
+color.burndown.done=color0 on color6
+color.burndown.pending=color0 on color1
+color.burndown.started=color0 on color3
+color.history.add=color0 on color1
+color.history.delete=color0 on color3
+color.history.done=color0 on color6
+color.summary.background=white on color0
+color.summary.bar=black on color6
+
+# Calendar Colors
+color.calendar.due=color0 on color1
+color.calendar.due.today=color0 on color9
+color.calendar.holiday=color0 on color11
+color.calendar.overdue=color0 on color9
+color.calendar.today=color0 on color4
+color.calendar.weekend=on color235
+color.calendar.weeknumber=color4
+
+# Sync Colors
+color.sync.added=color14
+color.sync.changed=color9
+color.sync.rejected=color13
+
+# Urgency Colors (used in urgency column)
+color.uda.urgency.high=bold color9
+color.uda.urgency.medium=color11
+color.uda.urgency.low=color8

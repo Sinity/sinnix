@@ -12,18 +12,18 @@
   sinnix.machine.isDesktop = true;
 
   sinnix.paths.projectRoot = "/realm/project/sinnix";
-  
+
   sinnix.bundles.desktop.enable = true;
   sinnix.bundles.dev.enable = true;
-  
+
   sinnix.features.dev.vscode.enable = true;
   sinnix.features.dev.zed.enable = true;
   sinnix.features.cli.asciinema.enable = true;
 
   sinnix.services = {
     transmission.enable = true;
-    qdrant.enable = true;
-    sinevec.enable = true;
+    qdrant.enable = false;
+    sinevec.enable = false;
     asciinema.enable = true;
     polylogue.enable = true;
     sinex = {

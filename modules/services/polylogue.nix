@@ -1,6 +1,16 @@
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 let
-  inherit (lib) mkEnableOption mkIf mkOption types;
+  inherit (lib)
+    mkEnableOption
+    mkIf
+    mkOption
+    types
+    ;
   cfg = config.sinnix.services.polylogue;
   user = config.sinnix.user.name;
   userGroup = config.users.users.${user}.group or user;
@@ -87,10 +97,7 @@ let
         name = "claude";
         path = claudeRoot;
       }
-      {
-        name = "gemini-local";
-        path = geminiLocalRoot;
-      }
+
       {
         name = "gemini";
         folder = "Google AI Studio";
@@ -98,11 +105,26 @@ let
     ];
   };
 
-  runArgs = [ "--plain" "run" ];
+  runArgs = [
+    "--plain"
+    "run"
+  ];
 in
 {
   options.sinnix.services.polylogue = {
     enable = mkEnableOption "Polylogue ingestion pipeline";
+    server = {
+      enable = mkOption {
+        type = types.bool;
+        default = true;
+        description = "Enable Polylogue Semantic API server.";
+      };
+      port = mkOption {
+        type = types.int;
+        default = 8000;
+        description = "Port to bind.";
+      };
+    };
     drive = {
       retries = mkOption {
         type = types.int;
@@ -114,7 +136,7 @@ in
         default = 0.5;
         description = "Base delay (seconds) for Drive retry backoff.";
       };
-    }
+    };
     qdrant = {
       url = mkOption {
         type = types.str;
@@ -125,16 +147,21 @@ in
   };
 
   config = mkIf cfg.enable {
-    system.activationScripts.polylogueConfig = ''
-      ${lib.concatStringsSep "\n" (map (dir: "install -d -m 0755 -o ${user} -g ${userGroup} ${lib.escapeShellArg dir}") dataDirs)}
-      install -d -m 0700 -o ${user} -g ${userGroup} ${lib.escapeShellArg configRoot}
-      install -d -m 0700 -o ${user} -g ${userGroup} ${lib.escapeShellArg xdgStateHome}
-      install -d -m 0700 -o ${user} -g ${userGroup} ${lib.escapeShellArg stateAppRoot}
-      cat > ${configPath} <<'EOF'
-${configJson}
-EOF
-      chown ${user}:${userGroup} ${configPath}
-      chown -R ${user}:${userGroup} ${lib.escapeShellArg stateAppRoot}
+    system.activationScripts.polylogueConfig = lib.stringAfter [ "etc" "users" "groups" ] ''
+            ${lib.concatStringsSep "\n" (
+              map (dir: "install -d -m 0755 -o ${user} -g ${userGroup} ${lib.escapeShellArg dir}") dataDirs
+            )}
+            install -d -m 0700 -o ${user} -g ${userGroup} ${lib.escapeShellArg configRoot}
+            install -d -m 0700 -o ${user} -g ${userGroup} ${lib.escapeShellArg xdgStateHome}
+            install -d -m 0700 -o ${user} -g ${userGroup} ${lib.escapeShellArg stateAppRoot}
+            
+            # Write config atomically
+            cat > ${configPath}.tmp <<'EOF'
+      ${configJson}
+      EOF
+            mv ${configPath}.tmp ${configPath}
+            chown ${user}:${userGroup} ${configPath}
+            chown -R ${user}:${userGroup} ${lib.escapeShellArg stateAppRoot}
     '';
 
     systemd.tmpfiles.rules = tmpfilesRules;
@@ -150,6 +177,22 @@ EOF
         User = user;
         WorkingDirectory = chatlogRoot;
         ExecStart = lib.escapeShellArgs ([ polylogueBin ] ++ runArgs);
+      };
+    };
+
+    systemd.services.polylogue-serve = mkIf cfg.server.enable {
+      description = "Polylogue Semantic API Server";
+      after = [ "network-online.target" ];
+      wants = [ "network-online.target" ];
+      unitConfig.RequiresMountsFor = [ chatlogRoot ];
+      environment = envVars;
+      serviceConfig = {
+        Type = "simple";
+        User = user;
+        WorkingDirectory = chatlogRoot;
+        ExecStart = "${polylogueBin} serve --host 127.0.0.1 --port ${toString cfg.server.port}";
+        Restart = "on-failure";
+        RestartSec = "5s";
       };
     };
 

@@ -1,0 +1,247 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  printf "%s\n" \
+    "ai - prompt and agent picker" \
+    "" \
+    "Usage:" \
+    "  ai list [prompts|agents|instructions]" \
+    "  ai show <type> <name>" \
+    "  ai pick [type] [--print|--copy|--edit|--codex]" \
+    "  ai copy <type> <name>" \
+    "  ai edit <type> <name>" \
+    "  ai codex <type> <name>" \
+    "" \
+    "Types: prompts, agents, instructions" \
+    "" \
+    "Environment:" \
+    "  AI_ROOT    override repo root (default: auto-detect)" \
+    "  AI_PICKER  override picker (default: PICKER, gum, or fzf)"
+}
+
+die() { echo "ai: $*" >&2; exit 1; }
+
+resolve_root() {
+  local root="${AI_ROOT:-}"
+  if [ -n "$root" ]; then
+    echo "$root"
+    return
+  fi
+
+  if command -v find-flake-root >/dev/null 2>&1; then
+    root=$(find-flake-root 2>/dev/null || true)
+  fi
+
+  if [ -z "$root" ]; then
+    root=$(git rev-parse --show-toplevel 2>/dev/null || true)
+  fi
+
+  if [ -z "$root" ]; then
+    local realm_root="${REALM_ROOT:-/realm/project}"
+    if [ -d "${realm_root}/sinnix" ]; then
+      root="${realm_root}/sinnix"
+    else
+      root="$realm_root"
+    fi
+  fi
+
+  echo "$root"
+}
+
+normalize_type() {
+  case "${1:-}" in
+    prompts|prompt|p) echo "prompts" ;;
+    agents|agent|a) echo "agents" ;;
+    instructions|instruction|i) echo "instructions" ;;
+    *) return 1 ;;
+  esac
+}
+
+dir_for_type() {
+  local root="$1"
+  local type="$2"
+  case "$type" in
+    prompts) echo "$root/dots/ai/prompts" ;;
+    agents) echo "$root/dots/ai/agents" ;;
+    instructions) echo "$root/dots/ai/instructions" ;;
+    *) return 1 ;;
+  esac
+}
+
+list_files() {
+  local dir="$1"
+  if command -v fd >/dev/null 2>&1; then
+    fd --max-depth 1 --type f . "$dir" | sort
+  else
+    find "$dir" -maxdepth 1 -type f -print | sort
+  fi
+}
+
+list_names() {
+  local dir="$1"
+  list_files "$dir" | sed 's|.*/||' | sed 's/\.[^.]*$//'
+}
+
+resolve_file() {
+  local dir="$1"
+  local name="$2"
+
+  if [ -f "$name" ]; then
+    echo "$name"
+    return
+  fi
+
+  if [ -f "$dir/$name" ]; then
+    echo "$dir/$name"
+    return
+  fi
+
+  if [ -f "$dir/$name.md" ]; then
+    echo "$dir/$name.md"
+    return
+  fi
+
+  if [ -f "$dir/$name.prompt" ]; then
+    echo "$dir/$name.prompt"
+    return
+  fi
+
+  return 1
+}
+
+pick_name() {
+  local prompt="$1"
+  local data="$2"
+  local picker="${AI_PICKER:-${PICKER:-}}"
+  local selection=""
+
+  if [ -n "$picker" ] && command -v "$picker" >/dev/null 2>&1; then
+    selection=$(printf '%s\n' "$data" | "$picker" --prompt-text "$prompt: " --horizontal false --require-match true || true)
+  elif command -v gum >/dev/null 2>&1; then
+    selection=$(printf '%s\n' "$data" | gum choose --header "$prompt")
+  elif command -v fzf >/dev/null 2>&1; then
+    selection=$(printf '%s\n' "$data" | fzf --prompt "$prompt> ")
+  else
+    selection=$(printf '%s\n' "$data" | head -n 1)
+  fi
+
+  printf '%s' "$selection" | sed 's/\r$//' | sed -e 's/^[[:space:]]\+//' -e 's/[[:space:]]\+$//'
+}
+
+copy_text() {
+  local file="$1"
+  if command -v wl-copy >/dev/null 2>&1; then
+    wl-copy <"$file"
+  elif command -v pbcopy >/dev/null 2>&1; then
+    pbcopy <"$file"
+  elif command -v xclip >/dev/null 2>&1; then
+    xclip -selection clipboard <"$file"
+  else
+    die "no clipboard tool found (wl-copy, pbcopy, or xclip)"
+  fi
+}
+
+edit_file() {
+  local file="$1"
+  if [ -n "${EDITOR:-}" ]; then
+    "$EDITOR" "$file"
+  elif command -v nvim >/dev/null 2>&1; then
+    nvim "$file"
+  elif command -v vim >/dev/null 2>&1; then
+    vim "$file"
+  elif command -v code >/dev/null 2>&1; then
+    code --reuse-window "$file" >/dev/null 2>&1 &
+  else
+    die "no editor found"
+  fi
+}
+
+run_codex() {
+  local root="$1"
+  local file="$2"
+  command -v codex >/dev/null 2>&1 || die "codex not found"
+  local prompt
+  prompt=$(cat "$file")
+  codex exec -C "$root" "$prompt"
+}
+
+root=$(resolve_root)
+[ -d "$root/dots/ai" ] || die "AI root not found: $root"
+
+cmd="${1:-}"
+case "$cmd" in
+  -h|--help|help|"")
+    usage
+    exit 0
+    ;;
+  list)
+    type=$(normalize_type "${2:-prompts}") || die "unknown type: ${2:-}"
+    dir=$(dir_for_type "$root" "$type")
+    [ -d "$dir" ] || die "missing directory: $dir"
+    list_names "$dir"
+    ;;
+  show|cat)
+    type=$(normalize_type "${2:-}") || die "unknown type: ${2:-}"
+    name="${3:-}"
+    [ -n "$name" ] || die "name required"
+    dir=$(dir_for_type "$root" "$type")
+    file=$(resolve_file "$dir" "$name") || die "not found: $name"
+    cat "$file"
+    ;;
+  pick)
+    type=$(normalize_type "${2:-prompts}") || die "unknown type: ${2:-}"
+    shift 2 || true
+    action="print"
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --print) action="print" ;;
+        --copy) action="copy" ;;
+        --edit) action="edit" ;;
+        --codex) action="codex" ;;
+        *) die "unknown option: $1" ;;
+      esac
+      shift
+    done
+    dir=$(dir_for_type "$root" "$type")
+    [ -d "$dir" ] || die "missing directory: $dir"
+    names=$(list_names "$dir")
+    [ -n "$names" ] || die "no entries in $dir"
+    name=$(pick_name "${type%?}" "$names")
+    [ -n "$name" ] || exit 0
+    file=$(resolve_file "$dir" "$name") || die "not found: $name"
+    case "$action" in
+      print) cat "$file" ;;
+      copy) copy_text "$file" ;;
+      edit) edit_file "$file" ;;
+      codex) run_codex "$root" "$file" ;;
+    esac
+    ;;
+  copy)
+    type=$(normalize_type "${2:-}") || die "unknown type: ${2:-}"
+    name="${3:-}"
+    [ -n "$name" ] || die "name required"
+    dir=$(dir_for_type "$root" "$type")
+    file=$(resolve_file "$dir" "$name") || die "not found: $name"
+    copy_text "$file"
+    ;;
+  edit)
+    type=$(normalize_type "${2:-}") || die "unknown type: ${2:-}"
+    name="${3:-}"
+    [ -n "$name" ] || die "name required"
+    dir=$(dir_for_type "$root" "$type")
+    file=$(resolve_file "$dir" "$name") || die "not found: $name"
+    edit_file "$file"
+    ;;
+  codex)
+    type=$(normalize_type "${2:-}") || die "unknown type: ${2:-}"
+    name="${3:-}"
+    [ -n "$name" ] || die "name required"
+    dir=$(dir_for_type "$root" "$type")
+    file=$(resolve_file "$dir" "$name") || die "not found: $name"
+    run_codex "$root" "$file"
+    ;;
+  *)
+    die "unknown command: $cmd"
+    ;;
+esac

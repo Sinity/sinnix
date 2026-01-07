@@ -133,7 +133,7 @@ in
         claude = "~/.local/bin/claude";
         nvim = "nvim --listen /tmp/nvim-$$";
         ccusage = "npx --yes ccusage@latest";
-        gemini-cli = "npx --yes https://github.com/google-gemini/gemini-cli";
+        gemini-cli = "npx --yes https://github.com/google-gemini/gemini-cli --yolo";
         marimo-edit = "marimo edit --mcp";
         marimo-edit-remote = "marimo edit --mcp --host 0.0.0.0 --port 2718";
         l = "eza --icons  -a --group-directories-first -1";

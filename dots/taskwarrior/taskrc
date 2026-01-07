@@ -1,0 +1,232 @@
+# Advanced Taskwarrior Configuration
+# Location: /realm/project/sinnix/dots/taskwarrior/taskrc
+
+# Data and Hooks
+data.location=~/.task
+hooks.location=/realm/project/sinnix/dots/taskwarrior/hooks
+
+# User Defined Attributes (UDAs)
+uda.estimate.type=duration
+uda.estimate.label=Est
+uda.estimate.values=
+
+uda.actual.type=duration
+uda.actual.label=Act
+uda.actual.values=
+
+uda.reviewed.type=date
+uda.reviewed.label=Reviewed
+uda.reviewed.values=
+
+uda.energy.type=string
+uda.energy.label=Energy
+uda.energy.values=low,medium,high
+uda.energy.default=medium
+
+uda.impact.type=string
+uda.impact.label=Impact
+uda.impact.values=low,medium,high,critical
+uda.impact.default=medium
+
+uda.complexity.type=string
+uda.complexity.label=Complexity
+uda.complexity.values=trivial,simple,moderate,complex
+uda.complexity.default=moderate
+
+uda.size.type=numeric
+uda.size.label=Size
+uda.size.values=
+
+# Urgency Coefficients (fine-tuned for productivity)
+urgency.user.tag.next.coefficient=15.0
+urgency.user.tag.blocking.coefficient=8.0
+urgency.user.tag.waiting.coefficient=-5.0
+urgency.user.tag.someday.coefficient=-10.0
+
+urgency.uda.priority.H.coefficient=6.0
+urgency.uda.priority.M.coefficient=3.9
+urgency.uda.priority.L.coefficient=1.8
+
+urgency.due.coefficient=12.0
+urgency.blocking.coefficient=8.0
+urgency.blocked.coefficient=-5.0
+urgency.annotations.coefficient=1.0
+urgency.tags.coefficient=1.0
+urgency.project.coefficient=1.0
+urgency.active.coefficient=4.0
+urgency.scheduled.coefficient=5.0
+urgency.age.coefficient=2.0
+urgency.inherit=on
+
+urgency.user.project.work.coefficient=2.0
+urgency.user.project.personal.coefficient=1.0
+
+# Context Definitions (GTD-inspired)
+context.work=+work or project:work
+context.home=+home or project:home
+context.errands=+errands
+context.online=+online
+context.offline=-online
+context.coding=+coding or project:dev
+context.writing=+writing
+context.learning=+learning or +study
+context.review=+review or reviewed.before:today-7days
+context.deep=+energy:high and -next
+context.quick=+energy:low or estimate.below:15min
+
+# Color Theme (custom 256-color)
+include /realm/project/sinnix/dots/taskwarrior/themes/custom-dark.theme
+
+# Report: Next Actions (GTD)
+report.next.description=Most urgent tasks
+report.next.columns=id,start.age,entry.age,depends,priority,project,tags,recur,scheduled.countdown,due.relative,until.remaining,description.count,urgency
+report.next.labels=ID,Active,Age,Deps,P,Project,Tag,Recur,S,Due,Until,Description,Urg
+report.next.sort=urgency-,start-,due+,project+
+report.next.filter=status:pending limit:page -WAITING -someday
+
+# Report: Overdue
+report.overdue.description=Overdue tasks
+report.overdue.columns=id,priority,project,tags,due.relative,description.count,urgency
+report.overdue.labels=ID,P,Project,Tags,Due,Description,Urg
+report.overdue.sort=urgency-,due+
+report.overdue.filter=status:pending due.before:today
+
+# Report: Waiting
+report.waiting.description=Tasks waiting on something
+report.waiting.columns=id,priority,project,tags,wait.remaining,description.count,urgency
+report.waiting.labels=ID,P,Project,Tags,Wait,Description,Urg
+report.waiting.sort=wait+,urgency-
+report.waiting.filter=status:waiting
+
+# Report: Someday/Maybe
+report.someday.description=Someday/Maybe tasks
+report.someday.columns=id,priority,project,tags,description.count
+report.someday.labels=ID,P,Project,Tags,Description
+report.someday.sort=project+,priority-
+report.someday.filter=status:pending +someday
+
+# Report: Review (tasks needing review)
+report.review.description=Tasks needing review
+report.review.columns=id,priority,project,tags,reviewed,description.count,urgency
+report.review.labels=ID,P,Project,Tags,Reviewed,Description,Urg
+report.review.sort=reviewed+,urgency-
+report.review.filter=status:pending (reviewed.before:today-7days or reviewed:)
+
+# Report: Weekly Summary
+report.weekly.description=Weekly task summary
+report.weekly.columns=id,entry,priority,project,tags,due,description.count
+report.weekly.labels=ID,Added,P,Project,Tags,Due,Description
+report.weekly.sort=entry-
+report.weekly.filter=entry.after:today-7days status:pending
+
+# Report: Projects Overview
+report.proj.description=Project overview
+report.proj.columns=id,project,priority,tags,due.relative,description.count,urgency
+report.proj.labels=ID,Project,P,Tags,Due,Description,Urg
+report.proj.sort=project+,urgency-
+report.proj.filter=status:pending
+
+# Report: Energy-based
+report.energy_high.description=High energy tasks
+report.energy_high.columns=id,priority,project,tags,energy,estimate,description.count,urgency
+report.energy_high.labels=ID,P,Project,Tags,Energy,Est,Description,Urg
+report.energy_high.sort=urgency-
+report.energy_high.filter=status:pending energy:high
+
+report.energy_low.description=Low energy tasks
+report.energy_low.columns=id,priority,project,tags,energy,estimate,description.count,urgency
+report.energy_low.labels=ID,P,Project,Tags,Energy,Est,Description,Urg
+report.energy_low.sort=urgency-
+report.energy_low.filter=status:pending energy:low
+
+# Report: Quick wins (high impact, low complexity)
+report.quickwins.description=Quick wins (high impact, low effort)
+report.quickwins.columns=id,priority,project,impact,complexity,estimate,description.count,urgency
+report.quickwins.labels=ID,P,Project,Impact,Complexity,Est,Description,Urg
+report.quickwins.sort=urgency-
+report.quickwins.filter=status:pending (impact:high or impact:critical) (complexity:trivial or complexity:simple)
+
+# Report: All with UDAs
+report.full.description=All task details with UDAs
+report.full.columns=id,priority,project,tags,energy,impact,complexity,estimate,actual,due.relative,description.count,urgency
+report.full.labels=ID,P,Project,Tags,Enrg,Impct,Cplx,Est,Act,Due,Description,Urg
+report.full.sort=urgency-
+report.full.filter=status:pending
+
+# Aliases
+alias.rm=delete
+alias.burndown=burndown.weekly
+alias.dailystatus=status:completed end.after:today
+alias.inbox=+inbox
+alias.@=context
+alias.+tag=modify +
+alias.-tag=modify -
+
+# General Settings
+news.version=3.4.2
+verbose=yes
+confirmation=no
+recurrence.confirmation=no
+allow.empty.filter=no
+complete.all.tags=yes
+list.all.tags=yes
+search.case.sensitive=no
+active.indicator=>
+tag.indicator=+
+dependency.indicator=D
+recurrence.indicator=R
+undo.style=side
+urgency.user.tag.inbox.coefficient=-5.0
+nag=You have more urgent tasks.
+fontunderline=on
+rule.precedence.color=deleted,completed,active,keyword.,tag.,project.,overdue,scheduled,due.today,due,blocked,blocking,recurring,tagged,uda.
+
+# Date and Time
+dateformat=Y-M-D H:N
+dateformat.report=Y-M-D
+dateformat.annotation=Y-M-D
+dateformat.holiday=YMD
+dateformat.edit=Y-M-D H:N
+weekstart=monday
+displayweeknumber=yes
+due=7
+
+# Calendar and Holidays
+calendar.details=full
+calendar.details.report=list
+calendar.holidays=full
+calendar.offset=off
+calendar.offset.value=-1
+
+# Default Command
+default.command=next
+
+# Sync (disabled by default, configure if using sync service)
+# sync.server.url=
+# sync.server.client_id=
+# sync.encryption_secret=
+
+# Advanced Features
+obfuscate=no
+abbreviation.minimum=2
+regex=on
+xterm.title=yes
+bulk=3
+gc=on
+
+# Journal
+journal.time=yes
+journal.time.start.annotation=yes
+journal.time.stop.annotation=yes
+
+# Reserved and Special Tags
+reserved.lines=2
+
+# Performance
+locking=on
+
+# Editor
+editor=nvim
+
+# Hooks enabled
+hooks=on

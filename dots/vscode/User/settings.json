@@ -683,5 +683,6 @@
   "[html]": {
     "editor.defaultFormatter": "esbenp.prettier-vscode"
   },
-  "terminal.integrated.fontSize": 16
+  "terminal.integrated.fontSize": 16,
+  "geminicodeassist.project": "REDACTED_GEMINI_PROJECT"
 }

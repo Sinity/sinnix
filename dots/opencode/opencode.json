@@ -5,8 +5,7 @@
   ],
   "model": "openai/gpt-5-codex",
   "instructions": [
-    "/home/sinity/.config/claude/CLAUDE.md.hm-bak",
-    "/home/sinity/.codex/AGENTS.md"
+    "/home/sinity/.config/ai/instructions/AGENTS.md"
   ],
   "permission": {
     "bash": "allow",
@@ -77,25 +76,19 @@
     "playwright": {
       "type": "local",
       "command": [
-        "npx",
-        "-y",
-        "@playwright/mcp@latest"
+        "/home/sinity/.local/bin/mcp-playwright"
       ]
     },
     "context7": {
       "type": "local",
       "command": [
-        "bash",
-        "-lc",
-        "exec npx -y @upstash/context7-mcp@latest --api-key \"$CONTEXT7_API_KEY\""
+        "/home/sinity/.local/bin/mcp-context7"
       ]
     },
     "firecrawl": {
       "type": "local",
       "command": [
-        "bash",
-        "-lc",
-        "exec env FIRECRAWL_API_KEY=\"$(< /run/agenix/firecrawl-api-key)\" npx -y firecrawl-mcp@latest"
+        "/home/sinity/.local/bin/mcp-firecrawl"
       ]
     },
     "qdrant": {

@@ -22,9 +22,9 @@ The template contains:
 - `dots/codex/skills` linked into `~/.codex/skills`
 - MCP servers aligned with VS Code: GitHub (expects `GITHUB_TOKEN`), a local
   PostgreSQL bridge (no auth required, talks to the socket at
-  `/run/postgresql`), Playwright, Context7, Firecrawl (with
-  `FIRECRAWL_API_KEY` forwarded), plus a local Qdrant server executed via the
-  `~/.local/bin/mcp-qdrant` wrapper.
+  `/run/postgresql`), Playwright/Context7/Firecrawl via `~/.local/bin/mcp-*`
+  wrappers, plus a local Qdrant server executed via the `~/.local/bin/mcp-qdrant`
+  wrapper.
 - `features.rmcp_client = true` for hosted MCP OAuth flows
 
 The shell profile now sources the agenix export snippet automatically; use the

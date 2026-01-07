@@ -10,6 +10,7 @@ flake rebuild is needed because the symlinks point directly into the checkout.
 | Dot dir        | Primary consumer(s)                              | Notes |
 |----------------|--------------------------------------------------|-------|
 | `audacity/`    | `modules/features/desktop/common-apps.nix` (`xdg.configFile`) | UI settings for the audio editor |
+| `ai/`          | `modules/features/dev/utilities.nix` (`xdg.configFile`)       | Shared AI instructions, prompts, agents |
 | `claude/`      | `modules/features/dev/core/base.nix` (`linkClaudeConfig`)             | Shared with `.claude` and CLAUDE CLI |
 | `codex/`       | `modules/features/dev/utilities.nix` (`.codex/config.toml`, `.codex/skills`) | Codex CLI config + skills |
 | `gemini/`      | `modules/features/dev/utilities.nix` (`.gemini/settings.json`)         | Gemini CLI defaults |

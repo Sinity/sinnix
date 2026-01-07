@@ -34,6 +34,13 @@ in
           ioclass = "idle";
           oom_score_adj = 200;
         }
+        {
+          type = "Critical_Interactive";
+          nice = -15;
+          ioclass = "best-effort";
+          ioprio = 0;
+          oom_score_adj = -800;
+        }
       ];
 
       extraRules = [
@@ -192,6 +199,74 @@ in
           oom_score_adj = -50;
         }
 
+        # Input interception pipeline - keep input responsive under load
+        {
+          name = "intercept";
+          type = "Critical_Interactive";
+        }
+        {
+          name = "interception-tools";
+          type = "Critical_Interactive";
+        }
+        {
+          name = "intercept-bounce";
+          type = "Critical_Interactive";
+        }
+        {
+          name = "scribe-tap";
+          type = "Critical_Interactive";
+        }
+        {
+          name = "caps2esc";
+          type = "Critical_Interactive";
+        }
+        {
+          name = "uinput";
+          type = "Critical_Interactive";
+        }
+        {
+          name = "systemd-logind";
+          type = "Critical_Interactive";
+        }
+        {
+          name = "systemd-udevd";
+          type = "Critical_Interactive";
+        }
+
+        # SSH and TTY login paths - keep recovery access snappy under load
+        {
+          name = "sshd";
+          type = "Critical_Interactive";
+        }
+        {
+          name = "sshd-session";
+          type = "Critical_Interactive";
+        }
+        {
+          name = "ssh";
+          type = "Critical_Interactive";
+        }
+        {
+          name = "sftp-server";
+          type = "Critical_Interactive";
+        }
+        {
+          name = "agetty";
+          type = "Critical_Interactive";
+        }
+        {
+          name = "login";
+          type = "Critical_Interactive";
+        }
+        {
+          name = "bash";
+          type = "Critical_Interactive";
+        }
+        {
+          name = "zsh";
+          type = "Critical_Interactive";
+        }
+
         # System daemons - protected
         {
           name = "systemd";
@@ -271,7 +346,7 @@ in
         domain = "@users";
         type = "-";
         item = "nice";
-        value = "-11";
+        value = "-15";
       }
     ];
   };

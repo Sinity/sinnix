@@ -45,7 +45,7 @@ let
     sysstat
     usbutils
     util-linux
-    vkmark
+    # vkmark
     glmark2
   ];
 in

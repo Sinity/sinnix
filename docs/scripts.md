@@ -31,7 +31,13 @@ into `~/.local/bin` automatically.
 
 - `mcp-postgres.py`, `mcp-qdrant.py`, `mcp-sqlite.py` – expose local datasources
   to MCP-capable agents (Codex, Claude Desktop, etc.). `modules/features/dev/utilities.nix`
-  ships thin wrappers (`mcp-<name>`) in `~/.local/bin`.
+  ships thin wrappers (`mcp-<name>`) in `~/.local/bin`, including `mcp-context7`,
+  `mcp-firecrawl`, and `mcp-playwright` for shared MCP wiring.
+
+## AI tooling
+
+- `ai` – pick, show, or launch shared prompts/agents from `dots/ai` (supports
+  `codex exec`, clipboard, or editor workflows).
 
 ## Developer tooling
 

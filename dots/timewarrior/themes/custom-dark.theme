@@ -1,0 +1,50 @@
+# Custom Dark 256-color Theme for Timewarrior
+# Designed for modern terminal emulators with 256-color support
+
+define theme:
+  description = "Custom dark theme with 256-color support"
+
+  color:
+    # General colors
+    today = color15 on color237
+    holiday = color0 on color11
+    label = color14
+    exclusion = color236 on color233
+
+    # Chart colors
+    ids = color14
+    track.current = color10
+
+    # Summary colors
+    summary = color15
+
+  # Tag Color Palette (auto-assigned to tags)
+  palette:
+    color1 = color39
+    color2 = color10
+    color3 = color11
+    color4 = color202
+    color5 = color13
+    color6 = color12
+    color7 = color14
+    color8 = color208
+    color9 = color51
+    color10 = color226
+    color11 = color46
+    color12 = color207
+    color13 = color129
+    color14 = color82
+    color15 = color214
+
+# Specific Tag Colors
+tags.work.color = color12
+tags.coding.color = color39
+tags.meetings.color = color202
+tags.learning.color = color11
+tags.writing.color = color13
+tags.admin.color = color8
+tags.research.color = color14
+tags.personal.color = color10
+tags.exercise.color = color46
+tags.reading.color = color207
+tags.break.color = color245

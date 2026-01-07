@@ -44,22 +44,6 @@ in
           brokerPackage = pkgs.dbus-broker;
         };
 
-        earlyoom = {
-          enable = true;
-          enableNotifications = true;
-          freeMemThreshold = 5;
-          freeSwapThreshold = 5;
-          reportInterval = 5;
-          extraArgs = [
-            # Killing whole process groups nuked the entire Hyprland session when Chrome was the victim.
-            "-p"
-            "--prefer"
-            "(^|/)(java|chromium|google-chrome(-stable)?)$"
-            "--avoid"
-            "(^|/)(init|systemd|sshd)$"
-          ];
-        };
-
         gnome.gnome-keyring.enable = lib.mkForce false;
       };
 

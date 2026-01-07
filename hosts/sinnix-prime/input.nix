@@ -1,4 +1,3 @@
-# Host-specific hardware configuration for sinnix-prime
 {
   pkgs,
   lib,
@@ -160,14 +159,17 @@ in
 
   systemd.services.interception-tools = {
     unitConfig.RequiresMountsFor = [ keylogRoot ];
-    serviceConfig.ExecStartPre = [
-      (pkgs.writeShellScript "interception-tools-init" ''
-        #!/usr/bin/env bash
-        set -euo pipefail
-        install -d -m700 -o ${username} -g users "${keylogRoot}"
-        install -d -m700 -o ${username} -g users "${keylogRoot}/logs"
-        install -d -m700 -o ${username} -g users "${keylogRoot}/snapshots"
-      '')
-    ];
+    serviceConfig = {
+      Slice = "recovery.slice";
+      ExecStartPre = [
+        (pkgs.writeShellScript "interception-tools-init" ''
+          #!/usr/bin/env bash
+          set -euo pipefail
+          install -d -m700 -o ${username} -g users "${keylogRoot}"
+          install -d -m700 -o ${username} -g users "${keylogRoot}/logs"
+          install -d -m700 -o ${username} -g users "${keylogRoot}/snapshots"
+        '')
+      ];
+    };
   };
 }

@@ -16,7 +16,9 @@ in
   config = lib.mkIf cfg.enable {
     home-manager.users.${user} = { pkgs, lib, config, dotsRepoPath, ... }:
       let
-        chromeStablePkg = pkgs.google-chrome;
+        chromeStablePkg = pkgs.google-chrome.override {
+          commandLineArgs = "--force-color-profile=srgb";
+        };
         mkDotsRepoLink = rel: config.lib.file.mkOutOfStoreSymlink (dotsRepoPath + rel);
         quteDots = rel: mkDotsRepoLink ("/qutebrowser" + rel);
         mkUserScript = name: {

@@ -175,22 +175,61 @@ in
         MemoryHigh = "20G";
         MemoryMax = "24G";
         ManagedOOMMemoryPressure = "kill";
-        ManagedOOMMemoryPressureLimit = "80%";
+        ManagedOOMMemoryPressureLimit = "95%";
       };
 
       slices."user.slice".sliceConfig = {
         Description = "High priority for user session (UI, terminals)";
         CPUWeight = 500;
         IOWeight = 500;
+        ManagedOOMMemoryPressure = "kill";
+        ManagedOOMMemoryPressureLimit = "90%";
       };
 
-      services.nix-daemon.serviceConfig = {
-        Slice = "nix-daemon.slice";
-        CPUAccounting = true;
-        MemoryAccounting = true;
-        IOAccounting = true;
-        TasksAccounting = true;
+      slices."recovery.slice".sliceConfig = {
+        Description = "High priority recovery services (SSH, TTY)";
+        CPUWeight = 1000;
+        IOWeight = 1000;
+        ManagedOOMMemoryPressure = "none";
+        MemoryLow = "512M";
       };
+
+      services = lib.mkMerge [
+        {
+          nix-daemon.serviceConfig = {
+            Slice = "nix-daemon.slice";
+            CPUAccounting = true;
+            MemoryAccounting = true;
+            IOAccounting = true;
+            TasksAccounting = true;
+          };
+        }
+        {
+          "systemd-logind".serviceConfig = {
+            Slice = "recovery.slice";
+          };
+          "systemd-udevd".serviceConfig = {
+            Slice = "recovery.slice";
+          };
+          "systemd-journald".serviceConfig = {
+            Slice = "recovery.slice";
+          };
+        }
+        (lib.genAttrs
+          [
+            "getty@tty1"
+            "getty@tty2"
+            "getty@tty3"
+            "getty@tty4"
+            "getty@tty5"
+            "getty@tty6"
+          ]
+          (_: {
+            serviceConfig = {
+              Slice = "recovery.slice";
+            };
+          }))
+      ];
     };
 
     systemd.oomd.enableSystemSlice = true;

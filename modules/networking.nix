@@ -63,6 +63,8 @@ in
       openssh = {
         enable = true;
         settings = {
+          UseDns = false;
+          GSSAPIAuthentication = false;
           PermitRootLogin = lib.mkDefault "no";
           PasswordAuthentication = false;
           KbdInteractiveAuthentication = false;
@@ -73,6 +75,13 @@ in
     };
 
     programs.mosh.enable = true;
+
+    systemd.services.sshd.serviceConfig = {
+      Slice = "recovery.slice";
+    };
+    systemd.sockets.sshd.socketConfig = {
+      Slice = "recovery.slice";
+    };
 
     hardware.bluetooth = lib.mkIf isDesktop {
       enable = lib.mkDefault true;

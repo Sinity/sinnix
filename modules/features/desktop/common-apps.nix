@@ -43,7 +43,7 @@ in
           android-tools
           android-file-transfer
           hledger
-          llm
+          # llm # disabled due to build failure
           single-file-cli
           # programmer-calculator  # Broken with glibc 2.40, temporarily disabled
           bc

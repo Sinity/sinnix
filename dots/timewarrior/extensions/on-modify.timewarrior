@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# Timewarrior Taskwarrior Integration Hook
+# Location: /realm/project/sinnix/dots/timewarrior/extensions/on-modify.timewarrior
+#
+# This hook script integrates Taskwarrior with Timewarrior.
+# When a task is started in Taskwarrior, time tracking begins in Timewarrior.
+# When a task is stopped, time tracking stops.
+
+input=$(cat)
+
+# Extract the two lines of JSON
+json_old=$(echo "$input" | head -n 1)
+json_new=$(echo "$input" | tail -n 1)
+
+# Check if task was started
+old_start=$(echo "$json_old" | jq -r '.start // empty')
+new_start=$(echo "$json_new" | jq -r '.start // empty')
+
+# Check if task was stopped (completed or deleted)
+new_status=$(echo "$json_new" | jq -r '.status')
+old_status=$(echo "$json_old" | jq -r '.status')
+
+# Get task description and tags
+description=$(echo "$json_new" | jq -r '.description')
+tags=$(echo "$json_new" | jq -r '.tags[]?' | tr '\n' ' ')
+project=$(echo "$json_new" | jq -r '.project // empty')
+uuid=$(echo "$json_new" | jq -r '.uuid')
+
+# Task was just started
+if [[ -z "$old_start" && -n "$new_start" ]]; then
+    # Build tag list for timewarrior
+    timew_tags=""
+
+    # Add project as tag if exists
+    if [[ -n "$project" ]]; then
+        timew_tags="$project "
+    fi
+
+    # Add all task tags
+    if [[ -n "$tags" ]]; then
+        timew_tags="$timew_tags$tags"
+    fi
+
+    # Start tracking with description as annotation
+    if [[ -n "$timew_tags" ]]; then
+        timew start $timew_tags "$description" 2>/dev/null
+    else
+        timew start "$description" 2>/dev/null
+    fi
+fi
+
+# Task was stopped (completed or deleted)
+if [[ -n "$old_start" && ( "$new_status" == "completed" || "$new_status" == "deleted" ) ]]; then
+    # Stop current tracking
+    timew stop 2>/dev/null
+fi
+
+# Task was stopped (via 'task stop')
+if [[ -n "$old_start" && -z "$new_start" && "$new_status" == "pending" ]]; then
+    # Stop current tracking
+    timew stop 2>/dev/null
+fi
+
+# Output the modified task (pass-through)
+echo "$json_new"
