@@ -35,9 +35,19 @@ in
           "nix-gaming.cachix.org-1:nbjlureqMbRAxR1gJ/f3hxemL9svXaZF/Ees8vCUUs4="
         ];
         netrc-file = "/etc/nix/netrc";
-        max-jobs = lib.mkDefault 2;
-        cores = 8;
+        # Increased from 2 to 6 for better build parallelism
+        # Safe due to idle I/O scheduling (lines 48-50) preventing UI freezing
+        max-jobs = 6;
+        # Reduced from 8 to 4 to balance total parallelism (6 jobs × 4 cores = 24)
+        cores = 4;
         use-cgroups = true;
+
+        # DX optimizations: keep build dependencies for faster rebuilds
+        keep-outputs = true;
+        keep-derivations = true;
+
+        # Reduce warning spam for dirty git repos during development
+        warn-dirty = false;
         allowed-users = [
           "root"
           "@wheel"
@@ -66,7 +76,7 @@ in
         allowUnfree = true;
         allowAliases = true;
       };
-      hostPlatform = lib.mkDefault "x86_64-linux";
+      hostPlatform = "x86_64-linux";
       overlays = [ inputs.nur.overlays.default ];
     };
 
@@ -88,17 +98,17 @@ in
     time.timeZone = "Europe/Warsaw";
     i18n = {
       defaultLocale = "en_US.UTF-8";
-      extraLocaleSettings = {
-        LC_ADDRESS = "pl_PL.UTF-8";
-        LC_IDENTIFICATION = "pl_PL.UTF-8";
-        LC_MEASUREMENT = "pl_PL.UTF-8";
-        LC_MONETARY = "pl_PL.UTF-8";
-        LC_NAME = "pl_PL.UTF-8";
-        LC_NUMERIC = "pl_PL.UTF-8";
-        LC_PAPER = "pl_PL.UTF-8";
-        LC_TELEPHONE = "pl_PL.UTF-8";
-        LC_TIME = "pl_PL.UTF-8";
-      };
+      extraLocaleSettings = lib.genAttrs [
+        "LC_ADDRESS"
+        "LC_IDENTIFICATION"
+        "LC_MEASUREMENT"
+        "LC_MONETARY"
+        "LC_NAME"
+        "LC_NUMERIC"
+        "LC_PAPER"
+        "LC_TELEPHONE"
+        "LC_TIME"
+      ] (_: "pl_PL.UTF-8");
     };
 
     system.stateVersion = "24.05";

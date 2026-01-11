@@ -102,18 +102,20 @@ in
 
     xdg.portal = {
       enable = true;
-      wlr.enable = true;
+      wlr.enable = lib.mkForce false;
       xdgOpenUsePortal = true;
-      extraPortals = lib.mkAfter [ pkgs.xdg-desktop-portal-gtk ];
-      config.common = {
-        default = [
-          "hyprland"
-          "gtk"
-        ];
-        "org.freedesktop.portal.OpenURI" = [
-          "hyprland"
-          "gtk"
-        ];
+      extraPortals = lib.mkAfter [
+        pkgs.xdg-desktop-portal-hyprland
+        pkgs.xdg-desktop-portal-gtk
+      ];
+      config = {
+        common = {
+          default = ["hyprland" "gtk"];
+        };
+        hyprland = {
+          default = ["hyprland" "gtk"];
+          "org.freedesktop.impl.portal.Secret" = ["gnome-keyring"];
+        };
       };
     };
 

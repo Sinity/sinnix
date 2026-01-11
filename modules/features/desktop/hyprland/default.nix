@@ -152,9 +152,15 @@ in
           animations.enabled = false;
 
           inherit (bindings) bind bindl bindm;
-          inherit (rules) windowrule;
-          windowrulev2 = rules.windowrulev2 or [ ];
+          windowrule = if rules ? windowrule then rules.windowrule else [ ];
+          windowrulev2 = if rules ? windowrulev2 then rules.windowrulev2 else [ ];
         };
+
+        extraConfig =
+          let
+            extra = if rules ? extraConfig then rules.extraConfig else "";
+          in
+          lib.mkAfter extra;
       };
 
       home.file = {
@@ -200,8 +206,6 @@ in
         slurp
         grimblast
         wl-screenrec
-        gum
-        jq
       ];
 
       systemd.user.services.hyprpaper.Unit.X-Restart-Triggers = lib.mkForce [ ];

@@ -7,6 +7,9 @@
     ./desktop/browser.nix
     ./desktop/clipse.nix
     ./desktop/common-apps.nix
+    ./desktop/theming.nix
+    ./desktop/mime.nix
+    ./desktop/gaming.nix
     ./desktop/crypto.nix
     ./desktop/fnott.nix
     ./desktop/hyprland/default.nix

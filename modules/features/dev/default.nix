@@ -1,10 +1,10 @@
 { ... }:
 {
   imports = [
-    ./core/default.nix
+    ./editors.nix
+    ./git.nix
+    ./shell.nix
     ./languages.nix
     ./utilities.nix
-    ./vscode.nix
-    ./zed.nix
   ];
 }

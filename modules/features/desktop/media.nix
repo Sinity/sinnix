@@ -53,7 +53,6 @@ in
           fanficfare
           gpu-screen-recorder
           gpu-screen-recorder-gtk
-          wf-recorder
           ffmpeg
           yt-dlp
           tdf
@@ -62,8 +61,6 @@ in
           zotero
           gimp
           inkscape
-          mangohud
-          steam-run
           imvWithExtras
         ];
       };

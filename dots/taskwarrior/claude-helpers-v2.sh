@@ -39,10 +39,8 @@ claude_track_request() {
     task add "User request: $desc" \
         project:claude.instance.$CLAUDE_INSTANCE_ID \
         priority:"$priority" \
-        +user-request \
-        +claude-work \
-        +instance:$CLAUDE_INSTANCE_ID \
         estimate:"$estimate" \
+        tags:user-request,claude-work,instance:$CLAUDE_INSTANCE_ID \
         2>&1 | grep -v "^Filter:"
 
     local task_id=$(task +LATEST ids 2>/dev/null)
@@ -67,9 +65,8 @@ claude_track_subtask() {
     task add "$desc" \
         project:claude.instance.$CLAUDE_INSTANCE_ID \
         estimate:"$estimate" \
-        +claude-work \
-        +instance:$CLAUDE_INSTANCE_ID \
         ${parent_id:+depends:$parent_id} \
+        tags:claude-work,instance:$CLAUDE_INSTANCE_ID \
         2>&1 | grep -v "^Filter:"
 
     local task_id=$(task +LATEST ids 2>/dev/null)
@@ -134,9 +131,8 @@ claude_followup() {
 
     task add "Follow-up: $desc" \
         project:claude.shared \
-        +follow-up \
-        +claude-work \
         wait:"$wait" \
+        tags:follow-up,claude-work \
         2>&1 | grep -v "^Filter:"
     echo "✓ Follow-up noted: $desc"
 }
@@ -148,10 +144,8 @@ claude_research() {
 
     task add "Research: $topic" \
         project:claude.instance.$CLAUDE_INSTANCE_ID \
-        +research \
-        +claude-work \
-        +instance:$CLAUDE_INSTANCE_ID \
         estimate:"$estimate" \
+        tags:research,claude-work,instance:$CLAUDE_INSTANCE_ID \
         2>&1 | grep -v "^Filter:"
 
     local task_id=$(task +LATEST ids 2>/dev/null)
@@ -321,11 +315,9 @@ claude_track_coding() {
 
     task add "$desc" \
         project:claude.instance.$CLAUDE_INSTANCE_ID \
-        +coding \
-        +claude-work \
-        +instance:$CLAUDE_INSTANCE_ID \
         estimate:"$estimate" \
         energy:high \
+        tags:coding,claude-work,instance:$CLAUDE_INSTANCE_ID \
         2>&1 | grep -v "^Filter:"
 
     local task_id=$(task +LATEST ids 2>/dev/null)
@@ -344,11 +336,9 @@ claude_track_docs() {
 
     task add "$desc" \
         project:claude.instance.$CLAUDE_INSTANCE_ID \
-        +documentation \
-        +claude-work \
-        +instance:$CLAUDE_INSTANCE_ID \
         estimate:"$estimate" \
         energy:medium \
+        tags:documentation,claude-work,instance:$CLAUDE_INSTANCE_ID \
         2>&1 | grep -v "^Filter:"
 
     local task_id=$(task +LATEST ids 2>/dev/null)

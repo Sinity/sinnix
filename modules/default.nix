@@ -10,7 +10,6 @@
     ./networking.nix
     ./nix-ld.nix
     ./performance.nix
-    ./programs.nix
     ./secrets.nix
     ./storage.nix
     ./ui.nix

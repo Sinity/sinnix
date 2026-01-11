@@ -12,6 +12,8 @@ mkFeatureModule {
         swaybg
         hyprpicker
         wl-gammactl
+        wlr-randr
+        cage
       ];
     };
 } args

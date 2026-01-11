@@ -2,6 +2,7 @@
   inputs,
   lib,
   config,
+  helpers,
   ...
 }:
 let
@@ -22,7 +23,7 @@ in
     useGlobalPkgs = true;
     backupFileExtension = null;
     extraSpecialArgs = {
-      inherit inputs;
+      inherit inputs helpers;
       dotsRepoPath = config.sinnix.paths.dotsRoot;
       secretPaths = config.sinnix.secrets.paths;
       inherit (config) sinnix;

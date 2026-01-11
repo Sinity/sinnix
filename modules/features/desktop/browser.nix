@@ -31,12 +31,6 @@ in
           package = pkgs.qutebrowser;
         };
 
-        programs.ssh = {
-          enable = true;
-          enableDefaultConfig = false;
-          matchBlocks."*".addKeysToAgent = "yes";
-        };
-
         home = {
           sessionVariables = {
             BROWSER = "google-chrome-stable";
@@ -48,27 +42,6 @@ in
             qutebrowser
             firefox
             tor-browser
-            weechat
-            curl
-            wget
-            nmap
-            dig
-            traceroute
-            whois
-            netcat
-            socat
-            tcpdump
-            mtr
-            wireshark
-            openssh
-            mosh
-            yt-dlp
-            fzf
-            jq
-            single-file-cli
-            wl-clipboard
-            neovim-remote
-            libnotify
           ];
 
           file = {

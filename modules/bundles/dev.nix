@@ -9,7 +9,8 @@ in
 
   config = lib.mkIf cfg.enable {
     sinnix.features.dev = {
-      core.enable = true;
+      shell.enable = true;
+      git.enable = true;
       languages.enable = true;
       utilities.enable = true;
     };

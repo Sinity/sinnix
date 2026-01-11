@@ -20,6 +20,9 @@ in
       features.desktop.fnott.enable = true;
       features.desktop.clipse.enable = true;
       features.desktop.common-apps.enable = true;
+      features.desktop.theming.enable = true;
+      features.desktop.mime.enable = true;
+      features.desktop.gaming.enable = true;
       features.desktop.crypto.enable = true;
       features.desktop.media.enable = true;
       features.desktop.browser.enable = true;

@@ -43,19 +43,16 @@ in
               questionary
               typer
               tqdm
+              tabulate
+              httpx
+              requests
+              beautifulsoup4
               fastapi
               uvicorn
-              aiofiles
-              httpx
-              beautifulsoup4
-              requests
               pydantic
               pydantic-settings
               python-dotenv
               pyyaml
-              toml
-              ujson
-              tabulate
               tiktoken
               gitpython
               black
@@ -66,8 +63,6 @@ in
               openai
               anthropic
               google-genai
-              mcp
-              qdrant-client
             ]
           ))
           sqlite
@@ -78,10 +73,9 @@ in
           aider-chat
           whisper-cpp
           gh
-          delta
           lazygit
+          delta
           onefetch
-          gitui
           jetbrains-mono
         ])
         ++ externalTools

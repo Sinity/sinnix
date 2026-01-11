@@ -16,9 +16,12 @@
   sinnix.bundles.desktop.enable = true;
   sinnix.bundles.dev.enable = true;
 
-  sinnix.features.dev.vscode.enable = true;
-  sinnix.features.dev.zed.enable = true;
+  sinnix.features.dev.editors.vscode.enable = true;
+  sinnix.features.dev.editors.zed.enable = true;
   sinnix.features.cli.asciinema.enable = true;
+
+  # Ensure dev shell is explicitly enabled (though bundle covers it)
+  sinnix.features.dev.shell.enable = true;
 
   sinnix.services = {
     transmission.enable = true;
