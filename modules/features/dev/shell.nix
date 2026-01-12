@@ -1,8 +1,8 @@
 {
+  config,
   lib,
   pkgs,
   inputs,
-  config,
   ...
 }:
 let
@@ -35,9 +35,8 @@ let
   '';
 in
 {
-  options.sinnix.features.dev.shell = {
-    enable = lib.mkEnableOption "Advanced Shell Environment (Zsh/Starship/Atuin)";
-  };
+  options.sinnix.features.dev.shell.enable =
+    lib.mkEnableOption "Advanced shell environment (Zsh/Starship/Atuin)";
 
   config = lib.mkIf cfg.enable {
     home-manager.users.${user} =
@@ -75,12 +74,14 @@ in
             ripgrep
             gum
             stow
+            curlie
             yq
             csvkit
             httpie
             websocat
             xh
             tokei
+            diffsitter
             difftastic
             ast-grep
             mprocs
@@ -91,6 +92,7 @@ in
             glow
             graphviz
             mermaid-cli
+            antigravity
           ])
           ++ [ findFlakeRoot ];
 

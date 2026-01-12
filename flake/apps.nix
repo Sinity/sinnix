@@ -50,6 +50,14 @@
           echo "Formatting complete!"
         '' "Format Nix files according to the RFC style";
 
+        fmt-check = mkApp "fmt-check" ''
+          if [ "$#" -eq 0 ]; then
+            echo "Usage: nix run .#fmt-check -- <files...>"
+            exit 1
+          fi
+          ${pkgs.nixfmt-rfc-style}/bin/nixfmt --check "$@"
+        '' "Check whether specific Nix files conform to nixfmt";
+
         # Lint Nix files
         lint = mkApp "lint" ''
           flake_dir="''${PRJ_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"

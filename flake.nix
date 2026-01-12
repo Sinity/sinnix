@@ -39,29 +39,30 @@
     devenv.url = "github:cachix/devenv/85b34019389c192e10e3508745c15b98060216f5";
     devenv.inputs.nixpkgs.follows = "nixpkgs";
 
-    # Custom tools and integrations
-    intercept-bounce.url = "github:sinity/intercept-bounce";
-    intercept-bounce.inputs.nixpkgs.follows = "nixpkgs";
+    # Custom tools and integrations (prefer local clones under /realm/project)
+    intercept-bounce = {
+      url = "git+file:///realm/project/intercept-bounce?ref=master";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
 
     scribe-tap = {
-      url = "github:Sinity/scribe-tap";
+      url = "git+file:///realm/project/scribe-tap?ref=master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
     polylogue = {
-      url = "github:Sinity/polylogue";
+      url = "git+file:///realm/project/polylogue?ref=master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
     sinevec = {
-      url = "github:Sinity/sinevec";
+      url = "git+file:///realm/project/_inactive/sinevec?ref=master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Private Sinex repository; intentionally expects SSH access to the upstream
-    # repository so evaluation fails cleanly when the key is missing.
+    # Private Sinex repository stored locally; build fails fast if missing.
     sinex = {
-      url = "git+ssh://git@github.com/Sinity/sinex?ref=master";
+      url = "git+file:///realm/project/sinex?ref=master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -90,7 +91,9 @@
       imports = [
         ./flake/dev-shell.nix
         ./flake/apps.nix
+        ./flake/formatter.nix
         ./flake/nixos.nix
+        ./flake/tests.nix
       ];
     };
 }

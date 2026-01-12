@@ -798,15 +798,16 @@
       "locked": {
         "lastModified": 1760580766,
         "narHash": "sha256-U0qd2923ey9EiHME88q5+J3ctkshiN74pkKiGucvd1E=",
-        "owner": "sinity",
-        "repo": "intercept-bounce",
+        "ref": "master",
         "rev": "aad936bafe379134ca7be8134fefd7b9754c7640",
-        "type": "github"
+        "revCount": 394,
+        "type": "git",
+        "url": "file:///realm/project/intercept-bounce"
       },
       "original": {
-        "owner": "sinity",
-        "repo": "intercept-bounce",
-        "type": "github"
+        "ref": "master",
+        "type": "git",
+        "url": "file:///realm/project/intercept-bounce"
       }
     },
     "nix": {
@@ -1055,15 +1056,16 @@
       "locked": {
         "lastModified": 1768163451,
         "narHash": "sha256-OyQaguTa69VtlOFtGtGdha3f1HdlXRWd1rd2bSxssIQ=",
-        "owner": "Sinity",
-        "repo": "polylogue",
+        "ref": "master",
         "rev": "f01b16079a04c76a8bf3aad694e6121c628c30b4",
-        "type": "github"
+        "revCount": 419,
+        "type": "git",
+        "url": "file:///realm/project/polylogue"
       },
       "original": {
-        "owner": "Sinity",
-        "repo": "polylogue",
-        "type": "github"
+        "ref": "master",
+        "type": "git",
+        "url": "file:///realm/project/polylogue"
       }
     },
     "quickshell": {
@@ -1150,15 +1152,16 @@
       "locked": {
         "lastModified": 1763182741,
         "narHash": "sha256-c+Z8DdDj+bFTxT5h4oxbE6EoiRp9LHzTwPJErBLOqt4=",
-        "owner": "Sinity",
-        "repo": "scribe-tap",
+        "ref": "master",
         "rev": "8ecc697dd730f29707980ff62abf8f65a83892db",
-        "type": "github"
+        "revCount": 18,
+        "type": "git",
+        "url": "file:///realm/project/scribe-tap"
       },
       "original": {
-        "owner": "Sinity",
-        "repo": "scribe-tap",
-        "type": "github"
+        "ref": "master",
+        "type": "git",
+        "url": "file:///realm/project/scribe-tap"
       }
     },
     "sinevec": {
@@ -1171,15 +1174,16 @@
       "locked": {
         "lastModified": 1763183593,
         "narHash": "sha256-WuObnOKCMY4WD3+9Tf9HazJI/QBvlT+XsF2NZNEjyNQ=",
-        "owner": "Sinity",
-        "repo": "sinevec",
+        "ref": "master",
         "rev": "3a27e5bc7808d7f075e8d854b76cd8f3b7704c4c",
-        "type": "github"
+        "revCount": 28,
+        "type": "git",
+        "url": "file:///realm/project/_inactive/sinevec"
       },
       "original": {
-        "owner": "Sinity",
-        "repo": "sinevec",
-        "type": "github"
+        "ref": "master",
+        "type": "git",
+        "url": "file:///realm/project/_inactive/sinevec"
       }
     },
     "sinex": {
@@ -1193,18 +1197,18 @@
         ]
       },
       "locked": {
-        "lastModified": 1766806563,
-        "narHash": "sha256-43rsBZL7emlvI+kP/9zKKM6JfGf7fa9Q4Hs2K2XVbvM=",
+        "lastModified": 1767827035,
+        "narHash": "sha256-zgpqNTu2wby4Q3b1KqfidKzWHstq3gJe7dN5KbnCjMs=",
         "ref": "master",
-        "rev": "4c461bd6ddb1c7905df0e13f1c61ea798656bfc7",
-        "revCount": 1770,
+        "rev": "f730ffd2d99623417fb43b5cc0a5fdf582fc87f6",
+        "revCount": 1813,
         "type": "git",
-        "url": "ssh://git@github.com/Sinity/sinex"
+        "url": "file:///realm/project/sinex"
       },
       "original": {
         "ref": "master",
         "type": "git",
-        "url": "ssh://git@github.com/Sinity/sinex"
+        "url": "file:///realm/project/sinex"
       }
     },
     "stylix": {

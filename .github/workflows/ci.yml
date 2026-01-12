@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "*"
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          install_url: https://releases.nixos.org/nix/nix-2.19.2/install
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            extra-substituters = https://numtide.cachix.org https://sinity.cachix.org
+            extra-trusted-public-keys = numtide.cachix.org-1:2ps1kLBUWjxIneOy1Ik6cQjb41X0iXVXeHigGmycPPE= sinity.cachix.org-1:i5YsUuuRv9r790gdwwE+FiJiUcWULV1lEOmKE50Y+TI=
+
+      - name: Check Nix formatting
+        run: nix run .#fmt-check -- $(git ls-files '*.nix')
+
+      - name: Run flake checks (includes nixosTests)
+        run: nix flake check

@@ -9,7 +9,10 @@ mkFeatureModule {
     in
     {
       home-manager.users.${user} = { ... }: {
-        home.packages = [ pkgs.clipse ];
+        home.packages = with pkgs; [
+          clipse
+          wl-clipboard
+        ];
 
         services.clipse = {
           enable = true;

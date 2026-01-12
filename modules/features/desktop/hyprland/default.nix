@@ -206,6 +206,7 @@ in
         slurp
         grimblast
         wl-screenrec
+        xdg-desktop-portal-gtk
       ];
 
       systemd.user.services.hyprpaper.Unit.X-Restart-Triggers = lib.mkForce [ ];

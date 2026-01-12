@@ -49,6 +49,23 @@
     wayland.windowManager.hyprland.settings.monitor = [
       ",3840x2160@120,auto,1,bitdepth,10,cm,hdr,sdrbrightness,1.4,sdrsaturation,1.0"
     ];
+
+    wayland.windowManager.hyprland.settings.monitorv2 = [
+      {
+        output = "DP-3";
+        mode = "3840x2160@120";
+        position = "0x0";
+        scale = 1;
+        bitdepth = "10";
+        cm = "hdr";
+        sdrbrightness = 1.4;
+        sdrsaturation = 1.0;
+        sdr_min_luminance = 0.02;
+        sdr_max_luminance = 200;
+        supports_hdr = 1;
+        supports_wide_color = 1;
+      }
+    ];
   };
 
   security.pam.services.hyprlock = { };

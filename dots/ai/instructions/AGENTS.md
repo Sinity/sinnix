@@ -1,86 +1,88 @@
-# Task and Time Tracking Protocol
+# Task and Time Tracking Protocol (Agent)
 
 **ALWAYS ACTIVE**: Use taskwarrior and timewarrior to track work during conversations in this project.
 
 ## Critical Rules
 
-1. **Instance Identification**
+1. **Identity**
    ```bash
-   # At conversation start, set instance ID
-   CLAUDE_INSTANCE_ID="${CLAUDE_INSTANCE_ID:-claude-$(date +%H%M%S)-$$}"
+   # Set agent identity once per environment.
+   export AGENT_NAME="codex"  # or claude, gemini, etc.
+   export AGENT_SESSION_ID="${AGENT_SESSION_ID:-${AGENT_NAME}-$(date +%H%M%S)-$$}"
    ```
 
 2. **Separation of Concerns**
-   - All Claude tasks must have `+claude-work` tag.
-   - All Claude tasks use `project:claude.*` hierarchy.
-   - User tasks have no `+claude-work` tag and are read-only unless asked.
+   - All agent tasks must have the `+agent` tag.
+   - All agent tasks must use `project:agent.*`.
+   - User tasks are anything without the `+agent` tag.
 
 3. **Project Namespacing**
    ```
-   claude.instance.{id}     <- This instance's work
-   claude.shared.{topic}    <- Shared across instances
-   {anything-else}          <- User's tasks (read-only)
+   agent.${AGENT_NAME}.${AGENT_SESSION_ID}   <- This session's work
+   agent.shared.${topic}                     <- Shared across sessions
+   {anything-else}                           <- User tasks (read-only)
    ```
 
 4. **Ownership Verification**
    ```bash
    # Before modifying ANY task, verify ownership:
-   if task {id} export | jq -r '.[0].tags[]?' | grep -q 'claude-work'; then
-       # Safe - Claude's task
+   if task {id} export | jq -r '.[0].project // ""' | grep -q '^agent\.'; then
+       # Safe - agent task
    else
-       # STOP - User's task, ask permission
+       # STOP - user task, ask permission
    fi
    ```
+
+## Environment Changes
+
+- **Never** use `nix profile install/add/remove` (or other ad-hoc profile commands) to add tools for the user. All package changes must go through this repo's Nix/NixOS/Home-Manager modules so they are declarative and reproducible.
+- If you believe a temporary binary is required, ask the user first or create a derivation/shell via the repo.
+- When debugging, prefer disposable shells (`nix develop`, `nix shell`, etc.) instead of mutating the user's profiles.
 
 ## When to Track
 
 **Create tasks for:**
-- User requests (`+user-request`)
+- User requests (`+user_request`)
 - Multi-step work (>3 tool calls or >5 minutes)
 - Research and investigation (`+research`)
-- Follow-up items (`+follow-up`)
+- Follow-up items (`+follow_up`)
 
 **Track time on:**
 - All significant work (>2 minutes)
-- Use tags: `claude`, `instance:{id}`, `{activity}`
+- Use tags: `agent`, `agent_${AGENT_NAME}`, `session_${AGENT_SESSION_ID}`, `{activity}` (timewarrior uses tags only)
 
 ## Core Commands
 
 **Using helpers** (recommended):
 ```bash
-source /realm/project/sinnix/dots/taskwarrior/claude-helpers-v2.sh
+source /realm/project/sinnix/dots/taskwarrior/agent-helpers.sh
 
 # Track user request
-claude_track_request "Description" "30min" "H"
+agent_track_request "Description" "30min" "H"
 
 # Annotate current work
-claude_annotate "Finding or note"
+agent_annotate "Finding or note"
 
 # Complete task
-claude_complete_task {id} "actual-time"
+agent_complete_task {id} "actual-time"
 
 # Show status
-claude_status
+agent_status
 
 # Session summary
-claude_session_summary
+agent_session_summary
 ```
 
 **Direct usage**:
 ```bash
-# Create task with proper namespacing
 task add "User request: {desc}" \
-    project:claude.instance.$CLAUDE_INSTANCE_ID \
+    project:agent.$AGENT_NAME.$AGENT_SESSION_ID \
     priority:H \
-    +user-request \
-    +claude-work \
-    +instance:$CLAUDE_INSTANCE_ID \
+    tags:agent,user_request \
     estimate:30min
 
-# Track time
-timew start claude instance:$CLAUDE_INSTANCE_ID conversation "{desc}"
+timew start agent agent_${AGENT_NAME} session_${AGENT_SESSION_ID} conversation
 
-# Complete
 task {id} modify actual:45min
 task {id} done
 timew stop
@@ -90,45 +92,31 @@ timew stop
 
 **CAN do:**
 ```bash
-# Read user's tasks
-task -claude-work status:pending
-
-# Report to user
-"You have 5 tasks due today in your 'work' project"
-
-# Create task FOR user (if asked)
-task add "Buy milk" project:personal  # NO +claude-work tag
+task -agent status:pending
 ```
 
 **CANNOT do:**
 - Modify user's tasks without explicit permission
 - Delete user's tasks
-- Add `+claude-work` to user's tasks
+- Add `+agent` to user's tasks
 - Track time on user's tasks (unless asked)
 
-## Multi-Instance Coordination
+## Multi-Session Coordination
 
 **Check for others at startup:**
 ```bash
-OTHERS=$(task +ACTIVE +claude-work project.startswith:claude.instance count)
+OTHERS=$(task +ACTIVE +agent project.startswith:agent.$AGENT_NAME. count)
 if [ "$OTHERS" -gt 0 ]; then
-    echo "WARNING: $OTHERS other Claude instance(s) active"
+    echo "WARNING: $OTHERS other session(s) active"
 fi
 ```
 
 **View separation:**
 ```bash
-# My instance only
-task +instance:$CLAUDE_INSTANCE_ID
-
-# Other instances
-task +ACTIVE +claude-work -instance:$CLAUDE_INSTANCE_ID
-
-# All Claude work
-task +claude-work
-
-# User's tasks only
-task -claude-work
+task project:agent.$AGENT_NAME.$AGENT_SESSION_ID
+task +ACTIVE +agent project.startswith:agent.$AGENT_NAME.
+task +agent
+task -agent
 ```
 
 ## Proactive Behavior
@@ -144,57 +132,17 @@ task -claude-work
 - Natural break points in conversation
 - Completing major work
 
-**Quick summary format:**
-```
-"Completed {n} tasks:
-- Task A (30min)
-- Task B (45min)
-Total: 1h 15min on {activities}"
-```
-
-## Anti-Patterns (Avoid)
-
-- Creating tasks without `+claude-work`
-- Using `project:conversation` (use `project:claude.instance.{id}`)
-- Modifying tasks without ownership check
-- Forgetting instance ID in multi-instance scenarios
-- Tracking time without `claude` tag
-- Polluting user's task space
-
-## Quick Reference Card
-
-```bash
-# At conversation start
-source /realm/project/sinnix/dots/taskwarrior/claude-helpers-v2.sh
-# (Sets CLAUDE_INSTANCE_ID automatically)
-
-# User makes request
-claude_track_request "What they want" "estimate" "priority"
-
-# During work
-claude_annotate "What I discovered"
-
-# Complete work
-claude_complete_task {id} "actual-time"
-
-# Status check
-claude_status              # My work
-task -claude-work          # User's tasks
-claude_session_summary     # Summary
-```
-
 ## File Locations
 
-- Helpers: `/realm/project/sinnix/dots/taskwarrior/claude-helpers-v2.sh`
+- Helpers: `/realm/project/sinnix/dots/taskwarrior/agent-helpers.sh`
 - Detailed skill: `/realm/project/sinnix/.claude/skills/task-tracking.md`
-- Multi-instance FAQ: `/realm/project/sinnix/dots/README-claude-multi-instance-faq.md`
-- User guide: `/realm/project/sinnix/dots/README-claude-task-tracking.md`
+- User guide: `/realm/project/sinnix/dots/README-agent-task-tracking.md`
+- Multi-session FAQ: `/realm/project/sinnix/dots/README-agent-multi-instance-faq.md`
 
 ## Success Criteria
 
 - Every significant user request is tracked
-- All Claude tasks have `+claude-work`
-- Instance IDs prevent conflicts
+- All agent tasks have `+agent` and `project:agent.*`
+- Session IDs prevent conflicts
 - User's tasks remain untouched
 - Time tracking provides insights
-- Summaries are helpful and accurate

@@ -1,23 +1,24 @@
-{ lib, config, pkgs, ... }:
-let
-  cfg = config.sinnix.features.desktop.gaming;
-  user = config.sinnix.user.name;
-in
-{
-  options.sinnix.features.desktop.gaming = {
-    enable = lib.mkEnableOption "Desktop Gaming Support (Steam/Gamemode)";
-  };
+{ mkFeatureModule, pkgs, ... }@args:
+mkFeatureModule {
+  path = [ "desktop" "gaming" ];
+  description = "Steam/gamemode gaming support";
+  configFn =
+    { config, lib, pkgs, ... }:
+    let
+      user = config.sinnix.user.name;
+    in
+    {
+      programs = {
+        steam = {
+          enable = true;
+          gamescopeSession.enable = true;
+        };
+        gamemode.enable = true;
+      };
 
-  config = lib.mkIf cfg.enable {
-    programs.steam = {
-      enable = true;
-      gamescopeSession.enable = true;
+      home-manager.users.${user}.home.packages = with pkgs; [
+        mangohud
+        steam-run
+      ];
     };
-    programs.gamemode.enable = true;
-
-    home-manager.users.${user}.home.packages = with pkgs; [
-      mangohud
-      steam-run
-    ];
-  };
-}
+} args

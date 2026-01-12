@@ -110,13 +110,19 @@ in
       ];
       config = {
         common = {
-          default = ["hyprland" "gtk"];
+          default = ["gtk" "hyprland"];
         };
         hyprland = {
-          default = ["hyprland" "gtk"];
+          default = ["gtk" "hyprland"];
+          "org.freedesktop.impl.portal.ScreenCast" = ["hyprland"];
+          "org.freedesktop.impl.portal.Screenshot" = ["hyprland"];
           "org.freedesktop.impl.portal.Secret" = ["gnome-keyring"];
         };
       };
+    };
+
+    systemd.user.services."xdg-desktop-portal".environment = {
+      XDG_DESKTOP_PORTAL_DIR = "/run/current-system/sw/share/xdg-desktop-portal/portals";
     };
 
     fonts = {

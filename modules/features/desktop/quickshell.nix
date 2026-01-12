@@ -1,21 +1,14 @@
-{
-  inputs,
-  pkgs,
-  lib,
-  config,
-  ...
-}:
-let
-  cfg = config.sinnix.features.desktop.quickshell;
-  user = config.sinnix.user.name;
-in
-{
-  options.sinnix.features.desktop.quickshell = {
-    enable = lib.mkEnableOption "Quickshell Status Bar";
-  };
-
-  config = lib.mkIf cfg.enable {
-    home-manager.users.${user} = { pkgs, inputs, ... }:
+{ mkFeatureModule, inputs, pkgs, ... }@args:
+mkFeatureModule {
+  path = [ "desktop" "quickshell" ];
+  description = "Quickshell status bar";
+  configFn =
+    { config, pkgs, lib, inputs, ... }:
+    let
+      user = config.sinnix.user.name;
+    in
+    {
+      home-manager.users.${user} = { pkgs, inputs, ... }:
       let
         quickshellConfigFile = pkgs.writeText "shell.qml" ''
           import QtQuick
@@ -237,5 +230,5 @@ in
           qs-reload = "systemctl --user restart quickshell";
         };
       };
-  };
-}
+    };
+} args

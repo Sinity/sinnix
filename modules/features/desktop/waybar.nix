@@ -1,55 +1,46 @@
-{
-  pkgs,
-  lib,
-  config,
-  ...
-}:
-let
-  cfg = config.sinnix.features.desktop.waybar;
-  user = config.sinnix.user.name;
-  sinnix = config.sinnix;
-
-  scriptPath = rel: "${sinnix.paths.projectRoot}/scripts/${rel}";
-  waybarAudioSignal = 12;
-  
-  audioOutputStatus = pkgs.writeShellApplication {
-    name = "audio-output-status";
-    runtimeInputs = with pkgs; [
-      coreutils
-      gawk
-      jq
-      pipewire
-    ];
-    text = ''
-      exec ${pkgs.bash}/bin/bash ${scriptPath "audio-output-status"} "$@"
-    '';
-  };
-  
-  audioOutputToggle = pkgs.writeShellApplication {
-    name = "toggle-audio-output";
-    runtimeInputs = with pkgs; [
-      coreutils
-      gawk
-      jq
-      pipewire
-      procps
-    ];
-    text = ''
-      exec ${pkgs.bash}/bin/bash ${scriptPath "toggle-audio-output"} "$@"
-    '';
-  };
-in
-{
-  options.sinnix.features.desktop.waybar = {
-    enable = lib.mkEnableOption "Waybar Status Bar";
-  };
-
-  config = lib.mkIf cfg.enable {
-    home-manager.users.${user} = { pkgs, lib, ... }: {
-      home.packages = [
-        audioOutputToggle
-        audioOutputStatus
-      ];
+{ mkFeatureModule, pkgs, ... }@args:
+mkFeatureModule {
+  path = [ "desktop" "waybar" ];
+  description = "Waybar status bar";
+  configFn =
+    { config, pkgs, lib, ... }:
+    let
+      user = config.sinnix.user.name;
+      sinnix = config.sinnix;
+      scriptPath = rel: "${sinnix.paths.projectRoot}/scripts/${rel}";
+      waybarAudioSignal = 12;
+      audioOutputStatus = pkgs.writeShellApplication {
+        name = "audio-output-status";
+        runtimeInputs = with pkgs; [
+          coreutils
+          gawk
+          jq
+          pipewire
+        ];
+        text = ''
+          exec ${pkgs.bash}/bin/bash ${scriptPath "audio-output-status"} "$@"
+        '';
+      };
+      audioOutputToggle = pkgs.writeShellApplication {
+        name = "toggle-audio-output";
+        runtimeInputs = with pkgs; [
+          coreutils
+          gawk
+          jq
+          pipewire
+          procps
+        ];
+        text = ''
+          exec ${pkgs.bash}/bin/bash ${scriptPath "toggle-audio-output"} "$@"
+        '';
+      };
+    in
+    {
+      home-manager.users.${user} = { pkgs, lib, ... }: {
+        home.packages = [
+          audioOutputToggle
+          audioOutputStatus
+        ];
 
       # Restart Waybar on every Home Manager activation
       home.activation.restartWaybar = lib.hm.dag.entryAfter [ "reloadSystemd" ] ''
@@ -246,8 +237,8 @@ in
             on-click = "fnottctl dismiss";
             on-click-right = "fnottctl actions";
           };
+          };
         };
       };
     };
-  };
-}
+} args

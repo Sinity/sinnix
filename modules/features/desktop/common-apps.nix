@@ -1,37 +1,35 @@
-{
-  lib,
-  config,
-  ...
-}:
-let
-  cfg = config.sinnix.features.desktop.common-apps;
-  user = config.sinnix.user.name;
-in
-{
-  options.sinnix.features.desktop.common-apps = {
-    enable = lib.mkEnableOption "Common Desktop Applications and Settings";
-  };
-
-  config = lib.mkIf cfg.enable {
-    home-manager.users.${user} =
-      {
-        pkgs,
-        lib,
-        config,
-        dotsRepoPath,
-        helpers,
-        ...
-      }:
-      let
-        mkDotsRepoLink = helpers.mkDotsSymlink config dotsRepoPath;
-      in
-      {
+{ mkFeatureModule, pkgs, ... }@args:
+mkFeatureModule {
+  path = [ "desktop" "common-apps" ];
+  description = "Common desktop applications and settings";
+  configFn =
+    { config, lib, helpers, ... }:
+    let
+      globalConfig = config;
+      user = globalConfig.sinnix.user.name;
+      dotsRepoPath = globalConfig.sinnix.paths.dotsRoot;
+      mkDotsRepoLink = helpers.mkDotsSymlink globalConfig dotsRepoPath;
+    in
+    {
+      home-manager.users.${user} =
+        {
+          pkgs,
+          lib,
+          config,
+          ...
+        }:
+        let
+          mkDotsRepoLink = helpers.mkDotsSymlink config dotsRepoPath;
+        in
+        {
         home.packages = with pkgs; [
           junction
           nautilus
           bleachbit
           transmission_4-gtk
           pwvucontrol
+          single-file-cli
+          blueman
           weechat
           piper
           solaar
@@ -41,6 +39,7 @@ in
           imgur-screenshot
           aria2
           lnch
+          libnotify
         ];
 
         home.file = {
@@ -90,5 +89,5 @@ in
           };
         };
       };
-  };
-}
+    };
+} args

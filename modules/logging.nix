@@ -20,20 +20,45 @@ let
     text = ''
       set -euo pipefail
 
+      wait_for_boot_completion() {
+        local state
+        for _ in $(seq 1 12); do
+          state="$(systemctl is-system-running 2>/dev/null || true)"
+          case "''${state}" in
+            running|degraded)
+              return 0
+              ;;
+          esac
+          echo "capture-boot-metrics: system state ''${state:-unknown}, waiting..."
+          sleep 5
+        done
+        echo "capture-boot-metrics: system state still ''${state:-unknown}; continuing anyway"
+      }
+
+      if [ "''${CAPTURE_BOOT_METRICS_SKIP_WAIT:-0}" = "1" ]; then
+        echo "capture-boot-metrics: skipping wait for system state"
+      else
+        wait_for_boot_completion
+      fi
+
       BOOT_ID="$(cat /proc/sys/kernel/random/boot_id)"
-      # Don't block boot progress; just record the current state if available.
-      systemctl is-system-running --quiet >/dev/null 2>&1 || true
+
+      run_timeout() {
+        local limit="$1"
+        shift
+        timeout "$limit" "$@" || true
+      }
 
       OUT_DIR="${bootMetricsDir}/''${BOOT_ID}"
       mkdir -p "''${OUT_DIR}"
 
-      systemd-analyze time > "''${OUT_DIR}/time.txt" || true
-      systemd-analyze blame > "''${OUT_DIR}/blame.txt" || true
-      systemd-analyze critical-chain > "''${OUT_DIR}/critical-chain.txt" || true
-      systemd-analyze plot > "''${OUT_DIR}/boot.svg" || true
+      run_timeout 10s systemd-analyze time > "''${OUT_DIR}/time.txt"
+      run_timeout 15s systemd-analyze blame > "''${OUT_DIR}/blame.txt"
+      run_timeout 15s systemd-analyze critical-chain > "''${OUT_DIR}/critical-chain.txt"
+      run_timeout 20s systemd-analyze plot > "''${OUT_DIR}/boot.svg"
 
-      journalctl -b -p 0..3 > "''${OUT_DIR}/journal-errors.log" || true
-      dmesg > "''${OUT_DIR}/dmesg.log"
+      run_timeout 20s journalctl -b -p 0..3 > "''${OUT_DIR}/journal-errors.log"
+      run_timeout 15s dmesg > "''${OUT_DIR}/dmesg.log"
 
     '';
   };
@@ -59,17 +84,29 @@ in
 
     systemd.services.capture-boot-metrics = {
       description = "Capture boot metrics and logs";
-      wantedBy = [ "multi-user.target" ];
       after = [
         "systemd-journald.service"
       ];
+      environment = {
+        CAPTURE_BOOT_METRICS_SKIP_WAIT = "1";
+      };
       serviceConfig = {
         Type = "oneshot";
         ExecStart = "${captureBootMetrics}/bin/capture-boot-metrics";
-        TimeoutStartSec = 30;
+        TimeoutStartSec = "2min";
       };
       unitConfig = {
         RequiresMountsFor = [ bootMetricsDir ];
+      };
+    };
+
+    systemd.timers.capture-boot-metrics = {
+      description = "Schedule boot metrics capture";
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnBootSec = "1min";
+        AccuracySec = "10s";
+        Unit = "capture-boot-metrics.service";
       };
     };
   };

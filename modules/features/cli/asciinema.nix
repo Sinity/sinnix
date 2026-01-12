@@ -1,20 +1,17 @@
-{
-  pkgs,
-  lib,
-  config,
-  ... 
-}: 
-let
-  cfg = config.sinnix.features.cli.asciinema;
-  user = config.sinnix.user.name;
-in
-{
-  options.sinnix.features.cli.asciinema = {
-    enable = lib.mkEnableOption "Asciinema Shell Integration";
-  };
-
-  config = lib.mkIf cfg.enable {
-    home-manager.users.${user} = { config, pkgs, lib, sinnix, ... }:
+{ mkFeatureModule, ... }@args:
+mkFeatureModule {
+  path = [ "cli" "asciinema" ];
+  description = "Asciinema shell integration";
+  configFn =
+    args@{ config, lib, ... }:
+    let
+      sinnix = config.sinnix;
+      user = sinnix.user.name;
+      inherit (sinnix.paths) capturesRoot;
+      pkgs = args.pkgs;
+    in
+    {
+      home-manager.users.${user} = { config, pkgs, lib, sinnix, ... }:
       let
         inherit (sinnix.paths) capturesRoot;
         recordingsDir = "${capturesRoot}/asciinema";
@@ -238,5 +235,5 @@ ltk/}"
           fi
         '';
       };
-  };
-}
+    };
+} args
