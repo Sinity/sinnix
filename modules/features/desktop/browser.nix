@@ -32,7 +32,12 @@ mkFeatureModule {
           ...
         }:
         let
-          chromeStablePkg = pkgs.google-chrome;
+          # Disable Chromium's Wayland color management - it conflicts with
+          # Hyprland's HDR mode, causing washed out colors.
+          # See: https://github.com/hyprwm/Hyprland/discussions/11910
+          chromeStablePkg = pkgs.google-chrome.override {
+            commandLineArgs = "--disable-features=WaylandWpColorManagerV1";
+          };
           mkDotsRepoLink = helpers.mkDotsSymlink config dotsRepoPath;
           quteDots = rel: mkDotsRepoLink ("/qutebrowser" + rel);
           mkUserScript = name: {

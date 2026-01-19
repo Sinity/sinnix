@@ -7,14 +7,8 @@ set -euo pipefail
 
 DEFAULT_REALM_ROOT=${REALM_ROOT:-/realm/project}
 if [ -z "${KB_ROOT:-}" ]; then
-  for candidate in "${DEFAULT_REALM_ROOT}/knowledgebase" "/realm/knowledgebase" "$HOME/knowledgebase"; do
-    if [ -d "$candidate" ]; then
-      KB_ROOT="$candidate"
-      break
-    fi
-  done
+  KB_ROOT="${DEFAULT_REALM_ROOT}/knowledgebase"
 fi
-KB_ROOT=${KB_ROOT:-${DEFAULT_REALM_ROOT}/knowledgebase}
 RAWLOG_BIN=${RAWLOG_BIN:-$HOME/.local/bin/rawlog}
 CANCEL_CODE=${RAWLOG_CANCEL_CODE:-130}
 GUM_WIDTH=${GUM_WIDTH:-80}

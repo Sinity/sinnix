@@ -13,17 +13,55 @@
     "deny": [],
     "defaultMode": "default"
   },
+  "model": "opus",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'CMD=$(cat | jq -r \".tool_input.command // \\\"\\\"\"); echo \"$CMD\" | grep -qE \"rm\\s+(-[rRf]+\\s+|.*\\s+-[rRf]+)\" && echo \"{\\\"decision\\\":\\\"deny\\\",\\\"reason\\\":\\\"Use trash or backup instead of rm -rf\\\"}\" >&2 && exit 2; echo \"$CMD\" | grep -qE \"(nix\\s+profile\\s+(install|add|remove)|cargo\\s+install|pip3?\\s+install|npm\\s+install\\s+-g)\" && echo \"{\\\"decision\\\":\\\"deny\\\",\\\"reason\\\":\\\"Use declarative config instead of imperative install\\\"}\" >&2 && exit 2; echo \"$CMD\" | grep -qE \"git\\s+push\\s+.*--force.*(main|master)\" && echo \"{\\\"decision\\\":\\\"deny\\\",\\\"reason\\\":\\\"Force push to main/master blocked\\\"}\" >&2 && exit 2; exit 0'",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Before stopping, verify: 1) Goal achieved or clearly blocked? 2) Todos complete or explained? 3) User will understand state? Return 'approve' if done. Return 'block' only if clearly incomplete.",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Context compacting. Output concise summary: 1) Current goal 2) Progress (done/in-progress/remaining) 3) Key decisions 4) Open questions. Format as: ## Preserved State\\n[summary]",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  },
   "enabledPlugins": {
     "context7@claude-plugins-official": true,
-    "serena@claude-plugins-official": false,
-    "github@claude-plugins-official": false,
-    "frontend-design@claude-plugins-official": true,
     "feature-dev@claude-plugins-official": true,
     "agent-sdk-dev@claude-plugins-official": true,
     "hookify@claude-plugins-official": true,
-    "greptile@claude-plugins-official": false,
     "rust-analyzer-lsp@claude-plugins-official": true,
-    "plugin-dev@claude-plugins-official": true
+    "plugin-dev@claude-plugins-official": true,
+    "commit-commands@claude-plugins-official": true,
+    "pr-review-toolkit@claude-plugins-official": true,
+    "learning-output-style@claude-plugins-official": true
   },
   "alwaysThinkingEnabled": true
 }

@@ -2,17 +2,40 @@
   "servers": [
     {
       "extensions": ["py", "pyi"],
-      "command": ["uvx", "--from", "python-lsp-server", "pylsp"],
-      "rootDir": "."
+      "command": ["lsp-root", "uvx", "--from", "python-lsp-server", "pylsp"]
     },
     {
       "extensions": ["rs"],
-      "command": ["rust-analyzer"],
-      "rootDir": "."
+      "command": ["lsp-root", "rust-analyzer"]
+    },
+    {
+      "extensions": ["go", "mod", "sum"],
+      "command": ["lsp-root", "gopls"]
+    },
+    {
+      "extensions": ["nix"],
+      "command": ["lsp-root", "nil"]
+    },
+    {
+      "extensions": ["sh", "bash", "zsh"],
+      "command": ["lsp-root", "bash-language-server", "start"]
+    },
+    {
+      "extensions": ["lua"],
+      "command": ["lsp-root", "lua-language-server"]
+    },
+    {
+      "extensions": ["yml", "yaml"],
+      "command": ["lsp-root", "yaml-language-server", "--stdio"]
+    },
+    {
+      "extensions": ["md", "markdown"],
+      "command": ["lsp-root", "marksman"]
     },
     {
       "extensions": ["ts", "tsx", "js", "jsx"],
       "command": [
+        "lsp-root",
         "npx",
         "-y",
         "-p",
@@ -21,8 +44,7 @@
         "typescript-language-server",
         "typescript-language-server",
         "--stdio"
-      ],
-      "rootDir": "."
+      ]
     }
   ]
 }

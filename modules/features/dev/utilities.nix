@@ -1,17 +1,45 @@
 { mkFeatureModule, pkgs, ... }@args:
 mkFeatureModule {
-  path = [ "dev" "utilities" ];
+  path = [
+    "dev"
+    "utilities"
+  ];
   description = "Development utilities and MCP servers";
   configFn =
-    { config, lib, pkgs, inputs, helpers, ... }:
+    {
+      config,
+      lib,
+      pkgs,
+      inputs,
+      helpers,
+      ...
+    }:
     let
       globalConfig = config;
       user = config.sinnix.user.name;
       dotsRepoPath = globalConfig.sinnix.paths.dotsRoot;
       mkDotsRepoLink = rel: globalConfig.lib.file.mkOutOfStoreSymlink (dotsRepoPath + rel);
+      firecrawlSecretPath = lib.attrByPath [ "sinnix" "secrets" "paths" "firecrawl-api-key" ] null config;
+      firecrawlSecretExport =
+        if firecrawlSecretPath != null then
+          ''
+            if [ -z "''${FIRECRAWL_API_KEY:-}" ] && [ -r ${firecrawlSecretPath} ]; then
+              export FIRECRAWL_API_KEY="$(<${firecrawlSecretPath})"
+            fi
+          ''
+        else
+          "";
+      qdrantLdLibraryPath = lib.makeLibraryPath [
+        pkgs.stdenv.cc.cc.lib
+      ];
       mcpQdrantBin = pkgs.writeShellScriptBin "mcp-qdrant" ''
         set -euo pipefail
         export QDRANT_URL="''${QDRANT_URL:-http://127.0.0.1:6333}"
+        if [ -n "''${LD_LIBRARY_PATH:-}" ]; then
+          export LD_LIBRARY_PATH="${qdrantLdLibraryPath}:''${LD_LIBRARY_PATH}"
+        else
+          export LD_LIBRARY_PATH="${qdrantLdLibraryPath}"
+        fi
         exec ${pkgs.uv}/bin/uv run \
           --with fastmcp \
           --with qdrant-client \
@@ -32,11 +60,18 @@ mkFeatureModule {
       '';
       mcpFirecrawlBin = pkgs.writeShellScriptBin "mcp-firecrawl" ''
         set -euo pipefail
+        ${firecrawlSecretExport}
         exec npx -y firecrawl-mcp
       '';
+      lspRootLauncher = import ../../lib/lsp-root.nix { inherit pkgs; };
       mcpPlaywrightBin = pkgs.writeShellScriptBin "mcp-playwright" ''
         set -euo pipefail
         exec npx -y @playwright/mcp@latest
+      '';
+      mcpCclspBin = pkgs.writeShellScriptBin "mcp-cclsp" ''
+        set -euo pipefail
+        export CCLSP_CONFIG_PATH="''${CCLSP_CONFIG_PATH:-$HOME/.config/claude/cclsp.json}"
+        exec npx -y cclsp@latest
       '';
     in
     {
@@ -99,6 +134,7 @@ mkFeatureModule {
                 gnuplot
                 google-cloud-sdk
                 gource
+                gopls
                 hyperfine
                 intel-gpu-tools
                 libva-utils
@@ -110,9 +146,11 @@ mkFeatureModule {
                 mesa-demos
                 meld
                 meson
+                marksman
                 miller
                 ncdu
                 ninja
+                nil
                 nvitop
                 nix-doc
                 nix-fast-build
@@ -130,6 +168,9 @@ mkFeatureModule {
                 plantuml
                 powertop
                 python312Packages.speedtest-cli
+                lua-language-server
+                nodePackages_latest.bash-language-server
+                nodePackages_latest.yaml-language-server
                 s-tui
                 scc
                 stress-ng
@@ -150,12 +191,14 @@ mkFeatureModule {
                 zk
               ]
               ++ [
+                lspRootLauncher
                 mcpQdrantBin
                 mcpPostgresBin
                 mcpSqliteBin
                 mcpContext7Bin
                 mcpFirecrawlBin
                 mcpPlaywrightBin
+                mcpCclspBin
               ]
             );
 
@@ -206,6 +249,7 @@ mkFeatureModule {
             ".local/bin/mcp-context7".source = "${mcpContext7Bin}/bin/mcp-context7";
             ".local/bin/mcp-firecrawl".source = "${mcpFirecrawlBin}/bin/mcp-firecrawl";
             ".local/bin/mcp-playwright".source = "${mcpPlaywrightBin}/bin/mcp-playwright";
+            ".local/bin/mcp-cclsp".source = "${mcpCclspBin}/bin/mcp-cclsp";
             ".gemini/settings.json" = {
               source = mkDotsRepoLink "/gemini/settings.json";
               force = true;

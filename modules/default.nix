@@ -5,6 +5,7 @@
     ./core.nix
     ./diagnostics.nix
     ./foundation.nix
+    ./projects.nix
     ./home-manager.nix
     ./logging.nix
     ./networking.nix

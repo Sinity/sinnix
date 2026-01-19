@@ -23,8 +23,8 @@ The template contains:
 - MCP servers aligned with VS Code: GitHub (expects `GITHUB_TOKEN`), a local
   PostgreSQL bridge (no auth required, talks to the socket at
   `/run/postgresql`), Playwright/Context7/Firecrawl via `~/.local/bin/mcp-*`
-  wrappers, plus a local Qdrant server executed via the `~/.local/bin/mcp-qdrant`
-  wrapper.
+  wrappers, the shared `cclsp` bridge for language servers, plus a local Qdrant
+  server executed via the `~/.local/bin/mcp-qdrant` wrapper.
 - `features.rmcp_client = true` for hosted MCP OAuth flows
 
 The shell profile now sources the agenix export snippet automatically; use the
@@ -60,3 +60,15 @@ The resolve step accepts any fuzzy library name and returns a list of IDs. Pass
 whichever `/org/repo` slug you need into `get-library-docs` (optionally with a
 `topic` or `tokens` override) and Codex will load the docs directly into the
 conversation—no separate CLI wrapper required.
+
+## LSP / cclsp bridge
+
+All coding agents (Claude Desktop, Codex CLI, OpenCode) share the same
+`~/.config/claude/cclsp.json` manifest. Each entry launches a language server via
+the `lsp-root` helper which walks up from the current file to find
+markers such as `Cargo.toml`, `go.mod`, `flake.nix`, `package.json`, etc. If a
+marker is found, the launcher `cd`s to that directory before spawning the
+language server so requests resolve relative to the project root. Customize the
+markers by setting `CCLSP_ROOT_MARKERS` (colon-delimited list) or editing the
+JSON file; all MCP wrappers will pick up the changes automatically on the next
+`nixos-rebuild` / `home-manager switch`.

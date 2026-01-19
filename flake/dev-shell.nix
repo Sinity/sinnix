@@ -35,6 +35,7 @@
                   rootHash = builtins.substring 0 10 (builtins.hashString "sha256" resolvedRoot);
                 in
                 "/tmp/sinnix-devenv-" + rootHash;
+              lspRootLauncher = import ../modules/lib/lsp-root.nix { inherit pkgs; };
             in
             {
               # Basic shell information
@@ -79,6 +80,7 @@
                 yq
                 fd
                 ripgrep
+                lspRootLauncher
               ];
 
               # Disable devenv-managed git hooks; use the committed
