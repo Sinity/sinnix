@@ -59,6 +59,9 @@ in
       LimitRTPRIO = 95;
       LimitMEMLOCK = "infinity";
       Nice = -11;
+      # Auto-recover from silent audio daemon crashes
+      Restart = "on-failure";
+      RestartSec = 2;
     };
 
     security.pam.loginLimits = [

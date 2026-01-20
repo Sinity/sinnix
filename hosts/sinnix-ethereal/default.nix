@@ -26,7 +26,7 @@
       };
     };
 
-    # Keep the desktop stack disabled on the VPS
+    # mkForce: Headless VPS has no graphics hardware; override any module defaults
     xserver.enable = lib.mkForce false;
   };
 
@@ -34,6 +34,7 @@
 
   sinnix.features.cli.core.enable = true;
 
+  # mkForce: Redundant with isDesktop=false, but explicit host-level override for clarity
   programs.hyprland.enable = lib.mkForce false;
   programs.zsh.enable = true;
 }

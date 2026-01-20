@@ -102,6 +102,7 @@ in
 
     xdg.portal = {
       enable = true;
+      # mkForce: Disable wlr portal in favor of hyprland-specific portal (better screenshare)
       wlr.enable = lib.mkForce false;
       xdgOpenUsePortal = true;
       extraPortals = lib.mkAfter [

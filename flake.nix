@@ -55,11 +55,6 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    sinevec = {
-      url = "git+file:///realm/project/_inactive/sinevec?ref=master";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
     # Private Sinex repository stored locally; build fails fast if missing.
     sinex = {
       url = "git+file:///realm/project/sinex?ref=master";
@@ -73,12 +68,6 @@
     # VSCode extensions overlay (community-maintained)
     nix-vscode-extensions.url = "github:nix-community/nix-vscode-extensions";
     nix-vscode-extensions.inputs.nixpkgs.follows = "nixpkgs";
-
-    # Modern Qt/QML based desktop shell toolkit
-    quickshell = {
-      url = "git+https://git.outfoxxed.me/outfoxxed/quickshell";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
 
     nix-ai-tools.url = "github:numtide/nix-ai-tools";
 

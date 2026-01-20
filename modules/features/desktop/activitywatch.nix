@@ -14,6 +14,8 @@ mkFeatureModule {
     in
     {
       home-manager.users.${user} = { pkgs, lib, ... }: {
+        # awatcher (Rust) handles both AFK and window tracking natively on Wayland
+        # Replaces legacy aw-watcher-afk (X11-only) and aw-watcher-window-wayland
         services.activitywatch = {
           enable = true;
           package = pkgs.aw-server-rust;
@@ -24,20 +26,6 @@ mkFeatureModule {
                 idle-timeout-seconds = 60;
                 poll-time-idle-seconds = 5;
                 poll-time-window-seconds = 2;
-              };
-            };
-
-            "aw-watcher-window-wayland" = {
-              package = pkgs.aw-watcher-window-wayland;
-              settings = {
-                poll-time-window-seconds = 1;
-              };
-            };
-
-            "aw-watcher-afk" = {
-              package = pkgs.aw-watcher-afk;
-              settings = {
-                timeout-seconds = 300;
               };
             };
           };

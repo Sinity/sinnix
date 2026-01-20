@@ -91,6 +91,7 @@
               };
 
               # Binary cache setup
+              # Note: "sinity" is the user's personal cachix cache (matches user.name)
               cachix.enable = true;
               cachix.pull = [
                 "sinity"

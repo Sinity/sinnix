@@ -19,9 +19,8 @@ mkFeatureModule {
       ...
     }:
     let
-      globalConfig = config;
-      user = globalConfig.sinnix.user.name;
-      dotsRepoPath = globalConfig.sinnix.paths.dotsRoot;
+      user = config.sinnix.user.name;
+      dotsRepoPath = config.sinnix.paths.dotsRoot;
     in
     {
       home-manager.users.${user} =

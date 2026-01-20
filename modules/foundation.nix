@@ -64,7 +64,7 @@ in
             indicesRoot = mkOption {
               type = types.str;
               default = "${config.dataRoot}/indices";
-              description = "Root directory for service indexes and derived stores (qdrant, sinevec, etc.).";
+              description = "Root directory for service indexes and derived stores.";
             };
 
             mediaRoot = mkOption {
@@ -87,7 +87,7 @@ in
 
             projectRoot = mkOption {
               type = types.str;
-              default = "${config.realmRoot}/sinnix";
+              default = "${config.realmRoot}/project/sinnix";
               description = "Location of the Sinnix git checkout used for editable dotfiles and dev helpers.";
             };
 
@@ -96,11 +96,25 @@ in
               default = "${config.projectRoot}/dots";
               description = "Directory containing tracked dotfiles that should be symlinked into $HOME.";
             };
+
+            cryptoRoot = mkOption {
+              type = types.str;
+              default = "/monero";
+              description = "Root directory for cryptocurrency data (Monero blockchain, Bitcoin wallets).";
+            };
           };
         }
       );
       default = { };
       description = "Filesystem roots that multiple modules share.";
+    };
+
+    storage = {
+      nextcloudHost = mkOption {
+        type = types.str;
+        default = "nextcloud-host";
+        description = "Hostname or IP of the Nextcloud server for WebDAV mounts.";
+      };
     };
   };
 

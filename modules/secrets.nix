@@ -1,3 +1,12 @@
+# Agenix secret management with auto-discovery
+#
+# Auto-discovers .age files in secret/ directory and generates:
+# - age.secrets entries with appropriate permissions
+# - Environment export script for shell integration
+# - config.sinnix.secrets.paths for programmatic access
+#
+# Note: Uses builtins.readDir at eval time for auto-discovery. This adds
+# minor eval overhead but eliminates the need for a separate manifest file.
 {
   lib,
   inputs,
@@ -6,9 +15,11 @@
 }:
 let
   username = config.sinnix.user.name;
+  userPasswordSecret = "${username}-password";
   secretDir = "${inputs.self}/secret";
   cfg = config.sinnix.secrets;
 
+  # Auto-discover .age files - evaluated once per flake eval
   secretFiles =
     if cfg.enable && builtins.pathExists secretDir then
       lib.filterAttrs (name: _: lib.hasSuffix ".age" name) (builtins.readDir secretDir)
@@ -48,8 +59,8 @@ let
             mode = "0600";
             path = "/run/agenix/davfs2-secrets";
           }
-        else if secretName == "sinity-password" then
-          rootOwnedSpec // { path = "/run/agenix/sinity-password"; }
+        else if secretName == userPasswordSecret then
+          rootOwnedSpec // { path = "/run/agenix/${userPasswordSecret}"; }
         else if secretName == "root-password" then
           rootOwnedSpec // { path = "/run/agenix/root-password"; }
         else
@@ -58,7 +69,7 @@ let
   }) secretFiles;
 
   secretsExcludedFromEnv = [
-    "sinity-password"
+    userPasswordSecret
     "root-password"
     "davfs2-secrets"
     "configstore-update-notifier"
@@ -100,6 +111,7 @@ in
   };
 
   config = {
+    # mkForce: Ensure these options are authoritative regardless of module import order
     sinnix.secrets.exportScript = lib.mkForce (if cfg.enable then secretsExportScript else "");
     sinnix.secrets.paths = lib.mkForce (
       if cfg.enable then lib.mapAttrs (_: spec: spec.path) secretSpecs else { }

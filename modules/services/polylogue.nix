@@ -37,19 +37,24 @@ let
 
   polylogueBin = "${pkgs.polylogue}/bin/polylogue";
 
-  envVars = {
-    XDG_CONFIG_HOME = xdgConfigHome;
-    XDG_DATA_HOME = xdgDataHome;
-    XDG_STATE_HOME = xdgStateHome;
+  # Shared env vars used by both systemd services and user shell
+  sharedEnvVars = {
     POLYLOGUE_CONFIG = configPath;
     POLYLOGUE_ARCHIVE_ROOT = archiveRoot;
     POLYLOGUE_RENDER_ROOT = renderRoot;
-    POLYLOGUE_FORCE_PLAIN = "1";
     POLYLOGUE_CREDENTIAL_PATH = credentialsPath;
     POLYLOGUE_TOKEN_PATH = tokenPath;
     POLYLOGUE_DRIVE_RETRIES = toString cfg.drive.retries;
     POLYLOGUE_DRIVE_RETRY_BASE = toString cfg.drive.retryBase;
     QDRANT_URL = cfg.qdrant.url;
+  };
+
+  # Systemd services need explicit XDG paths + FORCE_PLAIN
+  envVars = sharedEnvVars // {
+    XDG_CONFIG_HOME = xdgConfigHome;
+    XDG_DATA_HOME = xdgDataHome;
+    XDG_STATE_HOME = xdgStateHome;
+    POLYLOGUE_FORCE_PLAIN = "1";
   };
 
   dataDirs = [
@@ -175,6 +180,22 @@ in
         User = user;
         WorkingDirectory = chatlogRoot;
         ExecStart = lib.escapeShellArgs ([ polylogueBin ] ++ runArgs);
+        # Restart protection for oneshot
+        Restart = "on-failure";
+        RestartSec = 10;
+        StartLimitBurst = 5;
+        StartLimitIntervalSec = 60;
+        # Hardening
+        PrivateTmp = true;
+        NoNewPrivileges = true;
+        ProtectSystem = "strict";
+        ProtectHome = "read-only";
+        ProtectKernelTunables = true;
+        ProtectKernelModules = true;
+        ProtectControlGroups = true;
+        RestrictRealtime = true;
+        LockPersonality = true;
+        ReadWritePaths = [ chatlogRoot stateAppRoot ];
       };
     };
 
@@ -190,7 +211,18 @@ in
         WorkingDirectory = chatlogRoot;
         ExecStart = "${polylogueBin} serve --host 127.0.0.1 --port ${toString cfg.server.port}";
         Restart = "on-failure";
-        RestartSec = "5s";
+        RestartSec = 5;
+        # Hardening
+        PrivateTmp = true;
+        NoNewPrivileges = true;
+        ProtectSystem = "strict";
+        ProtectHome = "read-only";
+        ProtectKernelTunables = true;
+        ProtectKernelModules = true;
+        ProtectControlGroups = true;
+        RestrictRealtime = true;
+        LockPersonality = true;
+        ReadWritePaths = [ chatlogRoot stateAppRoot ];
       };
     };
 
@@ -204,16 +236,7 @@ in
       };
     };
 
-    environment.sessionVariables = {
-      POLYLOGUE_CONFIG = configPath;
-      POLYLOGUE_CREDENTIAL_PATH = credentialsPath;
-      POLYLOGUE_TOKEN_PATH = tokenPath;
-      POLYLOGUE_ARCHIVE_ROOT = archiveRoot;
-      POLYLOGUE_RENDER_ROOT = renderRoot;
-      POLYLOGUE_DRIVE_RETRIES = toString cfg.drive.retries;
-      POLYLOGUE_DRIVE_RETRY_BASE = toString cfg.drive.retryBase;
-      QDRANT_URL = cfg.qdrant.url;
-    };
+    environment.sessionVariables = sharedEnvVars;
 
     environment.systemPackages = lib.mkAfter [ pkgs.polylogue ];
   };

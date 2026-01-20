@@ -23,10 +23,51 @@ in
 
       # zram: compressed RAM swap - faster than SSD, effectively extends RAM
       # Compression ratio ~2-3x for typical workloads (debug symbols compress well)
+      # 25% of 32GB = 8GB capacity → ~16-24GB effective with compression
       zramSwap = {
         enable = true;
         algorithm = "zstd"; # Best compression/speed tradeoff
-        memoryPercent = 50; # Use up to 50% of RAM as compressed swap
+        memoryPercent = 25; # Conservative: small buffer, fail fast if exceeded
+        priority = 100; # High priority: prefer zram over disk swap
+      };
+
+      # earlyoom: kill memory hogs BEFORE system thrashes
+      # Acts on memory+swap pressure, not just when OOM is imminent
+      services.earlyoom = {
+        enable = true;
+        freeMemThreshold = 5; # Act when <5% RAM free
+        freeSwapThreshold = 10; # Act when <10% swap free (catches zram filling)
+        enableNotifications = true;
+
+        # Prefer killing build processes over interactive apps
+        extraArgs = [
+          "--prefer" "^(cc1|cc1plus|rustc|clang|ld|lld|nix-build|nix-daemon)$"
+          "--avoid" "^(Hyprland|pipewire|wireplumber|kitty|systemd)$"
+          "-r" "60" # Check every 60 seconds (default 1s is too aggressive)
+        ];
+      };
+
+      # systemd-oomd: complementary to earlyoom, uses PSI (pressure stall info)
+      systemd.oomd = {
+        enable = true;
+        enableRootSlice = true;
+        enableUserSlices = true;
+        enableSystemSlice = true;
+        settings.OOM = {
+          # Kill when memory pressure sustained >20 seconds
+          DefaultMemoryPressureDurationSec = "20s";
+        };
+      };
+
+      # nix-daemon memory limits: prevent nix builds from consuming all RAM
+      # This is the key fix for "cargo build + nix build = thrash"
+      systemd.services.nix-daemon.serviceConfig = {
+        # MemoryHigh: soft limit - kernel will reclaim aggressively above this
+        MemoryHigh = "24G";
+        # MemoryMax: hard limit - OOM kill nix workers if exceeded
+        MemoryMax = "28G";
+        # Make nix-daemon children killable before system-critical services
+        OOMScoreAdjust = 250;
       };
     }
 
@@ -372,6 +413,36 @@ in
           value = "-15";
         }
       ];
+
+      # Systemd slice for builds - these limits ACTUALLY work unlike ananicy extraCgroups
+      # Use with: systemd-run --user --slice=build.slice cargo build
+      # Or set CARGO_BUILD_JOBS in shell config
+      systemd.user.slices.build = {
+        description = "Build processes slice with memory limits";
+        sliceConfig = {
+          MemoryHigh = "16G";
+          MemoryMax = "20G";
+          CPUWeight = 30;
+          IOWeight = 30;
+        };
+      };
     })
+
+    # Cargo/Rust build parallelism - tuned for i7-13700K (24 threads / 31GB RAM)
+    # Peak memory ≈ jobs × ~1.5GB per rustc instance
+    {
+      environment.variables = {
+        # 10 parallel crates: uses ~15GB peak, leaves room for system
+        CARGO_BUILD_JOBS = "10";
+
+        # Dev: lower codegen units = less memory per crate during LLVM phase
+        # (default is 256 for dev, which causes memory spikes)
+        CARGO_PROFILE_DEV_CODEGEN_UNITS = "8";
+
+        # Release: 1 = maximum optimization (full LTO, best inlining)
+        # Slower but produces smaller/faster binaries
+        CARGO_PROFILE_RELEASE_CODEGEN_UNITS = "1";
+      };
+    }
   ];
 }

@@ -8,17 +8,12 @@
 let
   username = config.sinnix.user.name;
   userCfg = lib.attrByPath [ "users" "users" username ] config { };
-  getAttrOrFallback =
-    set: attr: fallback:
-    let
-      value = set.${attr} or null;
-    in
-    if value == null then fallback else value;
-  userUid = builtins.toString (getAttrOrFallback userCfg "uid" 1000);
-  primaryGroupName = getAttrOrFallback userCfg "group" "users";
+  userUid = builtins.toString (userCfg.uid or 1000);
+  primaryGroupName = userCfg.group or "users";
   groupCfg = lib.attrByPath [ "users" "groups" primaryGroupName ] config { };
-  primaryGroupId = builtins.toString (getAttrOrFallback groupCfg "gid" 100);
-  userHome = getAttrOrFallback userCfg "home" "/home/${username}";
+  primaryGroupId = builtins.toString (groupCfg.gid or 100);
+  userHome = userCfg.home or "/home/${username}";
+  nextcloudHost = config.sinnix.storage.nextcloudHost;
   nextcloudCert = builtins.readFile "${inputs.self}/assets/nextcloud-cert.crt";
   baseStoragePackages = with pkgs; [
     davfs2
@@ -54,12 +49,12 @@ in
         group = "root";
       };
 
-      "davfs2/certs/nextcloud-host.pem" = {
+      "davfs2/certs/${nextcloudHost}.pem" = {
         mode = "0644";
         text = nextcloudCert;
       };
 
-      "davfs2/servers/nextcloud-host".text = ''
+      "davfs2/servers/${nextcloudHost}".text = ''
         servercert sha256:0E:BA:10:DB:78:60:43:37:BD:5C:0A:60:BA:71:04:4A:FD:BF:84:D4:62:40:4A:63:8D:CD:12:5F:D4:BE:7E:8D
       '';
     };
@@ -89,7 +84,7 @@ in
   '';
 
   fileSystems."/mnt/nextcloud" = {
-    device = "https://nextcloud-host/remote.php/dav/files/USER/";
+    device = "https://${nextcloudHost}/remote.php/dav/files/USER/";
     fsType = "davfs";
     noCheck = true;
     options = [

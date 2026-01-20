@@ -5,8 +5,7 @@ mkFeatureModule {
   configFn =
     { config, lib, pkgs, helpers, ... }:
     let
-      globalConfig = config;
-      user = globalConfig.sinnix.user.name;
+      user = config.sinnix.user.name;
       kvantumPkg =
         if lib.hasAttrByPath [ "qt6Packages" "qtstyleplugin-kvantum" ] pkgs then
           pkgs.qt6Packages.qtstyleplugin-kvantum
@@ -14,7 +13,7 @@ mkFeatureModule {
           pkgs.libsForQt5.kvantum
         else
           null;
-      dotsRepoPath = globalConfig.sinnix.paths.dotsRoot;
+      dotsRepoPath = config.sinnix.paths.dotsRoot;
     in
     {
       home-manager.users.${user} =

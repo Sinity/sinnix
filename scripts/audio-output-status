@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
+# audio-output-status - Output current audio sink status as Waybar JSON
+#
+# Usage: audio-output-status [--help]
+#
+# Outputs JSON with: text, tooltip, class, volume (%), muted (bool)
+# For use in Waybar custom modules.
 set -euo pipefail
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  sed -n '2,7p' "$0" | sed 's/^# //'
+  exit 0
+fi
 
 if ! command -v wpctl >/dev/null 2>&1; then
   jq -n --arg text "󰓃" --arg tooltip "wpctl unavailable" --arg class "unavailable" '{text:$text, tooltip:$tooltip, class:$class}'

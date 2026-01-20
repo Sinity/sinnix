@@ -1,3 +1,13 @@
+# Development utilities and MCP server wrappers
+#
+# MCP servers for Claude/Codex integration:
+#   mcp-qdrant     - Vector search (env: QDRANT_URL, default: localhost:6333)
+#   mcp-postgres   - PostgreSQL queries (hardcoded: sinex_dev database)
+#   mcp-sqlite     - SQLite queries (pass db path as argument)
+#   mcp-context7   - Context7 documentation lookup
+#   mcp-firecrawl  - Web scraping (env: FIRECRAWL_API_KEY or secret)
+#   mcp-playwright - Browser automation
+#   mcp-cclsp      - LSP code intelligence (env: CCLSP_CONFIG_PATH)
 { mkFeatureModule, pkgs, ... }@args:
 mkFeatureModule {
   path = [
@@ -15,10 +25,8 @@ mkFeatureModule {
       ...
     }:
     let
-      globalConfig = config;
       user = config.sinnix.user.name;
-      dotsRepoPath = globalConfig.sinnix.paths.dotsRoot;
-      mkDotsRepoLink = rel: globalConfig.lib.file.mkOutOfStoreSymlink (dotsRepoPath + rel);
+      dotsRepoPath = config.sinnix.paths.dotsRoot;
       firecrawlSecretPath = lib.attrByPath [ "sinnix" "secrets" "paths" "firecrawl-api-key" ] null config;
       firecrawlSecretExport =
         if firecrawlSecretPath != null then
@@ -82,12 +90,11 @@ mkFeatureModule {
           config,
           inputs,
           secretPaths,
-          sinnix,
           ...
         }:
         let
           mkDotsRepoLink = helpers.mkDotsSymlink config dotsRepoPath;
-          devenvPkg = inputs.devenv.packages.${pkgs.system}.devenv;
+          devenvPkg = inputs.devenv.packages.${pkgs.stdenv.hostPlatform.system}.devenv;
         in
         {
           programs.htop = {
@@ -108,87 +115,36 @@ mkFeatureModule {
               with pkgs;
               [
                 android-tools
-                breakpad
-                cargo-bloat
-                cargo-deny
-                cargo-expand
-                cargo-flamegraph
-                cargo-machete
-                cargo-outdated
-                cargo-udeps
-                cmake
-                cocogitto
-                d2
-                drm_info
                 dua
                 duckdb
                 evtest
-                fselect
                 gcc
                 gdb
-                git-annex
-                git-cliff
                 git-filter-repo
-                glmark2
                 gnumake
-                gnuplot
                 google-cloud-sdk
-                gource
-                gopls
-                hyperfine
-                intel-gpu-tools
-                libva-utils
-                linuxPackages.cpupower
-                linuxPackages.turbostat
                 lm_sensors
                 man-pages
                 man-pages-posix
-                mesa-demos
                 meld
-                meson
-                marksman
-                miller
                 ncdu
-                ninja
                 nil
                 nvitop
-                nix-doc
                 nix-fast-build
-                nix-health
-                nix-index
                 nix-prefetch-git
                 nix-tree
                 devenvPkg
-                nmap
-                dig
-                mtr
                 wireshark
-                perf
-                pikchr
-                plantuml
                 powertop
-                python312Packages.speedtest-cli
-                lua-language-server
                 nodePackages_latest.bash-language-server
                 nodePackages_latest.yaml-language-server
-                s-tui
-                scc
-                stress-ng
-                sysbench
-                phoronix-test-suite
-                structurizr-cli
                 sysstat
                 strace
-                usbview
                 polylogue
-                uv
                 gallery-dl
-                vulkan-tools
                 vulkan-validation-layers
                 wayland-utils
                 wayland-protocols
-                xan
-                zk
               ]
               ++ [
                 lspRootLauncher

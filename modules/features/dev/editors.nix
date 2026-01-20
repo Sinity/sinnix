@@ -1,20 +1,16 @@
 { mkFeatureModule, lib, pkgs, ... }@args:
-let
-  mkEnable = desc: lib.mkEnableOption desc;
-in
 mkFeatureModule {
   path = [ "dev" "editors" ];
   description = "Developer editors (VS Code, Zed)";
   extraOptions = {
-    vscode.enable = mkEnable "VSCode Editor";
-    zed.enable = mkEnable "Zed Editor";
+    vscode.enable = lib.mkEnableOption "VSCode Editor";
+    zed.enable = lib.mkEnableOption "Zed Editor";
   };
   configFn =
     { config, lib, pkgs, helpers, cfg, ... }:
     let
-      globalConfig = config;
-      user = globalConfig.sinnix.user.name;
-      dotsRepoPath = globalConfig.sinnix.paths.dotsRoot;
+      user = config.sinnix.user.name;
+      dotsRepoPath = config.sinnix.paths.dotsRoot;
       marketplace = pkgs.nix-vscode-extensions.vscode-marketplace;
     in
     lib.mkMerge [

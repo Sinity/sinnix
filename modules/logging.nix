@@ -1,3 +1,11 @@
+# System logging and boot metrics capture
+#
+# Configures journald for persistent logging with compression, and captures
+# boot performance metrics (systemd-analyze, dmesg, journal errors) on each boot.
+#
+# Outputs:
+# - Journald logs → ${capturesRoot}/syslog/journal/
+# - Boot metrics → ${capturesRoot}/syslog/boot-metrics/{boot_id}/
 {
   pkgs,
   lib,

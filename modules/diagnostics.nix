@@ -1,3 +1,10 @@
+# System diagnostics tools
+#
+# Installs hardware introspection utilities (hwinfo, lshw, smartmontools)
+# and the perf-scan script for comprehensive system analysis. Desktop only.
+#
+# Note: perf-scan bundles its own heavier dependencies (flamegraph, etc.)
+# to keep this module lightweight.
 {
   pkgs,
   lib,

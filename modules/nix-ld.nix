@@ -1,3 +1,10 @@
+# Nix-LD runtime for unpatched binaries
+#
+# Provides a dynamic linker and common shared libraries for running
+# pre-compiled binaries (AppImages, proprietary software, etc.) that
+# expect FHS-standard library paths.
+#
+# Enable with: sinnix.programs.nix-ld.enable = true
 { pkgs, lib, config, ... }:
 let
   cfg = config.sinnix.programs.nix-ld;

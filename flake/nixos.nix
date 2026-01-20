@@ -18,9 +18,7 @@ let
     inherit inputs;
     inherit (featureLib) mkFeatureModule;
     helpers = {
-      mkDotsSymlink =
-        config: dotsRepoPath: rel:
-        config.lib.file.mkOutOfStoreSymlink (dotsRepoPath + rel);
+      inherit (featureLib) mkDotsSymlink;
     };
   };
   mkHost =

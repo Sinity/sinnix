@@ -11,11 +11,12 @@ the host or a bundle so ownership stays with that module.
   `modules/storage.nix`, etc. provide system-wide defaults.  They expect to be
   imported together from `flake/nixos.nix`, and each module owns its domain.
 - **Services** – Each service lives in its own file under
-  `modules/services/` (`qdrant.nix`, `sinevec.nix`, `sinex.nix`,
+  `modules/services/` (`asciinema.nix`, `polylogue.nix`, `sinex.nix`,
   `transmission.nix`). Service-specific state, users, tmpfiles, and advanced
   tuning stay beside the service definition. Hosts enable services by toggling
   `sinnix.services.*` (the service module set is imported via
-  `modules/services/default.nix`).
+  `modules/services/default.nix`). Former services (`qdrant.nix`,
+  `sinevec.nix`) were consolidated into the unified Sinex service.
 - **Secrets** – `modules/secrets.nix` renders every `.age` file and exposes two
   read-only helpers:
   - `config.sinnix.secrets.paths.NAME` – resolved runtime path for the secret.

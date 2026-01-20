@@ -34,9 +34,11 @@ mkFeatureModule {
           brokerPackage = pkgs.dbus-broker;
         };
 
+        # Disable GNOME keyring - using GPG agent for SSH key management instead
         gnome.gnome-keyring.enable = lib.mkForce false;
       };
 
+      # Prevent PAM from starting keyring on login (conflicts with gpg-agent SSH)
       security.pam.services.login.enableGnomeKeyring = lib.mkForce false;
 
       home-manager.users.${user} =
@@ -58,18 +60,14 @@ mkFeatureModule {
               tldr
               xdg-utils
               xxd
-              graphicsmagick
               jq
               fzf
               bc
               at
-              hledger
             ]
             ++ lib.filter (p: p != null) [
               (pkgs.tasksh or null)
               (pkgs.taskwarrior-tui or null)
-              (pkgs.bugwarrior or null)
-              (pkgs.timewarrior-all-reports or null)
             ]
           );
 

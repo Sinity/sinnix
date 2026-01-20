@@ -30,7 +30,6 @@ in
       features.desktop.wayland-session.enable = true;
       features.desktop.background-services.enable = true;
       features.desktop.activitywatch.enable = true;
-      features.desktop.kdeconnect.enable = true;
       features.desktop.reboot-notifier.enable = true;
     };
   };

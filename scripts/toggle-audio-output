@@ -1,5 +1,17 @@
 #!/usr/bin/env bash
+# toggle-audio-output - Cycle between PipeWire audio sinks
+#
+# Usage: toggle-audio-output [--help]
+#
+# Cycles to the next available audio sink (speakers → headphones → etc.)
+# and moves all active streams to the new sink. Sends RTMIN+12 to Waybar
+# for immediate status refresh.
 set -euo pipefail
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  sed -n '2,7p' "$0" | sed 's/^# //'
+  exit 0
+fi
 
 inspect=$(wpctl inspect @DEFAULT_AUDIO_SINK@ 2>/dev/null || true)
 if [[ -z "$inspect" ]]; then

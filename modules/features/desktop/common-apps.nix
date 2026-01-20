@@ -3,12 +3,10 @@ mkFeatureModule {
   path = [ "desktop" "common-apps" ];
   description = "Common desktop applications and settings";
   configFn =
-    { config, lib, helpers, ... }:
+    { config, helpers, ... }:
     let
-      globalConfig = config;
-      user = globalConfig.sinnix.user.name;
-      dotsRepoPath = globalConfig.sinnix.paths.dotsRoot;
-      mkDotsRepoLink = helpers.mkDotsSymlink globalConfig dotsRepoPath;
+      user = config.sinnix.user.name;
+      dotsRepoPath = config.sinnix.paths.dotsRoot;
     in
     {
       home-manager.users.${user} =
@@ -23,19 +21,12 @@ mkFeatureModule {
         in
         {
         home.packages = with pkgs; [
-          junction
           nautilus
-          bleachbit
           transmission_4-gtk
           pwvucontrol
-          single-file-cli
           blueman
           weechat
-          piper
           solaar
-          android-file-transfer
-          soundwireserver
-          kdePackages.kdeconnect-kde
           imgur-screenshot
           aria2
           lnch

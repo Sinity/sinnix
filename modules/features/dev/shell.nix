@@ -48,13 +48,14 @@ in
         ...
       }:
       let
-        dotsRoot = "${sinnix.paths.dotsRoot}";
+        dotsRoot = sinnix.paths.dotsRoot;
       in
       {
         home.sessionVariables = {
           DEVELOPMENT_DOMAIN = "v0.3";
           EDITOR = "nvim";
           VISUAL = "nvim";
+          # Override default pager to enable color output (-R for raw control chars)
           PAGER = lib.mkForce "less -R";
           MANPAGER = "nvim +Man!";
           PYTHONDONTWRITEBYTECODE = "1";
@@ -191,7 +192,8 @@ in
               ccusage = "npx --yes ccusage@latest";
               gemini-cli = "npx --yes https://github.com/google-gemini/gemini-cli --yolo";
               marimo-edit = "marimo edit --mcp";
-              marimo-edit-remote = "marimo edit --mcp --host 0.0.0.0 --port 2718";
+              # Remote marimo binds to localhost only - use SSH tunnel for external access
+              marimo-edit-remote = "marimo edit --mcp --host 127.0.0.1 --port 2718";
               l = "eza --icons  -a --group-directories-first -1";
               ll = "eza --icons  -a --group-directories-first -1 --no-user --long";
               tree = "eza --icons --tree --group-directories-first";

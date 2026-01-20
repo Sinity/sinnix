@@ -20,7 +20,11 @@ let
       options = lib.setAttrByPath featurePath optionsForPath;
       config = lib.mkIf cfg.enable (configFn (args // { inherit cfg; }));
     };
+
+  # Helper for creating symlinks to dotfiles repo (used in home-manager contexts)
+  mkDotsSymlink = config: dotsRepoPath: rel:
+    config.lib.file.mkOutOfStoreSymlink (dotsRepoPath + rel);
 in
 {
-  inherit mkFeatureModule;
+  inherit mkFeatureModule mkDotsSymlink;
 }

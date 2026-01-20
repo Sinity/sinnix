@@ -11,7 +11,8 @@ into `~/.local/bin` automatically.
   including icon/class heuristics.
 - `toggle-audio-output`* – cycles between common sinks (speakers/bluetooth/etc.)
   and pokes Waybar via RTMIN+12.
-- `mic-status`/`mic-toggle` – show and toggle microphone mute state.
+- `mic-status`/`mic-toggle` – show and toggle microphone mute state
+  (archived – functionality now in Waybar module).
 - `kitty-hypr-nav`* – Hyprland focus helper used by arrow-key bindings.
 - `kitty-grid`* – Python grid arranger that can spawn kitty panes through the
   `KITTY_LISTEN_ON` socket and tile them via `hyprctl`.
@@ -24,15 +25,15 @@ into `~/.local/bin` automatically.
 - `rawlog-capture`/`rawlog-loop`* – gum-powered TUI logger that keeps the kitty
   scratchpad hot.
 - `kb-capture`* – capture clipboard/text snippets into the knowledgebase.
-- `combine-files` & `combine-files-batch.sh` – merge arbitrary files into a
-  single Markdown/text artifact for ingestion.
+- `combine-files`* – merge arbitrary files into a single Markdown/text artifact
+  for ingestion (batch variant archived in `archive/scripts/`).
 
 ## MCP + data access
 
-- `mcp-postgres.py`, `mcp-qdrant.py`, `mcp-sqlite.py` – expose local datasources
-  to MCP-capable agents (Codex, Claude Desktop, etc.). `modules/features/dev/utilities.nix`
-  ships thin wrappers (`mcp-<name>`) in `~/.local/bin`, including `mcp-context7`,
-  `mcp-firecrawl`, and `mcp-playwright` for shared MCP wiring.
+- `mcp-qdrant.py` – exposes Qdrant vector store to MCP-capable agents.
+  `modules/features/dev/utilities.nix` ships thin wrappers (`mcp-<name>`) in
+  `~/.local/bin`, including `mcp-context7`, `mcp-firecrawl`, and `mcp-playwright`
+  for shared MCP wiring. Archived: `mcp-postgres.py`, `mcp-sqlite.py`.
 
 ## AI tooling
 
@@ -41,18 +42,14 @@ into `~/.local/bin` automatically.
 
 ## Developer tooling
 
-- `audit-package-usage` – inspects shell history, desktop files, and units to
-  flag unused packages vs. configured ones.
 - `perf-scan` – system diagnostics/benchmark runner with bundled dependencies.
-- `pre-commit-check` – runs `nix flake check`, warns about tmpfiles/services,
-  and ensures staged `.nix` files are tracked.
-- `setup-git-hooks` – installs repo-specific pre-commit hooks.
+- Archived: `audit-package-usage`, `pre-commit-check`, `setup-git-hooks` (moved
+  to `archive/scripts/` – functionality superseded by devenv hooks).
 
 ## Misc
 
-- `audio-output-status`, `mic-status`, etc. are used by Waybar modules (see
-  `modules/features/desktop/waybar.nix`).
-- `toggle-audio-output` and `mic-toggle` are bound via Hyprland keybindings.
+- `audio-output-status` and `toggle-audio-output` are used by Waybar modules and
+  Hyprland keybindings (see `modules/features/desktop/waybar.nix`).
 
 Scripts that manipulate Kitty or Hyprland rely on the remote control hints
 described in `AGENTS.md` – in particular, they honour `KITTY_LISTEN_ON` so they

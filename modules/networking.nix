@@ -1,3 +1,10 @@
+# Core networking configuration
+#
+# Provides:
+# - NetworkManager with systemd-resolved for DNS-over-TLS (Cloudflare/Google)
+# - Hardened OpenSSH (no passwords, no root login, verbose logging)
+# - Mosh for resilient remote sessions
+# - Bluetooth support with experimental features (desktop only)
 {
   lib,
   pkgs,

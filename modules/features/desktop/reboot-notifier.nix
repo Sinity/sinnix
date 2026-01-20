@@ -105,6 +105,9 @@ mkFeatureModule {
             Service = {
               Type = "oneshot";
               ExecStart = "${checkScript}";
+              Environment = [
+                "PATH=${pkgs.coreutils}/bin:${pkgs.gawk}/bin"
+              ];
             };
             Install.WantedBy = [ "default.target" ];
           };

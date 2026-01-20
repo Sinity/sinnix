@@ -7,17 +7,18 @@ mkFeatureModule {
     let
       user = config.sinnix.user.name;
       userGroup = config.users.users.${user}.group or user;
-      moneroDataDir = "/monero";
+      moneroDataDir = config.sinnix.paths.cryptoRoot;
+      # P2P bound to localhost (no external peers). For public node, change p2p-bind-ip
+      # to 0.0.0.0 and add firewall rule: networking.firewall.allowedTCPPorts = [ 18080 ]
       moneroConfig = ''
         data-dir=${moneroDataDir}
-        p2p-bind-ip=0.0.0.0
+        p2p-bind-ip=127.0.0.1
         p2p-bind-port=18080
         db-sync-mode=fast:async:10000
         out-peers=32
         in-peers=8
         limit-rate-up=10240
         limit-rate-down=0
-        confirm-external-bind=1
         rpc-bind-ip=127.0.0.1
         rpc-restricted-bind-ip=127.0.0.1
         log-file=${moneroDataDir}/monerod.log
@@ -87,7 +88,5 @@ mkFeatureModule {
         "d ${bitcoinDataDir} 0700 ${user} ${userGroup} -"
         "d ${bitcoinWalletDir} 0700 ${user} ${userGroup} -"
       ];
-
-      networking.firewall.allowedTCPPorts = lib.mkAfter [ 18080 ];
     };
 } args

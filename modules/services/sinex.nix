@@ -17,40 +17,49 @@ in
     provisionDatabase = lib.mkEnableOption "Provision the Sinex PostgreSQL database without running services";
   };
 
+  # Only configure if sinex module is available from the flake input
   config = lib.mkIf (config.services ? sinex) (lib.mkMerge [
+    # Package defaults (always applied when module exists)
     {
       services.sinex.package = lib.mkDefault sinexPkgs.sinex;
       services.sinex.cliPackage = lib.mkDefault sinexPkgs.sinexCli;
-
-      services.sinex.enable = lib.mkDefault cfg.enable;
-      services.sinex.core.enable = lib.mkDefault cfg.enable;
-      services.sinex.database.enable = lib.mkDefault dbProvision;
-      services.sinex.database.autoSetup = lib.mkDefault dbProvision;
-      services.sinex.nats.enable = lib.mkDefault cfg.enable;
-      services.sinex.storage.blob.enable = lib.mkDefault cfg.enable;
-      services.sinex.storage.dlq.enable = lib.mkDefault cfg.enable;
-      services.sinex.lifecycle.maintenance.enable = lib.mkDefault cfg.enable;
     }
 
+    # Database-only provisioning (for dev environments)
+    (lib.mkIf dbProvision {
+      services.sinex.database.enable = true;
+      services.sinex.database.autoSetup = true;
+    })
+
+    # Full service configuration
     (lib.mkIf cfg.enable {
-      systemd.services."sinex-blob-init".path = [
-        pkgs.git
-        pkgs.git-annex
-      ];
+      systemd.services."sinex-blob-init" = {
+        path = [
+          pkgs.git
+          pkgs.git-annex
+        ];
+        # Ensure database is ready before blob init
+        after = [ "postgresql.service" ];
+        requires = [ "postgresql.service" ];
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+        };
+      };
 
       services.sinex = {
         enable = true;
-        users.target = config.sinnix.user.name;
-
-        database.autoSetup = true;
-        logLevel = "debug";
+        core.enable = true;
+        nats.enable = true;
         storage.blob.enable = true;
         storage.dlq.enable = true;
-        shell.asciinema.autoRecord = true;
+        lifecycle.maintenance.enable = true;
 
+        users.target = config.sinnix.user.name;
+        logLevel = "debug";
+        shell.asciinema.autoRecord = true;
         stateRoot = "${indicesRoot}/sinex";
         satellites.filesystem.watchPaths = [ realmRoot ];
-        # satellites.defaults.instances = 2; # I want to test whether these mechanisms work first
       };
     })
   ]);

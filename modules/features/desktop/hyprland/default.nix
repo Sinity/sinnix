@@ -11,6 +11,7 @@ let
 
   # Helpers for home-manager config
   repoRoot = config.sinnix.paths.projectRoot;
+  knowledgebaseRoot = config.sinnix.projects.knowledgebase;
   scriptPath = rel: "${repoRoot}/scripts/${rel}";
 
   # Helper to import sub-modules which might need args
@@ -74,6 +75,7 @@ in
     # -------------------------------------------------------------------------
     programs.hyprland = {
       enable = lib.mkDefault true;
+      # Force UWSM for proper systemd-managed session (required for XDG portal reliability)
       withUWSM = lib.mkForce true;
       package = lib.mkDefault pkgs.hyprland;
       portalPackage = lib.mkDefault pkgs.xdg-desktop-portal-hyprland;
@@ -104,6 +106,10 @@ in
 
           settings = {
             exec-once = [ "uwsm finalize" ];
+
+            # Override uwsm's "start-hyprland:Hyprland" to clean value
+            # Fixes warning from apps like nm-applet that don't understand uwsm format
+            env = [ "XDG_CURRENT_DESKTOP,Hyprland" ];
 
             xwayland.force_zero_scaling = true;
 
@@ -137,6 +143,7 @@ in
             };
 
             misc = {
+              # Override stylix which sets this true; keep logo visible during startup
               disable_hyprland_logo = lib.mkForce false;
               vrr = 2;
               mouse_move_enables_dpms = true;
@@ -201,7 +208,7 @@ in
             HEIGHT_RATIO=0.55
           '';
           ".config/scratchpads/notes.conf".text = ''
-            COMMAND=(${pkgs.kitty}/bin/kitty --class notes-scratch -d /realm/project/knowledgebase ${pkgs.neovim}/bin/nvim)
+            COMMAND=(${pkgs.kitty}/bin/kitty --class notes-scratch -d ${knowledgebaseRoot} ${pkgs.neovim}/bin/nvim)
             CLASS="notes-scratch"
             WORKSPACE="scratch_notes"
             WIDTH_RATIO=0.70
@@ -238,6 +245,7 @@ in
           xdg-desktop-portal-gtk
         ];
 
+        # Prevent hyprpaper restarts on config changes (wallpaper is set once at login)
         systemd.user.services.hyprpaper.Unit.X-Restart-Triggers = lib.mkForce [ ];
       };
   };

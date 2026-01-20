@@ -163,7 +163,7 @@ in
           "d ${paths.capturesRoot}/audio/raw 0755 ${username} users -"
           "d ${paths.capturesRoot}/audio/archive 0755 ${username} users -"
           "d ${paths.capturesRoot}/asciinema 0755 ${username} users -"
-          "d ${paths.capturesRoot}/keylog 0755 ${username} users -"
+          "d ${paths.capturesRoot}/keylog 0700 ${username} users -"
           "d ${paths.capturesRoot}/screenshot 0755 ${username} users -"
           "d ${paths.capturesRoot}/screenshot/mpv 0755 ${username} users -"
           "d ${paths.exportsRoot}/lastpass 0755 ${username} users -"

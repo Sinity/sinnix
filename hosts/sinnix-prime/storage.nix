@@ -8,17 +8,10 @@ let
   inherit (config.sinnix.paths) realmRoot dataRoot capturesRoot outerRealm;
   username = config.sinnix.user.name;
   userCfg = config.users.users.${username} or { };
-	  getAttrOrFallback =
-	    set: attr: fallback:
-	    let
-	      value = set.${attr} or null;
-	    in
-	    if value == null then fallback else value;
-  userUid = builtins.toString (getAttrOrFallback userCfg "uid" 1000);
-  primaryGroupName = getAttrOrFallback userCfg "group" "users";
+  userUid = builtins.toString (userCfg.uid or 1000);
+  primaryGroupName = userCfg.group or "users";
   groupCfg = lib.attrByPath [ "users" "groups" primaryGroupName ] config { };
-  primaryGroupId = builtins.toString (getAttrOrFallback groupCfg "gid" 100);
-
+  primaryGroupId = builtins.toString (groupCfg.gid or 100);
 in
 {
   services = {
@@ -97,26 +90,21 @@ in
       ];
     };
 
-    # "/mnt/smol_ssd" = {
-    #   device = "/dev/disk/by-uuid/481e214e-7bb6-49fa-bc87-ccb1f2c1e3c3";
-    #   fsType = "btrfs";
-    #   options = [
-    #     "strictatime"
-    #     "lazytime"
-    #   ];
-    # };
   };
 
-  swapDevices = [
-    {
-      device = "/dev/nvme1n1p1";
-    }
-  ];
+  # No disk swap - zram only. Rationale:
+  # - Disk swap enables thrashing instead of fast failure
+  # - zram at 50% RAM with 2-3x compression ≈ 32-48GB effective swap
+  # - If that's not enough, you need more RAM, not more swap
+  # - earlyoom kills memory hogs before exhaustion anyway
+  #
+  # To re-enable for hibernation: { device = "/dev/nvme1n1p1"; }
+  swapDevices = [ ];
 
   systemd = {
     tmpfiles.rules = lib.mkAfter [
       "d /mnt/pendrv 0755 root root -"
-      "d ${realmRoot}/knowledgebase 0755 ${username} users -"
+      "d ${realmRoot}/knowledgebase 0755 ${username} ${primaryGroupName} -"
     ];
 
     automounts = [

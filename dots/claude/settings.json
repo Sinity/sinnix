@@ -33,7 +33,7 @@
         "hooks": [
           {
             "type": "prompt",
-            "prompt": "Before stopping, verify: 1) Goal achieved or clearly blocked? 2) Todos complete or explained? 3) User will understand state? Return 'approve' if done. Return 'block' only if clearly incomplete.",
+            "prompt": "CRITICAL: Output ONLY a JSON object, nothing else. No markdown, no explanation, no code blocks. Verify: goal achieved/blocked, todos complete/explained, user will understand state. Output exactly one of: {\"ok\":true} OR {\"ok\":false,\"reason\":\"brief reason\"}",
             "timeout": 15
           }
         ]

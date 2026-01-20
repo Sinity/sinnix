@@ -11,7 +11,6 @@ let
     agenix = inputs.agenix;
     home-manager = inputs.home-manager;
     nix-ai-tools = inputs.nix-ai-tools;
-    sinevec = inputs.sinevec;
     sinex = inputs.sinex;
     polylogue = inputs.polylogue;
     scribe-tap = inputs.scribe-tap;
@@ -20,7 +19,6 @@ let
     nur = inputs.nur;
     stylix = inputs.stylix;
     nix-vscode-extensions = inputs.nix-vscode-extensions;
-    quickshell = inputs.quickshell;
     disko = inputs.disko;
     nixpkgs = inputs.nixpkgs;
     self = flakeSource;
@@ -36,9 +34,7 @@ let
     inputs = sanitizedInputs;
     inherit (featureLib) mkFeatureModule;
     helpers = {
-      mkDotsSymlink =
-        config: dotsRepoPath: rel:
-        config.lib.file.mkOutOfStoreSymlink (dotsRepoPath + rel);
+      inherit (featureLib) mkDotsSymlink;
     };
   };
 
@@ -82,20 +78,24 @@ let
           }
         )
       ];
-      assertions = config: [
-        {
-          assertion = config.home-manager.users.sinity.programs.zsh.enable;
-          message = "Zsh must be enabled for the primary user.";
-        }
-        {
-          assertion = config.home-manager.users.sinity.programs.starship.enable;
-          message = "Starship prompt must be enabled in the dev shell.";
-        }
-        {
-          assertion = config.home-manager.users.sinity.home.file ? ".local/bin/claude" != null;
-          message = "Claude CLI wrapper must be provisioned in the dev shell.";
-        }
-      ];
+      assertions = config:
+        let
+          user = config.sinnix.user.name;
+        in
+        [
+          {
+            assertion = config.home-manager.users.${user}.programs.zsh.enable;
+            message = "Zsh must be enabled for the primary user.";
+          }
+          {
+            assertion = config.home-manager.users.${user}.programs.starship.enable;
+            message = "Starship prompt must be enabled in the dev shell.";
+          }
+          {
+            assertion = config.home-manager.users.${user}.home.file ? ".local/bin/claude";
+            message = "Claude CLI wrapper must be provisioned in the dev shell.";
+          }
+        ];
     }
     {
       name = "services-transmission";
