@@ -22,10 +22,12 @@
   sinnix.services = {
     transmission.enable = true;
     asciinema.enable = true;
-    polylogue.enable = true;
+    netdata.enable = true;
     sinex = {
       enable = false;
       provisionDatabase = true;
     };
   };
+
+  services.polylogue-sync.enable = false;
 }

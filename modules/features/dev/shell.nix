@@ -61,6 +61,8 @@ in
           PYTHONDONTWRITEBYTECODE = "1";
           SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS = "0";
           MICRO_TRUECOLOR = "1";
+          # Disable Qdrant for polylogue (use FTS5 only)
+          POLYLOGUE_QDRANT_URL = "";
           LD_LIBRARY_PATH = lib.makeLibraryPath [
             pkgs.libGL
             pkgs.libglvnd
@@ -362,6 +364,7 @@ in
           ln -sfn "$DOTS_ROOT/claude/settings.json" "$HOME/.config/claude/settings.json"
           ln -sfn "$DOTS_ROOT/claude/cclsp.json" "$HOME/.config/claude/cclsp.json"
           ln -sfn "$DOTS_ROOT/claude/CLAUDE.md" "$HOME/.config/claude/CLAUDE.md"
+          ln -sfn "$DOTS_ROOT/claude/skills" "$HOME/.config/claude/skills"
         '';
 
         home.activation.ensureClaudeDir = lib.hm.dag.entryAfter [ "linkClaudeConfig" ] ''
@@ -377,10 +380,9 @@ in
           ln -sfn "$DOTS_ROOT/serena/serena_config.yml" "$HOME/.serena/serena_config.yml"
         '';
 
+        # Always rebuild bat cache - version upgrades on unstable invalidate it
         home.activation.rebuildBatCache = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
-          if [ -d "$HOME/.config/bat/themes" ] || [ -d "$HOME/.config/bat/syntaxes" ]; then
-            ${lib.getExe pkgs.bat} cache --build
-          fi
+          ${lib.getExe pkgs.bat} cache --build 2>/dev/null || true
         '';
 
         home.file.".local/bin/claude" = {

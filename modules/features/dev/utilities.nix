@@ -175,6 +175,19 @@ mkFeatureModule {
                   rm -rf "$HOME/.codex/skills"
                 fi
               '';
+              # Polylogue inbox symlinks to actual chatlog export directories
+              linkPolylogueInbox = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+                INBOX_DIR="$HOME/.local/share/polylogue/inbox"
+                mkdir -p "$INBOX_DIR"
+                # ChatGPT exports
+                if [ -d "/realm/data/exports/chatlog/raw/chatgpt" ]; then
+                  ln -sfn "/realm/data/exports/chatlog/raw/chatgpt" "$INBOX_DIR/chatgpt"
+                fi
+                # Claude web exports
+                if [ -d "/realm/data/exports/chatlog/raw/claude" ]; then
+                  ln -sfn "/realm/data/exports/chatlog/raw/claude" "$INBOX_DIR/claude"
+                fi
+              '';
             };
           };
 

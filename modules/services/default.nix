@@ -2,7 +2,7 @@
 {
   imports = [
     ./asciinema.nix
-    ./polylogue.nix
+    ./netdata.nix
     ./sinex.nix
     ./transmission.nix
   ];
