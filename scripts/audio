@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# audio - Unified audio management for PipeWire
+# Usage: audio [toggle|status|mic-toggle|mic-status|volume-up|volume-down|mute]
+
+set -euo pipefail
+
+# Signal to Waybar for immediate refresh
+WAYBAR_SIGNAL=12
+
+refresh_waybar() {
+    pkill -RTMIN+$WAYBAR_SIGNAL waybar || true
+}
+
+get_current_sink_json() {
+    if ! command -v wpctl >/dev/null 2>&1; then
+        jq -n --arg text "󰓃" --arg tooltip "wpctl unavailable" --arg class "unavailable" '{text:$text, tooltip:$tooltip, class:$class}'
+        return
+    fi
+
+    inspect=$(wpctl inspect @DEFAULT_AUDIO_SINK@ 2>/dev/null || true)
+    if [[ -z "$inspect" ]]; then
+        jq -n --arg text "󰓃" --arg tooltip "No default audio sink" --arg class "missing" '{text:$text, tooltip:$tooltip, class:$class}'
+        return
+    fi
+
+    description=$(printf '%s\n' "$inspect" | awk -F ' = ' '/node.description/ {gsub(/"/, "", $2); print $2; exit}')
+    lowered=$(printf '%s' "$description" | tr '[:upper:]' '[:lower:]')
+
+    status=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null || true)
+    volume_raw=$(printf '%s\n' "$status" | awk '{for (i=1; i<=NF; i++) if ($i ~ /^[0-9.]+$/) {print $i; exit}}')
+    muted=$(printf '%s\n' "$status" | grep -q '\[MUTED\]' && echo "true" || echo "false")
+    percent=$(LC_NUMERIC=C awk -v vol="${volume_raw:-0}" 'BEGIN {printf "%.0f", vol * 100 }')
+
+    icon="󰓃"
+    class="speaker"
+
+    if [[ "$lowered" == *"wh-1000xm5"* || "$lowered" == *"buds"* || "$lowered" == *"headphone"* || "$lowered" == *"headset"* ]]; then
+        icon="󰋋"
+        class="headphones"
+    elif [[ "$lowered" == *"bluetooth"* || "$lowered" == *"bt"* ]]; then
+        icon="󰂯"
+        class="bluetooth"
+    elif [[ "$lowered" == *"monitor"* || "$lowered" == *"display"* || "$lowered" == *"hdmi"* ]]; then
+        icon="󰹑"
+        class="monitor"
+    fi
+
+    if [[ "$muted" == "true" ]]; then
+        icon="󰖁"
+        class="$class muted"
+    fi
+
+    display=$(echo "$description" | awk '{print $1}')
+    text_output="$icon ${percent}% · $display"
+
+    jq -nc \
+      --arg text "$text_output" \
+      --arg tooltip "$description" \
+      --arg class "$class" \
+      --arg volume "$percent" \
+      --arg muted "$muted" \
+      '{text:$text, tooltip:$tooltip, class:$class, volume:($volume|tonumber), muted:($muted == "true")}'
+}
+
+get_mic_json() {
+    status=$(wpctl get-volume @DEFAULT_AUDIO_SOURCE@ 2>/dev/null || true)
+    if [[ -z "$status" ]]; then
+        jq -n '{text:"󰍭", tooltip:"No mic", class:"missing"}'
+        return
+    fi
+
+    muted=$(printf '%s\n' "$status" | grep -q '\[MUTED\]' && echo "true" || echo "false")
+    icon=$([[ "$muted" == "true" ]] && echo "󰍭" || echo "󰍬")
+    class=$([[ "$muted" == "true" ]] && echo "muted" || echo "active")
+
+    jq -n --arg text "$icon" --arg class "$class" '{text:$text, class:$class}'
+}
+
+case "${1:-status}" in
+    toggle)
+        inspect=$(wpctl inspect @DEFAULT_AUDIO_SINK@ 2>/dev/null || true)
+        current_id=$(printf '%s\n' "$inspect" | head -n1 | awk '{print $2}' | tr -d ',')
+        mapfile -t sinks < <(pw-dump | jq -r '.[] | select(.type == "PipeWire:Interface:Node") | select(.info.props["media.class"] == "Audio/Sink") | .id' | sort -n | uniq)
+        
+        sinks_count=${#sinks[@]}
+        if (( sinks_count > 0 )); then
+            next="${sinks[0]}"
+            for idx in "${!sinks[@]}"; do
+                if [[ "${sinks[$idx]}" == "$current_id" ]]; then
+                    next="${sinks[$(((idx + 1) % sinks_count))]}"
+                    break
+                fi
+            done
+            wpctl set-default "$next"
+            # Move active streams
+            mapfile -t streams < <(pw-dump | jq -r '.[] | select(.type == "PipeWire:Interface:Node") | select(.info.props["media.class"] == "Stream/Output/Audio") | .id')
+            for stream in "${streams[@]}"; do
+                wpctl set-target "$stream" "$next" || true
+            done
+        fi
+        refresh_waybar
+        ;;
+    status)
+        get_current_sink_json
+        ;;
+    mic-toggle)
+        wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle
+        refresh_waybar
+        ;;
+    mic-status)
+        get_mic_json
+        ;;
+    volume-up)
+        wpctl set-volume @DEFAULT_AUDIO_SINK@ 2%+
+        refresh_waybar
+        ;;
+    volume-down)
+        wpctl set-volume @DEFAULT_AUDIO_SINK@ 2%-
+        refresh_waybar
+        ;;
+    mute)
+        wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle
+        refresh_waybar
+        ;;
+    *)
+        echo "Usage: audio [toggle|status|mic-toggle|mic-status|volume-up|volume-down|mute]"
+        exit 1
+        ;;
+esac

@@ -23,11 +23,12 @@ let
   ];
   perfScan = pkgs."perf-scan";
   hogkill = pkgs."hogkill";
+  asbl-no-more = pkgs."asbl-no-more";
 in
 {
   config = lib.mkIf isDesktop {
     environment.systemPackages = lib.mkAfter (
-      coreDiagnostics ++ [ perfScan hogkill ]
+      coreDiagnostics ++ [ perfScan hogkill asbl-no-more ]
     );
   };
 }

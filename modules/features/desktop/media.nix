@@ -77,48 +77,6 @@ mkFeatureModule {
               inkscape
               imvWithExtras
             ];
-
-            file.".local/bin/xdg-open" = {
-              executable = true;
-              text = ''
-                              #!${pkgs.bash}/bin/bash
-                              set -euo pipefail
-
-                              resolve_target() {
-                                local uri="$1"
-                                if [[ "$uri" == file://* ]]; then
-                                  URI="$uri" ${pythonBin} - <<'PY'
-                import os
-                import urllib.parse
-                uri = os.environ.get("URI", "")
-                if uri.startswith("file://"):
-                    path = urllib.parse.unquote(uri[7:])
-                    if not path.startswith("/"):
-                        path = "/" + path
-                    print(path)
-                else:
-                    print(uri)
-                PY
-                                else
-                                  printf '%s\n' "$uri"
-                                fi
-                              }
-
-                              if [ "$#" -gt 0 ]; then
-                                target="$(resolve_target "$1")"
-                                if [ -n "$target" ] && [ -e "$target" ]; then
-                                  mime="$(${fileBin} --mime-type -Lb -- "$target" 2>/dev/null || true)"
-                                  case "$mime" in
-                                    video/*|audio/*)
-                                      exec ${mpvBin} "$@"
-                                      ;;
-                                  esac
-                                fi
-                              fi
-
-                              exec ${systemXdgOpen} "$@"
-              '';
-            };
           };
 
           programs.mpv = {

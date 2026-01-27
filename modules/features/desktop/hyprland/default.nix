@@ -31,8 +31,8 @@ let
 
   scriptLinks = [
     {
-      target = "kb-capture";
-      source = "kb-capture";
+      target = "audio";
+      source = "audio";
     }
     {
       target = "rawlog";
@@ -41,10 +41,6 @@ let
     {
       target = "toggle-scratch";
       source = "toggle-scratch";
-    }
-    {
-      target = "combine-files";
-      source = "combine-files";
     }
     {
       target = "rawlog-capture";
@@ -57,10 +53,6 @@ let
     {
       target = "rawlog-loop";
       source = "rawlog-loop";
-    }
-    {
-      target = "log-to-knowledgebase";
-      source = "rawlog";
     }
   ];
 in
@@ -164,9 +156,9 @@ in
             decoration = {
               rounding = 0;
               active_opacity = 1.0;
-              inactive_opacity = 0.7;
+              inactive_opacity = 0.96;
               dim_inactive = true;
-              dim_strength = 0.3;
+              dim_strength = 0.03;
 
               blur = {
                 enabled = true;

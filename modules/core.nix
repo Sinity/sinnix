@@ -93,24 +93,6 @@ in
       fi
     '';
 
-    console.keyMap = "pl2";
-    console.font = "Lat2-Terminus16";
-    time.timeZone = "Europe/Warsaw";
-    i18n = {
-      defaultLocale = "en_US.UTF-8";
-      extraLocaleSettings = lib.genAttrs [
-        "LC_ADDRESS"
-        "LC_IDENTIFICATION"
-        "LC_MEASUREMENT"
-        "LC_MONETARY"
-        "LC_NAME"
-        "LC_NUMERIC"
-        "LC_PAPER"
-        "LC_TELEPHONE"
-        "LC_TIME"
-      ] (_: "pl_PL.UTF-8");
-    };
-
     system.stateVersion = "24.05";
 
     security = {
@@ -177,69 +159,6 @@ in
           paths.dataRoot == "/realm/data"
         ) "d /realm/data/captures/screenshot/mpv 0755 ${username} users -"
       );
-
-      slices."nix-daemon.slice".sliceConfig = {
-        Description = "Resource limits for nix-daemon builds";
-        CPUWeight = 40;
-        IOWeight = 40;
-        MemoryHigh = "20G";
-        MemoryMax = "24G";
-        ManagedOOMMemoryPressure = "kill";
-        ManagedOOMMemoryPressureLimit = "95%";
-      };
-
-      slices."user.slice".sliceConfig = {
-        Description = "High priority for user session (UI, terminals)";
-        CPUWeight = 500;
-        IOWeight = 500;
-        ManagedOOMMemoryPressure = "kill";
-        ManagedOOMMemoryPressureLimit = "90%";
-      };
-
-      slices."recovery.slice".sliceConfig = {
-        Description = "High priority recovery services (SSH, TTY)";
-        CPUWeight = 1000;
-        IOWeight = 1000;
-        ManagedOOMMemoryPressure = "none";
-        MemoryLow = "512M";
-      };
-
-      services = lib.mkMerge [
-        {
-          nix-daemon.serviceConfig = {
-            Slice = "nix-daemon.slice";
-            CPUAccounting = true;
-            MemoryAccounting = true;
-            IOAccounting = true;
-            TasksAccounting = true;
-          };
-        }
-        {
-          "systemd-logind".serviceConfig = {
-            Slice = "recovery.slice";
-          };
-          "systemd-udevd".serviceConfig = {
-            Slice = "recovery.slice";
-          };
-          "systemd-journald".serviceConfig = {
-            Slice = "recovery.slice";
-          };
-        }
-        (lib.genAttrs
-          [
-            "getty@tty1"
-            "getty@tty2"
-            "getty@tty3"
-            "getty@tty4"
-            "getty@tty5"
-            "getty@tty6"
-          ]
-          (_: {
-            serviceConfig = {
-              Slice = "recovery.slice";
-            };
-          }))
-      ];
     };
 
     systemd.oomd.enableSystemSlice = true;

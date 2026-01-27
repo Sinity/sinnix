@@ -24,11 +24,7 @@ let
   ];
   storageMaintenancePackages = with pkgs; [
     btrfs-progs
-    hdparm
-    smartmontools
-    nvme-cli
     parted
-    fio
     ioping
     udisks2
     extundelete

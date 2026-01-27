@@ -3,7 +3,7 @@
   imports = [
     ./cli/default.nix
     ./desktop/activitywatch.nix
-    ./desktop/background-services.nix
+    ./desktop/base.nix
     ./desktop/browser.nix
     ./desktop/clipse.nix
     ./desktop/common-apps.nix
@@ -19,7 +19,6 @@
     ./desktop/terminal.nix
     ./desktop/tofi.nix
     ./desktop/waybar.nix
-    ./desktop/wayland-session.nix
     ./dev/default.nix
   ];
 }

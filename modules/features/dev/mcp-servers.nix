@@ -1,20 +1,13 @@
-# Development utilities and MCP server wrappers
+# Model Context Protocol (MCP) servers and AI-integrated tool settings
 #
-# MCP servers for Claude/Codex integration:
-#   mcp-qdrant     - Vector search (env: QDRANT_URL, default: localhost:6333)
-#   mcp-postgres   - PostgreSQL queries (hardcoded: sinex_dev database)
-#   mcp-sqlite     - SQLite queries (pass db path as argument)
-#   mcp-context7   - Context7 documentation lookup
-#   mcp-firecrawl  - Web scraping (env: FIRECRAWL_API_KEY or secret)
-#   mcp-playwright - Browser automation
-#   mcp-cclsp      - LSP code intelligence (env: CCLSP_CONFIG_PATH)
+# Provides:
+# - MCP server wrappers (PostgreSQL, Qdrant, Context7, etc.)
+# - Claude/Codex/Gemini dotfile linking and integration
+# - System monitoring tools (htop)
 { mkFeatureModule, pkgs, ... }@args:
 mkFeatureModule {
-  path = [
-    "dev"
-    "utilities"
-  ];
-  description = "Development utilities and MCP servers";
+  path = [ "dev" "mcp-servers" ];
+  description = "MCP servers and AI tool integration";
   configFn =
     {
       config,
@@ -48,9 +41,9 @@ mkFeatureModule {
         else
           export LD_LIBRARY_PATH="${qdrantLdLibraryPath}"
         fi
-        exec ${pkgs.uv}/bin/uv run \
-          --with fastmcp \
-          --with qdrant-client \
+        exec ${pkgs.uv}/bin/uv run 
+          --with fastmcp 
+          --with qdrant-client 
           -- python ${config.sinnix.paths.projectRoot}/scripts/mcp-qdrant.py
       '';
       mcpPostgresBin = pkgs.writeShellScriptBin "mcp-postgres" ''
@@ -71,7 +64,6 @@ mkFeatureModule {
         ${firecrawlSecretExport}
         exec npx -y firecrawl-mcp
       '';
-      lspRootLauncher = import ../../lib/lsp-root.nix { inherit pkgs; };
       mcpPlaywrightBin = pkgs.writeShellScriptBin "mcp-playwright" ''
         set -euo pipefail
         exec npx -y @playwright/mcp@latest
@@ -94,7 +86,6 @@ mkFeatureModule {
         }:
         let
           mkDotsRepoLink = helpers.mkDotsSymlink config dotsRepoPath;
-          devenvPkg = inputs.devenv.packages.${pkgs.stdenv.hostPlatform.system}.devenv;
         in
         {
           programs.htop = {
@@ -111,52 +102,15 @@ mkFeatureModule {
           };
 
           home = {
-            packages = lib.mkAfter (
-              with pkgs;
-              [
-                android-tools
-                dua
-                duckdb
-                evtest
-                gcc
-                gdb
-                git-filter-repo
-                gnumake
-                google-cloud-sdk
-                lm_sensors
-                man-pages
-                man-pages-posix
-                meld
-                ncdu
-                nil
-                nvitop
-                nix-fast-build
-                nix-prefetch-git
-                nix-tree
-                devenvPkg
-                wireshark
-                powertop
-                nodePackages_latest.bash-language-server
-                nodePackages_latest.yaml-language-server
-                sysstat
-                strace
-                polylogue
-                gallery-dl
-                vulkan-validation-layers
-                wayland-utils
-                wayland-protocols
-              ]
-              ++ [
-                lspRootLauncher
-                mcpQdrantBin
-                mcpPostgresBin
-                mcpSqliteBin
-                mcpContext7Bin
-                mcpFirecrawlBin
-                mcpPlaywrightBin
-                mcpCclspBin
-              ]
-            );
+            packages = [
+              mcpQdrantBin
+              mcpPostgresBin
+              mcpSqliteBin
+              mcpContext7Bin
+              mcpFirecrawlBin
+              mcpPlaywrightBin
+              mcpCclspBin
+            ];
 
             activation = {
               restoreConfigstore = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
@@ -175,15 +129,12 @@ mkFeatureModule {
                   rm -rf "$HOME/.codex/skills"
                 fi
               '';
-              # Polylogue inbox symlinks to actual chatlog export directories
               linkPolylogueInbox = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
                 INBOX_DIR="$HOME/.local/share/polylogue/inbox"
                 mkdir -p "$INBOX_DIR"
-                # ChatGPT exports
                 if [ -d "/realm/data/exports/chatlog/raw/chatgpt" ]; then
                   ln -sfn "/realm/data/exports/chatlog/raw/chatgpt" "$INBOX_DIR/chatgpt"
                 fi
-                # Claude web exports
                 if [ -d "/realm/data/exports/chatlog/raw/claude" ]; then
                   ln -sfn "/realm/data/exports/chatlog/raw/claude" "$INBOX_DIR/claude"
                 fi
@@ -192,10 +143,6 @@ mkFeatureModule {
           };
 
           xdg.configFile = {
-            "ai" = {
-              source = mkDotsRepoLink "/ai";
-              recursive = true;
-            };
             "opencode/opencode.json".source = mkDotsRepoLink "/opencode/opencode.json";
             "sqlitebrowser/sqlitebrowser.conf".source = mkDotsRepoLink "/sqlitebrowser/sqlitebrowser.conf";
             "ripgrep-all/config.jsonc".source = mkDotsRepoLink "/ripgrep-all/config.jsonc";

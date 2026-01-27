@@ -9,38 +9,11 @@ mkFeatureModule {
       sinnix = config.sinnix;
       scriptPath = rel: "${sinnix.paths.projectRoot}/scripts/${rel}";
       waybarAudioSignal = 12;
-      audioOutputStatus = pkgs.writeShellApplication {
-        name = "audio-output-status";
-        runtimeInputs = with pkgs; [
-          coreutils
-          gawk
-          jq
-          pipewire
-        ];
-        text = ''
-          exec ${pkgs.bash}/bin/bash ${scriptPath "audio-output-status"} "$@"
-        '';
-      };
-      audioOutputToggle = pkgs.writeShellApplication {
-        name = "toggle-audio-output";
-        runtimeInputs = with pkgs; [
-          coreutils
-          gawk
-          jq
-          pipewire
-          procps
-        ];
-        text = ''
-          exec ${pkgs.bash}/bin/bash ${scriptPath "toggle-audio-output"} "$@"
-        '';
-      };
+      audioBin = scriptPath "audio";
     in
     {
       home-manager.users.${user} = { pkgs, lib, ... }: {
-        home.packages = [
-          audioOutputToggle
-          audioOutputStatus
-        ];
+        home.packages = [ ];
 
       # Restart Waybar on every Home Manager activation
       home.activation.restartWaybar = lib.hm.dag.entryAfter [ "reloadSystemd" ] ''
@@ -208,14 +181,11 @@ mkFeatureModule {
             return-type = "json";
             interval = 2;
             signal = waybarAudioSignal;
-            exec = "${audioOutputStatus}/bin/audio-output-status";
-            env = {
-              WAYBAR_AUDIO_OUTPUT_SIGNAL = toString waybarAudioSignal;
-            };
-            on-click = "${audioOutputToggle}/bin/toggle-audio-output";
-            on-click-right = "pamixer -t";
-            on-scroll-up = "pamixer -i 2";
-            on-scroll-down = "pamixer -d 2";
+            exec = "${audioBin} status";
+            on-click = "${audioBin} toggle";
+            on-click-right = "${audioBin} mute";
+            on-scroll-up = "${audioBin} volume-up";
+            on-scroll-down = "${audioBin} volume-down";
             on-click-middle = "pwvucontrol";
           };
           "custom/launcher" = {

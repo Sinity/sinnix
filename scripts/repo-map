@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# repo-map - Generate an AI-optimized repository map
+# Usage: repo-map [--full]
+
+set -euo pipefail
+
+ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+
+# Compact tree excluding noise
+echo "## Repository Structure (Compact)"
+echo '```'
+fd --max-depth 2 --hidden --exclude .git --exclude node_modules --exclude .venv --exclude .direnv . "$ROOT" | sed -e "s|$ROOT/||" | tree --fromfile -L 2
+echo '```'
+
+echo
+echo "## Canonical Files"
+# Highlight files that define the system's "brain"
+declare -a canonical=(
+    "flake.nix"
+    "dots/claude/CLAUDE.md"
+    "docs/taskw/task-tracking-architecture.md"
+    "modules/core.nix"
+)
+
+for f in "${canonical[@]}"; do
+    if [ -f "$ROOT/$f" ]; then
+        echo "- **$f**: $(head -n 1 "$ROOT/$f" | sed 's/^# //')"
+    fi
+done

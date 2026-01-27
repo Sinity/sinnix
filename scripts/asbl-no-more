@@ -1,0 +1,173 @@
+#!/usr/bin/env bash
+# asbl-no-more - Prevent OLED/LCD ASBL by periodically pulsing screen brightness
+#
+# Usage: asbl-no-more [start|stop|status|toggle|once] [options]
+#
+# Options:
+#   -i, --interval SECS    Interval between pulses (default: 120)
+#   -d, --duration SECS    Duration of each pulse (default: 0.05)
+#   -v, --intensity MULT   Brightness multiplier (default: 1.25)
+#   -m, --mode MODE        Pulse mode: brightness, dim, invert (default: brightness)
+
+set -euo pipefail
+
+# Defaults
+INTERVAL=120
+DURATION=0.05
+INTENSITY=1.25
+MODE="brightness"
+SHADER_FILE="/tmp/asbl-pulse.glsl"
+
+show_help() {
+    cat << EOF
+asbl-no-more - OLED/LCD ASBL reset tool
+
+Usage: asbl-no-more [start|stop|status|toggle|once] [options]
+
+Commands:
+  start     Start the background loop
+  stop      Stop the running loop
+  status    Check if the loop is running
+  toggle    Toggle the loop
+  once      Trigger a single pulse now
+
+Options:
+  -i, --interval SECS    Interval between pulses (Default: $INTERVAL)
+  -d, --duration SECS    Pulse duration in seconds (Default: $DURATION)
+  -v, --intensity MULT   Brightness multiplier (Default: $INTENSITY)
+  -m, --mode MODE        Mode: brightness, dim, invert (Default: $MODE)
+
+Environment:
+  ASBL_INTERVAL, ASBL_DURATION, ASBL_INTENSITY, ASBL_MODE
+EOF
+}
+
+# Load from environment if set
+INTERVAL="${ASBL_INTERVAL:-$INTERVAL}"
+DURATION="${ASBL_DURATION:-$DURATION}"
+INTENSITY="${ASBL_INTENSITY:-$INTENSITY}"
+MODE="${ASBL_MODE:-$MODE}"
+
+# Parse args
+CMD="${1:-help}"
+[[ $# -gt 0 ]] && shift
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -i|--interval) INTERVAL="$2"; shift 2 ;;
+        -d|--duration) DURATION="$2"; shift 2 ;;
+        -v|--intensity) INTENSITY="$2"; shift 2 ;;
+        -m|--mode) MODE="$2"; shift 2 ;;
+        -h|--help) show_help; exit 0 ;;
+        *) echo "Unknown option: $1"; exit 1 ;;
+    esac
+done
+
+# Ensure INTENSITY is a float for GLSL (Handle both . and , then force . via LC_NUMERIC=C)
+INTENSITY=$(echo "$INTENSITY" | tr ',' '.')
+INTENSITY=$(LC_NUMERIC=C printf "%.2f" "$INTENSITY")
+
+write_brightness_shader() {
+    cat > "$SHADER_FILE" << EOF
+#version 300 es
+precision highp float;
+in vec2 v_texcoord;
+uniform sampler2D tex;
+out vec4 fragColor;
+void main() {
+    vec4 color = texture(tex, v_texcoord);
+    fragColor = vec4((color.rgb * $INTENSITY) + 0.01, color.a);
+}
+EOF
+}
+
+write_invert_shader() {
+    cat > "$SHADER_FILE" << EOF
+#version 300 es
+precision highp float;
+in vec2 v_texcoord;
+uniform sampler2D tex;
+out vec4 fragColor;
+void main() {
+    vec4 color = texture(tex, v_texcoord);
+    fragColor = vec4(1.0 - color.rgb, color.a);
+}
+EOF
+}
+
+pulse() {
+    case "$MODE" in
+        brightness)
+            write_brightness_shader
+            hyprctl keyword decoration:screen_shader "$SHADER_FILE" >/dev/null 2>&1
+            sleep "$DURATION"
+            hyprctl keyword decoration:screen_shader "" >/dev/null 2>&1
+            ;;
+        dim)
+            local current
+            current=$(hyprctl getoption decoration:dim_strength -j | jq '.float')
+            hyprctl keyword decoration:dim_strength "$INTENSITY" >/dev/null 2>&1
+            sleep "$DURATION"
+            hyprctl keyword decoration:dim_strength "$current" >/dev/null 2>&1
+            ;;
+        invert)
+            write_invert_shader
+            hyprctl keyword decoration:screen_shader "$SHADER_FILE" >/dev/null 2>&1
+            sleep "$DURATION"
+            hyprctl keyword decoration:screen_shader "" >/dev/null 2>&1
+            ;;
+    esac
+}
+
+is_running() {
+    pgrep -f "asbl-no-more loop" >/dev/null
+}
+
+case "$CMD" in
+    start)
+        if is_running; then
+            echo "asbl-no-more is already running."
+            exit 0
+        fi
+        echo "Starting ASBL reset loop ($MODE mode, ${INTERVAL}s interval)"
+        # Export vars for the loop process
+        export ASBL_INTERVAL="$INTERVAL" ASBL_DURATION="$DURATION" ASBL_INTENSITY="$INTENSITY" ASBL_MODE="$MODE"
+        "$0" loop &
+        disown
+        ;;
+    loop)
+        while true; do
+            pulse
+            sleep "$INTERVAL"
+        done
+        ;;
+    stop)
+        if pkill -f "asbl-no-more loop"; then
+            echo "ASBL reset loop stopped."
+            hyprctl keyword decoration:screen_shader "" >/dev/null 2>&1
+        else
+            echo "asbl-no-more was not running."
+        fi
+        ;;
+    status)
+        if is_running; then
+            echo "asbl-no-more: RUNNING (Mode: $MODE, Interval: ${INTERVAL}s)"
+        else
+            echo "asbl-no-more: STOPPED"
+        fi
+        ;;
+    toggle)
+        if is_running; then "$0" stop; else "$0" start -i "$INTERVAL" -d "$DURATION" -v "$INTENSITY" -m "$MODE"; fi
+        ;;
+    once)
+        pulse
+        ;;
+    help)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $CMD"
+        show_help
+        exit 1
+        ;;
+esac

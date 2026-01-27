@@ -33,6 +33,7 @@ let
     fi
     printf '%s\n' "$PWD"
   '';
+  lspRootLauncher = import ../../lib/lsp-root.nix { inherit pkgs; };
 in
 {
   options.sinnix.features.dev.shell.enable =
@@ -84,8 +85,6 @@ in
             websocat
             xh
             tokei
-            diffsitter
-            difftastic
             ast-grep
             mprocs
             tmux
@@ -96,8 +95,38 @@ in
             graphviz
             mermaid-cli
             antigravity
+            # From utilities.nix
+            android-tools
+            dua
+            duckdb
+            evtest
+            gcc
+            gdb
+            git-filter-repo
+            gnumake
+            google-cloud-sdk
+            lm_sensors
+            man-pages
+            man-pages-posix
+            meld
+            ncdu
+            nvitop
+            nix-fast-build
+            nix-prefetch-git
+            nix-tree
+            wireshark
+            powertop
+            nodePackages_latest.bash-language-server
+            nodePackages_latest.yaml-language-server
+            sysstat
+            strace
+            polylogue
+            gallery-dl
+            vulkan-validation-layers
+            wayland-utils
+            wayland-protocols
           ])
-          ++ [ findFlakeRoot ];
+          ++ [ findFlakeRoot lspRootLauncher ];
 
         programs = {
           zsh = {

@@ -12,7 +12,7 @@ in
       shell.enable = true;
       git.enable = true;
       languages.enable = true;
-      utilities.enable = true;
+      mcp-servers.enable = true;
     };
     sinnix.features.cli.core.enable = true;
   };

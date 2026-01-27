@@ -4,6 +4,7 @@ let
 in
 [
   (mkOverlay ./aw-server-rust.nix)
+  (mkOverlay ./asbl-no-more.nix)
   (mkOverlay ./lowdown.nix)
   (mkOverlay ./codex.nix)
   (mkOverlay ./chromium.nix)

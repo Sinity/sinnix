@@ -506,3 +506,31 @@ Each project has its own `AGENTS.md` or `CLAUDE.md` with deeper context:
 - **lynchpin**: Data landscape, pipeline specs, Lynchpin API
 
 When working in a project directory, that project's instructions take precedence.
+
+---
+
+## Technical Reference
+
+### System Architecture
+- **NixOS Configuration**: Uses `modules/default.nix` as entrypoint.
+- **Core Stack**: `modules/core.nix`, `networking.nix`, `storage.nix`, etc.
+- **Services**: Grouped in `modules/services/`. `sinex.nix` is the unified data platform.
+- **Features**: Grouped in `modules/features/` (`cli`, `desktop`, `dev`).
+- **Hosts**: Defined in `hosts/`, layered on top of shared modules.
+- **Secrets**: Managed via `modules/secrets.nix` using agenix.
+
+### Dotfile Management
+- **Location**: `dots/` directory.
+- **Mechanism**: Home Manager out-of-store symlinks (`mkOutOfStoreSymlink`). Edits propagate instantly without rebuild.
+- **Key Managed Paths**:
+  - `dots/claude/` -> `~/.config/claude`
+  - `dots/nvim/` -> `~/.config/nvim`
+  - `dots/vscode/` -> VS Code profile
+  - `dots/hyprland/` (Some parts declarative in Nix)
+
+### Tooling: Codex CLI
+- **Config**: `dots/codex/config.toml`, skills in `dots/codex/skills`.
+- **MCP Servers**: GitHub, PostgreSQL (local), Qdrant, Context7, Firecrawl, `cclsp` bridge.
+- **Context7**: Documentation discovery via `resolve-library-id` and `get-library-docs`.
+- **LSP Bridge**: `cclsp` shares manifests between Claude, Codex, and OpenCode. uses `lsp-root` for project detection.
+

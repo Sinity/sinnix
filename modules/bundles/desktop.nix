@@ -27,8 +27,7 @@ in
       features.desktop.media.enable = true;
       features.desktop.browser.enable = true;
       features.desktop.storage.enable = true;
-      features.desktop.wayland-session.enable = true;
-      features.desktop.background-services.enable = true;
+      features.desktop.base.enable = true;
       features.desktop.activitywatch.enable = true;
       features.desktop.reboot-notifier.enable = true;
     };

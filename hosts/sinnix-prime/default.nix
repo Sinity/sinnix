@@ -17,11 +17,10 @@
   sinnix.features.dev.editors.enable = true;
   sinnix.features.dev.editors.vscode.enable = true;
   sinnix.features.dev.editors.zed.enable = true;
-  sinnix.features.cli.asciinema.enable = true;
 
   sinnix.services = {
     transmission.enable = true;
-    asciinema.enable = true;
+    terminal-capture.enable = true;
     netdata.enable = true;
     sinex = {
       enable = false;

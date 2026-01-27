@@ -58,7 +58,6 @@ in
     ", Print, exec, grimblast --notify --freeze copysave area ${screenshotDir}/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
     "SUPER, Print, exec, grimblast --notify --cursor copysave output ${screenshotDir}/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
     ", F8, exec, ${script "toggle-scratch"} rawlog"
-    ", SHIFT+F8, exec, log-to-knowledgebase"
 
     "SUPER SHIFT, P, pin"
 
@@ -69,7 +68,6 @@ in
     "SUPER SHIFT, G, exec, ${script "kitty-grid"}"
     "SUPER CTRL, G, exec, ${script "kitty-grid"} --grid 3x3"
     "SUPER SHIFT, C, exec, ${script "kitty-grid"} --class qutebrowser --grid 3x2 --arrange-only"
-    "SUPER SHIFT, N, exec, ~/.local/bin/kb-capture"
 
     ",XF86AudioMute, exec, pamixer -t"
     ",XF86AudioPlay, exec, playerctl play-pause && notify-send -t 1000 '♪ Media' '$(playerctl status)'"
@@ -77,6 +75,8 @@ in
     ",XF86AudioPrev, exec, playerctl previous && notify-send -t 1000 '♪ Previous' '$(playerctl metadata title 2>/dev/null || echo \"Unknown\")'"
     ",XF86AudioRaiseVolume, exec, pamixer -i 2"
     ",XF86AudioLowerVolume, exec, pamixer -d 2"
+    "SUPER, XF86AudioMute, exec, ${script "audio"} mic-toggle"
+    "SUPER, XF86AudioRaiseVolume, exec, ${script "audio"} toggle"
 
     "SUPER, Tab, changegroupactive, f"
     "SUPER SHIFT, Tab, changegroupactive, b"

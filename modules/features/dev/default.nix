@@ -5,6 +5,6 @@
     ./git.nix
     ./shell.nix
     ./languages.nix
-    ./utilities.nix
+    ./mcp-servers.nix
   ];
 }

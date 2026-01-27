@@ -1,7 +1,7 @@
 { ... }:
 {
   imports = [
-    ./asciinema.nix
+    ./terminal-capture.nix
     ./netdata.nix
     ./sinex.nix
     ./transmission.nix
