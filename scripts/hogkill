@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# kill-hog: Interactive process killer using gum
+# Dependencies: gum, ps, kill
+
+if ! command -v gum &> /dev/null; then
+    echo "Error: 'gum' is not installed or not in PATH."
+    echo "Please install gum to use this script."
+    exit 1
+fi
+
+# 1. Select Resource Type
+RESOURCE_TYPE=$(gum choose "CPU Usage" "Memory Usage")
+
+if [[ "$RESOURCE_TYPE" == "Memory Usage" ]]; then
+    SORT_FLAG="-%mem"
+    LABEL="Memory"
+else
+    SORT_FLAG="-%cpu"
+    LABEL="CPU"
+fi
+
+# 2. Select Process
+# We grab the top 50 processes by selected resource.
+# Format: PID | User | CPU% | MEM% | Command
+# we skip the header in ps output for easier parsing
+PS_OUTPUT=$(ps -eo pid,user,%cpu,%mem,args --sort="$SORT_FLAG" | head -n 51 | tail -n +2)
+
+if [ -z "$PS_OUTPUT" ]; then
+    echo "No processes found?"
+    exit 1
+fi
+
+# We use awk to format it nicely for the menu
+# $1=PID, $2=USER, $3=CPU, $4=MEM, $5...=CMD
+# we pad columns to align them somewhat
+FORMATTED_LIST=$(echo "$PS_OUTPUT" | awk '{
+    printf "%-8s %-10s %-6s %-6s ", $1, $2, $3, $4;
+    for (i=5; i<=NF; i++) printf "%s ", $i;
+    printf "\n"
+}')
+
+echo "Select a process to kill (Top 50 by $LABEL):"
+SELECTED_LINE=$(echo "$FORMATTED_LIST" | gum filter --placeholder "Search process..." --height 20)
+
+if [ -z "$SELECTED_LINE" ]; then
+    echo "No process selected. Exiting."
+    exit 0
+fi
+
+PID=$(echo "$SELECTED_LINE" | awk '{print $1}')
+CMD_NAME=$(echo "$SELECTED_LINE" | awk '{for (i=5; i<=NF; i++) printf "%s ", $i;}' | cut -c 1-50)
+
+echo "Selected: $PID ($CMD_NAME...)"
+
+# 3. Select Signal
+# Explaining the difference between TERM and KILL
+SIGNAL_CHOICE=$(gum choose \
+    "SIGTERM (15) - Polite request (Cleanup allowed)" \
+    "SIGKILL (9)  - Force kill (No cleanup, immediate)" \
+    "Cancel")
+
+if [[ "$SIGNAL_CHOICE" == "Cancel" ]]; then
+    echo "Cancelled."
+    exit 0
+fi
+
+SIGNAL="15"
+if [[ "$SIGNAL_CHOICE" == *"SIGKILL"* ]]; then
+    SIGNAL="9"
+fi
+
+# 4. Confirm and Kill
+echo "About to send signal $SIGNAL to PID $PID."
+if gum confirm "Are you sure?"; then
+    kill -$SIGNAL "$PID"
+    
+    # Verify
+    sleep 0.5
+    if kill -0 "$PID" 2>/dev/null; then
+        echo "Process $PID is still running."
+        if [[ "$SIGNAL" == "15" ]]; then
+            echo "It might be ignoring SIGTERM. Try SIGKILL."
+        fi
+    else
+        echo "Process $PID terminated."
+    fi
+else
+    echo "Cancelled."
+fi

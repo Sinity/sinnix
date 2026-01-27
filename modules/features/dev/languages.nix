@@ -57,7 +57,7 @@ mkFeatureModule {
           jetbrains-mono
           aiTools.claude-code
           aiTools.opencode
-          codex
+          # codex  # temporarily disabled - OOMs during build
         ];
       };
     };

@@ -76,21 +76,21 @@ in
           "access log" = "none";
         };
 
-        # Database engine configuration for long-term storage
+        # Database engine configuration for long-term storage (25x capacity)
         db = {
           # Tier 0: 1-second granularity, recent data
           "mode" = "dbengine";
           "storage tiers" = "3";
 
-          # Tier 0: ~7 days at 1s granularity
-          "dbengine tier 0 retention size" = "5GiB";
+          # Tier 0: ~6 months at 1s granularity
+          "dbengine tier 0 retention size" = "125GiB";
 
-          # Tier 1: ~30 days at 60s granularity (aggregated)
-          "dbengine tier 1 retention size" = "2GiB";
+          # Tier 1: ~2 years at 60s granularity (aggregated)
+          "dbengine tier 1 retention size" = "50GiB";
           "dbengine tier 1 update every iterations" = "60";
 
-          # Tier 2: ~365 days at 3600s (1hr) granularity
-          "dbengine tier 2 retention size" = "1GiB";
+          # Tier 2: ~10+ years at 3600s (1hr) granularity
+          "dbengine tier 2 retention size" = "25GiB";
           "dbengine tier 2 update every iterations" = "60";
         };
 

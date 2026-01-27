@@ -22,11 +22,12 @@ let
     hdparm
   ];
   perfScan = pkgs."perf-scan";
+  hogkill = pkgs."hogkill";
 in
 {
   config = lib.mkIf isDesktop {
     environment.systemPackages = lib.mkAfter (
-      coreDiagnostics ++ [ perfScan ]
+      coreDiagnostics ++ [ perfScan hogkill ]
     );
   };
 }

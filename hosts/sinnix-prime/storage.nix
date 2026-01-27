@@ -94,9 +94,9 @@ in
 
   # No disk swap - zram only. Rationale:
   # - Disk swap enables thrashing instead of fast failure
-  # - zram at 50% RAM with 2-3x compression ≈ 32-48GB effective swap
-  # - If that's not enough, you need more RAM, not more swap
-  # - earlyoom kills memory hogs before exhaustion anyway
+  # - zram at 10% RAM = small buffer for earlyoom to act (not RAM extension)
+  # - If zram fills, earlyoom kills hogs before system thrashes
+  # - Large zram (25%+) silently degrades performance under memory pressure
   #
   # To re-enable for hibernation: { device = "/dev/nvme1n1p1"; }
   swapDevices = [ ];

@@ -23,6 +23,23 @@
         "type": "github"
       }
     },
+    "aw-server-rust": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1769309180,
+        "narHash": "sha256-BP5UcDRqumqcqNcbF/TK6sjHKVvMCrANJtRaB0NRWVU=",
+        "owner": "Sinity",
+        "repo": "aw-server-rust",
+        "rev": "e9ec01de75ef80e701d70caf0b0c27a58238d138",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Sinity",
+        "ref": "fix/heartbeat-replace-event-id-mismatch",
+        "repo": "aw-server-rust",
+        "type": "github"
+      }
+    },
     "base16": {
       "inputs": {
         "fromYaml": "fromYaml"
@@ -981,11 +998,11 @@
         "nixpkgs": "nixpkgs_5"
       },
       "locked": {
-        "lastModified": 1769279629,
-        "narHash": "sha256-hsY0FyTFNA8us96V7RVKsRr1txj60X3jA5UBb3C4ic0=",
+        "lastModified": 1769299956,
+        "narHash": "sha256-VVsR5guWl8caEMohq0PFt2rq0TCc5La1WTaeJzqYqv0=",
         "ref": "master",
-        "rev": "474d8928bdd2361a07ade436f06a21c96e7b389b",
-        "revCount": 470,
+        "rev": "2f52a3bcd22a614e10286f6463e80de1bd183f35",
+        "revCount": 477,
         "type": "git",
         "url": "file:///realm/project/polylogue"
       },
@@ -998,6 +1015,7 @@
     "root": {
       "inputs": {
         "agenix": "agenix",
+        "aw-server-rust": "aw-server-rust",
         "devenv": "devenv",
         "disko": "disko",
         "flake-parts": "flake-parts_2",

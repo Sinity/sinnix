@@ -11,11 +11,11 @@ let
   codexPatch = name: codexPatches + "/${name}";
 in
 {
+  # Temporarily disabled patch due to nix-ai-tools update
+  # TODO: Update prompt-subcommand.patch for new codex version
   codex = upstream.overrideAttrs (old: {
-    patches = (old.patches or [ ]) ++ [
-      (codexPatch "prompt-subcommand.patch")
-    ];
-    patchFlags = (old.patchFlags or [ "-p1" ]) ++ [ "--fuzz=0" ];
+    patches = (old.patches or [ ]); # Removed custom patch
+    patchFlags = (old.patchFlags or [ "-p1" ]);
     passthru = (old.passthru or { }) // {
       inherit upstream;
     };

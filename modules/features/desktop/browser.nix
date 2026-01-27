@@ -44,11 +44,6 @@ mkFeatureModule {
           };
         in
         {
-          programs.qutebrowser = {
-            enable = true;
-            package = pkgs.qutebrowser;
-          };
-
           home = {
             sessionVariables = {
               BROWSER = "google-chrome-stable";

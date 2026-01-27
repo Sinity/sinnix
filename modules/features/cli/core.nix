@@ -12,6 +12,8 @@ mkFeatureModule {
         git
         taskwarrior3
         timewarrior
+        repomix
+        difftastic
         unzip
         wget
       ];

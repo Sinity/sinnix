@@ -21,13 +21,13 @@ in
         "vm.dirty_background_ratio" = 5; # Background writeback threshold
       };
 
-      # zram: compressed RAM swap - faster than SSD, effectively extends RAM
-      # Compression ratio ~2-3x for typical workloads (debug symbols compress well)
-      # 25% of 32GB = 8GB capacity → ~16-24GB effective with compression
+      # zram: small compressed swap buffer - gives earlyoom time to act
+      # NOT for extending RAM capacity (that silently kills performance)
+      # 10% of 32GB = 3.2GB capacity → just a safety buffer before OOM killer
       zramSwap = {
         enable = true;
         algorithm = "zstd"; # Best compression/speed tradeoff
-        memoryPercent = 25; # Conservative: small buffer, fail fast if exceeded
+        memoryPercent = 10; # Minimal: buffer for earlyoom, not RAM extension
         priority = 100; # High priority: prefer zram over disk swap
       };
 
@@ -393,8 +393,8 @@ in
             cgroup = "build";
             CPUWeight = 30;
             IOWeight = 30;
-            MemoryHigh = "16G";
-            MemoryMax = "20G";
+            MemoryHigh = "14G";
+            MemoryMax = "16G";
           }
         ];
       };
@@ -416,31 +416,30 @@ in
 
       # Systemd slice for builds - these limits ACTUALLY work unlike ananicy extraCgroups
       # Use with: systemd-run --user --slice=build.slice cargo build
-      # Or set CARGO_BUILD_JOBS in shell config
+      # Limits match CARGO_BUILD_JOBS expectation: 8 jobs × 2GB = 16GB max
       systemd.user.slices.build = {
         description = "Build processes slice with memory limits";
         sliceConfig = {
-          MemoryHigh = "16G";
-          MemoryMax = "20G";
+          MemoryHigh = "14G"; # Soft limit: kernel reclaims aggressively above this
+          MemoryMax = "16G"; # Hard limit: OOM kill if exceeded
           CPUWeight = 30;
           IOWeight = 30;
         };
       };
     })
 
-    # Cargo/Rust build parallelism - tuned for i7-13700K (24 threads / 31GB RAM)
-    # Peak memory ≈ jobs × ~1.5GB per rustc instance
+    # Cargo/Rust build parallelism - tuned for i7-13700K (24 threads / 32GB RAM)
+    # Peak memory ≈ jobs × ~2GB per rustc instance (debug builds with symbols)
     {
       environment.variables = {
-        # 10 parallel crates: uses ~15GB peak, leaves room for system
-        CARGO_BUILD_JOBS = "10";
+        # 8 parallel crates × ~2GB = ~16GB peak, leaves ~16GB for system
+        CARGO_BUILD_JOBS = "8";
 
-        # Dev: lower codegen units = less memory per crate during LLVM phase
-        # (default is 256 for dev, which causes memory spikes)
-        CARGO_PROFILE_DEV_CODEGEN_UNITS = "8";
+        # Dev: 16 codegen units balances incremental compile speed vs memory
+        # Must match Cargo.toml [profile.dev] codegen-units setting
+        CARGO_PROFILE_DEV_CODEGEN_UNITS = "16";
 
         # Release: 1 = maximum optimization (full LTO, best inlining)
-        # Slower but produces smaller/faster binaries
         CARGO_PROFILE_RELEASE_CODEGEN_UNITS = "1";
       };
     }

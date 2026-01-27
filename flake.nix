@@ -50,15 +50,16 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # polylogue uses its own nixpkgs pin (24.05) to avoid dependency-injector build issues
     polylogue = {
       url = "git+file:///realm/project/polylogue?ref=master";
-      inputs.nixpkgs.follows = "nixpkgs";
     };
 
     # Private Sinex repository stored locally; build fails fast if missing.
     sinex = {
       url = "git+file:///realm/project/sinex?ref=master";
       inputs.nixpkgs.follows = "nixpkgs";
+      inputs.agenix.follows = "agenix";
     };
 
     # System-wide theming
@@ -70,6 +71,12 @@
     nix-vscode-extensions.inputs.nixpkgs.follows = "nixpkgs";
 
     nix-ai-tools.url = "github:numtide/nix-ai-tools";
+
+    # aw-server-rust with heartbeat fix (PR #555)
+    aw-server-rust = {
+      url = "github:Sinity/aw-server-rust/fix/heartbeat-replace-event-id-mismatch";
+      flake = false;
+    };
 
   };
 
