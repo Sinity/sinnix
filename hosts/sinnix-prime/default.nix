@@ -20,13 +20,11 @@
 
   sinnix.services = {
     transmission.enable = true;
-    terminal-capture.enable = true;
+    # terminal-capture disabled - sinex handles asciinema recording via shell.asciinema.autoRecord
     netdata.enable = true;
     sinex = {
       enable = false;
       provisionDatabase = true;
     };
   };
-
-  services.polylogue-sync.enable = false;
 }

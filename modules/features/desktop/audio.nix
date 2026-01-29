@@ -12,10 +12,10 @@
   ...
 }:
 let
-  cfg = config.sinnix.audio;
+  cfg = config.sinnix.features.desktop.audio;
 in
 {
-  options.sinnix.audio = {
+  options.sinnix.features.desktop.audio = {
     enable = lib.mkEnableOption "High-performance audio stack (PipeWire)";
   };
 

@@ -8,6 +8,7 @@
 let
   inherit (inputs.nixpkgs) lib;
   featureLib = import ../modules/lib/features.nix { inherit lib; };
+  systemdLib = import ../modules/lib/systemd-hardening.nix { inherit lib; };
   baseModules = [
     inputs.agenix.nixosModules.default
     inputs.stylix.nixosModules.stylix
@@ -20,6 +21,7 @@ let
     inherit (featureLib) mkFeatureModule;
     helpers = {
       inherit (featureLib) mkDotsSymlink;
+      systemd = systemdLib;
     };
   };
   mkHost =

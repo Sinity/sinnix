@@ -10,26 +10,23 @@ in
   config = lib.mkIf cfg.enable {
     sinnix = {
       # Enable core desktop capabilities
-      ui.enable = true;
-      audio.enable = true;
       programs.nix-ld.enable = true;
-      features.desktop.hyprland.enable = true;
-      features.desktop.terminal.enable = true;
-      features.desktop.waybar.enable = true;
-      features.desktop.tofi.enable = true;
-      features.desktop.fnott.enable = true;
-      features.desktop.clipse.enable = true;
-      features.desktop.common-apps.enable = true;
-      features.desktop.theming.enable = true;
-      features.desktop.mime.enable = true;
-      features.desktop.gaming.enable = true;
-      features.desktop.crypto.enable = true;
-      features.desktop.media.enable = true;
-      features.desktop.browser.enable = true;
-      features.desktop.storage.enable = true;
-      features.desktop.base.enable = true;
       features.desktop.activitywatch.enable = true;
+      features.desktop.audio.enable = true;
+      features.desktop.base.enable = true;
+      features.desktop.browser.enable = true;
+      features.desktop.common-apps.enable = true;
+      features.desktop.crypto.enable = true;
+      features.desktop.gaming.enable = true;
+      features.desktop.hyprland.enable = true;
+      features.desktop.media.enable = true;
+      features.desktop.mime.enable = true;
       features.desktop.reboot-notifier.enable = true;
+      features.desktop.storage.enable = true;
+      features.desktop.terminal.enable = true;
+      features.desktop.theming.enable = true;
+      features.desktop.ui.enable = true;
+      features.desktop.waybar.enable = true;
     };
   };
 }

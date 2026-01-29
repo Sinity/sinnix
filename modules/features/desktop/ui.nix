@@ -67,10 +67,10 @@ let
   sansName = stylixFontSpec.sansSerif.name;
   serifName = stylixFontSpec.serif.name;
 
-  cfg = config.sinnix.ui;
+  cfg = config.sinnix.features.desktop.ui;
 in
 {
-  options.sinnix.ui = {
+  options.sinnix.features.desktop.ui = {
     enable = lib.mkEnableOption "Sinity's Graphical User Interface Stack";
   };
 
@@ -104,7 +104,8 @@ in
       enable = true;
       # mkForce: Disable wlr portal in favor of hyprland-specific portal (better screenshare)
       wlr.enable = lib.mkForce false;
-      xdgOpenUsePortal = true;
+      # xdgOpenUsePortal forces portal dialogs even with default apps - disabled for better UX
+      xdgOpenUsePortal = false;
       extraPortals = lib.mkAfter [
         pkgs.xdg-desktop-portal-hyprland
         pkgs.xdg-desktop-portal-gtk

@@ -143,6 +143,16 @@ ${lib.concatStringsSep "\n" (map (effect: "        ${effect}") effects)}
           ];
         }
         {
+          name = "scratchpad-claude";
+          props = [ "match:class = ^(scratchpad-claude)$" ];
+          effects = [
+            "workspace = special:scratch_claude silent"
+            "float = yes"
+            "center = yes"
+            "size = (monitor_w*0.85) (monitor_h*0.85)"
+          ];
+        }
+        {
           name = "scratchpad-spotify";
           props = [ "match:class = ^([Ss]potify)$" ];
           effects = [

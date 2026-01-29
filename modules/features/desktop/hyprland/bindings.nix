@@ -57,7 +57,11 @@ in
     "SUPER, V, exec, kitty --class clipse -e clipse"
     ", Print, exec, grimblast --notify --freeze copysave area ${screenshotDir}/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
     "SUPER, Print, exec, grimblast --notify --cursor copysave output ${screenshotDir}/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
+
+    # F-key bindings
+    ", F4, exec, kitty --class scratchpad-claude --title 'Claude Assistant' ${script "claude-scratchpad"}"
     ", F8, exec, ${script "toggle-scratch"} rawlog"
+    ", F9, exec, ${script "nuke-builds"}"
 
     "SUPER SHIFT, P, pin"
 

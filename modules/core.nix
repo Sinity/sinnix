@@ -77,7 +77,6 @@ in
         allowAliases = true;
       };
       hostPlatform = "x86_64-linux";
-      overlays = [ inputs.nur.overlays.default ];
     };
 
     services.xserver.xkb.layout = "pl";

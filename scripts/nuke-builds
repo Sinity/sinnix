@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Aggressively terminate all build processes, compilers, and LSPs
+# Designed for F9 emergency kill binding
+
+set -euo pipefail
+
+# Build tools and compilers
+BUILD_PATTERNS=(
+  "gcc" "g++" "clang" "clang++" "rustc"
+  "cc1" "cc1plus" "ld" "lld" "mold"
+  "cargo" "cmake" "make" "ninja" "meson"
+  "nix" "nix-daemon" "nix-build"
+)
+
+# LSP servers
+LSP_PATTERNS=(
+  "rust-analyzer" "clangd" "pyright" "gopls"
+  "typescript-language-server" "nil" "lua-language-server"
+  "bash-language-server" "yaml-language-server"
+)
+
+ALL_PATTERNS=("${BUILD_PATTERNS[@]}" "${LSP_PATTERNS[@]}")
+
+echo "🔪 Nuking build processes and LSPs..."
+
+killed=0
+for pattern in "${ALL_PATTERNS[@]}"; do
+  # Find PIDs matching pattern
+  pids=$(pgrep -f "$pattern" 2>/dev/null || true)
+
+  if [ -n "$pids" ]; then
+    echo "  Killing $pattern: $pids"
+
+    # SIGTERM first (give 2s to cleanup)
+    kill -TERM $pids 2>/dev/null || true
+    sleep 0.5
+
+    # SIGKILL stragglers
+    for pid in $pids; do
+      if kill -0 "$pid" 2>/dev/null; then
+        kill -KILL "$pid" 2>/dev/null || true
+        ((killed++))
+      fi
+    done
+  fi
+done
+
+# Also kill anything in build cgroup
+if [ -d /sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/build.slice ]; then
+  build_pids=$(cat /sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/build.slice/cgroup.procs 2>/dev/null || true)
+  if [ -n "$build_pids" ]; then
+    echo "  Killing build cgroup processes: $(echo $build_pids | tr '\n' ' ')"
+    echo "$build_pids" | xargs -r kill -KILL 2>/dev/null || true
+    ((killed += $(echo "$build_pids" | wc -l)))
+  fi
+fi
+
+if [ "$killed" -gt 0 ]; then
+  notify-send "Nuke Builds" "Killed $killed processes" -u normal
+  echo "✅ Killed $killed processes"
+else
+  echo "✅ No build processes found"
+fi

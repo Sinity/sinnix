@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Launch or attach to persistent Claude Code tmux session
+# Designed for F4 scratchpad binding
+
+set -euo pipefail
+
+SESSION_NAME="claude-assistant"
+WORK_DIR="${LYNCHPIN_REPO_ROOT:-/realm/project/sinity-lynchpin}/claude-sessions"
+SOCKET_PATH="/tmp/tmux-claude-$UID"
+
+# Ensure work directory exists
+mkdir -p "$WORK_DIR"
+cd "$WORK_DIR"
+
+# Check if session already exists
+if tmux -S "$SOCKET_PATH" has-session -t="$SESSION_NAME" 2>/dev/null; then
+  # Session exists - just attach
+  tmux -S "$SOCKET_PATH" attach-session -t "$SESSION_NAME"
+else
+  # Create new session with Claude Code
+  tmux -S "$SOCKET_PATH" new-session -d -s "$SESSION_NAME" -c "$WORK_DIR"
+
+  # Set session options
+  tmux -S "$SOCKET_PATH" set-option -t "$SESSION_NAME" remain-on-exit off
+  tmux -S "$SOCKET_PATH" set-option -t "$SESSION_NAME" destroy-unattached off
+
+  # Launch Claude Code with Haiku model in the session
+  tmux -S "$SOCKET_PATH" send-keys -t "$SESSION_NAME" "claude --model haiku" C-m
+
+  # Attach to the session
+  tmux -S "$SOCKET_PATH" attach-session -t "$SESSION_NAME"
+fi

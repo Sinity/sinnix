@@ -46,14 +46,14 @@
   "terminal.integrated.defaultProfile.linux": "zsh",
   "terminal.integrated.profiles.linux": {
     "opencode": { "path": "opencode" },
-    "codex": { "path": "codex" }
+    "codex": { "path": "codex" },
   },
 
   // ——— Performance ———
   "files.watcherExclude": {
     "**/target/**": true,
     "**/.direnv/**": true,
-    "**/node_modules/**": true
+    "**/node_modules/**": true,
   },
 
   // ——— Foam / Markdown ———
@@ -88,7 +88,7 @@
       "key": "?",
       "name": "Commands",
       "type": "command",
-      "command": "workbench.action.showCommands"
+      "command": "workbench.action.showCommands",
     },
     {
       "key": "f",
@@ -99,27 +99,27 @@
           "key": "f",
           "name": "Quick Open",
           "type": "command",
-          "command": "workbench.action.quickOpen"
+          "command": "workbench.action.quickOpen",
         },
         {
           "key": "e",
           "name": "Explorer",
           "type": "command",
-          "command": "workbench.view.explorer"
+          "command": "workbench.view.explorer",
         },
         {
           "key": "r",
           "name": "Open Recent",
           "type": "command",
-          "command": "workbench.action.openRecent"
+          "command": "workbench.action.openRecent",
         },
         {
           "key": "s",
           "name": "Save All",
           "type": "command",
-          "command": "workbench.action.files.saveAll"
-        }
-      ]
+          "command": "workbench.action.files.saveAll",
+        },
+      ],
     },
     {
       "key": "s",
@@ -130,33 +130,33 @@
           "key": "s",
           "name": "Find in Files",
           "type": "command",
-          "command": "workbench.action.findInFiles"
+          "command": "workbench.action.findInFiles",
         },
         {
           "key": "/",
           "name": "Find in Files",
           "type": "command",
-          "command": "workbench.action.findInFiles"
+          "command": "workbench.action.findInFiles",
         },
         {
           "key": "h",
           "name": "Search: Focus View",
           "type": "command",
-          "command": "workbench.view.search"
+          "command": "workbench.view.search",
         },
         {
           "key": "i",
           "name": "Symbols in File",
           "type": "command",
-          "command": "workbench.action.gotoSymbol"
+          "command": "workbench.action.gotoSymbol",
         },
         {
           "key": "w",
           "name": "Symbols in Workspace",
           "type": "command",
-          "command": "workbench.action.showAllSymbols"
-        }
-      ]
+          "command": "workbench.action.showAllSymbols",
+        },
+      ],
     },
     {
       "key": "l",
@@ -167,57 +167,57 @@
           "key": "d",
           "name": "Go to Definition",
           "type": "command",
-          "command": "editor.action.revealDefinition"
+          "command": "editor.action.revealDefinition",
         },
         {
           "key": "D",
           "name": "Go to Declaration",
           "type": "command",
-          "command": "editor.action.revealDeclaration"
+          "command": "editor.action.revealDeclaration",
         },
         {
           "key": "I",
           "name": "Go to Implementation",
           "type": "command",
-          "command": "editor.action.goToImplementation"
+          "command": "editor.action.goToImplementation",
         },
         {
           "key": "T",
           "name": "Go to Type Definition",
           "type": "command",
-          "command": "editor.action.goToTypeDefinition"
+          "command": "editor.action.goToTypeDefinition",
         },
         {
           "key": "R",
           "name": "Find References",
           "type": "command",
-          "command": "editor.action.referenceSearch.trigger"
+          "command": "editor.action.referenceSearch.trigger",
         },
         {
           "key": "p",
           "name": "Peek Definition",
           "type": "command",
-          "command": "editor.action.peekDefinition"
+          "command": "editor.action.peekDefinition",
         },
         {
           "key": "r",
           "name": "Rename Symbol",
           "type": "command",
-          "command": "editor.action.rename"
+          "command": "editor.action.rename",
         },
         {
           "key": "f",
           "name": "Format Document",
           "type": "command",
-          "command": "editor.action.formatDocument"
+          "command": "editor.action.formatDocument",
         },
         {
           "key": "a",
           "name": "Code Actions",
           "type": "command",
-          "command": "editor.action.codeAction"
-        }
-      ]
+          "command": "editor.action.codeAction",
+        },
+      ],
     },
     {
       "key": "g",
@@ -228,45 +228,45 @@
           "key": "g",
           "name": "Source Control",
           "type": "command",
-          "command": "workbench.view.scm"
+          "command": "workbench.view.scm",
         },
         {
           "key": "b",
           "name": "GitLens: Toggle Blame",
           "type": "command",
-          "command": "gitlens.toggleLineBlame"
+          "command": "gitlens.toggleLineBlame",
         },
         {
           "key": "f",
           "name": "Fetch",
           "type": "command",
-          "command": "git.fetch"
+          "command": "git.fetch",
         },
         {
           "key": "p",
           "name": "Pull",
           "type": "command",
-          "command": "git.pull"
+          "command": "git.pull",
         },
         {
           "key": "u",
           "name": "Push",
           "type": "command",
-          "command": "git.push"
+          "command": "git.push",
         },
         {
           "key": "h",
           "name": "File History (GitLens)",
           "type": "command",
-          "command": "gitlens.showQuickFileHistory"
+          "command": "gitlens.showQuickFileHistory",
         },
         {
           "key": "r",
           "name": "Repo History (GitLens)",
           "type": "command",
-          "command": "gitlens.showQuickRepoHistory"
-        }
-      ]
+          "command": "gitlens.showQuickRepoHistory",
+        },
+      ],
     },
     {
       "key": "x",
@@ -277,21 +277,21 @@
           "key": "x",
           "name": "Problems",
           "type": "command",
-          "command": "workbench.actions.view.problems"
+          "command": "workbench.actions.view.problems",
         },
         {
           "key": "n",
           "name": "Next Problem",
           "type": "command",
-          "command": "editor.action.marker.next"
+          "command": "editor.action.marker.next",
         },
         {
           "key": "p",
           "name": "Prev Problem",
           "type": "command",
-          "command": "editor.action.marker.prev"
-        }
-      ]
+          "command": "editor.action.marker.prev",
+        },
+      ],
     },
     {
       "key": "t",
@@ -302,21 +302,21 @@
           "key": "t",
           "name": "Toggle Terminal",
           "type": "command",
-          "command": "workbench.action.terminal.toggleTerminal"
+          "command": "workbench.action.terminal.toggleTerminal",
         },
         {
           "key": "n",
           "name": "New Terminal",
           "type": "command",
-          "command": "workbench.action.terminal.new"
+          "command": "workbench.action.terminal.new",
         },
         {
           "key": "r",
           "name": "Run Task…",
           "type": "command",
-          "command": "workbench.action.tasks.runTask"
-        }
-      ]
+          "command": "workbench.action.tasks.runTask",
+        },
+      ],
     },
     {
       "key": "d",
@@ -327,33 +327,33 @@
           "key": "d",
           "name": "Debug View",
           "type": "command",
-          "command": "workbench.view.debug"
+          "command": "workbench.view.debug",
         },
         {
           "key": "b",
           "name": "Toggle Breakpoint",
           "type": "command",
-          "command": "editor.debug.action.toggleBreakpoint"
+          "command": "editor.debug.action.toggleBreakpoint",
         },
         {
           "key": "c",
           "name": "Continue",
           "type": "command",
-          "command": "workbench.action.debug.continue"
+          "command": "workbench.action.debug.continue",
         },
         {
           "key": "o",
           "name": "Step Over",
           "type": "command",
-          "command": "workbench.action.debug.stepOver"
+          "command": "workbench.action.debug.stepOver",
         },
         {
           "key": "i",
           "name": "Step Into",
           "type": "command",
-          "command": "workbench.action.debug.stepInto"
-        }
-      ]
+          "command": "workbench.action.debug.stepInto",
+        },
+      ],
     },
     {
       "key": "r",
@@ -364,21 +364,21 @@
           "key": "a",
           "name": "Code Action",
           "type": "command",
-          "command": "editor.action.codeAction"
+          "command": "editor.action.codeAction",
         },
         {
           "key": "r",
           "name": "RA: Run",
           "type": "command",
-          "command": "rust-analyzer.run"
+          "command": "rust-analyzer.run",
         },
         {
           "key": "t",
           "name": "Run All Tests",
           "type": "command",
-          "command": "testing.runAll"
-        }
-      ]
+          "command": "testing.runAll",
+        },
+      ],
     },
     {
       "key": "n",
@@ -389,23 +389,23 @@
           "key": "c",
           "name": "Run Task…",
           "type": "command",
-          "command": "workbench.action.tasks.runTask"
+          "command": "workbench.action.tasks.runTask",
         },
         {
           "key": "s",
           "name": "nix: switch",
           "type": "command",
           "command": "workbench.action.tasks.runTask",
-          "args": "nix: switch"
+          "args": "nix: switch",
         },
         {
           "key": "f",
           "name": "nix: flake check",
           "type": "command",
           "command": "workbench.action.tasks.runTask",
-          "args": "nix: flake check"
-        }
-      ]
+          "args": "nix: flake check",
+        },
+      ],
     },
     {
       "key": "m",
@@ -416,15 +416,15 @@
           "key": "p",
           "name": "Markdown Preview",
           "type": "command",
-          "command": "markdown.showPreviewToSide"
+          "command": "markdown.showPreviewToSide",
         },
         {
           "key": "g",
           "name": "Foam: Show Graph",
           "type": "command",
-          "command": "foam-vscode.show-graph"
-        }
-      ]
+          "command": "foam-vscode.show-graph",
+        },
+      ],
     },
     {
       "key": "a",
@@ -435,15 +435,15 @@
           "key": "c",
           "name": "Open Chat",
           "type": "command",
-          "command": "workbench.action.copilot.chat.open"
+          "command": "workbench.action.copilot.chat.open",
         },
         {
           "key": "i",
           "name": "Inline Chat",
           "type": "command",
-          "command": "editor.action.copilot.inlineChat.start"
-        }
-      ]
+          "command": "editor.action.copilot.inlineChat.start",
+        },
+      ],
     },
     {
       "key": "w",
@@ -454,45 +454,45 @@
           "key": "v",
           "name": "Split Right",
           "type": "command",
-          "command": "workbench.action.splitEditorRight"
+          "command": "workbench.action.splitEditorRight",
         },
         {
           "key": "s",
           "name": "Split Down",
           "type": "command",
-          "command": "workbench.action.splitEditorDown"
+          "command": "workbench.action.splitEditorDown",
         },
         {
           "key": "=",
           "name": "Even Widths",
           "type": "command",
-          "command": "workbench.action.evenEditorWidths"
+          "command": "workbench.action.evenEditorWidths",
         },
         {
           "key": "h",
           "name": "Focus Left",
           "type": "command",
-          "command": "workbench.action.focusLeftGroup"
+          "command": "workbench.action.focusLeftGroup",
         },
         {
           "key": "j",
           "name": "Focus Down",
           "type": "command",
-          "command": "workbench.action.focusBelowGroup"
+          "command": "workbench.action.focusBelowGroup",
         },
         {
           "key": "k",
           "name": "Focus Up",
           "type": "command",
-          "command": "workbench.action.focusAboveGroup"
+          "command": "workbench.action.focusAboveGroup",
         },
         {
           "key": "l",
           "name": "Focus Right",
           "type": "command",
-          "command": "workbench.action.focusRightGroup"
-        }
-      ]
+          "command": "workbench.action.focusRightGroup",
+        },
+      ],
     },
     {
       "key": "b",
@@ -503,22 +503,22 @@
           "key": "n",
           "name": "Next Editor",
           "type": "command",
-          "command": "workbench.action.nextEditor"
+          "command": "workbench.action.nextEditor",
         },
         {
           "key": "p",
           "name": "Prev Editor",
           "type": "command",
-          "command": "workbench.action.previousEditor"
+          "command": "workbench.action.previousEditor",
         },
         {
           "key": "d",
           "name": "Close Editor",
           "type": "command",
-          "command": "workbench.action.closeActiveEditor"
-        }
-      ]
-    }
+          "command": "workbench.action.closeActiveEditor",
+        },
+      ],
+    },
   ],
   "gitlens.ai.model": "vscode",
   "gitlens.ai.vscode.model": "copilot:gpt-4.1",
@@ -527,7 +527,7 @@
   "github.copilot.nextEditSuggestions.enabled": true,
   "editor.inlineSuggest.experimental.showOnSuggestConflict": "always",
   "extensions.experimental.affinity": {
-    "asvetliakov.vscode-neovim": 1
+    "asvetliakov.vscode-neovim": 1,
   },
   "wakatime.apiKey": "REDACTED_WAKATIME_KEY",
   "explorer.confirmDelete": false,
@@ -666,7 +666,7 @@
   "window.zoomLevel": 2,
   "lldb.suppressUpdateNotifications": true,
   "[markdown]": {
-    "editor.defaultFormatter": "DavidAnson.vscode-markdownlint"
+    "editor.defaultFormatter": "DavidAnson.vscode-markdownlint",
   },
   "gitlens.showWhatsNewAfterUpgrades": false,
   "gitlens.plusFeatures.enabled": false,
@@ -674,15 +674,16 @@
   "python.testing.pytestEnabled": true,
   "claudeCode.preferredLocation": "panel",
   "[jsonc]": {
-    "editor.defaultFormatter": "esbenp.prettier-vscode"
   },
   "[json]": {
-    "editor.defaultFormatter": "esbenp.prettier-vscode"
   },
-  "workbench.colorTheme": "GitHub Dark Default",
   "[html]": {
-    "editor.defaultFormatter": "esbenp.prettier-vscode"
   },
   "terminal.integrated.fontSize": 16,
-  "geminicodeassist.project": "REDACTED_GEMINI_PROJECT"
+  "geminicodeassist.project": "REDACTED_GEMINI_PROJECT",
+  "explorer.confirmDragAndDrop": false,
+  "vsicons.dontShowNewVersionMessage": true,
+  "geminicodeassist.agentYoloMode": true,
+  "geminicodeassist.inlineSuggestions.nextEditPredictions": true,
+  "geminicodeassist.inlineSuggestions.suggestionSpeed": "Fast",
 }
