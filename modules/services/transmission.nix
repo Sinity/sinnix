@@ -50,25 +50,13 @@ in
       # Ensure network is ready and add restart policy
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
-      serviceConfig = {
-        Restart = "on-failure";
-        RestartSec = 10;
-        # Systemd hardening
-        PrivateTmp = true;
-        NoNewPrivileges = true;
-        ProtectSystem = "strict";
-        ProtectHome = "read-only";
-        ProtectKernelTunables = true;
-        ProtectKernelModules = true;
-        ProtectControlGroups = true;
-        RestrictRealtime = true;
-        LockPersonality = true;
-        # Allow write to download directories
-        ReadWritePaths = [
-          torrentInbox
-          "/var/lib/transmission"
-        ];
-      };
+      serviceConfig = lib.mkMerge [
+        (lib.sinnix.systemd.mkHardenedService {
+          level = "strict";
+          readWritePaths = [ torrentInbox "/var/lib/transmission" ];
+        })
+        (lib.sinnix.systemd.mkRestartPolicy { strategy = "on-failure"; delaySec = 10; })
+      ];
     };
   };
 }

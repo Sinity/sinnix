@@ -6,6 +6,8 @@ mkFeatureModule {
     { config, pkgs, ... }:
     let
       user = config.sinnix.user.name;
+      # Capture nvidia package from NixOS config for use in home-manager scope
+      nvidiaPackage = config.hardware.nvidia.package;
     in
     {
       home-manager.users.${user} = { pkgs, ... }:
@@ -106,7 +108,7 @@ mkFeatureModule {
               Type = "oneshot";
               ExecStart = "${checkScript}";
               Environment = [
-                "PATH=${pkgs.coreutils}/bin:${pkgs.gawk}/bin"
+                "PATH=${pkgs.coreutils}/bin:${pkgs.gawk}/bin:${nvidiaPackage.bin}/bin"
               ];
             };
             Install.WantedBy = [ "default.target" ];

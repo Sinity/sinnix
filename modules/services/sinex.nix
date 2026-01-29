@@ -57,7 +57,7 @@ in
 
         users.target = config.sinnix.user.name;
         logLevel = "debug";
-        shell.asciinema.autoRecord = true;
+        # shell.asciinema.autoRecord = true; # Disabled - use terminal-capture instead if needed
         stateRoot = "${indicesRoot}/sinex";
         satellites.filesystem.watchPaths = [ realmRoot ];
       };

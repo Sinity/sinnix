@@ -213,6 +213,9 @@ mkFeatureModule {
               "image/bmp"
             ];
           };
+
+          # Note: mpv.desktop is provided by the mpv package itself
+          # No need for custom xdg.desktopEntries.mpv
         };
     };
 } args

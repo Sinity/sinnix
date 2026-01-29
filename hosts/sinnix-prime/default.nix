@@ -14,13 +14,14 @@
   sinnix.bundles.desktop.enable = true;
   sinnix.bundles.dev.enable = true;
 
+  sinnix.features.cli.task-tracking.enable = true;
   sinnix.features.dev.editors.enable = true;
   sinnix.features.dev.editors.vscode.enable = true;
   sinnix.features.dev.editors.zed.enable = true;
 
   sinnix.services = {
     transmission.enable = true;
-    # terminal-capture disabled - sinex handles asciinema recording via shell.asciinema.autoRecord
+    terminal-capture.enable = true;
     netdata.enable = true;
     sinex = {
       enable = false;

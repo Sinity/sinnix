@@ -30,8 +30,6 @@ mkFeatureModule {
                   oderwat.indent-rainbow
                   jnoortheen.nix-ide
                   rust-lang.rust-analyzer
-                  ms-python.python
-                  ms-python.vscode-pylance
                   tamasfe.even-better-toml
                   asvetliakov.vscode-neovim
                   editorconfig.editorconfig

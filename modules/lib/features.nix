@@ -24,7 +24,9 @@ let
   # Helper for creating symlinks to dotfiles repo (used in home-manager contexts)
   mkDotsSymlink = config: dotsRepoPath: rel:
     config.lib.file.mkOutOfStoreSymlink (dotsRepoPath + rel);
+  sinnixHelpers = import ./sinnix-helpers.nix { inherit lib; };
 in
 {
   inherit mkFeatureModule mkDotsSymlink;
+  inherit (sinnixHelpers) mkPAMLimits;
 }

@@ -3,7 +3,7 @@ mkFeatureModule {
   path = [ "desktop" "terminal" ];
   description = "Kitty terminal emulator";
   configFn =
-    { config, ... }:
+    { config, lib, ... }:
     let
       user = config.sinnix.user.name;
     in
@@ -14,6 +14,8 @@ mkFeatureModule {
         programs.kitty = {
           enable = true;
           settings = {
+            background = lib.mkForce "#000000";
+            background_opacity = lib.mkForce "1.0";
             window_padding_width = 10;
             scrollback_lines = 9999999;
             enable_audio_bell = "no";

@@ -160,6 +160,14 @@ in
       );
     };
 
-    systemd.oomd.enableSystemSlice = true;
+    services.dbus.implementation = "broker";
+
+    # Harden dbus-broker (system message bus)
+    systemd.services.dbus-broker.serviceConfig = lib.mkMerge [
+      (lib.sinnix.systemd.mkHardenedService {
+        level = "moderate";
+        allowedCalls = [ "@system-service" "~@privileged" ];
+      })
+    ];
   };
 }

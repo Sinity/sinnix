@@ -73,6 +73,9 @@ in
       portalPackage = lib.mkDefault pkgs.xdg-desktop-portal-hyprland;
     };
 
+    # Expose wayland-sessions directory for UWSM to discover desktop files
+    environment.pathsToLink = [ "/share/wayland-sessions" ];
+
     # -------------------------------------------------------------------------
     # User Level Configuration (Home Manager)
     # -------------------------------------------------------------------------

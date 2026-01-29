@@ -59,9 +59,19 @@ in
     "SUPER, Print, exec, grimblast --notify --cursor copysave output ${screenshotDir}/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
 
     # F-key bindings
+    ", F3, exec, asbl-no-moar once --mode invert --duration 0.05"
     ", F4, exec, kitty --class scratchpad-claude --title 'Claude Assistant' ${script "claude-scratchpad"}"
+    ", F6, exec, kitty --class scratchpad-weechat --title 'WeeChat' ${script "weechat-scratchpad"}"
     ", F8, exec, ${script "toggle-scratch"} rawlog"
     ", F9, exec, ${script "nuke-builds"}"
+
+    # Numpad browser scratchpads (numlock OFF)
+    ", KP_Left, exec, ${script "browser-scratchpad"} chatgpt https://chatgpt.com"
+    ", KP_Begin, exec, ${script "browser-scratchpad"} claude https://claude.ai"
+    ", KP_Right, exec, ${script "browser-scratchpad"} aistudio https://aistudio.google.com"
+    ", KP_Home, exec, ${script "browser-scratchpad"} raindrop https://app.raindrop.io"
+    ", KP_Up, exec, ${script "browser-scratchpad"} ytmusic https://music.youtube.com"
+    ", KP_Prior, exec, ${script "browser-scratchpad"} youtube https://youtube.com"
 
     "SUPER SHIFT, P, pin"
 

@@ -66,7 +66,7 @@
                 pre-commit
 
                 # Nix tools
-                nixfmt-rfc-style
+                nixfmt
                 nil
                 nixd
                 deadnix

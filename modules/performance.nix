@@ -19,11 +19,10 @@ in
         "vm.dirty_background_ratio" = 5;
       };
 
-      # Increase zram to 20% (6.4GB on 32GB system) for better compression headroom
       zramSwap = {
         enable = true;
         algorithm = "zstd";
-        memoryPercent = 20;
+        memoryPercent = 10; # 3.2GB → ~9-12GB effective with zstd compression
         priority = 100;
       };
 
@@ -60,11 +59,11 @@ in
       ];
 
       systemd.slices = {
-        # Parent slice: caps TOTAL build memory
+        # Parent slice: caps TOTAL build memory if both active simultaneously
         "builds.slice".sliceConfig = {
           Description = "All build processes (nix-daemon + user)";
-          MemoryHigh = "24G";
-          MemoryMax = "28G";
+          MemoryHigh = "28G";
+          MemoryMax = "30G";
           ManagedOOMMemoryPressure = "kill";
           ManagedOOMMemoryPressureLimit = "95%";
         };
@@ -74,8 +73,8 @@ in
           Description = "Nix daemon builds";
           CPUWeight = 40;
           IOWeight = 40;
-          MemoryHigh = "20G";
-          MemoryMax = "24G";
+          MemoryHigh = "24G";
+          MemoryMax = "28G";
         };
 
         # User slice (high priority for UI)
@@ -186,7 +185,7 @@ in
 
         # User build cgroup (child of user.slice)
         extraCgroups = [
-          { cgroup = "user/build"; CPUWeight = 30; IOWeight = 30; MemoryHigh = "14G"; MemoryMax = "16G"; }
+          { cgroup = "user/build"; CPUWeight = 30; IOWeight = 30; MemoryHigh = "24G"; MemoryMax = "28G"; }
         ];
       };
 
@@ -198,8 +197,8 @@ in
       systemd.user.slices.build = {
         description = "User build processes (cargo, make, cmake)";
         sliceConfig = {
-          MemoryHigh = "14G";
-          MemoryMax = "16G";
+          MemoryHigh = "24G";
+          MemoryMax = "28G";
           CPUWeight = 30;
           IOWeight = 30;
         };

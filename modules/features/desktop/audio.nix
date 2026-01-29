@@ -55,41 +55,35 @@ in
       };
     };
 
-    systemd.user.services.pipewire.serviceConfig = {
-      LimitRTPRIO = 95;
-      LimitMEMLOCK = "infinity";
-      Nice = -11;
-      # Auto-recover from silent audio daemon crashes
-      Restart = "on-failure";
-      RestartSec = 2;
-    };
-
-    security.pam.loginLimits = [
+    systemd.user.services.pipewire.serviceConfig = lib.mkMerge [
+      (lib.sinnix.systemd.mkPriorityConfig {
+        nice = -11;
+        rtprio = 95;
+        memlock = "infinity";
+      })
+      (lib.sinnix.systemd.mkRestartPolicy { strategy = "on-failure"; delaySec = 2; })
       {
-        domain = "@audio";
-        type = "soft";
-        item = "rtprio";
-        value = "95";
-      }
-      {
-        domain = "@audio";
-        type = "hard";
-        item = "rtprio";
-        value = "95";
-      }
-      {
-        domain = "@audio";
-        type = "soft";
-        item = "memlock";
-        value = "unlimited";
-      }
-      {
-        domain = "@audio";
-        type = "hard";
-        item = "memlock";
-        value = "unlimited";
+        # Audio-specific hardening
+        ProtectKernelModules = true;
+        ProtectKernelTunables = true;
+        RestrictNamespaces = true;
+        LockPersonality = true;
       }
     ];
+
+    systemd.user.services.wireplumber.serviceConfig = lib.mkMerge [
+      (lib.sinnix.systemd.mkRestartPolicy { strategy = "on-failure"; delaySec = 2; })
+      {
+        ProtectKernelModules = true;
+        RestrictNamespaces = true;
+      }
+    ];
+
+    security.pam.loginLimits = lib.sinnix.mkPAMLimits {
+      domain = "@audio";
+      rtprio = 95;
+      memlock = "unlimited";
+    };
 
     environment.systemPackages = with pkgs; [
       alsa-utils

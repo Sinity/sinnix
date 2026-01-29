@@ -66,7 +66,7 @@ in
               "2606:4700:4700::1001#one.one.one.one"
               "2001:4860:4860::8844#dns.google"
             ];
-            DNSSEC = "allow-downgrade";
+            DNSSEC = "false";
             Domains = [ "~." ];
             DNSOverTLS = "opportunistic";
           };
@@ -89,11 +89,17 @@ in
 
     programs.mosh.enable = true;
 
+    # sshd hardening handled by nixpkgs - custom seccomp filters break it
     systemd.services.sshd.serviceConfig = {
       Slice = "recovery.slice";
     };
     systemd.sockets.sshd.socketConfig = {
       Slice = "recovery.slice";
+    };
+
+    # Bluetooth hardening handled by nixpkgs - it needs kernel module/tunable access
+    systemd.services.bluetooth = lib.mkIf isDesktop {
+      serviceConfig = lib.sinnix.systemd.mkRestartPolicy { strategy = "on-failure"; delaySec = 3; };
     };
 
     hardware.bluetooth = lib.mkIf isDesktop {

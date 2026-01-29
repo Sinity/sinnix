@@ -16,7 +16,7 @@
     "deny": [],
     "defaultMode": "default"
   },
-  "model": "haiku",
+  "model": "opus",
   "hooks": {
     "PreToolUse": [
       {
@@ -24,7 +24,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash -c 'CMD=$(cat | jq -r \".tool_input.command // \\\"\\\"\"); echo \"$CMD\" | grep -qE \"(nix\\s+profile\\s+(install|add|remove)|cargo\\s+install|pip3?\\s+install|npm\\s+install\\s+-g)\" && { echo \"{\\\"decision\\\":\\\"block\\\",\\\"reason\\\":\\\"Use declarative config instead of imperative install\\\"}\" ; exit 0; }; echo \"$CMD\" | grep -qE \"rm\\s+(-[^\\s]*r[^\\s]*f|-[^\\s]*f[^\\s]*r)\\s\" && { echo \"{\\\"decision\\\":\\\"block\\\",\\\"reason\\\":\\\"Use trash instead of rm -rf\\\"}\" ; exit 0; }; echo \"$CMD\" | grep -qE \"git\\s+push\\s+(-f|--force)|git\\s+push\\s+.*--force\" && { echo \"{\\\"decision\\\":\\\"block\\\",\\\"reason\\\":\\\"Force push blocked - remove flag if intended\\\"}\" ; exit 0; }; exit 0'",
+            "command": "~/.claude/hooks/pretooluse-bash.sh",
             "timeout": 3
           }
         ]
@@ -38,7 +38,7 @@
     "hookify@claude-plugins-official": true,
     "plugin-dev@claude-plugins-official": true,
     "commit-commands@claude-plugins-official": true,
-    "pr-review-toolkit@claude-plugins-official": true,
+    "pr-review-toolkit@claude-plugins-official": false,
     "learning-output-style@claude-plugins-official": true,
     "rust-analyzer-lsp@claude-plugins-official": false
   },

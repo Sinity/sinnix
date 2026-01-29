@@ -34,9 +34,16 @@ mkFeatureModule {
               "audio/wav" = [ "mpv.desktop" ];
               "audio/webm" = [ "mpv.desktop" ];
               "video/mp4" = [ "mpv.desktop" ];
+              "video/mpeg" = [ "mpv.desktop" ];
+              "video/mp2t" = [ "mpv.desktop" ];
               "video/mkv" = [ "mpv.desktop" ];
               "video/webm" = [ "mpv.desktop" ];
               "video/x-matroska" = [ "mpv.desktop" ];
+              "video/x-msvideo" = [ "mpv.desktop" ];
+              "video/x-flv" = [ "mpv.desktop" ];
+              "video/quicktime" = [ "mpv.desktop" ];
+              "video/3gpp" = [ "mpv.desktop" ];
+              "video/ogg" = [ "mpv.desktop" ];
               "application/pdf" = [ "org.qutebrowser.qutebrowser.desktop" ];
             };
             associations.removed = {
@@ -63,9 +70,16 @@ mkFeatureModule {
               "audio/wav" = [ "mpv.desktop" ];
               "audio/webm" = [ "mpv.desktop" ];
               "video/mp4" = [ "mpv.desktop" ];
+              "video/mpeg" = [ "mpv.desktop" ];
+              "video/mp2t" = [ "mpv.desktop" ];
               "video/mkv" = [ "mpv.desktop" ];
               "video/webm" = [ "mpv.desktop" ];
               "video/x-matroska" = [ "mpv.desktop" ];
+              "video/x-msvideo" = [ "mpv.desktop" ];
+              "video/x-flv" = [ "mpv.desktop" ];
+              "video/quicktime" = [ "mpv.desktop" ];
+              "video/3gpp" = [ "mpv.desktop" ];
+              "video/ogg" = [ "mpv.desktop" ];
               "application/pdf" = [ "org.qutebrowser.qutebrowser.desktop" ];
               "text/html" = [ "google-chrome.desktop" ];
               "x-scheme-handler/http" = [ "google-chrome.desktop" ];

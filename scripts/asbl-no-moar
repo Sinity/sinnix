@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# asbl-no-more - Prevent OLED/LCD ASBL by periodically pulsing screen brightness
+# asbl-no-moar - Prevent OLED/LCD ASBL by periodically pulsing screen brightness
 #
-# Usage: asbl-no-more [start|stop|status|toggle|once] [options]
+# Usage: asbl-no-moar [start|stop|status|toggle|once] [options]
 #
 # Options:
 #   -i, --interval SECS    Interval between pulses (default: 120)
@@ -14,15 +14,16 @@ set -euo pipefail
 # Defaults
 INTERVAL=120
 DURATION=0.05
-INTENSITY=1.25
+INTENSITY=1.5
+BASELINE=1.25
 MODE="brightness"
 SHADER_FILE="/tmp/asbl-pulse.glsl"
 
 show_help() {
     cat << EOF
-asbl-no-more - OLED/LCD ASBL reset tool
+asbl-no-moar - OLED/LCD ASBL reset tool
 
-Usage: asbl-no-more [start|stop|status|toggle|once] [options]
+Usage: asbl-no-moar [start|stop|status|toggle|once] [options]
 
 Commands:
   start     Start the background loop
@@ -34,11 +35,12 @@ Commands:
 Options:
   -i, --interval SECS    Interval between pulses (Default: $INTERVAL)
   -d, --duration SECS    Pulse duration in seconds (Default: $DURATION)
-  -v, --intensity MULT   Brightness multiplier (Default: $INTENSITY)
+  -v, --intensity MULT   Brightness multiplier for pulse (Default: $INTENSITY)
+  -b, --baseline MULT    Baseline brightness multiplier (Default: $BASELINE)
   -m, --mode MODE        Mode: brightness, dim, invert (Default: $MODE)
 
 Environment:
-  ASBL_INTERVAL, ASBL_DURATION, ASBL_INTENSITY, ASBL_MODE
+  ASBL_INTERVAL, ASBL_DURATION, ASBL_INTENSITY, ASBL_BASELINE, ASBL_MODE
 EOF
 }
 
@@ -46,6 +48,7 @@ EOF
 INTERVAL="${ASBL_INTERVAL:-$INTERVAL}"
 DURATION="${ASBL_DURATION:-$DURATION}"
 INTENSITY="${ASBL_INTENSITY:-$INTENSITY}"
+BASELINE="${ASBL_BASELINE:-$BASELINE}"
 MODE="${ASBL_MODE:-$MODE}"
 
 # Parse args
@@ -57,15 +60,18 @@ while [[ $# -gt 0 ]]; do
         -i|--interval) INTERVAL="$2"; shift 2 ;;
         -d|--duration) DURATION="$2"; shift 2 ;;
         -v|--intensity) INTENSITY="$2"; shift 2 ;;
+        -b|--baseline) BASELINE="$2"; shift 2 ;;
         -m|--mode) MODE="$2"; shift 2 ;;
         -h|--help) show_help; exit 0 ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
 
-# Ensure INTENSITY is a float for GLSL (Handle both . and , then force . via LC_NUMERIC=C)
+# Ensure INTENSITY and BASELINE are floats for GLSL (Handle both . and , then force . via LC_NUMERIC=C)
 INTENSITY=$(echo "$INTENSITY" | tr ',' '.')
 INTENSITY=$(LC_NUMERIC=C printf "%.2f" "$INTENSITY")
+BASELINE=$(echo "$BASELINE" | tr ',' '.')
+BASELINE=$(LC_NUMERIC=C printf "%.2f" "$BASELINE")
 
 write_brightness_shader() {
     cat > "$SHADER_FILE" << EOF
@@ -77,6 +83,52 @@ out vec4 fragColor;
 void main() {
     vec4 color = texture(tex, v_texcoord);
     fragColor = vec4((color.rgb * $INTENSITY) + 0.01, color.a);
+}
+EOF
+}
+
+write_baseline_shader() {
+    cat > "$SHADER_FILE" << EOF
+#version 300 es
+precision highp float;
+in vec2 v_texcoord;
+uniform sampler2D tex;
+out vec4 fragColor;
+void main() {
+    vec4 color = texture(tex, v_texcoord);
+    fragColor = vec4((color.rgb * $BASELINE) + 0.01, color.a);
+}
+EOF
+}
+
+write_dim_shader() {
+    local dim_factor
+    dim_factor=$(LC_NUMERIC=C printf "%.2f" "$(echo "scale=4; $BASELINE / $INTENSITY" | bc)")
+    cat > "$SHADER_FILE" << EOF
+#version 300 es
+precision highp float;
+in vec2 v_texcoord;
+uniform sampler2D tex;
+out vec4 fragColor;
+void main() {
+    vec4 color = texture(tex, v_texcoord);
+    fragColor = vec4((color.rgb * $dim_factor) + 0.01, color.a);
+}
+EOF
+}
+
+write_overbrighten_shader() {
+    local bright_factor
+    bright_factor=$(LC_NUMERIC=C printf "%.2f" "$(echo "scale=4; $BASELINE * $INTENSITY" | bc)")
+    cat > "$SHADER_FILE" << EOF
+#version 300 es
+precision highp float;
+in vec2 v_texcoord;
+uniform sampler2D tex;
+out vec4 fragColor;
+void main() {
+    vec4 color = texture(tex, v_texcoord);
+    fragColor = vec4((color.rgb * $bright_factor) + 0.01, color.a);
 }
 EOF
 }
@@ -96,12 +148,24 @@ EOF
 }
 
 pulse() {
+    local half_duration
+    half_duration=$(echo "scale=4; $DURATION / 2" | bc)
+    
     case "$MODE" in
         brightness)
-            write_brightness_shader
+            # Phase 1: Dim (baseline / intensity)
+            write_dim_shader
             hyprctl keyword decoration:screen_shader "$SHADER_FILE" >/dev/null 2>&1
-            sleep "$DURATION"
-            hyprctl keyword decoration:screen_shader "" >/dev/null 2>&1
+            sleep "$half_duration"
+            
+            # Phase 2: Overbrighten (baseline * intensity)
+            write_overbrighten_shader
+            hyprctl keyword decoration:screen_shader "$SHADER_FILE" >/dev/null 2>&1
+            sleep "$half_duration"
+            
+            # Phase 3: Return to baseline
+            write_baseline_shader
+            hyprctl keyword decoration:screen_shader "$SHADER_FILE" >/dev/null 2>&1
             ;;
         dim)
             local current
@@ -120,18 +184,18 @@ pulse() {
 }
 
 is_running() {
-    pgrep -f "asbl-no-more loop" >/dev/null
+    pgrep -f "asbl-no-moar loop" >/dev/null
 }
 
 case "$CMD" in
     start)
         if is_running; then
-            echo "asbl-no-more is already running."
+            echo "asbl-no-moar is already running."
             exit 0
         fi
         echo "Starting ASBL reset loop ($MODE mode, ${INTERVAL}s interval)"
         # Export vars for the loop process
-        export ASBL_INTERVAL="$INTERVAL" ASBL_DURATION="$DURATION" ASBL_INTENSITY="$INTENSITY" ASBL_MODE="$MODE"
+        export ASBL_INTERVAL="$INTERVAL" ASBL_DURATION="$DURATION" ASBL_INTENSITY="$INTENSITY" ASBL_BASELINE="$BASELINE" ASBL_MODE="$MODE"
         "$0" loop &
         disown
         ;;
@@ -142,22 +206,22 @@ case "$CMD" in
         done
         ;;
     stop)
-        if pkill -f "asbl-no-more loop"; then
+        if pkill -f "asbl-no-moar loop"; then
             echo "ASBL reset loop stopped."
             hyprctl keyword decoration:screen_shader "" >/dev/null 2>&1
         else
-            echo "asbl-no-more was not running."
+            echo "asbl-no-moar was not running."
         fi
         ;;
     status)
         if is_running; then
-            echo "asbl-no-more: RUNNING (Mode: $MODE, Interval: ${INTERVAL}s)"
+            echo "asbl-no-moar: RUNNING (Mode: $MODE, Interval: ${INTERVAL}s)"
         else
-            echo "asbl-no-more: STOPPED"
+            echo "asbl-no-moar: STOPPED"
         fi
         ;;
     toggle)
-        if is_running; then "$0" stop; else "$0" start -i "$INTERVAL" -d "$DURATION" -v "$INTENSITY" -m "$MODE"; fi
+        if is_running; then "$0" stop; else "$0" start -i "$INTERVAL" -d "$DURATION" -v "$INTENSITY" -b "$BASELINE" -m "$MODE"; fi
         ;;
     once)
         pulse

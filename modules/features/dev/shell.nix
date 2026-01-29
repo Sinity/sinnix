@@ -89,6 +89,7 @@ in
             mprocs
             tmux
             dtach
+            weechat
             neovim
             yazi
             glow
@@ -98,7 +99,7 @@ in
             # From utilities.nix
             android-tools
             dua
-            duckdb
+            # duckdb
             evtest
             gcc
             gdb
@@ -126,9 +127,24 @@ in
             wayland-utils
             wayland-protocols
           ])
-          ++ [ findFlakeRoot lspRootLauncher ];
+          ++ [
+            findFlakeRoot
+            lspRootLauncher
+          ];
 
         programs = {
+          tmux = {
+            enable = true;
+            baseIndex = 1;
+            escapeTime = 0;
+            historyLimit = 50000;
+            keyMode = "vi";
+            mouse = true;
+            prefix = "C-Space";
+            terminal = "tmux-256color";
+            extraConfig = builtins.readFile "${inputs.self}/dots/tmux/tmux.conf";
+          };
+
           zsh = {
             enable = true;
             enableCompletion = true;

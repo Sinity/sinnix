@@ -15,14 +15,6 @@ mkFeatureModule {
       home-manager.users.${user} = { pkgs, lib, ... }: {
         home.packages = [ ];
 
-      # Restart Waybar on every Home Manager activation
-      home.activation.restartWaybar = lib.hm.dag.entryAfter [ "reloadSystemd" ] ''
-        if systemctl --user --plain status basic.target >/dev/null 2>&1; then
-          systemctl --user stop waybar.service >/dev/null 2>&1 || true
-          systemctl --user start waybar.service >/dev/null 2>&1 || true
-        fi
-      '';
-
       programs.waybar = {
         enable = true;
         systemd.enable = true;
@@ -203,7 +195,9 @@ mkFeatureModule {
                 echo "<span font_family='SauceCodePro Nerd Font Mono'>󰂚</span>"
               fi
             ''}";
-            interval = 1;
+            # Poll every 10 seconds instead of 1 to reduce journal spam
+            # (fnott logs 2 messages per poll = 17,280/day at 1s)
+            interval = 10;
             on-click = "fnottctl dismiss";
             on-click-right = "fnottctl actions";
           };

@@ -9,6 +9,15 @@ let
   inherit (inputs.nixpkgs) lib;
   featureLib = import ../modules/lib/features.nix { inherit lib; };
   systemdLib = import ../modules/lib/systemd-hardening.nix { inherit lib; };
+
+  # Extend lib with sinnix helpers globally available
+  extendedLib = lib.extend (final: prev: {
+    sinnix = {
+      inherit (featureLib) mkPAMLimits;
+      systemd = systemdLib;
+    };
+  });
+
   baseModules = [
     inputs.agenix.nixosModules.default
     inputs.stylix.nixosModules.stylix
@@ -21,7 +30,6 @@ let
     inherit (featureLib) mkFeatureModule;
     helpers = {
       inherit (featureLib) mkDotsSymlink;
-      systemd = systemdLib;
     };
   };
   mkHost =
@@ -29,10 +37,10 @@ let
       system ? "x86_64-linux",
       modules,
     }:
-    lib.nixosSystem {
+    extendedLib.nixosSystem {
       inherit system;
       modules = baseModules ++ modules;
-      specialArgs = sharedSpecialArgs;
+      specialArgs = sharedSpecialArgs // { lib = extendedLib; };
     };
 in
 {

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Launch qutebrowser instance for specific scratchpad site
+# Each site gets isolated basedir for separate sessions
+
+set -euo pipefail
+
+SITE="${1:-}"
+URL="${2:-}"
+
+if [ -z "$SITE" ] || [ -z "$URL" ]; then
+  echo "Usage: browser-scratchpad <site-name> <url>"
+  exit 1
+fi
+
+BASEDIR="$HOME/.local/share/browser-scratchpads/$SITE"
+mkdir -p "$BASEDIR"
+
+# Launch qutebrowser with isolated session
+exec qutebrowser \
+  --basedir "$BASEDIR" \
+  --qt-arg name "browser-$SITE" \
+  "$URL"

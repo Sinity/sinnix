@@ -30,15 +30,7 @@ let
       doCheck = false;
     });
   };
-  composeOverrides = prev.lib.composeExtensions (prev.python3.packageOverrides or (_self: _super: { })
-  ) pythonOverrides;
 in
 {
   python3Packages = prev.python3Packages.overrideScope pythonOverrides;
-
-  python313Packages = prev.python313Packages.overrideScope pythonOverrides;
-
-  python3 = prev.python3.override {
-    packageOverrides = composeOverrides;
-  };
 }

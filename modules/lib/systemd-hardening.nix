@@ -59,11 +59,11 @@
     delaySec ? 10,
     maxRetries ? null,
   }: {
-    Restart = strategy;
-    RestartSec = delaySec;
+    Restart = lib.mkDefault strategy;
+    RestartSec = lib.mkDefault delaySec;
   } // lib.optionalAttrs (maxRetries != null) {
-    StartLimitBurst = maxRetries;
-    StartLimitIntervalSec = 300;
+    StartLimitBurst = lib.mkDefault maxRetries;
+    StartLimitIntervalSec = lib.mkDefault 300;
   };
 
   mkPriorityConfig = {

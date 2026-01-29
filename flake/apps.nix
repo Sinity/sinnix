@@ -46,7 +46,7 @@
           flake_dir="''${PRJ_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
           echo "Formatting Nix files in $flake_dir..."
           ${pkgs.findutils}/bin/find "$flake_dir" -name "*.nix" -type f -not -path "*/nix/store/*" -print0 | \
-          ${pkgs.findutils}/bin/xargs -0 -P 4 -I{} ${pkgs.nixfmt-rfc-style}/bin/nixfmt {}
+          ${pkgs.findutils}/bin/xargs -0 -P 4 -I{} ${pkgs.nixfmt}/bin/nixfmt {}
           echo "Formatting complete!"
         '' "Format Nix files according to the RFC style";
 
@@ -55,7 +55,7 @@
             echo "Usage: nix run .#fmt-check -- <files...>"
             exit 1
           fi
-          ${pkgs.nixfmt-rfc-style}/bin/nixfmt --check "$@"
+          ${pkgs.nixfmt}/bin/nixfmt --check "$@"
         '' "Check whether specific Nix files conform to nixfmt";
 
         # Lint Nix files

@@ -153,6 +153,35 @@ ${lib.concatStringsSep "\n" (map (effect: "        ${effect}") effects)}
           ];
         }
         {
+          name = "scratchpad-weechat";
+          props = [ "match:class = ^(scratchpad-weechat)$" ];
+          effects = [
+            "workspace = special:scratch_weechat silent"
+            "float = yes"
+            "center = yes"
+            "size = (monitor_w*0.75) (monitor_h*0.75)"
+          ];
+        }
+      ]
+      ++ (map (site: {
+        name = "browser-${site.name}";
+        props = [ "match:class = ^(browser-${site.name})$" ];
+        effects = [
+          "workspace = special:browser_${site.name} silent"
+          "float = yes"
+          "center = yes"
+          "size = (monitor_w*0.80) (monitor_h*0.85)"
+        ];
+      }) [
+        { name = "chatgpt"; }
+        { name = "claude"; }
+        { name = "aistudio"; }
+        { name = "raindrop"; }
+        { name = "ytmusic"; }
+        { name = "youtube"; }
+      ])
+      ++ [
+        {
           name = "scratchpad-spotify";
           props = [ "match:class = ^([Ss]potify)$" ];
           effects = [

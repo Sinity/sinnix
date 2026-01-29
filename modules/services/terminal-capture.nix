@@ -49,10 +49,10 @@ in
             }
 
             _sinnix_precmd() {
-              local status=$?
+              local exit_code=$?
               local duration=0
               [[ -n $SINNIX_CMD_START ]] && duration=$(( (EPOCHREALTIME - SINNIX_CMD_START) * 1000 ))
-              _sinnix_log_event "command_end" ""status":$status,"duration_ms":$duration"
+              _sinnix_log_event "command_end" ""status":$exit_code,"duration_ms":$duration"
             }
 
             add-zsh-hook preexec _sinnix_preexec
