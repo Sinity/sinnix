@@ -3,10 +3,7 @@ mkFeatureModule {
   path = [ "desktop" "terminal" ];
   description = "Kitty terminal emulator";
   configFn =
-    { config, lib, ... }:
-    let
-      user = config.sinnix.user.name;
-    in
+    { config, lib, user, ... }:
     {
       home-manager.users.${user} = { ... }: {
         home.sessionVariables.TERMINAL = "kitty";

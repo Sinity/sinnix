@@ -29,13 +29,6 @@ let
     hdparm
   ];
 
-  # Explicitly reference local packages from flake outputs to avoid overlays
-  localScripts = [
-    inputs.self.packages.${pkgs.system}.perf-scan
-    inputs.self.packages.${pkgs.system}.hogkill
-    inputs.self.packages.${pkgs.system}.asbl-no-moar
-  ];
-
   captureBootMetrics = pkgs.writeShellApplication {
     name = "capture-boot-metrics";
     runtimeInputs = with pkgs; [ coreutils findutils util-linux systemd ];
@@ -54,12 +47,17 @@ in
 {
   config = {
     environment.systemPackages = lib.mkIf isDesktop (
-      coreDiagnostics ++ localScripts
+      coreDiagnostics ++ [
+        inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.perf-scan
+        inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.hogkill
+        inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.asbl-no-moar
+      ]
     );
 
     # Logging and metrics (always on)
+    # Note: owned by user since this is for boot-metrics capture, not journald itself
     systemd.tmpfiles.rules = [
-      "d ${journaldBaseDir} 0750 root systemd-journal -"
+      "d ${journaldBaseDir} 0750 ${username} users -"
       "d ${bootMetricsDir} 0750 ${username} users -"
     ];
 
@@ -68,21 +66,22 @@ in
       Storage=persistent
       Compress=yes
 
+      # Corruption resilience: sync every 30s (default 5min), smaller files
+      # On power loss, at most 30s of logs lost; corruption affects max 100MB
+      SyncIntervalSec=30s
+      SystemMaxFileSize=100M
+
       # Size limits: Large allocation for long-term retention
-      # With spam fixed, this should hold 6+ months of logs
       SystemMaxUse=50G
       SystemKeepFree=10G
-      SystemMaxFileSize=1G
 
       # Time-based retention: DISABLED - size is the only limit
-      # This ensures maximum log retention
       MaxRetentionSec=0
 
-      # Rotate files weekly to prevent corruption from losing too much
-      MaxFileSec=1week
+      # Rotate files daily to limit blast radius of corruption
+      MaxFileSec=1day
 
-      # Rate limiting: aggressive limits to prevent spam from filling journals
-      # 500 messages per 30s = 1000/min max, vs default 10000/30s
+      # Rate limiting: aggressive limits to prevent spam
       RateLimitIntervalSec=30s
       RateLimitBurst=500
 

@@ -66,7 +66,7 @@
 
         # SDR content rendering in HDR mode
         # For dark-mode usage (white text on black), lower values reduce ABL triggering
-        sdrbrightness = 1.0; # SDR brightness multiplier (1.0 = native, was 1.4)
+        sdrbrightness = 1.3; # SDR brightness multiplier (boosted for dark-mode comfort)
         sdrsaturation = 1.0; # SDR saturation (1.0 = native)
 
         # Luminance values for tone mapping (in nits)

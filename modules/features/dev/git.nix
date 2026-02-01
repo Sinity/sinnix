@@ -3,9 +3,8 @@ mkFeatureModule {
   path = [ "dev" "git" ];
   description = "Git and delta tooling";
   configFn =
-    { config, lib, ... }:
+    { config, lib, user, ... }:
     let
-      user = config.sinnix.user.name;
       githubTokenPath = config.sinnix.secrets.paths."github-token";
       githubHelper = ''!f(){ if [ -r ${githubTokenPath} ]; then token="$(tr -d '\r\n' < ${githubTokenPath})"; printf 'username=x-access-token\npassword=%s\n' "$token"; fi; }; f'';
     in

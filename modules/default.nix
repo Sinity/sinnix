@@ -1,19 +1,9 @@
-{ ... }:
+# Modules auto-discovery
+#
+# All .nix files (except default.nix) and subdirs with default.nix
+# are automatically imported. The lib/ directory is excluded as it
+# contains helper functions, not NixOS modules.
+{ lib, ... }:
 {
-  imports = [
-    ./core.nix
-    ./diagnostics.nix
-    ./foundation.nix
-    ./home-manager.nix
-    ./log-hygiene.nix
-    ./networking.nix
-    ./nix-ld.nix
-    ./performance.nix
-    ./secrets.nix
-    ./storage.nix
-    ./services/default.nix
-    ./features/default.nix
-    ./bundles/desktop.nix
-    ./bundles/dev.nix
-  ];
+  imports = lib.sinnix.mkAutoImports ./. [ "lib" ];
 }

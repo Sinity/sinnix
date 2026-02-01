@@ -1,395 +1,136 @@
 # Hyprland window rules configuration
-{ lib, hyprlandPkg }:
+#
+# Uses the windowrule {} block syntax (Hyprland 0.53+)
+# All rules defined via DSL helpers from lib/hyprland-rules.nix
+#
+# scratchpadSpecs: list of { name, class, workspace, size } from scratchpads.nix
+{ lib, scratchpadSpecs ? [] }:
 let
-  useNewIdleRule = lib.versionAtLeast hyprlandPkg.version "0.52.0";
-  useNewSyntax = lib.versionAtLeast hyprlandPkg.version "0.53.0";
-  idleRuleName = if useNewIdleRule then "idleinhibit" else "idle_inhibit";
+  # Import rules DSL
+  rulesDsl = import ../../../lib/hyprland-rules.nix { inherit lib; };
+  inherit (rulesDsl) mkRule mkScratchpad mkBrowserScratchpad mkDialog mkIdleInhibit renderBlock;
 
-  stripMatch =
-    cond:
-    let
-      rest = lib.removePrefix "match:" cond;
-      groups = builtins.match "^[[:space:]]*([^[:space:]]+)[[:space:]]+(.*)$" rest;
-    in
-    if !lib.hasPrefix "match:" cond then
-      cond
-    else if groups == null then
-      rest
-    else
-      "${builtins.elemAt groups 0}:${builtins.elemAt groups 1}";
-
+  # ========================================
+  # Idle Inhibit Rules
+  # ========================================
   idleRules = [
-    { mode = "focus"; condition = "match:class ^(mpv)$"; }
-    { mode = "fullscreen"; condition = "match:class ^(firefox)$"; }
-    { mode = "fullscreen"; condition = "match:class ^(qutebrowser)$"; }
-    { mode = "focus"; condition = "match:title .*[Yy]ou[Tt]ube.*"; }
-    { mode = "focus"; condition = "match:title .*- YouTube$"; }
-    { mode = "focus"; condition = "match:title .*YouTube.*"; }
-    { mode = "focus"; condition = "match:title .*Netflix.*"; }
-    { mode = "focus"; condition = "match:title .*Twitch.*"; }
-    { mode = "focus"; condition = "match:title .*Prime Video.*"; }
+    { mode = "focus"; class = "^(mpv)$"; }
+    { mode = "fullscreen"; class = "^(firefox)$"; }
+    { mode = "fullscreen"; class = "^(qutebrowser)$"; }
+    { mode = "focus"; title = ".*[Yy]ou[Tt]ube.*"; }
+    { mode = "focus"; title = ".*- YouTube$"; }
+    { mode = "focus"; title = ".*YouTube.*"; }
+    { mode = "focus"; title = ".*Netflix.*"; }
+    { mode = "focus"; title = ".*Twitch.*"; }
+    { mode = "focus"; title = ".*Prime Video.*"; }
   ];
 
-  mkBlock =
-    {
-      name,
-      props,
-      effects,
-    }:
-    ''
-      windowrule {
-        name = ${name}
-${lib.concatStringsSep "\n" (map (prop: "        ${prop}") props)}
-${lib.concatStringsSep "\n" (map (effect: "        ${effect}") effects)}
-      }
-    '';
+  idleBlocks = lib.imap0 mkIdleInhibit idleRules;
 
-  parseCondition =
-    cond:
-    let
-      matches = builtins.match "^([^ ]+)[[:space:]]+(.*)$" cond;
-    in
-    {
-      key = builtins.elemAt matches 0;
-      value = builtins.elemAt matches 1;
-    };
+  # ========================================
+  # Dialog Rules
+  # ========================================
+  dialogRules = [
+    (mkDialog "open-file" { title = "^(Open File)$"; })
+    (mkDialog "save-as" { title = "^(Save As)$"; })
+    (mkDialog "nm-connection-editor" { class = "^(nm-connection-editor)$"; })
+  ];
 
-  blockRules =
-    let
-      baseRules = [
-        {
-          name = "dialog-open-file";
-          props = [ "match:title = ^(Open File)$" ];
-          effects = [ "float = yes" ];
-        }
-        {
-          name = "dialog-save-as";
-          props = [ "match:title = ^(Save As)$" ];
-          effects = [ "float = yes" ];
-        }
-        {
-          name = "dialog-nm-connection-editor";
-          props = [ "match:class = ^(nm-connection-editor)$" ];
-          effects = [ "float = yes" ];
-        }
-        {
-          name = "picture-in-picture";
-          props = [ "match:title = ^(Picture-in-Picture)$" ];
-          effects = [
-            "float = yes"
-            "pin = yes"
-            "size = 480 270"
-            "move = (monitor_w-500) 50"
-          ];
-        }
-        {
-          name = "music-classic-player";
-          props = [ "match:class = ^(music)$" ];
-          effects = [ "workspace = special:music" ];
-        }
-        {
-          name = "music-ncspot";
-          props = [ "match:title = ^(ncspot)$" ];
-          effects = [ "workspace = special:music" ];
-        }
-        {
-          name = "music-volume-control";
-          props = [ "match:class = ^(pwvucontrol)$" ];
-          effects = [
-            "workspace = special:music"
-            "float = yes"
-            "opacity = 0.8 0.8"
-          ];
-        }
-        {
-          name = "music-blueman";
-          props = [ "match:class = ^(blueman-manager)$" ];
-          effects = [
-            "workspace = special:music"
-            "float = yes"
-            "size = (monitor_w*0.40) (monitor_h*0.45)"
-            "move = (monitor_w*0.02) (monitor_h*0.55)"
-            "opacity = 0.8 0.8"
-          ];
-        }
-        {
-          name = "scratchpad-terminal";
-          props = [ "match:class = ^(scratchpad-terminal)$" ];
-          effects = [
-            "workspace = special:scratch_term silent"
-            "float = yes"
-            "center = yes"
-            "size = (monitor_w*0.75) (monitor_h*0.55)"
-          ];
-        }
-        {
-          name = "scratchpad-notes";
-          props = [ "match:class = ^(notes-scratch)$" ];
-          effects = [
-            "workspace = special:scratch_notes silent"
-            "float = yes"
-            "center = yes"
-            "size = (monitor_w*0.70) (monitor_h*0.50)"
-          ];
-        }
-        {
-          name = "scratchpad-rawlog";
-          props = [ "match:class = ^(rawlog-capture)$" ];
-          effects = [
-            "workspace = special:scratch_rawlog silent"
-            "float = yes"
-            "center = yes"
-            "size = (monitor_w*0.72) (monitor_h*0.48)"
-          ];
-        }
-        {
-          name = "scratchpad-claude";
-          props = [ "match:class = ^(scratchpad-claude)$" ];
-          effects = [
-            "workspace = special:scratch_claude silent"
-            "float = yes"
-            "center = yes"
-            "size = (monitor_w*0.85) (monitor_h*0.85)"
-          ];
-        }
-        {
-          name = "scratchpad-weechat";
-          props = [ "match:class = ^(scratchpad-weechat)$" ];
-          effects = [
-            "workspace = special:scratch_weechat silent"
-            "float = yes"
-            "center = yes"
-            "size = (monitor_w*0.75) (monitor_h*0.75)"
-          ];
-        }
-      ]
-      ++ (map (site: {
-        name = "browser-${site.name}";
-        props = [ "match:class = ^(browser-${site.name})$" ];
-        effects = [
-          "workspace = special:browser_${site.name} silent"
-          "float = yes"
-          "center = yes"
-          "size = (monitor_w*0.80) (monitor_h*0.85)"
-        ];
-      }) [
-        { name = "chatgpt"; }
-        { name = "claude"; }
-        { name = "aistudio"; }
-        { name = "raindrop"; }
-        { name = "ytmusic"; }
-        { name = "youtube"; }
-      ])
-      ++ [
-        {
-          name = "scratchpad-spotify";
-          props = [ "match:class = ^([Ss]potify)$" ];
-          effects = [
-            "workspace = special:scratch_spotify silent"
-            "float = yes"
-            "center = yes"
-            "size = (monitor_w*0.85) (monitor_h*0.85)"
-          ];
-        }
-        {
-          name = "clipse-manager";
-          props = [ "match:class = ^(clipse)$" ];
-          effects = [
-            "float = yes"
-            "center = yes"
-            "size = 2000 1000"
-          ];
-        }
-        {
-          name = "steam-games";
-          props = [ "match:class = ^(steam_app_.*)$" ];
-          effects = [
-            "workspace = 5"
-            "fullscreen = yes"
-          ];
-        }
-        {
-          name = "xdg-portal";
-          props = [ "match:class = ^(xdg-desktop-portal-gtk)$" ];
-          effects = [
-            "float = yes"
-            "center = yes"
-            "size = 1200 800"
-          ];
-        }
-        {
-          name = "qutebrowser-main";
-          props = [ "match:class = ^(qutebrowser)$" ];
-          effects = [
-            "tile = yes"
-            "group = set"
-          ];
-        }
-        {
-          name = "qutebrowser-floating";
-          props = [
-            "match:class = ^(qutebrowser)$"
-            "match:float = true"
-          ];
-          effects = [
-            "float = yes"
-            "size = (monitor_w*0.28) (monitor_h*0.24)"
-            "move = (monitor_w*0.70) (monitor_h*0.06)"
-          ];
-        }
-        {
-          name = "imv-floating";
-          props = [ "match:class = ^(imv)$" ];
-          effects = [
-            "float = yes"
-            "center = yes"
-          ];
-        }
-      ];
+  # ========================================
+  # Picture-in-Picture
+  # ========================================
+  pipRule = mkRule "picture-in-picture" {
+    title = "^(Picture-in-Picture)$";
+    float = true;
+    pin = true;
+    size = { w = 480; h = 270; };
+    move = { x = "(monitor_w-500)"; y = "50"; };
+  };
 
-      idleBlocks =
-        if !useNewIdleRule then
-          [ ]
-        else
-          lib.imap0
-            (index: rule:
-              let
-                parsed = parseCondition rule.condition;
-              in
-              {
-                name = "idle-${rule.mode}-${toString index}";
-                props = [ "${parsed.key} = ${parsed.value}" ];
-                effects = [ "idle_inhibit = ${rule.mode}" ];
-              })
-            idleRules;
-    in
-    map mkBlock (baseRules ++ idleBlocks);
+  # ========================================
+  # Scratchpad Rules (from scratchpads.nix)
+  # ========================================
+  scratchpadRules = map (spec: mkScratchpad spec.name {
+    inherit (spec) class workspace size;
+  }) scratchpadSpecs;
+
+  # Browser scratchpads (using specialized helper)
+  browserScratchpads = map mkBrowserScratchpad [
+    "chatgpt" "claude" "aistudio" "raindrop" "ytmusic" "youtube"
+  ];
+
+  # ========================================
+  # Music Workspace Rules
+  # ========================================
+  musicRules = [
+    (mkRule "music-classic-player" { class = "^(music)$"; workspace = "special:music"; })
+    (mkRule "music-ncspot" { title = "^(ncspot)$"; workspace = "special:music"; })
+    (mkRule "music-volume-control" {
+      class = "^(pwvucontrol)$";
+      workspace = "special:music";
+      float = true;
+      opacity = 0.8;
+    })
+    (mkRule "music-blueman" {
+      class = "^(blueman-manager)$";
+      workspace = "special:music";
+      float = true;
+      size = { w = 0.40; h = 0.45; };
+      move = { x = "(monitor_w*0.02)"; y = "(monitor_h*0.55)"; };
+      opacity = 0.8;
+    })
+  ];
+
+  # ========================================
+  # Application-Specific Rules
+  # ========================================
+  appRules = [
+    (mkRule "clipse-manager" {
+      class = "^(clipse)$";
+      float = true;
+      center = true;
+      size = { w = 2000; h = 1000; };
+    })
+    (mkRule "steam-games" {
+      class = "^(steam_app_.*)$";
+      workspace = "5";
+      fullscreen = true;
+      immediate = true;
+    })
+    (mkRule "xdg-portal" {
+      class = "^(xdg-desktop-portal-gtk)$";
+      float = true;
+      center = true;
+      size = { w = 1200; h = 800; };
+    })
+    (mkRule "qutebrowser-main" {
+      class = "^(qutebrowser)$";
+      tile = true;
+      group = "set";
+    })
+    (mkRule "qutebrowser-floating" {
+      class = "^(qutebrowser)$";
+      floating = true;
+      float = true;
+      size = { w = 0.28; h = 0.24; };
+      move = { x = "(monitor_w*0.70)"; y = "(monitor_h*0.06)"; };
+    })
+    (mkRule "imv-floating" {
+      class = "^(imv)$";
+      float = true;
+      center = true;
+    })
+  ];
+
+  # ========================================
+  # Combine All Rules
+  # ========================================
+  allBlockRules = dialogRules ++ [ pipRule ] ++ musicRules
+    ++ scratchpadRules ++ browserScratchpads ++ appRules ++ idleBlocks;
+
 in
-if useNewSyntax then
-  {
-    windowrule = [ ];
-    windowrulev2 = [ ];
-    extraConfig = lib.concatStringsSep "\n\n" blockRules + "\n";
-  }
-else
-  {
-    windowrule =
-      (if useNewIdleRule then [ ] else map (rule: "${idleRuleName} ${rule.mode}, ${rule.condition}") idleRules)
-      ++ [
-        "float, title:^(Open File)$"
-        "float, title:^(Save As)$"
-        "float, class:^(nm-connection-editor)$"
-        "float, pin, size 480 270, move monitor_w-500 50, title:^(Picture-in-Picture)$"
-
-        "workspace special:music, class:^(music)$"
-        "workspace special:music, title:^(ncspot)$"
-        "workspace special:music, class:^(pwvucontrol)$"
-        "workspace special:music, class:^(blueman-manager)$"
-        "float, size monitor_w*0.40 monitor_h*0.45, move monitor_w*0.02 monitor_h*0.55, opacity 0.8 0.8, class:^(blueman-manager)$"
-        "opacity 0.8 0.8, class:^(pwvucontrol)$"
-
-        "workspace special:scratch_term silent, class:^(scratchpad-terminal)$"
-        "float, class:^(scratchpad-terminal)$"
-        "center, class:^(scratchpad-terminal)$"
-        "size monitor_w*0.75 monitor_h*0.55, class:^(scratchpad-terminal)$"
-
-        "workspace special:scratch_notes silent, class:^(notes-scratch)$"
-        "float, class:^(notes-scratch)$"
-        "center, class:^(notes-scratch)$"
-        "size monitor_w*0.70 monitor_h*0.50, class:^(notes-scratch)$"
-
-        "workspace special:scratch_rawlog silent, class:^(rawlog-capture)$"
-        "float, class:^(rawlog-capture)$"
-        "center, class:^(rawlog-capture)$"
-        "size monitor_w*0.72 monitor_h*0.48, class:^(rawlog-capture)$"
-
-        "workspace special:scratch_spotify silent, class:^([Ss]potify)$"
-        "float, class:^([Ss]potify)$"
-        "center, class:^([Ss]potify)$"
-        "size monitor_w*0.85 monitor_h*0.85, class:^([Ss]potify)$"
-
-        "float, center, size 2000 1000, class:(clipse)"
-
-        "immediate, fullscreen, workspace 5, class:^(steam_app_.*)$"
-
-        "float, size 1200 800, center, class:^(xdg-desktop-portal-gtk)$"
-
-        "tile, class:^(qutebrowser)$"
-        "group set, class:^(qutebrowser)$"
-        "float, size monitor_w*0.28 monitor_h*0.24, move monitor_w*0.70 monitor_h*0.06, class:^(qutebrowser)$, floating:1"
-        "float, center, class:^(imv)$"
-      ];
-
-    windowrulev2 =
-      (map (rule: "${idleRuleName} ${rule.mode},${stripMatch rule.condition}") idleRules)
-      ++ [
-        # File dialogs
-        "float,title:^(Open File)$"
-        "float,title:^(Save As)$"
-        "float,class:^(nm-connection-editor)$"
-
-        # Picture-in-Picture
-        "float,title:^(Picture-in-Picture)$"
-        "pin,title:^(Picture-in-Picture)$"
-        "size 480 270,title:^(Picture-in-Picture)$"
-        "move monitor_w-500 50,title:^(Picture-in-Picture)$"
-
-        # Music workspace
-        "workspace special:music,class:^(music)$"
-        "workspace special:music,title:^(ncspot)$"
-        "workspace special:music,class:^(pwvucontrol)$"
-        "workspace special:music,class:^(blueman-manager)$"
-        "float,class:^(blueman-manager)$"
-        "size monitor_w*0.40 monitor_h*0.45,class:^(blueman-manager)$"
-        "move monitor_w*0.02 monitor_h*0.55,class:^(blueman-manager)$"
-        "opacity 0.8 0.8,class:^(blueman-manager)$"
-        "opacity 0.8 0.8,class:^(pwvucontrol)$"
-
-        # Scratchpad terminal
-        "workspace special:scratch_term silent,class:^(scratchpad-terminal)$"
-        "float,class:^(scratchpad-terminal)$"
-        "center,class:^(scratchpad-terminal)$"
-        "size monitor_w*0.75 monitor_h*0.55,class:^(scratchpad-terminal)$"
-
-        # Scratchpad notes
-        "workspace special:scratch_notes silent,class:^(notes-scratch)$"
-        "float,class:^(notes-scratch)$"
-        "center,class:^(notes-scratch)$"
-        "size monitor_w*0.70 monitor_h*0.50,class:^(notes-scratch)$"
-
-        # Scratchpad rawlog
-        "workspace special:scratch_rawlog silent,class:^(rawlog-capture)$"
-        "float,class:^(rawlog-capture)$"
-        "center,class:^(rawlog-capture)$"
-        "size monitor_w*0.72 monitor_h*0.48,class:^(rawlog-capture)$"
-
-        # Spotify scratchpad
-        "workspace special:scratch_spotify silent,class:^([Ss]potify)$"
-        "float,class:^([Ss]potify)$"
-        "center,class:^([Ss]potify)$"
-        "size monitor_w*0.85 monitor_h*0.85,class:^([Ss]potify)$"
-
-        # Clipse clipboard manager
-        "float,class:(clipse)"
-        "center,class:(clipse)"
-        "size 2000 1000,class:(clipse)"
-
-        # Steam games
-        "immediate,class:^(steam_app_.*)$"
-        "fullscreen,class:^(steam_app_.*)$"
-        "workspace 5,class:^(steam_app_.*)$"
-
-        # File picker
-        "float,class:^(xdg-desktop-portal-gtk)$"
-        "size 1200 800,class:^(xdg-desktop-portal-gtk)$"
-        "center,class:^(xdg-desktop-portal-gtk)$"
-
-        # Qutebrowser
-        "tile,class:^(qutebrowser)$"
-        "group set,class:^(qutebrowser)$"
-
-        # IMV image viewer
-        "float,class:^(imv)$"
-        "center,class:^(imv)$"
-      ];
-  }
+{
+  windowrule = [ ];
+  windowrulev2 = [ ];
+  extraConfig = lib.concatMapStringsSep "\n\n" renderBlock allBlockRules + "\n";
+}

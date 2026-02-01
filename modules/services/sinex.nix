@@ -8,7 +8,6 @@
 let
   cfg = config.sinnix.services.sinex;
   inherit (config.sinnix.paths) indicesRoot realmRoot;
-  dbProvision = cfg.enable || cfg.provisionDatabase;
   sinexPkgs = inputs.sinex.packages.${pkgs.stdenv.hostPlatform.system};
 in
 {
@@ -26,9 +25,9 @@ in
     }
 
     # Database-only provisioning (for dev environments)
-    (lib.mkIf dbProvision {
+    (lib.mkIf (cfg.enable || cfg.provisionDatabase) {
       services.sinex.database.enable = true;
-      services.sinex.database.autoSetup = true;
+      services.sinex.database.autoSetup = false;
     })
 
     # Full service configuration
@@ -57,7 +56,6 @@ in
 
         users.target = config.sinnix.user.name;
         logLevel = "debug";
-        # shell.asciinema.autoRecord = true; # Disabled - use terminal-capture instead if needed
         stateRoot = "${indicesRoot}/sinex";
         satellites.filesystem.watchPaths = [ realmRoot ];
       };

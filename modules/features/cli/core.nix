@@ -3,10 +3,7 @@ mkFeatureModule {
   path = [ "cli" "core" ];
   description = "Core CLI environment";
   configFn =
-    { config, pkgs, lib, ... }:
-    let
-      user = config.sinnix.user.name;
-    in
+    { config, pkgs, lib, user, ... }:
     {
       environment.systemPackages = with pkgs; [
         git

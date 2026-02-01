@@ -1,37 +1,40 @@
 #!/usr/bin/env bash
 # Aggressively terminate all build processes, compilers, and LSPs
 # Designed for F9 emergency kill binding
+#
+# SAFETY: Uses pgrep without -f to match process names only (not full command line)
+# This prevents killing everything running from /nix/store/
 
 set -euo pipefail
 
-# Build tools and compilers
-BUILD_PATTERNS=(
+# Build tools and compilers (exact process names)
+BUILD_PROCS=(
   "gcc" "g++" "clang" "clang++" "rustc"
   "cc1" "cc1plus" "ld" "lld" "mold"
   "cargo" "cmake" "make" "ninja" "meson"
-  "nix" "nix-daemon" "nix-build"
+  "nix-daemon" "nix-build"
 )
 
-# LSP servers
-LSP_PATTERNS=(
+# LSP servers (exact process names)
+LSP_PROCS=(
   "rust-analyzer" "clangd" "pyright" "gopls"
-  "typescript-language-server" "nil" "lua-language-server"
+  "tsserver" "nil" "lua-language-server"
   "bash-language-server" "yaml-language-server"
 )
 
-ALL_PATTERNS=("${BUILD_PATTERNS[@]}" "${LSP_PATTERNS[@]}")
+ALL_PROCS=("${BUILD_PROCS[@]}" "${LSP_PROCS[@]}")
 
 echo "🔪 Nuking build processes and LSPs..."
 
 killed=0
-for pattern in "${ALL_PATTERNS[@]}"; do
-  # Find PIDs matching pattern
-  pids=$(pgrep -f "$pattern" 2>/dev/null || true)
+for proc in "${ALL_PROCS[@]}"; do
+  # Find PIDs matching exact process name (NOT -f which matches full command line!)
+  pids=$(pgrep -x "$proc" 2>/dev/null || true)
 
   if [ -n "$pids" ]; then
-    echo "  Killing $pattern: $pids"
+    echo "  Killing $proc: $pids"
 
-    # SIGTERM first (give 2s to cleanup)
+    # SIGTERM first (give 0.5s to cleanup)
     kill -TERM $pids 2>/dev/null || true
     sleep 0.5
 
@@ -39,19 +42,22 @@ for pattern in "${ALL_PATTERNS[@]}"; do
     for pid in $pids; do
       if kill -0 "$pid" 2>/dev/null; then
         kill -KILL "$pid" 2>/dev/null || true
-        ((killed++))
+        ((killed++)) || true
       fi
     done
   fi
 done
 
-# Also kill anything in build cgroup
-if [ -d /sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/build.slice ]; then
-  build_pids=$(cat /sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/build.slice/cgroup.procs 2>/dev/null || true)
+# Also kill anything in builds.slice (system-level cgroup for nix-daemon + user builds)
+# This covers processes started via systemd-run --scope --slice=builds.slice
+BUILDS_SLICE="/sys/fs/cgroup/builds.slice"
+if [ -d "$BUILDS_SLICE" ]; then
+  # Read all PIDs from builds.slice and its sub-slices
+  build_pids=$(find "$BUILDS_SLICE" -name "cgroup.procs" -exec cat {} \; 2>/dev/null | sort -u || true)
   if [ -n "$build_pids" ]; then
-    echo "  Killing build cgroup processes: $(echo $build_pids | tr '\n' ' ')"
+    echo "  Killing builds.slice processes: $(echo $build_pids | tr '\n' ' ')"
     echo "$build_pids" | xargs -r kill -KILL 2>/dev/null || true
-    ((killed += $(echo "$build_pids" | wc -l)))
+    ((killed += $(echo "$build_pids" | wc -l))) || true
   fi
 fi
 

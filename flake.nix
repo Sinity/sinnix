@@ -74,6 +74,19 @@
       flake = false;
     };
 
+    # Code formatting (multi-formatter via flake-parts)
+    treefmt-nix = {
+      url = "github:numtide/treefmt-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    # Declarative git hooks (flake-parts module)
+    git-hooks-nix = {
+      url = "github:cachix/git-hooks.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+
   };
 
   outputs =
@@ -81,10 +94,16 @@
     flake-parts.lib.mkFlake { inherit inputs; } {
       systems = [ "x86_64-linux" ];
       imports = [
+        # 3rd-party flake-parts modules
+        inputs.treefmt-nix.flakeModule
+        inputs.git-hooks-nix.flakeModule
+
+        # Local modules
         ./flake/dev-shell.nix
         ./flake/apps.nix
         ./flake/packages.nix
-        ./flake/formatter.nix
+        ./flake/treefmt.nix
+        ./flake/git-hooks.nix
         ./flake/nixos.nix
         ./flake/tests.nix
       ];

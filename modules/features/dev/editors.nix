@@ -2,23 +2,22 @@
 mkFeatureModule {
   path = [ "dev" "editors" ];
   description = "Developer editors (VS Code, Zed)";
-  extraOptions = {
-    vscode.enable = lib.mkEnableOption "VSCode Editor";
-    zed.enable = lib.mkEnableOption "Zed Editor";
+  # Using declarative subFeatures instead of manual extraOptions
+  subFeatures = {
+    vscode = { description = "VSCode Editor"; };
+    zed = { description = "Zed Editor"; };
   };
   configFn =
-    { config, lib, pkgs, helpers, cfg, ... }:
+    { config, lib, pkgs, helpers, cfg, user, ... }:
     let
-      user = config.sinnix.user.name;
-      dotsRepoPath = config.sinnix.paths.dotsRoot;
       marketplace = pkgs.nix-vscode-extensions.vscode-marketplace;
     in
     lib.mkMerge [
       (lib.mkIf cfg.vscode.enable {
         home-manager.users.${user} =
-          { pkgs, lib, config, ... }:
+          { pkgs, lib, config, sinnix, ... }:
           let
-            mkDotsRepoLink = helpers.mkDotsSymlink config dotsRepoPath;
+            mkDotsFile = helpers.mkDotsFile sinnix config;
           in
           {
             programs.vscode = {
@@ -47,11 +46,11 @@ mkFeatureModule {
             };
 
             xdg.configFile = {
-              "Code/User/settings.json".source = mkDotsRepoLink "/vscode/User/settings.json";
-              "Code/User/keybindings.json".source = mkDotsRepoLink "/vscode/User/keybindings.json";
-              "Code/User/mcp.json".source = mkDotsRepoLink "/vscode/User/mcp.json";
+              "Code/User/settings.json".source = mkDotsFile "/vscode/User/settings.json";
+              "Code/User/keybindings.json".source = mkDotsFile "/vscode/User/keybindings.json";
+              "Code/User/mcp.json".source = mkDotsFile "/vscode/User/mcp.json";
               "Code/User/mcp" = {
-                source = mkDotsRepoLink "/vscode/User/mcp";
+                source = mkDotsFile "/vscode/User/mcp";
                 force = true;
               };
             };
@@ -66,14 +65,14 @@ mkFeatureModule {
 
       (lib.mkIf cfg.zed.enable {
         home-manager.users.${user} =
-          { config, ... }:
+          { config, sinnix, ... }:
           let
-            mkDotsRepoLink = helpers.mkDotsSymlink config dotsRepoPath;
+            mkDotsFile = helpers.mkDotsFile sinnix config;
           in
           {
             xdg.configFile = {
-              "zed/settings.json".source = mkDotsRepoLink "/zed/settings.json";
-              "zed/keymap.json".source = mkDotsRepoLink "/zed/keymap.json";
+              "zed/settings.json".source = mkDotsFile "/zed/settings.json";
+              "zed/keymap.json".source = mkDotsFile "/zed/keymap.json";
             };
 
             home.file.".local/bin/zed" = {

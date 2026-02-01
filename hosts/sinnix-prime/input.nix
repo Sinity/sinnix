@@ -143,17 +143,22 @@ in
         wantedBy = [ "graphical-session.target" ];
       };
 
-      timers.logitech-maintenance = {
-        description = "Keep Logitech G502 LEDs locked to the desired state";
-        timerConfig = {
-          OnBootSec = "45s";
-          OnUnitActiveSec = "5m";
-          RandomizedDelaySec = "30s";
-          Unit = "logitech-maintenance.service";
-          Persistent = true;
-        };
-        wantedBy = [ "timers.target" ];
-      };
+      # DISABLED: Timer causes Solaar to recreate virtual keyboard ~8 times per run
+      # Over hours this creates 200+ input devices, potentially causing kernel resource exhaustion.
+      # Investigation needed: why does `solaar config` trigger device recreation?
+      # See: journalctl -k --grep="solaar-keyboard" for device creation pattern
+      #
+      # timers.logitech-maintenance = {
+      #   description = "Keep Logitech G502 LEDs locked to the desired state";
+      #   timerConfig = {
+      #     OnBootSec = "45s";
+      #     OnUnitActiveSec = "5m";
+      #     RandomizedDelaySec = "30s";
+      #     Unit = "logitech-maintenance.service";
+      #     Persistent = true;
+      #   };
+      #   wantedBy = [ "timers.target" ];
+      # };
     };
   };
 

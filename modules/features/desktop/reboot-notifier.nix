@@ -3,9 +3,8 @@ mkFeatureModule {
   path = [ "desktop" "reboot-notifier" ];
   description = "System reboot notifier";
   configFn =
-    { config, pkgs, ... }:
+    { config, pkgs, user, ... }:
     let
-      user = config.sinnix.user.name;
       # Capture nvidia package from NixOS config for use in home-manager scope
       nvidiaPackage = config.hardware.nvidia.package;
     in

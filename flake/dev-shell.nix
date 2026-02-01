@@ -1,17 +1,14 @@
 # Dev shell configuration for nixos-config
 #
-# This module defines the development environment for working
-# with the NixOS configuration. It integrates devenv.sh to provide:
-#
-# - Git hooks for code quality
-# - Development tools
-# - Quality assurance scripts
-# - Completions and helpers
+# Integrates devenv.sh with git-hooks.nix for:
+# - Automatic hook installation on shell entry
+# - Development tools and Nix helpers
+# - Cachix integration
 
 { inputs, ... }:
 {
   perSystem =
-    { pkgs, system, ... }:
+    { config, pkgs, system, ... }:
     {
       # Development environment with devenv.sh
       # Note: Requires use flake . --no-pure-eval in .envrc for directory detection
@@ -36,6 +33,9 @@
                 in
                 "/tmp/sinnix-devenv-" + rootHash;
               lspRootLauncher = import ../modules/lib/lsp-root.nix { inherit pkgs; };
+
+              # Git hooks from git-hooks.nix flake-parts module
+              gitHooksShellHook = config.pre-commit.installationScript;
             in
             {
               # Basic shell information
@@ -63,13 +63,10 @@
                 git
                 gh
                 delta
-                pre-commit
 
                 # Nix tools
-                nixfmt
                 nil
                 nixd
-                deadnix
 
                 # Secret management
                 inputs.agenix.packages.${system}.default
@@ -81,17 +78,14 @@
                 fd
                 ripgrep
                 lspRootLauncher
-              ];
+              ]
+              # Add packages required by git-hooks
+              ++ config.pre-commit.settings.enabledPackages;
 
-              # Disable devenv-managed git hooks; use the committed
-              # `.pre-commit-config.yaml` for manual `pre-commit` usage instead.
-              git-hooks = {
-                enable = false;
-                hooks = { };
-              };
+              # Disable devenv's built-in git-hooks (using git-hooks.nix instead)
+              git-hooks.enable = false;
 
               # Binary cache setup
-              # Note: "sinity" is the user's personal cachix cache (matches user.name)
               cachix.enable = true;
               cachix.pull = [
                 "sinity"
@@ -107,12 +101,12 @@
 
                 # Run code quality checks (without modifying files)
                 lint.exec = ''
-                  ${pkgs.nix}/bin/nix run ${resolvedRoot}#lint
+                  ${pkgs.nix}/bin/nix develop -c pre-commit run --all-files
                 '';
 
-                # Format Nix code according to standard
+                # Format code according to standard (via treefmt)
                 format.exec = ''
-                  ${pkgs.nix}/bin/nix run ${resolvedRoot}#format
+                  ${pkgs.nix}/bin/nix fmt
                 '';
 
                 # Build and apply the system configuration
@@ -121,26 +115,20 @@
                 '';
               };
 
-              # Welcome message with available commands
+              # Shell entry - install git hooks and show welcome message
               enterShell = ''
-                  # Ensure devenv git-hooks state config is valid JSON
-                GH_STATE_DIR="${stateRoot}/state/git-hooks"
-                GH_CFG="$GH_STATE_DIR/config.json"
-                  if [ ! -e "$GH_CFG" ] || ! ${pkgs.jq}/bin/jq . "$GH_CFG" >/dev/null 2>&1; then
-                    mkdir -p "$GH_STATE_DIR"
-                    printf '%s\n' '{"configPath": ".pre-commit-config.yaml"}' > "$GH_CFG"
-                  fi
+                # Install git hooks via git-hooks.nix
+                ${gitHooksShellHook}
 
-                  echo ""
-                  echo "NixOS Configuration Development Environment"
-                  echo ""
-                  echo "Available commands:"
-                  echo "  check     - Validate configuration syntax and structure"
-                  echo "  format    - Apply code formatting rules"
-                  echo "  lint      - Run code quality checks"
-                  echo "  rebuild   - Apply configuration to system (requires sudo)"
-                  echo "  pre-commit install - Activate repo git hooks"
-                  echo ""
+                echo ""
+                echo "NixOS Configuration Development Environment"
+                echo ""
+                echo "Available commands:"
+                echo "  check   - Validate configuration syntax and structure"
+                echo "  format  - Apply code formatting (nix fmt via treefmt)"
+                echo "  lint    - Run pre-commit hooks on all files"
+                echo "  rebuild - Apply configuration to system (requires sudo)"
+                echo ""
               '';
             }
           )

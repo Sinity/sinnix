@@ -10,17 +10,18 @@
 # Don't use overlays for:
 # - Simple custom scripts → use flake/packages.nix instead
 # - Standalone new packages → use flake/packages.nix instead
-{ inputs }:
+#
+# Adding a new overlay:
+# - Simply create a new .nix file in this directory
+# - It will be auto-discovered and imported (no need to edit this file)
+{ inputs, overlayLib }:
 let
-  mkOverlay = path: import path { inherit inputs; };
+  mkOverlay = path: import path { inherit inputs overlayLib; };
+
+  # Auto-discover all .nix files except default.nix
+  overlayDir = builtins.readDir ./.;
+  overlayNames = builtins.filter
+    (name: name != "default.nix" && builtins.match ".*\\.nix$" name != null)
+    (builtins.attrNames overlayDir);
 in
-[
-  (mkOverlay ./aw-server-rust.nix)
-  (mkOverlay ./codex.nix)
-  (mkOverlay ./chromium.nix)
-  (mkOverlay ./polylogue.nix)
-  (mkOverlay ./pwvucontrol.nix)
-  (mkOverlay ./python.nix)
-  (mkOverlay ./uwsm.nix)
-  (mkOverlay ./xdg-desktop-portal-hyprland.nix)
-]
+builtins.map (name: mkOverlay ./${name}) overlayNames

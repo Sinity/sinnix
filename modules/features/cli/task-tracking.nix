@@ -3,9 +3,8 @@ mkFeatureModule {
   path = [ "cli" "task-tracking" ];
   description = "Taskwarrior and Timewarrior task tracking";
   configFn =
-    { config, lib, ... }:
+    { config, lib, user, ... }:
     let
-      user = config.sinnix.user.name;
       dotsRoot = "${config.sinnix.paths.projectRoot}/dots";
     in
     {
@@ -35,10 +34,11 @@ mkFeatureModule {
         };
 
         # Source shell integration
-        programs.zsh.initExtra = lib.mkAfter ''
+        programs.zsh.initContent = lib.mkAfter ''
           # Taskwarrior shell aliases and helpers
           [ -f "${dotsRoot}/taskwarrior/shell-aliases.sh" ] && source "${dotsRoot}/taskwarrior/shell-aliases.sh"
-          [ -f "${dotsRoot}/taskwarrior/agent-helpers.sh" ] && source "${dotsRoot}/taskwarrior/agent-helpers.sh"
+          # Agent helpers only loaded when AGENT_NAME is set (Claude/Codex sessions)
+          [ -n "''${AGENT_NAME:-}" ] && [ -f "${dotsRoot}/taskwarrior/agent-helpers.sh" ] && source "${dotsRoot}/taskwarrior/agent-helpers.sh"
         '';
       };
     };

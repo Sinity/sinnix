@@ -1,14 +1,12 @@
 # Hyprland screen locking and idle management
 { pkgs, inputs, ... }:
-let
-  asset = rel: "${inputs.self}/assets/${rel}";
-in
 {
   xdg.configFile."hypr/hyprlock.conf".text = ''
     # BACKGROUND
     background {
       monitor =
-      path = ${asset "forest.jpg"}
+      path = ${inputs.self}/assets/forest.jpg
+assets/wallpaper-base.jpg
       blur_passes = 1
       contrast = 0.8916
       brightness = 0.8172

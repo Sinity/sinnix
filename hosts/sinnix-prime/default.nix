@@ -22,7 +22,7 @@
   sinnix.services = {
     transmission.enable = true;
     terminal-capture.enable = true;
-    netdata.enable = true;
+    below.enable = true;
     sinex = {
       enable = false;
       provisionDatabase = true;

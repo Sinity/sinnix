@@ -1,4 +1,4 @@
-{ inputs }:
+{ inputs, ... }:
 final: _prev:
 let
   inherit (final.stdenv.hostPlatform) system;

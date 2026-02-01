@@ -7,11 +7,12 @@
 let
   inherit (config.sinnix.paths) realmRoot dataRoot capturesRoot outerRealm;
   username = config.sinnix.user.name;
-  userCfg = config.users.users.${username} or { };
-  userUid = builtins.toString (userCfg.uid or 1000);
-  primaryGroupName = userCfg.group or "users";
-  groupCfg = lib.attrByPath [ "users" "groups" primaryGroupName ] config { };
-  primaryGroupId = builtins.toString (groupCfg.gid or 100);
+  userCfg = config.users.users.${username};
+  # NixOS auto-assigns UIDs; .uid can be null so use explicit fallback
+  userUid = builtins.toString (if userCfg.uid != null then userCfg.uid else 1000);
+  primaryGroupName = userCfg.group;
+  groupCfg = config.users.groups.${primaryGroupName};
+  primaryGroupId = builtins.toString (if groupCfg.gid != null then groupCfg.gid else 100);
 in
 {
   services = {
@@ -76,16 +77,13 @@ in
       depends = [ realmRoot ];
     };
 
+    # NTFS drive - Windows SIDs prevent proper uid mapping
+    # Will be reformatted after migration to new 14TB drive
     "${outerRealm}" = {
       device = "/dev/disk/by-uuid/5119B4113C747C42";
       fsType = "ntfs";
       options = [
-        "strictatime"
-        "lazytime"
         "nofail"
-        "uid=${userUid}"
-        "gid=${primaryGroupId}"
-        "umask=022"
         "big_writes"
       ];
     };

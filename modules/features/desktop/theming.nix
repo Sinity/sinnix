@@ -3,9 +3,8 @@ mkFeatureModule {
   path = [ "desktop" "theming" ];
   description = "Desktop theming (GTK/Qt overrides)";
   configFn =
-    { config, lib, pkgs, helpers, ... }:
+    { config, lib, pkgs, helpers, user, ... }:
     let
-      user = config.sinnix.user.name;
       kvantumPkg =
         if lib.hasAttrByPath [ "qt6Packages" "qtstyleplugin-kvantum" ] pkgs then
           pkgs.qt6Packages.qtstyleplugin-kvantum
@@ -13,18 +12,12 @@ mkFeatureModule {
           pkgs.libsForQt5.kvantum
         else
           null;
-      dotsRepoPath = config.sinnix.paths.dotsRoot;
     in
     {
       home-manager.users.${user} =
-        {
-          pkgs,
-          lib,
-          config,
-          ...
-        }:
+        { pkgs, lib, config, sinnix, ... }:
         let
-          mkDotsRepoLink = helpers.mkDotsSymlink config dotsRepoPath;
+          mkDotsFile = helpers.mkDotsFile sinnix config;
         in
         {
           gtk = {
@@ -53,9 +46,9 @@ mkFeatureModule {
           '';
 
           xdg.configFile = {
-            "qt5ct/qt5ct.conf".source = mkDotsRepoLink "/qt5ct/qt5ct.conf";
-            "qt6ct/qt6ct.conf".source = mkDotsRepoLink "/qt6ct/qt6ct.conf";
-            "Kvantum".source = mkDotsRepoLink "/Kvantum";
+            "qt5ct/qt5ct.conf".source = mkDotsFile "/qt5ct/qt5ct.conf";
+            "qt6ct/qt6ct.conf".source = mkDotsFile "/qt6ct/qt6ct.conf";
+            "Kvantum".source = mkDotsFile "/Kvantum";
           };
         };
     };

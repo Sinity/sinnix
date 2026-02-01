@@ -1,4 +1,3 @@
-{ inputs }:
-final: prev: {
-  polylogue = inputs.polylogue.packages.${final.stdenv.hostPlatform.system}.default;
-}
+# Re-export polylogue from flake input
+{ inputs, overlayLib }:
+overlayLib.mkInputOverlay "polylogue" inputs.polylogue.packages

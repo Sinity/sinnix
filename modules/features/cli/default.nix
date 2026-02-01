@@ -1,7 +1,5 @@
-{ ... }:
+# CLI features auto-discovery
+{ lib, ... }:
 {
-  imports = [
-    ./core.nix
-    ./task-tracking.nix
-  ];
+  imports = lib.sinnix.mkAutoImports ./. [];
 }

@@ -3,9 +3,8 @@ mkFeatureModule {
   path = [ "desktop" "storage" ];
   description = "User storage helpers";
   configFn =
-    { config, pkgs, lib, ... }:
+    { config, pkgs, lib, user, ... }:
     let
-      user = config.sinnix.user.name;
       encryptFolder = pkgs.writeShellScriptBin "encrypt-folder" ''
         #!/usr/bin/env bash
         set -euo pipefail

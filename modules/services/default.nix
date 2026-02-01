@@ -1,9 +1,8 @@
-{ ... }:
+# Services auto-discovery
+#
+# All .nix files in this directory are automatically imported.
+# Just add a new service file - no need to update this file.
+{ lib, ... }:
 {
-  imports = [
-    ./terminal-capture.nix
-    ./netdata.nix
-    ./sinex.nix
-    ./transmission.nix
-  ];
+  imports = lib.sinnix.mkAutoImports ./. [];
 }

@@ -1,19 +1,17 @@
-{ lib, config, ... }:
-let
-  cfg = config.sinnix.bundles.dev;
-in
-{
-  options.sinnix.bundles.dev = {
-    enable = lib.mkEnableOption "Standard Development Environment (CLI)";
+# Dev Bundle - auto-enables all features.dev.* plus CLI core
+#
+# Uses mkBundleModule for auto-discovery of dev features.
+# Adding a new feature to features/dev/ automatically includes it here.
+{ lib, ... }@args:
+lib.sinnix.mkBundleModule {
+  name = "dev";
+  description = "Standard Development Environment (CLI)";
+  featureDomain = "dev";
+  # Editors have subfeatures that default to off, so enabling base is harmless
+  # but explicit exclusion keeps the bundle focused on CLI dev environment
+  excludeFeatures = [ "editors" ];
+  extraEnables = {
+    # CLI tools are part of dev workflow
+    "features.cli.core" = true;
   };
-
-  config = lib.mkIf cfg.enable {
-    sinnix.features.dev = {
-      shell.enable = true;
-      git.enable = true;
-      languages.enable = true;
-      mcp-servers.enable = true;
-    };
-    sinnix.features.cli.core.enable = true;
-  };
-}
+} args

@@ -1,4 +1,4 @@
-{ inputs }: final: prev:
+{ inputs, ... }: final: prev:
 let
   inherit (final) lib;
   fixRe2 =

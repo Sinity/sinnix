@@ -3,9 +3,8 @@ mkFeatureModule {
   path = [ "desktop" "waybar" ];
   description = "Waybar status bar";
   configFn =
-    { config, pkgs, lib, ... }:
+    { config, pkgs, lib, user, ... }:
     let
-      user = config.sinnix.user.name;
       sinnix = config.sinnix;
       scriptPath = rel: "${sinnix.paths.projectRoot}/scripts/${rel}";
       waybarAudioSignal = 12;

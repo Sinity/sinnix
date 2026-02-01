@@ -15,11 +15,10 @@ mkFeatureModule {
       pkgs,
       inputs,
       helpers,
+      user,
       ...
     }:
     let
-      user = config.sinnix.user.name;
-      dotsRepoPath = config.sinnix.paths.dotsRoot;
       firecrawlSecretPath = lib.attrByPath [ "sinnix" "secrets" "paths" "firecrawl-api-key" ] null config;
       firecrawlSecretExport =
         if firecrawlSecretPath != null then
@@ -76,16 +75,9 @@ mkFeatureModule {
     in
     {
       home-manager.users.${user} =
-        {
-          pkgs,
-          lib,
-          config,
-          inputs,
-          secretPaths,
-          ...
-        }:
+        { pkgs, lib, config, sinnix, secretPaths, ... }:
         let
-          mkDotsRepoLink = helpers.mkDotsSymlink config dotsRepoPath;
+          mkDotsFile = helpers.mkDotsFile sinnix config;
         in
         {
           programs.htop = {
@@ -143,19 +135,19 @@ mkFeatureModule {
           };
 
           xdg.configFile = {
-            "opencode/opencode.json".source = mkDotsRepoLink "/opencode/opencode.json";
-            "sqlitebrowser/sqlitebrowser.conf".source = mkDotsRepoLink "/sqlitebrowser/sqlitebrowser.conf";
-            "ripgrep-all/config.jsonc".source = mkDotsRepoLink "/ripgrep-all/config.jsonc";
-            "marimo/marimo.toml".source = mkDotsRepoLink "/marimo/marimo.toml";
+            "opencode/opencode.json".source = mkDotsFile "/opencode/opencode.json";
+            "sqlitebrowser/sqlitebrowser.conf".source = mkDotsFile "/sqlitebrowser/sqlitebrowser.conf";
+            "ripgrep-all/config.jsonc".source = mkDotsFile "/ripgrep-all/config.jsonc";
+            "marimo/marimo.toml".source = mkDotsFile "/marimo/marimo.toml";
           };
 
           home.file = {
             ".codex/config.toml" = {
-              source = mkDotsRepoLink "/codex/config.toml";
+              source = mkDotsFile "/codex/config.toml";
               force = true;
             };
             ".codex/skills" = {
-              source = mkDotsRepoLink "/codex/skills";
+              source = mkDotsFile "/codex/skills";
               force = true;
               recursive = true;
             };
@@ -167,7 +159,7 @@ mkFeatureModule {
             ".local/bin/mcp-playwright".source = "${mcpPlaywrightBin}/bin/mcp-playwright";
             ".local/bin/mcp-cclsp".source = "${mcpCclspBin}/bin/mcp-cclsp";
             ".gemini/settings.json" = {
-              source = mkDotsRepoLink "/gemini/settings.json";
+              source = mkDotsFile "/gemini/settings.json";
               force = true;
             };
           };

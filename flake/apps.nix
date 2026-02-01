@@ -14,6 +14,11 @@
       ...
     }:
     let
+      # Resolve flake directory from PRJ_ROOT or git root
+      resolveFlakeDir = ''
+        _flake_dir="''${PRJ_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+      '';
+
       # Helper to create runnable commands
       mkApp = name: command: description: {
         type = "app";
@@ -35,17 +40,17 @@
 
         # Validate NixOS configuration
         check = mkApp "check" ''
-          flake_dir="''${PRJ_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-          echo "Checking NixOS configuration at $flake_dir..."
-          ${pkgs.nix}/bin/nix flake check "$flake_dir"
+          ${resolveFlakeDir}
+          echo "Checking NixOS configuration at $_flake_dir..."
+          ${pkgs.nix}/bin/nix flake check "$_flake_dir"
           echo "Configuration check complete!"
         '' "Validate NixOS configuration syntax and structure";
 
         # Format Nix files
         format = mkApp "format" ''
-          flake_dir="''${PRJ_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-          echo "Formatting Nix files in $flake_dir..."
-          ${pkgs.findutils}/bin/find "$flake_dir" -name "*.nix" -type f -not -path "*/nix/store/*" -print0 | \
+          ${resolveFlakeDir}
+          echo "Formatting Nix files in $_flake_dir..."
+          ${pkgs.findutils}/bin/find "$_flake_dir" -name "*.nix" -type f -not -path "*/nix/store/*" -print0 | \
           ${pkgs.findutils}/bin/xargs -0 -P 4 -I{} ${pkgs.nixfmt}/bin/nixfmt {}
           echo "Formatting complete!"
         '' "Format Nix files according to the RFC style";
@@ -60,9 +65,9 @@
 
         # Lint Nix files
         lint = mkApp "lint" ''
-          flake_dir="''${PRJ_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-          echo "Linting Nix files in $flake_dir..."
-          cd "$flake_dir"
+          ${resolveFlakeDir}
+          echo "Linting Nix files in $_flake_dir..."
+          cd "$_flake_dir"
           echo "Running deadnix..."
           ${pkgs.deadnix}/bin/deadnix --fail .
           echo "Running statix..."
@@ -82,33 +87,33 @@
 
         # Test configuration without applying
         test = mkApp "test" ''
-          flake_dir="''${PRJ_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+          ${resolveFlakeDir}
           if [ "$(id -u)" -ne 0 ]; then
-            echo "Error: This command must be run as root (use 'sudo nix run $flake_dir#test')"
+            echo "Error: This command must be run as root (use 'sudo nix run $_flake_dir#test')"
             exit 1
           fi
-          ${pkgs.nixos-rebuild}/bin/nixos-rebuild test --flake "$flake_dir#sinnix-prime" \
+          ${pkgs.nixos-rebuild}/bin/nixos-rebuild test --flake "$_flake_dir#sinnix-prime" \
             --log-format internal-json -v 2>&1 | ${pkgs.nix-output-monitor}/bin/nom --json
         '' "Test configuration without applying it to the system";
 
         # Apply configuration to system
         switch = mkApp "switch" ''
-          flake_dir="''${PRJ_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+          ${resolveFlakeDir}
           if [ "$(id -u)" -ne 0 ]; then
-            echo "Error: This command must be run as root (use 'sudo nix run $flake_dir#switch')"
+            echo "Error: This command must be run as root (use 'sudo nix run $_flake_dir#switch')"
             exit 1
           fi
-          ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --flake "$flake_dir#sinnix-prime" \
+          ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --flake "$_flake_dir#sinnix-prime" \
             --log-format internal-json -v 2>&1 | ${pkgs.nix-output-monitor}/bin/nom --json
         '' "Apply configuration changes to the system";
 
         # Update flake dependencies
         update = mkApp "update" ''
-          flake_dir="''${PRJ_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-          echo "Updating flake inputs for $flake_dir..."
-          cd "$flake_dir"
+          ${resolveFlakeDir}
+          echo "Updating flake inputs for $_flake_dir..."
+          cd "$_flake_dir"
           ${pkgs.nix}/bin/nix flake update
-          echo "Flake inputs updated. Run 'sudo nix run $flake_dir#switch' to apply."
+          echo "Flake inputs updated. Run 'sudo nix run $_flake_dir#switch' to apply."
         '' "Update flake dependencies to their latest versions";
 
         # Clean up old generations

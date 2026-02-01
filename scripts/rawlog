@@ -98,12 +98,8 @@ fi
 echo "$line" >>"$LOG_FILE"
 
 if command -v notify-send >/dev/null 2>&1; then
-  recent_preview=$(recent_entries | tail -n "$RECENT_COUNT")
-  notify_body="$msg"
-  if [ -n "$recent_preview" ]; then
-    notify_body="$msg\n\nRecent:\n$recent_preview"
-  fi
-  notify-send -t 1200 "Raw log saved" "$notify_body"
+  # Just show the saved message, not the entire recent history
+  notify-send -t 1200 "📝 Logged" "$msg"
 fi
 
 echo "$line"

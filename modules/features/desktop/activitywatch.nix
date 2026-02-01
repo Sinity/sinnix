@@ -3,9 +3,8 @@ mkFeatureModule {
   path = [ "desktop" "activitywatch" ];
   description = "ActivityWatch time tracker";
   configFn =
-    { config, pkgs, lib, ... }:
+    { config, pkgs, lib, user, ... }:
     let
-      user = config.sinnix.user.name;
       graphicalTarget = "graphical-session.target";
       baseGraphicalUnit = {
         After = [ graphicalTarget ];

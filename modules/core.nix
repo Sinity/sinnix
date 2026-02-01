@@ -161,13 +161,8 @@ in
     };
 
     services.dbus.implementation = "broker";
-
-    # Harden dbus-broker (system message bus)
-    systemd.services.dbus-broker.serviceConfig = lib.mkMerge [
-      (lib.sinnix.systemd.mkHardenedService {
-        level = "moderate";
-        allowedCalls = [ "@system-service" "~@privileged" ];
-      })
-    ];
+    # NOTE: dbus-broker hardening removed - it needs setgroups() to drop privileges
+    # for spawned services. The ~@privileged syscall filter blocked this, causing
+    # crashes at boot. See: journalctl -b -3 | grep dbus-broker
   };
 }

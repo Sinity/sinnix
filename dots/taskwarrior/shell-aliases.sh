@@ -176,5 +176,6 @@ function tpomodoro() {
     tstop "$task_id"
 }
 
-# Export functions
-export -f twbalance twprod twork tstop tdone tquick treviewday treviewweek tpomodoro
+# Note: Functions are automatically available in the current shell when sourced.
+# No export needed - zsh doesn't support `export -f` and functions don't
+# propagate to subshells anyway in typical usage.

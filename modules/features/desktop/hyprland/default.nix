@@ -14,12 +14,15 @@ let
   knowledgebaseRoot = config.sinnix.projects.knowledgebase;
   scriptPath = rel: "${repoRoot}/scripts/${rel}";
 
+  # Scratchpad configuration (single source of truth)
+  scratchpadData = import ./scratchpads.nix { inherit pkgs lib knowledgebaseRoot; };
+
   # Helper to import sub-modules which might need args
   bindings = import ./bindings.nix {
     inherit pkgs;
     sinnix = config.sinnix;
   };
-  rules = import ./rules.nix { inherit lib hyprlandPkg; };
+  rules = import ./rules.nix { inherit lib; scratchpadSpecs = scratchpadData.ruleSpecs; };
 
   # Lock configuration needs to be adapted since it was a HM module
   # We will inline or import it within the HM block
@@ -53,6 +56,10 @@ let
     {
       target = "rawlog-loop";
       source = "rawlog-loop";
+    }
+    {
+      target = "weechat-scratchpad";
+      source = "weechat-scratchpad";
     }
   ];
 in
@@ -100,7 +107,11 @@ in
           systemd.enable = false;
 
           settings = {
-            exec-once = [ "uwsm finalize" ];
+            exec-once = [
+              "uwsm finalize"
+              # Auto-start weechat scratchpad (hidden in special workspace)
+              "${pkgs.kitty}/bin/kitty --class scratchpad-weechat --title WeeChat $HOME/.local/bin/weechat-scratchpad"
+            ];
 
             # Override uwsm's "start-hyprland:Hyprland" to clean value
             # Fixes warning from apps like nm-applet that don't understand uwsm format
@@ -194,37 +205,8 @@ in
             lib.mkAfter extra;
         };
 
-        home.file = {
-          ".config/scratchpads/term.conf".text = ''
-            COMMAND=(${pkgs.kitty}/bin/kitty --class scratchpad-terminal)
-            CLASS="scratchpad-terminal"
-            WORKSPACE="scratch_term"
-            WIDTH_RATIO=0.75
-            HEIGHT_RATIO=0.55
-          '';
-          ".config/scratchpads/notes.conf".text = ''
-            COMMAND=(${pkgs.kitty}/bin/kitty --class notes-scratch -d ${knowledgebaseRoot} ${pkgs.neovim}/bin/nvim)
-            CLASS="notes-scratch"
-            WORKSPACE="scratch_notes"
-            WIDTH_RATIO=0.70
-            HEIGHT_RATIO=0.50
-          '';
-          ".config/scratchpads/rawlog.conf".text = ''
-            COMMAND=(${pkgs.kitty}/bin/kitty --class rawlog-capture --instance-group rawlog --single-instance --override font_size=22 sh -lc "$HOME/.local/bin/rawlog-loop")
-            CLASS="rawlog-capture"
-            WORKSPACE="scratch_rawlog"
-            WAIT_FOR_WINDOW_TRIES=50
-            WIDTH_RATIO=0.72
-            HEIGHT_RATIO=0.48
-          '';
-          ".config/scratchpads/spotify.conf".text = ''
-            COMMAND=(spotify)
-            CLASS="Spotify"
-            CLASS_PATTERN="(?i)^spotify$"
-            WORKSPACE="scratch_spotify"
-            WAIT_FOR_WINDOW_TRIES=100
-          '';
-        };
+        # Scratchpad config files (generated from scratchpads.nix)
+        home.file = scratchpadData.confFiles;
 
         home.activation.hyprlandScriptLinks = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
           mkdir -p "$HOME/.local/bin"

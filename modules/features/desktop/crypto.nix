@@ -3,9 +3,8 @@ mkFeatureModule {
   path = [ "desktop" "crypto" ];
   description = "Crypto daemon/wallet tooling";
   configFn =
-    { config, lib, pkgs, ... }:
+    { config, lib, pkgs, user, ... }:
     let
-      user = config.sinnix.user.name;
       userGroup = config.users.users.${user}.group or user;
       moneroDataDir = config.sinnix.paths.cryptoRoot;
       # P2P bound to localhost (no external peers). For public node, change p2p-bind-ip

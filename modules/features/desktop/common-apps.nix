@@ -1,23 +1,14 @@
-{ mkFeatureModule, pkgs, ... }@args:
+{ mkFeatureModule, pkgs, helpers, ... }@args:
 mkFeatureModule {
   path = [ "desktop" "common-apps" ];
   description = "Common desktop applications and settings";
   configFn =
-    { config, helpers, ... }:
-    let
-      user = config.sinnix.user.name;
-      dotsRepoPath = config.sinnix.paths.dotsRoot;
-    in
+    { config, helpers, user, ... }:
     {
       home-manager.users.${user} =
-        {
-          pkgs,
-          lib,
-          config,
-          ...
-        }:
+        { pkgs, lib, config, sinnix, ... }:
         let
-          mkDotsRepoLink = helpers.mkDotsSymlink config dotsRepoPath;
+          mkDotsFile = helpers.mkDotsFile sinnix config;
         in
         {
         home.packages = with pkgs; [
@@ -68,15 +59,15 @@ mkFeatureModule {
               CHECK_UPDATE="false"
             '';
             "yazi/opener.toml" = {
-              source = mkDotsRepoLink "/yazi/opener.toml";
+              source = mkDotsFile "/yazi/opener.toml";
               force = true;
             };
             "yazi/keymap.toml" = {
-              source = mkDotsRepoLink "/yazi/keymap.toml";
+              source = mkDotsFile "/yazi/keymap.toml";
               force = true;
             };
-            "audacity/audacity.cfg".source = mkDotsRepoLink "/audacity/audacity.cfg";
-            "transmission/settings.json".source = mkDotsRepoLink "/transmission/settings.json";
+            "audacity/audacity.cfg".source = mkDotsFile "/audacity/audacity.cfg";
+            "transmission/settings.json".source = mkDotsFile "/transmission/settings.json";
           };
         };
       };

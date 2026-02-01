@@ -1,32 +1,14 @@
-{ lib, config, ... }:
-let
-  cfg = config.sinnix.bundles.desktop;
-in
-{
-  options.sinnix.bundles.desktop = {
-    enable = lib.mkEnableOption "Standard Desktop Environment Bundle";
+# Desktop Bundle - auto-enables all features.desktop.* plus system dependencies
+#
+# Uses mkBundleModule for auto-discovery of desktop features.
+# Adding a new feature to features/desktop/ automatically includes it here.
+{ lib, ... }@args:
+lib.sinnix.mkBundleModule {
+  name = "desktop";
+  description = "Standard Desktop Environment Bundle";
+  featureDomain = "desktop";
+  extraEnables = {
+    # System-level requirements for desktop
+    "features.system.nix-ld" = true;
   };
-
-  config = lib.mkIf cfg.enable {
-    sinnix = {
-      # Enable core desktop capabilities
-      programs.nix-ld.enable = true;
-      features.desktop.activitywatch.enable = true;
-      features.desktop.audio.enable = true;
-      features.desktop.base.enable = true;
-      features.desktop.browser.enable = true;
-      features.desktop.common-apps.enable = true;
-      features.desktop.crypto.enable = true;
-      features.desktop.gaming.enable = true;
-      features.desktop.hyprland.enable = true;
-      features.desktop.media.enable = true;
-      features.desktop.mime.enable = true;
-      features.desktop.reboot-notifier.enable = true;
-      features.desktop.storage.enable = true;
-      features.desktop.terminal.enable = true;
-      features.desktop.theming.enable = true;
-      features.desktop.ui.enable = true;
-      features.desktop.waybar.enable = true;
-    };
-  };
-}
+} args

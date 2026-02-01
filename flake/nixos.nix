@@ -9,12 +9,14 @@ let
   inherit (inputs.nixpkgs) lib;
   featureLib = import ../modules/lib/features.nix { inherit lib; };
   systemdLib = import ../modules/lib/systemd-hardening.nix { inherit lib; };
+  overlayLib = import ../modules/lib/overlay-helpers.nix { inherit lib; };
 
   # Extend lib with sinnix helpers globally available
   extendedLib = lib.extend (final: prev: {
     sinnix = {
-      inherit (featureLib) mkPAMLimits;
+      inherit (featureLib) mkPAMLimits mkAutoImports mkBundleModule;
       systemd = systemdLib;
+      overlay = overlayLib;
     };
   });
 
@@ -23,13 +25,13 @@ let
     inputs.stylix.nixosModules.stylix
     inputs.sinex.nixosModules.default
     inputs.polylogue.nixosModules.default
-    (import ./overlay)
+    (import ./overlay { inherit inputs overlayLib; })
   ];
   sharedSpecialArgs = {
     inherit inputs;
-    inherit (featureLib) mkFeatureModule;
+    inherit (featureLib) mkFeatureModule mkServiceModule;
     helpers = {
-      inherit (featureLib) mkDotsSymlink;
+      inherit (featureLib) mkDotsLink mkDotsFile;
     };
   };
   mkHost =

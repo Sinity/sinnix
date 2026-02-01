@@ -9,9 +9,8 @@ mkFeatureModule {
   path = [ "desktop" "base" ];
   description = "Essential desktop background services and session logic";
   configFn =
-    { config, pkgs, lib, ... }:
+    { config, pkgs, lib, user, ... }:
     let
-      user = config.sinnix.user.name;
       graphicalTarget = "graphical-session.target";
       baseGraphicalUnit = {
         After = [ graphicalTarget ];
