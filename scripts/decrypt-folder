@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ $# -ne 2 ]; then
+  echo "Usage: decrypt-folder <encrypted-folder> <mount-point>"
+  exit 1
+fi
+
+ENCRYPTED="$1"
+MOUNT_POINT="$2"
+
+if [ ! -d "$ENCRYPTED" ]; then
+  echo "Error: Encrypted folder does not exist"
+  exit 1
+fi
+
+mkdir -p "$MOUNT_POINT"
+gocryptfs "$ENCRYPTED" "$MOUNT_POINT"

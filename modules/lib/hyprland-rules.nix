@@ -96,8 +96,5 @@ let
     '';
 
 in {
-  inherit mkRule mkScratchpad mkBrowserScratchpad mkDialog mkIdleInhibit renderBlock formatSize formatPos;
-
-  # Render multiple rules to config string
-  renderRules = rules: lib.concatMapStringsSep "\n\n" renderBlock rules;
+  inherit mkRule mkScratchpad mkBrowserScratchpad mkDialog mkIdleInhibit renderBlock;
 }

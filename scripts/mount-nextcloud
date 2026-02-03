@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if mountpoint -q /mnt/nextcloud; then
+  echo "Nextcloud is already mounted"
+  exit 0
+fi
+sudo mount /mnt/nextcloud
