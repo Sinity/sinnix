@@ -1,5 +1,6 @@
 # imv with additional format support (AVIF, HEIF, JXL)
-{ inputs, ... }: final: prev:
+{ inputs, ... }:
+final: prev:
 let
   sdl2ImageWithJxl = prev.SDL2_image.overrideAttrs (old: {
     buildInputs = old.buildInputs ++ [

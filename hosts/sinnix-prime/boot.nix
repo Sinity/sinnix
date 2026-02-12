@@ -24,7 +24,6 @@
       "i915"
     ];
     kernelModules = [ "kvm-intel" ];
-    # sysctl moved to modules/performance.nix (swappiness 60, vfs_cache_pressure, etc.)
     kernelParams = [
       "quiet"
       "rw"

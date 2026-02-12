@@ -318,16 +318,20 @@ REQUIRED in every prompt:
 **Agents launched**: N
 
 ### Execution
-| # | Task | Agent Type | Model | Status |
-|---|------|------------|-------|--------|
+
+| #   | Task | Agent Type | Model | Status |
+| --- | ---- | ---------- | ----- | ------ |
 
 ### Results
+
 [Key findings per agent]
 
 ### Synthesis
+
 [Cross-agent patterns, unified conclusions]
 
 ### Next Steps
+
 [Remaining work, recommended follow-up]
 ```
 

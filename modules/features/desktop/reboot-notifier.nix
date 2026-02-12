@@ -1,15 +1,29 @@
-{ mkFeatureModule, pkgs, config, ... }@args:
+{
+  mkFeatureModule,
+  pkgs,
+  config,
+  ...
+}@args:
 mkFeatureModule {
-  path = [ "desktop" "reboot-notifier" ];
+  path = [
+    "desktop"
+    "reboot-notifier"
+  ];
   description = "System reboot notifier";
   configFn =
-    { config, pkgs, user, ... }:
+    {
+      config,
+      pkgs,
+      user,
+      ...
+    }:
     let
       # Capture nvidia package from NixOS config for use in home-manager scope
       nvidiaPackage = config.hardware.nvidia.package;
     in
     {
-      home-manager.users.${user} = { pkgs, ... }:
+      home-manager.users.${user} =
+        { pkgs, ... }:
         let
           checkScript = pkgs.writeShellScript "check-reboot-needed" ''
             set -euo pipefail

@@ -13,6 +13,7 @@ Compare specification documents against actual implementation. Categorize differ
 ## Process
 
 ### Phase 1: Inventory
+
 ```
 [spec-sync:inventory]
 1. Locate spec documents (README, docs/, SPEC.md, etc.)
@@ -21,6 +22,7 @@ Compare specification documents against actual implementation. Categorize differ
 ```
 
 ### Phase 2: Mapping
+
 ```
 [spec-sync:mapping]
 For each spec item:
@@ -30,6 +32,7 @@ For each spec item:
 ```
 
 ### Phase 3: Report
+
 ```
 [spec-sync:report]
 Output structured report:
@@ -51,6 +54,7 @@ Output structured report:
 ```
 
 ### Phase 4: Recommendations
+
 ```
 [spec-sync:recommend]
 Prioritized list:
@@ -62,6 +66,7 @@ Prioritized list:
 ## Scope Confirmation
 
 Before starting, confirm:
+
 - Which spec document(s)?
 - Which code directories?
 - Focus area or full audit?

@@ -43,137 +43,137 @@ alias twcancel='timew cancel'
 
 # Custom Timewarrior reports
 function twbalance() {
-    local range="${1:-:week}"
-    timew export "$range" | python3 ~/.config/timewarrior/extensions/balance.py
+  local range="${1:-:week}"
+  timew export "$range" | python3 ~/.config/timewarrior/extensions/balance.py
 }
 
 function twprod() {
-    local range="${1:-:week}"
-    timew export "$range" | python3 ~/.config/timewarrior/extensions/productivity.py
+  local range="${1:-:week}"
+  timew export "$range" | python3 ~/.config/timewarrior/extensions/productivity.py
 }
 
 # Combined functions
 function twork() {
-    # Start working on a specific task and track time
-    if [ -z "$1" ]; then
-        echo "Usage: twork <task-id>"
-        return 1
-    fi
+  # Start working on a specific task and track time
+  if [ -z "$1" ]; then
+    echo "Usage: twork <task-id>"
+    return 1
+  fi
 
-    task "$1" start
+  task "$1" start
 
-    # Get task details for timewarrior
-    local desc=$(task "$1" export | jq -r '.[0].description')
-    local tags=$(task "$1" export | jq -r '.[0].tags[]?' | tr '\n' ' ')
-    local project=$(task "$1" export | jq -r '.[0].project // empty')
+  # Get task details for timewarrior
+  local desc=$(task "$1" export | jq -r '.[0].description')
+  local tags=$(task "$1" export | jq -r '.[0].tags[]?' | tr '\n' ' ')
+  local project=$(task "$1" export | jq -r '.[0].project // empty')
 
-    # Start timewarrior tracking
-    if [ -n "$project" ] && [ -n "$tags" ]; then
-        timew start "$project" $tags "$desc"
-    elif [ -n "$project" ]; then
-        timew start "$project" "$desc"
-    elif [ -n "$tags" ]; then
-        timew start $tags "$desc"
-    else
-        timew start "$desc"
-    fi
+  # Start timewarrior tracking
+  if [ -n "$project" ] && [ -n "$tags" ]; then
+    timew start "$project" $tags "$desc"
+  elif [ -n "$project" ]; then
+    timew start "$project" "$desc"
+  elif [ -n "$tags" ]; then
+    timew start $tags "$desc"
+  else
+    timew start "$desc"
+  fi
 }
 
 function tstop() {
-    # Stop current task in both taskwarrior and timewarrior
-    if [ -z "$1" ]; then
-        # Find currently active task
-        local active_id=$(task +ACTIVE ids)
-        if [ -n "$active_id" ]; then
-            task "$active_id" stop
-            timew stop
-        else
-            echo "No active task found"
-            return 1
-        fi
+  # Stop current task in both taskwarrior and timewarrior
+  if [ -z "$1" ]; then
+    # Find currently active task
+    local active_id=$(task +ACTIVE ids)
+    if [ -n "$active_id" ]; then
+      task "$active_id" stop
+      timew stop
     else
-        task "$1" stop
-        timew stop
+      echo "No active task found"
+      return 1
     fi
+  else
+    task "$1" stop
+    timew stop
+  fi
 }
 
 function tdone() {
-    # Complete a task and stop timewarrior
-    if [ -z "$1" ]; then
-        echo "Usage: tdone <task-id>"
-        return 1
-    fi
+  # Complete a task and stop timewarrior
+  if [ -z "$1" ]; then
+    echo "Usage: tdone <task-id>"
+    return 1
+  fi
 
-    task "$1" done
-    timew stop
+  task "$1" done
+  timew stop
 }
 
 # Quick task entry with immediate start
 function tquick() {
-    if [ -z "$1" ]; then
-        echo "Usage: tquick <description> [+tags] [project:name]"
-        return 1
-    fi
+  if [ -z "$1" ]; then
+    echo "Usage: tquick <description> [+tags] [project:name]"
+    return 1
+  fi
 
-    # Add and start the task
-    local task_id=$(task add "$@" | grep -oP 'Created task \K\d+')
-    if [ -n "$task_id" ]; then
-        twork "$task_id"
-    fi
+  # Add and start the task
+  local task_id=$(task add "$@" | grep -oP 'Created task \K\d+')
+  if [ -n "$task_id" ]; then
+    twork "$task_id"
+  fi
 }
 
 # Review workflow
 function treviewday() {
-    echo "=== Today's Completed Tasks ==="
-    task dailystatus
+  echo "=== Today's Completed Tasks ==="
+  task dailystatus
 
-    echo ""
-    echo "=== Current Active Tasks ==="
-    task +ACTIVE
+  echo ""
+  echo "=== Current Active Tasks ==="
+  task +ACTIVE
 
-    echo ""
-    echo "=== Time Tracking Summary ==="
-    timew summary :day
+  echo ""
+  echo "=== Time Tracking Summary ==="
+  timew summary :day
 
-    echo ""
-    echo "=== Work-Life Balance ==="
-    twbalance :day
+  echo ""
+  echo "=== Work-Life Balance ==="
+  twbalance :day
 }
 
 function treviewweek() {
-    echo "=== This Week's Summary ==="
-    task weekly
+  echo "=== This Week's Summary ==="
+  task weekly
 
-    echo ""
-    echo "=== Time Tracking Summary ==="
-    timew summary :week
+  echo ""
+  echo "=== Time Tracking Summary ==="
+  timew summary :week
 
-    echo ""
-    echo "=== Work-Life Balance ==="
-    twbalance :week
+  echo ""
+  echo "=== Work-Life Balance ==="
+  twbalance :week
 
-    echo ""
-    echo "=== Productivity Analysis ==="
-    twprod :week
+  echo ""
+  echo "=== Productivity Analysis ==="
+  twprod :week
 }
 
 # Pomodoro-style work session
 function tpomodoro() {
-    local duration="${1:-25}"
-    local task_id="$2"
+  local duration="${1:-25}"
+  local task_id="$2"
 
-    if [ -z "$task_id" ]; then
-        echo "Usage: tpomodoro [duration-in-minutes] <task-id>"
-        return 1
-    fi
+  if [ -z "$task_id" ]; then
+    echo "Usage: tpomodoro [duration-in-minutes] <task-id>"
+    return 1
+  fi
 
-    echo "Starting ${duration}-minute work session on task $task_id"
-    twork "$task_id"
+  echo "Starting ${duration}-minute work session on task $task_id"
+  twork "$task_id"
 
-    sleep "${duration}m"
+  sleep "${duration}m"
 
-    echo "Work session complete!"
-    tstop "$task_id"
+  echo "Work session complete!"
+  tstop "$task_id"
 }
 
 # Note: Functions are automatically available in the current shell when sourced.

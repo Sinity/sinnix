@@ -13,9 +13,14 @@ let
   # Import test infrastructure
   testLib = import ./test-lib.nix { inherit inputs lib; };
   inherit (testLib)
-    mountTmpfsRoots baseTestConfig
-    mkFeatureTest mkServiceTest mkBundleTest
-    mkTestForSystem mkSystemChecks;
+    mountTmpfsRoots
+    baseTestConfig
+    mkFeatureTest
+    mkServiceTest
+    mkBundleTest
+    mkTestForSystem
+    mkSystemChecks
+    ;
 
   # Helper to get HM config for assertions
   hmFor = config: config.home-manager.users.${config.sinnix.user.name};
@@ -25,27 +30,80 @@ let
     (mkFeatureTest {
       name = "dev-shell";
       feature = "sinnix.features.dev.shell.enable";
-      assertions = config:
-        let hm = hmFor config;
-        in [
-          { assertion = hm.programs.zsh.enable; message = "Zsh must be enabled"; }
-          { assertion = hm.programs.starship.enable; message = "Starship must be enabled"; }
-          { assertion = hm.programs.atuin.enable; message = "Atuin must be enabled"; }
-          { assertion = hm.programs.fzf.enable; message = "FZF must be enabled"; }
-          { assertion = hm.programs.zoxide.enable; message = "Zoxide must be enabled"; }
-          { assertion = hm.home.file ? ".local/bin/claude"; message = "Claude wrapper must exist"; }
+      assertions =
+        config:
+        let
+          hm = hmFor config;
+        in
+        [
+          {
+            assertion = hm.programs.zsh.enable;
+            message = "Zsh must be enabled";
+          }
+          {
+            assertion = hm.programs.starship.enable;
+            message = "Starship must be enabled";
+          }
+          {
+            assertion = hm.programs.atuin.enable;
+            message = "Atuin must be enabled";
+          }
+          {
+            assertion = hm.programs.fzf.enable;
+            message = "FZF must be enabled";
+          }
+          {
+            assertion = hm.programs.zoxide.enable;
+            message = "Zoxide must be enabled";
+          }
+          {
+            assertion = hm.home.file ? ".local/bin/claude";
+            message = "Claude wrapper must exist";
+          }
         ];
     })
 
     (mkFeatureTest {
       name = "dev-git";
       feature = "sinnix.features.dev.git.enable";
-      assertions = config:
-        let hm = hmFor config;
-        in [
-          { assertion = hm.programs.git.enable; message = "Git must be enabled"; }
-          { assertion = hm.programs.delta.enable; message = "Delta must be enabled"; }
+      assertions =
+        config:
+        let
+          hm = hmFor config;
+        in
+        [
+          {
+            assertion = hm.programs.git.enable;
+            message = "Git must be enabled";
+          }
+          {
+            assertion = hm.programs.delta.enable;
+            message = "Delta must be enabled";
+          }
         ];
+    })
+
+    (mkFeatureTest {
+      name = "desktop-hyprland";
+      feature = "sinnix.features.desktop.hyprland.enable";
+      extraModules = [
+        (
+          { lib, ... }:
+          {
+            hardware.graphics.enable = lib.mkForce false;
+          }
+        )
+      ];
+      assertions = config: [
+        {
+          assertion = config.programs.hyprland.enable;
+          message = "Hyprland must be enabled";
+        }
+        {
+          assertion = config.programs.hyprland.withUWSM;
+          message = "UWSM must be enabled";
+        }
+      ];
     })
 
     # === Service Tests (using DSL) ===
@@ -53,8 +111,14 @@ let
       name = "services-below";
       service = "below";
       assertions = config: [
-        { assertion = config.systemd.services ? below; message = "Below service must exist"; }
-        { assertion = config.environment.systemPackages != []; message = "Below package must be installed"; }
+        {
+          assertion = config.systemd.services ? below;
+          message = "Below service must exist";
+        }
+        {
+          assertion = config.environment.systemPackages != [ ];
+          message = "Below package must be installed";
+        }
       ];
     })
 
@@ -62,9 +126,12 @@ let
       name = "services-transmission";
       service = "transmission";
       assertions = config: [
-        { assertion = config.services.transmission.enable; message = "Transmission must be enabled"; }
         {
-          assertion = config.systemd.services.transmission.serviceConfig.RequiresMountsFor != [];
+          assertion = config.services.transmission.enable;
+          message = "Transmission must be enabled";
+        }
+        {
+          assertion = config.systemd.services.transmission.serviceConfig.RequiresMountsFor != [ ];
           message = "Transmission must declare required mounts";
         }
       ];
@@ -75,8 +142,25 @@ let
       service = "terminal-capture";
       assertions = config: [
         {
-          assertion = builtins.any (rule: builtins.match ".*captures/asciinema.*" rule != null) config.systemd.tmpfiles.rules;
+          assertion = builtins.any (
+            rule: builtins.match ".*captures/asciinema.*" rule != null
+          ) config.systemd.tmpfiles.rules;
           message = "Asciinema captures directory tmpfiles entry must exist";
+        }
+      ];
+    })
+
+    (mkServiceTest {
+      name = "services-sinex";
+      service = "sinex";
+      assertions = config: [
+        {
+          assertion = config.services.sinex.enable;
+          message = "Sinex must be enabled";
+        }
+        {
+          assertion = config.services.sinex.core.enable;
+          message = "Sinex core must be enabled";
         }
       ];
     })
@@ -85,12 +169,52 @@ let
     (mkBundleTest {
       name = "bundle-dev";
       bundle = "dev";
-      assertions = config:
-        let hm = hmFor config;
-        in [
-          { assertion = hm.programs.zsh.enable; message = "Dev bundle must enable zsh"; }
-          { assertion = hm.programs.git.enable; message = "Dev bundle must enable git"; }
-          { assertion = hm.programs.tmux.enable; message = "Dev bundle must enable tmux"; }
+      assertions =
+        config:
+        let
+          hm = hmFor config;
+        in
+        [
+          {
+            assertion = hm.programs.zsh.enable;
+            message = "Dev bundle must enable zsh";
+          }
+          {
+            assertion = hm.programs.git.enable;
+            message = "Dev bundle must enable git";
+          }
+          {
+            assertion = hm.programs.tmux.enable;
+            message = "Dev bundle must enable tmux";
+          }
+        ];
+    })
+
+    (mkBundleTest {
+      name = "bundle-desktop";
+      bundle = "desktop";
+      extraModules = [
+        (
+          { lib, ... }:
+          {
+            hardware.graphics.enable = lib.mkForce false;
+          }
+        )
+      ];
+      assertions =
+        config:
+        let
+          hm = hmFor config;
+        in
+        [
+          {
+            assertion = config.programs.hyprland.enable or false;
+            message = "Desktop must enable hyprland";
+          }
+          {
+            assertion = config.services.pipewire.enable or false;
+            message = "Desktop must enable audio";
+          }
         ];
     })
 
@@ -100,16 +224,28 @@ let
       modules = [
         mountTmpfsRoots
         baseTestConfig
-        ({ ... }: {
-          networking.hostName = "minimal";
-          sinnix.bundles.dev.enable = false;
-        })
+        (
+          { ... }:
+          {
+            networking.hostName = "minimal";
+            sinnix.bundles.dev.enable = false;
+          }
+        )
       ];
-      assertions = config:
-        let hm = hmFor config;
-        in [
-          { assertion = !(hm.programs.starship.enable or false); message = "Starship should not be enabled in minimal"; }
-          { assertion = !(config.services.transmission.enable or false); message = "Transmission should not be enabled in minimal"; }
+      assertions =
+        config:
+        let
+          hm = hmFor config;
+        in
+        [
+          {
+            assertion = !(hm.programs.starship.enable or false);
+            message = "Starship should not be enabled in minimal";
+          }
+          {
+            assertion = !(config.services.transmission.enable or false);
+            message = "Transmission should not be enabled in minimal";
+          }
         ];
     }
 
@@ -118,20 +254,38 @@ let
       modules = [
         mountTmpfsRoots
         baseTestConfig
-        ({ ... }: { networking.hostName = "paths-test"; })
+        (
+          { ... }:
+          {
+            networking.hostName = "paths-test";
+          }
+        )
       ];
       assertions = config: [
-        { assertion = config.sinnix.paths.realmRoot == "/realm"; message = "realmRoot must be /realm"; }
-        { assertion = config.sinnix.paths.dataRoot == "/realm/data"; message = "dataRoot must be /realm/data"; }
-        { assertion = config.sinnix.paths.capturesRoot == "/realm/data/captures"; message = "capturesRoot must be correct"; }
-        { assertion = config.sinnix.user.name == "sinity"; message = "Default user must be sinity"; }
+        {
+          assertion = config.sinnix.paths.realmRoot == "/realm";
+          message = "realmRoot must be /realm";
+        }
+        {
+          assertion = config.sinnix.paths.dataRoot == "/realm/data";
+          message = "dataRoot must be /realm/data";
+        }
+        {
+          assertion = config.sinnix.paths.capturesRoot == "/realm/data/captures";
+          message = "capturesRoot must be correct";
+        }
+        {
+          assertion = config.sinnix.user.name == "sinity";
+          message = "Default user must be sinity";
+        }
       ];
     }
   ];
 
 in
 {
-  perSystem = { system, pkgs, ... }:
+  perSystem =
+    { system, pkgs, ... }:
     let
       vmTests = import ../tests { inherit inputs pkgs system; };
     in

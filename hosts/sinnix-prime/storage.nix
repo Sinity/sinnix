@@ -5,7 +5,13 @@
   ...
 }:
 let
-  inherit (config.sinnix.paths) realmRoot dataRoot capturesRoot outerRealm;
+  inherit (config.sinnix.paths)
+    realmRoot
+    dataRoot
+    capturesRoot
+    outerRealm
+    neoOuterRealm
+    ;
   username = config.sinnix.user.name;
   userCfg = config.users.users.${username};
   # NixOS auto-assigns UIDs; .uid can be null so use explicit fallback
@@ -77,26 +83,32 @@ in
       depends = [ realmRoot ];
     };
 
-    # NTFS drive - Windows SIDs prevent proper uid mapping
-    # Will be reformatted after migration to new 14TB drive
+    # 6TB HGST - reformatted from NTFS to btrfs
     "${outerRealm}" = {
-      device = "/dev/disk/by-uuid/5119B4113C747C42";
-      fsType = "ntfs";
+      device = "/dev/disk/by-uuid/250683a9-c13f-4546-a29b-a743f3babb43";
+      fsType = "btrfs";
       options = [
+        "compress=zstd"
+        "noatime"
         "nofail"
-        "big_writes"
+      ];
+    };
+
+    # 14TB Seagate Exos X18 - btrfs with @data subvolume
+    "${neoOuterRealm}" = {
+      device = "/dev/disk/by-uuid/2e20423b-bc3a-4953-8662-393f8aea9f2b";
+      fsType = "btrfs";
+      options = [
+        "subvol=@data"
+        "compress=zstd"
+        "noatime"
+        "nofail"
       ];
     };
 
   };
 
-  # No disk swap - zram only. Rationale:
-  # - Disk swap enables thrashing instead of fast failure
-  # - zram at 10% RAM = small buffer for earlyoom to act (not RAM extension)
-  # - If zram fills, earlyoom kills hogs before system thrashes
-  # - Large zram (25%+) silently degrades performance under memory pressure
-  #
-  # To re-enable for hibernation: { device = "/dev/nvme1n1p1"; }
+  # No disk swap — zram + earlyoom in modules/performance.nix
   swapDevices = [ ];
 
   systemd = {

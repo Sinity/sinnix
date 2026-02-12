@@ -1,3 +1,7 @@
+# Core Nix Configuration
+#
+# Nix daemon settings, binary caches, build parallelism,
+# GC, store optimization, security, firewall base config.
 {
   inputs,
   lib,
@@ -103,26 +107,24 @@ in
       enable = true;
       allowPing = true;
       allowedTCPPorts = [ 22 ];
-      allowedTCPPortRanges =
-        lib.optionals isDesktop [
-          {
-            from = 1714;
-            to = 1764;
-          }
-        ];
-      allowedUDPPortRanges =
-        [
-          {
-            from = 60000;
-            to = 61000;
-          }
-        ]
-        ++ lib.optionals isDesktop [
-          {
-            from = 1714;
-            to = 1764;
-          }
-        ];
+      allowedTCPPortRanges = lib.optionals isDesktop [
+        {
+          from = 1714;
+          to = 1764;
+        }
+      ];
+      allowedUDPPortRanges = [
+        {
+          from = 60000;
+          to = 61000;
+        }
+      ]
+      ++ lib.optionals isDesktop [
+        {
+          from = 1714;
+          to = 1764;
+        }
+      ];
     };
 
     systemd = {

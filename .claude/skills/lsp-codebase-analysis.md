@@ -5,13 +5,15 @@ Use cclsp (LSP via MCP) and rust-analyzer CLI for semantic code understanding. T
 ## Quick Setup for New Projects
 
 Copy the MCP config template to enable cclsp:
+
 ```bash
 cp /realm/project/sinnix/dots/claude/mcp-template.json /path/to/project/.mcp.json
 ```
 
 Or create manually:
+
 ```json
-{"mcpServers": {"cclsp": {"command": "mcp-cclsp", "args": []}}}
+{ "mcpServers": { "cclsp": { "command": "mcp-cclsp", "args": [] } } }
 ```
 
 The global cclsp config (`~/.config/claude/cclsp.json`) handles language server selection automatically based on file extension.
@@ -19,6 +21,7 @@ The global cclsp config (`~/.config/claude/cclsp.json`) handles language server 
 ## When to Use LSP Tools
 
 **Prefer LSP over text search when:**
+
 - Tracing type usage across crate boundaries
 - Finding all implementations of a trait
 - Understanding call hierarchies
@@ -26,6 +29,7 @@ The global cclsp config (`~/.config/claude/cclsp.json`) handles language server 
 - Finding dead/unreachable code
 
 **Still use grep/rg for:**
+
 - String literals, comments, documentation
 - Configuration patterns (env vars, magic strings)
 - Quick keyword searches where semantic precision isn't needed
@@ -33,6 +37,7 @@ The global cclsp config (`~/.config/claude/cclsp.json`) handles language server 
 ## cclsp Tools Reference
 
 ### find_definition
+
 Find where a symbol is defined.
 
 ```
@@ -44,6 +49,7 @@ symbol_kind: struct  # or: function, method, enum, interface, class
 **Use for:** Understanding where a type/function comes from, jumping to source.
 
 ### find_references
+
 Find all usages of a symbol across the workspace.
 
 ```
@@ -60,6 +66,7 @@ include_declaration: true
 Note: Rust `trait` maps to `interface` in LSP.
 
 ### get_diagnostics
+
 Get compiler errors, warnings, hints for a file.
 
 ```
@@ -69,6 +76,7 @@ file_path: /path/to/file.rs
 **Use for:** Verifying code compiles after changes, finding issues before running cargo.
 
 ### rename_symbol / rename_symbol_strict
+
 Rename a symbol across the codebase.
 
 ```
@@ -98,10 +106,12 @@ RA_LOG=error rust-analyzer ssr '...'
 ```
 
 **Placeholder syntax:**
+
 - `$name` - matches any AST node
 - `${name:constraint}` - with constraint (e.g., `${x:kind(literal)}`)
 
 **Examples:**
+
 ```bash
 # Find all unwrap() calls
 rust-analyzer search '$expr.unwrap()'
@@ -171,17 +181,17 @@ Find unused symbols:
 
 cclsp supports multiple languages via `~/.config/claude/cclsp.json`:
 
-| Extension | Language Server |
-|-----------|-----------------|
-| `.rs` | rust-analyzer |
-| `.py`, `.pyi` | pylsp |
+| Extension                    | Language Server            |
+| ---------------------------- | -------------------------- |
+| `.rs`                        | rust-analyzer              |
+| `.py`, `.pyi`                | pylsp                      |
 | `.ts`, `.tsx`, `.js`, `.jsx` | typescript-language-server |
-| `.go` | gopls |
-| `.nix` | nil |
-| `.sh`, `.bash` | bash-language-server |
-| `.lua` | lua-language-server |
-| `.yml`, `.yaml` | yaml-language-server |
-| `.md` | marksman |
+| `.go`                        | gopls                      |
+| `.nix`                       | nil                        |
+| `.sh`, `.bash`               | bash-language-server       |
+| `.lua`                       | lua-language-server        |
+| `.yml`, `.yaml`              | yaml-language-server       |
+| `.md`                        | marksman                   |
 
 Same cclsp tools work across all languages.
 

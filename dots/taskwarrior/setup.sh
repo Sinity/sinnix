@@ -11,13 +11,13 @@ echo ""
 
 # Backup existing configurations
 if [ -f ~/.taskrc ]; then
-    echo "Backing up existing ~/.taskrc to ~/.taskrc.backup"
-    mv ~/.taskrc ~/.taskrc.backup
+  echo "Backing up existing ~/.taskrc to ~/.taskrc.backup"
+  mv ~/.taskrc ~/.taskrc.backup
 fi
 
 if [ -f ~/.config/timewarrior/timewarrior.cfg ]; then
-    echo "Backing up existing timewarrior config"
-    mv ~/.config/timewarrior/timewarrior.cfg ~/.config/timewarrior/timewarrior.cfg.backup
+  echo "Backing up existing timewarrior config"
+  mv ~/.config/timewarrior/timewarrior.cfg ~/.config/timewarrior/timewarrior.cfg.backup
 fi
 
 # Create necessary directories
@@ -39,10 +39,10 @@ chmod +x ~/.config/timewarrior/extensions/*.py
 
 # Copy Taskwarrior-Timewarrior integration hook
 if [ -f "$DOTS_DIR/timewarrior/extensions/on-modify.timewarrior" ]; then
-    echo "Installing Taskwarrior-Timewarrior integration hook..."
-    mkdir -p "$SCRIPT_DIR/hooks"
-    cp "$DOTS_DIR/timewarrior/extensions/on-modify.timewarrior" "$SCRIPT_DIR/hooks/"
-    chmod +x "$SCRIPT_DIR/hooks/on-modify.timewarrior"
+  echo "Installing Taskwarrior-Timewarrior integration hook..."
+  mkdir -p "$SCRIPT_DIR/hooks"
+  cp "$DOTS_DIR/timewarrior/extensions/on-modify.timewarrior" "$SCRIPT_DIR/hooks/"
+  chmod +x "$SCRIPT_DIR/hooks/on-modify.timewarrior"
 fi
 
 # Make hooks executable

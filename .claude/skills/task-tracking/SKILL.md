@@ -13,12 +13,14 @@ Use taskwarrior and timewarrior to track work during conversations. This provide
 ## When to Track
 
 **Create tasks for:**
+
 - User requests (tag: `+user_request`)
 - Multi-step work (>3 tool calls or >5 minutes)
 - Research and investigation (tag: `+research`)
 - Follow-up items (tag: `+follow_up`)
 
 **Track time on:**
+
 - All significant work (>2 minutes)
 - Use tags: `agent`, `agent_${AGENT_NAME}`, `session_${AGENT_SESSION_ID}`, `{activity}`
 

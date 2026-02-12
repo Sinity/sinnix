@@ -5,12 +5,25 @@
 # - Bluetooth audio (A2DP, SBC-XQ, mSBC)
 # - Real-time priority for low latency
 # - USB DAC quantum settings
-{ mkFeatureModule, lib, pkgs, ... }@args:
+{
+  mkFeatureModule,
+  lib,
+  pkgs,
+  ...
+}@args:
 mkFeatureModule {
-  path = [ "desktop" "audio" ];
+  path = [
+    "desktop"
+    "audio"
+  ];
   description = "High-performance audio stack (PipeWire)";
   configFn =
-    { config, lib, pkgs, ... }:
+    {
+      config,
+      lib,
+      pkgs,
+      ...
+    }:
     {
       services.pipewire = {
         enable = true;
@@ -53,7 +66,10 @@ mkFeatureModule {
           rtprio = 95;
           memlock = "infinity";
         })
-        (lib.sinnix.systemd.mkRestartPolicy { strategy = "on-failure"; delaySec = 2; })
+        (lib.sinnix.systemd.mkRestartPolicy {
+          strategy = "on-failure";
+          delaySec = 2;
+        })
         {
           # Audio-specific hardening
           ProtectKernelModules = true;
@@ -64,7 +80,10 @@ mkFeatureModule {
       ];
 
       systemd.user.services.wireplumber.serviceConfig = lib.mkMerge [
-        (lib.sinnix.systemd.mkRestartPolicy { strategy = "on-failure"; delaySec = 2; })
+        (lib.sinnix.systemd.mkRestartPolicy {
+          strategy = "on-failure";
+          delaySec = 2;
+        })
         {
           ProtectKernelModules = true;
           RestrictNamespaces = true;

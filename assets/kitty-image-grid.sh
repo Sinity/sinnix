@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ -z "${KITTY_WINDOW_ID:-}" ]]; then
+if [[ -z ${KITTY_WINDOW_ID:-} ]]; then
   printf 'kitty-image-grid: run inside kitty (KITTY_WINDOW_ID missing)\n' >&2
   exit 1
 fi
@@ -34,57 +34,57 @@ usage() {
 args=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --cols)
-      cols="$2"
-      shift 2
-      ;;
-    --rows)
-      rows="$2"
-      shift 2
-      ;;
-    --tile-width)
-      tile_w="$2"
-      shift 2
-      ;;
-    --tile-height)
-      tile_h="$2"
-      shift 2
-      ;;
-    --no-clear)
-      clear_first=0
-      shift
-      ;;
-    --no-loop)
-      loop_anim=0
-      shift
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    --)
-      shift
-      args+=("$@")
-      break
-      ;;
-    -*)
-      printf 'kitty-image-grid: unknown option %s\n' "$1" >&2
-      usage >&2
-      exit 2
-      ;;
-    *)
-      args+=("$1")
-      shift
-      ;;
+  --cols)
+    cols="$2"
+    shift 2
+    ;;
+  --rows)
+    rows="$2"
+    shift 2
+    ;;
+  --tile-width)
+    tile_w="$2"
+    shift 2
+    ;;
+  --tile-height)
+    tile_h="$2"
+    shift 2
+    ;;
+  --no-clear)
+    clear_first=0
+    shift
+    ;;
+  --no-loop)
+    loop_anim=0
+    shift
+    ;;
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  --)
+    shift
+    args+=("$@")
+    break
+    ;;
+  -*)
+    printf 'kitty-image-grid: unknown option %s\n' "$1" >&2
+    usage >&2
+    exit 2
+    ;;
+  *)
+    args+=("$1")
+    shift
+    ;;
   esac
 done
 
-if [[ -z "$cols" || "$cols" -le 0 ]]; then
+if [[ -z $cols || $cols -le 0 ]]; then
   printf 'kitty-image-grid: --cols must be positive\n' >&2
   exit 2
 fi
 
-if [[ -z "$tile_w" || "$tile_w" -le 0 || -z "$tile_h" || "$tile_h" -le 0 ]]; then
+if [[ -z $tile_w || $tile_w -le 0 || -z $tile_h || $tile_h -le 0 ]]; then
   printf 'kitty-image-grid: tile dimensions must be positive\n' >&2
   exit 2
 fi
@@ -124,7 +124,7 @@ if [[ ${#args[@]} -eq 0 ]]; then
   exit 0
 fi
 
-if (( clear_first == 1 )); then
+if ((clear_first == 1)); then
   kitty +kitten icat --clear || true
 fi
 
@@ -134,17 +134,17 @@ tiles_drawn=0
 
 place_image() {
   local file="$1"
-  local x=$(( col * tile_w ))
-  local y=$(( row * tile_h ))
+  local x=$((col * tile_w))
+  local y=$((row * tile_h))
   local extra=()
 
-  if (( loop_anim == 1 )); then
+  if ((loop_anim == 1)); then
     local mime
     mime=$(file --mime-type -b -- "$file" 2>/dev/null || true)
     case "$mime" in
-      image/gif|image/apng|image/webp)
-        extra+=(--loop -1)
-        ;;
+    image/gif | image/apng | image/webp)
+      extra+=(--loop -1)
+      ;;
     esac
   fi
 
@@ -163,7 +163,7 @@ place_image() {
 }
 
 for file in "${args[@]}"; do
-  if [[ ! -f "$file" ]]; then
+  if [[ ! -f $file ]]; then
     continue
   fi
 
@@ -172,10 +172,10 @@ for file in "${args[@]}"; do
   col=$((col + 1))
   tiles_drawn=$((tiles_drawn + 1))
 
-  if (( col >= cols )); then
+  if ((col >= cols)); then
     col=0
     row=$((row + 1))
-    if (( rows > 0 && row >= rows )); then
+    if ((rows > 0 && row >= rows)); then
       break
     fi
   fi

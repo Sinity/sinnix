@@ -6,7 +6,10 @@
 # - System monitoring tools (htop)
 { mkFeatureModule, pkgs, ... }@args:
 mkFeatureModule {
-  path = [ "dev" "mcp-servers" ];
+  path = [
+    "dev"
+    "mcp-servers"
+  ];
   description = "MCP servers and AI tool integration";
   configFn =
     {
@@ -75,9 +78,16 @@ mkFeatureModule {
     in
     {
       home-manager.users.${user} =
-        { pkgs, lib, config, sinnix, secretPaths, ... }:
+        {
+          pkgs,
+          lib,
+          config,
+          mkDotsFileFor,
+          secretPaths,
+          ...
+        }:
         let
-          mkDotsFile = helpers.mkDotsFile sinnix config;
+          mkDotsFile = mkDotsFileFor config;
         in
         {
           programs.htop = {

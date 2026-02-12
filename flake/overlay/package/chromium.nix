@@ -1,4 +1,5 @@
-{ inputs, ... }: final: _prev:
+{ inputs, ... }:
+final: _prev:
 let
   system = final.stdenv.hostPlatform.system;
   cleanPkgs = import inputs.nixpkgs {

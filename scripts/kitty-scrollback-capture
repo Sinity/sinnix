@@ -1,0 +1,173 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Capture all kitty terminal scrollbacks with full ANSI fidelity.
+# Iterates over ALL kitty instances (each has its own socket).
+#
+# Outputs: /realm/data/captures/kitty-scrollback/<timestamp>-<pid>-win<id>-<title_slug>.ansi
+#
+# Usage:
+#   kitty-scrollback-capture           # Capture all windows from all instances
+#   kitty-scrollback-capture --current # Capture current window only
+
+CAPTURE_DIR="${KITTY_SCROLLBACK_DIR:-/realm/data/captures/kitty-scrollback}"
+TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
+HOSTNAME=$(hostname)
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+
+mkdir -p "$CAPTURE_DIR"
+
+# Slugify title for filename
+slugify() {
+  echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g' | cut -c1-50
+}
+
+capture_window() {
+  local socket="$1"
+  local pid="$2"
+  local win_id="$3"
+  local title="$4"
+  local cwd="$5"
+
+  local title_slug
+  title_slug=$(slugify "$title")
+  [ -z "$title_slug" ] && title_slug="untitled"
+
+  # Include PID to disambiguate window IDs across instances
+  local filename="${TIMESTAMP}-${HOSTNAME}-pid${pid}-win${win_id}-${title_slug}.ansi"
+  local filepath="$CAPTURE_DIR/$filename"
+
+  # Capture with full ANSI escape codes
+  # --extent=all: screen + entire scrollback
+  # --ansi: preserve colors, bold, italic, etc.
+  # --add-wrap-markers: preserve line wrap info
+  if kitty @ --to "unix:$socket" get-text --match="id:$win_id" --extent=all --ansi --add-wrap-markers > "$filepath" 2>/dev/null; then
+    local lines
+    lines=$(wc -l < "$filepath")
+    local size
+    size=$(du -h "$filepath" | cut -f1)
+    echo "  ✓ win:$win_id ($lines lines, $size) → $filename"
+
+    # Write metadata sidecar
+    cat > "${filepath%.ansi}.meta.json" <<EOF
+{
+  "window_id": $win_id,
+  "kitty_pid": $pid,
+  "title": $(printf '%s' "$title" | jq -Rs .),
+  "cwd": $(printf '%s' "$cwd" | jq -Rs .),
+  "captured_at": "$TIMESTAMP",
+  "hostname": "$HOSTNAME",
+  "ansi_file": "$filename"
+}
+EOF
+    return 0
+  else
+    echo "  ✗ win:$win_id - capture failed" >&2
+    rm -f "$filepath"
+    return 1
+  fi
+}
+
+# Parse arguments
+CURRENT_ONLY=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --current)
+      CURRENT_ONLY=true
+      shift
+      ;;
+    --help|-h)
+      echo "Usage: kitty-scrollback-capture [--current]"
+      echo ""
+      echo "Captures kitty terminal scrollbacks with full ANSI fidelity."
+      echo "Iterates over all kitty instances (separate processes)."
+      echo ""
+      echo "Output: $CAPTURE_DIR/<timestamp>-<pid>-win<id>-<title>.ansi"
+      echo ""
+      echo "Options:"
+      echo "  --current   Capture current window only (uses KITTY_LISTEN_ON)"
+      echo ""
+      echo "View captured files with: less -R <file>"
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+# Handle --current: only capture from current instance
+if [ "$CURRENT_ONLY" = true ]; then
+  if [ -z "${KITTY_LISTEN_ON:-}" ]; then
+    echo "Error: KITTY_LISTEN_ON not set. Run from within kitty." >&2
+    exit 1
+  fi
+  socket="${KITTY_LISTEN_ON#unix:}"
+  pid=$(basename "$socket" | sed 's/kitty-[^-]*-//')
+
+  if [ -z "${KITTY_WINDOW_ID:-}" ]; then
+    echo "Error: KITTY_WINDOW_ID not set." >&2
+    exit 1
+  fi
+
+  windows_json=$(kitty @ ls 2>/dev/null)
+  while IFS=$'\t' read -r win_id title cwd; do
+    if [ "$win_id" = "$KITTY_WINDOW_ID" ]; then
+      capture_window "$socket" "$pid" "$win_id" "$title" "$cwd"
+      exit $?
+    fi
+  done < <(echo "$windows_json" | jq -r '
+    [.[] | .tabs[] | .windows[] | {id, title, cwd}] |
+    .[] | [.id, .title, .cwd] | @tsv
+  ')
+  echo "Error: Window $KITTY_WINDOW_ID not found" >&2
+  exit 1
+fi
+
+# Find all kitty sockets
+sockets=()
+while IFS= read -r -d '' socket; do
+  sockets+=("$socket")
+done < <(find "$RUNTIME_DIR" -maxdepth 1 -name 'kitty-*' -type s -print0 2>/dev/null)
+
+if [ ${#sockets[@]} -eq 0 ]; then
+  echo "No kitty instances found (no sockets in $RUNTIME_DIR)" >&2
+  exit 1
+fi
+
+echo "Found ${#sockets[@]} kitty instance(s)"
+echo ""
+
+total_captured=0
+total_failed=0
+
+for socket in "${sockets[@]}"; do
+  pid=$(basename "$socket" | sed 's/kitty-[^-]*-//')
+  echo "● Instance pid:$pid"
+
+  windows_json=$(kitty @ --to "unix:$socket" ls 2>/dev/null) || {
+    echo "  ⚠ cannot connect"
+    ((total_failed++)) || true
+    continue
+  }
+
+  while IFS=$'\t' read -r win_id title cwd; do
+    [ -z "$win_id" ] && continue
+    if capture_window "$socket" "$pid" "$win_id" "$title" "$cwd"; then
+      ((total_captured++)) || true
+    else
+      ((total_failed++)) || true
+    fi
+  done < <(echo "$windows_json" | jq -r '
+    [.[] | .tabs[] | .windows[] | {id, title, cwd}] |
+    .[] | [.id, .title, .cwd] | @tsv
+  ')
+done
+
+echo ""
+echo "Total: $total_captured window(s) captured, $total_failed failed"
+echo "Output: $CAPTURE_DIR"
+
+[ "$total_failed" -eq 0 ] || exit 1

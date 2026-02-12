@@ -1,9 +1,18 @@
 { pkgs, mkFeatureModule, ... }@args:
 mkFeatureModule {
-  path = [ "cli" "core" ];
+  path = [
+    "cli"
+    "core"
+  ];
   description = "Core CLI environment";
   configFn =
-    { config, pkgs, lib, user, ... }:
+    {
+      config,
+      pkgs,
+      lib,
+      user,
+      ...
+    }:
     {
       environment.systemPackages = with pkgs; [
         git

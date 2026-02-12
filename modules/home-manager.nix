@@ -1,3 +1,7 @@
+# Home Manager Integration
+#
+# Imports HM module, configures extraSpecialArgs, sets up
+# primary user home with XDG paths and state version.
 {
   inputs,
   lib,
@@ -27,6 +31,8 @@ in
       dotsRepoPath = config.sinnix.paths.dotsRoot;
       secretPaths = config.sinnix.secrets.paths;
       inherit (config) sinnix;
+      # Pre-bound mkDotsFile helper - modules just need: let mkDotsFile = mkDotsFileFor config;
+      mkDotsFileFor = helpers.mkDotsFileFor config.sinnix;
     };
     users."${user}" = {
       imports = config.sinnix.home.userImports;

@@ -31,7 +31,12 @@ let
 
   captureBootMetrics = pkgs.writeShellApplication {
     name = "capture-boot-metrics";
-    runtimeInputs = with pkgs; [ coreutils findutils util-linux systemd ];
+    runtimeInputs = with pkgs; [
+      coreutils
+      findutils
+      util-linux
+      systemd
+    ];
     text = ''
       set -euo pipefail
       BOOT_ID="$(cat /proc/sys/kernel/random/boot_id)"
@@ -47,7 +52,8 @@ in
 {
   config = {
     environment.systemPackages = lib.mkIf isDesktop (
-      coreDiagnostics ++ [
+      coreDiagnostics
+      ++ [
         inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.perf-scan
         inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.hogkill
         inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.asbl-no-moar
@@ -100,7 +106,10 @@ in
 
     systemd.timers.capture-boot-metrics = {
       wantedBy = [ "timers.target" ];
-      timerConfig = { OnBootSec = "1min"; AccuracySec = "10s"; };
+      timerConfig = {
+        OnBootSec = "1min";
+        AccuracySec = "10s";
+      };
     };
   };
 }

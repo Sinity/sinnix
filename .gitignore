@@ -8,6 +8,7 @@ result-*
 .devenv/
 devenv.local.nix
 .venv/
+.pre-commit-config.yaml
 
 # AI
 .aider*

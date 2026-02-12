@@ -4,5 +4,5 @@
 # All .nix files are automatically imported.
 { lib, ... }:
 {
-  imports = lib.sinnix.mkAutoImports ./. [];
+  imports = lib.sinnix.mkAutoImports ./. [ ];
 }

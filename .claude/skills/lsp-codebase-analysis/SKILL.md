@@ -14,43 +14,45 @@ Use cclsp (MCP-based LSP) for semantic code understanding. More reliable than gr
 ## Quick Setup
 
 Requires `.mcp.json` in project root:
+
 ```json
-{"mcpServers": {"cclsp": {"command": "mcp-cclsp", "args": []}}}
+{ "mcpServers": { "cclsp": { "command": "mcp-cclsp", "args": [] } } }
 ```
 
 ## Available Tools
 
-| Tool | Purpose |
-|------|---------|
-| `find_definition` | Where is this symbol defined? |
-| `find_references` | All usages across workspace |
-| `get_diagnostics` | Compiler errors/warnings for file |
-| `rename_symbol` | Safe rename (use `dry_run: true` first) |
-| `restart_server` | Reset if results seem stale |
+| Tool              | Purpose                                 |
+| ----------------- | --------------------------------------- |
+| `find_definition` | Where is this symbol defined?           |
+| `find_references` | All usages across workspace             |
+| `get_diagnostics` | Compiler errors/warnings for file       |
+| `rename_symbol`   | Safe rename (use `dry_run: true` first) |
+| `restart_server`  | Reset if results seem stale             |
 
 ## symbol_kind Mapping
 
-| Language Concept | LSP Kind |
-|------------------|----------|
-| Rust trait | `interface` |
-| Rust struct | `struct` |
-| Rust enum | `enum` |
-| Function | `function` |
-| Method (impl) | `method` |
+| Language Concept | LSP Kind    |
+| ---------------- | ----------- |
+| Rust trait       | `interface` |
+| Rust struct      | `struct`    |
+| Rust enum        | `enum`      |
+| Function         | `function`  |
+| Method (impl)    | `method`    |
 
 ## When to Use LSP vs Text Search
 
-| LSP (cclsp) | Text Search (grep/rg) |
-|-------------|----------------------|
+| LSP (cclsp)                     | Text Search (grep/rg)     |
+| ------------------------------- | ------------------------- |
 | Type/trait usage across modules | String literals, comments |
-| All trait implementations | Config patterns, env vars |
-| Call hierarchy tracing | Quick keyword lookup |
-| Refactoring impact analysis | Documentation search |
-| Dead code detection | Magic strings |
+| All trait implementations       | Config patterns, env vars |
+| Call hierarchy tracing          | Quick keyword lookup      |
+| Refactoring impact analysis     | Documentation search      |
+| Dead code detection             | Magic strings             |
 
 ## Analysis Patterns
 
 ### Type Lifecycle Tracing
+
 ```
 1. find_definition → where defined?
 2. find_references (constructor) → where created?
@@ -59,12 +61,14 @@ Requires `.mcp.json` in project root:
 ```
 
 ### Trait Implementation Discovery (Rust)
+
 ```
 1. find_definition on trait
 2. find_references (kind: interface) → all impl sites
 ```
 
 ### Safe Refactoring
+
 ```
 1. find_references → scope of change
 2. get_diagnostics → baseline state
@@ -85,18 +89,19 @@ RA_LOG=error rust-analyzer ssr '$x.unwrap() ==>> $x?'
 ```
 
 Placeholder syntax:
+
 - `$name` - any AST node
 - `${name:kind(literal)}` - constrained match
 
 ## Supported Languages
 
-| Extension | Server |
-|-----------|--------|
-| `.rs` | rust-analyzer |
-| `.py` | pylsp |
+| Extension           | Server                     |
+| ------------------- | -------------------------- |
+| `.rs`               | rust-analyzer              |
+| `.py`               | pylsp                      |
 | `.ts/.tsx/.js/.jsx` | typescript-language-server |
-| `.go` | gopls |
-| `.nix` | nil |
+| `.go`               | gopls                      |
+| `.nix`              | nil                        |
 
 ## Best Practices
 

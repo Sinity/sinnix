@@ -4,5 +4,5 @@
 # Each domain (cli, desktop, dev) handles its own module discovery.
 { lib, ... }:
 {
-  imports = lib.sinnix.mkAutoImports ./. [];
+  imports = lib.sinnix.mkAutoImports ./. [ ];
 }

@@ -12,13 +12,15 @@ let
   overlayLib = import ../modules/lib/overlay-helpers.nix { inherit lib; };
 
   # Extend lib with sinnix helpers globally available
-  extendedLib = lib.extend (final: prev: {
-    sinnix = {
-      inherit (featureLib) mkPAMLimits mkAutoImports mkBundleModule;
-      systemd = systemdLib;
-      overlay = overlayLib;
-    };
-  });
+  extendedLib = lib.extend (
+    final: prev: {
+      sinnix = {
+        inherit (featureLib) mkPAMLimits mkAutoImports mkBundleModule;
+        systemd = systemdLib;
+        overlay = overlayLib;
+      };
+    }
+  );
 
   baseModules = [
     inputs.agenix.nixosModules.default
@@ -31,7 +33,7 @@ let
     inherit inputs;
     inherit (featureLib) mkFeatureModule mkServiceModule;
     helpers = {
-      inherit (featureLib) mkDotsLink mkDotsFile;
+      inherit (featureLib) mkDotsFile mkDotsFileFor;
     };
   };
   mkHost =
@@ -42,7 +44,9 @@ let
     extendedLib.nixosSystem {
       inherit system;
       modules = baseModules ++ modules;
-      specialArgs = sharedSpecialArgs // { lib = extendedLib; };
+      specialArgs = sharedSpecialArgs // {
+        lib = extendedLib;
+      };
     };
 in
 {

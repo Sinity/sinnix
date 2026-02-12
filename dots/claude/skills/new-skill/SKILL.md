@@ -90,18 +90,18 @@ Description of what this skill does.
 
 ## Frontmatter Options
 
-| Field | Purpose | Example |
-|-------|---------|---------|
-| `name` | Skill identifier | `deploy` |
-| `description` | When to auto-invoke | `Deploy application to production` |
-| `triggers` | Keywords for matching | `["deploy", "ship it"]` |
-| `allowed-tools` | Tool whitelist | `["Bash", "Read"]` |
-| `disallowed-tools` | Tool blacklist | `["Write"]` |
-| `argument-hint` | Usage hint | `<environment> [--dry-run]` |
-| `context` | Execution context | `fork` (isolated) or omit (main) |
-| `model` | Model override | `haiku`, `sonnet`, `opus` |
-| `user-invocable` | Can user invoke directly? | `false` (Claude only) |
-| `disable-model-invocation` | Prevent auto-invoke? | `true` (user only) |
+| Field                      | Purpose                   | Example                            |
+| -------------------------- | ------------------------- | ---------------------------------- |
+| `name`                     | Skill identifier          | `deploy`                           |
+| `description`              | When to auto-invoke       | `Deploy application to production` |
+| `triggers`                 | Keywords for matching     | `["deploy", "ship it"]`            |
+| `allowed-tools`            | Tool whitelist            | `["Bash", "Read"]`                 |
+| `disallowed-tools`         | Tool blacklist            | `["Write"]`                        |
+| `argument-hint`            | Usage hint                | `<environment> [--dry-run]`        |
+| `context`                  | Execution context         | `fork` (isolated) or omit (main)   |
+| `model`                    | Model override            | `haiku`, `sonnet`, `opus`          |
+| `user-invocable`           | Can user invoke directly? | `false` (Claude only)              |
+| `disable-model-invocation` | Prevent auto-invoke?      | `true` (user only)                 |
 
 ---
 
@@ -119,6 +119,7 @@ MATCH scope_need:
 ## Examples
 
 **Simple skill (user-invoked only)**:
+
 ```yaml
 ---
 name: format
@@ -129,6 +130,7 @@ argument-hint: "<file-pattern>"
 ```
 
 **Auto-invoked skill**:
+
 ```yaml
 ---
 name: explain-error
@@ -141,6 +143,7 @@ triggers:
 ```
 
 **Isolated execution skill**:
+
 ```yaml
 ---
 name: risky-operation

@@ -2,13 +2,25 @@
 #
 # Downloads to torrentInbox, uses strict systemd hardening.
 # RPC accessible only on localhost (no auth required).
-{ mkServiceModule, lib, pkgs, ... }@args:
+{
+  mkServiceModule,
+  lib,
+  pkgs,
+  ...
+}@args:
 mkServiceModule {
   name = "transmission";
   description = "Transmission BitTorrent client";
-  configFn = { config, lib, pkgs, cfg, ... }:
+  configFn =
+    {
+      config,
+      lib,
+      pkgs,
+      cfg,
+      ...
+    }:
     let
-      inherit (config.sinnix.paths) torrentInbox outerRealm;
+      inherit (config.sinnix.paths) torrentInbox neoOuterRealm;
       username = config.sinnix.user.name;
     in
     {
@@ -42,16 +54,22 @@ mkServiceModule {
       systemd.services.transmission = {
         unitConfig.RequiresMountsFor = lib.unique [
           torrentInbox
-          outerRealm
+          neoOuterRealm
         ];
         after = [ "network-online.target" ];
         wants = [ "network-online.target" ];
         serviceConfig = lib.mkMerge [
           (lib.sinnix.systemd.mkHardenedService {
             level = "strict";
-            readWritePaths = [ torrentInbox "/var/lib/transmission" ];
+            readWritePaths = [
+              torrentInbox
+              "/var/lib/transmission"
+            ];
           })
-          (lib.sinnix.systemd.mkRestartPolicy { strategy = "on-failure"; delaySec = 10; })
+          (lib.sinnix.systemd.mkRestartPolicy {
+            strategy = "on-failure";
+            delaySec = 10;
+          })
         ];
       };
     };

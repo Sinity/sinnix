@@ -23,9 +23,7 @@
     transmission.enable = true;
     terminal-capture.enable = true;
     below.enable = true;
-    sinex = {
-      enable = false;
-      provisionDatabase = true;
-    };
+    sinex.enable = false;
+    polylogue.enable = true;
   };
 }

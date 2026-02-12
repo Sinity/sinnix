@@ -1,23 +1,49 @@
-{ mkFeatureModule, lib, pkgs, ... }@args:
+{
+  mkFeatureModule,
+  lib,
+  pkgs,
+  ...
+}@args:
 mkFeatureModule {
-  path = [ "dev" "editors" ];
+  path = [
+    "dev"
+    "editors"
+  ];
   description = "Developer editors (VS Code, Zed)";
   # Using declarative subFeatures instead of manual extraOptions
   subFeatures = {
-    vscode = { description = "VSCode Editor"; };
-    zed = { description = "Zed Editor"; };
+    vscode = {
+      description = "VSCode Editor";
+    };
+    zed = {
+      description = "Zed Editor";
+    };
   };
   configFn =
-    { config, lib, pkgs, helpers, cfg, user, ... }:
+    {
+      config,
+      lib,
+      pkgs,
+      helpers,
+      cfg,
+      user,
+      ...
+    }:
     let
       marketplace = pkgs.nix-vscode-extensions.vscode-marketplace;
     in
     lib.mkMerge [
       (lib.mkIf cfg.vscode.enable {
         home-manager.users.${user} =
-          { pkgs, lib, config, sinnix, ... }:
+          {
+            pkgs,
+            lib,
+            config,
+            mkDotsFileFor,
+            ...
+          }:
           let
-            mkDotsFile = helpers.mkDotsFile sinnix config;
+            mkDotsFile = mkDotsFileFor config;
           in
           {
             programs.vscode = {
@@ -65,24 +91,16 @@ mkFeatureModule {
 
       (lib.mkIf cfg.zed.enable {
         home-manager.users.${user} =
-          { config, sinnix, ... }:
+          { config, mkDotsFileFor, ... }:
           let
-            mkDotsFile = helpers.mkDotsFile sinnix config;
+            mkDotsFile = mkDotsFileFor config;
           in
           {
             xdg.configFile = {
               "zed/settings.json".source = mkDotsFile "/zed/settings.json";
               "zed/keymap.json".source = mkDotsFile "/zed/keymap.json";
             };
-
-            home.file.".local/bin/zed" = {
-              text = ''
-                #!/usr/bin/env bash
-                set -euo pipefail
-                exec zeditor "$@"
-              '';
-              executable = true;
-            };
+            # Note: `zed = "zeditor"` alias is defined in shell.nix
           };
       })
     ];

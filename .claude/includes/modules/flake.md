@@ -15,16 +15,19 @@
 ### Overlay vs Package: When to Use Each
 
 **Use overlays** (`flake/overlay/package/*.nix`) when:
+
 - Overriding existing nixpkgs packages (e.g., chromium with custom flags)
 - Patching upstream packages (e.g., aw-server-rust with fix)
 - Integrating external flake outputs into pkgs namespace
 
 **Use packages** (`flake/packages.nix`) when:
+
 - Creating custom shell scripts wrapped with dependencies
 - Building standalone utilities specific to sinnix
 - Adding new packages not in nixpkgs
 
 **Example**:
+
 ```nix
 # flake/packages.nix - custom scripts
 packages.asbl-no-moar = pkgs.writeShellApplication {

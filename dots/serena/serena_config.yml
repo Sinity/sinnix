@@ -77,5 +77,5 @@ token_count_estimator: CHAR_COUNT
 
 # The list of registered project paths (updated automatically).
 projects:
-- /realm/project/sinnix
-- /realm/project/sinex
+  - /realm/project/sinnix
+  - /realm/project/sinex

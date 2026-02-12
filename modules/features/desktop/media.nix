@@ -1,17 +1,50 @@
-{ mkFeatureModule, pkgs, lib, ... }@args:
+{
+  mkFeatureModule,
+  pkgs,
+  lib,
+  ...
+}@args:
 mkFeatureModule {
-  path = [ "desktop" "media" ];
+  path = [
+    "desktop"
+    "media"
+  ];
   description = "Media playback and creative tools";
   subFeatures = {
-    mpv = { description = "MPV video player with custom bindings"; default = true; };
-    music = { description = "Music streaming (Spotify, ncspot)"; default = true; };
-    anime = { description = "Anime tools (ani-cli, trackma)"; default = false; };
-    graphics = { description = "Image viewers and editors (imv, gimp, inkscape)"; default = true; };
-    documents = { description = "Document viewers (zathura, zotero, ebook tools)"; default = true; };
-    recording = { description = "Screen recording and media tools (ffmpeg, yt-dlp)"; default = true; };
+    mpv = {
+      description = "MPV video player with custom bindings";
+      default = true;
+    };
+    music = {
+      description = "Music streaming (Spotify, ncspot)";
+      default = true;
+    };
+    anime = {
+      description = "Anime tools (ani-cli, trackma)";
+      default = false;
+    };
+    graphics = {
+      description = "Image viewers and editors (imv, gimp, inkscape)";
+      default = true;
+    };
+    documents = {
+      description = "Document viewers (zathura, zotero, ebook tools)";
+      default = true;
+    };
+    recording = {
+      description = "Screen recording and media tools (ffmpeg, yt-dlp)";
+      default = true;
+    };
   };
   configFn =
-    { config, lib, pkgs, cfg, user, ... }:
+    {
+      config,
+      lib,
+      pkgs,
+      cfg,
+      user,
+      ...
+    }:
     let
       inherit (config.sinnix.paths) capturesRoot;
     in
@@ -19,14 +52,22 @@ mkFeatureModule {
       # MPV video player
       (lib.mkIf cfg.mpv.enable {
         home-manager.users.${user} =
-          { pkgs, lib, config, ... }:
+          {
+            pkgs,
+            lib,
+            config,
+            ...
+          }:
           {
             home.sessionVariables = {
               MEDIA_DOMAIN = "v0.3";
               MPV_SCREENSHOT_DIR = "${capturesRoot}/screenshot/mpv";
             };
 
-            home.packages = with pkgs; [ mpvc svp ];
+            home.packages = with pkgs; [
+              mpvc
+              svp
+            ];
 
             programs.mpv = {
               enable = true;
@@ -162,7 +203,7 @@ mkFeatureModule {
           { pkgs, lib, ... }:
           {
             home.packages = with pkgs; [
-              imvWithExtras  # from overlay: includes AVIF/HEIF/JXL support
+              imvWithExtras # from overlay: includes AVIF/HEIF/JXL support
               gimp
               inkscape
             ];
@@ -173,11 +214,22 @@ mkFeatureModule {
               comment = "Lightweight image viewer with extended format support";
               exec = "imv %F";
               terminal = false;
-              categories = [ "Graphics" "Viewer" "Photography" ];
+              categories = [
+                "Graphics"
+                "Viewer"
+                "Photography"
+              ];
               mimeType = [
-                "image/jpeg" "image/png" "image/gif" "image/webp"
-                "image/avif" "image/heif" "image/heic" "image/jxl"
-                "image/tiff" "image/bmp"
+                "image/jpeg"
+                "image/png"
+                "image/gif"
+                "image/webp"
+                "image/avif"
+                "image/heif"
+                "image/heic"
+                "image/jxl"
+                "image/tiff"
+                "image/bmp"
               ];
             };
           };

@@ -51,16 +51,16 @@ MATCH config_type:
 
 ## Module Details
 
-@.claude/includes/modules/_index.md
+@.claude/includes/modules/\_index.md
 
 ---
 
 ## Development
 
-@.claude/includes/development/_index.md
+@.claude/includes/development/\_index.md
 
 ---
 
 ## Reference
 
-@.claude/includes/reference/_index.md
+@.claude/includes/reference/\_index.md

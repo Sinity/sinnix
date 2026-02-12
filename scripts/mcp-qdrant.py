@@ -21,12 +21,11 @@ from __future__ import annotations
 
 import os
 from functools import wraps
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from mcp.server.fastmcp import FastMCP
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as rest_models
-
 
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://127.0.0.1:6333")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
@@ -61,7 +60,9 @@ def _serialize(item: Any) -> Any:
     return item
 
 
-def _optional_filter(filter_data: Optional[Dict[str, Any]]) -> Optional[rest_models.Filter]:
+def _optional_filter(
+    filter_data: Optional[Dict[str, Any]],
+) -> Optional[rest_models.Filter]:
     if filter_data is None:
         return None
     try:
@@ -70,7 +71,9 @@ def _optional_filter(filter_data: Optional[Dict[str, Any]]) -> Optional[rest_mod
         return rest_models.Filter.parse_obj(filter_data)
 
 
-def _optional_search_params(params: Optional[Dict[str, Any]]) -> Optional[rest_models.SearchParams]:
+def _optional_search_params(
+    params: Optional[Dict[str, Any]],
+) -> Optional[rest_models.SearchParams]:
     if params is None:
         return None
     try:
@@ -189,9 +192,13 @@ def get_point(
     return [_serialize(record) for record in records]
 
 
-@mcp.tool(name="count-points", description="Count points in a collection (optional filter)")
+@mcp.tool(
+    name="count-points", description="Count points in a collection (optional filter)"
+)
 @_handle_qdrant_errors
-def count_points(collection: str, payload_filter: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def count_points(
+    collection: str, payload_filter: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     q_filter = _optional_filter(payload_filter)
     response = client.count(collection_name=collection, filter=q_filter, exact=True)
     return _serialize(response)

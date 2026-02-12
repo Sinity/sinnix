@@ -6,17 +6,43 @@
   ...
 }@args:
 mkFeatureModule {
-  path = [ "dev" "languages" ];
+  path = [
+    "dev"
+    "languages"
+  ];
   description = "Programming language toolchains";
   subFeatures = {
-    nix = { description = "Nix language tooling (nixfmt, nil, nix-diff)"; default = true; };
-    python = { description = "Python 3 with common packages"; default = true; };
-    nodejs = { description = "Node.js runtime"; default = true; };
-    database = { description = "Database clients (sqlite, pgcli)"; default = true; };
-    ai = { description = "AI coding tools (claude-code, opencode, codex)"; default = true; };
+    nix = {
+      description = "Nix language tooling (nixfmt, nil, nix-diff)";
+      default = true;
+    };
+    python = {
+      description = "Python 3 with common packages";
+      default = true;
+    };
+    nodejs = {
+      description = "Node.js runtime";
+      default = true;
+    };
+    database = {
+      description = "Database clients (sqlite, pgcli)";
+      default = true;
+    };
+    ai = {
+      description = "AI coding tools (claude-code, opencode, codex)";
+      default = true;
+    };
   };
   configFn =
-    { config, pkgs, lib, inputs, cfg, user, ... }:
+    {
+      config,
+      pkgs,
+      lib,
+      inputs,
+      cfg,
+      user,
+      ...
+    }:
     let
       aiTools = inputs.nix-ai-tools.packages.${pkgs.stdenv.hostPlatform.system};
     in
@@ -33,36 +59,38 @@ mkFeatureModule {
       # Python with common packages
       (lib.mkIf cfg.python.enable {
         home-manager.users.${user}.home.packages = [
-          (pkgs.python3.withPackages (ps: with ps; [
-            pip
-            ipython
-            rich
-            click
-            questionary
-            typer
-            tqdm
-            tabulate
-            httpx
-            requests
-            beautifulsoup4
-            fastapi
-            uvicorn
-            pydantic
-            pydantic-settings
-            python-dotenv
-            pyyaml
-            tiktoken
-            gitpython
-            black
-            mypy
-            pytest
-            marimo
-            litellm
-            llm
-            openai
-            anthropic
-            google-genai
-          ]))
+          (pkgs.python3.withPackages (
+            ps: with ps; [
+              pip
+              ipython
+              rich
+              click
+              questionary
+              typer
+              tqdm
+              tabulate
+              httpx
+              requests
+              beautifulsoup4
+              fastapi
+              uvicorn
+              pydantic
+              pydantic-settings
+              python-dotenv
+              pyyaml
+              tiktoken
+              gitpython
+              black
+              mypy
+              pytest
+              marimo
+              litellm
+              llm
+              openai
+              anthropic
+              google-genai
+            ]
+          ))
         ];
       })
 

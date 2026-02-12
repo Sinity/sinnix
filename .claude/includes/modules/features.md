@@ -3,13 +3,16 @@
 Organized by domain under `modules/features/`:
 
 ### CLI (`features/cli/`)
+
 - **core.nix**: Core CLI environment (git, taskwarrior, gnupg)
 - **task-tracking.nix**: Taskwarrior/Timewarrior integration
 
 ### System (`features/system/`)
+
 - **nix-ld.nix**: Dynamic linker for running unpatched binaries (AppImages, proprietary software)
 
 ### Desktop (`features/desktop/`)
+
 - **activitywatch.nix**: Activity tracking daemon + web UI
 - **audio.nix**: PipeWire, audio devices, routing (moved from top-level)
 - **base.nix**: Core desktop services (clipboard, notifications, launcher)
@@ -28,6 +31,7 @@ Organized by domain under `modules/features/`:
 - **waybar.nix**: Status bar configuration
 
 ### Dev (`features/dev/`)
+
 - **editors.nix**: VS Code, Zed (with subFeatures for each)
 - **git.nix**: Git config, delta, aliases
 - **languages.nix**: Language toolchains (Python, Rust, Node, etc.)
@@ -39,3 +43,13 @@ Organized by domain under `modules/features/`:
   - `tmux`: Terminal multiplexer
 
 **Rule**: If users **directly interact** with it, it's a feature.
+
+### Composite Module Pattern: Hyprland
+
+The hyprland module (`features/desktop/hyprland/`) does NOT use `mkFeatureModule` due to:
+
+- Complex internal structure (5 sub-files)
+- Sub-files need parent's let-bindings
+- System + HM config tightly coupled
+
+Reserve this pattern for WM-level complexity only. Most features should use `mkFeatureModule`.

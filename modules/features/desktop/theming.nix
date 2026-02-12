@@ -1,9 +1,24 @@
-{ mkFeatureModule, pkgs, helpers, ... }@args:
+{
+  mkFeatureModule,
+  pkgs,
+  helpers,
+  ...
+}@args:
 mkFeatureModule {
-  path = [ "desktop" "theming" ];
+  path = [
+    "desktop"
+    "theming"
+  ];
   description = "Desktop theming (GTK/Qt overrides)";
   configFn =
-    { config, lib, pkgs, helpers, user, ... }:
+    {
+      config,
+      lib,
+      pkgs,
+      helpers,
+      user,
+      ...
+    }:
     let
       kvantumPkg =
         if lib.hasAttrByPath [ "qt6Packages" "qtstyleplugin-kvantum" ] pkgs then
@@ -15,9 +30,15 @@ mkFeatureModule {
     in
     {
       home-manager.users.${user} =
-        { pkgs, lib, config, sinnix, ... }:
+        {
+          pkgs,
+          lib,
+          config,
+          mkDotsFileFor,
+          ...
+        }:
         let
-          mkDotsFile = helpers.mkDotsFile sinnix config;
+          mkDotsFile = mkDotsFileFor config;
         in
         {
           gtk = {

@@ -20,14 +20,17 @@ export AGENT_SESSION_ID="${AGENT_SESSION_ID:-${AGENT_NAME}-$(date +%H%M%S)-$$}"
 ## Naming & Tagging
 
 **Projects**
+
 - Session: `agent.${AGENT_NAME}.${AGENT_SESSION_ID}`
 - Shared: `agent.shared.${topic}`
 
 **Tags**
+
 - Agent tasks: `+agent`
 - Semantic tags: `+user_request`, `+research`, `+follow_up`, `+coding`, `+documentation`, `+review`
 
 **Timewarrior tags**
+
 - `agent`
 - `agent_${AGENT_NAME}`
 - `session_${AGENT_SESSION_ID}`
@@ -60,6 +63,7 @@ timew start agent agent_${AGENT_NAME} session_${AGENT_SESSION_ID} conversation
 ## Common Workflows
 
 **Research**
+
 ```bash
 task add "Research: {topic}" \
   project:agent.$AGENT_NAME.$AGENT_SESSION_ID \
@@ -68,6 +72,7 @@ task add "Research: {topic}" \
 ```
 
 **Follow-up**
+
 ```bash
 task add "Follow-up: {item}" \
   project:agent.shared.{topic} \
@@ -76,6 +81,7 @@ task add "Follow-up: {item}" \
 ```
 
 **Subtask**
+
 ```bash
 task add "{subtask}" \
   project:agent.$AGENT_NAME.$AGENT_SESSION_ID \

@@ -22,8 +22,20 @@ let
 
   # Sanitized inputs replace self with pure path for reproducible tests
   sanitizedInputs = {
-    inherit (inputs) agenix home-manager nix-ai-tools sinex polylogue;
-    inherit (inputs) scribe-tap intercept-bounce devenv nur stylix;
+    inherit (inputs)
+      agenix
+      home-manager
+      nix-ai-tools
+      sinex
+      polylogue
+      ;
+    inherit (inputs)
+      scribe-tap
+      intercept-bounce
+      devenv
+      nur
+      stylix
+      ;
     inherit (inputs) nix-vscode-extensions disko nixpkgs;
     self = flakeSource;
   };
@@ -43,32 +55,36 @@ let
     inputs = sanitizedInputs;
     inherit (featureLib) mkFeatureModule mkServiceModule;
     helpers = {
-      inherit (featureLib) mkDotsLink mkDotsFile;
+      inherit (featureLib) mkDotsFile mkDotsFileFor;
     };
   };
 
   # Mock filesystem roots for test VMs (prevents real FS dependencies)
-  mountTmpfsRoots = { config, ... }: {
-    fileSystems."/realm" = {
-      device = "tmpfs";
-      fsType = "tmpfs";
-      neededForBoot = true;
+  mountTmpfsRoots =
+    { config, ... }:
+    {
+      fileSystems."/realm" = {
+        device = "tmpfs";
+        fsType = "tmpfs";
+        neededForBoot = true;
+      };
+      fileSystems."/outer-realm" = {
+        device = "tmpfs";
+        fsType = "tmpfs";
+        neededForBoot = true;
+      };
     };
-    fileSystems."/outer-realm" = {
-      device = "tmpfs";
-      fsType = "tmpfs";
-      neededForBoot = true;
-    };
-  };
 
   # Base test configuration: minimal, no desktop, no secrets
-  baseTestConfig = { ... }: {
-    sinnix = {
-      machine.isDesktop = false;
-      secrets.enable = false;
-      bundles.desktop.enable = false;
+  baseTestConfig =
+    { ... }:
+    {
+      sinnix = {
+        machine.isDesktop = false;
+        secrets.enable = false;
+        bundles.desktop.enable = false;
+      };
     };
-  };
 
   # Create a test for a single feature
   # Example: mkFeatureTest {
@@ -76,44 +92,74 @@ let
   #   feature = "sinnix.features.dev.shell.enable";
   #   assertions = config: let hm = ... in [ { assertion = ...; message = ...; } ];
   # }
-  mkFeatureTest = { name, feature, assertions, extraModules ? [] }:
+  mkFeatureTest =
+    {
+      name,
+      feature,
+      assertions,
+      extraModules ? [ ],
+    }:
     {
       inherit name;
       modules = [
         mountTmpfsRoots
         baseTestConfig
-        ({ ... }: {
-          networking.hostName = name;
-        } // lib.setAttrByPath (lib.splitString "." feature) true)
-      ] ++ extraModules;
+        (
+          { ... }:
+          {
+            networking.hostName = name;
+          }
+          // lib.setAttrByPath (lib.splitString "." feature) true
+        )
+      ]
+      ++ extraModules;
       inherit assertions;
     };
 
   # Create a test for a service
-  mkServiceTest = { name, service, assertions, extraModules ? [] }:
+  mkServiceTest =
+    {
+      name,
+      service,
+      assertions,
+      extraModules ? [ ],
+    }:
     mkFeatureTest {
       inherit name assertions extraModules;
       feature = "sinnix.services.${service}.enable";
     };
 
   # Create a test for a bundle
-  mkBundleTest = { name, bundle, assertions, extraModules ? [] }:
+  mkBundleTest =
+    {
+      name,
+      bundle,
+      assertions,
+      extraModules ? [ ],
+    }:
     mkFeatureTest {
       inherit name assertions extraModules;
       feature = "sinnix.bundles.${bundle}.enable";
     };
 
   # Build a test check derivation from a spec
-  mkTestForSystem = system: spec:
+  mkTestForSystem =
+    system: spec:
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
       evaluated = lib.nixosSystem {
         inherit system;
-        modules = baseModules ++ spec.modules ++ [
-          ({ config, lib, ... }: {
-            assertions = spec.assertions config;
-          })
-        ];
+        modules =
+          baseModules
+          ++ spec.modules
+          ++ [
+            (
+              { config, lib, ... }:
+              {
+                assertions = spec.assertions config;
+              }
+            )
+          ];
         specialArgs = sharedSpecialArgs;
       };
     in
@@ -122,11 +168,14 @@ let
     '';
 
   # Generate checks for all systems from a list of test specs
-  mkSystemChecks = system: testSpecs:
-    lib.listToAttrs (map (spec: {
-      name = "nixos-${spec.name}";
-      value = mkTestForSystem system spec;
-    }) testSpecs);
+  mkSystemChecks =
+    system: testSpecs:
+    lib.listToAttrs (
+      map (spec: {
+        name = "nixos-${spec.name}";
+        value = mkTestForSystem system spec;
+      }) testSpecs
+    );
 
 in
 {

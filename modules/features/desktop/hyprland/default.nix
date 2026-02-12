@@ -22,7 +22,10 @@ let
     inherit pkgs;
     sinnix = config.sinnix;
   };
-  rules = import ./rules.nix { inherit lib; scratchpadSpecs = scratchpadData.ruleSpecs; };
+  rules = import ./rules.nix {
+    inherit lib;
+    scratchpadSpecs = scratchpadData.ruleSpecs;
+  };
 
   # Lock configuration needs to be adapted since it was a HM module
   # We will inline or import it within the HM block
@@ -60,6 +63,14 @@ let
     {
       target = "weechat-scratchpad";
       source = "weechat-scratchpad";
+    }
+    {
+      target = "kitty-scrollback-capture";
+      source = "kitty-scrollback-capture";
+    }
+    {
+      target = "kitty-scrollback-view";
+      source = "kitty-scrollback-view";
     }
   ];
 in
@@ -162,7 +173,7 @@ in
             };
 
             debug = {
-              disable_logs = true;
+              disable_logs = false;
               disable_time = false;
               enable_stdout_logs = false;
             };

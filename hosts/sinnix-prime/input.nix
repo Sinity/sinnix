@@ -13,7 +13,7 @@ let
   interceptBouncePkg =
     inputs.intercept-bounce.packages.${pkgs.stdenv.hostPlatform.system}.intercept-bounce;
   scribePkg = inputs.scribe-tap.packages.${pkgs.stdenv.hostPlatform.system}.default;
-  interceptCmd = ''${interceptTools}/bin/intercept -g $DEVNODE'';
+  interceptCmd = "${interceptTools}/bin/intercept -g $DEVNODE";
   bounceCmd = lib.escapeShellArgs [
     "${interceptBouncePkg}/bin/intercept-bounce"
     "--debounce-time"
@@ -47,7 +47,7 @@ let
     "-m"
     "1"
   ];
-  uinputCmd = ''${interceptTools}/bin/uinput -d $DEVNODE'';
+  uinputCmd = "${interceptTools}/bin/uinput -d $DEVNODE";
   pipeline = lib.concatStringsSep " | " [
     interceptCmd
     bounceCmd

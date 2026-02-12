@@ -27,14 +27,14 @@ agent_owns_task() {
   local task_id="$1"
   local project
   project=$(task "$task_id" export 2>/dev/null | jq -r '.[0].project // ""' 2>/dev/null)
-  [[ "$project" == agent.* ]]
+  [[ $project == agent.* ]]
 }
 
 agent_session_owns_task() {
   local task_id="$1"
   local project
   project=$(task "$task_id" export 2>/dev/null | jq -r '.[0].project // ""' 2>/dev/null)
-  [[ "$project" == "$AGENT_PROJECT" ]]
+  [[ $project == "$AGENT_PROJECT" ]]
 }
 
 agent_track_request() {

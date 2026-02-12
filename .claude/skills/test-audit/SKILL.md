@@ -13,6 +13,7 @@ Analyze test suite, identify gaps, implement missing coverage. Autonomous until 
 ## Process
 
 ### Phase 1: Compile Check
+
 ```
 [test-audit:compile]
 1. Run test compilation (cargo test --no-run, pytest --collect-only, etc.)
@@ -21,6 +22,7 @@ Analyze test suite, identify gaps, implement missing coverage. Autonomous until 
 ```
 
 ### Phase 2: Coverage Analysis
+
 ```
 [test-audit:coverage]
 1. Run tests with coverage if available
@@ -33,6 +35,7 @@ Analyze test suite, identify gaps, implement missing coverage. Autonomous until 
 ```
 
 ### Phase 3: Gap Assessment
+
 ```
 [test-audit:gaps]
 Categorize gaps by severity:
@@ -46,6 +49,7 @@ Output gap list with locations.
 ```
 
 ### Phase 4: Remediation
+
 ```
 [test-audit:fix]
 For each gap (highest severity first):
@@ -58,6 +62,7 @@ Report progress: "Fixed N/M gaps. Remaining: [list]"
 ```
 
 ### Phase 5: Verification
+
 ```
 [test-audit:verify]
 1. Run full test suite
@@ -68,6 +73,7 @@ Report progress: "Fixed N/M gaps. Remaining: [list]"
 ## Red-Team Mode
 
 When triggered with "red-team" or "adversarial":
+
 - Think like an attacker
 - Focus on: input validation, auth boundaries, resource limits
 - Try to break assumptions
@@ -76,6 +82,7 @@ When triggered with "red-team" or "adversarial":
 ## Scope Confirmation
 
 Before starting:
+
 - Which test directory/module?
 - Fix gaps or report only?
 - Commit after each fix?
@@ -83,6 +90,7 @@ Before starting:
 ## Completion Criteria
 
 Done when:
+
 - All tests compile
 - All tests pass
 - No CRITICAL/HIGH gaps remain (or explicitly deferred)

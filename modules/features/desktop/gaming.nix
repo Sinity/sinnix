@@ -1,13 +1,34 @@
-{ mkFeatureModule, pkgs, lib, ... }@args:
+{
+  mkFeatureModule,
+  pkgs,
+  lib,
+  ...
+}@args:
 mkFeatureModule {
-  path = [ "desktop" "gaming" ];
+  path = [
+    "desktop"
+    "gaming"
+  ];
   description = "Gaming support (Steam, gamemode, tools)";
   subFeatures = {
-    steam = { description = "Steam platform with gamescope session"; default = true; };
-    gamemode = { description = "Feral gamemode for performance optimization"; default = true; };
+    steam = {
+      description = "Steam platform with gamescope session";
+      default = true;
+    };
+    gamemode = {
+      description = "Feral gamemode for performance optimization";
+      default = true;
+    };
   };
   configFn =
-    { config, lib, pkgs, cfg, user, ... }:
+    {
+      config,
+      lib,
+      pkgs,
+      cfg,
+      user,
+      ...
+    }:
     lib.mkMerge [
       # Steam with gamescope
       (lib.mkIf cfg.steam.enable {

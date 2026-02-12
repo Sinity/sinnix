@@ -95,7 +95,10 @@ in
 
     # Bluetooth hardening handled by nixpkgs - it needs kernel module/tunable access
     systemd.services.bluetooth = lib.mkIf isDesktop {
-      serviceConfig = lib.sinnix.systemd.mkRestartPolicy { strategy = "on-failure"; delaySec = 3; };
+      serviceConfig = lib.sinnix.systemd.mkRestartPolicy {
+        strategy = "on-failure";
+        delaySec = 3;
+      };
     };
 
     hardware.bluetooth = lib.mkIf isDesktop {

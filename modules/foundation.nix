@@ -30,40 +30,116 @@ in
     };
 
     paths = mkOption {
-      type = types.submodule ({ config, ... }: {
-        options = {
-          realmRoot = mkOption { type = types.str; default = "/realm"; };
-          dataRoot = mkOption { type = types.str; default = "${config.realmRoot}/data"; };
-          capturesRoot = mkOption { type = types.str; default = "${config.dataRoot}/captures"; };
-          exportsRoot = mkOption { type = types.str; default = "${config.dataRoot}/exports"; };
-          librariesRoot = mkOption { type = types.str; default = "${config.dataRoot}/libraries"; };
-          indicesRoot = mkOption { type = types.str; default = "${config.dataRoot}/indices"; };
-          mediaRoot = mkOption { type = types.str; default = "${config.librariesRoot}/media"; };
-          outerRealm = mkOption { type = types.str; default = "/outer-realm"; };
-          torrentInbox = mkOption { type = types.str; default = "${config.outerRealm}/inbox"; };
-          projectRoot = mkOption { type = types.str; default = "${config.realmRoot}/project/sinnix"; };
-          dotsRoot = mkOption { type = types.str; default = "${config.projectRoot}/dots"; };
-          cryptoRoot = mkOption { type = types.str; default = "/monero"; };
-        };
-      });
+      type = types.submodule (
+        { config, ... }:
+        {
+          options = {
+            realmRoot = mkOption {
+              type = types.str;
+              default = "/realm";
+            };
+            dataRoot = mkOption {
+              type = types.str;
+              default = "${config.realmRoot}/data";
+            };
+            capturesRoot = mkOption {
+              type = types.str;
+              default = "${config.dataRoot}/captures";
+            };
+            exportsRoot = mkOption {
+              type = types.str;
+              default = "${config.dataRoot}/exports";
+            };
+            librariesRoot = mkOption {
+              type = types.str;
+              default = "${config.dataRoot}/libraries";
+            };
+            indicesRoot = mkOption {
+              type = types.str;
+              default = "${config.dataRoot}/indices";
+            };
+            mediaRoot = mkOption {
+              type = types.str;
+              default = "${config.librariesRoot}/media";
+            };
+            outerRealm = mkOption {
+              type = types.str;
+              default = "/outer-realm";
+            };
+            neoOuterRealm = mkOption {
+              type = types.str;
+              default = "/neo-outer-realm";
+            };
+            torrentInbox = mkOption {
+              type = types.str;
+              default = "${config.neoOuterRealm}/inbox";
+            };
+            projectRoot = mkOption {
+              type = types.str;
+              default = "${config.realmRoot}/project/sinnix";
+            };
+            dotsRoot = mkOption {
+              type = types.str;
+              default = "${config.projectRoot}/dots";
+            };
+            cryptoRoot = mkOption {
+              type = types.str;
+              default = "/monero";
+            };
+          };
+        }
+      );
       default = { };
     };
 
     projects = mkOption {
-      type = types.submodule ({ config, ... }: {
-        options = {
-          root = mkOption { type = types.str; default = "/realm/project"; };
-          lynchpin = mkOption { type = types.str; default = "${config.root}/sinity-lynchpin"; };
-          sinex = mkOption { type = types.str; default = "${config.root}/sinex"; };
-          polylogue = mkOption { type = types.str; default = "${config.root}/polylogue"; };
-          sinnix = mkOption { type = types.str; default = "${config.root}/sinnix"; };
-          scribeTap = mkOption { type = types.str; default = "${config.root}/scribe-tap"; };
-          interceptBounce = mkOption { type = types.str; default = "${config.root}/intercept-bounce"; };
-          knowledgeExtract = mkOption { type = types.str; default = "${config.root}/knowledge-extract"; };
-          knowledgebase = mkOption { type = types.str; default = "${config.root}/knowledgebase"; };
-          pwrank = mkOption { type = types.str; default = "${config.root}/pwrank"; };
-        };
-      });
+      type = types.submodule (
+        { config, ... }:
+        {
+          options = {
+            root = mkOption {
+              type = types.str;
+              default = "/realm/project";
+            };
+            lynchpin = mkOption {
+              type = types.str;
+              default = "${config.root}/sinity-lynchpin";
+            };
+            sinex = mkOption {
+              type = types.str;
+              default = "${config.root}/sinex";
+            };
+            polylogue = mkOption {
+              type = types.str;
+              default = "${config.root}/polylogue";
+            };
+            sinnix = mkOption {
+              type = types.str;
+              default = "${config.root}/sinnix";
+            };
+            scribeTap = mkOption {
+              type = types.str;
+              default = "${config.root}/scribe-tap";
+            };
+            interceptBounce = mkOption {
+              type = types.str;
+              default = "${config.root}/intercept-bounce";
+            };
+            knowledgeExtract = mkOption {
+              type = types.str;
+              default = "${config.root}/knowledge-extract";
+            };
+            knowledgebase = mkOption {
+              type = types.str;
+              default = "${config.root}/knowledgebase";
+            };
+            pwrank = mkOption {
+              type = types.str;
+              default = "${config.root}/pwrank";
+            };
+          };
+        }
+      );
       default = { };
     };
 
@@ -79,8 +155,15 @@ in
     i18n = {
       defaultLocale = "en_US.UTF-8";
       extraLocaleSettings = lib.genAttrs [
-        "LC_ADDRESS" "LC_IDENTIFICATION" "LC_MEASUREMENT" "LC_MONETARY"
-        "LC_NAME" "LC_NUMERIC" "LC_PAPER" "LC_TELEPHONE" "LC_TIME"
+        "LC_ADDRESS"
+        "LC_IDENTIFICATION"
+        "LC_MEASUREMENT"
+        "LC_MONETARY"
+        "LC_NAME"
+        "LC_NUMERIC"
+        "LC_PAPER"
+        "LC_TELEPHONE"
+        "LC_TIME"
       ] (_: "pl_PL.UTF-8");
     };
     console = {
@@ -92,7 +175,15 @@ in
     users.mutableUsers = false;
     users.users.${cfg.user.name} = {
       isNormalUser = true;
-      extraGroups = [ "networkmanager" "wheel" "users" "seat" "video" "wireshark" "fuse" ];
+      extraGroups = [
+        "networkmanager"
+        "wheel"
+        "users"
+        "seat"
+        "video"
+        "wireshark"
+        "fuse"
+      ];
       shell = pkgs.zsh;
       hashedPassword = "AGENIX_MANAGED_PASSWORD_HASH";
     };

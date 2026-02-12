@@ -6,6 +6,7 @@ Scripts live in two places with distinct purposes:
 2. **Package definitions**: `flake/packages.nix` (wrappers with dependencies)
 
 Each script requires:
+
 - Source file in `scripts/`
 - Package wrapper in `flake/packages.nix` with `runtimeInputs`
 - Path reference via `${inputs.self}/scripts/name`

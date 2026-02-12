@@ -1,42 +1,42 @@
 {
-	"inputs": [],
-	"servers": {
-		"github": {
-			"type": "http",
-			"url": "https://api.githubcopilot.com/mcp/",
-			"gallery": true
-		},
-		"playwright": {
-			"type": "stdio",
-			"command": "/home/sinity/.local/bin/mcp-playwright",
-			"args": [],
-			"gallery": true
-		},
-		"context7": {
-			"type": "stdio",
-			"command": "/home/sinity/.local/bin/mcp-context7",
-			"args": [],
-			"gallery": true
-		},
-		"firecrawl": {
-			"type": "stdio",
-			"command": "/home/sinity/.local/bin/mcp-firecrawl",
-			"args": [],
-			"gallery": true
-		},
-		"postgres-local": {
-			"type": "stdio",
-			"command": "/home/sinity/.local/bin/mcp-postgres",
-			"gallery": false
-		},
-		"qdrant": {
-			"type": "stdio",
-			"command": "/home/sinity/.local/bin/mcp-qdrant",
-			"gallery": false
-		},
-		"Parallel Search MCP": {
-			"type": "http",
-			"url": "https://search-mcp.parallel.ai/mcp"
-		}
-	}
+  "inputs": [],
+  "servers": {
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "gallery": true
+    },
+    "playwright": {
+      "type": "stdio",
+      "command": "/home/sinity/.local/bin/mcp-playwright",
+      "args": [],
+      "gallery": true
+    },
+    "context7": {
+      "type": "stdio",
+      "command": "/home/sinity/.local/bin/mcp-context7",
+      "args": [],
+      "gallery": true
+    },
+    "firecrawl": {
+      "type": "stdio",
+      "command": "/home/sinity/.local/bin/mcp-firecrawl",
+      "args": [],
+      "gallery": true
+    },
+    "postgres-local": {
+      "type": "stdio",
+      "command": "/home/sinity/.local/bin/mcp-postgres",
+      "gallery": false
+    },
+    "qdrant": {
+      "type": "stdio",
+      "command": "/home/sinity/.local/bin/mcp-qdrant",
+      "gallery": false
+    },
+    "Parallel Search MCP": {
+      "type": "http",
+      "url": "https://search-mcp.parallel.ai/mcp"
+    }
+  }
 }

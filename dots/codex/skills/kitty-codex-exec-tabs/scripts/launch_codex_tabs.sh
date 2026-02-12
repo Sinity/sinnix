@@ -30,7 +30,7 @@ for agent in "$@"; do
   fi
 
   if [ ! -f "$log_file" ]; then
-    : > "$log_file"
+    : >"$log_file"
   fi
 
   kitty @ launch --type=tab --tab-title "$agent" --cwd "$workdir" -- \

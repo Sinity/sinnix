@@ -15,12 +15,27 @@
 #
 # To disable stylix for specific apps:
 #   stylix.targets.<app>.enable = false;
-{ mkFeatureModule, pkgs, inputs, lib, ... }@args:
+{
+  mkFeatureModule,
+  pkgs,
+  inputs,
+  lib,
+  ...
+}@args:
 mkFeatureModule {
-  path = [ "desktop" "ui" ];
+  path = [
+    "desktop"
+    "ui"
+  ];
   description = "Sinity's Graphical User Interface Stack";
   configFn =
-    { config, pkgs, lib, inputs, ... }:
+    {
+      config,
+      pkgs,
+      lib,
+      inputs,
+      ...
+    }:
     let
       stylixFontSpec = {
         monospace = {
@@ -110,13 +125,19 @@ mkFeatureModule {
         ];
         config = {
           common = {
-            default = ["gtk" "hyprland"];
+            default = [
+              "gtk"
+              "hyprland"
+            ];
           };
           hyprland = {
-            default = ["gtk" "hyprland"];
-            "org.freedesktop.impl.portal.ScreenCast" = ["hyprland"];
-            "org.freedesktop.impl.portal.Screenshot" = ["hyprland"];
-            "org.freedesktop.impl.portal.Secret" = ["gnome-keyring"];
+            default = [
+              "gtk"
+              "hyprland"
+            ];
+            "org.freedesktop.impl.portal.ScreenCast" = [ "hyprland" ];
+            "org.freedesktop.impl.portal.Screenshot" = [ "hyprland" ];
+            "org.freedesktop.impl.portal.Secret" = [ "gnome-keyring" ];
           };
         };
       };

@@ -19,16 +19,16 @@ in its own Kitty tab using `codex exec` and prompt files.
 
 ## Workflow
 
-1) Verify Kitty control is reachable:
+1. Verify Kitty control is reachable:
    - `command -v kitty`
    - `echo $KITTY_LISTEN_ON`
    - If empty, instruct user to run inside Kitty or set `KITTY_LISTEN_ON`.
 
-2) Ensure prompt and log files exist:
+2. Ensure prompt and log files exist:
    - Prompt files: `docs/exploration/<Agent>.prompt` (or user-specified dir).
    - Log files: `docs/exploration/<Agent>.md` (append-only).
 
-3) Launch tabs using the script in `scripts/launch_codex_tabs.sh`.
+3. Launch tabs using the script in `scripts/launch_codex_tabs.sh`.
 
 ## Script
 

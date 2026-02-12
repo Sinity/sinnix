@@ -4,12 +4,14 @@ target-version = ['py311']
 
 [tool.ruff]
 line-length = 88
+
+[tool.ruff.lint]
 select = [
-    "E",  # pycodestyle errors
-    "W",  # pycodestyle warnings
-    "F",  # pyflakes
-    "I",  # isort
-    "C",  # flake8-comprehensions
-    "B",  # flake8-bugbear
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "C4",  # flake8-comprehensions (explicit, avoids pulling in C901)
+    "B",   # flake8-bugbear
 ]
-ignore = ["E501"] # ignore line length errors, handled by black
+ignore = ["E501"] # line length handled by formatter

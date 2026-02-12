@@ -6,12 +6,14 @@ This is a quick reference for common commands.
 ## Immediate Actions
 
 When you see a **user request**, immediately run:
+
 ```bash
 source /realm/project/sinnix/dots/taskwarrior/claude-helpers.sh && \
 claude_track_request "Description of request" "estimated-time" "priority"
 ```
 
 When you're **doing significant work** (>2 min), track it:
+
 ```bash
 source /realm/project/sinnix/dots/taskwarrior/claude-helpers.sh && \
 claude_track_coding "What you're coding"
@@ -22,18 +24,21 @@ claude_research "What you're researching"
 ```
 
 When you **discover something** during work:
+
 ```bash
 source /realm/project/sinnix/dots/taskwarrior/claude-helpers.sh && \
 claude_annotate "Your finding or note"
 ```
 
 When you **complete work**:
+
 ```bash
 source /realm/project/sinnix/dots/taskwarrior/claude-helpers.sh && \
 claude_complete_task <task-id> "actual-time"
 ```
 
 When user asks **"what have we done?"**:
+
 ```bash
 source /realm/project/sinnix/dots/taskwarrior/claude-helpers.sh && \
 claude_session_summary :day
@@ -41,15 +46,15 @@ claude_session_summary :day
 
 ## Pattern Matching
 
-| User Says | You Do |
-|-----------|--------|
-| "Help me X" | `claude_track_request "X"` |
-| "Debug this" | `claude_track_request "Debug: issue" && tag +debugging` |
-| "Research Y" | `claude_research "Y"` |
-| "Write code for Z" | `claude_track_coding "Z"` |
-| "Document W" | `claude_track_docs "W"` |
-| "What did we do?" | `claude_session_summary` |
-| "What are you working on?" | `claude_status` |
+| User Says                  | You Do                                                  |
+| -------------------------- | ------------------------------------------------------- |
+| "Help me X"                | `claude_track_request "X"`                              |
+| "Debug this"               | `claude_track_request "Debug: issue" && tag +debugging` |
+| "Research Y"               | `claude_research "Y"`                                   |
+| "Write code for Z"         | `claude_track_coding "Z"`                               |
+| "Document W"               | `claude_track_docs "W"`                                 |
+| "What did we do?"          | `claude_session_summary`                                |
+| "What are you working on?" | `claude_status`                                         |
 
 ## Decision Tree
 

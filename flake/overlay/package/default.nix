@@ -20,8 +20,8 @@ let
 
   # Auto-discover all .nix files except default.nix
   overlayDir = builtins.readDir ./.;
-  overlayNames = builtins.filter
-    (name: name != "default.nix" && builtins.match ".*\\.nix$" name != null)
-    (builtins.attrNames overlayDir);
+  overlayNames = builtins.filter (
+    name: name != "default.nix" && builtins.match ".*\\.nix$" name != null
+  ) (builtins.attrNames overlayDir);
 in
 builtins.map (name: mkOverlay ./${name}) overlayNames

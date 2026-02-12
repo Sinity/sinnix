@@ -98,12 +98,15 @@ Then execute the enhanced prompt immediately.
 Use AskUserQuestion to gather context (2-3 questions max):
 
 **Question 1: Enhancement Mode**
+
 - Auto (recommended), Minimal, Balanced, Thorough, Code-focused, Writing-focused
 
 **Question 2: Context** (if gaps detected)
+
 - Time constraints, Domain context, Target audience, Technical constraints
 
 **Question 3: Clarifications** (if ambiguous)
+
 - Specific clarifying question based on gaps
 
 ### Phase 3: Enhancement
@@ -113,6 +116,7 @@ Apply mode-specific techniques based on interview responses.
 ### Phase 4: Refinement Loop
 
 Present enhanced prompt, ask for feedback:
+
 - Perfect - use this
 - Adjust tone/style
 - Add more detail

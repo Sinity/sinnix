@@ -12,10 +12,10 @@ echo "CLAUDE vars: $(env | grep -i claude || echo 'none')" >&2
 # Try to find the lock file
 LOCK_FILE=""
 for candidate in \
-    ".claude/completion-lock.md" \
-    "${PWD}/.claude/completion-lock.md"; do
+  ".claude/completion-lock.md" \
+  "${PWD}/.claude/completion-lock.md"; do
   echo "Checking: $candidate" >&2
-  if [[ -f "$candidate" ]]; then
+  if [[ -f $candidate ]]; then
     LOCK_FILE="$candidate"
     echo "Found: $LOCK_FILE" >&2
     break
@@ -23,7 +23,7 @@ for candidate in \
 done
 
 # If lock file doesn't exist, allow stop
-if [[ -z "$LOCK_FILE" ]]; then
+if [[ -z $LOCK_FILE ]]; then
   echo "No lock file found, allowing stop" >&2
   exit 0
 fi
@@ -32,7 +32,7 @@ fi
 ENABLED=$(head -10 "$LOCK_FILE" | grep -E '^enabled:\s*true' || true)
 echo "Enabled check result: '$ENABLED'" >&2
 
-if [[ -n "$ENABLED" ]]; then
+if [[ -n $ENABLED ]]; then
   echo "Lock is armed, blocking!" >&2
   MESSAGE=$(awk '/^---$/{if(++c==2){p=1;next}} p' "$LOCK_FILE")
 

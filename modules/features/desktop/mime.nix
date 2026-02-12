@@ -6,7 +6,12 @@ mkFeatureModule {
   ];
   description = "Desktop MIME associations";
   configFn =
-    { config, lib, user, ... }:
+    {
+      config,
+      lib,
+      user,
+      ...
+    }:
     let
       # Shared media associations - used for both added and default
       mediaAssociations = {

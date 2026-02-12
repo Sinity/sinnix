@@ -4,5 +4,5 @@
 # Just add a new feature file - no need to update this file.
 { lib, ... }:
 {
-  imports = lib.sinnix.mkAutoImports ./. [];
+  imports = lib.sinnix.mkAutoImports ./. [ ];
 }

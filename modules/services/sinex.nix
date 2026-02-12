@@ -17,48 +17,50 @@ in
   };
 
   # Only configure if sinex module is available from the flake input
-  config = lib.mkIf (config.services ? sinex) (lib.mkMerge [
-    # Package defaults (always applied when module exists)
-    {
-      services.sinex.package = lib.mkDefault sinexPkgs.sinex;
-      services.sinex.cliPackage = lib.mkDefault sinexPkgs.sinexCli;
-    }
+  config = lib.mkIf (config.services ? sinex) (
+    lib.mkMerge [
+      # Package defaults
+      (lib.mkIf (cfg.enable || cfg.provisionDatabase) {
+        services.sinex.package = lib.mkDefault sinexPkgs.sinex;
+        services.sinex.cliPackage = lib.mkDefault sinexPkgs.sinexctl;
+      })
 
-    # Database-only provisioning (for dev environments)
-    (lib.mkIf (cfg.enable || cfg.provisionDatabase) {
-      services.sinex.database.enable = true;
-      services.sinex.database.autoSetup = false;
-    })
+      # Database provisioning
+      (lib.mkIf (cfg.enable || cfg.provisionDatabase) {
+        services.sinex.database.enable = true;
+        services.sinex.database.autoSetup = false;
+      })
 
-    # Full service configuration
-    (lib.mkIf cfg.enable {
-      systemd.services."sinex-blob-init" = {
-        path = [
-          pkgs.git
-          pkgs.git-annex
-        ];
-        # Ensure database is ready before blob init
-        after = [ "postgresql.service" ];
-        requires = [ "postgresql.service" ];
-        serviceConfig = {
-          Type = "oneshot";
-          RemainAfterExit = true;
+      # Full service configuration
+      (lib.mkIf cfg.enable {
+        systemd.services."sinex-blob-init" = {
+          path = [
+            pkgs.git
+            pkgs.git-annex
+          ];
+          # Ensure database is ready before blob init
+          after = [ "postgresql.service" ];
+          requires = [ "postgresql.service" ];
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+          };
         };
-      };
 
-      services.sinex = {
-        enable = true;
-        core.enable = true;
-        nats.enable = true;
-        storage.blob.enable = true;
-        storage.dlq.enable = true;
-        lifecycle.maintenance.enable = true;
+        services.sinex = {
+          enable = true;
+          core.enable = true;
+          nats.enable = true;
+          storage.blob.enable = true;
+          storage.dlq.enable = true;
+          lifecycle.maintenance.enable = true;
 
-        users.target = config.sinnix.user.name;
-        logLevel = "debug";
-        stateRoot = "${indicesRoot}/sinex";
-        satellites.filesystem.watchPaths = [ realmRoot ];
-      };
-    })
-  ]);
+          users.target = config.sinnix.user.name;
+          logLevel = "debug";
+          stateRoot = "${indicesRoot}/sinex";
+          satellites.filesystem.watchPaths = [ realmRoot ];
+        };
+      })
+    ]
+  );
 }

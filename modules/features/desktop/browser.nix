@@ -21,7 +21,13 @@ mkFeatureModule {
     }:
     {
       home-manager.users.${user} =
-        { pkgs, lib, config, sinnix, ... }:
+        {
+          pkgs,
+          lib,
+          config,
+          mkDotsFileFor,
+          ...
+        }:
         let
           # Disable Chromium's Wayland color management - it conflicts with
           # Hyprland's HDR mode, causing washed out colors.
@@ -29,7 +35,7 @@ mkFeatureModule {
           chromeStablePkg = pkgs.google-chrome.override {
             commandLineArgs = "--disable-features=WaylandWpColorManagerV1";
           };
-          mkDotsFile = helpers.mkDotsFile sinnix config;
+          mkDotsFile = mkDotsFileFor config;
           quteDots = rel: mkDotsFile ("/qutebrowser" + rel);
           mkUserScript = name: {
             source = quteDots ("/userscripts/" + name);

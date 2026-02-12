@@ -8,6 +8,7 @@ Convenience wrappers in `modules/bundles/`:
 **Rule**: Bundles only **enable other modules**, never add their own config.
 
 Example:
+
 ```nix
 # modules/bundles/desktop.nix
 config = lib.mkIf cfg.enable {

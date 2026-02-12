@@ -6,11 +6,13 @@ Host-specific configs in `hosts/{hostname}/`:
 - **sinnix-ethereal**: Secondary machine
 
 Each host:
+
 1. Imports shared modules via `../modules`
 2. Sets machine-specific options (boot, storage, display, input)
 3. Enables bundles/features selectively
 
 Example:
+
 ```nix
 # hosts/sinnix-prime/default.nix
 {

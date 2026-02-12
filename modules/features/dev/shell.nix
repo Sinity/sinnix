@@ -5,22 +5,54 @@
 # - utilities: CLI tools (bat, eza, fd, ripgrep) + session vars + config symlinks
 # - tmux: Terminal multiplexer with vi-mode
 # - prompt: Starship prompt + Atuin history + Zoxide + FZF
-{ mkFeatureModule, lib, pkgs, inputs, ... }@args:
+{
+  mkFeatureModule,
+  lib,
+  pkgs,
+  inputs,
+  ...
+}@args:
 mkFeatureModule {
-  path = [ "dev" "shell" ];
+  path = [
+    "dev"
+    "shell"
+  ];
   description = "Advanced shell environment (Zsh/Starship/Atuin)";
   subFeatures = {
-    zsh = { description = "Zsh shell with oh-my-zsh and plugins"; default = true; };
-    prompt = { description = "Starship prompt with Atuin history"; default = true; };
-    utilities = { description = "CLI tools and session configuration"; default = true; };
-    tmux = { description = "Tmux terminal multiplexer"; default = true; };
+    zsh = {
+      description = "Zsh shell with oh-my-zsh and plugins";
+      default = true;
+    };
+    prompt = {
+      description = "Starship prompt with Atuin history";
+      default = true;
+    };
+    utilities = {
+      description = "CLI tools and session configuration";
+      default = true;
+    };
+    tmux = {
+      description = "Tmux terminal multiplexer";
+      default = true;
+    };
   };
   configFn =
-    { config, lib, pkgs, cfg, user, ... }:
+    {
+      config,
+      lib,
+      pkgs,
+      cfg,
+      user,
+      inputs,
+      ...
+    }:
     let
       sinnixCfg = config.sinnix;
       dotsRoot = sinnixCfg.paths.dotsRoot;
       capturesRoot = sinnixCfg.paths.capturesRoot;
+
+      # Script packages from flake registry
+      scriptPkgs = inputs.self.packages.${pkgs.stdenv.hostPlatform.system};
 
       findFlakeRoot = pkgs.writeShellScriptBin "find-flake-root" ''
         #!/usr/bin/env bash
@@ -45,8 +77,6 @@ mkFeatureModule {
         fi
         printf '%s\n' "$PWD"
       '';
-
-      lspRootLauncher = import ../../lib/lsp-root.nix { inherit pkgs; };
     in
     lib.mkMerge [
       # ========================================
@@ -75,7 +105,11 @@ mkFeatureModule {
 
               oh-my-zsh = {
                 enable = true;
-                plugins = [ "git" "python" "man" ];
+                plugins = [
+                  "git"
+                  "python"
+                  "man"
+                ];
               };
 
               initContent = lib.mkMerge [
@@ -170,6 +204,7 @@ mkFeatureModule {
                 pingg = "ping 8.8.8.8";
                 wtf = "dmesg";
                 ytd = "yt-dlp";
+                zed = "zeditor"; # Zed editor binary is named 'zeditor' on NixOS
               };
             };
           };
@@ -316,7 +351,13 @@ mkFeatureModule {
       # ========================================
       (lib.mkIf cfg.utilities.enable {
         home-manager.users.${user} =
-          { config, pkgs, lib, sinnix, ... }:
+          {
+            config,
+            pkgs,
+            lib,
+            sinnix,
+            ...
+          }:
           {
             home.sessionVariables = {
               DEVELOPMENT_DOMAIN = "v0.3";
@@ -391,7 +432,7 @@ mkFeatureModule {
               ])
               ++ [
                 findFlakeRoot
-                lspRootLauncher
+                scriptPkgs.lsp-root
               ];
 
             programs = {
@@ -406,32 +447,23 @@ mkFeatureModule {
               };
             };
 
-            # Config linking activations
-            home.activation.linkNeovimConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-              mkdir -p "$HOME/.config"
+            # Config linking activations (consolidated)
+            home.activation.linkConfigs = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
               DOTS_ROOT=''${DOTS_ROOT:-${dotsRoot}}
-              ln -sfn "$DOTS_ROOT/nvim" "$HOME/.config/nvim"
-            '';
+              mkdir -p "$HOME/.config" "$HOME/.config/claude" "$HOME/.serena"
 
-            home.activation.linkClaudeConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-              DOTS_ROOT=''${DOTS_ROOT:-${dotsRoot}}
-              mkdir -p "$HOME/.config/claude"
+              # Neovim
+              ln -sfn "$DOTS_ROOT/nvim" "$HOME/.config/nvim"
+
+              # Claude
               ln -sfn "$DOTS_ROOT/claude/settings.json" "$HOME/.config/claude/settings.json"
               ln -sfn "$DOTS_ROOT/claude/cclsp.json" "$HOME/.config/claude/cclsp.json"
               ln -sfn "$DOTS_ROOT/claude/CLAUDE.md" "$HOME/.config/claude/CLAUDE.md"
               ln -sfn "$DOTS_ROOT/claude/skills" "$HOME/.config/claude/skills"
-            '';
-
-            home.activation.ensureClaudeDir = lib.hm.dag.entryAfter [ "linkClaudeConfig" ] ''
-              if [ -e "$HOME/.claude" ] && ! [ -L "$HOME/.claude" ]; then
-                rm -rf "$HOME/.claude"
-              fi
+              [ -e "$HOME/.claude" ] && [ ! -L "$HOME/.claude" ] && rm -rf "$HOME/.claude"
               ln -sfn .config/claude "$HOME/.claude"
-            '';
 
-            home.activation.linkSerenaConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-              DOTS_ROOT=''${DOTS_ROOT:-${dotsRoot}}
-              mkdir -p "$HOME/.serena"
+              # Serena
               ln -sfn "$DOTS_ROOT/serena/serena_config.yml" "$HOME/.serena/serena_config.yml"
             '';
 

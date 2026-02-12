@@ -2,7 +2,8 @@
 let
   # Generate sub-feature options from declarative spec
   # subFeatures = { name = { description = "..."; default = false; }; ... }
-  mkSubFeatureOptions = subFeatures:
+  mkSubFeatureOptions =
+    subFeatures:
     lib.mapAttrs (name: spec: {
       enable = (lib.mkEnableOption (spec.description or name)) // {
         default = spec.default or false;
@@ -22,12 +23,21 @@ let
     }:
     args@{ config, ... }:
     let
-      featurePath = [ "sinnix" "features" ] ++ path;
+      featurePath = [
+        "sinnix"
+        "features"
+      ]
+      ++ path;
       # Merge extraOptions with generated sub-feature options
       subFeatureOpts = mkSubFeatureOptions subFeatures;
-      optionsForPath = extraOptions // subFeatureOpts // {
-        enable = (lib.mkEnableOption description) // { default = enableDefault; };
-      };
+      optionsForPath =
+        extraOptions
+        // subFeatureOpts
+        // {
+          enable = (lib.mkEnableOption description) // {
+            default = enableDefault;
+          };
+        };
       cfg = lib.getAttrFromPath featurePath config;
       user = config.sinnix.user.name;
     in
@@ -47,7 +57,11 @@ let
     }:
     args@{ config, lib, ... }:
     let
-      servicePath = [ "sinnix" "services" name ];
+      servicePath = [
+        "sinnix"
+        "services"
+        name
+      ];
       optionsForPath = extraOptions // {
         enable = lib.mkEnableOption description;
       };
@@ -58,21 +72,32 @@ let
       config = lib.mkIf cfg.enable (configFn (args // { inherit cfg; }));
     };
 
-  # Pre-bound version using standard dotsRoot path - saves boilerplate in modules
-  # Usage: mkDotsLink = helpers.mkDotsLink nixosConfig hmConfig;
-  mkDotsLink = nixosConfig: hmConfig: rel:
-    hmConfig.lib.file.mkOutOfStoreSymlink (nixosConfig.sinnix.paths.dotsRoot + rel);
-
   # Simplified dotfile linker using sinnix extraSpecialArgs (preferred pattern)
   # Usage inside HM context: mkDotsFile = helpers.mkDotsFile sinnix config;
   #                         then: xdg.configFile."foo".source = mkDotsFile "/foo";
   # This avoids the "nixosConfig = config" capture dance.
-  mkDotsFile = sinnix: hmConfig: rel:
+  mkDotsFile =
+    sinnix: hmConfig: rel:
+    hmConfig.lib.file.mkOutOfStoreSymlink (sinnix.paths.dotsRoot + rel);
+
+  # Pre-curried version for extraSpecialArgs - eliminates boilerplate in modules
+  # Usage in home-manager.nix extraSpecialArgs:
+  #   mkDotsFileFor = helpers.mkDotsFileFor config.sinnix;
+  # Then in HM modules:
+  #   { config, mkDotsFileFor, ... }: let mkDotsFile = mkDotsFileFor config; in { ... }
+  mkDotsFileFor =
+    sinnix: hmConfig: rel:
     hmConfig.lib.file.mkOutOfStoreSymlink (sinnix.paths.dotsRoot + rel);
 
   # PAM login limits factory
   # Usage: mkPAMLimits { domain = "@audio"; rtprio = 95; memlock = "unlimited"; }
-  mkPAMLimits = { domain, rtprio ? null, memlock ? null, nice ? null }:
+  mkPAMLimits =
+    {
+      domain,
+      rtprio ? null,
+      memlock ? null,
+      nice ? null,
+    }:
     lib.concatLists [
       (lib.optional (rtprio != null) {
         inherit domain;
@@ -106,15 +131,26 @@ let
   #
   # Or with exclusions:
   #   { lib, ... }: { imports = lib.sinnix.mkAutoImports ./. [ "deprecated.nix" ]; }
-  mkAutoImports = dir: exclude: let
-    excludeSet = lib.listToAttrs (map (n: { name = n; value = true; }) exclude);
-    entries = builtins.readDir dir;
-    isModule = name: type:
-      !excludeSet ? ${name} &&
-      ((type == "regular" && name != "default.nix" && lib.hasSuffix ".nix" name) ||
-       (type == "directory" && builtins.pathExists (dir + "/${name}/default.nix")));
-    moduleNames = lib.filterAttrs isModule entries;
-  in map (name: dir + "/${name}") (builtins.attrNames moduleNames);
+  mkAutoImports =
+    dir: exclude:
+    let
+      excludeSet = lib.listToAttrs (
+        map (n: {
+          name = n;
+          value = true;
+        }) exclude
+      );
+      entries = builtins.readDir dir;
+      isModule =
+        name: type:
+        !excludeSet ? ${name}
+        && (
+          (type == "regular" && name != "default.nix" && lib.hasSuffix ".nix" name)
+          || (type == "directory" && builtins.pathExists (dir + "/${name}/default.nix"))
+        );
+      moduleNames = lib.filterAttrs isModule entries;
+    in
+    map (name: dir + "/${name}") (builtins.attrNames moduleNames);
 
   # ============================================================================
   # Bundle Factory
@@ -138,23 +174,30 @@ let
       # Primary domain to auto-enable (e.g., "desktop" → features.desktop.*)
       featureDomain,
       # Extra features to enable (path strings relative to sinnix)
-      extraEnables ? {},
+      extraEnables ? { },
       # Features to exclude from auto-enable
-      excludeFeatures ? [],
+      excludeFeatures ? [ ],
     }:
     { config, lib, ... }:
     let
-      bundlePath = [ "sinnix" "bundles" name ];
+      bundlePath = [
+        "sinnix"
+        "bundles"
+        name
+      ];
       cfg = lib.getAttrFromPath bundlePath config;
 
       # Get all features in the domain
-      domainFeatures = config.sinnix.features.${featureDomain} or {};
+      domainFeatures = config.sinnix.features.${featureDomain} or { };
 
       # Filter to only features with .enable option, excluding specified ones
-      excludeSet = lib.listToAttrs (map (n: { name = n; value = true; }) excludeFeatures);
-      enableableFeatures = lib.filterAttrs (n: v:
-        v ? enable && !excludeSet ? ${n}
-      ) domainFeatures;
+      excludeSet = lib.listToAttrs (
+        map (n: {
+          name = n;
+          value = true;
+        }) excludeFeatures
+      );
+      enableableFeatures = lib.filterAttrs (n: v: v ? enable && !excludeSet ? ${n}) domainFeatures;
 
       # Generate enable statements for domain features
       domainEnables = lib.mapAttrs (_: _: { enable = true; }) enableableFeatures;
@@ -162,11 +205,12 @@ let
       # Parse extra enables (path string → nested attrs)
       parseExtraEnables = lib.mapAttrs' (path: value: {
         name = builtins.head (lib.splitString "." path);
-        value = let
-          parts = lib.splitString "." path;
-          rest = builtins.tail parts;
-        in if rest == [] then { enable = value; }
-           else lib.setAttrByPath rest { enable = value; };
+        value =
+          let
+            parts = lib.splitString "." path;
+            rest = builtins.tail parts;
+          in
+          if rest == [ ] then { enable = value; } else lib.setAttrByPath rest { enable = value; };
       }) extraEnables;
     in
     {
@@ -184,6 +228,12 @@ let
 
 in
 {
-  inherit mkFeatureModule mkServiceModule mkDotsLink mkDotsFile mkPAMLimits;
+  inherit
+    mkFeatureModule
+    mkServiceModule
+    mkDotsFile
+    mkDotsFileFor
+    mkPAMLimits
+    ;
   inherit mkAutoImports mkBundleModule;
 }

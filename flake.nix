@@ -80,13 +80,6 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Declarative git hooks (flake-parts module)
-    git-hooks-nix = {
-      url = "github:cachix/git-hooks.nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
-
   };
 
   outputs =
@@ -96,14 +89,12 @@
       imports = [
         # 3rd-party flake-parts modules
         inputs.treefmt-nix.flakeModule
-        inputs.git-hooks-nix.flakeModule
 
         # Local modules
         ./flake/dev-shell.nix
         ./flake/apps.nix
         ./flake/packages.nix
         ./flake/treefmt.nix
-        ./flake/git-hooks.nix
         ./flake/nixos.nix
         ./flake/tests.nix
       ];

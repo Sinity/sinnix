@@ -4,29 +4,44 @@
 # - Systemd-managed user services (tray, clipboard, notifications)
 # - Wayland session environment and auto-start logic
 # - Application launcher (tofi)
-{ mkFeatureModule, lib, pkgs, ... }@args:
+{
+  mkFeatureModule,
+  lib,
+  pkgs,
+  ...
+}@args:
 mkFeatureModule {
-  path = [ "desktop" "base" ];
+  path = [
+    "desktop"
+    "base"
+  ];
   description = "Essential desktop background services and session logic";
   configFn =
-    { config, pkgs, lib, user, ... }:
+    {
+      config,
+      pkgs,
+      lib,
+      user,
+      ...
+    }:
     let
       graphicalTarget = "graphical-session.target";
       baseGraphicalUnit = {
         After = [ graphicalTarget ];
         PartOf = [ graphicalTarget ];
       };
-      mkService =
-        exec: desc: {
-          Unit = baseGraphicalUnit // { Description = desc; };
-          Service = {
-            Type = "simple";
-            ExecStart = exec;
-            Restart = "on-failure";
-            RestartSec = 1;
-          };
-          Install.WantedBy = [ graphicalTarget ];
+      mkService = exec: desc: {
+        Unit = baseGraphicalUnit // {
+          Description = desc;
         };
+        Service = {
+          Type = "simple";
+          ExecStart = exec;
+          Restart = "on-failure";
+          RestartSec = 1;
+        };
+        Install.WantedBy = [ graphicalTarget ];
+      };
 
       stylixColors = config.lib.stylix.colors;
       toRgba = alpha: color: "${lib.removePrefix "#" color}${alpha}";
@@ -81,7 +96,10 @@ mkFeatureModule {
               body-color = subtle;
               progress-color = accent;
             };
-            critical = { background = criticalBg; border-color = accent; };
+            critical = {
+              background = criticalBg;
+              border-color = accent;
+            };
           };
         };
 
@@ -102,8 +120,7 @@ mkFeatureModule {
         systemd.user.services = {
           wl-clip-persist = mkService "${pkgs.wl-clip-persist}/bin/wl-clip-persist --clipboard both" "Wayland clipboard persistence";
           nm-applet = mkService "${pkgs.networkmanagerapplet}/bin/nm-applet" "NetworkManager applet";
-          polkit-gnome-authentication-agent-1 =
-            mkService "${pkgs.polkit_gnome}/libexec/polkit-gnome-authentication-agent-1" "polkit-gnome-authentication-agent-1";
+          polkit-gnome-authentication-agent-1 = mkService "${pkgs.polkit_gnome}/libexec/polkit-gnome-authentication-agent-1" "polkit-gnome-authentication-agent-1";
           blueman-applet = mkService "${pkgs.blueman}/bin/blueman-applet" "Blueman applet";
         };
 

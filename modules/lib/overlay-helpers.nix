@@ -17,12 +17,6 @@ rec {
     ${name} = packages.${_final.stdenv.hostPlatform.system}.default;
   };
 
-  # Re-export with custom attribute path
-  # Example: mkInputOverlayWith "codex" inputs.nix-ai-tools.packages (p: p.codex)
-  mkInputOverlayWith = name: packages: selector: _final: _prev: {
-    ${name} = selector packages.${_final.stdenv.hostPlatform.system};
-  };
-
   # Apply patches to an existing package
   # Example: mkPatchOverlay "uwsm" [ ../patch/uwsm/fix.patch ]
   mkPatchOverlay = name: patches: _final: prev: {
@@ -39,30 +33,4 @@ rec {
     });
   };
 
-  # Add native build inputs to an existing package
-  # Example: mkNativeBuildInputsOverlay "foo" (pkgs: [ pkgs.cmake ])
-  mkNativeBuildInputsOverlay = name: nativeBuildInputsFn: _final: prev: {
-    ${name} = prev.${name}.overrideAttrs (old: {
-      nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ nativeBuildInputsFn prev;
-    });
-  };
-
-  # General attribute override
-  # Example: mkOverrideAttrs "foo" (old: { doCheck = false; })
-  mkOverrideAttrs = name: overrideFn: _final: prev: {
-    ${name} = prev.${name}.overrideAttrs overrideFn;
-  };
-
-  # Combine multiple overlays for the same package
-  # Example: mkComposedOverlay "foo" [
-  #   (mkPatchOverlay "foo" [ ./fix.patch ])
-  #   (mkBuildInputsOverlay "foo" (pkgs: [ pkgs.bar ]))
-  # ]
-  mkComposedOverlay = name: overlays: final: prev:
-    let
-      composed = lib.foldl' (acc: overlay:
-        acc // (overlay final acc)
-      ) prev overlays;
-    in
-    { ${name} = composed.${name}; };
 }

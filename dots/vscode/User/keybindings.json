@@ -1,10 +1,21 @@
 [
   // Let Neovim own Ctrl+W split commands; keep VS Code behavior in terminals
-  { "key": "ctrl+w", "command": "-workbench.action.closeActiveEditor", "when": "editorTextFocus" },
+  {
+    "key": "ctrl+w",
+    "command": "-workbench.action.closeActiveEditor",
+    "when": "editorTextFocus"
+  },
 
   // Let Neovim own paging/scroll chords and selection expansion
-  { "key": "ctrl+d", "command": "-editor.action.addSelectionToNextFindMatch", "when": "editorTextFocus" },
+  {
+    "key": "ctrl+d",
+    "command": "-editor.action.addSelectionToNextFindMatch",
+    "when": "editorTextFocus"
+  },
   { "key": "ctrl+f", "command": "-actions.find", "when": "editorTextFocus" },
-  { "key": "ctrl+b", "command": "-workbench.action.toggleSidebarVisibility", "when": "editorTextFocus" }
+  {
+    "key": "ctrl+b",
+    "command": "-workbench.action.toggleSidebarVisibility",
+    "when": "editorTextFocus"
+  }
 ]
-

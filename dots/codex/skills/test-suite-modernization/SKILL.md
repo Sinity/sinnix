@@ -12,37 +12,37 @@ modernizing a large Rust test suite (especially with pipeline + DB + message bus
 
 ## Core workflow
 
-1) Read repo instructions and the current plan docs.
+1. Read repo instructions and the current plan docs.
    - `AGENTS.md`
    - `docs/exploration/plan.md`
    - `docs/exploration/harness-design.md`
    - `docs/exploration/test-suite-modernization-table.md`
 
-2) Build or update a **semantic coverage map**.
+2. Build or update a **semantic coverage map**.
    - Focus on what the suite proves today (invariants, pipeline correctness, recovery,
      system behavior).
    - Use representative test names; avoid file-name-only summaries.
 
-3) Normalize **boundary labels** by dependency (not directory).
+3. Normalize **boundary labels** by dependency (not directory).
    - L0: pure logic (no DB/NATS/filesystem)
    - L1: DB/repository invariants
    - L2: pipeline ingestion (NATS/JetStream/ingestd)
    - L3: services over pipeline data
    - L4: system lifecycle/chaos/recovery/perf
 
-4) Identify **self-healing patterns** and remove them.
+4. Identify **self-healing patterns** and remove them.
    - Backfill, top-up, reseed, trim, post-hoc deletes.
    - Replace with explicit preconditions + deterministic waits.
 
-5) Identify **sleep/timeout risks** and consolidate wait helpers.
+5. Identify **sleep/timeout risks** and consolidate wait helpers.
    - Replace fixed sleeps with wait-for conditions aligned with production queries.
    - Centralize waits in test-utils.
 
-6) Decide **profile gating** for heavy suites.
+6. Decide **profile gating** for heavy suites.
    - Perf, stress/chaos, and external-binary profiles.
    - Keep default `reliable` fast and deterministic.
 
-7) Produce a concrete plan with track ownership and file scopes.
+7. Produce a concrete plan with track ownership and file scopes.
    - Each track edits a disjoint set of files.
    - Require per-agent append-only logs.
 

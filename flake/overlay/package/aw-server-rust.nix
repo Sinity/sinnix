@@ -1,5 +1,5 @@
-{ inputs, ... }: final: prev:
-{
+{ inputs, ... }:
+final: prev: {
   # Override aw-server-rust with the heartbeat fix from PR #555
   # Fixes SQL query mismatch causing duplicate events and failed heartbeat merges
   aw-server-rust = prev.aw-server-rust.overrideAttrs (old: {

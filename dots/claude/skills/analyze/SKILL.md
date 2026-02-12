@@ -45,16 +45,18 @@ FOR EACH item IN target:
 ```
 
 **Concern indicators**:
+
 - **High**: >500 LOC, many deps, complex error handling, concurrent/distributed, macros
 - **Medium**: moderate size, some complexity, non-trivial logic
 - **Low**: small, straightforward, well-tested, stable
 
 **Output**:
+
 ```markdown
 ## Survey: [target]
 
 | Item | LOC | Purpose | Concern |
-|------|-----|---------|---------|
+| ---- | --- | ------- | ------- |
 
 **Recommended focus**: [highest-concern items]
 ```
@@ -106,22 +108,28 @@ SEQUENTIAL:
 ```
 
 **Output**:
+
 ```markdown
 ## Synthesis
 
 ### High Priority (fix now)
+
 1. [Issue] - [location] - [why urgent]
 
 ### Medium Priority (fix soon)
+
 ...
 
 ### Low Priority (tech debt)
+
 ...
 
 ### Patterns Observed
+
 - [recurring patterns]
 
 ### Cross-Reference Checks
+
 - [x] checked: [what was verified consistent]
 - [!] inconsistent: [what doesn't match]
 ```
@@ -135,6 +143,7 @@ ECHO(>>> Write to file? | Start fixing? | Analyze more?)
 ## User Steering Commands
 
 At any point:
+
 - **"focus on X"** → narrow to specific area
 - **"skip X"** → exclude from analysis
 - **"go deeper on X"** → more detailed narration
@@ -146,12 +155,12 @@ At any point:
 
 ## Comparison: /analyze vs /swarm analyze
 
-| Aspect | /analyze | /swarm analyze |
-|--------|----------|----------------|
-| Execution | Interactive, pausable | Autonomous, parallel |
-| User input | After each phase | Only at start |
-| Best for | Learning, targeted investigation | Broad coverage |
-| Context cost | Lower (you steer) | Higher (full autonomy) |
+| Aspect       | /analyze                         | /swarm analyze         |
+| ------------ | -------------------------------- | ---------------------- |
+| Execution    | Interactive, pausable            | Autonomous, parallel   |
+| User input   | After each phase                 | Only at start          |
+| Best for     | Learning, targeted investigation | Broad coverage         |
+| Context cost | Lower (you steer)                | Higher (full autonomy) |
 
 ---
 

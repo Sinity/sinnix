@@ -1,9 +1,18 @@
 { mkFeatureModule, pkgs, ... }@args:
 mkFeatureModule {
-  path = [ "desktop" "crypto" ];
+  path = [
+    "desktop"
+    "crypto"
+  ];
   description = "Crypto daemon/wallet tooling";
   configFn =
-    { config, lib, pkgs, user, ... }:
+    {
+      config,
+      lib,
+      pkgs,
+      user,
+      ...
+    }:
     let
       userGroup = config.users.users.${user}.group or user;
       moneroDataDir = config.sinnix.paths.cryptoRoot;
@@ -66,21 +75,23 @@ mkFeatureModule {
       '';
     in
     {
-      home-manager.users.${user} = { pkgs, lib, ... }: {
-        home = {
-          packages = with pkgs; [
-            monero-cli
-            monero-gui
-            moneroImportRaw
-            moneroDaemon
-            electrum
-            btcWallet
-          ];
+      home-manager.users.${user} =
+        { pkgs, lib, ... }:
+        {
+          home = {
+            packages = with pkgs; [
+              monero-cli
+              monero-gui
+              moneroImportRaw
+              moneroDaemon
+              electrum
+              btcWallet
+            ];
 
-          file.".bitmonero/bitmonero.conf".text = moneroConfig;
-          sessionVariables.MONERO_DATA_DIR = moneroDataDir;
+            file.".bitmonero/bitmonero.conf".text = moneroConfig;
+            sessionVariables.MONERO_DATA_DIR = moneroDataDir;
+          };
         };
-      };
 
       systemd.tmpfiles.rules = lib.mkAfter [
         "d ${moneroDataDir} 0700 ${user} ${userGroup} -"

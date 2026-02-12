@@ -106,6 +106,7 @@ carmack:
 Load from `personas.yaml`. Core set:
 
 ### Tech/Systems
+
 - **carmack** - Performance, measurement, brutal optimization
 - **hickey** - Simplicity over easiness, hammock-driven, decomplecting
 - **linus** - Code taste, API stability, maintainer perspective
@@ -113,10 +114,12 @@ Load from `personas.yaml`. Core set:
 - **gwern** - Research depth, probability, evidence-based
 
 ### Business
+
 - **patio11** - SaaS, pricing, "charge more", enterprise
 - **pg** - Startups, product-market fit, essays
 
 ### Archetypes
+
 - **devil** - Find holes, stress-test, "what could go wrong?"
 - **maintainer** - 2-year horizon, "will I understand this?"
 - **junior** - Fresh eyes, question implicit knowledge

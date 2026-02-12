@@ -13,57 +13,125 @@ let
   scriptPath = name: "${inputs.self}/scripts/${name}";
 
   # Helper to create a script wrapper
-  mkScript = name: { description, runtimeInputs ? [ ], bashArgs ? "" }: {
-    inherit description runtimeInputs;
-    package = pkgs.writeShellApplication {
-      inherit name runtimeInputs;
-      text = ''
-        exec ${pkgs.bash}/bin/bash ${bashArgs} ${scriptPath name} "$@"
-      '';
+  mkScript =
+    name:
+    {
+      description,
+      runtimeInputs ? [ ],
+      bashArgs ? "",
+    }:
+    {
+      inherit description runtimeInputs;
+      package = pkgs.writeShellApplication {
+        inherit name runtimeInputs;
+        text = ''
+          exec ${pkgs.bash}/bin/bash ${bashArgs} ${scriptPath name} "$@"
+        '';
+      };
     };
-  };
 
   # Registry of scripts needing packaging
   registry = {
     # System utilities
     asbl-no-moar = mkScript "asbl-no-moar" {
       description = "Disable ASBL (Automatic Screen Brightness Limiting) on monitors";
-      runtimeInputs = with pkgs; [ coreutils procps ];
+      runtimeInputs = with pkgs; [
+        coreutils
+        procps
+      ];
     };
 
     hogkill = mkScript "hogkill" {
       description = "Interactive memory hog killer with gum UI";
-      runtimeInputs = with pkgs; [ coreutils gum procps gawk gnugrep gnused ];
+      runtimeInputs = with pkgs; [
+        coreutils
+        gum
+        procps
+        gawk
+        gnugrep
+        gnused
+      ];
     };
 
     nuke-builds = mkScript "nuke-builds" {
       description = "Kill runaway build processes (cargo, nix-daemon, ninja)";
-      runtimeInputs = with pkgs; [ coreutils procps gnugrep systemd ];
+      runtimeInputs = with pkgs; [
+        coreutils
+        procps
+        gnugrep
+        systemd
+      ];
     };
 
     # Diagnostics
     perf-scan = mkScript "perf-scan" {
       description = "Comprehensive system performance benchmarking";
       runtimeInputs = with pkgs; [
-        bash coreutils cpuid dmidecode ethtool fio flent gawk gnugrep gnused gum
-        hw-probe hwdata i7z intel-gpu-tools inxi iperf3 iproute2 iw
-        linuxPackages.turbostat lm_sensors mcelog memtester ncurses netperf
-        nvme-cli numactl pciutils perf phoronix-test-suite powertop procps
-        python3 python3Packages.speedtest-cli rt-tests s-tui smartmontools
-        stress-ng stressapptest sysbench sysstat usbutils util-linux glmark2
+        bash
+        coreutils
+        cpuid
+        dmidecode
+        ethtool
+        fio
+        flent
+        gawk
+        gnugrep
+        gnused
+        gum
+        hw-probe
+        hwdata
+        i7z
+        intel-gpu-tools
+        inxi
+        iperf3
+        iproute2
+        iw
+        linuxPackages.turbostat
+        lm_sensors
+        mcelog
+        memtester
+        ncurses
+        netperf
+        nvme-cli
+        numactl
+        pciutils
+        perf
+        phoronix-test-suite
+        powertop
+        procps
+        python3
+        python3Packages.speedtest-cli
+        rt-tests
+        s-tui
+        smartmontools
+        stress-ng
+        stressapptest
+        sysbench
+        sysstat
+        usbutils
+        util-linux
+        glmark2
       ];
     };
 
     # Audio control
     audio = mkScript "audio" {
       description = "Audio device and volume control with gum UI";
-      runtimeInputs = with pkgs; [ coreutils gum pulseaudio pamixer ];
+      runtimeInputs = with pkgs; [
+        coreutils
+        gum
+        pulseaudio
+        pamixer
+      ];
     };
 
     # Rawlog utilities
     rawlog = mkScript "rawlog" {
       description = "View and analyze raw kernel logs";
-      runtimeInputs = with pkgs; [ coreutils less ];
+      runtimeInputs = with pkgs; [
+        coreutils
+        less
+      ];
     };
 
     rawlog-capture = mkScript "rawlog-capture" {
@@ -74,7 +142,50 @@ let
     # Development helpers
     repo-map = mkScript "repo-map" {
       description = "Generate repository structure map";
-      runtimeInputs = with pkgs; [ coreutils fd ];
+      runtimeInputs = with pkgs; [
+        coreutils
+        fd
+      ];
+    };
+
+    lsp-root = mkScript "lsp-root" {
+      description = "Find project root and exec command from there";
+      runtimeInputs = with pkgs; [ coreutils ];
+    };
+
+    # Storage utilities
+    encrypt-folder = mkScript "encrypt-folder" {
+      description = "Encrypt a folder using gocryptfs";
+      runtimeInputs = with pkgs; [
+        coreutils
+        gocryptfs
+        rsync
+        util-linux
+      ];
+    };
+
+    decrypt-folder = mkScript "decrypt-folder" {
+      description = "Decrypt/mount a gocryptfs folder";
+      runtimeInputs = with pkgs; [
+        coreutils
+        gocryptfs
+      ];
+    };
+
+    mount-nextcloud = mkScript "mount-nextcloud" {
+      description = "Mount Nextcloud WebDAV share";
+      runtimeInputs = with pkgs; [
+        coreutils
+        util-linux
+      ];
+    };
+
+    umount-nextcloud = mkScript "umount-nextcloud" {
+      description = "Unmount Nextcloud WebDAV share";
+      runtimeInputs = with pkgs; [
+        coreutils
+        util-linux
+      ];
     };
   };
 in

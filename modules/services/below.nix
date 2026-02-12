@@ -7,7 +7,12 @@
 # Storage: ~10-20 MB/day at 1s interval with zstd (~10x).
 # No retention limit = accumulate indefinitely (~4-8 GB/year at 1s).
 # Export via: below dump -O json/csv
-{ mkServiceModule, lib, pkgs, ... }@args:
+{
+  mkServiceModule,
+  lib,
+  pkgs,
+  ...
+}@args:
 mkServiceModule {
   name = "below";
   description = "below time-traveling resource monitor";

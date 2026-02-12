@@ -1,14 +1,19 @@
 # Dev shell configuration for nixos-config
 #
-# Integrates devenv.sh with git-hooks.nix for:
-# - Automatic hook installation on shell entry
+# Provides:
 # - Development tools and Nix helpers
 # - Cachix integration
+# - Helper scripts for common operations
 
 { inputs, ... }:
 {
   perSystem =
-    { config, pkgs, system, ... }:
+    {
+      config,
+      pkgs,
+      system,
+      ...
+    }:
     {
       # Development environment with devenv.sh
       # Note: Requires use flake . --no-pure-eval in .envrc for directory detection
@@ -32,10 +37,8 @@
                   rootHash = builtins.substring 0 10 (builtins.hashString "sha256" resolvedRoot);
                 in
                 "/tmp/sinnix-devenv-" + rootHash;
-              lspRootLauncher = import ../modules/lib/lsp-root.nix { inherit pkgs; };
-
-              # Git hooks from git-hooks.nix flake-parts module
-              gitHooksShellHook = config.pre-commit.installationScript;
+              # Script packages from flake registry
+              scriptPkgs = inputs.self.packages.${system};
             in
             {
               # Basic shell information
@@ -77,12 +80,10 @@
                 yq
                 fd
                 ripgrep
-                lspRootLauncher
-              ]
-              # Add packages required by git-hooks
-              ++ config.pre-commit.settings.enabledPackages;
+                scriptPkgs.lsp-root
+              ];
 
-              # Disable devenv's built-in git-hooks (using git-hooks.nix instead)
+              # Disable devenv's built-in git-hooks
               git-hooks.enable = false;
 
               # Binary cache setup
@@ -99,11 +100,6 @@
                   ${pkgs.nix}/bin/nix run ${resolvedRoot}#check
                 '';
 
-                # Run code quality checks (without modifying files)
-                lint.exec = ''
-                  ${pkgs.nix}/bin/nix develop -c pre-commit run --all-files
-                '';
-
                 # Format code according to standard (via treefmt)
                 format.exec = ''
                   ${pkgs.nix}/bin/nix fmt
@@ -115,18 +111,14 @@
                 '';
               };
 
-              # Shell entry - install git hooks and show welcome message
+              # Shell entry - show welcome message
               enterShell = ''
-                # Install git hooks via git-hooks.nix
-                ${gitHooksShellHook}
-
                 echo ""
                 echo "NixOS Configuration Development Environment"
                 echo ""
                 echo "Available commands:"
                 echo "  check   - Validate configuration syntax and structure"
                 echo "  format  - Apply code formatting (nix fmt via treefmt)"
-                echo "  lint    - Run pre-commit hooks on all files"
                 echo "  rebuild - Apply configuration to system (requires sudo)"
                 echo ""
               '';

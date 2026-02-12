@@ -13,6 +13,7 @@ Break large refactors into verified phases. Each phase compiles, tests pass, com
 ## Process
 
 ### Phase 0: Planning
+
 ```
 [refactor:plan]
 1. Understand current state
@@ -35,6 +36,7 @@ Rollback: [how to undo if needed]
 ```
 
 ### Phase N: Execute
+
 ```
 [refactor:phase-N]
 1. Make changes for this phase only
@@ -45,6 +47,7 @@ Rollback: [how to undo if needed]
 ```
 
 ### Completion
+
 ```
 [refactor:complete]
 1. Verify all phases committed
@@ -55,12 +58,14 @@ Rollback: [how to undo if needed]
 ## Phase Design Principles
 
 Good phases:
+
 - Compile independently
 - Don't break other code mid-phase
 - Have clear rollback (git reset)
 - Are small enough to review
 
 Bad phases:
+
 - Leave code in broken state
 - Mix unrelated changes
 - Are too large to understand
@@ -68,6 +73,7 @@ Bad phases:
 ## Commit Discipline
 
 Each phase commit:
+
 ```
 [refactor] Phase N/M: brief description
 
@@ -80,6 +86,7 @@ Part of: [overall refactor goal]
 ## Scope Confirmation
 
 Before starting:
+
 - What's the refactor goal?
 - Acceptable to commit incrementally?
 - Any phases that need user review before proceeding?
@@ -87,6 +94,7 @@ Before starting:
 ## Abort Conditions
 
 Stop and report if:
+
 - Phase introduces test failures that can't be fixed quickly
 - Scope expands beyond original plan
 - Blocking dependency discovered

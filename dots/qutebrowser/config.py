@@ -13,7 +13,7 @@ from qutebrowser.qt.core import QTimer, QUrl
 from qutebrowser.utils import objreg
 
 try:
-    config  # provided by qutebrowser at runtime
+    config  # noqa: B018 - provided by qutebrowser at runtime
 except NameError:  # pragma: no cover - fallback for linting/tests
     from qutebrowser.api import config as _config_stub
 
@@ -166,8 +166,12 @@ DEDUP_SCHEMES = {"http", "https"}
 _connected_windows: set[int] = set()
 _window_callbacks: Dict[int, list] = {}
 _timers: list[QTimer] = []
-_aw_endpoint = os.environ.get("QUTE_ACTIVITYWATCH_URL", "http://127.0.0.1:5600/api/0").rstrip("/")
-_aw_bucket = os.environ.get("QUTE_ACTIVITYWATCH_BUCKET", "aw-watcher-window_qutebrowser")
+_aw_endpoint = os.environ.get(
+    "QUTE_ACTIVITYWATCH_URL", "http://127.0.0.1:5600/api/0"
+).rstrip("/")
+_aw_bucket = os.environ.get(
+    "QUTE_ACTIVITYWATCH_BUCKET", "aw-watcher-window_qutebrowser"
+)
 _aw_client = os.environ.get("QUTE_ACTIVITYWATCH_CLIENT", "qutebrowser-hypr")
 _aw_hostname = socket.gethostname()
 
@@ -218,7 +222,7 @@ def _handle_tab_loaded(tab, ok: bool) -> None:
 
 
 def _iter_tabbed_browsers():
-    for win_id, window in list(objreg.window_registry.items()):
+    for win_id, _window in list(objreg.window_registry.items()):
         try:
             tabbed = objreg.get("tabbed-browser", scope="window", window=win_id)
         except objreg.RegistryUnavailableError:

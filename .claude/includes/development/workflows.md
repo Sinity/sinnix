@@ -1,6 +1,7 @@
 ## Common Workflows
 
 ### Rebuild System
+
 ```bash
 cd /realm/project/sinnix
 direnv allow                    # Activate devshell
@@ -9,6 +10,7 @@ sudo nix run .#switch          # Apply changes
 ```
 
 ### Add New Feature
+
 ```bash
 # 1. Create module
 vim modules/features/desktop/new-feature.nix
@@ -27,6 +29,7 @@ vim CLAUDE.md  # Add to feature list
 ```
 
 ### Add New Package Overlay
+
 ```bash
 # 1. Create overlay file
 vim flake/overlay/package/my-package.nix
@@ -39,6 +42,7 @@ nix build .#nixosConfigurations.sinnix-prime.config.system.build.toplevel
 ```
 
 ### Add New Script
+
 ```bash
 # 1. Create script
 vim scripts/my-script

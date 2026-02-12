@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# View kitty scrollback captures with correct dark bg/bright fg rendering.
+#
+# Usage:
+#   kitty-scrollback-view <file.ansi>      # View single file in less
+#   kitty-scrollback-view --list           # List recent captures
+#   kitty-scrollback-view --last           # View most recent capture
+#   kitty-scrollback-view --html <file>    # Export to HTML with dark bg
+
+CAPTURE_DIR="${KITTY_SCROLLBACK_DIR:-/realm/data/captures/kitty-scrollback}"
+
+case "${1:-}" in
+  --list|-l)
+    echo "Recent captures in $CAPTURE_DIR:"
+    echo ""
+    ls -lt "$CAPTURE_DIR"/*.ansi 2>/dev/null | head -20 | while read -r line; do
+      echo "  $line"
+    done
+    ;;
+
+  --last)
+    latest=$(ls -t "$CAPTURE_DIR"/*.ansi 2>/dev/null | head -1)
+    if [ -z "$latest" ]; then
+      echo "No captures found in $CAPTURE_DIR" >&2
+      exit 1
+    fi
+    echo "Viewing: $latest"
+    exec less -R "$latest"
+    ;;
+
+  --html)
+    shift
+    input="${1:?Usage: kitty-scrollback-view --html <file.ansi>}"
+    output="${input%.ansi}.html"
+
+    # Convert ANSI to HTML with dark background
+    # Uses aha (ANSI HTML Adapter) if available, otherwise basic conversion
+    if command -v aha &>/dev/null; then
+      echo "Converting with aha..."
+      aha --black --title "$(basename "$input")" < "$input" > "$output"
+    else
+      # Fallback: wrap in pre with dark bg, use ansi2html if available
+      if command -v ansi2html &>/dev/null; then
+        ansi2html --bg=dark < "$input" > "$output"
+      else
+        echo "Error: Install 'aha' or 'ansi2html' for HTML export" >&2
+        echo "  nix shell nixpkgs#aha" >&2
+        exit 1
+      fi
+    fi
+    echo "Wrote: $output"
+    ;;
+
+  --help|-h|"")
+    echo "Usage: kitty-scrollback-view [OPTIONS] [FILE]"
+    echo ""
+    echo "View kitty scrollback captures with correct dark bg/bright fg."
+    echo ""
+    echo "Options:"
+    echo "  <file.ansi>    View file with less -R (ANSI colors preserved)"
+    echo "  --list, -l     List recent captures"
+    echo "  --last         View most recent capture"
+    echo "  --html <file>  Export to HTML with dark background"
+    echo ""
+    echo "Notes:"
+    echo "  - View in a dark-themed terminal for correct colors"
+    echo "  - Colors assume black background (kitty default)"
+    echo "  - Use --html for sharing/archiving with preserved styling"
+    ;;
+
+  *)
+    if [ ! -f "$1" ]; then
+      echo "File not found: $1" >&2
+      exit 1
+    fi
+    exec less -R "$1"
+    ;;
+esac

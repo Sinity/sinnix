@@ -1,3 +1,7 @@
+# Storage Infrastructure
+#
+# Filesystem tools, btrfs maintenance, Nextcloud WebDAV.
+# Distinct from features/desktop/storage.nix (user helpers).
 {
   pkgs,
   lib,

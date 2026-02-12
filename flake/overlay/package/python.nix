@@ -1,18 +1,7 @@
-{ ... }: _final: prev:
+{ ... }:
+_final: prev:
 let
   pythonOverrides = _self: super: {
-    # Upstream aggdraw test suite flakes on Python 3.13; keep disabled to avoid eval/switch failures.
-    aggdraw = super.aggdraw.overridePythonAttrs (_old: {
-      doCheck = false;
-    });
-
-    # dependency-injector needs Cython at build time and tests fail with Pydantic v2
-    dependency-injector = super.dependency-injector.overridePythonAttrs (old: {
-      nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ super.cython ];
-      doCheck = false;
-      meta.broken = false;
-    });
-
     # Fix llm build failure by skipping tests
     llm = super.llm.overridePythonAttrs (old: {
       doCheck = false;

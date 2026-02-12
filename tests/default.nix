@@ -5,7 +5,11 @@
 #
 # Note: VM tests would require refactoring how modules consume `inputs`
 # (currently needed at import time, which nixosTest doesn't support well).
-{ inputs, pkgs, system }:
+{
+  inputs,
+  pkgs,
+  system,
+}:
 let
   inherit (pkgs) lib;
 in
