@@ -26,7 +26,6 @@ let
     inputs.agenix.nixosModules.default
     inputs.stylix.nixosModules.stylix
     inputs.sinex.nixosModules.default
-    inputs.polylogue.nixosModules.default
     (import ./overlay { inherit inputs overlayLib; })
   ];
   sharedSpecialArgs = {

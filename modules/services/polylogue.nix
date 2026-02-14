@@ -1,13 +1,8 @@
-# Polylogue - AI conversation archive service
+# Polylogue - AI conversation archive
 #
-# Provides scheduled ingestion of AI chat exports from multiple sources:
-# - ChatGPT/Claude exports via inbox symlinks
-# - Claude Code sessions from ~/.claude/projects
-# - Codex sessions from ~/.codex/sessions
-# - Gemini via Google Drive integration
-#
-# Uses user-level systemd timer for periodic runs, matching the XDG-based
-# storage layout the user already has configured.
+# Periodic ingestion of AI chat exports (ChatGPT, Claude, Claude Code,
+# Codex, Gemini). Sources are auto-discovered from XDG paths; no
+# configuration needed beyond enabling the service.
 {
   config,
   lib,
@@ -25,49 +20,37 @@ in
     interval = lib.mkOption {
       type = lib.types.str;
       default = "15min";
-      description = "How often to run polylogue ingestion (systemd timer format)";
-    };
-
-    onStartupDelay = lib.mkOption {
-      type = lib.types.str;
-      default = "2min";
-      description = "Delay before first run after boot";
+      description = "How often to run polylogue ingestion (systemd timer format).";
     };
   };
 
   config = lib.mkIf cfg.enable {
-    # Ensure polylogue package is available
     environment.systemPackages = [ pkgs.polylogue ];
 
-    # User-level systemd service and timer via Home Manager
     home-manager.users.${userName} = {
       systemd.user.services.polylogue-run = {
-        Unit = {
-          Description = "Polylogue ingest/render/index";
-          After = [ "network-online.target" ];
-          Wants = [ "network-online.target" ];
-        };
+        Unit.Description = "Polylogue ingest/render/index";
         Service = {
           Type = "oneshot";
           ExecStart = "${pkgs.polylogue}/bin/polylogue --plain run";
-          Environment = [
-            "POLYLOGUE_FORCE_PLAIN=1"
-          ];
+          # Background priority — ingestion shouldn't compete with interactive work
+          Nice = 19;
+          IOSchedulingClass = "idle";
+          # Bound runtime: prevents hangs if Drive API stalls
+          TimeoutStartSec = "10min";
         };
       };
 
       systemd.user.timers.polylogue-run = {
-        Unit = {
-          Description = "Schedule Polylogue runs";
-        };
+        Unit.Description = "Polylogue periodic sync";
         Timer = {
-          OnStartupSec = cfg.onStartupDelay;
+          OnStartupSec = "2min";
           OnUnitActiveSec = cfg.interval;
+          # Catch up on missed runs (laptop was asleep)
+          Persistent = true;
           Unit = "polylogue-run.service";
         };
-        Install = {
-          WantedBy = [ "timers.target" ];
-        };
+        Install.WantedBy = [ "timers.target" ];
       };
     };
   };

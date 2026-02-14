@@ -123,6 +123,17 @@ let
     })
 
     (mkServiceTest {
+      name = "services-power-watchdog";
+      service = "power-watchdog";
+      assertions = config: [
+        {
+          assertion = config.systemd.services ? power-watchdog;
+          message = "power-watchdog service must exist";
+        }
+      ];
+    })
+
+    (mkServiceTest {
       name = "services-transmission";
       service = "transmission";
       assertions = config: [

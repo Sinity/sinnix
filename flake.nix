@@ -46,7 +46,6 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # polylogue uses its own nixpkgs pin (24.05) to avoid dependency-injector build issues
     polylogue = {
       url = "git+file:///realm/project/polylogue?ref=master";
     };

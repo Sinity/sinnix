@@ -25,5 +25,6 @@
     below.enable = true;
     sinex.enable = false;
     polylogue.enable = true;
+    power-watchdog.enable = true;
   };
 }
