@@ -7,18 +7,12 @@
 let
   inherit (config.sinnix.paths)
     realmRoot
-    dataRoot
     capturesRoot
     outerRealm
     neoOuterRealm
     ;
   username = config.sinnix.user.name;
-  userCfg = config.users.users.${username};
-  # NixOS auto-assigns UIDs; .uid can be null so use explicit fallback
-  userUid = builtins.toString (if userCfg.uid != null then userCfg.uid else 1000);
-  primaryGroupName = userCfg.group;
-  groupCfg = config.users.groups.${primaryGroupName};
-  primaryGroupId = builtins.toString (if groupCfg.gid != null then groupCfg.gid else 100);
+  primaryGroupName = config.users.users.${username}.group;
 in
 {
   services = {

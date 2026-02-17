@@ -3,7 +3,7 @@ _final: prev:
 let
   pythonOverrides = _self: super: {
     # Fix llm build failure by skipping tests
-    llm = super.llm.overridePythonAttrs (old: {
+    llm = super.llm.overridePythonAttrs (_old: {
       doCheck = false;
       # Force skip check phase if doCheck is ignored
       checkPhase = "true";

@@ -5,10 +5,10 @@ result-*
 .envrc.local
 
 # Development
-.devenv/
-devenv.local.nix
 .venv/
 .pre-commit-config.yaml
+__pycache__/
+*.pyc
 
 # AI
 .aider*

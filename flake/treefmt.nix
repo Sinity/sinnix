@@ -6,7 +6,7 @@
 { ... }:
 {
   perSystem =
-    { pkgs, ... }:
+    { ... }:
     {
       treefmt = {
         # Identify project root

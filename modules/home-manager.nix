@@ -40,7 +40,7 @@ in
       home = {
         username = user;
         homeDirectory = "/home/${user}";
-        stateVersion = config.system.stateVersion;
+        inherit (config.system) stateVersion;
         sessionPath = [ "$HOME/.local/bin" ];
         sessionVariables = {
           FLAKE = flakePath;

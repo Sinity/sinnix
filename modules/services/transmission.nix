@@ -16,7 +16,6 @@ mkServiceModule {
       config,
       lib,
       pkgs,
-      cfg,
       ...
     }:
     let

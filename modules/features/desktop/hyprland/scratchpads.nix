@@ -124,9 +124,8 @@ let
 
   # Generate .conf file content for toggle-scratch script
   mkConfContent =
-    name: spec:
+    _name: spec:
     let
-      commandStr = lib.concatStringsSep " " (map (s: ''"${s}"'') spec.command);
       lines = [
         "COMMAND=(${lib.concatStringsSep " " spec.command})"
         ''CLASS="${spec.class}"''

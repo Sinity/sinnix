@@ -29,17 +29,7 @@
       })
     ];
 
-    # Reduce XKB warnings by using a cleaner keyboard configuration
-    # The warnings are cosmetic but create log noise
-    services.xserver.xkb = {
-      layout = lib.mkDefault "pl";
-      # Use evdev rules which have cleaner modifier definitions
-      options = lib.mkDefault "";
-    };
-
-    # Ensure Hyprland uses the same keyboard layout
     home-manager.users.${config.sinnix.user.name} = {
-      wayland.windowManager.hyprland.settings.input.kb_layout = lib.mkForce "pl";
 
       # User services log reduction for home-manager-managed services
       systemd.user.services = {

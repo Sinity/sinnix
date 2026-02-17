@@ -13,6 +13,6 @@
     in
     {
       # Export all script packages from registry
-      packages = scriptRegistry.packages;
+      inherit (scriptRegistry) packages;
     };
 }

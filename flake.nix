@@ -31,10 +31,6 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Development tools
-    devenv.url = "github:cachix/devenv/85b34019389c192e10e3508745c15b98060216f5";
-    devenv.inputs.nixpkgs.follows = "nixpkgs";
-
     # Custom tools and integrations (prefer local clones under /realm/project)
     intercept-bounce = {
       url = "git+file:///realm/project/intercept-bounce?ref=master";

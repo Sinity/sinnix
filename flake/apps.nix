@@ -1,8 +1,8 @@
 # CLI applications for nixos-config
 #
-# This module defines system-wide CLI commands that can be run
-# with `nix run .#<command>`. These commands provide convenient
-# access to common operations without having to enter the dev shell.
+# Provides `nix run .#<command>` convenience wrappers.
+# Only for multi-step operations or commands needing nix closure wiring.
+# Don't wrap single nix commands (use nix flake check, nix fmt, nix flake update directly).
 
 { inputs, ... }:
 {
@@ -33,40 +33,12 @@
       };
     in
     {
-      # CLI applications
       apps = {
-        # Default app: check configuration
-        default = self'.apps.check;
+        default = self'.apps.switch;
 
-        # Validate NixOS configuration
-        check = mkApp "check" ''
-          ${resolveFlakeDir}
-          echo "Checking NixOS configuration at $_flake_dir..."
-          ${pkgs.nix}/bin/nix flake check "$_flake_dir"
-          echo "Configuration check complete!"
-        '' "Validate NixOS configuration syntax and structure";
-
-        # Format Nix files
-        format = mkApp "format" ''
-          ${resolveFlakeDir}
-          echo "Formatting Nix files in $_flake_dir..."
-          ${pkgs.findutils}/bin/find "$_flake_dir" -name "*.nix" -type f -not -path "*/nix/store/*" -print0 | \
-          ${pkgs.findutils}/bin/xargs -0 -P 4 -I{} ${pkgs.nixfmt}/bin/nixfmt {}
-          echo "Formatting complete!"
-        '' "Format Nix files according to the RFC style";
-
-        fmt-check = mkApp "fmt-check" ''
-          if [ "$#" -eq 0 ]; then
-            echo "Usage: nix run .#fmt-check -- <files...>"
-            exit 1
-          fi
-          ${pkgs.nixfmt}/bin/nixfmt --check "$@"
-        '' "Check whether specific Nix files conform to nixfmt";
-
-        # Lint Nix files
+        # Lint Nix and shell files (deadnix + statix + shellcheck)
         lint = mkApp "lint" ''
           ${resolveFlakeDir}
-          echo "Linting Nix files in $_flake_dir..."
           cd "$_flake_dir"
           echo "Running deadnix..."
           ${pkgs.deadnix}/bin/deadnix --fail .
@@ -107,16 +79,7 @@
             --log-format internal-json -v 2>&1 | ${pkgs.nix-output-monitor}/bin/nom --json
         '' "Apply configuration changes to the system";
 
-        # Update flake dependencies
-        update = mkApp "update" ''
-          ${resolveFlakeDir}
-          echo "Updating flake inputs for $_flake_dir..."
-          cd "$_flake_dir"
-          ${pkgs.nix}/bin/nix flake update
-          echo "Flake inputs updated. Run 'sudo nix run $_flake_dir#switch' to apply."
-        '' "Update flake dependencies to their latest versions";
-
-        # Clean up old generations
+        # Clean up old generations + gc + optimize
         clean = mkApp "clean" ''
           if [ "$(id -u)" -ne 0 ]; then
             echo "Error: This command must be run as root (use 'sudo nix run .#clean')"

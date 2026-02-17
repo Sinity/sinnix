@@ -12,7 +12,20 @@
 { inputs, lib }:
 let
   featureLib = import ../modules/lib/features.nix { inherit lib; };
+  systemdLib = import ../modules/lib/systemd-hardening.nix { inherit lib; };
   overlayLib = import ../modules/lib/overlay-helpers.nix { inherit lib; };
+
+  # Extend lib with sinnix helpers — mirrors flake/nixos.nix so that
+  # modules/default.nix can call lib.sinnix.mkAutoImports during tests.
+  extendedLib = lib.extend (
+    _final: _prev: {
+      sinnix = {
+        inherit (featureLib) mkPAMLimits mkAutoImports mkBundleModule;
+        systemd = systemdLib;
+        overlay = overlayLib;
+      };
+    }
+  );
 
   # Create a pure flake source for hermetic evaluation
   flakeSource = builtins.path {
@@ -32,12 +45,12 @@ let
     inherit (inputs)
       scribe-tap
       intercept-bounce
-      devenv
-      nur
       stylix
       ;
     inherit (inputs) nix-vscode-extensions disko nixpkgs;
-    self = flakeSource;
+    self = inputs.self // {
+      outPath = flakeSource;
+    };
   };
 
   # Base modules required for all tests
@@ -60,8 +73,12 @@ let
 
   # Mock filesystem roots for test VMs (prevents real FS dependencies)
   mountTmpfsRoots =
-    { config, ... }:
+    { ... }:
     {
+      fileSystems."/" = {
+        device = "tmpfs";
+        fsType = "tmpfs";
+      };
       fileSystems."/realm" = {
         device = "tmpfs";
         fsType = "tmpfs";
@@ -76,12 +93,16 @@ let
 
   # Base test configuration: minimal, no desktop, no secrets
   baseTestConfig =
-    { ... }:
+    { lib, ... }:
     {
+      # Minimal NixOS requirements for evaluation
+      boot.loader.grub.enable = false;
+      programs.zsh.enable = true;
+
       sinnix = {
-        machine.isDesktop = false;
-        secrets.enable = false;
-        bundles.desktop.enable = false;
+        machine.isDesktop = lib.mkDefault false;
+        secrets.enable = lib.mkDefault false;
+        bundles.desktop.enable = lib.mkDefault false;
       };
     };
 
@@ -153,18 +174,26 @@ let
           ++ spec.modules
           ++ [
             (
-              { config, lib, ... }:
+              { config, ... }:
               {
                 assertions = spec.assertions config;
               }
             )
           ];
-        specialArgs = sharedSpecialArgs;
+        specialArgs = sharedSpecialArgs // {
+          lib = extendedLib;
+        };
       };
     in
-    pkgs.runCommand "nixos-${spec.name}-config-check" { } ''
-      touch $out
-    '';
+    pkgs.runCommand "nixos-${spec.name}-config-check"
+      {
+        # Force evaluation of the NixOS config — this triggers assertion checks.
+        # Without this reference, the nixosSystem call is dead code.
+        systemDrv = evaluated.config.system.build.toplevel;
+      }
+      ''
+        touch $out
+      '';
 
   # Generate checks for all systems from a list of test specs
   mkSystemChecks =

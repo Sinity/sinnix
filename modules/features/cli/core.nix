@@ -35,16 +35,8 @@ mkFeatureModule {
 
       systemd.coredump.enable = true;
 
-      services = {
-        dbus = {
-          enable = true;
-          implementation = "broker";
-          brokerPackage = pkgs.dbus-broker;
-        };
-
-        # Disable GNOME keyring - using GPG agent for SSH key management instead
-        gnome.gnome-keyring.enable = lib.mkForce false;
-      };
+      # Disable GNOME keyring - using GPG agent for SSH key management instead
+      services.gnome.gnome-keyring.enable = lib.mkForce false;
 
       # Prevent PAM from starting keyring on login (conflicts with gpg-agent SSH)
       security.pam.services.login.enableGnomeKeyring = lib.mkForce false;

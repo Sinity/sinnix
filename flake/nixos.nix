@@ -13,7 +13,7 @@ let
 
   # Extend lib with sinnix helpers globally available
   extendedLib = lib.extend (
-    final: prev: {
+    _final: _prev: {
       sinnix = {
         inherit (featureLib) mkPAMLimits mkAutoImports mkBundleModule;
         systemd = systemdLib;

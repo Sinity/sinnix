@@ -13,7 +13,9 @@ mkFeatureModule {
       ...
     }:
     let
-      githubTokenPath = config.sinnix.secrets.paths."github-token";
+      secretsEnabled = config.sinnix.secrets.enable;
+      githubTokenPath =
+        if secretsEnabled then config.sinnix.secrets.paths."github-token" else "/dev/null";
       githubHelper = ''!f(){ if [ -r ${githubTokenPath} ]; then token="$(tr -d '\r\n' < ${githubTokenPath})"; printf 'username=x-access-token\npassword=%s\n' "$token"; fi; }; f'';
     in
     {

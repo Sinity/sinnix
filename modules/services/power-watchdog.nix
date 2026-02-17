@@ -30,7 +30,7 @@
   ...
 }@args:
 let
-  capturesRoot = config.sinnix.paths.capturesRoot;
+  inherit (config.sinnix.paths) capturesRoot;
   dataDir = "${capturesRoot}/power-watchdog";
   username = config.sinnix.user.name;
 

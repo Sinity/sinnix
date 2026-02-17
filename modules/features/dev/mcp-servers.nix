@@ -104,28 +104,20 @@ mkFeatureModule {
           };
 
           home = {
-            packages = [
-              mcpQdrantBin
-              mcpPostgresBin
-              mcpSqliteBin
-              mcpContext7Bin
-              mcpFirecrawlBin
-              mcpPlaywrightBin
-              mcpCclspBin
-            ];
-
             activation = {
-              restoreConfigstore = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-                if [ -f ${secretPaths."configstore-update-notifier"} ]; then
-                  mkdir -p "$HOME/.config/configstore"
-                  rm -rf "$HOME/.config/configstore/update-notifier-@google"
-                  if ! ${pkgs.gzip}/bin/gzip -dc ${
-                    secretPaths."configstore-update-notifier"
-                  } | ${pkgs.gnutar}/bin/tar -xC "$HOME/.config/configstore"; then
-                    echo "warning: unable to restore configstore notifier archive" >&2
+              restoreConfigstore = lib.mkIf (secretPaths ? "configstore-update-notifier") (
+                lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+                  if [ -f ${secretPaths."configstore-update-notifier"} ]; then
+                    mkdir -p "$HOME/.config/configstore"
+                    rm -rf "$HOME/.config/configstore/update-notifier-@google"
+                    if ! ${pkgs.gzip}/bin/gzip -dc ${
+                      secretPaths."configstore-update-notifier"
+                    } | ${pkgs.gnutar}/bin/tar -xC "$HOME/.config/configstore"; then
+                      echo "warning: unable to restore configstore notifier archive" >&2
+                    fi
                   fi
-                fi
-              '';
+                ''
+              );
               prepareCodexSkills = lib.hm.dag.entryBefore [ "linkGeneration" ] ''
                 if [ -e "$HOME/.codex/skills" ] && [ ! -L "$HOME/.codex/skills" ]; then
                   rm -rf "$HOME/.codex/skills"

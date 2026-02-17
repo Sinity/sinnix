@@ -36,33 +36,33 @@ let
     xfsprogs
     e2fsprogs
   ];
+  secretsEnabled = config.sinnix.secrets.enable;
 in
 {
-  environment = {
-    systemPackages = lib.mkAfter (baseStoragePackages ++ storageMaintenancePackages);
+  environment.systemPackages = lib.mkAfter (baseStoragePackages ++ storageMaintenancePackages);
 
-    etc = {
-      "davfs2/secrets" = {
-        source = config.sinnix.secrets.paths.davfs2-secrets;
-        mode = "0600";
-        user = "root";
-        group = "root";
-      };
-
-      "davfs2/certs/${nextcloudHost}.pem" = {
-        mode = "0644";
-        text = nextcloudCert;
-      };
-
-      "davfs2/servers/${nextcloudHost}".text = ''
-        servercert sha256:0E:BA:10:DB:78:60:43:37:BD:5C:0A:60:BA:71:04:4A:FD:BF:84:D4:62:40:4A:63:8D:CD:12:5F:D4:BE:7E:8D
-      '';
+  # Nextcloud/davfs2 config requires secrets (davfs2-secrets agenix path)
+  environment.etc = lib.mkIf secretsEnabled {
+    "davfs2/secrets" = {
+      source = config.sinnix.secrets.paths.davfs2-secrets;
+      mode = "0600";
+      user = "root";
+      group = "root";
     };
+
+    "davfs2/certs/${nextcloudHost}.pem" = {
+      mode = "0644";
+      text = nextcloudCert;
+    };
+
+    "davfs2/servers/${nextcloudHost}".text = ''
+      servercert sha256:0E:BA:10:DB:78:60:43:37:BD:5C:0A:60:BA:71:04:4A:FD:BF:84:D4:62:40:4A:63:8D:CD:12:5F:D4:BE:7E:8D
+    '';
   };
 
-  security.pki.certificates = lib.mkAfter [ nextcloudCert ];
+  security.pki.certificates = lib.mkIf secretsEnabled (lib.mkAfter [ nextcloudCert ]);
 
-  services.davfs2 = {
+  services.davfs2 = lib.mkIf secretsEnabled {
     enable = true;
     settings.globalSection = {
       use_locks = "0";
@@ -83,7 +83,7 @@ in
     fi
   '';
 
-  fileSystems."/mnt/nextcloud" = {
+  fileSystems."/mnt/nextcloud" = lib.mkIf secretsEnabled {
     device = "https://${nextcloudHost}/remote.php/dav/files/USER/";
     fsType = "davfs";
     noCheck = true;
