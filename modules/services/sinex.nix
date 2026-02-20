@@ -19,46 +19,112 @@ in
   # Only configure if sinex module is available from the flake input
   config = lib.mkIf (config.services ? sinex) (
     lib.mkMerge [
-      # Package defaults
+      # Package defaults — applied whenever sinex is referenced at all
       (lib.mkIf (cfg.enable || cfg.provisionDatabase) {
-        services.sinex.package = lib.mkDefault sinexPkgs.sinex;
+        services.sinex.package    = lib.mkDefault sinexPkgs.sinex;
         services.sinex.cliPackage = lib.mkDefault sinexPkgs.sinexctl;
       })
 
-      # Database provisioning
-      (lib.mkIf (cfg.enable || cfg.provisionDatabase) {
-        services.sinex.database.enable = true;
-        services.sinex.database.autoSetup = false;
+      # Database provisioning only (no running services)
+      (lib.mkIf cfg.provisionDatabase {
+        services.sinex.database = {
+          enable    = true;
+          autoSetup = true;
+          host      = "127.0.0.1";
+          name      = "sinex";
+          user      = "sinex";
+          passwordFile = config.sinex.secrets.paths."sinex-local-db";
+        };
       })
 
       # Full service configuration
       (lib.mkIf cfg.enable {
-        systemd.services."sinex-blob-init" = {
-          path = [
-            pkgs.git
-            pkgs.git-annex
-          ];
-          # Ensure database is ready before blob init
-          after = [ "postgresql.service" ];
-          requires = [ "postgresql.service" ];
-          serviceConfig = {
-            Type = "oneshot";
-            RemainAfterExit = true;
-          };
-        };
-
         services.sinex = {
           enable = true;
-          core.enable = true;
-          nats.enable = true;
-          storage.blob.enable = true;
-          storage.dlq.enable = true;
-          lifecycle.maintenance.enable = true;
+
+          secrets.enableAgenix = true;
+          nats.environment     = "prod";
+
+          stateRoot = "${indicesRoot}/sinex";
+          logLevel  = "info";
 
           users.target = config.sinnix.user.name;
-          logLevel = "debug";
-          stateRoot = "${indicesRoot}/sinex";
-          satellites.filesystem.watchPaths = [ realmRoot ];
+
+          database = {
+            autoSetup    = true;
+            host         = "127.0.0.1";
+            name         = "sinex";
+            user         = "sinex";
+            passwordFile = config.sinex.secrets.paths."sinex-local-db";
+          };
+
+          core = {
+            enable = true;
+            gateway.autoGenerateTls = true;
+          };
+
+          nats.enable = true;
+
+          storage = {
+            blob.enable = true;
+            dlq.enable  = true;
+          };
+
+          lifecycle = {
+            preflight.enable   = true;
+            maintenance.enable = true;
+          };
+
+          satellites = {
+            enable = true;
+
+            # watchPaths defaults to ["/home/${users.target}"] automatically;
+            # extend with the realm workspace as well.
+            filesystem = {
+              enable     = true;
+              watchPaths = [ "/home/${config.sinnix.user.name}" realmRoot ];
+            };
+
+            terminal.enable = true;
+
+            desktop = {
+              enable = true;
+              clipboard.enable = true;
+            };
+
+            system.enable = true;
+
+            automata = {
+              enable                  = true;
+              canonicalizer.enable    = true;
+              healthAggregator.enable = true;
+            };
+          };
+
+          observability = {
+            enable = true;
+            monitoring = {
+              enable = true;
+              prometheus = {
+                listen    = "127.0.0.1";
+                port      = 9090;
+                retention = "30d";
+                exporters = {
+                  node     = true;
+                  postgres = true;
+                };
+              };
+              grafana = {
+                enable = true;
+                port   = 3000;
+              };
+            };
+          };
+
+          shell.kitty = {
+            enable        = true;
+            autoConfigure = true;
+          };
         };
       })
     ]
