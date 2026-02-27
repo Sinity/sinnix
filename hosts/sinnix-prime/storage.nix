@@ -16,7 +16,11 @@ let
 in
 {
   services = {
-    fstrim.enable = true; # periodically TRIM ssd storage devices
+    # fstrim disabled: using discard=async on SSD mounts instead.
+    # Weekly batch TRIM caused 1.5h+ I/O saturation on multi-TB BTRFS volumes,
+    # blocking all processes. discard=async coalesces discards continuously in
+    # the background without a stall.
+    fstrim.enable = false;
     gvfs.enable = true; # dynamic mount
   };
 
@@ -28,6 +32,7 @@ in
         "subvol=@"
         "compress=zstd"
         "noatime"
+        "discard=async"
       ];
     };
 
@@ -38,6 +43,7 @@ in
         "subvol=@nix"
         "compress=zstd"
         "noatime"
+        "discard=async"
       ];
     };
 
@@ -48,6 +54,7 @@ in
         "subvol=@var"
         "compress=zstd"
         "noatime"
+        "discard=async"
       ];
     };
 
@@ -67,6 +74,7 @@ in
         "relatime"
         "lazytime"
         "nofail"
+        "discard=async"
       ];
     };
 
@@ -102,7 +110,9 @@ in
 
   };
 
-  # No disk swap — zram + earlyoom in modules/performance.nix
+  # No disk swap. Zram-only (in modules/performance.nix) as a brief buffer
+  # before earlyoom kills runaway processes. Large disk swap causes the system
+  # to crawl for minutes instead of quickly killing the offender.
   swapDevices = [ ];
 
   systemd = {

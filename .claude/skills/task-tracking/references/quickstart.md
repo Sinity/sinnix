@@ -175,7 +175,8 @@ claude_session_summary
 ## Integration Notes
 
 - Helpers are in: `/realm/project/sinnix/dots/taskwarrior/claude-helpers.sh`
-- Full skill in: `/realm/project/sinnix/.claude/skills/task-tracking.md`
+- Full skill in: `/realm/project/sinnix/.claude/skills/task-tracking/SKILL.md`
+- Extended reference: `/realm/project/sinnix/.claude/skills/task-tracking/references/extended.md`
 - Documentation: `/realm/project/sinnix/dots/README-claude-task-tracking.md`
 
 Start using NOW! Track the current conversation as practice.

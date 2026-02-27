@@ -21,16 +21,8 @@
       "command": ["lsp-root", "bash-language-server", "start"]
     },
     {
-      "extensions": ["lua"],
-      "command": ["lsp-root", "lua-language-server"]
-    },
-    {
       "extensions": ["yml", "yaml"],
       "command": ["lsp-root", "yaml-language-server", "--stdio"]
-    },
-    {
-      "extensions": ["md", "markdown"],
-      "command": ["lsp-root", "marksman"]
     },
     {
       "extensions": ["ts", "tsx", "js", "jsx"],

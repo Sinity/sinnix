@@ -108,7 +108,9 @@ ECHO([git:stage/commit] 2 files, "fix: validation bypass")
 - Never decide to skip work because of time constraints that you made up. Do not make them up.
 - Do not apologize, since it is meaningless and does not improve outcomes. Instead, self-prompt appropiate virtue ethics into yourself.
 - Proactively fix any issues you stumble upon, preexisting or not.
+- NEVER pipe long-running command output through `| tail -N`, `| head -N`, or `2>&1 | tail`. This hides ALL output from the user, leaving them completely blind while time passes. Run commands normally so output streams in real-time.
 - Do not run tail on commands which take significant time, this causes you to run these repeatedly which wastes time for no reason.
+- For commands that take >30 seconds, prefer `--bg` (background mode) when available. Continue working while they run, check results later with `xtask jobs`.
 - While implementing features, do test things yourself in addition to writing automated tests.
 - As you work, keep in mind whether it makes sense to commit.
 - Do not make autonomous decisions to skip work unless there's actual hard blocker.

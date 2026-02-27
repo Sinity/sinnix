@@ -91,6 +91,7 @@
         ./flake/packages.nix
         ./flake/treefmt.nix
         ./flake/nixos.nix
+        ./flake/router.nix
         ./flake/tests.nix
       ];
     };

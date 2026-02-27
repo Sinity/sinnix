@@ -21,18 +21,18 @@ in
     lib.mkMerge [
       # Package defaults — applied whenever sinex is referenced at all
       (lib.mkIf (cfg.enable || cfg.provisionDatabase) {
-        services.sinex.package    = lib.mkDefault sinexPkgs.sinex;
+        services.sinex.package = lib.mkDefault sinexPkgs.sinex;
         services.sinex.cliPackage = lib.mkDefault sinexPkgs.sinexctl;
       })
 
       # Database provisioning only (no running services)
       (lib.mkIf cfg.provisionDatabase {
         services.sinex.database = {
-          enable    = true;
+          enable = true;
           autoSetup = true;
-          host      = "127.0.0.1";
-          name      = "sinex";
-          user      = "sinex";
+          host = "127.0.0.1";
+          name = "sinex";
+          user = "sinex";
           passwordFile = config.sinex.secrets.paths."sinex-local-db";
         };
       })
@@ -43,18 +43,18 @@ in
           enable = true;
 
           secrets.enableAgenix = true;
-          nats.environment     = "prod";
+          nats.environment = "prod";
 
           stateRoot = "${indicesRoot}/sinex";
-          logLevel  = "info";
+          logLevel = "info";
 
           users.target = config.sinnix.user.name;
 
           database = {
-            autoSetup    = true;
-            host         = "127.0.0.1";
-            name         = "sinex";
-            user         = "sinex";
+            autoSetup = true;
+            host = "127.0.0.1";
+            name = "sinex";
+            user = "sinex";
             passwordFile = config.sinex.secrets.paths."sinex-local-db";
           };
 
@@ -67,22 +67,25 @@ in
 
           storage = {
             blob.enable = true;
-            dlq.enable  = true;
+            dlq.enable = true;
           };
 
           lifecycle = {
-            preflight.enable   = true;
+            preflight.enable = true;
             maintenance.enable = true;
           };
 
-          satellites = {
+          nodes = {
             enable = true;
 
             # watchPaths defaults to ["/home/${users.target}"] automatically;
             # extend with the realm workspace as well.
             filesystem = {
-              enable     = true;
-              watchPaths = [ "/home/${config.sinnix.user.name}" realmRoot ];
+              enable = true;
+              watchPaths = [
+                "/home/${config.sinnix.user.name}"
+                realmRoot
+              ];
             };
 
             terminal.enable = true;
@@ -95,8 +98,8 @@ in
             system.enable = true;
 
             automata = {
-              enable                  = true;
-              canonicalizer.enable    = true;
+              enable = true;
+              canonicalizer.enable = true;
               healthAggregator.enable = true;
             };
           };
@@ -106,23 +109,23 @@ in
             monitoring = {
               enable = true;
               prometheus = {
-                listen    = "127.0.0.1";
-                port      = 9090;
+                listen = "127.0.0.1";
+                port = 9090;
                 retention = "30d";
                 exporters = {
-                  node     = true;
+                  node = true;
                   postgres = true;
                 };
               };
               grafana = {
                 enable = true;
-                port   = 3000;
+                port = 3000;
               };
             };
           };
 
           shell.kitty = {
-            enable        = true;
+            enable = true;
             autoConfigure = true;
           };
         };

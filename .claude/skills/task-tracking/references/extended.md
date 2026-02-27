@@ -1,10 +1,3 @@
----
-name: task-tracking
-description: Agent-agnostic taskwarrior/timewarrior reference with streamlined conventions.
-trigger: When you need detailed examples or complex scenarios
-auto_invoke: false
----
-
 # Task & Time Tracking (Agent-Agnostic)
 
 Core rules live in `/realm/project/sinnix/dots/ai/instructions/AGENTS.md`.

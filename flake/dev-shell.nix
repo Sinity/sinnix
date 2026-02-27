@@ -44,6 +44,9 @@
           # Secret management
           inputs.agenix.packages.${system}.default
 
+          # Router access
+          pkgs.sshpass
+
           # Utilities
           pkgs.nix-output-monitor
           pkgs.jq

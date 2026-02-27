@@ -24,7 +24,7 @@
     terminal-capture.enable = true;
     below.enable = true;
     sinex.enable = false;
-    polylogue.enable = true;
+    polylogue.enable = false;
     power-watchdog.enable = true;
   };
 }

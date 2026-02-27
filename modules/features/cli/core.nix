@@ -64,10 +64,13 @@ mkFeatureModule {
               fzf
               bc
               at
+              speedtest-cli
+              stress-ng
             ]
             ++ lib.filter (p: p != null) [
               (pkgs.tasksh or null)
               (pkgs.taskwarrior-tui or null)
+              (pkgs.sshpass or null) # For initial router deploy (password auth)
             ]
           );
 
@@ -81,7 +84,18 @@ mkFeatureModule {
           programs.ssh = {
             enable = true;
             enableDefaultConfig = false;
-            matchBlocks."*".addKeysToAgent = "yes";
+            matchBlocks = {
+              "*".addKeysToAgent = "yes";
+              # Router: `ssh sinnix-gw` just works
+              "sinnix-gw" = {
+                hostname = "192.168.1.1";
+                user = "root";
+              };
+              "sinnix-gw.lan" = {
+                hostname = "192.168.1.1";
+                user = "root";
+              };
+            };
           };
 
           programs.btop = {

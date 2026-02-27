@@ -49,9 +49,20 @@ mkFeatureModule {
           -- python ${config.sinnix.paths.projectRoot}/scripts/mcp-qdrant.py
       '';
       mcpPostgresBin = pkgs.writeShellScriptBin "mcp-postgres" ''
-        export POSTGRES_URL="postgresql://sinex:sinex@localhost:5432/sinex_dev"
         set -euo pipefail
-        exec npx -y @modelcontextprotocol/server-postgres "$POSTGRES_URL"
+        # Prefer explicit overrides and project-provided DATABASE_URL (e.g. sinex xtask infra).
+        if [ -n "''${POSTGRES_URL:-}" ]; then
+          db_url="$POSTGRES_URL"
+        elif [ -n "''${DATABASE_URL:-}" ]; then
+          db_url="$DATABASE_URL"
+        elif [ -n "''${SINEX_DEV_STATE_DIR:-}" ]; then
+          db_url="postgresql:///sinex_dev?host=''${SINEX_DEV_STATE_DIR}/run&port=''${SINEX_DEV_PG_PORT:-5432}&user=''${USER:-sinity}"
+        elif [ -n "''${PGHOST:-}" ]; then
+          db_url="postgresql:///''${PGDATABASE:-sinex_dev}?host=''${PGHOST}&port=''${PGPORT:-5432}&user=''${PGUSER:-''${USER:-sinity}}"
+        else
+          db_url="postgresql://sinex:sinex@localhost:5432/sinex_dev"
+        fi
+        exec npx -y @modelcontextprotocol/server-postgres "$db_url"
       '';
       mcpSqliteBin = pkgs.writeShellScriptBin "mcp-sqlite" ''
         set -euo pipefail
@@ -72,7 +83,13 @@ mkFeatureModule {
       '';
       mcpCclspBin = pkgs.writeShellScriptBin "mcp-cclsp" ''
         set -euo pipefail
-        export CCLSP_CONFIG_PATH="''${CCLSP_CONFIG_PATH:-$HOME/.config/claude/cclsp.json}"
+        if [ -z "''${CCLSP_CONFIG_PATH:-}" ]; then
+          if [ -f "$PWD/.cclsp.json" ]; then
+            export CCLSP_CONFIG_PATH="$PWD/.cclsp.json"
+          else
+            export CCLSP_CONFIG_PATH="$HOME/.config/claude/cclsp.json"
+          fi
+        fi
         exec npx -y cclsp@latest
       '';
     in

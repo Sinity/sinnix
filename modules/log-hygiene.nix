@@ -50,6 +50,13 @@
           StandardOutput = "null";
           StandardError = "journal";
         };
+        # Limit hyprpaper restart attempts. Without this, NVIDIA driver mismatches
+        # (after nixos-rebuild without reboot) cause infinite crash-loops:
+        # 1675 restarts in 5 hours, each generating a coredump + journal spam.
+        hyprpaper.Unit = {
+          StartLimitIntervalSec = 60;
+          StartLimitBurst = 5;
+        };
       };
     };
 

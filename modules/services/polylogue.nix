@@ -38,6 +38,11 @@ in
           IOSchedulingClass = "idle";
           # Bound runtime: prevents hangs if Drive API stalls
           TimeoutStartSec = "10min";
+          # Memory limits: polylogue hit 16GB RSS ingesting conversations,
+          # pushing everything to swap. MemoryHigh triggers aggressive reclaim;
+          # MemoryMax kills if it still grows (prevents system-wide I/O storm).
+          MemoryHigh = "2G";
+          MemoryMax = "4G";
         };
       };
 

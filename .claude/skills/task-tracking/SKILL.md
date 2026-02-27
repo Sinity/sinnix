@@ -114,3 +114,8 @@ agent_annotate "Implemented token generation"
 # 4. Complete
 agent_complete_task 42 "45min"
 ```
+
+## References
+
+- `references/quickstart.md` - terse command-first flow for daily usage
+- `references/extended.md` - extended conventions and troubleshooting

@@ -276,6 +276,212 @@ let
         }
       ];
     }
+
+    # === Router Config Tests ===
+    # Verify sinnix-gw OpenWrt config evaluates without errors
+    # (no NixOS VM needed — just checks the Nix expressions)
+    {
+      name = "router-config-evaluates";
+      modules = [
+        mountTmpfsRoots
+        baseTestConfig
+        (
+          { ... }:
+          {
+            networking.hostName = "router-test";
+          }
+        )
+      ];
+      assertions =
+        _config:
+        let
+          routerCfg = import ../hosts/sinnix-gw/default.nix { inherit lib; };
+          openwrtLib = import ../modules/lib/openwrt.nix { inherit lib; };
+          uciScript = openwrtLib.mkUciScript routerCfg.uci;
+          pkgScript = openwrtLib.mkOpkgScript routerCfg.packages;
+
+          # Helper: check if string contains a substring
+          contains = haystack: needle: builtins.match ".*${lib.escapeRegex needle}.*" haystack != null;
+          # Helper: check if string matches regex (multiline via [\s\S])
+          matchesRegex = haystack: regex: builtins.match regex haystack != null;
+        in
+        [
+          # ── Basic metadata ──
+          {
+            assertion = routerCfg.hostname == "sinnix-gw";
+            message = "Router hostname must be sinnix-gw";
+          }
+          {
+            assertion = routerCfg.address == "192.168.1.1";
+            message = "Router address must be 192.168.1.1";
+          }
+          {
+            assertion = builtins.length routerCfg.packages > 0;
+            message = "Router must have packages to install";
+          }
+          {
+            assertion = builtins.stringLength uciScript > 100;
+            message = "UCI script must generate non-trivial output";
+          }
+          {
+            assertion = builtins.stringLength pkgScript > 10;
+            message = "Package script must generate output";
+          }
+          {
+            assertion = builtins.stringLength routerCfg.postCommands > 100;
+            message = "Post-commands must be non-empty";
+          }
+
+          # ── Ash compatibility (no pipefail) ──
+          {
+            assertion = !(contains uciScript "pipefail");
+            message = "UCI script must not contain pipefail (ash incompatible)";
+          }
+          {
+            assertion = !(contains pkgScript "pipefail");
+            message = "Package script must not contain pipefail (ash incompatible)";
+          }
+
+          # ── UCI script is a fragment (no embedded shebang) ──
+          {
+            assertion = !(contains uciScript "#!/bin/sh");
+            message = "UCI script must not contain shebang (it's a fragment, not standalone)";
+          }
+
+          # ── Critical UCI sections exist ──
+          {
+            assertion = contains uciScript "network.lan=";
+            message = "UCI script must configure LAN interface";
+          }
+          {
+            assertion = contains uciScript "network.wan=";
+            message = "UCI script must configure WAN interface";
+          }
+          {
+            assertion = contains uciScript "wireless.radio0=";
+            message = "UCI script must configure radio0 (2.4GHz)";
+          }
+          {
+            assertion = contains uciScript "wireless.radio1=";
+            message = "UCI script must configure radio1 (5GHz)";
+          }
+          {
+            assertion = contains uciScript "sqm.wan_qos=";
+            message = "UCI script must configure SQM";
+          }
+          {
+            assertion = contains uciScript "firewall.defaults=";
+            message = "UCI script must configure firewall defaults";
+          }
+          {
+            assertion = contains uciScript "dhcp.dnsmasq=";
+            message = "UCI script must configure dnsmasq";
+          }
+
+          # ── UCI commit commands present ──
+          {
+            assertion = contains uciScript "uci commit network";
+            message = "UCI script must commit network package";
+          }
+          {
+            assertion = contains uciScript "uci commit wireless";
+            message = "UCI script must commit wireless package";
+          }
+          {
+            assertion = contains uciScript "uci commit firewall";
+            message = "UCI script must commit firewall package";
+          }
+
+          # ── postCommands content ──
+          {
+            assertion = contains routerCfg.postCommands "authorized_keys";
+            message = "Post-commands must deploy SSH authorized key";
+          }
+          {
+            assertion = contains routerCfg.postCommands "https-dns-proxy";
+            message = "Post-commands must configure https-dns-proxy (DoH)";
+          }
+          {
+            assertion = contains routerCfg.postCommands "network reload";
+            message = "Post-commands must reload network";
+          }
+          {
+            assertion = contains routerCfg.postCommands "nf_conntrack_max";
+            message = "Post-commands must tune conntrack table";
+          }
+        ];
+    }
+
+    # === Backup Tests ===
+    {
+      name = "backup-btrbk";
+      modules = [
+        mountTmpfsRoots
+        baseTestConfig
+        (
+          { ... }:
+          {
+            networking.hostName = "backup-test";
+          }
+        )
+      ];
+      assertions =
+        config:
+        let
+          hasConf = config.environment.etc ? "btrbk/btrbk.conf";
+          conf = if hasConf then config.environment.etc."btrbk/btrbk.conf".text else "";
+        in
+        [
+          # Core service
+          {
+            assertion = config.systemd.services ? btrbk;
+            message = "btrbk service must exist";
+          }
+          {
+            assertion = config.systemd.timers ? btrbk;
+            message = "btrbk timer must exist";
+          }
+          # Config deployed
+          {
+            assertion = hasConf;
+            message = "btrbk config must be deployed to /etc";
+          }
+          # Config contains correct paths (guarded — conf is "" if etc file missing)
+          {
+            assertion = hasConf && builtins.match ".*volume /realm.*" conf != null;
+            message = "btrbk config must include /realm volume";
+          }
+          {
+            assertion = hasConf && builtins.match ".*target.*/neo-outer-realm/backups/realm.*" conf != null;
+            message = "btrbk config must target neo-outer-realm for realm backups";
+          }
+          {
+            assertion = hasConf && builtins.match ".*volume /\n.*" conf != null;
+            message = "btrbk config must include root volume for rollback snapshots";
+          }
+          # Retention policy present
+          {
+            assertion = hasConf && builtins.match ".*snapshot_preserve.*48h.*" conf != null;
+            message = "btrbk config must have hourly retention for realm";
+          }
+          # Health check service
+          {
+            assertion = config.systemd.services ? btrbk-health;
+            message = "btrbk-health check service must exist";
+          }
+          {
+            assertion = config.systemd.timers ? btrbk-health;
+            message = "btrbk-health timer must exist (daily health check)";
+          }
+          # Snapshot dirs created by tmpfiles
+          {
+            assertion = builtins.any (
+              rule: builtins.match ".*\\.snapshots.*" rule != null
+            ) config.systemd.tmpfiles.rules;
+            message = "Snapshot directories must be created via tmpfiles";
+          }
+        ];
+    }
   ];
 
 in

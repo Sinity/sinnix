@@ -30,7 +30,10 @@
       "Skill(enhance)",
       "Skill(netdata-metrics)"
     ],
-    "deny": [],
+    "deny": [
+      "Bash(rm -rf /:*)",
+      "Bash(sudo:*)"
+    ],
     "ask": [],
     "defaultMode": "default"
   },
@@ -42,6 +45,17 @@
           {
             "type": "command",
             "command": "~/.claude/hooks/pretooluse-bash.sh",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/stop-lazy-completion.sh",
             "timeout": 3
           }
         ]

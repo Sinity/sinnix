@@ -16,8 +16,20 @@ Use cclsp (MCP-based LSP) for semantic code understanding. More reliable than gr
 Requires `.mcp.json` in project root:
 
 ```json
-{ "mcpServers": { "cclsp": { "command": "mcp-cclsp", "args": [] } } }
+{
+  "mcpServers": {
+    "cclsp": {
+      "command": "mcp-cclsp",
+      "args": [],
+      "env": {
+        "CCLSP_CONFIG_PATH": "/abs/path/to/project/.cclsp.json"
+      }
+    }
+  }
+}
 ```
+
+Use a project-local `.cclsp.json` to keep language server scope aligned with that repository.
 
 ## Available Tools
 
@@ -118,6 +130,6 @@ Placeholder syntax:
 - Feature-gated code may not be visible
 - Macro-generated code partially visible
 
-## Full Documentation
+## References
 
-See: `/realm/project/sinnix/dots/ai/instructions/lsp-tooling.md`
+- `references/legacy-guide.md` - extended examples and rust-analyzer workflows

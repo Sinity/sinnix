@@ -97,7 +97,13 @@ in
 
     systemd.services.capture-boot-metrics = {
       description = "Capture boot metrics";
-      after = [ "systemd-journald.service" ];
+      # Must wait for boot to fully complete — systemd-analyze requires
+      # FinishTimestampMonotonic != 0, which is only set after all boot
+      # services finish. With slow nofail mounts this can take 2+ min.
+      after = [
+        "systemd-journald.service"
+        "multi-user.target"
+      ];
       serviceConfig = {
         Type = "oneshot";
         ExecStart = "${captureBootMetrics}/bin/capture-boot-metrics";
@@ -107,7 +113,7 @@ in
     systemd.timers.capture-boot-metrics = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
-        OnBootSec = "1min";
+        OnBootSec = "3min";
         AccuracySec = "10s";
       };
     };
