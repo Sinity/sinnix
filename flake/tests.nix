@@ -159,6 +159,35 @@ let
       ];
     })
 
+    (mkServiceTest {
+      name = "services-sentinel";
+      service = "sentinel";
+      assertions = config: [
+        {
+          assertion = config.systemd.services ? sinnix-sentinel;
+          message = "sinnix-sentinel oneshot service must exist";
+        }
+        {
+          assertion = config.systemd.timers ? sinnix-sentinel;
+          message = "sinnix-sentinel timer must exist";
+        }
+        {
+          assertion = config.environment.etc ? "sinnix/health-policy.json";
+          message = "health-policy.json must be generated (from introspection.nix)";
+        }
+        {
+          assertion = config.environment.etc ? "sinnix/config.json";
+          message = "config.json must be generated (from introspection.nix)";
+        }
+        {
+          assertion = builtins.any (
+            rule: builtins.match ".*sinnix-sentinel.*" rule != null
+          ) config.systemd.tmpfiles.rules;
+          message = "sentinel event log directory must be created via tmpfiles";
+        }
+      ];
+    })
+
     # Note: sinex service test omitted — sinex requires PostgreSQL, TLS certs,
     # and agenix secrets which are too heavyweight for config-only assertion tests.
     # The sinex service is verified via the full sinnix-prime build.

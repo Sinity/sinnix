@@ -1,0 +1,433 @@
+#!/usr/bin/env bash
+# sinnix-sentinel: System health monitor with auto-derived checks
+#
+# Reads /etc/sinnix/health-policy.json (generated at build time from
+# NixOS config) and verifies that all declared services, captures,
+# mounts, and backups are healthy. Takes corrective actions for
+# restartable services, sends desktop notifications for new issues,
+# and logs state transitions to JSONL for sinex ingestion.
+#
+# Usage:
+#   sinnix-sentinel              # Normal mode: write health.json, take actions
+#   sinnix-sentinel --verbose    # Human-readable report (like backup-health)
+#   sinnix-sentinel --json       # Print health.json to stdout
+set -euo pipefail
+
+# ── Configuration ─────────────────────────────────────────────────────
+POLICY_FILE="${SINNIX_HEALTH_POLICY:-/etc/sinnix/health-policy.json}"
+HEALTH_FILE="${SINNIX_HEALTH_FILE:-/run/sinnix/health.json}"
+PREV_HEALTH_FILE="${SINNIX_HEALTH_FILE:-/run/sinnix/health.json}.prev"
+EVENT_LOG="${SINNIX_EVENT_LOG:-/var/log/sinnix-sentinel/events.jsonl}"
+CORRECTIVE_ACTIONS="${SINNIX_CORRECTIVE_ACTIONS:-true}"
+NOTIFICATIONS="${SINNIX_NOTIFICATIONS:-true}"
+VERBOSE=false
+JSON_ONLY=false
+
+for arg in "$@"; do
+  case "$arg" in
+    --verbose) VERBOSE=true ;;
+    --json) JSON_ONLY=true ;;
+    --no-correct) CORRECTIVE_ACTIONS=false ;;
+    --no-notify) NOTIFICATIONS=false ;;
+  esac
+done
+
+# ── Terminal colors (only for --verbose) ──────────────────────────────
+RED=$'\033[0;31m'
+GREEN=$'\033[0;32m'
+YELLOW=$'\033[1;33m'
+NC=$'\033[0m'
+BOLD=$'\033[1m'
+
+# ── State ─────────────────────────────────────────────────────────────
+ok=0
+warn=0
+fail=0
+declare -a CHECKS=()     # JSON array elements
+declare -a EVENTS=()     # JSONL lines to append
+declare -a NOTIFICATIONS_QUEUE=()  # Messages to send via fnott
+NOW_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+NOW_EPOCH=$(date +%s)
+
+# ── Helpers ───────────────────────────────────────────────────────────
+json_escape() {
+  # Escape characters that break JSON strings: \ → \\, " → \"
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  printf '%s' "$s"
+}
+
+record_check() {
+  local category="$1" name="$2" status="$3" detail="$4"
+  case "$status" in
+    ok)   ok=$((ok + 1)) ;;
+    warn) warn=$((warn + 1)) ;;
+    fail) fail=$((fail + 1)) ;;
+  esac
+
+  local esc_detail
+  esc_detail=$(json_escape "$detail")
+  local esc_name
+  esc_name=$(json_escape "$name")
+  CHECKS+=("$(printf '{"category":"%s","name":"%s","status":"%s","detail":"%s"}' \
+    "$category" "$esc_name" "$status" "$esc_detail")")
+
+  if $VERBOSE; then
+    local color="$NC" icon="[ok]"
+    case "$status" in
+      ok)   color="$GREEN"; icon="[ok]" ;;
+      warn) color="$YELLOW"; icon="[!] " ;;
+      fail) color="$RED"; icon="[FAIL]" ;;
+    esac
+    printf '  %s%s%s %s: %s\n' "$color" "$icon" "$NC" "$name" "$detail"
+  fi
+}
+
+record_event() {
+  local event="$1" detail="$2"
+  EVENTS+=("$(printf '{"timestamp":"%s","event":"%s",%s}' "$NOW_TS" "$event" "$detail")")
+}
+
+queue_notification() {
+  local urgency="$1" message="$2"
+  NOTIFICATIONS_QUEUE+=("$urgency|$message")
+}
+
+# ── Load policy ───────────────────────────────────────────────────────
+if [ ! -f "$POLICY_FILE" ]; then
+  echo "FATAL: health policy not found at $POLICY_FILE" >&2
+  echo "Run nixos-rebuild switch to generate it." >&2
+  exit 1
+fi
+
+POLICY=$(cat "$POLICY_FILE")
+
+# ── 1. Check services ────────────────────────────────────────────────
+$VERBOSE && printf '\n%s=== sinnix sentinel ===%s\n\n' "$BOLD" "$NC"
+$VERBOSE && printf '%sServices:%s\n' "$BOLD" "$NC"
+
+# Parse services from policy using python
+eval "$(echo "$POLICY" | python3 -c "
+import json, sys
+policy = json.load(sys.stdin)
+for i, svc in enumerate(policy.get('services', [])):
+    print(f'SVC_{i}_NAME={svc[\"name\"]}')
+    print(f'SVC_{i}_UNIT={svc[\"unit\"]}')
+    print(f'SVC_{i}_TYPE={svc[\"type\"]}')
+    print(f'SVC_{i}_RESTARTABLE={str(svc[\"restartable\"]).lower()}')
+print(f'SVC_COUNT={len(policy.get(\"services\", []))}')
+")"
+
+for ((i=0; i<SVC_COUNT; i++)); do
+  name_var="SVC_${i}_NAME"; name="${!name_var}"
+  unit_var="SVC_${i}_UNIT"; unit="${!unit_var}"
+  type_var="SVC_${i}_TYPE"; type="${!type_var}"
+  restart_var="SVC_${i}_RESTARTABLE"; restartable="${!restart_var}"
+
+  if [ "$type" = "timer" ]; then
+    if systemctl is-enabled "$unit" &>/dev/null; then
+      # Check if timer has a reasonable next run
+      next=$(systemctl show "$unit" --property=NextElapseUSecRealtime --value 2>/dev/null || echo "")
+      if [ -n "$next" ] && [ "$next" != "n/a" ]; then
+        record_check "services" "$name" "ok" "timer enabled, next: $next"
+      else
+        record_check "services" "$name" "ok" "timer enabled"
+      fi
+    else
+      record_check "services" "$name" "fail" "timer not enabled"
+    fi
+  else
+    active_state=$(systemctl show "$unit" --property=ActiveState --value 2>/dev/null || echo "unknown")
+    if [ "$active_state" = "active" ]; then
+      mem=$(systemctl show "$unit" --property=MemoryCurrent --value 2>/dev/null || echo "")
+      if [ -n "$mem" ] && [ "$mem" != "[not set]" ] && [ "$mem" -gt 0 ] 2>/dev/null; then
+        mem_mb=$((mem / 1048576))
+        record_check "services" "$name" "ok" "active (${mem_mb}MB)"
+      else
+        record_check "services" "$name" "ok" "active"
+      fi
+    elif [ "$active_state" = "activating" ]; then
+      record_check "services" "$name" "warn" "activating"
+    else
+      record_check "services" "$name" "fail" "$active_state"
+
+      # Corrective action: restart if allowed
+      if [ "$CORRECTIVE_ACTIONS" = "true" ] && [ "$restartable" = "true" ]; then
+        if systemctl restart "$unit" 2>/dev/null; then
+          record_event "action" "\"action\":\"restart\",\"unit\":\"$unit\",\"result\":\"success\""
+          queue_notification "normal" "sentinel: restarted $name"
+        else
+          record_event "action" "\"action\":\"restart\",\"unit\":\"$unit\",\"result\":\"failed\""
+          queue_notification "critical" "sentinel: failed to restart $name"
+        fi
+      fi
+    fi
+  fi
+done
+
+# ── 2. Check capture freshness ────────────────────────────────────────
+$VERBOSE && printf '\n%sCaptures:%s\n' "$BOLD" "$NC"
+
+eval "$(echo "$POLICY" | python3 -c "
+import json, sys
+policy = json.load(sys.stdin)
+for i, cap in enumerate(policy.get('captures', [])):
+    print(f'CAP_{i}_NAME={cap[\"name\"]}')
+    print(f'CAP_{i}_PATH={cap[\"path\"]}')
+    print(f'CAP_{i}_MAX_STALE={cap[\"maxStaleHours\"]}')
+print(f'CAP_COUNT={len(policy.get(\"captures\", []))}')
+")"
+
+for ((i=0; i<CAP_COUNT; i++)); do
+  name_var="CAP_${i}_NAME"; name="${!name_var}"
+  path_var="CAP_${i}_PATH"; path="${!path_var}"
+  max_var="CAP_${i}_MAX_STALE"; max_stale="${!max_var}"
+
+  if [ ! -d "$path" ]; then
+    record_check "captures" "$name" "warn" "directory missing: $path"
+    continue
+  fi
+
+  # Find newest file (any depth)
+  newest_ts=$(find "$path" -type f -printf '%T@\n' 2>/dev/null | sort -rn | head -1 || true)
+  if [ -z "$newest_ts" ]; then
+    record_check "captures" "$name" "warn" "no files in $path"
+    continue
+  fi
+
+  # Calculate age in hours (floating point via awk)
+  age_hours=$(awk "BEGIN{v=($NOW_EPOCH - $newest_ts)/3600; printf \"%.1f\", v<0?0:v}")
+  max_stale_seconds=$(awk "BEGIN{printf \"%.0f\", $max_stale * 3600}")
+  age_seconds=$(awk "BEGIN{printf \"%.0f\", $NOW_EPOCH - $newest_ts}")
+
+  if [ "$age_seconds" -le "$max_stale_seconds" ]; then
+    record_check "captures" "$name" "ok" "${age_hours}h fresh"
+  elif [ "$age_seconds" -le "$((max_stale_seconds * 4))" ]; then
+    record_check "captures" "$name" "warn" "${age_hours}h stale (threshold: ${max_stale}h)"
+  else
+    record_check "captures" "$name" "fail" "${age_hours}h stale (threshold: ${max_stale}h)"
+  fi
+done
+
+# ── 3. Check mounts and disk pressure ─────────────────────────────────
+$VERBOSE && printf '\n%sStorage:%s\n' "$BOLD" "$NC"
+
+eval "$(echo "$POLICY" | python3 -c "
+import json, sys
+policy = json.load(sys.stdin)
+for i, mnt in enumerate(policy.get('mounts', [])):
+    print(f'MNT_{i}_PATH={mnt[\"path\"]}')
+    print(f'MNT_{i}_WARN={mnt[\"warnPct\"]}')
+    print(f'MNT_{i}_FAIL={mnt[\"failPct\"]}')
+print(f'MNT_COUNT={len(policy.get(\"mounts\", []))}')
+")"
+
+for ((i=0; i<MNT_COUNT; i++)); do
+  path_var="MNT_${i}_PATH"; path="${!path_var}"
+  warn_var="MNT_${i}_WARN"; warn_pct="${!warn_var}"
+  fail_var="MNT_${i}_FAIL"; fail_pct="${!fail_var}"
+
+  if ! mountpoint -q "$path" 2>/dev/null; then
+    record_check "mounts" "$path" "fail" "NOT MOUNTED"
+    continue
+  fi
+
+  used=$(df "$path" | awk 'NR==2{print $5}')
+  used_num=${used%\%}
+  avail=$(df -h "$path" | awk 'NR==2{print $4}')
+
+  if [ "$used_num" -ge "$fail_pct" ]; then
+    record_check "mounts" "$path" "fail" "${used} used ($avail free) — critical"
+    queue_notification "critical" "sentinel: $path at ${used} — low disk space"
+  elif [ "$used_num" -ge "$warn_pct" ]; then
+    record_check "mounts" "$path" "warn" "${used} used ($avail free)"
+  else
+    record_check "mounts" "$path" "ok" "${used} used ($avail free)"
+  fi
+done
+
+# ── 4. Check backup integrity ─────────────────────────────────────────
+$VERBOSE && printf '\n%sBackups:%s\n' "$BOLD" "$NC"
+
+eval "$(echo "$POLICY" | python3 -c "
+import json, sys
+policy = json.load(sys.stdin)
+b = policy.get('backups', {})
+for i, sd in enumerate(b.get('snapshotDirs', [])):
+    print(f'SNAP_{i}={sd}')
+print(f'SNAP_COUNT={len(b.get(\"snapshotDirs\", []))}')
+print(f'BACKUP_TARGET={b.get(\"backupTarget\", \"\")}')
+print(f'BACKUP_MAX_STALE={b.get(\"maxStaleHours\", 2)}')
+")"
+
+for ((i=0; i<SNAP_COUNT; i++)); do
+  dir_var="SNAP_${i}"; dir="${!dir_var}"
+
+  if [ ! -d "$dir" ]; then
+    record_check "backups" "$dir" "warn" "snapshot directory missing"
+    continue
+  fi
+
+  newest=$(find "$dir" -maxdepth 1 -mindepth 1 -type d -printf '%T@\t%f\n' 2>/dev/null | sort -rn | head -1 | cut -f2 || true)
+  if [ -z "$newest" ]; then
+    record_check "backups" "$dir" "warn" "no snapshots"
+    continue
+  fi
+
+  newest_ts=$(stat -c %Y "$dir/$newest" 2>/dev/null || echo "0")
+  age_hours=$(awk "BEGIN{v=($NOW_EPOCH - $newest_ts)/3600; printf \"%.1f\", v<0?0:v}")
+  max_seconds=$(awk "BEGIN{printf \"%.0f\", $BACKUP_MAX_STALE * 3600}")
+  age_seconds=$((NOW_EPOCH - newest_ts))
+
+  if [ "$age_seconds" -le "$max_seconds" ]; then
+    record_check "backups" "$dir" "ok" "latest=$newest (${age_hours}h ago)"
+  elif [ "$age_seconds" -le "$((max_seconds * 12))" ]; then
+    record_check "backups" "$dir" "warn" "latest=$newest (${age_hours}h ago — stale)"
+  else
+    record_check "backups" "$dir" "fail" "latest=$newest (${age_hours}h ago — OLD)"
+    queue_notification "critical" "sentinel: snapshots in $dir are ${age_hours}h old"
+  fi
+done
+
+# Check backup target
+if [ -n "$BACKUP_TARGET" ] && [ -d "$BACKUP_TARGET" ]; then
+  count=$(find "$BACKUP_TARGET" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l)
+  newest=$(find "$BACKUP_TARGET" -maxdepth 1 -mindepth 1 -type d -printf '%T@\t%f\n' 2>/dev/null | sort -rn | head -1 | cut -f2 || true)
+  if [ -n "$newest" ]; then
+    newest_ts=$(stat -c %Y "$BACKUP_TARGET/$newest" 2>/dev/null || echo "0")
+    age_hours=$(awk "BEGIN{v=($NOW_EPOCH - $newest_ts)/3600; printf \"%.1f\", v<0?0:v}")
+    max_seconds=$(awk "BEGIN{printf \"%.0f\", $BACKUP_MAX_STALE * 3600}")
+    age_seconds=$((NOW_EPOCH - newest_ts))
+    if [ "$age_seconds" -le "$max_seconds" ]; then
+      record_check "backups" "incremental" "ok" "$count backups, latest=${age_hours}h ago"
+    elif [ "$age_seconds" -le "$((max_seconds * 12))" ]; then
+      record_check "backups" "incremental" "warn" "$count backups, latest=${age_hours}h ago — stale"
+    else
+      record_check "backups" "incremental" "fail" "$count backups, latest=${age_hours}h ago — OLD"
+    fi
+  else
+    record_check "backups" "incremental" "warn" "backup target exists but empty"
+  fi
+elif [ -n "$BACKUP_TARGET" ]; then
+  record_check "backups" "incremental" "warn" "backup target missing: $BACKUP_TARGET"
+fi
+
+# ── 5. Check journal for critical patterns ────────────────────────────
+$VERBOSE && printf '\n%sJournal:%s\n' "$BOLD" "$NC"
+
+eval "$(echo "$POLICY" | python3 -c "
+import json, sys
+policy = json.load(sys.stdin)
+for i, jc in enumerate(policy.get('journal', [])):
+    # Escape pattern for shell safety
+    import shlex
+    print(f'JNL_{i}_PATTERN={shlex.quote(jc[\"pattern\"])}')
+    print(f'JNL_{i}_SEVERITY={jc[\"severity\"]}')
+    print(f'JNL_{i}_WINDOW={jc[\"window\"]}')
+print(f'JNL_COUNT={len(policy.get(\"journal\", []))}')
+")"
+
+for ((i=0; i<JNL_COUNT; i++)); do
+  pattern_var="JNL_${i}_PATTERN"; pattern="${!pattern_var}"
+  severity_var="JNL_${i}_SEVERITY"; severity="${!severity_var}"
+  window_var="JNL_${i}_WINDOW"; window="${!window_var}"
+
+  count=$(journalctl --since "$window ago" --grep "$pattern" --no-pager --quiet 2>/dev/null | wc -l || true)
+  count=${count:-0}
+
+  if [ "$count" -eq 0 ]; then
+    record_check "journal" "$pattern" "ok" "0 matches in $window"
+  else
+    record_check "journal" "$pattern" "$severity" "$count matches in $window"
+    if [ "$severity" = "fail" ]; then
+      queue_notification "critical" "sentinel: $count journal matches for '$pattern' in $window"
+    fi
+  fi
+done
+
+# ── Compile health.json ───────────────────────────────────────────────
+overall="ok"
+if [ "$fail" -gt 0 ]; then
+  overall="fail"
+elif [ "$warn" -gt 0 ]; then
+  overall="warn"
+fi
+
+checks_json=$(printf '%s\n' "${CHECKS[@]}" | paste -sd ',' -)
+
+health_json=$(printf '{
+  "timestamp": "%s",
+  "overall": "%s",
+  "summary": {"ok": %d, "warn": %d, "fail": %d},
+  "checks": [%s]
+}' "$NOW_TS" "$overall" "$ok" "$warn" "$fail" "$checks_json")
+
+# ── JSON-only mode ────────────────────────────────────────────────────
+if $JSON_ONLY; then
+  echo "$health_json" | python3 -m json.tool
+  exit 0
+fi
+
+# ── Write health.json ─────────────────────────────────────────────────
+if [ -d "$(dirname "$HEALTH_FILE")" ]; then
+  # Save previous for diff detection
+  if [ -f "$HEALTH_FILE" ]; then
+    cp "$HEALTH_FILE" "$PREV_HEALTH_FILE" 2>/dev/null || true
+  fi
+  echo "$health_json" > "$HEALTH_FILE"
+fi
+
+# ── Detect transitions and log events ─────────────────────────────────
+if [ -f "$PREV_HEALTH_FILE" ]; then
+  prev_overall=$(python3 -c "import json; print(json.load(open('$PREV_HEALTH_FILE')).get('overall','unknown'))" 2>/dev/null || echo "unknown")
+  if [ "$prev_overall" != "$overall" ]; then
+    record_event "transition" "\"from\":\"$prev_overall\",\"to\":\"$overall\""
+    if [ "$overall" = "fail" ] && [ "$prev_overall" != "fail" ]; then
+      queue_notification "critical" "sentinel: system health degraded to FAIL"
+    elif [ "$overall" = "ok" ] && [ "$prev_overall" != "ok" ]; then
+      queue_notification "normal" "sentinel: system health recovered to OK"
+    fi
+  fi
+fi
+
+# ── Write event log ───────────────────────────────────────────────────
+if [ -d "$(dirname "$EVENT_LOG")" ]; then
+  for event in "${EVENTS[@]}"; do
+    echo "$event" >> "$EVENT_LOG"
+  done
+  # Always log a heartbeat with summary
+  printf '{"timestamp":"%s","event":"heartbeat","overall":"%s","ok":%d,"warn":%d,"fail":%d}\n' \
+    "$NOW_TS" "$overall" "$ok" "$warn" "$fail" >> "$EVENT_LOG"
+fi
+
+# ── Send notifications ────────────────────────────────────────────────
+if [ "$NOTIFICATIONS" = "true" ] && command -v fnottctl &>/dev/null; then
+  for notif in "${NOTIFICATIONS_QUEUE[@]}"; do
+    urgency="${notif%%|*}"
+    message="${notif#*|}"
+    # Use notify-send which fnott picks up
+    if command -v notify-send &>/dev/null; then
+      notify-send --urgency="$urgency" "sinnix sentinel" "$message" 2>/dev/null || true
+    fi
+  done
+fi
+
+# ── Verbose summary ───────────────────────────────────────────────────
+if $VERBOSE; then
+  total=$((ok + warn + fail))
+  echo ""
+  if [ "$fail" -gt 0 ]; then
+    printf '%s%sSENTINEL: %d/%d passed, %d FAILED, %d warnings%s\n' "$RED" "$BOLD" "$ok" "$total" "$fail" "$warn" "$NC"
+  elif [ "$warn" -gt 0 ]; then
+    printf '%s%sSENTINEL: %d/%d passed, %d warnings%s\n' "$YELLOW" "$BOLD" "$ok" "$total" "$warn" "$NC"
+  else
+    printf '%s%sSENTINEL: all %d checks passed%s\n' "$GREEN" "$BOLD" "$total" "$NC"
+  fi
+fi
+
+# Exit code: 0 for ok/warn, 1 for fail (so systemd sees it as success unless critical)
+if [ "$fail" -gt 0 ]; then
+  exit 1
+fi
+exit 0

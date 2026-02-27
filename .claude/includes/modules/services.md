@@ -8,6 +8,8 @@ Long-running systemd services in `modules/services/`:
 | polylogue.nix        | AI chat archive ingestion (scheduled timer)   | No (background) |
 | sinex.nix            | Data capture platform (Rust/NATS/PostgreSQL)  | No (background) |
 | terminal-capture.nix | Shell session recording (transparent capture) | No (background) |
+| power-watchdog.nix   | High-freq power/thermal sensor logging        | No (background) |
+| sentinel.nix         | Auto-derived system health monitoring         | No (background) |
 | transmission.nix     | BitTorrent daemon                             | Yes (web UI)    |
 
 **Rule**: Primary purpose is **daemon**, UI is secondary/optional. Compare with `features/desktop/activitywatch.nix` where user wants **tracking**, daemon is implementation detail.

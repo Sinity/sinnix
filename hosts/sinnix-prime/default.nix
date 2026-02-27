@@ -26,5 +26,6 @@
     sinex.enable = false;
     polylogue.enable = false;
     power-watchdog.enable = true;
+    sentinel.enable = true;
   };
 }

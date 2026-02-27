@@ -187,6 +187,21 @@ let
         util-linux
       ];
     };
+
+    # System health
+    sinnix-sentinel = mkScript "sinnix-sentinel" {
+      description = "System health monitor with auto-derived checks";
+      runtimeInputs = with pkgs; [
+        coreutils
+        findutils
+        gawk
+        python3
+        systemd
+        util-linux
+        gnugrep
+        libnotify
+      ];
+    };
   };
 in
 {
