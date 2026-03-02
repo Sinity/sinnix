@@ -81,17 +81,8 @@ mkFeatureModule {
         set -euo pipefail
         exec npx -y @playwright/mcp@latest
       '';
-      mcpCclspBin = pkgs.writeShellScriptBin "mcp-cclsp" ''
-        set -euo pipefail
-        if [ -z "''${CCLSP_CONFIG_PATH:-}" ]; then
-          if [ -f "$PWD/.cclsp.json" ]; then
-            export CCLSP_CONFIG_PATH="$PWD/.cclsp.json"
-          else
-            export CCLSP_CONFIG_PATH="$HOME/.config/claude/cclsp.json"
-          fi
-        fi
-        exec npx -y cclsp@latest
-      '';
+      # Optimized Gemini from the flake registry
+      geminiPkg = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.gemini;
     in
     {
       home-manager.users.${user} =
@@ -111,14 +102,21 @@ mkFeatureModule {
             enable = true;
             settings = {
               detailed_cpu_time = true;
-              hide_kernel_threads = false;
-              hide_userland_threads = false;
+              hide_kernel_threads = true;
+              hide_userland_threads = true;
               show_cpu_frequency = true;
               show_cpu_temperature = true;
               tree_view = true;
               sort_key = "PERCENT_CPU";
+              show_program_path = false;
+              highlight_base_name = true;
+              highlight_megabytes = true;
             };
           };
+
+          home.packages = [
+            geminiPkg
+          ];
 
           home = {
             activation = {
@@ -176,7 +174,8 @@ mkFeatureModule {
             ".local/bin/mcp-context7".source = "${mcpContext7Bin}/bin/mcp-context7";
             ".local/bin/mcp-firecrawl".source = "${mcpFirecrawlBin}/bin/mcp-firecrawl";
             ".local/bin/mcp-playwright".source = "${mcpPlaywrightBin}/bin/mcp-playwright";
-            ".local/bin/mcp-cclsp".source = "${mcpCclspBin}/bin/mcp-cclsp";
+            # Disabled for now due severe memory spikes/freezes.
+            # ".local/bin/mcp-cclsp".source = "${mcpCclspBin}/bin/mcp-cclsp";
             ".gemini/settings.json" = {
               source = mkDotsFile "/gemini/settings.json";
               force = true;

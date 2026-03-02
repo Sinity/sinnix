@@ -202,6 +202,7 @@ mkFeatureModule {
                 du = "du -h";
                 mkdir = "mkdir -p";
                 pingg = "ping 8.8.8.8";
+                psq = "procs --tree --thread-off";
                 wtf = "dmesg";
                 ytd = "yt-dlp";
                 zed = "zeditor"; # Zed editor binary is named 'zeditor' on NixOS
@@ -457,7 +458,8 @@ mkFeatureModule {
 
               # Claude
               ln -sfn "$DOTS_ROOT/claude/settings.json" "$HOME/.config/claude/settings.json"
-              ln -sfn "$DOTS_ROOT/claude/cclsp.json" "$HOME/.config/claude/cclsp.json"
+              # Disabled for now due severe memory spikes/freezes.
+              # ln -sfn "$DOTS_ROOT/claude/cclsp.json" "$HOME/.config/claude/cclsp.json"
               ln -sfn "$DOTS_ROOT/claude/CLAUDE.md" "$HOME/.config/claude/CLAUDE.md"
               ln -sfn "$DOTS_ROOT/claude/skills" "$HOME/.config/claude/skills"
               [ -e "$HOME/.claude" ] && [ ! -L "$HOME/.claude" ] && rm -rf "$HOME/.claude"

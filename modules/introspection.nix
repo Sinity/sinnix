@@ -36,6 +36,16 @@ let
       type = "service";
       restartable = true;
     };
+    activitywatch = {
+      unit = "activitywatch.service";
+      type = "user";
+      restartable = true;
+    };
+    activitywatch-watcher-awatcher = {
+      unit = "activitywatch-watcher-awatcher.service";
+      type = "user";
+      restartable = true;
+    };
     terminal-capture = null; # Shell hook via asciinema exec, no persistent daemon
     polylogue = {
       unit = "polylogue-run.timer";
@@ -70,16 +80,6 @@ let
       else
         null
     )
-    (
-      if (cfg.features.desktop.activitywatch.enable or false) then
-        {
-          name = "activitywatch";
-          path = "${capturesRoot}/activitywatch";
-          maxStaleHours = 24; # Desktop might be idle
-        }
-      else
-        null
-    )
   ];
 
   # ── Mount monitoring ────────────────────────────────────────────────
@@ -97,14 +97,20 @@ let
   ];
 
   # ── Backup monitoring ───────────────────────────────────────────────
+  # Snapshot directories are monitored for recency.
+  # backupTargets are the off-disk incremental targets.
   backupMonitoring = {
     snapshotDirs = [
-      "${cfg.paths.realmRoot}/.snapshots"
-      "/.snapshots"
-      "${cfg.paths.neoOuterRealm}/.snapshots"
+      "${cfg.paths.realmRoot}/.snapshot"
+      "/.snapshot"
+      "/var/.snapshot"
+      "${cfg.paths.neoOuterRealm}/.snapshot"
     ];
-    backupTarget = "${cfg.paths.neoOuterRealm}/backups/realm";
-    maxStaleHours = 2;
+    backupTargets = [
+      "${cfg.paths.outerRealm}/backup/borg-var"
+      "${cfg.paths.outerRealm}/backup/borg-realm"
+    ];
+    maxStaleHours = 24; # Increased from 2h to be more realistic for daily/hourly batches
   };
 
   # ── Journal pattern checks ─────────────────────────────────────────
@@ -162,12 +168,6 @@ let
     {
       name = "btrbk";
       unit = "btrbk.timer";
-      type = "timer";
-      restartable = false;
-    }
-    {
-      name = "btrbk-health";
-      unit = "btrbk-health.timer";
       type = "timer";
       restartable = false;
     }

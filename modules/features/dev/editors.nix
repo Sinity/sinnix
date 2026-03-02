@@ -15,6 +15,9 @@ mkFeatureModule {
     vscode = {
       description = "VSCode Editor";
     };
+    antigravity = {
+      description = "Antigravity Editor (Fork of VSCode)";
+    };
     zed = {
       description = "Zed Editor";
     };
@@ -48,6 +51,7 @@ mkFeatureModule {
           {
             programs.vscode = {
               enable = true;
+              mutableExtensionsDir = false;
               profiles.default.extensions =
                 (with pkgs.vscode-extensions; [
                   enkia.tokyo-night
@@ -66,7 +70,6 @@ mkFeatureModule {
                   pkgs.vscode-extensions.eamodio.gitlens
                   marketplace.usernamehw.errorlens
                   marketplace.yzhang.markdown-all-in-one
-                  marketplace."sst-dev".opencode
                   marketplace.xiangz19.codex-ratelimit
                 ];
             };
@@ -86,6 +89,30 @@ mkFeatureModule {
             '';
 
             stylix.targets.vscode.enable = false;
+          };
+      })
+
+      (lib.mkIf cfg.antigravity.enable {
+        home-manager.users.${user} =
+          { config, mkDotsFileFor, ... }:
+          let
+            mkDotsFile = mkDotsFileFor config;
+          in
+          {
+            home.file = {
+              ".antigravity/extensions".source = config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/.vscode/extensions";
+            };
+            xdg.configFile = {
+              "Antigravity/User/settings.json" = {
+                source = mkDotsFile "/vscode/User/settings.json";
+                force = true;
+              };
+              "Antigravity/User/keybindings.json" = {
+                source = mkDotsFile "/vscode/User/keybindings.json";
+                force = true;
+              };
+            };
+            stylix.targets.vscode.enable = false; # Antigravity uses Code settings
           };
       })
 

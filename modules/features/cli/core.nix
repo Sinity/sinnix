@@ -22,6 +22,20 @@ mkFeatureModule {
         difftastic
         unzip
         wget
+        # Modern CLI replacements
+        eza
+        bat
+        fd
+        sd
+        lnav
+        dua
+        bandwhich
+        # Even more modern tools
+        micro
+        bottom
+        gping
+        doggo
+        dust
       ];
 
       programs = {
@@ -53,6 +67,7 @@ mkFeatureModule {
               nix-direnv
               killall
               procps
+              procs
               psmisc
               iotop
               entr
@@ -66,6 +81,7 @@ mkFeatureModule {
               at
               speedtest-cli
               stress-ng
+              glances
             ]
             ++ lib.filter (p: p != null) [
               (pkgs.tasksh or null)
@@ -106,14 +122,18 @@ mkFeatureModule {
               show_cpu_freq = true;
               show_gpu = true;
               mem_graphs = true;
-              proc_sorting = "cpu direct";
-              proc_filter = false;
-              tree_view = false;
+              proc_sorting = "cpu descending";
+              proc_filter = true;
+              tree_view = true;
+              proc_gradient = true;
               proc_per_core = true;
               proc_mem_bytes = true;
+              proc_left = true;
               cpu_graph_upper = "total";
               cpu_graph_lower = "user";
               cpu_invert_lower = true;
+              show_uptime = true;
+              check_temp = true;
             };
           };
         };

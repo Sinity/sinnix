@@ -67,6 +67,8 @@ in
                     export SINNIX_ASCIINEMA_FILE="$cast_path"
                     export SINNIX_ASCIINEMA_META="$cast_path.meta"
                     
+                    # Ensure cleanup on terminal hangup/termination
+                    trap "exit" HUP TERM
                     exec ${pkgs.asciinema_3}/bin/asciinema rec --stdin --quiet --command "$SHELL" "$cast_path"
                   fi
         '';

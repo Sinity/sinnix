@@ -17,25 +17,12 @@
   lib,
   pkgs,
   config,
+  inputs,
   ...
 }@args:
 let
   username = config.sinnix.user.name;
-
-  sentinelScript = pkgs.writeShellApplication {
-    name = "sinnix-sentinel";
-    runtimeInputs = with pkgs; [
-      coreutils
-      findutils
-      gawk
-      python3
-      systemd
-      util-linux # mountpoint
-      gnugrep
-      libnotify # notify-send
-    ];
-    text = builtins.readFile ../../scripts/sinnix-sentinel;
-  };
+  sentinelPkg = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.sinnix-sentinel;
 in
 mkServiceModule {
   name = "sentinel";
@@ -70,10 +57,17 @@ mkServiceModule {
           "/etc/sinnix"
           "/proc"
           "/sys"
+          "/realm"
+          "/outer-realm"
+          "/neo-outer-realm"
+          "/.snapshots"
+          "/var/.snapshots"
         ];
       };
     in
     {
+      environment.systemPackages = [ sentinelPkg ];
+
       systemd.tmpfiles.rules = [
         "d /run/sinnix 0755 root root -"
         "d /var/log/sinnix-sentinel 0750 root root 30d"
@@ -86,7 +80,13 @@ mkServiceModule {
           "local-fs.target"
         ];
         # Sentinel needs access to systemctl for service checks and restarts
-        path = [ pkgs.systemd ];
+        # Plus tools for hardware and backup monitoring
+        path = with pkgs; [
+          systemd
+          borgbackup
+          jq
+          smartmontools
+        ];
 
         environment = {
           SINNIX_CORRECTIVE_ACTIONS = if cfg.enableCorrectiveActions then "true" else "false";
@@ -95,7 +95,7 @@ mkServiceModule {
 
         serviceConfig = hardenedConfig // {
           Type = "oneshot";
-          ExecStart = "${sentinelScript}/bin/sinnix-sentinel";
+          ExecStart = "${sentinelPkg}/bin/sinnix-sentinel";
           # Don't mark timer as failed if health checks find issues
           # (script exits 1 on fail, but that's informational)
           SuccessExitStatus = "0 1";

@@ -21,6 +21,10 @@
       memoryPercent = 10;
     };
 
+    systemd.settings.Manager = {
+      StatusUnitFormat = "name";
+    };
+
     boot.kernel.sysctl = {
       # swappiness=0: only swap to avoid OOM. Normal desktop workloads should
       # never touch swap — if they do, something is wrong and earlyoom should kill it.
@@ -35,11 +39,13 @@
 
     # Earlyoom: the actual OOM policy. Kill early, kill fast, notify.
     # At 8% free RAM (~2.5GB) earlyoom kills the biggest process.
-    # This fires BEFORE swap fills, so the system never enters a swap death spiral.
+    # With swappiness=0, swap can stay unused even during severe RAM pressure.
+    # Keep swap thresholds at 100% so kills trigger on RAM thresholds alone.
     services.earlyoom = {
       enable = true;
       freeMemThreshold = 8;
-      freeSwapThreshold = 50;
+      freeSwapThreshold = 100;
+      freeSwapKillThreshold = 100;
       enableNotifications = true;
     };
 
@@ -59,7 +65,14 @@
       enable = true;
       package = pkgs.ananicy-cpp;
       rulesProvider = pkgs.ananicy-rules-cachyos;
-      settings.apply_oom_score_adj = true;
+      settings = {
+        apply_oom_score_adj = true;
+        # ananicy-cpp cgroup placement is erroring on this host
+        # (Invalid argument on /sys/fs/cgroup/cgroup.procs).
+        # Keep priority/ionice/scheduler tuning, disable cgroup writes.
+        cgroup_load = false;
+        apply_cgroup = false;
+      };
 
       extraTypes = [
         {
@@ -78,30 +91,90 @@
 
       extraRules = [
         # Compilers/linkers
-        { name = "gcc"; type = "Heavy_Build"; }
-        { name = "g++"; type = "Heavy_Build"; }
-        { name = "clang"; type = "Heavy_Build"; }
-        { name = "clang++"; type = "Heavy_Build"; }
-        { name = "rustc"; type = "Heavy_Build"; }
-        { name = "cc1"; type = "Heavy_Build"; }
-        { name = "cc1plus"; type = "Heavy_Build"; }
-        { name = "ld"; type = "Heavy_Build"; }
-        { name = "lld"; type = "Heavy_Build"; }
-        { name = "mold"; type = "Heavy_Build"; }
-        { name = "cargo"; type = "Light_Build"; }
-        { name = "nix"; type = "Heavy_Build"; }
+        {
+          name = "gcc";
+          type = "Heavy_Build";
+        }
+        {
+          name = "g++";
+          type = "Heavy_Build";
+        }
+        {
+          name = "clang";
+          type = "Heavy_Build";
+        }
+        {
+          name = "clang++";
+          type = "Heavy_Build";
+        }
+        {
+          name = "rustc";
+          type = "Heavy_Build";
+        }
+        {
+          name = "cc1";
+          type = "Heavy_Build";
+        }
+        {
+          name = "cc1plus";
+          type = "Heavy_Build";
+        }
+        {
+          name = "ld";
+          type = "Heavy_Build";
+        }
+        {
+          name = "lld";
+          type = "Heavy_Build";
+        }
+        {
+          name = "mold";
+          type = "Heavy_Build";
+        }
+        {
+          name = "cargo";
+          type = "Light_Build";
+        }
+        {
+          name = "nix";
+          type = "Heavy_Build";
+        }
 
         # LSPs and language servers
-        { name = "rust-analyzer"; type = "Heavy_Build"; }
-        { name = "pyrefly"; type = "Heavy_Build"; }
-        { name = "nil"; type = "Light_Build"; }
-        { name = "nixd"; type = "Light_Build"; }
-        { name = "typescript-language-server"; type = "Light_Build"; }
-        { name = "gopls"; type = "Light_Build"; }
+        {
+          name = "rust-analyzer";
+          type = "Heavy_Build";
+        }
+        {
+          name = "pyrefly";
+          type = "Heavy_Build";
+        }
+        {
+          name = "nil";
+          type = "Light_Build";
+        }
+        {
+          name = "nixd";
+          type = "Light_Build";
+        }
+        {
+          name = "typescript-language-server";
+          type = "Light_Build";
+        }
+        {
+          name = "gopls";
+          type = "Light_Build";
+        }
 
         # AI tools
-        { name = "claude"; type = "Light_Build"; }
-        { name = "gemini"; type = "Light_Build"; }
+        {
+          name = "claude";
+          type = "Light_Build";
+        }
+        {
+          name = "gemini";
+          type = "Light_Build";
+        }
       ];
     };
 

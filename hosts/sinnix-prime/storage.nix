@@ -118,7 +118,6 @@ in
   systemd = {
     tmpfiles.rules = lib.mkAfter [
       "d /mnt/pendrv 0755 root root -"
-      "d ${realmRoot}/knowledgebase 0755 ${username} ${primaryGroupName} -"
     ];
 
     automounts = [
