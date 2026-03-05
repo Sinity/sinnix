@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="${1:-/realm/project}"
+MAX_DEPTH="${2:-4}"
+RENDER_BIN="${RENDER_BIN:-$(dirname "$0")/render-agents}"
+
+if [ ! -x "$RENDER_BIN" ]; then
+  RENDER_BIN="$(command -v render-agents 2>/dev/null || true)"
+fi
+
+if [ -z "$RENDER_BIN" ] || [ ! -x "$RENDER_BIN" ]; then
+  echo "error: render-agents not executable" >&2
+  exit 1
+fi
+
+if [ ! -d "$ROOT" ]; then
+  echo "error: root directory not found: $ROOT" >&2
+  exit 1
+fi
+
+mapfile -t doc_dirs < <(
+  find "$ROOT" -maxdepth "$MAX_DEPTH" \( -type f -o -type l \) \( -name "AGENTS.md" -o -name "CLAUDE.md" -o -name "AGENTS.override.md" \) -printf "%h\n" | sort -u
+)
+
+if [ "${#doc_dirs[@]}" -eq 0 ]; then
+  echo "no AGENTS.md or CLAUDE.md found under $ROOT"
+  exit 0
+fi
+
+declare -A repos_seen=()
+for dir in "${doc_dirs[@]}"; do
+  git_root="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null || true)"
+  if [ -n "$git_root" ]; then
+    repos_seen["$git_root"]=1
+  else
+    repos_seen["$dir"]=1
+  fi
+done
+
+mapfile -t repos < <(printf '%s\n' "${!repos_seen[@]}" | sort)
+
+checked=0
+failed=0
+for repo in "${repos[@]}"; do
+  checked=$((checked + 1))
+  repo_failed=0
+
+  claude="$repo/CLAUDE.md"
+  agents="$repo/AGENTS.md"
+  override="$repo/AGENTS.override.md"
+
+  if [ -L "$claude" ]; then
+    target="$(readlink "$claude" || true)"
+    if [ "$target" = "AGENTS.md" ]; then
+      echo "fail: $repo: CLAUDE.md is a legacy symlink to AGENTS.md"
+      repo_failed=1
+    fi
+  fi
+
+  if [ ! -f "$claude" ]; then
+    echo "fail: $repo: missing CLAUDE.md source"
+    repo_failed=1
+  fi
+
+  if [ ! -f "$agents" ]; then
+    echo "fail: $repo: missing generated AGENTS.md"
+    repo_failed=1
+  fi
+
+  if [ -f "$override" ]; then
+    echo "fail: $repo: legacy AGENTS.override.md present"
+    repo_failed=1
+  fi
+
+  if [ -f "$claude" ] && ! "$RENDER_BIN" --input "$claude" --output "$agents" --check >/dev/null 2>&1; then
+    echo "fail: $repo: AGENTS.md is out of sync with CLAUDE.md"
+    repo_failed=1
+  fi
+
+  if git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    gitignore="$repo/.gitignore"
+    if [ ! -f "$gitignore" ] || ! grep -qx 'AGENTS.md' "$gitignore"; then
+      echo "fail: $repo: .gitignore must contain AGENTS.md"
+      repo_failed=1
+    fi
+  fi
+
+  if [ "$repo_failed" -eq 0 ]; then
+    echo "ok: $repo"
+  else
+    failed=$((failed + 1))
+  fi
+done
+
+echo "checked=$checked failed=$failed"
+
+if [ "$failed" -gt 0 ]; then
+  exit 1
+fi

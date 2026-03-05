@@ -76,6 +76,7 @@ mkFeatureModule {
               };
               init.defaultBranch = "master";
               core.editor = "nvim";
+              core.excludesFile = "~/.config/git/ignore_global";
               merge = {
                 conflictStyle = "zdiff3";
                 ff = false;
@@ -113,6 +114,10 @@ mkFeatureModule {
               "credential \"https://api.github.com\"".helper = githubHelper;
             };
           };
+
+          home.file.".config/git/ignore_global".text = ''
+            AGENTS.md
+          '';
 
           programs.delta = {
             enable = true;

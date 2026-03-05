@@ -1,0 +1,26 @@
+## Cross-Project Tooling
+
+### Codex CLI
+
+- **Config**: `dots/codex/config.toml`, shared skills in `dots/agent-skills`
+- **MCP Servers**: GitHub, PostgreSQL (local), Qdrant, Context7, Firecrawl, `cclsp` bridge
+- **Context7**: Documentation discovery via `resolve-library-id` and `query-docs`
+- **LSP Bridge**: `cclsp` shares manifests between Claude, Codex, and OpenCode
+
+### Desktop Environment
+
+- **WM**: Hyprland (Wayland compositor)
+- **Browser**: qutebrowser (keyboard-driven)
+- **Terminal**: foot/kitty
+- **Launcher**: tofi
+
+### Dotfile Pattern
+
+All dotfiles in `dots/` use Home Manager out-of-store symlinks (`mkOutOfStoreSymlink`). Edits propagate instantly without rebuild.
+
+---
+
+**Project-specific details** (module structure, patterns, workflows) are in each project's CLAUDE.md:
+- sinnix → `/realm/project/sinnix/CLAUDE.md`
+- sinex → `/realm/project/sinex/CLAUDE.md`
+- lynchpin → see project docs

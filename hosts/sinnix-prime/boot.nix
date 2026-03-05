@@ -39,6 +39,8 @@
     ];
   };
 
-  powerManagement.cpuFreqGovernor = "schedutil";
+  # intel_pstate on this host exposes performance/powersave governors;
+  # forcing schedutil makes NixOS try to load cpufreq_schedutil at boot.
+  powerManagement.cpuFreqGovernor = "powersave";
   hardware.enableRedistributableFirmware = true;
 }

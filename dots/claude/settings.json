@@ -30,10 +30,7 @@
       "Skill(enhance)",
       "Skill(netdata-metrics)"
     ],
-    "deny": [
-      "Bash(rm -rf /:*)",
-      "Bash(sudo:*)"
-    ],
+    "deny": ["Bash(rm -rf /:*)", "Bash(sudo:*)"],
     "ask": [],
     "defaultMode": "default"
   },

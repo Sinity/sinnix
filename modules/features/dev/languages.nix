@@ -29,7 +29,6 @@ mkFeatureModule {
       default = true;
     };
     ai = {
-      description = "AI coding tools (claude-code, opencode, codex)";
       default = true;
     };
   };
@@ -118,7 +117,6 @@ mkFeatureModule {
           pkgs.delta
           pkgs.jetbrains-mono
           aiTools.claude-code
-          aiTools.opencode
           aiTools.codex
         ];
       })

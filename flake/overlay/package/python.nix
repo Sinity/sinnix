@@ -22,8 +22,12 @@ let
     # Collateral damage from python3 override forcing local rebuilds:
     # These packages fail tests or runtime dep checks when built locally
     # but work fine from Hydra's binary cache.
-    picosvg = super.picosvg.overridePythonAttrs (_old: { doCheck = false; });
-    nanoemoji = super.nanoemoji.overridePythonAttrs (_old: { doCheck = false; });
+    picosvg = super.picosvg.overridePythonAttrs (_old: {
+      doCheck = false;
+    });
+    nanoemoji = super.nanoemoji.overridePythonAttrs (_old: {
+      doCheck = false;
+    });
 
     # Fix marimo build on nixpkgs 2fc6539+:
     # 1. uv-build.patch applied in reverse (source already has the change)
@@ -52,5 +56,7 @@ in
 
   # Electrum is a top-level package (not in python3Packages), so it needs
   # a top-level override. The python3 interpreter override above doesn't reach it.
-  electrum = prev.electrum.overridePythonAttrs (_old: { dontCheckRuntimeDeps = true; });
+  electrum = prev.electrum.overridePythonAttrs (_old: {
+    dontCheckRuntimeDeps = true;
+  });
 }

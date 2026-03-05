@@ -58,6 +58,18 @@ let
             assertion = hm.home.file ? ".local/bin/claude";
             message = "Claude wrapper must exist";
           }
+          {
+            assertion = hm.home.file ? ".local/bin/codex";
+            message = "Codex wrapper must exist";
+          }
+          {
+            assertion = hm.xdg.configFile ? "claude/skills";
+            message = "Claude skills symlink must exist";
+          }
+          {
+            assertion = hm.home.activation ? renderGlobalCodexAgents;
+            message = "Global Codex AGENTS render activation must exist";
+          }
         ];
     })
 
@@ -77,6 +89,26 @@ let
           {
             assertion = hm.programs.delta.enable;
             message = "Delta must be enabled";
+          }
+        ];
+    })
+
+    (mkFeatureTest {
+      name = "dev-mcp-servers";
+      feature = "sinnix.features.dev.mcp-servers.enable";
+      assertions =
+        config:
+        let
+          hm = hmFor config;
+        in
+        [
+          {
+            assertion = hm.home.file ? ".codex/config.toml";
+            message = "Codex config must be linked";
+          }
+          {
+            assertion = hm.home.file ? ".codex/skills";
+            message = "Codex skills must be linked from shared agent-skills";
           }
         ];
     })
@@ -481,8 +513,8 @@ let
             message = "btrbk config must include /realm volume";
           }
           {
-            assertion = hasConf && builtins.match ".*target.*/neo-outer-realm/backups/realm.*" conf != null;
-            message = "btrbk config must target neo-outer-realm for realm backups";
+            assertion = hasConf && builtins.match ".*volume /neo-outer-realm.*" conf != null;
+            message = "btrbk config must include neo-outer-realm volume";
           }
           {
             assertion = hasConf && builtins.match ".*volume /\n.*" conf != null;
@@ -490,8 +522,8 @@ let
           }
           # Retention policy present
           {
-            assertion = hasConf && builtins.match ".*snapshot_preserve.*48h.*" conf != null;
-            message = "btrbk config must have hourly retention for realm";
+            assertion = hasConf && builtins.match ".*snapshot_preserve.*14d.*52w.*" conf != null;
+            message = "btrbk config must include long-horizon daily/weekly retention";
           }
           # Health check service
           {
@@ -505,7 +537,7 @@ let
           # Snapshot dirs created by tmpfiles
           {
             assertion = builtins.any (
-              rule: builtins.match ".*\\.snapshots.*" rule != null
+              rule: builtins.match ".*\\.snapshot.*" rule != null
             ) config.systemd.tmpfiles.rules;
             message = "Snapshot directories must be created via tmpfiles";
           }

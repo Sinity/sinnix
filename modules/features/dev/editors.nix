@@ -84,21 +84,27 @@ mkFeatureModule {
               };
             };
 
-            home.activation.cleanupVscodeMcp = lib.hm.dag.entryBefore [ "linkGeneration" ] ''
-              rm -rf "$HOME/.config/Code/User/mcp"
-            '';
-
             stylix.targets.vscode.enable = false;
           };
       })
 
       (lib.mkIf cfg.antigravity.enable {
         home-manager.users.${user} =
-          { config, mkDotsFileFor, ... }:
+          { config, mkDotsFileFor, pkgs, ... }:
           let
             mkDotsFile = mkDotsFileFor config;
+            antigravity-wrapped = pkgs.symlinkJoin {
+              name = "antigravity-wrapped";
+              paths = [ pkgs.antigravity ];
+              buildInputs = [ pkgs.makeWrapper ];
+              postBuild = ''
+                wrapProgram $out/bin/antigravity \
+                  --add-flags "--enable-features=UseOzonePlatform --ozone-platform=wayland --disable-features=WaylandWpColorManagerV1,Vulkan,DefaultANGLEVulkan"
+              '';
+            };
           in
           {
+            home.packages = [ antigravity-wrapped ];
             home.file = {
               ".antigravity/extensions".source = config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/.vscode/extensions";
             };

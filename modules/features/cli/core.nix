@@ -26,7 +26,6 @@ mkFeatureModule {
         eza
         bat
         fd
-        sd
         lnav
         dua
         bandwhich
@@ -129,6 +128,7 @@ mkFeatureModule {
               proc_per_core = true;
               proc_mem_bytes = true;
               proc_left = true;
+              proc_aggregate = true;
               cpu_graph_upper = "total";
               cpu_graph_lower = "user";
               cpu_invert_lower = true;

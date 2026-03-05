@@ -39,3 +39,5 @@ _tmp_do_not_include_in_version_control.md
 *.pem
 *.env
 *.gpg
+
+AGENTS.md

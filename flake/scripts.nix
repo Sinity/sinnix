@@ -19,12 +19,17 @@ let
       description,
       runtimeInputs ? [ ],
       bashArgs ? "",
+      runner ? null,
     }:
     {
       inherit description runtimeInputs;
       package = pkgs.writeShellApplication {
         inherit name runtimeInputs;
         text = ''
+          RUNNER="${if runner != null then runner else ""}"
+          if [ -n "$RUNNER" ]; then
+            exec "$RUNNER" ${scriptPath name} "$@"
+          fi
           exec ${pkgs.bash}/bin/bash ${bashArgs} ${scriptPath name} "$@"
         '';
       };
@@ -59,7 +64,6 @@ let
         coreutils
         procps
         gnugrep
-        systemd
       ];
     };
 
@@ -153,6 +157,36 @@ let
       runtimeInputs = with pkgs; [ coreutils ];
     };
 
+    render-agents = mkScript "render-agents" {
+      description = "Render CLAUDE.md @includes into generated AGENTS.md";
+      runtimeInputs = with pkgs; [
+        coreutils
+        python3
+      ];
+      runner = "${pkgs.python3}/bin/python3";
+    };
+
+    normalize-agent-projects = mkScript "normalize-agent-projects" {
+      description = "Normalize CLAUDE/AGENTS instruction docs across project repos";
+      runtimeInputs = with pkgs; [
+        coreutils
+        findutils
+        git
+        gnugrep
+      ];
+    };
+
+    verify-agent-topology = mkScript "verify-agent-topology" {
+      description = "Verify CLAUDE/AGENTS topology and sync invariants across project repos";
+      runtimeInputs = with pkgs; [
+        coreutils
+        findutils
+        git
+        gnugrep
+        python3
+      ];
+    };
+
     # Storage utilities
     encrypt-folder = mkScript "encrypt-folder" {
       description = "Encrypt a folder using gocryptfs";
@@ -202,6 +236,7 @@ let
         gnugrep
         libnotify
         smartmontools
+        borgbackup
       ];
     };
 

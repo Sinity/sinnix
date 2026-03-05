@@ -45,7 +45,6 @@
   "terminal.integrated.enableMultiLinePasteWarning": "auto",
   "terminal.integrated.defaultProfile.linux": "zsh",
   "terminal.integrated.profiles.linux": {
-    "opencode": { "path": "opencode" },
     "codex": { "path": "codex" }
   },
 

@@ -19,14 +19,29 @@ let
   username = config.sinnix.user.name;
 
   # Snapshot directories
-  realmSnapshots = "${realmRoot}/.snapshots";
-  rootSnapshots = "/.snapshots";
-  varSnapshots = "/var/.snapshots";
-  neoSnapshots = "${neoOuterRealm}/.snapshots";
+  realmSnapshots = "${realmRoot}/.snapshot";
+  rootSnapshots = "/.snapshot";
+  varSnapshots = "/var/.snapshot";
+  neoSnapshots = "${neoOuterRealm}/.snapshot";
 
   # Borg Configuration
-  borgRepoSystem = "${config.sinnix.paths.outerRealm}/backups/borg-system";
-  borgRepoRealm = "${config.sinnix.paths.outerRealm}/backups/borg-realm";
+  borgRepoSystem = "${config.sinnix.paths.outerRealm}/backup/borg-var";
+  borgRepoRealm = "${config.sinnix.paths.outerRealm}/backup/borg-realm";
+
+  commonBorgOptions = {
+    encryption.mode = "none";
+    compression = "auto,zstd,3";
+    startAt = "daily";
+    persistentTimer = true;
+    environment = {
+      BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK = "yes";
+    };
+    prune.keep = {
+      daily = 14;
+      weekly = 8;
+      monthly = 6;
+    };
+  };
 
   btrbkConfig = ''
     # === Global settings ===
@@ -41,25 +56,25 @@ let
     # ─── SNAPSHOTS ONLY (Borg handles all off-disk transfers) ───
     
     volume ${realmRoot}
-      snapshot_dir   ${realmSnapshots}
+      snapshot_dir   .snapshot
       subvolume .
-        snapshot_preserve       48h 14d 8w
+        snapshot_preserve       14d 52w
 
     volume /var
-      snapshot_dir   ${varSnapshots}
+      snapshot_dir   .snapshot
       subvolume .
-        snapshot_preserve       48h 14d 8w
+        snapshot_preserve       14d 52w
 
     volume /
-      snapshot_dir   ${rootSnapshots}
+      snapshot_dir   .snapshot
       subvolume .
-        snapshot_preserve       7d 4w
+        snapshot_preserve       30d 52w
 
     volume ${neoOuterRealm}
-      snapshot_dir   ${neoSnapshots}
+      snapshot_dir   .snapshot
       snapshot_create always
       subvolume .
-        snapshot_preserve       7d 4w
+        snapshot_preserve       30d 52w
   '';
 
 in
@@ -76,10 +91,11 @@ in
     # ─── Borg Backup Jobs ───
     services.borgbackup.jobs = {
       # 1. System State (/var snapshots) - runs as root
-      system = {
+      var = commonBorgOptions // {
         paths = [
           # Backup the latest snapshot to ensure data consistency
-          "${varSnapshots}/var.latest"
+          # Use trailing slash to force traversal into the symlinked dir
+          "/var/.snapshot/var.latest/"
         ];
         exclude = [
           "/var/tmp"
@@ -87,31 +103,28 @@ in
           "/var/lib/systemd/coredump"
         ];
         repo = borgRepoSystem;
-        encryption.mode = "none";
-        compression = "zstd,1";
-        startAt = "daily";
-        persistentTimer = true;
-        prune.keep = {
-          daily = 14;
-          weekly = 8;
-          monthly = 6;
-        };
+        # Allow creating the .latest symlink in the snapshot dir
+        readWritePaths = [ "/var/.snapshot" ];
         # Hook to symlink the latest snapshot before backup
         preHook = ''
-          latest=$(ls -td ${varSnapshots}/var.* | grep -v 'var.latest' | head -n 1 || true)
+          latest="$(
+            ${pkgs.findutils}/bin/find /var/.snapshot -maxdepth 1 -mindepth 1 -type d -name 'var.*' -printf '%f\n' \
+              | ${pkgs.coreutils}/bin/sort | ${pkgs.coreutils}/bin/tail -n 1
+          )"
           if [ -n "$latest" ]; then
-            ln -sfn "$latest" ${varSnapshots}/var.latest
+            ${pkgs.coreutils}/bin/ln -sfn "/var/.snapshot/$latest" /var/.snapshot/var.latest
           fi
         '';
       };
 
       # 2. User Data (/realm snapshots) - runs as sinity
-      realm = {
+      realm = commonBorgOptions // {
         user = username;
         group = "users";
         paths = [
           # Backup the latest snapshot to ensure data consistency
-          "${realmSnapshots}/realm.latest"
+          # Use trailing slash to force traversal into the symlinked dir
+          "${realmRoot}/.snapshot/realm.latest/"
         ];
         exclude = [
           "**/node_modules"
@@ -128,27 +141,23 @@ in
           "/realm/data/indices"
         ];
         repo = borgRepoRealm;
-        encryption.mode = "none";
-        compression = "zstd,1";
-        startAt = "daily";
-        persistentTimer = true;
-        prune.keep = {
-          daily = 14;
-          weekly = 8;
-          monthly = 6;
-        };
+        # Allow creating the .latest symlink in the snapshot dir
+        readWritePaths = [ "${realmRoot}/.snapshot" ];
         # Hook to symlink the latest snapshot before backup
         preHook = ''
-          latest=$(ls -td ${realmSnapshots}/realm.* | grep -v 'realm.latest' | head -n 1 || true)
+          latest="$(
+            ${pkgs.findutils}/bin/find ${realmRoot}/.snapshot -maxdepth 1 -mindepth 1 -type d -name 'realm.*' -printf '%f\n' \
+              | ${pkgs.coreutils}/bin/sort | ${pkgs.coreutils}/bin/tail -n 1
+          )"
           if [ -n "$latest" ]; then
-            ln -sfn "$latest" ${realmSnapshots}/realm.latest
+            ${pkgs.coreutils}/bin/ln -sfn "${realmRoot}/.snapshot/$latest" ${realmRoot}/.snapshot/realm.latest
           fi
         '';
       };
     };
 
     # Performance tuning for Borg
-    systemd.services.borgbackup-job-system.serviceConfig = {
+    systemd.services.borgbackup-job-var.serviceConfig = {
       Nice = 19;
       IOSchedulingClass = "idle";
       IOSchedulingPriority = 7;
@@ -165,7 +174,7 @@ in
       "d ${rootSnapshots} 0750 root users -"
       "d ${varSnapshots} 0750 root users -"
       "d ${neoSnapshots} 0750 root users -"
-      "d ${config.sinnix.paths.outerRealm}/backups 0750 root users -"
+      "d ${config.sinnix.paths.outerRealm}/backup 0750 root users -"
       "d ${borgRepoSystem} 0700 root root -"
       "d ${borgRepoRealm} 0750 ${username} users -"
     ];
@@ -184,7 +193,7 @@ in
     systemd.timers.btrbk = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
-        OnCalendar = "hourly";
+        OnCalendar = "*-*-* *:00/15:00";
         Persistent = true;
       };
     };

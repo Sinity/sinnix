@@ -111,6 +111,10 @@ mkFeatureModule {
               show_program_path = false;
               highlight_base_name = true;
               highlight_megabytes = true;
+              # Cumulative metrics and cleaner tree
+              account_guest_in_cpu_meter = true;
+              all_branches_collapsed = true;
+              find_comm_in_free_text = true;
             };
           };
 
@@ -133,38 +137,23 @@ mkFeatureModule {
                   fi
                 ''
               );
-              prepareCodexSkills = lib.hm.dag.entryBefore [ "linkGeneration" ] ''
-                if [ -e "$HOME/.codex/skills" ] && [ ! -L "$HOME/.codex/skills" ]; then
-                  rm -rf "$HOME/.codex/skills"
-                fi
-              '';
-              linkPolylogueInbox = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-                INBOX_DIR="$HOME/.local/share/polylogue/inbox"
-                mkdir -p "$INBOX_DIR"
-                if [ -d "/realm/data/exports/chatlog/raw/chatgpt" ]; then
-                  ln -sfn "/realm/data/exports/chatlog/raw/chatgpt" "$INBOX_DIR/chatgpt"
-                fi
-                if [ -d "/realm/data/exports/chatlog/raw/claude" ]; then
-                  ln -sfn "/realm/data/exports/chatlog/raw/claude" "$INBOX_DIR/claude"
-                fi
-              '';
             };
           };
 
           xdg.configFile = {
-            "opencode/opencode.json".source = mkDotsFile "/opencode/opencode.json";
             "sqlitebrowser/sqlitebrowser.conf".source = mkDotsFile "/sqlitebrowser/sqlitebrowser.conf";
             "ripgrep-all/config.jsonc".source = mkDotsFile "/ripgrep-all/config.jsonc";
             "marimo/marimo.toml".source = mkDotsFile "/marimo/marimo.toml";
           };
 
           home.file = {
+            # Canonical Codex location is ~/.codex.
             ".codex/config.toml" = {
               source = mkDotsFile "/codex/config.toml";
               force = true;
             };
             ".codex/skills" = {
-              source = mkDotsFile "/codex/skills";
+              source = mkDotsFile "/agent-skills";
               force = true;
               recursive = true;
             };
@@ -178,6 +167,14 @@ mkFeatureModule {
             # ".local/bin/mcp-cclsp".source = "${mcpCclspBin}/bin/mcp-cclsp";
             ".gemini/settings.json" = {
               source = mkDotsFile "/gemini/settings.json";
+              force = true;
+            };
+            ".local/share/polylogue/inbox/chatgpt" = {
+              source = config.lib.file.mkOutOfStoreSymlink "/realm/data/exports/chatlog/raw/chatgpt";
+              force = true;
+            };
+            ".local/share/polylogue/inbox/claude" = {
+              source = config.lib.file.mkOutOfStoreSymlink "/realm/data/exports/chatlog/raw/claude";
               force = true;
             };
           };

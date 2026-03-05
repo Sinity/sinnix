@@ -1,7 +1,7 @@
 # power-watchdog: High-frequency sensor logger for power loss forensics
 #
 # Logs CPU/GPU/NVMe temperatures, GPU power draw, and system load every second
-# to a persistent CSV file with immediate disk sync.
+# to a persistent CSV file with periodic file sync.
 #
 # Purpose: When the system power-cycles unexpectedly, this gives us the last
 # known sensor state to correlate with the crash. Unlike `below` which captures
@@ -14,7 +14,8 @@
 # Data stored in: ${capturesRoot}/power-watchdog/
 # Format: CSV with millisecond timestamps, one row per sample
 # Retention: configurable, defaults to 30 days
-# Storage: ~17 MB/day at 1s interval
+# Storage: sample data is small, but per-sample sync can cause very high write
+# amplification. We flush periodically to balance durability vs I/O overhead.
 #
 # Query examples:
 #   # Last 100 samples before a crash (check timestamps):
@@ -47,6 +48,7 @@ let
       DATA_DIR="${dataDir}"
       CSV_FILE="$DATA_DIR/sensors.csv"
       RETENTION_DAYS="''${2:-30}"
+      FLUSH_EVERY_SAMPLES="''${3:-15}"
 
       mkdir -p "$DATA_DIR"
 
@@ -84,7 +86,10 @@ let
       echo "power-watchdog: discovered hwmon paths:" >&2
       echo "  coretemp=$CORETEMP gwmi=$GWMI" >&2
       echo "  spd5118=$SPD1,$SPD2 nvme=$NVME1,$NVME2" >&2
-      echo "  interval=''${INTERVAL}s retention=''${RETENTION_DAYS}d" >&2
+      echo "  interval=''${INTERVAL}s retention=''${RETENTION_DAYS}d flush_every=''${FLUSH_EVERY_SAMPLES} samples" >&2
+
+      # Best-effort flush on service stop/crash.
+      trap 'sync -f "$CSV_FILE" 2>/dev/null || true' EXIT
 
       # === Helper: read sysfs temp (millidegrees → degrees with 1 decimal) ===
       read_temp() {
@@ -133,6 +138,7 @@ let
       }
 
       # === Main loop ===
+      samples_since_flush=0
       while true; do
         ts=$(date +%Y-%m-%dT%H:%M:%S.%3N)
 
@@ -173,9 +179,13 @@ let
         mem_info=$(awk '/MemTotal:/{total=$2} /MemAvailable:/{avail=$2} /SwapTotal:/{stotal=$2} /SwapFree:/{sfree=$2} END{printf "%d %d %d", (total-avail)/1024, avail/1024, (stotal-sfree)/1024}' /proc/meminfo)
         read -r mem_used mem_avail swap_used <<< "$mem_info"
 
-        # --- Write & sync ---
+        # --- Write ---
         echo "$ts,$cpu_pkg,$cpu_max,$ddr5_1,$ddr5_2,$nvme_1,$nvme_2,$gwmi_1,$gwmi_2,$gwmi_3,$gwmi_4,$gwmi_5,$gwmi_6,$gpu_temp,$gpu_power,$gpu_plimit,$gpu_fan,$gpu_util,$gpu_mem,$gpu_clk,$load_1,$load_5,$mem_used,$mem_avail,$swap_used" >> "$CSV_FILE"
-        sync
+        samples_since_flush=$((samples_since_flush + 1))
+        if (( samples_since_flush >= FLUSH_EVERY_SAMPLES )); then
+          sync -f "$CSV_FILE" 2>/dev/null || true
+          samples_since_flush=0
+        fi
 
         rotate_if_needed
         sleep "$INTERVAL"
@@ -197,6 +207,11 @@ mkServiceModule {
       default = 30;
       description = "Number of days of sensor data to retain.";
     };
+    flushEverySamples = lib.mkOption {
+      type = lib.types.int;
+      default = 15;
+      description = "Flush CSV file to disk after this many samples.";
+    };
   };
   configFn =
     { cfg, pkgs, ... }:
@@ -216,7 +231,7 @@ mkServiceModule {
 
         serviceConfig = {
           Type = "simple";
-          ExecStart = "${powerWatchdog}/bin/power-watchdog ${toString cfg.intervalSec} ${toString cfg.retentionDays}";
+          ExecStart = "${powerWatchdog}/bin/power-watchdog ${toString cfg.intervalSec} ${toString cfg.retentionDays} ${toString cfg.flushEverySamples}";
           Restart = "on-failure";
           RestartSec = "5s";
           Nice = 19;

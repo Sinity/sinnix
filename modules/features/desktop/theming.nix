@@ -62,14 +62,13 @@ mkFeatureModule {
 
           stylix.targets.qt.enable = false;
 
-          home.activation.cleanupKvantum = lib.hm.dag.entryBefore [ "linkGeneration" ] ''
-            rm -rf "$HOME/.config/Kvantum"
-          '';
-
           xdg.configFile = {
             "qt5ct/qt5ct.conf".source = mkDotsFile "/qt5ct/qt5ct.conf";
             "qt6ct/qt6ct.conf".source = mkDotsFile "/qt6ct/qt6ct.conf";
-            "Kvantum".source = mkDotsFile "/Kvantum";
+            "Kvantum" = {
+              source = mkDotsFile "/Kvantum";
+              force = true;
+            };
           };
         };
     };

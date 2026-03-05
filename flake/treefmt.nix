@@ -50,7 +50,7 @@
           ".direnv/*"
           "secret/*"
           # Prettier can't parse personas.yaml (unicode box-drawing in comments)
-          "dots/claude/skills/persona/personas.yaml"
+          "dots/agent-skills/persona/personas.yaml"
         ];
       };
     };

@@ -48,7 +48,6 @@ mkFeatureModule {
     }:
     let
       sinnixCfg = config.sinnix;
-      dotsRoot = sinnixCfg.paths.dotsRoot;
       capturesRoot = sinnixCfg.paths.capturesRoot;
 
       # Script packages from flake registry
@@ -164,10 +163,6 @@ mkFeatureModule {
                   zle -N bracketed-paste bracketed-paste-magic
                   autoload -Uz url-quote-magic
                   zle -N self-insert url-quote-magic
-                '')
-                (lib.mkAfter ''
-                  # Build wrappers - run cargo/make/ninja in memory-limited cgroup
-                  [[ -f "${dotsRoot}/zsh/build-wrappers.zsh" ]] && source "${dotsRoot}/zsh/build-wrappers.zsh"
                 '')
               ];
 
@@ -357,8 +352,12 @@ mkFeatureModule {
             pkgs,
             lib,
             sinnix,
+            mkDotsFileFor,
             ...
           }:
+          let
+            mkDotsFile = mkDotsFileFor config;
+          in
           {
             home.sessionVariables = {
               DEVELOPMENT_DOMAIN = "v0.3";
@@ -401,7 +400,6 @@ mkFeatureModule {
                 glow
                 graphviz
                 mermaid-cli
-                antigravity
                 android-tools
                 dua
                 evtest
@@ -434,6 +432,9 @@ mkFeatureModule {
               ++ [
                 findFlakeRoot
                 scriptPkgs.lsp-root
+                scriptPkgs.render-agents
+                scriptPkgs.normalize-agent-projects
+                scriptPkgs.verify-agent-topology
               ];
 
             programs = {
@@ -448,32 +449,43 @@ mkFeatureModule {
               };
             };
 
-            # Config linking activations (consolidated)
-            home.activation.linkConfigs = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-              DOTS_ROOT=''${DOTS_ROOT:-${dotsRoot}}
-              mkdir -p "$HOME/.config" "$HOME/.config/claude" "$HOME/.serena"
-
-              # Neovim
-              ln -sfn "$DOTS_ROOT/nvim" "$HOME/.config/nvim"
-
-              # Claude
-              ln -sfn "$DOTS_ROOT/claude/settings.json" "$HOME/.config/claude/settings.json"
-              # Disabled for now due severe memory spikes/freezes.
-              # ln -sfn "$DOTS_ROOT/claude/cclsp.json" "$HOME/.config/claude/cclsp.json"
-              ln -sfn "$DOTS_ROOT/claude/CLAUDE.md" "$HOME/.config/claude/CLAUDE.md"
-              ln -sfn "$DOTS_ROOT/claude/skills" "$HOME/.config/claude/skills"
-              [ -e "$HOME/.claude" ] && [ ! -L "$HOME/.claude" ] && rm -rf "$HOME/.claude"
-              ln -sfn .config/claude "$HOME/.claude"
-
-              # Serena
-              ln -sfn "$DOTS_ROOT/serena/serena_config.yml" "$HOME/.serena/serena_config.yml"
-            '';
+            xdg.configFile = {
+              "nvim".source = mkDotsFile "/nvim";
+              "claude/settings.json".source = mkDotsFile "/claude/settings.json";
+              "claude/CLAUDE.md".source = mkDotsFile "/claude/CLAUDE.md";
+              "claude/world-model" = {
+                source = mkDotsFile "/claude/world-model";
+                force = true;
+                recursive = true;
+              };
+              "claude/operational" = {
+                source = mkDotsFile "/claude/operational";
+                force = true;
+                recursive = true;
+              };
+              "claude/skills" = {
+                source = mkDotsFile "/agent-skills";
+                force = true;
+                recursive = true;
+              };
+            };
 
             home.activation.rebuildBatCache = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
               ${lib.getExe pkgs.bat} cache --build 2>/dev/null || true
             '';
+            home.activation.cleanupLegacyClaudeIncludes = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+              rm -rf "$HOME/.config/claude/includes"
+            '';
+            home.activation.renderGlobalCodexAgents = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+              mkdir -p "$HOME/.codex"
+              if [ -f "$HOME/.config/claude/CLAUDE.md" ]; then
+                ${scriptPkgs.render-agents}/bin/render-agents \
+                  --input "$HOME/.config/claude/CLAUDE.md" \
+                  --output "$HOME/.codex/AGENTS.md"
+              fi
+            '';
 
-            # Claude wrapper script
+            # CLI wrappers
             home.file.".local/bin/claude" = {
               text = ''
                 #!/usr/bin/env bash
@@ -493,6 +505,76 @@ mkFeatureModule {
               '';
               executable = true;
             };
+
+            home.file.".local/bin/codex" = {
+              text = ''
+                #!/usr/bin/env bash
+                set -euo pipefail
+
+                CODEX_BIN="${
+                  inputs.nix-ai-tools.packages.${pkgs.stdenv.hostPlatform.system}.codex
+                }/bin/codex"
+                RENDER_AGENTS_BIN="${scriptPkgs.render-agents}/bin/render-agents"
+                if [ ! -x "$RENDER_AGENTS_BIN" ]; then
+                  RENDER_AGENTS_BIN="$(command -v render-agents 2>/dev/null || true)"
+                fi
+                render_instruction_tree() {
+                  local root="$1"
+                  local dir="$root"
+                  while :; do
+                    if [ -f "$dir/CLAUDE.md" ]; then
+                      if ! "$RENDER_AGENTS_BIN" --input "$dir/CLAUDE.md" --output "$dir/AGENTS.md"; then
+                        echo "warning: failed to render $dir/CLAUDE.md" >&2
+                      fi
+                    fi
+                    [ "$dir" = "/" ] && break
+                    dir="$(dirname "$dir")"
+                  done
+                }
+
+                if [ -z "''${SINNIX_SKIP_AGENTS_RENDER:-}" ] && [ -x "$RENDER_AGENTS_BIN" ]; then
+                  if [ -f "$HOME/.config/claude/CLAUDE.md" ]; then
+                    "$RENDER_AGENTS_BIN" \
+                      --input "$HOME/.config/claude/CLAUDE.md" \
+                      --output "$HOME/.codex/AGENTS.md" || echo "warning: failed to render global CLAUDE.md" >&2
+                  fi
+
+                  start_dir="$PWD"
+                  argv=("$@")
+                  i=0
+                  while [ "$i" -lt "''${#argv[@]}" ]; do
+                    arg="''${argv[$i]}"
+                    case "$arg" in
+                      -C|--cd)
+                        if [ "$((i + 1))" -lt "''${#argv[@]}" ]; then
+                          start_dir="''${argv[$((i + 1))]}"
+                          i=$((i + 2))
+                          continue
+                        fi
+                        ;;
+                      --cd=*)
+                        start_dir="''${arg#--cd=}"
+                        ;;
+                    esac
+                    i=$((i + 1))
+                  done
+
+                  if [ -d "$start_dir" ]; then
+                    start_dir="$(cd "$start_dir" && pwd -P)"
+                    render_instruction_tree "$start_dir"
+                  fi
+                fi
+
+                exec "$CODEX_BIN" "$@"
+              '';
+              executable = true;
+            };
+
+            home.file.".claude" = {
+              source = config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/.config/claude";
+              force = true;
+            };
+            home.file.".serena/serena_config.yml".source = mkDotsFile "/serena/serena_config.yml";
 
             # Bash integration for direnv
             home.file.".bashrc" = {

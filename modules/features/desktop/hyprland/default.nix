@@ -12,7 +12,6 @@ let
   # Helpers for home-manager config
   repoRoot = config.sinnix.paths.projectRoot;
   knowledgebaseRoot = config.sinnix.projects.knowledgebase;
-  scriptPath = rel: "${repoRoot}/scripts/${rel}";
 
   # Scratchpad configuration (single source of truth)
   scratchpadData = import ./scratchpads.nix { inherit pkgs lib knowledgebaseRoot; };
@@ -26,14 +25,6 @@ let
     inherit lib;
     scratchpadSpecs = scratchpadData.ruleSpecs;
   };
-
-  # Lock configuration needs to be adapted since it was a HM module
-  # We will inline or import it within the HM block
-
-  mkLinkCmd = link: ''
-    ln -sf ${scriptPath link.source} "$HOME/.local/bin/${link.target}"
-    chmod +x "$HOME/.local/bin/${link.target}"
-  '';
 
   scriptLinks = [
     {
@@ -98,7 +89,7 @@ in
     # User Level Configuration (Home Manager)
     # -------------------------------------------------------------------------
     home-manager.users.${user} =
-      { pkgs, lib, ... }:
+      { pkgs, lib, config, ... }:
       {
         imports = [ ./lock.nix ];
 
@@ -216,13 +207,18 @@ in
             lib.mkAfter extra;
         };
 
-        # Scratchpad config files (generated from scratchpads.nix)
-        home.file = scratchpadData.confFiles;
-
-        home.activation.hyprlandScriptLinks = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-          mkdir -p "$HOME/.local/bin"
-          ${lib.concatMapStrings mkLinkCmd scriptLinks}
-        '';
+        # Scratchpad config files + script links
+        home.file =
+          scratchpadData.confFiles
+          // lib.listToAttrs (
+            map (link: {
+              name = ".local/bin/${link.target}";
+              value = {
+                source = config.lib.file.mkOutOfStoreSymlink "${repoRoot}/scripts/${link.source}";
+                force = true;
+              };
+            }) scriptLinks
+          );
 
         home.packages = with pkgs; [
           brightnessctl

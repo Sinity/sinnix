@@ -116,17 +116,19 @@ in
       powerOnBoot = lib.mkDefault true;
       package = lib.mkDefault bluezExperimental;
       settings = {
-        Policy.AutoEnable = true;
+        Policy = {
+          AutoEnable = true;
+          # Limit reconnection attempts for offline devices.
+          # Default (7) with AVDTP retries causes 60+ attempts/hour to
+          # powered-off headsets, flooding journal and dbus.
+          ReconnectAttempts = lib.mkDefault 3;
+        };
         General = {
           ControllerMode = lib.mkDefault "dual";
           DiscoverableTimeout = lib.mkDefault 0;
           Experimental = lib.mkDefault true;
           FastConnectable = lib.mkDefault true;
           MultiProfile = lib.mkDefault "multiple";
-          # Limit reconnection attempts for offline devices.
-          # Default (7) with AVDTP retries causes 60+ attempts/hour to
-          # powered-off headsets, flooding journal and dbus.
-          ReconnectAttempts = lib.mkDefault 3;
         };
       };
     };

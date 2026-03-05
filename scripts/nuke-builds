@@ -48,19 +48,6 @@ for proc in "${ALL_PROCS[@]}"; do
   fi
 done
 
-# Also kill anything in builds.slice (system-level cgroup for nix-daemon + user builds)
-# This covers processes started via systemd-run --scope --slice=builds.slice
-BUILDS_SLICE="/sys/fs/cgroup/builds.slice"
-if [ -d "$BUILDS_SLICE" ]; then
-  # Read all PIDs from builds.slice and its sub-slices
-  build_pids=$(find "$BUILDS_SLICE" -name "cgroup.procs" -exec cat {} \; 2>/dev/null | sort -u || true)
-  if [ -n "$build_pids" ]; then
-    echo "  Killing builds.slice processes: $(echo $build_pids | tr '\n' ' ')"
-    echo "$build_pids" | xargs -r kill -KILL 2>/dev/null || true
-    ((killed += $(echo "$build_pids" | wc -l))) || true
-  fi
-fi
-
 if [ "$killed" -gt 0 ]; then
   notify-send "Nuke Builds" "Killed $killed processes" -u normal
   echo "✅ Killed $killed processes"

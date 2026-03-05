@@ -32,8 +32,14 @@ mkFeatureModule {
           # Disable Chromium's Wayland color management - it conflicts with
           # Hyprland's HDR mode, causing washed out colors.
           # See: https://github.com/hyprwm/Hyprland/discussions/11910
+          #
+          # Also disable Vulkan/ANGLE-Vulkan to avoid unstable paths on
+          # NVIDIA+Wayland+HDR setups while keeping normal GPU acceleration.
+          chromeArgs = lib.concatStringsSep " " [
+            "--disable-features=WaylandWpColorManagerV1,Vulkan,DefaultANGLEVulkan"
+          ];
           chromeStablePkg = pkgs.google-chrome.override {
-            commandLineArgs = "--disable-features=WaylandWpColorManagerV1";
+            commandLineArgs = chromeArgs;
           };
           mkDotsFile = mkDotsFileFor config;
           quteDots = rel: mkDotsFile ("/qutebrowser" + rel);

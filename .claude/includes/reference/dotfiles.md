@@ -11,7 +11,7 @@ Dotfiles in `dots/` directory:
 | Directory      | Target                  | Purpose                         |
 | -------------- | ----------------------- | ------------------------------- |
 | `claude/`      | `~/.config/claude`      | Claude Code config              |
-| `codex/`       | `~/.config/codex`       | Codex CLI config                |
+| `codex/`       | `~/.codex`              | Codex CLI config + skills + global AGENTS |
 | `gemini/`      | `~/.config/gemini`      | Gemini CLI config               |
 | `nvim/`        | `~/.config/nvim`        | Neovim LazyVim                  |
 | `vscode/User/` | VS Code settings        | Settings, keybindings, snippets |
@@ -26,3 +26,13 @@ Dotfiles in `dots/` directory:
 ### Application Configs (less frequently edited)
 
 `audacity/`, `Kvantum/`, `marimo/`, `opencode/`, `qt5ct/`, `qt6ct/`, `ripgrep-all/`, `serena/`, `sqlitebrowser/`, `transmission/`
+
+### Codex AGENTS Include Handling
+
+- Codex does not expand `@path` includes in `AGENTS.md` natively.
+- Canonical source is `CLAUDE.md`; `scripts/render-agents` renders `CLAUDE.md` (with recursive transclusions) into generated `AGENTS.md`.
+- `~/.local/bin/codex` wrapper auto-runs this renderer on launch for the working tree (`$PWD`/`--cd`) and parent dirs that contain `CLAUDE.md`.
+- Shared skill sources live in `dots/agent-skills/`, symlinked into both `~/.config/claude/skills` and `~/.codex/skills`.
+- `scripts/normalize-agent-projects /realm/project` performs one-shot normalization across repos (promotes/creates `CLAUDE.md`, regenerates `AGENTS.md`, removes legacy overrides, updates `.gitignore`).
+- `scripts/verify-agent-topology /realm/project` is the read-only topology/sync verifier used for audits and CI checks.
+- Global always-on Codex guidance is `~/.codex/AGENTS.md`, rendered from `~/.config/claude/CLAUDE.md` during activation and before Codex launch.

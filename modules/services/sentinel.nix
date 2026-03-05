@@ -60,8 +60,8 @@ mkServiceModule {
           "/realm"
           "/outer-realm"
           "/neo-outer-realm"
-          "/.snapshots"
-          "/var/.snapshots"
+          "/.snapshot"
+          "/var/.snapshot"
         ];
       };
     in
