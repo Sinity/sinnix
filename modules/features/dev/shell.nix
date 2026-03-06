@@ -360,7 +360,6 @@ mkFeatureModule {
           in
           {
             home.sessionVariables = {
-              DEVELOPMENT_DOMAIN = "v0.3";
               EDITOR = "nvim";
               VISUAL = "nvim";
               PAGER = lib.mkForce "less -R";
@@ -511,9 +510,7 @@ mkFeatureModule {
                 #!/usr/bin/env bash
                 set -euo pipefail
 
-                CODEX_BIN="${
-                  inputs.nix-ai-tools.packages.${pkgs.stdenv.hostPlatform.system}.codex
-                }/bin/codex"
+                CODEX_BIN="${inputs.nix-ai-tools.packages.${pkgs.stdenv.hostPlatform.system}.codex}/bin/codex"
                 RENDER_AGENTS_BIN="${scriptPkgs.render-agents}/bin/render-agents"
                 if [ ! -x "$RENDER_AGENTS_BIN" ]; then
                   RENDER_AGENTS_BIN="$(command -v render-agents 2>/dev/null || true)"

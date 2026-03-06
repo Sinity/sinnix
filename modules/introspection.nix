@@ -4,10 +4,9 @@
 # - /etc/sinnix/config.json   — Serialized config.sinnix attrset (for any consumer)
 # - /etc/sinnix/health-policy.json — Auto-derived health checks (for sentinel)
 #
-# The health policy maps enabled sinnix services to their systemd units,
-# capture directories to freshness thresholds, and mounts to disk pressure
-# limits. Adding a new service module and registering it in serviceMonitoring
-# is all that's needed to get automatic health monitoring.
+# The health policy maps enabled sinnix services to their self-declared
+# health metadata, capture directories to freshness thresholds, and mounts
+# to disk pressure limits.
 {
   lib,
   config,
@@ -17,44 +16,23 @@ let
   cfg = config.sinnix;
   capturesRoot = cfg.paths.capturesRoot;
 
-  # ── Service → systemd unit mapping ──────────────────────────────────
-  # Add entries here when creating new service modules.
-  # Set to null for services that have no monitorable systemd unit.
-  serviceMonitoring = {
-    power-watchdog = {
-      unit = "power-watchdog.service";
-      type = "service";
-      restartable = true;
-    };
-    below = {
-      unit = "below.service";
-      type = "service";
-      restartable = true;
-    };
-    transmission = {
-      unit = "transmission.service";
-      type = "service";
-      restartable = true;
-    };
-    activitywatch = {
+  # ── Feature-provided service checks ─────────────────────────────────
+  # These services are implemented in feature modules rather than
+  # sinnix.services.* modules, so they are listed here explicitly.
+  featureServiceChecks = lib.optionals (cfg.features.desktop.activitywatch.enable or false) [
+    {
+      name = "activitywatch";
       unit = "activitywatch.service";
       type = "user";
       restartable = true;
-    };
-    activitywatch-watcher-awatcher = {
+    }
+    {
+      name = "activitywatch-watcher-awatcher";
       unit = "activitywatch-watcher-awatcher.service";
       type = "user";
       restartable = true;
-    };
-    terminal-capture = null; # Shell hook via asciinema exec, no persistent daemon
-    polylogue = {
-      unit = "polylogue-run.timer";
-      type = "timer";
-      restartable = false;
-    };
-    sinex = null; # Complex multi-service stack — skip for now
-    sentinel = null; # Self-monitoring would be recursive
-  };
+    }
+  ];
 
   # ── Capture → freshness mapping ─────────────────────────────────────
   # Only captures that are continuously produced by services.
@@ -156,12 +134,17 @@ let
   ) (builtins.attrNames (cfg.bundles or { }));
 
   # ── Build service health checks from enabled services ───────────────
-  enabledServiceChecks = lib.filter (x: x != null) (
-    lib.mapAttrsToList (
-      name: meta:
-      if meta != null && (builtins.elem name enabledServices) then meta // { inherit name; } else null
-    ) serviceMonitoring
-  );
+  enabledServiceChecks =
+    (lib.filter (x: x != null) (
+      lib.mapAttrsToList (
+        name: svc:
+        if builtins.elem name enabledServices && svc ? health && svc.health != null then
+          svc.health // { inherit name; }
+        else
+          null
+      ) (cfg.services or { })
+    ))
+    ++ featureServiceChecks;
 
   # Always monitor btrbk (configured by backup.nix, not sinnix.services)
   btrbkChecks = [

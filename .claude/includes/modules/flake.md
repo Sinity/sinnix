@@ -2,15 +2,20 @@
 
 ### `flake/` Directory
 
-- **apps.nix**: Flake apps (switch, test, update, clean, check, etc.)
-- **dev-shell.nix**: Development shell with pre-commit hooks
-- **formatter.nix**: Nixpkgs-fmt configuration
+- **apps.nix**: Flake app wrappers (`lint`, `test`, `switch`, `clean`, `agenix`)
+- **command-registry.nix**: Canonical command metadata for apps/docs
+- **dev-shell.nix**: Development shell
+- **lib-context.nix**: Shared flake lib/module bootstrap context
 - **nixos.nix**: NixOS configuration integration (imports modules/)
-- **packages.nix**: Custom packages (shell scripts wrapped with dependencies)
-- **tests.nix**: System tests
+- **packages.nix**: Custom packages
+- **scripts.nix**: Script package registry + metadata
+- **test-lib.nix**: Reusable test helpers/DSL
+- **tests.nix**: Config assertion tests
+- **treefmt.nix**: Formatter configuration
 - **overlay/**: Nixpkgs overlays (package modifications, external integrations)
   - **package/**: Package overlays (individual files per package)
-  - **patch/**: Patches for upstream packages
+- **patch/**: Standalone source patches
+- **router.nix**: OpenWrt deployment/health tooling
 
 ### Overlay vs Package: When to Use Each
 

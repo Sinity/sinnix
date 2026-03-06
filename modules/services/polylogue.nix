@@ -22,6 +22,34 @@ in
       default = "15min";
       description = "How often to run polylogue ingestion (systemd timer format).";
     };
+
+    health = lib.mkOption {
+      type = lib.types.nullOr (
+        lib.types.submodule {
+          options = {
+            unit = lib.mkOption {
+              type = lib.types.str;
+            };
+            type = lib.mkOption {
+              type = lib.types.enum [
+                "service"
+                "timer"
+                "user"
+              ];
+            };
+            restartable = lib.mkOption {
+              type = lib.types.bool;
+            };
+          };
+        }
+      );
+      default = {
+        unit = "polylogue-run.timer";
+        type = "timer";
+        restartable = false;
+      };
+      description = "Service health metadata consumed by introspection/sentinel.";
+    };
   };
 
   config = lib.mkIf cfg.enable {

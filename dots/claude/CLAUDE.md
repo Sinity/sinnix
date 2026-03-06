@@ -7,6 +7,7 @@
 ## Unified Agent Core (Claude + Codex)
 
 Keep behavior aligned with global Codex contract (`~/.codex/AGENTS.md`):
+
 - complete work end-to-end unless truly blocked,
 - prefer canonical naming and no compatibility aliases,
 - reuse existing infrastructure before inventing new helpers,

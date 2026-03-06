@@ -10,10 +10,10 @@ Externalize reasoning to scratch files. Write liberally - context is expensive, 
 
 ### File Locations
 
-| Scope | Location | Use |
-|-------|----------|-----|
+| Scope                | Location                           | Use                                |
+| -------------------- | ---------------------------------- | ---------------------------------- |
 | Global/cross-project | `~/.claude/scratch/NNN-<topic>.md` | System-wide learnings, config work |
-| Project-specific | `.claude/scratch/NNN-<topic>.md` | Project analysis, debugging notes |
+| Project-specific     | `.claude/scratch/NNN-<topic>.md`   | Project analysis, debugging notes  |
 
 ### File Structure
 

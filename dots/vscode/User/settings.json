@@ -528,7 +528,6 @@
   "extensions.experimental.affinity": {
     "asvetliakov.vscode-neovim": 1
   },
-  "wakatime.apiKey": "REDACTED_WAKATIME_KEY",
   "explorer.confirmDelete": false,
   "editor.formatOnPaste": true,
   "editor.formatOnSave": true,
@@ -676,7 +675,6 @@
   "[json]": {},
   "[html]": {},
   "terminal.integrated.fontSize": 16,
-  "geminicodeassist.project": "REDACTED_GEMINI_PROJECT",
   "explorer.confirmDragAndDrop": false,
   "vsicons.dontShowNewVersionMessage": true,
   "geminicodeassist.agentYoloMode": true,

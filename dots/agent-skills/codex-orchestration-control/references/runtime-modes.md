@@ -5,6 +5,7 @@
 Use when reproducibility and machine-ingestable logs are primary.
 
 Traits:
+
 - deterministic CLI invocation,
 - easy to rerun in scripts,
 - no UI dependency.
@@ -14,11 +15,13 @@ Traits:
 Use when you need live observability and manual interruption.
 
 Traits:
+
 - one tab/window per agent,
 - remote launch through `kitty @ launch`,
 - compatible with Hyprland workflow routing.
 
 Hyprland tip:
+
 - launch in separate Kitty OS windows (`--launch-type os-window`) and move windows to a dedicated workspace using your existing `hyprctl dispatch` patterns.
 - this skill does not hardcode `hyprctl` behavior because workspace naming/layouts differ by setup.
 

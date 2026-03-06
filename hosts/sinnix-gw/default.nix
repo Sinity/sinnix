@@ -22,9 +22,8 @@
 # - AdGuard Home too RAM-heavy; adblock-fast uses ~2-3MB
 #
 # === Secrets ===
-# WiFi PSK and router password are stored as plain strings here because:
-# - OpenWrt itself stores them in plaintext in /etc/config/wireless
-# - This private repo is the source of truth; agenix is for NixOS hosts only
+# WiFi PSK is intentionally redacted in-repo for public distribution.
+# Set a real value locally before router deploy.
 
 { lib }:
 

@@ -65,10 +65,6 @@ mkFeatureModule {
           xdg.configFile = {
             "qt5ct/qt5ct.conf".source = mkDotsFile "/qt5ct/qt5ct.conf";
             "qt6ct/qt6ct.conf".source = mkDotsFile "/qt6ct/qt6ct.conf";
-            "Kvantum" = {
-              source = mkDotsFile "/Kvantum";
-              force = true;
-            };
           };
         };
     };

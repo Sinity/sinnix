@@ -6,13 +6,15 @@ import json
 import os
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
 
 
 def run(cmd: list[str], cwd: Path | None = None) -> tuple[int, str, str]:
-    p = subprocess.run(cmd, cwd=str(cwd) if cwd else None, text=True, capture_output=True)
+    p = subprocess.run(
+        cmd, cwd=str(cwd) if cwd else None, text=True, capture_output=True
+    )
     return p.returncode, p.stdout.strip(), p.stderr.strip()
 
 
@@ -45,7 +47,9 @@ def parse_status_porcelain(text: str) -> dict[str, int]:
 
 
 def upstream_ahead_behind(repo: Path) -> tuple[int | None, int | None]:
-    rc, out, _ = run(["git", "rev-list", "--left-right", "--count", "@{upstream}...HEAD"], cwd=repo)
+    rc, out, _ = run(
+        ["git", "rev-list", "--left-right", "--count", "@{upstream}...HEAD"], cwd=repo
+    )
     if rc != 0 or not out:
         return None, None
     parts = out.split()
@@ -125,7 +129,11 @@ def find_repos(root: Path, max_depth: int) -> list[Path]:
             repos.add(cur)
             dirs[:] = []
             continue
-        dirs[:] = [d for d in dirs if d not in {".git", "node_modules", ".venv", "target", "dist"}]
+        dirs[:] = [
+            d
+            for d in dirs
+            if d not in {".git", "node_modules", ".venv", "target", "dist"}
+        ]
     return sorted(repos)
 
 
@@ -135,17 +143,35 @@ def print_table(repos: Iterable[RepoInfo], root: Path) -> None:
         rel = Path(r.path).resolve().relative_to(root)
         state = "clean" if r.clean else "dirty"
         ab = f"{r.ahead if r.ahead is not None else '-'} / {r.behind if r.behind is not None else '-'}"
-        print(f"{rel}\t{r.branch}\t{state}\t{r.changed}\t{ab}\t{r.last_commit_date} {r.last_commit_short}")
+        print(
+            f"{rel}\t{r.branch}\t{state}\t{r.changed}\t{ab}\t{r.last_commit_date} {r.last_commit_short}"
+        )
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Fast multi-repo workspace scanner")
     ap.add_argument("--root", default="/realm/project", help="Root directory to scan")
-    ap.add_argument("--max-depth", type=int, default=3, help="Max directory depth for repo discovery")
-    ap.add_argument("--workers", type=int, default=12, help="Concurrent repo inspectors")
-    ap.add_argument("--changed-only", action="store_true", help="Only output dirty repos")
-    ap.add_argument("--with-size", action="store_true", help="Include approximate repo size (MB)")
-    ap.add_argument("--limit", type=int, default=0, help="Limit number of repos in output (0 = no limit)")
+    ap.add_argument(
+        "--max-depth",
+        type=int,
+        default=3,
+        help="Max directory depth for repo discovery",
+    )
+    ap.add_argument(
+        "--workers", type=int, default=12, help="Concurrent repo inspectors"
+    )
+    ap.add_argument(
+        "--changed-only", action="store_true", help="Only output dirty repos"
+    )
+    ap.add_argument(
+        "--with-size", action="store_true", help="Include approximate repo size (MB)"
+    )
+    ap.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Limit number of repos in output (0 = no limit)",
+    )
     ap.add_argument("--json", action="store_true", help="Emit JSON")
     args = ap.parse_args()
 

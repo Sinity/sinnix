@@ -11,6 +11,7 @@ metadata:
 
 Use this skill when you need repeatable machine-control primitives for desktop workflows.
 This skill provides:
+
 1. Kitty remote-control I/O (list windows, send input, capture output),
 2. Hyprland control wrapper (status, binds, dispatch, keyword, batch),
 3. Screenshot diagnostics and HDR washout workaround flow.
@@ -28,6 +29,7 @@ This skill provides:
 `scripts/kitty-remote-control.sh`
 
 Examples:
+
 ```bash
 # List windows
 scripts/kitty-remote-control.sh list
@@ -50,6 +52,7 @@ scripts/kitty-remote-control.sh send-await --match 'title:Codex' --text 'echo TA
 `scripts/hypr-control.sh`
 
 Examples:
+
 ```bash
 # Current focused monitor/window/workspace + color management
 scripts/hypr-control.sh status
@@ -66,6 +69,7 @@ scripts/hypr-control.sh dispatch workspace 3
 `scripts/screenshot-color-lab.sh`
 
 Examples:
+
 ```bash
 # Probe HDR state and tool availability
 scripts/screenshot-color-lab.sh probe

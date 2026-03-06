@@ -131,16 +131,22 @@ let
 
     # Rawlog utilities
     rawlog = mkScript "rawlog" {
-      description = "View and analyze raw kernel logs";
+      description = "Append and browse knowledgebase raw thought logs";
       runtimeInputs = with pkgs; [
         coreutils
         less
+        gnused
+        tofi
+        libnotify
       ];
     };
 
     rawlog-capture = mkScript "rawlog-capture" {
-      description = "Capture raw kernel logs to file";
-      runtimeInputs = with pkgs; [ coreutils ];
+      description = "Capture rawlog entries via gum UI";
+      runtimeInputs = with pkgs; [
+        coreutils
+        gum
+      ];
     };
 
     # Development helpers
@@ -149,6 +155,8 @@ let
       runtimeInputs = with pkgs; [
         coreutils
         fd
+        gnused
+        tree
       ];
     };
 

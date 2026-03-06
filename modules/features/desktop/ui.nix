@@ -90,7 +90,7 @@ mkFeatureModule {
       stylix = {
         enable = true;
         base16Scheme = "${pkgs.base16-schemes}/share/themes/gruvbox-dark-medium.yaml";
-        image = "${inputs.self}/assets/forest.jpg";
+        image = "${inputs.self}/assets/wallpaper-sinnix.svg";
 
         fonts = stylixFontSpec // {
           sizes = fontSizes;

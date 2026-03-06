@@ -43,9 +43,9 @@ mkFeatureModule {
         else
           export LD_LIBRARY_PATH="${qdrantLdLibraryPath}"
         fi
-        exec ${pkgs.uv}/bin/uv run 
-          --with fastmcp 
-          --with qdrant-client 
+        exec ${pkgs.uv}/bin/uv run \
+          --with fastmcp \
+          --with qdrant-client \
           -- python ${config.sinnix.paths.projectRoot}/scripts/mcp-qdrant.py
       '';
       mcpPostgresBin = pkgs.writeShellScriptBin "mcp-postgres" ''
@@ -163,8 +163,6 @@ mkFeatureModule {
             ".local/bin/mcp-context7".source = "${mcpContext7Bin}/bin/mcp-context7";
             ".local/bin/mcp-firecrawl".source = "${mcpFirecrawlBin}/bin/mcp-firecrawl";
             ".local/bin/mcp-playwright".source = "${mcpPlaywrightBin}/bin/mcp-playwright";
-            # Disabled for now due severe memory spikes/freezes.
-            # ".local/bin/mcp-cclsp".source = "${mcpCclspBin}/bin/mcp-cclsp";
             ".gemini/settings.json" = {
               source = mkDotsFile "/gemini/settings.json";
               force = true;

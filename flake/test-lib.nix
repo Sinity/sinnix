@@ -11,21 +11,12 @@
 #   in testLib.mkFeatureTest { ... }
 { inputs, lib }:
 let
-  featureLib = import ../modules/lib/features.nix { inherit lib; };
-  systemdLib = import ../modules/lib/systemd-hardening.nix { inherit lib; };
-  overlayLib = import ../modules/lib/overlay-helpers.nix { inherit lib; };
-
-  # Extend lib with sinnix helpers — mirrors flake/nixos.nix so that
-  # modules/default.nix can call lib.sinnix.mkAutoImports during tests.
-  extendedLib = lib.extend (
-    _final: _prev: {
-      sinnix = {
-        inherit (featureLib) mkPAMLimits mkAutoImports mkBundleModule;
-        systemd = systemdLib;
-        overlay = overlayLib;
-      };
-    }
-  );
+  libContext = import ./lib-context.nix { inherit inputs; };
+  inherit (libContext)
+    extendedLib
+    mkBaseModules
+    mkSharedSpecialArgs
+    ;
 
   # Create a pure flake source for hermetic evaluation
   flakeSource = builtins.path {
@@ -54,22 +45,10 @@ let
   };
 
   # Base modules required for all tests
-  baseModules = [
-    inputs.agenix.nixosModules.default
-    inputs.stylix.nixosModules.stylix
-    inputs.sinex.nixosModules.default
-    (import ./overlay { inherit inputs overlayLib; })
-    ../modules/default.nix
-  ];
+  baseModules = (mkBaseModules inputs) ++ [ ../modules/default.nix ];
 
   # Shared special args for test evaluation
-  sharedSpecialArgs = {
-    inputs = sanitizedInputs;
-    inherit (featureLib) mkFeatureModule mkServiceModule;
-    helpers = {
-      inherit (featureLib) mkDotsFile mkDotsFileFor;
-    };
-  };
+  sharedSpecialArgs = mkSharedSpecialArgs sanitizedInputs;
 
   # Mock filesystem roots for test VMs (prevents real FS dependencies)
   mountTmpfsRoots =

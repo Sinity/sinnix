@@ -101,4 +101,43 @@
       IOSchedulingClass = ioClass;
       IOSchedulingPriority = ioPriority;
     };
+
+  mkGraphicalUserService =
+    {
+      description,
+      execStart,
+      target ? "graphical-session.target",
+      serviceType ? "simple",
+      restart ? "on-failure",
+      restartSec ? 1,
+      unitExtra ? { },
+      serviceExtra ? { },
+      installWantedBy ? null,
+    }:
+    let
+      wantedBy = if installWantedBy == null then [ target ] else installWantedBy;
+      mergedAfter = (unitExtra.After or [ ]) ++ [ target ];
+      mergedPartOf = (unitExtra.PartOf or [ ]) ++ [ target ];
+      baseUnit = {
+        Description = description;
+        After = lib.unique mergedAfter;
+        PartOf = lib.unique mergedPartOf;
+      };
+    in
+    {
+      Unit =
+        baseUnit
+        // (lib.removeAttrs unitExtra [
+          "After"
+          "PartOf"
+        ]);
+      Service = {
+        Type = serviceType;
+        ExecStart = execStart;
+        Restart = restart;
+        RestartSec = restartSec;
+      }
+      // serviceExtra;
+      Install.WantedBy = wantedBy;
+    };
 }

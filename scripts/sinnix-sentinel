@@ -27,7 +27,7 @@ RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'; NC=$'\033[0m'; BOL
 # ── State ─────────────────────────────────────────────────────────────
 ok=0; warn=0; fail=0
 declare -a CHECKS=()     
-declare -a EVENTS=()     
+declare -a EVENTS=()
 declare -a NOTIFICATIONS_QUEUE=()  
 NOW_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 NOW_EPOCH=$(date +%s)
@@ -66,6 +66,14 @@ record_check() {
 queue_notification() {
   local urgency="$1" message="$2"
   NOTIFICATIONS_QUEUE+=("$urgency|$message")
+}
+
+can_write_parent() {
+  local path="$1"
+  local parent
+  parent="$(dirname "$path")"
+  [ -d "$parent" ] || mkdir -p "$parent" 2>/dev/null || true
+  [ -w "$parent" ]
 }
 
 # ── Load policy ───────────────────────────────────────────────────────
@@ -246,10 +254,112 @@ checks_json=$(printf '%s\n' "${CHECKS[@]}" | paste -sd ',' -)
 health_json=$(printf '{"timestamp":"%s","overall":"%s","summary":{"ok":%d,"warn":%d,"fail":%d},"checks":[%s]}' \
   "$NOW_TS" "$overall" "$ok" "$warn" "$fail" "$checks_json")
 
-$JSON_ONLY && echo "$health_json" | jq . && exit 0
-if [ -w "$(dirname "$HEALTH_FILE")" ]; then
-  echo "$health_json" > "$HEALTH_FILE" || true
+previous_health_json="null"
+if [ -r "$HEALTH_FILE" ] && jq -e . "$HEALTH_FILE" >/dev/null 2>&1; then
+  previous_health_json="$(cat "$HEALTH_FILE")"
 fi
+
+mapfile -t EVENTS < <(
+  jq -c -n \
+    --arg ts "$NOW_TS" \
+    --argjson current "$health_json" \
+    --argjson previous "$previous_health_json" '
+      def severity(s):
+        if s == "fail" then "critical"
+        elif s == "warn" then "warning"
+        else "normal"
+        end;
+      def key(c): "\((c.category // "unknown")):\((c.name // "unnamed"))";
+      def to_map(checks):
+        (checks // [])
+        | map({ key: key(.), value: . })
+        | from_entries;
+      def overall_event:
+        if $previous == null then
+          [{
+            timestamp: $ts,
+            source: "sinnix-sentinel",
+            event: "health.initialized",
+            severity: severity($current.overall),
+            overall: $current.overall,
+            summary: $current.summary
+          }]
+        elif ($previous.overall // "unknown") != ($current.overall // "unknown") then
+          [{
+            timestamp: $ts,
+            source: "sinnix-sentinel",
+            event: "health.overall_transition",
+            severity: severity($current.overall),
+            overall_before: ($previous.overall // "unknown"),
+            overall_after: ($current.overall // "unknown"),
+            summary_before: ($previous.summary // {}),
+            summary_after: ($current.summary // {})
+          }]
+        else
+          []
+        end;
+      def check_events:
+        if $previous == null then
+          []
+        else
+          (to_map($previous.checks) as $before
+           | to_map($current.checks) as $after
+           | [($after | keys[]) as $k
+              | ($before[$k] // null) as $prev
+              | ($after[$k] // null) as $next
+              | select($prev != null and $next != null and ($prev.status != $next.status))
+              | {
+                  timestamp: $ts,
+                  source: "sinnix-sentinel",
+                  event: "health.check_transition",
+                  severity: severity($next.status),
+                  category: $next.category,
+                  name: $next.name,
+                  status_before: $prev.status,
+                  status_after: $next.status,
+                  detail_before: ($prev.detail // ""),
+                  detail_after: ($next.detail // "")
+                }])
+        end;
+      (overall_event + check_events)[]
+    '
+)
+
+if [ "$previous_health_json" != "null" ]; then
+  if can_write_parent "$PREV_HEALTH_FILE"; then
+    printf '%s\n' "$previous_health_json" > "$PREV_HEALTH_FILE" || true
+  fi
+fi
+
+$JSON_ONLY && echo "$health_json" | jq . && exit 0
+if can_write_parent "$HEALTH_FILE"; then
+  printf '%s\n' "$health_json" > "$HEALTH_FILE" || true
+fi
+
+if [ "${#EVENTS[@]}" -gt 0 ] && can_write_parent "$EVENT_LOG"; then
+  printf '%s\n' "${EVENTS[@]}" >> "$EVENT_LOG" || true
+fi
+
+for event_json in "${EVENTS[@]}"; do
+  event_type="$(jq -r '.event // ""' <<<"$event_json" 2>/dev/null || true)"
+  event_severity="$(jq -r '.severity // "normal"' <<<"$event_json" 2>/dev/null || echo "normal")"
+  urgency="normal"
+  [ "$event_severity" = "critical" ] && urgency="critical"
+  case "$event_type" in
+    health.overall_transition)
+      before="$(jq -r '.overall_before // "unknown"' <<<"$event_json" 2>/dev/null || echo "unknown")"
+      after="$(jq -r '.overall_after // "unknown"' <<<"$event_json" 2>/dev/null || echo "unknown")"
+      queue_notification "$urgency" "sentinel: overall health ${before} -> ${after}"
+      ;;
+    health.check_transition)
+      after="$(jq -r '.status_after // "unknown"' <<<"$event_json" 2>/dev/null || echo "unknown")"
+      if [ "$after" = "fail" ]; then
+        name="$(jq -r '.name // "unknown"' <<<"$event_json" 2>/dev/null || echo "unknown")"
+        queue_notification "critical" "sentinel: check failed (${name})"
+      fi
+      ;;
+  esac
+done
 
 # Print one-line summary if not verbose/json
 if ! $VERBOSE && ! $JSON_ONLY; then

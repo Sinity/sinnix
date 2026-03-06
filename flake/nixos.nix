@@ -6,35 +6,12 @@
 
 { inputs, ... }:
 let
-  inherit (inputs.nixpkgs) lib;
-  featureLib = import ../modules/lib/features.nix { inherit lib; };
-  systemdLib = import ../modules/lib/systemd-hardening.nix { inherit lib; };
-  overlayLib = import ../modules/lib/overlay-helpers.nix { inherit lib; };
+  libContext = import ./lib-context.nix { inherit inputs; };
+  inherit (libContext) extendedLib mkBaseModules mkSharedSpecialArgs;
 
-  # Extend lib with sinnix helpers globally available
-  extendedLib = lib.extend (
-    _final: _prev: {
-      sinnix = {
-        inherit (featureLib) mkPAMLimits mkAutoImports mkBundleModule;
-        systemd = systemdLib;
-        overlay = overlayLib;
-      };
-    }
-  );
+  baseModules = mkBaseModules inputs;
+  sharedSpecialArgs = mkSharedSpecialArgs inputs;
 
-  baseModules = [
-    inputs.agenix.nixosModules.default
-    inputs.stylix.nixosModules.stylix
-    inputs.sinex.nixosModules.default
-    (import ./overlay { inherit inputs overlayLib; })
-  ];
-  sharedSpecialArgs = {
-    inherit inputs;
-    inherit (featureLib) mkFeatureModule mkServiceModule;
-    helpers = {
-      inherit (featureLib) mkDotsFile mkDotsFileFor;
-    };
-  };
   mkHost =
     {
       system ? "x86_64-linux",

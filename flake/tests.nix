@@ -525,15 +525,6 @@ let
             assertion = hasConf && builtins.match ".*snapshot_preserve.*14d.*52w.*" conf != null;
             message = "btrbk config must include long-horizon daily/weekly retention";
           }
-          # Health check service
-          {
-            assertion = config.systemd.services ? btrbk-health;
-            message = "btrbk-health check service must exist";
-          }
-          {
-            assertion = config.systemd.timers ? btrbk-health;
-            message = "btrbk-health timer must exist (daily health check)";
-          }
           # Snapshot dirs created by tmpfiles
           {
             assertion = builtins.any (

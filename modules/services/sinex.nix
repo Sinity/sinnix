@@ -14,6 +14,29 @@ in
   options.sinnix.services.sinex = {
     enable = lib.mkEnableOption "Sinex service";
     provisionDatabase = lib.mkEnableOption "Provision the Sinex PostgreSQL database without running services";
+    health = lib.mkOption {
+      type = lib.types.nullOr (
+        lib.types.submodule {
+          options = {
+            unit = lib.mkOption {
+              type = lib.types.str;
+            };
+            type = lib.mkOption {
+              type = lib.types.enum [
+                "service"
+                "timer"
+                "user"
+              ];
+            };
+            restartable = lib.mkOption {
+              type = lib.types.bool;
+            };
+          };
+        }
+      );
+      default = null;
+      description = "Service health metadata consumed by introspection/sentinel.";
+    };
   };
 
   # Only configure if sinex module is available from the flake input

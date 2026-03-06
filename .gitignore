@@ -22,6 +22,9 @@ __pycache__/
 .DS_Store
 Thumbs.db
 *.hm-bak
+assets/forest.jpg
+assets/wallpaper-base.jpg
+dots/Kvantum/
 
 # Backup
 *.bak
@@ -33,6 +36,8 @@ Thumbs.db
 build.log
 compilation.log
 _tmp_do_not_include_in_version_control.md
+.claude/scratch/*
+!.claude/scratch/.gitkeep
 
 # Only ignore unencrypted secrets
 *.key

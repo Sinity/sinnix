@@ -8,13 +8,20 @@
 {
   perSystem =
     {
-      config,
       pkgs,
       system,
       ...
     }:
     let
       scriptPkgs = inputs.self.packages.${system};
+      commandRegistry = import ./command-registry.nix {
+        inherit inputs pkgs system;
+      };
+      commandHelp = builtins.concatStringsSep "\n" (
+        map (
+          doc: ''echo "  ${doc.name}  - ${doc.description} (${doc.command})"''
+        ) commandRegistry.commandDocs
+      );
 
       # Helper scripts available in the dev shell
       check = pkgs.writeShellScriptBin "check" ''
@@ -66,8 +73,7 @@
           echo "NixOS Configuration Development Environment"
           echo ""
           echo "Available commands:"
-          echo "  check   - Validate configuration (nix flake check)"
-          echo "  format  - Apply code formatting (nix fmt)"
+          ${commandHelp}
           echo "  rebuild - Apply configuration to system (sudo nix run .#switch)"
           echo ""
         '';

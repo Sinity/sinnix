@@ -196,6 +196,11 @@ in
 mkServiceModule {
   name = "power-watchdog";
   description = "High-frequency sensor logger for power loss forensics";
+  health = {
+    unit = "power-watchdog.service";
+    type = "service";
+    restartable = true;
+  };
   extraOptions = {
     intervalSec = lib.mkOption {
       type = lib.types.int;

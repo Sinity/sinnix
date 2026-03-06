@@ -7,6 +7,7 @@
     ./hardware-configuration.nix
     ./boot.nix
     ./networking.nix
+    ./storage.nix
     ./disko.nix
   ];
 

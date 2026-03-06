@@ -58,7 +58,7 @@ in {
 | **DSLs**                   | `lib/hyprland-rules.nix`    | `mkRule`, `mkScratchpad` → transform declarative data to config syntax     |
 | **Systemd Hardening**      | `lib/systemd-hardening.nix` | `mkHardenedService { level = "strict" }` — preset security profiles        |
 | **Bundles**                | `bundles/*.nix`             | Pure composition — only enable other features, no direct config            |
-| **Out-of-Store Symlinks**  | `lib/features.nix`          | `mkDotsFile` — instant dotfile propagation without rebuild                 |
+| **Out-of-Store Symlinks**  | `lib/features.nix`          | `mkDotsFileFor` — instant dotfile propagation without rebuild              |
 | **Conditional Merge**      | `services/sinex.nix`        | `lib.mkMerge [ base (lib.mkIf cond extra) ]` — layered composition         |
 | **Config Assertion Tests** | `flake/tests.nix`           | Fast checks via `assertions` — no VM boot, just evaluation                 |
 | **Package Registry**       | `flake/packages.nix`        | Centralize custom scripts with `writeShellApplication`                     |

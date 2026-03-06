@@ -45,6 +45,29 @@ in
 {
   options.sinnix.services.terminal-capture = {
     enable = lib.mkEnableOption "Advanced terminal session recording and telemetry";
+    health = lib.mkOption {
+      type = lib.types.nullOr (
+        lib.types.submodule {
+          options = {
+            unit = lib.mkOption {
+              type = lib.types.str;
+            };
+            type = lib.mkOption {
+              type = lib.types.enum [
+                "service"
+                "timer"
+                "user"
+              ];
+            };
+            restartable = lib.mkOption {
+              type = lib.types.bool;
+            };
+          };
+        }
+      );
+      default = null;
+      description = "Service health metadata consumed by introspection/sentinel.";
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -58,50 +81,80 @@ in
       { lib, pkgs, ... }:
       {
         programs.zsh.initContent = lib.mkBefore ''
-                  # Metadata and hooks logic for enriched capture
-                  if [[ -n ''${SINNIX_ASCIINEMA_ACTIVE:-} ]]; then
-                    if [[ -n ''${SINNIX_ASCIINEMA_META:-} && -z ''${SINNIX_ASCIINEMA_HOOKED:-} ]]; then
-                      export SINNIX_ASCIINEMA_HOOKED=1
-                      autoload -Uz add-zsh-hook
-                      zmodload zsh/datetime 2>/dev/null || true
+                            # Metadata and hooks logic for enriched capture
+                            if [[ -n ''${SINNIX_ASCIINEMA_ACTIVE:-} ]]; then
+                              if [[ -n ''${SINNIX_ASCIINEMA_META:-} && -z ''${SINNIX_ASCIINEMA_HOOKED:-} ]]; then
+                                export SINNIX_ASCIINEMA_HOOKED=1
+                                autoload -Uz add-zsh-hook
+                                zmodload zsh/datetime 2>/dev/null || true
 
-                      _sinnix_log_event() {
-                        local type="$1"; shift
-                        printf '{"type":"%s","time":"%s",%s}
-          ' "$type" "$(date -Is)" "$*" >>"$SINNIX_ASCIINEMA_META"
-                      }
+                                _sinnix_preexec() {
+                                  export SINNIX_CMD_START=$EPOCHREALTIME
+                                  ${pkgs.python3}/bin/python3 - "$SINNIX_ASCIINEMA_META" "$(date -Is)" "$1" "$PWD" <<'PY'
+          import json
+          import sys
 
-                      _sinnix_preexec() {
-                        export SINNIX_CMD_START=$EPOCHREALTIME
-                        _sinnix_log_event "command_start" ""cmd":$(printf '%q' "$1"),"pwd":$(printf '%q' "$PWD")"
-                      }
+          path, ts, cmd, pwd = sys.argv[1:5]
+          with open(path, "a", encoding="utf-8") as f:
+              f.write(
+                  json.dumps(
+                      {
+                          "type": "command_start",
+                          "time": ts,
+                          "cmd": cmd,
+                          "pwd": pwd,
+                      },
+                      ensure_ascii=False,
+                  )
+                  + "\n"
+              )
+          PY
+                                }
 
-                      _sinnix_precmd() {
-                        local exit_code=$?
-                        local duration=0
-                        [[ -n $SINNIX_CMD_START ]] && duration=$(( (EPOCHREALTIME - SINNIX_CMD_START) * 1000 ))
-                        _sinnix_log_event "command_end" ""status":$exit_code,"duration_ms":$duration"
-                      }
+                                _sinnix_precmd() {
+                                  local exit_code=$?
+                                  local duration=0
+                                  [[ -n $SINNIX_CMD_START ]] && duration=$(( (EPOCHREALTIME - SINNIX_CMD_START) * 1000 ))
+                                  ${pkgs.python3}/bin/python3 - "$SINNIX_ASCIINEMA_META" "$(date -Is)" "$exit_code" "$duration" <<'PY'
+          import json
+          import sys
 
-                      add-zsh-hook preexec _sinnix_preexec
-                      add-zsh-hook precmd _sinnix_precmd
-                    fi
-                  elif [[ -z ''${SINNIX_ASCIINEMA_DISABLE:-} && $- == *i* && -t 0 && "$(tty)" != "/dev/tty1" && -z ''${TMUX:-} ]]; then
-                    export SINNIX_ASCIINEMA_ACTIVE=1
-                    local ts=$(date -u +%Y%m%dT%H%M%SZ)
-                    local cast_path="${recordingsDir}/$(hostname)-$(tty | tr / _)-''${ts}.cast"
-                    local launcher_pid="$PPID"
-                    local tty_path="$(tty 2>/dev/null || true)"
-                    if [[ "$tty_path" = "not a tty" ]]; then
-                      tty_path=""
-                    fi
-                    export SINNIX_ASCIINEMA_FILE="$cast_path"
-                    export SINNIX_ASCIINEMA_META="$cast_path.meta"
-                    export SINNIX_ASCIINEMA_LAUNCHER_PID="$launcher_pid"
-                    export SINNIX_ASCIINEMA_TTY="$tty_path"
+          path, ts, status, duration_ms = sys.argv[1:5]
+          with open(path, "a", encoding="utf-8") as f:
+              f.write(
+                  json.dumps(
+                      {
+                          "type": "command_end",
+                          "time": ts,
+                          "status": int(status),
+                          "duration_ms": int(float(duration_ms)),
+                      },
+                      ensure_ascii=False,
+                  )
+                  + "\n"
+              )
+          PY
+                                }
 
-                    exec ${pkgs.asciinema_3}/bin/asciinema rec --stdin --quiet --command "${asciinemaShellWrapper}" "$cast_path"
-                  fi
+                                add-zsh-hook preexec _sinnix_preexec
+                                add-zsh-hook precmd _sinnix_precmd
+                              fi
+                            elif [[ -z ''${SINNIX_ASCIINEMA_DISABLE:-} && $- == *i* && -t 0 && "$(tty)" != "/dev/tty1" && -z ''${TMUX:-} ]]; then
+                              export SINNIX_ASCIINEMA_ACTIVE=1
+                              local ts=$(date -u +%Y%m%dT%H%M%SZ)
+                              local cast_path="${recordingsDir}/$(hostname)-$(tty | tr / _)-''${ts}.cast"
+                              local launcher_pid="$PPID"
+                              local tty_path="$(tty 2>/dev/null || true)"
+                              if [[ "$tty_path" = "not a tty" ]]; then
+                                tty_path=""
+                              fi
+                              export SINNIX_ASCIINEMA_FILE="$cast_path"
+                              export SINNIX_ASCIINEMA_META="$cast_path.meta"
+                              export SINNIX_ASCIINEMA_LAUNCHER_PID="$launcher_pid"
+                              export SINNIX_ASCIINEMA_TTY="$tty_path"
+
+                              exec ${pkgs.asciinema_3}/bin/asciinema rec --stdin --quiet --command "${asciinemaShellWrapper}" "$cast_path"
+                            fi
         '';
       };
   };

@@ -26,23 +26,6 @@ mkFeatureModule {
     }:
     let
       graphicalTarget = "graphical-session.target";
-      baseGraphicalUnit = {
-        After = [ graphicalTarget ];
-        PartOf = [ graphicalTarget ];
-      };
-      mkService = exec: desc: {
-        Unit = baseGraphicalUnit // {
-          Description = desc;
-        };
-        Service = {
-          Type = "simple";
-          ExecStart = exec;
-          Restart = "on-failure";
-          RestartSec = 1;
-        };
-        Install.WantedBy = [ graphicalTarget ];
-      };
-
       stylixColors = config.lib.stylix.colors;
       toRgba = alpha: color: "${lib.removePrefix "#" color}${alpha}";
       bg = toRgba "f0" stylixColors.base00;
@@ -118,10 +101,22 @@ mkFeatureModule {
 
         # Background Services
         systemd.user.services = {
-          wl-clip-persist = mkService "${pkgs.wl-clip-persist}/bin/wl-clip-persist --clipboard both" "Wayland clipboard persistence";
-          nm-applet = mkService "${pkgs.networkmanagerapplet}/bin/nm-applet" "NetworkManager applet";
-          polkit-gnome-authentication-agent-1 = mkService "${pkgs.polkit_gnome}/libexec/polkit-gnome-authentication-agent-1" "polkit-gnome-authentication-agent-1";
-          blueman-applet = mkService "${pkgs.blueman}/bin/blueman-applet" "Blueman applet";
+          wl-clip-persist = lib.sinnix.systemd.mkGraphicalUserService {
+            description = "Wayland clipboard persistence";
+            execStart = "${pkgs.wl-clip-persist}/bin/wl-clip-persist --clipboard both";
+          };
+          nm-applet = lib.sinnix.systemd.mkGraphicalUserService {
+            description = "NetworkManager applet";
+            execStart = "${pkgs.networkmanagerapplet}/bin/nm-applet";
+          };
+          polkit-gnome-authentication-agent-1 = lib.sinnix.systemd.mkGraphicalUserService {
+            description = "polkit-gnome-authentication-agent-1";
+            execStart = "${pkgs.polkit_gnome}/libexec/polkit-gnome-authentication-agent-1";
+          };
+          blueman-applet = lib.sinnix.systemd.mkGraphicalUserService {
+            description = "Blueman applet";
+            execStart = "${pkgs.blueman}/bin/blueman-applet";
+          };
         };
 
         home.sessionVariables = {

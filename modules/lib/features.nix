@@ -53,6 +53,7 @@ let
       name,
       description,
       extraOptions ? { },
+      health ? null,
       configFn,
     }:
     args@{ config, lib, ... }:
@@ -62,23 +63,46 @@ let
         "services"
         name
       ];
-      optionsForPath = extraOptions // {
-        enable = lib.mkEnableOption description;
+      healthOption = lib.optionalAttrs (health != null) {
+        health = lib.mkOption {
+          type = lib.types.nullOr (
+            lib.types.submodule {
+              options = {
+                unit = lib.mkOption {
+                  type = lib.types.str;
+                  description = "systemd unit name for health monitoring.";
+                };
+                type = lib.mkOption {
+                  type = lib.types.enum [
+                    "service"
+                    "timer"
+                    "user"
+                  ];
+                  description = "How sentinel should query the unit.";
+                };
+                restartable = lib.mkOption {
+                  type = lib.types.bool;
+                  description = "Whether sentinel may auto-restart this unit.";
+                };
+              };
+            }
+          );
+          default = health;
+          description = "Service health metadata consumed by introspection/sentinel.";
+        };
       };
+      optionsForPath =
+        extraOptions
+        // healthOption
+        // {
+          enable = lib.mkEnableOption description;
+        };
       cfg = lib.getAttrFromPath servicePath config;
     in
     {
       options = lib.setAttrByPath servicePath optionsForPath;
       config = lib.mkIf cfg.enable (configFn (args // { inherit cfg; }));
     };
-
-  # Simplified dotfile linker using sinnix extraSpecialArgs (preferred pattern)
-  # Usage inside HM context: mkDotsFile = helpers.mkDotsFile sinnix config;
-  #                         then: xdg.configFile."foo".source = mkDotsFile "/foo";
-  # This avoids the "nixosConfig = config" capture dance.
-  mkDotsFile =
-    sinnix: hmConfig: rel:
-    hmConfig.lib.file.mkOutOfStoreSymlink (sinnix.paths.dotsRoot + rel);
 
   # Pre-curried version for extraSpecialArgs - eliminates boilerplate in modules
   # Usage in home-manager.nix extraSpecialArgs:
@@ -231,7 +255,6 @@ in
   inherit
     mkFeatureModule
     mkServiceModule
-    mkDotsFile
     mkDotsFileFor
     mkPAMLimits
     ;

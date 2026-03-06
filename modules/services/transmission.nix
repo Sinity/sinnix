@@ -11,6 +11,11 @@
 mkServiceModule {
   name = "transmission";
   description = "Transmission BitTorrent client";
+  health = {
+    unit = "transmission.service";
+    type = "service";
+    restartable = true;
+  };
   configFn =
     {
       config,

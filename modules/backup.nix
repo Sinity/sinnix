@@ -54,7 +54,7 @@ let
     lockfile                /var/lock/btrbk.lock
 
     # ─── SNAPSHOTS ONLY (Borg handles all off-disk transfers) ───
-    
+
     volume ${realmRoot}
       snapshot_dir   .snapshot
       subvolume .

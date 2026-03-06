@@ -5,6 +5,7 @@
 On Hyprland HDR setups (`colorManagementPreset = hdr`, often 10-bit format like `XBGR2101010`), screenshots can appear washed out compared to on-screen output.
 
 Observed local context:
+
 - Host config explicitly sets monitor HDR mode in `hosts/sinnix-prime/display.nix`.
 - Hyprland monitor state reports HDR preset.
 

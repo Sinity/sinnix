@@ -247,7 +247,7 @@
       # ─────────────────────────────────────────────────────────────
       # router-config package: derivation containing all deploy scripts
       # ─────────────────────────────────────────────────────────────
-      routerConfigDrv = pkgs.runCommandNoCC "sinnix-gw-config" { } ''
+      routerConfigDrv = pkgs.runCommand "sinnix-gw-config" { } ''
         mkdir -p $out
         cat > $out/configure.sh << 'CONFIGURE_EOF'
         ${configureScript}

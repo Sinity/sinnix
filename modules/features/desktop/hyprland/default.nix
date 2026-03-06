@@ -89,7 +89,12 @@ in
     # User Level Configuration (Home Manager)
     # -------------------------------------------------------------------------
     home-manager.users.${user} =
-      { pkgs, lib, config, ... }:
+      {
+        pkgs,
+        lib,
+        config,
+        ...
+      }:
       {
         imports = [ ./lock.nix ];
 

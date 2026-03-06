@@ -30,7 +30,10 @@
       "Skill(enhance)",
       "Skill(netdata-metrics)"
     ],
-    "deny": ["Bash(rm -rf /:*)", "Bash(sudo:*)"],
+    "deny": [
+      "Bash(rm -rf /:*)",
+      "Bash(sudo:*)"
+    ],
     "ask": [],
     "defaultMode": "default"
   },
@@ -70,5 +73,6 @@
     "learning-output-style@claude-plugins-official": true,
     "rust-analyzer-lsp@claude-plugins-official": false
   },
-  "alwaysThinkingEnabled": true
+  "alwaysThinkingEnabled": true,
+  "model": "sonnet"
 }

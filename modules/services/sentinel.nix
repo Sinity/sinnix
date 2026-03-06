@@ -27,6 +27,7 @@ in
 mkServiceModule {
   name = "sentinel";
   description = "System health sentinel with auto-derived checks";
+  health = null;
   extraOptions = {
     intervalSec = lib.mkOption {
       type = lib.types.int;

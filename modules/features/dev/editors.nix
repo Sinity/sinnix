@@ -90,7 +90,12 @@ mkFeatureModule {
 
       (lib.mkIf cfg.antigravity.enable {
         home-manager.users.${user} =
-          { config, mkDotsFileFor, pkgs, ... }:
+          {
+            config,
+            mkDotsFileFor,
+            pkgs,
+            ...
+          }:
           let
             mkDotsFile = mkDotsFileFor config;
             antigravity-wrapped = pkgs.symlinkJoin {
@@ -106,7 +111,8 @@ mkFeatureModule {
           {
             home.packages = [ antigravity-wrapped ];
             home.file = {
-              ".antigravity/extensions".source = config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/.vscode/extensions";
+              ".antigravity/extensions".source =
+                config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/.vscode/extensions";
             };
             xdg.configFile = {
               "Antigravity/User/settings.json" = {

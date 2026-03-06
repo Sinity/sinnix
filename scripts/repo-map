@@ -5,21 +5,44 @@
 set -euo pipefail
 
 ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+MAX_DEPTH=2
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --full)
+      MAX_DEPTH=4
+      ;;
+    -h|--help)
+      echo "Usage: repo-map [--full]"
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      echo "Usage: repo-map [--full]" >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
 
 # Compact tree excluding noise
 echo "## Repository Structure (Compact)"
 echo '```'
-fd --max-depth 2 --hidden --exclude .git --exclude node_modules --exclude .venv --exclude .direnv . "$ROOT" | sed -e "s|$ROOT/||" | tree --fromfile -L 2
+fd --max-depth "$MAX_DEPTH" --hidden --exclude .git --exclude node_modules --exclude .venv --exclude .direnv . "$ROOT" \
+  | sed -e "s|$ROOT/||" \
+  | tree --fromfile -L "$MAX_DEPTH"
 echo '```'
 
 echo
 echo "## Canonical Files"
 # Highlight files that define the system's "brain"
 declare -a canonical=(
-    "flake.nix"
-    "dots/claude/CLAUDE.md"
-    "docs/taskw/task-tracking-architecture.md"
-    "modules/core.nix"
+  "flake.nix"
+  "AGENTS.md"
+  "modules/default.nix"
+  "modules/core.nix"
+  "hosts/sinnix-prime/default.nix"
+  "flake/apps.nix"
 )
 
 for f in "${canonical[@]}"; do

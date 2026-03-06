@@ -60,7 +60,6 @@ mkFeatureModule {
           }:
           {
             home.sessionVariables = {
-              MEDIA_DOMAIN = "v0.3";
               MPV_SCREENSHOT_DIR = "${capturesRoot}/screenshot/mpv";
             };
 

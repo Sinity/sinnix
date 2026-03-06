@@ -21,6 +21,7 @@ All dotfiles in `dots/` use Home Manager out-of-store symlinks (`mkOutOfStoreSym
 ---
 
 **Project-specific details** (module structure, patterns, workflows) are in each project's CLAUDE.md:
+
 - sinnix → `/realm/project/sinnix/CLAUDE.md`
 - sinex → `/realm/project/sinex/CLAUDE.md`
 - lynchpin → see project docs

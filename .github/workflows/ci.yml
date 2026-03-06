@@ -27,7 +27,7 @@ jobs:
             extra-trusted-public-keys = numtide.cachix.org-1:2ps1kLBUWjxIneOy1Ik6cQjb41X0iXVXeHigGmycPPE= sinity.cachix.org-1:i5YsUuuRv9r790gdwwE+FiJiUcWULV1lEOmKE50Y+TI=
 
       - name: Check Nix formatting
-        run: nix run .#fmt-check -- $(git ls-files '*.nix')
+        run: nix fmt -- --fail-on-change
 
       - name: Run flake checks (includes nixosTests)
         run: nix flake check

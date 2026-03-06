@@ -51,7 +51,6 @@ mkFeatureModule {
           home = {
             sessionVariables = {
               BROWSER = "google-chrome-stable";
-              COMMUNICATION_DOMAIN = "v0.3";
             };
 
             packages = with pkgs; [

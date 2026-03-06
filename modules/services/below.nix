@@ -16,6 +16,11 @@
 mkServiceModule {
   name = "below";
   description = "below time-traveling resource monitor";
+  health = {
+    unit = "below.service";
+    type = "service";
+    restartable = true;
+  };
   extraOptions = {
     collectIntervalSec = lib.mkOption {
       type = lib.types.int;

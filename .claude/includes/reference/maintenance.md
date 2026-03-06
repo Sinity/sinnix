@@ -30,6 +30,21 @@ After structural changes:
 
 ## Recent Changes
 
+### 2026-03-06: Consistency, Health Telemetry, and Flake Context Refactor
+
+- **Added**: `flake/lib-context.nix` to centralize lib extension/bootstrap shared by `nixos.nix` and `test-lib.nix`
+- **Added**: `flake/command-registry.nix`; `apps.nix` now generates flake apps from a single registry
+- **Removed**: `mkDotsFile` helper export from `modules/lib/features.nix`; standardized on `mkDotsFileFor`
+- **Added**: Optional `health` metadata support in `mkServiceModule`; updated services to self-declare sentinel health checks
+- **Refactored**: `modules/introspection.nix` now derives service checks from enabled `sinnix.services.*.health` metadata
+- **Added**: `mkGraphicalUserService` helper in `modules/lib/systemd-hardening.nix`; applied in `features/desktop/base.nix`
+- **Fixed**: `scripts/kitty-grid` undefined function call (`collect_kitty_windows` -> `collect_target_windows`)
+- **Fixed**: `modules/features/dev/mcp-servers.nix` qdrant wrapper command continuation
+- **Fixed**: `scripts/sinnix-sentinel` transition/event logging contract (`events.jsonl`) and previous-health snapshot persistence
+- **Improved**: `scripts/repo-map` now supports a real `--full` mode and updated canonical-file list
+- **Updated**: `hosts/sinnix-ethereal/default.nix` now imports `./storage.nix` (swap config no longer orphaned)
+- **Updated**: CI formatting step now uses `nix fmt -- --check`
+
 ### 2026-02-12: Audit Cleanup
 
 - **Deleted**: `archive/` directory (~80K of abandoned modules and obsolete scripts; git history preserves all)

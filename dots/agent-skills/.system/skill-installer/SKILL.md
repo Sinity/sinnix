@@ -20,6 +20,7 @@ Install skills with the helper scripts.
 ## Communication
 
 When listing skills, output approximately as follows, depending on the context of the user's request. If they ask about experimental skills, list from `.experimental` instead of `.curated` and label the source accordingly:
+
 ```text
 Skills from {repo}:
 

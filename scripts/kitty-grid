@@ -277,7 +277,7 @@ def ensure_windows(
 
     time.sleep(args.poll_interval)
     clients = load_clients()
-    return collect_kitty_windows(clients, workspace, workspace_id)
+    return collect_target_windows(clients, workspace, workspace_id, args.window_class)
 
 
 def compute_grid(

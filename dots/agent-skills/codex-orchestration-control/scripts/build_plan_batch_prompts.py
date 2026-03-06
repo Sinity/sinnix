@@ -46,16 +46,46 @@ Requirements:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate prompt files from generic plan batches.")
-    parser.add_argument("--plan-json", required=True, help="Path to plan JSON containing a batches array")
-    parser.add_argument("--out-dir", required=True, help="Directory where *.prompt files will be written")
-    parser.add_argument("--batch-key", default="batches", help="Key containing batch array (default: batches)")
-    parser.add_argument("--id-key", default="batch_id", help="Batch id key (default: batch_id)")
-    parser.add_argument("--items-key", default="shard_ids", help="Batch items key (default: shard_ids)")
-    parser.add_argument("--item-label", default="items", help="Label shown in generated prompts")
-    parser.add_argument("--name-prefix", default="batch", help="Prefix for prompt filenames")
-    parser.add_argument("--project-root", default="", help="Optional project root path to embed in prompt")
-    parser.add_argument("--protocol-path", default="", help="Optional protocol/runbook path to embed in prompt")
+    parser = argparse.ArgumentParser(
+        description="Generate prompt files from generic plan batches."
+    )
+    parser.add_argument(
+        "--plan-json",
+        required=True,
+        help="Path to plan JSON containing a batches array",
+    )
+    parser.add_argument(
+        "--out-dir",
+        required=True,
+        help="Directory where *.prompt files will be written",
+    )
+    parser.add_argument(
+        "--batch-key",
+        default="batches",
+        help="Key containing batch array (default: batches)",
+    )
+    parser.add_argument(
+        "--id-key", default="batch_id", help="Batch id key (default: batch_id)"
+    )
+    parser.add_argument(
+        "--items-key", default="shard_ids", help="Batch items key (default: shard_ids)"
+    )
+    parser.add_argument(
+        "--item-label", default="items", help="Label shown in generated prompts"
+    )
+    parser.add_argument(
+        "--name-prefix", default="batch", help="Prefix for prompt filenames"
+    )
+    parser.add_argument(
+        "--project-root",
+        default="",
+        help="Optional project root path to embed in prompt",
+    )
+    parser.add_argument(
+        "--protocol-path",
+        default="",
+        help="Optional protocol/runbook path to embed in prompt",
+    )
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
 
@@ -96,7 +126,9 @@ def main():
         "generated_count": len(generated),
         "generated": generated,
     }
-    (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (out_dir / "manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     print(json.dumps(manifest, indent=2, sort_keys=True))
 
 
