@@ -76,13 +76,6 @@
         "github_personal_access_token": { "env": "GITHUB_TOKEN" }
       }
     },
-    "postgres-context-server": {
-      "source": "extension",
-      "enabled": true,
-      "settings": {
-        "database_url": { "env": "SINEX_DATABASE_URL" }
-      }
-    },
     "mcp-server-context7": {
       "source": "extension",
       "enabled": true,

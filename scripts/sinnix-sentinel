@@ -9,6 +9,8 @@ PREV_HEALTH_FILE="${SINNIX_HEALTH_FILE:-/run/sinnix/health.json}.prev"
 EVENT_LOG="${SINNIX_EVENT_LOG:-/var/log/sinnix-sentinel/events.jsonl}"
 CORRECTIVE_ACTIONS="${SINNIX_CORRECTIVE_ACTIONS:-true}"
 NOTIFICATIONS="${SINNIX_NOTIFICATIONS:-true}"
+MCP_CHILD_THRESHOLD="${SINNIX_MCP_CHILD_THRESHOLD:-1}"
+REBOOT_STATE_FILE="${SINNIX_REBOOT_STATE_FILE:-/var/lib/sinnix-sentinel/reboot-last-notified-system}"
 VERBOSE=false
 JSON_ONLY=false
 
@@ -68,6 +70,28 @@ queue_notification() {
   NOTIFICATIONS_QUEUE+=("$urgency|$message")
 }
 
+send_notification() {
+  local urgency="$1" message="$2"
+  if ! command -v notify-send &>/dev/null; then
+    return 0
+  fi
+
+  local notify_user="${SINNIX_NOTIFY_USER:-}"
+  if [ -n "$notify_user" ] && id "$notify_user" &>/dev/null; then
+    local notify_uid
+    notify_uid="$(id -u "$notify_user" 2>/dev/null || true)"
+    if [ -n "$notify_uid" ] && [ -S "/run/user/${notify_uid}/bus" ] && command -v runuser &>/dev/null; then
+      runuser -u "$notify_user" -- env \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${notify_uid}/bus" \
+        XDG_RUNTIME_DIR="/run/user/${notify_uid}" \
+        notify-send --urgency="$urgency" "sinnix sentinel" "$message" >/dev/null 2>&1 || true
+      return 0
+    fi
+  fi
+
+  notify-send --urgency="$urgency" "sinnix sentinel" "$message" >/dev/null 2>&1 || true
+}
+
 can_write_parent() {
   local path="$1"
   local parent
@@ -82,6 +106,9 @@ if [ ! -f "$POLICY_FILE" ]; then
   exit 1
 fi
 POLICY=$(cat "$POLICY_FILE")
+if ! [[ "$MCP_CHILD_THRESHOLD" =~ ^[0-9]+$ ]]; then
+  MCP_CHILD_THRESHOLD=1
+fi
 
 # ── 1. Hardware ──────────────────────────────────────────────────────
 $VERBOSE && printf '\n%s=== sinnix sentinel ===%s\n\n' "$BOLD" "$NC"
@@ -106,7 +133,54 @@ if command -v smartctl &>/dev/null; then
   fi
 fi
 
-# ── 2. Services ───────────────────────────────────────────────────────
+# ── 2. Reboot Requirement ──────────────────────────────────────────────
+$VERBOSE && printf '\n%sReboot:%s\n' "$BOLD" "$NC"
+
+reboot_needed=0
+reboot_reason=""
+booted_kernel="$(readlink /run/booted-system/kernel 2>/dev/null || echo "unknown")"
+current_kernel="$(readlink /run/current-system/kernel 2>/dev/null || echo "unknown")"
+current_system="$(readlink /run/current-system 2>/dev/null || echo "unknown")"
+
+if [ "$booted_kernel" != "unknown" ] && [ "$current_kernel" != "unknown" ] && [ "$booted_kernel" != "$current_kernel" ]; then
+  reboot_needed=1
+  reboot_reason="kernel updated"
+fi
+
+if [ -f /proc/driver/nvidia/version ]; then
+  loaded_nvidia="$(
+    awk '/NVRM version:/ {for (i = 1; i <= NF; i++) if ($i == "Module") {print $(i + 1); exit}}' \
+      /proc/driver/nvidia/version 2>/dev/null || true
+  )"
+  current_nvidia=""
+  if command -v nvidia-smi &>/dev/null; then
+    current_nvidia="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | sed -n '1p' || true)"
+  fi
+
+  if [ -n "$loaded_nvidia" ] && [ -z "$current_nvidia" ]; then
+    reboot_needed=1
+    reboot_reason="${reboot_reason:+${reboot_reason}; }nvidia driver check failed"
+  elif [ -n "$loaded_nvidia" ] && [ -n "$current_nvidia" ] && [ "$loaded_nvidia" != "$current_nvidia" ]; then
+    reboot_needed=1
+    reboot_reason="${reboot_reason:+${reboot_reason}; }nvidia ${loaded_nvidia} -> ${current_nvidia}"
+  fi
+fi
+
+if [ "$reboot_needed" -eq 1 ]; then
+  record_check "reboot" "required" "warn" "$reboot_reason"
+  last_notified_system="$(cat "$REBOOT_STATE_FILE" 2>/dev/null || true)"
+  if [ "$current_system" != "unknown" ] && [ "$current_system" != "$last_notified_system" ]; then
+    queue_notification "critical" "sentinel: reboot required (${reboot_reason})"
+    if can_write_parent "$REBOOT_STATE_FILE"; then
+      printf '%s\n' "$current_system" > "$REBOOT_STATE_FILE" || true
+    fi
+  fi
+else
+  record_check "reboot" "required" "ok" "no reboot needed"
+  rm -f "$REBOOT_STATE_FILE" 2>/dev/null || true
+fi
+
+# ── 3. Services ───────────────────────────────────────────────────────
 $VERBOSE && printf '\n%sServices:%s\n' "$BOLD" "$NC"
 
 while IFS='|' read -r name unit type restartable; do
@@ -134,7 +208,142 @@ while IFS='|' read -r name unit type restartable; do
   fi
 done < <(echo "$POLICY" | jq -r '.services[] | "\(.name)|\(.unit)|\(.type)|\(.restartable)"')
 
-# ── 3. Captures ───────────────────────────────────────────────────────
+# ── 4. MCP Telemetry ──────────────────────────────────────────────────
+$VERBOSE && printf '\n%sMCP:%s\n' "$BOLD" "$NC"
+
+mcp_telemetry_json="$(
+  MCP_CHILD_THRESHOLD="$MCP_CHILD_THRESHOLD" python3 - <<'PY'
+import json
+import os
+import re
+import subprocess
+
+threshold = int(os.environ.get("MCP_CHILD_THRESHOLD", "1"))
+
+agent_patterns = [
+    ("codex", re.compile(r"\bcodex\b", re.IGNORECASE)),
+    ("claude", re.compile(r"\bclaude(?:-code)?\b", re.IGNORECASE)),
+    ("gemini", re.compile(r"\bgemini\b", re.IGNORECASE)),
+    ("opencode", re.compile(r"\bopencode\b", re.IGNORECASE)),
+    ("cursor", re.compile(r"\bcursor\b", re.IGNORECASE)),
+    ("aider", re.compile(r"\baider\b", re.IGNORECASE)),
+    ("qwen", re.compile(r"\bqwen\b", re.IGNORECASE)),
+    ("goose", re.compile(r"\bgoose\b", re.IGNORECASE)),
+    ("jules", re.compile(r"\bjules\b", re.IGNORECASE)),
+]
+
+def infer_mcp_type(cmd: str):
+    lower = cmd.lower()
+    if "context7" in lower:
+        return "context7"
+    if "firecrawl" in lower:
+        return "firecrawl"
+    if "playwright" in lower and "mcp" in lower:
+        return "playwright"
+    match = re.search(r"@modelcontextprotocol/server-([a-z0-9._-]+)", lower)
+    if match:
+        return match.group(1)
+    match = re.search(r"\bmcp-([a-z0-9._-]+)\b", lower)
+    if match:
+        return match.group(1)
+    return None
+
+proc = subprocess.run(
+    ["ps", "-eo", "pid=,ppid=,args=", "--no-headers"],
+    check=True,
+    text=True,
+    capture_output=True,
+)
+
+pid_map = {}
+for line in proc.stdout.splitlines():
+    line = line.strip()
+    if not line:
+        continue
+    parts = line.split(None, 2)
+    if len(parts) < 3:
+        continue
+    pid = int(parts[0])
+    ppid = int(parts[1])
+    args = parts[2]
+    pid_map[pid] = (ppid, args)
+
+def infer_agent(start_ppid: int):
+    seen = set()
+    current = start_ppid
+    while current and current not in seen:
+        seen.add(current)
+        if current not in pid_map:
+            break
+        parent_ppid, parent_args = pid_map[current]
+        for label, rx in agent_patterns:
+            if rx.search(parent_args):
+                return f"{label}:{current}", parent_args
+        current = parent_ppid
+    parent_args = pid_map.get(start_ppid, (None, "unknown-parent"))[1]
+    return f"unclassified:{start_ppid}", parent_args
+
+pair_counts = {}
+total = 0
+for pid, (ppid, args) in pid_map.items():
+    mcp_type = infer_mcp_type(args)
+    if not mcp_type:
+        continue
+    total += 1
+    agent_key, agent_cmd = infer_agent(ppid)
+    key = (agent_key, mcp_type)
+    if key not in pair_counts:
+        pair_counts[key] = {
+            "agent": agent_key,
+            "mcp_type": mcp_type,
+            "count": 0,
+            "agent_cmd": agent_cmd,
+            "sample_mcp_cmd": args,
+        }
+    pair_counts[key]["count"] += 1
+
+pairs = sorted(pair_counts.values(), key=lambda x: (-x["count"], x["agent"], x["mcp_type"]))
+violations = [p for p in pairs if p["count"] > threshold]
+
+print(
+    json.dumps(
+        {
+            "total": total,
+            "pair_count": len(pairs),
+            "agent_count": len({p["agent"] for p in pairs}),
+            "pairs": pairs,
+            "violations": violations,
+        }
+    )
+)
+PY
+)"
+
+mcp_total="$(jq -r '.total // 0' <<<"$mcp_telemetry_json")"
+mcp_pair_count="$(jq -r '.pair_count // 0' <<<"$mcp_telemetry_json")"
+mcp_agent_instance_count="$(jq -r '.agent_count // 0' <<<"$mcp_telemetry_json")"
+mcp_violation_count="$(jq -r '.violations | length' <<<"$mcp_telemetry_json")"
+mcp_hotspots="$(
+  jq -r '[.pairs[] | "\(.agent) \(.mcp_type)=\(.count)x"] | .[:6] | join(" | ")' <<<"$mcp_telemetry_json"
+)"
+mcp_violation_detail="$(
+  jq -r '[.violations[] | "\(.agent) \(.mcp_type)=\(.count)x"] | .[:6] | join(" | ")' <<<"$mcp_telemetry_json"
+)"
+
+record_check "mcp" "processes_total" "ok" \
+  "${mcp_total} MCP process(es) across ${mcp_agent_instance_count} coding-agent instance(s) and ${mcp_pair_count} instance/type pair(s)"
+
+if [ "$mcp_violation_count" -gt 0 ]; then
+  record_check "mcp" "per_type_per_agent_fanout" "fail" \
+    "${mcp_violation_count} agent/type pair(s) exceed threshold=${MCP_CHILD_THRESHOLD}; ${mcp_violation_detail}"
+  queue_notification "critical" \
+    "sentinel: MCP per-type fanout exceeded (threshold=${MCP_CHILD_THRESHOLD})"
+else
+  record_check "mcp" "per_type_per_agent_fanout" "ok" \
+    "all agent/type pairs <= ${MCP_CHILD_THRESHOLD}; ${mcp_hotspots}"
+fi
+
+# ── 5. Captures ───────────────────────────────────────────────────────
 $VERBOSE && printf '\n%sCaptures:%s\n' "$BOLD" "$NC"
 
 while IFS='|' read -r name path max_stale; do
@@ -156,7 +365,7 @@ while IFS='|' read -r name path max_stale; do
   record_check "captures" "$name" "${res%%|*}" "${res#*|}"
 done < <(echo "$POLICY" | jq -r '.captures[] | "\(.name)|\(.path)|\(.maxStaleHours)"')
 
-# ── 4. Storage ────────────────────────────────────────────────────────
+# ── 6. Storage ────────────────────────────────────────────────────────
 $VERBOSE && printf '\n%sStorage:%s\n' "$BOLD" "$NC"
 
 while IFS='|' read -r path warn_pct fail_pct; do
@@ -171,7 +380,7 @@ while IFS='|' read -r path warn_pct fail_pct; do
   record_check "mounts" "$path" "$status" "${used_pct}% used ($avail free)"
 done < <(echo "$POLICY" | jq -r '.mounts[] | "\(.path)|\(.warnPct)|\(.failPct)"')
 
-# ── 5. Backups ────────────────────────────────────────────────────────
+# ── 7. Backups ────────────────────────────────────────────────────────
 $VERBOSE && printf '\n%sBackups:%s\n' "$BOLD" "$NC"
 
 snapshot_dirs=$(echo "$POLICY" | jq -r '.backups.snapshotDirs[]')
@@ -239,7 +448,7 @@ for target_repo in $target_repos; do
   fi
 done
 
-# ── 6. Journal ────────────────────────────────────────────────────────
+# ── 8. Journal ────────────────────────────────────────────────────────
 $VERBOSE && printf '\n%sJournal:%s\n' "$BOLD" "$NC"
 while IFS=$'\t' read -r pattern severity window; do
   # Robust journalctl call (limit to current boot for performance)
@@ -353,9 +562,13 @@ for event_json in "${EVENTS[@]}"; do
       ;;
     health.check_transition)
       after="$(jq -r '.status_after // "unknown"' <<<"$event_json" 2>/dev/null || echo "unknown")"
+      category="$(jq -r '.category // "unknown"' <<<"$event_json" 2>/dev/null || echo "unknown")"
       if [ "$after" = "fail" ]; then
         name="$(jq -r '.name // "unknown"' <<<"$event_json" 2>/dev/null || echo "unknown")"
-        queue_notification "critical" "sentinel: check failed (${name})"
+        queue_notification "critical" "sentinel: check failed (${category}/${name})"
+      elif [ "$after" = "warn" ]; then
+        name="$(jq -r '.name // "unknown"' <<<"$event_json" 2>/dev/null || echo "unknown")"
+        queue_notification "warning" "sentinel: check warning (${category}/${name})"
       fi
       ;;
   esac
@@ -368,7 +581,7 @@ fi
 
 if [ "$NOTIFICATIONS" = "true" ] && command -v notify-send &>/dev/null; then
   for notif in "${NOTIFICATIONS_QUEUE[@]}"; do
-    notify-send --urgency="${notif%%|*}" "sinnix sentinel" "${notif#*|}" 2>/dev/null || true
+    send_notification "${notif%%|*}" "${notif#*|}"
   done
 fi
 

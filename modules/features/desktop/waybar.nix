@@ -23,8 +23,6 @@ mkFeatureModule {
       home-manager.users.${user} =
         { pkgs, lib, ... }:
         {
-          home.packages = [ ];
-
           programs.waybar = {
             enable = true;
             systemd.enable = true;

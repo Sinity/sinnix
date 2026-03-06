@@ -1,4 +1,0 @@
-interface:
-  display_name: "Codex Instance Control"
-  short_description: "Drive Codex Kitty windows with list, exec, wait, and batch."
-  default_prompt: "Find active Codex windows and execute a command with sentinel-based completion."

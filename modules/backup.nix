@@ -138,7 +138,7 @@ in
           "**/dist"
           "**/*.pyc"
           "**/.Trash-1000"
-          "/realm/data/indices"
+          "/realm/data/runtime"
         ];
         repo = borgRepoRealm;
         # Allow creating the .latest symlink in the snapshot dir

@@ -73,6 +73,7 @@ let
     "root-password"
     "davfs2-secrets"
     "configstore-update-notifier"
+    "wifi-psk"
   ];
 
   mkSecretExport =

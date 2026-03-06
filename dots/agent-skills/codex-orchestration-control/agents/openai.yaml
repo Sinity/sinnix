@@ -1,3 +1,0 @@
-interface:
-  display_name: "Codex Orchestration Control"
-  short_description: "Coordinate Codex/Spark runs and orchestration workflows"

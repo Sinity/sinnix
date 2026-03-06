@@ -27,7 +27,7 @@ mkFeatureModule {
     "desktop"
     "ui"
   ];
-  description = "Sinity's Graphical User Interface Stack";
+  description = "Graphical User Interface Stack";
   configFn =
     {
       config,

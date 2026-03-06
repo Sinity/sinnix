@@ -18,6 +18,7 @@ let
   primaryGroupId = builtins.toString (groupCfg.gid or 100);
   userHome = userCfg.home or "/home/${username}";
   nextcloudHost = config.sinnix.storage.nextcloudHost;
+  nextcloudUser = config.sinnix.storage.nextcloudUser;
   nextcloudCert = builtins.readFile "${inputs.self}/assets/nextcloud-cert.crt";
   baseStoragePackages = with pkgs; [
     davfs2
@@ -84,7 +85,7 @@ in
   '';
 
   fileSystems."/mnt/nextcloud" = lib.mkIf secretsEnabled {
-    device = "https://${nextcloudHost}/remote.php/dav/files/USER/";
+    device = "https://${nextcloudHost}/remote.php/dav/files/${nextcloudUser}/";
     fsType = "davfs";
     noCheck = true;
     options = [

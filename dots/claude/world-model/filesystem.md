@@ -30,5 +30,5 @@
 ├── libraries/         # Curated collections
 │   ├── finance/       # Ledger/accounting data
 │   └── substack/      # Newsletter archives
-└── indices/           # Derived stores (qdrant, sinevec)
+└── runtime/           # Mutable service state (e.g. sinex spool/blob repo)
 ```

@@ -7,7 +7,8 @@
 # Actions:
 # - Writes /run/sinnix/health.json (machine-readable, consumed by waybar)
 # - Restarts failed restartable sinnix services (configurable)
-# - Sends fnott desktop notifications for state transitions
+# - Sends desktop notifications for state transitions and reboot-needed alerts
+# - Emits strict telemetry on MCP child-process fanout (no cleanup actions)
 # - Logs events to /var/log/sinnix-sentinel/events.jsonl (sinex-ready)
 #
 # The health policy is auto-derived: enabling a sinnix service automatically
@@ -44,6 +45,11 @@ mkServiceModule {
       default = true;
       description = "Whether sentinel sends desktop notifications.";
     };
+    mcpChildThreshold = lib.mkOption {
+      type = lib.types.int;
+      default = 1;
+      description = "Maximum allowed MCP child processes per parent process before sentinel alerts.";
+    };
   };
   configFn =
     { cfg, pkgs, ... }:
@@ -53,6 +59,7 @@ mkServiceModule {
         readWritePaths = [
           "/run/sinnix"
           "/var/log/sinnix-sentinel"
+          "/var/lib/sinnix-sentinel"
         ];
         readOnlyPaths = [
           "/etc/sinnix"
@@ -72,6 +79,7 @@ mkServiceModule {
       systemd.tmpfiles.rules = [
         "d /run/sinnix 0755 root root -"
         "d /var/log/sinnix-sentinel 0750 root root 30d"
+        "d /var/lib/sinnix-sentinel 0750 root root -"
       ];
 
       systemd.services.sinnix-sentinel = {
@@ -92,6 +100,8 @@ mkServiceModule {
         environment = {
           SINNIX_CORRECTIVE_ACTIONS = if cfg.enableCorrectiveActions then "true" else "false";
           SINNIX_NOTIFICATIONS = if cfg.enableNotifications then "true" else "false";
+          SINNIX_MCP_CHILD_THRESHOLD = toString cfg.mcpChildThreshold;
+          SINNIX_NOTIFY_USER = username;
         };
 
         serviceConfig = hardenedConfig // {

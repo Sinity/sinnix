@@ -242,6 +242,8 @@ let
         systemd
         util-linux
         gnugrep
+        procps
+        sudo
         libnotify
         smartmontools
         borgbackup

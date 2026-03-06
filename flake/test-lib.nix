@@ -70,7 +70,7 @@ let
       };
     };
 
-  # Base test configuration: minimal, no desktop, no secrets
+  # Base test configuration: minimal, no desktop
   baseTestConfig =
     { lib, ... }:
     {
@@ -80,7 +80,6 @@ let
 
       sinnix = {
         machine.isDesktop = lib.mkDefault false;
-        secrets.enable = lib.mkDefault false;
         bundles.desktop.enable = lib.mkDefault false;
       };
     };

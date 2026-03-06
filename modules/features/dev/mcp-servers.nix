@@ -1,19 +1,45 @@
 # Model Context Protocol (MCP) servers and AI-integrated tool settings
 #
 # Provides:
-# - MCP server wrappers (PostgreSQL, Qdrant, Context7, etc.)
+# - MCP server wrappers (Context7, Firecrawl, Playwright)
 # - Claude/Codex/Gemini dotfile linking and integration
 # - System monitoring tools (htop)
-{ mkFeatureModule, pkgs, ... }@args:
+{
+  mkFeatureModule,
+  lib,
+  pkgs,
+  ...
+}@args:
 mkFeatureModule {
   path = [
     "dev"
     "mcp-servers"
   ];
   description = "MCP servers and AI tool integration";
+  extraOptions = {
+    context7Singleton = lib.mkOption {
+      type = lib.types.submodule {
+        options = {
+          enable = lib.mkOption {
+            type = lib.types.bool;
+            default = true;
+            description = "Run Context7 MCP as a singleton HTTP service for all MCP clients.";
+          };
+          port = lib.mkOption {
+            type = lib.types.ints.between 1 65535;
+            default = 3939;
+            description = "Local port for the Context7 singleton MCP service.";
+          };
+        };
+      };
+      default = { };
+      description = "Context7 singleton service settings.";
+    };
+  };
   configFn =
     {
       config,
+      cfg,
       lib,
       pkgs,
       inputs,
@@ -32,54 +58,24 @@ mkFeatureModule {
           ''
         else
           "";
-      qdrantLdLibraryPath = lib.makeLibraryPath [
-        pkgs.stdenv.cc.cc.lib
-      ];
-      mcpQdrantBin = pkgs.writeShellScriptBin "mcp-qdrant" ''
-        set -euo pipefail
-        export QDRANT_URL="''${QDRANT_URL:-http://127.0.0.1:6333}"
-        if [ -n "''${LD_LIBRARY_PATH:-}" ]; then
-          export LD_LIBRARY_PATH="${qdrantLdLibraryPath}:''${LD_LIBRARY_PATH}"
-        else
-          export LD_LIBRARY_PATH="${qdrantLdLibraryPath}"
-        fi
-        exec ${pkgs.uv}/bin/uv run \
-          --with fastmcp \
-          --with qdrant-client \
-          -- python ${config.sinnix.paths.projectRoot}/scripts/mcp-qdrant.py
-      '';
-      mcpPostgresBin = pkgs.writeShellScriptBin "mcp-postgres" ''
-        set -euo pipefail
-        # Prefer explicit overrides and project-provided DATABASE_URL (e.g. sinex xtask infra).
-        if [ -n "''${POSTGRES_URL:-}" ]; then
-          db_url="$POSTGRES_URL"
-        elif [ -n "''${DATABASE_URL:-}" ]; then
-          db_url="$DATABASE_URL"
-        elif [ -n "''${SINEX_DEV_STATE_DIR:-}" ]; then
-          db_url="postgresql:///sinex_dev?host=''${SINEX_DEV_STATE_DIR}/run&port=''${SINEX_DEV_PG_PORT:-5432}&user=''${USER:-sinity}"
-        elif [ -n "''${PGHOST:-}" ]; then
-          db_url="postgresql:///''${PGDATABASE:-sinex_dev}?host=''${PGHOST}&port=''${PGPORT:-5432}&user=''${PGUSER:-''${USER:-sinity}}"
-        else
-          db_url="postgresql://sinex:sinex@localhost:5432/sinex_dev"
-        fi
-        exec npx -y @modelcontextprotocol/server-postgres "$db_url"
-      '';
-      mcpSqliteBin = pkgs.writeShellScriptBin "mcp-sqlite" ''
-        set -euo pipefail
-        exec npx -y @modelcontextprotocol/server-sqlite "$@"
-      '';
+      context7McpVersion = "2.1.3";
+      firecrawlMcpVersion = "3.10.3";
       mcpContext7Bin = pkgs.writeShellScriptBin "mcp-context7" ''
         set -euo pipefail
-        exec npx -y @upstash/context7-mcp
+        exec ${pkgs.nodejs}/bin/npm exec --yes \
+          --package=@upstash/context7-mcp@${context7McpVersion} \
+          -- context7-mcp "$@"
       '';
       mcpFirecrawlBin = pkgs.writeShellScriptBin "mcp-firecrawl" ''
         set -euo pipefail
         ${firecrawlSecretExport}
-        exec npx -y firecrawl-mcp
+        exec ${pkgs.nodejs}/bin/npm exec --yes \
+          --package=firecrawl-mcp@${firecrawlMcpVersion} \
+          -- firecrawl-mcp "$@"
       '';
       mcpPlaywrightBin = pkgs.writeShellScriptBin "mcp-playwright" ''
         set -euo pipefail
-        exec npx -y @playwright/mcp@latest
+        exec ${pkgs.playwright-mcp}/bin/playwright-mcp "$@"
       '';
       # Optimized Gemini from the flake registry
       geminiPkg = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.gemini;
@@ -122,6 +118,20 @@ mkFeatureModule {
             geminiPkg
           ];
 
+          systemd.user.services.mcp-context7-singleton = lib.mkIf cfg.context7Singleton.enable {
+            Unit = {
+              Description = "Context7 MCP singleton (HTTP)";
+              After = [ "network-online.target" ];
+            };
+            Service = {
+              Type = "simple";
+              ExecStart = "${mcpContext7Bin}/bin/mcp-context7 --transport http --port ${toString cfg.context7Singleton.port}";
+              Restart = "on-failure";
+              RestartSec = "2s";
+            };
+            Install.WantedBy = [ "default.target" ];
+          };
+
           home = {
             activation = {
               restoreConfigstore = lib.mkIf (secretPaths ? "configstore-update-notifier") (
@@ -157,9 +167,6 @@ mkFeatureModule {
               force = true;
               recursive = true;
             };
-            ".local/bin/mcp-qdrant".source = "${mcpQdrantBin}/bin/mcp-qdrant";
-            ".local/bin/mcp-postgres".source = "${mcpPostgresBin}/bin/mcp-postgres";
-            ".local/bin/mcp-sqlite".source = "${mcpSqliteBin}/bin/mcp-sqlite";
             ".local/bin/mcp-context7".source = "${mcpContext7Bin}/bin/mcp-context7";
             ".local/bin/mcp-firecrawl".source = "${mcpFirecrawlBin}/bin/mcp-firecrawl";
             ".local/bin/mcp-playwright".source = "${mcpPlaywrightBin}/bin/mcp-playwright";

@@ -28,6 +28,17 @@
   "context": {
     "loadMemoryFromIncludeDirectories": true
   },
+  "mcpServers": {
+    "context7": {
+      "httpUrl": "http://127.0.0.1:3939/mcp"
+    },
+    "github": {
+      "httpUrl": "https://api.githubcopilot.com/mcp/",
+      "headers": {
+        "Authorization": "Bearer ${GITHUB_TOKEN}"
+      }
+    }
+  },
   "tools": {
     "autoAccept": true,
     "shell": {

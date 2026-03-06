@@ -5,7 +5,7 @@ socket="${KITTY_LISTEN_ON:-}"
 
 usage() {
   cat <<'USAGE'
-Usage: codex_instance_control.sh [--to SOCKET] <command> [options]
+Usage: agent_instance_control.sh [--to SOCKET] <command> [options]
 
 Commands:
   list [--regex <pattern>] [--json]
@@ -71,7 +71,7 @@ resolve_self_match() {
     fi
   fi
 
-  # Prefer codex-like title in current working directory if unique.
+  # Prefer agent-like title in current working directory if unique.
   id="$(printf '%s' "$windows" | jq -r --arg r "$regex" --arg p "$pwd_abs" '
     (map(select(((.title // "") | test($r; "i")) and (.cwd == $p))) | if length == 1 then .[0].window_id else empty end)
   ')"
@@ -80,7 +80,7 @@ resolve_self_match() {
     return 0
   fi
 
-  # Fallback to single codex-like window.
+  # Fallback to single agent-like window.
   id="$(printf '%s' "$windows" | jq -r --arg r "$regex" '
     (map(select((.title // "") | test($r; "i"))) | if length == 1 then .[0].window_id else empty end)
   ')"
@@ -129,7 +129,7 @@ shift || true
 
 case "$cmd" in
 list)
-  regex='[Cc]odex'
+  regex='[Cc]laude|[Cc]odex|[Gg]emini'
   emit_json=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -170,7 +170,7 @@ list)
   ;;
 
 self)
-  regex='[Cc]odex'
+  regex='[Cc]laude|[Cc]odex|[Gg]emini'
   emit_json=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -205,7 +205,7 @@ self)
 send)
   match=""
   use_self=0
-  self_regex='[Cc]odex'
+  self_regex='[Cc]laude|[Cc]odex|[Gg]emini'
   text=""
   add_enter=0
   while [[ $# -gt 0 ]]; do
@@ -252,7 +252,7 @@ send)
 exec)
   match=""
   use_self=0
-  self_regex='[Cc]odex'
+  self_regex='[Cc]laude|[Cc]odex|[Gg]emini'
   shell_cmd=""
   timeout_sec=120
   interval_sec=0.5
@@ -295,7 +295,7 @@ exec)
     echo "exec requires --match and --command" >&2
     exit 2
   }
-  sentinel="__CODEX_DONE_$(date +%s%N)__"
+  sentinel="__AGENT_DONE_$(date +%s%N)__"
   run_kitty send-text --match "$match" "$shell_cmd; printf '%s\\n' '$sentinel'"
   run_kitty send-key --match "$match" enter
   if ! poll_pattern "$match" "^$sentinel$" "$timeout_sec" "$interval_sec" "last_cmd_output"; then
@@ -307,7 +307,7 @@ exec)
 wait)
   match=""
   use_self=0
-  self_regex='[Cc]odex'
+  self_regex='[Cc]laude|[Cc]odex|[Gg]emini'
   pattern=""
   timeout_sec=120
   interval_sec=0.5
@@ -364,7 +364,7 @@ wait)
 batch)
   match=""
   use_self=0
-  self_regex='[Cc]odex'
+  self_regex='[Cc]laude|[Cc]odex|[Gg]emini'
   file=""
   timeout_sec=120
   while [[ $# -gt 0 ]]; do
@@ -415,7 +415,7 @@ batch)
 kill)
   match=""
   use_self=0
-  self_regex='[Cc]odex'
+  self_regex='[Cc]laude|[Cc]odex|[Gg]emini'
   mode="close"
   while [[ $# -gt 0 ]]; do
     case "$1" in

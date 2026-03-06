@@ -7,7 +7,7 @@
 }:
 let
   cfg = config.sinnix.services.sinex;
-  inherit (config.sinnix.paths) indicesRoot realmRoot;
+  inherit (config.sinnix.paths) realmRoot;
   sinexPkgs = inputs.sinex.packages.${pkgs.stdenv.hostPlatform.system};
 in
 {
@@ -68,7 +68,8 @@ in
           secrets.enableAgenix = true;
           nats.environment = "prod";
 
-          stateRoot = "${indicesRoot}/sinex";
+          # Align service state root with XDG-style default for the sinex service user.
+          stateRoot = "/var/lib/sinex/.local/state/sinex";
           logLevel = "info";
 
           users.target = config.sinnix.user.name;

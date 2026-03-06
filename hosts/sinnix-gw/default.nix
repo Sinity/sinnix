@@ -22,8 +22,9 @@
 # - AdGuard Home too RAM-heavy; adblock-fast uses ~2-3MB
 #
 # === Secrets ===
-# WiFi PSK is intentionally redacted in-repo for public distribution.
-# Set a real value locally before router deploy.
+# WiFi PSK lives in agenix (secret/wifi-psk.age).
+# The deploy script injects it at runtime from /run/agenix/wifi-psk.
+# To create: echo -n 'your-psk' | agenix -e secret/wifi-psk.age
 
 { lib }:
 
@@ -64,7 +65,7 @@ let
     ssid_2g = "sinnix-gw"; # 2.4 GHz SSID
     ssid_5g = "sinnix-gw-5g"; # 5 GHz SSID
     # WPA3-SAE + WPA2-PSK mixed for broad compatibility
-    psk = "REDACTED_WIFI_PSK";
+    psk = "@@WIFI_PSK@@";
     country = "PL"; # Regulatory domain (Poland, EU)
   };
 

@@ -36,7 +36,7 @@
           };
         };
 
-        # Python formatting (for scripts like mcp-qdrant.py)
+        # Python formatting for repository scripts
         programs.ruff = {
           enable = true;
           format = true;

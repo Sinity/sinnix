@@ -177,7 +177,7 @@ mkFeatureModule {
                 claude = "~/.local/bin/claude";
                 nvim = "nvim --listen /tmp/nvim-$$";
                 ccusage = "npx --yes ccusage@latest";
-                gemini-cli = "npx --yes https://github.com/google-gemini/gemini-cli --yolo";
+                gemini = "~/.local/bin/gemini";
                 marimo-edit = "marimo edit --mcp";
                 marimo-edit-remote = "marimo edit --mcp --host 127.0.0.1 --port 2718";
                 l = "eza --icons  -a --group-directories-first -1";
@@ -367,7 +367,6 @@ mkFeatureModule {
               PYTHONDONTWRITEBYTECODE = "1";
               SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS = "0";
               MICRO_TRUECOLOR = "1";
-              POLYLOGUE_QDRANT_URL = "";
               LD_LIBRARY_PATH = lib.makeLibraryPath [
                 pkgs.libGL
                 pkgs.libglvnd
@@ -563,6 +562,26 @@ mkFeatureModule {
                 fi
 
                 exec "$CODEX_BIN" "$@"
+              '';
+              executable = true;
+            };
+
+            home.file.".local/bin/gemini" = {
+              text = ''
+                #!/usr/bin/env bash
+                set -euo pipefail
+
+                GEMINI_BIN="${inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.gemini}/bin/gemini"
+                RENDER_AGENTS_BIN="${scriptPkgs.render-agents}/bin/render-agents"
+
+                # Render CLAUDE.md → GEMINI.md for shared instructions
+                if [ -f "$HOME/.config/claude/CLAUDE.md" ] && [ -x "$RENDER_AGENTS_BIN" ]; then
+                  "$RENDER_AGENTS_BIN" \
+                    --input "$HOME/.config/claude/CLAUDE.md" \
+                    --output "$HOME/.gemini/GEMINI.md" 2>/dev/null || true
+                fi
+
+                exec "$GEMINI_BIN" "$@"
               '';
               executable = true;
             };

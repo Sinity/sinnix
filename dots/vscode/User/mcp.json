@@ -7,15 +7,9 @@
       "gallery": true
     },
     "context7": {
-      "type": "stdio",
-      "command": "/home/sinity/.local/bin/mcp-context7",
-      "args": [],
+      "type": "http",
+      "url": "http://127.0.0.1:3939/mcp",
       "gallery": true
-    },
-    "postgres-local": {
-      "type": "stdio",
-      "command": "/home/sinity/.local/bin/mcp-postgres",
-      "gallery": false
     },
     "Parallel Search MCP": {
       "type": "http",

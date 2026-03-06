@@ -26,8 +26,7 @@ def _render_default_prompt(batch_id, items, project_root, protocol_path, item_la
     return f"""You are executing a batch coordination run.
 
 Project root:
-{project_block}
-{protocol_line}Batch id:
+{project_block}{protocol_line}Batch id:
 - {batch_id}
 
 Batch {item_label}:

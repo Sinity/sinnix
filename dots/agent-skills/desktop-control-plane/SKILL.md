@@ -1,6 +1,6 @@
 ---
 name: desktop-control-plane
-description: "Control desktop/runtime surfaces for operator workflows: Kitty remote I/O, Hyprland dispatch/inspection, and screenshot diagnostics/workarounds (including HDR washout handling). Use when Codex needs reliable computer-use primitives on Linux Wayland/Hyprland systems."
+description: "Control desktop/runtime surfaces for operator workflows: Kitty remote I/O, Hyprland dispatch/inspection, and screenshot diagnostics/workarounds (including HDR washout handling). Use when coding agents need reliable computer-use primitives on Linux Wayland/Hyprland systems."
 metadata:
   short-description: Desktop control and automation toolkit
 ---

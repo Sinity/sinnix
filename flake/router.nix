@@ -305,8 +305,9 @@
       deployScript = pkgs.writeShellScriptBin "router-deploy" ''
         set -euo pipefail
 
-        CONFIG_DIR="${routerConfigDrv}"
+        ORIG_CONFIG_DIR="${routerConfigDrv}"
         DRY_RUN=0
+        WIFI_PSK_FILE="/run/agenix/wifi-psk"
 
         # Parse args
         for arg in "$@"; do
@@ -326,6 +327,21 @@
               ;;
           esac
         done
+
+        # ── Inject WiFi PSK from agenix secret ──
+        CONFIG_DIR=$(mktemp -d)
+        trap 'rm -rf "$CONFIG_DIR"' EXIT
+        cp "$ORIG_CONFIG_DIR"/* "$CONFIG_DIR/"
+        chmod u+w "$CONFIG_DIR"/*
+
+        if [ -f "$WIFI_PSK_FILE" ]; then
+          WIFI_PSK=$(cat "$WIFI_PSK_FILE")
+          ${pkgs.gnused}/bin/sed -i "s|@@WIFI_PSK@@|$WIFI_PSK|g" "$CONFIG_DIR/configure.sh"
+          echo "✓ WiFi PSK injected from agenix secret"
+        else
+          echo "⚠  $WIFI_PSK_FILE not found — WiFi PSK will be a placeholder."
+          echo "   Create it: echo -n 'your-psk' | agenix -e secret/wifi-psk.age"
+        fi
 
         if [ "$DRY_RUN" -eq 1 ]; then
           echo "=== DRY RUN: scripts that would be applied ==="
