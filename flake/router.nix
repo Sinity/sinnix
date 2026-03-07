@@ -273,30 +273,22 @@
 
       # ─────────────────────────────────────────────────────────────
       # Shared SSH/SCP connection setup (reused by deploy + health)
-      # Sets SSH_CMD, SCP_CMD, ROUTER_ADDR, ROUTER_USER, ROUTER_PASS
+      # Sets SSH_CMD, SCP_CMD, ROUTER_ADDR, ROUTER_USER
       # ─────────────────────────────────────────────────────────────
       sshSetupFragment = ''
         ROUTER_ADDR="${routerCfg.address}"
         ROUTER_USER="${routerCfg.sshUser}"
-        ROUTER_PASS=""
 
-        SSH_BASE_OPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10"
-        SSH_KEY_CMD="${pkgs.openssh}/bin/ssh $SSH_BASE_OPTS -o BatchMode=yes"
-        SCP_KEY_CMD="${pkgs.openssh}/bin/scp $SSH_BASE_OPTS -o BatchMode=yes"
+        SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -o BatchMode=yes"
+        SSH_CMD="${pkgs.openssh}/bin/ssh $SSH_OPTS"
+        SCP_CMD="${pkgs.openssh}/bin/scp $SSH_OPTS"
 
-        # Test key-based auth first, fall back to password
-        if $SSH_KEY_CMD ''${ROUTER_USER}@''${ROUTER_ADDR} 'echo ok' >/dev/null 2>&1; then
-          echo "✓ Connecting with key-based auth..."
-          SSH_CMD="$SSH_KEY_CMD"
-          SCP_CMD="$SCP_KEY_CMD"
-        else
-          echo "Key auth failed — falling back to password."
-          echo -n "Router password (''${ROUTER_USER}@''${ROUTER_ADDR}): "
-          read -rs ROUTER_PASS
-          echo ""
-          SSH_CMD="${pkgs.sshpass}/bin/sshpass -p \"$ROUTER_PASS\" ${pkgs.openssh}/bin/ssh $SSH_BASE_OPTS -o PreferredAuthentications=password -o PubkeyAuthentication=no"
-          SCP_CMD="${pkgs.sshpass}/bin/sshpass -p \"$ROUTER_PASS\" ${pkgs.openssh}/bin/scp $SSH_BASE_OPTS -o PreferredAuthentications=password -o PubkeyAuthentication=no"
+        if ! $SSH_CMD ''${ROUTER_USER}@''${ROUTER_ADDR} 'echo ok' >/dev/null 2>&1; then
+          echo "✗ Key-based SSH auth failed for ''${ROUTER_USER}@''${ROUTER_ADDR}"
+          echo "  Bootstrap: ssh-copy-id root@''${ROUTER_ADDR}"
+          exit 1
         fi
+        echo "✓ Connecting with key-based auth..."
       '';
 
       # ─────────────────────────────────────────────────────────────
@@ -308,6 +300,7 @@
         ORIG_CONFIG_DIR="${routerConfigDrv}"
         DRY_RUN=0
         WIFI_PSK_FILE="/run/agenix/wifi-psk"
+        SINNIX_PRIME_MAC_FILE="/run/agenix/router-sinnix-prime-mac"
 
         # Parse args
         for arg in "$@"; do
@@ -341,6 +334,15 @@
         else
           echo "⚠  $WIFI_PSK_FILE not found — WiFi PSK will be a placeholder."
           echo "   Create it: echo -n 'your-psk' | agenix -e secret/wifi-psk.age"
+        fi
+
+        if [ -f "$SINNIX_PRIME_MAC_FILE" ]; then
+          SINNIX_PRIME_MAC=$(cat "$SINNIX_PRIME_MAC_FILE")
+          ${pkgs.gnused}/bin/sed -i "s|@@SINNIX_PRIME_MAC@@|$SINNIX_PRIME_MAC|g" "$CONFIG_DIR/configure.sh"
+          echo "✓ sinnix-prime MAC injected from agenix secret"
+        else
+          echo "⚠  $SINNIX_PRIME_MAC_FILE not found — static lease MAC will be a placeholder."
+          echo "   Create it: echo -n 'aa:bb:cc:dd:ee:ff' | agenix -e secret/router-sinnix-prime-mac.age"
         fi
 
         if [ "$DRY_RUN" -eq 1 ]; then
@@ -404,16 +406,8 @@
           echo ""
           echo "✓ Health check passed."
         else
-          # Key auth may not work yet if this is first deploy; retry with password
-          if [ -n "$ROUTER_PASS" ]; then
-            ${pkgs.sshpass}/bin/sshpass -p "$ROUTER_PASS" \
-              ${pkgs.openssh}/bin/ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 \
-              -o PreferredAuthentications=password -o PubkeyAuthentication=no \
-              ''${ROUTER_USER}@''${ROUTER_ADDR} 'sh /tmp/health-check.sh' || true
-          else
-            echo "⚠  Could not reconnect for health check. Try manually:"
-            echo "   ssh root@''${ROUTER_ADDR} 'sh /tmp/health-check.sh'"
-          fi
+          echo "⚠  Health check failed or could not reconnect."
+          echo "   Try manually: ssh root@''${ROUTER_ADDR} 'sh /tmp/health-check.sh'"
         fi
 
         # Cleanup temp scripts
@@ -455,20 +449,13 @@
         ROUTER_USER="${routerCfg.sshUser}"
         SSH_OPTS="-o StrictHostKeyChecking=accept-new"
 
-        # Try key auth first
-        if ${pkgs.openssh}/bin/ssh $SSH_OPTS -o BatchMode=yes -o ConnectTimeout=5 \
+        if ! ${pkgs.openssh}/bin/ssh $SSH_OPTS -o BatchMode=yes -o ConnectTimeout=5 \
             ''${ROUTER_USER}@''${ROUTER_ADDR} 'echo ok' >/dev/null 2>&1; then
-          exec ${pkgs.openssh}/bin/ssh $SSH_OPTS ''${ROUTER_USER}@''${ROUTER_ADDR}
-        else
-          echo "Using password auth (key not yet installed)."
-          echo -n "Router password (''${ROUTER_USER}@''${ROUTER_ADDR}): "
-          read -rs ROUTER_PASS
-          echo ""
-          exec ${pkgs.sshpass}/bin/sshpass -p "$ROUTER_PASS" \
-            ${pkgs.openssh}/bin/ssh $SSH_OPTS \
-            -o PreferredAuthentications=password -o PubkeyAuthentication=no \
-            ''${ROUTER_USER}@''${ROUTER_ADDR}
+          echo "✗ Key auth failed for ''${ROUTER_USER}@''${ROUTER_ADDR}"
+          echo "  Bootstrap: ssh-copy-id root@''${ROUTER_ADDR}"
+          exit 1
         fi
+        exec ${pkgs.openssh}/bin/ssh $SSH_OPTS ''${ROUTER_USER}@''${ROUTER_ADDR}
       '';
 
     in

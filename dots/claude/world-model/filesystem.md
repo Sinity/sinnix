@@ -7,8 +7,7 @@
 ├── project/           # All active project repositories
 ├── data/              # Canonical data lake (see below)
 ├── home/              # User home directory (symlinked from ~)
-├── inbox/             # Staging area for retired/incoming data
-└── knowledgebase/     # PKM vault (Obsidian/Dendron)
+└── inbox/             # Staging area for retired/incoming data
 ```
 
 ### /realm/data - Data Lake Structure
@@ -19,16 +18,28 @@
 │   ├── activitywatch/ # Window/AFK/browser tracking
 │   ├── webhistory/    # Browser history exports
 │   ├── asciinema/     # Terminal recordings
-│   └── keylog/        # Keystroke captures (scribe-tap)
+│   ├── keylog/        # Keystroke captures (scribe-tap)
+│   ├── audio/         # Audio captures
+│   ├── comms/         # Communication captures
+│   ├── screenshot/    # Screenshots
+│   ├── shell/         # Shell history (Atuin)
+│   ├── syslog/        # System log exports
+│   ├── power-watchdog/# Power event log
+│   └── kitty-scrollback/ # Terminal scrollback
 ├── exports/           # GDPR/Takeout provider exports
 │   ├── chatlog/       # AI chat archives (Claude, ChatGPT, Codex)
+│   ├── health/        # Samsung Health, Sleep As Android
+│   ├── google/        # Takeout archives
 │   ├── reddit/        # Reddit GDPR export
 │   ├── spotify/       # Streaming history
-│   ├── google/        # Takeout archives
-│   ├── health/        # Samsung Health, Sleep As Android
-│   └── ...            # Other service exports
-├── libraries/         # Curated collections
-│   ├── finance/       # Ledger/accounting data
-│   └── substack/      # Newsletter archives
-└── runtime/           # Mutable service state (e.g. sinex spool/blob repo)
+│   ├── raindrop/      # Raindrop bookmarks
+│   ├── goodreads/     # Reading history
+│   ├── wykop/         # Wykop export
+│   ├── lastpass/      # Password manager export
+│   └── comms/         # Messaging exports
+└── libraries/         # Curated collections
+    ├── finance/       # Ledger/accounting data
+    ├── substack/      # Newsletter archives
+    ├── doc/           # Document library
+    └── model/         # Curated model data
 ```

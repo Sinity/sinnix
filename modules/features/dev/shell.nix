@@ -471,9 +471,6 @@ mkFeatureModule {
             home.activation.rebuildBatCache = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
               ${lib.getExe pkgs.bat} cache --build 2>/dev/null || true
             '';
-            home.activation.cleanupLegacyClaudeIncludes = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
-              rm -rf "$HOME/.config/claude/includes"
-            '';
             home.activation.renderGlobalCodexAgents = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
               mkdir -p "$HOME/.codex"
               if [ -f "$HOME/.config/claude/CLAUDE.md" ]; then

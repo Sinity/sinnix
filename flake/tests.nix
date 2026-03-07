@@ -136,6 +136,99 @@ let
       ];
     })
 
+    (mkFeatureTest {
+      name = "desktop-gaming";
+      feature = "sinnix.features.desktop.gaming.enable";
+      assertions =
+        config:
+        let
+          hm = hmFor config;
+          packageNames = map (pkg: pkg.name or "") hm.home.packages;
+        in
+        [
+          {
+            assertion = builtins.any (name: name == "factorio-steam") packageNames;
+            message = "Gaming feature must install the factorio-steam launcher";
+          }
+          {
+            assertion = config.sinnix.features.desktop.gaming.factorio.username == "Sinityy";
+            message = "Gaming feature must preserve the nested Factorio username option";
+          }
+        ];
+    })
+
+    {
+      name = "nextcloud-storage-wiring";
+      modules = [
+        mountTmpfsRoots
+        baseTestConfig
+        (
+          { ... }:
+          {
+            networking.hostName = "nextcloud-storage-test";
+          }
+        )
+      ];
+      assertions = config: [
+        {
+          assertion = config.age.secrets ? "nextcloud-address";
+          message = "Agenix must define the nextcloud-address secret";
+        }
+        {
+          assertion = config.age.secrets ? "borg-passphrase";
+          message = "Agenix must define the borg-passphrase secret";
+        }
+        {
+          assertion = config.age.secrets ? "nextcloud-webdav-credentials";
+          message = "Agenix must still define the Nextcloud credentials secret";
+        }
+        {
+          assertion = config.services.borgbackup.jobs.realm.encryption.mode == "repokey-blake2";
+          message = "Realm Borg job must use repokey-blake2";
+        }
+        {
+          assertion = config.services.borgbackup.jobs.var.encryption.mode == "repokey-blake2";
+          message = "System Borg job must use repokey-blake2";
+        }
+        {
+          assertion = config.programs.fuse.userAllowOther;
+          message = "The rclone Nextcloud mount must permit allow_other";
+        }
+        {
+          assertion = config.system.activationScripts ? nextcloudRcloneRuntime;
+          message = "Nextcloud rclone mount units must be rendered at activation time from secrets";
+        }
+        {
+          assertion =
+            lib.hasInfix
+              "runtime_unit_dir=/run/systemd/system"
+              config.system.activationScripts.nextcloudRcloneRuntime.text;
+          message = "Nextcloud runtime mount units must be rendered under /run/systemd/system";
+        }
+        {
+          assertion =
+            lib.hasInfix
+              "Type=rclone"
+              config.system.activationScripts.nextcloudRcloneRuntime.text;
+          message = "Nextcloud runtime mount units must use the rclone mount helper";
+        }
+        {
+          assertion =
+            lib.hasInfix
+              "/nextcloud/remote.php/dav/files/"
+              config.system.activationScripts.nextcloudRcloneRuntime.text;
+          message = "Nextcloud runtime wiring must target the actual /nextcloud WebDAV endpoint";
+        }
+        {
+          assertion =
+            lib.hasInfix
+              "no_check_certificate"
+              config.system.activationScripts.nextcloudRcloneRuntime.text;
+          message = "Nextcloud runtime wiring must explicitly handle the hostname-mismatched LAN cert";
+        }
+      ];
+    }
+
     # === Service Tests (using DSL) ===
     (mkServiceTest {
       name = "services-below";
@@ -542,6 +635,11 @@ let
         let
           hasConf = config.environment.etc ? "btrbk/btrbk.conf";
           conf = if hasConf then config.environment.etc."btrbk/btrbk.conf".text else "";
+          realmJob = config.services.borgbackup.jobs.realm;
+          varJob = config.services.borgbackup.jobs.var;
+          hasTmpfilesRule =
+            pattern:
+            builtins.any (rule: builtins.match ".*${pattern}.*" rule != null) config.systemd.tmpfiles.rules;
         in
         [
           # Core service
@@ -576,12 +674,44 @@ let
             assertion = hasConf && builtins.match ".*snapshot_preserve.*14d.*52w.*" conf != null;
             message = "btrbk config must include long-horizon daily/weekly retention";
           }
+          {
+            assertion = realmJob.repo == "file:///outer-realm/backup/borg-realm-v2";
+            message = "Realm Borg job must target the v2 encrypted repository via file URI";
+          }
+          {
+            assertion = varJob.repo == "file:///outer-realm/backup/borg-var-v2";
+            message = "System Borg job must target the v2 encrypted repository via file URI";
+          }
+          {
+            assertion = realmJob.paths == [ "/run/borgbackup-snapshot-inputs/realm/./" ];
+            message = "Realm Borg job must archive the bind-mounted snapshot contents";
+          }
+          {
+            assertion = varJob.paths == [ "/run/borgbackup-snapshot-inputs/var/./" ];
+            message = "System Borg job must archive the bind-mounted snapshot contents";
+          }
+          {
+            assertion = builtins.match ".*mount --bind.*" realmJob.preHook != null;
+            message = "Realm Borg job must bind-mount the latest snapshot before backup";
+          }
+          {
+            assertion = builtins.match ".*mount --bind.*" varJob.preHook != null;
+            message = "System Borg job must bind-mount the latest snapshot before backup";
+          }
           # Snapshot dirs created by tmpfiles
           {
             assertion = builtins.any (
               rule: builtins.match ".*\\.snapshot.*" rule != null
             ) config.systemd.tmpfiles.rules;
             message = "Snapshot directories must be created via tmpfiles";
+          }
+          {
+            assertion = hasTmpfilesRule "/run/borgbackup-snapshot-inputs";
+            message = "Borg snapshot bind-mount staging directories must be created via tmpfiles";
+          }
+          {
+            assertion = config.system.activationScripts ? borgRepositoryDirectories;
+            message = "Borg repository directories must be created during activation";
           }
         ];
     }

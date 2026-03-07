@@ -5,7 +5,6 @@
 {
   pkgs,
   lib,
-  inputs,
   config,
   ...
 }:
@@ -17,11 +16,16 @@ let
   groupCfg = lib.attrByPath [ "users" "groups" primaryGroupName ] config { };
   primaryGroupId = builtins.toString (groupCfg.gid or 100);
   userHome = userCfg.home or "/home/${username}";
-  nextcloudHost = config.sinnix.storage.nextcloudHost;
   nextcloudUser = config.sinnix.storage.nextcloudUser;
-  nextcloudCert = builtins.readFile "${inputs.self}/assets/nextcloud-cert.crt";
+  nextcloudAddressPath = config.sinnix.secrets.paths."nextcloud-address";
+  nextcloudCredentialsPath = config.sinnix.secrets.paths."nextcloud-webdav-credentials";
+  nextcloudRemoteName = "nextcloud";
+  nextcloudMountUnit = "mnt-nextcloud.mount";
+  nextcloudAutomountUnit = "mnt-nextcloud.automount";
+  nextcloudRcloneConfigDir = "/run/rclone-nextcloud";
+  nextcloudRcloneConfigPath = "${nextcloudRcloneConfigDir}/rclone.conf";
+  nextcloudRcloneCacheDir = "/var/cache/rclone-nextcloud";
   baseStoragePackages = with pkgs; [
-    davfs2
     rclone
     fuse
     fuse3
@@ -42,40 +46,102 @@ in
 {
   environment.systemPackages = lib.mkAfter (baseStoragePackages ++ storageMaintenancePackages);
 
-  # Nextcloud/davfs2 config requires secrets (davfs2-secrets agenix path)
-  environment.etc = lib.mkIf secretsEnabled {
-    "davfs2/secrets" = {
-      source = config.sinnix.secrets.paths.davfs2-secrets;
-      mode = "0600";
-      user = "root";
-      group = "root";
-    };
-
-    "davfs2/certs/${nextcloudHost}.pem" = {
-      mode = "0644";
-      text = nextcloudCert;
-    };
-
-    "davfs2/servers/${nextcloudHost}".text = ''
-      servercert sha256:0E:BA:10:DB:78:60:43:37:BD:5C:0A:60:BA:71:04:4A:FD:BF:84:D4:62:40:4A:63:8D:CD:12:5F:D4:BE:7E:8D
-    '';
-  };
-
-  security.pki.certificates = lib.mkIf secretsEnabled (lib.mkAfter [ nextcloudCert ]);
-
-  services.davfs2 = lib.mkIf secretsEnabled {
-    enable = true;
-    settings.globalSection = {
-      use_locks = "0";
-      cache_size = "5120";
-      cache_dir = "/var/cache/davfs2";
-      delay_upload = "10";
-    };
-  };
+  # Nextcloud WebDAV mount requires the secretized endpoint and credentials.
+  programs.fuse.userAllowOther = lib.mkIf secretsEnabled true;
 
   systemd.tmpfiles.rules = lib.mkAfter [
     "d /mnt/nextcloud 0755 root root -"
+    "d ${nextcloudRcloneCacheDir} 0755 root root -"
   ];
+
+  # The appliance exposes Nextcloud on an IP-backed endpoint with a
+  # hostname-mismatched cert, so the rclone mount must skip hostname validation
+  # until the server-side certificate is fixed.
+  system.activationScripts.nextcloudRcloneRuntime = lib.mkIf secretsEnabled {
+    deps = [ "agenixInstall" ];
+    text = ''
+      nextcloud_address_file="${nextcloudAddressPath}"
+      nextcloud_credentials_file="${nextcloudCredentialsPath}"
+      runtime_config_dir="${nextcloudRcloneConfigDir}"
+      runtime_config_path="${nextcloudRcloneConfigPath}"
+      runtime_unit_dir=/run/systemd/system
+      runtime_wants_dir="$runtime_unit_dir/multi-user.target.wants"
+      mount_unit="$runtime_unit_dir/${nextcloudMountUnit}"
+      automount_unit="$runtime_unit_dir/${nextcloudAutomountUnit}"
+      automount_wanted_by="$runtime_wants_dir/${nextcloudAutomountUnit}"
+
+      cleanup_managed_nextcloud() {
+        rm -rf "$runtime_config_dir"
+        rm -f "$mount_unit" "$automount_unit" "$automount_wanted_by"
+      }
+
+      if [ ! -r "$nextcloud_address_file" ] || [ ! -r "$nextcloud_credentials_file" ]; then
+        echo "WARNING: Nextcloud secrets missing; disabling Nextcloud mount units" >&2
+        ${pkgs.systemd}/bin/systemctl stop ${nextcloudAutomountUnit} ${nextcloudMountUnit} >/dev/null 2>&1 || true
+        cleanup_managed_nextcloud
+        ${pkgs.systemd}/bin/systemctl daemon-reload >/dev/null 2>&1 || true
+      else
+        nextcloud_address="$(${pkgs.coreutils}/bin/tr -d '\r\n' < "$nextcloud_address_file")"
+        cleanup_managed_nextcloud
+        ${pkgs.coreutils}/bin/mkdir -p "$runtime_wants_dir"
+        ${pkgs.coreutils}/bin/mkdir -p "$runtime_config_dir"
+        chmod 700 "$runtime_config_dir"
+
+        read -r _nextcloud_url _nextcloud_credentials_user nextcloud_password < "$nextcloud_credentials_file"
+        if [ -z "$nextcloud_address" ] || [ -z "$nextcloud_password" ]; then
+          echo "WARNING: malformed Nextcloud credentials secret; disabling Nextcloud mount units" >&2
+          ${pkgs.systemd}/bin/systemctl stop ${nextcloudAutomountUnit} ${nextcloudMountUnit} >/dev/null 2>&1 || true
+          cleanup_managed_nextcloud
+          ${pkgs.systemd}/bin/systemctl daemon-reload >/dev/null 2>&1 || true
+          exit 0
+        fi
+        obscured_password="$(${pkgs.rclone}/bin/rclone obscure "$nextcloud_password")"
+
+        cat > "$runtime_config_path" <<EOF
+[${nextcloudRemoteName}]
+type = webdav
+url = https://$nextcloud_address/nextcloud/remote.php/dav/files/${nextcloudUser}/
+vendor = nextcloud
+user = ${nextcloudUser}
+pass = $obscured_password
+EOF
+        chmod 600 "$runtime_config_path"
+
+        cat > "$mount_unit" <<EOF
+[Unit]
+Description=Nextcloud WebDAV mount via rclone
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=${nextcloudRcloneConfigPath}
+
+[Mount]
+What=${nextcloudRemoteName}:
+Where=/mnt/nextcloud
+Type=rclone
+Options=rw,_netdev,noauto,nosuid,nodev,args2env,allow_other,config=${nextcloudRcloneConfigPath},cache_dir=${nextcloudRcloneCacheDir},vfs_cache_mode=writes,dir_cache_time=10m,uid=${userUid},gid=${primaryGroupId},file_perms=0644,dir_perms=0755,no_check_certificate
+EOF
+
+        cat > "$automount_unit" <<EOF
+[Unit]
+Description=Nextcloud WebDAV automount via rclone
+After=network-online.target
+Wants=network-online.target
+
+[Automount]
+Where=/mnt/nextcloud
+TimeoutIdleSec=600
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+        ${pkgs.coreutils}/bin/ln -s ../${nextcloudAutomountUnit} "$automount_wanted_by"
+        ${pkgs.systemd}/bin/systemctl daemon-reload
+        ${pkgs.systemd}/bin/systemctl restart ${nextcloudAutomountUnit} >/dev/null 2>&1 \
+          || ${pkgs.systemd}/bin/systemctl start ${nextcloudAutomountUnit}
+      fi
+    '';
+  };
 
   system.activationScripts.fixRclonePermissions.text = ''
     if [ -f ${userHome}/.config/rclone/rclone.conf ]; then
@@ -83,20 +149,4 @@ in
       chmod 600 ${userHome}/.config/rclone/rclone.conf 2>/dev/null || true
     fi
   '';
-
-  fileSystems."/mnt/nextcloud" = lib.mkIf secretsEnabled {
-    device = "https://${nextcloudHost}/remote.php/dav/files/${nextcloudUser}/";
-    fsType = "davfs";
-    noCheck = true;
-    options = [
-      "noauto"
-      "x-systemd.automount"
-      "x-systemd.idle-timeout=600"
-      "_netdev"
-      "uid=${userUid}"
-      "gid=${primaryGroupId}"
-      "dir_mode=0755"
-      "file_mode=0644"
-    ];
-  };
 }

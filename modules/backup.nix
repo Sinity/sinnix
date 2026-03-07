@@ -16,26 +16,63 @@
 }:
 let
   inherit (config.sinnix.paths) realmRoot neoOuterRealm;
-  username = config.sinnix.user.name;
+  borgRepoRoot = "${config.sinnix.paths.outerRealm}/backup";
 
   # Snapshot directories
   realmSnapshots = "${realmRoot}/.snapshot";
   rootSnapshots = "/.snapshot";
   varSnapshots = "/var/.snapshot";
   neoSnapshots = "${neoOuterRealm}/.snapshot";
+  borgSnapshotBindRoot = "/run/borgbackup-snapshot-inputs";
+  borgVarSnapshotBind = "${borgSnapshotBindRoot}/var";
+  borgRealmSnapshotBind = "${borgSnapshotBindRoot}/realm";
 
   # Borg Configuration
-  borgRepoSystem = "${config.sinnix.paths.outerRealm}/backup/borg-var";
-  borgRepoRealm = "${config.sinnix.paths.outerRealm}/backup/borg-realm";
+  borgRepoSystemPath = "${borgRepoRoot}/borg-var-v2";
+  borgRepoRealmPath = "${borgRepoRoot}/borg-realm-v2";
+  borgRepoSystem = "file://${borgRepoSystemPath}";
+  borgRepoRealm = "file://${borgRepoRealmPath}";
+  borgPassphrasePath = config.sinnix.secrets.paths."borg-passphrase";
+
+  mkBindMountedSnapshotHook =
+    {
+      label,
+      snapshotDir,
+      snapshotGlob,
+      bindTarget,
+    }:
+    ''
+      cleanup_${label}_snapshot_bind_mount() {
+        if ${pkgs.util-linux}/bin/mountpoint -q "${bindTarget}"; then
+          ${pkgs.util-linux}/bin/umount "${bindTarget}"
+        fi
+      }
+
+      trap cleanup_${label}_snapshot_bind_mount EXIT
+
+      latest_snapshot="$(
+        ${pkgs.findutils}/bin/find ${snapshotDir} -maxdepth 1 -mindepth 1 -type d -name '${snapshotGlob}' -printf '%f\n' \
+          | ${pkgs.coreutils}/bin/sort | ${pkgs.coreutils}/bin/tail -n 1
+      )"
+
+      if [ -z "$latest_snapshot" ]; then
+        echo "No ${label} snapshot found in ${snapshotDir}" >&2
+        exit 1
+      fi
+
+      ${pkgs.coreutils}/bin/mkdir -p "${bindTarget}"
+      cleanup_${label}_snapshot_bind_mount || true
+      ${pkgs.util-linux}/bin/mount --bind "${snapshotDir}/$latest_snapshot" "${bindTarget}"
+    '';
 
   commonBorgOptions = {
-    encryption.mode = "none";
+    encryption = {
+      mode = "repokey-blake2";
+      passCommand = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
+    };
     compression = "auto,zstd,3";
     startAt = "daily";
     persistentTimer = true;
-    environment = {
-      BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK = "yes";
-    };
     prune.keep = {
       daily = 14;
       weekly = 8;
@@ -93,9 +130,9 @@ in
       # 1. System State (/var snapshots) - runs as root
       var = commonBorgOptions // {
         paths = [
-          # Backup the latest snapshot to ensure data consistency
-          # Use trailing slash to force traversal into the symlinked dir
-          "/var/.snapshot/var.latest/"
+          # Borg treats symlink roots as symlinks, not traversed directories.
+          # Bind-mount the newest snapshot to a stable path and archive that path.
+          "${borgVarSnapshotBind}/./"
         ];
         exclude = [
           "/var/tmp"
@@ -103,28 +140,22 @@ in
           "/var/lib/systemd/coredump"
         ];
         repo = borgRepoSystem;
-        # Allow creating the .latest symlink in the snapshot dir
-        readWritePaths = [ "/var/.snapshot" ];
-        # Hook to symlink the latest snapshot before backup
-        preHook = ''
-          latest="$(
-            ${pkgs.findutils}/bin/find /var/.snapshot -maxdepth 1 -mindepth 1 -type d -name 'var.*' -printf '%f\n' \
-              | ${pkgs.coreutils}/bin/sort | ${pkgs.coreutils}/bin/tail -n 1
-          )"
-          if [ -n "$latest" ]; then
-            ${pkgs.coreutils}/bin/ln -sfn "/var/.snapshot/$latest" /var/.snapshot/var.latest
-          fi
-        '';
+        readWritePaths = [
+          borgSnapshotBindRoot
+          borgRepoRoot
+        ];
+        preHook = mkBindMountedSnapshotHook {
+          label = "var";
+          snapshotDir = varSnapshots;
+          snapshotGlob = "var.*";
+          bindTarget = borgVarSnapshotBind;
+        };
       };
 
-      # 2. User Data (/realm snapshots) - runs as sinity
+      # 2. User Data (/realm snapshots) - runs as root so the bind mount can be created
       realm = commonBorgOptions // {
-        user = username;
-        group = "users";
         paths = [
-          # Backup the latest snapshot to ensure data consistency
-          # Use trailing slash to force traversal into the symlinked dir
-          "${realmRoot}/.snapshot/realm.latest/"
+          "${borgRealmSnapshotBind}/./"
         ];
         exclude = [
           "**/node_modules"
@@ -138,21 +169,18 @@ in
           "**/dist"
           "**/*.pyc"
           "**/.Trash-1000"
-          "/realm/data/runtime"
         ];
         repo = borgRepoRealm;
-        # Allow creating the .latest symlink in the snapshot dir
-        readWritePaths = [ "${realmRoot}/.snapshot" ];
-        # Hook to symlink the latest snapshot before backup
-        preHook = ''
-          latest="$(
-            ${pkgs.findutils}/bin/find ${realmRoot}/.snapshot -maxdepth 1 -mindepth 1 -type d -name 'realm.*' -printf '%f\n' \
-              | ${pkgs.coreutils}/bin/sort | ${pkgs.coreutils}/bin/tail -n 1
-          )"
-          if [ -n "$latest" ]; then
-            ${pkgs.coreutils}/bin/ln -sfn "${realmRoot}/.snapshot/$latest" ${realmRoot}/.snapshot/realm.latest
-          fi
-        '';
+        readWritePaths = [
+          borgSnapshotBindRoot
+          borgRepoRoot
+        ];
+        preHook = mkBindMountedSnapshotHook {
+          label = "realm";
+          snapshotDir = realmSnapshots;
+          snapshotGlob = "realm.*";
+          bindTarget = borgRealmSnapshotBind;
+        };
       };
     };
 
@@ -168,15 +196,22 @@ in
       IOSchedulingPriority = 7;
     };
 
+    system.activationScripts.borgRepositoryDirectories.text = ''
+      ${pkgs.coreutils}/bin/install -d -m 0750 -o root -g users ${borgRepoRoot}
+      ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${borgRepoSystemPath}
+      ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${borgRepoRealmPath}
+    '';
+
     # Ensure directories exist
     systemd.tmpfiles.rules = lib.mkAfter [
       "d ${realmSnapshots} 0750 root users -"
       "d ${rootSnapshots} 0750 root users -"
       "d ${varSnapshots} 0750 root users -"
       "d ${neoSnapshots} 0750 root users -"
-      "d ${config.sinnix.paths.outerRealm}/backup 0750 root users -"
-      "d ${borgRepoSystem} 0700 root root -"
-      "d ${borgRepoRealm} 0750 ${username} users -"
+      "d ${borgSnapshotBindRoot} 0700 root root -"
+      "d ${borgVarSnapshotBind} 0700 root root -"
+      "d ${borgRealmSnapshotBind} 0700 root root -"
+      "d ${borgRepoRoot} 0750 root users -"
     ];
 
     # systemd services for btrbk

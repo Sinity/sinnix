@@ -54,10 +54,6 @@ in
               type = types.str;
               default = "${config.dataRoot}/libraries";
             };
-            runtimeRoot = mkOption {
-              type = types.str;
-              default = "${config.dataRoot}/runtime";
-            };
             mediaRoot = mkOption {
               type = types.str;
               default = "${config.librariesRoot}/media";
@@ -141,11 +137,6 @@ in
         }
       );
       default = { };
-    };
-
-    storage.nextcloudHost = mkOption {
-      type = types.str;
-      default = "@@NEXTCLOUD_ADDRESS@@";
     };
 
     storage.nextcloudUser = mkOption {

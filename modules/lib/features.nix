@@ -28,11 +28,12 @@ let
         "features"
       ]
       ++ path;
-      # Merge extraOptions with generated sub-feature options
+      # Merge extraOptions with generated sub-feature options.
+      # Use a recursive merge so nested attrs like `factorio.username`
+      # coexist with generated `factorio.enable`.
       subFeatureOpts = mkSubFeatureOptions subFeatures;
       optionsForPath =
-        extraOptions
-        // subFeatureOpts
+        lib.recursiveUpdate extraOptions subFeatureOpts
         // {
           enable = (lib.mkEnableOption description) // {
             default = enableDefault;

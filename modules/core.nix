@@ -135,7 +135,6 @@ in
         "d ${paths.capturesRoot}/comms/irc 0755 ${username} users -"
         "d ${paths.exportsRoot} 0755 ${username} users -"
         "d ${paths.librariesRoot} 0755 ${username} users -"
-        "d ${paths.runtimeRoot} 0755 ${username} users -"
         "d ${paths.capturesRoot}/activitywatch 0755 ${username} users -"
         "d ${paths.capturesRoot}/activitywatch/raw 0755 ${username} users -"
         "d ${paths.capturesRoot}/audio 0755 ${username} users -"

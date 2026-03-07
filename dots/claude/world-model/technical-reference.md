@@ -3,9 +3,8 @@
 ### Codex CLI
 
 - **Config**: `dots/codex/config.toml`, shared skills in `dots/agent-skills`
-- **MCP Servers**: GitHub, Context7 (singleton HTTP), Firecrawl, `cclsp` bridge
+- **MCP Servers**: GitHub, Context7 (singleton HTTP), Firecrawl
 - **Context7**: Documentation discovery via `resolve-library-id` and `query-docs`
-- **LSP Bridge**: `cclsp` shares manifests between Claude, Codex, and OpenCode
 
 ### Desktop Environment
 

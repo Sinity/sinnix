@@ -1,9 +1,0 @@
-{
-  "note": "Disabled cclsp MCP config kept for quick restore.",
-  "mcpServers": {
-    "cclsp": {
-      "command": "mcp-cclsp",
-      "args": []
-    }
-  }
-}

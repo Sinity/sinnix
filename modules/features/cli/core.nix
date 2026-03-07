@@ -85,7 +85,6 @@ mkFeatureModule {
             ++ lib.filter (p: p != null) [
               (pkgs.tasksh or null)
               (pkgs.taskwarrior-tui or null)
-              (pkgs.sshpass or null) # For initial router deploy (password auth)
             ]
           );
 
