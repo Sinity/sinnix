@@ -449,6 +449,7 @@ mkFeatureModule {
 
             xdg.configFile = {
               "nvim".source = mkDotsFile "/nvim";
+              "claude/hooks/pretooluse-bash.sh".source = mkDotsFile "/claude/hooks/pretooluse-bash.sh";
               "claude/settings.json".source = mkDotsFile "/claude/settings.json";
               "claude/CLAUDE.md".source = mkDotsFile "/claude/CLAUDE.md";
               "claude/world-model" = {

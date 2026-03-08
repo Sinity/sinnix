@@ -53,6 +53,9 @@
       inputs.agenix.follows = "agenix";
     };
 
+    # BTRFS rollback impermanence (see modules/persistence.nix)
+    impermanence.url = "github:nix-community/impermanence";
+
     # System-wide theming
     stylix.url = "github:danth/stylix";
     stylix.inputs.nixpkgs.follows = "nixpkgs";

@@ -20,6 +20,7 @@ let
     moduleInputs.agenix.nixosModules.default
     moduleInputs.stylix.nixosModules.stylix
     moduleInputs.sinex.nixosModules.default
+    moduleInputs.impermanence.nixosModules.impermanence
     (import ./overlay {
       inputs = moduleInputs;
       inherit overlayLib;

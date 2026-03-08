@@ -151,7 +151,6 @@ mkFeatureModule {
           };
 
           xdg.configFile = {
-            "sqlitebrowser/sqlitebrowser.conf".source = mkDotsFile "/sqlitebrowser/sqlitebrowser.conf";
             "ripgrep-all/config.jsonc".source = mkDotsFile "/ripgrep-all/config.jsonc";
             "marimo/marimo.toml".source = mkDotsFile "/marimo/marimo.toml";
           };
