@@ -56,7 +56,6 @@ mkFeatureModule {
             packages = with pkgs; [
               chromeStablePkg
               qutebrowser
-              firefox
               tor-browser
             ];
 

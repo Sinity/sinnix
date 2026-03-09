@@ -47,15 +47,20 @@ in
       ];
     };
 
-    "/var" = {
+    # @var subvolume removed (B6): /var is now a plain dir inside @, populated
+    # by /persist bind-mounts declared in modules/persistence.nix.
+    # @var remains on disk as a historical archive — not yet deleted.
+
+    "/persist" = {
       device = "/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02";
       fsType = "btrfs";
       options = [
-        "subvol=@var"
+        "subvol=@persist"
         "compress=zstd"
         "noatime"
         "discard=async"
       ];
+      neededForBoot = true;
     };
 
     "/boot" = {
@@ -78,12 +83,9 @@ in
       ];
     };
 
-    "/home/${username}" = {
-      device = "${realmRoot}/home";
-      fsType = "none";
-      options = [ "bind" ];
-      depends = [ realmRoot ];
-    };
+    # B9: /realm/home bind mount removed. /home/${username} is now ephemeral
+    # (part of @, wiped on every boot by B8 initrd script). Populated entirely
+    # from /persist bind-mounts (impermanence) + Home Manager activation.
 
     # 6TB HGST - reformatted from NTFS to btrfs
     "${outerRealm}" = {
@@ -157,4 +159,32 @@ in
     "btrfs"
     "ntfs"
   ];
+
+  # B8: initrd rollback — on every boot, snapshot current @ then restore from @blank.
+  # Guard: if @blank does not exist yet (before B7), boots normally with no rollback.
+  # Safety window: each pre-wipe state is snapshotted to @snapshots/root.boot.TIMESTAMP.
+  boot.initrd.postDeviceCommands = lib.mkAfter ''
+    mkdir /btrfs_tmp
+    mount -o subvol=/ /dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02 /btrfs_tmp
+    if btrfs subvolume show /btrfs_tmp/@blank > /dev/null 2>&1; then
+      SNAP_NAME="root.boot.$(date +%Y%m%dT%H%M%S)"
+      btrfs subvolume snapshot /btrfs_tmp/@ "/btrfs_tmp/@snapshots/$SNAP_NAME"
+
+      # Delete nested child subvolumes of @ before deleting @ itself.
+      # btrfs subvolume delete fails if the subvolume has nested children.
+      # Sort by path depth descending so children are deleted before parents.
+      btrfs subvolume list -o /btrfs_tmp/@ \
+        | awk '{print $NF}' \
+        | sort -r \
+        | while IFS= read -r child; do
+            btrfs subvolume delete "/btrfs_tmp/$child" 2>/dev/null || true
+          done
+      btrfs subvolume delete /btrfs_tmp/@
+      btrfs subvolume snapshot /btrfs_tmp/@blank /btrfs_tmp/@
+      echo "Rolled back @ from @blank (saved to @snapshots/$SNAP_NAME)"
+    else
+      echo "No @blank snapshot — skipping rollback (create it post-boot: B7)"
+    fi
+    umount /btrfs_tmp
+  '';
 }

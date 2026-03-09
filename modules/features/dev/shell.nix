@@ -200,7 +200,6 @@ mkFeatureModule {
                 psq = "procs --tree --thread-off";
                 wtf = "dmesg";
                 ytd = "yt-dlp";
-                zed = "zeditor"; # Zed editor binary is named 'zeditor' on NixOS
               };
             };
           };
@@ -449,21 +448,28 @@ mkFeatureModule {
 
             xdg.configFile = {
               "nvim".source = mkDotsFile "/nvim";
-              "claude/hooks/pretooluse-bash.sh".source = mkDotsFile "/claude/hooks/pretooluse-bash.sh";
-              "claude/settings.json".source = mkDotsFile "/claude/settings.json";
-              "claude/CLAUDE.md".source = mkDotsFile "/claude/CLAUDE.md";
-              "claude/world-model" = {
+            };
+
+            # Claude Code uses ~/.claude as its single canonical directory.
+            # Config files (settings, CLAUDE.md, skills, etc.) live here alongside
+            # runtime state (projects/, history.jsonl). Impermanence persists the
+            # whole dir; HM manages the config symlinks within it.
+            home.file = {
+              ".claude/hooks/pretooluse-bash.sh".source = mkDotsFile "/claude/hooks/pretooluse-bash.sh";
+              ".claude/settings.json".source = mkDotsFile "/claude/settings.json";
+              ".claude/CLAUDE.md".source = mkDotsFile "/claude/CLAUDE.md";
+              ".claude/world-model" = {
                 source = mkDotsFile "/claude/world-model";
                 force = true;
                 recursive = true;
               };
-              "claude/operational" = {
+              ".claude/operational" = {
                 source = mkDotsFile "/claude/operational";
                 force = true;
                 recursive = true;
               };
-              "claude/skills" = {
-                source = mkDotsFile "/agent-skills";
+              ".claude/skills" = {
+                source = mkDotsFile "/claude/skills";
                 force = true;
                 recursive = true;
               };
@@ -474,9 +480,9 @@ mkFeatureModule {
             '';
             home.activation.renderGlobalCodexAgents = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
               mkdir -p "$HOME/.codex"
-              if [ -f "$HOME/.config/claude/CLAUDE.md" ]; then
+              if [ -f "$HOME/.claude/CLAUDE.md" ]; then
                 ${scriptPkgs.render-agents}/bin/render-agents \
-                  --input "$HOME/.config/claude/CLAUDE.md" \
+                  --input "$HOME/.claude/CLAUDE.md" \
                   --output "$HOME/.codex/AGENTS.md"
               fi
             '';
@@ -527,9 +533,9 @@ mkFeatureModule {
                 }
 
                 if [ -z "''${SINNIX_SKIP_AGENTS_RENDER:-}" ] && [ -x "$RENDER_AGENTS_BIN" ]; then
-                  if [ -f "$HOME/.config/claude/CLAUDE.md" ]; then
+                  if [ -f "$HOME/.claude/CLAUDE.md" ]; then
                     "$RENDER_AGENTS_BIN" \
-                      --input "$HOME/.config/claude/CLAUDE.md" \
+                      --input "$HOME/.claude/CLAUDE.md" \
                       --output "$HOME/.codex/AGENTS.md" || echo "warning: failed to render global CLAUDE.md" >&2
                   fi
 
@@ -573,9 +579,9 @@ mkFeatureModule {
                 RENDER_AGENTS_BIN="${scriptPkgs.render-agents}/bin/render-agents"
 
                 # Render CLAUDE.md → GEMINI.md for shared instructions
-                if [ -f "$HOME/.config/claude/CLAUDE.md" ] && [ -x "$RENDER_AGENTS_BIN" ]; then
+                if [ -f "$HOME/.claude/CLAUDE.md" ] && [ -x "$RENDER_AGENTS_BIN" ]; then
                   "$RENDER_AGENTS_BIN" \
-                    --input "$HOME/.config/claude/CLAUDE.md" \
+                    --input "$HOME/.claude/CLAUDE.md" \
                     --output "$HOME/.gemini/GEMINI.md" 2>/dev/null || true
                 fi
 
@@ -584,10 +590,6 @@ mkFeatureModule {
               executable = true;
             };
 
-            home.file.".claude" = {
-              source = config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/.config/claude";
-              force = true;
-            };
             home.file.".serena/serena_config.yml".source = mkDotsFile "/serena/serena_config.yml";
 
             # Bash integration for direnv

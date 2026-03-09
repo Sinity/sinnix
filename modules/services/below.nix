@@ -33,6 +33,15 @@ mkServiceModule {
     {
       environment.systemPackages = [ pkgs.below ];
 
+      # /var/log/below/store is the below data directory. Create it via tmpfiles
+      # so below.service can start even if the /persist bind-mount hasn't activated
+      # yet (e.g. first boot without @blank). When impermanence is active, the
+      # bind-mount overlays this and persists the data across reboots.
+      systemd.tmpfiles.rules = [
+        "d /var/log/below 0755 root root -"
+        "d /var/log/below/store 0755 root root -"
+      ];
+
       systemd.services.below = {
         description = "below - Time traveling resource monitor";
         wantedBy = [ "multi-user.target" ];

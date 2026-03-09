@@ -55,7 +55,16 @@ mkFeatureModule {
       security.pam.services.login.enableGnomeKeyring = lib.mkForce false;
 
       home-manager.users.${user} =
-        { lib, pkgs, ... }:
+        {
+          lib,
+          pkgs,
+          config,
+          mkDotsFileFor,
+          ...
+        }:
+        let
+          mkDotsFile = mkDotsFileFor config;
+        in
         {
           home.packages = lib.mkAfter (
             with pkgs;
@@ -110,6 +119,24 @@ mkFeatureModule {
                 user = "root";
               };
             };
+          };
+
+          programs.bat = {
+            enable = true;
+            config.pager = "less -FR";
+            # theme: set by stylix (stylix.targets.bat)
+          };
+
+          programs.broot = {
+            enable = true;
+            enableZshIntegration = true;
+            # Core settings are in dots/broot/conf.hjson (gruvbox skin, modal mode,
+            # special_paths). Loaded alongside the conf.toml HM generates here.
+          };
+
+          xdg.configFile = {
+            "broot/conf.hjson".source = mkDotsFile "/broot/conf.hjson";
+            "broot/verbs.hjson".source = mkDotsFile "/broot/verbs.hjson";
           };
 
           programs.btop = {

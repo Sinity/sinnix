@@ -162,7 +162,7 @@ mkFeatureModule {
               force = true;
             };
             ".codex/skills" = {
-              source = mkDotsFile "/agent-skills";
+              source = mkDotsFile "/codex/skills";
               force = true;
               recursive = true;
             };

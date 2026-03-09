@@ -2,7 +2,7 @@
 
 ### Codex CLI
 
-- **Config**: `dots/codex/config.toml`, shared skills in `dots/agent-skills`
+- **Config**: `dots/codex/config.toml`, Codex skills in `dots/codex/skills`, Claude skills in `dots/claude/skills`
 - **MCP Servers**: GitHub, Context7 (singleton HTTP), Firecrawl
 - **Context7**: Documentation discovery via `resolve-library-id` and `query-docs`
 

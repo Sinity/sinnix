@@ -108,7 +108,7 @@ let
           }
           {
             assertion = hm.home.file ? ".codex/skills";
-            message = "Codex skills must be linked from shared agent-skills";
+            message = "Codex skills must be linked from the dedicated dots/codex/skills tree";
           }
         ];
     })

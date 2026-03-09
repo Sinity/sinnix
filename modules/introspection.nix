@@ -81,12 +81,12 @@ let
     snapshotDirs = [
       "${cfg.paths.realmRoot}/.snapshot"
       "/.snapshot"
-      "/var/.snapshot"
+      "/persist/.snapshot"
       "${cfg.paths.neoOuterRealm}/.snapshot"
     ];
     backupTargets = [
-      "${cfg.paths.outerRealm}/backup/borg-var"
-      "${cfg.paths.outerRealm}/backup/borg-realm"
+      "${cfg.paths.outerRealm}/backup/borg-persist-v1"
+      "${cfg.paths.outerRealm}/backup/borg-realm-v2"
     ];
     maxStaleHours = 24; # Increased from 2h to be more realistic for daily/hourly batches
   };

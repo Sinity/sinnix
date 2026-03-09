@@ -7,7 +7,8 @@
   "ui": {
     "theme": "Default",
     "footer": {
-      "hideContextPercentage": false
+      "hideContextPercentage": false,
+      "hideModelInfo": false
     },
     "showCitations": true,
     "showModelInfoInChat": true,
@@ -18,7 +19,7 @@
     "enablePromptCompletion": true,
     "sessionRetention": {
       "enabled": true,
-      "maxAge": "30d",
+      "maxAge": "9999d",
       "warningAcknowledged": true
     }
   },
@@ -49,6 +50,7 @@
     "enabled": true
   },
   "model": {
-    "name": "auto-gemini-3"
+    "name": "auto-gemini-3",
+    "compressionThreshold": 0.95
   }
 }

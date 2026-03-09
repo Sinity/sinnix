@@ -15,10 +15,11 @@
   sinnix.bundles.dev.enable = true;
 
   sinnix.features.cli.task-tracking.enable = true;
+  sinnix.persistence.enable = true;
+
   sinnix.features.dev.editors.enable = true;
   sinnix.features.dev.editors.vscode.enable = true;
   sinnix.features.dev.editors.antigravity.enable = true;
-  sinnix.features.dev.editors.zed.enable = true;
 
   sinnix.services = {
     transmission.enable = true;

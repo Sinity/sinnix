@@ -9,17 +9,13 @@ mkFeatureModule {
     "dev"
     "editors"
   ];
-  description = "Developer editors (VS Code, Zed)";
-  # Using declarative subFeatures instead of manual extraOptions
+  description = "Developer editors (VS Code, Antigravity)";
   subFeatures = {
     vscode = {
       description = "VSCode Editor";
     };
     antigravity = {
       description = "Antigravity Editor (Fork of VSCode)";
-    };
-    zed = {
-      description = "Zed Editor";
     };
   };
   configFn =
@@ -34,6 +30,26 @@ mkFeatureModule {
     }:
     let
       marketplace = pkgs.nix-vscode-extensions.vscode-marketplace;
+      waylandEditorFlags =
+        "--enable-features=UseOzonePlatform --ozone-platform=wayland "
+        + "--disable-features=WaylandWpColorManagerV1,Vulkan,DefaultANGLEVulkan";
+      wrapWaylandEditor =
+        name: pkg: bin:
+        pkgs.symlinkJoin {
+          inherit name;
+          inherit (pkg)
+            meta
+            pname
+            version
+            ;
+          paths = [ pkg ];
+          passthru = pkg.passthru or { };
+          buildInputs = [ pkgs.makeWrapper ];
+          postBuild = ''
+            wrapProgram $out/bin/${bin} \
+              --add-flags "${waylandEditorFlags}"
+          '';
+        };
     in
     lib.mkMerge [
       (lib.mkIf cfg.vscode.enable {
@@ -47,10 +63,12 @@ mkFeatureModule {
           }:
           let
             mkDotsFile = mkDotsFileFor config;
+            vscode-wrapped = wrapWaylandEditor "vscode-wrapped" pkgs.vscode "code";
           in
           {
             programs.vscode = {
               enable = true;
+              package = vscode-wrapped;
               mutableExtensionsDir = false;
               profiles.default.extensions =
                 (with pkgs.vscode-extensions; [
@@ -98,15 +116,7 @@ mkFeatureModule {
           }:
           let
             mkDotsFile = mkDotsFileFor config;
-            antigravity-wrapped = pkgs.symlinkJoin {
-              name = "antigravity-wrapped";
-              paths = [ pkgs.antigravity ];
-              buildInputs = [ pkgs.makeWrapper ];
-              postBuild = ''
-                wrapProgram $out/bin/antigravity \
-                  --add-flags "--enable-features=UseOzonePlatform --ozone-platform=wayland --disable-features=WaylandWpColorManagerV1,Vulkan,DefaultANGLEVulkan"
-              '';
-            };
+            antigravity-wrapped = wrapWaylandEditor "antigravity-wrapped" pkgs.antigravity "antigravity";
           in
           {
             home.packages = [ antigravity-wrapped ];
@@ -128,19 +138,5 @@ mkFeatureModule {
           };
       })
 
-      (lib.mkIf cfg.zed.enable {
-        home-manager.users.${user} =
-          { config, mkDotsFileFor, ... }:
-          let
-            mkDotsFile = mkDotsFileFor config;
-          in
-          {
-            xdg.configFile = {
-              "zed/settings.json".source = mkDotsFile "/zed/settings.json";
-              "zed/keymap.json".source = mkDotsFile "/zed/keymap.json";
-            };
-            # Note: `zed = "zeditor"` alias is defined in shell.nix
-          };
-      })
     ];
 } args

@@ -5,9 +5,10 @@
 #
 # Drive           Label            Mount            Purpose
 # ────────────────────────────────────────────────────────────────────────────
-# /dev/nvme0n1p3  SSD_4TB          /realm           Source: projects, home, data
-# /dev/sda2       root_btrfs       /                Source: System & /var
+# /dev/nvme0n1p3  SSD_4TB          /realm           Source: projects, data
+# /dev/sdc2       root_btrfs       /persist         Source: system & home state
 # /dev/sdc1       outer-realm      /outer-realm     Target: Borg & btrbk archives
+# Note: / is ephemeral — not snapshotted by btrbk (initrd saves pre-wipe states)
 {
   pkgs,
   lib,
@@ -20,17 +21,16 @@ let
 
   # Snapshot directories
   realmSnapshots = "${realmRoot}/.snapshot";
-  rootSnapshots = "/.snapshot";
-  varSnapshots = "/var/.snapshot";
+  persistSnapshots = "/persist/.snapshot";
   neoSnapshots = "${neoOuterRealm}/.snapshot";
   borgSnapshotBindRoot = "/run/borgbackup-snapshot-inputs";
-  borgVarSnapshotBind = "${borgSnapshotBindRoot}/var";
+  borgPersistSnapshotBind = "${borgSnapshotBindRoot}/persist";
   borgRealmSnapshotBind = "${borgSnapshotBindRoot}/realm";
 
   # Borg Configuration
-  borgRepoSystemPath = "${borgRepoRoot}/borg-var-v2";
+  borgRepoPersistPath = "${borgRepoRoot}/borg-persist-v1";
   borgRepoRealmPath = "${borgRepoRoot}/borg-realm-v2";
-  borgRepoSystem = "file://${borgRepoSystemPath}";
+  borgRepoPersist = "file://${borgRepoPersistPath}";
   borgRepoRealm = "file://${borgRepoRealmPath}";
   borgPassphrasePath = config.sinnix.secrets.paths."borg-passphrase";
 
@@ -97,15 +97,14 @@ let
       subvolume .
         snapshot_preserve       14d 52w
 
-    volume /var
+    volume /persist
       snapshot_dir   .snapshot
       subvolume .
         snapshot_preserve       14d 52w
 
-    volume /
-      snapshot_dir   .snapshot
-      subvolume .
-        snapshot_preserve       30d 52w
+    # / is ephemeral (restored from @blank on every boot by B8 initrd script).
+    # Pre-wipe states are saved by initrd to @snapshots/root.boot.TIMESTAMP.
+    # btrbk snapshotting / would reset on every boot — not useful.
 
     volume ${neoOuterRealm}
       snapshot_dir   .snapshot
@@ -127,28 +126,34 @@ in
 
     # ─── Borg Backup Jobs ───
     services.borgbackup.jobs = {
-      # 1. System State (/var snapshots) - runs as root
-      var = commonBorgOptions // {
+      # 1. Persistent state (/persist snapshots) - runs as root
+      #    Replaced the old borg-var-v2 job. /persist now contains all system
+      #    and home state that was previously split between @var and /realm/home.
+      persist = commonBorgOptions // {
         paths = [
           # Borg treats symlink roots as symlinks, not traversed directories.
           # Bind-mount the newest snapshot to a stable path and archive that path.
-          "${borgVarSnapshotBind}/./"
+          "${borgPersistSnapshotBind}/./"
         ];
         exclude = [
-          "/var/tmp"
-          "/var/cache"
-          "/var/lib/systemd/coredump"
+          # Large game library — relocate to /realm/data/libraries/ eventually
+          "/persist/home/sinity/.local/share/Steam"
+          # Ephemeral junk
+          "/persist/var/lib/systemd/coredump"
+          "/persist/home/sinity/.config/google-chrome/Default/Cache"
+          "/persist/home/sinity/.config/google-chrome/Default/Code Cache"
+          "/persist/home/sinity/.config/google-chrome/Default/Service Worker"
         ];
-        repo = borgRepoSystem;
+        repo = borgRepoPersist;
         readWritePaths = [
           borgSnapshotBindRoot
           borgRepoRoot
         ];
         preHook = mkBindMountedSnapshotHook {
-          label = "var";
-          snapshotDir = varSnapshots;
-          snapshotGlob = "var.*";
-          bindTarget = borgVarSnapshotBind;
+          label = "persist";
+          snapshotDir = persistSnapshots;
+          snapshotGlob = "persist.*";
+          bindTarget = borgPersistSnapshotBind;
         };
       };
 
@@ -185,7 +190,7 @@ in
     };
 
     # Performance tuning for Borg
-    systemd.services.borgbackup-job-var.serviceConfig = {
+    systemd.services.borgbackup-job-persist.serviceConfig = {
       Nice = 19;
       IOSchedulingClass = "idle";
       IOSchedulingPriority = 7;
@@ -198,18 +203,17 @@ in
 
     system.activationScripts.borgRepositoryDirectories.text = ''
       ${pkgs.coreutils}/bin/install -d -m 0750 -o root -g users ${borgRepoRoot}
-      ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${borgRepoSystemPath}
+      ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${borgRepoPersistPath}
       ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${borgRepoRealmPath}
     '';
 
     # Ensure directories exist
     systemd.tmpfiles.rules = lib.mkAfter [
       "d ${realmSnapshots} 0750 root users -"
-      "d ${rootSnapshots} 0750 root users -"
-      "d ${varSnapshots} 0750 root users -"
+      "d ${persistSnapshots} 0750 root users -"
       "d ${neoSnapshots} 0750 root users -"
       "d ${borgSnapshotBindRoot} 0700 root root -"
-      "d ${borgVarSnapshotBind} 0700 root root -"
+      "d ${borgPersistSnapshotBind} 0700 root root -"
       "d ${borgRealmSnapshotBind} 0700 root root -"
       "d ${borgRepoRoot} 0750 root users -"
     ];

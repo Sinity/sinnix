@@ -123,6 +123,8 @@ mkFeatureModule {
             enable = true;
             enableGitIntegration = true;
           };
+
+          programs.lazygit.enable = true;
         };
     };
 } args

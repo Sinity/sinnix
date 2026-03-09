@@ -16,7 +16,7 @@
 
 - Keep `AGENTS.md` as always-on map of module taxonomy, invariants, and architecture decisions.
 - Use skills for heavy procedural workflows (for example orchestration, CI repair, desktop control).
-- Repo-local skills: `.agents/skills/` (Codex), `.claude/skills/` (Claude). Example: `sinnix-module-placement`.
+- Agent-specific skills live in `dots/codex/skills/` for Codex and `dots/claude/skills/` for Claude Code. Example: `dots/codex/skills/sinnix-module-placement/`.
 - Rule: if guidance is needed on most turns, keep it here; if it is specialized or long-form, move it to a skill.
 
 ## No-Alias Rule
