@@ -14,7 +14,10 @@ mkFeatureModule {
     }:
     {
       home-manager.users.${user} =
-        { ... }:
+        { config, ... }:
+        let
+          captureShellCmd = "${config.home.homeDirectory}/.local/bin/sinnix-captured-shell";
+        in
         {
           home.sessionVariables.TERMINAL = "kitty";
 
@@ -43,6 +46,7 @@ mkFeatureModule {
               inactive_tab_font_style = "normal";
               tab_bar_style = "powerline";
               tab_powerline_style = "angled";
+              shell = captureShellCmd;
             };
             extraConfig = ''
               map ctrl+shift+f12 debug_config

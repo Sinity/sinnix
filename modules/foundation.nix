@@ -168,39 +168,6 @@ in
       font = "Lat2-Terminus16";
     };
 
-    # Password safety net: if agenix fails to decrypt password secrets,
-    # preserve the current working password from /etc/shadow instead of
-    # leaving the user with no password (which would cause lockout).
-    # Runs after agenixInstall, before users activation.
-    system.activationScripts.passwordSafetyNet = {
-      deps = [ "agenixInstall" ];
-      text =
-        let
-          userPwFile = config.sinnix.secrets.paths."${cfg.user.name}-password";
-          rootPwFile = config.sinnix.secrets.paths.root-password;
-          username = cfg.user.name;
-        in
-        ''
-          password_fallback() {
-            local user="$1" target="$2"
-            if [ ! -s "$target" ]; then
-              echo "WARNING: agenix did not decrypt $target — extracting fallback from /etc/shadow" >&2
-              current_hash=$(${pkgs.gawk}/bin/awk -F: -v u="$user" '$1==u {print $2}' /etc/shadow 2>/dev/null)
-              if [ -n "$current_hash" ] && [ "$current_hash" != "!" ] && [ "$current_hash" != "*" ]; then
-                echo "$current_hash" > "$target"
-                chmod 0400 "$target"
-                chown root:root "$target"
-                echo "  → Preserved existing password for $user (agenix recovery)" >&2
-              else
-                echo "CRITICAL: No fallback password available for $user — system may be inaccessible!" >&2
-              fi
-            fi
-          }
-          password_fallback "${username}" "${userPwFile}"
-          password_fallback "root" "${rootPwFile}"
-        '';
-    };
-
     # User definition
     users.mutableUsers = false;
     users.users.${cfg.user.name} = {

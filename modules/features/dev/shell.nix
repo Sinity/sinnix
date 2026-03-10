@@ -147,16 +147,15 @@ mkFeatureModule {
                   stty -ixon
 
                   update_terminal_title() {
-                    LAST_CMD=$1
-                    TITLE="\033]2;$(pwd); $(date "+%Y-%m-%d %H:%M:%S") $LAST_CMD\007"
-                    echo -ne $TITLE
+                    local last_cmd="$1"
+                    printf '\033]2;%s; %s\007' "$PWD" "$last_cmd"
                   }
-                  preexec() { update_terminal_title "$1" }
-                  precmd() { update_terminal_title "" }
+                  _terminal_title_preexec() { update_terminal_title "$1" }
+                  _terminal_title_precmd() { update_terminal_title "" }
 
                   autoload -U add-zsh-hook
-                  add-zsh-hook preexec preexec
-                  add-zsh-hook precmd precmd
+                  add-zsh-hook preexec _terminal_title_preexec
+                  add-zsh-hook precmd _terminal_title_precmd
                   zmodload zsh/zpty
 
                   autoload -Uz bracketed-paste-magic
@@ -345,6 +344,21 @@ mkFeatureModule {
       # CLI Utilities & Session Config
       # ========================================
       (lib.mkIf cfg.utilities.enable {
+        # Persistence for AI tools and dev caches (colocated with their config)
+        sinnix.persistence.home = {
+          directories = [
+            { directory = ".config/claude"; mode = "0700"; } # Claude Code runtime + HM config
+            { directory = ".codex"; mode = "0700"; }         # Codex CLI config + state
+            { directory = ".gemini"; mode = "0700"; }        # Gemini CLI auth + history (tmp/ regenerates)
+            ".cache"  # entire cache dir — nix eval, sccache, uv, etc.
+            ".cargo"  # Rust crate registry + git checkouts
+            ".npm"    # npm package cache
+          ];
+          files = [
+            ".claude.json"  # Claude CLI auth token
+          ];
+        };
+
         home-manager.users.${user} =
           {
             config,
@@ -448,27 +462,20 @@ mkFeatureModule {
 
             xdg.configFile = {
               "nvim".source = mkDotsFile "/nvim";
-            };
-
-            # Claude Code uses ~/.claude as its single canonical directory.
-            # Config files (settings, CLAUDE.md, skills, etc.) live here alongside
-            # runtime state (projects/, history.jsonl). Impermanence persists the
-            # whole dir; HM manages the config symlinks within it.
-            home.file = {
-              ".claude/hooks/pretooluse-bash.sh".source = mkDotsFile "/claude/hooks/pretooluse-bash.sh";
-              ".claude/settings.json".source = mkDotsFile "/claude/settings.json";
-              ".claude/CLAUDE.md".source = mkDotsFile "/claude/CLAUDE.md";
-              ".claude/world-model" = {
+              "claude/hooks/pretooluse-bash.sh".source = mkDotsFile "/claude/hooks/pretooluse-bash.sh";
+              "claude/settings.json".source = mkDotsFile "/claude/settings.json";
+              "claude/CLAUDE.md".source = mkDotsFile "/claude/CLAUDE.md";
+              "claude/world-model" = {
                 source = mkDotsFile "/claude/world-model";
                 force = true;
                 recursive = true;
               };
-              ".claude/operational" = {
+              "claude/operational" = {
                 source = mkDotsFile "/claude/operational";
                 force = true;
                 recursive = true;
               };
-              ".claude/skills" = {
+              "claude/skills" = {
                 source = mkDotsFile "/claude/skills";
                 force = true;
                 recursive = true;
@@ -478,11 +485,17 @@ mkFeatureModule {
             home.activation.rebuildBatCache = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
               ${lib.getExe pkgs.bat} cache --build 2>/dev/null || true
             '';
+            # ~/.claude → ~/.config/claude symlink. Claude Code uses ~/.claude as
+            # its data dir; we canonicalize to XDG at ~/.config/claude (persisted
+            # by impermanence, HM-managed config via xdg.configFile).
+            home.activation.claudeSymlink = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+              ln -sfn .config/claude $HOME/.claude
+            '';
             home.activation.renderGlobalCodexAgents = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
               mkdir -p "$HOME/.codex"
-              if [ -f "$HOME/.claude/CLAUDE.md" ]; then
+              if [ -f "$HOME/.config/claude/CLAUDE.md" ]; then
                 ${scriptPkgs.render-agents}/bin/render-agents \
-                  --input "$HOME/.claude/CLAUDE.md" \
+                  --input "$HOME/.config/claude/CLAUDE.md" \
                   --output "$HOME/.codex/AGENTS.md"
               fi
             '';
@@ -533,9 +546,9 @@ mkFeatureModule {
                 }
 
                 if [ -z "''${SINNIX_SKIP_AGENTS_RENDER:-}" ] && [ -x "$RENDER_AGENTS_BIN" ]; then
-                  if [ -f "$HOME/.claude/CLAUDE.md" ]; then
+                  if [ -f "$HOME/.config/claude/CLAUDE.md" ]; then
                     "$RENDER_AGENTS_BIN" \
-                      --input "$HOME/.claude/CLAUDE.md" \
+                      --input "$HOME/.config/claude/CLAUDE.md" \
                       --output "$HOME/.codex/AGENTS.md" || echo "warning: failed to render global CLAUDE.md" >&2
                   fi
 
@@ -579,9 +592,9 @@ mkFeatureModule {
                 RENDER_AGENTS_BIN="${scriptPkgs.render-agents}/bin/render-agents"
 
                 # Render CLAUDE.md → GEMINI.md for shared instructions
-                if [ -f "$HOME/.claude/CLAUDE.md" ] && [ -x "$RENDER_AGENTS_BIN" ]; then
+                if [ -f "$HOME/.config/claude/CLAUDE.md" ] && [ -x "$RENDER_AGENTS_BIN" ]; then
                   "$RENDER_AGENTS_BIN" \
-                    --input "$HOME/.claude/CLAUDE.md" \
+                    --input "$HOME/.config/claude/CLAUDE.md" \
                     --output "$HOME/.gemini/GEMINI.md" 2>/dev/null || true
                 fi
 

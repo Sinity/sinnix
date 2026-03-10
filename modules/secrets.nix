@@ -129,13 +129,14 @@ in
     );
 
     age = {
-      # Always include the user's SSH key so we can decrypt even if the host
-      # key rotates; the file must exist on the target system.
+      # With impermanence, /etc/ssh and ~/.ssh are empty at activation time
+      # (bind-mounts from /persist haven't run yet). Point directly at /persist
+      # paths so agenix can decrypt before bind-mounts complete.
       identityPaths =
         if cfg.enable then
           [
-            "/etc/ssh/ssh_host_ed25519_key"
-            "/home/${username}/.ssh/id_ed25519"
+            "/persist/etc/ssh/ssh_host_ed25519_key"
+            "/persist/home/${username}/.ssh/id_ed25519"
           ]
         else
           [ ];

@@ -80,7 +80,6 @@ let
   backupMonitoring = {
     snapshotDirs = [
       "${cfg.paths.realmRoot}/.snapshot"
-      "/.snapshot"
       "/persist/.snapshot"
       "${cfg.paths.neoOuterRealm}/.snapshot"
     ];

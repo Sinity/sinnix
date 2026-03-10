@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "$#" -eq 0 ]; then
+  echo "usage: open-browser-link <url> [more-urls...]" >&2
+  exit 1
+fi
+
+setsid -f google-chrome-stable "$@" >/dev/null 2>&1 < /dev/null

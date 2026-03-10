@@ -102,9 +102,9 @@ let
       subvolume .
         snapshot_preserve       14d 52w
 
-    # / is ephemeral (restored from @blank on every boot by B8 initrd script).
-    # Pre-wipe states are saved by initrd to @snapshots/root.boot.TIMESTAMP.
-    # btrbk snapshotting / would reset on every boot — not useful.
+    # / is ephemeral (wiped and recreated each boot by initrd rollback script).
+    # Pre-wipe states are saved by initrd to .snapshots/root.TIMESTAMP.
+    # btrbk snapshotting / would be pointless — it resets every boot.
 
     volume ${neoOuterRealm}
       snapshot_dir   .snapshot
@@ -219,8 +219,12 @@ in
     ];
 
     # systemd services for btrbk
+    # Depends on all snapshotted volumes being mounted. neo-outer-realm is an
+    # HDD (slow spin-up) with nofail — without this, btrbk races the mount on boot.
     systemd.services.btrbk = {
       description = "btrbk btrfs snapshot";
+      after = [ "neo-outer-realm.mount" "persist.mount" "realm.mount" ];
+      wants = [ "neo-outer-realm.mount" ];
       serviceConfig = {
         Type = "oneshot";
         ExecStart = "${pkgs.btrbk}/bin/btrbk run --quiet";

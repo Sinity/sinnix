@@ -68,7 +68,6 @@ mkServiceModule {
           "/realm"
           "/outer-realm"
           "/neo-outer-realm"
-          "/.snapshot"
           "/persist/.snapshot"
         ];
       };

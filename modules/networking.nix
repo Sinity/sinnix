@@ -129,6 +129,10 @@ in
           Experimental = lib.mkDefault true;
           FastConnectable = lib.mkDefault true;
           MultiProfile = lib.mkDefault "multiple";
+          # Enable ISO socket so BAP (LE Audio) probe succeeds.
+          # Without this, Experimental=true loads the BAP plugin but ISO
+          # stays disabled → "BAP requires ISO Socket" error on every boot.
+          KernelExperimental = lib.mkDefault "6fbaf188-05e0-496a-9885-d6ddfdb4e03e";
         };
       };
     };

@@ -13,6 +13,14 @@ mkFeatureModule {
       ...
     }:
     let
+      browserHandlerDesktop = "sinnix-browser-link.desktop";
+      browserMimeTypes = [
+        "text/html"
+        "x-scheme-handler/http"
+        "x-scheme-handler/https"
+        "x-scheme-handler/about"
+        "x-scheme-handler/unknown"
+      ];
       # Shared media associations - used for both added and default
       mediaAssociations = {
         "text/plain" = [ "org.gnome.TextEditor.desktop" ];
@@ -46,18 +54,26 @@ mkFeatureModule {
       };
 
       # Browser handlers (only in defaultApplications)
-      browserHandlers = {
-        "text/html" = [ "google-chrome.desktop" ];
-        "x-scheme-handler/http" = [ "google-chrome.desktop" ];
-        "x-scheme-handler/https" = [ "google-chrome.desktop" ];
-        "x-scheme-handler/about" = [ "google-chrome.desktop" ];
-        "x-scheme-handler/unknown" = [ "google-chrome.desktop" ];
-      };
+      browserHandlers = lib.genAttrs browserMimeTypes (_: [ browserHandlerDesktop ]);
     in
     {
       home-manager.users.${user} =
-        { ... }:
+        { config, ... }:
         {
+          xdg.desktopEntries.sinnix-browser-link = {
+            name = "Sinnix Browser Link";
+            genericName = "Web Browser";
+            comment = "Open browser links without swallowing the calling terminal";
+            exec = "${config.home.homeDirectory}/.local/bin/open-browser-link %U";
+            terminal = false;
+            noDisplay = true;
+            categories = [
+              "Network"
+              "WebBrowser"
+            ];
+            mimeType = browserMimeTypes;
+          };
+
           xdg.mimeApps = {
             enable = true;
             associations.added = mediaAssociations;

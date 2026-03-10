@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+shell_bin="${SHELL:-}"
+if [[ -z "$shell_bin" || ! -x "$shell_bin" ]]; then
+  shell_bin="$(command -v zsh)"
+fi
+
+capture_root="${SINNIX_ASCIINEMA_DIR:-/realm/data/captures/asciinema}"
+capture_disabled="${SINNIX_ASCIINEMA_DISABLE:-}"
+
+now_ms() {
+  local raw="${EPOCHREALTIME:-}"
+
+  if [[ -z "$raw" ]]; then
+    raw="$(printf '%(%s)T' -1).000"
+  fi
+
+  local sec="${raw%%.*}"
+  local frac="${raw#*.}"
+
+  if [[ "$frac" == "$raw" ]]; then
+    frac="0"
+  fi
+
+  frac="${frac}000"
+  printf '%s%s' "$sec" "${frac:0:3}"
+}
+
+guess_project_root() {
+  local cwd="$1"
+  if [[ "$cwd" == /realm/project/* ]]; then
+    local suffix="${cwd#/realm/project/}"
+    local name="${suffix%%/*}"
+    if [[ -n "$name" ]]; then
+      printf '/realm/project/%s' "$name"
+      return 0
+    fi
+  fi
+  printf ''
+}
+
+find_repo_root() {
+  local dir="$1"
+
+  while [[ -n "$dir" && "$dir" != "/" ]]; do
+    if [[ -d "$dir/.git" || -f "$dir/.git" ]]; then
+      printf '%s' "$dir"
+      return 0
+    fi
+
+    dir="${dir%/*}"
+    if [[ -z "$dir" ]]; then
+      dir="/"
+    fi
+  done
+
+  return 1
+}
+
+for name in $(compgen -v); do
+  case "$name" in
+    SINNIX_CAPTURE_*)
+      unset "$name"
+      ;;
+  esac
+done
+unset SINNIX_ASCIINEMA_ACTIVE SINNIX_ASCIINEMA_FILE ASCIINEMA_SESSION || true
+
+if [[ -n "$capture_disabled" || -n "${TMUX:-}" || ! -t 0 || -z "${KITTY_PID:-}" ]]; then
+  exec "$shell_bin"
+fi
+
+if ! command -v asciinema >/dev/null 2>&1 || ! command -v setsid >/dev/null 2>&1; then
+  exec "$shell_bin"
+fi
+
+tty_path="$(tty 2>/dev/null || true)"
+if [[ "$tty_path" == "not a tty" ]]; then
+  tty_path=""
+fi
+
+tty_slug="${tty_path//\//_}"
+if [[ -z "$tty_slug" ]]; then
+  tty_slug="unknown_tty"
+fi
+
+started_at_ms="$(now_ms)"
+host_name="${HOSTNAME:-}"
+if [[ -z "$host_name" ]]; then
+  host_name="$(hostname)"
+fi
+
+capture_day="$(printf '%(%Y/%m/%d)T' -1)"
+session_id="${host_name}-${tty_slug}-${started_at_ms}"
+session_dir="${capture_root}/${capture_day}/${session_id}"
+cast_path="${session_dir}/session.cast"
+start_cwd="$(pwd -P)"
+start_repo_root="$(find_repo_root "$start_cwd" || true)"
+start_project_root="$(guess_project_root "$start_cwd")"
+
+mkdir -p "$session_dir"
+
+export SINNIX_ASCIINEMA_ACTIVE=1
+export SINNIX_ASCIINEMA_FILE="$cast_path"
+export SINNIX_CAPTURE_SESSION_ID="$session_id"
+export SINNIX_CAPTURE_SESSION_DIR="$session_dir"
+export SINNIX_CAPTURE_SESSION_FILE="${session_dir}/session.json"
+export SINNIX_CAPTURE_EVENTS_FILE="${session_dir}/events.jsonl"
+export SINNIX_CAPTURE_STARTED_AT_MS="$started_at_ms"
+export SINNIX_CAPTURE_HOST="$host_name"
+export SINNIX_CAPTURE_USER="${USER:-}"
+export SINNIX_CAPTURE_TTY="$tty_path"
+export SINNIX_CAPTURE_TERMINAL="kitty"
+export SINNIX_CAPTURE_SHELL="$shell_bin"
+export SINNIX_CAPTURE_TERM_TYPE="${TERM:-}"
+export SINNIX_CAPTURE_START_CWD="$start_cwd"
+export SINNIX_CAPTURE_START_REPO_ROOT="$start_repo_root"
+export SINNIX_CAPTURE_PROJECT_ROOT="$start_project_root"
+
+rec_pid=""
+
+stop_recorder() {
+  local pid="${rec_pid:-}"
+
+  if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
+    return 0
+  fi
+
+  kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+
+  for _ in 1 2 3 4 5; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      return 0
+    fi
+    sleep 0.2
+  done
+
+  kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+}
+
+on_signal() {
+  local code="$1"
+  stop_recorder
+  exit "$code"
+}
+
+trap 'stop_recorder' EXIT
+trap 'on_signal 129' HUP
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
+
+setsid asciinema rec \
+  --stdin \
+  --quiet \
+  --return \
+  --output-format asciicast-v3 \
+  --capture-env SHELL,TERM,SINNIX_CAPTURE_SESSION_ID,SINNIX_CAPTURE_HOST,SINNIX_CAPTURE_USER,SINNIX_CAPTURE_TTY,SINNIX_CAPTURE_TERMINAL,SINNIX_CAPTURE_START_CWD,SINNIX_CAPTURE_START_REPO_ROOT,SINNIX_CAPTURE_PROJECT_ROOT \
+  --command "$shell_bin" \
+  "$cast_path" &
+rec_pid=$!
+
+wait "$rec_pid"
+status=$?
+rec_pid=""
+exit "$status"

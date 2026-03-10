@@ -13,6 +13,17 @@ let
     ;
   username = config.sinnix.user.name;
   primaryGroupName = config.users.users.${username}.group;
+
+  # Initrd scaffold: early-boot placeholders derived from persistence config
+  scaffoldCfg = config.sinnix.persistence.initrdScaffold;
+  scaffoldDirs = lib.unique (
+    scaffoldCfg.directories
+    ++ map builtins.dirOf scaffoldCfg.files
+  );
+  scaffoldCmds = lib.concatStringsSep "\n" (
+    map (d: "mkdir -p /btrfs_tmp/@${d}") scaffoldDirs
+    ++ map (f: "touch /btrfs_tmp/@${f}") scaffoldCfg.files
+  );
 in
 {
   services = {
@@ -76,6 +87,7 @@ in
       device = "/dev/disk/by-uuid/bd19092f-a195-47ab-9c0d-c923d1e5bfea";
       fsType = "btrfs";
       options = [
+        "compress=zstd"
         "relatime"
         "lazytime"
         "nofail"
@@ -160,31 +172,36 @@ in
     "ntfs"
   ];
 
-  # B8: initrd rollback — on every boot, snapshot current @ then restore from @blank.
-  # Guard: if @blank does not exist yet (before B7), boots normally with no rollback.
-  # Safety window: each pre-wipe state is snapshotted to @snapshots/root.boot.TIMESTAMP.
+  # Initrd rollback: on every boot, snapshot current @, then replace with a
+  # fresh empty subvolume. All persistent state lives in @persist and is
+  # bind-mounted back by impermanence; HM activation recreates config symlinks.
+  # Safety net: pre-wipe @ saved to .snapshots/root.TIMESTAMP (never auto-pruned).
   boot.initrd.postDeviceCommands = lib.mkAfter ''
     mkdir /btrfs_tmp
     mount -o subvol=/ /dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02 /btrfs_tmp
-    if btrfs subvolume show /btrfs_tmp/@blank > /dev/null 2>&1; then
-      SNAP_NAME="root.boot.$(date +%Y%m%dT%H%M%S)"
-      btrfs subvolume snapshot /btrfs_tmp/@ "/btrfs_tmp/@snapshots/$SNAP_NAME"
+    mkdir -p /btrfs_tmp/.snapshots
 
-      # Delete nested child subvolumes of @ before deleting @ itself.
-      # btrfs subvolume delete fails if the subvolume has nested children.
-      # Sort by path depth descending so children are deleted before parents.
-      btrfs subvolume list -o /btrfs_tmp/@ \
-        | awk '{print $NF}' \
-        | sort -r \
-        | while IFS= read -r child; do
-            btrfs subvolume delete "/btrfs_tmp/$child" 2>/dev/null || true
-          done
-      btrfs subvolume delete /btrfs_tmp/@
-      btrfs subvolume snapshot /btrfs_tmp/@blank /btrfs_tmp/@
-      echo "Rolled back @ from @blank (saved to @snapshots/$SNAP_NAME)"
-    else
-      echo "No @blank snapshot — skipping rollback (create it post-boot: B7)"
-    fi
+    # Save pre-wipe @ — never auto-pruned, manual cleanup only
+    SNAP_NAME="root.$(date +%Y%m%dT%H%M%S)"
+    btrfs subvolume snapshot /btrfs_tmp/@ "/btrfs_tmp/.snapshots/$SNAP_NAME"
+
+    # Delete nested child subvolumes of @ (required before deleting @)
+    btrfs subvolume list -o /btrfs_tmp/@ \
+      | awk '{print $NF}' \
+      | sort -r \
+      | while IFS= read -r child; do
+          btrfs subvolume delete "/btrfs_tmp/$child" 2>/dev/null || true
+        done
+    btrfs subvolume delete /btrfs_tmp/@
+
+    # Fresh empty root — impermanence and HM populate everything declaratively.
+    btrfs subvolume create /btrfs_tmp/@
+
+    # Scaffold: early-boot placeholders derived from sinnix.persistence.initrdScaffold.
+    ${scaffoldCmds}
+
+    echo "Rolled back @ (saved to .snapshots/$SNAP_NAME)"
+
     umount /btrfs_tmp
   '';
 }

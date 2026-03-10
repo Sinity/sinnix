@@ -19,6 +19,9 @@ mkFeatureModule {
       user,
       ...
     }:
+    let
+      repoRoot = config.sinnix.paths.projectRoot;
+    in
     {
       home-manager.users.${user} =
         {
@@ -41,6 +44,7 @@ mkFeatureModule {
           chromeStablePkg = pkgs.google-chrome.override {
             commandLineArgs = chromeArgs;
           };
+          browserLinkCmd = "${config.home.homeDirectory}/.local/bin/open-browser-link";
           mkDotsFile = mkDotsFileFor config;
           quteDots = rel: mkDotsFile ("/qutebrowser" + rel);
           mkUserScript = name: {
@@ -50,7 +54,7 @@ mkFeatureModule {
         {
           home = {
             sessionVariables = {
-              BROWSER = "google-chrome-stable";
+              BROWSER = browserLinkCmd;
             };
 
             packages = with pkgs; [
@@ -66,10 +70,15 @@ mkFeatureModule {
               ".local/share/qutebrowser/userscripts/archive-both" = mkUserScript "archive-both";
               ".local/share/qutebrowser/userscripts/raindrop-save" = mkUserScript "raindrop-save";
               ".local/share/qutebrowser/userscripts/research-capture" = mkUserScript "research-capture";
+              ".local/bin/open-browser-link" = {
+                source = config.lib.file.mkOutOfStoreSymlink "${repoRoot}/scripts/open-browser-link";
+                force = true;
+              };
             };
 
             activation."qutebrowser-userscripts-perms" = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
               for script in \
+                "$HOME/.local/bin/open-browser-link" \
                 "$HOME/.local/share/qutebrowser/userscripts/open-in-mpv" \
                 "$HOME/.local/share/qutebrowser/userscripts/open-in-mpv-audio" \
                 "$HOME/.local/share/qutebrowser/userscripts/yt-related" \
