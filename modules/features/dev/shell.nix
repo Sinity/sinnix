@@ -174,6 +174,7 @@ mkFeatureModule {
                 open = "xdg-open";
                 cl = "~/.local/bin/claude";
                 claude = "~/.local/bin/claude";
+                ct = "~/.local/bin/claude-team";
                 nvim = "nvim --listen /tmp/nvim-$$";
                 ccusage = "npx --yes ccusage@latest";
                 gemini = "~/.local/bin/gemini";
@@ -499,6 +500,14 @@ mkFeatureModule {
                   --output "$HOME/.codex/AGENTS.md"
               fi
             '';
+            home.activation.renderGlobalGeminiAgents = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+              mkdir -p "$HOME/.gemini"
+              if [ -f "$HOME/.config/claude/CLAUDE.md" ]; then
+                ${scriptPkgs.render-agents}/bin/render-agents \
+                  --input "$HOME/.config/claude/CLAUDE.md" \
+                  --output "$HOME/.gemini/GEMINI.md"
+              fi
+            '';
 
             # CLI wrappers
             home.file.".local/bin/claude" = {
@@ -521,62 +530,32 @@ mkFeatureModule {
               executable = true;
             };
 
+            home.file.".local/bin/claude-team" = {
+              text = ''
+                #!/usr/bin/env bash
+                # Launch Claude Code inside tmux for agent team split panes.
+                # If already in tmux, just runs claude directly (auto-detected).
+                set -euo pipefail
+
+                CLAUDE="$HOME/.local/bin/claude"
+
+                if [ -n "''${TMUX:-}" ]; then
+                  exec "$CLAUDE" "$@"
+                fi
+
+                # Outside tmux — start a named session running claude
+                printf -v claude_cmd '%q ' "$CLAUDE" "$@"
+                exec tmux new-session -s ct "$claude_cmd"
+              '';
+              executable = true;
+            };
+
             home.file.".local/bin/codex" = {
               text = ''
                 #!/usr/bin/env bash
                 set -euo pipefail
 
                 CODEX_BIN="${inputs.nix-ai-tools.packages.${pkgs.stdenv.hostPlatform.system}.codex}/bin/codex"
-                RENDER_AGENTS_BIN="${scriptPkgs.render-agents}/bin/render-agents"
-                if [ ! -x "$RENDER_AGENTS_BIN" ]; then
-                  RENDER_AGENTS_BIN="$(command -v render-agents 2>/dev/null || true)"
-                fi
-                render_instruction_tree() {
-                  local root="$1"
-                  local dir="$root"
-                  while :; do
-                    if [ -f "$dir/CLAUDE.md" ]; then
-                      if ! "$RENDER_AGENTS_BIN" --input "$dir/CLAUDE.md" --output "$dir/AGENTS.md"; then
-                        echo "warning: failed to render $dir/CLAUDE.md" >&2
-                      fi
-                    fi
-                    [ "$dir" = "/" ] && break
-                    dir="$(dirname "$dir")"
-                  done
-                }
-
-                if [ -z "''${SINNIX_SKIP_AGENTS_RENDER:-}" ] && [ -x "$RENDER_AGENTS_BIN" ]; then
-                  if [ -f "$HOME/.config/claude/CLAUDE.md" ]; then
-                    "$RENDER_AGENTS_BIN" \
-                      --input "$HOME/.config/claude/CLAUDE.md" \
-                      --output "$HOME/.codex/AGENTS.md" || echo "warning: failed to render global CLAUDE.md" >&2
-                  fi
-
-                  start_dir="$PWD"
-                  argv=("$@")
-                  i=0
-                  while [ "$i" -lt "''${#argv[@]}" ]; do
-                    arg="''${argv[$i]}"
-                    case "$arg" in
-                      -C|--cd)
-                        if [ "$((i + 1))" -lt "''${#argv[@]}" ]; then
-                          start_dir="''${argv[$((i + 1))]}"
-                          i=$((i + 2))
-                          continue
-                        fi
-                        ;;
-                      --cd=*)
-                        start_dir="''${arg#--cd=}"
-                        ;;
-                    esac
-                    i=$((i + 1))
-                  done
-
-                  if [ -d "$start_dir" ]; then
-                    start_dir="$(cd "$start_dir" && pwd -P)"
-                    render_instruction_tree "$start_dir"
-                  fi
-                fi
 
                 exec "$CODEX_BIN" "$@"
               '';
@@ -588,15 +567,7 @@ mkFeatureModule {
                 #!/usr/bin/env bash
                 set -euo pipefail
 
-                GEMINI_BIN="${inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.gemini}/bin/gemini"
-                RENDER_AGENTS_BIN="${scriptPkgs.render-agents}/bin/render-agents"
-
-                # Render CLAUDE.md → GEMINI.md for shared instructions
-                if [ -f "$HOME/.config/claude/CLAUDE.md" ] && [ -x "$RENDER_AGENTS_BIN" ]; then
-                  "$RENDER_AGENTS_BIN" \
-                    --input "$HOME/.config/claude/CLAUDE.md" \
-                    --output "$HOME/.gemini/GEMINI.md" 2>/dev/null || true
-                fi
+                GEMINI_BIN="${inputs.nix-ai-tools.packages.${pkgs.stdenv.hostPlatform.system}.gemini-cli}/bin/gemini"
 
                 exec "$GEMINI_BIN" "$@"
               '';

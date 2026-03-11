@@ -68,8 +68,6 @@ let
         "--single-instance"
         "--override"
         "font_size=22"
-        "sh"
-        "-lc"
         "$HOME/.local/bin/rawlog-loop"
       ];
       waitTries = 50;

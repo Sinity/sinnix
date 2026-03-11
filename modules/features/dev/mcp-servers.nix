@@ -77,8 +77,7 @@ mkFeatureModule {
         set -euo pipefail
         exec ${pkgs.playwright-mcp}/bin/playwright-mcp "$@"
       '';
-      # Optimized Gemini from the flake registry
-      geminiPkg = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.gemini;
+      geminiPkg = inputs.nix-ai-tools.packages.${pkgs.stdenv.hostPlatform.system}.gemini-cli;
     in
     {
       home-manager.users.${user} =

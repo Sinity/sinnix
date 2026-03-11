@@ -18,14 +18,11 @@ if tmux -S "$SOCKET_PATH" has-session -t="$SESSION_NAME" 2>/dev/null; then
   tmux -S "$SOCKET_PATH" attach-session -t "$SESSION_NAME"
 else
   # Create new session with Claude Code
-  tmux -S "$SOCKET_PATH" new-session -d -s "$SESSION_NAME" -c "$WORK_DIR"
+  tmux -S "$SOCKET_PATH" new-session -d -s "$SESSION_NAME" -c "$WORK_DIR" "claude --model haiku"
 
   # Set session options
   tmux -S "$SOCKET_PATH" set-option -t "$SESSION_NAME" remain-on-exit off
   tmux -S "$SOCKET_PATH" set-option -t "$SESSION_NAME" destroy-unattached off
-
-  # Launch Claude Code with Haiku model in the session
-  tmux -S "$SOCKET_PATH" send-keys -t "$SESSION_NAME" "claude --model haiku" C-m
 
   # Attach to the session
   tmux -S "$SOCKET_PATH" attach-session -t "$SESSION_NAME"

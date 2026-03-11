@@ -60,8 +60,35 @@ let
             message = "Claude wrapper must exist";
           }
           {
+            assertion = builtins.match ".*\\$\\*.*" (hm.home.file.".local/bin/claude-team".text or "") == null;
+            message = "Claude team wrapper must not flatten arguments via $*";
+          }
+          {
             assertion = hm.home.file ? ".local/bin/codex";
             message = "Codex wrapper must exist";
+          }
+          {
+            assertion = builtins.match ".*render-agents.*" (hm.home.file.".local/bin/codex".text or "") == null;
+            message = "Codex wrapper must not render AGENTS on every launch";
+          }
+          {
+            assertion = hm.home.file ? ".local/bin/gemini";
+            message = "Gemini wrapper must exist";
+          }
+          {
+            assertion = builtins.match ".*render-agents.*" (hm.home.file.".local/bin/gemini".text or "") == null;
+            message = "Gemini wrapper must not render instructions on every launch";
+          }
+          {
+            assertion =
+              let
+                geminiText = hm.home.file.".local/bin/gemini".text or "";
+              in
+              lib.hasInfix "GEMINI_BIN=" geminiText
+              && lib.hasInfix "/bin/gemini" geminiText
+              && builtins.match ".*npx.*" geminiText == null
+              && builtins.match ".*bundle/index\\.js.*" geminiText == null;
+            message = "Gemini wrapper must launch the packaged binary directly";
           }
           {
             assertion = hm.xdg.configFile ? "claude/skills";
@@ -70,6 +97,10 @@ let
           {
             assertion = hm.home.activation ? renderGlobalCodexAgents;
             message = "Global Codex AGENTS render activation must exist";
+          }
+          {
+            assertion = hm.home.activation ? renderGlobalGeminiAgents;
+            message = "Global Gemini instruction render activation must exist";
           }
         ];
     })
@@ -110,6 +141,10 @@ let
           {
             assertion = hm.home.file ? ".codex/skills";
             message = "Codex skills must be linked from the dedicated dots/codex/skills tree";
+          }
+          {
+            assertion = builtins.match ".*zsh -lc.*" (builtins.readFile ../dots/codex/skills/agent-orchestration/scripts/launch_agent_tabs.sh) == null;
+            message = "Agent launcher must not wrap kitty launches in zsh -lc";
           }
         ];
     })
@@ -161,6 +196,31 @@ let
           {
             assertion = hm.programs.kitty.settings.allow_remote_control == "socket-only";
             message = "Kitty remote control must stay socket-only";
+          }
+        ];
+    })
+
+    (mkFeatureTest {
+      name = "desktop-browser";
+      feature = "sinnix.features.desktop.browser.enable";
+      assertions =
+        config:
+        let
+          hm = hmFor config;
+          quteConfig = builtins.readFile ../dots/qutebrowser/config.py;
+        in
+        [
+          {
+            assertion = hm.xdg.configFile ? "qutebrowser/config.py";
+            message = "Qutebrowser config must be linked";
+          }
+          {
+            assertion = builtins.match ".*configfiles\\.read_autoconfig.*" quteConfig == null;
+            message = "Qutebrowser config must target the pinned modern API directly";
+          }
+          {
+            assertion = builtins.match ".*except Exception:.*" quteConfig == null;
+            message = "Qutebrowser config must not silently swallow broad exceptions";
           }
         ];
     })
@@ -325,6 +385,10 @@ let
         {
           assertion = lib.hasInfix "sinnix-terminal-capture-hooks.zsh" (hmFor config).programs.zsh.initContent;
           message = "The zsh init path must source the terminal capture hooks";
+        }
+        {
+          assertion = builtins.match ".*SUCCESS_BACKOFF_SECONDS.*sleep.*" (builtins.readFile ../scripts/rawlog-loop) != null;
+          message = "rawlog-loop must back off after fast success exits";
         }
       ];
     })
@@ -872,10 +936,125 @@ in
 
           touch "$out"
         '';
+      terminalCaptureRuntimeFailure = pkgs.runCommand "sinnix-terminal-capture-runtime-failure-check"
+        {
+          nativeBuildInputs = [
+            pkgs.asciinema_3
+            pkgs.coreutils
+            pkgs.findutils
+            pkgs.gnugrep
+            pkgs.jq
+            pkgs.util-linux
+            pkgs.zsh
+          ];
+        }
+        ''
+          export HOME="$TMPDIR/home"
+          mkdir -p "$HOME" "$TMPDIR/captures" "$TMPDIR/bin"
+
+          cat > "$TMPDIR/bin/asciinema" <<'EOF'
+          #!${pkgs.bash}/bin/bash
+          set -euo pipefail
+
+          command_path=""
+          output_path=""
+
+          while (($#)); do
+            case "$1" in
+              rec)
+                shift
+                ;;
+              --command)
+                command_path="$2"
+                shift 2
+                ;;
+              --*)
+                if (($# >= 2)) && [[ "$2" != --* ]]; then
+                  shift 2
+                else
+                  shift
+                fi
+                ;;
+              *)
+                output_path="$1"
+                shift
+                ;;
+            esac
+          done
+
+          test -n "$command_path"
+          test -n "$output_path"
+          mkdir -p "$(dirname "$output_path")"
+          printf '{"version": 3, "width": 80, "height": 24, "timestamp": 0}\n' > "$output_path"
+          "$command_path"
+          exit 42
+          EOF
+          chmod +x "$TMPDIR/bin/asciinema"
+
+          cat > "$TMPDIR/fake-shell.zsh" <<'EOF'
+          #!${pkgs.zsh}/bin/zsh
+          set -eu
+          source ${../scripts/sinnix-terminal-capture-hooks.zsh}
+          true
+          exit 0
+          EOF
+          chmod +x "$TMPDIR/fake-shell.zsh"
+
+          export PATH="$TMPDIR/bin:${lib.makeBinPath [
+            pkgs.coreutils
+            pkgs.findutils
+            pkgs.gnugrep
+            pkgs.jq
+            pkgs.util-linux
+            pkgs.zsh
+          ]}:$PATH"
+
+          set +e
+          script -qfec "env \
+            HOME='$HOME' \
+            HOSTNAME='terminal-capture-test' \
+            KITTY_PID='4242' \
+            SHELL='$TMPDIR/fake-shell.zsh' \
+            SINNIX_CAPTURE_ROOT='$TMPDIR/captures' \
+            TERM='xterm-kitty' \
+            USER='tester' \
+            ${pkgs.bash}/bin/bash ${../scripts/sinnix-captured-shell}" /dev/null
+          status=$?
+          set -e
+
+          test "$status" -eq 42
+
+          session_json="$(find "$TMPDIR/captures" -type f -name session.json | sed -n '1p')"
+          events_json="$(find "$TMPDIR/captures" -type f -name events.jsonl | sed -n '1p')"
+          cast_file="$(find "$TMPDIR/captures" -type f -name session.cast | sed -n '1p')"
+
+          test -n "$session_json"
+          test -n "$events_json"
+          test -n "$cast_file"
+
+          jq -e '
+            .schema == "terminal-session-v1" and
+            .exit_reason == "shell_exit" and
+            .exit_code == 0 and
+            .recorder_exit_code == 42 and
+            .cleanup_escalated == false and
+            .command_count >= 1 and
+            .event_count == 4
+          ' "$session_json" >/dev/null
+
+          jq -s -e '
+            length == 4 and
+            .[0].type == "session_start" and
+            .[-1].type == "session_end"
+          ' "$events_json" >/dev/null
+
+          touch "$out"
+        '';
     in
     {
       checks = (mkSystemChecks system testSpecs) // {
         terminal-capture-runtime = terminalCaptureRuntime;
+        terminal-capture-runtime-failure = terminalCaptureRuntimeFailure;
       };
     };
 }

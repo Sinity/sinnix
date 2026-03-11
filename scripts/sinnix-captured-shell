@@ -9,6 +9,36 @@ fi
 capture_root="${SINNIX_CAPTURE_ROOT:-/realm/data/captures/asciinema}"
 capture_disabled="${SINNIX_CAPTURE_DISABLE:-}"
 
+json_escape() {
+  local value="${1:-}"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\t'/\\t}"
+  printf '%s' "$value"
+}
+
+json_string() {
+  printf '"%s"' "$(json_escape "${1:-}")"
+}
+
+json_nullable_string() {
+  if [[ -n "${1:-}" ]]; then
+    json_string "$1"
+  else
+    printf 'null'
+  fi
+}
+
+json_nullable_int() {
+  if [[ -n "${1:-}" ]]; then
+    printf '%s' "$1"
+  else
+    printf 'null'
+  fi
+}
+
 now_ms() {
   local raw="${EPOCHREALTIME:-}"
 
@@ -154,6 +184,45 @@ export SINNIX_CAPTURE_START_REPO_COMMIT="$start_repo_commit"
 export SINNIX_CAPTURE_START_REPO_DIRTY="$start_repo_dirty"
 export SINNIX_CAPTURE_PROJECT_ROOT="$start_project_root"
 
+{
+  printf '{\n'
+  printf '  "schema": %s,\n' "$(json_string "terminal-session-v1")"
+  printf '  "schema_generation": %s,\n' "$(json_string "terminal-session-v1")"
+  printf '  "session_id": %s,\n' "$(json_nullable_string "$session_id")"
+  printf '  "cast_path": %s,\n' "$(json_nullable_string "$cast_path")"
+  printf '  "events_path": %s,\n' "$(json_nullable_string "${session_dir}/events.jsonl")"
+  printf '  "host": %s,\n' "$(json_nullable_string "$host_name")"
+  printf '  "user": %s,\n' "$(json_nullable_string "${USER:-}")"
+  printf '  "tty": %s,\n' "$(json_nullable_string "$tty_path")"
+  printf '  "terminal": %s,\n' "$(json_string "kitty")"
+  printf '  "shell": %s,\n' "$(json_nullable_string "$shell_bin")"
+  printf '  "term_type": %s,\n' "$(json_nullable_string "${TERM:-}")"
+  printf '  "start_cwd": %s,\n' "$(json_nullable_string "$start_cwd")"
+  printf '  "final_cwd": null,\n'
+  printf '  "project_root": %s,\n' "$(json_nullable_string "$start_project_root")"
+  printf '  "final_project_root": null,\n'
+  printf '  "repo_root": %s,\n' "$(json_nullable_string "$start_repo_root")"
+  printf '  "final_repo_root": null,\n'
+  printf '  "repo_branch": %s,\n' "$(json_nullable_string "$start_repo_branch")"
+  printf '  "final_repo_branch": null,\n'
+  printf '  "repo_commit": %s,\n' "$(json_nullable_string "$start_repo_commit")"
+  printf '  "final_repo_commit": null,\n'
+  printf '  "repo_dirty": %s,\n' "$(json_nullable_string "$start_repo_dirty")"
+  printf '  "final_repo_dirty": null,\n'
+  printf '  "started_at_ms": %s,\n' "$(json_nullable_int "$started_at_ms")"
+  printf '  "finished_at_ms": null,\n'
+  printf '  "duration_ms": null,\n'
+  printf '  "active_ms": 0,\n'
+  printf '  "idle_ms": 0,\n'
+  printf '  "command_count": 0,\n'
+  printf '  "event_count": 0,\n'
+  printf '  "exit_code": null,\n'
+  printf '  "exit_reason": %s,\n' "$(json_string "recorder_starting")"
+  printf '  "recorder_exit_code": null,\n'
+  printf '  "cleanup_escalated": false\n'
+  printf '}\n'
+} > "${session_dir}/session.json"
+
 rec_pid=""
 cleanup_escalated=false
 
@@ -215,8 +284,11 @@ setsid asciinema rec \
   "$cast_path" &
 rec_pid=$!
 
-wait "$rec_pid"
-status=$?
+if wait "$rec_pid"; then
+  status=0
+else
+  status=$?
+fi
 rec_pid=""
 update_session_file "$status"
 exit "$status"

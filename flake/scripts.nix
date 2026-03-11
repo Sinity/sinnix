@@ -249,14 +249,6 @@ let
         borgbackup
       ];
     };
-
-    # AI Tools
-    gemini = mkScript "gemini" {
-      description = "Gemini CLI optimized launch";
-      runtimeInputs = with pkgs; [ nodejs ];
-      # Note: We use the bundle path directly for speed, as it's pre-installed
-      # or managed by nodePackages in the flake.
-    };
   };
 in
 {

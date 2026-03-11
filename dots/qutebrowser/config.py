@@ -1,5 +1,6 @@
 import datetime
 import json
+import logging
 import os
 import socket
 import time
@@ -19,31 +20,13 @@ except NameError:  # pragma: no cover - fallback for linting/tests
 
     config = _config_stub
 
-try:
-    config.load_autoconfig(False)
-except AttributeError:
-    from qutebrowser.config import configfiles
-
-    configfiles.read_autoconfig()
-
-try:
-    c = config.config  # old API
-except AttributeError:
-    c = config  # new ConfigAPI provides what we need directly
+config.load_autoconfig(False)
+c = config
+LOGGER = logging.getLogger("sinnix.qutebrowser")
 
 
 def _set(key: str, value):
-    # Prefer the modern setter; fall back to attribute walks for older builds.
-    try:
-        config.set(key, value)
-        return
-    except Exception:
-        pass
-    target = c
-    parts = key.split(".")
-    for part in parts[:-1]:
-        target = getattr(target, part)
-    setattr(target, parts[-1], value)
+    config.set(key, value)
 
 
 # Core browsing behaviour -------------------------------------------------- #
@@ -265,8 +248,8 @@ def _dedupe(win_id: int) -> None:
             continue
         try:
             tabbed.close_tab(tab, add_undo=False, new_undo=False)
-        except Exception:
-            pass
+        except RuntimeError as exc:
+            LOGGER.warning("Failed to close duplicate qutebrowser tab: %s", exc)
 
 
 def _enforce_tab_limit(win_id: int) -> None:
@@ -293,8 +276,8 @@ def _enforce_tab_limit(win_id: int) -> None:
         try:
             tabbed.close_tab(tab, add_undo=False, new_undo=False)
             to_close -= 1
-        except Exception:
-            continue
+        except RuntimeError as exc:
+            LOGGER.warning("Failed to close qutebrowser tab during limit enforcement: %s", exc)
 
 
 def _on_current_tab_changed(tab) -> None:
@@ -353,8 +336,8 @@ def _aw_request(method: str, path: str, payload: Optional[dict] = None) -> None:
     )
     try:
         urllib.request.urlopen(req, timeout=1.0)
-    except (urllib.error.URLError, TimeoutError):
-        pass
+    except (urllib.error.URLError, TimeoutError) as exc:
+        LOGGER.warning("ActivityWatch request failed for %s %s: %s", method.upper(), path, exc)
 
 
 def _ensure_aw_bucket() -> None:

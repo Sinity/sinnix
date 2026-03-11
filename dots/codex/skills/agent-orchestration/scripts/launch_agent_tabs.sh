@@ -171,6 +171,14 @@ fi
 
 mkdir -p "${output_dir}"
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+runner="${script_dir}/run_agent_prompt.sh"
+
+if [[ ! -x ${runner} ]]; then
+  echo "runner helper is not executable: ${runner}" >&2
+  exit 1
+fi
+
 if [[ ${mode} == "kitty" ]]; then
   if ! command -v kitty >/dev/null 2>&1; then
     echo "kitty not found on PATH for --mode kitty" >&2
@@ -194,101 +202,47 @@ run_batch_agent() {
     return 1
   fi
 
-  local -a cmd
+  local -a cmd=(
+    "${runner}"
+    --agent "${agent}"
+    --workdir "${workdir}"
+    --prompt-file "${prompt_file}"
+    --log-file "${log_file}"
+  )
 
-  case "${agent}" in
-  codex)
-    cmd=(codex exec -C "${workdir}" --model "${model}" --output-last-message "${last_file}")
-    if [[ -n ${reasoning_effort} ]]; then
-      cmd+=(-c "model_reasoning_effort=\"${reasoning_effort}\"")
-    fi
-    if [[ -n ${schema_file} ]]; then
-      cmd+=(--output-schema "${schema_file}")
-    fi
-    if [[ ${ephemeral} -eq 1 ]]; then
-      cmd+=(--ephemeral)
-    fi
-    if [[ ${json_mode} -eq 1 ]]; then
-      cmd+=(--json)
-    fi
-    cmd+=(-)
-    ;;
-  claude)
-    cmd=(claude --print -p)
-    # Claude reads prompt as argument, not stdin
-    ;;
-  gemini)
-    cmd=(gemini)
-    ;;
-  *)
-    echo "unknown agent: ${agent}" >&2
-    return 2
-    ;;
-  esac
+  if [[ -n ${json_file} ]]; then
+    cmd+=(--json-file "${json_file}")
+  fi
+  if [[ -n ${last_file} ]]; then
+    cmd+=(--last-file "${last_file}")
+  fi
+  if [[ -n ${model} ]]; then
+    cmd+=(--model "${model}")
+  fi
+  if [[ -n ${reasoning_effort} ]]; then
+    cmd+=(--reasoning-effort "${reasoning_effort}")
+  fi
+  if [[ -n ${schema_file} ]]; then
+    cmd+=(--schema-file "${schema_file}")
+  fi
+  if [[ ${json_mode} -eq 1 ]]; then
+    cmd+=(--json)
+  fi
+  if [[ ${skip_agents_render} -eq 1 ]]; then
+    cmd+=(--skip-agents-render)
+  fi
+  if [[ ${ephemeral} -eq 1 ]]; then
+    cmd+=(--ephemeral)
+  fi
 
   if [[ ${dry_run} -eq 1 ]]; then
     printf 'DRY-RUN (%s): ' "${prompt_name}"
-    if [[ ${skip_agents_render} -eq 1 ]]; then
-      printf 'SINNIX_SKIP_AGENTS_RENDER=1 '
-    fi
-    if [[ ${agent} == "claude" ]]; then
-      printf 'claude --print -p "$(cat %s)" --workdir %s' "${prompt_file}" "${workdir}"
-    else
-      printf '%q ' "${cmd[@]}"
-      echo -n "< ${prompt_file}"
-    fi
-    echo " > ${log_file}"
+    printf '%q ' "${cmd[@]}"
+    echo
     return 0
   fi
 
-  if [[ ${agent} == "claude" ]]; then
-    # Claude: read prompt file and pass via -p argument
-    local prompt_text
-    prompt_text="$(cat "${prompt_file}")"
-    if [[ ${json_mode} -eq 1 ]]; then
-      if [[ ${skip_agents_render} -eq 1 ]]; then
-        SINNIX_SKIP_AGENTS_RENDER=1 claude --print -p "$prompt_text" --workdir "${workdir}" >"${json_file}" 2>"${log_file}"
-      else
-        claude --print -p "$prompt_text" --workdir "${workdir}" >"${json_file}" 2>"${log_file}"
-      fi
-    else
-      if [[ ${skip_agents_render} -eq 1 ]]; then
-        SINNIX_SKIP_AGENTS_RENDER=1 claude --print -p "$prompt_text" --workdir "${workdir}" >"${log_file}" 2>&1
-      else
-        claude --print -p "$prompt_text" --workdir "${workdir}" >"${log_file}" 2>&1
-      fi
-    fi
-  elif [[ ${agent} == "gemini" ]]; then
-    # Gemini: read prompt from stdin
-    if [[ ${json_mode} -eq 1 ]]; then
-      if [[ ${skip_agents_render} -eq 1 ]]; then
-        SINNIX_SKIP_AGENTS_RENDER=1 gemini <"${prompt_file}" >"${json_file}" 2>"${log_file}"
-      else
-        gemini <"${prompt_file}" >"${json_file}" 2>"${log_file}"
-      fi
-    else
-      if [[ ${skip_agents_render} -eq 1 ]]; then
-        SINNIX_SKIP_AGENTS_RENDER=1 gemini <"${prompt_file}" >"${log_file}" 2>&1
-      else
-        gemini <"${prompt_file}" >"${log_file}" 2>&1
-      fi
-    fi
-  else
-    # Codex: read prompt from stdin
-    if [[ ${json_mode} -eq 1 ]]; then
-      if [[ ${skip_agents_render} -eq 1 ]]; then
-        SINNIX_SKIP_AGENTS_RENDER=1 "${cmd[@]}" <"${prompt_file}" >"${json_file}" 2>"${log_file}"
-      else
-        "${cmd[@]}" <"${prompt_file}" >"${json_file}" 2>"${log_file}"
-      fi
-    else
-      if [[ ${skip_agents_render} -eq 1 ]]; then
-        SINNIX_SKIP_AGENTS_RENDER=1 "${cmd[@]}" <"${prompt_file}" >"${log_file}" 2>&1
-      else
-        "${cmd[@]}" <"${prompt_file}" >"${log_file}" 2>&1
-      fi
-    fi
-  fi
+  "${cmd[@]}"
 }
 
 run_kitty_agent() {
@@ -303,65 +257,43 @@ run_kitty_agent() {
     return 1
   fi
 
-  local -a agent_cmd
-  local launch_cmd
-  local env_prefix=""
+  local -a launch_cmd=(
+    "${runner}"
+    --agent "${agent}"
+    --workdir "${workdir}"
+    --prompt-file "${prompt_file}"
+    --log-file "${log_file}"
+  )
 
+  if [[ -n ${json_file} ]]; then
+    launch_cmd+=(--json-file "${json_file}")
+  fi
+  if [[ -n ${last_file} ]]; then
+    launch_cmd+=(--last-file "${last_file}")
+  fi
+  if [[ -n ${model} ]]; then
+    launch_cmd+=(--model "${model}")
+  fi
+  if [[ -n ${reasoning_effort} ]]; then
+    launch_cmd+=(--reasoning-effort "${reasoning_effort}")
+  fi
+  if [[ -n ${schema_file} ]]; then
+    launch_cmd+=(--schema-file "${schema_file}")
+  fi
+  if [[ ${json_mode} -eq 1 ]]; then
+    launch_cmd+=(--json)
+  fi
   if [[ ${skip_agents_render} -eq 1 ]]; then
-    env_prefix='SINNIX_SKIP_AGENTS_RENDER=1 '
+    launch_cmd+=(--skip-agents-render)
+  fi
+  if [[ ${ephemeral} -eq 1 ]]; then
+    launch_cmd+=(--ephemeral)
   fi
 
-  case "${agent}" in
-  codex)
-    agent_cmd=(codex exec -C "${workdir}" --model "${model}" --output-last-message "${last_file}")
-    if [[ -n ${reasoning_effort} ]]; then
-      agent_cmd+=(-c "model_reasoning_effort=\"${reasoning_effort}\"")
-    fi
-    if [[ -n ${schema_file} ]]; then
-      agent_cmd+=(--output-schema "${schema_file}")
-    fi
-    if [[ ${ephemeral} -eq 1 ]]; then
-      agent_cmd+=(--ephemeral)
-    fi
-    if [[ ${json_mode} -eq 1 ]]; then
-      agent_cmd+=(--json)
-    fi
-    agent_cmd+=(-)
-    local cmd_q
-    printf -v cmd_q '%q ' "${agent_cmd[@]}"
-    if [[ ${json_mode} -eq 1 ]]; then
-      printf -v launch_cmd 'cat %q | %s%s >%q 2>%q' "${prompt_file}" "${env_prefix}" "${cmd_q}" "${json_file}" "${log_file}"
-    else
-      printf -v launch_cmd 'cat %q | %s%s >%q 2>&1' "${prompt_file}" "${env_prefix}" "${cmd_q}" "${log_file}"
-    fi
-    ;;
-  claude)
-    local prompt_text
-    prompt_text="$(cat "${prompt_file}")"
-    # Escape for shell
-    local prompt_escaped
-    printf -v prompt_escaped '%q' "$prompt_text"
-    if [[ ${json_mode} -eq 1 ]]; then
-      printf -v launch_cmd '%sclaude --print -p %s --workdir %q >%q 2>%q' "${env_prefix}" "${prompt_escaped}" "${workdir}" "${json_file}" "${log_file}"
-    else
-      printf -v launch_cmd '%sclaude --print -p %s --workdir %q >%q 2>&1' "${env_prefix}" "${prompt_escaped}" "${workdir}" "${log_file}"
-    fi
-    ;;
-  gemini)
-    if [[ ${json_mode} -eq 1 ]]; then
-      printf -v launch_cmd 'cat %q | %sgemini >%q 2>%q' "${prompt_file}" "${env_prefix}" "${json_file}" "${log_file}"
-    else
-      printf -v launch_cmd 'cat %q | %sgemini >%q 2>&1' "${prompt_file}" "${env_prefix}" "${log_file}"
-    fi
-    ;;
-  *)
-    echo "unknown agent: ${agent}" >&2
-    return 2
-    ;;
-  esac
-
   if [[ ${dry_run} -eq 1 ]]; then
-    echo "DRY-RUN (${prompt_name}): kitty @ launch --type=${launch_type} --tab-title ${prompt_name} --cwd ${workdir} -- zsh -lc ${launch_cmd}"
+    printf 'DRY-RUN (%s): kitty @ launch --type=%s --tab-title %q --cwd %q -- ' "${prompt_name}" "${launch_type}" "${prompt_name}" "${workdir}"
+    printf '%q ' "${launch_cmd[@]}"
+    echo
     return 0
   fi
 
@@ -369,7 +301,7 @@ run_kitty_agent() {
     --type="${launch_type}" \
     --tab-title "${prompt_name}" \
     --cwd "${workdir}" \
-    -- zsh -lc "${launch_cmd}"
+    -- "${launch_cmd[@]}"
 }
 
 # Special handling for codex with spark model

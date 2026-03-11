@@ -75,7 +75,7 @@ in
 
     "SUPER SHIFT, P, pin"
 
-    "SUPER, C, exec, ${pkgs.bash}/bin/bash -lc 'command -v code >/dev/null && code --reuse-window || codium --reuse-window'"
+    "SUPER, C, exec, ${script "open-code-editor"}"
     "SUPER, B, exec, qutebrowser --target window"
     "SUPER SHIFT, B, exec, qutebrowser --target window"
     "SUPER, G, togglegroup"
