@@ -1,0 +1,8 @@
+{
+  "name": "firecrawl-mcp-wrapper",
+  "private": true,
+  "version": "0.0.0",
+  "dependencies": {
+    "firecrawl-mcp": "3.10.3"
+  }
+}

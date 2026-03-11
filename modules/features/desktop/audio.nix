@@ -56,6 +56,25 @@ mkFeatureModule {
               "bluetooth.autoswitch-to-headset-profile" = false;
               "bluetooth.use-persistent-storage" = true;
             };
+            "12-preferred-xm4-output" = {
+              "monitor.bluez.rules" = [
+                {
+                  matches = [
+                    {
+                      # Prefer the WH-1000XM4 over permanently attached desktop sinks
+                      # whenever its A2DP output node appears.
+                      "node.name" = "~bluez_output.*AC_80_0A_D4_08_48.*";
+                    }
+                  ];
+                  actions = {
+                    update-props = {
+                      "priority.driver" = 2100;
+                      "priority.session" = 2100;
+                    };
+                  };
+                }
+              ];
+            };
           };
         };
       };

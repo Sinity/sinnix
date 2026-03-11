@@ -148,7 +148,7 @@ except json.JSONDecodeError:
 try:
     ratio_w = float(sys.argv[1])
     ratio_h = float(sys.argv[2])
-except Exception:
+except ValueError:
     sys.exit(0)
 focused = next((m for m in monitors if m.get("focused")), None)
 if not focused:

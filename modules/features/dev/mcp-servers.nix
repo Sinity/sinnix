@@ -58,20 +58,16 @@ mkFeatureModule {
           ''
         else
           "";
-      context7McpVersion = "2.1.3";
-      firecrawlMcpVersion = "3.10.3";
+      mcpContext7Pkg = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.mcp-context7;
+      mcpFirecrawlPkg = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.mcp-firecrawl;
       mcpContext7Bin = pkgs.writeShellScriptBin "mcp-context7" ''
         set -euo pipefail
-        exec ${pkgs.nodejs}/bin/npm exec --yes \
-          --package=@upstash/context7-mcp@${context7McpVersion} \
-          -- context7-mcp "$@"
+        exec ${mcpContext7Pkg}/bin/mcp-context7 "$@"
       '';
       mcpFirecrawlBin = pkgs.writeShellScriptBin "mcp-firecrawl" ''
         set -euo pipefail
         ${firecrawlSecretExport}
-        exec ${pkgs.nodejs}/bin/npm exec --yes \
-          --package=firecrawl-mcp@${firecrawlMcpVersion} \
-          -- firecrawl-mcp "$@"
+        exec ${mcpFirecrawlPkg}/bin/mcp-firecrawl "$@"
       '';
       mcpPlaywrightBin = pkgs.writeShellScriptBin "mcp-playwright" ''
         set -euo pipefail

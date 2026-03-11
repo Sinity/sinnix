@@ -30,6 +30,7 @@ typeset -g SINNIX_CAPTURE_LAST_COMMAND_MS=""
 
 _sinnix_capture_now_ms() {
   local raw="${EPOCHREALTIME:-0}"
+  raw="${raw//,/.}"
   local sec="${raw%%.*}"
   local frac="${raw#*.}"
 

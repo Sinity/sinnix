@@ -23,6 +23,9 @@ mkFeatureModule {
 
           programs.kitty = {
             enable = true;
+            # Keep Kitty's shell helpers, but turn off the prompt/title/cursor
+            # subfeatures that collide with the custom zsh prompt pipeline.
+            shellIntegration.mode = "no-prompt-mark no-title no-cursor";
             settings = {
               background = lib.mkForce "#000000";
               background_opacity = lib.mkForce "1.0";
@@ -52,8 +55,6 @@ mkFeatureModule {
               map ctrl+shift+f12 debug_config
 
               map ctrl+shift+enter launch --type=tab --cwd=current
-
-              shell_integration enabled
             '';
           };
         };

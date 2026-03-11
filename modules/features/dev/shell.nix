@@ -145,6 +145,7 @@ mkFeatureModule {
                   }
 
                   stty -ixon
+                  unsetopt prompt_sp
 
                   update_terminal_title() {
                     local last_cmd="$1"
@@ -176,7 +177,7 @@ mkFeatureModule {
                 claude = "~/.local/bin/claude";
                 ct = "~/.local/bin/claude-team";
                 nvim = "nvim --listen /tmp/nvim-$$";
-                ccusage = "npx --yes ccusage@latest";
+                ccusage = "ccusage";
                 gemini = "~/.local/bin/gemini";
                 marimo-edit = "marimo edit --mcp";
                 marimo-edit-remote = "marimo edit --mcp --host 127.0.0.1 --port 2718";
@@ -443,6 +444,7 @@ mkFeatureModule {
               ])
               ++ [
                 findFlakeRoot
+                scriptPkgs.ccusage
                 scriptPkgs.lsp-root
                 scriptPkgs.render-agents
                 scriptPkgs.normalize-agent-projects

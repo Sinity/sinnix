@@ -29,19 +29,6 @@ let
       doCheck = false;
     });
 
-    # Fix marimo build on nixpkgs 2fc6539+:
-    # 1. uv-build.patch applied in reverse (source already has the change)
-    # 2. uv-build 0.10.0 exceeds <0.10.0 constraint in source
-    # 3. msgspec missing from nixpkgs dependency list (new dep in 0.19.4)
-    marimo = super.marimo.overridePythonAttrs (old: {
-      patches = [ ];
-      postPatch = (old.postPatch or "") + ''
-        substituteInPlace pyproject.toml \
-          --replace-fail 'requires = ["uv_build>=0.8.3,<0.10.0"]' \
-                         'requires = ["uv_build>=0.8.3,<0.11.0"]'
-      '';
-      dependencies = (old.dependencies or [ ]) ++ [ super.msgspec ];
-    });
   };
 
   # Override the interpreter so python3.withPackages uses patched packages

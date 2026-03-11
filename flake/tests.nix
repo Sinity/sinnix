@@ -102,6 +102,14 @@ let
             assertion = hm.home.activation ? renderGlobalGeminiAgents;
             message = "Global Gemini instruction render activation must exist";
           }
+          {
+            assertion = hm.programs.zsh.shellAliases.ccusage == "ccusage";
+            message = "ccusage alias must resolve to the packaged CLI";
+          }
+          {
+            assertion = lib.hasInfix "unsetopt prompt_sp" hm.programs.zsh.initContent;
+            message = "Zsh init must disable PROMPT_SP to avoid stray partial-line prompt markers";
+          }
         ];
     })
 
@@ -146,6 +154,16 @@ let
             assertion = builtins.match ".*zsh -lc.*" (builtins.readFile ../dots/codex/skills/agent-orchestration/scripts/launch_agent_tabs.sh) == null;
             message = "Agent launcher must not wrap kitty launches in zsh -lc";
           }
+          {
+            assertion =
+              let
+                context7Source = hm.home.file.".local/bin/mcp-context7".source or "";
+                firecrawlSource = hm.home.file.".local/bin/mcp-firecrawl".source or "";
+              in
+              lib.hasInfix "/bin/mcp-context7" context7Source
+              && lib.hasInfix "/bin/mcp-firecrawl" firecrawlSource;
+            message = "MCP wrappers must launch packaged servers directly";
+          }
         ];
     })
 
@@ -173,6 +191,36 @@ let
     })
 
     (mkFeatureTest {
+      name = "desktop-audio";
+      feature = "sinnix.features.desktop.audio.enable";
+      assertions =
+        config:
+        let
+          wireplumber = config.services.pipewire.wireplumber.extraConfig;
+          xm4Rules = wireplumber."12-preferred-xm4-output"."monitor.bluez.rules" or [ ];
+          isXm4Rule =
+            rule:
+            (builtins.elemAt (rule.matches or [ ]) 0)."node.name" or null == "~bluez_output.*AC_80_0A_D4_08_48.*"
+            && (rule.actions.update-props."priority.session" or null) == 2100
+            && (rule.actions.update-props."priority.driver" or null) == 2100;
+        in
+        [
+          {
+            assertion = config.services.pipewire.enable or false;
+            message = "Desktop audio must enable PipeWire";
+          }
+          {
+            assertion = config.services.pipewire.wireplumber.enable or false;
+            message = "Desktop audio must enable WirePlumber";
+          }
+          {
+            assertion = builtins.any isXm4Rule xm4Rules;
+            message = "WH-1000XM4 must be preferred as the default Bluetooth sink when it appears";
+          }
+        ];
+    })
+
+    (mkFeatureTest {
       name = "desktop-terminal";
       feature = "sinnix.features.desktop.terminal.enable";
       assertions =
@@ -196,6 +244,10 @@ let
           {
             assertion = hm.programs.kitty.settings.allow_remote_control == "socket-only";
             message = "Kitty remote control must stay socket-only";
+          }
+          {
+            assertion = hm.programs.kitty.shellIntegration.mode == "no-rc no-prompt-mark no-title no-cursor";
+            message = "Kitty shell integration must disable prompt/title/cursor features that interfere with the custom zsh prompt";
           }
         ];
     })
@@ -504,6 +556,42 @@ let
           {
             assertion = !(config.services.transmission.enable or false);
             message = "Transmission should not be enabled in minimal";
+          }
+        ];
+    }
+
+    {
+      name = "desktop-bluetooth-persistence";
+      modules = [
+        mountTmpfsRoots
+        baseTestConfig
+        (
+          { ... }:
+          {
+            networking.hostName = "desktop-bluetooth-persistence";
+            sinnix.machine.isDesktop = true;
+            sinnix.persistence.enable = true;
+          }
+        )
+      ];
+      assertions =
+        config:
+        let
+          isBluetoothDir =
+            entry:
+            if builtins.isAttrs entry then
+              (entry.directory or null) == "/var/lib/bluetooth"
+            else
+              entry == "/var/lib/bluetooth";
+        in
+        [
+          {
+            assertion = config.hardware.bluetooth.enable or false;
+            message = "Desktop hosts must enable Bluetooth support";
+          }
+          {
+            assertion = builtins.any isBluetoothDir config.sinnix.persistence.system.directories;
+            message = "Bluetooth state must be persisted under /var/lib/bluetooth";
           }
         ];
     }
@@ -861,12 +949,16 @@ in
           #!${pkgs.zsh}/bin/zsh
           set -eu
           source ${../scripts/sinnix-terminal-capture-hooks.zsh}
+          print -r -- "terminal-capture-ready"
           true
           exit 0
           EOF
           chmod +x "$TMPDIR/fake-shell.zsh"
 
+          transcript="$TMPDIR/terminal-capture-runtime.typescript"
+
           script -qfec "env \
+            EPOCHREALTIME='1773285652,647035000' \
             HOME='$HOME' \
             HOSTNAME='terminal-capture-test' \
             KITTY_PID='4242' \
@@ -877,7 +969,9 @@ in
             SINNIX_CAPTURE_SESSION_ID='poison-session' \
             TERM='xterm-kitty' \
             USER='tester' \
-            ${pkgs.bash}/bin/bash ${../scripts/sinnix-captured-shell}" /dev/null
+            ${pkgs.bash}/bin/bash ${../scripts/sinnix-captured-shell}" "$transcript"
+
+          grep -q "terminal-capture-ready" "$transcript"
 
           session_json="$(find "$TMPDIR/captures" -type f -name session.json | sed -n '1p')"
           events_json="$(find "$TMPDIR/captures" -type f -name events.jsonl | sed -n '1p')"
@@ -905,9 +999,10 @@ in
           jq -e '
             .schema == "terminal-session-v1" and
             .session_id == $session_id and
+            (.started_at_ms | type) == "number" and
             (.command_count | type) == "number" and
             .command_count >= 1 and
-            .event_count == 4 and
+            .event_count >= 4 and
             .cast_path == $cast_path and
             .events_path == $events_path and
             .host == "terminal-capture-test" and
@@ -915,6 +1010,7 @@ in
             .exit_reason == "shell_exit" and
             .cleanup_escalated == false and
             .recorder_exit_code == 0 and
+            (.session_id | test(",") | not) and
             .session_id != "poison-session" and
             .cast_path != $poison_cast and
             .events_path != $poison_events
@@ -927,7 +1023,7 @@ in
             "$session_json" >/dev/null
 
           jq -s -e '
-            length == 4 and
+            length >= 4 and
             .[0].type == "session_start" and
             .[-1].type == "session_end" and
             ([.[] | select(.type == "command_start")] | length) >= 1 and
@@ -995,6 +1091,7 @@ in
           #!${pkgs.zsh}/bin/zsh
           set -eu
           source ${../scripts/sinnix-terminal-capture-hooks.zsh}
+          print -r -- "terminal-capture-ready"
           true
           exit 0
           EOF
@@ -1009,8 +1106,11 @@ in
             pkgs.zsh
           ]}:$PATH"
 
+          transcript="$TMPDIR/terminal-capture-runtime-failure.typescript"
+
           set +e
           script -qfec "env \
+            EPOCHREALTIME='1773285652,647035000' \
             HOME='$HOME' \
             HOSTNAME='terminal-capture-test' \
             KITTY_PID='4242' \
@@ -1018,11 +1118,12 @@ in
             SINNIX_CAPTURE_ROOT='$TMPDIR/captures' \
             TERM='xterm-kitty' \
             USER='tester' \
-            ${pkgs.bash}/bin/bash ${../scripts/sinnix-captured-shell}" /dev/null
+            ${pkgs.bash}/bin/bash ${../scripts/sinnix-captured-shell}" "$transcript"
           status=$?
           set -e
 
           test "$status" -eq 42
+          grep -q "terminal-capture-ready" "$transcript"
 
           session_json="$(find "$TMPDIR/captures" -type f -name session.json | sed -n '1p')"
           events_json="$(find "$TMPDIR/captures" -type f -name events.jsonl | sed -n '1p')"
@@ -1034,16 +1135,18 @@ in
 
           jq -e '
             .schema == "terminal-session-v1" and
+            (.started_at_ms | type) == "number" and
             .exit_reason == "shell_exit" and
             .exit_code == 0 and
             .recorder_exit_code == 42 and
             .cleanup_escalated == false and
             .command_count >= 1 and
-            .event_count == 4
+            .event_count >= 4 and
+            (.session_id | test(",") | not)
           ' "$session_json" >/dev/null
 
           jq -s -e '
-            length == 4 and
+            length >= 4 and
             .[0].type == "session_start" and
             .[-1].type == "session_end"
           ' "$events_json" >/dev/null

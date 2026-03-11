@@ -1,0 +1,8 @@
+{
+  "name": "context7-mcp-wrapper",
+  "private": true,
+  "version": "0.0.0",
+  "dependencies": {
+    "@upstash/context7-mcp": "2.1.4"
+  }
+}

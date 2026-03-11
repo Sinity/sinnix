@@ -229,11 +229,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1772699110,
-        "narHash": "sha256-jkyo/9fZVB3F/PHk3fVK1ImxJBZ71DCOYZvAz4R4v4E=",
+        "lastModified": 1773025010,
+        "narHash": "sha256-khlHllTsovXgT2GZ0WxT4+RvuMjNeR5OW0UYeEHPYQo=",
         "owner": "nix-community",
         "repo": "disko",
-        "rev": "42affa9d33750ac0a0a89761644af20d8d03e6ee",
+        "rev": "7b9f7f88ab3b339f8142dc246445abb3c370d3d3",
         "type": "github"
       },
       "original": {
@@ -459,11 +459,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1772845525,
-        "narHash": "sha256-Dp5Ir2u4jJDGCgeMRviHvEQDe+U37hMxp6RSNOoMMPc=",
+        "lastModified": 1773283961,
+        "narHash": "sha256-hw2opR8BB4vVBC+MWxGy5PmLdW43ea8x3bWXx46bNpU=",
         "owner": "nix-community",
         "repo": "home-manager",
-        "rev": "27b93804fbef1544cb07718d3f0a451f4c4cd6c0",
+        "rev": "d7ef0034e346ed99d152cd75b99c11cdb726fc5c",
         "type": "github"
       },
       "original": {
@@ -561,11 +561,11 @@
         "treefmt-nix": "treefmt-nix"
       },
       "locked": {
-        "lastModified": 1772852941,
-        "narHash": "sha256-ox8WesAZ30mlt7lzlOzD8FbrH+q3eYd0xnfmmgXv8j0=",
+        "lastModified": 1773241852,
+        "narHash": "sha256-kwETflAbufOL32E1dRkJDTgcroafwN8HZqxjAaLItJw=",
         "owner": "numtide",
         "repo": "nix-ai-tools",
-        "rev": "40fd508a39281dcb3c4c1d7d56acf2f67f43e157",
+        "rev": "e21490459caf641e19cac7ad7679f1121d643e0c",
         "type": "github"
       },
       "original": {
@@ -581,11 +581,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1772850876,
-        "narHash": "sha256-Ga19zlfMpakCY4GMwBSOljNLOF0nEYrYBXv0hP/d4rw=",
+        "lastModified": 1773283718,
+        "narHash": "sha256-ZGOp7NeIk52YRamvmPhmcCqAdJqBizM0G7ax+YPKr5s=",
         "owner": "nix-community",
         "repo": "nix-vscode-extensions",
-        "rev": "22f084d4c280dfc8a9d764f7b85af38e5d69c3dc",
+        "rev": "515abbebc96beceff06a41965b215ad2debcb0be",
         "type": "github"
       },
       "original": {
@@ -644,11 +644,11 @@
     },
     "nixpkgs_4": {
       "locked": {
-        "lastModified": 1772736753,
-        "narHash": "sha256-au/m3+EuBLoSzWUCb64a/MZq6QUtOV8oC0D9tY2scPQ=",
+        "lastModified": 1773110118,
+        "narHash": "sha256-mPAG8phMbCReKSiKAijjjd3v7uVcJOQ75gSjGJjt/Rk=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "917fec990948658ef1ccd07cef2a1ef060786846",
+        "rev": "e607cb5360ff1234862ac9f8839522becb853bb9",
         "type": "github"
       },
       "original": {
@@ -660,11 +660,11 @@
     },
     "nixpkgs_5": {
       "locked": {
-        "lastModified": 1772624091,
-        "narHash": "sha256-QKyJ0QGWBn6r0invrMAK8dmJoBYWoOWy7lN+UHzW1jc=",
+        "lastModified": 1772963539,
+        "narHash": "sha256-9jVDGZnvCckTGdYT53d/EfznygLskyLQXYwJLKMPsZs=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "80bdc1e5ce51f56b19791b52b2901187931f5353",
+        "rev": "9dcb002ca1690658be4a04645215baea8b95f31d",
         "type": "github"
       },
       "original": {
@@ -721,11 +721,11 @@
         "nixpkgs": "nixpkgs_6"
       },
       "locked": {
-        "lastModified": 1772735804,
-        "narHash": "sha256-HyTRUL1zBScRjPq2D/JxgIHQmXTEqYGojmjKX+FGiqY=",
+        "lastModified": 1773284262,
+        "narHash": "sha256-aFhqwhJ9ysjTheHq9psP4x9qPdbbt2xcKg6QdrRoo54=",
         "ref": "master",
-        "rev": "ce617f3f0bae0add21dafcf33636ee974eb44fb2",
-        "revCount": 751,
+        "rev": "3bdd3f02dc87b2a84b23b523ed0483f5fcb63c1c",
+        "revCount": 893,
         "type": "git",
         "url": "file:///realm/project/polylogue"
       },
@@ -823,11 +823,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1772863421,
-        "narHash": "sha256-e4GytzCQ6G6lojY4U42AhF5pIw0jEhgPwe9blwT1jFs=",
+        "lastModified": 1773281847,
+        "narHash": "sha256-UbdP5tsJiy0SR5EGHqeoJFwyAdWgIGJIin4UAqzOHfY=",
         "ref": "master",
-        "rev": "4f7f1b8de7c936291b5a49229de28a1f3a6da864",
-        "revCount": 2304,
+        "rev": "3e299b6d1274247d8b6f68cae900131b3797c81f",
+        "revCount": 2145,
         "type": "git",
         "url": "file:///realm/project/sinex"
       },

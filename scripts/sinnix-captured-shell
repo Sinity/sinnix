@@ -46,6 +46,8 @@ now_ms() {
     raw="$(printf '%(%s)T' -1).000"
   fi
 
+  raw="${raw//,/.}"
+
   local sec="${raw%%.*}"
   local frac="${raw#*.}"
 
@@ -118,13 +120,13 @@ repo_dirty() {
   fi
 }
 
-for name in $(compgen -v); do
+while IFS='=' read -r name _; do
   case "$name" in
     SINNIX_CAPTURE_*)
       unset "$name"
       ;;
   esac
-done
+done < <(env)
 unset SINNIX_CAPTURE_ACTIVE SINNIX_CAPTURE_CAST_FILE ASCIINEMA_SESSION || true
 
 if [[ -n "$capture_disabled" || -n "${TMUX:-}" || ! -t 0 || -z "${KITTY_PID:-}" ]]; then
@@ -223,28 +225,7 @@ export SINNIX_CAPTURE_PROJECT_ROOT="$start_project_root"
   printf '}\n'
 } > "${session_dir}/session.json"
 
-rec_pid=""
 cleanup_escalated=false
-
-stop_recorder() {
-  local pid="${rec_pid:-}"
-
-  if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
-    return 0
-  fi
-
-  kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
-
-  for _ in 1 2 3 4 5; do
-    if ! kill -0 "$pid" 2>/dev/null; then
-      return 0
-    fi
-    sleep 0.2
-  done
-
-  cleanup_escalated=true
-  kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
-}
 
 update_session_file() {
   local recorder_exit_code="$1"
@@ -263,32 +244,18 @@ update_session_file() {
   mv "$tmp_file" "$session_file"
 }
 
-on_signal() {
-  local code="$1"
-  stop_recorder
-  exit "$code"
-}
-
-trap 'stop_recorder' EXIT
-trap 'on_signal 129' HUP
-trap 'on_signal 130' INT
-trap 'on_signal 143' TERM
-
-setsid asciinema rec \
+if asciinema rec \
   --stdin \
   --quiet \
   --return \
   --output-format asciicast-v3 \
   --capture-env SHELL,TERM,SINNIX_CAPTURE_SESSION_ID,SINNIX_CAPTURE_HOST,SINNIX_CAPTURE_USER,SINNIX_CAPTURE_TTY,SINNIX_CAPTURE_TERMINAL,SINNIX_CAPTURE_START_CWD,SINNIX_CAPTURE_START_REPO_ROOT,SINNIX_CAPTURE_START_REPO_BRANCH,SINNIX_CAPTURE_START_REPO_COMMIT,SINNIX_CAPTURE_START_REPO_DIRTY,SINNIX_CAPTURE_PROJECT_ROOT \
   --command "$shell_bin" \
-  "$cast_path" &
-rec_pid=$!
-
-if wait "$rec_pid"; then
+  "$cast_path"
+then
   status=0
 else
   status=$?
 fi
-rec_pid=""
 update_session_file "$status"
 exit "$status"

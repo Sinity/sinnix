@@ -1,0 +1,8 @@
+{
+  "name": "ccusage-wrapper",
+  "private": true,
+  "version": "0.0.0",
+  "dependencies": {
+    "ccusage": "18.0.10"
+  }
+}
