@@ -8,6 +8,7 @@
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;
+  pkgsFor = system: inputs.nixpkgs.legacyPackages.${system};
 
   # Import test infrastructure
   testLib = import ./test-lib.nix { inherit inputs lib; };
@@ -134,6 +135,34 @@ let
           message = "UWSM must be enabled";
         }
       ];
+    })
+
+    (mkFeatureTest {
+      name = "desktop-terminal";
+      feature = "sinnix.features.desktop.terminal.enable";
+      assertions =
+        config:
+        let
+          hm = hmFor config;
+        in
+        [
+          {
+            assertion = hm.programs.kitty.enable;
+            message = "Kitty must be enabled";
+          }
+          {
+            assertion = hm.programs.kitty.settings.shell == "${hm.home.homeDirectory}/.local/bin/sinnix-captured-shell";
+            message = "Kitty must launch through the capture wrapper";
+          }
+          {
+            assertion = hm.programs.kitty.settings.open_url_with == "xdg-open";
+            message = "Kitty URL opening must stay delegated to xdg-open";
+          }
+          {
+            assertion = hm.programs.kitty.settings.allow_remote_control == "socket-only";
+            message = "Kitty remote control must stay socket-only";
+          }
+        ];
     })
 
     (mkFeatureTest {
@@ -280,6 +309,22 @@ let
             rule: builtins.match ".*captures/asciinema.*" rule != null
           ) config.systemd.tmpfiles.rules;
           message = "Asciinema captures directory tmpfiles entry must exist";
+        }
+        {
+          assertion = (hmFor config).home.file ? ".local/bin/sinnix-captured-shell";
+          message = "The terminal capture launcher must be linked into ~/.local/bin";
+        }
+        {
+          assertion = (hmFor config).home.sessionVariables.SINNIX_CAPTURE_ROOT == "/realm/data/captures/asciinema";
+          message = "The capture root session variable must point at the canonical asciinema directory";
+        }
+        {
+          assertion = (hmFor config).home.sessionVariables.SINNIX_CAPTURE_TERMINAL == "kitty";
+          message = "The capture terminal session variable must identify Kitty";
+        }
+        {
+          assertion = lib.hasInfix "sinnix-terminal-capture-hooks.zsh" (hmFor config).programs.zsh.initContent;
+          message = "The zsh init path must source the terminal capture hooks";
         }
       ];
     })
@@ -721,7 +766,116 @@ in
 {
   perSystem =
     { system, ... }:
+    let
+      pkgs = pkgsFor system;
+      terminalCaptureRuntime = pkgs.runCommand "sinnix-terminal-capture-runtime-check"
+        {
+          nativeBuildInputs = [
+            pkgs.asciinema_3
+            pkgs.coreutils
+            pkgs.findutils
+            pkgs.gnugrep
+            pkgs.jq
+            pkgs.util-linux
+            pkgs.zsh
+          ];
+        }
+        ''
+          export HOME="$TMPDIR/home"
+          export PATH="${lib.makeBinPath [
+            pkgs.asciinema_3
+            pkgs.coreutils
+            pkgs.findutils
+            pkgs.gnugrep
+            pkgs.jq
+            pkgs.util-linux
+            pkgs.zsh
+          ]}:$PATH"
+          mkdir -p "$HOME" "$TMPDIR/captures"
+
+          cat > "$TMPDIR/fake-shell.zsh" <<'EOF'
+          #!${pkgs.zsh}/bin/zsh
+          set -eu
+          source ${../scripts/sinnix-terminal-capture-hooks.zsh}
+          true
+          exit 0
+          EOF
+          chmod +x "$TMPDIR/fake-shell.zsh"
+
+          script -qfec "env \
+            HOME='$HOME' \
+            HOSTNAME='terminal-capture-test' \
+            KITTY_PID='4242' \
+            SHELL='$TMPDIR/fake-shell.zsh' \
+            SINNIX_CAPTURE_CAST_FILE='$TMPDIR/poison.cast' \
+            SINNIX_CAPTURE_EVENTS_FILE='$TMPDIR/poison.events.jsonl' \
+            SINNIX_CAPTURE_ROOT='$TMPDIR/captures' \
+            SINNIX_CAPTURE_SESSION_ID='poison-session' \
+            TERM='xterm-kitty' \
+            USER='tester' \
+            ${pkgs.bash}/bin/bash ${../scripts/sinnix-captured-shell}" /dev/null
+
+          session_json="$(find "$TMPDIR/captures" -type f -name session.json | sed -n '1p')"
+          events_json="$(find "$TMPDIR/captures" -type f -name events.jsonl | sed -n '1p')"
+          cast_file="$(find "$TMPDIR/captures" -type f -name session.cast | sed -n '1p')"
+
+          test -n "$session_json"
+          test -n "$events_json"
+          test -n "$cast_file"
+
+          session_dir="$(dirname "$session_json")"
+          session_id="$(basename "$session_dir")"
+          month_dir="$(dirname "$session_dir")"
+          day_dir="$(basename "$month_dir")"
+          year_month_dir="$(dirname "$month_dir")"
+          month_name="$(basename "$year_month_dir")"
+          year_name="$(basename "$(dirname "$year_month_dir")")"
+
+          test "$day_dir" != "$session_id"
+          [[ "$year_name" =~ ^[0-9]{4}$ ]]
+          [[ "$month_name" =~ ^[0-9]{2}$ ]]
+          [[ "$day_dir" =~ ^[0-9]{2}$ ]]
+          test "$cast_file" = "$session_dir/session.cast"
+          test "$events_json" = "$session_dir/events.jsonl"
+
+          jq -e '
+            .schema == "terminal-session-v1" and
+            .session_id == $session_id and
+            (.command_count | type) == "number" and
+            .command_count >= 1 and
+            .event_count == 4 and
+            .cast_path == $cast_path and
+            .events_path == $events_path and
+            .host == "terminal-capture-test" and
+            .terminal == "kitty" and
+            .exit_reason == "shell_exit" and
+            .cleanup_escalated == false and
+            .recorder_exit_code == 0 and
+            .session_id != "poison-session" and
+            .cast_path != $poison_cast and
+            .events_path != $poison_events
+          ' \
+            --arg session_id "$session_id" \
+            --arg cast_path "$cast_file" \
+            --arg events_path "$events_json" \
+            --arg poison_cast "$TMPDIR/poison.cast" \
+            --arg poison_events "$TMPDIR/poison.events.jsonl" \
+            "$session_json" >/dev/null
+
+          jq -s -e '
+            length == 4 and
+            .[0].type == "session_start" and
+            .[-1].type == "session_end" and
+            ([.[] | select(.type == "command_start")] | length) >= 1 and
+            all(.[]; .session_id != "poison-session")
+          ' "$events_json" >/dev/null
+
+          touch "$out"
+        '';
+    in
     {
-      checks = mkSystemChecks system testSpecs;
+      checks = (mkSystemChecks system testSpecs) // {
+        terminal-capture-runtime = terminalCaptureRuntime;
+      };
     };
 }

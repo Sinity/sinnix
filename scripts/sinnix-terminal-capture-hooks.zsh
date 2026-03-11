@@ -4,7 +4,7 @@ if [[ -z ${ZSH_VERSION:-} ]]; then
   return 0 2>/dev/null || exit 0
 fi
 
-if [[ -z ${SINNIX_ASCIINEMA_ACTIVE:-} ]]; then
+if [[ -z ${SINNIX_CAPTURE_ACTIVE:-} ]]; then
   return 0
 fi
 
@@ -112,6 +112,30 @@ _sinnix_capture_repo_branch() {
     || true
 }
 
+_sinnix_capture_repo_commit() {
+  local repo_root="$1"
+
+  if [[ -z "$repo_root" ]] || ! command -v git >/dev/null 2>&1; then
+    return 0
+  fi
+
+  git -C "$repo_root" rev-parse HEAD 2>/dev/null || true
+}
+
+_sinnix_capture_repo_dirty() {
+  local repo_root="$1"
+
+  if [[ -z "$repo_root" ]] || ! command -v git >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if [[ -n "$(git -C "$repo_root" status --porcelain --ignore-submodules=dirty 2>/dev/null)" ]]; then
+    print -r -- "true"
+  else
+    print -r -- "false"
+  fi
+}
+
 _sinnix_capture_append_prefix() {
   local type="$1"
   local ts_ms="$2"
@@ -133,6 +157,12 @@ _sinnix_capture_append_session_start() {
     _sinnix_capture_json_nullable_string "$project_root"
     print -nr -- ',"repo_root":'
     _sinnix_capture_json_nullable_string "${SINNIX_CAPTURE_START_REPO_ROOT:-}"
+    print -nr -- ',"repo_branch":'
+    _sinnix_capture_json_nullable_string "${SINNIX_CAPTURE_START_REPO_BRANCH:-}"
+    print -nr -- ',"repo_commit":'
+    _sinnix_capture_json_nullable_string "${SINNIX_CAPTURE_START_REPO_COMMIT:-}"
+    print -nr -- ',"repo_dirty":'
+    _sinnix_capture_json_nullable_string "${SINNIX_CAPTURE_START_REPO_DIRTY:-}"
     print -nr -- ',"tty":'
     _sinnix_capture_json_nullable_string "${SINNIX_CAPTURE_TTY:-}"
     print -nr -- ',"terminal":'
@@ -190,6 +220,9 @@ _sinnix_capture_append_session_end() {
   local final_cwd="$4"
   local final_project_root="$5"
   local final_repo_root="$6"
+  local final_repo_branch="$7"
+  local final_repo_commit="$8"
+  local final_repo_dirty="$9"
 
   {
     _sinnix_capture_append_prefix "session_end" "$ts_ms"
@@ -203,6 +236,12 @@ _sinnix_capture_append_session_end() {
     _sinnix_capture_json_nullable_string "$final_project_root"
     print -nr -- ',"repo_root":'
     _sinnix_capture_json_nullable_string "$final_repo_root"
+    print -nr -- ',"repo_branch":'
+    _sinnix_capture_json_nullable_string "$final_repo_branch"
+    print -nr -- ',"repo_commit":'
+    _sinnix_capture_json_nullable_string "$final_repo_commit"
+    print -nr -- ',"repo_dirty":'
+    _sinnix_capture_json_nullable_string "$final_repo_dirty"
     print -nr -- ',"active_ms":'
     _sinnix_capture_json_nullable_int "$SINNIX_CAPTURE_ACTIVE_MS"
     print -nr -- ',"idle_ms":'
@@ -219,7 +258,9 @@ _sinnix_capture_write_session_file() {
   local exit_reason="$3"
   local final_cwd="$4"
   local final_repo_root="$5"
-  local repo_branch="$6"
+  local final_repo_branch="$6"
+  local final_repo_commit="$7"
+  local final_repo_dirty="$8"
   local project_root="${SINNIX_CAPTURE_PROJECT_ROOT:-${SINNIX_CAPTURE_START_REPO_ROOT:-}}"
   local final_project_root="$(_sinnix_capture_guess_project_root "$final_cwd")"
   local duration_ms=""
@@ -233,7 +274,7 @@ _sinnix_capture_write_session_file() {
     print -nr -- '  "schema": '; _sinnix_capture_json_string "terminal-session-v1"; print -r -- ","
     print -nr -- '  "schema_generation": '; _sinnix_capture_json_string "terminal-session-v1"; print -r -- ","
     print -nr -- '  "session_id": '; _sinnix_capture_json_nullable_string "${SINNIX_CAPTURE_SESSION_ID:-}"; print -r -- ","
-    print -nr -- '  "cast_path": '; _sinnix_capture_json_nullable_string "${SINNIX_ASCIINEMA_FILE:-}"; print -r -- ","
+    print -nr -- '  "cast_path": '; _sinnix_capture_json_nullable_string "${SINNIX_CAPTURE_CAST_FILE:-}"; print -r -- ","
     print -nr -- '  "events_path": '; _sinnix_capture_json_nullable_string "${SINNIX_CAPTURE_EVENTS_FILE:-}"; print -r -- ","
     print -nr -- '  "host": '; _sinnix_capture_json_nullable_string "${SINNIX_CAPTURE_HOST:-}"; print -r -- ","
     print -nr -- '  "user": '; _sinnix_capture_json_nullable_string "${SINNIX_CAPTURE_USER:-}"; print -r -- ","
@@ -247,7 +288,12 @@ _sinnix_capture_write_session_file() {
     print -nr -- '  "final_project_root": '; _sinnix_capture_json_nullable_string "$final_project_root"; print -r -- ","
     print -nr -- '  "repo_root": '; _sinnix_capture_json_nullable_string "${SINNIX_CAPTURE_START_REPO_ROOT:-}"; print -r -- ","
     print -nr -- '  "final_repo_root": '; _sinnix_capture_json_nullable_string "$final_repo_root"; print -r -- ","
-    print -nr -- '  "repo_branch": '; _sinnix_capture_json_nullable_string "$repo_branch"; print -r -- ","
+    print -nr -- '  "repo_branch": '; _sinnix_capture_json_nullable_string "${SINNIX_CAPTURE_START_REPO_BRANCH:-}"; print -r -- ","
+    print -nr -- '  "final_repo_branch": '; _sinnix_capture_json_nullable_string "$final_repo_branch"; print -r -- ","
+    print -nr -- '  "repo_commit": '; _sinnix_capture_json_nullable_string "${SINNIX_CAPTURE_START_REPO_COMMIT:-}"; print -r -- ","
+    print -nr -- '  "final_repo_commit": '; _sinnix_capture_json_nullable_string "$final_repo_commit"; print -r -- ","
+    print -nr -- '  "repo_dirty": '; _sinnix_capture_json_nullable_string "${SINNIX_CAPTURE_START_REPO_DIRTY:-}"; print -r -- ","
+    print -nr -- '  "final_repo_dirty": '; _sinnix_capture_json_nullable_string "$final_repo_dirty"; print -r -- ","
     print -nr -- '  "started_at_ms": '; _sinnix_capture_json_nullable_int "${SINNIX_CAPTURE_STARTED_AT_MS:-}"; print -r -- ","
     print -nr -- '  "finished_at_ms": '; _sinnix_capture_json_nullable_int "$finished_at_ms"; print -r -- ","
     print -nr -- '  "duration_ms": '; _sinnix_capture_json_nullable_int "$duration_ms"; print -r -- ","
@@ -297,7 +343,9 @@ _sinnix_capture_zshexit() {
   local final_cwd="$PWD"
   local final_repo_root="$(_sinnix_capture_find_repo_root "$final_cwd" || true)"
   local final_project_root="$(_sinnix_capture_guess_project_root "$final_cwd")"
-  local repo_branch="$(_sinnix_capture_repo_branch "$final_repo_root")"
+  local final_repo_branch="$(_sinnix_capture_repo_branch "$final_repo_root")"
+  local final_repo_commit="$(_sinnix_capture_repo_commit "$final_repo_root")"
+  local final_repo_dirty="$(_sinnix_capture_repo_dirty "$final_repo_root")"
   local exit_reason="shell_exit"
 
   if (( exit_code >= 128 )); then
@@ -311,13 +359,21 @@ _sinnix_capture_zshexit() {
     SINNIX_CAPTURE_IDLE_MS=$((SINNIX_CAPTURE_IDLE_MS + now_ms - SINNIX_CAPTURE_LAST_PROMPT_MS))
   fi
 
-  _sinnix_capture_append_session_end "$now_ms" "$exit_code" "$exit_reason" "$final_cwd" "$final_project_root" "$final_repo_root"
-  _sinnix_capture_write_session_file "$now_ms" "$exit_code" "$exit_reason" "$final_cwd" "$final_repo_root" "$repo_branch"
+  _sinnix_capture_append_session_end "$now_ms" "$exit_code" "$exit_reason" "$final_cwd" "$final_project_root" "$final_repo_root" "$final_repo_branch" "$final_repo_commit" "$final_repo_dirty"
+  _sinnix_capture_write_session_file "$now_ms" "$exit_code" "$exit_reason" "$final_cwd" "$final_repo_root" "$final_repo_branch" "$final_repo_commit" "$final_repo_dirty"
 }
 
 touch "$SINNIX_CAPTURE_EVENTS_FILE"
 _sinnix_capture_append_session_start
-_sinnix_capture_write_session_file "" "" "running" "${SINNIX_CAPTURE_START_CWD:-$PWD}" "${SINNIX_CAPTURE_START_REPO_ROOT:-}" ""
+_sinnix_capture_write_session_file \
+  "" \
+  "" \
+  "running" \
+  "${SINNIX_CAPTURE_START_CWD:-$PWD}" \
+  "${SINNIX_CAPTURE_START_REPO_ROOT:-}" \
+  "" \
+  "" \
+  ""
 
 add-zsh-hook preexec _sinnix_capture_preexec
 add-zsh-hook precmd _sinnix_capture_precmd
