@@ -5,6 +5,7 @@ Organized by domain under `modules/features/`:
 ### CLI (`features/cli/`)
 
 - **core.nix**: Core CLI environment (git, taskwarrior, gnupg)
+- **stability-lab.nix**: Persistent hardware stability runner with reboot-no-more GPU/display experiment suite and reboot forensics capture directories
 - **task-tracking.nix**: Taskwarrior/Timewarrior integration
 
 ### System (`features/system/`)

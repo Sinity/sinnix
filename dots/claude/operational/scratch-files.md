@@ -7,6 +7,7 @@ Externalize reasoning to scratch files. Write liberally - context is expensive, 
 - **Always**: Non-trivial analysis, multi-step debugging, architectural decisions
 - **Proactively**: Anything you figure out that took >1 tool call to discover
 - **Especially**: Cross-session work, context-compaction-spanning tasks
+- **Bootstrap when missing**: If a project lacks `.claude/scratch/`, create it early for any non-trivial work and ensure the project `.gitignore` ignores it before you start accumulating notes
 
 ### File Locations
 
@@ -14,6 +15,10 @@ Externalize reasoning to scratch files. Write liberally - context is expensive, 
 | -------------------- | ---------------------------------- | ---------------------------------- |
 | Global/cross-project | `~/.claude/scratch/NNN-<topic>.md` | System-wide learnings, config work |
 | Project-specific     | `.claude/scratch/NNN-<topic>.md`   | Project analysis, debugging notes  |
+
+Project hygiene:
+- Project-local scratch space should exist by default for active repos that receive agent-driven analysis
+- If `.claude/scratch/` is absent, create it and add a matching `.gitignore` entry as part of the first substantial analysis pass
 
 ### File Structure
 

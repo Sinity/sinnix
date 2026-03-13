@@ -11,9 +11,9 @@ direnv allow                # Activate devshell (auto on cd)
 
 ```bash
 cd /realm/project/sinity-lynchpin
-just                        # List available pipelines
+just                        # List remaining heavyweight pipelines
 just baseline               # Rebuild ActivityWatch/git/health rollups
-just calendar-refresh ...   # Generate daily views
+python -m lynchpin.views.calendar_views build 2026-03-01 2026-03-07
 ```
 
 ### Context7

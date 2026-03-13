@@ -1,7 +1,7 @@
 # Core networking configuration
 #
 # Provides:
-# - NetworkManager with systemd-resolved (DNSSEC allow-downgrade)
+# - NetworkManager with systemd-resolved stub/cache
 # - DNS resolution via router (sinnix-gw handles DoH upstream to Cloudflare + Quad9)
 # - Hardened OpenSSH (no passwords, no root login, rate-limited, verbose logging)
 # - NTP via router with nixos.pool.ntp.org fallback
@@ -49,18 +49,17 @@ in
     };
 
     services = {
-      # systemd-resolved provides local caching and .lan resolution.
-      # Upstream DNS comes from DHCP (i.e., the router's dnsmasq which itself
-      # forwards to Cloudflare DoH via https-dns-proxy).
+      # systemd-resolved provides the local stub resolver and .lan handling.
+      # The router remains the DNS authority and already forwards upstream via DoH.
       resolved = {
         enable = true;
-        # Accept DHCP-provided DNS (the router). No static upstream overrides needed.
         settings = {
           Resolve = {
-            # Router runs DoH (Cloudflare + Quad9) so DNSSEC validation is meaningful.
-            # "allow-downgrade" validates when DNSSEC records exist, tolerates unsigned domains.
-            DNSSEC = "allow-downgrade";
-            # Resolve .lan names via the router's dnsmasq
+            # Avoid duplicate validation on the workstation.
+            DNSSEC = false;
+            # Emit an explicit blank fallback list so compiled-in public resolvers stay disabled.
+            FallbackDNS = "";
+            # Resolve .lan names via the router's dnsmasq.
             Domains = [ "~lan" ];
           };
         };

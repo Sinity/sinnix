@@ -13,7 +13,7 @@ mkFeatureModule {
       ...
     }:
     let
-      browserHandlerDesktop = "sinnix-browser-link.desktop";
+      browserDefaultDesktop = "google-chrome.desktop";
       browserMimeTypes = [
         "text/html"
         "x-scheme-handler/http"
@@ -54,7 +54,7 @@ mkFeatureModule {
       };
 
       # Browser handlers (only in defaultApplications)
-      browserHandlers = lib.genAttrs browserMimeTypes (_: [ browserHandlerDesktop ]);
+      browserDefaults = lib.genAttrs browserMimeTypes (_: [ browserDefaultDesktop ]);
     in
     {
       home-manager.users.${user} =
@@ -76,14 +76,14 @@ mkFeatureModule {
 
           xdg.mimeApps = {
             enable = true;
-            associations.added = mediaAssociations;
+            associations.added = mediaAssociations // browserDefaults;
             associations.removed = {
               "video/mp4" = [ "svp-manager4.desktop" ];
               "video/mkv" = [ "svp-manager4.desktop" ];
               "video/webm" = [ "svp-manager4.desktop" ];
               "video/x-matroska" = [ "svp-manager4.desktop" ];
             };
-            defaultApplications = mediaAssociations // browserHandlers;
+            defaultApplications = mediaAssociations // browserDefaults;
           };
         };
     };

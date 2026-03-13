@@ -15,6 +15,8 @@
   sinnix.bundles.dev.enable = true;
 
   sinnix.features.cli.task-tracking.enable = true;
+  sinnix.features.cli.stability-lab.enable = true;
+  sinnix.features.cli.polylogue.enable = true;
   sinnix.persistence.enable = true;
 
   sinnix.features.dev.editors.enable = true;

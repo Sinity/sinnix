@@ -2,6 +2,7 @@
   mkFeatureModule,
   pkgs,
   helpers,
+  inputs,
   ...
 }@args:
 mkFeatureModule {
@@ -15,8 +16,12 @@ mkFeatureModule {
       config,
       helpers,
       user,
+      inputs,
       ...
     }:
+    let
+      scriptPkgs = inputs.self.packages.${pkgs.stdenv.hostPlatform.system};
+    in
     {
       home-manager.users.${user} =
         {
@@ -41,6 +46,7 @@ mkFeatureModule {
             aria2
             lnch
             libnotify
+            scriptPkgs.media-preview-cache
           ];
 
           home.file = {
@@ -81,8 +87,16 @@ mkFeatureModule {
                 source = mkDotsFile "/yazi/opener.toml";
                 force = true;
               };
+              "yazi/yazi.toml" = {
+                source = mkDotsFile "/yazi/yazi.toml";
+                force = true;
+              };
               "yazi/keymap.toml" = {
                 source = mkDotsFile "/yazi/keymap.toml";
+                force = true;
+              };
+              "yazi/plugins/sinnix-video-preview.yazi/main.lua" = {
+                source = mkDotsFile "/yazi/plugins/sinnix-video-preview.yazi/main.lua";
                 force = true;
               };
               "audacity/audacity.cfg".source = mkDotsFile "/audacity/audacity.cfg";

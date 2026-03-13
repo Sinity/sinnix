@@ -159,10 +159,116 @@ let
               let
                 context7Source = hm.home.file.".local/bin/mcp-context7".source or "";
                 firecrawlSource = hm.home.file.".local/bin/mcp-firecrawl".source or "";
+                polylogueSource = hm.home.file.".local/bin/mcp-polylogue".source or "";
+                codexConfig = builtins.readFile ../dots/codex/config.toml;
+                claudeSettings = builtins.fromJSON (builtins.readFile ../dots/claude/settings.json);
               in
               lib.hasInfix "/bin/mcp-context7" context7Source
-              && lib.hasInfix "/bin/mcp-firecrawl" firecrawlSource;
-            message = "MCP wrappers must launch packaged servers directly";
+              && lib.hasInfix "/bin/mcp-firecrawl" firecrawlSource
+              && lib.hasInfix "/bin/mcp-polylogue" polylogueSource
+              && lib.hasInfix "[mcp_servers.polylogue]" codexConfig
+              && lib.hasInfix "command = \"mcp-polylogue\"" codexConfig
+              && claudeSettings.mcpServers.polylogue.command == "mcp-polylogue";
+            message = "MCP wrappers and agent configs must expose the packaged Polylogue server directly";
+          }
+        ];
+    })
+
+    (mkFeatureTest {
+      name = "cli-polylogue";
+      feature = "sinnix.features.cli.polylogue.enable";
+      assertions =
+        config:
+        let
+          packageNames = map (pkg: pkg.name or "") (hmFor config).home.packages;
+        in
+        [
+          {
+            assertion = builtins.any (name: lib.hasPrefix "polylogue" name) packageNames;
+            message = "Polylogue feature must install the packaged Polylogue CLI";
+          }
+        ];
+    })
+
+    (mkFeatureTest {
+      name = "cli-stability-lab";
+      feature = "sinnix.features.cli.stability-lab.enable";
+      assertions =
+        config:
+        let
+          hm = hmFor config;
+          packageNames = map (pkg: pkg.name or "") hm.home.packages;
+          scriptText = builtins.readFile ../scripts/stability-lab;
+        in
+        [
+          {
+            assertion = builtins.any (name: lib.hasPrefix "stability-lab" name) packageNames;
+            message = "Stability lab must install the packaged runner";
+          }
+          {
+            assertion = hm.home.sessionVariables.SINNIX_STABILITY_ROOT == "/realm/data/captures/stability-lab";
+            message = "Stability lab must export the canonical capture root";
+          }
+          {
+            assertion = builtins.any (
+              rule: builtins.match ".*captures/stability-lab.*" rule != null
+            ) config.systemd.tmpfiles.rules;
+            message = "Stability lab must create its persistent capture directory via tmpfiles";
+          }
+          {
+            assertion = builtins.any (name: lib.hasPrefix "launch-trigger-capture" name) packageNames;
+            message = "Stability lab must install the launch-trigger capture wrapper";
+          }
+          {
+            assertion = builtins.any (name: lib.hasPrefix "reboot-no-more" name) packageNames;
+            message = "Stability lab must install the reboot-no-more package that ships the GPU lab suite";
+          }
+          {
+            assertion = hm.home.sessionVariables.SINNIX_TRIGGER_CAPTURE_ROOT == "/realm/data/captures/launch-trigger";
+            message = "Stability lab must export the canonical launch-trigger capture root";
+          }
+          {
+            assertion = builtins.any (
+              rule: builtins.match ".*captures/launch-trigger.*" rule != null
+            ) config.systemd.tmpfiles.rules;
+            message = "Stability lab must create the launch-trigger capture directory via tmpfiles";
+          }
+          {
+            assertion =
+              lib.hasInfix "stability-lab [options]" scriptText
+              && lib.hasInfix "auto      run CPU soak, memory hammer, and mixed load sweep (default)" scriptText
+              && lib.hasInfix "observe   capture launch-path telemetry only; no synthetic stress load" scriptText;
+            message = "Stability lab must expose the automatic default sweep in its help text";
+          }
+          {
+            assertion =
+              builtins.match ".*--reserve-memory.*" scriptText == null
+              && lib.hasInfix "try_resume_default_auto" scriptText;
+            message = "Stability lab must avoid the broken stressapptest reserve flag and resume incomplete default auto runs";
+          }
+        ];
+    })
+
+    (mkFeatureTest {
+      name = "desktop-mime";
+      feature = "sinnix.features.desktop.mime.enable";
+      assertions =
+        config:
+        let
+          defaultApps = (hmFor config).xdg.mimeApps.defaultApplications;
+        in
+        [
+          {
+            assertion = defaultApps."x-scheme-handler/http" == [ "google-chrome.desktop" ];
+            message = "HTTP links must default to Google Chrome";
+          }
+          {
+            assertion = defaultApps."x-scheme-handler/https" == [ "google-chrome.desktop" ];
+            message = "HTTPS links must default to Google Chrome";
+          }
+          {
+            assertion = defaultApps."text/html" == [ "google-chrome.desktop" ];
+            message = "HTML documents must default to Google Chrome";
           }
         ];
     })
@@ -186,6 +292,12 @@ let
         {
           assertion = config.programs.hyprland.withUWSM;
           message = "UWSM must be enabled";
+        }
+        {
+          assertion =
+            lib.hasInfix "/bin/launch-trigger-capture hyprland -- uwsm start hyprland-uwsm.desktop"
+              ((hmFor config).programs.zsh.loginExtra or "");
+          message = "TTY Hyprland login must be wrapped with launch-trigger-capture";
         }
       ];
     })
@@ -221,6 +333,38 @@ let
     })
 
     (mkFeatureTest {
+      name = "desktop-common-apps";
+      feature = "sinnix.features.desktop.common-apps.enable";
+      assertions =
+        config:
+        let
+          hm = hmFor config;
+          packageNames = map (pkg: pkg.name or "") hm.home.packages;
+          yaziConfig = builtins.readFile ../dots/yazi/yazi.toml;
+        in
+        [
+          {
+            assertion = hm.xdg.configFile ? "yazi/yazi.toml";
+            message = "Common desktop apps must link the Yazi config";
+          }
+          {
+            assertion = hm.xdg.configFile ? "yazi/plugins/sinnix-video-preview.yazi/main.lua";
+            message = "Common desktop apps must link the custom Yazi video preview plugin";
+          }
+          {
+            assertion = builtins.any (name: lib.hasPrefix "media-preview-cache" name) packageNames;
+            message = "Common desktop apps must install the media preview cache helper";
+          }
+          {
+            assertion =
+              lib.hasInfix "image_delay = 0" yaziConfig
+              && lib.hasInfix "run = \"sinnix-video-preview\"" yaziConfig;
+            message = "Yazi must use the custom instant video preview configuration";
+          }
+        ];
+    })
+
+    (mkFeatureTest {
       name = "desktop-terminal";
       feature = "sinnix.features.desktop.terminal.enable";
       assertions =
@@ -246,7 +390,7 @@ let
             message = "Kitty remote control must stay socket-only";
           }
           {
-            assertion = hm.programs.kitty.shellIntegration.mode == "no-rc no-prompt-mark no-title no-cursor";
+            assertion = hm.programs.kitty.shellIntegration.mode == "no-prompt-mark no-title no-cursor";
             message = "Kitty shell integration must disable prompt/title/cursor features that interfere with the custom zsh prompt";
           }
         ];
@@ -260,6 +404,11 @@ let
         let
           hm = hmFor config;
           quteConfig = builtins.readFile ../dots/qutebrowser/config.py;
+          packageNames = map (pkg: pkg.name or "") hm.home.packages;
+          chromePkgs = builtins.filter (pkg: (pkg.pname or "") == "google-chrome") hm.home.packages;
+          chromePkg = if chromePkgs == [ ] then null else builtins.head chromePkgs;
+          chromeDesktop =
+            if chromePkg == null then "" else builtins.readFile "${chromePkg}/share/applications/google-chrome.desktop";
         in
         [
           {
@@ -273,6 +422,14 @@ let
           {
             assertion = builtins.match ".*except Exception:.*" quteConfig == null;
             message = "Qutebrowser config must not silently swallow broad exceptions";
+          }
+          {
+            assertion = builtins.any (name: lib.hasPrefix "launch-trigger-capture" name) packageNames;
+            message = "Browser feature must install the launch-trigger capture helper";
+          }
+          {
+            assertion = chromePkg != null && builtins.match ".*Exec=.*/bin/google-chrome-stable.*" chromeDesktop != null;
+            message = "Chrome desktop entry must point at the wrapped binary";
           }
         ];
     })
@@ -297,6 +454,38 @@ let
           }
         ];
     })
+
+    {
+      name = "networking-resolved-router-authority";
+      modules = [
+        mountTmpfsRoots
+        baseTestConfig
+        (
+          { ... }:
+          {
+            networking.hostName = "networking-test";
+          }
+        )
+      ];
+      assertions = config: [
+        {
+          assertion = config.networking.networkmanager.dns == "systemd-resolved";
+          message = "NetworkManager must keep using systemd-resolved as the local stub";
+        }
+        {
+          assertion = config.services.resolved.enable;
+          message = "systemd-resolved must stay enabled";
+        }
+        {
+          assertion = config.services.resolved.settings.Resolve.DNSSEC == false;
+          message = "Local systemd-resolved DNSSEC must be disabled when the router is the DNS authority";
+        }
+        {
+          assertion = config.services.resolved.settings.Resolve.FallbackDNS == "";
+          message = "Local systemd-resolved fallback DNS must be disabled when the router is authoritative";
+        }
+      ];
+    }
 
     {
       name = "nextcloud-storage-wiring";
@@ -995,6 +1184,8 @@ in
           [[ "$day_dir" =~ ^[0-9]{2}$ ]]
           test "$cast_file" = "$session_dir/session.cast"
           test "$events_json" = "$session_dir/events.jsonl"
+          test -z "$(find "$TMPDIR/captures" -maxdepth 1 -type f | sed -n '1p')"
+          test -z "$(find "$TMPDIR/captures" -type f -name '*.cast.meta' | sed -n '1p')"
 
           jq -e '
             .schema == "terminal-session-v1" and
@@ -1132,6 +1323,8 @@ in
           test -n "$session_json"
           test -n "$events_json"
           test -n "$cast_file"
+          test -z "$(find "$TMPDIR/captures" -maxdepth 1 -type f | sed -n '1p')"
+          test -z "$(find "$TMPDIR/captures" -type f -name '*.cast.meta' | sed -n '1p')"
 
           jq -e '
             .schema == "terminal-session-v1" and

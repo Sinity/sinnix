@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cache_root="${XDG_CACHE_HOME:-$HOME/.cache}/media-preview-cache/v1"
+video_cache_root="${cache_root}/video"
+default_percent="${MEDIA_PREVIEW_PERCENT:-10}"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  media-preview-cache thumb-path FILE [PERCENT]
+  media-preview-cache ensure FILE [PERCENT]
+  media-preview-cache warm DIR [PERCENT]
+
+Commands:
+  thumb-path  Print the deterministic cache path for a file thumbnail.
+  ensure      Generate the thumbnail if it is missing, then print its path.
+  warm        Recursively precompute thumbnails for video files under DIR.
+EOF
+}
+
+canonical_file() {
+  readlink -f -- "$1"
+}
+
+thumb_path() {
+  local file="$1"
+  local percent="${2:-$default_percent}"
+  local resolved metadata key shard
+
+  resolved="$(canonical_file "$file")"
+  metadata="$(stat --printf='%s\t%Y\t%Z' -- "$resolved")"
+  key="$(printf '%s\t%s\t%s\n' "$resolved" "$metadata" "$percent" | sha256sum | cut -d' ' -f1)"
+  shard="${key:0:2}"
+
+  printf '%s/%s/%s.jpg\n' "$video_cache_root" "$shard" "$key"
+}
+
+ensure_thumb() {
+  local file="$1"
+  local percent="${2:-$default_percent}"
+  local resolved output lock_dir lock_file tmp_file
+
+  resolved="$(canonical_file "$file")"
+  output="$(thumb_path "$resolved" "$percent")"
+  lock_dir="$(dirname "$output")"
+  lock_file="${output}.lock"
+
+  mkdir -p "$lock_dir"
+
+  if [[ -s "$output" ]]; then
+    printf '%s\n' "$output"
+    return 0
+  fi
+
+  exec 9>"$lock_file"
+  flock 9
+
+  if [[ -s "$output" ]]; then
+    printf '%s\n' "$output"
+    return 0
+  fi
+
+  tmp_file="$(mktemp "${output}.tmp.XXXXXX")"
+  trap 'rm -f "$tmp_file"' RETURN
+
+  ffmpegthumbnailer \
+    -i "$resolved" \
+    -o "$tmp_file" \
+    -c jpeg \
+    -s 0 \
+    -t "$percent" \
+    -m >/dev/null 2>&1
+
+  mv "$tmp_file" "$output"
+  trap - RETURN
+
+  printf '%s\n' "$output"
+}
+
+warm_tree() {
+  local dir="$1"
+  local percent="${2:-$default_percent}"
+  local jobs="${MEDIA_PREVIEW_JOBS:-$(nproc)}"
+  local resolved_dir
+
+  resolved_dir="$(canonical_file "$dir")"
+
+  fd \
+    -HI \
+    -t f \
+    -e 3gp \
+    -e asf \
+    -e avi \
+    -e flv \
+    -e m4v \
+    -e mkv \
+    -e mov \
+    -e mp4 \
+    -e mpeg \
+    -e mpg \
+    -e mts \
+    -e m2ts \
+    -e ts \
+    -e webm \
+    . \
+    "$resolved_dir" \
+    -0 \
+    | xargs -0 -r -P "$jobs" -I{} bash -c 'bash "$1" ensure "$2" "$3" >/dev/null || true' _ "$0" "{}" "$percent"
+}
+
+main() {
+  local cmd="${1:-}"
+
+  case "$cmd" in
+    thumb-path)
+      [[ $# -ge 2 ]] || {
+        usage >&2
+        exit 1
+      }
+      thumb_path "$2" "${3:-$default_percent}"
+      ;;
+    ensure)
+      [[ $# -ge 2 ]] || {
+        usage >&2
+        exit 1
+      }
+      ensure_thumb "$2" "${3:-$default_percent}"
+      ;;
+    warm)
+      [[ $# -ge 2 ]] || {
+        usage >&2
+        exit 1
+      }
+      warm_tree "$2" "${3:-$default_percent}"
+      ;;
+    *)
+      usage >&2
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"

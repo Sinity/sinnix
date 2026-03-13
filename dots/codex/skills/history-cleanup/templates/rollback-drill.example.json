@@ -1,0 +1,18 @@
+{
+  "repo": "/realm/project/example",
+  "backup_ref": "refs/backup/pre-structural-apply",
+  "bundle": "/outer-realm/backups/example/20260311T210000+0100-pre-structural-apply.bundle",
+  "checks": [
+    {
+      "kind": "backup_ref",
+      "restored_head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "restored_tree": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "kind": "bundle",
+      "restored_head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "restored_tree": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  ],
+  "ok": true
+}

@@ -1,0 +1,13 @@
+{
+  "left_repo": "/realm/project/example",
+  "right_repo": "/tmp/example-history-rewrite/repo",
+  "left_ref": "HEAD",
+  "right_ref": "HEAD",
+  "only_left_count": 0,
+  "only_right_count": 0,
+  "differing_count": 0,
+  "union_problem_count": 0,
+  "only_left_sample": [],
+  "only_right_sample": [],
+  "differing_sample": []
+}

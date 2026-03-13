@@ -2,6 +2,7 @@
   mkFeatureModule,
   pkgs,
   helpers,
+  inputs,
   ...
 }@args:
 mkFeatureModule {
@@ -16,11 +17,13 @@ mkFeatureModule {
       lib,
       pkgs,
       helpers,
+      inputs,
       user,
       ...
     }:
     let
       repoRoot = config.sinnix.paths.projectRoot;
+      scriptPkgs = inputs.self.packages.${pkgs.stdenv.hostPlatform.system};
     in
     {
       home-manager.users.${user} =
@@ -41,8 +44,37 @@ mkFeatureModule {
           chromeArgs = lib.concatStringsSep " " [
             "--disable-features=WaylandWpColorManagerV1,Vulkan,DefaultANGLEVulkan"
           ];
-          chromeStablePkg = pkgs.google-chrome.override {
+          chromeBasePkg = pkgs.google-chrome.override {
             commandLineArgs = chromeArgs;
+          };
+          chromeStablePkg = pkgs.symlinkJoin {
+            name = "google-chrome-trigger-capture";
+            inherit (chromeBasePkg)
+              meta
+              pname
+              version
+              ;
+            paths = [ chromeBasePkg ];
+            buildInputs = [ pkgs.makeWrapper ];
+            postBuild = ''
+              real_bin="$out/bin/.google-chrome-stable-real"
+              mv "$out/bin/google-chrome-stable" "$real_bin"
+              cat > "$out/bin/google-chrome-stable" <<'EOF'
+#!${pkgs.bash}/bin/bash
+set -euo pipefail
+exec ${lib.getExe scriptPkgs.launch-trigger-capture} chrome -- "$0.real" "$@"
+EOF
+              chmod +x "$out/bin/google-chrome-stable"
+              ln -s "$real_bin" "$out/bin/google-chrome-stable.real"
+
+              desktop="$out/share/applications/google-chrome.desktop"
+              if [ -f "$desktop" ]; then
+                rm -f "$desktop"
+                cp "${chromeBasePkg}/share/applications/google-chrome.desktop" "$desktop"
+                substituteInPlace "$desktop" \
+                  --replace-fail "${chromeBasePkg}/bin/google-chrome-stable" "$out/bin/google-chrome-stable"
+              fi
+            '';
           };
           browserLinkCmd = "${config.home.homeDirectory}/.local/bin/open-browser-link";
           mkDotsFile = mkDotsFileFor config;
@@ -61,6 +93,7 @@ mkFeatureModule {
               chromeStablePkg
               qutebrowser
               tor-browser
+              scriptPkgs.launch-trigger-capture
             ];
 
             file = {

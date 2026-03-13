@@ -30,6 +30,7 @@ let
       agenix
       home-manager
       nix-ai-tools
+      reboot-no-more
       sinex
       polylogue
       ;

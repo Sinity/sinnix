@@ -73,6 +73,10 @@ mkFeatureModule {
         set -euo pipefail
         exec ${pkgs.playwright-mcp}/bin/playwright-mcp "$@"
       '';
+      mcpPolylogueBin = pkgs.writeShellScriptBin "mcp-polylogue" ''
+        set -euo pipefail
+        exec ${pkgs.polylogue}/bin/polylogue mcp "$@"
+      '';
       geminiPkg = inputs.nix-ai-tools.packages.${pkgs.stdenv.hostPlatform.system}.gemini-cli;
     in
     {
@@ -164,6 +168,7 @@ mkFeatureModule {
             ".local/bin/mcp-context7".source = "${mcpContext7Bin}/bin/mcp-context7";
             ".local/bin/mcp-firecrawl".source = "${mcpFirecrawlBin}/bin/mcp-firecrawl";
             ".local/bin/mcp-playwright".source = "${mcpPlaywrightBin}/bin/mcp-playwright";
+            ".local/bin/mcp-polylogue".source = "${mcpPolylogueBin}/bin/mcp-polylogue";
             ".gemini/settings.json" = {
               source = mkDotsFile "/gemini/settings.json";
               force = true;

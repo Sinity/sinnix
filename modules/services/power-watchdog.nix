@@ -1,6 +1,6 @@
 # power-watchdog: High-frequency sensor logger for power loss forensics
 #
-# Logs CPU/GPU/NVMe temperatures, GPU power draw, and system load every second
+# Logs CPU/GPU/NVMe temperatures, GPU power/link state, and system load every second
 # to a persistent CSV file with periodic file sync.
 #
 # Purpose: When the system power-cycles unexpectedly, this gives us the last
@@ -116,7 +116,7 @@ let
 
       # Write CSV header if file doesn't exist or is empty
       if [ ! -s "$CSV_FILE" ]; then
-        echo "timestamp,cpu_pkg_c,cpu_max_core_c,ddr5_1_c,ddr5_2_c,nvme_1_c,nvme_2_c,gwmi_1_c,gwmi_2_c,gwmi_3_c,gwmi_4_c,gwmi_5_c,gwmi_6_c,gpu_temp_c,gpu_power_w,gpu_power_limit_w,gpu_fan_pct,gpu_util_pct,gpu_mem_util_pct,gpu_clk_mhz,load_1m,load_5m,mem_used_mb,mem_avail_mb,swap_used_mb" > "$CSV_FILE"
+        echo "timestamp,cpu_pkg_c,cpu_max_core_c,ddr5_1_c,ddr5_2_c,nvme_1_c,nvme_2_c,gwmi_1_c,gwmi_2_c,gwmi_3_c,gwmi_4_c,gwmi_5_c,gwmi_6_c,gpu_temp_c,gpu_power_w,gpu_power_limit_w,gpu_fan_pct,gpu_util_pct,gpu_mem_util_pct,gpu_clk_mhz,gpu_mem_clk_mhz,gpu_pstate,gpu_pcie_gen,gpu_pcie_width,load_1m,load_5m,mem_used_mb,mem_avail_mb,swap_used_mb" > "$CSV_FILE"
       fi
 
       # Rotation: once per day, trim lines older than retention
@@ -165,7 +165,7 @@ let
         fi
 
         # --- GPU data (nvidia-smi, ~54ms) ---
-        gpu_line=$(nvidia-smi --query-gpu=temperature.gpu,power.draw,power.limit,fan.speed,utilization.gpu,utilization.memory,clocks.current.graphics --format=csv,noheader,nounits 2>/dev/null || echo "0, 0, 0, 0, 0, 0, 0")
+        gpu_line=$(nvidia-smi --query-gpu=temperature.gpu,power.draw,power.limit,fan.speed,utilization.gpu,utilization.memory,clocks.current.graphics,clocks.current.memory,pstate,pcie.link.gen.gpucurrent,pcie.link.width.current --format=csv,noheader,nounits 2>/dev/null || echo "0, 0, 0, 0, 0, 0, 0, 0, P0, 0, 0")
         gpu_temp=$(echo "$gpu_line" | awk -F', ' '{print $1+0}')
         gpu_power=$(echo "$gpu_line" | awk -F', ' '{print $2+0}')
         gpu_plimit=$(echo "$gpu_line" | awk -F', ' '{print $3+0}')
@@ -173,6 +173,10 @@ let
         gpu_util=$(echo "$gpu_line" | awk -F', ' '{print $5+0}')
         gpu_mem=$(echo "$gpu_line" | awk -F', ' '{print $6+0}')
         gpu_clk=$(echo "$gpu_line" | awk -F', ' '{print $7+0}')
+        gpu_mem_clk=$(echo "$gpu_line" | awk -F', ' '{print $8+0}')
+        gpu_pstate=$(echo "$gpu_line" | awk -F', ' '{print $9}')
+        gpu_pcie_gen=$(echo "$gpu_line" | awk -F', ' '{print $10+0}')
+        gpu_pcie_width=$(echo "$gpu_line" | awk -F', ' '{print $11+0}')
 
         # --- System load & memory (direct /proc reads, ~0ms) ---
         read -r load_1 load_5 _ < /proc/loadavg
@@ -180,7 +184,7 @@ let
         read -r mem_used mem_avail swap_used <<< "$mem_info"
 
         # --- Write ---
-        echo "$ts,$cpu_pkg,$cpu_max,$ddr5_1,$ddr5_2,$nvme_1,$nvme_2,$gwmi_1,$gwmi_2,$gwmi_3,$gwmi_4,$gwmi_5,$gwmi_6,$gpu_temp,$gpu_power,$gpu_plimit,$gpu_fan,$gpu_util,$gpu_mem,$gpu_clk,$load_1,$load_5,$mem_used,$mem_avail,$swap_used" >> "$CSV_FILE"
+        echo "$ts,$cpu_pkg,$cpu_max,$ddr5_1,$ddr5_2,$nvme_1,$nvme_2,$gwmi_1,$gwmi_2,$gwmi_3,$gwmi_4,$gwmi_5,$gwmi_6,$gpu_temp,$gpu_power,$gpu_plimit,$gpu_fan,$gpu_util,$gpu_mem,$gpu_clk,$gpu_mem_clk,$gpu_pstate,$gpu_pcie_gen,$gpu_pcie_width,$load_1,$load_5,$mem_used,$mem_avail,$swap_used" >> "$CSV_FILE"
         samples_since_flush=$((samples_since_flush + 1))
         if (( samples_since_flush >= FLUSH_EVERY_SAMPLES )); then
           sync -f "$CSV_FILE" 2>/dev/null || true

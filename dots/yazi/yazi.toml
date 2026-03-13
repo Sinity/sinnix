@@ -1,0 +1,10 @@
+[preview]
+image_delay = 0
+
+[plugin]
+prepend_preloaders = [
+  { mime = "video/*", run = "sinnix-video-preview" },
+]
+prepend_previewers = [
+  { mime = "video/*", run = "sinnix-video-preview" },
+]

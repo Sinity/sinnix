@@ -1,0 +1,20 @@
+{
+  "created": "2026-03-11T00:00:00+01:00",
+  "project": "example-repo",
+  "head_sha": "0123456789abcdef0123456789abcdef01234567",
+  "prepared_commits": 0,
+  "remaining_commits": 0,
+  "current_branch": "master",
+  "working_tree_clean": true,
+  "pure_reword_applied_on_master": false,
+  "canonical_refs": {
+    "state_of_world": ".claude/scratch/audit/reword-history/canonical/launch-pack/state-of-world.md",
+    "execution_status": ".claude/scratch/audit/reword-history/canonical/launch-pack/execution-status-current.md",
+    "structural_execution_schema": "dots/codex/skills/history-cleanup/STRUCTURAL_EXECUTION_SCHEMA.md"
+  },
+  "rollback_refs": {
+    "local_backup_ref": "backup/pre-history-rewrite",
+    "external_bundle": "/outer-realm/backups/example-repo/pre-history-rewrite.bundle"
+  }
+}
+

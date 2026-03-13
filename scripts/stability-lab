@@ -1,0 +1,759 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DEFAULT_AUTO_CPU_MIN=25
+DEFAULT_AUTO_MEMORY_MIN=35
+DEFAULT_AUTO_COMBO_MIN=30
+DEFAULT_AUTO_COMBO_MEM_PERCENT=60
+
+REQUESTED_DEFAULT_AUTO=0
+if [[ $# -eq 0 ]]; then
+  REQUESTED_DEFAULT_AUTO=1
+fi
+
+usage() {
+  cat <<'EOF'
+stability-lab - focused hardware stability runner with persistent capture logs
+
+Usage:
+  stability-lab [options]
+  stability-lab auto [options]
+  stability-lab observe [options]
+  stability-lab cpu [options]
+  stability-lab memory [options]
+  stability-lab combo [options]
+  stability-lab report RUN_DIR [--end-local "YYYY-MM-DD HH:MM:SS"]
+
+Profiles:
+  auto      run CPU soak, memory hammer, and mixed load sweep (default)
+  observe   capture launch-path telemetry only; no synthetic stress load
+  cpu       stress all CPU workers with stress-ng matrix workload
+  memory    stress memory/controller with stressapptest
+  combo     stress CPU and RAM together with stress-ng
+  report    reconstruct below/journal/power-watchdog evidence for a run dir
+
+Options:
+  --duration-min N   single-profile run length in minutes (default: 20)
+  --mem-percent N    percent of available memory to target (default: 70)
+  --cpu-workers N    CPU workers/threads to use (default: nproc)
+  --cpu-min N        auto sweep CPU phase length in minutes (default: 25)
+  --memory-min N     auto sweep memory phase length in minutes (default: 35)
+  --combo-min N      auto sweep mixed phase length in minutes (default: 30)
+  --label NAME       append a short label to the output directory
+  --out-dir DIR      override capture root (default: $SINNIX_STABILITY_ROOT or /realm/data/captures/stability-lab)
+  -h, --help         show this help
+
+Examples:
+  stability-lab
+  stability-lab cpu --duration-min 30 --label compile-burst
+  stability-lab auto --combo-min 45 --label long-mixed
+  stability-lab memory --duration-min 45
+  stability-lab combo --duration-min 20 --mem-percent 60
+  stability-lab report /realm/data/captures/stability-lab/latest
+EOF
+}
+
+sanitize_fragment() {
+  printf '%s' "$1" | tr -cs '[:alnum:]._-+' '-' | sed 's/^-//; s/-$//'
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ "$EUID" -ne 0 ]]; then
+  if command -v sudo >/dev/null 2>&1; then
+    exec sudo -E "$0" "$@"
+  fi
+  echo "stability-lab requires root (sudo not found)." >&2
+  exit 1
+fi
+
+PROFILE="auto"
+if [[ $# -gt 0 && "${1:-}" != -* ]]; then
+  PROFILE="$1"
+  shift
+fi
+
+case "$PROFILE" in
+  auto|observe|cpu|memory|combo|report) ;;
+  *)
+    echo "Unknown subcommand: $PROFILE" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+DURATION_MIN=20
+MEM_PERCENT=70
+CPU_WORKERS="$(nproc)"
+AUTO_CPU_MIN="$DEFAULT_AUTO_CPU_MIN"
+AUTO_MEMORY_MIN="$DEFAULT_AUTO_MEMORY_MIN"
+AUTO_COMBO_MIN="$DEFAULT_AUTO_COMBO_MIN"
+LABEL=""
+OUTPUT_ROOT="${SINNIX_STABILITY_ROOT:-/realm/data/captures/stability-lab}"
+REPORT_END_LOCAL=""
+RUN_DIR=""
+RESUMING_EXISTING_RUN=0
+RESUME_PHASE=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --duration-min)
+      [[ $# -ge 2 ]] || { echo "--duration-min requires a value" >&2; exit 2; }
+      DURATION_MIN="$2"
+      shift 2
+      ;;
+    --mem-percent)
+      [[ $# -ge 2 ]] || { echo "--mem-percent requires a value" >&2; exit 2; }
+      MEM_PERCENT="$2"
+      shift 2
+      ;;
+    --cpu-workers)
+      [[ $# -ge 2 ]] || { echo "--cpu-workers requires a value" >&2; exit 2; }
+      CPU_WORKERS="$2"
+      shift 2
+      ;;
+    --cpu-min)
+      [[ $# -ge 2 ]] || { echo "--cpu-min requires a value" >&2; exit 2; }
+      AUTO_CPU_MIN="$2"
+      shift 2
+      ;;
+    --memory-min)
+      [[ $# -ge 2 ]] || { echo "--memory-min requires a value" >&2; exit 2; }
+      AUTO_MEMORY_MIN="$2"
+      shift 2
+      ;;
+    --combo-min)
+      [[ $# -ge 2 ]] || { echo "--combo-min requires a value" >&2; exit 2; }
+      AUTO_COMBO_MIN="$2"
+      shift 2
+      ;;
+    --label)
+      [[ $# -ge 2 ]] || { echo "--label requires a value" >&2; exit 2; }
+      LABEL="$2"
+      shift 2
+      ;;
+    --out-dir)
+      [[ $# -ge 2 ]] || { echo "--out-dir requires a path" >&2; exit 2; }
+      OUTPUT_ROOT="$2"
+      shift 2
+      ;;
+    --end-local)
+      [[ $# -ge 2 ]] || { echo "--end-local requires a timestamp" >&2; exit 2; }
+      REPORT_END_LOCAL="$2"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      if [[ "$PROFILE" == "report" && -z "$RUN_DIR" ]]; then
+        RUN_DIR="$1"
+        shift
+      else
+        echo "Unknown argument: $1" >&2
+        usage >&2
+        exit 2
+      fi
+      ;;
+  esac
+done
+
+if ! [[ "$DURATION_MIN" =~ ^[0-9]+$ ]] || (( DURATION_MIN <= 0 )); then
+  echo "--duration-min must be a positive integer" >&2
+  exit 2
+fi
+
+if ! [[ "$MEM_PERCENT" =~ ^[0-9]+$ ]] || (( MEM_PERCENT < 10 || MEM_PERCENT > 95 )); then
+  echo "--mem-percent must be an integer between 10 and 95" >&2
+  exit 2
+fi
+
+if ! [[ "$CPU_WORKERS" =~ ^[0-9]+$ ]] || (( CPU_WORKERS <= 0 )); then
+  echo "--cpu-workers must be a positive integer" >&2
+  exit 2
+fi
+
+if ! [[ "$AUTO_CPU_MIN" =~ ^[0-9]+$ ]] || (( AUTO_CPU_MIN <= 0 )); then
+  echo "--cpu-min must be a positive integer" >&2
+  exit 2
+fi
+
+if ! [[ "$AUTO_MEMORY_MIN" =~ ^[0-9]+$ ]] || (( AUTO_MEMORY_MIN <= 0 )); then
+  echo "--memory-min must be a positive integer" >&2
+  exit 2
+fi
+
+if ! [[ "$AUTO_COMBO_MIN" =~ ^[0-9]+$ ]] || (( AUTO_COMBO_MIN <= 0 )); then
+  echo "--combo-min must be a positive integer" >&2
+  exit 2
+fi
+
+RUN_STATE_DIR=""
+RUN_LOG=""
+RUN_META=""
+REPORT_DIR=""
+PHASE_LOG=""
+START_LOCAL=""
+START_CSV=""
+MONITOR_PIDS=()
+COMPLETION_RECORDED=0
+REPORT_GENERATED=0
+CURRENT_PHASE=""
+CURRENT_PHASE_DURATION_MIN=0
+CURRENT_PHASE_MEM_PERCENT=0
+CURRENT_PHASE_TARGET_MEM_MB=0
+TARGET_MEM_MB=0
+RESERVE_MB=2048
+COPY_THREADS=1
+INVERT_THREADS=1
+CPU_STRESS_THREADS=1
+VM_WORKERS=1
+VM_BYTES_MB=128
+
+find_resume_phase() {
+  local phase_log="$1"
+
+  if [[ ! -f "$phase_log" ]]; then
+    return 1
+  fi
+
+  if grep -q ',combo,end,' "$phase_log"; then
+    return 1
+  fi
+
+  if grep -q ',combo,start,' "$phase_log" || grep -q ',combo,abort,' "$phase_log"; then
+    printf 'combo\n'
+    return 0
+  fi
+
+  if grep -q ',memory,end,' "$phase_log"; then
+    printf 'combo\n'
+    return 0
+  fi
+
+  if grep -q ',memory,start,' "$phase_log" || grep -q ',memory,abort,' "$phase_log"; then
+    printf 'memory\n'
+    return 0
+  fi
+
+  if grep -q ',cpu,end,' "$phase_log"; then
+    printf 'memory\n'
+    return 0
+  fi
+
+  if grep -q ',cpu,start,' "$phase_log" || grep -q ',cpu,abort,' "$phase_log"; then
+    printf 'cpu\n'
+    return 0
+  fi
+
+  printf 'cpu\n'
+}
+
+try_resume_default_auto() {
+  local latest_auto
+
+  if [[ "$PROFILE" != "auto" || $REQUESTED_DEFAULT_AUTO -ne 1 ]]; then
+    return 1
+  fi
+
+  latest_auto="$(readlink -f "${OUTPUT_ROOT}/latest-auto" 2>/dev/null || true)"
+  if [[ -z "$latest_auto" || ! -d "$latest_auto" ]]; then
+    return 1
+  fi
+
+  RUN_STATE_DIR="$latest_auto"
+  RUN_LOG="${RUN_STATE_DIR}/run.log"
+  RUN_META="${RUN_STATE_DIR}/meta.env"
+  PHASE_LOG="${RUN_STATE_DIR}/phases.csv"
+  if [[ ! -f "$RUN_META" || ! -f "$PHASE_LOG" ]]; then
+    return 1
+  fi
+
+  RESUME_PHASE="$(find_resume_phase "$PHASE_LOG" || true)"
+  if [[ -z "$RESUME_PHASE" ]]; then
+    return 1
+  fi
+
+  # shellcheck disable=SC1090
+  source "$RUN_META"
+  RESUMING_EXISTING_RUN=1
+  return 0
+}
+
+record_completion() {
+  local exit_code="$1"
+  local end_local end_csv
+  if [[ $COMPLETION_RECORDED -eq 1 || -z "$RUN_META" || ! -f "$RUN_META" ]]; then
+    return
+  fi
+
+  end_local=$(date +'%Y-%m-%d %H:%M:%S')
+  end_csv=$(date +'%Y-%m-%dT%H:%M:%S')
+  {
+    printf 'END_LOCAL=%q\n' "$end_local"
+    printf 'END_CSV=%q\n' "$end_csv"
+    printf 'EXIT_STATUS=%q\n' "$exit_code"
+  } >> "$RUN_META"
+  COMPLETION_RECORDED=1
+}
+
+stop_monitors() {
+  local pid
+  for pid in "${MONITOR_PIDS[@]:-}"; do
+    if kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+    fi
+  done
+}
+
+record_phase() {
+  local phase="$1"
+  local event="$2"
+  local duration_min="$3"
+  local mem_percent="$4"
+  local target_mem_mb="$5"
+
+  if [[ -z "$PHASE_LOG" ]]; then
+    return
+  fi
+
+  printf '%s,%s,%s,%s,%s,%s,%s,%s\n' \
+    "$(date +'%Y-%m-%d %H:%M:%S')" \
+    "$(date +'%Y-%m-%dT%H:%M:%S')" \
+    "$phase" \
+    "$event" \
+    "$duration_min" \
+    "$mem_percent" \
+    "$CPU_WORKERS" \
+    "$target_mem_mb" >> "$PHASE_LOG"
+}
+
+ensure_service_active() {
+  local unit="$1"
+  if ! systemctl cat "$unit" >/dev/null 2>&1; then
+    printf 'warning: %s is not installed on this machine\n' "$unit"
+    return 0
+  fi
+
+  if ! systemctl is-active --quiet "$unit"; then
+    printf 'starting %s to ensure telemetry is present\n' "$unit"
+    systemctl start "$unit"
+  fi
+}
+
+collect_storage_health() {
+  local target_dir="$1"
+  local dev base
+  while read -r dev; do
+    [[ -n "$dev" ]] || continue
+    base="$(basename "$dev")"
+    smartctl -H "$dev" > "${target_dir}/smart-health-${base}.txt" 2>&1 || true
+    if [[ "$dev" == /dev/nvme* ]]; then
+      nvme smart-log "$dev" > "${target_dir}/nvme-smart-${base}.txt" 2>&1 || true
+    fi
+  done < <(lsblk -dn -o NAME,TYPE | awk '$2 == "disk" { print "/dev/" $1 }')
+}
+
+collect_snapshots() {
+  local suffix="$1"
+  mkdir -p "${RUN_STATE_DIR}/${suffix}"
+
+  uname -a > "${RUN_STATE_DIR}/${suffix}/uname.txt"
+  lscpu > "${RUN_STATE_DIR}/${suffix}/lscpu.txt"
+  free -h > "${RUN_STATE_DIR}/${suffix}/memory.txt"
+  uptime > "${RUN_STATE_DIR}/${suffix}/uptime.txt"
+  sensors > "${RUN_STATE_DIR}/${suffix}/sensors.txt" 2>&1 || true
+  nvidia-smi -q -d POWER,TEMPERATURE,CLOCK > "${RUN_STATE_DIR}/${suffix}/nvidia-smi.txt" 2>&1 || true
+  systemctl status power-watchdog.service below.service > "${RUN_STATE_DIR}/${suffix}/telemetry-services.txt" 2>&1 || true
+  journalctl -k -b -n 300 > "${RUN_STATE_DIR}/${suffix}/kernel-tail.txt" 2>&1 || true
+  coredumpctl list --no-pager > "${RUN_STATE_DIR}/${suffix}/coredumps.txt" 2>&1 || true
+  cp /proc/pressure/cpu "${RUN_STATE_DIR}/${suffix}/pressure-cpu.txt"
+  cp /proc/pressure/memory "${RUN_STATE_DIR}/${suffix}/pressure-memory.txt"
+  cp /proc/pressure/io "${RUN_STATE_DIR}/${suffix}/pressure-io.txt"
+  collect_storage_health "${RUN_STATE_DIR}/${suffix}"
+}
+
+start_monitors() {
+  stdbuf -oL -eL journalctl -kf -o short-iso > "${RUN_STATE_DIR}/journal-kernel-live.log" 2>&1 &
+  MONITOR_PIDS+=("$!")
+
+  stdbuf -oL -eL turbostat --Summary --interval 5 > "${RUN_STATE_DIR}/turbostat.log" 2>&1 &
+  MONITOR_PIDS+=("$!")
+
+  stdbuf -oL -eL bash -c '
+    while true; do
+      printf "# %s\n" "$(date +'"'"'%Y-%m-%d %H:%M:%S'"'"')"
+      sensors -u || true
+      printf "\n"
+      sleep 5
+    done
+  ' > "${RUN_STATE_DIR}/sensors-live.log" 2>&1 &
+  MONITOR_PIDS+=("$!")
+
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    stdbuf -oL -eL bash -c '
+      while true; do
+        printf "timestamp,temperature.gpu,power.draw,utilization.gpu,utilization.memory,clocks.current.graphics,clocks.current.memory,pstate,pcie.link.gen.gpucurrent,pcie.link.width.current\n"
+        break
+      done
+      while true; do
+        printf "%s," "$(date +'"'"'%Y-%m-%dT%H:%M:%S'"'"')"
+        nvidia-smi --query-gpu=temperature.gpu,power.draw,utilization.gpu,utilization.memory,clocks.current.graphics,clocks.current.memory,pstate,pcie.link.gen.gpucurrent,pcie.link.width.current --format=csv,noheader,nounits 2>/dev/null || echo "0,0,0,0,0,0,P0,0,0"
+        sleep 1
+      done
+    ' > "${RUN_STATE_DIR}/nvidia-live.csv" 2>&1 &
+    MONITOR_PIDS+=("$!")
+  fi
+
+  stdbuf -oL -eL journalctl -f -o short-iso \
+    -g 'Hyprland|google-chrome|chrome|chromium|Xwayland|waybar|xdg-desktop-portal-hyprland|nvidia|NVRM|Xid|systemd-resolved|NetworkManager|r8169|AER|pcie|watchdog' \
+    > "${RUN_STATE_DIR}/journal-targeted.log" 2>&1 &
+  MONITOR_PIDS+=("$!")
+
+  stdbuf -oL -eL bash -c '
+    while true; do
+      printf "# %s\n" "$(date +'"'"'%Y-%m-%d %H:%M:%S'"'"')"
+      ps -eo pid,comm,%cpu,%mem,etimes,args --sort=pid | grep -E "^(\\s*PID|.*(Hyprland|chrome|google-chrome|chromium|Xwayland|waybar|xdg-desktop-portal-hyprland).*)$" || true
+      printf "\n"
+      sleep 1
+    done
+  ' > "${RUN_STATE_DIR}/process-watch.log" 2>&1 &
+  MONITOR_PIDS+=("$!")
+}
+
+prepare_memory_targets() {
+  local phase_mem_percent="$1"
+  local avail_mb max_safe_mb
+
+  avail_mb="$(awk '/MemAvailable:/ { print int($2 / 1024) }' /proc/meminfo)"
+  TARGET_MEM_MB=$((avail_mb * phase_mem_percent / 100))
+  max_safe_mb=$((avail_mb - RESERVE_MB))
+  if (( max_safe_mb < 512 )); then
+    max_safe_mb=512
+  fi
+  if (( TARGET_MEM_MB > max_safe_mb )); then
+    TARGET_MEM_MB=$max_safe_mb
+  fi
+
+  COPY_THREADS=$CPU_WORKERS
+  if (( COPY_THREADS > 8 )); then
+    COPY_THREADS=8
+  fi
+  if (( COPY_THREADS < 1 )); then
+    COPY_THREADS=1
+  fi
+
+  INVERT_THREADS=$((COPY_THREADS / 2))
+  if (( INVERT_THREADS < 1 )); then
+    INVERT_THREADS=1
+  fi
+
+  CPU_STRESS_THREADS=$((COPY_THREADS / 2))
+  if (( CPU_STRESS_THREADS < 1 )); then
+    CPU_STRESS_THREADS=1
+  fi
+
+  VM_WORKERS=$(( (CPU_WORKERS + 1) / 2 ))
+  if (( VM_WORKERS < 1 )); then
+    VM_WORKERS=1
+  fi
+
+  VM_BYTES_MB=$((TARGET_MEM_MB / VM_WORKERS))
+  if (( VM_BYTES_MB < 128 )); then
+    VM_BYTES_MB=128
+  fi
+}
+
+run_phase() {
+  local phase="$1"
+  local duration_min="$2"
+  local phase_mem_percent="$3"
+  local duration_sec
+
+  duration_sec=$((duration_min * 60))
+  prepare_memory_targets "$phase_mem_percent"
+
+  CURRENT_PHASE="$phase"
+  CURRENT_PHASE_DURATION_MIN="$duration_min"
+  CURRENT_PHASE_MEM_PERCENT="$phase_mem_percent"
+  CURRENT_PHASE_TARGET_MEM_MB="$TARGET_MEM_MB"
+
+  printf 'stability-lab: phase=%s duration=%sm mem_percent=%s target_mem=%sMiB reserve=%sMiB\n' \
+    "$phase" "$duration_min" "$phase_mem_percent" "$TARGET_MEM_MB" "$RESERVE_MB"
+  record_phase "$phase" "start" "$duration_min" "$phase_mem_percent" "$TARGET_MEM_MB"
+
+  case "$phase" in
+    cpu)
+      stress-ng \
+        --cpu "$CPU_WORKERS" \
+        --cpu-method matrixprod \
+        --verify \
+        --metrics-brief \
+        --rapl \
+        --tz \
+        --timeout "${duration_sec}s"
+      ;;
+    memory)
+      stressapptest \
+        -s "$duration_sec" \
+        -M "$TARGET_MEM_MB" \
+        -m "$COPY_THREADS" \
+        -i "$INVERT_THREADS" \
+        -C "$CPU_STRESS_THREADS" \
+        -W \
+        -l "${RUN_STATE_DIR}/stressapptest.log"
+      ;;
+    combo)
+      stress-ng \
+        --cpu "$CPU_WORKERS" \
+        --cpu-method matrixprod \
+        --vm "$VM_WORKERS" \
+        --vm-bytes "${VM_BYTES_MB}M" \
+        --vm-keep \
+        --verify \
+        --metrics-brief \
+        --rapl \
+        --tz \
+        --timeout "${duration_sec}s"
+      ;;
+  esac
+
+  record_phase "$phase" "end" "$duration_min" "$phase_mem_percent" "$TARGET_MEM_MB"
+  CURRENT_PHASE=""
+}
+
+run_observe_phase() {
+  local duration_min="$1"
+  local duration_sec
+
+  duration_sec=$((duration_min * 60))
+  CURRENT_PHASE="observe"
+  CURRENT_PHASE_DURATION_MIN="$duration_min"
+  CURRENT_PHASE_MEM_PERCENT=0
+  CURRENT_PHASE_TARGET_MEM_MB=0
+
+  printf 'stability-lab: phase=observe duration=%sm targeted launch-path telemetry only\n' "$duration_min"
+  record_phase "observe" "start" "$duration_min" "0" "0"
+  sleep "$duration_sec"
+  record_phase "observe" "end" "$duration_min" "0" "0"
+  CURRENT_PHASE=""
+}
+
+generate_report() {
+  local target_dir="$1"
+  local start_local="$2"
+  local start_csv="$3"
+  local end_local="$4"
+  local end_csv="$5"
+
+  mkdir -p "${target_dir}/report"
+  REPORT_DIR="${target_dir}/report"
+
+  journalctl -k --since "$start_local" --until "$end_local" > "${REPORT_DIR}/kernel.log" 2>&1 || true
+  journalctl --since "$start_local" --until "$end_local" -p warning..alert > "${REPORT_DIR}/warnings.log" 2>&1 || true
+  coredumpctl list --since "$start_local" --until "$end_local" > "${REPORT_DIR}/coredumps-window.txt" 2>&1 || true
+
+  if command -v below >/dev/null 2>&1; then
+    below dump system \
+      -b "$start_local" \
+      -e "$end_local" \
+      -f datetime cpu.usage_pct cpu.iowait_pct mem.available vm.oom_kill stat.running_processes \
+      -O csv \
+      > "${REPORT_DIR}/below-system.csv" 2> "${REPORT_DIR}/below-system.err" || true
+
+    below dump process \
+      -b "$start_local" \
+      -e "$end_local" \
+      -s cpu.usage_pct \
+      --rsort \
+      --top 20 \
+      -f datetime pid comm state cpu.usage_pct mem.rss_bytes cmdline \
+      -O csv \
+      > "${REPORT_DIR}/below-top-processes.csv" 2> "${REPORT_DIR}/below-top-processes.err" || true
+
+    below dump cgroup \
+      -b "$start_local" \
+      -e "$end_local" \
+      -s cpu.usage_pct \
+      --rsort \
+      --top 20 \
+      -f datetime name full_path cpu.usage_pct mem.total pressure.cpu_some_pct pressure.memory_full_pct io.rwbytes_per_sec \
+      -O csv \
+      > "${REPORT_DIR}/below-top-cgroups.csv" 2> "${REPORT_DIR}/below-top-cgroups.err" || true
+  fi
+
+  if [[ -f /realm/data/captures/power-watchdog/sensors.csv ]]; then
+    awk -F, -v start="$start_csv" -v end="$end_csv" 'NR == 1 || ($1 >= start && $1 <= end)' \
+      /realm/data/captures/power-watchdog/sensors.csv > "${REPORT_DIR}/power-watchdog.csv" || true
+  fi
+
+  REPORT_GENERATED=1
+}
+
+cleanup() {
+  local exit_code="$1"
+  set +e
+  stop_monitors
+
+  if [[ $exit_code -ne 0 && -n "$CURRENT_PHASE" ]]; then
+    record_phase "$CURRENT_PHASE" "abort" "$CURRENT_PHASE_DURATION_MIN" "$CURRENT_PHASE_MEM_PERCENT" "$CURRENT_PHASE_TARGET_MEM_MB"
+  fi
+
+  record_completion "$exit_code"
+
+  if [[ -n "$RUN_META" && -f "$RUN_META" ]]; then
+    # shellcheck disable=SC1090
+    source "$RUN_META"
+    if [[ $REPORT_GENERATED -eq 0 && -n "${START_LOCAL:-}" && -n "${START_CSV:-}" && -n "${END_LOCAL:-}" && -n "${END_CSV:-}" ]]; then
+      generate_report "$RUN_STATE_DIR" "$START_LOCAL" "$START_CSV" "$END_LOCAL" "$END_CSV"
+    fi
+  fi
+
+  if [[ -n "${SUDO_UID:-}" && -n "${SUDO_GID:-}" && -n "$RUN_STATE_DIR" && -d "$RUN_STATE_DIR" ]]; then
+    chown -R "$SUDO_UID:$SUDO_GID" "$RUN_STATE_DIR" 2>/dev/null || true
+  fi
+}
+
+if [[ "$PROFILE" == "report" ]]; then
+  if [[ -z "$RUN_DIR" ]]; then
+    echo "report requires a run directory argument" >&2
+    exit 2
+  fi
+  RUN_STATE_DIR="$(readlink -f "$RUN_DIR")"
+  RUN_META="${RUN_STATE_DIR}/meta.env"
+  if [[ ! -f "$RUN_META" ]]; then
+    echo "No meta.env found in $RUN_STATE_DIR" >&2
+    exit 1
+  fi
+
+  # shellcheck disable=SC1090
+  source "$RUN_META"
+
+  if [[ -n "${REPORT_END_LOCAL:-}" ]]; then
+    END_LOCAL="$REPORT_END_LOCAL"
+    END_CSV="$(date -d "$REPORT_END_LOCAL" +'%Y-%m-%dT%H:%M:%S')"
+  elif [[ -z "${END_LOCAL:-}" || -z "${END_CSV:-}" ]]; then
+    current_boot_id="$(cat /proc/sys/kernel/random/boot_id)"
+    if [[ "${START_BOOT_ID:-}" != "$current_boot_id" ]]; then
+      END_LOCAL="$(uptime -s)"
+      END_CSV="$(date -d "$END_LOCAL" +'%Y-%m-%dT%H:%M:%S')"
+    else
+      END_LOCAL="$(date +'%Y-%m-%d %H:%M:%S')"
+      END_CSV="$(date +'%Y-%m-%dT%H:%M:%S')"
+    fi
+  fi
+
+  generate_report "$RUN_STATE_DIR" "$START_LOCAL" "$START_CSV" "$END_LOCAL" "$END_CSV"
+  if [[ -n "${SUDO_UID:-}" && -n "${SUDO_GID:-}" ]]; then
+    chown -R "$SUDO_UID:$SUDO_GID" "$RUN_STATE_DIR" 2>/dev/null || true
+  fi
+  printf 'Report written to %s\n' "$REPORT_DIR"
+  exit 0
+fi
+
+timestamp_id="$(date +'%Y%m%d-%H%M%S')"
+label_fragment=""
+if [[ -n "$LABEL" ]]; then
+  label_fragment="-$(sanitize_fragment "$LABEL")"
+fi
+
+if ! try_resume_default_auto; then
+  RUN_STATE_DIR="${OUTPUT_ROOT}/${timestamp_id}-${PROFILE}${label_fragment}"
+  RUN_LOG="${RUN_STATE_DIR}/run.log"
+  RUN_META="${RUN_STATE_DIR}/meta.env"
+  PHASE_LOG="${RUN_STATE_DIR}/phases.csv"
+  mkdir -p "$RUN_STATE_DIR"
+
+  if [[ -n "${SUDO_UID:-}" && -n "${SUDO_GID:-}" ]]; then
+    chown "$SUDO_UID:$SUDO_GID" "$RUN_STATE_DIR"
+  fi
+
+  START_LOCAL="$(date +'%Y-%m-%d %H:%M:%S')"
+  START_CSV="$(date +'%Y-%m-%dT%H:%M:%S')"
+  {
+    printf 'PROFILE=%q\n' "$PROFILE"
+    printf 'RUN_DIR=%q\n' "$RUN_STATE_DIR"
+    printf 'START_LOCAL=%q\n' "$START_LOCAL"
+    printf 'START_CSV=%q\n' "$START_CSV"
+    printf 'START_BOOT_ID=%q\n' "$(cat /proc/sys/kernel/random/boot_id)"
+    printf 'HOSTNAME=%q\n' "$(hostname)"
+    printf 'KERNEL=%q\n' "$(uname -r)"
+    printf 'DURATION_MIN=%q\n' "$DURATION_MIN"
+    printf 'MEM_PERCENT=%q\n' "$MEM_PERCENT"
+    printf 'CPU_WORKERS=%q\n' "$CPU_WORKERS"
+    printf 'AUTO_CPU_MIN=%q\n' "$AUTO_CPU_MIN"
+    printf 'AUTO_MEMORY_MIN=%q\n' "$AUTO_MEMORY_MIN"
+    printf 'AUTO_COMBO_MIN=%q\n' "$AUTO_COMBO_MIN"
+    printf 'AUTO_COMBO_MEM_PERCENT=%q\n' "$DEFAULT_AUTO_COMBO_MEM_PERCENT"
+  } > "$RUN_META"
+
+  printf 'timestamp_local,timestamp_csv,phase,event,duration_min,mem_percent,cpu_workers,target_mem_mb\n' > "$PHASE_LOG"
+fi
+
+ln -sfn "$RUN_STATE_DIR" "${OUTPUT_ROOT}/latest"
+ln -sfn "$RUN_STATE_DIR" "${OUTPUT_ROOT}/latest-${PROFILE}"
+
+exec > >(tee -a "$RUN_LOG")
+exec 2>&1
+
+trap 'cleanup "$?"' EXIT
+
+if [[ $RESUMING_EXISTING_RUN -eq 1 ]]; then
+  printf 'stability-lab: resuming run directory %s from phase=%s\n' "$RUN_STATE_DIR" "$RESUME_PHASE"
+else
+  printf 'stability-lab: run directory %s\n' "$RUN_STATE_DIR"
+fi
+printf 'stability-lab: profile=%s duration=%sm cpu_workers=%s mem_percent=%s\n' \
+  "$PROFILE" "$DURATION_MIN" "$CPU_WORKERS" "$MEM_PERCENT"
+
+ensure_service_active power-watchdog.service
+ensure_service_active below.service
+sleep 2
+
+if [[ $RESUMING_EXISTING_RUN -eq 1 ]]; then
+  printf 'RESUME_LOCAL=%q\n' "$(date +'%Y-%m-%d %H:%M:%S')" >> "$RUN_META"
+  printf 'RESUME_BOOT_ID=%q\n' "$(cat /proc/sys/kernel/random/boot_id)" >> "$RUN_META"
+  collect_snapshots "resume-before"
+else
+  collect_snapshots before
+fi
+start_monitors
+
+case "$PROFILE" in
+  auto)
+    # Default sweep isolates CPU first, then RAM/IMC, then mixed load on a warm system.
+    printf 'stability-lab: auto sweep cpu=%sm memory=%sm combo=%sm combo_mem_percent=%s\n' \
+      "$AUTO_CPU_MIN" "$AUTO_MEMORY_MIN" "$AUTO_COMBO_MIN" "$DEFAULT_AUTO_COMBO_MEM_PERCENT"
+    case "${RESUME_PHASE:-cpu}" in
+      cpu)
+        run_phase cpu "$AUTO_CPU_MIN" "$MEM_PERCENT"
+        ;&
+      memory)
+        run_phase memory "$AUTO_MEMORY_MIN" "$MEM_PERCENT"
+        ;&
+      combo)
+        run_phase combo "$AUTO_COMBO_MIN" "$DEFAULT_AUTO_COMBO_MEM_PERCENT"
+        ;;
+    esac
+    ;;
+  observe)
+    run_observe_phase "$DURATION_MIN"
+    ;;
+  cpu)
+    run_phase cpu "$DURATION_MIN" "$MEM_PERCENT"
+    ;;
+  memory)
+    run_phase memory "$DURATION_MIN" "$MEM_PERCENT"
+    ;;
+  combo)
+    run_phase combo "$DURATION_MIN" "$MEM_PERCENT"
+    ;;
+esac
+
+collect_snapshots after
+printf 'stability-lab: run complete, report at %s/report\n' "$RUN_STATE_DIR"

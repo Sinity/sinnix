@@ -38,6 +38,7 @@
     "ask": [],
     "defaultMode": "default"
   },
+  "model": "sonnet",
   "hooks": {
     "PreToolUse": [
       {
@@ -62,6 +63,10 @@
     "rust-analyzer-lsp@claude-plugins-official": true
   },
   "alwaysThinkingEnabled": true,
-  "effortLevel": "high",
-  "model": "sonnet"
+  "mcpServers": {
+    "polylogue": {
+      "command": "mcp-polylogue",
+      "args": []
+    }
+  }
 }

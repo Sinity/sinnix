@@ -118,6 +118,48 @@ let
       ];
     };
 
+    stability-lab = mkScript "stability-lab" {
+      description = "Focused hardware stability runner with persistent reboot forensics";
+      runtimeInputs = with pkgs; [
+        bash
+        below
+        coreutils
+        findutils
+        gawk
+        gnugrep
+        gnused
+        linuxPackages.turbostat
+        lm_sensors
+        nvme-cli
+        procps
+        smartmontools
+        stress-ng
+        stressapptest
+        sudo
+        systemd
+        util-linux
+      ];
+    };
+
+    launch-trigger-capture = mkScript "launch-trigger-capture" {
+      description = "Capture granular launch-boundary telemetry for suspected reboot triggers";
+      runtimeInputs = with pkgs; [
+        bash
+        coreutils
+        findutils
+        gawk
+        gnugrep
+        gnused
+        lm_sensors
+        pciutils
+        procps
+        strace
+        systemd
+        udev
+        util-linux
+      ];
+    };
+
     # Audio control
     audio = mkScript "audio" {
       description = "Audio device and volume control with gum UI";
@@ -126,6 +168,18 @@ let
         gum
         pulseaudio
         pamixer
+      ];
+    };
+
+    media-preview-cache = mkScript "media-preview-cache" {
+      description = "Precompute and query cached media preview thumbnails";
+      runtimeInputs = with pkgs; [
+        bash
+        coreutils
+        fd
+        ffmpegthumbnailer
+        findutils
+        util-linux
       ];
     };
 

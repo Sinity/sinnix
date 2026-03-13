@@ -31,6 +31,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    lanzaboote = {
+      url = "github:nix-community/lanzaboote";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     # Custom tools and integrations (prefer local clones under /realm/project)
     intercept-bounce = {
       url = "git+file:///realm/project/intercept-bounce?ref=master";
@@ -44,6 +49,11 @@
 
     polylogue = {
       url = "git+file:///realm/project/polylogue?ref=master";
+    };
+
+    reboot-no-more = {
+      url = "path:/realm/project/reboot-no-more";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
 
     # Private Sinex repository stored locally; build fails fast if missing.

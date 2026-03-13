@@ -1,10 +1,18 @@
 # Host-specific boot configuration for sinnix-prime
-{ pkgs, ... }:
+{ pkgs, lib, inputs, ... }:
 {
+  imports = [ inputs.lanzaboote.nixosModules.lanzaboote ];
+
   boot = {
+    lanzaboote = {
+      enable = true;
+      pkiBundle = "/var/lib/sbctl";
+      autoGenerateKeys.enable = true;
+    };
+
     loader = {
       systemd-boot = {
-        enable = true;
+        enable = lib.mkForce false;
         configurationLimit = null;
       };
       efi.canTouchEfiVariables = true;
@@ -38,6 +46,9 @@
       "vga=current"
     ];
   };
+
+  environment.systemPackages = [ pkgs.sbctl ];
+  sinnix.persistence.system.directories = [ "/var/lib/sbctl" ];
 
   # intel_pstate on this host exposes performance/powersave governors;
   # forcing schedutil makes NixOS try to load cpufreq_schedutil at boot.
