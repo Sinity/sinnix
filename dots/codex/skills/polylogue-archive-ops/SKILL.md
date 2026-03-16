@@ -18,6 +18,7 @@ Use this skill when the task touches archived AI-chat data.
 1. Use `polylogue` CLI for local operator flows: ingest, inspect, archive maintenance.
 2. Use `mcp-polylogue` when an MCP-capable client should query the archive through one canonical tool contract.
 3. Do not duplicate Polylogue archive logic in ad hoc skills when the MCP already exposes it cleanly.
+4. Do not assume a timer/service is updating the archive; refresh it explicitly when needed.
 
 ## Commands
 
@@ -30,7 +31,8 @@ mcp-polylogue
 
 ## Rules
 
-1. Prefer the packaged `polylogue` binary, not repo-local bootstrap commands.
+1. Prefer the packaged `polylogue`, `polylogue-python`, and `mcp-polylogue` wrappers, not repo-local bootstrap commands.
 2. Treat MCP as the portable query surface and skills as orchestration around it.
 3. When configuring clients, use the `mcp-polylogue` wrapper rather than embedding provider-specific launch logic.
 4. Keep archive state under the existing Sinnix-managed Polylogue directories; do not invent new state roots.
+5. For analysis work, treat Polylogue as the owner of conversation semantics and use the CLI/MCP/API surfaces directly before resorting to rendered Markdown.

@@ -1,6 +1,7 @@
 {
   mkFeatureModule,
   pkgs,
+  inputs,
   ...
 }@args:
 mkFeatureModule {
@@ -12,13 +13,21 @@ mkFeatureModule {
   configFn =
     {
       user,
+      inputs,
+      pkgs,
       ...
     }:
+    let
+      scriptPkgs = inputs.self.packages.${pkgs.stdenv.hostPlatform.system};
+    in
     {
       home-manager.users.${user} =
         { ... }:
         {
-          home.packages = [ pkgs.polylogue ];
+          home.packages = [
+            scriptPkgs.polylogue-cli
+            scriptPkgs.polylogue-python
+          ];
         };
     };
 } args

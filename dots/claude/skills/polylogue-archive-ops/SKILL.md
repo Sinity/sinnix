@@ -28,3 +28,4 @@ Rules:
 2. Use MCP when the goal is a reusable query/tool contract across clients.
 3. Use the CLI when the goal is an operator workflow or archive maintenance step.
 4. Do not recreate Polylogue archive semantics in bespoke scripts when the existing CLI or MCP surface already covers the task.
+5. Do not assume a timer/service is updating the archive; refresh it explicitly when needed.

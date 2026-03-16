@@ -10,6 +10,12 @@ metadata:
 
 # Lynchpin Ops
 
+This skill owns the evolving doctrine at:
+
+- `/realm/project/sinnix/dots/codex/skills/lynchpin-ops/README.md`
+- `/realm/project/sinnix/dots/codex/skills/lynchpin-ops/METHODOLOGY.md`
+- `/realm/project/sinnix/dots/codex/skills/lynchpin-ops/project-runs/README.md`
+
 Use this skill when the task is about Lynchpin control-plane workflows and the
 canonical surface should be the internal `lynchpin.*` Python modules rather
 than `just` wrappers or packaged `lynchpin-*` binaries.
@@ -27,6 +33,7 @@ project `justfile`.
 
 ## Rules
 
+0. Read `README.md` and `METHODOLOGY.md` before substantial trajectory or interpretation work.
 1. Prefer direct `python -m lynchpin...` invocations or imports over `just`.
 2. Use `lynchpin-baseline` and `lynchpin-life-timeline` when the task is one of
    those heavier workflows.
@@ -41,11 +48,12 @@ project `justfile`.
 6. Run repo-local commands from `/realm/project/sinity-lynchpin`.
 7. For non-trivial runs, record the exact module command, key arguments, and
    output paths.
+8. Treat current report surfaces as provisional delivery layers; the durable
+   target is reusable trajectory artifacts and context packets.
 
 ## Common Module Entry Points
 
 - `python -m lynchpin.system.validate`
-- `python -m lynchpin.system.materialize`
 - `python -m lynchpin.system.baseline` — see `lynchpin-baseline`
 - `python -m lynchpin.system.life_timeline` — see `lynchpin-life-timeline`
 - `python -m lynchpin.views.warehouse`
@@ -64,8 +72,7 @@ project `justfile`.
 
 ```bash
 python -m lynchpin.system.validate hpi --quick
-python -m lynchpin.system.materialize --warehouse --warehouse-sources activitywatch,atuin
-python -m lynchpin.views.warehouse refresh
+python -m lynchpin.views.warehouse refresh --sources activitywatch,atuin
 python -m lynchpin.views.calendar_views 2026-03-07 2026-03-13 --output artefacts/calendar/views
 python -m lynchpin.views.calendar_narratives 2026-03-07 2026-03-13 --mode reflective
 python -m lynchpin.views.session_summaries summarise docs/reference/sessions/example.md
@@ -73,12 +80,12 @@ python -m lynchpin.views.session_summaries summarise docs/reference/sessions/exa
 
 ## Workflow Guidance
 
-### Validation and Materialization
+### Validation and Refresh
 
 - Run `python -m lynchpin.system.validate hpi --quick` before broad rebuilds or
   when source health is in doubt.
-- Use `python -m lynchpin.system.materialize` when the task is "refresh the
-  derived read models", not when you only need a single source or view.
+- Use `python -m lynchpin.views.warehouse refresh` when the task is "refresh
+  the derived read models", not when you only need a single source or view.
 
 ### Warehouse
 
@@ -92,6 +99,27 @@ python -m lynchpin.views.session_summaries summarise docs/reference/sessions/exa
   rendering, not retired dashboard exporters.
 - Use `python -m lynchpin.views.calendar_narratives START END ...` for
   prompt-driven summaries that sit on top of those day views.
+- Treat `lynchpin.views.calendar_summary` as the main day-scale structured
+  substrate. If you are adding higher-level understanding, prefer promoting
+  stable facts and rollups out of it rather than prompting directly from raw
+  source rows.
+- For activity understanding, start from raw ActivityWatch/Atuin/instrumentation
+  signals and classify by purpose, not by app name alone.
+
+### Life Timeline and Multi-Scale Work
+
+- Use `python -m lynchpin.system.life_timeline*` for month/life-scale
+  historical synthesis.
+- Treat `lynchpin.views.calendar*` and `lynchpin.system.life_timeline*` as
+  current delivery surfaces, not as fixed architecture standards.
+- When adding new higher-level analysis, prefer shared structured artifacts or
+  warehouse tables that can feed day/week/month/quarter/year views, instead of
+  inventing a one-off narrative path.
+- Treat the model's context window state as a first-class output: prefer
+  compact context packets assembled from typed artifacts over ad hoc prompt
+  stuffing.
+- Do not reintroduce removed umbrella refresh commands such as
+  `lynchpin.system.materialize`.
 
 ### Sessions
 

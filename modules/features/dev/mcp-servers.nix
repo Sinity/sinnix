@@ -48,6 +48,7 @@ mkFeatureModule {
       ...
     }:
     let
+      scriptPkgs = inputs.self.packages.${pkgs.stdenv.hostPlatform.system};
       firecrawlSecretPath = lib.attrByPath [ "sinnix" "secrets" "paths" "firecrawl-api-key" ] null config;
       firecrawlSecretExport =
         if firecrawlSecretPath != null then
@@ -75,7 +76,7 @@ mkFeatureModule {
       '';
       mcpPolylogueBin = pkgs.writeShellScriptBin "mcp-polylogue" ''
         set -euo pipefail
-        exec ${pkgs.polylogue}/bin/polylogue mcp "$@"
+        exec ${scriptPkgs.polylogue-cli}/bin/polylogue mcp "$@"
       '';
       geminiPkg = inputs.nix-ai-tools.packages.${pkgs.stdenv.hostPlatform.system}.gemini-cli;
     in

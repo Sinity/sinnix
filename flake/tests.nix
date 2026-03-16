@@ -68,6 +68,14 @@ let
             message = "Codex wrapper must exist";
           }
           {
+            assertion = builtins.match ".*/bin/lynchpin-python" hm.home.sessionVariables.LYNCHPIN_PYTHON != null;
+            message = "Dev shell must export the system-wide Lynchpin API interpreter path";
+          }
+          {
+            assertion = builtins.match ".*/bin/polylogue-python" hm.home.sessionVariables.POLYLOGUE_PYTHON != null;
+            message = "Dev shell must export the system-wide Polylogue API interpreter path";
+          }
+          {
             assertion = builtins.match ".*render-agents.*" (hm.home.file.".local/bin/codex".text or "") == null;
             message = "Codex wrapper must not render AGENTS on every launch";
           }
@@ -105,6 +113,14 @@ let
           {
             assertion = hm.programs.zsh.shellAliases.ccusage == "ccusage";
             message = "ccusage alias must resolve to the packaged CLI";
+          }
+          {
+            assertion = builtins.any (name: lib.hasPrefix "lynchpin-python" name) (map (pkg: pkg.name or "") hm.home.packages);
+            message = "Dev shell must install the Lynchpin API interpreter wrapper";
+          }
+          {
+            assertion = builtins.any (name: lib.hasPrefix "polylogue-python" name) (map (pkg: pkg.name or "") hm.home.packages);
+            message = "Dev shell must install the Polylogue API interpreter wrapper";
           }
           {
             assertion = lib.hasInfix "unsetopt prompt_sp" hm.programs.zsh.initContent;
@@ -184,8 +200,10 @@ let
         in
         [
           {
-            assertion = builtins.any (name: lib.hasPrefix "polylogue" name) packageNames;
-            message = "Polylogue feature must install the packaged Polylogue CLI";
+            assertion =
+              builtins.any (name: lib.hasPrefix "polylogue" name) packageNames
+              && builtins.any (name: lib.hasPrefix "polylogue-python" name) packageNames;
+            message = "Polylogue feature must install the packaged Polylogue CLI and API wrappers";
           }
         ];
     })

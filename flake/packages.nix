@@ -10,6 +10,16 @@
     { pkgs, ... }:
     let
       scriptRegistry = import ./scripts.nix { inherit inputs pkgs; };
+      mkSanitizedPythonWrapper =
+        {
+          name,
+          target,
+        }:
+        pkgs.writeShellScriptBin name ''
+          set -euo pipefail
+          unset PYTHONPATH PYTHONHOME PYTHONBREAKPOINT PYTHONUSERBASE VIRTUAL_ENV
+          exec ${target} "$@"
+        '';
       mkNodeCliPackage =
         {
           pname,
@@ -43,6 +53,21 @@
         };
 
       customPackages = {
+        lynchpin-python = pkgs.writeShellScriptBin "lynchpin-python" ''
+          set -euo pipefail
+          exec ${inputs.lynchpin.packages.${pkgs.stdenv.hostPlatform.system}.api-python}/bin/python "$@"
+        '';
+
+        polylogue-cli = mkSanitizedPythonWrapper {
+          name = "polylogue";
+          target = "${inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.default}/bin/polylogue";
+        };
+
+        polylogue-python = mkSanitizedPythonWrapper {
+          name = "polylogue-python";
+          target = "${inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.api-python}/bin/python";
+        };
+
         mcp-context7 = mkNodeCliPackage {
           pname = "mcp-context7";
           version = "2.1.4";
