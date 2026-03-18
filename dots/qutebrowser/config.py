@@ -2,6 +2,7 @@ import datetime
 import json
 import logging
 import os
+import pathlib
 import socket
 import time
 import urllib.error
@@ -195,6 +196,44 @@ def _handle_tab_url_changed(tab, url: QUrl) -> None:
     _send_aw_event(tab, url)
 
 
+# ── Sinex browser-history capture ────────────────────────────────────────── #
+_SINEX_EVENTS_DIR = pathlib.Path.home() / ".local" / "share" / "sinex"
+_SINEX_EVENTS_FILE = _SINEX_EVENTS_DIR / "browser_events.jsonl"
+_sinex_file_ready: bool = False
+
+
+def _sinex_ensure_file() -> bool:
+    global _sinex_file_ready
+    if _sinex_file_ready:
+        return True
+    try:
+        _SINEX_EVENTS_DIR.mkdir(parents=True, exist_ok=True)
+        _sinex_file_ready = True
+        return True
+    except OSError as exc:
+        LOGGER.warning("sinex: cannot create events dir %s: %s", _SINEX_EVENTS_DIR, exc)
+        return False
+
+
+def _sinex_record_load(tab) -> None:
+    url = tab.url()
+    if not url.isValid() or url.scheme() not in DEDUP_SCHEMES:
+        return
+    if not _sinex_ensure_file():
+        return
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    record = {
+        "url": url.toString(),
+        "title": tab.title() or url.toDisplayString(),
+        "ts_utc": now_utc.isoformat(),
+    }
+    try:
+        with _SINEX_EVENTS_FILE.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        LOGGER.warning("sinex: failed to write browser event: %s", exc)
+
+
 def _handle_tab_loaded(tab, ok: bool) -> None:
     if not ok:
         return
@@ -202,6 +241,7 @@ def _handle_tab_loaded(tab, ok: bool) -> None:
     _dedupe(tab.win_id)
     _enforce_tab_limit(tab.win_id)
     _send_aw_event(tab, tab.url())
+    _sinex_record_load(tab)
 
 
 def _iter_tabbed_browsers():

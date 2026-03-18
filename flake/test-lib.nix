@@ -30,6 +30,7 @@ let
       agenix
       home-manager
       nix-ai-tools
+      lynchpin
       reboot-no-more
       sinex
       polylogue

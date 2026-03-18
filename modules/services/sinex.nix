@@ -64,6 +64,12 @@ in
   # Only configure if sinex module is available from the flake input
   config = lib.mkIf (config.services ? sinex) (
     lib.mkMerge [
+      # Keep the imported upstream module from pulling pkgs.sinexctl into the
+      # system closure when Sinnix is not actually enabling Sinex yet.
+      (lib.mkIf (!(cfg.enable || cfg.provisionDatabase)) {
+        services.sinex.cliPackage = lib.mkDefault null;
+      })
+
       # Package defaults — applied whenever sinex is referenced at all
       (lib.mkIf (cfg.enable || cfg.provisionDatabase) {
         services.sinex.package = lib.mkDefault sinexPkgs.sinex;

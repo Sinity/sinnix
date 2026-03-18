@@ -25,7 +25,8 @@ Canonical references:
 Primary command:
 
 ```bash
-python /realm/project/sinnix/dots/codex/skills/history-cleanup/cli.py --help
+cd /realm/project/sinity-lynchpin
+python -m lynchpin.analysis history-cleanup --help
 ```
 
 Rules:

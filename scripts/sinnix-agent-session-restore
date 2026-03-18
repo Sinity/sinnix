@@ -4,13 +4,13 @@ import argparse
 import json
 import os
 import shlex
+import stat
 import subprocess
 import sys
 import time
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Iterable
 
 
 STATE_VERSION = 1
@@ -55,24 +55,6 @@ def load_json(path: Path) -> dict | None:
         if VERBOSE:
             eprint(f"warning: failed to parse {path}: {exc}")
         return None
-
-
-def load_jsonl(path: Path) -> list[dict]:
-    try:
-        lines = path.read_text().splitlines()
-    except FileNotFoundError:
-        return []
-
-    events: list[dict] = []
-    for line in lines:
-        if not line.strip():
-            continue
-        try:
-            events.append(json.loads(line))
-        except json.JSONDecodeError as exc:
-            if VERBOSE:
-                eprint(f"warning: failed to parse line in {path}: {exc}")
-    return events
 
 
 def current_boot_started_at_ms() -> int:
@@ -148,17 +130,30 @@ def classify_agent(command: str) -> str | None:
     return AGENT_TOKEN_MAP.get(token)
 
 
-def active_agent_command(events: Iterable[dict]) -> dict | None:
-    active: dict | None = None
-    for event in events:
-        kind = event.get("type")
-        if kind == "command_start":
-            if classify_agent(str(event.get("command", ""))):
-                active = event
-            else:
-                active = {"non_agent": True}
-        elif kind == "command_end":
-            active = None
+def active_agent_command_from_path(path: Path) -> dict | None:
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            active: dict | None = None
+            for line in handle:
+                if not line.strip():
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    if VERBOSE:
+                        eprint(f"warning: failed to parse line in {path}: {exc}")
+                    continue
+                kind = event.get("type")
+                if kind == "command_start":
+                    if classify_agent(str(event.get("command", ""))):
+                        active = event
+                    else:
+                        active = {"non_agent": True}
+                elif kind == "command_end":
+                    active = None
+    except FileNotFoundError:
+        return None
+
     if active and active.get("non_agent"):
         return None
     return active
@@ -170,8 +165,7 @@ def candidate_from_session(session_file: Path) -> Candidate | None:
         return None
 
     events_path = Path(session.get("events_path") or session_file.with_name("events.jsonl"))
-    events = load_jsonl(events_path)
-    active = active_agent_command(events)
+    active = active_agent_command_from_path(events_path)
     if not active:
         return None
 
@@ -268,6 +262,41 @@ def kitty_socket() -> str:
     raise RuntimeError("unable to determine kitty socket path")
 
 
+def candidate_kitty_sockets(preferred_socket: str | None = None) -> list[str]:
+    sockets: list[str] = []
+    seen: set[str] = set()
+
+    def add(socket: str | None) -> None:
+        if socket and socket not in seen:
+            sockets.append(socket)
+            seen.add(socket)
+
+    add(preferred_socket)
+    add(os.environ.get("KITTY_LISTEN_ON"))
+
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+    user = os.environ.get("USER")
+    if runtime_dir and user:
+        runtime_path = Path(runtime_dir)
+        socket_paths = [runtime_path / f"kitty-{user}"]
+        socket_paths.extend(
+            sorted(
+                runtime_path.glob(f"kitty-{user}-*"),
+                key=lambda path: path.stat().st_mtime,
+                reverse=True,
+            )
+        )
+        for path in socket_paths:
+            try:
+                mode = path.stat().st_mode
+            except FileNotFoundError:
+                continue
+            if stat.S_ISSOCK(mode):
+                add(f"unix:{path}")
+
+    return sockets
+
+
 def run(cmd: list[str], *, input_text: str | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         cmd,
@@ -315,23 +344,32 @@ def wait_for_socket(kitty_bin: str, socket: str, timeout_sec: float = 15.0) -> N
     raise RuntimeError(f"kitty socket did not become ready: {socket}")
 
 
-def wait_for_prompt(kitty_bin: str, socket: str, window_id: int, timeout_sec: float = 15.0) -> None:
+def wait_for_prompt(kitty_bin: str, socket: str, window_id: int, timeout_sec: float = 2.0) -> bool:
     deadline = time.time() + timeout_sec
     while time.time() < deadline:
         for window in kitty_windows(kitty_bin, socket):
             if int(window["id"]) == int(window_id) and window.get("at_prompt"):
-                return
+                return True
         time.sleep(0.2)
-    raise RuntimeError(f"window {window_id} did not reach prompt state")
+    return False
 
 
 def spawn_first_window(kitty_bin: str, socket: str) -> int:
-    subprocess.Popen([kitty_bin, "--detach"])
+    subprocess.Popen([kitty_bin, "--detach", "--listen-on", socket])
     wait_for_socket(kitty_bin, socket)
     windows = kitty_windows(kitty_bin, socket)
     if not windows:
         raise RuntimeError("kitty started but no windows were reported")
     return int(max(windows, key=lambda w: int(w["id"]))["id"])
+
+
+def resolve_socket(kitty_bin: str, preferred_socket: str | None = None) -> str:
+    for socket in candidate_kitty_sockets(preferred_socket):
+        if kitty_socket_ready(kitty_bin, socket):
+            return socket
+    if preferred_socket:
+        return preferred_socket
+    return kitty_socket()
 
 
 def launch_tab(kitty_bin: str, socket: str, title: str) -> int:
@@ -446,7 +484,7 @@ def restore(args: argparse.Namespace) -> int:
             print(f"Would restore: {candidate.cwd} :: {candidate.command}")
     else:
         if pending:
-            socket = args.socket or kitty_socket()
+            socket = resolve_socket(args.kitty_bin, args.socket)
             first = True
             for candidate in pending:
                 title = candidate.command
@@ -457,7 +495,11 @@ def restore(args: argparse.Namespace) -> int:
                     window_id = launch_tab(args.kitty_bin, socket, title)
                     first = False
                 temporary_title(args.kitty_bin, socket, window_id, title)
-                wait_for_prompt(args.kitty_bin, socket, window_id)
+                prompt_ready = wait_for_prompt(args.kitty_bin, socket, window_id)
+                if not prompt_ready and VERBOSE:
+                    eprint(
+                        f"warning: window {window_id} did not report at_prompt; continuing with buffered send-text"
+                    )
                 send_command(args.kitty_bin, socket, window_id, candidate.cwd, candidate.command)
                 print(f"Restored: {candidate.cwd} :: {candidate.command}")
                 restored_ids.add(candidate.session_id)

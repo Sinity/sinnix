@@ -223,7 +223,13 @@ mkServiceModule {
     };
   };
   configFn =
-    { cfg, pkgs, ... }:
+    {
+      cfg,
+      pkgs,
+      config,
+      lib,
+      ...
+    }:
     {
       systemd.tmpfiles.rules = [
         "d ${dataDir} 0750 ${username} users -"
@@ -236,7 +242,9 @@ mkServiceModule {
           "local-fs.target"
           "lm_sensors.service"
         ];
-        path = [ pkgs.linuxPackages.nvidia_x11 ];
+        path = lib.optionals (config.sinnix.gpu.mode != "igpu") [
+          pkgs.linuxPackages.nvidia_x11 # provides nvidia-smi for GPU telemetry
+        ];
 
         serviceConfig = {
           Type = "simple";

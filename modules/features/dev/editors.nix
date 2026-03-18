@@ -107,6 +107,13 @@ mkFeatureModule {
       })
 
       (lib.mkIf cfg.antigravity.enable {
+        sinnix.persistence.home.directories = [
+          {
+            directory = ".config/Antigravity";
+            mode = "0700";
+          }
+        ];
+
         home-manager.users.${user} =
           {
             config,

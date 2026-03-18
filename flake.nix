@@ -48,7 +48,13 @@
     };
 
     polylogue = {
-      url = "git+file:///realm/project/polylogue?ref=master";
+      url = "path:/realm/project/polylogue";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    lynchpin = {
+      url = "path:/realm/project/sinity-lynchpin";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
 
     reboot-no-more = {

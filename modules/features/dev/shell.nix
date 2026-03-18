@@ -349,15 +349,24 @@ mkFeatureModule {
         # Persistence for AI tools and dev caches (colocated with their config)
         sinnix.persistence.home = {
           directories = [
-            { directory = ".config/claude"; mode = "0700"; } # Claude Code runtime + HM config
-            { directory = ".codex"; mode = "0700"; }         # Codex CLI config + state
-            { directory = ".gemini"; mode = "0700"; }        # Gemini CLI auth + history (tmp/ regenerates)
-            ".cache"  # entire cache dir — nix eval, sccache, uv, etc.
-            ".cargo"  # Rust crate registry + git checkouts
-            ".npm"    # npm package cache
+            {
+              directory = ".config/claude";
+              mode = "0700";
+            } # Claude Code runtime + HM config
+            {
+              directory = ".codex";
+              mode = "0700";
+            } # Codex CLI config + state
+            {
+              directory = ".gemini";
+              mode = "0700";
+            } # Gemini CLI auth + history (tmp/ regenerates)
+            ".cache" # entire cache dir — nix eval, sccache, uv, etc.
+            ".cargo" # Rust crate registry + git checkouts
+            ".npm" # npm package cache
           ];
           files = [
-            ".claude.json"  # Claude CLI auth token
+            ".claude.json" # Claude CLI auth token
           ];
         };
 
@@ -386,6 +395,8 @@ mkFeatureModule {
                 pkgs.libGL
                 pkgs.libglvnd
               ];
+              LYNCHPIN_PYTHON = "${scriptPkgs.lynchpin-python}/bin/lynchpin-python";
+              POLYLOGUE_PYTHON = "${scriptPkgs.polylogue-python}/bin/polylogue-python";
             };
 
             home.packages =
@@ -436,13 +447,14 @@ mkFeatureModule {
                 nodePackages_latest.yaml-language-server
                 sysstat
                 strace
-                polylogue
                 gallery-dl
                 vulkan-validation-layers
                 wayland-utils
                 wayland-protocols
               ])
               ++ [
+                scriptPkgs.lynchpin-python
+                scriptPkgs.polylogue-python
                 findFlakeRoot
                 scriptPkgs.ccusage
                 scriptPkgs.lsp-root
@@ -569,7 +581,9 @@ mkFeatureModule {
                 #!/usr/bin/env bash
                 set -euo pipefail
 
-                GEMINI_BIN="${inputs.nix-ai-tools.packages.${pkgs.stdenv.hostPlatform.system}.gemini-cli}/bin/gemini"
+                GEMINI_BIN="${
+                  inputs.nix-ai-tools.packages.${pkgs.stdenv.hostPlatform.system}.gemini-cli
+                }/bin/gemini"
 
                 exec "$GEMINI_BIN" "$@"
               '';

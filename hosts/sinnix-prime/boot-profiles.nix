@@ -1,4 +1,9 @@
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 let
   bootProfileTag =
     {
@@ -76,9 +81,9 @@ let
 
       profile_description() {
         case "$1" in
-          nvidia-operational) echo "Daily NVIDIA profile: recorder off, wrappers off" ;;
-          nvidia-recorder) echo "NVIDIA with reboot-no-more on, Chrome/Hyprland wrappers off" ;;
-          nvidia-investigation) echo "NVIDIA with reboot-no-more on plus Chrome/Hyprland capture wrappers" ;;
+          nvidia-operational) echo "Daily dGPU profile via NVIDIA open kernel module: recorder off, wrappers off" ;;
+          nvidia-recorder) echo "dGPU via NVIDIA open kernel module with reboot-no-more on, Chrome/Hyprland wrappers off" ;;
+          nvidia-investigation) echo "dGPU via NVIDIA open kernel module with reboot-no-more on plus Chrome/Hyprland capture wrappers" ;;
           igpu-rescue) echo "Intel iGPU rescue boot; display cable must be on the motherboard outputs" ;;
           dual-gpu) echo "Both i915 + NVIDIA active; plug cable into mobo or dGPU port, either works" ;;
           *)
@@ -212,14 +217,14 @@ in
 
   specialisation = {
     nvidia-recorder.configuration = mkProfileConfig {
-      gpuMode = "nvidia";
+      gpuMode = "nvidia-open";
       recorderEnabled = true;
       launchCaptureEnabled = false;
       diagnosisEnabled = true;
     };
 
     nvidia-investigation.configuration = mkProfileConfig {
-      gpuMode = "nvidia";
+      gpuMode = "nvidia-open";
       recorderEnabled = true;
       launchCaptureEnabled = true;
       diagnosisEnabled = true;

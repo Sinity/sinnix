@@ -1,88 +1,198 @@
 # Host-specific display configuration for sinnix-prime
-# Hardware-specific GPU, gaming, and driver configuration
+# GPU mode is controlled by a single toggle in default.nix:
+#   sinnix.gpu.mode = "nvidia"       → proprietary NVIDIA kernel module
+#   sinnix.gpu.mode = "nvidia-open"  → NVIDIA open kernel module
+#   sinnix.gpu.mode = "igpu"         → Intel UHD 770 (discrete GPU absent)
 {
   pkgs,
   config,
+  lib,
   ...
 }:
-{
-  # X11 stack stays disabled; Hyprland is launched directly via UWSM, but we still
-  # declare the desired driver so the NVIDIA kernel modules are available.
-  services.xserver = {
-    enable = false;
-    videoDrivers = [ "nvidia" ];
-  };
+let
+  mode = config.sinnix.gpu.mode;
+  discrete = mode != "igpu";
+  nvidiaOpen = mode == "nvidia-open";
+  user = config.sinnix.user.name;
+in
+lib.mkMerge [
 
-  # NVIDIA hardware configuration
-  hardware = {
-    nvidia = {
-      package = config.boot.kernelPackages.nvidiaPackages.production;
-      modesetting.enable = true;
-      powerManagement.enable = true;
-      open = true;
-      nvidiaSettings = true;
-      forceFullCompositionPipeline = true;
-    };
-
-    graphics = {
+  # ── Common ──────────────────────────────────────────────────────────────────
+  {
+    hardware.graphics = {
       enable = true;
+      enable32Bit = true; # Steam / Wine 32-bit GL+Vulkan
       extraPackages = with pkgs; [
-        edid-decode # For decoding display capabilities metadata
+        edid-decode
         mesa
         libGL
         libglvnd
       ];
     };
-  };
 
-  home-manager.users.${config.sinnix.user.name} = {
-    home.sessionVariables = {
-      LIBVA_DRIVER_NAME = "nvidia";
-      GBM_BACKEND = "nvidia-drm";
-      __GLX_VENDOR_LIBRARY_NAME = "nvidia";
-      WLR_NO_HARDWARE_CURSORS = "1";
-      __GL_GSYNC_ALLOWED = "1";
-      __GL_VRR_ALLOWED = "1";
+    security.pam.services.hyprlock = { };
+  }
+
+  # ── NVIDIA (both modes) ──────────────────────────────────────────────────────
+  (lib.mkIf discrete {
+    services.xserver = {
+      enable = false;
+      videoDrivers = [ "nvidia" ]; # loads NVIDIA kernel modules even without X11
     };
 
-    # Note: Using monitorv2 block for HDR config (Hyprland 0.53+)
-    # The v1 monitor line is kept as fallback but monitorv2 takes precedence
-    wayland.windowManager.hyprland.settings.monitor = [
-      ",3840x2160@120,auto,1,bitdepth,10,cm,hdr"
+    hardware.nvidia = {
+      package = config.boot.kernelPackages.nvidiaPackages.production;
+      modesetting.enable = true;
+      # open / powerManagement driven by mode — see below
+      nvidiaSettings = true;
+      forceFullCompositionPipeline = true;
+    };
+
+    home-manager.users.${user} = {
+      home.sessionVariables = {
+        LIBVA_DRIVER_NAME = "nvidia";
+        GBM_BACKEND = "nvidia-drm";
+        __GLX_VENDOR_LIBRARY_NAME = "nvidia";
+        WLR_NO_HARDWARE_CURSORS = "1";
+        __GL_GSYNC_ALLOWED = "1";
+        __GL_VRR_ALLOWED = "1";
+      };
+
+      # v1 catch-all — monitorv2 below takes precedence
+      wayland.windowManager.hyprland.settings.monitor = [
+        ",3840x2160@120,auto,1,bitdepth,10,cm,hdr"
+      ];
+
+      # AORUS FO48U OLED HDR — connector names are NVIDIA-assigned (DP-3, HDMI-A-1)
+      # Reference: https://github.com/hyprwm/Hyprland/discussions/11677
+      wayland.windowManager.hyprland.settings.monitorv2 = [
+        {
+          output = "DP-3";
+          mode = "3840x2160@120";
+          position = "0x0";
+          scale = 1;
+          bitdepth = "10";
+          cm = "hdr";
+          sdrbrightness = 1.3;
+          sdrsaturation = 1.0;
+          sdr_min_luminance = 0;
+          sdr_max_luminance = 150;
+          min_luminance = 0;
+          max_luminance = 550;
+          max_avg_luminance = 200;
+          supports_hdr = 1;
+          supports_wide_color = 1;
+        }
+        {
+          # HDMI 2.0 — 60Hz until HDMI 2.1 (48Gbps) cable arrives
+          output = "HDMI-A-1";
+          mode = "3840x2160@60";
+          position = "0x0";
+          scale = 1;
+          bitdepth = "10";
+          cm = "hdr";
+          sdrbrightness = 1.3;
+          sdrsaturation = 1.0;
+          sdr_min_luminance = 0;
+          sdr_max_luminance = 150;
+          min_luminance = 0;
+          max_luminance = 550;
+          max_avg_luminance = 200;
+          supports_hdr = 1;
+          supports_wide_color = 1;
+        }
+      ];
+    };
+  })
+
+  # ── NVIDIA proprietary (no power management) ─────────────────────────────────
+  # Keep power management off until the reset investigation is fully closed.
+  # Also applies to "dual" — same proprietary NVIDIA settings, just with i915
+  # alongside.
+  (lib.mkIf (mode == "nvidia" || mode == "dual") {
+    hardware.nvidia = {
+      open = false;
+      powerManagement.enable = false;
+    };
+  })
+
+  # ── NVIDIA open kernel module (no power management) ──────────────────────────
+  # Requested reinsertion path: use NVIDIA's open kernel module while keeping
+  # the suspend/resume power-management path disabled.
+  (lib.mkIf nvidiaOpen {
+    hardware.nvidia = {
+      open = true;
+      powerManagement.enable = false;
+    };
+  })
+
+  # ── Dual (both i915 + NVIDIA active, either port works) ─────────────────────
+  # NVIDIA drives dGPU outputs (DP-3); i915 drives mobo outputs (DP-1).
+  # Hyprland enumerates both DRM devices. Catch-all monitor rule picks up
+  # whichever output is physically connected — run `hyprctl monitors` to confirm.
+  # No monitorv2 override: connector names are session-dependent; prefer the
+  # catch-all so a cable swap doesn't need a config change.
+  (lib.mkIf (mode == "dual") {
+    hardware.graphics.extraPackages = with pkgs; [
+      intel-media-driver # VA-API iHD driver for iGPU decode
     ];
 
-    # AORUS FO48U OLED HDR Configuration
-    # Reference: https://github.com/hyprwm/Hyprland/discussions/11677
-    # Monitor specs: ~550 nits HDR peak, true black (OLED), ~150-200 nits SDR
-    wayland.windowManager.hyprland.settings.monitorv2 = [
-      {
-        output = "DP-3";
-        mode = "3840x2160@120";
-        position = "0x0";
-        scale = 1;
-        bitdepth = "10";
-        cm = "hdr";
+    home-manager.users.${user} = {
+      home.sessionVariables = {
+        LIBVA_DRIVER_NAME = "nvidia";
+        GBM_BACKEND = "nvidia-drm";
+        __GLX_VENDOR_LIBRARY_NAME = "nvidia";
+        WLR_NO_HARDWARE_CURSORS = "1";
+      };
 
-        # SDR content rendering in HDR mode
-        # For dark-mode usage (white text on black), lower values reduce ABL triggering
-        sdrbrightness = 1.3; # SDR brightness multiplier (boosted for dark-mode comfort)
-        sdrsaturation = 1.0; # SDR saturation (1.0 = native)
+      # Catch-all: any connected output at preferred mode, auto position.
+      # Covers both DP-1 (mobo/iGPU) and DP-3 (dGPU) without hardcoding.
+      wayland.windowManager.hyprland.settings.monitor = [
+        ",3840x2160@120,auto,1,bitdepth,10,cm,hdr"
+      ];
+    };
+  })
 
-        # Luminance values for tone mapping (in nits)
-        # OLED-specific: min should be 0 for true blacks
-        sdr_min_luminance = 0; # SDR black floor (0 = true black, >0 = raised blacks like LCD)
-        sdr_max_luminance = 150; # SDR white point (lowered from 200 for dark-mode comfort)
-        min_luminance = 0; # HDR black floor (OLED = 0)
-        max_luminance = 550; # HDR peak brightness (FO48U: ~550 nits real-world)
-        max_avg_luminance = 200; # Full-screen sustained brightness
-
-        # Capability flags
-        supports_hdr = 1;
-        supports_wide_color = 1;
-      }
+  # ── Intel iGPU (i7-13700K UHD 770, discrete GPU absent) ─────────────────────
+  # Connector names differ from NVIDIA — run `hyprctl monitors` on first boot.
+  (lib.mkIf (mode == "igpu") {
+    hardware.graphics.extraPackages = with pkgs; [
+      intel-media-driver # VA-API iHD driver (Gen 8+)
+      libva-vdpau-driver # VDPAU → VA-API bridge
+      libvdpau-va-gl # VDPAU backend via VA-API/OpenGL
     ];
-  };
 
-  security.pam.services.hyprlock = { };
+    home-manager.users.${user} = {
+      home.sessionVariables = {
+        LIBVA_DRIVER_NAME = "iHD";
+      };
 
-}
+      # v1 catch-all — monitorv2 below takes precedence
+      wayland.windowManager.hyprland.settings.monitor = [
+        ",3840x2160@120,auto,1,bitdepth,10,cm,hdr"
+      ];
+
+      # AORUS FO48U OLED HDR via Intel iGPU — connector is DP-1 (Intel-assigned)
+      # 4K@120Hz confirmed available via modetest on DP-1
+      wayland.windowManager.hyprland.settings.monitorv2 = [
+        {
+          output = "DP-1";
+          mode = "3840x2160@120";
+          position = "0x0";
+          scale = 1;
+          bitdepth = "10";
+          cm = "hdr";
+          sdrbrightness = 1.3;
+          sdrsaturation = 1.0;
+          sdr_min_luminance = 0;
+          sdr_max_luminance = 150;
+          min_luminance = 0;
+          max_luminance = 550;
+          max_avg_luminance = 200;
+          supports_hdr = 1;
+          supports_wide_color = 1;
+        }
+      ];
+    };
+  })
+]

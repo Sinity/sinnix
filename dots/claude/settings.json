@@ -32,13 +32,11 @@
       "Skill(enhance)"
     ],
     "deny": [
-      "Bash(rm -rf /:*)",
-      "Bash(sudo:*)"
+      "Bash(rm -rf /:*)"
     ],
     "ask": [],
     "defaultMode": "default"
   },
-  "model": "sonnet",
   "hooks": {
     "PreToolUse": [
       {
@@ -63,6 +61,7 @@
     "rust-analyzer-lsp@claude-plugins-official": true
   },
   "alwaysThinkingEnabled": true,
+  "effortLevel": "low",
   "mcpServers": {
     "polylogue": {
       "command": "mcp-polylogue",

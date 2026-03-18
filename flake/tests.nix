@@ -68,11 +68,13 @@ let
             message = "Codex wrapper must exist";
           }
           {
-            assertion = builtins.match ".*/bin/lynchpin-python" hm.home.sessionVariables.LYNCHPIN_PYTHON != null;
+            assertion =
+              builtins.match ".*/bin/lynchpin-python" hm.home.sessionVariables.LYNCHPIN_PYTHON != null;
             message = "Dev shell must export the system-wide Lynchpin API interpreter path";
           }
           {
-            assertion = builtins.match ".*/bin/polylogue-python" hm.home.sessionVariables.POLYLOGUE_PYTHON != null;
+            assertion =
+              builtins.match ".*/bin/polylogue-python" hm.home.sessionVariables.POLYLOGUE_PYTHON != null;
             message = "Dev shell must export the system-wide Polylogue API interpreter path";
           }
           {
@@ -84,7 +86,8 @@ let
             message = "Gemini wrapper must exist";
           }
           {
-            assertion = builtins.match ".*render-agents.*" (hm.home.file.".local/bin/gemini".text or "") == null;
+            assertion =
+              builtins.match ".*render-agents.*" (hm.home.file.".local/bin/gemini".text or "") == null;
             message = "Gemini wrapper must not render instructions on every launch";
           }
           {
@@ -115,11 +118,15 @@ let
             message = "ccusage alias must resolve to the packaged CLI";
           }
           {
-            assertion = builtins.any (name: lib.hasPrefix "lynchpin-python" name) (map (pkg: pkg.name or "") hm.home.packages);
+            assertion = builtins.any (name: lib.hasPrefix "lynchpin-python" name) (
+              map (pkg: pkg.name or "") hm.home.packages
+            );
             message = "Dev shell must install the Lynchpin API interpreter wrapper";
           }
           {
-            assertion = builtins.any (name: lib.hasPrefix "polylogue-python" name) (map (pkg: pkg.name or "") hm.home.packages);
+            assertion = builtins.any (name: lib.hasPrefix "polylogue-python" name) (
+              map (pkg: pkg.name or "") hm.home.packages
+            );
             message = "Dev shell must install the Polylogue API interpreter wrapper";
           }
           {
@@ -167,7 +174,10 @@ let
             message = "Codex skills must be linked from the dedicated dots/codex/skills tree";
           }
           {
-            assertion = builtins.match ".*zsh -lc.*" (builtins.readFile ../dots/codex/skills/agent-orchestration/scripts/launch_agent_tabs.sh) == null;
+            assertion =
+              builtins.match ".*zsh -lc.*" (
+                builtins.readFile ../dots/codex/skills/agent-orchestration/scripts/launch_agent_tabs.sh
+              ) == null;
             message = "Agent launcher must not wrap kitty launches in zsh -lc";
           }
           {
@@ -186,6 +196,32 @@ let
               && lib.hasInfix "command = \"mcp-polylogue\"" codexConfig
               && claudeSettings.mcpServers.polylogue.command == "mcp-polylogue";
             message = "MCP wrappers and agent configs must expose the packaged Polylogue server directly";
+          }
+        ];
+    })
+
+    (mkFeatureTest {
+      name = "dev-editors-antigravity";
+      feature = "sinnix.features.dev.editors.enable";
+      extraModules = [
+        ({ ... }: {
+          sinnix.features.dev.editors.antigravity.enable = true;
+        })
+      ];
+      assertions =
+        config:
+        let
+          hasAntigravityDir =
+            entry:
+            if builtins.isAttrs entry then
+              (entry.directory or null) == ".config/Antigravity"
+            else
+              entry == ".config/Antigravity";
+        in
+        [
+          {
+            assertion = builtins.any hasAntigravityDir config.sinnix.persistence.home.directories;
+            message = "Antigravity state must be persisted under ~/.config/Antigravity";
           }
         ];
     })
@@ -242,7 +278,8 @@ let
             message = "Stability lab must install the reboot-no-more package that ships the GPU lab suite";
           }
           {
-            assertion = hm.home.sessionVariables.SINNIX_TRIGGER_CAPTURE_ROOT == "/realm/data/captures/launch-trigger";
+            assertion =
+              hm.home.sessionVariables.SINNIX_TRIGGER_CAPTURE_ROOT == "/realm/data/captures/launch-trigger";
             message = "Stability lab must export the canonical launch-trigger capture root";
           }
           {
@@ -312,10 +349,32 @@ let
           message = "UWSM must be enabled";
         }
         {
+          assertion = lib.hasInfix "exec uwsm start hyprland-uwsm.desktop" (
+            (hmFor config).programs.zsh.loginExtra or ""
+          );
+          message = "TTY Hyprland login must stay unwrapped by default";
+        }
+      ];
+    })
+
+    (mkFeatureTest {
+      name = "desktop-hyprland-launch-capture";
+      feature = "sinnix.features.desktop.hyprland.enable";
+      extraModules = [
+        (
+          { lib, ... }:
+          {
+            hardware.graphics.enable = lib.mkForce false;
+            sinnix.services.reboot-no-more.launchCapture.enable = true;
+          }
+        )
+      ];
+      assertions = config: [
+        {
           assertion =
             lib.hasInfix "/bin/launch-trigger-capture hyprland -- uwsm start hyprland-uwsm.desktop"
               ((hmFor config).programs.zsh.loginExtra or "");
-          message = "TTY Hyprland login must be wrapped with launch-trigger-capture";
+          message = "TTY Hyprland launch capture opt-in must wrap the login path";
         }
       ];
     })
@@ -330,7 +389,8 @@ let
           xm4Rules = wireplumber."12-preferred-xm4-output"."monitor.bluez.rules" or [ ];
           isXm4Rule =
             rule:
-            (builtins.elemAt (rule.matches or [ ]) 0)."node.name" or null == "~bluez_output.*AC_80_0A_D4_08_48.*"
+            (builtins.elemAt (rule.matches or [ ]) 0)."node.name" or null
+            == "~bluez_output.*AC_80_0A_D4_08_48.*"
             && (rule.actions.update-props."priority.session" or null) == 2100
             && (rule.actions.update-props."priority.driver" or null) == 2100;
         in
@@ -396,7 +456,8 @@ let
             message = "Kitty must be enabled";
           }
           {
-            assertion = hm.programs.kitty.settings.shell == "${hm.home.homeDirectory}/.local/bin/sinnix-captured-shell";
+            assertion =
+              hm.programs.kitty.settings.shell == "${hm.home.homeDirectory}/.local/bin/sinnix-captured-shell";
             message = "Kitty must launch through the capture wrapper";
           }
           {
@@ -426,7 +487,10 @@ let
           chromePkgs = builtins.filter (pkg: (pkg.pname or "") == "google-chrome") hm.home.packages;
           chromePkg = if chromePkgs == [ ] then null else builtins.head chromePkgs;
           chromeDesktop =
-            if chromePkg == null then "" else builtins.readFile "${chromePkg}/share/applications/google-chrome.desktop";
+            if chromePkg == null then
+              ""
+            else
+              builtins.readFile "${chromePkg}/share/applications/google-chrome.desktop";
         in
         [
           {
@@ -442,12 +506,47 @@ let
             message = "Qutebrowser config must not silently swallow broad exceptions";
           }
           {
-            assertion = builtins.any (name: lib.hasPrefix "launch-trigger-capture" name) packageNames;
-            message = "Browser feature must install the launch-trigger capture helper";
+            assertion = !(builtins.any (name: lib.hasPrefix "launch-trigger-capture" name) packageNames);
+            message = "Browser feature must keep launch-trigger capture disabled by default";
           }
           {
-            assertion = chromePkg != null && builtins.match ".*Exec=.*/bin/google-chrome-stable.*" chromeDesktop != null;
-            message = "Chrome desktop entry must point at the wrapped binary";
+            assertion =
+              chromePkg != null
+              && !(lib.hasPrefix "google-chrome-trigger-capture" (chromePkg.name or ""))
+              && builtins.match ".*Exec=.*/bin/google-chrome-stable.*" chromeDesktop != null;
+            message = "Chrome desktop entry must point at the normal binary by default";
+          }
+        ];
+    })
+
+    (mkFeatureTest {
+      name = "desktop-browser-launch-capture";
+      feature = "sinnix.features.desktop.browser.enable";
+      extraModules = [
+        (
+          { ... }:
+          {
+            sinnix.services.reboot-no-more.launchCapture.enable = true;
+          }
+        )
+      ];
+      assertions =
+        config:
+        let
+          hm = hmFor config;
+          packageNames = map (pkg: pkg.name or "") hm.home.packages;
+          chromePkgs = builtins.filter (pkg: (pkg.pname or "") == "google-chrome") hm.home.packages;
+          chromePkg = if chromePkgs == [ ] then null else builtins.head chromePkgs;
+        in
+        [
+          {
+            assertion = builtins.any (name: lib.hasPrefix "launch-trigger-capture" name) packageNames;
+            message = "Browser launch capture opt-in must install the helper";
+          }
+          {
+            assertion =
+              chromePkg != null && lib.hasPrefix "google-chrome-trigger-capture" (chromePkg.name or "");
+            message = "Browser launch capture opt-in must wrap Chrome explicitly";
           }
         ];
     })
@@ -547,31 +646,19 @@ let
           message = "Nextcloud rclone mount units must be rendered at activation time from secrets";
         }
         {
-          assertion =
-            lib.hasInfix
-              "runtime_unit_dir=/run/systemd/system"
-              config.system.activationScripts.nextcloudRcloneRuntime.text;
+          assertion = lib.hasInfix "runtime_unit_dir=/run/systemd/system" config.system.activationScripts.nextcloudRcloneRuntime.text;
           message = "Nextcloud runtime mount units must be rendered under /run/systemd/system";
         }
         {
-          assertion =
-            lib.hasInfix
-              "Type=rclone"
-              config.system.activationScripts.nextcloudRcloneRuntime.text;
+          assertion = lib.hasInfix "Type=rclone" config.system.activationScripts.nextcloudRcloneRuntime.text;
           message = "Nextcloud runtime mount units must use the rclone mount helper";
         }
         {
-          assertion =
-            lib.hasInfix
-              "/nextcloud/remote.php/dav/files/"
-              config.system.activationScripts.nextcloudRcloneRuntime.text;
+          assertion = lib.hasInfix "/nextcloud/remote.php/dav/files/" config.system.activationScripts.nextcloudRcloneRuntime.text;
           message = "Nextcloud runtime wiring must target the actual /nextcloud WebDAV endpoint";
         }
         {
-          assertion =
-            lib.hasInfix
-              "no_check_certificate"
-              config.system.activationScripts.nextcloudRcloneRuntime.text;
+          assertion = lib.hasInfix "no_check_certificate" config.system.activationScripts.nextcloudRcloneRuntime.text;
           message = "Nextcloud runtime wiring must explicitly handle the hostname-mismatched LAN cert";
         }
       ];
@@ -634,7 +721,8 @@ let
           message = "The terminal capture launcher must be linked into ~/.local/bin";
         }
         {
-          assertion = (hmFor config).home.sessionVariables.SINNIX_CAPTURE_ROOT == "/realm/data/captures/asciinema";
+          assertion =
+            (hmFor config).home.sessionVariables.SINNIX_CAPTURE_ROOT == "/realm/data/captures/asciinema";
           message = "The capture root session variable must point at the canonical asciinema directory";
         }
         {
@@ -642,11 +730,14 @@ let
           message = "The capture terminal session variable must identify Kitty";
         }
         {
-          assertion = lib.hasInfix "sinnix-terminal-capture-hooks.zsh" (hmFor config).programs.zsh.initContent;
+          assertion = lib.hasInfix "sinnix-terminal-capture-hooks.zsh" (hmFor config)
+          .programs.zsh.initContent;
           message = "The zsh init path must source the terminal capture hooks";
         }
         {
-          assertion = builtins.match ".*SUCCESS_BACKOFF_SECONDS.*sleep.*" (builtins.readFile ../scripts/rawlog-loop) != null;
+          assertion =
+            builtins.match ".*SUCCESS_BACKOFF_SECONDS.*sleep.*" (builtins.readFile ../scripts/rawlog-loop)
+            != null;
           message = "rawlog-loop must back off after fast success exits";
         }
       ];
@@ -1127,243 +1218,249 @@ in
     { system, ... }:
     let
       pkgs = pkgsFor system;
-      terminalCaptureRuntime = pkgs.runCommand "sinnix-terminal-capture-runtime-check"
-        {
-          nativeBuildInputs = [
-            pkgs.asciinema_3
-            pkgs.coreutils
-            pkgs.findutils
-            pkgs.gnugrep
-            pkgs.jq
-            pkgs.util-linux
-            pkgs.zsh
-          ];
-        }
-        ''
-          export HOME="$TMPDIR/home"
-          export PATH="${lib.makeBinPath [
-            pkgs.asciinema_3
-            pkgs.coreutils
-            pkgs.findutils
-            pkgs.gnugrep
-            pkgs.jq
-            pkgs.util-linux
-            pkgs.zsh
-          ]}:$PATH"
-          mkdir -p "$HOME" "$TMPDIR/captures"
+      terminalCaptureRuntime =
+        pkgs.runCommand "sinnix-terminal-capture-runtime-check"
+          {
+            nativeBuildInputs = [
+              pkgs.asciinema_3
+              pkgs.coreutils
+              pkgs.findutils
+              pkgs.gnugrep
+              pkgs.jq
+              pkgs.util-linux
+              pkgs.zsh
+            ];
+          }
+          ''
+            export HOME="$TMPDIR/home"
+            export PATH="${
+              lib.makeBinPath [
+                pkgs.asciinema_3
+                pkgs.coreutils
+                pkgs.findutils
+                pkgs.gnugrep
+                pkgs.jq
+                pkgs.util-linux
+                pkgs.zsh
+              ]
+            }:$PATH"
+            mkdir -p "$HOME" "$TMPDIR/captures"
 
-          cat > "$TMPDIR/fake-shell.zsh" <<'EOF'
-          #!${pkgs.zsh}/bin/zsh
-          set -eu
-          source ${../scripts/sinnix-terminal-capture-hooks.zsh}
-          print -r -- "terminal-capture-ready"
-          true
-          exit 0
-          EOF
-          chmod +x "$TMPDIR/fake-shell.zsh"
+            cat > "$TMPDIR/fake-shell.zsh" <<'EOF'
+            #!${pkgs.zsh}/bin/zsh
+            set -eu
+            source ${../scripts/sinnix-terminal-capture-hooks.zsh}
+            print -r -- "terminal-capture-ready"
+            true
+            exit 0
+            EOF
+            chmod +x "$TMPDIR/fake-shell.zsh"
 
-          transcript="$TMPDIR/terminal-capture-runtime.typescript"
+            transcript="$TMPDIR/terminal-capture-runtime.typescript"
 
-          script -qfec "env \
-            EPOCHREALTIME='1773285652,647035000' \
-            HOME='$HOME' \
-            HOSTNAME='terminal-capture-test' \
-            KITTY_PID='4242' \
-            SHELL='$TMPDIR/fake-shell.zsh' \
-            SINNIX_CAPTURE_CAST_FILE='$TMPDIR/poison.cast' \
-            SINNIX_CAPTURE_EVENTS_FILE='$TMPDIR/poison.events.jsonl' \
-            SINNIX_CAPTURE_ROOT='$TMPDIR/captures' \
-            SINNIX_CAPTURE_SESSION_ID='poison-session' \
-            TERM='xterm-kitty' \
-            USER='tester' \
-            ${pkgs.bash}/bin/bash ${../scripts/sinnix-captured-shell}" "$transcript"
+            script -qfec "env \
+              EPOCHREALTIME='1773285652,647035000' \
+              HOME='$HOME' \
+              HOSTNAME='terminal-capture-test' \
+              KITTY_PID='4242' \
+              SHELL='$TMPDIR/fake-shell.zsh' \
+              SINNIX_CAPTURE_CAST_FILE='$TMPDIR/poison.cast' \
+              SINNIX_CAPTURE_EVENTS_FILE='$TMPDIR/poison.events.jsonl' \
+              SINNIX_CAPTURE_ROOT='$TMPDIR/captures' \
+              SINNIX_CAPTURE_SESSION_ID='poison-session' \
+              TERM='xterm-kitty' \
+              USER='tester' \
+              ${pkgs.bash}/bin/bash ${../scripts/sinnix-captured-shell}" "$transcript"
 
-          grep -q "terminal-capture-ready" "$transcript"
+            grep -q "terminal-capture-ready" "$transcript"
 
-          session_json="$(find "$TMPDIR/captures" -type f -name session.json | sed -n '1p')"
-          events_json="$(find "$TMPDIR/captures" -type f -name events.jsonl | sed -n '1p')"
-          cast_file="$(find "$TMPDIR/captures" -type f -name session.cast | sed -n '1p')"
+            session_json="$(find "$TMPDIR/captures" -type f -name session.json | sed -n '1p')"
+            events_json="$(find "$TMPDIR/captures" -type f -name events.jsonl | sed -n '1p')"
+            cast_file="$(find "$TMPDIR/captures" -type f -name session.cast | sed -n '1p')"
 
-          test -n "$session_json"
-          test -n "$events_json"
-          test -n "$cast_file"
+            test -n "$session_json"
+            test -n "$events_json"
+            test -n "$cast_file"
 
-          session_dir="$(dirname "$session_json")"
-          session_id="$(basename "$session_dir")"
-          month_dir="$(dirname "$session_dir")"
-          day_dir="$(basename "$month_dir")"
-          year_month_dir="$(dirname "$month_dir")"
-          month_name="$(basename "$year_month_dir")"
-          year_name="$(basename "$(dirname "$year_month_dir")")"
+            session_dir="$(dirname "$session_json")"
+            session_id="$(basename "$session_dir")"
+            month_dir="$(dirname "$session_dir")"
+            day_dir="$(basename "$month_dir")"
+            year_month_dir="$(dirname "$month_dir")"
+            month_name="$(basename "$year_month_dir")"
+            year_name="$(basename "$(dirname "$year_month_dir")")"
 
-          test "$day_dir" != "$session_id"
-          [[ "$year_name" =~ ^[0-9]{4}$ ]]
-          [[ "$month_name" =~ ^[0-9]{2}$ ]]
-          [[ "$day_dir" =~ ^[0-9]{2}$ ]]
-          test "$cast_file" = "$session_dir/session.cast"
-          test "$events_json" = "$session_dir/events.jsonl"
-          test -z "$(find "$TMPDIR/captures" -maxdepth 1 -type f | sed -n '1p')"
-          test -z "$(find "$TMPDIR/captures" -type f -name '*.cast.meta' | sed -n '1p')"
+            test "$day_dir" != "$session_id"
+            [[ "$year_name" =~ ^[0-9]{4}$ ]]
+            [[ "$month_name" =~ ^[0-9]{2}$ ]]
+            [[ "$day_dir" =~ ^[0-9]{2}$ ]]
+            test "$cast_file" = "$session_dir/session.cast"
+            test "$events_json" = "$session_dir/events.jsonl"
+            test -z "$(find "$TMPDIR/captures" -maxdepth 1 -type f | sed -n '1p')"
+            test -z "$(find "$TMPDIR/captures" -type f -name '*.cast.meta' | sed -n '1p')"
 
-          jq -e '
-            .schema == "terminal-session-v1" and
-            .session_id == $session_id and
-            (.started_at_ms | type) == "number" and
-            (.command_count | type) == "number" and
-            .command_count >= 1 and
-            .event_count >= 4 and
-            .cast_path == $cast_path and
-            .events_path == $events_path and
-            .host == "terminal-capture-test" and
-            .terminal == "kitty" and
-            .exit_reason == "shell_exit" and
-            .cleanup_escalated == false and
-            .recorder_exit_code == 0 and
-            (.session_id | test(",") | not) and
-            .session_id != "poison-session" and
-            .cast_path != $poison_cast and
-            .events_path != $poison_events
-          ' \
-            --arg session_id "$session_id" \
-            --arg cast_path "$cast_file" \
-            --arg events_path "$events_json" \
-            --arg poison_cast "$TMPDIR/poison.cast" \
-            --arg poison_events "$TMPDIR/poison.events.jsonl" \
-            "$session_json" >/dev/null
+            jq -e '
+              .schema == "terminal-session-v1" and
+              .session_id == $session_id and
+              (.started_at_ms | type) == "number" and
+              (.command_count | type) == "number" and
+              .command_count >= 1 and
+              .event_count >= 4 and
+              .cast_path == $cast_path and
+              .events_path == $events_path and
+              .host == "terminal-capture-test" and
+              .terminal == "kitty" and
+              .exit_reason == "shell_exit" and
+              .cleanup_escalated == false and
+              .recorder_exit_code == 0 and
+              (.session_id | test(",") | not) and
+              .session_id != "poison-session" and
+              .cast_path != $poison_cast and
+              .events_path != $poison_events
+            ' \
+              --arg session_id "$session_id" \
+              --arg cast_path "$cast_file" \
+              --arg events_path "$events_json" \
+              --arg poison_cast "$TMPDIR/poison.cast" \
+              --arg poison_events "$TMPDIR/poison.events.jsonl" \
+              "$session_json" >/dev/null
 
-          jq -s -e '
-            length >= 4 and
-            .[0].type == "session_start" and
-            .[-1].type == "session_end" and
-            ([.[] | select(.type == "command_start")] | length) >= 1 and
-            all(.[]; .session_id != "poison-session")
-          ' "$events_json" >/dev/null
+            jq -s -e '
+              length >= 4 and
+              .[0].type == "session_start" and
+              .[-1].type == "session_end" and
+              ([.[] | select(.type == "command_start")] | length) >= 1 and
+              all(.[]; .session_id != "poison-session")
+            ' "$events_json" >/dev/null
 
-          touch "$out"
-        '';
-      terminalCaptureRuntimeFailure = pkgs.runCommand "sinnix-terminal-capture-runtime-failure-check"
-        {
-          nativeBuildInputs = [
-            pkgs.asciinema_3
-            pkgs.coreutils
-            pkgs.findutils
-            pkgs.gnugrep
-            pkgs.jq
-            pkgs.util-linux
-            pkgs.zsh
-          ];
-        }
-        ''
-          export HOME="$TMPDIR/home"
-          mkdir -p "$HOME" "$TMPDIR/captures" "$TMPDIR/bin"
+            touch "$out"
+          '';
+      terminalCaptureRuntimeFailure =
+        pkgs.runCommand "sinnix-terminal-capture-runtime-failure-check"
+          {
+            nativeBuildInputs = [
+              pkgs.asciinema_3
+              pkgs.coreutils
+              pkgs.findutils
+              pkgs.gnugrep
+              pkgs.jq
+              pkgs.util-linux
+              pkgs.zsh
+            ];
+          }
+          ''
+            export HOME="$TMPDIR/home"
+            mkdir -p "$HOME" "$TMPDIR/captures" "$TMPDIR/bin"
 
-          cat > "$TMPDIR/bin/asciinema" <<'EOF'
-          #!${pkgs.bash}/bin/bash
-          set -euo pipefail
+            cat > "$TMPDIR/bin/asciinema" <<'EOF'
+            #!${pkgs.bash}/bin/bash
+            set -euo pipefail
 
-          command_path=""
-          output_path=""
+            command_path=""
+            output_path=""
 
-          while (($#)); do
-            case "$1" in
-              rec)
-                shift
-                ;;
-              --command)
-                command_path="$2"
-                shift 2
-                ;;
-              --*)
-                if (($# >= 2)) && [[ "$2" != --* ]]; then
-                  shift 2
-                else
+            while (($#)); do
+              case "$1" in
+                rec)
                   shift
-                fi
-                ;;
-              *)
-                output_path="$1"
-                shift
-                ;;
-            esac
-          done
+                  ;;
+                --command)
+                  command_path="$2"
+                  shift 2
+                  ;;
+                --*)
+                  if (($# >= 2)) && [[ "$2" != --* ]]; then
+                    shift 2
+                  else
+                    shift
+                  fi
+                  ;;
+                *)
+                  output_path="$1"
+                  shift
+                  ;;
+              esac
+            done
 
-          test -n "$command_path"
-          test -n "$output_path"
-          mkdir -p "$(dirname "$output_path")"
-          printf '{"version": 3, "width": 80, "height": 24, "timestamp": 0}\n' > "$output_path"
-          "$command_path"
-          exit 42
-          EOF
-          chmod +x "$TMPDIR/bin/asciinema"
+            test -n "$command_path"
+            test -n "$output_path"
+            mkdir -p "$(dirname "$output_path")"
+            printf '{"version": 3, "width": 80, "height": 24, "timestamp": 0}\n' > "$output_path"
+            "$command_path"
+            exit 42
+            EOF
+            chmod +x "$TMPDIR/bin/asciinema"
 
-          cat > "$TMPDIR/fake-shell.zsh" <<'EOF'
-          #!${pkgs.zsh}/bin/zsh
-          set -eu
-          source ${../scripts/sinnix-terminal-capture-hooks.zsh}
-          print -r -- "terminal-capture-ready"
-          true
-          exit 0
-          EOF
-          chmod +x "$TMPDIR/fake-shell.zsh"
+            cat > "$TMPDIR/fake-shell.zsh" <<'EOF'
+            #!${pkgs.zsh}/bin/zsh
+            set -eu
+            source ${../scripts/sinnix-terminal-capture-hooks.zsh}
+            print -r -- "terminal-capture-ready"
+            true
+            exit 0
+            EOF
+            chmod +x "$TMPDIR/fake-shell.zsh"
 
-          export PATH="$TMPDIR/bin:${lib.makeBinPath [
-            pkgs.coreutils
-            pkgs.findutils
-            pkgs.gnugrep
-            pkgs.jq
-            pkgs.util-linux
-            pkgs.zsh
-          ]}:$PATH"
+            export PATH="$TMPDIR/bin:${
+              lib.makeBinPath [
+                pkgs.coreutils
+                pkgs.findutils
+                pkgs.gnugrep
+                pkgs.jq
+                pkgs.util-linux
+                pkgs.zsh
+              ]
+            }:$PATH"
 
-          transcript="$TMPDIR/terminal-capture-runtime-failure.typescript"
+            transcript="$TMPDIR/terminal-capture-runtime-failure.typescript"
 
-          set +e
-          script -qfec "env \
-            EPOCHREALTIME='1773285652,647035000' \
-            HOME='$HOME' \
-            HOSTNAME='terminal-capture-test' \
-            KITTY_PID='4242' \
-            SHELL='$TMPDIR/fake-shell.zsh' \
-            SINNIX_CAPTURE_ROOT='$TMPDIR/captures' \
-            TERM='xterm-kitty' \
-            USER='tester' \
-            ${pkgs.bash}/bin/bash ${../scripts/sinnix-captured-shell}" "$transcript"
-          status=$?
-          set -e
+            set +e
+            script -qfec "env \
+              EPOCHREALTIME='1773285652,647035000' \
+              HOME='$HOME' \
+              HOSTNAME='terminal-capture-test' \
+              KITTY_PID='4242' \
+              SHELL='$TMPDIR/fake-shell.zsh' \
+              SINNIX_CAPTURE_ROOT='$TMPDIR/captures' \
+              TERM='xterm-kitty' \
+              USER='tester' \
+              ${pkgs.bash}/bin/bash ${../scripts/sinnix-captured-shell}" "$transcript"
+            status=$?
+            set -e
 
-          test "$status" -eq 42
-          grep -q "terminal-capture-ready" "$transcript"
+            test "$status" -eq 42
+            grep -q "terminal-capture-ready" "$transcript"
 
-          session_json="$(find "$TMPDIR/captures" -type f -name session.json | sed -n '1p')"
-          events_json="$(find "$TMPDIR/captures" -type f -name events.jsonl | sed -n '1p')"
-          cast_file="$(find "$TMPDIR/captures" -type f -name session.cast | sed -n '1p')"
+            session_json="$(find "$TMPDIR/captures" -type f -name session.json | sed -n '1p')"
+            events_json="$(find "$TMPDIR/captures" -type f -name events.jsonl | sed -n '1p')"
+            cast_file="$(find "$TMPDIR/captures" -type f -name session.cast | sed -n '1p')"
 
-          test -n "$session_json"
-          test -n "$events_json"
-          test -n "$cast_file"
-          test -z "$(find "$TMPDIR/captures" -maxdepth 1 -type f | sed -n '1p')"
-          test -z "$(find "$TMPDIR/captures" -type f -name '*.cast.meta' | sed -n '1p')"
+            test -n "$session_json"
+            test -n "$events_json"
+            test -n "$cast_file"
+            test -z "$(find "$TMPDIR/captures" -maxdepth 1 -type f | sed -n '1p')"
+            test -z "$(find "$TMPDIR/captures" -type f -name '*.cast.meta' | sed -n '1p')"
 
-          jq -e '
-            .schema == "terminal-session-v1" and
-            (.started_at_ms | type) == "number" and
-            .exit_reason == "shell_exit" and
-            .exit_code == 0 and
-            .recorder_exit_code == 42 and
-            .cleanup_escalated == false and
-            .command_count >= 1 and
-            .event_count >= 4 and
-            (.session_id | test(",") | not)
-          ' "$session_json" >/dev/null
+            jq -e '
+              .schema == "terminal-session-v1" and
+              (.started_at_ms | type) == "number" and
+              .exit_reason == "shell_exit" and
+              .exit_code == 0 and
+              .recorder_exit_code == 42 and
+              .cleanup_escalated == false and
+              .command_count >= 1 and
+              .event_count >= 4 and
+              (.session_id | test(",") | not)
+            ' "$session_json" >/dev/null
 
-          jq -s -e '
-            length >= 4 and
-            .[0].type == "session_start" and
-            .[-1].type == "session_end"
-          ' "$events_json" >/dev/null
+            jq -s -e '
+              length >= 4 and
+              .[0].type == "session_start" and
+              .[-1].type == "session_end"
+            ' "$events_json" >/dev/null
 
-          touch "$out"
-        '';
+            touch "$out"
+          '';
     in
     {
       checks = (mkSystemChecks system testSpecs) // {

@@ -22,8 +22,10 @@ mkFeatureModule {
       ...
     }:
     let
-      repoRoot = config.sinnix.paths.projectRoot;
+      systemConfig = config;
+      repoRoot = systemConfig.sinnix.paths.projectRoot;
       scriptPkgs = inputs.self.packages.${pkgs.stdenv.hostPlatform.system};
+      captureChromeLaunches = systemConfig.sinnix.services.reboot-no-more.launchCapture.enable;
     in
     {
       home-manager.users.${user} =
@@ -57,25 +59,26 @@ mkFeatureModule {
             paths = [ chromeBasePkg ];
             buildInputs = [ pkgs.makeWrapper ];
             postBuild = ''
-              real_bin="$out/bin/.google-chrome-stable-real"
-              mv "$out/bin/google-chrome-stable" "$real_bin"
-              cat > "$out/bin/google-chrome-stable" <<'EOF'
-#!${pkgs.bash}/bin/bash
-set -euo pipefail
-exec ${lib.getExe scriptPkgs.launch-trigger-capture} chrome -- "$0.real" "$@"
-EOF
-              chmod +x "$out/bin/google-chrome-stable"
-              ln -s "$real_bin" "$out/bin/google-chrome-stable.real"
+                            real_bin="$out/bin/.google-chrome-stable-real"
+                            mv "$out/bin/google-chrome-stable" "$real_bin"
+                            cat > "$out/bin/google-chrome-stable" <<'EOF'
+              #!${pkgs.bash}/bin/bash
+              set -euo pipefail
+              exec ${lib.getExe scriptPkgs.launch-trigger-capture} chrome -- "$0.real" "$@"
+              EOF
+                            chmod +x "$out/bin/google-chrome-stable"
+                            ln -s "$real_bin" "$out/bin/google-chrome-stable.real"
 
-              desktop="$out/share/applications/google-chrome.desktop"
-              if [ -f "$desktop" ]; then
-                rm -f "$desktop"
-                cp "${chromeBasePkg}/share/applications/google-chrome.desktop" "$desktop"
-                substituteInPlace "$desktop" \
-                  --replace-fail "${chromeBasePkg}/bin/google-chrome-stable" "$out/bin/google-chrome-stable"
-              fi
+                            desktop="$out/share/applications/google-chrome.desktop"
+                            if [ -f "$desktop" ]; then
+                              rm -f "$desktop"
+                              cp "${chromeBasePkg}/share/applications/google-chrome.desktop" "$desktop"
+                              substituteInPlace "$desktop" \
+                                --replace-fail "${chromeBasePkg}/bin/google-chrome-stable" "$out/bin/google-chrome-stable"
+                            fi
             '';
           };
+          chromePkg = if captureChromeLaunches then chromeStablePkg else chromeBasePkg;
           browserLinkCmd = "${config.home.homeDirectory}/.local/bin/open-browser-link";
           mkDotsFile = mkDotsFileFor config;
           quteDots = rel: mkDotsFile ("/qutebrowser" + rel);
@@ -89,12 +92,16 @@ EOF
               BROWSER = browserLinkCmd;
             };
 
-            packages = with pkgs; [
-              chromeStablePkg
-              qutebrowser
-              tor-browser
-              scriptPkgs.launch-trigger-capture
-            ];
+            packages =
+              with pkgs;
+              [
+                chromePkg
+                qutebrowser
+                tor-browser
+              ]
+              ++ lib.optionals captureChromeLaunches [
+                scriptPkgs.launch-trigger-capture
+              ];
 
             file = {
               ".local/share/qutebrowser/userscripts/open-in-mpv" = mkUserScript "open-in-mpv";

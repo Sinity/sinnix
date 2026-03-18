@@ -1,5 +1,10 @@
 # Host-specific boot configuration for sinnix-prime
-{ pkgs, lib, config, ... }:
+{
+  pkgs,
+  lib,
+  config,
+  ...
+}:
 {
   boot = {
     loader = {
@@ -9,6 +14,14 @@
         # With the current generation at 336, 22 entries keeps >=315 and drops the
         # stale UKI/BLS clutter from the earlier bring-up churn.
         configurationLimit = 22;
+        extraInstallCommands = ''
+          loader_conf="${config.boot.loader.efi.efiSysMountPoint}/loader/loader.conf"
+          default_entry="$(${pkgs.gawk}/bin/awk '$1 == "default" { print $2; exit }' "$loader_conf")"
+
+          if [[ -n "$default_entry" ]]; then
+            ${config.systemd.package}/bin/bootctl set-default "$default_entry"
+          fi
+        '';
       };
       efi.canTouchEfiVariables = true;
     };
@@ -33,8 +46,10 @@
     # is still physically on the PCIe bus, and nouveau + GA102 Ampere (GSP path)
     # is unstable enough to hard-reset the system. Blacklist it explicitly.
     blacklistedKernelModules =
-      lib.optionals (config.sinnix.gpu.mode == "nvidia" || config.sinnix.gpu.mode == "nvidia-open") [ "i915" ] ++
-      lib.optionals (config.sinnix.gpu.mode == "igpu") [ "nouveau" ];
+      lib.optionals (config.sinnix.gpu.mode == "nvidia" || config.sinnix.gpu.mode == "nvidia-open") [
+        "i915"
+      ]
+      ++ lib.optionals (config.sinnix.gpu.mode == "igpu") [ "nouveau" ];
     kernelModules = [ "kvm-intel" ] ++ lib.optionals (config.sinnix.gpu.mode == "igpu") [ "i915" ];
 
     consoleLogLevel = 3;
@@ -53,7 +68,8 @@
       # Keep the NVIDIA link on the more conservative path while the reset
       # investigation is active.
       "nvidia.NVreg_EnablePCIeGen3=0"
-    ] ++ lib.optionals (config.sinnix.gpu.mode == "dual") [
+    ]
+    ++ lib.optionals (config.sinnix.gpu.mode == "dual") [
       # xe loads as a transitive dep of nvidia and claims the iGPU PCI ID (0xa780)
       # before i915 can bind. force_probe opts the UHD 770 into xe's binding path.
       "xe.force_probe=a780"
@@ -63,5 +79,30 @@
   # intel_pstate on this host exposes performance/powersave governors;
   # forcing schedutil makes NixOS try to load cpufreq_schedutil at boot.
   powerManagement.cpuFreqGovernor = "powersave";
+
+  systemd.services.sinnix-cpu-frequency-cap = {
+    description = "Cap sinnix-prime CPU frequency without disabling turbo entirely";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "sysinit.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
+    script = ''
+      echo 0 > /sys/devices/system/cpu/intel_pstate/no_turbo
+
+      for policy in /sys/devices/system/cpu/cpufreq/policy*; do
+        max="$(cat "$policy/cpuinfo_max_freq")"
+        target=4500000
+
+        if [[ "$max" -lt "$target" ]]; then
+          target="$max"
+        fi
+
+        echo "$target" > "$policy/scaling_max_freq"
+      done
+    '';
+  };
+
   hardware.enableRedistributableFirmware = true;
 }
