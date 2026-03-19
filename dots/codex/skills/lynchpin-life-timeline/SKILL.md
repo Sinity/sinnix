@@ -7,7 +7,9 @@ user_invocable: true
 # lynchpin-life-timeline
 
 Build monthly "life timeline" metrics from local personal telemetry sources via
-direct `lynchpin.system.life_timeline*` module composition.
+the reusable `lynchpin.retrospective.run_life_timeline(...)` API, with
+`lynchpin.system.life_timeline*` kept as thin CLI wrappers for concrete
+artefact writes.
 
 ## Latest Refresh Sequence
 
@@ -90,11 +92,12 @@ Reddit, Wykop, webhistory, Raindrop bookmarks, Goodreads, Spotify, finance (hled
 ## API
 
 ```python
-from lynchpin.system.life_timeline import run_life_timeline, LifeTimelineResult
+from pathlib import Path
+from lynchpin.retrospective import LifeTimelineInputs, LifeTimelineResult, run_life_timeline
 result: LifeTimelineResult = run_life_timeline(
     start_month="2024-01",
     end_month="2024-12",
     output=Path("..."),
-    markdown_output=Path("..."),
+    inputs=LifeTimelineInputs(),
 )
 ```

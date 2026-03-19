@@ -569,7 +569,9 @@ mkFeatureModule {
                 #!/usr/bin/env bash
                 set -euo pipefail
 
-                CODEX_BIN="${inputs.nix-ai-tools.packages.${pkgs.stdenv.hostPlatform.system}.codex}/bin/codex"
+                CODEX_BIN="${
+                  inputs.nix-ai-tools.packages.${pkgs.stdenv.hostPlatform.system}.codex
+                }/bin/codex"
 
                 exec "$CODEX_BIN" "$@"
               '';

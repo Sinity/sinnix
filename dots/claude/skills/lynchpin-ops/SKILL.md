@@ -23,7 +23,9 @@ argument-hint: "<command> [args]"
 # Lynchpin Ops
 
 Unified skill for operating the Lynchpin personal data analysis hub.
-Prefer composable Python module imports over CLI wrappers.
+Prefer composable Python module imports over CLI wrappers. The real reusable
+surface is `lynchpin.retrospective.*` plus `lynchpin.trajectory.*`; the CLIs
+exist to materialize artefacts, not as the architectural center.
 
 Canonical doctrine for this skill family lives at:
 
@@ -72,11 +74,23 @@ from lynchpin.sources.exports.spotify import iter_streams
 ```bash
 python -m lynchpin.views.warehouse refresh --format parquet    # Full warehouse rebuild
 python -m lynchpin.views.warehouse refresh --sources analysis  # Analysis tables only
-python -m lynchpin.views.calendar_views <start> <end>          # Render calendar views
-python -m lynchpin.views.calendar_narratives <start> <end> --mode reflective
-python -m lynchpin.views.session_summaries summarise <path>    # Session summaries
-python -m lynchpin.views.velocity                              # Cross-project velocity
-python -m lynchpin.views.ledgers artefact                      # Artefact ledger
+python - <<'PY'
+import asyncio
+from datetime import date
+from pathlib import Path
+from lynchpin.retrospective import (
+    CalendarScale,
+    build_calendar_views,
+    generate_date_range_narrative,
+)
+views = build_calendar_views(date(2026, 3, 7), date(2026, 3, 13), scale=CalendarScale.day, write_files=False)
+print(views[0].markdown)
+print(asyncio.run(generate_date_range_narrative(date(2026, 3, 7), date(2026, 3, 13))).text)
+PY
+python -m lynchpin.views.calendar_views <start> <end>          # Only when you need files on disk
+just summarise-session <path>                                  # Session summaries
+just velocity                                                  # Cross-project velocity
+just artefact-index                                            # Artefact ledger
 ```
 
 ### Baseline Analytics
@@ -101,13 +115,25 @@ result: BaselineResult = run_baseline(mode="auto", full=True)
 python -m lynchpin.system.life_timeline --start 2024-01 --end 2024-12
 python -m lynchpin.system.life_timeline_digest      # Markdown digest
 python -m lynchpin.system.life_timeline_oembed enrich # YouTube enrichment
-python -m lynchpin.system.life_timeline_narrative    # LLM narrative
+python -m lynchpin.system.life_timeline_narrative    # Quarterly / annual narrative
 ```
 
-**API**:
+**API / orchestration**:
 ```python
-from lynchpin.system.life_timeline import run_life_timeline, LifeTimelineResult
-result: LifeTimelineResult = run_life_timeline(start_month="2024-01", end_month="2024-12")
+import asyncio
+from datetime import date
+from pathlib import Path
+
+from lynchpin.retrospective import run_life_timeline, generate_date_range_narrative
+
+result = run_life_timeline(
+    start_month="2024-01",
+    end_month="2024-12",
+    output=Path("artefacts/lifelog/life-timeline/monthly_life_latest.json"),
+)
+week_narrative = asyncio.run(
+    generate_date_range_narrative(date(2026, 3, 7), date(2026, 3, 13), backend="codex-exec")
+)
 ```
 
 **Artifacts**: `artefacts/lifelog/life-timeline/`
@@ -141,12 +167,16 @@ python -m lynchpin.views.warehouse refresh --format parquet
 
 ### Multi-Scale Interpretation Guidance
 
-- Use `lynchpin.views.calendar_summary` and `lynchpin.views.calendar*` as the
-  day-scale structured substrate.
-- Use `lynchpin.system.life_timeline*` for month/life-scale synthesis.
-- Treat both as current delivery surfaces, not as fixed architecture standards.
+- Use `lynchpin.retrospective.build_calendar_views(...)` for day/week/month
+  dossier assembly and `lynchpin.retrospective.run_life_timeline(...)` for
+  month/life-scale synthesis.
+- Treat both as thin delivery surfaces. The canonical orchestration layer for
+  agents is this skill plus the reusable `lynchpin.retrospective` /
+  `lynchpin.trajectory` APIs.
 - When adding new higher-level understanding, prefer reusable structured facts
   and rollups over prompting directly from raw source rows.
+- For LLM retrospectives, prefer the default `codex-exec` backend so runs use
+  the local Codex login/subscription path rather than API-key billing.
 - For activity understanding, start from raw ActivityWatch/Atuin/instrumentation
   signals and classify by purpose, not by app name alone.
 - Treat the model's context window state as a first-class output: prefer

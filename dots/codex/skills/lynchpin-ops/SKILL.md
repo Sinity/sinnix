@@ -22,9 +22,11 @@ than `just` wrappers or packaged `lynchpin-*` binaries.
 
 ## Canonical Surface
 
-- Repo-local module CLIs via `python -m lynchpin.<module>`
-- Python imports from `lynchpin.sources.*`, `lynchpin.views.*`,
-  `lynchpin.system.*`, and `lynchpin.ingest.*`
+- Python imports from `lynchpin.sources.*`, `lynchpin.retrospective.*`,
+  `lynchpin.trajectory.*`, `lynchpin.views.*`, `lynchpin.system.*`, and
+  `lynchpin.ingest.*`
+- Repo-local module CLIs via `python -m lynchpin.<module>` when you need
+  concrete artefacts written to disk
 - Runbooks in `/realm/project/sinity-lynchpin/docs/reference/`
 
 `just` is no longer the canonical workflow surface for baseline or life
@@ -55,14 +57,22 @@ project `justfile`.
 
 - `python -m lynchpin.system.validate`
 - `python -m lynchpin.system.baseline` — see `lynchpin-baseline`
+- `lynchpin.retrospective.run_life_timeline(...)`
 - `python -m lynchpin.system.life_timeline` — see `lynchpin-life-timeline`
+- `lynchpin.retrospective.build_calendar_views(...)`
 - `python -m lynchpin.views.warehouse`
 - `python -m lynchpin.views.calendar_views`
-- `python -m lynchpin.views.calendar_narratives`
-- `python -m lynchpin.views.session_summaries`
-- `python -m lynchpin.views.ledgers`
-- `python -m lynchpin.views.project_bundles`
-- `python -m lynchpin.views.velocity`
+- `lynchpin.retrospective.generate_date_range_narrative(...)`
+- `lynchpin.analysis.knowledge.summarise_session_transcript(...)`
+- `lynchpin.analysis.knowledge.write_session_ledger(...)`
+- `lynchpin.analysis.knowledge.write_artefact_ledger(...)`
+- `lynchpin.analysis.projects.build_project_bundles(...)`
+- `lynchpin.analysis.projects.build_velocity_dashboard(...)`
+- `just summarise-session`
+- `just session-index`
+- `just artefact-index`
+- `just project-bundles`
+- `just velocity`
 - `python -m lynchpin.views.knowledge_graph`
 - `python -m lynchpin.ingest.instrumentation`
 - `python -m lynchpin.ingest.webhistory`
@@ -73,9 +83,20 @@ project `justfile`.
 ```bash
 python -m lynchpin.system.validate hpi --quick
 python -m lynchpin.views.warehouse refresh --sources activitywatch,atuin
-python -m lynchpin.views.calendar_views 2026-03-07 2026-03-13 --output artefacts/calendar/views
-python -m lynchpin.views.calendar_narratives 2026-03-07 2026-03-13 --mode reflective
-python -m lynchpin.views.session_summaries summarise docs/reference/sessions/example.md
+python - <<'PY'
+import asyncio
+from datetime import date
+from pathlib import Path
+from lynchpin.retrospective import (
+    CalendarScale,
+    build_calendar_views,
+    generate_date_range_narrative,
+)
+views = build_calendar_views(date(2026, 3, 7), date(2026, 3, 13), scale=CalendarScale.day, write_files=False)
+print(views[0].markdown)
+print(asyncio.run(generate_date_range_narrative(date(2026, 3, 7), date(2026, 3, 13))).text)
+PY
+just summarise-session docs/reference/sessions/example.md
 ```
 
 ## Workflow Guidance
@@ -95,10 +116,15 @@ python -m lynchpin.views.session_summaries summarise docs/reference/sessions/exa
 
 ### Calendar and Narratives
 
-- Use `python -m lynchpin.views.calendar_views START END` for dossier
-  rendering, not retired dashboard exporters.
-- Use `python -m lynchpin.views.calendar_narratives START END ...` for
-  prompt-driven summaries that sit on top of those day views.
+- Use this skill as the canonical orchestration surface. Reach for
+  `lynchpin.retrospective.build_calendar_views(...)` first. Reach for
+  `python -m lynchpin.views.calendar_views START END` only when you need the
+  concrete dossier artefacts on disk.
+- Use `lynchpin.retrospective.generate_date_range_narrative(...)` for
+  prompt-driven summaries that sit on top of those day views; the agent should
+  orchestrate this directly instead of depending on a dedicated CLI wrapper.
+- Prefer the default `codex-exec` backend for retrospective generation so the
+  run uses the local Codex login/subscription path rather than API-key billing.
 - Treat `lynchpin.views.calendar_summary` as the main day-scale structured
   substrate. If you are adding higher-level understanding, prefer promoting
   stable facts and rollups out of it rather than prompting directly from raw
@@ -108,8 +134,9 @@ python -m lynchpin.views.session_summaries summarise docs/reference/sessions/exa
 
 ### Life Timeline and Multi-Scale Work
 
-- Use `python -m lynchpin.system.life_timeline*` for month/life-scale
-  historical synthesis.
+- Use `lynchpin.retrospective.run_life_timeline(...)` as the reusable build
+  entrypoint. Reach for `python -m lynchpin.system.life_timeline*` only when
+  you need the concrete month/life artefacts written from the CLI.
 - Treat `lynchpin.views.calendar*` and `lynchpin.system.life_timeline*` as
   current delivery surfaces, not as fixed architecture standards.
 - When adding new higher-level analysis, prefer shared structured artifacts or
@@ -123,8 +150,13 @@ python -m lynchpin.views.session_summaries summarise docs/reference/sessions/exa
 
 ### Sessions
 
-- Use `python -m lynchpin.views.session_summaries summarise INPUT_PATH` only
-  when an API key/runtime is available.
+- Use `lynchpin.analysis.knowledge.summarise_session_transcript(...)` for
+  programmatic orchestration and `just summarise-session INPUT_PATH` for the
+  default materializer path.
+- The default summary path should stay on the local Codex login/subscription
+  flow rather than API-key billing.
+- Use `just session-index` / `just artefact-index` for the flat ledger exports
+  when you need them on disk.
 - Keep Polylogue responsible for rendering chat exports into canonical
   Markdown before summarization.
 

@@ -153,7 +153,7 @@ Some current repo surfaces are useful seeds:
 
 - `lynchpin.views.calendar_summary`
 - `lynchpin.system.meta`
-- `lynchpin.views.session_summaries`
+- `lynchpin.analysis.knowledge`
 - `lynchpin.views.knowledge_graph`
 
 But none of them yet constitute the final context substrate.
