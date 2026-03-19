@@ -25,6 +25,8 @@ Supported agents: `claude` (via `claude --print`/exec), `codex` (exec mode), `ge
 If you need execution-lane tradeoffs and notes, read:
 
 - `references/runtime-modes.md`
+- `references/2026-03-19-local-first-coding-agent-sessions-in-sinnix.md`
+- `references/2026-03-19-vocal-interface-possibilities-for-sinnix.md`
 
 ## When To Use
 

@@ -1,0 +1,62 @@
+name: Feature or Change
+description: Track a concrete feature, improvement, or meaningful implementation slice.
+title: "[feature] "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: What should exist or work differently once this is done?
+      placeholder: A concrete user-visible or system-visible result.
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or opportunity
+      description: Why does this matter now?
+      placeholder: Pain, gap, blocker, or leverage.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Expected scope
+      description: What parts of the repo or system are likely in scope?
+      placeholder: Modules, hosts, services, scripts, docs, tests.
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints and invariants
+      description: Capture requirements that must not be violated.
+      placeholder: Host safety, module placement, deployment assumptions, secrets, rollback constraints.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List the concrete conditions for closure.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification plan
+      description: How should this be tested or otherwise checked?
+      placeholder: nix eval/build, VM tests, switch procedure, manual host validation.
+  - type: textarea
+    id: context
+    attributes:
+      label: Context and evidence
+      description: Link issues, reports, docs, screenshots, logs, or commits.
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Non-goals or explicitly deferred work
+      description: Say what this issue is not trying to solve.
