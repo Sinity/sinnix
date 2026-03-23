@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if (( $# == 0 )); then
+  exec nix
+fi
+
+command_name=$1
+shift
+
+is_heavy_cmd=0
+case "$command_name" in
+  build|develop|run|shell|flake|copy|copy-closure|build-remote)
+    is_heavy_cmd=1
+    ;;
+esac
+
+if (( is_heavy_cmd == 0 )); then
+  exec nix "$command_name" "$@"
+fi
+
+if [[ "${NIX_SAFE_MAX_JOBS:-}" =~ ^[0-9]+$ && ${NIX_SAFE_MAX_JOBS:-0} -gt 0 ]]; then
+  safe_jobs="$NIX_SAFE_MAX_JOBS"
+else
+  mem_kb="$(awk '/MemAvailable/ { print $2; exit }' /proc/meminfo)"
+  if [[ -z "${mem_kb:-}" ]]; then
+    mem_kb="$(awk '/MemTotal/ { print $2; exit }' /proc/meminfo)"
+  fi
+  mem_gb=$((mem_kb / 1024 / 1024))
+
+  # Rough heuristic: keep ~7GiB reserved per concurrent Nix job.
+  safe_jobs=$((mem_gb / 7))
+  safe_jobs=$((safe_jobs > 0 ? safe_jobs : 1))
+  safe_jobs=$((safe_jobs > 8 ? 8 : safe_jobs))
+fi
+
+if (( safe_jobs < 1 )); then
+  safe_jobs=1
+fi
+if (( safe_jobs > 12 )); then
+  safe_jobs=12
+fi
+
+cpu_count="$(nproc)"
+safe_cores=$((cpu_count / safe_jobs))
+safe_cores=$((safe_cores > 0 ? safe_cores : 1))
+safe_cores=$((safe_cores > 4 ? 4 : safe_cores))
+if (( safe_cores < 1 )); then
+  safe_cores=1
+fi
+
+args=()
+max_jobs_set=0
+cores_set=0
+while (($#)); do
+  case "$1" in
+    --max-jobs=*)
+      max_jobs_set=1
+      args+=("$1")
+      shift
+      ;;
+    --max-jobs)
+      max_jobs_set=1
+      if (($# < 2)); then
+        args+=("$1")
+        shift
+        break
+      fi
+      args+=("$1" "$2")
+      shift 2
+      ;;
+    --cores=*)
+      cores_set=1
+      args+=("$1")
+      shift
+      ;;
+    --cores)
+      cores_set=1
+      if (($# < 2)); then
+        args+=("$1")
+        shift
+        break
+      fi
+      args+=("$1" "$2")
+      shift 2
+      ;;
+    *)
+      args+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if (( max_jobs_set == 0 )); then
+  args+=(--max-jobs "$safe_jobs")
+fi
+
+if (( cores_set == 0 )); then
+  args+=(--cores "$safe_cores")
+fi
+
+exec nix "$command_name" "${args[@]}"

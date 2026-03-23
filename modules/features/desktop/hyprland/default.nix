@@ -2,16 +2,12 @@
   lib,
   config,
   pkgs,
-  inputs,
   ...
 }:
 let
-  systemConfig = config;
   cfg = config.sinnix.features.desktop.hyprland;
   user = config.sinnix.user.name;
   hyprlandPkg = config.programs.hyprland.package or pkgs.hyprland;
-  scriptPkgs = inputs.self.packages.${pkgs.stdenv.hostPlatform.system};
-  captureHyprlandLaunch = systemConfig.sinnix.services.reboot-no-more.launchCapture.enable;
 
   # Helpers for home-manager config
   repoRoot = config.sinnix.paths.projectRoot;
@@ -67,6 +63,10 @@ let
       target = "kitty-scrollback-view";
       source = "kitty-scrollback-view";
     }
+    {
+      target = "hdr-screenshot";
+      source = "hdr-screenshot";
+    }
   ];
 in
 {
@@ -106,12 +106,7 @@ in
           if [ "$(id -un)" = "${user}" ] && [ -z "$DISPLAY" ]; then
             current_tty=$(tty 2>/dev/null || true)
             if [ "$current_tty" = "/dev/tty1" ] && command -v uwsm >/dev/null 2>&1; then
-              ${
-                if captureHyprlandLaunch then
-                  "exec ${lib.getExe scriptPkgs.launch-trigger-capture} hyprland -- uwsm start hyprland-uwsm.desktop"
-                else
-                  "exec uwsm start hyprland-uwsm.desktop"
-              }
+              exec uwsm start hyprland-uwsm.desktop
             fi
           fi
         '';
@@ -241,11 +236,12 @@ in
             grim
             slurp
             grimblast
+            imagemagick
+            jq
+            libnotify
+            wl-clipboard
             wl-screenrec
             xdg-desktop-portal-gtk
-          ]
-          ++ lib.optionals captureHyprlandLaunch [
-            scriptPkgs.launch-trigger-capture
           ];
 
         # Prevent hyprpaper restarts on config changes (wallpaper is set once at login)

@@ -55,8 +55,8 @@ in
     "SUPER, N, exec, ${script "toggle-scratch"} notes"
 
     "SUPER, V, exec, kitty --class clipse -e clipse"
-    ", Print, exec, grimblast --notify --freeze copysave area ${screenshotDir}/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
-    "SUPER, Print, exec, grimblast --notify --cursor copysave output ${screenshotDir}/$(date +'%Y-%m-%d-At-%Ih%Mm%Ss').png"
+    ", Print, exec, ${script "hdr-screenshot"} area --dir ${screenshotDir}"
+    "SUPER, Print, exec, ${script "hdr-screenshot"} output --dir ${screenshotDir}"
 
     # F-key bindings
     ", F3, exec, asbl-no-moar once --mode invert --duration 0.05"

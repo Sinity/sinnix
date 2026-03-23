@@ -20,6 +20,7 @@ mkFeatureModule {
         timewarrior
         repomix
         difftastic
+        bubblewrap
         unzip
         wget
         # Modern CLI replacements
@@ -47,6 +48,7 @@ mkFeatureModule {
       };
 
       systemd.coredump.enable = true;
+      services.atd.enable = true;
 
       # Disable GNOME keyring - using GPG agent for SSH key management instead
       services.gnome.gnome-keyring.enable = lib.mkForce false;

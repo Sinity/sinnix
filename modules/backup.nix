@@ -95,7 +95,7 @@ let
     volume ${realmRoot}
       snapshot_dir   .snapshot
       subvolume .
-        snapshot_preserve       14d 52w
+        snapshot_preserve       3d
 
     volume /persist
       snapshot_dir   .snapshot
@@ -163,6 +163,7 @@ in
           "${borgRealmSnapshotBind}/./"
         ];
         exclude = [
+          "**/inbox/monero"
           "**/node_modules"
           "**/target"
           "**/.venv"
@@ -223,7 +224,8 @@ in
     # HDD (slow spin-up) with nofail — without this, btrbk races the mount on boot.
     systemd.services.btrbk = {
       description = "btrbk btrfs snapshot";
-      after = [ "neo-outer-realm.mount" "persist.mount" "realm.mount" ];
+      requires = [ "sinnix-realm-sinex-target-subvolume.service" ];
+      after = [ "neo-outer-realm.mount" "persist.mount" "realm.mount" "sinnix-realm-sinex-target-subvolume.service" ];
       wants = [ "neo-outer-realm.mount" ];
       serviceConfig = {
         Type = "oneshot";
@@ -239,6 +241,42 @@ in
         OnCalendar = "*-*-* *:00/15:00";
         Persistent = true;
       };
+    };
+
+    systemd.services.sinnix-realm-sinex-target-subvolume = {
+      description = "Ensure /realm/project/sinex/.sinex/target is a dedicated Btrfs subvolume";
+      after = [ "realm.mount" ];
+      requires = [ "realm.mount" ];
+      before = [ "btrbk.service" ];
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig.Type = "oneshot";
+      script = ''
+        set -euo pipefail
+
+        target_parent="/realm/project/sinex/.sinex"
+        target_path="$target_parent/target"
+
+        ${pkgs.coreutils}/bin/mkdir -p "$target_parent"
+
+        if ${pkgs.btrfs-progs}/bin/btrfs subvolume show "$target_path" >/dev/null 2>&1; then
+          exit 0
+        fi
+
+        if ${pkgs.coreutils}/bin/test -e "$target_path" && ! ${pkgs.coreutils}/bin/test -d "$target_path"; then
+          echo "$target_path exists but is not a directory" >&2
+          exit 1
+        fi
+
+        if ${pkgs.coreutils}/bin/test -d "$target_path"; then
+          if ${pkgs.findutils}/bin/find "$target_path" -mindepth 1 -print -quit | ${pkgs.gnugrep}/bin/grep -q .; then
+            echo "$target_path already exists as a non-empty directory; refusing to replace it automatically" >&2
+            exit 1
+          fi
+          ${pkgs.coreutils}/bin/rmdir "$target_path"
+        fi
+
+        ${pkgs.btrfs-progs}/bin/btrfs subvolume create "$target_path"
+      '';
     };
   };
 }

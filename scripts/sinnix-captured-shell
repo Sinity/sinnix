@@ -226,6 +226,109 @@ export SINNIX_CAPTURE_PROJECT_ROOT="$start_project_root"
 } > "${session_dir}/session.json"
 
 cleanup_escalated=false
+recorder_pid=""
+recorder_status=""
+supervisor_done=false
+cleanup_reason=""
+
+trim_spaces() {
+  local value="${1:-}"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+count_event_lines() {
+  local events_file="${SINNIX_CAPTURE_EVENTS_FILE:-}"
+  if [[ -z "$events_file" || ! -f "$events_file" ]]; then
+    printf '0'
+    return 0
+  fi
+
+  wc -l < "$events_file" | tr -d '[:space:]'
+}
+
+session_needs_finalization() {
+  local session_file="${SINNIX_CAPTURE_SESSION_FILE:-}"
+
+  if [[ -z "$session_file" || ! -f "$session_file" ]] || ! command -v jq >/dev/null 2>&1; then
+    return 1
+  fi
+
+  jq -e '(.finished_at_ms == null)' "$session_file" >/dev/null 2>&1
+}
+
+wait_for_recorder() {
+  if [[ -z "$recorder_pid" || -n "$recorder_status" ]]; then
+    return 0
+  fi
+
+  if wait "$recorder_pid"; then
+    recorder_status=0
+  else
+    recorder_status=$?
+  fi
+}
+
+finalize_session_file_if_running() {
+  local exit_reason="$1"
+  local exit_code="${2:-}"
+  local recorder_exit_code="${3:-}"
+  local session_file="${SINNIX_CAPTURE_SESSION_FILE:-}"
+
+  if [[ -z "$session_file" || ! -f "$session_file" ]] || ! command -v jq >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if ! session_needs_finalization; then
+    return 0
+  fi
+
+  local finished_at_ms
+  finished_at_ms="$(now_ms)"
+
+  local started_at_ms
+  started_at_ms="$(jq -r '.started_at_ms // empty' "$session_file" 2>/dev/null || true)"
+
+  local duration_ms="null"
+  if [[ -n "$started_at_ms" ]]; then
+    duration_ms=$((finished_at_ms - started_at_ms))
+  fi
+
+  local event_count
+  event_count="$(count_event_lines)"
+
+  local exit_code_json="null"
+  if [[ -n "$exit_code" ]]; then
+    exit_code_json="$exit_code"
+  fi
+
+  local recorder_exit_code_json="null"
+  if [[ -n "$recorder_exit_code" ]]; then
+    recorder_exit_code_json="$recorder_exit_code"
+  fi
+
+  local tmp_file="${session_file}.tmp"
+  jq \
+    --arg exit_reason "$exit_reason" \
+    --argjson finished_at_ms "$finished_at_ms" \
+    --argjson duration_ms "$duration_ms" \
+    --argjson exit_code "$exit_code_json" \
+    --argjson recorder_exit_code "$recorder_exit_code_json" \
+    --argjson cleanup_escalated "$cleanup_escalated" \
+    --argjson event_count "$event_count" \
+    '
+      .finished_at_ms = $finished_at_ms
+      | .duration_ms = $duration_ms
+      | .event_count = (if (.event_count // 0) < $event_count then $event_count else (.event_count // 0) end)
+      | .exit_reason = $exit_reason
+      | .exit_code = $exit_code
+      | .recorder_exit_code = $recorder_exit_code
+      | .cleanup_escalated = $cleanup_escalated
+    ' \
+    "$session_file" > "$tmp_file"
+  mv "$tmp_file" "$session_file"
+}
 
 update_session_file() {
   local recorder_exit_code="$1"
@@ -244,18 +347,68 @@ update_session_file() {
   mv "$tmp_file" "$session_file"
 }
 
-if asciinema rec \
+cleanup_recorder_subtree() {
+  local exit_reason="$1"
+  local exit_code="${2:-}"
+
+  if [[ -z "$recorder_pid" ]]; then
+    finalize_session_file_if_running "$exit_reason" "$exit_code" "$recorder_status"
+    return 0
+  fi
+
+  kill -TERM "$recorder_pid" 2>/dev/null || true
+
+  for _ in 1 2 3 4 5; do
+    if ! kill -0 "$recorder_pid" 2>/dev/null; then
+      break
+    fi
+    sleep 0.2
+  done
+
+  if kill -0 "$recorder_pid" 2>/dev/null; then
+    cleanup_escalated=true
+    kill -KILL "$recorder_pid" 2>/dev/null || true
+  fi
+
+  wait_for_recorder
+  finalize_session_file_if_running "$exit_reason" "$exit_code" "$recorder_status"
+}
+
+handle_supervisor_signal() {
+  local exit_reason="$1"
+  local process_status="$2"
+  cleanup_reason="$exit_reason"
+  cleanup_recorder_subtree "$exit_reason" ""
+  trap - EXIT
+  exit "$process_status"
+}
+
+handle_supervisor_exit() {
+  local exit_status="$1"
+
+  if [[ "$supervisor_done" == true || -n "$cleanup_reason" ]]; then
+    return 0
+  fi
+
+  cleanup_recorder_subtree "launcher_exit" ""
+}
+
+trap 'handle_supervisor_signal "terminal_detached" 129' HUP
+trap 'handle_supervisor_signal "launcher_interrupted" 130' INT
+trap 'handle_supervisor_signal "launcher_terminated" 143' TERM
+trap 'handle_supervisor_exit "$?"' EXIT
+
+asciinema rec \
   --stdin \
   --quiet \
   --return \
   --output-format asciicast-v3 \
   --capture-env SHELL,TERM,SINNIX_CAPTURE_SESSION_ID,SINNIX_CAPTURE_HOST,SINNIX_CAPTURE_USER,SINNIX_CAPTURE_TTY,SINNIX_CAPTURE_TERMINAL,SINNIX_CAPTURE_START_CWD,SINNIX_CAPTURE_START_REPO_ROOT,SINNIX_CAPTURE_START_REPO_BRANCH,SINNIX_CAPTURE_START_REPO_COMMIT,SINNIX_CAPTURE_START_REPO_DIRTY,SINNIX_CAPTURE_PROJECT_ROOT \
   --command "$shell_bin" \
-  "$cast_path"
-then
-  status=0
-else
-  status=$?
-fi
-update_session_file "$status"
-exit "$status"
+  "$cast_path" &
+recorder_pid=$!
+
+wait_for_recorder
+update_session_file "$recorder_status"
+supervisor_done=true
+exit "$recorder_status"

@@ -38,12 +38,12 @@
     };
 
     # Earlyoom: the actual OOM policy. Kill early, kill fast, notify.
-    # At 8% free RAM (~2.5GB) earlyoom kills the biggest process.
+    # At 12% free RAM (~3.8GB) earlyoom kills the biggest process.
     # With swappiness=0, swap can stay unused even during severe RAM pressure.
     # Keep swap thresholds at 100% so kills trigger on RAM thresholds alone.
     services.earlyoom = {
       enable = true;
-      freeMemThreshold = 8;
+      freeMemThreshold = 12;
       freeSwapThreshold = 100;
       freeSwapKillThreshold = 100;
       enableNotifications = true;
@@ -56,7 +56,7 @@
     # interactive work. IOWeight=50 yields disk bandwidth to desktop processes.
     systemd.services.nix-daemon.serviceConfig = {
       IOWeight = 50;
-      MemoryHigh = "60%";
+      MemoryHigh = "70%";
       ManagedOOMMemoryPressure = "kill";
     };
 

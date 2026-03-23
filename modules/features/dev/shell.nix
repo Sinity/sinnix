@@ -44,14 +44,14 @@ mkFeatureModule {
       cfg,
       user,
       inputs,
+      helpers,
       ...
     }:
     let
       sinnixCfg = config.sinnix;
       capturesRoot = sinnixCfg.paths.capturesRoot;
 
-      # Script packages from flake registry
-      scriptPkgs = inputs.self.packages.${pkgs.stdenv.hostPlatform.system};
+      scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
 
       findFlakeRoot = pkgs.writeShellScriptBin "find-flake-root" ''
         #!/usr/bin/env bash
@@ -186,9 +186,10 @@ mkFeatureModule {
                 tree = "eza --icons --tree --group-directories-first";
                 mosh-sinity-ephemeral = "mosh --ssh=\"ssh -p 22\" sinity@sinnix-ethereal";
                 ns = "nom-shell --run zsh";
-                nix-switch = "sudo nix run --accept-flake-config \"$(find-flake-root)#switch\"";
-                nix-test = "sudo nix run --accept-flake-config \"$(find-flake-root)#test\"";
-                nix-check = "nix run --accept-flake-config \"$(find-flake-root)#check\"";
+                nix-safe = "nix-safe";
+                nix-switch = "sudo nix-safe run --accept-flake-config \"$(find-flake-root)#switch\"";
+                nix-test = "sudo nix-safe run --accept-flake-config \"$(find-flake-root)#test\"";
+                nix-check = "nix-safe run --accept-flake-config \"$(find-flake-root)#check\"";
                 nix-search = "nix search nixpkgs";
                 piv = "python -m venv .venv";
                 psv = "source .venv/bin/activate";
@@ -458,6 +459,7 @@ mkFeatureModule {
                 findFlakeRoot
                 scriptPkgs.ccusage
                 scriptPkgs.lsp-root
+                scriptPkgs.nix-safe
                 scriptPkgs.render-agents
                 scriptPkgs.normalize-agent-projects
                 scriptPkgs.verify-agent-topology

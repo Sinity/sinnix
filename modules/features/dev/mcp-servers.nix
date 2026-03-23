@@ -48,7 +48,7 @@ mkFeatureModule {
       ...
     }:
     let
-      scriptPkgs = inputs.self.packages.${pkgs.stdenv.hostPlatform.system};
+      scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
       firecrawlSecretPath = lib.attrByPath [ "sinnix" "secrets" "paths" "firecrawl-api-key" ] null config;
       firecrawlSecretExport =
         if firecrawlSecretPath != null then
@@ -59,8 +59,8 @@ mkFeatureModule {
           ''
         else
           "";
-      mcpContext7Pkg = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.mcp-context7;
-      mcpFirecrawlPkg = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.mcp-firecrawl;
+      mcpContext7Pkg = scriptPkgs.mcp-context7;
+      mcpFirecrawlPkg = scriptPkgs.mcp-firecrawl;
       mcpContext7Bin = pkgs.writeShellScriptBin "mcp-context7" ''
         set -euo pipefail
         exec ${mcpContext7Pkg}/bin/mcp-context7 "$@"

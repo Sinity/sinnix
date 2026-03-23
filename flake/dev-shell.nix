@@ -13,7 +13,7 @@
       ...
     }:
     let
-      scriptPkgs = inputs.self.packages.${system};
+      scriptPkgs = (import ./scripts.nix { inherit inputs pkgs; }).packageSet;
       commandRegistry = import ./command-registry.nix {
         inherit inputs pkgs system;
       };

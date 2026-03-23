@@ -10,23 +10,26 @@ let
   inherit (inputs.nixpkgs) lib;
   pkgsFor = system: inputs.nixpkgs.legacyPackages.${system};
 
-  # Import test infrastructure
-  testLib = import ./test-lib.nix { inherit inputs lib; };
-  inherit (testLib)
-    mountTmpfsRoots
-    baseTestConfig
-    mkFeatureTest
-    mkServiceTest
-    mkBundleTest
-    mkSystemChecks
-    ;
+  mkSpecChecks =
+    system:
+    let
+      # Import test infrastructure only when checks are requested.
+      testLib = import ./test-lib.nix { inherit inputs lib; };
+      inherit (testLib)
+        mountTmpfsRoots
+        baseTestConfig
+        mkFeatureTest
+        mkServiceTest
+        mkBundleTest
+        mkSystemChecks
+        ;
 
-  # Helper to get HM config for assertions
-  hmFor = config: config.home-manager.users.${config.sinnix.user.name};
+      # Helper to get HM config for assertions
+      hmFor = config: config.home-manager.users.${config.sinnix.user.name};
 
-  testSpecs = [
-    # === Feature Tests (using DSL) ===
-    (mkFeatureTest {
+      testSpecs = [
+        # === Feature Tests (using DSL) ===
+        (mkFeatureTest {
       name = "dev-shell";
       feature = "sinnix.features.dev.shell.enable";
       assertions =
@@ -245,66 +248,6 @@ let
     })
 
     (mkFeatureTest {
-      name = "cli-stability-lab";
-      feature = "sinnix.features.cli.stability-lab.enable";
-      assertions =
-        config:
-        let
-          hm = hmFor config;
-          packageNames = map (pkg: pkg.name or "") hm.home.packages;
-          scriptText = builtins.readFile ../scripts/stability-lab;
-        in
-        [
-          {
-            assertion = builtins.any (name: lib.hasPrefix "stability-lab" name) packageNames;
-            message = "Stability lab must install the packaged runner";
-          }
-          {
-            assertion = hm.home.sessionVariables.SINNIX_STABILITY_ROOT == "/realm/data/captures/stability-lab";
-            message = "Stability lab must export the canonical capture root";
-          }
-          {
-            assertion = builtins.any (
-              rule: builtins.match ".*captures/stability-lab.*" rule != null
-            ) config.systemd.tmpfiles.rules;
-            message = "Stability lab must create its persistent capture directory via tmpfiles";
-          }
-          {
-            assertion = builtins.any (name: lib.hasPrefix "launch-trigger-capture" name) packageNames;
-            message = "Stability lab must install the launch-trigger capture wrapper";
-          }
-          {
-            assertion = builtins.any (name: lib.hasPrefix "reboot-no-more" name) packageNames;
-            message = "Stability lab must install the reboot-no-more package that ships the GPU lab suite";
-          }
-          {
-            assertion =
-              hm.home.sessionVariables.SINNIX_TRIGGER_CAPTURE_ROOT == "/realm/data/captures/launch-trigger";
-            message = "Stability lab must export the canonical launch-trigger capture root";
-          }
-          {
-            assertion = builtins.any (
-              rule: builtins.match ".*captures/launch-trigger.*" rule != null
-            ) config.systemd.tmpfiles.rules;
-            message = "Stability lab must create the launch-trigger capture directory via tmpfiles";
-          }
-          {
-            assertion =
-              lib.hasInfix "stability-lab [options]" scriptText
-              && lib.hasInfix "auto      run CPU soak, memory hammer, and mixed load sweep (default)" scriptText
-              && lib.hasInfix "observe   capture launch-path telemetry only; no synthetic stress load" scriptText;
-            message = "Stability lab must expose the automatic default sweep in its help text";
-          }
-          {
-            assertion =
-              builtins.match ".*--reserve-memory.*" scriptText == null
-              && lib.hasInfix "try_resume_default_auto" scriptText;
-            message = "Stability lab must avoid the broken stressapptest reserve flag and resume incomplete default auto runs";
-          }
-        ];
-    })
-
-    (mkFeatureTest {
       name = "desktop-mime";
       feature = "sinnix.features.desktop.mime.enable";
       assertions =
@@ -353,28 +296,6 @@ let
             (hmFor config).programs.zsh.loginExtra or ""
           );
           message = "TTY Hyprland login must stay unwrapped by default";
-        }
-      ];
-    })
-
-    (mkFeatureTest {
-      name = "desktop-hyprland-launch-capture";
-      feature = "sinnix.features.desktop.hyprland.enable";
-      extraModules = [
-        (
-          { lib, ... }:
-          {
-            hardware.graphics.enable = lib.mkForce false;
-            sinnix.services.reboot-no-more.launchCapture.enable = true;
-          }
-        )
-      ];
-      assertions = config: [
-        {
-          assertion =
-            lib.hasInfix "/bin/launch-trigger-capture hyprland -- uwsm start hyprland-uwsm.desktop"
-              ((hmFor config).programs.zsh.loginExtra or "");
-          message = "TTY Hyprland launch capture opt-in must wrap the login path";
         }
       ];
     })
@@ -483,7 +404,6 @@ let
         let
           hm = hmFor config;
           quteConfig = builtins.readFile ../dots/qutebrowser/config.py;
-          packageNames = map (pkg: pkg.name or "") hm.home.packages;
           chromePkgs = builtins.filter (pkg: (pkg.pname or "") == "google-chrome") hm.home.packages;
           chromePkg = if chromePkgs == [ ] then null else builtins.head chromePkgs;
           chromeDesktop =
@@ -506,47 +426,11 @@ let
             message = "Qutebrowser config must not silently swallow broad exceptions";
           }
           {
-            assertion = !(builtins.any (name: lib.hasPrefix "launch-trigger-capture" name) packageNames);
-            message = "Browser feature must keep launch-trigger capture disabled by default";
-          }
-          {
             assertion =
               chromePkg != null
               && !(lib.hasPrefix "google-chrome-trigger-capture" (chromePkg.name or ""))
               && builtins.match ".*Exec=.*/bin/google-chrome-stable.*" chromeDesktop != null;
             message = "Chrome desktop entry must point at the normal binary by default";
-          }
-        ];
-    })
-
-    (mkFeatureTest {
-      name = "desktop-browser-launch-capture";
-      feature = "sinnix.features.desktop.browser.enable";
-      extraModules = [
-        (
-          { ... }:
-          {
-            sinnix.services.reboot-no-more.launchCapture.enable = true;
-          }
-        )
-      ];
-      assertions =
-        config:
-        let
-          hm = hmFor config;
-          packageNames = map (pkg: pkg.name or "") hm.home.packages;
-          chromePkgs = builtins.filter (pkg: (pkg.pname or "") == "google-chrome") hm.home.packages;
-          chromePkg = if chromePkgs == [ ] then null else builtins.head chromePkgs;
-        in
-        [
-          {
-            assertion = builtins.any (name: lib.hasPrefix "launch-trigger-capture" name) packageNames;
-            message = "Browser launch capture opt-in must install the helper";
-          }
-          {
-            assertion =
-              chromePkg != null && lib.hasPrefix "google-chrome-trigger-capture" (chromePkg.name or "");
-            message = "Browser launch capture opt-in must wrap Chrome explicitly";
           }
         ];
     })
@@ -1132,6 +1016,8 @@ let
           conf = if hasConf then config.environment.etc."btrbk/btrbk.conf".text else "";
           realmJob = config.services.borgbackup.jobs.realm;
           varJob = config.services.borgbackup.jobs.var;
+          subvolumeGuard =
+            config.systemd.services.sinnix-realm-sinex-target-subvolume.script or "";
           hasTmpfilesRule =
             pattern:
             builtins.any (rule: builtins.match ".*${pattern}.*" rule != null) config.systemd.tmpfiles.rules;
@@ -1145,6 +1031,10 @@ let
           {
             assertion = config.systemd.timers ? btrbk;
             message = "btrbk timer must exist";
+          }
+          {
+            assertion = builtins.match ".*btrfs subvolume show.*" subvolumeGuard != null;
+            message = "sinex target guard must detect an existing Btrfs subvolume rather than requiring a mountpoint";
           }
           # Config deployed
           {
@@ -1166,8 +1056,12 @@ let
           }
           # Retention policy present
           {
-            assertion = hasConf && builtins.match ".*snapshot_preserve.*14d.*52w.*" conf != null;
-            message = "btrbk config must include long-horizon daily/weekly retention";
+            assertion = hasConf && builtins.match ".*volume /realm\n      snapshot_dir   \.snapshot\n      subvolume \.\n        snapshot_preserve       3d.*" conf != null;
+            message = "btrbk config must keep /realm at 3d retention";
+          }
+          {
+            assertion = hasConf && builtins.match ".*volume /persist\n      snapshot_dir   \.snapshot\n      subvolume \.\n        snapshot_preserve       14d 52w.*" conf != null;
+            message = "btrbk config must preserve long-horizon /persist snapshots";
           }
           {
             assertion = realmJob.repo == "file:///outer-realm/backup/borg-realm-v2";
@@ -1210,8 +1104,10 @@ let
           }
         ];
     }
-  ];
 
+      ];
+    in
+    mkSystemChecks system testSpecs;
 in
 {
   perSystem =
@@ -1463,7 +1359,7 @@ in
           '';
     in
     {
-      checks = (mkSystemChecks system testSpecs) // {
+      checks = (mkSpecChecks system) // {
         terminal-capture-runtime = terminalCaptureRuntime;
         terminal-capture-runtime-failure = terminalCaptureRuntimeFailure;
       };

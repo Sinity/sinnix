@@ -57,11 +57,6 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    reboot-no-more = {
-      url = "path:/realm/project/reboot-no-more";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
     # Private Sinex repository stored locally; build fails fast if missing.
     sinex = {
       url = "git+file:///realm/project/sinex?ref=master";

@@ -105,10 +105,8 @@ lib.mkMerge [
     };
   })
 
-  # ── NVIDIA proprietary (no power management) ─────────────────────────────────
-  # Keep power management off until the reset investigation is fully closed.
-  # Also applies to "dual" — same proprietary NVIDIA settings, just with i915
-  # alongside.
+  # ── NVIDIA proprietary ───────────────────────────────────────────────────────
+  # Applies to both pure NVIDIA and dual-GPU mode.
   (lib.mkIf (mode == "nvidia" || mode == "dual") {
     hardware.nvidia = {
       open = false;
@@ -116,9 +114,7 @@ lib.mkMerge [
     };
   })
 
-  # ── NVIDIA open kernel module (no power management) ──────────────────────────
-  # Requested reinsertion path: use NVIDIA's open kernel module while keeping
-  # the suspend/resume power-management path disabled.
+  # ── NVIDIA open kernel module ────────────────────────────────────────────────
   (lib.mkIf nvidiaOpen {
     hardware.nvidia = {
       open = true;

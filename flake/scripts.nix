@@ -11,6 +11,48 @@
 { inputs, pkgs }:
 let
   scriptPath = name: "${inputs.self}/scripts/${name}";
+  mkSanitizedPythonWrapper =
+    {
+      name,
+      target,
+    }:
+    pkgs.writeShellScriptBin name ''
+      set -euo pipefail
+      unset PYTHONPATH PYTHONHOME PYTHONBREAKPOINT PYTHONUSERBASE VIRTUAL_ENV
+      exec ${target} "$@"
+    '';
+
+  mkNodeCliPackage =
+    {
+      pname,
+      version,
+      src,
+      packagePath,
+      entrypoint,
+      npmDepsHash,
+    }:
+    pkgs.buildNpmPackage {
+      inherit pname version src npmDepsHash;
+      dontNpmBuild = true;
+      dontNpmPrune = true;
+
+      installPhase = ''
+        runHook preInstall
+
+        libexec="$out/libexec/${pname}"
+        mkdir -p "$libexec" "$out/bin"
+        cp -r node_modules package.json package-lock.json "$libexec/"
+        makeWrapper ${pkgs.nodejs}/bin/node "$out/bin/${pname}" \
+          --add-flags "$libexec/node_modules/${packagePath}/${entrypoint}"
+
+        runHook postInstall
+      '';
+
+      meta = {
+        description = "${pname} packaged for sinnix MCP usage";
+        mainProgram = pname;
+      };
+    };
 
   # Helper to create a script wrapper
   mkScript =
@@ -67,6 +109,14 @@ let
       ];
     };
 
+    nix-safe = mkScript "nix-safe" {
+      description = "Nix wrapper with memory-aware defaults for heavy commands";
+      runtimeInputs = with pkgs; [
+        bash
+        coreutils
+      ];
+    };
+
     # Diagnostics
     perf-scan = mkScript "perf-scan" {
       description = "Comprehensive system performance benchmarking";
@@ -115,48 +165,6 @@ let
         usbutils
         util-linux
         glmark2
-      ];
-    };
-
-    stability-lab = mkScript "stability-lab" {
-      description = "Focused hardware stability runner with persistent reboot forensics";
-      runtimeInputs = with pkgs; [
-        bash
-        below
-        coreutils
-        findutils
-        gawk
-        gnugrep
-        gnused
-        linuxPackages.turbostat
-        lm_sensors
-        nvme-cli
-        procps
-        smartmontools
-        stress-ng
-        stressapptest
-        sudo
-        systemd
-        util-linux
-      ];
-    };
-
-    launch-trigger-capture = mkScript "launch-trigger-capture" {
-      description = "Capture granular launch-boundary telemetry for suspected reboot triggers";
-      runtimeInputs = with pkgs; [
-        bash
-        coreutils
-        findutils
-        gawk
-        gnugrep
-        gnused
-        lm_sensors
-        pciutils
-        procps
-        strace
-        systemd
-        udev
-        util-linux
       ];
     };
 
@@ -304,10 +312,57 @@ let
       ];
     };
   };
+  scriptPackages = builtins.mapAttrs (_: v: v.package) registry;
+  packageSet =
+    scriptPackages
+    // {
+      lynchpin-python = pkgs.writeShellScriptBin "lynchpin-python" ''
+        set -euo pipefail
+        exec ${inputs.lynchpin.packages.${pkgs.stdenv.hostPlatform.system}.api-python}/bin/python "$@"
+      '';
+
+      polylogue-cli = mkSanitizedPythonWrapper {
+        name = "polylogue";
+        target = "${inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.default}/bin/polylogue";
+      };
+
+      polylogue-python = mkSanitizedPythonWrapper {
+        name = "polylogue-python";
+        target = "${inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.api-python}/bin/python";
+      };
+
+      mcp-context7 = mkNodeCliPackage {
+        pname = "mcp-context7";
+        version = "2.1.4";
+        src = ./npm/context7-mcp;
+        packagePath = "@upstash/context7-mcp";
+        entrypoint = "dist/index.js";
+        npmDepsHash = "sha256-Tlo/IcyETB6iEqo9MYN937TAS3DmHCSmfBDwa+4HzDM=";
+      };
+
+      mcp-firecrawl = mkNodeCliPackage {
+        pname = "mcp-firecrawl";
+        version = "3.10.3";
+        src = ./npm/firecrawl-mcp;
+        packagePath = "firecrawl-mcp";
+        entrypoint = "dist/index.js";
+        npmDepsHash = "sha256-bz3EVlVQNOeS5g9qvO1+5OIcMNxVQ+oLrwA9j9ZmqEY=";
+      };
+
+      ccusage = mkNodeCliPackage {
+        pname = "ccusage";
+        version = "18.0.10";
+        src = ./npm/ccusage;
+        packagePath = "ccusage";
+        entrypoint = "dist/index.js";
+        npmDepsHash = "sha256-/duhx34Iiq+7ZOaRTTAWChbGjJhxiVvWOoaLJsH2USc=";
+      };
+    };
 in
 {
   # Export packages for flake outputs
-  packages = builtins.mapAttrs (_: v: v.package) registry;
+  packages = scriptPackages;
+  inherit packageSet;
 
   # Export registry metadata for documentation/tooling
   inherit registry;

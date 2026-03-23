@@ -18,12 +18,12 @@
   lib,
   pkgs,
   config,
-  inputs,
+  helpers,
   ...
 }@args:
 let
   username = config.sinnix.user.name;
-  sentinelPkg = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.sinnix-sentinel;
+  sentinelPkg = (helpers.mkSinnixPackagesFor pkgs).sinnix-sentinel;
 in
 mkServiceModule {
   name = "sentinel";

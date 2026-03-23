@@ -10,12 +10,14 @@
   lib,
   config,
   inputs,
+  helpers,
   ...
 }:
 let
   inherit (config.sinnix.machine) isDesktop;
   inherit (config.sinnix.paths) capturesRoot;
   username = config.sinnix.user.name;
+  scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
 
   journaldBaseDir = "${capturesRoot}/syslog";
   bootMetricsDir = "${journaldBaseDir}/boot-metrics";
@@ -54,9 +56,9 @@ in
     environment.systemPackages = lib.mkIf isDesktop (
       coreDiagnostics
       ++ [
-        inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.perf-scan
-        inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.hogkill
-        inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.asbl-no-moar
+        scriptPkgs.perf-scan
+        scriptPkgs.hogkill
+        scriptPkgs.asbl-no-moar
       ]
     );
 

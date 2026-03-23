@@ -32,6 +32,12 @@ let
     inherit (featureLib) mkFeatureModule mkServiceModule;
     helpers = {
       inherit (featureLib) mkDotsFileFor;
+      mkSinnixPackagesFor =
+        pkgs:
+        (import ./scripts.nix {
+          inputs = specialInputs;
+          inherit pkgs;
+        }).packageSet;
     };
   };
 in

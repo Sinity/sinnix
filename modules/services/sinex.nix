@@ -30,12 +30,28 @@
 let
   cfg = config.sinnix.services.sinex;
   inherit (config.sinnix.paths) realmRoot;
-  sinexPkgs = inputs.sinex.packages.${pkgs.stdenv.hostPlatform.system};
+  mkSinexPkgs = pkgs': inputs.sinex.packages.${pkgs'.stdenv.hostPlatform.system};
+  sinexEnvironment = lib.toLower cfg.environment;
+  databaseHost = "127.0.0.1";
+  databasePort = 5432;
+  databaseUser = "sinex";
+  databaseName = "sinex_${sinexEnvironment}";
+  databasePasswordFile = lib.attrByPath [ "sinnix" "secrets" "paths" "sinex-local-db" ] null config;
+  databaseUrl = "postgresql://${databaseUser}@${databaseHost}:${toString databasePort}/${databaseName}";
 in
 {
   options.sinnix.services.sinex = {
     enable = lib.mkEnableOption "Sinex service";
     provisionDatabase = lib.mkEnableOption "Provision the Sinex PostgreSQL database without running services";
+    environment = lib.mkOption {
+      type = lib.types.str;
+      default = "prod";
+      apply = lib.toLower;
+      description = ''
+        Environment name used for both the Sinex NATS namespace and the
+        default runtime database name.
+      '';
+    };
     health = lib.mkOption {
       type = lib.types.nullOr (
         lib.types.submodule {
@@ -71,30 +87,88 @@ in
       })
 
       # Package defaults — applied whenever sinex is referenced at all
-      (lib.mkIf (cfg.enable || cfg.provisionDatabase) {
-        services.sinex.package = lib.mkDefault sinexPkgs.sinex;
-        services.sinex.cliPackage = lib.mkDefault sinexPkgs.sinexctl;
-      })
+      (lib.mkIf (cfg.enable || cfg.provisionDatabase) (
+        let
+          sinexPkgs = mkSinexPkgs pkgs;
+        in
+        {
+          services.sinex.package = lib.mkDefault sinexPkgs.sinex;
+          services.sinex.cliPackage = lib.mkDefault sinexPkgs.sinexctl;
+        }
+      ))
 
       # Database provisioning only (no running services)
       (lib.mkIf cfg.provisionDatabase {
+        assertions = [
+          {
+            assertion = databasePasswordFile != null;
+            message = "sinnix.services.sinex requires the sinex-local-db agenix secret";
+          }
+        ];
+        services.sinex.secrets.enableAgenix = true;
+        services.sinex.nats.environment = sinexEnvironment;
         services.sinex.database = {
           enable = true;
           autoSetup = true;
-          host = "127.0.0.1";
-          name = "sinex";
-          user = "sinex";
-          passwordFile = config.sinex.secrets.paths."sinex-local-db";
+          host = databaseHost;
+          port = databasePort;
+          name = databaseName;
+          user = databaseUser;
+          passwordFile = databasePasswordFile;
         };
       })
 
+      # Keep the database-only path honest: create the env-namespaced DB and
+      # apply the declarative schema even while the full Sinex service remains off.
+      (lib.mkIf (cfg.provisionDatabase && !cfg.enable) (
+        let
+          sinexPkgs = mkSinexPkgs pkgs;
+          schemaBootstrapScript = pkgs.writeShellScript "sinnix-sinex-schema-bootstrap" ''
+            set -euo pipefail
+
+            database_url=${lib.escapeShellArg databaseUrl}
+            echo "$(date): applying Sinex schema to ${databaseName}"
+            ${sinexPkgs.sinex}/bin/xtask infra schema-apply --database-url "$database_url"
+          '';
+        in
+        {
+          systemd.services.sinex-schema-apply = {
+            description = "Apply Sinex declarative schema";
+            wantedBy = [ "multi-user.target" ];
+            after = [
+              "network-online.target"
+              "postgresql.service"
+              "postgresql-setup.service"
+            ];
+            requires = [
+              "postgresql.service"
+              "postgresql-setup.service"
+            ];
+            serviceConfig = {
+              Type = "oneshot";
+              User = databaseUser;
+              Group = databaseUser;
+              ExecStart = schemaBootstrapScript;
+              TimeoutStartSec = "10min";
+              RemainAfterExit = true;
+            };
+          };
+        }
+      ))
+
       # Full service configuration
       (lib.mkIf cfg.enable {
+        assertions = [
+          {
+            assertion = databasePasswordFile != null;
+            message = "sinnix.services.sinex requires the sinex-local-db agenix secret";
+          }
+        ];
         services.sinex = {
           enable = true;
 
           secrets.enableAgenix = true;
-          nats.environment = "prod";
+          nats.environment = sinexEnvironment;
 
           # Align service state root with XDG-style default for the sinex service user.
           stateRoot = "/var/lib/sinex/.local/state/sinex";
@@ -104,10 +178,11 @@ in
 
           database = {
             autoSetup = true;
-            host = "127.0.0.1";
-            name = "sinex";
-            user = "sinex";
-            passwordFile = config.sinex.secrets.paths."sinex-local-db";
+            host = databaseHost;
+            port = databasePort;
+            name = databaseName;
+            user = databaseUser;
+            passwordFile = databasePasswordFile;
           };
 
           core = {
@@ -130,12 +205,12 @@ in
           nodes = {
             enable = true;
 
-            # watchPaths defaults to ["/home/${users.target}"] automatically;
-            # extend with the realm workspace as well.
+            # The captured user's home is private (`0700`) on sinnix-prime, so
+            # the system `sinex` account cannot observe it honestly. Watch the
+            # realm workspace only until a readable target path is configured.
             filesystem = {
               enable = true;
               watchPaths = [
-                "/home/${config.sinnix.user.name}"
                 realmRoot
               ];
             };
@@ -159,19 +234,17 @@ in
           observability = {
             enable = true;
             monitoring = {
-              enable = true;
-              prometheus = {
-                listen = "127.0.0.1";
-                port = 9090;
-                retention = "30d";
-                exporters = {
-                  node = true;
-                  postgres = true;
-                };
-              };
+              # Keep the host story truthful until gateway/node readiness and
+              # dataflow health are good enough to treat dashboards as signal.
+              enable = false;
+              prometheus.enable = false;
               grafana = {
-                enable = true;
-                port = 3000;
+                enable = false;
+              };
+              exporters = {
+                node = false;
+                postgres = false;
+                nats = false;
               };
             };
           };

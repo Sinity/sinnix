@@ -13,12 +13,12 @@ mkFeatureModule {
   configFn =
     {
       user,
-      inputs,
       pkgs,
+      helpers,
       ...
     }:
     let
-      scriptPkgs = inputs.self.packages.${pkgs.stdenv.hostPlatform.system};
+      scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
     in
     {
       home-manager.users.${user} =

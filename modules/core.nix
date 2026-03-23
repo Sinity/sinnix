@@ -41,10 +41,10 @@ in
           "nix-gaming.cachix.org-1:nbjlureqMbRAxR1gJ/f3hxemL9svXaZF/Ees8vCUUs4="
         ];
         netrc-file = "/etc/nix/netrc";
-        # Increased from 2 to 6 for better build parallelism
-        # Safe due to idle I/O scheduling (lines 48-50) preventing UI freezing
-        max-jobs = 6;
-        # Reduced from 8 to 4 to balance total parallelism (6 jobs × 4 cores = 24)
+        # Default cap for unattended daemon policy. Use `nix-safe` for
+        # adaptive scheduling when running explicit heavy commands.
+        max-jobs = 4;
+        # Reduced from 8 to 4 to balance total parallelism (4 jobs × 4 cores = 16)
         cores = 4;
         use-cgroups = true;
 

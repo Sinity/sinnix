@@ -102,7 +102,6 @@ mkFeatureModule {
               };
             };
 
-            stylix.targets.vscode.enable = false;
           };
       })
 
@@ -141,7 +140,6 @@ mkFeatureModule {
                 force = true;
               };
             };
-            stylix.targets.vscode.enable = false; # Antigravity uses Code settings
           };
       })
 

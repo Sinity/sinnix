@@ -65,43 +65,12 @@
       "rd.udev.log-priority=3"
       "acpi_enforce_resources=lax"
       "vga=current"
-      # Keep the NVIDIA link on the more conservative path while the reset
-      # investigation is active.
-      "nvidia.NVreg_EnablePCIeGen3=0"
     ]
     ++ lib.optionals (config.sinnix.gpu.mode == "dual") [
       # xe loads as a transitive dep of nvidia and claims the iGPU PCI ID (0xa780)
       # before i915 can bind. force_probe opts the UHD 770 into xe's binding path.
       "xe.force_probe=a780"
     ];
-  };
-
-  # intel_pstate on this host exposes performance/powersave governors;
-  # forcing schedutil makes NixOS try to load cpufreq_schedutil at boot.
-  powerManagement.cpuFreqGovernor = "powersave";
-
-  systemd.services.sinnix-cpu-frequency-cap = {
-    description = "Cap sinnix-prime CPU frequency without disabling turbo entirely";
-    wantedBy = [ "multi-user.target" ];
-    after = [ "sysinit.target" ];
-    serviceConfig = {
-      Type = "oneshot";
-      RemainAfterExit = true;
-    };
-    script = ''
-      echo 0 > /sys/devices/system/cpu/intel_pstate/no_turbo
-
-      for policy in /sys/devices/system/cpu/cpufreq/policy*; do
-        max="$(cat "$policy/cpuinfo_max_freq")"
-        target=4500000
-
-        if [[ "$max" -lt "$target" ]]; then
-          target="$max"
-        fi
-
-        echo "$target" > "$policy/scaling_max_freq"
-      done
-    '';
   };
 
   hardware.enableRedistributableFirmware = true;

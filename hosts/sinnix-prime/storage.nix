@@ -87,6 +87,7 @@ in
       device = "/dev/disk/by-uuid/bd19092f-a195-47ab-9c0d-c923d1e5bfea";
       fsType = "btrfs";
       options = [
+        "subvol=/"
         "compress=zstd"
         "relatime"
         "lazytime"

@@ -18,12 +18,11 @@ mkFeatureModule {
       pkgs,
       lib,
       user,
-      inputs,
+      helpers,
       ...
     }:
     let
-      # Script packages from flake registry
-      scriptPkgs = inputs.self.packages.${pkgs.stdenv.hostPlatform.system};
+      scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
     in
     {
       home-manager.users.${user}.home.packages = with pkgs; [

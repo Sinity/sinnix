@@ -1,0 +1,234 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  hdr-screenshot probe
+  hdr-screenshot area [--dir DIR] [--brightness PCT] [--saturation PCT] [--gamma VALUE] [--copy raw|corrected] [--no-notify]
+  hdr-screenshot output [--dir DIR] [--brightness PCT] [--saturation PCT] [--gamma VALUE] [--copy raw|corrected] [--no-notify]
+  hdr-screenshot tone-map --in FILE [--out FILE] [--brightness PCT] [--saturation PCT] [--gamma VALUE]
+
+Behavior:
+  - In HDR mode, captures a raw PNG plus a corrected sidecar.
+  - In SDR mode, captures a single PNG unchanged.
+  - By default, the corrected PNG is copied to the clipboard in HDR mode.
+EOF
+}
+
+die() {
+  printf 'hdr-screenshot: %s\n' "$*" >&2
+  exit 1
+}
+
+notify_enabled=1
+copy_mode="corrected"
+target_dir="${HOME}/Pictures/Screenshots"
+brightness=""
+saturation=""
+gamma=""
+input_file=""
+output_file=""
+
+if [ $# -lt 1 ]; then
+  usage
+  exit 1
+fi
+
+subcommand="$1"
+shift
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dir)
+      [ $# -ge 2 ] || die "--dir requires a value"
+      target_dir="$2"
+      shift 2
+      ;;
+    --brightness)
+      [ $# -ge 2 ] || die "--brightness requires a value"
+      brightness="$2"
+      shift 2
+      ;;
+    --saturation)
+      [ $# -ge 2 ] || die "--saturation requires a value"
+      saturation="$2"
+      shift 2
+      ;;
+    --gamma)
+      [ $# -ge 2 ] || die "--gamma requires a value"
+      gamma="$2"
+      shift 2
+      ;;
+    --copy)
+      [ $# -ge 2 ] || die "--copy requires raw or corrected"
+      copy_mode="$2"
+      shift 2
+      ;;
+    --no-notify)
+      notify_enabled=0
+      shift
+      ;;
+    --in)
+      [ $# -ge 2 ] || die "--in requires a file"
+      input_file="$2"
+      shift 2
+      ;;
+    --out)
+      [ $# -ge 2 ] || die "--out requires a file"
+      output_file="$2"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      die "unknown argument: $1"
+      ;;
+  esac
+done
+
+need_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+}
+
+send_notification() {
+  local title="$1"
+  local body="$2"
+  if [ "$notify_enabled" -eq 1 ] && command -v notify-send >/dev/null 2>&1; then
+    notify-send "$title" "$body"
+  fi
+}
+
+copy_file() {
+  local path="$1"
+  if command -v wl-copy >/dev/null 2>&1; then
+    wl-copy < "$path"
+  fi
+}
+
+focused_monitor_json() {
+  hyprctl monitors -j | jq -c 'map(select(.focused))[0] // empty'
+}
+
+default_brightness() {
+  local sdr_brightness="$1"
+  awk -v s="$sdr_brightness" 'BEGIN {
+    if (s <= 0) s = 1;
+    b = int((100 / s) + 0.5);
+    if (b < 70) b = 70;
+    if (b > 100) b = 100;
+    printf "%d\n", b;
+  }'
+}
+
+run_tone_map() {
+  local in_path="$1"
+  local out_path="$2"
+  local brightness_pct="$3"
+  local saturation_pct="$4"
+  local gamma_value="$5"
+  magick "$in_path" \
+    -modulate "${brightness_pct},${saturation_pct},100" \
+    -gamma "$gamma_value" \
+    "$out_path"
+}
+
+case "$subcommand" in
+  probe)
+    need_cmd hyprctl
+    need_cmd jq
+    focused_monitor_json
+    exit 0
+    ;;
+  tone-map)
+    need_cmd magick
+    [ -n "$input_file" ] || die "tone-map requires --in FILE"
+    [ -f "$input_file" ] || die "input file does not exist: $input_file"
+    if [ -z "$output_file" ]; then
+      output_file="${input_file%.*}.hdrfix.png"
+    fi
+    brightness="${brightness:-77}"
+    saturation="${saturation:-120}"
+    gamma="${gamma:-1.05}"
+    run_tone_map "$input_file" "$output_file" "$brightness" "$saturation" "$gamma"
+    printf '%s\n' "$output_file"
+    exit 0
+    ;;
+  area|output)
+    ;;
+  *)
+    usage
+    die "unknown subcommand: $subcommand"
+    ;;
+esac
+
+need_cmd hyprctl
+need_cmd jq
+need_cmd grimblast
+need_cmd magick
+need_cmd date
+
+monitor_json="$(focused_monitor_json)"
+[ -n "$monitor_json" ] || die "could not determine focused monitor"
+
+color_preset="$(printf '%s' "$monitor_json" | jq -r '.colorManagementPreset // ""')"
+sdr_brightness_value="$(printf '%s' "$monitor_json" | jq -r '.sdrBrightness // 1')"
+monitor_name="$(printf '%s' "$monitor_json" | jq -r '.name // "unknown"')"
+hdr_active=0
+if [ "$color_preset" = "hdr" ]; then
+  hdr_active=1
+fi
+
+brightness="${brightness:-$(default_brightness "$sdr_brightness_value")}"
+saturation="${saturation:-120}"
+gamma="${gamma:-1.05}"
+
+mkdir -p "$target_dir"
+timestamp="$(date +'%Y-%m-%d-At-%Hh%Mm%Ss')"
+base_path="${target_dir}/${timestamp}"
+final_path="${base_path}.png"
+raw_path="$final_path"
+copied_path="$final_path"
+
+if [ "$hdr_active" -eq 1 ]; then
+  raw_path="${base_path}.raw.png"
+fi
+
+case "$subcommand" in
+  area)
+    grimblast --freeze save area "$raw_path" >/dev/null
+    ;;
+  output)
+    grimblast --cursor save output "$raw_path" >/dev/null
+    ;;
+esac
+
+[ -s "$raw_path" ] || die "capture did not produce an image"
+
+if [ "$hdr_active" -eq 1 ]; then
+  run_tone_map "$raw_path" "$final_path" "$brightness" "$saturation" "$gamma"
+  case "$copy_mode" in
+    raw)
+      copied_path="$raw_path"
+      ;;
+    corrected)
+      copied_path="$final_path"
+      ;;
+    *)
+      die "--copy must be raw or corrected"
+      ;;
+  esac
+  copy_file "$copied_path"
+  send_notification \
+    "HDR screenshot saved" \
+    "Monitor: ${monitor_name}\nRaw: $(basename "$raw_path")\nCorrected: $(basename "$final_path")\nCopied: $(basename "$copied_path")"
+else
+  copy_file "$final_path"
+  send_notification \
+    "Screenshot saved" \
+    "Monitor: ${monitor_name}\nFile: $(basename "$final_path")"
+fi
+
+printf '%s\n' "$copied_path"
