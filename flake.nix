@@ -59,7 +59,7 @@
 
     # Private Sinex repository stored locally; build fails fast if missing.
     sinex = {
-      url = "git+file:///realm/project/sinex?ref=master";
+      url = "git+file:///realm/project/sinex";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.agenix.follows = "agenix";
     };

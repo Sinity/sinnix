@@ -34,10 +34,12 @@
     terminal-capture.enable = true;
     below.enable = true;
     sinex = {
-      # Keep the real host off the full Sinex service path until gateway health,
-      # node readiness, and other March 19 deployment blockers are closed.
+      # Keep the host dark while still making the next rebuild exercise agenix,
+      # database provisioning, and the full eventual node graph configuration.
+      prepareHost = true;
       enable = false;
-      provisionDatabase = false;
+      provisionDatabase = true;
+      activationProfile = "full";
       environment = "prod";
     };
     polylogue.enable = false;
