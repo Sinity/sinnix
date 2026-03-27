@@ -819,8 +819,8 @@
         ]
       },
       "locked": {
-        "lastModified": 1774651969,
-        "narHash": "sha256-sYDJ0oDscBTly64/acQ9sTp4tblvakmSJ8iolE+dAuc=",
+        "lastModified": 1774738504,
+        "narHash": "sha256-YiyKDx6BAR5TIxA9YAFg0J4GveWTg5WpDqHg6WZIxrE=",
         "path": "/realm/project/polylogue",
         "type": "path"
       },
