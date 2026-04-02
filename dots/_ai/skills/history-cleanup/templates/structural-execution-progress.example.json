@@ -1,0 +1,18 @@
+{
+  "schema_ref": "dots/_ai/skills/history-cleanup/STRUCTURAL_EXECUTION_SCHEMA.md",
+  "global_validation_status": "not_run",
+  "failure_note": null,
+  "tree_scorecard": null,
+  "packs": [
+    {
+      "name": "wave1",
+      "status": "compiled_not_validated",
+      "checkpoint_files": [
+        ".claude/scratch/audit/reword-history/canonical/launch-pack/agent-work/wave1/current-pack.json"
+      ],
+      "owned_output": ".claude/scratch/audit/reword-history/canonical/launch-pack/agent-work/wave1/current-pack.json",
+      "manual_review_residue": 0,
+      "note": "Pack is compiled but has not yet passed disposable validation."
+    }
+  ]
+}

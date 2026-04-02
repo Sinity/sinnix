@@ -122,7 +122,7 @@ mkFeatureModule {
         home.sessionVariables = {
           XDG_SESSION_TYPE = "wayland";
           QT_QPA_PLATFORM = "wayland";
-          SDL_VIDEODRIVER = "wayland";
+          SDL_VIDEODRIVER = "wayland,x11";
           CLUTTER_BACKEND = "wayland";
         };
       };

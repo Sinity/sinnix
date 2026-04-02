@@ -16,54 +16,49 @@
   "scm.inputFontFamily": "SauceCodePro Nerd Font Mono",
   "scm.inputFontSize": 20,
   "screencastMode.fontSize": 85,
-
   // ——— VSCode-Neovim integration ———
   // Rely on PATH for nvim, avoid hard-coding Nix path.
   // Remove any composite jk escape. Keep Linux key handling sane.
   "vscode-neovim.compositeKeys": {},
   "keyboard.dispatch": "keyCode",
   "vscode-neovim.useCtrlKeys": true,
-
   // ——— Editor ergonomics ———
   "editor.lineNumbers": "relative",
   "workbench.startupEditor": "none",
-
   // ——— Copilot / Chat Agent ———
   "chat.agent.enabled": true,
-
   // ——— Rust Analyzer ———
   "rust-analyzer.check.command": "clippy",
   "rust-analyzer.cargo.allFeatures": true,
   "rust-analyzer.procMacro.enable": true,
-
   // ——— Nix ———
   "nix.formatterPath": "nixfmt",
-
   // ——— Terminal ———
   "terminal.integrated.inheritEnv": true,
   "terminal.integrated.fontFamily": "SauceCodePro Nerd Font Mono",
   "terminal.integrated.enableMultiLinePasteWarning": "auto",
   "terminal.integrated.defaultProfile.linux": "zsh",
   "terminal.integrated.profiles.linux": {
-    "codex": { "path": "codex" }
+    "codex": {
+      "path": "codex"
+    }
   },
-
   // ——— Performance ———
   "files.watcherExclude": {
     "**/target/**": true,
     "**/.direnv/**": true,
     "**/node_modules/**": true
   },
-
   // ——— Foam / Markdown ———
   "foam.edit.linkReferenceDefinitions": "withExtensions",
   "markdown.references.preferredLocation": "endOfFile",
-
   // ——— Editor QoL ———
   "breadcrumbs.enabled": true,
   "editor.stickyScroll.enabled": true,
   "editor.renderWhitespace": "selection",
-  "editor.rulers": [100],
+  "editor.rulers": [
+    100
+  ],
   "explorer.autoReveal": false,
   "explorer.excludeGitIgnore": true,
   "search.useIgnoreFiles": true,
@@ -72,15 +67,12 @@
   "window.titleBarStyle": "custom",
   "window.openFoldersInNewWindow": "off",
   "window.restoreWindows": "none",
-
   // ——— Git ergonomics ———
   "git.autofetch": true,
   "git.confirmSync": false,
-
   // ——— Files hygiene ———
   "files.trimTrailingWhitespace": true,
   "files.trimFinalNewlines": true,
-
   // ——— WhichKey menu (VS Code) ———
   "whichkey.bindings": [
     {
@@ -574,7 +566,7 @@
   "workbench.list.smoothScrolling": true,
   "workbench.navigationControl.enabled": false,
   "workbench.secondarySideBar.defaultVisibility": "visible",
-  "workbench.iconTheme": "material-icon-theme",
+  "workbench.iconTheme": "vscode-icons",
   "workbench.preferredDarkColorTheme": "GitHub Dark Default",
   "workbench.preferredLightColorTheme": "GitHub Light Default",
   "workbench.editor.alwaysShowEditorActions": true,
@@ -667,7 +659,6 @@
     "editor.defaultFormatter": "DavidAnson.vscode-markdownlint"
   },
   "gitlens.showWhatsNewAfterUpgrades": false,
-  "gitlens.plusFeatures.enabled": false,
   "gitlens.currentLine.enabled": false,
   "python.testing.pytestEnabled": true,
   "claudeCode.preferredLocation": "panel",

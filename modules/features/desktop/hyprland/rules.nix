@@ -162,6 +162,14 @@ let
       workspace = "5";
       fullscreen = true;
       immediate = true;
+      idleinhibit = "always";
+    })
+    (mkRule "gamescope" {
+      class = "^(gamescope)$";
+      workspace = "5";
+      fullscreen = true;
+      immediate = true;
+      idleinhibit = "always";
     })
     (mkRule "xdg-portal" {
       class = "^(xdg-desktop-portal-gtk)$";

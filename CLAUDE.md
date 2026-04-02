@@ -16,7 +16,7 @@
 
 - Keep `AGENTS.md` as always-on map of module taxonomy, invariants, and architecture decisions.
 - Use skills for heavy procedural workflows (for example orchestration, CI repair, desktop control).
-- Agent-specific skills live in `dots/codex/skills/` for Codex and `dots/claude/skills/` for Claude Code. Example: `dots/codex/skills/sinnix-module-placement/`.
+- Shared skills live in `dots/_ai/skills/`. Agent trees such as `dots/codex/skills/` and `dots/claude/skills/` are thin overlays that expose those shared skills, while Codex-only system skills remain under `dots/codex/skills/.system/`.
 - Rule: if guidance is needed on most turns, keep it here; if it is specialized or long-form, move it to a skill.
 
 ## No-Alias Rule

@@ -72,13 +72,35 @@ mkFeatureModule {
       '';
       mcpPlaywrightBin = pkgs.writeShellScriptBin "mcp-playwright" ''
         set -euo pipefail
-        exec ${pkgs.playwright-mcp}/bin/playwright-mcp "$@"
+        exec ${pkgs.playwright-mcp}/bin/mcp-server-playwright "$@"
       '';
       mcpPolylogueBin = pkgs.writeShellScriptBin "mcp-polylogue" ''
         set -euo pipefail
         exec ${scriptPkgs.polylogue-cli}/bin/polylogue mcp "$@"
       '';
-      geminiPkg = inputs.nix-ai-tools.packages.${pkgs.stdenv.hostPlatform.system}.gemini-cli;
+      geminiPkg = inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.gemini-cli;
+      forgeMcpServers =
+        (lib.optionalAttrs cfg.context7Singleton.enable {
+          context7 = {
+            url = "http://127.0.0.1:${toString cfg.context7Singleton.port}/mcp";
+            disable = false;
+          };
+        })
+        // {
+          firecrawl = {
+            command = "mcp-firecrawl";
+            disable = false;
+          };
+          polylogue = {
+            command = "mcp-polylogue";
+            disable = false;
+          };
+          playwright = {
+            command = "mcp-playwright";
+            args = [ "--headless" ];
+            disable = false;
+          };
+        };
     in
     {
       home-manager.users.${user} =
@@ -161,10 +183,15 @@ mkFeatureModule {
               source = mkDotsFile "/codex/config.toml";
               force = true;
             };
+            # Codex keeps a dedicated overlay tree; canonical shared skills live in dots/_ai/skills.
             ".codex/skills" = {
               source = mkDotsFile "/codex/skills";
               force = true;
               recursive = true;
+            };
+            "forge/.mcp.json" = {
+              text = builtins.toJSON { mcpServers = forgeMcpServers; };
+              force = true;
             };
             ".local/bin/mcp-context7".source = "${mcpContext7Bin}/bin/mcp-context7";
             ".local/bin/mcp-firecrawl".source = "${mcpFirecrawlBin}/bin/mcp-firecrawl";
@@ -173,6 +200,11 @@ mkFeatureModule {
             ".gemini/settings.json" = {
               source = mkDotsFile "/gemini/settings.json";
               force = true;
+            };
+            ".gemini/skills" = {
+              source = mkDotsFile "/_ai/skills";
+              force = true;
+              recursive = true;
             };
             ".local/share/polylogue/inbox/chatgpt" = {
               source = config.lib.file.mkOutOfStoreSymlink "/realm/data/exports/chatlog/raw/chatgpt";

@@ -1,0 +1,3 @@
+{"timestamp":"2026-03-11T21:00:00+01:00","kind":"run_structural_plan_started","repo":"/realm/project/example","plan_json":".claude/scratch/audit/reword-history/canonical/launch-pack/current-structural-operations-plan.json","cli_path":"/realm/project/sinnix/dots/_ai/skills/history-cleanup/cli.py"}
+{"timestamp":"2026-03-11T21:00:05+01:00","kind":"structural_op_started","op_id":"range-op-001","source_spec_ids":["merge-range-01"],"expected_tail_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","pre_head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","source_commit_count":12}
+{"timestamp":"2026-03-11T21:00:07+01:00","kind":"structural_op_completed","op_id":"range-op-001","post_head":"cccccccccccccccccccccccccccccccccccccccc","target_commit_count":3}

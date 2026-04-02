@@ -52,6 +52,16 @@ mkFeatureModule {
       capturesRoot = sinnixCfg.paths.capturesRoot;
 
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
+      aiTools = inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system};
+      forgePkg = aiTools.forge;
+      forgeZshPlugin = pkgs.runCommandLocal "forge-zsh-plugin.zsh" { } ''
+        export HOME="$TMPDIR"
+        ${lib.getExe forgePkg} zsh plugin > "$out"
+      '';
+      forgeZshTheme = pkgs.runCommandLocal "forge-zsh-theme.zsh" { } ''
+        export HOME="$TMPDIR"
+        ${lib.getExe forgePkg} zsh theme > "$out"
+      '';
 
       findFlakeRoot = pkgs.writeShellScriptBin "find-flake-root" ''
         #!/usr/bin/env bash
@@ -362,6 +372,10 @@ mkFeatureModule {
               directory = ".gemini";
               mode = "0700";
             } # Gemini CLI auth + history (tmp/ regenerates)
+            {
+              directory = "forge";
+              mode = "0700";
+            } # Forge runtime state (db, history, MCP, logs, checkpoints)
             ".cache" # entire cache dir — nix eval, sccache, uv, etc.
             ".cargo" # Rust crate registry + git checkouts
             ".npm" # npm package cache
@@ -387,6 +401,8 @@ mkFeatureModule {
             home.sessionVariables = {
               EDITOR = "nvim";
               VISUAL = "nvim";
+              FORGE_EDITOR = "nvim";
+              FORGE_BIN = "\${HOME}/.local/bin/forge";
               PAGER = lib.mkForce "less -R";
               MANPAGER = "nvim +Man!";
               PYTHONDONTWRITEBYTECODE = "1";
@@ -465,6 +481,17 @@ mkFeatureModule {
                 scriptPkgs.verify-agent-topology
               ];
 
+            programs.zsh.initContent = lib.mkAfter ''
+              export FORGE_BIN="$HOME/.local/bin/forge"
+              if [ -x "$FORGE_BIN" ]; then
+                source ${forgeZshPlugin}
+                source ${forgeZshTheme}
+                bindkey -M viins '^M' forge-accept-line
+                bindkey -M viins '^J' forge-accept-line
+                bindkey -M viins '^I' forge-completion
+              fi
+            '';
+
             programs = {
               broot = {
                 enable = true;
@@ -492,6 +519,7 @@ mkFeatureModule {
                 force = true;
                 recursive = true;
               };
+              # Claude keeps an overlay tree; canonical shared skills live in dots/_ai/skills.
               "claude/skills" = {
                 source = mkDotsFile "/claude/skills";
                 force = true;
@@ -524,6 +552,18 @@ mkFeatureModule {
                   --output "$HOME/.gemini/GEMINI.md"
               fi
             '';
+            home.activation.renderGlobalForgeAgents = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+              mkdir -p \
+                "$HOME/forge" \
+                "$HOME/forge/agents" \
+                "$HOME/forge/commands" \
+                "$HOME/forge/logs/requests"
+              if [ -f "$HOME/.config/claude/CLAUDE.md" ]; then
+                ${scriptPkgs.render-agents}/bin/render-agents \
+                  --input "$HOME/.config/claude/CLAUDE.md" \
+                  --output "$HOME/forge/AGENTS.md"
+              fi
+            '';
 
             # CLI wrappers
             home.file.".local/bin/claude" = {
@@ -531,9 +571,7 @@ mkFeatureModule {
                 #!/usr/bin/env bash
                 set -euo pipefail
 
-                CLAUDE_BIN="${
-                  inputs.nix-ai-tools.packages.${pkgs.stdenv.hostPlatform.system}.claude-code
-                }/bin/claude"
+                CLAUDE_BIN="${aiTools.claude-code}/bin/claude"
                 REALM_DIR="${sinnix.paths.realmRoot}"
                 HOME_DIR="${config.home.homeDirectory}"
 
@@ -566,14 +604,64 @@ mkFeatureModule {
               executable = true;
             };
 
+            home.file."forge/.forge.toml" = {
+              text = ''
+                "$schema" = "https://forgecode.dev/schema.json"
+
+                auto_dump = "json"
+                auto_open_dump = false
+                debug_requests = "${config.home.homeDirectory}/forge/logs/requests"
+                max_conversations = 1000000
+                max_fetch_chars = 75000
+                max_file_read_batch_size = 64
+                max_parallel_file_reads = 64
+                max_read_lines = 4000
+                max_requests_per_turn = 100
+                max_tool_failure_per_turn = 5
+                tool_timeout_secs = 600
+
+                [session]
+                provider_id = "codex"
+                model_id = "gpt-5.4"
+
+                [commit]
+                provider_id = "codex"
+                model_id = "gpt-5.4"
+
+                [suggest]
+                provider_id = "codex"
+                model_id = "gpt-5.4"
+
+                [updates]
+                auto_update = false
+                frequency = "weekly"
+              '';
+              force = true;
+            };
+            home.file."forge/skills" = {
+              source = mkDotsFile "/_ai/skills";
+              force = true;
+              recursive = true;
+            };
+
+            home.file.".local/bin/forge" = {
+              text = ''
+                #!/usr/bin/env bash
+                set -euo pipefail
+
+                FORGE_BIN="${forgePkg}/bin/forge"
+
+                exec "$FORGE_BIN" "$@"
+              '';
+              executable = true;
+            };
+
             home.file.".local/bin/codex" = {
               text = ''
                 #!/usr/bin/env bash
                 set -euo pipefail
 
-                CODEX_BIN="${
-                  inputs.nix-ai-tools.packages.${pkgs.stdenv.hostPlatform.system}.codex
-                }/bin/codex"
+                CODEX_BIN="${aiTools.codex}/bin/codex"
 
                 exec "$CODEX_BIN" "$@"
               '';
@@ -585,9 +673,7 @@ mkFeatureModule {
                 #!/usr/bin/env bash
                 set -euo pipefail
 
-                GEMINI_BIN="${
-                  inputs.nix-ai-tools.packages.${pkgs.stdenv.hostPlatform.system}.gemini-cli
-                }/bin/gemini"
+                GEMINI_BIN="${aiTools.gemini-cli}/bin/gemini"
 
                 exec "$GEMINI_BIN" "$@"
               '';

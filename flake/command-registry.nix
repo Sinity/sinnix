@@ -4,8 +4,197 @@
   system,
 }:
 let
+  lib = pkgs.lib;
+  checkTiers = import ./check-tiers.nix { inherit lib; };
+  defaultCheckNames = checkTiers.defaultCheckNames;
+  heavyCheckNames =
+    map (name: "nixos-${name}") checkTiers.heavySpecNames
+    ++ checkTiers.runtimeCheckNames
+    ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux checkTiers.vmCheckNames
+    ++ lib.optionals (system == "x86_64-linux") checkTiers.hostBuildCheckNames;
   resolveFlakeDir = ''
     _flake_dir="''${PRJ_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+  '';
+  hostSmokeTerminalScript = ''
+    session="sinnix-host-smoke-$$"
+    artifact_dir="''${SINNIX_HOST_SMOKE_ARTIFACT_DIR:-}"
+    cleanup_artifacts=0
+    if [ -n "$artifact_dir" ]; then
+      mkdir -p "$artifact_dir"
+      transcript="$artifact_dir/transcript.log"
+    else
+      artifact_dir="$(mktemp -d -t sinnix-host-smoke-terminal.XXXXXX)"
+      transcript="$artifact_dir/transcript.log"
+      cleanup_artifacts=1
+    fi
+
+    cleanup() {
+      ${pkgs.tmux}/bin/tmux kill-session -t "$session" >/dev/null 2>&1 || true
+      if [ "$cleanup_artifacts" -eq 1 ]; then
+        rm -f "$transcript"
+        rm -f "$artifact_dir/summary.txt"
+        rmdir "$artifact_dir" >/dev/null 2>&1 || true
+      fi
+    }
+    trap cleanup EXIT
+
+    if ! command -v ${pkgs.tmux}/bin/tmux >/dev/null 2>&1; then
+      echo "tmux is required for host-smoke-terminal"
+      exit 1
+    fi
+
+    ${pkgs.tmux}/bin/tmux new-session -d -s "$session" "env ZDOTDIR=\$HOME HOME=\$HOME ${pkgs.zsh}/bin/zsh -i"
+
+    wait_for() {
+      pattern="$1"
+      timeout_secs="$2"
+      start="$(${pkgs.coreutils}/bin/date +%s)"
+      while true; do
+        ${pkgs.tmux}/bin/tmux capture-pane -pt "$session" > "$transcript"
+        if ${pkgs.gnugrep}/bin/grep -qE "$pattern" "$transcript"; then
+          return 0
+        fi
+
+        now="$(${pkgs.coreutils}/bin/date +%s)"
+        if [ $((now - start)) -ge "$timeout_secs" ]; then
+          echo "Timed out waiting for pattern: $pattern" >&2
+          cat "$transcript" >&2
+          exit 1
+        fi
+
+        ${pkgs.coreutils}/bin/sleep 0.2
+      done
+    }
+
+    ${pkgs.tmux}/bin/tmux send-keys -t "$session" 'print READY' Enter
+    wait_for 'READY' 10
+
+    ${pkgs.tmux}/bin/tmux send-keys -t "$session" ':env' Enter
+    wait_for 'TOOL CONFIGURATION' 10
+    wait_for 'debug requests' 10
+
+    printf 'terminal smoke ok\n' > "$artifact_dir/summary.txt"
+    echo "Host terminal smoke passed."
+    cat "$transcript"
+  '';
+  hostSmokeServicesScript = ''
+    artifact_dir="''${SINNIX_HOST_SMOKE_ARTIFACT_DIR:-}"
+    cleanup_artifacts=0
+    if [ -n "$artifact_dir" ]; then
+      mkdir -p "$artifact_dir"
+    else
+      artifact_dir="$(mktemp -d -t sinnix-host-smoke-services.XXXXXX)"
+      cleanup_artifacts=1
+    fi
+    headers_file="$artifact_dir/transmission.headers"
+    body_file="$artifact_dir/transmission.body"
+
+    cleanup() {
+      if [ "$cleanup_artifacts" -eq 1 ]; then
+        rm -f "$headers_file" "$body_file" "$artifact_dir/summary.txt"
+        rmdir "$artifact_dir" >/dev/null 2>&1 || true
+      fi
+    }
+    trap cleanup EXIT
+
+    need_active() {
+      unit="$1"
+      if [ "$(${pkgs.systemd}/bin/systemctl is-active "$unit")" != "active" ]; then
+        echo "$unit is not active" >&2
+        exit 1
+      fi
+    }
+
+    need_active below.service
+    need_active power-watchdog.service
+    need_active transmission.service
+
+    sensors_csv="/realm/data/captures/power-watchdog/sensors.csv"
+    [ -s "$sensors_csv" ]
+
+    now="$(${pkgs.coreutils}/bin/date +%s)"
+    sensors_mtime="$(${pkgs.coreutils}/bin/stat -c %Y "$sensors_csv")"
+    if [ $((now - sensors_mtime)) -gt 120 ]; then
+      echo "power-watchdog output is stale: $sensors_csv" >&2
+      exit 1
+    fi
+
+    ${pkgs.findutils}/bin/find /var/log/below/store -type f | ${pkgs.gnugrep}/bin/grep -q .
+
+    ${pkgs.curl}/bin/curl -sS -D "$headers_file" -o "$body_file" \
+      http://127.0.0.1:9091/transmission/rpc || true
+    ${pkgs.gnugrep}/bin/grep -q '409 Conflict' "$headers_file"
+    session_id="$(${pkgs.gawk}/bin/awk -F': ' '/X-Transmission-Session-Id/ {print $2}' "$headers_file" | ${pkgs.coreutils}/bin/tr -d '\r')"
+    [ -n "$session_id" ]
+
+    printf 'services smoke ok\nsession_id=%s\n' "$session_id" > "$artifact_dir/summary.txt"
+    echo "Host service smoke passed."
+  '';
+  hostSmokeCliScript = ''
+    artifact_dir="''${SINNIX_HOST_SMOKE_ARTIFACT_DIR:-}"
+    cleanup_artifacts=0
+    if [ -n "$artifact_dir" ]; then
+      mkdir -p "$artifact_dir"
+    else
+      artifact_dir="$(mktemp -d -t sinnix-host-smoke-cli.XXXXXX)"
+      cleanup_artifacts=1
+    fi
+
+    cleanup() {
+      if [ "$cleanup_artifacts" -eq 1 ]; then
+        rm -f \
+          "$artifact_dir/forge-version.txt" \
+          "$artifact_dir/forge-zsh-doctor.txt" \
+          "$artifact_dir/polylogue-help.txt" \
+          "$artifact_dir/summary.txt"
+        rmdir "$artifact_dir" >/dev/null 2>&1 || true
+      fi
+    }
+    trap cleanup EXIT
+
+    forge --version > "$artifact_dir/forge-version.txt"
+    forge zsh doctor > "$artifact_dir/forge-zsh-doctor.txt"
+    polylogue --help > "$artifact_dir/polylogue-help.txt"
+
+    printf 'cli smoke ok\n' > "$artifact_dir/summary.txt"
+    echo "Host CLI smoke passed."
+  '';
+  hostSmokeAllScript = ''
+    ${resolveFlakeDir}
+    artifact_root="''${SINNIX_HOST_SMOKE_ROOT:-/realm/data/captures/host-smoke}"
+    run_id="$(${pkgs.coreutils}/bin/date -u +%Y%m%dT%H%M%SZ)-$$"
+    run_dir="$artifact_root/$run_id"
+    mkdir -p "$run_dir"
+
+    (
+      export SINNIX_HOST_SMOKE_ARTIFACT_DIR="$run_dir/terminal"
+      ${hostSmokeTerminalScript}
+    )
+
+    (
+      export SINNIX_HOST_SMOKE_ARTIFACT_DIR="$run_dir/services"
+      ${hostSmokeServicesScript}
+    )
+
+    (
+      export SINNIX_HOST_SMOKE_ARTIFACT_DIR="$run_dir/cli"
+      ${hostSmokeCliScript}
+    )
+
+    cat > "$run_dir/summary.json" <<EOF
+    {
+      "run_id": "$run_id",
+      "flake_dir": "$_flake_dir",
+      "artifacts": {
+        "terminal": "$run_dir/terminal",
+        "services": "$run_dir/services",
+        "cli": "$run_dir/cli"
+      }
+    }
+    EOF
+
+    echo "Host smoke suite passed."
+    echo "Artifacts: $run_dir"
   '';
 in
 {
@@ -30,6 +219,72 @@ in
         fi
 
         echo "Linting complete!"
+      '';
+    };
+
+    check-heavy = {
+      description = "Run heavy non-default checks sequentially to keep evaluation memory bounded";
+      script = ''
+        ${resolveFlakeDir}
+        cd "$_flake_dir"
+
+        heavy_targets=(
+          ${
+            builtins.concatStringsSep "\n          " (
+              map (name: ''"heavyChecks.${system}.${name}"'') heavyCheckNames
+            )
+          }
+        )
+
+        for target in "''${heavy_targets[@]}"; do
+          echo "Running heavy check: $target"
+          nix build "$_flake_dir#$target"
+        done
+
+        echo "Heavy check suite complete."
+      '';
+    };
+
+    check-all = {
+      description = "Run the default semantic checks, then the heavy non-default suite sequentially";
+      script = ''
+        ${resolveFlakeDir}
+        cd "$_flake_dir"
+
+        echo "Running default semantic checks..."
+        default_targets=(
+          ${
+            builtins.concatStringsSep "\n          " (
+              map (name: ''"checks.${system}.${name}"'') defaultCheckNames
+            )
+          }
+        )
+
+        for target in "''${default_targets[@]}"; do
+          echo "Running default check: $target"
+          nix build "$_flake_dir#$target"
+        done
+
+        echo "Running heavy checks..."
+        ${
+          let
+            heavyTargets = builtins.concatStringsSep "\n          " (
+              map (name: ''"heavyChecks.${system}.${name}"'') heavyCheckNames
+            );
+          in
+          ''
+            heavy_targets=(
+              ${heavyTargets}
+            )
+
+            for target in "''${heavy_targets[@]}"; do
+              echo "Running heavy check: $target"
+              nix build "$_flake_dir#$target"
+            done
+          ''
+        }
+
+        echo "Full non-host semantic check suite complete."
       '';
     };
 
@@ -88,6 +343,21 @@ in
         ${inputs.agenix.packages.${system}.default}/bin/agenix "$@"
       '';
     };
+
+    host-smoke-terminal = {
+      description = "Run an opt-in tmux-driven host smoke probe for interactive terminal integrations";
+      script = hostSmokeTerminalScript;
+    };
+
+    host-smoke-services = {
+      description = "Run an opt-in live host smoke probe for long-running service surfaces";
+      script = hostSmokeServicesScript;
+    };
+
+    host-smoke-all = {
+      description = "Run the full opt-in host smoke suite and persist terminal/service/CLI artifacts";
+      script = hostSmokeAllScript;
+    };
   };
 
   commandDocs = [
@@ -112,6 +382,16 @@ in
       description = "Run deadnix/statix/shellcheck";
     }
     {
+      name = "check-heavy";
+      command = "nix run .#check-heavy";
+      description = "Run the heavy non-default check suite sequentially";
+    }
+    {
+      name = "check-all";
+      command = "nix run .#check-all";
+      description = "Run the default and heavy semantic check tiers sequentially";
+    }
+    {
       name = "test";
       command = "sudo nix run .#test";
       description = "Build and test host config without switching";
@@ -130,6 +410,21 @@ in
       name = "agenix";
       command = "nix run .#agenix";
       description = "Manage encrypted secrets";
+    }
+    {
+      name = "host-smoke-terminal";
+      command = "nix run .#host-smoke-terminal";
+      description = "Run an opt-in tmux-based interactive terminal smoke probe";
+    }
+    {
+      name = "host-smoke-services";
+      command = "nix run .#host-smoke-services";
+      description = "Run an opt-in live host smoke probe for service surfaces";
+    }
+    {
+      name = "host-smoke-all";
+      command = "nix run .#host-smoke-all";
+      description = "Run the full host smoke suite and persist captured artifacts";
     }
   ];
 }

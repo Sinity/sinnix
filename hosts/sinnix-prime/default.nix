@@ -20,6 +20,9 @@
   sinnix.bundles.desktop.enable = true;
   sinnix.bundles.dev.enable = true;
 
+  # VR streaming to Quest 3 (WiVRn + Monado OpenXR stack + ADB tools)
+  sinnix.features.desktop.vr.enable = true;
+
   sinnix.features.cli.task-tracking.enable = true;
   sinnix.features.cli.polylogue.enable = true;
   sinnix.persistence.enable = true;

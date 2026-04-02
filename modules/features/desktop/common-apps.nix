@@ -100,7 +100,10 @@ mkFeatureModule {
                 force = true;
               };
               "audacity/audacity.cfg".source = mkDotsFile "/audacity/audacity.cfg";
-              "transmission/settings.json".source = mkDotsFile "/transmission/settings.json";
+              "transmission/settings.json" = {
+                source = mkDotsFile "/transmission/settings.json";
+                force = true;
+              };
             };
           };
         };

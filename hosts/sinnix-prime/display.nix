@@ -45,7 +45,6 @@ lib.mkMerge [
       modesetting.enable = true;
       # open / powerManagement driven by mode — see below
       nvidiaSettings = true;
-      forceFullCompositionPipeline = true;
     };
 
     home-manager.users.${user} = {

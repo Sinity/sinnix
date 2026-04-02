@@ -65,6 +65,11 @@
       "rd.udev.log-priority=3"
       "acpi_enforce_resources=lax"
       "vga=current"
+      # Low-latency: allow preemption of almost all kernel code paths.
+      # ~2-5% throughput cost on heavy compilation, negligible on 24-thread CPU.
+      "preempt=full"
+      # Prevent USB device autosuspend — eliminates wakeup latency on mouse/keyboard
+      "usbcore.autosuspend=-1"
     ]
     ++ lib.optionals (config.sinnix.gpu.mode == "dual") [
       # xe loads as a transitive dep of nvidia and claims the iGPU PCI ID (0xa780)

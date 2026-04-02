@@ -65,6 +65,11 @@ in
     ", F8, exec, ${script "toggle-scratch"} rawlog"
     ", F9, exec, ${script "nuke-builds"}"
 
+    # Gaming: replay buffer (F10 = toggle/save, Shift+F10 = stop)
+    ", F10, exec, replay-buffer"
+    "SHIFT, F10, exec, replay-buffer-stop"
+    # Gaming: MangoHud toggle is Shift_R+F12 (handled by MangoHud itself)
+
     # Numpad browser scratchpads (numlock OFF)
     ", KP_Left, exec, ${script "browser-scratchpad"} chatgpt https://chatgpt.com"
     ", KP_Begin, exec, ${script "browser-scratchpad"} claude https://claude.ai"

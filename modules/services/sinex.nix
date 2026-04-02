@@ -41,6 +41,12 @@ let
   databaseName = "sinex_${sinexEnvironment}";
   databasePasswordFile = lib.attrByPath [ "sinnix" "secrets" "paths" "sinex-local-db" ] null config;
   gatewayAdminTokenFile = lib.attrByPath [ "sinnix" "secrets" "paths" "sinex-gateway-admin-token" ] null config;
+  natsCaCertFile = lib.attrByPath [ "sinnix" "secrets" "paths" "sinex-nats-ca" ] null config;
+  natsClientCertFile = lib.attrByPath [ "sinnix" "secrets" "paths" "sinex-nats-client-cert" ] null config;
+  natsClientKeyFile = lib.attrByPath [ "sinnix" "secrets" "paths" "sinex-nats-client-key" ] null config;
+  natsTokenFile = lib.attrByPath [ "sinnix" "secrets" "paths" "sinex-nats-token" ] null config;
+  natsCredsFile = lib.attrByPath [ "sinnix" "secrets" "paths" "sinex-nats-client-creds" ] null config;
+  natsNkeySeedFile = lib.attrByPath [ "sinnix" "secrets" "paths" "sinex-nats-client-nkey" ] null config;
   databaseUrl = "postgresql://${databaseUser}@${databaseHost}:${toString databasePort}/${databaseName}";
 in
 {
@@ -201,6 +207,12 @@ in
         secrets = {
           database_password_file = databasePasswordFile;
           gateway_admin_token_file = gatewayAdminTokenFile;
+          nats_ca_cert_file = natsCaCertFile;
+          nats_client_cert_file = natsClientCertFile;
+          nats_client_key_file = natsClientKeyFile;
+          nats_token_file = natsTokenFile;
+          nats_creds_file = natsCredsFile;
+          nats_nkey_seed_file = natsNkeySeedFile;
         };
       };
     in

@@ -19,28 +19,30 @@ mkFeatureModule {
       home-manager.users.${user} =
         { config, ... }:
         {
-          # Link taskwarrior configuration
-          xdg.configFile."task/taskrc".source =
-            config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/taskwarrior/taskrc";
-
           xdg.dataHome = lib.mkDefault "${config.home.homeDirectory}/.local/share";
 
-          # Link timewarrior configuration
-          xdg.configFile."timewarrior/timewarrior.cfg".source =
-            config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/timewarrior/timewarrior.cfg";
+          xdg.configFile = {
+            # Link taskwarrior configuration
+            "task/taskrc".source = config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/taskwarrior/taskrc";
 
-          # Link taskwarrior hooks and timewarrior extensions
-          xdg.dataFile = {
-            "task/hooks/on-add-inbox.py".source =
-              config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/taskwarrior/hooks/on-add-inbox.py";
-            "task/hooks/on-modify-review.py".source =
-              config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/taskwarrior/hooks/on-modify-review.py";
+            # Link timewarrior configuration
+            "timewarrior/timewarrior.cfg".source =
+              config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/timewarrior/timewarrior.cfg";
+
             "timewarrior/extensions/balance.py".source =
               config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/timewarrior/extensions/balance.py";
             "timewarrior/extensions/on-modify.timewarrior".source =
               config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/timewarrior/extensions/on-modify.timewarrior";
             "timewarrior/extensions/productivity.py".source =
               config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/timewarrior/extensions/productivity.py";
+          };
+
+          # Link taskwarrior hooks
+          xdg.dataFile = {
+            "task/hooks/on-add-inbox.py".source =
+              config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/taskwarrior/hooks/on-add-inbox.py";
+            "task/hooks/on-modify-review.py".source =
+              config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/taskwarrior/hooks/on-modify-review.py";
           };
 
           # Source shell integration

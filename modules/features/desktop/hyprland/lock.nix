@@ -5,7 +5,7 @@
     # BACKGROUND
     background {
       monitor =
-      path = ${inputs.self}/assets/wallpaper-sinnix.svg
+      path = ${inputs.self + "/assets/wallpaper-sinnix.svg"}
       blur_passes = 1
       contrast = 0.8916
       brightness = 0.8172

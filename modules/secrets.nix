@@ -16,7 +16,7 @@
 let
   username = config.sinnix.user.name;
   userPasswordSecret = "${username}-password";
-  secretDir = "${inputs.self}/secret";
+  secretDir = inputs.self + "/secret";
   cfg = config.sinnix.secrets;
 
   # Auto-discover .age files - evaluated once per flake eval
@@ -43,7 +43,7 @@ let
         };
       in
       {
-        file = secretDir + "/" + filename;
+        file = secretDir + "/${filename}";
       }
       // (
         if secretName == "github-token" then

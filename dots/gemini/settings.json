@@ -17,9 +17,16 @@
   "general": {
     "previewFeatures": true,
     "enablePromptCompletion": true,
+    "preferredEditor": "nvim",
+    "checkpointing": {
+      "enabled": true
+    },
+    "enableAutoUpdate": false,
+    "enableAutoUpdateNotification": false,
     "sessionRetention": {
       "enabled": true,
       "maxAge": "9999d",
+      "maxCount": 1000000,
       "warningAcknowledged": true
     }
   },
@@ -32,6 +39,10 @@
   "mcpServers": {
     "context7": {
       "httpUrl": "http://127.0.0.1:3939/mcp"
+    },
+    "polylogue": {
+      "command": "mcp-polylogue",
+      "args": []
     },
     "github": {
       "httpUrl": "https://api.githubcopilot.com/mcp/",
@@ -51,6 +62,7 @@
   },
   "model": {
     "name": "auto-gemini-3",
-    "compressionThreshold": 0.95
+    "compressionThreshold": 0.99,
+    "maxSessionTurns": -1
   }
 }

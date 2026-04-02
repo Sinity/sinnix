@@ -10,7 +10,7 @@
 # modules as they're tightly coupled to that configuration.
 { inputs, pkgs }:
 let
-  scriptPath = name: "${inputs.self}/scripts/${name}";
+  scriptPath = name: inputs.self + "/scripts/${name}";
   mkSanitizedPythonWrapper =
     {
       name,

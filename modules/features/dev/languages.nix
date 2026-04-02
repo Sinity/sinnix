@@ -43,7 +43,7 @@ mkFeatureModule {
       ...
     }:
     let
-      aiTools = inputs.nix-ai-tools.packages.${pkgs.stdenv.hostPlatform.system};
+      aiTools = inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system};
     in
     lib.mkMerge [
       # Nix tooling
@@ -118,6 +118,7 @@ mkFeatureModule {
           pkgs.jetbrains-mono
           aiTools.claude-code
           aiTools.codex
+          aiTools.forge
         ];
       })
     ];

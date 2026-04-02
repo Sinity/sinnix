@@ -16,13 +16,12 @@
   ...
 }:
 let
-  inherit (config.sinnix.paths) realmRoot neoOuterRealm;
+  inherit (config.sinnix.paths) realmRoot;
   borgRepoRoot = "${config.sinnix.paths.outerRealm}/backup";
 
   # Snapshot directories
   realmSnapshots = "${realmRoot}/.snapshot";
   persistSnapshots = "/persist/.snapshot";
-  neoSnapshots = "${neoOuterRealm}/.snapshot";
   borgSnapshotBindRoot = "/run/borgbackup-snapshot-inputs";
   borgPersistSnapshotBind = "${borgSnapshotBindRoot}/persist";
   borgRealmSnapshotBind = "${borgSnapshotBindRoot}/realm";
@@ -86,31 +85,33 @@ let
     snapshot_create          onchange
     incremental             yes
     preserve_day_of_week    monday
+    # Schedule-based retention does nothing unless snapshot_preserve_min stops
+    # defaulting to "all". Keep a single latest snapshot by default.
+    snapshot_preserve_min   latest
     ssh_identity            /etc/ssh/ssh_host_ed25519_key
     transaction_log         /var/log/btrbk.log
     lockfile                /var/lock/btrbk.lock
 
     # ─── SNAPSHOTS ONLY (Borg handles all off-disk transfers) ───
+    # Keep every 15-minute snapshot for 4h, then thin to hourly for 3d,
+    # daily for 14d, and weekly for 8w.
 
     volume ${realmRoot}
       snapshot_dir   .snapshot
       subvolume .
-        snapshot_preserve       3d
+        snapshot_preserve_min   4h
+        snapshot_preserve       72h 14d 8w
 
     volume /persist
       snapshot_dir   .snapshot
       subvolume .
-        snapshot_preserve       14d 52w
+        snapshot_preserve_min   4h
+        snapshot_preserve       72h 14d 8w
 
     # / is ephemeral (wiped and recreated each boot by initrd rollback script).
     # Pre-wipe states are saved by initrd to .snapshots/root.TIMESTAMP.
     # btrbk snapshotting / would be pointless — it resets every boot.
 
-    volume ${neoOuterRealm}
-      snapshot_dir   .snapshot
-      snapshot_create always
-      subvolume .
-        snapshot_preserve       30d 52w
   '';
 
 in
@@ -212,7 +213,6 @@ in
     systemd.tmpfiles.rules = lib.mkAfter [
       "d ${realmSnapshots} 0750 root users -"
       "d ${persistSnapshots} 0750 root users -"
-      "d ${neoSnapshots} 0750 root users -"
       "d ${borgSnapshotBindRoot} 0700 root root -"
       "d ${borgPersistSnapshotBind} 0700 root root -"
       "d ${borgRealmSnapshotBind} 0700 root root -"
@@ -225,8 +225,7 @@ in
     systemd.services.btrbk = {
       description = "btrbk btrfs snapshot";
       requires = [ "sinnix-realm-sinex-target-subvolume.service" ];
-      after = [ "neo-outer-realm.mount" "persist.mount" "realm.mount" "sinnix-realm-sinex-target-subvolume.service" ];
-      wants = [ "neo-outer-realm.mount" ];
+      after = [ "persist.mount" "realm.mount" "sinnix-realm-sinex-target-subvolume.service" ];
       serviceConfig = {
         Type = "oneshot";
         ExecStart = "${pkgs.btrbk}/bin/btrbk run --quiet";

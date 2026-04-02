@@ -41,7 +41,12 @@ mkFeatureModule {
       ...
     }:
     let
-      factorioTokenPath = config.sinnix.secrets.paths."factorio-token";
+      sinnix = config.sinnix;
+      capturesRoot = sinnix.paths.capturesRoot;
+      projectRoot = sinnix.paths.projectRoot;
+      replayDir = "${capturesRoot}/replay";
+
+      factorioTokenPath = sinnix.secrets.paths."factorio-token";
       factorioVersion = pkgs.factorio.version;
       factorioSha256 = pkgs.factorio.src.outputHash;
       factorioUrl = pkgs.factorio.src.url;
@@ -113,6 +118,58 @@ mkFeatureModule {
           exec ${pkgs.steam-run}/bin/steam-run "$bin_path" "$@"
         '';
       };
+
+      # gpu-screen-recorder replay buffer script
+      replayBufferScript = pkgs.writeShellApplication {
+        name = "replay-buffer";
+        runtimeInputs = with pkgs; [
+          gpu-screen-recorder
+          coreutils
+          procps
+          libnotify
+        ];
+        text = ''
+          set -euo pipefail
+          REPLAY_DIR="${replayDir}"
+          DURATION="''${1:-60}"
+          PIDFILE="/tmp/replay-buffer.pid"
+
+          if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+            # Already running — save current replay
+            kill -USR1 "$(cat "$PIDFILE")"
+            notify-send -t 3000 "Replay saved" "$REPLAY_DIR"
+            exit 0
+          fi
+
+          mkdir -p "$REPLAY_DIR"
+          gpu-screen-recorder \
+            -w screen \
+            -f 60 \
+            -r "$DURATION" \
+            -a default_output \
+            -c mp4 \
+            -o "$REPLAY_DIR" &
+          echo $! > "$PIDFILE"
+          notify-send -t 2000 "Replay buffer started" "''${DURATION}s @ 60fps"
+        '';
+      };
+
+      replayBufferStop = pkgs.writeShellApplication {
+        name = "replay-buffer-stop";
+        runtimeInputs = with pkgs; [
+          coreutils
+          procps
+          libnotify
+        ];
+        text = ''
+          PIDFILE="/tmp/replay-buffer.pid"
+          if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+            kill "$(cat "$PIDFILE")"
+            rm -f "$PIDFILE"
+            notify-send -t 2000 "Replay buffer stopped"
+          fi
+        '';
+      };
     in
     lib.mkMerge [
       # Steam with gamescope
@@ -122,15 +179,101 @@ mkFeatureModule {
           gamescopeSession.enable = true;
         };
 
-        home-manager.users.${user}.home.packages = with pkgs; [
-          mangohud
-          steam-run
+        home-manager.users.${user} = {
+          home.packages = with pkgs; [
+            mangohud
+            steam-run
+            protonup-ng
+          ];
+
+          home.sessionVariables = {
+            # Proton: expose NVAPI so games can use DLSS/DLSS-G/ray tracing
+            PROTON_ENABLE_NVAPI = "1";
+            DXVK_ENABLE_NVAPI = "1";
+            # Proton: don't hide the NVIDIA GPU from DirectX
+            PROTON_HIDE_NVIDIA_GPU = "0";
+            # VKD3D-proton: enable DX12 ray tracing via Vulkan RT extensions
+            VKD3D_CONFIG = "dxr";
+            # Shader caches: persist compiled shaders to avoid stutter
+            DXVK_STATE_CACHE = "1";
+            __GL_SHADER_DISK_CACHE = "1";
+            __GL_SHADER_DISK_CACHE_SKIP_CLEANUP = "1";
+            # HDR passthrough for Proton (games that support HDR natively)
+            DXVK_HDR = "1";
+            # MangoHud: inject into all Vulkan/OpenGL apps globally
+            # Starts hidden (no_display in config), toggle with Shift_R+F12
+            MANGOHUD = "1";
+          };
+
+          # MangoHud overlay configuration
+          xdg.configFile."MangoHud/MangoHud.conf".text = ''
+            # Position & appearance
+            position=top-left
+            font_size=20
+            background_alpha=0.3
+            round_corners=8
+
+            # Metrics
+            fps
+            frametime=0
+            frame_timing
+            gpu_stats
+            gpu_temp
+            gpu_power
+            gpu_mem_clock
+            gpu_core_clock
+            vram
+            cpu_stats
+            cpu_temp
+            cpu_power
+            ram
+
+            # Behavior
+            toggle_hud=Shift_R+F12
+            toggle_fps_limit=Shift_R+F11
+            fps_limit=0,60,120
+            no_display
+          '';
+
+          # Persistence for Proton GE versions
+          # (Steam library itself is already persisted)
+        };
+
+        # Persist shader caches and Proton GE across reboots
+        sinnix.persistence.home.directories = [
+          ".local/share/vulkan" # Vulkan pipeline caches
+          ".local/share/Steam/compatibilitytools.d" # Proton GE installs
         ];
       })
 
-      # Gamemode for performance
+      # Gamemode: CPU governor + scheduler tuning for gaming sessions
       (lib.mkIf cfg.gamemode.enable {
-        programs.gamemode.enable = true;
+        programs.gamemode = {
+          enable = true;
+          settings = {
+            general = {
+              renice = 10;
+              softrealtime = "auto";
+              inhibit_screensaver = 1;
+            };
+            gpu = {
+              apply_gpu_optimisations = "accept-responsibility";
+              gpu_device = 0;
+            };
+            custom = {
+              start = "${pkgs.libnotify}/bin/notify-send -t 2000 'GameMode' 'Performance mode active'";
+              end = "${pkgs.libnotify}/bin/notify-send -t 2000 'GameMode' 'Performance mode off'";
+            };
+          };
+        };
+      })
+
+      # Replay buffer tooling
+      (lib.mkIf cfg.steam.enable {
+        home-manager.users.${user}.home.packages = [
+          replayBufferScript
+          replayBufferStop
+        ];
       })
 
       # Factorio launcher using the agenix-managed token at runtime
