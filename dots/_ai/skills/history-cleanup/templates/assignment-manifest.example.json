@@ -3,17 +3,11 @@
   "assignments": [
     {
       "agent": "Ada",
-      "batches": [
-        "batch-01",
-        "batch-02"
-      ]
+      "batches": ["batch-01", "batch-02"]
     },
     {
       "agent": "Noether",
-      "batches": [
-        "batch-03",
-        "batch-04"
-      ]
+      "batches": ["batch-03", "batch-04"]
     }
   ]
 }

@@ -12,7 +12,6 @@ from pathlib import Path
 
 import duckdb
 
-
 QUERY_LIBRARY = {
     "daily_shape": """
 SELECT date,
@@ -108,7 +107,7 @@ def _duckdb_records(con: duckdb.DuckDBPyConnection, sql: str) -> list[dict]:
     records = []
     for row in rel.fetchall():
         row_map = {}
-        for key, value in zip(columns, row):
+        for key, value in zip(columns, row, strict=True):
             if hasattr(value, "to_eng_string"):
                 value = value.to_eng_string()
             elif hasattr(value, "isoformat"):
@@ -208,7 +207,9 @@ def run_evidence(args: argparse.Namespace) -> dict:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Collect evidence artifacts for Lynchpin narratives")
+    parser = argparse.ArgumentParser(
+        description="Collect evidence artifacts for Lynchpin narratives"
+    )
     parser.add_argument(
         "--repo",
         default="/realm/project/sinity-lynchpin",

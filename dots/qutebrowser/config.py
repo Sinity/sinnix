@@ -317,7 +317,9 @@ def _enforce_tab_limit(win_id: int) -> None:
             tabbed.close_tab(tab, add_undo=False, new_undo=False)
             to_close -= 1
         except RuntimeError as exc:
-            LOGGER.warning("Failed to close qutebrowser tab during limit enforcement: %s", exc)
+            LOGGER.warning(
+                "Failed to close qutebrowser tab during limit enforcement: %s", exc
+            )
 
 
 def _on_current_tab_changed(tab) -> None:
@@ -377,7 +379,9 @@ def _aw_request(method: str, path: str, payload: Optional[dict] = None) -> None:
     try:
         urllib.request.urlopen(req, timeout=1.0)
     except (urllib.error.URLError, TimeoutError) as exc:
-        LOGGER.warning("ActivityWatch request failed for %s %s: %s", method.upper(), path, exc)
+        LOGGER.warning(
+            "ActivityWatch request failed for %s %s: %s", method.upper(), path, exc
+        )
 
 
 def _ensure_aw_bucket() -> None:

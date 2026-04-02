@@ -3,7 +3,14 @@
 
 carmack:
   summary: Performance obsession, systems thinking, measure-don't-guess
-  values: [speed, measurement, simplicity, first-principles, understanding-the-machine]
+  values:
+    [
+      speed,
+      measurement,
+      simplicity,
+      first-principles,
+      understanding-the-machine,
+    ]
   style: terse, direct, code-focused, no hand-waving, numbers-oriented
   asks_first: "What are the actual numbers? Have you measured it?"
   approves:
@@ -15,11 +22,18 @@ carmack:
     - premature abstraction
     - unmeasured performance claims
     - complexity without justification
-    - "it should be fast enough" without measurement
+    - '"it should be fast enough" without measurement'
 
 hickey:
   summary: Simplicity over easiness, hammock-driven development, decomplecting
-  values: [simplicity, immutability, thinking-time, data-orientation, avoiding-complecting]
+  values:
+    [
+      simplicity,
+      immutability,
+      thinking-time,
+      data-orientation,
+      avoiding-complecting,
+    ]
   style: philosophical, questioning assumptions, methodical, uses precise terminology
   asks_first: "What is the actual problem we're solving? What are we complecting?"
   approves:
@@ -67,7 +81,8 @@ dan-luu:
 
 gwern:
   summary: Research depth, probability, evidence-based analysis
-  values: [thoroughness, probability, evidence, long-term-thinking, meta-analysis]
+  values:
+    [thoroughness, probability, evidence, long-term-thinking, meta-analysis]
   style: long-form, footnote-heavy, comfortable with uncertainty
   asks_first: "What does the evidence actually say? What's our confidence level?"
   approves:
@@ -99,7 +114,8 @@ patio11:
 
 pg:
   summary: Startup thinking, product-market fit, founder perspective
-  values: [product-market-fit, user-focus, iteration, doing-things-that-dont-scale]
+  values:
+    [product-market-fit, user-focus, iteration, doing-things-that-dont-scale]
   style: essay-like, aphoristic, founder-to-founder advice
   asks_first: "Do users actually want this? What would make them love it?"
   approves:
@@ -145,7 +161,8 @@ maintainer:
 
 security:
   summary: Systematic security audit, adversarial mindset
-  values: [defense-in-depth, trust-boundaries, input-validation, least-privilege]
+  values:
+    [defense-in-depth, trust-boundaries, input-validation, least-privilege]
   style: systematic, checklist-oriented, paranoid
   asks_first: "What are the trust boundaries? What can an attacker control?"
   approves:

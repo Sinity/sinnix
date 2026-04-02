@@ -44,6 +44,7 @@ The restore script is explicitly oriented around Kitty remote control + prior ca
 Sinnix also includes a Codex “agent-orchestration” skill that already treats agents operationally—discovering agent instances by Kitty window title, sending commands, launching many tabs, and supporting both batch and interactive “Kitty mode.” fileciteturn29file0L1-L1 fileciteturn31file0L1-L1 fileciteturn32file0L1-L1 fileciteturn33file0L1-L1 fileciteturn34file0L1-L1
 
 This indicates a clear bias toward:
+
 - terminal-native control surfaces,
 - high transparency (“drive the terminal, not a hidden API”),
 - and multi-session work across projects. fileciteturn29file0L1-L1
@@ -51,6 +52,7 @@ This indicates a clear bias toward:
 ### Agent tooling and persistence already in scope
 
 Sinnix’s shell feature persists the major agent state directories:
+
 - `~/.config/claude` (Claude Code runtime + config) and a symlink `~/.claude -> ~/.config/claude`. fileciteturn24file0L1-L1
 - `~/.codex` (Codex CLI config + state). fileciteturn24file0L1-L1
 - `~/.claude.json` (Claude CLI auth token file). fileciteturn24file0L1-L1
@@ -151,6 +153,7 @@ This is strong prior art for the “searchable transcripts/logs” requirement�
 ### Concurrency and orchestration patterns
 
 Sinnix already favors multi-instance orchestration through:
+
 - Kitty remote-control instance discovery and command injection patterns; fileciteturn31file0L1-L1
 - batch prompt execution and mass tab launching for agent parallelism; fileciteturn32file0L1-L1
 - explicit support for “agent teams” within Claude Code via tmux wrapper. fileciteturn24file0L1-L1
@@ -167,19 +170,19 @@ Sinnix currently sets Codex approvals to never and sandbox to danger-full-access
 
 ## Architecture options and comparison table
 
-The options below focus on *which layer owns session identity* and *how viewports attach*.
+The options below focus on _which layer owns session identity_ and _how viewports attach_.
 
-| option | session persistence | attach/detach | multi-view support | UX quality | implementation complexity | compatibility with terminal-native agents | NixOS fit | recommendation |
-|---|---|---|---|---|---|---|---|---|
-| tmux session as service (systemd user units start tmux sessions; Kitty is a viewport) | strong (process survives terminal; can be boot-persistent with linger) citeturn25search2turn25search6 | excellent (`tmux attach`, detach; detach others; read-only attach) citeturn25search2turn25search1 | excellent (multiple tmux clients; read-only observer) citeturn25search2turn25search1 | high for terminal power users; predictable | moderate (need wrapper CLI + metadata + systemd unit generator) | excellent (runs any agent TUI) | excellent (systemd user services are native; hardening templates available in Sinnix) fileciteturn26file0L1-L1 | **primary baseline** |
-| zellij session as service (systemd user units start zellij sessions; optional web client) | strong (sessions separate from terminal; can resurrect; web client can reattach) citeturn26search1turn26search7 | good (`zellij attach`, session manager) citeturn26search1turn26search6 | good (multi-user attach; can disconnect other clients; resizing constraints exist) citeturn26search0turn26search6 | high for users who prefer zellij UX; web client is a bonus but not terminal-native citeturn26search7 | moderate-high (similar to tmux path + different affordances; possible browser surface) | excellent (runs agent TUIs) | excellent | viable alternative; consider if zellij is preferred |
-| Codex App Server–centric (run `codex app-server` as daemon; build client(s); Claude via tmux) | very strong for Codex threads (JSONL thread logs; archive; resume/fork; thread read without resume) citeturn8view4turn7view2turn13view5 | excellent for Codex (protocol-level resume, subscribe/unsubscribe; ws optional) citeturn14view2turn13view3turn8view3 | excellent for Codex (structured status, approvals, multi-connection subscriptions) citeturn8view2turn8view6turn8view3 | potentially best-in-class (blocked states, previews, list/read without attach) | high (you own a client and must track experimental API drift) citeturn13view6 | partial (Codex only; Claude still needs a separate substrate) | good (daemon as user service fits well) | **optional “power-up”**, not baseline (API is explicitly experimental for dev/debug) citeturn13view6 |
-| “PTY daemon” per session (dtach/pty virtualization + custom attach client; tmux-like but bespoke) | strong if done right | good if done right | variable (hard to get multi-client + tty correctness right) | can be good, but likely rough edges | very high (hardest correctness domain: terminals, input routing, scrollback) | aims to be universal | okay | not recommended for Sinnix first pass; defer |
+| option                                                                                            | session persistence                                                                                                                          | attach/detach                                                                                                             | multi-view support                                                                                                         | UX quality                                                                                              | implementation complexity                                                              | compatibility with terminal-native agents                     | NixOS fit                                                                                                          | recommendation                                                                                          |
+| ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| tmux session as service (systemd user units start tmux sessions; Kitty is a viewport)             | strong (process survives terminal; can be boot-persistent with linger) citeturn25search2turn25search6                                    | excellent (`tmux attach`, detach; detach others; read-only attach) citeturn25search2turn25search1                     | excellent (multiple tmux clients; read-only observer) citeturn25search2turn25search1                                   | high for terminal power users; predictable                                                              | moderate (need wrapper CLI + metadata + systemd unit generator)                        | excellent (runs any agent TUI)                                | excellent (systemd user services are native; hardening templates available in Sinnix) fileciteturn26file0L1-L1 | **primary baseline**                                                                                    |
+| zellij session as service (systemd user units start zellij sessions; optional web client)         | strong (sessions separate from terminal; can resurrect; web client can reattach) citeturn26search1turn26search7                          | good (`zellij attach`, session manager) citeturn26search1turn26search6                                                | good (multi-user attach; can disconnect other clients; resizing constraints exist) citeturn26search0turn26search6      | high for users who prefer zellij UX; web client is a bonus but not terminal-native citeturn26search7 | moderate-high (similar to tmux path + different affordances; possible browser surface) | excellent (runs agent TUIs)                                   | excellent                                                                                                          | viable alternative; consider if zellij is preferred                                                     |
+| Codex App Server–centric (run `codex app-server` as daemon; build client(s); Claude via tmux)     | very strong for Codex threads (JSONL thread logs; archive; resume/fork; thread read without resume) citeturn8view4turn7view2turn13view5 | excellent for Codex (protocol-level resume, subscribe/unsubscribe; ws optional) citeturn14view2turn13view3turn8view3 | excellent for Codex (structured status, approvals, multi-connection subscriptions) citeturn8view2turn8view6turn8view3 | potentially best-in-class (blocked states, previews, list/read without attach)                          | high (you own a client and must track experimental API drift) citeturn13view6       | partial (Codex only; Claude still needs a separate substrate) | good (daemon as user service fits well)                                                                            | **optional “power-up”**, not baseline (API is explicitly experimental for dev/debug) citeturn13view6 |
+| “PTY daemon” per session (dtach/pty virtualization + custom attach client; tmux-like but bespoke) | strong if done right                                                                                                                         | good if done right                                                                                                        | variable (hard to get multi-client + tty correctness right)                                                                | can be good, but likely rough edges                                                                     | very high (hardest correctness domain: terminals, input routing, scrollback)           | aims to be universal                                          | okay                                                                                                               | not recommended for Sinnix first pass; defer                                                            |
 
 **Why the tmux-first baseline wins in Sinnix**
 It matches Sinnix’s existing stance: terminal-native, keyboard-driven, local-first, and already shipping tmux and wrappers built around it. fileciteturn24file0L1-L1 It also cleanly separates session identity (tmux session + systemd unit) from viewports (Kitty tabs, SSH sessions, multiple terminals), which is the core framing of the problem.
 
-Codex App Server offers a better *agent-native state model* than tmux ever will (status flags, approvals, archive/read), but its own docs position standalone app-server usage as “development/debugging” and subject to change. citeturn13view6turn14view0 That makes it ideal as an opt-in “acceleration path,” not the base contract for all sessions.
+Codex App Server offers a better _agent-native state model_ than tmux ever will (status flags, approvals, archive/read), but its own docs position standalone app-server usage as “development/debugging” and subject to change. citeturn13view6turn14view0 That makes it ideal as an opt-in “acceleration path,” not the base contract for all sessions.
 
 ## UX patterns and operator workflows
 
@@ -208,7 +211,7 @@ Store these mappings in a tiny local DB/ledger (SQLite or JSONL), not “in your
    - cwd/worktree path,
    - agent type + model (default profile),
    - and chooses a tmux session name and systemd unit name.
-4. Sinnix launches a *detached* tmux session via systemd user service, then opens a Kitty tab that attaches.
+4. Sinnix launches a _detached_ tmux session via systemd user service, then opens a Kitty tab that attaches.
 
 This matches “session independent of a shell window,” because tmux (and systemd) own the process lifetime, not Kitty. citeturn25search2turn25search6
 
@@ -235,16 +238,19 @@ Advanced attach modes:
 Separate “peek” from “attach.”
 
 **Codex (best-case):** if a session is Codex App Server–backed, show:
+
 - `thread/status` and `activeFlags` (e.g., `waitingOnApproval`), and
 - `thread.preview` and `thread.updatedAt`,
-using `thread/list`/`thread/read`. citeturn8view2turn8view3turn7view2
+  using `thread/list`/`thread/read`. citeturn8view2turn8view3turn7view2
 
 **Claude Code:** show:
+
 - known session ID/name,
 - last checkpoint age, and
 - quick “resume/fork” hints, because checkpointing persists across resumed conversations. citeturn19view0turn16view0
 
 **Generic/tmux sessions:** show a cheap preview:
+
 - tail of the tmux pane capture (if you implement it), or
 - tail of agent-native logs (preferred), or
 - last N lines of terminal capture as a fallback (Sinnix already captures Kitty scrollback and writes `.ansi` + `.meta.json` sidecars). fileciteturn28file0L1-L1
@@ -299,6 +305,7 @@ If you want agent sessions to survive logouts/reboots without depending on an in
 `loginctl enable-linger` causes a user manager to be spawned at boot and kept after logouts, allowing user services to run even when not logged in. citeturn25search6turn25search5
 
 This matters for:
+
 - overnight Codex exec jobs,
 - long compactions/ingestions (Polylogue already runs via a user service + timer), fileciteturn20file0L1-L1
 - and “agent sessions as services.”
@@ -386,7 +393,7 @@ The tmux-first design best matches the decision lens:
 ### What should explicitly not be built in this pass
 
 - A bespoke PTY multiplexer / custom terminal emulator layer (too much correctness risk).
-- A browser-first control plane (Zellij web client / App Server web UI) as *the* primary interface; keep any web surface optional. citeturn26search7turn13view3
+- A browser-first control plane (Zellij web client / App Server web UI) as _the_ primary interface; keep any web surface optional. citeturn26search7turn13view3
 - A second transcript database rivaling Polylogue; prefer feeding Polylogue with better artifacts. fileciteturn35file0L1-L1
 
 ## Implementation plan, risks, and validation experiments
@@ -441,11 +448,11 @@ Treat this as optional because `codex app-server` is documented as experimental/
 ### Validation experiments (do these early)
 
 - **Codex persistence reality check (on your workstation):**
-  1) start an interactive Codex session, exit, then `codex resume --last`; verify what constitutes “most recent” and how it scopes to cwd. citeturn12view0turn12view1
-  2) run `codex exec` and `codex exec resume --last`; verify artifact locations and how `--ephemeral` changes disk writes. citeturn12view0turn12view5
+  1. start an interactive Codex session, exit, then `codex resume --last`; verify what constitutes “most recent” and how it scopes to cwd. citeturn12view0turn12view1
+  2. run `codex exec` and `codex exec resume --last`; verify artifact locations and how `--ephemeral` changes disk writes. citeturn12view0turn12view5
 - **Claude persistence + path check:**
-  1) set `CLAUDE_CONFIG_DIR` and verify where sessions/projects/logs land; confirm resumability with `claude --resume` and fork behavior with `--fork-session`. citeturn21view0turn16view0turn19view0
-  2) confirm whether your install uses `~/.config/claude/projects` or `~/.claude/projects`, and align Sinnix persistence accordingly. citeturn23view0turn24view0
+  1. set `CLAUDE_CONFIG_DIR` and verify where sessions/projects/logs land; confirm resumability with `claude --resume` and fork behavior with `--fork-session`. citeturn21view0turn16view0turn19view0
+  2. confirm whether your install uses `~/.config/claude/projects` or `~/.claude/projects`, and align Sinnix persistence accordingly. citeturn23view0turn24view0
 - **tmux multi-viewport correctness:**
   attach from two terminals; test read-only observer mode and “steal” attach; validate that your preferred copy/paste works under Kitty + tmux. citeturn25search2turn25search1
 - **Zellij alternative spike (optional):**

@@ -83,6 +83,14 @@
         "runtime"
       ];
     };
+    "dev.agentTools" = {
+      layers = [
+        "eval"
+        "runtime"
+        "pty"
+        "host"
+      ];
+    };
     "dev.editors" = {
       layers = [ "eval" ];
     };
@@ -105,12 +113,10 @@
       ];
     };
     "dev.shell" = {
-      layers = [
-        "eval"
-        "runtime"
-        "pty"
-        "host"
-      ];
+      layers = [ "eval" ];
+    };
+    "dev.workbench" = {
+      layers = [ "eval" ];
     };
     "system.nix-ld" = {
       layers = [ "eval" ];

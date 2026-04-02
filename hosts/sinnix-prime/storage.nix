@@ -16,10 +16,7 @@ let
 
   # Initrd scaffold: early-boot placeholders derived from persistence config
   scaffoldCfg = config.sinnix.persistence.initrdScaffold;
-  scaffoldDirs = lib.unique (
-    scaffoldCfg.directories
-    ++ map builtins.dirOf scaffoldCfg.files
-  );
+  scaffoldDirs = lib.unique (scaffoldCfg.directories ++ map builtins.dirOf scaffoldCfg.files);
   scaffoldCmds = lib.concatStringsSep "\n" (
     map (d: "mkdir -p /btrfs_tmp/@${d}") scaffoldDirs
     ++ map (f: "touch /btrfs_tmp/@${f}") scaffoldCfg.files

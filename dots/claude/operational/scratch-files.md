@@ -17,6 +17,7 @@ Externalize reasoning to scratch files. Write liberally - context is expensive, 
 | Project-specific     | `.claude/scratch/NNN-<topic>.md`   | Project analysis, debugging notes  |
 
 Project hygiene:
+
 - Project-local scratch space should exist by default for active repos that receive agent-driven analysis
 - If `.claude/scratch/` is absent, create it and add a matching `.gitignore` entry as part of the first substantial analysis pass
 

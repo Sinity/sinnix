@@ -56,9 +56,7 @@
   "breadcrumbs.enabled": true,
   "editor.stickyScroll.enabled": true,
   "editor.renderWhitespace": "selection",
-  "editor.rulers": [
-    100
-  ],
+  "editor.rulers": [100],
   "explorer.autoReveal": false,
   "explorer.excludeGitIgnore": true,
   "search.useIgnoreFiles": true,

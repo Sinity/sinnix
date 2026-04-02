@@ -200,19 +200,16 @@ let
         && (envVar == null || lib.hasInfix "${envVar}=" text)
         && builtins.all (regex: builtins.match ".*${regex}.*" text == null) forbidRegexes;
       hmPackagedWrapper =
-        hm:
-        path:
+        hm: path:
         {
           envVar ? null,
           binaryFragments ? [ ],
           forbidRegexes ? [ ],
         }:
         message:
-        mkAssertion (
-          packagedWrapperText (managedEntryText hm.home.file.${path}) {
-            inherit envVar binaryFragments forbidRegexes;
-          }
-        ) message;
+        mkAssertion (packagedWrapperText (managedEntryText hm.home.file.${path}) {
+          inherit envVar binaryFragments forbidRegexes;
+        }) message;
     };
 
   coverageDiscoveryEval = extendedLib.nixosSystem {
@@ -410,12 +407,9 @@ let
       rewrites,
     }:
     let
-      rewriteCommands = lib.concatMapStrings (
-        rewrite:
-        ''
-          sed -i ${lib.escapeShellArg "s|${rewrite.from}|${rewrite.to}|g"} "$rewrite_target"
-        ''
-      ) rewrites;
+      rewriteCommands = lib.concatMapStrings (rewrite: ''
+        sed -i ${lib.escapeShellArg "s|${rewrite.from}|${rewrite.to}|g"} "$rewrite_target"
+      '') rewrites;
     in
     ''
       rewrite_target="$HOME/${target}"
@@ -434,12 +428,9 @@ let
     }:
     let
       sourcePath = toString source;
-      rewriteCommands = lib.concatMapStrings (
-        rewrite:
-        ''
-          sed -i ${lib.escapeShellArg "s|${rewrite.from}|${rewrite.to}|g"} "$rewrite_file"
-        ''
-      ) rewrites;
+      rewriteCommands = lib.concatMapStrings (rewrite: ''
+        sed -i ${lib.escapeShellArg "s|${rewrite.from}|${rewrite.to}|g"} "$rewrite_file"
+      '') rewrites;
     in
     ''
       fixture_target="$HOME/${target}"

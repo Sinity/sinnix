@@ -5,6 +5,8 @@
     ./input.nix
     ./storage.nix
     ./display.nix
+    inputs.sinex.nixosModules.default
+    ../../modules/services/sinex/bridge.nix
   ];
 
   networking.hostName = "sinnix-prime";
@@ -37,8 +39,8 @@
     terminal-capture.enable = true;
     below.enable = true;
     sinex = {
-      # Keep the host dark while still making the next rebuild exercise agenix,
-      # database provisioning, and the full eventual node graph configuration.
+      # Keep the runtime off for now, but stage the full workstation profile so
+      # flipping `enable = true` later only turns on the already-curated graph.
       prepareHost = true;
       enable = false;
       provisionDatabase = true;

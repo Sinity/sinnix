@@ -8,9 +8,7 @@
     {
       "index": 1,
       "op_id": "range-op-001",
-      "source_spec_ids": [
-        "merge-range-01"
-      ],
+      "source_spec_ids": ["merge-range-01"],
       "anchor_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "exact": true,
       "comparison": {

@@ -39,63 +39,63 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --agent)
-      agent="${2:?missing value for --agent}"
-      shift 2
-      ;;
-    --workdir)
-      workdir="${2:?missing value for --workdir}"
-      shift 2
-      ;;
-    --prompt-file)
-      prompt_file="${2:?missing value for --prompt-file}"
-      shift 2
-      ;;
-    --log-file)
-      log_file="${2:?missing value for --log-file}"
-      shift 2
-      ;;
-    --json-file)
-      json_file="${2:?missing value for --json-file}"
-      shift 2
-      ;;
-    --last-file)
-      last_file="${2:?missing value for --last-file}"
-      shift 2
-      ;;
-    --model)
-      model="${2:?missing value for --model}"
-      shift 2
-      ;;
-    --reasoning-effort)
-      reasoning_effort="${2:?missing value for --reasoning-effort}"
-      shift 2
-      ;;
-    --schema-file)
-      schema_file="${2:?missing value for --schema-file}"
-      shift 2
-      ;;
-    --json)
-      json_mode=1
-      shift
-      ;;
-    --skip-agents-render)
-      skip_agents_render=1
-      shift
-      ;;
-    --ephemeral)
-      ephemeral=1
-      shift
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      echo "unknown option: $1" >&2
-      usage >&2
-      exit 2
-      ;;
+  --agent)
+    agent="${2:?missing value for --agent}"
+    shift 2
+    ;;
+  --workdir)
+    workdir="${2:?missing value for --workdir}"
+    shift 2
+    ;;
+  --prompt-file)
+    prompt_file="${2:?missing value for --prompt-file}"
+    shift 2
+    ;;
+  --log-file)
+    log_file="${2:?missing value for --log-file}"
+    shift 2
+    ;;
+  --json-file)
+    json_file="${2:?missing value for --json-file}"
+    shift 2
+    ;;
+  --last-file)
+    last_file="${2:?missing value for --last-file}"
+    shift 2
+    ;;
+  --model)
+    model="${2:?missing value for --model}"
+    shift 2
+    ;;
+  --reasoning-effort)
+    reasoning_effort="${2:?missing value for --reasoning-effort}"
+    shift 2
+    ;;
+  --schema-file)
+    schema_file="${2:?missing value for --schema-file}"
+    shift 2
+    ;;
+  --json)
+    json_mode=1
+    shift
+    ;;
+  --skip-agents-render)
+    skip_agents_render=1
+    shift
+    ;;
+  --ephemeral)
+    ephemeral=1
+    shift
+    ;;
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  *)
+    echo "unknown option: $1" >&2
+    usage >&2
+    exit 2
+    ;;
   esac
 done
 
@@ -133,52 +133,52 @@ run_with_optional_env() {
 }
 
 case "${agent}" in
-  codex)
-    if [[ -z ${model} || -z ${last_file} ]]; then
-      echo "codex requires --model and --last-file" >&2
-      exit 2
-    fi
-
-    cmd=(codex exec -C "${workdir}" --model "${model}" --output-last-message "${last_file}")
-    if [[ -n ${reasoning_effort} ]]; then
-      cmd+=(-c "model_reasoning_effort=\"${reasoning_effort}\"")
-    fi
-    if [[ -n ${schema_file} ]]; then
-      cmd+=(--output-schema "${schema_file}")
-    fi
-    if [[ ${ephemeral} -eq 1 ]]; then
-      cmd+=(--ephemeral)
-    fi
-    if [[ ${json_mode} -eq 1 ]]; then
-      cmd+=(--json)
-    fi
-    cmd+=(-)
-
-    if [[ ${json_mode} -eq 1 ]]; then
-      run_with_optional_env "${cmd[@]}" <"${prompt_file}" >"${json_file}" 2>"${log_file}"
-    else
-      run_with_optional_env "${cmd[@]}" <"${prompt_file}" >"${log_file}" 2>&1
-    fi
-    ;;
-  claude)
-    prompt_text="$(cat "${prompt_file}")"
-    cmd=(claude --print -p "${prompt_text}" --workdir "${workdir}")
-
-    if [[ ${json_mode} -eq 1 ]]; then
-      run_with_optional_env "${cmd[@]}" >"${json_file}" 2>"${log_file}"
-    else
-      run_with_optional_env "${cmd[@]}" >"${log_file}" 2>&1
-    fi
-    ;;
-  gemini)
-    if [[ ${json_mode} -eq 1 ]]; then
-      run_with_optional_env gemini <"${prompt_file}" >"${json_file}" 2>"${log_file}"
-    else
-      run_with_optional_env gemini <"${prompt_file}" >"${log_file}" 2>&1
-    fi
-    ;;
-  *)
-    echo "unknown agent: ${agent}" >&2
+codex)
+  if [[ -z ${model} || -z ${last_file} ]]; then
+    echo "codex requires --model and --last-file" >&2
     exit 2
-    ;;
+  fi
+
+  cmd=(codex exec -C "${workdir}" --model "${model}" --output-last-message "${last_file}")
+  if [[ -n ${reasoning_effort} ]]; then
+    cmd+=(-c "model_reasoning_effort=\"${reasoning_effort}\"")
+  fi
+  if [[ -n ${schema_file} ]]; then
+    cmd+=(--output-schema "${schema_file}")
+  fi
+  if [[ ${ephemeral} -eq 1 ]]; then
+    cmd+=(--ephemeral)
+  fi
+  if [[ ${json_mode} -eq 1 ]]; then
+    cmd+=(--json)
+  fi
+  cmd+=(-)
+
+  if [[ ${json_mode} -eq 1 ]]; then
+    run_with_optional_env "${cmd[@]}" <"${prompt_file}" >"${json_file}" 2>"${log_file}"
+  else
+    run_with_optional_env "${cmd[@]}" <"${prompt_file}" >"${log_file}" 2>&1
+  fi
+  ;;
+claude)
+  prompt_text="$(cat "${prompt_file}")"
+  cmd=(claude --print -p "${prompt_text}" --workdir "${workdir}")
+
+  if [[ ${json_mode} -eq 1 ]]; then
+    run_with_optional_env "${cmd[@]}" >"${json_file}" 2>"${log_file}"
+  else
+    run_with_optional_env "${cmd[@]}" >"${log_file}" 2>&1
+  fi
+  ;;
+gemini)
+  if [[ ${json_mode} -eq 1 ]]; then
+    run_with_optional_env gemini <"${prompt_file}" >"${json_file}" 2>"${log_file}"
+  else
+    run_with_optional_env gemini <"${prompt_file}" >"${log_file}" 2>&1
+  fi
+  ;;
+*)
+  echo "unknown agent: ${agent}" >&2
+  exit 2
+  ;;
 esac

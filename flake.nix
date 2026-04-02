@@ -8,6 +8,10 @@
     extra-trusted-public-keys = [
       "numtide.cachix.org-1:2ps1kLBUWjxIneOy1Ik6cQjb41X0iXVXeHigGmycPPE="
     ];
+    # Keep plain `nix flake check` and other flake-bound commands from
+    # oversubscribing this workstation under a normal desktop load.
+    max-jobs = 2;
+    cores = 4;
   };
 
   inputs = {

@@ -229,20 +229,18 @@ in
             }) scriptLinks
           );
 
-        home.packages =
-          with pkgs;
-          [
-            brightnessctl
-            grim
-            slurp
-            grimblast
-            imagemagick
-            jq
-            libnotify
-            wl-clipboard
-            wl-screenrec
-            xdg-desktop-portal-gtk
-          ];
+        home.packages = with pkgs; [
+          brightnessctl
+          grim
+          slurp
+          grimblast
+          imagemagick
+          jq
+          libnotify
+          wl-clipboard
+          wl-screenrec
+          xdg-desktop-portal-gtk
+        ];
 
         # Prevent hyprpaper restarts on config changes (wallpaper is set once at login)
         systemd.user.services.hyprpaper.Unit.X-Restart-Triggers = lib.mkForce [ ];

@@ -229,11 +229,9 @@ in
         cd "$_flake_dir"
 
         heavy_targets=(
-          ${
-            builtins.concatStringsSep "\n          " (
-              map (name: ''"heavyChecks.${system}.${name}"'') heavyCheckNames
-            )
-          }
+          ${builtins.concatStringsSep "\n          " (
+            map (name: ''"heavyChecks.${system}.${name}"'') heavyCheckNames
+          )}
         )
 
         for target in "''${heavy_targets[@]}"; do
@@ -253,11 +251,9 @@ in
 
         echo "Running default semantic checks..."
         default_targets=(
-          ${
-            builtins.concatStringsSep "\n          " (
-              map (name: ''"checks.${system}.${name}"'') defaultCheckNames
-            )
-          }
+          ${builtins.concatStringsSep "\n          " (
+            map (name: ''"checks.${system}.${name}"'') defaultCheckNames
+          )}
         )
 
         for target in "''${default_targets[@]}"; do

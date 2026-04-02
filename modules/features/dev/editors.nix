@@ -29,7 +29,78 @@ mkFeatureModule {
       ...
     }:
     let
-      marketplace = pkgs.nix-vscode-extensions.vscode-marketplace;
+      # Keep the marketplace subset tiny and explicit so the editor feature does
+      # not evaluate the full nix-vscode-extensions marketplace index on every
+      # host/test eval. Versions and hashes are pinned from the flake input.
+      mkPinnedVscodeMarketplaceExtension =
+        {
+          publisher,
+          name,
+          version,
+          hash,
+          platform ? "universal",
+          ...
+        }:
+        let
+          targetPlatform = lib.optionalString (platform != "universal") "targetPlatform=${platform}";
+          url =
+            "https://${publisher}.gallery.vsassets.io/_apis/public/gallery/publisher/${publisher}"
+            + "/extension/${name}/${version}/assetbyname/Microsoft.VisualStudio.Services.VSIXPackage"
+            + lib.optionalString (targetPlatform != "") "?${targetPlatform}";
+          mktplcRef = {
+            inherit
+              publisher
+              name
+              version
+              hash
+              ;
+          };
+        in
+        pkgs.vscode-utils.buildVscodeMarketplaceExtension {
+          inherit mktplcRef;
+          vsix = pkgs.fetchurl {
+            inherit url hash;
+            name = "${publisher}-${name}-${version}.vsix";
+          };
+        };
+      vscodeMarketplacePinned = {
+        fzfQuickOpen = mkPinnedVscodeMarketplaceExtension {
+          publisher = "rlivings39";
+          name = "fzf-quick-open";
+          version = "0.5.1";
+          hash = "sha256-xGcBl3mmyy+Zsn9OncDDbJViMxEgvsRjkzy89NPJpS8=";
+        };
+        direnv = mkPinnedVscodeMarketplaceExtension {
+          publisher = "mkhl";
+          name = "direnv";
+          version = "0.17.0";
+          hash = "sha256-9sFcfTMeLBGw2ET1snqQ6Uk//D/vcD9AVsZfnUNrWNg=";
+        };
+        whichkey = mkPinnedVscodeMarketplaceExtension {
+          publisher = "VSpaceCode";
+          name = "whichkey";
+          version = "0.11.4";
+          hash = "sha256-mgvI/8Y3naw3Zmud73UYcAEKz6B0Q4tf+0uL3UWcAD0=";
+        };
+        errorlens = mkPinnedVscodeMarketplaceExtension {
+          publisher = "usernamehw";
+          name = "errorlens";
+          version = "3.28.0";
+          hash = "sha256-7eu7y9IR1uxSFZ0IplDieFt3iWbcmdwf1lAcXq+S4C8=";
+        };
+        markdownAllInOne = mkPinnedVscodeMarketplaceExtension {
+          publisher = "yzhang";
+          name = "markdown-all-in-one";
+          version = "3.4.4";
+          hash = "sha256-2lZfWP+yk0Dp8INLjlJY5ROGu0sLaWhb4fT+O9xGg0s=";
+        };
+        codexRatelimit = mkPinnedVscodeMarketplaceExtension {
+          publisher = "xiangz19";
+          name = "codex-ratelimit";
+          version = "0.12.0";
+          hash = "sha256-9uqR4BGXzMh7V1zfKJ8+Zn7tagfVbDXsBh5iS1mzQdk=";
+        };
+      };
       waylandEditorFlags =
         "--enable-features=UseOzonePlatform --ozone-platform=wayland "
         + "--disable-features=WaylandWpColorManagerV1,Vulkan,DefaultANGLEVulkan";
@@ -64,6 +135,23 @@ mkFeatureModule {
           let
             mkDotsFile = mkDotsFileFor config;
             vscode-wrapped = wrapWaylandEditor "vscode-wrapped" pkgs.vscode "code";
+            vscodeExtensions = [
+              pkgs.vscode-extensions.enkia.tokyo-night
+              pkgs.vscode-extensions.vscode-icons-team.vscode-icons
+              pkgs.vscode-extensions.oderwat.indent-rainbow
+              pkgs.vscode-extensions.jnoortheen.nix-ide
+              pkgs.vscode-extensions.rust-lang.rust-analyzer
+              pkgs.vscode-extensions.tamasfe.even-better-toml
+              pkgs.vscode-extensions.asvetliakov.vscode-neovim
+              pkgs.vscode-extensions.editorconfig.editorconfig
+              vscodeMarketplacePinned.fzfQuickOpen
+              vscodeMarketplacePinned.direnv
+              vscodeMarketplacePinned.whichkey
+              pkgs.vscode-extensions.eamodio.gitlens
+              vscodeMarketplacePinned.errorlens
+              vscodeMarketplacePinned.markdownAllInOne
+              vscodeMarketplacePinned.codexRatelimit
+            ];
           in
           {
             programs.vscode = {
@@ -71,26 +159,7 @@ mkFeatureModule {
               package = vscode-wrapped;
               mutableExtensionsDir = false;
               profiles.default = {
-                extensions =
-                  (with pkgs.vscode-extensions; [
-                    enkia.tokyo-night
-                    vscode-icons-team.vscode-icons
-                    oderwat.indent-rainbow
-                    jnoortheen.nix-ide
-                    rust-lang.rust-analyzer
-                    tamasfe.even-better-toml
-                    asvetliakov.vscode-neovim
-                    editorconfig.editorconfig
-                  ])
-                  ++ [
-                    marketplace.rlivings39.fzf-quick-open
-                    marketplace.mkhl.direnv
-                    marketplace.vspacecode.whichkey
-                    pkgs.vscode-extensions.eamodio.gitlens
-                    marketplace.usernamehw.errorlens
-                    marketplace.yzhang.markdown-all-in-one
-                    marketplace.xiangz19.codex-ratelimit
-                  ];
+                extensions = vscodeExtensions;
                 userSettings = mkDotsFile "/vscode/User/settings.json";
                 keybindings = mkDotsFile "/vscode/User/keybindings.json";
                 userMcp = mkDotsFile "/vscode/User/mcp.json";

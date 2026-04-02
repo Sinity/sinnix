@@ -225,7 +225,11 @@ in
     systemd.services.btrbk = {
       description = "btrbk btrfs snapshot";
       requires = [ "sinnix-realm-sinex-target-subvolume.service" ];
-      after = [ "persist.mount" "realm.mount" "sinnix-realm-sinex-target-subvolume.service" ];
+      after = [
+        "persist.mount"
+        "realm.mount"
+        "sinnix-realm-sinex-target-subvolume.service"
+      ];
       serviceConfig = {
         Type = "oneshot";
         ExecStart = "${pkgs.btrbk}/bin/btrbk run --quiet";

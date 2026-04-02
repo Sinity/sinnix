@@ -12,6 +12,7 @@ let
     "desktop.hyprland"
     "desktop.mime"
     "desktop.terminal"
+    "dev.agentTools"
     "dev.editors"
     "dev.git"
     "dev.mcp-servers"
@@ -33,6 +34,7 @@ let
   ];
 
   manualSpecNames = [
+    "dev-agent-tools"
     "dev-shell"
     "dev-git"
     "dev-mcp-servers"
@@ -87,7 +89,8 @@ let
     ) (builtins.attrNames coverage.bundles)
   );
 
-  allSpecNames = manualSpecNames ++ featureSmokeSpecNames ++ serviceSmokeSpecNames ++ bundleSmokeSpecNames;
+  allSpecNames =
+    manualSpecNames ++ featureSmokeSpecNames ++ serviceSmokeSpecNames ++ bundleSmokeSpecNames;
 
   defaultSpecNames = [
     "dev-shell"
@@ -109,10 +112,10 @@ let
     "cli-polylogue-runtime"
     "cli-task-tracking-runtime"
     "dev-agent-restore-runtime"
+    "dev-agent-tools-pty"
+    "dev-agent-tools-runtime"
     "dev-git-runtime"
     "dev-languages-runtime"
-    "forge-pty"
-    "forge-runtime"
     "terminal-capture-runtime"
     "terminal-capture-runtime-failure"
   ];
@@ -135,7 +138,11 @@ let
   ];
 
   defaultCheckNames = map (name: "nixos-${name}") defaultSpecNames ++ defaultAuxCheckNames;
-  heavyCheckNames = map (name: "nixos-${name}") heavySpecNames ++ runtimeCheckNames ++ vmCheckNames ++ hostBuildCheckNames;
+  heavyCheckNames =
+    map (name: "nixos-${name}") heavySpecNames
+    ++ runtimeCheckNames
+    ++ vmCheckNames
+    ++ hostBuildCheckNames;
 in
 {
   inherit

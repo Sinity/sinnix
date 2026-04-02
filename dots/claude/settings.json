@@ -31,9 +31,7 @@
       "mcp__plugin_context7_context7__query-docs",
       "Skill(enhance)"
     ],
-    "deny": [
-      "Bash(rm -rf /:*)"
-    ],
+    "deny": ["Bash(rm -rf /:*)"],
     "ask": [],
     "defaultMode": "default"
   },

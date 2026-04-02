@@ -49,58 +49,171 @@ mkFeatureModule {
     }:
     let
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
+      jsonFormat = pkgs.formats.json { };
+      tomlFormat = pkgs.formats.toml { };
       firecrawlSecretPath = lib.attrByPath [ "sinnix" "secrets" "paths" "firecrawl-api-key" ] null config;
-      firecrawlSecretExport =
-        if firecrawlSecretPath != null then
-          ''
-            if [ -z "''${FIRECRAWL_API_KEY:-}" ] && [ -r ${firecrawlSecretPath} ]; then
-              export FIRECRAWL_API_KEY="$(<${firecrawlSecretPath})"
+      mkRuntimeSecretExports =
+        secretEnv:
+        lib.concatStringsSep "\n" (
+          lib.mapAttrsToList (envName: secretPath: ''
+            if [ -z "''${${envName}:-}" ] && [ -r ${secretPath} ]; then
+              export ${envName}="$(<${secretPath})"
             fi
-          ''
-        else
-          "";
-      mcpContext7Pkg = scriptPkgs.mcp-context7;
-      mcpFirecrawlPkg = scriptPkgs.mcp-firecrawl;
-      mcpContext7Bin = pkgs.writeShellScriptBin "mcp-context7" ''
-        set -euo pipefail
-        exec ${mcpContext7Pkg}/bin/mcp-context7 "$@"
-      '';
-      mcpFirecrawlBin = pkgs.writeShellScriptBin "mcp-firecrawl" ''
-        set -euo pipefail
-        ${firecrawlSecretExport}
-        exec ${mcpFirecrawlPkg}/bin/mcp-firecrawl "$@"
-      '';
-      mcpPlaywrightBin = pkgs.writeShellScriptBin "mcp-playwright" ''
-        set -euo pipefail
-        exec ${pkgs.playwright-mcp}/bin/mcp-server-playwright "$@"
-      '';
-      mcpPolylogueBin = pkgs.writeShellScriptBin "mcp-polylogue" ''
-        set -euo pipefail
-        exec ${scriptPkgs.polylogue-cli}/bin/polylogue mcp "$@"
-      '';
+          '') secretEnv
+        );
+      mkMcpWrapper =
+        name:
+        {
+          command,
+          args ? [ ],
+          runtimeSecretEnv ? { },
+        }:
+        pkgs.writeShellScriptBin name ''
+          set -euo pipefail
+          ${mkRuntimeSecretExports runtimeSecretEnv}
+          exec ${lib.escapeShellArgs ([ command ] ++ args)} "$@"
+        '';
+      mcpContext7Bin = mkMcpWrapper "mcp-context7" {
+        command = "${scriptPkgs.mcp-context7}/bin/mcp-context7";
+      };
+      mcpFirecrawlBin = mkMcpWrapper "mcp-firecrawl" {
+        command = "${scriptPkgs.mcp-firecrawl}/bin/mcp-firecrawl";
+        runtimeSecretEnv = lib.optionalAttrs (firecrawlSecretPath != null) {
+          FIRECRAWL_API_KEY = firecrawlSecretPath;
+        };
+      };
+      mcpPlaywrightBin = mkMcpWrapper "mcp-playwright" {
+        command = "${pkgs.playwright-mcp}/bin/mcp-server-playwright";
+      };
+      mcpPolylogueBin = mkMcpWrapper "mcp-polylogue" {
+        command = "${scriptPkgs.polylogue-cli}/bin/polylogue";
+        args = [ "mcp" ];
+      };
       geminiPkg = inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.gemini-cli;
-      forgeMcpServers =
+      pruneAttrs = lib.filterAttrs (_: value: value != null && value != [ ] && value != { });
+      mcpServerRegistry =
         (lib.optionalAttrs cfg.context7Singleton.enable {
           context7 = {
+            transport = "http";
             url = "http://127.0.0.1:${toString cfg.context7Singleton.port}/mcp";
-            disable = false;
+            clients = [
+              "codex"
+              "gemini"
+              "forge"
+            ];
           };
         })
         // {
+          github = {
+            transport = "http";
+            url = "https://api.githubcopilot.com/mcp/";
+            clients = [
+              "codex"
+              "gemini"
+            ];
+            codex = {
+              bearer_token_env_var = "GITHUB_TOKEN";
+            };
+            gemini = {
+              headers = {
+                Authorization = "Bearer \${GITHUB_TOKEN}";
+              };
+            };
+          };
           firecrawl = {
+            transport = "stdio";
             command = "mcp-firecrawl";
-            disable = false;
+            clients = [ "forge" ];
           };
           polylogue = {
+            transport = "stdio";
             command = "mcp-polylogue";
-            disable = false;
+            clients = [
+              "codex"
+              "claude"
+              "gemini"
+              "forge"
+            ];
           };
           playwright = {
+            transport = "stdio";
             command = "mcp-playwright";
             args = [ "--headless" ];
-            disable = false;
+            clients = [ "forge" ];
           };
         };
+      selectClientServers =
+        client: lib.filterAttrs (_: server: builtins.elem client server.clients) mcpServerRegistry;
+      renderCodexServer =
+        _name: server:
+        if server.transport == "http" then
+          pruneAttrs (
+            {
+              inherit (server) url;
+            }
+            // (server.codex or { })
+          )
+        else
+          pruneAttrs {
+            inherit (server) command;
+            args = server.args or [ ];
+          };
+      renderClaudeServer =
+        _name: server:
+        pruneAttrs {
+          inherit (server) command;
+          args = server.args or [ ];
+        };
+      renderGeminiServer =
+        _name: server:
+        if server.transport == "http" then
+          pruneAttrs (
+            {
+              httpUrl = server.url;
+            }
+            // (server.gemini or { })
+          )
+        else
+          pruneAttrs {
+            inherit (server) command;
+            args = server.args or [ ];
+          };
+      renderForgeServer =
+        _name: server:
+        pruneAttrs (
+          if server.transport == "http" then
+            {
+              url = server.url;
+              disable = false;
+            }
+          else
+            {
+              inherit (server) command;
+              args = server.args or [ ];
+              disable = false;
+            }
+        );
+      codexMcpServers = lib.mapAttrs renderCodexServer (selectClientServers "codex");
+      claudeMcpServers = lib.mapAttrs renderClaudeServer (selectClientServers "claude");
+      geminiMcpServers = lib.mapAttrs renderGeminiServer (selectClientServers "gemini");
+      forgeMcpServers = lib.mapAttrs renderForgeServer (selectClientServers "forge");
+      generatedCodexConfig = (builtins.fromTOML (builtins.readFile ../../../dots/codex/config.toml)) // {
+        mcp_servers = codexMcpServers;
+      };
+      generatedClaudeSettings =
+        (builtins.fromJSON (builtins.readFile ../../../dots/claude/settings.json))
+        // {
+          mcpServers = claudeMcpServers;
+        };
+      generatedGeminiSettings =
+        (builtins.fromJSON (builtins.readFile ../../../dots/gemini/settings.json))
+        // {
+          mcpServers = geminiMcpServers;
+        };
+      codexConfigFile = tomlFormat.generate "codex-config.toml" generatedCodexConfig;
+      claudeSettingsFile = jsonFormat.generate "claude-settings.json" generatedClaudeSettings;
+      geminiSettingsFile = jsonFormat.generate "gemini-settings.json" generatedGeminiSettings;
+      forgeMcpConfigFile = jsonFormat.generate "forge-mcp.json" { mcpServers = forgeMcpServers; };
     in
     {
       home-manager.users.${user} =
@@ -173,6 +286,7 @@ mkFeatureModule {
           };
 
           xdg.configFile = {
+            "claude/settings.json".source = lib.mkForce claudeSettingsFile;
             "ripgrep-all/config.jsonc".source = mkDotsFile "/ripgrep-all/config.jsonc";
             "marimo/marimo.toml".source = mkDotsFile "/marimo/marimo.toml";
           };
@@ -180,7 +294,7 @@ mkFeatureModule {
           home.file = {
             # Canonical Codex location is ~/.codex.
             ".codex/config.toml" = {
-              source = mkDotsFile "/codex/config.toml";
+              source = codexConfigFile;
               force = true;
             };
             # Codex keeps a dedicated overlay tree; canonical shared skills live in dots/_ai/skills.
@@ -190,7 +304,7 @@ mkFeatureModule {
               recursive = true;
             };
             "forge/.mcp.json" = {
-              text = builtins.toJSON { mcpServers = forgeMcpServers; };
+              source = forgeMcpConfigFile;
               force = true;
             };
             ".local/bin/mcp-context7".source = "${mcpContext7Bin}/bin/mcp-context7";
@@ -198,7 +312,7 @@ mkFeatureModule {
             ".local/bin/mcp-playwright".source = "${mcpPlaywrightBin}/bin/mcp-playwright";
             ".local/bin/mcp-polylogue".source = "${mcpPolylogueBin}/bin/mcp-polylogue";
             ".gemini/settings.json" = {
-              source = mkDotsFile "/gemini/settings.json";
+              source = geminiSettingsFile;
               force = true;
             };
             ".gemini/skills" = {

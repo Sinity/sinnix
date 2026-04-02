@@ -29,12 +29,18 @@ mkFeatureModule {
             "timewarrior/timewarrior.cfg".source =
               config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/timewarrior/timewarrior.cfg";
 
-            "timewarrior/extensions/balance.py".source =
-              config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/timewarrior/extensions/balance.py";
-            "timewarrior/extensions/on-modify.timewarrior".source =
-              config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/timewarrior/extensions/on-modify.timewarrior";
-            "timewarrior/extensions/productivity.py".source =
-              config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/timewarrior/extensions/productivity.py";
+            "timewarrior/extensions/balance.py" = {
+              source = config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/timewarrior/extensions/balance.py";
+              force = true;
+            };
+            "timewarrior/extensions/on-modify.timewarrior" = {
+              source = config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/timewarrior/extensions/on-modify.timewarrior";
+              force = true;
+            };
+            "timewarrior/extensions/productivity.py" = {
+              source = config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/timewarrior/extensions/productivity.py";
+              force = true;
+            };
           };
 
           # Link taskwarrior hooks

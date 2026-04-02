@@ -35,15 +35,19 @@
       # Flush dirty pages earlier to avoid bursty I/O spikes.
       "vm.dirty_background_ratio" = 5;
       "vm.dirty_ratio" = 10;
-    } // lib.optionalAttrs (
-      config.sinnix.services.sinex.prepareHost
-      || config.sinnix.services.sinex.enable
-      || config.sinnix.services.sinex.provisionDatabase
-    ) {
-      # Filesystem capture needs a higher inotify watch budget than the desktop
-      # default. Keep the tuning with the rest of the host kernel policy.
-      "fs.inotify.max_user_watches" = 524288;
-    };
+    }
+    //
+      lib.optionalAttrs
+        (
+          config.sinnix.services.sinex.prepareHost
+          || config.sinnix.services.sinex.enable
+          || config.sinnix.services.sinex.provisionDatabase
+        )
+        {
+          # Filesystem capture needs a higher inotify watch budget than the desktop
+          # default. Keep the tuning with the rest of the host kernel policy.
+          "fs.inotify.max_user_watches" = 524288;
+        };
 
     # Earlyoom: the actual OOM policy. Kill early, kill fast, notify.
     # At 12% free RAM (~3.8GB) earlyoom kills the biggest process.

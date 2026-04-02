@@ -32,7 +32,12 @@ let
       npmDepsHash,
     }:
     pkgs.buildNpmPackage {
-      inherit pname version src npmDepsHash;
+      inherit
+        pname
+        version
+        src
+        npmDepsHash
+        ;
       dontNpmBuild = true;
       dontNpmPrune = true;
 
@@ -313,51 +318,49 @@ let
     };
   };
   scriptPackages = builtins.mapAttrs (_: v: v.package) registry;
-  packageSet =
-    scriptPackages
-    // {
-      lynchpin-python = pkgs.writeShellScriptBin "lynchpin-python" ''
-        set -euo pipefail
-        exec ${inputs.lynchpin.packages.${pkgs.stdenv.hostPlatform.system}.api-python}/bin/python "$@"
-      '';
+  packageSet = scriptPackages // {
+    lynchpin-python = pkgs.writeShellScriptBin "lynchpin-python" ''
+      set -euo pipefail
+      exec ${inputs.lynchpin.packages.${pkgs.stdenv.hostPlatform.system}.api-python}/bin/python "$@"
+    '';
 
-      polylogue-cli = mkSanitizedPythonWrapper {
-        name = "polylogue";
-        target = "${inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.default}/bin/polylogue";
-      };
-
-      polylogue-python = mkSanitizedPythonWrapper {
-        name = "polylogue-python";
-        target = "${inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.api-python}/bin/python";
-      };
-
-      mcp-context7 = mkNodeCliPackage {
-        pname = "mcp-context7";
-        version = "2.1.4";
-        src = ./npm/context7-mcp;
-        packagePath = "@upstash/context7-mcp";
-        entrypoint = "dist/index.js";
-        npmDepsHash = "sha256-Tlo/IcyETB6iEqo9MYN937TAS3DmHCSmfBDwa+4HzDM=";
-      };
-
-      mcp-firecrawl = mkNodeCliPackage {
-        pname = "mcp-firecrawl";
-        version = "3.10.3";
-        src = ./npm/firecrawl-mcp;
-        packagePath = "firecrawl-mcp";
-        entrypoint = "dist/index.js";
-        npmDepsHash = "sha256-bz3EVlVQNOeS5g9qvO1+5OIcMNxVQ+oLrwA9j9ZmqEY=";
-      };
-
-      ccusage = mkNodeCliPackage {
-        pname = "ccusage";
-        version = "18.0.10";
-        src = ./npm/ccusage;
-        packagePath = "ccusage";
-        entrypoint = "dist/index.js";
-        npmDepsHash = "sha256-/duhx34Iiq+7ZOaRTTAWChbGjJhxiVvWOoaLJsH2USc=";
-      };
+    polylogue-cli = mkSanitizedPythonWrapper {
+      name = "polylogue";
+      target = "${inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.default}/bin/polylogue";
     };
+
+    polylogue-python = mkSanitizedPythonWrapper {
+      name = "polylogue-python";
+      target = "${inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.api-python}/bin/python";
+    };
+
+    mcp-context7 = mkNodeCliPackage {
+      pname = "mcp-context7";
+      version = "2.1.4";
+      src = ./npm/context7-mcp;
+      packagePath = "@upstash/context7-mcp";
+      entrypoint = "dist/index.js";
+      npmDepsHash = "sha256-Tlo/IcyETB6iEqo9MYN937TAS3DmHCSmfBDwa+4HzDM=";
+    };
+
+    mcp-firecrawl = mkNodeCliPackage {
+      pname = "mcp-firecrawl";
+      version = "3.10.3";
+      src = ./npm/firecrawl-mcp;
+      packagePath = "firecrawl-mcp";
+      entrypoint = "dist/index.js";
+      npmDepsHash = "sha256-bz3EVlVQNOeS5g9qvO1+5OIcMNxVQ+oLrwA9j9ZmqEY=";
+    };
+
+    ccusage = mkNodeCliPackage {
+      pname = "ccusage";
+      version = "18.0.10";
+      src = ./npm/ccusage;
+      packagePath = "ccusage";
+      entrypoint = "dist/index.js";
+      npmDepsHash = "sha256-/duhx34Iiq+7ZOaRTTAWChbGjJhxiVvWOoaLJsH2USc=";
+    };
+  };
 in
 {
   # Export packages for flake outputs

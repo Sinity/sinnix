@@ -53,6 +53,13 @@ let
             mode = "0440";
             path = "/run/agenix/github-token";
           }
+        else if secretName == "sinex-local-db" then
+          defaultSpec
+          // {
+            group = "postgres";
+            mode = "0440";
+            path = "/run/agenix/sinex-local-db";
+          }
         else if secretName == "nextcloud-webdav-credentials" then
           rootOwnedSpec
           // {

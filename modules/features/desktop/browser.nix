@@ -55,14 +55,11 @@ mkFeatureModule {
               BROWSER = browserLinkCmd;
             };
 
-            packages =
-              with pkgs;
-              [
-                chromePkg
-                qutebrowser
-                tor-browser
-              ]
-              ;
+            packages = with pkgs; [
+              chromePkg
+              qutebrowser
+              tor-browser
+            ];
 
             file = {
               ".local/share/qutebrowser/userscripts/open-in-mpv" = mkUserScript "open-in-mpv";

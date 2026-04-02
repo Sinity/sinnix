@@ -38,6 +38,7 @@ let
         "desktop.hyprland"
         "desktop.mime"
         "desktop.terminal"
+        "dev.agentTools"
         "dev.editors"
         "dev.git"
         "dev.mcp-servers"
@@ -111,50 +112,44 @@ let
       manualTestSpecs = [
         # === Feature Tests (using DSL) ===
         (mkFeatureTest {
-          name = "dev-shell";
-          feature = "sinnix.features.dev.shell.enable";
+          name = "dev-agent-tools";
+          feature = "sinnix.features.dev.agentTools.enable";
+          extraModules = [
+            (
+              { ... }:
+              {
+                sinnix.features.dev.shell.enable = true;
+                sinnix.features.dev.mcp-servers.enable = true;
+              }
+            )
+          ];
           assertions =
             config:
             let
               hm = hmFor config;
+              managedEntryText =
+                entry:
+                if entry ? text && entry.text != null then
+                  entry.text
+                else if entry ? source && entry.source != null then
+                  builtins.readFile entry.source
+                else
+                  "";
+              managedEntrySource =
+                entry: if entry ? source && entry.source != null then toString entry.source else "";
+              codexConfigText = managedEntryText hm.home.file.".codex/config.toml";
+              claudeSettings = builtins.fromJSON (managedEntryText hm.xdg.configFile."claude/settings.json");
+              geminiSettings = builtins.fromJSON (managedEntryText hm.home.file.".gemini/settings.json");
+              forgeMcpConfig = builtins.fromJSON (managedEntryText hm.home.file."forge/.mcp.json");
             in
             [
-              {
-                assertion = hm.programs.zsh.enable;
-                message = "Zsh must be enabled";
-              }
-              {
-                assertion = hm.programs.starship.enable;
-                message = "Starship must be enabled";
-              }
-              {
-                assertion = hm.programs.atuin.enable;
-                message = "Atuin must be enabled";
-              }
-              {
-                assertion = hm.programs.fzf.enable;
-                message = "FZF must be enabled";
-              }
-              {
-                assertion = hm.programs.zoxide.enable;
-                message = "Zoxide must be enabled";
-              }
               {
                 assertion = builtins.match ".*\\$\\*.*" (hm.home.file.".local/bin/claude-team".text or "") == null;
                 message = "Claude team wrapper must not flatten arguments via $*";
               }
               (expect.hmFileExists hm ".local/bin/claude" "Claude wrapper must exist")
-              (expect.sessionVariableMatches hm "LYNCHPIN_PYTHON"
-                ".*/bin/lynchpin-python"
-                "Dev shell must export the system-wide Lynchpin API interpreter path"
-              )
-              (expect.sessionVariableMatches hm "POLYLOGUE_PYTHON"
-                ".*/bin/polylogue-python"
-                "Dev shell must export the system-wide Polylogue API interpreter path"
-              )
               (expect.hmFileExists hm ".local/bin/codex" "Codex wrapper must exist")
-              (expect.hmFileTextNotMatches hm ".local/bin/codex"
-                ".*render-agents.*"
+              (expect.hmFileTextNotMatches hm ".local/bin/codex" ".*render-agents.*"
                 "Codex wrapper must not render AGENTS on every launch"
               )
               (expect.hmPackagedWrapper hm ".local/bin/forge" {
@@ -167,8 +162,7 @@ let
                 "Global Forge AGENTS render activation must exist"
               )
               (expect.hmFileExists hm "forge/skills" "Forge skill root must be linked from the shared skill tree")
-              (expect.textContains hm.programs.zsh.initContent
-                "export FORGE_BIN=\"$HOME/.local/bin/forge\""
+              (expect.textContains hm.programs.zsh.initContent "export FORGE_BIN=\"$HOME/.local/bin/forge\""
                 "Zsh init must source Forge via the managed wrapper path"
               )
               (expect.hmFileExists hm "forge/.forge.toml"
@@ -196,18 +190,20 @@ let
                 "max_tool_failure_per_turn = 5"
                 "tool_timeout_secs = 600"
               ] "Forge config must keep the bounded runtime guardrails")
-              (expect.hmFileTextNotMatches hm "forge/.forge.toml"
-                ".*custom_history_path.*"
+              (expect.hmFileTextNotMatches hm "forge/.forge.toml" ".*custom_history_path.*"
                 "Forge config must rely on Forge's native history storage path"
               )
-              (expect.hmFileTextNotMatches hm "forge/.forge.toml"
-                ".*[[]compact[]].*"
+              (expect.hmFileTextNotMatches hm "forge/.forge.toml" ".*[[]compact[]].*"
                 "Forge config must not override upstream compaction defaults"
               )
               (expect.persistedHomeDir config "forge" "Forge home directory must be persisted under ~/forge")
+              (expect.persistedHomeDir config ".config/claude"
+                "Claude config directory must be persisted under ~/.config/claude"
+              )
+              (expect.persistedHomeDir config ".codex" "Codex home directory must be persisted under ~/.codex")
+              (expect.persistedHomeDir config ".gemini" "Gemini home directory must be persisted under ~/.gemini")
               (expect.hmFileExists hm ".local/bin/gemini" "Gemini wrapper must exist")
-              (expect.hmFileTextNotMatches hm ".local/bin/gemini"
-                ".*render-agents.*"
+              (expect.hmFileTextNotMatches hm ".local/bin/gemini" ".*render-agents.*"
                 "Gemini wrapper must not render instructions on every launch"
               )
               (expect.hmPackagedWrapper hm ".local/bin/gemini" {
@@ -218,12 +214,67 @@ let
                   "bundle/index\\.js"
                 ];
               } "Gemini wrapper must launch the packaged binary directly")
+              (expect.xdgConfigFileExists hm "claude/CLAUDE.md" "Claude instruction root must exist")
               (expect.xdgConfigFileExists hm "claude/skills" "Claude skills symlink must exist")
+              (expect.xdgConfigFileExists hm "claude/world-model" "Claude world model tree must exist")
+              (expect.xdgConfigFileExists hm "claude/operational" "Claude operational knowledge tree must exist")
               (expect.activationExists hm "renderGlobalCodexAgents"
                 "Global Codex AGENTS render activation must exist"
               )
               (expect.activationExists hm "renderGlobalGeminiAgents"
                 "Global Gemini instruction render activation must exist"
+              )
+            ];
+        })
+
+        (mkFeatureTest {
+          name = "dev-shell";
+          feature = "sinnix.features.dev.shell.enable";
+          assertions =
+            config:
+            let
+              hm = hmFor config;
+              managedEntryText =
+                entry:
+                if entry ? text && entry.text != null then
+                  entry.text
+                else if entry ? source && entry.source != null then
+                  builtins.readFile entry.source
+                else
+                  "";
+              managedEntrySource =
+                entry: if entry ? source && entry.source != null then toString entry.source else "";
+              codexConfigText = managedEntryText hm.home.file.".codex/config.toml";
+              claudeSettings = builtins.fromJSON (managedEntryText hm.xdg.configFile."claude/settings.json");
+              geminiSettings = builtins.fromJSON (managedEntryText hm.home.file.".gemini/settings.json");
+              forgeMcpConfig = builtins.fromJSON (managedEntryText hm.home.file."forge/.mcp.json");
+            in
+            [
+              {
+                assertion = hm.programs.zsh.enable;
+                message = "Zsh must be enabled";
+              }
+              {
+                assertion = hm.programs.starship.enable;
+                message = "Starship must be enabled";
+              }
+              {
+                assertion = hm.programs.atuin.enable;
+                message = "Atuin must be enabled";
+              }
+              {
+                assertion = hm.programs.fzf.enable;
+                message = "FZF must be enabled";
+              }
+              {
+                assertion = hm.programs.zoxide.enable;
+                message = "Zoxide must be enabled";
+              }
+              (expect.sessionVariableMatches hm "LYNCHPIN_PYTHON" ".*/bin/lynchpin-python"
+                "Dev shell must export the system-wide Lynchpin API interpreter path"
+              )
+              (expect.sessionVariableMatches hm "POLYLOGUE_PYTHON" ".*/bin/polylogue-python"
+                "Dev shell must export the system-wide Polylogue API interpreter path"
               )
               {
                 assertion = hm.programs.zsh.shellAliases.ccusage == "ccusage";
@@ -291,6 +342,20 @@ let
             config:
             let
               hm = hmFor config;
+              managedEntryText =
+                entry:
+                if entry ? text && entry.text != null then
+                  entry.text
+                else if entry ? source && entry.source != null then
+                  builtins.readFile entry.source
+                else
+                  "";
+              managedEntrySource =
+                entry: if entry ? source && entry.source != null then toString entry.source else "";
+              codexConfigText = managedEntryText hm.home.file.".codex/config.toml";
+              claudeSettings = builtins.fromJSON (managedEntryText hm.xdg.configFile."claude/settings.json");
+              geminiSettings = builtins.fromJSON (managedEntryText hm.home.file.".gemini/settings.json");
+              forgeMcpConfig = builtins.fromJSON (managedEntryText hm.home.file."forge/.mcp.json");
             in
             [
               {
@@ -300,98 +365,114 @@ let
                   ) == null;
                 message = "Agent launcher must not wrap kitty launches in zsh -lc";
               }
-              (expect.hmFileExists hm ".codex/config.toml" "Codex config must be linked")
+              (expect.hmFileExists hm ".codex/config.toml" "Codex config must be managed")
               (expect.hmFileExists hm ".codex/skills"
                 "Codex skills must be linked from the dedicated dots/codex/skills tree"
               )
-              (expect.textContains (hm.home.file.".local/bin/mcp-context7".source or "")
-                "/bin/mcp-context7"
-                "Context7 wrapper must point at the packaged binary"
-              )
-              (expect.textContains (hm.home.file.".local/bin/mcp-firecrawl".source or "")
-                "/bin/mcp-firecrawl"
-                "Firecrawl wrapper must point at the packaged binary"
-              )
-              (expect.textContains (hm.home.file.".local/bin/mcp-playwright".source or "")
-                "/bin/mcp-playwright"
-                "Playwright wrapper must point at the packaged binary"
-              )
-              (expect.textContains (builtins.readFile (hm.home.file.".local/bin/mcp-playwright".source or ""))
-                "/bin/mcp-server-playwright"
-                "Playwright wrapper must launch the packaged server entrypoint"
-              )
-              (expect.textContains (hm.home.file.".local/bin/mcp-polylogue".source or "")
-                "/bin/mcp-polylogue"
-                "Polylogue wrapper must point at the packaged binary"
-              )
-              (expect.textContains (builtins.readFile ../dots/codex/config.toml)
-                "[mcp_servers.polylogue]"
+              (expect.textContains (managedEntrySource
+                hm.home.file.".local/bin/mcp-context7"
+              ) "/bin/mcp-context7" "Context7 wrapper must point at the packaged binary")
+              (expect.textContains (managedEntrySource
+                hm.home.file.".local/bin/mcp-firecrawl"
+              ) "/bin/mcp-firecrawl" "Firecrawl wrapper must point at the packaged binary")
+              (expect.textContains (managedEntrySource
+                hm.home.file.".local/bin/mcp-playwright"
+              ) "/bin/mcp-playwright" "Playwright wrapper must point at the packaged binary")
+              (expect.textContains (managedEntryText
+                hm.home.file.".local/bin/mcp-playwright"
+              ) "/bin/mcp-server-playwright" "Playwright wrapper must launch the packaged server entrypoint")
+              (expect.textContains (managedEntrySource
+                hm.home.file.".local/bin/mcp-polylogue"
+              ) "/bin/mcp-polylogue" "Polylogue wrapper must point at the packaged binary")
+              (expect.textContains codexConfigText "[mcp_servers.polylogue]"
                 "Codex config must declare the Polylogue MCP server"
               )
-              (expect.textContains (builtins.readFile ../dots/codex/config.toml)
-                "command = \"mcp-polylogue\""
+              (expect.textContains codexConfigText "command = \"mcp-polylogue\""
                 "Codex config must call the packaged Polylogue MCP wrapper"
               )
-              (expect.attrPathEq (builtins.fromJSON (builtins.readFile ../dots/claude/settings.json))
-                [ "mcpServers" "polylogue" "command" ]
-                "mcp-polylogue"
-                "Claude config must call the packaged Polylogue MCP wrapper"
+              (expect.textContains codexConfigText "[mcp_servers.context7]"
+                "Codex config must declare the Context7 MCP server"
               )
-              (expect.attrPathEq (builtins.fromJSON (builtins.readFile ../dots/gemini/settings.json))
-                [ "mcpServers" "polylogue" "command" ]
-                "mcp-polylogue"
-                "Gemini config must call the packaged Polylogue MCP wrapper"
+              (expect.textContains codexConfigText "url = \"http://127.0.0.1:3939/mcp\""
+                "Codex config must point Context7 at the singleton HTTP endpoint"
               )
-              (expect.attrPathEq (builtins.fromJSON (builtins.readFile ../dots/gemini/settings.json))
-                [ "general" "enableAutoUpdate" ]
-                false
-                "Gemini must keep self-update disabled"
+              (expect.textContains codexConfigText "[mcp_servers.github]"
+                "Codex config must declare the GitHub MCP server"
               )
-              (expect.attrPathEq (builtins.fromJSON (builtins.readFile ../dots/gemini/settings.json))
-                [ "general" "enableAutoUpdateNotification" ]
-                false
-                "Gemini must keep update notifications disabled"
+              (expect.textContains codexConfigText "bearer_token_env_var = \"GITHUB_TOKEN\""
+                "Codex config must keep GitHub token lookup in the environment"
               )
-              (expect.attrPathEq (builtins.fromJSON (builtins.readFile ../dots/gemini/settings.json))
-                [ "general" "checkpointing" "enabled" ]
-                true
-                "Gemini must retain checkpointing"
-              )
-              (expect.attrPathEq (builtins.fromJSON (builtins.readFile ../dots/gemini/settings.json))
-                [ "general" "sessionRetention" "maxCount" ]
-                1000000
-                "Gemini must keep the long session-retention budget"
-              )
-              (expect.attrPathEq (builtins.fromJSON (builtins.readFile ../dots/gemini/settings.json))
-                [ "model" "maxSessionTurns" ]
-                (-1)
-                "Gemini must keep unlimited session turns"
-              )
-              (expect.attrPathEq (builtins.fromJSON (hm.home.file."forge/.mcp.json".text or "{}"))
-                [ "mcpServers" "context7" "url" ]
-                "http://127.0.0.1:3939/mcp"
-                "Forge MCP config must point Context7 at the singleton HTTP endpoint"
-              )
-              (expect.attrPathEq (builtins.fromJSON (hm.home.file."forge/.mcp.json".text or "{}"))
-                [ "mcpServers" "firecrawl" "command" ]
-                "mcp-firecrawl"
-                "Forge MCP config must call the packaged Firecrawl wrapper"
-              )
-              (expect.attrPathEq (builtins.fromJSON (hm.home.file."forge/.mcp.json".text or "{}"))
-                [ "mcpServers" "playwright" "command" ]
-                "mcp-playwright"
-                "Forge MCP config must call the packaged Playwright wrapper"
-              )
-              (expect.attrPathEq (builtins.fromJSON (hm.home.file."forge/.mcp.json".text or "{}"))
-                [ "mcpServers" "playwright" "args" ]
-                [ "--headless" ]
+              (expect.attrPathEq claudeSettings [
+                "mcpServers"
+                "polylogue"
+                "command"
+              ] "mcp-polylogue" "Claude config must call the packaged Polylogue MCP wrapper")
+              (expect.attrPathEq geminiSettings [
+                "mcpServers"
+                "polylogue"
+                "command"
+              ] "mcp-polylogue" "Gemini config must call the packaged Polylogue MCP wrapper")
+              (expect.attrPathEq geminiSettings [
+                "mcpServers"
+                "context7"
+                "httpUrl"
+              ] "http://127.0.0.1:3939/mcp" "Gemini config must point Context7 at the singleton HTTP endpoint")
+              (expect.attrPathEq geminiSettings [
+                "mcpServers"
+                "github"
+                "httpUrl"
+              ] "https://api.githubcopilot.com/mcp/" "Gemini config must keep the GitHub MCP endpoint")
+              (expect.attrPathEq geminiSettings [
+                "mcpServers"
+                "github"
+                "headers"
+                "Authorization"
+              ] "Bearer \${GITHUB_TOKEN}" "Gemini config must keep GitHub auth as runtime header expansion")
+              (expect.attrPathEq geminiSettings [
+                "general"
+                "enableAutoUpdate"
+              ] false "Gemini must keep self-update disabled")
+              (expect.attrPathEq geminiSettings [
+                "general"
+                "enableAutoUpdateNotification"
+              ] false "Gemini must keep update notifications disabled")
+              (expect.attrPathEq geminiSettings [
+                "general"
+                "checkpointing"
+                "enabled"
+              ] true "Gemini must retain checkpointing")
+              (expect.attrPathEq geminiSettings [
+                "general"
+                "sessionRetention"
+                "maxCount"
+              ] 1000000 "Gemini must keep the long session-retention budget")
+              (expect.attrPathEq geminiSettings [
+                "model"
+                "maxSessionTurns"
+              ] (-1) "Gemini must keep unlimited session turns")
+              (expect.attrPathEq forgeMcpConfig [
+                "mcpServers"
+                "context7"
+                "url"
+              ] "http://127.0.0.1:3939/mcp" "Forge MCP config must point Context7 at the singleton HTTP endpoint")
+              (expect.attrPathEq forgeMcpConfig [
+                "mcpServers"
+                "firecrawl"
+                "command"
+              ] "mcp-firecrawl" "Forge MCP config must call the packaged Firecrawl wrapper")
+              (expect.attrPathEq forgeMcpConfig [
+                "mcpServers"
+                "playwright"
+                "command"
+              ] "mcp-playwright" "Forge MCP config must call the packaged Playwright wrapper")
+              (expect.attrPathEq forgeMcpConfig [ "mcpServers" "playwright" "args" ] [ "--headless" ]
                 "Forge MCP config must keep Playwright headless by default"
               )
-              (expect.attrPathEq (builtins.fromJSON (hm.home.file."forge/.mcp.json".text or "{}"))
-                [ "mcpServers" "polylogue" "command" ]
-                "mcp-polylogue"
-                "Forge MCP config must call the packaged Polylogue wrapper"
-              )
+              (expect.attrPathEq forgeMcpConfig [
+                "mcpServers"
+                "polylogue"
+                "command"
+              ] "mcp-polylogue" "Forge MCP config must call the packaged Polylogue wrapper")
             ];
         })
 
@@ -426,18 +507,18 @@ let
               (expect.textContains execStart "/bin/polylogue --plain run"
                 "Polylogue user service must run the packaged CLI directly"
               )
-              (expect.attrPathEq service [ "TimeoutStartSec" ] "10min"
-                "Polylogue ingestion must keep the bounded 10 minute timeout"
-              )
-              (expect.attrPathEq service [ "MemoryHigh" ] "2G"
-                "Polylogue ingestion must retain the memory high watermark"
-              )
-              (expect.attrPathEq service [ "MemoryMax" ] "4G"
-                "Polylogue ingestion must retain the hard memory limit"
-              )
-              (expect.attrPathEq timer [ "Persistent" ] true
-                "Polylogue timer must catch up missed runs after sleep"
-              )
+              (expect.attrPathEq service [
+                "TimeoutStartSec"
+              ] "10min" "Polylogue ingestion must keep the bounded 10 minute timeout")
+              (expect.attrPathEq service [
+                "MemoryHigh"
+              ] "2G" "Polylogue ingestion must retain the memory high watermark")
+              (expect.attrPathEq service [
+                "MemoryMax"
+              ] "4G" "Polylogue ingestion must retain the hard memory limit")
+              (expect.attrPathEq timer [
+                "Persistent"
+              ] true "Polylogue timer must catch up missed runs after sleep")
             ];
         }
 
@@ -1348,15 +1429,17 @@ let
 
       ];
       specByName = lib.listToAttrs (
-        map (spec: {
-          name = spec.name;
-          value = spec;
-        }) (
-          manualTestSpecs
-          ++ coverageFeatureSmokeSpecs
-          ++ coverageServiceSmokeSpecs
-          ++ coverageBundleSmokeSpecs
-        )
+        map
+          (spec: {
+            name = spec.name;
+            value = spec;
+          })
+          (
+            manualTestSpecs
+            ++ coverageFeatureSmokeSpecs
+            ++ coverageServiceSmokeSpecs
+            ++ coverageBundleSmokeSpecs
+          )
       );
       selectSpecs = names: map (name: specByName.${name}) names;
     in
@@ -1445,21 +1528,22 @@ in
         feature = "sinnix.features.dev.languages.enable";
         assertions = _config: [ ];
       };
-      forgeRuntimeSpec = mkFeatureTest {
-        name = "dev-shell-runtime";
-        feature = "sinnix.features.dev.shell.enable";
+      devAgentToolsRuntimeSpec = mkFeatureTest {
+        name = "dev-agent-tools-runtime";
+        feature = "sinnix.features.dev.agentTools.enable";
         extraModules = [
           (
             { ... }:
             {
+              sinnix.features.dev.shell.enable = true;
               sinnix.features.dev.mcp-servers.enable = true;
             }
           )
         ];
         assertions = _config: [ ];
       };
-      forgeFixture = {
-        spec = forgeRuntimeSpec;
+      agentToolsFixture = {
+        spec = devAgentToolsRuntimeSpec;
         nativeBuildInputs = [
           pkgs.coreutils
           pkgs.expect
@@ -1526,75 +1610,81 @@ in
       };
       rewriteBackupHook =
         hook: replacements:
-        builtins.replaceStrings (map (replacement: replacement.from) replacements) (
-          map (replacement: replacement.to) replacements
-        ) hook;
-      realmBorgPreHook = rewriteBackupHook backupRuntimeEval.config.services.borgbackup.jobs.realm.preHook [
-        {
-          from = "${pkgs.util-linux}/bin/mountpoint";
-          to = "$TMPDIR/mock-bin/mountpoint";
-        }
-        {
-          from = "${pkgs.util-linux}/bin/umount";
-          to = "$TMPDIR/mock-bin/umount";
-        }
-        {
-          from = "${pkgs.util-linux}/bin/mount";
-          to = "$TMPDIR/mock-bin/mount";
-        }
-        {
-          from = "/realm/.snapshot";
-          to = "$TMPDIR/realm-snapshots";
-        }
-        {
-          from = "/run/borgbackup-snapshot-inputs/realm";
-          to = "$TMPDIR/bind/realm";
-        }
-      ];
-      persistBorgPreHook = rewriteBackupHook backupRuntimeEval.config.services.borgbackup.jobs.persist.preHook [
-        {
-          from = "${pkgs.util-linux}/bin/mountpoint";
-          to = "$TMPDIR/mock-bin/mountpoint";
-        }
-        {
-          from = "${pkgs.util-linux}/bin/umount";
-          to = "$TMPDIR/mock-bin/umount";
-        }
-        {
-          from = "${pkgs.util-linux}/bin/mount";
-          to = "$TMPDIR/mock-bin/mount";
-        }
-        {
-          from = "/persist/.snapshot";
-          to = "$TMPDIR/persist-snapshots";
-        }
-        {
-          from = "/run/borgbackup-snapshot-inputs/persist";
-          to = "$TMPDIR/bind/persist";
-        }
-      ];
-      missingRealmBorgPreHook = rewriteBackupHook backupRuntimeEval.config.services.borgbackup.jobs.realm.preHook [
-        {
-          from = "${pkgs.util-linux}/bin/mountpoint";
-          to = "$TMPDIR/mock-bin/mountpoint";
-        }
-        {
-          from = "${pkgs.util-linux}/bin/umount";
-          to = "$TMPDIR/mock-bin/umount";
-        }
-        {
-          from = "${pkgs.util-linux}/bin/mount";
-          to = "$TMPDIR/mock-bin/mount";
-        }
-        {
-          from = "/realm/.snapshot";
-          to = "$TMPDIR/realm-empty";
-        }
-        {
-          from = "/run/borgbackup-snapshot-inputs/realm";
-          to = "$TMPDIR/bind/realm-empty";
-        }
-      ];
+        builtins.replaceStrings (map (replacement: replacement.from) replacements) (map (
+          replacement: replacement.to
+        ) replacements) hook;
+      realmBorgPreHook =
+        rewriteBackupHook backupRuntimeEval.config.services.borgbackup.jobs.realm.preHook
+          [
+            {
+              from = "${pkgs.util-linux}/bin/mountpoint";
+              to = "$TMPDIR/mock-bin/mountpoint";
+            }
+            {
+              from = "${pkgs.util-linux}/bin/umount";
+              to = "$TMPDIR/mock-bin/umount";
+            }
+            {
+              from = "${pkgs.util-linux}/bin/mount";
+              to = "$TMPDIR/mock-bin/mount";
+            }
+            {
+              from = "/realm/.snapshot";
+              to = "$TMPDIR/realm-snapshots";
+            }
+            {
+              from = "/run/borgbackup-snapshot-inputs/realm";
+              to = "$TMPDIR/bind/realm";
+            }
+          ];
+      persistBorgPreHook =
+        rewriteBackupHook backupRuntimeEval.config.services.borgbackup.jobs.persist.preHook
+          [
+            {
+              from = "${pkgs.util-linux}/bin/mountpoint";
+              to = "$TMPDIR/mock-bin/mountpoint";
+            }
+            {
+              from = "${pkgs.util-linux}/bin/umount";
+              to = "$TMPDIR/mock-bin/umount";
+            }
+            {
+              from = "${pkgs.util-linux}/bin/mount";
+              to = "$TMPDIR/mock-bin/mount";
+            }
+            {
+              from = "/persist/.snapshot";
+              to = "$TMPDIR/persist-snapshots";
+            }
+            {
+              from = "/run/borgbackup-snapshot-inputs/persist";
+              to = "$TMPDIR/bind/persist";
+            }
+          ];
+      missingRealmBorgPreHook =
+        rewriteBackupHook backupRuntimeEval.config.services.borgbackup.jobs.realm.preHook
+          [
+            {
+              from = "${pkgs.util-linux}/bin/mountpoint";
+              to = "$TMPDIR/mock-bin/mountpoint";
+            }
+            {
+              from = "${pkgs.util-linux}/bin/umount";
+              to = "$TMPDIR/mock-bin/umount";
+            }
+            {
+              from = "${pkgs.util-linux}/bin/mount";
+              to = "$TMPDIR/mock-bin/mount";
+            }
+            {
+              from = "/realm/.snapshot";
+              to = "$TMPDIR/realm-empty";
+            }
+            {
+              from = "/run/borgbackup-snapshot-inputs/realm";
+              to = "$TMPDIR/bind/realm-empty";
+            }
+          ];
       hostCommandNames = [
         "check-all"
         "check-heavy"
@@ -1614,12 +1704,12 @@ in
           "dev.agentRestore".runtime = [ "dev-agent-restore-runtime" ];
           "dev.git".runtime = [ "dev-git-runtime" ];
           "dev.languages".runtime = [ "dev-languages-runtime" ];
-          "dev.mcp-servers".runtime = [ "forge-runtime" ];
-          "dev.shell" = {
-            runtime = [ "forge-runtime" ];
-            pty = [ "forge-pty" ];
+          "dev.agentTools" = {
+            runtime = [ "dev-agent-tools-runtime" ];
+            pty = [ "dev-agent-tools-pty" ];
             host = [ "host-smoke-terminal" ];
           };
+          "dev.mcp-servers".runtime = [ "dev-agent-tools-runtime" ];
         };
         services = {
           "below".vm = [ "below-vm" ];
@@ -2124,11 +2214,11 @@ in
 
             touch "$out"
           '';
-      forgeRuntime = mkHmRuntimeCheck system (
-        forgeFixture
+      devAgentToolsRuntime = mkHmRuntimeCheck system (
+        agentToolsFixture
         // {
-          name = "forge-runtime-check";
-          nativeBuildInputs = builtins.filter (pkg: pkg != pkgs.expect) forgeFixture.nativeBuildInputs;
+          name = "dev-agent-tools-runtime-check";
+          nativeBuildInputs = builtins.filter (pkg: pkg != pkgs.expect) agentToolsFixture.nativeBuildInputs;
           script = ''
             "$HOME/.local/bin/forge" --version | grep -q '^forge '
             "$HOME/.local/bin/forge" config get model | grep -qx 'gpt-5.4'
@@ -2336,10 +2426,10 @@ in
           forge --version | grep -q '^forge '
         '';
       };
-      forgePty = mkHmRuntimeCheck system (
-        forgeFixture
+      devAgentToolsPty = mkHmRuntimeCheck system (
+        agentToolsFixture
         // {
-          name = "forge-pty-check";
+          name = "dev-agent-tools-pty-check";
           script = ''
             cat > "$TMPDIR/forge-pty.expect" <<'EOF'
             log_user 1
@@ -2383,10 +2473,10 @@ in
           cli-polylogue-runtime = cliPolylogueRuntime;
           cli-task-tracking-runtime = cliTaskTrackingRuntime;
           dev-agent-restore-runtime = devAgentRestoreRuntime;
+          dev-agent-tools-pty = devAgentToolsPty;
+          dev-agent-tools-runtime = devAgentToolsRuntime;
           dev-git-runtime = devGitRuntime;
           dev-languages-runtime = devLanguagesRuntime;
-          forge-pty = forgePty;
-          forge-runtime = forgeRuntime;
           terminal-capture-runtime = terminalCaptureRuntime;
           terminal-capture-runtime-failure = terminalCaptureRuntimeFailure;
         }

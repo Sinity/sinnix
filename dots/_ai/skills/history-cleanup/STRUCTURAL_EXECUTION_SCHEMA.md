@@ -84,4 +84,3 @@ Recommended default:
 - preserve committer dates unless a minimal monotonic offset is required by a
   reorder
 - never restamp rewritten history as “today”
-

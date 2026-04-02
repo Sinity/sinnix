@@ -881,7 +881,7 @@ Recommended usage pattern:
 9. `analyze-series`
    use only as triage for suspicious bands
 10. `scaffold-split`
-   create initial structural grouping for giant commits
+    create initial structural grouping for giant commits
 11. `emit-rebase-todo`
     only after deterministic structural execution packs already exist
 

@@ -23,6 +23,7 @@ in
           "flakes"
           "cgroups"
         ];
+        accept-flake-config = true;
         trusted-users = [
           username
           "root"

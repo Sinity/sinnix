@@ -32,13 +32,11 @@ let
       # Use a recursive merge so nested attrs like `factorio.username`
       # coexist with generated `factorio.enable`.
       subFeatureOpts = mkSubFeatureOptions subFeatures;
-      optionsForPath =
-        lib.recursiveUpdate extraOptions subFeatureOpts
-        // {
-          enable = (lib.mkEnableOption description) // {
-            default = enableDefault;
-          };
+      optionsForPath = lib.recursiveUpdate extraOptions subFeatureOpts // {
+        enable = (lib.mkEnableOption description) // {
+          default = enableDefault;
         };
+      };
       cfg = lib.getAttrFromPath featurePath config;
       user = config.sinnix.user.name;
     in

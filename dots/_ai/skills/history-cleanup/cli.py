@@ -3,17 +3,17 @@ from __future__ import annotations
 
 import argparse
 import csv
-from datetime import datetime, timezone
 import json
-from json import JSONDecodeError
 import math
 import os
 import re
 import shlex
-import subprocess
 import statistics
+import subprocess
 import time
 from collections import Counter, defaultdict
+from datetime import datetime, timezone
+from json import JSONDecodeError
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +21,9 @@ from structural import register_structural_subcommands
 
 COMMIT_HEADER_RE = re.compile(r"^commit ([0-9a-f]{40})$")
 DIFF_HEADER_RE = re.compile(r"^diff --git a/(.+) b/(.+)$")
-SURFACE_TOKEN_RE = re.compile(r"`[^`]+`|[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+|[A-Za-z_][A-Za-z0-9_]+\.[A-Za-z0-9_]+")
+SURFACE_TOKEN_RE = re.compile(
+    r"`[^`]+`|[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+|[A-Za-z_][A-Za-z0-9_]+\.[A-Za-z0-9_]+"
+)
 EFFECT_SIGNAL_RE = re.compile(
     r"\b(add|remove|split|extract|rename|migrate|deduplicate|normalize|validate|record|generate|"
     r"rebuild|index|persist|render|route|wire|isolate|retire|separate|introduce|restrict|repair|"
@@ -63,6 +65,7 @@ WINDOW_PROFILES: dict[str, dict[str, Any]] = {
         "max_commits_per_normal_packet": 24,
     },
 }
+
 
 def load_json(path: Path) -> Any:
     return json.loads(path.read_text())
@@ -114,7 +117,9 @@ def resolve_window_profile(name: str | None) -> dict[str, Any]:
     profile = WINDOW_PROFILES.get(profile_name)
     if profile is None:
         choices = ", ".join(sorted(WINDOW_PROFILES))
-        raise SystemExit(f"unsupported window profile {profile_name!r}; expected one of: {choices}")
+        raise SystemExit(
+            f"unsupported window profile {profile_name!r}; expected one of: {choices}"
+        )
     return {"name": profile_name, **profile}
 
 
@@ -165,7 +170,11 @@ def normalize_why_basis(value: Any) -> str:
     lowered = joined.lower()
     if not lowered.strip():
         return "not_recorded"
-    if "patch" in lowered and "context" in lowered and ("behavior" in lowered or "reason" in lowered):
+    if (
+        "patch" in lowered
+        and "context" in lowered
+        and ("behavior" in lowered or "reason" in lowered)
+    ):
         return "patch_plus_adjacent_context_behavior_and_reason"
     if "patch" in lowered and "context" in lowered:
         return "patch_plus_adjacent_context"
@@ -286,9 +295,13 @@ def parse_numstat_history_log(path: Path) -> list[dict[str, Any]]:
             return
         current["files_touched"] = len(current["paths"])
         current["lines_changed"] = current["additions"] + current["deletions"]
-        current["path_roots"] = sorted({top_level_area_for_path(path) for path in current["paths"]})
+        current["path_roots"] = sorted(
+            {top_level_area_for_path(path) for path in current["paths"]}
+        )
         current["current_body"] = "\n".join(current["body_lines"]).strip()
-        current["current_message"] = current_message_from_subject_body(current["subject"], current["body_lines"])
+        current["current_message"] = current_message_from_subject_body(
+            current["subject"], current["body_lines"]
+        )
         rows.append(current)
         current = None
 
@@ -319,7 +332,9 @@ def parse_numstat_history_log(path: Path) -> list[dict[str, Any]]:
                 in_numstat = True
                 continue
             if line.startswith("parents ") and not in_numstat:
-                current["parents"] = [part for part in line[len("parents ") :].split() if part]
+                current["parents"] = [
+                    part for part in line[len("parents ") :].split() if part
+                ]
                 continue
             if line.startswith("author ") and not in_numstat:
                 current["author"] = line[len("author ") :].strip()
@@ -350,7 +365,9 @@ def parse_numstat_history_log(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def enrich_rows_with_patch_metrics(rows: list[dict[str, Any]], diff_log_path: Path) -> None:
+def enrich_rows_with_patch_metrics(
+    rows: list[dict[str, Any]], diff_log_path: Path
+) -> None:
     by_sha = {row["sha"]: row for row in rows}
     current_sha: str | None = None
     in_diff = False
@@ -391,11 +408,15 @@ def enrich_rows_with_patch_metrics(rows: list[dict[str, Any]], diff_log_path: Pa
         row["body_word_count"] = body_word_count(row.get("current_body"))
         row["approx_patch_tokens"] = estimate_tokens_from_bytes(row["patch_byte_count"])
         row["approx_transport_tokens"] = estimate_tokens_from_bytes(
-            row["patch_byte_count"] + len((row.get("subject") or "").encode("utf-8")) + len((row.get("current_body") or "").encode("utf-8"))
+            row["patch_byte_count"]
+            + len((row.get("subject") or "").encode("utf-8"))
+            + len((row.get("current_body") or "").encode("utf-8"))
         )
 
 
-def quantile_map(values: list[int], *, points: tuple[float, ...] = (0.5, 0.75, 0.9, 0.95, 0.99)) -> dict[str, int]:
+def quantile_map(
+    values: list[int], *, points: tuple[float, ...] = (0.5, 0.75, 0.9, 0.95, 0.99)
+) -> dict[str, int]:
     if not values:
         return {}
     ordered = sorted(values)
@@ -406,7 +427,9 @@ def quantile_map(values: list[int], *, points: tuple[float, ...] = (0.5, 0.75, 0
     return result
 
 
-def packet_simulation_summary(rows: list[dict[str, Any]], budget_tokens: int, *, per_commit_overhead_tokens: int) -> dict[str, Any]:
+def packet_simulation_summary(
+    rows: list[dict[str, Any]], budget_tokens: int, *, per_commit_overhead_tokens: int
+) -> dict[str, Any]:
     non_merge = [row for row in rows if not row.get("merge_commit")]
     packets = 0
     current_count = 0
@@ -414,8 +437,12 @@ def packet_simulation_summary(rows: list[dict[str, Any]], budget_tokens: int, *,
     max_used = 0
     counts: list[int] = []
     oversize_single_commit_count = 0
-    for row in sorted(non_merge, key=lambda item: (item.get("date") or "", item["sha"])):
-        cost = max(120, (row.get("approx_patch_tokens") or 0) + per_commit_overhead_tokens)
+    for row in sorted(
+        non_merge, key=lambda item: (item.get("date") or "", item["sha"])
+    ):
+        cost = max(
+            120, (row.get("approx_patch_tokens") or 0) + per_commit_overhead_tokens
+        )
         if cost > budget_tokens:
             oversize_single_commit_count += 1
             if current_count:
@@ -442,7 +469,9 @@ def packet_simulation_summary(rows: list[dict[str, Any]], budget_tokens: int, *,
         max_used = max(max_used, current_used)
     return {
         "packet_count": packets,
-        "avg_commits_per_packet": round(sum(counts) / max(1, len(counts)), 2) if counts else 0.0,
+        "avg_commits_per_packet": round(sum(counts) / max(1, len(counts)), 2)
+        if counts
+        else 0.0,
         "min_commits_per_packet": min(counts) if counts else 0,
         "max_commits_per_packet": max(counts) if counts else 0,
         "max_used_tokens": max_used,
@@ -497,24 +526,51 @@ def summarize_history_surface(
             "lines_changed": sum(row.get("lines_changed") or 0 for row in rows),
             "patch_lines": sum(row.get("patch_line_count") or 0 for row in rows),
             "patch_bytes": sum(row.get("patch_byte_count") or 0 for row in rows),
-            "approx_patch_tokens": sum(row.get("approx_patch_tokens") or 0 for row in rows),
+            "approx_patch_tokens": sum(
+                row.get("approx_patch_tokens") or 0 for row in rows
+            ),
         },
         "distributions": {
-            "files_touched": quantile_map([row.get("files_touched") or 0 for row in rows]),
-            "lines_changed": quantile_map([row.get("lines_changed") or 0 for row in rows]),
-            "patch_line_count": quantile_map([row.get("patch_line_count") or 0 for row in rows]),
-            "approx_patch_tokens": quantile_map([row.get("approx_patch_tokens") or 0 for row in rows]),
-            "body_word_count": quantile_map([row.get("body_word_count") or 0 for row in rows]),
+            "files_touched": quantile_map(
+                [row.get("files_touched") or 0 for row in rows]
+            ),
+            "lines_changed": quantile_map(
+                [row.get("lines_changed") or 0 for row in rows]
+            ),
+            "patch_line_count": quantile_map(
+                [row.get("patch_line_count") or 0 for row in rows]
+            ),
+            "approx_patch_tokens": quantile_map(
+                [row.get("approx_patch_tokens") or 0 for row in rows]
+            ),
+            "body_word_count": quantile_map(
+                [row.get("body_word_count") or 0 for row in rows]
+            ),
         },
         "packet_simulation": {
-            str(budget): packet_simulation_summary(rows, budget, per_commit_overhead_tokens=per_commit_overhead_tokens)
-            for budget in (24000, 32000, 40000, 48000, 56000, 64000, 80000, 96000, 112000)
+            str(budget): packet_simulation_summary(
+                rows, budget, per_commit_overhead_tokens=per_commit_overhead_tokens
+            )
+            for budget in (
+                24000,
+                32000,
+                40000,
+                48000,
+                56000,
+                64000,
+                80000,
+                96000,
+                112000,
+            )
         },
         "primary_path_root_top10": [
             {"root": root, "commit_count": count}
             for root, count in primary_path_roots.most_common(10)
         ],
-        "months": [dict(month=month, **month_buckets[month]) for month in sorted(month_buckets.keys())],
+        "months": [
+            dict(month=month, **month_buckets[month])
+            for month in sorted(month_buckets.keys())
+        ],
         "top_patch_commits": [
             {
                 "sha": row["sha"],
@@ -525,7 +581,14 @@ def summarize_history_surface(
                 "approx_patch_tokens": row.get("approx_patch_tokens"),
                 "merge_commit": row.get("merge_commit"),
             }
-            for row in sorted(rows, key=lambda item: (-(item.get("patch_line_count") or 0), item.get("date") or "", item["sha"]))[:25]
+            for row in sorted(
+                rows,
+                key=lambda item: (
+                    -(item.get("patch_line_count") or 0),
+                    item.get("date") or "",
+                    item["sha"],
+                ),
+            )[:25]
         ],
         "top_token_commits": [
             {
@@ -537,7 +600,14 @@ def summarize_history_surface(
                 "files_touched": row.get("files_touched"),
                 "merge_commit": row.get("merge_commit"),
             }
-            for row in sorted(rows, key=lambda item: (-(item.get("approx_patch_tokens") or 0), item.get("date") or "", item["sha"]))[:25]
+            for row in sorted(
+                rows,
+                key=lambda item: (
+                    -(item.get("approx_patch_tokens") or 0),
+                    item.get("date") or "",
+                    item["sha"],
+                ),
+            )[:25]
         ],
     }
     return summary
@@ -648,8 +718,19 @@ def iter_git_commits(repo: Path, start_index: int, count: int) -> list[dict[str,
         chunk = chunk.lstrip("\n")
         parts = chunk.split("\x00")
         if len(parts) < 8:
-            raise ValueError(f"unexpected git log record at selection index {selection_index}")
-        sha, author_date_iso, author_name, author_email, committer_name, committer_email, current_subject, current_message = parts[:8]
+            raise ValueError(
+                f"unexpected git log record at selection index {selection_index}"
+            )
+        (
+            sha,
+            author_date_iso,
+            author_name,
+            author_email,
+            committer_name,
+            committer_email,
+            current_subject,
+            current_message,
+        ) = parts[:8]
         rows.append(
             {
                 "history_index_from_head": start_index + selection_index - 1,
@@ -724,7 +805,9 @@ def parse_subject_scope(subject: str) -> str | None:
     if not scope:
         return None
     normalized = scope.replace("`", "").replace("/", ",").replace("+", ",")
-    tokens = [slugify(token) for token in re.split(r"[, ]+", normalized) if token.strip()]
+    tokens = [
+        slugify(token) for token in re.split(r"[, ]+", normalized) if token.strip()
+    ]
     if not tokens:
         return None
     return ",".join(tokens)
@@ -843,7 +926,9 @@ def collect_commit_surface(repo: Path, sha: str) -> dict[str, Any]:
     }
 
 
-def commit_rows_with_surface(repo: Path, start_index: int, count: int) -> list[dict[str, Any]]:
+def commit_rows_with_surface(
+    repo: Path, start_index: int, count: int
+) -> list[dict[str, Any]]:
     rows = iter_git_commits(repo, start_index=start_index, count=count)
     enriched: list[dict[str, Any]] = []
     for row in rows:
@@ -852,7 +937,12 @@ def commit_rows_with_surface(repo: Path, start_index: int, count: int) -> list[d
     return enriched
 
 
-def split_candidate_reasons(row: dict[str, Any], files_threshold: int, areas_threshold: int, churn_threshold: int) -> list[str]:
+def split_candidate_reasons(
+    row: dict[str, Any],
+    files_threshold: int,
+    areas_threshold: int,
+    churn_threshold: int,
+) -> list[str]:
     reasons: list[str] = []
     if (row.get("semantic_files_changed_count") or 0) >= files_threshold:
         reasons.append(f"semantic_files>={files_threshold}")
@@ -868,7 +958,10 @@ def split_candidate_reasons(row: dict[str, Any], files_threshold: int, areas_thr
 
 
 def shared_area_count(left: dict[str, Any], right: dict[str, Any]) -> int:
-    return len(set(left.get("semantic_top_level_areas") or []) & set(right.get("semantic_top_level_areas") or []))
+    return len(
+        set(left.get("semantic_top_level_areas") or [])
+        & set(right.get("semantic_top_level_areas") or [])
+    )
 
 
 def scopes_overlap(left: dict[str, Any], right: dict[str, Any]) -> bool:
@@ -883,7 +976,18 @@ def merge_strength(left: dict[str, Any], right: dict[str, Any]) -> int:
         score += 2
     if shared_area_count(left, right) >= 1:
         score += 1
-    if any(token in (right.get("subject") or "").lower() for token in ("fix", "follow-up", "followup", "leftover", "remaining", "docs", "test")):
+    if any(
+        token in (right.get("subject") or "").lower()
+        for token in (
+            "fix",
+            "follow-up",
+            "followup",
+            "leftover",
+            "remaining",
+            "docs",
+            "test",
+        )
+    ):
         score += 1
     return score
 
@@ -891,23 +995,37 @@ def merge_strength(left: dict[str, Any], right: dict[str, Any]) -> int:
 def reorder_reason(left: dict[str, Any], right: dict[str, Any]) -> str | None:
     left_subject = (left.get("subject") or "").lower()
     right_subject = (right.get("subject") or "").lower()
-    if any(token in left_subject for token in ("remove", "drop")) and any(token in right_subject for token in ("restore", "reintroduce", "bring back")):
+    if any(token in left_subject for token in ("remove", "drop")) and any(
+        token in right_subject for token in ("restore", "reintroduce", "bring back")
+    ):
         return "remove_then_restore"
-    if any(token in right_subject for token in ("leftover", "remaining", "follow-up", "followup")) and (scopes_overlap(left, right) or shared_area_count(left, right) >= 1):
+    if any(
+        token in right_subject
+        for token in ("leftover", "remaining", "follow-up", "followup")
+    ) and (scopes_overlap(left, right) or shared_area_count(left, right) >= 1):
         return "followup_leftovers_after_primary_change"
-    if any(token in right_subject for token in ("docs", "test")) and (scopes_overlap(left, right) or shared_area_count(left, right) >= 1):
+    if any(token in right_subject for token in ("docs", "test")) and (
+        scopes_overlap(left, right) or shared_area_count(left, right) >= 1
+    ):
         return "docs_or_tests_interleaved_with_same_scope_change"
     return None
 
 
 def cmd_analyze_series(args: argparse.Namespace) -> int:
     repo = Path(args.repo).resolve()
-    rows = commit_rows_with_surface(repo, start_index=args.start_index, count=args.count)
+    rows = commit_rows_with_surface(
+        repo, start_index=args.start_index, count=args.count
+    )
     split_candidates: list[dict[str, Any]] = []
     merge_clusters: list[dict[str, Any]] = []
     reorder_candidates: list[dict[str, Any]] = []
     for row in rows:
-        reasons = split_candidate_reasons(row, args.split_files_threshold, args.split_areas_threshold, args.split_churn_threshold)
+        reasons = split_candidate_reasons(
+            row,
+            args.split_files_threshold,
+            args.split_areas_threshold,
+            args.split_churn_threshold,
+        )
         if reasons:
             split_candidates.append(
                 {
@@ -919,7 +1037,9 @@ def cmd_analyze_series(args: argparse.Namespace) -> int:
                     "files_changed_count": row["files_changed_count"],
                     "semantic_files_changed_count": row["semantic_files_changed_count"],
                     "top_level_area_count": row["top_level_area_count"],
-                    "semantic_top_level_area_count": row["semantic_top_level_area_count"],
+                    "semantic_top_level_area_count": row[
+                        "semantic_top_level_area_count"
+                    ],
                     "churn": row["churn"],
                     "semantic_churn": row["semantic_churn"],
                     "top_level_areas": row["top_level_areas"],
@@ -944,7 +1064,13 @@ def cmd_analyze_series(args: argparse.Namespace) -> int:
                     "start_selection_index": active_cluster[0]["selection_index"],
                     "end_selection_index": active_cluster[-1]["selection_index"],
                     "count": len(active_cluster),
-                    "areas_union": sorted({area for item in active_cluster for area in item.get("semantic_top_level_areas") or []}),
+                    "areas_union": sorted(
+                        {
+                            area
+                            for item in active_cluster
+                            for area in item.get("semantic_top_level_areas") or []
+                        }
+                    ),
                     "subjects": [item["subject"] for item in active_cluster],
                     "shas": [item["sha"] for item in active_cluster],
                 }
@@ -953,15 +1079,21 @@ def cmd_analyze_series(args: argparse.Namespace) -> int:
     if len(active_cluster) >= 2:
         merge_clusters.append(
             {
-                    "start_selection_index": active_cluster[0]["selection_index"],
-                    "end_selection_index": active_cluster[-1]["selection_index"],
-                    "count": len(active_cluster),
-                    "areas_union": sorted({area for item in active_cluster for area in item.get("semantic_top_level_areas") or []}),
-                    "subjects": [item["subject"] for item in active_cluster],
-                    "shas": [item["sha"] for item in active_cluster],
-                }
+                "start_selection_index": active_cluster[0]["selection_index"],
+                "end_selection_index": active_cluster[-1]["selection_index"],
+                "count": len(active_cluster),
+                "areas_union": sorted(
+                    {
+                        area
+                        for item in active_cluster
+                        for area in item.get("semantic_top_level_areas") or []
+                    }
+                ),
+                "subjects": [item["subject"] for item in active_cluster],
+                "shas": [item["sha"] for item in active_cluster],
+            }
         )
-    for left, right in zip(rows, rows[1:]):
+    for left, right in zip(rows, rows[1:], strict=True):
         reason = reorder_reason(left, right)
         if reason:
             reorder_candidates.append(
@@ -1015,7 +1147,9 @@ def cmd_scaffold_split(args: argparse.Namespace) -> int:
     repo = Path(args.repo).resolve()
     surface = collect_commit_surface(repo, args.sha)
     parent_sha = git_optional(repo, "rev-parse", f"{args.sha}^").strip() or None
-    child_line = git_optional(repo, "rev-list", "--children", "-n", "1", args.sha).strip()
+    child_line = git_optional(
+        repo, "rev-list", "--children", "-n", "1", args.sha
+    ).strip()
     child_sha = None
     if child_line:
         parts = child_line.split()
@@ -1033,11 +1167,15 @@ def cmd_scaffold_split(args: argparse.Namespace) -> int:
         deletions = 0 if del_raw == "-" else int(del_raw)
         area = top_level_area_for_path(path)
         prefix = path_prefix(path, depth=args.prefix_depth)
-        by_area.setdefault(area, {"group": area, "files": [], "insertions": 0, "deletions": 0})
+        by_area.setdefault(
+            area, {"group": area, "files": [], "insertions": 0, "deletions": 0}
+        )
         by_area[area]["files"].append(path)
         by_area[area]["insertions"] += insertions
         by_area[area]["deletions"] += deletions
-        by_prefix.setdefault(prefix, {"group": prefix, "files": [], "insertions": 0, "deletions": 0})
+        by_prefix.setdefault(
+            prefix, {"group": prefix, "files": [], "insertions": 0, "deletions": 0}
+        )
         by_prefix[prefix]["files"].append(path)
         by_prefix[prefix]["insertions"] += insertions
         by_prefix[prefix]["deletions"] += deletions
@@ -1058,8 +1196,12 @@ def cmd_scaffold_split(args: argparse.Namespace) -> int:
             "sha": child_sha,
             "subject": subject_for_optional_sha(repo, child_sha),
         },
-        "groups_by_top_level_area": sorted(by_area.values(), key=lambda item: (-len(item["files"]), item["group"])),
-        "groups_by_prefix": sorted(by_prefix.values(), key=lambda item: (-len(item["files"]), item["group"])),
+        "groups_by_top_level_area": sorted(
+            by_area.values(), key=lambda item: (-len(item["files"]), item["group"])
+        ),
+        "groups_by_prefix": sorted(
+            by_prefix.values(), key=lambda item: (-len(item["files"]), item["group"])
+        ),
     }
     if args.output_json:
         write_json(Path(args.output_json).resolve(), payload)
@@ -1078,7 +1220,19 @@ def cmd_scaffold_split(args: argparse.Namespace) -> int:
     return 0
 
 
-VALID_REBASE_ACTIONS = {"pick", "reword", "edit", "squash", "fixup", "drop", "break", "exec", "label", "reset", "merge"}
+VALID_REBASE_ACTIONS = {
+    "pick",
+    "reword",
+    "edit",
+    "squash",
+    "fixup",
+    "drop",
+    "break",
+    "exec",
+    "label",
+    "reset",
+    "merge",
+}
 
 
 def cmd_emit_rebase_todo(args: argparse.Namespace) -> int:
@@ -1123,11 +1277,17 @@ def cmd_emit_rebase_todo(args: argparse.Namespace) -> int:
     output_path = Path(args.output).resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines).rstrip() + "\n")
-    print(json.dumps({"operations": len(operations), "output": str(output_path)}, indent=2))
+    print(
+        json.dumps(
+            {"operations": len(operations), "output": str(output_path)}, indent=2
+        )
+    )
     return 0
 
 
-def range_rows_from_input(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+def range_rows_from_input(
+    path: Path,
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
     payload = load_json(path)
     if not isinstance(payload, dict):
         raise ValueError("range input must be a dict payload")
@@ -1202,17 +1362,29 @@ def cmd_build_review_bundles(args: argparse.Namespace) -> int:
         bundle_dir = output_dir / bundle_id
         bundle_dir.mkdir(parents=True, exist_ok=True)
         shas = [row["sha"] for row in window_rows]
-        owned_window_rows = [row for row in window_rows if owned_start <= row.get("selection_index", 0) <= owned_end]
+        owned_window_rows = [
+            row
+            for row in window_rows
+            if owned_start <= row.get("selection_index", 0) <= owned_end
+        ]
         summary = {
             "bundle_id": bundle_id,
             "window_size": len(window_rows),
             "requested_window_size": args.window_size,
             "slide": args.slide,
             "exclude_sqlx": args.exclude_sqlx,
-            "selection_index_range": [window_rows[0].get("selection_index"), window_rows[-1].get("selection_index")],
-            "history_index_range": [window_rows[0].get("history_index_from_head"), window_rows[-1].get("history_index_from_head")],
+            "selection_index_range": [
+                window_rows[0].get("selection_index"),
+                window_rows[-1].get("selection_index"),
+            ],
+            "history_index_range": [
+                window_rows[0].get("history_index_from_head"),
+                window_rows[-1].get("history_index_from_head"),
+            ],
             "owned_selection_index_range": [owned_start, owned_end],
-            "owned_commits_in_window": [row.get("selection_index") for row in owned_window_rows],
+            "owned_commits_in_window": [
+                row.get("selection_index") for row in owned_window_rows
+            ],
             "commits": window_rows,
         }
         write_json(bundle_dir / "summary.json", summary)
@@ -1265,11 +1437,17 @@ def cmd_build_review_bundles(args: argparse.Namespace) -> int:
         "bundles": bundles,
     }
     write_json(output_dir / "bundles-index.json", index)
-    print(json.dumps({"bundle_count": len(bundles), "output_dir": str(output_dir)}, indent=2))
+    print(
+        json.dumps(
+            {"bundle_count": len(bundles), "output_dir": str(output_dir)}, indent=2
+        )
+    )
     return 0
 
 
-def build_ranges(rows: list[dict[str, Any]], owned_size: int, overlap: int) -> list[dict[str, Any]]:
+def build_ranges(
+    rows: list[dict[str, Any]], owned_size: int, overlap: int
+) -> list[dict[str, Any]]:
     ranges: list[dict[str, Any]] = []
     total = len(rows)
     range_count = math.ceil(total / owned_size)
@@ -1300,7 +1478,9 @@ def cmd_prepare_wave(args: argparse.Namespace) -> int:
     repo = Path(args.repo).resolve()
     output_dir = Path(args.output_dir).resolve()
     if args.include_surface:
-        rows = commit_rows_with_surface(repo, start_index=args.start_index, count=args.count)
+        rows = commit_rows_with_surface(
+            repo, start_index=args.start_index, count=args.count
+        )
     else:
         rows = iter_git_commits(repo, start_index=args.start_index, count=args.count)
     if args.index_field != "selection_index":
@@ -1339,7 +1519,17 @@ def cmd_prepare_wave(args: argparse.Namespace) -> int:
         "ranges": manifest_ranges,
     }
     write_json(output_dir / "manifest.json", manifest)
-    print(json.dumps({"status": "ok", "wave": args.wave_name, "ranges": len(manifest_ranges), "output_dir": str(output_dir)}, indent=2))
+    print(
+        json.dumps(
+            {
+                "status": "ok",
+                "wave": args.wave_name,
+                "ranges": len(manifest_ranges),
+                "output_dir": str(output_dir),
+            },
+            indent=2,
+        )
+    )
     return 0
 
 
@@ -1399,18 +1589,30 @@ def cmd_wave_status(args: argparse.Namespace) -> int:
 def proposal_rows_by_sha(range_input_path: Path) -> dict[str, dict[str, Any]]:
     payload = load_json(range_input_path)
     owned_rows = payload.get("owned", []) if isinstance(payload, dict) else []
-    return {row["sha"]: row for row in owned_rows if isinstance(row, dict) and row.get("sha")}
+    return {
+        row["sha"]: row
+        for row in owned_rows
+        if isinstance(row, dict) and row.get("sha")
+    }
 
 
-def normalize_proposal_row(row: dict[str, Any], base: dict[str, Any], range_id: str) -> dict[str, Any]:
+def normalize_proposal_row(
+    row: dict[str, Any], base: dict[str, Any], range_id: str
+) -> dict[str, Any]:
     sha = row.get("sha") or row.get("after_sha") or base.get("sha")
     if not sha:
         raise ValueError(f"proposal row in {range_id} missing sha/after_sha")
-    full_patch_confirmed = row.get("effective_full_patch_confirmed", row.get("full_patch_confirmed"))
-    strict_process_attested = row.get("effective_strict_process_attested", row.get("strict_process_attested"))
+    full_patch_confirmed = row.get(
+        "effective_full_patch_confirmed", row.get("full_patch_confirmed")
+    )
+    strict_process_attested = row.get(
+        "effective_strict_process_attested", row.get("strict_process_attested")
+    )
     full_patch_bool = parse_boolish(full_patch_confirmed)
     strict_bool = parse_boolish(strict_process_attested)
-    surrounding_raw = row.get("normalized_surrounding_context_label", row.get("surrounding_context_used"))
+    surrounding_raw = row.get(
+        "normalized_surrounding_context_label", row.get("surrounding_context_used")
+    )
     surrounding_used, surrounding_label = normalize_surrounding_context(surrounding_raw)
     why_raw = row.get("normalized_why_basis", row.get("why_basis_recorded"))
     why_basis = normalize_why_basis(why_raw)
@@ -1418,7 +1620,12 @@ def normalize_proposal_row(row: dict[str, Any], base: dict[str, Any], range_id: 
     if strict_bool:
         review_status = "complete_strict"
         remaining_review_required = False
-    elif full_patch_bool or surrounding_used or why_basis != "not_recorded" or bool(notes):
+    elif (
+        full_patch_bool
+        or surrounding_used
+        or why_basis != "not_recorded"
+        or bool(notes)
+    ):
         review_status = "complete_conservative"
         remaining_review_required = False
     else:
@@ -1426,8 +1633,13 @@ def normalize_proposal_row(row: dict[str, Any], base: dict[str, Any], range_id: 
         remaining_review_required = True
     normalized = {
         "range_id": range_id,
-        "history_index_from_head": base.get("history_index_from_head") or row.get("history_index_from_head"),
-        "selection_index": base.get("selection_index") or base.get("wave2_index") or row.get("selection_index") or row.get("wave2_index") or row.get("global_index"),
+        "history_index_from_head": base.get("history_index_from_head")
+        or row.get("history_index_from_head"),
+        "selection_index": base.get("selection_index")
+        or base.get("wave2_index")
+        or row.get("selection_index")
+        or row.get("wave2_index")
+        or row.get("global_index"),
         "sha": sha,
         "author_date_iso": base.get("author_date_iso"),
         "author_name": base.get("author_name"),
@@ -1470,10 +1682,24 @@ def cmd_normalize_wave(args: argparse.Namespace) -> int:
             proposal_rows = load_row_list(output_path)
             base_map = proposal_rows_by_sha(Path(range_info["input"]))
             for proposal_row in proposal_rows:
-                normalized_rows.append(normalize_proposal_row(proposal_row, base_map.get(proposal_row.get("sha") or proposal_row.get("after_sha"), {}), range_id))
+                normalized_rows.append(
+                    normalize_proposal_row(
+                        proposal_row,
+                        base_map.get(
+                            proposal_row.get("sha") or proposal_row.get("after_sha"), {}
+                        ),
+                        range_id,
+                    )
+                )
         except Exception as exc:
             bad_ranges.append({"range_id": range_id, "error": str(exc)})
-    normalized_rows.sort(key=lambda row: (row.get("selection_index") is None, row.get("selection_index") or 0, row["sha"]))
+    normalized_rows.sort(
+        key=lambda row: (
+            row.get("selection_index") is None,
+            row.get("selection_index") or 0,
+            row["sha"],
+        )
+    )
     summary = {
         "wave": manifest.get("wave"),
         "manifest": str(manifest_path),
@@ -1481,12 +1707,31 @@ def cmd_normalize_wave(args: argparse.Namespace) -> int:
         "ranges_total": len(manifest["ranges"]),
         "missing_ranges": missing_ranges,
         "bad_ranges": bad_ranges,
-        "strict_rows": sum(1 for row in normalized_rows if row["strict_process_attested"] is True),
-        "conservative_rows": sum(1 for row in normalized_rows if row["review_status"] == "complete_conservative"),
-        "needs_review_rows": sum(1 for row in normalized_rows if row["remaining_review_required"]),
-        "claude_trailers": sum(1 for row in normalized_rows if row.get("proposed_trailer") == "Co-Authored-By: Claude <noreply@anthropic.com>"),
-        "codex_trailers": sum(1 for row in normalized_rows if row.get("proposed_trailer") == "Co-Authored-By: Codex <codex@openai.com>"),
-        "rows_without_trailer": sum(1 for row in normalized_rows if not row.get("proposed_trailer")),
+        "strict_rows": sum(
+            1 for row in normalized_rows if row["strict_process_attested"] is True
+        ),
+        "conservative_rows": sum(
+            1
+            for row in normalized_rows
+            if row["review_status"] == "complete_conservative"
+        ),
+        "needs_review_rows": sum(
+            1 for row in normalized_rows if row["remaining_review_required"]
+        ),
+        "claude_trailers": sum(
+            1
+            for row in normalized_rows
+            if row.get("proposed_trailer")
+            == "Co-Authored-By: Claude <noreply@anthropic.com>"
+        ),
+        "codex_trailers": sum(
+            1
+            for row in normalized_rows
+            if row.get("proposed_trailer") == "Co-Authored-By: Codex <codex@openai.com>"
+        ),
+        "rows_without_trailer": sum(
+            1 for row in normalized_rows if not row.get("proposed_trailer")
+        ),
     }
     if args.output_json:
         write_json(Path(args.output_json), normalized_rows)
@@ -1544,10 +1789,14 @@ def message_for_source(row: dict[str, Any], source: str) -> tuple[str, str]:
         return split_message_subject_body(row.get("rewritten_message"))
     if source == "proposed":
         if row.get("proposed_subject") or row.get("proposed_body"):
-            return (row.get("proposed_subject") or "").strip(), (row.get("proposed_body") or "").strip()
+            return (row.get("proposed_subject") or "").strip(), (
+                row.get("proposed_body") or ""
+            ).strip()
         if isinstance(row.get("message"), dict):
             message = row["message"]
-            return (message.get("subject") or "").strip(), (message.get("body") or "").strip()
+            return (message.get("subject") or "").strip(), (
+                message.get("body") or ""
+            ).strip()
         return split_message_subject_body(row.get("proposed_message"))
     if source == "auto":
         for candidate in ("proposed", "rewritten", "current"):
@@ -1574,9 +1823,17 @@ def assess_commit_message_quality(subject: str, body: str) -> dict[str, Any]:
     normalized_subject = subject.strip()
     normalized_body = strip_known_git_trailers(body.strip())
     body_words = body_word_count(normalized_body)
-    paragraphs = [paragraph.strip() for paragraph in re.split(r"\n\s*\n", normalized_body) if paragraph.strip()]
-    bullet_lines = [line for line in normalized_body.splitlines() if re.match(r"^\s*[-*]\s+", line)]
-    sentence_count = len(re.findall(r"[.!?](?:\s|$)", normalized_body)) or (1 if normalized_body else 0)
+    paragraphs = [
+        paragraph.strip()
+        for paragraph in re.split(r"\n\s*\n", normalized_body)
+        if paragraph.strip()
+    ]
+    bullet_lines = [
+        line for line in normalized_body.splitlines() if re.match(r"^\s*[-*]\s+", line)
+    ]
+    sentence_count = len(re.findall(r"[.!?](?:\s|$)", normalized_body)) or (
+        1 if normalized_body else 0
+    )
     subject_word_count = len(normalized_subject.split())
     subject_length = len(normalized_subject)
     effect_signal = has_effect_signal(f"{normalized_subject}\n{normalized_body}")
@@ -1674,11 +1931,18 @@ def assess_commit_message_quality(subject: str, body: str) -> dict[str, Any]:
 
 def choose_best_batch_candidate(candidates: list[dict[str, Any]]) -> dict[str, Any]:
     def score(candidate: dict[str, Any]) -> tuple[Any, ...]:
-        qualities = [assess_commit_message_quality(item.get("proposed_subject") or "", item.get("proposed_body") or "") for item in candidate["items"]]
+        qualities = [
+            assess_commit_message_quality(
+                item.get("proposed_subject") or "", item.get("proposed_body") or ""
+            )
+            for item in candidate["items"]
+        ]
         counts = [quality["body_word_count"] for quality in qualities]
         quality_scores = [quality["score"] for quality in qualities]
         strong_count = sum(1 for quality in qualities if quality["tier"] == "strong")
-        adequate_plus_count = sum(1 for quality in qualities if quality["tier"] in {"strong", "adequate"})
+        adequate_plus_count = sum(
+            1 for quality in qualities if quality["tier"] in {"strong", "adequate"}
+        )
         avg = sum(counts) / len(counts) if counts else 0.0
         return (
             sum(1 for item in candidate["items"] if item.get("full_patch_confirmed")),
@@ -1711,7 +1975,10 @@ def cmd_finalize_message_wave(args: argparse.Namespace) -> int:
     expected_commits = thin_corpus["commits"]
     expected_shas = [normalize_commit_sha(commit["sha"]) for commit in expected_commits]
     expected_sha_set = set(expected_shas)
-    expected_index_by_sha = {normalize_commit_sha(commit["sha"]): commit["index"] for commit in expected_commits}
+    expected_index_by_sha = {
+        normalize_commit_sha(commit["sha"]): commit["index"]
+        for commit in expected_commits
+    }
 
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for path in sorted(proposals_dir.glob("*.json")):
@@ -1765,16 +2032,24 @@ def cmd_finalize_message_wave(args: argparse.Namespace) -> int:
                             "agent": candidate["agent"],
                             "item_count": len(candidate["items"]),
                             "body_word_median": statistics.median(
-                                [body_word_count(item.get("proposed_body")) for item in candidate["items"]]
+                                [
+                                    body_word_count(item.get("proposed_body"))
+                                    for item in candidate["items"]
+                                ]
                             ),
-                            "body_word_total": sum(body_word_count(item.get("proposed_body")) for item in candidate["items"]),
+                            "body_word_total": sum(
+                                body_word_count(item.get("proposed_body"))
+                                for item in candidate["items"]
+                            ),
                         }
                         for candidate in candidates
                     ],
                 }
             )
         for item in chosen["items"]:
-            quality = assess_commit_message_quality(item["proposed_subject"], item["proposed_body"])
+            quality = assess_commit_message_quality(
+                item["proposed_subject"], item["proposed_body"]
+            )
             canonical_rows.append(
                 {
                     "batch_id": batch_id,
@@ -1785,12 +2060,16 @@ def cmd_finalize_message_wave(args: argparse.Namespace) -> int:
                     "message_quality_tier": quality["tier"],
                     "message_quality_flags": quality["flags"],
                     "rewritten_body_word_count": quality["body_word_count"],
-                    "rewritten_message": build_message_from_subject_body(item["proposed_subject"], item["proposed_body"]),
+                    "rewritten_message": build_message_from_subject_body(
+                        item["proposed_subject"], item["proposed_body"]
+                    ),
                 }
             )
 
     canonical_shas = [row["sha"] for row in canonical_rows]
-    duplicate_shas = sorted({sha for sha in canonical_shas if canonical_shas.count(sha) > 1})
+    duplicate_shas = sorted(
+        {sha for sha in canonical_shas if canonical_shas.count(sha) > 1}
+    )
     canonical_sha_set = set(canonical_shas)
     missing_shas = sorted(expected_sha_set - canonical_sha_set)
     unexpected_shas = sorted(canonical_sha_set - expected_sha_set)
@@ -1834,8 +2113,14 @@ def cmd_finalize_message_wave(args: argparse.Namespace) -> int:
         "canonical_batch_count": len(chosen_batches),
         "duplicate_resolution_count": len(duplicate_resolution),
         "proposal_file_count": sum(len(value) for value in grouped.values()),
-        "quality_tiers": dict(Counter(row["message_quality_tier"] for row in canonical_rows)),
-        "median_rewritten_body_words": statistics.median(row["rewritten_body_word_count"] for row in canonical_rows) if canonical_rows else 0,
+        "quality_tiers": dict(
+            Counter(row["message_quality_tier"] for row in canonical_rows)
+        ),
+        "median_rewritten_body_words": statistics.median(
+            row["rewritten_body_word_count"] for row in canonical_rows
+        )
+        if canonical_rows
+        else 0,
     }
 
     write_json(Path(args.canonical_json).resolve(), canonical_payload)
@@ -1858,10 +2143,17 @@ def cmd_build_rewrite_map(args: argparse.Namespace) -> int:
         strict = parse_boolish(row.get("strict_process_attested"))
         review_required = parse_boolish(row.get("remaining_review_required"))
         if args.only_strict and not strict:
-            skipped_rows.append({"sha": row.get("sha") or row.get("after_sha"), "reason": "not_strict"})
+            skipped_rows.append(
+                {"sha": row.get("sha") or row.get("after_sha"), "reason": "not_strict"}
+            )
             continue
         if args.require_review_complete and review_required:
-            skipped_rows.append({"sha": row.get("sha") or row.get("after_sha"), "reason": "review_required"})
+            skipped_rows.append(
+                {
+                    "sha": row.get("sha") or row.get("after_sha"),
+                    "reason": "review_required",
+                }
+            )
             continue
         sha = row.get("sha") or row.get("after_sha")
         proposed_message = row.get("proposed_message")
@@ -1871,8 +2163,11 @@ def cmd_build_rewrite_map(args: argparse.Namespace) -> int:
         rewrite_rows.append(
             {
                 "sha": sha,
-                "current_message": row.get("current_message") or row.get("after_message"),
-                "rewritten_message": compose_message(proposed_message, row.get("proposed_trailer")),
+                "current_message": row.get("current_message")
+                or row.get("after_message"),
+                "rewritten_message": compose_message(
+                    proposed_message, row.get("proposed_trailer")
+                ),
                 "review_status": row.get("review_status"),
                 "strict_process_attested": strict,
             }
@@ -1889,7 +2184,10 @@ def cmd_build_rewrite_map(args: argparse.Namespace) -> int:
         "require_review_complete": args.require_review_complete,
     }
     if args.summary_json:
-        write_json(Path(args.summary_json).resolve(), {"summary": summary, "skipped": skipped_rows})
+        write_json(
+            Path(args.summary_json).resolve(),
+            {"summary": summary, "skipped": skipped_rows},
+        )
     print(json.dumps(summary, indent=2))
     return 0
 
@@ -1987,10 +2285,14 @@ def packet_prompt_family(kind: str) -> str:
 
 
 def packet_cost_tokens(row: dict[str, Any], per_commit_overhead_tokens: int) -> int:
-    return max(120, int(row.get("approx_patch_tokens") or 0) + per_commit_overhead_tokens)
+    return max(
+        120, int(row.get("approx_patch_tokens") or 0) + per_commit_overhead_tokens
+    )
 
 
-def edge_message_context(rows: list[dict[str, Any]], start_index: int, end_index: int, context_commits: int) -> dict[str, list[dict[str, Any]]]:
+def edge_message_context(
+    rows: list[dict[str, Any]], start_index: int, end_index: int, context_commits: int
+) -> dict[str, list[dict[str, Any]]]:
     before_rows = rows[max(0, start_index - context_commits) : start_index]
     after_rows = rows[end_index + 1 : end_index + 1 + context_commits]
 
@@ -2005,7 +2307,9 @@ def edge_message_context(rows: list[dict[str, Any]], start_index: int, end_index
                     "date": row.get("date"),
                     "subject": subject,
                     "body_word_count": body_word_count(body),
-                    "current_message": current_message_from_subject_body(subject, body.splitlines() if body else []),
+                    "current_message": current_message_from_subject_body(
+                        subject, body.splitlines() if body else []
+                    ),
                 }
             )
         return encoded
@@ -2034,7 +2338,9 @@ def split_patch_sections(patch_text: str) -> tuple[str, list[dict[str, Any]]]:
                 "old_path": old_path,
                 "new_path": new_path,
                 "patch_text": text,
-                "approx_patch_tokens": estimate_tokens_from_bytes(len(text.encode("utf-8", errors="replace"))),
+                "approx_patch_tokens": estimate_tokens_from_bytes(
+                    len(text.encode("utf-8", errors="replace"))
+                ),
             }
         )
         current = []
@@ -2052,7 +2358,9 @@ def split_patch_sections(patch_text: str) -> tuple[str, list[dict[str, Any]]]:
     return "".join(prelude), sections
 
 
-def chunk_diff_sections(sections: list[dict[str, Any]], target_tokens: int) -> list[list[dict[str, Any]]]:
+def chunk_diff_sections(
+    sections: list[dict[str, Any]], target_tokens: int
+) -> list[list[dict[str, Any]]]:
     chunks: list[list[dict[str, Any]]] = []
     current: list[dict[str, Any]] = []
     used = 0
@@ -2098,14 +2406,20 @@ def materialize_jumbo_chunks(
                 "file": str(chunk_path),
                 "path_count": 0,
                 "paths": [],
-                "approx_patch_tokens": estimate_tokens_from_bytes(len(patch_text.encode("utf-8", errors="replace"))),
+                "approx_patch_tokens": estimate_tokens_from_bytes(
+                    len(patch_text.encode("utf-8", errors="replace"))
+                ),
             }
         ]
 
     chunk_rows: list[dict[str, Any]] = []
-    for index, chunk_sections in enumerate(chunk_diff_sections(sections, jumbo_chunk_budget_tokens), 1):
+    for index, chunk_sections in enumerate(
+        chunk_diff_sections(sections, jumbo_chunk_budget_tokens), 1
+    ):
         chunk_id = f"jumbo-chunk-{index:02d}"
-        chunk_text = prelude + "".join(section["patch_text"] for section in chunk_sections)
+        chunk_text = prelude + "".join(
+            section["patch_text"] for section in chunk_sections
+        )
         chunk_path = packet_dir / f"{chunk_id}.patch"
         chunk_path.write_text(chunk_text)
         chunk_rows.append(
@@ -2113,8 +2427,14 @@ def materialize_jumbo_chunks(
                 "chunk_id": chunk_id,
                 "file": str(chunk_path),
                 "path_count": len(chunk_sections),
-                "paths": [section["new_path"] or section["old_path"] for section in chunk_sections],
-                "approx_patch_tokens": sum(max(120, int(section["approx_patch_tokens"])) for section in chunk_sections),
+                "paths": [
+                    section["new_path"] or section["old_path"]
+                    for section in chunk_sections
+                ],
+                "approx_patch_tokens": sum(
+                    max(120, int(section["approx_patch_tokens"]))
+                    for section in chunk_sections
+                ),
             }
         )
     return chunk_rows
@@ -2126,10 +2446,18 @@ def cmd_build_message_packets(args: argparse.Namespace) -> int:
     out_dir = Path(args.out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     window_profile = resolve_window_profile(args.window_profile)
-    full_diff_budget_tokens = args.full_diff_budget_tokens or int(window_profile["full_diff_budget_tokens"])
-    jumbo_threshold_tokens = args.jumbo_threshold_tokens or int(window_profile["jumbo_threshold_tokens"])
-    jumbo_chunk_budget_tokens = args.jumbo_chunk_budget_tokens or int(window_profile["jumbo_chunk_budget_tokens"])
-    edge_context_commits = args.edge_context_commits or int(window_profile["edge_context_commits"])
+    full_diff_budget_tokens = args.full_diff_budget_tokens or int(
+        window_profile["full_diff_budget_tokens"]
+    )
+    jumbo_threshold_tokens = args.jumbo_threshold_tokens or int(
+        window_profile["jumbo_threshold_tokens"]
+    )
+    jumbo_chunk_budget_tokens = args.jumbo_chunk_budget_tokens or int(
+        window_profile["jumbo_chunk_budget_tokens"]
+    )
+    edge_context_commits = args.edge_context_commits or int(
+        window_profile["edge_context_commits"]
+    )
     max_commits_per_normal_packet = args.max_commits_per_normal_packet
     if max_commits_per_normal_packet is None:
         profile_cap = window_profile.get("max_commits_per_normal_packet")
@@ -2181,7 +2509,10 @@ def cmd_build_message_packets(args: argparse.Namespace) -> int:
 
         if current_rows and (
             current_used + cost > full_diff_budget_tokens
-            or (max_commits_per_normal_packet is not None and len(current_rows) >= max_commits_per_normal_packet)
+            or (
+                max_commits_per_normal_packet is not None
+                and len(current_rows) >= max_commits_per_normal_packet
+            )
         ):
             flush_normal_packet()
         current_rows.append(row)
@@ -2241,7 +2572,9 @@ def cmd_build_message_packets(args: argparse.Namespace) -> int:
                 "message_contract": "/realm/project/sinnix/dots/_ai/skills/history-cleanup/COMMIT_MESSAGE_CONTRACT.md",
                 "message_policy": "changed code and paths primary; existing commit message secondary; edge context is message-only",
             },
-            "edge_context": edge_message_context(surface_rows, first_sequence, last_sequence, edge_context_commits),
+            "edge_context": edge_message_context(
+                surface_rows, first_sequence, last_sequence, edge_context_commits
+            ),
             "owned_commits": [
                 {
                     "history_sequence": row.get("history_sequence"),
@@ -2336,13 +2669,17 @@ def cmd_message_quality_report(args: argparse.Namespace) -> int:
 
     report_rows.sort(
         key=lambda row: (
-            {"insufficient": 0, "thin": 1, "adequate": 2, "strong": 3}.get(row["quality_tier"], -1),
+            {"insufficient": 0, "thin": 1, "adequate": 2, "strong": 3}.get(
+                row["quality_tier"], -1
+            ),
             row["quality_score"],
             row.get("sha") or "",
         )
     )
     tier_counts = Counter(row["quality_tier"] for row in report_rows)
-    flag_counts = Counter(flag for row in report_rows for flag in row.get("flags") or [])
+    flag_counts = Counter(
+        flag for row in report_rows for flag in row.get("flags") or []
+    )
     summary = {
         "input": str(input_path),
         "message_source": args.message_source,
@@ -2350,8 +2687,16 @@ def cmd_message_quality_report(args: argparse.Namespace) -> int:
         "skipped_rows": skipped_rows,
         "tier_counts": dict(tier_counts),
         "flag_counts": dict(flag_counts.most_common()),
-        "median_body_words": statistics.median([row["body_word_count"] for row in report_rows]) if report_rows else 0,
-        "median_quality_score": statistics.median([row["quality_score"] for row in report_rows]) if report_rows else 0,
+        "median_body_words": statistics.median(
+            [row["body_word_count"] for row in report_rows]
+        )
+        if report_rows
+        else 0,
+        "median_quality_score": statistics.median(
+            [row["quality_score"] for row in report_rows]
+        )
+        if report_rows
+        else 0,
         "top_flagged_rows": report_rows[: args.top_n],
     }
     if args.output_json:
@@ -2415,7 +2760,11 @@ def build_global_style_schema() -> dict[str, Any]:
                     "required": ["surface", "preferred"],
                     "properties": {
                         "surface": {"type": "string", "minLength": 1, "maxLength": 120},
-                        "preferred": {"type": "string", "minLength": 1, "maxLength": 120},
+                        "preferred": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 120,
+                        },
                         "notes": {"type": "string", "maxLength": 240},
                     },
                 },
@@ -2436,11 +2785,17 @@ def build_global_style_schema() -> dict[str, Any]:
     }
 
 
-def build_global_style_prompt(corpus_path: Path, schema_path: Path, corpus: dict[str, Any]) -> str:
+def build_global_style_prompt(
+    corpus_path: Path, schema_path: Path, corpus: dict[str, Any]
+) -> str:
     top_roots = corpus.get("top_path_roots") or []
-    root_lines = [f"- {row['path_root']}: {row['commit_count']} commits" for row in top_roots[:12]] or ["- none"]
+    root_lines = [
+        f"- {row['path_root']}: {row['commit_count']} commits" for row in top_roots[:12]
+    ] or ["- none"]
     tier_counts = corpus.get("current_quality_tier_counts") or {}
-    tier_lines = [f"- {tier}: {count}" for tier, count in tier_counts.items()] or ["- none"]
+    tier_lines = [f"- {tier}: {count}" for tier, count in tier_counts.items()] or [
+        "- none"
+    ]
     sections = [
         "# Global Rewrite Style Derivation",
         "",
@@ -2522,7 +2877,10 @@ def cmd_prepare_global_style_pass(args: argparse.Namespace) -> int:
         "target_window_profile_description": window_profile["description"],
         "current_quality_tier_counts": dict(quality_tiers),
         "current_quality_flag_counts": dict(quality_flags.most_common(24)),
-        "top_path_roots": [{"path_root": root, "commit_count": count} for root, count in top_path_roots.most_common(24)],
+        "top_path_roots": [
+            {"path_root": root, "commit_count": count}
+            for root, count in top_path_roots.most_common(24)
+        ],
         "commits": corpus_commits,
     }
 
@@ -2584,7 +2942,8 @@ def cmd_prepare_global_style_pass(args: argparse.Namespace) -> int:
         "",
         f"cd {shlex.quote(str(repo))}",
         "",
-        " ".join(shlex.quote(part) for part in command) + f" 2> {shlex.quote(str(stderr_path))}",
+        " ".join(shlex.quote(part) for part in command)
+        + f" 2> {shlex.quote(str(stderr_path))}",
     ]
     run_script_path.write_text("\n".join(run_script_lines) + "\n")
     run_script_path.chmod(0o755)
@@ -2607,7 +2966,12 @@ def cmd_prepare_global_style_pass(args: argparse.Namespace) -> int:
         "sandbox": args.sandbox,
     }
     write_json(manifest_path, manifest)
-    print(json.dumps({"manifest": str(manifest_path), "commit_count": len(corpus_commits)}, indent=2))
+    print(
+        json.dumps(
+            {"manifest": str(manifest_path), "commit_count": len(corpus_commits)},
+            indent=2,
+        )
+    )
     return 0
 
 
@@ -2640,7 +3004,11 @@ def build_packet_exec_schema(packet: dict[str, Any]) -> dict[str, Any]:
                     "properties": {
                         "sha": {"type": "string", "enum": owned_shas},
                         "original_subject": {"type": "string", "minLength": 1},
-                        "proposed_subject": {"type": "string", "minLength": 1, "maxLength": 120},
+                        "proposed_subject": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 120,
+                        },
                         "proposed_body": {"type": "string"},
                         "full_patch_confirmed": {"type": "boolean"},
                         "adjacent_context_used": {
@@ -2727,7 +3095,9 @@ def build_packet_exec_prompt(
         "- Edge-context commit messages exist only for chronology and naming continuity.",
     ]
     if style_guide_path is not None:
-        method_lines.append("- Treat the style guide as repo-local naming policy; do not let it override patch facts.")
+        method_lines.append(
+            "- Treat the style guide as repo-local naming policy; do not let it override patch facts."
+        )
     method_lines.extend(
         [
             "- Output one item per owned commit, in the same order shown below.",
@@ -2777,27 +3147,39 @@ def build_packet_exec_request(prompt_file: Path) -> str:
     return f"Read @{prompt_file} and return only JSON matching the provided schema."
 
 
-def validate_packet_exec_payload(packet: dict[str, Any], payload: dict[str, Any]) -> list[dict[str, Any]]:
+def validate_packet_exec_payload(
+    packet: dict[str, Any], payload: dict[str, Any]
+) -> list[dict[str, Any]]:
     if payload.get("batch_id") != packet["packet_id"]:
-        raise ValueError(f"batch_id mismatch: expected {packet['packet_id']} got {payload.get('batch_id')!r}")
+        raise ValueError(
+            f"batch_id mismatch: expected {packet['packet_id']} got {payload.get('batch_id')!r}"
+        )
     items = payload.get("items")
     if not isinstance(items, list):
         raise ValueError("payload.items must be a list")
     owned_commits = packet["owned_commits"]
     if len(items) != len(owned_commits):
-        raise ValueError(f"item count mismatch: expected {len(owned_commits)} got {len(items)}")
+        raise ValueError(
+            f"item count mismatch: expected {len(owned_commits)} got {len(items)}"
+        )
 
     normalized_items: list[dict[str, Any]] = []
     seen_shas: set[str] = set()
-    for expected_commit, item in zip(owned_commits, items):
+    for expected_commit, item in zip(owned_commits, items, strict=True):
         sha = normalize_commit_sha(item.get("sha"))
         if sha != expected_commit["sha"]:
-            raise ValueError(f"sha order mismatch: expected {expected_commit['sha']} got {sha!r}")
+            raise ValueError(
+                f"sha order mismatch: expected {expected_commit['sha']} got {sha!r}"
+            )
         if sha in seen_shas:
             raise ValueError(f"duplicate sha in payload: {sha}")
         seen_shas.add(sha)
         original_subject = normalized_subject_line(item.get("original_subject") or "")
-        expected_original_subject = normalized_subject_line(expected_commit.get("current_message") or expected_commit.get("subject") or "")
+        expected_original_subject = normalized_subject_line(
+            expected_commit.get("current_message")
+            or expected_commit.get("subject")
+            or ""
+        )
         if original_subject != expected_original_subject:
             raise ValueError(f"original_subject mismatch for {sha}")
         proposed_subject = (item.get("proposed_subject") or "").strip()
@@ -2805,7 +3187,9 @@ def validate_packet_exec_payload(packet: dict[str, Any], payload: dict[str, Any]
             raise ValueError(f"missing proposed_subject for {sha}")
         if "\n" in proposed_subject:
             raise ValueError(f"proposed_subject contains newline for {sha}")
-        proposed_body = strip_known_git_trailers((item.get("proposed_body") or "").strip())
+        proposed_body = strip_known_git_trailers(
+            (item.get("proposed_body") or "").strip()
+        )
         adjacent_context_used = item.get("adjacent_context_used")
         if not isinstance(adjacent_context_used, list):
             raise ValueError(f"adjacent_context_used must be a list for {sha}")
@@ -2822,7 +3206,9 @@ def validate_packet_exec_payload(packet: dict[str, Any], payload: dict[str, Any]
                 "proposed_subject": proposed_subject,
                 "proposed_body": proposed_body,
                 "full_patch_confirmed": bool(item.get("full_patch_confirmed")),
-                "adjacent_context_used": [str(value) for value in adjacent_context_used],
+                "adjacent_context_used": [
+                    str(value) for value in adjacent_context_used
+                ],
                 "confidence": confidence,
                 "why_basis": why_basis,
             }
@@ -2867,7 +3253,9 @@ def ns_to_ms(duration_ns: int) -> float:
     return round(duration_ns / 1_000_000, 3)
 
 
-def write_packet_exec_summary(manifest: dict[str, Any], summary: dict[str, Any]) -> None:
+def write_packet_exec_summary(
+    manifest: dict[str, Any], summary: dict[str, Any]
+) -> None:
     write_json(Path(manifest["summary_file"]), summary)
 
 
@@ -2903,10 +3291,14 @@ def summarize_packet_exec_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
 def cmd_prepare_packet_exec(args: argparse.Namespace) -> int:
     packet_index_path = Path(args.packet_index).resolve()
     packet_index = load_json(packet_index_path)
-    if not isinstance(packet_index, dict) or not isinstance(packet_index.get("packets"), list):
+    if not isinstance(packet_index, dict) or not isinstance(
+        packet_index.get("packets"), list
+    ):
         raise SystemExit(f"unsupported packet index: {packet_index_path}")
     repo = Path(packet_index["repo"]).resolve()
-    style_guide_path = Path(args.style_guide_file).resolve() if args.style_guide_file else None
+    style_guide_path = (
+        Path(args.style_guide_file).resolve() if args.style_guide_file else None
+    )
     out_dir = Path(args.out_dir).resolve()
     packets_dir = out_dir / "packets"
     proposals_dir = out_dir / "proposals"
@@ -2934,7 +3326,11 @@ def cmd_prepare_packet_exec(args: argparse.Namespace) -> int:
         proposal_path = proposals_dir / f"{packet['packet_id']}.json"
 
         write_json(schema_path, build_packet_exec_schema(packet))
-        prompt_path.write_text(build_packet_exec_prompt(packet, packet_json_path, schema_path, style_guide_path))
+        prompt_path.write_text(
+            build_packet_exec_prompt(
+                packet, packet_json_path, schema_path, style_guide_path
+            )
+        )
         request_path.write_text(build_packet_exec_request(prompt_path) + "\n")
 
         add_dirs = [str(skill_root), str(run_root), str(out_dir)]
@@ -3168,7 +3564,9 @@ def cmd_run_packet_exec(args: argparse.Namespace) -> int:
             "stderr_handle": stderr_handle,
             "started_monotonic_ns": time.monotonic_ns(),
         }
-        print(f"started {entry['packet_id']} kind={entry['kind']} commits={entry['commit_count']}")
+        print(
+            f"started {entry['packet_id']} kind={entry['kind']} commits={entry['commit_count']}"
+        )
 
     def finalize(packet_id: str) -> None:
         nonlocal completed
@@ -3191,15 +3589,23 @@ def cmd_run_packet_exec(args: argparse.Namespace) -> int:
         attempt.setdefault("timing_ns", {})
         attempt["process_exited_at"] = process_exited_at
         attempt["validation_started_at"] = validation_started_at
-        attempt["timing_ns"]["launch_to_exit"] = finished_monotonic_ns - runtime["started_monotonic_ns"]
+        attempt["timing_ns"]["launch_to_exit"] = (
+            finished_monotonic_ns - runtime["started_monotonic_ns"]
+        )
 
         if process.returncode != 0:
             validation_finished_ns = time.monotonic_ns()
             validation_finished_at = utc_now_iso_precise()
             attempt["validation_finished_at"] = validation_finished_at
-            attempt["timing_ns"]["validation"] = validation_finished_ns - validation_started_ns
-            attempt["timing_ns"]["total"] = validation_finished_ns - runtime["started_monotonic_ns"]
-            attempt["timing_ms"] = {key: ns_to_ms(value) for key, value in attempt["timing_ns"].items()}
+            attempt["timing_ns"]["validation"] = (
+                validation_finished_ns - validation_started_ns
+            )
+            attempt["timing_ns"]["total"] = (
+                validation_finished_ns - runtime["started_monotonic_ns"]
+            )
+            attempt["timing_ms"] = {
+                key: ns_to_ms(value) for key, value in attempt["timing_ns"].items()
+            }
             attempts[-1] = attempt
             write_json(
                 status_path,
@@ -3222,9 +3628,15 @@ def cmd_run_packet_exec(args: argparse.Namespace) -> int:
             validation_finished_ns = time.monotonic_ns()
             validation_finished_at = utc_now_iso_precise()
             attempt["validation_finished_at"] = validation_finished_at
-            attempt["timing_ns"]["validation"] = validation_finished_ns - validation_started_ns
-            attempt["timing_ns"]["total"] = validation_finished_ns - runtime["started_monotonic_ns"]
-            attempt["timing_ms"] = {key: ns_to_ms(value) for key, value in attempt["timing_ns"].items()}
+            attempt["timing_ns"]["validation"] = (
+                validation_finished_ns - validation_started_ns
+            )
+            attempt["timing_ns"]["total"] = (
+                validation_finished_ns - runtime["started_monotonic_ns"]
+            )
+            attempt["timing_ms"] = {
+                key: ns_to_ms(value) for key, value in attempt["timing_ns"].items()
+            }
             attempts[-1] = attempt
             write_json(
                 status_path,
@@ -3250,9 +3662,15 @@ def cmd_run_packet_exec(args: argparse.Namespace) -> int:
             validation_finished_ns = time.monotonic_ns()
             validation_finished_at = utc_now_iso_precise()
             attempt["validation_finished_at"] = validation_finished_at
-            attempt["timing_ns"]["validation"] = validation_finished_ns - validation_started_ns
-            attempt["timing_ns"]["total"] = validation_finished_ns - runtime["started_monotonic_ns"]
-            attempt["timing_ms"] = {key: ns_to_ms(value) for key, value in attempt["timing_ns"].items()}
+            attempt["timing_ns"]["validation"] = (
+                validation_finished_ns - validation_started_ns
+            )
+            attempt["timing_ns"]["total"] = (
+                validation_finished_ns - runtime["started_monotonic_ns"]
+            )
+            attempt["timing_ms"] = {
+                key: ns_to_ms(value) for key, value in attempt["timing_ns"].items()
+            }
             attempts[-1] = attempt
             write_json(
                 status_path,
@@ -3273,7 +3691,6 @@ def cmd_run_packet_exec(args: argparse.Namespace) -> int:
         validation_finished_ns = time.monotonic_ns()
         validation_finished_at = utc_now_iso_precise()
         proposal_write_started_ns = time.monotonic_ns()
-        proposal_write_started_at = utc_now_iso_precise()
         proposal_payload = {
             "batch_id": entry["packet_id"],
             "agent": f"codex-exec:{manifest.get('model') or 'default'}",
@@ -3286,10 +3703,18 @@ def cmd_run_packet_exec(args: argparse.Namespace) -> int:
         proposal_write_finished_at = utc_now_iso_precise()
         attempt["validation_finished_at"] = validation_finished_at
         attempt["proposal_written_at"] = proposal_write_finished_at
-        attempt["timing_ns"]["validation"] = validation_finished_ns - validation_started_ns
-        attempt["timing_ns"]["proposal_write"] = proposal_write_finished_ns - proposal_write_started_ns
-        attempt["timing_ns"]["total"] = proposal_write_finished_ns - runtime["started_monotonic_ns"]
-        attempt["timing_ms"] = {key: ns_to_ms(value) for key, value in attempt["timing_ns"].items()}
+        attempt["timing_ns"]["validation"] = (
+            validation_finished_ns - validation_started_ns
+        )
+        attempt["timing_ns"]["proposal_write"] = (
+            proposal_write_finished_ns - proposal_write_started_ns
+        )
+        attempt["timing_ns"]["total"] = (
+            proposal_write_finished_ns - runtime["started_monotonic_ns"]
+        )
+        attempt["timing_ms"] = {
+            key: ns_to_ms(value) for key, value in attempt["timing_ns"].items()
+        }
         attempts[-1] = attempt
         write_json(
             status_path,
@@ -3369,11 +3794,23 @@ def build_parser() -> argparse.ArgumentParser:
         "derive-history-surface",
         help="Dump raw history derivatives and compute per-commit diff-size metrics for one repository.",
     )
-    derive_history_surface.add_argument("--repo", default=".", help="Repository root containing the git history.")
-    derive_history_surface.add_argument("--branch", default="HEAD", help="Branch or revision range to inspect.")
-    derive_history_surface.add_argument("--after", help="Optional git log --after boundary.")
-    derive_history_surface.add_argument("--before", help="Optional git log --before boundary.")
-    derive_history_surface.add_argument("--out-dir", required=True, help="Directory where raw dumps and summaries will be written.")
+    derive_history_surface.add_argument(
+        "--repo", default=".", help="Repository root containing the git history."
+    )
+    derive_history_surface.add_argument(
+        "--branch", default="HEAD", help="Branch or revision range to inspect."
+    )
+    derive_history_surface.add_argument(
+        "--after", help="Optional git log --after boundary."
+    )
+    derive_history_surface.add_argument(
+        "--before", help="Optional git log --before boundary."
+    )
+    derive_history_surface.add_argument(
+        "--out-dir",
+        required=True,
+        help="Directory where raw dumps and summaries will be written.",
+    )
     derive_history_surface.add_argument(
         "--per-commit-overhead-tokens",
         type=int,
@@ -3386,9 +3823,17 @@ def build_parser() -> argparse.ArgumentParser:
         "build-message-packets",
         help="Build prompt-ready rewrite packets with full owned diffs and message-only edge context.",
     )
-    build_message_packets.add_argument("--repo", default=".", help="Repository root containing the git history.")
-    build_message_packets.add_argument("--commit-surface-json", required=True, help="Path to commit-surface.json.")
-    build_message_packets.add_argument("--out-dir", required=True, help="Directory where packet materials will be written.")
+    build_message_packets.add_argument(
+        "--repo", default=".", help="Repository root containing the git history."
+    )
+    build_message_packets.add_argument(
+        "--commit-surface-json", required=True, help="Path to commit-surface.json."
+    )
+    build_message_packets.add_argument(
+        "--out-dir",
+        required=True,
+        help="Directory where packet materials will be written.",
+    )
     build_message_packets.add_argument(
         "--window-profile",
         choices=tuple(sorted(WINDOW_PROFILES)),
@@ -3426,32 +3871,58 @@ def build_parser() -> argparse.ArgumentParser:
         default=80,
         help="Token overhead added per commit during packet planning.",
     )
-    build_message_packets.add_argument("--unified", type=int, default=3, help="Unified diff context lines.")
-    build_message_packets.add_argument("--include-stat", action="store_true", help="Include --stat in packet patch files.")
-    build_message_packets.add_argument("--exclude-sqlx", action="store_true", help="Exclude .sqlx/** from generated patch files.")
+    build_message_packets.add_argument(
+        "--unified", type=int, default=3, help="Unified diff context lines."
+    )
+    build_message_packets.add_argument(
+        "--include-stat",
+        action="store_true",
+        help="Include --stat in packet patch files.",
+    )
+    build_message_packets.add_argument(
+        "--exclude-sqlx",
+        action="store_true",
+        help="Exclude .sqlx/** from generated patch files.",
+    )
     build_message_packets.set_defaults(func=cmd_build_message_packets)
 
     prepare_global_style_pass = subparsers.add_parser(
         "prepare-global-style-pass",
         help="Generate a repo-wide style-derivation corpus plus prompt/schema/run script for a wide-context worker.",
     )
-    prepare_global_style_pass.add_argument("--repo", default=".", help="Repository root containing the git history.")
-    prepare_global_style_pass.add_argument("--commit-surface-json", required=True, help="Path to commit-surface.json.")
-    prepare_global_style_pass.add_argument("--out-dir", required=True, help="Directory where style-pass materials will be written.")
+    prepare_global_style_pass.add_argument(
+        "--repo", default=".", help="Repository root containing the git history."
+    )
+    prepare_global_style_pass.add_argument(
+        "--commit-surface-json", required=True, help="Path to commit-surface.json."
+    )
+    prepare_global_style_pass.add_argument(
+        "--out-dir",
+        required=True,
+        help="Directory where style-pass materials will be written.",
+    )
     prepare_global_style_pass.add_argument(
         "--window-profile",
         choices=tuple(sorted(WINDOW_PROFILES)),
         default="wide-1m-750k",
         help="Target packet profile the style guide should optimize for.",
     )
-    prepare_global_style_pass.add_argument("--max-commits", type=int, help="Optional cap on how many surface rows to include in the style corpus.")
-    prepare_global_style_pass.add_argument("--model", default="", help="Optional model passed to codex exec.")
+    prepare_global_style_pass.add_argument(
+        "--max-commits",
+        type=int,
+        help="Optional cap on how many surface rows to include in the style corpus.",
+    )
+    prepare_global_style_pass.add_argument(
+        "--model", default="", help="Optional model passed to codex exec."
+    )
     prepare_global_style_pass.add_argument(
         "--reasoning-effort",
         default="xhigh",
         help="model_reasoning_effort override passed to codex exec.",
     )
-    prepare_global_style_pass.add_argument("--profile", help="Optional Codex profile name.")
+    prepare_global_style_pass.add_argument(
+        "--profile", help="Optional Codex profile name."
+    )
     prepare_global_style_pass.add_argument(
         "--sandbox",
         choices=("read-only", "workspace-write", "danger-full-access"),
@@ -3470,26 +3941,49 @@ def build_parser() -> argparse.ArgumentParser:
         "message-quality-report",
         help="Score commit messages against the commit-message contract and flag thin/vague outputs.",
     )
-    message_quality_report.add_argument("--input-json", required=True, help="Input JSON containing current/proposed/rewritten messages.")
+    message_quality_report.add_argument(
+        "--input-json",
+        required=True,
+        help="Input JSON containing current/proposed/rewritten messages.",
+    )
     message_quality_report.add_argument(
         "--message-source",
         choices=("auto", "current", "proposed", "rewritten"),
         default="auto",
         help="Which message field set to score.",
     )
-    message_quality_report.add_argument("--output-json", help="Optional output path for per-row quality results.")
-    message_quality_report.add_argument("--output-csv", help="Optional CSV projection of the quality results.")
-    message_quality_report.add_argument("--summary-json", help="Optional output path for summary metrics.")
-    message_quality_report.add_argument("--top-n", type=int, default=25, help="How many low-quality rows to retain in the summary.")
+    message_quality_report.add_argument(
+        "--output-json", help="Optional output path for per-row quality results."
+    )
+    message_quality_report.add_argument(
+        "--output-csv", help="Optional CSV projection of the quality results."
+    )
+    message_quality_report.add_argument(
+        "--summary-json", help="Optional output path for summary metrics."
+    )
+    message_quality_report.add_argument(
+        "--top-n",
+        type=int,
+        default=25,
+        help="How many low-quality rows to retain in the summary.",
+    )
     message_quality_report.set_defaults(func=cmd_message_quality_report)
 
     prepare_packet_exec = subparsers.add_parser(
         "prepare-packet-exec",
         help="Generate prompt/schema/request files plus a runnable Codex exec manifest for message packets.",
     )
-    prepare_packet_exec.add_argument("--packet-index", required=True, help="Path to message-packets/index.json.")
-    prepare_packet_exec.add_argument("--out-dir", required=True, help="Directory where execution materials will be written.")
-    prepare_packet_exec.add_argument("--model", default="gpt-5.3-codex-spark", help="Model passed to codex exec.")
+    prepare_packet_exec.add_argument(
+        "--packet-index", required=True, help="Path to message-packets/index.json."
+    )
+    prepare_packet_exec.add_argument(
+        "--out-dir",
+        required=True,
+        help="Directory where execution materials will be written.",
+    )
+    prepare_packet_exec.add_argument(
+        "--model", default="gpt-5.3-codex-spark", help="Model passed to codex exec."
+    )
     prepare_packet_exec.add_argument(
         "--reasoning-effort",
         default="xhigh",
@@ -3518,45 +4012,107 @@ def build_parser() -> argparse.ArgumentParser:
         "packet-exec-status",
         help="Summarize prepared packet-exec state across pending/running/completed/failed packets.",
     )
-    packet_exec_status.add_argument("--manifest", required=True, help="Path to packet-exec manifest.json.")
-    packet_exec_status.add_argument("--json", action="store_true", help="Print machine-readable JSON instead of text.")
-    packet_exec_status.add_argument("--show-rows", action="store_true", help="Include one text row per packet.")
+    packet_exec_status.add_argument(
+        "--manifest", required=True, help="Path to packet-exec manifest.json."
+    )
+    packet_exec_status.add_argument(
+        "--json",
+        action="store_true",
+        help="Print machine-readable JSON instead of text.",
+    )
+    packet_exec_status.add_argument(
+        "--show-rows", action="store_true", help="Include one text row per packet."
+    )
     packet_exec_status.set_defaults(func=cmd_packet_exec_status)
 
     run_packet_exec = subparsers.add_parser(
         "run-packet-exec",
         help="Run prepared packet exec jobs via codex exec and record per-packet status/proposal outputs.",
     )
-    run_packet_exec.add_argument("--manifest", required=True, help="Path to packet-exec manifest.json.")
-    run_packet_exec.add_argument("--jobs", type=int, default=1, help="Maximum concurrent codex exec processes.")
-    run_packet_exec.add_argument("--limit", type=int, help="Optional maximum number of packets to run this invocation.")
-    run_packet_exec.add_argument("--packet-id", action="append", help="Optional packet id to run; repeatable.")
-    run_packet_exec.add_argument("--retry-failed", action="store_true", help="Also retry failed/invalid packets.")
+    run_packet_exec.add_argument(
+        "--manifest", required=True, help="Path to packet-exec manifest.json."
+    )
+    run_packet_exec.add_argument(
+        "--jobs", type=int, default=1, help="Maximum concurrent codex exec processes."
+    )
+    run_packet_exec.add_argument(
+        "--limit",
+        type=int,
+        help="Optional maximum number of packets to run this invocation.",
+    )
+    run_packet_exec.add_argument(
+        "--packet-id", action="append", help="Optional packet id to run; repeatable."
+    )
+    run_packet_exec.add_argument(
+        "--retry-failed", action="store_true", help="Also retry failed/invalid packets."
+    )
     run_packet_exec.set_defaults(func=cmd_run_packet_exec)
 
-    prepare_wave = subparsers.add_parser("prepare-wave", help="Create a wave manifest and range input files from live git history.")
-    prepare_wave.add_argument("--repo", default=".", help="Repository root containing the git history.")
-    prepare_wave.add_argument("--output-dir", required=True, help="Directory where manifest and range input files will be written.")
-    prepare_wave.add_argument("--wave-name", required=True, help="Human name for the wave, written into manifest.json.")
-    prepare_wave.add_argument("--start-index", type=int, required=True, help="1-based history index from HEAD where the wave starts.")
-    prepare_wave.add_argument("--count", type=int, required=True, help="Number of consecutive commits to include.")
-    prepare_wave.add_argument("--owned-size", type=int, required=True, help="Owned commit count per range.")
-    prepare_wave.add_argument("--overlap", type=int, required=True, help="Context overlap on each side.")
+    prepare_wave = subparsers.add_parser(
+        "prepare-wave",
+        help="Create a wave manifest and range input files from live git history.",
+    )
+    prepare_wave.add_argument(
+        "--repo", default=".", help="Repository root containing the git history."
+    )
+    prepare_wave.add_argument(
+        "--output-dir",
+        required=True,
+        help="Directory where manifest and range input files will be written.",
+    )
+    prepare_wave.add_argument(
+        "--wave-name",
+        required=True,
+        help="Human name for the wave, written into manifest.json.",
+    )
+    prepare_wave.add_argument(
+        "--start-index",
+        type=int,
+        required=True,
+        help="1-based history index from HEAD where the wave starts.",
+    )
+    prepare_wave.add_argument(
+        "--count",
+        type=int,
+        required=True,
+        help="Number of consecutive commits to include.",
+    )
+    prepare_wave.add_argument(
+        "--owned-size", type=int, required=True, help="Owned commit count per range."
+    )
+    prepare_wave.add_argument(
+        "--overlap", type=int, required=True, help="Context overlap on each side."
+    )
     prepare_wave.add_argument(
         "--include-surface",
         action="store_true",
         help="Enrich input rows with cheap git-show surface metadata (semantic/sqlx churn, scope, areas, paths).",
     )
-    prepare_wave.add_argument("--index-field", default="selection_index", help="Field name to use for range-local sequential indexing.")
+    prepare_wave.add_argument(
+        "--index-field",
+        default="selection_index",
+        help="Field name to use for range-local sequential indexing.",
+    )
     prepare_wave.set_defaults(func=cmd_prepare_wave)
 
-    wave_status = subparsers.add_parser("wave-status", help="Report which range outputs exist for a wave manifest.")
+    wave_status = subparsers.add_parser(
+        "wave-status", help="Report which range outputs exist for a wave manifest."
+    )
     wave_status.add_argument("--manifest", required=True, help="Path to manifest.json.")
-    wave_status.add_argument("--json", action="store_true", help="Print machine-readable JSON instead of text.")
+    wave_status.add_argument(
+        "--json",
+        action="store_true",
+        help="Print machine-readable JSON instead of text.",
+    )
     wave_status.set_defaults(func=cmd_wave_status)
 
-    normalize_wave = subparsers.add_parser("normalize-wave", help="Normalize raw worker proposal files into a canonical corpus.")
-    normalize_wave.add_argument("--manifest", required=True, help="Path to manifest.json.")
+    normalize_wave = subparsers.add_parser(
+        "normalize-wave",
+        help="Normalize raw worker proposal files into a canonical corpus.",
+    )
+    normalize_wave.add_argument(
+        "--manifest", required=True, help="Path to manifest.json."
+    )
     normalize_wave.add_argument("--output-json", help="Canonical JSON output path.")
     normalize_wave.add_argument("--output-csv", help="Canonical CSV output path.")
     normalize_wave.add_argument("--summary-json", help="Summary JSON output path.")
@@ -3566,55 +4122,175 @@ def build_parser() -> argparse.ArgumentParser:
         "finalize-message-wave",
         help="Resolve duplicate batch outputs, verify complete thin-corpus coverage, and emit a canonical rewrite map.",
     )
-    finalize_message_wave.add_argument("--thin-corpus", required=True, help="Path to the thin-commit-corpus.json file.")
-    finalize_message_wave.add_argument("--proposals-dir", required=True, help="Directory containing per-batch proposal JSON files.")
-    finalize_message_wave.add_argument("--canonical-json", required=True, help="Output path for the canonical merged proposal corpus.")
-    finalize_message_wave.add_argument("--canonical-csv", help="Optional CSV projection of the canonical merged corpus.")
-    finalize_message_wave.add_argument("--duplicate-resolution-json", help="Optional output path for duplicate-batch resolution details.")
-    finalize_message_wave.add_argument("--rewrite-map-json", required=True, help="Output path for the finalized rewrite map.")
-    finalize_message_wave.add_argument("--summary-json", help="Optional output path for the finalization summary JSON.")
+    finalize_message_wave.add_argument(
+        "--thin-corpus", required=True, help="Path to the thin-commit-corpus.json file."
+    )
+    finalize_message_wave.add_argument(
+        "--proposals-dir",
+        required=True,
+        help="Directory containing per-batch proposal JSON files.",
+    )
+    finalize_message_wave.add_argument(
+        "--canonical-json",
+        required=True,
+        help="Output path for the canonical merged proposal corpus.",
+    )
+    finalize_message_wave.add_argument(
+        "--canonical-csv",
+        help="Optional CSV projection of the canonical merged corpus.",
+    )
+    finalize_message_wave.add_argument(
+        "--duplicate-resolution-json",
+        help="Optional output path for duplicate-batch resolution details.",
+    )
+    finalize_message_wave.add_argument(
+        "--rewrite-map-json",
+        required=True,
+        help="Output path for the finalized rewrite map.",
+    )
+    finalize_message_wave.add_argument(
+        "--summary-json", help="Optional output path for the finalization summary JSON."
+    )
     finalize_message_wave.set_defaults(func=cmd_finalize_message_wave)
 
-    build_rewrite_map = subparsers.add_parser("build-rewrite-map", help="Turn canonical proposals into a machine-usable rewrite map.")
-    build_rewrite_map.add_argument("--proposals", required=True, help="Canonical proposal JSON path.")
-    build_rewrite_map.add_argument("--output-json", required=True, help="Rewrite-map JSON output path.")
-    build_rewrite_map.add_argument("--output-csv", help="Optional CSV projection of the rewrite map.")
+    build_rewrite_map = subparsers.add_parser(
+        "build-rewrite-map",
+        help="Turn canonical proposals into a machine-usable rewrite map.",
+    )
+    build_rewrite_map.add_argument(
+        "--proposals", required=True, help="Canonical proposal JSON path."
+    )
+    build_rewrite_map.add_argument(
+        "--output-json", required=True, help="Rewrite-map JSON output path."
+    )
+    build_rewrite_map.add_argument(
+        "--output-csv", help="Optional CSV projection of the rewrite map."
+    )
     build_rewrite_map.add_argument("--summary-json", help="Optional JSON summary path.")
-    build_rewrite_map.add_argument("--only-strict", action="store_true", help="Emit only rows with strict_process_attested=true.")
-    build_rewrite_map.add_argument("--require-review-complete", action="store_true", help="Skip rows that still declare remaining_review_required=true.")
+    build_rewrite_map.add_argument(
+        "--only-strict",
+        action="store_true",
+        help="Emit only rows with strict_process_attested=true.",
+    )
+    build_rewrite_map.add_argument(
+        "--require-review-complete",
+        action="store_true",
+        help="Skip rows that still declare remaining_review_required=true.",
+    )
     build_rewrite_map.set_defaults(func=cmd_build_rewrite_map)
 
-    analyze_series = subparsers.add_parser("analyze-series", help="Analyze a consecutive history band for split, merge, and reorder candidates.")
-    analyze_series.add_argument("--repo", default=".", help="Repository root containing the git history.")
-    analyze_series.add_argument("--start-index", type=int, required=True, help="1-based history index from HEAD where analysis starts.")
-    analyze_series.add_argument("--count", type=int, required=True, help="Number of consecutive commits to analyze.")
-    analyze_series.add_argument("--split-files-threshold", type=int, default=80, help="Mark commits touching at least this many files as split candidates.")
-    analyze_series.add_argument("--split-areas-threshold", type=int, default=5, help="Mark commits touching at least this many top-level areas as split candidates.")
-    analyze_series.add_argument("--split-churn-threshold", type=int, default=3000, help="Mark commits with at least this total line churn as split candidates.")
-    analyze_series.add_argument("--merge-min-score", type=int, default=2, help="Minimum adjacency score required to keep commits in the same merge cluster.")
-    analyze_series.add_argument("--output-json", help="Optional path for the full analysis JSON.")
-    analyze_series.add_argument("--summary-json", help="Optional path for the compact summary JSON.")
+    analyze_series = subparsers.add_parser(
+        "analyze-series",
+        help="Analyze a consecutive history band for split, merge, and reorder candidates.",
+    )
+    analyze_series.add_argument(
+        "--repo", default=".", help="Repository root containing the git history."
+    )
+    analyze_series.add_argument(
+        "--start-index",
+        type=int,
+        required=True,
+        help="1-based history index from HEAD where analysis starts.",
+    )
+    analyze_series.add_argument(
+        "--count",
+        type=int,
+        required=True,
+        help="Number of consecutive commits to analyze.",
+    )
+    analyze_series.add_argument(
+        "--split-files-threshold",
+        type=int,
+        default=80,
+        help="Mark commits touching at least this many files as split candidates.",
+    )
+    analyze_series.add_argument(
+        "--split-areas-threshold",
+        type=int,
+        default=5,
+        help="Mark commits touching at least this many top-level areas as split candidates.",
+    )
+    analyze_series.add_argument(
+        "--split-churn-threshold",
+        type=int,
+        default=3000,
+        help="Mark commits with at least this total line churn as split candidates.",
+    )
+    analyze_series.add_argument(
+        "--merge-min-score",
+        type=int,
+        default=2,
+        help="Minimum adjacency score required to keep commits in the same merge cluster.",
+    )
+    analyze_series.add_argument(
+        "--output-json", help="Optional path for the full analysis JSON."
+    )
+    analyze_series.add_argument(
+        "--summary-json", help="Optional path for the compact summary JSON."
+    )
     analyze_series.set_defaults(func=cmd_analyze_series)
 
-    scaffold_split = subparsers.add_parser("scaffold-split", help="Summarize one commit into file-group scaffolds for future split work.")
-    scaffold_split.add_argument("--repo", default=".", help="Repository root containing the git history.")
-    scaffold_split.add_argument("--sha", required=True, help="Commit SHA to scaffold for splitting.")
-    scaffold_split.add_argument("--prefix-depth", type=int, default=2, help="How many path segments to include in prefix grouping.")
-    scaffold_split.add_argument("--output-json", help="Optional path for the split scaffold JSON.")
+    scaffold_split = subparsers.add_parser(
+        "scaffold-split",
+        help="Summarize one commit into file-group scaffolds for future split work.",
+    )
+    scaffold_split.add_argument(
+        "--repo", default=".", help="Repository root containing the git history."
+    )
+    scaffold_split.add_argument(
+        "--sha", required=True, help="Commit SHA to scaffold for splitting."
+    )
+    scaffold_split.add_argument(
+        "--prefix-depth",
+        type=int,
+        default=2,
+        help="How many path segments to include in prefix grouping.",
+    )
+    scaffold_split.add_argument(
+        "--output-json", help="Optional path for the split scaffold JSON."
+    )
     scaffold_split.set_defaults(func=cmd_scaffold_split)
 
     review_bundles = subparsers.add_parser(
         "build-review-bundles",
         help="Create sliding adjacent-commit review bundles with filtered patch files for one range input.",
     )
-    review_bundles.add_argument("--repo", default=".", help="Repository root containing the git history.")
-    review_bundles.add_argument("--range-input", required=True, help="Path to a range-XX-input.json file.")
-    review_bundles.add_argument("--output-dir", required=True, help="Directory where bundle files will be written.")
-    review_bundles.add_argument("--window-size", type=int, default=4, help="Number of consecutive commits per bundle.")
-    review_bundles.add_argument("--slide", type=int, default=3, help="How many commits to advance between bundles.")
-    review_bundles.add_argument("--unified", type=int, default=3, help="Unified diff context lines.")
-    review_bundles.add_argument("--include-stat", action="store_true", help="Include --stat output in the generated patch files.")
-    review_bundles.add_argument("--exclude-sqlx", action="store_true", help="Exclude .sqlx/** from generated patch files.")
+    review_bundles.add_argument(
+        "--repo", default=".", help="Repository root containing the git history."
+    )
+    review_bundles.add_argument(
+        "--range-input", required=True, help="Path to a range-XX-input.json file."
+    )
+    review_bundles.add_argument(
+        "--output-dir",
+        required=True,
+        help="Directory where bundle files will be written.",
+    )
+    review_bundles.add_argument(
+        "--window-size",
+        type=int,
+        default=4,
+        help="Number of consecutive commits per bundle.",
+    )
+    review_bundles.add_argument(
+        "--slide",
+        type=int,
+        default=3,
+        help="How many commits to advance between bundles.",
+    )
+    review_bundles.add_argument(
+        "--unified", type=int, default=3, help="Unified diff context lines."
+    )
+    review_bundles.add_argument(
+        "--include-stat",
+        action="store_true",
+        help="Include --stat output in the generated patch files.",
+    )
+    review_bundles.add_argument(
+        "--exclude-sqlx",
+        action="store_true",
+        help="Exclude .sqlx/** from generated patch files.",
+    )
     review_bundles.add_argument(
         "--include-path",
         action="append",
@@ -3629,10 +4305,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     review_bundles.set_defaults(func=cmd_build_review_bundles)
 
-    emit_rebase_todo = subparsers.add_parser("emit-rebase-todo", help="Compile a simple JSON rebase plan into a git-rebase todo file.")
-    emit_rebase_todo.add_argument("--plan-json", required=True, help="Plan JSON containing an operations array.")
-    emit_rebase_todo.add_argument("--output", required=True, help="Output path for the generated rebase todo file.")
-    emit_rebase_todo.add_argument("--repo", help="Optional repository root used to look up missing subjects for comments.")
+    emit_rebase_todo = subparsers.add_parser(
+        "emit-rebase-todo",
+        help="Compile a simple JSON rebase plan into a git-rebase todo file.",
+    )
+    emit_rebase_todo.add_argument(
+        "--plan-json", required=True, help="Plan JSON containing an operations array."
+    )
+    emit_rebase_todo.add_argument(
+        "--output",
+        required=True,
+        help="Output path for the generated rebase todo file.",
+    )
+    emit_rebase_todo.add_argument(
+        "--repo",
+        help="Optional repository root used to look up missing subjects for comments.",
+    )
     emit_rebase_todo.set_defaults(func=cmd_emit_rebase_todo)
 
     return parser

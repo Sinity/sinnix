@@ -7,11 +7,27 @@
 { inputs, ... }:
 {
   perSystem =
-    { pkgs, ... }:
+    { pkgs, lib, ... }:
     let
       scriptRegistry = import ./scripts.nix { inherit inputs pkgs; };
+      publicPackageNames = [
+        "ccusage"
+        "lynchpin-python"
+        "mcp-context7"
+        "mcp-firecrawl"
+        "normalize-agent-projects"
+        "polylogue-cli"
+        "polylogue-python"
+        "render-agents"
+        "sinnix-sentinel"
+        "verify-agent-topology"
+      ];
     in
     {
-      packages = scriptRegistry.packageSet;
+      # Keep the public flake package surface small. The full script registry is
+      # still imported directly by modules/tests; only the explicitly supported
+      # external package names stay under `packages` so `nix flake check` does
+      # not walk every local convenience wrapper.
+      packages = lib.getAttrs publicPackageNames scriptRegistry.packageSet;
     };
 }
