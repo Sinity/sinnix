@@ -39,3 +39,18 @@ scripts/screenshot-color-lab.sh capture-output --fix-hdr
 ```bash
 /realm/project/sinnix/scripts/kitty-grid --workspace 3 --grid 3x2
 ```
+
+## 6) Paste a Command into a Native Wayland App
+
+```bash
+scripts/hypr-control.sh clients --grep 'Steam|kitty|obs'
+scripts/hypr-control.sh focus-window 'class:^(steam)$'
+scripts/hypr-control.sh paste 'class:^(steam)$' \
+  --text 'download_depot 427520 427523 3610450483505928345' \
+  --enter
+```
+
+Notes:
+
+- Use `kitty-remote-control.sh` instead for terminal targets.
+- For XWayland apps, prefer app-native global shortcuts where possible; shortcut injection is best-effort there.

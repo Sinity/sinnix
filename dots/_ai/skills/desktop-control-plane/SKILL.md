@@ -13,7 +13,7 @@ Use this skill when you need repeatable machine-control primitives for desktop w
 This skill provides:
 
 1. Kitty remote-control I/O (list windows, send input, capture output),
-2. Hyprland control wrapper (status, binds, dispatch, keyword, batch),
+2. Hyprland control wrapper (status, window inventory, focus, shortcut dispatch, clipboard-backed paste, keyword, batch),
 3. Screenshot diagnostics and HDR washout workaround flow.
 
 ## Preconditions
@@ -60,6 +60,18 @@ scripts/hypr-control.sh status
 # Find screenshot-related keybinds
 scripts/hypr-control.sh binds --grep 'Print|grimblast|screenshot'
 
+# Enumerate candidate windows before targeting one
+scripts/hypr-control.sh clients --grep 'Steam|obs|kitty'
+
+# Focus a specific window using a Hyprland selector
+scripts/hypr-control.sh focus-window 'class:^(steam)$'
+
+# Send a shortcut to a specific app
+scripts/hypr-control.sh send-shortcut CTRL V 'class:^(steam)$'
+
+# Paste text into a paste-aware GUI app and optionally press Enter
+scripts/hypr-control.sh paste 'class:^(steam)$' --text 'download_depot 427520 427523 3610450483505928345' --enter
+
 # Dispatch any Hyprland action
 scripts/hypr-control.sh dispatch workspace 3
 ```
@@ -86,6 +98,8 @@ scripts/screenshot-color-lab.sh tone-map --in /path/image.png --brightness 105 -
 - On some HDR Hyprland setups, native captures may look washed out due unresolved compositor/tonemapping behavior.
 - This skill keeps raw captures intact and generates optional corrected sidecars rather than destructive replacement.
 - Prefer `kitty-remote-control` for keyboard/text injection into terminal processes; global keyboard/mouse injection requires separate tools (`wtype`/`ydotool`) not assumed here.
+- `hypr-control.sh paste` closes part of that gap for GUI apps by using clipboard plus Hyprland `sendshortcut`; it is reliable for native Wayland clients and best-effort for XWayland clients.
+- `hypr-control.sh paste` restores only text clipboard content, and only if a text clipboard existed when the command started.
 - For deterministic automation loops, prefer `send-await` over blind sleeps.
 - `send-await` defaults to `--extent last_cmd_output` to avoid false positives from echoed input.
 - For window layout/navigation primitives, reuse existing system scripts in `/realm/project/sinnix/scripts`:
