@@ -20,8 +20,8 @@ let
   borgRepoRoot = "${config.sinnix.paths.outerRealm}/backup";
 
   # Snapshot directories
-  realmSnapshots = "${realmRoot}/.snapshot";
-  persistSnapshots = "/persist/.snapshot";
+  realmSnapshots = "${realmRoot}/.btrfs/snapshot";
+  persistSnapshots = "/persist/.btrfs/snapshot";
   borgSnapshotBindRoot = "/run/borgbackup-snapshot-inputs";
   borgPersistSnapshotBind = "${borgSnapshotBindRoot}/persist";
   borgRealmSnapshotBind = "${borgSnapshotBindRoot}/realm";
@@ -70,9 +70,9 @@ let
       passCommand = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
     };
     compression = "auto,zstd,3";
-    startAt = "daily";
     persistentTimer = true;
     prune.keep = {
+      within = "2d";
       daily = 14;
       weekly = 8;
       monthly = 6;
@@ -93,20 +93,26 @@ let
     lockfile                /var/lock/btrbk.lock
 
     # ─── SNAPSHOTS ONLY (Borg handles all off-disk transfers) ───
-    # Keep every 15-minute snapshot for 4h, then thin to hourly for 3d,
-    # daily for 14d, and weekly for 8w.
+    # btrbk covers the intra-day window that borg doesn't: fine-grained rollback
+    # for recent work. Borg runs daily at midnight; once a day is borged, the
+    # fine-grained snapshots for that day have little value.
+    #
+    # Retention: btrbk fills the gaps between 4-hourly borg runs.
+    # Keep all 5-min snapshots for 6h (the "oops I just broke it" window),
+    # then hourly for 24h (covers two borg cycles as buffer), then drop.
+    # Beyond 24h, borg has it covered with better dedup and off-disk safety.
 
     volume ${realmRoot}
-      snapshot_dir   .snapshot
+      snapshot_dir   .btrfs/snapshot
       subvolume .
-        snapshot_preserve_min   4h
-        snapshot_preserve       72h 14d 8w
+        snapshot_preserve_min   6h
+        snapshot_preserve       24h
 
     volume /persist
-      snapshot_dir   .snapshot
+      snapshot_dir   .btrfs/snapshot
       subvolume .
-        snapshot_preserve_min   4h
-        snapshot_preserve       72h 14d 8w
+        snapshot_preserve_min   6h
+        snapshot_preserve       24h
 
     # / is ephemeral (wiped and recreated each boot by initrd rollback script).
     # Pre-wipe states are saved by initrd to .snapshots/root.TIMESTAMP.
@@ -131,6 +137,7 @@ in
       #    Replaced the old borg-var-v2 job. /persist now contains all system
       #    and home state that was previously split between @var and /realm/home.
       persist = commonBorgOptions // {
+        startAt = "*-*-* 00/4:00:00";
         paths = [
           # Borg treats symlink roots as symlinks, not traversed directories.
           # Bind-mount the newest snapshot to a stable path and archive that path.
@@ -141,9 +148,10 @@ in
           "/persist/home/sinity/.local/share/Steam"
           # Ephemeral junk
           "/persist/var/lib/systemd/coredump"
-          "/persist/home/sinity/.config/google-chrome/Default/Cache"
-          "/persist/home/sinity/.config/google-chrome/Default/Code Cache"
           "/persist/home/sinity/.config/google-chrome/Default/Service Worker"
+          "/persist/home/sinity/.config/google-chrome/Default/GPUCache"
+          "/persist/home/sinity/.config/google-chrome/*Cache*"
+          "/persist/home/sinity/.config/google-chrome/*cache*"
         ];
         repo = borgRepoPersist;
         readWritePaths = [
@@ -160,6 +168,7 @@ in
 
       # 2. User Data (/realm snapshots) - runs as root so the bind mount can be created
       realm = commonBorgOptions // {
+        startAt = "*-*-* 02/4:00:00";
         paths = [
           "${borgRealmSnapshotBind}/./"
         ];
@@ -203,6 +212,30 @@ in
       IOSchedulingPriority = 7;
     };
 
+    # Weekly integrity check — verify repo metadata, detect bit rot on the HDD.
+    # Runs repository-only (fast, ~minutes) not --verify-data (reads all chunks, hours).
+    systemd.services.borgbackup-check = {
+      description = "Borg backup integrity check";
+      serviceConfig = {
+        Type = "oneshot";
+        Nice = 19;
+        IOSchedulingClass = "idle";
+        IOSchedulingPriority = 7;
+      };
+      environment.BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
+      script = ''
+        ${pkgs.borgbackup}/bin/borg check --repository-only ${borgRepoPersist}
+        ${pkgs.borgbackup}/bin/borg check --repository-only ${borgRepoRealm}
+      '';
+    };
+    systemd.timers.borgbackup-check = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnCalendar = "Sun 04:00:00";
+        Persistent = true;
+      };
+    };
+
     system.activationScripts.borgRepositoryDirectories.text = ''
       ${pkgs.coreutils}/bin/install -d -m 0750 -o root -g users ${borgRepoRoot}
       ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${borgRepoPersistPath}
@@ -224,7 +257,7 @@ in
     # HDD (slow spin-up) with nofail — without this, btrbk races the mount on boot.
     systemd.services.btrbk = {
       description = "btrbk btrfs snapshot";
-      requires = [ "sinnix-realm-sinex-target-subvolume.service" ];
+      wants = [ "sinnix-realm-sinex-target-subvolume.service" ];
       after = [
         "persist.mount"
         "realm.mount"
@@ -241,7 +274,7 @@ in
     systemd.timers.btrbk = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
-        OnCalendar = "*-*-* *:00/15:00";
+        OnCalendar = "*-*-* *:00/5:00";
         Persistent = true;
       };
     };
@@ -271,11 +304,14 @@ in
         fi
 
         if ${pkgs.coreutils}/bin/test -d "$target_path"; then
-          if ${pkgs.findutils}/bin/find "$target_path" -mindepth 1 -print -quit | ${pkgs.gnugrep}/bin/grep -q .; then
-            echo "$target_path already exists as a non-empty directory; refusing to replace it automatically" >&2
-            exit 1
-          fi
-          ${pkgs.coreutils}/bin/rmdir "$target_path"
+          # Migrate existing directory contents into a new subvolume
+          staging="''${target_path}.migrate-$$"
+          ${pkgs.coreutils}/bin/mv "$target_path" "$staging"
+          ${pkgs.btrfs-progs}/bin/btrfs subvolume create "$target_path"
+          ${pkgs.coreutils}/bin/cp -a "$staging"/. "$target_path"/
+          ${pkgs.coreutils}/bin/rm -rf "$staging"
+          echo "Migrated $target_path to Btrfs subvolume (contents preserved)"
+          exit 0
         fi
 
         ${pkgs.btrfs-progs}/bin/btrfs subvolume create "$target_path"

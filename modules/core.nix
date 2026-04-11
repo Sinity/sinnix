@@ -127,6 +127,9 @@ in
 
     systemd = {
       tmpfiles.rules = lib.mkAfter ([
+        "d ${paths.realmRoot} 0755 root root -"
+        "d ${paths.outerRealm} 0755 root root -"
+        "d ${paths.neoOuterRealm} 0755 root root -"
         "d ${paths.outerRealm}/inbox 0755 ${username} users -"
         "d ${paths.dataRoot} 0755 ${username} users -"
         "d ${paths.capturesRoot} 0755 ${username} users -"

@@ -170,8 +170,10 @@ in
 
     # User definition
     users.mutableUsers = false;
+    users.groups.${cfg.user.name} = { };
     users.users.${cfg.user.name} = {
       isNormalUser = true;
+      group = cfg.user.name;
       extraGroups = [
         "networkmanager"
         "wheel"

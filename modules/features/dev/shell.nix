@@ -47,8 +47,10 @@ mkFeatureModule {
       ...
     }:
     let
-      sinnixCfg = config.sinnix;
+      nixosConfig = config;
+      sinnixCfg = nixosConfig.sinnix;
       capturesRoot = sinnixCfg.paths.capturesRoot;
+      cliCoreEnabled = nixosConfig.sinnix.features.cli.core.enable;
 
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
 
@@ -381,9 +383,6 @@ mkFeatureModule {
 
             home.packages =
               (with pkgs; [
-                bat
-                eza
-                fd
                 ripgrep
                 gum
                 curlie
@@ -392,11 +391,19 @@ mkFeatureModule {
                 neovim
                 yazi
                 glow
-                dua
                 man-pages
                 man-pages-posix
                 ncdu
               ])
+              ++ lib.optionals (!cliCoreEnabled) (
+                with pkgs;
+                [
+                  bat
+                  eza
+                  fd
+                  dua
+                ]
+              )
               ++ [
                 scriptPkgs.lynchpin-python
                 scriptPkgs.polylogue-python
@@ -406,12 +413,7 @@ mkFeatureModule {
                 scriptPkgs.nix-safe
               ];
 
-            programs = {
-              broot = {
-                enable = true;
-                settings.modal = true;
-              };
-
+            programs = lib.optionalAttrs (!cliCoreEnabled) {
               bat = {
                 enable = true;
                 config.pager = "less -FR";

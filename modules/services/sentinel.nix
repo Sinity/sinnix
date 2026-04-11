@@ -68,7 +68,7 @@ mkServiceModule {
           "/realm"
           "/outer-realm"
           "/neo-outer-realm"
-          "/persist/.snapshot"
+          "/persist/.btrfs/snapshot"
         ];
       };
     in

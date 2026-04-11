@@ -79,9 +79,8 @@ let
   # backupTargets are the off-disk incremental targets.
   backupMonitoring = {
     snapshotDirs = [
-      "${cfg.paths.realmRoot}/.snapshot"
-      "/persist/.snapshot"
-      "${cfg.paths.neoOuterRealm}/.snapshot"
+      "${cfg.paths.realmRoot}/.btrfs/snapshot"
+      "/persist/.btrfs/snapshot"
     ];
     backupTargets = [
       "${cfg.paths.outerRealm}/backup/borg-persist-v1"

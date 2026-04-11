@@ -281,7 +281,8 @@
 
         SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -o BatchMode=yes"
         SSH_CMD="${pkgs.openssh}/bin/ssh $SSH_OPTS"
-        SCP_CMD="${pkgs.openssh}/bin/scp $SSH_OPTS"
+        # -O: legacy SCP/rcp protocol — Dropbear on OpenWrt has no sftp-server
+        SCP_CMD="${pkgs.openssh}/bin/scp -O $SSH_OPTS"
 
         if ! $SSH_CMD ''${ROUTER_USER}@''${ROUTER_ADDR} 'echo ok' >/dev/null 2>&1; then
           echo "✗ Key-based SSH auth failed for ''${ROUTER_USER}@''${ROUTER_ADDR}"

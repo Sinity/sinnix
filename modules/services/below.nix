@@ -4,8 +4,9 @@
 # Use `below replay` to investigate what happened at any point in time.
 #
 # Data stored in /var/log/below (default).
-# Storage: ~10-20 MB/day at 1s interval with zstd (~10x).
-# No retention limit = accumulate indefinitely (~4-8 GB/year at 1s).
+# Storage: ~64 MB/day at 1s interval with dict-compress (chunk-32, ~99x).
+# Without dict-compress: ~6.5 GB/day (plain zstd only gets ~10x on the
+# CBOR format which repeats string field keys in every frame).
 # Export via: below dump -O json/csv
 {
   mkServiceModule,
@@ -49,10 +50,11 @@ mkServiceModule {
 
         serviceConfig = {
           Type = "simple";
-          ExecStart = "${pkgs.below}/bin/below record --collect-io-stat --compress --interval-s ${toString cfg.collectIntervalSec}";
+          ExecStart = "${pkgs.below}/bin/below record --collect-io-stat --compress --dict-compress-chunk-size 32 --interval-s ${toString cfg.collectIntervalSec}";
           Restart = "on-failure";
           RestartSec = "5s";
         };
       };
+
     };
 } args

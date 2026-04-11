@@ -61,12 +61,8 @@ mkFeatureModule {
           lib,
           pkgs,
           config,
-          mkDotsFileFor,
           ...
         }:
-        let
-          mkDotsFile = mkDotsFileFor config;
-        in
         {
           home.packages = lib.mkAfter (
             with pkgs;
@@ -132,13 +128,9 @@ mkFeatureModule {
           programs.broot = {
             enable = true;
             enableZshIntegration = true;
-            # Core settings are in dots/broot/conf.hjson (gruvbox skin, modal mode,
-            # special_paths). Loaded alongside the conf.toml HM generates here.
-          };
-
-          xdg.configFile = {
-            "broot/conf.hjson".source = mkDotsFile "/broot/conf.hjson";
-            "broot/verbs.hjson".source = mkDotsFile "/broot/verbs.hjson";
+            # Home Manager owns ~/.config/broot now. Keep the custom skin, modal
+            # mode, special paths, and verbs in the canonical dots JSON source.
+            settings = builtins.fromJSON (builtins.readFile ../../../dots/broot/conf.hjson);
           };
 
           programs.btop = {

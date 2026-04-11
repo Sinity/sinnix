@@ -50,7 +50,6 @@ mkFeatureModule {
     let
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
       jsonFormat = pkgs.formats.json { };
-      tomlFormat = pkgs.formats.toml { };
       firecrawlSecretPath = lib.attrByPath [ "sinnix" "secrets" "paths" "firecrawl-api-key" ] null config;
       mkRuntimeSecretExports =
         secretEnv:
@@ -144,40 +143,6 @@ mkFeatureModule {
         };
       selectClientServers =
         client: lib.filterAttrs (_: server: builtins.elem client server.clients) mcpServerRegistry;
-      renderCodexServer =
-        _name: server:
-        if server.transport == "http" then
-          pruneAttrs (
-            {
-              inherit (server) url;
-            }
-            // (server.codex or { })
-          )
-        else
-          pruneAttrs {
-            inherit (server) command;
-            args = server.args or [ ];
-          };
-      renderClaudeServer =
-        _name: server:
-        pruneAttrs {
-          inherit (server) command;
-          args = server.args or [ ];
-        };
-      renderGeminiServer =
-        _name: server:
-        if server.transport == "http" then
-          pruneAttrs (
-            {
-              httpUrl = server.url;
-            }
-            // (server.gemini or { })
-          )
-        else
-          pruneAttrs {
-            inherit (server) command;
-            args = server.args or [ ];
-          };
       renderForgeServer =
         _name: server:
         pruneAttrs (
@@ -193,26 +158,7 @@ mkFeatureModule {
               disable = false;
             }
         );
-      codexMcpServers = lib.mapAttrs renderCodexServer (selectClientServers "codex");
-      claudeMcpServers = lib.mapAttrs renderClaudeServer (selectClientServers "claude");
-      geminiMcpServers = lib.mapAttrs renderGeminiServer (selectClientServers "gemini");
       forgeMcpServers = lib.mapAttrs renderForgeServer (selectClientServers "forge");
-      generatedCodexConfig = (builtins.fromTOML (builtins.readFile ../../../dots/codex/config.toml)) // {
-        mcp_servers = codexMcpServers;
-      };
-      generatedClaudeSettings =
-        (builtins.fromJSON (builtins.readFile ../../../dots/claude/settings.json))
-        // {
-          mcpServers = claudeMcpServers;
-        };
-      generatedGeminiSettings =
-        (builtins.fromJSON (builtins.readFile ../../../dots/gemini/settings.json))
-        // {
-          mcpServers = geminiMcpServers;
-        };
-      codexConfigFile = tomlFormat.generate "codex-config.toml" generatedCodexConfig;
-      claudeSettingsFile = jsonFormat.generate "claude-settings.json" generatedClaudeSettings;
-      geminiSettingsFile = jsonFormat.generate "gemini-settings.json" generatedGeminiSettings;
       forgeMcpConfigFile = jsonFormat.generate "forge-mcp.json" { mcpServers = forgeMcpServers; };
     in
     {
@@ -286,7 +232,6 @@ mkFeatureModule {
           };
 
           xdg.configFile = {
-            "claude/settings.json".source = lib.mkForce claudeSettingsFile;
             "ripgrep-all/config.jsonc".source = mkDotsFile "/ripgrep-all/config.jsonc";
             "marimo/marimo.toml".source = mkDotsFile "/marimo/marimo.toml";
           };
@@ -294,15 +239,11 @@ mkFeatureModule {
           home.file = {
             # Canonical Codex location is ~/.codex.
             ".codex/config.toml" = {
-              source = codexConfigFile;
+              source = mkDotsFile "/codex/config.toml";
               force = true;
             };
             # Codex keeps a dedicated overlay tree; canonical shared skills live in dots/_ai/skills.
-            ".codex/skills" = {
-              source = mkDotsFile "/codex/skills";
-              force = true;
-              recursive = true;
-            };
+            ".codex/skills".source = mkDotsFile "/codex/skills";
             "forge/.mcp.json" = {
               source = forgeMcpConfigFile;
               force = true;
@@ -312,14 +253,10 @@ mkFeatureModule {
             ".local/bin/mcp-playwright".source = "${mcpPlaywrightBin}/bin/mcp-playwright";
             ".local/bin/mcp-polylogue".source = "${mcpPolylogueBin}/bin/mcp-polylogue";
             ".gemini/settings.json" = {
-              source = geminiSettingsFile;
+              source = mkDotsFile "/gemini/settings.json";
               force = true;
             };
-            ".gemini/skills" = {
-              source = mkDotsFile "/_ai/skills";
-              force = true;
-              recursive = true;
-            };
+            ".gemini/skills".source = mkDotsFile "/_ai/skills";
             ".local/share/polylogue/inbox/chatgpt" = {
               source = config.lib.file.mkOutOfStoreSymlink "/realm/data/exports/chatlog/raw/chatgpt";
               force = true;

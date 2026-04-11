@@ -112,11 +112,9 @@ mkFeatureModule {
               force = true;
               recursive = true;
             };
-            "claude/skills" = {
-              source = mkDotsFile "/claude/skills";
-              force = true;
-              recursive = true;
-            };
+            # Single symlink → _ai/skills (shared skill source with real dirs).
+            # No recursive — one symlink for the whole directory.
+            "claude/skills".source = mkDotsFile "/_ai/skills";
           };
 
           home.activation.claudeSymlink = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
@@ -206,44 +204,12 @@ mkFeatureModule {
           };
 
           home.file."forge/.forge.toml" = {
-            text = ''
-              "$schema" = "https://forgecode.dev/schema.json"
-
-              auto_dump = "json"
-              auto_open_dump = false
-              debug_requests = "${config.home.homeDirectory}/forge/logs/requests"
-              max_conversations = 1000000
-              max_fetch_chars = 75000
-              max_file_read_batch_size = 64
-              max_parallel_file_reads = 64
-              max_read_lines = 4000
-              max_requests_per_turn = 100
-              max_tool_failure_per_turn = 5
-              tool_timeout_secs = 600
-
-              [session]
-              provider_id = "codex"
-              model_id = "gpt-5.4"
-
-              [commit]
-              provider_id = "codex"
-              model_id = "gpt-5.4"
-
-              [suggest]
-              provider_id = "codex"
-              model_id = "gpt-5.4"
-
-              [updates]
-              auto_update = false
-              frequency = "weekly"
-            '';
+            source = mkDotsFile "/forge/.forge.toml";
             force = true;
           };
-          home.file."forge/skills" = {
-            source = mkDotsFile "/_ai/skills";
-            force = true;
-            recursive = true;
-          };
+          # Shared skills should stay a single directory symlink; recursively
+          # materializing the tree invites junk self-links and duplicate state.
+          home.file."forge/skills".source = mkDotsFile "/_ai/skills";
 
           home.file.".local/bin/forge" = {
             text = ''

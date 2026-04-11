@@ -3,12 +3,13 @@
 # This module carries the heavy integration with the upstream `services.sinex`
 # option tree. Keep it opt-in so the generic sinnix module graph does not pay
 # for Sinex evaluation when the host does not import the upstream module.
-{ config
-, options
-, pkgs
-, lib
-, inputs
-, ...
+{
+  config,
+  options,
+  pkgs,
+  lib,
+  inputs,
+  ...
 }:
 let
   cfg = config.sinnix.services.sinex;
@@ -21,8 +22,7 @@ let
     "users"
     targetUserName
     "home"
-  ] "/home/${targetUserName}"
-    config;
+  ] "/home/${targetUserName}" config;
   targetUserUid = lib.attrByPath [ "users" "users" targetUserName "uid" ] null config;
   databaseHost = "127.0.0.1";
   databasePort = 5432;
@@ -36,25 +36,20 @@ let
     "secrets"
     "paths"
     "sinex-gateway-admin-token"
-  ] "/run/agenix/sinex-gateway-admin-token"
-    config;
+  ] "/run/agenix/sinex-gateway-admin-token" config;
   natsCaCertFile = lib.attrByPath [ "sinnix" "secrets" "paths" "sinex-nats-ca" ] null config;
   natsClientCertFile = lib.attrByPath [
     "sinnix"
     "secrets"
     "paths"
     "sinex-nats-client-cert"
-  ]
-    null
-    config;
+  ] null config;
   natsClientKeyFile = lib.attrByPath [
     "sinnix"
     "secrets"
     "paths"
     "sinex-nats-client-key"
-  ]
-    null
-    config;
+  ] null config;
   natsTokenFile = lib.attrByPath [ "sinnix" "secrets" "paths" "sinex-nats-token" ] null config;
   natsCredsFile = lib.attrByPath [ "sinnix" "secrets" "paths" "sinex-nats-client-creds" ] null config;
   natsNkeySeedFile = lib.attrByPath [
@@ -62,9 +57,7 @@ let
     "secrets"
     "paths"
     "sinex-nats-client-nkey"
-  ]
-    null
-    config;
+  ] null config;
   databaseUrl = "postgresql://${databaseUser}@${databaseHost}:${toString databasePort}/${databaseName}";
   schemaBootstrapUrl = "postgresql:///${databaseName}?host=${databaseSocketDir}&user=${schemaBootstrapUser}";
   hostPrepared = cfg.prepareHost || cfg.enable || cfg.provisionDatabase;
@@ -106,7 +99,8 @@ in
             healthAggregator = true;
             kitty = true;
           };
-        }.${cfg.activationProfile};
+        }
+        .${cfg.activationProfile};
       terminalHistorySources = [
         {
           path = "${targetUserHome}/.bash_history";
@@ -178,11 +172,9 @@ in
       (lib.mkIf hostPrepared {
         sinex.secrets.paths = lib.mkForce (
           lib.mapAttrs (_: path: toString path) (
-            lib.filterAttrs
-              (
-                name: _: lib.hasPrefix "sinex-" name || lib.hasPrefix "nats-" name
-              )
-              config.sinnix.secrets.paths
+            lib.filterAttrs (
+              name: _: lib.hasPrefix "sinex-" name || lib.hasPrefix "nats-" name
+            ) config.sinnix.secrets.paths
           )
         );
 
@@ -197,7 +189,14 @@ in
             install -d -m 0755 -o sinex -g sinex \
               /var/lib/sinex \
               /var/lib/sinex/.local \
-              /var/lib/sinex/.local/state
+              /var/lib/sinex/.local/state \
+              /var/lib/sinex/.local/state/sinex \
+              /var/lib/sinex/.local/state/sinex/blob-repository \
+              /var/lib/sinex/.local/state/sinex/failures \
+              /var/lib/sinex/.local/state/sinex/logs \
+              /var/lib/sinex/.local/state/sinex/run \
+              /var/lib/sinex/.local/state/sinex/spool \
+              /var/lib/sinex/.local/state/sinex/tls
             ${pkgs.systemd}/bin/systemd-tmpfiles --create --prefix=/var/lib/sinex
           fi
         '';
@@ -319,6 +318,11 @@ in
             autoConfigure = runtimeEnabled && activationProfile.kitty;
           };
         };
+
+        # Upstream sinex module omits SINEX_ENVIRONMENT from the preflight service;
+        # the binary panics without it on non-dev builds.
+        systemd.services.sinex-preflight.environment.SINEX_ENVIRONMENT =
+          lib.mkIf runtimeEnabled sinexEnvironment;
       })
 
       (lib.mkIf cfg.provisionDatabase {
@@ -328,6 +332,12 @@ in
             message = "sinnix.services.sinex requires the sinex-local-db agenix secret";
           }
         ];
+
+        # Skip postgresql-setup cleanly when agenix hasn't decrypted yet (boot race).
+        # On the next activation the secret exists and the service succeeds.
+        systemd.services.postgresql-setup.unitConfig.ConditionPathIsReadable = lib.mkIf (
+          databasePasswordFile != null
+        ) [ databasePasswordFile ];
       })
 
       (lib.mkIf (cfg.provisionDatabase && !cfg.enable) (

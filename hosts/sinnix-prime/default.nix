@@ -49,6 +49,7 @@
     };
     polylogue.enable = false;
     power-watchdog.enable = true;
+    network-monitor.enable = true;
     sentinel.enable = true;
   };
 

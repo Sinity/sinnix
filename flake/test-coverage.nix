@@ -130,6 +130,9 @@
         "vm"
       ];
     };
+    "network-monitor" = {
+      layers = [ "eval" ];
+    };
     "polylogue" = {
       layers = [
         "eval"

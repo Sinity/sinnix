@@ -137,15 +137,38 @@ let
                   "";
               managedEntrySource =
                 entry: if entry ? source && entry.source != null then toString entry.source else "";
-              codexConfigText = managedEntryText hm.home.file.".codex/config.toml";
-              claudeSettings = builtins.fromJSON (managedEntryText hm.xdg.configFile."claude/settings.json");
-              geminiSettings = builtins.fromJSON (managedEntryText hm.home.file.".gemini/settings.json");
+              findSelfReferentialLinks =
+                dir:
+                let
+                  entries = builtins.readDir dir;
+                  names = builtins.attrNames entries;
+                  basename = baseNameOf (toString dir);
+                  directHits = lib.optional (
+                    entries ? ${basename} && entries.${basename} == "symlink"
+                  ) "${toString dir}/${basename}";
+                  nestedHits = lib.concatLists (
+                    map (
+                      name:
+                      if entries.${name} == "directory" then
+                        findSelfReferentialLinks (dir + "/${name}")
+                      else
+                        [ ]
+                    ) names
+                  );
+                in
+                directHits ++ nestedHits;
+              forgeConfigText = builtins.readFile ../dots/forge/.forge.toml;
               forgeMcpConfig = builtins.fromJSON (managedEntryText hm.home.file."forge/.mcp.json");
+              sharedSkillSelfLinks = findSelfReferentialLinks ../dots/_ai/skills;
             in
             [
               {
                 assertion = builtins.match ".*\\$\\*.*" (hm.home.file.".local/bin/claude-team".text or "") == null;
                 message = "Claude team wrapper must not flatten arguments via $*";
+              }
+              {
+                assertion = sharedSkillSelfLinks == [ ];
+                message = "Shared skills tree must not contain self-referential symlinks: ${lib.concatStringsSep ", " sharedSkillSelfLinks}";
               }
               (expect.hmFileExists hm ".local/bin/claude" "Claude wrapper must exist")
               (expect.hmFileExists hm ".local/bin/codex" "Codex wrapper must exist")
@@ -162,26 +185,30 @@ let
                 "Global Forge AGENTS render activation must exist"
               )
               (expect.hmFileExists hm "forge/skills" "Forge skill root must be linked from the shared skill tree")
+              {
+                assertion = !(hm.home.file."forge/skills".recursive or false);
+                message = "Forge skill root must stay a direct directory symlink, not a recursive materialization";
+              }
               (expect.textContains hm.programs.zsh.initContent "export FORGE_BIN=\"$HOME/.local/bin/forge\""
                 "Zsh init must source Forge via the managed wrapper path"
               )
               (expect.hmFileExists hm "forge/.forge.toml"
                 "Forge config must be managed under ~/forge/.forge.toml"
               )
-              (expect.hmFileTextContainsAll hm "forge/.forge.toml" [
+              (expect.textContainsAll forgeConfigText [
                 "provider_id = \"codex\""
                 "model_id = \"gpt-5.4\""
                 "auto_dump = \"json\""
                 "auto_open_dump = false"
               ] "Forge config must preserve the Codex session defaults and dump settings")
-              (expect.hmFileTextContainsAll hm "forge/.forge.toml" [
+              (expect.textContainsAll forgeConfigText [
                 "debug_requests = \""
                 "/forge/logs/requests\""
                 "max_conversations = 1000000"
                 "auto_update = false"
                 "frequency = \"weekly\""
               ] "Forge config must keep durable request logs and disable self-updates")
-              (expect.hmFileTextContainsAll hm "forge/.forge.toml" [
+              (expect.textContainsAll forgeConfigText [
                 "max_fetch_chars = 75000"
                 "max_file_read_batch_size = 64"
                 "max_parallel_file_reads = 64"
@@ -190,10 +217,10 @@ let
                 "max_tool_failure_per_turn = 5"
                 "tool_timeout_secs = 600"
               ] "Forge config must keep the bounded runtime guardrails")
-              (expect.hmFileTextNotMatches hm "forge/.forge.toml" ".*custom_history_path.*"
+              (expect.textNotMatches forgeConfigText ".*custom_history_path.*"
                 "Forge config must rely on Forge's native history storage path"
               )
-              (expect.hmFileTextNotMatches hm "forge/.forge.toml" ".*[[]compact[]].*"
+              (expect.textNotMatches forgeConfigText ".*[[]compact[]].*"
                 "Forge config must not override upstream compaction defaults"
               )
               (expect.persistedHomeDir config "forge" "Forge home directory must be persisted under ~/forge")
@@ -216,6 +243,10 @@ let
               } "Gemini wrapper must launch the packaged binary directly")
               (expect.xdgConfigFileExists hm "claude/CLAUDE.md" "Claude instruction root must exist")
               (expect.xdgConfigFileExists hm "claude/skills" "Claude skills symlink must exist")
+              {
+                assertion = !(hm.xdg.configFile."claude/skills".recursive or false);
+                message = "Claude skills must stay a direct directory symlink, not a recursive materialization";
+              }
               (expect.xdgConfigFileExists hm "claude/world-model" "Claude world model tree must exist")
               (expect.xdgConfigFileExists hm "claude/operational" "Claude operational knowledge tree must exist")
               (expect.activationExists hm "renderGlobalCodexAgents"
@@ -244,10 +275,6 @@ let
                   "";
               managedEntrySource =
                 entry: if entry ? source && entry.source != null then toString entry.source else "";
-              codexConfigText = managedEntryText hm.home.file.".codex/config.toml";
-              claudeSettings = builtins.fromJSON (managedEntryText hm.xdg.configFile."claude/settings.json");
-              geminiSettings = builtins.fromJSON (managedEntryText hm.home.file.".gemini/settings.json");
-              forgeMcpConfig = builtins.fromJSON (managedEntryText hm.home.file."forge/.mcp.json");
             in
             [
               {
@@ -352,9 +379,9 @@ let
                   "";
               managedEntrySource =
                 entry: if entry ? source && entry.source != null then toString entry.source else "";
-              codexConfigText = managedEntryText hm.home.file.".codex/config.toml";
-              claudeSettings = builtins.fromJSON (managedEntryText hm.xdg.configFile."claude/settings.json");
-              geminiSettings = builtins.fromJSON (managedEntryText hm.home.file.".gemini/settings.json");
+              codexConfigText = builtins.readFile ../dots/codex/config.toml;
+              claudeSettings = builtins.fromJSON (builtins.readFile ../dots/claude/settings.json);
+              geminiSettings = builtins.fromJSON (builtins.readFile ../dots/gemini/settings.json);
               forgeMcpConfig = builtins.fromJSON (managedEntryText hm.home.file."forge/.mcp.json");
             in
             [
@@ -369,6 +396,10 @@ let
               (expect.hmFileExists hm ".codex/skills"
                 "Codex skills must be linked from the dedicated dots/codex/skills tree"
               )
+              {
+                assertion = !(hm.home.file.".codex/skills".recursive or false);
+                message = "Codex skills must stay a direct directory symlink, not a recursive materialization";
+              }
               (expect.textContains (managedEntrySource
                 hm.home.file.".local/bin/mcp-context7"
               ) "/bin/mcp-context7" "Context7 wrapper must point at the packaged binary")
@@ -412,6 +443,10 @@ let
                 "polylogue"
                 "command"
               ] "mcp-polylogue" "Gemini config must call the packaged Polylogue MCP wrapper")
+              {
+                assertion = !(hm.home.file.".gemini/skills".recursive or false);
+                message = "Gemini skills must stay a direct directory symlink, not a recursive materialization";
+              }
               (expect.attrPathEq geminiSettings [
                 "mcpServers"
                 "context7"
@@ -1373,17 +1408,17 @@ let
                 assertion =
                   hasConf
                   &&
-                    builtins.match ".*volume /realm\n +snapshot_dir +\\.snapshot\n +subvolume \\.\n +snapshot_preserve_min +4h\n +snapshot_preserve +72h 14d 8w.*" conf
+                    builtins.match ".*volume /realm\n +snapshot_dir +\\.btrfs/snapshot\n +subvolume \\.\n +snapshot_preserve_min +6h\n +snapshot_preserve +24h.*" conf
                     != null;
-                message = "btrbk config must keep dense recent /realm snapshots and thin older history";
+                message = "btrbk config must keep recent /realm snapshots in the .btrfs/snapshot layout";
               }
               {
                 assertion =
                   hasConf
                   &&
-                    builtins.match ".*volume /persist\n +snapshot_dir +\\.snapshot\n +subvolume \\.\n +snapshot_preserve_min +4h\n +snapshot_preserve +72h 14d 8w.*" conf
+                    builtins.match ".*volume /persist\n +snapshot_dir +\\.btrfs/snapshot\n +subvolume \\.\n +snapshot_preserve_min +6h\n +snapshot_preserve +24h.*" conf
                     != null;
-                message = "btrbk config must keep dense recent /persist snapshots and thin older history";
+                message = "btrbk config must keep recent /persist snapshots in the .btrfs/snapshot layout";
               }
               {
                 assertion = realmJob.repo == "file:///outer-realm/backup/borg-realm-v2";
@@ -1412,7 +1447,7 @@ let
               # Snapshot dirs created by tmpfiles
               {
                 assertion = builtins.any (
-                  rule: builtins.match ".*\\.snapshot.*" rule != null
+                  rule: builtins.match ".*\\.btrfs/snapshot.*" rule != null
                 ) config.systemd.tmpfiles.rules;
                 message = "Snapshot directories must be created via tmpfiles";
               }
@@ -1553,6 +1588,8 @@ in
           pkgs.zsh
         ];
         homeFiles = [
+          ".codex/config.toml"
+          ".gemini/settings.json"
           ".local/bin/forge"
           ".local/bin/mcp-context7"
           ".local/bin/mcp-firecrawl"
@@ -1561,6 +1598,9 @@ in
           "forge/.forge.toml"
           "forge/.mcp.json"
           "forge/skills"
+        ];
+        xdgConfigFiles = [
+          "claude/settings.json"
         ];
         useHmZshrc = true;
         zshrcPreamble = ''
@@ -1629,7 +1669,7 @@ in
               to = "$TMPDIR/mock-bin/mount";
             }
             {
-              from = "/realm/.snapshot";
+              from = "/realm/.btrfs/snapshot";
               to = "$TMPDIR/realm-snapshots";
             }
             {
@@ -1653,7 +1693,7 @@ in
               to = "$TMPDIR/mock-bin/mount";
             }
             {
-              from = "/persist/.snapshot";
+              from = "/persist/.btrfs/snapshot";
               to = "$TMPDIR/persist-snapshots";
             }
             {
@@ -1677,7 +1717,7 @@ in
               to = "$TMPDIR/mock-bin/mount";
             }
             {
-              from = "/realm/.snapshot";
+              from = "/realm/.btrfs/snapshot";
               to = "$TMPDIR/realm-empty";
             }
             {
@@ -1835,8 +1875,7 @@ in
                 intervalSec = 5;
               };
               systemd.tmpfiles.rules = [
-                "d /persist/.snapshot 0755 root root -"
-                "d /neo-outer-realm/.snapshot 0755 root root -"
+                "d /persist/.btrfs/snapshot 0755 root root -"
               ];
             };
           testScript = ''
@@ -2220,6 +2259,20 @@ in
           name = "dev-agent-tools-runtime-check";
           nativeBuildInputs = builtins.filter (pkg: pkg != pkgs.expect) agentToolsFixture.nativeBuildInputs;
           script = ''
+            test -L "$HOME/.codex/config.toml"
+            test -L "$(readlink "$HOME/.codex/config.toml")"
+            test -L "$HOME/.gemini/settings.json"
+            test -L "$(readlink "$HOME/.gemini/settings.json")"
+            test -L "$HOME/.config/claude/settings.json"
+            test -L "$(readlink "$HOME/.config/claude/settings.json")"
+            test -L "$HOME/forge/.forge.toml"
+            test -L "$(readlink "$HOME/forge/.forge.toml")"
+
+            cp ${lib.escapeShellArg (toString (repoFixtureRoot + "/dots/forge/.forge.toml"))} \
+              "$TMPDIR/forge.toml"
+            rm "$HOME/forge/.forge.toml"
+            cp "$TMPDIR/forge.toml" "$HOME/forge/.forge.toml"
+
             "$HOME/.local/bin/forge" --version | grep -q '^forge '
             "$HOME/.local/bin/forge" config get model | grep -qx 'gpt-5.4'
 
