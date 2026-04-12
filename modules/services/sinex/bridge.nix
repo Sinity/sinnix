@@ -340,50 +340,12 @@ in
         ) [ databasePasswordFile ];
       })
 
-      (lib.mkIf (cfg.provisionDatabase && !cfg.enable) (
-        let
-          sinexPkgs = mkSinexPkgs pkgs;
-          schemaBootstrapScript = pkgs.writeShellScript "sinnix-sinex-schema-bootstrap" ''
-            set -euo pipefail
-
-            mkdir -p "$XDG_STATE_HOME"
-
-            database_url=${lib.escapeShellArg schemaBootstrapUrl}
-            echo "$(date): applying Sinex schema to ${databaseName}"
-            ${sinexPkgs.sinex}/bin/xtask infra schema-apply --database-url "$database_url"
-          '';
-        in
-        {
-          systemd.services.sinex-schema-apply = {
-            description = "Apply Sinex declarative schema";
-            wantedBy = [ "multi-user.target" ];
-            wants = [ "network-online.target" ];
-            environment = {
-              HOME = "/run/sinex-schema-apply";
-              XDG_STATE_HOME = "/run/sinex-schema-apply/.local/state";
-              SINEX_STATE_DIR = "/var/lib/sinex/.local/state/sinex";
-            };
-            after = [
-              "network-online.target"
-              "postgresql.service"
-              "postgresql-setup.service"
-            ];
-            requires = [
-              "postgresql.service"
-              "postgresql-setup.service"
-            ];
-            serviceConfig = {
-              Type = "oneshot";
-              User = schemaBootstrapUser;
-              Group = schemaBootstrapUser;
-              RuntimeDirectory = "sinex-schema-apply";
-              ExecStart = schemaBootstrapScript;
-              TimeoutStartSec = "10min";
-              RemainAfterExit = true;
-            };
-          };
-        }
-      ))
+      # Schema-apply pool cap: the upstream sinex-schema-apply oneshot inherits
+      # the default pool size (100) which can exceed PostgreSQL max_connections
+      # on a host that only provisions the database without the full runtime.
+      (lib.mkIf databasePrepared {
+        systemd.services.sinex-schema-apply.environment.SINEX_DB_MAX_CONNECTIONS = "5";
+      })
     ]
   );
 }
