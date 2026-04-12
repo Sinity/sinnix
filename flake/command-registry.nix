@@ -356,71 +356,64 @@ in
     };
   };
 
+  # Category order for display grouping
+  categoryOrder = [
+    "Core"
+    "Validate"
+    "Maintain"
+    "Smoke"
+  ];
+
   commandDocs = [
     {
       name = "check";
-      command = "nix flake check";
+      category = "Core";
       description = "Validate flake outputs and config assertion tests";
     }
     {
       name = "format";
-      command = "nix fmt";
-      description = "Format configured filetypes via treefmt";
-    }
-    {
-      name = "update";
-      command = "nix flake update";
-      description = "Update flake inputs";
-    }
-    {
-      name = "lint";
-      command = "nix run .#lint";
-      description = "Run deadnix/statix/shellcheck";
-    }
-    {
-      name = "check-heavy";
-      command = "nix run .#check-heavy";
-      description = "Run the heavy non-default check suite sequentially";
-    }
-    {
-      name = "check-all";
-      command = "nix run .#check-all";
-      description = "Run the default and heavy semantic check tiers sequentially";
-    }
-    {
-      name = "test";
-      command = "sudo nix run .#test";
-      description = "Build and test host config without switching";
+      category = "Core";
+      description = "Format via treefmt";
     }
     {
       name = "switch";
-      command = "sudo nix run .#switch";
+      category = "Core";
       description = "Apply host config";
     }
     {
+      name = "test";
+      category = "Core";
+      description = "Test host config without switching";
+    }
+    {
+      name = "lint";
+      category = "Validate";
+      description = "Run deadnix/statix/shellcheck";
+    }
+    {
+      name = "check-all";
+      category = "Validate";
+      description = "Default + heavy semantic check tiers";
+    }
+    {
+      name = "update";
+      category = "Maintain";
+      description = "Update flake inputs";
+    }
+    {
       name = "clean";
-      command = "sudo nix run .#clean";
+      category = "Maintain";
       description = "Prune generations and garbage collect";
     }
     {
       name = "agenix";
-      command = "nix run .#agenix";
+      category = "Maintain";
       description = "Manage encrypted secrets";
     }
     {
-      name = "host-smoke-terminal";
-      command = "nix run .#host-smoke-terminal";
-      description = "Run an opt-in tmux-based interactive terminal smoke probe";
-    }
-    {
-      name = "host-smoke-services";
-      command = "nix run .#host-smoke-services";
-      description = "Run an opt-in live host smoke probe for service surfaces";
-    }
-    {
-      name = "host-smoke-all";
-      command = "nix run .#host-smoke-all";
-      description = "Run the full host smoke suite and persist captured artifacts";
+      name = "smoke";
+      category = "Smoke";
+      description = "Host smoke suite (smoke [terminal|services])";
     }
   ];
 }
