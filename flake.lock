@@ -963,11 +963,10 @@
         ]
       },
       "locked": {
-        "lastModified": 1774336399,
-        "narHash": "sha256-NE8ZGbsJIoSL7BrVv5bPyepJHDQF7CFhFmUiTYXhi9E=",
-        "ref": "refs/heads/master",
-        "rev": "1850ef945a2fc3e2df11821d983e63a9369be8f4",
-        "revCount": 2264,
+        "dirtyRev": "7ef22f5fbc577d1c8c40a9d699672a77d0342040-dirty",
+        "dirtyShortRev": "7ef22f5-dirty",
+        "lastModified": 1775991312,
+        "narHash": "sha256-gMxSmx2JZke/B/dxvneir9EHdXFumAIu2rToK/shQSU=",
         "type": "git",
         "url": "file:///realm/project/sinex"
       },
