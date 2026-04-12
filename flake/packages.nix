@@ -13,7 +13,6 @@
       publicPackageNames = [
         "ccusage"
         "lynchpin-python"
-        "mcp-context7"
         "mcp-firecrawl"
         "normalize-agent-projects"
         "polylogue-cli"

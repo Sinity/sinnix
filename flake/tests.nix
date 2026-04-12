@@ -401,9 +401,6 @@ let
                 message = "Codex skills must stay a direct directory symlink, not a recursive materialization";
               }
               (expect.textContains (managedEntrySource
-                hm.home.file.".local/bin/mcp-context7"
-              ) "/bin/mcp-context7" "Context7 wrapper must point at the packaged binary")
-              (expect.textContains (managedEntrySource
                 hm.home.file.".local/bin/mcp-firecrawl"
               ) "/bin/mcp-firecrawl" "Firecrawl wrapper must point at the packaged binary")
               (expect.textContains (managedEntrySource
@@ -424,8 +421,11 @@ let
               (expect.textContains codexConfigText "[mcp_servers.context7]"
                 "Codex config must declare the Context7 MCP server"
               )
-              (expect.textContains codexConfigText "url = \"http://127.0.0.1:3939/mcp\""
-                "Codex config must point Context7 at the singleton HTTP endpoint"
+              (expect.textContains codexConfigText "url = \"https://mcp.context7.com/mcp\""
+                "Codex config must point Context7 at the remote hosted endpoint"
+              )
+              (expect.textContains codexConfigText "bearer_token_env_var = \"CONTEXT7_API_KEY\""
+                "Codex config must use bearer token auth for Context7"
               )
               (expect.textContains codexConfigText "[mcp_servers.github]"
                 "Codex config must declare the GitHub MCP server"
@@ -451,7 +451,7 @@ let
                 "mcpServers"
                 "context7"
                 "httpUrl"
-              ] "http://127.0.0.1:3939/mcp" "Gemini config must point Context7 at the singleton HTTP endpoint")
+              ] "https://mcp.context7.com/mcp" "Gemini config must point Context7 at the remote hosted endpoint")
               (expect.attrPathEq geminiSettings [
                 "mcpServers"
                 "github"
@@ -489,7 +489,7 @@ let
                 "mcpServers"
                 "context7"
                 "url"
-              ] "http://127.0.0.1:3939/mcp" "Forge MCP config must point Context7 at the singleton HTTP endpoint")
+              ] "https://mcp.context7.com/mcp" "Forge MCP config must point Context7 at the remote hosted endpoint")
               (expect.attrPathEq forgeMcpConfig [
                 "mcpServers"
                 "firecrawl"
@@ -1591,7 +1591,6 @@ in
           ".codex/config.toml"
           ".gemini/settings.json"
           ".local/bin/forge"
-          ".local/bin/mcp-context7"
           ".local/bin/mcp-firecrawl"
           ".local/bin/mcp-playwright"
           ".local/bin/mcp-polylogue"
@@ -2284,7 +2283,7 @@ in
             grep -q '~/forge/permissions.yaml' "$TMPDIR/forge-env.txt"
 
             jq -e '
-              .mcpServers.context7.url == "http://127.0.0.1:3939/mcp" and
+              .mcpServers.context7.url == "https://mcp.context7.com/mcp" and
               .mcpServers.firecrawl.command == "mcp-firecrawl" and
               .mcpServers.playwright.command == "mcp-playwright" and
               .mcpServers.playwright.args == ["--headless"] and

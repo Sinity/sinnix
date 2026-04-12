@@ -1,7 +1,8 @@
 # Model Context Protocol (MCP) servers and AI-integrated tool settings
 #
 # Provides:
-# - MCP server wrappers (Context7, Firecrawl, Playwright)
+# - MCP server wrappers (Firecrawl, Playwright)
+# - MCP server registry (Context7 remote, GitHub, Firecrawl, Playwright, Polylogue)
 # - Claude/Codex/Gemini dotfile linking and integration
 # - System monitoring tools (htop)
 {
@@ -16,26 +17,7 @@ mkFeatureModule {
     "mcp-servers"
   ];
   description = "MCP servers and AI tool integration";
-  extraOptions = {
-    context7Singleton = lib.mkOption {
-      type = lib.types.submodule {
-        options = {
-          enable = lib.mkOption {
-            type = lib.types.bool;
-            default = true;
-            description = "Run Context7 MCP as a singleton HTTP service for all MCP clients.";
-          };
-          port = lib.mkOption {
-            type = lib.types.ints.between 1 65535;
-            default = 3939;
-            description = "Local port for the Context7 singleton MCP service.";
-          };
-        };
-      };
-      default = { };
-      description = "Context7 singleton service settings.";
-    };
-  };
+  extraOptions = { };
   configFn =
     {
       config,
@@ -72,9 +54,6 @@ mkFeatureModule {
           ${mkRuntimeSecretExports runtimeSecretEnv}
           exec ${lib.escapeShellArgs ([ command ] ++ args)} "$@"
         '';
-      mcpContext7Bin = mkMcpWrapper "mcp-context7" {
-        command = "${scriptPkgs.mcp-context7}/bin/mcp-context7";
-      };
       mcpFirecrawlBin = mkMcpWrapper "mcp-firecrawl" {
         command = "${scriptPkgs.mcp-firecrawl}/bin/mcp-firecrawl";
         runtimeSecretEnv = lib.optionalAttrs (firecrawlSecretPath != null) {
@@ -90,19 +69,16 @@ mkFeatureModule {
       };
       geminiPkg = inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.gemini-cli;
       pruneAttrs = lib.filterAttrs (_: value: value != null && value != [ ] && value != { });
-      mcpServerRegistry =
-        (lib.optionalAttrs cfg.context7Singleton.enable {
+      mcpServerRegistry = {
           context7 = {
             transport = "http";
-            url = "http://127.0.0.1:${toString cfg.context7Singleton.port}/mcp";
+            url = "https://mcp.context7.com/mcp";
             clients = [
               "codex"
               "gemini"
               "forge"
             ];
           };
-        })
-        // {
           github = {
             transport = "http";
             url = "https://api.githubcopilot.com/mcp/";
@@ -199,20 +175,6 @@ mkFeatureModule {
             geminiPkg
           ];
 
-          systemd.user.services.mcp-context7-singleton = lib.mkIf cfg.context7Singleton.enable {
-            Unit = {
-              Description = "Context7 MCP singleton (HTTP)";
-              After = [ "network-online.target" ];
-            };
-            Service = {
-              Type = "simple";
-              ExecStart = "${mcpContext7Bin}/bin/mcp-context7 --transport http --port ${toString cfg.context7Singleton.port}";
-              Restart = "on-failure";
-              RestartSec = "2s";
-            };
-            Install.WantedBy = [ "default.target" ];
-          };
-
           home = {
             activation = {
               restoreConfigstore = lib.mkIf (secretPaths ? "configstore-update-notifier") (
@@ -248,7 +210,6 @@ mkFeatureModule {
               source = forgeMcpConfigFile;
               force = true;
             };
-            ".local/bin/mcp-context7".source = "${mcpContext7Bin}/bin/mcp-context7";
             ".local/bin/mcp-firecrawl".source = "${mcpFirecrawlBin}/bin/mcp-firecrawl";
             ".local/bin/mcp-playwright".source = "${mcpPlaywrightBin}/bin/mcp-playwright";
             ".local/bin/mcp-polylogue".source = "${mcpPolylogueBin}/bin/mcp-polylogue";

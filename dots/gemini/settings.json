@@ -38,7 +38,10 @@
   },
   "mcpServers": {
     "context7": {
-      "httpUrl": "http://127.0.0.1:3939/mcp"
+      "headers": {
+        "Authorization": "Bearer ${CONTEXT7_API_KEY}"
+      },
+      "httpUrl": "https://mcp.context7.com/mcp"
     },
     "polylogue": {
       "command": "mcp-polylogue",

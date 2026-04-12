@@ -44,7 +44,9 @@
       "mcp__claude_ai_SimpleScraper__*",
       "mcp__claude_ai_Mermaid_Chart__*"
     ],
-    "deny": ["Bash(rm -rf /:*)"],
+    "deny": [
+      "Bash(rm -rf /:*)"
+    ],
     "ask": [],
     "defaultMode": "default"
   },
@@ -96,5 +98,6 @@
       "command": "mcp-polylogue",
       "args": []
     }
-  }
+  },
+  "skipDangerousModePermissionPrompt": true
 }

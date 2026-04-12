@@ -8,8 +8,7 @@
     },
     "context7": {
       "type": "http",
-      "url": "http://127.0.0.1:3939/mcp",
-      "gallery": true
+      "url": "https://mcp.context7.com/mcp"
     },
     "Parallel Search MCP": {
       "type": "http",

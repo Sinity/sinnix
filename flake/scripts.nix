@@ -334,15 +334,6 @@ let
       target = "${inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.api-python}/bin/python";
     };
 
-    mcp-context7 = mkNodeCliPackage {
-      pname = "mcp-context7";
-      version = "2.1.4";
-      src = ./npm/context7-mcp;
-      packagePath = "@upstash/context7-mcp";
-      entrypoint = "dist/index.js";
-      npmDepsHash = "sha256-Tlo/IcyETB6iEqo9MYN937TAS3DmHCSmfBDwa+4HzDM=";
-    };
-
     mcp-firecrawl = mkNodeCliPackage {
       pname = "mcp-firecrawl";
       version = "3.10.3";
