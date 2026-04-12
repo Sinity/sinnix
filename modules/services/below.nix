@@ -4,9 +4,10 @@
 # Use `below replay` to investigate what happened at any point in time.
 #
 # Data stored in /var/log/below (default).
-# Storage: ~64 MB/day at 1s interval with dict-compress (chunk-32, ~99x).
-# Without dict-compress: ~6.5 GB/day (plain zstd only gets ~10x on the
-# CBOR format which repeats string field keys in every frame).
+# Storage: ~720 MB/day at 1s interval with dict-compress (chunk-32, ~9x over plain zstd).
+# Without dict-compress: ~6.5 GB/day. No retention limit — accumulate indefinitely
+# (~26 GB/year). below's CBOR format repeats field-name strings per frame;
+# dict-compress learns them across adjacent frames for the extra 9x.
 # Export via: below dump -O json/csv
 {
   mkServiceModule,
