@@ -1,10 +1,11 @@
 ## Cross-Project Tooling
 
-### Codex CLI
+### AI Agent Configs
 
-- **Config**: `dots/codex/config.toml`, Codex skills in `dots/codex/skills`, Claude skills in `dots/claude/skills`
-- **MCP Servers**: GitHub, Context7 (singleton HTTP), Firecrawl
-- **Context7**: Documentation discovery via `resolve-library-id` and `query-docs`
+- **Claude**: `dots/claude/` — CLAUDE.md read natively; other agents get flat renders via `render-agents` on HM activation and on `dots/claude/` file changes (systemd path unit).
+- **Codex**: `dots/codex/config.toml`, skills overlay at `dots/codex/skills/` (`.system/` holds Codex-only system skills).
+- **MCP Servers**: All five servers (polylogue, context7, github, firecrawl, playwright) are universal — all agents get all of them. Registry source of truth: `modules/features/dev/mcp-servers.nix`.
+- **Context7**: Documentation discovery via `resolve-library-id` and `query-docs`.
 
 ### Desktop Environment
 
