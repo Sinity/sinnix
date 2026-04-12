@@ -51,6 +51,7 @@
     power-watchdog.enable = true;
     network-monitor.enable = true;
     sentinel.enable = true;
+    weechat-log-sealer.enable = true;
   };
 
   systemd.services.systemd-tpm2-setup.enable = lib.mkForce false;

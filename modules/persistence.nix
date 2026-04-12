@@ -185,6 +185,7 @@ in
       # IRC
       ".config/weechat"
       ".local/state/weechat"
+      ".local/share/weechat" # logs
 
       # Peripherals
       {
