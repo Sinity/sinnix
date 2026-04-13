@@ -39,10 +39,10 @@
     terminal-capture.enable = true;
     below.enable = true;
     sinex = {
-      # Keep the runtime off for now, but stage the full workstation profile so
-      # flipping `enable = true` later only turns on the already-curated graph.
+      # Keep the full workstation profile staged while the runtime is live so
+      # production proof work exercises the checked-in graph directly.
       prepareHost = true;
-      enable = false;
+      enable = true;
       provisionDatabase = true;
       activationProfile = "full";
       environment = "prod";
@@ -53,6 +53,13 @@
     sentinel.enable = true;
     weechat-log-sealer.enable = true;
   };
+
+  users.users.sinex.homeMode = lib.mkForce "0711";
+  system.activationScripts.sinexHomeTraverse = ''
+    if getent passwd sinex >/dev/null; then
+      install -d -m 0711 -o sinex -g sinex /var/lib/sinex
+    fi
+  '';
 
   systemd.services.systemd-tpm2-setup.enable = lib.mkForce false;
   systemd.services.systemd-tpm2-setup-early.enable = lib.mkForce false;
