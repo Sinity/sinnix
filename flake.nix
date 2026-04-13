@@ -40,7 +40,9 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Custom tools and integrations (prefer local clones under /realm/project)
+    # Custom tools and integrations (prefer local clones under /realm/project).
+    # Keep local project inputs pinned to committed git state by default so
+    # ordinary flake evals do not snapshot large, dirty worktrees.
     intercept-bounce = {
       url = "git+file:///realm/project/intercept-bounce?ref=master";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -52,18 +54,20 @@
     };
 
     polylogue = {
-      url = "path:/realm/project/polylogue";
+      url = "git+file:///realm/project/polylogue?ref=master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
     lynchpin = {
-      url = "path:/realm/project/sinity-lynchpin";
+      url = "git+file:///realm/project/sinity-lynchpin?ref=master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Private Sinex repository stored locally; build fails fast if missing.
+    # Private Sinex repository stored locally. The default lock stays pinned to
+    # the current committed HEAD; switch/test-system wrappers can override it with a
+    # sanitized snapshot of a dirty worktree when needed.
     sinex = {
-      url = "git+file:///realm/project/sinex";
+      url = "git+file:///realm/project/sinex?ref=master";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.agenix.follows = "agenix";
     };
@@ -74,12 +78,15 @@
     # System-wide theming
     stylix.url = "github:danth/stylix";
     stylix.inputs.nixpkgs.follows = "nixpkgs";
+    stylix.inputs.flake-parts.follows = "flake-parts";
 
     # VSCode extensions overlay (community-maintained)
     nix-vscode-extensions.url = "github:nix-community/nix-vscode-extensions";
     nix-vscode-extensions.inputs.nixpkgs.follows = "nixpkgs";
 
     llm-agents.url = "github:numtide/llm-agents.nix";
+    llm-agents.inputs.nixpkgs.follows = "nixpkgs";
+    llm-agents.inputs.flake-parts.follows = "flake-parts";
 
     # aw-server-rust with heartbeat fix (PR #555)
     aw-server-rust = {

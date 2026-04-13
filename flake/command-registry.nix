@@ -15,6 +15,30 @@ let
   resolveFlakeDir = ''
     _flake_dir="''${PRJ_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
   '';
+  avoidRepoCwdForActivation = ''
+    # nixos-rebuild-ng can trip over a git checkout cwd during activation.
+    # Keep the resolved flake path, then leave the repository before invoking it.
+    _invoke_flake_dir="$_flake_dir"
+    cd "''${SUDO_HOME:-''${HOME:-/root}}"
+  '';
+  localInputOverrideArgs = ''
+    nix_override_args=()
+    append_override_arg() {
+      nix_override_args+=(
+        --override-input "$1" "$2"
+        --no-write-lock-file
+      )
+    }
+    if [ -n "''${SINNIX_SINEX_OVERRIDE:-}" ]; then
+      append_override_arg sinex "$SINNIX_SINEX_OVERRIDE"
+    fi
+    if [ -n "''${SINNIX_POLYLOGUE_OVERRIDE:-}" ]; then
+      append_override_arg polylogue "$SINNIX_POLYLOGUE_OVERRIDE"
+    fi
+    if [ -n "''${SINNIX_LYNCHPIN_OVERRIDE:-}" ]; then
+      append_override_arg lynchpin "$SINNIX_LYNCHPIN_OVERRIDE"
+    fi
+  '';
   hostSmokeTerminalScript = ''
     session="sinnix-host-smoke-$$"
     artifact_dir="''${SINNIX_HOST_SMOKE_ARTIFACT_DIR:-}"
@@ -284,15 +308,18 @@ in
       '';
     };
 
-    test = {
+    test-system = {
       description = "Test configuration without applying it to the system";
       script = ''
         ${resolveFlakeDir}
         if [ "$(id -u)" -ne 0 ]; then
-          echo "Error: This command must be run as root (use 'sudo nix run $_flake_dir#test')"
+          echo "Error: This command must be run as root (use 'sudo nix run $_flake_dir#test-system')"
           exit 1
         fi
-        ${pkgs.nixos-rebuild}/bin/nixos-rebuild test --flake "$_flake_dir#sinnix-prime" \
+        ${avoidRepoCwdForActivation}
+        ${localInputOverrideArgs}
+        ${pkgs.nixos-rebuild}/bin/nixos-rebuild test --flake "$_invoke_flake_dir#sinnix-prime" \
+          "''${nix_override_args[@]}" \
           --log-format internal-json -v 2>&1 | ${pkgs.nix-output-monitor}/bin/nom --json
       '';
     };
@@ -305,7 +332,10 @@ in
           echo "Error: This command must be run as root (use 'sudo nix run $_flake_dir#switch')"
           exit 1
         fi
-        ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --flake "$_flake_dir#sinnix-prime" \
+        ${avoidRepoCwdForActivation}
+        ${localInputOverrideArgs}
+        ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --flake "$_invoke_flake_dir#sinnix-prime" \
+          "''${nix_override_args[@]}" \
           --log-format internal-json -v 2>&1 | ${pkgs.nix-output-monitor}/bin/nom --json
       '';
     };
@@ -381,7 +411,7 @@ in
       description = "Apply host config";
     }
     {
-      name = "test";
+      name = "test-system";
       category = "Core";
       description = "Test host config without switching";
     }
