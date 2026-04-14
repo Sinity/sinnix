@@ -38,6 +38,7 @@ mkFeatureModule {
           # NVIDIA+Wayland+HDR setups while keeping normal GPU acceleration.
           chromeArgs = lib.concatStringsSep " " [
             "--disable-features=WaylandWpColorManagerV1,Vulkan,DefaultANGLEVulkan"
+            "--remote-debugging-port=9222"
           ];
           chromePkg = pkgs.google-chrome.override {
             commandLineArgs = chromeArgs;

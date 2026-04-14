@@ -44,8 +44,8 @@ mkFeatureModule {
         nix-tree
         wireshark
         powertop
-        nodePackages_latest.bash-language-server
-        nodePackages_latest.yaml-language-server
+        bash-language-server
+        yaml-language-server
         sysstat
         strace
         gallery-dl
