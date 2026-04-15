@@ -82,6 +82,10 @@ mkFeatureModule {
       serifName = stylixFontSpec.serif.name;
     in
     {
+      home-manager.sharedModules = lib.singleton {
+        disabledModules = [ "${inputs.stylix}/modules/opencode/hm.nix" ];
+      };
+
       # Force unset portal env var in all shells (prevents stale session vars)
       home-manager.users.${config.sinnix.user.name}.programs.zsh.initContent = lib.mkBefore ''
         unset NIXOS_XDG_OPEN_USE_PORTAL
