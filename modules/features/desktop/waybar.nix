@@ -89,6 +89,7 @@ mkFeatureModule {
               #disk,
               #custom-audio,
               #custom-health,
+              #custom-agent,
               #custom-notification,
               #tray {
                 background-color: rgba(40, 42, 54, 0.75);
@@ -112,6 +113,16 @@ mkFeatureModule {
               #custom-audio.hdmi,
               #custom-audio.monitor { color: #fe8019; }
               #custom-audio.usb { color: #b8bb26; }
+
+              #custom-agent { color: #83a598; }
+              #custom-agent.idle { color: #665c54; }
+              #custom-agent.live { color: #83a598; }
+              #custom-agent.pending {
+                color: #fabd2f;
+                border-color: rgba(250, 189, 47, 0.6);
+                background-color: rgba(250, 189, 47, 0.12);
+              }
+              #custom-agent.missing { color: #fb4934; }
 
               #tray button,
               #tray .item {
@@ -144,6 +155,7 @@ mkFeatureModule {
                 "disk"
                 "custom/audio"
                 "custom/health"
+                "custom/agent"
                 "custom/notification"
               ];
               clock = {
@@ -238,6 +250,21 @@ mkFeatureModule {
                   "
                 ''}";
                 on-click = "kitty -e sinnix-sentinel --verbose";
+              };
+              "custom/agent" = {
+                tooltip = true;
+                format = "{}";
+                return-type = "json";
+                interval = 5;
+                exec = "${pkgs.writeShellScript "waybar-agent" ''
+                  set -euo pipefail
+                  if [ -x /home/sinity/.local/bin/agent-state ]; then
+                    /home/sinity/.local/bin/agent-state --waybar
+                  else
+                    echo '{"text":"agent?","alt":"missing","class":"missing","tooltip":"agent-state not on PATH"}'
+                  fi
+                ''}";
+                on-click = "/home/sinity/.local/bin/agent-surface";
               };
               "custom/notification" = {
                 tooltip = false;

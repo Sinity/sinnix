@@ -60,7 +60,7 @@ in
 
     # F-key bindings
     ", F3, exec, asbl-no-moar once --mode invert --duration 0.05"
-    ", F4, exec, kitty --class scratchpad-claude --title 'Claude Assistant' ${script "claude-scratchpad"}"
+    ", F4, exec, ${script "toggle-scratch"} agent"
     ", F6, exec, ${script "toggle-scratch"} weechat"
     ", F8, exec, ${script "toggle-scratch"} rawlog"
     ", F9, exec, ${script "nuke-builds"}"
