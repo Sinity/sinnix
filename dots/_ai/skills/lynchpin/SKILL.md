@@ -74,7 +74,7 @@ python3 scripts/run_narrative_evidence.py \
   --start 2026-03-16 \
   --end 2026-03-17 \
   --providers claude-code codex \
-  --outdir /realm/project/sinity-lynchpin/.claude/scratch/narratives
+  --outdir /realm/project/sinity-lynchpin/.agent/scratch/narratives
 ```
 
 ## Working Paths

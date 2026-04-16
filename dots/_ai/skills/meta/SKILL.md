@@ -113,7 +113,7 @@ CLAUDE.md                 # Project patterns (loaded when in dir)
 
 ## Pinned Notes
 
-@.claude/scratch/topic.md
+@.agent/scratch/topic.md
 ```
 
 **Heuristic**: If you've explained something twice, it should be documented.

@@ -7,19 +7,20 @@ Externalize reasoning to scratch files. Write liberally - context is expensive, 
 - **Always**: Non-trivial analysis, multi-step debugging, architectural decisions
 - **Proactively**: Anything you figure out that took >1 tool call to discover
 - **Especially**: Cross-session work, context-compaction-spanning tasks
-- **Bootstrap when missing**: If a project lacks `.claude/scratch/`, create it early for any non-trivial work and ensure the project `.gitignore` ignores it before you start accumulating notes
+- **Bootstrap when missing**: If a project lacks `.agent/scratch/`, create it early for any non-trivial work and ensure the project `.gitignore` ignores it before you start accumulating notes
 
 ### File Locations
 
 | Scope                | Location                           | Use                                |
 | -------------------- | ---------------------------------- | ---------------------------------- |
 | Global/cross-project | `~/.claude/scratch/NNN-<topic>.md` | System-wide learnings, config work |
-| Project-specific     | `.claude/scratch/NNN-<topic>.md`   | Project analysis, debugging notes  |
+| Project-specific     | `.agent/scratch/NNN-<topic>.md`    | Project analysis, debugging notes  |
 
 Project hygiene:
 
 - Project-local scratch space should exist by default for active repos that receive agent-driven analysis
-- If `.claude/scratch/` is absent, create it and add a matching `.gitignore` entry as part of the first substantial analysis pass
+- If `.agent/scratch/` is absent, create it and add a matching `.gitignore` entry as part of the first substantial analysis pass
+- **Never use `.claude/` for per-project auxiliary content.** Claude Code treats `.claude/` as a protected path and prompts for permission on every write. `.agent/` is the project-local convention; `.claude/` is reserved only for files Claude Code natively reads (`settings.local.json`, `commands/`, `agents/`, `skills/` if any).
 
 ### File Structure
 
@@ -69,14 +70,14 @@ Projects can maintain a "Pinned Notes" section that **transcludes** scratch file
 ```markdown
 ## Pinned Notes
 
-@.claude/scratch/003-replay-bug-hunt.md
-@.claude/scratch/007-schema-v5-migration.md
+@.agent/scratch/003-replay-bug-hunt.md
+@.agent/scratch/007-schema-v5-migration.md
 ```
 
 **Key behaviors:**
 
 - `@` transcludes file content into CLAUDE.md at session startup
-- Works with project-relative (`.claude/scratch/...`) and absolute (`@~/.claude/scratch/...`) paths
+- Works with project-relative (`.agent/scratch/...`) and absolute (`@~/.claude/scratch/...`) paths
 - Max 5 hops of recursive imports
 - NOT evaluated inside code blocks - must be bare `@path` on its own line
 - Run `/memory` to see what files are loaded

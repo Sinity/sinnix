@@ -73,16 +73,16 @@ MATCH config_type:
 
 ## Module Details
 
-@.claude/includes/modules/\_index.md
+@.agent/includes/modules/\_index.md
 
 ---
 
 ## Development
 
-@.claude/includes/development/\_index.md
+@.agent/includes/development/\_index.md
 
 ---
 
 ## Reference
 
-@.claude/includes/reference/\_index.md
+@.agent/includes/reference/\_index.md

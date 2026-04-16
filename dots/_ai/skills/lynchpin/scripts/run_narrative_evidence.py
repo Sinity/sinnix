@@ -239,7 +239,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--outdir",
-        default="/realm/project/sinity-lynchpin/.claude/scratch/narratives",
+        default="/realm/project/sinity-lynchpin/.agent/scratch/narratives",
         help="Output directory for raw evidence JSON",
     )
     parser.add_argument(

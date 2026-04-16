@@ -36,8 +36,8 @@ dots/Kvantum/
 build.log
 compilation.log
 _tmp_do_not_include_in_version_control.md
-.claude/scratch/*
-!.claude/scratch/.gitkeep
+.agent/scratch/*
+!.agent/scratch/.gitkeep
 
 # Only ignore unencrypted secrets
 *.key

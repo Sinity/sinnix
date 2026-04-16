@@ -26,6 +26,6 @@ cat ~/.claude/projects/<project>/<session-id>.jsonl | jq -r 'select(.type=="user
 
 When accessing history, write down learnings to prevent re-discovery:
 
-1. **Session summaries**: `.claude/history-summaries/<id>.md`
-2. **Cross-session patterns**: `.claude/learnings.local.md`
+1. **Session summaries**: `.agent/history-summaries/<id>.md`
+2. **Cross-session patterns**: `.agent/learnings.local.md`
 3. **Recurring solutions**: Add to relevant CLAUDE.md (use the `meta` skill, `remember` flow)
