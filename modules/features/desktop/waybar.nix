@@ -123,6 +123,11 @@ mkFeatureModule {
                 background-color: rgba(250, 189, 47, 0.12);
               }
               #custom-agent.missing { color: #fb4934; }
+              #custom-agent.unhealthy {
+                color: #fb4934;
+                border-color: rgba(251, 73, 52, 0.7);
+                background-color: rgba(251, 73, 52, 0.18);
+              }
 
               #tray button,
               #tray .item {
