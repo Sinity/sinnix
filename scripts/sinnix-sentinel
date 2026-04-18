@@ -9,13 +9,23 @@ PREV_HEALTH_FILE="${SINNIX_HEALTH_FILE:-/run/sinnix/health.json}.prev"
 EVENT_LOG="${SINNIX_EVENT_LOG:-/var/log/sinnix-sentinel/events.jsonl}"
 CORRECTIVE_ACTIONS="${SINNIX_CORRECTIVE_ACTIONS:-true}"
 NOTIFICATIONS="${SINNIX_NOTIFICATIONS:-true}"
-MCP_CHILD_THRESHOLD="${SINNIX_MCP_CHILD_THRESHOLD:-1}"
+MCP_CHILD_THRESHOLD="${SINNIX_MCP_CHILD_THRESHOLD:-2}"
 REBOOT_STATE_FILE="${SINNIX_REBOOT_STATE_FILE:-/var/lib/sinnix-sentinel/reboot-last-notified-system}"
 VERBOSE=false
 JSON_ONLY=false
 
+usage() {
+  cat <<'EOF'
+Usage: sinnix-sentinel [--verbose] [--json] [--no-correct] [--no-notify]
+EOF
+}
+
 for arg in "$@"; do
   case "$arg" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
     --verbose) VERBOSE=true ;;
     --json) JSON_ONLY=true ;;
     --no-correct) CORRECTIVE_ACTIONS=false ;;
@@ -100,6 +110,50 @@ can_write_parent() {
   [ -w "$parent" ]
 }
 
+notify_user="${SINNIX_NOTIFY_USER:-}"
+user_manager_args=()
+if [ -n "$notify_user" ]; then
+  user_manager_args=(--machine="${notify_user}@.host" --user)
+fi
+
+run_scoped_systemctl() {
+  local scope="$1"
+  shift
+  if [ "$scope" = "user" ]; then
+    systemctl "${user_manager_args[@]}" "$@"
+  else
+    systemctl "$@"
+  fi
+}
+
+unit_load_state() {
+  local scope="$1" unit="$2"
+  run_scoped_systemctl "$scope" show "$unit" --property=LoadState --value 2>/dev/null || true
+}
+
+pick_unit_scope() {
+  local type="$1" unit="$2"
+
+  if [ "$type" = "user" ] && [ ${#user_manager_args[@]} -gt 0 ]; then
+    echo "user"
+    return
+  fi
+
+  if [ "$type" = "timer" ] && [ ${#user_manager_args[@]} -gt 0 ]; then
+    if [ "$(unit_load_state system "$unit")" = "loaded" ]; then
+      echo "system"
+      return
+    fi
+
+    if [ "$(unit_load_state user "$unit")" = "loaded" ]; then
+      echo "user"
+      return
+    fi
+  fi
+
+  echo "system"
+}
+
 # ── Load policy ───────────────────────────────────────────────────────
 if [ ! -f "$POLICY_FILE" ]; then
   echo "FATAL: health policy not found at $POLICY_FILE" >&2
@@ -107,7 +161,7 @@ if [ ! -f "$POLICY_FILE" ]; then
 fi
 POLICY=$(cat "$POLICY_FILE")
 if ! [[ "$MCP_CHILD_THRESHOLD" =~ ^[0-9]+$ ]]; then
-  MCP_CHILD_THRESHOLD=1
+  MCP_CHILD_THRESHOLD=2
 fi
 
 # ── 1. Hardware ──────────────────────────────────────────────────────
@@ -125,8 +179,16 @@ fi
 
 # SMART Status
 if command -v smartctl &>/dev/null; then
-  if sudo smartctl -H /dev/nvme0n1 2>/dev/null | grep -Ei "test result: (PASSED|OK)" >/dev/null; then
+  smartctl_cmd=(smartctl)
+  if [ "$(id -u)" -ne 0 ] && command -v sudo &>/dev/null; then
+    smartctl_cmd=(sudo -n smartctl)
+  fi
+
+  smart_status="$("${smartctl_cmd[@]}" -H /dev/nvme0n1 2>&1 || true)"
+  if grep -Ei "test result: (PASSED|OK)" <<<"$smart_status" >/dev/null; then
     record_check "hardware" "smart" "ok" "NVMe health passed"
+  elif grep -Eqi "permission denied|a password is required|sudo:|not permitted" <<<"$smart_status"; then
+    record_check "hardware" "smart" "warn" "NVMe SMART check skipped (insufficient permissions)"
   else
     record_check "hardware" "smart" "fail" "NVMe health CRITICAL or UNKNOWN"
     queue_notification "critical" "sentinel: NVMe SMART health check FAILED"
@@ -184,25 +246,25 @@ fi
 $VERBOSE && printf '\n%sServices:%s\n' "$BOLD" "$NC"
 
 while IFS='|' read -r name unit type restartable; do
-  SCTL="systemctl"; [ "$type" = "user" ] && SCTL="systemctl --user"
+  scope="$(pick_unit_scope "$type" "$unit")"
   
   if [ "$type" = "timer" ]; then
-    if $SCTL is-enabled "$unit" &>/dev/null; then
-      next=$($SCTL show "$unit" --property=NextElapseUSecRealtime --value 2>/dev/null || echo "")
+    if run_scoped_systemctl "$scope" is-enabled "$unit" &>/dev/null; then
+      next="$(run_scoped_systemctl "$scope" show "$unit" --property=NextElapseUSecRealtime --value 2>/dev/null || echo "")"
       record_check "services" "$name" "ok" "timer enabled${next:+ (next: $next)}"
     else
       record_check "services" "$name" "fail" "timer not enabled"
     fi
   else
-    active_state=$($SCTL show "$unit" --property=ActiveState --value 2>/dev/null || echo "unknown")
+    active_state="$(run_scoped_systemctl "$scope" show "$unit" --property=ActiveState --value 2>/dev/null || echo "unknown")"
     if [ "$active_state" = "active" ]; then
-      mem=$($SCTL show "$unit" --property=MemoryCurrent --value 2>/dev/null || echo "0")
+      mem="$(run_scoped_systemctl "$scope" show "$unit" --property=MemoryCurrent --value 2>/dev/null || echo "0")"
       mem_mb=$((mem / 1048576))
       record_check "services" "$name" "ok" "active${mem_mb:+ (${mem_mb}MB)}"
     else
       record_check "services" "$name" "fail" "$active_state"
       if [ "$CORRECTIVE_ACTIONS" = "true" ] && [ "$restartable" = "true" ]; then
-        $SCTL restart "$unit" 2>/dev/null && queue_notification "normal" "sentinel: restarted $name"
+        run_scoped_systemctl "$scope" restart "$unit" 2>/dev/null && queue_notification "normal" "sentinel: restarted $name"
       fi
     fi
   fi

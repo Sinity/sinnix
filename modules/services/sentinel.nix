@@ -47,7 +47,7 @@ mkServiceModule {
     };
     mcpChildThreshold = lib.mkOption {
       type = lib.types.int;
-      default = 1;
+      default = 2;
       description = "Maximum allowed MCP child processes per parent process before sentinel alerts.";
     };
   };

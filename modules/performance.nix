@@ -1,8 +1,8 @@
 # Performance Tuning
 #
-# Philosophy: 32GB RAM is enough. Don't swap as working memory — OOM-kill
-# runaway processes instead. Swap exists only as a brief buffer so earlyoom
-# has time to react before the kernel OOM killer makes a worse choice.
+# Philosophy: keep the desktop responsive under pressure by giving the kernel a
+# meaningful zram-backed landing zone for bursts, then containing runaway work
+# in dedicated slices before the whole box degrades.
 {
   pkgs,
   lib,
@@ -11,14 +11,13 @@
 }:
 {
   config = lib.mkIf config.sinnix.machine.isDesktop {
-    # Zram: small compressed swap buffer — just enough runway for earlyoom to
-    # detect pressure and kill the right process. NOT working memory.
-    # 10% of 32GB = 3.2GB compressed ≈ 6-8GB logical pages. Deliberately small:
-    # large swap hides memory leaks and causes slow crawls instead of fast kills.
+    # Give the kernel a modest compressed buffer for burst absorption. The goal
+    # is not to run the workstation out of swap; it is to avoid instant hard
+    # failure on short spikes while keeping steady-state pressure out of swap.
     zramSwap = {
       enable = true;
       algorithm = "zstd";
-      memoryPercent = 10;
+      memoryPercent = 20;
     };
 
     systemd.settings.Manager = {
@@ -26,9 +25,11 @@
     };
 
     boot.kernel.sysctl = {
-      # swappiness=0: only swap to avoid OOM. Normal desktop workloads should
-      # never touch swap — if they do, something is wrong and earlyoom should kill it.
-      "vm.swappiness" = 0;
+      # Allow some zram use during transient pressure without turning the normal
+      # desktop path into a swap-first policy.
+      "vm.swappiness" = 40;
+      # zram is cheap random access; clustered swap readahead just adds latency.
+      "vm.page-cluster" = 0;
       # Keep inode/dentry cache hot — NixOS store paths are long and frequently
       # resolved. Reducing eviction pressure improves terminal startup latency.
       "vm.vfs_cache_pressure" = 50;
@@ -49,27 +50,46 @@
           "fs.inotify.max_user_watches" = 524288;
         };
 
-    # Earlyoom: the actual OOM policy. Kill early, kill fast, notify.
-    # At 12% free RAM (~3.8GB) earlyoom kills the biggest process.
-    # With swappiness=0, swap can stay unused even during severe RAM pressure.
-    # Keep swap thresholds at 100% so kills trigger on RAM thresholds alone.
-    services.earlyoom = {
+    # Use cgroup-aware OOM policy so runaway build/test work is killed inside
+    # its own slice instead of forcing whole-system contention decisions.
+    services.earlyoom.enable = false;
+
+    systemd.oomd = {
       enable = true;
-      freeMemThreshold = 12;
-      freeSwapThreshold = 100;
-      freeSwapKillThreshold = 100;
-      enableNotifications = true;
+      enableSystemSlice = true;
+      enableUserSlices = true;
+      settings.OOM.DefaultMemoryPressureDurationSec = "15s";
     };
 
-    # systemd-oomd needs explicit cgroup PSI config per-service; earlyoom is simpler
-    systemd.oomd.enable = false;
+    # Keep interactive user sessions as the preferred survivor under pressure.
+    systemd.slices."user-".sliceConfig = {
+      ManagedOOMPreference = "avoid";
+      MemoryLow = "10G";
+    };
 
-    # Nix daemon: cap aggregate build memory so compilations can't starve
-    # interactive work. IOWeight=50 yields disk bandwidth to desktop processes.
+    # Put Nix builds in an explicitly budgeted slice so they cannot consume the
+    # entire workstation even when individual derivations fan out internally.
+    systemd.slices."nix-build" = {
+      description = "Resource budget for Nix builds";
+      sliceConfig = {
+        MemoryHigh = "18G";
+        MemoryMax = "20G";
+        MemorySwapMax = "0";
+        ManagedOOMMemoryPressure = "kill";
+        ManagedOOMMemoryPressureLimit = "50%";
+        CPUWeight = 20;
+        IOWeight = 50;
+      };
+    };
+
     systemd.services.nix-daemon.serviceConfig = {
+      Slice = "nix-build.slice";
       IOWeight = 50;
-      MemoryHigh = "70%";
+      MemoryHigh = "18G";
+      MemoryMax = "20G";
+      MemorySwapMax = "0";
       ManagedOOMMemoryPressure = "kill";
+      ManagedOOMMemoryPressureLimit = "50%";
     };
 
     # Ananicy: per-process nice/ioclass for desktop responsiveness

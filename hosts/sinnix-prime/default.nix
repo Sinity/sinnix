@@ -39,10 +39,12 @@
     terminal-capture.enable = true;
     below.enable = true;
     sinex = {
-      # Keep the full workstation profile staged while the runtime is live so
-      # production proof work exercises the checked-in graph directly.
+      # Keep the host integration and database staged, but do not auto-start the
+      # local Sinex runtime until the JetStream backlog/retention fixes are
+      # deployed. Rebooting into the full runtime currently recreates the same
+      # NATS restore storm that has been freezing the workstation.
       prepareHost = true;
-      enable = true;
+      enable = false;
       provisionDatabase = true;
       activationProfile = "full";
       environment = "prod";
@@ -53,6 +55,17 @@
     sentinel.enable = true;
     weechat-log-sealer.enable = true;
   };
+
+  services.sinex.nodes.automata = {
+    canonicalizer.profile = "heavy";
+    healthAggregator.profile = "heavy";
+  };
+
+  services.sinex.nodes.filesystem.ignoredDirectoryNames = lib.mkAfter [
+    ".cache"
+    "asciinema"
+    "kitty-scrollback"
+  ];
 
   users.users.sinex.homeMode = lib.mkForce "0711";
   system.activationScripts.sinexHomeTraverse = ''

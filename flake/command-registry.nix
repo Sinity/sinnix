@@ -6,6 +6,14 @@
 let
   lib = pkgs.lib;
   checkTiers = import ./check-tiers.nix { inherit lib; };
+  rebuildServicePath = lib.makeBinPath [
+    pkgs.coreutils
+    pkgs.findutils
+    pkgs.gnugrep
+    pkgs.gnused
+    pkgs.systemd
+    pkgs.util-linux
+  ];
   defaultCheckNames = checkTiers.defaultCheckNames;
   heavyCheckNames =
     map (name: "nixos-${name}") checkTiers.heavySpecNames
@@ -318,7 +326,22 @@ in
         fi
         ${avoidRepoCwdForActivation}
         ${localInputOverrideArgs}
-        ${pkgs.nixos-rebuild}/bin/nixos-rebuild test --flake "$_invoke_flake_dir#sinnix-prime" \
+        ${pkgs.systemd}/bin/systemd-run \
+          --quiet \
+          --collect \
+          --pipe \
+          --service-type=exec \
+          --wait \
+          --setenv=PATH="${rebuildServicePath}:$PATH" \
+          -p Slice=nix-build.slice \
+          -p CPUWeight=20 \
+          -p IOWeight=50 \
+          -p MemoryHigh=18G \
+          -p MemoryMax=20G \
+          -p MemorySwapMax=0 \
+          -p ManagedOOMMemoryPressure=kill \
+          -p ManagedOOMMemoryPressureLimit=50% \
+          ${pkgs.nixos-rebuild}/bin/nixos-rebuild test --flake "path:$_invoke_flake_dir#sinnix-prime" \
           "''${nix_override_args[@]}" \
           --log-format internal-json -v 2>&1 | ${pkgs.nix-output-monitor}/bin/nom --json
       '';
@@ -334,7 +357,22 @@ in
         fi
         ${avoidRepoCwdForActivation}
         ${localInputOverrideArgs}
-        ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --flake "$_invoke_flake_dir#sinnix-prime" \
+        ${pkgs.systemd}/bin/systemd-run \
+          --quiet \
+          --collect \
+          --pipe \
+          --service-type=exec \
+          --wait \
+          --setenv=PATH="${rebuildServicePath}:$PATH" \
+          -p Slice=nix-build.slice \
+          -p CPUWeight=20 \
+          -p IOWeight=50 \
+          -p MemoryHigh=18G \
+          -p MemoryMax=20G \
+          -p MemorySwapMax=0 \
+          -p ManagedOOMMemoryPressure=kill \
+          -p ManagedOOMMemoryPressureLimit=50% \
+          ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --flake "path:$_invoke_flake_dir#sinnix-prime" \
           "''${nix_override_args[@]}" \
           --log-format internal-json -v 2>&1 | ${pkgs.nix-output-monitor}/bin/nom --json
       '';

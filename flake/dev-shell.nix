@@ -20,12 +20,19 @@
       };
       nix = "${pkgs.nix}/bin/nix";
       safeSudoPathPrefix = "${pkgs.coreutils}/bin";
+      rebuildServicePath = lib.makeBinPath [
+        pkgs.coreutils
+        pkgs.findutils
+        pkgs.gnugrep
+        pkgs.gnused
+        pkgs.systemd
+        pkgs.util-linux
+      ];
       resolveFlakeDir = ''
         _flake_dir="''${PRJ_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
       '';
-      withLocalInputOverrides = ''
+      localInputOverrideArgs = ''
         nix_override_args=()
-        local_override_root=""
 
         append_override_arg() {
           nix_override_args+=(
@@ -33,102 +40,91 @@
             --no-write-lock-file
           )
         }
-
-        ensure_local_override_root() {
-          if [ -z "$local_override_root" ]; then
-            local_override_root="$(${pkgs.coreutils}/bin/mktemp -d -t sinnix-local-input.XXXXXX)"
-          fi
-        }
-
-        cleanup_local_override_root() {
-          if [ -n "$local_override_root" ]; then
-            rm -rf "$local_override_root"
-          fi
-        }
-
-        repo_is_dirty() {
-          repo_path="$1"
-          [ -d "$repo_path" ] || return 1
-          git -C "$repo_path" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
-          [ -n "$(git -C "$repo_path" status --short --untracked-files=normal 2>/dev/null)" ]
-        }
-
-        maybe_snapshot_input() {
-          input_name="$1"
-          repo_path="$2"
-          override_value="$3"
-          shift 3
-
-          if [ -n "$override_value" ]; then
-            append_override_arg "$input_name" "$override_value"
-            return 0
-          fi
-
-          if ! repo_is_dirty "$repo_path"; then
-            return 0
-          fi
-
-          ensure_local_override_root
-          snapshot_path="$local_override_root/$input_name"
-          rsync_args=(
-            -a
-            --exclude='.git'
-            --exclude='.direnv'
-            --exclude='.devenv'
-            --exclude='.venv'
-            --exclude='.mypy_cache'
-            --exclude='.pytest_cache'
-            --exclude='__pycache__'
-            --exclude='node_modules'
-          )
-          for exclude_name in "$@"; do
-            rsync_args+=("--exclude=$exclude_name")
-          done
-          ${pkgs.rsync}/bin/rsync "''${rsync_args[@]}" "$repo_path/" "$snapshot_path/"
-          append_override_arg "$input_name" "path:$snapshot_path"
-        }
-
-        maybe_snapshot_input sinex /realm/project/sinex "''${SINNIX_SINEX_OVERRIDE:-}" .sinex
-        maybe_snapshot_input polylogue /realm/project/polylogue "''${SINNIX_POLYLOGUE_OVERRIDE:-}"
-        maybe_snapshot_input lynchpin /realm/project/sinity-lynchpin "''${SINNIX_LYNCHPIN_OVERRIDE:-}" .playwright-mcp
-
-        if [ -n "$local_override_root" ]; then
-          trap cleanup_local_override_root EXIT
+        if [ -n "''${SINNIX_SINEX_OVERRIDE:-}" ]; then
+          append_override_arg sinex "$SINNIX_SINEX_OVERRIDE"
+        fi
+        if [ -n "''${SINNIX_POLYLOGUE_OVERRIDE:-}" ]; then
+          append_override_arg polylogue "$SINNIX_POLYLOGUE_OVERRIDE"
+        fi
+        if [ -n "''${SINNIX_LYNCHPIN_OVERRIDE:-}" ]; then
+          append_override_arg lynchpin "$SINNIX_LYNCHPIN_OVERRIDE"
         fi
       '';
+      mkRebuildCommand =
+        name: action:
+        pkgs.writeShellScriptBin name ''
+          set -euo pipefail
+          ${resolveFlakeDir}
+          ${localInputOverrideArgs}
+
+          rebuild_runner="$(${pkgs.coreutils}/bin/mktemp)"
+          rebuild_pid=""
+
+          cleanup_rebuild() {
+            local status=$?
+            trap - EXIT HUP INT TERM
+            if [ -n "''${rebuild_pid:-}" ] && kill -0 "$rebuild_pid" 2>/dev/null; then
+              kill -TERM -- "-$rebuild_pid" 2>/dev/null || true
+              ${pkgs.coreutils}/bin/sleep 1
+              kill -KILL -- "-$rebuild_pid" 2>/dev/null || true
+            fi
+            ${pkgs.coreutils}/bin/rm -f "$rebuild_runner"
+            exit "$status"
+          }
+
+          trap cleanup_rebuild EXIT HUP INT TERM
+
+          cat >"$rebuild_runner" <<'EOF'
+          #!${pkgs.bash}/bin/bash
+          set -euo pipefail
+          flake_ref="$1"
+          shift
+          PATH="${safeSudoPathPrefix}:$PATH" \
+            sudo ${pkgs.systemd}/bin/systemd-run \
+            --quiet \
+            --collect \
+            --pipe \
+            --service-type=exec \
+            --wait \
+            --setenv=PATH="${rebuildServicePath}:$PATH" \
+            -p Slice=nix-build.slice \
+            -p CPUWeight=20 \
+            -p IOWeight=50 \
+            -p MemoryHigh=18G \
+            -p MemoryMax=20G \
+            -p MemorySwapMax=0 \
+            -p ManagedOOMMemoryPressure=kill \
+            -p ManagedOOMMemoryPressureLimit=50% \
+            ${pkgs.nixos-rebuild}/bin/nixos-rebuild \
+              ${action} \
+              --flake "$flake_ref" \
+              "$@" \
+              --log-format internal-json \
+              -v 2>&1 \
+            | ${pkgs.nix-output-monitor}/bin/nom --json
+          EOF
+
+          ${pkgs.coreutils}/bin/chmod +x "$rebuild_runner"
+
+          cd "$HOME"
+          ${pkgs.util-linux}/bin/setsid "$rebuild_runner" \
+            "path:$_flake_dir#sinnix-prime" \
+            "''${nix_override_args[@]}" &
+          rebuild_pid=$!
+          wait "$rebuild_pid"
+          status=$?
+
+          trap - EXIT HUP INT TERM
+          ${pkgs.coreutils}/bin/rm -f "$rebuild_runner"
+          exit "$status"
+        '';
 
       # Devshell command wrappers — every listed command is directly typeable
       devCommands = {
         check = pkgs.writeShellScriptBin "check" ''exec ${nix} flake check "$@"'';
         format = pkgs.writeShellScriptBin "format" ''exec ${nix} fmt "$@"'';
-        switch = pkgs.writeShellScriptBin "switch" ''
-          set -euo pipefail
-          ${resolveFlakeDir}
-          ${withLocalInputOverrides}
-          cd "$HOME"
-          PATH="${safeSudoPathPrefix}:$PATH" \
-            sudo ${pkgs.nixos-rebuild}/bin/nixos-rebuild \
-            switch \
-            --flake "$_flake_dir#sinnix-prime" \
-            "''${nix_override_args[@]}" \
-            --log-format internal-json \
-            -v 2>&1 \
-            | ${pkgs.nix-output-monitor}/bin/nom --json
-        '';
-        test-system = pkgs.writeShellScriptBin "test-system" ''
-          set -euo pipefail
-          ${resolveFlakeDir}
-          ${withLocalInputOverrides}
-          cd "$HOME"
-          PATH="${safeSudoPathPrefix}:$PATH" \
-            sudo ${pkgs.nixos-rebuild}/bin/nixos-rebuild \
-            test \
-            --flake "$_flake_dir#sinnix-prime" \
-            "''${nix_override_args[@]}" \
-            --log-format internal-json \
-            -v 2>&1 \
-            | ${pkgs.nix-output-monitor}/bin/nom --json
-        '';
+        switch = mkRebuildCommand "switch" "switch";
+        test-system = mkRebuildCommand "test-system" "test";
         lint = pkgs.writeShellScriptBin "lint" ''exec ${nix} run .#lint -- "$@"'';
         check-all = pkgs.writeShellScriptBin "check-all" ''exec ${nix} run .#check-all -- "$@"'';
         update = pkgs.writeShellScriptBin "update" ''exec ${nix} flake update "$@"'';

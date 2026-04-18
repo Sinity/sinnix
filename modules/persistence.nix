@@ -173,6 +173,7 @@ in
       } # 65 GB game library
 
       # Nix user state
+      ".cache/nix" # eval-cache-v6 + fetcher cache; keeps flake/direnv warm across rollbacks
       ".local/share/nix" # trusted-settings.json (cachix substituters)
 
       # UX state

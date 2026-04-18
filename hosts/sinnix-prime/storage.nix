@@ -1,6 +1,7 @@
 # Host-specific storage configuration for sinnix-prime
 {
   lib,
+  pkgs,
   config,
   ...
 }:
@@ -174,32 +175,51 @@ in
   # fresh empty subvolume. All persistent state lives in @persist and is
   # bind-mounted back by impermanence; HM activation recreates config symlinks.
   # Safety net: pre-wipe @ saved to .snapshots/root.TIMESTAMP (never auto-pruned).
-  boot.initrd.postDeviceCommands = lib.mkAfter ''
-    mkdir /btrfs_tmp
-    mount -o subvol=/ /dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02 /btrfs_tmp
-    mkdir -p /btrfs_tmp/.snapshots
+  boot.initrd.systemd.services.rollback-root = {
+    description = "Rollback btrfs root subvolume";
+    wantedBy = [ "initrd.target" ];
+    requires = [ "dev-disk-by\\x2duuid-f4782d9f\\x2daabe\\x2d408e\\x2db18b\\x2d2f2baa9e9a02.device" ];
+    after = [ "dev-disk-by\\x2duuid-f4782d9f\\x2daabe\\x2d408e\\x2db18b\\x2d2f2baa9e9a02.device" ];
+    before = [ "sysroot.mount" ];
+    unitConfig.DefaultDependencies = "no";
+    path = with pkgs; [
+      btrfs-progs
+      coreutils
+      findutils
+      gawk
+      util-linux
+    ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
+    script = ''
+      mkdir -p /btrfs_tmp
+      mount -o subvol=/ /dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02 /btrfs_tmp
+      mkdir -p /btrfs_tmp/.snapshots
 
-    # Save pre-wipe @ — never auto-pruned, manual cleanup only
-    SNAP_NAME="root.$(date +%Y%m%dT%H%M%S)"
-    btrfs subvolume snapshot /btrfs_tmp/@ "/btrfs_tmp/.snapshots/$SNAP_NAME"
+      # Save pre-wipe @ — never auto-pruned, manual cleanup only
+      SNAP_NAME="root.$(date +%Y%m%dT%H%M%S)"
+      btrfs subvolume snapshot /btrfs_tmp/@ "/btrfs_tmp/.snapshots/$SNAP_NAME"
 
-    # Delete nested child subvolumes of @ (required before deleting @)
-    btrfs subvolume list -o /btrfs_tmp/@ \
-      | awk '{print $NF}' \
-      | sort -r \
-      | while IFS= read -r child; do
-          btrfs subvolume delete "/btrfs_tmp/$child" 2>/dev/null || true
-        done
-    btrfs subvolume delete /btrfs_tmp/@
+      # Delete nested child subvolumes of @ (required before deleting @)
+      btrfs subvolume list -o /btrfs_tmp/@ \
+        | awk '{print $NF}' \
+        | sort -r \
+        | while IFS= read -r child; do
+            btrfs subvolume delete "/btrfs_tmp/$child" 2>/dev/null || true
+          done
+      btrfs subvolume delete /btrfs_tmp/@
 
-    # Fresh empty root — impermanence and HM populate everything declaratively.
-    btrfs subvolume create /btrfs_tmp/@
+      # Fresh empty root — impermanence and HM populate everything declaratively.
+      btrfs subvolume create /btrfs_tmp/@
 
-    # Scaffold: early-boot placeholders derived from sinnix.persistence.initrdScaffold.
-    ${scaffoldCmds}
+      # Scaffold: early-boot placeholders derived from sinnix.persistence.initrdScaffold.
+      ${scaffoldCmds}
 
-    echo "Rolled back @ (saved to .snapshots/$SNAP_NAME)"
+      echo "Rolled back @ (saved to .snapshots/$SNAP_NAME)"
 
-    umount /btrfs_tmp
-  '';
+      umount /btrfs_tmp
+    '';
+  };
 }

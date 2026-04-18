@@ -56,12 +56,13 @@ in
           "nixpkgs-unfree.cachix.org-1:hqvoInulhbV4nJ9yJOEr+4wxhDV4xq2d1DK7S6Nj6rs="
         ];
         netrc-file = "/etc/nix/netrc";
-        # Default cap for unattended daemon policy. Use `nix-safe` for
-        # adaptive scheduling when running explicit heavy commands.
-        max-jobs = 4;
-        # Reduced from 8 to 4 to balance total parallelism (4 jobs × 4 cores = 16)
-        cores = 4;
+        # Let Nix use the machine normally; interactive protection lives in the
+        # dedicated build slice and systemd-oomd policy, not in a hardcoded
+        # workstation-wide job/core throttle.
+        max-jobs = "auto";
+        cores = 0;
         use-cgroups = true;
+        builders-use-substitutes = true;
 
         # DX optimizations: keep build dependencies for faster rebuilds
         keep-outputs = true;
