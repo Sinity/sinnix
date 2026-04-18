@@ -8,10 +8,8 @@
     extra-trusted-public-keys = [
       "numtide.cachix.org-1:2ps1kLBUWjxIneOy1Ik6cQjb41X0iXVXeHigGmycPPE="
     ];
-    # Keep plain `nix flake check` and other flake-bound commands from
-    # oversubscribing this workstation under a normal desktop load.
-    max-jobs = 2;
-    cores = 4;
+    # Do not bake workstation-local parallelism throttles into repository-level
+    # flake config; the host owns containment policy.
   };
 
   inputs = {
@@ -40,21 +38,21 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Custom tools and integrations (prefer local clones under /realm/project).
-    # Keep local project inputs pinned to committed git state by default so
-    # ordinary flake evals do not snapshot large, dirty worktrees.
+    # Custom tools and integrations.
+    # Use GitHub-backed inputs when a canonical remote exists so system
+    # deployments don't implicitly consume local checkout state.
     intercept-bounce = {
-      url = "git+file:///realm/project/intercept-bounce?ref=master";
+      url = "github:Sinity/intercept-bounce/master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
     scribe-tap = {
-      url = "git+file:///realm/project/scribe-tap?ref=master";
+      url = "github:Sinity/scribe-tap/master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
     polylogue = {
-      url = "git+file:///realm/project/polylogue?ref=master";
+      url = "github:Sinity/polylogue/master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -63,11 +61,10 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Private Sinex repository stored locally. The default lock stays pinned to
-    # the current committed HEAD; switch/test-system wrappers can override it with a
-    # sanitized snapshot of a dirty worktree when needed.
+    # Sinex is sourced from GitHub so system deployments follow reviewed upstream
+    # history instead of implicitly consuming the local checkout state.
     sinex = {
-      url = "git+file:///realm/project/sinex?ref=master";
+      url = "git+https://github.com/Sinity/sinex?ref=master";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.agenix.follows = "agenix";
     };

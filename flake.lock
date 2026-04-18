@@ -566,16 +566,16 @@
       "locked": {
         "lastModified": 1760580766,
         "narHash": "sha256-U0qd2923ey9EiHME88q5+J3ctkshiN74pkKiGucvd1E=",
-        "ref": "master",
+        "owner": "Sinity",
+        "repo": "intercept-bounce",
         "rev": "aad936bafe379134ca7be8134fefd7b9754c7640",
-        "revCount": 394,
-        "type": "git",
-        "url": "file:///realm/project/intercept-bounce"
+        "type": "github"
       },
       "original": {
+        "owner": "Sinity",
         "ref": "master",
-        "type": "git",
-        "url": "file:///realm/project/intercept-bounce"
+        "repo": "intercept-bounce",
+        "type": "github"
       }
     },
     "lanzaboote": {
@@ -767,18 +767,18 @@
         ]
       },
       "locked": {
-        "lastModified": 1775240677,
-        "narHash": "sha256-uIOw+HM90f/xDplmdQpP5lu7S0Jji8Eu6cg3qaGrlbw=",
-        "ref": "master",
-        "rev": "8a1e1a0209578250d2127026f79956f4b03bc46d",
-        "revCount": 83,
-        "type": "git",
-        "url": "file:///realm/project/polylogue"
+        "lastModified": 1776443299,
+        "narHash": "sha256-gNuVltATXjypirB5Sx+xN42f9k8v7zDgDkRSqtJ/rgc=",
+        "owner": "Sinity",
+        "repo": "polylogue",
+        "rev": "eb82dece9e22a961d47eab7d955bfdc8ad0497ea",
+        "type": "github"
       },
       "original": {
+        "owner": "Sinity",
         "ref": "master",
-        "type": "git",
-        "url": "file:///realm/project/polylogue"
+        "repo": "polylogue",
+        "type": "github"
       }
     },
     "pre-commit": {
@@ -890,16 +890,16 @@
       "locked": {
         "lastModified": 1763182741,
         "narHash": "sha256-c+Z8DdDj+bFTxT5h4oxbE6EoiRp9LHzTwPJErBLOqt4=",
-        "ref": "master",
+        "owner": "Sinity",
+        "repo": "scribe-tap",
         "rev": "8ecc697dd730f29707980ff62abf8f65a83892db",
-        "revCount": 18,
-        "type": "git",
-        "url": "file:///realm/project/scribe-tap"
+        "type": "github"
       },
       "original": {
+        "owner": "Sinity",
         "ref": "master",
-        "type": "git",
-        "url": "file:///realm/project/scribe-tap"
+        "repo": "scribe-tap",
+        "type": "github"
       }
     },
     "sinex": {
@@ -915,18 +915,18 @@
         ]
       },
       "locked": {
-        "lastModified": 1776333892,
-        "narHash": "sha256-JA/bEgUtY5Wv14mv3ZA++X7ZjdX07fsEm8amGKZ2y/U=",
+        "lastModified": 1776497610,
+        "narHash": "sha256-Lqvn1ESmTbj3fWFI/+nfEemcwFIhf//8dked/dxxWzs=",
         "ref": "master",
-        "rev": "62aabcff69ccca94f86fbf7cc68cf92f57c8245c",
-        "revCount": 132,
+        "rev": "5917aa275427aef76966115917f33701bbf3aa12",
+        "revCount": 143,
         "type": "git",
-        "url": "file:///realm/project/sinex"
+        "url": "https://github.com/Sinity/sinex"
       },
       "original": {
         "ref": "master",
         "type": "git",
-        "url": "file:///realm/project/sinex"
+        "url": "https://github.com/Sinity/sinex"
       }
     },
     "stylix": {

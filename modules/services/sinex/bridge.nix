@@ -129,6 +129,35 @@ in
         source = desktopRuntimeDir;
         destination = desktopRuntimeDir;
       };
+      mkScopedSinexPackage =
+        sinexPkgs:
+        pkgs.symlinkJoin {
+          name = "sinex-runtime-${sinexEnvironment}";
+          paths = lib.unique (
+            lib.optionals databasePrepared [ sinexPkgs.xtask ]
+            ++ lib.optionals runtimeEnabled [
+              sinexPkgs.sinex-ingestd
+              sinexPkgs.sinex-gateway
+              sinexPkgs.sinex-node-sdk
+            ]
+            ++ lib.optionals (runtimeEnabled && activationProfile.filesystem) [ sinexPkgs.sinex-fs-ingestor ]
+            ++ lib.optionals (runtimeEnabled && activationProfile.terminal) [
+              sinexPkgs.sinex-terminal-ingestor
+            ]
+            ++ lib.optionals (runtimeEnabled && activationProfile.desktop) [ sinexPkgs.sinex-desktop-ingestor ]
+            ++ lib.optionals (runtimeEnabled && activationProfile.system) [ sinexPkgs.sinex-system-ingestor ]
+            ++ lib.optionals (runtimeEnabled && activationProfile.automata) [
+              sinexPkgs.sinex-analytics-automaton
+              sinexPkgs.sinex-session-detector
+            ]
+            ++ lib.optionals (runtimeEnabled && activationProfile.canonicalizer) [
+              sinexPkgs.sinex-terminal-command-canonicalizer
+            ]
+            ++ lib.optionals (runtimeEnabled && activationProfile.healthAggregator) [
+              sinexPkgs.sinex-health-automaton
+            ]
+          );
+        };
     in
     lib.mkMerge [
       (lib.mkIf (!runtimeEnabled) {
@@ -160,7 +189,7 @@ in
           sinexPkgs = mkSinexPkgs pkgs;
         in
         {
-          services.sinex.package = lib.mkDefault sinexPkgs.sinex;
+          services.sinex.package = lib.mkDefault (mkScopedSinexPackage sinexPkgs);
           services.sinex.cliPackage = lib.mkDefault sinexPkgs.sinexctl;
         }
       ))
