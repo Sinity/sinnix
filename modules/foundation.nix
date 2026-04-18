@@ -129,6 +129,11 @@ in
               type = types.str;
               default = "${config.root}/knowledgebase";
             };
+            lynchpinExported = mkOption {
+              type = types.str;
+              default = "${config.root}/__lynchpin_exported";
+              description = "Lynchpin's derived artifacts (ledgers, dashboards, repo-artefacts) — extracted from knowledgebase in 2026-04.";
+            };
             pwrank = mkOption {
               type = types.str;
               default = "${config.root}/pwrank";
@@ -166,6 +171,7 @@ in
     console = {
       keyMap = "pl2";
       font = "Lat2-Terminus16";
+      packages = [ pkgs.terminus_font ];
     };
 
     # User definition

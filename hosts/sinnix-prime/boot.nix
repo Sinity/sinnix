@@ -59,7 +59,6 @@
       "rw"
       "vconsole.keymap=pl"
       "vconsole.font=Lat2-Terminus16"
-      "vconsole.font_map=8859-2"
       "vt.global_cursor_default=0"
       "rd.systemd.show_status=false"
       "rd.udev.log-priority=3"

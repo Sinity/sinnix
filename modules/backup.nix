@@ -148,10 +148,10 @@ in
           "/persist/home/sinity/.local/share/Steam"
           # Ephemeral junk
           "/persist/var/lib/systemd/coredump"
-          "/persist/home/sinity/.config/google-chrome/Default/Service Worker"
-          "/persist/home/sinity/.config/google-chrome/Default/GPUCache"
-          "/persist/home/sinity/.config/google-chrome/*Cache*"
-          "/persist/home/sinity/.config/google-chrome/*cache*"
+          "/persist/home/sinity/.config/chrome-ws/Default/Service Worker"
+          "/persist/home/sinity/.config/chrome-ws/Default/GPUCache"
+          "/persist/home/sinity/.config/chrome-ws/*Cache*"
+          "/persist/home/sinity/.config/chrome-ws/*cache*"
         ];
         repo = borgRepoPersist;
         readWritePaths = [

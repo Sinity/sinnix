@@ -36,9 +36,20 @@ mkFeatureModule {
           #
           # Also disable Vulkan/ANGLE-Vulkan to avoid unstable paths on
           # NVIDIA+Wayland+HDR setups while keeping normal GPU acceleration.
+          #
+          # --user-data-dir is intentional: Chrome 136+ silently refuses to
+          # honour --remote-debugging-port when using the platform-default
+          # profile path (~/.config/google-chrome). Pointing at a non-default
+          # directory restores debug-port behaviour. See:
+          # https://developer.chrome.com/blog/remote-debugging-port
+          # Side effect: loopback-only debug port allows local processes to
+          # read cookies via CDP. Acceptable on this single-user machine.
+          chromeUserDataDir = "${config.home.homeDirectory}/.config/chrome-ws";
           chromeArgs = lib.concatStringsSep " " [
             "--disable-features=WaylandWpColorManagerV1,Vulkan,DefaultANGLEVulkan"
             "--remote-debugging-port=9222"
+            "--remote-debugging-address=127.0.0.1"
+            "--user-data-dir=${chromeUserDataDir}"
           ];
           chromePkg = pkgs.google-chrome.override {
             commandLineArgs = chromeArgs;

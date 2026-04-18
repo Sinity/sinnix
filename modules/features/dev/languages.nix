@@ -44,6 +44,17 @@ mkFeatureModule {
     }:
     let
       aiTools = inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system};
+
+      # Pin claude-code ahead of upstream llm-agents when it lags behind.
+      # To update: nix-prefetch-url the new binary URL, convert to SRI hash.
+      # Remove this override once llm-agents catches up.
+      claude-code = aiTools.claude-code.overrideAttrs (old: rec {
+        version = "2.1.111";
+        src = pkgs.fetchurl {
+          url = "https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases/${version}/linux-x64/claude";
+          hash = "sha256-XU35cAQLD4OqxDSuVAtAkSakd4o3noybTHk1YOO/oGA=";
+        };
+      });
     in
     lib.mkMerge [
       # Nix tooling
@@ -116,7 +127,7 @@ mkFeatureModule {
           pkgs.gh
           pkgs.delta
           pkgs.jetbrains-mono
-          aiTools.claude-code
+          claude-code
           aiTools.codex
           aiTools.forge
         ];

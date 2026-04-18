@@ -22,6 +22,17 @@ mkFeatureModule {
     }:
     let
       aiTools = inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system};
+
+      # Pin claude-code ahead of upstream llm-agents when it lags behind.
+      # Mirror of the override in languages.nix — remove both once upstream catches up.
+      claude-code = aiTools.claude-code.overrideAttrs (old: rec {
+        version = "2.1.111";
+        src = pkgs.fetchurl {
+          url = "https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases/${version}/linux-x64/claude";
+          hash = "sha256-XU35cAQLD4OqxDSuVAtAkSakd4o3noybTHk1YOO/oGA=";
+        };
+      });
+
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
       forgePkg = aiTools.forge;
       forgeZshPlugin = pkgs.runCommandLocal "forge-zsh-plugin.zsh" { } ''
@@ -170,7 +181,7 @@ mkFeatureModule {
               #!/usr/bin/env bash
               set -euo pipefail
 
-              CLAUDE_BIN="${aiTools.claude-code}/bin/claude"
+              CLAUDE_BIN="${claude-code}/bin/claude"
               REALM_DIR="${sinnixCfg.paths.realmRoot}"
               HOME_DIR="${config.home.homeDirectory}"
 

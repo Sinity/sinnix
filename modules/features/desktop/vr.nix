@@ -380,6 +380,7 @@ mkFeatureModule {
         # WiVRn uses Avahi for headset discovery on the local network
         services.avahi = {
           enable = true;
+          nssmdns4 = true;
           publish.enable = true;
           publish.userServices = true;
         };

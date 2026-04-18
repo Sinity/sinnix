@@ -9,6 +9,7 @@
   mkFeatureModule,
   pkgs,
   lib,
+  config,
   ...
 }@args:
 mkFeatureModule {

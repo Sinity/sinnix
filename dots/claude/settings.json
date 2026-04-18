@@ -88,11 +88,12 @@
     "huggingface-skills@claude-plugins-official": true,
     "semgrep@claude-plugins-official": false,
     "posthog@claude-plugins-official": true,
-    "chrome-devtools-mcp@claude-plugins-official": false,
+    "chrome-devtools-mcp@claude-plugins-official": true,
     "atomic-agents@claude-plugins-official": true
   },
   "alwaysThinkingEnabled": true,
-  "effortLevel": "high",
+  "effortLevel": "xhigh",
+  "skipDangerousModePermissionPrompt": true,
   "mcpServers": {
     "polylogue": {
       "command": "mcp-polylogue",
@@ -100,8 +101,11 @@
     },
     "chrome-devtools": {
       "command": "npx",
-      "args": ["chrome-devtools-mcp@latest", "--browserUrl", "http://127.0.0.1:9222"]
+      "args": [
+        "chrome-devtools-mcp@latest",
+        "--browserUrl",
+        "http://127.0.0.1:9222"
+      ]
     }
-  },
-  "skipDangerousModePermissionPrompt": true
+  }
 }

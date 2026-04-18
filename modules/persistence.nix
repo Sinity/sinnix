@@ -132,9 +132,9 @@ in
 
       # Browsers
       {
-        directory = ".config/google-chrome";
+        directory = ".config/chrome-ws";
         mode = "0700";
-      } # 1.6 GB profile
+      } # Chrome profile, non-default path so --remote-debugging-port works (Chrome 136+ hardening)
       {
         directory = ".config/spotify";
         mode = "0700";

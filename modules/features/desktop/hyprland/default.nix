@@ -168,8 +168,7 @@ in
               always_follow_on_dnd = true;
               focus_on_activate = true;
               middle_click_paste = true;
-              enable_swallow = true;
-              swallow_regex = "^(kitty)$";
+              enable_swallow = false;
             };
 
             debug = {

@@ -84,6 +84,20 @@
 
 ---
 
+
+
+
+**During work** — when significant intents, decisions, insights, tensions, or possibilities emerge, capture them:
+- Quick capture → `seed/YYYY-MM-DD-HHMMSS-slug.md` (YAML frontmatter + content)
+- Append to thread → `stream/NNN-name.md` (add `## YYYY-MM-DD HH:MM` heading)
+- Decision made → `crystal/decisions/name.md` (decision + reasoning + reversal conditions)
+- Contradiction → `tension/NNN-name.md` (positions + what's unresolved)
+- Dead end → `graveyard/name.md` (what + why it failed)
+
+Quality over quantity. Only capture what's non-obvious, persistent, connective, or decisive.
+
+---
+
 ## World Model
 
 @./world-model/index.md

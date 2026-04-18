@@ -1,0 +1,17 @@
+# Exclude lockfiles from git diffs and language statistics
+*.lock linguist-generated=true
+
+# Treat agenix secrets as binary to prevent diffs and text processing
+*.age binary
+*.age -diff -text
+
+# Other common binary or generated files
+*.sqlite binary
+*.sqlite3 binary
+*.db binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary

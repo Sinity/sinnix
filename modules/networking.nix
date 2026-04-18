@@ -59,6 +59,8 @@ in
             DNSSEC = false;
             # Emit an explicit blank fallback list so compiled-in public resolvers stay disabled.
             FallbackDNS = "";
+            # Avahi owns local mDNS service discovery on this host.
+            MulticastDNS = false;
             # Resolve .lan names via the router's dnsmasq.
             Domains = [ "~lan" ];
           };

@@ -64,7 +64,7 @@
     "enabled": true
   },
   "model": {
-    "name": "auto-gemini-3",
+    "name": "auto-gemini-3-1-pro",
     "compressionThreshold": 0.99,
     "maxSessionTurns": -1
   }
