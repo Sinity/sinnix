@@ -185,7 +185,7 @@ mkFeatureModule {
                 ns = "nom-shell --run zsh";
                 nix-safe = "nix-safe";
                 nix-switch = "sudo nix-safe run --accept-flake-config \"$(find-flake-root)#switch\"";
-                nix-test = "sudo nix-safe run --accept-flake-config \"$(find-flake-root)#test\"";
+                nix-test-system = "sudo nix-safe run --accept-flake-config \"$(find-flake-root)#test-system\"";
                 nix-check = "nix-safe run --accept-flake-config \"$(find-flake-root)#check\"";
                 nix-search = "nix search nixpkgs";
                 piv = "python -m venv .venv";
@@ -434,9 +434,16 @@ mkFeatureModule {
             # Bash integration for direnv
             home.file.".bashrc" = {
               text = ''
-                # Automatically load direnv-provided environment for any bash shell
+                # Only interactive bash shells should hook direnv. Running
+                # `direnv export bash` in every spawned bash process makes agent
+                # and script-heavy workflows repeatedly re-evaluate flakes.
+                case "$-" in
+                  *i*) ;;
+                  *) return ;;
+                esac
+
                 if command -v direnv >/dev/null 2>&1; then
-                  eval "$(direnv export bash)" || true
+                  eval "$(direnv hook bash)"
                 fi
               '';
             };

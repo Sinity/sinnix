@@ -115,7 +115,7 @@ let
     };
 
     nix-safe = mkScript "nix-safe" {
-      description = "Nix wrapper with memory-aware defaults for heavy commands";
+      description = "Nix wrapper that only applies explicit job/core overrides when requested";
       runtimeInputs = with pkgs; [
         bash
         coreutils

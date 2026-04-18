@@ -28,8 +28,6 @@ let
   databasePort = 5432;
   databaseUser = "sinex";
   databaseName = "sinex_${sinexEnvironment}";
-  databaseSocketDir = "/run/postgresql";
-  schemaBootstrapUser = "postgres";
   databasePasswordFile = lib.attrByPath [ "sinnix" "secrets" "paths" "sinex-local-db" ] null config;
   gatewayAdminTokenFile = lib.attrByPath [
     "sinnix"
@@ -59,7 +57,6 @@ let
     "sinex-nats-client-nkey"
   ] null config;
   databaseUrl = "postgresql://${databaseUser}@${databaseHost}:${toString databasePort}/${databaseName}";
-  schemaBootstrapUrl = "postgresql:///${databaseName}?host=${databaseSocketDir}&user=${schemaBootstrapUser}";
   hostPrepared = cfg.prepareHost || cfg.enable || cfg.provisionDatabase;
   runtimeEnabled = cfg.enable;
   databasePrepared = cfg.provisionDatabase || cfg.enable;
@@ -369,50 +366,6 @@ in
         ) [ databasePasswordFile ];
       })
 
-      (lib.mkIf (cfg.provisionDatabase && !cfg.enable) (
-        let
-          sinexPkgs = mkSinexPkgs pkgs;
-          schemaBootstrapScript = pkgs.writeShellScript "sinnix-sinex-schema-bootstrap" ''
-            set -euo pipefail
-
-            mkdir -p "$XDG_STATE_HOME"
-
-            database_url=${lib.escapeShellArg schemaBootstrapUrl}
-            echo "$(date): applying Sinex schema to ${databaseName}"
-            ${sinexPkgs.sinex}/bin/xtask infra schema-apply --database-url "$database_url"
-          '';
-        in
-        {
-          systemd.services.sinex-schema-apply = {
-            description = "Apply Sinex declarative schema";
-            wantedBy = [ "multi-user.target" ];
-            wants = [ "network-online.target" ];
-            environment = {
-              HOME = "/run/sinex-schema-apply";
-              XDG_STATE_HOME = "/run/sinex-schema-apply/.local/state";
-              SINEX_STATE_DIR = "/var/lib/sinex/.local/state/sinex";
-            };
-            after = [
-              "network-online.target"
-              "postgresql.service"
-              "postgresql-setup.service"
-            ];
-            requires = [
-              "postgresql.service"
-              "postgresql-setup.service"
-            ];
-            serviceConfig = {
-              Type = "oneshot";
-              User = schemaBootstrapUser;
-              Group = schemaBootstrapUser;
-              RuntimeDirectory = "sinex-schema-apply";
-              ExecStart = schemaBootstrapScript;
-              TimeoutStartSec = "10min";
-              RemainAfterExit = true;
-            };
-          };
-        }
-      ))
     ]
   );
 }
