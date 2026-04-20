@@ -6,12 +6,57 @@
   inputs,
   lib,
   config,
+  pkgs,
   ...
 }:
 let
   username = config.sinnix.user.name;
   inherit (config.sinnix) paths;
   inherit (config.sinnix.machine) isDesktop;
+  safeNixosRebuild = lib.hiPrio (
+    pkgs.writeShellScriptBin "nixos-rebuild" ''
+      set -euo pipefail
+
+      export PATH="${lib.makeBinPath [ pkgs.coreutils pkgs.systemd ]}:$PATH"
+
+      if [[ -z "''${SINNIX_SAFE_REBUILD_SCOPED:-}" ]] && command -v systemd-run >/dev/null 2>&1; then
+        if (( EUID == 0 )); then
+          exec systemd-run \
+            --scope \
+            --quiet \
+            --collect \
+            --slice=nix-build.slice \
+            -p CPUWeight=20 \
+            -p IOWeight=50 \
+            -p MemoryHigh=18G \
+            -p MemoryMax=20G \
+            -p MemorySwapMax=0 \
+            -p ManagedOOMMemoryPressure=kill \
+            -p ManagedOOMMemoryPressureLimit=50% \
+            --setenv=SINNIX_SAFE_REBUILD_SCOPED=1 \
+            ${config.system.build.nixos-rebuild}/bin/nixos-rebuild "$@"
+        elif [[ -n "''${XDG_RUNTIME_DIR:-}" ]]; then
+          exec systemd-run \
+            --user \
+            --scope \
+            --quiet \
+            --collect \
+            --slice=background.slice \
+            -p CPUWeight=20 \
+            -p IOWeight=50 \
+            -p MemoryHigh=18G \
+            -p MemoryMax=20G \
+            -p MemorySwapMax=0 \
+            -p ManagedOOMMemoryPressure=kill \
+            -p ManagedOOMMemoryPressureLimit=50% \
+            --setenv=SINNIX_SAFE_REBUILD_SCOPED=1 \
+            ${config.system.build.nixos-rebuild}/bin/nixos-rebuild "$@"
+        fi
+      fi
+
+      exec ${config.system.build.nixos-rebuild}/bin/nixos-rebuild "$@"
+    ''
+  );
 in
 {
   config = {
@@ -61,7 +106,11 @@ in
         # workstation-wide job/core throttle.
         max-jobs = "auto";
         cores = 0;
-        use-cgroups = true;
+        # Let the systemd-managed nix-build/background slices be the only cgroup
+        # authority. With Nix's own builder cgroups enabled, the heavy build
+        # workers escape the slice budget and only the daemon itself stays
+        # constrained, which defeats the desktop protection model.
+        use-cgroups = false;
         builders-use-substitutes = true;
 
         # DX optimizations: keep build dependencies for faster rebuilds
@@ -95,6 +144,11 @@ in
       };
       hostPlatform = "x86_64-linux";
     };
+
+    # Shadow the stock entrypoint so direct `nixos-rebuild` invocations inherit
+    # the same cgroup envelope as `nix-safe` instead of running in the caller's
+    # interactive scope.
+    environment.systemPackages = lib.mkAfter [ safeNixosRebuild ];
 
     services.xserver.xkb.layout = "pl";
 
