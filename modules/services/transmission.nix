@@ -26,6 +26,7 @@ mkServiceModule {
     let
       inherit (config.sinnix.paths) torrentInbox neoOuterRealm;
       username = config.sinnix.user.name;
+      neoOuterRealmMount = "neo\\x2douter\\x2drealm.mount";
     in
     {
       services.transmission = {
@@ -56,11 +57,16 @@ mkServiceModule {
       ];
 
       systemd.services.transmission = {
+        wantedBy = lib.mkForce [ ];
         unitConfig.RequiresMountsFor = lib.unique [
           torrentInbox
           neoOuterRealm
         ];
-        after = [ "network-online.target" ];
+        unitConfig.PartOf = [ neoOuterRealmMount ];
+        after = [
+          "network-online.target"
+          neoOuterRealmMount
+        ];
         wants = [ "network-online.target" ];
         serviceConfig = lib.mkMerge [
           (lib.sinnix.systemd.mkHardenedService {
@@ -75,6 +81,35 @@ mkServiceModule {
             delaySec = 10;
           })
         ];
+      };
+
+      systemd.services.transmission-autostart = {
+        description = "Start Transmission after boot settles";
+        after = [ "network-online.target" ];
+        wants = [ "network-online.target" ];
+        serviceConfig = {
+          Type = "oneshot";
+          Restart = "on-failure";
+          RestartSec = "30s";
+          ExecStart = pkgs.writeShellScript "transmission-autostart" ''
+            set -euo pipefail
+
+            if ${pkgs.systemd}/bin/systemctl is-active --quiet transmission.service; then
+              exit 0
+            fi
+
+            exec ${pkgs.systemd}/bin/systemctl start transmission.service
+          '';
+        };
+      };
+
+      systemd.timers.transmission-autostart = {
+        description = "Deferred Transmission startup";
+        wantedBy = [ "timers.target" ];
+        timerConfig = {
+          OnBootSec = "30s";
+          Unit = "transmission-autostart.service";
+        };
       };
     };
 } args

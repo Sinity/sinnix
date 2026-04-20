@@ -17,8 +17,9 @@
 #
 # ─── ENABLED WHEN ─────────────────────────────────────────────────────────────
 #
-#   sinnix.services.sinex.enable = true   (currently disabled — service is not
-#   yet deployed; sinex is in active development at /realm/project/sinex)
+#   sinnix.services.sinex.enable = true
+#     The host bridge is live. `prepareHost` and `provisionDatabase` stage
+#     partial activation without starting the full runtime.
 #
 { lib, ... }:
 {

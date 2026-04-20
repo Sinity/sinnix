@@ -79,6 +79,9 @@ if (( cores_set == 0 )) && [[ -n "$safe_cores" ]]; then
 fi
 
 if [[ -z "${NIX_SAFE_SCOPED:-}" ]] && command -v systemd-run >/dev/null 2>&1; then
+  # Keep the runtime budget self-contained here as well as in host slice
+  # policy. The wrapper is used *before* a new system generation is switched,
+  # so relying on slice defaults alone can silently drop the protections.
   if (( EUID == 0 )); then
     exec systemd-run \
       --scope \

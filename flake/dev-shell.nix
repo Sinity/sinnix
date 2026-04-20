@@ -121,7 +121,9 @@
 
       # Devshell command wrappers — every listed command is directly typeable
       devCommands = {
-        check = pkgs.writeShellScriptBin "check" ''exec ${nix} flake check "$@"'';
+        check = pkgs.writeShellScriptBin "check" ''
+          exec ${scriptPkgs.nix-safe}/bin/nix-safe flake check "$@"
+        '';
         format = pkgs.writeShellScriptBin "format" ''exec ${nix} fmt "$@"'';
         switch = mkRebuildCommand "switch" "switch";
         test-system = mkRebuildCommand "test-system" "test";

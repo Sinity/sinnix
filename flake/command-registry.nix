@@ -5,6 +5,7 @@
 }:
 let
   lib = pkgs.lib;
+  scriptPkgs = (import ./scripts.nix { inherit inputs pkgs; }).packageSet;
   checkTiers = import ./check-tiers.nix { inherit lib; };
   rebuildServicePath = lib.makeBinPath [
     pkgs.coreutils
@@ -268,7 +269,7 @@ in
 
         for target in "''${heavy_targets[@]}"; do
           echo "Running heavy check: $target"
-          nix build "$_flake_dir#$target"
+          ${scriptPkgs.nix-safe}/bin/nix-safe build "$_flake_dir#$target"
         done
 
         echo "Heavy check suite complete."
@@ -290,7 +291,7 @@ in
 
         for target in "''${default_targets[@]}"; do
           echo "Running default check: $target"
-          nix build "$_flake_dir#$target"
+          ${scriptPkgs.nix-safe}/bin/nix-safe build "$_flake_dir#$target"
         done
 
         echo "Running heavy checks..."
@@ -307,7 +308,7 @@ in
 
             for target in "''${heavy_targets[@]}"; do
               echo "Running heavy check: $target"
-              nix build "$_flake_dir#$target"
+              ${scriptPkgs.nix-safe}/bin/nix-safe build "$_flake_dir#$target"
             done
           ''
         }

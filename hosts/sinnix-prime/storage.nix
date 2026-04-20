@@ -117,7 +117,10 @@ in
         "subvol=@data"
         "compress=zstd"
         "noatime"
+        "noauto"
         "nofail"
+        "x-systemd.automount"
+        "x-systemd.idle-timeout=10min"
       ];
     };
 
@@ -194,32 +197,32 @@ in
       RemainAfterExit = true;
     };
     script = ''
-      mkdir -p /btrfs_tmp
-      mount -o subvol=/ /dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02 /btrfs_tmp
-      mkdir -p /btrfs_tmp/.snapshots
+      ${pkgs.coreutils}/bin/mkdir -p /btrfs_tmp
+      ${pkgs.util-linux}/bin/mount -o subvol=/ /dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02 /btrfs_tmp
+      ${pkgs.coreutils}/bin/mkdir -p /btrfs_tmp/.snapshots
 
       # Save pre-wipe @ — never auto-pruned, manual cleanup only
-      SNAP_NAME="root.$(date +%Y%m%dT%H%M%S)"
-      btrfs subvolume snapshot /btrfs_tmp/@ "/btrfs_tmp/.snapshots/$SNAP_NAME"
+      SNAP_NAME="root.$(${pkgs.coreutils}/bin/date +%Y%m%dT%H%M%S)"
+      ${pkgs.btrfs-progs}/bin/btrfs subvolume snapshot /btrfs_tmp/@ "/btrfs_tmp/.snapshots/$SNAP_NAME"
 
       # Delete nested child subvolumes of @ (required before deleting @)
-      btrfs subvolume list -o /btrfs_tmp/@ \
-        | awk '{print $NF}' \
-        | sort -r \
+      ${pkgs.btrfs-progs}/bin/btrfs subvolume list -o /btrfs_tmp/@ \
+        | ${pkgs.gawk}/bin/awk '{print $NF}' \
+        | ${pkgs.coreutils}/bin/sort -r \
         | while IFS= read -r child; do
-            btrfs subvolume delete "/btrfs_tmp/$child" 2>/dev/null || true
+            ${pkgs.btrfs-progs}/bin/btrfs subvolume delete "/btrfs_tmp/$child" 2>/dev/null || true
           done
-      btrfs subvolume delete /btrfs_tmp/@
+      ${pkgs.btrfs-progs}/bin/btrfs subvolume delete /btrfs_tmp/@
 
       # Fresh empty root — impermanence and HM populate everything declaratively.
-      btrfs subvolume create /btrfs_tmp/@
+      ${pkgs.btrfs-progs}/bin/btrfs subvolume create /btrfs_tmp/@
 
       # Scaffold: early-boot placeholders derived from sinnix.persistence.initrdScaffold.
       ${scaffoldCmds}
 
-      echo "Rolled back @ (saved to .snapshots/$SNAP_NAME)"
+      ${pkgs.coreutils}/bin/echo "Rolled back @ (saved to .snapshots/$SNAP_NAME)"
 
-      umount /btrfs_tmp
+      ${pkgs.util-linux}/bin/umount /btrfs_tmp
     '';
   };
 }

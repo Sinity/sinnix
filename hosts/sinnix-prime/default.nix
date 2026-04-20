@@ -39,12 +39,8 @@
     terminal-capture.enable = true;
     below.enable = true;
     sinex = {
-      # Keep the host integration and database staged, but do not auto-start the
-      # local Sinex runtime until the JetStream backlog/retention fixes are
-      # deployed. Rebooting into the full runtime currently recreates the same
-      # NATS restore storm that has been freezing the workstation.
       prepareHost = true;
-      enable = false;
+      enable = true;
       provisionDatabase = true;
       activationProfile = "full";
       environment = "prod";

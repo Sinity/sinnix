@@ -9,6 +9,17 @@
   config,
   ...
 }:
+let
+  buildBudget = {
+    MemoryHigh = "18G";
+    MemoryMax = "20G";
+    MemorySwapMax = "0";
+    ManagedOOMMemoryPressure = "kill";
+    ManagedOOMMemoryPressureLimit = "50%";
+    CPUWeight = 5;
+    IOWeight = 5;
+  };
+in
 {
   config = lib.mkIf config.sinnix.machine.isDesktop {
     # Give the kernel a modest compressed buffer for burst absorption. The goal
@@ -61,8 +72,12 @@
       settings.OOM.DefaultMemoryPressureDurationSec = "15s";
     };
 
-    # Keep interactive user sessions as the preferred survivor under pressure.
-    systemd.slices."user-".sliceConfig = {
+    # Keep the actual interactive user slice as the preferred survivor under
+    # pressure. `user.slice` is the live cgroup that holds session scopes; the
+    # old wildcard-style `user-` unit did not protect the host in practice.
+    systemd.slices.user.sliceConfig = {
+      CPUWeight = 1000;
+      IOWeight = 1000;
       ManagedOOMPreference = "avoid";
       MemoryLow = "10G";
     };
@@ -71,26 +86,22 @@
     # entire workstation even when individual derivations fan out internally.
     systemd.slices."nix-build" = {
       description = "Resource budget for Nix builds";
-      sliceConfig = {
-        MemoryHigh = "18G";
-        MemoryMax = "20G";
-        MemorySwapMax = "0";
-        ManagedOOMMemoryPressure = "kill";
-        ManagedOOMMemoryPressureLimit = "50%";
-        CPUWeight = 20;
-        IOWeight = 50;
-      };
+      sliceConfig = buildBudget;
     };
 
+    # Generic background scopes should inherit the same low-priority budget as
+    # Nix builds so wrappers like `nix-safe` and future backgrounded dev tasks
+    # do not run at full desktop priority by accident.
+    systemd.slices.background = {
+      description = "Resource budget for background developer work";
+      sliceConfig = buildBudget;
+    };
+
+    # The slices above are the source of truth. Helper wrappers should target
+    # the correct slice instead of re-stating the whole resource envelope.
     systemd.services.nix-daemon.serviceConfig = {
       Slice = "nix-build.slice";
-      IOWeight = 50;
-      MemoryHigh = "18G";
-      MemoryMax = "20G";
-      MemorySwapMax = "0";
-      ManagedOOMMemoryPressure = "kill";
-      ManagedOOMMemoryPressureLimit = "50%";
-    };
+    } // buildBudget;
 
     # Ananicy: per-process nice/ioclass for desktop responsiveness
     services.ananicy = {
@@ -128,7 +139,15 @@
           type = "Heavy_Build";
         }
         {
+          name = "cc";
+          type = "Heavy_Build";
+        }
+        {
           name = "g++";
+          type = "Heavy_Build";
+        }
+        {
+          name = "c++";
           type = "Heavy_Build";
         }
         {
@@ -160,7 +179,19 @@
           type = "Heavy_Build";
         }
         {
+          name = "ld.lld";
+          type = "Heavy_Build";
+        }
+        {
+          name = "ld.gold";
+          type = "Heavy_Build";
+        }
+        {
           name = "mold";
+          type = "Heavy_Build";
+        }
+        {
+          name = "ld.mold";
           type = "Heavy_Build";
         }
         {
@@ -197,15 +228,41 @@
           name = "gopls";
           type = "Light_Build";
         }
-
-        # AI tools
         {
-          name = "claude";
+          name = "cargo-nextest";
           type = "Light_Build";
         }
         {
-          name = "gemini";
+          name = "ninja";
+          type = "Heavy_Build";
+        }
+        {
+          name = "cmake";
           type = "Light_Build";
+        }
+        {
+          name = "meson";
+          type = "Light_Build";
+        }
+        {
+          name = "make";
+          type = "Heavy_Build";
+        }
+        {
+          name = "ctest";
+          type = "Heavy_Build";
+        }
+        {
+          name = "pytest";
+          type = "Heavy_Build";
+        }
+        {
+          name = "qemu-system-x86_64";
+          type = "Heavy_Build";
+        }
+        {
+          name = "qemu-kvm";
+          type = "Heavy_Build";
         }
       ];
     };
