@@ -22,7 +22,7 @@ let
     ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux checkTiers.vmCheckNames
     ++ lib.optionals (system == "x86_64-linux") checkTiers.hostBuildCheckNames;
   resolveFlakeDir = ''
-    _flake_dir="''${PRJ_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+    _flake_dir="''${SINNIX_FLAKE_DIR:-''${FLAKE:-${inputs.self}}}"
   '';
   avoidRepoCwdForActivation = ''
     # nixos-rebuild-ng can trip over a git checkout cwd during activation.
