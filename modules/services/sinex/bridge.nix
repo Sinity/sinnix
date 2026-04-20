@@ -35,8 +35,10 @@ in
           foundation = {
             filesystem = true;
             terminal = false;
+            browser = false;
             desktop = false;
             system = true;
+            document = false;
             automata = false;
             canonicalizer = false;
             healthAggregator = false;
@@ -45,8 +47,10 @@ in
           capture = {
             filesystem = true;
             terminal = true;
+            browser = true;
             desktop = false;
             system = true;
+            document = true;
             automata = true;
             canonicalizer = true;
             healthAggregator = true;
@@ -55,8 +59,10 @@ in
           full = {
             filesystem = true;
             terminal = true;
+            browser = true;
             desktop = true;
             system = true;
+            document = true;
             automata = true;
             canonicalizer = true;
             healthAggregator = true;
@@ -79,8 +85,10 @@ in
             ++ lib.optionals (runtimeEnabled && activationProfile.terminal) [
               sinexPkgs.sinex-terminal-ingestor
             ]
+            ++ lib.optionals (runtimeEnabled && activationProfile.browser) [ sinexPkgs.sinex-browser-ingestor ]
             ++ lib.optionals (runtimeEnabled && activationProfile.desktop) [ sinexPkgs.sinex-desktop-ingestor ]
             ++ lib.optionals (runtimeEnabled && activationProfile.system) [ sinexPkgs.sinex-system-ingestor ]
+            ++ lib.optionals (runtimeEnabled && activationProfile.document) [ sinexPkgs.sinex-document-ingestor ]
             ++ lib.optionals (runtimeEnabled && activationProfile.automata) [
               sinexPkgs.sinex-analytics-automaton
               sinexPkgs.sinex-session-detector
@@ -212,6 +220,10 @@ in
               ];
             };
 
+            browser = {
+              enable = runtimeEnabled && activationProfile.browser;
+            };
+
             desktop = {
               enable = runtimeEnabled && activationProfile.desktop;
               clipboard.enable = false;
@@ -219,6 +231,10 @@ in
 
             system = {
               enable = runtimeEnabled && activationProfile.system;
+            };
+
+            document = {
+              enable = runtimeEnabled && activationProfile.document;
             };
 
             automata = {

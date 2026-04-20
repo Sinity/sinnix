@@ -18,6 +18,11 @@ let
       set -euo pipefail
 
       export PATH="${lib.makeBinPath [ pkgs.coreutils pkgs.systemd ]}:$PATH"
+      rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-3}"
+      rebuild_cores="''${SINNIX_REBUILD_CORES:-6}"
+      export NIX_CONFIG="max-jobs = $rebuild_jobs
+cores = $rebuild_cores''${NIX_CONFIG:+
+$NIX_CONFIG}"
 
       if [[ -z "''${SINNIX_SAFE_REBUILD_SCOPED:-}" ]] && command -v systemd-run >/dev/null 2>&1; then
         if (( EUID == 0 )); then
@@ -26,11 +31,13 @@ let
             --quiet \
             --collect \
             --slice=nix-build.slice \
+            -p CPUQuota=1800% \
             -p CPUWeight=20 \
             -p IOWeight=50 \
             -p MemoryHigh=18G \
             -p MemoryMax=20G \
             -p MemorySwapMax=0 \
+            -p Nice=10 \
             -p ManagedOOMMemoryPressure=kill \
             -p ManagedOOMMemoryPressureLimit=50% \
             --setenv=SINNIX_SAFE_REBUILD_SCOPED=1 \
@@ -42,11 +49,13 @@ let
             --quiet \
             --collect \
             --slice=background.slice \
+            -p CPUQuota=1800% \
             -p CPUWeight=20 \
             -p IOWeight=50 \
             -p MemoryHigh=18G \
             -p MemoryMax=20G \
             -p MemorySwapMax=0 \
+            -p Nice=10 \
             -p ManagedOOMMemoryPressure=kill \
             -p ManagedOOMMemoryPressureLimit=50% \
             --setenv=SINNIX_SAFE_REBUILD_SCOPED=1 \

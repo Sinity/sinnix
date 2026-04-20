@@ -28,6 +28,33 @@ if [[ "${NIX_SAFE_CORES:-}" =~ ^[0-9]+$ && ${NIX_SAFE_CORES:-0} -ge 0 ]]; then
   safe_cores="$NIX_SAFE_CORES"
 fi
 
+if [[ -z "$safe_jobs" || -z "$safe_cores" ]]; then
+  cpu_count="$(nproc)"
+  if (( cpu_count >= 12 )); then
+    default_jobs=3
+  elif (( cpu_count >= 6 )); then
+    default_jobs=2
+  else
+    default_jobs=1
+  fi
+
+  budget_cores=$(( (cpu_count * 3) / 4 ))
+  if (( budget_cores < 1 )); then
+    budget_cores=1
+  fi
+  default_cores=$(( budget_cores / default_jobs ))
+  if (( default_cores < 1 )); then
+    default_cores=1
+  fi
+
+  if [[ -z "$safe_jobs" ]]; then
+    safe_jobs="$default_jobs"
+  fi
+  if [[ -z "$safe_cores" ]]; then
+    safe_cores="$default_cores"
+  fi
+fi
+
 args=()
 max_jobs_set=0
 cores_set=0
@@ -88,11 +115,13 @@ if [[ -z "${NIX_SAFE_SCOPED:-}" ]] && command -v systemd-run >/dev/null 2>&1; th
       --quiet \
       --collect \
       --slice=nix-build.slice \
+      -p CPUQuota=1800% \
       -p CPUWeight=20 \
       -p IOWeight=50 \
       -p MemoryHigh=18G \
       -p MemoryMax=20G \
       -p MemorySwapMax=0 \
+      --nice=10 \
       -p ManagedOOMMemoryPressure=kill \
       -p ManagedOOMMemoryPressureLimit=50% \
       --setenv=NIX_SAFE_SCOPED=1 \
@@ -104,11 +133,13 @@ if [[ -z "${NIX_SAFE_SCOPED:-}" ]] && command -v systemd-run >/dev/null 2>&1; th
       --quiet \
       --collect \
       --slice=background.slice \
+      -p CPUQuota=1800% \
       -p CPUWeight=20 \
       -p IOWeight=50 \
       -p MemoryHigh=18G \
       -p MemoryMax=20G \
       -p MemorySwapMax=0 \
+      --nice=10 \
       -p ManagedOOMMemoryPressure=kill \
       -p ManagedOOMMemoryPressureLimit=50% \
       --setenv=NIX_SAFE_SCOPED=1 \

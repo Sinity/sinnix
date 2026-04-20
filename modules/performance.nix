@@ -16,6 +16,12 @@ let
     MemorySwapMax = "0";
     ManagedOOMMemoryPressure = "kill";
     ManagedOOMMemoryPressureLimit = "50%";
+    # Weight-only isolation still lets Rust/Nix saturate every CPU. Reserve a
+    # meaningful fraction of the host for the interactive desktop instead of
+    # trying to serialize builds down to a crawl. Process fan-out is handled at
+    # the build scheduler level; a low pids.max here breaks rustc/mold thread
+    # creation before the build has actually gone pathological.
+    CPUQuota = "1800%";
     CPUWeight = 5;
     IOWeight = 5;
   };
