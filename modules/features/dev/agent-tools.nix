@@ -44,6 +44,28 @@ mkFeatureModule {
         ${lib.getExe forgePkg} zsh theme > "$out"
       '';
       sinnixCfg = config.sinnix;
+      agentScopePrelude = ''
+        run_agent_scoped() {
+          if [[ -z "''${SINNIX_AGENT_SCOPED:-}" && -n "''${XDG_RUNTIME_DIR:-}" ]]; then
+            exec ${pkgs.systemd}/bin/systemd-run \
+              --user \
+              --scope \
+              --quiet \
+              --collect \
+              --slice=background.slice \
+              --same-dir \
+              -p CPUWeight=5 \
+              -p IOWeight=5 \
+              -p MemoryHigh=16G \
+              -p MemoryMax=18G \
+              -p MemorySwapMax=0 \
+              -E SINNIX_AGENT_SCOPED=1 \
+              -- "$@"
+          fi
+
+          exec "$@"
+        }
+      '';
     in
     {
       sinnix.persistence.home = {
@@ -185,10 +207,12 @@ mkFeatureModule {
               REALM_DIR="${sinnixCfg.paths.realmRoot}"
               HOME_DIR="${config.home.homeDirectory}"
 
+              ${agentScopePrelude}
+
               if [ -d "$REALM_DIR" ]; then
-                exec "$CLAUDE_BIN" --add-dir "$REALM_DIR" "$HOME_DIR" "$@"
+                run_agent_scoped "$CLAUDE_BIN" --add-dir "$REALM_DIR" "$HOME_DIR" "$@"
               else
-                exec "$CLAUDE_BIN" "$HOME_DIR" "$@"
+                run_agent_scoped "$CLAUDE_BIN" "$HOME_DIR" "$@"
               fi
             '';
             executable = true;
@@ -242,7 +266,9 @@ mkFeatureModule {
 
               CODEX_BIN="${aiTools.codex}/bin/codex"
 
-              exec "$CODEX_BIN" "$@"
+              ${agentScopePrelude}
+
+              run_agent_scoped "$CODEX_BIN" "$@"
             '';
             executable = true;
           };
@@ -254,7 +280,9 @@ mkFeatureModule {
 
               GEMINI_BIN="${aiTools.gemini-cli}/bin/gemini"
 
-              exec "$GEMINI_BIN" "$@"
+              ${agentScopePrelude}
+
+              run_agent_scoped "$GEMINI_BIN" "$@"
             '';
             executable = true;
           };
