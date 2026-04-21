@@ -47,7 +47,20 @@ mkFeatureModule {
         };
       };
 
-      systemd.coredump.enable = true;
+      systemd.coredump = {
+        enable = true;
+        extraConfig = ''
+          Storage=none
+          ProcessSizeMax=128M
+          ExternalSizeMax=0
+          JournalSizeMax=8M
+        '';
+      };
+      systemd.services."systemd-coredump@".serviceConfig = {
+        MemoryHigh = "256M";
+        MemoryMax = "512M";
+        MemorySwapMax = 0;
+      };
       services.atd.enable = true;
 
       # Disable GNOME keyring - using GPG agent for SSH key management instead
