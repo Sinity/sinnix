@@ -37,7 +37,6 @@ $NIX_CONFIG}"
             -p MemoryHigh=18G \
             -p MemoryMax=20G \
             -p MemorySwapMax=0 \
-            -p Nice=10 \
             -p ManagedOOMMemoryPressure=kill \
             -p ManagedOOMMemoryPressureLimit=50% \
             --setenv=SINNIX_SAFE_REBUILD_SCOPED=1 \
@@ -55,7 +54,6 @@ $NIX_CONFIG}"
             -p MemoryHigh=18G \
             -p MemoryMax=20G \
             -p MemorySwapMax=0 \
-            -p Nice=10 \
             -p ManagedOOMMemoryPressure=kill \
             -p ManagedOOMMemoryPressureLimit=50% \
             --setenv=SINNIX_SAFE_REBUILD_SCOPED=1 \
