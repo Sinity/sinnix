@@ -916,11 +916,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1776746391,
-        "narHash": "sha256-pRCAPTalCVQHRiYrH+zbcnSD82Gm8f1azX9DHr+/5QQ=",
+        "lastModified": 1776785931,
+        "narHash": "sha256-YTKY5AmmDnaXaEUBA6/CvO8jwZc8mwRFqEDWkjMTH9s=",
         "ref": "master",
-        "rev": "f5226e797a307957ec527da59f81f1e1f9aa3415",
-        "revCount": 177,
+        "rev": "6bc568099f2ed6568ecfaf7dc120c408ca2a30c5",
+        "revCount": 190,
         "type": "git",
         "url": "https://github.com/Sinity/sinex"
       },
