@@ -198,7 +198,6 @@ let
 
     # Rawlog utilities
     rawlog = mkScript "rawlog" {
-      description = "Append and browse knowledgebase raw thought logs";
       runtimeInputs = with pkgs; [
         coreutils
         less

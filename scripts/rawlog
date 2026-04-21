@@ -1,21 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Quick append-only logger for knowledgebase raw-log
 # Usage: rawlog [message...]
 
 DEFAULT_REALM_ROOT=${REALM_ROOT:-/realm/project}
-if [ -z "${KB_ROOT:-}" ]; then
-  KB_ROOT="${DEFAULT_REALM_ROOT}/knowledgebase"
 fi
-LOG_DIR="$KB_ROOT"
-LOG_FILE="$LOG_DIR/logs.raw-log.md"
+LOG_FILE="$LOG_DIR/raw-log.md"
 PICKER=${PICKER:-tofi}
 RECENT_COUNT=${RECENT_COUNT:-5}
 
 die() { echo "rawlog: $*" >&2; exit 1; }
 
-[ -d "$KB_ROOT" ] || die "KB root not found: $KB_ROOT"
 mkdir -p "$LOG_DIR"
 command -v "$PICKER" >/dev/null 2>&1 || die "picker '$PICKER' not found"
 
@@ -82,12 +77,12 @@ line="- **$ts** $msg"
 if [ ! -f "$LOG_FILE" ]; then
   {
     echo "---"
-    echo "id: logs.raw-log"
-    echo "aliases: []"
-    echo "tags:"
-    echo "  - log"
-    echo "  - self"
-    echo "dr-contextualization: Append-only raw thought log."
+    echo "title: Log — raw-log"
+    echo "type: memoir"
+    echo "kind: log"
+    echo "tags: [gen/self, memoir, log, self]"
+    echo "started: $(date +%Y-%m-%d)"
+    echo "status: active"
     echo "---"
     echo
     echo "# Raw log"

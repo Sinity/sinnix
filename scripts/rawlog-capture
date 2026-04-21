@@ -6,8 +6,6 @@ set -euo pipefail
 # forwards to the core rawlog appender.
 
 DEFAULT_REALM_ROOT=${REALM_ROOT:-/realm/project}
-if [ -z "${KB_ROOT:-}" ]; then
-  KB_ROOT="${DEFAULT_REALM_ROOT}/knowledgebase"
 fi
 RAWLOG_BIN=${RAWLOG_BIN:-$HOME/.local/bin/rawlog}
 CANCEL_CODE=${RAWLOG_CANCEL_CODE:-130}
@@ -27,7 +25,6 @@ fi
 
 die() { echo "rawlog-capture: $*" >&2; exit 1; }
 
-[ -d "$KB_ROOT" ] || die "KB root not found: $KB_ROOT"
 [ -x "$RAWLOG_BIN" ] || die "rawlog script not executable at $RAWLOG_BIN"
 command -v gum >/dev/null 2>&1 || die "gum CLI not available (need pkg gum)"
 
