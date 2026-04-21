@@ -25,14 +25,23 @@ mkFeatureModule {
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
     in
     {
-      home-manager.users.${user}.home.packages = with pkgs; [
-        gocryptfs
-        encfs
-        cryptsetup
-        scriptPkgs.encrypt-folder
-        scriptPkgs.decrypt-folder
-        scriptPkgs.mount-nextcloud
-        scriptPkgs.umount-nextcloud
-      ];
+      home-manager.users.${user} = {
+        home.packages = with pkgs; [
+          gocryptfs
+          encfs
+          cryptsetup
+          scriptPkgs.encrypt-folder
+          scriptPkgs.decrypt-folder
+          scriptPkgs.mount-nextcloud
+          scriptPkgs.umount-nextcloud
+        ];
+
+        xdg.configFile."autostart/git-annex.desktop".text = ''
+          [Desktop Entry]
+          Type=Application
+          Name=Git Annex Assistant
+          Hidden=true
+        '';
+      };
     };
 } args

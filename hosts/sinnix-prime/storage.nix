@@ -178,6 +178,14 @@ in
   # fresh empty subvolume. All persistent state lives in @persist and is
   # bind-mounted back by impermanence; HM activation recreates config symlinks.
   # Safety net: pre-wipe @ saved to .snapshots/root.TIMESTAMP (never auto-pruned).
+  boot.initrd.systemd.storePaths = with pkgs; [
+    btrfs-progs
+    coreutils
+    findutils
+    gawk
+    util-linux
+  ];
+
   boot.initrd.systemd.services.rollback-root = {
     description = "Rollback btrfs root subvolume";
     wantedBy = [ "initrd.target" ];
