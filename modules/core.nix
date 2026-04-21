@@ -34,8 +34,8 @@ $NIX_CONFIG}"
             -p CPUQuota=1800% \
             -p CPUWeight=20 \
             -p IOWeight=50 \
-            -p MemoryHigh=18G \
-            -p MemoryMax=20G \
+            -p MemoryHigh=16G \
+            -p MemoryMax=18G \
             -p MemorySwapMax=0 \
             -p ManagedOOMMemoryPressure=kill \
             -p ManagedOOMMemoryPressureLimit=50% \
@@ -51,8 +51,8 @@ $NIX_CONFIG}"
             -p CPUQuota=1800% \
             -p CPUWeight=20 \
             -p IOWeight=50 \
-            -p MemoryHigh=18G \
-            -p MemoryMax=20G \
+            -p MemoryHigh=16G \
+            -p MemoryMax=18G \
             -p MemorySwapMax=0 \
             -p ManagedOOMMemoryPressure=kill \
             -p ManagedOOMMemoryPressureLimit=50% \

@@ -11,8 +11,8 @@
 }:
 let
   buildBudget = {
-    MemoryHigh = "18G";
-    MemoryMax = "20G";
+    MemoryHigh = "16G";
+    MemoryMax = "18G";
     MemorySwapMax = "0";
     ManagedOOMMemoryPressure = "kill";
     ManagedOOMMemoryPressureLimit = "50%";
@@ -24,6 +24,15 @@ let
     CPUQuota = "1800%";
     CPUWeight = 5;
     IOWeight = 5;
+  };
+  graphicalBudget = {
+    MemoryHigh = "18G";
+    MemoryMax = "24G";
+    MemorySwapMax = "1G";
+    ManagedOOMMemoryPressure = "kill";
+    ManagedOOMMemoryPressureLimit = "60%";
+    CPUWeight = 800;
+    IOWeight = 800;
   };
 in
 {
@@ -78,14 +87,36 @@ in
       settings.OOM.DefaultMemoryPressureDurationSec = "15s";
     };
 
-    # Keep the actual interactive user slice as the preferred survivor under
-    # pressure. `user.slice` is the live cgroup that holds session scopes; the
-    # old wildcard-style `user-` unit did not protect the host in practice.
+    # Keep a small floor for the logged-in user, but do not make the entire
+    # user session an unlimited preferred survivor. Terminals, AI agents,
+    # browsers, and ad-hoc dev stacks all live under user.slice; protecting the
+    # whole parent made the desktop swap-thrash instead of killing the runaway
+    # child cgroup.
     systemd.slices.user.sliceConfig = {
       CPUWeight = 1000;
       IOWeight = 1000;
-      ManagedOOMPreference = "avoid";
-      MemoryLow = "10G";
+      MemoryLow = "4G";
+    };
+
+    # User-manager background/graphical slices need their own budgets. Do not
+    # cap Kitty's aggregate slice: one throttled `memory.high` bucket stalls all
+    # terminals, including the interactive shell needed to recover the machine.
+    # Heavy terminal-launched work must be moved into `nix-build.slice` or
+    # `background.slice` instead of punishing the whole terminal surface.
+    systemd.user.slices = {
+      background.sliceConfig = buildBudget;
+
+      # Graphical apps can be large, especially browsers, but they should not be
+      # able to consume all RAM plus zram before oomd reacts.
+      app.sliceConfig = graphicalBudget;
+
+      # Preserve the compositor/session supervisor paths preferentially.
+      session.sliceConfig = {
+        ManagedOOMPreference = "avoid";
+        MemoryLow = "1G";
+        CPUWeight = 1000;
+        IOWeight = 1000;
+      };
     };
 
     # Put Nix builds in an explicitly budgeted slice so they cannot consume the
