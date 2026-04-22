@@ -23,9 +23,10 @@ if echo "$CMD" | grep -qE '(nix\s+profile\s+(install|add|remove)|cargo\s+install
   exit 0
 fi
 
-# Block force push
-if echo "$CMD" | grep -qE 'git\s+push\s+(-f|--force)|git\s+push\s+.*--force'; then
-  emit_deny "Force push blocked - remove flag if intended"
+# Block bare force-push (-f, --force) but allow safer variants
+# (--force-with-lease, --force-if-includes).
+if echo "$CMD" | grep -qE 'git\s+push\s+.*(-f(\s|$)|--force(\s|$))'; then
+  emit_deny "Bare force-push blocked — use --force-with-lease or --force-if-includes"
   exit 0
 fi
 
