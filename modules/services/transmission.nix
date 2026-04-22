@@ -1,6 +1,7 @@
 # Transmission BitTorrent Client
 #
-# Downloads to torrentInbox, uses strict systemd hardening.
+# Downloads to torrentInbox/tdown, uses systemd hardening, and exposes RPC
+# only on localhost for remote-only desktop clients.
 # RPC accessible only on localhost (no auth required).
 {
   mkServiceModule,
@@ -30,6 +31,8 @@ mkServiceModule {
       inherit (config.sinnix.paths) torrentInbox neoOuterRealm;
       username = config.sinnix.user.name;
       neoOuterRealmMount = "neo\\x2douter\\x2drealm.mount";
+      transmissionConfigDir = "/var/lib/transmission/.config/transmission-daemon";
+      torrentDownloadDir = "${torrentInbox}/tdown";
     in
     {
       services.transmission = {
@@ -42,9 +45,10 @@ mkServiceModule {
           script-torrent-done-enabled = false;
           ratio-limit-enabled = false;
           umask = 18;
-          download-dir = torrentInbox;
+          download-dir = torrentDownloadDir;
           incomplete-dir-enabled = false;
           preallocation = 0;
+          start-added-torrents = false;
           rpc-enabled = true;
           rpc-bind-address = "127.0.0.1";
           rpc-port = 9091;
@@ -58,6 +62,10 @@ mkServiceModule {
 
       systemd.tmpfiles.rules = lib.mkAfter [
         "d ${torrentInbox} 2775 ${username} users -"
+        "d ${torrentDownloadDir} 2775 ${username} users -"
+        "d /var/lib/transmission/.config 0750 ${username} users -"
+        "d ${transmissionConfigDir} 0750 ${username} users -"
+        "f ${transmissionConfigDir}/queue.json 0644 ${username} users - []"
       ];
 
       systemd.services.transmission = {
@@ -80,6 +88,13 @@ mkServiceModule {
               "/var/lib/transmission"
             ];
           })
+          {
+            # Transmission 4.1.1 uses RPC/session-info paths that are killed by
+            # the generic syscall deny-list on this host. Keep filesystem,
+            # namespace, privilege, and localhost RPC hardening, but do not use
+            # seccomp as the failure mode for an interactive torrent daemon.
+            SystemCallFilter = lib.mkForce [ ];
+          }
           (lib.sinnix.systemd.mkRestartPolicy {
             strategy = "on-failure";
             delaySec = 10;

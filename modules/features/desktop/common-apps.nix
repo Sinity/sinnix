@@ -37,7 +37,8 @@ mkFeatureModule {
         {
           home.packages = with pkgs; [
             nautilus
-            transmission_4-gtk
+            tremotesf
+            transmission-remote-gtk
             pwvucontrol
             blueman
             weechat

@@ -98,7 +98,7 @@
   "speed-limit-down-enabled": false,
   "speed-limit-up": 1096,
   "speed-limit-up-enabled": false,
-  "start-added-torrents": true,
+  "start-added-torrents": false,
   "statusbar-stats": "total-ratio",
   "tcp-enabled": true,
   "torrent-added-notification-enabled": true,
