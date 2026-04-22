@@ -7,6 +7,8 @@ let
   lib = pkgs.lib;
   scriptPkgs = (import ./scripts.nix { inherit inputs pkgs; }).packageSet;
   checkTiers = import ./check-tiers.nix { inherit lib; };
+  resourceBudgets = import ../modules/lib/resource-budgets.nix;
+  developerBudget = resourceBudgets.developerWork;
   rebuildServicePath = lib.makeBinPath [
     pkgs.coreutils
     pkgs.findutils
@@ -49,8 +51,8 @@ let
     fi
   '';
   rebuildDefaultArgs = ''
-    rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-2}"
-    rebuild_cores="''${SINNIX_REBUILD_CORES:-8}"
+    rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-auto}"
+    rebuild_cores="''${SINNIX_REBUILD_CORES:-0}"
   '';
   hostSmokeTerminalScript = ''
     session="sinnix-host-smoke-$$"
@@ -340,15 +342,15 @@ in
           --wait \
           --setenv=PATH="${rebuildServicePath}:$PATH" \
           -p Slice=nix-build.slice \
-          -p CPUQuota=1800% \
-          -p CPUWeight=20 \
-          -p IOWeight=50 \
-          -p MemoryHigh=18G \
-          -p MemoryMax=20G \
-          -p MemorySwapMax=0 \
+          -p CPUQuota=${developerBudget.cpuQuota} \
+          -p CPUWeight=${toString developerBudget.cpuWeight} \
+          -p IOWeight=${toString developerBudget.ioWeight} \
+          -p MemoryHigh=${developerBudget.memoryHigh} \
+          -p MemoryMax=${developerBudget.memoryMax} \
+          -p MemorySwapMax=${developerBudget.memorySwapMax} \
           -p Nice=10 \
-          -p ManagedOOMMemoryPressure=kill \
-          -p ManagedOOMMemoryPressureLimit=50% \
+          -p ManagedOOMMemoryPressure=${developerBudget.managedOOMMemoryPressure} \
+          -p ManagedOOMMemoryPressureLimit=${developerBudget.managedOOMMemoryPressureLimit} \
           ${pkgs.nixos-rebuild}/bin/nixos-rebuild test --flake "path:$_invoke_flake_dir#sinnix-prime" \
           --max-jobs "$rebuild_jobs" \
           --cores "$rebuild_cores" \
@@ -376,15 +378,15 @@ in
           --wait \
           --setenv=PATH="${rebuildServicePath}:$PATH" \
           -p Slice=nix-build.slice \
-          -p CPUQuota=1800% \
-          -p CPUWeight=20 \
-          -p IOWeight=50 \
-          -p MemoryHigh=18G \
-          -p MemoryMax=20G \
-          -p MemorySwapMax=0 \
+          -p CPUQuota=${developerBudget.cpuQuota} \
+          -p CPUWeight=${toString developerBudget.cpuWeight} \
+          -p IOWeight=${toString developerBudget.ioWeight} \
+          -p MemoryHigh=${developerBudget.memoryHigh} \
+          -p MemoryMax=${developerBudget.memoryMax} \
+          -p MemorySwapMax=${developerBudget.memorySwapMax} \
           -p Nice=10 \
-          -p ManagedOOMMemoryPressure=kill \
-          -p ManagedOOMMemoryPressureLimit=50% \
+          -p ManagedOOMMemoryPressure=${developerBudget.managedOOMMemoryPressure} \
+          -p ManagedOOMMemoryPressureLimit=${developerBudget.managedOOMMemoryPressureLimit} \
           ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --flake "path:$_invoke_flake_dir#sinnix-prime" \
           --max-jobs "$rebuild_jobs" \
           --cores "$rebuild_cores" \

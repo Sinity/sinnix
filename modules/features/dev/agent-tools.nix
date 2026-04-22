@@ -44,6 +44,8 @@ mkFeatureModule {
         ${lib.getExe forgePkg} zsh theme > "$out"
       '';
       sinnixCfg = config.sinnix;
+      resourceBudgets = import ../../lib/resource-budgets.nix;
+      developerBudget = resourceBudgets.developerWork;
       agentScopePrelude = ''
         run_agent_scoped() {
           if [[ -z "''${SINNIX_AGENT_SCOPED:-}" && -n "''${XDG_RUNTIME_DIR:-}" ]]; then
@@ -54,11 +56,14 @@ mkFeatureModule {
               --collect \
               --slice=background.slice \
               --same-dir \
-              -p CPUWeight=5 \
-              -p IOWeight=5 \
-              -p MemoryHigh=16G \
-              -p MemoryMax=18G \
-              -p MemorySwapMax=0 \
+              -p CPUQuota=${developerBudget.cpuQuota} \
+              -p CPUWeight=${toString developerBudget.cpuWeight} \
+              -p IOWeight=${toString developerBudget.ioWeight} \
+              -p MemoryHigh=${developerBudget.memoryHigh} \
+              -p MemoryMax=${developerBudget.memoryMax} \
+              -p MemorySwapMax=${developerBudget.memorySwapMax} \
+              -p ManagedOOMMemoryPressure=${developerBudget.managedOOMMemoryPressure} \
+              -p ManagedOOMMemoryPressureLimit=${developerBudget.managedOOMMemoryPressureLimit} \
               -E SINNIX_AGENT_SCOPED=1 \
               -- "$@"
           fi

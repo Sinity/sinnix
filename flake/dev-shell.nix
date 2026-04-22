@@ -18,6 +18,8 @@
       commandRegistry = import ./command-registry.nix {
         inherit inputs pkgs system;
       };
+      resourceBudgets = import ../modules/lib/resource-budgets.nix;
+      developerBudget = resourceBudgets.developerWork;
       nix = "${pkgs.nix}/bin/nix";
       safeSudoPathPrefix = "${pkgs.coreutils}/bin";
       rebuildServicePath = lib.makeBinPath [
@@ -79,8 +81,8 @@
           set -euo pipefail
           flake_ref="$1"
           shift
-          rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-2}"
-          rebuild_cores="''${SINNIX_REBUILD_CORES:-8}"
+          rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-auto}"
+          rebuild_cores="''${SINNIX_REBUILD_CORES:-0}"
           PATH="${safeSudoPathPrefix}:$PATH" \
             sudo ${pkgs.systemd}/bin/systemd-run \
             --quiet \
@@ -90,13 +92,14 @@
             --wait \
             --setenv=PATH="${rebuildServicePath}:$PATH" \
             -p Slice=nix-build.slice \
-            -p CPUWeight=20 \
-            -p IOWeight=50 \
-            -p MemoryHigh=18G \
-            -p MemoryMax=20G \
-            -p MemorySwapMax=0 \
-            -p ManagedOOMMemoryPressure=kill \
-            -p ManagedOOMMemoryPressureLimit=50% \
+            -p CPUQuota=${developerBudget.cpuQuota} \
+            -p CPUWeight=${toString developerBudget.cpuWeight} \
+            -p IOWeight=${toString developerBudget.ioWeight} \
+            -p MemoryHigh=${developerBudget.memoryHigh} \
+            -p MemoryMax=${developerBudget.memoryMax} \
+            -p MemorySwapMax=${developerBudget.memorySwapMax} \
+            -p ManagedOOMMemoryPressure=${developerBudget.managedOOMMemoryPressure} \
+            -p ManagedOOMMemoryPressureLimit=${developerBudget.managedOOMMemoryPressureLimit} \
             ${pkgs.nixos-rebuild}/bin/nixos-rebuild \
               ${action} \
               --flake "$flake_ref" \

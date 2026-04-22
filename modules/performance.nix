@@ -10,30 +10,9 @@
   ...
 }:
 let
-  buildBudget = {
-    MemoryHigh = "16G";
-    MemoryMax = "18G";
-    MemorySwapMax = "0";
-    ManagedOOMMemoryPressure = "kill";
-    ManagedOOMMemoryPressureLimit = "50%";
-    # Weight-only isolation still lets Rust/Nix saturate every CPU. Reserve a
-    # meaningful fraction of the host for the interactive desktop instead of
-    # trying to serialize builds down to a crawl. Process fan-out is handled at
-    # the build scheduler level; a low pids.max here breaks rustc/mold thread
-    # creation before the build has actually gone pathological.
-    CPUQuota = "1800%";
-    CPUWeight = 5;
-    IOWeight = 5;
-  };
-  graphicalBudget = {
-    MemoryHigh = "18G";
-    MemoryMax = "24G";
-    MemorySwapMax = "1G";
-    ManagedOOMMemoryPressure = "kill";
-    ManagedOOMMemoryPressureLimit = "60%";
-    CPUWeight = 800;
-    IOWeight = 800;
-  };
+  resourceBudgets = import ./lib/resource-budgets.nix;
+  buildBudget = resourceBudgets.developerWork.sliceConfig;
+  graphicalBudget = resourceBudgets.graphical.sliceConfig;
 in
 {
   config = lib.mkIf config.sinnix.machine.isDesktop {
@@ -138,7 +117,8 @@ in
     # the correct slice instead of re-stating the whole resource envelope.
     systemd.services.nix-daemon.serviceConfig = {
       Slice = "nix-build.slice";
-    } // buildBudget;
+    }
+    // buildBudget;
 
     # Ananicy: per-process nice/ioclass for desktop responsiveness
     services.ananicy = {

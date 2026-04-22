@@ -13,6 +13,8 @@ let
   username = config.sinnix.user.name;
   inherit (config.sinnix) paths;
   inherit (config.sinnix.machine) isDesktop;
+  resourceBudgets = import ./lib/resource-budgets.nix;
+  developerBudget = resourceBudgets.developerWork;
   safeNixosRebuild = lib.hiPrio (
     pkgs.writeShellScriptBin "nixos-rebuild" ''
             set -euo pipefail
@@ -36,14 +38,14 @@ let
                   --quiet \
                   --collect \
                   --slice=nix-build.slice \
-                  -p CPUQuota=2200% \
-                  -p CPUWeight=20 \
-                  -p IOWeight=50 \
-                  -p MemoryHigh=22G \
-                  -p MemoryMax=26G \
-                  -p MemorySwapMax=0 \
-                  -p ManagedOOMMemoryPressure=kill \
-                  -p ManagedOOMMemoryPressureLimit=50% \
+                  -p CPUQuota=${developerBudget.cpuQuota} \
+                  -p CPUWeight=${toString developerBudget.cpuWeight} \
+                  -p IOWeight=${toString developerBudget.ioWeight} \
+                  -p MemoryHigh=${developerBudget.memoryHigh} \
+                  -p MemoryMax=${developerBudget.memoryMax} \
+                  -p MemorySwapMax=${developerBudget.memorySwapMax} \
+                  -p ManagedOOMMemoryPressure=${developerBudget.managedOOMMemoryPressure} \
+                  -p ManagedOOMMemoryPressureLimit=${developerBudget.managedOOMMemoryPressureLimit} \
                   --setenv=SINNIX_SAFE_REBUILD_SCOPED=1 \
                   ${config.system.build.nixos-rebuild}/bin/nixos-rebuild "$@"
               elif [[ -n "''${XDG_RUNTIME_DIR:-}" ]]; then
@@ -53,14 +55,14 @@ let
                   --quiet \
                   --collect \
                   --slice=background.slice \
-                  -p CPUQuota=2200% \
-                  -p CPUWeight=20 \
-                  -p IOWeight=50 \
-                  -p MemoryHigh=22G \
-                  -p MemoryMax=26G \
-                  -p MemorySwapMax=0 \
-                  -p ManagedOOMMemoryPressure=kill \
-                  -p ManagedOOMMemoryPressureLimit=50% \
+                  -p CPUQuota=${developerBudget.cpuQuota} \
+                  -p CPUWeight=${toString developerBudget.cpuWeight} \
+                  -p IOWeight=${toString developerBudget.ioWeight} \
+                  -p MemoryHigh=${developerBudget.memoryHigh} \
+                  -p MemoryMax=${developerBudget.memoryMax} \
+                  -p MemorySwapMax=${developerBudget.memorySwapMax} \
+                  -p ManagedOOMMemoryPressure=${developerBudget.managedOOMMemoryPressure} \
+                  -p ManagedOOMMemoryPressureLimit=${developerBudget.managedOOMMemoryPressureLimit} \
                   --setenv=SINNIX_SAFE_REBUILD_SCOPED=1 \
                   ${config.system.build.nixos-rebuild}/bin/nixos-rebuild "$@"
               fi
