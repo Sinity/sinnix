@@ -25,14 +25,16 @@ mkFeatureModule {
           programs.git = {
             enable = true;
             signing = {
-              key = "0x5E6A3B1F";
-              signByDefault = false;
+              format = "ssh";
+              key = "/home/sinity/.ssh/id_ed25519_github.pub";
+              signByDefault = true;
             };
             settings = {
               user = {
                 name = "Sinity";
                 email = "ezo.dev@gmail.com";
               };
+              gpg.ssh.allowedSignersFile = "~/.config/git/allowed_signers";
               alias = {
                 a = "add";
                 aa = "add --all";
@@ -117,6 +119,10 @@ mkFeatureModule {
 
           home.file.".config/git/ignore_global".text = ''
             AGENTS.md
+          '';
+
+          home.file.".config/git/allowed_signers".text = ''
+            ezo.dev@gmail.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBn+iIA903PeKrQvEmJl3Q8kE1haD6HkSZCoXEp6sFFR
           '';
 
           programs.delta = {

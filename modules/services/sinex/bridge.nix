@@ -26,6 +26,7 @@ let
   hostPrepared = cfg.prepareHost || cfg.enable || cfg.provisionDatabase;
   runtimeEnabled = cfg.enable;
   databasePrepared = cfg.provisionDatabase || cfg.enable;
+  sinexRuntimeStartDelay = "90s";
 in
 {
   config = lib.mkIf (options.services ? sinex) (
@@ -70,6 +71,41 @@ in
           };
         }
         .${cfg.activationProfile};
+      filesystemWatchPaths = [
+        "${realmRoot}/project"
+        "${realmRoot}/inbox"
+      ];
+      delayedRuntimeServices = lib.unique (
+        lib.optionals databasePrepared [
+          "postgresql"
+          "postgresql-setup"
+          "sinex-schema-apply"
+        ]
+        ++ lib.optionals runtimeEnabled [
+          "nats"
+          "sinex-nats-bootstrap"
+          "sinex-blob-init"
+          "sinex-preflight"
+          "sinex-tls-init"
+          "sinex-ingestd"
+          "sinex-gateway"
+        ]
+        ++ lib.optionals (runtimeEnabled && activationProfile.filesystem) [ "sinex-filesystem-1" ]
+        ++ lib.optionals (runtimeEnabled && activationProfile.terminal) [ "sinex-terminal-1" ]
+        ++ lib.optionals (runtimeEnabled && activationProfile.browser) [ "sinex-browser-1" ]
+        ++ lib.optionals (runtimeEnabled && activationProfile.desktop) [ "sinex-desktop-1" ]
+        ++ lib.optionals (runtimeEnabled && activationProfile.system) [ "sinex-system-1" ]
+        ++ lib.optionals (runtimeEnabled && activationProfile.document) [ "sinex-document-scan" ]
+        ++ lib.optionals (runtimeEnabled && activationProfile.automata) [
+          "sinex-analytics-automaton"
+          "sinex-session-detector"
+        ]
+        ++ lib.optionals (runtimeEnabled && activationProfile.canonicalizer) [ "sinex-canonicalizer" ]
+        ++ lib.optionals (runtimeEnabled && activationProfile.healthAggregator) [
+          "sinex-health-automaton"
+        ]
+      );
+      delayedRuntimeUnits = map (name: "${name}.service") delayedRuntimeServices;
       mkScopedSinexPackage =
         sinexPkgs:
         pkgs.symlinkJoin {
@@ -88,7 +124,9 @@ in
             ++ lib.optionals (runtimeEnabled && activationProfile.browser) [ sinexPkgs.sinex-browser-ingestor ]
             ++ lib.optionals (runtimeEnabled && activationProfile.desktop) [ sinexPkgs.sinex-desktop-ingestor ]
             ++ lib.optionals (runtimeEnabled && activationProfile.system) [ sinexPkgs.sinex-system-ingestor ]
-            ++ lib.optionals (runtimeEnabled && activationProfile.document) [ sinexPkgs.sinex-document-ingestor ]
+            ++ lib.optionals (runtimeEnabled && activationProfile.document) [
+              sinexPkgs.sinex-document-ingestor
+            ]
             ++ lib.optionals (runtimeEnabled && activationProfile.automata) [
               sinexPkgs.sinex-analytics-automaton
               sinexPkgs.sinex-session-detector
@@ -207,7 +245,7 @@ in
 
             filesystem = {
               enable = runtimeEnabled && activationProfile.filesystem;
-              watchPaths = [ realmRoot ];
+              watchPaths = filesystemWatchPaths;
             };
 
             terminal = {
@@ -265,16 +303,46 @@ in
         };
       })
 
-      (lib.mkIf (
-        cfg.provisionDatabase
-        && databasePasswordFile != null
-        && config.services.sinex.database.localAuth != "trust"
-      ) {
-        # Delay postgresql-setup until agenix has materialized the password file.
-        systemd.services.postgresql-setup.unitConfig.ConditionPathIsReadable = [
-          databasePasswordFile
-        ];
+      (lib.mkIf runtimeEnabled {
+        # Sinex is a capture runtime, not a boot prerequisite for the desktop.
+        # Start the stack shortly after boot through an explicit target so
+        # PostgreSQL/schema apply/NATS/node startup cannot hold graphical.target.
+        systemd.services = lib.genAttrs delayedRuntimeServices (_: {
+          wantedBy = lib.mkForce [ ];
+        });
+        systemd.targets.sinex-runtime = {
+          description = "Start Sinex runtime after interactive boot";
+          wants = delayedRuntimeUnits ++ [ "network-online.target" ];
+          after = [
+            "multi-user.target"
+            "graphical.target"
+            "network-online.target"
+          ];
+        };
+        systemd.timers.sinex-runtime = {
+          description = "Delay Sinex runtime startup until after boot";
+          wantedBy = [ "timers.target" ];
+          timerConfig = {
+            OnBootSec = sinexRuntimeStartDelay;
+            AccuracySec = "15s";
+            Unit = "sinex-runtime.target";
+          };
+        };
       })
+
+      (lib.mkIf
+        (
+          cfg.provisionDatabase
+          && databasePasswordFile != null
+          && config.services.sinex.database.localAuth != "trust"
+        )
+        {
+          # Delay postgresql-setup until agenix has materialized the password file.
+          systemd.services.postgresql-setup.unitConfig.ConditionPathIsReadable = [
+            databasePasswordFile
+          ];
+        }
+      )
 
     ]
   );
