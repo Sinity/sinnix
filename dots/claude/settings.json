@@ -79,16 +79,13 @@
     "code-review@claude-plugins-official": true,
     "code-simplifier@claude-plugins-official": true,
     "playwright@claude-plugins-official": true,
-    "ralph-loop@claude-plugins-official": true,
     "claude-md-management@claude-plugins-official": true,
     "skill-creator@claude-plugins-official": true,
     "pr-review-toolkit@claude-plugins-official": true,
     "pyright-lsp@claude-plugins-official": true,
     "playground@claude-plugins-official": true,
-    "huggingface-skills@claude-plugins-official": true,
     "semgrep@claude-plugins-official": false,
-    "posthog@claude-plugins-official": true,
-    "chrome-devtools-mcp@claude-plugins-official": false,
+    "chrome-devtools-mcp@claude-plugins-official": true,
     "atomic-agents@claude-plugins-official": true
   },
   "alwaysThinkingEnabled": true,
@@ -108,6 +105,5 @@
         "http://127.0.0.1:9222"
       ]
     }
-  },
-  "model": "sonnet"
+  }
 }

@@ -14,7 +14,10 @@ mkServiceModule {
   health = {
     unit = "transmission.service";
     type = "service";
-    restartable = true;
+    # Transmission is often intentionally stopped for disk maintenance.
+    # Let the dedicated autostart timer handle boot startup; sentinel must
+    # not fight manual stops or sparsification jobs.
+    restartable = false;
   };
   configFn =
     {
@@ -110,6 +113,68 @@ mkServiceModule {
         timerConfig = {
           OnBootSec = "30s";
           Unit = "transmission-autostart.service";
+        };
+      };
+
+      systemd.services.transmission-sparsify = {
+        description = "Punch holes in Transmission partial downloads";
+        after = [ neoOuterRealmMount ];
+        unitConfig = {
+          RequiresMountsFor = [ torrentInbox ];
+          PartOf = [ neoOuterRealmMount ];
+        };
+        path = with pkgs; [
+          coreutils
+          findutils
+          systemd
+          util-linux
+        ];
+        script = ''
+          set -euo pipefail
+
+          max_gib="''${TRANSMISSION_SPARSIFY_MAX_LOGICAL_GIB:-256}"
+          force="''${TRANSMISSION_SPARSIFY_FORCE:-0}"
+          plan="$(mktemp)"
+          cleanup() {
+            rm -f "$plan"
+          }
+          trap cleanup EXIT
+
+          find ${lib.escapeShellArg torrentInbox} -xdev -type f -name "*.part" -print0 > "$plan"
+
+          count=0
+          bytes=0
+          while IFS= read -r -d "" path; do
+            size="$(stat -c %s -- "$path")"
+            count="$((count + 1))"
+            bytes="$((bytes + size))"
+          done < "$plan"
+
+          max_bytes="$((max_gib * 1024 * 1024 * 1024))"
+          echo "transmission-sparsify: found $count partial file(s), $bytes logical byte(s), budget $max_gib GiB"
+
+          if [ "$force" != 1 ] && [ "$bytes" -gt "$max_bytes" ]; then
+            echo "transmission-sparsify: refusing scan above budget; set TRANSMISSION_SPARSIFY_FORCE=1 to override" >&2
+            exit 78
+          fi
+
+          systemctl stop transmission.service transmission-autostart.timer transmission-autostart.service || true
+          while IFS= read -r -d "" path; do
+            echo "transmission-sparsify: punching holes in $path"
+            fallocate -d -- "$path"
+          done < "$plan"
+        '';
+        postStop = ''
+          systemctl start transmission-autostart.timer transmission.service || true
+        '';
+        serviceConfig = {
+          Type = "oneshot";
+          Slice = "background.slice";
+          Nice = 19;
+          IOSchedulingClass = "idle";
+          CPUWeight = 10;
+          IOWeight = 5;
+          MemoryMax = "1G";
         };
       };
     };

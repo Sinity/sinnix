@@ -23,8 +23,8 @@ let
                 pkgs.systemd
               ]
             }:$PATH"
-            rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-2}"
-            rebuild_cores="''${SINNIX_REBUILD_CORES:-8}"
+            rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-auto}"
+            rebuild_cores="''${SINNIX_REBUILD_CORES:-0}"
             export NIX_CONFIG="max-jobs = $rebuild_jobs
       cores = $rebuild_cores''${NIX_CONFIG:+
       $NIX_CONFIG}"
@@ -36,11 +36,11 @@ let
                   --quiet \
                   --collect \
                   --slice=nix-build.slice \
-                  -p CPUQuota=1800% \
+                  -p CPUQuota=2200% \
                   -p CPUWeight=20 \
                   -p IOWeight=50 \
-                  -p MemoryHigh=16G \
-                  -p MemoryMax=18G \
+                  -p MemoryHigh=22G \
+                  -p MemoryMax=26G \
                   -p MemorySwapMax=0 \
                   -p ManagedOOMMemoryPressure=kill \
                   -p ManagedOOMMemoryPressureLimit=50% \
@@ -53,11 +53,11 @@ let
                   --quiet \
                   --collect \
                   --slice=background.slice \
-                  -p CPUQuota=1800% \
+                  -p CPUQuota=2200% \
                   -p CPUWeight=20 \
                   -p IOWeight=50 \
-                  -p MemoryHigh=16G \
-                  -p MemoryMax=18G \
+                  -p MemoryHigh=22G \
+                  -p MemoryMax=26G \
                   -p MemorySwapMax=0 \
                   -p ManagedOOMMemoryPressure=kill \
                   -p ManagedOOMMemoryPressureLimit=50% \
@@ -113,16 +113,13 @@ in
           "nixpkgs-unfree.cachix.org-1:hqvoInulhbV4nJ9yJOEr+4wxhDV4xq2d1DK7S6Nj6rs="
         ];
         netrc-file = "/etc/nix/netrc";
-        # Keep daemon defaults desktop-safe even for direct `nix build` calls.
-        # Sinex builds start SQLx validation Postgres instances inside package
-        # derivations, so unbounded daemon fanout multiplies compiler, linker,
-        # and database pressure before the slice can react.
-        max-jobs = 2;
-        cores = 8;
-        # Let the systemd-managed nix-build/background slices be the only cgroup
-        # authority. With Nix's own builder cgroups enabled, the heavy build
-        # workers escape the slice budget and only the daemon itself stays
-        # constrained, which defeats the desktop protection model.
+        # Use the workstation. Containment belongs to nix-build.slice, not to
+        # globally serializing Nix into a low-throughput mode.
+        max-jobs = "auto";
+        cores = 0;
+        # Keep build workers under the daemon's systemd slice so MemoryMax,
+        # MemorySwapMax, CPUQuota, IOWeight, and oomd apply to the whole build
+        # tree as one budget.
         use-cgroups = false;
         builders-use-substitutes = true;
 
