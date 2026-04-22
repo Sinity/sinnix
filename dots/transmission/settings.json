@@ -48,7 +48,7 @@
   "peer-socket-tos": "le",
   "pex-enabled": true,
   "port-forwarding-enabled": true,
-  "preallocation": 1,
+  "preallocation": 0,
   "preferred_transports": ["utp", "tcp"],
   "proxy_url": null,
   "queue-stalled-enabled": true,

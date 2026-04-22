@@ -94,6 +94,7 @@
   "alwaysThinkingEnabled": true,
   "effortLevel": "xhigh",
   "skipDangerousModePermissionPrompt": true,
+  "skipAutoPermissionPrompt": true,
   "mcpServers": {
     "polylogue": {
       "command": "mcp-polylogue",
@@ -108,5 +109,5 @@
       ]
     }
   },
-  "skipAutoPermissionPrompt": true
+  "model": "sonnet"
 }

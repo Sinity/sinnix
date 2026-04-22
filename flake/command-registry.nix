@@ -49,8 +49,8 @@ let
     fi
   '';
   rebuildDefaultArgs = ''
-    rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-3}"
-    rebuild_cores="''${SINNIX_REBUILD_CORES:-6}"
+    rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-2}"
+    rebuild_cores="''${SINNIX_REBUILD_CORES:-8}"
   '';
   hostSmokeTerminalScript = ''
     session="sinnix-host-smoke-$$"

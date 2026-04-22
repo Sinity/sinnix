@@ -111,32 +111,13 @@ in
         pkgs.symlinkJoin {
           name = "sinex-runtime-${sinexEnvironment}";
           paths = lib.unique (
-            lib.optionals databasePrepared [ sinexPkgs.xtask ]
-            ++ lib.optionals runtimeEnabled [
-              sinexPkgs.sinex-ingestd
-              sinexPkgs.sinex-gateway
-              sinexPkgs.sinex-node-sdk
+            lib.optionals runtimeEnabled [
+              # Use the upstream aggregate runtime so Nix builds Sinex once for
+              # deployment. Selecting per-node packages here reintroduces one
+              # SQLx/Postgres build derivation per service.
+              sinexPkgs.sinex
             ]
-            ++ lib.optionals (runtimeEnabled && activationProfile.filesystem) [ sinexPkgs.sinex-fs-ingestor ]
-            ++ lib.optionals (runtimeEnabled && activationProfile.terminal) [
-              sinexPkgs.sinex-terminal-ingestor
-            ]
-            ++ lib.optionals (runtimeEnabled && activationProfile.browser) [ sinexPkgs.sinex-browser-ingestor ]
-            ++ lib.optionals (runtimeEnabled && activationProfile.desktop) [ sinexPkgs.sinex-desktop-ingestor ]
-            ++ lib.optionals (runtimeEnabled && activationProfile.system) [ sinexPkgs.sinex-system-ingestor ]
-            ++ lib.optionals (runtimeEnabled && activationProfile.document) [
-              sinexPkgs.sinex-document-ingestor
-            ]
-            ++ lib.optionals (runtimeEnabled && activationProfile.automata) [
-              sinexPkgs.sinex-analytics-automaton
-              sinexPkgs.sinex-session-detector
-            ]
-            ++ lib.optionals (runtimeEnabled && activationProfile.canonicalizer) [
-              sinexPkgs.sinex-terminal-command-canonicalizer
-            ]
-            ++ lib.optionals (runtimeEnabled && activationProfile.healthAggregator) [
-              sinexPkgs.sinex-health-automaton
-            ]
+            ++ lib.optionals (!runtimeEnabled && databasePrepared) [ sinexPkgs.xtask ]
           );
         };
     in
@@ -171,7 +152,9 @@ in
         in
         {
           services.sinex.package = lib.mkDefault (mkScopedSinexPackage sinexPkgs);
-          services.sinex.cliPackage = lib.mkDefault sinexPkgs.sinexctl;
+          services.sinex.cliPackage = lib.mkDefault (
+            if runtimeEnabled then sinexPkgs.sinex else sinexPkgs.sinexctl
+          );
           services.sinex.users.target = targetUserName;
           sinex.secrets.paths = lib.mkForce (
             lib.mapAttrs (_: path: toString path) (

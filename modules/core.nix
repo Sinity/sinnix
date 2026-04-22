@@ -15,53 +15,58 @@ let
   inherit (config.sinnix.machine) isDesktop;
   safeNixosRebuild = lib.hiPrio (
     pkgs.writeShellScriptBin "nixos-rebuild" ''
-      set -euo pipefail
+            set -euo pipefail
 
-      export PATH="${lib.makeBinPath [ pkgs.coreutils pkgs.systemd ]}:$PATH"
-      rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-3}"
-      rebuild_cores="''${SINNIX_REBUILD_CORES:-6}"
-      export NIX_CONFIG="max-jobs = $rebuild_jobs
-cores = $rebuild_cores''${NIX_CONFIG:+
-$NIX_CONFIG}"
+            export PATH="${
+              lib.makeBinPath [
+                pkgs.coreutils
+                pkgs.systemd
+              ]
+            }:$PATH"
+            rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-2}"
+            rebuild_cores="''${SINNIX_REBUILD_CORES:-8}"
+            export NIX_CONFIG="max-jobs = $rebuild_jobs
+      cores = $rebuild_cores''${NIX_CONFIG:+
+      $NIX_CONFIG}"
 
-      if [[ -z "''${SINNIX_SAFE_REBUILD_SCOPED:-}" ]] && command -v systemd-run >/dev/null 2>&1; then
-        if (( EUID == 0 )); then
-          exec systemd-run \
-            --scope \
-            --quiet \
-            --collect \
-            --slice=nix-build.slice \
-            -p CPUQuota=1800% \
-            -p CPUWeight=20 \
-            -p IOWeight=50 \
-            -p MemoryHigh=16G \
-            -p MemoryMax=18G \
-            -p MemorySwapMax=0 \
-            -p ManagedOOMMemoryPressure=kill \
-            -p ManagedOOMMemoryPressureLimit=50% \
-            --setenv=SINNIX_SAFE_REBUILD_SCOPED=1 \
-            ${config.system.build.nixos-rebuild}/bin/nixos-rebuild "$@"
-        elif [[ -n "''${XDG_RUNTIME_DIR:-}" ]]; then
-          exec systemd-run \
-            --user \
-            --scope \
-            --quiet \
-            --collect \
-            --slice=background.slice \
-            -p CPUQuota=1800% \
-            -p CPUWeight=20 \
-            -p IOWeight=50 \
-            -p MemoryHigh=16G \
-            -p MemoryMax=18G \
-            -p MemorySwapMax=0 \
-            -p ManagedOOMMemoryPressure=kill \
-            -p ManagedOOMMemoryPressureLimit=50% \
-            --setenv=SINNIX_SAFE_REBUILD_SCOPED=1 \
-            ${config.system.build.nixos-rebuild}/bin/nixos-rebuild "$@"
-        fi
-      fi
+            if [[ -z "''${SINNIX_SAFE_REBUILD_SCOPED:-}" ]] && command -v systemd-run >/dev/null 2>&1; then
+              if (( EUID == 0 )); then
+                exec systemd-run \
+                  --scope \
+                  --quiet \
+                  --collect \
+                  --slice=nix-build.slice \
+                  -p CPUQuota=1800% \
+                  -p CPUWeight=20 \
+                  -p IOWeight=50 \
+                  -p MemoryHigh=16G \
+                  -p MemoryMax=18G \
+                  -p MemorySwapMax=0 \
+                  -p ManagedOOMMemoryPressure=kill \
+                  -p ManagedOOMMemoryPressureLimit=50% \
+                  --setenv=SINNIX_SAFE_REBUILD_SCOPED=1 \
+                  ${config.system.build.nixos-rebuild}/bin/nixos-rebuild "$@"
+              elif [[ -n "''${XDG_RUNTIME_DIR:-}" ]]; then
+                exec systemd-run \
+                  --user \
+                  --scope \
+                  --quiet \
+                  --collect \
+                  --slice=background.slice \
+                  -p CPUQuota=1800% \
+                  -p CPUWeight=20 \
+                  -p IOWeight=50 \
+                  -p MemoryHigh=16G \
+                  -p MemoryMax=18G \
+                  -p MemorySwapMax=0 \
+                  -p ManagedOOMMemoryPressure=kill \
+                  -p ManagedOOMMemoryPressureLimit=50% \
+                  --setenv=SINNIX_SAFE_REBUILD_SCOPED=1 \
+                  ${config.system.build.nixos-rebuild}/bin/nixos-rebuild "$@"
+              fi
+            fi
 
-      exec ${config.system.build.nixos-rebuild}/bin/nixos-rebuild "$@"
+            exec ${config.system.build.nixos-rebuild}/bin/nixos-rebuild "$@"
     ''
   );
 in
@@ -108,11 +113,12 @@ in
           "nixpkgs-unfree.cachix.org-1:hqvoInulhbV4nJ9yJOEr+4wxhDV4xq2d1DK7S6Nj6rs="
         ];
         netrc-file = "/etc/nix/netrc";
-        # Let Nix use the machine normally; interactive protection lives in the
-        # dedicated build slice and systemd-oomd policy, not in a hardcoded
-        # workstation-wide job/core throttle.
-        max-jobs = "auto";
-        cores = 0;
+        # Keep daemon defaults desktop-safe even for direct `nix build` calls.
+        # Sinex builds start SQLx validation Postgres instances inside package
+        # derivations, so unbounded daemon fanout multiplies compiler, linker,
+        # and database pressure before the slice can react.
+        max-jobs = 2;
+        cores = 8;
         # Let the systemd-managed nix-build/background slices be the only cgroup
         # authority. With Nix's own builder cgroups enabled, the heavy build
         # workers escape the slice budget and only the daemon itself stays

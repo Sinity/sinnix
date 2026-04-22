@@ -31,19 +31,13 @@ fi
 if [[ -z "$safe_jobs" || -z "$safe_cores" ]]; then
   cpu_count="$(nproc)"
   if (( cpu_count >= 12 )); then
-    default_jobs=3
+    default_jobs=2
+    default_cores=8
   elif (( cpu_count >= 6 )); then
     default_jobs=2
+    default_cores=2
   else
     default_jobs=1
-  fi
-
-  budget_cores=$(( (cpu_count * 3) / 4 ))
-  if (( budget_cores < 1 )); then
-    budget_cores=1
-  fi
-  default_cores=$(( budget_cores / default_jobs ))
-  if (( default_cores < 1 )); then
     default_cores=1
   fi
 

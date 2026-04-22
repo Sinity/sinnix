@@ -41,6 +41,7 @@ mkServiceModule {
           umask = 18;
           download-dir = torrentInbox;
           incomplete-dir-enabled = false;
+          preallocation = 0;
           rpc-enabled = true;
           rpc-bind-address = "127.0.0.1";
           rpc-port = 9091;

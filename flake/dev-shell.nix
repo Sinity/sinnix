@@ -79,6 +79,8 @@
           set -euo pipefail
           flake_ref="$1"
           shift
+          rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-2}"
+          rebuild_cores="''${SINNIX_REBUILD_CORES:-8}"
           PATH="${safeSudoPathPrefix}:$PATH" \
             sudo ${pkgs.systemd}/bin/systemd-run \
             --quiet \
@@ -99,6 +101,8 @@
               ${action} \
               --flake "$flake_ref" \
               "$@" \
+              --max-jobs "$rebuild_jobs" \
+              --cores "$rebuild_cores" \
               --log-format internal-json \
               -v 2>&1 \
             | ${pkgs.nix-output-monitor}/bin/nom --json
@@ -182,32 +186,31 @@
       devShells.default = pkgs.mkShellNoCC {
         name = "nixos-config-dev";
 
-        packages =
-          [
-            # Version control
-            pkgs.git
-            pkgs.gh
-            pkgs.delta
+        packages = [
+          # Version control
+          pkgs.git
+          pkgs.gh
+          pkgs.delta
 
-            # Nix tools
-            pkgs.nil
-            pkgs.nixd
+          # Nix tools
+          pkgs.nil
+          pkgs.nixd
 
-            # Secret management
-            inputs.agenix.packages.${system}.default
+          # Secret management
+          inputs.agenix.packages.${system}.default
 
-            # Utilities
-            pkgs.nix-output-monitor
-            pkgs.jq
-            pkgs.yq
-            pkgs.fd
-            pkgs.ripgrep
-            scriptPkgs.lsp-root
+          # Utilities
+          pkgs.nix-output-monitor
+          pkgs.jq
+          pkgs.yq
+          pkgs.fd
+          pkgs.ripgrep
+          scriptPkgs.lsp-root
 
-            # Help
-            help
-          ]
-          ++ builtins.attrValues devCommands;
+          # Help
+          help
+        ]
+        ++ builtins.attrValues devCommands;
 
         shellHook = ''
           echo ""
