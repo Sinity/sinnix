@@ -19,8 +19,26 @@ in
 
     interval = lib.mkOption {
       type = lib.types.str;
-      default = "15min";
-      description = "How often to run polylogue ingestion (systemd timer format).";
+      default = "1h";
+      description = "How often to run durable polylogue archive catch-up (systemd timer format).";
+    };
+
+    browserCapture = {
+      enable = lib.mkEnableOption "Polylogue local browser-capture receiver" // {
+        default = true;
+      };
+
+      host = lib.mkOption {
+        type = lib.types.str;
+        default = "127.0.0.1";
+        description = "Host for the local-only browser-capture receiver.";
+      };
+
+      port = lib.mkOption {
+        type = lib.types.port;
+        default = 8765;
+        description = "Port for the local-only browser-capture receiver.";
+      };
     };
 
     health = lib.mkOption {
@@ -57,15 +75,22 @@ in
 
     home-manager.users.${userName} = {
       systemd.user.services.polylogue-run = {
-        Unit.Description = "Polylogue ingest/render/index";
+        Unit = {
+          Description = "Polylogue durable archive catch-up";
+          # This oneshot can run for many minutes. Do not let Home Manager's
+          # unit switcher start/restart it inline during a rebuild; the timer
+          # and explicit operator starts own execution.
+          X-SwitchMethod = "keep-old";
+        };
         Service = {
           Type = "oneshot";
-          ExecStart = "${pkgs.polylogue}/bin/polylogue --plain run";
+          ExecStart = "${pkgs.polylogue}/bin/polylogue --plain run acquire parse materialize render index";
           # Background priority — ingestion shouldn't compete with interactive work
           Nice = 19;
           IOSchedulingClass = "idle";
-          # Bound runtime: prevents hangs if Drive API stalls
-          TimeoutStartSec = "10min";
+          # Bound runtime: prevents hangs if Drive API stalls while still
+          # allowing render/site/index catch-up on active days.
+          TimeoutStartSec = "30min";
           # Memory limits: polylogue hit 16GB RSS ingesting conversations,
           # pushing everything to swap. MemoryHigh triggers aggressive reclaim;
           # MemoryMax kills if it still grows (prevents system-wide I/O storm).
@@ -74,11 +99,28 @@ in
         };
       };
 
+      systemd.user.services.polylogue-browser-capture = lib.mkIf cfg.browserCapture.enable {
+        Unit = {
+          Description = "Polylogue local browser-capture receiver";
+          After = [ "default.target" ];
+        };
+        Service = {
+          ExecStart = "${pkgs.polylogue}/bin/polylogue --plain browser-capture serve --host ${cfg.browserCapture.host} --port ${toString cfg.browserCapture.port}";
+          Restart = "on-failure";
+          RestartSec = "5s";
+          Nice = 10;
+          IOSchedulingClass = "idle";
+          MemoryHigh = "256M";
+          MemoryMax = "512M";
+        };
+        Install.WantedBy = [ "default.target" ];
+      };
+
       systemd.user.timers.polylogue-run = {
-        Unit.Description = "Polylogue periodic sync";
+        Unit.Description = "Polylogue periodic archive catch-up";
         Timer = {
           OnStartupSec = "2min";
-          OnUnitActiveSec = cfg.interval;
+          OnUnitInactiveSec = cfg.interval;
           # Catch up on missed runs (laptop was asleep)
           Persistent = true;
           Unit = "polylogue-run.service";

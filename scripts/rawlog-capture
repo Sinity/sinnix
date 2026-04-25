@@ -6,7 +6,9 @@ set -euo pipefail
 # forwards to the core rawlog appender.
 
 DEFAULT_REALM_ROOT=${REALM_ROOT:-/realm/project}
-fi
+KNOWLEDGEBASE_ROOT=${KNOWLEDGEBASE_ROOT:-${DEFAULT_REALM_ROOT}/knowledgebase}
+LOG_FILE=${RAWLOG_FILE:-${KNOWLEDGEBASE_ROOT}/logs.raw-log.md}
+LOG_DIR=$(dirname "$LOG_FILE")
 RAWLOG_BIN=${RAWLOG_BIN:-$HOME/.local/bin/rawlog}
 CANCEL_CODE=${RAWLOG_CANCEL_CODE:-130}
 GUM_WIDTH=${GUM_WIDTH:-80}
@@ -25,6 +27,7 @@ fi
 
 die() { echo "rawlog-capture: $*" >&2; exit 1; }
 
+[ -d "$LOG_DIR" ] || die "Log directory not found: $LOG_DIR"
 [ -x "$RAWLOG_BIN" ] || die "rawlog script not executable at $RAWLOG_BIN"
 command -v gum >/dev/null 2>&1 || die "gum CLI not available (need pkg gum)"
 

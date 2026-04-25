@@ -45,7 +45,7 @@
       activationProfile = "full";
       environment = "prod";
     };
-    polylogue.enable = false;
+    polylogue.enable = true;
     power-watchdog.enable = true;
     network-monitor.enable = true;
     sentinel.enable = true;
@@ -58,9 +58,21 @@
   };
 
   services.sinex.nodes.filesystem.ignoredDirectoryNames = lib.mkAfter [
+    ".btrfs"
+    ".claude"
     ".cache"
+    ".direnv"
+    ".git"
+    ".hg"
+    ".jj"
+    ".sinex"
+    ".svn"
+    ".Trash-1000"
+    "__pycache__"
     "asciinema"
     "kitty-scrollback"
+    "node_modules"
+    "target"
   ];
 
   users.users.sinex.homeMode = lib.mkForce "0711";

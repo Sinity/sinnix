@@ -1,17 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Quick append-only logger for the raw-log stream.
 # Usage: rawlog [message...]
+#
+# Default target: $KNOWLEDGEBASE_ROOT/logs.raw-log.md.
+# Override with RAWLOG_FILE=/some/path/file.md.
 
 DEFAULT_REALM_ROOT=${REALM_ROOT:-/realm/project}
-fi
-LOG_FILE="$LOG_DIR/raw-log.md"
+KNOWLEDGEBASE_ROOT=${KNOWLEDGEBASE_ROOT:-${DEFAULT_REALM_ROOT}/knowledgebase}
+LOG_FILE=${RAWLOG_FILE:-${KNOWLEDGEBASE_ROOT}/logs.raw-log.md}
+LOG_DIR=$(dirname "$LOG_FILE")
 PICKER=${PICKER:-tofi}
 RECENT_COUNT=${RECENT_COUNT:-5}
 
 die() { echo "rawlog: $*" >&2; exit 1; }
 
-mkdir -p "$LOG_DIR"
+[ -d "$LOG_DIR" ] || die "Log directory not found: $LOG_DIR"
 command -v "$PICKER" >/dev/null 2>&1 || die "picker '$PICKER' not found"
 
 prompt_text() {
@@ -31,7 +36,6 @@ recent_entries() {
   if [ ! -f "$LOG_FILE" ]; then
     return
   fi
-  # Extract the Markdown bullet entries and turn them into compact lines with timestamp context
   tail -n 200 "$LOG_FILE" |
     sed -En 's/^- \*\*([^*]+)\*\* (.*)$/[\1] \2/p' |
     tail -n "$RECENT_COUNT"
@@ -66,23 +70,23 @@ if [ -z "$msg" ]; then
   msg=$(pick_message)
 fi
 
-# Trim message
 msg=$(echo -n "$msg" | sed -e 's/^[[:space:]]\+//' -e 's/[[:space:]]\+$//')
 [ -n "$msg" ] || exit 0
 
 ts=$(date +"%Y-%m-%d %H:%M:%S")
 line="- **$ts** $msg"
 
-# Ensure file exists with a minimal header if missing
+# Ensure file exists with a Dendron-style frontmatter if missing
+# (matches the knowledgebase logs.raw-log.md schema).
 if [ ! -f "$LOG_FILE" ]; then
   {
     echo "---"
-    echo "title: Log — raw-log"
-    echo "type: memoir"
-    echo "kind: log"
-    echo "tags: [gen/self, memoir, log, self]"
-    echo "started: $(date +%Y-%m-%d)"
-    echo "status: active"
+    echo "id: logs.raw-log"
+    echo "aliases: []"
+    echo "tags:"
+    echo "  - log"
+    echo "  - self"
+    echo "dr-contextualization: Append-only raw thought log."
     echo "---"
     echo
     echo "# Raw log"
@@ -93,7 +97,6 @@ fi
 echo "$line" >>"$LOG_FILE"
 
 if command -v notify-send >/dev/null 2>&1; then
-  # Just show the saved message, not the entire recent history
   notify-send -t 1200 "📝 Logged" "$msg"
 fi
 

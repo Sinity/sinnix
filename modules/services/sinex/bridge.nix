@@ -73,8 +73,35 @@ in
         .${cfg.activationProfile};
       filesystemWatchPaths = [
         "${realmRoot}/project"
-        "${realmRoot}/inbox"
+        "${realmRoot}/inbox/download"
+        "${realmRoot}/inbox/polylogue_scratch"
       ];
+      terminalSourceUnitIdForShell =
+        shell:
+        let
+          normalized = lib.toLower shell;
+        in
+        if normalized == "atuin" then
+          "terminal.atuin-history"
+        else if normalized == "bash" then
+          "terminal.bash-history"
+        else if normalized == "zsh" then
+          "terminal.zsh-history"
+        else if normalized == "fish" then
+          "terminal.fish-history"
+        else
+          "terminal.text-history";
+      terminalSourceUnitServices = lib.unique (
+        map (
+          source:
+          let
+            explicitSourceUnit = source.sourceUnitId or null;
+          in
+          "sinex-source@${
+            if explicitSourceUnit != null then explicitSourceUnit else terminalSourceUnitIdForShell source.shell
+          }"
+        ) (config.services.sinex.nodes.terminal.historySources or [ ])
+      );
       delayedRuntimeServices = lib.unique (
         lib.optionals databasePrepared [
           "postgresql"
@@ -91,7 +118,7 @@ in
           "sinex-gateway"
         ]
         ++ lib.optionals (runtimeEnabled && activationProfile.filesystem) [ "sinex-filesystem-1" ]
-        ++ lib.optionals (runtimeEnabled && activationProfile.terminal) [ "sinex-terminal-1" ]
+        ++ lib.optionals (runtimeEnabled && activationProfile.terminal) terminalSourceUnitServices
         ++ lib.optionals (runtimeEnabled && activationProfile.browser) [ "sinex-browser-1" ]
         ++ lib.optionals (runtimeEnabled && activationProfile.desktop) [ "sinex-desktop-1" ]
         ++ lib.optionals (runtimeEnabled && activationProfile.system) [ "sinex-system-1" ]
