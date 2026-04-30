@@ -10,11 +10,11 @@ let
 in
 {
   bind = [
-    "SUPER, Return, exec, kitty"
+    "SUPER, Return, exec, uwsm app -- kitty"
     "SUPER, Q, killactive"
     "SUPER, F, fullscreen, 0"
-    "SUPER, D, exec, tofi-drun --drun-launch=true"
-    "SUPER, Escape, exec, hyprlock"
+    "SUPER, D, exec, uwsm app -- tofi-drun --drun-launch=true"
+    "SUPER, Escape, exec, uwsm app -- hyprlock"
 
     "SUPER, H, exec, ${script "kitty-hypr-nav"} focus left"
     "SUPER, J, exec, ${script "kitty-hypr-nav"} focus down"
@@ -50,20 +50,20 @@ in
     "SUPER SHIFT, 9, movetoworkspace, 9"
     "SUPER SHIFT, 0, movetoworkspace, 10"
 
-    "SUPER, grave, exec, ${script "toggle-scratch"} term"
-    "SUPER, S, exec, ${script "toggle-scratch"} spotify"
-    "SUPER, N, exec, ${script "toggle-scratch"} notes"
+    "SUPER, grave, exec, uwsm app -- ${script "toggle-scratch"} term"
+    "SUPER, S, exec, uwsm app -- ${script "toggle-scratch"} spotify"
+    "SUPER, N, exec, uwsm app -- ${script "toggle-scratch"} notes"
 
-    "SUPER, V, exec, kitty --class clipse -e clipse"
+    "SUPER, V, exec, uwsm app -- kitty --class clipse -e clipse"
     ", Print, exec, ${script "hdr-screenshot"} area --dir ${screenshotDir}"
     "SUPER, Print, exec, ${script "hdr-screenshot"} output --dir ${screenshotDir}"
 
     # F-key bindings
     ", F3, exec, asbl-no-moar once --mode invert --duration 0.05"
-    ", F4, exec, ${script "toggle-scratch"} agent"
-    ", F6, exec, ${script "toggle-scratch"} weechat"
-    ", F8, exec, ${script "toggle-scratch"} rawlog"
-    ", F9, exec, ${script "nuke-builds"}"
+    ", F4, exec, uwsm app -- ${script "toggle-scratch"} agent"
+    ", F6, exec, uwsm app -- ${script "toggle-scratch"} weechat"
+    ", F8, exec, uwsm app -- ${script "toggle-scratch"} rawlog"
+    ", F9, exec, uwsm app -- ${script "nuke-builds"}"
 
     # Gaming: replay buffer (F10 = toggle/save, Shift+F10 = stop)
     ", F10, exec, replay-buffer"
@@ -71,22 +71,22 @@ in
     # Gaming: MangoHud toggle is Shift_R+F12 (handled by MangoHud itself)
 
     # Numpad browser scratchpads (numlock OFF)
-    ", KP_Left, exec, ${script "browser-scratchpad"} chatgpt https://chatgpt.com"
-    ", KP_Begin, exec, ${script "browser-scratchpad"} claude https://claude.ai"
-    ", KP_Right, exec, ${script "browser-scratchpad"} aistudio https://aistudio.google.com"
-    ", KP_Home, exec, ${script "browser-scratchpad"} raindrop https://app.raindrop.io"
-    ", KP_Up, exec, ${script "browser-scratchpad"} ytmusic https://music.youtube.com"
-    ", KP_Prior, exec, ${script "browser-scratchpad"} youtube https://youtube.com"
+    ", KP_Left, exec, uwsm app -- ${script "browser-scratchpad"} chatgpt https://chatgpt.com"
+    ", KP_Begin, exec, uwsm app -- ${script "browser-scratchpad"} claude https://claude.ai"
+    ", KP_Right, exec, uwsm app -- ${script "browser-scratchpad"} aistudio https://aistudio.google.com"
+    ", KP_Home, exec, uwsm app -- ${script "browser-scratchpad"} raindrop https://app.raindrop.io"
+    ", KP_Up, exec, uwsm app -- ${script "browser-scratchpad"} ytmusic https://music.youtube.com"
+    ", KP_Prior, exec, uwsm app -- ${script "browser-scratchpad"} youtube https://youtube.com"
 
     "SUPER SHIFT, P, pin"
 
-    "SUPER, C, exec, ${script "open-code-editor"}"
-    "SUPER, B, exec, qutebrowser --target window"
-    "SUPER SHIFT, B, exec, qutebrowser --target window"
+    "SUPER, C, exec, uwsm app -- ${script "open-code-editor"}"
+    "SUPER, B, exec, uwsm app -- qutebrowser --target window"
+    "SUPER SHIFT, B, exec, uwsm app -- qutebrowser --target window"
     "SUPER, G, togglegroup"
-    "SUPER SHIFT, G, exec, ${script "kitty-grid"}"
-    "SUPER CTRL, G, exec, ${script "kitty-grid"} --grid 3x3"
-    "SUPER SHIFT, C, exec, ${script "kitty-grid"} --class qutebrowser --grid 3x2 --arrange-only"
+    "SUPER SHIFT, G, exec, uwsm app -- ${script "kitty-grid"}"
+    "SUPER CTRL, G, exec, uwsm app -- ${script "kitty-grid"} --grid 3x3"
+    "SUPER SHIFT, C, exec, uwsm app -- ${script "kitty-grid"} --class qutebrowser --grid 3x2 --arrange-only"
 
     ",XF86AudioMute, exec, pamixer -t"
     ",XF86AudioPlay, exec, playerctl play-pause && notify-send -t 1000 '♪ Media' '$(playerctl status)'"

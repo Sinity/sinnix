@@ -29,7 +29,7 @@
 ```
 sinnix ──────► System packages, services, dotfiles
     │
-    └──► Enables: sinex service stack, polylogue ingestion timer, scribe-tap
+    └──► Enables: sinex service stack, polylogue-watch service, scribe-tap
 
 sinex ◄────── Captures events from scribe-tap, polylogue
     │

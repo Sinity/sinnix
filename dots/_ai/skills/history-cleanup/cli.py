@@ -3982,7 +3982,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory where execution materials will be written.",
     )
     prepare_packet_exec.add_argument(
-        "--model", default="gpt-5.3-codex-spark", help="Model passed to codex exec."
+        "--model", default="gpt-5.5", help="Model passed to codex exec."
     )
     prepare_packet_exec.add_argument(
         "--reasoning-effort",

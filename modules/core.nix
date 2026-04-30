@@ -129,13 +129,60 @@ in
         keep-outputs = true;
         keep-derivations = true;
 
+        # Continue building unrelated derivations when one fails — avoids
+        # wasting already-scheduled work on parallel build failures.
+        keep-going = true;
+
         # Reduce warning spam for dirty git repos during development
         warn-dirty = false;
+
+        # ── Substituter perf tuning ────────────────────────────────────────
+        # Higher HTTP parallelism shaves wall-time on cold restores from
+        # cache.nixos.org / cachix when many small NARs land at once.
+        http-connections = 50;
+        # Default connect-timeout is unbounded — a stalled cachix host can
+        # block evaluation. 5s is enough for healthy caches and falls
+        # through to local build quickly when one is sick.
+        connect-timeout = 5;
+        # Default download-attempts (5) compounds with connect-timeout when
+        # multiple substituters are unreachable. 3 is enough for transient
+        # blips without amplifying bad-host latency.
+        download-attempts = 3;
+        # Cache positive narinfo lookups longer than the default 1h — the
+        # store is content-addressed so stale-positives don't exist.
+        # Negative lookups stay short so a freshly-pushed path appears soon.
+        narinfo-cache-positive-ttl = 86400; # 24 h
+        narinfo-cache-negative-ttl = 60; # 1 min
+
+        # Free-space pressure tuning for /nix on the 1 TB SSD: garbage
+        # collect during a build when free space drops below 5 GiB, until
+        # at least 50 GiB is free. Prevents ENOSPC mid-build without
+        # forcing weekly-only GCs to be aggressive.
+        min-free = 5368709120; # 5 GiB
+        max-free = 53687091200; # 50 GiB
+
+        # lazy-trees disabled — local nix (2.34.6) rejects the setting at
+        # nix.conf validation time. Re-enable once the version supports it
+        # natively. Tracked elsewhere; not blocking the urgent #581 deploy.
+        # lazy-trees = true;
       };
 
       daemonCPUSchedPolicy = "idle";
       daemonIOSchedClass = "idle";
       daemonIOSchedPriority = 6;
+
+      # Build sandbox scratch on the NVMe cache partition. Default would
+      # land in /tmp (tmpfs, RAM-backed) which is fast but capped at half
+      # of RAM — sinex's cargo workspace alone produces multi-GB target/
+      # trees during nix builds. Routing TMPDIR to NVMe keeps the build
+      # fast (Samsung 960 EVO ≈ 3 GB/s read, 1.5 GB/s write) while not
+      # consuming RAM that the rest of the workstation needs.
+      extraOptions = ''
+        build-dir = /cache/nix-build
+        # Shared sccache on the cache NVMe — allows Nix build sandboxes
+        # to reach the Rust compilation cache.
+        extra-sandbox-paths = /cache/sccache
+      '';
 
       gc = {
         automatic = true;
@@ -143,9 +190,12 @@ in
         options = "--delete-older-than 30d";
       };
 
+      # Daily store dedup runs while the GC stays weekly. Optimise is cheap
+      # (re-hardlinks identical files) and keeps /nix/store tight against
+      # the steady drip of new derivations from sinex/lynchpin bumps.
       optimise = {
         automatic = true;
-        dates = [ "weekly" ];
+        dates = [ "daily" ];
       };
     };
 
@@ -160,7 +210,26 @@ in
     # Shadow the stock entrypoint so direct `nixos-rebuild` invocations inherit
     # the same cgroup envelope as `nix-safe` instead of running in the caller's
     # interactive scope.
-    environment.systemPackages = lib.mkAfter [ safeNixosRebuild ];
+    environment.systemPackages = lib.mkAfter [
+      safeNixosRebuild
+      pkgs.sccache
+    ];
+
+    # Rust sccache on the /cache NVMe. RUSTC_WRAPPER applies to devshell
+    # builds; Nix builds opt in per-flake via extra-sandbox-paths.
+    environment.variables = {
+      SCCACHE_DIR = "/cache/sccache";
+      RUSTC_WRAPPER = "${pkgs.sccache}/bin/sccache";
+      SCCACHE_MAX_CACHE_SIZE = "20G";
+      # nix-direnv eval cache — recomputed on cd into flake projects.
+      # /cache NVMe makes eval-cache misses fast and avoids cluttering ~/.cache.
+      NIX_DIRENV_CACHE = "/cache/nix-direnv";
+      # Rust: move ~/.cargo (registry + git checkouts) to the cache NVMe.
+      # sccache handles compilation artifacts; CARGO_HOME covers deps.
+      CARGO_HOME = "/cache/cargo";
+      # pip: move package downloads off ~/.cache to the fast scratch disk.
+      PIP_CACHE_DIR = "/cache/pip";
+    };
 
     services.xserver.xkb.layout = "pl";
 
@@ -208,6 +277,10 @@ in
 
     systemd = {
       tmpfiles.rules = lib.mkAfter ([
+        "d /cache/sccache 0755 ${username} users -"
+        "d /cache/nix-direnv 0755 ${username} users -"
+        "d /cache/cargo 0755 ${username} users -"
+        "d /cache/pip 0755 ${username} users -"
         "d ${paths.realmRoot} 0755 root root -"
         "d ${paths.outerRealm} 0755 root root -"
         "d ${paths.neoOuterRealm} 0755 root root -"

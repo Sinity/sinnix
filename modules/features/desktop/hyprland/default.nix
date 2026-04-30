@@ -121,7 +121,7 @@ in
             exec-once = [
               "uwsm finalize"
               # Auto-start weechat scratchpad (hidden in special workspace)
-              "${pkgs.kitty}/bin/kitty --class scratchpad-weechat --title WeeChat $HOME/.local/bin/weechat-scratchpad"
+              "uwsm app -- ${pkgs.kitty}/bin/kitty --class scratchpad-weechat --title WeeChat $HOME/.local/bin/weechat-scratchpad"
             ];
 
             # Override uwsm's "start-hyprland:Hyprland" to clean value
@@ -160,6 +160,7 @@ in
             };
 
             misc = {
+              enable_anr_dialog = false;
               # Override stylix which sets this true; keep logo visible during startup
               disable_hyprland_logo = lib.mkForce false;
               vrr = 2;
@@ -174,7 +175,10 @@ in
             debug = {
               disable_logs = false;
               disable_time = false;
-              enable_stdout_logs = false;
+              # Route Hyprland logs through systemd journal (already persisted
+              # to /realm/data/captures/syslog/journal/). Critical for post-
+              # mortem crash analysis — the file-based log in /run/user is tmpfs.
+              enable_stdout_logs = true;
             };
 
             decoration = {

@@ -1,8 +1,12 @@
 # Performance Tuning
 #
-# Philosophy: keep the desktop responsive under pressure by giving the kernel a
-# meaningful zram-backed landing zone for bursts, then containing runaway work
-# in dedicated slices before the whole box degrades.
+# Philosophy: under memory pressure, KILL fast — do not thrash. zram and
+# systemd-oomd both delayed kills until the desktop was already wedged
+# (zram thrashes compression cycles instead of freeing real RAM; oomd PSI
+# accounting needs ~15s of sustained pressure before it acts). Replaced with
+# earlyoom, which polls /proc/meminfo every 100ms and SIGKILLs the largest
+# offender in well under a second. A small disk swapfile (declared in the
+# host storage module) stays as a release valve for genuinely cold pages.
 {
   pkgs,
   lib,
@@ -16,24 +20,21 @@ let
 in
 {
   config = lib.mkIf config.sinnix.machine.isDesktop {
-    # Give the kernel a modest compressed buffer for burst absorption. The goal
-    # is not to run the workstation out of swap; it is to avoid instant hard
-    # failure on short spikes while keeping steady-state pressure out of swap.
-    zramSwap = {
-      enable = true;
-      algorithm = "zstd";
-      memoryPercent = 20;
-    };
+    # zram is disabled: under sustained pressure it burns CPU compressing
+    # pages without ever freeing real memory, which is exactly the freeze
+    # pattern we are trying to eliminate.
+    zramSwap.enable = false;
 
     systemd.settings.Manager = {
       StatusUnitFormat = "name";
     };
 
     boot.kernel.sysctl = {
-      # Allow some zram use during transient pressure without turning the normal
-      # desktop path into a swap-first policy.
-      "vm.swappiness" = 40;
-      # zram is cheap random access; clustered swap readahead just adds latency.
+      # Disk swap is a last-resort release valve, not the default landing
+      # zone. swappiness=1 keeps the kernel from preemptively pushing
+      # anonymous pages out under mild pressure.
+      "vm.swappiness" = 1;
+      # No zram now, but a low cluster still helps disk swap latency on NVMe.
       "vm.page-cluster" = 0;
       # Keep inode/dentry cache hot — NixOS store paths are long and frequently
       # resolved. Reducing eviction pressure improves terminal startup latency.
@@ -41,6 +42,18 @@ in
       # Flush dirty pages earlier to avoid bursty I/O spikes.
       "vm.dirty_background_ratio" = 5;
       "vm.dirty_ratio" = 10;
+      # Hung-task stall breaker: if any task is stuck in D-state for 120s,
+      # panic and reboot. Better to lose 2 minutes of work than stay wedged
+      # with all terminals unresponsive. Sets the timeout low (default 120s
+      # still fires — we just want the panic to follow within 60s).
+      "kernel.hung_task_panic" = 1;
+      "kernel.hung_task_timeout_secs" = 120;
+      "kernel.panic" = 60;
+      # Panic backtrace: log a full stack trace on oops/panic so pstore
+      # captures actionable diagnostics (which function was stuck in D-state).
+      "kernel.oops_all_cpu_backtrace" = 1;
+      "kernel.hardlockup_all_cpu_backtrace" = 1;
+      "kernel.softlockup_all_cpu_backtrace" = 1;
     }
     //
       lib.optionalAttrs
@@ -55,26 +68,90 @@ in
           "fs.inotify.max_user_watches" = 524288;
         };
 
-    # Use cgroup-aware OOM policy so runaway build/test work is killed inside
-    # its own slice instead of forcing whole-system contention decisions.
-    services.earlyoom.enable = false;
+    # pstore: persist kernel panic/oops logs across reboots.
+    # After a panic, the kernel stores dmesg in a reserved RAM region
+    # (ramoops / pstore). On next boot, panic-log-capture.service copies
+    # them to /realm/data/captures/syslog/panic/ for post-mortem analysis.
+    boot.kernelModules = [ "ramoops" ];
+    boot.kernelParams = [
+      "ramoops.record_size=262144"
+      "ramoops.console_size=262144"
+      "ramoops.ftrace_size=131072"
+      "ramoops.dump_oops=1"
+    ];
 
-    systemd.oomd = {
-      enable = true;
-      enableSystemSlice = true;
-      enableUserSlices = true;
-      settings.OOM.DefaultMemoryPressureDurationSec = "15s";
+    systemd.services.panic-log-capture = {
+      description = "Capture kernel panic/oops logs from pstore to persistent storage";
+      after = [ "realm.mount" ];
+      requires = [ "realm.mount" ];
+      serviceConfig.Type = "oneshot";
+      script = ''
+        panic_dir="/realm/data/captures/syslog/panic"
+        if [ -d /sys/fs/pstore ] && [ "$(ls -A /sys/fs/pstore 2>/dev/null)" ]; then
+          install -d -m 0755 "$panic_dir"
+          dest="$panic_dir/panic-$(date +%Y%m%dT%H%M%S)"
+          mkdir -p "$dest"
+          cp -r /sys/fs/pstore/* "$dest/"
+          chmod -R 0644 "$dest"/*
+          echo "Captured $(ls /sys/fs/pstore | wc -l) pstore entries to $dest"
+          # Clean pstore to free the reserved RAM region for next panic
+          for f in /sys/fs/pstore/*; do
+            : > "$f" 2>/dev/null || true
+          done
+        fi
+      '';
+      wantedBy = [ "multi-user.target" ];
     };
+
+    # earlyoom: sub-second guardian. Polls /proc/meminfo at ~100ms and
+    # SIGTERMs/SIGKILLs the highest oom_score process before the desktop
+    # has a chance to lock. Tunables below mirror upstream defaults except
+    # for the avoid/prefer regexes, which keep the compositor + shells
+    # alive while pushing the killer at large dev workloads.
+    services.earlyoom = {
+      enable = true;
+      # SIGTERM at 15% available, SIGKILL at 8%.
+      # Raised from 10/5 because by 12% the system is already swap-thrashing
+      # (borg backup I/O + browser/terminal memory compete for NVMe bandwidth).
+      # Killing earlier prevents the desktop-freeze cascade.
+      freeMemThreshold = 15;
+      freeMemKillThreshold = 8;
+      # Same for swap, with a wider TERM band since swap fills slowly.
+      freeSwapThreshold = 20;
+      freeSwapKillThreshold = 10;
+      # Print a status line every 60s so journald has a trail when kills happen.
+      reportInterval = 60;
+      extraArgs = [
+        # Never kill the compositor stack, login session, or recovery shells.
+        "--avoid"
+        "^(systemd|systemd-.*|Hyprland|sway|gnome-shell|kwin|Xorg|sshd|kitty|foot|bash|zsh|tmux)$"
+        # Prefer to kill big memory hogs that we can always restart.
+        "--prefer"
+        "^(electron|chrome|chromium|firefox|node|cargo|rustc|ld|ld\\.lld|ld\\.mold|cc1|cc1plus|nix|nix-build|cmake|ninja|monado|wivrn|waybar|claude|codex|gemini|forge|nats-server|tofi)$"
+      ];
+    };
+
+    # systemd-oomd is disabled: its 15s PSI accumulation window means the
+    # box can wedge before it ever fires. earlyoom replaces it.
+    systemd.oomd.enable = false;
 
     # Keep a small floor for the logged-in user, but do not make the entire
     # user session an unlimited preferred survivor. Terminals, AI agents,
     # browsers, and ad-hoc dev stacks all live under user.slice; protecting the
     # whole parent made the desktop swap-thrash instead of killing the runaway
     # child cgroup.
+    #
+    # MemoryMax provides a hard ceiling so a single runaway process inside the
+    # session cannot push the whole system into swap-thrash territory.
+    # TasksMax prevents PID-space exhaustion: a thread-exploding build or fork
+    # bomb inside user.slice leaves enough PIDs for recovery shells.
     systemd.slices.user.sliceConfig = {
       CPUWeight = 1000;
       IOWeight = 1000;
       MemoryLow = "4G";
+      MemoryHigh = "20G";   # soft reclaim trigger, well below the 24G hard ceiling
+      MemoryMax = "24G";
+      TasksMax = "10000";
     };
 
     # User-manager background/graphical slices need their own budgets. Do not
@@ -96,13 +173,32 @@ in
         CPUWeight = 1000;
         IOWeight = 1000;
       };
+
+      # Interactive build tools (cargo, rustc, nix, etc.) get the same I/O
+      # caps as nix-build.slice so a `cargo build` in a terminal can't
+      # saturate the desktop NVMe. Wrapper scripts use systemd-run --scope
+      # to place invocations here.
+      build.sliceConfig = buildBudget // {
+        IOWriteBandwidthMax = [
+          "/dev/disk/by-uuid/bd19092f-a195-47ab-9c0d-c923d1e5bfea 300M"  # /realm NVMe
+          "/dev/disk/by-uuid/7f603111-8f3a-40aa-bad0-0cac69c140f1 300M"  # /cache NVMe
+        ];
+      };
     };
 
     # Put Nix builds in an explicitly budgeted slice so they cannot consume the
     # entire workstation even when individual derivations fan out internally.
+    # IOWriteBandwidthMax provides a hard ceiling so bulk writes from large
+    # builds (Rust target/ trees, linker output) cannot saturate the NVMe and
+    # starve interactive I/O paths (terminals, browsers, desktop compositor).
     systemd.slices."nix-build" = {
       description = "Resource budget for Nix builds";
-      sliceConfig = buildBudget;
+      sliceConfig = buildBudget // {
+        IOWriteBandwidthMax = [
+          "/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02 300M"
+          "/dev/disk/by-uuid/7f603111-8f3a-40aa-bad0-0cac69c140f1 300M"
+        ];
+      };
     };
 
     # Generic background scopes should inherit the same low-priority budget as
@@ -119,6 +215,22 @@ in
       Slice = "nix-build.slice";
     }
     // buildBudget;
+
+    # Heavy-write services that should inherit the nix-build.slice ceiling.
+    # nixos-rebuild-ng wraps switch-to-configuration as a transient unit
+    # named `nixos-rebuild-switch-to-configuration.service` (see
+    # SWITCH_TO_CONFIGURATION_CMD_PREFIX in nixos_rebuild/nix.py). The
+    # activation phase copies hundreds of MB of profile changes, regenerates
+    # font caches, links thousands of HM files. When it ran in system.slice
+    # unmetered on 2026-05-01, the writeback saturated NVMe and froze the
+    # desktop until power-cycle. Same bug class as 28cf1fc (pytest) at a
+    # different layer: heavy writes from a non-build.slice caller.
+    #
+    # home-manager-${user}.service is the actual file-linker; it's pulled
+    # in by switch-to-configuration but runs as its own system unit, so the
+    # parent slice doesn't propagate. Cap it directly.
+    systemd.services.nixos-rebuild-switch-to-configuration.serviceConfig.Slice = "nix-build.slice";
+    systemd.services."home-manager-${config.sinnix.user.name}".serviceConfig.Slice = "nix-build.slice";
 
     # Ananicy: per-process nice/ioclass for desktop responsiveness
     services.ananicy = {

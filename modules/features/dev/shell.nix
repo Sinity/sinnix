@@ -411,6 +411,8 @@ mkFeatureModule {
                 scriptPkgs.ccusage
                 scriptPkgs.lsp-root
                 scriptPkgs.nix-safe
+                scriptPkgs.cargo
+                (lib.hiPrio scriptPkgs.pytest)
               ];
 
             programs = lib.optionalAttrs (!cliCoreEnabled) {

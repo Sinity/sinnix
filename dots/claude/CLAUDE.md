@@ -107,3 +107,15 @@ Quality over quantity. Only capture what's non-obvious, persistent, connective, 
 ## Operational Knowledge
 
 @./operational/index.md
+
+---
+
+## Session recall (polylogue)
+
+A SessionStart hook prepends recent polylogue conversations matching the current project directory at the start of every session. The polylogue MCP server is also available for deeper queries:
+
+- `list_conversations(path=..., sort=recent, limit=N)` — sessions referencing files under a path.
+- `get_conversation(id, prose_only=True)` or `get_conversation(id, no_tool_calls=True)` — projected reads.
+- `search(query, ...)` — full-text + filter chain.
+
+A live watcher (`polylogue watch`, systemd user service `polylogue-watch.service`) tails `~/.claude/projects/` and `~/.codex/sessions/`; conversations land in the archive within seconds. There is no "live session" concept — any JSONL appended to (including year-old ones via resume) is picked up.

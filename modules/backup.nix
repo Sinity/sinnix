@@ -77,6 +77,9 @@ let
       weekly = 8;
       monthly = 6;
     };
+    # / is ephemeral; persist the chunk cache so backups are truly incremental
+    # (without it, borg re-reads + re-chunks every file on every run).
+    environment.BORG_CACHE_DIR = "/persist/root/.cache/borg";
   };
 
   btrbkConfig = ''
@@ -137,7 +140,7 @@ in
       #    Replaced the old borg-var-v2 job. /persist now contains all system
       #    and home state that was previously split between @var and /realm/home.
       persist = commonBorgOptions // {
-        startAt = "*-*-* 00/4:00:00";
+        startAt = "*-*-* 00/4:02:00";  # offset 2min from btrbk :00/:05 marks
         paths = [
           # Borg treats symlink roots as symlinks, not traversed directories.
           # Bind-mount the newest snapshot to a stable path and archive that path.
@@ -157,6 +160,7 @@ in
         readWritePaths = [
           borgSnapshotBindRoot
           borgRepoRoot
+          "/persist/root/.cache/borg"
         ];
         preHook = mkBindMountedSnapshotHook {
           label = "persist";
@@ -168,7 +172,7 @@ in
 
       # 2. User Data (/realm snapshots) - runs as root so the bind mount can be created
       realm = commonBorgOptions // {
-        startAt = "*-*-* 02/4:00:00";
+        startAt = "*-*-* 02/4:02:00";  # offset 2min from btrbk :00/:05 marks
         paths = [
           "${borgRealmSnapshotBind}/./"
         ];
@@ -190,6 +194,7 @@ in
         readWritePaths = [
           borgSnapshotBindRoot
           borgRepoRoot
+          "/persist/root/.cache/borg"
         ];
         preHook = mkBindMountedSnapshotHook {
           label = "realm";
@@ -200,16 +205,22 @@ in
       };
     };
 
-    # Performance tuning for Borg
+    # Performance tuning for Borg.
+    # IOSchedulingClass=idle is a no-op on NVMe (mq-deadline/none schedulers
+    # don't support CFQ priority classes). cgroup v2 IOWeight would be the
+    # proportional fix but only works with BFQ scheduler. Absolute bandwidth
+    # caps (IOReadBandwidthMax) are too blunt — they throttle backups even
+    # when the system is idle. The actual fixes are:
+    #   1. Timer offset from btrbk marks (no collision)
+    #   2. earlyoom at 15% + MemoryHigh=20G (kill before swap-thrash)
+    # CPUWeight=1 + Nice=19 handles CPU fairness for borg's zstd compression.
     systemd.services.borgbackup-job-persist.serviceConfig = {
       Nice = 19;
-      IOSchedulingClass = "idle";
-      IOSchedulingPriority = 7;
+      CPUWeight = 1;
     };
     systemd.services.borgbackup-job-realm.serviceConfig = {
       Nice = 19;
-      IOSchedulingClass = "idle";
-      IOSchedulingPriority = 7;
+      CPUWeight = 1;
     };
 
     # Weekly integrity check — verify repo metadata, detect bit rot on the HDD.
@@ -219,8 +230,7 @@ in
       serviceConfig = {
         Type = "oneshot";
         Nice = 19;
-        IOSchedulingClass = "idle";
-        IOSchedulingPriority = 7;
+        CPUWeight = 1;
       };
       environment.BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
       script = ''
@@ -243,6 +253,10 @@ in
     '';
 
     # Ensure directories exist
+    # Borg chunk cache must survive reboots. / is ephemeral, so the default
+    # ~/.cache/borg is lost on every boot, forcing a full re-read + re-chunk
+    # of every file (616GB read for 2.4GB written — a 256:1 waste).
+    # Persist it under /persist so backups are truly incremental.
     systemd.tmpfiles.rules = lib.mkAfter [
       "d ${realmSnapshots} 0750 root users -"
       "d ${persistSnapshots} 0750 root users -"
@@ -250,6 +264,7 @@ in
       "d ${borgPersistSnapshotBind} 0700 root root -"
       "d ${borgRealmSnapshotBind} 0700 root root -"
       "d ${borgRepoRoot} 0750 root users -"
+      "d /persist/root/.cache/borg 0700 root root -"
     ];
 
     # systemd services for btrbk

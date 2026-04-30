@@ -122,6 +122,26 @@ let
       ];
     };
 
+    cargo = mkScript "cargo" {
+      description = "Transparent cargo wrapper — all invocations run inside build.slice with I/O caps. Works for interactive use, scripts, and AI agents alike.";
+      runtimeInputs = with pkgs; [
+        bash
+        coreutils
+        systemd
+        cargo
+      ];
+    };
+
+    pytest = mkScript "pytest" {
+      description = "Transparent pytest wrapper — bare-`pytest` invocations run inside build.slice with I/O caps. Catches the AI-agent case; venv/python-m/uv-run paths are wrapped by the Claude PreToolUse hook.";
+      runtimeInputs = with pkgs; [
+        bash
+        coreutils
+        systemd
+        gnugrep
+      ];
+    };
+
     # Diagnostics
     perf-scan = mkScript "perf-scan" {
       description = "Comprehensive system performance benchmarking";

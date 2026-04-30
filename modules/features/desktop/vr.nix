@@ -335,8 +335,11 @@ mkFeatureModule {
   description = "VR streaming to standalone headsets (Quest 3)";
   subFeatures = {
     wivrn = {
+      # Off by default until upstream nixpkgs ships a cached monado-25.1.0;
+      # building it from source on a fresh system was a multi-minute RAM spike
+      # that contributed to desktop freezes. Re-enable per-host when needed.
       description = "WiVRn + Monado OpenXR streaming stack";
-      default = true;
+      default = false;
     };
     alvr = {
       description = "ALVR wireless VR streaming server (alternative to WiVRn)";

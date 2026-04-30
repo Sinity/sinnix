@@ -48,6 +48,13 @@ in
       };
     };
 
+    # Don't gate boot on full network startup. nm-online -s waits for ALL
+    # autoconnect profiles to complete or time out (60s budget); cold-boot
+    # WiFi WPA handshake or DHCP renewal regularly trips that. On a
+    # desktop nothing critical depends on the unit — disabling avoids the
+    # boot-time failure that lingers in `systemctl --failed`.
+    systemd.services.NetworkManager-wait-online.enable = false;
+
     services = {
       # systemd-resolved provides the local stub resolver and .lan handling.
       # The router remains the DNS authority and already forwards upstream via DoH.

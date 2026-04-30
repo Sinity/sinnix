@@ -152,7 +152,7 @@ if [[ -z ${model} ]]; then
     model="claude-opus-4.6"
     ;;
   codex)
-    model="gpt-5.3-codex"
+    model="gpt-5.5"
     ;;
   gemini)
     model="gemini-2.0-flash"

@@ -27,7 +27,13 @@
     "desktop.activitywatch" = {
       layers = [ "eval" ];
     };
+    "desktop.agentVerifyTimer" = {
+      layers = [ "eval" ];
+    };
     "desktop.audio" = {
+      layers = [ "eval" ];
+    };
+    "desktop.audioCapture" = {
       layers = [ "eval" ];
     };
     "desktop.base" = {
@@ -46,6 +52,9 @@
       layers = [ "eval" ];
     };
     "desktop.hyprland" = {
+      layers = [ "eval" ];
+    };
+    "desktop.hyprlandAnimations" = {
       layers = [ "eval" ];
     };
     "desktop.media" = {
@@ -153,6 +162,9 @@
     };
     "sinex" = {
       layers = [ "build" ];
+    };
+    "weechat-log-sealer" = {
+      layers = [ "eval" ];
     };
     "terminal-capture" = {
       layers = [

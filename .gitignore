@@ -13,6 +13,7 @@ __pycache__/
 # AI
 .aider*
 **/.claude/settings.local.json
+**/.claude/scheduled_tasks.lock
 
 # Editors and OS
 .vscode/

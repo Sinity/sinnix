@@ -31,6 +31,22 @@ in
     # the background without a stall.
     fstrim.enable = false;
     gvfs.enable = true; # dynamic mount
+
+    # Disable block-layer writeback throttle on all storage. wbt parks writers
+    # in `wbt_wait` when observed completion latency exceeds wbt_lat_usec
+    # (default 75ms). Combined with btrfs holding the log-tree mutex during
+    # `btrfs_commit_transaction` (especially under btrbk snapshot creation),
+    # any writer doing fdatasync (postgres, sinex, polylogue) can block long
+    # enough to trip khungtaskd → kernel panic. Observed 2026-04-28 23:11:
+    # btrbk snapshot of /persist stalled in wbt_wait while holding the log
+    # mutex; postgres + tokio fsync tasks stacked behind it and the 122s
+    # hung-task threshold fired. wbt is widely disabled on btrfs+NVMe setups
+    # (Fedora ships it off on btrfs); block-layer throttling is the wrong
+    # mechanism when the FS itself coordinates ordering.
+    udev.extraRules = ''
+      ACTION=="add|change", KERNEL=="nvme[0-9]n[0-9]", ATTR{queue/wbt_lat_usec}="0"
+      ACTION=="add|change", KERNEL=="sd[a-z]", ATTR{queue/wbt_lat_usec}="0"
+    '';
   };
 
   fileSystems = {
@@ -81,6 +97,21 @@ in
       ];
     };
 
+    # NVMe-class scratch cache on Samsung 960 EVO (nvme1n1p2). Hosts sccache,
+    # nix-fast-build artifacts, and other rebuild-cheap caches whose loss is
+    # painful but not catastrophic. Compressed btrfs so dedup-friendly content
+    # (Rust object files, .rlib) stays small.
+    "/cache" = {
+      device = "/dev/disk/by-uuid/7f603111-8f3a-40aa-bad0-0cac69c140f1";
+      fsType = "btrfs";
+      options = [
+        "compress=zstd"
+        "noatime"
+        "nofail"
+        "discard=async"
+      ];
+    };
+
     "${realmRoot}" = {
       device = "/dev/disk/by-uuid/bd19092f-a195-47ab-9c0d-c923d1e5bfea";
       fsType = "btrfs";
@@ -126,10 +157,16 @@ in
 
   };
 
-  # No disk swap. Zram-only (in modules/performance.nix) as a brief buffer
-  # before earlyoom kills runaway processes. Large disk swap causes the system
-  # to crawl for minutes instead of quickly killing the offender.
-  swapDevices = [ ];
+  # 32 GiB swap on dedicated NVMe partition (nvme1n1p1, Samsung 960 EVO).
+  # Replaced the prior /persist/swap/swapfile setup which blocked btrbk
+  # snapshots: an active btrfs swapfile pins the parent subvolume's extent
+  # map, causing `Could not create subvolume: Text file busy` every 5 min.
+  # A real swap partition has no CoW concerns and isolates swap I/O from the
+  # @persist hot path. Combined with vm.swappiness=1 and earlyoom, this is
+  # still a release valve — earlyoom kills well before swap fills.
+  swapDevices = [
+    { device = "/dev/disk/by-uuid/f2f75da7-69bd-4c8e-8332-83e6cb39a84b"; }
+  ];
 
   systemd = {
     tmpfiles.rules = lib.mkAfter [

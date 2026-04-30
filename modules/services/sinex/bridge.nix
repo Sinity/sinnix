@@ -76,32 +76,14 @@ in
         "${realmRoot}/inbox/download"
         "${realmRoot}/inbox/polylogue_scratch"
       ];
-      terminalSourceUnitIdForShell =
-        shell:
-        let
-          normalized = lib.toLower shell;
-        in
-        if normalized == "atuin" then
-          "terminal.atuin-history"
-        else if normalized == "bash" then
-          "terminal.bash-history"
-        else if normalized == "zsh" then
-          "terminal.zsh-history"
-        else if normalized == "fish" then
-          "terminal.fish-history"
-        else
-          "terminal.text-history";
-      terminalSourceUnitServices = lib.unique (
-        map (
-          source:
-          let
-            explicitSourceUnit = source.sourceUnitId or null;
-          in
-          "sinex-source@${
-            if explicitSourceUnit != null then explicitSourceUnit else terminalSourceUnitIdForShell source.shell
-          }"
-        ) (config.services.sinex.nodes.terminal.historySources or [ ])
-      );
+      generatedNodeServices = lib.optionals runtimeEnabled (config.sinex._generatedUnits or [ ]);
+      documentScanEnabled =
+        runtimeEnabled
+        && lib.attrByPath [ "services" "sinex" "nodes" "document" "enable" ] false config;
+      kittyAutoConfigureEnabled =
+        runtimeEnabled
+        && lib.attrByPath [ "services" "sinex" "shell" "kitty" "enable" ] false config
+        && lib.attrByPath [ "services" "sinex" "shell" "kitty" "autoConfigure" ] false config;
       delayedRuntimeServices = lib.unique (
         lib.optionals databasePrepared [
           "postgresql"
@@ -117,22 +99,14 @@ in
           "sinex-ingestd"
           "sinex-gateway"
         ]
-        ++ lib.optionals (runtimeEnabled && activationProfile.filesystem) [ "sinex-filesystem-1" ]
-        ++ lib.optionals (runtimeEnabled && activationProfile.terminal) terminalSourceUnitServices
-        ++ lib.optionals (runtimeEnabled && activationProfile.browser) [ "sinex-browser-1" ]
-        ++ lib.optionals (runtimeEnabled && activationProfile.desktop) [ "sinex-desktop-1" ]
-        ++ lib.optionals (runtimeEnabled && activationProfile.system) [ "sinex-system-1" ]
-        ++ lib.optionals (runtimeEnabled && activationProfile.document) [ "sinex-document-scan" ]
-        ++ lib.optionals (runtimeEnabled && activationProfile.automata) [
-          "sinex-analytics-automaton"
-          "sinex-session-detector"
-        ]
-        ++ lib.optionals (runtimeEnabled && activationProfile.canonicalizer) [ "sinex-canonicalizer" ]
-        ++ lib.optionals (runtimeEnabled && activationProfile.healthAggregator) [
-          "sinex-health-automaton"
-        ]
+        ++ generatedNodeServices
+        ++ lib.optionals documentScanEnabled [ "sinex-document-scan" ]
+        ++ lib.optionals kittyAutoConfigureEnabled [ "sinex-kitty-setup" ]
       );
-      delayedRuntimeUnits = map (name: "${name}.service") delayedRuntimeServices;
+      delayedRuntimeTargets = lib.optionals databasePrepared [ "postgresql" ];
+      delayedRuntimeUnits =
+        map (name: "${name}.service") delayedRuntimeServices
+        ++ map (name: "${name}.target") delayedRuntimeTargets;
       mkScopedSinexPackage =
         sinexPkgs:
         pkgs.symlinkJoin {
@@ -159,7 +133,6 @@ in
           observability.enable = lib.mkDefault false;
           shell.kitty.enable = lib.mkDefault false;
           storage = {
-            dlq.enable = lib.mkDefault false;
             blob = {
               enable = lib.mkDefault false;
               autoInit = lib.mkDefault false;
@@ -211,7 +184,10 @@ in
             enable = runtimeEnabled;
             autoSetup = runtimeEnabled;
             dataDir = "/var/lib/nats";
-            storeDir = "/var/lib/nats/jetstream";
+            # JetStream on the dedicated NVMe cache partition so its
+            # sustained write load (message store + index compaction) does
+            # not compete with system and interactive I/O on the root volume.
+            storeDir = "/cache/nats/jetstream";
           };
 
           stateRoot = "/var/lib/sinex/.local/state/sinex";
@@ -238,15 +214,11 @@ in
               enable = runtimeEnabled;
               autoInit = runtimeEnabled;
             };
-            dlq.enable = runtimeEnabled;
           };
 
           lifecycle = {
             preflight.enable = runtimeEnabled;
-            maintenance = {
-              enable = runtimeEnabled;
-              tasks.dlq = lib.mkForce false;
-            };
+            maintenance.enable = runtimeEnabled;
             updates.enable = runtimeEnabled;
           };
 
@@ -317,18 +289,43 @@ in
         # Sinex is a capture runtime, not a boot prerequisite for the desktop.
         # Start the stack shortly after boot through an explicit target so
         # PostgreSQL/schema apply/NATS/node startup cannot hold graphical.target.
+        # Strip both direct services and the postgresql.target install surface;
+        # otherwise local PostgreSQL still leaks into multi-user.target.
         systemd.services = lib.genAttrs delayedRuntimeServices (_: {
           wantedBy = lib.mkForce [ ];
-        });
-        systemd.targets.sinex-runtime = {
-          description = "Start Sinex runtime after interactive boot";
-          wants = delayedRuntimeUnits ++ [ "network-online.target" ];
-          after = [
-            "multi-user.target"
-            "graphical.target"
-            "network-online.target"
-          ];
+        }) // {
+          # Cap NATS memory so JetStream cannot push the system into swap.
+          # Peak observed: 3.4 GB with 484 MB swapped — the 1 GB cap keeps
+          # it in RAM and lets earlyoom prefer-kill it before the desktop
+          # feels pressure. IOWeight=10 ensures its sustained writes don't
+          # compete fairly with interactive I/O.
+          nats.serviceConfig = {
+            MemoryMax = "1G";
+            IOWeight = 10;
+          };
+
+          # Restrict PostgreSQL from consuming all system memory and I/O bandwidth,
+          # preventing page-cache thrashing and system lockups on heavy analytical queries.
+          postgresql.serviceConfig = {
+            MemoryHigh = "8G";
+            IOWeight = 10;
+          };
         };
+        systemd.targets =
+          lib.genAttrs delayedRuntimeTargets (_: {
+            wantedBy = lib.mkForce [ ];
+          })
+          // {
+            sinex-runtime = {
+              description = "Start Sinex runtime after interactive boot";
+              wants = delayedRuntimeUnits ++ [ "network-online.target" ];
+              after = [
+                "multi-user.target"
+                "graphical.target"
+                "network-online.target"
+              ];
+            };
+          };
         systemd.timers.sinex-runtime = {
           description = "Delay Sinex runtime startup until after boot";
           wantedBy = [ "timers.target" ];
@@ -338,6 +335,13 @@ in
             Unit = "sinex-runtime.target";
           };
         };
+
+        # NATS JetStream lives on the /cache NVMe partition. Ensure the
+        # directory exists before the service starts so the auto-setup
+        # bootstrap doesn't race with fs init.
+        systemd.tmpfiles.rules = [
+          "d /cache/nats 0750 nats nats -"
+        ];
       })
 
       (lib.mkIf

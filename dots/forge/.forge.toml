@@ -14,15 +14,15 @@ tool_timeout_secs = 600
 
 [session]
 provider_id = "codex"
-model_id = "gpt-5.4"
+model_id = "gpt-5.5"
 
 [commit]
 provider_id = "codex"
-model_id = "gpt-5.4"
+model_id = "gpt-5.5"
 
 [suggest]
 provider_id = "codex"
-model_id = "gpt-5.4"
+model_id = "gpt-5.5"
 
 [updates]
 auto_update = false

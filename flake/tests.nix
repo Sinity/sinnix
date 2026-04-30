@@ -197,7 +197,7 @@ let
               )
               (expect.textContainsAll forgeConfigText [
                 "provider_id = \"codex\""
-                "model_id = \"gpt-5.4\""
+                "model_id = \"gpt-5.5\""
                 "auto_dump = \"json\""
                 "auto_open_dump = false"
               ] "Forge config must preserve the Codex session defaults and dump settings")
@@ -1039,9 +1039,61 @@ let
           ];
         })
 
-        # Note: sinex service test omitted — sinex requires PostgreSQL, TLS certs,
-        # and agenix secrets which are too heavyweight for config-only assertion tests.
-        # The sinex service is verified via the full sinnix-prime build.
+        {
+          name = "services-sinex-delayed-runtime";
+          modules = [
+            { imports = [ ../hosts/sinnix-prime ]; }
+          ];
+          assertions =
+            config:
+            let
+              candidateRuntimeServices = [
+                "postgresql"
+                "postgresql-setup"
+                "sinex-schema-apply"
+                "nats"
+                "sinex-nats-bootstrap"
+                "sinex-blob-init"
+                "sinex-preflight"
+                "sinex-tls-init"
+                "sinex-ingestd"
+                "sinex-gateway"
+                "sinex-kitty-setup"
+              ]
+              ++ (config.sinex._generatedUnits or [ ])
+              ++ lib.optionals
+                (lib.attrByPath [ "services" "sinex" "nodes" "document" "enable" ] false config)
+                [ "sinex-document-scan" ];
+              runtimeServices = lib.unique (builtins.filter (
+                name: builtins.hasAttr name config.systemd.services
+              ) candidateRuntimeServices);
+              serviceWantedBy = name: lib.attrByPath [ "systemd" "services" name "wantedBy" ] [ ] config;
+              targetWantedBy = name: lib.attrByPath [ "systemd" "targets" name "wantedBy" ] [ ] config;
+              runtimeWants = lib.attrByPath [ "systemd" "targets" "sinex-runtime" "wants" ] [ ] config;
+            in
+            [
+              {
+                assertion = !(builtins.elem "multi-user.target" (targetWantedBy "postgresql"));
+                message = "Sinex PostgreSQL target must not install into multi-user.target";
+              }
+              {
+                assertion = builtins.all (
+                  name: !(builtins.elem "multi-user.target" (serviceWantedBy name))
+                ) runtimeServices;
+                message = "Sinex runtime services that exist on the host must not install into multi-user.target";
+              }
+              {
+                assertion = builtins.elem "postgresql.target" runtimeWants;
+                message = "sinex-runtime.target must pull in postgresql.target";
+              }
+              {
+                assertion = builtins.all (
+                  name: builtins.elem "${name}.service" runtimeWants
+                ) runtimeServices;
+                message = "sinex-runtime.target must pull in the stripped Sinex runtime services that exist on the host";
+              }
+            ];
+        }
 
         # === Bundle Tests (using DSL) ===
         (mkBundleTest {
@@ -2298,14 +2350,13 @@ in
             cp "$TMPDIR/forge.toml" "$HOME/forge/.forge.toml"
 
             "$HOME/.local/bin/forge" --version | grep -q '^forge '
-            "$HOME/.local/bin/forge" config get model | grep -qx 'gpt-5.4'
+            "$HOME/.local/bin/forge" config get model | grep -qx 'gpt-5.5'
 
-            "$HOME/.local/bin/forge" env > "$TMPDIR/forge-env.txt"
-            grep -q '~/forge/agents' "$TMPDIR/forge-env.txt"
-            grep -q '~/forge/.forge_history' "$TMPDIR/forge-env.txt"
-            grep -q '~/forge/logs' "$TMPDIR/forge-env.txt"
-            grep -q '~/forge/snapshots' "$TMPDIR/forge-env.txt"
-            grep -q '~/forge/permissions.yaml' "$TMPDIR/forge-env.txt"
+            "$HOME/.local/bin/forge" config path | grep -qx "$HOME/forge/.forge.toml"
+            test -d "$HOME/forge/agents"
+            test -d "$HOME/forge/logs/requests"
+            test -d "$HOME/forge/snapshots"
+            test -f "$HOME/forge/.forge_history"
 
             jq -e '
               .mcpServers.context7.url == "https://mcp.context7.com/mcp" and

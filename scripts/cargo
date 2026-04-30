@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Transparent cargo wrapper: all invocations run inside build.slice so
+# I/O caps apply — interactive use, scripting, and AI agents alike.
+# Anything that runs `cargo` gets the budgeted cgroup automatically.
+#
+# Reentrant: if already in build.slice, runs the real cargo directly.
+# Path stripping prevents recursive wrapping when the wrapper is named
+# `cargo` and placed before the real cargo in PATH.
+
+set -euo pipefail
+
+# Already inside build.slice — run the real cargo directly.
+if grep -q 'build.slice' /proc/self/cgroup 2>/dev/null; then
+  exec /run/current-system/sw/bin/cargo "$@"
+fi
+
+# Strip our own bin dir from PATH so the inner call finds the real cargo,
+# not this wrapper again.
+self_bin="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+clean_path=""
+IFS=: read -ra path_parts <<< "$PATH"
+for part in "${path_parts[@]}"; do
+  part_abs="$(cd "$part" 2>/dev/null && pwd || echo "$part")"
+  if [ "$part_abs" != "$self_bin" ]; then
+    clean_path="${clean_path}${clean_path:+:}${part}"
+  fi
+done
+
+exec systemd-run --user --scope --quiet \
+  --slice=build.slice \
+  --same-dir \
+  --setenv=PATH="$clean_path" \
+  --setenv=HOME \
+  --setenv=CARGO_HOME \
+  --setenv=SCCACHE_DIR \
+  --setenv=RUSTC_WRAPPER \
+  --setenv=RUSTUP_HOME \
+  --setenv=RUST_LOG \
+  --setenv=TERM \
+  cargo "$@"

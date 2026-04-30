@@ -122,6 +122,7 @@ mkFeatureModule {
               cl = "~/.local/bin/claude";
               claude = "~/.local/bin/claude";
               ct = "~/.local/bin/claude-team";
+              deepseek = "~/.local/bin/deepseek";
               gemini = "~/.local/bin/gemini";
             };
             initContent = lib.mkAfter ''
@@ -138,6 +139,7 @@ mkFeatureModule {
 
           xdg.configFile = {
             "claude/hooks/pretooluse-bash.sh".source = mkDotsFile "/claude/hooks/pretooluse-bash.sh";
+            "claude/hooks/sessionstart-polylogue-recall.sh".source = mkDotsFile "/claude/hooks/sessionstart-polylogue-recall.sh";
             "claude/settings.json".source = mkDotsFile "/claude/settings.json";
             "claude/CLAUDE.md".source = mkDotsFile "/claude/CLAUDE.md";
             "claude/world-model" = {
@@ -211,6 +213,41 @@ mkFeatureModule {
               CLAUDE_BIN="${claude-code}/bin/claude"
               REALM_DIR="${sinnixCfg.paths.realmRoot}"
               HOME_DIR="${config.home.homeDirectory}"
+
+              ${agentScopePrelude}
+
+              if [ -d "$REALM_DIR" ]; then
+                run_agent_scoped "$CLAUDE_BIN" --add-dir "$REALM_DIR" "$HOME_DIR" "$@"
+              else
+                run_agent_scoped "$CLAUDE_BIN" "$HOME_DIR" "$@"
+              fi
+            '';
+            executable = true;
+          };
+
+          home.file.".local/bin/deepseek" = {
+            text = ''
+              #!/usr/bin/env bash
+              set -euo pipefail
+
+              CLAUDE_BIN="${claude-code}/bin/claude"
+              REALM_DIR="${sinnixCfg.paths.realmRoot}"
+              HOME_DIR="${config.home.homeDirectory}"
+
+              DEEPSEEK_KEY_FILE="/run/agenix/deepseek-api-key"
+              if [ ! -r "$DEEPSEEK_KEY_FILE" ]; then
+                echo "deepseek: cannot read $DEEPSEEK_KEY_FILE" >&2
+                exit 1
+              fi
+
+              export ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic"
+              export ANTHROPIC_AUTH_TOKEN="$(<"$DEEPSEEK_KEY_FILE")"
+              export ANTHROPIC_MODEL="deepseek-v4-pro[1m]"
+              export ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-v4-pro[1m]"
+              export ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-v4-pro[1m]"
+              export ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-v4-flash"
+              export CLAUDE_CODE_SUBAGENT_MODEL="deepseek-v4-flash"
+              export CLAUDE_CODE_EFFORT_LEVEL="max"
 
               ${agentScopePrelude}
 
