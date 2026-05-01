@@ -89,6 +89,26 @@ in
     # Expose wayland-sessions directory for UWSM to discover desktop files
     environment.pathsToLink = [ "/share/wayland-sessions" ];
 
+    # Prevent nixos-rebuild switch from tearing down the running graphical
+    # session.  uwsm's wayland-session-bindpid@<HYPRLAND_PID>.service waits
+    # on Hyprland's PID with `waitpid` and fires
+    # `OnSuccess=wayland-session-shutdown.target` on clean exit — which
+    # triggers a graceful session teardown.  When switch-to-configuration
+    # restarts this unit because its store path changed (it embeds the
+    # util-linux store path in ExecStart), SIGTERM exits waitpid cleanly
+    # → OnSuccess fires → graphical-session.target stops → every kitty
+    # scope under app.slice is reaped.  Annotating the template with
+    # X-RestartIfChanged=false tells switch-to-configuration to leave the
+    # running instance alone across rebuilds; new sessions still pick up
+    # the updated unit on next login.
+    systemd.user.units."wayland-session-bindpid@.service" = {
+      overrideStrategy = "asDropin";
+      text = ''
+        [Unit]
+        X-RestartIfChanged=false
+      '';
+    };
+
     # -------------------------------------------------------------------------
     # User Level Configuration (Home Manager)
     # -------------------------------------------------------------------------
