@@ -79,46 +79,12 @@ if (( cores_set == 0 )) && [[ -n "$safe_cores" ]]; then
   args+=(--cores "$safe_cores")
 fi
 
-if [[ -z "${NIX_SAFE_SCOPED:-}" ]] && command -v systemd-run >/dev/null 2>&1; then
-  # Keep the runtime budget self-contained here as well as in host slice
-  # policy. The wrapper is used *before* a new system generation is switched,
-  # so relying on slice defaults alone can silently drop the protections.
+if [[ -z "${NIX_SAFE_SCOPED:-}" ]] && command -v sinnix-scope >/dev/null 2>&1; then
+  export NIX_SAFE_SCOPED=1
   if (( EUID == 0 )); then
-    exec systemd-run \
-      --scope \
-      --quiet \
-      --collect \
-      --slice=nix-build.slice \
-      -p CPUQuota=2200% \
-      -p CPUWeight=20 \
-      -p IOWeight=50 \
-      -p MemoryHigh=22G \
-      -p MemoryMax=26G \
-      -p MemorySwapMax=0 \
-      --nice=10 \
-      -p ManagedOOMMemoryPressure=kill \
-      -p ManagedOOMMemoryPressureLimit=50% \
-      --setenv=NIX_SAFE_SCOPED=1 \
-      nix "$command_name" "${args[@]}"
-  elif [[ -n "${XDG_RUNTIME_DIR:-}" ]]; then
-    exec systemd-run \
-      --user \
-      --scope \
-      --quiet \
-      --collect \
-      --slice=background.slice \
-      -p CPUQuota=2200% \
-      -p CPUWeight=20 \
-      -p IOWeight=50 \
-      -p MemoryHigh=22G \
-      -p MemoryMax=26G \
-      -p MemorySwapMax=0 \
-      --nice=10 \
-      -p ManagedOOMMemoryPressure=kill \
-      -p ManagedOOMMemoryPressureLimit=50% \
-      --setenv=NIX_SAFE_SCOPED=1 \
-      nix "$command_name" "${args[@]}"
+    exec sinnix-scope nix-build -- nix "$command_name" "${args[@]}"
   fi
+  exec sinnix-scope background -- nix "$command_name" "${args[@]}"
 fi
 
 exec nix "$command_name" "${args[@]}"

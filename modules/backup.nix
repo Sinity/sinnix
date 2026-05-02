@@ -32,6 +32,14 @@ let
   borgRepoPersist = "file://${borgRepoPersistPath}";
   borgRepoRealm = "file://${borgRepoRealmPath}";
   borgPassphrasePath = config.sinnix.secrets.paths."borg-passphrase";
+  realmDevice = "/dev/disk/by-uuid/bd19092f-a195-47ab-9c0d-c923d1e5bfea";
+  persistDevice = "/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02";
+  outerRealmDevice = "/dev/disk/by-uuid/250683a9-c13f-4546-a29b-a743f3babb43";
+  borgBandwidth = "80M";
+  btrbkBandwidth = "100M";
+  borgMemoryHigh = "8G";
+  borgMemoryMax = "20G";
+  mkBandwidthCaps = rate: devices: map (device: "${device} ${rate}") devices;
 
   mkBindMountedSnapshotHook =
     {
@@ -70,7 +78,7 @@ let
       passCommand = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
     };
     compression = "auto,zstd,3";
-    persistentTimer = true;
+    persistentTimer = false;
     prune.keep = {
       within = "2d";
       daily = 14;
@@ -97,11 +105,11 @@ let
 
     # ─── SNAPSHOTS ONLY (Borg handles all off-disk transfers) ───
     # btrbk covers the intra-day window that borg doesn't: fine-grained rollback
-    # for recent work. Borg runs daily at midnight; once a day is borged, the
+    # for recent work. Borg runs daily overnight; once a day is borged, the
     # fine-grained snapshots for that day have little value.
     #
-    # Retention: btrbk fills the gaps between 4-hourly borg runs.
-    # Keep all 5-min snapshots for 6h (the "oops I just broke it" window),
+    # Retention: btrbk fills the gaps between overnight borg runs.
+    # Keep all 30-min snapshots for 6h (the "oops I just broke it" window),
     # then hourly for 24h (covers two borg cycles as buffer), then drop.
     # Beyond 24h, borg has it covered with better dedup and off-disk safety.
 
@@ -140,7 +148,7 @@ in
       #    Replaced the old borg-var-v2 job. /persist now contains all system
       #    and home state that was previously split between @var and /realm/home.
       persist = commonBorgOptions // {
-        startAt = "*-*-* 00/4:02:00";  # offset 2min from btrbk :00/:05 marks
+        startAt = "*-*-* 02:17:00"; # overnight, offset from btrbk :12/:42 marks
         paths = [
           # Borg treats symlink roots as symlinks, not traversed directories.
           # Bind-mount the newest snapshot to a stable path and archive that path.
@@ -172,7 +180,7 @@ in
 
       # 2. User Data (/realm snapshots) - runs as root so the bind mount can be created
       realm = commonBorgOptions // {
-        startAt = "*-*-* 02/4:02:00";  # offset 2min from btrbk :00/:05 marks
+        startAt = "*-*-* 03:17:00"; # overnight, offset from btrbk :12/:42 marks
         paths = [
           "${borgRealmSnapshotBind}/./"
         ];
@@ -205,22 +213,36 @@ in
       };
     };
 
-    # Performance tuning for Borg.
-    # IOSchedulingClass=idle is a no-op on NVMe (mq-deadline/none schedulers
-    # don't support CFQ priority classes). cgroup v2 IOWeight would be the
-    # proportional fix but only works with BFQ scheduler. Absolute bandwidth
-    # caps (IOReadBandwidthMax) are too blunt — they throttle backups even
-    # when the system is idle. The actual fixes are:
-    #   1. Timer offset from btrbk marks (no collision)
-    #   2. earlyoom at 15% + MemoryHigh=20G (kill before swap-thrash)
-    # CPUWeight=1 + Nice=19 handles CPU fairness for borg's zstd compression.
+    # Performance tuning for Borg. Nice/CPUWeight do not protect the desktop
+    # from NVMe/HDD stalls, and IOSchedulingClass=idle is ineffective on the
+    # active schedulers. Use hard cgroup I/O caps and do not run missed backup
+    # timers immediately after boot.
     systemd.services.borgbackup-job-persist.serviceConfig = {
       Nice = 19;
       CPUWeight = 1;
+      IOWeight = 1;
+      MemoryHigh = borgMemoryHigh;
+      MemoryMax = borgMemoryMax;
+      IOReadBandwidthMax = mkBandwidthCaps borgBandwidth [ persistDevice ];
+      IOWriteBandwidthMax = mkBandwidthCaps borgBandwidth [
+        persistDevice
+        outerRealmDevice
+      ];
     };
     systemd.services.borgbackup-job-realm.serviceConfig = {
       Nice = 19;
       CPUWeight = 1;
+      IOWeight = 1;
+      MemoryHigh = borgMemoryHigh;
+      MemoryMax = borgMemoryMax;
+      IOReadBandwidthMax = mkBandwidthCaps borgBandwidth [
+        realmDevice
+        persistDevice
+      ];
+      IOWriteBandwidthMax = mkBandwidthCaps borgBandwidth [
+        persistDevice
+        outerRealmDevice
+      ];
     };
 
     # Weekly integrity check — verify repo metadata, detect bit rot on the HDD.
@@ -231,6 +253,15 @@ in
         Type = "oneshot";
         Nice = 19;
         CPUWeight = 1;
+        IOWeight = 1;
+        IOReadBandwidthMax = mkBandwidthCaps borgBandwidth [
+          persistDevice
+          outerRealmDevice
+        ];
+        IOWriteBandwidthMax = mkBandwidthCaps borgBandwidth [
+          persistDevice
+          outerRealmDevice
+        ];
       };
       environment.BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
       script = ''
@@ -241,8 +272,8 @@ in
     systemd.timers.borgbackup-check = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
-        OnCalendar = "Sun 04:00:00";
-        Persistent = true;
+        OnCalendar = "Sun 06:17:00";
+        Persistent = false;
       };
     };
 
@@ -272,65 +303,34 @@ in
     # HDD (slow spin-up) with nofail — without this, btrbk races the mount on boot.
     systemd.services.btrbk = {
       description = "btrbk btrfs snapshot";
-      wants = [ "sinnix-realm-sinex-target-subvolume.service" ];
       after = [
         "persist.mount"
         "realm.mount"
-        "sinnix-realm-sinex-target-subvolume.service"
       ];
       serviceConfig = {
         Type = "oneshot";
         ExecStart = "${pkgs.btrbk}/bin/btrbk run --quiet";
         Nice = 19;
         IOSchedulingClass = "idle";
+        IOWeight = 1;
+        IOReadBandwidthMax = mkBandwidthCaps btrbkBandwidth [
+          realmDevice
+          persistDevice
+        ];
+        IOWriteBandwidthMax = mkBandwidthCaps btrbkBandwidth [
+          realmDevice
+          persistDevice
+        ];
       };
     };
 
     systemd.timers.btrbk = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
-        OnCalendar = "*-*-* *:00/5:00";
-        Persistent = true;
+        OnCalendar = "*-*-* *:12/30:00";
+        Persistent = false;
       };
     };
 
-    systemd.services.sinnix-realm-sinex-target-subvolume = {
-      description = "Ensure /realm/project/sinex/.sinex/target is a dedicated Btrfs subvolume";
-      after = [ "realm.mount" ];
-      requires = [ "realm.mount" ];
-      before = [ "btrbk.service" ];
-      wantedBy = [ "multi-user.target" ];
-      serviceConfig.Type = "oneshot";
-      script = ''
-        set -euo pipefail
-
-        target_parent="/realm/project/sinex/.sinex"
-        target_path="$target_parent/target"
-
-        ${pkgs.coreutils}/bin/mkdir -p "$target_parent"
-
-        if ${pkgs.btrfs-progs}/bin/btrfs subvolume show "$target_path" >/dev/null 2>&1; then
-          exit 0
-        fi
-
-        if ${pkgs.coreutils}/bin/test -e "$target_path" && ! ${pkgs.coreutils}/bin/test -d "$target_path"; then
-          echo "$target_path exists but is not a directory" >&2
-          exit 1
-        fi
-
-        if ${pkgs.coreutils}/bin/test -d "$target_path"; then
-          # Migrate existing directory contents into a new subvolume
-          staging="''${target_path}.migrate-$$"
-          ${pkgs.coreutils}/bin/mv "$target_path" "$staging"
-          ${pkgs.btrfs-progs}/bin/btrfs subvolume create "$target_path"
-          ${pkgs.coreutils}/bin/cp -a "$staging"/. "$target_path"/
-          ${pkgs.coreutils}/bin/rm -rf "$staging"
-          echo "Migrated $target_path to Btrfs subvolume (contents preserved)"
-          exit 0
-        fi
-
-        ${pkgs.btrfs-progs}/bin/btrfs subvolume create "$target_path"
-      '';
-    };
   };
 }

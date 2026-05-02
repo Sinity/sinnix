@@ -21,10 +21,20 @@
 #     The host bridge is live. `prepareHost` and `provisionDatabase` stage
 #     partial activation without starting the full runtime.
 #
-{ lib, ... }:
+{ config, lib, ... }:
 {
   options.sinnix.services.sinex = {
     enable = lib.mkEnableOption "Sinex service";
+    autoStart = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Install the delayed runtime timer that starts Sinex automatically after
+        boot. Disable this when the host should keep Sinex available for
+        manual operation without letting NATS/ingest start during interactive
+        login.
+      '';
+    };
     prepareHost = lib.mkEnableOption ''
       Stage the Sinex host integration without starting the capture runtime
     '';
@@ -82,5 +92,9 @@
       };
       description = "Service health metadata consumed by introspection/sentinel.";
     };
+  };
+
+  config = lib.mkIf (config.sinnix.services.sinex.enable && !config.sinnix.services.sinex.autoStart) {
+    sinnix.services.sinex.health = lib.mkForce null;
   };
 }

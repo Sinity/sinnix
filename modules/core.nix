@@ -281,6 +281,7 @@ in
         "d /cache/nix-direnv 0755 ${username} users -"
         "d /cache/cargo 0755 ${username} users -"
         "d /cache/pip 0755 ${username} users -"
+        "d /cache/sinex 0755 ${username} users -"
         "d ${paths.realmRoot} 0755 root root -"
         "d ${paths.outerRealm} 0755 root root -"
         "d ${paths.neoOuterRealm} 0755 root root -"
@@ -305,6 +306,33 @@ in
         "d ${paths.exportsRoot}/lastpass 0755 ${username} users -"
         "d ${paths.exportsRoot}/lastpass/raw 0755 ${username} users -"
       ]);
+
+      services.sinex-cache-prune = {
+        description = "Prune stale Sinex development cache artifacts";
+        serviceConfig = {
+          Type = "oneshot";
+          Nice = 19;
+          IOSchedulingClass = "idle";
+          ExecStart = pkgs.writeShellScript "sinex-cache-prune" ''
+            set -euo pipefail
+
+            cache_root="/cache/sinex"
+            [ -d "$cache_root" ] || exit 0
+
+            ${pkgs.findutils}/bin/find "$cache_root" -xdev -type f -mtime +2 -delete
+            ${pkgs.findutils}/bin/find "$cache_root" -xdev -mindepth 1 -type d -empty -delete
+          '';
+        };
+      };
+
+      timers.sinex-cache-prune = {
+        wantedBy = [ "timers.target" ];
+        timerConfig = {
+          OnCalendar = "daily";
+          Persistent = false;
+          RandomizedDelaySec = "30m";
+        };
+      };
     };
 
     services.dbus.implementation = "broker";

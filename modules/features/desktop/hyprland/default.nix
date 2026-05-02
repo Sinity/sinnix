@@ -2,12 +2,14 @@
   lib,
   config,
   pkgs,
+  helpers,
   ...
 }:
 let
   cfg = config.sinnix.features.desktop.hyprland;
   user = config.sinnix.user.name;
   hyprlandPkg = config.programs.hyprland.package or pkgs.hyprland;
+  scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
 
   # Helpers for home-manager config
   repoRoot = config.sinnix.paths.projectRoot;
@@ -18,7 +20,7 @@ let
 
   # Helper to import sub-modules which might need args
   bindings = import ./bindings.nix {
-    inherit pkgs;
+    inherit pkgs scriptPkgs;
     sinnix = config.sinnix;
   };
   rules = import ./rules.nix {
@@ -88,6 +90,18 @@ in
 
     # Expose wayland-sessions directory for UWSM to discover desktop files
     environment.pathsToLink = [ "/share/wayland-sessions" ];
+
+    security.sudo.extraRules = [
+      {
+        users = [ user ];
+        commands = [
+          {
+            command = "${scriptPkgs.nuke-builds}/bin/nuke-builds";
+            options = [ "NOPASSWD" ];
+          }
+        ];
+      }
+    ];
 
     # Prevent nixos-rebuild switch from tearing down the running graphical
     # session.  uwsm's wayland-session-bindpid@<HYPRLAND_PID>.service waits

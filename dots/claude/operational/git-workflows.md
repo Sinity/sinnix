@@ -72,7 +72,53 @@ Use scopes (`fix(cli): ...`) when the repo is large enough that scope adds clari
 
 **Convert anonymous debt into tracked debt.** When you discover an expected-failure test, a persistent TODO, or out-of-scope work: open an issue and reference it from the code/PR. Anonymous TODOs rot.
 
-**PR size (reviewer attention is finite):** ideal 200–400 LOC; 400–1000 with clear read order; >1000 stack or self-review first. PR = one logical change — if the change is big, stack it (branch per level, `gh pr create --base <prev-branch>`, merge bottom-up).
+**Issue comments are part of the spec.** Before implementing an issue, read the
+full issue thread, not only the body. Later comments may supersede, narrow,
+correct, or expand the body, and can be more important than the original
+description. If the body and comments conflict, preserve the evidence in your
+own issue/PR comment and state the interpretation you are implementing.
+
+**Leave an implementation trail.** Agents working an issue should comment with:
+their understanding of scope; important constraints or non-goals; what they
+changed; what they intentionally did not change; acceptance criteria satisfied,
+deferred, or found misframed; verification run; and follow-up issues opened.
+Use PR comments when the work is already in review and issue comments when the
+understanding changes the durable issue record. Do not let meaningful research,
+scope decisions, or discovered drift survive only in chat or scratch notes.
+
+**PR size and shape:** prefer substantial, cohesive PRs over micro-PRs that
+burn CI/review cycles. A good PR may contain multiple atomic commits while it is
+in review, then squash to one permanent master commit. Size the PR around a
+complete issue slice or coherent implementation phase, not around one rename,
+one helper, or one mechanical substep. Tiny PRs are appropriate only for urgent
+fixes, risky isolated changes, or when a larger branch would mix unrelated
+concepts. If a slice is large but coherent, keep it as one PR with a read order,
+self-review notes, and focused commits; stack only when independent review
+boundaries or merge ordering actually help.
+
+**Issue phase batching:** when an issue has several adjacent acceptance criteria
+that touch the same subsystem, keep them on one branch until the coherent phase
+is exhausted. Use multiple commits as review waypoints, not multiple PRs by
+default. Before opening a PR, update the issue/PR narrative with a compact
+matrix: satisfied, intentionally deferred, misframed, and still open. If that
+matrix would show only a tiny fraction of the phase satisfied, keep working
+unless risk or reviewability genuinely argues for a smaller PR.
+
+**Verification cadence:** do not run the slowest gate after every small edit.
+During implementation, run the narrow command that proves the changed behavior
+plus cheap static checks. Run the broad local gate once when the phase is ready
+to publish, again only after material changes to the tested surface or after a
+failure fix. If a broad suite exposes an unrelated flaky/pre-existing failure,
+rerun the exact node to classify it, record the evidence, and avoid turning the
+current PR into an unrelated cleanup unless the fix is necessary and local.
+
+**CI/review economy:** don't wait passively on known-quota or known-slow CI when
+local gates and required impact reports already give enough evidence for the
+next action. Inspect substantive bot comments and proof reports, but classify
+rate limits, pending capacity, and tool failures quickly instead of letting them
+stall implementation. Green checks are not a substitute for reading substantive
+comments; pending known-capacity checks are not a reason to burn more local or
+agent cycles without a new signal.
 
 **PR title = squash-merge subject.** Write it as the permanent history line:
 - ≤72 chars, conventional prefix, imperative, describes what changed
@@ -87,6 +133,29 @@ Use scopes (`fix(cli): ...`) when the repo is large enough that scope adds clari
 3. Read the PR's GitHub diff (not just local) — catches force-push/merge artifacts.
 4. Revise the claim if the code doesn't support it; "partially unified" is valid, "unified" when half-done is a lie.
 5. Test the claim. If PR says "fixes #123," the verification section shows #123's repro passing.
+
+**Acceptance-criteria honesty.** If an issue has acceptance criteria, address
+each item explicitly in the PR or issue comment that claims completion. Mark
+each criterion as satisfied, deferred to a follow-up issue, or misframed by new
+evidence. If an issue has no AC list, say what concrete decision, behavior, or
+verification closes it. Never close an issue on a partial subset without making
+the remaining work durable.
+
+**Automated reviews are review input.** Before merging, inspect every automated
+review/comment/check that posts substantive text: CodeRabbit, Copilot, proof
+packs, security scanners, PR policy bots, and custom repo reports. Classify
+each item as actionable, false positive/noise, informational, or tool failure.
+Address actionable items with code or tests. For false positives/noise, leave a
+brief PR comment or issue note when the reason matters for future agents. Do not
+merge while a bot reports unresolved actionable findings, and do not treat a
+green checkmark as a substitute for reading the comment body.
+
+**Proof/impact reports.** When a repo posts generated impact reports such as a
+Proof Pack, use them to choose gates and focus review. Required/recommended
+gates should be reflected in the PR verification plan. Known-gap dumps,
+zero-claim domains, or boilerplate deployment gates should be triaged rather
+than followed blindly. If the report is noisy or misleading, improve the report
+or record the mismatch in the owning issue; do not just learn to ignore it.
 
 ---
 

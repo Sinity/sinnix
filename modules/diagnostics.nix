@@ -59,6 +59,8 @@ in
         scriptPkgs.perf-scan
         scriptPkgs.hogkill
         scriptPkgs.asbl-no-moar
+        scriptPkgs.nuke-builds
+        scriptPkgs.sinnix-observe
       ]
     );
 

@@ -1,7 +1,7 @@
 # power-watchdog: High-frequency sensor logger for power loss forensics
 #
 # Logs CPU/GPU/NVMe temperatures, GPU power/link state, and system load every second
-# to a persistent CSV file with periodic file sync.
+# to a persistent CSV file with periodic file-data sync.
 #
 # Purpose: When the system power-cycles unexpectedly, this gives us the last
 # known sensor state to correlate with the crash. Unlike `below` which captures
@@ -14,8 +14,8 @@
 # Data stored in: ${capturesRoot}/power-watchdog/
 # Format: CSV with millisecond timestamps, one row per sample
 # Retention: configurable, defaults to 30 days
-# Storage: sample data is small, but per-sample sync can cause very high write
-# amplification. We flush periodically to balance durability vs I/O overhead.
+# Storage: sample data is small. Flush with file-data sync only; filesystem-wide
+# sync turns telemetry writes into unrelated Btrfs/git/Sinex writeback stalls.
 #
 # Query examples:
 #   # Last 100 samples before a crash (check timestamps):
@@ -89,7 +89,7 @@ let
       echo "  interval=''${INTERVAL}s retention=''${RETENTION_DAYS}d flush_every=''${FLUSH_EVERY_SAMPLES} samples" >&2
 
       # Best-effort flush on service stop/crash.
-      trap 'sync -f "$CSV_FILE" 2>/dev/null || true' EXIT
+      trap 'sync -d "$CSV_FILE" 2>/dev/null || true' EXIT
 
       # === Helper: read sysfs temp (millidegrees → degrees with 1 decimal) ===
       read_temp() {
@@ -187,7 +187,7 @@ let
         echo "$ts,$cpu_pkg,$cpu_max,$ddr5_1,$ddr5_2,$nvme_1,$nvme_2,$gwmi_1,$gwmi_2,$gwmi_3,$gwmi_4,$gwmi_5,$gwmi_6,$gpu_temp,$gpu_power,$gpu_plimit,$gpu_fan,$gpu_util,$gpu_mem,$gpu_clk,$gpu_mem_clk,$gpu_pstate,$gpu_pcie_gen,$gpu_pcie_width,$load_1,$load_5,$mem_used,$mem_avail,$swap_used" >> "$CSV_FILE"
         samples_since_flush=$((samples_since_flush + 1))
         if (( samples_since_flush >= FLUSH_EVERY_SAMPLES )); then
-          sync -f "$CSV_FILE" 2>/dev/null || true
+          sync -d "$CSV_FILE" 2>/dev/null || true
           samples_since_flush=0
         fi
 
@@ -253,6 +253,7 @@ mkServiceModule {
           RestartSec = "5s";
           Nice = 19;
           IOSchedulingClass = "idle";
+          IOWeight = 1;
         };
       };
     };

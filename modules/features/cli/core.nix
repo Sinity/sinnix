@@ -115,6 +115,22 @@ mkFeatureModule {
             config.global.warn_timeout = "30s";
           };
 
+          xdg.configFile."direnv/direnvrc".text = ''
+            # Host-local cache policy for portable project devshells.
+            #
+            # Projects should consume these generic env vars without knowing
+            # Sinnix device paths. This keeps /cache routing in Sinnix while
+            # leaving the project flakes portable on other machines.
+            case "$PWD" in
+              /realm/project/sinex)
+                if [ -d /cache/sinex ]; then
+                  _sinex_checkout_hash="$(printf '%s' "$PWD" | sha256sum | cut -c1-12)"
+                  export SINEX_DEV_CACHE_ROOT="/cache/sinex/$_sinex_checkout_hash"
+                fi
+                ;;
+            esac
+          '';
+
           programs.ssh = {
             enable = true;
             enableDefaultConfig = false;

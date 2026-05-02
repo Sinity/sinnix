@@ -1,6 +1,7 @@
 # Hyprland keybindings configuration
 {
   pkgs,
+  scriptPkgs,
   sinnix,
   ...
 }:
@@ -63,7 +64,7 @@ in
     ", F4, exec, uwsm app -- ${script "toggle-scratch"} agent"
     ", F6, exec, uwsm app -- ${script "toggle-scratch"} weechat"
     ", F8, exec, uwsm app -- ${script "toggle-scratch"} rawlog"
-    ", F9, exec, uwsm app -- ${script "nuke-builds"}"
+    ", F9, exec, sudo -n ${scriptPkgs.nuke-builds}/bin/nuke-builds"
 
     # Gaming: replay buffer (F10 = toggle/save, Shift+F10 = stop)
     ", F10, exec, replay-buffer"

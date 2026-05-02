@@ -1,10 +1,9 @@
 name: CI
 
 on:
-  push:
-    branches:
-      - "*"
-  pull_request:
+  # GitHub Actions billing is unavailable for now. Keep manual CI available
+  # without spending failed automatic runs on every push/PR.
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

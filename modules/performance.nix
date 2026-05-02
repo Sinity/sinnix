@@ -149,7 +149,7 @@ in
       CPUWeight = 1000;
       IOWeight = 1000;
       MemoryLow = "4G";
-      MemoryHigh = "20G";   # soft reclaim trigger, well below the 24G hard ceiling
+      MemoryHigh = "20G"; # soft reclaim trigger, well below the 24G hard ceiling
       MemoryMax = "24G";
       TasksMax = "10000";
     };
@@ -174,14 +174,14 @@ in
         IOWeight = 1000;
       };
 
-      # Interactive build tools (cargo, rustc, nix, etc.) get the same I/O
-      # caps as nix-build.slice so a `cargo build` in a terminal can't
-      # saturate the desktop NVMe. Wrapper scripts use systemd-run --scope
-      # to place invocations here.
+      # Interactive build/test entrypoints enter this slice through
+      # Sinnix-owned wrappers such as `sinnix-scope` and `pytest`. Rust
+      # project-specific orchestration should prefer repo control planes
+      # such as Sinex `xtask`, not a global transparent cargo wrapper.
       build.sliceConfig = buildBudget // {
         IOWriteBandwidthMax = [
-          "/dev/disk/by-uuid/bd19092f-a195-47ab-9c0d-c923d1e5bfea 300M"  # /realm NVMe
-          "/dev/disk/by-uuid/7f603111-8f3a-40aa-bad0-0cac69c140f1 300M"  # /cache NVMe
+          "/dev/disk/by-uuid/bd19092f-a195-47ab-9c0d-c923d1e5bfea 300M" # /realm NVMe
+          "/dev/disk/by-uuid/7f603111-8f3a-40aa-bad0-0cac69c140f1 300M" # /cache NVMe
         ];
       };
     };
@@ -216,20 +216,12 @@ in
     }
     // buildBudget;
 
-    # Heavy-write services that should inherit the nix-build.slice ceiling.
-    # nixos-rebuild-ng wraps switch-to-configuration as a transient unit
-    # named `nixos-rebuild-switch-to-configuration.service` (see
-    # SWITCH_TO_CONFIGURATION_CMD_PREFIX in nixos_rebuild/nix.py). The
-    # activation phase copies hundreds of MB of profile changes, regenerates
-    # font caches, links thousands of HM files. When it ran in system.slice
-    # unmetered on 2026-05-01, the writeback saturated NVMe and froze the
-    # desktop until power-cycle. Same bug class as 28cf1fc (pytest) at a
-    # different layer: heavy writes from a non-build.slice caller.
-    #
-    # home-manager-${user}.service is the actual file-linker; it's pulled
-    # in by switch-to-configuration but runs as its own system unit, so the
-    # parent slice doesn't propagate. Cap it directly.
-    systemd.services.nixos-rebuild-switch-to-configuration.serviceConfig.Slice = "nix-build.slice";
+    # home-manager-${user}.service is the actual file-linker; it is pulled in
+    # by switch-to-configuration but runs as its own system unit, so the parent
+    # slice does not propagate. Do not define
+    # nixos-rebuild-switch-to-configuration.service here: nixos-rebuild-ng
+    # creates that name as a transient unit, and any static fragment makes
+    # systemd-run refuse the activation job.
     systemd.services."home-manager-${config.sinnix.user.name}".serviceConfig.Slice = "nix-build.slice";
 
     # Ananicy: per-process nice/ioclass for desktop responsiveness

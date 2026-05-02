@@ -148,11 +148,7 @@ let
                   ) "${toString dir}/${basename}";
                   nestedHits = lib.concatLists (
                     map (
-                      name:
-                      if entries.${name} == "directory" then
-                        findSelfReferentialLinks (dir + "/${name}")
-                      else
-                        [ ]
+                      name: if entries.${name} == "directory" then findSelfReferentialLinks (dir + "/${name}") else [ ]
                     ) names
                   );
                 in
@@ -485,11 +481,15 @@ let
                 "model"
                 "maxSessionTurns"
               ] (-1) "Gemini must keep unlimited session turns")
-              (expect.attrPathEq forgeMcpConfig [
-                "mcpServers"
-                "context7"
-                "url"
-              ] "https://mcp.context7.com/mcp" "Forge MCP config must point Context7 at the remote hosted endpoint")
+              (expect.attrPathEq forgeMcpConfig
+                [
+                  "mcpServers"
+                  "context7"
+                  "url"
+                ]
+                "https://mcp.context7.com/mcp"
+                "Forge MCP config must point Context7 at the remote hosted endpoint"
+              )
               (expect.attrPathEq forgeMcpConfig [
                 "mcpServers"
                 "firecrawl"
@@ -537,6 +537,11 @@ let
                   raw = service.ExecStart or [ ];
                 in
                 if builtins.isList raw then builtins.concatStringsSep " " raw else raw;
+              execCondition =
+                let
+                  raw = service.ExecCondition or [ ];
+                in
+                if builtins.isList raw then builtins.concatStringsSep " " raw else raw;
               browserCaptureExecStart =
                 let
                   raw = browserCapture.ExecStart or [ ];
@@ -552,7 +557,11 @@ let
               (expect.textContains execStart "/bin/polylogue --plain run acquire parse materialize render index"
                 "Polylogue catch-up service must run archive/product stages without unattended site publication"
               )
-              (expect.textContains browserCaptureExecStart "/bin/polylogue --plain browser-capture serve --host 127.0.0.1 --port 8765"
+              (expect.textContains execCondition "polylogue-run-pressure-gate"
+                "Polylogue catch-up must skip starts while global I/O pressure is already high"
+              )
+              (expect.textContains browserCaptureExecStart
+                "/bin/polylogue --plain browser-capture serve --host 127.0.0.1 --port 8765"
                 "Polylogue browser capture receiver must run local-only on the default extension port"
               )
               (expect.attrPathEq unit [
@@ -566,19 +575,29 @@ let
               ] "on-failure" "Polylogue browser capture receiver must restart on failure")
               (expect.attrPathEq service [
                 "MemoryHigh"
-              ] "2G" "Polylogue ingestion must retain the memory high watermark")
+              ] "8G" "Polylogue ingestion must retain a headroom-oriented memory high watermark")
               (expect.attrPathEq browserCapture [
                 "MemoryMax"
               ] "512M" "Polylogue browser capture receiver must keep a tight memory limit")
               (expect.attrPathEq service [
                 "MemoryMax"
-              ] "4G" "Polylogue ingestion must retain the hard memory limit")
+              ] "16G" "Polylogue ingestion must retain a runaway-only hard memory limit")
+              (expect.attrPathEq service [
+                "IOWeight"
+              ] 1 "Polylogue ingestion must run at minimum cgroup I/O weight")
+              {
+                assertion = service ? IOReadBandwidthMax && service ? IOWriteBandwidthMax;
+                message = "Polylogue ingestion must retain hard I/O bandwidth caps";
+              }
+              (expect.attrPathEq timer [
+                "OnStartupSec"
+              ] "30min" "Polylogue timer must not run archive catch-up during interactive boot")
               (expect.attrPathEq timer [
                 "OnUnitInactiveSec"
               ] "1h" "Polylogue timer must be paced after durable catch-up completion, not realtime ingestion")
               (expect.attrPathEq timer [
                 "Persistent"
-              ] true "Polylogue timer must catch up missed runs after sleep")
+              ] false "Polylogue timer must not catch up missed runs immediately after boot")
             ];
         }
 
@@ -664,22 +683,44 @@ let
               }
             )
           ];
-          assertions = config: [
-            {
-              assertion = config.programs.hyprland.enable;
-              message = "Hyprland must be enabled";
-            }
-            {
-              assertion = config.programs.hyprland.withUWSM;
-              message = "UWSM must be enabled";
-            }
-            {
-              assertion = lib.hasInfix "exec uwsm start hyprland-uwsm.desktop" (
-                (hmFor config).programs.zsh.loginExtra or ""
-              );
-              message = "TTY Hyprland login must stay unwrapped by default";
-            }
-          ];
+          assertions =
+            config:
+            let
+              hm = hmFor config;
+              binds = hm.wayland.windowManager.hyprland.settings.bind or [ ];
+              sudoRules = config.security.sudo.extraRules or [ ];
+            in
+            [
+              {
+                assertion = config.programs.hyprland.enable;
+                message = "Hyprland must be enabled";
+              }
+              {
+                assertion = config.programs.hyprland.withUWSM;
+                message = "UWSM must be enabled";
+              }
+              {
+                assertion = lib.hasInfix "exec uwsm start hyprland-uwsm.desktop" (hm.programs.zsh.loginExtra or "");
+                message = "TTY Hyprland login must stay unwrapped by default";
+              }
+              {
+                assertion = builtins.any (
+                  bind: lib.hasInfix "F9, exec, sudo -n" bind && lib.hasInfix "/bin/nuke-builds" bind
+                ) binds;
+                message = "F9 emergency binding must bypass uwsm and run the packaged root shed script";
+              }
+              {
+                assertion = builtins.any (
+                  rule:
+                  builtins.elem config.sinnix.user.name (rule.users or [ ])
+                  && builtins.any (
+                    command:
+                    lib.hasInfix "/bin/nuke-builds" command.command && builtins.elem "NOPASSWD" (command.options or [ ])
+                  ) (rule.commands or [ ])
+                ) sudoRules;
+                message = "Hyprland emergency binding must have passwordless sudo for the immutable nuke-builds package";
+              }
+            ];
         })
 
         (mkFeatureTest {
@@ -935,27 +976,63 @@ let
         (mkServiceTest {
           name = "services-below";
           service = "below";
-          assertions = config: [
-            {
-              assertion = config.systemd.services ? below;
-              message = "Below service must exist";
-            }
-            {
-              assertion = config.environment.systemPackages != [ ];
-              message = "Below package must be installed";
-            }
-          ];
+          assertions =
+            config:
+            let
+              watchdogEnv = config.systemd.services.sinnix-pressure-watchdog.serviceConfig.Environment or [ ];
+            in
+            [
+              {
+                assertion = config.systemd.services ? below;
+                message = "Below service must exist";
+              }
+              {
+                assertion = config.environment.systemPackages != [ ];
+                message = "Below package must be installed";
+              }
+              {
+                assertion = config.systemd.services ? sinnix-pressure-watchdog;
+                message = "Pressure watchdog service must exist when below is enabled";
+              }
+              {
+                assertion = builtins.any (
+                  pkg: lib.hasInfix "gawk" (toString pkg)
+                ) config.systemd.services.sinnix-pressure-watchdog.path;
+                message = "Pressure watchdog runtime path must include awk";
+              }
+              {
+                assertion =
+                  builtins.elem "HOME=/var/log/below/home" watchdogEnv
+                  && builtins.elem "XDG_CACHE_HOME=/var/log/below/cache" watchdogEnv
+                  && builtins.elem "XDG_STATE_HOME=/var/log/below/state" watchdogEnv;
+                message = "Pressure watchdog must provide HOME/XDG paths for below dump";
+              }
+            ];
         })
 
         (mkServiceTest {
           name = "services-power-watchdog";
           service = "power-watchdog";
-          assertions = config: [
-            {
-              assertion = config.systemd.services ? power-watchdog;
-              message = "power-watchdog service must exist";
-            }
-          ];
+          assertions =
+            config:
+            let
+              service = config.systemd.services.power-watchdog.serviceConfig;
+              source = builtins.readFile ../modules/services/power-watchdog.nix;
+            in
+            [
+              {
+                assertion = config.systemd.services ? power-watchdog;
+                message = "power-watchdog service must exist";
+              }
+              {
+                assertion = service.IOWeight == 1;
+                message = "power-watchdog must not compete with foreground storage I/O";
+              }
+              {
+                assertion = lib.hasInfix "sync -d" source && !(lib.hasInfix "sync -f" source);
+                message = "power-watchdog must sync only its CSV data, not the whole filesystem";
+              }
+            ];
         })
 
         (mkServiceTest {
@@ -1054,22 +1131,46 @@ let
                 "nats"
                 "sinex-nats-bootstrap"
                 "sinex-blob-init"
-                "sinex-preflight"
                 "sinex-tls-init"
                 "sinex-ingestd"
                 "sinex-gateway"
                 "sinex-kitty-setup"
               ]
               ++ (config.sinex._generatedUnits or [ ])
-              ++ lib.optionals
-                (lib.attrByPath [ "services" "sinex" "nodes" "document" "enable" ] false config)
-                [ "sinex-document-scan" ];
-              runtimeServices = lib.unique (builtins.filter (
-                name: builtins.hasAttr name config.systemd.services
-              ) candidateRuntimeServices);
+              ++ lib.optionals (lib.attrByPath [ "services" "sinex" "nodes" "document" "enable" ] false config) [
+                "sinex-document-scan"
+              ];
+              runtimeServices = lib.unique (
+                builtins.filter (name: builtins.hasAttr name config.systemd.services) candidateRuntimeServices
+              );
+              packageNames = map (pkg: pkg.name or "") config.environment.systemPackages;
               serviceWantedBy = name: lib.attrByPath [ "systemd" "services" name "wantedBy" ] [ ] config;
+              serviceRestartIfChanged =
+                name: lib.attrByPath [ "systemd" "services" name "restartIfChanged" ] true config;
+              serviceRestartMode =
+                name: lib.attrByPath [ "systemd" "services" name "serviceConfig" "Restart" ] null config;
               targetWantedBy = name: lib.attrByPath [ "systemd" "targets" name "wantedBy" ] [ ] config;
               runtimeWants = lib.attrByPath [ "systemd" "targets" "sinex-runtime" "wants" ] [ ] config;
+              runtimeTimerWantedBy = lib.attrByPath [ "systemd" "timers" "sinex-runtime" "wantedBy" ] [ ] config;
+              runtimeTimer = lib.attrByPath [ "systemd" "timers" "sinex-runtime" "timerConfig" ] { } config;
+              sinexHealth = config.sinnix.services.sinex.health;
+              healthPolicy = builtins.fromJSON config.environment.etc."sinnix/health-policy.json".text;
+              healthServiceNames = map (check: check.name) healthPolicy.services;
+              sinexAutoTimers = [
+                "sinex-blob-fsck"
+                "sinex-blob-gc"
+                "sinex-cache-prune"
+                "sinex-document-scan"
+              ];
+              natsService = config.systemd.services.nats.serviceConfig;
+              postgresService = config.systemd.services.postgresql.serviceConfig;
+              preflightEnabled = lib.attrByPath [
+                "services"
+                "sinex"
+                "lifecycle"
+                "preflight"
+                "enable"
+              ] false config;
             in
             [
               {
@@ -1083,14 +1184,114 @@ let
                 message = "Sinex runtime services that exist on the host must not install into multi-user.target";
               }
               {
+                assertion = builtins.all (name: serviceRestartIfChanged name == false) runtimeServices;
+                message = "Sinex runtime services must not restart during desktop activation while auto-start is disabled";
+              }
+              {
+                assertion = builtins.all (name: serviceRestartMode name == "no") runtimeServices;
+                message = "Sinex runtime services must not self-resurrect while auto-start is disabled";
+              }
+              {
                 assertion = builtins.elem "postgresql.target" runtimeWants;
                 message = "sinex-runtime.target must pull in postgresql.target";
               }
               {
-                assertion = builtins.all (
-                  name: builtins.elem "${name}.service" runtimeWants
-                ) runtimeServices;
+                assertion = !preflightEnabled && !(builtins.elem "sinex-preflight.service" runtimeWants);
+                message = "Sinex production preflight must stay manual instead of running during desktop activation";
+              }
+              {
+                assertion = builtins.all (name: builtins.elem "${name}.service" runtimeWants) runtimeServices;
                 message = "sinex-runtime.target must pull in the stripped Sinex runtime services that exist on the host";
+              }
+              {
+                assertion = builtins.any (name: lib.hasPrefix "sinexctl-" name) packageNames;
+                message = "Sinex should expose sinexctl, not the aggregate runtime package, on interactive PATH";
+              }
+              {
+                assertion =
+                  !(builtins.any (
+                    name: builtins.match "sinex-[0-9].*" name != null || lib.hasPrefix "xtask" name
+                  ) packageNames);
+                message = "Sinex aggregate/runtime packages must not leak a bare global xtask into interactive PATH";
+              }
+              {
+                assertion = runtimeTimer.OnBootSec == "5min";
+                message = "sinex-runtime.timer must preserve its delayed-start policy";
+              }
+              {
+                assertion = runtimeTimerWantedBy == [ ];
+                message = "sinnix-prime must keep Sinex runtime startup manual until replay pressure is fixed";
+              }
+              {
+                assertion = sinexHealth == null && !(builtins.elem "sinex" healthServiceNames);
+                message = "manual Sinex runtime must not be auto-restarted by sentinel health policy";
+              }
+              {
+                assertion = builtins.all (
+                  name: lib.attrByPath [ "systemd" "timers" name "wantedBy" ] [ ] config == [ ]
+                ) sinexAutoTimers;
+                message = "sinnix-prime must keep Sinex maintenance timers manual with runtime auto-start disabled";
+              }
+              {
+                assertion =
+                  natsService.MemoryMax == "1G"
+                  && natsService.IOWeight == 10
+                  && natsService ? IOReadBandwidthMax
+                  && natsService ? IOWriteBandwidthMax;
+                message = "NATS must retain memory and I/O caps";
+              }
+              {
+                assertion = natsService.KillSignal == "SIGTERM" && natsService.TimeoutStopSec == "10s";
+                message = "NATS must stop promptly under operator control";
+              }
+              {
+                assertion =
+                  postgresService.MemoryHigh == "8G"
+                  && postgresService.MemoryMax == "12G"
+                  && postgresService.IOWeight == 10
+                  && postgresService ? IOReadBandwidthMax
+                  && postgresService ? IOWriteBandwidthMax;
+                message = "PostgreSQL must retain memory and I/O caps";
+              }
+            ];
+        }
+
+        {
+          name = "host-sinnix-prime-storage-discard-policy";
+          modules = [
+            { imports = [ ../hosts/sinnix-prime ]; }
+          ];
+          assertions =
+            config:
+            let
+              ssdBtrfsMounts = [
+                "/"
+                "/nix"
+                "/persist"
+                "/cache"
+                config.sinnix.paths.realmRoot
+              ];
+              optionsFor = mount: lib.attrByPath [ "fileSystems" mount "options" ] [ ] config;
+              isOnlineDiscard = option: option == "discard" || option == "discard=async";
+            in
+            [
+              {
+                assertion = builtins.all (mount: builtins.elem "nodiscard" (optionsFor mount)) ssdBtrfsMounts;
+                message = "sinnix-prime SSD btrfs mounts must explicitly disable online discard";
+              }
+              {
+                assertion = builtins.all (mount: !(builtins.any isOnlineDiscard (optionsFor mount))) ssdBtrfsMounts;
+                message = "sinnix-prime SSD btrfs mounts must not enable online discard";
+              }
+              {
+                assertion = config.services.fstrim.enable && config.services.fstrim.interval == "Sun 04:30:00";
+                message = "sinnix-prime must rely on the scheduled low-priority fstrim window";
+              }
+              {
+                assertion =
+                  config.systemd.services.fstrim.serviceConfig.IOSchedulingClass == "idle"
+                  && config.systemd.services.fstrim.serviceConfig.IOWeight == 1;
+                message = "fstrim must stay background-priority when online discard is disabled";
               }
             ];
         }
@@ -1243,6 +1444,36 @@ let
               message = "Default user must be sinity";
             }
           ];
+        }
+
+        {
+          name = "core-performance-policy";
+          modules = [
+            mountTmpfsRoots
+            baseTestConfig
+            (
+              { ... }:
+              {
+                networking.hostName = "performance-policy-test";
+                sinnix.machine.isDesktop = true;
+              }
+            )
+          ];
+          assertions =
+            config:
+            let
+              hmService = config.systemd.services."home-manager-${config.sinnix.user.name}".serviceConfig;
+            in
+            [
+              {
+                assertion = !(config.systemd.services ? "nixos-rebuild-switch-to-configuration");
+                message = "nixos-rebuild switch-to-configuration must remain transient";
+              }
+              {
+                assertion = (hmService.Slice or "") == "nix-build.slice";
+                message = "Home Manager activation must stay in nix-build.slice";
+              }
+            ];
         }
 
         # === Password/Secrets Safety Tests ===
@@ -1447,7 +1678,13 @@ let
               conf = if hasConf then config.environment.etc."btrbk/btrbk.conf".text else "";
               realmJob = config.services.borgbackup.jobs.realm;
               persistJob = config.services.borgbackup.jobs.persist;
-              subvolumeGuard = config.systemd.services.sinnix-realm-sinex-target-subvolume.script or "";
+              btrbkService = config.systemd.services.btrbk.serviceConfig;
+              btrbkTimer = config.systemd.timers.btrbk.timerConfig;
+              realmBorgService = config.systemd.services.borgbackup-job-realm.serviceConfig;
+              persistBorgService = config.systemd.services.borgbackup-job-persist.serviceConfig;
+              borgCheckService = config.systemd.services.borgbackup-check.serviceConfig;
+              borgCheckTimer = config.systemd.timers.borgbackup-check.timerConfig;
+              persistDevice = "/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02";
               hasTmpfilesRule =
                 pattern:
                 builtins.any (rule: builtins.match ".*${pattern}.*" rule != null) config.systemd.tmpfiles.rules;
@@ -1461,10 +1698,6 @@ let
               {
                 assertion = config.systemd.timers ? btrbk;
                 message = "btrbk timer must exist";
-              }
-              {
-                assertion = builtins.match ".*btrfs subvolume show.*" subvolumeGuard != null;
-                message = "sinex target guard must detect an existing Btrfs subvolume rather than requiring a mountpoint";
               }
               # Config deployed
               {
@@ -1512,6 +1745,56 @@ let
               {
                 assertion = persistJob.paths == [ "/run/borgbackup-snapshot-inputs/persist/./" ];
                 message = "Persist Borg job must archive the bind-mounted snapshot contents";
+              }
+              {
+                assertion = realmJob.persistentTimer == false && persistJob.persistentTimer == false;
+                message = "Borg timers must not catch up missed runs immediately after boot";
+              }
+              {
+                assertion = borgCheckTimer.Persistent == false;
+                message = "Borg integrity checks must not catch up during system switches";
+              }
+              {
+                assertion = persistJob.startAt == "*-*-* 02:17:00" && realmJob.startAt == "*-*-* 03:17:00";
+                message = "Borg timers must run in overnight windows, not every four hours";
+              }
+              {
+                assertion = btrbkTimer.Persistent == false;
+                message = "btrbk timer must not catch up missed runs immediately after boot";
+              }
+              {
+                assertion = btrbkTimer.OnCalendar == "*-*-* *:12/30:00";
+                message = "btrbk timer must not run high-frequency snapshots on the busiest clock edges";
+              }
+              {
+                assertion = btrbkService.IOWeight == 1;
+                message = "btrbk must run at minimum cgroup I/O weight";
+              }
+              {
+                assertion = persistBorgService.IOWeight == 1 && realmBorgService.IOWeight == 1;
+                message = "Borg backup jobs must run at minimum cgroup I/O weight";
+              }
+              {
+                assertion = borgCheckService.IOWeight == 1 && borgCheckService ? IOReadBandwidthMax;
+                message = "Borg integrity checks must run at low I/O priority";
+              }
+              {
+                assertion =
+                  persistBorgService.MemoryHigh == "8G"
+                  && persistBorgService.MemoryMax == "20G"
+                  && realmBorgService.MemoryHigh == "8G"
+                  && realmBorgService.MemoryMax == "20G";
+                message = "Borg backup jobs must have cgroup memory guardrails";
+              }
+              {
+                assertion = persistBorgService ? IOReadBandwidthMax && realmBorgService ? IOReadBandwidthMax;
+                message = "Borg backup jobs must have hard read bandwidth caps";
+              }
+              {
+                assertion =
+                  builtins.elem "${persistDevice} 80M" persistBorgService.IOWriteBandwidthMax
+                  && builtins.elem "${persistDevice} 80M" realmBorgService.IOWriteBandwidthMax;
+                message = "Borg jobs must cap writes to the persisted chunk cache device";
               }
               {
                 assertion = builtins.match ".*mount --bind.*" realmJob.preHook != null;

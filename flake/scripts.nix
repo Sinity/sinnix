@@ -82,6 +82,16 @@ let
       };
     };
 
+  sinnixScope = mkScript "sinnix-scope" {
+    description = "Place commands in Sinnix resource slices without duplicating systemd-run policy";
+    runtimeInputs = with pkgs; [
+      bash
+      coreutils
+      gnugrep
+      systemd
+    ];
+  };
+
   # Registry of scripts needing packaging
   registry = {
     # System utilities
@@ -106,39 +116,49 @@ let
     };
 
     nuke-builds = mkScript "nuke-builds" {
-      description = "Kill runaway build processes (cargo, nix-daemon, ninja)";
+      description = "Emergency load shedding for runaway background, build, and LSP work";
       runtimeInputs = with pkgs; [
         coreutils
+        systemd
         procps
         gnugrep
+        libnotify
       ];
     };
+
+    sinnix-scope = sinnixScope;
 
     nix-safe = mkScript "nix-safe" {
       description = "Nix wrapper that only applies explicit job/core overrides when requested";
       runtimeInputs = with pkgs; [
         bash
         coreutils
-      ];
-    };
-
-    cargo = mkScript "cargo" {
-      description = "Transparent cargo wrapper — all invocations run inside build.slice with I/O caps. Works for interactive use, scripts, and AI agents alike.";
-      runtimeInputs = with pkgs; [
-        bash
-        coreutils
-        systemd
-        cargo
+        sinnixScope.package
       ];
     };
 
     pytest = mkScript "pytest" {
-      description = "Transparent pytest wrapper — bare-`pytest` invocations run inside build.slice with I/O caps. Catches the AI-agent case; venv/python-m/uv-run paths are wrapped by the Claude PreToolUse hook.";
+      description = "Transparent pytest wrapper — bare-`pytest` invocations run inside build.slice through sinnix-scope.";
       runtimeInputs = with pkgs; [
         bash
         coreutils
-        systemd
         gnugrep
+        sinnixScope.package
+      ];
+    };
+
+    sinnix-observe = mkScript "sinnix-observe" {
+      description = "Join live pressure, systemd placement, Sinex xtask history, and Polylogue run ledgers";
+      runtimeInputs = with pkgs; [
+        bash
+        coreutils
+        gawk
+        gnugrep
+        gnused
+        procps
+        sqlite
+        systemd
+        util-linux
       ];
     };
 

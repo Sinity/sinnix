@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# Place a command in a Sinnix resource slice.
+#
+# Slice limits live in modules/performance.nix. This helper owns placement so
+# wrappers do not each grow their own systemd-run policy.
+
+set -euo pipefail
+
+if [ "$#" -lt 3 ] || [ "$2" != "--" ]; then
+  echo "usage: sinnix-scope <build|background|nix-build> -- <command> [args...]" >&2
+  exit 64
+fi
+
+class="$1"
+shift 2
+
+case "$class" in
+  build) slice="build.slice" ;;
+  background) slice="background.slice" ;;
+  nix-build) slice="nix-build.slice" ;;
+  *)
+    echo "sinnix-scope: unknown class: $class" >&2
+    exit 64
+    ;;
+esac
+
+if grep -q "$slice" /proc/self/cgroup 2>/dev/null; then
+  exec "$@"
+fi
+
+if ! command -v systemd-run >/dev/null 2>&1; then
+  exec "$@"
+fi
+
+apply_project_cache_policy() {
+  local cwd sinex_root checkout_hash
+
+  cwd="$(pwd -P)"
+  sinex_root="${SINEX_ROOT:-/realm/project/sinex}"
+
+  case "$cwd" in
+    "$sinex_root"|"$sinex_root"/*)
+      if [ -d /cache/sinex ] && [ -z "${SINEX_DEV_CACHE_ROOT:-}" ]; then
+        checkout_hash="$(printf '%s' "$sinex_root" | sha256sum | cut -c1-12)"
+        export SINEX_DEV_CACHE_ROOT="/cache/sinex/$checkout_hash"
+      fi
+      if [ -n "${SINEX_DEV_CACHE_ROOT:-}" ] && [ -z "${CARGO_TARGET_DIR:-}" ]; then
+        export CARGO_TARGET_DIR="$SINEX_DEV_CACHE_ROOT/target"
+      fi
+      if [ -n "${SINEX_DEV_CACHE_ROOT:-}" ]; then
+        mkdir -p "$SINEX_DEV_CACHE_ROOT/target" "$SINEX_DEV_CACHE_ROOT/cache"
+      fi
+      ;;
+  esac
+}
+
+apply_project_cache_policy
+
+env_args=()
+for name in \
+  PATH HOME TERM TMPDIR \
+  CARGO_HOME CARGO_TARGET_DIR SCCACHE_DIR RUSTC_WRAPPER RUSTUP_HOME RUST_LOG \
+  VIRTUAL_ENV PYTHONPATH PYTHONHOME PYTEST_ADDOPTS PYTEST_DISABLE_PLUGIN_AUTOLOAD \
+  UV_CACHE_DIR UV_PROJECT_ENVIRONMENT \
+  NIX_PATH NIX_CONFIG NIXPKGS_ALLOW_UNFREE \
+  SINEX_DEV_CACHE_ROOT SINEX_CACHE_DIR SINEX_STATE_DIR SINEX_TEST_RESULTS_DIR
+do
+  if [ "${!name+x}" = x ]; then
+    env_args+=("--setenv=$name=${!name}")
+  fi
+done
+
+if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+  exec systemd-run \
+    --scope \
+    --quiet \
+    --collect \
+    --slice="$slice" \
+    --same-dir \
+    "${env_args[@]}" \
+    -- "$@"
+fi
+
+if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+  exec systemd-run \
+    --user \
+    --scope \
+    --quiet \
+    --collect \
+    --slice="$slice" \
+    --same-dir \
+    "${env_args[@]}" \
+    -- "$@"
+fi
+
+exec "$@"

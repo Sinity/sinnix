@@ -41,6 +41,10 @@
     sinex = {
       prepareHost = true;
       enable = true;
+      # Keep the runtime target manual until Sinex #914 resolves the current
+      # NATS/ingest replay-pressure path. The service graph stays available as
+      # `sinex-runtime.target`; it just no longer starts during desktop boot.
+      autoStart = false;
       provisionDatabase = true;
       activationProfile = "full";
       environment = "prod";

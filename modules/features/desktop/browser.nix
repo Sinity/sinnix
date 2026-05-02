@@ -34,8 +34,12 @@ mkFeatureModule {
           # Hyprland's HDR mode, causing washed out colors.
           # See: https://github.com/hyprwm/Hyprland/discussions/11910
           #
-          # Also disable Vulkan/ANGLE-Vulkan to avoid unstable paths on
-          # NVIDIA+Wayland+HDR setups while keeping normal GPU acceleration.
+          # Also disable Vulkan/ANGLE-Vulkan and Chrome's accelerated video
+          # decode/zero-copy paths. On 2026-05-02, rapidly switching YouTube
+          # tabs hit NVIDIA DRM BAR mapping failures (`NV_ERR_NO_MEMORY` from
+          # `reusemappingdbMap`) followed by Chrome Media renderer SIGILLs and
+          # Xid 44. Keep GPU compositing, but route video frames away from the
+          # dmabuf/BAR-heavy path that crashed the display stack.
           #
           # --user-data-dir is intentional: Chrome 136+ silently refuses to
           # honour --remote-debugging-port when using the platform-default
@@ -46,7 +50,10 @@ mkFeatureModule {
           # read cookies via CDP. Acceptable on this single-user machine.
           chromeUserDataDir = "${config.home.homeDirectory}/.config/chrome-ws";
           chromeArgs = lib.concatStringsSep " " [
-            "--disable-features=WaylandWpColorManagerV1,Vulkan,DefaultANGLEVulkan"
+            "--disable-features=WaylandWpColorManagerV1,Vulkan,DefaultANGLEVulkan,VaapiVideoDecoder,VaapiVideoEncoder,UseChromeOSDirectVideoDecoder"
+            "--disable-accelerated-video-decode"
+            "--disable-gpu-memory-buffer-video-frames"
+            "--disable-zero-copy"
             "--remote-debugging-port=9222"
             "--remote-debugging-address=127.0.0.1"
             "--user-data-dir=${chromeUserDataDir}"

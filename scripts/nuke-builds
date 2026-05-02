@@ -1,18 +1,32 @@
 #!/usr/bin/env bash
-# Aggressively terminate all build processes, compilers, and LSPs
-# Designed for F9 emergency kill binding
+# Emergency load shedding for the F9 recovery binding.
 #
 # SAFETY: Uses pgrep without -f to match process names only (not full command line)
 # This prevents killing everything running from /nix/store/
 
 set -euo pipefail
 
+SYSTEM_UNITS=(
+  "borgbackup-job-persist.service"
+  "borgbackup-job-realm.service"
+  "btrbk.service"
+  "btrbk.timer"
+  "sinex-runtime.timer"
+  "sinex-runtime.target"
+  "nats.service"
+  "postgresql.service"
+)
+
+USER_UNITS=(
+  "polylogue-run.service"
+)
+
 # Build tools and compilers (exact process names)
 BUILD_PROCS=(
   "gcc" "g++" "clang" "clang++" "rustc"
   "cc1" "cc1plus" "ld" "lld" "mold"
-  "cargo" "cmake" "make" "ninja" "meson"
-  "nix-daemon" "nix-build"
+  "cargo" "cmake" "make" "ninja" "meson" "pytest"
+  "nix-daemon" "nix-build" "nix"
 )
 
 # LSP servers (exact process names)
@@ -22,9 +36,41 @@ LSP_PROCS=(
   "bash-language-server" "yaml-language-server"
 )
 
-ALL_PROCS=("${BUILD_PROCS[@]}" "${LSP_PROCS[@]}")
+BACKGROUND_PROCS=(
+  "borg" "borgmatic" "btrbk"
+  "sinex-ingestd" "sinex-preflight" "sinex-gateway"
+)
 
-echo "🔪 Nuking build processes and LSPs..."
+ALL_PROCS=("${BUILD_PROCS[@]}" "${LSP_PROCS[@]}" "${BACKGROUND_PROCS[@]}")
+
+stop_units() {
+  local scope="$1"
+  shift
+  local -a units=("$@")
+
+  if [ "${#units[@]}" -eq 0 ]; then
+    return
+  fi
+
+  if [ "$scope" = "system" ]; then
+    systemctl stop "${units[@]}" 2>/dev/null || true
+  else
+    systemctl --user stop "${units[@]}" 2>/dev/null || true
+  fi
+}
+
+notify() {
+  if command -v notify-send >/dev/null 2>&1; then
+    notify-send "$@" 2>/dev/null || true
+  fi
+}
+
+echo "Emergency load shedding..."
+
+stop_units user "${USER_UNITS[@]}"
+if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+  stop_units system "${SYSTEM_UNITS[@]}"
+fi
 
 killed=0
 for proc in "${ALL_PROCS[@]}"; do
@@ -49,8 +95,9 @@ for proc in "${ALL_PROCS[@]}"; do
 done
 
 if [ "$killed" -gt 0 ]; then
-  notify-send "Nuke Builds" "Killed $killed processes" -u normal
-  echo "✅ Killed $killed processes"
+  notify "Emergency Shed" "Stopped background units and killed $killed processes" -u normal
+  echo "Killed $killed processes"
 else
-  echo "✅ No build processes found"
+  notify "Emergency Shed" "Stopped background units" -u normal
+  echo "No matching processes found"
 fi

@@ -3,9 +3,8 @@
 #
 # Two responsibilities:
 #   1. Block dangerous patterns (imperative installs, bare force-push).
-#   2. Rewrap heavy I/O commands (pytest in any invocation form) to run
-#      inside build.slice with the 300 MB/s NVMe write cap. See
-#      modules/performance.nix:181-186 for the slice budget.
+#   2. Rewrap heavy I/O commands (pytest in any invocation form) through
+#      sinnix-scope so they enter build.slice.
 #
 # Slice rewrap uses `hookSpecificOutput.updatedInput` to transparently
 # replace `tool_input.command`. The agent sees `systemMessage` explaining
@@ -77,8 +76,8 @@ if echo "$CMD" | grep -qE '(^|[^[:alnum:]_./-])(pytest|python[0-9.]*[[:space:]]+
   # POSIX single-quote escape: every "'" becomes "'\''", whole payload wrapped
   # in single quotes — bash then sees the original command literally.
   ESCAPED=$(printf '%s' "$CMD" | sed "s/'/'\\\\''/g")
-  WRAPPED="systemd-run --user --scope --quiet --slice=build.slice --same-dir bash -lc '$ESCAPED'"
-  emit_rewrite "$WRAPPED" "Rewrapped pytest invocation into build.slice (300 MB/s NVMe write cap). See modules/performance.nix."
+  WRAPPED="sinnix-scope build -- bash -lc '$ESCAPED'"
+  emit_rewrite "$WRAPPED" "Rewrapped pytest invocation through sinnix-scope build."
   exit 0
 fi
 

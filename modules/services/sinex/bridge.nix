@@ -1,4 +1,4 @@
-# Sinex upstream bridge
+# Sinex bridge
 #
 # This module carries the heavy integration with the upstream `services.sinex`
 # option tree. Keep it opt-in so the generic sinnix module graph does not pay
@@ -25,8 +25,15 @@ let
   databasePasswordFile = lib.attrByPath [ "sinnix" "secrets" "paths" "sinex-local-db" ] null config;
   hostPrepared = cfg.prepareHost || cfg.enable || cfg.provisionDatabase;
   runtimeEnabled = cfg.enable;
+  runtimeAutoStart = runtimeEnabled && cfg.autoStart;
   databasePrepared = cfg.provisionDatabase || cfg.enable;
-  sinexRuntimeStartDelay = "90s";
+  sinexRuntimeStartDelay = "5min";
+  sinexAutoTimers = [
+    "sinex-blob-fsck"
+    "sinex-blob-gc"
+    "sinex-cache-prune"
+    "sinex-document-scan"
+  ];
 in
 {
   config = lib.mkIf (options.services ? sinex) (
@@ -74,12 +81,13 @@ in
       filesystemWatchPaths = [
         "${realmRoot}/project"
         "${realmRoot}/inbox/download"
-        "${realmRoot}/inbox/polylogue_scratch"
       ];
       generatedNodeServices = lib.optionals runtimeEnabled (config.sinex._generatedUnits or [ ]);
       documentScanEnabled =
+        runtimeEnabled && lib.attrByPath [ "services" "sinex" "nodes" "document" "enable" ] false config;
+      preflightEnabled =
         runtimeEnabled
-        && lib.attrByPath [ "services" "sinex" "nodes" "document" "enable" ] false config;
+        && lib.attrByPath [ "services" "sinex" "lifecycle" "preflight" "enable" ] false config;
       kittyAutoConfigureEnabled =
         runtimeEnabled
         && lib.attrByPath [ "services" "sinex" "shell" "kitty" "enable" ] false config
@@ -94,11 +102,11 @@ in
           "nats"
           "sinex-nats-bootstrap"
           "sinex-blob-init"
-          "sinex-preflight"
           "sinex-tls-init"
           "sinex-ingestd"
           "sinex-gateway"
         ]
+        ++ lib.optionals preflightEnabled [ "sinex-preflight" ]
         ++ generatedNodeServices
         ++ lib.optionals documentScanEnabled [ "sinex-document-scan" ]
         ++ lib.optionals kittyAutoConfigureEnabled [ "sinex-kitty-setup" ]
@@ -107,6 +115,18 @@ in
       delayedRuntimeUnits =
         map (name: "${name}.service") delayedRuntimeServices
         ++ map (name: "${name}.target") delayedRuntimeTargets;
+      runtimeServicePolicy = {
+        wantedBy = lib.mkForce [ ];
+        unitConfig.PartOf = [ "sinex-runtime.target" ];
+      }
+      // lib.optionalAttrs (!runtimeAutoStart) {
+        # With host auto-start disabled, activation must not restart changed
+        # Sinex units. Several services require bootstrap/preflight units that
+        # in turn pull NATS/PostgreSQL up, recreating the pressure incident
+        # during an otherwise routine NixOS switch.
+        restartIfChanged = false;
+        serviceConfig.Restart = lib.mkForce "no";
+      };
       mkScopedSinexPackage =
         sinexPkgs:
         pkgs.symlinkJoin {
@@ -152,9 +172,7 @@ in
         in
         {
           services.sinex.package = lib.mkDefault (mkScopedSinexPackage sinexPkgs);
-          services.sinex.cliPackage = lib.mkDefault (
-            if runtimeEnabled then sinexPkgs.sinex else sinexPkgs.sinexctl
-          );
+          services.sinex.cliPackage = lib.mkDefault sinexPkgs.sinexctl;
           services.sinex.users.target = targetUserName;
           sinex.secrets.paths = lib.mkForce (
             lib.mapAttrs (_: path: toString path) (
@@ -217,7 +235,9 @@ in
           };
 
           lifecycle = {
-            preflight.enable = runtimeEnabled;
+            # Full preflight can touch production-sized data and is an operator
+            # diagnostic, not a safe prerequisite for desktop activation.
+            preflight.enable = false;
             maintenance.enable = runtimeEnabled;
             updates.enable = runtimeEnabled;
           };
@@ -291,25 +311,69 @@ in
         # PostgreSQL/schema apply/NATS/node startup cannot hold graphical.target.
         # Strip both direct services and the postgresql.target install surface;
         # otherwise local PostgreSQL still leaks into multi-user.target.
-        systemd.services = lib.genAttrs delayedRuntimeServices (_: {
-          wantedBy = lib.mkForce [ ];
-        }) // {
+        systemd.services = lib.genAttrs delayedRuntimeServices (_: runtimeServicePolicy) // {
           # Cap NATS memory so JetStream cannot push the system into swap.
           # Peak observed: 3.4 GB with 484 MB swapped — the 1 GB cap keeps
           # it in RAM and lets earlyoom prefer-kill it before the desktop
           # feels pressure. IOWeight=10 ensures its sustained writes don't
           # compete fairly with interactive I/O.
-          nats.serviceConfig = {
-            MemoryMax = "1G";
-            IOWeight = 10;
+          nats = lib.mkMerge [
+            runtimeServicePolicy
+            {
+              serviceConfig = {
+                MemoryMax = "1G";
+                IOWeight = 10;
+                IOReadBandwidthMax = [
+                  "/dev/disk/by-uuid/7f603111-8f3a-40aa-bad0-0cac69c140f1 80M"
+                ];
+                IOWriteBandwidthMax = [
+                  "/dev/disk/by-uuid/7f603111-8f3a-40aa-bad0-0cac69c140f1 80M"
+                ];
+                # NATS' graceful SIGUSR2 drain can sit for minutes while
+                # JetStream is already the pressure source. Operator stops
+                # need to converge quickly.
+                KillSignal = lib.mkForce "SIGTERM";
+                TimeoutStopSec = lib.mkForce "10s";
+              };
+            }
+          ];
+
+          # These are validation/bootstrap one-shots. Restart loops here keep
+          # pulling NATS/PostgreSQL back up after an operator stops the runtime,
+          # which is exactly the failure mode seen during the 2026-05-02
+          # pressure incident.
+          sinex-nats-bootstrap = {
+            restartIfChanged = false;
+            unitConfig.PartOf = [ "sinex-runtime.target" ];
+            wantedBy = lib.mkForce [ ];
+            serviceConfig.Restart = lib.mkForce "no";
+          };
+          sinex-preflight = {
+            restartIfChanged = false;
+            unitConfig.PartOf = [ "sinex-runtime.target" ];
+            wantedBy = lib.mkForce [ ];
+            serviceConfig.Restart = lib.mkForce "no";
           };
 
           # Restrict PostgreSQL from consuming all system memory and I/O bandwidth,
           # preventing page-cache thrashing and system lockups on heavy analytical queries.
-          postgresql.serviceConfig = {
-            MemoryHigh = "8G";
-            IOWeight = 10;
-          };
+          postgresql = lib.mkMerge [
+            runtimeServicePolicy
+            {
+              unitConfig.PartOf = lib.mkAfter [ "sinex-runtime.target" ];
+              serviceConfig = {
+                MemoryHigh = "8G";
+                MemoryMax = "12G";
+                IOWeight = 10;
+                IOReadBandwidthMax = [
+                  "/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02 100M"
+                ];
+                IOWriteBandwidthMax = [
+                  "/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02 80M"
+                ];
+              };
+            }
+          ];
         };
         systemd.targets =
           lib.genAttrs delayedRuntimeTargets (_: {
@@ -326,15 +390,22 @@ in
               ];
             };
           };
-        systemd.timers.sinex-runtime = {
-          description = "Delay Sinex runtime startup until after boot";
-          wantedBy = [ "timers.target" ];
-          timerConfig = {
-            OnBootSec = sinexRuntimeStartDelay;
-            AccuracySec = "15s";
-            Unit = "sinex-runtime.target";
+        systemd.timers = {
+          sinex-runtime = {
+            description = "Delay Sinex runtime startup until after boot";
+            wantedBy = lib.mkIf runtimeAutoStart [ "timers.target" ];
+            timerConfig = {
+              OnBootSec = sinexRuntimeStartDelay;
+              AccuracySec = "15s";
+              Unit = "sinex-runtime.target";
+            };
           };
-        };
+        }
+        // lib.optionalAttrs (!runtimeAutoStart) (
+          lib.genAttrs sinexAutoTimers (_: {
+            wantedBy = lib.mkForce [ ];
+          })
+        );
 
         # NATS JetStream lives on the /cache NVMe partition. Ensure the
         # directory exists before the service starts so the auto-setup

@@ -1,0 +1,265 @@
+#!/usr/bin/env bash
+# Cross-project observability entrypoint for the workstation.
+
+set -euo pipefail
+
+SINEX_ROOT="${SINEX_ROOT:-/realm/project/sinex}"
+POLYLOGUE_ROOT="${POLYLOGUE_ROOT:-/realm/project/polylogue}"
+
+section() {
+  printf '\n== %s ==\n' "$1"
+}
+
+have() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+sqlite_read() {
+  local db="$1"
+  local sql="$2"
+  sqlite3 -readonly -header -column "$db" "$sql" 2>/dev/null || true
+}
+
+first_existing() {
+  local path
+  for path in "$@"; do
+    if [ -e "$path" ]; then
+      printf '%s\n' "$path"
+      return 0
+    fi
+  done
+  return 1
+}
+
+table_exists() {
+  local db="$1"
+  local table="$2"
+  [ -e "$db" ] || return 1
+  [ "$(sqlite3 -readonly "$db" "select count(*) from sqlite_master where type='table' and name='$table';" 2>/dev/null || echo 0)" = "1" ]
+}
+
+polylogue_db() {
+  local db
+  for db in \
+    "${POLYLOGUE_DB_PATH:-}" \
+    "$HOME/.local/share/polylogue/polylogue.db" \
+    "$HOME/.local/share/polylogue/archive.db" \
+    "$HOME/.local/share/polylogue/polylogue.sqlite" \
+    "$POLYLOGUE_ROOT/.local/browser-capture/xdg-data/polylogue/polylogue.db"
+  do
+    [ -n "$db" ] || continue
+    if table_exists "$db" runs; then
+      printf '%s\n' "$db"
+      return 0
+    fi
+  done
+  return 1
+}
+
+pressure_summary() {
+  section "live pressure"
+  date --iso-8601=seconds
+  printf 'cpu    '; cat /proc/pressure/cpu
+  printf 'memory '; cat /proc/pressure/memory
+  printf 'io     '; cat /proc/pressure/io
+  free -h
+}
+
+blocked_tasks() {
+  section "blocked tasks"
+  ps -eo stat,pid,ppid,etime,pcpu,pmem,rss,wchan:24,comm,args \
+    | awk 'NR == 1 || $1 ~ /D/' \
+    | sed -n '1,40p'
+}
+
+systemd_units() {
+  section "managed workload units"
+  local units=(
+    below.service
+    sinnix-pressure-watchdog.service
+    sinex-runtime.target
+    sinex-runtime.timer
+    sinex-ingestd.service
+    nats.service
+    postgresql.service
+    btrbk.service
+    borgbackup-job-realm.service
+    borgbackup-job-persist.service
+  )
+  local unit
+  for unit in "${units[@]}"; do
+    if systemctl list-unit-files "$unit" >/dev/null 2>&1; then
+      systemctl show "$unit" \
+        -p Id -p ActiveState -p SubState -p MainPID -p Slice \
+        -p MemoryCurrent -p MemoryHigh -p MemoryMax -p IOReadBandwidthMax \
+        -p IOWriteBandwidthMax \
+        | awk -v unit="$unit" '
+          BEGIN { FS="=" }
+          $1 == "ActiveState" { active=$2 }
+          $1 == "SubState" { unit_sub=$2 }
+          $1 == "MainPID" { pid=$2 }
+          $1 == "Slice" { slice=$2 }
+          $1 == "MemoryCurrent" { mem=$2 }
+          $1 == "MemoryHigh" { high=$2 }
+          $1 == "MemoryMax" { max=$2 }
+          $1 == "IOReadBandwidthMax" { read=$2 }
+          $1 == "IOWriteBandwidthMax" { write=$2 }
+          END {
+            printf "%-34s active=%s/%s pid=%s slice=%s mem=%s high=%s max=%s readcap=%s writecap=%s\n",
+              unit, active, unit_sub, pid, slice, mem, high, max, read, write
+          }'
+    fi
+  done
+
+  if systemctl --user list-unit-files polylogue-run.service >/dev/null 2>&1; then
+    systemctl --user show polylogue-run.service \
+      -p Id -p ActiveState -p SubState -p MainPID -p Slice \
+      -p MemoryCurrent -p MemoryHigh -p MemoryMax -p IOReadBandwidthMax \
+      -p IOWriteBandwidthMax \
+      | awk '
+        BEGIN { FS="=" }
+        $1 == "ActiveState" { active=$2 }
+        $1 == "SubState" { unit_sub=$2 }
+        $1 == "MainPID" { pid=$2 }
+        $1 == "Slice" { slice=$2 }
+        $1 == "MemoryCurrent" { mem=$2 }
+        $1 == "MemoryHigh" { high=$2 }
+        $1 == "MemoryMax" { max=$2 }
+        $1 == "IOReadBandwidthMax" { read=$2 }
+        $1 == "IOWriteBandwidthMax" { write=$2 }
+        END {
+          printf "%-34s active=%s/%s pid=%s slice=%s mem=%s high=%s max=%s readcap=%s writecap=%s\n",
+            "polylogue-run.service", active, unit_sub, pid, slice, mem, high, max, read, write
+        }'
+  fi
+}
+
+slice_state() {
+  section "resource slices"
+  local specs=(
+    "user build.slice"
+    "user background.slice"
+    "system nix-build.slice"
+    "system background.slice"
+  )
+  local spec scope slice
+  for spec in "${specs[@]}"; do
+    scope="${spec%% *}"
+    slice="${spec#* }"
+    if [ "$scope" = user ]; then
+      systemctl --user show "$slice" -p ActiveState -p MemoryCurrent -p MemoryHigh -p MemoryMax -p IOReadBandwidthMax -p IOWriteBandwidthMax 2>/dev/null \
+        | awk -v slice="user/$slice" '
+          BEGIN { FS="=" }
+          $1 == "ActiveState" { active=$2 }
+          $1 == "MemoryCurrent" { current=$2 }
+          $1 == "MemoryHigh" { high=$2 }
+          $1 == "MemoryMax" { max=$2 }
+          $1 == "IOReadBandwidthMax" { read=$2 }
+          $1 == "IOWriteBandwidthMax" { write=$2 }
+          END { printf "%-24s active=%s current=%s high=%s max=%s readcap=%s writecap=%s\n", slice, active, current, high, max, read, write }'
+    else
+      systemctl show "$slice" -p ActiveState -p MemoryCurrent -p MemoryHigh -p MemoryMax -p IOReadBandwidthMax -p IOWriteBandwidthMax 2>/dev/null \
+        | awk -v slice="system/$slice" '
+          BEGIN { FS="=" }
+          $1 == "ActiveState" { active=$2 }
+          $1 == "MemoryCurrent" { current=$2 }
+          $1 == "MemoryHigh" { high=$2 }
+          $1 == "MemoryMax" { max=$2 }
+          $1 == "IOReadBandwidthMax" { read=$2 }
+          $1 == "IOWriteBandwidthMax" { write=$2 }
+          END { printf "%-24s active=%s current=%s high=%s max=%s readcap=%s writecap=%s\n", slice, active, current, high, max, read, write }'
+    fi
+  done
+}
+
+active_heavy_processes() {
+  section "heavy process snapshot"
+  ps -eo pid,stat,pcpu,pmem,rss,comm,args --sort=-pcpu \
+    | awk 'NR == 1 || $6 ~ /^(cargo|cargo-nextest|rustc|pytest|nix|nix-daemon|borg|btrbk|nats-server|postgres|polylogue|xtask)$/ || $7 ~ /(polylogue|xtask|cargo nextest|pytest|borgbackup)/' \
+    | sed -n '1,40p'
+}
+
+sinex_xtask_history() {
+  section "sinex xtask history"
+  local db
+  db="$(first_existing \
+    "$SINEX_ROOT/.sinex/state/xtask-history.db" \
+    "$HOME/.sinex/history.db" \
+    "${XTASK_HISTORY_DB:-}" \
+    2>/dev/null || true)"
+  if [ -z "$db" ]; then
+    echo "no xtask history DB found"
+    return
+  fi
+  printf 'db=%s\n' "$db"
+  sqlite_read "$db" "
+    select
+      id,
+      command,
+      coalesce(subcommand, '') as subcommand,
+      status,
+      started_at,
+      round(duration_secs, 1) as secs,
+      round(process_memory_usage_max_mb, 1) as rss_mb,
+      round(shared_background_slice_memory_usage_max_mb, 1) as bg_mb,
+      round(shared_nix_build_slice_memory_usage_max_mb, 1) as nix_mb
+    from invocations
+    order by started_at desc
+    limit 10;"
+}
+
+polylogue_runs() {
+  section "polylogue runs"
+  local db
+  db="$(polylogue_db || true)"
+  if [ -n "$db" ]; then
+    printf 'db=%s\n' "$db"
+    sqlite_read "$db" "
+      select
+        case
+          when timestamp glob '[0-9]*' then datetime(cast(timestamp as integer), 'unixepoch')
+          else timestamp
+        end as timestamp,
+        run_id,
+        round(duration_ms / 1000.0, 1) as secs,
+        substr(coalesce(counts_json, ''), 1, 96) as counts
+      from runs
+      order by timestamp desc
+      limit 10;"
+    return
+  fi
+
+  local runs_dir
+  runs_dir="$(first_existing \
+    "$HOME/.local/share/polylogue/runs" \
+    "$POLYLOGUE_ROOT/runs" \
+    "$POLYLOGUE_ROOT/archive/runs" \
+    2>/dev/null || true)"
+  if [ -z "$runs_dir" ]; then
+    echo "no Polylogue runs DB or runs directory found"
+    return
+  fi
+  printf 'runs_dir=%s\n' "$runs_dir"
+  find "$runs_dir" -maxdepth 1 -type f -name 'run-*.json' -printf '%T+\t%p\n' \
+    | sort -r \
+    | sed -n '1,10p'
+}
+
+below_hint() {
+  section "below hint"
+  if have below; then
+    echo "historical attribution: below replay"
+    echo "recent process I/O: below dump process -b '10 min ago' --duration '10 min' -f datetime pid comm state io.rwbytes_per_sec mem.rss_bytes cmdline --select io.rwbytes_per_sec --rsort --top 20"
+  else
+    echo "below not on PATH"
+  fi
+}
+
+pressure_summary
+blocked_tasks
+systemd_units
+slice_state
+active_heavy_processes
+sinex_xtask_history
+polylogue_runs
+below_hint

@@ -25,11 +25,15 @@ let
 in
 {
   services = {
-    # fstrim disabled: using discard=async on SSD mounts instead.
-    # Weekly batch TRIM caused 1.5h+ I/O saturation on multi-TB BTRFS volumes,
-    # blocking all processes. discard=async coalesces discards continuously in
-    # the background without a stall.
-    fstrim.enable = false;
+    # Continuous btrfs discard looked harmless on paper, but during the
+    # 2026-05-02 pressure incident btrfs-discard workers were visible in
+    # D-state while desktop I/O PSI was high. Use an explicit, low-priority
+    # weekly TRIM window instead of letting snapshot/delete churn schedule
+    # discard work throughout the day.
+    fstrim = {
+      enable = true;
+      interval = "Sun 04:30:00";
+    };
     gvfs.enable = true; # dynamic mount
 
     # Disable block-layer writeback throttle on all storage. wbt parks writers
@@ -49,6 +53,17 @@ in
     '';
   };
 
+  systemd.services.fstrim.serviceConfig = {
+    Nice = 19;
+    IOSchedulingClass = "idle";
+    IOWeight = 1;
+  };
+
+  systemd.timers.fstrim.timerConfig = {
+    Persistent = false;
+    RandomizedDelaySec = "30m";
+  };
+
   fileSystems = {
     "/" = {
       device = "/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02";
@@ -57,7 +72,7 @@ in
         "subvol=@"
         "compress=zstd"
         "noatime"
-        "discard=async"
+        "nodiscard"
       ];
     };
 
@@ -68,7 +83,7 @@ in
         "subvol=@nix"
         "compress=zstd"
         "noatime"
-        "discard=async"
+        "nodiscard"
       ];
     };
 
@@ -83,7 +98,7 @@ in
         "subvol=@persist"
         "compress=zstd"
         "noatime"
-        "discard=async"
+        "nodiscard"
       ];
       neededForBoot = true;
     };
@@ -107,8 +122,8 @@ in
       options = [
         "compress=zstd"
         "noatime"
+        "nodiscard"
         "nofail"
-        "discard=async"
       ];
     };
 
@@ -120,8 +135,8 @@ in
         "compress=zstd"
         "relatime"
         "lazytime"
+        "nodiscard"
         "nofail"
-        "discard=async"
       ];
     };
 
@@ -243,7 +258,7 @@ in
     };
     script = ''
       ${pkgs.coreutils}/bin/mkdir -p /btrfs_tmp
-      ${pkgs.util-linux}/bin/mount -o subvol=/ /dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02 /btrfs_tmp
+      ${pkgs.util-linux}/bin/mount -o subvol=/,nodiscard /dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02 /btrfs_tmp
       ${pkgs.coreutils}/bin/mkdir -p /btrfs_tmp/.snapshots
 
       # Save pre-wipe @ — never auto-pruned, manual cleanup only

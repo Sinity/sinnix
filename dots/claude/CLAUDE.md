@@ -82,6 +82,12 @@
 
 **§19 Proactive fixes** — Fix issues stumbled upon, preexisting or not. Test things yourself in addition to writing automated tests.
 
+**§20 Throughput stewardship** — Treat CI minutes, review cycles, and agent time
+as scarce shared resources. Prefer one complete coherent phase over several
+micro-PRs; run focused checks while iterating, then the broad gate once near the
+merge boundary. Keep an acceptance checklist current so real issue progress is
+visible and partial work does not masquerade as closure.
+
 ---
 
 
