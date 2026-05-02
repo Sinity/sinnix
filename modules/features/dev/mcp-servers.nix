@@ -114,10 +114,7 @@ mkFeatureModule {
             transport = "stdio";
             command = "mcp-playwright";
             args = [ "--headless" ];
-            clients = [
-              "codex"
-              "forge"
-            ];
+            clients = [ "forge" ];
           };
         };
       selectClientServers =

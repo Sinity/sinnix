@@ -4,7 +4,7 @@
 
 - **Claude**: `dots/claude/` — CLAUDE.md read natively; other agents get flat renders via `render-agents` on HM activation and on `dots/claude/` file changes (systemd path unit).
 - **Codex**: `dots/codex/config.toml`, skills overlay at `dots/codex/skills/` (`.system/` holds Codex-only system skills).
-- **MCP Servers**: All five servers (polylogue, context7, github, firecrawl, playwright) are universal — all agents get all of them. Registry source of truth: `modules/features/dev/mcp-servers.nix`.
+- **MCP Servers**: Polylogue/Context7/GitHub are the default coding-agent substrate. Browser automation MCPs are opt-in/manual so ordinary agent sessions do not multiply heavyweight browser-control daemons. Registry source of truth: `modules/features/dev/mcp-servers.nix`.
 - **Context7**: Documentation discovery via `resolve-library-id` and `query-docs`.
 
 ### Desktop Environment
