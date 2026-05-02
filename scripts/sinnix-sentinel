@@ -7,7 +7,7 @@ POLICY_FILE="${SINNIX_HEALTH_POLICY:-/etc/sinnix/health-policy.json}"
 HEALTH_FILE="${SINNIX_HEALTH_FILE:-/run/sinnix/health.json}"
 PREV_HEALTH_FILE="${SINNIX_HEALTH_FILE:-/run/sinnix/health.json}.prev"
 EVENT_LOG="${SINNIX_EVENT_LOG:-/var/log/sinnix-sentinel/events.jsonl}"
-CORRECTIVE_ACTIONS="${SINNIX_CORRECTIVE_ACTIONS:-true}"
+CORRECTIVE_ACTIONS="${SINNIX_CORRECTIVE_ACTIONS:-false}"
 NOTIFICATIONS="${SINNIX_NOTIFICATIONS:-true}"
 MCP_CHILD_THRESHOLD="${SINNIX_MCP_CHILD_THRESHOLD:-2}"
 REBOOT_STATE_FILE="${SINNIX_REBOOT_STATE_FILE:-/var/lib/sinnix-sentinel/reboot-last-notified-system}"
@@ -16,7 +16,7 @@ JSON_ONLY=false
 
 usage() {
   cat <<'EOF'
-Usage: sinnix-sentinel [--verbose] [--json] [--no-correct] [--no-notify]
+Usage: sinnix-sentinel [--verbose] [--json] [--correct] [--no-correct] [--no-notify]
 EOF
 }
 
@@ -28,6 +28,7 @@ for arg in "$@"; do
       ;;
     --verbose) VERBOSE=true ;;
     --json) JSON_ONLY=true ;;
+    --correct) CORRECTIVE_ACTIONS=true ;;
     --no-correct) CORRECTIVE_ACTIONS=false ;;
     --no-notify) NOTIFICATIONS=false ;;
   esac
@@ -40,6 +41,7 @@ RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'; NC=$'\033[0m'; BOL
 ok=0; warn=0; fail=0
 declare -a CHECKS=()     
 declare -a EVENTS=()
+declare -a ACTION_EVENTS=()
 declare -a NOTIFICATIONS_QUEUE=()  
 NOW_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 NOW_EPOCH=$(date +%s)
@@ -78,6 +80,17 @@ record_check() {
 queue_notification() {
   local urgency="$1" message="$2"
   NOTIFICATIONS_QUEUE+=("$urgency|$message")
+}
+
+queue_action_event() {
+  local event="$1" severity="$2" name="$3" unit="$4" scope="$5" detail="$6"
+  local esc_name esc_unit esc_scope esc_detail
+  esc_name=$(json_escape "$name")
+  esc_unit=$(json_escape "$unit")
+  esc_scope=$(json_escape "$scope")
+  esc_detail=$(json_escape "$detail")
+  ACTION_EVENTS+=("$(printf '{"timestamp":"%s","source":"sinnix-sentinel","event":"%s","severity":"%s","name":"%s","unit":"%s","scope":"%s","detail":"%s"}' \
+    "$NOW_TS" "$event" "$severity" "$esc_name" "$esc_unit" "$esc_scope" "$esc_detail")")
 }
 
 send_notification() {
@@ -264,7 +277,12 @@ while IFS='|' read -r name unit type restartable; do
     else
       record_check "services" "$name" "fail" "$active_state"
       if [ "$CORRECTIVE_ACTIONS" = "true" ] && [ "$restartable" = "true" ]; then
-        run_scoped_systemctl "$scope" restart "$unit" 2>/dev/null && queue_notification "normal" "sentinel: restarted $name"
+        if run_scoped_systemctl "$scope" restart "$unit" 2>/dev/null; then
+          queue_action_event "service.restart" "normal" "$name" "$unit" "$scope" "restarted from ${active_state}"
+          queue_notification "normal" "sentinel: restarted $name"
+        else
+          queue_action_event "service.restart_failed" "critical" "$name" "$unit" "$scope" "restart failed from ${active_state}"
+        fi
       fi
     fi
   fi
@@ -595,6 +613,7 @@ mapfile -t EVENTS < <(
       (overall_event + check_events)[]
     '
 )
+EVENTS+=("${ACTION_EVENTS[@]}")
 
 if [ "$previous_health_json" != "null" ]; then
   if can_write_parent "$PREV_HEALTH_FILE"; then

@@ -94,7 +94,7 @@ let
       # === Helper: read sysfs temp (millidegrees → degrees with 1 decimal) ===
       read_temp() {
         local val
-        val=$(cat "$1" 2>/dev/null) || echo "0"
+        val=$(cat "$1" 2>/dev/null || true)
         if [ -n "$val" ]; then
           awk "BEGIN{printf \"%.1f\", $val/1000}"
         else
@@ -120,7 +120,7 @@ let
       fi
 
       # Rotation: once per day, trim lines older than retention
-      last_rotate=0
+      last_rotate=$(date +%s)
       rotate_if_needed() {
         local now
         now=$(date +%s)

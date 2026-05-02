@@ -6,7 +6,7 @@
 #
 # Actions:
 # - Writes /run/sinnix/health.json (machine-readable, consumed by waybar)
-# - Restarts failed restartable sinnix services (configurable)
+# - Optionally restarts explicitly restartable sinnix services
 # - Sends desktop notifications for state transitions and reboot-needed alerts
 # - Emits strict telemetry on MCP child-process fanout (no cleanup actions)
 # - Logs events to /var/log/sinnix-sentinel/events.jsonl (sinex-ready)
@@ -37,8 +37,12 @@ mkServiceModule {
     };
     enableCorrectiveActions = lib.mkOption {
       type = lib.types.bool;
-      default = true;
-      description = "Whether sentinel can restart failed services.";
+      default = false;
+      description = ''
+        Whether sentinel can restart failed services. Keep this opt-in:
+        health reporting is generally safe, but corrective action must be
+        explicitly justified per host/service class.
+      '';
     };
     enableNotifications = lib.mkOption {
       type = lib.types.bool;
@@ -77,7 +81,7 @@ mkServiceModule {
 
       systemd.tmpfiles.rules = [
         "d /run/sinnix 0755 root root -"
-        "d /var/log/sinnix-sentinel 0750 root root 30d"
+        "d /var/log/sinnix-sentinel 0755 root root 30d"
         "d /var/lib/sinnix-sentinel 0750 root root -"
       ];
 
@@ -87,8 +91,8 @@ mkServiceModule {
           "network.target"
           "local-fs.target"
         ];
-        # Sentinel needs access to systemctl for service checks and restarts
-        # Plus tools for hardware and backup monitoring
+        # Sentinel needs systemctl for service checks. Corrective restarts are
+        # opt-in, so this remains primarily an observability service.
         path = with pkgs; [
           systemd
           borgbackup

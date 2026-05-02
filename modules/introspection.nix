@@ -82,10 +82,10 @@ let
       "${cfg.paths.realmRoot}/.btrfs/snapshot"
       "/persist/.btrfs/snapshot"
     ];
-    backupTargets = [
-      "${cfg.paths.outerRealm}/backup/borg-persist-v1"
-      "${cfg.paths.outerRealm}/backup/borg-realm-v2"
-    ];
+    # Borg repository freshness is intentionally not probed from the 60s
+    # sentinel loop. Even read-only `borg list` can block on backup storage;
+    # the dedicated Borg check timer owns that slower repository inspection.
+    backupTargets = [ ];
     maxStaleHours = 24; # Increased from 2h to be more realistic for daily/hourly batches
   };
 

@@ -157,7 +157,7 @@ in
     # User-manager background/graphical slices need their own budgets. Do not
     # cap Kitty's aggregate slice: one throttled `memory.high` bucket stalls all
     # terminals, including the interactive shell needed to recover the machine.
-    # Heavy terminal-launched work must be moved into `nix-build.slice` or
+    # Heavy terminal-launched work must be moved into `build.slice` or
     # `background.slice` instead of punishing the whole terminal surface.
     systemd.user.slices = {
       background.sliceConfig = buildBudget;

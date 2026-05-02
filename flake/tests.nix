@@ -167,7 +167,13 @@ let
                 message = "Shared skills tree must not contain self-referential symlinks: ${lib.concatStringsSep ", " sharedSkillSelfLinks}";
               }
               (expect.hmFileExists hm ".local/bin/claude" "Claude wrapper must exist")
+              (expect.hmFileTextContains hm ".local/bin/claude" "/bin/sinnix-scope background --"
+                "Claude wrapper must use the shared Sinnix placement helper"
+              )
               (expect.hmFileExists hm ".local/bin/codex" "Codex wrapper must exist")
+              (expect.hmFileTextContains hm ".local/bin/codex" "/bin/sinnix-scope background --"
+                "Codex wrapper must use the shared Sinnix placement helper"
+              )
               (expect.hmFileTextNotMatches hm ".local/bin/codex" ".*render-agents.*"
                 "Codex wrapper must not render AGENTS on every launch"
               )
@@ -177,6 +183,9 @@ let
                 forbidRegexes = [ "curl -fsSL" ];
               } "Forge wrapper must launch the packaged binary directly")
               (expect.hmFileExists hm ".local/bin/forge" "Forge wrapper must exist")
+              (expect.hmFileTextContains hm ".local/bin/forge" "/bin/sinnix-scope background --"
+                "Forge wrapper must use the shared Sinnix placement helper"
+              )
               (expect.activationExists hm "renderGlobalForgeAgents"
                 "Global Forge AGENTS render activation must exist"
               )
@@ -226,6 +235,9 @@ let
               (expect.persistedHomeDir config ".codex" "Codex home directory must be persisted under ~/.codex")
               (expect.persistedHomeDir config ".gemini" "Gemini home directory must be persisted under ~/.gemini")
               (expect.hmFileExists hm ".local/bin/gemini" "Gemini wrapper must exist")
+              (expect.hmFileTextContains hm ".local/bin/gemini" "/bin/sinnix-scope background --"
+                "Gemini wrapper must use the shared Sinnix placement helper"
+              )
               (expect.hmFileTextNotMatches hm ".local/bin/gemini" ".*render-agents.*"
                 "Gemini wrapper must not render instructions on every launch"
               )
@@ -838,6 +850,8 @@ let
                   ""
                 else
                   builtins.readFile "${chromePkg}/share/applications/google-chrome.desktop";
+              chromeWrapper =
+                if chromePkg == null then "" else builtins.readFile "${chromePkg}/bin/google-chrome-stable";
             in
             [
               {
@@ -858,6 +872,14 @@ let
                   && !(lib.hasPrefix "google-chrome-trigger-capture" (chromePkg.name or ""))
                   && builtins.match ".*Exec=.*/bin/google-chrome-stable.*" chromeDesktop != null;
                 message = "Chrome desktop entry must point at the normal binary by default";
+              }
+              {
+                assertion =
+                  lib.hasInfix "--disable-features=WaylandWpColorManagerV1" chromeWrapper
+                  && !(lib.hasInfix "VaapiVideoDecoder" chromeWrapper)
+                  && !(lib.hasInfix "--disable-accelerated-video-decode" chromeWrapper)
+                  && !(lib.hasInfix "--disable-zero-copy" chromeWrapper);
+                message = "Chrome must keep video acceleration defaults while disabling only the Wayland color bug";
               }
             ];
         })
@@ -1032,6 +1054,16 @@ let
                 assertion = lib.hasInfix "sync -d" source && !(lib.hasInfix "sync -f" source);
                 message = "power-watchdog must sync only its CSV data, not the whole filesystem";
               }
+              {
+                assertion =
+                  lib.hasInfix ''val=$(cat "$1" 2>/dev/null || true)'' source
+                  && !(lib.hasInfix ''val=$(cat "$1" 2>/dev/null) || echo "0"'' source);
+                message = "power-watchdog temp reads must emit exactly one CSV value when sysfs files are missing";
+              }
+              {
+                assertion = lib.hasInfix "last_rotate=$(date +%s)" source;
+                message = "power-watchdog must not rewrite retained CSV data immediately after every restart";
+              }
             ];
         })
 
@@ -1090,30 +1122,48 @@ let
         (mkServiceTest {
           name = "services-sentinel";
           service = "sentinel";
-          assertions = config: [
-            {
-              assertion = config.systemd.services ? sinnix-sentinel;
-              message = "sinnix-sentinel oneshot service must exist";
-            }
-            {
-              assertion = config.systemd.timers ? sinnix-sentinel;
-              message = "sinnix-sentinel timer must exist";
-            }
-            {
-              assertion = config.environment.etc ? "sinnix/health-policy.json";
-              message = "health-policy.json must be generated (from introspection.nix)";
-            }
-            {
-              assertion = config.environment.etc ? "sinnix/config.json";
-              message = "config.json must be generated (from introspection.nix)";
-            }
-            {
-              assertion = builtins.any (
-                rule: builtins.match ".*sinnix-sentinel.*" rule != null
-              ) config.systemd.tmpfiles.rules;
-              message = "sentinel event log directory must be created via tmpfiles";
-            }
-          ];
+          assertions =
+            config:
+            let
+              serviceEnv = config.systemd.services.sinnix-sentinel.environment;
+              sentinelScript = builtins.readFile ../scripts/sinnix-sentinel;
+              healthPolicy = builtins.fromJSON config.environment.etc."sinnix/health-policy.json".text;
+            in
+            [
+              {
+                assertion = config.systemd.services ? sinnix-sentinel;
+                message = "sinnix-sentinel oneshot service must exist";
+              }
+              {
+                assertion = config.systemd.timers ? sinnix-sentinel;
+                message = "sinnix-sentinel timer must exist";
+              }
+              {
+                assertion = config.environment.etc ? "sinnix/health-policy.json";
+                message = "health-policy.json must be generated (from introspection.nix)";
+              }
+              {
+                assertion = config.environment.etc ? "sinnix/config.json";
+                message = "config.json must be generated (from introspection.nix)";
+              }
+              {
+                assertion = builtins.any (
+                  rule: builtins.match ".*sinnix-sentinel.*" rule != null
+                ) config.systemd.tmpfiles.rules;
+                message = "sentinel event log directory must be created via tmpfiles";
+              }
+              {
+                assertion =
+                  serviceEnv.SINNIX_CORRECTIVE_ACTIONS == "false"
+                  && lib.hasInfix ''CORRECTIVE_ACTIONS="''${SINNIX_CORRECTIVE_ACTIONS:-false}"'' sentinelScript
+                  && lib.hasInfix "--correct) CORRECTIVE_ACTIONS=true" sentinelScript;
+                message = "sentinel corrective actions must be opt-in and observable";
+              }
+              {
+                assertion = healthPolicy.backups.backupTargets == [ ];
+                message = "sentinel must not run Borg repository probes in the 60s health loop";
+              }
+            ];
         })
 
         {
@@ -1463,6 +1513,8 @@ let
             config:
             let
               hmService = config.systemd.services."home-manager-${config.sinnix.user.name}".serviceConfig;
+              scopeScript = builtins.readFile ../scripts/sinnix-scope;
+              observeScript = builtins.readFile ../scripts/sinnix-observe;
             in
             [
               {
@@ -1472,6 +1524,23 @@ let
               {
                 assertion = (hmService.Slice or "") == "nix-build.slice";
                 message = "Home Manager activation must stay in nix-build.slice";
+              }
+              {
+                assertion =
+                  lib.hasInfix ''uid="''${EUID:-$(id -u)}"'' scopeScript
+                  && lib.hasInfix "# The system nix-build slice exists for root/nix-daemon work." scopeScript
+                  && lib.hasInfix ''slice="build.slice"'' scopeScript
+                  && lib.hasInfix ''[ "$uid" -eq 0 ] && [ "$class" = "build" ]'' scopeScript
+                  && lib.hasInfix ''slice="nix-build.slice"'' scopeScript;
+                message = "sinnix-scope must keep user and root build placement on configured slices";
+              }
+              {
+                assertion =
+                  lib.hasInfix "below_recent_history" observeScript
+                  && lib.hasInfix "below dump cgroup" observeScript
+                  && lib.hasInfix "below dump process" observeScript
+                  && lib.hasInfix "SINNIX_OBSERVE_BEGIN" observeScript;
+                message = "sinnix-observe must include bounded below history joins";
               }
             ];
         }

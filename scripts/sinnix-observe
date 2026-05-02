@@ -134,10 +134,54 @@ systemd_units() {
   fi
 }
 
+sentinel_state() {
+  section "sentinel policy"
+  if systemctl list-unit-files sinnix-sentinel.service >/dev/null 2>&1; then
+    systemctl show sinnix-sentinel.service \
+      -p ActiveState -p SubState -p Result -p TriggeredBy -p Environment \
+      | awk '
+        BEGIN { FS="=" }
+        $1 == "ActiveState" { active=$2 }
+        $1 == "SubState" { sub_state=$2 }
+        $1 == "Result" { result=$2 }
+        $1 == "TriggeredBy" { triggered=$2 }
+        $1 == "Environment" { env=$0; sub(/^Environment=/, "", env) }
+        END {
+          printf "sinnix-sentinel.service active=%s/%s result=%s triggered_by=%s\n", active, sub_state, result, triggered
+          if (env != "") print "environment=" env
+        }'
+  fi
+
+  if [ -r /etc/sinnix/health-policy.json ]; then
+    echo "health policy services:"
+    jq -r '.services[] | "  \(.name) unit=\(.unit) type=\(.type) restartable=\(.restartable)"' \
+      /etc/sinnix/health-policy.json 2>/dev/null || true
+  fi
+
+  if [ -r /run/sinnix/health.json ]; then
+    echo "latest health:"
+    jq -r '"  timestamp=\(.timestamp) overall=\(.overall) ok=\(.summary.ok) warn=\(.summary.warn) fail=\(.summary.fail)"' \
+      /run/sinnix/health.json 2>/dev/null || true
+  fi
+
+  local event_log="${SINNIX_EVENT_LOG:-/var/log/sinnix-sentinel/events.jsonl}"
+  if [ -r "$event_log" ]; then
+    echo "recent sentinel events:"
+    tail -n 20 "$event_log" \
+      | jq -r 'select(.source == "sinnix-sentinel") | "  \(.timestamp) \(.event) severity=\(.severity // "normal")\(.name? // "" | if . == "" then "" else " name=" + . end)\(.unit? // "" | if . == "" then "" else " unit=" + . end)"' \
+      2>/dev/null || true
+  elif [ -e "$event_log" ]; then
+    echo "recent sentinel events: unreadable ($event_log)"
+  else
+    echo "recent sentinel events: none yet"
+  fi
+}
+
 slice_state() {
   section "resource slices"
   local specs=(
     "user build.slice"
+    "user nix-build.slice"
     "user background.slice"
     "system nix-build.slice"
     "system background.slice"
@@ -248,18 +292,128 @@ polylogue_runs() {
 below_hint() {
   section "below hint"
   if have below; then
-    echo "historical attribution: below replay"
-    echo "recent process I/O: below dump process -b '10 min ago' --duration '10 min' -f datetime pid comm state io.rwbytes_per_sec mem.rss_bytes cmdline --select io.rwbytes_per_sec --rsort --top 20"
+    echo "interactive replay: below replay -t '${SINNIX_OBSERVE_BEGIN:-10 min ago}'"
   else
     echo "below not on PATH"
+  fi
+}
+
+below_recent_history() {
+  section "below recent history"
+  if ! have below; then
+    echo "below not on PATH"
+    return
+  fi
+
+  local begin duration cgroup_rows process_rows
+  begin="${SINNIX_OBSERVE_BEGIN:-10 min ago}"
+  duration="${SINNIX_OBSERVE_DURATION:-10 min}"
+  printf 'window: begin=%s duration=%s\n' "$begin" "$duration"
+
+  cgroup_rows="$(
+    below dump cgroup \
+      -b "$begin" \
+      --duration "$duration" \
+      -f datetime name full_path cpu.usage_pct mem.total io.rwbytes_per_sec pressure.io_full_pct pressure.memory_full_pct \
+      -O tsv \
+      --raw \
+      --disable-title 2>/dev/null \
+      | awk -F '\t' '
+          NF >= 8 && $3 != "" {
+            path = $3
+            io = $6 + 0
+            mem = $5 + 0
+            cpu = $4 + 0
+            io_full = $7 + 0
+            mem_full = $8 + 0
+            samples[path]++
+            if (io > max_io[path]) max_io[path] = io
+            if (mem > max_mem[path]) max_mem[path] = mem
+            if (cpu > max_cpu[path]) max_cpu[path] = cpu
+            if (io_full > max_io_full[path]) max_io_full[path] = io_full
+            if (mem_full > max_mem_full[path]) max_mem_full[path] = mem_full
+          }
+          END {
+            for (path in samples) {
+              printf "%.0f\t%.2f\t%.2f\t%.0f\t%.1f\t%d\t%s\n",
+                max_io[path], max_io_full[path], max_mem_full[path],
+                max_mem[path], max_cpu[path], samples[path], path
+            }
+          }' \
+      | LC_ALL=C sort -nr -k1,1 \
+      | sed -n '1,12p'
+  )"
+
+  echo "cgroup peaks:"
+  if [ -n "$cgroup_rows" ]; then
+    printf '  %-12s %-10s %-10s %-10s %-8s %s\n' \
+      "rw_Bps" "io_full%" "mem_full%" "rss_MiB" "cpu%" "cgroup"
+    printf '%s\n' "$cgroup_rows" \
+      | awk -F '\t' '{
+          printf "  %-12.0f %-10.2f %-10.2f %-10.1f %-8.1f %s\n",
+            $1, $2, $3, $4 / 1048576, $5, $7
+        }'
+  else
+    echo "  no below cgroup samples for window"
+  fi
+
+  process_rows="$(
+    below dump process \
+      -b "$begin" \
+      --duration "$duration" \
+      -f datetime pid comm state cgroup io.rwbytes_per_sec mem.rss_bytes cpu.usage_pct cmdline \
+      -O tsv \
+      --raw \
+      --disable-title 2>/dev/null \
+      | awk -F '\t' '
+          NF >= 9 && $2 ~ /^[0-9]+$/ {
+            pid = $2
+            io = $6 + 0
+            rss = $7 + 0
+            cpu = $8 + 0
+            samples[pid]++
+            if (io > max_io[pid]) {
+              max_io[pid] = io
+              comm[pid] = $3
+              state[pid] = $4
+              cgroup[pid] = $5
+              cmdline[pid] = substr($9, 1, 120)
+            }
+            if (rss > max_rss[pid]) max_rss[pid] = rss
+            if (cpu > max_cpu[pid]) max_cpu[pid] = cpu
+          }
+          END {
+            for (pid in samples) {
+              printf "%.0f\t%.0f\t%.1f\t%d\t%s\t%s\t%s\t%s\n",
+                max_io[pid], max_rss[pid], max_cpu[pid], pid,
+                comm[pid], state[pid], cgroup[pid], cmdline[pid]
+            }
+          }' \
+      | LC_ALL=C sort -nr -k1,1 \
+      | sed -n '1,12p'
+  )"
+
+  echo "process I/O peaks:"
+  if [ -n "$process_rows" ]; then
+    printf '  %-12s %-9s %-7s %-8s %-18s %s\n' \
+      "rw_Bps" "rss_MiB" "cpu%" "pid" "comm" "cmdline"
+    printf '%s\n' "$process_rows" \
+      | awk -F '\t' '{
+          printf "  %-12.0f %-9.1f %-7.1f %-8d %-18s %s\n",
+            $1, $2 / 1048576, $3, $4, $5, $8
+        }'
+  else
+    echo "  no below process samples for window"
   fi
 }
 
 pressure_summary
 blocked_tasks
 systemd_units
+sentinel_state
 slice_state
 active_heavy_processes
 sinex_xtask_history
 polylogue_runs
+below_recent_history
 below_hint

@@ -151,10 +151,12 @@ let
       description = "Join live pressure, systemd placement, Sinex xtask history, and Polylogue run ledgers";
       runtimeInputs = with pkgs; [
         bash
+        below
         coreutils
         gawk
         gnugrep
         gnused
+        jq
         procps
         sqlite
         systemd

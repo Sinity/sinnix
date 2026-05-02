@@ -44,28 +44,11 @@ mkFeatureModule {
         ${lib.getExe forgePkg} zsh theme > "$out"
       '';
       sinnixCfg = config.sinnix;
-      resourceBudgets = import ../../lib/resource-budgets.nix;
-      developerBudget = resourceBudgets.developerWork;
       agentScopePrelude = ''
         run_agent_scoped() {
-          if [[ -z "''${SINNIX_AGENT_SCOPED:-}" && -n "''${XDG_RUNTIME_DIR:-}" ]]; then
-            exec ${pkgs.systemd}/bin/systemd-run \
-              --user \
-              --scope \
-              --quiet \
-              --collect \
-              --slice=background.slice \
-              --same-dir \
-              -p CPUQuota=${developerBudget.cpuQuota} \
-              -p CPUWeight=${toString developerBudget.cpuWeight} \
-              -p IOWeight=${toString developerBudget.ioWeight} \
-              -p MemoryHigh=${developerBudget.memoryHigh} \
-              -p MemoryMax=${developerBudget.memoryMax} \
-              -p MemorySwapMax=${developerBudget.memorySwapMax} \
-              -p ManagedOOMMemoryPressure=${developerBudget.managedOOMMemoryPressure} \
-              -p ManagedOOMMemoryPressureLimit=${developerBudget.managedOOMMemoryPressureLimit} \
-              -E SINNIX_AGENT_SCOPED=1 \
-              -- "$@"
+          if [[ -z "''${SINNIX_AGENT_SCOPED:-}" ]]; then
+            exec ${scriptPkgs.sinnix-scope}/bin/sinnix-scope background -- \
+              ${pkgs.coreutils}/bin/env SINNIX_AGENT_SCOPED=1 "$@"
           fi
 
           exec "$@"
@@ -139,7 +122,8 @@ mkFeatureModule {
 
           xdg.configFile = {
             "claude/hooks/pretooluse-bash.sh".source = mkDotsFile "/claude/hooks/pretooluse-bash.sh";
-            "claude/hooks/sessionstart-polylogue-recall.sh".source = mkDotsFile "/claude/hooks/sessionstart-polylogue-recall.sh";
+            "claude/hooks/sessionstart-polylogue-recall.sh".source =
+              mkDotsFile "/claude/hooks/sessionstart-polylogue-recall.sh";
             "claude/settings.json".source = mkDotsFile "/claude/settings.json";
             "claude/CLAUDE.md".source = mkDotsFile "/claude/CLAUDE.md";
             "claude/world-model" = {
@@ -295,7 +279,9 @@ mkFeatureModule {
 
               FORGE_BIN="${forgePkg}/bin/forge"
 
-              exec "$FORGE_BIN" "$@"
+              ${agentScopePrelude}
+
+              run_agent_scoped "$FORGE_BIN" "$@"
             '';
             executable = true;
             force = true;
