@@ -91,10 +91,8 @@ in
         "/var/lib/NetworkManager" # wired profiles, DHCP leases
         "/var/lib/nixos" # NixOS activation state
         "/var/lib/systemd" # timers, random-seed, rfkill, linger, timesync
-        "/var/lib/sinex" # sinex event platform (→ services/sinex.nix)
         "/var/lib/transmission" # torrent state
         "/var/lib/tailscale" # auth keys and device identity
-        "/var/lib/postgresql" # database files
         "/var/log/below" # below resource monitor
       ];
       files = [
@@ -210,7 +208,6 @@ in
         directory = ".local/state/polylogue";
         mode = "0700";
       } # index, tokens, state
-      ".local/share/polylogue" # conversation DB + drive-cache, ~61 GB
 
       # Large data
       ".local/share/hyprland" # Hyprland logs + state, ~1.1 GB

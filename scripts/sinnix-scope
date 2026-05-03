@@ -48,30 +48,6 @@ if ! command -v systemd-run >/dev/null 2>&1; then
   exec "$@"
 fi
 
-apply_project_cache_policy() {
-  local cwd sinex_root checkout_hash
-
-  cwd="$(pwd -P)"
-  sinex_root="${SINEX_ROOT:-/realm/project/sinex}"
-
-  case "$cwd" in
-    "$sinex_root"|"$sinex_root"/*)
-      if [ -d /cache/sinex ] && [ -z "${SINEX_DEV_CACHE_ROOT:-}" ]; then
-        checkout_hash="$(printf '%s' "$sinex_root" | sha256sum | cut -c1-12)"
-        export SINEX_DEV_CACHE_ROOT="/cache/sinex/$checkout_hash"
-      fi
-      if [ -n "${SINEX_DEV_CACHE_ROOT:-}" ] && [ -z "${CARGO_TARGET_DIR:-}" ]; then
-        export CARGO_TARGET_DIR="$SINEX_DEV_CACHE_ROOT/target"
-      fi
-      if [ -n "${SINEX_DEV_CACHE_ROOT:-}" ]; then
-        mkdir -p "$SINEX_DEV_CACHE_ROOT/target" "$SINEX_DEV_CACHE_ROOT/cache"
-      fi
-      ;;
-  esac
-}
-
-apply_project_cache_policy
-
 env_args=()
 for name in \
   PATH HOME TERM TMPDIR \

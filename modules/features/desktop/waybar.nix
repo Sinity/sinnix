@@ -88,7 +88,7 @@ mkFeatureModule {
               #memory,
               #disk,
               #custom-audio,
-              #custom-health,
+              #custom-pressure,
               #custom-agent,
               #custom-notification,
               #tray {
@@ -101,11 +101,10 @@ mkFeatureModule {
               #cpu { color: #fb4934; }
               #memory { color: #fabd2f; }
               #disk { color: #b8bb26; }
-              #custom-health { color: #b8bb26; }
-              #custom-health.ok { color: #b8bb26; }
-              #custom-health.warn { color: #fabd2f; }
-              #custom-health.fail { color: #fb4934; }
-              #custom-health.unknown { color: #665c54; }
+              #custom-pressure { color: #b8bb26; }
+              #custom-pressure.ok { color: #b8bb26; }
+              #custom-pressure.warn { color: #fabd2f; }
+              #custom-pressure.fail { color: #fb4934; }
               #custom-audio { color: #83a598; }
               #custom-audio.muted { color: #665c54; }
               #custom-audio.headphones { color: #d3869b; }
@@ -159,7 +158,7 @@ mkFeatureModule {
                 "memory"
                 "disk"
                 "custom/audio"
-                "custom/health"
+                "custom/pressure"
                 "custom/agent"
                 "custom/notification"
               ];
@@ -217,44 +216,50 @@ mkFeatureModule {
                 on-click = "tofi-drun --drun-launch=true";
                 tooltip = "false";
               };
-              "custom/health" = {
+              "custom/pressure" = {
                 tooltip = true;
                 format = "{}";
                 return-type = "json";
-                interval = 10;
-                exec = "${pkgs.writeShellScript "waybar-health" ''
-                                    HEALTH=/run/sinnix/health.json
-                                    if [ ! -f "$HEALTH" ]; then
-                                      echo '{"text":"?","class":"unknown","tooltip":"sentinel not running"}'
-                                      exit 0
-                                    fi
-                                    ${pkgs.python3}/bin/python3 -c "
-                  import json, sys
-                  try:
-                      h = json.load(open('$HEALTH'))
-                      s = h.get('summary', {})
-                      ok, w, f = s.get('ok', 0), s.get('warn', 0), s.get('fail', 0)
-                      total = ok + w + f
-                      overall = h.get('overall', 'unknown')
-                      if overall == 'ok':
-                          text = '<span font_family=\"SauceCodePro Nerd Font Mono\">\u25cf</span>'
-                          tooltip = f'sentinel: all {total} checks passed'
-                      elif overall == 'warn':
-                          text = f'<span font_family=\"SauceCodePro Nerd Font Mono\">\u25d0</span> {w}'
-                          tooltip = f'sentinel: {w} warnings, {ok}/{total} ok'
-                      else:
-                          text = f'<span font_family=\"SauceCodePro Nerd Font Mono\">\u2716</span> {f}'
-                          tooltip = f'sentinel: {f} failures, {w} warnings, {ok}/{total} ok'
-                      # Add failing check details to tooltip
-                      for c in h.get('checks', []):
-                          if c.get('status') in ('warn', 'fail'):
-                              tooltip += f\"\n  {c['status'].upper()}: {c['name']} — {c['detail']}\"
-                      print(json.dumps({'text': text, 'class': overall, 'tooltip': tooltip}))
-                  except Exception as e:
-                      print(json.dumps({'text': '?', 'class': 'unknown', 'tooltip': f'parse error: {e}'}))
-                  "
+                interval = 5;
+                exec = "${pkgs.writeShellScript "waybar-pressure" ''
+                  read_psi() {
+                    ${pkgs.gawk}/bin/awk -v metric="$1" '
+                      $1 == "some" {
+                        for (i = 2; i <= NF; i++) {
+                          split($i, kv, "=")
+                          if (kv[1] == metric) {
+                            print kv[2]
+                            exit
+                          }
+                        }
+                      }
+                    ' "$2"
+                  }
+
+                  io10="$(read_psi avg10 /proc/pressure/io)"
+                  io60="$(read_psi avg60 /proc/pressure/io)"
+                  io300="$(read_psi avg300 /proc/pressure/io)"
+                  mem10="$(read_psi avg10 /proc/pressure/memory)"
+                  mem60="$(read_psi avg60 /proc/pressure/memory)"
+                  mem300="$(read_psi avg300 /proc/pressure/memory)"
+                  cpu10="$(read_psi avg10 /proc/pressure/cpu)"
+                  cpu60="$(read_psi avg60 /proc/pressure/cpu)"
+                  cpu300="$(read_psi avg300 /proc/pressure/cpu)"
+
+                  state="$(${pkgs.gawk}/bin/awk -v io="$io10" -v mem="$mem10" 'BEGIN {
+                    worst = io > mem ? io : mem
+                    if (worst >= 20) print "fail"
+                    else if (worst >= 5) print "warn"
+                    else print "ok"
+                  }')"
+                  text="$(${pkgs.gawk}/bin/awk -v io="$io10" 'BEGIN {
+                    if (io >= 1) printf "io %.0f", io
+                    else printf "psi"
+                  }')"
+                  printf '{"text":"%s","class":"%s","tooltip":"io avg10=%s avg60=%s avg300=%s\\nmem avg10=%s avg60=%s avg300=%s\\ncpu avg10=%s avg60=%s avg300=%s"}\n' \
+                    "$text" "$state" "$io10" "$io60" "$io300" "$mem10" "$mem60" "$mem300" "$cpu10" "$cpu60" "$cpu300"
                 ''}";
-                on-click = "kitty -e sinnix-sentinel --verbose";
+                on-click = "kitty -e sinnix-observe";
               };
               "custom/agent" = {
                 tooltip = true;

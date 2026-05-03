@@ -13,11 +13,16 @@
 }:
 let
   cfg = config.sinnix.services.sinex;
-  inherit (config.sinnix.paths) realmRoot;
+  inherit (config.sinnix.paths) capturesRoot realmRoot;
   mkSinexPkgs = pkgs': inputs.sinex.packages.${pkgs'.stdenv.hostPlatform.system};
   sinexEnvironment = lib.toLower cfg.environment;
   targetUserName = config.sinnix.user.name;
   targetUserHome = "/home/${targetUserName}";
+  sinexCaptureRoot = "${capturesRoot}/sinex";
+  sinexHome = "${sinexCaptureRoot}/home";
+  sinexPostgresRoot = "${sinexCaptureRoot}/postgresql";
+  sinexPostgresDataDir = "${sinexPostgresRoot}/18";
+  sinexStateRoot = "${sinexCaptureRoot}/state";
   databaseHost = "127.0.0.1";
   databasePort = 5432;
   databaseUser = "sinex";
@@ -120,14 +125,35 @@ in
         "sinex-gateway"
       ]
       ++ generatedNodeServices;
+      cappedRuntimeServices = [
+        "nats"
+        "postgresql"
+      ];
+      uncappedRuntimeServices = builtins.filter (
+        name: !(builtins.elem name cappedRuntimeServices)
+      ) delayedRuntimeServices;
       runtimeServicePolicy = {
         wantedBy = lib.mkForce [ ];
-        unitConfig.PartOf = [ "sinex-runtime.target" ];
+        unitConfig = {
+          PartOf = [ "sinex-runtime.target" ];
+          RequiresMountsFor = [ sinexCaptureRoot ];
+        };
         # Sinex starts through sinex-runtime.target, not as a side effect of
         # host activation. Several services require bootstrap/preflight units
         # that pull NATS/PostgreSQL up; restart-on-switch recreated pressure
         # incidents during ordinary NixOS activation.
         restartIfChanged = false;
+      };
+      uncappedRuntimeServicePolicy = {
+        serviceConfig = {
+          # Upstream Sinex's reusable NixOS module ships concrete
+          # MemoryMax/CPUQuota defaults for portability. This workstation keeps
+          # runtime daemons bounded at the substrate where it matters
+          # (PostgreSQL/NATS) and otherwise uses restart limits/weights, not
+          # per-node hard caps that can silently throttle capture correctness.
+          MemoryMax = lib.mkForce null;
+          CPUQuota = lib.mkForce null;
+        };
       };
       boundedRuntimeRestartPolicy = {
         unitConfig = {
@@ -199,124 +225,164 @@ in
           );
 
           users.users.sinex = {
-            home = lib.mkForce "/var/lib/sinex";
+            home = lib.mkForce sinexHome;
+            homeMode = lib.mkForce "0711";
             createHome = lib.mkForce true;
             extraGroups = lib.optionals (cfg.provisionDatabase || cfg.enable) [ "postgres" ];
           };
+
+          systemd.tmpfiles.rules = lib.mkAfter (
+            [
+              "d ${sinexCaptureRoot} 0755 root root -"
+              "d ${sinexHome} 0711 sinex sinex -"
+              "d ${sinexStateRoot} 0750 sinex sinex -"
+            ]
+            ++ lib.optionals databasePrepared [
+              "d ${sinexPostgresRoot} 0750 postgres postgres -"
+              "d ${sinexPostgresDataDir} 0750 postgres postgres -"
+            ]
+          );
         }
       ))
 
       (lib.mkIf hostPrepared {
-        services.sinex = {
-          enable = runtimeEnabled;
+        services = {
+          postgresql.dataDir = sinexPostgresDataDir;
 
-          secrets = {
-            enableAgenix = false;
-          };
-          nats = {
-            environment = sinexEnvironment;
+          sinex = {
             enable = runtimeEnabled;
-            autoSetup = runtimeEnabled;
-            dataDir = "/var/lib/nats";
-            # JetStream on the dedicated NVMe cache partition so its
-            # sustained write load (message store + index compaction) does
-            # not compete with system and interactive I/O on the root volume.
-            storeDir = "/cache/nats/jetstream";
-          };
 
-          stateRoot = "/var/lib/sinex/.local/state/sinex";
-
-          database = {
-            enable = databasePrepared;
-            autoSetup = databasePrepared;
-            host = databaseHost;
-            port = databasePort;
-            name = databaseName;
-            user = databaseUser;
-          };
-
-          core = {
-            enable = runtimeEnabled;
-            gateway = {
+            secrets = {
+              enableAgenix = false;
+            };
+            nats = {
+              environment = sinexEnvironment;
               enable = runtimeEnabled;
-              autoGenerateTls = true;
+              autoSetup = runtimeEnabled;
+              dataDir = "/var/lib/nats";
+              # JetStream on the dedicated NVMe cache partition so its
+              # sustained write load (message store + index compaction) does
+              # not compete with system and interactive I/O on the root volume.
+              storeDir = "/cache/nats/jetstream";
             };
-          };
 
-          storage = {
-            blob = {
+            stateRoot = sinexStateRoot;
+
+            database = {
+              enable = databasePrepared;
+              autoSetup = databasePrepared;
+              host = databaseHost;
+              port = databasePort;
+              name = databaseName;
+              user = databaseUser;
+            };
+
+            core = {
               enable = runtimeEnabled;
-              autoInit = runtimeEnabled;
-            };
-          };
-
-          lifecycle = {
-            # Full preflight can touch production-sized data and is an operator
-            # diagnostic, not a safe prerequisite for desktop activation.
-            preflight.enable = false;
-            maintenance.enable = runtimeEnabled;
-            updates.enable = runtimeEnabled;
-          };
-
-          nodes = {
-            enable = runtimeEnabled;
-
-            filesystem = {
-              enable = runtimeEnabled && activationProfile.filesystem;
-              watchPaths = filesystemWatchPaths;
-            };
-
-            terminal = {
-              enable = runtimeEnabled && activationProfile.terminal;
-              historySources = [
-                {
-                  path = "${targetUserHome}/.local/share/atuin/history.db";
-                  shell = "atuin";
-                }
-              ];
-            };
-
-            browser = {
-              enable = runtimeEnabled && activationProfile.browser;
-            };
-
-            desktop = {
-              enable = runtimeEnabled && activationProfile.desktop;
-              clipboard.enable = false;
-            };
-
-            system = {
-              enable = runtimeEnabled && activationProfile.system;
-            };
-
-            document = {
-              enable = runtimeEnabled && activationProfile.document;
-            };
-
-            automata = {
-              enable = runtimeEnabled && activationProfile.automata;
-              canonicalizer.enable = runtimeEnabled && activationProfile.canonicalizer;
-              healthAggregator.enable = runtimeEnabled && activationProfile.healthAggregator;
-            };
-          };
-
-          observability = {
-            enable = runtimeEnabled;
-            monitoring = {
-              enable = false;
-              prometheus.enable = false;
-              grafana.enable = false;
-              exporters = {
-                node = false;
-                postgres = false;
-                nats = false;
+              gateway = {
+                enable = runtimeEnabled;
+                autoGenerateTls = true;
               };
             };
-          };
 
-          shell.kitty = {
-            enable = runtimeEnabled && activationProfile.kitty;
-            autoConfigure = runtimeEnabled && activationProfile.kitty;
+            storage = {
+              blob = {
+                enable = runtimeEnabled;
+                autoInit = runtimeEnabled;
+              };
+            };
+
+            lifecycle = {
+              # Full preflight can touch production-sized data and is an operator
+              # diagnostic, not a safe prerequisite for desktop activation.
+              preflight.enable = false;
+              maintenance.enable = runtimeEnabled;
+              updates.enable = runtimeEnabled;
+            };
+
+            nodes = {
+              enable = runtimeEnabled;
+
+              filesystem = {
+                enable = runtimeEnabled && activationProfile.filesystem;
+                watchPaths = filesystemWatchPaths;
+                ignoredDirectoryNames = lib.mkForce [
+                  ".btrfs"
+                  ".claude"
+                  ".cache"
+                  ".direnv"
+                  ".git"
+                  ".hg"
+                  ".jj"
+                  ".sinex"
+                  ".svn"
+                  ".Trash-1000"
+                  "__pycache__"
+                  "asciinema"
+                  "kitty-scrollback"
+                  "node_modules"
+                  "target"
+                ];
+              };
+
+              terminal = {
+                enable = runtimeEnabled && activationProfile.terminal;
+                historySources = [
+                  {
+                    path = "${targetUserHome}/.local/share/atuin/history.db";
+                    shell = "atuin";
+                  }
+                ];
+              };
+
+              browser = {
+                enable = runtimeEnabled && activationProfile.browser;
+              };
+
+              desktop = {
+                enable = runtimeEnabled && activationProfile.desktop;
+                clipboard.enable = false;
+              };
+
+              system = {
+                enable = runtimeEnabled && activationProfile.system;
+              };
+
+              document = {
+                enable = runtimeEnabled && activationProfile.document;
+              };
+
+              automata = {
+                enable = runtimeEnabled && activationProfile.automata;
+                canonicalizer = {
+                  enable = runtimeEnabled && activationProfile.canonicalizer;
+                  profile = lib.mkDefault "heavy";
+                };
+                healthAggregator = {
+                  enable = runtimeEnabled && activationProfile.healthAggregator;
+                  profile = lib.mkDefault "heavy";
+                };
+              };
+            };
+
+            observability = {
+              enable = runtimeEnabled;
+              monitoring = {
+                enable = false;
+                prometheus.enable = false;
+                grafana.enable = false;
+                exporters = {
+                  node = false;
+                  postgres = false;
+                  nats = false;
+                };
+              };
+            };
+
+            shell.kitty = {
+              enable = runtimeEnabled && activationProfile.kitty;
+              autoConfigure = runtimeEnabled && activationProfile.kitty;
+            };
           };
         };
       })
@@ -329,10 +395,18 @@ in
         # otherwise local PostgreSQL still leaks into multi-user.target.
         systemd.services =
           lib.genAttrs delayedRuntimeServices (_: runtimeServicePolicy)
+          // lib.genAttrs uncappedRuntimeServices (
+            _:
+            lib.mkMerge [
+              runtimeServicePolicy
+              uncappedRuntimeServicePolicy
+            ]
+          )
           // lib.genAttrs restartableRuntimeServices (
             _:
             lib.mkMerge [
               runtimeServicePolicy
+              uncappedRuntimeServicePolicy
               boundedRuntimeRestartPolicy
             ]
           )
@@ -343,7 +417,7 @@ in
             # restoring the confirmation stream. The high/max pair below leaves
             # room for the observed working set while still bounding runaway
             # growth. IOWeight=10 keeps sustained JetStream I/O below
-            # interactive work.
+            # interactive work without hard per-device throughput ceilings.
             nats = lib.mkMerge [
               runtimeServicePolicy
               {
@@ -351,12 +425,6 @@ in
                   MemoryHigh = "4G";
                   MemoryMax = "6G";
                   IOWeight = 10;
-                  IOReadBandwidthMax = [
-                    "/dev/disk/by-uuid/7f603111-8f3a-40aa-bad0-0cac69c140f1 80M"
-                  ];
-                  IOWriteBandwidthMax = [
-                    "/dev/disk/by-uuid/7f603111-8f3a-40aa-bad0-0cac69c140f1 80M"
-                  ];
                   # NATS' graceful SIGUSR2 drain can sit for minutes while
                   # JetStream is already the pressure source. Operator stops
                   # need to converge quickly.
@@ -374,17 +442,25 @@ in
               restartIfChanged = false;
               unitConfig.PartOf = [ "sinex-runtime.target" ];
               wantedBy = lib.mkForce [ ];
-              serviceConfig.Restart = lib.mkForce "no";
+              serviceConfig = {
+                Restart = lib.mkForce "no";
+                MemoryMax = lib.mkForce null;
+                CPUQuota = lib.mkForce null;
+              };
             };
             sinex-preflight = {
               restartIfChanged = false;
               unitConfig.PartOf = [ "sinex-runtime.target" ];
               wantedBy = lib.mkForce [ ];
-              serviceConfig.Restart = lib.mkForce "no";
+              serviceConfig = {
+                Restart = lib.mkForce "no";
+                MemoryMax = lib.mkForce null;
+                CPUQuota = lib.mkForce null;
+              };
             };
 
-            # Restrict PostgreSQL from consuming all system memory and I/O bandwidth,
-            # preventing page-cache thrashing and system lockups on heavy analytical queries.
+            # Restrict PostgreSQL from consuming all system memory and give it
+            # proportional background I/O priority without fixed device caps.
             postgresql = lib.mkMerge [
               runtimeServicePolicy
               {
@@ -393,12 +469,6 @@ in
                   MemoryHigh = "8G";
                   MemoryMax = "12G";
                   IOWeight = 10;
-                  IOReadBandwidthMax = [
-                    "/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02 100M"
-                  ];
-                  IOWriteBandwidthMax = [
-                    "/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02 80M"
-                  ];
                 };
               }
             ];
@@ -409,7 +479,10 @@ in
           })
           // {
             sinex-runtime = {
-              description = "Start Sinex runtime after interactive boot";
+              description = "Delayed automatic Sinex runtime";
+              # NixOS activation metadata only: do not start/restart the target
+              # during a switch. The sinex-runtime.timer still starts this
+              # target automatically after the configured delay.
               unitConfig.X-OnlyManualStart = true;
               wants = delayedRuntimeUnits ++ [ "network-online.target" ];
               after = [

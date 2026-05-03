@@ -137,16 +137,6 @@ let
       ];
     };
 
-    pytest = mkScript "pytest" {
-      description = "Transparent pytest wrapper — bare-`pytest` invocations run inside build.slice through sinnix-scope.";
-      runtimeInputs = with pkgs; [
-        bash
-        coreutils
-        gnugrep
-        sinnixScope.package
-      ];
-    };
-
     sinnix-observe = mkScript "sinnix-observe" {
       description = "Join live pressure, systemd placement, Sinex xtask history, and Polylogue run ledgers";
       runtimeInputs = with pkgs; [
@@ -159,6 +149,7 @@ let
         jq
         procps
         sqlite
+        sysstat
         systemd
         util-linux
       ];

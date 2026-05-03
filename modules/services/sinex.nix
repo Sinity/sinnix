@@ -2,18 +2,15 @@
 #
 # ─── STATE LAYOUT ─────────────────────────────────────────────────────────────
 #
-#   System service state: /var/lib/sinex/.local/state/sinex/
-#     Runs as the sinex system user. Persisted via modules/persistence.nix
-#     when impermanence is enabled (/var/lib/sinex bind-mounted from /persist).
+#   System service state: /realm/data/captures/sinex/state/
+#     Runs as the sinex system user on the /realm NVMe data volume. PostgreSQL
+#     production data lives beside it under /realm/data/captures/sinex/postgresql.
 #
 #   Development state: /realm/project/sinex/.sinex/state/ (workspace-local)
 #     xtask (sinex dev runner) defaults to SINEX_STATE_DIR which points at
 #     the workspace-local path. Home dirs (~/.local/state/sinex, ~/.config/sinex,
 #     ~/.config/xtask, ~/.local/share/nats etc.) were accumulated from past
 #     SINEX_STATE_DIR overrides and have been purged. Do not re-accumulate there.
-#
-#   Future: system service state may move to /realm/data/sinex/ or similar
-#     once the realm topology is finalized. SINEX_STATE_DIR will control this.
 #
 # ─── ENABLED WHEN ─────────────────────────────────────────────────────────────
 #

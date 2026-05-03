@@ -6,8 +6,8 @@
 # Drive           Label            Mount            Purpose
 # ────────────────────────────────────────────────────────────────────────────
 # /dev/nvme0n1p3  SSD_4TB          /realm           Source: projects, data
-# /dev/sdc2       root_btrfs       /persist         Source: system & home state
-# /dev/sdc1       outer-realm      /outer-realm     Target: Borg & btrbk archives
+# /dev/sdb2       root_btrfs       /persist         Source: system & home state
+# /dev/sda1       outer-realm      /outer-realm     Target: Borg & btrbk archives
 # Note: / is ephemeral — not snapshotted by btrbk (initrd saves pre-wipe states)
 {
   pkgs,
@@ -32,14 +32,8 @@ let
   borgRepoPersist = "file://${borgRepoPersistPath}";
   borgRepoRealm = "file://${borgRepoRealmPath}";
   borgPassphrasePath = config.sinnix.secrets.paths."borg-passphrase";
-  realmDevice = "/dev/disk/by-uuid/bd19092f-a195-47ab-9c0d-c923d1e5bfea";
-  persistDevice = "/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02";
-  outerRealmDevice = "/dev/disk/by-uuid/250683a9-c13f-4546-a29b-a743f3babb43";
-  borgBandwidth = "80M";
-  btrbkBandwidth = "100M";
   borgMemoryHigh = "8G";
   borgMemoryMax = "20G";
-  mkBandwidthCaps = rate: devices: map (device: "${device} ${rate}") devices;
 
   mkBindMountedSnapshotHook =
     {
@@ -213,21 +207,16 @@ in
       };
     };
 
-    # Performance tuning for Borg. Nice/CPUWeight do not protect the desktop
-    # from NVMe/HDD stalls, and IOSchedulingClass=idle is ineffective on the
-    # active schedulers. Use hard cgroup I/O caps and do not run missed backup
-    # timers immediately after boot.
+    # Backups are scheduled work, not emergency foreground work. Keep them
+    # low-priority and avoid missed-run catch-up; do not hide extra bandwidth
+    # ceilings here unless a measured device-specific fault proves one is
+    # needed.
     systemd.services.borgbackup-job-persist.serviceConfig = {
       Nice = 19;
       CPUWeight = 1;
       IOWeight = 1;
       MemoryHigh = borgMemoryHigh;
       MemoryMax = borgMemoryMax;
-      IOReadBandwidthMax = mkBandwidthCaps borgBandwidth [ persistDevice ];
-      IOWriteBandwidthMax = mkBandwidthCaps borgBandwidth [
-        persistDevice
-        outerRealmDevice
-      ];
     };
     systemd.services.borgbackup-job-realm.serviceConfig = {
       Nice = 19;
@@ -235,18 +224,10 @@ in
       IOWeight = 1;
       MemoryHigh = borgMemoryHigh;
       MemoryMax = borgMemoryMax;
-      IOReadBandwidthMax = mkBandwidthCaps borgBandwidth [
-        realmDevice
-        persistDevice
-      ];
-      IOWriteBandwidthMax = mkBandwidthCaps borgBandwidth [
-        persistDevice
-        outerRealmDevice
-      ];
     };
 
-    # Weekly integrity check — verify repo metadata, detect bit rot on the HDD.
-    # Runs repository-only (fast, ~minutes) not --verify-data (reads all chunks, hours).
+    # Weekly integrity check — verify repo metadata and detect bit rot on the HDD.
+    # Keep it low-priority and observable; do not hide it behind PSI gates.
     systemd.services.borgbackup-check = {
       description = "Borg backup integrity check";
       serviceConfig = {
@@ -254,14 +235,6 @@ in
         Nice = 19;
         CPUWeight = 1;
         IOWeight = 1;
-        IOReadBandwidthMax = mkBandwidthCaps borgBandwidth [
-          persistDevice
-          outerRealmDevice
-        ];
-        IOWriteBandwidthMax = mkBandwidthCaps borgBandwidth [
-          persistDevice
-          outerRealmDevice
-        ];
       };
       environment.BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
       script = ''
@@ -313,14 +286,6 @@ in
         Nice = 19;
         IOSchedulingClass = "idle";
         IOWeight = 1;
-        IOReadBandwidthMax = mkBandwidthCaps btrbkBandwidth [
-          realmDevice
-          persistDevice
-        ];
-        IOWriteBandwidthMax = mkBandwidthCaps btrbkBandwidth [
-          realmDevice
-          persistDevice
-        ];
       };
     };
 

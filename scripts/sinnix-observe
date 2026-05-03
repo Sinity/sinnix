@@ -72,6 +72,48 @@ blocked_tasks() {
     | sed -n '1,40p'
 }
 
+storage_pressure() {
+  section "storage pressure"
+
+  echo "fstrim:"
+  systemctl show fstrim.timer \
+    -p ActiveState -p SubState -p UnitFileState -p NextElapseUSecRealtime -p LastTriggerUSec \
+    2>/dev/null \
+    | sed 's/^/  timer /' || true
+  systemctl show fstrim.service \
+    -p ActiveState -p SubState -p Result -p MainPID -p ExecMainStartTimestamp \
+    2>/dev/null \
+    | sed 's/^/  service /' || true
+
+  echo "mount map:"
+  local mount
+  for mount in / /nix /persist /cache /realm /realm/data/captures/sinex /var/lib/postgresql /var/lib/sinex "$HOME/.local/share/polylogue"; do
+    printf '  %-42s ' "$mount"
+    findmnt -T "$mount" -n -o TARGET,SOURCE,FSTYPE,OPTIONS 2>/dev/null || echo "unresolved"
+  done
+
+  echo "discard queues:"
+  local dev queue
+  for dev in /sys/block/nvme*n1 /sys/block/sd*; do
+    [ -e "$dev" ] || continue
+    queue="$dev/queue"
+    printf '  %-8s discard_max=%s discard_granularity=%s rotational=%s scheduler=%s wbt_lat_usec=%s\n' \
+      "${dev##*/}" \
+      "$(cat "$queue/discard_max_bytes" 2>/dev/null || printf '?')" \
+      "$(cat "$queue/discard_granularity" 2>/dev/null || printf '?')" \
+      "$(cat "$queue/rotational" 2>/dev/null || printf '?')" \
+      "$(cat "$queue/scheduler" 2>/dev/null || printf '?')" \
+      "$(cat "$queue/wbt_lat_usec" 2>/dev/null || printf '?')"
+  done
+
+  if have iostat; then
+    echo "iostat 1s sample:"
+    timeout 4s iostat -xz 1 2 2>/dev/null | sed 's/^/  /' || true
+  else
+    echo "iostat 1s sample: iostat not on PATH"
+  fi
+}
+
 systemd_units() {
   section "managed workload units"
   local units=(
@@ -226,12 +268,11 @@ active_heavy_processes() {
 sinex_xtask_history() {
   section "sinex xtask history"
   local db
-  db="$(first_existing \
-    "$SINEX_ROOT/.sinex/state/xtask-history.db" \
-    "$HOME/.sinex/history.db" \
-    "${XTASK_HISTORY_DB:-}" \
-    2>/dev/null || true)"
-  if [ -z "$db" ]; then
+  db="$SINEX_ROOT/.sinex/state/xtask-history.db"
+  if [ ! -f "$db" ]; then
+    db="/realm/project/sinex/.sinex/state/xtask-history.db"
+  fi
+  if [ ! -f "$db" ]; then
     echo "no xtask history DB found"
     return
   fi
@@ -409,6 +450,7 @@ below_recent_history() {
 
 pressure_summary
 blocked_tasks
+storage_pressure
 systemd_units
 sentinel_state
 slice_state

@@ -283,6 +283,7 @@ let
                   "";
               managedEntrySource =
                 entry: if entry ? source && entry.source != null then toString entry.source else "";
+              packageNames = map (pkg: pkg.name or "") hm.home.packages;
             in
             [
               {
@@ -316,16 +317,16 @@ let
                 message = "ccusage alias must resolve to the packaged CLI";
               }
               {
-                assertion = builtins.any (name: lib.hasPrefix "lynchpin-python" name) (
-                  map (pkg: pkg.name or "") hm.home.packages
-                );
+                assertion = builtins.any (name: lib.hasPrefix "lynchpin-python" name) packageNames;
                 message = "Dev shell must install the Lynchpin API interpreter wrapper";
               }
               {
-                assertion = builtins.any (name: lib.hasPrefix "polylogue-python" name) (
-                  map (pkg: pkg.name or "") hm.home.packages
-                );
+                assertion = builtins.any (name: lib.hasPrefix "polylogue-python" name) packageNames;
                 message = "Dev shell must install the Polylogue API interpreter wrapper";
+              }
+              {
+                assertion = !(builtins.any (name: lib.hasPrefix "pytest-" name || name == "pytest") packageNames);
+                message = "Dev shell must not install the transparent pytest resource-scope wrapper";
               }
               {
                 assertion = lib.hasInfix "unsetopt prompt_sp" hm.programs.zsh.initContent;
@@ -549,11 +550,6 @@ let
                   raw = service.ExecStart or [ ];
                 in
                 if builtins.isList raw then builtins.concatStringsSep " " raw else raw;
-              execCondition =
-                let
-                  raw = service.ExecCondition or [ ];
-                in
-                if builtins.isList raw then builtins.concatStringsSep " " raw else raw;
               browserCaptureExecStart =
                 let
                   raw = browserCapture.ExecStart or [ ];
@@ -569,9 +565,10 @@ let
               (expect.textContains execStart "/bin/polylogue --plain run acquire parse materialize render index"
                 "Polylogue catch-up service must run archive/product stages without unattended site publication"
               )
-              (expect.textContains execCondition "polylogue-run-pressure-gate"
-                "Polylogue catch-up must skip starts while global I/O pressure is already high"
-              )
+              {
+                assertion = !(service ? ExecCondition);
+                message = "Polylogue catch-up must not hide pipeline pressure behind an arbitrary start gate";
+              }
               (expect.textContains browserCaptureExecStart
                 "/bin/polylogued browser-capture serve --host 127.0.0.1 --port 8765"
                 "Polylogue browser capture receiver must run local-only on the default extension port"
@@ -598,8 +595,8 @@ let
                 "IOWeight"
               ] 1 "Polylogue ingestion must run at minimum cgroup I/O weight")
               {
-                assertion = service ? IOReadBandwidthMax && service ? IOWriteBandwidthMax;
-                message = "Polylogue ingestion must retain hard I/O bandwidth caps";
+                assertion = !(service ? IOReadBandwidthMax) && !(service ? IOWriteBandwidthMax);
+                message = "Polylogue ingestion must not use hard per-device I/O bandwidth caps";
               }
               (expect.attrPathEq timer [
                 "OnStartupSec"
@@ -1212,6 +1209,7 @@ let
                 name: lib.attrByPath [ "systemd" "services" name "serviceConfig" "RestartSec" ] null config;
               serviceUnitConfig = name: lib.attrByPath [ "systemd" "services" name "unitConfig" ] { } config;
               targetWantedBy = name: lib.attrByPath [ "systemd" "targets" name "wantedBy" ] [ ] config;
+              targetUnit = name: lib.attrByPath [ "systemd" "targets" name ] { } config;
               targetUnitConfig = name: lib.attrByPath [ "systemd" "targets" name "unitConfig" ] { } config;
               runtimeWants = lib.attrByPath [ "systemd" "targets" "sinex-runtime" "wants" ] [ ] config;
               runtimeTimerWantedBy = lib.attrByPath [ "systemd" "timers" "sinex-runtime" "wantedBy" ] [ ] config;
@@ -1231,6 +1229,18 @@ let
               sinexHealthChecks = builtins.filter (check: check.name == "sinex") healthPolicy.services;
               natsService = config.systemd.services.nats.serviceConfig;
               postgresService = config.systemd.services.postgresql.serviceConfig;
+              cappedSubstrateUnits = [
+                "nats"
+                "postgresql"
+              ];
+              sinexRuntimeAppServices = builtins.filter (
+                name: !(builtins.elem name cappedSubstrateUnits)
+              ) runtimeServices;
+              sinexCaptureRoot = "${config.sinnix.paths.capturesRoot}/sinex";
+              persistedSystemDirs = config.sinnix.persistence.system.directories;
+              postgresqlUnitConfig = serviceUnitConfig "postgresql";
+              sinexFilesystem = config.services.sinex.nodes.filesystem;
+              sinexAutomata = config.services.sinex.nodes.automata;
               preflightEnabled = lib.attrByPath [
                 "services"
                 "sinex"
@@ -1253,6 +1263,17 @@ let
               {
                 assertion = builtins.all (name: serviceRestartIfChanged name == false) runtimeServices;
                 message = "Sinex runtime services must not restart during desktop activation";
+              }
+              {
+                assertion = builtins.all (
+                  name:
+                  let
+                    service = lib.attrByPath [ "systemd" "services" name "serviceConfig" ] { } config;
+                  in
+                  (!(service ? MemoryMax) || service.MemoryMax == null)
+                  && (!(service ? CPUQuota) || service.CPUQuota == null)
+                ) sinexRuntimeAppServices;
+                message = "Sinex runtime app daemons must not keep upstream MemoryMax/CPUQuota caps";
               }
               {
                 assertion = builtins.all (
@@ -1296,8 +1317,10 @@ let
                 message = "sinnix-prime must auto-start Sinex through the delayed runtime timer";
               }
               {
-                assertion = (targetUnitConfig "sinex-runtime").X-OnlyManualStart == true;
-                message = "sinex-runtime.target must not be restarted by NixOS activation";
+                assertion =
+                  (targetUnitConfig "sinex-runtime").X-OnlyManualStart == true
+                  && (targetUnit "sinex-runtime").description == "Delayed automatic Sinex runtime";
+                message = "sinex-runtime.target must keep the activation guard while describing timer-based auto-start";
               }
               {
                 assertion = builtins.all (
@@ -1325,9 +1348,9 @@ let
                   natsService.MemoryHigh == "4G"
                   && natsService.MemoryMax == "6G"
                   && natsService.IOWeight == 10
-                  && natsService ? IOReadBandwidthMax
-                  && natsService ? IOWriteBandwidthMax;
-                message = "NATS must retain memory and I/O caps";
+                  && !(natsService ? IOReadBandwidthMax)
+                  && !(natsService ? IOWriteBandwidthMax);
+                message = "NATS must retain memory/weight policy without hard I/O bandwidth caps";
               }
               {
                 assertion = natsService.KillSignal == "SIGTERM" && natsService.TimeoutStopSec == "10s";
@@ -1338,9 +1361,50 @@ let
                   postgresService.MemoryHigh == "8G"
                   && postgresService.MemoryMax == "12G"
                   && postgresService.IOWeight == 10
-                  && postgresService ? IOReadBandwidthMax
-                  && postgresService ? IOWriteBandwidthMax;
-                message = "PostgreSQL must retain memory and I/O caps";
+                  && !(postgresService ? IOReadBandwidthMax)
+                  && !(postgresService ? IOWriteBandwidthMax);
+                message = "PostgreSQL must retain memory/weight policy without hard I/O bandwidth caps";
+              }
+              {
+                assertion =
+                  config.services.postgresql.dataDir == "${sinexCaptureRoot}/postgresql/18"
+                  && config.services.sinex.stateRoot == "${sinexCaptureRoot}/state"
+                  && config.users.users.sinex.home == "${sinexCaptureRoot}/home"
+                  && config.users.users.sinex.homeMode == "0711"
+                  && !(config.system.activationScripts ? sinexHomeTraverse)
+                  && builtins.elem sinexCaptureRoot postgresqlUnitConfig.RequiresMountsFor;
+                message = "Sinex production hot state and home must live on the realm NVMe capture volume";
+              }
+              {
+                assertion =
+                  !(builtins.elem "/var/lib/postgresql" persistedSystemDirs)
+                  && !(builtins.elem "/var/lib/sinex" persistedSystemDirs);
+                message = "Sinex/PostgreSQL hot state must not be bind-mounted from /persist";
+              }
+              {
+                assertion = builtins.all (name: builtins.elem name sinexFilesystem.ignoredDirectoryNames) [
+                  ".btrfs"
+                  ".claude"
+                  ".cache"
+                  ".direnv"
+                  ".git"
+                  ".hg"
+                  ".jj"
+                  ".sinex"
+                  ".svn"
+                  ".Trash-1000"
+                  "__pycache__"
+                  "asciinema"
+                  "kitty-scrollback"
+                  "node_modules"
+                  "target"
+                ];
+                message = "Sinex bridge must preserve upstream and workstation filesystem ignore defaults";
+              }
+              {
+                assertion =
+                  sinexAutomata.canonicalizer.profile == "heavy" && sinexAutomata.healthAggregator.profile == "heavy";
+                message = "Sinex bridge must own workstation automata profile defaults";
               }
             ];
         }
@@ -1362,6 +1426,11 @@ let
               ];
               optionsFor = mount: lib.attrByPath [ "fileSystems" mount "options" ] [ ] config;
               isOnlineDiscard = option: option == "discard" || option == "discard=async";
+              polylogueShareMount = "/home/${config.sinnix.user.name}/.local/share/polylogue";
+              polylogueMounts = builtins.filter (mount: mount.where == polylogueShareMount) config.systemd.mounts;
+              persistedHomeDirs = map (
+                entry: if builtins.isAttrs entry then entry.directory else entry
+              ) config.sinnix.persistence.home.directories;
             in
             [
               {
@@ -1373,16 +1442,35 @@ let
                 message = "sinnix-prime SSD btrfs mounts must not enable online discard";
               }
               {
-                assertion = config.services.fstrim.enable && config.services.fstrim.interval == "Sun 04:30:00";
-                message = "sinnix-prime must rely on the scheduled low-priority fstrim window";
+                assertion = !(config.services.fstrim.enable or false);
+                message = "sinnix-prime must not schedule automatic fstrim while storage pressure is unresolved";
               }
               {
                 assertion =
-                  config.systemd.services.fstrim.serviceConfig.IOSchedulingClass == "idle"
-                  && config.systemd.services.fstrim.serviceConfig.IOWeight == 1;
-                message = "fstrim must stay background-priority when online discard is disabled";
+                  polylogueMounts != [ ]
+                  && (builtins.head polylogueMounts).what == "${config.sinnix.paths.capturesRoot}/polylogue"
+                  && (builtins.head polylogueMounts).type == "none";
+                message = "Polylogue archive path must bind to /realm captures, not root/persist SATA storage";
+              }
+              {
+                assertion = !(builtins.elem ".local/share/polylogue" persistedHomeDirs);
+                message = "Polylogue archive bytes must not be impermanence-mounted from /persist";
               }
             ];
+        }
+
+        {
+          name = "host-sinnix-prime-observability-policy";
+          modules = [
+            { imports = [ ../hosts/sinnix-prime ]; }
+          ];
+          assertions = config: [
+            {
+              assertion =
+                !(config.systemd.services ? sinnix-sentinel) && !(config.systemd.timers ? sinnix-sentinel);
+              message = "sinnix-prime must not run the scan-heavy sentinel loop as a background timer";
+            }
+          ];
         }
 
         # === Bundle Tests (using DSL) ===
@@ -1552,8 +1640,25 @@ let
             config:
             let
               hmService = config.systemd.services."home-manager-${config.sinnix.user.name}".serviceConfig;
+              userSlice = config.systemd.slices.user.sliceConfig;
+              appSlice = config.systemd.user.slices.app.sliceConfig;
+              userBackgroundSlice = config.systemd.user.slices.background.sliceConfig;
+              buildSlice = config.systemd.user.slices.build.sliceConfig;
+              systemBackgroundSlice = config.systemd.slices.background.sliceConfig;
+              nixBuildSlice = config.systemd.slices."nix-build".sliceConfig;
+              nixDaemonService = config.systemd.services.nix-daemon.serviceConfig;
               scopeScript = builtins.readFile ../scripts/sinnix-scope;
               observeScript = builtins.readFile ../scripts/sinnix-observe;
+              pretooluseBash = builtins.readFile ../dots/claude/hooks/pretooluse-bash.sh;
+              packageNames = map (pkg: pkg.name or "") config.environment.systemPackages;
+              hasHardResourceCeiling =
+                slice:
+                (slice ? MemoryHigh)
+                || (slice ? MemoryMax)
+                || (slice ? MemorySwapMax)
+                || (slice ? CPUQuota)
+                || (slice ? IOReadBandwidthMax)
+                || (slice ? IOWriteBandwidthMax);
             in
             [
               {
@@ -1561,8 +1666,63 @@ let
                 message = "nixos-rebuild switch-to-configuration must remain transient";
               }
               {
+                assertion = !(builtins.elem "nixos-rebuild" packageNames);
+                message = "bare nixos-rebuild must not be shadowed by a high-priority wrapper";
+              }
+              {
                 assertion = (hmService.Slice or "") == "nix-build.slice";
                 message = "Home Manager activation must stay in nix-build.slice";
+              }
+              {
+                assertion =
+                  !(userSlice ? MemoryHigh)
+                  && !(userSlice ? MemoryMax)
+                  && userSlice.MemoryLow == "4G"
+                  && userSlice.TasksMax == "10000";
+                message = "user.slice must protect recovery headroom without a parent memory cap";
+              }
+              {
+                assertion =
+                  !hasHardResourceCeiling appSlice && appSlice.CPUWeight == 800 && appSlice.IOWeight == 800;
+                message = "app.slice must prefer desktop work by weight, not by hard memory/CPU/I/O caps";
+              }
+              {
+                assertion =
+                  !hasHardResourceCeiling userBackgroundSlice
+                  && userBackgroundSlice.CPUWeight == 20
+                  && userBackgroundSlice.IOWeight == 50;
+                message = "user background.slice must stay weighted without arbitrary hard ceilings";
+              }
+              {
+                assertion =
+                  !hasHardResourceCeiling buildSlice && buildSlice.CPUWeight == 20 && buildSlice.IOWeight == 50;
+                message = "build.slice must stay observable/weighted without arbitrary hard ceilings";
+              }
+              {
+                assertion =
+                  !hasHardResourceCeiling systemBackgroundSlice
+                  && systemBackgroundSlice.CPUWeight == 20
+                  && systemBackgroundSlice.IOWeight == 50;
+                message = "system background.slice must stay weighted without arbitrary hard ceilings";
+              }
+              {
+                assertion =
+                  !hasHardResourceCeiling nixBuildSlice
+                  && nixBuildSlice.CPUWeight == 20
+                  && nixBuildSlice.IOWeight == 50;
+                message = "nix-build.slice must stay observable/weighted without arbitrary hard ceilings";
+              }
+              {
+                assertion =
+                  !hasHardResourceCeiling nixDaemonService
+                  && nixDaemonService.Slice == "nix-build.slice"
+                  && nixDaemonService.CPUWeight == 20
+                  && nixDaemonService.IOWeight == 50;
+                message = "nix-daemon must stay in nix-build.slice with weights only";
+              }
+              {
+                assertion = !(config.services.ananicy.enable or false);
+                message = "Ananicy name-based process tuning must stay disabled; resource policy belongs in explicit slices";
               }
               {
                 assertion =
@@ -1575,11 +1735,34 @@ let
               }
               {
                 assertion =
+                  !(lib.hasInfix "SINEX_DEV_CACHE_ROOT=\"/cache/sinex" scopeScript)
+                  && !(lib.hasInfix "apply_project_cache_policy" scopeScript);
+                message = "sinnix-scope must only place scopes; project cache policy belongs in project devshells";
+              }
+              {
+                assertion =
+                  !(lib.hasInfix "updatedInput" pretooluseBash)
+                  && !(lib.hasInfix "Rewrapped pytest" pretooluseBash)
+                  && !(lib.hasInfix "sinnix-scope build" pretooluseBash);
+                message = "Claude Bash hook must not transparently rewrite pytest/build commands";
+              }
+              {
+                assertion =
                   lib.hasInfix "below_recent_history" observeScript
                   && lib.hasInfix "below dump cgroup" observeScript
                   && lib.hasInfix "below dump process" observeScript
-                  && lib.hasInfix "SINNIX_OBSERVE_BEGIN" observeScript;
-                message = "sinnix-observe must include bounded below history joins";
+                  && lib.hasInfix "storage_pressure" observeScript
+                  && lib.hasInfix ''findmnt -T "$mount"'' observeScript
+                  && lib.hasInfix "iostat -xz 1 2" observeScript
+                  && lib.hasInfix "discard_max_bytes" observeScript
+                  && lib.hasInfix "$HOME/.local/share/polylogue" observeScript
+                  && lib.hasInfix "/realm/data/captures/sinex" observeScript
+                  && lib.hasInfix "/var/lib/postgresql" observeScript
+                  && lib.hasInfix "fstrim.service" observeScript
+                  && lib.hasInfix "SINNIX_OBSERVE_BEGIN" observeScript
+                  && lib.hasInfix "$SINEX_ROOT/.sinex/state/xtask-history.db" observeScript
+                  && !(lib.hasInfix "XTASK_HISTORY_DB" observeScript);
+                message = "sinnix-observe must include storage pressure, below joins, and canonical Sinex xtask history path";
               }
             ];
         }
@@ -1792,7 +1975,6 @@ let
               persistBorgService = config.systemd.services.borgbackup-job-persist.serviceConfig;
               borgCheckService = config.systemd.services.borgbackup-check.serviceConfig;
               borgCheckTimer = config.systemd.timers.borgbackup-check.timerConfig;
-              persistDevice = "/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02";
               hasTmpfilesRule =
                 pattern:
                 builtins.any (rule: builtins.match ".*${pattern}.*" rule != null) config.systemd.tmpfiles.rules;
@@ -1883,8 +2065,12 @@ let
                 message = "Borg backup jobs must run at minimum cgroup I/O weight";
               }
               {
-                assertion = borgCheckService.IOWeight == 1 && borgCheckService ? IOReadBandwidthMax;
-                message = "Borg integrity checks must run at low I/O priority";
+                assertion =
+                  borgCheckService.IOWeight == 1
+                  && !(borgCheckService ? ExecCondition)
+                  && !(borgCheckService ? IOReadBandwidthMax)
+                  && !(borgCheckService ? IOWriteBandwidthMax);
+                message = "Borg integrity checks must stay low-priority without hidden pressure gates or hard bandwidth caps";
               }
               {
                 assertion =
@@ -1895,14 +2081,12 @@ let
                 message = "Borg backup jobs must have cgroup memory guardrails";
               }
               {
-                assertion = persistBorgService ? IOReadBandwidthMax && realmBorgService ? IOReadBandwidthMax;
-                message = "Borg backup jobs must have hard read bandwidth caps";
-              }
-              {
                 assertion =
-                  builtins.elem "${persistDevice} 80M" persistBorgService.IOWriteBandwidthMax
-                  && builtins.elem "${persistDevice} 80M" realmBorgService.IOWriteBandwidthMax;
-                message = "Borg jobs must cap writes to the persisted chunk cache device";
+                  !(persistBorgService ? IOReadBandwidthMax)
+                  && !(persistBorgService ? IOWriteBandwidthMax)
+                  && !(realmBorgService ? IOReadBandwidthMax)
+                  && !(realmBorgService ? IOWriteBandwidthMax);
+                message = "Borg backup jobs must rely on scheduling and low weights, not hard bandwidth caps";
               }
               {
                 assertion = builtins.match ".*mount --bind.*" realmJob.preHook != null;

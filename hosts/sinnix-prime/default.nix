@@ -52,40 +52,8 @@
     polylogue.enable = true;
     power-watchdog.enable = true;
     network-monitor.enable = true;
-    sentinel.enable = true;
     weechat-log-sealer.enable = true;
   };
-
-  services.sinex.nodes.automata = {
-    canonicalizer.profile = "heavy";
-    healthAggregator.profile = "heavy";
-  };
-
-  services.sinex.nodes.filesystem.ignoredDirectoryNames = lib.mkAfter [
-    ".btrfs"
-    ".claude"
-    ".cache"
-    ".direnv"
-    ".git"
-    ".hg"
-    ".jj"
-    ".sinex"
-    ".svn"
-    ".Trash-1000"
-    "__pycache__"
-    "asciinema"
-    "kitty-scrollback"
-    "node_modules"
-    "target"
-  ];
-
-  users.users.sinex.homeMode = lib.mkForce "0711";
-  system.activationScripts.sinexHomeTraverse = ''
-    if getent passwd sinex >/dev/null; then
-      install -d -m 0711 -o sinex -g sinex /var/lib/sinex
-    fi
-  '';
-
   systemd.services.systemd-tpm2-setup.enable = lib.mkForce false;
   systemd.services.systemd-tpm2-setup-early.enable = lib.mkForce false;
 }

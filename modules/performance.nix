@@ -141,29 +141,23 @@ in
     # whole parent made the desktop swap-thrash instead of killing the runaway
     # child cgroup.
     #
-    # MemoryMax provides a hard ceiling so a single runaway process inside the
-    # session cannot push the whole system into swap-thrash territory.
     # TasksMax prevents PID-space exhaustion: a thread-exploding build or fork
     # bomb inside user.slice leaves enough PIDs for recovery shells.
     systemd.slices.user.sliceConfig = {
       CPUWeight = 1000;
       IOWeight = 1000;
       MemoryLow = "4G";
-      MemoryHigh = "20G"; # soft reclaim trigger, well below the 24G hard ceiling
-      MemoryMax = "24G";
       TasksMax = "10000";
     };
 
-    # User-manager background/graphical slices need their own budgets. Do not
-    # cap Kitty's aggregate slice: one throttled `memory.high` bucket stalls all
-    # terminals, including the interactive shell needed to recover the machine.
-    # Heavy terminal-launched work must be moved into `build.slice` or
-    # `background.slice` instead of punishing the whole terminal surface.
+    # User-manager background/graphical slices use weights for proportional
+    # priority, not hard ceilings. Parent `memory.high`/`memory.max` caps caused
+    # desktop throttling around 75% RAM even while the machine still had free
+    # memory and page cache to reclaim.
     systemd.user.slices = {
       background.sliceConfig = buildBudget;
 
-      # Graphical apps can be large, especially browsers, but they should not be
-      # able to consume all RAM plus zram before oomd reacts.
+      # Prefer graphical apps over background work without capping browser RAM.
       app.sliceConfig = graphicalBudget;
 
       # Preserve the compositor/session supervisor paths preferentially.
@@ -174,31 +168,16 @@ in
         IOWeight = 1000;
       };
 
-      # Interactive build/test entrypoints enter this slice through
-      # Sinnix-owned wrappers such as `sinnix-scope` and `pytest`. Rust
-      # project-specific orchestration should prefer repo control planes
-      # such as Sinex `xtask`, not a global transparent cargo wrapper.
-      build.sliceConfig = buildBudget // {
-        IOWriteBandwidthMax = [
-          "/dev/disk/by-uuid/bd19092f-a195-47ab-9c0d-c923d1e5bfea 300M" # /realm NVMe
-          "/dev/disk/by-uuid/7f603111-8f3a-40aa-bad0-0cac69c140f1 300M" # /cache NVMe
-        ];
-      };
+      # Explicitly scoped interactive build/test entrypoints land here.
+      build.sliceConfig = buildBudget;
     };
 
-    # Put Nix builds in an explicitly budgeted slice so they cannot consume the
-    # entire workstation even when individual derivations fan out internally.
-    # IOWriteBandwidthMax provides a hard ceiling so bulk writes from large
-    # builds (Rust target/ trees, linker output) cannot saturate the NVMe and
-    # starve interactive I/O paths (terminals, browsers, desktop compositor).
+    # Put Nix builds in an explicitly weighted slice so they are visible and
+    # lower priority than the desktop without imposing arbitrary throughput or
+    # CPU ceilings.
     systemd.slices."nix-build" = {
       description = "Resource budget for Nix builds";
-      sliceConfig = buildBudget // {
-        IOWriteBandwidthMax = [
-          "/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02 300M"
-          "/dev/disk/by-uuid/7f603111-8f3a-40aa-bad0-0cac69c140f1 300M"
-        ];
-      };
+      sliceConfig = buildBudget;
     };
 
     # Generic background scopes should inherit the same low-priority budget as
@@ -223,170 +202,6 @@ in
     # creates that name as a transient unit, and any static fragment makes
     # systemd-run refuse the activation job.
     systemd.services."home-manager-${config.sinnix.user.name}".serviceConfig.Slice = "nix-build.slice";
-
-    # Ananicy: per-process nice/ioclass for desktop responsiveness
-    services.ananicy = {
-      enable = true;
-      package = pkgs.ananicy-cpp;
-      rulesProvider = pkgs.ananicy-rules-cachyos;
-      settings = {
-        apply_oom_score_adj = true;
-        # ananicy-cpp cgroup placement is erroring on this host
-        # (Invalid argument on /sys/fs/cgroup/cgroup.procs).
-        # Keep priority/ionice/scheduler tuning, disable cgroup writes.
-        cgroup_load = false;
-        apply_cgroup = false;
-      };
-
-      extraTypes = [
-        {
-          type = "Heavy_Build";
-          nice = 15;
-          sched = "batch";
-          ioclass = "idle";
-        }
-        {
-          type = "Light_Build";
-          nice = 10;
-          sched = "batch";
-          ioclass = "idle";
-        }
-      ];
-
-      extraRules = [
-        # Compilers/linkers
-        {
-          name = "gcc";
-          type = "Heavy_Build";
-        }
-        {
-          name = "cc";
-          type = "Heavy_Build";
-        }
-        {
-          name = "g++";
-          type = "Heavy_Build";
-        }
-        {
-          name = "c++";
-          type = "Heavy_Build";
-        }
-        {
-          name = "clang";
-          type = "Heavy_Build";
-        }
-        {
-          name = "clang++";
-          type = "Heavy_Build";
-        }
-        {
-          name = "rustc";
-          type = "Heavy_Build";
-        }
-        {
-          name = "cc1";
-          type = "Heavy_Build";
-        }
-        {
-          name = "cc1plus";
-          type = "Heavy_Build";
-        }
-        {
-          name = "ld";
-          type = "Heavy_Build";
-        }
-        {
-          name = "lld";
-          type = "Heavy_Build";
-        }
-        {
-          name = "ld.lld";
-          type = "Heavy_Build";
-        }
-        {
-          name = "ld.gold";
-          type = "Heavy_Build";
-        }
-        {
-          name = "mold";
-          type = "Heavy_Build";
-        }
-        {
-          name = "ld.mold";
-          type = "Heavy_Build";
-        }
-        {
-          name = "cargo";
-          type = "Light_Build";
-        }
-        {
-          name = "nix";
-          type = "Heavy_Build";
-        }
-
-        # LSPs and language servers
-        {
-          name = "rust-analyzer";
-          type = "Heavy_Build";
-        }
-        {
-          name = "pyrefly";
-          type = "Heavy_Build";
-        }
-        {
-          name = "nil";
-          type = "Light_Build";
-        }
-        {
-          name = "nixd";
-          type = "Light_Build";
-        }
-        {
-          name = "typescript-language-server";
-          type = "Light_Build";
-        }
-        {
-          name = "gopls";
-          type = "Light_Build";
-        }
-        {
-          name = "cargo-nextest";
-          type = "Light_Build";
-        }
-        {
-          name = "ninja";
-          type = "Heavy_Build";
-        }
-        {
-          name = "cmake";
-          type = "Light_Build";
-        }
-        {
-          name = "meson";
-          type = "Light_Build";
-        }
-        {
-          name = "make";
-          type = "Heavy_Build";
-        }
-        {
-          name = "ctest";
-          type = "Heavy_Build";
-        }
-        {
-          name = "pytest";
-          type = "Heavy_Build";
-        }
-        {
-          name = "qemu-system-x86_64";
-          type = "Heavy_Build";
-        }
-        {
-          name = "qemu-kvm";
-          type = "Heavy_Build";
-        }
-      ];
-    };
 
     # Allow realtime priority for audio
     security.pam.loginLimits = [

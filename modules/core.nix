@@ -13,64 +13,6 @@ let
   username = config.sinnix.user.name;
   inherit (config.sinnix) paths;
   inherit (config.sinnix.machine) isDesktop;
-  resourceBudgets = import ./lib/resource-budgets.nix;
-  developerBudget = resourceBudgets.developerWork;
-  safeNixosRebuild = lib.hiPrio (
-    pkgs.writeShellScriptBin "nixos-rebuild" ''
-            set -euo pipefail
-
-            export PATH="${
-              lib.makeBinPath [
-                pkgs.coreutils
-                pkgs.systemd
-              ]
-            }:$PATH"
-            rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-auto}"
-            rebuild_cores="''${SINNIX_REBUILD_CORES:-0}"
-            export NIX_CONFIG="max-jobs = $rebuild_jobs
-      cores = $rebuild_cores''${NIX_CONFIG:+
-      $NIX_CONFIG}"
-
-            if [[ -z "''${SINNIX_SAFE_REBUILD_SCOPED:-}" ]] && command -v systemd-run >/dev/null 2>&1; then
-              if (( EUID == 0 )); then
-                exec systemd-run \
-                  --scope \
-                  --quiet \
-                  --collect \
-                  --slice=nix-build.slice \
-                  -p CPUQuota=${developerBudget.cpuQuota} \
-                  -p CPUWeight=${toString developerBudget.cpuWeight} \
-                  -p IOWeight=${toString developerBudget.ioWeight} \
-                  -p MemoryHigh=${developerBudget.memoryHigh} \
-                  -p MemoryMax=${developerBudget.memoryMax} \
-                  -p MemorySwapMax=${developerBudget.memorySwapMax} \
-                  -p ManagedOOMMemoryPressure=${developerBudget.managedOOMMemoryPressure} \
-                  -p ManagedOOMMemoryPressureLimit=${developerBudget.managedOOMMemoryPressureLimit} \
-                  --setenv=SINNIX_SAFE_REBUILD_SCOPED=1 \
-                  ${config.system.build.nixos-rebuild}/bin/nixos-rebuild "$@"
-              elif [[ -n "''${XDG_RUNTIME_DIR:-}" ]]; then
-                exec systemd-run \
-                  --user \
-                  --scope \
-                  --quiet \
-                  --collect \
-                  --slice=background.slice \
-                  -p CPUQuota=${developerBudget.cpuQuota} \
-                  -p CPUWeight=${toString developerBudget.cpuWeight} \
-                  -p IOWeight=${toString developerBudget.ioWeight} \
-                  -p MemoryHigh=${developerBudget.memoryHigh} \
-                  -p MemoryMax=${developerBudget.memoryMax} \
-                  -p MemorySwapMax=${developerBudget.memorySwapMax} \
-                  -p ManagedOOMMemoryPressure=${developerBudget.managedOOMMemoryPressure} \
-                  -p ManagedOOMMemoryPressureLimit=${developerBudget.managedOOMMemoryPressureLimit} \
-                  --setenv=SINNIX_SAFE_REBUILD_SCOPED=1 \
-                  ${config.system.build.nixos-rebuild}/bin/nixos-rebuild "$@"
-              fi
-            fi
-
-            exec ${config.system.build.nixos-rebuild}/bin/nixos-rebuild "$@"
-    ''
-  );
 in
 {
   config = {
@@ -119,9 +61,9 @@ in
         # globally serializing Nix into a low-throughput mode.
         max-jobs = "auto";
         cores = 0;
-        # Keep build workers under the daemon's systemd slice so MemoryMax,
-        # MemorySwapMax, CPUQuota, IOWeight, and oomd apply to the whole build
-        # tree as one budget.
+        # Keep cgroup placement explicit through systemd slices. Nix's own
+        # per-build cgroup mode is disabled here so it does not create another
+        # independent resource-policy layer.
         use-cgroups = false;
         builders-use-substitutes = true;
 
@@ -207,11 +149,7 @@ in
       hostPlatform = "x86_64-linux";
     };
 
-    # Shadow the stock entrypoint so direct `nixos-rebuild` invocations inherit
-    # the same cgroup envelope as `nix-safe` instead of running in the caller's
-    # interactive scope.
     environment.systemPackages = lib.mkAfter [
-      safeNixosRebuild
       pkgs.sccache
     ];
 

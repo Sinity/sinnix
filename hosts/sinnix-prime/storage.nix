@@ -14,6 +14,8 @@ let
     ;
   username = config.sinnix.user.name;
   primaryGroupName = config.users.users.${username}.group;
+  polylogueArchiveRoot = "${capturesRoot}/polylogue";
+  polylogueShareMount = "/home/${username}/.local/share/polylogue";
 
   # Initrd scaffold: early-boot placeholders derived from persistence config
   scaffoldCfg = config.sinnix.persistence.initrdScaffold;
@@ -25,15 +27,11 @@ let
 in
 {
   services = {
-    # Continuous btrfs discard looked harmless on paper, but during the
-    # 2026-05-02 pressure incident btrfs-discard workers were visible in
-    # D-state while desktop I/O PSI was high. Use an explicit, low-priority
-    # weekly TRIM window instead of letting snapshot/delete churn schedule
-    # discard work throughout the day.
-    fstrim = {
-      enable = true;
-      interval = "Sun 04:30:00";
-    };
+    # Keep discard off the hot path. Continuous discard previously produced
+    # D-state btrfs workers during desktop pressure, and the replacement
+    # scheduled fstrim window itself saturated the root_btrfs SSD (sdb2) with
+    # discard I/O on 2026-05-03.
+    fstrim.enable = false;
     gvfs.enable = true; # dynamic mount
 
     # Disable block-layer writeback throttle on all storage. wbt parks writers
@@ -51,17 +49,6 @@ in
       ACTION=="add|change", KERNEL=="nvme[0-9]n[0-9]", ATTR{queue/wbt_lat_usec}="0"
       ACTION=="add|change", KERNEL=="sd[a-z]", ATTR{queue/wbt_lat_usec}="0"
     '';
-  };
-
-  systemd.services.fstrim.serviceConfig = {
-    Nice = 19;
-    IOSchedulingClass = "idle";
-    IOWeight = 1;
-  };
-
-  systemd.timers.fstrim.timerConfig = {
-    Persistent = false;
-    RandomizedDelaySec = "30m";
   };
 
   fileSystems = {
@@ -186,6 +173,40 @@ in
   systemd = {
     tmpfiles.rules = lib.mkAfter [
       "d /mnt/pendrv 0755 root root -"
+      "d ${polylogueArchiveRoot} 0700 ${username} ${primaryGroupName} -"
+      "d /home/${username}/.local/share 0700 ${username} ${primaryGroupName} -"
+      "d ${polylogueShareMount} 0700 ${username} ${primaryGroupName} -"
+    ];
+
+    # Polylogue's archive is an active SQLite/write-heavy workload. Keep the
+    # default XDG path stable for CLI/MCP/service consumers, but place the
+    # bytes on /realm's NVMe instead of the root/persist SATA SSD shared with
+    # PostgreSQL.
+    mounts = [
+      {
+        what = polylogueArchiveRoot;
+        where = polylogueShareMount;
+        type = "none";
+        options = "bind,x-systemd.requires-mounts-for=${realmRoot}";
+        wantedBy = [ "local-fs.target" ];
+        requires = [ "realm.mount" ];
+        after = [ "realm.mount" ];
+      }
+      {
+        what = "${capturesRoot}/syslog/journal";
+        where = "/var/log/journal";
+        type = "none";
+        options = "bind,x-systemd.requires-mounts-for=${realmRoot}";
+        wantedBy = [ "local-fs.target" ];
+        requires = [ "realm.mount" ];
+        after = [ "realm.mount" ];
+      }
+      {
+        what = "/dev/disk/by-uuid/36213474-7e7f-4df7-8fb6-264d9a2e9643";
+        where = "/mnt/pendrv";
+        type = "btrfs";
+        options = "nofail,compress=zstd,x-systemd.device-timeout=5s";
+      }
     ];
 
     automounts = [
@@ -198,28 +219,12 @@ in
       }
     ];
 
-    mounts = lib.mkAfter (
-      [
-        {
-          what = "${capturesRoot}/syslog/journal";
-          where = "/var/log/journal";
-          type = "none";
-          options = "bind,x-systemd.requires-mounts-for=${realmRoot}";
-          wantedBy = [ "local-fs.target" ];
-          requires = [ "realm.mount" ];
-          after = [ "realm.mount" ];
-        }
-      ]
-      ++ [
-        {
-          what = "/dev/disk/by-uuid/36213474-7e7f-4df7-8fb6-264d9a2e9643";
-          where = "/mnt/pendrv";
-          type = "btrfs";
-          options = "nofail,compress=zstd,x-systemd.device-timeout=5s";
-        }
-      ]
-    );
   };
+
+  sinnix.persistence.initrdScaffold.directories = lib.mkAfter [
+    "/home/${username}/.local/share"
+    polylogueShareMount
+  ];
 
   boot.supportedFilesystems = [
     "btrfs"
