@@ -769,11 +769,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1777572129,
-        "narHash": "sha256-6RhTxn7ESUJMIeEGnxZtlK7qxOH61OVgJY5/rz4P/4M=",
+        "lastModified": 1777771989,
+        "narHash": "sha256-IJ3SSyZsbCoUDcCtJEDd5JDGy2F23T4T8Rtwfzi+Bw8=",
         "owner": "Sinity",
         "repo": "polylogue",
-        "rev": "1282bb688b4bb8d24c7f76031cf08f365b5ba264",
+        "rev": "5eec6cc575610f1dd28706e15e87ff219e15d548",
         "type": "github"
       },
       "original": {
@@ -917,11 +917,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1777588393,
-        "narHash": "sha256-dlg1VCvcpGRdzBG9e1DXz6MwcHmidAqOMk9pOcJquEY=",
+        "lastModified": 1777768589,
+        "narHash": "sha256-JcSRyFWcQUwpRgaGx8zG8akCajK+6SzWMOvHCO5ZKZ4=",
         "ref": "master",
-        "rev": "d049cd7e4fb503db9101a9d4dbfb4eb69f2c185a",
-        "revCount": 339,
+        "rev": "56a2c996797604d2cb37d7721cd403320b1d24d4",
+        "revCount": 449,
         "type": "git",
         "url": "https://github.com/Sinity/sinex"
       },

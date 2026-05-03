@@ -88,7 +88,7 @@
       default = {
         unit = "sinex-ingestd.service";
         type = "service";
-        restartable = true;
+        restartable = false;
       };
       description = "Service health metadata consumed by introspection/sentinel.";
     };

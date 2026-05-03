@@ -573,7 +573,7 @@ let
                 "Polylogue catch-up must skip starts while global I/O pressure is already high"
               )
               (expect.textContains browserCaptureExecStart
-                "/bin/polylogue --plain browser-capture serve --host 127.0.0.1 --port 8765"
+                "/bin/polylogued browser-capture serve --host 127.0.0.1 --port 8765"
                 "Polylogue browser capture receiver must run local-only on the default extension port"
               )
               (expect.attrPathEq unit [
@@ -1193,25 +1193,42 @@ let
               runtimeServices = lib.unique (
                 builtins.filter (name: builtins.hasAttr name config.systemd.services) candidateRuntimeServices
               );
+              restartableRuntimeServices = lib.unique (
+                builtins.filter (name: builtins.hasAttr name config.systemd.services) (
+                  [
+                    "sinex-ingestd"
+                    "sinex-gateway"
+                  ]
+                  ++ (config.sinex._generatedUnits or [ ])
+                )
+              );
               packageNames = map (pkg: pkg.name or "") config.environment.systemPackages;
               serviceWantedBy = name: lib.attrByPath [ "systemd" "services" name "wantedBy" ] [ ] config;
               serviceRestartIfChanged =
                 name: lib.attrByPath [ "systemd" "services" name "restartIfChanged" ] true config;
               serviceRestartMode =
                 name: lib.attrByPath [ "systemd" "services" name "serviceConfig" "Restart" ] null config;
+              serviceRestartSec =
+                name: lib.attrByPath [ "systemd" "services" name "serviceConfig" "RestartSec" ] null config;
+              serviceUnitConfig = name: lib.attrByPath [ "systemd" "services" name "unitConfig" ] { } config;
               targetWantedBy = name: lib.attrByPath [ "systemd" "targets" name "wantedBy" ] [ ] config;
+              targetUnitConfig = name: lib.attrByPath [ "systemd" "targets" name "unitConfig" ] { } config;
               runtimeWants = lib.attrByPath [ "systemd" "targets" "sinex-runtime" "wants" ] [ ] config;
               runtimeTimerWantedBy = lib.attrByPath [ "systemd" "timers" "sinex-runtime" "wantedBy" ] [ ] config;
               runtimeTimer = lib.attrByPath [ "systemd" "timers" "sinex-runtime" "timerConfig" ] { } config;
-              sinexHealth = config.sinnix.services.sinex.health;
-              healthPolicy = builtins.fromJSON config.environment.etc."sinnix/health-policy.json".text;
-              healthServiceNames = map (check: check.name) healthPolicy.services;
-              sinexAutoTimers = [
+              maintenanceTimerWantedBy = name: lib.attrByPath [ "systemd" "timers" name "wantedBy" ] [ ] config;
+              maintenanceTimerUnitConfig =
+                name: lib.attrByPath [ "systemd" "timers" name "unitConfig" ] { } config;
+              sinexMaintenanceTimers = [
                 "sinex-blob-fsck"
                 "sinex-blob-gc"
                 "sinex-cache-prune"
                 "sinex-document-scan"
               ];
+              sinexHealth = config.sinnix.services.sinex.health;
+              healthPolicy = builtins.fromJSON config.environment.etc."sinnix/health-policy.json".text;
+              healthServiceNames = map (check: check.name) healthPolicy.services;
+              sinexHealthChecks = builtins.filter (check: check.name == "sinex") healthPolicy.services;
               natsService = config.systemd.services.nats.serviceConfig;
               postgresService = config.systemd.services.postgresql.serviceConfig;
               preflightEnabled = lib.attrByPath [
@@ -1235,11 +1252,17 @@ let
               }
               {
                 assertion = builtins.all (name: serviceRestartIfChanged name == false) runtimeServices;
-                message = "Sinex runtime services must not restart during desktop activation while auto-start is disabled";
+                message = "Sinex runtime services must not restart during desktop activation";
               }
               {
-                assertion = builtins.all (name: serviceRestartMode name == "no") runtimeServices;
-                message = "Sinex runtime services must not self-resurrect while auto-start is disabled";
+                assertion = builtins.all (
+                  name:
+                  serviceRestartMode name == "on-failure"
+                  && serviceRestartSec name == "30s"
+                  && (serviceUnitConfig name).StartLimitIntervalSec == 600
+                  && (serviceUnitConfig name).StartLimitBurst == 3
+                ) restartableRuntimeServices;
+                message = "Long-running Sinex runtime services must use bounded on-failure restart";
               }
               {
                 assertion = builtins.elem "postgresql.target" runtimeWants;
@@ -1265,26 +1288,42 @@ let
                 message = "Sinex aggregate/runtime packages must not leak a bare global xtask into interactive PATH";
               }
               {
-                assertion = runtimeTimer.OnBootSec == "5min";
-                message = "sinex-runtime.timer must preserve its delayed-start policy";
+                assertion = runtimeTimer.OnActiveSec == "5min";
+                message = "sinex-runtime.timer must delay relative to timer activation, not only boot time";
               }
               {
-                assertion = runtimeTimerWantedBy == [ ];
-                message = "sinnix-prime must keep Sinex runtime startup manual until replay pressure is fixed";
+                assertion = runtimeTimerWantedBy == [ "timers.target" ];
+                message = "sinnix-prime must auto-start Sinex through the delayed runtime timer";
               }
               {
-                assertion = sinexHealth == null && !(builtins.elem "sinex" healthServiceNames);
-                message = "manual Sinex runtime must not be auto-restarted by sentinel health policy";
+                assertion = (targetUnitConfig "sinex-runtime").X-OnlyManualStart == true;
+                message = "sinex-runtime.target must not be restarted by NixOS activation";
               }
               {
                 assertion = builtins.all (
-                  name: lib.attrByPath [ "systemd" "timers" name "wantedBy" ] [ ] config == [ ]
-                ) sinexAutoTimers;
-                message = "sinnix-prime must keep Sinex maintenance timers manual with runtime auto-start disabled";
+                  name: maintenanceTimerWantedBy name == [ "sinex-runtime.target" ]
+                ) sinexMaintenanceTimers;
+                message = "Sinex maintenance timers must be tied to the delayed runtime target, not timers.target activation";
+              }
+              {
+                assertion = builtins.all (
+                  name: (maintenanceTimerUnitConfig name).PartOf == [ "sinex-runtime.target" ]
+                ) sinexMaintenanceTimers;
+                message = "Sinex maintenance timers must stop with the runtime target";
               }
               {
                 assertion =
-                  natsService.MemoryMax == "1G"
+                  sinexHealth != null
+                  && sinexHealth.restartable == false
+                  && builtins.elem "sinex" healthServiceNames
+                  && sinexHealthChecks != [ ]
+                  && (builtins.head sinexHealthChecks).restartable == false;
+                message = "sentinel may report Sinex health but must not correctively restart it";
+              }
+              {
+                assertion =
+                  natsService.MemoryHigh == "4G"
+                  && natsService.MemoryMax == "6G"
                   && natsService.IOWeight == 10
                   && natsService ? IOReadBandwidthMax
                   && natsService ? IOWriteBandwidthMax;
@@ -2736,7 +2775,7 @@ in
         ];
         script = ''
           polylogue --help | grep -q '^Usage: polylogue'
-          polylogue sources --help | grep -q 'List configured sources'
+          polylogue schema list --help | grep -q 'List available schema packages'
           polylogue-python - <<'EOF'
           import sys
           print(sys.executable)

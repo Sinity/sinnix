@@ -115,17 +115,33 @@ in
       delayedRuntimeUnits =
         map (name: "${name}.service") delayedRuntimeServices
         ++ map (name: "${name}.target") delayedRuntimeTargets;
+      restartableRuntimeServices = [
+        "sinex-ingestd"
+        "sinex-gateway"
+      ]
+      ++ generatedNodeServices;
       runtimeServicePolicy = {
         wantedBy = lib.mkForce [ ];
         unitConfig.PartOf = [ "sinex-runtime.target" ];
-      }
-      // lib.optionalAttrs (!runtimeAutoStart) {
-        # With host auto-start disabled, activation must not restart changed
-        # Sinex units. Several services require bootstrap/preflight units that
-        # in turn pull NATS/PostgreSQL up, recreating the pressure incident
-        # during an otherwise routine NixOS switch.
+        # Sinex starts through sinex-runtime.target, not as a side effect of
+        # host activation. Several services require bootstrap/preflight units
+        # that pull NATS/PostgreSQL up; restart-on-switch recreated pressure
+        # incidents during ordinary NixOS activation.
         restartIfChanged = false;
-        serviceConfig.Restart = lib.mkForce "no";
+      };
+      boundedRuntimeRestartPolicy = {
+        unitConfig = {
+          # Upstream Sinex uses unlimited StartLimitIntervalSec=0 for capture
+          # daemons. On this workstation, failure loops must stop and become
+          # visible instead of generating unbounded NATS/Postgres/git-annex
+          # pressure. Normal transient failures still get a few retries.
+          StartLimitIntervalSec = lib.mkForce 600;
+          StartLimitBurst = lib.mkForce 3;
+        };
+        serviceConfig = {
+          Restart = lib.mkForce "on-failure";
+          RestartSec = lib.mkForce "30s";
+        };
       };
       mkScopedSinexPackage =
         sinexPkgs:
@@ -311,70 +327,82 @@ in
         # PostgreSQL/schema apply/NATS/node startup cannot hold graphical.target.
         # Strip both direct services and the postgresql.target install surface;
         # otherwise local PostgreSQL still leaks into multi-user.target.
-        systemd.services = lib.genAttrs delayedRuntimeServices (_: runtimeServicePolicy) // {
-          # Cap NATS memory so JetStream cannot push the system into swap.
-          # Peak observed: 3.4 GB with 484 MB swapped — the 1 GB cap keeps
-          # it in RAM and lets earlyoom prefer-kill it before the desktop
-          # feels pressure. IOWeight=10 ensures its sustained writes don't
-          # compete fairly with interactive I/O.
-          nats = lib.mkMerge [
-            runtimeServicePolicy
-            {
-              serviceConfig = {
-                MemoryMax = "1G";
-                IOWeight = 10;
-                IOReadBandwidthMax = [
-                  "/dev/disk/by-uuid/7f603111-8f3a-40aa-bad0-0cac69c140f1 80M"
-                ];
-                IOWriteBandwidthMax = [
-                  "/dev/disk/by-uuid/7f603111-8f3a-40aa-bad0-0cac69c140f1 80M"
-                ];
-                # NATS' graceful SIGUSR2 drain can sit for minutes while
-                # JetStream is already the pressure source. Operator stops
-                # need to converge quickly.
-                KillSignal = lib.mkForce "SIGTERM";
-                TimeoutStopSec = lib.mkForce "10s";
-              };
-            }
-          ];
+        systemd.services =
+          lib.genAttrs delayedRuntimeServices (_: runtimeServicePolicy)
+          // lib.genAttrs restartableRuntimeServices (
+            _:
+            lib.mkMerge [
+              runtimeServicePolicy
+              boundedRuntimeRestartPolicy
+            ]
+          )
+          // {
+            # Keep NATS bounded without forcing JetStream restore into swap.
+            # Live delayed-start verification on 2026-05-03 showed the old 1G
+            # cap pinned nats-server at the limit and pushed ~1.8G to swap while
+            # restoring the confirmation stream. The high/max pair below leaves
+            # room for the observed working set while still bounding runaway
+            # growth. IOWeight=10 keeps sustained JetStream I/O below
+            # interactive work.
+            nats = lib.mkMerge [
+              runtimeServicePolicy
+              {
+                serviceConfig = {
+                  MemoryHigh = "4G";
+                  MemoryMax = "6G";
+                  IOWeight = 10;
+                  IOReadBandwidthMax = [
+                    "/dev/disk/by-uuid/7f603111-8f3a-40aa-bad0-0cac69c140f1 80M"
+                  ];
+                  IOWriteBandwidthMax = [
+                    "/dev/disk/by-uuid/7f603111-8f3a-40aa-bad0-0cac69c140f1 80M"
+                  ];
+                  # NATS' graceful SIGUSR2 drain can sit for minutes while
+                  # JetStream is already the pressure source. Operator stops
+                  # need to converge quickly.
+                  KillSignal = lib.mkForce "SIGTERM";
+                  TimeoutStopSec = lib.mkForce "10s";
+                };
+              }
+            ];
 
-          # These are validation/bootstrap one-shots. Restart loops here keep
-          # pulling NATS/PostgreSQL back up after an operator stops the runtime,
-          # which is exactly the failure mode seen during the 2026-05-02
-          # pressure incident.
-          sinex-nats-bootstrap = {
-            restartIfChanged = false;
-            unitConfig.PartOf = [ "sinex-runtime.target" ];
-            wantedBy = lib.mkForce [ ];
-            serviceConfig.Restart = lib.mkForce "no";
-          };
-          sinex-preflight = {
-            restartIfChanged = false;
-            unitConfig.PartOf = [ "sinex-runtime.target" ];
-            wantedBy = lib.mkForce [ ];
-            serviceConfig.Restart = lib.mkForce "no";
-          };
+            # These are validation/bootstrap one-shots. Restart loops here keep
+            # pulling NATS/PostgreSQL back up after an operator stops the runtime,
+            # which is exactly the failure mode seen during the 2026-05-02
+            # pressure incident.
+            sinex-nats-bootstrap = {
+              restartIfChanged = false;
+              unitConfig.PartOf = [ "sinex-runtime.target" ];
+              wantedBy = lib.mkForce [ ];
+              serviceConfig.Restart = lib.mkForce "no";
+            };
+            sinex-preflight = {
+              restartIfChanged = false;
+              unitConfig.PartOf = [ "sinex-runtime.target" ];
+              wantedBy = lib.mkForce [ ];
+              serviceConfig.Restart = lib.mkForce "no";
+            };
 
-          # Restrict PostgreSQL from consuming all system memory and I/O bandwidth,
-          # preventing page-cache thrashing and system lockups on heavy analytical queries.
-          postgresql = lib.mkMerge [
-            runtimeServicePolicy
-            {
-              unitConfig.PartOf = lib.mkAfter [ "sinex-runtime.target" ];
-              serviceConfig = {
-                MemoryHigh = "8G";
-                MemoryMax = "12G";
-                IOWeight = 10;
-                IOReadBandwidthMax = [
-                  "/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02 100M"
-                ];
-                IOWriteBandwidthMax = [
-                  "/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02 80M"
-                ];
-              };
-            }
-          ];
-        };
+            # Restrict PostgreSQL from consuming all system memory and I/O bandwidth,
+            # preventing page-cache thrashing and system lockups on heavy analytical queries.
+            postgresql = lib.mkMerge [
+              runtimeServicePolicy
+              {
+                unitConfig.PartOf = lib.mkAfter [ "sinex-runtime.target" ];
+                serviceConfig = {
+                  MemoryHigh = "8G";
+                  MemoryMax = "12G";
+                  IOWeight = 10;
+                  IOReadBandwidthMax = [
+                    "/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02 100M"
+                  ];
+                  IOWriteBandwidthMax = [
+                    "/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02 80M"
+                  ];
+                };
+              }
+            ];
+          };
         systemd.targets =
           lib.genAttrs delayedRuntimeTargets (_: {
             wantedBy = lib.mkForce [ ];
@@ -382,6 +410,7 @@ in
           // {
             sinex-runtime = {
               description = "Start Sinex runtime after interactive boot";
+              unitConfig.X-OnlyManualStart = true;
               wants = delayedRuntimeUnits ++ [ "network-online.target" ];
               after = [
                 "multi-user.target"
@@ -395,17 +424,16 @@ in
             description = "Delay Sinex runtime startup until after boot";
             wantedBy = lib.mkIf runtimeAutoStart [ "timers.target" ];
             timerConfig = {
-              OnBootSec = sinexRuntimeStartDelay;
+              OnActiveSec = sinexRuntimeStartDelay;
               AccuracySec = "15s";
               Unit = "sinex-runtime.target";
             };
           };
         }
-        // lib.optionalAttrs (!runtimeAutoStart) (
-          lib.genAttrs sinexAutoTimers (_: {
-            wantedBy = lib.mkForce [ ];
-          })
-        );
+        // (lib.genAttrs sinexAutoTimers (_: {
+          wantedBy = lib.mkForce (lib.optionals runtimeAutoStart [ "sinex-runtime.target" ]);
+          unitConfig.PartOf = [ "sinex-runtime.target" ];
+        }));
 
         # NATS JetStream lives on the /cache NVMe partition. Ensure the
         # directory exists before the service starts so the auto-setup

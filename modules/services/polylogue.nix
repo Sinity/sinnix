@@ -141,7 +141,7 @@ in
           After = [ "default.target" ];
         };
         Service = {
-          ExecStart = "${pkgs.polylogue}/bin/polylogue --plain browser-capture serve --host ${cfg.browserCapture.host} --port ${toString cfg.browserCapture.port}";
+          ExecStart = "${pkgs.polylogue}/bin/polylogued browser-capture serve --host ${cfg.browserCapture.host} --port ${toString cfg.browserCapture.port}";
           Restart = "on-failure";
           RestartSec = "5s";
           Nice = 10;
