@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# @sinnix-package: skip
 # Arrange Hyprland windows (with kitty integration) into a grid.
 #
 # By default this targets kitty, leveraging its remote control socket to launch

@@ -27,6 +27,9 @@ mkFeatureModule {
             # subfeatures that collide with the custom zsh prompt pipeline.
             shellIntegration.mode = "no-prompt-mark no-title no-cursor";
             settings = {
+              # why mkForce: stylix derives background from the active
+              # palette (typically a dark grey). This terminal wants pure
+              # black for maximum contrast and OLED-friendliness.
               background = lib.mkForce "#000000";
               background_opacity = lib.mkForce "1.0";
               window_padding_width = 10;

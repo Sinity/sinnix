@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# @sinnix-package
+# description: Capture rawlog entries via gum UI
+# runtimeInputs: coreutils gum
 set -euo pipefail
 
 # Raw log capture UI wrapper.

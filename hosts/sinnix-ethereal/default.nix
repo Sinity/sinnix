@@ -20,6 +20,8 @@
     # Override the default "no" from networking.nix to allow root SSH on VPS
     openssh.settings.PermitRootLogin = "prohibit-password";
 
+    # why mkForce: ethereal is a headless VPS; the desktop bundle defaults
+    # in the shared module graph would otherwise enable xserver here.
     xserver.enable = lib.mkForce false;
   };
 

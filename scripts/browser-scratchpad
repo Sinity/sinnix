@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# @sinnix-package: skip
 # Launch qutebrowser instance for specific scratchpad site
 # Each site gets isolated basedir for separate sessions
 

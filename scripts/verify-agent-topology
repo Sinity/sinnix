@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# @sinnix-package
+# description: Verify CLAUDE/AGENTS topology and sync invariants across project repos
+# runtimeInputs: coreutils findutils git gnugrep python3
 set -euo pipefail
 
 ROOT="${1:-/realm/project}"

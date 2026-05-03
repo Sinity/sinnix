@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# @sinnix-package
+# description: Precompute and query cached media preview thumbnails
+# runtimeInputs: bash coreutils fd ffmpegthumbnailer findutils util-linux
 set -euo pipefail
 
 cache_root="${XDG_CACHE_HOME:-$HOME/.cache}/media-preview-cache/v1"

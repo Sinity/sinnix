@@ -69,6 +69,8 @@ mkServiceModule {
       ];
 
       systemd.services.transmission = {
+        # why mkForce: gated behind PartOf=${neoOuterRealmMount} below.
+        # The upstream nixos-transmission module attaches multi-user.target.
         wantedBy = lib.mkForce [ ];
         unitConfig.RequiresMountsFor = lib.unique [
           torrentInbox

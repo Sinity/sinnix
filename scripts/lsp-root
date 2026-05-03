@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# @sinnix-package
+# description: Find project root and exec command from there
+# runtimeInputs: coreutils
 set -euo pipefail
 start_dir="${CCLSP_START_DIR:-$PWD}"
 if [ -z "$start_dir" ]; then

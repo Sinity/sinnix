@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# @sinnix-package
+# description: System health monitor with auto-derived checks
+# runtimeInputs: coreutils findutils gawk python3 jq systemd util-linux gnugrep procps sudo libnotify smartmontools borgbackup
 # sinnix-sentinel: System health monitor with auto-derived checks
 set -euo pipefail
 

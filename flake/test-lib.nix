@@ -93,9 +93,9 @@ let
   vmTestConfig =
     { lib, ... }:
     {
-      # The qemu-vm test harness disables timesyncd in its base module.
-      # Keep the VM baseline aligned so sinnix's normal networking defaults
-      # do not conflict with the test driver.
+      # why mkForce: the qemu-vm test harness disables timesyncd in its
+      # base module. Keep the VM baseline aligned so sinnix's normal
+      # networking defaults do not conflict with the test driver.
       services.timesyncd.enable = lib.mkForce false;
     };
 
@@ -240,6 +240,10 @@ let
     # list explicit until router outputs move behind the same discovery path.
     outputs = [ "router-config" ];
   };
+
+  # Convenience accessor for the canonical Home Manager user attrset.
+  # Used by *.test.nix specs to keep assertion bodies terse.
+  hmFor = config: config.home-manager.users.${config.sinnix.user.name};
 
   # Create a test for a single feature
   # Example: mkFeatureTest {
@@ -874,7 +878,7 @@ in
   inherit sanitizedInputs baseModules sharedSpecialArgs;
   inherit mountTmpfsRoots baseTestConfig vmTestConfig;
   inherit expect;
-  inherit mkFeatureTest mkServiceTest mkBundleTest;
+  inherit mkFeatureTest mkServiceTest mkBundleTest hmFor;
   inherit
     evalTestSpec
     mkRuntimeCheck

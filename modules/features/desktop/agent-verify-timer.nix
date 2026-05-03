@@ -43,12 +43,7 @@ mkFeatureModule {
             };
             Service = {
               Type = "oneshot";
-              ExecStart = "${pkgs.writeShellScript "agent-verify-run" ''
-                set -euo pipefail
-                if [ -x /home/sinity/.local/bin/agent-verify ]; then
-                  /home/sinity/.local/bin/agent-verify --quiet >/dev/null 2>&1 || true
-                fi
-              ''}";
+              ExecStart = "${pkgs.writeShellScript "agent-verify-run" (builtins.readFile ./agent-verify-run.sh)}";
             };
           };
 

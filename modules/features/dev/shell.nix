@@ -54,29 +54,7 @@ mkFeatureModule {
 
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
 
-      findFlakeRoot = pkgs.writeShellScriptBin "find-flake-root" ''
-        #!/usr/bin/env bash
-        set -euo pipefail
-        if [ -n "''${FLAKE:-}" ]; then
-          printf '%s\n' "$FLAKE"
-          exit 0
-        fi
-        if command -v git >/dev/null 2>&1; then
-          if git_root=$(git rev-parse --show-toplevel 2>/dev/null); then
-            printf '%s\n' "$git_root"
-            exit 0
-          fi
-        fi
-        if [ -n "''${PRJ_ROOT:-}" ]; then
-          printf '%s\n' "$PRJ_ROOT"
-          exit 0
-        fi
-        if [ -n "''${DEVENV_ROOT:-}" ]; then
-          printf '%s\n' "$DEVENV_ROOT"
-          exit 0
-        fi
-        printf '%s\n' "$PWD"
-      '';
+      findFlakeRoot = pkgs.writeShellScriptBin "find-flake-root" (builtins.readFile ./find-flake-root.sh);
     in
     lib.mkMerge [
       # ========================================
@@ -368,6 +346,9 @@ mkFeatureModule {
             home.sessionVariables = {
               EDITOR = "nvim";
               VISUAL = "nvim";
+              # why mkForce: home-manager defaults PAGER via programs.zsh
+              # (typically `less` without -R). Force the colour-aware form
+              # so SGR escapes from rg/bat/git render correctly.
               PAGER = lib.mkForce "less -R";
               MANPAGER = "nvim +Man!";
               PYTHONDONTWRITEBYTECODE = "1";

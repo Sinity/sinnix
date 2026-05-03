@@ -168,7 +168,12 @@ let
         name: type:
         !excludeSet ? ${name}
         && (
-          (type == "regular" && name != "default.nix" && lib.hasSuffix ".nix" name)
+          (
+            type == "regular"
+            && name != "default.nix"
+            && lib.hasSuffix ".nix" name
+            && !(lib.hasSuffix ".test.nix" name)
+          )
           || (type == "directory" && builtins.pathExists (dir + "/${name}/default.nix"))
         );
       moduleNames = lib.filterAttrs isModule entries;

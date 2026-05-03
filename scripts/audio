@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# @sinnix-package
+# description: Audio device and volume control with gum UI
+# runtimeInputs: coreutils gum pulseaudio pamixer
 # audio - Unified audio management for PipeWire
 # Usage: audio [toggle|status|mic-toggle|mic-status|volume-up|volume-down|mute]
 

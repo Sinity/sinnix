@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# @sinnix-package
+# description: Render CLAUDE.md @includes into generated AGENTS.md
+# runtimeInputs: coreutils python3
 """Render Markdown transclusions from source instruction doc into output doc."""
 
 from __future__ import annotations

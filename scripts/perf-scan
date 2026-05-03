@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# @sinnix-package
+# description: Comprehensive system performance benchmarking
+# runtimeInputs: bash coreutils cpuid dmidecode ethtool fio flent gawk gnugrep gnused gum hw-probe hwdata i7z intel-gpu-tools inxi iperf3 iproute2 iw linuxPackages.turbostat lm_sensors mcelog memtester ncurses netperf nvme-cli numactl pciutils perf phoronix-test-suite powertop procps python3 python3Packages.speedtest-cli rt-tests s-tui smartmontools stress-ng stressapptest sysbench sysstat usbutils util-linux glmark2
 set -euo pipefail
 
 # Auto-elevate to root if not already, preserving environment (PATH, etc.)

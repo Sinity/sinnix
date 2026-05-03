@@ -1,16 +1,28 @@
-# Script Registry
-#
-# Central registry for scripts that need packaging (PATH, dependencies).
-# Scripts in scripts/ are referenced directly by hyprland bindings via
-# ${repoRoot}/scripts/... and don't need packaging unless they:
-#   1. Need to be in PATH for shell use
-#   2. Have runtime dependencies that must be in PATH
-#
-# Module-scoped scripts (mcp-*, crypto, storage) remain inline in their
-# modules as they're tightly coupled to that configuration.
+/*
+  Script registry — director only.
+
+  All packaged scripts under `scripts/` opt in via `# @sinnix-package`
+  frontmatter (description + runtimeInputs); discovery code in
+  `flake/script-discovery.nix` walks the directory and constructs the
+  package set.
+
+  Scripts launched directly by Hyprland keybindings or sourced by the
+  shell declare `# @sinnix-package: skip`.
+
+  This file additionally exposes the few non-script packages that wrap
+  external flake outputs (lynchpin/polylogue Pythons) and the npm-vendor
+  packages (mcp-firecrawl, ccusage).
+*/
 { inputs, pkgs }:
 let
-  scriptPath = name: inputs.self + "/scripts/${name}";
+  inherit (pkgs) lib;
+
+  discovery = import ./script-discovery.nix { inherit lib pkgs; };
+  discovered = discovery.discover (inputs.self + "/scripts");
+
+  registry = discovered.registry;
+  scriptPackages = lib.mapAttrs (_: v: v.package) registry;
+
   mkSanitizedPythonWrapper =
     {
       name,
@@ -59,298 +71,7 @@ let
       };
     };
 
-  # Helper to create a script wrapper
-  mkScript =
-    name:
-    {
-      description,
-      runtimeInputs ? [ ],
-      bashArgs ? "",
-      runner ? null,
-    }:
-    {
-      inherit description runtimeInputs;
-      package = pkgs.writeShellApplication {
-        inherit name runtimeInputs;
-        text = ''
-          RUNNER="${if runner != null then runner else ""}"
-          if [ -n "$RUNNER" ]; then
-            exec "$RUNNER" ${scriptPath name} "$@"
-          fi
-          exec ${pkgs.bash}/bin/bash ${bashArgs} ${scriptPath name} "$@"
-        '';
-      };
-    };
-
-  sinnixScope = mkScript "sinnix-scope" {
-    description = "Place commands in Sinnix resource slices without duplicating systemd-run policy";
-    runtimeInputs = with pkgs; [
-      bash
-      coreutils
-      gnugrep
-      systemd
-    ];
-  };
-
-  # Registry of scripts needing packaging
-  registry = {
-    # System utilities
-    asbl-no-moar = mkScript "asbl-no-moar" {
-      description = "Disable ASBL (Automatic Screen Brightness Limiting) on monitors";
-      runtimeInputs = with pkgs; [
-        coreutils
-        procps
-      ];
-    };
-
-    hogkill = mkScript "hogkill" {
-      description = "Interactive memory hog killer with gum UI";
-      runtimeInputs = with pkgs; [
-        coreutils
-        gum
-        procps
-        gawk
-        gnugrep
-        gnused
-      ];
-    };
-
-    nuke-builds = mkScript "nuke-builds" {
-      description = "Emergency load shedding for runaway background, build, and LSP work";
-      runtimeInputs = with pkgs; [
-        coreutils
-        systemd
-        procps
-        gnugrep
-        libnotify
-      ];
-    };
-
-    sinnix-scope = sinnixScope;
-
-    nix-safe = mkScript "nix-safe" {
-      description = "Nix wrapper that only applies explicit job/core overrides when requested";
-      runtimeInputs = with pkgs; [
-        bash
-        coreutils
-        sinnixScope.package
-      ];
-    };
-
-    sinnix-observe = mkScript "sinnix-observe" {
-      description = "Join live pressure, systemd placement, Sinex xtask history, and Polylogue run ledgers";
-      runtimeInputs = with pkgs; [
-        bash
-        below
-        coreutils
-        gawk
-        gnugrep
-        gnused
-        jq
-        procps
-        sqlite
-        sysstat
-        systemd
-        util-linux
-      ];
-    };
-
-    # Diagnostics
-    perf-scan = mkScript "perf-scan" {
-      description = "Comprehensive system performance benchmarking";
-      runtimeInputs = with pkgs; [
-        bash
-        coreutils
-        cpuid
-        dmidecode
-        ethtool
-        fio
-        flent
-        gawk
-        gnugrep
-        gnused
-        gum
-        hw-probe
-        hwdata
-        i7z
-        intel-gpu-tools
-        inxi
-        iperf3
-        iproute2
-        iw
-        linuxPackages.turbostat
-        lm_sensors
-        mcelog
-        memtester
-        ncurses
-        netperf
-        nvme-cli
-        numactl
-        pciutils
-        perf
-        phoronix-test-suite
-        powertop
-        procps
-        python3
-        python3Packages.speedtest-cli
-        rt-tests
-        s-tui
-        smartmontools
-        stress-ng
-        stressapptest
-        sysbench
-        sysstat
-        usbutils
-        util-linux
-        glmark2
-      ];
-    };
-
-    # Audio control
-    audio = mkScript "audio" {
-      description = "Audio device and volume control with gum UI";
-      runtimeInputs = with pkgs; [
-        coreutils
-        gum
-        pulseaudio
-        pamixer
-      ];
-    };
-
-    media-preview-cache = mkScript "media-preview-cache" {
-      description = "Precompute and query cached media preview thumbnails";
-      runtimeInputs = with pkgs; [
-        bash
-        coreutils
-        fd
-        ffmpegthumbnailer
-        findutils
-        util-linux
-      ];
-    };
-
-    # Rawlog utilities
-    rawlog = mkScript "rawlog" {
-      runtimeInputs = with pkgs; [
-        coreutils
-        less
-        gnused
-        tofi
-        libnotify
-      ];
-    };
-
-    rawlog-capture = mkScript "rawlog-capture" {
-      description = "Capture rawlog entries via gum UI";
-      runtimeInputs = with pkgs; [
-        coreutils
-        gum
-      ];
-    };
-
-    # Development helpers
-    repo-map = mkScript "repo-map" {
-      description = "Generate repository structure map";
-      runtimeInputs = with pkgs; [
-        coreutils
-        fd
-        gnused
-        tree
-      ];
-    };
-
-    lsp-root = mkScript "lsp-root" {
-      description = "Find project root and exec command from there";
-      runtimeInputs = with pkgs; [ coreutils ];
-    };
-
-    render-agents = mkScript "render-agents" {
-      description = "Render CLAUDE.md @includes into generated AGENTS.md";
-      runtimeInputs = with pkgs; [
-        coreutils
-        python3
-      ];
-      runner = "${pkgs.python3}/bin/python3";
-    };
-
-    normalize-agent-projects = mkScript "normalize-agent-projects" {
-      description = "Normalize CLAUDE/AGENTS instruction docs across project repos";
-      runtimeInputs = with pkgs; [
-        coreutils
-        findutils
-        git
-        gnugrep
-      ];
-    };
-
-    verify-agent-topology = mkScript "verify-agent-topology" {
-      description = "Verify CLAUDE/AGENTS topology and sync invariants across project repos";
-      runtimeInputs = with pkgs; [
-        coreutils
-        findutils
-        git
-        gnugrep
-        python3
-      ];
-    };
-
-    # Storage utilities
-    encrypt-folder = mkScript "encrypt-folder" {
-      description = "Encrypt a folder using gocryptfs";
-      runtimeInputs = with pkgs; [
-        coreutils
-        gocryptfs
-        rsync
-        util-linux
-      ];
-    };
-
-    decrypt-folder = mkScript "decrypt-folder" {
-      description = "Decrypt/mount a gocryptfs folder";
-      runtimeInputs = with pkgs; [
-        coreutils
-        gocryptfs
-      ];
-    };
-
-    mount-nextcloud = mkScript "mount-nextcloud" {
-      description = "Mount Nextcloud WebDAV share";
-      runtimeInputs = with pkgs; [
-        coreutils
-        util-linux
-      ];
-    };
-
-    umount-nextcloud = mkScript "umount-nextcloud" {
-      description = "Unmount Nextcloud WebDAV share";
-      runtimeInputs = with pkgs; [
-        coreutils
-        util-linux
-      ];
-    };
-
-    # System health
-    sinnix-sentinel = mkScript "sinnix-sentinel" {
-      description = "System health monitor with auto-derived checks";
-      runtimeInputs = with pkgs; [
-        coreutils
-        findutils
-        gawk
-        python3
-        jq
-        systemd
-        util-linux
-        gnugrep
-        procps
-        sudo
-        libnotify
-        smartmontools
-        borgbackup
-      ];
-    };
-  };
-  scriptPackages = builtins.mapAttrs (_: v: v.package) registry;
-  packageSet = scriptPackages // {
+  externalPackages = {
     lynchpin-python = pkgs.writeShellScriptBin "lynchpin-python" ''
       set -euo pipefail
       exec ${inputs.lynchpin.packages.${pkgs.stdenv.hostPlatform.system}.api-python}/bin/python "$@"
@@ -384,15 +105,12 @@ let
       npmDepsHash = "sha256-/duhx34Iiq+7ZOaRTTAWChbGjJhxiVvWOoaLJsH2USc=";
     };
   };
+
+  packageSet = scriptPackages // externalPackages;
 in
 {
-  # Export packages for flake outputs
   packages = scriptPackages;
   inherit packageSet;
-
-  # Export registry metadata for documentation/tooling
   inherit registry;
-
-  # List available scripts
-  list = builtins.attrNames registry;
+  list = lib.attrNames registry;
 }

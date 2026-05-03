@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# @sinnix-package
+# description: Normalize CLAUDE/AGENTS instruction docs across project repos
+# runtimeInputs: coreutils findutils git gnugrep
 set -euo pipefail
 
 usage() {

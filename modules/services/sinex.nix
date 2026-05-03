@@ -92,6 +92,10 @@
   };
 
   config = lib.mkIf (config.sinnix.services.sinex.enable && !config.sinnix.services.sinex.autoStart) {
+    # why mkForce: when the host opts out of auto-start, sentinel must
+    # not include sinex in the auto-derived health-policy (otherwise it
+    # resurrects manually-stopped runtime services). The default health
+    # value above is set unconditionally; override it to null here.
     sinnix.services.sinex.health = lib.mkForce null;
   };
 }

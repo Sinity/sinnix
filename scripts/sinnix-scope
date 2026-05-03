@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# @sinnix-package
+# description: Place commands in Sinnix resource slices without duplicating systemd-run policy
+# runtimeInputs: bash coreutils gnugrep systemd
 # Place a command in a Sinnix resource slice.
 #
 # Slice limits live in modules/performance.nix. This helper owns placement so

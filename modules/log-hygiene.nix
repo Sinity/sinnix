@@ -71,6 +71,9 @@
       # interception-tools (udevmon) logs JSON stats constantly = 21% of all logs
       # Example spam: 176,431 messages in 3 days = 2,378 messages/hour
       interception-tools.serviceConfig = {
+        # why mkForce: the keyboard/intercept-bounce stack re-enables
+        # journal output via mkDefault. Suppress it unconditionally;
+        # 176k messages over 3 days is pure noise.
         StandardOutput = lib.mkForce "null";
         StandardError = lib.mkDefault "journal";
       };

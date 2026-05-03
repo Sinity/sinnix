@@ -7,6 +7,8 @@
       grub = {
         enable = true;
         devices = [ "/dev/vda" ];
+        # why mkForce: the shared boot module assumes the sinnix-prime
+        # mirrored-boot layout (two NVMe devices). VPS only has /dev/vda.
         mirroredBoots = lib.mkForce (
           lib.singleton {
             path = "/boot";

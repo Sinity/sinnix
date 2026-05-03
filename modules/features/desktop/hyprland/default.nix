@@ -82,7 +82,8 @@ in
     # -------------------------------------------------------------------------
     programs.hyprland = {
       enable = lib.mkDefault true;
-      # Force UWSM for proper systemd-managed session (required for XDG portal reliability)
+      # why mkForce: nixos-hyprland defaults withUWSM=false; UWSM is
+      # required for proper systemd-managed session (XDG portal reliability).
       withUWSM = lib.mkForce true;
       package = lib.mkDefault pkgs.hyprland;
       portalPackage = lib.mkDefault pkgs.xdg-desktop-portal-hyprland;
@@ -195,7 +196,8 @@ in
 
             misc = {
               enable_anr_dialog = false;
-              # Override stylix which sets this true; keep logo visible during startup
+              # why mkForce: stylix sets this true; keep the logo visible
+              # during startup as a "compositor alive" indicator.
               disable_hyprland_logo = lib.mkForce false;
               vrr = 2;
               mouse_move_enables_dpms = true;
@@ -279,7 +281,9 @@ in
           xdg-desktop-portal-gtk
         ];
 
-        # Prevent hyprpaper restarts on config changes (wallpaper is set once at login)
+        # why mkForce: home-manager auto-injects X-Restart-Triggers from
+        # config-file hashes. The wallpaper is set once at login; flushing
+        # restarts on every HM rebuild causes a visible flash.
         systemd.user.services.hyprpaper.Unit.X-Restart-Triggers = lib.mkForce [ ];
       };
   };

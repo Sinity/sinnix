@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# @sinnix-package
+# description: Decrypt/mount a gocryptfs folder
+# runtimeInputs: coreutils gocryptfs
 set -euo pipefail
 
 if [ $# -ne 2 ]; then

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# @sinnix-package: skip
 set -euo pipefail
 
 if command -v code >/dev/null 2>&1; then

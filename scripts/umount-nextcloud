@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# @sinnix-package
+# description: Unmount Nextcloud WebDAV share
+# runtimeInputs: coreutils util-linux
 set -euo pipefail
 if ! mountpoint -q /mnt/nextcloud; then
   exit 0

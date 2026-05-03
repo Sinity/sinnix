@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# @sinnix-package
+# runtimeInputs: coreutils less gnused tofi libnotify
 set -euo pipefail
 
 # Quick append-only logger for the raw-log stream.

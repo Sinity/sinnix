@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# @sinnix-package
+# description: Emergency load shedding for runaway background, build, and LSP work
+# runtimeInputs: coreutils systemd procps gnugrep libnotify
 # Emergency load shedding for the F9 recovery binding.
 #
 # SAFETY: Uses pgrep without -f to match process names only (not full command line)

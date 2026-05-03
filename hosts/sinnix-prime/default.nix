@@ -54,6 +54,9 @@
     network-monitor.enable = true;
     weechat-log-sealer.enable = true;
   };
+  # why mkForce: this board's fTPM hangs the systemd-tpm2-setup unit on
+  # activation (kernel d-state up to 30s). lanzaboote / boot defaults
+  # would re-enable it; this host opts out unconditionally.
   systemd.services.systemd-tpm2-setup.enable = lib.mkForce false;
   systemd.services.systemd-tpm2-setup-early.enable = lib.mkForce false;
 }

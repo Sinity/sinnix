@@ -3,6 +3,18 @@
 # This module carries the heavy integration with the upstream `services.sinex`
 # option tree. Keep it opt-in so the generic sinnix module graph does not pay
 # for Sinex evaluation when the host does not import the upstream module.
+#
+# Workstation policy is now expressed through upstream options
+# (services.sinex.runtime.*, .bootstrap.*, .nats.killPolicy). This bridge
+# only carries what is genuinely host-specific:
+#   - workstation memory / IO budgets for NATS and PostgreSQL
+#   - per-node MemoryMax/CPUQuota suppression (until upstream surfaces
+#     services.sinex.nodes.<n>.resources.memoryMax = null as an option)
+#   - cache placement under /cache/nats/jetstream and /cache/sinex
+#   - secrets paths + sinex user home + database password binding
+#   - the deferred-startup orchestration around sinex-runtime.timer for
+#     non-sinex bootstrap units (postgresql/postgresql-setup) that the
+#     upstream module cannot gate on its own attachToMultiUser flag
 {
   config,
   options,
@@ -132,41 +144,27 @@ in
       uncappedRuntimeServices = builtins.filter (
         name: !(builtins.elem name cappedRuntimeServices)
       ) delayedRuntimeServices;
-      runtimeServicePolicy = {
+      # Bridge-side policy that the upstream options can't yet express:
+      # - RequiresMountsFor on the captureRoot (host-specific path)
+      # - wantedBy=[] for non-sinex services (postgresql/postgresql-setup)
+      #   that upstream's runtime.target.attachToMultiUser cannot gate
+      bridgeRuntimePolicy = {
         wantedBy = lib.mkForce [ ];
         unitConfig = {
           PartOf = [ "sinex-runtime.target" ];
           RequiresMountsFor = [ sinexCaptureRoot ];
         };
-        # Sinex starts through sinex-runtime.target, not as a side effect of
-        # host activation. Several services require bootstrap/preflight units
-        # that pull NATS/PostgreSQL up; restart-on-switch recreated pressure
-        # incidents during ordinary NixOS activation.
         restartIfChanged = false;
       };
-      uncappedRuntimeServicePolicy = {
+      # why mkForce: upstream Sinex's per-node resourceModule sets concrete
+      # MemoryMax/CPUQuota defaults for portability. Workstation pressure
+      # concentrates at the storage substrate (PostgreSQL/NATS) where the
+      # bridge sets explicit caps below; per-node hard caps would silently
+      # throttle capture correctness without solving the underlying issue.
+      perNodeUncapped = {
         serviceConfig = {
-          # Upstream Sinex's reusable NixOS module ships concrete
-          # MemoryMax/CPUQuota defaults for portability. This workstation keeps
-          # runtime daemons bounded at the substrate where it matters
-          # (PostgreSQL/NATS) and otherwise uses restart limits/weights, not
-          # per-node hard caps that can silently throttle capture correctness.
           MemoryMax = lib.mkForce null;
           CPUQuota = lib.mkForce null;
-        };
-      };
-      boundedRuntimeRestartPolicy = {
-        unitConfig = {
-          # Upstream Sinex uses unlimited StartLimitIntervalSec=0 for capture
-          # daemons. On this workstation, failure loops must stop and become
-          # visible instead of generating unbounded NATS/Postgres/git-annex
-          # pressure. Normal transient failures still get a few retries.
-          StartLimitIntervalSec = lib.mkForce 600;
-          StartLimitBurst = lib.mkForce 3;
-        };
-        serviceConfig = {
-          Restart = lib.mkForce "on-failure";
-          RestartSec = lib.mkForce "30s";
         };
       };
       mkScopedSinexPackage =
@@ -383,86 +381,91 @@ in
               enable = runtimeEnabled && activationProfile.kitty;
               autoConfigure = runtimeEnabled && activationProfile.kitty;
             };
+
+            # Workstation runtime policy via upstream options.
+            # Replaces the per-attribute mkForce overrides this bridge
+            # used to scatter across runtimeServicePolicy and
+            # boundedRuntimeRestartPolicy.
+            runtime = {
+              target = {
+                attachToMultiUser = false;
+                manualStartOnly = true;
+              };
+              restartOnSwitch = false;
+              restartPolicy = {
+                # Bound failure loops at three retries / 10 minutes / 30s
+                # backoff so a stuck capture daemon stops generating
+                # NATS/Postgres pressure and becomes visible instead.
+                mode = "on-failure";
+                backoffSec = 30;
+                intervalSec = 600;
+                burst = 3;
+              };
+            };
+            bootstrap.restartPolicy = "no";
+            nats.killPolicy = {
+              # NATS' graceful SIGUSR2 drain can sit for minutes while
+              # JetStream is already the pressure source. Operator stops
+              # need to converge quickly.
+              signal = "SIGTERM";
+              timeoutStopSec = "10s";
+            };
           };
         };
       })
 
       (lib.mkIf runtimeEnabled {
         # Sinex is a capture runtime, not a boot prerequisite for the desktop.
-        # Start the stack shortly after boot through an explicit target so
-        # PostgreSQL/schema apply/NATS/node startup cannot hold graphical.target.
-        # Strip both direct services and the postgresql.target install surface;
-        # otherwise local PostgreSQL still leaks into multi-user.target.
-        systemd.services =
-          lib.genAttrs delayedRuntimeServices (_: runtimeServicePolicy)
-          // lib.genAttrs uncappedRuntimeServices (
-            _:
-            lib.mkMerge [
-              runtimeServicePolicy
-              uncappedRuntimeServicePolicy
-            ]
-          )
-          // lib.genAttrs restartableRuntimeServices (
-            _:
-            lib.mkMerge [
-              runtimeServicePolicy
-              uncappedRuntimeServicePolicy
-              boundedRuntimeRestartPolicy
-            ]
-          )
-          // {
+        # The upstream module's runtime.target.attachToMultiUser=false +
+        # restartOnSwitch=false + restartPolicy options (set above) handle the
+        # six long-running runtime services; this block carries only what
+        # upstream cannot:
+        #   - workstation memory/IO budgets for NATS and PostgreSQL
+        #   - per-node MemoryMax/CPUQuota suppression for capture daemons
+        #   - bridge-side gating for non-sinex services (postgresql) and the
+        #     sinex one-shots (blob-init, tls-init, schema-apply, kitty-setup,
+        #     document-scan, nats-bootstrap, preflight) that upstream keeps
+        #     attached to multi-user.target
+        systemd.services = lib.mkMerge [
+          # Per-node uncap (until upstream surfaces a node-resources option):
+          # workstation pressure concentrates at NATS/PostgreSQL where the
+          # bridge sets explicit caps below. Drop the per-daemon caps that
+          # upstream's resourceModule defaults pin on capture nodes,
+          # ingestd, and gateway.
+          (lib.genAttrs (uncappedRuntimeServices ++ restartableRuntimeServices) (_: perNodeUncapped))
+          # Bridge-gated services that aren't the six upstream-handled ones
+          # (postgresql/postgresql-setup/sinex-blob-init/sinex-tls-init/...).
+          (lib.genAttrs (
+            lib.filter (
+              n: !(builtins.elem n [
+                "sinex-ingestd"
+                "sinex-gateway"
+              ])
+            ) delayedRuntimeServices
+          ) (_: bridgeRuntimePolicy))
+          {
             # Keep NATS bounded without forcing JetStream restore into swap.
             # Live delayed-start verification on 2026-05-03 showed the old 1G
-            # cap pinned nats-server at the limit and pushed ~1.8G to swap while
-            # restoring the confirmation stream. The high/max pair below leaves
-            # room for the observed working set while still bounding runaway
-            # growth. IOWeight=10 keeps sustained JetStream I/O below
+            # cap pinned nats-server at the limit and pushed ~1.8G to swap
+            # while restoring the confirmation stream. The high/max pair below
+            # leaves room for the observed working set while still bounding
+            # runaway growth. IOWeight=10 keeps sustained JetStream I/O below
             # interactive work without hard per-device throughput ceilings.
             nats = lib.mkMerge [
-              runtimeServicePolicy
+              bridgeRuntimePolicy
               {
                 serviceConfig = {
                   MemoryHigh = "4G";
                   MemoryMax = "6G";
                   IOWeight = 10;
-                  # NATS' graceful SIGUSR2 drain can sit for minutes while
-                  # JetStream is already the pressure source. Operator stops
-                  # need to converge quickly.
-                  KillSignal = lib.mkForce "SIGTERM";
-                  TimeoutStopSec = lib.mkForce "10s";
                 };
               }
             ];
 
-            # These are validation/bootstrap one-shots. Restart loops here keep
-            # pulling NATS/PostgreSQL back up after an operator stops the runtime,
-            # which is exactly the failure mode seen during the 2026-05-02
-            # pressure incident.
-            sinex-nats-bootstrap = {
-              restartIfChanged = false;
-              unitConfig.PartOf = [ "sinex-runtime.target" ];
-              wantedBy = lib.mkForce [ ];
-              serviceConfig = {
-                Restart = lib.mkForce "no";
-                MemoryMax = lib.mkForce null;
-                CPUQuota = lib.mkForce null;
-              };
-            };
-            sinex-preflight = {
-              restartIfChanged = false;
-              unitConfig.PartOf = [ "sinex-runtime.target" ];
-              wantedBy = lib.mkForce [ ];
-              serviceConfig = {
-                Restart = lib.mkForce "no";
-                MemoryMax = lib.mkForce null;
-                CPUQuota = lib.mkForce null;
-              };
-            };
-
-            # Restrict PostgreSQL from consuming all system memory and give it
-            # proportional background I/O priority without fixed device caps.
+            # PostgreSQL: nixpkgs module, not sinex; upstream Sinex options
+            # cannot gate it. Keep the bridge override.
             postgresql = lib.mkMerge [
-              runtimeServicePolicy
+              bridgeRuntimePolicy
               {
                 unitConfig.PartOf = lib.mkAfter [ "sinex-runtime.target" ];
                 serviceConfig = {
@@ -472,26 +475,27 @@ in
                 };
               }
             ];
+          }
+        ];
+        # postgresql.target leaks into multi-user even with the runtime
+        # service's wantedBy stripped; suppress separately.
+        systemd.targets = lib.genAttrs delayedRuntimeTargets (_: {
+          wantedBy = lib.mkForce [ ];
+        }) // {
+          sinex-runtime = {
+            # Augment the upstream-defined sinex-runtime.target with the
+            # workstation-specific description and the extra wants/after
+            # this host needs (the bridge-gated services above are not in
+            # the upstream's PartOf graph).
+            description = lib.mkForce "Delayed automatic Sinex runtime";
+            wants = delayedRuntimeUnits ++ [ "network-online.target" ];
+            after = [
+              "multi-user.target"
+              "graphical.target"
+              "network-online.target"
+            ];
           };
-        systemd.targets =
-          lib.genAttrs delayedRuntimeTargets (_: {
-            wantedBy = lib.mkForce [ ];
-          })
-          // {
-            sinex-runtime = {
-              description = "Delayed automatic Sinex runtime";
-              # NixOS activation metadata only: do not start/restart the target
-              # during a switch. The sinex-runtime.timer still starts this
-              # target automatically after the configured delay.
-              unitConfig.X-OnlyManualStart = true;
-              wants = delayedRuntimeUnits ++ [ "network-online.target" ];
-              after = [
-                "multi-user.target"
-                "graphical.target"
-                "network-online.target"
-              ];
-            };
-          };
+        };
         systemd.timers = {
           sinex-runtime = {
             description = "Delay Sinex runtime startup until after boot";

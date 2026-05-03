@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# @sinnix-package
+# description: Generate repository structure map
+# runtimeInputs: coreutils fd gnused tree
 # repo-map - Generate an AI-optimized repository map
 # Usage: repo-map [--full]
 

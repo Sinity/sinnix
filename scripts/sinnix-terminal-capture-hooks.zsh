@@ -1,4 +1,5 @@
 #!/usr/bin/env zsh
+# @sinnix-package: skip
 
 if [[ -z ${ZSH_VERSION:-} ]]; then
   return 0 2>/dev/null || exit 0

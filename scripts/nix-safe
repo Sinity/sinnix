@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# @sinnix-package
+# description: Nix wrapper that only applies explicit job/core overrides when requested
+# runtimeInputs: bash coreutils @sinnix-scope
 set -euo pipefail
 
 if (( $# == 0 )); then

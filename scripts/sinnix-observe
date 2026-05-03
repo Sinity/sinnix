@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# @sinnix-package
+# description: Join live pressure, systemd placement, Sinex xtask history, and Polylogue run ledgers
+# runtimeInputs: bash below coreutils gawk gnugrep gnused jq procps sqlite sysstat systemd util-linux
 # Cross-project observability entrypoint for the workstation.
 
 set -euo pipefail

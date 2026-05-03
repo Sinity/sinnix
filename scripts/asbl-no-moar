@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# @sinnix-package
+# description: Disable ASBL (Automatic Screen Brightness Limiting) on monitors
+# runtimeInputs: coreutils procps
 # asbl-no-moar - Prevent OLED/LCD ASBL by periodically pulsing screen brightness
 #
 # Usage: asbl-no-moar [start|stop|status|toggle|once] [options]

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# @sinnix-package
+# description: Interactive memory hog killer with gum UI
+# runtimeInputs: coreutils gum procps gawk gnugrep gnused
 set -euo pipefail
 
 # kill-hog: Interactive process killer using gum
