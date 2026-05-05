@@ -81,7 +81,7 @@
           set -euo pipefail
           flake_ref="$1"
           shift
-          rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-auto}"
+          rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-8}"
           rebuild_cores="''${SINNIX_REBUILD_CORES:-0}"
           PATH="${safeSudoPathPrefix}:$PATH" \
             sudo ${pkgs.systemd}/bin/systemd-run \

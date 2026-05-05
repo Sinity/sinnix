@@ -49,12 +49,12 @@ mkFeatureModule {
 
       systemd.coredump = {
         enable = true;
-        extraConfig = ''
-          Storage=none
-          ProcessSizeMax=128M
-          ExternalSizeMax=0
-          JournalSizeMax=8M
-        '';
+        settings.Coredump = {
+          Storage = "none";
+          ProcessSizeMax = "128M";
+          ExternalSizeMax = "0";
+          JournalSizeMax = "8M";
+        };
       };
       systemd.services."systemd-coredump@".serviceConfig = {
         MemoryHigh = "256M";
@@ -116,19 +116,255 @@ mkFeatureModule {
           };
 
           xdg.configFile."direnv/direnvrc".text = ''
+            _sinnix_project_root() {
+              if command -v git >/dev/null 2>&1; then
+                local git_root
+                git_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+                if [ -n "$git_root" ]; then
+                  printf '%s\n' "$git_root"
+                  return 0
+                fi
+              fi
+
+              case "$PWD" in
+                /realm/project/*)
+                  local rest
+                  rest="''${PWD#/realm/project/}"
+                  printf '/realm/project/%s\n' "''${rest%%/*}"
+                  ;;
+                *) return 1 ;;
+              esac
+            }
+
+            _sinnix_project_kind() {
+              local project_root
+              project_root="$(_sinnix_project_root)" || return 1
+
+              case "$project_root" in
+                /realm/project/sinnix) printf '%s\n' sinnix ;;
+                /realm/project/sinity-lynchpin) printf '%s\n' lynchpin ;;
+                /realm/project/sinex | /realm/project/sinex-*) printf '%s\n' sinex ;;
+                /realm/project/polylogue | /realm/project/polylogue-*) printf '%s\n' polylogue ;;
+                /realm/project/scribe-tap) printf '%s\n' rust-project ;;
+                /realm/project/intercept-bounce) printf '%s\n' rust-project ;;
+                /realm/project/reboot-no-more) printf '%s\n' rust-project ;;
+                /realm/project/knowledge-extract) printf '%s\n' python-project ;;
+                /realm/project/pwrank) printf '%s\n' web-project ;;
+                /realm/project/knowledgebase) printf '%s\n' data-project ;;
+                /realm/project/*)
+                  if [ -e "$project_root/flake.nix" ] \
+                    || [ -e "$project_root/Cargo.toml" ] \
+                    || [ -e "$project_root/pyproject.toml" ] \
+                    || [ -e "$project_root/package.json" ] \
+                    || [ -e "$project_root/justfile" ] \
+                    || [ -e "$project_root/Justfile" ]; then
+                    printf '%s\n' realm-project
+                  else
+                    return 1
+                  fi
+                  ;;
+                *) return 1 ;;
+              esac
+            }
+
+            _sinnix_path_without() {
+              local remove="$1"
+              local old_ifs="$IFS"
+              local part
+              local next=""
+              IFS=:
+              for part in $PATH; do
+                [ "$part" = "$remove" ] && continue
+                next="$next''${next:+:}$part"
+              done
+              IFS="$old_ifs"
+              printf '%s' "$next"
+            }
+
             # Host-local cache policy for portable project devshells.
             #
             # Projects should consume these generic env vars without knowing
             # Sinnix device paths. This keeps /cache routing in Sinnix while
             # leaving the project flakes portable on other machines.
-            case "$PWD" in
-              /realm/project/sinex)
-                if [ -d /cache/sinex ]; then
-                  _sinex_checkout_hash="$(printf '%s' "$PWD" | sha256sum | cut -c1-12)"
-                  export SINEX_DEV_CACHE_ROOT="/cache/sinex/$_sinex_checkout_hash"
-                fi
-                ;;
+            _sinnix_project_cache_setup() {
+              local project_root
+              project_root="$(_sinnix_project_root)" || return 0
+
+              case "$project_root" in
+                /realm/project/sinex | /realm/project/sinex-*)
+                  if [ -d /cache/sinex ]; then
+                    local checkout_hash
+                    checkout_hash="$(printf '%s' "$project_root" | sha256sum | cut -c1-12)"
+                    export SINEX_DEV_CACHE_ROOT="/cache/sinex/$checkout_hash"
+                    mkdir -p "$SINEX_DEV_CACHE_ROOT"
+                    touch "$SINEX_DEV_CACHE_ROOT/.sinnix-last-used" 2>/dev/null || true
+                  fi
+                  ;;
+              esac
+            }
+
+            _sinnix_write_scope_wrapper() {
+              local wrapper="$1"
+              cat > "$wrapper" <<'SINNIX_SCOPE_WRAPPER'
+            #!/usr/bin/env bash
+            set -euo pipefail
+
+            cmd="''${0##*/}"
+            case "$cmd" in
+              nix | nixos-rebuild) class="nix-build" ;;
+              polylogue | sqlite3 | duckdb) class="background" ;;
+              *) class="build" ;;
             esac
+
+            if [ -n "''${SINNIX_SCOPE_WRAPPER_ACTIVE:-}" ]; then
+              export PATH="''${SINNIX_SCOPE_ORIGINAL_PATH:-$PATH}"
+              exec "$cmd" "$@"
+            fi
+
+            export SINNIX_SCOPE_WRAPPER_ACTIVE=1
+            export PATH="''${SINNIX_SCOPE_ORIGINAL_PATH:-$PATH}"
+
+            scope_bin="''${SINNIX_SCOPE_BIN:-}"
+            if [ -z "$scope_bin" ]; then
+              scope_bin="$(command -v sinnix-scope 2>/dev/null || true)"
+            fi
+            if [ -z "$scope_bin" ] && [ -x /realm/project/sinnix/scripts/sinnix-scope ]; then
+              scope_bin=/realm/project/sinnix/scripts/sinnix-scope
+            fi
+
+            if [ -n "$scope_bin" ] && [ -x "$scope_bin" ]; then
+              exec "$scope_bin" "$class" -- "$cmd" "$@"
+            fi
+
+            exec "$cmd" "$@"
+            SINNIX_SCOPE_WRAPPER
+              chmod +x "$wrapper"
+            }
+
+            # Project dev environments install transparent wrappers for heavy
+            # commands. Agents and humans run normal commands; the commands land
+            # in the Sinnix build/background slices when a recognized project
+            # devshell is active.
+            #
+            # Keep this broad for active /realm/project work, not only for
+            # projects with bespoke cache policy. The observed failure mode was
+            # an agent in an unrecognized repo launching plain `nix build`; the
+            # root nix-daemon was weighted, but the user-side command inherited
+            # the agent/background cgroup and attribution became split.
+            _sinnix_project_scope_setup() {
+              local project_kind
+              project_kind="$(_sinnix_project_kind)" || return 0
+
+              local project_root
+              project_root="$(_sinnix_project_root)" || return 0
+
+              local wrapper_dir
+              wrapper_dir="$(direnv_layout_dir)/sinnix-scope/bin"
+              mkdir -p "$wrapper_dir"
+              _sinnix_write_scope_wrapper "$wrapper_dir/.sinnix-scope-wrapper"
+
+              local commands=()
+              case "$project_kind" in
+                sinex)
+                  commands=(
+                    cargo cargo-nextest nextest
+                    pytest py.test
+                    nix nixos-rebuild
+                    ninja cmake meson make just
+                    git-annex xtask
+                    sqlite3 duckdb
+                  )
+                  ;;
+                polylogue)
+                  commands=(
+                    pytest py.test uv
+                    nix nixos-rebuild
+                    make just
+                    sqlite3 duckdb
+                    polylogue
+                  )
+                  ;;
+                sinnix)
+                  commands=(
+                    nix nixos-rebuild
+                    check just make
+                    sqlite3 duckdb
+                  )
+                  ;;
+                lynchpin)
+                  commands=(
+                    pytest py.test uv
+                    nix nixos-rebuild
+                    make just
+                    sqlite3 duckdb
+                  )
+                  ;;
+                rust-project)
+                  commands=(
+                    cargo cargo-nextest nextest
+                    nix nixos-rebuild
+                    make just ninja cmake meson
+                    sqlite3 duckdb
+                  )
+                  ;;
+                python-project)
+                  commands=(
+                    pytest py.test uv
+                    nix nixos-rebuild
+                    make just
+                    sqlite3 duckdb
+                  )
+                  ;;
+                web-project)
+                  commands=(
+                    npm pnpm yarn bun
+                    nix nixos-rebuild
+                    make just
+                    sqlite3 duckdb
+                  )
+                  ;;
+                data-project | realm-project)
+                  commands=(
+                    nix nixos-rebuild
+                    cargo cargo-nextest nextest
+                    pytest py.test uv
+                    npm pnpm yarn bun
+                    make just ninja cmake meson
+                    sqlite3 duckdb
+                  )
+                  ;;
+              esac
+
+              local command_name
+              for command_name in "''${commands[@]}"; do
+                ln -sfn .sinnix-scope-wrapper "$wrapper_dir/$command_name"
+              done
+
+              export SINNIX_SCOPE_ORIGINAL_PATH="$(_sinnix_path_without "$wrapper_dir")"
+              export PATH="$SINNIX_SCOPE_ORIGINAL_PATH"
+              if declare -F PATH_add >/dev/null 2>&1; then
+                PATH_add "$wrapper_dir"
+              else
+                export PATH="$wrapper_dir:$PATH"
+              fi
+              export SINNIX_SCOPE_WRAPPER_PROJECT="$project_kind"
+              export SINNIX_SCOPE_WRAPPER_PROJECT_ROOT="$project_root"
+            }
+
+            _sinnix_project_cache_setup
+
+            if declare -F use_flake >/dev/null 2>&1 && ! declare -F _sinnix_original_use_flake >/dev/null 2>&1; then
+              eval "$(declare -f use_flake | sed '1s/use_flake/_sinnix_original_use_flake/')"
+              use_flake() {
+                _sinnix_project_scope_setup
+                _sinnix_original_use_flake "$@"
+                local status=$?
+                if [ "$status" -eq 0 ]; then
+                  _sinnix_project_scope_setup
+                fi
+                return "$status"
+              }
+            fi
           '';
 
           programs.ssh = {

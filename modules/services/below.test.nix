@@ -1,4 +1,9 @@
-{ lib, mkServiceTest, ... }:
+{
+  lib,
+  mkServiceTest,
+  inputs,
+  ...
+}:
 mkServiceTest {
   name = "services-below";
   service = "below";
@@ -6,6 +11,8 @@ mkServiceTest {
     config:
     let
       watchdogEnv = config.systemd.services.sinnix-pressure-watchdog.serviceConfig.Environment or [ ];
+      watchdogPath = config.systemd.services.sinnix-pressure-watchdog.path;
+      belowModule = builtins.readFile (inputs.self + "/modules/services/below.nix");
     in
     [
       {
@@ -21,10 +28,12 @@ mkServiceTest {
         message = "Pressure watchdog service must exist when below is enabled";
       }
       {
-        assertion = builtins.any (
-          pkg: lib.hasInfix "gawk" (toString pkg)
-        ) config.systemd.services.sinnix-pressure-watchdog.path;
+        assertion = builtins.any (pkg: lib.hasInfix "gawk" (toString pkg)) watchdogPath;
         message = "Pressure watchdog runtime path must include awk";
+      }
+      {
+        assertion = builtins.any (pkg: lib.hasInfix "util-linux" (toString pkg)) watchdogPath;
+        message = "Pressure watchdog runtime path must include runuser for user-slice backoff";
       }
       {
         assertion =
@@ -32,6 +41,27 @@ mkServiceTest {
           && builtins.elem "XDG_CACHE_HOME=/var/log/below/cache" watchdogEnv
           && builtins.elem "XDG_STATE_HOME=/var/log/below/state" watchdogEnv;
         message = "Pressure watchdog must provide HOME/XDG paths for below dump";
+      }
+      {
+        assertion =
+          lib.hasInfix "/bin/sinnix-observe --format human" belowModule
+          && lib.hasInfix ''--since "2 min ago"'' belowModule
+          && lib.hasInfix ''--duration "60 sec"'' belowModule
+          && !(lib.hasInfix "sinnix-pressure-report" belowModule);
+        message = "Pressure watchdog must emit the correlated sinnix-observe report";
+      }
+      {
+        assertion =
+          lib.hasInfix "pressureWatch.backoff" belowModule
+          && lib.hasInfix "set-property --runtime" belowModule
+          && lib.hasInfix "backoff_active" belowModule
+          && lib.hasInfix "restore_backoff" belowModule
+          && lib.hasInfix "nix.slice nix-build.slice background.slice" belowModule
+          && lib.hasInfix "build.slice background.slice" belowModule
+          && lib.hasInfix "runuser -u" belowModule
+          && lib.hasInfix "applied PSI runtime backoff" belowModule
+          && lib.hasInfix "restored PSI runtime backoff" belowModule;
+        message = "Pressure watchdog must apply and restore optional runtime backoff for opportunistic slices";
       }
     ];
 }

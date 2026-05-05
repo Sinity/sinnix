@@ -7,4 +7,9 @@ if [ "$#" -eq 0 ]; then
   exit 1
 fi
 
-setsid -f google-chrome-stable "$@" >/dev/null 2>&1 < /dev/null
+browser_cmd="${SINNIX_BROWSER_COMMAND:-sinnix-chrome}"
+if ! command -v "$browser_cmd" >/dev/null 2>&1; then
+  browser_cmd=google-chrome-stable
+fi
+
+setsid -f "$browser_cmd" "$@" >/dev/null 2>&1 < /dev/null

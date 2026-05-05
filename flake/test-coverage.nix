@@ -86,12 +86,6 @@
     "desktop.waybar" = {
       layers = [ "eval" ];
     };
-    "dev.agentRestore" = {
-      layers = [
-        "eval"
-        "runtime"
-      ];
-    };
     "dev.agentTools" = {
       layers = [
         "eval"
@@ -138,6 +132,9 @@
         "eval"
         "vm"
       ];
+    };
+    "hermes" = {
+      layers = [ "eval" ];
     };
     "network-monitor" = {
       layers = [ "eval" ];

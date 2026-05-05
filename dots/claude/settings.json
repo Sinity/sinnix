@@ -42,9 +42,7 @@
       "mcp__claude_ai_SimpleScraper__*",
       "mcp__claude_ai_Mermaid_Chart__*"
     ],
-    "deny": [
-      "Bash(rm -rf /:*)"
-    ],
+    "deny": ["Bash(rm -rf /:*)"],
     "ask": [],
     "defaultMode": "auto"
   },
@@ -56,6 +54,28 @@
           {
             "type": "command",
             "command": "~/.claude/hooks/pretooluse-bash.sh",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/posttooluse-agent-event.sh",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/stop-agent-event.sh",
             "timeout": 3
           }
         ]
@@ -87,7 +107,7 @@
     "frontend-design@claude-plugins-official": true,
     "code-review@claude-plugins-official": true,
     "code-simplifier@claude-plugins-official": true,
-    "playwright@claude-plugins-official": false,
+    "playwright@claude-plugins-official": true,
     "claude-md-management@claude-plugins-official": true,
     "skill-creator@claude-plugins-official": true,
     "pr-review-toolkit@claude-plugins-official": true,
@@ -104,6 +124,18 @@
   "mcpServers": {
     "polylogue": {
       "command": "mcp-polylogue",
+      "args": []
+    },
+    "github": {
+      "type": "url",
+      "url": "https://api.githubcopilot.com/mcp/"
+    },
+    "firecrawl": {
+      "command": "mcp-firecrawl",
+      "args": []
+    },
+    "playwright": {
+      "command": "mcp-playwright",
       "args": []
     }
   }

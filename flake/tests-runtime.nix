@@ -49,11 +49,6 @@ in
         ];
         assertions = _config: [ ];
       };
-      devAgentRestoreRuntimeSpec = mkFeatureTest {
-        name = "dev-agent-restore-runtime";
-        feature = "sinnix.features.dev.agentRestore.enable";
-        assertions = _config: [ ];
-      };
       devGitRuntimeSpec = mkFeatureTest {
         name = "dev-git-runtime";
         feature = "sinnix.features.dev.git.enable";
@@ -435,6 +430,144 @@ in
           grep -q "No realm snapshot found" "$TMPDIR/missing-realm.log"
         '';
       };
+      sinnixObserveRuntime =
+        pkgs.runCommand "sinnix-observe-runtime-check"
+          {
+            nativeBuildInputs = [
+              pkgs.coreutils
+              pkgs.gnugrep
+              pkgs.jq
+              pkgs.python3
+              pkgs.sqlite
+            ];
+          }
+          ''
+            export HOME="$TMPDIR/home"
+            mkdir -p \
+              "$HOME" \
+              "$TMPDIR/sinex/.sinex/state" \
+              "$TMPDIR/polylogue-runs"
+
+            sqlite3 "$TMPDIR/sinex/.sinex/state/xtask-history.db" <<'SQL'
+            create table invocations (
+              id integer primary key,
+              command text not null,
+              subcommand text,
+              started_at text not null,
+              finished_at text,
+              duration_secs real,
+              status text not null,
+              cwd text not null,
+              pid integer,
+              scope_key text,
+              launch_mode text,
+              is_background integer,
+              process_cpu_usage_avg real,
+              process_memory_usage_max_mb real,
+              process_count_max integer,
+              resource_sample_count integer,
+              shared_nix_build_slice_memory_usage_max_mb real,
+              shared_background_slice_memory_usage_max_mb real
+            );
+            insert into invocations values (
+              42,
+              'check',
+              null,
+              '2026-05-03T12:00:00Z',
+              '2026-05-03T12:00:25Z',
+              25.0,
+              'success',
+              '/realm/project/sinex',
+              null,
+              'scope-fixture',
+              'foreground',
+              0,
+              180.0,
+              512.0,
+              12,
+              4,
+              128.0,
+              2048.0
+            );
+            SQL
+
+            sqlite3 "$TMPDIR/polylogue.db" <<'SQL'
+            create table runs (
+              run_id text primary key,
+              timestamp text not null,
+              plan_snapshot text,
+              counts_json text,
+              drift_json text,
+              indexed integer,
+              duration_ms integer
+            );
+            insert into runs values (
+              'run-fixture',
+              '1777809600',
+              null,
+              '{"conversations":2,"messages":77,"acquired":1,"rendered":2}',
+              '{}',
+              1,
+              12345
+            );
+            SQL
+
+            cat > "$TMPDIR/polylogue-runs/run-1777809600-run-fixture.json" <<'JSON'
+            {
+              "run_id": "run-fixture",
+              "timestamp": 1777809600,
+              "duration_ms": 12345,
+              "counts": {
+                "conversations": 2,
+                "messages": 77,
+                "rendered": 2
+              }
+            }
+            JSON
+
+            cat > "$TMPDIR/below-cgroup.tsv" <<'EOF'
+            2026-05-03T12:00:10Z	sinex	/user.slice/user-1000.slice/user@1000.service/build.slice/sinex.scope	120.0	536870912	104857600	7.5	0.0
+            2026-05-03T12:00:11Z	polylogue	/user.slice/user-1000.slice/user@1000.service/background.slice/polylogue.scope	30.0	268435456	20971520	1.5	0.0
+            EOF
+            cat > "$TMPDIR/below-process.tsv" <<'EOF'
+            2026-05-03T12:00:10Z	1001	cargo	S	/user.slice/user-1000.slice/user@1000.service/build.slice/sinex.scope	104857600	536870912	120.0	cargo check --workspace /realm/project/sinex
+            2026-05-03T12:00:11Z	1002	polylogue	S	/user.slice/user-1000.slice/user@1000.service/background.slice/polylogue.scope	20971520	268435456	30.0	polylogue --plain run acquire parse materialize render index
+            EOF
+
+            SINEX_ROOT="$TMPDIR/sinex" \
+            SINNIX_OBSERVE_POLYLOGUE_DB="$TMPDIR/polylogue.db" \
+            SINNIX_OBSERVE_POLYLOGUE_RUNS_DIR="$TMPDIR/polylogue-runs" \
+            SINNIX_OBSERVE_BELOW_CGROUP_TSV="$TMPDIR/below-cgroup.tsv" \
+            SINNIX_OBSERVE_BELOW_PROCESS_TSV="$TMPDIR/below-process.tsv" \
+              ${pkgs.python3}/bin/python3 ${../scripts/sinnix-observe} \
+                --offline --format json --since '1 day ago' --duration '1 day' --limit 5 \
+                > "$TMPDIR/report.json"
+
+            jq -e '
+              .schema == "sinnix-observe-v1" and
+              (.workload_rows | any(.source == "sinex.xtask" and .project == "sinex" and (.gaps | index("sinex.invocation.lacks_cgroup")))) and
+              (.workload_rows | any(.source == "polylogue.run" and .project == "polylogue" and (.gaps | index("polylogue.run.lacks_cgroup")))) and
+              (.workload_rows | any(.source == "below.process" and .project == "sinex")) and
+              (.workload_rows | any(.source == "below.process" and .project == "polylogue")) and
+              (.gaps_summary."sinex.invocation.lacks_io_bytes" >= 1) and
+              (.gaps_summary."polylogue.run.lacks_psi_window" >= 1)
+            ' "$TMPDIR/report.json" >/dev/null
+
+            SINEX_ROOT="$TMPDIR/sinex" \
+            SINNIX_OBSERVE_POLYLOGUE_DB="$TMPDIR/polylogue.db" \
+            SINNIX_OBSERVE_POLYLOGUE_RUNS_DIR="$TMPDIR/polylogue-runs" \
+            SINNIX_OBSERVE_BELOW_CGROUP_TSV="$TMPDIR/below-cgroup.tsv" \
+            SINNIX_OBSERVE_BELOW_PROCESS_TSV="$TMPDIR/below-process.tsv" \
+              ${pkgs.python3}/bin/python3 ${../scripts/sinnix-observe} \
+                --offline --format human --since '1 day ago' --duration '1 day' --limit 5 \
+                > "$TMPDIR/report.txt"
+
+            grep -q '== workload rows ==' "$TMPDIR/report.txt"
+            grep -q 'sinex.invocation.lacks_cgroup' "$TMPDIR/report.txt"
+            grep -q 'polylogue.run.lacks_cgroup' "$TMPDIR/report.txt"
+
+            touch "$out"
+          '';
       terminalCaptureRuntime =
         pkgs.runCommand "sinnix-terminal-capture-runtime-check"
           {
@@ -700,6 +833,8 @@ in
 
             "$HOME/.local/bin/forge" --version | grep -q '^forge '
             "$HOME/.local/bin/forge" config get model | grep -qx 'gpt-5.5'
+            "$HOME/.local/bin/mcp-polylogue" --help | grep -q 'Start the Polylogue MCP stdio bridge'
+            "$HOME/.local/bin/mcp-playwright" --help | grep -q 'Usage: Playwright MCP'
 
             "$HOME/.local/bin/forge" config path | grep -qx "$HOME/forge/.forge.toml"
             test -d "$HOME/forge/agents"
@@ -826,48 +961,6 @@ in
           '
         '';
       };
-      devAgentRestoreRuntime = mkHmRuntimeCheck system {
-        name = "dev-agent-restore-runtime-check";
-        spec = devAgentRestoreRuntimeSpec;
-        nativeBuildInputs = [
-          pkgs.coreutils
-          pkgs.gnugrep
-          pkgs.jq
-          pkgs.python3
-          pkgs.systemd
-        ];
-        homeFiles = [ ".local/bin/sinnix-agent-session-restore" ];
-        rewriteFiles = [
-          {
-            target = ".local/bin/sinnix-agent-session-restore";
-            rewrites = [
-              {
-                from = "/realm/project/sinnix";
-                to = toString repoFixtureRoot;
-              }
-            ];
-          }
-        ];
-        setup = ''
-          export PATH="${
-            lib.makeBinPath [
-              pkgs.coreutils
-              pkgs.gnugrep
-              pkgs.jq
-              pkgs.python3
-              pkgs.systemd
-            ]
-          }:$PATH"
-          mkdir -p "$TMPDIR/captures"
-        '';
-        script = ''
-          "$HOME/.local/bin/sinnix-agent-session-restore" --help | grep -q 'Restore interrupted Codex/Claude/Gemini terminal sessions.'
-          "$HOME/.local/bin/sinnix-agent-session-restore" \
-            --capture-root "$TMPDIR/captures" \
-            --state-file "$TMPDIR/state.json" \
-            plan --json | jq -e '.candidates == []' >/dev/null
-        '';
-      };
       devGitRuntime = mkHmRuntimeCheck system {
         name = "dev-git-runtime-check";
         spec = devGitRuntimeSpec;
@@ -945,20 +1038,19 @@ in
       );
     in
     {
-      heavyChecks =
-        {
-          backup-borg-hook-runtime = backupBorgHookRuntime;
-          cli-polylogue-runtime = cliPolylogueRuntime;
-          cli-task-tracking-runtime = cliTaskTrackingRuntime;
-          dev-agent-restore-runtime = devAgentRestoreRuntime;
-          dev-agent-tools-pty = devAgentToolsPty;
-          dev-agent-tools-runtime = devAgentToolsRuntime;
-          dev-git-runtime = devGitRuntime;
-          dev-languages-runtime = devLanguagesRuntime;
-          terminal-capture-runtime = terminalCaptureRuntime;
-          terminal-capture-runtime-failure = terminalCaptureRuntimeFailure;
-        }
-        // vmChecks
-        // hostBuildChecks;
+      heavyChecks = {
+        backup-borg-hook-runtime = backupBorgHookRuntime;
+        cli-polylogue-runtime = cliPolylogueRuntime;
+        cli-task-tracking-runtime = cliTaskTrackingRuntime;
+        dev-agent-tools-pty = devAgentToolsPty;
+        dev-agent-tools-runtime = devAgentToolsRuntime;
+        dev-git-runtime = devGitRuntime;
+        dev-languages-runtime = devLanguagesRuntime;
+        sinnix-observe-runtime = sinnixObserveRuntime;
+        terminal-capture-runtime = terminalCaptureRuntime;
+        terminal-capture-runtime-failure = terminalCaptureRuntimeFailure;
+      }
+      // vmChecks
+      // hostBuildChecks;
     };
 }

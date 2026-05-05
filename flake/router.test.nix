@@ -1,4 +1,10 @@
-{ lib, mountTmpfsRoots, baseTestConfig, inputs, ... }:
+{
+  lib,
+  mountTmpfsRoots,
+  baseTestConfig,
+  inputs,
+  ...
+}:
 {
   name = "router-config-evaluates";
   modules = [

@@ -23,7 +23,18 @@ in
           "nix-command"
           "flakes"
           "cgroups"
+          "fetch-tree"
+          "pipe-operators"
+          "auto-allocate-uids"
+          "ca-derivations"
         ];
+        # Do not spell out `use-cgroups = false`: false is Nix's default, and
+        # restating it made later agents infer a deliberate local workaround
+        # that was not documented. A future `use-cgroups = true` trial is still
+        # worth testing because it may improve per-derivation attribution and
+        # cleanup, but it must prove that daemon builders remain under
+        # nix-build.slice policy, inherit the latency targets below, interact
+        # sanely with systemd-oomd, and do not make failed-build cleanup worse.
         accept-flake-config = true;
         trusted-users = [
           username
@@ -35,7 +46,6 @@ in
           "https://sinity.cachix.org"
           "https://nix-community.cachix.org"
           "https://nix-gaming.cachix.org"
-          "https://cuda-maintainers.cachix.org"
           "https://hyprland.cachix.org"
           "https://devenv.cachix.org"
           "https://nixpkgs-wayland.cachix.org"
@@ -48,7 +58,6 @@ in
           "sinity.cachix.org-1:i5YsUuuRv9r790gdwwE+FiJiUcWULV1lEOmKE50Y+TI="
           "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
           "nix-gaming.cachix.org-1:nbjlureqMbRAxR1gJ/f3hxemL9svXaZF/Ees8vCUUs4="
-          "cuda-maintainers.cachix.org-1:0dq3bujKpuEPMCX6U4WylrUDZ9JyUG0VpVZa7CNfq5E="
           "hyprland.cachix.org-1:a7pgxzMz7+chwVL3/pzj6jIBMioiJM7ypFP8PwtkuGc="
           "devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw="
           "nixpkgs-wayland.cachix.org-1:3lwxaILxMRkVhehr5StQprHdEo4IrE8sRho9R9HOLYA="
@@ -57,14 +66,13 @@ in
           "nixpkgs-unfree.cachix.org-1:hqvoInulhbV4nJ9yJOEr+4wxhDV4xq2d1DK7S6Nj6rs="
         ];
         netrc-file = "/etc/nix/netrc";
-        # Use the workstation. Containment belongs to nix-build.slice, not to
-        # globally serializing Nix into a low-throughput mode.
-        max-jobs = "auto";
+        # Keep local builds broad enough to saturate CPU via `cores = 0`, but
+        # avoid scheduling one derivation per hardware thread by default. The
+        # old `auto` value resolved to 24 on sinnix-prime and amplified RAM/I/O
+        # spikes. Benchmark 6/8/12/24 against wall time, peak RSS, PSI, and
+        # desktop latency before changing this again.
+        max-jobs = 8;
         cores = 0;
-        # Keep cgroup placement explicit through systemd slices. Nix's own
-        # per-build cgroup mode is disabled here so it does not create another
-        # independent resource-policy layer.
-        use-cgroups = false;
         builders-use-substitutes = true;
 
         # DX optimizations: keep build dependencies for faster rebuilds
@@ -145,9 +153,16 @@ in
       config = {
         allowUnfree = true;
         allowAliases = true;
+        doCheck = false;
+        checkMeta = false;
       };
       hostPlatform = "x86_64-linux";
     };
+
+    documentation.enable = lib.mkDefault false;
+    documentation.info.enable = false;
+    documentation.nixos.enable = false;
+    programs.command-not-found.enable = false;
 
     environment.systemPackages = lib.mkAfter [
       pkgs.sccache
@@ -159,6 +174,10 @@ in
       SCCACHE_DIR = "/cache/sccache";
       RUSTC_WRAPPER = "${pkgs.sccache}/bin/sccache";
       SCCACHE_MAX_CACHE_SIZE = "20G";
+      # Nix's user eval/fetcher cache is rebuild-cheap SQLite/WAL churn.
+      # Home Manager links ~/.cache/nix to /cache/nix/user/${username} below
+      # so repeated flake evals stop writing this cache to the persisted SATA
+      # profile path. Keep persistent Nix trust/auth state in ~/.local/share/nix.
       # nix-direnv eval cache — recomputed on cd into flake projects.
       # /cache NVMe makes eval-cache misses fast and avoids cluttering ~/.cache.
       NIX_DIRENV_CACHE = "/cache/nix-direnv";
@@ -168,6 +187,19 @@ in
       # pip: move package downloads off ~/.cache to the fast scratch disk.
       PIP_CACHE_DIR = "/cache/pip";
     };
+
+    home-manager.users.${username} =
+      { config, ... }:
+      {
+        # Rebuildable Nix eval-cache-v6 and fetcher-cache state belongs on the
+        # cache NVMe, not under persisted home. `force` lets the first switch
+        # replace an old directory from the previous persistence policy with
+        # the out-of-store symlink.
+        home.file.".cache/nix" = {
+          source = config.lib.file.mkOutOfStoreSymlink "/cache/nix/user/${username}";
+          force = true;
+        };
+      };
 
     services.xserver.xkb.layout = "pl";
 
@@ -216,6 +248,9 @@ in
     systemd = {
       tmpfiles.rules = lib.mkAfter ([
         "d /cache/sccache 0755 ${username} users -"
+        "d /cache/nix 0755 root root -"
+        "d /cache/nix/user 0755 root root -"
+        "d /cache/nix/user/${username} 0755 ${username} users -"
         "d /cache/nix-direnv 0755 ${username} users -"
         "d /cache/cargo 0755 ${username} users -"
         "d /cache/pip 0755 ${username} users -"
@@ -245,25 +280,36 @@ in
         "d ${paths.exportsRoot}/lastpass/raw 0755 ${username} users -"
       ]);
 
-      services.sinex-cache-prune = {
+      services.sinex-dev-cache-prune = {
         description = "Prune stale Sinex development cache artifacts";
         serviceConfig = {
           Type = "oneshot";
           Nice = 19;
           IOSchedulingClass = "idle";
-          ExecStart = pkgs.writeShellScript "sinex-cache-prune" ''
+          ExecStart = pkgs.writeShellScript "sinex-dev-cache-prune" ''
             set -euo pipefail
 
             cache_root="/cache/sinex"
             [ -d "$cache_root" ] || exit 0
 
-            ${pkgs.findutils}/bin/find "$cache_root" -xdev -type f -mtime +2 -delete
+            # Preserve incremental build performance for active worktrees: only
+            # remove whole checkout-scoped cache roots that direnv has not
+            # marked as used recently. Do not shave individual object files out
+            # of an otherwise hot Cargo target.
+            ${pkgs.findutils}/bin/find "$cache_root" -xdev -mindepth 2 -maxdepth 2 \
+              -name .sinnix-last-used -type f -mtime +7 -print0 \
+              | while IFS= read -r -d "" marker; do
+                checkout_cache="$(dirname "$marker")"
+                case "$checkout_cache" in
+                  "$cache_root"/*) rm -rf --one-file-system "$checkout_cache" ;;
+                esac
+              done
             ${pkgs.findutils}/bin/find "$cache_root" -xdev -mindepth 1 -type d -empty -delete
           '';
         };
       };
 
-      timers.sinex-cache-prune = {
+      timers.sinex-dev-cache-prune = {
         wantedBy = [ "timers.target" ];
         timerConfig = {
           OnCalendar = "daily";

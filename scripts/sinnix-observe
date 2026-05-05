@@ -1,464 +1,1441 @@
-#!/usr/bin/env bash
+#!/usr/bin/env python3
 # @sinnix-package
 # description: Join live pressure, systemd placement, Sinex xtask history, and Polylogue run ledgers
-# runtimeInputs: bash below coreutils gawk gnugrep gnused jq procps sqlite sysstat systemd util-linux
-# Cross-project observability entrypoint for the workstation.
+# runtimeInputs: python3 below coreutils procps sqlite sysstat systemd util-linux
+"""Agent-readable workstation observability report.
 
-set -euo pipefail
+The command intentionally keeps machine-specific joining in Sinnix while
+reading project-native ledgers from Sinex and Polylogue. Project ledgers do not
+yet expose every field we need, so rows carry explicit gap codes instead of
+pretending the join is complete.
+"""
 
-SINEX_ROOT="${SINEX_ROOT:-/realm/project/sinex}"
-POLYLOGUE_ROOT="${POLYLOGUE_ROOT:-/realm/project/polylogue}"
+from __future__ import annotations
 
-section() {
-  printf '\n== %s ==\n' "$1"
+import argparse
+import datetime as dt
+import glob
+import json
+import os
+import re
+import shutil
+import sqlite3
+import subprocess
+import sys
+from collections import Counter
+from pathlib import Path
+from typing import Any
+
+
+SCHEMA = "sinnix-observe-v1"
+DEFAULT_BEGIN = os.environ.get("SINNIX_OBSERVE_BEGIN", "10 min ago")
+DEFAULT_DURATION = os.environ.get("SINNIX_OBSERVE_DURATION", "10 min")
+DEFAULT_LIMIT = int(os.environ.get("SINNIX_OBSERVE_LIMIT", "10"))
+
+SYSTEM_UNITS = [
+    "below.service",
+    "sinnix-pressure-watchdog.service",
+    "sinex-runtime.target",
+    "sinex-runtime.timer",
+    "sinex-ingestd.service",
+    "sinex-filesystem-1.service",
+    "sinex-gateway.service",
+    "nats.service",
+    "postgresql.service",
+    "nix-gc.service",
+    "nix-optimise.service",
+    "sinex-blob-gc.service",
+    "sinex-blob-fsck.service",
+    "sinex-dev-cache-prune.service",
+    "sinex-document-scan.service",
+    "btrbk.service",
+    "btrbk.timer",
+    "borgbackup-job-realm.service",
+    "borgbackup-job-persist.service",
+    "borgbackup-check.service",
+]
+
+USER_UNITS = [
+    "polylogue-run.service",
+    "polylogue-run.timer",
+    "polylogued.service",
+    "polylogue-browser-capture.service",
+]
+
+RESOURCE_CLASS_BY_UNIT = {
+    "below.service": "observability",
+    "sinnix-pressure-watchdog.service": "observability",
+    "btrbk.service": "background-maintenance",
+    "btrbk.timer": "background-maintenance",
+    "borgbackup-job-realm.service": "background-maintenance",
+    "borgbackup-job-persist.service": "background-maintenance",
+    "borgbackup-check.service": "background-maintenance",
+    "nix-gc.service": "background-maintenance",
+    "nix-optimise.service": "background-maintenance",
+    "polylogue-run.service": "background-maintenance",
+    "polylogue-run.timer": "background-maintenance",
+    "polylogued.service": "capture-runtime",
+    "polylogue-browser-capture.service": "capture-runtime",
+    "sinex-runtime.target": "capture-runtime",
+    "sinex-runtime.timer": "capture-runtime",
+    "sinex-ingestd.service": "capture-runtime",
+    "sinex-filesystem-1.service": "capture-runtime",
+    "sinex-gateway.service": "capture-runtime",
+    "nats.service": "capture-substrate",
+    "postgresql.service": "capture-substrate",
+    "sinex-blob-gc.service": "background-maintenance",
+    "sinex-blob-fsck.service": "background-maintenance",
+    "sinex-dev-cache-prune.service": "background-maintenance",
+    "sinex-document-scan.service": "background-maintenance",
 }
 
-have() {
-  command -v "$1" >/dev/null 2>&1
-}
+CHROME_PROFILE_GLOBS = [
+    "/home/*/.config/chrome-ws",
+    "/realm/home/.config/chrome-ws",
+]
 
-sqlite_read() {
-  local db="$1"
-  local sql="$2"
-  sqlite3 -readonly -header -column "$db" "$sql" 2>/dev/null || true
-}
+# Do not assume Chrome should move to /cache without evidence. This collector
+# makes the current profile/cache placement and Chrome cgroup I/O counters
+# visible first; exact per-file write tracing can be added later with eBPF if
+# the lightweight /proc + below view shows Chrome is materially involved.
+CHROME_CACHE_RELATIVE_PATHS = [
+    "Default/Cache",
+    "Default/Code Cache",
+    "Default/GPUCache",
+    "Default/Service Worker",
+    "Default/IndexedDB",
+    "Default/Local Storage",
+    "Default/Session Storage",
+    "Default/Storage",
+    "Default/OptimizationGuidePredictionModels",
+    "Default/OnDeviceHeadSuggestModel",
+    "GrShaderCache",
+    "ShaderCache",
+    "Crashpad",
+]
 
-first_existing() {
-  local path
-  for path in "$@"; do
-    if [ -e "$path" ]; then
-      printf '%s\n' "$path"
-      return 0
-    fi
-  done
-  return 1
-}
 
-table_exists() {
-  local db="$1"
-  local table="$2"
-  [ -e "$db" ] || return 1
-  [ "$(sqlite3 -readonly "$db" "select count(*) from sqlite_master where type='table' and name='$table';" 2>/dev/null || echo 0)" = "1" ]
-}
+def utc_now() -> str:
+    return dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat()
 
-polylogue_db() {
-  local db
-  for db in \
-    "${POLYLOGUE_DB_PATH:-}" \
-    "$HOME/.local/share/polylogue/polylogue.db" \
-    "$HOME/.local/share/polylogue/archive.db" \
-    "$HOME/.local/share/polylogue/polylogue.sqlite" \
-    "$POLYLOGUE_ROOT/.local/browser-capture/xdg-data/polylogue/polylogue.db"
-  do
-    [ -n "$db" ] || continue
-    if table_exists "$db" runs; then
-      printf '%s\n' "$db"
-      return 0
-    fi
-  done
-  return 1
-}
 
-pressure_summary() {
-  section "live pressure"
-  date --iso-8601=seconds
-  printf 'cpu    '; cat /proc/pressure/cpu
-  printf 'memory '; cat /proc/pressure/memory
-  printf 'io     '; cat /proc/pressure/io
-  free -h
-}
+def run_cmd(args: list[str], timeout: float = 5.0) -> subprocess.CompletedProcess[str] | None:
+    if shutil.which(args[0]) is None:
+        return None
+    try:
+        return subprocess.run(
+            args,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
 
-blocked_tasks() {
-  section "blocked tasks"
-  ps -eo stat,pid,ppid,etime,pcpu,pmem,rss,wchan:24,comm,args \
-    | awk 'NR == 1 || $1 ~ /D/' \
-    | sed -n '1,40p'
-}
 
-storage_pressure() {
-  section "storage pressure"
+def split_props(text: str) -> dict[str, str]:
+    props: dict[str, str] = {}
+    for line in text.splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        props[key] = value
+    return props
 
-  echo "fstrim:"
-  systemctl show fstrim.timer \
-    -p ActiveState -p SubState -p UnitFileState -p NextElapseUSecRealtime -p LastTriggerUSec \
-    2>/dev/null \
-    | sed 's/^/  timer /' || true
-  systemctl show fstrim.service \
-    -p ActiveState -p SubState -p Result -p MainPID -p ExecMainStartTimestamp \
-    2>/dev/null \
-    | sed 's/^/  service /' || true
 
-  echo "mount map:"
-  local mount
-  for mount in / /nix /persist /cache /realm /realm/data/captures/sinex /var/lib/postgresql /var/lib/sinex "$HOME/.local/share/polylogue"; do
-    printf '  %-42s ' "$mount"
-    findmnt -T "$mount" -n -o TARGET,SOURCE,FSTYPE,OPTIONS 2>/dev/null || echo "unresolved"
-  done
+def read_text(path: str | Path) -> str | None:
+    try:
+        return Path(path).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
 
-  echo "discard queues:"
-  local dev queue
-  for dev in /sys/block/nvme*n1 /sys/block/sd*; do
-    [ -e "$dev" ] || continue
-    queue="$dev/queue"
-    printf '  %-8s discard_max=%s discard_granularity=%s rotational=%s scheduler=%s wbt_lat_usec=%s\n' \
-      "${dev##*/}" \
-      "$(cat "$queue/discard_max_bytes" 2>/dev/null || printf '?')" \
-      "$(cat "$queue/discard_granularity" 2>/dev/null || printf '?')" \
-      "$(cat "$queue/rotational" 2>/dev/null || printf '?')" \
-      "$(cat "$queue/scheduler" 2>/dev/null || printf '?')" \
-      "$(cat "$queue/wbt_lat_usec" 2>/dev/null || printf '?')"
-  done
 
-  if have iostat; then
-    echo "iostat 1s sample:"
-    timeout 4s iostat -xz 1 2 2>/dev/null | sed 's/^/  /' || true
-  else
-    echo "iostat 1s sample: iostat not on PATH"
-  fi
-}
+def read_proc_cmdline(path: Path) -> str:
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return ""
+    return raw.replace(b"\0", b" ").decode("utf-8", "replace").strip()
 
-systemd_units() {
-  section "managed workload units"
-  local units=(
-    below.service
-    sinnix-pressure-watchdog.service
-    sinex-runtime.target
-    sinex-runtime.timer
-    sinex-ingestd.service
-    nats.service
-    postgresql.service
-    btrbk.service
-    borgbackup-job-realm.service
-    borgbackup-job-persist.service
-  )
-  local unit
-  for unit in "${units[@]}"; do
-    if systemctl list-unit-files "$unit" >/dev/null 2>&1; then
-      systemctl show "$unit" \
-        -p Id -p ActiveState -p SubState -p MainPID -p Slice \
-        -p MemoryCurrent -p MemoryHigh -p MemoryMax -p IOReadBandwidthMax \
-        -p IOWriteBandwidthMax \
-        | awk -v unit="$unit" '
-          BEGIN { FS="=" }
-          $1 == "ActiveState" { active=$2 }
-          $1 == "SubState" { unit_sub=$2 }
-          $1 == "MainPID" { pid=$2 }
-          $1 == "Slice" { slice=$2 }
-          $1 == "MemoryCurrent" { mem=$2 }
-          $1 == "MemoryHigh" { high=$2 }
-          $1 == "MemoryMax" { max=$2 }
-          $1 == "IOReadBandwidthMax" { read=$2 }
-          $1 == "IOWriteBandwidthMax" { write=$2 }
-          END {
-            printf "%-34s active=%s/%s pid=%s slice=%s mem=%s high=%s max=%s readcap=%s writecap=%s\n",
-              unit, active, unit_sub, pid, slice, mem, high, max, read, write
-          }'
-    fi
-  done
 
-  if systemctl --user list-unit-files polylogue-run.service >/dev/null 2>&1; then
-    systemctl --user show polylogue-run.service \
-      -p Id -p ActiveState -p SubState -p MainPID -p Slice \
-      -p MemoryCurrent -p MemoryHigh -p MemoryMax -p IOReadBandwidthMax \
-      -p IOWriteBandwidthMax \
-      | awk '
-        BEGIN { FS="=" }
-        $1 == "ActiveState" { active=$2 }
-        $1 == "SubState" { unit_sub=$2 }
-        $1 == "MainPID" { pid=$2 }
-        $1 == "Slice" { slice=$2 }
-        $1 == "MemoryCurrent" { mem=$2 }
-        $1 == "MemoryHigh" { high=$2 }
-        $1 == "MemoryMax" { max=$2 }
-        $1 == "IOReadBandwidthMax" { read=$2 }
-        $1 == "IOWriteBandwidthMax" { write=$2 }
-        END {
-          printf "%-34s active=%s/%s pid=%s slice=%s mem=%s high=%s max=%s readcap=%s writecap=%s\n",
-            "polylogue-run.service", active, unit_sub, pid, slice, mem, high, max, read, write
-        }'
-  fi
-}
+def parse_psi(path: str) -> dict[str, Any]:
+    result: dict[str, Any] = {"raw": read_text(path) or ""}
+    for line in result["raw"].splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        row: dict[str, float] = {}
+        for item in parts[1:]:
+            if "=" not in item:
+                continue
+            key, value = item.split("=", 1)
+            try:
+                row[key] = float(value)
+            except ValueError:
+                pass
+        result[parts[0]] = row
+    return result
 
-sentinel_state() {
-  section "sentinel policy"
-  if systemctl list-unit-files sinnix-sentinel.service >/dev/null 2>&1; then
-    systemctl show sinnix-sentinel.service \
-      -p ActiveState -p SubState -p Result -p TriggeredBy -p Environment \
-      | awk '
-        BEGIN { FS="=" }
-        $1 == "ActiveState" { active=$2 }
-        $1 == "SubState" { sub_state=$2 }
-        $1 == "Result" { result=$2 }
-        $1 == "TriggeredBy" { triggered=$2 }
-        $1 == "Environment" { env=$0; sub(/^Environment=/, "", env) }
-        END {
-          printf "sinnix-sentinel.service active=%s/%s result=%s triggered_by=%s\n", active, sub_state, result, triggered
-          if (env != "") print "environment=" env
-        }'
-  fi
 
-  if [ -r /etc/sinnix/health-policy.json ]; then
-    echo "health policy services:"
-    jq -r '.services[] | "  \(.name) unit=\(.unit) type=\(.type) restartable=\(.restartable)"' \
-      /etc/sinnix/health-policy.json 2>/dev/null || true
-  fi
+def collect_pressure(offline: bool) -> dict[str, Any]:
+    if offline:
+        return {"offline": True}
+    pressure = {
+        "cpu": parse_psi("/proc/pressure/cpu"),
+        "memory": parse_psi("/proc/pressure/memory"),
+        "io": parse_psi("/proc/pressure/io"),
+    }
+    free = run_cmd(["free", "-h"])
+    pressure["free_h"] = free.stdout if free else ""
+    return pressure
 
-  if [ -r /run/sinnix/health.json ]; then
-    echo "latest health:"
-    jq -r '"  timestamp=\(.timestamp) overall=\(.overall) ok=\(.summary.ok) warn=\(.summary.warn) fail=\(.summary.fail)"' \
-      /run/sinnix/health.json 2>/dev/null || true
-  fi
 
-  local event_log="${SINNIX_EVENT_LOG:-/var/log/sinnix-sentinel/events.jsonl}"
-  if [ -r "$event_log" ]; then
-    echo "recent sentinel events:"
-    tail -n 20 "$event_log" \
-      | jq -r 'select(.source == "sinnix-sentinel") | "  \(.timestamp) \(.event) severity=\(.severity // "normal")\(.name? // "" | if . == "" then "" else " name=" + . end)\(.unit? // "" | if . == "" then "" else " unit=" + . end)"' \
-      2>/dev/null || true
-  elif [ -e "$event_log" ]; then
-    echo "recent sentinel events: unreadable ($event_log)"
-  else
-    echo "recent sentinel events: none yet"
-  fi
-}
-
-slice_state() {
-  section "resource slices"
-  local specs=(
-    "user build.slice"
-    "user nix-build.slice"
-    "user background.slice"
-    "system nix-build.slice"
-    "system background.slice"
-  )
-  local spec scope slice
-  for spec in "${specs[@]}"; do
-    scope="${spec%% *}"
-    slice="${spec#* }"
-    if [ "$scope" = user ]; then
-      systemctl --user show "$slice" -p ActiveState -p MemoryCurrent -p MemoryHigh -p MemoryMax -p IOReadBandwidthMax -p IOWriteBandwidthMax 2>/dev/null \
-        | awk -v slice="user/$slice" '
-          BEGIN { FS="=" }
-          $1 == "ActiveState" { active=$2 }
-          $1 == "MemoryCurrent" { current=$2 }
-          $1 == "MemoryHigh" { high=$2 }
-          $1 == "MemoryMax" { max=$2 }
-          $1 == "IOReadBandwidthMax" { read=$2 }
-          $1 == "IOWriteBandwidthMax" { write=$2 }
-          END { printf "%-24s active=%s current=%s high=%s max=%s readcap=%s writecap=%s\n", slice, active, current, high, max, read, write }'
-    else
-      systemctl show "$slice" -p ActiveState -p MemoryCurrent -p MemoryHigh -p MemoryMax -p IOReadBandwidthMax -p IOWriteBandwidthMax 2>/dev/null \
-        | awk -v slice="system/$slice" '
-          BEGIN { FS="=" }
-          $1 == "ActiveState" { active=$2 }
-          $1 == "MemoryCurrent" { current=$2 }
-          $1 == "MemoryHigh" { high=$2 }
-          $1 == "MemoryMax" { max=$2 }
-          $1 == "IOReadBandwidthMax" { read=$2 }
-          $1 == "IOWriteBandwidthMax" { write=$2 }
-          END { printf "%-24s active=%s current=%s high=%s max=%s readcap=%s writecap=%s\n", slice, active, current, high, max, read, write }'
-    fi
-  done
-}
-
-active_heavy_processes() {
-  section "heavy process snapshot"
-  ps -eo pid,stat,pcpu,pmem,rss,comm,args --sort=-pcpu \
-    | awk 'NR == 1 || $6 ~ /^(cargo|cargo-nextest|rustc|pytest|nix|nix-daemon|borg|btrbk|nats-server|postgres|polylogue|xtask)$/ || $7 ~ /(polylogue|xtask|cargo nextest|pytest|borgbackup)/' \
-    | sed -n '1,40p'
-}
-
-sinex_xtask_history() {
-  section "sinex xtask history"
-  local db
-  db="$SINEX_ROOT/.sinex/state/xtask-history.db"
-  if [ ! -f "$db" ]; then
-    db="/realm/project/sinex/.sinex/state/xtask-history.db"
-  fi
-  if [ ! -f "$db" ]; then
-    echo "no xtask history DB found"
-    return
-  fi
-  printf 'db=%s\n' "$db"
-  sqlite_read "$db" "
-    select
-      id,
-      command,
-      coalesce(subcommand, '') as subcommand,
-      status,
-      started_at,
-      round(duration_secs, 1) as secs,
-      round(process_memory_usage_max_mb, 1) as rss_mb,
-      round(shared_background_slice_memory_usage_max_mb, 1) as bg_mb,
-      round(shared_nix_build_slice_memory_usage_max_mb, 1) as nix_mb
-    from invocations
-    order by started_at desc
-    limit 10;"
-}
-
-polylogue_runs() {
-  section "polylogue runs"
-  local db
-  db="$(polylogue_db || true)"
-  if [ -n "$db" ]; then
-    printf 'db=%s\n' "$db"
-    sqlite_read "$db" "
-      select
-        case
-          when timestamp glob '[0-9]*' then datetime(cast(timestamp as integer), 'unixepoch')
-          else timestamp
-        end as timestamp,
-        run_id,
-        round(duration_ms / 1000.0, 1) as secs,
-        substr(coalesce(counts_json, ''), 1, 96) as counts
-      from runs
-      order by timestamp desc
-      limit 10;"
-    return
-  fi
-
-  local runs_dir
-  runs_dir="$(first_existing \
-    "$HOME/.local/share/polylogue/runs" \
-    "$POLYLOGUE_ROOT/runs" \
-    "$POLYLOGUE_ROOT/archive/runs" \
-    2>/dev/null || true)"
-  if [ -z "$runs_dir" ]; then
-    echo "no Polylogue runs DB or runs directory found"
-    return
-  fi
-  printf 'runs_dir=%s\n' "$runs_dir"
-  find "$runs_dir" -maxdepth 1 -type f -name 'run-*.json' -printf '%T+\t%p\n' \
-    | sort -r \
-    | sed -n '1,10p'
-}
-
-below_hint() {
-  section "below hint"
-  if have below; then
-    echo "interactive replay: below replay -t '${SINNIX_OBSERVE_BEGIN:-10 min ago}'"
-  else
-    echo "below not on PATH"
-  fi
-}
-
-below_recent_history() {
-  section "below recent history"
-  if ! have below; then
-    echo "below not on PATH"
-    return
-  fi
-
-  local begin duration cgroup_rows process_rows
-  begin="${SINNIX_OBSERVE_BEGIN:-10 min ago}"
-  duration="${SINNIX_OBSERVE_DURATION:-10 min}"
-  printf 'window: begin=%s duration=%s\n' "$begin" "$duration"
-
-  cgroup_rows="$(
-    below dump cgroup \
-      -b "$begin" \
-      --duration "$duration" \
-      -f datetime name full_path cpu.usage_pct mem.total io.rwbytes_per_sec pressure.io_full_pct pressure.memory_full_pct \
-      -O tsv \
-      --raw \
-      --disable-title 2>/dev/null \
-      | awk -F '\t' '
-          NF >= 8 && $3 != "" {
-            path = $3
-            io = $6 + 0
-            mem = $5 + 0
-            cpu = $4 + 0
-            io_full = $7 + 0
-            mem_full = $8 + 0
-            samples[path]++
-            if (io > max_io[path]) max_io[path] = io
-            if (mem > max_mem[path]) max_mem[path] = mem
-            if (cpu > max_cpu[path]) max_cpu[path] = cpu
-            if (io_full > max_io_full[path]) max_io_full[path] = io_full
-            if (mem_full > max_mem_full[path]) max_mem_full[path] = mem_full
-          }
-          END {
-            for (path in samples) {
-              printf "%.0f\t%.2f\t%.2f\t%.0f\t%.1f\t%d\t%s\n",
-                max_io[path], max_io_full[path], max_mem_full[path],
-                max_mem[path], max_cpu[path], samples[path], path
+def collect_blocked_tasks(offline: bool) -> list[dict[str, Any]]:
+    if offline:
+        return []
+    proc = run_cmd(
+        [
+            "ps",
+            "-eo",
+            "stat,pid,ppid,etimes,pcpu,pmem,rss,wchan:32,comm,args",
+        ]
+    )
+    rows: list[dict[str, Any]] = []
+    if not proc:
+        return rows
+    for line in proc.stdout.splitlines()[1:]:
+        parts = line.split(None, 9)
+        if len(parts) < 10 or not parts[0].startswith("D"):
+            continue
+        rows.append(
+            {
+                "stat": parts[0],
+                "pid": int_or_none(parts[1]),
+                "ppid": int_or_none(parts[2]),
+                "elapsed_secs": int_or_none(parts[3]),
+                "cpu_pct": float_or_none(parts[4]),
+                "mem_pct": float_or_none(parts[5]),
+                "rss_kb": int_or_none(parts[6]),
+                "wchan": parts[7],
+                "comm": parts[8],
+                "cmdline": parts[9],
             }
-          }' \
-      | LC_ALL=C sort -nr -k1,1 \
-      | sed -n '1,12p'
-  )"
+        )
+    return rows
 
-  echo "cgroup peaks:"
-  if [ -n "$cgroup_rows" ]; then
-    printf '  %-12s %-10s %-10s %-10s %-8s %s\n' \
-      "rw_Bps" "io_full%" "mem_full%" "rss_MiB" "cpu%" "cgroup"
-    printf '%s\n' "$cgroup_rows" \
-      | awk -F '\t' '{
-          printf "  %-12.0f %-10.2f %-10.2f %-10.1f %-8.1f %s\n",
-            $1, $2, $3, $4 / 1048576, $5, $7
-        }'
-  else
-    echo "  no below cgroup samples for window"
-  fi
 
-  process_rows="$(
-    below dump process \
-      -b "$begin" \
-      --duration "$duration" \
-      -f datetime pid comm state cgroup io.rwbytes_per_sec mem.rss_bytes cpu.usage_pct cmdline \
-      -O tsv \
-      --raw \
-      --disable-title 2>/dev/null \
-      | awk -F '\t' '
-          NF >= 9 && $2 ~ /^[0-9]+$/ {
-            pid = $2
-            io = $6 + 0
-            rss = $7 + 0
-            cpu = $8 + 0
-            samples[pid]++
-            if (io > max_io[pid]) {
-              max_io[pid] = io
-              comm[pid] = $3
-              state[pid] = $4
-              cgroup[pid] = $5
-              cmdline[pid] = substr($9, 1, 120)
+def int_or_none(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def float_or_none(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def systemctl_show(unit: str, user: bool = False) -> dict[str, str]:
+    cmd = ["systemctl"]
+    if user:
+        cmd.append("--user")
+    cmd += [
+        "show",
+        unit,
+        "--no-pager",
+        "-p",
+        "Id",
+        "-p",
+        "LoadState",
+        "-p",
+        "ActiveState",
+        "-p",
+        "SubState",
+        "-p",
+        "MainPID",
+        "-p",
+        "ControlGroup",
+        "-p",
+        "Slice",
+        "-p",
+        "MemoryCurrent",
+        "-p",
+        "MemoryHigh",
+        "-p",
+        "MemoryMax",
+        "-p",
+        "CPUWeight",
+        "-p",
+        "IOWeight",
+        "-p",
+        "IODeviceLatencyTargetUSec",
+        "-p",
+        "IOReadBandwidthMax",
+        "-p",
+        "IOWriteBandwidthMax",
+        "-p",
+        "IOSchedulingClass",
+        "-p",
+        "Nice",
+        "-p",
+        "TimeoutStartUSec",
+        "-p",
+        "TimeoutStopUSec",
+        "-p",
+        "WantedBy",
+        "-p",
+        "Wants",
+        "-p",
+        "PartOf",
+        "-p",
+        "NextElapseUSecRealtime",
+        "-p",
+        "Persistent",
+        "-p",
+        "Result",
+    ]
+    proc = run_cmd(cmd, timeout=3)
+    if not proc or proc.returncode not in (0, 1):
+        return {"Id": unit, "LoadState": "unknown"}
+    props = split_props(proc.stdout)
+    props.setdefault("Id", unit)
+    return props
+
+
+def collect_systemd_units(offline: bool) -> list[dict[str, Any]]:
+    if offline:
+        return []
+    rows: list[dict[str, Any]] = []
+    for unit in SYSTEM_UNITS:
+        props = systemctl_show(unit, user=False)
+        if props.get("LoadState") == "not-found":
+            continue
+        rows.append(unit_row(unit, "system", props))
+    for unit in USER_UNITS:
+        props = systemctl_show(unit, user=True)
+        if props.get("LoadState") == "not-found":
+            continue
+        rows.append(unit_row(unit, "user", props))
+    return rows
+
+
+def unit_row(unit: str, manager: str, props: dict[str, str]) -> dict[str, Any]:
+    return {
+        "unit": unit,
+        "manager": manager,
+        "active_state": props.get("ActiveState"),
+        "sub_state": props.get("SubState"),
+        "load_state": props.get("LoadState"),
+        "main_pid": int_or_none(props.get("MainPID")),
+        "control_group": props.get("ControlGroup") or None,
+        "slice": props.get("Slice") or None,
+        "resource_class": RESOURCE_CLASS_BY_UNIT.get(unit),
+        "policy": {
+            "memory_current": props.get("MemoryCurrent"),
+            "memory_high": props.get("MemoryHigh"),
+            "memory_max": props.get("MemoryMax"),
+            "cpu_weight": props.get("CPUWeight"),
+            "io_weight": props.get("IOWeight"),
+            "io_device_latency_target": props.get("IODeviceLatencyTargetUSec"),
+            "io_read_bandwidth_max": props.get("IOReadBandwidthMax"),
+            "io_write_bandwidth_max": props.get("IOWriteBandwidthMax"),
+            "io_scheduling_class": props.get("IOSchedulingClass"),
+            "nice": props.get("Nice"),
+            "timeout_start": props.get("TimeoutStartUSec"),
+            "timeout_stop": props.get("TimeoutStopUSec"),
+        },
+        "timer": {
+            "next_elapse": props.get("NextElapseUSecRealtime") or None,
+            "persistent": props.get("Persistent") or None,
+        },
+        "relationships": {
+            "wanted_by": words(props.get("WantedBy")),
+            "wants": words(props.get("Wants")),
+            "part_of": words(props.get("PartOf")),
+        },
+        "result": props.get("Result") or None,
+    }
+
+
+def words(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [part for part in value.split() if part]
+
+
+def collect_resource_slices(offline: bool) -> list[dict[str, Any]]:
+    if offline:
+        return []
+    specs = [
+        ("user", "build.slice"),
+        ("user", "nix-build.slice"),
+        ("user", "background.slice"),
+        ("system", "nix-build.slice"),
+        ("system", "background.slice"),
+        ("system", "sinnix-maintenance.slice"),
+    ]
+    rows: list[dict[str, Any]] = []
+    for manager, unit in specs:
+        props = systemctl_show(unit, user=manager == "user")
+        if props.get("LoadState") == "not-found":
+            continue
+        rows.append(unit_row(unit, manager, props))
+    return rows
+
+
+def collect_storage(offline: bool) -> dict[str, Any]:
+    if offline:
+        return {"offline": True, "mounts": [], "discard_queues": []}
+    mounts = []
+    paths = [
+        "/",
+        "/nix",
+        "/persist",
+        "/cache",
+        "/realm",
+        "/realm/data/captures/sinex",
+        "/var/lib/postgresql",
+        "/var/lib/sinex",
+        str(Path.home() / ".local/share/polylogue"),
+    ]
+    for path in paths:
+        proc = run_cmd(["findmnt", "-T", path, "-n", "-o", "TARGET,SOURCE,FSTYPE,OPTIONS"])
+        if proc and proc.stdout.strip():
+            parts = proc.stdout.strip().split(None, 3)
+            mounts.append(
+                {
+                    "path": path,
+                    "target": parts[0] if len(parts) > 0 else None,
+                    "source": parts[1] if len(parts) > 1 else None,
+                    "fstype": parts[2] if len(parts) > 2 else None,
+                    "options": parts[3] if len(parts) > 3 else None,
+                }
+            )
+        else:
+            mounts.append({"path": path, "unresolved": True})
+
+    queues = []
+    for pattern in ("/sys/block/nvme*n1", "/sys/block/sd*"):
+        for dev in sorted(glob.glob(pattern)):
+            queue = Path(dev) / "queue"
+            queues.append(
+                {
+                    "device": Path(dev).name,
+                    "discard_max_bytes": read_text(queue / "discard_max_bytes"),
+                    "discard_granularity": read_text(queue / "discard_granularity"),
+                    "rotational": read_text(queue / "rotational"),
+                    "scheduler": read_text(queue / "scheduler"),
+                    "wbt_lat_usec": read_text(queue / "wbt_lat_usec"),
+                }
+            )
+
+    iostat = ""
+    if os.environ.get("SINNIX_OBSERVE_IOSTAT", "1") != "0":
+        proc = run_cmd(["iostat", "-xz", "1", "2"], timeout=4)
+        iostat = proc.stdout if proc else ""
+
+    return {
+        "fstrim_timer": systemctl_show("fstrim.timer"),
+        "fstrim_service": systemctl_show("fstrim.service"),
+        "mounts": mounts,
+        "discard_queues": queues,
+        "iostat_xz": iostat,
+    }
+
+
+def parse_proc_io(path: Path) -> dict[str, int]:
+    raw = read_text(path)
+    result: dict[str, int] = {}
+    if not raw:
+        return result
+    for line in raw.splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        parsed = int_or_none(value.strip())
+        if parsed is not None:
+            result[key.strip()] = parsed
+    return result
+
+
+def parse_proc_status(path: Path) -> dict[str, str]:
+    raw = read_text(path)
+    result: dict[str, str] = {}
+    if not raw:
+        return result
+    for line in raw.splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        result[key.strip()] = value.strip()
+    return result
+
+
+def parse_proc_cgroup(path: Path) -> str | None:
+    raw = read_text(path)
+    if not raw:
+        return None
+    for line in raw.splitlines():
+        parts = line.split(":", 2)
+        if len(parts) == 3 and parts[0] == "0":
+            return parts[2]
+    return raw.splitlines()[0] if raw.splitlines() else None
+
+
+def chrome_profile_candidates() -> list[Path]:
+    candidates: list[Path] = []
+    override = os.environ.get("SINNIX_CHROME_PROFILE")
+    if override:
+        candidates.append(Path(override))
+    candidates.append(Path.home() / ".config/chrome-ws")
+    for pattern in CHROME_PROFILE_GLOBS:
+        candidates.extend(Path(path) for path in glob.glob(pattern))
+
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(candidate)
+    return unique
+
+
+def is_chrome_process(comm: str, cmdline: str) -> bool:
+    text = f"{comm} {cmdline}".lower()
+    return any(
+        token in text
+        for token in (
+            "google-chrome",
+            "chrome-ws",
+            "chrome_crashpad",
+            "chromium",
+            "chrome --type=",
+            "/chrome ",
+        )
+    )
+
+
+def du_bytes(path: Path) -> int | None:
+    if os.environ.get("SINNIX_OBSERVE_CHROME_DU", "1") == "0":
+        return None
+    proc = run_cmd(["du", "-s", "-B1", str(path)], timeout=2)
+    if not proc or proc.returncode != 0:
+        return None
+    first = proc.stdout.splitlines()[0] if proc.stdout.splitlines() else ""
+    return int_or_none(first.split()[0] if first else None)
+
+
+def find_mount_for_path(path: Path) -> dict[str, Any]:
+    proc = run_cmd(["findmnt", "-T", str(path), "-n", "-o", "TARGET,SOURCE,FSTYPE,OPTIONS"], timeout=2)
+    if not proc or not proc.stdout.strip():
+        return {"unresolved": True}
+    parts = proc.stdout.strip().split(None, 3)
+    return {
+        "target": parts[0] if len(parts) > 0 else None,
+        "source": parts[1] if len(parts) > 1 else None,
+        "fstype": parts[2] if len(parts) > 2 else None,
+        "options": parts[3] if len(parts) > 3 else None,
+    }
+
+
+def chrome_path_row(path: Path, include_size: bool = True) -> dict[str, Any]:
+    exists = path.exists()
+    row: dict[str, Any] = {
+        "path": str(path),
+        "exists": exists,
+        "is_symlink": path.is_symlink(),
+        "realpath": str(path.resolve(strict=False)),
+    }
+    if exists:
+        row["mount"] = find_mount_for_path(path)
+        if include_size:
+            row["du_bytes"] = du_bytes(path)
+    return row
+
+
+def collect_chrome_io(offline: bool, below: dict[str, Any], limit: int) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "available": False,
+        "counter_scope": "live /proc/<pid>/io counters since each Chrome process started",
+        "profiles": [],
+        "processes": [],
+        "by_cgroup": [],
+        "below_process_peaks": [],
+    }
+    if offline:
+        result["offline"] = True
+        return result
+
+    for profile in chrome_profile_candidates():
+        if not profile.exists():
+            continue
+        profile_row = chrome_path_row(profile, include_size=False)
+        cache_rows = []
+        for rel in CHROME_CACHE_RELATIVE_PATHS:
+            candidate = profile / rel
+            if candidate.exists():
+                cache_rows.append(chrome_path_row(candidate))
+        profile_row["cache_paths"] = cache_rows
+        result["profiles"].append(profile_row)
+
+    for proc_dir in Path("/proc").glob("[0-9]*"):
+        pid = int_or_none(proc_dir.name)
+        if pid is None:
+            continue
+        comm = read_text(proc_dir / "comm") or ""
+        cmdline = read_proc_cmdline(proc_dir / "cmdline")
+        if not is_chrome_process(comm, cmdline):
+            continue
+        status = parse_proc_status(proc_dir / "status")
+        io = parse_proc_io(proc_dir / "io")
+        result["processes"].append(
+            {
+                "pid": pid,
+                "ppid": int_or_none(status.get("PPid")),
+                "comm": comm,
+                "state": status.get("State"),
+                "rss_kb": int_or_none((status.get("VmRSS") or "").split()[0]),
+                "cgroup": parse_proc_cgroup(proc_dir / "cgroup"),
+                "io": io,
+                "cmdline": cmdline[:300],
             }
-            if (rss > max_rss[pid]) max_rss[pid] = rss
-            if (cpu > max_cpu[pid]) max_cpu[pid] = cpu
-          }
-          END {
-            for (pid in samples) {
-              printf "%.0f\t%.0f\t%.1f\t%d\t%s\t%s\t%s\t%s\n",
-                max_io[pid], max_rss[pid], max_cpu[pid], pid,
-                comm[pid], state[pid], cgroup[pid], cmdline[pid]
+        )
+
+    by_cgroup: dict[str, dict[str, Any]] = {}
+    for proc in result["processes"]:
+        cgroup = proc.get("cgroup") or "(unknown)"
+        current = by_cgroup.setdefault(
+            cgroup,
+            {
+                "cgroup": cgroup,
+                "processes": 0,
+                "rss_kb": 0,
+                "rchar": 0,
+                "wchar": 0,
+                "read_bytes": 0,
+                "write_bytes": 0,
+                "cancelled_write_bytes": 0,
+            },
+        )
+        current["processes"] += 1
+        current["rss_kb"] += int(proc.get("rss_kb") or 0)
+        io = proc.get("io") or {}
+        for key in ("rchar", "wchar", "read_bytes", "write_bytes", "cancelled_write_bytes"):
+            current[key] += int(io.get(key) or 0)
+
+    result["processes"] = sorted(
+        result["processes"],
+        key=lambda proc: (proc.get("io") or {}).get("write_bytes", 0)
+        + (proc.get("io") or {}).get("read_bytes", 0),
+        reverse=True,
+    )[:limit]
+    result["by_cgroup"] = sorted(
+        by_cgroup.values(),
+        key=lambda row: row["write_bytes"] + row["read_bytes"],
+        reverse=True,
+    )
+
+    for proc in below.get("process_peaks", []):
+        text = f"{proc.get('comm') or ''} {proc.get('cmdline') or ''}".lower()
+        if is_chrome_process(str(proc.get("comm") or ""), text):
+            result["below_process_peaks"].append(proc)
+    result["below_process_peaks"] = result["below_process_peaks"][:limit]
+    result["available"] = bool(result["profiles"] or result["processes"] or result["below_process_peaks"])
+    if not result["available"]:
+        result["gaps"] = ["chrome_io.no_profile_or_process_seen"]
+    return result
+
+
+def sqlite_columns(db: Path, table: str) -> set[str]:
+    try:
+        with sqlite3.connect(f"file:{db}?mode=ro", uri=True) as conn:
+            return {row[1] for row in conn.execute(f"pragma table_info({table})")}
+    except sqlite3.Error:
+        return set()
+
+
+def sqlite_rows(db: Path, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
+    try:
+        with sqlite3.connect(f"file:{db}?mode=ro", uri=True) as conn:
+            conn.row_factory = sqlite3.Row
+            return [dict(row) for row in conn.execute(sql, params)]
+    except sqlite3.Error:
+        return []
+
+
+def table_exists(db: Path, table: str) -> bool:
+    if not db.exists():
+        return False
+    rows = sqlite_rows(
+        db,
+        "select count(*) as n from sqlite_master where type='table' and name=?",
+        (table,),
+    )
+    return bool(rows and rows[0].get("n") == 1)
+
+
+def sinex_history_db() -> Path | None:
+    override = os.environ.get("SINNIX_OBSERVE_SINEX_DB")
+    if override:
+        return Path(override)
+    sinex_root = Path(os.environ.get("SINEX_ROOT", "/realm/project/sinex"))
+    candidates = [
+        sinex_root / ".sinex/state/xtask-history.db",
+        Path("/realm/project/sinex/.sinex/state/xtask-history.db"),
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
+def collect_sinex_xtask(limit: int) -> dict[str, Any]:
+    db = sinex_history_db()
+    source: dict[str, Any] = {"db": str(db) if db else None, "available": False, "rows": []}
+    if not db or not db.exists() or not table_exists(db, "invocations"):
+        source["gaps"] = ["sinex.xtask_history.unavailable"]
+        return source
+    cols = sqlite_columns(db, "invocations")
+    wanted = [
+        "id",
+        "command",
+        "subcommand",
+        "profile",
+        "args_json",
+        "started_at",
+        "finished_at",
+        "duration_secs",
+        "status",
+        "exit_code",
+        "cwd",
+        "pid",
+        "scope_key",
+        "launch_mode",
+        "is_background",
+        "process_cpu_usage_avg",
+        "process_memory_usage_max_mb",
+        "process_count_max",
+        "resource_sample_count",
+        "shared_nix_build_slice_cpu_usage_avg",
+        "shared_nix_build_slice_memory_usage_max_mb",
+        "shared_background_slice_cpu_usage_avg",
+        "shared_background_slice_memory_usage_max_mb",
+    ]
+    selected = [col for col in wanted if col in cols]
+    rows = sqlite_rows(
+        db,
+        f"""
+        select {", ".join(selected)}
+        from invocations
+        order by started_at desc
+        limit ?
+        """,
+        (limit,),
+    )
+    source["available"] = True
+    source["rows"] = rows
+    return source
+
+
+def polylogue_db() -> Path | None:
+    candidates = [
+        os.environ.get("SINNIX_OBSERVE_POLYLOGUE_DB"),
+        os.environ.get("POLYLOGUE_DB_PATH"),
+        str(Path.home() / ".local/share/polylogue/polylogue.db"),
+        str(Path.home() / ".local/share/polylogue/archive.db"),
+        str(Path.home() / ".local/share/polylogue/polylogue.sqlite"),
+        str(Path(os.environ.get("POLYLOGUE_ROOT", "/realm/project/polylogue")) / ".local/browser-capture/xdg-data/polylogue/polylogue.db"),
+    ]
+    for candidate in candidates:
+        if candidate and table_exists(Path(candidate), "runs"):
+            return Path(candidate)
+    return Path(candidates[0]) if candidates[0] else None
+
+
+def polylogue_run_dirs() -> list[Path]:
+    dirs = [
+        os.environ.get("SINNIX_OBSERVE_POLYLOGUE_RUNS_DIR"),
+        str(Path.home() / ".local/share/polylogue/runs"),
+        str(Path(os.environ.get("POLYLOGUE_ROOT", "/realm/project/polylogue")) / "runs"),
+        str(Path(os.environ.get("POLYLOGUE_ROOT", "/realm/project/polylogue")) / "archive/runs"),
+    ]
+    return [Path(path) for path in dirs if path]
+
+
+def load_polylogue_run_json(run_id: str) -> dict[str, Any] | None:
+    for directory in polylogue_run_dirs():
+        if not directory.exists():
+            continue
+        matches = sorted(directory.glob(f"run-*-{run_id}.json"))
+        if not matches:
+            matches = sorted(directory.glob(f"*{run_id}*.json"))
+        for match in matches:
+            try:
+                return json.loads(match.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+    return None
+
+
+def collect_polylogue_runs(limit: int) -> dict[str, Any]:
+    db = polylogue_db()
+    source: dict[str, Any] = {"db": str(db) if db else None, "available": False, "rows": []}
+    if not db or not db.exists() or not table_exists(db, "runs"):
+        source["gaps"] = ["polylogue.runs.unavailable"]
+        return source
+    rows = sqlite_rows(
+        db,
+        """
+        select run_id, timestamp, plan_snapshot, counts_json, drift_json, indexed, duration_ms
+        from runs
+        order by timestamp desc
+        limit ?
+        """,
+        (limit,),
+    )
+    for row in rows:
+        run_json = load_polylogue_run_json(str(row.get("run_id") or ""))
+        if run_json is not None:
+            row["run_json"] = run_json
+    source["available"] = True
+    source["rows"] = rows
+    return source
+
+
+def parse_below_tsv(text: str) -> list[list[str]]:
+    rows = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        rows.append(line.split("\t"))
+    return rows
+
+
+def collect_below(begin: str, duration: str, limit: int, offline: bool) -> dict[str, Any]:
+    fixture_cgroup = os.environ.get("SINNIX_OBSERVE_BELOW_CGROUP_TSV")
+    fixture_process = os.environ.get("SINNIX_OBSERVE_BELOW_PROCESS_TSV")
+    result: dict[str, Any] = {
+        "available": False,
+        "begin": begin,
+        "duration": duration,
+        "cgroup_peaks": [],
+        "process_peaks": [],
+    }
+    if offline and not (fixture_cgroup or fixture_process):
+        result["gaps"] = ["below.history.unavailable_offline"]
+        return result
+
+    if fixture_cgroup:
+        try:
+            cgroup_text = Path(fixture_cgroup).read_text(encoding="utf-8")
+        except OSError:
+            cgroup_text = ""
+    else:
+        proc = run_cmd(
+            [
+                "below",
+                "dump",
+                "cgroup",
+                "-b",
+                begin,
+                "--duration",
+                duration,
+                "-f",
+                "datetime name full_path cpu.usage_pct mem.total io.rwbytes_per_sec pressure.io_full_pct pressure.memory_full_pct",
+                "-O",
+                "tsv",
+                "--raw",
+                "--disable-title",
+            ],
+            timeout=10,
+        )
+        cgroup_text = proc.stdout if proc and proc.returncode == 0 else ""
+
+    cgroup_by_path: dict[str, dict[str, Any]] = {}
+    for row in parse_below_tsv(cgroup_text):
+        if len(row) < 8:
+            continue
+        path = row[2]
+        current = cgroup_by_path.setdefault(
+            path,
+            {
+                "cgroup": path,
+                "max_rw_bps": 0.0,
+                "max_io_full_pct": 0.0,
+                "max_memory_full_pct": 0.0,
+                "max_rss_bytes": 0.0,
+                "max_cpu_pct": 0.0,
+                "samples": 0,
+            },
+        )
+        current["samples"] += 1
+        current["max_cpu_pct"] = max(current["max_cpu_pct"], float_or_zero(row[3]))
+        current["max_rss_bytes"] = max(current["max_rss_bytes"], float_or_zero(row[4]))
+        current["max_rw_bps"] = max(current["max_rw_bps"], float_or_zero(row[5]))
+        current["max_io_full_pct"] = max(current["max_io_full_pct"], float_or_zero(row[6]))
+        current["max_memory_full_pct"] = max(current["max_memory_full_pct"], float_or_zero(row[7]))
+
+    if fixture_process:
+        try:
+            process_text = Path(fixture_process).read_text(encoding="utf-8")
+        except OSError:
+            process_text = ""
+    else:
+        proc = run_cmd(
+            [
+                "below",
+                "dump",
+                "process",
+                "-b",
+                begin,
+                "--duration",
+                duration,
+                "-f",
+                "datetime pid comm state cgroup io.rwbytes_per_sec mem.rss_bytes cpu.usage_pct cmdline",
+                "-O",
+                "tsv",
+                "--raw",
+                "--disable-title",
+            ],
+            timeout=10,
+        )
+        process_text = proc.stdout if proc and proc.returncode == 0 else ""
+
+    process_by_pid: dict[str, dict[str, Any]] = {}
+    for row in parse_below_tsv(process_text):
+        if len(row) < 9 or not row[1].isdigit():
+            continue
+        pid = row[1]
+        current = process_by_pid.setdefault(
+            pid,
+            {
+                "pid": int(pid),
+                "comm": row[2],
+                "state": row[3],
+                "cgroup": row[4],
+                "cmdline": row[8][:240],
+                "max_rw_bps": 0.0,
+                "max_rss_bytes": 0.0,
+                "max_cpu_pct": 0.0,
+                "samples": 0,
+            },
+        )
+        current["samples"] += 1
+        current["max_rw_bps"] = max(current["max_rw_bps"], float_or_zero(row[5]))
+        current["max_rss_bytes"] = max(current["max_rss_bytes"], float_or_zero(row[6]))
+        current["max_cpu_pct"] = max(current["max_cpu_pct"], float_or_zero(row[7]))
+
+    result["cgroup_peaks"] = sorted(
+        cgroup_by_path.values(), key=lambda item: item["max_rw_bps"], reverse=True
+    )[:limit]
+    result["process_peaks"] = sorted(
+        process_by_pid.values(), key=lambda item: item["max_rw_bps"], reverse=True
+    )[:limit]
+    result["available"] = bool(result["cgroup_peaks"] or result["process_peaks"])
+    if not result["available"]:
+        result["gaps"] = ["below.history.no_samples"]
+    return result
+
+
+def float_or_zero(value: Any) -> float:
+    parsed = float_or_none(value)
+    return 0.0 if parsed is None else parsed
+
+
+def parse_counts(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return raw
+    if not raw:
+        return {}
+    try:
+        value = json.loads(str(raw))
+        return value if isinstance(value, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def normalize_timestamp(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    if re.fullmatch(r"\d+(\.\d+)?", text):
+        try:
+            return dt.datetime.fromtimestamp(float(text), dt.UTC).replace(microsecond=0).isoformat()
+        except (OSError, ValueError):
+            return text
+    return text
+
+
+def infer_sinex_resource_class(row: dict[str, Any]) -> str:
+    command = str(row.get("command") or "")
+    bg_mb = float_or_zero(row.get("shared_background_slice_memory_usage_max_mb"))
+    nix_mb = float_or_zero(row.get("shared_nix_build_slice_memory_usage_max_mb"))
+    if command in {"build", "check", "test", "doc"} or nix_mb > 0:
+        return "developer-build"
+    if row.get("is_background") or row.get("launch_mode") == "background" or bg_mb > 0:
+        return "background-maintenance"
+    return "unknown"
+
+
+def build_workload_rows(
+    systemd_units: list[dict[str, Any]],
+    sinex: dict[str, Any],
+    polylogue: dict[str, Any],
+    below: dict[str, Any],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for unit in systemd_units:
+        gaps = []
+        if not unit.get("control_group"):
+            gaps.append("systemd.unit.lacks_control_group")
+        if not unit.get("resource_class"):
+            gaps.append("systemd.unit.lacks_resource_class")
+        rows.append(
+            {
+                "workload_id": f"systemd:{unit['manager']}:{unit['unit']}",
+                "source": "systemd",
+                "project": project_for_unit(unit["unit"]),
+                "kind": "unit",
+                "name": unit["unit"],
+                "unit": unit["unit"],
+                "unit_scope": unit["manager"],
+                "cgroup": unit.get("control_group"),
+                "resource_class": unit.get("resource_class"),
+                "status": f"{unit.get('active_state')}/{unit.get('sub_state')}",
+                "metrics": {"policy": unit.get("policy", {})},
+                "below": match_below(unit["unit"], unit.get("control_group"), below),
+                "gaps": gaps,
             }
-          }' \
-      | LC_ALL=C sort -nr -k1,1 \
-      | sed -n '1,12p'
-  )"
+        )
 
-  echo "process I/O peaks:"
-  if [ -n "$process_rows" ]; then
-    printf '  %-12s %-9s %-7s %-8s %-18s %s\n' \
-      "rw_Bps" "rss_MiB" "cpu%" "pid" "comm" "cmdline"
-    printf '%s\n' "$process_rows" \
-      | awk -F '\t' '{
-          printf "  %-12.0f %-9.1f %-7.1f %-8d %-18s %s\n",
-            $1, $2 / 1048576, $3, $4, $5, $8
-        }'
-  else
-    echo "  no below process samples for window"
-  fi
-}
+    for row in sinex.get("rows", []):
+        gaps = [
+            "sinex.invocation.lacks_recorded_unit",
+            "sinex.invocation.lacks_cgroup",
+            "sinex.invocation.lacks_io_bytes",
+            "sinex.invocation.lacks_psi_window",
+            "sinex.invocation.lacks_declared_resource_class",
+        ]
+        command = " ".join(str(v) for v in [row.get("command"), row.get("subcommand")] if v)
+        rows.append(
+            {
+                "workload_id": f"sinex.xtask:{row.get('id')}",
+                "source": "sinex.xtask",
+                "project": "sinex",
+                "kind": "project-ledger",
+                "name": command or "xtask",
+                "command": command,
+                "started_at": normalize_timestamp(row.get("started_at")),
+                "finished_at": normalize_timestamp(row.get("finished_at")),
+                "duration_secs": row.get("duration_secs"),
+                "status": row.get("status"),
+                "pid": row.get("pid"),
+                "unit": None,
+                "cgroup": None,
+                "resource_class": infer_sinex_resource_class(row),
+                "metrics": {
+                    "rss_mb": row.get("process_memory_usage_max_mb"),
+                    "cpu_avg": row.get("process_cpu_usage_avg"),
+                    "process_count_max": row.get("process_count_max"),
+                    "resource_sample_count": row.get("resource_sample_count"),
+                    "scope_key": row.get("scope_key"),
+                    "launch_mode": row.get("launch_mode"),
+                    "shared_background_slice_memory_usage_max_mb": row.get(
+                        "shared_background_slice_memory_usage_max_mb"
+                    ),
+                    "shared_nix_build_slice_memory_usage_max_mb": row.get(
+                        "shared_nix_build_slice_memory_usage_max_mb"
+                    ),
+                },
+                "below": match_below("sinex", None, below),
+                "gaps": gaps,
+            }
+        )
 
-pressure_summary
-blocked_tasks
-storage_pressure
-systemd_units
-sentinel_state
-slice_state
-active_heavy_processes
-sinex_xtask_history
-polylogue_runs
-below_recent_history
-below_hint
+    for row in polylogue.get("rows", []):
+        counts = parse_counts(row.get("counts_json"))
+        run_json = row.get("run_json") if isinstance(row.get("run_json"), dict) else {}
+        if run_json:
+            counts = parse_counts(run_json.get("counts")) or counts
+        gaps = [
+            "polylogue.run.lacks_recorded_unit",
+            "polylogue.run.lacks_cgroup",
+            "polylogue.run.lacks_io_bytes",
+            "polylogue.run.lacks_psi_window",
+            "polylogue.run.lacks_declared_resource_class",
+        ]
+        if not run_json:
+            gaps.append("polylogue.run.lacks_sidecar_run_json")
+        rows.append(
+            {
+                "workload_id": f"polylogue.run:{row.get('run_id')}",
+                "source": "polylogue.run",
+                "project": "polylogue",
+                "kind": "project-ledger",
+                "name": "polylogue run",
+                "run_id": row.get("run_id"),
+                "started_at": normalize_timestamp(row.get("timestamp")),
+                "duration_secs": (row.get("duration_ms") or 0) / 1000.0
+                if row.get("duration_ms") is not None
+                else None,
+                "status": "indexed" if row.get("indexed") else "recorded",
+                "unit": "polylogue-run.service",
+                "unit_source": "sinnix-inferred",
+                "cgroup": None,
+                "resource_class": "background-maintenance",
+                "metrics": {
+                    "counts": counts,
+                    "indexed": row.get("indexed"),
+                    "drift_json": row.get("drift_json"),
+                    "has_sidecar_run_json": bool(run_json),
+                },
+                "below": match_below("polylogue", None, below),
+                "gaps": gaps,
+            }
+        )
+
+    for proc in below.get("process_peaks", []):
+        gaps = []
+        if not proc.get("cgroup"):
+            gaps.append("below.process.lacks_cgroup")
+        rows.append(
+            {
+                "workload_id": f"below.process:{proc.get('pid')}",
+                "source": "below.process",
+                "project": project_for_text(proc.get("cmdline") or proc.get("comm") or ""),
+                "kind": "below-process-peak",
+                "name": proc.get("comm"),
+                "pid": proc.get("pid"),
+                "cgroup": proc.get("cgroup"),
+                "resource_class": infer_resource_class_from_cgroup(proc.get("cgroup") or ""),
+                "metrics": proc,
+                "gaps": gaps,
+            }
+        )
+    return rows
+
+
+def project_for_unit(unit: str) -> str | None:
+    if unit.startswith("sinex") or unit in {"nats.service", "postgresql.service"}:
+        return "sinex"
+    if unit.startswith("polylogue") or unit.startswith("polylogued"):
+        return "polylogue"
+    if unit.startswith("borg") or unit.startswith("btrbk"):
+        return "backup"
+    return None
+
+
+def project_for_text(text: str) -> str | None:
+    lower = text.lower()
+    if "sinex" in lower or "xtask" in lower:
+        return "sinex"
+    if "polylogue" in lower or "polylogued" in lower:
+        return "polylogue"
+    if "borg" in lower or "btrbk" in lower:
+        return "backup"
+    return None
+
+
+def infer_resource_class_from_cgroup(cgroup: str) -> str | None:
+    if "build.slice" in cgroup or "nix-build.slice" in cgroup:
+        return "developer-build"
+    if "background.slice" in cgroup:
+        return "background-maintenance"
+    if "app-graphical.slice" in cgroup or "app.slice" in cgroup:
+        return "interactive"
+    if "system.slice" in cgroup:
+        return "system"
+    return None
+
+
+def match_below(name: str, cgroup: str | None, below: dict[str, Any]) -> dict[str, Any]:
+    name_l = name.lower()
+    matched_cgroups = []
+    for row in below.get("cgroup_peaks", []):
+        cg = str(row.get("cgroup") or "")
+        if (cgroup and cgroup in cg) or name_l.replace(".service", "") in cg.lower():
+            matched_cgroups.append(row)
+    matched_processes = []
+    for row in below.get("process_peaks", []):
+        text = f"{row.get('comm') or ''} {row.get('cmdline') or ''} {row.get('cgroup') or ''}".lower()
+        if name_l.replace(".service", "") in text or (
+            name_l == "sinex" and ("sinex" in text or "xtask" in text)
+        ):
+            matched_processes.append(row)
+        elif name_l == "polylogue" and "polylogue" in text:
+            matched_processes.append(row)
+    return {
+        "cgroup_peaks": matched_cgroups[:3],
+        "process_peaks": matched_processes[:3],
+    }
+
+
+def collect_sentinel(offline: bool) -> dict[str, Any]:
+    if offline:
+        return {"offline": True}
+    state = {"service": systemctl_show("sinnix-sentinel.service")}
+    policy = Path("/etc/sinnix/health-policy.json")
+    if policy.exists():
+        try:
+            state["health_policy"] = json.loads(policy.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            state["health_policy_error"] = str(policy)
+    health = Path("/run/sinnix/health.json")
+    if health.exists():
+        try:
+            state["latest_health"] = json.loads(health.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            state["latest_health_error"] = str(health)
+    return state
+
+
+def collect_report(args: argparse.Namespace) -> dict[str, Any]:
+    pressure = collect_pressure(args.offline)
+    blocked = collect_blocked_tasks(args.offline)
+    storage = collect_storage(args.offline)
+    systemd_units = collect_systemd_units(args.offline)
+    slices = collect_resource_slices(args.offline)
+    sinex = collect_sinex_xtask(args.limit)
+    polylogue = collect_polylogue_runs(args.limit)
+    below = collect_below(args.since, args.duration, args.limit, args.offline)
+    chrome_io = collect_chrome_io(args.offline, below, args.limit)
+    workload_rows = build_workload_rows(systemd_units, sinex, polylogue, below)
+    return {
+        "schema": SCHEMA,
+        "generated_at": utc_now(),
+        "window": {"since": args.since, "duration": args.duration},
+        "sources": {
+            "sinex_xtask_history": {"path": sinex.get("db"), "available": sinex.get("available")},
+            "polylogue_runs": {"path": polylogue.get("db"), "available": polylogue.get("available")},
+            "below": {"available": below.get("available")},
+        },
+        "live_pressure": pressure,
+        "blocked_tasks": blocked,
+        "storage": storage,
+        "systemd_units": systemd_units,
+        "sentinel": collect_sentinel(args.offline),
+        "resource_slices": slices,
+        "chrome_io": chrome_io,
+        "sinex_xtask_history": sinex,
+        "polylogue_runs": polylogue,
+        "below": below,
+        "workload_rows": workload_rows,
+        "gaps_summary": dict(Counter(gap for row in workload_rows for gap in row.get("gaps", []))),
+    }
+
+
+def render_human(report: dict[str, Any]) -> str:
+    lines: list[str] = []
+
+    def section(title: str) -> None:
+        lines.append("")
+        lines.append(f"== {title} ==")
+
+    section("live pressure")
+    lines.append(report["generated_at"])
+    pressure = report.get("live_pressure", {})
+    for key in ("cpu", "memory", "io"):
+        raw = pressure.get(key, {}).get("raw", "")
+        prefix = f"{key:<6}"
+        for idx, raw_line in enumerate(raw.splitlines() or [""]):
+            lines.append(f"{prefix if idx == 0 else '':<7}{raw_line}")
+    if pressure.get("free_h"):
+        lines.append(pressure["free_h"].rstrip())
+
+    section("blocked tasks")
+    blocked = report.get("blocked_tasks", [])
+    if not blocked:
+        lines.append("none")
+    else:
+        lines.append(f"{'STAT':<6} {'PID':<8} {'PPID':<8} {'SEC':<8} {'CPU':<6} {'RSS_KB':<9} {'WCHAN':<24} COMMAND")
+        for task in blocked[:20]:
+            lines.append(
+                f"{task.get('stat',''):<6} {task.get('pid','')!s:<8} {task.get('ppid','')!s:<8} "
+                f"{task.get('elapsed_secs','')!s:<8} {task.get('cpu_pct','')!s:<6} {task.get('rss_kb','')!s:<9} "
+                f"{task.get('wchan',''):<24} {task.get('cmdline','')}"
+            )
+
+    section("storage pressure")
+    storage = report.get("storage", {})
+    ft = storage.get("fstrim_timer", {})
+    fs = storage.get("fstrim_service", {})
+    lines.append(
+        f"fstrim.timer active={ft.get('ActiveState')} sub={ft.get('SubState')} next={ft.get('NextElapseUSecRealtime')}"
+    )
+    lines.append(
+        f"fstrim.service active={fs.get('ActiveState')} sub={fs.get('SubState')} result={fs.get('Result')}"
+    )
+    lines.append("mount map:")
+    for mount in storage.get("mounts", []):
+        if mount.get("unresolved"):
+            lines.append(f"  {mount.get('path'):<42} unresolved")
+        else:
+            lines.append(
+                f"  {mount.get('path'):<42} {mount.get('target')} {mount.get('source')} {mount.get('fstype')} {mount.get('options')}"
+            )
+    if storage.get("discard_queues"):
+        lines.append("discard queues:")
+        for queue in storage["discard_queues"]:
+            lines.append(
+                f"  {queue.get('device'):<8} discard_max={queue.get('discard_max_bytes')} "
+                f"granularity={queue.get('discard_granularity')} scheduler={queue.get('scheduler')} "
+                f"wbt={queue.get('wbt_lat_usec')}"
+            )
+    if storage.get("iostat_xz"):
+        lines.append("iostat 1s sample:")
+        lines.extend("  " + line for line in storage["iostat_xz"].rstrip().splitlines()[:40])
+
+    section("managed workload units")
+    for unit in report.get("systemd_units", []):
+        policy = unit.get("policy", {})
+        lines.append(
+            f"{unit.get('unit'):<34} active={unit.get('active_state')}/{unit.get('sub_state')} "
+            f"pid={unit.get('main_pid')} class={unit.get('resource_class')} "
+            f"cgroup={unit.get('control_group')} high={policy.get('memory_high')} "
+            f"max={policy.get('memory_max')} io_weight={policy.get('io_weight')}"
+        )
+
+    section("resource slices")
+    for unit in report.get("resource_slices", []):
+        policy = unit.get("policy", {})
+        lines.append(
+            f"{unit.get('manager')}/{unit.get('unit'):<24} active={unit.get('active_state')}/{unit.get('sub_state')} "
+            f"high={policy.get('memory_high')} max={policy.get('memory_max')} "
+            f"io_weight={policy.get('io_weight')}"
+        )
+
+    section("chrome I/O attribution")
+    chrome = report.get("chrome_io", {})
+    lines.append(chrome.get("counter_scope", "unavailable"))
+    if not chrome.get("available"):
+        lines.append("none")
+    else:
+        for profile in chrome.get("profiles", []):
+            mount = profile.get("mount", {})
+            lines.append(
+                f"profile {profile.get('path')} real={profile.get('realpath')} "
+                f"mount={mount.get('source')} target={mount.get('target')}"
+            )
+            for cache in profile.get("cache_paths", [])[:16]:
+                cache_mount = cache.get("mount", {})
+                lines.append(
+                    f"  cache {cache.get('path')} bytes={cache.get('du_bytes')} "
+                    f"mount={cache_mount.get('source')}"
+                )
+        lines.append("cgroups:")
+        for row in chrome.get("by_cgroup", [])[:12]:
+            lines.append(
+                f"  procs={row.get('processes')} rss_MiB={row.get('rss_kb', 0) / 1024:.1f} "
+                f"read_MiB={row.get('read_bytes', 0) / 1048576:.1f} "
+                f"write_MiB={row.get('write_bytes', 0) / 1048576:.1f} {row.get('cgroup')}"
+            )
+        lines.append("top live processes:")
+        for proc in chrome.get("processes", [])[:12]:
+            io = proc.get("io") or {}
+            lines.append(
+                f"  pid={proc.get('pid')} rss_MiB={(proc.get('rss_kb') or 0) / 1024:.1f} "
+                f"read_MiB={io.get('read_bytes', 0) / 1048576:.1f} "
+                f"write_MiB={io.get('write_bytes', 0) / 1048576:.1f} "
+                f"cg={proc.get('cgroup')} {proc.get('comm')}"
+            )
+        if chrome.get("below_process_peaks"):
+            lines.append("recent below Chrome peaks:")
+            for row in chrome["below_process_peaks"][:8]:
+                lines.append(
+                    f"  rw_Bps={row.get('max_rw_bps'):.0f} rss_MiB={row.get('max_rss_bytes', 0) / 1048576:.1f} "
+                    f"pid={row.get('pid')} {row.get('comm')} {row.get('cgroup')}"
+                )
+
+    section("workload rows")
+    rows = report.get("workload_rows", [])
+    if not rows:
+        lines.append("none")
+    else:
+        lines.append(f"{'source':<18} {'project':<10} {'class':<22} {'status':<18} {'name'}")
+        for row in rows[:60]:
+            gap_count = len(row.get("gaps", []))
+            lines.append(
+                f"{row.get('source',''):<18} {str(row.get('project') or ''):<10} "
+                f"{str(row.get('resource_class') or ''):<22} {str(row.get('status') or ''):<18} "
+                f"{row.get('name') or row.get('workload_id')} gaps={gap_count}"
+            )
+
+    section("sinex xtask history")
+    sinex = report.get("sinex_xtask_history", {})
+    lines.append(f"db={sinex.get('db')} available={sinex.get('available')}")
+    for row in sinex.get("rows", [])[:10]:
+        lines.append(
+            f"  {row.get('id')} {row.get('command')} {row.get('status')} "
+            f"{row.get('started_at')} secs={row.get('duration_secs')} "
+            f"rss_mb={row.get('process_memory_usage_max_mb')}"
+        )
+
+    section("polylogue runs")
+    poly = report.get("polylogue_runs", {})
+    lines.append(f"db={poly.get('db')} available={poly.get('available')}")
+    for row in poly.get("rows", [])[:10]:
+        counts = parse_counts(row.get("counts_json"))
+        lines.append(
+            f"  {normalize_timestamp(row.get('timestamp'))} {row.get('run_id')} "
+            f"secs={(row.get('duration_ms') or 0) / 1000.0:.1f} counts={str(counts)[:120]}"
+        )
+
+    section("below recent history")
+    below = report.get("below", {})
+    lines.append(f"window: begin={below.get('begin')} duration={below.get('duration')}")
+    lines.append("cgroup peaks:")
+    for row in below.get("cgroup_peaks", [])[:12]:
+        lines.append(
+            f"  rw_Bps={row.get('max_rw_bps'):.0f} io_full={row.get('max_io_full_pct'):.2f} "
+            f"rss_MiB={row.get('max_rss_bytes', 0) / 1048576:.1f} cpu={row.get('max_cpu_pct'):.1f} "
+            f"{row.get('cgroup')}"
+        )
+    lines.append("process I/O peaks:")
+    for row in below.get("process_peaks", [])[:12]:
+        lines.append(
+            f"  rw_Bps={row.get('max_rw_bps'):.0f} rss_MiB={row.get('max_rss_bytes', 0) / 1048576:.1f} "
+            f"cpu={row.get('max_cpu_pct'):.1f} pid={row.get('pid')} {row.get('comm')} {row.get('cmdline')}"
+        )
+
+    section("gaps")
+    gaps = report.get("gaps_summary", {})
+    if not gaps:
+        lines.append("none")
+    else:
+        for gap, count in sorted(gaps.items()):
+            lines.append(f"{gap}: {count}")
+
+    section("below hint")
+    lines.append(f"interactive replay: below replay -t '{report['window']['since']}'")
+    return "\n".join(lines) + "\n"
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--format", choices=["human", "json"], default="human")
+    parser.add_argument("--since", default=DEFAULT_BEGIN)
+    parser.add_argument("--duration", default=DEFAULT_DURATION)
+    parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
+    parser.add_argument("--offline", action="store_true", help="Skip live /proc/systemd/below collectors; useful for fixtures")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str]) -> int:
+    args = parse_args(argv)
+    report = collect_report(args)
+    if args.format == "json":
+        json.dump(report, sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+    else:
+        sys.stdout.write(render_human(report))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

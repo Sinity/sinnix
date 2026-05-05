@@ -3,8 +3,7 @@
 # the assertions are stale. Skip them so pgcli (a downstream consumer)
 # can build until upstream refreshes the fixtures.
 { ... }:
-_final: prev:
-{
+_final: prev: {
   pythonPackagesExtensions = (prev.pythonPackagesExtensions or [ ]) ++ [
     (pyFinal: pyPrev: {
       cli-helpers = pyPrev.cli-helpers.overrideAttrs (old: {

@@ -21,6 +21,7 @@ let
 
   semanticServiceSubjects = [
     "below"
+    "hermes"
     "polylogue"
     "power-watchdog"
     "sentinel"
@@ -51,6 +52,7 @@ let
     "networking-resolved-router-authority"
     "nextcloud-storage-wiring"
     "services-below"
+    "services-hermes"
     "services-power-watchdog"
     "services-transmission"
     "services-terminal-capture"
@@ -100,6 +102,7 @@ let
     "dev-shell"
     "dev-git"
     "dev-mcp-servers"
+    "services-hermes"
     "services-polylogue"
     "desktop-terminal"
     "services-terminal-capture"
@@ -119,11 +122,11 @@ let
     "backup-borg-hook-runtime"
     "cli-polylogue-runtime"
     "cli-task-tracking-runtime"
-    "dev-agent-restore-runtime"
     "dev-agent-tools-pty"
     "dev-agent-tools-runtime"
     "dev-git-runtime"
     "dev-languages-runtime"
+    "sinnix-observe-runtime"
     "terminal-capture-runtime"
     "terminal-capture-runtime-failure"
   ];

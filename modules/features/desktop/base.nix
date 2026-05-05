@@ -41,6 +41,7 @@ mkFeatureModule {
         home.packages = with pkgs; [
           clipse
           wl-clipboard
+          wtype
         ];
 
         # Clipboard

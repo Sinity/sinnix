@@ -1,4 +1,9 @@
-{ lib, mkServiceTest, inputs, ... }:
+{
+  lib,
+  mkServiceTest,
+  inputs,
+  ...
+}:
 mkServiceTest {
   name = "services-power-watchdog";
   service = "power-watchdog";

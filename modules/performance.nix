@@ -1,22 +1,93 @@
 # Performance Tuning
 #
-# Philosophy: under memory pressure, KILL fast — do not thrash. zram and
-# systemd-oomd both delayed kills until the desktop was already wedged
-# (zram thrashes compression cycles instead of freeing real RAM; oomd PSI
-# accounting needs ~15s of sustained pressure before it acts). Replaced with
-# earlyoom, which polls /proc/meminfo every 100ms and SIGKILLs the largest
-# offender in well under a second. A small disk swapfile (declared in the
-# host storage module) stays as a release valve for genuinely cold pages.
+# Philosophy: the desktop and recovery paths get explicit cgroup protection;
+# build/maintenance work gets low priority and pressure-based shedding. This
+# keeps throughput opportunistic when the machine is idle without letting a
+# fan-out build turn interactive shells, Waybar, Hyprland, or PID 1 into reclaim
+# victims. A small disk swapfile (declared in the host storage module) stays as
+# a release valve for genuinely cold pages; zram stays disabled because it burns
+# CPU during the exact pressure cascade we need to break.
 {
   pkgs,
   lib,
   config,
+  helpers,
   ...
 }:
 let
   resourceBudgets = import ./lib/resource-budgets.nix;
+  scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   buildBudget = resourceBudgets.developerWork.sliceConfig;
   graphicalBudget = resourceBudgets.graphical.sliceConfig;
+  # cgroup-v2 io.latency is work-conserving: low-priority peers are throttled
+  # only while a protected peer is missing its target. Targets are intentionally
+  # conservative first-pass values for sinnix-prime's current desktop storage:
+  # root/persist/Nix on SATA SSD, cache on Samsung 960 EVO NVMe, and realm on
+  # CT4000P3 NVMe. Planned test: run the Nix max-jobs benchmark matrix
+  # (6/8/12/24 with cores=0) while collecting wall time, peak RSS, PSI,
+  # `/sys/fs/cgroup/.../io.stat` avg_lat for these slices, and a simple desktop
+  # latency probe. Re-tune these targets from that evidence instead of guessing.
+  interactiveIoLatencyTargets = [
+    "/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02 75ms"
+    "/dev/disk/by-uuid/7f603111-8f3a-40aa-bad0-0cac69c140f1 25ms"
+    "/dev/disk/by-uuid/bd19092f-a195-47ab-9c0d-c923d1e5bfea 25ms"
+  ];
+  opportunisticIoLatencyTargets = [
+    "/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02 250ms"
+    "/dev/disk/by-uuid/7f603111-8f3a-40aa-bad0-0cac69c140f1 100ms"
+    "/dev/disk/by-uuid/bd19092f-a195-47ab-9c0d-c923d1e5bfea 100ms"
+  ];
+  pressureKillBudget = {
+    ManagedOOMMemoryPressure = "kill";
+    ManagedOOMMemoryPressureLimit = "10%";
+    ManagedOOMMemoryPressureDurationSec = "5s";
+  };
+  opportunisticBuildBudget = buildBudget // pressureKillBudget;
+  systemInteractiveBudget = {
+    CPUWeight = 1000;
+    IOWeight = 1000;
+    IODeviceLatencyTargetSec = interactiveIoLatencyTargets;
+    ManagedOOMPreference = "avoid";
+    MemoryMin = "1G";
+    MemoryLow = "2G";
+  };
+  userInteractiveBudget = {
+    CPUWeight = 1000;
+    IOWeight = 1000;
+    IODeviceLatencyTargetSec = interactiveIoLatencyTargets;
+    ManagedOOMPreference = "avoid";
+    MemoryMin = "2G";
+    MemoryLow = "12G";
+    TasksMax = "10000";
+  };
+  appInteractiveBudget = graphicalBudget // {
+    IODeviceLatencyTargetSec = interactiveIoLatencyTargets;
+    ManagedOOMPreference = "avoid";
+    MemoryMin = "1G";
+    MemoryLow = "8G";
+  };
+  sessionInteractiveBudget = {
+    ManagedOOMPreference = "avoid";
+    MemoryMin = "1G";
+    MemoryLow = "2G";
+    CPUWeight = 1000;
+    IOWeight = 1000;
+    IODeviceLatencyTargetSec = interactiveIoLatencyTargets;
+  };
+  latencySheddingBudget = {
+    IODeviceLatencyTargetSec = opportunisticIoLatencyTargets;
+  };
+  maintenanceGate = unit: "${scriptPkgs.sinnix-maintenance-gate}/bin/sinnix-maintenance-gate ${unit}";
+  maintenanceServiceConfig = unit: {
+    Slice = "sinnix-maintenance.slice";
+    Nice = 19;
+    CPUSchedulingPolicy = "idle";
+    IOSchedulingClass = "idle";
+    CPUWeight = 10;
+    IOWeight = 1;
+    IODeviceLatencyTargetSec = opportunisticIoLatencyTargets;
+    ExecCondition = lib.mkDefault (maintenanceGate unit);
+  };
 in
 {
   config = lib.mkIf config.sinnix.machine.isDesktop {
@@ -110,60 +181,80 @@ in
       extraArgs = [
         # Never kill the compositor stack, login session, or recovery shells.
         "--avoid"
-        "^(systemd|systemd-.*|Hyprland|sway|gnome-shell|kwin|Xorg|sshd|kitty|foot|bash|zsh|tmux)$"
+        "^(systemd|systemd-.*|Hyprland|sway|gnome-shell|kwin|Xorg|sshd|kitty|foot|bash|zsh|tmux|waybar|tofi)$"
         # Prefer to kill big memory hogs that we can always restart.
         "--prefer"
-        "^(electron|chrome|chromium|firefox|node|cargo|rustc|ld|ld\\.lld|ld\\.mold|cc1|cc1plus|nix|nix-build|cmake|ninja|monado|wivrn|waybar|claude|codex|gemini|forge|nats-server|tofi)$"
+        "^(electron|chrome|chromium|firefox|node|cargo|rustc|ld|ld\\.lld|ld\\.mold|cc1|cc1plus|nix|nix-build|cmake|ninja|monado|wivrn|claude|codex|gemini|forge|nats-server)$"
       ];
     };
 
-    # systemd-oomd is disabled: its 15s PSI accumulation window means the
-    # box can wedge before it ever fires. earlyoom replaces it.
-    systemd.oomd.enable = false;
+    # systemd-oomd is not a global desktop killer here. It only acts on slices
+    # that opt in below, so opportunistic build/maintenance work is shed when
+    # it is memory-stalled while interactive slices remain protected.
+    systemd.oomd = {
+      enable = true;
+      enableRootSlice = false;
+      enableSystemSlice = false;
+      enableUserSlices = false;
+      settings.OOM.DefaultMemoryPressureDurationSec = "5s";
+    };
 
-    # Keep a small floor for the logged-in user, but do not make the entire
-    # user session an unlimited preferred survivor. Terminals, AI agents,
-    # browsers, and ad-hoc dev stacks all live under user.slice; protecting the
-    # whole parent made the desktop swap-thrash instead of killing the runaway
-    # child cgroup.
+    # Protect PID 1's system services and login plumbing from build pressure.
+    systemd.slices.system.sliceConfig = systemInteractiveBudget;
+
+    # Keep a protected floor for the logged-in user. This is not a throughput
+    # cap: build/background children can use the memory while it is free, but
+    # reclaim preferentially takes it back from them before the compositor,
+    # Waybar, terminals, and the user manager become unrecoverable.
     #
     # TasksMax prevents PID-space exhaustion: a thread-exploding build or fork
     # bomb inside user.slice leaves enough PIDs for recovery shells.
-    systemd.slices.user.sliceConfig = {
-      CPUWeight = 1000;
-      IOWeight = 1000;
-      MemoryLow = "4G";
-      TasksMax = "10000";
-    };
+    systemd.slices.user.sliceConfig = userInteractiveBudget;
 
     # User-manager background/graphical slices use weights for proportional
     # priority, not hard ceilings. Parent `memory.high`/`memory.max` caps caused
     # desktop throttling around 75% RAM even while the machine still had free
     # memory and page cache to reclaim.
     systemd.user.slices = {
-      background.sliceConfig = buildBudget;
+      background.sliceConfig = opportunisticBuildBudget // latencySheddingBudget;
 
-      # Prefer graphical apps over background work without capping browser RAM.
-      app.sliceConfig = graphicalBudget;
+      # Waybar and terminal windows live under app.slice on this workstation.
+      # Protect enough baseline to launch a fresh terminal during pressure.
+      app.sliceConfig = appInteractiveBudget;
 
-      # Preserve the compositor/session supervisor paths preferentially.
-      session.sliceConfig = {
-        ManagedOOMPreference = "avoid";
-        MemoryLow = "1G";
-        CPUWeight = 1000;
-        IOWeight = 1000;
-      };
+      # Hyprland, Xwayland, portals, and the session envelope live here.
+      session.sliceConfig = sessionInteractiveBudget;
 
       # Explicitly scoped interactive build/test entrypoints land here.
-      build.sliceConfig = buildBudget;
+      build.sliceConfig = opportunisticBuildBudget // latencySheddingBudget;
+    };
+
+    # Root-level peer latency targets. `nix-build.slice` is nested below
+    # `nix.slice`, and `sinnix-maintenance.slice` below `sinnix.slice`; set the
+    # parent peer targets as well or user.slice cannot directly protect itself
+    # from those workloads.
+    systemd.slices.nix = {
+      description = "Parent slice for Nix build work";
+      sliceConfig = latencySheddingBudget;
+    };
+    systemd.slices.sinnix = {
+      description = "Parent slice for Sinnix-managed background work";
+      sliceConfig = latencySheddingBudget;
     };
 
     # Put Nix builds in an explicitly weighted slice so they are visible and
     # lower priority than the desktop without imposing arbitrary throughput or
     # CPU ceilings.
+    #
+    # Do not casually reintroduce IOReadBandwidthMax/IOWriteBandwidthMax here:
+    # past caps protected bad moments by wasting idle-device capacity. If
+    # weights are insufficient for browser/terminal latency, the next candidate
+    # to benchmark is systemd's IODeviceLatencyTargetSec, which maps to the
+    # kernel cgroup-v2 io.latency controller and is work-conserving when the
+    # protected peer meets its measured latency target.
     systemd.slices."nix-build" = {
       description = "Resource budget for Nix builds";
-      sliceConfig = buildBudget;
+      sliceConfig = opportunisticBuildBudget // latencySheddingBudget;
     };
 
     # Generic background scopes should inherit the same low-priority budget as
@@ -171,7 +262,19 @@ in
     # do not run at full desktop priority by accident.
     systemd.slices.background = {
       description = "Resource budget for background developer work";
-      sliceConfig = buildBudget;
+      sliceConfig = opportunisticBuildBudget // latencySheddingBudget;
+    };
+
+    systemd.slices."sinnix-maintenance" = {
+      description = "Serialized low-priority maintenance work";
+      sliceConfig =
+        opportunisticBuildBudget
+        // latencySheddingBudget
+        // {
+          IOWeight = 1;
+          CPUWeight = 10;
+          ManagedOOMMemoryPressureLimit = "5%";
+        };
     };
 
     # The slices above are the source of truth. Helper wrappers should target
@@ -179,7 +282,8 @@ in
     systemd.services.nix-daemon.serviceConfig = {
       Slice = "nix-build.slice";
     }
-    // buildBudget;
+    // opportunisticBuildBudget
+    // latencySheddingBudget;
 
     # home-manager-${user}.service is the actual file-linker; it is pulled in
     # by switch-to-configuration but runs as its own system unit, so the parent
@@ -188,6 +292,23 @@ in
     # creates that name as a transient unit, and any static fragment makes
     # systemd-run refuse the activation job.
     systemd.services."home-manager-${config.sinnix.user.name}".serviceConfig.Slice = "nix-build.slice";
+
+    systemd.services.nix-gc = {
+      restartIfChanged = false;
+      serviceConfig = maintenanceServiceConfig "nix-gc.service";
+    };
+    systemd.timers.nix-gc.timerConfig.Persistent = lib.mkForce false;
+
+    systemd.services.nix-optimise = {
+      restartIfChanged = false;
+      serviceConfig = maintenanceServiceConfig "nix-optimise.service";
+    };
+    systemd.timers.nix-optimise.timerConfig.Persistent = lib.mkForce false;
+
+    systemd.services.sinex-dev-cache-prune = {
+      restartIfChanged = false;
+      serviceConfig = maintenanceServiceConfig "sinex-dev-cache-prune.service";
+    };
 
     # Allow realtime priority for audio
     security.pam.loginLimits = [

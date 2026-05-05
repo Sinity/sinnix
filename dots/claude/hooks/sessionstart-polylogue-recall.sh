@@ -10,7 +10,7 @@ set -euo pipefail
 cwd="${CLAUDE_PROJECT_DIR:-$PWD}"
 
 if ! command -v polylogue >/dev/null 2>&1; then
-    exit 0
+  exit 0
 fi
 
 # Most recent 3 conversations that referenced files under this cwd.
@@ -21,7 +21,7 @@ fi
 output=$(polylogue --plain --cwd-prefix "$cwd" --sort date --limit 3 list 2>/dev/null || true)
 
 if [ -z "$output" ]; then
-    exit 0
+  exit 0
 fi
 
 cat <<EOF

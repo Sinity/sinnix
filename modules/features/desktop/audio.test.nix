@@ -1,4 +1,9 @@
-{ mountTmpfsRoots, baseTestConfig, mkFeatureTest, ... }:
+{
+  mountTmpfsRoots,
+  baseTestConfig,
+  mkFeatureTest,
+  ...
+}:
 [
   (mkFeatureTest {
     name = "desktop-audio";

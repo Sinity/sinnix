@@ -1,4 +1,9 @@
-{ mkFeatureTest, expect, hmFor, ... }:
+{
+  mkFeatureTest,
+  expect,
+  hmFor,
+  ...
+}:
 mkFeatureTest {
   name = "dev-git";
   feature = "sinnix.features.dev.git.enable";

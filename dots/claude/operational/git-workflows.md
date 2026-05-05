@@ -18,29 +18,31 @@ Navigable signals: conventional prefix (`feat:`/`fix:`/...), `(#N)` suffix on sq
 
 **Conventional prefixes** (pick accurately — reviewers filter by type):
 
-| Prefix | Meaning |
-|---|---|
-| `feat:` | User-visible new capability |
-| `fix:` | Bug fix |
-| `refactor:` | Internal restructure, no behavior change |
-| `perf:` | Optimization (include measurement) |
-| `test:` | Test-only |
-| `docs:` | Documentation only |
-| `chore:` | Tooling/deps/config |
-| `build:` / `ci:` | Build system / CI config |
-| `style:` | Formatting only |
-| `archive:` | Move to `archive/` instead of delete |
+| Prefix           | Meaning                                  |
+| ---------------- | ---------------------------------------- |
+| `feat:`          | User-visible new capability              |
+| `fix:`           | Bug fix                                  |
+| `refactor:`      | Internal restructure, no behavior change |
+| `perf:`          | Optimization (include measurement)       |
+| `test:`          | Test-only                                |
+| `docs:`          | Documentation only                       |
+| `chore:`         | Tooling/deps/config                      |
+| `build:` / `ci:` | Build system / CI config                 |
+| `style:`         | Formatting only                          |
+| `archive:`       | Move to `archive/` instead of delete     |
 
 Use scopes (`fix(cli): ...`) when the repo is large enough that scope adds clarity.
 
 **Subject line (≤72 chars):**
+
 - Present-tense imperative (`add X`, not `added X`)
-- Describes what *landed*, not what was *worked on*
+- Describes what _landed_, not what was _worked on_
 - Specific nouns, not vague gerunds (`fix: handle null cursor in pagination`, not `fix: pagination bug`)
 - No trailing period
 - Don't repeat the prefix verbosely (`feat: add new feature` is redundant)
 
 **Body (required for anything non-trivial):**
+
 - Blank line between subject and body; wrap at 72 chars
 - Four sections worth writing (not all always required): **Problem** (what observation/constraint triggered this), **What changed** (higher level than the diff), **Alternatives rejected** (only if there was a real fork), **Compatibility/migration** (breaking changes)
 - Issue refs in body: `Closes #N`, `Ref #N`
@@ -121,6 +123,7 @@ comments; pending known-capacity checks are not a reason to burn more local or
 agent cycles without a new signal.
 
 **PR title = squash-merge subject.** Write it as the permanent history line:
+
 - ≤72 chars, conventional prefix, imperative, describes what changed
 - Ends with `(#N)` — clickable jump back to PR discussion
 - Accurate: don't claim "unified"/"aligned"/"fixed" unless the diff actually achieves it
@@ -128,6 +131,7 @@ agent cycles without a new signal.
 **PR body = squash-merge body.** Required sections: **Summary** (one para), **Problem** (evidence/motivation — not "user asked"), **Solution** (modules touched, non-obvious decisions, rejected alternatives), **Verification** (exact commands run + output line that matters, not "tests pass"). Optional: Migration notes, Follow-ups, Breaking changes. Link issues in body (`Closes #N` auto-closes).
 
 **Claim verification — grep the diff before asserting:**
+
 1. Grep for duplicated logic. If you claim "unified into one helper," is the old helper actually gone?
 2. Check all call sites if claiming "every path now uses X."
 3. Read the PR's GitHub diff (not just local) — catches force-push/merge artifacts.
@@ -162,6 +166,7 @@ or record the mismatch in the owning issue; do not just learn to ignore it.
 ### Squash-merge hygiene
 
 **`(#N)` suffix on master.** GitHub's "Default commit message: Pull request title and description" setting auto-appends `(#N)` and copies the PR body. Enforcement options per repo:
+
 - GitHub Ruleset with subject regex `^(feat|fix|refactor|perf|test|docs|chore|build|ci|style|archive)(\([^)]+\))?: .+ \(#\d+\)$`
 - Repo setting "Default commit message" → "Pull request title and description"
 
@@ -171,13 +176,14 @@ When running `gh pr merge <N> --squash` with custom `--subject`/`--body`, supply
 
 **Rewriting degraded history** (missing `(#N)`, empty bodies):
 
-*Scope check first:* solo repo + no external SHA links → cheap. External `/commit/<SHA>` links → those break (PR pages survive by number). Other active agents → ask / wait.
+_Scope check first:_ solo repo + no external SHA links → cheap. External `/commit/<SHA>` links → those break (PR pages survive by number). Other active agents → ask / wait.
 
-*Reconstruction:* `gh pr list --state merged --json number,title,body,mergeCommit,mergedAt` gives everything needed to regenerate each commit's message.
+_Reconstruction:_ `gh pr list --state merged --json number,title,body,mergeCommit,mergedAt` gives everything needed to regenerate each commit's message.
 
-*Tool:* `git filter-repo --commit-callback` (modern; prefer over deprecated `filter-branch`). For small scopes: `git rebase -i --exec`.
+_Tool:_ `git filter-repo --commit-callback` (modern; prefer over deprecated `filter-branch`). For small scopes: `git rebase -i --exec`.
 
-*Safety protocol:*
+_Safety protocol:_
+
 1. `git branch backup-master-pre-rewrite` before starting.
 2. Dry-run on a mirror clone (`git clone --mirror . /tmp/rewrite-test`).
 3. Confirm with user before force-push.
@@ -186,7 +192,8 @@ When running `gh pr merge <N> --squash` with custom `--subject`/`--body`, supply
 
 **Committer-date traps:**
 
-*Trap 1:* `git rebase --exec 'git commit --amend --no-edit -S'` resets committer-date to now on every rebased commit. `--no-edit` preserves the message, not the dates. Correct pattern:
+_Trap 1:_ `git rebase --exec 'git commit --amend --no-edit -S'` resets committer-date to now on every rebased commit. `--no-edit` preserves the message, not the dates. Correct pattern:
+
 ```bash
 git rebase <base> --exec '
   GIT_COMMITTER_DATE="$(git show -s --format=%cI HEAD)" \
@@ -194,15 +201,16 @@ git rebase <base> --exec '
 '
 ```
 
-*Trap 2:* `git-filter-repo` rewrites committer-date on *modified* commits only (to run time). Unmodified commits keep originals — partial corruption hard to spot. Recovery is a follow-up filter-repo pass that restores original committer-dates by mapping `(#N)` → `mergeCommit.oid` → committer-date on a backup branch. Filter-repo date format is bytes `"<epoch> <tz_offset>"` (e.g. `b"1776860027 +0200"`), not ISO 8601.
+_Trap 2:_ `git-filter-repo` rewrites committer-date on _modified_ commits only (to run time). Unmodified commits keep originals — partial corruption hard to spot. Recovery is a follow-up filter-repo pass that restores original committer-dates by mapping `(#N)` → `mergeCommit.oid` → committer-date on a backup branch. Filter-repo date format is bytes `"<epoch> <tz_offset>"` (e.g. `b"1776860027 +0200"`), not ISO 8601.
 
-*Defense:* always keep `backup-<date>-pre-rewrite` and spot-check `git log -5 --format='%aI %cI'` after the rewrite.
+_Defense:_ always keep `backup-<date>-pre-rewrite` and spot-check `git log -5 --format='%aI %cI'` after the rewrite.
 
 ---
 
 ### Destructive operations — require explicit confirmation
 
 Even in auto mode, state specifically what will happen and pause:
+
 - `git reset --hard` on a branch with uncommitted changes
 - `git push --force` on any branch (`--force-with-lease` on shared branches is still disruptive)
 - `git branch -D` on unmerged branch
@@ -214,7 +222,7 @@ Even in auto mode, state specifically what will happen and pause:
 
 Never force-push to shared branches without agreement. Never push to `master` / `main` directly — the PR flow is the enforcement surface.
 
-**Force-push alternatives:** before reaching for `--force-with-lease`, ask if a non-destructive path works. Amending your own feature branch: fine. Fixing a typo in a recent master commit: *don't* — live with it; history isn't worth rewriting over one character. Adding missing `(#N)` to one commit: don't — fix the process, accept the miss.
+**Force-push alternatives:** before reaching for `--force-with-lease`, ask if a non-destructive path works. Amending your own feature branch: fine. Fixing a typo in a recent master commit: _don't_ — live with it; history isn't worth rewriting over one character. Adding missing `(#N)` to one commit: don't — fix the process, accept the miss.
 
 ---
 

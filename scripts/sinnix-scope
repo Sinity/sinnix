@@ -65,6 +65,10 @@ do
   fi
 done
 
+scope_props=(
+  --nice=0
+)
+
 if [ "$uid" -eq 0 ]; then
   exec systemd-run \
     --scope \
@@ -72,6 +76,7 @@ if [ "$uid" -eq 0 ]; then
     --collect \
     --slice="$slice" \
     --same-dir \
+    "${scope_props[@]}" \
     "${env_args[@]}" \
     -- "$@"
 fi
@@ -84,6 +89,7 @@ if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
     --collect \
     --slice="$slice" \
     --same-dir \
+    "${scope_props[@]}" \
     "${env_args[@]}" \
     -- "$@"
 fi

@@ -1,4 +1,11 @@
-{ lib, mkFeatureTest, expect, hmFor, inputs, ... }:
+{
+  lib,
+  mkFeatureTest,
+  expect,
+  hmFor,
+  inputs,
+  ...
+}:
 mkFeatureTest {
   name = "dev-agent-tools";
   feature = "sinnix.features.dev.agentTools.enable";
@@ -41,6 +48,7 @@ mkFeatureTest {
         directHits ++ nestedHits;
       forgeConfigText = builtins.readFile (inputs.self + "/dots/forge/.forge.toml");
       forgeMcpConfig = builtins.fromJSON (managedEntryText hm.home.file."forge/.mcp.json");
+      deepseekWrapperText = managedEntryText hm.home.file.".local/bin/deepseek";
       sharedSkillSelfLinks = findSelfReferentialLinks (inputs.self + "/dots/_ai/skills");
     in
     [
@@ -53,13 +61,41 @@ mkFeatureTest {
         message = "Shared skills tree must not contain self-referential symlinks: ${lib.concatStringsSep ", " sharedSkillSelfLinks}";
       }
       (expect.hmFileExists hm ".local/bin/claude" "Claude wrapper must exist")
-      (expect.hmFileTextContains hm ".local/bin/claude" "/bin/sinnix-scope background --"
-        "Claude wrapper must use the shared Sinnix placement helper"
-      )
+      {
+        assertion = lib.any (pkg: lib.getName pkg == "sinnix-scope") hm.home.packages;
+        message = "sinnix-scope must be in the user profile so wrapper runtime fallbacks are real";
+      }
+      (expect.hmFileTextContainsAll hm ".local/bin/claude" [
+        ''scope_bin="''
+        "/bin/sinnix-scope"
+        "command -v sinnix-scope"
+        ''"$scope_bin" background --''
+      ] "Claude wrapper must use the shared Sinnix placement helper with a runtime fallback")
+      (expect.hmFileExists hm ".local/bin/deepseek" "DeepSeek wrapper must exist")
+      (expect.hmFileTextContainsAll hm ".local/bin/deepseek" [
+        ''scope_bin="''
+        "/bin/sinnix-scope"
+        "command -v sinnix-scope"
+        ''"$scope_bin" background --''
+      ] "DeepSeek wrapper must use the shared Sinnix placement helper with a runtime fallback")
+      {
+        assertion =
+          lib.hasInfix ''DEEPSEEK_MODEL="deepseek-v4-pro[1m]"'' deepseekWrapperText
+          && lib.hasInfix ''export ANTHROPIC_MODEL="$DEEPSEEK_MODEL"'' deepseekWrapperText
+          && lib.hasInfix ''export ANTHROPIC_DEFAULT_OPUS_MODEL="$DEEPSEEK_MODEL"'' deepseekWrapperText
+          && lib.hasInfix ''export ANTHROPIC_DEFAULT_SONNET_MODEL="$DEEPSEEK_MODEL"'' deepseekWrapperText
+          && lib.hasInfix ''export ANTHROPIC_DEFAULT_HAIKU_MODEL="$DEEPSEEK_MODEL"'' deepseekWrapperText
+          && lib.hasInfix ''export CLAUDE_CODE_SUBAGENT_MODEL="$DEEPSEEK_MODEL"'' deepseekWrapperText
+          && !(lib.hasInfix "deepseek-v4-flash" deepseekWrapperText);
+        message = "DeepSeek wrapper must force v4 pro 1m for default, opus, sonnet, haiku, and subagents";
+      }
       (expect.hmFileExists hm ".local/bin/codex" "Codex wrapper must exist")
-      (expect.hmFileTextContains hm ".local/bin/codex" "/bin/sinnix-scope background --"
-        "Codex wrapper must use the shared Sinnix placement helper"
-      )
+      (expect.hmFileTextContainsAll hm ".local/bin/codex" [
+        ''scope_bin="''
+        "/bin/sinnix-scope"
+        "command -v sinnix-scope"
+        ''"$scope_bin" background --''
+      ] "Codex wrapper must use the shared Sinnix placement helper with a runtime fallback")
       (expect.hmFileTextNotMatches hm ".local/bin/codex" ".*render-agents.*"
         "Codex wrapper must not render AGENTS on every launch"
       )
@@ -69,9 +105,12 @@ mkFeatureTest {
         forbidRegexes = [ "curl -fsSL" ];
       } "Forge wrapper must launch the packaged binary directly")
       (expect.hmFileExists hm ".local/bin/forge" "Forge wrapper must exist")
-      (expect.hmFileTextContains hm ".local/bin/forge" "/bin/sinnix-scope background --"
-        "Forge wrapper must use the shared Sinnix placement helper"
-      )
+      (expect.hmFileTextContainsAll hm ".local/bin/forge" [
+        ''scope_bin="''
+        "/bin/sinnix-scope"
+        "command -v sinnix-scope"
+        ''"$scope_bin" background --''
+      ] "Forge wrapper must use the shared Sinnix placement helper with a runtime fallback")
       (expect.activationExists hm "renderGlobalForgeAgents"
         "Global Forge AGENTS render activation must exist"
       )
@@ -121,9 +160,12 @@ mkFeatureTest {
       (expect.persistedHomeDir config ".codex" "Codex home directory must be persisted under ~/.codex")
       (expect.persistedHomeDir config ".gemini" "Gemini home directory must be persisted under ~/.gemini")
       (expect.hmFileExists hm ".local/bin/gemini" "Gemini wrapper must exist")
-      (expect.hmFileTextContains hm ".local/bin/gemini" "/bin/sinnix-scope background --"
-        "Gemini wrapper must use the shared Sinnix placement helper"
-      )
+      (expect.hmFileTextContainsAll hm ".local/bin/gemini" [
+        ''scope_bin="''
+        "/bin/sinnix-scope"
+        "command -v sinnix-scope"
+        ''"$scope_bin" background --''
+      ] "Gemini wrapper must use the shared Sinnix placement helper with a runtime fallback")
       (expect.hmFileTextNotMatches hm ".local/bin/gemini" ".*render-agents.*"
         "Gemini wrapper must not render instructions on every launch"
       )

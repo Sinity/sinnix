@@ -1,4 +1,10 @@
-{ lib, mkServiceTest, hmFor, inputs, ... }:
+{
+  lib,
+  mkServiceTest,
+  hmFor,
+  inputs,
+  ...
+}:
 mkServiceTest {
   name = "services-terminal-capture";
   service = "terminal-capture";
@@ -29,8 +35,9 @@ mkServiceTest {
     }
     {
       assertion =
-        builtins.match ".*SUCCESS_BACKOFF_SECONDS.*sleep.*" (builtins.readFile (inputs.self + "/scripts/rawlog-loop"))
-        != null;
+        builtins.match ".*SUCCESS_BACKOFF_SECONDS.*sleep.*" (
+          builtins.readFile (inputs.self + "/scripts/rawlog-loop")
+        ) != null;
       message = "rawlog-loop must back off after fast success exits";
     }
   ];

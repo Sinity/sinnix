@@ -1,4 +1,9 @@
-{ lib, mountTmpfsRoots, baseTestConfig, ... }:
+{
+  lib,
+  mountTmpfsRoots,
+  baseTestConfig,
+  ...
+}:
 {
   name = "nextcloud-storage-wiring";
   modules = [

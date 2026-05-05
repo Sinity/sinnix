@@ -17,6 +17,7 @@
         "normalize-agent-projects"
         "polylogue-cli"
         "polylogue-python"
+        "polylogued"
         "render-agents"
         "sinnix-sentinel"
         "verify-agent-topology"

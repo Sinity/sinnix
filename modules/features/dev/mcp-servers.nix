@@ -32,6 +32,7 @@ mkFeatureModule {
     let
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
       jsonFormat = pkgs.formats.json { };
+      mcpRegistry = import ../../lib/mcp-registry.nix { inherit lib; };
       firecrawlSecretPath = lib.attrByPath [ "sinnix" "secrets" "paths" "firecrawl-api-key" ] null config;
       mkRuntimeSecretExports =
         secretEnv:
@@ -61,78 +62,13 @@ mkFeatureModule {
         };
       };
       mcpPlaywrightBin = mkMcpWrapper "mcp-playwright" {
-        command = "${pkgs.playwright-mcp}/bin/mcp-server-playwright";
+        command = "${pkgs.playwright-mcp}/bin/playwright-mcp";
       };
       mcpPolylogueBin = mkMcpWrapper "mcp-polylogue" {
         command = "${scriptPkgs.polylogue-cli}/bin/polylogue-mcp";
       };
       geminiPkg = inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.gemini-cli;
-      pruneAttrs = lib.filterAttrs (_: value: value != null && value != [ ] && value != { });
-      mcpServerRegistry = {
-          context7 = {
-            transport = "http";
-            url = "https://mcp.context7.com/mcp";
-            clients = [
-              "codex"
-              "gemini"
-              "forge"
-            ];
-          };
-          github = {
-            transport = "http";
-            url = "https://api.githubcopilot.com/mcp/";
-            clients = [
-              "codex"
-              "gemini"
-            ];
-            codex = {
-              bearer_token_env_var = "GITHUB_TOKEN";
-            };
-            gemini = {
-              headers = {
-                Authorization = "Bearer \${GITHUB_TOKEN}";
-              };
-            };
-          };
-          firecrawl = {
-            transport = "stdio";
-            command = "mcp-firecrawl";
-            clients = [ "forge" ];
-          };
-          polylogue = {
-            transport = "stdio";
-            command = "mcp-polylogue";
-            clients = [
-              "codex"
-              "claude"
-              "gemini"
-              "forge"
-            ];
-          };
-          playwright = {
-            transport = "stdio";
-            command = "mcp-playwright";
-            args = [ "--headless" ];
-            clients = [ "forge" ];
-          };
-        };
-      selectClientServers =
-        client: lib.filterAttrs (_: server: builtins.elem client server.clients) mcpServerRegistry;
-      renderForgeServer =
-        _name: server:
-        pruneAttrs (
-          if server.transport == "http" then
-            {
-              url = server.url;
-              disable = false;
-            }
-          else
-            {
-              inherit (server) command;
-              args = server.args or [ ];
-              disable = false;
-            }
-        );
+      inherit (mcpRegistry) selectClientServers renderForgeServer;
       forgeMcpServers = lib.mapAttrs renderForgeServer (selectClientServers "forge");
       forgeMcpConfigFile = jsonFormat.generate "forge-mcp.json" { mcpServers = forgeMcpServers; };
     in

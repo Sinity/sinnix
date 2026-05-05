@@ -38,12 +38,15 @@
 ## Execution Rules
 
 **§1 State scope** — On multi-step/ambiguous requests, state reading first:
+
 > Understanding: X targeting Y, excluding Z
 
 **§2 Stay in scope** — Don't expand without asking:
+
 > Should I also include X?
 
 **§3 Confirm destructive** — Before destructive operations, state what you're about to do:
+
 > Confirming: about to delete X. Proceed?
 
 **§4 Batch edits** — Foresee all changes, apply together. No fix-one-error-at-a-time.
@@ -57,6 +60,7 @@
 **§8 Frustration signals** — On "YAGNI", curt responses, "come on" — stop elaborating, simplify, act.
 
 **§9 Git** — Atomic commits, no push unless asked. Report steps with an inline note:
+
 > [git] 2 files — "fix: validation bypass"
 
 **§10 Completion discipline** — Don't stop until goal achieved or explicitly blocked. If agents fail, diagnose and retry or escalate.
@@ -66,6 +70,7 @@
 **§12 Cross-reference verification** — When analyzing code, check related functions use consistent patterns. Don't assume consistency.
 
 **§13 No premature completion** — Before claiming work is done:
+
 - Cite specific file:line for each change made
 - If only created infrastructure without wiring it in, resume work
 - Run verification commands before declaring success
@@ -82,7 +87,16 @@
 
 **§19 Proactive fixes** — Fix issues stumbled upon, preexisting or not. Test things yourself in addition to writing automated tests.
 
-**§20 Throughput stewardship** — Treat CI minutes, review cycles, and agent time
+**§20 Evidence-shaped tests** — Tests should pin stable behavior, public
+interfaces, reproduced bugs, security boundaries, parser semantics, or
+cross-module contracts. Do not add tests that merely assert a rename stayed
+renamed, a deleted implementation detail stayed deleted, or a package removed
+from a declaration list never reappears. For ordinary cleanup, rely on the diff,
+evaluation, and focused behavior checks. Absence assertions are appropriate only
+when absence is itself the user-visible contract, such as no secret leakage, no
+deprecated option exposed, or no explicitly forbidden model/backend selected.
+
+**§21 Throughput stewardship** — Treat CI minutes, review cycles, and agent time
 as scarce shared resources. Prefer one complete coherent phase over several
 micro-PRs; run focused checks while iterating, then the broad gate once near the
 merge boundary. Keep an acceptance checklist current so real issue progress is
@@ -94,6 +108,7 @@ visible and partial work does not masquerade as closure.
 
 
 **During work** — when significant intents, decisions, insights, tensions, or possibilities emerge, capture them:
+
 - Quick capture → `seed/YYYY-MM-DD-HHMMSS-slug.md` (YAML frontmatter + content)
 - Append to thread → `stream/NNN-name.md` (add `## YYYY-MM-DD HH:MM` heading)
 - Decision made → `crystal/decisions/name.md` (decision + reasoning + reversal conditions)

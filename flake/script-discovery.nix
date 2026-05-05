@@ -9,9 +9,9 @@
       # runtimeInputs: bash coreutils jq        (space-separated, may be empty)
       # tier: default                           (optional; default | heavy | dev)
 
-  The wrapper invokes the script through its own shebang, so Python /
-  bash / zsh dispatch is automatic. `runtimeInputs` packages land on
-  PATH for both wrapper and script.
+  The script is copied into the Nix store with its shebang patched, so Python /
+  bash / zsh dispatch is automatic inside sandboxed builds. `runtimeInputs`
+  packages land on PATH for both wrapper and script.
 
   A script that should NOT be packaged (e.g. launched directly by Hyprland)
   declares:
@@ -69,10 +69,11 @@ let
     let
       lines = lib.take 60 (splitString "\n" text);
       stripped = map stripCommentPrefix lines;
-      indexed = lib.imap0 (i: v: { inherit i; line = v; }) stripped;
-      markerLines = filter (
-        e: e.line != null && (lib.hasPrefix "@sinnix-package" (trim e.line))
-      ) indexed;
+      indexed = lib.imap0 (i: v: {
+        inherit i;
+        line = v;
+      }) stripped;
+      markerLines = filter (e: e.line != null && (lib.hasPrefix "@sinnix-package" (trim e.line))) indexed;
     in
     if markerLines == [ ] then
       { mode = "missing"; }
@@ -139,8 +140,7 @@ let
       let
         name = lib.substring 1 (lib.stringLength token) token;
       in
-      scriptPackages.${name}.package
-        or (throw "script-discovery: unknown sibling script @${name}")
+      scriptPackages.${name}.package or (throw "script-discovery: unknown sibling script @${name}")
     else
       let
         path = splitString "." token;
@@ -154,10 +154,24 @@ let
       runtimeInputsRaw = splitWords (fields.runtimeInputs or "");
       runtimeInputs = filter (p: p != null) (map (resolvePkg scriptPackages) runtimeInputsRaw);
       tier = fields.tier or "default";
+      patchedScript =
+        pkgs.runCommand "${name}-script"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.python3
+              pkgs.zsh
+            ];
+          }
+          ''
+            install -Dm755 ${filePath} "$out"
+            patchShebangs "$out"
+          '';
       pkg = pkgs.writeShellApplication {
         inherit name runtimeInputs;
         text = ''
-          exec ${filePath} "$@"
+          exec ${patchedScript} "$@"
         '';
       };
     in

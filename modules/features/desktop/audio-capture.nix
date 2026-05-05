@@ -66,23 +66,12 @@ mkFeatureModule {
       ...
     }:
     let
-      # torch-bin avoids ~4h source compile; torchvision is stubbed (unused by ASR).
+      # Unstable transformers 5.5 has CohereAsrForConditionalGeneration; torch CPU is cached
       pythonEnv =
         (pkgs.python313.override {
           packageOverrides = pySelf: pySuper: {
-            torch = pySuper.torch-bin.overridePythonAttrs (old: {
-              dontCheckRuntimeDeps = true;
-              passthru = (old.passthru or { }) // {
-                cudaSupport = true;
-                cudaPackages = pkgs.cudaPackages;
-                cudaCapabilities = pkgs.config.cudaCapabilities or [ "8.6" ];
-                cxxdev = null;
-              };
-            });
+            torch = pySuper.torch;
             torchvision = null;
-            accelerate = pySuper.accelerate.overridePythonAttrs (old: {
-              doCheck = false;
-            });
           };
         }).withPackages
           (ps: [
@@ -90,6 +79,7 @@ mkFeatureModule {
             ps.uvicorn
             ps.python-multipart
             ps.torch
+            ps.torchaudio
             ps.transformers
             ps.accelerate
             ps.huggingface-hub
@@ -101,15 +91,32 @@ mkFeatureModule {
             ps.click
             ps.pyyaml
           ]);
+      # System NVIDIA driver provides libcudart, libcudnn etc.
+      # torch-bin is a pre-compiled CUDA wheel — needs these at runtime only.
+      cudaLibPath = "/run/opengl-driver/lib";
       # Wrapper scripts — avoid needing a shebang bash inside systemd to cd around.
       asrWrapper = pkgs.writeShellScript "sinnix-asr-server-wrapper" ''
         set -euo pipefail
-        export PATH=${lib.makeBinPath [ pythonEnv pkgs.ffmpeg pkgs.libsndfile ]}:$PATH
+        export LD_LIBRARY_PATH=${cudaLibPath}''${LD_LIBRARY_PATH:+:}$LD_LIBRARY_PATH
+        export PATH=${
+          lib.makeBinPath [
+            pythonEnv
+            pkgs.ffmpeg
+            pkgs.libsndfile
+          ]
+        }:$PATH
       '';
       daemonWrapper = pkgs.writeShellScript "sinnix-audio-daemon-wrapper" ''
         set -euo pipefail
         export ASR_URL=http://127.0.0.1:${toString cfg.asrPort}
-        export PATH=${lib.makeBinPath [ pythonEnv pkgs.pipewire pkgs.ffmpeg pkgs.libsndfile ]}:$PATH
+        export PATH=${
+          lib.makeBinPath [
+            pythonEnv
+            pkgs.pipewire
+            pkgs.ffmpeg
+            pkgs.libsndfile
+          ]
+        }:$PATH
         mkdir -p ${cfg.archiveDir}
           ${lib.optionalString (!cfg.transcribe) "--no-transcribe"} \
           ${lib.optionalString (!cfg.archive) "--no-archive"} \

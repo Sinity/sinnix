@@ -1,4 +1,10 @@
-{ lib, mkFeatureTest, hmFor, inputs, ... }:
+{
+  lib,
+  mkFeatureTest,
+  hmFor,
+  inputs,
+  ...
+}:
 mkFeatureTest {
   name = "desktop-common-apps";
   feature = "sinnix.features.desktop.common-apps.enable";

@@ -186,7 +186,6 @@ in
         "users"
         "seat"
         "video"
-        "wireshark"
         "fuse"
       ];
       shell = pkgs.zsh;

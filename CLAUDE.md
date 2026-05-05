@@ -18,6 +18,8 @@
 - Use skills for heavy procedural workflows (for example orchestration, CI repair, desktop control).
 - Shared skills live in `dots/_ai/skills/`. Agent trees such as `dots/codex/skills/` and `dots/claude/skills/` are thin overlays that expose those shared skills, while Codex-only system skills remain under `dots/codex/skills/.system/`.
 - Rule: if guidance is needed on most turns, keep it here; if it is specialized or long-form, move it to a skill.
+- Module placement is ordinary repo taxonomy, documented below. Do not add a
+  dedicated skill or separate procedural layer for it.
 
 ## No-Alias Rule
 

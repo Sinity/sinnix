@@ -179,7 +179,6 @@ in
             pty = [ "terminal-capture-runtime" ];
             host = [ "host-smoke-terminal" ];
           };
-          "dev.agentRestore".runtime = [ "dev-agent-restore-runtime" ];
           "dev.git".runtime = [ "dev-git-runtime" ];
           "dev.languages".runtime = [ "dev-languages-runtime" ];
           "dev.agentTools" = {

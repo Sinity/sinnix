@@ -34,6 +34,22 @@ let
       exec ${target} "$@"
     '';
 
+  mkSanitizedPythonWrappers =
+    {
+      name,
+      commands,
+    }:
+    pkgs.symlinkJoin {
+      inherit name;
+      paths = lib.mapAttrsToList (
+        commandName: target:
+        mkSanitizedPythonWrapper {
+          name = commandName;
+          inherit target;
+        }
+      ) commands;
+    };
+
   mkNodeCliPackage =
     {
       pname,
@@ -77,14 +93,24 @@ let
       exec ${inputs.lynchpin.packages.${pkgs.stdenv.hostPlatform.system}.api-python}/bin/python "$@"
     '';
 
-    polylogue-cli = mkSanitizedPythonWrapper {
-      name = "polylogue";
-      target = "${inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.default}/bin/polylogue";
+    polylogue-cli = mkSanitizedPythonWrappers {
+      name = "polylogue-cli";
+      commands = {
+        polylogue = "${inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.default}/bin/polylogue";
+        polylogue-mcp = "${
+          inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.default
+        }/bin/polylogue-mcp";
+      };
     };
 
     polylogue-python = mkSanitizedPythonWrapper {
       name = "polylogue-python";
       target = "${inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.api-python}/bin/python";
+    };
+
+    polylogued = mkSanitizedPythonWrapper {
+      name = "polylogued";
+      target = "${inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.default}/bin/polylogued";
     };
 
     mcp-firecrawl = mkNodeCliPackage {

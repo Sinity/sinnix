@@ -7,11 +7,13 @@
   config,
   lib,
   pkgs,
+  helpers,
   ...
 }:
 let
   cfg = config.sinnix.services.polylogue;
   userName = config.sinnix.user.name;
+  scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
 in
 {
   options.sinnix.services.polylogue = {
@@ -23,9 +25,33 @@ in
       description = "How often to run durable polylogue archive catch-up (systemd timer format).";
     };
 
+    daemon = {
+      enable = lib.mkEnableOption "Polylogue long-running daemon (live watcher + browser capture)" // {
+        default = true;
+      };
+
+      host = lib.mkOption {
+        type = lib.types.str;
+        default = "127.0.0.1";
+        description = "Host for the daemon's local browser-capture receiver.";
+      };
+
+      port = lib.mkOption {
+        type = lib.types.port;
+        default = 8765;
+        description = "Port for the daemon's local browser-capture receiver.";
+      };
+
+      browserCapture = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Run browser-capture inside the long-lived daemon.";
+      };
+    };
+
     browserCapture = {
       enable = lib.mkEnableOption "Polylogue local browser-capture receiver" // {
-        default = true;
+        default = false; # daemon handles this by default
       };
 
       host = lib.mkOption {
@@ -98,6 +124,7 @@ in
           # single run from consuming the whole workstation.
           MemoryHigh = "8G";
           MemoryMax = "16G";
+          ExecCondition = "${scriptPkgs.sinnix-maintenance-gate}/bin/sinnix-maintenance-gate polylogue-run.service";
         };
       };
 
@@ -127,6 +154,25 @@ in
           Unit = "polylogue-run.service";
         };
         Install.WantedBy = [ "timers.target" ];
+      };
+
+      systemd.user.services.polylogued = lib.mkIf cfg.daemon.enable {
+        Unit = {
+          Description = "Polylogue daemon - live watcher and browser capture";
+          After = [ "default.target" ];
+        };
+        Service = {
+          ExecStart =
+            "${pkgs.polylogue}/bin/polylogued run --host ${cfg.daemon.host} --port ${toString cfg.daemon.port}"
+            + lib.optionalString (!cfg.daemon.browserCapture) " --no-browser-capture";
+          Restart = "on-failure";
+          RestartSec = "5s";
+          Nice = 10;
+          IOSchedulingClass = "idle";
+          MemoryHigh = "2G";
+          MemoryMax = "4G";
+        };
+        Install.WantedBy = [ "default.target" ];
       };
     };
   };

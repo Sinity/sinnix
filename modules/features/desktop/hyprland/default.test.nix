@@ -1,4 +1,9 @@
-{ lib, mkFeatureTest, hmFor, ... }:
+{
+  lib,
+  mkFeatureTest,
+  hmFor,
+  ...
+}:
 mkFeatureTest {
   name = "desktop-hyprland";
   feature = "sinnix.features.desktop.hyprland.enable";

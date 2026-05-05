@@ -47,8 +47,13 @@ mkFeatureModule {
       agentScopePrelude = ''
         run_agent_scoped() {
           if [[ -z "''${SINNIX_AGENT_SCOPED:-}" ]]; then
-            exec ${scriptPkgs.sinnix-scope}/bin/sinnix-scope background -- \
-              ${pkgs.coreutils}/bin/env SINNIX_AGENT_SCOPED=1 "$@"
+            scope_bin="${scriptPkgs.sinnix-scope}/bin/sinnix-scope"
+            if [[ ! -x "$scope_bin" ]]; then
+              scope_bin="$(command -v sinnix-scope 2>/dev/null || true)"
+            fi
+            if [[ -n "$scope_bin" && -x "$scope_bin" ]]; then
+              exec "$scope_bin" background -- ${pkgs.coreutils}/bin/env SINNIX_AGENT_SCOPED=1 "$@"
+            fi
           fi
 
           exec "$@"
@@ -95,6 +100,7 @@ mkFeatureModule {
           };
 
           home.packages = [
+            scriptPkgs.sinnix-scope
             scriptPkgs.render-agents
             scriptPkgs.normalize-agent-projects
             scriptPkgs.verify-agent-topology
@@ -207,6 +213,7 @@ mkFeatureModule {
               fi
             '';
             executable = true;
+            force = true;
           };
 
           home.file.".local/bin/deepseek" = {
@@ -226,11 +233,12 @@ mkFeatureModule {
 
               export ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic"
               export ANTHROPIC_AUTH_TOKEN="$(<"$DEEPSEEK_KEY_FILE")"
-              export ANTHROPIC_MODEL="deepseek-v4-pro[1m]"
-              export ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-v4-pro[1m]"
-              export ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-v4-pro[1m]"
-              export ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-v4-flash"
-              export CLAUDE_CODE_SUBAGENT_MODEL="deepseek-v4-flash"
+              DEEPSEEK_MODEL="deepseek-v4-pro[1m]"
+              export ANTHROPIC_MODEL="$DEEPSEEK_MODEL"
+              export ANTHROPIC_DEFAULT_OPUS_MODEL="$DEEPSEEK_MODEL"
+              export ANTHROPIC_DEFAULT_SONNET_MODEL="$DEEPSEEK_MODEL"
+              export ANTHROPIC_DEFAULT_HAIKU_MODEL="$DEEPSEEK_MODEL"
+              export CLAUDE_CODE_SUBAGENT_MODEL="$DEEPSEEK_MODEL"
               export CLAUDE_CODE_EFFORT_LEVEL="max"
 
               ${agentScopePrelude}
@@ -242,6 +250,7 @@ mkFeatureModule {
               fi
             '';
             executable = true;
+            force = true;
           };
 
           home.file.".local/bin/claude-team" = {
@@ -262,6 +271,7 @@ mkFeatureModule {
               exec tmux new-session -s ct "$claude_cmd"
             '';
             executable = true;
+            force = true;
           };
 
           home.file."forge/.forge.toml" = {
@@ -299,6 +309,7 @@ mkFeatureModule {
               run_agent_scoped "$CODEX_BIN" "$@"
             '';
             executable = true;
+            force = true;
           };
 
           home.file.".local/bin/gemini" = {
@@ -313,6 +324,7 @@ mkFeatureModule {
               run_agent_scoped "$GEMINI_BIN" "$@"
             '';
             executable = true;
+            force = true;
           };
         };
     };

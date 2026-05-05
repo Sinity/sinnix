@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Emergency load shedding for runaway background, build, and LSP work
-# runtimeInputs: coreutils systemd procps gnugrep libnotify
+# runtimeInputs: coreutils systemd procps gnugrep libnotify util-linux
 # Emergency load shedding for the F9 recovery binding.
 #
 # SAFETY: Uses pgrep without -f to match process names only (not full command line)
@@ -22,6 +22,8 @@ SYSTEM_UNITS=(
 
 USER_UNITS=(
   "polylogue-run.service"
+  "polylogued.service"
+  "polylogue-browser-capture.service"
 )
 
 # Build tools and compilers (exact process names)
@@ -42,6 +44,7 @@ LSP_PROCS=(
 BACKGROUND_PROCS=(
   "borg" "borgmatic" "btrbk"
   "sinex-ingestd" "sinex-preflight" "sinex-gateway"
+  "polylogued" "polylogue" ".polylogue-wrap"
 )
 
 ALL_PROCS=("${BUILD_PROCS[@]}" "${LSP_PROCS[@]}" "${BACKGROUND_PROCS[@]}")
@@ -50,16 +53,42 @@ stop_units() {
   local scope="$1"
   shift
   local -a units=("$@")
+  local -a systemctl_cmd=()
 
   if [ "${#units[@]}" -eq 0 ]; then
     return
   fi
 
   if [ "$scope" = "system" ]; then
-    systemctl stop "${units[@]}" 2>/dev/null || true
+    systemctl_cmd=(systemctl)
+  elif [ "${EUID:-$(id -u)}" -eq 0 ]; then
+    local target_user target_uid
+    target_user="${SUDO_USER:-sinity}"
+    target_uid="$(id -u "$target_user" 2>/dev/null || true)"
+    if [ -z "$target_uid" ] || [ ! -d "/run/user/$target_uid" ]; then
+      return
+    fi
+    systemctl_cmd=(runuser -u "$target_user" -- env "XDG_RUNTIME_DIR=/run/user/$target_uid" systemctl --user)
   else
-    systemctl --user stop "${units[@]}" 2>/dev/null || true
+    systemctl_cmd=(systemctl --user)
   fi
+
+  timeout 2s "${systemctl_cmd[@]}" stop --no-block "${units[@]}" 2>/dev/null || true
+  sleep 0.5
+  timeout 2s "${systemctl_cmd[@]}" kill --kill-who=all --signal=TERM "${units[@]}" 2>/dev/null || true
+  sleep 1
+  timeout 2s "${systemctl_cmd[@]}" kill --kill-who=all --signal=KILL "${units[@]}" 2>/dev/null || true
+}
+
+rearm_sinex_runtime_timer() {
+  if [ "${EUID:-$(id -u)}" -ne 0 ]; then
+    return
+  fi
+
+  # Emergency shedding should pause Sinex runtime work, not leave capture
+  # permanently manual. Re-arm the existing delayed timer so recovery follows
+  # the normal startup path instead of immediately restarting the target.
+  timeout 2s systemctl start sinex-runtime.timer 2>/dev/null || true
 }
 
 notify() {
@@ -73,6 +102,7 @@ echo "Emergency load shedding..."
 stop_units user "${USER_UNITS[@]}"
 if [ "${EUID:-$(id -u)}" -eq 0 ]; then
   stop_units system "${SYSTEM_UNITS[@]}"
+  rearm_sinex_runtime_timer
 fi
 
 killed=0

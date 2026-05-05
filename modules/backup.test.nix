@@ -104,20 +104,51 @@
         message = "btrbk timer must not run high-frequency snapshots on the busiest clock edges";
       }
       {
-        assertion = btrbkService.IOWeight == 1;
-        message = "btrbk must run at minimum cgroup I/O weight";
+        assertion =
+          btrbkService.IOWeight == 1
+          && btrbkService.CPUWeight == 1
+          && btrbkService.IOSchedulingClass == "idle"
+          && btrbkService.Slice == "sinnix-maintenance.slice"
+          && btrbkService.TimeoutStopSec == "15s";
+        message = "btrbk must run in the bounded low-priority maintenance class";
       }
       {
-        assertion = persistBorgService.IOWeight == 1 && realmBorgService.IOWeight == 1;
-        message = "Borg backup jobs must run at minimum cgroup I/O weight";
+        assertion =
+          persistBorgService.IOWeight == 1
+          && realmBorgService.IOWeight == 1
+          && persistBorgService.CPUWeight == 1
+          && realmBorgService.CPUWeight == 1
+          && persistBorgService.IOSchedulingClass == "idle"
+          && realmBorgService.IOSchedulingClass == "idle"
+          && persistBorgService.Slice == "sinnix-maintenance.slice"
+          && realmBorgService.Slice == "sinnix-maintenance.slice"
+          && persistBorgService.TimeoutStopSec == "15s"
+          && realmBorgService.TimeoutStopSec == "15s";
+        message = "Borg backup jobs must run in the bounded low-priority maintenance class";
       }
       {
         assertion =
           borgCheckService.IOWeight == 1
-          && !(borgCheckService ? ExecCondition)
+          && borgCheckService.CPUWeight == 1
+          && borgCheckService.IOSchedulingClass == "idle"
+          && borgCheckService.Slice == "sinnix-maintenance.slice"
+          && borgCheckService.TimeoutStopSec == "15s"
+          &&
+            builtins.match ".*sinnix-maintenance-gate.*borgbackup-check\\.service.*" borgCheckService.ExecCondition
+            != null
           && !(borgCheckService ? IOReadBandwidthMax)
           && !(borgCheckService ? IOWriteBandwidthMax);
-        message = "Borg integrity checks must stay low-priority without hidden pressure gates or hard bandwidth caps";
+        message = "Borg integrity checks must stay low-priority with only the explicit maintenance-overlap gate";
+      }
+      {
+        assertion =
+          builtins.match ".*sinnix-maintenance-gate.*borgbackup-job-persist\\.service.*" persistBorgService.ExecCondition
+          != null
+          &&
+            builtins.match ".*sinnix-maintenance-gate.*borgbackup-job-realm\\.service.*" realmBorgService.ExecCondition
+            != null
+          && builtins.match ".*sinnix-maintenance-gate.*btrbk\\.service.*" btrbkService.ExecCondition != null;
+        message = "Borg and btrbk must skip rather than overlap another active maintenance unit";
       }
       {
         assertion =

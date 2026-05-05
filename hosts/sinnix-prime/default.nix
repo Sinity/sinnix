@@ -24,12 +24,13 @@
 
   # VR streaming to Quest 3 (WiVRn + Monado OpenXR stack + ADB tools)
   sinnix.features.desktop.vr.enable = true;
+  sinnix.features.desktop.audioCapture.enable = true;
+  sinnix.features.desktop.agentVerifyTimer.enable = true;
+  sinnix.features.desktop.hyprlandAnimations.enable = true;
 
   sinnix.features.cli.task-tracking.enable = true;
   sinnix.features.cli.polylogue.enable = true;
   sinnix.persistence.enable = true;
-
-  sinnix.features.dev.agentRestore.autoRestore.enable = false;
 
   sinnix.features.dev.editors.enable = true;
   sinnix.features.dev.editors.vscode.enable = true;
@@ -50,6 +51,7 @@
       environment = "prod";
     };
     polylogue.enable = true;
+    hermes.enable = true;
     power-watchdog.enable = true;
     network-monitor.enable = true;
     weechat-log-sealer.enable = true;

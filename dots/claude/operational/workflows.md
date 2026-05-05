@@ -17,6 +17,23 @@ python3 /realm/project/sinnix/dots/_ai/tools/workspace_recon_scan.py --root /rea
 python3 /realm/project/sinnix/dots/_ai/tools/workspace_recon_scan.py --root /realm/project --changed-only --with-size --json
 ```
 
+### Heavy Agent Work
+
+Recognized project dev environments install transparent wrappers for common
+heavy commands. In Sinex and Polylogue devshells, ordinary commands such as
+`xtask`, `cargo`, `pytest`, `uv`, `polylogue`, and `nix` are routed into the
+Sinnix build/background slices automatically, so agents should run the normal
+project command first.
+
+Use an explicit scope only outside a recognized devshell or for one-off custom
+commands that are expected to run for a long time or scan/write large stores:
+
+```bash
+sinnix-scope background -- <long-running scan/import/db command>
+sinnix-scope build -- <project build/test command>
+sinnix-scope nix-build -- nix build .#target
+```
+
 ### Data Analysis (lynchpin)
 
 ```bash

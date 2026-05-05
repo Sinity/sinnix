@@ -1,4 +1,9 @@
-{ lib, mkFeatureTest, hmFor, ... }:
+{
+  lib,
+  mkFeatureTest,
+  hmFor,
+  ...
+}:
 mkFeatureTest {
   name = "desktop-terminal";
   feature = "sinnix.features.desktop.terminal.enable";

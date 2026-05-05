@@ -27,6 +27,7 @@ mkFeatureModule {
           home.packages = [
             scriptPkgs.polylogue-cli
             scriptPkgs.polylogue-python
+            scriptPkgs.polylogued
           ];
         };
     };

@@ -16,7 +16,13 @@ let
   knowledgebaseRoot = config.sinnix.projects.knowledgebase;
 
   # Scratchpad configuration (single source of truth)
-  scratchpadData = import ./scratchpads.nix { inherit pkgs lib knowledgebaseRoot; };
+  scratchpadData = import ./scratchpads.nix {
+    inherit
+      pkgs
+      lib
+      knowledgebaseRoot
+      ;
+  };
 
   # Helper to import sub-modules which might need args
   bindings = import ./bindings.nix {

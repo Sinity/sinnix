@@ -878,7 +878,12 @@ in
   inherit sanitizedInputs baseModules sharedSpecialArgs;
   inherit mountTmpfsRoots baseTestConfig vmTestConfig;
   inherit expect;
-  inherit mkFeatureTest mkServiceTest mkBundleTest hmFor;
+  inherit
+    mkFeatureTest
+    mkServiceTest
+    mkBundleTest
+    hmFor
+    ;
   inherit
     evalTestSpec
     mkRuntimeCheck

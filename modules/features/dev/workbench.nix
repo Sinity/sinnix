@@ -42,7 +42,6 @@ mkFeatureModule {
         nix-fast-build
         nix-prefetch-git
         nix-tree
-        wireshark
         powertop
         bash-language-server
         yaml-language-server

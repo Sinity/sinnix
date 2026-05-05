@@ -1,4 +1,9 @@
-{ mountTmpfsRoots, baseTestConfig, hmFor, ... }:
+{
+  mountTmpfsRoots,
+  baseTestConfig,
+  hmFor,
+  ...
+}:
 [
   {
     name = "minimal-no-features";

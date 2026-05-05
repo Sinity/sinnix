@@ -171,7 +171,10 @@ in
       } # 65 GB game library
 
       # Nix user state
-      ".cache/nix" # eval-cache-v6 + fetcher cache; keeps flake/direnv warm across rollbacks
+      # ~/.cache/nix is intentionally not persisted. core.nix links it to
+      # /cache/nix/user/${username}: eval-cache-v6 and fetcher-cache files are
+      # rebuild-cheap SQLite/WAL churn, while keeping them on the cache NVMe
+      # reduces SATA contention with /nix and browser profile state.
       ".local/share/nix" # trusted-settings.json (cachix substituters)
 
       # UX state

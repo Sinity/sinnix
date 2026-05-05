@@ -13,10 +13,12 @@
   pkgs,
   lib,
   config,
+  helpers,
   ...
 }:
 let
   inherit (config.sinnix.paths) realmRoot;
+  scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   borgRepoRoot = "${config.sinnix.paths.outerRealm}/backup";
 
   # Snapshot directories
@@ -34,6 +36,17 @@ let
   borgPassphrasePath = config.sinnix.secrets.paths."borg-passphrase";
   borgMemoryHigh = "8G";
   borgMemoryMax = "20G";
+  maintenanceSlice = "sinnix-maintenance.slice";
+  maintenanceStopTimeout = "15s";
+  maintenanceServiceConfig = {
+    Nice = 19;
+    CPUWeight = 1;
+    IOWeight = 1;
+    IOSchedulingClass = "idle";
+    Slice = maintenanceSlice;
+    TimeoutStopSec = maintenanceStopTimeout;
+  };
+  maintenanceGate = unit: "${scriptPkgs.sinnix-maintenance-gate}/bin/sinnix-maintenance-gate ${unit}";
 
   mkBindMountedSnapshotHook =
     {
@@ -212,18 +225,30 @@ in
     # ceilings here unless a measured device-specific fault proves one is
     # needed.
     systemd.services.borgbackup-job-persist.serviceConfig = {
-      Nice = 19;
-      CPUWeight = 1;
-      IOWeight = 1;
+      inherit (maintenanceServiceConfig)
+        Nice
+        CPUWeight
+        IOWeight
+        IOSchedulingClass
+        Slice
+        TimeoutStopSec
+        ;
       MemoryHigh = borgMemoryHigh;
       MemoryMax = borgMemoryMax;
+      ExecCondition = maintenanceGate "borgbackup-job-persist.service";
     };
     systemd.services.borgbackup-job-realm.serviceConfig = {
-      Nice = 19;
-      CPUWeight = 1;
-      IOWeight = 1;
+      inherit (maintenanceServiceConfig)
+        Nice
+        CPUWeight
+        IOWeight
+        IOSchedulingClass
+        Slice
+        TimeoutStopSec
+        ;
       MemoryHigh = borgMemoryHigh;
       MemoryMax = borgMemoryMax;
+      ExecCondition = maintenanceGate "borgbackup-job-realm.service";
     };
 
     # Weekly integrity check — verify repo metadata and detect bit rot on the HDD.
@@ -232,10 +257,9 @@ in
       description = "Borg backup integrity check";
       serviceConfig = {
         Type = "oneshot";
-        Nice = 19;
-        CPUWeight = 1;
-        IOWeight = 1;
-      };
+        ExecCondition = maintenanceGate "borgbackup-check.service";
+      }
+      // maintenanceServiceConfig;
       environment.BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
       script = ''
         ${pkgs.borgbackup}/bin/borg check --repository-only ${borgRepoPersist}
@@ -283,10 +307,9 @@ in
       serviceConfig = {
         Type = "oneshot";
         ExecStart = "${pkgs.btrbk}/bin/btrbk run --quiet";
-        Nice = 19;
-        IOSchedulingClass = "idle";
-        IOWeight = 1;
-      };
+        ExecCondition = maintenanceGate "btrbk.service";
+      }
+      // maintenanceServiceConfig;
     };
 
     systemd.timers.btrbk = {

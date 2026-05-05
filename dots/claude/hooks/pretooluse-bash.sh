@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # PreToolUse hook for Bash commands.
 #
-# Blocks dangerous patterns. It does not rewrite build/test commands: hidden
-# resource placement makes runtime behavior harder to reason about and belongs
-# in explicit project or Sinnix entrypoints instead.
+# Blocks dangerous patterns only. Build/test/resource placement is provided by
+# project dev environments, not by this hook.
 
 set -euo pipefail
 
@@ -24,7 +23,8 @@ emit_deny() {
 # --- Denials -----------------------------------------------------------------
 
 # Block imperative package installs.
-if echo "$CMD" | grep -qE '(nix\s+profile\s+(install|add|remove)|cargo\s+install|pip3?\s+install|npm\s+install\s+-g)'; then
+# Only at command start or after a command separator — not inside heredocs or strings.
+if echo "$CMD" | grep -qE '(^|[;&|]\s*)(nix\s+profile\s+(install|add|remove)|cargo\s+install|pip3?\s+install|npm\s+install\s+-g)'; then
   emit_deny "Use declarative config instead of imperative install"
   exit 0
 fi

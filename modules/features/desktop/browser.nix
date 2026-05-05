@@ -51,6 +51,66 @@ mkFeatureModule {
           chromePkg = pkgs.google-chrome.override {
             commandLineArgs = chromeArgs;
           };
+          # Launch Chrome through a transient user service even when started by
+          # tofi-drun. Without this escape hatch, tofi remains the cgroup parent
+          # for Chrome zygotes/renderers while the browser process itself lands
+          # in a separate app scope. That split makes app accounting and future
+          # interactive resource policy lie about what "Chrome" contains.
+          chromeLauncher = pkgs.writeShellApplication {
+            name = "sinnix-chrome";
+            runtimeInputs = [
+              pkgs.coreutils
+              pkgs.systemd
+            ];
+            text = ''
+              chrome_bin="${chromePkg}/bin/google-chrome-stable"
+
+              if [ "''${SINNIX_CHROME_SCOPED:-0}" = "1" ]; then
+                exec "$chrome_bin" "$@"
+              fi
+
+              if systemctl --user show-environment >/dev/null 2>&1; then
+                unit="app-google-chrome-$(date +%s%N)"
+                run_args=(
+                  --user
+                  --collect
+                  --quiet
+                  --unit="$unit"
+                  --description="Google Chrome"
+                  --slice=app.slice
+                  --same-dir
+                  --property=ExitType=cgroup
+                  --setenv=SINNIX_CHROME_SCOPED=1
+                )
+
+                for var in \
+                  DISPLAY \
+                  WAYLAND_DISPLAY \
+                  XDG_CURRENT_DESKTOP \
+                  XDG_SESSION_TYPE \
+                  DBUS_SESSION_BUS_ADDRESS \
+                  XAUTHORITY \
+                  NIXOS_OZONE_WL
+                do
+                  if [ -n "''${!var:-}" ]; then
+                    run_args+=(--setenv="$var=''${!var}")
+                  fi
+                done
+
+                exec systemd-run "''${run_args[@]}" "$chrome_bin" "$@"
+              fi
+
+              export SINNIX_CHROME_SCOPED=1
+              exec "$chrome_bin" "$@"
+            '';
+          };
+          chromeDesktopMimeTypes = [
+            "text/html"
+            "x-scheme-handler/http"
+            "x-scheme-handler/https"
+            "x-scheme-handler/about"
+            "x-scheme-handler/unknown"
+          ];
           browserLinkCmd = "${config.home.homeDirectory}/.local/bin/open-browser-link";
           mkDotsFile = mkDotsFileFor config;
           quteDots = rel: mkDotsFile ("/qutebrowser" + rel);
@@ -65,6 +125,7 @@ mkFeatureModule {
             };
 
             packages = with pkgs; [
+              chromeLauncher
               chromePkg
               qutebrowser
               tor-browser
@@ -108,6 +169,20 @@ mkFeatureModule {
             "qutebrowser/greasemonkey/readable-medium.user.js".source =
               quteDots "/greasemonkey/readable-medium.user.js";
             "qutebrowser/greasemonkey/template.user.js".source = quteDots "/greasemonkey/template.user.js";
+          };
+
+          xdg.desktopEntries.google-chrome = {
+            name = "Google Chrome";
+            genericName = "Web Browser";
+            comment = "Access the Internet";
+            exec = "${chromeLauncher}/bin/sinnix-chrome %U";
+            icon = "google-chrome";
+            terminal = false;
+            categories = [
+              "Network"
+              "WebBrowser"
+            ];
+            mimeType = chromeDesktopMimeTypes;
           };
         };
     };

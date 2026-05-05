@@ -1,4 +1,9 @@
-{ lib, mkFeatureTest, hmFor, ... }:
+{
+  lib,
+  mkFeatureTest,
+  hmFor,
+  ...
+}:
 mkFeatureTest {
   name = "desktop-gaming";
   feature = "sinnix.features.desktop.gaming.enable";

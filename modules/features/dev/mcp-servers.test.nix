@@ -1,4 +1,10 @@
-{ mkFeatureTest, expect, hmFor, inputs, ... }:
+{
+  mkFeatureTest,
+  expect,
+  hmFor,
+  inputs,
+  ...
+}:
 mkFeatureTest {
   name = "dev-mcp-servers";
   feature = "sinnix.features.dev.mcp-servers.enable";
@@ -25,7 +31,9 @@ mkFeatureTest {
       {
         assertion =
           builtins.match ".*zsh -lc.*" (
-            builtins.readFile (inputs.self + "/dots/_ai/skills/agent-orchestration/scripts/launch_agent_tabs.sh")
+            builtins.readFile (
+              inputs.self + "/dots/_ai/skills/agent-orchestration/scripts/launch_agent_tabs.sh"
+            )
           ) == null;
         message = "Agent launcher must not wrap kitty launches in zsh -lc";
       }
@@ -45,7 +53,7 @@ mkFeatureTest {
       ) "/bin/mcp-playwright" "Playwright wrapper must point at the packaged binary")
       (expect.textContains (managedEntryText
         hm.home.file.".local/bin/mcp-playwright"
-      ) "/bin/mcp-server-playwright" "Playwright wrapper must launch the packaged server entrypoint")
+      ) "/bin/playwright-mcp" "Playwright wrapper must launch the packaged server entrypoint")
       (expect.textContains (managedEntrySource
         hm.home.file.".local/bin/mcp-polylogue"
       ) "/bin/mcp-polylogue" "Polylogue wrapper must point at the packaged binary")

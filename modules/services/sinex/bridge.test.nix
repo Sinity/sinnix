@@ -53,10 +53,12 @@
       maintenanceTimerWantedBy = name: lib.attrByPath [ "systemd" "timers" name "wantedBy" ] [ ] config;
       maintenanceTimerUnitConfig =
         name: lib.attrByPath [ "systemd" "timers" name "unitConfig" ] { } config;
+      maintenanceTimerConfig = name: lib.attrByPath [ "systemd" "timers" name "timerConfig" ] { } config;
+      maintenanceServiceConfig =
+        name: lib.attrByPath [ "systemd" "services" name "serviceConfig" ] { } config;
       sinexMaintenanceTimers = [
         "sinex-blob-fsck"
         "sinex-blob-gc"
-        "sinex-cache-prune"
         "sinex-document-scan"
       ];
       sinexHealth = config.sinnix.services.sinex.health;
@@ -110,6 +112,16 @@
           && (!(service ? CPUQuota) || service.CPUQuota == null)
         ) sinexRuntimeAppServices;
         message = "Sinex runtime app daemons must not keep upstream MemoryMax/CPUQuota caps";
+      }
+      {
+        assertion = builtins.all (
+          name:
+          let
+            service = lib.attrByPath [ "systemd" "services" name "serviceConfig" ] { } config;
+          in
+          service.MemoryHigh == "8G" && service.IOWeight == 10
+        ) restartableRuntimeServices;
+        message = "Long-running Sinex runtime daemons must stay throughput-capable but lower priority than the desktop";
       }
       {
         assertion = builtins.all (
@@ -178,6 +190,30 @@
         message = "Sinex maintenance timers must stop with the runtime target";
       }
       {
+        assertion = builtins.all (
+          name: (maintenanceTimerConfig name).Persistent == false
+        ) sinexMaintenanceTimers;
+        message = "Sinex maintenance timers must not catch up missed work immediately";
+      }
+      {
+        assertion = builtins.all (
+          name:
+          let
+            service = maintenanceServiceConfig name;
+          in
+          serviceRestartIfChanged name == false
+          && service.Slice == "sinnix-maintenance.slice"
+          && service.CPUWeight == 1
+          && service.IOWeight == 1
+          && service.IOSchedulingClass == "idle"
+          && (
+            service.TimeoutStopSec == "15s" || service.TimeoutStopSec == 90 || service.TimeoutStopSec == "90s"
+          )
+          && builtins.match ".*sinnix-maintenance-gate.*${name}\\.service.*" service.ExecCondition != null
+        ) sinexMaintenanceTimers;
+        message = "Sinex maintenance services must run in the bounded maintenance class with overlap gates";
+      }
+      {
         assertion =
           sinexHealth != null
           && sinexHealth.restartable == false
@@ -188,16 +224,16 @@
       }
       {
         assertion =
-          natsService.MemoryHigh == "4G"
-          && natsService.MemoryMax == "6G"
+          natsService.MemoryHigh == "5G"
+          && natsService.MemoryMax == "8G"
           && natsService.IOWeight == 10
           && !(natsService ? IOReadBandwidthMax)
           && !(natsService ? IOWriteBandwidthMax);
         message = "NATS must retain memory/weight policy without hard I/O bandwidth caps";
       }
       {
-        assertion = natsService.KillSignal == "SIGTERM" && natsService.TimeoutStopSec == "10s";
-        message = "NATS must stop promptly under operator control";
+        assertion = natsService.KillSignal == "SIGTERM" && natsService.TimeoutStopSec == "90s";
+        message = "NATS must have bounded but production-sized graceful shutdown time";
       }
       {
         assertion =

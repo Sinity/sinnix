@@ -1,4 +1,9 @@
-{ lib, mkFeatureTest, hmFor, ... }:
+{
+  lib,
+  mkFeatureTest,
+  hmFor,
+  ...
+}:
 mkFeatureTest {
   name = "cli-polylogue";
   feature = "sinnix.features.cli.polylogue.enable";
@@ -11,8 +16,9 @@ mkFeatureTest {
       {
         assertion =
           builtins.any (name: lib.hasPrefix "polylogue" name) packageNames
-          && builtins.any (name: lib.hasPrefix "polylogue-python" name) packageNames;
-        message = "Polylogue feature must install the packaged Polylogue CLI and API wrappers";
+          && builtins.any (name: lib.hasPrefix "polylogue-python" name) packageNames
+          && builtins.any (name: lib.hasPrefix "polylogued" name) packageNames;
+        message = "Polylogue feature must install the packaged Polylogue CLI, API, and daemon wrappers";
       }
     ];
 }
