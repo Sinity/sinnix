@@ -64,8 +64,7 @@ mkFeatureModule {
         command = "${pkgs.playwright-mcp}/bin/mcp-server-playwright";
       };
       mcpPolylogueBin = mkMcpWrapper "mcp-polylogue" {
-        command = "${scriptPkgs.polylogue-cli}/bin/polylogue";
-        args = [ "mcp" ];
+        command = "${scriptPkgs.polylogue-cli}/bin/polylogue-mcp";
       };
       geminiPkg = inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.gemini-cli;
       pruneAttrs = lib.filterAttrs (_: value: value != null && value != [ ] && value != { });

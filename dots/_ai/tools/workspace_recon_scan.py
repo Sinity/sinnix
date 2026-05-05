@@ -15,7 +15,7 @@ def run(cmd: list[str], cwd: Path | None = None) -> tuple[int, str, str]:
     p = subprocess.run(
         cmd, cwd=str(cwd) if cwd else None, text=True, capture_output=True
     )
-    return p.returncode, p.stdout.strip(), p.stderr.strip()
+    return p.returncode, p.stdout.rstrip("\n"), p.stderr.rstrip("\n")
 
 
 def parse_status_porcelain(text: str) -> dict[str, int]:

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Workspace Recon Scan"
-  short_description: "Fast scanner for branch, dirty state, and repo recency."
-  default_prompt: "Scan /realm/project and return a ranked summary of dirty repositories in JSON."

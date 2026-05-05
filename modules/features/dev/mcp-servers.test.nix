@@ -49,6 +49,9 @@ mkFeatureTest {
       (expect.textContains (managedEntrySource
         hm.home.file.".local/bin/mcp-polylogue"
       ) "/bin/mcp-polylogue" "Polylogue wrapper must point at the packaged binary")
+      (expect.textContains (managedEntryText
+        hm.home.file.".local/bin/mcp-polylogue"
+      ) "/bin/polylogue-mcp" "Polylogue wrapper must launch the packaged MCP server entrypoint")
       (expect.textContains codexConfigText "[mcp_servers.polylogue]"
         "Codex config must declare the Polylogue MCP server"
       )
