@@ -67,30 +67,23 @@ mkFeatureModule {
     }:
     let
       # Unstable transformers 5.5 has CohereAsrForConditionalGeneration; torch CPU is cached
-      pythonEnv =
-        (pkgs.python313.override {
-          packageOverrides = pySelf: pySuper: {
-            torch = pySuper.torch;
-            torchvision = null;
-          };
-        }).withPackages
-          (ps: [
-            ps.fastapi
-            ps.uvicorn
-            ps.python-multipart
-            ps.torch
-            ps.torchaudio
-            ps.transformers
-            ps.accelerate
-            ps.huggingface-hub
-            ps.soundfile
-            ps.librosa
-            ps.sentencepiece
-            ps.protobuf
-            ps.numpy
-            ps.click
-            ps.pyyaml
-          ]);
+      pythonEnv = pkgs.python313.withPackages (ps: [
+        ps.fastapi
+        ps.uvicorn
+        ps.python-multipart
+        ps.torch
+        ps.torchaudio
+        ps.transformers
+        ps.accelerate
+        ps.huggingface-hub
+        ps.soundfile
+        ps.librosa
+        ps.sentencepiece
+        ps.protobuf
+        ps.numpy
+        ps.click
+        ps.pyyaml
+      ]);
       # System NVIDIA driver provides libcudart, libcudnn etc.
       # torch-bin is a pre-compiled CUDA wheel — needs these at runtime only.
       cudaLibPath = "/run/opengl-driver/lib";
