@@ -42,6 +42,12 @@ mkServiceTest {
       (expect.textContains execStart "/bin/polylogue --plain run acquire parse materialize render index"
         "Polylogue catch-up service must run archive/product stages without unattended site publication"
       )
+      (expect.textContains service.ExecStartPre "/bin/systemctl --user stop polylogued.service"
+        "Polylogue catch-up must stop the live daemon before writing the shared archive"
+      )
+      (expect.textContains service.ExecStopPost "/bin/systemctl --user start polylogued.service"
+        "Polylogue catch-up must restart the live daemon after success or failure"
+      )
       {
         assertion =
           builtins.match ".*sinnix-maintenance-gate.*polylogue-run\\.service.*" service.ExecCondition != null;

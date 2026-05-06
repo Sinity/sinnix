@@ -48,8 +48,6 @@ let
   databasePrepared = cfg.provisionDatabase || cfg.enable;
   sinexRuntimeStartDelay = "5min";
   sinexAutoTimers = [
-    "sinex-blob-fsck"
-    "sinex-blob-gc"
     "sinex-document-scan"
   ];
   maintenanceGate = unit: "${scriptPkgs.sinnix-maintenance-gate}/bin/sinnix-maintenance-gate ${unit}";
@@ -463,8 +461,6 @@ in
             ])
           ) delayedRuntimeServices) (_: bridgeRuntimePolicy))
           {
-            sinex-blob-gc = maintenanceServicePolicy "sinex-blob-gc.service";
-            sinex-blob-fsck = maintenanceServicePolicy "sinex-blob-fsck.service";
             sinex-document-scan = maintenanceServicePolicy "sinex-document-scan.service";
 
             # Keep NATS bounded without forcing JetStream restore into swap.

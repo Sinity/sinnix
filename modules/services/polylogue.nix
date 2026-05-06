@@ -110,7 +110,12 @@ in
         };
         Service = {
           Type = "oneshot";
+          # Both services write the same SQLite archive. Keep the durable
+          # catch-up path single-writer until Polylogue owns cross-process
+          # writer coordination internally.
+          ExecStartPre = lib.mkIf cfg.daemon.enable "${pkgs.systemd}/bin/systemctl --user stop polylogued.service";
           ExecStart = "${pkgs.polylogue}/bin/polylogue --plain run acquire parse materialize render index";
+          ExecStopPost = lib.mkIf cfg.daemon.enable "${pkgs.systemd}/bin/systemctl --user start polylogued.service";
           # Background priority — ingestion shouldn't compete with interactive work
           Nice = 19;
           IOSchedulingClass = "idle";

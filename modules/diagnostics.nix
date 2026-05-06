@@ -50,6 +50,93 @@ let
       dmesg > "$OUT_DIR/dmesg.log"
     '';
   };
+
+  resourceAudit = pkgs.writeShellApplication {
+    name = "sinnix-resource-audit";
+    runtimeInputs = with pkgs; [
+      coreutils
+      gnugrep
+      systemd
+    ];
+    text = ''
+      set -euo pipefail
+
+      failures=0
+
+      fail() {
+        echo "FAIL: $*" >&2
+        failures=$((failures + 1))
+      }
+
+      pass() {
+        echo "ok: $*"
+      }
+
+      prop() {
+        systemctl show "$1" -P "$2" 2>/dev/null || true
+      }
+
+      require_eq() {
+        local unit="$1"
+        local key="$2"
+        local expected="$3"
+        local actual
+        actual="$(prop "$unit" "$key")"
+        if [ "$actual" = "$expected" ]; then
+          pass "$unit $key=$actual"
+        else
+          fail "$unit $key expected $expected got ''${actual:-<empty>}"
+        fi
+      }
+
+      require_contains() {
+        local unit="$1"
+        local key="$2"
+        local needle="$3"
+        local actual
+        actual="$(prop "$unit" "$key")"
+        if printf '%s\n' "$actual" | grep -Fq "$needle"; then
+          pass "$unit $key contains $needle"
+        else
+          fail "$unit $key missing $needle; got ''${actual:-<empty>}"
+        fi
+      }
+
+      require_active() {
+        local unit="$1"
+        if [ "$(systemctl is-active "$unit" 2>/dev/null || true)" = active ]; then
+          pass "$unit active"
+        else
+          fail "$unit is not active"
+        fi
+      }
+
+      require_active below.service
+      require_active sinnix-pressure-watchdog.service
+      require_eq below-prune.timer Persistent no
+      require_eq btrbk.timer Persistent no
+      require_eq borgbackup-job-realm.timer Persistent no
+      require_eq borgbackup-job-persist.timer Persistent no
+      require_eq btrbk.service IOWeight 1
+      require_eq borgbackup-job-realm.service CPUWeight 1
+      require_eq borgbackup-job-realm.service IOWeight 1
+      require_eq borgbackup-job-persist.service CPUWeight 1
+      require_eq borgbackup-job-persist.service IOWeight 1
+      require_contains btrbk.service ExecCondition sinnix-maintenance-gate
+      require_contains borgbackup-job-realm.service ExecCondition sinnix-maintenance-gate
+      require_contains borgbackup-job-persist.service ExecCondition sinnix-maintenance-gate
+
+      echo
+      echo "Current pressure:"
+      cat /proc/pressure/memory
+      cat /proc/pressure/io
+
+      if [ "$failures" -gt 0 ]; then
+        echo "$failures resource policy check(s) failed" >&2
+        exit 1
+      fi
+    '';
+  };
 in
 {
   config = {
@@ -61,6 +148,7 @@ in
         scriptPkgs.asbl-no-moar
         scriptPkgs.nuke-builds
         scriptPkgs.sinnix-observe
+        resourceAudit
       ]
     );
 

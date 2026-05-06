@@ -57,9 +57,11 @@
       maintenanceServiceConfig =
         name: lib.attrByPath [ "systemd" "services" name "serviceConfig" ] { } config;
       sinexMaintenanceTimers = [
+        "sinex-document-scan"
+      ];
+      absentLegacyBlobMaintenanceUnits = [
         "sinex-blob-fsck"
         "sinex-blob-gc"
-        "sinex-document-scan"
       ];
       sinexHealth = config.sinnix.services.sinex.health;
       healthPolicy = builtins.fromJSON config.environment.etc."sinnix/health-policy.json".text;
@@ -212,6 +214,13 @@
           && builtins.match ".*sinnix-maintenance-gate.*${name}\\.service.*" service.ExecCondition != null
         ) sinexMaintenanceTimers;
         message = "Sinex maintenance services must run in the bounded maintenance class with overlap gates";
+      }
+      {
+        assertion = builtins.all (
+          name:
+          !(builtins.hasAttr name config.systemd.timers) && !(builtins.hasAttr name config.systemd.services)
+        ) absentLegacyBlobMaintenanceUnits;
+        message = "Sinnix must not synthesize empty legacy blob maintenance units when upstream does not define them";
       }
       {
         assertion =
