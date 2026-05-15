@@ -39,6 +39,7 @@ compilation.log
 _tmp_do_not_include_in_version_control.md
 .agent/scratch/*
 !.agent/scratch/.gitkeep
+.cache/
 
 # Only ignore unencrypted secrets
 *.key

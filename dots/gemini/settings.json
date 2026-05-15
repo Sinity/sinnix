@@ -52,6 +52,16 @@
       "headers": {
         "Authorization": "Bearer ${GITHUB_TOKEN}"
       }
+    },
+    "playwright": {
+      "command": "mcp-playwright",
+      "args": ["--headless"]
+    },
+    "playwright-headed": {
+      "command": "mcp-playwright-headed"
+    },
+    "chrome-devtools": {
+      "command": "mcp-chrome-devtools"
     }
   },
   "tools": {

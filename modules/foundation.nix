@@ -127,7 +127,7 @@ in
             };
             knowledgebase = mkOption {
               type = types.str;
-              default = "${config.root}/knowledgebase";
+              default = "/realm/data/knowledgebase";
             };
             lynchpinExported = mkOption {
               type = types.str;
@@ -169,8 +169,9 @@ in
       ] (_: "pl_PL.UTF-8");
     };
     console = {
+      earlySetup = true;
       keyMap = "pl2";
-      font = "Lat2-Terminus16";
+      font = "ter-220n";
       packages = [ pkgs.terminus_font ];
     };
 

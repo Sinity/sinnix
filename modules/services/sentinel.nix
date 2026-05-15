@@ -73,6 +73,7 @@ mkServiceModule {
           "/outer-realm"
           "/neo-outer-realm"
           "/persist/.btrfs/snapshot"
+          "/nix/var/nix/profiles"
         ];
       };
     in
@@ -98,6 +99,7 @@ mkServiceModule {
           borgbackup
           jq
           smartmontools
+          nix
         ];
 
         environment = {
@@ -113,8 +115,6 @@ mkServiceModule {
           # Don't mark timer as failed if health checks find issues
           # (script exits 1 on fail, but that's informational)
           SuccessExitStatus = "0 1";
-          Nice = 19;
-          IOSchedulingClass = "idle";
         };
       };
 

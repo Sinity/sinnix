@@ -1,0 +1,250 @@
+#!/usr/bin/env python3
+# @sinnix-package: skip
+"""Small ASR HTTP service for Sinnix audio capture."""
+
+from __future__ import annotations
+
+import os
+import json
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+
+PROVIDER = os.environ.get("SINNIX_ASR_PROVIDER", "local")
+MODEL_NAME = os.environ.get("SINNIX_ASR_MODEL", "small")
+DEVICE = os.environ.get("SINNIX_ASR_DEVICE", "auto")
+COMPUTE_TYPE = os.environ.get("SINNIX_ASR_COMPUTE_TYPE", "auto")
+COHERE_MODEL = os.environ.get("SINNIX_COHERE_TRANSCRIBE_MODEL", "CohereLabs/cohere-transcribe-03-2026")
+COHERE_REVISION = os.environ.get("SINNIX_COHERE_TRANSCRIBE_REVISION", "refs/pr/6")
+COHERE_API_MODEL = os.environ.get("SINNIX_COHERE_TRANSCRIBE_API_MODEL", "cohere-transcribe-03-2026")
+COHERE_LANGUAGE = os.environ.get("SINNIX_COHERE_TRANSCRIBE_LANGUAGE", "en")
+COHERE_MAX_NEW_TOKENS = int(os.environ.get("SINNIX_COHERE_TRANSCRIBE_MAX_NEW_TOKENS", "256"))
+COHERE_ENDPOINT = os.environ.get(
+    "SINNIX_COHERE_TRANSCRIBE_ENDPOINT",
+    "https://api.cohere.com/v2/audio/transcriptions",
+)
+
+
+def transcribe_cohere_local(audio_path: str) -> dict[str, object]:
+    import torch
+    from transformers import AutoProcessor, CohereAsrForConditionalGeneration
+    from transformers.audio_utils import load_audio
+
+    torch.set_num_threads(1)
+    torch.set_num_interop_threads(1)
+    torch.backends.mkldnn.enabled = False
+    processor = AutoProcessor.from_pretrained(COHERE_MODEL, revision=COHERE_REVISION)
+    model = CohereAsrForConditionalGeneration.from_pretrained(
+        COHERE_MODEL,
+        device_map=DEVICE,
+        revision=COHERE_REVISION,
+    )
+    audio = load_audio(audio_path, sampling_rate=16000)
+    inputs = processor(
+        audio,
+        sampling_rate=16000,
+        return_tensors="pt",
+        language=COHERE_LANGUAGE,
+    )
+    audio_chunk_index = inputs.get("audio_chunk_index")
+    inputs.to(model.device, dtype=model.dtype)
+    outputs = model.generate(**inputs, max_new_tokens=COHERE_MAX_NEW_TOKENS)
+    text = processor.decode(
+        outputs,
+        skip_special_tokens=True,
+        audio_chunk_index=audio_chunk_index,
+        language=COHERE_LANGUAGE,
+    )
+    if isinstance(text, list):
+        text = " ".join(item.strip() for item in text).strip()
+    else:
+        text = text.strip()
+    return {
+        "text": text,
+        "language": COHERE_LANGUAGE,
+        "language_probability": None,
+        "segments": [],
+        "provider": PROVIDER,
+        "model": COHERE_MODEL,
+        "revision": COHERE_REVISION,
+    }
+
+
+if "--cohere-worker" in sys.argv:
+    worker_arg = sys.argv.index("--cohere-worker")
+    print(json.dumps(transcribe_cohere_local(sys.argv[worker_arg + 1])))
+    raise SystemExit(0)
+
+import requests
+import uvicorn
+from fastapi import FastAPI, File, UploadFile
+from fastapi.responses import JSONResponse
+from faster_whisper import WhisperModel
+
+
+app = FastAPI(title="Sinnix ASR")
+whisper_model: WhisperModel | None = None
+
+
+@app.on_event("startup")
+def load_model() -> None:
+    global whisper_model
+    if PROVIDER == "local":
+        whisper_model = WhisperModel(MODEL_NAME, device=DEVICE, compute_type=COMPUTE_TYPE)
+
+
+def run_cohere_worker(audio_path: str) -> dict[str, object]:
+    env = os.environ.copy()
+    env.update(
+        {
+            "OMP_NUM_THREADS": "1",
+            "MKL_NUM_THREADS": "1",
+            "OPENBLAS_NUM_THREADS": "1",
+            "NUMEXPR_NUM_THREADS": "1",
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, __file__, "--cohere-worker", audio_path],
+        check=False,
+        capture_output=True,
+        env=env,
+        text=True,
+        timeout=300,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        detail = f"exit status {result.returncode}: {detail or 'no output'}"
+        raise RuntimeError(detail[-1000:])
+    return json.loads(result.stdout)
+
+
+def read_secret(name: str, file_name: str) -> str | None:
+    value = os.environ.get(name)
+    if value:
+        return value.strip()
+
+    path = os.environ.get(file_name)
+    if not path:
+        return None
+
+    try:
+        return Path(path).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    if PROVIDER == "cohere":
+        return {
+            "status": "ok",
+            "provider": PROVIDER,
+            "model": COHERE_MODEL,
+            "revision": COHERE_REVISION,
+            "language": COHERE_LANGUAGE,
+        }
+    if PROVIDER == "cohere-api":
+        return {
+            "status": "ok",
+            "provider": PROVIDER,
+            "model": COHERE_API_MODEL,
+            "language": COHERE_LANGUAGE,
+        }
+    return {
+        "status": "ok",
+        "provider": PROVIDER,
+        "model": MODEL_NAME,
+        "device": DEVICE,
+    }
+
+
+@app.post("/transcribe")
+async def transcribe(file: UploadFile = File(...)) -> JSONResponse:
+    if PROVIDER == "local" and whisper_model is None:
+        return JSONResponse({"error": "model not loaded"}, status_code=503)
+
+    suffix = Path(file.filename or "audio.wav").suffix or ".wav"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(await file.read())
+        tmp_path = tmp.name
+
+    try:
+        if PROVIDER == "cohere":
+            return JSONResponse(run_cohere_worker(tmp_path))
+
+        if PROVIDER == "cohere-api":
+            api_key = read_secret("COHERE_API_KEY", "COHERE_API_KEY_FILE")
+            if not api_key:
+                return JSONResponse({"error": "COHERE_API_KEY_FILE or COHERE_API_KEY is required"}, status_code=503)
+
+            with Path(tmp_path).open("rb") as audio:
+                response = requests.post(
+                    COHERE_ENDPOINT,
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    data={
+                        "model": COHERE_API_MODEL,
+                        "language": COHERE_LANGUAGE,
+                    },
+                    files={"file": (Path(tmp_path).name, audio, file.content_type or "audio/wav")},
+                    timeout=300,
+                )
+            response.raise_for_status()
+            payload = response.json()
+            return JSONResponse(
+                {
+                    "text": (payload.get("text") or "").strip(),
+                    "language": COHERE_LANGUAGE,
+                    "language_probability": None,
+                    "segments": [],
+                    "provider": PROVIDER,
+                    "model": COHERE_API_MODEL,
+                }
+            )
+
+        if PROVIDER != "local":
+            return JSONResponse({"error": f"unsupported provider: {PROVIDER}"}, status_code=400)
+
+        segments_iter, info = whisper_model.transcribe(
+            tmp_path,
+            beam_size=5,
+            vad_filter=True,
+            vad_parameters={"min_silence_duration_ms": 600},
+        )
+        segments = [
+            {
+                "start": segment.start,
+                "end": segment.end,
+                "text": segment.text,
+            }
+            for segment in segments_iter
+        ]
+        text = " ".join(segment["text"].strip() for segment in segments).strip()
+        return JSONResponse(
+            {
+                "text": text,
+                "language": info.language,
+                "language_probability": info.language_probability,
+                "segments": segments,
+                "provider": PROVIDER,
+                "model": MODEL_NAME,
+            }
+        )
+    except requests.HTTPError as exc:
+        body = exc.response.text[:500] if exc.response is not None else str(exc)
+        return JSONResponse({"error": f"cohere transcription failed: {body}"}, status_code=502)
+    except (RuntimeError, subprocess.TimeoutExpired) as exc:
+        return JSONResponse({"error": f"cohere transcription failed: {exc}"}, status_code=502)
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=7778)
+    args = parser.parse_args()
+    uvicorn.run(app, host=args.host, port=args.port)

@@ -99,20 +99,14 @@ in
       ];
     };
 
-    # NVMe-class scratch cache on Samsung 960 EVO (nvme1n1p2). Hosts sccache,
-    # nix-fast-build artifacts, and other rebuild-cheap caches whose loss is
-    # painful but not catastrophic. Compressed btrfs so dedup-friendly content
-    # (Rust object files, .rlib) stays small.
-    "/cache" = {
-      device = "/dev/disk/by-uuid/7f603111-8f3a-40aa-bad0-0cac69c140f1";
-      fsType = "btrfs";
-      options = [
-        "compress=zstd"
-        "noatime"
-        "nodiscard"
-        "nofail"
-      ];
-    };
+    # /cache mount on Samsung 960 EVO (nvme1n1p2) removed 2026-05-12 after the
+    # drive started throwing sustained I/O errors: NVMe queue timeouts at
+    # 06:52, then btrfs flipped /cache read-only and the kernel logged hundreds
+    # of Read-/Write-error events on swap-device 259:0 (nvme1n1p1). Codex/exec
+    # syscalls began returning EIO ("env: 'bash': Input/output error") because
+    # paged-out binary pages could not be read back. Drive is staying unused
+    # until it is physically replaced. Cache consumers fall back to their
+    # default locations or root-backed /var/tmp scratch.
 
     "${realmRoot}" = {
       device = "/dev/disk/by-uuid/bd19092f-a195-47ab-9c0d-c923d1e5bfea";
@@ -159,20 +153,17 @@ in
 
   };
 
-  # 32 GiB swap on dedicated NVMe partition (nvme1n1p1, Samsung 960 EVO).
-  # Replaced the prior /persist/swap/swapfile setup which blocked btrbk
-  # snapshots: an active btrfs swapfile pins the parent subvolume's extent
-  # map, causing `Could not create subvolume: Text file busy` every 5 min.
-  # A real swap partition has no CoW concerns and isolates swap I/O from the
-  # @persist hot path. Combined with vm.swappiness=1 and earlyoom, this is
-  # still a release valve — earlyoom kills well before swap fills.
-  swapDevices = [
-    { device = "/dev/disk/by-uuid/f2f75da7-69bd-4c8e-8332-83e6cb39a84b"; }
-  ];
+  # Swap on nvme1n1p1 (Samsung 960 EVO) removed 2026-05-12: the drive's
+  # controller started hanging admin commands and the kernel logged sustained
+  # Read-/Write-error events on the swap device. With 32 GiB RAM and
+  # vm.swappiness=1 + earlyoom we already treated swap as a release valve, not
+  # a working store; running without it for now is workable. Revisit when the
+  # drive is replaced — at that point swap can move to a partition on the new
+  # device (no btrfs swapfile, no CoW concerns).
+  swapDevices = [ ];
 
   systemd = {
     tmpfiles.rules = lib.mkAfter [
-      "d /mnt/pendrv 0755 root root -"
       "d ${polylogueArchiveRoot} 0700 ${username} ${primaryGroupName} -"
       "d /home/${username}/.local/share 0700 ${username} ${primaryGroupName} -"
       "d ${polylogueShareMount} 0700 ${username} ${primaryGroupName} -"

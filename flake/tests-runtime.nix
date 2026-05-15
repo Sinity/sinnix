@@ -268,18 +268,12 @@ in
 
             machine.succeed("loginctl enable-linger sinity")
             machine.wait_for_unit(f"user@{uid}.service")
-            machine.wait_for_unit("polylogue-run.timer", "sinity")
+            machine.wait_for_unit("polylogued.service", "sinity")
 
-            machine.succeed(f"{as_user} systemctl --user start polylogue-run.service")
-            machine.wait_until_succeeds(f"{as_user} systemctl --user show polylogue-run.service -P Result | grep -qx success")
-
-            machine.wait_until_succeeds(f"{as_user} test -s /home/sinity/.local/share/polylogue/polylogue.db")
-            machine.wait_until_succeeds(
-                f"""{as_user} sh -lc 'find "$HOME/.local/share/polylogue/runs" -type f | grep -q .'"""
-            )
-            machine.succeed(
-                f"""{as_user} sh -lc 'latest_run=$(ls -1t "$HOME/.local/share/polylogue/runs"/run-*.json | head -n 1); jq -e ".run_id != null and .duration_ms >= 0 and .counts.acquire_errors >= 0" "$latest_run" >/dev/null'"""
-            )
+            machine.succeed(f"{as_user} systemctl --user is-active --quiet polylogued.service")
+            machine.fail(f"{as_user} systemctl --user cat polylogue-run.service")
+            machine.fail(f"{as_user} systemctl --user cat polylogue-run.timer")
+            machine.succeed(f"{as_user} polylogued status --format json | jq -e '.daemon == \"polylogued\" and (.live.source_count >= 0)' >/dev/null")
           '';
         };
         sentinel-vm = mkVmCheck system {
@@ -445,8 +439,7 @@ in
             export HOME="$TMPDIR/home"
             mkdir -p \
               "$HOME" \
-              "$TMPDIR/sinex/.sinex/state" \
-              "$TMPDIR/polylogue-runs"
+              "$TMPDIR/sinex/.sinex/state"
 
             sqlite3 "$TMPDIR/sinex/.sinex/state/xtask-history.db" <<'SQL'
             create table invocations (
@@ -492,51 +485,73 @@ in
             SQL
 
             sqlite3 "$TMPDIR/polylogue.db" <<'SQL'
-            create table runs (
-              run_id text primary key,
-              timestamp text not null,
-              plan_snapshot text,
-              counts_json text,
-              drift_json text,
-              indexed integer,
-              duration_ms integer
+            create table live_ingest_attempt (
+              attempt_id text primary key,
+              started_at text not null,
+              updated_at text not null,
+              completed_at text,
+              status text not null,
+              phase text not null,
+              queued_file_count integer not null,
+              needed_file_count integer not null,
+              succeeded_file_count integer not null,
+              failed_file_count integer not null,
+              input_bytes integer not null,
+              source_payload_read_bytes integer not null,
+              cursor_fingerprint_read_bytes integer not null,
+              parse_time_s real not null,
+              convergence_time_s real not null,
+              current_source text,
+              current_path text,
+              error text,
+              rss_current_mb real,
+              rss_peak_self_mb real,
+              rss_peak_children_mb real,
+              cgroup_path text,
+              cgroup_memory_current_mb real,
+              cgroup_memory_peak_mb real,
+              cgroup_memory_swap_current_mb real
             );
-            insert into runs values (
-              'run-fixture',
-              '1777809600',
+            insert into live_ingest_attempt values (
+              'attempt-fixture',
+              '2026-05-03T12:00:00Z',
+              '2026-05-03T12:00:12Z',
+              '2026-05-03T12:00:12Z',
+              'succeeded',
+              'converged',
+              3,
+              2,
+              2,
+              0,
+              4096,
+              2048,
+              0,
+              1.5,
+              0.5,
+              'codex',
+              '/tmp/session.jsonl',
               null,
-              '{"conversations":2,"messages":77,"acquired":1,"rendered":2}',
-              '{}',
-              1,
-              12345
+              300.0,
+              512.0,
+              64.0,
+              '/user.slice/user-1000.slice/user@1000.service/app.slice/polylogued.service',
+              768.0,
+              1024.0,
+              0.0
             );
             SQL
 
-            cat > "$TMPDIR/polylogue-runs/run-1777809600-run-fixture.json" <<'JSON'
-            {
-              "run_id": "run-fixture",
-              "timestamp": 1777809600,
-              "duration_ms": 12345,
-              "counts": {
-                "conversations": 2,
-                "messages": 77,
-                "rendered": 2
-              }
-            }
-            JSON
-
             cat > "$TMPDIR/below-cgroup.tsv" <<'EOF'
             2026-05-03T12:00:10Z	sinex	/user.slice/user-1000.slice/user@1000.service/build.slice/sinex.scope	120.0	536870912	104857600	7.5	0.0
-            2026-05-03T12:00:11Z	polylogue	/user.slice/user-1000.slice/user@1000.service/background.slice/polylogue.scope	30.0	268435456	20971520	1.5	0.0
+            2026-05-03T12:00:11Z	polylogued	/user.slice/user-1000.slice/user@1000.service/app.slice/polylogued.service	30.0	268435456	20971520	1.5	0.0
             EOF
             cat > "$TMPDIR/below-process.tsv" <<'EOF'
             2026-05-03T12:00:10Z	1001	cargo	S	/user.slice/user-1000.slice/user@1000.service/build.slice/sinex.scope	104857600	536870912	120.0	cargo check --workspace /realm/project/sinex
-            2026-05-03T12:00:11Z	1002	polylogue	S	/user.slice/user-1000.slice/user@1000.service/background.slice/polylogue.scope	20971520	268435456	30.0	polylogue --plain run acquire parse materialize render index
+            2026-05-03T12:00:11Z	1002	polylogued	S	/user.slice/user-1000.slice/user@1000.service/app.slice/polylogued.service	20971520	268435456	30.0	polylogued run --host 127.0.0.1 --port 8765
             EOF
 
             SINEX_ROOT="$TMPDIR/sinex" \
             SINNIX_OBSERVE_POLYLOGUE_DB="$TMPDIR/polylogue.db" \
-            SINNIX_OBSERVE_POLYLOGUE_RUNS_DIR="$TMPDIR/polylogue-runs" \
             SINNIX_OBSERVE_BELOW_CGROUP_TSV="$TMPDIR/below-cgroup.tsv" \
             SINNIX_OBSERVE_BELOW_PROCESS_TSV="$TMPDIR/below-process.tsv" \
               ${pkgs.python3}/bin/python3 ${../scripts/sinnix-observe} \
@@ -546,16 +561,14 @@ in
             jq -e '
               .schema == "sinnix-observe-v1" and
               (.workload_rows | any(.source == "sinex.xtask" and .project == "sinex" and (.gaps | index("sinex.invocation.lacks_cgroup")))) and
-              (.workload_rows | any(.source == "polylogue.run" and .project == "polylogue" and (.gaps | index("polylogue.run.lacks_cgroup")))) and
+              (.workload_rows | any(.source == "polylogue.live_attempt" and .project == "polylogue" and .unit == "polylogued.service" and .metrics.source_payload_read_bytes == 2048)) and
               (.workload_rows | any(.source == "below.process" and .project == "sinex")) and
               (.workload_rows | any(.source == "below.process" and .project == "polylogue")) and
-              (.gaps_summary."sinex.invocation.lacks_io_bytes" >= 1) and
-              (.gaps_summary."polylogue.run.lacks_psi_window" >= 1)
+              (.gaps_summary."sinex.invocation.lacks_io_bytes" >= 1)
             ' "$TMPDIR/report.json" >/dev/null
 
             SINEX_ROOT="$TMPDIR/sinex" \
             SINNIX_OBSERVE_POLYLOGUE_DB="$TMPDIR/polylogue.db" \
-            SINNIX_OBSERVE_POLYLOGUE_RUNS_DIR="$TMPDIR/polylogue-runs" \
             SINNIX_OBSERVE_BELOW_CGROUP_TSV="$TMPDIR/below-cgroup.tsv" \
             SINNIX_OBSERVE_BELOW_PROCESS_TSV="$TMPDIR/below-process.tsv" \
               ${pkgs.python3}/bin/python3 ${../scripts/sinnix-observe} \
@@ -564,7 +577,7 @@ in
 
             grep -q '== workload rows ==' "$TMPDIR/report.txt"
             grep -q 'sinex.invocation.lacks_cgroup' "$TMPDIR/report.txt"
-            grep -q 'polylogue.run.lacks_cgroup' "$TMPDIR/report.txt"
+            grep -q 'polylogue live ingest' "$TMPDIR/report.txt"
 
             touch "$out"
           '';

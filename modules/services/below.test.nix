@@ -57,11 +57,29 @@ mkServiceTest {
           && lib.hasInfix "backoff_active" belowModule
           && lib.hasInfix "restore_backoff" belowModule
           && lib.hasInfix "nix.slice nix-build.slice background.slice" belowModule
+          && lib.hasInfix "sinnix.slice sinnix-maintenance.slice" belowModule
           && lib.hasInfix "build.slice background.slice" belowModule
+          && lib.hasInfix "maintenanceCpuWeight" belowModule
+          && lib.hasInfix "maintenanceIoWeight" belowModule
+          && lib.hasInfix "developer CPUWeight=$backoff_cpu_weight IOWeight=$backoff_io_weight" belowModule
           && lib.hasInfix "runuser -u" belowModule
           && lib.hasInfix "applied PSI runtime backoff" belowModule
           && lib.hasInfix "restored PSI runtime backoff" belowModule;
         message = "Pressure watchdog must apply and restore optional runtime backoff for opportunistic slices";
+      }
+      # Fix D — below.service must run in system-critical.slice with priority
+      # knobs so it can sample at sub-second intervals during the contention
+      # it exists to capture.
+      {
+        assertion =
+          let
+            below = config.systemd.services.below.serviceConfig;
+          in
+          below.Slice == "system-critical.slice"
+          && below.Nice == -5
+          && below.IOSchedulingClass == "best-effort"
+          && below.IOSchedulingPriority == 0;
+        message = "below.service must run in system-critical.slice with Nice=-5 / best-effort prio 0 (Fix D)";
       }
     ];
 }

@@ -64,6 +64,37 @@ mkFeatureModule {
       mcpPlaywrightBin = mkMcpWrapper "mcp-playwright" {
         command = "${pkgs.playwright-mcp}/bin/playwright-mcp";
       };
+      # Headed Playwright variant against a persistent dev profile under
+      # ~/.local/share/sinnix-browser/playwright-headed. Lets agents drive a
+      # real browser session (e.g. for browser-extension dev) instead of a
+      # fresh sandbox per call.
+      mcpPlaywrightHeadedBin = pkgs.writeShellScriptBin "mcp-playwright-headed" ''
+        set -euo pipefail
+        profile_dir="''${SINNIX_PLAYWRIGHT_PROFILE:-$HOME/.local/share/sinnix-browser/playwright-headed}"
+        mkdir -p "$profile_dir"
+        exec ${pkgs.playwright-mcp}/bin/playwright-mcp \
+          --user-data-dir "$profile_dir" \
+          "$@"
+      '';
+      # Chrome DevTools MCP — vendored npm package built via mkNodeCliPackage.
+      # By default attaches to the user's running Chrome on the loopback debug
+      # port (configured by modules/features/desktop/browser.nix:47). Override
+      # via SINNIX_CHROME_DEVTOOLS_URL for a different endpoint, or set it to
+      # the empty string to let Chrome DevTools MCP launch its own browser.
+      mcpChromeDevtoolsBin = pkgs.writeShellScriptBin "mcp-chrome-devtools" ''
+        set -euo pipefail
+        target="''${SINNIX_CHROME_DEVTOOLS_URL-http://127.0.0.1:9222}"
+        if [ -n "$target" ]; then
+          exec ${scriptPkgs.mcp-chrome-devtools}/bin/mcp-chrome-devtools \
+            --browserUrl "$target" \
+            "$@"
+        else
+          exec ${scriptPkgs.mcp-chrome-devtools}/bin/mcp-chrome-devtools "$@"
+        fi
+      '';
+      mcpLynchpinBin = mkMcpWrapper "mcp-lynchpin" {
+        command = "${scriptPkgs.lynchpin-cli}/bin/lynchpin-mcp";
+      };
       mcpPolylogueBin = mkMcpWrapper "mcp-polylogue" {
         command = "${scriptPkgs.polylogue-cli}/bin/polylogue-mcp";
       };
@@ -147,6 +178,9 @@ mkFeatureModule {
             };
             ".local/bin/mcp-firecrawl".source = "${mcpFirecrawlBin}/bin/mcp-firecrawl";
             ".local/bin/mcp-playwright".source = "${mcpPlaywrightBin}/bin/mcp-playwright";
+            ".local/bin/mcp-playwright-headed".source = "${mcpPlaywrightHeadedBin}/bin/mcp-playwright-headed";
+            ".local/bin/mcp-chrome-devtools".source = "${mcpChromeDevtoolsBin}/bin/mcp-chrome-devtools";
+            ".local/bin/mcp-lynchpin".source = "${mcpLynchpinBin}/bin/mcp-lynchpin";
             ".local/bin/mcp-polylogue".source = "${mcpPolylogueBin}/bin/mcp-polylogue";
             ".gemini/settings.json" = {
               source = mkDotsFile "/gemini/settings.json";

@@ -56,8 +56,6 @@ SYSTEM_UNITS = [
 ]
 
 USER_UNITS = [
-    "polylogue-run.service",
-    "polylogue-run.timer",
     "polylogued.service",
     "polylogue-browser-capture.service",
 ]
@@ -72,8 +70,6 @@ RESOURCE_CLASS_BY_UNIT = {
     "borgbackup-check.service": "background-maintenance",
     "nix-gc.service": "background-maintenance",
     "nix-optimise.service": "background-maintenance",
-    "polylogue-run.service": "background-maintenance",
-    "polylogue-run.timer": "background-maintenance",
     "polylogued.service": "capture-runtime",
     "polylogue-browser-capture.service": "capture-runtime",
     "sinex-runtime.target": "capture-runtime",
@@ -371,6 +367,7 @@ def collect_resource_slices(offline: bool) -> list[dict[str, Any]]:
     if offline:
         return []
     specs = [
+        ("user", "agent.slice"),
         ("user", "build.slice"),
         ("user", "nix-build.slice"),
         ("user", "background.slice"),
@@ -753,56 +750,59 @@ def polylogue_db() -> Path | None:
         str(Path(os.environ.get("POLYLOGUE_ROOT", "/realm/project/polylogue")) / ".local/browser-capture/xdg-data/polylogue/polylogue.db"),
     ]
     for candidate in candidates:
-        if candidate and table_exists(Path(candidate), "runs"):
+        if candidate and table_exists(Path(candidate), "live_ingest_attempt"):
             return Path(candidate)
     return Path(candidates[0]) if candidates[0] else None
 
 
-def polylogue_run_dirs() -> list[Path]:
-    dirs = [
-        os.environ.get("SINNIX_OBSERVE_POLYLOGUE_RUNS_DIR"),
-        str(Path.home() / ".local/share/polylogue/runs"),
-        str(Path(os.environ.get("POLYLOGUE_ROOT", "/realm/project/polylogue")) / "runs"),
-        str(Path(os.environ.get("POLYLOGUE_ROOT", "/realm/project/polylogue")) / "archive/runs"),
-    ]
-    return [Path(path) for path in dirs if path]
-
-
-def load_polylogue_run_json(run_id: str) -> dict[str, Any] | None:
-    for directory in polylogue_run_dirs():
-        if not directory.exists():
-            continue
-        matches = sorted(directory.glob(f"run-*-{run_id}.json"))
-        if not matches:
-            matches = sorted(directory.glob(f"*{run_id}*.json"))
-        for match in matches:
-            try:
-                return json.loads(match.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                continue
-    return None
-
-
-def collect_polylogue_runs(limit: int) -> dict[str, Any]:
+def collect_polylogue_live_attempts(limit: int) -> dict[str, Any]:
     db = polylogue_db()
     source: dict[str, Any] = {"db": str(db) if db else None, "available": False, "rows": []}
-    if not db or not db.exists() or not table_exists(db, "runs"):
-        source["gaps"] = ["polylogue.runs.unavailable"]
+    if not db or not db.exists() or not table_exists(db, "live_ingest_attempt"):
+        source["gaps"] = ["polylogue.live_attempts.unavailable"]
+        return source
+    cols = set(sqlite_columns(db, "live_ingest_attempt"))
+    wanted = [
+        "attempt_id",
+        "started_at",
+        "updated_at",
+        "completed_at",
+        "status",
+        "phase",
+        "queued_file_count",
+        "needed_file_count",
+        "succeeded_file_count",
+        "failed_file_count",
+        "input_bytes",
+        "source_payload_read_bytes",
+        "cursor_fingerprint_read_bytes",
+        "parse_time_s",
+        "convergence_time_s",
+        "current_source",
+        "current_path",
+        "error",
+        "rss_current_mb",
+        "rss_peak_self_mb",
+        "rss_peak_children_mb",
+        "cgroup_path",
+        "cgroup_memory_current_mb",
+        "cgroup_memory_peak_mb",
+        "cgroup_memory_swap_current_mb",
+    ]
+    selected = [col for col in wanted if col in cols]
+    if not selected:
+        source["gaps"] = ["polylogue.live_attempts.empty_schema"]
         return source
     rows = sqlite_rows(
         db,
-        """
-        select run_id, timestamp, plan_snapshot, counts_json, drift_json, indexed, duration_ms
-        from runs
-        order by timestamp desc
+        f"""
+        select {", ".join(selected)}
+        from live_ingest_attempt
+        order by updated_at desc, started_at desc
         limit ?
         """,
         (limit,),
     )
-    for row in rows:
-        run_json = load_polylogue_run_json(str(row.get("run_id") or ""))
-        if run_json is not None:
-            row["run_json"] = run_json
     source["available"] = True
     source["rows"] = rows
     return source
@@ -1059,43 +1059,51 @@ def build_workload_rows(
         )
 
     for row in polylogue.get("rows", []):
-        counts = parse_counts(row.get("counts_json"))
-        run_json = row.get("run_json") if isinstance(row.get("run_json"), dict) else {}
-        if run_json:
-            counts = parse_counts(run_json.get("counts")) or counts
-        gaps = [
-            "polylogue.run.lacks_recorded_unit",
-            "polylogue.run.lacks_cgroup",
-            "polylogue.run.lacks_io_bytes",
-            "polylogue.run.lacks_psi_window",
-            "polylogue.run.lacks_declared_resource_class",
-        ]
-        if not run_json:
-            gaps.append("polylogue.run.lacks_sidecar_run_json")
+        gaps = []
+        if not row.get("cgroup_path"):
+            gaps.append("polylogue.live_attempt.lacks_cgroup")
+        if row.get("source_payload_read_bytes") is None:
+            gaps.append("polylogue.live_attempt.lacks_io_bytes")
+        if row.get("cgroup_memory_current_mb") is None:
+            gaps.append("polylogue.live_attempt.lacks_cgroup_memory")
         rows.append(
             {
-                "workload_id": f"polylogue.run:{row.get('run_id')}",
-                "source": "polylogue.run",
+                "workload_id": f"polylogue.live_attempt:{row.get('attempt_id')}",
+                "source": "polylogue.live_attempt",
                 "project": "polylogue",
                 "kind": "project-ledger",
-                "name": "polylogue run",
-                "run_id": row.get("run_id"),
-                "started_at": normalize_timestamp(row.get("timestamp")),
-                "duration_secs": (row.get("duration_ms") or 0) / 1000.0
-                if row.get("duration_ms") is not None
-                else None,
-                "status": "indexed" if row.get("indexed") else "recorded",
-                "unit": "polylogue-run.service",
+                "name": "polylogue live ingest",
+                "run_id": row.get("attempt_id"),
+                "started_at": normalize_timestamp(row.get("started_at")),
+                "finished_at": normalize_timestamp(row.get("completed_at")),
+                "duration_secs": None,
+                "status": row.get("status"),
+                "unit": "polylogued.service",
                 "unit_source": "sinnix-inferred",
-                "cgroup": None,
-                "resource_class": "background-maintenance",
+                "cgroup": row.get("cgroup_path"),
+                "resource_class": "capture-runtime",
                 "metrics": {
-                    "counts": counts,
-                    "indexed": row.get("indexed"),
-                    "drift_json": row.get("drift_json"),
-                    "has_sidecar_run_json": bool(run_json),
+                    "phase": row.get("phase"),
+                    "queued_file_count": row.get("queued_file_count"),
+                    "needed_file_count": row.get("needed_file_count"),
+                    "succeeded_file_count": row.get("succeeded_file_count"),
+                    "failed_file_count": row.get("failed_file_count"),
+                    "input_bytes": row.get("input_bytes"),
+                    "source_payload_read_bytes": row.get("source_payload_read_bytes"),
+                    "cursor_fingerprint_read_bytes": row.get("cursor_fingerprint_read_bytes"),
+                    "parse_time_s": row.get("parse_time_s"),
+                    "convergence_time_s": row.get("convergence_time_s"),
+                    "current_source": row.get("current_source"),
+                    "current_path": row.get("current_path"),
+                    "rss_current_mb": row.get("rss_current_mb"),
+                    "rss_peak_self_mb": row.get("rss_peak_self_mb"),
+                    "rss_peak_children_mb": row.get("rss_peak_children_mb"),
+                    "cgroup_memory_current_mb": row.get("cgroup_memory_current_mb"),
+                    "cgroup_memory_peak_mb": row.get("cgroup_memory_peak_mb"),
+                    "cgroup_memory_swap_current_mb": row.get("cgroup_memory_swap_current_mb"),
+                    "error": row.get("error"),
                 },
-                "below": match_below("polylogue", None, below),
+                "below": match_below("polylogued", row.get("cgroup_path"), below),
                 "gaps": gaps,
             }
         )
@@ -1147,6 +1155,8 @@ def infer_resource_class_from_cgroup(cgroup: str) -> str | None:
         return "developer-build"
     if "background.slice" in cgroup:
         return "background-maintenance"
+    if "agent.slice" in cgroup:
+        return "interactive-agent"
     if "app-graphical.slice" in cgroup or "app.slice" in cgroup:
         return "interactive"
     if "system.slice" in cgroup:
@@ -1202,7 +1212,7 @@ def collect_report(args: argparse.Namespace) -> dict[str, Any]:
     systemd_units = collect_systemd_units(args.offline)
     slices = collect_resource_slices(args.offline)
     sinex = collect_sinex_xtask(args.limit)
-    polylogue = collect_polylogue_runs(args.limit)
+    polylogue = collect_polylogue_live_attempts(args.limit)
     below = collect_below(args.since, args.duration, args.limit, args.offline)
     chrome_io = collect_chrome_io(args.offline, below, args.limit)
     workload_rows = build_workload_rows(systemd_units, sinex, polylogue, below)
@@ -1212,7 +1222,7 @@ def collect_report(args: argparse.Namespace) -> dict[str, Any]:
         "window": {"since": args.since, "duration": args.duration},
         "sources": {
             "sinex_xtask_history": {"path": sinex.get("db"), "available": sinex.get("available")},
-            "polylogue_runs": {"path": polylogue.get("db"), "available": polylogue.get("available")},
+            "polylogue_live_attempts": {"path": polylogue.get("db"), "available": polylogue.get("available")},
             "below": {"available": below.get("available")},
         },
         "live_pressure": pressure,
@@ -1223,7 +1233,7 @@ def collect_report(args: argparse.Namespace) -> dict[str, Any]:
         "resource_slices": slices,
         "chrome_io": chrome_io,
         "sinex_xtask_history": sinex,
-        "polylogue_runs": polylogue,
+        "polylogue_live_attempts": polylogue,
         "below": below,
         "workload_rows": workload_rows,
         "gaps_summary": dict(Counter(gap for row in workload_rows for gap in row.get("gaps", []))),
@@ -1376,14 +1386,15 @@ def render_human(report: dict[str, Any]) -> str:
             f"rss_mb={row.get('process_memory_usage_max_mb')}"
         )
 
-    section("polylogue runs")
-    poly = report.get("polylogue_runs", {})
+    section("polylogue live ingest")
+    poly = report.get("polylogue_live_attempts", {})
     lines.append(f"db={poly.get('db')} available={poly.get('available')}")
     for row in poly.get("rows", [])[:10]:
-        counts = parse_counts(row.get("counts_json"))
         lines.append(
-            f"  {normalize_timestamp(row.get('timestamp'))} {row.get('run_id')} "
-            f"secs={(row.get('duration_ms') or 0) / 1000.0:.1f} counts={str(counts)[:120]}"
+            f"  {normalize_timestamp(row.get('started_at'))} {row.get('attempt_id')} "
+            f"{row.get('status')} {row.get('phase')} "
+            f"files={row.get('succeeded_file_count')}/{row.get('needed_file_count')} "
+            f"payload_read={row.get('source_payload_read_bytes')}"
         )
 
     section("below recent history")

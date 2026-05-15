@@ -20,8 +20,16 @@ mkServiceModule {
     # not fight manual stops or sparsification jobs.
     restartable = false;
   };
+  extraOptions = {
+    autoStart = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Start Transmission automatically after boot settles.";
+    };
+  };
   configFn =
     {
+      cfg,
       config,
       lib,
       pkgs,
@@ -33,6 +41,7 @@ mkServiceModule {
       neoOuterRealmMount = "neo\\x2douter\\x2drealm.mount";
       transmissionConfigDir = "/var/lib/transmission/.config/transmission-daemon";
       torrentDownloadDir = "${torrentInbox}/tdown";
+      torrentPartialDir = "${torrentInbox}/tdown_partial";
     in
     {
       services.transmission = {
@@ -46,7 +55,8 @@ mkServiceModule {
           ratio-limit-enabled = false;
           umask = 18;
           download-dir = torrentDownloadDir;
-          incomplete-dir-enabled = false;
+          incomplete-dir = torrentPartialDir;
+          incomplete-dir-enabled = true;
           preallocation = 0;
           start-added-torrents = false;
           rpc-enabled = true;
@@ -61,8 +71,6 @@ mkServiceModule {
       };
 
       systemd.tmpfiles.rules = lib.mkAfter [
-        "d ${torrentInbox} 2775 ${username} users -"
-        "d ${torrentDownloadDir} 2775 ${username} users -"
         "d /var/lib/transmission/.config 0750 ${username} users -"
         "d ${transmissionConfigDir} 0750 ${username} users -"
         "f ${transmissionConfigDir}/queue.json 0644 ${username} users - []"
@@ -87,6 +95,7 @@ mkServiceModule {
             level = "strict";
             readWritePaths = [
               torrentInbox
+              torrentPartialDir
               "/var/lib/transmission"
             ];
           })
@@ -96,6 +105,15 @@ mkServiceModule {
             # namespace, privilege, and localhost RPC hardening, but do not use
             # seccomp as the failure mode for an interactive torrent daemon.
             SystemCallFilter = lib.mkForce [ ];
+            # Cold Btrfs metadata lookups across large torrents can keep
+            # Transmission busy checking payload paths before it sends READY=1.
+            TimeoutStartSec = "15min";
+            TimeoutStopSec = "5min";
+            ExecStartPre = [
+              "+${pkgs.coreutils}/bin/install -d -m 2775 -o ${username} -g users ${torrentInbox}"
+              "+${pkgs.coreutils}/bin/install -d -m 2775 -o ${username} -g users ${torrentDownloadDir}"
+              "+${pkgs.coreutils}/bin/install -d -m 2775 -o ${username} -g users ${torrentPartialDir}"
+            ];
           }
           (lib.sinnix.systemd.mkRestartPolicy {
             strategy = "on-failure";
@@ -126,7 +144,7 @@ mkServiceModule {
 
       systemd.timers.transmission-autostart = {
         description = "Deferred Transmission startup";
-        wantedBy = [ "timers.target" ];
+        wantedBy = lib.optionals cfg.autoStart [ "timers.target" ];
         timerConfig = {
           OnBootSec = "30s";
           Unit = "transmission-autostart.service";
@@ -186,12 +204,6 @@ mkServiceModule {
         '';
         serviceConfig = {
           Type = "oneshot";
-          Slice = "background.slice";
-          Nice = 19;
-          IOSchedulingClass = "idle";
-          CPUWeight = 10;
-          IOWeight = 5;
-          MemoryMax = "1G";
         };
       };
     };

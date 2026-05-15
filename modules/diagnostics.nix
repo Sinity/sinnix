@@ -2,7 +2,7 @@
 #
 # Provides:
 # - Hardware introspection (hwinfo, lshw, smartmontools)
-# - Performance analysis (perf-scan, hogkill, asbl-no-moar)
+# - Performance analysis (machine-experiment-run, hogkill, asbl-no-moar)
 # - Boot metrics capture (systemd-analyze, dmesg)
 # - Persistent journald logging with compression
 {
@@ -21,6 +21,8 @@ let
 
   journaldBaseDir = "${capturesRoot}/syslog";
   bootMetricsDir = "${journaldBaseDir}/boot-metrics";
+  oomdEventsDir = "${journaldBaseDir}/oomd-events";
+  oomdStateDir = "/var/lib/sinnix-oomd-watch";
 
   coreDiagnostics = with pkgs; [
     hwinfo
@@ -112,19 +114,10 @@ let
       }
 
       require_active below.service
-      require_active sinnix-pressure-watchdog.service
       require_eq below-prune.timer Persistent no
       require_eq btrbk.timer Persistent no
       require_eq borgbackup-job-realm.timer Persistent no
       require_eq borgbackup-job-persist.timer Persistent no
-      require_eq btrbk.service IOWeight 1
-      require_eq borgbackup-job-realm.service CPUWeight 1
-      require_eq borgbackup-job-realm.service IOWeight 1
-      require_eq borgbackup-job-persist.service CPUWeight 1
-      require_eq borgbackup-job-persist.service IOWeight 1
-      require_contains btrbk.service ExecCondition sinnix-maintenance-gate
-      require_contains borgbackup-job-realm.service ExecCondition sinnix-maintenance-gate
-      require_contains borgbackup-job-persist.service ExecCondition sinnix-maintenance-gate
 
       echo
       echo "Current pressure:"
@@ -143,11 +136,12 @@ in
     environment.systemPackages = lib.mkIf isDesktop (
       coreDiagnostics
       ++ [
-        scriptPkgs.perf-scan
         scriptPkgs.hogkill
         scriptPkgs.asbl-no-moar
         scriptPkgs.nuke-builds
         scriptPkgs.sinnix-observe
+        scriptPkgs.machine-experiment-run
+        scriptPkgs.syslog-index
         resourceAudit
       ]
     );
@@ -157,6 +151,11 @@ in
     systemd.tmpfiles.rules = [
       "d ${journaldBaseDir} 0750 ${username} users -"
       "d ${bootMetricsDir} 0750 ${username} users -"
+      "d ${journaldBaseDir}/index 0750 ${username} users -"
+    ]
+    ++ lib.optionals isDesktop [
+      "d ${oomdEventsDir} 0750 ${username} users 90d"
+      "d ${oomdStateDir} 0750 root root -"
     ];
 
     services.journald.extraConfig = ''
@@ -207,6 +206,57 @@ in
       timerConfig = {
         OnBootSec = "3min";
         AccuracySec = "10s";
+      };
+    };
+
+    systemd.services.syslog-index = {
+      description = "Build no-loss syslog/journal capture indexes";
+      after = [
+        "local-fs.target"
+        "systemd-journald.service"
+      ];
+      unitConfig.RequiresMountsFor = [ journaldBaseDir ];
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${scriptPkgs.syslog-index}/bin/syslog-index --no-edge-inspect";
+      };
+    };
+
+    systemd.timers.syslog-index = {
+      description = "Refresh no-loss syslog/journal capture indexes";
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnBootSec = "4min";
+        OnUnitActiveSec = "1h";
+        AccuracySec = "1min";
+      };
+    };
+
+    systemd.services.sinnix-oomd-watch = lib.mkIf isDesktop {
+      description = "Record and notify systemd-oomd memory pressure kills";
+      after = [
+        "local-fs.target"
+        "systemd-journald.service"
+      ];
+      unitConfig.RequiresMountsFor = [ oomdEventsDir ];
+      environment = {
+        SINNIX_NOTIFY_USER = username;
+        SINNIX_OOMD_EVENTS_DIR = oomdEventsDir;
+        SINNIX_OOMD_STATE_DIR = oomdStateDir;
+      };
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${scriptPkgs.sinnix-oomd-watch}/bin/sinnix-oomd-watch";
+      };
+    };
+
+    systemd.timers.sinnix-oomd-watch = lib.mkIf isDesktop {
+      description = "Poll for systemd-oomd and cgroup OOM kill events";
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnBootSec = "30s";
+        OnUnitActiveSec = "15s";
+        AccuracySec = "5s";
       };
     };
   };

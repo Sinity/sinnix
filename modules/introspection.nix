@@ -39,11 +39,11 @@ let
   # Event-driven captures (screenshot, audio) can't have freshness checks.
   captureMonitoring = lib.filter (x: x != null) [
     (
-      if (cfg.services.power-watchdog.enable or false) then
+      if (cfg.services.machine-telemetry.enable or false) then
         {
-          name = "power-watchdog";
-          path = "${capturesRoot}/power-watchdog";
-          maxStaleHours = 0.1; # Updates every second
+          name = "machine-telemetry";
+          path = "${capturesRoot}/machine/${config.networking.hostName}";
+          maxStaleHours = 0.1; # Samples every few seconds.
         }
       else
         null
@@ -188,7 +188,7 @@ let
         audio = "${capturesRoot}/audio";
         keylog = "${capturesRoot}/keylog";
         syslog = "${capturesRoot}/syslog";
-        power-watchdog = "${capturesRoot}/power-watchdog";
+        machine = "${capturesRoot}/machine";
         activitywatch = "${capturesRoot}/activitywatch";
         shell = "${capturesRoot}/shell";
         comms = "${capturesRoot}/comms";

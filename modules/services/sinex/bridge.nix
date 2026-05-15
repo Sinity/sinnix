@@ -1,42 +1,49 @@
 # Sinex bridge
 #
-# This module carries the heavy integration with the upstream `services.sinex`
-# option tree. Keep it opt-in so the generic sinnix module graph does not pay
-# for Sinex evaluation when the host does not import the upstream module.
+# Carries the genuinely host-specific glue between sinnix's options and
+# upstream `services.sinex`:
 #
-# Workstation policy is now expressed through upstream options
-# (services.sinex.runtime.*, .bootstrap.*, .nats.killPolicy). This bridge
-# only carries what is genuinely host-specific:
-#   - workstation memory / IO budgets for NATS and PostgreSQL
-#   - per-node MemoryMax/CPUQuota suppression (until upstream surfaces
-#     services.sinex.nodes.<n>.resources.memoryMax = null as an option)
-#   - cache placement under /cache/nats/jetstream and /cache/sinex
-#   - secrets paths + sinex user home + database password binding
-#   - the deferred-startup orchestration around sinex-runtime.timer for
-#     non-sinex bootstrap units (postgresql/postgresql-setup) that the
-#     upstream module cannot gate on its own attachToMultiUser flag
+# - selecting the Sinex runtime package from the flake input
+# - secrets paths + sinex user home location + database password binding
+# - storage placement (NATS state dir, runtime root)
+# - workstation deployment policy expressed through upstream options:
+#     services.sinex.runtime.target.{attachToMultiUser,manualStartOnly,
+#       includeDatabase,extraAfter}
+#     services.sinex.runtime.deferredStart.{enable,delay}
+#     services.sinex.runtime.restartPolicy.*
+#     services.sinex.bootstrap.restartPolicy
+#     services.sinex.nats.killPolicy.*
+#     services.sinex.database.setupWaitForPaths
+# - the activation-profile mapping from sinnix's `cfg.activationProfile`
+#   string to the per-node `enable` flags
+#
+# Auxiliary-unit gating (wantedBy stripping, sinex-runtime.target wants
+# graph, deferred-start timer, document-scan timer pinning) is owned by
+# upstream as of sinex#1306 and intentionally not duplicated here.
 {
   config,
   options,
   pkgs,
   lib,
   inputs,
-  helpers,
   ...
 }:
 let
   cfg = config.sinnix.services.sinex;
-  scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
-  inherit (config.sinnix.paths) capturesRoot realmRoot;
+  inherit (config.sinnix.paths) realmRoot;
   mkSinexPkgs = pkgs': inputs.sinex.packages.${pkgs'.stdenv.hostPlatform.system};
   sinexEnvironment = lib.toLower cfg.environment;
   targetUserName = config.sinnix.user.name;
   targetUserHome = "/home/${targetUserName}";
-  sinexCaptureRoot = "${capturesRoot}/sinex";
-  sinexHome = "${sinexCaptureRoot}/home";
-  sinexPostgresRoot = "${sinexCaptureRoot}/postgresql";
+  # Sinex runtime state lives at /var/lib/sinex (NixOS convention for service
+  # state). The earlier ${capturesRoot}/sinex layout misused the captures
+  # namespace — /realm/data/captures is for input data sinex *ingests*, not
+  # sinex's own operational substrate.
+  sinexRuntimeRoot = "/var/lib/sinex";
+  sinexStateRoot = "${sinexRuntimeRoot}/state";
+  sinexHome = "${sinexRuntimeRoot}/home";
+  sinexPostgresRoot = "${sinexRuntimeRoot}/postgresql";
   sinexPostgresDataDir = "${sinexPostgresRoot}/18";
-  sinexStateRoot = "${sinexCaptureRoot}/state";
   databaseHost = "127.0.0.1";
   databasePort = 5432;
   databaseUser = "sinex";
@@ -46,23 +53,14 @@ let
   runtimeEnabled = cfg.enable;
   runtimeAutoStart = runtimeEnabled && cfg.autoStart;
   databasePrepared = cfg.provisionDatabase || cfg.enable;
-  sinexRuntimeStartDelay = "5min";
-  sinexAutoTimers = [
-    "sinex-document-scan"
-  ];
-  maintenanceGate = unit: "${scriptPkgs.sinnix-maintenance-gate}/bin/sinnix-maintenance-gate ${unit}";
-  maintenanceServiceConfig = unit: {
-    Nice = 19;
-    CPUWeight = 1;
-    IOWeight = 1;
-    IOSchedulingClass = "idle";
-    Slice = "sinnix-maintenance.slice";
-    TimeoutStopSec = lib.mkDefault "15s";
-    ExecCondition = maintenanceGate unit;
-  };
-  maintenanceServicePolicy = unit: {
-    restartIfChanged = false;
-    serviceConfig = maintenanceServiceConfig unit;
+  # Workstation policy: clear the hard MemoryMax/CPUQuota caps that the
+  # upstream module sets as kill-fences on heavy automata. Sinnix prioritizes
+  # capture continuity over host containment on this workstation.
+  workstationResourcePolicy = {
+    serviceConfig = {
+      MemoryMax = lib.mkForce null;
+      CPUQuota = lib.mkForce null;
+    };
   };
 in
 {
@@ -112,84 +110,26 @@ in
         "${realmRoot}/project"
         "${realmRoot}/inbox/download"
       ];
-      generatedNodeServices = lib.optionals runtimeEnabled (config.sinex._generatedUnits or [ ]);
-      documentScanEnabled =
-        runtimeEnabled && lib.attrByPath [ "services" "sinex" "nodes" "document" "enable" ] false config;
-      preflightEnabled =
-        runtimeEnabled
-        && lib.attrByPath [ "services" "sinex" "lifecycle" "preflight" "enable" ] false config;
-      kittyAutoConfigureEnabled =
-        runtimeEnabled
-        && lib.attrByPath [ "services" "sinex" "shell" "kitty" "enable" ] false config
-        && lib.attrByPath [ "services" "sinex" "shell" "kitty" "autoConfigure" ] false config;
-      delayedRuntimeServices = lib.unique (
-        lib.optionals databasePrepared [
-          "postgresql"
-          "postgresql-setup"
-          "sinex-schema-apply"
-        ]
-        ++ lib.optionals runtimeEnabled [
-          "nats"
-          "sinex-nats-bootstrap"
-          "sinex-blob-init"
-          "sinex-tls-init"
+      generatedRuntimeServices = lib.optionals runtimeEnabled (config.sinex._generatedUnits or [ ]);
+      cappedAppRuntimeServices = lib.unique (
+        lib.optionals runtimeEnabled [
           "sinex-ingestd"
           "sinex-gateway"
         ]
-        ++ lib.optionals preflightEnabled [ "sinex-preflight" ]
-        ++ generatedNodeServices
-        ++ lib.optionals documentScanEnabled [ "sinex-document-scan" ]
-        ++ lib.optionals kittyAutoConfigureEnabled [ "sinex-kitty-setup" ]
+        ++ generatedRuntimeServices
       );
-      delayedRuntimeTargets = lib.optionals databasePrepared [ "postgresql" ];
-      delayedRuntimeUnits =
-        map (name: "${name}.service") delayedRuntimeServices
-        ++ map (name: "${name}.target") delayedRuntimeTargets;
-      restartableRuntimeServices = [
-        "sinex-ingestd"
-        "sinex-gateway"
-      ]
-      ++ generatedNodeServices;
-      cappedRuntimeServices = [
-        "nats"
-        "postgresql"
+      maintenanceTimerServiceNames = [
+        "sinex-document-scan"
       ];
-      uncappedRuntimeServices = builtins.filter (
-        name: !(builtins.elem name cappedRuntimeServices)
-      ) delayedRuntimeServices;
-      # Bridge-side policy that the upstream options can't yet express:
-      # - RequiresMountsFor on the captureRoot (host-specific path)
-      # - wantedBy=[] for non-sinex services (postgresql/postgresql-setup)
-      #   that upstream's runtime.target.attachToMultiUser cannot gate
-      bridgeRuntimePolicy = {
-        wantedBy = lib.mkForce [ ];
-        unitConfig = {
-          PartOf = [ "sinex-runtime.target" ];
-          RequiresMountsFor = [ sinexCaptureRoot ];
-        };
-        restartIfChanged = false;
-      };
-      # why mkForce: upstream Sinex's per-node resourceModule sets concrete
-      # MemoryMax/CPUQuota defaults for portability. The workstation keeps
-      # throughput available for capture correctness, while still marking
-      # long-running capture daemons as lower-I/O work than the desktop.
-      captureRuntimeServicePolicy = {
-        serviceConfig = {
-          MemoryMax = lib.mkForce null;
-          CPUQuota = lib.mkForce null;
-          MemoryHigh = lib.mkDefault "8G";
-          IOWeight = lib.mkDefault 10;
-        };
-      };
       mkScopedSinexPackage =
         sinexPkgs:
         pkgs.symlinkJoin {
           name = "sinex-runtime-${sinexEnvironment}";
           paths = lib.unique (
             lib.optionals runtimeEnabled [
-              # Use the upstream aggregate runtime so Nix builds Sinex once for
-              # deployment. Selecting per-node packages here reintroduces one
-              # SQLx/Postgres build derivation per service.
+              # Aggregate runtime so Nix builds Sinex once for deployment.
+              # Selecting per-node packages reintroduces one SQLx/Postgres
+              # build derivation per service.
               sinexPkgs.sinex
             ]
             ++ lib.optionals (!runtimeEnabled && databasePrepared) [ sinexPkgs.xtask ]
@@ -236,6 +176,9 @@ in
             )
           );
 
+          # Pin the sinex user home to /var/lib/sinex/home so it sits beside
+          # the postgres data dir and state root on the realm NVMe volume,
+          # not nested under stateRoot.
           users.users.sinex = {
             home = lib.mkForce sinexHome;
             homeMode = lib.mkForce "0711";
@@ -245,9 +188,8 @@ in
 
           systemd.tmpfiles.rules = lib.mkAfter (
             [
-              "d ${sinexCaptureRoot} 0755 root root -"
+              "d ${sinexRuntimeRoot} 0755 root root -"
               "d ${sinexHome} 0711 sinex sinex -"
-              "d ${sinexStateRoot} 0750 sinex sinex -"
             ]
             ++ lib.optionals databasePrepared [
               "d ${sinexPostgresRoot} 0750 postgres postgres -"
@@ -272,10 +214,18 @@ in
               enable = runtimeEnabled;
               autoSetup = runtimeEnabled;
               dataDir = "/var/lib/nats";
-              # JetStream on the dedicated NVMe cache partition so its
-              # sustained write load (message store + index compaction) does
-              # not compete with system and interactive I/O on the root volume.
-              storeDir = "/cache/nats/jetstream";
+              jetstreamMaxStore = "32G";
+              # The dedicated /cache NVMe was removed after sustained I/O
+              # failures. Keep JetStream under the normal NATS state root.
+              storeDir = "/var/lib/nats/jetstream";
+              killPolicy = {
+                # Give JetStream enough bounded time to close a
+                # production-sized store cleanly. Live stop evidence on
+                # 2026-05-03 showed the old 10s timeout SIGKILLed NATS
+                # during JetStream shutdown.
+                signal = "SIGTERM";
+                timeoutStopSec = "90s";
+              };
             };
 
             stateRoot = sinexStateRoot;
@@ -287,6 +237,13 @@ in
               port = databasePort;
               name = databaseName;
               user = databaseUser;
+              # Delay postgresql-setup until agenix has materialized the
+              # password file (no-op when localAuth = "trust").
+              setupWaitForPaths = lib.optional (
+                cfg.provisionDatabase
+                && databasePasswordFile != null
+                && config.services.sinex.database.localAuth != "trust"
+              ) databasePasswordFile;
             };
 
             core = {
@@ -305,8 +262,9 @@ in
             };
 
             lifecycle = {
-              # Full preflight can touch production-sized data and is an operator
-              # diagnostic, not a safe prerequisite for desktop activation.
+              # Full preflight can touch production-sized data and is an
+              # operator diagnostic, not a safe prerequisite for desktop
+              # activation.
               preflight.enable = false;
               maintenance.enable = runtimeEnabled;
               updates.enable = runtimeEnabled;
@@ -397,19 +355,36 @@ in
             };
 
             # Workstation runtime policy via upstream options.
-            # Replaces the per-attribute mkForce overrides this bridge
-            # used to scatter across runtimeServicePolicy and
-            # boundedRuntimeRestartPolicy.
+            # Sinex itself owns the wantedBy stripping, sinex-runtime.target
+            # wants graph, and deferred-start timer.
             runtime = {
               target = {
                 attachToMultiUser = false;
                 manualStartOnly = true;
+                # Postgres exists on this host solely to serve Sinex; gate
+                # it through sinex-runtime.target.
+                includeDatabase = databasePrepared;
+                extraAfter = [
+                  "multi-user.target"
+                  "graphical.target"
+                  "network-online.target"
+                ];
+              };
+              deferredStart = {
+                # Always define the timer when the runtime is enabled so its
+                # shape (5min delay, sinex-runtime.target unit) is
+                # introspectable; gate timers.target installation on the
+                # host's auto-start policy.
+                enable = runtimeEnabled;
+                autoStart = runtimeAutoStart;
+                delay = "5min";
+                accuracy = "15s";
               };
               restartOnSwitch = false;
               restartPolicy = {
                 # Bound failure loops at three retries / 10 minutes / 30s
                 # backoff so a stuck capture daemon stops generating
-                # NATS/Postgres pressure and becomes visible instead.
+                # NATS/Postgres pressure.
                 mode = "on-failure";
                 backoffSec = 30;
                 intervalSec = 600;
@@ -417,145 +392,50 @@ in
               };
             };
             bootstrap.restartPolicy = "no";
-            nats.killPolicy = {
-              # Give JetStream enough bounded time to close a production-sized
-              # store cleanly. Live stop evidence on 2026-05-03 showed the old
-              # 10s timeout SIGKILLed NATS during JetStream shutdown and left
-              # the unit failed even though the runtime was intentionally
-              # stopped.
-              signal = "SIGTERM";
-              timeoutStopSec = "90s";
-            };
           };
         };
       })
 
+      # Workstation policy that sinex itself does not own:
+      #   - clear the heavy-automaton MemoryMax/CPUQuota kill-fences (this
+      #     host prioritizes capture continuity over containment)
+      #   - declare RequiresMountsFor on /var/lib/sinex for postgresql so
+      #     activation waits for the mount when /var/lib/sinex is a separate
+      #     filesystem
+      #   - retitle sinex-runtime.target to reflect the host's automation
+      #     model
+      #   - drop workstation-civil scheduler bias from one-shot maintenance
+      #     timers and force their next-fire semantics
       (lib.mkIf runtimeEnabled {
-        # Sinex is a capture runtime, not a boot prerequisite for the desktop.
-        # The upstream module's runtime.target.attachToMultiUser=false +
-        # restartOnSwitch=false + restartPolicy options (set above) handle the
-        # six long-running runtime services; this block carries only what
-        # upstream cannot:
-        #   - workstation memory/IO budgets for NATS and PostgreSQL
-        #   - per-node MemoryMax/CPUQuota suppression for capture daemons
-        #   - bridge-side gating for non-sinex services (postgresql) and the
-        #     sinex one-shots (blob-init, tls-init, schema-apply, kitty-setup,
-        #     document-scan, nats-bootstrap, preflight) that upstream keeps
-        #     attached to multi-user.target
         systemd.services = lib.mkMerge [
-          # Per-node uncap (until upstream surfaces a node-resources option):
-          # workstation pressure concentrates at NATS/PostgreSQL where the
-          # bridge sets explicit caps below. Drop the per-daemon caps that
-          # upstream's resourceModule defaults pin on capture nodes,
-          # ingestd, and gateway.
-          (lib.genAttrs (uncappedRuntimeServices ++ restartableRuntimeServices) (
-            _: captureRuntimeServicePolicy
-          ))
-          # Bridge-gated services that aren't the six upstream-handled ones
-          # (postgresql/postgresql-setup/sinex-blob-init/sinex-tls-init/...).
-          (lib.genAttrs (lib.filter (
-            n:
-            !(builtins.elem n [
-              "sinex-ingestd"
-              "sinex-gateway"
-            ])
-          ) delayedRuntimeServices) (_: bridgeRuntimePolicy))
+          (lib.genAttrs cappedAppRuntimeServices (_: workstationResourcePolicy))
           {
-            sinex-document-scan = maintenanceServicePolicy "sinex-document-scan.service";
-
-            # Keep NATS bounded without forcing JetStream restore into swap.
-            # Live delayed-start verification on 2026-05-03 showed the old 1G
-            # cap pinned nats-server at the limit and pushed ~1.8G to swap.
-            # Later live startup restore/rebuild evidence on 2026-05-03 peaked
-            # just over 4G, so the high watermark must sit above that normal
-            # startup working set. IOWeight=10 keeps sustained JetStream I/O
-            # below interactive work without hard per-device throughput ceilings.
-            nats = lib.mkMerge [
-              bridgeRuntimePolicy
-              {
-                serviceConfig = {
-                  MemoryHigh = "5G";
-                  MemoryMax = "8G";
-                  IOWeight = 10;
-                };
-              }
-            ];
-
-            # PostgreSQL: nixpkgs module, not sinex; upstream Sinex options
-            # cannot gate it. Keep the bridge override.
-            postgresql = lib.mkMerge [
-              bridgeRuntimePolicy
-              {
-                unitConfig.PartOf = lib.mkAfter [ "sinex-runtime.target" ];
-                serviceConfig = {
-                  MemoryHigh = "8G";
-                  MemoryMax = "12G";
-                  IOWeight = 10;
-                };
-              }
-            ];
+            postgresql.unitConfig.RequiresMountsFor = [ sinexRuntimeRoot ];
           }
+          (lib.genAttrs maintenanceTimerServiceNames (_: {
+            restartIfChanged = false;
+            serviceConfig = {
+              Nice = lib.mkForce null;
+              CPUWeight = lib.mkForce null;
+              IOWeight = lib.mkForce null;
+              IOSchedulingClass = lib.mkForce null;
+              Slice = lib.mkForce null;
+              TimeoutStopSec = lib.mkDefault "15s";
+              ExecCondition = lib.mkForce null;
+            };
+          }))
         ];
-        # postgresql.target leaks into multi-user even with the runtime
-        # service's wantedBy stripped; suppress separately.
-        systemd.targets =
-          lib.genAttrs delayedRuntimeTargets (_: {
-            wantedBy = lib.mkForce [ ];
-          })
-          // {
-            sinex-runtime = {
-              # Augment the upstream-defined sinex-runtime.target with the
-              # workstation-specific description and the extra wants/after
-              # this host needs (the bridge-gated services above are not in
-              # the upstream's PartOf graph).
-              description = lib.mkForce "Delayed automatic Sinex runtime";
-              wants = delayedRuntimeUnits ++ [ "network-online.target" ];
-              after = [
-                "multi-user.target"
-                "graphical.target"
-                "network-online.target"
-              ];
-            };
-          };
-        systemd.timers = {
-          sinex-runtime = {
-            description = "Delay Sinex runtime startup until after boot";
-            wantedBy = lib.mkIf runtimeAutoStart [ "timers.target" ];
-            timerConfig = {
-              OnActiveSec = sinexRuntimeStartDelay;
-              AccuracySec = "15s";
-              Unit = "sinex-runtime.target";
-            };
-          };
-        }
-        // (lib.genAttrs sinexAutoTimers (_: {
-          wantedBy = lib.mkForce (lib.optionals runtimeAutoStart [ "sinex-runtime.target" ]);
-          unitConfig.PartOf = [ "sinex-runtime.target" ];
+        systemd.targets.sinex-runtime = {
+          description = lib.mkForce "Delayed automatic Sinex runtime";
+          # extraAfter declares ordering against network-online.target; pair
+          # it with wants so systemd doesn't emit an unfulfilled-ordering
+          # warning at evaluation time.
+          wants = [ "network-online.target" ];
+        };
+        systemd.timers = lib.genAttrs maintenanceTimerServiceNames (_: {
           timerConfig.Persistent = lib.mkForce false;
-        }));
-
-        # NATS JetStream lives on the /cache NVMe partition. Ensure the
-        # directory exists before the service starts so the auto-setup
-        # bootstrap doesn't race with fs init.
-        systemd.tmpfiles.rules = [
-          "d /cache/nats 0750 nats nats -"
-        ];
+        });
       })
-
-      (lib.mkIf
-        (
-          cfg.provisionDatabase
-          && databasePasswordFile != null
-          && config.services.sinex.database.localAuth != "trust"
-        )
-        {
-          # Delay postgresql-setup until agenix has materialized the password file.
-          systemd.services.postgresql-setup.unitConfig.ConditionPathIsReadable = [
-            databasePasswordFile
-          ];
-        }
-      )
-
     ]
   );
 }

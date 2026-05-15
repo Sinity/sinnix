@@ -8,8 +8,8 @@ set -euo pipefail
 # Renders recent entries, collects a new note via gum, then
 # forwards to the core rawlog appender.
 
-DEFAULT_REALM_ROOT=${REALM_ROOT:-/realm/project}
-KNOWLEDGEBASE_ROOT=${KNOWLEDGEBASE_ROOT:-${DEFAULT_REALM_ROOT}/knowledgebase}
+DEFAULT_DATA_ROOT=${REALM_DATA_ROOT:-/realm/data}
+KNOWLEDGEBASE_ROOT=${KNOWLEDGEBASE_ROOT:-${DEFAULT_DATA_ROOT}/knowledgebase}
 LOG_FILE=${RAWLOG_FILE:-${KNOWLEDGEBASE_ROOT}/logs.raw-log.md}
 LOG_DIR=$(dirname "$LOG_FILE")
 RAWLOG_BIN=${RAWLOG_BIN:-$HOME/.local/bin/rawlog}

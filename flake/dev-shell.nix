@@ -18,8 +18,6 @@
       commandRegistry = import ./command-registry.nix {
         inherit inputs pkgs system;
       };
-      resourceBudgets = import ../modules/lib/resource-budgets.nix;
-      developerBudget = resourceBudgets.developerWork;
       nix = "${pkgs.nix}/bin/nix";
       safeSudoPathPrefix = "${pkgs.coreutils}/bin";
       rebuildServicePath = lib.makeBinPath [
@@ -91,9 +89,6 @@
             --service-type=exec \
             --wait \
             --setenv=PATH="${rebuildServicePath}:$PATH" \
-            -p Slice=nix-build.slice \
-            -p CPUWeight=${toString developerBudget.cpuWeight} \
-            -p IOWeight=${toString developerBudget.ioWeight} \
             ${pkgs.nixos-rebuild}/bin/nixos-rebuild \
               ${action} \
               --flake "$flake_ref" \

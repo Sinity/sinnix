@@ -11,7 +11,6 @@
         "/"
         "/nix"
         "/persist"
-        "/cache"
         config.sinnix.paths.realmRoot
       ];
       optionsFor = mount: lib.attrByPath [ "fileSystems" mount "options" ] [ ] config;

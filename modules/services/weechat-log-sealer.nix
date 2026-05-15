@@ -59,12 +59,6 @@ mkServiceModule {
           Service = {
             Type = "oneshot";
             ExecStart = "${pkgs.python3}/bin/python3 ${scriptPath} ${ircRoot}";
-            Nice = 19;
-            IOSchedulingClass = "idle";
-            IOSchedulingPriority = 7;
-            # blake2b streaming is tiny in RAM (1 MiB chunks); cap anyway.
-            MemoryHigh = "256M";
-            MemoryMax = "512M";
             # Bound runtime so a stuck mount doesn't pin a stale unit.
             TimeoutStartSec = "10min";
           };

@@ -24,6 +24,9 @@
         "runtime"
       ];
     };
+    "cli.yt-polisher" = {
+      layers = [ "eval" ];
+    };
     "desktop.activitywatch" = {
       layers = [ "eval" ];
     };
@@ -127,28 +130,34 @@
   };
 
   services = {
+    "airvpn-seed" = {
+      layers = [ "eval" ];
+    };
     "below" = {
       layers = [
         "eval"
         "vm"
       ];
     };
+    "chatgpt-mcp" = {
+      layers = [ "eval" ];
+    };
     "hermes" = {
       layers = [ "eval" ];
     };
-    "network-monitor" = {
+    "lynchpin" = {
       layers = [ "eval" ];
+    };
+    "machine-telemetry" = {
+      layers = [
+        "eval"
+        "host"
+      ];
     };
     "polylogue" = {
       layers = [
         "eval"
         "vm"
-      ];
-    };
-    "power-watchdog" = {
-      layers = [
-        "eval"
-        "host"
       ];
     };
     "sentinel" = {

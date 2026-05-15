@@ -190,8 +190,8 @@ in
         };
         services = {
           "below".vm = [ "below-vm" ];
+          "machine-telemetry".host = [ "host-smoke-services" ];
           "polylogue".vm = [ "polylogue-vm" ];
-          "power-watchdog".host = [ "host-smoke-services" ];
           "sentinel".vm = [ "sentinel-vm" ];
           "sinex".build = [ "host-sinnix-prime-build" ];
           "terminal-capture" = {

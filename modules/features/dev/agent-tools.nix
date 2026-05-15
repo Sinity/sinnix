@@ -44,6 +44,24 @@ mkFeatureModule {
         ${lib.getExe forgePkg} zsh theme > "$out"
       '';
       sinnixCfg = config.sinnix;
+
+      jsonFormat = pkgs.formats.json { };
+      mcpRegistry = import ../../lib/mcp-registry.nix { inherit lib; };
+      claudeMcpServers = lib.mapAttrs mcpRegistry.renderClaudeServer (
+        mcpRegistry.selectClientServers "claude"
+      );
+      # Dedicated registry-driven MCP config consumed via `claude --mcp-config`.
+      # Claude Code 2.x does NOT read `mcpServers` from settings.json — only
+      # `.mcp.json` (project), `~/.claude.json` (user, managed by `claude mcp add`),
+      # or `--mcp-config <file>` recognise stdio servers. This file is the
+      # registry's connection point.
+      claudeMcpConfigFile = jsonFormat.generate "claude-mcp.json" {
+        mcpServers = claudeMcpServers;
+      };
+      claudeSettingsBase = builtins.fromJSON (
+        builtins.readFile (inputs.self + "/dots/claude/settings.json")
+      );
+      claudeSettingsFile = jsonFormat.generate "claude-settings.json" claudeSettingsBase;
       agentScopePrelude = ''
         run_agent_scoped() {
           if [[ -z "''${SINNIX_AGENT_SCOPED:-}" ]]; then
@@ -52,7 +70,7 @@ mkFeatureModule {
               scope_bin="$(command -v sinnix-scope 2>/dev/null || true)"
             fi
             if [[ -n "$scope_bin" && -x "$scope_bin" ]]; then
-              exec "$scope_bin" background -- ${pkgs.coreutils}/bin/env SINNIX_AGENT_SCOPED=1 "$@"
+              exec "$scope_bin" agent -- ${pkgs.coreutils}/bin/env SINNIX_AGENT_SCOPED=1 "$@"
             fi
           fi
 
@@ -130,7 +148,13 @@ mkFeatureModule {
             "claude/hooks/pretooluse-bash.sh".source = mkDotsFile "/claude/hooks/pretooluse-bash.sh";
             "claude/hooks/sessionstart-polylogue-recall.sh".source =
               mkDotsFile "/claude/hooks/sessionstart-polylogue-recall.sh";
-            "claude/settings.json".source = mkDotsFile "/claude/settings.json";
+            # Static settings.json fragment (permissions, hooks, plugins). MCP
+            # servers are NOT here because Claude Code 2.x ignores any
+            # `mcpServers` block in settings.json — they're delivered via
+            # `--mcp-config` from the wrapper instead (see ./claude-mcp.json).
+            "claude/settings.json".source = claudeSettingsFile;
+            # Registry-driven MCP config consumed by the claude wrapper.
+            "claude/mcp.json".source = claudeMcpConfigFile;
             "claude/CLAUDE.md".source = mkDotsFile "/claude/CLAUDE.md";
             "claude/world-model" = {
               source = mkDotsFile "/claude/world-model";
@@ -203,13 +227,19 @@ mkFeatureModule {
               CLAUDE_BIN="${claude-code}/bin/claude"
               REALM_DIR="${sinnixCfg.paths.realmRoot}"
               HOME_DIR="${config.home.homeDirectory}"
+              MCP_CONFIG="$HOME/.config/claude/mcp.json"
 
               ${agentScopePrelude}
 
+              mcp_args=()
+              if [ -r "$MCP_CONFIG" ]; then
+                mcp_args=(--mcp-config "$MCP_CONFIG")
+              fi
+
               if [ -d "$REALM_DIR" ]; then
-                run_agent_scoped "$CLAUDE_BIN" --add-dir "$REALM_DIR" "$HOME_DIR" "$@"
+                run_agent_scoped "$CLAUDE_BIN" "''${mcp_args[@]}" --add-dir "$REALM_DIR" "$HOME_DIR" "$@"
               else
-                run_agent_scoped "$CLAUDE_BIN" "$HOME_DIR" "$@"
+                run_agent_scoped "$CLAUDE_BIN" "''${mcp_args[@]}" "$HOME_DIR" "$@"
               fi
             '';
             executable = true;
@@ -224,6 +254,7 @@ mkFeatureModule {
               CLAUDE_BIN="${claude-code}/bin/claude"
               REALM_DIR="${sinnixCfg.paths.realmRoot}"
               HOME_DIR="${config.home.homeDirectory}"
+              MCP_CONFIG="$HOME/.config/claude/mcp.json"
 
               DEEPSEEK_KEY_FILE="/run/agenix/deepseek-api-key"
               if [ ! -r "$DEEPSEEK_KEY_FILE" ]; then
@@ -243,10 +274,15 @@ mkFeatureModule {
 
               ${agentScopePrelude}
 
+              mcp_args=()
+              if [ -r "$MCP_CONFIG" ]; then
+                mcp_args=(--mcp-config "$MCP_CONFIG")
+              fi
+
               if [ -d "$REALM_DIR" ]; then
-                run_agent_scoped "$CLAUDE_BIN" --add-dir "$REALM_DIR" "$HOME_DIR" "$@"
+                run_agent_scoped "$CLAUDE_BIN" "''${mcp_args[@]}" --add-dir "$REALM_DIR" "$HOME_DIR" "$@"
               else
-                run_agent_scoped "$CLAUDE_BIN" "$HOME_DIR" "$@"
+                run_agent_scoped "$CLAUDE_BIN" "''${mcp_args[@]}" "$HOME_DIR" "$@"
               fi
             '';
             executable = true;

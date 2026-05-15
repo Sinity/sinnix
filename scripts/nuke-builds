@@ -21,7 +21,6 @@ SYSTEM_UNITS=(
 )
 
 USER_UNITS=(
-  "polylogue-run.service"
   "polylogued.service"
   "polylogue-browser-capture.service"
 )

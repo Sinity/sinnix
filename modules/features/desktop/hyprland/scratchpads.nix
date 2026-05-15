@@ -119,9 +119,9 @@ let
       ];
     };
 
-    agent = {
-      class = "scratchpad-agent";
-      workspace = "scratch_agent";
+    agent2 = {
+      class = "scratchpad-agent2";
+      workspace = "scratch_agent2";
       size = {
         w = 0.90;
         h = 0.90;
@@ -129,9 +129,9 @@ let
       command = [
         "${pkgs.kitty}/bin/kitty"
         "--class"
-        "scratchpad-agent"
+        "scratchpad-agent2"
         "--title"
-        "Agent"
+        "Hermes-2"
       ];
     };
   };

@@ -1,0 +1,8 @@
+{
+  "name": "chrome-devtools-mcp-wrapper",
+  "private": true,
+  "version": "0.0.0",
+  "dependencies": {
+    "chrome-devtools-mcp": "0.25.0"
+  }
+}

@@ -170,11 +170,8 @@ in
         mode = "0750";
       } # 65 GB game library
 
-      # Nix user state
-      # ~/.cache/nix is intentionally not persisted. core.nix links it to
-      # /cache/nix/user/${username}: eval-cache-v6 and fetcher-cache files are
-      # rebuild-cheap SQLite/WAL churn, while keeping them on the cache NVMe
-      # reduces SATA contention with /nix and browser profile state.
+      # Nix user state. Eval/fetcher cache stays under ~/.cache/nix with the
+      # rest of XDG cache state now that the dedicated /cache NVMe is offline.
       ".local/share/nix" # trusted-settings.json (cachix substituters)
 
       # UX state

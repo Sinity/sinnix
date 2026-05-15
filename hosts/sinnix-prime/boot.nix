@@ -10,10 +10,10 @@
     loader = {
       systemd-boot = {
         enable = true;
-        # Keep only the recent experiment window in the boot menu.
-        # With the current generation at 336, 22 entries keeps >=315 and drops the
-        # stale UKI/BLS clutter from the earlier bring-up churn.
-        configurationLimit = 22;
+        memtest86.enable = true;
+        # Keep the boot menu readable and leave the deeper rollback window to
+        # the Nix profile itself.
+        configurationLimit = 10;
         extraInstallCommands = ''
           loader_conf="${config.boot.loader.efi.efiSysMountPoint}/loader/loader.conf"
           default_entry="$(${pkgs.gawk}/bin/awk '$1 == "default" { print $2; exit }' "$loader_conf")"
@@ -21,6 +21,30 @@
           if [[ -n "$default_entry" ]]; then
             ${config.systemd.package}/bin/bootctl set-default "$default_entry"
           fi
+
+          for entry in "${config.boot.loader.efi.efiSysMountPoint}"/loader/entries/nixos-generation-*.conf; do
+            [[ -e "$entry" ]] || continue
+
+            version_line="$(${pkgs.gawk}/bin/awk '$1 == "version" { sub(/^version[ \t]+/, ""); print; exit }' "$entry")"
+            generation="$(${pkgs.gawk}/bin/awk '$1 == "version" { print $3; exit }' "$entry")"
+            kernel="$(printf '%s\n' "$version_line" | ${pkgs.gnused}/bin/sed -n 's/.*(Linux \([^)]*\)).*/\1/p')"
+            built="$(printf '%s\n' "$version_line" | ${pkgs.gnused}/bin/sed -n 's/.*built on \([0-9:+ TZ-]*\).*/\1/p')"
+            if [[ -z "$built" ]]; then
+              built="$(${pkgs.coreutils}/bin/stat -c '%y' "$entry" | ${pkgs.coreutils}/bin/cut -d. -f1)"
+            fi
+
+            title="Sinnix gen $generation"
+            [[ -n "$built" ]] && title="$title - $built"
+            [[ -n "$kernel" ]] && title="$title - Linux $kernel"
+            ${pkgs.gnused}/bin/sed -i "s|^title .*|title $title|" "$entry"
+          done
+
+          # Earlier UKI experiments left hash-suffixed Type #2 entries in
+          # EFI/Linux. The current system uses BLS .conf entries under
+          # loader/entries, so remove the stale UKIs that make the boot menu
+          # show long opaque IDs.
+          ${pkgs.findutils}/bin/find "${config.boot.loader.efi.efiSysMountPoint}/EFI/Linux" \
+            -maxdepth 1 -type f -name 'nixos-generation-[0-9]*-*.efi' -delete 2>/dev/null || true
         '';
       };
       efi.canTouchEfiVariables = true;
@@ -76,4 +100,5 @@
   };
 
   hardware.enableRedistributableFirmware = true;
+  hardware.cpu.intel.updateMicrocode = true;
 }

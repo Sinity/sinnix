@@ -54,11 +54,11 @@ mkFeatureTest {
       }
       {
         assertion =
-          lib.hasInfix "--disable-features=WaylandWpColorManagerV1" chromeWrapper
+          lib.hasInfix "--disable-features=WaylandWpColorManagerV1,Vulkan,DefaultANGLEVulkan" chromeWrapper
           && !(lib.hasInfix "VaapiVideoDecoder" chromeWrapper)
           && !(lib.hasInfix "--disable-accelerated-video-decode" chromeWrapper)
           && !(lib.hasInfix "--disable-zero-copy" chromeWrapper);
-        message = "Chrome must keep video acceleration defaults while disabling only the Wayland color bug";
+        message = "Chrome must keep video acceleration defaults while disabling Wayland color/Vulkan GPU-reset bugs";
       }
       {
         assertion =

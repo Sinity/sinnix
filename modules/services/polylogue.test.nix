@@ -5,30 +5,13 @@
   hmFor,
   ...
 }:
-mkServiceTest {
-  name = "services-polylogue";
-  service = "polylogue";
-  assertions =
+let
+  commonAssertions =
     config:
     let
       hm = hmFor config;
-      unit = hm.systemd.user.services."polylogue-run".Unit or { };
-      service = hm.systemd.user.services."polylogue-run".Service or { };
-      daemonUnit = hm.systemd.user.services.polylogued.Unit or { };
       daemonService = hm.systemd.user.services.polylogued.Service or { };
       browserCaptureExists = builtins.hasAttr "polylogue-browser-capture" hm.systemd.user.services;
-      browserCapture = hm.systemd.user.services."polylogue-browser-capture".Service or { };
-      timer = hm.systemd.user.timers."polylogue-run".Timer or { };
-      execStart =
-        let
-          raw = service.ExecStart or [ ];
-        in
-        if builtins.isList raw then builtins.concatStringsSep " " raw else raw;
-      browserCaptureExecStart =
-        let
-          raw = browserCapture.ExecStart or [ ];
-        in
-        if builtins.isList raw then builtins.concatStringsSep " " raw else raw;
       daemonExecStart =
         let
           raw = daemonService.ExecStart or [ ];
@@ -36,30 +19,18 @@ mkServiceTest {
         if builtins.isList raw then builtins.concatStringsSep " " raw else raw;
     in
     [
-      (expect.hmUserServiceExists hm "polylogue-run" "Polylogue user service must exist")
       (expect.hmUserServiceExists hm "polylogued" "Polylogue daemon user service must exist")
-      (expect.hmUserTimerExists hm "polylogue-run" "Polylogue user timer must exist")
-      (expect.textContains execStart "/bin/polylogue --plain run acquire parse materialize render index"
-        "Polylogue catch-up service must run archive/product stages without unattended site publication"
-      )
-      (expect.textContains service.ExecStartPre "/bin/systemctl --user stop polylogued.service"
-        "Polylogue catch-up must stop the live daemon before writing the shared archive"
-      )
-      (expect.textContains service.ExecStopPost "/bin/systemctl --user start polylogued.service"
-        "Polylogue catch-up must restart the live daemon after success or failure"
-      )
       {
-        assertion =
-          builtins.match ".*sinnix-maintenance-gate.*polylogue-run\\.service.*" service.ExecCondition != null;
-        message = "Polylogue catch-up must use only the explicit maintenance-overlap gate";
+        assertion = !(builtins.hasAttr "polylogue-run" hm.systemd.user.services);
+        message = "Polylogue must not install a separate batch catch-up writer service";
+      }
+      {
+        assertion = !(builtins.hasAttr "polylogue-run" hm.systemd.user.timers);
+        message = "Polylogue must not install a batch catch-up timer";
       }
       (expect.textContains daemonExecStart "/bin/polylogued run --host 127.0.0.1 --port 8765"
         "Polylogue daemon must run the watcher/browser-capture command with the local receiver port"
       )
-      {
-        assertion = !(builtins.elem "polylogue-run.service" (daemonUnit.Wants or [ ]));
-        message = "Polylogue daemon must not start durable catch-up immediately";
-      }
       {
         assertion = !(lib.hasInfix "--no-browser-capture" daemonExecStart);
         message = "Polylogue daemon must own browser capture by default";
@@ -68,39 +39,66 @@ mkServiceTest {
         assertion = !browserCaptureExists;
         message = "Standalone browser-capture service must be opt-in when polylogued owns the receiver";
       }
-      (expect.attrPathEq unit [
-        "X-SwitchMethod"
-      ] "keep-old" "Polylogue catch-up must not run inline during Home Manager switches")
-      (expect.attrPathEq service [
-        "TimeoutStartSec"
-      ] "30min" "Polylogue catch-up must keep a bounded but realistic timeout")
       (expect.attrPathEq daemonService [
-        "Restart"
-      ] "on-failure" "Polylogue daemon must restart on failure")
-      (expect.attrPathEq service [
-        "MemoryHigh"
-      ] "8G" "Polylogue ingestion must retain a headroom-oriented memory high watermark")
-      (expect.attrPathEq daemonService [
-        "MemoryMax"
-      ] "4G" "Polylogue daemon must keep a runaway-only memory limit")
-      (expect.attrPathEq service [
-        "MemoryMax"
-      ] "16G" "Polylogue ingestion must retain a runaway-only hard memory limit")
-      (expect.attrPathEq service [
-        "IOWeight"
-      ] 1 "Polylogue ingestion must run at minimum cgroup I/O weight")
+          "Restart"
+        ] "on-failure" "Polylogue daemon must restart on failure")
       {
-        assertion = !(service ? IOReadBandwidthMax) && !(service ? IOWriteBandwidthMax);
-        message = "Polylogue ingestion must not use hard per-device I/O bandwidth caps";
+        assertion = !(daemonService ? MemoryHigh) && !(daemonService ? MemoryMax);
+        message = "Polylogue daemon must not carry local cgroup memory guardrails";
       }
-      (expect.attrPathEq timer [
-        "OnStartupSec"
-      ] "30min" "Polylogue timer must not run archive catch-up during interactive boot")
-      (expect.attrPathEq timer [
-        "OnUnitInactiveSec"
-      ] "1h" "Polylogue timer must be paced after durable catch-up completion, not realtime ingestion")
-      (expect.attrPathEq timer [
-        "Persistent"
-      ] false "Polylogue timer must not catch up missed runs immediately after boot")
+      {
+        assertion = !(daemonService ? IOReadIOPSMax) && !(daemonService ? IOReadBandwidthMax);
+        message = "Polylogue daemon must not carry local I/O caps";
+      }
+      {
+        assertion = !(daemonService ? CPUWeight);
+        message = "Polylogue daemon must not carry a local CPU cgroup weight";
+      }
+      {
+        assertion =
+          daemonService.Nice == 10
+          && daemonService.IOSchedulingClass == "idle"
+          && daemonService.IOWeight == 10;
+        message = "Polylogue daemon must run as a systemd-managed background I/O workload";
+      }
     ];
-}
+in
+[
+  (mkServiceTest {
+    name = "services-polylogue";
+    service = "polylogue";
+    assertions =
+      config:
+      let
+        hm = hmFor config;
+      in
+      commonAssertions config
+      ++ [
+        {
+          assertion = hm.systemd.user.services.polylogued.Install.WantedBy == [ "default.target" ];
+          message = "Polylogue daemon must start automatically by default";
+        }
+      ];
+  })
+  (mkServiceTest {
+    name = "services-polylogue-manual-start";
+    service = "polylogue";
+    extraModules = [
+      {
+        sinnix.services.polylogue.daemon.autoStart = false;
+      }
+    ];
+    assertions =
+      config:
+      let
+        hm = hmFor config;
+      in
+      commonAssertions config
+      ++ [
+        {
+          assertion = hm.systemd.user.services.polylogued.Install.WantedBy == [ ];
+          message = "Polylogue daemon autoStart=false must remove default user-session installation";
+        }
+      ];
+  })
+]

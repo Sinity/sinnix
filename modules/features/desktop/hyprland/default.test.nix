@@ -21,6 +21,7 @@ mkFeatureTest {
     let
       hm = hmFor config;
       binds = hm.wayland.windowManager.hyprland.settings.bind or [ ];
+      debug = hm.wayland.windowManager.hyprland.settings.debug or { };
       sudoRules = config.security.sudo.extraRules or [ ];
     in
     [
@@ -35,6 +36,11 @@ mkFeatureTest {
       {
         assertion = lib.hasInfix "exec uwsm start hyprland-uwsm.desktop" (hm.programs.zsh.loginExtra or "");
         message = "TTY Hyprland login must stay unwrapped by default";
+      }
+      {
+        assertion =
+          debug.disable_logs == true && debug.disable_time == true && debug.enable_stdout_logs == false;
+        message = "Hyprland debug logs must stay disabled outside targeted crash forensics";
       }
       {
         assertion = builtins.any (

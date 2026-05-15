@@ -180,18 +180,61 @@ if ! [[ "$MCP_CHILD_THRESHOLD" =~ ^[0-9]+$ ]]; then
   MCP_CHILD_THRESHOLD=2
 fi
 
+# ── Baseline state ────────────────────────────────────────────────────
+BASELINE_FILE="${SINNIX_BASELINE_FILE:-/var/lib/sinnix-sentinel/baselines.json}"
+
+read_baselines() {
+  if [ -r "$BASELINE_FILE" ] && jq -e . "$BASELINE_FILE" >/dev/null 2>&1; then
+    cat "$BASELINE_FILE"
+  else
+    echo '{}'
+  fi
+}
+
+write_baselines() {
+  local tmp="${BASELINE_FILE}.tmp"
+  printf '%s\n' "$1" > "$tmp" && mv "$tmp" "$BASELINE_FILE" || true
+}
+
+# Compute median and stdev from space-separated numbers via awk
+baseline_stats() {
+  # Input: space-separated numbers via stdin
+  # Output: "median stdev count"
+  awk '{
+    n=0; for(i=1;i<=NF;i++) if($i!=""){v[n++]=$i}
+    if(n==0){print "0 0 0"; exit}
+    asort(v)
+    if(n%2==1) median=v[int(n/2)+1]
+    else median=(v[n/2]+v[n/2+1])/2
+    sum=0; for(i=1;i<=n;i++) sum+=v[i]
+    mean=sum/n
+    sumsq=0; for(i=1;i<=n;i++) sumsq+=(v[i]-mean)^2
+    stdev=(n>1?sqrt(sumsq/(n-1)):0)
+    printf "%.2f %.2f %d", median, stdev, n
+  }'
+}
+
+# Append a value to a rolling key in baselines (keeps last 144 samples = 24h at 10min)
+baseline_append() {
+  local key="$1" value="$2" max_samples="${3:-144}"
+  local baselines
+  baselines=$(read_baselines)
+  local existing
+  existing=$(echo "$baselines" | jq -r --arg k "$key" '.[$k] // [] | join(" ")' 2>/dev/null || echo "")
+  local samples="$existing $value"
+  # Trim to max_samples
+  samples=$(echo "$samples" | awk -v max="$max_samples" '{for(i=1;i<=NF;i++) printf "%s%s", $i, (i<NF?" ":"")}' | awk -v max="$max_samples" '{
+    if(NF>max){for(i=NF-max+1;i<=NF;i++) printf "%s%s", $i, (i<NF?" ":"")}
+    else print $0
+  }')
+  local new_baselines
+  new_baselines=$(echo "$baselines" | jq --arg k "$key" --arg v "$samples" '.[$k] = ($v | split(" "))')
+  write_baselines "$new_baselines"
+}
+
 # ── 1. Hardware ──────────────────────────────────────────────────────
 $VERBOSE && printf '\n%s=== sinnix sentinel ===%s\n\n' "$BOLD" "$NC"
-$VERBOSE && printf '%sHardware:%s\n' "$BOLD" "$NC"
-
-# CPU Temp
-if [ -f /sys/class/thermal/thermal_zone0/temp ]; then
-  temp_c=$(( $(cat /sys/class/thermal/thermal_zone0/temp) / 1000 ))
-  if [ "$temp_c" -gt 85 ]; then record_check "hardware" "cpu_temp" "fail" "${temp_c}°C — overheating"
-  elif [ "$temp_c" -gt 70 ]; then record_check "hardware" "cpu_temp" "warn" "${temp_c}°C — high"
-  else record_check "hardware" "cpu_temp" "ok" "${temp_c}°C"
-  fi
-fi
+$VERBOSE && printf '\n%sHardware:%s\n' "$BOLD" "$NC"
 
 # SMART Status
 if command -v smartctl &>/dev/null; then
@@ -531,7 +574,183 @@ for target_repo in $target_repos; do
   fi
 done
 
-# ── 8. Journal ────────────────────────────────────────────────────────
+# ── 8. Memory ──────────────────────────────────────────────────────────
+$VERBOSE && printf '\n%sMemory:%s\n' "$BOLD" "$NC"
+
+mem_total_kb=$(awk '/MemTotal/{print $2}' /proc/meminfo 2>/dev/null || echo 0)
+mem_avail_kb=$(awk '/MemAvailable/{print $2}' /proc/meminfo 2>/dev/null || echo 0)
+swap_total_kb=$(awk '/SwapTotal/{print $2}' /proc/meminfo 2>/dev/null || echo 0)
+swap_free_kb=$(awk '/SwapFree/{print $2}' /proc/meminfo 2>/dev/null || echo 0)
+
+mem_total_gb=$(( mem_total_kb / 1024 / 1024 ))
+mem_avail_gb=$(( mem_avail_kb / 1024 / 1024 ))
+swap_used_gb=$(( (swap_total_kb - swap_free_kb) / 1024 / 1024 ))
+swap_total_gb=$(( swap_total_kb / 1024 / 1024 ))
+
+if [ "$mem_avail_gb" -lt 2 ]; then
+  record_check "memory" "available" "fail" "${mem_avail_gb}G available — OOM risk"
+  queue_notification "critical" "sentinel: memory critical — ${mem_avail_gb}G available"
+elif [ "$mem_avail_gb" -lt 4 ]; then
+  record_check "memory" "available" "warn" "${mem_avail_gb}G available of ${mem_total_gb}G"
+else
+  record_check "memory" "available" "ok" "${mem_avail_gb}G available of ${mem_total_gb}G"
+fi
+
+baseline_append "mem_avail_gb" "$mem_avail_gb"
+
+if [ "$swap_total_gb" -gt 0 ] && [ "$swap_used_gb" -gt 0 ]; then
+  swap_pct=$(( swap_used_gb * 100 / swap_total_gb ))
+  if [ "$swap_pct" -gt 75 ]; then
+    record_check "memory" "swap" "warn" "${swap_used_gb}G used of ${swap_total_gb}G (${swap_pct}%)"
+  else
+    record_check "memory" "swap" "ok" "${swap_used_gb}G used of ${swap_total_gb}G (${swap_pct}%)"
+  fi
+fi
+
+# ── 9. Load ───────────────────────────────────────────────────────────
+$VERBOSE && printf '\n%sLoad:%s\n' "$BOLD" "$NC"
+load_1m=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null || echo 0)
+load_5m=$(cut -d' ' -f2 /proc/loadavg 2>/dev/null || echo 0)
+load_15m=$(cut -d' ' -f3 /proc/loadavg 2>/dev/null || echo 0)
+
+baseline_append "load_1m" "$load_1m"
+
+# Compare against baseline
+load_baseline_vals=$(echo "$(read_baselines)" | jq -r '.load_1m // [] | join(" ")' 2>/dev/null || echo "")
+if [ -n "$load_baseline_vals" ]; then
+  load_stats=$(echo "$load_baseline_vals" | baseline_stats)
+  load_median=$(echo "$load_stats" | awk '{print $1}')
+  load_stdev=$(echo "$load_stats" | awk '{print $2}')
+  load_count=$(echo "$load_stats" | awk '{print $3}')
+
+  if [ "$load_count" -ge 6 ]; then
+    threshold=$(awk "BEGIN {print $load_median + 3 * $load_stdev}")
+    spike=$(awk "BEGIN {print ($load_1m > $threshold) ? 1 : 0}")
+    if [ "$spike" -eq 1 ]; then
+      record_check "load" "1m" "warn" "$load_1m (baseline ${load_median}±${load_stdev}, 3σ spike)"
+    else
+      record_check "load" "1m" "ok" "$load_1m (baseline ${load_median}±${load_stdev})"
+    fi
+  else
+    record_check "load" "1m" "ok" "$load_1m (building baseline: ${load_count} samples)"
+  fi
+else
+  record_check "load" "1m" "ok" "$load_1m (collecting baseline)"
+fi
+
+# ── 10. Processes ─────────────────────────────────────────────────────
+$VERBOSE && printf '\n%sProcesses:%s\n' "$BOLD" "$NC"
+
+proc_total=0
+proc_zombies=0
+for pid_dir in /proc/[0-9]*; do
+  [ -d "$pid_dir" ] || continue
+  proc_total=$((proc_total + 1))
+  state=$(awk '/^State:/{print $2}' "$pid_dir/status" 2>/dev/null || echo "")
+  case "$state" in
+    Z*|z*) proc_zombies=$((proc_zombies + 1)) ;;
+  esac
+done
+
+if [ "$proc_zombies" -gt 5 ]; then
+  record_check "processes" "zombies" "warn" "${proc_zombies} zombie processes"
+else
+  record_check "processes" "zombies" "ok" "${proc_zombies}"
+fi
+
+baseline_append "proc_total" "$proc_total"
+
+proc_baseline_vals=$(echo "$(read_baselines)" | jq -r '.proc_total // [] | join(" ")' 2>/dev/null || echo "")
+if [ -n "$proc_baseline_vals" ]; then
+  proc_stats=$(echo "$proc_baseline_vals" | baseline_stats)
+  proc_median=$(echo "$proc_stats" | awk '{print $1}')
+  proc_stdev=$(echo "$proc_stats" | awk '{print $2}')
+  proc_count=$(echo "$proc_stats" | awk '{print $3}')
+
+  if [ "$proc_count" -ge 6 ]; then
+    threshold=$(awk "BEGIN {print int($proc_median + 3 * $proc_stdev)}")
+    if [ "$proc_total" -gt "$threshold" ] && [ "$proc_stdev" != "0.00" ]; then
+      record_check "processes" "total" "warn" "$proc_total (baseline ${proc_median}±${proc_stdev}, explosion)"
+    else
+      record_check "processes" "total" "ok" "$proc_total (baseline ${proc_median}±${proc_stdev})"
+    fi
+  else
+    record_check "processes" "total" "ok" "$proc_total (building baseline: ${proc_count} samples)"
+  fi
+else
+  record_check "processes" "total" "ok" "$proc_total (collecting baseline)"
+fi
+
+# ── 11. Thermal ───────────────────────────────────────────────────────
+$VERBOSE && printf '\n%sThermal:%s\n' "$BOLD" "$NC"
+thermal_issues=0
+for zone in /sys/class/thermal/thermal_zone[0-9]*/temp; do
+  [ -f "$zone" ] || continue
+  zone_name=$(basename "$(dirname "$zone")")
+  temp_c=$(( $(cat "$zone") / 1000 ))
+  if [ "$temp_c" -gt 85 ]; then
+    thermal_issues=$((thermal_issues + 1))
+    record_check "thermal" "$zone_name" "fail" "${temp_c}°C — overheating"
+    queue_notification "critical" "sentinel: ${zone_name} at ${temp_c}°C"
+  elif [ "$temp_c" -gt 75 ]; then
+    thermal_issues=$((thermal_issues + 1))
+    record_check "thermal" "$zone_name" "warn" "${temp_c}°C — elevated"
+  fi
+done
+if [ "$thermal_issues" -eq 0 ]; then
+  temp0=$(( $(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null || echo 0) / 1000 ))
+  record_check "thermal" "all_zones" "ok" "all zones ≤75°C (zone0=${temp0}°C)"
+fi
+
+# ── 12. Disk Fill Rate ────────────────────────────────────────────────
+$VERBOSE && printf '\n%sDisk Fill Rate:%s\n' "$BOLD" "$NC"
+
+for mount_path in / /nix; do
+  mount_name=$(echo "$mount_path" | sed 's|/|_root|;s|^_||')
+  used_pct=$(df "$mount_path" --output=pcent 2>/dev/null | tail -1 | tr -dc '0-9' || echo 0)
+  baseline_append "disk_${mount_name}_pct" "$used_pct"
+
+  fill_vals=$(echo "$(read_baselines)" | jq -r --arg k "disk_${mount_name}_pct" '.[$k] // [] | join(" ")' 2>/dev/null || echo "")
+  fill_count=$(echo "$fill_vals" | wc -w)
+  if [ "$fill_count" -ge 12 ]; then
+    first_val=$(echo "$fill_vals" | awk '{print $1}')
+    last_val="$used_pct"
+    span_hours=$(awk "BEGIN {printf \"%.1f\", $fill_count / 6}")  # 6 samples/hour at 10min interval
+    delta_pct=$(awk "BEGIN {printf \"%.1f\", $last_val - $first_val}")
+    rate_per_day=$(awk "BEGIN {printf \"%.1f\", ($delta_pct / $span_hours) * 24}")
+    if [ "$(awk "BEGIN {print ($rate_per_day > 2) ? 1 : 0}")" -eq 1 ] && [ "$used_pct" -lt 95 ]; then
+      days_left=$(awk "BEGIN {printf \"%.0f\", (100 - $used_pct) / $rate_per_day}")
+      record_check "disk_rate" "$mount_name" "warn" "${used_pct}% used, filling at ${rate_per_day}%/day (~${days_left}d until full)"
+    elif [ "$(awk "BEGIN {print ($rate_per_day > 0.5) ? 1 : 0}")" -eq 1 ]; then
+      record_check "disk_rate" "$mount_name" "ok" "${used_pct}% used, ${rate_per_day}%/day (normal)"
+    else
+      record_check "disk_rate" "$mount_name" "ok" "${used_pct}% used, stable (${rate_per_day}%/day)"
+    fi
+  fi
+done
+
+# ── 13. Nix ────────────────────────────────────────────────────────────
+$VERBOSE && printf '\n%sNix:%s\n' "$BOLD" "$NC"
+nix_generations=$(sudo -n nix-env --list-generations --profile /nix/var/nix/profiles/system 2>/dev/null | wc -l || echo "?")
+record_check "nix" "generations" "ok" "${nix_generations} system generations"
+
+# Nix GC trigger: if root disk ≥92%, start nix-gc immediately
+root_pct=$(df / --output=pcent 2>/dev/null | tail -1 | tr -dc '0-9' || echo 0)
+if [ "$root_pct" -ge 92 ]; then
+  if systemctl is-active nix-gc.service >/dev/null 2>&1; then
+    record_check "nix" "gc_trigger" "warn" "root at ${root_pct}%, nix-gc already running"
+  else
+    if systemctl start nix-gc.service 2>/dev/null; then
+      queue_action_event "nix.gc_triggered" "critical" "nix-gc" "nix-gc.service" "system" "root at ${root_pct}%"
+      record_check "nix" "gc_trigger" "warn" "root at ${root_pct}% — triggered nix-gc"
+      queue_notification "critical" "sentinel: disk ${root_pct}% — triggered nix-gc"
+    else
+      record_check "nix" "gc_trigger" "fail" "root at ${root_pct}% — failed to trigger nix-gc"
+    fi
+  fi
+fi
+
+# ── 14. Journal ────────────────────────────────────────────────────────
 $VERBOSE && printf '\n%sJournal:%s\n' "$BOLD" "$NC"
 while IFS=$'\t' read -r pattern severity window; do
   # Robust journalctl call (limit to current boot for performance)
@@ -539,6 +758,50 @@ while IFS=$'\t' read -r pattern severity window; do
   status="ok"; [ "$count" -gt 0 ] && status="$severity"
   record_check "journal" "$pattern" "$status" "$count matches in last $window"
 done < <(echo "$POLICY" | jq -r '.journal[] | "\(.pattern)\t\(.severity)\t\(.window)"')
+
+# ── 15. Pressure Watchdog Feedback (Fix E1) ───────────────────────────
+# sinnix-pressure-watchdog logs structured "lacks_*" markers when units
+# under pressure are missing resource-class / control-group / PSI-window
+# metadata. Without a feedback loop these markers accumulate silently.
+#
+# This section reads recent journal entries from the watchdog, counts
+# distinct event kinds within a 5-minute window, and emits a sentinel
+# event + desktop notification when any kind exceeds threshold N=5. Acts
+# as an instrument first: surfaces the data so the operator can decide
+# whether to widen sinnix's slice declarations (Fix B/D in performance.nix
+# already cover the largest gaps; future units may still slip through).
+$VERBOSE && printf '\n%sPressure Watchdog:%s\n' "$BOLD" "$NC"
+watchdog_window="${SINNIX_WATCHDOG_WINDOW:-5 min ago}"
+watchdog_threshold="${SINNIX_WATCHDOG_THRESHOLD:-5}"
+watchdog_kinds=(
+  "sinex.invocation.lacks_declared_resource_class"
+  "sinex.invocation.lacks_control_group"
+  "sinex.invocation.lacks_io_bytes"
+  "sinex.invocation.lacks_psi_window"
+  "sinex.invocation.lacks_recorded_unit"
+  "systemd.unit.lacks_control_group"
+)
+watchdog_log="$(journalctl --identifier=sinnix-pressure-watchdog \
+  --since "$watchdog_window" --no-pager --quiet 2>/dev/null || true)"
+watchdog_total_breaches=0
+watchdog_breach_kinds=()
+for kind in "${watchdog_kinds[@]}"; do
+  count=$(printf '%s\n' "$watchdog_log" | grep -cF "$kind:" 2>/dev/null || echo 0)
+  count="${count//[^0-9]/}"
+  if [ -n "$count" ] && [ "$count" -ge "$watchdog_threshold" ]; then
+    watchdog_total_breaches=$((watchdog_total_breaches + 1))
+    watchdog_breach_kinds+=("$kind=$count")
+  fi
+done
+if [ "$watchdog_total_breaches" -gt 0 ]; then
+  detail="${watchdog_breach_kinds[*]}"
+  record_check "pressure" "watchdog_metadata_gaps" "warn" \
+    "$watchdog_total_breaches kind(s) breached in last $watchdog_window: $detail"
+  queue_notification "warning" "sentinel: pressure watchdog reports $watchdog_total_breaches metadata-gap kind(s) breached"
+else
+  record_check "pressure" "watchdog_metadata_gaps" "ok" \
+    "no kind exceeded $watchdog_threshold in last $watchdog_window"
+fi
 
 # ── Output ────────────────────────────────────────────────────────────
 overall="ok"; [ "$warn" -gt 0 ] && overall="warn"; [ "$fail" -gt 0 ] && overall="fail"

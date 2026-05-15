@@ -27,7 +27,6 @@ else
     system:sinex-blob-fsck.service
     system:sinex-dev-cache-prune.service
     system:sinex-document-scan.service
-    user:polylogue-run.service
   )
 fi
 

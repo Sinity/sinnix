@@ -12,7 +12,9 @@
       scriptRegistry = import ./scripts.nix { inherit inputs pkgs; };
       publicPackageNames = [
         "ccusage"
+        "lynchpin-cli"
         "lynchpin-python"
+        "mcp-chrome-devtools"
         "mcp-firecrawl"
         "normalize-agent-projects"
         "polylogue-cli"

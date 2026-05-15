@@ -55,7 +55,7 @@
         assertion =
           hasConf
           &&
-            builtins.match ".*volume /realm\n +snapshot_dir +\\.btrfs/snapshot\n +subvolume \\.\n +snapshot_preserve_min +6h\n +snapshot_preserve +24h.*" conf
+            builtins.match ".*volume /realm\n +snapshot_dir +\\.btrfs/snapshot\n +subvolume \\.\n +snapshot_preserve_min +30m\n +snapshot_preserve +6h.*" conf
             != null;
         message = "btrbk config must keep recent /realm snapshots in the .btrfs/snapshot layout";
       }
@@ -63,7 +63,7 @@
         assertion =
           hasConf
           &&
-            builtins.match ".*volume /persist\n +snapshot_dir +\\.btrfs/snapshot\n +subvolume \\.\n +snapshot_preserve_min +6h\n +snapshot_preserve +24h.*" conf
+            builtins.match ".*volume /persist\n +snapshot_dir +\\.btrfs/snapshot\n +subvolume \\.\n +snapshot_preserve_min +30m\n +snapshot_preserve +6h.*" conf
             != null;
         message = "btrbk config must keep recent /persist snapshots in the .btrfs/snapshot layout";
       }
@@ -92,71 +92,66 @@
         message = "Borg integrity checks must not catch up during system switches";
       }
       {
-        assertion = persistJob.startAt == "*-*-* 02:17:00" && realmJob.startAt == "*-*-* 03:17:00";
-        message = "Borg timers must run in overnight windows, not every four hours";
+        assertion =
+          persistJob.startAt == [ "*-*-* 02,06,10,14,18,22:20:00" ]
+          && realmJob.startAt == [ "*-*-* 03,07,11,15,19,23:20:00" ];
+        message = "Borg timers must stay on the staggered four-hour cadence";
       }
       {
         assertion = btrbkTimer.Persistent == false;
         message = "btrbk timer must not catch up missed runs immediately after boot";
       }
       {
-        assertion = btrbkTimer.OnCalendar == "*-*-* *:12/30:00";
-        message = "btrbk timer must not run high-frequency snapshots on the busiest clock edges";
+        assertion = btrbkTimer.OnCalendar == "*-*-* *:00/15:00";
+        message = "btrbk timer must keep the quarter-hour snapshot cadence";
       }
       {
         assertion =
-          btrbkService.IOWeight == 1
-          && btrbkService.CPUWeight == 1
-          && btrbkService.IOSchedulingClass == "idle"
-          && btrbkService.Slice == "sinnix-maintenance.slice"
-          && btrbkService.TimeoutStopSec == "15s";
-        message = "btrbk must run in the bounded low-priority maintenance class";
+          btrbkService.TimeoutStopSec == "15s"
+          && !(btrbkService ? IOWeight)
+          && !(btrbkService ? CPUWeight)
+          && !(btrbkService ? IOSchedulingClass)
+          && !(btrbkService ? Slice)
+          && !(btrbkService ? ExecCondition);
+        message = "btrbk must use the plain maintenance baseline without cgroup policy";
       }
       {
         assertion =
-          persistBorgService.IOWeight == 1
-          && realmBorgService.IOWeight == 1
-          && persistBorgService.CPUWeight == 1
-          && realmBorgService.CPUWeight == 1
-          && persistBorgService.IOSchedulingClass == "idle"
-          && realmBorgService.IOSchedulingClass == "idle"
-          && persistBorgService.Slice == "sinnix-maintenance.slice"
-          && realmBorgService.Slice == "sinnix-maintenance.slice"
-          && persistBorgService.TimeoutStopSec == "15s"
-          && realmBorgService.TimeoutStopSec == "15s";
-        message = "Borg backup jobs must run in the bounded low-priority maintenance class";
+          persistBorgService.TimeoutStopSec == "15s"
+          && realmBorgService.TimeoutStopSec == "15s"
+          && !(persistBorgService ? IOWeight)
+          && !(realmBorgService ? IOWeight)
+          && !(persistBorgService ? CPUWeight)
+          && !(realmBorgService ? CPUWeight)
+          && (!(persistBorgService ? IOSchedulingClass) || persistBorgService.IOSchedulingClass == null)
+          && (!(realmBorgService ? IOSchedulingClass) || realmBorgService.IOSchedulingClass == null)
+          && (!(persistBorgService ? CPUSchedulingPolicy) || persistBorgService.CPUSchedulingPolicy == null)
+          && (!(realmBorgService ? CPUSchedulingPolicy) || realmBorgService.CPUSchedulingPolicy == null)
+          && !(persistBorgService ? Slice)
+          && !(realmBorgService ? Slice)
+          && !(persistBorgService ? ExecCondition)
+          && !(realmBorgService ? ExecCondition);
+        message = "Borg backup jobs must use the plain maintenance baseline without cgroup policy";
       }
       {
         assertion =
-          borgCheckService.IOWeight == 1
-          && borgCheckService.CPUWeight == 1
-          && borgCheckService.IOSchedulingClass == "idle"
-          && borgCheckService.Slice == "sinnix-maintenance.slice"
-          && borgCheckService.TimeoutStopSec == "15s"
-          &&
-            builtins.match ".*sinnix-maintenance-gate.*borgbackup-check\\.service.*" borgCheckService.ExecCondition
-            != null
+          borgCheckService.TimeoutStopSec == "15s"
+          && !(borgCheckService ? IOWeight)
+          && !(borgCheckService ? CPUWeight)
+          && !(borgCheckService ? IOSchedulingClass)
+          && !(borgCheckService ? Slice)
+          && !(borgCheckService ? ExecCondition)
           && !(borgCheckService ? IOReadBandwidthMax)
           && !(borgCheckService ? IOWriteBandwidthMax);
-        message = "Borg integrity checks must stay low-priority with only the explicit maintenance-overlap gate";
+        message = "Borg integrity checks must use the plain maintenance baseline";
       }
       {
         assertion =
-          builtins.match ".*sinnix-maintenance-gate.*borgbackup-job-persist\\.service.*" persistBorgService.ExecCondition
-          != null
-          &&
-            builtins.match ".*sinnix-maintenance-gate.*borgbackup-job-realm\\.service.*" realmBorgService.ExecCondition
-            != null
-          && builtins.match ".*sinnix-maintenance-gate.*btrbk\\.service.*" btrbkService.ExecCondition != null;
-        message = "Borg and btrbk must skip rather than overlap another active maintenance unit";
-      }
-      {
-        assertion =
-          persistBorgService.MemoryHigh == "8G"
-          && persistBorgService.MemoryMax == "20G"
-          && realmBorgService.MemoryHigh == "8G"
-          && realmBorgService.MemoryMax == "20G";
-        message = "Borg backup jobs must have cgroup memory guardrails";
+          !(persistBorgService ? MemoryHigh)
+          && !(persistBorgService ? MemoryMax)
+          && !(realmBorgService ? MemoryHigh)
+          && !(realmBorgService ? MemoryMax);
+        message = "Borg backup jobs must not carry cgroup memory guardrails";
       }
       {
         assertion =

@@ -1,0 +1,221 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Run a workload with an immutable machine experiment manifest
+# runtimeInputs: python3 coreutils git jq linuxPackages.nvidia_x11 pciutils systemd util-linux
+"""Run one workload as a timestamped experiment unit.
+
+This runner does not change hardware state. It records planned treatment,
+observed machine/service/cache state, and the workload command around one
+invocation so Lynchpin can later join the run window against machine telemetry.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+import platform
+import socket
+import subprocess
+import sys
+import uuid
+from pathlib import Path
+from typing import Any
+
+SCHEMA = "machine-experiment-run-v1"
+
+
+def utc_now() -> str:
+    return dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat()
+
+
+def read_text(path: str | Path) -> str | None:
+    try:
+        return Path(path).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+
+
+def run_stdout(args: list[str], cwd: Path | None = None, timeout: float = 3.0) -> str | None:
+    try:
+        proc = subprocess.run(args, cwd=cwd, check=False, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip()
+
+
+def git_state(cwd: Path) -> dict[str, Any]:
+    root = run_stdout(["git", "rev-parse", "--show-toplevel"], cwd=cwd)
+    if not root:
+        return {"available": False}
+    root_path = Path(root)
+    return {
+        "available": True,
+        "root": str(root_path),
+        "head": run_stdout(["git", "rev-parse", "HEAD"], cwd=root_path),
+        "branch": run_stdout(["git", "branch", "--show-current"], cwd=root_path),
+        "dirty": (run_stdout(["git", "status", "--porcelain"], cwd=root_path) or "") != "",
+    }
+
+
+def cpu_state() -> dict[str, Any]:
+    governors = sorted(set(
+        value
+        for path in Path("/sys/devices/system/cpu").glob("cpu[0-9]*/cpufreq/scaling_governor")
+        if (value := read_text(path))
+    ))
+    max_freqs = sorted(set(
+        value
+        for path in Path("/sys/devices/system/cpu").glob("cpu[0-9]*/cpufreq/scaling_max_freq")
+        if (value := read_text(path))
+    ))
+    turbo_disabled = read_text("/sys/devices/system/cpu/intel_pstate/no_turbo")
+    return {
+        "governors": governors,
+        "scaling_max_freq_khz": [int(v) for v in max_freqs if v.isdigit()],
+        "turbo": None if turbo_disabled is None else turbo_disabled == "0",
+    }
+
+
+def gpu_state() -> dict[str, Any]:
+    out = run_stdout([
+        "nvidia-smi",
+        "--query-gpu=pstate,power.draw,clocks.sm,pcie.link.gen.current,pcie.link.width.current",
+        "--format=csv,noheader,nounits",
+    ])
+    if not out:
+        return {"available": False}
+    first = out.splitlines()[0]
+    parts = [item.strip() for item in first.split(",")]
+    return {
+        "available": True,
+        "pstate": parts[0] if len(parts) > 0 else None,
+        "power_w": float(parts[1]) if len(parts) > 1 and parts[1] else None,
+        "clock_sm_mhz": int(float(parts[2])) if len(parts) > 2 and parts[2] else None,
+        "pcie_gen": int(float(parts[3])) if len(parts) > 3 and parts[3] else None,
+        "pcie_width": int(float(parts[4])) if len(parts) > 4 and parts[4] else None,
+    }
+
+
+def systemd_state(units: list[str]) -> dict[str, dict[str, str]]:
+    result: dict[str, dict[str, str]] = {}
+    for unit in units:
+        out = run_stdout([
+            "systemctl",
+            "show",
+            unit,
+            "--no-pager",
+            "-p",
+            "ActiveState",
+            "-p",
+            "SubState",
+            "-p",
+            "MemoryCurrent",
+            "-p",
+            "CPUUsageNSec",
+            "-p",
+            "IOReadBytes",
+            "-p",
+            "IOWriteBytes",
+        ])
+        if not out:
+            continue
+        props = {}
+        for line in out.splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                props[key] = value
+        result[unit] = props
+    return result
+
+
+def observed_state(units: list[str]) -> dict[str, Any]:
+    return {
+        "boot_id": read_text("/proc/sys/kernel/random/boot_id"),
+        "kernel": platform.release(),
+        "nix_system": os.path.realpath("/run/current-system") if Path("/run/current-system").exists() else None,
+        "cpu": cpu_state(),
+        "gpu": gpu_state(),
+        "systemd": systemd_state(units),
+    }
+
+
+def load_json_arg(value: str | None) -> dict[str, Any]:
+    if not value:
+        return {}
+    path = Path(value)
+    text = path.read_text(encoding="utf-8") if path.exists() else value
+    parsed = json.loads(text)
+    if not isinstance(parsed, dict):
+        raise SystemExit("--planned-treatment must be a JSON object or path to one")
+    return parsed
+
+
+def write_json(path: Path, payload: dict[str, Any]) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", default=os.environ.get("MACHINE_EXPERIMENT_ROOT"))
+    parser.add_argument("--workload", required=True)
+    parser.add_argument("--service-profile", default="unspecified")
+    parser.add_argument("--cache-profile", default="unspecified")
+    parser.add_argument("--planned-treatment", help="JSON object or path")
+    parser.add_argument("--unit", action="append", default=[])
+    parser.add_argument("--note", action="append", default=[])
+    parser.add_argument("command", nargs=argparse.REMAINDER)
+    args = parser.parse_args()
+
+    command = args.command[1:] if args.command[:1] == ["--"] else args.command
+    if not command:
+        raise SystemExit("missing workload command after --")
+
+    host = socket.gethostname()
+    root = Path(args.root) if args.root else Path("/realm/data/captures/machine") / "experiments"
+    run_id = f"{dt.datetime.now(dt.UTC).strftime('%Y%m%dT%H%M%SZ')}-{args.workload}-{uuid.uuid4().hex[:8]}"
+    run_dir = root / run_id
+    run_dir.mkdir(parents=True, exist_ok=False)
+
+    units = args.unit or [
+        "machine-telemetry.service",
+        "below.service",
+        "borgbackup-job-realm.service",
+        "btrbk.service",
+        "nix-daemon.service",
+    ]
+    cwd = Path.cwd()
+    manifest: dict[str, Any] = {
+        "schema": SCHEMA,
+        "run_id": run_id,
+        "host": host,
+        "workload": args.workload,
+        "command": command,
+        "cwd": str(cwd),
+        "git": git_state(cwd),
+        "planned_treatment": load_json_arg(args.planned_treatment),
+        "service_profile": args.service_profile,
+        "cache_profile": args.cache_profile,
+        "notes": args.note,
+        "started_at": utc_now(),
+        "pre_state": observed_state(units),
+    }
+    write_json(run_dir / "started.json", manifest)
+
+    proc = subprocess.run(command, check=False)
+
+    manifest["ended_at"] = utc_now()
+    manifest["exit_status"] = proc.returncode
+    manifest["post_state"] = observed_state(units)
+    write_json(run_dir / "manifest.json", manifest)
+    print(run_dir)
+    return int(proc.returncode)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

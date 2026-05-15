@@ -279,7 +279,8 @@
         ROUTER_ADDR="${routerCfg.address}"
         ROUTER_USER="${routerCfg.sshUser}"
 
-        SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -o BatchMode=yes"
+        SSH_KEY="$HOME/.ssh/id_ed25519"
+        SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -i $SSH_KEY"
         SSH_CMD="${pkgs.openssh}/bin/ssh $SSH_OPTS"
         # -O: legacy SCP/rcp protocol — Dropbear on OpenWrt has no sftp-server
         SCP_CMD="${pkgs.openssh}/bin/scp -O $SSH_OPTS"
@@ -448,7 +449,8 @@
         set -euo pipefail
         ROUTER_ADDR="${routerCfg.address}"
         ROUTER_USER="${routerCfg.sshUser}"
-        SSH_OPTS="-o StrictHostKeyChecking=accept-new"
+        SSH_KEY="$HOME/.ssh/id_ed25519"
+        SSH_OPTS="-o StrictHostKeyChecking=accept-new -o IdentitiesOnly=yes -o IdentityAgent=none -i $SSH_KEY"
 
         if ! ${pkgs.openssh}/bin/ssh $SSH_OPTS -o BatchMode=yes -o ConnectTimeout=5 \
             ''${ROUTER_USER}@''${ROUTER_ADDR} 'echo ok' >/dev/null 2>&1; then

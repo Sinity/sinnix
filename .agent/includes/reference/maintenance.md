@@ -30,6 +30,16 @@ After structural changes:
 
 ## Recent Changes
 
+### 2026-05-07: Protected Agent Sessions and OOMD Kill Visibility
+
+- **Added**: `agent.slice` as a protected user-manager slice for Claude, Codex, Gemini, and Forge frontends
+- **Updated**: managed agent wrappers now launch through `sinnix-scope agent -- ...` instead of `background`
+- **Removed**: `systemd-oomd` PSI kills from build/background/nix-build slices after runtime evidence showed kills with ~24G MemAvailable and one victim at 4M current memory
+- **Kept**: build/background/nix-build slices remain weighted, latency-sheddable, and clearly attributed; actual low-memory intervention belongs to earlyoom
+- **Improved**: `sinnix-observe` now reports `agent.slice` as `interactive-agent`
+- **Added**: `scripts/sinnix-oomd-watch`, its oneshot service, and a polling timer to persist oomd/cgroup OOM events under `/realm/data/captures/syslog/oomd-events` and send desktop notifications without a resident journal reader
+- **Purpose**: preserve the agent and terminal recovery surface while avoiding PSI false-positive kills under low actual memory usage
+
 ### 2026-03-12: Launch-Trigger Early Capture and Lanzaboote Prep
 
 - **Improved**: `scripts/launch-trigger-capture` now starts and pre-creates live monitor outputs before taking the initial snapshot, and records the last completed stage in `status.env` / `run.log` so sub-second Hyprland-triggered resets leave a clearer boundary

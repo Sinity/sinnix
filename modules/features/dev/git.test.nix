@@ -13,6 +13,7 @@ mkFeatureTest {
       hm = hmFor config;
       gitSettings = hm.programs.git.settings;
       ignoreGlobal = hm.home.file.".config/git/ignore_global".text or "";
+      cleanupScript = hm.home.file.".local/bin/git-cleanup-merged-pr-branches".text or "";
       githubHelper = gitSettings."credential \"https://github.com\"".helper or "";
     in
     [
@@ -32,6 +33,12 @@ mkFeatureTest {
       (expect.mkAssertion (
         (gitSettings.rerere.enabled or false) == true
       ) "Git must enable rerere for repeated conflict reuse")
+      (expect.mkAssertion (
+        (gitSettings.alias.cleanup or null) == "!~/.local/bin/git-cleanup-merged-pr-branches"
+      ) "Git cleanup must route through the merged-PR cleanup helper")
+      (expect.textContains cleanupScript "gh pr list"
+        "Git cleanup helper must verify gone upstream branches against merged GitHub PRs"
+      )
       (expect.textContains githubHelper "/run/agenix/github-token"
         "GitHub credential helper must read from the managed agenix token path"
       )

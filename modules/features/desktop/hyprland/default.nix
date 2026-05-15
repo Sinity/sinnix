@@ -215,12 +215,9 @@ in
             };
 
             debug = {
-              disable_logs = false;
-              disable_time = false;
-              # Route Hyprland logs through systemd journal (already persisted
-              # to /realm/data/captures/syslog/journal/). Critical for post-
-              # mortem crash analysis — the file-based log in /run/user is tmpfs.
-              enable_stdout_logs = true;
+              disable_logs = true;
+              disable_time = true;
+              enable_stdout_logs = false;
             };
 
             decoration = {

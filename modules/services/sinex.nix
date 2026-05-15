@@ -2,9 +2,9 @@
 #
 # ─── STATE LAYOUT ─────────────────────────────────────────────────────────────
 #
-#   System service state: /realm/data/captures/sinex/state/
+#   System service state: /var/lib/sinex/state/
 #     Runs as the sinex system user on the /realm NVMe data volume. PostgreSQL
-#     production data lives beside it under /realm/data/captures/sinex/postgresql.
+#     production data lives beside it under /var/lib/sinex/postgresql.
 #
 #   Development state: /realm/project/sinex/.sinex/state/ (workspace-local)
 #     xtask (sinex dev runner) defaults to SINEX_STATE_DIR which points at

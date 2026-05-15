@@ -22,19 +22,13 @@ in
         experimental-features = [
           "nix-command"
           "flakes"
-          "cgroups"
           "fetch-tree"
           "pipe-operators"
           "auto-allocate-uids"
           "ca-derivations"
         ];
-        # Do not spell out `use-cgroups = false`: false is Nix's default, and
-        # restating it made later agents infer a deliberate local workaround
-        # that was not documented. A future `use-cgroups = true` trial is still
-        # worth testing because it may improve per-derivation attribution and
-        # cleanup, but it must prove that daemon builders remain under
-        # nix-build.slice policy, inherit the latency targets below, interact
-        # sanely with systemd-oomd, and do not make failed-build cleanup worse.
+        # Do not enable Nix cgroups while the workstation is on the simplified
+        # resource-policy baseline.
         accept-flake-config = true;
         trusted-users = [
           username
@@ -121,23 +115,17 @@ in
       daemonIOSchedClass = "idle";
       daemonIOSchedPriority = 6;
 
-      # Build sandbox scratch on the NVMe cache partition. Default would
-      # land in /tmp (tmpfs, RAM-backed) which is fast but capped at half
-      # of RAM — sinex's cargo workspace alone produces multi-GB target/
-      # trees during nix builds. Routing TMPDIR to NVMe keeps the build
-      # fast (Samsung 960 EVO ≈ 3 GB/s read, 1.5 GB/s write) while not
-      # consuming RAM that the rest of the workstation needs.
+      # Keep build sandbox scratch off /tmp. /tmp is RAM-backed and capped;
+      # /var/cache is root-btrfs backed and survives large derivation scratch
+      # trees without relying on the removed /cache NVMe.
       extraOptions = ''
-        build-dir = /cache/nix-build
-        # Shared sccache on the cache NVMe — allows Nix build sandboxes
-        # to reach the Rust compilation cache.
-        extra-sandbox-paths = /cache/sccache
+        build-dir = /var/cache/nix-build
       '';
 
       gc = {
         automatic = true;
         dates = "weekly";
-        options = "--delete-older-than 30d";
+        options = "--delete-generations +10";
       };
 
       # Daily store dedup runs while the GC stays weekly. Optimise is cheap
@@ -168,38 +156,12 @@ in
       pkgs.sccache
     ];
 
-    # Rust sccache on the /cache NVMe. RUSTC_WRAPPER applies to devshell
-    # builds; Nix builds opt in per-flake via extra-sandbox-paths.
+    # RUSTC_WRAPPER applies to devshell builds; sccache uses its default
+    # XDG cache location now that the dedicated /cache NVMe is offline.
     environment.variables = {
-      SCCACHE_DIR = "/cache/sccache";
       RUSTC_WRAPPER = "${pkgs.sccache}/bin/sccache";
       SCCACHE_MAX_CACHE_SIZE = "20G";
-      # Nix's user eval/fetcher cache is rebuild-cheap SQLite/WAL churn.
-      # Home Manager links ~/.cache/nix to /cache/nix/user/${username} below
-      # so repeated flake evals stop writing this cache to the persisted SATA
-      # profile path. Keep persistent Nix trust/auth state in ~/.local/share/nix.
-      # nix-direnv eval cache — recomputed on cd into flake projects.
-      # /cache NVMe makes eval-cache misses fast and avoids cluttering ~/.cache.
-      NIX_DIRENV_CACHE = "/cache/nix-direnv";
-      # Rust: move ~/.cargo (registry + git checkouts) to the cache NVMe.
-      # sccache handles compilation artifacts; CARGO_HOME covers deps.
-      CARGO_HOME = "/cache/cargo";
-      # pip: move package downloads off ~/.cache to the fast scratch disk.
-      PIP_CACHE_DIR = "/cache/pip";
     };
-
-    home-manager.users.${username} =
-      { config, ... }:
-      {
-        # Rebuildable Nix eval-cache-v6 and fetcher-cache state belongs on the
-        # cache NVMe, not under persisted home. `force` lets the first switch
-        # replace an old directory from the previous persistence policy with
-        # the out-of-store symlink.
-        home.file.".cache/nix" = {
-          source = config.lib.file.mkOutOfStoreSymlink "/cache/nix/user/${username}";
-          force = true;
-        };
-      };
 
     services.xserver.xkb.layout = "pl";
 
@@ -231,13 +193,7 @@ in
           to = 1764;
         }
       ];
-      allowedUDPPortRanges = [
-        {
-          from = 60000;
-          to = 61000;
-        }
-      ]
-      ++ lib.optionals isDesktop [
+      allowedUDPPortRanges = lib.optionals isDesktop [
         {
           from = 1714;
           to = 1764;
@@ -247,20 +203,12 @@ in
 
     systemd = {
       tmpfiles.rules = lib.mkAfter ([
-        "d /cache/sccache 0755 ${username} users -"
-        "d /cache/nix 0755 root root -"
-        "d /cache/nix/user 0755 root root -"
-        "d /cache/nix/user/${username} 0755 ${username} users -"
-        "d /cache/nix-direnv 0755 ${username} users -"
-        "d /cache/cargo 0755 ${username} users -"
-        "d /cache/pip 0755 ${username} users -"
-        "d /cache/sinex 0755 ${username} users -"
+        "d /var/cache/nix-build 0755 root root -"
         "d ${paths.realmRoot} 0755 root root -"
         "d ${paths.outerRealm} 0755 root root -"
-        "d ${paths.neoOuterRealm} 0755 root root -"
         "d ${paths.outerRealm}/inbox 0755 ${username} users -"
-        "d ${paths.dataRoot} 0755 ${username} users -"
-        "d ${paths.capturesRoot} 0755 ${username} users -"
+        "d ${paths.dataRoot} 0755 root root -"
+        "d ${paths.capturesRoot} 0755 root root -"
         "d ${paths.capturesRoot}/shell 0755 ${username} users -"
         "d ${paths.capturesRoot}/shell/zsh 0700 ${username} users -"
         "d ${paths.capturesRoot}/comms 0755 ${username} users -"
@@ -279,44 +227,6 @@ in
         "d ${paths.exportsRoot}/lastpass 0755 ${username} users -"
         "d ${paths.exportsRoot}/lastpass/raw 0755 ${username} users -"
       ]);
-
-      services.sinex-dev-cache-prune = {
-        description = "Prune stale Sinex development cache artifacts";
-        serviceConfig = {
-          Type = "oneshot";
-          Nice = 19;
-          IOSchedulingClass = "idle";
-          ExecStart = pkgs.writeShellScript "sinex-dev-cache-prune" ''
-            set -euo pipefail
-
-            cache_root="/cache/sinex"
-            [ -d "$cache_root" ] || exit 0
-
-            # Preserve incremental build performance for active worktrees: only
-            # remove whole checkout-scoped cache roots that direnv has not
-            # marked as used recently. Do not shave individual object files out
-            # of an otherwise hot Cargo target.
-            ${pkgs.findutils}/bin/find "$cache_root" -xdev -mindepth 2 -maxdepth 2 \
-              -name .sinnix-last-used -type f -mtime +7 -print0 \
-              | while IFS= read -r -d "" marker; do
-                checkout_cache="$(dirname "$marker")"
-                case "$checkout_cache" in
-                  "$cache_root"/*) rm -rf --one-file-system "$checkout_cache" ;;
-                esac
-              done
-            ${pkgs.findutils}/bin/find "$cache_root" -xdev -mindepth 1 -type d -empty -delete
-          '';
-        };
-      };
-
-      timers.sinex-dev-cache-prune = {
-        wantedBy = [ "timers.target" ];
-        timerConfig = {
-          OnCalendar = "daily";
-          Persistent = false;
-          RandomizedDelaySec = "30m";
-        };
-      };
     };
 
     services.dbus.implementation = "broker";

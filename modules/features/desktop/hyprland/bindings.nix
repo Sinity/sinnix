@@ -61,7 +61,7 @@ in
 
     # F-key bindings
     ", F3, exec, asbl-no-moar once --mode invert --duration 0.05"
-    ", F4, exec, uwsm app -- ${script "toggle-scratch"} agent"
+    ", F5, exec, uwsm app -- ${script "toggle-scratch"} agent2"
     ", F6, exec, uwsm app -- ${script "toggle-scratch"} weechat"
     ", F8, exec, uwsm app -- ${script "toggle-scratch"} rawlog"
     ", F9, exec, sudo -n ${scriptPkgs.nuke-builds}/bin/nuke-builds"

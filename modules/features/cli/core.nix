@@ -56,11 +56,6 @@ mkFeatureModule {
           JournalSizeMax = "8M";
         };
       };
-      systemd.services."systemd-coredump@".serviceConfig = {
-        MemoryHigh = "256M";
-        MemoryMax = "512M";
-        MemorySwapMax = 0;
-      };
       services.atd.enable = true;
 
       # Disable GNOME keyring - using GPG agent for SSH key management instead
@@ -101,6 +96,7 @@ mkFeatureModule {
               speedtest-cli
               stress-ng
               glances
+              fio
             ]
             ++ lib.filter (p: p != null) [
               (pkgs.tasksh or null)
@@ -150,7 +146,7 @@ mkFeatureModule {
                 /realm/project/reboot-no-more) printf '%s\n' rust-project ;;
                 /realm/project/knowledge-extract) printf '%s\n' python-project ;;
                 /realm/project/pwrank) printf '%s\n' web-project ;;
-                /realm/project/knowledgebase) printf '%s\n' data-project ;;
+                /realm/data/knowledgebase) printf '%s\n' data-project ;;
                 /realm/project/*)
                   if [ -e "$project_root/flake.nix" ] \
                     || [ -e "$project_root/Cargo.toml" ] \
@@ -181,28 +177,6 @@ mkFeatureModule {
               printf '%s' "$next"
             }
 
-            # Host-local cache policy for portable project devshells.
-            #
-            # Projects should consume these generic env vars without knowing
-            # Sinnix device paths. This keeps /cache routing in Sinnix while
-            # leaving the project flakes portable on other machines.
-            _sinnix_project_cache_setup() {
-              local project_root
-              project_root="$(_sinnix_project_root)" || return 0
-
-              case "$project_root" in
-                /realm/project/sinex | /realm/project/sinex-*)
-                  if [ -d /cache/sinex ]; then
-                    local checkout_hash
-                    checkout_hash="$(printf '%s' "$project_root" | sha256sum | cut -c1-12)"
-                    export SINEX_DEV_CACHE_ROOT="/cache/sinex/$checkout_hash"
-                    mkdir -p "$SINEX_DEV_CACHE_ROOT"
-                    touch "$SINEX_DEV_CACHE_ROOT/.sinnix-last-used" 2>/dev/null || true
-                  fi
-                  ;;
-              esac
-            }
-
             _sinnix_write_scope_wrapper() {
               local wrapper="$1"
               cat > "$wrapper" <<'SINNIX_SCOPE_WRAPPER'
@@ -216,13 +190,43 @@ mkFeatureModule {
               *) class="build" ;;
             esac
 
+            _sinnix_scope_path_without_dir() {
+              local drop_dir="$1"
+              local input_path="$2"
+              local old_ifs="$IFS"
+              local part
+              local next=""
+              IFS=:
+              for part in $input_path; do
+                if [ "$part" = "$drop_dir" ]; then
+                  continue
+                fi
+                if [ -z "$next" ]; then
+                  next="$part"
+                else
+                  next="$next:$part"
+                fi
+              done
+              IFS="$old_ifs"
+              printf '%s' "$next"
+            }
+
+            wrapper_dir="''${SINNIX_SCOPE_WRAPPER_DIR:-}"
+            if [ -z "$wrapper_dir" ]; then
+              wrapper_dir="$(cd -P -- "$(dirname -- "$0")" && pwd)"
+            fi
+            export PATH="$(_sinnix_scope_path_without_dir "$wrapper_dir" "''${SINNIX_SCOPE_ORIGINAL_PATH:-$PATH}")"
+
             if [ -n "''${SINNIX_SCOPE_WRAPPER_ACTIVE:-}" ]; then
-              export PATH="''${SINNIX_SCOPE_ORIGINAL_PATH:-$PATH}"
-              exec "$cmd" "$@"
+              cmd_path="$(command -v -- "$cmd" 2>/dev/null || true)"
+              if [ -z "$cmd_path" ]; then
+                echo "sinnix-scope wrapper: unable to locate unwrapped $cmd" >&2
+                exit 127
+              fi
+              exec "$cmd_path" "$@"
             fi
 
             export SINNIX_SCOPE_WRAPPER_ACTIVE=1
-            export PATH="''${SINNIX_SCOPE_ORIGINAL_PATH:-$PATH}"
 
             scope_bin="''${SINNIX_SCOPE_BIN:-}"
             if [ -z "$scope_bin" ]; then
@@ -341,6 +345,7 @@ mkFeatureModule {
               done
 
               export SINNIX_SCOPE_ORIGINAL_PATH="$(_sinnix_path_without "$wrapper_dir")"
+              export SINNIX_SCOPE_WRAPPER_DIR="$wrapper_dir"
               export PATH="$SINNIX_SCOPE_ORIGINAL_PATH"
               if declare -F PATH_add >/dev/null 2>&1; then
                 PATH_add "$wrapper_dir"
@@ -350,8 +355,6 @@ mkFeatureModule {
               export SINNIX_SCOPE_WRAPPER_PROJECT="$project_kind"
               export SINNIX_SCOPE_WRAPPER_PROJECT_ROOT="$project_root"
             }
-
-            _sinnix_project_cache_setup
 
             if declare -F use_flake >/dev/null 2>&1 && ! declare -F _sinnix_original_use_flake >/dev/null 2>&1; then
               eval "$(declare -f use_flake | sed '1s/use_flake/_sinnix_original_use_flake/')"

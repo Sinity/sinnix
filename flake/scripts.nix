@@ -87,31 +87,43 @@ let
       };
     };
 
+  polylogueSrc = inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.default;
+
   externalPackages = {
     lynchpin-python = pkgs.writeShellScriptBin "lynchpin-python" ''
       set -euo pipefail
       exec ${inputs.lynchpin.packages.${pkgs.stdenv.hostPlatform.system}.api-python}/bin/python "$@"
     '';
 
-    polylogue-cli = mkSanitizedPythonWrappers {
-      name = "polylogue-cli";
+    lynchpin-cli = mkSanitizedPythonWrappers {
+      name = "lynchpin-cli";
       commands = {
-        polylogue = "${inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.default}/bin/polylogue";
-        polylogue-mcp = "${
-          inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.default
-        }/bin/polylogue-mcp";
+        lynchpin-mcp = "${
+          inputs.lynchpin.packages.${pkgs.stdenv.hostPlatform.system}.default
+        }/bin/lynchpin-mcp";
       };
     };
 
-    polylogue-python = mkSanitizedPythonWrapper {
-      name = "polylogue-python";
-      target = "${inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.api-python}/bin/python";
-    };
+    # polylogue's own postFixup already wraps all CLI binaries and the api-python
+    # interpreter with PYTHONPATH/PYTHONHOME/… unset. Use symlink trees to expose
+    # only the intended commands per package.
+    polylogue-cli = pkgs.runCommand "polylogue-cli" { } ''
+      mkdir -p "$out/bin"
+      ln -s "${polylogueSrc}/bin/polylogue" "$out/bin/polylogue"
+      ln -s "${polylogueSrc}/bin/polylogue-mcp" "$out/bin/polylogue-mcp"
+    '';
 
-    polylogued = mkSanitizedPythonWrapper {
-      name = "polylogued";
-      target = "${inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.default}/bin/polylogued";
-    };
+    polylogue-python = pkgs.runCommand "polylogue-python" { } ''
+      mkdir -p "$out/bin"
+      ln -s "${
+        inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.api-python
+      }/bin/python" "$out/bin/polylogue-python"
+    '';
+
+    polylogued = pkgs.runCommand "polylogued" { } ''
+      mkdir -p "$out/bin"
+      ln -s "${polylogueSrc}/bin/polylogued" "$out/bin/polylogued"
+    '';
 
     mcp-firecrawl = mkNodeCliPackage {
       pname = "mcp-firecrawl";
@@ -120,6 +132,15 @@ let
       packagePath = "firecrawl-mcp";
       entrypoint = "dist/index.js";
       npmDepsHash = "sha256-bz3EVlVQNOeS5g9qvO1+5OIcMNxVQ+oLrwA9j9ZmqEY=";
+    };
+
+    mcp-chrome-devtools = mkNodeCliPackage {
+      pname = "mcp-chrome-devtools";
+      version = "0.25.0";
+      src = ./npm/chrome-devtools-mcp;
+      packagePath = "chrome-devtools-mcp";
+      entrypoint = "build/src/bin/chrome-devtools-mcp.js";
+      npmDepsHash = "sha256-yGbzAtsbFBilXwTBL+dXkH2NM6tzOu7wnowE/z9WwQo=";
     };
 
     ccusage = mkNodeCliPackage {

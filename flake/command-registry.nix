@@ -7,8 +7,6 @@ let
   lib = pkgs.lib;
   scriptPkgs = (import ./scripts.nix { inherit inputs pkgs; }).packageSet;
   checkTiers = import ./check-tiers.nix { inherit lib; };
-  resourceBudgets = import ../modules/lib/resource-budgets.nix;
-  developerBudget = resourceBudgets.developerWork;
   rebuildServicePath = lib.makeBinPath [
     pkgs.coreutils
     pkgs.findutils
@@ -145,26 +143,28 @@ let
     }
 
     need_active below.service
-    need_active power-watchdog.service
-    need_active transmission.service
+    need_active machine-telemetry.service
 
-    sensors_csv="/realm/data/captures/power-watchdog/sensors.csv"
-    [ -s "$sensors_csv" ]
+    telemetry_db="/realm/data/captures/machine/telemetry.sqlite"
+    [ -s "$telemetry_db" ]
 
     now="$(${pkgs.coreutils}/bin/date +%s)"
-    sensors_mtime="$(${pkgs.coreutils}/bin/stat -c %Y "$sensors_csv")"
-    if [ $((now - sensors_mtime)) -gt 120 ]; then
-      echo "power-watchdog output is stale: $sensors_csv" >&2
+    latest_sample="$(${pkgs.sqlite}/bin/sqlite3 "$telemetry_db" "SELECT COALESCE(MAX(strftime('%s', observed_at)), 0) FROM metric_sample;")"
+    if [ $((now - latest_sample)) -gt 120 ]; then
+      echo "machine telemetry output is stale: $telemetry_db" >&2
       exit 1
     fi
 
     ${pkgs.findutils}/bin/find /var/log/below/store -type f | ${pkgs.gnugrep}/bin/grep -q .
 
-    ${pkgs.curl}/bin/curl -sS -D "$headers_file" -o "$body_file" \
-      http://127.0.0.1:9091/transmission/rpc || true
-    ${pkgs.gnugrep}/bin/grep -q '409 Conflict' "$headers_file"
-    session_id="$(${pkgs.gawk}/bin/awk -F': ' '/X-Transmission-Session-Id/ {print $2}' "$headers_file" | ${pkgs.coreutils}/bin/tr -d '\r')"
-    [ -n "$session_id" ]
+    session_id="inactive"
+    if [ "$(${pkgs.systemd}/bin/systemctl is-active transmission.service)" = "active" ]; then
+      ${pkgs.curl}/bin/curl -sS -D "$headers_file" -o "$body_file" \
+        http://127.0.0.1:9091/transmission/rpc || true
+      ${pkgs.gnugrep}/bin/grep -q '409 Conflict' "$headers_file"
+      session_id="$(${pkgs.gawk}/bin/awk -F': ' '/X-Transmission-Session-Id/ {print $2}' "$headers_file" | ${pkgs.coreutils}/bin/tr -d '\r')"
+      [ -n "$session_id" ]
+    fi
 
     printf 'services smoke ok\nsession_id=%s\n' "$session_id" > "$artifact_dir/summary.txt"
     echo "Host service smoke passed."
@@ -341,9 +341,6 @@ in
           --service-type=exec \
           --wait \
           --setenv=PATH="${rebuildServicePath}:$PATH" \
-          -p Slice=nix-build.slice \
-          -p CPUWeight=${toString developerBudget.cpuWeight} \
-          -p IOWeight=${toString developerBudget.ioWeight} \
           -p Nice=10 \
           ${pkgs.nixos-rebuild}/bin/nixos-rebuild test --flake "path:$_invoke_flake_dir#sinnix-prime" \
           --max-jobs "$rebuild_jobs" \
@@ -371,9 +368,6 @@ in
           --service-type=exec \
           --wait \
           --setenv=PATH="${rebuildServicePath}:$PATH" \
-          -p Slice=nix-build.slice \
-          -p CPUWeight=${toString developerBudget.cpuWeight} \
-          -p IOWeight=${toString developerBudget.ioWeight} \
           -p Nice=10 \
           ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --flake "path:$_invoke_flake_dir#sinnix-prime" \
           --max-jobs "$rebuild_jobs" \
@@ -390,11 +384,8 @@ in
           echo "Error: This command must be run as root (use 'sudo nix run .#clean')"
           exit 1
         fi
-        echo "Removing old system generations..."
-        if ! nix profile wipe-history --profile /nix/var/nix/profiles/system --older-than 30d >/dev/null 2>&1; then
-          echo "nix profile wipe-history unavailable, falling back to nix-env"
-          nix-env --delete-generations old --profile /nix/var/nix/profiles/system
-        fi
+        echo "Keeping the last 10 system generations..."
+        nix-env --delete-generations +10 --profile /nix/var/nix/profiles/system
 
         echo "Optimizing nix store..."
         nix store optimise

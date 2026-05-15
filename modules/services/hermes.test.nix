@@ -37,6 +37,9 @@ mkServiceTest {
       (expect.textContainsAll configText [
         "default: deepseek-v4-pro"
         "provider: deepseek"
+        "max_snapshots: 1000000"
+        "approvals:"
+        "max_turns: 1000000"
         "model: gpt-5.5"
         "cwd: /realm/project"
         "mcp_servers:"

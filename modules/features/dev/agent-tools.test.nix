@@ -69,14 +69,14 @@ mkFeatureTest {
         ''scope_bin="''
         "/bin/sinnix-scope"
         "command -v sinnix-scope"
-        ''"$scope_bin" background --''
+        ''"$scope_bin" agent --''
       ] "Claude wrapper must use the shared Sinnix placement helper with a runtime fallback")
       (expect.hmFileExists hm ".local/bin/deepseek" "DeepSeek wrapper must exist")
       (expect.hmFileTextContainsAll hm ".local/bin/deepseek" [
         ''scope_bin="''
         "/bin/sinnix-scope"
         "command -v sinnix-scope"
-        ''"$scope_bin" background --''
+        ''"$scope_bin" agent --''
       ] "DeepSeek wrapper must use the shared Sinnix placement helper with a runtime fallback")
       {
         assertion =
@@ -94,7 +94,7 @@ mkFeatureTest {
         ''scope_bin="''
         "/bin/sinnix-scope"
         "command -v sinnix-scope"
-        ''"$scope_bin" background --''
+        ''"$scope_bin" agent --''
       ] "Codex wrapper must use the shared Sinnix placement helper with a runtime fallback")
       (expect.hmFileTextNotMatches hm ".local/bin/codex" ".*render-agents.*"
         "Codex wrapper must not render AGENTS on every launch"
@@ -109,7 +109,7 @@ mkFeatureTest {
         ''scope_bin="''
         "/bin/sinnix-scope"
         "command -v sinnix-scope"
-        ''"$scope_bin" background --''
+        ''"$scope_bin" agent --''
       ] "Forge wrapper must use the shared Sinnix placement helper with a runtime fallback")
       (expect.activationExists hm "renderGlobalForgeAgents"
         "Global Forge AGENTS render activation must exist"
@@ -164,7 +164,7 @@ mkFeatureTest {
         ''scope_bin="''
         "/bin/sinnix-scope"
         "command -v sinnix-scope"
-        ''"$scope_bin" background --''
+        ''"$scope_bin" agent --''
       ] "Gemini wrapper must use the shared Sinnix placement helper with a runtime fallback")
       (expect.hmFileTextNotMatches hm ".local/bin/gemini" ".*render-agents.*"
         "Gemini wrapper must not render instructions on every launch"

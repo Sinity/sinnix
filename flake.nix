@@ -56,9 +56,16 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Private repo — fetch via ssh (relies on the user's ssh-agent).
+    yt-polisher = {
+      url = "git+ssh://git@github.com/Sinity/yt-polisher.git?ref=master";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     lynchpin = {
       url = "git+file:///realm/project/sinity-lynchpin?ref=master";
       inputs.nixpkgs.follows = "nixpkgs";
+      inputs.polylogueSrc.follows = "polylogue";
     };
 
     # Sinex is sourced from GitHub so system deployments follow reviewed upstream

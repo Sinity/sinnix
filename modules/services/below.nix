@@ -4,10 +4,9 @@
 # Use `below replay` to investigate what happened at any point in time.
 #
 # Data stored in /var/log/below (default).
-# Storage: ~720 MB/day at 1s interval with dict-compress (chunk-32, ~8.8x over plain zstd).
-# Without dict-compress: ~6.5 GB/day (plain zstd gets ~10x on raw CBOR, but
-# dict-compress learns the repeated field-name strings across frames for another ~9x).
-# Export via: below dump -O json/csv
+# Retention is indefinite: at 1 s with dict-compress (chunk-32, ~8.8× over plain
+# zstd) this is ~720 MB/day = ~260 GB/year. Without dict-compress: ~6.5 GB/day.
+# Export via: below dump -O json/csv. Excluded from Borg in modules/backup.nix.
 {
   mkServiceModule,
   lib,
@@ -32,11 +31,6 @@ mkServiceModule {
       type = lib.types.int;
       default = 1;
       description = "Collection interval in seconds.";
-    };
-    retentionDays = lib.mkOption {
-      type = lib.types.int;
-      default = 14;
-      description = "Number of days of below store chunks to retain.";
     };
     pressureWatch = {
       enable = lib.mkOption {
@@ -92,13 +86,23 @@ mkServiceModule {
         };
         cpuWeight = lib.mkOption {
           type = lib.types.int;
-          default = 5;
-          description = "Runtime CPUWeight applied to opportunistic slices during pressure backoff.";
+          default = 1;
+          description = "Runtime CPUWeight applied to developer/background slices during pressure backoff.";
         };
         ioWeight = lib.mkOption {
           type = lib.types.int;
           default = 1;
-          description = "Runtime IOWeight applied to opportunistic slices during pressure backoff.";
+          description = "Runtime IOWeight applied to developer/background slices during pressure backoff.";
+        };
+        maintenanceCpuWeight = lib.mkOption {
+          type = lib.types.int;
+          default = 1;
+          description = "Runtime CPUWeight applied to maintenance slices during pressure backoff.";
+        };
+        maintenanceIoWeight = lib.mkOption {
+          type = lib.types.int;
+          default = 1;
+          description = "Runtime IOWeight applied to maintenance slices during pressure backoff.";
         };
       };
     };
@@ -138,6 +142,15 @@ mkServiceModule {
           ExecStart = "${pkgs.below}/bin/below record --collect-io-stat --compress --dict-compress-chunk-size 32 --interval-s ${toString cfg.collectIntervalSec}";
           Restart = "on-failure";
           RestartSec = "5s";
+          # Fix D — observability tier. below.service was previously in
+          # system.slice at default priority, which produced "data
+          # collection took 938 ms" warnings under exactly the contention
+          # below exists to capture. system-critical.slice provides high
+          # CPU/IO weights and MemoryMin protection from reclaim.
+          Slice = "system-critical.slice";
+          Nice = -5;
+          IOSchedulingClass = "best-effort";
+          IOSchedulingPriority = 0;
         };
       };
 
@@ -180,6 +193,8 @@ mkServiceModule {
             clear_samples_required=${toString cfg.pressureWatch.backoff.clearSamples}
             backoff_cpu_weight=${toString cfg.pressureWatch.backoff.cpuWeight}
             backoff_io_weight=${toString cfg.pressureWatch.backoff.ioWeight}
+            maintenance_backoff_cpu_weight=${toString cfg.pressureWatch.backoff.maintenanceCpuWeight}
+            maintenance_backoff_io_weight=${toString cfg.pressureWatch.backoff.maintenanceIoWeight}
             user_name=${lib.escapeShellArg config.sinnix.user.name}
             state_dir=/run/sinnix-pressure-watchdog
             last_report=0
@@ -276,23 +291,28 @@ mkServiceModule {
             apply_backoff_unit() {
               local manager="$1"
               local unit="$2"
+              local cpu_weight="$3"
+              local io_weight="$4"
               save_policy "$manager" "$unit"
               set_policy "$manager" "$unit" \
-                "CPUWeight=$backoff_cpu_weight" \
-                "IOWeight=$backoff_io_weight"
+                "CPUWeight=$cpu_weight" \
+                "IOWeight=$io_weight"
             }
 
             apply_backoff() {
               local unit
-              for unit in nix.slice nix-build.slice background.slice sinnix.slice sinnix-maintenance.slice; do
-                apply_backoff_unit system "$unit"
+              for unit in nix.slice nix-build.slice background.slice; do
+                apply_backoff_unit system "$unit" "$backoff_cpu_weight" "$backoff_io_weight"
+              done
+              for unit in sinnix.slice sinnix-maintenance.slice; do
+                apply_backoff_unit system "$unit" "$maintenance_backoff_cpu_weight" "$maintenance_backoff_io_weight"
               done
               for unit in build.slice background.slice; do
-                apply_backoff_unit user "$unit"
+                apply_backoff_unit user "$unit" "$backoff_cpu_weight" "$backoff_io_weight"
               done
               backoff_active=1
               touch "$state_dir/active"
-              log_line notice "applied PSI runtime backoff: CPUWeight=$backoff_cpu_weight IOWeight=$backoff_io_weight"
+              log_line notice "applied PSI runtime backoff: developer CPUWeight=$backoff_cpu_weight IOWeight=$backoff_io_weight; maintenance CPUWeight=$maintenance_backoff_cpu_weight IOWeight=$maintenance_backoff_io_weight"
             }
 
             restore_backoff() {
@@ -382,29 +402,6 @@ mkServiceModule {
           ''}";
           Restart = "always";
           RestartSec = "5s";
-        };
-      };
-
-      systemd.services.below-prune = {
-        description = "Prune old below resource monitor chunks";
-        serviceConfig = {
-          Type = "oneshot";
-          Nice = 19;
-          IOSchedulingClass = "idle";
-          ExecStart = pkgs.writeShellScript "below-prune" ''
-            set -euo pipefail
-            [ -d /var/log/below/store ] || exit 0
-            ${pkgs.findutils}/bin/find /var/log/below/store -xdev -type f -mtime +${toString cfg.retentionDays} -delete
-          '';
-        };
-      };
-
-      systemd.timers.below-prune = {
-        wantedBy = [ "timers.target" ];
-        timerConfig = {
-          OnCalendar = "daily";
-          Persistent = false;
-          RandomizedDelaySec = "30m";
         };
       };
 

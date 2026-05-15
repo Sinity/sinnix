@@ -107,6 +107,10 @@ lib.mkMerge [
   # ── NVIDIA proprietary ───────────────────────────────────────────────────────
   # Applies to both pure NVIDIA and dual-GPU mode.
   (lib.mkIf (mode == "nvidia" || mode == "dual") {
+    boot.extraModprobeConfig = ''
+      options nvidia NVreg_EnableGpuFirmware=0
+    '';
+
     hardware.nvidia = {
       open = false;
       powerManagement.enable = false;

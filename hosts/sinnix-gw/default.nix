@@ -629,6 +629,8 @@ in
           uci set https-dns-proxy.quad9.listen_port='5054'
 
           uci commit https-dns-proxy
+          /etc/init.d/https-dns-proxy enable 2>/dev/null || true
+          /etc/init.d/https-dns-proxy restart 2>/dev/null || /etc/init.d/https-dns-proxy start 2>/dev/null || true
           echo "✓ DoH configured: Cloudflare (5053) + Quad9 fallback (5054)."
         fi
 

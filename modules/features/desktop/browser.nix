@@ -32,6 +32,10 @@ mkFeatureModule {
         let
           # Disable Chromium's Wayland color management - it conflicts with
           # Hyprland's HDR mode, causing washed out colors.
+          #
+          # Keep Vulkan disabled on Chrome/Wayland as well. Chrome 147 logged
+          # an explicit Wayland+Vulkan incompatibility immediately before an
+          # NVIDIA Xid 31 / GPU-process reset that also took down a kitty window.
           # See: https://github.com/hyprwm/Hyprland/discussions/11910
           #
           # --user-data-dir is intentional: Chrome 136+ silently refuses to
@@ -43,7 +47,7 @@ mkFeatureModule {
           # read cookies via CDP. Acceptable on this single-user machine.
           chromeUserDataDir = "${config.home.homeDirectory}/.config/chrome-ws";
           chromeArgs = lib.concatStringsSep " " [
-            "--disable-features=WaylandWpColorManagerV1"
+            "--disable-features=WaylandWpColorManagerV1,Vulkan,DefaultANGLEVulkan"
             "--remote-debugging-port=9222"
             "--remote-debugging-address=127.0.0.1"
             "--user-data-dir=${chromeUserDataDir}"

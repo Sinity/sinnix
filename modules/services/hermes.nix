@@ -32,18 +32,23 @@ let
     terminal.cwd = cfg.workingDirectory;
     checkpoints = {
       enabled = true;
-      max_snapshots = 50;
+      max_snapshots = 1000000;
     };
     memory = {
       memory_enabled = true;
       user_profile_enabled = true;
+      memory_char_limit = 8000;
+      user_char_limit = 4000;
     };
     delegation = {
       model = cfg.model;
       provider = cfg.provider;
     };
+    approvals = {
+      mode = cfg.approvals.mode;
+    };
     agent = {
-      max_turns = 90;
+      max_turns = 1000000;
       api_max_retries = 3;
     };
     context.project_discovery = true;
@@ -110,6 +115,18 @@ in
       type = lib.types.str;
       default = "${config.sinnix.paths.realmRoot}/project";
       description = "Default working directory used by Hermes terminal tools.";
+    };
+
+    approvals = {
+      mode = lib.mkOption {
+        type = lib.types.enum [
+          "manual"
+          "smart"
+          "off"
+        ];
+        default = "manual";
+        description = "Dangerous command approval mode. 'manual' prompts user, 'smart' uses auxiliary LLM, 'off' auto-approves all commands (YOLO).";
+      };
     };
   };
 

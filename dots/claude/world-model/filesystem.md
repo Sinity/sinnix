@@ -6,9 +6,14 @@
 /realm/
 ├── project/           # All active project repositories
 ├── data/              # Canonical data lake (see below)
-├── home/              # User home directory (symlinked from ~)
 └── inbox/             # Staging area for retired/incoming data
 ```
+
+User home is `/home/sinity`. It is intentionally not under `/realm`: the live
+home directory is recreated on each boot and populated from `/persist` via the
+impermanence module plus Home Manager activation. Persistent home state such as
+SSH keys lives at `/persist/home/sinity/.ssh` and appears at runtime as
+`/home/sinity/.ssh`.
 
 ### /realm/data - Data Lake Structure
 
@@ -24,7 +29,7 @@
 │   ├── screenshot/    # Screenshots
 │   ├── shell/         # Shell history (Atuin)
 │   ├── syslog/        # System log exports
-│   ├── power-watchdog/# Power event log
+│   ├── machine/       # Canonical host machine telemetry
 │   └── kitty-scrollback/ # Terminal scrollback
 ├── exports/           # GDPR/Takeout provider exports
 │   ├── chatlog/       # AI chat archives (Claude, ChatGPT, Codex)

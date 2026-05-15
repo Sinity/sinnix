@@ -1,0 +1,284 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Generate flat reprojection contact sheets for VR videos
+# runtimeInputs: bash coreutils ffmpeg imagemagick jq gnugrep gnused findutils
+set -euo pipefail
+
+input_root="/neo-outer-realm/inbox/tdown"
+output_root="/neo-outer-realm/inbox/tdown_contact_sheets"
+samples=12
+cols=4
+width=520
+force=0
+limit=0
+mode="auto"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  vr-contact-sheet [options] [INPUT_ROOT]
+
+Options:
+  -o, --output DIR       Output gallery directory.
+                         Default: /neo-outer-realm/inbox/tdown_contact_sheets
+  -n, --samples N        Frames per video sheet. Default: 12
+  -c, --cols N           Contact sheet columns. Default: 4
+  -w, --width PX         Tile width. Default: 520
+      --mode MODE        auto | vr180 | fisheye | flat. Default: auto
+      --limit N          Process at most N videos.
+  -f, --force            Regenerate existing sheets.
+  -h, --help             Show this help.
+
+The output mirrors INPUT_ROOT as JPEG sheets and writes index.html for browsing.
+VR180 mode uses ffmpeg's v360 filter to flatten side-by-side VR frames to a
+single left-eye rectilinear view. Fisheye mode uses v360 fisheye input.
+EOF
+}
+
+die() {
+  printf 'vr-contact-sheet: %s\n' "$*" >&2
+  exit 1
+}
+
+while (($# > 0)); do
+  case "$1" in
+    -o|--output)
+      (($# >= 2)) || die "$1 needs a directory"
+      output_root="$2"
+      shift 2
+      ;;
+    -n|--samples)
+      (($# >= 2)) || die "$1 needs a count"
+      samples="$2"
+      shift 2
+      ;;
+    -c|--cols)
+      (($# >= 2)) || die "$1 needs a count"
+      cols="$2"
+      shift 2
+      ;;
+    -w|--width)
+      (($# >= 2)) || die "$1 needs a pixel width"
+      width="$2"
+      shift 2
+      ;;
+    --mode)
+      (($# >= 2)) || die "$1 needs a mode"
+      mode="$2"
+      shift 2
+      ;;
+    --limit)
+      (($# >= 2)) || die "$1 needs a count"
+      limit="$2"
+      shift 2
+      ;;
+    -f|--force)
+      force=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      die "unknown option: $1"
+      ;;
+    *)
+      input_root="$1"
+      shift
+      ;;
+  esac
+done
+
+[[ "$samples" =~ ^[0-9]+$ ]] && ((samples > 0)) || die "samples must be a positive integer"
+[[ "$cols" =~ ^[0-9]+$ ]] && ((cols > 0)) || die "cols must be a positive integer"
+[[ "$width" =~ ^[0-9]+$ ]] && ((width >= 160)) || die "width must be an integer >= 160"
+[[ "$limit" =~ ^[0-9]+$ ]] || die "limit must be a non-negative integer"
+case "$mode" in
+  auto|vr180|fisheye|flat) ;;
+  *) die "mode must be auto, vr180, fisheye, or flat" ;;
+esac
+
+input_root="$(readlink -f -- "$input_root")"
+mkdir -p "$output_root"
+output_root="$(readlink -f -- "$output_root")"
+[[ -d "$input_root" ]] || die "input root does not exist: $input_root"
+
+html_escape() {
+  sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g'
+}
+
+json_value() {
+  jq -r "$1 // empty"
+}
+
+probe_duration() {
+  ffprobe -v error \
+    -show_entries format=duration \
+    -of json \
+    -- "$1" | json_value '.format.duration'
+}
+
+classify_mode() {
+  local file="$1"
+  local base
+  base="$(basename -- "$file")"
+  case "$mode" in
+    vr180|fisheye|flat)
+      printf '%s\n' "$mode"
+      ;;
+    auto)
+      if [[ "$base" =~ [Ff][Ii][Ss][Hh][Ee][Yy][Ee] ]]; then
+        printf 'fisheye\n'
+      elif [[ "$base" =~ (180|VR|Vr|vr|Oculus|Quest|3dh|LR|_LR|_TB|_SBS) ]]; then
+        printf 'vr180\n'
+      else
+        printf 'flat\n'
+      fi
+      ;;
+  esac
+}
+
+vf_for_mode() {
+  local sheet_mode="$1"
+  case "$sheet_mode" in
+    vr180)
+      printf 'v360=input=equirect:output=flat:in_stereo=sbs:out_stereo=2d:h_fov=95:v_fov=62:yaw=0:pitch=0,scale=%d:-2:flags=lanczos' "$width"
+      ;;
+    fisheye)
+      printf 'v360=input=fisheye:output=flat:in_stereo=sbs:out_stereo=2d:ih_fov=190:iv_fov=190:h_fov=95:v_fov=62:yaw=0:pitch=0,scale=%d:-2:flags=lanczos' "$width"
+      ;;
+    flat)
+      printf 'scale=%d:-2:flags=lanczos' "$width"
+      ;;
+  esac
+}
+
+sheet_path_for() {
+  local file="$1"
+  local rel="${file#"$input_root"/}"
+  printf '%s/%s.jpg\n' "$output_root" "$rel"
+}
+
+make_sheet() {
+  local file="$1"
+  local out="$2"
+  local duration sheet_mode vf tmp status
+  local i t thumb
+
+  duration="$(probe_duration "$file")"
+  [[ -n "$duration" && "$duration" != "N/A" ]] || {
+    printf 'skip: no duration: %s\n' "$file" >&2
+    return 0
+  }
+
+  sheet_mode="$(classify_mode "$file")"
+  vf="$(vf_for_mode "$sheet_mode")"
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
+
+  for ((i = 1; i <= samples; i++)); do
+    t="$(awk -v d="$duration" -v i="$i" -v n="$samples" 'BEGIN { printf "%.3f", d * i / (n + 1) }')"
+    thumb="$tmp/$(printf '%03d.jpg' "$i")"
+    status=0
+    ffmpeg -hide_banner -loglevel error -y \
+      -ss "$t" \
+      -i "$file" \
+      -frames:v 1 \
+      -vf "$vf" \
+      -q:v 3 \
+      "$thumb" || status=$?
+    if ((status != 0)) && [[ "$sheet_mode" != "flat" ]]; then
+      ffmpeg -hide_banner -loglevel error -y \
+        -ss "$t" \
+        -i "$file" \
+        -frames:v 1 \
+        -vf "$(vf_for_mode flat)" \
+        -q:v 3 \
+        "$thumb" || return 0
+    fi
+  done
+
+  mkdir -p "$(dirname -- "$out")"
+  magick montage "$tmp"/*.jpg \
+    -font DejaVu-Sans \
+    -tile "${cols}x" \
+    -geometry '+6+6' \
+    -background '#111111' \
+    "$out"
+
+  magick "$out" \
+    -gravity south \
+    -background '#000000cc' \
+    -fill white \
+    -font DejaVu-Sans \
+    -pointsize 22 \
+    -splice 0x42 \
+    -annotate +0+8 "$(basename -- "$file") [$sheet_mode]" \
+    "$out"
+
+  trap - RETURN
+  rm -rf "$tmp"
+}
+
+write_index() {
+  local index="$output_root/index.html"
+  local rel
+  {
+    cat <<'EOF'
+<!doctype html>
+<meta charset="utf-8">
+<title>VR Contact Sheets</title>
+<style>
+body { margin: 24px; background: #111; color: #eee; font: 14px system-ui, sans-serif; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 18px; }
+a { color: inherit; text-decoration: none; }
+img { width: 100%; height: auto; display: block; background: #000; }
+.name { margin: 6px 0 18px; overflow-wrap: anywhere; color: #ccc; }
+</style>
+<h1>VR Contact Sheets</h1>
+<div class="grid">
+EOF
+    while IFS= read -r -d '' sheet; do
+      [[ "$(basename -- "$sheet")" == "index.html" ]] && continue
+      rel="${sheet#"$output_root"/}"
+      printf '<a href="%s"><img loading="lazy" src="%s"><div class="name">%s</div></a>\n' \
+        "$(printf '%s' "$rel" | html_escape)" \
+        "$(printf '%s' "$rel" | html_escape)" \
+        "$(printf '%s' "${rel%.jpg}" | html_escape)"
+    done < <(find "$output_root" -type f -name '*.jpg' -print0 | sort -z)
+    cat <<'EOF'
+</div>
+EOF
+  } >"$index"
+}
+
+count=0
+generated=0
+skipped=0
+
+while IFS= read -r -d '' file; do
+  out="$(sheet_path_for "$file")"
+  ((++count))
+  if ((limit > 0 && count > limit)); then
+    break
+  fi
+  if [[ -s "$out" && "$force" -eq 0 ]]; then
+    ((++skipped))
+    continue
+  fi
+  printf '[%d] %s\n' "$count" "${file#"$input_root"/}"
+  make_sheet "$file" "$out"
+  ((++generated))
+done < <(
+  find "$input_root" -type f \
+    \( -iname '*.mp4' -o -iname '*.mkv' -o -iname '*.mov' -o -iname '*.m4v' -o -iname '*.webm' \) \
+    -print0 | sort -z
+)
+
+write_index
+printf 'done: scanned=%d generated=%d skipped=%d index=%s\n' "$count" "$generated" "$skipped" "$output_root/index.html"

@@ -23,7 +23,21 @@ mkFeatureTest {
       managedEntrySource =
         entry: if entry ? source && entry.source != null then toString entry.source else "";
       codexConfigText = builtins.readFile (inputs.self + "/dots/codex/config.toml");
-      claudeSettings = builtins.fromJSON (builtins.readFile (inputs.self + "/dots/claude/settings.json"));
+      # Rendered Claude settings — merged from static base and registry mcpServers.
+      # Compute inline rather than reading the rendered file because this test
+      # exercises the dev.mcp-servers feature in isolation; agent-tools (which
+      # owns the merge wiring) may not be enabled in the minimal config.
+      mcpRegistry = import (inputs.self + "/modules/lib/mcp-registry.nix") {
+        lib = (inputs.nixpkgs.lib);
+      };
+      claudeSettings =
+        let
+          base = builtins.fromJSON (builtins.readFile (inputs.self + "/dots/claude/settings.json"));
+          mcpServers = (inputs.nixpkgs.lib).mapAttrs mcpRegistry.renderClaudeServer (
+            mcpRegistry.selectClientServers "claude"
+          );
+        in
+        base // { inherit mcpServers; };
       geminiSettings = builtins.fromJSON (builtins.readFile (inputs.self + "/dots/gemini/settings.json"));
       forgeMcpConfig = builtins.fromJSON (managedEntryText hm.home.file."forge/.mcp.json");
     in

@@ -1,97 +1,22 @@
 #!/usr/bin/env bash
 # @sinnix-package
-# description: Place commands in Sinnix resource slices without duplicating systemd-run policy
-# runtimeInputs: bash coreutils gnugrep systemd
-# Place a command in a Sinnix resource slice.
-#
-# Slice limits live in modules/performance.nix. This helper owns placement so
-# wrappers do not each grow their own systemd-run policy.
+# description: Compatibility wrapper for the retired Sinnix resource slices
+# runtimeInputs: bash coreutils
 
 set -euo pipefail
 
 if [ "$#" -lt 3 ] || [ "$2" != "--" ]; then
-  echo "usage: sinnix-scope <build|background|nix-build> -- <command> [args...]" >&2
+  echo "usage: sinnix-scope <agent|build|background|nix-build> -- <command> [args...]" >&2
   exit 64
 fi
 
-class="$1"
-shift 2
-uid="${EUID:-$(id -u)}"
-
-case "$class" in
-  build) slice="build.slice" ;;
-  background) slice="background.slice" ;;
-  nix-build)
-    if [ "$uid" -eq 0 ]; then
-      slice="nix-build.slice"
-    else
-      # The system nix-build slice exists for root/nix-daemon work. User-side
-      # Nix/check invocations reuse the budgeted interactive build slice.
-      slice="build.slice"
-    fi
-    ;;
+case "$1" in
+  agent|build|background|nix-build) ;;
   *)
-    echo "sinnix-scope: unknown class: $class" >&2
+    echo "sinnix-scope: unknown class: $1" >&2
     exit 64
     ;;
 esac
 
-if [ "$uid" -eq 0 ] && [ "$class" = "build" ]; then
-  # `build.slice` is a user-manager slice. Root scopes would create an
-  # unbudgeted system slice with the same name, so root build work uses the
-  # system Nix-build budget unless the caller explicitly asks for background.
-  slice="nix-build.slice"
-fi
-
-if grep -q "$slice" /proc/self/cgroup 2>/dev/null; then
-  exec "$@"
-fi
-
-if ! command -v systemd-run >/dev/null 2>&1; then
-  exec "$@"
-fi
-
-env_args=()
-for name in \
-  PATH HOME TERM TMPDIR \
-  CARGO_HOME CARGO_TARGET_DIR SCCACHE_DIR RUSTC_WRAPPER RUSTUP_HOME RUST_LOG \
-  VIRTUAL_ENV PYTHONPATH PYTHONHOME PYTEST_ADDOPTS PYTEST_DISABLE_PLUGIN_AUTOLOAD \
-  UV_CACHE_DIR UV_PROJECT_ENVIRONMENT \
-  NIX_PATH NIX_CONFIG NIXPKGS_ALLOW_UNFREE \
-  SINEX_DEV_CACHE_ROOT SINEX_CACHE_DIR SINEX_STATE_DIR SINEX_TEST_RESULTS_DIR
-do
-  if [ "${!name+x}" = x ]; then
-    env_args+=("--setenv=$name=${!name}")
-  fi
-done
-
-scope_props=(
-  --nice=0
-)
-
-if [ "$uid" -eq 0 ]; then
-  exec systemd-run \
-    --scope \
-    --quiet \
-    --collect \
-    --slice="$slice" \
-    --same-dir \
-    "${scope_props[@]}" \
-    "${env_args[@]}" \
-    -- "$@"
-fi
-
-if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
-  exec systemd-run \
-    --user \
-    --scope \
-    --quiet \
-    --collect \
-    --slice="$slice" \
-    --same-dir \
-    "${scope_props[@]}" \
-    "${env_args[@]}" \
-    -- "$@"
-fi
-
+shift 2
 exec "$@"

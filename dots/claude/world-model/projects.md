@@ -20,7 +20,7 @@
 
 | Project               | Path                               | Purpose                              |
 | --------------------- | ---------------------------------- | ------------------------------------ |
-| **knowledgebase**     | `/realm/project/knowledgebase`     | PKM vault (Obsidian-friendly MOCs)   |
+| **knowledgebase**     | `/realm/data/knowledgebase`        | PKM vault (Obsidian-friendly MOCs)   |
 | **knowledge-extract** | `/realm/project/knowledge-extract` | Adaptive knowledge assessment engine |
 | **pwrank**            | `/realm/project/pwrank`            | Web-based ranking/preference tool    |
 
@@ -29,7 +29,7 @@
 ```
 sinnix ──────► System packages, services, dotfiles
     │
-    └──► Enables: sinex service stack, polylogue-watch service, scribe-tap
+    └──► Enables: sinex service stack, polylogued daemon, scribe-tap
 
 sinex ◄────── Captures events from scribe-tap, polylogue
     │
@@ -46,7 +46,7 @@ lynchpin ◄─── Aggregates: ActivityWatch, Atuin, git, health, chats
 SINEX_ROOT=/realm/project/sinex
 LYNCHPIN_REPO_ROOT=/realm/project/sinity-lynchpin
 POLYLOGUE_ROOT=/realm/project/polylogue
-KNOWLEDGEBASE_ROOT=/realm/project/knowledgebase
+KNOWLEDGEBASE_ROOT=/realm/data/knowledgebase
 ```
 
 ### Documentation Map

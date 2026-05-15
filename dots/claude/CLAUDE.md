@@ -87,6 +87,8 @@
 
 **§19 Proactive fixes** — Fix issues stumbled upon, preexisting or not. Test things yourself in addition to writing automated tests.
 
+**§19a Inherited failures** — Pre-existing test failures at session start are inherited obligations. They are part of the current session's workload and must be resolved before the session's work is complete. A clean baseline is the entry condition; if the baseline is dirty, the first task is to clean it.
+
 **§20 Evidence-shaped tests** — Tests should pin stable behavior, public
 interfaces, reproduced bugs, security boundaries, parser semantics, or
 cross-module contracts. Do not add tests that merely assert a rename stayed
@@ -103,7 +105,6 @@ merge boundary. Keep an acceptance checklist current so real issue progress is
 visible and partial work does not masquerade as closure.
 
 ---
-
 
 
 
@@ -139,4 +140,4 @@ A SessionStart hook prepends recent polylogue conversations matching the current
 - `get_conversation(id, prose_only=True)` or `get_conversation(id, no_tool_calls=True)` — projected reads.
 - `search(query, ...)` — full-text + filter chain.
 
-A live watcher (`polylogue watch`, systemd user service `polylogue-watch.service`) tails `~/.claude/projects/` and `~/.codex/sessions/`; conversations land in the archive within seconds. There is no "live session" concept — any JSONL appended to (including year-old ones via resume) is picked up.
+A live daemon (`polylogued`, systemd user service `polylogued.service`, configured by `sinnix.services.polylogue`) tails `~/.claude/projects/` and `~/.codex/sessions/`; conversations land in the archive within seconds and `session_profiles` / `day_session_summaries` / `session_work_events` products are kept materialized. There is no "live session" concept — any JSONL appended to (including year-old ones via resume) is picked up.

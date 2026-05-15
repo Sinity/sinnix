@@ -26,14 +26,24 @@
       runtimeServices = lib.unique (
         builtins.filter (name: builtins.hasAttr name config.systemd.services) candidateRuntimeServices
       );
+      # restartableRuntimeServices = long-running notify-style services only.
+      # Generated source-workers tagged service_policy=invoked_on_demand are
+      # oneshots (Restart=no); excluding them by their runtime shape avoids
+      # depending on catalog metadata that the test doesn't import.
       restartableRuntimeServices = lib.unique (
-        builtins.filter (name: builtins.hasAttr name config.systemd.services) (
-          [
-            "sinex-ingestd"
-            "sinex-gateway"
-          ]
-          ++ (config.sinex._generatedUnits or [ ])
-        )
+        builtins.filter
+          (
+            name:
+            builtins.hasAttr name config.systemd.services
+            && lib.attrByPath [ "systemd" "services" name "serviceConfig" "Restart" ] null config != "no"
+          )
+          (
+            [
+              "sinex-ingestd"
+              "sinex-gateway"
+            ]
+            ++ (config.sinex._generatedUnits or [ ])
+          )
       );
       packageNames = map (pkg: pkg.name or "") config.environment.systemPackages;
       serviceWantedBy = name: lib.attrByPath [ "systemd" "services" name "wantedBy" ] [ ] config;
@@ -43,6 +53,7 @@
         name: lib.attrByPath [ "systemd" "services" name "serviceConfig" "Restart" ] null config;
       serviceRestartSec =
         name: lib.attrByPath [ "systemd" "services" name "serviceConfig" "RestartSec" ] null config;
+      serviceConfig = name: lib.attrByPath [ "systemd" "services" name "serviceConfig" ] { } config;
       serviceUnitConfig = name: lib.attrByPath [ "systemd" "services" name "unitConfig" ] { } config;
       targetWantedBy = name: lib.attrByPath [ "systemd" "targets" name "wantedBy" ] [ ] config;
       targetUnit = name: lib.attrByPath [ "systemd" "targets" name ] { } config;
@@ -60,6 +71,7 @@
         "sinex-document-scan"
       ];
       absentLegacyBlobMaintenanceUnits = [
+        "sinex-blob-init"
         "sinex-blob-fsck"
         "sinex-blob-gc"
       ];
@@ -76,7 +88,7 @@
       sinexRuntimeAppServices = builtins.filter (
         name: !(builtins.elem name cappedSubstrateUnits)
       ) runtimeServices;
-      sinexCaptureRoot = "${config.sinnix.paths.capturesRoot}/sinex";
+      sinexRuntimeRoot = "/var/lib/sinex";
       persistedSystemDirs = config.sinnix.persistence.system.directories;
       postgresqlUnitConfig = serviceUnitConfig "postgresql";
       sinexFilesystem = config.services.sinex.nodes.filesystem;
@@ -108,7 +120,7 @@
         assertion = builtins.all (
           name:
           let
-            service = lib.attrByPath [ "systemd" "services" name "serviceConfig" ] { } config;
+            service = serviceConfig name;
           in
           (!(service ? MemoryMax) || service.MemoryMax == null)
           && (!(service ? CPUQuota) || service.CPUQuota == null)
@@ -119,11 +131,12 @@
         assertion = builtins.all (
           name:
           let
-            service = lib.attrByPath [ "systemd" "services" name "serviceConfig" ] { } config;
+            service = serviceConfig name;
           in
-          service.MemoryHigh == "8G" && service.IOWeight == 10
+          (!(service ? MemoryMax) || service.MemoryMax == null)
+          && (!(service ? CPUQuota) || service.CPUQuota == null)
         ) restartableRuntimeServices;
-        message = "Long-running Sinex runtime daemons must stay throughput-capable but lower priority than the desktop";
+        message = "Long-running Sinex runtime daemons must not keep hard caps from old upstream defaults";
       }
       {
         assertion = builtins.all (
@@ -170,8 +183,12 @@
         message = "sinex-runtime.timer must delay relative to timer activation, not only boot time";
       }
       {
-        assertion = runtimeTimerWantedBy == [ "timers.target" ];
-        message = "sinnix-prime must auto-start Sinex through the delayed runtime timer";
+        assertion =
+          if config.sinnix.services.sinex.autoStart then
+            runtimeTimerWantedBy == [ "timers.target" ]
+          else
+            runtimeTimerWantedBy == [ ];
+        message = "Sinex delayed runtime timer must respect the host auto-start policy";
       }
       {
         assertion =
@@ -181,9 +198,13 @@
       }
       {
         assertion = builtins.all (
-          name: maintenanceTimerWantedBy name == [ "sinex-runtime.target" ]
+          name:
+          if config.sinnix.services.sinex.autoStart then
+            maintenanceTimerWantedBy name == [ "sinex-runtime.target" ]
+          else
+            maintenanceTimerWantedBy name == [ ]
         ) sinexMaintenanceTimers;
-        message = "Sinex maintenance timers must be tied to the delayed runtime target, not timers.target activation";
+        message = "Sinex maintenance timers must respect the host delayed-runtime auto-start policy";
       }
       {
         assertion = builtins.all (
@@ -204,16 +225,17 @@
             service = maintenanceServiceConfig name;
           in
           serviceRestartIfChanged name == false
-          && service.Slice == "sinnix-maintenance.slice"
-          && service.CPUWeight == 1
-          && service.IOWeight == 1
-          && service.IOSchedulingClass == "idle"
           && (
             service.TimeoutStopSec == "15s" || service.TimeoutStopSec == 90 || service.TimeoutStopSec == "90s"
           )
-          && builtins.match ".*sinnix-maintenance-gate.*${name}\\.service.*" service.ExecCondition != null
+          && (!(service ? Slice) || service.Slice == null)
+          && (!(service ? Nice) || service.Nice == null)
+          && (!(service ? CPUWeight) || service.CPUWeight == null)
+          && (!(service ? IOWeight) || service.IOWeight == null)
+          && (!(service ? IOSchedulingClass) || service.IOSchedulingClass == null)
+          && (!(service ? ExecCondition) || service.ExecCondition == null)
         ) sinexMaintenanceTimers;
-        message = "Sinex maintenance services must run in the bounded maintenance class with overlap gates";
+        message = "Sinex maintenance services must use plain systemd policy";
       }
       {
         assertion = builtins.all (
@@ -224,21 +246,25 @@
       }
       {
         assertion =
-          sinexHealth != null
-          && sinexHealth.restartable == false
-          && builtins.elem "sinex" healthServiceNames
-          && sinexHealthChecks != [ ]
-          && (builtins.head sinexHealthChecks).restartable == false;
-        message = "sentinel may report Sinex health but must not correctively restart it";
+          if config.sinnix.services.sinex.autoStart then
+            sinexHealth != null
+            && sinexHealth.restartable == false
+            && builtins.elem "sinex" healthServiceNames
+            && sinexHealthChecks != [ ]
+            && (builtins.head sinexHealthChecks).restartable == false
+          else
+            sinexHealth == null && !(builtins.elem "sinex" healthServiceNames) && sinexHealthChecks == [ ];
+        message = "Sinex health policy must respect whether the runtime auto-starts";
       }
       {
         assertion =
-          natsService.MemoryHigh == "5G"
-          && natsService.MemoryMax == "8G"
-          && natsService.IOWeight == 10
+          config.services.nats.settings.jetstream.max_file == "32G"
+          && !(natsService ? MemoryHigh)
+          && !(natsService ? MemoryMax)
+          && !(natsService ? IOWeight)
           && !(natsService ? IOReadBandwidthMax)
           && !(natsService ? IOWriteBandwidthMax);
-        message = "NATS must retain memory/weight policy without hard I/O bandwidth caps";
+        message = "NATS must keep storage sizing without bridge-side cgroup policy";
       }
       {
         assertion = natsService.KillSignal == "SIGTERM" && natsService.TimeoutStopSec == "90s";
@@ -246,21 +272,21 @@
       }
       {
         assertion =
-          postgresService.MemoryHigh == "8G"
-          && postgresService.MemoryMax == "12G"
-          && postgresService.IOWeight == 10
+          !(postgresService ? MemoryHigh)
+          && !(postgresService ? MemoryMax)
+          && !(postgresService ? IOWeight)
           && !(postgresService ? IOReadBandwidthMax)
           && !(postgresService ? IOWriteBandwidthMax);
-        message = "PostgreSQL must retain memory/weight policy without hard I/O bandwidth caps";
+        message = "PostgreSQL must not carry bridge-side cgroup policy";
       }
       {
         assertion =
-          config.services.postgresql.dataDir == "${sinexCaptureRoot}/postgresql/18"
-          && config.services.sinex.stateRoot == "${sinexCaptureRoot}/state"
-          && config.users.users.sinex.home == "${sinexCaptureRoot}/home"
+          config.services.postgresql.dataDir == "${sinexRuntimeRoot}/postgresql/18"
+          && config.services.sinex.stateRoot == "${sinexRuntimeRoot}/state"
+          && config.users.users.sinex.home == "${sinexRuntimeRoot}/home"
           && config.users.users.sinex.homeMode == "0711"
           && !(config.system.activationScripts ? sinexHomeTraverse)
-          && builtins.elem sinexCaptureRoot postgresqlUnitConfig.RequiresMountsFor;
+          && builtins.elem sinexRuntimeRoot postgresqlUnitConfig.RequiresMountsFor;
         message = "Sinex production hot state and home must live on the realm NVMe capture volume";
       }
       {
