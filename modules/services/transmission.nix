@@ -109,6 +109,9 @@ mkServiceModule {
             # Transmission busy checking payload paths before it sends READY=1.
             TimeoutStartSec = "15min";
             TimeoutStopSec = "5min";
+            Nice = 10;
+            IOWeight = 10;
+            IOSchedulingClass = "idle";
             ExecStartPre = [
               "+${pkgs.coreutils}/bin/install -d -m 2775 -o ${username} -g users ${torrentInbox}"
               "+${pkgs.coreutils}/bin/install -d -m 2775 -o ${username} -g users ${torrentDownloadDir}"

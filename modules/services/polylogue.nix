@@ -68,6 +68,18 @@ in
         description = "Cgroup v2 I/O weight for the long-running daemon.";
       };
 
+      memoryHigh = lib.mkOption {
+        type = lib.types.str;
+        default = "4G";
+        description = "Soft cgroup memory throttle for the long-running daemon.";
+      };
+
+      memoryMax = lib.mkOption {
+        type = lib.types.str;
+        default = "8G";
+        description = "Hard cgroup memory limit for the long-running daemon.";
+      };
+
     };
 
     browserCapture = {
@@ -148,6 +160,8 @@ in
           Nice = cfg.daemon.nice;
           IOSchedulingClass = cfg.daemon.ioSchedulingClass;
           IOWeight = cfg.daemon.ioWeight;
+          MemoryHigh = cfg.daemon.memoryHigh;
+          MemoryMax = cfg.daemon.memoryMax;
         };
         Install.WantedBy = lib.optionals cfg.daemon.autoStart [ "default.target" ];
       };

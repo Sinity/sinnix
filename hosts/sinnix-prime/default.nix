@@ -65,7 +65,9 @@
     };
     polylogue = {
       enable = true;
-      daemon.autoStart = true;
+      # Manual until the live watcher leak that reached a 17.9G service peak is
+      # fixed in Polylogue; service-level memory guardrails still apply.
+      daemon.autoStart = false;
     };
     hermes = {
       enable = true;
@@ -97,16 +99,21 @@
   systemd.services.systemd-tpm2-setup-early.enable = lib.mkForce false;
 
   # Recovery posture after repeated NVMe/Btrfs D-state stalls on /realm:
-  # keep the host interactive first. These services are useful, but they
-  # should not be boot-critical while /realm is producing write timeouts.
+  # keep journald off /realm, but preserve enough previous-boot evidence for
+  # crash/root-cause work. /var/log/journal is persisted by impermanence on the
+  # root SSD, not bind-mounted to /realm's syslog archive.
+  sinnix.persistence.system.directories = [ "/var/log/journal" ];
   services.journald = {
-    storage = lib.mkForce "volatile";
+    storage = lib.mkForce "persistent";
     extraConfig = lib.mkForce ''
-      Storage=volatile
+      Storage=persistent
       Compress=yes
-      SyncIntervalSec=5min
-      RuntimeMaxUse=512M
-      RuntimeKeepFree=256M
+      SyncIntervalSec=2min
+      SystemMaxUse=2G
+      SystemKeepFree=10G
+      SystemMaxFileSize=16M
+      MaxFileSec=1day
+      MaxRetentionSec=0
       RateLimitIntervalSec=30s
       RateLimitBurst=500
       ForwardToSyslog=no

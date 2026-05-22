@@ -43,8 +43,8 @@ let
         "Restart"
       ] "on-failure" "Polylogue daemon must restart on failure")
       {
-        assertion = !(daemonService ? MemoryHigh) && !(daemonService ? MemoryMax);
-        message = "Polylogue daemon must not carry local cgroup memory guardrails";
+        assertion = daemonService.MemoryHigh == "4G" && daemonService.MemoryMax == "8G";
+        message = "Polylogue daemon must carry memory guardrails for live-ingest leaks";
       }
       {
         assertion = !(daemonService ? IOReadIOPSMax) && !(daemonService ? IOReadBandwidthMax);

@@ -154,6 +154,7 @@ in
 
         wayland.windowManager.hyprland = {
           enable = true;
+          configType = "hyprlang";
           package = hyprlandPkg;
           xwayland.enable = true;
           systemd.enable = false;
