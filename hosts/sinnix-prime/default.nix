@@ -24,17 +24,13 @@
 
   # VR streaming to Quest 3 (WiVRn + Monado OpenXR stack + ADB tools)
   sinnix.features.desktop.vr.enable = true;
-  # Recovery posture: /realm is currently producing NVMe write timeouts and
-  # Btrfs D-state stalls. Keep the desktop available, but stop continuous
-  # capture workloads from writing to /realm until the device/path is proven
-  # stable again.
-  sinnix.features.desktop.activitywatch.enable = lib.mkForce false;
+  sinnix.features.desktop.activitywatch.enable = true;
   sinnix.features.desktop.audioCapture = {
-    enable = lib.mkForce false;
+    enable = true;
     asrProvider = "openai";
     asrDiarization = false;
   };
-  sinnix.features.desktop.agentVerifyTimer.enable = lib.mkForce false;
+  sinnix.features.desktop.agentVerifyTimer.enable = true;
   sinnix.features.desktop.hyprlandAnimations.enable = true;
 
   sinnix.features.cli.task-tracking.enable = true;
@@ -47,8 +43,8 @@
   sinnix.features.dev.editors.antigravity.enable = true;
   sinnix.services = {
     transmission = {
-      enable = false;
-      autoStart = false;
+      enable = true;
+      autoStart = true;
     };
     terminal-capture.enable = true;
     below = {
@@ -57,19 +53,19 @@
       pressureWatch.enable = true;
     };
     sinex = {
-      prepareHost = false;
-      enable = false;
+      prepareHost = true;
+      enable = true;
       # Start through the delayed `sinex-runtime.target`, not during the
       # graphical boot transaction. Sinex #932 guards the worst hidden full
       # replay case; #914/#915 still track writeback/retry/metrics follow-up.
       autoStart = false;
-      provisionDatabase = false;
+      provisionDatabase = true;
       activationProfile = "full";
       environment = "prod";
     };
     polylogue = {
       enable = true;
-      daemon.autoStart = false;
+      daemon.autoStart = true;
     };
     hermes = {
       enable = true;
@@ -116,6 +112,8 @@
       ForwardToSyslog=no
     '';
   };
+  # Keep heavyweight snapshot/backup automation manual while storage is under
+  # observation; lighter diagnostic timers are restored above by their modules.
   systemd.timers = {
     btrfs-metadata-image-backup.wantedBy = lib.mkForce [ ];
     btrbk.wantedBy = lib.mkForce [ ];
@@ -124,7 +122,5 @@
     borgbackup-check.wantedBy = lib.mkForce [ ];
     borgbackup-root-snapshots.wantedBy = lib.mkForce [ ];
     sinnix-borg-drill.wantedBy = lib.mkForce [ ];
-    capture-boot-metrics.wantedBy = lib.mkForce [ ];
-    syslog-index.wantedBy = lib.mkForce [ ];
   };
 }

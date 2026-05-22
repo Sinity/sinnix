@@ -45,7 +45,7 @@ in
     # walks the entire used capacity (1.0 TB on root, ~0.7 TB on /realm,
     # multi-TB on /outer-realm) and the read load is meaningful.
     btrfs.autoScrub = {
-      enable = false;
+      enable = true;
       fileSystems = [
         "/"
         "/realm"
@@ -176,7 +176,8 @@ in
         "noatime"
         "noauto"
         "nofail"
-        "x-systemd.mount-timeout=5min"
+        "x-systemd.automount"
+        "x-systemd.idle-timeout=10min"
       ];
     };
 
