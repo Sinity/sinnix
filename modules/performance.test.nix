@@ -44,8 +44,11 @@
     in
     [
       {
-        assertion = !config.zramSwap.enable;
-        message = "desktop must use persistent swap instead of zram";
+        assertion =
+          config.zramSwap.enable
+          && config.zramSwap.memoryPercent == 25
+          && config.zramSwap.priority == 100;
+        message = "desktop must keep zram enabled as the emergency memory buffer";
       }
       {
         assertion = !config.systemd.oomd.enable && config.services.earlyoom.enable;

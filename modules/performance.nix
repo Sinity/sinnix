@@ -59,14 +59,19 @@ let
 in
 {
   config = lib.mkIf config.sinnix.machine.isDesktop {
-    zramSwap.enable = false;
+    zramSwap = {
+      enable = true;
+      memoryPercent = 25;
+      algorithm = "zstd";
+      priority = 100;
+    };
 
     systemd.settings.Manager.StatusUnitFormat = "name";
 
     boot.kernel.sysctl = {
-      # Real swap exists to absorb transient spikes. Keep it cold in normal
-      # desktop use, but allow the kernel to use it before earlyoom has to kill.
-      "vm.swappiness" = 20;
+      # Keep zram as the first emergency buffer. The root Btrfs swapfile is
+      # much slower and can visibly stall interactive work under pressure.
+      "vm.swappiness" = 10;
       "vm.page-cluster" = 0;
       "vm.vfs_cache_pressure" = 50;
       "vm.dirty_background_ratio" = 5;
