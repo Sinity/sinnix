@@ -29,6 +29,33 @@ let
       fi
     '';
   };
+  applyCpuPowerLimits = pkgs.writeShellApplication {
+    name = "sinnix-apply-cpu-power-limits";
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.gnugrep
+    ];
+    text = ''
+      set -eu
+
+      package=
+      for candidate in /sys/class/powercap/intel-rapl:*; do
+        [ -f "$candidate/name" ] || continue
+        if grep -qx 'package-0' "$candidate/name"; then
+          package="$candidate"
+          break
+        fi
+      done
+
+      [ -n "$package" ] || exit 0
+
+      # This host currently reaches the 100C package critical threshold even
+      # under Intel's nominal 125W/253W i7-13700K envelope. Keep a conservative
+      # workstation cap until cooling is physically inspected.
+      printf '%s\n' 95000000 >"$package/constraint_0_power_limit_uw"
+      printf '%s\n' 150000000 >"$package/constraint_1_power_limit_uw"
+    '';
+  };
 in
 {
   config = lib.mkIf config.sinnix.machine.isDesktop {
@@ -79,6 +106,17 @@ in
         Type = "oneshot";
         RemainAfterExit = true;
         ExecStart = "${panicLogCapture}/bin/panic-log-capture";
+      };
+    };
+
+    systemd.services.sinnix-cpu-power-limits = {
+      description = "Apply sane Intel CPU package power limits";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "multi-user.target" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        ExecStart = "${applyCpuPowerLimits}/bin/sinnix-apply-cpu-power-limits";
       };
     };
 

@@ -32,6 +32,7 @@
       earlyoomAvoid = builtins.elemAt config.services.earlyoom.extraArgs 3;
       earlyoomPrefer = builtins.elemAt config.services.earlyoom.extraArgs 1;
       panicCaptureExec = config.systemd.services.panic-log-capture.serviceConfig.ExecStart;
+      cpuPowerLimitExec = config.systemd.services.sinnix-cpu-power-limits.serviceConfig.ExecStart;
       noLocalSlice =
         name:
         !(builtins.hasAttr name config.systemd.slices)
@@ -76,6 +77,12 @@
           lib.hasInfix "/bin/panic-log-capture" panicCaptureExec
           && !(lib.hasInfix "panic-log-capture.sh" panicCaptureExec);
         message = "panic-log-capture must execute a packaged binary, not a non-executable store file";
+      }
+      {
+        assertion =
+          lib.hasInfix "/bin/sinnix-apply-cpu-power-limits" cpuPowerLimitExec
+          && config.systemd.services.sinnix-cpu-power-limits.wantedBy == [ "multi-user.target" ];
+        message = "desktop must apply conservative CPU package power limits at boot";
       }
       {
         assertion =
