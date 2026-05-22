@@ -13,11 +13,13 @@
   pkgs,
   lib,
   config,
+  helpers,
   ...
 }:
 let
   inherit (config.sinnix.paths) realmRoot;
   borgRepoRoot = "${config.sinnix.paths.outerRealm}/backup";
+  scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
 
   # Snapshot directories
   realmSnapshots = "${realmRoot}/.btrfs/snapshot";
@@ -29,9 +31,17 @@ let
   # Borg Configuration
   borgRepoPersistPath = "${borgRepoRoot}/borg-persist-v1";
   borgRepoRealmPath = "${borgRepoRoot}/borg-realm-v2";
+  btrfsImageRoot = "${borgRepoRoot}/btrfs-images";
   borgRepoPersist = "file://${borgRepoPersistPath}";
   borgRepoRealm = "file://${borgRepoRealmPath}";
   borgPassphrasePath = config.sinnix.secrets.paths."borg-passphrase";
+  backgroundBackupServiceConfig = {
+    Nice = 10;
+    CPUSchedulingPolicy = "idle";
+    IOSchedulingClass = "idle";
+    CPUWeight = 20;
+    IOWeight = 20;
+  };
 
   mkBindMountedSnapshotHook =
     {
@@ -63,6 +73,42 @@ let
       cleanup_${label}_snapshot_bind_mount || true
       ${pkgs.util-linux}/bin/mount --bind "${snapshotDir}/$latest_snapshot" "${bindTarget}"
     '';
+
+  # ── shared borg-job constructor ──────────────────────────────────────
+  # Wraps mkBindMountedSnapshotHook + commonBorgOptions + the shared
+  # readWritePaths list around per-job policy (paths, excludes, repo,
+  # startAt, snapshot args). Each new borg job becomes a single attrset.
+  mkBorgJob =
+    {
+      name,
+      startAt,
+      repo,
+      paths,
+      exclude,
+      snapshotDir,
+      snapshotGlob,
+      bindTarget,
+      archiveBaseName ? null,
+    }:
+    commonBorgOptions
+    // (lib.optionalAttrs (archiveBaseName != null) { inherit archiveBaseName; })
+    // {
+      inherit
+        startAt
+        paths
+        exclude
+        repo
+        ;
+      readWritePaths = [
+        borgSnapshotBindRoot
+        borgRepoRoot
+        "/persist/root/.cache/borg"
+      ];
+      preHook = mkBindMountedSnapshotHook {
+        label = name;
+        inherit snapshotDir snapshotGlob bindTarget;
+      };
+    };
 
   commonBorgOptions = {
     encryption = {
@@ -145,7 +191,12 @@ in
       # 1. Persistent state (/persist snapshots) - runs as root
       #    Replaced the old borg-var-v2 job. /persist now contains all system
       #    and home state that was previously split between @var and /realm/home.
-      persist = commonBorgOptions // {
+      persist = mkBorgJob {
+        name = "persist";
+        repo = borgRepoPersist;
+        snapshotDir = persistSnapshots;
+        snapshotGlob = "persist.*";
+        bindTarget = borgPersistSnapshotBind;
         # Every 4h at :20 (5 min after btrbk :15, so latest snapshot is always ready)
         startAt = [ "*-*-* 02,06,10,14,18,22:20:00" ];
         paths = [
@@ -195,27 +246,20 @@ in
           # replayable from their original sources.
           "var/lib/sinex"
         ];
-        repo = borgRepoPersist;
-        readWritePaths = [
-          borgSnapshotBindRoot
-          borgRepoRoot
-          "/persist/root/.cache/borg"
-        ];
-        preHook = mkBindMountedSnapshotHook {
-          label = "persist";
-          snapshotDir = persistSnapshots;
-          snapshotGlob = "persist.*";
-          bindTarget = borgPersistSnapshotBind;
-        };
       };
 
       # 2. User Data (/realm snapshots) - runs as root so the bind mount can be created
-      realm = commonBorgOptions // {
-        # Every 4h at :20, offset 1h from persist to avoid lock contention
-        startAt = [ "*-*-* 03,07,11,15,19,23:20:00" ];
+      realm = mkBorgJob {
+        name = "realm";
+        repo = borgRepoRealm;
+        snapshotDir = realmSnapshots;
+        snapshotGlob = "realm.*";
+        bindTarget = borgRealmSnapshotBind;
         # Pin hostname explicitly; the eval-time hostname can resolve to the
         # build sandbox default ("machine") instead of the real hostname.
         archiveBaseName = "sinnix-prime-realm";
+        # Every 4h at :20, offset 1h from persist to avoid lock contention
+        startAt = [ "*-*-* 03,07,11,15,19,23:20:00" ];
         paths = [
           "${borgRealmSnapshotBind}/./"
         ];
@@ -245,41 +289,34 @@ in
           # source on the same disk. Re-exportable if needed.
           "**/data/captures/syslog"
         ];
-        repo = borgRepoRealm;
-        readWritePaths = [
-          borgSnapshotBindRoot
-          borgRepoRoot
-          "/persist/root/.cache/borg"
-        ];
-        preHook = mkBindMountedSnapshotHook {
-          label = "realm";
-          snapshotDir = realmSnapshots;
-          snapshotGlob = "realm.*";
-          bindTarget = borgRealmSnapshotBind;
-        };
       };
     };
 
-    # Backups are scheduled work. Keep the policy plain here; if a particular
-    # device proves pathological again, reintroduce limits from measurements.
-    systemd.services.borgbackup-job-persist.serviceConfig = {
-      CPUSchedulingPolicy = lib.mkForce null;
-      IOSchedulingClass = lib.mkForce null;
-      TimeoutStopSec = "15s";
+    # Backups are scheduled bulk I/O. Keep them below interactive work: the
+    # post-restore backup and metadata capture saturated /realm enough to make
+    # the desktop visibly stall even though the machine was otherwise healthy.
+    systemd.services.borgbackup-job-persist = {
+      restartIfChanged = false;
+      serviceConfig = backgroundBackupServiceConfig // {
+        TimeoutStopSec = "15s";
+      };
     };
-    systemd.services.borgbackup-job-realm.serviceConfig = {
-      CPUSchedulingPolicy = lib.mkForce null;
-      IOSchedulingClass = lib.mkForce null;
-      TimeoutStopSec = "15s";
+    systemd.services.borgbackup-job-realm = {
+      restartIfChanged = false;
+      serviceConfig = backgroundBackupServiceConfig // {
+        TimeoutStopSec = "15s";
+      };
     };
 
     # Weekly integrity check — verify repo metadata and detect bit rot on the HDD.
     systemd.services.borgbackup-check = {
       description = "Borg backup integrity check";
+      restartIfChanged = false;
       serviceConfig = {
         Type = "oneshot";
         TimeoutStopSec = "15s";
-      };
+      }
+      // backgroundBackupServiceConfig;
       environment.BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
       script = ''
         ${pkgs.borgbackup}/bin/borg check --repository-only ${borgRepoPersist}
@@ -294,10 +331,70 @@ in
       };
     };
 
+    # Borg is file-level recovery. Keep compact Btrfs metadata images off the
+    # source filesystems so a future tree/chunk/extent repair has native
+    # metadata evidence instead of only a file archive.
+    systemd.services.btrfs-metadata-image-backup = {
+      description = "Capture Btrfs metadata images for realm and persist";
+      restartIfChanged = false;
+      after = [
+        "persist.mount"
+        "realm.mount"
+        "outer\\x2drealm.mount"
+      ];
+      requires = [
+        "persist.mount"
+        "realm.mount"
+        "outer\\x2drealm.mount"
+      ];
+      serviceConfig = {
+        Type = "oneshot";
+        TimeoutStopSec = "15s";
+      }
+      // backgroundBackupServiceConfig;
+      path = with pkgs; [
+        btrfs-progs
+        coreutils
+        findutils
+      ];
+      script = ''
+        set -euo pipefail
+
+        stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+        install -d -m 0700 -o root -g root "${btrfsImageRoot}"
+
+        capture_image() {
+          label="$1"
+          device="$2"
+          out="${btrfsImageRoot}/$label-$stamp.btrfs-image"
+          tmp="$out.tmp"
+
+          rm -f "$tmp"
+          btrfs-image -c 9 "$device" "$tmp"
+          chmod 0600 "$tmp"
+          mv "$tmp" "$out"
+        }
+
+        capture_image realm /dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a
+        capture_image persist /dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02
+
+        find "${btrfsImageRoot}" -type f -name '*.btrfs-image' -mtime +30 -delete
+      '';
+    };
+    systemd.timers.btrfs-metadata-image-backup = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnCalendar = "daily";
+        Persistent = false;
+        RandomizedDelaySec = "30min";
+      };
+    };
+
     system.activationScripts.borgRepositoryDirectories.text = ''
       ${pkgs.coreutils}/bin/install -d -m 0750 -o root -g users ${borgRepoRoot}
       ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${borgRepoPersistPath}
       ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${borgRepoRealmPath}
+      ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${btrfsImageRoot}
     '';
 
     # Ensure directories exist
@@ -312,6 +409,7 @@ in
       "d ${borgPersistSnapshotBind} 0700 root root -"
       "d ${borgRealmSnapshotBind} 0700 root root -"
       "d ${borgRepoRoot} 0750 root users -"
+      "d ${btrfsImageRoot} 0700 root root -"
       "d /persist/root/.cache/borg 0700 root root -"
     ];
 
@@ -320,6 +418,7 @@ in
     # HDD (slow spin-up) with nofail — without this, btrbk races the mount on boot.
     systemd.services.btrbk = {
       description = "btrbk btrfs snapshot";
+      restartIfChanged = false;
       after = [
         "persist.mount"
         "realm.mount"
@@ -328,7 +427,8 @@ in
         Type = "oneshot";
         ExecStart = "${pkgs.btrbk}/bin/btrbk run --quiet";
         TimeoutStopSec = "15s";
-      };
+      }
+      // backgroundBackupServiceConfig;
     };
 
     systemd.timers.btrbk = {
@@ -347,6 +447,7 @@ in
     # persist borg repo, and deletes the subvolume on success.
     systemd.services.borgbackup-root-snapshots = {
       description = "Archive ephemeral root snapshots to borg";
+      restartIfChanged = false;
       after = [
         "persist.mount"
         "borgbackup-job-persist.service"
@@ -354,7 +455,8 @@ in
       serviceConfig = {
         Type = "oneshot";
         TimeoutStopSec = "15s";
-      };
+      }
+      // backgroundBackupServiceConfig;
       environment.BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
       environment.BORG_REPO = borgRepoPersist;
       environment.BORG_CACHE_DIR = "/persist/root/.cache/borg";
@@ -407,6 +509,59 @@ in
         OnCalendar = "daily";
         Persistent = true;
         RandomizedDelaySec = 300;
+      };
+    };
+
+    # Weekly random-archive deep-verify drill.
+    #
+    # The existing `services.borgbackup.jobs.*.doCheck` runs
+    # `borg check --repository-only` which validates the chunk graph
+    # without re-reading chunk data — fast, but cannot detect chunk-store
+    # bit rot. The drill picks one random archive per repo (within the
+    # last 30 days, to bound runtime + keep the verification fresh) and
+    # runs `borg check --verify-data --first 1 -P <archive>` against it,
+    # appending a JSONL record to
+    # /realm/data/captures/machine/borg_drill.jsonl so lynchpin can
+    # chart pass/fail history. Sentinel will surface failures via its
+    # existing systemd-unit health checks.
+    systemd.services.sinnix-borg-drill = {
+      description = "Borg random-archive deep-verify drill";
+      after = [
+        "network.target"
+      ];
+      environment = {
+        BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
+        BORG_CACHE_DIR = "/persist/root/.cache/borg";
+      };
+      path = with pkgs; [
+        borgbackup
+        coreutils
+        jq
+        util-linux
+      ];
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${scriptPkgs.sinnix-borg-drill}/bin/sinnix-borg-drill";
+        # Borg's chunk verification is CPU+IO heavy; keep it from
+        # contending with interactive work and the periodic borg create.
+        Nice = 10;
+        CPUSchedulingPolicy = "idle";
+        IOSchedulingClass = "idle";
+        IOWeight = 20;
+        # `borg check --verify-data` on a multi-GB archive can take
+        # tens of minutes on HDDs; allow up to 12 hours total across repos.
+        TimeoutStartSec = "12h";
+      };
+    };
+
+    systemd.timers.sinnix-borg-drill = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        # Weekly, offset from `borgbackup-check.timer` (Sun 06:17) so the
+        # two heavy borg jobs do not contend for the HDD.
+        OnCalendar = "Wed 04:00:00";
+        Persistent = true;
+        RandomizedDelaySec = 1800;
       };
     };
 

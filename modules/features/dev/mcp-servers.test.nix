@@ -22,7 +22,7 @@ mkFeatureTest {
           "";
       managedEntrySource =
         entry: if entry ? source && entry.source != null then toString entry.source else "";
-      codexConfigText = builtins.readFile (inputs.self + "/dots/codex/config.toml");
+      codexConfigText = managedEntryText hm.home.file.".codex/config.toml";
       # Rendered Claude settings — merged from static base and registry mcpServers.
       # Compute inline rather than reading the rendered file because this test
       # exercises the dev.mcp-servers feature in isolation; agent-tools (which
@@ -74,6 +74,14 @@ mkFeatureTest {
       (expect.textContains (managedEntryText
         hm.home.file.".local/bin/mcp-polylogue"
       ) "/bin/polylogue-mcp" "Polylogue wrapper must launch the packaged MCP server entrypoint")
+      (expect.textContains (managedEntryText hm.home.file.".local/bin/mcp-lynchpin")
+        "export LYNCHPIN_REPO_ROOT=/realm/project/sinity-lynchpin"
+        "Lynchpin wrapper must point runtime cache/config resolution at the writable project checkout"
+      )
+      (expect.textContains (managedEntryText hm.home.file.".local/bin/mcp-lynchpin")
+        "export LYNCHPIN_LOCAL_ROOT=/realm/project/sinity-lynchpin/.lynchpin"
+        "Lynchpin wrapper must keep generated substrate writes outside the Nix store"
+      )
       (expect.textContains codexConfigText "[mcp_servers.polylogue]"
         "Codex config must declare the Polylogue MCP server"
       )
@@ -100,6 +108,22 @@ mkFeatureTest {
         "polylogue"
         "command"
       ] "mcp-polylogue" "Claude config must call the packaged Polylogue MCP wrapper")
+      (expect.attrPathEq claudeSettings [
+        "mcpServers"
+        "lynchpin"
+        "env"
+        "LYNCHPIN_REPO_ROOT"
+      ] "/realm/project/sinity-lynchpin" "Claude config must pass the writable Lynchpin repo root")
+      (expect.attrPathEq claudeSettings
+        [
+          "mcpServers"
+          "lynchpin"
+          "env"
+          "LYNCHPIN_LOCAL_ROOT"
+        ]
+        "/realm/project/sinity-lynchpin/.lynchpin"
+        "Claude config must pass the writable Lynchpin local root"
+      )
       (expect.attrPathEq geminiSettings [
         "mcpServers"
         "polylogue"
@@ -174,5 +198,21 @@ mkFeatureTest {
         "polylogue"
         "command"
       ] "mcp-polylogue" "Forge MCP config must call the packaged Polylogue wrapper")
+      (expect.attrPathEq forgeMcpConfig [
+        "mcpServers"
+        "lynchpin"
+        "env"
+        "LYNCHPIN_REPO_ROOT"
+      ] "/realm/project/sinity-lynchpin" "Forge MCP config must pass the writable Lynchpin repo root")
+      (expect.attrPathEq forgeMcpConfig
+        [
+          "mcpServers"
+          "lynchpin"
+          "env"
+          "LYNCHPIN_LOCAL_ROOT"
+        ]
+        "/realm/project/sinity-lynchpin/.lynchpin"
+        "Forge MCP config must pass the writable Lynchpin local root"
+      )
     ];
 }

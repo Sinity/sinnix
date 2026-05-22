@@ -60,13 +60,14 @@ in
           "nixpkgs-unfree.cachix.org-1:hqvoInulhbV4nJ9yJOEr+4wxhDV4xq2d1DK7S6Nj6rs="
         ];
         netrc-file = "/etc/nix/netrc";
-        # Keep local builds broad enough to saturate CPU via `cores = 0`, but
-        # avoid scheduling one derivation per hardware thread by default. The
-        # old `auto` value resolved to 24 on sinnix-prime and amplified RAM/I/O
-        # spikes. Benchmark 6/8/12/24 against wall time, peak RSS, PSI, and
-        # desktop latency before changing this again.
-        max-jobs = 8;
-        cores = 0;
+        # Bound local builds so cache misses cannot fan out into many
+        # full-core C++/Rust/Python derivations at once. The previous
+        # max-jobs=8/cores=0 policy let each of 8 derivations see every core,
+        # amplifying RAM/I/O pressure during devshell and rebuild work.
+        # Benchmark future changes against wall time, peak RSS, PSI, and
+        # desktop latency before raising this again.
+        max-jobs = 4;
+        cores = 4;
         builders-use-substitutes = true;
 
         # DX optimizations: keep build dependencies for faster rebuilds
@@ -178,6 +179,14 @@ in
 
     system.stateVersion = "24.05";
 
+    # Record the flake commit that produced this generation. Surfaces via
+    # `nixos-version --revision` and is read at activation time by the
+    # lynchpin generation-log script so substrate can join telemetry rows
+    # back to the sinnix git history. Falls through to "dirty"/"unknown"
+    # if the source tree was uncommitted at build time, which is itself
+    # diagnostically useful (rebuilds from local edits are visible).
+    system.configurationRevision = inputs.self.rev or inputs.self.dirtyRev or "unknown";
+
     security = {
       rtkit.enable = true;
       sudo.wheelNeedsPassword = false;
@@ -226,6 +235,7 @@ in
         "d ${paths.capturesRoot}/screenshot/mpv 0755 ${username} users -"
         "d ${paths.exportsRoot}/lastpass 0755 ${username} users -"
         "d ${paths.exportsRoot}/lastpass/raw 0755 ${username} users -"
+        "d /var/run/nscd 0755 nscd nscd -"
       ]);
     };
 
@@ -233,5 +243,14 @@ in
     # NOTE: dbus-broker hardening removed - it needs setgroups() to drop privileges
     # for spawned services. The ~@privileged syscall filter blocked this, causing
     # crashes at boot. See: journalctl -b -3 | grep dbus-broker
+
+    # nsncd opens its compatibility socket at /var/run/nscd/socket. On the
+    # current systemd/nixpkgs generation the upstream unit bind-mounts /run/nscd
+    # but still leaves the /var/run path read-only under ProtectSystem=strict,
+    # causing nss-user-lookup.target to fail repeatedly during boot.
+    systemd.services.nscd.serviceConfig.ReadWritePaths = [
+      "/run/nscd"
+      "/var/run/nscd"
+    ];
   };
 }

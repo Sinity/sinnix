@@ -22,8 +22,8 @@ if (( is_heavy_cmd == 0 )); then
   exec nix "$command_name" "$@"
 fi
 
-safe_jobs="${NIX_SAFE_MAX_JOBS:-8}"
-safe_cores="${NIX_SAFE_CORES:-0}"
+safe_jobs="${NIX_SAFE_MAX_JOBS:-4}"
+safe_cores="${NIX_SAFE_CORES:-4}"
 
 if [[ "$safe_jobs" != "auto" && ! "$safe_jobs" =~ ^[1-9][0-9]*$ ]]; then
   safe_jobs="auto"

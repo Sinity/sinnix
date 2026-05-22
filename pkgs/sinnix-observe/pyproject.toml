@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sinnix-observe"
+version = "0.1.0"
+description = "Agent-readable workstation observability report (Sinnix)"
+requires-python = ">=3.12"
+
+[project.scripts]
+# Parallel binary name during the transition; the live single-file script in
+# scripts/sinnix-observe still owns the canonical `sinnix-observe` name.
+sinnix-observe-py = "sinnix_observe.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["sinnix_observe*"]

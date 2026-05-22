@@ -23,9 +23,9 @@ encrypt_dir() {
     return 0
   fi
   echo "ENCRYPT $name ($(du -sh "$dir" | cut -f1)) → $out"
-  tar cf - -C "$(dirname "$dir")" "$(basename "$dir")" \
-    | zstd -3 -c \
-    | $AGE -R ~/.ssh/id_ed25519.pub -o "$out"
+  tar cf - -C "$(dirname "$dir")" "$(basename "$dir")" |
+    zstd -3 -c |
+    $AGE -R ~/.ssh/id_ed25519.pub -o "$out"
   echo "  done: $(du -h "$out" | cut -f1)"
 }
 

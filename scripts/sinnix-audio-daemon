@@ -1,33 +1,40 @@
 #!/usr/bin/env python3
 # @sinnix-package: skip
-"""Continuous PipeWire capture with preferred-mic transcription."""
+"""Always-on PipeWire microphone capture with local VAD and transcript sink.
+
+The daemon records raw 16 kHz mono PCM from the selected PipeWire source,
+segments speech into utterances locally, sends only finalized utterances to the
+ASR router, and appends normalized transcript events as JSONL.
+"""
 
 from __future__ import annotations
 
 import argparse
 import datetime as dt
 import json
-import os
 import re
 import signal
 import subprocess
 import sys
 import threading
 import time
+import warnings
 import wave
+from collections import deque
 from pathlib import Path
 from typing import Any
 
 import requests
-import webrtcvad
 
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated as an API.*")
+import webrtcvad  # noqa: E402
 
 RATE = 16_000
 CHANNELS = 1
 SAMPLE_WIDTH = 2
 FRAME_MS = 30
-FRAME_BYTES = int(RATE * FRAME_MS / 1000) * SAMPLE_WIDTH
-
+FRAME_SAMPLES = int(RATE * FRAME_MS / 1000)
+FRAME_BYTES = FRAME_SAMPLES * SAMPLE_WIDTH
 
 stop_event = threading.Event()
 
@@ -69,11 +76,7 @@ def discover_nodes(
             continue
         description = props.get("node.description") or name
         kind = "input" if media_class == "Audio/Source" else "output"
-        node = {
-            "name": name,
-            "description": description,
-            "kind": kind,
-        }
+        node = {"name": name, "description": description, "kind": kind}
         if kind == "output" and not capture_outputs:
             continue
         if kind == "input" and not capture_all_inputs and not matches(preferred_re, node):
@@ -82,33 +85,23 @@ def discover_nodes(
     return nodes
 
 
-def has_speech(path: Path, vad: webrtcvad.Vad) -> bool:
-    with wave.open(str(path), "rb") as wav:
-        if (
-            wav.getframerate() != RATE
-            or wav.getnchannels() != CHANNELS
-            or wav.getsampwidth() != SAMPLE_WIDTH
-        ):
-            return True
-        voiced = 0
-        total = 0
-        while True:
-            frame = wav.readframes(int(RATE * FRAME_MS / 1000))
-            if len(frame) < FRAME_BYTES:
-                break
-            total += 1
-            if vad.is_speech(frame, RATE):
-                voiced += 1
-        return total > 0 and voiced >= max(3, total // 20)
+def write_wav(path: Path, pcm: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(CHANNELS)
+        wav.setsampwidth(SAMPLE_WIDTH)
+        wav.setframerate(RATE)
+        wav.writeframes(pcm)
 
 
 def transcribe(path: Path, node: dict[str, str], transcript_file: Path, asr_url: str) -> None:
+    started = dt.datetime.now(dt.UTC)
     try:
         with path.open("rb") as handle:
             response = requests.post(
                 f"{asr_url.rstrip('/')}/transcribe",
                 files={"file": (path.name, handle, "audio/wav")},
-                timeout=300,
+                timeout=180,
             )
         response.raise_for_status()
         payload = response.json()
@@ -125,38 +118,30 @@ def transcribe(path: Path, node: dict[str, str], transcript_file: Path, asr_url:
         "ts": dt.datetime.now(dt.UTC).isoformat(),
         "source": node,
         "audio": str(path),
+        "duration_seconds": round(wav_duration(path), 3),
+        "latency_seconds": round((dt.datetime.now(dt.UTC) - started).total_seconds(), 3),
         "text": text,
         "language": payload.get("language"),
         "language_probability": payload.get("language_probability"),
+        "provider": payload.get("provider"),
+        "model": payload.get("model"),
+        "segments": payload.get("segments") or [],
+        "words": payload.get("words") or [],
+        "speakers": payload.get("speakers") or [],
     }
     with transcript_file.open("a", encoding="utf-8") as out:
         out.write(json.dumps(record, ensure_ascii=False) + "\n")
+    log(f"transcribed {node['description']}: {text[:120]}")
 
 
-def capture_worker(
-    node: dict[str, str],
-    archive_dir: Path,
-    transcript_dir: Path,
-    asr_url: str,
-    chunk_seconds: int,
-    transcribe_enabled: bool,
-    preferred_re: re.Pattern[str],
-    archive_enabled: bool,
-) -> None:
-    vad = webrtcvad.Vad(2)
-    key = f"{node['kind']}:{node['name']}"
-    target = node["name"]
-    label = slugify(f"{node['kind']}-{node['description']}")
-    transcribe_this = transcribe_enabled and node["kind"] == "input" and matches(preferred_re, node)
-    log(f"capture started {key} transcribe={transcribe_this}")
+def wav_duration(path: Path) -> float:
+    with wave.open(str(path), "rb") as wav:
+        return wav.getnframes() / float(wav.getframerate())
 
-    while not stop_event.is_set():
-        day = dt.datetime.now().strftime("%Y-%m-%d")
-        timestamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
-        chunk_dir = archive_dir / day / label
-        chunk_dir.mkdir(parents=True, exist_ok=True)
-        path = chunk_dir / f"{timestamp}.wav"
-        command = [
+
+def capture_process(target: str, latency_ms: int) -> subprocess.Popen[bytes]:
+    return subprocess.Popen(
+        [
             "pw-record",
             "--target",
             target,
@@ -166,23 +151,127 @@ def capture_worker(
             str(CHANNELS),
             "--format",
             "s16",
-            "--sample-count",
-            str(RATE * chunk_seconds),
-            str(path),
-        ]
-        proc = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
-        if not path.exists() or path.stat().st_size < 44:
-            log(f"capture failed {key}: {proc.stderr.strip()}")
-            time.sleep(5)
+            "--latency",
+            f"{latency_ms}ms",
+            "--raw",
+            "-",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+
+def finalize_segment(
+    pcm: bytes,
+    node: dict[str, str],
+    archive_dir: Path,
+    transcript_dir: Path,
+    asr_url: str,
+    archive_enabled: bool,
+) -> None:
+    now = dt.datetime.now(dt.UTC)
+    day = now.strftime("%Y-%m-%d")
+    timestamp = now.strftime("%Y%m%dT%H%M%SZ")
+    label = slugify(f"{node['kind']}-{node['description']}")
+    path = archive_dir / day / label / f"{timestamp}.wav"
+    write_wav(path, pcm)
+    transcript_file = transcript_dir / f"{day}.jsonl"
+    transcribe(path, node, transcript_file, asr_url)
+    if not archive_enabled:
+        path.unlink(missing_ok=True)
+
+
+def capture_worker(
+    node: dict[str, str],
+    archive_dir: Path,
+    transcript_dir: Path,
+    asr_url: str,
+    preferred_re: re.Pattern[str],
+    transcribe_enabled: bool,
+    archive_enabled: bool,
+    vad_aggressiveness: int,
+    pre_roll_ms: int,
+    min_speech_ms: int,
+    silence_ms: int,
+    max_utterance_seconds: int,
+    latency_ms: int,
+) -> None:
+    key = f"{node['kind']}:{node['name']}"
+    target = node["name"]
+    transcribe_this = transcribe_enabled and node["kind"] == "input" and matches(preferred_re, node)
+    vad = webrtcvad.Vad(vad_aggressiveness)
+    pre_roll_frames = max(1, pre_roll_ms // FRAME_MS)
+    min_voiced_frames = max(1, min_speech_ms // FRAME_MS)
+    max_silence_frames = max(1, silence_ms // FRAME_MS)
+    max_segment_frames = max(1, (max_utterance_seconds * 1000) // FRAME_MS)
+    log(f"capture started {key} transcribe={transcribe_this}")
+
+    while not stop_event.is_set():
+        proc = capture_process(target, latency_ms)
+        if proc.stdout is None:
+            log(f"capture failed {key}: missing stdout")
+            time.sleep(2)
             continue
+        pre_roll: deque[bytes] = deque(maxlen=pre_roll_frames)
+        segment = bytearray()
+        in_speech = False
+        voiced_frames = 0
+        silence_frames = 0
+        total_segment_frames = 0
+        try:
+            while not stop_event.is_set():
+                frame = proc.stdout.read(FRAME_BYTES)
+                if len(frame) < FRAME_BYTES:
+                    break
+                is_speech = vad.is_speech(frame, RATE)
+                if not in_speech:
+                    pre_roll.append(frame)
+                    if not is_speech:
+                        continue
+                    in_speech = True
+                    segment.clear()
+                    for prior in pre_roll:
+                        segment.extend(prior)
+                    voiced_frames = 1
+                    silence_frames = 0
+                    total_segment_frames = len(pre_roll)
+                    continue
 
-        if transcribe_this and has_speech(path, vad):
-            transcript_file = transcript_dir / f"{day}.jsonl"
-            transcribe(path, node, transcript_file, asr_url)
+                segment.extend(frame)
+                total_segment_frames += 1
+                if is_speech:
+                    voiced_frames += 1
+                    silence_frames = 0
+                else:
+                    silence_frames += 1
 
-        if not archive_enabled and not transcribe_this:
-            path.unlink(missing_ok=True)
+                segment_complete = silence_frames >= max_silence_frames
+                segment_too_long = total_segment_frames >= max_segment_frames
+                if not segment_complete and not segment_too_long:
+                    continue
 
+                pcm = bytes(segment)
+                enough_speech = voiced_frames >= min_voiced_frames
+                in_speech = False
+                segment.clear()
+                voiced_frames = 0
+                silence_frames = 0
+                total_segment_frames = 0
+                pre_roll.clear()
+                if transcribe_this and enough_speech:
+                    finalize_segment(pcm, node, archive_dir, transcript_dir, asr_url, archive_enabled)
+        except Exception as exc:  # noqa: BLE001
+            log(f"capture loop failed {key}: {exc}")
+        finally:
+            proc.terminate()
+            try:
+                _, stderr = proc.communicate(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                _, stderr = proc.communicate(timeout=2)
+            if stderr and proc.returncode not in {0, -15, -9, None}:
+                log(f"pw-record exited {key}: {stderr.decode(errors='replace')[-500:]}")
+        time.sleep(1)
     log(f"capture stopped {key}")
 
 
@@ -191,21 +280,18 @@ def main() -> int:
     parser.add_argument("--archive-dir", required=True)
     parser.add_argument("--transcript-dir", required=True)
     parser.add_argument("--asr-url", default="http://127.0.0.1:7778")
-    parser.add_argument("--chunk-seconds", type=int, default=30)
     parser.add_argument("--refresh-seconds", type=int, default=15)
     parser.add_argument("--preferred-source-pattern", default=r"(?i)(blue.*yeti|yeti)")
-    parser.add_argument(
-        "--capture-outputs",
-        action="store_true",
-        help="Also record output/sink monitors. Off by default to avoid disturbing playback devices.",
-    )
-    parser.add_argument(
-        "--capture-all-inputs",
-        action="store_true",
-        help="Record every input/source instead of only the preferred source.",
-    )
+    parser.add_argument("--capture-outputs", action="store_true")
+    parser.add_argument("--capture-all-inputs", action="store_true")
     parser.add_argument("--no-transcribe", action="store_true")
     parser.add_argument("--no-archive", action="store_true")
+    parser.add_argument("--vad-aggressiveness", type=int, choices=range(4), default=2)
+    parser.add_argument("--pre-roll-ms", type=int, default=450)
+    parser.add_argument("--min-speech-ms", type=int, default=300)
+    parser.add_argument("--silence-ms", type=int, default=900)
+    parser.add_argument("--max-utterance-seconds", type=int, default=18)
+    parser.add_argument("--latency-ms", type=int, default=80)
     args = parser.parse_args()
 
     archive_dir = Path(args.archive_dir)
@@ -227,6 +313,11 @@ def main() -> int:
             time.sleep(args.refresh_seconds)
             continue
 
+        live_keys = {f"{node['kind']}:{node['name']}" for node in nodes}
+        for key, worker in list(workers.items()):
+            if key not in live_keys or not worker.is_alive():
+                workers.pop(key, None)
+
         for node in nodes:
             key = f"{node['kind']}:{node['name']}"
             worker = workers.get(key)
@@ -239,10 +330,15 @@ def main() -> int:
                     archive_dir,
                     transcript_dir,
                     args.asr_url,
-                    args.chunk_seconds,
-                    not args.no_transcribe,
                     preferred_re,
+                    not args.no_transcribe,
                     not args.no_archive,
+                    args.vad_aggressiveness,
+                    args.pre_roll_ms,
+                    args.min_speech_ms,
+                    args.silence_ms,
+                    args.max_utterance_seconds,
+                    args.latency_ms,
                 ),
                 daemon=True,
             )

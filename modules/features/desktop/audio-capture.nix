@@ -1,10 +1,10 @@
-# Continuous audio capture with VAD + ASR.
+# Always-on microphone capture with local VAD and cloud-first ASR.
 #
 # Runs two user services:
-# - sinnix-asr-server:    exposes local faster-whisper or local Cohere Transcribe on port 7778
-# - sinnix-audio-daemon:  captures the preferred PipeWire input and transcribes the Yeti mic
+# - sinnix-asr-server:    normalizes cloud/local ASR providers behind localhost:7778
+# - sinnix-audio-daemon:  segments the preferred PipeWire input into speech utterances
 #
-# Disabled by default (opt-in).
+# The daemon uploads only locally detected speech, not 24/7 silence.
 {
   mkFeatureModule,
   pkgs,
@@ -17,72 +17,89 @@ mkFeatureModule {
     "desktop"
     "audioCapture"
   ];
-  description = "Continuous audio capture with VAD and automatic ASR";
+  description = "Always-on microphone capture with local VAD and cloud-first ASR";
   enableDefault = false;
   extraOptions = {
     archiveDir = lib.mkOption {
       type = lib.types.str;
       default = "/realm/data/captures/audio";
-      description = "Directory for opus-compressed full-stream archives.";
+      description = "Directory for utterance WAV captures.";
     };
     transcriptDir = lib.mkOption {
       type = lib.types.str;
       default = "/realm/data/captures/audio/transcripts";
-      description = "Directory for ASR transcript JSONL files.";
+      description = "Directory for normalized transcript JSONL files.";
     };
     asrPort = lib.mkOption {
       type = lib.types.port;
       default = 7778;
-      description = "Port the ASR server listens on.";
+      description = "Port the ASR router listens on.";
+    };
+    asrProvider = lib.mkOption {
+      type = lib.types.enum [
+        "openai"
+        "deepgram"
+        "assemblyai"
+        "cohere-api"
+        "local"
+      ];
+      default = "openai";
+      description = "ASR backend used by the localhost router. Cloud providers are preferred for realtime quality/features.";
+    };
+    asrLanguage = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = "en";
+      description = "Optional language code passed to ASR providers.";
+    };
+    asrDiarization = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "Request speaker diarization where the selected provider supports it.";
     };
     asrModel = lib.mkOption {
       type = lib.types.str;
       default = "small";
-      description = "faster-whisper model name used by the local ASR server.";
+      description = "faster-whisper model used by the local fallback provider.";
     };
-    asrProvider = lib.mkOption {
-      type = lib.types.enum [
-        "local"
-        "cohere"
-        "cohere-api"
-      ];
-      default = "local";
-      description = "ASR backend used by the local HTTP service. Cohere uses local open weights.";
-    };
-    cohereModel = lib.mkOption {
+    openaiModel = lib.mkOption {
       type = lib.types.str;
-      default = "CohereLabs/cohere-transcribe-03-2026";
-      description = "Cohere Transcribe model repo or model name.";
+      default = "gpt-4o-mini-transcribe";
+      description = "OpenAI transcription model.";
     };
-    cohereRevision = lib.mkOption {
+    openaiApiKeyFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = lib.attrByPath [ "sinnix" "secrets" "paths" "openai-api-key" ] null config;
+      description = "Path to a file containing the OpenAI API key.";
+    };
+    deepgramModel = lib.mkOption {
       type = lib.types.str;
-      default = "refs/pr/6";
-      description = "Cohere Transcribe model revision used for the working Transformers implementation.";
+      default = "nova-3";
+      description = "Deepgram model name.";
+    };
+    deepgramApiKeyFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = lib.attrByPath [ "sinnix" "secrets" "paths" "deepgram-api-key" ] null config;
+      description = "Path to a file containing the Deepgram API key.";
+    };
+    assemblyaiModel = lib.mkOption {
+      type = lib.types.str;
+      default = "universal-2";
+      description = "AssemblyAI speech model.";
+    };
+    assemblyaiApiKeyFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = lib.attrByPath [ "sinnix" "secrets" "paths" "assemblyai-api-key" ] null config;
+      description = "Path to a file containing the AssemblyAI API key.";
     };
     cohereApiModel = lib.mkOption {
       type = lib.types.str;
       default = "cohere-transcribe-03-2026";
       description = "Cohere Transcribe API model name.";
     };
-    cohereLanguage = lib.mkOption {
-      type = lib.types.str;
-      default = "en";
-      description = "Single language code passed to Cohere Transcribe.";
-    };
     cohereApiKeyFile = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
-      default = lib.attrByPath [
-        "sinnix"
-        "secrets"
-        "paths"
-        "cohere-api-key"
-      ] null config;
+      default = lib.attrByPath [ "sinnix" "secrets" "paths" "cohere-api-key" ] null config;
       description = "Path to a file containing the Cohere API key.";
-    };
-    cohereMaxNewTokens = lib.mkOption {
-      type = lib.types.ints.positive;
-      default = 256;
-      description = "Maximum generated tokens for each Cohere Transcribe chunk.";
     };
     preferredSourcePattern = lib.mkOption {
       type = lib.types.str;
@@ -99,30 +116,55 @@ mkFeatureModule {
       default = false;
       description = "Record every input source instead of only the preferred source.";
     };
-    chunkSeconds = lib.mkOption {
-      type = lib.types.ints.positive;
-      default = 30;
-      description = "Length of each captured audio chunk.";
-    };
-    enableAsrServer = lib.mkOption {
+    archive = lib.mkOption {
       type = lib.types.bool;
       default = true;
-      description = "Run the persistent local ASR server.";
-    };
-    enableAudioDaemon = lib.mkOption {
-      type = lib.types.bool;
-      default = true;
-      description = "Run the capture daemon (pipewire → VAD → transcribe).";
+      description = "Archive finalized utterance WAV files. Off keeps only transcript JSONL.";
     };
     transcribe = lib.mkOption {
       type = lib.types.bool;
       default = true;
-      description = "Auto-transcribe detected speech segments. Requires ASR server.";
+      description = "Send finalized speech utterances to the ASR router.";
     };
-    archive = lib.mkOption {
+    vadAggressiveness = lib.mkOption {
+      type = lib.types.ints.between 0 3;
+      default = 2;
+      description = "WebRTC VAD aggressiveness: 0 least strict, 3 most strict.";
+    };
+    preRollMs = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 450;
+      description = "Audio kept before speech trigger to avoid clipped first syllables.";
+    };
+    minSpeechMs = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 300;
+      description = "Minimum voiced audio needed before an utterance is transcribed.";
+    };
+    silenceMs = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 900;
+      description = "Trailing silence that finalizes an utterance.";
+    };
+    maxUtteranceSeconds = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 18;
+      description = "Maximum utterance length before forced finalization.";
+    };
+    captureLatencyMs = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 80;
+      description = "PipeWire recording latency hint.";
+    };
+    enableAsrServer = lib.mkOption {
       type = lib.types.bool;
       default = true;
-      description = "Archive full audio streams as opus. Off = VAD + transcribe only, no archival.";
+      description = "Run the localhost ASR router.";
+    };
+    enableAudioDaemon = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Run the capture daemon (PipeWire → local VAD → ASR).";
     };
     extraArgs = lib.mkOption {
       type = lib.types.listOf lib.types.str;
@@ -141,46 +183,47 @@ mkFeatureModule {
     }:
     let
       pythonEnv = pkgs.python313.withPackages (ps: [
-        ps.accelerate
         ps.fastapi
         ps.uvicorn
         ps.python-multipart
         ps.faster-whisper
-        ps.huggingface-hub
-        ps.librosa
-        ps.protobuf
         ps.requests
-        ps.sentencepiece
         ps.setuptools
-        ps.soundfile
-        ps.torch
-        ps.transformers
         ps.webrtcvad
       ]);
       scriptsRoot = "${config.sinnix.paths.projectRoot}/scripts";
-      # Wrapper scripts — avoid needing a shebang bash inside systemd to cd around.
+      maybeSecret =
+        envName: path:
+        lib.optionalString (path != null) ''
+          export ${envName}=${lib.escapeShellArg path}
+        '';
+      maybeLanguage = lib.optionalString (cfg.asrLanguage != null) ''
+        export SINNIX_ASR_LANGUAGE=${lib.escapeShellArg cfg.asrLanguage}
+      '';
       asrWrapper = pkgs.writeShellScript "sinnix-asr-server-wrapper" ''
         set -euo pipefail
+        export SINNIX_ASR_PROVIDER=${lib.escapeShellArg cfg.asrProvider}
         export SINNIX_ASR_MODEL=${lib.escapeShellArg cfg.asrModel}
-        export SINNIX_COHERE_TRANSCRIBE_MODEL=${lib.escapeShellArg cfg.cohereModel}
-        export SINNIX_COHERE_TRANSCRIBE_REVISION=${lib.escapeShellArg cfg.cohereRevision}
+        export SINNIX_ASR_DIARIZATION=${if cfg.asrDiarization then "true" else "false"}
+        ${maybeLanguage}
+        export SINNIX_OPENAI_TRANSCRIBE_MODEL=${lib.escapeShellArg cfg.openaiModel}
+        export SINNIX_DEEPGRAM_MODEL=${lib.escapeShellArg cfg.deepgramModel}
+        export SINNIX_ASSEMBLYAI_MODEL=${lib.escapeShellArg cfg.assemblyaiModel}
         export SINNIX_COHERE_TRANSCRIBE_API_MODEL=${lib.escapeShellArg cfg.cohereApiModel}
-        export SINNIX_COHERE_TRANSCRIBE_LANGUAGE=${lib.escapeShellArg cfg.cohereLanguage}
-        export SINNIX_COHERE_TRANSCRIBE_MAX_NEW_TOKENS=${toString cfg.cohereMaxNewTokens}
+        ${maybeSecret "OPENAI_API_KEY_FILE" cfg.openaiApiKeyFile}
+        ${maybeSecret "DEEPGRAM_API_KEY_FILE" cfg.deepgramApiKeyFile}
+        ${maybeSecret "ASSEMBLYAI_API_KEY_FILE" cfg.assemblyaiApiKeyFile}
+        ${maybeSecret "COHERE_API_KEY_FILE" cfg.cohereApiKeyFile}
         export OMP_NUM_THREADS=1
         export MKL_NUM_THREADS=1
         export OPENBLAS_NUM_THREADS=1
         export NUMEXPR_NUM_THREADS=1
-        ${lib.optionalString (cfg.cohereApiKeyFile != null) ''
-          export COHERE_API_KEY_FILE=${lib.escapeShellArg cfg.cohereApiKeyFile}
-        ''}
         export PATH=${
           lib.makeBinPath [
             pythonEnv
             pkgs.ffmpeg
           ]
         }:$PATH
-        export SINNIX_ASR_PROVIDER=${lib.escapeShellArg cfg.asrProvider}
         exec ${pythonEnv}/bin/python3 ${scriptsRoot}/sinnix-asr-server \
           --host 127.0.0.1 \
           --port ${toString cfg.asrPort}
@@ -199,8 +242,13 @@ mkFeatureModule {
           --archive-dir ${lib.escapeShellArg cfg.archiveDir} \
           --transcript-dir ${lib.escapeShellArg cfg.transcriptDir} \
           --asr-url http://127.0.0.1:${toString cfg.asrPort} \
-          --chunk-seconds ${toString cfg.chunkSeconds} \
           --preferred-source-pattern ${lib.escapeShellArg cfg.preferredSourcePattern} \
+          --vad-aggressiveness ${toString cfg.vadAggressiveness} \
+          --pre-roll-ms ${toString cfg.preRollMs} \
+          --min-speech-ms ${toString cfg.minSpeechMs} \
+          --silence-ms ${toString cfg.silenceMs} \
+          --max-utterance-seconds ${toString cfg.maxUtteranceSeconds} \
+          --latency-ms ${toString cfg.captureLatencyMs} \
           ${lib.optionalString cfg.captureOutputs "--capture-outputs"} \
           ${lib.optionalString cfg.captureAllInputs "--capture-all-inputs"} \
           ${lib.optionalString (!cfg.transcribe) "--no-transcribe"} \
@@ -209,12 +257,31 @@ mkFeatureModule {
       '';
     in
     {
+      assertions = [
+        {
+          assertion = !(cfg.asrProvider == "openai" && cfg.openaiApiKeyFile == null);
+          message = "audioCapture.asrProvider=openai requires openaiApiKeyFile";
+        }
+        {
+          assertion = !(cfg.asrProvider == "deepgram" && cfg.deepgramApiKeyFile == null);
+          message = "audioCapture.asrProvider=deepgram requires deepgramApiKeyFile";
+        }
+        {
+          assertion = !(cfg.asrProvider == "assemblyai" && cfg.assemblyaiApiKeyFile == null);
+          message = "audioCapture.asrProvider=assemblyai requires assemblyaiApiKeyFile";
+        }
+        {
+          assertion = !(cfg.asrProvider == "cohere-api" && cfg.cohereApiKeyFile == null);
+          message = "audioCapture.asrProvider=cohere-api requires cohereApiKeyFile";
+        }
+      ];
+
       home-manager.users.${user} =
-        { pkgs, lib, ... }:
+        { lib, ... }:
         {
           systemd.user.services.sinnix-asr-server = lib.mkIf cfg.enableAsrServer {
             Unit = {
-              Description = "Sinnix persistent ASR server";
+              Description = "Sinnix ASR router";
               After = [ "default.target" ];
             };
             Service = {
@@ -222,16 +289,14 @@ mkFeatureModule {
               ExecStart = "${asrWrapper}";
               Restart = "on-failure";
               RestartSec = 10;
-              Environment = [
-                "HF_HOME=%h/.cache/huggingface"
-              ];
+              Environment = [ "HF_HOME=%h/.cache/huggingface" ];
             };
             Install.WantedBy = [ "default.target" ];
           };
 
           systemd.user.services.sinnix-audio-daemon = lib.mkIf cfg.enableAudioDaemon {
             Unit = {
-              Description = "Sinnix continuous audio capture + auto-transcribe";
+              Description = "Sinnix always-on microphone capture + transcription";
               After = [
                 "graphical-session.target"
                 "pipewire.service"
@@ -250,8 +315,7 @@ mkFeatureModule {
             Install.WantedBy = [ "graphical-session.target" ];
           };
 
-          # Ensure capture dirs exist at activation.
-          home.activation.audioCaptureArchiveDir = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+          home.activation.audioCaptureDirs = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
             run mkdir -p ${cfg.archiveDir}
             run mkdir -p ${cfg.transcriptDir}
           '';

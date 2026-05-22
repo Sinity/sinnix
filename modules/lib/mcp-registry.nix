@@ -12,6 +12,7 @@ let
         "forge"
         "hermes"
       ];
+      codex.bearer_token_env_var = "CONTEXT7_API_KEY";
       hermes.headers.Authorization = "Bearer \${CONTEXT7_API_KEY}";
     };
 
@@ -42,6 +43,10 @@ let
     lynchpin = {
       transport = "stdio";
       command = "mcp-lynchpin";
+      env = {
+        LYNCHPIN_REPO_ROOT = "/realm/project/sinity-lynchpin";
+        LYNCHPIN_LOCAL_ROOT = "/realm/project/sinity-lynchpin/.lynchpin";
+      };
       clients = [
         "codex"
         "claude"
@@ -121,6 +126,7 @@ let
         {
           inherit (server) command;
           args = server.args or [ ];
+          env = server.env or { };
           disable = false;
         }
     );
@@ -167,6 +173,7 @@ let
         {
           inherit (server) command;
           args = server.args or [ ];
+          env = server.env or { };
         }
     );
 
@@ -186,6 +193,7 @@ let
         {
           inherit (server) command;
           args = server.args or [ ];
+          env = server.env or { };
         }
     );
 
@@ -205,6 +213,7 @@ let
         {
           inherit (server) command;
           args = server.args or [ ];
+          env = server.env or { };
         }
     );
 in

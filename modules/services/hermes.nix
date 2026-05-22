@@ -70,6 +70,37 @@ let
       exec "$@"
     }
   '';
+
+  mkHermesModeWrapper =
+    {
+      name,
+      skills,
+      toolsets,
+      sessionName,
+      extraArgs ? [ ],
+    }:
+    {
+      text = ''
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        HERMES_BIN="${cfg.package}/bin/hermes"
+        unset PYTHONPATH PYTHONHOME PYTHONBREAKPOINT PYTHONUSERBASE VIRTUAL_ENV
+        export PYTHONNOUSERSITE=1
+
+        ${agentScopePrelude}
+
+        run_agent_scoped "$HERMES_BIN" \
+          --continue "${sessionName}" \
+          --skills "${skills}" \
+          --toolsets "${toolsets}" \
+          ${lib.concatStringsSep " \\\
+          " (map lib.escapeShellArg extraArgs)} \
+          "$@"
+      '';
+      executable = true;
+      force = true;
+    };
 in
 {
   options.sinnix.services.hermes = {
@@ -163,6 +194,34 @@ in
           '';
           executable = true;
           force = true;
+        };
+
+        ".local/bin/hermes-mirror" = mkHermesModeWrapper {
+          name = "hermes-mirror";
+          sessionName = "cognitive-mirror";
+          skills = "cognitive-mirroring";
+          toolsets = "skills,memory,session_search,terminal,file,todo,delegation";
+        };
+
+        ".local/bin/hermes-rp" = mkHermesModeWrapper {
+          name = "hermes-rp";
+          sessionName = "cognitive-mirror-rp";
+          skills = "cognitive-mirroring";
+          toolsets = "skills,memory,session_search,file";
+        };
+
+        ".local/bin/hermes-research" = mkHermesModeWrapper {
+          name = "hermes-research";
+          sessionName = "research";
+          skills = "deep-research,hermes-agent";
+          toolsets = "web,browser,search,delegation,file,terminal,skills";
+        };
+
+        ".local/bin/hermes-code" = mkHermesModeWrapper {
+          name = "hermes-code";
+          sessionName = "code";
+          skills = "sinnix-workflows,git-conventions,hermes-agent";
+          toolsets = "terminal,file,github,context7,delegation,skills,todo";
         };
       };
     };

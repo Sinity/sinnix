@@ -8,9 +8,13 @@
 {
   boot = {
     loader = {
+      timeout = 15;
       systemd-boot = {
+        editor = true;
+        consoleMode = "keep";
         enable = true;
         memtest86.enable = true;
+        edk2-uefi-shell.enable = true;
         # Keep the boot menu readable and leave the deeper rollback window to
         # the Nix profile itself.
         configurationLimit = 10;
@@ -76,14 +80,13 @@
       ++ lib.optionals (config.sinnix.gpu.mode == "igpu") [ "nouveau" ];
     kernelModules = [ "kvm-intel" ] ++ lib.optionals (config.sinnix.gpu.mode == "igpu") [ "i915" ];
 
-    consoleLogLevel = 3;
+    consoleLogLevel = 4;
 
     kernelParams = [
-      "quiet"
       "rw"
       "vt.global_cursor_default=0"
-      "rd.systemd.show_status=false"
-      "rd.udev.log-priority=3"
+      "rd.systemd.show_status=true"
+      "rd.udev.log-priority=info"
       "acpi_enforce_resources=lax"
       "vga=current"
       # Low-latency: allow preemption of almost all kernel code paths.
@@ -91,12 +94,62 @@
       "preempt=full"
       # Prevent USB device autosuspend — eliminates wakeup latency on mouse/keyboard
       "usbcore.autosuspend=-1"
+      # Crucial P3 / workstation NVMe stability: avoid deep APST states that
+      # can turn intermittent controller latency into kernel I/O timeouts.
+      "nvme_core.default_ps_max_latency_us=0"
+      # Keep PCIe link power management out of the storage path while /realm is
+      # producing NVMe command timeouts under Btrfs metadata writeback.
+      "pcie_aspm=off"
+      # Keep boot diagnostics visible without debug-level systemd spam.
+      "loglevel=4"
+      "systemd.default_timeout_start_sec=30s"
+      "systemd.default_timeout_stop_sec=10s"
     ]
     ++ lib.optionals (config.sinnix.gpu.mode == "dual") [
       # xe loads as a transitive dep of nvidia and claims the iGPU PCI ID (0xa780)
       # before i915 can bind. force_probe opts the UHD 770 into xe's binding path.
       "xe.force_probe=a780"
     ];
+  };
+
+  specialisation = {
+    recovery-nomodeset.configuration = {
+      system.nixos.tags = [ "recovery-nomodeset" ];
+      boot.kernelParams = [
+        "systemd.unit=multi-user.target"
+        "nomodeset"
+        "systemd.mask=display-manager.service"
+      ];
+    };
+
+    recovery-skip-binds.configuration = {
+      system.nixos.tags = [ "recovery-skip-binds" ];
+      boot.kernelParams = [
+        "systemd.unit=multi-user.target"
+        "nomodeset"
+        "systemd.mask=display-manager.service"
+        "systemd.mask=var-log-journal.mount"
+        "systemd.mask=home-sinity-.local-share-polylogue.mount"
+      ];
+    };
+
+    recovery-rescue.configuration = {
+      system.nixos.tags = [ "recovery-rescue" ];
+      boot.kernelParams = [
+        "systemd.unit=rescue.target"
+        "nomodeset"
+        "systemd.mask=display-manager.service"
+      ];
+    };
+
+    recovery-emergency.configuration = {
+      system.nixos.tags = [ "recovery-emergency" ];
+      boot.kernelParams = [
+        "systemd.unit=emergency.target"
+        "nomodeset"
+        "systemd.mask=display-manager.service"
+      ];
+    };
   };
 
   hardware.enableRedistributableFirmware = true;

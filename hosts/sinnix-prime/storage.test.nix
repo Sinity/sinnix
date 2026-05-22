@@ -11,6 +11,7 @@
         "/"
         "/nix"
         "/persist"
+        "/swap"
         config.sinnix.paths.realmRoot
       ];
       optionsFor = mount: lib.attrByPath [ "fileSystems" mount "options" ] [ ] config;
@@ -20,6 +21,7 @@
       persistedHomeDirs = map (
         entry: if builtins.isAttrs entry then entry.directory else entry
       ) config.sinnix.persistence.home.directories;
+      swapDevice = builtins.head config.swapDevices;
     in
     [
       {
@@ -44,6 +46,15 @@
       {
         assertion = !(builtins.elem ".local/share/polylogue" persistedHomeDirs);
         message = "Polylogue archive bytes must not be impermanence-mounted from /persist";
+      }
+      {
+        assertion =
+          builtins.length config.swapDevices == 1
+          && swapDevice.device == "/swap/swapfile"
+          && swapDevice.size == 64 * 1024
+          && builtins.elem "subvol=@swap" (optionsFor "/swap")
+          && builtins.elem "nodatacow" (optionsFor "/swap");
+        message = "swapfile must live on a dedicated non-snapshotted btrfs subvolume";
       }
     ];
 }

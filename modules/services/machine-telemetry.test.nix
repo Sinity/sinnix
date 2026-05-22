@@ -11,7 +11,11 @@ mkServiceTest {
     config:
     let
       service = config.systemd.services.machine-telemetry.serviceConfig;
-      source = builtins.readFile (inputs.self + "/modules/services/machine-telemetry.nix");
+      # The collector body was extracted from this .nix into pkgs/machine-telemetry/collector.py.
+      # Substring assertions need both files concatenated to keep covering the same surface.
+      source =
+        builtins.readFile (inputs.self + "/modules/services/machine-telemetry.nix")
+        + builtins.readFile (inputs.self + "/pkgs/machine-telemetry/collector.py");
       hasTmpfilesRule =
         pattern:
         builtins.any (rule: builtins.match ".*${pattern}.*" rule != null) config.systemd.tmpfiles.rules;

@@ -15,6 +15,7 @@
 }:
 let
   username = config.sinnix.user.name;
+  primaryGroupName = config.users.users.${username}.group or username;
   userPasswordSecret = "${username}-password";
   secretDir = inputs.self + "/secret";
   cfg = config.sinnix.secrets;
@@ -56,7 +57,7 @@ let
         else if secretName == "sinex-local-db" then
           defaultSpec
           // {
-            group = "postgres";
+            group = if config.users.groups ? postgres then "postgres" else primaryGroupName;
             mode = "0440";
             path = "/run/agenix/sinex-local-db";
           }

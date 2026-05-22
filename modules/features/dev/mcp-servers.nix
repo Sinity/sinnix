@@ -32,6 +32,7 @@ mkFeatureModule {
     let
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
       jsonFormat = pkgs.formats.json { };
+      tomlFormat = pkgs.formats.toml { };
       mcpRegistry = import ../../lib/mcp-registry.nix { inherit lib; };
       firecrawlSecretPath = lib.attrByPath [ "sinnix" "secrets" "paths" "firecrawl-api-key" ] null config;
       mkRuntimeSecretExports =
@@ -48,10 +49,14 @@ mkFeatureModule {
         {
           command,
           args ? [ ],
+          runtimeEnv ? { },
           runtimeSecretEnv ? { },
         }:
         pkgs.writeShellScriptBin name ''
           set -euo pipefail
+          ${lib.concatStringsSep "\n" (
+            lib.mapAttrsToList (envName: value: "export ${envName}=${lib.escapeShellArg value}") runtimeEnv
+          )}
           ${mkRuntimeSecretExports runtimeSecretEnv}
           exec ${lib.escapeShellArgs ([ command ] ++ args)} "$@"
         '';
@@ -94,14 +99,27 @@ mkFeatureModule {
       '';
       mcpLynchpinBin = mkMcpWrapper "mcp-lynchpin" {
         command = "${scriptPkgs.lynchpin-cli}/bin/lynchpin-mcp";
+        runtimeEnv = {
+          LYNCHPIN_REPO_ROOT = "/realm/project/sinity-lynchpin";
+          LYNCHPIN_LOCAL_ROOT = "/realm/project/sinity-lynchpin/.lynchpin";
+        };
       };
       mcpPolylogueBin = mkMcpWrapper "mcp-polylogue" {
         command = "${scriptPkgs.polylogue-cli}/bin/polylogue-mcp";
       };
       geminiPkg = inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.gemini-cli;
-      inherit (mcpRegistry) selectClientServers renderForgeServer;
+      inherit (mcpRegistry)
+        selectClientServers
+        renderCodexServer
+        renderForgeServer
+        ;
       forgeMcpServers = lib.mapAttrs renderForgeServer (selectClientServers "forge");
       forgeMcpConfigFile = jsonFormat.generate "forge-mcp.json" { mcpServers = forgeMcpServers; };
+      codexMcpServers = lib.mapAttrs renderCodexServer (selectClientServers "codex");
+      codexMcpConfigFile = tomlFormat.generate "codex-mcp.toml" { mcp_servers = codexMcpServers; };
+      codexConfigFile = pkgs.runCommandLocal "codex-config.toml" { } ''
+        cat ${inputs.self + "/dots/codex/config.toml"} ${codexMcpConfigFile} > "$out"
+      '';
     in
     {
       home-manager.users.${user} =
@@ -165,9 +183,11 @@ mkFeatureModule {
           };
 
           home.file = {
-            # Canonical Codex location is ~/.codex.
+            # Canonical Codex location is ~/.codex. Static defaults live in
+            # dots/codex/config.toml; MCP server entries are appended from the
+            # shared registry so Codex does not drift from Claude/Forge/Gemini/Hermes.
             ".codex/config.toml" = {
-              source = mkDotsFile "/codex/config.toml";
+              source = codexConfigFile;
               force = true;
             };
             # Codex keeps a dedicated overlay tree; canonical shared skills live in dots/_ai/skills.
@@ -176,12 +196,30 @@ mkFeatureModule {
               source = forgeMcpConfigFile;
               force = true;
             };
-            ".local/bin/mcp-firecrawl".source = "${mcpFirecrawlBin}/bin/mcp-firecrawl";
-            ".local/bin/mcp-playwright".source = "${mcpPlaywrightBin}/bin/mcp-playwright";
-            ".local/bin/mcp-playwright-headed".source = "${mcpPlaywrightHeadedBin}/bin/mcp-playwright-headed";
-            ".local/bin/mcp-chrome-devtools".source = "${mcpChromeDevtoolsBin}/bin/mcp-chrome-devtools";
-            ".local/bin/mcp-lynchpin".source = "${mcpLynchpinBin}/bin/mcp-lynchpin";
-            ".local/bin/mcp-polylogue".source = "${mcpPolylogueBin}/bin/mcp-polylogue";
+            ".local/bin/mcp-firecrawl" = {
+              source = "${mcpFirecrawlBin}/bin/mcp-firecrawl";
+              force = true;
+            };
+            ".local/bin/mcp-playwright" = {
+              source = "${mcpPlaywrightBin}/bin/mcp-playwright";
+              force = true;
+            };
+            ".local/bin/mcp-playwright-headed" = {
+              source = "${mcpPlaywrightHeadedBin}/bin/mcp-playwright-headed";
+              force = true;
+            };
+            ".local/bin/mcp-chrome-devtools" = {
+              source = "${mcpChromeDevtoolsBin}/bin/mcp-chrome-devtools";
+              force = true;
+            };
+            ".local/bin/mcp-lynchpin" = {
+              source = "${mcpLynchpinBin}/bin/mcp-lynchpin";
+              force = true;
+            };
+            ".local/bin/mcp-polylogue" = {
+              source = "${mcpPolylogueBin}/bin/mcp-polylogue";
+              force = true;
+            };
             ".gemini/settings.json" = {
               source = mkDotsFile "/gemini/settings.json";
               force = true;

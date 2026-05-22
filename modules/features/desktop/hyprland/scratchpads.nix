@@ -131,7 +131,11 @@ let
         "--class"
         "scratchpad-agent2"
         "--title"
-        "Hermes-2"
+        "Hermes-Mirror"
+        "hermes"
+        "--continue"
+        "cognitive-mirror"
+        "--skills"
       ];
     };
   };

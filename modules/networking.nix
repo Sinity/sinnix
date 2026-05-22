@@ -15,10 +15,9 @@
 }:
 let
   inherit (config.sinnix.machine) isDesktop;
-  bluezExperimental = pkgs.bluez.override { enableExperimental = true; };
   desktopNetworkingPackages = [
     pkgs.networkmanagerapplet
-    bluezExperimental
+    pkgs.bluez
     pkgs.bluez-tools
   ];
   networkingToolPackages = with pkgs; [
@@ -122,7 +121,7 @@ in
     hardware.bluetooth = lib.mkIf isDesktop {
       enable = lib.mkDefault true;
       powerOnBoot = lib.mkDefault true;
-      package = lib.mkDefault bluezExperimental;
+      package = lib.mkDefault pkgs.bluez;
       settings = {
         Policy = {
           AutoEnable = true;
@@ -134,13 +133,9 @@ in
         General = {
           ControllerMode = lib.mkDefault "dual";
           DiscoverableTimeout = lib.mkDefault 0;
-          Experimental = lib.mkDefault true;
+          Experimental = lib.mkDefault false;
           FastConnectable = lib.mkDefault true;
           MultiProfile = lib.mkDefault "multiple";
-          # Enable ISO socket so BAP (LE Audio) probe succeeds.
-          # Without this, Experimental=true loads the BAP plugin but ISO
-          # stays disabled → "BAP requires ISO Socket" error on every boot.
-          KernelExperimental = lib.mkDefault "6fbaf188-05e0-496a-9885-d6ddfdb4e03e";
         };
       };
     };

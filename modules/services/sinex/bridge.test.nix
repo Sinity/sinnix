@@ -3,6 +3,14 @@
   name = "services-sinex-delayed-runtime";
   modules = [
     { imports = [ (inputs.self + "/hosts/sinnix-prime") ]; }
+    {
+      sinnix.services.sinex = {
+        enable = lib.mkForce true;
+        autoStart = lib.mkForce false;
+        prepareHost = lib.mkForce true;
+        provisionDatabase = lib.mkForce true;
+      };
+    }
   ];
   assertions =
     config:

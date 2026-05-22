@@ -43,12 +43,12 @@ mkFeatureModule {
                 "bluez5.enable-sbc-xq" = true;
                 "bluez5.enable-msbc" = true;
                 "bluez5.enable-hw-volume" = true;
-                # Only expose high-fidelity roles; drop HSP/HFP so headsets never fall back to handsfree
+                # Keep Bluetooth headphones on classic A2DP. LE Audio/BAP
+                # currently exposes Galaxy Buds2 Pro as LC3 sinks that reset
+                # their ISO transport, leaving them connected with no audio.
                 "bluez5.roles" = [
                   "a2dp_sink"
                   "a2dp_source"
-                  "bap_sink"
-                  "bap_source"
                 ];
               };
             };

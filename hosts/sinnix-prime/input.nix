@@ -8,6 +8,8 @@
 let
   keylogRoot = "${config.sinnix.paths.capturesRoot}/keylog";
   username = config.sinnix.user.name;
+  enableKeyCapture = false;
+  enableLogitechMaintenance = false;
   interceptTools = pkgs.interception-tools;
   capsPlugin = pkgs.interception-tools-plugins.caps2esc;
   interceptBouncePkg =
@@ -46,13 +48,17 @@ let
     "1"
   ];
   uinputCmd = "${interceptTools}/bin/uinput -d $DEVNODE";
-  pipeline = lib.concatStringsSep " | " [
-    interceptCmd
-    bounceCmd
-    scribeCmd
-    capsCmd
-    uinputCmd
-  ];
+  pipeline = lib.concatStringsSep " | " (
+    [
+      interceptCmd
+      bounceCmd
+    ]
+    ++ lib.optional enableKeyCapture scribeCmd
+    ++ [
+      capsCmd
+      uinputCmd
+    ]
+  );
 
   logitechMaintenance = pkgs.writeShellScript "logitech-maintenance" ''
     #!/usr/bin/env bash
@@ -114,7 +120,7 @@ in
   programs.dconf.enable = true;
 
   systemd = {
-    tmpfiles.rules = [
+    tmpfiles.rules = lib.optionals enableKeyCapture [
       "d ${keylogRoot} 0700 ${username} users -"
       "d ${keylogRoot}/logs 0700 ${username} users -"
       "d ${keylogRoot}/snapshots 0700 ${username} users -"
@@ -138,7 +144,7 @@ in
           Restart = "on-failure";
           RestartSec = 10;
         };
-        wantedBy = [ "graphical-session.target" ];
+        wantedBy = lib.optionals enableLogitechMaintenance [ "graphical-session.target" ];
       };
 
       # DISABLED: Timer causes Solaar to recreate virtual keyboard ~8 times per run
@@ -161,10 +167,10 @@ in
   };
 
   systemd.services.interception-tools = {
-    unitConfig.RequiresMountsFor = [ keylogRoot ];
+    unitConfig.RequiresMountsFor = lib.optional enableKeyCapture keylogRoot;
     serviceConfig = {
       Slice = "recovery.slice";
-      ExecStartPre = [
+      ExecStartPre = lib.optionals enableKeyCapture [
         (pkgs.writeShellScript "interception-tools-init" ''
           #!/usr/bin/env bash
           set -euo pipefail

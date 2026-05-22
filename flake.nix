@@ -56,9 +56,9 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Private repo — fetch via ssh (relies on the user's ssh-agent).
+    # Private repo — fetch via HTTPS through the local gh/git credential helper.
     yt-polisher = {
-      url = "git+ssh://git@github.com/Sinity/yt-polisher.git?ref=master";
+      url = "git+https://github.com/Sinity/yt-polisher.git?ref=master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -88,9 +88,11 @@
     nix-vscode-extensions.url = "github:nix-community/nix-vscode-extensions";
     nix-vscode-extensions.inputs.nixpkgs.follows = "nixpkgs";
 
+    # Fast-moving agent CLI package supply. Keep its nixpkgs independent:
+    # upstream packages are daily-updated and often expect their own pinned
+    # dependency graph. Sinnix wraps/projects these tools locally instead of
+    # owning their package derivations.
     llm-agents.url = "github:numtide/llm-agents.nix";
-    llm-agents.inputs.nixpkgs.follows = "nixpkgs";
-    llm-agents.inputs.flake-parts.follows = "flake-parts";
 
     # aw-server-rust with heartbeat fix (PR #555)
     aw-server-rust = {

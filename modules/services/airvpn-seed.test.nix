@@ -46,10 +46,9 @@ in
       commonAssertions config
       ++ [
         {
-          assertion =
-            builtins.elem "multi-user.target" (
-              config.systemd.targets.wireguard-airvpn-seed.wantedBy or [ ]
-            );
+          assertion = builtins.elem "multi-user.target" (
+            config.systemd.targets.wireguard-airvpn-seed.wantedBy or [ ]
+          );
           message = "airvpn-seed must start at boot by default";
         }
       ];

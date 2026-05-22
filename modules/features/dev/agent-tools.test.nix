@@ -61,6 +61,31 @@ mkFeatureTest {
         message = "Shared skills tree must not contain self-referential symlinks: ${lib.concatStringsSep ", " sharedSkillSelfLinks}";
       }
       (expect.hmFileExists hm ".local/bin/claude" "Claude wrapper must exist")
+      (expect.hmFileExists hm ".local/bin/claude-opus" "Claude Opus wrapper must exist")
+      (expect.hmFileExists hm ".local/bin/claude-sonnet" "Claude Sonnet wrapper must exist")
+      (expect.hmFileExists hm ".local/bin/claude-lite" "Claude bare/no-MCP wrapper must exist")
+      (expect.hmFileTextContainsAll hm ".local/bin/claude" [
+        "--mcp-config"
+        "--strict-mcp-config"
+      ] "Default Claude wrapper must use only the managed MCP config")
+      (expect.hmFileTextContainsAll hm ".local/bin/claude-opus" [
+        "--model"
+        "opus"
+        "--effort"
+        "high"
+      ] "Claude Opus wrapper must force the Opus high-effort profile")
+      (expect.hmFileTextContainsAll hm ".local/bin/claude-sonnet" [
+        "--model"
+        "sonnet"
+        "--effort"
+        "medium"
+      ] "Claude Sonnet wrapper must force the Sonnet medium-effort profile")
+      (expect.hmFileTextContainsAll hm ".local/bin/claude-lite" [
+        "--bare"
+      ] "Claude lite wrapper must run bare")
+      (expect.hmFileTextNotMatches hm ".local/bin/claude-lite" ".*--mcp-config.*"
+        "Claude lite wrapper must not attach MCP servers"
+      )
       {
         assertion = lib.any (pkg: lib.getName pkg == "sinnix-scope") hm.home.packages;
         message = "sinnix-scope must be in the user profile so wrapper runtime fallbacks are real";
@@ -90,6 +115,33 @@ mkFeatureTest {
         message = "DeepSeek wrapper must force v4 pro 1m for default, opus, sonnet, haiku, and subagents";
       }
       (expect.hmFileExists hm ".local/bin/codex" "Codex wrapper must exist")
+      (expect.hmFileExists hm ".local/bin/codex-fast" "Codex fast profile wrapper must exist")
+      (expect.hmFileExists hm ".local/bin/codex-deep" "Codex deep profile wrapper must exist")
+      (expect.hmFileExists hm ".local/bin/codex-max" "Codex max profile wrapper must exist")
+      (expect.hmFileExists hm ".local/bin/codex-spark" "Codex Spark profile wrapper must exist")
+      (expect.hmFileExists hm ".local/bin/codex-spark-xhigh"
+        "Codex Spark xhigh profile wrapper must exist"
+      )
+      (expect.hmFileTextContainsAll hm ".local/bin/codex-fast" [
+        "--profile"
+        "fast"
+      ] "Codex fast wrapper must select the fast profile")
+      (expect.hmFileTextContainsAll hm ".local/bin/codex-deep" [
+        "--profile"
+        "deep"
+      ] "Codex deep wrapper must select the deep profile")
+      (expect.hmFileTextContainsAll hm ".local/bin/codex-max" [
+        "--profile"
+        "max"
+      ] "Codex max wrapper must select the max profile")
+      (expect.hmFileTextContainsAll hm ".local/bin/codex-spark" [
+        "--profile"
+        "spark_medium"
+      ] "Codex Spark wrapper must select the Spark medium profile")
+      (expect.hmFileTextContainsAll hm ".local/bin/codex-spark-xhigh" [
+        "--profile"
+        "spark_xhigh"
+      ] "Codex Spark xhigh wrapper must select the Spark xhigh profile")
       (expect.hmFileTextContainsAll hm ".local/bin/codex" [
         ''scope_bin="''
         "/bin/sinnix-scope"

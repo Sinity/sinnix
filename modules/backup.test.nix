@@ -1,4 +1,9 @@
-{ mountTmpfsRoots, baseTestConfig, ... }:
+{
+  lib,
+  mountTmpfsRoots,
+  baseTestConfig,
+  ...
+}:
 {
   name = "backup-btrbk";
   modules = [
@@ -24,6 +29,19 @@
       persistBorgService = config.systemd.services.borgbackup-job-persist.serviceConfig;
       borgCheckService = config.systemd.services.borgbackup-check.serviceConfig;
       borgCheckTimer = config.systemd.timers.borgbackup-check.timerConfig;
+      btrfsImageService = config.systemd.services.btrfs-metadata-image-backup;
+      btrfsImageServiceConfig = btrfsImageService.serviceConfig;
+      rootSnapshotService = config.systemd.services.borgbackup-root-snapshots;
+      rootSnapshotServiceConfig = rootSnapshotService.serviceConfig;
+      serviceRestartIfChanged =
+        name: lib.attrByPath [ "systemd" "services" name "restartIfChanged" ] true config;
+      hasBackgroundPriority =
+        service:
+        service.Nice == 10
+        && service.CPUSchedulingPolicy == "idle"
+        && service.IOSchedulingClass == "idle"
+        && service.CPUWeight == 20
+        && service.IOWeight == 20;
       hasTmpfilesRule =
         pattern:
         builtins.any (rule: builtins.match ".*${pattern}.*" rule != null) config.systemd.tmpfiles.rules;
@@ -108,42 +126,36 @@
       {
         assertion =
           btrbkService.TimeoutStopSec == "15s"
-          && !(btrbkService ? IOWeight)
-          && !(btrbkService ? CPUWeight)
-          && !(btrbkService ? IOSchedulingClass)
+          && !serviceRestartIfChanged "btrbk"
+          && hasBackgroundPriority btrbkService
           && !(btrbkService ? Slice)
           && !(btrbkService ? ExecCondition);
-        message = "btrbk must use the plain maintenance baseline without cgroup policy";
+        message = "btrbk must yield CPU and I/O to interactive work";
       }
       {
         assertion =
           persistBorgService.TimeoutStopSec == "15s"
           && realmBorgService.TimeoutStopSec == "15s"
-          && !(persistBorgService ? IOWeight)
-          && !(realmBorgService ? IOWeight)
-          && !(persistBorgService ? CPUWeight)
-          && !(realmBorgService ? CPUWeight)
-          && (!(persistBorgService ? IOSchedulingClass) || persistBorgService.IOSchedulingClass == null)
-          && (!(realmBorgService ? IOSchedulingClass) || realmBorgService.IOSchedulingClass == null)
-          && (!(persistBorgService ? CPUSchedulingPolicy) || persistBorgService.CPUSchedulingPolicy == null)
-          && (!(realmBorgService ? CPUSchedulingPolicy) || realmBorgService.CPUSchedulingPolicy == null)
+          && !serviceRestartIfChanged "borgbackup-job-persist"
+          && !serviceRestartIfChanged "borgbackup-job-realm"
+          && hasBackgroundPriority persistBorgService
+          && hasBackgroundPriority realmBorgService
           && !(persistBorgService ? Slice)
           && !(realmBorgService ? Slice)
           && !(persistBorgService ? ExecCondition)
           && !(realmBorgService ? ExecCondition);
-        message = "Borg backup jobs must use the plain maintenance baseline without cgroup policy";
+        message = "Borg backup jobs must yield CPU and I/O to interactive work";
       }
       {
         assertion =
           borgCheckService.TimeoutStopSec == "15s"
-          && !(borgCheckService ? IOWeight)
-          && !(borgCheckService ? CPUWeight)
-          && !(borgCheckService ? IOSchedulingClass)
+          && !serviceRestartIfChanged "borgbackup-check"
+          && hasBackgroundPriority borgCheckService
           && !(borgCheckService ? Slice)
           && !(borgCheckService ? ExecCondition)
           && !(borgCheckService ? IOReadBandwidthMax)
           && !(borgCheckService ? IOWriteBandwidthMax);
-        message = "Borg integrity checks must use the plain maintenance baseline";
+        message = "Borg integrity checks must yield CPU and I/O to interactive work";
       }
       {
         assertion =
@@ -182,6 +194,26 @@
       {
         assertion = config.system.activationScripts ? borgRepositoryDirectories;
         message = "Borg repository directories must be created during activation";
+      }
+      {
+        assertion =
+          (config.systemd.timers ? btrfs-metadata-image-backup)
+          && builtins.elem "realm.mount" btrfsImageService.requires
+          && builtins.elem "outer\\x2drealm.mount" btrfsImageService.requires
+          && !btrfsImageService.restartIfChanged
+          && hasBackgroundPriority btrfsImageServiceConfig
+          &&
+            builtins.match ".*btrfs-image -c 9.*/dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a.*" btrfsImageService.script
+            != null
+          &&
+            builtins.match ".*btrfs-image -c 9.*/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02.*" btrfsImageService.script
+            != null;
+        message = "Btrfs metadata images must be captured off-disk for native recovery";
+      }
+      {
+        assertion =
+          !rootSnapshotService.restartIfChanged && hasBackgroundPriority rootSnapshotServiceConfig;
+        message = "Root snapshot archival must yield CPU and I/O to interactive work";
       }
     ];
 }

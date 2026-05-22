@@ -44,7 +44,7 @@
     [
       {
         assertion = !config.zramSwap.enable;
-        message = "zram must stay disabled on the workstation baseline";
+        message = "desktop must use persistent swap instead of zram";
       }
       {
         assertion = !config.systemd.oomd.enable && config.services.earlyoom.enable;
@@ -54,9 +54,15 @@
         assertion =
           lib.hasInfix "Hyprland" earlyoomAvoid
           && lib.hasInfix "below" earlyoomAvoid
+          && lib.hasInfix "chrome" earlyoomAvoid
+          && lib.hasInfix "firefox" earlyoomAvoid
           && lib.hasInfix "cargo" earlyoomPrefer
-          && lib.hasInfix "nix-daemon" earlyoomPrefer;
-        message = "earlyoom must prefer expendable build/browser work and avoid recovery/UI processes";
+          && lib.hasInfix "nix-daemon" earlyoomPrefer
+          && !(lib.hasInfix "chrome" earlyoomPrefer)
+          && !(lib.hasInfix "firefox" earlyoomPrefer)
+          && config.services.earlyoom.freeMemThreshold == 5
+          && config.services.earlyoom.freeSwapThreshold == 15;
+        message = "earlyoom must act only as a late emergency guard";
       }
       {
         assertion =
@@ -70,6 +76,13 @@
           lib.hasInfix "/bin/panic-log-capture" panicCaptureExec
           && !(lib.hasInfix "panic-log-capture.sh" panicCaptureExec);
         message = "panic-log-capture must execute a packaged binary, not a non-executable store file";
+      }
+      {
+        assertion =
+          !(config.systemd.services ? browser-oom-protect)
+          && !(lib.hasInfix "oom_score_adj" (builtins.readFile (inputs.self + "/modules/performance.nix")))
+          && !(lib.hasInfix "pgrep -x" (builtins.readFile (inputs.self + "/modules/performance.nix")));
+        message = "desktop must not install the retired browser OOM score daemon";
       }
       {
         assertion =
@@ -88,17 +101,17 @@
       }
       {
         assertion =
-          nixSettings.max-jobs == 8
-          && nixSettings.cores == 0
+          nixSettings.max-jobs == 4
+          && nixSettings.cores == 4
           && !(nixSettings ? use-cgroups)
           && !(builtins.elem "cgroups" nixSettings.experimental-features)
-          && lib.hasInfix "SINNIX_REBUILD_MAX_JOBS:-8" commandRegistry
-          && lib.hasInfix "SINNIX_REBUILD_CORES:-0" commandRegistry
-          && lib.hasInfix "SINNIX_REBUILD_MAX_JOBS:-8" devShell
-          && lib.hasInfix "SINNIX_REBUILD_CORES:-0" devShell
-          && lib.hasInfix "NIX_SAFE_MAX_JOBS:-8" nixSafeScript
-          && lib.hasInfix "NIX_SAFE_CORES:-0" nixSafeScript;
-        message = "Nix concurrency must stay moderate without enabling Nix cgroups";
+          && lib.hasInfix "SINNIX_REBUILD_MAX_JOBS:-4" commandRegistry
+          && lib.hasInfix "SINNIX_REBUILD_CORES:-4" commandRegistry
+          && lib.hasInfix "SINNIX_REBUILD_MAX_JOBS:-4" devShell
+          && lib.hasInfix "SINNIX_REBUILD_CORES:-4" devShell
+          && lib.hasInfix "NIX_SAFE_MAX_JOBS:-4" nixSafeScript
+          && lib.hasInfix "NIX_SAFE_CORES:-4" nixSafeScript;
+        message = "Nix concurrency must stay bounded without enabling Nix cgroups";
       }
       {
         assertion =

@@ -47,7 +47,7 @@ in
 
   config = lib.mkIf cfg.enable {
     environment.systemPackages = [
-      pkgs.asciinema_3
+      pkgs.asciinema
       pkgs.jq
     ];
 

@@ -40,8 +40,8 @@ let
         message = "Standalone browser-capture service must be opt-in when polylogued owns the receiver";
       }
       (expect.attrPathEq daemonService [
-          "Restart"
-        ] "on-failure" "Polylogue daemon must restart on failure")
+        "Restart"
+      ] "on-failure" "Polylogue daemon must restart on failure")
       {
         assertion = !(daemonService ? MemoryHigh) && !(daemonService ? MemoryMax);
         message = "Polylogue daemon must not carry local cgroup memory guardrails";

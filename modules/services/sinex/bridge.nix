@@ -35,6 +35,7 @@ let
   sinexEnvironment = lib.toLower cfg.environment;
   targetUserName = config.sinnix.user.name;
   targetUserHome = "/home/${targetUserName}";
+  homeManagerServiceName = "home-manager-${targetUserName}";
   # Sinex runtime state lives at /var/lib/sinex (NixOS convention for service
   # state). The earlier ${capturesRoot}/sinex layout misused the captures
   # namespace — /realm/data/captures is for input data sinex *ingests*, not
@@ -406,11 +407,28 @@ in
       #     model
       #   - drop workstation-civil scheduler bias from one-shot maintenance
       #     timers and force their next-fire semantics
+      #   - re-run sinex-desktop-target-access after every nixos-rebuild switch
+      #     because home-manager activation calls chmod 700 on the target home,
+      #     maps the group bits to the POSIX ACL mask, resetting mask::--x →
+      #     mask::--- and nullifying the sinex traverse grant. Ordering after
+      #     the Home Manager service ensures the ACL is set last.
       (lib.mkIf runtimeEnabled {
         systemd.services = lib.mkMerge [
           (lib.genAttrs cappedAppRuntimeServices (_: workstationResourcePolicy))
           {
             postgresql.unitConfig.RequiresMountsFor = [ sinexRuntimeRoot ];
+            # home-manager activation calls chmod 700 /home/${targetUserName}
+            # which maps the group bits to the POSIX ACL mask, resetting
+            # mask::--x → mask::--- and nullifying sinex's traverse grant.
+            # Re-run sinex-desktop-target-access after each home-manager run
+            # so the mask is restored immediately.
+            ${homeManagerServiceName} = {
+              # The `+` prefix runs this command as root regardless of the
+              # service user, which has no privilege to restart system services.
+              serviceConfig.ExecStartPost = lib.mkAfter [
+                "+${pkgs.systemd}/bin/systemctl restart --no-block sinex-desktop-target-access.service"
+              ];
+            };
           }
           (lib.genAttrs maintenanceTimerServiceNames (_: {
             restartIfChanged = false;
@@ -419,9 +437,7 @@ in
               CPUWeight = lib.mkForce null;
               IOWeight = lib.mkForce null;
               IOSchedulingClass = lib.mkForce null;
-              Slice = lib.mkForce null;
               TimeoutStopSec = lib.mkDefault "15s";
-              ExecCondition = lib.mkForce null;
             };
           }))
         ];
@@ -430,7 +446,7 @@ in
           # extraAfter declares ordering against network-online.target; pair
           # it with wants so systemd doesn't emit an unfulfilled-ordering
           # warning at evaluation time.
-          wants = [ "network-online.target" ];
+          wants = [ "network-online.target" ] ++ lib.optionals databasePrepared [ "postgresql.target" ];
         };
         systemd.timers = lib.genAttrs maintenanceTimerServiceNames (_: {
           timerConfig.Persistent = lib.mkForce false;

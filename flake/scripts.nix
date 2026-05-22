@@ -151,6 +151,18 @@ let
       entrypoint = "dist/index.js";
       npmDepsHash = "sha256-/duhx34Iiq+7ZOaRTTAWChbGjJhxiVvWOoaLJsH2USc=";
     };
+
+    # Packaged split of scripts/sinnix-observe. Installed in parallel under a
+    # distinct binary name (`sinnix-observe-py`) so the live single-file script
+    # at scripts/sinnix-observe remains the wired CLI until a follow-up swaps
+    # the module reference.
+    sinnix-observe-py = pkgs.callPackage ../pkgs/sinnix-observe/pkg.nix { };
+
+    # Python port of sinnix-sentinel (Phase G). Ships side-by-side with the
+    # bash script; the systemd unit in modules/services/sentinel.nix is
+    # intentionally NOT redirected here. Promotion is a separate operational
+    # step after a 24h observe-only validation window.
+    sinnix-sentinel-py = pkgs.callPackage ../pkgs/sinnix-sentinel/pkg.nix { };
   };
 
   packageSet = scriptPackages // externalPackages;

@@ -81,11 +81,23 @@ in
           pkgs.findutils
           pkgs.gnugrep
           pkgs.jq
+          pkgs.python3
           pkgs.zsh
         ];
         homeFiles = [
           ".codex/config.toml"
           ".gemini/settings.json"
+          ".local/bin/claude"
+          ".local/bin/claude-lite"
+          ".local/bin/claude-opus"
+          ".local/bin/claude-sonnet"
+          ".local/bin/claude-team"
+          ".local/bin/codex"
+          ".local/bin/codex-deep"
+          ".local/bin/codex-fast"
+          ".local/bin/codex-max"
+          ".local/bin/codex-spark"
+          ".local/bin/codex-spark-xhigh"
           ".local/bin/forge"
           ".local/bin/mcp-firecrawl"
           ".local/bin/mcp-playwright"
@@ -95,6 +107,7 @@ in
           "forge/skills"
         ];
         xdgConfigFiles = [
+          "claude/mcp.json"
           "claude/settings.json"
         ];
         useHmZshrc = true;
@@ -830,19 +843,87 @@ in
           name = "dev-agent-tools-runtime-check";
           nativeBuildInputs = builtins.filter (pkg: pkg != pkgs.expect) agentToolsFixture.nativeBuildInputs;
           script = ''
+            trap 'echo "dev-agent-tools-runtime failed at line $LINENO" >&2' ERR
+
             test -L "$HOME/.codex/config.toml"
-            test -L "$(readlink "$HOME/.codex/config.toml")"
             test -L "$HOME/.gemini/settings.json"
-            test -L "$(readlink "$HOME/.gemini/settings.json")"
             test -L "$HOME/.config/claude/settings.json"
-            test -L "$(readlink "$HOME/.config/claude/settings.json")"
+            test -L "$HOME/.config/claude/mcp.json"
             test -L "$HOME/forge/.forge.toml"
-            test -L "$(readlink "$HOME/forge/.forge.toml")"
+
+            for wrapper in \
+              "$HOME/.local/bin/claude" \
+              "$HOME/.local/bin/claude-opus" \
+              "$HOME/.local/bin/claude-sonnet" \
+              "$HOME/.local/bin/claude-lite" \
+              "$HOME/.local/bin/claude-team" \
+              "$HOME/.local/bin/codex" \
+              "$HOME/.local/bin/codex-fast" \
+              "$HOME/.local/bin/codex-deep" \
+              "$HOME/.local/bin/codex-max" \
+              "$HOME/.local/bin/codex-spark" \
+              "$HOME/.local/bin/codex-spark-xhigh"; do
+              test -x "$wrapper"
+              bash -n "$wrapper"
+            done
+
+            jq -e '
+              (has("mcpServers") | not) and
+              .alwaysThinkingEnabled == true and
+              .skipDangerousModePermissionPrompt == true
+            ' "$HOME/.config/claude/settings.json" >/dev/null
+
+            jq -e '
+              .mcpServers.github.url == "https://api.githubcopilot.com/mcp/" and
+              .mcpServers.lynchpin.command == "mcp-lynchpin" and
+              .mcpServers.lynchpin.env.LYNCHPIN_REPO_ROOT == "/realm/project/sinity-lynchpin" and
+              .mcpServers.lynchpin.env.LYNCHPIN_LOCAL_ROOT == "/realm/project/sinity-lynchpin/.lynchpin" and
+              .mcpServers.polylogue.command == "mcp-polylogue"
+            ' "$HOME/.config/claude/mcp.json" >/dev/null
+
+            python3 - <<'PYCODE'
+            import pathlib, tomllib
+
+            config = tomllib.loads(pathlib.Path.home().joinpath('.codex/config.toml').read_text())
+            assert config['model'] == 'gpt-5.5'
+            assert config['model_reasoning_effort'] == 'medium'
+            assert config['approval_policy'] == 'never'
+            assert config['sandbox_mode'] == 'danger-full-access'
+            expected_profiles = {
+                'fast': ('gpt-5.5', 'low'),
+                'deep': ('gpt-5.5', 'high'),
+                'max': ('gpt-5.5', 'xhigh'),
+                'spark_medium': ('gpt-5.3-codex-spark', 'medium'),
+                'spark_xhigh': ('gpt-5.3-codex-spark', 'xhigh'),
+            }
+            for name, (model, effort) in expected_profiles.items():
+                profile = config['profiles'][name]
+                assert profile['model'] == model, name
+                assert profile['model_reasoning_effort'] == effort, name
+            mcp = config['mcp_servers']
+            assert mcp['context7']['url'] == 'https://mcp.context7.com/mcp'
+            assert mcp['context7']['bearer_token_env_var'] == 'CONTEXT7_API_KEY'
+            assert mcp['github']['bearer_token_env_var'] == 'GITHUB_TOKEN'
+            assert mcp['polylogue']['command'] == 'mcp-polylogue'
+            assert mcp['lynchpin']['env']['LYNCHPIN_REPO_ROOT'] == '/realm/project/sinity-lynchpin'
+            assert mcp['lynchpin']['env']['LYNCHPIN_LOCAL_ROOT'] == '/realm/project/sinity-lynchpin/.lynchpin'
+            PYCODE
 
             cp ${lib.escapeShellArg (toString (repoFixtureRoot + "/dots/forge/.forge.toml"))} \
               "$TMPDIR/forge.toml"
             rm "$HOME/forge/.forge.toml"
             cp "$TMPDIR/forge.toml" "$HOME/forge/.forge.toml"
+
+            grep -Fq 'mcp_args=(--mcp-config "$MCP_CONFIG" --strict-mcp-config)' "$HOME/.local/bin/claude"
+            grep -Fq 'wrapper_args=(--model opus --effort high)' "$HOME/.local/bin/claude-opus"
+            grep -Fq 'wrapper_args=(--model sonnet --effort medium)' "$HOME/.local/bin/claude-sonnet"
+            grep -Fq 'wrapper_args=(--bare)' "$HOME/.local/bin/claude-lite"
+            grep -Fq 'exec tmux new-session -s ct "$claude_cmd"' "$HOME/.local/bin/claude-team"
+            grep -Fq 'run_agent_scoped "$CODEX_BIN" --profile fast "$@"' "$HOME/.local/bin/codex-fast"
+            grep -Fq 'run_agent_scoped "$CODEX_BIN" --profile deep "$@"' "$HOME/.local/bin/codex-deep"
+            grep -Fq 'run_agent_scoped "$CODEX_BIN" --profile max "$@"' "$HOME/.local/bin/codex-max"
+            grep -Fq 'run_agent_scoped "$CODEX_BIN" --profile spark_medium "$@"' "$HOME/.local/bin/codex-spark"
+            grep -Fq 'run_agent_scoped "$CODEX_BIN" --profile spark_xhigh "$@"' "$HOME/.local/bin/codex-spark-xhigh"
 
             "$HOME/.local/bin/forge" --version | grep -q '^forge '
             "$HOME/.local/bin/forge" config get model | grep -qx 'gpt-5.5'
@@ -1022,20 +1103,17 @@ in
             spawn env HOME=$env(HOME) PATH=$env(PATH) SHELL=$env(SHELL) TERM=$env(TERM) TERM_PROGRAM=$env(TERM_PROGRAM) TERM_PROGRAM_VERSION=$env(TERM_PROGRAM_VERSION) ZDOTDIR=$env(ZDOTDIR) ${pkgs.zsh}/bin/zsh -i
             after 3000
             send_user "forge-pty: shell spawned\n"
-            send "print READY\r"
+            send "print $'\\x5f\\x5fSINNIX_FORGE_READY\\x5f\\x5f'\r"
             expect {
-              -re {READY} {}
+              -re {__SINNIX_FORGE_READY__} {}
               timeout { exit 1 }
             }
+            after 500
 
-            send_user "forge-pty: sending :env\n"
-            send ":env\r"
+            send_user "forge-pty: checking loaded plugin state\n"
+            send "print -- \$_FORGE_PLUGIN_LOADED \$_FORGE_THEME_LOADED \$_FORGE_BIN\r"
             expect {
-              -re {TOOL CONFIGURATION} {}
-              timeout { exit 1 }
-            }
-            expect {
-              -re {debug requests} {}
+              -re {[0-9]+ [0-9]+ .*/home/.local/bin/forge} {}
               timeout { exit 1 }
             }
 
@@ -1044,8 +1122,7 @@ in
             EOF
 
             TMPDIR="$TMPDIR" ${pkgs.expect}/bin/expect -f "$TMPDIR/forge-pty.expect"
-            ${pkgs.gnugrep}/bin/grep -q 'TOOL CONFIGURATION' "$TMPDIR/forge-pty.log"
-            ${pkgs.gnugrep}/bin/grep -q 'debug requests' "$TMPDIR/forge-pty.log"
+            ${pkgs.gnugrep}/bin/grep -q '/home/.local/bin/forge' "$TMPDIR/forge-pty.log"
           '';
         }
       );

@@ -23,11 +23,16 @@ mkFeatureModule {
 
           xdg.configFile = {
             # Link taskwarrior configuration
-            "task/taskrc".source = config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/taskwarrior/taskrc";
+            "task/taskrc" = {
+              source = config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/taskwarrior/taskrc";
+              force = true;
+            };
 
             # Link timewarrior configuration
-            "timewarrior/timewarrior.cfg".source =
-              config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/timewarrior/timewarrior.cfg";
+            "timewarrior/timewarrior.cfg" = {
+              source = config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/timewarrior/timewarrior.cfg";
+              force = true;
+            };
 
             "timewarrior/extensions/balance.py" = {
               source = config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/timewarrior/extensions/balance.py";

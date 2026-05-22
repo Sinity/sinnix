@@ -37,8 +37,9 @@ in
     systemd.settings.Manager.StatusUnitFormat = "name";
 
     boot.kernel.sysctl = {
-      # Keep swap as a last-resort release valve; do not proactively churn it.
-      "vm.swappiness" = 1;
+      # Real swap exists to absorb transient spikes. Keep it cold in normal
+      # desktop use, but allow the kernel to use it before earlyoom has to kill.
+      "vm.swappiness" = 20;
       "vm.page-cluster" = 0;
       "vm.vfs_cache_pressure" = 50;
       "vm.dirty_background_ratio" = 5;
@@ -84,20 +85,15 @@ in
     services.earlyoom = {
       enable = true;
       enableNotifications = true;
-      # Trigger when free memory drops below 12% (≈88% used). On this
-      # no-swap host the mem threshold is the only effective trigger
-      # (freeSwapThreshold AND-combines but swap is always 0). The
-      # previous 3% threshold (≈97% used) waited until rustc/cargo were
-      # already swapping out via OOM thrashing; 12% lets earlyoom kill
-      # one of the rustc workers from the --prefer list early, before
-      # the host starts thrashing the kernel + cache.
-      freeMemThreshold = 12;
-      freeSwapThreshold = 5;
+      # Kill only near true exhaustion. With a real swapfile, earlyoom is the
+      # emergency brake, not routine pressure management.
+      freeMemThreshold = 5;
+      freeSwapThreshold = 15;
       extraArgs = [
         "--prefer"
-        "^(electron|chrome|chromium|firefox|node|python|cargo|rustc|cc1plus|ld|nix|nix-daemon)$"
+        "(node|python|cargo|rustc|cc1plus|ld|nix|nix-daemon)"
         "--avoid"
-        "^(systemd|systemd-logind|dbus-daemon|sshd|agetty|Hyprland|waybar|foot|kitty|zsh|bash|sudo|doas|below)$"
+        "(systemd|systemd-logind|dbus-daemon|sshd|agetty|Hyprland|waybar|foot|kitty|zsh|bash|sudo|doas|below|chrome|chromium|firefox|electron)"
       ];
     };
 

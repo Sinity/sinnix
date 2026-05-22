@@ -77,6 +77,56 @@ mkFeatureModule {
           exec "$@"
         }
       '';
+      mkClaudeCodeWrapper =
+        {
+          useMcp ? true,
+          extraEnv ? "",
+          extraArgs ? [ ],
+        }:
+        {
+          text = ''
+            #!/usr/bin/env bash
+            set -euo pipefail
+
+            CLAUDE_BIN="${claude-code}/bin/claude"
+            REALM_DIR="${sinnixCfg.paths.realmRoot}"
+            HOME_DIR="/home/${user}"
+            MCP_CONFIG="$HOME/.config/claude/mcp.json"
+
+            ${extraEnv}
+            ${agentScopePrelude}
+
+            mcp_args=()
+            ${lib.optionalString useMcp ''
+              if [ -r "$MCP_CONFIG" ]; then
+                mcp_args=(--mcp-config "$MCP_CONFIG" --strict-mcp-config)
+              fi
+            ''}
+            wrapper_args=(${lib.concatStringsSep " " (map lib.escapeShellArg extraArgs)})
+
+            if [ -d "$REALM_DIR" ]; then
+              run_agent_scoped "$CLAUDE_BIN" "''${mcp_args[@]}" --add-dir "$REALM_DIR" "$HOME_DIR" "''${wrapper_args[@]}" "$@"
+            else
+              run_agent_scoped "$CLAUDE_BIN" "''${mcp_args[@]}" --add-dir "$HOME_DIR" "''${wrapper_args[@]}" "$@"
+            fi
+          '';
+          executable = true;
+          force = true;
+        };
+      mkCodexProfileWrapper = profile: {
+        text = ''
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          CODEX_BIN="${aiTools.codex}/bin/codex"
+
+          ${agentScopePrelude}
+
+          run_agent_scoped "$CODEX_BIN" --profile ${lib.escapeShellArg profile} "$@"
+        '';
+        executable = true;
+        force = true;
+      };
     in
     {
       sinnix.persistence.home = {
@@ -122,13 +172,34 @@ mkFeatureModule {
             scriptPkgs.render-agents
             scriptPkgs.normalize-agent-projects
             scriptPkgs.verify-agent-topology
+
+            # Upstream agent ecosystem tools. Sinnix owns projection/wrappers;
+            # llm-agents.nix owns fast-moving package supply.
+            aiTools.agent-browser
+            aiTools.agent-deck
+            aiTools.agentsview
+            aiTools.beads-rust
+            aiTools.beads-viewer
+            aiTools.claude-agent-acp
+            aiTools.codex-acp
+            aiTools.herdr
+            aiTools.opencode
+            aiTools.skills
           ];
 
           programs.zsh = {
             shellAliases = {
               cl = "~/.local/bin/claude";
               claude = "~/.local/bin/claude";
+              claude-lite = "~/.local/bin/claude-lite";
+              claude-opus = "~/.local/bin/claude-opus";
+              claude-sonnet = "~/.local/bin/claude-sonnet";
               ct = "~/.local/bin/claude-team";
+              codex-deep = "~/.local/bin/codex-deep";
+              codex-fast = "~/.local/bin/codex-fast";
+              codex-max = "~/.local/bin/codex-max";
+              codex-spark = "~/.local/bin/codex-spark";
+              codex-spark-xhigh = "~/.local/bin/codex-spark-xhigh";
               deepseek = "~/.local/bin/deepseek";
               gemini = "~/.local/bin/gemini";
             };
@@ -219,43 +290,33 @@ mkFeatureModule {
             fi
           '';
 
-          home.file.".local/bin/claude" = {
-            text = ''
-              #!/usr/bin/env bash
-              set -euo pipefail
+          home.file.".local/bin/claude" = mkClaudeCodeWrapper { };
 
-              CLAUDE_BIN="${claude-code}/bin/claude"
-              REALM_DIR="${sinnixCfg.paths.realmRoot}"
-              HOME_DIR="${config.home.homeDirectory}"
-              MCP_CONFIG="$HOME/.config/claude/mcp.json"
-
-              ${agentScopePrelude}
-
-              mcp_args=()
-              if [ -r "$MCP_CONFIG" ]; then
-                mcp_args=(--mcp-config "$MCP_CONFIG")
-              fi
-
-              if [ -d "$REALM_DIR" ]; then
-                run_agent_scoped "$CLAUDE_BIN" "''${mcp_args[@]}" --add-dir "$REALM_DIR" "$HOME_DIR" "$@"
-              else
-                run_agent_scoped "$CLAUDE_BIN" "''${mcp_args[@]}" "$HOME_DIR" "$@"
-              fi
-            '';
-            executable = true;
-            force = true;
+          home.file.".local/bin/claude-opus" = mkClaudeCodeWrapper {
+            extraArgs = [
+              "--model"
+              "opus"
+              "--effort"
+              "high"
+            ];
           };
 
-          home.file.".local/bin/deepseek" = {
-            text = ''
-              #!/usr/bin/env bash
-              set -euo pipefail
+          home.file.".local/bin/claude-sonnet" = mkClaudeCodeWrapper {
+            extraArgs = [
+              "--model"
+              "sonnet"
+              "--effort"
+              "medium"
+            ];
+          };
 
-              CLAUDE_BIN="${claude-code}/bin/claude"
-              REALM_DIR="${sinnixCfg.paths.realmRoot}"
-              HOME_DIR="${config.home.homeDirectory}"
-              MCP_CONFIG="$HOME/.config/claude/mcp.json"
+          home.file.".local/bin/claude-lite" = mkClaudeCodeWrapper {
+            useMcp = false;
+            extraArgs = [ "--bare" ];
+          };
 
+          home.file.".local/bin/deepseek" = mkClaudeCodeWrapper {
+            extraEnv = ''
               DEEPSEEK_KEY_FILE="/run/agenix/deepseek-api-key"
               if [ ! -r "$DEEPSEEK_KEY_FILE" ]; then
                 echo "deepseek: cannot read $DEEPSEEK_KEY_FILE" >&2
@@ -271,38 +332,22 @@ mkFeatureModule {
               export ANTHROPIC_DEFAULT_HAIKU_MODEL="$DEEPSEEK_MODEL"
               export CLAUDE_CODE_SUBAGENT_MODEL="$DEEPSEEK_MODEL"
               export CLAUDE_CODE_EFFORT_LEVEL="max"
-
-              ${agentScopePrelude}
-
-              mcp_args=()
-              if [ -r "$MCP_CONFIG" ]; then
-                mcp_args=(--mcp-config "$MCP_CONFIG")
-              fi
-
-              if [ -d "$REALM_DIR" ]; then
-                run_agent_scoped "$CLAUDE_BIN" "''${mcp_args[@]}" --add-dir "$REALM_DIR" "$HOME_DIR" "$@"
-              else
-                run_agent_scoped "$CLAUDE_BIN" "''${mcp_args[@]}" "$HOME_DIR" "$@"
-              fi
             '';
-            executable = true;
-            force = true;
           };
 
           home.file.".local/bin/claude-team" = {
             text = ''
               #!/usr/bin/env bash
-              # Launch Claude Code inside tmux for agent team split panes.
-              # If already in tmux, just runs claude directly (auto-detected).
+              # Launch a selected Claude Code wrapper inside tmux for agent team split panes.
+              # Override CLAUDE_WRAPPER=claude-opus/claude-sonnet/deepseek when desired.
               set -euo pipefail
 
-              CLAUDE="$HOME/.local/bin/claude"
+              CLAUDE="$HOME/.local/bin/''${CLAUDE_WRAPPER:-claude}"
 
               if [ -n "''${TMUX:-}" ]; then
                 exec "$CLAUDE" "$@"
               fi
 
-              # Outside tmux — start a named session running claude
               printf -v claude_cmd '%q ' "$CLAUDE" "$@"
               exec tmux new-session -s ct "$claude_cmd"
             '';
@@ -347,6 +392,12 @@ mkFeatureModule {
             executable = true;
             force = true;
           };
+
+          home.file.".local/bin/codex-fast" = mkCodexProfileWrapper "fast";
+          home.file.".local/bin/codex-deep" = mkCodexProfileWrapper "deep";
+          home.file.".local/bin/codex-max" = mkCodexProfileWrapper "max";
+          home.file.".local/bin/codex-spark" = mkCodexProfileWrapper "spark_medium";
+          home.file.".local/bin/codex-spark-xhigh" = mkCodexProfileWrapper "spark_xhigh";
 
           home.file.".local/bin/gemini" = {
             text = ''

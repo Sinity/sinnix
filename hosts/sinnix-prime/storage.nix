@@ -16,6 +16,8 @@ let
   primaryGroupName = config.users.users.${username}.group;
   polylogueArchiveRoot = "${capturesRoot}/polylogue";
   polylogueShareMount = "/home/${username}/.local/share/polylogue";
+  swapFile = "/swap/swapfile";
+  swapSizeGiB = 64;
 
   # Initrd scaffold: early-boot placeholders derived from persistence config
   scaffoldCfg = config.sinnix.persistence.initrdScaffold;
@@ -33,6 +35,23 @@ in
     # discard I/O on 2026-05-03.
     fstrim.enable = false;
     gvfs.enable = true; # dynamic mount
+
+    # Monthly btrfs scrub on always-mounted filesystems. Scrub re-reads every
+    # data + metadata block and verifies checksums against the DUP copy; for
+    # single-device btrfs this is the only defence against silent bit rot.
+    # /neo-outer-realm is deliberately excluded — it is a manual maintenance
+    # mount, and scrubbing would pin the disk awake for hours.
+    # Cadence is monthly (NixOS default) rather than weekly because each scrub
+    # walks the entire used capacity (1.0 TB on root, ~0.7 TB on /realm,
+    # multi-TB on /outer-realm) and the read load is meaningful.
+    btrfs.autoScrub = {
+      enable = false;
+      fileSystems = [
+        "/"
+        "/realm"
+        "/outer-realm"
+      ];
+    };
 
     # Disable block-layer writeback throttle on all storage. wbt parks writers
     # in `wbt_wait` when observed completion latency exceeds wbt_lat_usec
@@ -90,6 +109,17 @@ in
       neededForBoot = true;
     };
 
+    "/swap" = {
+      device = "/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02";
+      fsType = "btrfs";
+      options = [
+        "subvol=@swap"
+        "nodatacow"
+        "noatime"
+        "nodiscard"
+      ];
+    };
+
     "/boot" = {
       device = "/dev/disk/by-uuid/9E84-C199";
       fsType = "vfat";
@@ -109,7 +139,7 @@ in
     # default locations or root-backed /var/tmp scratch.
 
     "${realmRoot}" = {
-      device = "/dev/disk/by-uuid/bd19092f-a195-47ab-9c0d-c923d1e5bfea";
+      device = "/dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a";
       fsType = "btrfs";
       options = [
         "subvol=/"
@@ -146,23 +176,41 @@ in
         "noatime"
         "noauto"
         "nofail"
-        "x-systemd.automount"
-        "x-systemd.idle-timeout=10min"
+        "x-systemd.mount-timeout=5min"
       ];
     };
 
   };
 
-  # Swap on nvme1n1p1 (Samsung 960 EVO) removed 2026-05-12: the drive's
-  # controller started hanging admin commands and the kernel logged sustained
-  # Read-/Write-error events on the swap device. With 32 GiB RAM and
-  # vm.swappiness=1 + earlyoom we already treated swap as a release valve, not
-  # a working store; running without it for now is workable. Revisit when the
-  # drive is replaced — at that point swap can move to a partition on the new
-  # device (no btrfs swapfile, no CoW concerns).
-  swapDevices = [ ];
+  # Swap on nvme1n1p1 (Samsung 960 EVO) was removed 2026-05-12 after the drive
+  # started returning I/O errors. Use a prepared Btrfs swapfile on a dedicated
+  # @swap subvolume instead: it survives impermanent-root rollback, stays out
+  # of btrbk's /persist and /realm snapshots, and is created through
+  # `btrfs filesystem mkswapfile` so CoW/compression/holes are not
+  # accidentally enabled.
+  swapDevices = [
+    {
+      device = swapFile;
+      size = swapSizeGiB * 1024;
+    }
+  ];
 
   systemd = {
+    services.realm-scaffold = {
+      description = "Create /realm-backed bind mount source directories";
+      requires = [ "realm.mount" ];
+      after = [ "realm.mount" ];
+      before = [
+        "home-${username}-.local-share-polylogue.mount"
+      ];
+      unitConfig.DefaultDependencies = false;
+      serviceConfig.Type = "oneshot";
+      path = [ pkgs.coreutils ];
+      script = ''
+        install -d -m 0700 -o ${username} -g ${primaryGroupName} ${polylogueArchiveRoot}
+      '';
+    };
+
     tmpfiles.rules = lib.mkAfter [
       "d ${polylogueArchiveRoot} 0700 ${username} ${primaryGroupName} -"
       "d /home/${username}/.local/share 0700 ${username} ${primaryGroupName} -"
@@ -180,17 +228,14 @@ in
         type = "none";
         options = "bind,x-systemd.requires-mounts-for=${realmRoot}";
         wantedBy = [ "local-fs.target" ];
-        requires = [ "realm.mount" ];
-        after = [ "realm.mount" ];
-      }
-      {
-        what = "${capturesRoot}/syslog/journal";
-        where = "/var/log/journal";
-        type = "none";
-        options = "bind,x-systemd.requires-mounts-for=${realmRoot}";
-        wantedBy = [ "local-fs.target" ];
-        requires = [ "realm.mount" ];
-        after = [ "realm.mount" ];
+        requires = [
+          "realm.mount"
+          "realm-scaffold.service"
+        ];
+        after = [
+          "realm.mount"
+          "realm-scaffold.service"
+        ];
       }
       {
         what = "/dev/disk/by-uuid/36213474-7e7f-4df7-8fb6-264d9a2e9643";
@@ -256,6 +301,9 @@ in
       ${pkgs.coreutils}/bin/mkdir -p /btrfs_tmp
       ${pkgs.util-linux}/bin/mount -o subvol=/,nodiscard /dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02 /btrfs_tmp
       ${pkgs.coreutils}/bin/mkdir -p /btrfs_tmp/.snapshots
+      if [ ! -e /btrfs_tmp/@swap ]; then
+        ${pkgs.btrfs-progs}/bin/btrfs subvolume create /btrfs_tmp/@swap
+      fi
 
       # Save pre-wipe @ — never auto-pruned, manual cleanup only
       SNAP_NAME="root.$(${pkgs.coreutils}/bin/date +%Y%m%dT%H%M%S)"
