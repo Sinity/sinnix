@@ -37,9 +37,10 @@ let
   targetUserHome = "/home/${targetUserName}";
   homeManagerServiceName = "home-manager-${targetUserName}";
   # Sinex runtime state lives at /var/lib/sinex (NixOS convention for service
-  # state). The earlier ${capturesRoot}/sinex layout misused the captures
+  # state). The earlier /realm/data/captures/sinex layout misused the captures
   # namespace — /realm/data/captures is for input data sinex *ingests*, not
-  # sinex's own operational substrate.
+  # sinex's own operational substrate. On sinnix-prime this currently places
+  # the active substrate on the root SSD, not on /realm.
   sinexRuntimeRoot = "/var/lib/sinex";
   sinexStateRoot = "${sinexRuntimeRoot}/state";
   sinexHome = "${sinexRuntimeRoot}/home";
@@ -178,8 +179,7 @@ in
           );
 
           # Pin the sinex user home to /var/lib/sinex/home so it sits beside
-          # the postgres data dir and state root on the realm NVMe volume,
-          # not nested under stateRoot.
+          # the postgres data dir and state root, not nested under stateRoot.
           users.users.sinex = {
             home = lib.mkForce sinexHome;
             homeMode = lib.mkForce "0711";
@@ -400,6 +400,9 @@ in
       # Workstation policy that sinex itself does not own:
       #   - clear the heavy-automaton MemoryMax/CPUQuota kill-fences (this
       #     host prioritizes capture continuity over containment)
+      #   - keep PostgreSQL/NATS below interactive priority; they are
+      #     long-lived capture substrate writers, not login/TTY-critical
+      #     services
       #   - declare RequiresMountsFor on /var/lib/sinex for postgresql so
       #     activation waits for the mount when /var/lib/sinex is a separate
       #     filesystem
@@ -416,7 +419,17 @@ in
         systemd.services = lib.mkMerge [
           (lib.genAttrs cappedAppRuntimeServices (_: workstationResourcePolicy))
           {
-            postgresql.unitConfig.RequiresMountsFor = [ sinexRuntimeRoot ];
+            postgresql = {
+              unitConfig.RequiresMountsFor = [ sinexRuntimeRoot ];
+              serviceConfig = {
+                Nice = 5;
+                IOWeight = 50;
+              };
+            };
+            nats.serviceConfig = {
+              Nice = 5;
+              IOWeight = 50;
+            };
             # home-manager activation calls chmod 700 /home/${targetUserName}
             # which maps the group bits to the POSIX ACL mask, resetting
             # mask::--x → mask::--- and nullifying sinex's traverse grant.

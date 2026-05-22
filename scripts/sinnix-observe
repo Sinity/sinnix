@@ -392,11 +392,11 @@ def collect_storage(offline: bool) -> dict[str, Any]:
         "/",
         "/nix",
         "/persist",
-        "/cache",
         "/realm",
-        "/realm/data/captures/sinex",
-        "/var/lib/postgresql",
         "/var/lib/sinex",
+        "/var/lib/nats",
+        "/var/lib/nats/jetstream",
+        str(Path.home() / ".local/share/activitywatch"),
         str(Path.home() / ".local/share/polylogue"),
     ]
     for path in paths:

@@ -269,10 +269,11 @@
           config.services.nats.settings.jetstream.max_file == "32G"
           && !(natsService ? MemoryHigh)
           && !(natsService ? MemoryMax)
-          && !(natsService ? IOWeight)
+          && natsService.Nice == 5
+          && natsService.IOWeight == 50
           && !(natsService ? IOReadBandwidthMax)
           && !(natsService ? IOWriteBandwidthMax);
-        message = "NATS must keep storage sizing without bridge-side cgroup policy";
+        message = "NATS must keep storage sizing with only soft workstation scheduler bias";
       }
       {
         assertion = natsService.KillSignal == "SIGTERM" && natsService.TimeoutStopSec == "90s";
@@ -282,10 +283,11 @@
         assertion =
           !(postgresService ? MemoryHigh)
           && !(postgresService ? MemoryMax)
-          && !(postgresService ? IOWeight)
+          && postgresService.Nice == 5
+          && postgresService.IOWeight == 50
           && !(postgresService ? IOReadBandwidthMax)
           && !(postgresService ? IOWriteBandwidthMax);
-        message = "PostgreSQL must not carry bridge-side cgroup policy";
+        message = "PostgreSQL must carry only soft workstation scheduler bias";
       }
       {
         assertion =
@@ -295,7 +297,7 @@
           && config.users.users.sinex.homeMode == "0711"
           && !(config.system.activationScripts ? sinexHomeTraverse)
           && builtins.elem sinexRuntimeRoot postgresqlUnitConfig.RequiresMountsFor;
-        message = "Sinex production hot state and home must live on the realm NVMe capture volume";
+        message = "Sinex production hot state and home must live under the runtime state root";
       }
       {
         assertion =
