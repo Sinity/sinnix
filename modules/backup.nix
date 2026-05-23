@@ -276,12 +276,6 @@ in
           "**/dist"
           "**/*.pyc"
           "**/.Trash-1000"
-          # Sinex runtime state misplaced under captures/ — JetStream/NATS state
-          # (~243 GB) and the PostgreSQL data directory (~52 GB). Both regenerate
-          # from upstream events; backing them up duplicates the working set on
-          # every archive. TODO: relocate to /var/lib/sinex via sinex env config.
-          "**/data/captures/sinex/state"
-          "**/data/captures/sinex/postgresql"
           # Polylogue archive (~123 GB) — regenerable from ~/.claude/projects/
           # and ~/.codex/sessions/ via `polylogue run acquire parse materialize`.
           "**/data/captures/polylogue"

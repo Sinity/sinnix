@@ -56,38 +56,25 @@
       prepareHost = true;
       enable = true;
       # Start through the delayed `sinex-runtime.target`, not during the
-      # graphical boot transaction. Sinex #932 guards the worst hidden full
-      # replay case; #914/#915 still track writeback/retry/metrics follow-up.
-      autoStart = false;
+      # graphical boot transaction.
+      autoStart = true;
       provisionDatabase = true;
       activationProfile = "full";
       environment = "prod";
     };
-    polylogue = {
-      enable = true;
-      # Manual until the live watcher leak that reached a 17.9G service peak is
-      # fixed in Polylogue; service-level memory guardrails still apply.
-      daemon.autoStart = false;
-    };
+    polylogue.enable = true;
     hermes = {
       enable = true;
       approvals.mode = "off";
     };
-    machine-telemetry = {
-      enable = true;
-      intervalSec = 60;
-      serviceIntervalSec = 60;
-      networkIntervalSec = 0;
-      bufferbloatIntervalSec = 0;
-      gpuIntervalSec = 0;
-    };
+    machine-telemetry.enable = true;
     weechat-log-sealer.enable = true;
     # Disabled until the remote connector path has explicit auth and exposure
     # discipline. The service module remains available for a future ChatGPT
     # Web UI connector setup.
     chatgpt-mcp.enable = false;
     airvpn-seed = {
-      enable = false;
+      enable = true;
       autoStart = false;
       forwardedPort = 20241;
     };

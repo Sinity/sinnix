@@ -21,7 +21,7 @@
         "polylogue-python"
         "polylogued"
         "render-agents"
-        "sinnix-observe-py"
+        "sinnix-observe"
         "sinnix-sentinel"
         "sinnix-sentinel-py"
         "verify-agent-topology"

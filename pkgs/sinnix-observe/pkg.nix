@@ -1,6 +1,6 @@
 { python3Packages, lib, ... }:
 python3Packages.buildPythonApplication {
-  pname = "sinnix-observe-py";
+  pname = "sinnix-observe";
   version = "0.1.0";
   pyproject = true;
   src = ./.;
@@ -25,6 +25,7 @@ python3Packages.buildPythonApplication {
     "sinnix_observe.cli"
     "sinnix_observe.joins"
     "sinnix_observe.render"
+    "sinnix_observe.workload_policy"
     "sinnix_observe.sources.below"
     "sinnix_observe.sources.chrome"
     "sinnix_observe.sources.polylogue"
@@ -35,8 +36,8 @@ python3Packages.buildPythonApplication {
   ];
 
   meta = {
-    description = "Sinnix workstation observability report (packaged split of scripts/sinnix-observe)";
-    mainProgram = "sinnix-observe-py";
+    description = "Sinnix workstation observability report";
+    mainProgram = "sinnix-observe";
     license = lib.licenses.mit;
   };
 }

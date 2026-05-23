@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 
-from sinnix_observe import SCHEMA, cli, joins, render, util
+from sinnix_observe import SCHEMA, cli, joins, render, util, workload_policy
 from sinnix_observe.sources import (
     below,
     chrome,
@@ -70,6 +70,21 @@ def test_systemd_offline_returns_empty() -> None:
     row = systemd.unit_row("x.service", "system", {"ActiveState": "active"})
     assert row["unit"] == "x.service"
     assert row["active_state"] == "active"
+
+
+def test_workload_policy_fallback_excludes_retired_slices(monkeypatch) -> None:
+    monkeypatch.setenv("SINNIX_WORKLOAD_POLICY_FILE", "/does/not/exist")
+    policy = workload_policy.load_policy()
+    assert policy["schema"] == "sinnix-workload-policy-v1"
+    assert ("system", "system-critical.slice") in workload_policy.observed_slices()
+    assert (
+        "system",
+        "sinnix-maintenance.slice",
+    ) not in workload_policy.observed_slices()
+    assert (
+        workload_policy.resource_class_for_unit("polylogued.service")
+        == "capture-runtime"
+    )
 
 
 def test_storage_offline_returns_marker() -> None:

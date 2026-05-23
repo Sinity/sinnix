@@ -12,6 +12,7 @@
   ...
 }:
 let
+  workloadPolicy = config.sinnix.workloadPolicy;
   panicLogCapture = pkgs.writeShellApplication {
     name = "panic-log-capture";
     runtimeInputs = [ pkgs.coreutils ];
@@ -107,8 +108,9 @@ in
       "vm.dirty_background_bytes" = 64 * 1024 * 1024;
       "vm.dirty_bytes" = 256 * 1024 * 1024;
 
-      # Preserve the crash diagnostics that helped during the hardware pass.
-      "kernel.hung_task_panic" = 1;
+      # Preserve crash diagnostics without turning ordinary hung-task reports
+      # into automatic workstation reboots.
+      "kernel.hung_task_panic" = 0;
       "kernel.hung_task_timeout_secs" = 120;
       "kernel.panic" = 60;
       "kernel.oops_all_cpu_backtrace" = 1;
@@ -175,44 +177,13 @@ in
     # was removed here.
     systemd.oomd.enable = false;
 
-    systemd.slices = {
-      background.sliceConfig = {
-        CPUWeight = 10;
-        IOWeight = 5;
-        MemoryHigh = "4G";
-        MemoryMax = "10G";
-      };
+    systemd.slices = lib.mapAttrs (_: sliceConfig: {
+      inherit sliceConfig;
+    }) workloadPolicy.slices.system;
 
-      "nix-build".sliceConfig = {
-        CPUWeight = 20;
-        IOWeight = 10;
-        MemoryHigh = "8G";
-        MemoryMax = "16G";
-      };
-    };
-
-    systemd.user.slices = {
-      agent.sliceConfig = {
-        CPUWeight = 200;
-        IOWeight = 100;
-        MemoryLow = "1G";
-        MemoryHigh = "12G";
-      };
-
-      background.sliceConfig = {
-        CPUWeight = 10;
-        IOWeight = 5;
-        MemoryHigh = "4G";
-        MemoryMax = "10G";
-      };
-
-      build.sliceConfig = {
-        CPUWeight = 20;
-        IOWeight = 10;
-        MemoryHigh = "8G";
-        MemoryMax = "16G";
-      };
-    };
+    systemd.user.slices = lib.mapAttrs (_: sliceConfig: {
+      inherit sliceConfig;
+    }) workloadPolicy.slices.user;
 
     systemd.user.services.sinnix-thaw-interactive-scopes = {
       description = "Thaw stranded interactive recovery scopes";

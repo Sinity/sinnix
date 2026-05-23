@@ -116,6 +116,13 @@
         message = "Borg timers must stay on the staggered four-hour cadence";
       }
       {
+        assertion =
+          builtins.elem "var/lib/sinex" persistJob.exclude
+          && !(builtins.elem "**/data/captures/sinex/state" realmJob.exclude)
+          && !(builtins.elem "**/data/captures/sinex/postgresql" realmJob.exclude);
+        message = "Borg must exclude active Sinex runtime state, not obsolete capture paths";
+      }
+      {
         assertion = btrbkTimer.Persistent == false;
         message = "btrbk timer must not catch up missed runs immediately after boot";
       }

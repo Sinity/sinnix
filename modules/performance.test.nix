@@ -30,6 +30,8 @@
       coreModule = builtins.readFile (inputs.self + "/modules/core.nix");
       performanceModule = builtins.readFile (inputs.self + "/modules/performance.nix");
       persistenceModule = builtins.readFile (inputs.self + "/modules/persistence.nix");
+      workloadPolicy = config.sinnix.workloadPolicy;
+      workloadPolicyJson = builtins.fromJSON config.environment.etc."sinnix/workload-policy.json".text;
       earlyoomAvoid = builtins.elemAt config.services.earlyoom.extraArgs 3;
       earlyoomPrefer = builtins.elemAt config.services.earlyoom.extraArgs 1;
       panicCaptureExec = config.systemd.services.panic-log-capture.serviceConfig.ExecStart;
@@ -44,9 +46,11 @@
         || (config.systemd.user.slices.${name}.sliceConfig or { }) == { };
       systemBackground = config.systemd.slices.background.sliceConfig;
       nixBuild = config.systemd.slices."nix-build".sliceConfig;
+      systemCritical = config.systemd.slices."system-critical".sliceConfig;
       userAgent = config.systemd.user.slices.agent.sliceConfig;
       userBackground = config.systemd.user.slices.background.sliceConfig;
       userBuild = config.systemd.user.slices.build.sliceConfig;
+      userNixBuild = config.systemd.user.slices."nix-build".sliceConfig;
       thawService = config.systemd.user.services.sinnix-thaw-interactive-scopes;
       thawTimer = config.systemd.user.timers.sinnix-thaw-interactive-scopes;
     in
@@ -65,6 +69,16 @@
           config.boot.kernel.sysctl."vm.dirty_background_bytes" == 64 * 1024 * 1024
           && config.boot.kernel.sysctl."vm.dirty_bytes" == 256 * 1024 * 1024;
         message = "desktop dirty writeback must stay byte-bounded for NVMe/Btrfs latency";
+      }
+      {
+        assertion =
+          config.boot.kernel.sysctl."kernel.hung_task_panic" == 0
+          && config.boot.kernel.sysctl."kernel.hung_task_timeout_secs" == 120
+          && config.boot.kernel.sysctl."kernel.panic" == 60
+          && config.boot.kernel.sysctl."kernel.oops_all_cpu_backtrace" == 1
+          && builtins.elem "ramoops" config.boot.kernelModules
+          && builtins.elem "ramoops.dump_oops=1" config.boot.kernelParams;
+        message = "desktop crash diagnostics must not auto-reboot on ordinary hung-task reports";
       }
       {
         assertion =
@@ -111,7 +125,6 @@
           noLocalSlice "nix"
           && noLocalSlice "sinnix"
           && noLocalSlice "sinnix-maintenance"
-          && noLocalSlice "system-critical"
           && noUserSlice "app"
           && noUserSlice "session";
         message = "Sinnix must not resurrect retired whole-session or maintenance slice policy";
@@ -126,10 +139,15 @@
           && nixBuild.IOWeight == 10
           && nixBuild.MemoryHigh == "8G"
           && nixBuild.MemoryMax == "16G"
+          && systemCritical.CPUWeight == 200
+          && systemCritical.IOWeight == 100
+          && systemCritical.MemoryLow == "512M"
           && userBackground.CPUWeight == 10
           && userBackground.IOWeight == 5
           && userBuild.CPUWeight == 20
           && userBuild.IOWeight == 10
+          && userNixBuild.CPUWeight == 20
+          && userNixBuild.IOWeight == 10
           && userAgent.CPUWeight == 200
           && userAgent.IOWeight == 100
           && userAgent.MemoryLow == "1G";
@@ -163,23 +181,39 @@
       {
         assertion =
           lib.hasInfix "usage: sinnix-scope <agent|build|background|nix-build>" scopeScript
+          && lib.hasInfix "SINNIX_WORKLOAD_POLICY_FILE" scopeScript
+          && lib.hasInfix "/etc/sinnix/workload-policy.json" scopeScript
+          && lib.hasInfix "jq -er" scopeScript
           && lib.hasInfix "systemd-run" scopeScript
           && lib.hasInfix "agent.slice" scopeScript
           && lib.hasInfix "build.slice" scopeScript
           && lib.hasInfix "background.slice" scopeScript
           && lib.hasInfix "nix-build.slice" scopeScript
-          && lib.hasInfix "CARGO_BUILD_JOBS:=4" scopeScript
-          && lib.hasInfix "CMAKE_BUILD_PARALLEL_LEVEL:=4" scopeScript
-          && lib.hasInfix "NIX_BUILD_CORES:=4" scopeScript
-          && lib.hasInfix "SCCACHE_IDLE_TIMEOUT:=10" scopeScript
-          && lib.hasInfix ''MAKEFLAGS="-j4"'' scopeScript
-          && lib.hasInfix "ionice -c 2 -n 7" scopeScript
-          && lib.hasInfix "nice -n 5" scopeScript
+          && lib.hasInfix "policy_env_default CARGO_BUILD_JOBS 4" scopeScript
+          && lib.hasInfix "policy_env_default CMAKE_BUILD_PARALLEL_LEVEL 4" scopeScript
+          && lib.hasInfix "policy_env_default NIX_BUILD_CORES 4" scopeScript
+          && lib.hasInfix "policy_env_default SCCACHE_IDLE_TIMEOUT 10" scopeScript
+          && lib.hasInfix "policy_env_default MAKEFLAGS -j4" scopeScript
+          && lib.hasInfix "ionice -c 2 -n" scopeScript
+          && lib.hasInfix "nice -n \"$nice_level\"" scopeScript
           && lib.hasInfix "ionice -c 3" scopeScript
-          && lib.hasInfix "nice -n 10" scopeScript
           && lib.hasInfix "--unit=\"$unit\"" scopeScript
           && lib.hasInfix "--user" scopeScript;
         message = "sinnix-scope must place heavy work in explicit resource slices and scheduler classes";
+      }
+      {
+        assertion =
+          workloadPolicy.schema == "sinnix-workload-policy-v1"
+          && workloadPolicyJson.schema == workloadPolicy.schema
+          && workloadPolicy.commandClasses.build.slice == "build.slice"
+          && workloadPolicy.commandClasses.build.envDefaults.MAKEFLAGS == "-j4"
+          && workloadPolicy.commandClasses.agent.resourceClass == "interactive-agent"
+          && builtins.elem "background.slice" workloadPolicy.pressureBackoff.systemUnits
+          && builtins.elem "nix-build.slice" workloadPolicy.pressureBackoff.userUnits
+          && !(builtins.elem "nix.slice" workloadPolicy.pressureBackoff.systemUnits)
+          && !(builtins.elem "sinnix-maintenance.slice" workloadPolicy.observedSlices.system)
+          && workloadPolicy.unitClasses."polylogued.service" == "capture-runtime";
+        message = "workload policy registry must be the single source for command classes, backoff, and observe classification";
       }
       {
         assertion =

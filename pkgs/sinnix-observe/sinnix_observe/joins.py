@@ -6,6 +6,7 @@ from typing import Any
 
 from .sources.xtask import infer_sinex_resource_class
 from .util import normalize_timestamp
+from .workload_policy import resource_class_from_cgroup
 
 
 def project_for_unit(unit: str) -> str | None:
@@ -30,17 +31,7 @@ def project_for_text(text: str) -> str | None:
 
 
 def infer_resource_class_from_cgroup(cgroup: str) -> str | None:
-    if "build.slice" in cgroup or "nix-build.slice" in cgroup:
-        return "developer-build"
-    if "background.slice" in cgroup:
-        return "background-maintenance"
-    if "agent.slice" in cgroup:
-        return "interactive-agent"
-    if "app-graphical.slice" in cgroup or "app.slice" in cgroup:
-        return "interactive"
-    if "system.slice" in cgroup:
-        return "system"
-    return None
+    return resource_class_from_cgroup(cgroup)
 
 
 def match_below(name: str, cgroup: str | None, below: dict[str, Any]) -> dict[str, Any]:

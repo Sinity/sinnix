@@ -56,12 +56,13 @@ mkServiceTest {
           && lib.hasInfix "set-property --runtime" belowModule
           && lib.hasInfix "backoff_active" belowModule
           && lib.hasInfix "restore_backoff" belowModule
-          && lib.hasInfix "nix.slice nix-build.slice background.slice" belowModule
-          && lib.hasInfix "sinnix.slice sinnix-maintenance.slice" belowModule
-          && lib.hasInfix "build.slice background.slice" belowModule
-          && lib.hasInfix "maintenanceCpuWeight" belowModule
-          && lib.hasInfix "maintenanceIoWeight" belowModule
-          && lib.hasInfix "developer CPUWeight=$backoff_cpu_weight IOWeight=$backoff_io_weight" belowModule
+          && lib.hasInfix "system_backoff_units" belowModule
+          && lib.hasInfix "user_backoff_units" belowModule
+          && !(lib.hasInfix "nix.slice" belowModule)
+          && !(lib.hasInfix "sinnix.slice" belowModule)
+          && !(lib.hasInfix "sinnix-maintenance.slice" belowModule)
+          && !(lib.hasInfix "maintenanceCpuWeight" belowModule)
+          && !(lib.hasInfix "maintenanceIoWeight" belowModule)
           && lib.hasInfix "demote_agent_heavy_processes" belowModule
           && lib.hasInfix ''*"/agent.slice/"*'' belowModule
           && lib.hasInfix "polylogue.cli maintenance" belowModule

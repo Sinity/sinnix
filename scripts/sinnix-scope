@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Place commands in Sinnix resource-control scopes
-# runtimeInputs: bash coreutils gnugrep systemd util-linux
+# runtimeInputs: bash coreutils gnugrep jq systemd util-linux
 
 set -euo pipefail
 
@@ -21,22 +21,45 @@ case "$1" in
 class="$1"
 shift 2
 
+policy_file="${SINNIX_WORKLOAD_POLICY_FILE:-/etc/sinnix/workload-policy.json}"
+
+policy_value() {
+  local query="$1"
+  local fallback="$2"
+  if [ -r "$policy_file" ] && command -v jq >/dev/null 2>&1; then
+    jq -er "$query // empty" "$policy_file" 2>/dev/null || printf '%s\n' "$fallback"
+  else
+    printf '%s\n' "$fallback"
+  fi
+}
+
+policy_env_default() {
+  local name="$1"
+  local fallback="$2"
+  policy_value ".commandClasses.\"$class\".envDefaults.\"$name\"" "$fallback"
+}
+
 case "$class" in
-  agent) slice="agent.slice" ;;
-  build) slice="build.slice" ;;
-  background) slice="background.slice" ;;
-  nix-build) slice="nix-build.slice" ;;
+  agent) fallback_slice="agent.slice" ;;
+  build) fallback_slice="build.slice" ;;
+  background) fallback_slice="background.slice" ;;
+  nix-build) fallback_slice="nix-build.slice" ;;
 esac
+
+slice="$(policy_value ".commandClasses.\"$class\".slice" "$fallback_slice")"
+nice_level="$(policy_value ".commandClasses.\"$class\".nice" "")"
+ionice_class="$(policy_value ".commandClasses.\"$class\".ioniceClass" "")"
+ionice_priority="$(policy_value ".commandClasses.\"$class\".ionicePriority" "")"
 
 scoped_command=("$@")
 case "$class" in
   build)
-    : "${CARGO_BUILD_JOBS:=4}"
-    : "${CMAKE_BUILD_PARALLEL_LEVEL:=4}"
-    : "${NIX_BUILD_CORES:=4}"
-    : "${SCCACHE_IDLE_TIMEOUT:=10}"
+    : "${CARGO_BUILD_JOBS:=$(policy_env_default CARGO_BUILD_JOBS 4)}"
+    : "${CMAKE_BUILD_PARALLEL_LEVEL:=$(policy_env_default CMAKE_BUILD_PARALLEL_LEVEL 4)}"
+    : "${NIX_BUILD_CORES:=$(policy_env_default NIX_BUILD_CORES 4)}"
+    : "${SCCACHE_IDLE_TIMEOUT:=$(policy_env_default SCCACHE_IDLE_TIMEOUT 10)}"
     if [ "${MAKEFLAGS+x}" != x ]; then
-      MAKEFLAGS="-j4"
+      MAKEFLAGS="$(policy_env_default MAKEFLAGS -j4)"
     fi
     export CARGO_BUILD_JOBS CMAKE_BUILD_PARALLEL_LEVEL MAKEFLAGS NIX_BUILD_CORES SCCACHE_IDLE_TIMEOUT
     ;;
@@ -71,26 +94,20 @@ if [ "$class" = build ] && [ -n "${SINEX_DEV_ROOT:-}" ]; then
   fi
 fi
 
-case "$class" in
-  agent)
-    ;;
-  build)
-    if command -v ionice >/dev/null 2>&1; then
-      scoped_command=(ionice -c 2 -n 7 -- "${scoped_command[@]}")
-    fi
-    if command -v nice >/dev/null 2>&1; then
-      scoped_command=(nice -n 5 "${scoped_command[@]}")
-    fi
-    ;;
-  background|nix-build)
-    if command -v ionice >/dev/null 2>&1; then
+if [ -n "$ionice_class" ] && command -v ionice >/dev/null 2>&1; then
+  case "$ionice_class" in
+    best-effort)
+      scoped_command=(ionice -c 2 -n "${ionice_priority:-7}" -- "${scoped_command[@]}")
+      ;;
+    idle)
       scoped_command=(ionice -c 3 -- "${scoped_command[@]}")
-    fi
-    if command -v nice >/dev/null 2>&1; then
-      scoped_command=(nice -n 10 "${scoped_command[@]}")
-    fi
-    ;;
-esac
+      ;;
+  esac
+fi
+
+if [ -n "$nice_level" ] && command -v nice >/dev/null 2>&1; then
+  scoped_command=(nice -n "$nice_level" "${scoped_command[@]}")
+fi
 
 if grep -q "/$slice" /proc/self/cgroup 2>/dev/null; then
   exec "${scoped_command[@]}"

@@ -9,9 +9,7 @@ description = "Agent-readable workstation observability report (Sinnix)"
 requires-python = ">=3.12"
 
 [project.scripts]
-# Parallel binary name during the transition; the live single-file script in
-# scripts/sinnix-observe still owns the canonical `sinnix-observe` name.
-sinnix-observe-py = "sinnix_observe.cli:main"
+sinnix-observe = "sinnix_observe.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["sinnix_observe*"]

@@ -14,6 +14,8 @@ in
     { system, ... }:
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
+      scriptRegistry = import ./scripts.nix { inherit inputs pkgs; };
+      sinnixObserve = scriptRegistry.packageSet.sinnix-observe;
       testLib = import ./test-lib.nix { inherit inputs lib; };
       checkTiers = import ./check-tiers.nix { inherit lib; };
       inherit (testLib)
@@ -567,7 +569,7 @@ in
             SINNIX_OBSERVE_POLYLOGUE_DB="$TMPDIR/polylogue.db" \
             SINNIX_OBSERVE_BELOW_CGROUP_TSV="$TMPDIR/below-cgroup.tsv" \
             SINNIX_OBSERVE_BELOW_PROCESS_TSV="$TMPDIR/below-process.tsv" \
-              ${pkgs.python3}/bin/python3 ${../scripts/sinnix-observe} \
+              ${sinnixObserve}/bin/sinnix-observe \
                 --offline --format json --since '1 day ago' --duration '1 day' --limit 5 \
                 > "$TMPDIR/report.json"
 
@@ -584,7 +586,7 @@ in
             SINNIX_OBSERVE_POLYLOGUE_DB="$TMPDIR/polylogue.db" \
             SINNIX_OBSERVE_BELOW_CGROUP_TSV="$TMPDIR/below-cgroup.tsv" \
             SINNIX_OBSERVE_BELOW_PROCESS_TSV="$TMPDIR/below-process.tsv" \
-              ${pkgs.python3}/bin/python3 ${../scripts/sinnix-observe} \
+              ${sinnixObserve}/bin/sinnix-observe \
                 --offline --format human --since '1 day ago' --duration '1 day' --limit 5 \
                 > "$TMPDIR/report.txt"
 

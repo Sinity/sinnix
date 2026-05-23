@@ -84,26 +84,6 @@ mkServiceModule {
           default = 3;
           description = "Consecutive clear samples required before restoring normal runtime weights.";
         };
-        cpuWeight = lib.mkOption {
-          type = lib.types.int;
-          default = 1;
-          description = "Runtime CPUWeight applied to developer/background slices during pressure backoff.";
-        };
-        ioWeight = lib.mkOption {
-          type = lib.types.int;
-          default = 1;
-          description = "Runtime IOWeight applied to developer/background slices during pressure backoff.";
-        };
-        maintenanceCpuWeight = lib.mkOption {
-          type = lib.types.int;
-          default = 1;
-          description = "Runtime CPUWeight applied to maintenance slices during pressure backoff.";
-        };
-        maintenanceIoWeight = lib.mkOption {
-          type = lib.types.int;
-          default = 1;
-          description = "Runtime IOWeight applied to maintenance slices during pressure backoff.";
-        };
       };
     };
   };
@@ -114,6 +94,11 @@ mkServiceModule {
       pkgs,
       ...
     }:
+    let
+      workloadPolicy = config.sinnix.workloadPolicy;
+      backoffPolicy = workloadPolicy.pressureBackoff;
+      shellWords = words: lib.concatMapStringsSep " " lib.escapeShellArg words;
+    in
     {
       environment.systemPackages = [
         pkgs.below
@@ -191,10 +176,10 @@ mkServiceModule {
             io_clear_threshold=${toString cfg.pressureWatch.backoff.ioClearThresholdPct}
             memory_clear_threshold=${toString cfg.pressureWatch.backoff.memoryClearThresholdPct}
             clear_samples_required=${toString cfg.pressureWatch.backoff.clearSamples}
-            backoff_cpu_weight=${toString cfg.pressureWatch.backoff.cpuWeight}
-            backoff_io_weight=${toString cfg.pressureWatch.backoff.ioWeight}
-            maintenance_backoff_cpu_weight=${toString cfg.pressureWatch.backoff.maintenanceCpuWeight}
-            maintenance_backoff_io_weight=${toString cfg.pressureWatch.backoff.maintenanceIoWeight}
+            backoff_cpu_weight=${toString backoffPolicy.cpuWeight}
+            backoff_io_weight=${toString backoffPolicy.ioWeight}
+            system_backoff_units=(${shellWords backoffPolicy.systemUnits})
+            user_backoff_units=(${shellWords backoffPolicy.userUnits})
             user_name=${lib.escapeShellArg config.sinnix.user.name}
             state_dir=/run/sinnix-pressure-watchdog
             last_report=0
@@ -301,18 +286,15 @@ mkServiceModule {
 
             apply_backoff() {
               local unit
-              for unit in nix.slice nix-build.slice background.slice; do
+              for unit in "''${system_backoff_units[@]}"; do
                 apply_backoff_unit system "$unit" "$backoff_cpu_weight" "$backoff_io_weight"
               done
-              for unit in sinnix.slice sinnix-maintenance.slice; do
-                apply_backoff_unit system "$unit" "$maintenance_backoff_cpu_weight" "$maintenance_backoff_io_weight"
-              done
-              for unit in build.slice background.slice; do
+              for unit in "''${user_backoff_units[@]}"; do
                 apply_backoff_unit user "$unit" "$backoff_cpu_weight" "$backoff_io_weight"
               done
               backoff_active=1
               touch "$state_dir/active"
-              log_line notice "applied PSI runtime backoff: developer CPUWeight=$backoff_cpu_weight IOWeight=$backoff_io_weight; maintenance CPUWeight=$maintenance_backoff_cpu_weight IOWeight=$maintenance_backoff_io_weight"
+              log_line notice "applied PSI runtime backoff: CPUWeight=$backoff_cpu_weight IOWeight=$backoff_io_weight"
             }
 
             demote_agent_heavy_processes() {

@@ -35,7 +35,7 @@
       }
       {
         assertion = !(config.services.fstrim.enable or false);
-        message = "sinnix-prime must not schedule automatic fstrim while storage pressure is unresolved";
+        message = "sinnix-prime must keep discard as explicit manual maintenance";
       }
       {
         assertion =

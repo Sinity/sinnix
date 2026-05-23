@@ -7,59 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from ..util import int_or_none, run_cmd, split_props, words
-
-SYSTEM_UNITS = [
-    "below.service",
-    "sinnix-pressure-watchdog.service",
-    "sinex-runtime.target",
-    "sinex-runtime.timer",
-    "sinex-ingestd.service",
-    "sinex-filesystem-1.service",
-    "sinex-gateway.service",
-    "nats.service",
-    "postgresql.service",
-    "nix-gc.service",
-    "nix-optimise.service",
-    "sinex-blob-gc.service",
-    "sinex-blob-fsck.service",
-    "sinex-dev-cache-prune.service",
-    "sinex-document-scan.service",
-    "btrbk.service",
-    "btrbk.timer",
-    "borgbackup-job-realm.service",
-    "borgbackup-job-persist.service",
-    "borgbackup-check.service",
-]
-
-USER_UNITS = [
-    "polylogued.service",
-    "polylogue-browser-capture.service",
-]
-
-RESOURCE_CLASS_BY_UNIT = {
-    "below.service": "observability",
-    "sinnix-pressure-watchdog.service": "observability",
-    "btrbk.service": "background-maintenance",
-    "btrbk.timer": "background-maintenance",
-    "borgbackup-job-realm.service": "background-maintenance",
-    "borgbackup-job-persist.service": "background-maintenance",
-    "borgbackup-check.service": "background-maintenance",
-    "nix-gc.service": "background-maintenance",
-    "nix-optimise.service": "background-maintenance",
-    "polylogued.service": "capture-runtime",
-    "polylogue-browser-capture.service": "capture-runtime",
-    "sinex-runtime.target": "capture-runtime",
-    "sinex-runtime.timer": "capture-runtime",
-    "sinex-ingestd.service": "capture-runtime",
-    "sinex-filesystem-1.service": "capture-runtime",
-    "sinex-gateway.service": "capture-runtime",
-    "nats.service": "capture-substrate",
-    "postgresql.service": "capture-substrate",
-    "sinex-blob-gc.service": "background-maintenance",
-    "sinex-blob-fsck.service": "background-maintenance",
-    "sinex-dev-cache-prune.service": "background-maintenance",
-    "sinex-document-scan.service": "background-maintenance",
-}
+from ..workload_policy import (
+    observed_slices,
+    observed_units,
+    resource_class_for_unit,
+)
 
 
 def systemctl_show(unit: str, user: bool = False) -> dict[str, str]:
@@ -139,7 +91,7 @@ def unit_row(unit: str, manager: str, props: dict[str, str]) -> dict[str, Any]:
         "main_pid": int_or_none(props.get("MainPID")),
         "control_group": props.get("ControlGroup") or None,
         "slice": props.get("Slice") or None,
-        "resource_class": RESOURCE_CLASS_BY_UNIT.get(unit),
+        "resource_class": resource_class_for_unit(unit),
         "policy": {
             "memory_current": props.get("MemoryCurrent"),
             "memory_high": props.get("MemoryHigh"),
@@ -171,12 +123,12 @@ def collect_systemd_units(offline: bool) -> list[dict[str, Any]]:
     if offline:
         return []
     rows: list[dict[str, Any]] = []
-    for unit in SYSTEM_UNITS:
+    for unit in observed_units("system"):
         props = systemctl_show(unit, user=False)
         if props.get("LoadState") == "not-found":
             continue
         rows.append(unit_row(unit, "system", props))
-    for unit in USER_UNITS:
+    for unit in observed_units("user"):
         props = systemctl_show(unit, user=True)
         if props.get("LoadState") == "not-found":
             continue
@@ -187,17 +139,8 @@ def collect_systemd_units(offline: bool) -> list[dict[str, Any]]:
 def collect_resource_slices(offline: bool) -> list[dict[str, Any]]:
     if offline:
         return []
-    specs = [
-        ("user", "agent.slice"),
-        ("user", "build.slice"),
-        ("user", "nix-build.slice"),
-        ("user", "background.slice"),
-        ("system", "nix-build.slice"),
-        ("system", "background.slice"),
-        ("system", "sinnix-maintenance.slice"),
-    ]
     rows: list[dict[str, Any]] = []
-    for manager, unit in specs:
+    for manager, unit in observed_slices():
         props = systemctl_show(unit, user=manager == "user")
         if props.get("LoadState") == "not-found":
             continue
