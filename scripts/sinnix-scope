@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
-# description: Compatibility wrapper for the retired Sinnix resource slices
-# runtimeInputs: bash coreutils
+# description: Place commands in Sinnix resource-control scopes
+# runtimeInputs: bash coreutils gnugrep systemd
 
 set -euo pipefail
 
@@ -16,7 +16,68 @@ case "$1" in
     echo "sinnix-scope: unknown class: $1" >&2
     exit 64
     ;;
+  esac
+
+class="$1"
+shift 2
+
+case "$class" in
+  agent) slice="agent.slice" ;;
+  build) slice="build.slice" ;;
+  background) slice="background.slice" ;;
+  nix-build) slice="nix-build.slice" ;;
 esac
 
-shift 2
+if grep -q "/$slice" /proc/self/cgroup 2>/dev/null; then
+  exec "$@"
+fi
+
+if ! command -v systemd-run >/dev/null 2>&1; then
+  exec "$@"
+fi
+
+env_args=()
+for name in \
+  AGENT_NAME AGENT_SESSION_ID \
+  CARGO_HOME CARGO_TARGET_DIR CODEX_HOME \
+  GEMINI_API_KEY GITHUB_TOKEN HOME LANG LC_ALL LOGNAME \
+  NIX_CONFIG NIX_PATH NIXPKGS_ALLOW_UNFREE \
+  PATH POLYLOGUE_ROOT PWD PYTHONHOME PYTHONPATH \
+  RUSTC_WRAPPER RUST_LOG RUSTUP_HOME SCCACHE_DIR SHELL \
+  SINEX_CACHE_DIR SINEX_DEV_CACHE_ROOT SINEX_ROOT SINEX_STATE_DIR SINEX_TEST_RESULTS_DIR \
+  TERM TERM_PROGRAM TMPDIR USER UV_CACHE_DIR UV_PROJECT_ENVIRONMENT VIRTUAL_ENV \
+  XDG_CACHE_HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_RUNTIME_DIR XDG_STATE_HOME
+do
+  if [ "${!name+x}" = x ]; then
+    env_args+=("--setenv=$name=${!name}")
+  fi
+done
+
+if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+  unit="sinnix-${class}-$(date +%s%N)-$$"
+  exec systemd-run \
+    --scope \
+    --quiet \
+    --collect \
+    --same-dir \
+    --unit="$unit" \
+    --slice="$slice" \
+    "${env_args[@]}" \
+    -- "$@"
+fi
+
+if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+  unit="sinnix-${class}-$(date +%s%N)-$$"
+  exec systemd-run \
+    --user \
+    --scope \
+    --quiet \
+    --collect \
+    --same-dir \
+    --unit="$unit" \
+    --slice="$slice" \
+    "${env_args[@]}" \
+    -- "$@"
+fi
+
 exec "$@"

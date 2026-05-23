@@ -1,10 +1,10 @@
 # Performance baseline
 #
-# Keep the desktop on plain systemd/kernel defaults by default. The previous
-# generation carried custom cgroup slices, IOWeight/io.cost setup, PSI backoff,
-# and maintenance gates to compensate for a degraded cache/storage situation.
-# With the failed /cache drive removed and PCIe/turbo settings fixed, prefer a
-# simple workstation baseline and reintroduce policy only from measurements.
+# Keep desktop-critical processes protected while build/background workloads are
+# explicitly placed into lower-weight slices by `sinnix-scope`. The failed
+# /cache NVMe is gone and PCIe links are currently healthy, but measurements on
+# this host still show enough random-I/O tail latency that unscoped heavy work
+# can starve interactive recovery paths.
 {
   lib,
   config,
@@ -144,6 +144,45 @@ in
     # simpler and global; it does not depend on the custom slice hierarchy that
     # was removed here.
     systemd.oomd.enable = false;
+
+    systemd.slices = {
+      background.sliceConfig = {
+        CPUWeight = 10;
+        IOWeight = 5;
+        MemoryHigh = "4G";
+        MemoryMax = "10G";
+      };
+
+      "nix-build".sliceConfig = {
+        CPUWeight = 20;
+        IOWeight = 10;
+        MemoryHigh = "8G";
+        MemoryMax = "16G";
+      };
+    };
+
+    systemd.user.slices = {
+      agent.sliceConfig = {
+        CPUWeight = 200;
+        IOWeight = 100;
+        MemoryLow = "1G";
+        MemoryHigh = "12G";
+      };
+
+      background.sliceConfig = {
+        CPUWeight = 10;
+        IOWeight = 5;
+        MemoryHigh = "4G";
+        MemoryMax = "10G";
+      };
+
+      build.sliceConfig = {
+        CPUWeight = 20;
+        IOWeight = 10;
+        MemoryHigh = "8G";
+        MemoryMax = "16G";
+      };
+    };
 
     security.pam.loginLimits = [
       {

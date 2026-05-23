@@ -116,11 +116,12 @@ in
       daemonIOSchedClass = "idle";
       daemonIOSchedPriority = 6;
 
-      # Keep build sandbox scratch off /tmp. /tmp is RAM-backed and capped;
-      # /var/cache is root-btrfs backed and survives large derivation scratch
-      # trees without relying on the removed /cache NVMe.
+      # Keep build sandbox scratch off /tmp and off the root SATA SSD. /tmp is
+      # RAM-backed and capped; root-backed /var/cache contends with journald,
+      # login-critical persisted state, and Sinex PostgreSQL. /realm/cache is
+      # disposable NVMe-backed scratch prepared with no-COW attributes below.
       extraOptions = ''
-        build-dir = /var/cache/nix-build
+        build-dir = ${paths.realmRoot}/cache/nix-build
       '';
 
       gc = {
@@ -157,10 +158,12 @@ in
       pkgs.sccache
     ];
 
-    # RUSTC_WRAPPER applies to devshell builds; sccache uses its default
-    # XDG cache location now that the dedicated /cache NVMe is offline.
+    # RUSTC_WRAPPER applies to devshell builds. Keep sccache's write-heavy,
+    # disposable object store beside Nix build scratch instead of under the
+    # user's persisted root-SSD-backed XDG cache.
     environment.variables = {
       RUSTC_WRAPPER = "${pkgs.sccache}/bin/sccache";
+      SCCACHE_DIR = "${paths.realmRoot}/cache/sccache";
       SCCACHE_MAX_CACHE_SIZE = "20G";
     };
 
@@ -212,8 +215,10 @@ in
 
     systemd = {
       tmpfiles.rules = lib.mkAfter ([
-        "d /var/cache/nix-build 0755 root root -"
         "d ${paths.realmRoot} 0755 root root -"
+        "d ${paths.realmRoot}/cache 0755 root root -"
+        "d ${paths.realmRoot}/cache/nix-build 0755 root root -"
+        "d ${paths.realmRoot}/cache/sccache 0775 ${username} users -"
         "d ${paths.outerRealm} 0755 root root -"
         "d ${paths.outerRealm}/inbox 0755 ${username} users -"
         "d ${paths.dataRoot} 0755 root root -"
@@ -237,6 +242,34 @@ in
         "d ${paths.exportsRoot}/lastpass/raw 0755 ${username} users -"
         "d /var/run/nscd 0755 nscd nscd -"
       ]);
+
+      services.sinnix-realm-cache-attrs = {
+        description = "Prepare /realm cache directories for write-heavy scratch";
+        requires = [ "realm.mount" ];
+        after = [ "realm.mount" ];
+        before = [ "nix-daemon.service" ];
+        wantedBy = [ "multi-user.target" ];
+        path = [
+          pkgs.coreutils
+          pkgs.e2fsprogs
+        ];
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+        };
+        script = ''
+          install -d -m 0755 -o root -g root ${paths.realmRoot}/cache
+          install -d -m 0755 -o root -g root ${paths.realmRoot}/cache/nix-build
+          install -d -m 0775 -o ${username} -g users ${paths.realmRoot}/cache/sccache
+
+          chattr +C ${paths.realmRoot}/cache/nix-build ${paths.realmRoot}/cache/sccache || true
+        '';
+      };
+
+      services.nix-daemon = {
+        requires = [ "sinnix-realm-cache-attrs.service" ];
+        after = [ "sinnix-realm-cache-attrs.service" ];
+      };
     };
 
     services.dbus.implementation = "broker";

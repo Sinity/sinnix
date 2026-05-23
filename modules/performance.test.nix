@@ -41,6 +41,11 @@
         name:
         !(builtins.hasAttr name config.systemd.user.slices)
         || (config.systemd.user.slices.${name}.sliceConfig or { }) == { };
+      systemBackground = config.systemd.slices.background.sliceConfig;
+      nixBuild = config.systemd.slices."nix-build".sliceConfig;
+      userAgent = config.systemd.user.slices.agent.sliceConfig;
+      userBackground = config.systemd.user.slices.background.sliceConfig;
+      userBuild = config.systemd.user.slices.build.sliceConfig;
     in
     [
       {
@@ -95,17 +100,31 @@
       {
         assertion =
           noLocalSlice "nix"
-          && noLocalSlice "nix-build"
-          && noLocalSlice "background"
           && noLocalSlice "sinnix"
           && noLocalSlice "sinnix-maintenance"
           && noLocalSlice "system-critical"
-          && noUserSlice "agent"
-          && noUserSlice "build"
-          && noUserSlice "background"
           && noUserSlice "app"
           && noUserSlice "session";
-        message = "Sinnix must not define custom resource-policy slices on the simplified baseline";
+        message = "Sinnix must not resurrect retired whole-session or maintenance slice policy";
+      }
+      {
+        assertion =
+          systemBackground.CPUWeight == 10
+          && systemBackground.IOWeight == 5
+          && systemBackground.MemoryHigh == "4G"
+          && systemBackground.MemoryMax == "10G"
+          && nixBuild.CPUWeight == 20
+          && nixBuild.IOWeight == 10
+          && nixBuild.MemoryHigh == "8G"
+          && nixBuild.MemoryMax == "16G"
+          && userBackground.CPUWeight == 10
+          && userBackground.IOWeight == 5
+          && userBuild.CPUWeight == 20
+          && userBuild.IOWeight == 10
+          && userAgent.CPUWeight == 200
+          && userAgent.IOWeight == 100
+          && userAgent.MemoryLow == "1G";
+        message = "background/build/agent slices must keep measured resource budgets";
       }
       {
         assertion =
@@ -124,19 +143,30 @@
       {
         assertion =
           lib.hasInfix "usage: sinnix-scope <agent|build|background|nix-build>" scopeScript
-          && lib.hasInfix "exec \"$@\"" scopeScript
-          && !(lib.hasInfix "systemd-run" scopeScript)
-          && !(lib.hasInfix "agent.slice" scopeScript)
-          && !(lib.hasInfix "nix-build.slice" scopeScript);
-        message = "sinnix-scope must be a compatibility shim, not a slice placer";
+          && lib.hasInfix "systemd-run" scopeScript
+          && lib.hasInfix "agent.slice" scopeScript
+          && lib.hasInfix "build.slice" scopeScript
+          && lib.hasInfix "background.slice" scopeScript
+          && lib.hasInfix "nix-build.slice" scopeScript
+          && lib.hasInfix "--unit=\"$unit\"" scopeScript
+          && lib.hasInfix "--user" scopeScript;
+        message = "sinnix-scope must place heavy work in explicit resource slices";
       }
       {
         assertion =
-          builtins.elem "d /var/cache/nix-build 0755 root root -" config.systemd.tmpfiles.rules
-          && lib.hasInfix "build-dir = /var/cache/nix-build" coreModule
+          builtins.any (rule: lib.hasInfix "/realm/cache/nix-build" rule) config.systemd.tmpfiles.rules
+          && builtins.any (rule: lib.hasInfix "/realm/cache/sccache" rule) config.systemd.tmpfiles.rules
+          && lib.hasInfix "build-dir = " coreModule
+          && lib.hasInfix "/cache/nix-build" coreModule
+          && lib.hasInfix "SCCACHE_DIR = " coreModule
+          && lib.hasInfix "/cache/sccache" coreModule
+          && lib.hasInfix "services.sinnix-realm-cache-attrs" coreModule
+          && lib.hasInfix "chattr +C" coreModule
+          && lib.hasInfix "before = [ \"nix-daemon.service\" ]" coreModule
+          && lib.hasInfix "requires = [ \"sinnix-realm-cache-attrs.service\" ]" coreModule
           && !(lib.hasInfix "/cache/nix/" coreModule)
           && lib.hasInfix "Eval/fetcher cache stays under ~/.cache/nix" persistenceModule;
-        message = "Nix scratch and eval cache must not rely on the failed /cache NVMe";
+        message = "Nix and sccache scratch must use prepared /realm cache, not root SATA or the failed /cache NVMe";
       }
       {
         assertion =
