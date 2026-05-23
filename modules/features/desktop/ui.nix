@@ -86,10 +86,18 @@ mkFeatureModule {
         disabledModules = [ "${inputs.stylix}/modules/opencode/hm.nix" ];
       };
 
-      # Force unset portal env var in all shells (prevents stale session vars)
-      home-manager.users.${config.sinnix.user.name}.programs.zsh.initContent = lib.mkBefore ''
-        unset NIXOS_XDG_OPEN_USE_PORTAL
-      '';
+      home-manager.users.${config.sinnix.user.name} = {
+        # Force unset portal env var in all shells (prevents stale session vars)
+        programs.zsh.initContent = lib.mkBefore ''
+          unset NIXOS_XDG_OPEN_USE_PORTAL
+        '';
+
+        # Keep portal DBus activation files in the system profile only.
+        # Hyprland's Home Manager module enables xdg.portal by default, which
+        # duplicates the same service names under /etc/profiles/per-user and
+        # makes dbus-broker emit duplicate-name warnings on every reload.
+        xdg.portal.enable = lib.mkForce false;
+      };
 
       stylix = {
         enable = true;
@@ -123,7 +131,7 @@ mkFeatureModule {
         # xdgOpenUsePortal forces portal dialogs even with default apps - disabled for better UX
         # NOTE: Must use mkForce because something else sets it to true
         xdgOpenUsePortal = lib.mkForce false;
-        extraPortals = lib.mkAfter [
+        extraPortals = lib.mkForce [
           pkgs.xdg-desktop-portal-hyprland
           pkgs.xdg-desktop-portal-gtk
         ];

@@ -11,6 +11,7 @@ let
     let
       hm = hmFor config;
       daemonService = hm.systemd.user.services.polylogued.Service or { };
+      daemonConfig = hm.xdg.configFile."polylogue/polylogue.toml";
       browserCaptureExists = builtins.hasAttr "polylogue-browser-capture" hm.systemd.user.services;
       daemonExecStart =
         let
@@ -28,6 +29,10 @@ let
         assertion = !(builtins.hasAttr "polylogue-run" hm.systemd.user.timers);
         message = "Polylogue must not install a batch catch-up timer";
       }
+      {
+        assertion = daemonConfig.force or false;
+        message = "Polylogue daemon config must replace pre-declarative config during activation";
+      }
       (expect.textContains daemonExecStart "/bin/polylogued run --host 127.0.0.1 --port 8765"
         "Polylogue daemon must run the watcher/browser-capture command with the local receiver port"
       )
@@ -43,7 +48,7 @@ let
         "Restart"
       ] "on-failure" "Polylogue daemon must restart on failure")
       {
-        assertion = daemonService.MemoryHigh == "4G" && daemonService.MemoryMax == "8G";
+        assertion = daemonService.MemoryHigh == "6G" && daemonService.MemoryMax == "8G";
         message = "Polylogue daemon must carry memory guardrails for live-ingest leaks";
       }
       {

@@ -24,7 +24,12 @@
 
   # VR streaming to Quest 3 (WiVRn + Monado OpenXR stack + ADB tools)
   sinnix.features.desktop.vr.enable = true;
-  sinnix.features.desktop.activitywatch.enable = true;
+  sinnix.features.desktop.activitywatch = {
+    enable = true;
+    # ActivityWatch is kept manual while its server CPU burn and awatcher
+    # heartbeat timeouts are under investigation.
+    autoStart = false;
+  };
   sinnix.features.desktop.audioCapture = {
     enable = true;
     asrProvider = "openai";

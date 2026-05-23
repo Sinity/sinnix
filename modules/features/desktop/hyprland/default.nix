@@ -282,7 +282,6 @@ in
           libnotify
           wl-clipboard
           wl-screenrec
-          xdg-desktop-portal-gtk
         ];
 
         # why mkForce: home-manager auto-injects X-Restart-Triggers from

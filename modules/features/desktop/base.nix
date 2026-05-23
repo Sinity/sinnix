@@ -35,6 +35,14 @@ mkFeatureModule {
       accent = toRgba "ff" stylixColors.base0D;
       criticalBg = toRgba "f0" stylixColors.base08;
       fontMono = "SauceCodePro Nerd Font Mono:size=16";
+      fnottWithoutPackageDbusActivation = pkgs.fnott.overrideAttrs (old: {
+        postInstall = (old.postInstall or "") + ''
+          rm -f $out/share/dbus-1/services/fnott.service
+        '';
+        passthru = (old.passthru or { }) // {
+          sinnixRemovesDbusActivation = true;
+        };
+      });
     in
     {
       home-manager.users.${user} = {
@@ -62,6 +70,7 @@ mkFeatureModule {
         stylix.targets.fnott.enable = false;
         services.fnott = {
           enable = true;
+          package = fnottWithoutPackageDbusActivation;
           settings = {
             main = {
               notification-margin = 8;
@@ -86,6 +95,13 @@ mkFeatureModule {
             };
           };
         };
+        xdg.dataFile."dbus-1/services/fnott.service".enable = lib.mkForce false;
+        xdg.dataFile."dbus-1/services/org.freedesktop.Notifications.service".text = ''
+          [D-BUS Service]
+          Name=org.freedesktop.Notifications
+          Exec=${fnottWithoutPackageDbusActivation}/bin/fnott
+          SystemdService=fnott.service
+        '';
 
         # Launcher
         programs.tofi = {

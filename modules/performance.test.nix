@@ -45,9 +45,7 @@
     [
       {
         assertion =
-          config.zramSwap.enable
-          && config.zramSwap.memoryPercent == 25
-          && config.zramSwap.priority == 100;
+          config.zramSwap.enable && config.zramSwap.memoryPercent == 25 && config.zramSwap.priority == 100;
         message = "desktop must keep zram enabled as the emergency memory buffer";
       }
       {

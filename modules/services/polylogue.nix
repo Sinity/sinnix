@@ -1,8 +1,8 @@
 # Polylogue - AI conversation archive
 #
 # Daemon ingestion of AI chat exports (ChatGPT, Claude, Claude Code,
-# Codex, Gemini). Sources are auto-discovered from XDG paths; no
-# configuration needed beyond enabling the service.
+# Codex, Gemini). The daemon can infer sources, but the CLI/status path reads
+# polylogue.toml for the archive root, source roots, and daemon API port.
 {
   config,
   lib,
@@ -12,6 +12,17 @@
 let
   cfg = config.sinnix.services.polylogue;
   userName = config.sinnix.user.name;
+  homeDir = config.users.users.${userName}.home;
+  archiveRoot = "${homeDir}/.local/share/polylogue";
+  sourceRoots = [
+    "${homeDir}/.claude/projects"
+    "${homeDir}/.codex/sessions"
+    "${homeDir}/.gemini/tmp"
+    "${homeDir}/.hermes/sessions"
+    "${homeDir}/.gemini/antigravity"
+  ];
+  sourceRootsToml = lib.concatMapStringsSep ", " (root: ''"${root}"'') sourceRoots;
+  daemonApiPort = cfg.daemon.port + 1;
 in
 {
   options.sinnix.services.polylogue = {
@@ -70,7 +81,7 @@ in
 
       memoryHigh = lib.mkOption {
         type = lib.types.str;
-        default = "4G";
+        default = "6G";
         description = "Soft cgroup memory throttle for the long-running daemon.";
       };
 
@@ -133,6 +144,21 @@ in
     environment.systemPackages = [ pkgs.polylogue ];
 
     home-manager.users.${userName} = {
+      xdg.configFile."polylogue/polylogue.toml" = {
+        force = true;
+        text = ''
+          [archive]
+          root = "${archiveRoot}"
+
+          [sources]
+          roots = [${sourceRootsToml}]
+
+          [daemon]
+          host = "${cfg.daemon.host}"
+          port = ${toString daemonApiPort}
+        '';
+      };
+
       systemd.user.services.polylogue-browser-capture = lib.mkIf cfg.browserCapture.enable {
         Unit = {
           Description = "Polylogue local browser-capture receiver";

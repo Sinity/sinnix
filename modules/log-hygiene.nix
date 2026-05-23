@@ -36,7 +36,7 @@
         # fnott spams "info: ctrl.c:161: got X IDs" 2x per second = 172,800 msg/day
         fnott.Service = {
           StandardOutput = "null";
-          StandardError = "journal";
+          StandardError = "null";
         };
 
         # Hypridle logs every idle state change - only log errors

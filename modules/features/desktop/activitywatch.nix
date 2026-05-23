@@ -10,12 +10,20 @@ mkFeatureModule {
     "activitywatch"
   ];
   description = "ActivityWatch time tracker";
+  extraOptions = {
+    autoStart = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Start ActivityWatch automatically with the graphical session.";
+    };
+  };
   configFn =
     {
       config,
       pkgs,
       lib,
       user,
+      cfg,
       ...
     }:
     let
@@ -46,6 +54,17 @@ mkFeatureModule {
             };
           };
 
+          systemd.user.services.activitywatch = {
+            Service = {
+              Nice = 10;
+              IOSchedulingClass = "idle";
+              IOWeight = 10;
+              MemoryHigh = "1G";
+              MemoryMax = "2G";
+            };
+            Install.WantedBy = lib.mkIf (!cfg.autoStart) (lib.mkForce [ ]);
+          };
+
           systemd.user.services.activitywatch-watcher-awatcher = {
             Unit = baseGraphicalUnit // {
               Requisite = [ graphicalTarget ];
@@ -55,7 +74,7 @@ mkFeatureModule {
               Restart = "on-failure";
               RestartSec = 5;
             };
-            Install.WantedBy = [ graphicalTarget ];
+            Install.WantedBy = lib.mkForce (lib.optionals cfg.autoStart [ graphicalTarget ]);
           };
 
         };
