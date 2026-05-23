@@ -61,18 +61,6 @@ let
             mode = "0440";
             path = "/run/agenix/sinex-local-db";
           }
-        else if secretName == "nextcloud-webdav-credentials" then
-          rootOwnedSpec
-          // {
-            mode = "0600";
-            path = "/run/agenix/nextcloud-webdav-credentials";
-          }
-        else if secretName == "nextcloud-address" then
-          rootOwnedSpec
-          // {
-            mode = "0400";
-            path = "/run/agenix/nextcloud-address";
-          }
         else if secretName == userPasswordSecret then
           rootOwnedSpec // { path = "/run/agenix/${userPasswordSecret}"; }
         else if secretName == "root-password" then
@@ -85,8 +73,6 @@ let
   secretsExcludedFromEnv = [
     userPasswordSecret
     "root-password"
-    "nextcloud-webdav-credentials"
-    "nextcloud-address"
     "router-sinnix-prime-mac"
     "borg-passphrase"
     "configstore-update-notifier"

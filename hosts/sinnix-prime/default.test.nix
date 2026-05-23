@@ -34,7 +34,7 @@
           config.sinnix.gpu.mode == "nvidia"
           && config.hardware.nvidia.open == false
           && lib.hasInfix "NVreg_EnableGpuFirmware=0" config.boot.extraModprobeConfig;
-        message = "sinnix-prime must use proprietary NVIDIA with GSP firmware disabled after GSP heartbeat lockups";
+        message = "sinnix-prime must use the proprietary NVIDIA stack with GSP firmware disabled";
       }
       {
         assertion =
@@ -63,7 +63,7 @@
           && machineTelemetry.networkIntervalSec == 300
           && machineTelemetry.bufferbloatIntervalSec == 1800
           && machineTelemetry.gpuIntervalSec == 1.0;
-        message = "sinnix-prime must not keep machine telemetry recovery throttles";
+        message = "sinnix-prime must keep machine telemetry at the normal desktop cadence";
       }
       {
         assertion =

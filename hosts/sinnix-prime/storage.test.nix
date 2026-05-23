@@ -39,10 +39,17 @@
       }
       {
         assertion =
-          lib.hasInfix ''KERNEL=="nvme[0-9]n[0-9]"'' udevRules
+          lib.hasInfix ''ID_SERIAL_SHORT}=="2247E6897FB8"'' udevRules
           && lib.hasInfix ''ATTR{queue/wbt_lat_usec}="0"'' udevRules
-          && lib.hasInfix ''ATTR{queue/nr_requests}="64"'' udevRules;
-        message = "sinnix-prime NVMe queues must be bounded while nvme0 write timeouts are unresolved";
+          && lib.hasInfix ''ATTR{queue/nr_requests}="64"'' udevRules
+          && !(lib.hasInfix ''KERNEL=="nvme[0-9]n[0-9]"'' udevRules);
+        message = "sinnix-prime Crucial P3 queue policy must be model-specific while nvme0 write timeouts are unresolved";
+      }
+      {
+        assertion =
+          lib.hasInfix ''ID_SERIAL_SHORT}=="2003E282E456"'' udevRules
+          && lib.hasInfix ''ATTR{queue/nr_requests}="256"'' udevRules;
+        message = "sinnix-prime root/Nix MX500 queue must leave enough request tags for builds and journald";
       }
       {
         assertion =

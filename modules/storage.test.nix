@@ -5,14 +5,14 @@
   ...
 }:
 {
-  name = "nextcloud-storage-wiring";
+  name = "storage-rclone-backup-wiring";
   modules = [
     mountTmpfsRoots
     baseTestConfig
     (
       { ... }:
       {
-        networking.hostName = "nextcloud-storage-test";
+        networking.hostName = "storage-wiring-test";
       }
     )
   ];
@@ -23,16 +23,8 @@
     in
     [
       {
-        assertion = config.age.secrets ? "nextcloud-address";
-        message = "Agenix must define the nextcloud-address secret";
-      }
-      {
         assertion = config.age.secrets ? "borg-passphrase";
         message = "Agenix must define the borg-passphrase secret";
-      }
-      {
-        assertion = config.age.secrets ? "nextcloud-webdav-credentials";
-        message = "Agenix must still define the Nextcloud credentials secret";
       }
       {
         assertion = config.services.borgbackup.jobs.realm.encryption.mode == "repokey-blake2";
@@ -53,10 +45,6 @@
       {
         assertion = lib.hasInfix "chmod 600" fixRclonePermissions;
         message = "Rclone permission repair must lock the credentials file to mode 600";
-      }
-      {
-        assertion = !(config.system.activationScripts ? nextcloudRcloneRuntime);
-        message = "Legacy Nextcloud runtime mount-unit rendering must remain disabled until the boot-cycle issue is fixed";
       }
     ];
 }

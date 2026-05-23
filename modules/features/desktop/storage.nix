@@ -32,8 +32,6 @@ mkFeatureModule {
           cryptsetup
           scriptPkgs.encrypt-folder
           scriptPkgs.decrypt-folder
-          scriptPkgs.mount-nextcloud
-          scriptPkgs.umount-nextcloud
         ];
 
         xdg.configFile."autostart/git-annex.desktop".text = ''

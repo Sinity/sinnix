@@ -29,10 +29,9 @@ let
 in
 {
   services = {
-    # Keep discard off the hot path. Continuous discard previously produced
-    # D-state btrfs workers during desktop pressure, and the replacement
-    # scheduled fstrim window itself saturated the root_btrfs SSD (sdb2) with
-    # discard I/O on 2026-05-03.
+    # Keep discard as explicit manual maintenance on this host. The active
+    # workstation baseline favors predictable foreground I/O over automatic
+    # discard bursts on the root and realm SSDs.
     fstrim.enable = false;
     gvfs.enable = true; # dynamic mount
 
@@ -53,27 +52,14 @@ in
       ];
     };
 
-    # Disable block-layer writeback throttle on all storage. wbt parks writers
-    # in `wbt_wait` when observed completion latency exceeds wbt_lat_usec
-    # (default 75ms). Combined with btrfs holding the log-tree mutex during
-    # `btrfs_commit_transaction` (especially under btrbk snapshot creation),
-    # any writer doing fdatasync (postgres, sinex, polylogue) can block long
-    # enough to trip khungtaskd -> kernel panic. Observed 2026-04-28 23:11:
-    # btrbk snapshot of /persist stalled in wbt_wait while holding the log
-    # mutex; postgres + tokio fsync tasks stacked behind it and the 122s
-    # hung-task threshold fired. wbt is widely disabled on btrfs+NVMe setups
-    # (Fedora ships it off on btrfs); block-layer throttling is the wrong
-    # mechanism when the FS itself coordinates ordering.
-    #
-    # Crucial P3 /realm mitigation: nvme0n1 exposes nr_requests=1023 by
-    # default, and under mixed Btrfs metadata/database/build writeback the
-    # controller produced repeated 30s NVMe command timeouts on 2026-05-23
-    # despite APST and PCIe ASPM already being disabled. Keep request depth
-    # bounded so background write bursts cannot leave commands buried behind a
-    # huge software queue.
+    # Btrfs on this workstation coordinates write ordering itself; block-layer
+    # WBT adds another latency throttle in front of fsync-heavy workloads.
+    # Keep the Crucial P3 NVMe conservative while giving the root/Nix MX500
+    # enough request tags for store writes, build scratch, and journald.
     udev.extraRules = ''
-      ACTION=="add|change", KERNEL=="nvme[0-9]n[0-9]", ATTR{queue/wbt_lat_usec}="0", ATTR{queue/nr_requests}="64"
-      ACTION=="add|change", KERNEL=="sd[a-z]", ATTR{queue/wbt_lat_usec}="0"
+      ACTION=="add|change", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", ENV{ID_SERIAL_SHORT}=="2003E282E456", ATTR{queue/wbt_lat_usec}="0", ATTR{queue/nr_requests}="256"
+      ACTION=="add|change", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", ENV{ID_SERIAL_SHORT}=="2247E6897FB8", ATTR{queue/wbt_lat_usec}="0", ATTR{queue/nr_requests}="64"
+      ACTION=="add|change", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", KERNEL=="sd[b-z]", ATTR{queue/wbt_lat_usec}="0"
     '';
   };
 
@@ -136,14 +122,8 @@ in
       ];
     };
 
-    # /cache mount on Samsung 960 EVO (nvme1n1p2) removed 2026-05-12 after the
-    # drive started throwing sustained I/O errors: NVMe queue timeouts at
-    # 06:52, then btrfs flipped /cache read-only and the kernel logged hundreds
-    # of Read-/Write-error events on swap-device 259:0 (nvme1n1p1). Codex/exec
-    # syscalls began returning EIO ("env: 'bash': Input/output error") because
-    # paged-out binary pages could not be read back. Drive is staying unused
-    # until it is physically replaced. Cache consumers fall back to their
-    # default locations or root-backed /var/tmp scratch.
+    # The old Samsung 960 EVO cache/swap device is not part of the active
+    # storage topology. Cache consumers use root-backed defaults instead.
 
     "${realmRoot}" = {
       device = "/dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a";
@@ -190,12 +170,8 @@ in
 
   };
 
-  # Swap on nvme1n1p1 (Samsung 960 EVO) was removed 2026-05-12 after the drive
-  # started returning I/O errors. Use a prepared Btrfs swapfile on a dedicated
-  # @swap subvolume instead: it survives impermanent-root rollback, stays out
-  # of btrbk's /persist and /realm snapshots, and is created through
-  # `btrfs filesystem mkswapfile` so CoW/compression/holes are not
-  # accidentally enabled.
+  # Swap lives on a dedicated Btrfs subvolume so it survives root rollback,
+  # stays out of snapshots, and is created without CoW/compression/holes.
   swapDevices = [
     {
       device = swapFile;

@@ -61,7 +61,7 @@ let
     "networking-resolved-router-authority"
     "services-airvpn-seed"
     "services-airvpn-seed-manual-start"
-    "nextcloud-storage-wiring"
+    "storage-rclone-backup-wiring"
     "services-below"
     "services-hermes"
     "services-machine-telemetry"

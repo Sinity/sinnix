@@ -168,6 +168,9 @@
         assertion =
           nixSettings.max-jobs == 4
           && nixSettings.cores == 4
+          && nixSettings.http-connections == 16
+          && nixSettings.max-substitution-jobs == 8
+          && nixSettings.keep-going == false
           && !(nixSettings ? use-cgroups)
           && !(builtins.elem "cgroups" nixSettings.experimental-features)
           && lib.hasInfix "SINNIX_REBUILD_MAX_JOBS:-4" commandRegistry
@@ -176,7 +179,7 @@
           && lib.hasInfix "SINNIX_REBUILD_CORES:-4" devShell
           && lib.hasInfix "NIX_SAFE_MAX_JOBS:-4" nixSafeScript
           && lib.hasInfix "NIX_SAFE_CORES:-4" nixSafeScript;
-        message = "Nix concurrency must stay bounded without enabling Nix cgroups";
+        message = "Nix concurrency and substitution fan-out must stay bounded without enabling Nix cgroups";
       }
       {
         assertion =

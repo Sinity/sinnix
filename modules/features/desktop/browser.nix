@@ -30,13 +30,9 @@ mkFeatureModule {
           ...
         }:
         let
-          # Disable Chromium's Wayland color management - it conflicts with
-          # Hyprland's HDR mode, causing washed out colors.
-          #
-          # Keep Vulkan disabled on Chrome/Wayland as well. Chrome 147 logged
-          # an explicit Wayland+Vulkan incompatibility immediately before an
-          # NVIDIA Xid 31 / GPU-process reset that also took down a kitty window.
-          # See: https://github.com/hyprwm/Hyprland/discussions/11910
+          # Chrome and Electron apps share a conservative Wayland GPU baseline:
+          # Hyprland owns color management, and Vulkan/ANGLE Vulkan stay off on
+          # this NVIDIA desktop path.
           #
           # --user-data-dir is intentional: Chrome 136+ silently refuses to
           # honour --remote-debugging-port when using the platform-default
@@ -55,11 +51,8 @@ mkFeatureModule {
           chromePkg = pkgs.google-chrome.override {
             commandLineArgs = chromeArgs;
           };
-          # Launch Chrome through a transient user service even when started by
-          # tofi-drun. Without this escape hatch, tofi remains the cgroup parent
-          # for Chrome zygotes/renderers while the browser process itself lands
-          # in a separate app scope. That split makes app accounting and future
-          # interactive resource policy lie about what "Chrome" contains.
+          # Launch Chrome through a transient user service so browser children
+          # stay in one cgroup for accounting and interactive policy.
           chromeLauncher = pkgs.writeShellApplication {
             name = "sinnix-chrome";
             runtimeInputs = [

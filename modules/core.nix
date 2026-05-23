@@ -36,7 +36,6 @@ in
           "@wheel"
         ];
         substituters = [
-          "https://cache.nixos.org/"
           "https://sinity.cachix.org"
           "https://nix-community.cachix.org"
           "https://nix-gaming.cachix.org"
@@ -74,17 +73,19 @@ in
         keep-outputs = true;
         keep-derivations = true;
 
-        # Continue building unrelated derivations when one fails — avoids
-        # wasting already-scheduled work on parallel build failures.
-        keep-going = true;
+        # Stop on the first build failure. Workstation rebuilds need fast,
+        # local diagnosis more than CI-style failure fan-out across a busy
+        # store/build scratch disk.
+        keep-going = false;
 
         # Reduce warning spam for dirty git repos during development
         warn-dirty = false;
 
         # ── Substituter perf tuning ────────────────────────────────────────
-        # Higher HTTP parallelism shaves wall-time on cold restores from
-        # cache.nixos.org / cachix when many small NARs land at once.
-        http-connections = 50;
+        # Keep cache restores parallel without letting Nix flood the root SSD
+        # with dozens of concurrent NAR unpack/store-registration writes.
+        http-connections = 16;
+        max-substitution-jobs = 8;
         # Default connect-timeout is unbounded — a stalled cachix host can
         # block evaluation. 5s is enough for healthy caches and falls
         # through to local build quickly when one is sick.

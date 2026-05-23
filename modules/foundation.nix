@@ -144,11 +144,12 @@ in
       default = { };
     };
 
-    storage.nextcloudUser = mkOption {
-      type = types.str;
-      default = "michal";
-      description = "WebDAV username on the Nextcloud server (may differ from system user).";
+    storage = mkOption {
+      type = types.attrs;
+      default = { };
+      description = "Reserved storage namespace for config introspection.";
     };
+
   };
 
   config = {

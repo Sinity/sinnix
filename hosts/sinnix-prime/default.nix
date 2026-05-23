@@ -79,9 +79,8 @@
       forwardedPort = 20241;
     };
   };
-  # why mkForce: this board's fTPM hangs the systemd-tpm2-setup unit on
-  # activation (kernel d-state up to 30s). lanzaboote / boot defaults
-  # would re-enable it; this host opts out unconditionally.
+  # This board's fTPM blocks system activation in systemd-tpm2-setup. Keep
+  # TPM2 setup masked on sinnix-prime; Secure Boot key material is file-backed.
   systemd.services.systemd-tpm2-setup.enable = lib.mkForce false;
   systemd.services.systemd-tpm2-setup-early.enable = lib.mkForce false;
 

@@ -33,11 +33,6 @@ in
 {
   environment.systemPackages = lib.mkAfter (baseStoragePackages ++ storageMaintenancePackages);
 
-  # Nextcloud WebDAV mount — DISABLED 2026-03-10 during recovery.
-  # Caused a systemd ordering cycle (mnt-nextcloud.automount vs local-fs.target)
-  # that contributed to boot failures. Re-enable after fixing the automount unit
-  # to not depend on network-online.target (automounts don't need it).
-
   system.activationScripts.fixRclonePermissions.text = ''
     if [ -f ${userHome}/.config/rclone/rclone.conf ]; then
       chown ${username}:${primaryGroupName} ${userHome}/.config/rclone ${userHome}/.config/rclone/rclone.conf 2>/dev/null || true
