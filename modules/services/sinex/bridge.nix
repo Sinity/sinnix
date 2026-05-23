@@ -55,15 +55,6 @@ let
   runtimeEnabled = cfg.enable;
   runtimeAutoStart = runtimeEnabled && cfg.autoStart;
   databasePrepared = cfg.provisionDatabase || cfg.enable;
-  # Workstation policy: clear the hard MemoryMax/CPUQuota caps that the
-  # upstream module sets as kill-fences on heavy automata. Sinnix prioritizes
-  # capture continuity over host containment on this workstation.
-  workstationResourcePolicy = {
-    serviceConfig = {
-      MemoryMax = lib.mkForce null;
-      CPUQuota = lib.mkForce null;
-    };
-  };
 in
 {
   config = lib.mkIf (options.services ? sinex) (
@@ -113,13 +104,6 @@ in
         "${realmRoot}/inbox/download"
       ];
       generatedRuntimeServices = lib.optionals runtimeEnabled (config.sinex._generatedUnits or [ ]);
-      cappedAppRuntimeServices = lib.unique (
-        lib.optionals runtimeEnabled [
-          "sinex-ingestd"
-          "sinex-gateway"
-        ]
-        ++ generatedRuntimeServices
-      );
       maintenanceTimerServiceNames = [
         "sinex-document-scan"
       ];
@@ -408,8 +392,6 @@ in
       })
 
       # Workstation policy that sinex itself does not own:
-      #   - clear the heavy-automaton MemoryMax/CPUQuota kill-fences (this
-      #     host prioritizes capture continuity over containment)
       #   - keep PostgreSQL/NATS below interactive priority; they are
       #     long-lived capture substrate writers, not login/TTY-critical
       #     services
@@ -427,7 +409,6 @@ in
       #     the Home Manager service ensures the ACL is set last.
       (lib.mkIf runtimeEnabled {
         systemd.services = lib.mkMerge [
-          (lib.genAttrs cappedAppRuntimeServices (_: workstationResourcePolicy))
           {
             postgresql = {
               unitConfig.RequiresMountsFor = [ sinexRuntimeRoot ];

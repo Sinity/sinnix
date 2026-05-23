@@ -165,6 +165,7 @@ in
     environment.variables = {
       RUSTC_WRAPPER = "${pkgs.sccache}/bin/sccache";
       SCCACHE_DIR = "/var/cache/sccache";
+      SCCACHE_IDLE_TIMEOUT = "300";
       SCCACHE_MAX_CACHE_SIZE = "20G";
     };
 

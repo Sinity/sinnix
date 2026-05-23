@@ -171,6 +171,7 @@
           && lib.hasInfix "CARGO_BUILD_JOBS:=4" scopeScript
           && lib.hasInfix "CMAKE_BUILD_PARALLEL_LEVEL:=4" scopeScript
           && lib.hasInfix "NIX_BUILD_CORES:=4" scopeScript
+          && lib.hasInfix "SCCACHE_IDLE_TIMEOUT:=10" scopeScript
           && lib.hasInfix ''MAKEFLAGS="-j4"'' scopeScript
           && lib.hasInfix "ionice -c 2 -n 7" scopeScript
           && lib.hasInfix "nice -n 5" scopeScript
@@ -189,6 +190,7 @@
           && lib.hasInfix "/var/cache/nix-build" coreModule
           && lib.hasInfix "SCCACHE_DIR = " coreModule
           && lib.hasInfix "/var/cache/sccache" coreModule
+          && lib.hasInfix "SCCACHE_IDLE_TIMEOUT = \"300\"" coreModule
           && lib.hasInfix "/var/cache/sinex" coreModule
           && lib.hasInfix "services.sinnix-root-cache-attrs" coreModule
           && lib.hasInfix "chattr +C" coreModule
@@ -204,10 +206,16 @@
         assertion =
           lib.hasInfix "default_sinex_cache=" scopeScript
           && lib.hasInfix "/var/cache/sinex/" scopeScript
+          && lib.hasInfix "sinex_cache_base=\"/var/cache/sinex/$sinex_user/$sinex_hash\"" scopeScript
           && lib.hasInfix "SINEX_DEV_CACHE_ROOT" scopeScript
+          && lib.hasInfix "SINEX_DEV_CACHE_ROOT=\"$sinex_cache_base\"" scopeScript
           && lib.hasInfix "CARGO_TARGET_DIR=\"$SINEX_DEV_CACHE_ROOT/target\"" scopeScript
-          && lib.hasInfix "SINEX_TEST_RESULTS_DIR=\"$SINEX_CACHE_DIR/test-results\"" scopeScript;
-        message = "sinnix-scope build must redirect default Sinex dev artifacts off /realm";
+          && lib.hasInfix "SINEX_TEST_RESULTS_DIR=\"$SINEX_CACHE_DIR/test-results\"" scopeScript
+          && lib.hasInfix "default_sinex_dev_state=" scopeScript
+          && lib.hasInfix "SINEX_DEV_STATE_DIR=\"$sinex_cache_base/dev-state\"" scopeScript
+          && lib.hasInfix "DATABASE_URL=\"postgresql:///sinex_dev?host=$SINEX_DEV_STATE_DIR/run\"" scopeScript
+          && lib.hasInfix "SINEX_DEV_STATE_DIR SINEX_NATS_DIR" scopeScript;
+        message = "sinnix-scope build must redirect default Sinex dev artifacts and state off /realm";
       }
       {
         assertion =

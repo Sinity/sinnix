@@ -80,6 +80,10 @@ in
       commonAssertions config
       ++ [
         {
+          assertion = config.sinnix.services.polylogue.health.unit == "polylogued.service";
+          message = "Polylogue daemon must be present in health policy when autostarted";
+        }
+        {
           assertion = hm.systemd.user.services.polylogued.Install.WantedBy == [ "default.target" ];
           message = "Polylogue daemon must start automatically by default";
         }
@@ -100,6 +104,10 @@ in
       in
       commonAssertions config
       ++ [
+        {
+          assertion = config.sinnix.services.polylogue.health == null;
+          message = "Polylogue daemon autoStart=false must remove restartable health metadata";
+        }
         {
           assertion = hm.systemd.user.services.polylogued.Install.WantedBy == [ ];
           message = "Polylogue daemon autoStart=false must remove default user-session installation";

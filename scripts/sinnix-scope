@@ -34,25 +34,40 @@ case "$class" in
     : "${CARGO_BUILD_JOBS:=4}"
     : "${CMAKE_BUILD_PARALLEL_LEVEL:=4}"
     : "${NIX_BUILD_CORES:=4}"
+    : "${SCCACHE_IDLE_TIMEOUT:=10}"
     if [ "${MAKEFLAGS+x}" != x ]; then
       MAKEFLAGS="-j4"
     fi
-    export CARGO_BUILD_JOBS CMAKE_BUILD_PARALLEL_LEVEL MAKEFLAGS NIX_BUILD_CORES
+    export CARGO_BUILD_JOBS CMAKE_BUILD_PARALLEL_LEVEL MAKEFLAGS NIX_BUILD_CORES SCCACHE_IDLE_TIMEOUT
     ;;
 esac
 
 if [ "$class" = build ] && [ -n "${SINEX_DEV_ROOT:-}" ]; then
   sinex_root="${SINEX_DEV_ROOT%/}"
+  sinex_user="${USER:-$(id -un)}"
+  sinex_hash="$(printf '%s' "$sinex_root" | sha256sum | cut -c1-12)"
+  sinex_cache_base="/var/cache/sinex/$sinex_user/$sinex_hash"
+
   default_sinex_cache="$sinex_root/.sinex/cache"
   if [ "${SINEX_DEV_CACHE_ROOT:-}" = "$default_sinex_cache" ]; then
-    sinex_user="${USER:-$(id -un)}"
-    sinex_hash="$(printf '%s' "$sinex_root" | sha256sum | cut -c1-12)"
-    SINEX_DEV_CACHE_ROOT="/var/cache/sinex/$sinex_user/$sinex_hash"
+    SINEX_DEV_CACHE_ROOT="$sinex_cache_base"
     SINEX_CACHE_DIR="$SINEX_DEV_CACHE_ROOT"
     CARGO_TARGET_DIR="$SINEX_DEV_CACHE_ROOT/target"
     SINEX_TEST_RESULTS_DIR="$SINEX_CACHE_DIR/test-results"
     mkdir -p "$SINEX_DEV_CACHE_ROOT" "$CARGO_TARGET_DIR" "$SINEX_TEST_RESULTS_DIR"
     export SINEX_DEV_CACHE_ROOT SINEX_CACHE_DIR CARGO_TARGET_DIR SINEX_TEST_RESULTS_DIR
+  fi
+
+  default_sinex_dev_state="$sinex_root/.sinex"
+  default_sinex_state="$default_sinex_dev_state/state"
+  if [ "${SINEX_DEV_STATE_DIR:-}" = "$default_sinex_dev_state" ] && [ "${SINEX_STATE_DIR:-}" = "$default_sinex_state" ]; then
+    SINEX_DEV_STATE_DIR="$sinex_cache_base/dev-state"
+    SINEX_STATE_DIR="$SINEX_DEV_STATE_DIR/state"
+    SINEX_NATS_DIR="$SINEX_STATE_DIR/nats"
+    DATABASE_URL="postgresql:///sinex_dev?host=$SINEX_DEV_STATE_DIR/run"
+    PGHOST="$SINEX_DEV_STATE_DIR/run"
+    mkdir -p "$SINEX_DEV_STATE_DIR" "$SINEX_STATE_DIR" "$SINEX_NATS_DIR"
+    export SINEX_DEV_STATE_DIR SINEX_STATE_DIR SINEX_NATS_DIR DATABASE_URL PGHOST
   fi
 fi
 
@@ -90,11 +105,12 @@ for name in \
   AGENT_NAME AGENT_SESSION_ID \
   CARGO_HOME CARGO_TARGET_DIR CODEX_HOME \
   CARGO_BUILD_JOBS CMAKE_BUILD_PARALLEL_LEVEL MAKEFLAGS \
+  DATABASE_URL \
   GEMINI_API_KEY GITHUB_TOKEN HOME LANG LC_ALL LOGNAME \
   NIX_BUILD_CORES NIX_CONFIG NIX_PATH NIXPKGS_ALLOW_UNFREE \
-  PATH POLYLOGUE_ROOT PWD PYTHONHOME PYTHONPATH \
-  RUSTC_WRAPPER RUST_LOG RUSTUP_HOME SCCACHE_DIR SHELL \
-  SINEX_CACHE_DIR SINEX_DEV_CACHE_ROOT SINEX_ROOT SINEX_STATE_DIR SINEX_TEST_RESULTS_DIR \
+  PATH PGHOST PGPORT POLYLOGUE_ROOT PWD PYTHONHOME PYTHONPATH \
+  RUSTC_WRAPPER RUST_LOG RUSTUP_HOME SCCACHE_DIR SCCACHE_IDLE_TIMEOUT SHELL \
+  SINEX_CACHE_DIR SINEX_DEV_CACHE_ROOT SINEX_DEV_STATE_DIR SINEX_NATS_DIR SINEX_ROOT SINEX_STATE_DIR SINEX_TEST_RESULTS_DIR \
   TERM TERM_PROGRAM TMPDIR USER UV_CACHE_DIR UV_PROJECT_ENVIRONMENT VIRTUAL_ENV \
   XDG_CACHE_HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_RUNTIME_DIR XDG_STATE_HOME
 do

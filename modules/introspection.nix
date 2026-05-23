@@ -19,20 +19,26 @@ let
   # ── Feature-provided service checks ─────────────────────────────────
   # These services are implemented in feature modules rather than
   # sinnix.services.* modules, so they are listed here explicitly.
-  featureServiceChecks = lib.optionals (cfg.features.desktop.activitywatch.enable or false) [
-    {
-      name = "activitywatch";
-      unit = "activitywatch.service";
-      type = "user";
-      restartable = true;
-    }
-    {
-      name = "activitywatch-watcher-awatcher";
-      unit = "activitywatch-watcher-awatcher.service";
-      type = "user";
-      restartable = true;
-    }
-  ];
+  featureServiceChecks =
+    lib.optionals
+      (
+        (cfg.features.desktop.activitywatch.enable or false)
+        && (cfg.features.desktop.activitywatch.autoStart or true)
+      )
+      [
+        {
+          name = "activitywatch";
+          unit = "activitywatch.service";
+          type = "user";
+          restartable = true;
+        }
+        {
+          name = "activitywatch-watcher-awatcher";
+          unit = "activitywatch-watcher-awatcher.service";
+          type = "user";
+          restartable = true;
+        }
+      ];
 
   # ── Capture → freshness mapping ─────────────────────────────────────
   # Only captures that are continuously produced by services.

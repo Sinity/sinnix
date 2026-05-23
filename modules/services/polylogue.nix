@@ -142,6 +142,7 @@ in
 
   config = lib.mkIf cfg.enable {
     environment.systemPackages = [ pkgs.polylogue ];
+    sinnix.services.polylogue.health = lib.mkIf (!cfg.daemon.autoStart) (lib.mkForce null);
 
     home-manager.users.${userName} = {
       xdg.configFile."polylogue/polylogue.toml" = {

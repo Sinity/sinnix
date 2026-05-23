@@ -89,13 +89,18 @@
       sinexHealthChecks = builtins.filter (check: check.name == "sinex") healthPolicy.services;
       natsService = config.systemd.services.nats.serviceConfig;
       postgresService = config.systemd.services.postgresql.serviceConfig;
-      cappedSubstrateUnits = [
+      substrateUnits = [
         "nats"
         "postgresql"
       ];
       sinexRuntimeAppServices = builtins.filter (
-        name: !(builtins.elem name cappedSubstrateUnits)
+        name: !(builtins.elem name substrateUnits)
       ) runtimeServices;
+      boundedAutomataServices = [
+        "sinex-canonicalizer"
+        "sinex-health-automaton"
+        "sinex-relation-extractor"
+      ];
       sinexRuntimeRoot = "/var/lib/sinex";
       persistedSystemDirs = config.sinnix.persistence.system.directories;
       postgresqlUnitConfig = serviceUnitConfig "postgresql";
@@ -139,10 +144,12 @@
           let
             service = serviceConfig name;
           in
-          (!(service ? MemoryMax) || service.MemoryMax == null)
+          service ? MemoryHigh
+          && service ? MemoryMax
+          && service.MemoryMax != null
           && (!(service ? CPUQuota) || service.CPUQuota == null)
-        ) sinexRuntimeAppServices;
-        message = "Sinex runtime app daemons must not keep upstream MemoryMax/CPUQuota caps";
+        ) boundedAutomataServices;
+        message = "Sinex heavy automata must keep upstream memory guardrails";
       }
       {
         assertion = builtins.all (
@@ -150,10 +157,9 @@
           let
             service = serviceConfig name;
           in
-          (!(service ? MemoryMax) || service.MemoryMax == null)
-          && (!(service ? CPUQuota) || service.CPUQuota == null)
+          (!(service ? CPUQuota) || service.CPUQuota == null)
         ) restartableRuntimeServices;
-        message = "Long-running Sinex runtime daemons must not keep hard caps from old upstream defaults";
+        message = "Long-running Sinex runtime daemons must not keep CPU hard caps";
       }
       {
         assertion = builtins.all (
