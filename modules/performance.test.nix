@@ -148,9 +148,13 @@
           && lib.hasInfix "build.slice" scopeScript
           && lib.hasInfix "background.slice" scopeScript
           && lib.hasInfix "nix-build.slice" scopeScript
+          && lib.hasInfix "ionice -c 2 -n 7" scopeScript
+          && lib.hasInfix "nice -n 5" scopeScript
+          && lib.hasInfix "ionice -c 3" scopeScript
+          && lib.hasInfix "nice -n 10" scopeScript
           && lib.hasInfix "--unit=\"$unit\"" scopeScript
           && lib.hasInfix "--user" scopeScript;
-        message = "sinnix-scope must place heavy work in explicit resource slices";
+        message = "sinnix-scope must place heavy work in explicit resource slices and scheduler classes";
       }
       {
         assertion =
