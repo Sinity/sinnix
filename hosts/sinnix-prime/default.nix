@@ -124,15 +124,4 @@
       ForwardToSyslog=no
     '';
   };
-  # Keep heavyweight snapshot/backup automation manual while storage is under
-  # observation; lighter diagnostic timers are restored above by their modules.
-  systemd.timers = {
-    btrfs-metadata-image-backup.wantedBy = lib.mkForce [ ];
-    btrbk.wantedBy = lib.mkForce [ ];
-    borgbackup-job-realm.wantedBy = lib.mkForce [ ];
-    borgbackup-job-persist.wantedBy = lib.mkForce [ ];
-    borgbackup-check.wantedBy = lib.mkForce [ ];
-    borgbackup-root-snapshots.wantedBy = lib.mkForce [ ];
-    sinnix-borg-drill.wantedBy = lib.mkForce [ ];
-  };
 }
