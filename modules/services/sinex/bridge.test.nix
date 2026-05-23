@@ -108,6 +108,15 @@
         "preflight"
         "enable"
       ] false config;
+      serviceWants = name: lib.attrByPath [ "systemd" "services" name "wants" ] [ ] config;
+      serviceAfter = name: lib.attrByPath [ "systemd" "services" name "after" ] [ ] config;
+      serviceBefore = name: lib.attrByPath [ "systemd" "services" name "before" ] [ ] config;
+      targetAccessServices = [
+        "sinex-browser-target-access"
+        "sinex-desktop-target-access"
+        "sinex-document-target-access"
+        "sinex-terminal-target-access"
+      ];
     in
     [
       {
@@ -251,6 +260,21 @@
           !(builtins.hasAttr name config.systemd.timers) && !(builtins.hasAttr name config.systemd.services)
         ) absentLegacyBlobMaintenanceUnits;
         message = "Sinnix must not synthesize empty legacy blob maintenance units when upstream does not define them";
+      }
+      {
+        assertion =
+          config.services.sinex.storage.blob.autoInit == false
+          && !(builtins.elem "sinex-blob-init.service" (serviceWants "sinex-ingestd"))
+          && !(builtins.elem "sinex-blob-init.service" (serviceAfter "sinex-ingestd"))
+          && !(builtins.elem "sinex-blob-init.service" (serviceWants "sinex-gateway"))
+          && !(builtins.elem "sinex-blob-init.service" (serviceAfter "sinex-gateway"));
+        message = "Sinex CAS runtime must not reference absent legacy blob-init units";
+      }
+      {
+        assertion = builtins.all (
+          name: !(builtins.elem "sinex-preflight.service" (serviceBefore name))
+        ) targetAccessServices;
+        message = "Sinex target-access helpers must not order against disabled preflight";
       }
       {
         assertion =

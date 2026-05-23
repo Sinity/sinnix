@@ -56,6 +56,32 @@ let
       printf '%s\n' 150000000 >"$package/constraint_1_power_limit_uw"
     '';
   };
+  thawInteractiveScopes = pkgs.writeShellApplication {
+    name = "sinnix-thaw-interactive-scopes";
+    runtimeInputs = [
+      pkgs.gawk
+      pkgs.systemd
+    ];
+    text = ''
+      set -eu
+
+      systemctl --user list-units '*.scope' --all --no-legend --plain \
+        | awk '{ print $1 }' \
+        | while read -r unit; do
+            case "$unit" in
+              kitty-*.scope|app-Hyprland-kitty-*.scope|foot-*.scope|app-Hyprland-foot-*.scope|tmux-spawn-*.scope|sinnix-agent-*.scope) ;;
+              *) continue ;;
+            esac
+
+            state="$(systemctl --user show "$unit" --property=FreezerState --value 2>/dev/null || true)"
+            if [ "$state" = frozen ]; then
+              printf '%s\n' "thawing stranded interactive scope: $unit" \
+                | systemd-cat --identifier=sinnix-thaw-interactive-scopes --priority=warning
+              systemctl --user thaw "$unit" >/dev/null 2>&1 || true
+            fi
+          done
+    '';
+  };
 in
 {
   config = lib.mkIf config.sinnix.machine.isDesktop {
@@ -185,6 +211,24 @@ in
         IOWeight = 10;
         MemoryHigh = "8G";
         MemoryMax = "16G";
+      };
+    };
+
+    systemd.user.services.sinnix-thaw-interactive-scopes = {
+      description = "Thaw stranded interactive recovery scopes";
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${thawInteractiveScopes}/bin/sinnix-thaw-interactive-scopes";
+      };
+    };
+
+    systemd.user.timers.sinnix-thaw-interactive-scopes = {
+      description = "Run stranded interactive scope thaw guard";
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnBootSec = "1min";
+        OnUnitActiveSec = "1min";
+        AccuracySec = "15s";
       };
     };
 

@@ -116,12 +116,13 @@ in
       daemonIOSchedClass = "idle";
       daemonIOSchedPriority = 6;
 
-      # Keep build sandbox scratch off /tmp and off the root SATA SSD. /tmp is
-      # RAM-backed and capped; root-backed /var/cache contends with journald,
-      # login-critical persisted state, and Sinex PostgreSQL. /realm/cache is
-      # disposable NVMe-backed scratch prepared with no-COW attributes below.
+      # Keep build sandbox scratch off /tmp and off /realm. /tmp is RAM-backed
+      # and capped; /realm's Crucial P3 has produced NVMe write timeouts under
+      # mixed build/database writeback. Root-backed /var/cache is slower, but
+      # it is the stable place for disposable scratch until /realm latency is
+      # no longer the active failure mode.
       extraOptions = ''
-        build-dir = ${paths.realmRoot}/cache/nix-build
+        build-dir = /var/cache/nix-build
       '';
 
       gc = {
@@ -159,11 +160,11 @@ in
     ];
 
     # RUSTC_WRAPPER applies to devshell builds. Keep sccache's write-heavy,
-    # disposable object store beside Nix build scratch instead of under the
-    # user's persisted root-SSD-backed XDG cache.
+    # disposable object store beside Nix build scratch instead of on /realm or
+    # under the user's persisted XDG cache.
     environment.variables = {
       RUSTC_WRAPPER = "${pkgs.sccache}/bin/sccache";
-      SCCACHE_DIR = "${paths.realmRoot}/cache/sccache";
+      SCCACHE_DIR = "/var/cache/sccache";
       SCCACHE_MAX_CACHE_SIZE = "20G";
     };
 
@@ -216,9 +217,9 @@ in
     systemd = {
       tmpfiles.rules = lib.mkAfter ([
         "d ${paths.realmRoot} 0755 root root -"
-        "d ${paths.realmRoot}/cache 0755 root root -"
-        "d ${paths.realmRoot}/cache/nix-build 0755 root root -"
-        "d ${paths.realmRoot}/cache/sccache 0775 ${username} users -"
+        "d /var/cache/nix-build 0755 root root -"
+        "d /var/cache/sccache 0775 ${username} users -"
+        "d /var/cache/sinex 0775 ${username} users -"
         "d ${paths.outerRealm} 0755 root root -"
         "d ${paths.outerRealm}/inbox 0755 ${username} users -"
         "d ${paths.dataRoot} 0755 root root -"
@@ -243,10 +244,8 @@ in
         "d /var/run/nscd 0755 nscd nscd -"
       ]);
 
-      services.sinnix-realm-cache-attrs = {
-        description = "Prepare /realm cache directories for write-heavy scratch";
-        requires = [ "realm.mount" ];
-        after = [ "realm.mount" ];
+      services.sinnix-root-cache-attrs = {
+        description = "Prepare root cache directories for write-heavy scratch";
         before = [ "nix-daemon.service" ];
         wantedBy = [ "multi-user.target" ];
         path = [
@@ -258,17 +257,17 @@ in
           RemainAfterExit = true;
         };
         script = ''
-          install -d -m 0755 -o root -g root ${paths.realmRoot}/cache
-          install -d -m 0755 -o root -g root ${paths.realmRoot}/cache/nix-build
-          install -d -m 0775 -o ${username} -g users ${paths.realmRoot}/cache/sccache
+          install -d -m 0755 -o root -g root /var/cache/nix-build
+          install -d -m 0775 -o ${username} -g users /var/cache/sccache
+          install -d -m 0775 -o ${username} -g users /var/cache/sinex
 
-          chattr +C ${paths.realmRoot}/cache/nix-build ${paths.realmRoot}/cache/sccache || true
+          chattr +C /var/cache/nix-build /var/cache/sccache /var/cache/sinex || true
         '';
       };
 
       services.nix-daemon = {
-        requires = [ "sinnix-realm-cache-attrs.service" ];
-        after = [ "sinnix-realm-cache-attrs.service" ];
+        requires = [ "sinnix-root-cache-attrs.service" ];
+        after = [ "sinnix-root-cache-attrs.service" ];
       };
     };
 

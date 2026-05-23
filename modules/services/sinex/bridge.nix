@@ -123,6 +123,12 @@ in
       maintenanceTimerServiceNames = [
         "sinex-document-scan"
       ];
+      targetAccessServiceBefore = {
+        sinex-browser-target-access = [ "sinex-source-worker-browser.history-1.service" ];
+        sinex-desktop-target-access = [ "sinex-source-worker-desktop.activitywatch-1.service" ];
+        sinex-document-target-access = [ "sinex-document-scan.service" ];
+        sinex-terminal-target-access = [ "sinex-source-worker-terminal.atuin-history-1.service" ];
+      };
       mkScopedSinexPackage =
         sinexPkgs:
         pkgs.symlinkJoin {
@@ -258,7 +264,11 @@ in
             storage = {
               blob = {
                 enable = runtimeEnabled;
-                autoInit = runtimeEnabled;
+                # Upstream only defines sinex-blob-init for legacy git-annex
+                # storage, but generated source/core units depend on it whenever
+                # autoInit is true. This host uses CAS storage, so keep autoInit
+                # off to avoid a dangling optional dependency.
+                autoInit = false;
               };
             };
 
@@ -453,6 +463,9 @@ in
               TimeoutStopSec = lib.mkDefault "15s";
             };
           }))
+          (lib.mapAttrs (_: before: {
+            before = lib.mkForce before;
+          }) targetAccessServiceBefore)
         ];
         systemd.targets.sinex-runtime = {
           description = lib.mkForce "Delayed automatic Sinex runtime";

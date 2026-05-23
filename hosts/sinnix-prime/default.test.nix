@@ -26,5 +26,13 @@
           && lib.hasInfix "NVreg_EnableGpuFirmware=0" config.boot.extraModprobeConfig;
         message = "sinnix-prime must use proprietary NVIDIA with GSP firmware disabled after GSP heartbeat lockups";
       }
+      {
+        assertion =
+          config.systemd.services.sinnix-disable-nvme-aspm.script != null
+          && lib.hasInfix "disable_aspm 00:06.0" config.systemd.services.sinnix-disable-nvme-aspm.script
+          && lib.hasInfix "disable_aspm 02:00.0" config.systemd.services.sinnix-disable-nvme-aspm.script
+          && lib.hasInfix "& ~0x3" config.systemd.services.sinnix-disable-nvme-aspm.script;
+        message = "sinnix-prime must clear ASPM on the Crucial P3 /realm NVMe link";
+      }
     ];
 }

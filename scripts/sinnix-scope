@@ -31,15 +31,30 @@ esac
 scoped_command=("$@")
 case "$class" in
   build)
-    : "${CARGO_BUILD_JOBS:=6}"
-    : "${CMAKE_BUILD_PARALLEL_LEVEL:=6}"
-    : "${NIX_BUILD_CORES:=6}"
+    : "${CARGO_BUILD_JOBS:=4}"
+    : "${CMAKE_BUILD_PARALLEL_LEVEL:=4}"
+    : "${NIX_BUILD_CORES:=4}"
     if [ "${MAKEFLAGS+x}" != x ]; then
-      MAKEFLAGS="-j6"
+      MAKEFLAGS="-j4"
     fi
     export CARGO_BUILD_JOBS CMAKE_BUILD_PARALLEL_LEVEL MAKEFLAGS NIX_BUILD_CORES
     ;;
 esac
+
+if [ "$class" = build ] && [ -n "${SINEX_DEV_ROOT:-}" ]; then
+  sinex_root="${SINEX_DEV_ROOT%/}"
+  default_sinex_cache="$sinex_root/.sinex/cache"
+  if [ "${SINEX_DEV_CACHE_ROOT:-}" = "$default_sinex_cache" ]; then
+    sinex_user="${USER:-$(id -un)}"
+    sinex_hash="$(printf '%s' "$sinex_root" | sha256sum | cut -c1-12)"
+    SINEX_DEV_CACHE_ROOT="/var/cache/sinex/$sinex_user/$sinex_hash"
+    SINEX_CACHE_DIR="$SINEX_DEV_CACHE_ROOT"
+    CARGO_TARGET_DIR="$SINEX_DEV_CACHE_ROOT/target"
+    SINEX_TEST_RESULTS_DIR="$SINEX_CACHE_DIR/test-results"
+    mkdir -p "$SINEX_DEV_CACHE_ROOT" "$CARGO_TARGET_DIR" "$SINEX_TEST_RESULTS_DIR"
+    export SINEX_DEV_CACHE_ROOT SINEX_CACHE_DIR CARGO_TARGET_DIR SINEX_TEST_RESULTS_DIR
+  fi
+fi
 
 case "$class" in
   agent)

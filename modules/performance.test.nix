@@ -28,6 +28,7 @@
       devShell = builtins.readFile (inputs.self + "/flake/dev-shell.nix");
       nixSafeScript = builtins.readFile (inputs.self + "/scripts/nix-safe");
       coreModule = builtins.readFile (inputs.self + "/modules/core.nix");
+      performanceModule = builtins.readFile (inputs.self + "/modules/performance.nix");
       persistenceModule = builtins.readFile (inputs.self + "/modules/persistence.nix");
       earlyoomAvoid = builtins.elemAt config.services.earlyoom.extraArgs 3;
       earlyoomPrefer = builtins.elemAt config.services.earlyoom.extraArgs 1;
@@ -46,6 +47,8 @@
       userAgent = config.systemd.user.slices.agent.sliceConfig;
       userBackground = config.systemd.user.slices.background.sliceConfig;
       userBuild = config.systemd.user.slices.build.sliceConfig;
+      thawService = config.systemd.user.services.sinnix-thaw-interactive-scopes;
+      thawTimer = config.systemd.user.timers.sinnix-thaw-interactive-scopes;
     in
     [
       {
@@ -99,8 +102,8 @@
       {
         assertion =
           !(config.systemd.services ? browser-oom-protect)
-          && !(lib.hasInfix "oom_score_adj" (builtins.readFile (inputs.self + "/modules/performance.nix")))
-          && !(lib.hasInfix "pgrep -x" (builtins.readFile (inputs.self + "/modules/performance.nix")));
+          && !(lib.hasInfix "oom_score_adj" performanceModule)
+          && !(lib.hasInfix "pgrep -x" performanceModule);
         message = "desktop must not install the retired browser OOM score daemon";
       }
       {
@@ -134,6 +137,17 @@
       }
       {
         assertion =
+          lib.hasInfix "/bin/sinnix-thaw-interactive-scopes" thawService.serviceConfig.ExecStart
+          && thawTimer.timerConfig.OnUnitActiveSec == "1min"
+          && thawTimer.wantedBy == [ "timers.target" ]
+          && lib.hasInfix "FreezerState" performanceModule
+          && lib.hasInfix "systemctl --user thaw" performanceModule
+          && lib.hasInfix "kitty-*.scope" performanceModule
+          && lib.hasInfix "sinnix-agent-*.scope" performanceModule;
+        message = "desktop must repair stranded frozen terminal and agent scopes";
+      }
+      {
+        assertion =
           nixSettings.max-jobs == 4
           && nixSettings.cores == 4
           && !(nixSettings ? use-cgroups)
@@ -154,10 +168,10 @@
           && lib.hasInfix "build.slice" scopeScript
           && lib.hasInfix "background.slice" scopeScript
           && lib.hasInfix "nix-build.slice" scopeScript
-          && lib.hasInfix "CARGO_BUILD_JOBS:=6" scopeScript
-          && lib.hasInfix "CMAKE_BUILD_PARALLEL_LEVEL:=6" scopeScript
-          && lib.hasInfix "NIX_BUILD_CORES:=6" scopeScript
-          && lib.hasInfix ''MAKEFLAGS="-j6"'' scopeScript
+          && lib.hasInfix "CARGO_BUILD_JOBS:=4" scopeScript
+          && lib.hasInfix "CMAKE_BUILD_PARALLEL_LEVEL:=4" scopeScript
+          && lib.hasInfix "NIX_BUILD_CORES:=4" scopeScript
+          && lib.hasInfix ''MAKEFLAGS="-j4"'' scopeScript
           && lib.hasInfix "ionice -c 2 -n 7" scopeScript
           && lib.hasInfix "nice -n 5" scopeScript
           && lib.hasInfix "ionice -c 3" scopeScript
@@ -168,19 +182,32 @@
       }
       {
         assertion =
-          builtins.any (rule: lib.hasInfix "/realm/cache/nix-build" rule) config.systemd.tmpfiles.rules
-          && builtins.any (rule: lib.hasInfix "/realm/cache/sccache" rule) config.systemd.tmpfiles.rules
+          builtins.any (rule: lib.hasInfix "/var/cache/nix-build" rule) config.systemd.tmpfiles.rules
+          && builtins.any (rule: lib.hasInfix "/var/cache/sccache" rule) config.systemd.tmpfiles.rules
+          && builtins.any (rule: lib.hasInfix "/var/cache/sinex" rule) config.systemd.tmpfiles.rules
           && lib.hasInfix "build-dir = " coreModule
-          && lib.hasInfix "/cache/nix-build" coreModule
+          && lib.hasInfix "/var/cache/nix-build" coreModule
           && lib.hasInfix "SCCACHE_DIR = " coreModule
-          && lib.hasInfix "/cache/sccache" coreModule
-          && lib.hasInfix "services.sinnix-realm-cache-attrs" coreModule
+          && lib.hasInfix "/var/cache/sccache" coreModule
+          && lib.hasInfix "/var/cache/sinex" coreModule
+          && lib.hasInfix "services.sinnix-root-cache-attrs" coreModule
           && lib.hasInfix "chattr +C" coreModule
           && lib.hasInfix "before = [ \"nix-daemon.service\" ]" coreModule
-          && lib.hasInfix "requires = [ \"sinnix-realm-cache-attrs.service\" ]" coreModule
+          && lib.hasInfix "requires = [ \"sinnix-root-cache-attrs.service\" ]" coreModule
+          && !(lib.hasInfix "/realm/cache/nix-build" coreModule)
+          && !(lib.hasInfix "/realm/cache/sccache" coreModule)
           && !(lib.hasInfix "/cache/nix/" coreModule)
           && lib.hasInfix "Eval/fetcher cache stays under ~/.cache/nix" persistenceModule;
-        message = "Nix and sccache scratch must use prepared /realm cache, not root SATA or the failed /cache NVMe";
+        message = "Nix and sccache scratch must use prepared root cache, not /realm or the failed /cache NVMe";
+      }
+      {
+        assertion =
+          lib.hasInfix "default_sinex_cache=" scopeScript
+          && lib.hasInfix "/var/cache/sinex/" scopeScript
+          && lib.hasInfix "SINEX_DEV_CACHE_ROOT" scopeScript
+          && lib.hasInfix "CARGO_TARGET_DIR=\"$SINEX_DEV_CACHE_ROOT/target\"" scopeScript
+          && lib.hasInfix "SINEX_TEST_RESULTS_DIR=\"$SINEX_CACHE_DIR/test-results\"" scopeScript;
+        message = "sinnix-scope build must redirect default Sinex dev artifacts off /realm";
       }
       {
         assertion =

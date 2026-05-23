@@ -112,6 +112,28 @@
     ];
   };
 
+  systemd.services.sinnix-disable-nvme-aspm = {
+    description = "Disable ASPM on the /realm NVMe PCIe link";
+    wantedBy = [ "multi-user.target" ];
+    before = [ "multi-user.target" ];
+    after = [ "local-fs.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
+    script = ''
+      disable_aspm() {
+        dev="$1"
+        value="$(${pkgs.pciutils}/bin/setpci -s "$dev" CAP_EXP+0x10.w)"
+        masked="$(printf '%04x' "$((0x$value & ~0x3))")"
+        ${pkgs.pciutils}/bin/setpci -s "$dev" CAP_EXP+0x10.w="$masked"
+      }
+
+      disable_aspm 00:06.0
+      disable_aspm 02:00.0
+    '';
+  };
+
   specialisation = {
     recovery-nomodeset.configuration = {
       system.nixos.tags = [ "recovery-nomodeset" ];
