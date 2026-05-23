@@ -74,8 +74,12 @@ in
       "vm.swappiness" = 10;
       "vm.page-cluster" = 0;
       "vm.vfs_cache_pressure" = 50;
-      "vm.dirty_background_ratio" = 5;
-      "vm.dirty_ratio" = 10;
+      # Keep Btrfs/NVMe writeback from accumulating multi-GiB dirty bursts.
+      # The Crucial P3 /realm drive has shown 30s NVMe command timeouts under
+      # mixed build/database writeback; bounded dirty bytes push back earlier
+      # and make stalls shorter and more attributable.
+      "vm.dirty_background_bytes" = 64 * 1024 * 1024;
+      "vm.dirty_bytes" = 256 * 1024 * 1024;
 
       # Preserve the crash diagnostics that helped during the hardware pass.
       "kernel.hung_task_panic" = 1;

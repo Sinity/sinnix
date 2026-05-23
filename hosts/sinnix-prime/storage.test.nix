@@ -22,6 +22,7 @@
         entry: if builtins.isAttrs entry then entry.directory else entry
       ) config.sinnix.persistence.home.directories;
       swapDevice = builtins.head config.swapDevices;
+      udevRules = config.services.udev.extraRules;
     in
     [
       {
@@ -35,6 +36,13 @@
       {
         assertion = !(config.services.fstrim.enable or false);
         message = "sinnix-prime must not schedule automatic fstrim while storage pressure is unresolved";
+      }
+      {
+        assertion =
+          lib.hasInfix ''KERNEL=="nvme[0-9]n[0-9]"'' udevRules
+          && lib.hasInfix ''ATTR{queue/wbt_lat_usec}="0"'' udevRules
+          && lib.hasInfix ''ATTR{queue/nr_requests}="64"'' udevRules;
+        message = "sinnix-prime NVMe queues must be bounded while nvme0 write timeouts are unresolved";
       }
       {
         assertion =

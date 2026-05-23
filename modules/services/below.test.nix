@@ -62,6 +62,10 @@ mkServiceTest {
           && lib.hasInfix "maintenanceCpuWeight" belowModule
           && lib.hasInfix "maintenanceIoWeight" belowModule
           && lib.hasInfix "developer CPUWeight=$backoff_cpu_weight IOWeight=$backoff_io_weight" belowModule
+          && lib.hasInfix "demote_agent_heavy_processes" belowModule
+          && lib.hasInfix ''*"/agent.slice/"*'' belowModule
+          && lib.hasInfix "polylogue.cli maintenance" belowModule
+          && lib.hasInfix "ionice -c 3 -p" belowModule
           && lib.hasInfix "runuser -u" belowModule
           && lib.hasInfix "applied PSI runtime backoff" belowModule
           && lib.hasInfix "restored PSI runtime backoff" belowModule;

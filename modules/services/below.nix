@@ -315,6 +315,38 @@ mkServiceModule {
               log_line notice "applied PSI runtime backoff: developer CPUWeight=$backoff_cpu_weight IOWeight=$backoff_io_weight; maintenance CPUWeight=$maintenance_backoff_cpu_weight IOWeight=$maintenance_backoff_io_weight"
             }
 
+            demote_agent_heavy_processes() {
+              local proc pid cgroup cmd marker
+              for proc in /proc/[0-9]*; do
+                pid="''${proc##*/}"
+                [ -r "$proc/cgroup" ] && [ -r "$proc/cmdline" ] || continue
+                cgroup="$(cat "$proc/cgroup" 2>/dev/null || true)"
+                case "$cgroup" in
+                  *"/agent.slice/"*) ;;
+                  *) continue ;;
+                esac
+
+                cmd="$(tr '\0' ' ' < "$proc/cmdline" 2>/dev/null || true)"
+                [ -n "$cmd" ] || continue
+
+                case "$cmd" in
+                  *"polylogue.cli maintenance"*|cargo\ *|*/cargo\ *|*\ cargo\ *|rustc\ *|*/rustc\ *|*\ rustc\ *|ld.mold\ *|*/ld.mold\ *|*\ ld.mold\ *|xtask\ *|*/xtask\ *|*\ xtask\ *|nix\ build\ *|*/nix\ build\ *|*\ nix\ build\ *|nix\ develop\ *|*/nix\ develop\ *|*\ nix\ develop\ *)
+                    ;;
+                  *)
+                    continue
+                    ;;
+                esac
+
+                marker="$state_dir/demoted-agent-$pid"
+                if [ ! -e "$marker" ]; then
+                  log_line warning "demoting heavy agent child pid=$pid cmd=$cmd"
+                  touch "$marker"
+                fi
+                renice 10 -p "$pid" >/dev/null 2>&1 || true
+                ionice -c 3 -p "$pid" >/dev/null 2>&1 || true
+              done
+            }
+
             restore_backoff() {
               local file manager unit cpu_weight io_weight
               for file in "$state_dir"/*.policy; do
@@ -376,6 +408,7 @@ mkServiceModule {
                   if [ "$backoff_active" -eq 0 ]; then
                     apply_backoff
                   fi
+                  demote_agent_heavy_processes
                   backoff_until=$((now + backoff_duration))
                   clear_seen=0
                 fi

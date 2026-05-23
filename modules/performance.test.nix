@@ -59,6 +59,12 @@
       }
       {
         assertion =
+          config.boot.kernel.sysctl."vm.dirty_background_bytes" == 64 * 1024 * 1024
+          && config.boot.kernel.sysctl."vm.dirty_bytes" == 256 * 1024 * 1024;
+        message = "desktop dirty writeback must stay byte-bounded for NVMe/Btrfs latency";
+      }
+      {
+        assertion =
           lib.hasInfix "Hyprland" earlyoomAvoid
           && lib.hasInfix "below" earlyoomAvoid
           && lib.hasInfix "chrome" earlyoomAvoid
@@ -148,6 +154,10 @@
           && lib.hasInfix "build.slice" scopeScript
           && lib.hasInfix "background.slice" scopeScript
           && lib.hasInfix "nix-build.slice" scopeScript
+          && lib.hasInfix "CARGO_BUILD_JOBS:=6" scopeScript
+          && lib.hasInfix "CMAKE_BUILD_PARALLEL_LEVEL:=6" scopeScript
+          && lib.hasInfix "NIX_BUILD_CORES:=6" scopeScript
+          && lib.hasInfix ''MAKEFLAGS="-j6"'' scopeScript
           && lib.hasInfix "ionice -c 2 -n 7" scopeScript
           && lib.hasInfix "nice -n 5" scopeScript
           && lib.hasInfix "ionice -c 3" scopeScript

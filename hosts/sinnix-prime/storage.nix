@@ -58,14 +58,21 @@ in
     # (default 75ms). Combined with btrfs holding the log-tree mutex during
     # `btrfs_commit_transaction` (especially under btrbk snapshot creation),
     # any writer doing fdatasync (postgres, sinex, polylogue) can block long
-    # enough to trip khungtaskd → kernel panic. Observed 2026-04-28 23:11:
+    # enough to trip khungtaskd -> kernel panic. Observed 2026-04-28 23:11:
     # btrbk snapshot of /persist stalled in wbt_wait while holding the log
     # mutex; postgres + tokio fsync tasks stacked behind it and the 122s
     # hung-task threshold fired. wbt is widely disabled on btrfs+NVMe setups
     # (Fedora ships it off on btrfs); block-layer throttling is the wrong
     # mechanism when the FS itself coordinates ordering.
+    #
+    # Crucial P3 /realm mitigation: nvme0n1 exposes nr_requests=1023 by
+    # default, and under mixed Btrfs metadata/database/build writeback the
+    # controller produced repeated 30s NVMe command timeouts on 2026-05-23
+    # despite APST and PCIe ASPM already being disabled. Keep request depth
+    # bounded so background write bursts cannot leave commands buried behind a
+    # huge software queue.
     udev.extraRules = ''
-      ACTION=="add|change", KERNEL=="nvme[0-9]n[0-9]", ATTR{queue/wbt_lat_usec}="0"
+      ACTION=="add|change", KERNEL=="nvme[0-9]n[0-9]", ATTR{queue/wbt_lat_usec}="0", ATTR{queue/nr_requests}="64"
       ACTION=="add|change", KERNEL=="sd[a-z]", ATTR{queue/wbt_lat_usec}="0"
     '';
   };
