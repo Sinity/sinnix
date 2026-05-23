@@ -87,6 +87,8 @@ mkFeatureModule {
       };
 
       home-manager.users.${config.sinnix.user.name} = {
+        gtk.gtk4.theme = lib.mkDefault null;
+
         # Force unset portal env var in all shells (prevents stale session vars)
         programs.zsh.initContent = lib.mkBefore ''
           unset NIXOS_XDG_OPEN_USE_PORTAL

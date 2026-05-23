@@ -116,6 +116,13 @@ mkFeatureModule {
           };
         };
 
+        xdg.userDirs = {
+          enable = true;
+          createDirectories = true;
+          setSessionVariables = true;
+          download = "${config.sinnix.paths.realmRoot}/inbox/download";
+        };
+
         # Background Services
         systemd.user.services = {
           wl-clip-persist = lib.sinnix.systemd.mkGraphicalUserService {

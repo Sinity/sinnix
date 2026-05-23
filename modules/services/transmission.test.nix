@@ -22,6 +22,18 @@ let
         && !(builtins.any (line: lib.hasInfix "/tdown" line) config.systemd.tmpfiles.rules);
       message = "Transmission must create automount-backed torrent directories only when started";
     }
+    {
+      assertion =
+        with config.systemd.services.transmission.serviceConfig;
+        Nice == 10 && CPUWeight == 20 && IOWeight == 10 && IOSchedulingClass == "idle";
+      message = "Transmission must run below interactive desktop priority";
+    }
+    {
+      assertion =
+        with config.systemd.services.transmission.serviceConfig;
+        MemoryHigh == "1G" && MemoryMax == "4G";
+      message = "Transmission must not be able to consume unbounded memory";
+    }
   ];
 in
 [

@@ -15,6 +15,21 @@ mkFeatureTest {
         sinnix.features.desktop.ui.enable = true;
       }
     )
+    (
+      { pkgs, ... }:
+      {
+        assertions = [
+          {
+            assertion = pkgs.blueman.passthru.sinnixRemovesXdgAutostart or false;
+            message = "Blueman XDG autostart must not duplicate the managed user service";
+          }
+          {
+            assertion = pkgs.obex_data_server.passthru.sinnixRenamesDbusActivation or false;
+            message = "OBEX DBus activation file name must match its DBus name";
+          }
+        ];
+      }
+    )
   ];
   assertions =
     config:
@@ -40,6 +55,10 @@ mkFeatureTest {
       {
         assertion = hm.xdg.dataFile."dbus-1/services/fnott.service".enable == false;
         message = "Fnott DBus activation file name must match its DBus name";
+      }
+      {
+        assertion = hm.xdg.userDirs.download == "${config.sinnix.paths.realmRoot}/inbox/download";
+        message = "Desktop base must declare the canonical XDG download directory";
       }
     ];
 }

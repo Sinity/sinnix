@@ -110,8 +110,11 @@ mkServiceModule {
             TimeoutStartSec = "15min";
             TimeoutStopSec = "5min";
             Nice = 10;
+            CPUWeight = 20;
             IOWeight = 10;
             IOSchedulingClass = "idle";
+            MemoryHigh = "1G";
+            MemoryMax = "4G";
             ExecStartPre = [
               "+${pkgs.coreutils}/bin/install -d -m 2775 -o ${username} -g users ${torrentInbox}"
               "+${pkgs.coreutils}/bin/install -d -m 2775 -o ${username} -g users ${torrentDownloadDir}"
