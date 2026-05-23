@@ -5,8 +5,9 @@ Organized by domain under `modules/features/`:
 ### CLI (`features/cli/`)
 
 - **core.nix**: Core CLI environment (git, taskwarrior, gnupg)
-- **stability-lab.nix**: Persistent hardware stability runner with reboot-no-more GPU/display experiment suite and reboot forensics capture directories
+- **polylogue.nix**: Polylogue CLI integration
 - **task-tracking.nix**: Taskwarrior/Timewarrior integration
+- **yt-polisher.nix**: YouTube media workflow helpers
 
 ### System (`features/system/`)
 

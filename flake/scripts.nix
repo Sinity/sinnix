@@ -153,12 +153,6 @@ let
     };
 
     sinnix-observe = pkgs.callPackage ../pkgs/sinnix-observe/pkg.nix { };
-
-    # Python port of sinnix-sentinel (Phase G). Ships side-by-side with the
-    # bash script; the systemd unit in modules/services/sentinel.nix is
-    # intentionally NOT redirected here. Promotion is a separate operational
-    # step after a 24h observe-only validation window.
-    sinnix-sentinel-py = pkgs.callPackage ../pkgs/sinnix-sentinel/pkg.nix { };
   };
 
   packageSet = scriptPackages // externalPackages;

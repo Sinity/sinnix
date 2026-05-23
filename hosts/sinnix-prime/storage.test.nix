@@ -43,7 +43,7 @@
           && lib.hasInfix ''ATTR{queue/wbt_lat_usec}="0"'' udevRules
           && lib.hasInfix ''ATTR{queue/nr_requests}="64"'' udevRules
           && !(lib.hasInfix ''KERNEL=="nvme[0-9]n[0-9]"'' udevRules);
-        message = "sinnix-prime Crucial P3 queue policy must be model-specific while nvme0 write timeouts are unresolved";
+        message = "sinnix-prime Crucial P3 queue policy must be model-specific and conservative";
       }
       {
         assertion =

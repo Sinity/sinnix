@@ -143,7 +143,6 @@ mkFeatureModule {
                 /realm/project/polylogue | /realm/project/polylogue-*) printf '%s\n' polylogue ;;
                 /realm/project/scribe-tap) printf '%s\n' rust-project ;;
                 /realm/project/intercept-bounce) printf '%s\n' rust-project ;;
-                /realm/project/reboot-no-more) printf '%s\n' rust-project ;;
                 /realm/project/knowledge-extract) printf '%s\n' python-project ;;
                 /realm/project/pwrank) printf '%s\n' web-project ;;
                 /realm/data/knowledgebase) printf '%s\n' data-project ;;

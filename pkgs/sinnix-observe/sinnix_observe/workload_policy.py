@@ -13,7 +13,6 @@ DEFAULT_POLICY: dict[str, Any] = {
     "observedUnits": {
         "system": [
             "below.service",
-            "sinnix-pressure-watchdog.service",
             "sinex-runtime.target",
             "sinex-runtime.timer",
             "sinex-ingestd.service",
@@ -50,7 +49,6 @@ DEFAULT_POLICY: dict[str, Any] = {
     },
     "unitClasses": {
         "below.service": "observability",
-        "sinnix-pressure-watchdog.service": "observability",
         "btrbk.service": "background-maintenance",
         "btrbk.timer": "background-maintenance",
         "borgbackup-job-realm.service": "background-maintenance",

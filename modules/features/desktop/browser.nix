@@ -30,9 +30,7 @@ mkFeatureModule {
           ...
         }:
         let
-          # Chrome and Electron apps share a conservative Wayland GPU baseline:
-          # Hyprland owns color management, and Vulkan/ANGLE Vulkan stay off on
-          # this NVIDIA desktop path.
+          # Hyprland owns color management on this Wayland desktop path.
           #
           # --user-data-dir is intentional: Chrome 136+ silently refuses to
           # honour --remote-debugging-port when using the platform-default
@@ -43,7 +41,7 @@ mkFeatureModule {
           # read cookies via CDP. Acceptable on this single-user machine.
           chromeUserDataDir = "${config.home.homeDirectory}/.config/chrome-ws";
           chromeArgs = lib.concatStringsSep " " [
-            "--disable-features=WaylandWpColorManagerV1,Vulkan,DefaultANGLEVulkan"
+            "--disable-features=WaylandWpColorManagerV1"
             "--remote-debugging-port=9222"
             "--remote-debugging-address=127.0.0.1"
             "--user-data-dir=${chromeUserDataDir}"

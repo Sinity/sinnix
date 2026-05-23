@@ -1,7 +1,7 @@
 # Workload policy registry
 #
 # One source of truth for Sinnix resource classes, systemd slices, command
-# wrappers, pressure backoff targets, and observability classification.
+# wrappers, static slice budgets, and observability classification.
 { lib, config, ... }:
 let
   policy = {
@@ -13,7 +13,7 @@ let
       background-maintenance.description = "Bulk maintenance that should yield to interaction";
       capture-runtime.description = "Long-running capture daemons";
       capture-substrate.description = "Databases and queues backing capture daemons";
-      observability.description = "Monitoring needed during pressure incidents";
+      observability.description = "Monitoring that should remain responsive during contention";
       system.description = "Ordinary system services without Sinnix-specific placement";
     };
 
@@ -106,24 +106,9 @@ let
       };
     };
 
-    pressureBackoff = {
-      systemUnits = [
-        "nix-build.slice"
-        "background.slice"
-      ];
-      userUnits = [
-        "build.slice"
-        "nix-build.slice"
-        "background.slice"
-      ];
-      cpuWeight = 1;
-      ioWeight = 1;
-    };
-
     observedUnits = {
       system = [
         "below.service"
-        "sinnix-pressure-watchdog.service"
         "sinex-runtime.target"
         "sinex-runtime.timer"
         "sinex-ingestd.service"
@@ -162,7 +147,6 @@ let
 
     unitClasses = {
       "below.service" = "observability";
-      "sinnix-pressure-watchdog.service" = "observability";
       "btrbk.service" = "background-maintenance";
       "btrbk.timer" = "background-maintenance";
       "borgbackup-job-realm.service" = "background-maintenance";

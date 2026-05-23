@@ -103,7 +103,7 @@ mkFeatureModule {
       };
       waylandEditorFlags =
         "--enable-features=UseOzonePlatform --ozone-platform=wayland "
-        + "--disable-features=WaylandWpColorManagerV1,Vulkan,DefaultANGLEVulkan";
+        + "--disable-features=WaylandWpColorManagerV1";
       wrapWaylandEditor =
         name: pkg: bin:
         pkgs.symlinkJoin {

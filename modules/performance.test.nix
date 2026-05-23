@@ -51,8 +51,6 @@
       userBackground = config.systemd.user.slices.background.sliceConfig;
       userBuild = config.systemd.user.slices.build.sliceConfig;
       userNixBuild = config.systemd.user.slices."nix-build".sliceConfig;
-      thawService = config.systemd.user.services.sinnix-thaw-interactive-scopes;
-      thawTimer = config.systemd.user.timers.sinnix-thaw-interactive-scopes;
     in
     [
       {
@@ -155,14 +153,11 @@
       }
       {
         assertion =
-          lib.hasInfix "/bin/sinnix-thaw-interactive-scopes" thawService.serviceConfig.ExecStart
-          && thawTimer.timerConfig.OnUnitActiveSec == "1min"
-          && thawTimer.wantedBy == [ "timers.target" ]
-          && lib.hasInfix "FreezerState" performanceModule
-          && lib.hasInfix "systemctl --user thaw" performanceModule
-          && lib.hasInfix "kitty-*.scope" performanceModule
-          && lib.hasInfix "sinnix-agent-*.scope" performanceModule;
-        message = "desktop must repair stranded frozen terminal and agent scopes";
+          !(config.systemd.user.services ? sinnix-thaw-interactive-scopes)
+          && !(config.systemd.user.timers ? sinnix-thaw-interactive-scopes)
+          && !(lib.hasInfix "FreezerState" performanceModule)
+          && !(lib.hasInfix "systemctl --user thaw" performanceModule);
+        message = "desktop must not install automatic frozen-scope repair jobs";
       }
       {
         assertion =
@@ -211,12 +206,11 @@
           && workloadPolicy.commandClasses.build.slice == "build.slice"
           && workloadPolicy.commandClasses.build.envDefaults.MAKEFLAGS == "-j4"
           && workloadPolicy.commandClasses.agent.resourceClass == "interactive-agent"
-          && builtins.elem "background.slice" workloadPolicy.pressureBackoff.systemUnits
-          && builtins.elem "nix-build.slice" workloadPolicy.pressureBackoff.userUnits
-          && !(builtins.elem "nix.slice" workloadPolicy.pressureBackoff.systemUnits)
+          && !(workloadPolicy ? pressureBackoff)
+          && !(builtins.elem "sinnix-pressure-watchdog.service" workloadPolicy.observedUnits.system)
           && !(builtins.elem "sinnix-maintenance.slice" workloadPolicy.observedSlices.system)
           && workloadPolicy.unitClasses."polylogued.service" == "capture-runtime";
-        message = "workload policy registry must be the single source for command classes, backoff, and observe classification";
+        message = "workload policy registry must be the single source for command classes and observe classification";
       }
       {
         assertion =

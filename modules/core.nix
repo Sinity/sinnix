@@ -60,9 +60,7 @@ in
         ];
         netrc-file = "/etc/nix/netrc";
         # Bound local builds so cache misses cannot fan out into many
-        # full-core C++/Rust/Python derivations at once. The previous
-        # max-jobs=8/cores=0 policy let each of 8 derivations see every core,
-        # amplifying RAM/I/O pressure during devshell and rebuild work.
+        # full-core C++/Rust/Python derivations at once.
         # Benchmark future changes against wall time, peak RSS, PSI, and
         # desktop latency before raising this again.
         max-jobs = 4;
@@ -107,9 +105,8 @@ in
         min-free = 5368709120; # 5 GiB
         max-free = 53687091200; # 50 GiB
 
-        # lazy-trees disabled — local nix (2.34.6) rejects the setting at
-        # nix.conf validation time. Re-enable once the version supports it
-        # natively. Tracked elsewhere; not blocking the urgent #581 deploy.
+        # lazy-trees disabled: local nix (2.34.6) rejects the setting at
+        # nix.conf validation time.
         # lazy-trees = true;
       };
 
@@ -118,10 +115,8 @@ in
       daemonIOSchedPriority = 6;
 
       # Keep build sandbox scratch off /tmp and off /realm. /tmp is RAM-backed
-      # and capped; /realm's Crucial P3 has produced NVMe write timeouts under
-      # mixed build/database writeback. Root-backed /var/cache is slower, but
-      # it is the stable place for disposable scratch until /realm latency is
-      # no longer the active failure mode.
+      # and capped; /realm is data/capture storage. Root-backed /var/cache is
+      # the stable place for disposable build scratch.
       extraOptions = ''
         build-dir = /var/cache/nix-build
       '';

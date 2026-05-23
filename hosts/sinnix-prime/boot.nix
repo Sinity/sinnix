@@ -43,12 +43,6 @@
             ${pkgs.gnused}/bin/sed -i "s|^title .*|title $title|" "$entry"
           done
 
-          # Earlier UKI experiments left hash-suffixed Type #2 entries in
-          # EFI/Linux. The current system uses BLS .conf entries under
-          # loader/entries, so remove the stale UKIs that make the boot menu
-          # show long opaque IDs.
-          ${pkgs.findutils}/bin/find "${config.boot.loader.efi.efiSysMountPoint}/EFI/Linux" \
-            -maxdepth 1 -type f -name 'nixos-generation-[0-9]*-*.efi' -delete 2>/dev/null || true
         '';
       };
       efi.canTouchEfiVariables = true;
@@ -94,11 +88,10 @@
       "preempt=full"
       # Prevent USB device autosuspend — eliminates wakeup latency on mouse/keyboard
       "usbcore.autosuspend=-1"
-      # Crucial P3 / workstation NVMe stability: avoid deep APST states that
-      # can turn intermittent controller latency into kernel I/O timeouts.
+      # Crucial P3 /realm policy: keep the storage controller in active states
+      # so Btrfs metadata writeback has predictable command latency.
       "nvme_core.default_ps_max_latency_us=0"
-      # Keep PCIe link power management out of the storage path while /realm is
-      # producing NVMe command timeouts under Btrfs metadata writeback.
+      # Keep PCIe link power management out of the /realm storage path.
       "pcie_aspm=off"
       # Keep boot diagnostics visible without debug-level systemd spam.
       "loglevel=4"
@@ -132,46 +125,6 @@
       disable_aspm 00:06.0
       disable_aspm 02:00.0
     '';
-  };
-
-  specialisation = {
-    recovery-nomodeset.configuration = {
-      system.nixos.tags = [ "recovery-nomodeset" ];
-      boot.kernelParams = [
-        "systemd.unit=multi-user.target"
-        "nomodeset"
-        "systemd.mask=display-manager.service"
-      ];
-    };
-
-    recovery-skip-binds.configuration = {
-      system.nixos.tags = [ "recovery-skip-binds" ];
-      boot.kernelParams = [
-        "systemd.unit=multi-user.target"
-        "nomodeset"
-        "systemd.mask=display-manager.service"
-        "systemd.mask=var-log-journal.mount"
-        "systemd.mask=home-sinity-.local-share-polylogue.mount"
-      ];
-    };
-
-    recovery-rescue.configuration = {
-      system.nixos.tags = [ "recovery-rescue" ];
-      boot.kernelParams = [
-        "systemd.unit=rescue.target"
-        "nomodeset"
-        "systemd.mask=display-manager.service"
-      ];
-    };
-
-    recovery-emergency.configuration = {
-      system.nixos.tags = [ "recovery-emergency" ];
-      boot.kernelParams = [
-        "systemd.unit=emergency.target"
-        "nomodeset"
-        "systemd.mask=display-manager.service"
-      ];
-    };
   };
 
   hardware.enableRedistributableFirmware = true;

@@ -23,7 +23,6 @@
         "render-agents"
         "sinnix-observe"
         "sinnix-sentinel"
-        "sinnix-sentinel-py"
         "verify-agent-topology"
       ];
     in

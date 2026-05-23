@@ -759,50 +759,6 @@ while IFS=$'\t' read -r pattern severity window; do
   record_check "journal" "$pattern" "$status" "$count matches in last $window"
 done < <(echo "$POLICY" | jq -r '.journal[] | "\(.pattern)\t\(.severity)\t\(.window)"')
 
-# ── 15. Pressure Watchdog Feedback (Fix E1) ───────────────────────────
-# sinnix-pressure-watchdog logs structured "lacks_*" markers when units
-# under pressure are missing resource-class / control-group / PSI-window
-# metadata. Without a feedback loop these markers accumulate silently.
-#
-# This section reads recent journal entries from the watchdog, counts
-# distinct event kinds within a 5-minute window, and emits a sentinel
-# event + desktop notification when any kind exceeds threshold N=5. Acts
-# as an instrument first: surfaces the data so the operator can decide
-# whether to widen sinnix's slice declarations (Fix B/D in performance.nix
-# already cover the largest gaps; future units may still slip through).
-$VERBOSE && printf '\n%sPressure Watchdog:%s\n' "$BOLD" "$NC"
-watchdog_window="${SINNIX_WATCHDOG_WINDOW:-5 min ago}"
-watchdog_threshold="${SINNIX_WATCHDOG_THRESHOLD:-5}"
-watchdog_kinds=(
-  "sinex.invocation.lacks_declared_resource_class"
-  "sinex.invocation.lacks_control_group"
-  "sinex.invocation.lacks_io_bytes"
-  "sinex.invocation.lacks_psi_window"
-  "sinex.invocation.lacks_recorded_unit"
-  "systemd.unit.lacks_control_group"
-)
-watchdog_log="$(journalctl --identifier=sinnix-pressure-watchdog \
-  --since "$watchdog_window" --no-pager --quiet 2>/dev/null || true)"
-watchdog_total_breaches=0
-watchdog_breach_kinds=()
-for kind in "${watchdog_kinds[@]}"; do
-  count=$(printf '%s\n' "$watchdog_log" | grep -cF "$kind:" 2>/dev/null || echo 0)
-  count="${count//[^0-9]/}"
-  if [ -n "$count" ] && [ "$count" -ge "$watchdog_threshold" ]; then
-    watchdog_total_breaches=$((watchdog_total_breaches + 1))
-    watchdog_breach_kinds+=("$kind=$count")
-  fi
-done
-if [ "$watchdog_total_breaches" -gt 0 ]; then
-  detail="${watchdog_breach_kinds[*]}"
-  record_check "pressure" "watchdog_metadata_gaps" "warn" \
-    "$watchdog_total_breaches kind(s) breached in last $watchdog_window: $detail"
-  queue_notification "warning" "sentinel: pressure watchdog reports $watchdog_total_breaches metadata-gap kind(s) breached"
-else
-  record_check "pressure" "watchdog_metadata_gaps" "ok" \
-    "no kind exceeded $watchdog_threshold in last $watchdog_window"
-fi
-
 # ── Output ────────────────────────────────────────────────────────────
 overall="ok"; [ "$warn" -gt 0 ] && overall="warn"; [ "$fail" -gt 0 ] && overall="fail"
 checks_json=$(printf '%s\n' "${CHECKS[@]}" | paste -sd ',' -)

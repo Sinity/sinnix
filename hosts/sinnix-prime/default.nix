@@ -50,7 +50,6 @@
     below = {
       enable = true;
       collectIntervalSec = 5;
-      pressureWatch.enable = true;
     };
     sinex = {
       prepareHost = true;
@@ -84,10 +83,8 @@
   systemd.services.systemd-tpm2-setup.enable = lib.mkForce false;
   systemd.services.systemd-tpm2-setup-early.enable = lib.mkForce false;
 
-  # Recovery posture after repeated NVMe/Btrfs D-state stalls on /realm:
-  # keep journald off /realm, but preserve enough previous-boot evidence for
-  # crash/root-cause work. /var/log/journal is persisted by impermanence on the
-  # root SSD, not bind-mounted to /realm's syslog archive.
+  # Persist the system journal on the root SSD. /realm is data/capture storage,
+  # not the boot-critical journal path.
   sinnix.persistence.system.directories = [ "/var/log/journal" ];
   services.journald = {
     storage = lib.mkForce "persistent";
