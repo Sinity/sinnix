@@ -7,15 +7,6 @@
 mkFeatureTest {
   name = "desktop-hyprland";
   feature = "sinnix.features.desktop.hyprland.enable";
-  extraModules = [
-    (
-      { lib, ... }:
-      {
-        # why mkForce: hermetic-test override; no real GPU in eval VMs.
-        hardware.graphics.enable = lib.mkForce false;
-      }
-    )
-  ];
   assertions =
     config:
     let
@@ -23,8 +14,13 @@ mkFeatureTest {
       binds = hm.wayland.windowManager.hyprland.settings.bind or [ ];
       debug = hm.wayland.windowManager.hyprland.settings.debug or { };
       sudoRules = config.security.sudo.extraRules or [ ];
+      packageNames = map (pkg: lib.getName pkg) config.environment.systemPackages;
     in
     [
+      {
+        assertion = config.sinnix.features.desktop.hyprland.enable;
+        message = "Hyprland must remain default-on with the rest of the desktop feature catalog";
+      }
       {
         assertion = config.programs.hyprland.enable;
         message = "Hyprland must be enabled";
@@ -36,6 +32,18 @@ mkFeatureTest {
       {
         assertion = lib.hasInfix "exec uwsm start hyprland-uwsm.desktop" (hm.programs.zsh.loginExtra or "");
         message = "TTY Hyprland login must stay unwrapped by default";
+      }
+      {
+        assertion = builtins.elem "uwsm" packageNames;
+        message = "TTY login autostart must have uwsm on the system PATH";
+      }
+      {
+        assertion =
+          config.systemd.user.units."wayland-session-bindpid@.service".overrideStrategy == "asDropin"
+          &&
+            lib.hasInfix "X-RestartIfChanged=false"
+              config.systemd.user.units."wayland-session-bindpid@.service".text;
+        message = "nixos-rebuild switch must not restart UWSM's bindpid unit and tear down Hyprland";
       }
       {
         assertion =
