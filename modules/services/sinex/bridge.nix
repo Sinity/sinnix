@@ -109,7 +109,11 @@ in
       ];
       targetAccessServiceBefore = {
         sinex-browser-target-access = [ "sinex-source-worker-browser.history-1.service" ];
-        sinex-desktop-target-access = [ "sinex-source-worker-desktop.activitywatch-1.service" ];
+        sinex-desktop-target-access = [
+          "sinex-source-worker-desktop.activitywatch-1.service"
+          "sinex-source-worker-desktop.window-manager-1.service"
+          "sinex-source-worker-desktop.clipboard-1.service"
+        ];
         sinex-document-target-access = [ "sinex-document-scan.service" ];
         sinex-terminal-target-access = [ "sinex-source-worker-terminal.atuin-history-1.service" ];
       };
