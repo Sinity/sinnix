@@ -3,7 +3,7 @@
 
   Walks the configured roots for `*.test.nix` files. Each file is a
   function that takes the helper bag (`lib`, `expect`, `mkFeatureTest`,
-  `mkServiceTest`, `mkBundleTest`, `hmFor`, `inputs`) and returns either
+  `mkServiceTest`, `hmFor`, `inputs`) and returns either
   a single test spec (the result of `mkFeatureTest`/etc.) or a list of
   specs.
 

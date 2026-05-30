@@ -50,69 +50,25 @@
           append_override_arg lynchpin "$SINNIX_LYNCHPIN_OVERRIDE"
         fi
       '';
-      mkRebuildCommand =
+      mkNhCommand =
         name: action:
         pkgs.writeShellScriptBin name ''
           set -euo pipefail
           ${resolveFlakeDir}
           ${localInputOverrideArgs}
-
-          rebuild_runner="$(${pkgs.coreutils}/bin/mktemp)"
-          rebuild_pid=""
-
-          cleanup_rebuild() {
-            local status=$?
-            trap - EXIT HUP INT TERM
-            if [ -n "''${rebuild_pid:-}" ] && kill -0 "$rebuild_pid" 2>/dev/null; then
-              kill -TERM -- "-$rebuild_pid" 2>/dev/null || true
-              ${pkgs.coreutils}/bin/sleep 1
-              kill -KILL -- "-$rebuild_pid" 2>/dev/null || true
-            fi
-            ${pkgs.coreutils}/bin/rm -f "$rebuild_runner"
-            exit "$status"
-          }
-
-          trap cleanup_rebuild EXIT HUP INT TERM
-
-          cat >"$rebuild_runner" <<'EOF'
-          #!${pkgs.bash}/bin/bash
-          set -euo pipefail
-          flake_ref="$1"
-          shift
           rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-4}"
           rebuild_cores="''${SINNIX_REBUILD_CORES:-4}"
-          PATH="${safeSudoPathPrefix}:$PATH" \
-            sudo ${pkgs.systemd}/bin/systemd-run \
-            --quiet \
-            --collect \
-            --pipe \
-            --service-type=exec \
-            --wait \
+
+          exec sudo ${pkgs.systemd}/bin/systemd-run \
+            --quiet --collect --pipe --service-type=exec --wait \
             --setenv=PATH="${rebuildServicePath}:$PATH" \
-            ${pkgs.nixos-rebuild}/bin/nixos-rebuild \
-              ${action} \
-              --flake "$flake_ref" \
-              "$@" \
+            -p Nice=10 \
+            ${pkgs.nh}/bin/nh os ${action} \
+              "''${_flake_dir}#sinnix-prime" \
               --max-jobs "$rebuild_jobs" \
               --cores "$rebuild_cores" \
-              --log-format internal-json \
-              -v 2>&1 \
-            | ${pkgs.nix-output-monitor}/bin/nom --json
-          EOF
-
-          ${pkgs.coreutils}/bin/chmod +x "$rebuild_runner"
-
-          cd "$HOME"
-          ${pkgs.util-linux}/bin/setsid "$rebuild_runner" \
-            "path:$_flake_dir#sinnix-prime" \
-            "''${nix_override_args[@]}" &
-          rebuild_pid=$!
-          wait "$rebuild_pid"
-          status=$?
-
-          trap - EXIT HUP INT TERM
-          ${pkgs.coreutils}/bin/rm -f "$rebuild_runner"
-          exit "$status"
+              "''${nix_override_args[@]}" \
+              --no-ask
         '';
 
       # Devshell command wrappers — every listed command is directly typeable
@@ -121,16 +77,46 @@
           exec ${scriptPkgs.nix-safe}/bin/nix-safe flake check "$@"
         '';
         format = pkgs.writeShellScriptBin "format" ''exec ${nix} fmt "$@"'';
-        switch = mkRebuildCommand "switch" "switch";
-        test-system = mkRebuildCommand "test-system" "test";
+        switch = mkNhCommand "switch" "switch";
+        boot = mkNhCommand "boot" "boot";
+        test-system = mkNhCommand "test" "test";
+        # nh doesn't wrap build-vm; keep direct nixos-rebuild.
+        test-vm = pkgs.writeShellScriptBin "test-vm" ''
+          set -euo pipefail
+          ${resolveFlakeDir}
+          ${localInputOverrideArgs}
+          rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-4}"
+          rebuild_cores="''${SINNIX_REBUILD_CORES:-4}"
+
+          exec sudo ${pkgs.systemd}/bin/systemd-run \
+            --quiet --collect --pipe --service-type=exec --wait \
+            --setenv=PATH="${rebuildServicePath}:$PATH" \
+            -p Nice=10 \
+            ${pkgs.nixos-rebuild}/bin/nixos-rebuild build-vm \
+              --flake "path:$_flake_dir#sinnix-prime" \
+              --max-jobs "$rebuild_jobs" \
+              --cores "$rebuild_cores" \
+              "''${nix_override_args[@]}"
+        '';
         lint = pkgs.writeShellScriptBin "lint" ''exec ${nix} run .#lint -- "$@"'';
         check-all = pkgs.writeShellScriptBin "check-all" ''exec ${nix} run .#check-all -- "$@"'';
         update = pkgs.writeShellScriptBin "update" ''exec ${nix} flake update "$@"'';
         clean = pkgs.writeShellScriptBin "clean" ''
-          ${resolveFlakeDir}
-          exec sudo ${nix} run --accept-flake-config "$_flake_dir#clean" -- "$@"
+          exec ${pkgs.nh}/bin/nh clean all --no-ask
         '';
         agenix = pkgs.writeShellScriptBin "agenix" ''exec ${nix} run .#agenix -- "$@"'';
+        diff-closure = pkgs.writeShellScriptBin "diff-closure" ''
+          set -euo pipefail
+          if [ $# -ge 2 ]; then
+            exec ${pkgs.nvd}/bin/nvd diff "$@"
+          elif [ $# -eq 0 ]; then
+            exec ${pkgs.nvd}/bin/nvd diff /nix/var/nix/profiles/system-{1,2}-link
+          else
+            echo "Usage: diff-closure [before] [after]" >&2
+            echo "Default: compares two most recent system profiles" >&2
+            exit 1
+          fi
+        '';
         smoke = pkgs.writeShellScriptBin "smoke" ''
           ${resolveFlakeDir}
           target="''${1:-all}"
@@ -187,6 +173,9 @@
           # Nix tools
           pkgs.nil
           pkgs.nixd
+          pkgs.nh
+          pkgs.nvd
+          pkgs.nix-tree
 
           # Secret management
           inputs.agenix.packages.${system}.default

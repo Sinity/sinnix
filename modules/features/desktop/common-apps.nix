@@ -11,6 +11,29 @@ mkFeatureModule {
     "common-apps"
   ];
   description = "Common desktop applications and settings";
+  meta.dotfiles.configFile = {
+    "yazi/opener.toml" = {
+      source = "yazi/opener.toml";
+      force = true;
+    };
+    "yazi/yazi.toml" = {
+      source = "yazi/yazi.toml";
+      force = true;
+    };
+    "yazi/keymap.toml" = {
+      source = "yazi/keymap.toml";
+      force = true;
+    };
+    "yazi/plugins/sinnix-video-preview.yazi/main.lua" = {
+      source = "yazi/plugins/sinnix-video-preview.yazi/main.lua";
+      force = true;
+    };
+    "audacity/audacity.cfg" = "audacity/audacity.cfg";
+    "transmission/settings.json" = {
+      source = "transmission/settings.json";
+      force = true;
+    };
+  };
   configFn =
     {
       config,
@@ -28,12 +51,8 @@ mkFeatureModule {
           pkgs,
           lib,
           config,
-          mkDotsFileFor,
           ...
         }:
-        let
-          mkDotsFile = mkDotsFileFor config;
-        in
         {
           home.packages = with pkgs; [
             nautilus
@@ -84,27 +103,6 @@ mkFeatureModule {
                 EDIT="false"
                 CHECK_UPDATE="false"
               '';
-              "yazi/opener.toml" = {
-                source = mkDotsFile "/yazi/opener.toml";
-                force = true;
-              };
-              "yazi/yazi.toml" = {
-                source = mkDotsFile "/yazi/yazi.toml";
-                force = true;
-              };
-              "yazi/keymap.toml" = {
-                source = mkDotsFile "/yazi/keymap.toml";
-                force = true;
-              };
-              "yazi/plugins/sinnix-video-preview.yazi/main.lua" = {
-                source = mkDotsFile "/yazi/plugins/sinnix-video-preview.yazi/main.lua";
-                force = true;
-              };
-              "audacity/audacity.cfg".source = mkDotsFile "/audacity/audacity.cfg";
-              "transmission/settings.json" = {
-                source = mkDotsFile "/transmission/settings.json";
-                force = true;
-              };
             };
           };
         };

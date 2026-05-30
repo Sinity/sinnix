@@ -6,10 +6,8 @@
   ...
 }:
 let
-  keylogRoot = "${config.sinnix.paths.capturesRoot}/keylog";
   username = config.sinnix.user.name;
-  enableKeyCapture = false;
-  enableLogitechMaintenance = false;
+  keylogRoot = "${config.sinnix.paths.capturesRoot}/keylog";
   interceptTools = pkgs.interception-tools;
   capsPlugin = pkgs.interception-tools-plugins.caps2esc;
   interceptBouncePkg =
@@ -28,7 +26,7 @@ let
   scribeCmd = lib.escapeShellArgs [
     "${scribePkg}/bin/scribe-tap"
     "--data-dir"
-    "${keylogRoot}"
+    keylogRoot
     "--log-dir"
     "${keylogRoot}/logs"
     "--log-mode"
@@ -48,17 +46,13 @@ let
     "1"
   ];
   uinputCmd = "${interceptTools}/bin/uinput -d $DEVNODE";
-  pipeline = lib.concatStringsSep " | " (
-    [
-      interceptCmd
-      bounceCmd
-    ]
-    ++ lib.optional enableKeyCapture scribeCmd
-    ++ [
-      capsCmd
-      uinputCmd
-    ]
-  );
+  pipeline = lib.concatStringsSep " | " ([
+    interceptCmd
+    bounceCmd
+    scribeCmd
+    capsCmd
+    uinputCmd
+  ]);
 
   logitechMaintenance = pkgs.writeShellScript "logitech-maintenance" ''
     #!/usr/bin/env bash
@@ -119,11 +113,16 @@ in
   };
   programs.dconf.enable = true;
 
+  sinnix.runtime.surfaces.interception-tools = {
+    unit = "interception-tools.service";
+    resourceClass = "interactive-access";
+  };
+
   systemd = {
-    tmpfiles.rules = lib.optionals enableKeyCapture [
+    tmpfiles.rules = [
       "d ${keylogRoot} 0700 ${username} users -"
+      "d ${keylogRoot}/events 0700 ${username} users -"
       "d ${keylogRoot}/logs 0700 ${username} users -"
-      "d ${keylogRoot}/snapshots 0700 ${username} users -"
     ];
 
     user = {
@@ -144,41 +143,24 @@ in
           Restart = "on-failure";
           RestartSec = 10;
         };
-        wantedBy = lib.optionals enableLogitechMaintenance [ "graphical-session.target" ];
+        wantedBy = [ "graphical-session.target" ];
       };
-
-      # DISABLED: Timer causes Solaar to recreate virtual keyboard ~8 times per run
-      # Over hours this creates 200+ input devices, potentially causing kernel resource exhaustion.
-      # Investigation needed: why does `solaar config` trigger device recreation?
-      # See: journalctl -k --grep="solaar-keyboard" for device creation pattern
-      #
-      # timers.logitech-maintenance = {
-      #   description = "Keep Logitech G502 LEDs locked to the desired state";
-      #   timerConfig = {
-      #     OnBootSec = "45s";
-      #     OnUnitActiveSec = "5m";
-      #     RandomizedDelaySec = "30s";
-      #     Unit = "logitech-maintenance.service";
-      #     Persistent = true;
-      #   };
-      #   wantedBy = [ "timers.target" ];
-      # };
     };
   };
 
   systemd.services.interception-tools = {
-    unitConfig.RequiresMountsFor = lib.optional enableKeyCapture keylogRoot;
-    serviceConfig = {
-      Slice = "recovery.slice";
-      ExecStartPre = lib.optionals enableKeyCapture [
-        (pkgs.writeShellScript "interception-tools-init" ''
-          #!/usr/bin/env bash
-          set -euo pipefail
-          install -d -m700 -o ${username} -g users "${keylogRoot}"
-          install -d -m700 -o ${username} -g users "${keylogRoot}/logs"
-          install -d -m700 -o ${username} -g users "${keylogRoot}/snapshots"
-        '')
-      ];
-    };
+    unitConfig.RequiresMountsFor = [ keylogRoot ];
+    serviceConfig =
+      (lib.sinnix.mkRuntimeServiceConfig {
+        runtimeInventory = config.sinnix.runtime.inventory;
+        unit = "interception-tools.service";
+      })
+      // {
+        ExecStartPre = [
+          (pkgs.writeShellScript "interception-tools-init-keylog" ''
+            install -d -m 0700 -o ${username} -g users ${keylogRoot} ${keylogRoot}/events ${keylogRoot}/logs
+          '')
+        ];
+      };
   };
 }

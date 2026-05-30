@@ -138,7 +138,7 @@ Only delete after an audit proves duplication:
 - any agent skill that duplicates an upstream command without local policy/context;
 - any UI/dashboard experiment superseded by Herdr/agent-deck/agentsview.
 
-Current obvious cleanup candidate: the local `claude-code` override in `agent-tools.nix` exists only because upstream lagged. Re-check on every `llm-agents.nix` update and delete when upstream version is new enough.
+The local `claude-code` override in `agent-tools.nix` / `languages.nix` was removed once upstream `llm-agents.nix` caught up to and surpassed the pinned version. If upstream lags again, reintroduce the same `overrideAttrs` pattern (fresh `fetchurl` from `storage.googleapis.com/claude-code-dist-…/claude-code-releases/<version>/linux-x64/claude`) and delete it once upstream catches up.
 
 ## Daemonic orchestration direction
 

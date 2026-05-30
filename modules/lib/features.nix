@@ -10,15 +10,31 @@ let
       };
     }) subFeatures;
 
+  # Static capability metadata slot. Consumed by sweep modules
+  # (modules/dotfiles-sweep.nix, etc.) to centralize cross-cutting concerns.
+  # Currently used for:
+  #   meta.dotfiles.configFile = { "rel/in/xdg" = "rel/in/dots"; ... };
+  #   meta.dotfiles.dataFile = { ... };
+  # Entries may be strings (simple recursive symlink) or attrsets with
+  # source/recursive/force/onChange keys (full HM file declaration).
+  mkMetaOption =
+    metaValue:
+    lib.mkOption {
+      type = lib.types.attrsOf lib.types.unspecified;
+      default = metaValue;
+      description = "Static capability metadata consumed by sweep modules.";
+      internal = true;
+    };
+
   mkFeatureModule =
     {
       path,
       description,
-      enableDefault ? false,
       extraOptions ? { },
-      # NEW: Declarative sub-features
+      # Declarative sub-features
       # subFeatures = { vscode = { description = "VSCode"; default = true; }; ... }
       subFeatures ? { },
+      meta ? { },
       configFn,
     }:
     args@{ config, ... }:
@@ -32,10 +48,15 @@ let
       # Use a recursive merge so nested attrs like `factorio.username`
       # coexist with generated `factorio.enable`.
       subFeatureOpts = mkSubFeatureOptions subFeatures;
+      # Features sitting in modules/features/ are unconditionally part of a
+      # sinnix host's default character. Hosts express exceptions via
+      # `sinnix.features.<path>.enable = false;`. Capabilities that are not
+      # default-on belong in modules/attic/, not features/.
       optionsForPath = lib.recursiveUpdate extraOptions subFeatureOpts // {
         enable = (lib.mkEnableOption description) // {
-          default = enableDefault;
+          default = true;
         };
+        meta = mkMetaOption meta;
       };
       cfg = lib.getAttrFromPath featurePath config;
       user = config.sinnix.user.name;
@@ -52,7 +73,8 @@ let
       name,
       description,
       extraOptions ? { },
-      health ? null,
+      surface ? null,
+      meta ? { },
       configFn,
     }:
     args@{ config, lib, ... }:
@@ -62,45 +84,22 @@ let
         "services"
         name
       ];
-      healthOption = lib.optionalAttrs (health != null) {
-        health = lib.mkOption {
-          type = lib.types.nullOr (
-            lib.types.submodule {
-              options = {
-                unit = lib.mkOption {
-                  type = lib.types.str;
-                  description = "systemd unit name for health monitoring.";
-                };
-                type = lib.mkOption {
-                  type = lib.types.enum [
-                    "service"
-                    "timer"
-                    "user"
-                  ];
-                  description = "How sentinel should query the unit.";
-                };
-                restartable = lib.mkOption {
-                  type = lib.types.bool;
-                  description = "Whether sentinel may auto-restart this unit.";
-                };
-              };
-            }
-          );
-          default = health;
-          description = "Service health metadata consumed by introspection/sentinel.";
-        };
+      optionsForPath = extraOptions // {
+        enable = lib.mkEnableOption description;
+        meta = mkMetaOption meta;
       };
-      optionsForPath =
-        extraOptions
-        // healthOption
-        // {
-          enable = lib.mkEnableOption description;
-        };
       cfg = lib.getAttrFromPath servicePath config;
     in
     {
       options = lib.setAttrByPath servicePath optionsForPath;
-      config = lib.mkIf cfg.enable (configFn (args // { inherit cfg; }));
+      config = lib.mkIf cfg.enable (
+        lib.mkMerge [
+          (lib.optionalAttrs (surface != null) {
+            sinnix.runtime.surfaces.${name} = surface;
+          })
+          (configFn (args // { inherit cfg; }))
+        ]
+      );
     };
 
   # Pre-curried version for extraSpecialArgs - eliminates boilerplate in modules
@@ -180,80 +179,6 @@ let
     in
     map (name: dir + "/${name}") (builtins.attrNames moduleNames);
 
-  # ============================================================================
-  # Bundle Factory
-  # ============================================================================
-
-  # Create a bundle module that enables features by path pattern
-  #
-  # Usage:
-  #   mkBundleModule {
-  #     name = "desktop";
-  #     description = "Standard Desktop Environment";
-  #     featureDomain = "desktop";  # enables all sinnix.features.desktop.*
-  #     extraEnables = {            # additional features outside domain
-  #       "features.system.nix-ld" = true;
-  #     };
-  #   }
-  mkBundleModule =
-    {
-      name,
-      description,
-      # Primary domain to auto-enable (e.g., "desktop" → features.desktop.*)
-      featureDomain,
-      # Extra features to enable (path strings relative to sinnix)
-      extraEnables ? { },
-      # Features to exclude from auto-enable
-      excludeFeatures ? [ ],
-    }:
-    { config, lib, ... }:
-    let
-      bundlePath = [
-        "sinnix"
-        "bundles"
-        name
-      ];
-      cfg = lib.getAttrFromPath bundlePath config;
-
-      # Get all features in the domain
-      domainFeatures = config.sinnix.features.${featureDomain} or { };
-
-      # Filter to only features with .enable option, excluding specified ones
-      excludeSet = lib.listToAttrs (
-        map (n: {
-          name = n;
-          value = true;
-        }) excludeFeatures
-      );
-      enableableFeatures = lib.filterAttrs (n: v: v ? enable && !excludeSet ? ${n}) domainFeatures;
-
-      # Generate enable statements for domain features
-      domainEnables = lib.mapAttrs (_: _: { enable = true; }) enableableFeatures;
-
-      # Parse extra enables (path string → nested attrs)
-      parseExtraEnables = lib.mapAttrs' (path: value: {
-        name = builtins.head (lib.splitString "." path);
-        value =
-          let
-            parts = lib.splitString "." path;
-            rest = builtins.tail parts;
-          in
-          if rest == [ ] then { enable = value; } else lib.setAttrByPath rest { enable = value; };
-      }) extraEnables;
-    in
-    {
-      options = lib.setAttrByPath bundlePath {
-        enable = lib.mkEnableOption description;
-      };
-
-      config = lib.mkIf cfg.enable {
-        sinnix = lib.mkMerge [
-          { features.${featureDomain} = domainEnables; }
-          parseExtraEnables
-        ];
-      };
-    };
-
 in
 {
   inherit
@@ -262,5 +187,5 @@ in
     mkDotsFileFor
     mkPAMLimits
     ;
-  inherit mkAutoImports mkBundleModule;
+  inherit mkAutoImports;
 }

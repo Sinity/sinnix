@@ -100,13 +100,9 @@ in
           ".local/bin/codex-max"
           ".local/bin/codex-spark"
           ".local/bin/codex-spark-xhigh"
-          ".local/bin/forge"
           ".local/bin/mcp-firecrawl"
           ".local/bin/mcp-playwright"
           ".local/bin/mcp-polylogue"
-          "forge/.forge.toml"
-          "forge/.mcp.json"
-          "forge/skills"
         ];
         xdgConfigFiles = [
           "claude/mcp.json"
@@ -132,16 +128,6 @@ in
           export TERM_PROGRAM="kitty"
           export TERM_PROGRAM_VERSION="test"
           export ZDOTDIR="$HOME"
-
-          mkdir -p \
-            "$HOME/forge/agents" \
-            "$HOME/forge/commands" \
-            "$HOME/forge/logs/requests" \
-            "$HOME/forge/snapshots"
-
-          cat > "$HOME/forge/.credentials.json" <<'EOF'
-          []
-          EOF
         '';
       };
       backupRuntimeEval = evalTestSpec system {
@@ -289,39 +275,6 @@ in
             machine.fail(f"{as_user} systemctl --user cat polylogue-run.service")
             machine.fail(f"{as_user} systemctl --user cat polylogue-run.timer")
             machine.succeed(f"{as_user} polylogued status --format json | jq -e '.daemon == \"polylogued\" and (.live.source_count >= 0)' >/dev/null")
-          '';
-        };
-        sentinel-vm = mkVmCheck system {
-          name = "sentinel-vm";
-          nodes.machine =
-            { pkgs, ... }:
-            {
-              environment.systemPackages = [ pkgs.jq ];
-              sinnix.services.sentinel = {
-                enable = true;
-                enableCorrectiveActions = false;
-                enableNotifications = false;
-                intervalSec = 5;
-              };
-              systemd.tmpfiles.rules = [
-                "d /persist/.btrfs/snapshot 0755 root root -"
-              ];
-            };
-          testScript = ''
-            start_all()
-            machine.wait_for_unit("multi-user.target")
-            machine.wait_for_unit("sinnix-sentinel.timer")
-
-            machine.succeed("systemctl start sinnix-sentinel.service")
-            machine.succeed("test \"$(systemctl show sinnix-sentinel.service -P Result)\" = success")
-
-            machine.wait_until_succeeds("test -s /run/sinnix/health.json")
-            machine.succeed("test -d /var/log/sinnix-sentinel")
-            machine.succeed("test -d /var/lib/sinnix-sentinel")
-            machine.succeed("test -s /var/log/sinnix-sentinel/events.jsonl")
-
-            machine.succeed("jq -e '(.summary.ok + .summary.warn + .summary.fail) >= 1 and any(.checks[]; .category == \"services\")' /run/sinnix/health.json >/dev/null")
-            machine.succeed("head -n 1 /var/log/sinnix-sentinel/events.jsonl | jq -e '.source == \"sinnix-sentinel\"' >/dev/null")
           '';
         };
         transmission-vm = mkVmCheck system {
@@ -851,7 +804,6 @@ in
             test -L "$HOME/.gemini/settings.json"
             test -L "$HOME/.config/claude/settings.json"
             test -L "$HOME/.config/claude/mcp.json"
-            test -L "$HOME/forge/.forge.toml"
 
             for wrapper in \
               "$HOME/.local/bin/claude" \
@@ -864,7 +816,8 @@ in
               "$HOME/.local/bin/codex-deep" \
               "$HOME/.local/bin/codex-max" \
               "$HOME/.local/bin/codex-spark" \
-              "$HOME/.local/bin/codex-spark-xhigh"; do
+              "$HOME/.local/bin/codex-spark-xhigh" \
+              "$HOME/.local/bin/gemini"; do
               test -x "$wrapper"
               bash -n "$wrapper"
             done
@@ -911,47 +864,34 @@ in
             assert mcp['lynchpin']['env']['LYNCHPIN_LOCAL_ROOT'] == '/realm/project/sinity-lynchpin/.lynchpin'
             PYCODE
 
-            cp ${lib.escapeShellArg (toString (repoFixtureRoot + "/dots/forge/.forge.toml"))} \
-              "$TMPDIR/forge.toml"
-            rm "$HOME/forge/.forge.toml"
-            cp "$TMPDIR/forge.toml" "$HOME/forge/.forge.toml"
 
             grep -Fq 'mcp_args=(--mcp-config "$MCP_CONFIG" --strict-mcp-config)' "$HOME/.local/bin/claude"
             grep -Fq 'wrapper_args=(--model opus --effort high)' "$HOME/.local/bin/claude-opus"
             grep -Fq 'wrapper_args=(--model sonnet --effort medium)' "$HOME/.local/bin/claude-sonnet"
             grep -Fq 'wrapper_args=(--bare)' "$HOME/.local/bin/claude-lite"
             grep -Fq 'exec tmux new-session -s ct "$claude_cmd"' "$HOME/.local/bin/claude-team"
-            grep -Fq 'run_agent_scoped "$CODEX_BIN" --profile fast "$@"' "$HOME/.local/bin/codex-fast"
-            grep -Fq 'run_agent_scoped "$CODEX_BIN" --profile deep "$@"' "$HOME/.local/bin/codex-deep"
-            grep -Fq 'run_agent_scoped "$CODEX_BIN" --profile max "$@"' "$HOME/.local/bin/codex-max"
-            grep -Fq 'run_agent_scoped "$CODEX_BIN" --profile spark_medium "$@"' "$HOME/.local/bin/codex-spark"
-            grep -Fq 'run_agent_scoped "$CODEX_BIN" --profile spark_xhigh "$@"' "$HOME/.local/bin/codex-spark-xhigh"
+            # Codex profile wrappers must contain their profile arg and FHS bootstrap
+            grep -Fq 'codex_args+=(--profile fast)' "$HOME/.local/bin/codex-fast"
+            grep -Fq 'codex_args+=(--profile deep)' "$HOME/.local/bin/codex-deep"
+            grep -Fq 'codex_args+=(--profile max)' "$HOME/.local/bin/codex-max"
+            grep -Fq 'codex_args+=(--profile spark_medium)' "$HOME/.local/bin/codex-spark"
+            grep -Fq 'codex_args+=(--profile spark_xhigh)' "$HOME/.local/bin/codex-spark-xhigh"
 
-            "$HOME/.local/bin/forge" --version | grep -q '^forge '
-            "$HOME/.local/bin/forge" config get model | grep -qx 'gpt-5.5'
+            # All agent wrappers must FHS-bootstrap from their npm packages
+            for wrapper in \
+              "$HOME/.local/bin/claude" \
+              "$HOME/.local/bin/codex" \
+              "$HOME/.local/bin/gemini"; do
+              grep -Fq 'agent-fhs' "$wrapper"
+              grep -Fq 'launch.sh' "$wrapper"
+            done
+            grep -Fq 'npm install -g @anthropic-ai/claude-code' "$HOME/.local/bin/claude"
+            grep -Fq 'npm install -g @openai/codex' "$HOME/.local/bin/codex"
+            grep -Fq 'npm install -g @google/gemini-cli' "$HOME/.local/bin/gemini"
+            grep -Fq 'run_agent_scoped "$FHS" "$STATE/launch.sh"' "$HOME/.local/bin/gemini"
+
             "$HOME/.local/bin/mcp-polylogue" --help | grep -q 'Start the Polylogue MCP stdio bridge'
             "$HOME/.local/bin/mcp-playwright" --help | grep -q 'Usage: Playwright MCP'
-
-            "$HOME/.local/bin/forge" config path | grep -qx "$HOME/forge/.forge.toml"
-            test -d "$HOME/forge/agents"
-            test -d "$HOME/forge/logs/requests"
-            test -d "$HOME/forge/snapshots"
-            test -f "$HOME/forge/.forge_history"
-
-            jq -e '
-              .mcpServers.context7.url == "https://mcp.context7.com/mcp" and
-              .mcpServers.firecrawl.command == "mcp-firecrawl" and
-              .mcpServers.playwright.command == "mcp-playwright" and
-              .mcpServers.playwright.args == ["--headless"] and
-              .mcpServers.polylogue.command == "mcp-polylogue"
-            ' "$HOME/forge/.mcp.json" >/dev/null
-
-            ${pkgs.zsh}/bin/zsh -ic '[[ -n "$_FORGE_PLUGIN_LOADED" ]]'
-            ${pkgs.zsh}/bin/zsh -ic '[[ -n "$_FORGE_THEME_LOADED" ]]'
-            ${pkgs.zsh}/bin/zsh -ic '[[ "$_FORGE_BIN" == "$HOME/.local/bin/forge" ]]'
-            ${pkgs.zsh}/bin/zsh -ic 'bindkey -M viins "^M" | grep -q "forge-accept-line"'
-            ${pkgs.zsh}/bin/zsh -ic 'bindkey -M viins "^J" | grep -q "forge-accept-line"'
-            ${pkgs.zsh}/bin/zsh -ic 'bindkey -M viins "^I" | grep -q "forge-completion"'
           '';
         }
       );
@@ -1089,52 +1029,14 @@ in
           node --version >/dev/null
           sqlite3 --version >/dev/null
           gh --version >/dev/null
-          forge --version | grep -q '^forge '
         '';
       };
-      devAgentToolsPty = mkHmRuntimeCheck system (
-        agentToolsFixture
-        // {
-          name = "dev-agent-tools-pty-check";
-          script = ''
-            cat > "$TMPDIR/forge-pty.expect" <<'EOF'
-            log_user 1
-            log_file -noappend "$env(TMPDIR)/forge-pty.log"
-            set timeout 20
-
-            spawn env HOME=$env(HOME) PATH=$env(PATH) SHELL=$env(SHELL) TERM=$env(TERM) TERM_PROGRAM=$env(TERM_PROGRAM) TERM_PROGRAM_VERSION=$env(TERM_PROGRAM_VERSION) ZDOTDIR=$env(ZDOTDIR) ${pkgs.zsh}/bin/zsh -i
-            after 3000
-            send_user "forge-pty: shell spawned\n"
-            send "print $'\\x5f\\x5fSINNIX_FORGE_READY\\x5f\\x5f'\r"
-            expect {
-              -re {__SINNIX_FORGE_READY__} {}
-              timeout { exit 1 }
-            }
-            after 500
-
-            send_user "forge-pty: checking loaded plugin state\n"
-            send "print -- \$_FORGE_PLUGIN_LOADED \$_FORGE_THEME_LOADED \$_FORGE_BIN\r"
-            expect {
-              -re {[0-9]+ [0-9]+ .*/home/.local/bin/forge} {}
-              timeout { exit 1 }
-            }
-
-            send "exit\r"
-            expect eof
-            EOF
-
-            TMPDIR="$TMPDIR" ${pkgs.expect}/bin/expect -f "$TMPDIR/forge-pty.expect"
-            ${pkgs.gnugrep}/bin/grep -q '/home/.local/bin/forge' "$TMPDIR/forge-pty.log"
-          '';
-        }
-      );
     in
     {
       heavyChecks = {
         backup-borg-hook-runtime = backupBorgHookRuntime;
         cli-polylogue-runtime = cliPolylogueRuntime;
         cli-task-tracking-runtime = cliTaskTrackingRuntime;
-        dev-agent-tools-pty = devAgentToolsPty;
         dev-agent-tools-runtime = devAgentToolsRuntime;
         dev-git-runtime = devGitRuntime;
         dev-languages-runtime = devLanguagesRuntime;

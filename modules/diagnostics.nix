@@ -21,8 +21,6 @@ let
 
   journaldBaseDir = "${capturesRoot}/syslog";
   bootMetricsDir = "${journaldBaseDir}/boot-metrics";
-  oomdEventsDir = "${journaldBaseDir}/oomd-events";
-  oomdStateDir = "/var/lib/sinnix-oomd-watch";
 
   coreDiagnostics = with pkgs; [
     hwinfo
@@ -152,10 +150,6 @@ in
       "d ${journaldBaseDir} 0750 ${username} users -"
       "d ${bootMetricsDir} 0750 ${username} users -"
       "d ${journaldBaseDir}/index 0750 ${username} users -"
-    ]
-    ++ lib.optionals isDesktop [
-      "d ${oomdEventsDir} 0750 ${username} users 90d"
-      "d ${oomdStateDir} 0750 root root -"
     ];
 
     services.journald.extraConfig = ''
@@ -229,34 +223,6 @@ in
         OnBootSec = "4min";
         OnUnitActiveSec = "1h";
         AccuracySec = "1min";
-      };
-    };
-
-    systemd.services.sinnix-oomd-watch = lib.mkIf isDesktop {
-      description = "Record and notify systemd-oomd memory pressure kills";
-      after = [
-        "local-fs.target"
-        "systemd-journald.service"
-      ];
-      unitConfig.RequiresMountsFor = [ oomdEventsDir ];
-      environment = {
-        SINNIX_NOTIFY_USER = username;
-        SINNIX_OOMD_EVENTS_DIR = oomdEventsDir;
-        SINNIX_OOMD_STATE_DIR = oomdStateDir;
-      };
-      serviceConfig = {
-        Type = "oneshot";
-        ExecStart = "${scriptPkgs.sinnix-oomd-watch}/bin/sinnix-oomd-watch";
-      };
-    };
-
-    systemd.timers.sinnix-oomd-watch = lib.mkIf isDesktop {
-      description = "Poll for systemd-oomd and cgroup OOM kill events";
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnBootSec = "30s";
-        OnUnitActiveSec = "2min";
-        AccuracySec = "30s";
       };
     };
   };

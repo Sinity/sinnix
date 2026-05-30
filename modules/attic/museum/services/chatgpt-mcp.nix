@@ -1,3 +1,7 @@
+# attic/museum: archived 2026-05-24.
+# Revive by `git mv` back to modules/services/chatgpt-mcp.nix.
+# Reason: Occasional-use ngrok bridge for exposing local MCP to ChatGPT;
+# preserved as design reference; revival may need ngrok/mcpo updates.
 # ChatGPT MCP Bridge - SSH transport to local machine
 #
 # Bridges ssh-mcp (stdio MCP server over SSH) to HTTP via mcpo,

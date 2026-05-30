@@ -27,7 +27,7 @@ mkFeatureTest {
       # Compute inline rather than reading the rendered file because this test
       # exercises the dev.mcp-servers feature in isolation; agent-tools (which
       # owns the merge wiring) may not be enabled in the minimal config.
-      mcpRegistry = import (inputs.self + "/modules/lib/mcp-registry.nix") {
+      mcpRegistry = import (inputs.self + "/flake/data/mcp-registry.nix") {
         lib = (inputs.nixpkgs.lib);
       };
       claudeSettings =
@@ -39,7 +39,6 @@ mkFeatureTest {
         in
         base // { inherit mcpServers; };
       geminiSettings = builtins.fromJSON (builtins.readFile (inputs.self + "/dots/gemini/settings.json"));
-      forgeMcpConfig = builtins.fromJSON (managedEntryText hm.home.file."forge/.mcp.json");
     in
     [
       {
@@ -81,6 +80,14 @@ mkFeatureTest {
       (expect.textContains (managedEntryText hm.home.file.".local/bin/mcp-lynchpin")
         "export LYNCHPIN_LOCAL_ROOT=/realm/project/sinity-lynchpin/.lynchpin"
         "Lynchpin wrapper must keep generated substrate writes outside the Nix store"
+      )
+      (expect.textContains (managedEntryText hm.home.file.".local/bin/mcp-lynchpin")
+        "export PYTHONPATH=\"$LYNCHPIN_REPO_ROOT"
+        "Lynchpin wrapper must load MCP tool code from the writable project checkout"
+      )
+      (expect.textContains (managedEntryText hm.home.file.".local/bin/mcp-lynchpin")
+        "lynchpin-python -m lynchpin.mcp.cli"
+        "Lynchpin wrapper must run the packaged Python environment against the live MCP module"
       )
       (expect.textContains codexConfigText "[mcp_servers.polylogue]"
         "Codex config must declare the Polylogue MCP server"
@@ -171,48 +178,5 @@ mkFeatureTest {
         "model"
         "maxSessionTurns"
       ] (-1) "Gemini must keep unlimited session turns")
-      (expect.attrPathEq forgeMcpConfig
-        [
-          "mcpServers"
-          "context7"
-          "url"
-        ]
-        "https://mcp.context7.com/mcp"
-        "Forge MCP config must point Context7 at the remote hosted endpoint"
-      )
-      (expect.attrPathEq forgeMcpConfig [
-        "mcpServers"
-        "firecrawl"
-        "command"
-      ] "mcp-firecrawl" "Forge MCP config must call the packaged Firecrawl wrapper")
-      (expect.attrPathEq forgeMcpConfig [
-        "mcpServers"
-        "playwright"
-        "command"
-      ] "mcp-playwright" "Forge MCP config must call the packaged Playwright wrapper")
-      (expect.attrPathEq forgeMcpConfig [ "mcpServers" "playwright" "args" ] [ "--headless" ]
-        "Forge MCP config must keep Playwright headless by default"
-      )
-      (expect.attrPathEq forgeMcpConfig [
-        "mcpServers"
-        "polylogue"
-        "command"
-      ] "mcp-polylogue" "Forge MCP config must call the packaged Polylogue wrapper")
-      (expect.attrPathEq forgeMcpConfig [
-        "mcpServers"
-        "lynchpin"
-        "env"
-        "LYNCHPIN_REPO_ROOT"
-      ] "/realm/project/sinity-lynchpin" "Forge MCP config must pass the writable Lynchpin repo root")
-      (expect.attrPathEq forgeMcpConfig
-        [
-          "mcpServers"
-          "lynchpin"
-          "env"
-          "LYNCHPIN_LOCAL_ROOT"
-        ]
-        "/realm/project/sinity-lynchpin/.lynchpin"
-        "Forge MCP config must pass the writable Lynchpin local root"
-      )
     ];
 }

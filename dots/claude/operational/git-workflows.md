@@ -122,6 +122,12 @@ stall implementation. Green checks are not a substitute for reading substantive
 comments; pending known-capacity checks are not a reason to burn more local or
 agent cycles without a new signal.
 
+This economy rule never authorizes merging through a failed substantive gate.
+A red schema/build/test/security/proof check is a blocker until fixed or until
+the user explicitly accepts that exact failed check. If local verification is
+blocked by a broken toolchain or stale generated surface, say so and leave the
+issue open unless the remaining acceptance criteria are demonstrably unrelated.
+
 **PR title = squash-merge subject.** Write it as the permanent history line:
 
 - ≤72 chars, conventional prefix, imperative, describes what changed
@@ -144,6 +150,12 @@ each criterion as satisfied, deferred to a follow-up issue, or misframed by new
 evidence. If an issue has no AC list, say what concrete decision, behavior, or
 verification closes it. Never close an issue on a partial subset without making
 the remaining work durable.
+
+Tests are not a substitute for missing runtime wiring. If an issue asks for an
+operator flow, actuator behavior, deployment observation, CLI command, or replay
+path, tests can prove those paths only when the paths exist and are exercised.
+Do not close implementation issues on data-model or test-only changes unless
+the issue itself was explicitly narrowed to that surface.
 
 **Automated reviews are review input.** Before merging, inspect every automated
 review/comment/check that posts substantive text: CodeRabbit, Copilot, proof

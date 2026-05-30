@@ -23,30 +23,58 @@ mkFeatureModule {
     let
       aiTools = inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system};
 
-      # Pin claude-code ahead of upstream llm-agents when it lags behind.
-      # Mirror of the override in languages.nix — remove both once upstream catches up.
-      claude-code = aiTools.claude-code.overrideAttrs (old: rec {
-        version = "2.1.111";
-        src = pkgs.fetchurl {
-          url = "https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases/${version}/linux-x64/claude";
-          hash = "sha256-XU35cAQLD4OqxDSuVAtAkSakd4o3noybTHk1YOO/oGA=";
-        };
-      });
+      # FHS environment for self-updating npm-based agent CLIs.
+      # Agents installed via npm inside this env auto-update natively; Nix
+      # only owns the bootstrap wrapper and the FHS runtime deps.
+      agentFhsEnv = pkgs.buildFHSEnv {
+        name = "agent-fhs";
+        targetPkgs = p: with p; [
+          nodejs_22
+          git
+          bash
+          gnutar
+          gzip
+          which
+          coreutils
+          gcc
+        ];
+        runScript = "bash";
+      };
+
+      # Shared FHS bootstrap prelude — generates: FHS env variable, state-dir
+      # setup, first-run npm install, and a regenerated launcher script.
+      mkFhsBootstrap =
+        {
+          stateDir,
+          npmPackage,
+          binaryName,
+        }:
+        ''
+          FHS="${agentFhsEnv}/bin/agent-fhs"
+          STATE="$HOME/.local/state/${stateDir}"
+          export npm_config_prefix="$STATE/npm"
+          mkdir -p "$STATE/npm"
+
+          if [ ! -x "$STATE/npm/bin/${binaryName}" ]; then
+            echo "${binaryName}: bootstrapping (npm install -g ${npmPackage})..." >&2
+            "$FHS" -c "npm install -g ${npmPackage}"
+          fi
+
+          cat > "$STATE/launch.sh" <<'LAUNCHER'
+        '' + ''
+          #!/usr/bin/env bash
+          PATH="$HOME/.local/state/${stateDir}/npm/bin:$PATH"
+          exec ${binaryName} "$@"
+        '' + ''
+          LAUNCHER
+          chmod +x "$STATE/launch.sh"
+        '';
 
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
-      forgePkg = aiTools.forge;
-      forgeZshPlugin = pkgs.runCommandLocal "forge-zsh-plugin.zsh" { } ''
-        export HOME="$TMPDIR"
-        ${lib.getExe forgePkg} zsh plugin > "$out"
-      '';
-      forgeZshTheme = pkgs.runCommandLocal "forge-zsh-theme.zsh" { } ''
-        export HOME="$TMPDIR"
-        ${lib.getExe forgePkg} zsh theme > "$out"
-      '';
       sinnixCfg = config.sinnix;
 
       jsonFormat = pkgs.formats.json { };
-      mcpRegistry = import ../../lib/mcp-registry.nix { inherit lib; };
+      inherit (helpers.data) mcpRegistry;
       claudeMcpServers = lib.mapAttrs mcpRegistry.renderClaudeServer (
         mcpRegistry.selectClientServers "claude"
       );
@@ -88,45 +116,63 @@ mkFeatureModule {
             #!/usr/bin/env bash
             set -euo pipefail
 
-            CLAUDE_BIN="${claude-code}/bin/claude"
-            REALM_DIR="${sinnixCfg.paths.realmRoot}"
-            HOME_DIR="/home/${user}"
-            MCP_CONFIG="$HOME/.config/claude/mcp.json"
+            ${mkFhsBootstrap {
+              stateDir = "claude-code";
+              npmPackage = "@anthropic-ai/claude-code";
+              binaryName = "claude";
+            }}
 
             ${extraEnv}
             ${agentScopePrelude}
 
             mcp_args=()
             ${lib.optionalString useMcp ''
-              if [ -r "$MCP_CONFIG" ]; then
-                mcp_args=(--mcp-config "$MCP_CONFIG" --strict-mcp-config)
+              if [ -r "$HOME/.config/claude/mcp.json" ]; then
+                mcp_args=(--mcp-config "$HOME/.config/claude/mcp.json" --strict-mcp-config)
               fi
             ''}
             wrapper_args=(${lib.concatStringsSep " " (map lib.escapeShellArg extraArgs)})
 
-            if [ -d "$REALM_DIR" ]; then
-              run_agent_scoped "$CLAUDE_BIN" "''${mcp_args[@]}" --add-dir "$REALM_DIR" "$HOME_DIR" "''${wrapper_args[@]}" "$@"
+            claude_args=(
+              "''${mcp_args[@]}"
+              "''${wrapper_args[@]}"
+            )
+            if [ -d "${sinnixCfg.paths.realmRoot}" ]; then
+              claude_args+=(--add-dir "${sinnixCfg.paths.realmRoot}" "/home/${user}")
             else
-              run_agent_scoped "$CLAUDE_BIN" "''${mcp_args[@]}" --add-dir "$HOME_DIR" "''${wrapper_args[@]}" "$@"
+              claude_args+=(--add-dir "/home/${user}")
             fi
+
+            run_agent_scoped "$FHS" "$STATE/launch.sh" "''${claude_args[@]}" "$@"
           '';
           executable = true;
           force = true;
         };
-      mkCodexProfileWrapper = profile: {
-        text = ''
-          #!/usr/bin/env bash
-          set -euo pipefail
+      mkCodexWrapper =
+        { profile ? null }:
+        {
+          text = ''
+            #!/usr/bin/env bash
+            set -euo pipefail
 
-          CODEX_BIN="${aiTools.codex}/bin/codex"
+            ${mkFhsBootstrap {
+              stateDir = "codex";
+              npmPackage = "@openai/codex";
+              binaryName = "codex";
+            }}
 
-          ${agentScopePrelude}
+            ${agentScopePrelude}
 
-          run_agent_scoped "$CODEX_BIN" --profile ${lib.escapeShellArg profile} "$@"
-        '';
-        executable = true;
-        force = true;
-      };
+            codex_args=()
+            ${lib.optionalString (profile != null) ''
+              codex_args+=(--profile ${lib.escapeShellArg profile})
+            ''}
+
+            run_agent_scoped "$FHS" "$STATE/launch.sh" "''${codex_args[@]}" "$@"
+          '';
+          executable = true;
+          force = true;
+        };
     in
     {
       sinnix.persistence.home = {
@@ -143,10 +189,11 @@ mkFeatureModule {
             directory = ".gemini";
             mode = "0700";
           }
-          {
-            directory = "forge";
-            mode = "0700";
-          }
+          # FHS-bootstrapped npm installs — survive impermanence cold boots
+          # so agents don't re-download on every activation.
+          ".local/state/claude-code"
+          ".local/state/codex"
+          ".local/state/gemini"
         ];
         files = [ ".claude.json" ];
       };
@@ -162,11 +209,6 @@ mkFeatureModule {
           mkDotsFile = mkDotsFileFor config;
         in
         {
-          home.sessionVariables = {
-            FORGE_EDITOR = "nvim";
-            FORGE_BIN = "\${HOME}/.local/bin/forge";
-          };
-
           home.packages = [
             scriptPkgs.sinnix-scope
             scriptPkgs.render-agents
@@ -203,16 +245,6 @@ mkFeatureModule {
               deepseek = "~/.local/bin/deepseek";
               gemini = "~/.local/bin/gemini";
             };
-            initContent = lib.mkAfter ''
-              export FORGE_BIN="$HOME/.local/bin/forge"
-              if [ -x "$FORGE_BIN" ]; then
-                source ${forgeZshPlugin}
-                source ${forgeZshTheme}
-                bindkey -M viins '^M' forge-accept-line
-                bindkey -M viins '^J' forge-accept-line
-                bindkey -M viins '^I' forge-completion
-              fi
-            '';
           };
 
           xdg.configFile = {
@@ -259,34 +291,6 @@ mkFeatureModule {
               ${scriptPkgs.render-agents}/bin/render-agents \
                 --input "$HOME/.config/claude/CLAUDE.md" \
                 --output "$HOME/.gemini/GEMINI.md"
-            fi
-          '';
-          home.activation.renderGlobalForgeAgents = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
-            mkdir -p \
-              "$HOME/forge" \
-              "$HOME/forge/agents" \
-              "$HOME/forge/commands" \
-              "$HOME/forge/logs/requests"
-            if [ -f "$HOME/.config/claude/CLAUDE.md" ]; then
-              ${scriptPkgs.render-agents}/bin/render-agents \
-                --input "$HOME/.config/claude/CLAUDE.md" \
-                --output "$HOME/forge/AGENTS.md"
-            fi
-          '';
-          home.activation.forgeSkillsMigration = lib.hm.dag.entryBefore [ "checkLinkTargets" ] ''
-            target="$HOME/forge/skills"
-            backup="$HOME/forge/skills.pre-home-manager-backup"
-
-            if [ -d "$target" ] && [ ! -L "$target" ]; then
-              if find "$target" -mindepth 1 -print -quit | grep -q .; then
-                if [ -e "$backup" ]; then
-                  echo "Refusing to overwrite existing $backup while migrating $target" >&2
-                  exit 1
-                fi
-                mv "$target" "$backup"
-              else
-                rmdir "$target"
-              fi
             fi
           '';
 
@@ -355,60 +359,27 @@ mkFeatureModule {
             force = true;
           };
 
-          home.file."forge/.forge.toml" = {
-            source = mkDotsFile "/forge/.forge.toml";
-            force = true;
-          };
-          # Shared skills should stay a single directory symlink; recursively
-          # materializing the tree invites junk self-links and duplicate state.
-          home.file."forge/skills".source = mkDotsFile "/_ai/skills";
-
-          home.file.".local/bin/forge" = {
-            text = ''
-              #!/usr/bin/env bash
-              set -euo pipefail
-
-              FORGE_BIN="${forgePkg}/bin/forge"
-
-              ${agentScopePrelude}
-
-              run_agent_scoped "$FORGE_BIN" "$@"
-            '';
-            executable = true;
-            force = true;
-          };
-
-          home.file.".local/bin/codex" = {
-            text = ''
-              #!/usr/bin/env bash
-              set -euo pipefail
-
-              CODEX_BIN="${aiTools.codex}/bin/codex"
-
-              ${agentScopePrelude}
-
-              run_agent_scoped "$CODEX_BIN" "$@"
-            '';
-            executable = true;
-            force = true;
-          };
-
-          home.file.".local/bin/codex-fast" = mkCodexProfileWrapper "fast";
-          home.file.".local/bin/codex-deep" = mkCodexProfileWrapper "deep";
-          home.file.".local/bin/codex-max" = mkCodexProfileWrapper "max";
-          home.file.".local/bin/codex-spark" = mkCodexProfileWrapper "spark_medium";
-          home.file.".local/bin/codex-spark-xhigh" = mkCodexProfileWrapper "spark_xhigh";
+          home.file.".local/bin/codex" = mkCodexWrapper { };
+          home.file.".local/bin/codex-fast" = mkCodexWrapper { profile = "fast"; };
+          home.file.".local/bin/codex-deep" = mkCodexWrapper { profile = "deep"; };
+          home.file.".local/bin/codex-max" = mkCodexWrapper { profile = "max"; };
+          home.file.".local/bin/codex-spark" = mkCodexWrapper { profile = "spark_medium"; };
+          home.file.".local/bin/codex-spark-xhigh" = mkCodexWrapper { profile = "spark_xhigh"; };
 
           home.file.".local/bin/gemini" = {
             text = ''
               #!/usr/bin/env bash
               set -euo pipefail
 
-              GEMINI_BIN="${aiTools.gemini-cli}/bin/gemini"
+              ${mkFhsBootstrap {
+                stateDir = "gemini";
+                npmPackage = "@google/gemini-cli";
+                binaryName = "gemini";
+              }}
 
               ${agentScopePrelude}
 
-              run_agent_scoped "$GEMINI_BIN" "$@"
+              run_agent_scoped "$FHS" "$STATE/launch.sh" "$@"
             '';
             executable = true;
             force = true;

@@ -3,10 +3,12 @@
 # Records system state continuously for post-mortem debugging.
 # Use `below replay` to investigate what happened at any point in time.
 #
-# Data stored in /var/log/below (default).
-# Retention is indefinite: at 1 s with dict-compress (chunk-32, ~8.8× over plain
-# zstd) this is ~720 MB/day = ~260 GB/year. Without dict-compress: ~6.5 GB/day.
-# Export via: below dump -O json/csv. Excluded from Borg in modules/backup.nix.
+# Data stored under storeDir (defaults to /realm/data/captures/machine/below
+# — same realm subtree as the rest of machine telemetry). Earlier installs
+# wrote to /var/log/below; the rollover lives in the dotfile/agent retrospective
+# trail. Retention is indefinite: at 1 s with dict-compress (chunk-32, ~8.8×
+# over plain zstd) this is ~720 MB/day = ~260 GB/year. Export via:
+# below dump -O json/csv. Excluded from Borg in modules/backup.nix.
 {
   mkServiceModule,
   lib,
@@ -20,16 +22,24 @@ in
 mkServiceModule {
   name = "below";
   description = "below time-traveling resource monitor";
-  health = {
+  surface = {
     unit = "below.service";
-    type = "service";
-    restartable = true;
+    resourceClass = "observability";
+    observe = {
+      enable = true;
+      restartable = true;
+    };
   };
   extraOptions = {
     collectIntervalSec = lib.mkOption {
       type = lib.types.int;
       default = 1;
       description = "Collection interval in seconds.";
+    };
+    storeDir = lib.mkOption {
+      type = lib.types.path;
+      default = "/var/log/below";
+      description = "Below data directory — keeps store/, home/, cache/, state/ subtrees. Set to a path on /realm if you want telemetry kept off the root filesystem.";
     };
   };
   configFn =
@@ -45,37 +55,43 @@ mkServiceModule {
         scriptPkgs.sinnix-observe
       ];
 
-      # /var/log/below/store is the below data directory. Create it via tmpfiles
-      # so below.service can start even if the /persist bind-mount hasn't activated
-      # yet (e.g. first boot without @blank). When impermanence is active, the
-      # bind-mount overlays this and persists the data across reboots.
+      # below 0.11+ reads store_dir/log_dir from /etc/below/below.conf;
+      # the --store-dir CLI flag was removed. Generate the config so data
+      # stays on the configured storeDir (e.g. /realm on prime).
+      environment.etc."below/below.conf".text = ''
+        store_dir = "${cfg.storeDir}/store"
+        log_dir = "${cfg.storeDir}"
+      '';
+
       systemd.tmpfiles.rules = [
-        "d /var/log/below 0755 root root -"
-        "d /var/log/below/store 0755 root root -"
-        "d /var/log/below/home 0755 root root -"
-        "d /var/log/below/cache 0755 root root -"
-        "d /var/log/below/state 0755 root root -"
+        "d ${cfg.storeDir} 0755 root root -"
+        "d ${cfg.storeDir}/store 0755 root root -"
+        "d ${cfg.storeDir}/home 0755 root root -"
+        "d ${cfg.storeDir}/cache 0755 root root -"
+        "d ${cfg.storeDir}/state 0755 root root -"
       ];
 
-      systemd.services.below = {
-        description = "below - Time traveling resource monitor";
-        wantedBy = [ "multi-user.target" ];
-        after = [ "local-fs.target" ];
+      systemd.services.below =
+        let
+          storeOnRealm = lib.hasPrefix "/realm/" cfg.storeDir;
+        in
+        {
+          description = "below - Time traveling resource monitor";
+          wantedBy = [ "multi-user.target" ];
+          after = [ "local-fs.target" ] ++ lib.optional storeOnRealm "realm.mount";
+          requires = lib.optional storeOnRealm "realm.mount";
 
-        serviceConfig = {
-          Type = "simple";
-          ExecStart = "${pkgs.below}/bin/below record --collect-io-stat --compress --dict-compress-chunk-size 32 --interval-s ${toString cfg.collectIntervalSec}";
-          Restart = "on-failure";
-          RestartSec = "5s";
-          # below is the recorder that remains useful under contention, so it
-          # runs in the protected observability tier instead of default
-          # system.slice placement.
-          Slice = "system-critical.slice";
-          Nice = -5;
-          IOSchedulingClass = "best-effort";
-          IOSchedulingPriority = 0;
+          serviceConfig = {
+            Type = "simple";
+            ExecStart = "${pkgs.below}/bin/below record --collect-io-stat --compress --dict-compress-chunk-size 32 --interval-s ${toString cfg.collectIntervalSec}";
+            Restart = "on-failure";
+            RestartSec = "5s";
+          }
+          // lib.sinnix.mkRuntimeServiceConfig {
+            runtimeInventory = config.sinnix.runtime.inventory;
+            unit = "below.service";
+          };
         };
-      };
 
     };
 } args

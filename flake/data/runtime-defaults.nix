@@ -1,0 +1,289 @@
+{ lib }:
+let
+  mkClass = description: serviceConfig: {
+    inherit description serviceConfig;
+  };
+
+  surfaceType = surface: if surface.manager == "user" then "user" else surface.kind;
+
+  normalizeSurface =
+    surface:
+    {
+      manager = "system";
+      kind = "service";
+      resourceClass = "system";
+      observe = {
+        enable = false;
+        restartable = false;
+      };
+      captures = [ ];
+    }
+    // surface;
+
+  captureRows =
+    surfaces:
+    lib.concatLists (
+      lib.mapAttrsToList (
+        _name: surface:
+        map (
+          capture:
+          {
+            inherit (capture) name path;
+          }
+          // lib.optionalAttrs (capture.cadenceSeconds != null) {
+            expectedCadenceSeconds = capture.cadenceSeconds;
+          }
+          // lib.optionalAttrs capture.eventDriven {
+            expectedCadence = "event-driven";
+          }
+        ) surface.captures
+      ) (lib.mapAttrs (_: normalizeSurface) surfaces)
+    );
+
+  observedServiceRows =
+    surfaces:
+    lib.mapAttrsToList
+      (name: surface: {
+        inherit name;
+        inherit (surface)
+          kind
+          manager
+          resourceClass
+          unit
+          ;
+        type = surfaceType surface;
+        restartable = surface.observe.restartable;
+      })
+      (
+        lib.filterAttrs (_: surface: surface.observe.enable) (lib.mapAttrs (_: normalizeSurface) surfaces)
+      );
+in
+rec {
+  classes = {
+    interactive-agent = mkClass "Interactive AI agent shells and frontends" { };
+    interactive-access = mkClass "Login, SSH, and input services needed to regain control" {
+      Slice = "system-critical.slice";
+      Nice = -5;
+      IOSchedulingClass = "best-effort";
+      IOSchedulingPriority = 0;
+    };
+    developer-build = mkClass "User-initiated builds, tests, and Nix work" { };
+    background-maintenance = mkClass "Bulk maintenance that should yield to interaction" {
+      Nice = 10;
+      IOSchedulingClass = "idle";
+      IOWeight = 10;
+      MemoryHigh = "1G";
+      MemoryMax = "4G";
+    };
+    backup-maintenance = mkClass "Snapshot and backup jobs" {
+      Nice = 10;
+      CPUSchedulingPolicy = "idle";
+      IOSchedulingClass = "idle";
+      CPUWeight = 20;
+      IOWeight = 20;
+    };
+    capture-runtime = mkClass "Long-running capture daemons" {
+      Nice = 10;
+      IOSchedulingClass = "idle";
+      IOWeight = 10;
+      MemoryHigh = "6G";
+      MemoryMax = "8G";
+    };
+    capture-substrate = mkClass "Databases and queues backing capture daemons" {
+      Nice = 5;
+      IOWeight = 50;
+    };
+    observability = mkClass "Monitoring that should remain responsive during contention" {
+      Slice = "system-critical.slice";
+      Nice = -5;
+      IOSchedulingClass = "best-effort";
+      IOSchedulingPriority = 0;
+    };
+    system = mkClass "Ordinary system services without Sinnix-specific placement" { };
+  };
+
+  environmentAllowList = [
+    "AGENT_NAME"
+    "AGENT_SESSION_ID"
+    "CARGO_BUILD_JOBS"
+    "CARGO_HOME"
+    "CARGO_TARGET_DIR"
+    "CMAKE_BUILD_PARALLEL_LEVEL"
+    "CODEX_HOME"
+    "DATABASE_URL"
+    "GEMINI_API_KEY"
+    "GITHUB_TOKEN"
+    "HOME"
+    "LANG"
+    "LC_ALL"
+    "LOGNAME"
+    "MAKEFLAGS"
+    "NIX_BUILD_CORES"
+    "NIX_CONFIG"
+    "NIX_PATH"
+    "NIXPKGS_ALLOW_UNFREE"
+    "PATH"
+    "PGHOST"
+    "PGPORT"
+    "POLYLOGUE_ROOT"
+    "PWD"
+    "PYTHONHOME"
+    "PYTHONPATH"
+    "RUSTC_WRAPPER"
+    "RUST_LOG"
+    "RUSTUP_HOME"
+    "SCCACHE_DIR"
+    "SCCACHE_IDLE_TIMEOUT"
+    "SHELL"
+    "SINEX_CACHE_DIR"
+    "SINEX_DEV_CACHE_ROOT"
+    "SINEX_DEV_STATE_DIR"
+    "SINEX_NATS_DIR"
+    "SINEX_ROOT"
+    "SINEX_STATE_DIR"
+    "SINEX_TEST_RESULTS_DIR"
+    "TERM"
+    "TERM_PROGRAM"
+    "TMPDIR"
+    "USER"
+    "UV_CACHE_DIR"
+    "UV_PROJECT_ENVIRONMENT"
+    "VIRTUAL_ENV"
+    "XDG_CACHE_HOME"
+    "XDG_CONFIG_HOME"
+    "XDG_DATA_HOME"
+    "XDG_RUNTIME_DIR"
+    "XDG_STATE_HOME"
+  ];
+
+  commandClasses = {
+    agent = {
+      resourceClass = "interactive-agent";
+      slice = "agent.slice";
+      nice = null;
+      ioniceClass = null;
+      ionicePriority = null;
+      envDefaults = { };
+    };
+    build = {
+      resourceClass = "developer-build";
+      slice = "build.slice";
+      nice = 5;
+      ioniceClass = "best-effort";
+      ionicePriority = 7;
+      envDefaults = {
+        CARGO_BUILD_JOBS = "4";
+        CMAKE_BUILD_PARALLEL_LEVEL = "4";
+        MAKEFLAGS = "-j4";
+        NIX_BUILD_CORES = "4";
+        SCCACHE_IDLE_TIMEOUT = "10";
+      };
+    };
+    background = {
+      resourceClass = "background-maintenance";
+      slice = "background.slice";
+      nice = 10;
+      ioniceClass = "idle";
+      ionicePriority = null;
+      envDefaults = { };
+    };
+    nix-build = {
+      resourceClass = "developer-build";
+      slice = "nix-build.slice";
+      nice = 10;
+      ioniceClass = "idle";
+      ionicePriority = null;
+      envDefaults = { };
+    };
+  };
+
+  slices = {
+    system = {
+      background = {
+        CPUWeight = 10;
+        IOWeight = 5;
+        MemoryHigh = "4G";
+        MemoryMax = "10G";
+      };
+      nix-build = {
+        CPUWeight = 20;
+        IOWeight = 10;
+        MemoryHigh = "8G";
+        MemoryMax = "16G";
+      };
+      system-critical = {
+        CPUWeight = 200;
+        IOWeight = 100;
+        MemoryLow = "512M";
+      };
+    };
+    user = {
+      agent = {
+        CPUWeight = 200;
+        IOWeight = 100;
+        MemoryLow = "1G";
+        MemoryHigh = "12G";
+      };
+      background = {
+        CPUWeight = 10;
+        IOWeight = 5;
+        MemoryHigh = "4G";
+        MemoryMax = "10G";
+      };
+      build = {
+        CPUWeight = 20;
+        IOWeight = 10;
+        MemoryHigh = "8G";
+        MemoryMax = "16G";
+      };
+      nix-build = {
+        CPUWeight = 20;
+        IOWeight = 10;
+        MemoryHigh = "8G";
+        MemoryMax = "16G";
+      };
+    };
+  };
+
+  baseSurfaces = {
+    sshd = {
+      unit = "sshd.service";
+      resourceClass = "interactive-access";
+    };
+    sshd-socket = {
+      unit = "sshd.socket";
+      kind = "socket";
+      resourceClass = "interactive-access";
+    };
+    nix-gc = {
+      unit = "nix-gc.service";
+      resourceClass = "background-maintenance";
+    };
+    nix-optimise = {
+      unit = "nix-optimise.service";
+      resourceClass = "background-maintenance";
+    };
+  };
+
+  mkInventory =
+    {
+      hostname ? "",
+      surfaces ? baseSurfaces,
+      mounts ? [ ],
+      backups ? { },
+    }:
+    {
+      schema = "sinnix-runtime-inventory-v1";
+      inherit
+        hostname
+        classes
+        commandClasses
+        environmentAllowList
+        slices
+        ;
+      surfaces = lib.mapAttrs (_: normalizeSurface) surfaces;
+      inherit mounts backups;
+      observedServices = observedServiceRows surfaces;
+      captures = captureRows surfaces;
+    };
+}

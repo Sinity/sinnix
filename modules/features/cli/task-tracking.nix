@@ -5,6 +5,34 @@ mkFeatureModule {
     "task-tracking"
   ];
   description = "Taskwarrior and Timewarrior task tracking";
+  meta.dotfiles = {
+    configFile = {
+      "task/taskrc" = {
+        source = "taskwarrior/taskrc";
+        force = true;
+      };
+      "timewarrior/timewarrior.cfg" = {
+        source = "timewarrior/timewarrior.cfg";
+        force = true;
+      };
+      "timewarrior/extensions/balance.py" = {
+        source = "timewarrior/extensions/balance.py";
+        force = true;
+      };
+      "timewarrior/extensions/on-modify.timewarrior" = {
+        source = "timewarrior/extensions/on-modify.timewarrior";
+        force = true;
+      };
+      "timewarrior/extensions/productivity.py" = {
+        source = "timewarrior/extensions/productivity.py";
+        force = true;
+      };
+    };
+    dataFile = {
+      "task/hooks/on-add-inbox.py" = "taskwarrior/hooks/on-add-inbox.py";
+      "task/hooks/on-modify-review.py" = "taskwarrior/hooks/on-modify-review.py";
+    };
+  };
   configFn =
     {
       config,
@@ -20,41 +48,6 @@ mkFeatureModule {
         { config, ... }:
         {
           xdg.dataHome = lib.mkDefault "${config.home.homeDirectory}/.local/share";
-
-          xdg.configFile = {
-            # Link taskwarrior configuration
-            "task/taskrc" = {
-              source = config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/taskwarrior/taskrc";
-              force = true;
-            };
-
-            # Link timewarrior configuration
-            "timewarrior/timewarrior.cfg" = {
-              source = config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/timewarrior/timewarrior.cfg";
-              force = true;
-            };
-
-            "timewarrior/extensions/balance.py" = {
-              source = config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/timewarrior/extensions/balance.py";
-              force = true;
-            };
-            "timewarrior/extensions/on-modify.timewarrior" = {
-              source = config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/timewarrior/extensions/on-modify.timewarrior";
-              force = true;
-            };
-            "timewarrior/extensions/productivity.py" = {
-              source = config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/timewarrior/extensions/productivity.py";
-              force = true;
-            };
-          };
-
-          # Link taskwarrior hooks
-          xdg.dataFile = {
-            "task/hooks/on-add-inbox.py".source =
-              config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/taskwarrior/hooks/on-add-inbox.py";
-            "task/hooks/on-modify-review.py".source =
-              config.lib.file.mkOutOfStoreSymlink "${dotsRoot}/taskwarrior/hooks/on-modify-review.py";
-          };
 
           # Source shell integration
           programs.zsh.initContent = lib.mkAfter ''

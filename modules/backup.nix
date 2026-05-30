@@ -35,13 +35,12 @@ let
   borgRepoPersist = "file://${borgRepoPersistPath}";
   borgRepoRealm = "file://${borgRepoRealmPath}";
   borgPassphrasePath = config.sinnix.secrets.paths."borg-passphrase";
-  backgroundBackupServiceConfig = {
-    Nice = 10;
-    CPUSchedulingPolicy = "idle";
-    IOSchedulingClass = "idle";
-    CPUWeight = 20;
-    IOWeight = 20;
-  };
+  backupServiceConfig =
+    unit:
+    lib.sinnix.mkRuntimeServiceConfig {
+      runtimeInventory = config.sinnix.runtime.inventory;
+      inherit unit;
+    };
 
   mkBindMountedSnapshotHook =
     {
@@ -152,20 +151,25 @@ let
     lockfile                /var/lock/btrbk.lock
 
     # ─── Tier-1: fine-grained local rollback (btrbk) ───
-    # Borg runs every 4h (:20). btrbk keeps ~9 snapshots per volume with
-    # declining density: all 15-min for 30min, then thins to hourly out to 6h
-    # (2h of overlap with the previous borg run as safety buffer).
+    # Borg runs every 4h (:20). btrbk keeps the last hour worth of 15-min
+    # snapshots plus 6 hourly buckets — ~10 snapshots per volume, 2 h of
+    # overlap with the previous borg run as safety buffer.
+    #
+    # NOTE: btrbk's "m" unit means months, not minutes (h/d/w/m/y). Using
+    # "30m" silently disables pruning for 30 months. Smallest supported tier
+    # is "1h"; sub-hour granularity from the timer cadence is not expressible
+    # as a retention policy.
 
     volume ${realmRoot}
       snapshot_dir   .btrfs/snapshot
       subvolume .
-        snapshot_preserve_min   30m
+        snapshot_preserve_min   1h
         snapshot_preserve       6h
 
     volume /persist
       snapshot_dir   .btrfs/snapshot
       subvolume .
-        snapshot_preserve_min   30m
+        snapshot_preserve_min   1h
         snapshot_preserve       6h
 
     # / is ephemeral (wiped and recreated each boot by initrd rollback script).
@@ -178,6 +182,53 @@ let
 in
 {
   config = {
+    sinnix.runtime.surfaces = {
+      btrbk = {
+        unit = "btrbk.service";
+        resourceClass = "backup-maintenance";
+      };
+      btrbk-timer = {
+        unit = "btrbk.timer";
+        kind = "timer";
+        resourceClass = "backup-maintenance";
+        observe = {
+          enable = true;
+          restartable = false;
+        };
+      };
+      borgbackup-job-persist = {
+        unit = "borgbackup-job-persist.service";
+        resourceClass = "backup-maintenance";
+      };
+      borgbackup-job-realm = {
+        unit = "borgbackup-job-realm.service";
+        resourceClass = "backup-maintenance";
+      };
+      borgbackup-check = {
+        unit = "borgbackup-check.service";
+        resourceClass = "backup-maintenance";
+      };
+      btrfs-metadata-image-backup = {
+        unit = "btrfs-metadata-image-backup.service";
+        resourceClass = "backup-maintenance";
+      };
+      borgbackup-root-snapshots = {
+        unit = "borgbackup-root-snapshots.service";
+        resourceClass = "backup-maintenance";
+      };
+      sinnix-borg-drill = {
+        unit = "sinnix-borg-drill.service";
+        resourceClass = "backup-maintenance";
+        captures = [
+          {
+            name = "borg-drill";
+            path = "${config.sinnix.paths.capturesRoot}/machine/borg_drill.jsonl";
+            eventDriven = true;
+          }
+        ];
+      };
+    };
+
     environment.systemPackages = [
       pkgs.btrbk
       pkgs.borgbackup
@@ -221,11 +272,11 @@ in
           "home/sinity/.config/chrome-ws/Default/GPUCache"
           "home/sinity/.config/chrome-ws/*Cache*"
           "home/sinity/.config/chrome-ws/*cache*"
-          # Polylogue DB belongs in realm, not persist (32 GB wasted per backup)
-          "home/sinity/.local/share/polylogue/polylogue.db"
-          # below resource monitor: indefinite retention ~260 GB/year at 1 s,
-          # post-mortem only — recover from live host, not backup.
-          "var/log/below"
+          # (Polylogue DB lived under home/sinity/.local/share/polylogue until
+          # the archive moved to /realm — removed from exclusions; the realm
+          # backup excludes /realm/data/captures/polylogue.)
+          # (below resource monitor moved off /var/log/below to /realm/data/
+          # captures/machine/below — exclusion follows in the realm backup.)
           # User caches — all regenerable; collectively ~30 GB on this host.
           # Specific entries (huggingface, spotify, chrome-ws) above stay as
           # documentation; the catch-all picks up sccache (11 G), sinex client
@@ -282,6 +333,10 @@ in
           # Syslog exports (~21 GB) — derived from journald, which retains the
           # source on the same disk. Re-exportable if needed.
           "**/data/captures/syslog"
+          # below resource monitor (~260 GB/year): post-mortem only, recover
+          # from live host. Previously excluded at /var/log/below; relocated
+          # to /realm in hosts/sinnix-prime so exclusion follows.
+          "**/data/captures/machine/below"
         ];
       };
     };
@@ -291,13 +346,13 @@ in
     # the desktop visibly stall even though the machine was otherwise healthy.
     systemd.services.borgbackup-job-persist = {
       restartIfChanged = false;
-      serviceConfig = backgroundBackupServiceConfig // {
+      serviceConfig = (backupServiceConfig "borgbackup-job-persist.service") // {
         TimeoutStopSec = "15s";
       };
     };
     systemd.services.borgbackup-job-realm = {
       restartIfChanged = false;
-      serviceConfig = backgroundBackupServiceConfig // {
+      serviceConfig = (backupServiceConfig "borgbackup-job-realm.service") // {
         TimeoutStopSec = "15s";
       };
     };
@@ -310,7 +365,7 @@ in
         Type = "oneshot";
         TimeoutStopSec = "15s";
       }
-      // backgroundBackupServiceConfig;
+      // backupServiceConfig "borgbackup-check.service";
       environment.BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
       script = ''
         ${pkgs.borgbackup}/bin/borg check --repository-only ${borgRepoPersist}
@@ -345,7 +400,7 @@ in
         Type = "oneshot";
         TimeoutStopSec = "15s";
       }
-      // backgroundBackupServiceConfig;
+      // backupServiceConfig "btrfs-metadata-image-backup.service";
       path = with pkgs; [
         btrfs-progs
         coreutils
@@ -422,7 +477,7 @@ in
         ExecStart = "${pkgs.btrbk}/bin/btrbk run --quiet";
         TimeoutStopSec = "15s";
       }
-      // backgroundBackupServiceConfig;
+      // backupServiceConfig "btrbk.service";
     };
 
     systemd.timers.btrbk = {
@@ -450,7 +505,7 @@ in
         Type = "oneshot";
         TimeoutStopSec = "15s";
       }
-      // backgroundBackupServiceConfig;
+      // backupServiceConfig "borgbackup-root-snapshots.service";
       environment.BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
       environment.BORG_REPO = borgRepoPersist;
       environment.BORG_CACHE_DIR = "/persist/root/.cache/borg";
@@ -515,11 +570,17 @@ in
     # last 30 days, to bound runtime + keep the verification fresh) and
     # runs `borg check --verify-data --first 1 -P <archive>` against it,
     # appending a JSONL record to
-    # /realm/data/captures/machine/borg_drill.jsonl so lynchpin can
-    # chart pass/fail history. Sentinel will surface failures via its
-    # existing systemd-unit health checks.
+    # /realm/data/captures/machine/borg_drill.jsonl so lynchpin and
+    # operator reports can chart pass/fail history from the canonical capture.
     systemd.services.sinnix-borg-drill = {
       description = "Borg random-archive deep-verify drill";
+      # Detach from nixos-rebuild switch: this is a multi-hour oneshot;
+      # switch-to-configuration must not block waiting for it to finish
+      # when the unit hash changes or the Persistent=true timer wants to
+      # catch up. The timer schedules invocations on its own cadence.
+      restartIfChanged = false;
+      reloadIfChanged = false;
+      stopIfChanged = false;
       after = [
         "network.target"
       ];
@@ -536,16 +597,11 @@ in
       serviceConfig = {
         Type = "oneshot";
         ExecStart = "${scriptPkgs.sinnix-borg-drill}/bin/sinnix-borg-drill";
-        # Borg's chunk verification is CPU+IO heavy; keep it from
-        # contending with interactive work and the periodic borg create.
-        Nice = 10;
-        CPUSchedulingPolicy = "idle";
-        IOSchedulingClass = "idle";
-        IOWeight = 20;
         # `borg check --verify-data` on a multi-GB archive can take
         # tens of minutes on HDDs; allow up to 12 hours total across repos.
         TimeoutStartSec = "12h";
-      };
+      }
+      // backupServiceConfig "sinnix-borg-drill.service";
     };
 
     systemd.timers.sinnix-borg-drill = {

@@ -62,40 +62,31 @@
         default runtime database name.
       '';
     };
-    health = lib.mkOption {
-      type = lib.types.nullOr (
-        lib.types.submodule {
-          options = {
-            unit = lib.mkOption {
-              type = lib.types.str;
-            };
-            type = lib.mkOption {
-              type = lib.types.enum [
-                "service"
-                "timer"
-                "user"
-              ];
-            };
-            restartable = lib.mkOption {
-              type = lib.types.bool;
-            };
-          };
-        }
-      );
-      default = {
-        unit = "sinex-ingestd.service";
-        type = "service";
-        restartable = false;
-      };
-      description = "Service health metadata consumed by introspection/sentinel.";
-    };
-  };
+    deploymentRole = lib.mkOption {
+      type = lib.types.enum [
+        "workstation"
+        "workstation-thin"
+        "replica"
+      ];
+      default = "workstation";
+      description = ''
+        Deployment topology for this host's sinex installation.
 
-  config = lib.mkIf (config.sinnix.services.sinex.enable && !config.sinnix.services.sinex.autoStart) {
-    # why mkForce: when the host opts out of auto-start, sentinel must
-    # not include sinex in the auto-derived health-policy (otherwise it
-    # resurrects manually-stopped runtime services). The default health
-    # value above is set unconditionally; override it to null here.
-    sinnix.services.sinex.health = lib.mkForce null;
+        - <literal>workstation</literal>: current behavior. PostgreSQL, NATS
+          and the full sinexd runtime are all local. This is the only role
+          sinnix-prime should use; changing the default would alter prime's
+          behavior.
+
+        - <literal>workstation-thin</literal>: PostgreSQL and NATS are
+          disabled locally; sinexd ingest reads <literal>DATABASE_URL</literal>
+          and <literal>NATS_URL</literal> from
+          <literal>/run/agenix/sinex-remote-db</literal> (typically pointing
+          at a tailscale-reachable replica host).
+
+        - <literal>replica</literal>: PostgreSQL and NATS run locally to
+          back remote workstation-thin nodes; the local sinexd capture
+          runtime is disabled (only the collector/receiver path stays live).
+      '';
+    };
   };
 }

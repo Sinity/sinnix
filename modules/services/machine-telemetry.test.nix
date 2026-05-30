@@ -33,8 +33,11 @@ mkServiceTest {
         message = "machine-telemetry must write the canonical machine telemetry SQLite stream";
       }
       {
-        assertion = !(service ? IOWeight) && !(service ? IOSchedulingClass) && !(service ? CPUWeight);
-        message = "machine-telemetry must not introduce local cgroup policy";
+        assertion =
+          service.Slice == "system-critical.slice"
+          && service.Nice == -5
+          && service.IOSchedulingClass == "best-effort";
+        message = "machine-telemetry must use the observability runtime class";
       }
       {
         assertion =

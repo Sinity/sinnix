@@ -20,32 +20,23 @@ in
 {
   options.sinnix.services.terminal-capture = {
     enable = lib.mkEnableOption "Advanced terminal session recording and telemetry";
-    health = lib.mkOption {
-      type = lib.types.nullOr (
-        lib.types.submodule {
-          options = {
-            unit = lib.mkOption {
-              type = lib.types.str;
-            };
-            type = lib.mkOption {
-              type = lib.types.enum [
-                "service"
-                "timer"
-                "user"
-              ];
-            };
-            restartable = lib.mkOption {
-              type = lib.types.bool;
-            };
-          };
-        }
-      );
-      default = null;
-      description = "Service health metadata consumed by introspection/sentinel.";
-    };
   };
 
   config = lib.mkIf cfg.enable {
+    sinnix.runtime.surfaces.terminal-capture = {
+      unit = "sinnix-captured-shell";
+      manager = "user";
+      kind = "capture";
+      resourceClass = "capture-runtime";
+      captures = [
+        {
+          name = "asciinema";
+          path = recordingsDir;
+          eventDriven = true;
+        }
+      ];
+    };
+
     environment.systemPackages = [
       pkgs.asciinema
       pkgs.jq

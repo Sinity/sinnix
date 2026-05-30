@@ -71,7 +71,7 @@
     # Sinex is sourced from GitHub so system deployments follow reviewed upstream
     # history instead of implicitly consuming the local checkout state.
     sinex = {
-      url = "git+https://github.com/Sinity/sinex?ref=master";
+      url = "git+https://github.com/Sinity/sinex?ref=feature/sinexd-collapse";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.agenix.follows = "agenix";
     };
@@ -94,9 +94,16 @@
     # owning their package derivations.
     llm-agents.url = "github:numtide/llm-agents.nix";
 
-    # aw-server-rust with heartbeat fix (PR #555)
+    # aw-server-rust upstream master. The previous pin to the operator's
+    # fork (Sinity/aw-server-rust @ fix/heartbeat-replace-event-id-mismatch,
+    # commit e9ec01d) was BEHIND upstream's PR #555 fix by one critical
+    # line: after a successful heartbeat-merge, upstream sets
+    # `merged_heartbeat.id = Some(event_id);` so the in-memory cache
+    # preserves the row id for the next heartbeat. The fork drops it,
+    # making every other heartbeat trip ok_or_else on a None id and
+    # re-fetch from DB. Functional but fragile.
     aw-server-rust = {
-      url = "github:Sinity/aw-server-rust/fix/heartbeat-replace-event-id-mismatch";
+      url = "github:ActivityWatch/aw-server-rust";
       flake = false;
     };
 
@@ -104,6 +111,27 @@
     treefmt-nix = {
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    # nixos-anywhere: bootstrap NixOS over SSH from a foreign initrd.
+    # Used to seed sinnix-ethereal from the default Hetzner image.
+    nixos-anywhere = {
+      url = "github:nix-community/nixos-anywhere";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.disko.follows = "disko";
+    };
+
+    # colmena: declarative multi-host deploy with per-host gating.
+    colmena = {
+      url = "github:zhaofengli/colmena";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.flake-utils.follows = "flake-utils-for-colmena";
+    };
+
+    # colmena pulls in flake-utils; pin it once here so the dep graph stays
+    # de-duplicated.
+    flake-utils-for-colmena = {
+      url = "github:numtide/flake-utils";
     };
 
   };
@@ -124,6 +152,7 @@
         ./flake/nixos.nix
         ./flake/router.nix
         ./flake/tests.nix
+        ./flake/deploy.nix
       ];
     };
 }

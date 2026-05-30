@@ -102,12 +102,13 @@ in
 
     programs.mosh.enable = true;
 
-    # sshd hardening handled by nixpkgs - custom seccomp filters break it
-    systemd.services.sshd.serviceConfig = {
-      Slice = "recovery.slice";
+    # sshd hardening handled by nixpkgs - custom seccomp filters break it.
+    systemd.services.sshd.serviceConfig = lib.sinnix.mkRuntimeServiceConfig {
+      runtimeInventory = config.sinnix.runtime.inventory;
+      unit = "sshd.service";
     };
     systemd.sockets.sshd.socketConfig = {
-      Slice = "recovery.slice";
+      Slice = config.sinnix.runtime.inventory.classes.interactive-access.serviceConfig.Slice;
     };
 
     # Bluetooth hardening handled by nixpkgs - it needs kernel module/tunable access

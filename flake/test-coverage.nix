@@ -7,7 +7,6 @@
     "vm"
     "host"
   ];
-
   features = {
     "cli.core" = {
       layers = [ "eval" ];
@@ -48,9 +47,6 @@
     "desktop.common-apps" = {
       layers = [ "eval" ];
     };
-    "desktop.crypto" = {
-      layers = [ "eval" ];
-    };
     "desktop.gaming" = {
       layers = [ "eval" ];
     };
@@ -81,9 +77,6 @@
       layers = [ "eval" ];
     };
     "desktop.ui" = {
-      layers = [ "eval" ];
-    };
-    "desktop.vr" = {
       layers = [ "eval" ];
     };
     "desktop.waybar" = {
@@ -128,7 +121,6 @@
       layers = [ "eval" ];
     };
   };
-
   services = {
     "airvpn-seed" = {
       layers = [ "eval" ];
@@ -139,10 +131,7 @@
         "vm"
       ];
     };
-    "chatgpt-mcp" = {
-      layers = [ "eval" ];
-    };
-    "hermes" = {
+    "borg" = {
       layers = [ "eval" ];
     };
     "lynchpin" = {
@@ -154,13 +143,10 @@
         "host"
       ];
     };
-    "polylogue" = {
-      layers = [
-        "eval"
-        "vm"
-      ];
+    "oracle" = {
+      layers = [ "eval" ];
     };
-    "sentinel" = {
+    "polylogue" = {
       layers = [
         "eval"
         "vm"
@@ -168,6 +154,9 @@
     };
     "sinex" = {
       layers = [ "build" ];
+    };
+    "tailscale" = {
+      layers = [ "eval" ];
     };
     "weechat-log-sealer" = {
       layers = [ "eval" ];
@@ -186,19 +175,6 @@
       ];
     };
   };
-
-  bundles = {
-    "desktop" = {
-      layers = [
-        "eval"
-        "build"
-      ];
-    };
-    "dev" = {
-      layers = [ "eval" ];
-    };
-  };
-
   hosts = {
     "sinnix-prime" = {
       layers = [
@@ -210,7 +186,6 @@
       layers = [ "build" ];
     };
   };
-
   outputs = {
     "router-config" = {
       layers = [

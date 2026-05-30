@@ -93,7 +93,6 @@ in
         "/var/lib/systemd" # timers, random-seed, rfkill, linger, timesync
         "/var/lib/transmission" # torrent state
         "/var/lib/tailscale" # auth keys and device identity
-        "/var/log/below" # below resource monitor
       ];
       files = [
         "/etc/machine-id" # dbus + journal continuity

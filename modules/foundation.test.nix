@@ -14,7 +14,6 @@
         { ... }:
         {
           networking.hostName = "minimal";
-          sinnix.bundles.dev.enable = false;
         }
       )
     ];

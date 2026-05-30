@@ -30,8 +30,13 @@
       coreModule = builtins.readFile (inputs.self + "/modules/core.nix");
       performanceModule = builtins.readFile (inputs.self + "/modules/performance.nix");
       persistenceModule = builtins.readFile (inputs.self + "/modules/persistence.nix");
-      workloadPolicy = config.sinnix.workloadPolicy;
-      workloadPolicyJson = builtins.fromJSON config.environment.etc."sinnix/workload-policy.json".text;
+      cliCoreModule = builtins.readFile (inputs.self + "/modules/features/cli/core.nix");
+      direnvrc = builtins.readFile (inputs.self + "/scripts/sinnix-direnvrc");
+      rootCacheService = config.systemd.services.sinnix-root-cache-attrs;
+      runtimeInventory = config.sinnix.runtime.inventory;
+      runtimeInventoryJson =
+        builtins.fromJSON
+          config.environment.etc."sinnix/runtime-inventory.json".text;
       earlyoomAvoid = builtins.elemAt config.services.earlyoom.extraArgs 3;
       earlyoomPrefer = builtins.elemAt config.services.earlyoom.extraArgs 1;
       panicCaptureExec = config.systemd.services.panic-log-capture.serviceConfig.ExecStart;
@@ -168,6 +173,12 @@
           && nixSettings.keep-going == false
           && !(nixSettings ? use-cgroups)
           && !(builtins.elem "cgroups" nixSettings.experimental-features)
+          &&
+            nixSettings.experimental-features == [
+              "nix-command"
+              "flakes"
+              "fetch-tree"
+            ]
           && lib.hasInfix "SINNIX_REBUILD_MAX_JOBS:-4" commandRegistry
           && lib.hasInfix "SINNIX_REBUILD_CORES:-4" commandRegistry
           && lib.hasInfix "SINNIX_REBUILD_MAX_JOBS:-4" devShell
@@ -178,20 +189,18 @@
       }
       {
         assertion =
-          lib.hasInfix "usage: sinnix-scope <agent|build|background|nix-build>" scopeScript
-          && lib.hasInfix "SINNIX_WORKLOAD_POLICY_FILE" scopeScript
-          && lib.hasInfix "/etc/sinnix/workload-policy.json" scopeScript
+          lib.hasInfix "usage: sinnix-scope <class> -- <command> [args...]" scopeScript
+          && lib.hasInfix "SINNIX_RUNTIME_INVENTORY_FILE" scopeScript
+          && lib.hasInfix "/etc/sinnix/runtime-inventory.json" scopeScript
           && lib.hasInfix "jq -er" scopeScript
+          && lib.hasInfix ".commandClasses[$class] != null" scopeScript
+          && lib.hasInfix ".environmentAllowList[]?" scopeScript
           && lib.hasInfix "systemd-run" scopeScript
           && lib.hasInfix "agent.slice" scopeScript
           && lib.hasInfix "build.slice" scopeScript
           && lib.hasInfix "background.slice" scopeScript
           && lib.hasInfix "nix-build.slice" scopeScript
-          && lib.hasInfix "policy_env_default CARGO_BUILD_JOBS 4" scopeScript
-          && lib.hasInfix "policy_env_default CMAKE_BUILD_PARALLEL_LEVEL 4" scopeScript
-          && lib.hasInfix "policy_env_default NIX_BUILD_CORES 4" scopeScript
-          && lib.hasInfix "policy_env_default SCCACHE_IDLE_TIMEOUT 10" scopeScript
-          && lib.hasInfix "policy_env_default MAKEFLAGS -j4" scopeScript
+          && lib.hasInfix ".commandClasses[$class].envDefaults" scopeScript
           && lib.hasInfix "ionice -c 2 -n" scopeScript
           && lib.hasInfix "nice -n \"$nice_level\"" scopeScript
           && lib.hasInfix "ionice -c 3" scopeScript
@@ -201,58 +210,55 @@
       }
       {
         assertion =
-          workloadPolicy.schema == "sinnix-workload-policy-v1"
-          && workloadPolicyJson.schema == workloadPolicy.schema
-          && workloadPolicy.commandClasses.build.slice == "build.slice"
-          && workloadPolicy.commandClasses.build.envDefaults.MAKEFLAGS == "-j4"
-          && workloadPolicy.commandClasses.agent.resourceClass == "interactive-agent"
-          && !(workloadPolicy ? pressureBackoff)
-          && !(builtins.elem "sinnix-pressure-watchdog.service" workloadPolicy.observedUnits.system)
-          && !(builtins.elem "sinnix-maintenance.slice" workloadPolicy.observedSlices.system)
-          && workloadPolicy.unitClasses."polylogued.service" == "capture-runtime";
-        message = "workload policy registry must be the single source for command classes and observe classification";
+          runtimeInventory.schema == "sinnix-runtime-inventory-v1"
+          && runtimeInventoryJson.schema == runtimeInventory.schema
+          && runtimeInventory.commandClasses.build.slice == "build.slice"
+          && runtimeInventory.commandClasses.build.envDefaults.MAKEFLAGS == "-j4"
+          && runtimeInventory.commandClasses.agent.resourceClass == "interactive-agent"
+          && runtimeInventory.classes.observability.serviceConfig.Slice == "system-critical.slice"
+          && runtimeInventory.classes.interactive-access.serviceConfig.Slice == "system-critical.slice"
+          && runtimeInventory.classes.backup-maintenance.serviceConfig.CPUWeight == 20
+          && runtimeInventory.classes.capture-runtime.serviceConfig.MemoryMax == "8G"
+          && builtins.elem "SINEX_DEV_CACHE_ROOT" runtimeInventory.environmentAllowList
+          && runtimeInventory.surfaces.sshd.resourceClass == "interactive-access"
+          && runtimeInventory.surfaces.nix-gc.resourceClass == "background-maintenance";
+        message = "runtime policy registry must be the single source for command classes and declared surfaces";
       }
       {
         assertion =
           builtins.any (rule: lib.hasInfix "/var/cache/nix-build" rule) config.systemd.tmpfiles.rules
           && builtins.any (rule: lib.hasInfix "/var/cache/sccache" rule) config.systemd.tmpfiles.rules
           && builtins.any (rule: lib.hasInfix "/var/cache/sinex" rule) config.systemd.tmpfiles.rules
-          && lib.hasInfix "build-dir = " coreModule
-          && lib.hasInfix "/var/cache/nix-build" coreModule
-          && lib.hasInfix "SCCACHE_DIR = " coreModule
-          && lib.hasInfix "/var/cache/sccache" coreModule
-          && lib.hasInfix "SCCACHE_IDLE_TIMEOUT = \"300\"" coreModule
-          && lib.hasInfix "/var/cache/sinex" coreModule
-          && lib.hasInfix "services.sinnix-root-cache-attrs" coreModule
-          && lib.hasInfix "chattr +C" coreModule
-          && lib.hasInfix "before = [ \"nix-daemon.service\" ]" coreModule
-          && lib.hasInfix "requires = [ \"sinnix-root-cache-attrs.service\" ]" coreModule
-          && !(lib.hasInfix "/realm/cache/nix-build" coreModule)
-          && !(lib.hasInfix "/realm/cache/sccache" coreModule)
-          && !(lib.hasInfix "/cache/nix/" coreModule)
+          && lib.hasInfix "build-dir = /var/cache/nix-build" config.nix.extraOptions
+          && config.environment.variables.SCCACHE_DIR == "/var/cache/sccache"
+          && config.environment.variables.SCCACHE_IDLE_TIMEOUT == "300"
+          && rootCacheService.before == [ "nix-daemon.service" ]
+          && rootCacheService.serviceConfig.Type == "oneshot"
+          && lib.hasInfix "chattr +C" rootCacheService.script
+          && builtins.elem "sinnix-root-cache-attrs.service" config.systemd.services.nix-daemon.requires
+          && !(lib.hasInfix "/var/cache/nix-build" coreModule)
+          && !(lib.hasInfix "/var/cache/sccache" coreModule)
           && lib.hasInfix "Eval/fetcher cache stays under ~/.cache/nix" persistenceModule;
         message = "Nix and sccache scratch must use prepared root cache, not /realm or the failed /cache NVMe";
       }
       {
         assertion =
-          lib.hasInfix "default_sinex_cache=" scopeScript
-          && lib.hasInfix "/var/cache/sinex/" scopeScript
-          && lib.hasInfix "sinex_cache_base=\"/var/cache/sinex/$sinex_user/$sinex_hash\"" scopeScript
-          && lib.hasInfix "SINEX_DEV_CACHE_ROOT" scopeScript
-          && lib.hasInfix "SINEX_DEV_CACHE_ROOT=\"$sinex_cache_base\"" scopeScript
-          && lib.hasInfix "CARGO_TARGET_DIR=\"$SINEX_DEV_CACHE_ROOT/target\"" scopeScript
-          && lib.hasInfix "SINEX_TEST_RESULTS_DIR=\"$SINEX_CACHE_DIR/test-results\"" scopeScript
-          && lib.hasInfix "default_sinex_dev_state=" scopeScript
-          && lib.hasInfix "SINEX_DEV_STATE_DIR=\"$sinex_cache_base/dev-state\"" scopeScript
-          && lib.hasInfix "DATABASE_URL=\"postgresql:///sinex_dev?host=$SINEX_DEV_STATE_DIR/run\"" scopeScript
-          && lib.hasInfix "SINEX_DEV_STATE_DIR SINEX_NATS_DIR" scopeScript;
-        message = "sinnix-scope build must redirect default Sinex dev artifacts and state off /realm";
+          !(lib.hasInfix "default_sinex_cache=" scopeScript)
+          && !(lib.hasInfix "SINEX_DEV_ROOT" scopeScript)
+          && lib.hasInfix "builtins.readFile ../../../scripts/sinnix-direnvrc" cliCoreModule
+          && lib.hasInfix "_sinnix_setup_sinex_dev_cache" direnvrc
+          && lib.hasInfix "/var/cache/sinex/$sinex_user/$sinex_hash" direnvrc
+          && lib.hasInfix "export SINEX_DEV_CACHE_ROOT=\"$sinex_cache_base\"" direnvrc
+          && lib.hasInfix "export CARGO_TARGET_DIR=\"$SINEX_DEV_CACHE_ROOT/target\"" direnvrc
+          && lib.hasInfix "export SINEX_DEV_STATE_DIR=\"$sinex_cache_base/dev-state\"" direnvrc
+          && lib.hasInfix "export DATABASE_URL=\"postgresql:///sinex_dev?host=$SINEX_DEV_STATE_DIR/run\"" direnvrc;
+        message = "Sinex dev cache relocation belongs to project direnv setup, not generic sinnix-scope";
       }
       {
         assertion =
-          lib.hasInfix "Do not enable Nix cgroups" coreModule
-          && !(lib.hasInfix "future `use-cgroups = true` trial" coreModule);
-        message = "Nix cgroup notes must match the simplified baseline";
+          lib.hasInfix "earlyoom owns global emergency memory intervention" performanceModule
+          && !(lib.hasInfix "while this host is being retuned" performanceModule);
+        message = "OOM policy notes must be present-tense rather than retuning history";
       }
     ];
 }

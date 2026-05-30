@@ -73,7 +73,7 @@
         assertion =
           hasConf
           &&
-            builtins.match ".*volume /realm\n +snapshot_dir +\\.btrfs/snapshot\n +subvolume \\.\n +snapshot_preserve_min +30m\n +snapshot_preserve +6h.*" conf
+            builtins.match ".*volume /realm\n +snapshot_dir +\\.btrfs/snapshot\n +subvolume \\.\n +snapshot_preserve_min +1h\n +snapshot_preserve +6h.*" conf
             != null;
         message = "btrbk config must keep recent /realm snapshots in the .btrfs/snapshot layout";
       }
@@ -81,7 +81,7 @@
         assertion =
           hasConf
           &&
-            builtins.match ".*volume /persist\n +snapshot_dir +\\.btrfs/snapshot\n +subvolume \\.\n +snapshot_preserve_min +30m\n +snapshot_preserve +6h.*" conf
+            builtins.match ".*volume /persist\n +snapshot_dir +\\.btrfs/snapshot\n +subvolume \\.\n +snapshot_preserve_min +1h\n +snapshot_preserve +6h.*" conf
             != null;
         message = "btrbk config must keep recent /persist snapshots in the .btrfs/snapshot layout";
       }

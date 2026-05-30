@@ -104,6 +104,9 @@ in
         "${realmRoot}/inbox/download"
       ];
       generatedRuntimeServices = lib.optionals runtimeEnabled (config.sinex._generatedUnits or [ ]);
+      generatedSourceWorkerServices = builtins.filter (
+        name: lib.hasPrefix "sinex-source-worker-" name
+      ) generatedRuntimeServices;
       maintenanceTimerServiceNames = [
         "sinex-document-scan"
       ];
@@ -310,7 +313,13 @@ in
 
               desktop = {
                 enable = runtimeEnabled && activationProfile.desktop;
-                clipboard.enable = true;
+                # Disabled post-sinexd-collapse: the single daemon runs as the
+                # sinex system user without DISPLAY/XAUTHORITY, so the clipboard
+                # adapter cannot reach X11 and triggers a runtime-wide critical
+                # failure cascade. Re-enable when sinexd has per-binding env
+                # injection or the runtime degrades source-worker failures
+                # from "critical" to "binding-local".
+                clipboard.enable = false;
               };
 
               system = {
@@ -404,6 +413,8 @@ in
       #     filesystem
       #   - retitle sinex-runtime.target to reflect the host's automation
       #     model
+      #   - give notify-style source workers enough time to acquire their
+      #     local data-source lease before the unit start deadline
       #   - drop workstation-civil scheduler bias from one-shot maintenance
       #     timers and force their next-fire semantics
       #   - re-run sinex-desktop-target-access after every nixos-rebuild switch
@@ -412,18 +423,61 @@ in
       #     mask::--- and nullifying the sinex traverse grant. Ordering after
       #     the Home Manager service ensures the ACL is set last.
       (lib.mkIf runtimeEnabled {
+        sinnix.runtime.surfaces =
+          let
+            mkSurface = name: resourceClass: {
+              inherit resourceClass;
+              unit = "${name}.service";
+            };
+            generatedSurfaces = lib.listToAttrs (
+              map (name: {
+                inherit name;
+                value = mkSurface name "capture-runtime";
+              }) generatedRuntimeServices
+            );
+          in
+          generatedSurfaces
+          // {
+            sinex-runtime = {
+              unit = "sinex-runtime.target";
+              kind = "target";
+              resourceClass = "capture-runtime";
+              observe = {
+                enable = runtimeAutoStart;
+                restartable = false;
+              };
+            };
+            sinex-runtime-timer = {
+              unit = "sinex-runtime.timer";
+              kind = "timer";
+              resourceClass = "capture-runtime";
+            };
+            nats = {
+              unit = "nats.service";
+              resourceClass = "capture-substrate";
+            };
+            postgresql = {
+              unit = "postgresql.service";
+              resourceClass = "capture-substrate";
+            };
+            sinex-document-scan = {
+              unit = "sinex-document-scan.service";
+              resourceClass = "background-maintenance";
+            };
+          };
+
         systemd.services = lib.mkMerge [
           {
             postgresql = {
               unitConfig.RequiresMountsFor = [ sinexRuntimeRoot ];
-              serviceConfig = {
-                Nice = 5;
-                IOWeight = 50;
+              serviceConfig = lib.sinnix.mkRuntimeServiceConfig {
+                runtimeInventory = config.sinnix.runtime.inventory;
+                unit = "postgresql.service";
               };
             };
-            nats.serviceConfig = {
-              Nice = 5;
-              IOWeight = 50;
+            nats.serviceConfig = lib.sinnix.mkRuntimeServiceConfig {
+              runtimeInventory = config.sinnix.runtime.inventory;
+              unit = "nats.service";
             };
             # home-manager activation calls chmod 700 /home/${targetUserName}
             # which maps the group bits to the POSIX ACL mask, resetting
@@ -448,6 +502,9 @@ in
               TimeoutStopSec = lib.mkDefault "15s";
             };
           }))
+          (lib.genAttrs generatedSourceWorkerServices (_: {
+            serviceConfig.TimeoutStartSec = lib.mkDefault "90s";
+          }))
           (lib.mapAttrs (_: before: {
             before = lib.mkForce before;
           }) targetAccessServiceBefore)
@@ -462,6 +519,46 @@ in
         systemd.timers = lib.genAttrs maintenanceTimerServiceNames (_: {
           timerConfig.Persistent = lib.mkForce false;
         });
+      })
+
+      # ── deploymentRole: workstation-thin ────────────────────────────────
+      # Host runs the sinex capture runtime but reads database + NATS over
+      # the wire from a remote replica. Local postgresql/nats are disabled
+      # and DATABASE_URL/NATS_URL are sourced from an agenix-decrypted env
+      # file (typically /run/agenix/sinex-remote-db, written by the operator
+      # as a sequence of `KEY=value` lines).
+      (lib.mkIf (cfg.deploymentRole == "workstation-thin") {
+        services.postgresql.enable = lib.mkForce false;
+        services.nats.enable = lib.mkForce false;
+        services.sinex.database.enable = lib.mkForce false;
+        services.sinex.database.autoSetup = lib.mkForce false;
+        services.sinex.nats.enable = lib.mkForce false;
+        services.sinex.nats.autoSetup = lib.mkForce false;
+
+        # Wire the remote-db env file into every generated sinex runtime
+        # unit. The file is operator-managed; if it is absent at start time,
+        # the unit will fail explicitly rather than silently fall back to a
+        # local socket.
+        systemd.services = lib.genAttrs (config.sinex._generatedUnits or [ ]) (_: {
+          serviceConfig.EnvironmentFile = [ "/run/agenix/sinex-remote-db" ];
+        });
+      })
+
+      # ── deploymentRole: replica ─────────────────────────────────────────
+      # Host runs postgresql + NATS for remote workstation-thin nodes but
+      # does not run the local sinexd capture runtime. The collector/
+      # receiver path stays alive via the database + nats services; ingest
+      # nodes are disabled.
+      (lib.mkIf (cfg.deploymentRole == "replica") {
+        services.sinex.nodes = {
+          filesystem.enable = lib.mkForce false;
+          terminal.enable = lib.mkForce false;
+          browser.enable = lib.mkForce false;
+          desktop.enable = lib.mkForce false;
+          system.enable = lib.mkForce false;
+          document.enable = lib.mkForce false;
+          automata.enable = lib.mkForce false;
+        };
       })
     ]
   );

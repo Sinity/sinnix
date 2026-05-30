@@ -135,18 +135,6 @@ def boot_metric_rows(root: Path, *, include_hash: bool) -> list[dict[str, Any]]:
     return rows
 
 
-def oomd_rows(root: Path, *, include_hash: bool) -> list[dict[str, Any]]:
-    events_root = root / "oomd-events"
-    if not events_root.exists():
-        return []
-    rows: list[dict[str, Any]] = []
-    for path in sorted(item for item in events_root.rglob("*") if item.is_file()):
-        row = stat_payload(path, root, include_hash=include_hash)
-        row["kind"] = "oomd_event_file"
-        rows.append(row)
-    return rows
-
-
 def publish_atomic(tmp_path: Path, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     parent_stat = path.parent.stat()
@@ -194,11 +182,8 @@ def main() -> int:
 
     journal = journal_rows(root, include_hash=args.hash, inspect_edges=not args.no_edge_inspect)
     boot_metrics = boot_metric_rows(root, include_hash=args.hash)
-    oomd = oomd_rows(root, include_hash=args.hash)
-
     write_jsonl_atomic(output / "journal-files.jsonl", journal)
     write_jsonl_atomic(output / "boot-metrics.jsonl", boot_metrics)
-    write_jsonl_atomic(output / "oomd-events.jsonl", oomd)
     write_json_atomic(
         output / "manifest.json",
         {
@@ -210,7 +195,6 @@ def main() -> int:
             "counts": {
                 "journal_files": len(journal),
                 "boot_metric_dirs": len(boot_metrics),
-                "oomd_event_files": len(oomd),
             },
             "hashes_included": bool(args.hash),
             "journal_edges_inspected": not args.no_edge_inspect,

@@ -1,17 +1,16 @@
-"""systemctl-driven collectors: managed units, slices, and sentinel."""
+"""systemctl-driven collectors: managed units, slices, and runtime inventory."""
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any
 
-from ..util import int_or_none, run_cmd, split_props, words
-from ..workload_policy import (
+from ..runtime_inventory import (
+    load_inventory,
+    managed_units,
     observed_slices,
-    observed_units,
     resource_class_for_unit,
 )
+from ..util import int_or_none, run_cmd, split_props, words
 
 
 def systemctl_show(unit: str, user: bool = False) -> dict[str, str]:
@@ -123,12 +122,12 @@ def collect_systemd_units(offline: bool) -> list[dict[str, Any]]:
     if offline:
         return []
     rows: list[dict[str, Any]] = []
-    for unit in observed_units("system"):
+    for unit in managed_units("system"):
         props = systemctl_show(unit, user=False)
         if props.get("LoadState") == "not-found":
             continue
         rows.append(unit_row(unit, "system", props))
-    for unit in observed_units("user"):
+    for unit in managed_units("user"):
         props = systemctl_show(unit, user=True)
         if props.get("LoadState") == "not-found":
             continue
@@ -148,20 +147,7 @@ def collect_resource_slices(offline: bool) -> list[dict[str, Any]]:
     return rows
 
 
-def collect_sentinel(offline: bool) -> dict[str, Any]:
+def collect_runtime_inventory(offline: bool) -> dict[str, Any]:
     if offline:
         return {"offline": True}
-    state = {"service": systemctl_show("sinnix-sentinel.service")}
-    policy = Path("/etc/sinnix/health-policy.json")
-    if policy.exists():
-        try:
-            state["health_policy"] = json.loads(policy.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            state["health_policy_error"] = str(policy)
-    health = Path("/run/sinnix/health.json")
-    if health.exists():
-        try:
-            state["latest_health"] = json.loads(health.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            state["latest_health_error"] = str(health)
-    return state
+    return load_inventory()

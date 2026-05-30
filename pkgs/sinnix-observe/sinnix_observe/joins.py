@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from .runtime_inventory import resource_class_from_cgroup
 from .sources.xtask import infer_sinex_resource_class
 from .util import normalize_timestamp
-from .workload_policy import resource_class_from_cgroup
 
 
 def project_for_unit(unit: str) -> str | None:

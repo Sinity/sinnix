@@ -12,19 +12,18 @@
       machineTelemetry = config.sinnix.services.machine-telemetry;
       polylogue = config.sinnix.services.polylogue;
       sinex = config.sinnix.services.sinex;
+      surfaces = config.sinnix.runtime.surfaces;
       transmission = config.services.transmission.settings;
       transmissionService = config.systemd.services.transmission;
       sinexRuntimeTimerWantedBy =
         lib.attrByPath [ "systemd" "timers" "sinex-runtime" "wantedBy" ] [ ]
           config;
       polylogueHm = config.home-manager.users.${config.sinnix.user.name};
+      keylogRoot = "${config.sinnix.paths.capturesRoot}/keylog";
+      interceptionConfig = config.services.interception-tools.udevmonConfig;
+      logitechMaintenance = config.systemd.user.services.logitech-maintenance;
     in
     [
-      {
-        assertion =
-          !(config.systemd.services ? sinnix-sentinel) && !(config.systemd.timers ? sinnix-sentinel);
-        message = "sinnix-prime must not run the scan-heavy sentinel loop as a background timer";
-      }
       {
         assertion = builtins.elem "sinnix-resource-audit" packageNames;
         message = "sinnix-prime must expose the live resource-policy audit command";
@@ -50,6 +49,7 @@
           && airvpn.autoStart == false
           && airvpn.forwardedPort == 20241
           && transmission.bind-address-ipv4 == "10.148.66.217"
+          && transmission.bind-address-ipv6 == "::1"
           && transmission.peer-port == 20241
           && builtins.elem "wireguard-airvpn-seed.target" (transmissionService.wants or [ ])
           && builtins.elem "wireguard-airvpn-seed.target" (transmissionService.after or [ ]);
@@ -69,7 +69,8 @@
         assertion =
           polylogue.enable
           && polylogue.daemon.autoStart
-          && polylogue.health.unit == "polylogued.service"
+          && surfaces.polylogued.unit == "polylogued.service"
+          && surfaces.polylogued.observe.enable
           && polylogueHm.systemd.user.services.polylogued.Install.WantedBy == [ "default.target" ];
         message = "sinnix-prime must autostart Polylogue after live-ingest repair updates";
       }
@@ -77,9 +78,23 @@
         assertion =
           sinex.enable
           && sinex.autoStart
-          && sinex.health.unit == "sinex-ingestd.service"
+          && surfaces.sinex-runtime.unit == "sinex-runtime.target"
+          && surfaces.sinex-runtime.observe.enable
           && sinexRuntimeTimerWantedBy == [ "timers.target" ];
         message = "sinnix-prime must install the delayed Sinex runtime timer";
+      }
+      {
+        assertion =
+          config.services.interception-tools.enable
+          && lib.hasInfix "scribe-tap" interceptionConfig
+          && lib.hasInfix keylogRoot interceptionConfig
+          && builtins.elem keylogRoot config.systemd.services.interception-tools.unitConfig.RequiresMountsFor
+          && builtins.elem "d ${keylogRoot} 0700 ${config.sinnix.user.name} users -" config.systemd.tmpfiles.rules;
+        message = "sinnix-prime keyboard interception must keep scribe-tap key capture active";
+      }
+      {
+        assertion = logitechMaintenance.wantedBy == [ "graphical-session.target" ];
+        message = "sinnix-prime Logitech maintenance must be installed, not gated off";
       }
     ];
 }

@@ -12,8 +12,11 @@
       config:
       let
         hm = hmFor config;
-        healthPolicy = builtins.fromJSON config.environment.etc."sinnix/health-policy.json".text;
-        healthServiceNames = map (check: check.name) healthPolicy.services;
+        runtimeInventory = builtins.fromJSON config.environment.etc."sinnix/runtime-inventory.json".text;
+        observedServiceNames = map (check: check.name) runtimeInventory.observedServices;
+        activitywatchEntry = builtins.head (
+          builtins.filter (check: check.name == "activitywatch") runtimeInventory.observedServices
+        );
         serverService = hm.systemd.user.services.activitywatch.Service or { };
         watcherInstall = hm.systemd.user.services.activitywatch-watcher-awatcher.Install or { };
       in
@@ -31,9 +34,12 @@
         }
         {
           assertion =
-            builtins.elem "activitywatch" healthServiceNames
-            && builtins.elem "activitywatch-watcher-awatcher" healthServiceNames;
-          message = "ActivityWatch must be present in health policy when autostarted";
+            builtins.elem "activitywatch" observedServiceNames
+            && builtins.elem "activitywatch-watcher-awatcher" observedServiceNames
+            && activitywatchEntry.manager == "user"
+            && activitywatchEntry.kind == "service"
+            && activitywatchEntry.resourceClass == "background-maintenance";
+          message = "ActivityWatch must be present in runtime inventory with surface metadata";
         }
         {
           assertion = watcherInstall.WantedBy == [ "graphical-session.target" ];
@@ -53,17 +59,17 @@
       config:
       let
         hm = hmFor config;
-        healthPolicy = builtins.fromJSON config.environment.etc."sinnix/health-policy.json".text;
-        healthServiceNames = map (check: check.name) healthPolicy.services;
+        runtimeInventory = builtins.fromJSON config.environment.etc."sinnix/runtime-inventory.json".text;
+        observedServiceNames = map (check: check.name) runtimeInventory.observedServices;
         serverInstall = hm.systemd.user.services.activitywatch.Install or { };
         watcherInstall = hm.systemd.user.services.activitywatch-watcher-awatcher.Install or { };
       in
       [
         {
           assertion =
-            !(builtins.elem "activitywatch" healthServiceNames)
-            && !(builtins.elem "activitywatch-watcher-awatcher" healthServiceNames);
-          message = "ActivityWatch autoStart=false must remove restartable health metadata";
+            !(builtins.elem "activitywatch" observedServiceNames)
+            && !(builtins.elem "activitywatch-watcher-awatcher" observedServiceNames);
+          message = "ActivityWatch autoStart=false must remove live-service runtime inventory metadata";
         }
         {
           assertion = serverInstall.WantedBy == [ ];

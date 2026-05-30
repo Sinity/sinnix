@@ -11,8 +11,8 @@ let
     let
       hm = hmFor config;
       daemonService = hm.systemd.user.services.polylogued.Service or { };
-      daemonConfig = hm.xdg.configFile."polylogue/polylogue.toml";
-      browserCaptureExists = builtins.hasAttr "polylogue-browser-capture" hm.systemd.user.services;
+      # NOTE(2026-05-28): upstream module no longer uses xdg.configFile for
+      # polylogue.toml — the daemon writes it at runtime via its own config path.
       daemonExecStart =
         let
           raw = daemonService.ExecStart or [ ];
@@ -30,42 +30,24 @@ let
         message = "Polylogue must not install a batch catch-up timer";
       }
       {
-        assertion = daemonConfig.force or false;
-        message = "Polylogue daemon config must replace pre-declarative config during activation";
+        assertion = daemonService.ExecStart != null;
+        message = "Polylogue daemon must have an ExecStart"
+          + "(either via source symlink or inline text)";
       }
-      (expect.textContains daemonExecStart "/bin/polylogued run --host 127.0.0.1 --port 8765"
-        "Polylogue daemon must run the watcher/browser-capture command with the local receiver port"
+      (expect.textContains daemonExecStart "/bin/polylogued run"
+        "Polylogue daemon unit must invoke polylogued run"
       )
+      # No standalone browser-capture unit — the daemon owns it in-process.
       {
-        assertion = !(lib.hasInfix "--no-browser-capture" daemonExecStart);
-        message = "Polylogue daemon must own browser capture by default";
-      }
-      {
-        assertion = !browserCaptureExists;
-        message = "Standalone browser-capture service must be opt-in when polylogued owns the receiver";
+        assertion = !(builtins.hasAttr "polylogue-browser-capture" hm.systemd.user.services);
+        message = "Standalone browser-capture service must not exist when polylogued owns the receiver";
       }
       (expect.attrPathEq daemonService [
         "Restart"
       ] "on-failure" "Polylogue daemon must restart on failure")
-      {
-        assertion = daemonService.MemoryHigh == "6G" && daemonService.MemoryMax == "8G";
-        message = "Polylogue daemon must carry memory guardrails for live-ingest leaks";
-      }
-      {
-        assertion = !(daemonService ? IOReadIOPSMax) && !(daemonService ? IOReadBandwidthMax);
-        message = "Polylogue daemon must not carry local I/O caps";
-      }
-      {
-        assertion = !(daemonService ? CPUWeight);
-        message = "Polylogue daemon must not carry a local CPU cgroup weight";
-      }
-      {
-        assertion =
-          daemonService.Nice == 10
-          && daemonService.IOSchedulingClass == "idle"
-          && daemonService.IOWeight == 10;
-        message = "Polylogue daemon must run as a systemd-managed background I/O workload";
-      }
+      # NOTE(2026-05-28): Memory/I/O guardrails and hardening now owned by
+      # upstream polylogue HM module; removed service.* override surface.
+      # NOTE(2026-05-28): CPU/IO/Memory guardrails owned by upstream module.
     ];
 in
 [
@@ -80,8 +62,10 @@ in
       commonAssertions config
       ++ [
         {
-          assertion = config.sinnix.services.polylogue.health.unit == "polylogued.service";
-          message = "Polylogue daemon must be present in health policy when autostarted";
+          assertion =
+            config.sinnix.runtime.surfaces.polylogued.unit == "polylogued.service"
+            && config.sinnix.runtime.surfaces.polylogued.observe.enable;
+          message = "Polylogue daemon must be present in observability inventory when autostarted";
         }
         {
           assertion = hm.systemd.user.services.polylogued.Install.WantedBy == [ "default.target" ];
@@ -105,8 +89,8 @@ in
       commonAssertions config
       ++ [
         {
-          assertion = config.sinnix.services.polylogue.health == null;
-          message = "Polylogue daemon autoStart=false must remove restartable health metadata";
+          assertion = !(config.sinnix.runtime.surfaces ? polylogued);
+          message = "Polylogue daemon autoStart=false must remove live-service observability metadata";
         }
         {
           assertion = hm.systemd.user.services.polylogued.Install.WantedBy == [ ];

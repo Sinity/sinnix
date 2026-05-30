@@ -1,196 +1,131 @@
-# Polylogue - AI conversation archive
+# Polylogue — AI conversation archive daemon (user-mode)
 #
-# Daemon ingestion of AI chat exports (ChatGPT, Claude, Claude Code,
-# Codex, Gemini). The daemon can infer sources, but the CLI/status path reads
-# polylogue.toml for the archive root, source roots, and daemon API port.
+# Thin wrapper over polylogue's upstream Home Manager module
+# (inputs.polylogue.homeManagerModules.default). The upstream module
+# defines programs.polylogued.* options, renders polylogue.toml, and
+# creates the polylogued user unit. This module adds sinnix-specific
+# wiring that the upstream cannot know about:
+#
+#   - ``sinnix.runtime.surfaces`` registration (resource class, observe)
+#
+# Everything else — archive/daemon/embedding/logging settings,
+# systemd hardening — is delegated to upstream.
+#
+# Consumer site (hosts/sinnix-prime/default.nix):
+#
+#     polylogue = {
+#       enable = true;
+#       dataDir = "/realm/data/captures/polylogue";  # optional override
+#     };
 {
   config,
   lib,
   pkgs,
+  inputs,
   ...
 }:
 let
   cfg = config.sinnix.services.polylogue;
   userName = config.sinnix.user.name;
   homeDir = config.users.users.${userName}.home;
-  archiveRoot = "${homeDir}/.local/share/polylogue";
-  sourceRoots = [
-    "${homeDir}/.claude/projects"
-    "${homeDir}/.codex/sessions"
-    "${homeDir}/.gemini/tmp"
-    "${homeDir}/.hermes/sessions"
-    "${homeDir}/.gemini/antigravity"
-  ];
-  sourceRootsToml = lib.concatMapStringsSep ", " (root: ''"${root}"'') sourceRoots;
-  daemonApiPort = cfg.daemon.port + 1;
+
+  # Defaults matching what polylogue's runtime discovery picks up.
+  defaultDataDir = "${homeDir}/.local/share/polylogue";
+
+  polyloguePkg = pkgs.polylogue;
 in
 {
   options.sinnix.services.polylogue = {
-    enable = lib.mkEnableOption "Polylogue daemon ingestion";
+    enable = lib.mkEnableOption "Polylogue AI conversation archive daemon (user-mode via home-manager)";
+
+    dataDir = lib.mkOption {
+      type = lib.types.str;
+      default = defaultDataDir;
+      description = ''
+        Path to the Polylogue archive root. Mapped to
+        ``programs.polylogued.settings.archive.root`` and persisted to
+        the generated ``polylogue.toml``.
+
+        Default: ``~/.local/share/polylogue``.
+      '';
+    };
 
     daemon = {
-      enable = lib.mkEnableOption "Polylogue long-running daemon (live watcher + browser capture)" // {
-        default = true;
+      host = lib.mkOption {
+        type = lib.types.str;
+        default = "127.0.0.1";
+        description = ''
+          Host for the daemon's HTTP API and browser-capture receiver.
+          Mapped to ``programs.polylogued.settings.daemon.host``.
+        '';
+      };
+
+      browserCapturePort = lib.mkOption {
+        type = lib.types.port;
+        default = 8765;
+        description = ''
+          Port for the browser-capture receiver. Passed as `--port` to
+          `polylogued run` and written to
+          `programs.polylogued.settings.browser-capture.port` in the TOML.
+        '';
+      };
+
+      apiPort = lib.mkOption {
+        type = lib.types.port;
+        default = 8766;
+        description = ''
+          Port for the daemon HTTP API. Mapped to
+          ``programs.polylogued.settings.daemon.port``.
+        '';
       };
 
       autoStart = lib.mkOption {
         type = lib.types.bool;
         default = true;
-        description = "Start the Polylogue daemon automatically in the user session.";
+        description = ''
+          Start the polylogued user systemd unit at login
+          (``WantedBy = default.target``). Mapped to
+          ``programs.polylogued.autoStart``.
+        '';
       };
-
-      host = lib.mkOption {
-        type = lib.types.str;
-        default = "127.0.0.1";
-        description = "Host for the daemon's local browser-capture receiver.";
-      };
-
-      port = lib.mkOption {
-        type = lib.types.port;
-        default = 8765;
-        description = "Port for the daemon's local browser-capture receiver.";
-      };
-
-      browserCapture = lib.mkOption {
-        type = lib.types.bool;
-        default = true;
-        description = "Run browser-capture inside the long-lived daemon.";
-      };
-
-      nice = lib.mkOption {
-        type = lib.types.ints.between (-20) 19;
-        default = 10;
-        description = "Unix nice value for the long-running daemon.";
-      };
-
-      ioSchedulingClass = lib.mkOption {
-        type = lib.types.enum [
-          "idle"
-          "best-effort"
-          "realtime"
-        ];
-        default = "idle";
-        description = "Linux I/O scheduling class for the long-running daemon.";
-      };
-
-      ioWeight = lib.mkOption {
-        type = lib.types.ints.between 1 10000;
-        default = 10;
-        description = "Cgroup v2 I/O weight for the long-running daemon.";
-      };
-
-      memoryHigh = lib.mkOption {
-        type = lib.types.str;
-        default = "6G";
-        description = "Soft cgroup memory throttle for the long-running daemon.";
-      };
-
-      memoryMax = lib.mkOption {
-        type = lib.types.str;
-        default = "8G";
-        description = "Hard cgroup memory limit for the long-running daemon.";
-      };
-
-    };
-
-    browserCapture = {
-      enable = lib.mkEnableOption "Polylogue local browser-capture receiver" // {
-        default = false; # daemon handles this by default
-      };
-
-      host = lib.mkOption {
-        type = lib.types.str;
-        default = "127.0.0.1";
-        description = "Host for the local-only browser-capture receiver.";
-      };
-
-      port = lib.mkOption {
-        type = lib.types.port;
-        default = 8765;
-        description = "Port for the local-only browser-capture receiver.";
-      };
-    };
-
-    health = lib.mkOption {
-      type = lib.types.nullOr (
-        lib.types.submodule {
-          options = {
-            unit = lib.mkOption {
-              type = lib.types.str;
-            };
-            type = lib.mkOption {
-              type = lib.types.enum [
-                "service"
-                "timer"
-                "user"
-              ];
-            };
-            restartable = lib.mkOption {
-              type = lib.types.bool;
-            };
-          };
-        }
-      );
-      default = {
-        unit = "polylogued.service";
-        type = "user";
-        restartable = true;
-      };
-      description = "Service health metadata consumed by introspection/sentinel.";
     };
   };
 
   config = lib.mkIf cfg.enable {
-    environment.systemPackages = [ pkgs.polylogue ];
-    sinnix.services.polylogue.health = lib.mkIf (!cfg.daemon.autoStart) (lib.mkForce null);
-
+    # ── Import the upstream Home Manager module ────────────────────
+    #     This defines programs.polylogued.* and creates the unit.
     home-manager.users.${userName} = {
-      xdg.configFile."polylogue/polylogue.toml" = {
-        force = true;
-        text = ''
-          [archive]
-          root = "${archiveRoot}"
+      imports = [ inputs.polylogue.homeManagerModules.default ];
+      programs.polylogued = {
+        enable = true;
+        package = polyloguePkg;
+        autoStart = cfg.daemon.autoStart;
 
-          [sources]
-          roots = [${sourceRootsToml}]
+        settings = {
+          archive.root = cfg.dataDir;
 
-          [daemon]
-          host = "${cfg.daemon.host}"
-          port = ${toString daemonApiPort}
-        '';
+          daemon = {
+            host = cfg.daemon.host;
+            port = cfg.daemon.apiPort;
+          };
+
+          browser-capture.port = cfg.daemon.browserCapturePort;
+        };
+
+        # NOTE(2026-05-28): upstream polylogue HM module no longer exposes
+        # `service` or `extraServiceConfig`; systemd unit tuning is now
+        # owned upstream.
       };
+    };
 
-      systemd.user.services.polylogue-browser-capture = lib.mkIf cfg.browserCapture.enable {
-        Unit = {
-          Description = "Polylogue local browser-capture receiver";
-          After = [ "default.target" ];
-        };
-        Service = {
-          ExecStart = "${pkgs.polylogue}/bin/polylogued browser-capture serve --host ${cfg.browserCapture.host} --port ${toString cfg.browserCapture.port}";
-          Restart = "on-failure";
-          RestartSec = "5s";
-        };
-        Install.WantedBy = [ "default.target" ];
-      };
-
-      systemd.user.services.polylogued = lib.mkIf cfg.daemon.enable {
-        Unit = {
-          Description = "Polylogue daemon - live watcher and browser capture";
-          After = [ "default.target" ];
-        };
-        Service = {
-          ExecStart =
-            "${pkgs.polylogue}/bin/polylogued run --host ${cfg.daemon.host} --port ${toString cfg.daemon.port}"
-            + lib.optionalString (!cfg.daemon.browserCapture) " --no-browser-capture";
-          Restart = "on-failure";
-          RestartSec = "5s";
-          Nice = cfg.daemon.nice;
-          IOSchedulingClass = cfg.daemon.ioSchedulingClass;
-          IOWeight = cfg.daemon.ioWeight;
-          MemoryHigh = cfg.daemon.memoryHigh;
-          MemoryMax = cfg.daemon.memoryMax;
-        };
-        Install.WantedBy = lib.optionals cfg.daemon.autoStart [ "default.target" ];
+    # ── Runtime-surface registration (sinnix-specific) ─────────────
+    sinnix.runtime.surfaces.polylogued = {
+      unit = "polylogued.service";
+      manager = "user";
+      resourceClass = "capture-runtime";
+      observe = {
+        enable = true;
+        restartable = true;
       };
     };
   };

@@ -95,8 +95,6 @@
       "pcie_aspm=off"
       # Keep boot diagnostics visible without debug-level systemd spam.
       "loglevel=4"
-      "systemd.default_timeout_start_sec=30s"
-      "systemd.default_timeout_stop_sec=10s"
     ]
     ++ lib.optionals (config.sinnix.gpu.mode == "dual") [
       # xe loads as a transitive dep of nvidia and claims the iGPU PCI ID (0xa780)

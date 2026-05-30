@@ -1,3 +1,6 @@
+# attic/cold: archived 2026-05-24 from sinnix-prime.
+# Revive by `git mv` back to modules/features/desktop/crypto.nix.
+# Reason: Monero daemon — no current consumption; previously bundle-swept on prime.
 { mkFeatureModule, pkgs, ... }@args:
 mkFeatureModule {
   path = [

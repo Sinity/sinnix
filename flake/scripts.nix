@@ -22,6 +22,13 @@ let
 
   registry = discovered.registry;
   scriptPackages = lib.mapAttrs (_: v: v.package) registry;
+  runtimeDefaults = import ./data/runtime-defaults.nix { inherit lib; };
+  defaultRuntimeInventoryJson = builtins.toJSON (
+    runtimeDefaults.mkInventory {
+      hostname = "sinnix-fallback";
+      surfaces = runtimeDefaults.baseSurfaces;
+    }
+  );
 
   mkSanitizedPythonWrapper =
     {
@@ -152,7 +159,9 @@ let
       npmDepsHash = "sha256-/duhx34Iiq+7ZOaRTTAWChbGjJhxiVvWOoaLJsH2USc=";
     };
 
-    sinnix-observe = pkgs.callPackage ../pkgs/sinnix-observe/pkg.nix { };
+    sinnix-observe = pkgs.callPackage ../pkgs/sinnix-observe/pkg.nix {
+      inherit defaultRuntimeInventoryJson;
+    };
   };
 
   packageSet = scriptPackages // externalPackages;

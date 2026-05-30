@@ -10,6 +10,10 @@ mkFeatureModule {
     "theming"
   ];
   description = "Desktop theming (GTK/Qt overrides)";
+  meta.dotfiles.configFile = {
+    "qt5ct/qt5ct.conf" = "qt5ct/qt5ct.conf";
+    "qt6ct/qt6ct.conf" = "qt6ct/qt6ct.conf";
+  };
   configFn =
     {
       config,
@@ -34,12 +38,8 @@ mkFeatureModule {
           pkgs,
           lib,
           config,
-          mkDotsFileFor,
           ...
         }:
-        let
-          mkDotsFile = mkDotsFileFor config;
-        in
         {
           gtk = {
             enable = true;
@@ -61,10 +61,6 @@ mkFeatureModule {
             };
           };
           stylix.targets.qt.enable = false;
-          xdg.configFile = {
-            "qt5ct/qt5ct.conf".source = mkDotsFile "/qt5ct/qt5ct.conf";
-            "qt6ct/qt6ct.conf".source = mkDotsFile "/qt6ct/qt6ct.conf";
-          };
         };
     };
 } args

@@ -5,5 +5,8 @@
 # contains helper functions, not NixOS modules.
 { lib, ... }:
 {
-  imports = lib.sinnix.mkAutoImports ./. [ "lib" ];
+  imports = lib.sinnix.mkAutoImports ./. [
+    "lib"
+    "attic"
+  ];
 }

@@ -1,4 +1,9 @@
-{ python3Packages, lib, ... }:
+{
+  python3Packages,
+  lib,
+  defaultRuntimeInventoryJson,
+  ...
+}:
 python3Packages.buildPythonApplication {
   pname = "sinnix-observe";
   version = "0.1.0";
@@ -13,6 +18,12 @@ python3Packages.buildPythonApplication {
 
   nativeCheckInputs = [ python3Packages.pytest ];
 
+  postPatch = ''
+        cat > sinnix_observe/default_runtime_inventory.py <<'PY'
+    DEFAULT_RUNTIME_INVENTORY_JSON = r"""${defaultRuntimeInventoryJson}"""
+    PY
+  '';
+
   checkPhase = ''
     runHook preCheck
     pytest tests/
@@ -25,7 +36,7 @@ python3Packages.buildPythonApplication {
     "sinnix_observe.cli"
     "sinnix_observe.joins"
     "sinnix_observe.render"
-    "sinnix_observe.workload_policy"
+    "sinnix_observe.runtime_inventory"
     "sinnix_observe.sources.below"
     "sinnix_observe.sources.chrome"
     "sinnix_observe.sources.polylogue"

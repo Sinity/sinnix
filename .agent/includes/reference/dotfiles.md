@@ -35,7 +35,6 @@ Dotfiles in `dots/` directory:
 - Shared skill sources live in `dots/_ai/skills/`.
 - `dots/codex/skills/` and `dots/claude/skills/` are agent-facing overlay trees, mostly symlinks into `dots/_ai/skills/`; Codex-only system skills remain in `dots/codex/skills/.system/`.
 - Gemini user skills live at `~/.gemini/skills`, linked directly to `dots/_ai/skills/`.
-- Forge user skills live at `~/forge/skills`, linked directly to `dots/_ai/skills/`.
 - `scripts/normalize-agent-projects /realm/project` performs one-shot normalization across repos (promotes/creates `CLAUDE.md`, regenerates `AGENTS.md`, removes legacy overrides, updates `.gitignore`).
 - `scripts/verify-agent-topology /realm/project` is the read-only topology/sync verifier used for audits and CI checks.
 - Global always-on Codex guidance is `~/.codex/AGENTS.md`, rendered from `~/.config/claude/CLAUDE.md` during activation and before Codex launch.

@@ -43,11 +43,40 @@ just baseline               # Rebuild ActivityWatch/git/health rollups
 python -m lynchpin.views.calendar_views build 2026-03-01 2026-03-07
 ```
 
+### NixOS Rebuild (sinnix)
+
+```bash
+cd /realm/project/sinnix
+direnv allow                    # Activate devshell
+nix flake check --no-build      # Fast pre-flight: option types, coverage, assertions
+```
+
+All rebuild commands use `nh` with systemd-run containment (nice=10):
+
+```bash
+switch                          # nh os switch — build + activate immediately
+boot                            # nh os boot — build + set boot default (safer: reboot)
+test-system                     # nh os test — build + activate without persisting
+test-vm                        # nixos-rebuild test-vm — test in QEMU (nh doesn't wrap this)
+clean                           # nh clean all — garbage collect + optimise store
+```
+
+For risky changes, test in VM first: `test-vm` → launch QEMU → verify → `switch`.
+
+**All three agent CLIs self-update via FHS npm bootstrap** — no Nix rebuild
+needed. `claude update`, `codex update`, `gemini` self-update inside
+`~/.local/state/{claude-code,codex,gemini}/npm/`. State directories are
+persisted under impermanence.
+
 ### Agent Orchestration (Multi-Agent Work)
 
-When dispatching multiple coding agents to execute a plan (e.g., parallel lanes):
+When dispatching multiple coding agents to execute a plan (e.g., parallel lanes),
+state the isolation model explicitly. The rules below are for worktree-isolated
+agents only; if agents intentionally share one checkout, the coordinator owns
+branching/committing/merging and agents should report patches or commit only by
+explicit instruction.
 
-**Worktree discipline — CRITICAL:**
+**Worktree discipline — CRITICAL when using worktree isolation:**
 
 - Agents run in isolated worktrees (`isolation: "worktree"`). The isolation system auto-cleans worktrees on completion, discarding uncommitted working-tree changes. **Agents MUST `git commit` every logical chunk.** Even a WIP commit is fine; the branch persists.
 - **Never `cd /realm/project/<name>` from inside a worktree agent.** The worktree is the agent's root. Git operations run against the worktree branch by default. If an agent `cd`s to the main checkout, commits land on the main branch — corrupting both the main branch and the worktree.
@@ -61,8 +90,8 @@ When dispatching multiple coding agents to execute a plan (e.g., parallel lanes)
 
 **Commit cadence:**
 
-- Agents should commit after each compile-check passes, not after "all work done."
-- First commit: "wip: <lane> — types and module wiring" (after first `cargo check` passes)
+- Agents should commit after each project check passes, not after "all work done."
+- First commit: "wip: <lane> — types and module wiring" (after the first relevant project check passes)
 - Second commit: "feat: <lane> — <next milestone>"
 - This prevents worktree auto-cleanup data loss and makes incremental merge possible.
 
@@ -83,3 +112,6 @@ When dispatching multiple coding agents to execute a plan (e.g., parallel lanes)
 ### Context7
 
 Use for unfamiliar APIs: `resolve-library-id` → `query-docs`. Cheap, prevents mistakes.
+
+### Daily oracle digest
+

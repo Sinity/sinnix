@@ -5,12 +5,14 @@ Files at `modules/*.nix` represent **system-level cross-cutting concerns** that 
 | Module            | Purpose                                      | Category       |
 | ----------------- | -------------------------------------------- | -------------- |
 | foundation.nix    | User identity, paths, projects, localization | Identity       |
-| core.nix          | Nix config, caches, GC, security, firewall   | Core System    |
+| build-policy.nix  | Nix daemon, caches, build scratch, GC        | Build Policy   |
+| core.nix          | Platform defaults, security, firewall        | Core System    |
 | networking.nix    | Network config, DNS, hosts                   | Infrastructure |
 | storage.nix       | Filesystem mounts, drives, BTRFS             | Infrastructure |
 | performance.nix   | CPU governor, I/O scheduler, OOM policy      | Tuning         |
+| runtime.nix       | Runtime inventory, resource classes, slices  | Operations     |
 | diagnostics.nix   | System monitoring, metrics collection        | Operations     |
-| introspection.nix | Config dump + health policy auto-derivation  | Operations     |
+| introspection.nix | Generated config dump                        | Operations     |
 | log-hygiene.nix   | Log cleanup, journal size limits             | Operations     |
 | secrets.nix       | Agenix secret integration                    | Security       |
 | home-manager.nix  | Home Manager integration glue                | Integration    |

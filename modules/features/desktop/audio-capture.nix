@@ -18,7 +18,6 @@ mkFeatureModule {
     "audioCapture"
   ];
   description = "Always-on microphone capture with local VAD and cloud-first ASR";
-  enableDefault = false;
   extraOptions = {
     archiveDir = lib.mkOption {
       type = lib.types.str;

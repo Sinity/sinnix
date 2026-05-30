@@ -18,6 +18,20 @@ mkFeatureModule {
   ];
   description = "MCP servers and AI tool integration";
   extraOptions = { };
+  meta.dotfiles = {
+    configFile = {
+      "ripgrep-all/config.jsonc" = "ripgrep-all/config.jsonc";
+      "marimo/marimo.toml" = "marimo/marimo.toml";
+    };
+    homeFile = {
+      ".codex/skills" = "codex/skills";
+      ".gemini/settings.json" = {
+        source = "gemini/settings.json";
+        force = true;
+      };
+      ".gemini/skills" = "_ai/skills";
+    };
+  };
   configFn =
     {
       config,
@@ -33,7 +47,7 @@ mkFeatureModule {
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
       jsonFormat = pkgs.formats.json { };
       tomlFormat = pkgs.formats.toml { };
-      mcpRegistry = import ../../lib/mcp-registry.nix { inherit lib; };
+      inherit (helpers.data) mcpRegistry;
       firecrawlSecretPath = lib.attrByPath [ "sinnix" "secrets" "paths" "firecrawl-api-key" ] null config;
       mkRuntimeSecretExports =
         secretEnv:
@@ -97,13 +111,13 @@ mkFeatureModule {
           exec ${scriptPkgs.mcp-chrome-devtools}/bin/mcp-chrome-devtools "$@"
         fi
       '';
-      mcpLynchpinBin = mkMcpWrapper "mcp-lynchpin" {
-        command = "${scriptPkgs.lynchpin-cli}/bin/lynchpin-mcp";
-        runtimeEnv = {
-          LYNCHPIN_REPO_ROOT = "/realm/project/sinity-lynchpin";
-          LYNCHPIN_LOCAL_ROOT = "/realm/project/sinity-lynchpin/.lynchpin";
-        };
-      };
+      mcpLynchpinBin = pkgs.writeShellScriptBin "mcp-lynchpin" ''
+        set -euo pipefail
+        export LYNCHPIN_REPO_ROOT=/realm/project/sinity-lynchpin
+        export LYNCHPIN_LOCAL_ROOT=/realm/project/sinity-lynchpin/.lynchpin
+        export PYTHONPATH="$LYNCHPIN_REPO_ROOT''${PYTHONPATH:+:$PYTHONPATH}"
+        exec ${scriptPkgs.lynchpin-python}/bin/lynchpin-python -m lynchpin.mcp.cli "$@"
+      '';
       mcpPolylogueBin = mkMcpWrapper "mcp-polylogue" {
         command = "${scriptPkgs.polylogue-cli}/bin/polylogue-mcp";
       };
@@ -111,10 +125,7 @@ mkFeatureModule {
       inherit (mcpRegistry)
         selectClientServers
         renderCodexServer
-        renderForgeServer
         ;
-      forgeMcpServers = lib.mapAttrs renderForgeServer (selectClientServers "forge");
-      forgeMcpConfigFile = jsonFormat.generate "forge-mcp.json" { mcpServers = forgeMcpServers; };
       codexMcpServers = lib.mapAttrs renderCodexServer (selectClientServers "codex");
       codexMcpConfigFile = tomlFormat.generate "codex-mcp.toml" { mcp_servers = codexMcpServers; };
       codexConfigFile = pkgs.runCommandLocal "codex-config.toml" { } ''
@@ -127,13 +138,9 @@ mkFeatureModule {
           pkgs,
           lib,
           config,
-          mkDotsFileFor,
           secretPaths,
           ...
         }:
-        let
-          mkDotsFile = mkDotsFileFor config;
-        in
         {
           programs.htop = {
             enable = true;
@@ -177,23 +184,12 @@ mkFeatureModule {
             };
           };
 
-          xdg.configFile = {
-            "ripgrep-all/config.jsonc".source = mkDotsFile "/ripgrep-all/config.jsonc";
-            "marimo/marimo.toml".source = mkDotsFile "/marimo/marimo.toml";
-          };
-
           home.file = {
             # Canonical Codex location is ~/.codex. Static defaults live in
             # dots/codex/config.toml; MCP server entries are appended from the
-            # shared registry so Codex does not drift from Claude/Forge/Gemini/Hermes.
+            # shared registry so Codex does not drift from Claude/Gemini/Hermes.
             ".codex/config.toml" = {
               source = codexConfigFile;
-              force = true;
-            };
-            # Codex keeps a dedicated overlay tree; canonical shared skills live in dots/_ai/skills.
-            ".codex/skills".source = mkDotsFile "/codex/skills";
-            "forge/.mcp.json" = {
-              source = forgeMcpConfigFile;
               force = true;
             };
             ".local/bin/mcp-firecrawl" = {
@@ -220,11 +216,6 @@ mkFeatureModule {
               source = "${mcpPolylogueBin}/bin/mcp-polylogue";
               force = true;
             };
-            ".gemini/settings.json" = {
-              source = mkDotsFile "/gemini/settings.json";
-              force = true;
-            };
-            ".gemini/skills".source = mkDotsFile "/_ai/skills";
             ".local/share/polylogue/inbox/chatgpt" = {
               source = config.lib.file.mkOutOfStoreSymlink "/realm/data/exports/chatlog/raw/chatgpt";
               force = true;

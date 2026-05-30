@@ -1,0 +1,199 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Build the daily reverse-prompting digest with Claude
+# runtimeInputs: coreutils git gnugrep gh claude-code
+# oracle — daily reverse-prompting digest.
+#
+# seeds, open GitHub issues, and the latest lynchpin current-state pack into a
+# single substrate, then asks Claude (headless mode) for a four-section
+# capped digest: Resume / Reverse-prompt questions / Drift / One thing.
+#
+# Usage:
+#   oracle                       # today, default output path
+#   oracle --date 2026-05-24     # specific day
+#   oracle --output PATH         # override output path
+#   oracle --show                # also cat to stdout after writing
+set -euo pipefail
+
+DATE="$(date -I)"
+OUTPUT=""
+SHOW=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --date) DATE="$2"; shift 2 ;;
+    --output) OUTPUT="$2"; shift 2 ;;
+    --show) SHOW=1; shift ;;
+    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+    *) echo "oracle: unknown arg: $1" >&2; exit 2 ;;
+  esac
+done
+
+if [[ -z "$OUTPUT" ]]; then
+  OUTPUT="$HOME/.local/share/oracle/${DATE}.md"
+fi
+mkdir -p "$(dirname "$OUTPUT")"
+
+RAWLOG=/realm/data/knowledgebase/logs.raw-log.md
+PACK_DIR=/realm/project/sinity-lynchpin/.agent/scratch/current-state-packs
+
+GH_REPOS=(Sinity/sinnix Sinity/sinex Sinity/polylogue Sinity/knowledgebase Sinity/scribe-tap Sinity/intercept-bounce)
+GIT_REPOS=(/realm/project/sinex /realm/project/polylogue /realm/project/sinity-lynchpin /realm/project/sinnix /realm/data/knowledgebase)
+
+SUBSTRATE="$(mktemp -t oracle-substrate.XXXXXX.md)"
+trap 'rm -f "$SUBSTRATE"' EXIT
+
+{
+  echo "# Substrate for ${DATE}"
+  echo
+
+  echo "## Rawlog (last 300 lines of ${RAWLOG})"
+  echo '```'
+  if [[ -r "$RAWLOG" ]]; then
+    tail -300 "$RAWLOG"
+  else
+    echo "(rawlog missing: $RAWLOG)"
+  fi
+  echo '```'
+  echo
+
+  echo "## Git activity (last 7 days, --no-merges, across known repos)"
+  echo '```'
+  for repo in "${GIT_REPOS[@]}"; do
+    if [[ -d "$repo/.git" ]]; then
+      echo "--- ${repo} ---"
+      git -C "$repo" log --oneline --no-merges --since='7 days ago' 2>/dev/null | head -80 || true
+    fi
+  done
+  echo '```'
+  echo
+
+  echo '```'
+  echo '```'
+  echo
+
+  echo "## Crystallized decisions (do not re-propose)"
+  echo '```'
+  echo '```'
+  echo
+
+  echo "## Graveyard (dead ends, do not propose anything matching)"
+  echo '```'
+  echo '```'
+  echo
+
+  echo "## Open GitHub issues (most-recently-updated, up to 30 per repo)"
+  for r in "${GH_REPOS[@]}"; do
+    echo
+    echo "### ${r}"
+    echo '```'
+    gh issue list --repo "$r" --state open --limit 30 \
+       --json number,title,updatedAt \
+       --template '{{range .}}#{{.number}} {{.updatedAt | timefmt "2006-01-02"}} {{.title}}{{"\n"}}{{end}}' \
+       2>/dev/null || echo "(unavailable)"
+    echo '```'
+  done
+  echo
+
+  echo "## Lynchpin current-state pack"
+  echo '```'
+  PACK="$PACK_DIR/${DATE}-pack.md"
+  if [[ ! -r "$PACK" ]]; then
+    PACK="$(ls -1t "$PACK_DIR"/*-pack.md 2>/dev/null | head -1 || true)"
+  fi
+  if [[ -n "${PACK:-}" && -r "$PACK" ]]; then
+    echo "(source: $PACK)"
+    # Cap pack to 800 lines so substrate stays under ~30k tokens.
+    head -800 "$PACK"
+  else
+    echo "(no current-state pack available under $PACK_DIR)"
+  fi
+  echo '```'
+} > "$SUBSTRATE"
+
+# Hard-cap substrate to keep input around ~30k tokens. Roughly 4 chars/token;
+# 30k tokens ≈ 120kB. Use 110kB to leave room for the prompt itself.
+SUBSTRATE_BYTES=$(wc -c < "$SUBSTRATE")
+MAX_BYTES=$((110 * 1024))
+if [[ "$SUBSTRATE_BYTES" -gt "$MAX_BYTES" ]]; then
+  TRUNC="$(mktemp -t oracle-substrate-trunc.XXXXXX.md)"
+  head -c "$MAX_BYTES" "$SUBSTRATE" > "$TRUNC"
+  printf '\n\n[substrate truncated at %d bytes; original was %d]\n' "$MAX_BYTES" "$SUBSTRATE_BYTES" >> "$TRUNC"
+  mv "$TRUNC" "$SUBSTRATE"
+fi
+
+KNOWN_PROJECTS="sinex, polylogue, sinity-lynchpin, sinnix, knowledgebase, sinex-target-vision, scribe-tap, intercept-bounce"
+
+PROMPT=$(cat <<EOF
+You are the daily oracle for ${DATE}. You are given a substrate dump below
+crystallized decisions, graveyard (dead ends), open GitHub issues across 6
+repos, and the latest lynchpin current-state pack.
+
+Your job: produce a four-section markdown digest with HARD CAPS. Be terse,
+specific, evidence-grounded. Citations are mandatory — every bullet must
+reference at least one of: a seed filename, an issue number with repo
+date. No-citation = no bullet. Drop the bullet rather than invent.
+
+KNOWN PROJECTS (do not name any project not in this list):
+${KNOWN_PROJECTS}
+
+DO NOT propose anything that matches a filename in the "Crystallized
+decisions" or "Graveyard" lists shown in the substrate. Those are settled.
+
+OUTPUT FORMAT (exactly these four sections, in this order, with these caps):
+
+# Oracle — ${DATE}
+
+## Resume
+Up to 3 bullets summarizing what just happened (last 1-3 days) that is
+relevant for picking work up today. Each bullet cites evidence.
+
+## Reverse-prompt questions
+Up to 3 questions the substrate would ask the operator if it could. These
+are questions the data implies but no human has voiced. Each cites evidence.
+
+## Drift
+Up to 3 things that appear to have stalled, drifted, or contradict each
+other. Each cites the specific issue/seed/commit that shows the drift.
+
+## One thing
+A SINGLE sentence naming the most leveraged concrete next move, including
+a runnable shell command or a specific file:line to edit. If the substrate
+does not support a clear move, write exactly: "No clear move; substrate is
+ambiguous." and nothing else in this section.
+
+End of format. Do not add any other sections, preambles, or commentary.
+
+--- SUBSTRATE BEGINS ---
+EOF
+)
+
+PROMPT="${PROMPT}
+$(cat "$SUBSTRATE")
+--- SUBSTRATE ENDS ---"
+
+# Run claude headless. We unset ANTHROPIC_API_KEY so the CLI falls back to the
+# user's OAuth/subscription auth — the API key in this environment is the
+# zero-balance one used for one-off automation, not the operator's account.
+OUT="$(env -u ANTHROPIC_API_KEY claude -p "$PROMPT" 2>&1)" || {
+  echo "oracle: claude invocation failed:" >&2
+  echo "$OUT" >&2
+  exit 1
+}
+
+# Sanity: must contain all four section headers.
+if ! grep -q '^## Resume' <<<"$OUT" \
+  || ! grep -q '^## Reverse-prompt questions' <<<"$OUT" \
+  || ! grep -q '^## Drift' <<<"$OUT" \
+  || ! grep -q '^## One thing' <<<"$OUT"; then
+  echo "oracle: claude output missing required sections; writing raw output for inspection." >&2
+  printf '%s\n' "$OUT" > "$OUTPUT"
+  exit 1
+fi
+
+printf '%s\n' "$OUT" > "$OUTPUT"
+echo "wrote $OUTPUT" >&2
+
+if [[ "$SHOW" -eq 1 ]]; then
+  cat "$OUTPUT"
+fi

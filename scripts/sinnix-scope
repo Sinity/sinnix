@@ -6,92 +6,78 @@
 set -euo pipefail
 
 if [ "$#" -lt 3 ] || [ "$2" != "--" ]; then
-  echo "usage: sinnix-scope <agent|build|background|nix-build> -- <command> [args...]" >&2
+  echo "usage: sinnix-scope <class> -- <command> [args...]" >&2
   exit 64
 fi
-
-case "$1" in
-  agent|build|background|nix-build) ;;
-  *)
-    echo "sinnix-scope: unknown class: $1" >&2
-    exit 64
-    ;;
-  esac
 
 class="$1"
 shift 2
 
-policy_file="${SINNIX_WORKLOAD_POLICY_FILE:-/etc/sinnix/workload-policy.json}"
+inventory_file="${SINNIX_RUNTIME_INVENTORY_FILE:-/etc/sinnix/runtime-inventory.json}"
+fallback_classes="agent build background nix-build"
 
-policy_value() {
+inventory_value() {
   local query="$1"
   local fallback="$2"
-  if [ -r "$policy_file" ] && command -v jq >/dev/null 2>&1; then
-    jq -er "$query // empty" "$policy_file" 2>/dev/null || printf '%s\n' "$fallback"
+  if [ -r "$inventory_file" ] && command -v jq >/dev/null 2>&1; then
+    jq -er "$query // empty" "$inventory_file" 2>/dev/null || printf '%s\n' "$fallback"
   else
     printf '%s\n' "$fallback"
   fi
 }
 
-policy_env_default() {
-  local name="$1"
-  local fallback="$2"
-  policy_value ".commandClasses.\"$class\".envDefaults.\"$name\"" "$fallback"
+inventory_readable() {
+  [ -r "$inventory_file" ] && command -v jq >/dev/null 2>&1 && jq -e . "$inventory_file" >/dev/null 2>&1
 }
+
+fallback_class_known() {
+  case " $fallback_classes " in
+    *" $class "*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+if inventory_readable; then
+  if ! jq -e --arg class "$class" '.commandClasses[$class] != null' "$inventory_file" >/dev/null; then
+    echo "sinnix-scope: unknown class: $class" >&2
+    jq -r '.commandClasses | keys | "known classes: " + join(", ")' "$inventory_file" >&2
+    exit 64
+  fi
+elif ! fallback_class_known; then
+  echo "sinnix-scope: unknown class without readable runtime inventory: $class" >&2
+  echo "fallback classes: $fallback_classes" >&2
+  exit 64
+fi
 
 case "$class" in
   agent) fallback_slice="agent.slice" ;;
   build) fallback_slice="build.slice" ;;
   background) fallback_slice="background.slice" ;;
   nix-build) fallback_slice="nix-build.slice" ;;
+  *) fallback_slice="$class.slice" ;;
 esac
 
-slice="$(policy_value ".commandClasses.\"$class\".slice" "$fallback_slice")"
-nice_level="$(policy_value ".commandClasses.\"$class\".nice" "")"
-ionice_class="$(policy_value ".commandClasses.\"$class\".ioniceClass" "")"
-ionice_priority="$(policy_value ".commandClasses.\"$class\".ionicePriority" "")"
+slice="$(inventory_value ".commandClasses.\"$class\".slice" "$fallback_slice")"
+nice_level="$(inventory_value ".commandClasses.\"$class\".nice" "")"
+ionice_class="$(inventory_value ".commandClasses.\"$class\".ioniceClass" "")"
+ionice_priority="$(inventory_value ".commandClasses.\"$class\".ionicePriority" "")"
 
 scoped_command=("$@")
-case "$class" in
-  build)
-    : "${CARGO_BUILD_JOBS:=$(policy_env_default CARGO_BUILD_JOBS 4)}"
-    : "${CMAKE_BUILD_PARALLEL_LEVEL:=$(policy_env_default CMAKE_BUILD_PARALLEL_LEVEL 4)}"
-    : "${NIX_BUILD_CORES:=$(policy_env_default NIX_BUILD_CORES 4)}"
-    : "${SCCACHE_IDLE_TIMEOUT:=$(policy_env_default SCCACHE_IDLE_TIMEOUT 10)}"
-    if [ "${MAKEFLAGS+x}" != x ]; then
-      MAKEFLAGS="$(policy_env_default MAKEFLAGS -j4)"
+
+if inventory_readable; then
+  while IFS='=' read -r name value; do
+    [ -n "$name" ] || continue
+    if [ "${!name+x}" != x ]; then
+      export "$name=$value"
     fi
-    export CARGO_BUILD_JOBS CMAKE_BUILD_PARALLEL_LEVEL MAKEFLAGS NIX_BUILD_CORES SCCACHE_IDLE_TIMEOUT
-    ;;
-esac
-
-if [ "$class" = build ] && [ -n "${SINEX_DEV_ROOT:-}" ]; then
-  sinex_root="${SINEX_DEV_ROOT%/}"
-  sinex_user="${USER:-$(id -un)}"
-  sinex_hash="$(printf '%s' "$sinex_root" | sha256sum | cut -c1-12)"
-  sinex_cache_base="/var/cache/sinex/$sinex_user/$sinex_hash"
-
-  default_sinex_cache="$sinex_root/.sinex/cache"
-  if [ "${SINEX_DEV_CACHE_ROOT:-}" = "$default_sinex_cache" ]; then
-    SINEX_DEV_CACHE_ROOT="$sinex_cache_base"
-    SINEX_CACHE_DIR="$SINEX_DEV_CACHE_ROOT"
-    CARGO_TARGET_DIR="$SINEX_DEV_CACHE_ROOT/target"
-    SINEX_TEST_RESULTS_DIR="$SINEX_CACHE_DIR/test-results"
-    mkdir -p "$SINEX_DEV_CACHE_ROOT" "$CARGO_TARGET_DIR" "$SINEX_TEST_RESULTS_DIR"
-    export SINEX_DEV_CACHE_ROOT SINEX_CACHE_DIR CARGO_TARGET_DIR SINEX_TEST_RESULTS_DIR
-  fi
-
-  default_sinex_dev_state="$sinex_root/.sinex"
-  default_sinex_state="$default_sinex_dev_state/state"
-  if [ "${SINEX_DEV_STATE_DIR:-}" = "$default_sinex_dev_state" ] && [ "${SINEX_STATE_DIR:-}" = "$default_sinex_state" ]; then
-    SINEX_DEV_STATE_DIR="$sinex_cache_base/dev-state"
-    SINEX_STATE_DIR="$SINEX_DEV_STATE_DIR/state"
-    SINEX_NATS_DIR="$SINEX_STATE_DIR/nats"
-    DATABASE_URL="postgresql:///sinex_dev?host=$SINEX_DEV_STATE_DIR/run"
-    PGHOST="$SINEX_DEV_STATE_DIR/run"
-    mkdir -p "$SINEX_DEV_STATE_DIR" "$SINEX_STATE_DIR" "$SINEX_NATS_DIR"
-    export SINEX_DEV_STATE_DIR SINEX_STATE_DIR SINEX_NATS_DIR DATABASE_URL PGHOST
-  fi
+  done < <(jq -r --arg class "$class" '.commandClasses[$class].envDefaults // {} | to_entries[] | "\(.key)=\(.value)"' "$inventory_file")
+elif [ "$class" = build ]; then
+  : "${CARGO_BUILD_JOBS:=4}"
+  : "${CMAKE_BUILD_PARALLEL_LEVEL:=4}"
+  : "${MAKEFLAGS:=-j4}"
+  : "${NIX_BUILD_CORES:=4}"
+  : "${SCCACHE_IDLE_TIMEOUT:=10}"
+  export CARGO_BUILD_JOBS CMAKE_BUILD_PARALLEL_LEVEL MAKEFLAGS NIX_BUILD_CORES SCCACHE_IDLE_TIMEOUT
 fi
 
 if [ -n "$ionice_class" ] && command -v ionice >/dev/null 2>&1; then
@@ -117,20 +103,26 @@ if ! command -v systemd-run >/dev/null 2>&1; then
   exec "${scoped_command[@]}"
 fi
 
+if inventory_readable; then
+  mapfile -t env_names < <(jq -r '.environmentAllowList[]?' "$inventory_file")
+else
+  env_names=(
+    AGENT_NAME AGENT_SESSION_ID
+    CARGO_HOME CARGO_TARGET_DIR CODEX_HOME
+    CARGO_BUILD_JOBS CMAKE_BUILD_PARALLEL_LEVEL MAKEFLAGS
+    DATABASE_URL
+    GEMINI_API_KEY GITHUB_TOKEN HOME LANG LC_ALL LOGNAME
+    NIX_BUILD_CORES NIX_CONFIG NIX_PATH NIXPKGS_ALLOW_UNFREE
+    PATH PGHOST PGPORT POLYLOGUE_ROOT PWD PYTHONHOME PYTHONPATH
+    RUSTC_WRAPPER RUST_LOG RUSTUP_HOME SCCACHE_DIR SCCACHE_IDLE_TIMEOUT SHELL
+    SINEX_CACHE_DIR SINEX_DEV_CACHE_ROOT SINEX_DEV_STATE_DIR SINEX_NATS_DIR SINEX_ROOT SINEX_STATE_DIR SINEX_TEST_RESULTS_DIR
+    TERM TERM_PROGRAM TMPDIR USER UV_CACHE_DIR UV_PROJECT_ENVIRONMENT VIRTUAL_ENV
+    XDG_CACHE_HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_RUNTIME_DIR XDG_STATE_HOME
+  )
+fi
+
 env_args=()
-for name in \
-  AGENT_NAME AGENT_SESSION_ID \
-  CARGO_HOME CARGO_TARGET_DIR CODEX_HOME \
-  CARGO_BUILD_JOBS CMAKE_BUILD_PARALLEL_LEVEL MAKEFLAGS \
-  DATABASE_URL \
-  GEMINI_API_KEY GITHUB_TOKEN HOME LANG LC_ALL LOGNAME \
-  NIX_BUILD_CORES NIX_CONFIG NIX_PATH NIXPKGS_ALLOW_UNFREE \
-  PATH PGHOST PGPORT POLYLOGUE_ROOT PWD PYTHONHOME PYTHONPATH \
-  RUSTC_WRAPPER RUST_LOG RUSTUP_HOME SCCACHE_DIR SCCACHE_IDLE_TIMEOUT SHELL \
-  SINEX_CACHE_DIR SINEX_DEV_CACHE_ROOT SINEX_DEV_STATE_DIR SINEX_NATS_DIR SINEX_ROOT SINEX_STATE_DIR SINEX_TEST_RESULTS_DIR \
-  TERM TERM_PROGRAM TMPDIR USER UV_CACHE_DIR UV_PROJECT_ENVIRONMENT VIRTUAL_ENV \
-  XDG_CACHE_HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_RUNTIME_DIR XDG_STATE_HOME
-do
+for name in "${env_names[@]}"; do
   if [ "${!name+x}" = x ]; then
     env_args+=("--setenv=$name=${!name}")
   fi

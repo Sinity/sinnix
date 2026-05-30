@@ -77,7 +77,7 @@ def collect_sinex_xtask(limit: int) -> dict[str, Any]:
     return source
 
 
-def infer_sinex_resource_class(row: dict[str, Any]) -> str:
+def infer_sinex_resource_class(row: dict[str, Any]) -> str | None:
     command = str(row.get("command") or "")
     bg_mb = float_or_zero(row.get("shared_background_slice_memory_usage_max_mb"))
     nix_mb = float_or_zero(row.get("shared_nix_build_slice_memory_usage_max_mb"))
@@ -85,4 +85,4 @@ def infer_sinex_resource_class(row: dict[str, Any]) -> str:
         return "developer-build"
     if row.get("is_background") or row.get("launch_mode") == "background" or bg_mb > 0:
         return "background-maintenance"
-    return "unknown"
+    return None

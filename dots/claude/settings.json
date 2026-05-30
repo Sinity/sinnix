@@ -120,5 +120,9 @@
   "alwaysThinkingEnabled": true,
   "effortLevel": "medium",
   "skipDangerousModePermissionPrompt": true,
-  "skipAutoPermissionPrompt": true
+  "skipAutoPermissionPrompt": true,
+  "statusLine": {
+    "type": "command",
+    "command": "bash /home/sinity/.claude/statusline-command.sh"
+  }
 }

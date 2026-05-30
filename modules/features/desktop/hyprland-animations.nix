@@ -19,7 +19,6 @@ mkFeatureModule {
     "hyprlandAnimations"
   ];
   description = "Polished Hyprland animations ported from end-4/dots-hyprland";
-  enableDefault = false;
   configFn =
     {
       config,

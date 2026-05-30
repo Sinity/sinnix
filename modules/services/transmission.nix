@@ -12,13 +12,16 @@
 mkServiceModule {
   name = "transmission";
   description = "Transmission BitTorrent client";
-  health = {
+  surface = {
     unit = "transmission.service";
-    type = "service";
+    resourceClass = "background-maintenance";
     # Transmission is often intentionally stopped for disk maintenance.
-    # Let the dedicated autostart timer handle boot startup; sentinel must
-    # not fight manual stops or sparsification jobs.
-    restartable = false;
+    # Let the dedicated autostart timer handle boot startup; observability
+    # should reflect manual stops without turning them into policy.
+    observe = {
+      enable = true;
+      restartable = false;
+    };
   };
   extraOptions = {
     autoStart = lib.mkOption {
@@ -109,18 +112,17 @@ mkServiceModule {
             # Transmission busy checking payload paths before it sends READY=1.
             TimeoutStartSec = "15min";
             TimeoutStopSec = "5min";
-            Nice = 10;
-            CPUWeight = 20;
-            IOWeight = 10;
-            IOSchedulingClass = "idle";
-            MemoryHigh = "1G";
-            MemoryMax = "4G";
             ExecStartPre = [
               "+${pkgs.coreutils}/bin/install -d -m 2775 -o ${username} -g users ${torrentInbox}"
               "+${pkgs.coreutils}/bin/install -d -m 2775 -o ${username} -g users ${torrentDownloadDir}"
               "+${pkgs.coreutils}/bin/install -d -m 2775 -o ${username} -g users ${torrentPartialDir}"
             ];
           }
+          (lib.sinnix.mkRuntimeServiceConfig {
+            runtimeInventory = config.sinnix.runtime.inventory;
+            unit = "transmission.service";
+            overrides.CPUWeight = 20;
+          })
           (lib.sinnix.systemd.mkRestartPolicy {
             strategy = "on-failure";
             delaySec = 10;

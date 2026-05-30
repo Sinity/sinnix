@@ -28,5 +28,11 @@
       assertion = config.services.resolved.settings.Resolve.FallbackDNS == "";
       message = "Local systemd-resolved fallback DNS must be disabled when the router is authoritative";
     }
+    {
+      assertion =
+        config.systemd.services.sshd.serviceConfig.Slice == "system-critical.slice"
+        && config.systemd.sockets.sshd.socketConfig.Slice == "system-critical.slice";
+      message = "SSH access must use the present-tense interactive-access runtime class";
+    }
   ];
 }

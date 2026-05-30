@@ -155,7 +155,7 @@ let
       exit 1
     fi
 
-    ${pkgs.findutils}/bin/find /var/log/below/store -type f | ${pkgs.gnugrep}/bin/grep -q .
+    ${pkgs.findutils}/bin/find /realm/data/captures/machine/below/store -type f | ${pkgs.gnugrep}/bin/grep -q .
 
     session_id="inactive"
     if [ "$(${pkgs.systemd}/bin/systemctl is-active transmission.service)" = "active" ]; then
@@ -182,8 +182,6 @@ let
     cleanup() {
       if [ "$cleanup_artifacts" -eq 1 ]; then
         rm -f \
-          "$artifact_dir/forge-version.txt" \
-          "$artifact_dir/forge-zsh-doctor.txt" \
           "$artifact_dir/polylogue-help.txt" \
           "$artifact_dir/summary.txt"
         rmdir "$artifact_dir" >/dev/null 2>&1 || true
@@ -191,8 +189,6 @@ let
     }
     trap cleanup EXIT
 
-    forge --version > "$artifact_dir/forge-version.txt"
-    forge zsh doctor > "$artifact_dir/forge-zsh-doctor.txt"
     polylogue --help > "$artifact_dir/polylogue-help.txt"
 
     printf 'cli smoke ok\n' > "$artifact_dir/summary.txt"
@@ -323,8 +319,35 @@ in
       '';
     };
 
+    test-vm = {
+      description = "Build a QEMU VM from current configuration for smoke-testing without switching";
+      script = ''
+        ${resolveFlakeDir}
+        if [ "$(id -u)" -ne 0 ]; then
+          echo "Error: This command must be run as root (use 'sudo nix run $_flake_dir#test-vm')"
+          exit 1
+        fi
+        ${avoidRepoCwdForActivation}
+        ${localInputOverrideArgs}
+        ${rebuildDefaultArgs}
+        ${pkgs.systemd}/bin/systemd-run \
+          --quiet \
+          --collect \
+          --pipe \
+          --service-type=exec \
+          --wait \
+          --setenv=PATH="${rebuildServicePath}:$PATH" \
+          -p Nice=10 \
+          ${pkgs.nixos-rebuild}/bin/nixos-rebuild test-vm --flake "path:$_invoke_flake_dir#sinnix-prime" \
+          --max-jobs "$rebuild_jobs" \
+          --cores "$rebuild_cores" \
+          "''${nix_override_args[@]}" \
+          --log-format internal-json -v 2>&1 | ${pkgs.nix-output-monitor}/bin/nom --json
+      '';
+    };
+
     test-system = {
-      description = "Test configuration without applying it to the system";
+      description = "Test configuration without applying it to the system (nh os test)";
       script = ''
         ${resolveFlakeDir}
         if [ "$(id -u)" -ne 0 ]; then
@@ -335,23 +358,42 @@ in
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
         ${pkgs.systemd}/bin/systemd-run \
-          --quiet \
-          --collect \
-          --pipe \
-          --service-type=exec \
-          --wait \
-          --setenv=PATH="${rebuildServicePath}:$PATH" \
+          --quiet --collect --pipe --service-type=exec --wait \
           -p Nice=10 \
-          ${pkgs.nixos-rebuild}/bin/nixos-rebuild test --flake "path:$_invoke_flake_dir#sinnix-prime" \
-          --max-jobs "$rebuild_jobs" \
-          --cores "$rebuild_cores" \
-          "''${nix_override_args[@]}" \
-          --log-format internal-json -v 2>&1 | ${pkgs.nix-output-monitor}/bin/nom --json
+          ${pkgs.nh}/bin/nh os test \
+            "''${_invoke_flake_dir}#sinnix-prime" \
+            --max-jobs "$rebuild_jobs" \
+            --cores "$rebuild_cores" \
+            "''${nix_override_args[@]}" \
+            --no-ask
+      '';
+    };
+
+    boot = {
+      description = "Build + set boot default, activate on next reboot (nh os boot)";
+      script = ''
+        ${resolveFlakeDir}
+        if [ "$(id -u)" -ne 0 ]; then
+          echo "Error: This command must be run as root (use 'sudo nix run $_flake_dir#boot')"
+          exit 1
+        fi
+        ${avoidRepoCwdForActivation}
+        ${localInputOverrideArgs}
+        ${rebuildDefaultArgs}
+        ${pkgs.systemd}/bin/systemd-run \
+          --quiet --collect --pipe --service-type=exec --wait \
+          -p Nice=10 \
+          ${pkgs.nh}/bin/nh os boot \
+            "''${_invoke_flake_dir}#sinnix-prime" \
+            --max-jobs "$rebuild_jobs" \
+            --cores "$rebuild_cores" \
+            "''${nix_override_args[@]}" \
+            --no-ask
       '';
     };
 
     switch = {
-      description = "Apply configuration changes to the system";
+      description = "Apply configuration changes to the system (nh os switch)";
       script = ''
         ${resolveFlakeDir}
         if [ "$(id -u)" -ne 0 ]; then
@@ -362,38 +404,25 @@ in
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
         ${pkgs.systemd}/bin/systemd-run \
-          --quiet \
-          --collect \
-          --pipe \
-          --service-type=exec \
-          --wait \
-          --setenv=PATH="${rebuildServicePath}:$PATH" \
+          --quiet --collect --pipe --service-type=exec --wait \
           -p Nice=10 \
-          ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --flake "path:$_invoke_flake_dir#sinnix-prime" \
-          --max-jobs "$rebuild_jobs" \
-          --cores "$rebuild_cores" \
-          "''${nix_override_args[@]}" \
-          --log-format internal-json -v 2>&1 | ${pkgs.nix-output-monitor}/bin/nom --json
+          ${pkgs.nh}/bin/nh os switch \
+            "''${_invoke_flake_dir}#sinnix-prime" \
+            --max-jobs "$rebuild_jobs" \
+            --cores "$rebuild_cores" \
+            "''${nix_override_args[@]}" \
+            --no-ask
       '';
     };
 
     clean = {
-      description = "Clean up old system generations and optimize nix store";
+      description = "Garbage collect + optimise nix store (nh clean all)";
       script = ''
         if [ "$(id -u)" -ne 0 ]; then
           echo "Error: This command must be run as root (use 'sudo nix run .#clean')"
           exit 1
         fi
-        echo "Keeping the last 10 system generations..."
-        nix-env --delete-generations +10 --profile /nix/var/nix/profiles/system
-
-        echo "Optimizing nix store..."
-        nix store optimise
-
-        echo "Collecting garbage..."
-        nix store gc
-
-        echo "System cleanup complete."
+        exec ${pkgs.nh}/bin/nh clean all --no-ask
       '';
     };
 
@@ -442,12 +471,22 @@ in
     {
       name = "switch";
       category = "Core";
-      description = "Apply host config";
+      description = "Apply host config (nh os switch)";
+    }
+    {
+      name = "boot";
+      category = "Core";
+      description = "Build + set boot default — safer, reboot to activate (nh os boot)";
     }
     {
       name = "test-system";
       category = "Core";
-      description = "Test host config without switching";
+      description = "Test host config without persisting (nh os test)";
+    }
+    {
+      name = "test-vm";
+      category = "Core";
+      description = "Build QEMU VM for smoke-testing (nixos-rebuild test-vm)";
     }
     {
       name = "lint";
@@ -467,7 +506,7 @@ in
     {
       name = "clean";
       category = "Maintain";
-      description = "Prune generations and garbage collect";
+      description = "Garbage collect + optimise store (nh clean all)";
     }
     {
       name = "agenix";

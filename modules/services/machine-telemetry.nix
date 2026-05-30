@@ -4,7 +4,7 @@
 # writes a typed SQLite stream under /realm/data/captures/machine/ that
 # Lynchpin can promote into its substrate without scraping mixed-schema CSV.
 # Captures CPU RAPL package/core watts, thermal state, PSI, service placement,
-# latency sentinel samples, and periodic network-link probes.
+# scheduler latency samples, and periodic network-link probes.
 {
   mkServiceModule,
   lib,
@@ -21,23 +21,6 @@ let
   manifestPath = "${dataDir}/manifest.json";
   username = config.sinnix.user.name;
 
-  relevantUnits = [
-    "below.service"
-    "sinex-runtime.target"
-    "sinex-ingestd.service"
-    "sinex-filesystem-1.service"
-    "sinex-gateway.service"
-    "nats.service"
-    "postgresql.service"
-    "polylogued.service"
-    "btrbk.service"
-    "borgbackup-job-realm.service"
-    "borgbackup-job-persist.service"
-    "transmission.service"
-    "nix-daemon.service"
-  ];
-  unitArgs = lib.concatStringsSep "," relevantUnits;
-
   machineTelemetry = pkgs.writeTextFile {
     name = "machine-telemetry";
     destination = "/bin/machine-telemetry";
@@ -51,10 +34,20 @@ in
 mkServiceModule {
   name = "machine-telemetry";
   description = "Canonical host machine telemetry capture for Lynchpin analysis";
-  health = {
+  surface = {
     unit = "machine-telemetry.service";
-    type = "service";
-    restartable = true;
+    resourceClass = "observability";
+    observe = {
+      enable = true;
+      restartable = true;
+    };
+    captures = [
+      {
+        name = "machine-telemetry";
+        path = dataRoot;
+        cadenceSeconds = config.sinnix.services."machine-telemetry".intervalSec or 10;
+      }
+    ];
   };
   extraOptions = {
     intervalSec = lib.mkOption {
@@ -101,6 +94,10 @@ mkServiceModule {
       lib,
       ...
     }:
+    let
+      surfaceUnits = map (surface: surface.unit) config.sinnix.runtime.inventory.observedServices;
+      unitArgs = lib.concatStringsSep "," (lib.unique surfaceUnits);
+    in
     {
       systemd.tmpfiles.rules = [
         "d ${dataRoot} 0755 root users -"
@@ -157,8 +154,7 @@ mkServiceModule {
           # returns exit 127, the collector records gap_codes_json carrying
           # network.dns_probe_failed on every sample, and the substrate row
           # looks like DNS is down (gap-summary surfaced this at 100% share
-          # on 2026-05-18). Keep both — the daemon binaries are still wanted
-          # by sentinel and ad-hoc operator debug paths.
+          # on 2026-05-18). Keep both for ad-hoc operator debug paths.
           pkgs.bind
           pkgs.bind.dnsutils
           pkgs.curl
@@ -181,6 +177,10 @@ mkServiceModule {
           ExecStart = "${machineTelemetry}/bin/machine-telemetry --db ${dbPath} --manifest ${manifestPath} --host ${hostName} --interval ${toString cfg.intervalSec} --service-interval ${toString cfg.serviceIntervalSec} --network-interval ${toString cfg.networkIntervalSec} --network-interface ${cfg.networkInterfaceName} --network-gateway ${cfg.networkGateway} --bufferbloat-interval ${toString cfg.bufferbloatIntervalSec} --gpu-interval ${toString cfg.gpuIntervalSec} --units ${unitArgs} --user-name ${username}";
           Restart = "on-failure";
           RestartSec = "5s";
+        }
+        // lib.sinnix.mkRuntimeServiceConfig {
+          runtimeInventory = config.sinnix.runtime.inventory;
+          unit = "machine-telemetry.service";
         };
       };
     };

@@ -83,10 +83,12 @@
         "sinex-blob-fsck"
         "sinex-blob-gc"
       ];
-      sinexHealth = config.sinnix.services.sinex.health;
-      healthPolicy = builtins.fromJSON config.environment.etc."sinnix/health-policy.json".text;
-      healthServiceNames = map (check: check.name) healthPolicy.services;
-      sinexHealthChecks = builtins.filter (check: check.name == "sinex") healthPolicy.services;
+      sinexSurface = config.sinnix.runtime.surfaces.sinex-runtime;
+      runtimeInventory = builtins.fromJSON config.environment.etc."sinnix/runtime-inventory.json".text;
+      observedServiceNames = map (check: check.name) runtimeInventory.observedServices;
+      sinexObservedServices = builtins.filter (
+        check: check.name == "sinex-runtime"
+      ) runtimeInventory.observedServices;
       natsService = config.systemd.services.nats.serviceConfig;
       postgresService = config.systemd.services.postgresql.serviceConfig;
       substrateUnits = [
@@ -96,11 +98,9 @@
       sinexRuntimeAppServices = builtins.filter (
         name: !(builtins.elem name substrateUnits)
       ) runtimeServices;
-      boundedAutomataServices = [
-        "sinex-canonicalizer"
-        "sinex-health-automaton"
-        "sinex-relation-extractor"
-      ];
+      # Post-sinexd-collapse: automata run inside the unified sinexd daemon,
+      # not as standalone services. The sinexd unit carries the memory guardrails.
+      boundedAutomataServices = [ "sinexd" ];
       sinexRuntimeRoot = "/var/lib/sinex";
       persistedSystemDirs = config.sinnix.persistence.system.directories;
       postgresqlUnitConfig = serviceUnitConfig "postgresql";
@@ -122,6 +122,9 @@
         "sinex-document-target-access"
         "sinex-terminal-target-access"
       ];
+      generatedSourceWorkerServices = builtins.filter (name: lib.hasPrefix "sinex-source-worker-" name) (
+        config.sinex._generatedUnits or [ ]
+      );
     in
     [
       {
@@ -145,11 +148,10 @@
             service = serviceConfig name;
           in
           service ? MemoryHigh
-          && service ? MemoryMax
-          && service.MemoryMax != null
+          && service.MemoryHigh != null
           && (!(service ? CPUQuota) || service.CPUQuota == null)
         ) boundedAutomataServices;
-        message = "Sinex heavy automata must keep upstream memory guardrails";
+        message = "Sinex heavy automata (sinexd) must keep upstream memory guardrails";
       }
       {
         assertion = builtins.all (
@@ -283,16 +285,27 @@
         message = "Sinex target-access helpers must not order against disabled preflight";
       }
       {
+        assertion = builtins.all (
+          name: (serviceConfig name).TimeoutStartSec == "90s"
+        ) generatedSourceWorkerServices;
+        message = "Sinex source workers must have a bounded startup window for local source lease acquisition";
+      }
+      {
         assertion =
           if config.sinnix.services.sinex.autoStart then
-            sinexHealth != null
-            && sinexHealth.restartable == false
-            && builtins.elem "sinex" healthServiceNames
-            && sinexHealthChecks != [ ]
-            && (builtins.head sinexHealthChecks).restartable == false
+            sinexSurface.observe.enable
+            && sinexSurface.observe.restartable == false
+            && builtins.elem "sinex-runtime" observedServiceNames
+            && sinexObservedServices != [ ]
+            && (builtins.head sinexObservedServices).restartable == false
+            && (builtins.head sinexObservedServices).manager == "system"
+            && (builtins.head sinexObservedServices).kind == "target"
+            && (builtins.head sinexObservedServices).resourceClass == "capture-runtime"
           else
-            sinexHealth == null && !(builtins.elem "sinex" healthServiceNames) && sinexHealthChecks == [ ];
-        message = "Sinex health policy must respect whether the runtime auto-starts";
+            !sinexSurface.observe.enable
+            && !(builtins.elem "sinex-runtime" observedServiceNames)
+            && sinexObservedServices == [ ];
+        message = "Sinex observability inventory must respect whether the runtime auto-starts";
       }
       {
         assertion =

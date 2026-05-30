@@ -25,7 +25,6 @@ let
         expect
         mkFeatureTest
         mkServiceTest
-        mkBundleTest
         mkSystemChecks
         hmFor
         sanitizedInputs
@@ -35,7 +34,6 @@ let
       smokeName = subject: "smoke-" + lib.replaceStrings [ "." ] [ "-" ] subject;
       semanticFeatureSubjects = checkTiers.semanticFeatureSubjects;
       semanticServiceSubjects = checkTiers.semanticServiceSubjects;
-      semanticBundleSubjects = checkTiers.semanticBundleSubjects;
 
       desktopSmokeBaseline = {
         sinnix.machine.isDesktop = true;
@@ -58,13 +56,6 @@ let
           service = subject;
           assertions = _config: [ ];
         };
-      mkBundleSmokeSpec =
-        subject:
-        mkBundleTest {
-          name = smokeName subject;
-          bundle = subject;
-          assertions = _config: [ ];
-        };
       coverageFeatureSmokeSpecs = map mkFeatureSmokeSpec (
         builtins.filter (
           subject:
@@ -79,13 +70,6 @@ let
           && !(builtins.elem subject semanticServiceSubjects)
         ) (builtins.attrNames coverage.services)
       );
-      coverageBundleSmokeSpecs = map mkBundleSmokeSpec (
-        builtins.filter (
-          subject:
-          hasCoverageLayer "eval" coverage.bundles.${subject}
-          && !(builtins.elem subject semanticBundleSubjects)
-        ) (builtins.attrNames coverage.bundles)
-      );
 
       manualTestSpecs = testDiscovery.discoverTestSpecs {
         roots = [
@@ -99,7 +83,6 @@ let
             expect
             mkFeatureTest
             mkServiceTest
-            mkBundleTest
             hmFor
             mountTmpfsRoots
             baseTestConfig
@@ -109,17 +92,10 @@ let
       };
 
       specByName = lib.listToAttrs (
-        map
-          (spec: {
-            name = spec.name;
-            value = spec;
-          })
-          (
-            manualTestSpecs
-            ++ coverageFeatureSmokeSpecs
-            ++ coverageServiceSmokeSpecs
-            ++ coverageBundleSmokeSpecs
-          )
+        map (spec: {
+          name = spec.name;
+          value = spec;
+        }) (manualTestSpecs ++ coverageFeatureSmokeSpecs ++ coverageServiceSmokeSpecs)
       );
       selectSpecs = names: map (name: specByName.${name}) names;
     in
@@ -192,7 +168,6 @@ in
           "below".vm = [ "below-vm" ];
           "machine-telemetry".host = [ "host-smoke-services" ];
           "polylogue".vm = [ "polylogue-vm" ];
-          "sentinel".vm = [ "sentinel-vm" ];
           "sinex".build = [ "host-sinnix-prime-build" ];
           "terminal-capture" = {
             runtime = [
@@ -202,9 +177,6 @@ in
             pty = [ "terminal-capture-runtime" ];
           };
           "transmission".vm = [ "transmission-vm" ];
-        };
-        bundles = {
-          "desktop".build = [ "host-sinnix-prime-build" ];
         };
         hosts = {
           "sinnix-prime" = {

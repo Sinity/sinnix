@@ -34,6 +34,7 @@ Organized by domain under `modules/features/`:
 
 ### Dev (`features/dev/`)
 
+- **agent-tools.nix**: AI coding agent CLIs (claude-code, codex, gemini), shared skills, MCP config rendering. All three use FHS environments with self-bootstrapping npm install — they auto-update outside the Nix store.
 - **editors.nix**: VS Code, Zed (with subFeatures for each)
 - **git.nix**: Git config, delta, aliases
 - **languages.nix**: Language toolchains (Python, Rust, Node, etc.)

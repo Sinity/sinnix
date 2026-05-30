@@ -11,7 +11,7 @@
   ...
 }:
 let
-  workloadPolicy = config.sinnix.workloadPolicy;
+  runtimeInventory = config.sinnix.runtime.inventory;
   panicLogCapture = pkgs.writeShellApplication {
     name = "panic-log-capture";
     runtimeInputs = [ pkgs.coreutils ];
@@ -144,18 +144,19 @@ in
       ];
     };
 
-    # Avoid systemd-oomd PSI kills while this host is being retuned. earlyoom is
-    # simpler and global; it does not depend on the custom slice hierarchy that
-    # was removed here.
+    # earlyoom owns global emergency memory intervention on this workstation.
+    # systemd-oomd PSI kills are deliberately disabled so custom runtime
+    # slices remain attribution and weighting policy, not an automatic kill
+    # surface.
     systemd.oomd.enable = false;
 
     systemd.slices = lib.mapAttrs (_: sliceConfig: {
       inherit sliceConfig;
-    }) workloadPolicy.slices.system;
+    }) runtimeInventory.slices.system;
 
     systemd.user.slices = lib.mapAttrs (_: sliceConfig: {
       inherit sliceConfig;
-    }) workloadPolicy.slices.user;
+    }) runtimeInventory.slices.user;
 
     security.pam.loginLimits = [
       {

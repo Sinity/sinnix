@@ -22,7 +22,6 @@
         "polylogued"
         "render-agents"
         "sinnix-observe"
-        "sinnix-sentinel"
         "verify-agent-topology"
       ];
     in

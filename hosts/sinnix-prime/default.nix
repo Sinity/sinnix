@@ -19,28 +19,16 @@
 
   sinnix.machine.isDesktop = true;
 
-  sinnix.bundles.desktop.enable = true;
-  sinnix.bundles.dev.enable = true;
-
-  # VR streaming to Quest 3 (WiVRn + Monado OpenXR stack + ADB tools)
-  sinnix.features.desktop.vr.enable = true;
-  sinnix.features.desktop.activitywatch.enable = true;
+  # Every capability in modules/features/ is default-on; this host expresses
+  # only configuration detail (subfeatures and option values), not enables.
   sinnix.features.desktop.audioCapture = {
-    enable = true;
     asrProvider = "openai";
     asrDiarization = false;
   };
-  sinnix.features.desktop.agentVerifyTimer.enable = true;
-  sinnix.features.desktop.hyprlandAnimations.enable = true;
-
-  sinnix.features.cli.task-tracking.enable = true;
-  sinnix.features.cli.polylogue.enable = true;
-  sinnix.features.cli.yt-polisher.enable = true;
-  sinnix.persistence.enable = true;
-
-  sinnix.features.dev.editors.enable = true;
   sinnix.features.dev.editors.vscode.enable = true;
   sinnix.features.dev.editors.antigravity.enable = true;
+
+  sinnix.persistence.enable = true;
   sinnix.services = {
     transmission = {
       enable = true;
@@ -50,6 +38,9 @@
     below = {
       enable = true;
       collectIntervalSec = 5;
+      # Keep telemetry on /realm so the root filesystem stays slim. Same
+      # subtree as machine-telemetry and activitywatch captures.
+      storeDir = "/realm/data/captures/machine/below";
     };
     sinex = {
       prepareHost = true;
@@ -62,20 +53,16 @@
       environment = "prod";
     };
     polylogue.enable = true;
-    hermes = {
-      enable = true;
-      approvals.mode = "off";
-    };
     machine-telemetry.enable = true;
     weechat-log-sealer.enable = true;
-    # Disabled until the remote connector path has explicit auth and exposure
-    # discipline. The service module remains available for a future ChatGPT
-    # Web UI connector setup.
-    chatgpt-mcp.enable = false;
     airvpn-seed = {
       enable = true;
       autoStart = false;
       forwardedPort = 20241;
+    };
+    lynchpin = {
+      enable = true;
+      refreshTimer.enable = true;
     };
   };
   # This board's fTPM blocks system activation in systemd-tpm2-setup. Keep

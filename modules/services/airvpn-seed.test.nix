@@ -32,8 +32,10 @@ let
         message = "Transmission must restart with the complete AirVPN WireGuard target";
       }
       {
-        assertion = config.sinnix.services.airvpn-seed.health.unit == "wireguard-airvpn-seed.service";
-        message = "airvpn-seed health must reference the generated WireGuard unit";
+        assertion =
+          config.sinnix.runtime.surfaces.airvpn-seed.unit == "wireguard-airvpn-seed.service"
+          && config.sinnix.runtime.surfaces.airvpn-seed.observe.enable;
+        message = "airvpn-seed observability must reference the generated WireGuard unit";
       }
     ];
 in

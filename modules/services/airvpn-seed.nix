@@ -23,10 +23,13 @@ in
 mkServiceModule {
   name = "airvpn-seed";
   description = "AirVPN WireGuard tunnel for Transmission seeding with policy routing";
-  health = {
+  surface = {
     unit = "wireguard-airvpn-seed.service";
-    type = "service";
-    restartable = true;
+    resourceClass = "background-maintenance";
+    observe = {
+      enable = true;
+      restartable = true;
+    };
   };
   extraOptions = {
     forwardedPort = lib.mkOption {
@@ -93,6 +96,9 @@ mkServiceModule {
       # Bind to VPN IP so all torrent traffic goes through AirVPN
       services.transmission.settings = {
         bind-address-ipv4 = vpnIP;
+        # This tunnel is IPv4-only. Keep peer traffic off the host's normal
+        # IPv6 route instead of letting Transmission listen on [::].
+        bind-address-ipv6 = "::1";
         peer-port = cfg.forwardedPort;
         # Port forwarding is now handled by AirVPN, not UPnP
         port-forwarding-enabled = false;

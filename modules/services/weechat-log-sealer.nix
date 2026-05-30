@@ -29,10 +29,15 @@ mkServiceModule {
       '';
     };
   };
-  health = {
+  surface = {
     unit = "weechat-log-sealer.timer";
-    type = "timer";
-    restartable = false;
+    manager = "user";
+    kind = "timer";
+    resourceClass = "background-maintenance";
+    observe = {
+      enable = true;
+      restartable = false;
+    };
   };
   configFn =
     {

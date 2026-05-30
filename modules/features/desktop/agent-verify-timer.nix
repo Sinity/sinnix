@@ -16,7 +16,6 @@ mkFeatureModule {
     "agentVerifyTimer"
   ];
   description = "Periodic agent-verify health check (feeds waybar agent widget)";
-  enableDefault = false;
   extraOptions = {
     interval = lib.mkOption {
       type = lib.types.str;

@@ -57,6 +57,7 @@ in {
 | **Module Factories**       | `lib/features.nix`          | `mkFeatureModule`, `mkServiceModule` — eliminate option/config scaffolding |
 | **DSLs**                   | `lib/hyprland-rules.nix`    | `mkRule`, `mkScratchpad` → transform declarative data to config syntax     |
 | **Systemd Hardening**      | `lib/systemd-hardening.nix` | `mkHardenedService { level = "strict" }` — preset security profiles        |
+| **Runtime Inventory**      | `runtime.nix`               | Declared units/captures → resource placement and runtime inventory         |
 | **Bundles**                | `bundles/*.nix`             | Pure composition — only enable other features, no direct config            |
 | **Out-of-Store Symlinks**  | `lib/features.nix`          | `mkDotsFileFor` — instant dotfile propagation without rebuild              |
 | **Conditional Merge**      | `services/sinex.nix`        | `lib.mkMerge [ base (lib.mkIf cond extra) ]` — layered composition         |

@@ -1,0 +1,58 @@
+// Tailscale ACL — source of truth for the tailnet shape.
+//
+// Tailscale's HuJSON parser allows comments, so this file is both a
+// repo-tracked artifact and a copy-pasteable payload for the admin
+// console:
+//   https://login.tailscale.com/admin/acls/file
+//
+// The ACL admin console is the *application* layer — pushing this file
+// there is what makes the tailnet actually enforce these rules. The repo
+// copy is the durable, reviewable source.
+//
+// Tag layout:
+//   tag:workstation  — sinnix-prime (the desktop, and any future thick
+//                      workstation clones)
+//   tag:infra        — sinnix-ethereal (always-on replica + bastion host)
+//   tag:phone        — operator's phone / mobile devices
+//   tag:burst-runner — ephemeral CI / batch-compute nodes (future)
+//
+// Default posture: deny. Every accept rule is opt-in.
+{
+  "tagOwners": {
+    "tag:workstation":  ["autogroup:admin"],
+    "tag:infra":        ["autogroup:admin"],
+    "tag:phone":        ["autogroup:admin"],
+    "tag:burst-runner": ["autogroup:admin"],
+  },
+
+  "acls": [
+    // Phone → workstation: SSH (22) + sinex gateway (8765) only.
+    {
+      "action": "accept",
+      "src":    ["tag:phone"],
+      "dst":    ["tag:workstation:22", "tag:workstation:8765"],
+    },
+
+    // Workstation → infra: full access. Workstations are the privileged
+    // origin for operator-driven admin against the replica + bastion.
+    {
+      "action": "accept",
+      "src":    ["tag:workstation"],
+      "dst":    ["tag:infra:*"],
+    },
+
+    // (Burst runners get rules added when the first runner is provisioned.)
+  ],
+
+  "ssh": [
+    // Tailnet-member SSH access lands on workstations as the `sinity`
+    // POSIX user. Authentication is via Tailscale identity; no separate
+    // password/key step.
+    {
+      "action": "accept",
+      "src":    ["autogroup:member"],
+      "dst":    ["tag:workstation"],
+      "users":  ["sinity"],
+    },
+  ],
+}

@@ -30,11 +30,47 @@ After structural changes:
 
 ## Recent Changes
 
+### 2026-05-24: Runtime Inventory Consolidation
+
+- **Renamed**: `modules/runtime-policy.nix` → `modules/runtime.nix`
+- **Replaced**: split `/etc/sinnix/runtime-policy.json` and `/etc/sinnix/observability.json` with `/etc/sinnix/runtime-inventory.json`
+- **Moved**: generated service/capture/mount/backup inventory from `introspection.nix` into the runtime inventory contract
+- **Updated**: `sinnix-observe`, `sinnix-scope`, machine telemetry, and Lynchpin to consume the single runtime inventory
+- **Added**: `modules/lib/runtime-defaults.nix` so package fallbacks reuse the same class/slice/command defaults as NixOS evaluation
+- **Purpose**: remove the troubleshooting-era split between placement policy and observability inventory; runtime ownership now has one present-tense contract
+
+### 2026-05-24: Declared Runtime Surfaces
+
+- **Renamed**: `modules/workload-policy.nix` → `modules/runtime.nix`
+- **Added**: `sinnix.runtime.surfaces` as the owner-declared registry for runtime units, managers, kinds, resource classes, observability, and capture outputs
+- **Unified**: resource class descriptions and systemd service settings under `sinnix.runtime.inventory.classes.<name>`
+- **Added**: runtime-surface assertions for duplicate manager/unit pairs, unknown resource classes, and unit-kind suffix mismatches
+- **Tightened**: `mkRuntimeServiceConfig` now fails on unknown unit lookups instead of silently falling back to the generic `system` class
+- **Replaced**: service-local `observe` options, `unitClasses`, `observedUnits`, and `observedSlices` with surfaces-derived runtime inventory JSON
+- **Updated**: `sinnix-observe`, `sinnix-scope`, machine telemetry, and config tests to consume `/etc/sinnix/runtime-inventory.json`
+- **Purpose**: make runtime ownership explicit in the module that creates each unit, instead of reconstructing live surfaces from troubleshooting-era side registries
+
+### 2026-05-23: Build and Runtime Policy Realization
+
+- **Added**: `modules/build-policy.nix` as the owner of Nix daemon settings, build scratch, sccache, GC, and store optimisation
+- **Added**: runtime resource class service settings plus `mkRuntimeServiceConfig` so services derive scheduler/resource policy from the canonical runtime registry
+- **Moved**: Sinex development cache relocation from generic `sinnix-scope` into project-kind direnv setup
+- **Removed**: unproven Nix experimental features and recovery-era boot timeout kernel params
+- **Purpose**: make build/runtime policy present-tense and centralized instead of duplicated across one-off service overrides
+
+### 2026-05-23: Observability Contract Cleanup
+
+- **Removed**: dormant `sinnix-sentinel` service, package, script, VM check, and test surface
+- **Removed**: stale `sinnix-oomd-watch` polling timer and syslog-index `oomd-events` output
+- **Replaced**: service `health` metadata with present-tense `observe` metadata
+- **Added**: generated service/capture inventory consumed by operator reports and Lynchpin; later folded into `/etc/sinnix/runtime-inventory.json`
+- **Purpose**: keep Sinnix responsible for capture mechanics and live inventory while leaving analysis in Lynchpin
+
 ### 2026-05-23: Present-Tense Baseline Cleanup
 
 - **Removed**: automatic PSI pressure intervention from below; below remains the protected recorder and `sinnix-observe` remains available for manual forensics
 - **Removed**: recovery boot specialisations, stale UKI cleanup, and frozen-scope thaw timer from the host baseline
-- **Removed**: unpromoted Python sentinel sidecar package; the service continues to use `scripts/sinnix-sentinel`
+- **Removed**: unpromoted Python sentinel sidecar package
 - **Reduced**: Chrome and editor Wayland flags to the current color-management disable only; Vulkan/ANGLE defaults are no longer suppressed
 - **Updated**: CLI feature documentation to match the current module tree
 
@@ -53,12 +89,12 @@ After structural changes:
 - **Added**: `flake/lib-context.nix` to centralize lib extension/bootstrap shared by `nixos.nix` and `test-lib.nix`
 - **Added**: `flake/command-registry.nix`; `apps.nix` now generates flake apps from a single registry
 - **Removed**: `mkDotsFile` helper export from `modules/lib/features.nix`; standardized on `mkDotsFileFor`
-- **Added**: Optional `health` metadata support in `mkServiceModule`; updated services to self-declare sentinel health checks
-- **Refactored**: `modules/introspection.nix` now derives service checks from enabled `sinnix.services.*.health` metadata
+- **Added**: Initial service metadata support in `mkServiceModule`; later replaced by the current `observe` contract
+- **Refactored**: `modules/introspection.nix` gained generated service metadata output, later superseded by `/etc/sinnix/runtime-inventory.json`
 - **Added**: `mkGraphicalUserService` helper in `modules/lib/systemd-hardening.nix`; applied in `features/desktop/base.nix`
 - **Fixed**: `scripts/kitty-grid` undefined function call (`collect_kitty_windows` -> `collect_target_windows`)
 - **Fixed**: `modules/features/dev/mcp-servers.nix` qdrant wrapper command continuation
-- **Fixed**: `scripts/sinnix-sentinel` transition/event logging contract (`events.jsonl`) and previous-health snapshot persistence
+- **Fixed**: earlier system-health transition/event logging and previous-state snapshot persistence
 - **Improved**: `scripts/repo-map` now supports a real `--full` mode and updated canonical-file list
 - **Updated**: `hosts/sinnix-ethereal/default.nix` now imports `./storage.nix` (swap config no longer orphaned)
 - **Updated**: CI formatting step now uses `nix fmt -- --check`

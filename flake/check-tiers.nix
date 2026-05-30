@@ -2,7 +2,6 @@
 let
   coverage = import ./test-coverage.nix;
   smokeName = subject: "smoke-" + lib.replaceStrings [ "." ] [ "-" ] subject;
-
   semanticFeatureSubjects = [
     "cli.polylogue"
     "desktop.activitywatch"
@@ -21,23 +20,14 @@ let
     "dev.mcp-servers"
     "dev.shell"
   ];
-
   semanticServiceSubjects = [
     "below"
     "airvpn-seed"
-    "hermes"
     "machine-telemetry"
     "polylogue"
-    "sentinel"
     "terminal-capture"
     "transmission"
   ];
-
-  semanticBundleSubjects = [
-    "desktop"
-    "dev"
-  ];
-
   manualSpecNames = [
     "dev-agent-tools"
     "dev-shell"
@@ -63,17 +53,13 @@ let
     "services-airvpn-seed-manual-start"
     "storage-rclone-backup-wiring"
     "services-below"
-    "services-hermes"
     "services-machine-telemetry"
     "services-transmission"
     "services-transmission-manual-start"
     "services-terminal-capture"
-    "services-sentinel"
     "services-sinex-delayed-runtime"
     "host-sinnix-prime-storage-discard-policy"
     "host-sinnix-prime-observability-policy"
-    "bundle-dev"
-    "bundle-desktop"
     "minimal-no-features"
     "core-performance-policy"
     "desktop-bluetooth-persistence"
@@ -82,7 +68,6 @@ let
     "router-config-evaluates"
     "backup-btrbk"
   ];
-
   featureSmokeSpecNames = map smokeName (
     builtins.filter (
       subject:
@@ -90,7 +75,6 @@ let
       && !(builtins.elem subject semanticFeatureSubjects)
     ) (builtins.attrNames coverage.features)
   );
-
   serviceSmokeSpecNames = map smokeName (
     builtins.filter (
       subject:
@@ -98,23 +82,11 @@ let
       && !(builtins.elem subject semanticServiceSubjects)
     ) (builtins.attrNames coverage.services)
   );
-
-  bundleSmokeSpecNames = map smokeName (
-    builtins.filter (
-      subject:
-      builtins.elem "eval" (coverage.bundles.${subject}.layers or [ ])
-      && !(builtins.elem subject semanticBundleSubjects)
-    ) (builtins.attrNames coverage.bundles)
-  );
-
-  allSpecNames =
-    manualSpecNames ++ featureSmokeSpecNames ++ serviceSmokeSpecNames ++ bundleSmokeSpecNames;
-
+  allSpecNames = manualSpecNames ++ featureSmokeSpecNames ++ serviceSmokeSpecNames;
   defaultSpecNames = [
     "dev-shell"
     "dev-git"
     "dev-mcp-servers"
-    "services-hermes"
     "services-machine-telemetry"
     "services-polylogue"
     "desktop-activitywatch"
@@ -123,18 +95,14 @@ let
     "desktop-base"
     "desktop-ui"
     "services-terminal-capture"
-    "services-sentinel"
     "services-sinex-delayed-runtime"
     "host-sinnix-prime-storage-discard-policy"
     "host-sinnix-prime-observability-policy"
     "core-performance-policy"
-    "bundle-desktop"
     "router-config-evaluates"
     "backup-btrbk"
   ];
-
   heavySpecNames = builtins.filter (name: !(builtins.elem name defaultSpecNames)) allSpecNames;
-
   runtimeCheckNames = [
     "backup-borg-hook-runtime"
     "cli-polylogue-runtime"
@@ -147,24 +115,19 @@ let
     "terminal-capture-runtime"
     "terminal-capture-runtime-failure"
   ];
-
   vmCheckNames = [
     "below-vm"
     "polylogue-vm"
-    "sentinel-vm"
     "transmission-vm"
   ];
-
   hostBuildCheckNames = [
     "host-sinnix-prime-build"
     "host-sinnix-ethereal-build"
   ];
-
   defaultAuxCheckNames = [
     "coverage-manifest"
     "router-config-build"
   ];
-
   defaultCheckNames = map (name: "nixos-${name}") defaultSpecNames ++ defaultAuxCheckNames;
   heavyCheckNames =
     map (name: "nixos-${name}") heavySpecNames
@@ -176,11 +139,9 @@ in
   inherit
     semanticFeatureSubjects
     semanticServiceSubjects
-    semanticBundleSubjects
     manualSpecNames
     featureSmokeSpecNames
     serviceSmokeSpecNames
-    bundleSmokeSpecNames
     allSpecNames
     defaultSpecNames
     heavySpecNames

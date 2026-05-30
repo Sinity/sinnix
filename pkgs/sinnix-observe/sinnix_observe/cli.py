@@ -19,7 +19,7 @@ from .sources.pressure import collect_blocked_tasks, collect_pressure
 from .sources.storage import collect_storage
 from .sources.systemd import (
     collect_resource_slices,
-    collect_sentinel,
+    collect_runtime_inventory,
     collect_systemd_units,
 )
 from .sources.xtask import collect_sinex_xtask
@@ -60,7 +60,7 @@ def collect_report(args: argparse.Namespace) -> dict[str, Any]:
         "blocked_tasks": blocked,
         "storage": storage,
         "systemd_units": systemd_units,
-        "sentinel": collect_sentinel(args.offline),
+        "runtime_inventory": collect_runtime_inventory(args.offline),
         "resource_slices": slices,
         "chrome_io": chrome_io,
         "sinex_xtask_history": sinex,

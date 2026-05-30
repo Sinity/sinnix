@@ -86,7 +86,6 @@ let
 
       sinnix = {
         machine.isDesktop = lib.mkDefault false;
-        bundles.desktop.enable = lib.mkDefault false;
       };
     };
 
@@ -234,7 +233,6 @@ let
       )
     ) (builtins.attrNames coverageDiscoveryEval.config.sinnix.features);
     services = builtins.attrNames coverageDiscoveryEval.config.sinnix.services;
-    bundles = builtins.attrNames coverageDiscoveryEval.config.sinnix.bundles;
     hosts = builtins.attrNames ((import ./nixos.nix { inherit inputs; }).flake.nixosConfigurations);
     # Flake outputs do not live under the module tree; keep the public surface
     # list explicit until router outputs move behind the same discovery path.
@@ -286,19 +284,6 @@ let
     mkFeatureTest {
       inherit name assertions extraModules;
       feature = "sinnix.services.${service}.enable";
-    };
-
-  # Create a test for a bundle
-  mkBundleTest =
-    {
-      name,
-      bundle,
-      assertions,
-      extraModules ? [ ],
-    }:
-    mkFeatureTest {
-      inherit name assertions extraModules;
-      feature = "sinnix.bundles.${bundle}.enable";
     };
 
   # Evaluate a test spec without forcing a check derivation.
@@ -686,14 +671,12 @@ let
       categories = [
         "features"
         "services"
-        "bundles"
         "hosts"
         "outputs"
       ];
       autoEvalCategories = [
         "features"
         "services"
-        "bundles"
       ];
       attrNamesFor = set: category: builtins.attrNames (set.${category} or { });
       listFor = set: category: set.${category} or [ ];
@@ -881,7 +864,6 @@ in
   inherit
     mkFeatureTest
     mkServiceTest
-    mkBundleTest
     hmFor
     ;
   inherit

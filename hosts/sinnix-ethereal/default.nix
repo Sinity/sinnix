@@ -1,4 +1,5 @@
 {
+  inputs,
   lib,
   ...
 }:
@@ -9,24 +10,38 @@
     ./networking.nix
     ./storage.nix
     ./disko.nix
+    # Pull in the sinex module graph so deploymentRole = replica can take
+    # effect; the bridge translates sinnix options into upstream
+    # services.sinex toggles.
+    inputs.sinex.nixosModules.default
+    ../../modules/services/sinex/bridge.nix
   ];
 
   networking.hostName = "sinnix-ethereal";
-  sinnix.machine.isDesktop = false;
 
-  services = {
-    qemuGuest.enable = true;
+  # Headless cloud-host posture: isDesktop=false, systemd-networkd, serial
+  # console, firewall locked to ssh + tailscale0, xserver/qemuGuest disabled.
+  sinnix.profiles.cloud.enable = true;
 
-    # Override the default "no" from networking.nix to allow root SSH on VPS
-    openssh.settings.PermitRootLogin = "prohibit-password";
-
-    # why mkForce: ethereal is a headless VPS; the desktop bundle defaults
-    # in the shared module graph would otherwise enable xserver here.
-    xserver.enable = lib.mkForce false;
+  sinnix.services.tailscale = {
+    enable = true;
+    tags = [ "tag:infra" ];
+    useRoutingFeatures = "client";
   };
 
-  systemd.services."serial-getty@ttyS0".enable = true;
+  sinnix.services.sinex = {
+    enable = true;
+    prepareHost = true;
+    provisionDatabase = true;
+    activationProfile = "foundation";
+    deploymentRole = "replica";
+    environment = "prod";
+    autoStart = true;
+  };
 
-  sinnix.features.cli.core.enable = true;
+  # Allow root login via SSH for break-glass / nixos-anywhere rebuilds.
+  # The cloud profile already locks the firewall to ssh + tailscale.
+  services.openssh.settings.PermitRootLogin = "prohibit-password";
+
   programs.zsh.enable = true;
 }

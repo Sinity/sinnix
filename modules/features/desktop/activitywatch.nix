@@ -27,6 +27,7 @@ mkFeatureModule {
       ...
     }:
     let
+      nixosConfig = config;
       graphicalTarget = "graphical-session.target";
       baseGraphicalUnit = {
         After = [ graphicalTarget ];
@@ -34,6 +35,27 @@ mkFeatureModule {
       };
     in
     {
+      sinnix.runtime.surfaces = lib.mkIf cfg.autoStart {
+        activitywatch = {
+          unit = "activitywatch.service";
+          manager = "user";
+          resourceClass = "background-maintenance";
+          observe = {
+            enable = true;
+            restartable = true;
+          };
+        };
+        activitywatch-watcher-awatcher = {
+          unit = "activitywatch-watcher-awatcher.service";
+          manager = "user";
+          resourceClass = "background-maintenance";
+          observe = {
+            enable = true;
+            restartable = true;
+          };
+        };
+      };
+
       home-manager.users.${user} =
         { pkgs, lib, ... }:
         {
@@ -55,12 +77,13 @@ mkFeatureModule {
           };
 
           systemd.user.services.activitywatch = {
-            Service = {
-              Nice = 10;
-              IOSchedulingClass = "idle";
-              IOWeight = 10;
-              MemoryHigh = "1G";
-              MemoryMax = "2G";
+            Service = lib.sinnix.mkRuntimeServiceConfig {
+              runtimeInventory = nixosConfig.sinnix.runtime.inventory;
+              resourceClass = "background-maintenance";
+              overrides = {
+                MemoryHigh = "1G";
+                MemoryMax = "2G";
+              };
             };
             Install.WantedBy = lib.mkIf (!cfg.autoStart) (lib.mkForce [ ]);
           };

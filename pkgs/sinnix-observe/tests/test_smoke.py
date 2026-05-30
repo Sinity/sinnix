@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 
-from sinnix_observe import SCHEMA, cli, joins, render, util, workload_policy
+from sinnix_observe import SCHEMA, cli, joins, render, runtime_inventory, util
 from sinnix_observe.sources import (
     below,
     chrome,
@@ -66,24 +66,29 @@ def test_pressure_offline_returns_marker() -> None:
 def test_systemd_offline_returns_empty() -> None:
     assert systemd.collect_systemd_units(offline=True) == []
     assert systemd.collect_resource_slices(offline=True) == []
-    assert systemd.collect_sentinel(offline=True) == {"offline": True}
+    assert systemd.collect_runtime_inventory(offline=True) == {"offline": True}
     row = systemd.unit_row("x.service", "system", {"ActiveState": "active"})
     assert row["unit"] == "x.service"
     assert row["active_state"] == "active"
 
 
-def test_workload_policy_fallback_excludes_retired_slices(monkeypatch) -> None:
-    monkeypatch.setenv("SINNIX_WORKLOAD_POLICY_FILE", "/does/not/exist")
-    policy = workload_policy.load_policy()
-    assert policy["schema"] == "sinnix-workload-policy-v1"
-    assert ("system", "system-critical.slice") in workload_policy.observed_slices()
+def test_runtime_inventory_fallback_excludes_retired_slices(monkeypatch) -> None:
+    monkeypatch.setenv("SINNIX_RUNTIME_INVENTORY_FILE", "/does/not/exist")
+    inventory = runtime_inventory.load_inventory()
+    assert inventory["schema"] == "sinnix-runtime-inventory-v1"
+    assert (
+        inventory["classes"]["observability"]["serviceConfig"]["Slice"]
+        == "system-critical.slice"
+    )
+    assert inventory["commandClasses"]["build"]["resourceClass"] == "developer-build"
+    assert ("system", "system-critical.slice") in runtime_inventory.observed_slices()
     assert (
         "system",
         "sinnix-maintenance.slice",
-    ) not in workload_policy.observed_slices()
+    ) not in runtime_inventory.observed_slices()
     assert (
-        workload_policy.resource_class_for_unit("polylogued.service")
-        == "capture-runtime"
+        runtime_inventory.resource_class_for_unit("sshd.service")
+        == "interactive-access"
     )
 
 
@@ -114,6 +119,8 @@ def test_xtask_missing_db_reports_gap() -> None:
     assert cls == "developer-build"
     cls = xtask.infer_sinex_resource_class({"command": "run", "is_background": True})
     assert cls == "background-maintenance"
+    cls = xtask.infer_sinex_resource_class({"command": "run"})
+    assert cls is None
 
 
 def test_polylogue_missing_db_reports_gap() -> None:
@@ -137,6 +144,14 @@ def test_joins_classifiers() -> None:
         joins.infer_resource_class_from_cgroup("/sys/fs/cgroup/build.slice")
         == "developer-build"
     )
+    assert (
+        joins.infer_resource_class_from_cgroup("/sys/fs/cgroup/agent.slice")
+        == "interactive-agent"
+    )
+    assert (
+        joins.infer_resource_class_from_cgroup("/sys/fs/cgroup/notbuild.slice") is None
+    )
+    assert joins.infer_resource_class_from_cgroup("/sys/fs/cgroup/app.slice") is None
     assert joins.infer_resource_class_from_cgroup("") is None
     matched = joins.match_below(
         "polylogued.service",

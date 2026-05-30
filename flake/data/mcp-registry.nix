@@ -9,11 +9,8 @@ let
       clients = [
         "codex"
         "gemini"
-        "forge"
-        "hermes"
       ];
       codex.bearer_token_env_var = "CONTEXT7_API_KEY";
-      hermes.headers.Authorization = "Bearer \${CONTEXT7_API_KEY}";
     };
 
     github = {
@@ -23,11 +20,9 @@ let
         "claude"
         "codex"
         "gemini"
-        "hermes"
       ];
       codex.bearer_token_env_var = "GITHUB_TOKEN";
       gemini.headers.Authorization = "Bearer \${GITHUB_TOKEN}";
-      hermes.headers.Authorization = "Bearer \${GITHUB_TOKEN}";
     };
 
     firecrawl = {
@@ -35,8 +30,6 @@ let
       command = "mcp-firecrawl";
       clients = [
         "claude"
-        "forge"
-        "hermes"
       ];
     };
 
@@ -51,8 +44,6 @@ let
         "codex"
         "claude"
         "gemini"
-        "forge"
-        "hermes"
       ];
     };
 
@@ -63,8 +54,6 @@ let
         "codex"
         "claude"
         "gemini"
-        "forge"
-        "hermes"
       ];
     };
 
@@ -78,8 +67,6 @@ let
         "claude"
         "codex"
         "gemini"
-        "forge"
-        "hermes"
       ];
     };
 
@@ -93,8 +80,6 @@ let
         "claude"
         "codex"
         "gemini"
-        "forge"
-        "hermes"
       ];
     };
 
@@ -105,8 +90,6 @@ let
         "claude"
         "codex"
         "gemini"
-        "forge"
-        "hermes"
       ];
     };
   };
@@ -114,53 +97,7 @@ let
   selectClientServers =
     client: lib.filterAttrs (_: server: builtins.elem client server.clients) registry;
 
-  renderForgeServer =
-    _name: server:
-    pruneAttrs (
-      if server.transport == "http" then
-        {
-          url = server.url;
-          disable = false;
-        }
-      else
-        {
-          inherit (server) command;
-          args = server.args or [ ];
-          env = server.env or { };
-          disable = false;
-        }
-    );
-
-  renderHermesServer =
-    _name: server:
-    let
-      client = server.hermes or { };
-      common = {
-        timeout = server.timeout or client.timeout or null;
-        connect_timeout = server.connect_timeout or client.connect_timeout or null;
-        enabled = server.enabled or client.enabled or true;
-        tools = server.tools or client.tools or null;
-      };
-    in
-    pruneAttrs (
-      common
-      // (
-        if server.transport == "http" then
-          {
-            url = server.url;
-            headers = client.headers or server.headers or { };
-            auth = client.auth or server.auth or null;
-          }
-        else
-          {
-            inherit (server) command;
-            args = server.args or [ ];
-            env = client.env or server.env or { };
-          }
-      )
-    );
-  # Claude Code mcpServers entry — same on-disk shape as Forge, kept distinct
-  # so the two surfaces can diverge (e.g., per-client args).
+  # Claude Code mcpServers entry.
   renderClaudeServer =
     _name: server:
     pruneAttrs (
@@ -221,8 +158,6 @@ in
   inherit
     registry
     selectClientServers
-    renderForgeServer
-    renderHermesServer
     renderClaudeServer
     renderCodexServer
     renderGeminiServer

@@ -118,26 +118,6 @@ let
         "claude"
       ];
     };
-
-    agent2 = {
-      class = "scratchpad-agent2";
-      workspace = "scratch_agent2";
-      size = {
-        w = 0.90;
-        h = 0.90;
-      };
-      command = [
-        "${pkgs.kitty}/bin/kitty"
-        "--class"
-        "scratchpad-agent2"
-        "--title"
-        "Hermes-Mirror"
-        "hermes"
-        "--continue"
-        "cognitive-mirror"
-        "--skills"
-      ];
-    };
   };
 
   # Generate .conf file content for toggle-scratch script

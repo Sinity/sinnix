@@ -9,6 +9,27 @@ mkFeatureModule {
     "browser"
   ];
   description = "Qutebrowser + Chrome stack";
+  meta.dotfiles = {
+    configFile = {
+      "qutebrowser/config.py" = "qutebrowser/config.py";
+      "qutebrowser/user.css" = "qutebrowser/user.css";
+      "qutebrowser/greasemonkey/cookie-nag-zapper.user.js" =
+        "qutebrowser/greasemonkey/cookie-nag-zapper.user.js";
+      "qutebrowser/greasemonkey/readable-medium.user.js" =
+        "qutebrowser/greasemonkey/readable-medium.user.js";
+      "qutebrowser/greasemonkey/template.user.js" = "qutebrowser/greasemonkey/template.user.js";
+    };
+    homeFile = {
+      ".local/share/qutebrowser/userscripts/open-in-mpv" = "qutebrowser/userscripts/open-in-mpv";
+      ".local/share/qutebrowser/userscripts/open-in-mpv-audio" =
+        "qutebrowser/userscripts/open-in-mpv-audio";
+      ".local/share/qutebrowser/userscripts/yt-related" = "qutebrowser/userscripts/yt-related";
+      ".local/share/qutebrowser/userscripts/archive-both" = "qutebrowser/userscripts/archive-both";
+      ".local/share/qutebrowser/userscripts/raindrop-save" = "qutebrowser/userscripts/raindrop-save";
+      ".local/share/qutebrowser/userscripts/research-capture" =
+        "qutebrowser/userscripts/research-capture";
+    };
+  };
   configFn =
     {
       config,
@@ -26,7 +47,6 @@ mkFeatureModule {
           pkgs,
           lib,
           config,
-          mkDotsFileFor,
           ...
         }:
         let
@@ -107,11 +127,6 @@ mkFeatureModule {
             "x-scheme-handler/unknown"
           ];
           browserLinkCmd = "${config.home.homeDirectory}/.local/bin/open-browser-link";
-          mkDotsFile = mkDotsFileFor config;
-          quteDots = rel: mkDotsFile ("/qutebrowser" + rel);
-          mkUserScript = name: {
-            source = quteDots ("/userscripts/" + name);
-          };
         in
         {
           home = {
@@ -127,12 +142,6 @@ mkFeatureModule {
             ];
 
             file = {
-              ".local/share/qutebrowser/userscripts/open-in-mpv" = mkUserScript "open-in-mpv";
-              ".local/share/qutebrowser/userscripts/open-in-mpv-audio" = mkUserScript "open-in-mpv-audio";
-              ".local/share/qutebrowser/userscripts/yt-related" = mkUserScript "yt-related";
-              ".local/share/qutebrowser/userscripts/archive-both" = mkUserScript "archive-both";
-              ".local/share/qutebrowser/userscripts/raindrop-save" = mkUserScript "raindrop-save";
-              ".local/share/qutebrowser/userscripts/research-capture" = mkUserScript "research-capture";
               ".local/bin/open-browser-link" = {
                 source = config.lib.file.mkOutOfStoreSymlink "${repoRoot}/scripts/open-browser-link";
                 force = true;
@@ -154,16 +163,6 @@ mkFeatureModule {
                 fi
               done
             '';
-          };
-
-          xdg.configFile = {
-            "qutebrowser/config.py".source = quteDots "/config.py";
-            "qutebrowser/user.css".source = quteDots "/user.css";
-            "qutebrowser/greasemonkey/cookie-nag-zapper.user.js".source =
-              quteDots "/greasemonkey/cookie-nag-zapper.user.js";
-            "qutebrowser/greasemonkey/readable-medium.user.js".source =
-              quteDots "/greasemonkey/readable-medium.user.js";
-            "qutebrowser/greasemonkey/template.user.js".source = quteDots "/greasemonkey/template.user.js";
           };
 
           xdg.desktopEntries.google-chrome = {
