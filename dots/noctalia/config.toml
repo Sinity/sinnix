@@ -1,0 +1,51 @@
+# Noctalia shell configuration.
+#
+# Writable + live-editable: this file is symlinked out-of-store into
+# ~/.config/noctalia/config.toml (see modules/features/desktop/noctalia.nix).
+# Noctalia reads AND writes it, so changes in the Settings GUI persist back
+# here and edits here apply on the next reload — no rebuild needed.
+#
+# v5 is alpha: these keys are a best-effort seed. The Settings GUI rewrites the
+# file in its full, correct schema the first time you change anything there.
+# Bar too small on this 4K display? Settings -> Bar -> Scale (it saves here).
+
+[colorScheme]
+useWallpaperColors = true
+darkMode = true
+
+[wallpaper]
+enabled = true
+directory = "/home/sinity/wallpaper"
+randomEnabled = true
+randomIntervalSec = 1800
+transitionType = "fade"
+transitionDuration = 800
+
+[appTheming]
+gtk = true
+qt = true
+kitty = true
+vscode = true
+
+[bar]
+position = "top"
+
+[plugins.screen-recorder]
+outputDirectory = "/realm/data/captures/screen"
+replayDirectory = "/realm/data/captures/replay"
+replayDurationSec = 60
+fps = 60
+codec = "hevc"
+audioSource = "system"
+
+[plugins.nvibrant]
+vibrance = 512
+displayCount = 1
+
+[plugins.model-usage]
+providers = ["claude", "codex"]
+metric = "usage"
+
+[plugins.linux-wallpaperengine-controller]
+workshopDirectory = "/home/sinity/.local/share/Steam/steamapps/workshop/content/431960"
+syncWallpaperColors = true

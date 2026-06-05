@@ -1,0 +1,10 @@
+{
+  "polkit-agent": { "enabled": true },
+  "screen-recorder": { "enabled": true },
+  "nvibrant": { "enabled": true },
+  "model-usage": { "enabled": true },
+  "keybind-cheatsheet": { "enabled": true },
+  "timer": { "enabled": true },
+  "display-settings": { "enabled": true },
+  "linux-wallpaperengine-controller": { "enabled": true }
+}
