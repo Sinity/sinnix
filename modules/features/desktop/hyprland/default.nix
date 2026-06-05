@@ -272,24 +272,19 @@ in
               inherit (bindings) bind bindl bindm;
               windowrule = if rules ? windowrule then rules.windowrule else [ ];
 
-              # Smart gaps: drop gaps/border/rounding when a workspace holds a
-              # single tiled window (or one fullscreen-tiled window).
+              # Smart gaps: a workspace holding a single tiled window (or one
+              # fullscreen-tiled window) drops gaps, border, and rounding.
+              # Hyprland 0.54 workspace-rule params — supersedes the old
+              # windowrulev2 bordersize/rounding hack (deprecated in 0.54).
               workspace = [
-                "w[tv1], gapsout:0, gapsin:0"
-                "f[1], gapsout:0, gapsin:0"
+                "w[tv1], gapsout:0, gapsin:0, border:false, rounding:false"
+                "f[1], gapsout:0, gapsin:0, border:false, rounding:false"
               ];
-              windowrulev2 = [
-                "bordersize 0, floating:0, onworkspace:w[tv1]"
-                "rounding 0, floating:0, onworkspace:w[tv1]"
-                "bordersize 0, floating:0, onworkspace:f[1]"
-                "rounding 0, floating:0, onworkspace:f[1]"
-              ];
-
-              # Blur Noctalia's layer surfaces (bar, launcher, panels).
-              layerrule = [
-                "blur, noctalia"
-                "ignorezero, noctalia"
-              ];
+              # NOTE: bar-layer blur (layerrule) omitted — the inline
+              # `layerrule = blur, <ns>` form is rejected by Hyprland 0.54.3
+              # (syntax changed). Re-add once the 0.54 layerrule form is
+              # confirmed; Noctalia namespaces are noctalia-bar-default /
+              # noctalia-wallpaper.
             };
 
             extraConfig =
