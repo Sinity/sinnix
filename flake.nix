@@ -79,10 +79,18 @@
     # BTRFS rollback impermanence (see modules/persistence.nix)
     impermanence.url = "github:nix-community/impermanence";
 
-    # System-wide theming
+    # System-wide theming (fonts + cursor only; color authority is Noctalia)
     stylix.url = "github:danth/stylix";
     stylix.inputs.nixpkgs.follows = "nixpkgs";
     stylix.inputs.flake-parts.follows = "flake-parts";
+
+    # Wayland desktop shell (Quickshell/Qt). Owns bar, launcher, notifications,
+    # lock, OSD, and wallpaper, and acts as the live Material-You color authority
+    # (wallpaper -> palette -> app templates). See modules/features/desktop/noctalia.nix.
+    noctalia = {
+      url = "github:noctalia-dev/noctalia-shell/v5";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
 
     # VSCode extensions overlay (community-maintained)
     nix-vscode-extensions.url = "github:nix-community/nix-vscode-extensions";

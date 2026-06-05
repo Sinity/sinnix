@@ -65,6 +65,9 @@ mkFeatureModule {
                 "specialWorkspaceOut, 1, 1.2, emphasizedAccel, slidevert"
                 # zoom
                 "zoomFactor, 1, 3, standardDecel"
+                # continuously rotate the active gradient border (default.nix
+                # sets col.active_border with an angle)
+                "borderangle, 1, 100, linear, loop"
               ];
             };
           };

@@ -79,7 +79,7 @@
     "desktop.ui" = {
       layers = [ "eval" ];
     };
-    "desktop.waybar" = {
+    "desktop.noctalia" = {
       layers = [ "eval" ];
     };
     "dev.agentTools" = {

@@ -1,5 +1,5 @@
 # Periodic agent health check — runs agent-verify every 15 minutes,
-# widget reflects fresh health status.
+# widget can reflect fresh health status.
 #
 # Disabled by default. Enable by setting
 #   sinnix.features.desktop.agentVerifyTimer.enable = true;
@@ -15,7 +15,7 @@ mkFeatureModule {
     "desktop"
     "agentVerifyTimer"
   ];
-  description = "Periodic agent-verify health check (feeds waybar agent widget)";
+  description = "Periodic agent-verify health check (feeds a status-bar agent widget)";
   extraOptions = {
     interval = lib.mkOption {
       type = lib.types.str;

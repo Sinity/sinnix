@@ -140,7 +140,7 @@ in
         "--prefer"
         "(node|python|cargo|rustc|cc1plus|ld|nix|nix-daemon)"
         "--avoid"
-        "(systemd|systemd-logind|dbus-daemon|sshd|agetty|Hyprland|waybar|foot|kitty|zsh|bash|sudo|doas|below|chrome|chromium|firefox|electron)"
+        "(systemd|systemd-logind|dbus-daemon|sshd|agetty|Hyprland|noctalia|quickshell|foot|kitty|zsh|bash|sudo|doas|below|chrome|chromium|firefox|electron)"
       ];
     };
 

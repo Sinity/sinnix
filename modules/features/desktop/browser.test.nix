@@ -77,7 +77,7 @@ mkFeatureTest {
           lib.hasSuffix "/bin/sinnix-chrome %U" localChromeExec
           && localChromeDesktop.icon == "google-chrome"
           && builtins.elem "x-scheme-handler/https" localChromeDesktop.mimeType;
-        message = "Local Chrome desktop entry must override tofi-drun launches with the scoped launcher";
+        message = "Local Chrome desktop entry must override default launches with the scoped launcher";
       }
       {
         assertion =

@@ -106,20 +106,6 @@ mkFeatureModule {
                   sigmoid-upscaling = "yes";
                   deband = "yes";
                 };
-                wallpaper = {
-                  ytdl-format = "bestvideo[height<=?1440]+worstaudio/best";
-                  loop = "";
-                  osc = "no";
-                  audio = "no";
-                  input-ipc-server = "/tmp/mpvwallpapersocket";
-                  scale = "spline36";
-                  cscale = "spline36";
-                  dscale = "mitchell";
-                  dither-depth = "no";
-                  correct-downscaling = "no";
-                  sigmoid-upscaling = "no";
-                  deband = "no";
-                };
                 bench = {
                   audio = "no";
                   untimed = "yes";

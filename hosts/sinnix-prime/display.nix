@@ -29,8 +29,8 @@ lib.mkMerge [
         libglvnd
       ];
     };
-
-    security.pam.services.hyprlock = { };
+    # Lock-screen PAM is declared by the Noctalia module
+    # (security.pam.services.noctalia); hyprlock is gone.
   }
 
   # ── NVIDIA (both modes) ──────────────────────────────────────────────────────

@@ -17,12 +17,13 @@ Organized by domain under `modules/features/`:
 
 - **activitywatch.nix**: Activity tracking daemon + web UI
 - **audio.nix**: PipeWire, audio devices, routing (moved from top-level)
-- **base.nix**: Core desktop services (clipboard, notifications, launcher)
+- **base.nix**: Core desktop services (clipboard + applets; launcher/notifications/OSD are Noctalia's)
 - **browser.nix**: Qutebrowser config, userscripts, profiles
 - **common-apps.nix**: GUI utilities (file manager, image viewer, etc.)
 - **crypto.nix**: Cryptocurrency tools (Monero)
 - **gaming.nix**: Steam, game launchers
-- **hyprland/**: Window manager config (bindings, rules, lock screen)
+- **hyprland/**: Window manager config (bindings, rules, idle/DPMS — lock UI is Noctalia)
+- **noctalia.nix**: Noctalia Wayland shell — bar, launcher, notifications, lock, OSD, wallpaper, and live Material-You color authority; plugins (polkit-agent, screen-recorder, nvibrant, model-usage, keybind-cheatsheet, timer, display-settings, linux-wallpaperengine)
 - **media.nix**: mpv, audio/video tools, codecs
 - **mime.nix**: File associations, default applications
 - **reboot-notifier.nix**: Systemd reboot notifications
@@ -30,7 +31,6 @@ Organized by domain under `modules/features/`:
 - **terminal.nix**: Terminal emulators (foot, kitty)
 - **theming.nix**: Stylix integration, GTK/Qt themes
 - **ui.nix**: Fonts, cursor themes, Wayland base environment (moved from top-level)
-- **waybar.nix**: Status bar configuration
 
 ### Dev (`features/dev/`)
 

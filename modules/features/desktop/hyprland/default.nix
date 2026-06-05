@@ -151,7 +151,7 @@ in
           ...
         }:
         {
-          imports = [ ./lock.nix ];
+          imports = [ ./idle.nix ];
 
           programs.zsh.loginExtra = lib.mkBefore ''
             if [ "$(id -un)" = "${user}" ] && [ -z "$DISPLAY" ]; then
@@ -168,6 +168,12 @@ in
             package = hyprlandPkg;
             xwayland.enable = true;
             systemd.enable = false;
+
+            # NOTE: hyprexpo (workspace overview) intentionally NOT enabled —
+            # hyprlandPlugins.hyprexpo fails to compile against this nixpkgs
+            # Hyprland pin (missing HookSystemManager.hpp; upstream out of sync).
+            # Re-add via the version-matched plugin from the hyprland flake once
+            # nixpkgs catches up.
 
             settings = {
               exec-once = [
@@ -200,6 +206,12 @@ in
                 gaps_out = 20;
                 layout = "dwindle";
                 resize_on_border = true;
+                # Animated gradient on the active border; the angle is animated
+                # by the borderangle rule in hyprland-animations.nix.
+                # mkForce: stylix's hyprland target sets a flat col.active_border;
+                # Phase 2 will source these from Noctalia's wallpaper palette.
+                "col.active_border" = lib.mkForce "rgba(83a598ee) rgba(d3869bee) rgba(b8bb26ee) 45deg";
+                "col.inactive_border" = lib.mkForce "rgba(3c3836aa)";
               };
 
               dwindle = {
@@ -232,7 +244,7 @@ in
               };
 
               decoration = {
-                rounding = 0;
+                rounding = 10;
                 active_opacity = 1.0;
                 inactive_opacity = 0.96;
                 dim_inactive = true;
@@ -259,7 +271,25 @@ in
 
               inherit (bindings) bind bindl bindm;
               windowrule = if rules ? windowrule then rules.windowrule else [ ];
-              windowrulev2 = if rules ? windowrulev2 then rules.windowrulev2 else [ ];
+
+              # Smart gaps: drop gaps/border/rounding when a workspace holds a
+              # single tiled window (or one fullscreen-tiled window).
+              workspace = [
+                "w[tv1], gapsout:0, gapsin:0"
+                "f[1], gapsout:0, gapsin:0"
+              ];
+              windowrulev2 = [
+                "bordersize 0, floating:0, onworkspace:w[tv1]"
+                "rounding 0, floating:0, onworkspace:w[tv1]"
+                "bordersize 0, floating:0, onworkspace:f[1]"
+                "rounding 0, floating:0, onworkspace:f[1]"
+              ];
+
+              # Blur Noctalia's layer surfaces (bar, launcher, panels).
+              layerrule = [
+                "blur, noctalia"
+                "ignorezero, noctalia"
+              ];
             };
 
             extraConfig =
@@ -293,11 +323,6 @@ in
             wl-clipboard
             wl-screenrec
           ];
-
-          # why mkForce: home-manager auto-injects X-Restart-Triggers from
-          # config-file hashes. The wallpaper is set once at login; flushing
-          # restarts on every HM rebuild causes a visible flash.
-          systemd.user.services.hyprpaper.Unit.X-Restart-Triggers = lib.mkForce [ ];
         };
     })
   ];

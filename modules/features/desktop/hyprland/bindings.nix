@@ -14,8 +14,11 @@ in
     "SUPER, Return, exec, uwsm app -- kitty"
     "SUPER, Q, killactive"
     "SUPER, F, fullscreen, 0"
-    "SUPER, D, exec, uwsm app -- tofi-drun --drun-launch=true"
-    "SUPER, Escape, exec, uwsm app -- hyprlock"
+    # Launcher + lock are Noctalia surfaces (IPC).
+    # NOTE (v5 alpha): verify exact IPC targets against `qs -c noctalia-shell ipc`.
+    "SUPER, D, exec, qs -c noctalia-shell ipc call launcher toggle"
+    "SUPER, Escape, exec, qs -c noctalia-shell ipc call lockScreen toggle"
+    "SUPER, Slash, exec, qs -c noctalia-shell ipc call plugin:keybind-cheatsheet toggle"
 
     "SUPER, H, exec, ${script "kitty-hypr-nav"} focus left"
     "SUPER, J, exec, ${script "kitty-hypr-nav"} focus down"

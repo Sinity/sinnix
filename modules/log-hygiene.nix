@@ -33,30 +33,12 @@
 
       # User services log reduction for home-manager-managed services
       systemd.user.services = {
-        # fnott spams "info: ctrl.c:161: got X IDs" 2x per second = 172,800 msg/day
-        fnott.Service = {
-          StandardOutput = "null";
-          StandardError = "null";
-        };
-
         # Hypridle logs every idle state change - only log errors
         hypridle.Service = {
           StandardOutput = "null";
           StandardError = "journal";
         };
 
-        # Hyprpaper is very chatty about wallpaper loading
-        hyprpaper.Service = {
-          StandardOutput = "null";
-          StandardError = "journal";
-        };
-        # Limit hyprpaper restart attempts. Without this, NVIDIA driver mismatches
-        # (after nixos-rebuild without reboot) cause infinite crash-loops:
-        # 1675 restarts in 5 hours, each generating a coredump + journal spam.
-        hyprpaper.Unit = {
-          StartLimitIntervalSec = 60;
-          StartLimitBurst = 5;
-        };
       };
     };
 

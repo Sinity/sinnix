@@ -1,16 +1,15 @@
 # System-wide UI theme configuration
 #
 # STYLIX MANAGES:
-#   - Color scheme (base16)
-#   - Wallpaper (via hyprpaper service)
-#   - System fonts
-#   - Cursor theme
-#   - GTK theme
-#   - QT theme
-#   - Application colors (vscode, kitty, etc - see targets)
+#   - Color scheme (base16, gruvbox) for apps — fonts, cursor, GTK/QT, and
+#     base16 app colors (nvim, bat, foot, …)
+#
+# Wallpaper DISPLAY and the live shell palette are Noctalia's (noctalia.nix);
+# stylix does NOT run hyprpaper (disabled below) so the two don't fight over the
+# wallpaper. Moving the app palette onto Noctalia's wallpaper-derived templates
+# (retiring this static scheme) is a tracked follow-up needing per-app validation.
 #
 # DO NOT manually configure:
-#   - hyprpaper service/config (stylix provides it)
 #   - Application color schemes (use stylix.targets.<app>.enable)
 #
 # To disable stylix for specific apps:
@@ -89,6 +88,10 @@ mkFeatureModule {
       home-manager.users.${config.sinnix.user.name} = {
         gtk.gtk4.theme = lib.mkDefault null;
 
+        # Noctalia owns the displayed wallpaper; stylix keeps the image only for
+        # color derivation, so its hyprpaper wallpaper-setter must stay off.
+        stylix.targets.hyprpaper.enable = lib.mkForce false;
+
         # Force unset portal env var in all shells (prevents stale session vars)
         programs.zsh.initContent = lib.mkBefore ''
           unset NIXOS_XDG_OPEN_USE_PORTAL
@@ -103,8 +106,18 @@ mkFeatureModule {
 
       stylix = {
         enable = true;
+        # Stylix themes apps/fonts/cursor from this base16 palette. Noctalia owns
+        # the displayed wallpaper (cycling) and recolors its own shell live from
+        # it. Moving the *app* palette onto Noctalia's wallpaper-derived templates
+        # (retiring this static scheme) is a follow-up that needs per-app
+        # validation — deriving the scheme from the image conflicts with hardcoded
+        # colors in dotfiles (e.g. dots/broot/conf.hjson char_match).
         base16Scheme = "${pkgs.base16-schemes}/share/themes/gruvbox-dark-medium.yaml";
-        image = inputs.self + "/assets/wallpaper-sinnix.svg";
+        image = pkgs.writeText "stylix-fallback.svg" ''
+          <svg xmlns="http://www.w3.org/2000/svg" width="1" height="1">
+            <rect width="1" height="1" fill="#282828" />
+          </svg>
+        '';
 
         fonts = stylixFontSpec // {
           sizes = fontSizes;

@@ -1,9 +1,11 @@
 # Core Desktop Foundation
 #
 # Provides:
-# - Systemd-managed user services (tray, clipboard, notifications)
+# - Systemd-managed user services (network/bluetooth applets, clipboard)
 # - Wayland session environment and auto-start logic
-# - Application launcher (tofi)
+#
+# Launcher, notifications, and the polkit agent are owned by Noctalia
+# (see noctalia.nix); clipboard stays here (clipse).
 {
   mkFeatureModule,
   lib,
@@ -26,23 +28,6 @@ mkFeatureModule {
     }:
     let
       graphicalTarget = "graphical-session.target";
-      stylixColors = config.lib.stylix.colors;
-      toRgba = alpha: color: "${lib.removePrefix "#" color}${alpha}";
-      bg = toRgba "f0" stylixColors.base00;
-      border = toRgba "ff" stylixColors.base03;
-      text = toRgba "ff" stylixColors.base06;
-      subtle = toRgba "ff" stylixColors.base04;
-      accent = toRgba "ff" stylixColors.base0D;
-      criticalBg = toRgba "f0" stylixColors.base08;
-      fontMono = "SauceCodePro Nerd Font Mono:size=16";
-      fnottWithoutPackageDbusActivation = pkgs.fnott.overrideAttrs (old: {
-        postInstall = (old.postInstall or "") + ''
-          rm -f $out/share/dbus-1/services/fnott.service
-        '';
-        passthru = (old.passthru or { }) // {
-          sinnixRemovesDbusActivation = true;
-        };
-      });
     in
     {
       home-manager.users.${user} = {
@@ -66,55 +51,7 @@ mkFeatureModule {
           };
         };
 
-        # Notifications
-        stylix.targets.fnott.enable = false;
-        services.fnott = {
-          enable = true;
-          package = fnottWithoutPackageDbusActivation;
-          settings = {
-            main = {
-              notification-margin = 8;
-              anchor = "top-right";
-              layer = "overlay";
-              max-width = 400;
-              border-size = 2;
-              border-radius = 10;
-              background = bg;
-              border-color = border;
-              title-font = fontMono;
-              title-color = text;
-              summary-font = fontMono;
-              summary-color = text;
-              body-font = fontMono;
-              body-color = subtle;
-              progress-color = accent;
-            };
-            critical = {
-              background = criticalBg;
-              border-color = accent;
-            };
-          };
-        };
-        xdg.dataFile."dbus-1/services/fnott.service".enable = lib.mkForce false;
-        xdg.dataFile."dbus-1/services/org.freedesktop.Notifications.service".text = ''
-          [D-BUS Service]
-          Name=org.freedesktop.Notifications
-          Exec=${fnottWithoutPackageDbusActivation}/bin/fnott
-          SystemdService=fnott.service
-        '';
-
-        # Launcher
-        programs.tofi = {
-          enable = true;
-          settings = {
-            width = 2000;
-            height = 1000;
-            anchor = "center";
-            prompt-text = "> ";
-            fuzzy-match = true;
-            terminal = "kitty";
-          };
-        };
+        # Notifications, launcher, and OSD are provided by Noctalia.
 
         xdg.userDirs = {
           enable = true;
@@ -133,10 +70,8 @@ mkFeatureModule {
             description = "NetworkManager applet";
             execStart = "${pkgs.networkmanagerapplet}/bin/nm-applet";
           };
-          polkit-gnome-authentication-agent-1 = lib.sinnix.systemd.mkGraphicalUserService {
-            description = "polkit-gnome-authentication-agent-1";
-            execStart = "${pkgs.polkit_gnome}/libexec/polkit-gnome-authentication-agent-1";
-          };
+          # Polkit authentication agent is provided by Noctalia's polkit-agent
+          # plugin; running a second agent (polkit-gnome) would conflict.
           blueman-applet = lib.sinnix.systemd.mkGraphicalUserService {
             description = "Blueman applet";
             execStart = "${pkgs.blueman}/bin/blueman-applet";

@@ -35,6 +35,7 @@ let
       scribe-tap
       intercept-bounce
       stylix
+      noctalia
       ;
     inherit (inputs) nix-vscode-extensions disko nixpkgs;
     self = flakeSource;
