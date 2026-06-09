@@ -58,9 +58,22 @@
         set -euo pipefail
         _cmd="''${1:-}"
         _sub="''${2:-}"
-        # SINNIX_REBUILD_ACTIVE=1 is set by switch/boot/test — they already hold
-        # the lock. Pass through without re-acquiring to avoid deadlock.
-        if [ -z "''${SINNIX_REBUILD_ACTIVE:-}" ]; then
+        # Decide whether this invocation is nested inside a rebuild that already
+        # holds the lock. Two independent signals, because neither alone covers
+        # every path:
+        #   - SINNIX_REBUILD_ACTIVE=1 is set by switch/boot/test for the build
+        #     phase, which runs as the same user — the env survives that hop.
+        #   - It does NOT survive the user→root sudo hop that nh makes for the
+        #     privileged activation step, which re-invokes us as root to run
+        #     `nix build --profile /nix/var/nix/profiles/system …`. That nested
+        #     root call must also skip locking: re-acquiring would either EACCES
+        #     on the sticky-/tmp lockfile (fs.protected_regular forbids root
+        #     opening the user-owned lock) or self-deadlock on the non-blocking
+        #     flock the parent switch already holds. `--profile` reliably marks
+        #     that profile-install build.
+        _nested="''${SINNIX_REBUILD_ACTIVE:-}"
+        case " $* " in *" --profile "*) _nested=1 ;; esac
+        if [ -z "$_nested" ]; then
           if [ "$_cmd" = "build" ] || { [ "$_cmd" = "flake" ] && [ "$_sub" = "check" ]; }; then
             exec 9>/tmp/sinnix-switch.lock
             if ! ${pkgs.util-linux}/bin/flock --nonblock 9; then
