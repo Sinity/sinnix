@@ -33,7 +33,7 @@ mkFeatureModule {
               background = lib.mkForce "#000000";
               background_opacity = lib.mkForce "1.0";
               window_padding_width = 10;
-              scrollback_lines = 9999999;
+              scrollback_lines = 50000;
               enable_audio_bell = "no";
               mouse_hide_wait = 60;
               wheel_scroll_multiplier = 5.0;
