@@ -54,6 +54,11 @@
         name: action:
         pkgs.writeShellScriptBin name ''
           set -euo pipefail
+          exec 9>/tmp/sinnix-switch.lock
+          if ! ${pkgs.util-linux}/bin/flock --nonblock 9; then
+            echo "sinnix ${name}: another rebuild is already running — aborting to prevent concurrent builds" >&2
+            exit 1
+          fi
           ${resolveFlakeDir}
           ${localInputOverrideArgs}
           rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-2}"
