@@ -138,8 +138,14 @@ in
       # Act before multi-GiB disk-swap residency turns into sustained major
       # faults and Btrfs queue collapse. systemd-oomd handles slice-local
       # pressure first; earlyoom remains the global emergency guard.
-      freeMemThreshold = 10;
-      freeSwapThreshold = 25;
+      # Fire early on memory pressure, before swap gets meaningfully used.
+      # 15% of 32 GiB = ~5 GiB free — kills misbehaving processes while the
+      # system is still responsive. Swap is a last-ditch cushion, not a sink.
+      freeMemThreshold = 15;
+      # Fire as soon as swap starts filling — 90% free on 8 GiB = 800 MiB used.
+      # Combined with the memory threshold this ensures earlyoom acts on memory
+      # pressure alone, not after swap has been churned.
+      freeSwapThreshold = 90;
       extraArgs = [
         "--prefer"
         "(node|python|cargo|rustc|cc1plus|ld|nix|nix-daemon)"

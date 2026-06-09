@@ -56,14 +56,16 @@
           set -euo pipefail
           ${resolveFlakeDir}
           ${localInputOverrideArgs}
-          rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-3}"
-          rebuild_cores="''${SINNIX_REBUILD_CORES:-3}"
+          rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-2}"
+          rebuild_cores="''${SINNIX_REBUILD_CORES:-2}"
 
           exec ${pkgs.systemd}/bin/systemd-run \
             --user \
             --quiet --collect --pipe --service-type=exec --wait \
             --setenv=PATH="${rebuildServicePath}:$PATH" \
-            -p Nice=10 \
+            --slice=nix-build.slice \
+            -p CPUSchedulingPolicy=idle \
+            -p IOSchedulingClass=idle \
             ${pkgs.coreutils}/bin/env -u FLAKE NH_FLAKE="''${_flake_dir}" \
               ${pkgs.nh}/bin/nh os ${action} \
               "''${_flake_dir}#sinnix-prime" \
@@ -86,13 +88,15 @@
           set -euo pipefail
           ${resolveFlakeDir}
           ${localInputOverrideArgs}
-          rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-3}"
-          rebuild_cores="''${SINNIX_REBUILD_CORES:-3}"
+          rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-2}"
+          rebuild_cores="''${SINNIX_REBUILD_CORES:-2}"
 
           exec sudo ${pkgs.systemd}/bin/systemd-run \
             --quiet --collect --pipe --service-type=exec --wait \
             --setenv=PATH="${rebuildServicePath}:$PATH" \
-            -p Nice=10 \
+            --slice=nix-build.slice \
+            -p CPUSchedulingPolicy=idle \
+            -p IOSchedulingClass=idle \
             ${pkgs.nixos-rebuild}/bin/nixos-rebuild build-vm \
               --flake "path:$_flake_dir#sinnix-prime" \
               --max-jobs "$rebuild_jobs" \

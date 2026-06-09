@@ -50,8 +50,13 @@ in
         ];
         netrc-file = "/etc/nix/netrc";
 
-        max-jobs = 3;
-        cores = 3;
+        # Limit parallel derivations and per-job cores to cap peak thermal load.
+        # At max-jobs=3 / cores=3, the nix-daemon could run 9 SCHED_IDLE cores
+        # simultaneously — enough heat to throttle the video decoder's P-core.
+        # max-jobs=2 / cores=2 keeps peak active cores at 4 and memory usage
+        # proportionally lower.
+        max-jobs = 2;
+        cores = 2;
         builders-use-substitutes = true;
         keep-outputs = true;
         keep-derivations = true;
@@ -125,6 +130,19 @@ in
       nix-daemon = {
         requires = [ "sinnix-root-cache-attrs.service" ];
         after = [ "sinnix-root-cache-attrs.service" ];
+        serviceConfig = {
+          # Place the daemon — and all build processes it spawns — into
+          # nix-build.slice so the slice's CPUWeight=5/IOWeight=2 apply.
+          # The daemon already carries CPUSchedulingPolicy=idle from the NixOS
+          # nix module; the slice adds IO weight and the memory guard below.
+          # Without this, nix-daemon lives in system.slice with no memory cap.
+          Slice = "nix-build.slice";
+          # Soft memory ceiling: kernel reclaims from build processes before
+          # they evict desktop/video/sinexd working sets. Rust workspace builds
+          # can spike to ~8 GB; 10 G gives headroom without starving the system
+          # (32 GB total → 22 GB free for OS + sinexd + desktop at this limit).
+          MemoryHigh = "10G";
+        };
       };
     };
   };

@@ -216,8 +216,13 @@ rec {
       nix-build = {
         CPUWeight = 5;
         IOWeight = 2;
-        MemoryHigh = "3G";
-        MemoryMax = "8G";
+        # Rust workspace builds (sinex ~473K LOC) can consume 8-12 GB of anon
+        # memory across parallel codegen units. MemoryHigh triggers reclaim
+        # without killing the build; MemoryMax is the hard safety ceiling.
+        # Previously 3G/8G — far too low, causing constant thrashing that made
+        # the desktop unresponsive during builds even though SCHED_IDLE was set.
+        MemoryHigh = "10G";
+        MemoryMax = "18G";
         ManagedOOMMemoryPressure = "kill";
         ManagedOOMMemoryPressureLimit = "30%";
       };

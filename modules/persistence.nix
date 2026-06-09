@@ -217,9 +217,21 @@ in
         mode = "0700";
       } # index, tokens, state
 
+      # Sinex runtime
+      ".local/share/sinex" # content-store and runtime state
+
       # Large data
+      ".local/share/stashbox" # StashApp DB, models, generated media, plugins, scrapers
+      ".local/share/uv" # uv-managed Python installs
+      ".insightface" # InsightFace face-recognition models
+      ".duckdb" # DuckDB extensions cache
       ".local/share/hyprland" # Hyprland logs + state, ~1.1 GB
       ".local/share/gh" # GitHub CLI extensions, ~37 MB
+
+      # Runtime state
+      ".local/share/nats" # NATS CLI contexts and plugins
+      ".local/share/polylogue" # polylogue share data
+      ".local/state/mpv" # mpv watch-later progress
     ];
   };
 }

@@ -17,21 +17,12 @@ let
   polylogueArchiveRoot = "${capturesRoot}/polylogue";
   polylogueShareMount = "/home/${username}/.local/share/polylogue";
   swapFile = "/swap/swapfile";
-  # OOM burst buffer — not a normal pressure sink. swappiness=10 keeps anon
-  # resident and reclaims file cache first, so this space is only consumed under
-  # genuine memory exhaustion. It must be large enough that earlyoom (which fires
-  # on AND: mem<10% AND swap<25%) has reaction time before the system runs dry.
-  #
-  # 8 GiB proved insufficient (2026-06-08): ~7 GiB accumulated from idle paging
-  # left only ~1 GiB of burst headroom; a nix build + substrate promote consumed
-  # that in seconds, filling swap completely and causing an NVMe I/O storm that
-  # froze all three terminal windows before earlyoom could react.
-  #
-  # 32 GiB gives earlyoom's 25% threshold (= 8 GiB free) room to fire ~14 GiB
-  # above the idle-paging residue baseline before the system locks up. The old
-  # 64 GiB was wrong because it enabled the 17 GiB swap-thrash (swappiness=60,
-  # now fixed); 32 GiB is right because swappiness=10 won't fill it lazily.
-  swapSizeGiB = 32;
+  # OOM burst buffer — not a normal pressure sink. Policy: keep this small so
+  # earlyoom fires quickly rather than letting the system swap-thrash into a
+  # freeze. swappiness=10 keeps anon resident; this space is only consumed under
+  # genuine memory exhaustion. earlyoom freeSwapThreshold=90 fires when 800 MiB
+  # is used (7.2 GiB free on 8 GiB), giving it reaction time before exhaustion.
+  swapSizeGiB = 8;
 
   # The realm btrfs lives on the Crucial P3 NVMe. Swap and /realm share this one
   # physical filesystem (swap rides a dedicated nested @swap subvolume), so they

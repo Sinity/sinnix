@@ -92,8 +92,8 @@
           && lib.hasInfix "nix-daemon" earlyoomPrefer
           && !(lib.hasInfix "chrome" earlyoomPrefer)
           && !(lib.hasInfix "firefox" earlyoomPrefer)
-          && config.services.earlyoom.freeMemThreshold == 10
-          && config.services.earlyoom.freeSwapThreshold == 25;
+          && config.services.earlyoom.freeMemThreshold == 15
+          && config.services.earlyoom.freeSwapThreshold == 90;
         message = "earlyoom must fire before disk-swap residency collapses interactivity";
       }
       {
@@ -141,8 +141,8 @@
           && systemBackground.ManagedOOMMemoryPressureLimit == "25%"
           && nixBuild.CPUWeight == 5
           && nixBuild.IOWeight == 2
-          && nixBuild.MemoryHigh == "3G"
-          && nixBuild.MemoryMax == "8G"
+          && nixBuild.MemoryHigh == "10G"
+          && nixBuild.MemoryMax == "18G"
           && nixBuild.ManagedOOMMemoryPressure == "kill"
           && nixBuild.ManagedOOMMemoryPressureLimit == "30%"
           && systemCritical.CPUWeight == 400
@@ -180,8 +180,8 @@
       }
       {
         assertion =
-          nixSettings.max-jobs == 3
-          && nixSettings.cores == 3
+          nixSettings.max-jobs == 2
+          && nixSettings.cores == 2
           && nixSettings.http-connections == 16
           && nixSettings.max-substitution-jobs == 8
           && nixSettings.keep-going == false
@@ -193,12 +193,12 @@
               "flakes"
               "fetch-tree"
             ]
-          && lib.hasInfix "SINNIX_REBUILD_MAX_JOBS:-3" commandRegistry
-          && lib.hasInfix "SINNIX_REBUILD_CORES:-3" commandRegistry
-          && lib.hasInfix "SINNIX_REBUILD_MAX_JOBS:-3" devShell
-          && lib.hasInfix "SINNIX_REBUILD_CORES:-3" devShell
-          && lib.hasInfix "NIX_SAFE_MAX_JOBS:-3" nixSafeScript
-          && lib.hasInfix "NIX_SAFE_CORES:-3" nixSafeScript;
+          && lib.hasInfix "SINNIX_REBUILD_MAX_JOBS:-2" commandRegistry
+          && lib.hasInfix "SINNIX_REBUILD_CORES:-2" commandRegistry
+          && lib.hasInfix "SINNIX_REBUILD_MAX_JOBS:-2" devShell
+          && lib.hasInfix "SINNIX_REBUILD_CORES:-2" devShell
+          && lib.hasInfix "NIX_SAFE_MAX_JOBS:-2" nixSafeScript
+          && lib.hasInfix "NIX_SAFE_CORES:-2" nixSafeScript;
         message = "Nix concurrency and substitution fan-out must stay bounded without enabling Nix cgroups";
       }
       {
