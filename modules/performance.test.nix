@@ -98,10 +98,10 @@
       }
       {
         assertion =
-          !(config.systemd.services ? sinnix-iocost-init)
+          (config.systemd.services ? sinnix-iocost-init)
           && !(config.systemd.services ? sinnix-swap-drain)
           && !(config.systemd.timers ? sinnix-swap-drain);
-        message = "The retired io.cost and swap-drain services must not be installed";
+        message = "sinnix-iocost-init must be installed (IOWeight is a no-op on NVMe without it); swap-drain must remain retired";
       }
       {
         assertion =

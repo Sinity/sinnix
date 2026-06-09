@@ -29,6 +29,41 @@ let
       fi
     '';
   };
+  iocostInit = pkgs.writeShellApplication {
+    name = "sinnix-iocost-init";
+    runtimeInputs = [ pkgs.coreutils pkgs.gnugrep ];
+    text = ''
+      set -eu
+
+      # io.cost makes IOWeight declarations in the cgroup hierarchy actually
+      # effective on NVMe drives. Without it, the kernel ignores IOWeight for
+      # any device running the 'none' (passthrough) scheduler — which is the
+      # NVMe default — so every IOWeight config in the slice tree is silently
+      # discarded. Setting the scheduler to mq-deadline lets the block layer
+      # mediate between cgroups, and ctrl=auto calibrates the cost model from
+      # the device's actual latency characteristics.
+      for dev_path in /sys/block/*/; do
+        dev=$(basename "$dev_path")
+        # Skip loop devices
+        echo "$dev" | grep -q "^loop" && continue
+        # Skip if no queue/scheduler
+        [ -f "$dev_path/queue/scheduler" ] || continue
+
+        major_minor=$(cat "$dev_path/dev")
+
+        # NVMe uses 'none' by default which disables queue-based IO scheduling.
+        # Switch to mq-deadline so cgroup IOWeight can actually take effect.
+        scheduler=$(cat "$dev_path/queue/scheduler")
+        if echo "$scheduler" | grep -q "\[none\]"; then
+          echo "mq-deadline" > "$dev_path/queue/scheduler" || true
+        fi
+
+        # Activate iocost cost model — auto-calibrates from device latency.
+        # This makes IOWeight proportional and work-conserving rather than nominal.
+        printf '%s ctrl=auto\n' "$major_minor" > /sys/fs/cgroup/io.cost.qos || true
+      done
+    '';
+  };
   applyCpuPowerLimits = pkgs.writeShellApplication {
     name = "sinnix-apply-cpu-power-limits";
     runtimeInputs = [
@@ -118,6 +153,18 @@ in
         Type = "oneshot";
         RemainAfterExit = true;
         ExecStart = "${panicLogCapture}/bin/panic-log-capture";
+      };
+    };
+
+    systemd.services.sinnix-iocost-init = {
+      description = "Activate io.cost on all block devices so IOWeight is honoured";
+      wantedBy = [ "sysinit.target" ];
+      before = [ "sysinit.target" ];
+      unitConfig.DefaultDependencies = false;
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        ExecStart = "${iocostInit}/bin/sinnix-iocost-init";
       };
     };
 
