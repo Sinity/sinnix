@@ -50,13 +50,15 @@ in
         ];
         netrc-file = "/etc/nix/netrc";
 
-        # Limit parallel derivations and per-job cores to cap peak thermal load.
-        # At max-jobs=3 / cores=3, the nix-daemon could run 9 SCHED_IDLE cores
-        # simultaneously — enough heat to throttle the video decoder's P-core.
-        # max-jobs=2 / cores=2 keeps peak active cores at 4 and memory usage
-        # proportionally lower.
+        # 2 parallel derivations × 10 cores each = 20 SCHED_IDLE threads max.
+        # Keeping max-jobs=2 bounds peak memory (one big Rust job at 4-8 GB,
+        # not four). Raising cores 2→10 gives rustc 10 threads per job, cutting
+        # sinexd build time from ~16 min back to ~3-4 min (the historic baseline
+        # before the overcautious 2/2 setting was introduced 2026-04-18).
+        # The daemon lives in nix-build.slice (CPUWeight=5/IOWeight=2/MemHigh=16G)
+        # so builds yield to foreground work even at 20 active threads.
         max-jobs = 2;
-        cores = 2;
+        cores = 10;
         builders-use-substitutes = true;
         keep-outputs = true;
         keep-derivations = true;
@@ -139,9 +141,11 @@ in
           Slice = "nix-build.slice";
           # Soft memory ceiling: kernel reclaims from build processes before
           # they evict desktop/video/sinexd working sets. Rust workspace builds
-          # can spike to ~8 GB; 10 G gives headroom without starving the system
-          # (32 GB total → 22 GB free for OS + sinexd + desktop at this limit).
-          MemoryHigh = "10G";
+          # can spike to ~8 GB per job; at max-jobs=2 that's up to ~16 GB peak.
+          # 16G gives the two concurrent jobs room without starving the system
+          # (32 GB total → 16 GB headroom for OS + sinexd + desktop).
+          # The previous 10G limit caused the nix-daemon to crash mid-Rust-build.
+          MemoryHigh = "16G";
         };
       };
     };
