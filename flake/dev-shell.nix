@@ -50,6 +50,29 @@
           append_override_arg lynchpin "$SINNIX_LYNCHPIN_OVERRIDE"
         fi
       '';
+      # Wrapper for nix that serializes heavy subcommands (build, flake check)
+      # behind the same lock as switch/boot/test. Passes through all other
+      # subcommands (eval, develop, shell, run, fmt, flake update, etc.)
+      # without any lock overhead.
+      nixWrapper = pkgs.writeShellScriptBin "nix" ''
+        set -euo pipefail
+        _cmd="''${1:-}"
+        _sub="''${2:-}"
+        # SINNIX_REBUILD_ACTIVE=1 is set by switch/boot/test — they already hold
+        # the lock. Pass through without re-acquiring to avoid deadlock.
+        if [ -z "''${SINNIX_REBUILD_ACTIVE:-}" ]; then
+          if [ "$_cmd" = "build" ] || { [ "$_cmd" = "flake" ] && [ "$_sub" = "check" ]; }; then
+            exec 9>/tmp/sinnix-switch.lock
+            if ! ${pkgs.util-linux}/bin/flock --nonblock 9; then
+              echo "nix $1: another heavy nix operation is already running — aborting to prevent thrashing" >&2
+              echo "  Tip: wait for the running build to finish, or kill it first." >&2
+              exit 1
+            fi
+          fi
+        fi
+        exec ${pkgs.nix}/bin/nix "$@"
+      '';
+
       mkNhCommand =
         name: action:
         pkgs.writeShellScriptBin name ''
@@ -68,6 +91,7 @@
             --user \
             --quiet --collect --pipe --service-type=exec --wait \
             --setenv=PATH="${rebuildServicePath}:$PATH" \
+            --setenv=SINNIX_REBUILD_ACTIVE=1 \
             --slice=nix-build.slice \
             -p CPUSchedulingPolicy=idle \
             -p IOSchedulingClass=idle \
@@ -82,7 +106,13 @@
       # Devshell command wrappers — every listed command is directly typeable
       devCommands = {
         check = pkgs.writeShellScriptBin "check" ''
-          exec ${scriptPkgs.nix-safe}/bin/nix-safe flake check "$@"
+          set -euo pipefail
+          exec 9>/tmp/sinnix-switch.lock
+          if ! ${pkgs.util-linux}/bin/flock --nonblock 9; then
+            echo "sinnix check: another heavy nix operation is already running — aborting to prevent thrashing" >&2
+            exit 1
+          fi
+          SINNIX_REBUILD_ACTIVE=1 exec ${scriptPkgs.nix-safe}/bin/nix-safe flake check "$@"
         '';
         format = pkgs.writeShellScriptBin "format" ''exec ${nix} fmt "$@"'';
         switch = mkNhCommand "switch" "switch";
@@ -175,6 +205,9 @@
         name = "nixos-config-dev";
 
         packages = [
+          # nix wrapper must come first — shadows system nix to serialize heavy ops
+          nixWrapper
+
           # Version control
           pkgs.git
           pkgs.gh

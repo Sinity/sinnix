@@ -23,6 +23,10 @@ mkFeatureModule {
         bubblewrap
         unzip
         wget
+        # age: same crypto as agenix. Kept system-wide so the master-key
+        # escrow blob (docs/key-recovery.md) can be created and, more
+        # importantly, decrypted during disaster recovery without fetching tools.
+        age
         # Modern CLI replacements
         eza
         bat

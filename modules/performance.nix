@@ -60,7 +60,7 @@ let
 
         # Activate iocost cost model — auto-calibrates from device latency.
         # This makes IOWeight proportional and work-conserving rather than nominal.
-        printf '%s ctrl=auto\n' "$major_minor" > /sys/fs/cgroup/io.cost.qos || true
+        printf '%s enable=1 ctrl=auto\n' "$major_minor" > /sys/fs/cgroup/io.cost.qos || true
       done
     '';
   };
