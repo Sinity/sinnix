@@ -6,14 +6,12 @@ usage() {
   cat <<'EOF'
 Usage:
   hdr-screenshot probe
-  hdr-screenshot area [--dir DIR] [--brightness PCT] [--saturation PCT] [--gamma VALUE] [--copy raw|corrected] [--no-notify]
-  hdr-screenshot output [--dir DIR] [--brightness PCT] [--saturation PCT] [--gamma VALUE] [--copy raw|corrected] [--no-notify]
-  hdr-screenshot tone-map --in FILE [--out FILE] [--brightness PCT] [--saturation PCT] [--gamma VALUE]
+  hdr-screenshot area [--dir DIR] [--no-notify]
+  hdr-screenshot output [--dir DIR] [--no-notify]
 
-Behavior:
-  - In HDR mode, captures a raw PNG plus a corrected sidecar.
-  - In SDR mode, captures a single PNG unchanged.
-  - By default, the corrected PNG is copied to the clipboard in HDR mode.
+Captures the selected area or focused output, saves it, and copies it to the
+clipboard. On Hyprland HDR outputs, temporarily switches the focused output to
+SDR for capture because the HDR screencopy path can produce black frames.
 EOF
 }
 
@@ -22,14 +20,12 @@ die() {
   exit 1
 }
 
-notify_enabled=1
-copy_mode="corrected"
+need_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+}
+
 target_dir="${HOME}/Pictures/Screenshots"
-brightness=""
-saturation=""
-gamma=""
-input_file=""
-output_file=""
+notify=1
 
 if [ $# -lt 1 ]; then
   usage
@@ -46,39 +42,9 @@ while [ $# -gt 0 ]; do
       target_dir="$2"
       shift 2
       ;;
-    --brightness)
-      [ $# -ge 2 ] || die "--brightness requires a value"
-      brightness="$2"
-      shift 2
-      ;;
-    --saturation)
-      [ $# -ge 2 ] || die "--saturation requires a value"
-      saturation="$2"
-      shift 2
-      ;;
-    --gamma)
-      [ $# -ge 2 ] || die "--gamma requires a value"
-      gamma="$2"
-      shift 2
-      ;;
-    --copy)
-      [ $# -ge 2 ] || die "--copy requires raw or corrected"
-      copy_mode="$2"
-      shift 2
-      ;;
     --no-notify)
-      notify_enabled=0
+      notify=0
       shift
-      ;;
-    --in)
-      [ $# -ge 2 ] || die "--in requires a file"
-      input_file="$2"
-      shift 2
-      ;;
-    --out)
-      [ $# -ge 2 ] || die "--out requires a file"
-      output_file="$2"
-      shift 2
       ;;
     -h|--help)
       usage
@@ -90,146 +56,76 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-need_cmd() {
-  command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
-}
-
-send_notification() {
-  local title="$1"
-  local body="$2"
-  if [ "$notify_enabled" -eq 1 ] && command -v notify-send >/dev/null 2>&1; then
-    notify-send "$title" "$body"
-  fi
-}
-
-copy_file() {
-  local path="$1"
-  if command -v wl-copy >/dev/null 2>&1; then
-    wl-copy < "$path"
-  fi
-}
-
-focused_monitor_json() {
-  hyprctl monitors -j | jq -c 'map(select(.focused))[0] // empty'
-}
-
-default_brightness() {
-  local sdr_brightness="$1"
-  awk -v s="$sdr_brightness" 'BEGIN {
-    if (s <= 0) s = 1;
-    b = int((100 / s) + 0.5);
-    if (b < 70) b = 70;
-    if (b > 100) b = 100;
-    printf "%d\n", b;
-  }'
-}
-
-run_tone_map() {
-  local in_path="$1"
-  local out_path="$2"
-  local brightness_pct="$3"
-  local saturation_pct="$4"
-  local gamma_value="$5"
-  magick "$in_path" \
-    -modulate "${brightness_pct},${saturation_pct},100" \
-    -gamma "$gamma_value" \
-    "$out_path"
-}
-
 case "$subcommand" in
   probe)
-    need_cmd hyprctl
-    need_cmd jq
-    focused_monitor_json
-    exit 0
-    ;;
-  tone-map)
-    need_cmd magick
-    [ -n "$input_file" ] || die "tone-map requires --in FILE"
-    [ -f "$input_file" ] || die "input file does not exist: $input_file"
-    if [ -z "$output_file" ]; then
-      output_file="${input_file%.*}.hdrfix.png"
-    fi
-    brightness="${brightness:-77}"
-    saturation="${saturation:-120}"
-    gamma="${gamma:-1.05}"
-    run_tone_map "$input_file" "$output_file" "$brightness" "$saturation" "$gamma"
-    printf '%s\n' "$output_file"
-    exit 0
+    need_cmd grimblast
+    grimblast check
     ;;
   area|output)
+    need_cmd date
+    need_cmd grim
+    need_cmd hyprctl
+    need_cmd jq
+    need_cmd wl-copy
+    if [ "$subcommand" = "area" ]; then
+      need_cmd slurp
+    fi
+
+    mkdir -p "$target_dir"
+    path="${target_dir}/$(date +'%Y-%m-%d-At-%Hh%Mm%Ss').png"
+
+    monitor_json="$(hyprctl -j monitors | jq -c 'map(select(.focused == true))[0]')"
+    [ -n "$monitor_json" ] && [ "$monitor_json" != "null" ] || die "no focused monitor found"
+
+    monitor="$(jq -r '.name' <<<"$monitor_json")"
+    width="$(jq -r '.width' <<<"$monitor_json")"
+    height="$(jq -r '.height' <<<"$monitor_json")"
+    refresh="$(jq -r '.refreshRate | round | tostring' <<<"$monitor_json")"
+    x="$(jq -r '.x' <<<"$monitor_json")"
+    y="$(jq -r '.y' <<<"$monitor_json")"
+    scale="$(jq -r '.scale' <<<"$monitor_json")"
+    cm="$(jq -r '.colorManagementPreset // ""' <<<"$monitor_json")"
+    sdr_brightness="$(jq -r '.sdrBrightness // 1.0' <<<"$monitor_json")"
+    sdr_saturation="$(jq -r '.sdrSaturation // 1.0' <<<"$monitor_json")"
+
+    restore_rule="$monitor,${width}x${height}@${refresh},${x}x${y},${scale},bitdepth,10,cm,hdr,sdrbrightness,${sdr_brightness},sdrsaturation,${sdr_saturation}"
+    capture_rule="$monitor,${width}x${height}@${refresh},${x}x${y},${scale},bitdepth,8,cm,srgb"
+
+    restore_monitor() {
+      if [ "$cm" = "hdr" ]; then
+        hyprctl keyword monitor "$restore_rule" >/dev/null 2>&1 || true
+      fi
+    }
+
+    if [ "$cm" = "hdr" ]; then
+      trap restore_monitor EXIT
+      hyprctl keyword monitor "$capture_rule" >/dev/null
+      sleep 0.2
+    fi
+
+    case "$subcommand" in
+      area)
+        geom="$(slurp)"
+        [ -n "$geom" ] || die "area selection cancelled"
+        grim -g "$geom" "$path"
+        ;;
+      output)
+        grim -c -o "$monitor" "$path"
+        ;;
+    esac
+
+    restore_monitor
+    trap - EXIT
+
+    [ -s "$path" ] || die "capture did not produce an image"
+    wl-copy --type image/png <"$path"
+    if [ "$notify" -eq 1 ]; then
+      notify-send -t 2000 "Screenshot saved" "$path" || true
+    fi
+    printf '%s\n' "$path"
     ;;
   *)
     usage
     die "unknown subcommand: $subcommand"
     ;;
 esac
-
-need_cmd hyprctl
-need_cmd jq
-need_cmd grimblast
-need_cmd magick
-need_cmd date
-
-monitor_json="$(focused_monitor_json)"
-[ -n "$monitor_json" ] || die "could not determine focused monitor"
-
-color_preset="$(printf '%s' "$monitor_json" | jq -r '.colorManagementPreset // ""')"
-sdr_brightness_value="$(printf '%s' "$monitor_json" | jq -r '.sdrBrightness // 1')"
-monitor_name="$(printf '%s' "$monitor_json" | jq -r '.name // "unknown"')"
-hdr_active=0
-if [ "$color_preset" = "hdr" ]; then
-  hdr_active=1
-fi
-
-brightness="${brightness:-$(default_brightness "$sdr_brightness_value")}"
-saturation="${saturation:-120}"
-gamma="${gamma:-1.05}"
-
-mkdir -p "$target_dir"
-timestamp="$(date +'%Y-%m-%d-At-%Hh%Mm%Ss')"
-base_path="${target_dir}/${timestamp}"
-final_path="${base_path}.png"
-raw_path="$final_path"
-copied_path="$final_path"
-
-if [ "$hdr_active" -eq 1 ]; then
-  raw_path="${base_path}.raw.png"
-fi
-
-case "$subcommand" in
-  area)
-    grimblast --freeze save area "$raw_path" >/dev/null
-    ;;
-  output)
-    grimblast --cursor save output "$raw_path" >/dev/null
-    ;;
-esac
-
-[ -s "$raw_path" ] || die "capture did not produce an image"
-
-if [ "$hdr_active" -eq 1 ]; then
-  run_tone_map "$raw_path" "$final_path" "$brightness" "$saturation" "$gamma"
-  case "$copy_mode" in
-    raw)
-      copied_path="$raw_path"
-      ;;
-    corrected)
-      copied_path="$final_path"
-      ;;
-    *)
-      die "--copy must be raw or corrected"
-      ;;
-  esac
-  copy_file "$copied_path"
-  send_notification \
-    "HDR screenshot saved" \
-    "Monitor: ${monitor_name}\nRaw: $(basename "$raw_path")\nCorrected: $(basename "$final_path")\nCopied: $(basename "$copied_path")"
-else
-  copy_file "$final_path"
-  send_notification \
-    "Screenshot saved" \
-    "Monitor: ${monitor_name}\nFile: $(basename "$final_path")"
-fi
-
-printf '%s\n' "$copied_path"

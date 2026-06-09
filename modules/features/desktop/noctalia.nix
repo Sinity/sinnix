@@ -69,6 +69,11 @@ mkFeatureModule {
 
       # Persist runtime-fetched plugin code + palette cache (config.toml and
       # plugins.json are out-of-store symlinks into the repo, not persisted here).
-      sinnix.persistence.home.directories = [ ".config/noctalia" ];
+      sinnix.persistence.home.directories = [
+        ".config/noctalia"
+        ".local/state/noctalia"
+        ".cache/noctalia/community-templates"
+        ".cache/noctalia/community-palettes"
+      ];
     };
 } args

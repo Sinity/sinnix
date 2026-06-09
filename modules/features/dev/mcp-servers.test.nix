@@ -22,7 +22,10 @@ mkFeatureTest {
           "";
       managedEntrySource =
         entry: if entry ? source && entry.source != null then toString entry.source else "";
-      codexConfigText = managedEntryText hm.home.file.".codex/config.toml";
+      # config.toml is deployed via home.activation (writable file, not a Nix
+      # store symlink). The module exposes the generated derivation path via
+      # the internal codexConfigSource option for content assertions.
+      codexConfigText = builtins.readFile config.sinnix.features.dev.mcp-servers.codexConfigSource;
       # Rendered Claude settings — merged from static base and registry mcpServers.
       # Compute inline rather than reading the rendered file because this test
       # exercises the dev.mcp-servers feature in isolation; agent-tools (which
@@ -50,7 +53,10 @@ mkFeatureTest {
           ) == null;
         message = "Agent launcher must not wrap kitty launches in zsh -lc";
       }
-      (expect.hmFileExists hm ".codex/config.toml" "Codex config must be managed")
+      {
+        assertion = hm.home.activation ? codexConfig;
+        message = "Codex config must be deployed via home.activation (writable, not a Nix store symlink)";
+      }
       (expect.hmFileExists hm ".codex/skills"
         "Codex skills must be linked from the dedicated dots/codex/skills tree"
       )

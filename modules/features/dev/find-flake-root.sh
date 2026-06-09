@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
-if [ -n "${FLAKE:-}" ]; then
+if [ -n "${NH_FLAKE:-}" ]; then
+  printf '%s\n' "$NH_FLAKE"
+elif [ -n "${FLAKE:-}" ]; then
   printf '%s\n' "$FLAKE"
   exit 0
 fi

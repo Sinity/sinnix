@@ -23,19 +23,20 @@
         "sinex-nats-bootstrap"
         "sinex-blob-init"
         "sinex-tls-init"
+        "sinexd"
         "sinex-ingestd"
         "sinex-gateway"
         "sinex-kitty-setup"
       ]
       ++ (config.sinex._generatedUnits or [ ])
-      ++ lib.optionals (lib.attrByPath [ "services" "sinex" "nodes" "document" "enable" ] false config) [
+      ++ lib.optionals (lib.attrByPath [ "services" "sinex" "sources" "document" "enable" ] false config) [
         "sinex-document-scan"
       ];
       runtimeServices = lib.unique (
         builtins.filter (name: builtins.hasAttr name config.systemd.services) candidateRuntimeServices
       );
       # restartableRuntimeServices = long-running notify-style services only.
-      # Generated source-workers tagged service_policy=invoked_on_demand are
+      # Generated source services tagged service_policy=invoked_on_demand are
       # oneshots (Restart=no); excluding them by their runtime shape avoids
       # depending on catalog metadata that the test doesn't import.
       restartableRuntimeServices = lib.unique (
@@ -47,6 +48,7 @@
           )
           (
             [
+              "sinexd"
               "sinex-ingestd"
               "sinex-gateway"
             ]
@@ -57,6 +59,8 @@
       serviceWantedBy = name: lib.attrByPath [ "systemd" "services" name "wantedBy" ] [ ] config;
       serviceRestartIfChanged =
         name: lib.attrByPath [ "systemd" "services" name "restartIfChanged" ] true config;
+      serviceStopIfChanged =
+        name: lib.attrByPath [ "systemd" "services" name "stopIfChanged" ] true config;
       serviceRestartMode =
         name: lib.attrByPath [ "systemd" "services" name "serviceConfig" "Restart" ] null config;
       serviceRestartSec =
@@ -104,8 +108,8 @@
       sinexRuntimeRoot = "/var/lib/sinex";
       persistedSystemDirs = config.sinnix.persistence.system.directories;
       postgresqlUnitConfig = serviceUnitConfig "postgresql";
-      sinexFilesystem = config.services.sinex.nodes.filesystem;
-      sinexAutomata = config.services.sinex.nodes.automata;
+      sinexFilesystem = config.services.sinex.sources.filesystem;
+      sinexAutomata = config.services.sinex.automata;
       preflightEnabled = lib.attrByPath [
         "services"
         "sinex"
@@ -122,7 +126,7 @@
         "sinex-document-target-access"
         "sinex-terminal-target-access"
       ];
-      generatedSourceWorkerServices = builtins.filter (name: lib.hasPrefix "sinex-source-worker-" name) (
+      generatedSourceServices = builtins.filter (name: lib.hasPrefix "sinex-source-" name) (
         config.sinex._generatedUnits or [ ]
       );
     in
@@ -140,6 +144,10 @@
       {
         assertion = builtins.all (name: serviceRestartIfChanged name == false) runtimeServices;
         message = "Sinex runtime services must not restart during desktop activation";
+      }
+      {
+        assertion = builtins.all (name: serviceStopIfChanged name == false) restartableRuntimeServices;
+        message = "Long-running Sinex runtime services must not stop during desktop activation";
       }
       {
         assertion = builtins.all (
@@ -287,8 +295,8 @@
       {
         assertion = builtins.all (
           name: (serviceConfig name).TimeoutStartSec == "90s"
-        ) generatedSourceWorkerServices;
-        message = "Sinex source workers must have a bounded startup window for local source lease acquisition";
+        ) generatedSourceServices;
+        message = "Sinex source services must have a bounded startup window for local source lease acquisition";
       }
       {
         assertion =
@@ -310,13 +318,15 @@
       {
         assertion =
           config.services.nats.settings.jetstream.max_file == "32G"
-          && !(natsService ? MemoryHigh)
+          && natsService.MemoryHigh == "8G"
           && !(natsService ? MemoryMax)
-          && natsService.Nice == 5
-          && natsService.IOWeight == 50
+          && natsService.Nice == 8
+          && natsService.IOSchedulingClass == "best-effort"
+          && natsService.IOSchedulingPriority == 7
+          && natsService.IOWeight == 20
           && !(natsService ? IOReadBandwidthMax)
           && !(natsService ? IOWriteBandwidthMax);
-        message = "NATS must keep storage sizing with only soft workstation scheduler bias";
+        message = "NATS must keep storage sizing with a soft 8G ceiling and capture-substrate scheduler bias (no hard cap)";
       }
       {
         assertion = natsService.KillSignal == "SIGTERM" && natsService.TimeoutStopSec == "90s";
@@ -324,13 +334,15 @@
       }
       {
         assertion =
-          !(postgresService ? MemoryHigh)
+          postgresService.MemoryHigh == "8G"
           && !(postgresService ? MemoryMax)
-          && postgresService.Nice == 5
-          && postgresService.IOWeight == 50
+          && postgresService.Nice == 8
+          && postgresService.IOSchedulingClass == "best-effort"
+          && postgresService.IOSchedulingPriority == 7
+          && postgresService.IOWeight == 20
           && !(postgresService ? IOReadBandwidthMax)
           && !(postgresService ? IOWriteBandwidthMax);
-        message = "PostgreSQL must carry only soft workstation scheduler bias";
+        message = "PostgreSQL must carry a soft 8G ceiling and capture-substrate scheduler bias (no hard cap)";
       }
       {
         assertion =

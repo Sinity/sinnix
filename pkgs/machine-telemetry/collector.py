@@ -8,12 +8,41 @@ import os
 import re
 import sqlite3
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 UTC = dt.timezone.utc
+DISKSTAT_FIELDS = (
+    "reads_completed",
+    "reads_merged",
+    "sectors_read",
+    "read_time_ms",
+    "writes_completed",
+    "writes_merged",
+    "sectors_written",
+    "write_time_ms",
+    "ios_in_progress",
+    "io_time_ms",
+    "weighted_io_time_ms",
+    "discards_completed",
+    "discards_merged",
+    "sectors_discarded",
+    "discard_time_ms",
+    "flushes_completed",
+    "flush_time_ms",
+)
+PROC_IO_FIELDS = (
+    "read_bytes",
+    "write_bytes",
+    "cancelled_write_bytes",
+    "rchar",
+    "wchar",
+    "syscr",
+    "syscw",
+)
 
 
 def now_iso() -> str:
@@ -173,30 +202,465 @@ def dstate_tasks() -> tuple[int, str | None]:
     return count, ",".join(sorted(set(waits))) if waits else None
 
 
+def read_proc_io(pid: str) -> dict[str, int] | None:
+    raw = read_text(Path("/proc") / pid / "io")
+    if not raw:
+        return None
+    values: dict[str, int] = {}
+    for line in raw.splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        if key in PROC_IO_FIELDS:
+            parsed = int_or_none(value.strip())
+            if parsed is not None:
+                values[key] = parsed
+    return values if values else None
+
+
+def process_start_time_ticks(pid: str) -> int | None:
+    raw = read_text(Path("/proc") / pid / "stat")
+    if not raw or ")" not in raw:
+        return None
+    fields_after_comm = raw.rsplit(")", 1)[1].strip().split()
+    if len(fields_after_comm) <= 19:
+        return None
+    return int_or_none(fields_after_comm[19])
+
+
+def process_cgroup(pid: str) -> str | None:
+    raw = read_text(Path("/proc") / pid / "cgroup")
+    if not raw:
+        return None
+    for line in raw.splitlines():
+        parts = line.split(":", 2)
+        if len(parts) == 3 and parts[1] == "":
+            return parts[2]
+    return None
+
+
+def process_unit_from_cgroup(cgroup: str | None) -> tuple[str | None, str | None]:
+    if not cgroup:
+        return None, None
+    for segment in reversed(cgroup.split("/")):
+        if segment.endswith((".service", ".scope")):
+            scope = "user" if "user.slice" in cgroup else "system"
+            return segment, scope
+    return None, None
+
+
+def process_identity(pid: str) -> dict[str, object] | None:
+    start_time = process_start_time_ticks(pid)
+    if start_time is None:
+        return None
+    proc = Path("/proc") / pid
+    comm = read_text(proc / "comm")
+    try:
+        exe = os.readlink(proc / "exe")
+    except OSError:
+        exe = None
+    cgroup = process_cgroup(pid)
+    unit, scope = process_unit_from_cgroup(cgroup)
+    return {
+        "pid": int_or_none(pid),
+        "process_start_time_ticks": start_time,
+        "comm": comm,
+        "exe": exe,
+        "cgroup": cgroup,
+        "unit": unit,
+        "scope": scope,
+    }
+
+
+def process_io_snapshot() -> dict[tuple[int, int], dict[str, object]]:
+    snapshot: dict[tuple[int, int], dict[str, object]] = {}
+    for proc_dir in Path("/proc").glob("[0-9]*"):
+        pid = proc_dir.name
+        counters = read_proc_io(pid)
+        if counters is None:
+            continue
+        identity = process_identity(pid)
+        if identity is None:
+            continue
+        parsed_pid = identity.get("pid")
+        start_time = identity.get("process_start_time_ticks")
+        if not isinstance(parsed_pid, int) or not isinstance(start_time, int):
+            continue
+        snapshot[(parsed_pid, start_time)] = {**identity, "counters": counters}
+    return snapshot
+
+
+def positive_delta(before: object, after: object) -> int:
+    if not isinstance(before, int) or not isinstance(after, int) or after < before:
+        return 0
+    return after - before
+
+
+def process_io_delta_rows(
+    observed_at: str,
+    host: str,
+    boot_id: str | None,
+    previous: dict[tuple[int, int], dict[str, object]],
+    current: dict[tuple[int, int], dict[str, object]],
+    *,
+    interval_s: float,
+    limit: int,
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    if interval_s <= 0:
+        interval_s = 0.0
+    for key, after_row in current.items():
+        before_row = previous.get(key)
+        if before_row is None:
+            continue
+        before = before_row.get("counters")
+        after = after_row.get("counters")
+        if not isinstance(before, dict) or not isinstance(after, dict):
+            continue
+        deltas = {
+            field: positive_delta(before.get(field), after.get(field))
+            for field in PROC_IO_FIELDS
+        }
+        total_bytes = deltas["read_bytes"] + deltas["write_bytes"]
+        total_syscalls = deltas["syscr"] + deltas["syscw"]
+        if total_bytes <= 0 and total_syscalls <= 0:
+            continue
+        rows.append(
+            {
+                "observed_at": observed_at,
+                "host": host,
+                "boot_id": boot_id,
+                "schema_version": SCHEMA_VERSION,
+                "interval_s": interval_s,
+                "pid": after_row.get("pid"),
+                "process_start_time_ticks": after_row.get("process_start_time_ticks"),
+                "comm": after_row.get("comm"),
+                "exe": after_row.get("exe"),
+                "cgroup": after_row.get("cgroup"),
+                "unit": after_row.get("unit"),
+                "scope": after_row.get("scope"),
+                "read_bytes_delta": deltas["read_bytes"],
+                "write_bytes_delta": deltas["write_bytes"],
+                "cancelled_write_bytes_delta": deltas["cancelled_write_bytes"],
+                "read_chars_delta": deltas["rchar"],
+                "write_chars_delta": deltas["wchar"],
+                "read_syscalls_delta": deltas["syscr"],
+                "write_syscalls_delta": deltas["syscw"],
+                "total_bytes_delta": total_bytes,
+                "total_syscalls_delta": total_syscalls,
+            }
+        )
+    rows.sort(
+        key=lambda row: (
+            -int(row["total_bytes_delta"]),
+            -int(row["total_syscalls_delta"]),
+            str(row.get("comm") or ""),
+        )
+    )
+    return rows[:limit]
+
+
+def insert_process_io_deltas(conn: sqlite3.Connection, rows: list[dict[str, object]]) -> None:
+    if not rows:
+        return
+    conn.executemany(
+        """
+        INSERT INTO process_io_delta_sample (
+          observed_at, host, boot_id, schema_version, interval_s,
+          pid, process_start_time_ticks, comm, exe, cgroup, unit, scope,
+          read_bytes_delta, write_bytes_delta, cancelled_write_bytes_delta,
+          read_chars_delta, write_chars_delta, read_syscalls_delta,
+          write_syscalls_delta, total_bytes_delta, total_syscalls_delta
+        ) VALUES (
+          :observed_at, :host, :boot_id, :schema_version, :interval_s,
+          :pid, :process_start_time_ticks, :comm, :exe, :cgroup, :unit, :scope,
+          :read_bytes_delta, :write_bytes_delta, :cancelled_write_bytes_delta,
+          :read_chars_delta, :write_chars_delta, :read_syscalls_delta,
+          :write_syscalls_delta, :total_bytes_delta, :total_syscalls_delta
+        )
+        """,
+        rows,
+    )
+
+
+def should_capture_block_device(device: str) -> bool:
+    # loop/ram/zram are noise for host contention attribution. Keep physical
+    # disks, their partitions, and dm-* mapper devices so analysis can choose
+    # either whole-device or filesystem-facing counters.
+    return not (
+        device.startswith("loop")
+        or device.startswith("ram")
+        or device.startswith("zram")
+        or device.startswith("fd")
+    )
+
+
+def block_device_stats(
+    observed_at: str, host: str, boot_id: str | None
+) -> list[dict[str, object]]:
+    raw = read_text("/proc/diskstats")
+    if not raw:
+        return []
+    rows: list[dict[str, object]] = []
+    for line in raw.splitlines():
+        parts = line.split()
+        if len(parts) < 14:
+            continue
+        device = parts[2]
+        if not should_capture_block_device(device):
+            continue
+        row: dict[str, object] = {
+            "observed_at": observed_at,
+            "host": host,
+            "boot_id": boot_id,
+            "schema_version": SCHEMA_VERSION,
+            "major": int_or_none(parts[0]),
+            "minor": int_or_none(parts[1]),
+            "device": device,
+        }
+        values = [int_or_none(value) for value in parts[3:]]
+        for index, field in enumerate(DISKSTAT_FIELDS):
+            row[field] = values[index] if index < len(values) else None
+        rows.append(row)
+    return rows
+
+
+def insert_block_device_stats(
+    conn: sqlite3.Connection, observed_at: str, host: str, boot_id: str | None
+) -> None:
+    rows = block_device_stats(observed_at, host, boot_id)
+    if not rows:
+        return
+    conn.executemany(
+        """
+        INSERT INTO block_device_sample (
+          observed_at, host, boot_id, schema_version, major, minor, device,
+          reads_completed, reads_merged, sectors_read, read_time_ms,
+          writes_completed, writes_merged, sectors_written, write_time_ms,
+          ios_in_progress, io_time_ms, weighted_io_time_ms,
+          discards_completed, discards_merged, sectors_discarded,
+          discard_time_ms, flushes_completed, flush_time_ms
+        ) VALUES (
+          :observed_at, :host, :boot_id, :schema_version, :major, :minor, :device,
+          :reads_completed, :reads_merged, :sectors_read, :read_time_ms,
+          :writes_completed, :writes_merged, :sectors_written, :write_time_ms,
+          :ios_in_progress, :io_time_ms, :weighted_io_time_ms,
+          :discards_completed, :discards_merged, :sectors_discarded,
+          :discard_time_ms, :flushes_completed, :flush_time_ms
+        )
+        """,
+        rows,
+    )
+
+
+def cgroup_io_stats(
+    observed_at: str,
+    host: str,
+    boot_id: str | None,
+    *,
+    unit: str,
+    scope: str,
+    control_group: str | None,
+) -> list[dict[str, object]]:
+    if not control_group:
+        return []
+    path = Path("/sys/fs/cgroup") / control_group.lstrip("/") / "io.stat"
+    raw = read_text(path)
+    if not raw:
+        return []
+    rows: list[dict[str, object]] = []
+    for line in raw.splitlines():
+        parts = line.split()
+        if not parts or ":" not in parts[0]:
+            continue
+        major_text, minor_text = parts[0].split(":", 1)
+        row: dict[str, object] = {
+            "observed_at": observed_at,
+            "host": host,
+            "boot_id": boot_id,
+            "schema_version": SCHEMA_VERSION,
+            "unit": unit,
+            "scope": scope,
+            "control_group": control_group,
+            "major": int_or_none(major_text),
+            "minor": int_or_none(minor_text),
+            "rbytes": None,
+            "wbytes": None,
+            "rios": None,
+            "wios": None,
+            "dbytes": None,
+            "dios": None,
+        }
+        for item in parts[1:]:
+            if "=" not in item:
+                continue
+            key, value = item.split("=", 1)
+            if key in row:
+                row[key] = int_or_none(value)
+        rows.append(row)
+    return rows
+
+
+def cgroup_pressure_stats(
+    observed_at: str,
+    host: str,
+    boot_id: str | None,
+    *,
+    unit: str,
+    scope: str,
+    control_group: str | None,
+) -> dict[str, object] | None:
+    if not control_group:
+        return None
+    root = Path("/sys/fs/cgroup") / control_group.lstrip("/")
+    cpu = parse_psi(str(root / "cpu.pressure"))
+    io = parse_psi(str(root / "io.pressure"))
+    memory = parse_psi(str(root / "memory.pressure"))
+    if not cpu and not io and not memory:
+        return None
+    return {
+        "observed_at": observed_at,
+        "host": host,
+        "boot_id": boot_id,
+        "schema_version": SCHEMA_VERSION,
+        "unit": unit,
+        "scope": scope,
+        "control_group": control_group,
+        "cpu_some_avg10": cpu.get("some_avg10"),
+        "cpu_some_avg60": cpu.get("some_avg60"),
+        "cpu_some_avg300": cpu.get("some_avg300"),
+        "cpu_some_total_us": cpu.get("some_total"),
+        "io_some_avg10": io.get("some_avg10"),
+        "io_some_avg60": io.get("some_avg60"),
+        "io_some_avg300": io.get("some_avg300"),
+        "io_some_total_us": io.get("some_total"),
+        "io_full_avg10": io.get("full_avg10"),
+        "io_full_avg60": io.get("full_avg60"),
+        "io_full_avg300": io.get("full_avg300"),
+        "io_full_total_us": io.get("full_total"),
+        "memory_some_avg10": memory.get("some_avg10"),
+        "memory_some_avg60": memory.get("some_avg60"),
+        "memory_some_avg300": memory.get("some_avg300"),
+        "memory_some_total_us": memory.get("some_total"),
+        "memory_full_avg10": memory.get("full_avg10"),
+        "memory_full_avg60": memory.get("full_avg60"),
+        "memory_full_avg300": memory.get("full_avg300"),
+        "memory_full_total_us": memory.get("full_total"),
+    }
+
+
+def insert_cgroup_io_stats(conn: sqlite3.Connection, rows: list[dict[str, object]]) -> None:
+    if not rows:
+        return
+    conn.executemany(
+        """
+        INSERT INTO service_cgroup_io_sample (
+          observed_at, host, boot_id, schema_version, unit, scope,
+          control_group, major, minor, rbytes, wbytes, rios, wios, dbytes, dios
+        ) VALUES (
+          :observed_at, :host, :boot_id, :schema_version, :unit, :scope,
+          :control_group, :major, :minor, :rbytes, :wbytes, :rios, :wios,
+          :dbytes, :dios
+        )
+        """,
+        rows,
+    )
+
+
+def insert_cgroup_pressure_stats(
+    conn: sqlite3.Connection, rows: list[dict[str, object]]
+) -> None:
+    if not rows:
+        return
+    conn.executemany(
+        """
+        INSERT INTO service_cgroup_pressure_sample (
+          observed_at, host, boot_id, schema_version, unit, scope,
+          control_group,
+          cpu_some_avg10, cpu_some_avg60, cpu_some_avg300, cpu_some_total_us,
+          io_some_avg10, io_some_avg60, io_some_avg300, io_some_total_us,
+          io_full_avg10, io_full_avg60, io_full_avg300, io_full_total_us,
+          memory_some_avg10, memory_some_avg60, memory_some_avg300,
+          memory_some_total_us,
+          memory_full_avg10, memory_full_avg60, memory_full_avg300,
+          memory_full_total_us
+        ) VALUES (
+          :observed_at, :host, :boot_id, :schema_version, :unit, :scope,
+          :control_group,
+          :cpu_some_avg10, :cpu_some_avg60, :cpu_some_avg300, :cpu_some_total_us,
+          :io_some_avg10, :io_some_avg60, :io_some_avg300, :io_some_total_us,
+          :io_full_avg10, :io_full_avg60, :io_full_avg300, :io_full_total_us,
+          :memory_some_avg10, :memory_some_avg60, :memory_some_avg300,
+          :memory_some_total_us,
+          :memory_full_avg10, :memory_full_avg60, :memory_full_avg300,
+          :memory_full_total_us
+        )
+        """,
+        rows,
+    )
+
+
 # NVML handle is initialized once at startup and reused; reads are direct
 # library calls (no subprocess), so 1 Hz sampling is cheap and per-sample
 # latency is sub-millisecond. nvidia-smi is no longer in the hot path.
 _nvml_handle: object | None = None
 _nvml_error: str | None = None
+# True only when pynvml itself is absent — a permanent condition, so we stop
+# retrying. An NVMLError at init (driver/libnvidia-ml not ready at boot) is
+# transient and must be retried, or a single bad startup permanently kills GPU
+# capture until the next service restart (the 2026-05-24 incident).
+_nvml_unavailable: bool = False
+_nvml_lock = threading.Lock()
+_nvml_last_init_attempt: float = 0.0
+_NVML_REINIT_BACKOFF_S: float = 30.0
 
 
-def nvml_init() -> None:
-    global _nvml_handle, _nvml_error
-    try:
-        import pynvml
-    except ImportError:
-        _nvml_error = "gpu.pynvml_unavailable"
-        return
-    try:
-        pynvml.nvmlInit()
-        _nvml_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-    except pynvml.NVMLError as exc:  # type: ignore[attr-defined]
-        _nvml_error = f"gpu.nvml_init_failed:{exc}"
-        _nvml_handle = None
+def nvml_init() -> bool:
+    """(Re)initialize the NVML handle. Returns True iff a handle is ready.
+
+    Thread-safe and idempotent: callable from both the heartbeat loop and the
+    GPU sampler thread. ImportError is permanent (``_nvml_unavailable``); an
+    NVMLError is transient and left retryable.
+    """
+    global _nvml_handle, _nvml_error, _nvml_unavailable, _nvml_last_init_attempt
+    with _nvml_lock:
+        if _nvml_handle is not None:
+            return True
+        if _nvml_unavailable:
+            return False
+        _nvml_last_init_attempt = time.monotonic()
+        try:
+            import pynvml
+        except ImportError:
+            _nvml_error = "gpu.pynvml_unavailable"
+            _nvml_unavailable = True
+            return False
+        try:
+            pynvml.nvmlInit()
+            _nvml_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            _nvml_error = None
+            return True
+        except pynvml.NVMLError as exc:  # type: ignore[attr-defined]
+            _nvml_error = f"gpu.nvml_init_failed:{exc}"
+            _nvml_handle = None
+            return False
+
+
+def nvml_ensure() -> bool:
+    """Lazily (re)init NVML with a backoff. Returns True iff a handle is ready."""
+    global _nvml_handle
+    if _nvml_handle is not None:
+        return True
+    if _nvml_unavailable:
+        return False
+    if time.monotonic() - _nvml_last_init_attempt < _NVML_REINIT_BACKOFF_S:
+        return False
+    return nvml_init()
 
 
 def gpu_metrics() -> tuple[dict[str, object], list[str]]:
-    if _nvml_handle is None:
+    global _nvml_handle
+    if not nvml_ensure():
         return {}, [_nvml_error or "gpu.nvml_not_initialized"]
     import pynvml
 
@@ -242,6 +706,12 @@ def gpu_metrics() -> tuple[dict[str, object], list[str]]:
         result["gpu_pstate"] = None
     safe("gpu_pcie_gen", lambda: int(pynvml.nvmlDeviceGetCurrPcieLinkGeneration(h)))
     safe("gpu_pcie_width", lambda: int(pynvml.nvmlDeviceGetCurrPcieLinkWidth(h)))
+    # If every probe failed the handle is dead (GPU reset / driver reload):
+    # drop it so nvml_ensure() re-initializes on the next call rather than
+    # emitting all-null rows indefinitely.
+    if gaps and all(v is None for v in result.values()):
+        with _nvml_lock:
+            _nvml_handle = None
     return result, gaps
 
 
@@ -260,36 +730,45 @@ def gpu_sampler_thread(
     conn.execute("PRAGMA synchronous=NORMAL;")
     try:
         while not stop.is_set():
-            metrics, _gaps = gpu_metrics()
-            if metrics:
-                conn.execute(
-                    """
-                    INSERT INTO gpu_sample (
-                      observed_at, host, boot_id,
-                      gpu_power_w, gpu_power_limit_w, gpu_temp_c, gpu_fan_pct,
-                      gpu_util_pct, gpu_mem_util_pct,
-                      gpu_clock_mhz, gpu_mem_clock_mhz,
-                      gpu_pstate, gpu_pcie_gen, gpu_pcie_width
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        now_iso(),
-                        host,
-                        boot_id,
-                        metrics.get("gpu_power_w"),
-                        metrics.get("gpu_power_limit_w"),
-                        metrics.get("gpu_temp_c"),
-                        metrics.get("gpu_fan_pct"),
-                        metrics.get("gpu_util_pct"),
-                        metrics.get("gpu_mem_util_pct"),
-                        metrics.get("gpu_clock_mhz"),
-                        metrics.get("gpu_mem_clock_mhz"),
-                        metrics.get("gpu_pstate"),
-                        metrics.get("gpu_pcie_gen"),
-                        metrics.get("gpu_pcie_width"),
-                    ),
-                )
-                conn.commit()
+            try:
+                metrics, _gaps = gpu_metrics()
+                if metrics:
+                    conn.execute(
+                        """
+                        INSERT INTO gpu_sample (
+                          observed_at, host, boot_id,
+                          gpu_power_w, gpu_power_limit_w, gpu_temp_c, gpu_fan_pct,
+                          gpu_util_pct, gpu_mem_util_pct,
+                          gpu_clock_mhz, gpu_mem_clock_mhz,
+                          gpu_pstate, gpu_pcie_gen, gpu_pcie_width
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            now_iso(),
+                            host,
+                            boot_id,
+                            metrics.get("gpu_power_w"),
+                            metrics.get("gpu_power_limit_w"),
+                            metrics.get("gpu_temp_c"),
+                            metrics.get("gpu_fan_pct"),
+                            metrics.get("gpu_util_pct"),
+                            metrics.get("gpu_mem_util_pct"),
+                            metrics.get("gpu_clock_mhz"),
+                            metrics.get("gpu_mem_clock_mhz"),
+                            metrics.get("gpu_pstate"),
+                            metrics.get("gpu_pcie_gen"),
+                            metrics.get("gpu_pcie_width"),
+                        ),
+                    )
+                    conn.commit()
+            except Exception as exc:  # noqa: BLE001 - the sampler must outlive any probe/DB fault
+                # A bare exception here would silently kill the only writer to
+                # gpu_sample and freeze GPU telemetry with no signal — the same
+                # outage class (2026-05-24) the NVML self-heal addresses, but on
+                # the DB/probe path instead of the handle path. Log to stderr
+                # (captured by journald) and keep sampling; handle-level faults
+                # are recovered by the self-heal in gpu_metrics().
+                print(f"gpu-sampler: sample failed: {exc!r}", file=sys.stderr, flush=True)
             stop.wait(interval)
     finally:
         conn.close()
@@ -432,6 +911,113 @@ def init_db(conn: sqlite3.Connection) -> None:
           io_write_bytes INTEGER
         );
         CREATE INDEX IF NOT EXISTS service_state_unit_time ON service_state(unit, observed_at);
+        CREATE TABLE IF NOT EXISTS block_device_sample (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          observed_at TEXT NOT NULL,
+          host TEXT NOT NULL,
+          boot_id TEXT,
+          schema_version INTEGER NOT NULL,
+          major INTEGER,
+          minor INTEGER,
+          device TEXT NOT NULL,
+          reads_completed INTEGER,
+          reads_merged INTEGER,
+          sectors_read INTEGER,
+          read_time_ms INTEGER,
+          writes_completed INTEGER,
+          writes_merged INTEGER,
+          sectors_written INTEGER,
+          write_time_ms INTEGER,
+          ios_in_progress INTEGER,
+          io_time_ms INTEGER,
+          weighted_io_time_ms INTEGER,
+          discards_completed INTEGER,
+          discards_merged INTEGER,
+          sectors_discarded INTEGER,
+          discard_time_ms INTEGER,
+          flushes_completed INTEGER,
+          flush_time_ms INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS block_device_sample_device_time ON block_device_sample(device, observed_at);
+        CREATE INDEX IF NOT EXISTS block_device_sample_observed_at ON block_device_sample(observed_at);
+        CREATE TABLE IF NOT EXISTS service_cgroup_io_sample (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          observed_at TEXT NOT NULL,
+          host TEXT NOT NULL,
+          boot_id TEXT,
+          schema_version INTEGER NOT NULL,
+          unit TEXT NOT NULL,
+          scope TEXT NOT NULL,
+          control_group TEXT,
+          major INTEGER,
+          minor INTEGER,
+          rbytes INTEGER,
+          wbytes INTEGER,
+          rios INTEGER,
+          wios INTEGER,
+          dbytes INTEGER,
+          dios INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS service_cgroup_io_sample_unit_time ON service_cgroup_io_sample(unit, observed_at);
+        CREATE INDEX IF NOT EXISTS service_cgroup_io_sample_device_time ON service_cgroup_io_sample(major, minor, observed_at);
+        CREATE TABLE IF NOT EXISTS service_cgroup_pressure_sample (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          observed_at TEXT NOT NULL,
+          host TEXT NOT NULL,
+          boot_id TEXT,
+          schema_version INTEGER NOT NULL,
+          unit TEXT NOT NULL,
+          scope TEXT NOT NULL,
+          control_group TEXT,
+          cpu_some_avg10 REAL,
+          cpu_some_avg60 REAL,
+          cpu_some_avg300 REAL,
+          cpu_some_total_us REAL,
+          io_some_avg10 REAL,
+          io_some_avg60 REAL,
+          io_some_avg300 REAL,
+          io_some_total_us REAL,
+          io_full_avg10 REAL,
+          io_full_avg60 REAL,
+          io_full_avg300 REAL,
+          io_full_total_us REAL,
+          memory_some_avg10 REAL,
+          memory_some_avg60 REAL,
+          memory_some_avg300 REAL,
+          memory_some_total_us REAL,
+          memory_full_avg10 REAL,
+          memory_full_avg60 REAL,
+          memory_full_avg300 REAL,
+          memory_full_total_us REAL
+        );
+        CREATE INDEX IF NOT EXISTS service_cgroup_pressure_sample_unit_time ON service_cgroup_pressure_sample(unit, observed_at);
+        CREATE TABLE IF NOT EXISTS process_io_delta_sample (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          observed_at TEXT NOT NULL,
+          host TEXT NOT NULL,
+          boot_id TEXT,
+          schema_version INTEGER NOT NULL,
+          interval_s REAL NOT NULL,
+          pid INTEGER NOT NULL,
+          process_start_time_ticks INTEGER NOT NULL,
+          comm TEXT,
+          exe TEXT,
+          cgroup TEXT,
+          unit TEXT,
+          scope TEXT,
+          read_bytes_delta INTEGER NOT NULL,
+          write_bytes_delta INTEGER NOT NULL,
+          cancelled_write_bytes_delta INTEGER NOT NULL,
+          read_chars_delta INTEGER NOT NULL,
+          write_chars_delta INTEGER NOT NULL,
+          read_syscalls_delta INTEGER NOT NULL,
+          write_syscalls_delta INTEGER NOT NULL,
+          total_bytes_delta INTEGER NOT NULL,
+          total_syscalls_delta INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS process_io_delta_sample_observed_at ON process_io_delta_sample(observed_at);
+        CREATE INDEX IF NOT EXISTS process_io_delta_sample_unit_time ON process_io_delta_sample(unit, observed_at);
+        CREATE INDEX IF NOT EXISTS process_io_delta_sample_process_time ON process_io_delta_sample(pid, process_start_time_ticks, observed_at);
         CREATE TABLE IF NOT EXISTS source_status (
           source TEXT PRIMARY KEY,
           checked_at TEXT NOT NULL,
@@ -725,28 +1311,52 @@ def insert_service_states(
 ) -> None:
     observed_at = now_iso()
     rows = []
+    io_rows: list[dict[str, object]] = []
+    pressure_rows: list[dict[str, object]] = []
     for unit in units:
         user = unit == "polylogued.service"
         props = systemctl_props(unit, user=user, user_name=user_name)
         if not props:
             continue
+        scope = "user" if user else "system"
+        control_group = props.get("ControlGroup")
         rows.append(
             (
                 observed_at,
                 host,
                 boot_id,
                 unit,
-                "user" if user else "system",
+                scope,
                 props.get("ActiveState"),
                 props.get("SubState"),
                 int_or_none(props.get("MainPID")),
-                props.get("ControlGroup"),
+                control_group,
                 int_or_none(props.get("MemoryCurrent")),
                 int_or_none(props.get("CPUUsageNSec")),
                 int_or_none(props.get("IOReadBytes")),
                 int_or_none(props.get("IOWriteBytes")),
             )
         )
+        io_rows.extend(
+            cgroup_io_stats(
+                observed_at,
+                host,
+                boot_id,
+                unit=unit,
+                scope=scope,
+                control_group=control_group,
+            )
+        )
+        pressure = cgroup_pressure_stats(
+            observed_at,
+            host,
+            boot_id,
+            unit=unit,
+            scope=scope,
+            control_group=control_group,
+        )
+        if pressure is not None:
+            pressure_rows.append(pressure)
     if rows:
         conn.executemany(
             """
@@ -758,6 +1368,8 @@ def insert_service_states(
             """,
             rows,
         )
+    insert_cgroup_io_stats(conn, io_rows)
+    insert_cgroup_pressure_stats(conn, pressure_rows)
 
 
 def main() -> int:
@@ -773,6 +1385,7 @@ def main() -> int:
     parser.add_argument("--network-gateway", default="192.168.1.1")
     parser.add_argument("--bufferbloat-interval", type=float, default=1800.0)
     parser.add_argument("--network-probe-once", action="store_true")
+    parser.add_argument("--process-io-top", type=int, default=40)
     parser.add_argument("--units", default="")
     parser.add_argument("--user-name", required=True)
     args = parser.parse_args()
@@ -871,11 +1484,14 @@ def main() -> int:
         # and then disappeared (driver reload / hardware fault).
         had_fans_at_startup = any(Path("/sys/class/hwmon").glob("hwmon*/fan*_input"))
 
-        # High-frequency GPU sampler — runs only if NVML initialized and
-        # the interval is positive (set to 0 to disable).
+        # High-frequency GPU sampler — runs whenever the interval is positive
+        # (set to 0 to disable) and pynvml is present. It starts even if the
+        # initial nvml_init() failed transiently: gpu_metrics() → nvml_ensure()
+        # retries with a backoff, so a bad-boot NVML state self-heals instead of
+        # permanently disabling GPU capture until the next restart.
         gpu_stop = threading.Event()
         gpu_thread: threading.Thread | None = None
-        if _nvml_handle is not None and args.gpu_interval > 0:
+        if not _nvml_unavailable and args.gpu_interval > 0:
             gpu_thread = threading.Thread(
                 target=gpu_sampler_thread,
                 args=(str(db), args.host, boot_id, args.gpu_interval, gpu_stop),
@@ -883,6 +1499,8 @@ def main() -> int:
                 daemon=True,
             )
             gpu_thread.start()
+
+        prev_process_io = process_io_snapshot()
 
         while True:
             target = time.monotonic() + args.interval
@@ -930,9 +1548,21 @@ def main() -> int:
                     if value is not None:
                         mb_temps.append(value)
 
+            current_process_io = process_io_snapshot()
             collector_duration_ms = (time.monotonic() - sample_start) * 1000.0
+            observed_at = now_iso()
+            process_io_rows = process_io_delta_rows(
+                observed_at,
+                args.host,
+                boot_id,
+                prev_process_io,
+                current_process_io,
+                interval_s=elapsed,
+                limit=max(args.process_io_top, 0),
+            )
+            prev_process_io = current_process_io
             row = {
-                "observed_at": now_iso(),
+                "observed_at": observed_at,
                 "host": args.host,
                 "boot_id": boot_id,
                 "schema_version": SCHEMA_VERSION,
@@ -1040,6 +1670,8 @@ def main() -> int:
                 """,
                 row,
             )
+            insert_block_device_stats(conn, observed_at, args.host, boot_id)
+            insert_process_io_deltas(conn, process_io_rows)
             if sample_start >= next_service:
                 insert_service_states(conn, args.host, boot_id, units, args.user_name)
                 next_service = sample_start + args.service_interval

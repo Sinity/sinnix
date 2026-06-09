@@ -15,7 +15,7 @@
 #     services.sinex.nats.killPolicy.*
 #     services.sinex.database.setupWaitForPaths
 # - the activation-profile mapping from sinnix's `cfg.activationProfile`
-#   string to the per-node `enable` flags
+#   string to the runtime source/automaton `enable` flags
 #
 # Auxiliary-unit gating (wantedBy stripping, sinex-runtime.target wants
 # graph, deferred-start timer, document-scan timer pinning) is owned by
@@ -69,8 +69,6 @@ in
             system = true;
             document = false;
             automata = false;
-            canonicalizer = false;
-            healthAggregator = false;
             kitty = false;
           };
           capture = {
@@ -81,8 +79,6 @@ in
             system = true;
             document = true;
             automata = true;
-            canonicalizer = true;
-            healthAggregator = true;
             kitty = true;
           };
           full = {
@@ -93,8 +89,6 @@ in
             system = true;
             document = true;
             automata = true;
-            canonicalizer = true;
-            healthAggregator = true;
             kitty = true;
           };
         }
@@ -103,22 +97,18 @@ in
         "${realmRoot}/project"
         "${realmRoot}/inbox/download"
       ];
-      generatedRuntimeServices = lib.optionals runtimeEnabled (config.sinex._generatedUnits or [ ]);
-      generatedSourceWorkerServices = builtins.filter (
-        name: lib.hasPrefix "sinex-source-worker-" name
-      ) generatedRuntimeServices;
       maintenanceTimerServiceNames = [
         "sinex-document-scan"
       ];
+      # Post-Wave-B fold all source bindings run inside sinexd, not per-source
+      # systemd units. ACL-granting target-access services must complete before
+      # sinexd starts so it can reach user-owned data paths and sockets.
+      # sinex-document-target-access gates the separate one-shot document scan.
       targetAccessServiceBefore = {
-        sinex-browser-target-access = [ "sinex-source-worker-browser.history-1.service" ];
-        sinex-desktop-target-access = [
-          "sinex-source-worker-desktop.activitywatch-1.service"
-          "sinex-source-worker-desktop.window-manager-1.service"
-          "sinex-source-worker-desktop.clipboard-1.service"
-        ];
+        sinex-browser-target-access = [ "sinexd.service" ];
+        sinex-desktop-target-access = [ "sinexd.service" ];
         sinex-document-target-access = [ "sinex-document-scan.service" ];
-        sinex-terminal-target-access = [ "sinex-source-worker-terminal.atuin-history-1.service" ];
+        sinex-terminal-target-access = [ "sinexd.service" ];
       };
       mkScopedSinexPackage =
         sinexPkgs:
@@ -127,7 +117,7 @@ in
           paths = lib.unique (
             lib.optionals runtimeEnabled [
               # Aggregate runtime so Nix builds Sinex once for deployment.
-              # Selecting per-node packages reintroduces one SQLx/Postgres
+              # Selecting per-source packages reintroduces one SQLx/Postgres
               # build derivation per service.
               sinexPkgs.sinex
             ]
@@ -140,7 +130,7 @@ in
         services.sinex = {
           secrets.enableAgenix = lib.mkDefault false;
           core.enable = lib.mkDefault false;
-          nodes.enable = lib.mkDefault false;
+          runtime.enable = lib.mkDefault false;
           nats.enable = lib.mkDefault false;
           nats.autoSetup = lib.mkDefault false;
           observability.enable = lib.mkDefault false;
@@ -246,7 +236,7 @@ in
 
             core = {
               enable = runtimeEnabled;
-              gateway = {
+              api = {
                 enable = runtimeEnabled;
                 autoGenerateTls = true;
               };
@@ -272,9 +262,12 @@ in
               updates.enable = runtimeEnabled;
             };
 
-            nodes = {
+            runtime = {
               enable = runtimeEnabled;
+            };
 
+            sources = {
+              enable = runtimeEnabled;
               filesystem = {
                 enable = runtimeEnabled && activationProfile.filesystem;
                 watchPaths = filesystemWatchPaths;
@@ -329,17 +322,17 @@ in
               document = {
                 enable = runtimeEnabled && activationProfile.document;
               };
+            };
 
-              automata = {
+            automata = {
+              enable = runtimeEnabled && activationProfile.automata;
+              canonicalizer = {
                 enable = runtimeEnabled && activationProfile.automata;
-                canonicalizer = {
-                  enable = runtimeEnabled && activationProfile.canonicalizer;
-                  profile = lib.mkDefault "heavy";
-                };
-                healthAggregator = {
-                  enable = runtimeEnabled && activationProfile.healthAggregator;
-                  profile = lib.mkDefault "heavy";
-                };
+                profile = lib.mkDefault "heavy";
+              };
+              healthAggregator = {
+                enable = runtimeEnabled && activationProfile.automata;
+                profile = lib.mkDefault "heavy";
               };
             };
 
@@ -413,7 +406,7 @@ in
       #     filesystem
       #   - retitle sinex-runtime.target to reflect the host's automation
       #     model
-      #   - give notify-style source workers enough time to acquire their
+      #   - give notify-style source services enough time to acquire their
       #     local data-source lease before the unit start deadline
       #   - drop workstation-civil scheduler bias from one-shot maintenance
       #     timers and force their next-fire semantics
@@ -424,20 +417,7 @@ in
       #     the Home Manager service ensures the ACL is set last.
       (lib.mkIf runtimeEnabled {
         sinnix.runtime.surfaces =
-          let
-            mkSurface = name: resourceClass: {
-              inherit resourceClass;
-              unit = "${name}.service";
-            };
-            generatedSurfaces = lib.listToAttrs (
-              map (name: {
-                inherit name;
-                value = mkSurface name "capture-runtime";
-              }) generatedRuntimeServices
-            );
-          in
-          generatedSurfaces
-          // {
+          {
             sinex-runtime = {
               unit = "sinex-runtime.target";
               kind = "target";
@@ -491,9 +471,14 @@ in
                 "+${pkgs.systemd}/bin/systemctl restart --no-block sinex-desktop-target-access.service"
               ];
             };
+            sinexd = {
+              restartIfChanged = false;
+              stopIfChanged = false;
+            };
           }
           (lib.genAttrs maintenanceTimerServiceNames (_: {
             restartIfChanged = false;
+            stopIfChanged = false;
             serviceConfig = {
               Nice = lib.mkForce null;
               CPUWeight = lib.mkForce null;
@@ -501,9 +486,6 @@ in
               IOSchedulingClass = lib.mkForce null;
               TimeoutStopSec = lib.mkDefault "15s";
             };
-          }))
-          (lib.genAttrs generatedSourceWorkerServices (_: {
-            serviceConfig.TimeoutStartSec = lib.mkDefault "90s";
           }))
           (lib.mapAttrs (_: before: {
             before = lib.mkForce before;
@@ -535,28 +517,29 @@ in
         services.sinex.nats.enable = lib.mkForce false;
         services.sinex.nats.autoSetup = lib.mkForce false;
 
-        # Wire the remote-db env file into every generated sinex runtime
-        # unit. The file is operator-managed; if it is absent at start time,
-        # the unit will fail explicitly rather than silently fall back to a
-        # local socket.
-        systemd.services = lib.genAttrs (config.sinex._generatedUnits or [ ]) (_: {
-          serviceConfig.EnvironmentFile = [ "/run/agenix/sinex-remote-db" ];
-        });
+        # Wire the remote-db env file into sinexd. The file is operator-managed;
+        # if it is absent at start time, the unit will fail explicitly rather
+        # than silently fall back to a local socket.
+        systemd.services.sinexd.serviceConfig.EnvironmentFile = [
+          "/run/agenix/sinex-remote-db"
+        ];
       })
 
       # ── deploymentRole: replica ─────────────────────────────────────────
-      # Host runs postgresql + NATS for remote workstation-thin nodes but
+      # Host runs postgresql + NATS for remote workstation-thin sources but
       # does not run the local sinexd capture runtime. The collector/
       # receiver path stays alive via the database + nats services; ingest
-      # nodes are disabled.
+      # sources are disabled.
       (lib.mkIf (cfg.deploymentRole == "replica") {
-        services.sinex.nodes = {
-          filesystem.enable = lib.mkForce false;
-          terminal.enable = lib.mkForce false;
-          browser.enable = lib.mkForce false;
-          desktop.enable = lib.mkForce false;
-          system.enable = lib.mkForce false;
-          document.enable = lib.mkForce false;
+        services.sinex = {
+          sources = {
+            filesystem.enable = lib.mkForce false;
+            terminal.enable = lib.mkForce false;
+            browser.enable = lib.mkForce false;
+            desktop.enable = lib.mkForce false;
+            system.enable = lib.mkForce false;
+            document.enable = lib.mkForce false;
+          };
           automata.enable = lib.mkForce false;
         };
       })

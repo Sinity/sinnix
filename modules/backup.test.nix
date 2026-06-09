@@ -21,14 +21,21 @@
     let
       hasConf = config.environment.etc ? "btrbk/btrbk.conf";
       conf = if hasConf then config.environment.etc."btrbk/btrbk.conf".text else "";
-      realmJob = config.services.borgbackup.jobs.realm;
-      persistJob = config.services.borgbackup.jobs.persist;
       btrbkService = config.systemd.services.btrbk.serviceConfig;
       btrbkTimer = config.systemd.timers.btrbk.timerConfig;
+      realmBorgUnit = config.systemd.services.borgbackup-job-realm;
+      persistBorgUnit = config.systemd.services.borgbackup-job-persist;
       realmBorgService = config.systemd.services.borgbackup-job-realm.serviceConfig;
       persistBorgService = config.systemd.services.borgbackup-job-persist.serviceConfig;
+      realmBorgTimer = config.systemd.timers.borgbackup-job-realm.timerConfig;
+      persistBorgTimer = config.systemd.timers.borgbackup-job-persist.timerConfig;
+      realmBorgPath = config.systemd.paths.borgbackup-job-realm.pathConfig;
+      persistBorgPath = config.systemd.paths.borgbackup-job-persist.pathConfig;
       borgCheckService = config.systemd.services.borgbackup-check.serviceConfig;
       borgCheckTimer = config.systemd.timers.borgbackup-check.timerConfig;
+      borgMaintenanceService = config.systemd.services.borgbackup-maintenance;
+      borgMaintenanceServiceConfig = borgMaintenanceService.serviceConfig;
+      borgMaintenanceTimer = config.systemd.timers.borgbackup-maintenance.timerConfig;
       btrfsImageService = config.systemd.services.btrfs-metadata-image-backup;
       btrfsImageServiceConfig = btrfsImageService.serviceConfig;
       rootSnapshotService = config.systemd.services.borgbackup-root-snapshots;
@@ -67,43 +74,68 @@
       }
       {
         assertion = hasConf && builtins.match ".*snapshot_preserve_min   latest.*" conf != null;
-        message = "btrbk config must disable the default preserve-all snapshot minimum";
+        message = "btrbk config must keep a default latest snapshot floor";
       }
       {
         assertion =
           hasConf
           &&
-            builtins.match ".*volume /realm\n +snapshot_dir +\\.btrfs/snapshot\n +subvolume \\.\n +snapshot_preserve_min +1h\n +snapshot_preserve +6h.*" conf
+            builtins.match ".*volume /realm\n +snapshot_dir +\\.btrfs/snapshot\n +subvolume \\.\n +snapshot_preserve_min +all.*" conf
             != null;
-        message = "btrbk config must keep recent /realm snapshots in the .btrfs/snapshot layout";
+        message = "btrbk config must keep /realm snapshots until the Borg drain deletes them";
       }
       {
         assertion =
           hasConf
           &&
-            builtins.match ".*volume /persist\n +snapshot_dir +\\.btrfs/snapshot\n +subvolume \\.\n +snapshot_preserve_min +1h\n +snapshot_preserve +6h.*" conf
+            builtins.match ".*volume /persist\n +snapshot_dir +\\.btrfs/snapshot\n +subvolume \\.\n +snapshot_preserve_min +all.*" conf
             != null;
-        message = "btrbk config must keep recent /persist snapshots in the .btrfs/snapshot layout";
+        message = "btrbk config must keep /persist snapshots until the Borg drain deletes them";
       }
       {
-        assertion = realmJob.repo == "file:///outer-realm/backup/borg-realm-v2";
-        message = "Realm Borg job must target the v2 encrypted repository via file URI";
+        assertion = !(config.services.borgbackup.jobs ? realm) && !(config.services.borgbackup.jobs ? persist);
+        message = "Borg snapshot drains must not use one-shot services.borgbackup.jobs latest-only wrappers";
       }
       {
-        assertion = persistJob.repo == "file:///outer-realm/backup/borg-persist-v1";
-        message = "Persist Borg job must target the encrypted persist repository via file URI";
+        assertion =
+          builtins.match ".*BORG_REPO=file:///outer-realm/backup/borg-realm-v2.*" realmBorgUnit.script
+          != null
+          &&
+            builtins.match ".*BORG_REPO=file:///outer-realm/backup/borg-persist-v1.*" persistBorgUnit.script
+            != null;
+        message = "Borg drain scripts must target the encrypted repositories via file URI";
       }
       {
-        assertion = realmJob.paths == [ "/run/borgbackup-snapshot-inputs/realm/./" ];
-        message = "Realm Borg job must archive the bind-mounted snapshot contents";
+        assertion =
+          builtins.match ".*mount --bind.*" realmBorgUnit.script != null
+          && builtins.match ".*mount --bind.*" persistBorgUnit.script != null
+          && builtins.match ".*borg create.*" realmBorgUnit.script != null
+          && builtins.match ".*borg create.*" persistBorgUnit.script != null
+          && builtins.match ".*--lock-wait 60.*" realmBorgUnit.script != null
+          && builtins.match ".*--lock-wait 60.*" persistBorgUnit.script != null
+          && builtins.match ".*--lock-wait 7200.*" realmBorgUnit.script == null
+          && builtins.match ".*--lock-wait 7200.*" persistBorgUnit.script == null
+          && builtins.match ".*--compression auto,zstd,1.*" realmBorgUnit.script != null
+          && builtins.match ".*--compression auto,zstd,1.*" persistBorgUnit.script != null;
+        message = "Borg drain scripts must bind-mount and archive snapshot contents";
       }
       {
-        assertion = persistJob.paths == [ "/run/borgbackup-snapshot-inputs/persist/./" ];
-        message = "Persist Borg job must archive the bind-mounted snapshot contents";
+        assertion =
+          builtins.match ".*tail -n 1.*" realmBorgUnit.script != null
+          && builtins.match ".*tail -n 1.*" persistBorgUnit.script != null
+          && builtins.match ".*btrfs subvolume delete.*" realmBorgUnit.script != null
+          && builtins.match ".*btrfs subvolume delete.*" persistBorgUnit.script != null
+          && builtins.match ".*Last realm Borg drain.*seconds ago.*coalescing.*" realmBorgUnit.script != null
+          && builtins.match ".*Last persist Borg drain.*seconds ago.*coalescing.*" persistBorgUnit.script != null;
+        message = "Borg drains must archive the newest snapshot and delete snapshots covered by it after throttling";
       }
       {
-        assertion = realmJob.persistentTimer == false && persistJob.persistentTimer == false;
-        message = "Borg timers must not catch up missed runs immediately after boot";
+        assertion =
+          realmBorgPath.PathChanged == "/realm/.btrfs/snapshot"
+          && persistBorgPath.PathChanged == "/persist/.btrfs/snapshot"
+          && realmBorgPath.Unit == "borgbackup-job-realm.service"
+          && persistBorgPath.Unit == "borgbackup-job-persist.service";
+        message = "Borg drains must path-activate when new snapshots appear";
       }
       {
         assertion = borgCheckTimer.Persistent == false;
@@ -111,15 +143,17 @@
       }
       {
         assertion =
-          persistJob.startAt == [ "*-*-* 02,06,10,14,18,22:20:00" ]
-          && realmJob.startAt == [ "*-*-* 03,07,11,15,19,23:20:00" ];
-        message = "Borg timers must stay on the staggered four-hour cadence";
+          persistBorgTimer.OnCalendar == "*-*-* *:20:00"
+          && realmBorgTimer.OnCalendar == "*-*-* *:35:00"
+          && persistBorgTimer.Persistent == false
+          && realmBorgTimer.Persistent == false;
+        message = "Borg drains must have staggered hourly backstop timers without catch-up";
       }
       {
         assertion =
-          builtins.elem "var/lib/sinex" persistJob.exclude
-          && !(builtins.elem "**/data/captures/sinex/state" realmJob.exclude)
-          && !(builtins.elem "**/data/captures/sinex/postgresql" realmJob.exclude);
+          builtins.match ".*--exclude var/lib/sinex.*" persistBorgUnit.script != null
+          && builtins.match ".*--exclude '\\*\\*/data/captures/polylogue'.*" realmBorgUnit.script != null
+          && builtins.match ".*--exclude '\\*\\*/\\.Trash-1000'.*" realmBorgUnit.script != null;
         message = "Borg must exclude active Sinex runtime state, not obsolete capture paths";
       }
       {
@@ -129,6 +163,11 @@
       {
         assertion = btrbkTimer.OnCalendar == "*-*-* *:00/15:00";
         message = "btrbk timer must keep the quarter-hour snapshot cadence";
+      }
+      {
+        assertion =
+          builtins.match ".*--preserve-snapshots.*" (builtins.toString btrbkService.ExecStart) != null;
+        message = "btrbk service must preserve snapshots for Borg-backed deletion";
       }
       {
         assertion =
@@ -166,6 +205,19 @@
       }
       {
         assertion =
+          borgMaintenanceServiceConfig.TimeoutStopSec == "15s"
+          && !serviceRestartIfChanged "borgbackup-maintenance"
+          && hasBackgroundPriority borgMaintenanceServiceConfig
+          && borgMaintenanceTimer.Persistent == false
+          && builtins.match ".*borg prune --lock-wait 60.*" borgMaintenanceService.script != null
+          && builtins.match ".*borg compact --lock-wait 60.*" borgMaintenanceService.script != null
+          && builtins.match ".*--lock-wait 7200.*" borgMaintenanceService.script == null
+          && builtins.match ".*borg prune.*--keep-within 7d.*--keep-daily 60.*--keep-weekly 26.*--keep-monthly 24.*--keep-yearly 5.*" borgMaintenanceService.script != null
+          && builtins.match ".*borg compact.*" borgMaintenanceService.script != null;
+        message = "Borg retention maintenance must keep broad history without running compaction on every drain";
+      }
+      {
+        assertion =
           !(persistBorgService ? MemoryHigh)
           && !(persistBorgService ? MemoryMax)
           && !(realmBorgService ? MemoryHigh)
@@ -179,14 +231,6 @@
           && !(realmBorgService ? IOReadBandwidthMax)
           && !(realmBorgService ? IOWriteBandwidthMax);
         message = "Borg backup jobs must rely on scheduling and low weights, not hard bandwidth caps";
-      }
-      {
-        assertion = builtins.match ".*mount --bind.*" realmJob.preHook != null;
-        message = "Realm Borg job must bind-mount the latest snapshot before backup";
-      }
-      {
-        assertion = builtins.match ".*mount --bind.*" persistJob.preHook != null;
-        message = "Persist Borg job must bind-mount the latest snapshot before backup";
       }
       {
         assertion = builtins.any (
@@ -219,8 +263,17 @@
       }
       {
         assertion =
-          !rootSnapshotService.restartIfChanged && hasBackgroundPriority rootSnapshotServiceConfig;
-        message = "Root snapshot archival must yield CPU and I/O to interactive work";
+          !rootSnapshotService.restartIfChanged
+          && hasBackgroundPriority rootSnapshotServiceConfig
+          && builtins.match ".*btrfs subvolume show.*" rootSnapshotService.script != null
+          && builtins.match ".*rm -rf --one-file-system.*" rootSnapshotService.script != null
+          && builtins.match ".*--exclude \"\\$snap_dir/nix\".*" rootSnapshotService.script != null
+          && builtins.match ".*--exclude \"\\$snap_dir/swap\".*" rootSnapshotService.script != null
+          && builtins.match ".*--exclude \"\\$snap_dir/home/\\*/\\.cache\".*" rootSnapshotService.script != null
+          && builtins.match ".*--exclude \"\\$snap_dir/var/cache\".*" rootSnapshotService.script != null
+          && builtins.match ".*--lock-wait 60.*" rootSnapshotService.script != null
+          && builtins.match ".*--lock-wait 7200.*" rootSnapshotService.script == null;
+        message = "Root snapshot archival must yield to interactive work and exclude mountpoint/cache payloads";
       }
     ];
 }

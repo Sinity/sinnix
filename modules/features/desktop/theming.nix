@@ -24,6 +24,7 @@ mkFeatureModule {
       ...
     }:
     let
+      scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
       kvantumPkg =
         if lib.hasAttrByPath [ "qt6Packages" "qtstyleplugin-kvantum" ] pkgs then
           pkgs.qt6Packages.qtstyleplugin-kvantum
@@ -43,7 +44,6 @@ mkFeatureModule {
         {
           gtk = {
             enable = true;
-            gtk4.theme = null;
             iconTheme = {
               package = pkgs.papirus-icon-theme;
               name = "Papirus-Dark";

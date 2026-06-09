@@ -72,6 +72,7 @@ mkServiceModule {
         allowedIPsAsRoutes = false;
         peers = [
           {
+            name = "airvpn-seed";
             publicKey = "PyLCXAQT8KkM4T+dUsOQfn+Ub3pGxfGlxkIApuig+hk=";
             presharedKeyFile = pskFile;
             endpoint = cfg.endpoint;
@@ -107,6 +108,19 @@ mkServiceModule {
       # ── Dependencies ────────────────────────────────────────────────
       # Transmission must wait for the VPN tunnel
       systemd.targets.wireguard-airvpn-seed.wantedBy = lib.mkIf (!cfg.autoStart) (lib.mkForce [ ]);
+
+      systemd.services.wireguard-airvpn-seed-peer-airvpn-seed = {
+        after = [ "network-online.target" ];
+        wants = [ "network-online.target" ];
+        serviceConfig = {
+          Restart = "on-failure";
+          RestartSec = "10s";
+        };
+        unitConfig = {
+          StartLimitIntervalSec = 300;
+          StartLimitBurst = 30;
+        };
+      };
 
       systemd.services.transmission = {
         after = [ "wireguard-airvpn-seed.target" ];

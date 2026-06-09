@@ -13,7 +13,13 @@ fi
 class="$1"
 shift 2
 
-inventory_file="${SINNIX_RUNTIME_INVENTORY_FILE:-/etc/sinnix/runtime-inventory.json}"
+if [ -n "${SINNIX_RUNTIME_INVENTORY_FILE:-}" ]; then
+  inventory_file="$SINNIX_RUNTIME_INVENTORY_FILE"
+elif [ -r /etc/sinnix/runtime-inventory.json ]; then
+  inventory_file="/etc/sinnix/runtime-inventory.json"
+else
+  inventory_file="/run/current-system/etc/sinnix/runtime-inventory.json"
+fi
 fallback_classes="agent build background nix-build"
 
 inventory_value() {
@@ -73,11 +79,12 @@ if inventory_readable; then
   done < <(jq -r --arg class "$class" '.commandClasses[$class].envDefaults // {} | to_entries[] | "\(.key)=\(.value)"' "$inventory_file")
 elif [ "$class" = build ]; then
   : "${CARGO_BUILD_JOBS:=4}"
+  : "${CARGO_INCREMENTAL:=0}"
   : "${CMAKE_BUILD_PARALLEL_LEVEL:=4}"
   : "${MAKEFLAGS:=-j4}"
   : "${NIX_BUILD_CORES:=4}"
   : "${SCCACHE_IDLE_TIMEOUT:=10}"
-  export CARGO_BUILD_JOBS CMAKE_BUILD_PARALLEL_LEVEL MAKEFLAGS NIX_BUILD_CORES SCCACHE_IDLE_TIMEOUT
+  export CARGO_BUILD_JOBS CARGO_INCREMENTAL CMAKE_BUILD_PARALLEL_LEVEL MAKEFLAGS NIX_BUILD_CORES SCCACHE_IDLE_TIMEOUT
 fi
 
 if [ -n "$ionice_class" ] && command -v ionice >/dev/null 2>&1; then

@@ -87,7 +87,6 @@ in
           pkgs.zsh
         ];
         homeFiles = [
-          ".codex/config.toml"
           ".gemini/settings.json"
           ".local/bin/claude"
           ".local/bin/claude-lite"
@@ -130,6 +129,9 @@ in
           export ZDOTDIR="$HOME"
         '';
       };
+      agentToolsRuntimeConfig = (evalTestSpec system devAgentToolsRuntimeSpec).config;
+      agentToolsCodexConfigSource =
+        agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexConfigSource;
       backupRuntimeEval = evalTestSpec system {
         name = "backup-borg-hook-runtime";
         modules = [
@@ -797,10 +799,16 @@ in
         // {
           name = "dev-agent-tools-runtime-check";
           nativeBuildInputs = builtins.filter (pkg: pkg != pkgs.expect) agentToolsFixture.nativeBuildInputs;
+          setup = agentToolsFixture.setup + ''
+            mkdir -p "$HOME/.codex"
+            cp ${lib.escapeShellArg (toString agentToolsCodexConfigSource)} "$HOME/.codex/config.toml"
+            chmod 644 "$HOME/.codex/config.toml"
+          '';
           script = ''
             trap 'echo "dev-agent-tools-runtime failed at line $LINENO" >&2' ERR
 
-            test -L "$HOME/.codex/config.toml"
+            test -f "$HOME/.codex/config.toml"
+            test ! -L "$HOME/.codex/config.toml"
             test -L "$HOME/.gemini/settings.json"
             test -L "$HOME/.config/claude/settings.json"
             test -L "$HOME/.config/claude/mcp.json"
@@ -870,25 +878,29 @@ in
             grep -Fq 'wrapper_args=(--model sonnet --effort medium)' "$HOME/.local/bin/claude-sonnet"
             grep -Fq 'wrapper_args=(--bare)' "$HOME/.local/bin/claude-lite"
             grep -Fq 'exec tmux new-session -s ct "$claude_cmd"' "$HOME/.local/bin/claude-team"
-            # Codex profile wrappers must contain their profile arg and FHS bootstrap
+            # Codex profile wrappers must contain their profile arg.
             grep -Fq 'codex_args+=(--profile fast)' "$HOME/.local/bin/codex-fast"
             grep -Fq 'codex_args+=(--profile deep)' "$HOME/.local/bin/codex-deep"
             grep -Fq 'codex_args+=(--profile max)' "$HOME/.local/bin/codex-max"
             grep -Fq 'codex_args+=(--profile spark_medium)' "$HOME/.local/bin/codex-spark"
             grep -Fq 'codex_args+=(--profile spark_xhigh)' "$HOME/.local/bin/codex-spark-xhigh"
 
-            # All agent wrappers must FHS-bootstrap from their npm packages
+            # All agent wrappers must bootstrap from npm packages without
+            # launching through buildFHSEnv/bubblewrap.
             for wrapper in \
               "$HOME/.local/bin/claude" \
               "$HOME/.local/bin/codex" \
               "$HOME/.local/bin/gemini"; do
-              grep -Fq 'agent-fhs' "$wrapper"
+              if grep -Fq 'agent-fhs' "$wrapper"; then
+                echo "$wrapper still launches through agent-fhs" >&2
+                exit 1
+              fi
               grep -Fq 'launch.sh' "$wrapper"
+              grep -Fq 'run_agent_scoped "$STATE/launch.sh"' "$wrapper"
             done
             grep -Fq 'npm install -g @anthropic-ai/claude-code' "$HOME/.local/bin/claude"
             grep -Fq 'npm install -g @openai/codex' "$HOME/.local/bin/codex"
             grep -Fq 'npm install -g @google/gemini-cli' "$HOME/.local/bin/gemini"
-            grep -Fq 'run_agent_scoped "$FHS" "$STATE/launch.sh"' "$HOME/.local/bin/gemini"
 
             "$HOME/.local/bin/mcp-polylogue" --help | grep -q 'Start the Polylogue MCP stdio bridge'
             "$HOME/.local/bin/mcp-playwright" --help | grep -q 'Usage: Playwright MCP'

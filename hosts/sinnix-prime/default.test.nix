@@ -85,6 +85,16 @@
       }
       {
         assertion =
+          config.sinnix.services.lynchpin.enable
+          && config.sinnix.services.lynchpin.materializationTimer.enable
+          && config.systemd.services ? lynchpin-materialize
+          && config.systemd.timers ? lynchpin-materialize
+          && !(config.systemd.services ? lynchpin-refresh-worker)
+          && !(config.systemd.timers ? lynchpin-refresh-worker);
+        message = "sinnix-prime must run daily Lynchpin materialization without the legacy refresh-worker timer";
+      }
+      {
+        assertion =
           config.services.interception-tools.enable
           && lib.hasInfix "scribe-tap" interceptionConfig
           && lib.hasInfix keylogRoot interceptionConfig
@@ -95,6 +105,10 @@
       {
         assertion = logitechMaintenance.wantedBy == [ "graphical-session.target" ];
         message = "sinnix-prime Logitech maintenance must be installed, not gated off";
+      }
+      {
+        assertion = polylogueHm.systemd.user.startServices == false;
+        message = "Home Manager activation must not restart user services during live system switches";
       }
     ];
 }

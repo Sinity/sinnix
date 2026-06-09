@@ -116,16 +116,16 @@ mkFeatureModule {
           programs.ssh = {
             enable = true;
             enableDefaultConfig = false;
-            matchBlocks = {
-              "*".addKeysToAgent = "yes";
+            settings = {
+              "*".AddKeysToAgent = "yes";
               # Router: `ssh sinnix-gw` just works
               "sinnix-gw" = {
-                hostname = "192.168.1.1";
-                user = "root";
+                HostName = "192.168.1.1";
+                User = "root";
               };
               "sinnix-gw.lan" = {
-                hostname = "192.168.1.1";
-                user = "root";
+                HostName = "192.168.1.1";
+                User = "root";
               };
             };
           };

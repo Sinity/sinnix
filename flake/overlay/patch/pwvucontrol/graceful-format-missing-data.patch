@@ -1,26 +1,15 @@
---- a/src/backend/pwnodeobject.rs	2025-10-10 01:11:51.762421270 +0200
-+++ b/src/backend/pwnodeobject.rs	2025-10-10 01:18:14.256301183 +0200
-@@ -346,6 +346,9 @@
-                         continue;
+--- a/src/backend/pwnodeobject.rs
++++ b/src/backend/pwnodeobject.rs
+@@ -360,39 +360,100 @@
+                         }
                      }
  
 +                    let node_id = node.bound_id();
 +                    let node_name = node.name().unwrap_or_default();
 +
-                     fn get_pod_maybe_choice(pod: wp::spa::SpaPod) -> wp::spa::SpaPod {
-                         if pod.is_choice() {
-                             pod.choice_child().unwrap()
-@@ -354,35 +357,103 @@
-                         }
-                     }
- 
--                    let choice = pod.find_spa_property(&wp::spa::ffi::SPA_FORMAT_AUDIO_format).expect("Format!");
--                    let format = get_pod_maybe_choice(choice).id().expect("Format id");
--                    if format == 0 {
--                        pwvucontrol_warning!("Format is 0, ignoring...");
+                     let Some(choice) = pod.find_spa_property(&wp::spa::ffi::SPA_FORMAT_AUDIO_format) else {
+-                        pwvucontrol_warning!("Format is missing for \"{}\"", node.name().unwrap_or_default());
 -                        return;
--                    }
-+                    let Some(choice) = pod.find_spa_property(&wp::spa::ffi::SPA_FORMAT_AUDIO_format) else {
 +                        pwvucontrol_warning!(
 +                            "Skipping format update for node {} ({}): missing SPA_FORMAT_AUDIO_format",
 +                            node_id,
@@ -46,11 +35,15 @@
 +                            );
 +                            continue;
 +                        }
-+                    };
+                     };
+-                    let format = get_pod_maybe_choice(choice).id().expect("Format id");
+-                    if format == 0 {
+-                        pwvucontrol_warning!("Format is 0 for \"{}\"", node.name().unwrap_or_default());
+-                        return;
+-                    }
  
                      let channels = match pod.find_spa_property(&wp::spa::ffi::SPA_FORMAT_AUDIO_channels) {
 -                        Some(pod) => get_pod_maybe_choice(pod).int().expect("Channels int"),
--                        None => 0
 +                        Some(pod) => match get_pod_maybe_choice(pod).int() {
 +                            Some(value) => value,
 +                            None => {
@@ -62,12 +55,11 @@
 +                                continue;
 +                            }
 +                        },
-+                        None => 0,
+                         None => 0
                      };
  
                      let rate = match pod.find_spa_property(&wp::spa::ffi::SPA_FORMAT_AUDIO_rate) {
 -                        Some(pod) => get_pod_maybe_choice(pod).int().expect("Rate int"),
--                        None => 0
 +                        Some(pod) => match get_pod_maybe_choice(pod).int() {
 +                            Some(value) => value,
 +                            None => {
@@ -79,33 +71,27 @@
 +                                continue;
 +                            }
 +                        },
-+                        None => 0,
+                         None => 0
                      };
  
--                    let choice = pod.find_spa_property(&wp::spa::ffi::SPA_FORMAT_AUDIO_position).expect("Position!");
-+                    let Some(choice) = pod.find_spa_property(&wp::spa::ffi::SPA_FORMAT_AUDIO_position) else {
-+                        pwvucontrol_warning!(
-+                            "Skipping format update for node {} ({}): missing SPA_FORMAT_AUDIO_position",
-+                            node_id,
-+                            node_name.as_str()
-+                        );
-+                        continue;
-+                    };
-                     let positionpod = get_pod_maybe_choice(choice);
-+                    if !positionpod.is_array() {
-+                        pwvucontrol_warning!(
-+                            "Skipping format update for node {} ({}): position pod is not an array",
-+                            node_id,
-+                            node_name.as_str()
-+                        );
-+                        continue;
-+                    }
-                     let vec: Vec<u32> = positionpod.array_iterator().map(|x: i32| x as u32).collect();
--                    let mut a = [0u32;64];
--                    for (i,v) in (0..).zip(vec.iter()) {
-+                    let mut a = [0u32; 64];
-+                    for (i, v) in (0..).zip(vec.iter()) {
-                         a[i] = *v;
+                     let mut a = [0u32;64];
+                     if let Some(choice) = pod.find_spa_property(&wp::spa::ffi::SPA_FORMAT_AUDIO_position) {
+                         let positionpod = get_pod_maybe_choice(choice);
+-                        let vec: Vec<u32> = positionpod.array_iterator().map(|x: i32| x as u32).collect();
+-                        for (i,v) in (0..).zip(vec.iter()) {
+-                            a[i] = *v;
++                        if !positionpod.is_array() {
++                            pwvucontrol_warning!(
++                                "Skipping channel position update for node {} ({}): position pod is not an array",
++                                node_id,
++                                node_name.as_str()
++                            );
++                        } else {
++                            let vec: Vec<u32> = positionpod.array_iterator().map(|x: i32| x as u32).collect();
++                            for (i,v) in (0..).zip(vec.iter()) {
++                                a[i] = *v;
++                            }
+                         }
                      }
  
 -                    pwvucontrol_info!("For {} bound id {}, Got rate {rate}, format {format}, channels {channels}", node.name().unwrap_or_default(), node.bound_id());

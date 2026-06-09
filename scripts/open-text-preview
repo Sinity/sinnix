@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# @sinnix-package: skip
+#
+# Open text files in a floating, dismissable preview popup: a detached kitty
+# window running `bat` (syntax-highlighted pager; `q` closes it). Wired as the
+# default handler for text/* via modules/features/desktop/mime.nix; the matching
+# Hyprland float rule (app-id `sinnix-preview`) lives in hyprland/rules.nix.
+#
+# Replaces the previous behaviour where text MIME types fell back to nvim.desktop
+# (Terminal=true), which under bare Hyprland launched a headless, window-less,
+# immortal nvim per open. `setsid -f` detaches so the calling xdg-open/gio
+# returns immediately and nothing is left hanging.
+set -euo pipefail
+
+if [ "$#" -eq 0 ]; then
+  echo "usage: open-text-preview <file> [more-files...]" >&2
+  exit 1
+fi
+
+# Normalise file:// URLs (xdg-open/gio may pass either path or URL).
+files=()
+for arg in "$@"; do
+  case "$arg" in
+    file://*) files+=("${arg#file://}") ;;
+    *) files+=("$arg") ;;
+  esac
+done
+
+setsid -f kitty \
+  --app-id=sinnix-preview \
+  --title="preview: $(basename -- "${files[0]}")" \
+  -- bat --style=full --paging=always -- "${files[@]}" \
+  >/dev/null 2>&1 </dev/null

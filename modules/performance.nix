@@ -58,39 +58,42 @@ let
 in
 {
   config = lib.mkIf config.sinnix.machine.isDesktop {
-    zramSwap = {
-      enable = true;
-      memoryPercent = 25;
-      algorithm = "zstd";
-      priority = 100;
-    };
+    # zram intentionally disabled (2026-06-07): it filled (memoryPercent=50) yet
+    # the box still spilled ~9 GiB to the disk swapfile, so it was not preventing
+    # disk paging. Policy is now "keep anon resident (low swappiness + reclaim
+    # cache first); a tiny disk swap is an OOM cushion only".
+    zramSwap.enable = false;
 
     systemd.settings.Manager.StatusUnitFormat = "name";
 
-    boot.kernel.sysctl = {
-      # Keep zram as the first emergency buffer. The root Btrfs swapfile is
-      # much slower and can visibly stall interactive work under pressure.
-      "vm.swappiness" = 10;
-      "vm.page-cluster" = 0;
-      "vm.vfs_cache_pressure" = 50;
-      # Keep Btrfs/NVMe writeback from accumulating multi-GiB dirty bursts.
-      # The Crucial P3 /realm drive has shown 30s NVMe command timeouts under
-      # mixed build/database writeback; bounded dirty bytes push back earlier
-      # and make stalls shorter and more attributable.
-      "vm.dirty_background_bytes" = 64 * 1024 * 1024;
-      "vm.dirty_bytes" = 256 * 1024 * 1024;
+    boot.kernel.sysctl =
+      {
+        # Keep process (anon) memory resident; reclaim file cache before swapping.
+        # Diagnosed 2026-06-07: swappiness=60 + vfs_cache_pressure=50 made the box
+        # hoard ~18 GiB page cache while paging ~17 GiB of anon to swap (incl.
+        # ~9 GiB to the disk swapfile) despite ~20 GiB available RAM. swappiness=10
+        # + vfs_cache_pressure=100 inverts that: drop cache first, keep anon in RAM,
+        # use the (now tiny) swap only as an OOM cushion.
+        "vm.swappiness" = 10;
+        "vm.page-cluster" = 0;
+        "vm.vfs_cache_pressure" = 100;
+        # Keep Btrfs/NVMe writeback from accumulating multi-GiB dirty bursts.
+        # The Crucial P3 /realm drive has shown 30s NVMe command timeouts under
+        # mixed build/database writeback; bounded dirty bytes push back earlier
+        # and make stalls shorter and more attributable.
+        "vm.dirty_background_bytes" = 64 * 1024 * 1024;
+        "vm.dirty_bytes" = 256 * 1024 * 1024;
 
-      # Preserve crash diagnostics without turning ordinary hung-task reports
-      # into automatic workstation reboots.
-      "kernel.hung_task_panic" = 0;
-      "kernel.hung_task_timeout_secs" = 120;
-      "kernel.panic" = 60;
-      "kernel.oops_all_cpu_backtrace" = 1;
-      "kernel.hardlockup_all_cpu_backtrace" = 1;
-      "kernel.softlockup_all_cpu_backtrace" = 1;
-    }
-    //
-      lib.optionalAttrs
+        # Preserve crash diagnostics without turning ordinary hung-task reports
+        # into automatic workstation reboots.
+        "kernel.hung_task_panic" = 0;
+        "kernel.hung_task_timeout_secs" = 120;
+        "kernel.panic" = 60;
+        "kernel.oops_all_cpu_backtrace" = 1;
+        "kernel.hardlockup_all_cpu_backtrace" = 1;
+        "kernel.softlockup_all_cpu_backtrace" = 1;
+      }
+      // lib.optionalAttrs
         (
           lib.attrByPath [ "sinnix" "services" "sinex" "prepareHost" ] false config
           || lib.attrByPath [ "sinnix" "services" "sinex" "enable" ] false config
@@ -132,10 +135,11 @@ in
     services.earlyoom = {
       enable = true;
       enableNotifications = true;
-      # Kill only near true exhaustion. With a real swapfile, earlyoom is the
-      # emergency brake, not routine pressure management.
-      freeMemThreshold = 5;
-      freeSwapThreshold = 15;
+      # Act before multi-GiB disk-swap residency turns into sustained major
+      # faults and Btrfs queue collapse. systemd-oomd handles slice-local
+      # pressure first; earlyoom remains the global emergency guard.
+      freeMemThreshold = 10;
+      freeSwapThreshold = 25;
       extraArgs = [
         "--prefer"
         "(node|python|cargo|rustc|cc1plus|ld|nix|nix-daemon)"
@@ -144,11 +148,10 @@ in
       ];
     };
 
-    # earlyoom owns global emergency memory intervention on this workstation.
-    # systemd-oomd PSI kills are deliberately disabled so custom runtime
-    # slices remain attribution and weighting policy, not an automatic kill
-    # surface.
-    systemd.oomd.enable = false;
+    # systemd-oomd provides slice-local pressure backpressure for build and
+    # background scopes. Critical and interactive slices are intentionally not
+    # managed by oomd; earlyoom remains the global emergency fallback.
+    systemd.oomd.enable = true;
 
     systemd.slices = lib.mapAttrs (_: sliceConfig: {
       inherit sliceConfig;

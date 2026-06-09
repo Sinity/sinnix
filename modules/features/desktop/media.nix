@@ -24,7 +24,7 @@ mkFeatureModule {
       default = false;
     };
     graphics = {
-      description = "Image viewers and editors (imv, gimp, inkscape)";
+      description = "Image viewers and editors (imv, gimp)";
       default = true;
     };
     documents = {
@@ -77,6 +77,8 @@ mkFeatureModule {
                 force-window = "immediate";
                 hwdec = "no";
                 video-sync = "display-resample";
+                drm-vrr-enabled = "no";
+                wayland-content-type = "none";
                 audio-file-auto = "fuzzy";
                 audio-pitch-correction = true;
                 alang = "jp,jpn,en,eng,pl,pol";
@@ -190,7 +192,6 @@ mkFeatureModule {
             home.packages = with pkgs; [
               imvWithExtras # from overlay: includes AVIF/HEIF/JXL support
               gimp
-              inkscape
             ];
 
             xdg.desktopEntries.imv = {

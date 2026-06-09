@@ -22,7 +22,7 @@ let
     ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux checkTiers.vmCheckNames
     ++ lib.optionals (system == "x86_64-linux") checkTiers.hostBuildCheckNames;
   resolveFlakeDir = ''
-    _flake_dir="''${SINNIX_FLAKE_DIR:-''${FLAKE:-${inputs.self}}}"
+    _flake_dir="''${SINNIX_FLAKE_DIR:-''${NH_FLAKE:-''${FLAKE:-${inputs.self}}}}"
   '';
   avoidRepoCwdForActivation = ''
     # nixos-rebuild-ng can trip over a git checkout cwd during activation.
@@ -49,8 +49,8 @@ let
     fi
   '';
   rebuildDefaultArgs = ''
-    rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-4}"
-    rebuild_cores="''${SINNIX_REBUILD_CORES:-4}"
+    rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-3}"
+    rebuild_cores="''${SINNIX_REBUILD_CORES:-3}"
   '';
   hostSmokeTerminalScript = ''
     session="sinnix-host-smoke-$$"
@@ -350,22 +350,20 @@ in
       description = "Test configuration without applying it to the system (nh os test)";
       script = ''
         ${resolveFlakeDir}
-        if [ "$(id -u)" -ne 0 ]; then
-          echo "Error: This command must be run as root (use 'sudo nix run $_flake_dir#test-system')"
-          exit 1
-        fi
         ${avoidRepoCwdForActivation}
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
         ${pkgs.systemd}/bin/systemd-run \
+          --user \
           --quiet --collect --pipe --service-type=exec --wait \
+          --setenv=PATH="${rebuildServicePath}:$PATH" \
           -p Nice=10 \
-          ${pkgs.nh}/bin/nh os test \
+          ${pkgs.coreutils}/bin/env -u FLAKE NH_FLAKE="$_invoke_flake_dir" \
+            ${pkgs.nh}/bin/nh os test \
             "''${_invoke_flake_dir}#sinnix-prime" \
             --max-jobs "$rebuild_jobs" \
             --cores "$rebuild_cores" \
-            "''${nix_override_args[@]}" \
-            --no-ask
+            "''${nix_override_args[@]}"
       '';
     };
 
@@ -373,22 +371,20 @@ in
       description = "Build + set boot default, activate on next reboot (nh os boot)";
       script = ''
         ${resolveFlakeDir}
-        if [ "$(id -u)" -ne 0 ]; then
-          echo "Error: This command must be run as root (use 'sudo nix run $_flake_dir#boot')"
-          exit 1
-        fi
         ${avoidRepoCwdForActivation}
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
         ${pkgs.systemd}/bin/systemd-run \
+          --user \
           --quiet --collect --pipe --service-type=exec --wait \
+          --setenv=PATH="${rebuildServicePath}:$PATH" \
           -p Nice=10 \
-          ${pkgs.nh}/bin/nh os boot \
+          ${pkgs.coreutils}/bin/env -u FLAKE NH_FLAKE="$_invoke_flake_dir" \
+            ${pkgs.nh}/bin/nh os boot \
             "''${_invoke_flake_dir}#sinnix-prime" \
             --max-jobs "$rebuild_jobs" \
             --cores "$rebuild_cores" \
-            "''${nix_override_args[@]}" \
-            --no-ask
+            "''${nix_override_args[@]}"
       '';
     };
 
@@ -396,22 +392,20 @@ in
       description = "Apply configuration changes to the system (nh os switch)";
       script = ''
         ${resolveFlakeDir}
-        if [ "$(id -u)" -ne 0 ]; then
-          echo "Error: This command must be run as root (use 'sudo nix run $_flake_dir#switch')"
-          exit 1
-        fi
         ${avoidRepoCwdForActivation}
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
         ${pkgs.systemd}/bin/systemd-run \
+          --user \
           --quiet --collect --pipe --service-type=exec --wait \
+          --setenv=PATH="${rebuildServicePath}:$PATH" \
           -p Nice=10 \
-          ${pkgs.nh}/bin/nh os switch \
+          ${pkgs.coreutils}/bin/env -u FLAKE NH_FLAKE="$_invoke_flake_dir" \
+            ${pkgs.nh}/bin/nh os switch \
             "''${_invoke_flake_dir}#sinnix-prime" \
             --max-jobs "$rebuild_jobs" \
             --cores "$rebuild_cores" \
-            "''${nix_override_args[@]}" \
-            --no-ask
+            "''${nix_override_args[@]}"
       '';
     };
 

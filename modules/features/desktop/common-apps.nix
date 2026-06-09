@@ -29,10 +29,6 @@ mkFeatureModule {
       force = true;
     };
     "audacity/audacity.cfg" = "audacity/audacity.cfg";
-    "transmission/settings.json" = {
-      source = "transmission/settings.json";
-      force = true;
-    };
   };
   configFn =
     {

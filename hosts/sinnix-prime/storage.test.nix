@@ -23,6 +23,7 @@
       ) config.sinnix.persistence.home.directories;
       swapDevice = builtins.head config.swapDevices;
       udevRules = config.services.udev.extraRules;
+      rollbackScript = config.boot.initrd.systemd.services.rollback-root.script;
     in
     [
       {
@@ -66,10 +67,25 @@
         assertion =
           builtins.length config.swapDevices == 1
           && swapDevice.device == "/swap/swapfile"
-          && swapDevice.size == 64 * 1024
+          && swapDevice.size == 32 * 1024
           && builtins.elem "subvol=@swap" (optionsFor "/swap")
           && builtins.elem "nodatacow" (optionsFor "/swap");
         message = "swapfile must live on a dedicated non-snapshotted btrfs subvolume";
+      }
+      {
+        # Swap must ride the NVMe realm filesystem, not the slower SATA root SSD
+        # that froze the box under build-load swap thrash on 2026-06-03.
+        assertion =
+          config.fileSystems."/swap".device == config.fileSystems.${config.sinnix.paths.realmRoot}.device
+          && config.fileSystems."/swap".device != config.fileSystems."/".device;
+        message = "swap must live on the realm NVMe filesystem, not the SATA root device";
+      }
+      {
+        assertion =
+          lib.hasInfix "for path in nix swap persist realm outer-realm neo-outer-realm" rollbackScript
+          && lib.hasInfix "/btrfs_tmp/@/home/*/.cache" rollbackScript
+          && lib.hasInfix "btrfs subvolume snapshot /btrfs_tmp/@" rollbackScript;
+        message = "root rollback snapshots must exclude hidden mountpoint payloads and caches before capture";
       }
     ];
 }

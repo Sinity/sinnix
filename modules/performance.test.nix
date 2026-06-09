@@ -59,13 +59,12 @@
     in
     [
       {
-        assertion =
-          config.zramSwap.enable && config.zramSwap.memoryPercent == 25 && config.zramSwap.priority == 100;
-        message = "desktop must keep zram enabled as the emergency memory buffer";
+        assertion = !config.zramSwap.enable;
+        message = "zram is intentionally disabled (2026-06-07); keep anon resident via low swappiness + cache reclaim, with a tiny disk swap as OOM cushion only";
       }
       {
-        assertion = !config.systemd.oomd.enable && config.services.earlyoom.enable;
-        message = "systemd-oomd must stay disabled while earlyoom handles global pressure";
+        assertion = config.systemd.oomd.enable && config.services.earlyoom.enable;
+        message = "systemd-oomd must provide slice-local pressure kills while earlyoom handles global emergencies";
       }
       {
         assertion =
@@ -93,9 +92,9 @@
           && lib.hasInfix "nix-daemon" earlyoomPrefer
           && !(lib.hasInfix "chrome" earlyoomPrefer)
           && !(lib.hasInfix "firefox" earlyoomPrefer)
-          && config.services.earlyoom.freeMemThreshold == 5
-          && config.services.earlyoom.freeSwapThreshold == 15;
-        message = "earlyoom must act only as a late emergency guard";
+          && config.services.earlyoom.freeMemThreshold == 10
+          && config.services.earlyoom.freeSwapThreshold == 25;
+        message = "earlyoom must fire before disk-swap residency collapses interactivity";
       }
       {
         assertion =
@@ -134,27 +133,42 @@
       }
       {
         assertion =
-          systemBackground.CPUWeight == 10
-          && systemBackground.IOWeight == 5
-          && systemBackground.MemoryHigh == "4G"
-          && systemBackground.MemoryMax == "10G"
-          && nixBuild.CPUWeight == 20
-          && nixBuild.IOWeight == 10
-          && nixBuild.MemoryHigh == "8G"
-          && nixBuild.MemoryMax == "16G"
-          && systemCritical.CPUWeight == 200
-          && systemCritical.IOWeight == 100
-          && systemCritical.MemoryLow == "512M"
-          && userBackground.CPUWeight == 10
-          && userBackground.IOWeight == 5
-          && userBuild.CPUWeight == 20
-          && userBuild.IOWeight == 10
-          && userNixBuild.CPUWeight == 20
-          && userNixBuild.IOWeight == 10
-          && userAgent.CPUWeight == 200
-          && userAgent.IOWeight == 100
-          && userAgent.MemoryLow == "1G";
-        message = "background/build/agent slices must keep measured resource budgets";
+          systemBackground.CPUWeight == 3
+          && systemBackground.IOWeight == 1
+          && systemBackground.MemoryHigh == "2G"
+          && systemBackground.MemoryMax == "4G"
+          && systemBackground.ManagedOOMMemoryPressure == "kill"
+          && systemBackground.ManagedOOMMemoryPressureLimit == "25%"
+          && nixBuild.CPUWeight == 5
+          && nixBuild.IOWeight == 2
+          && nixBuild.MemoryHigh == "3G"
+          && nixBuild.MemoryMax == "8G"
+          && nixBuild.ManagedOOMMemoryPressure == "kill"
+          && nixBuild.ManagedOOMMemoryPressureLimit == "30%"
+          && systemCritical.CPUWeight == 400
+          && systemCritical.IOWeight == 300
+          && systemCritical.MemoryLow == "2G"
+          && userBackground.CPUWeight == 3
+          && userBackground.IOWeight == 1
+          && userBackground.MemoryMax == "4G"
+          && userBackground.ManagedOOMMemoryPressure == "kill"
+          && userBackground.ManagedOOMMemoryPressureLimit == "25%"
+          && userBuild.CPUWeight == 5
+          && userBuild.IOWeight == 2
+          && userBuild.MemoryHigh == "3G"
+          && userBuild.MemoryMax == "8G"
+          && userBuild.ManagedOOMMemoryPressure == "kill"
+          && userBuild.ManagedOOMMemoryPressureLimit == "30%"
+          && userNixBuild.CPUWeight == 5
+          && userNixBuild.IOWeight == 2
+          && userNixBuild.MemoryHigh == "3G"
+          && userNixBuild.MemoryMax == "8G"
+          && userNixBuild.ManagedOOMMemoryPressure == "kill"
+          && userNixBuild.ManagedOOMMemoryPressureLimit == "30%"
+          && userAgent.CPUWeight == 400
+          && userAgent.IOWeight == 300
+          && userAgent.MemoryLow == "3G";
+        message = "background/build/agent slices must keep measured resource budgets and pressure backpressure";
       }
       {
         assertion =
@@ -166,8 +180,8 @@
       }
       {
         assertion =
-          nixSettings.max-jobs == 4
-          && nixSettings.cores == 4
+          nixSettings.max-jobs == 3
+          && nixSettings.cores == 3
           && nixSettings.http-connections == 16
           && nixSettings.max-substitution-jobs == 8
           && nixSettings.keep-going == false
@@ -179,12 +193,12 @@
               "flakes"
               "fetch-tree"
             ]
-          && lib.hasInfix "SINNIX_REBUILD_MAX_JOBS:-4" commandRegistry
-          && lib.hasInfix "SINNIX_REBUILD_CORES:-4" commandRegistry
-          && lib.hasInfix "SINNIX_REBUILD_MAX_JOBS:-4" devShell
-          && lib.hasInfix "SINNIX_REBUILD_CORES:-4" devShell
-          && lib.hasInfix "NIX_SAFE_MAX_JOBS:-4" nixSafeScript
-          && lib.hasInfix "NIX_SAFE_CORES:-4" nixSafeScript;
+          && lib.hasInfix "SINNIX_REBUILD_MAX_JOBS:-3" commandRegistry
+          && lib.hasInfix "SINNIX_REBUILD_CORES:-3" commandRegistry
+          && lib.hasInfix "SINNIX_REBUILD_MAX_JOBS:-3" devShell
+          && lib.hasInfix "SINNIX_REBUILD_CORES:-3" devShell
+          && lib.hasInfix "NIX_SAFE_MAX_JOBS:-3" nixSafeScript
+          && lib.hasInfix "NIX_SAFE_CORES:-3" nixSafeScript;
         message = "Nix concurrency and substitution fan-out must stay bounded without enabling Nix cgroups";
       }
       {
@@ -192,6 +206,7 @@
           lib.hasInfix "usage: sinnix-scope <class> -- <command> [args...]" scopeScript
           && lib.hasInfix "SINNIX_RUNTIME_INVENTORY_FILE" scopeScript
           && lib.hasInfix "/etc/sinnix/runtime-inventory.json" scopeScript
+          && lib.hasInfix "/run/current-system/etc/sinnix/runtime-inventory.json" scopeScript
           && lib.hasInfix "jq -er" scopeScript
           && lib.hasInfix ".commandClasses[$class] != null" scopeScript
           && lib.hasInfix ".environmentAllowList[]?" scopeScript
@@ -213,7 +228,8 @@
           runtimeInventory.schema == "sinnix-runtime-inventory-v1"
           && runtimeInventoryJson.schema == runtimeInventory.schema
           && runtimeInventory.commandClasses.build.slice == "build.slice"
-          && runtimeInventory.commandClasses.build.envDefaults.MAKEFLAGS == "-j4"
+          && runtimeInventory.commandClasses.build.envDefaults.MAKEFLAGS == "-j3"
+          && runtimeInventory.commandClasses.build.envDefaults.CARGO_INCREMENTAL == "0"
           && runtimeInventory.commandClasses.agent.resourceClass == "interactive-agent"
           && runtimeInventory.classes.observability.serviceConfig.Slice == "system-critical.slice"
           && runtimeInventory.classes.interactive-access.serviceConfig.Slice == "system-critical.slice"
@@ -227,19 +243,15 @@
       {
         assertion =
           builtins.any (rule: lib.hasInfix "/var/cache/nix-build" rule) config.systemd.tmpfiles.rules
-          && builtins.any (rule: lib.hasInfix "/var/cache/sccache" rule) config.systemd.tmpfiles.rules
           && builtins.any (rule: lib.hasInfix "/var/cache/sinex" rule) config.systemd.tmpfiles.rules
           && lib.hasInfix "build-dir = /var/cache/nix-build" config.nix.extraOptions
-          && config.environment.variables.SCCACHE_DIR == "/var/cache/sccache"
-          && config.environment.variables.SCCACHE_IDLE_TIMEOUT == "300"
           && rootCacheService.before == [ "nix-daemon.service" ]
           && rootCacheService.serviceConfig.Type == "oneshot"
           && lib.hasInfix "chattr +C" rootCacheService.script
           && builtins.elem "sinnix-root-cache-attrs.service" config.systemd.services.nix-daemon.requires
           && !(lib.hasInfix "/var/cache/nix-build" coreModule)
-          && !(lib.hasInfix "/var/cache/sccache" coreModule)
           && lib.hasInfix "Eval/fetcher cache stays under ~/.cache/nix" persistenceModule;
-        message = "Nix and sccache scratch must use prepared root cache, not /realm or the failed /cache NVMe";
+        message = "Nix scratch must use prepared root cache, not /realm or the failed /cache NVMe";
       }
       {
         assertion =
@@ -249,14 +261,16 @@
           && lib.hasInfix "_sinnix_setup_sinex_dev_cache" direnvrc
           && lib.hasInfix "/var/cache/sinex/$sinex_user/$sinex_hash" direnvrc
           && lib.hasInfix "export SINEX_DEV_CACHE_ROOT=\"$sinex_cache_base\"" direnvrc
+          && !(lib.hasInfix "CARGO_INCREMENTAL" direnvrc)
           && lib.hasInfix "export CARGO_TARGET_DIR=\"$SINEX_DEV_CACHE_ROOT/target\"" direnvrc
           && lib.hasInfix "export SINEX_DEV_STATE_DIR=\"$sinex_cache_base/dev-state\"" direnvrc
+          && lib.hasInfix "export SINEX_STATE_DIR=\"$project_root/.sinex/state\"" direnvrc
           && lib.hasInfix "export DATABASE_URL=\"postgresql:///sinex_dev?host=$SINEX_DEV_STATE_DIR/run\"" direnvrc;
         message = "Sinex dev cache relocation belongs to project direnv setup, not generic sinnix-scope";
       }
       {
         assertion =
-          lib.hasInfix "earlyoom owns global emergency memory intervention" performanceModule
+          lib.hasInfix "systemd-oomd provides slice-local pressure backpressure" performanceModule
           && !(lib.hasInfix "while this host is being retuned" performanceModule);
         message = "OOM policy notes must be present-tense rather than retuning history";
       }

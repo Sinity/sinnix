@@ -56,19 +56,20 @@
           set -euo pipefail
           ${resolveFlakeDir}
           ${localInputOverrideArgs}
-          rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-4}"
-          rebuild_cores="''${SINNIX_REBUILD_CORES:-4}"
+          rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-3}"
+          rebuild_cores="''${SINNIX_REBUILD_CORES:-3}"
 
-          exec sudo ${pkgs.systemd}/bin/systemd-run \
+          exec ${pkgs.systemd}/bin/systemd-run \
+            --user \
             --quiet --collect --pipe --service-type=exec --wait \
             --setenv=PATH="${rebuildServicePath}:$PATH" \
             -p Nice=10 \
-            ${pkgs.nh}/bin/nh os ${action} \
+            ${pkgs.coreutils}/bin/env -u FLAKE NH_FLAKE="''${_flake_dir}" \
+              ${pkgs.nh}/bin/nh os ${action} \
               "''${_flake_dir}#sinnix-prime" \
               --max-jobs "$rebuild_jobs" \
               --cores "$rebuild_cores" \
-              "''${nix_override_args[@]}" \
-              --no-ask
+              "''${nix_override_args[@]}"
         '';
 
       # Devshell command wrappers — every listed command is directly typeable
@@ -85,8 +86,8 @@
           set -euo pipefail
           ${resolveFlakeDir}
           ${localInputOverrideArgs}
-          rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-4}"
-          rebuild_cores="''${SINNIX_REBUILD_CORES:-4}"
+          rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-3}"
+          rebuild_cores="''${SINNIX_REBUILD_CORES:-3}"
 
           exec sudo ${pkgs.systemd}/bin/systemd-run \
             --quiet --collect --pipe --service-type=exec --wait \

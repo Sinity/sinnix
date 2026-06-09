@@ -162,8 +162,13 @@ in
       ".config/timewarrior"
       ".local/share/timewarrior"
 
+      # Per-device audio state: volumes, default sink/source routing, stream
+      # properties — otherwise reset to defaults on every boot.
+      ".local/state/wireplumber"
+
       # Large installs
       ".local/share/nvim" # Mason LSPs + treesitter, 1.6 GB
+      ".local/state/nvim" # shada: recent files, marks, registers, search/cmd history, undo
       {
         directory = ".local/share/Steam";
         mode = "0750";
@@ -195,6 +200,10 @@ in
       # Torrent
       {
         directory = ".config/transmission";
+        mode = "0700";
+      }
+      {
+        directory = ".config/transmission-remote-gtk";
         mode = "0700";
       }
 

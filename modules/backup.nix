@@ -27,14 +27,19 @@ let
   borgSnapshotBindRoot = "/run/borgbackup-snapshot-inputs";
   borgPersistSnapshotBind = "${borgSnapshotBindRoot}/persist";
   borgRealmSnapshotBind = "${borgSnapshotBindRoot}/realm";
+  borgDrainStateRoot = "/persist/root/.cache/borg-drain";
 
   # Borg Configuration
   borgRepoPersistPath = "${borgRepoRoot}/borg-persist-v1";
   borgRepoRealmPath = "${borgRepoRoot}/borg-realm-v2";
+  borgRepoRootSnapshotsPath = "${borgRepoRoot}/borg-root-snapshots-v1";
   btrfsImageRoot = "${borgRepoRoot}/btrfs-images";
   borgRepoPersist = "file://${borgRepoPersistPath}";
   borgRepoRealm = "file://${borgRepoRealmPath}";
+  borgRepoRootSnapshots = "file://${borgRepoRootSnapshotsPath}";
   borgPassphrasePath = config.sinnix.secrets.paths."borg-passphrase";
+  outerRealmMountUnit = "outer\\x2drealm.mount";
+  borgLockWaitSec = 60;
   backupServiceConfig =
     unit:
     lib.sinnix.mkRuntimeServiceConfig {
@@ -42,102 +47,155 @@ let
       inherit unit;
     };
 
-  mkBindMountedSnapshotHook =
+  mkBorgExcludeArgs =
+    exclude:
+    lib.concatMapStringsSep " " (pattern: "--exclude ${lib.escapeShellArg pattern}") exclude;
+
+  borgRetentionArgs = [
+    "--keep-within"
+    "7d"
+    "--keep-daily"
+    "60"
+    "--keep-weekly"
+    "26"
+    "--keep-monthly"
+    "24"
+    "--keep-yearly"
+    "5"
+  ];
+
+  mkBorgRetentionArgs = lib.concatMapStringsSep " " lib.escapeShellArg borgRetentionArgs;
+
+  mkSnapshotDrainScript =
     {
       label,
+      repo,
+      repoPath,
       snapshotDir,
       snapshotGlob,
       bindTarget,
+      archivePrefix,
+      minIntervalSec,
+      exclude,
     }:
     ''
-      cleanup_${label}_snapshot_bind_mount() {
-        if ${pkgs.util-linux}/bin/mountpoint -q "${bindTarget}"; then
-          ${pkgs.util-linux}/bin/umount "${bindTarget}"
-        fi
-      }
+      set -euo pipefail
+      shopt -s nullglob
 
-      trap cleanup_${label}_snapshot_bind_mount EXIT
+      export BORG_REPO=${lib.escapeShellArg repo}
+      export BORG_PASSCOMMAND=${lib.escapeShellArg "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}"}
+      export BORG_CACHE_DIR=/persist/root/.cache/borg
 
-      latest_snapshot="$(
-        ${pkgs.findutils}/bin/find ${snapshotDir} -maxdepth 1 -mindepth 1 -type d -name '${snapshotGlob}' -printf '%f\n' \
-          | ${pkgs.coreutils}/bin/sort | ${pkgs.coreutils}/bin/tail -n 1
-      )"
+      install -d -m 0700 -o root -g root ${lib.escapeShellArg repoPath}
+      install -d -m 0700 -o root -g root ${lib.escapeShellArg bindTarget}
+      install -d -m 0700 -o root -g root ${lib.escapeShellArg borgDrainStateRoot}
 
-      if [ -z "$latest_snapshot" ]; then
-        echo "No ${label} snapshot found in ${snapshotDir}" >&2
-        exit 1
+      if [ ! -e ${lib.escapeShellArg "${repoPath}/config"} ]; then
+        borg init --encryption repokey-blake2 "$BORG_REPO"
       fi
 
-      ${pkgs.coreutils}/bin/mkdir -p "${bindTarget}"
-      cleanup_${label}_snapshot_bind_mount || true
-      ${pkgs.util-linux}/bin/mount --bind "${snapshotDir}/$latest_snapshot" "${bindTarget}"
+      stamp=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.stamp"}
+      now="$(date +%s)"
+      if [ -e "$stamp" ]; then
+        last="$(stat -c %Y "$stamp")"
+        age=$((now - last))
+        if [ "$age" -lt ${toString minIntervalSec} ]; then
+          echo "Last ${label} Borg drain was $age seconds ago; keeping snapshots queued for coalescing"
+          exit 0
+        fi
+      fi
+
+      cleanup_snapshot_bind_mount() {
+        if mountpoint -q ${lib.escapeShellArg bindTarget}; then
+          umount ${lib.escapeShellArg bindTarget}
+        fi
+      }
+      trap cleanup_snapshot_bind_mount EXIT
+
+      snapshot="$(
+        find ${lib.escapeShellArg snapshotDir} -maxdepth 1 -mindepth 1 -type d -name ${lib.escapeShellArg snapshotGlob} -printf '%f\n' \
+          | sort \
+          | tail -n 1
+      )"
+
+      if [ -z "$snapshot" ]; then
+        exit 0
+      fi
+
+      snapshot_path=${lib.escapeShellArg snapshotDir}/"$snapshot"
+      archive_name=${lib.escapeShellArg archivePrefix}-"$snapshot"
+
+      if borg info "::$archive_name" >/dev/null 2>&1; then
+        echo "Archive $archive_name already exists"
+      else
+
+        cleanup_snapshot_bind_mount || true
+        mount --bind "$snapshot_path" ${lib.escapeShellArg bindTarget}
+
+        if borg create \
+          --compression auto,zstd,1 \
+          --lock-wait ${toString borgLockWaitSec} \
+          ${mkBorgExcludeArgs exclude} \
+          "::$archive_name" ${lib.escapeShellArg "${bindTarget}/./"}; then
+          cleanup_snapshot_bind_mount
+        else
+          echo "borg create failed for ${label} snapshot $snapshot; subvolume kept on disk" >&2
+          exit 1
+        fi
+      fi
+
+      find ${lib.escapeShellArg snapshotDir} -maxdepth 1 -mindepth 1 -type d -name ${lib.escapeShellArg snapshotGlob} -printf '%f\n' \
+        | sort \
+        | while IFS= read -r queued_snapshot; do
+          if [[ "$queued_snapshot" > "$snapshot" ]]; then
+            continue
+          fi
+          echo "Deleting ${label} snapshot $queued_snapshot covered by $archive_name"
+          btrfs subvolume delete ${lib.escapeShellArg snapshotDir}/"$queued_snapshot"
+        done
+
+      # Retention pruning and compaction are deliberately batched in
+      # borgbackup-maintenance.service. Running compaction on every path wake
+      # would turn "continuous" backups into repeated HDD churn.
+      touch "$stamp"
     '';
 
-  # ── shared borg-job constructor ──────────────────────────────────────
-  # Wraps mkBindMountedSnapshotHook + commonBorgOptions + the shared
-  # readWritePaths list around per-job policy (paths, excludes, repo,
-  # startAt, snapshot args). Each new borg job becomes a single attrset.
-  mkBorgJob =
-    {
-      name,
-      startAt,
-      repo,
-      paths,
-      exclude,
-      snapshotDir,
-      snapshotGlob,
-      bindTarget,
-      archiveBaseName ? null,
-    }:
-    commonBorgOptions
-    // (lib.optionalAttrs (archiveBaseName != null) { inherit archiveBaseName; })
-    // {
-      inherit
-        startAt
-        paths
-        exclude
-        repo
-        ;
-      readWritePaths = [
-        borgSnapshotBindRoot
-        borgRepoRoot
-        "/persist/root/.cache/borg"
-      ];
-      preHook = mkBindMountedSnapshotHook {
-        label = name;
-        inherit snapshotDir snapshotGlob bindTarget;
-      };
-    };
+  persistExcludes = [
+    # Archive-relative patterns: paths start from the /persist snapshot root.
+    "home/sinity/.local/share/Steam"
+    "home/sinity/.cache/huggingface"
+    "home/sinity/.cache/spotify"
+    "root/.cache/borg"
+    "home/sinity/.config/chrome-ws/Default/Service Worker"
+    "home/sinity/.config/chrome-ws/Default/GPUCache"
+    "home/sinity/.config/chrome-ws/*Cache*"
+    "home/sinity/.config/chrome-ws/*cache*"
+    # User caches are regenerable and currently large enough to dominate
+    # backup churn if included.
+    "home/sinity/.cache"
+    "var/lib/systemd/coredump"
+    # Sinex runtime state is backed up through structured service tooling.
+    "var/lib/sinex"
+  ];
 
-  commonBorgOptions = {
-    encryption = {
-      mode = "repokey-blake2";
-      passCommand = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
-    };
-    compression = "auto,zstd,3";
-    persistentTimer = false;
-    prune.keep = {
-      within = "2d";
-      daily = 14;
-      weekly = 8;
-      monthly = 6;
-    };
-    # / is ephemeral; persist the chunk cache so backups are truly incremental
-    # (without it, borg re-reads + re-chunks every file on every run).
-    environment.BORG_CACHE_DIR = "/persist/root/.cache/borg";
-    # appendFailedSuffix + rename-on-success pattern is fragile: borgWrapper
-    # never suppresses warnings (-z check is always false), so `borg create`
-    # exiting with code 1 kills the script before the rename runs, leaving
-    # every archive permanently named .failed.
-    appendFailedSuffix = false;
-    # Prevent lock-timeout failures: if a prior job crashed and left the lock,
-    # give the next run a generous window to acquire it (HDD spin-up,
-    # slow borg operations, etc. can all delay lock release).
-    extraCreateArgs = [
-      "--lock-wait"
-      "7200"
-    ];
-  };
+  realmExcludes = [
+    "**/inbox/monero"
+    "**/node_modules"
+    "**/target"
+    "**/.venv"
+    "**/.direnv"
+    "**/.ruff_cache"
+    "**/.pytest_cache"
+    "**/.cache"
+    "**/build"
+    "**/dist"
+    "**/*.pyc"
+    "**/.Trash-1000"
+    # Regenerable local capture products.
+    "**/data/captures/polylogue"
+    "**/data/captures/syslog"
+    "**/data/captures/machine/below"
+  ];
 
   btrbkConfig = ''
     # === Global settings ===
@@ -150,27 +208,21 @@ let
     transaction_log         /var/log/btrbk.log
     lockfile                /var/lock/btrbk.lock
 
-    # ─── Tier-1: fine-grained local rollback (btrbk) ───
-    # Borg runs every 4h (:20). btrbk keeps the last hour worth of 15-min
-    # snapshots plus 6 hourly buckets — ~10 snapshots per volume, 2 h of
-    # overlap with the previous borg run as safety buffer.
-    #
-    # NOTE: btrbk's "m" unit means months, not minutes (h/d/w/m/y). Using
-    # "30m" silently disables pruning for 30 months. Smallest supported tier
-    # is "1h"; sub-hour granularity from the timer cadence is not expressible
-    # as a retention policy.
+    # ─── Snapshot handoff queue ───
+    # btrbk creates point-in-time local snapshots; Borg is responsible for
+    # durable retention. The systemd btrbk service runs with
+    # --preserve-snapshots, so snapshots are deleted only by Borg drain jobs
+    # after the matching archive exists.
 
     volume ${realmRoot}
       snapshot_dir   .btrfs/snapshot
       subvolume .
-        snapshot_preserve_min   1h
-        snapshot_preserve       6h
+        snapshot_preserve_min   all
 
     volume /persist
       snapshot_dir   .btrfs/snapshot
       subvolume .
-        snapshot_preserve_min   1h
-        snapshot_preserve       6h
+        snapshot_preserve_min   all
 
     # / is ephemeral (wiped and recreated each boot by initrd rollback script).
     # Pre-wipe states are saved to .snapshots/root.TIMESTAMP and archived by
@@ -208,6 +260,10 @@ in
         unit = "borgbackup-check.service";
         resourceClass = "backup-maintenance";
       };
+      borgbackup-maintenance = {
+        unit = "borgbackup-maintenance.service";
+        resourceClass = "backup-maintenance";
+      };
       btrfs-metadata-image-backup = {
         unit = "btrfs-metadata-image-backup.service";
         resourceClass = "backup-maintenance";
@@ -237,123 +293,111 @@ in
     # btrbk configuration
     environment.etc."btrbk/btrbk.conf".text = btrbkConfig;
 
-    # ─── Borg Backup Jobs ───
-    services.borgbackup.jobs = {
-      # 1. Persistent state (/persist snapshots) - runs as root
-      #    Replaced the old borg-var-v2 job. /persist now contains all system
-      #    and home state that was previously split between @var and /realm/home.
-      persist = mkBorgJob {
-        name = "persist";
-        repo = borgRepoPersist;
-        snapshotDir = persistSnapshots;
-        snapshotGlob = "persist.*";
-        bindTarget = borgPersistSnapshotBind;
-        # Every 4h at :20 (5 min after btrbk :15, so latest snapshot is always ready)
-        startAt = [ "*-*-* 02,06,10,14,18,22:20:00" ];
-        paths = [
-          # Borg treats symlink roots as symlinks, not traversed directories.
-          # Bind-mount the newest snapshot to a stable path and archive that path.
-          "${borgPersistSnapshotBind}/./"
-        ];
-        exclude = [
-          # Archive-relative patterns: bind mount is at
-          # /run/borgbackup-snapshot-inputs/persist/, so paths start from
-          # the /persist snapshot root. /persist prefix never matches.
-          # Game library — large, rebuilt from Steam
-          "home/sinity/.local/share/Steam"
-          # AI model caches — ephemeral, rebuildable
-          "home/sinity/.cache/huggingface"
-          # Streaming cache — ephemeral
-          "home/sinity/.cache/spotify"
-          # Borg's own cache — backing up the backup tool's cache is waste
-          "root/.cache/borg"
-          # Chromium browser caches
-          "home/sinity/.config/chrome-ws/Default/Service Worker"
-          "home/sinity/.config/chrome-ws/Default/GPUCache"
-          "home/sinity/.config/chrome-ws/*Cache*"
-          "home/sinity/.config/chrome-ws/*cache*"
-          # (Polylogue DB lived under home/sinity/.local/share/polylogue until
-          # the archive moved to /realm — removed from exclusions; the realm
-          # backup excludes /realm/data/captures/polylogue.)
-          # (below resource monitor moved off /var/log/below to /realm/data/
-          # captures/machine/below — exclusion follows in the realm backup.)
-          # User caches — all regenerable; collectively ~30 GB on this host.
-          # Specific entries (huggingface, spotify, chrome-ws) above stay as
-          # documentation; the catch-all picks up sccache (11 G), sinex client
-          # cache (6 G), media-preview-cache, uv, google-chrome, ms-playwright,
-          # and anything else future tools drop here.
-          "home/sinity/.cache"
-          # System coredumps
-          "var/lib/systemd/coredump"
-          # Sinex service runtime state (Postgres data, NATS JetStream, CAS
-          # blob-repository, per-source-worker state). Has its own snapshot
-          # tooling — `sinexctl admin snapshot` (PR #1287) — and the
-          # underlying data is either content-addressed (CAS, restorable
-          # only by re-ingestion), transient (NATS event queue), or
-          # operationally large (50+ GB pg data dir). Including in borg
-          # would multiply repo size by ~150 GB per backup with little
-          # recovery value: pg_basebackup / pg_dump dumps are the right
-          # tool for the structured data, the source materials are
-          # replayable from their original sources.
-          "var/lib/sinex"
-        ];
-      };
-
-      # 2. User Data (/realm snapshots) - runs as root so the bind mount can be created
-      realm = mkBorgJob {
-        name = "realm";
-        repo = borgRepoRealm;
-        snapshotDir = realmSnapshots;
-        snapshotGlob = "realm.*";
-        bindTarget = borgRealmSnapshotBind;
-        # Pin hostname explicitly; the eval-time hostname can resolve to the
-        # build sandbox default ("machine") instead of the real hostname.
-        archiveBaseName = "sinnix-prime-realm";
-        # Every 4h at :20, offset 1h from persist to avoid lock contention
-        startAt = [ "*-*-* 03,07,11,15,19,23:20:00" ];
-        paths = [
-          "${borgRealmSnapshotBind}/./"
-        ];
-        exclude = [
-          "**/inbox/monero"
-          "**/node_modules"
-          "**/target"
-          "**/.venv"
-          "**/.direnv"
-          "**/.ruff_cache"
-          "**/.pytest_cache"
-          "**/.cache"
-          "**/build"
-          "**/dist"
-          "**/*.pyc"
-          "**/.Trash-1000"
-          # Polylogue archive (~123 GB) — regenerable from ~/.claude/projects/
-          # and ~/.codex/sessions/ via `polylogue run acquire parse materialize`.
-          "**/data/captures/polylogue"
-          # Syslog exports (~21 GB) — derived from journald, which retains the
-          # source on the same disk. Re-exportable if needed.
-          "**/data/captures/syslog"
-          # below resource monitor (~260 GB/year): post-mortem only, recover
-          # from live host. Previously excluded at /var/log/below; relocated
-          # to /realm in hosts/sinnix-prime so exclusion follows.
-          "**/data/captures/machine/below"
-        ];
-      };
-    };
+    # ─── Borg Snapshot Drainers ───
+    #
+    # btrbk is the producer. Borg is the durability gate. Local snapshots are
+    # never deleted by btrbk rotation; a snapshot leaves disk only after this
+    # drain has either found or created the matching Borg archive.
 
     # Backups are scheduled bulk I/O. Keep them below interactive work: the
     # post-restore backup and metadata capture saturated /realm enough to make
     # the desktop visibly stall even though the machine was otherwise healthy.
     systemd.services.borgbackup-job-persist = {
+      description = "Drain /persist btrbk snapshots into Borg";
       restartIfChanged = false;
+      after = [
+        "persist.mount"
+        outerRealmMountUnit
+      ];
+      requires = [
+        "persist.mount"
+        outerRealmMountUnit
+      ];
       serviceConfig = (backupServiceConfig "borgbackup-job-persist.service") // {
+        Type = "oneshot";
         TimeoutStopSec = "15s";
+      };
+      path = with pkgs; [
+        borgbackup
+        btrfs-progs
+        coreutils
+        findutils
+        util-linux
+      ];
+      script = mkSnapshotDrainScript {
+        label = "persist";
+        repo = borgRepoPersist;
+        repoPath = borgRepoPersistPath;
+        snapshotDir = persistSnapshots;
+        snapshotGlob = "persist.*";
+        bindTarget = borgPersistSnapshotBind;
+        archivePrefix = "persist";
+        minIntervalSec = 3600;
+        exclude = persistExcludes;
       };
     };
     systemd.services.borgbackup-job-realm = {
+      description = "Drain /realm btrbk snapshots into Borg";
       restartIfChanged = false;
+      after = [
+        "realm.mount"
+        outerRealmMountUnit
+      ];
+      requires = [
+        "realm.mount"
+        outerRealmMountUnit
+      ];
       serviceConfig = (backupServiceConfig "borgbackup-job-realm.service") // {
+        Type = "oneshot";
         TimeoutStopSec = "15s";
+      };
+      path = with pkgs; [
+        borgbackup
+        btrfs-progs
+        coreutils
+        findutils
+        util-linux
+      ];
+      script = mkSnapshotDrainScript {
+        label = "realm";
+        repo = borgRepoRealm;
+        repoPath = borgRepoRealmPath;
+        snapshotDir = realmSnapshots;
+        snapshotGlob = "realm.*";
+        bindTarget = borgRealmSnapshotBind;
+        archivePrefix = "realm";
+        minIntervalSec = 3600;
+        exclude = realmExcludes;
+      };
+    };
+
+    systemd.paths.borgbackup-job-persist = {
+      wantedBy = [ "multi-user.target" ];
+      pathConfig = {
+        PathChanged = persistSnapshots;
+        Unit = "borgbackup-job-persist.service";
+      };
+    };
+    systemd.paths.borgbackup-job-realm = {
+      wantedBy = [ "multi-user.target" ];
+      pathConfig = {
+        PathChanged = realmSnapshots;
+        Unit = "borgbackup-job-realm.service";
+      };
+    };
+
+    systemd.timers.borgbackup-job-persist = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnCalendar = "*-*-* *:20:00";
+        Persistent = false;
+      };
+    };
+    systemd.timers.borgbackup-job-realm = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnCalendar = "*-*-* *:35:00";
+        Persistent = false;
       };
     };
 
@@ -380,6 +424,54 @@ in
       };
     };
 
+    systemd.services.borgbackup-maintenance = {
+      description = "Prune and compact Borg backup repositories";
+      restartIfChanged = false;
+      after = [
+        outerRealmMountUnit
+      ];
+      requires = [
+        outerRealmMountUnit
+      ];
+      serviceConfig = {
+        Type = "oneshot";
+        TimeoutStopSec = "15s";
+      }
+      // backupServiceConfig "borgbackup-maintenance.service";
+      environment.BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
+      environment.BORG_CACHE_DIR = "/persist/root/.cache/borg";
+      path = with pkgs; [
+        borgbackup
+        coreutils
+      ];
+      script = ''
+        set -euo pipefail
+
+        maintain_repo() {
+          repo="$1"
+          if [ ! -e "''${repo#file://}/config" ]; then
+            echo "Skipping uninitialized repo $repo"
+            return
+          fi
+
+          borg prune --lock-wait ${toString borgLockWaitSec} ${mkBorgRetentionArgs} "$repo"
+          borg compact --lock-wait ${toString borgLockWaitSec} "$repo"
+        }
+
+        maintain_repo ${lib.escapeShellArg borgRepoPersist}
+        maintain_repo ${lib.escapeShellArg borgRepoRealm}
+        maintain_repo ${lib.escapeShellArg borgRepoRootSnapshots}
+      '';
+    };
+    systemd.timers.borgbackup-maintenance = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnCalendar = "*-*-* 04:50:00";
+        Persistent = false;
+        RandomizedDelaySec = "45min";
+      };
+    };
+
     # Borg is file-level recovery. Keep compact Btrfs metadata images off the
     # source filesystems so a future tree/chunk/extent repair has native
     # metadata evidence instead of only a file archive.
@@ -389,12 +481,12 @@ in
       after = [
         "persist.mount"
         "realm.mount"
-        "outer\\x2drealm.mount"
+        outerRealmMountUnit
       ];
       requires = [
         "persist.mount"
         "realm.mount"
-        "outer\\x2drealm.mount"
+        outerRealmMountUnit
       ];
       serviceConfig = {
         Type = "oneshot";
@@ -433,9 +525,9 @@ in
     systemd.timers.btrfs-metadata-image-backup = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
-        OnCalendar = "daily";
+        OnCalendar = "Sun 00:12:00";
         Persistent = false;
-        RandomizedDelaySec = "30min";
+        RandomizedDelaySec = "2h";
       };
     };
 
@@ -443,6 +535,7 @@ in
       ${pkgs.coreutils}/bin/install -d -m 0750 -o root -g users ${borgRepoRoot}
       ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${borgRepoPersistPath}
       ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${borgRepoRealmPath}
+      ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${borgRepoRootSnapshotsPath}
       ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${btrfsImageRoot}
     '';
 
@@ -458,8 +551,10 @@ in
       "d ${borgPersistSnapshotBind} 0700 root root -"
       "d ${borgRealmSnapshotBind} 0700 root root -"
       "d ${borgRepoRoot} 0750 root users -"
+      "d ${borgRepoRootSnapshotsPath} 0700 root root -"
       "d ${btrfsImageRoot} 0700 root root -"
       "d /persist/root/.cache/borg 0700 root root -"
+      "d ${borgDrainStateRoot} 0700 root root -"
     ];
 
     # systemd services for btrbk
@@ -474,7 +569,7 @@ in
       ];
       serviceConfig = {
         Type = "oneshot";
-        ExecStart = "${pkgs.btrbk}/bin/btrbk run --quiet";
+        ExecStart = "${pkgs.btrbk}/bin/btrbk --quiet --preserve-snapshots run";
         TimeoutStopSec = "15s";
       }
       // backupServiceConfig "btrbk.service";
@@ -489,25 +584,24 @@ in
     };
 
     # Root snapshot archival: the initrd saves pre-wipe / states to
-    # .snapshots/root.TIMESTAMP (btrfs subvolumes) on every boot. They
-    # accumulate indefinitely because they're invisible to btrbk (which
-    # manages .btrfs/snapshot/) and borg (which sees only btrbk snapshots).
-    # This job mounts the btrfs root, backs each root snapshot up to the
-    # persist borg repo, and deletes the subvolume on success.
+    # .snapshots/root.TIMESTAMP (btrfs subvolumes) on every boot. Archive them
+    # to a dedicated borg repo so slow root-drain work never blocks the normal
+    # /persist backup lock, then delete only after the archive exists.
     systemd.services.borgbackup-root-snapshots = {
       description = "Archive ephemeral root snapshots to borg";
       restartIfChanged = false;
       after = [
         "persist.mount"
-        "borgbackup-job-persist.service"
+        outerRealmMountUnit
       ];
+      requires = [ outerRealmMountUnit ];
       serviceConfig = {
         Type = "oneshot";
         TimeoutStopSec = "15s";
       }
       // backupServiceConfig "borgbackup-root-snapshots.service";
       environment.BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
-      environment.BORG_REPO = borgRepoPersist;
+      environment.BORG_REPO = borgRepoRootSnapshots;
       environment.BORG_CACHE_DIR = "/persist/root/.cache/borg";
       path = with pkgs; [
         btrfs-progs
@@ -526,38 +620,71 @@ in
 
         mount -o subvol=/ "$PERSIST_DEV" "$TMP_ROOT"
 
+        if [ ! -e "${borgRepoRootSnapshotsPath}/config" ]; then
+          install -d -m 0700 -o root -g root "${borgRepoRootSnapshotsPath}"
+          borg init --encryption repokey-blake2 "$BORG_REPO"
+        fi
+
+        delete_archived_snapshot() {
+          snap_dir="$1"
+          if btrfs subvolume show "$snap_dir" >/dev/null 2>&1; then
+            btrfs subvolume delete "$snap_dir"
+          else
+            rm -rf --one-file-system "$snap_dir"
+          fi
+        }
+
         backed_up=0
         for snap_dir in "$TMP_ROOT"/.snapshots/root.*; do
           [ -d "$snap_dir" ] || continue
           snap_name=$(basename "$snap_dir")
           archive_name="root-$snap_name"
 
-          borg create \
-            --compression auto,zstd,3 \
-            --lock-wait 7200 \
-            "::$archive_name" "$snap_dir"
+          if borg info "::$archive_name" >/dev/null 2>&1; then
+            echo "Archive $archive_name already exists; deleting archived snapshot $snap_name"
+            delete_archived_snapshot "$snap_dir"
+            backed_up=$((backed_up + 1))
+            continue
+          fi
 
-          if [ $? -eq 0 ]; then
-            btrfs subvolume delete "$snap_dir"
+          if borg create \
+            --compression auto,zstd,1 \
+            --lock-wait ${toString borgLockWaitSec} \
+            --exclude "$snap_dir/dev" \
+            --exclude "$snap_dir/home/*/.cache" \
+            --exclude "$snap_dir/mnt" \
+            --exclude "$snap_dir/neo-outer-realm" \
+            --exclude "$snap_dir/nix" \
+            --exclude "$snap_dir/outer-realm" \
+            --exclude "$snap_dir/persist" \
+            --exclude "$snap_dir/proc" \
+            --exclude "$snap_dir/realm" \
+            --exclude "$snap_dir/root/.cache" \
+            --exclude "$snap_dir/run" \
+            --exclude "$snap_dir/swap" \
+            --exclude "$snap_dir/sys" \
+            --exclude "$snap_dir/tmp" \
+            --exclude "$snap_dir/var/cache" \
+            "::$archive_name" "$snap_dir"; then
+            delete_archived_snapshot "$snap_dir"
             backed_up=$((backed_up + 1))
           else
-            echo "borg create failed for $snap_name — subvolume kept on disk" >&2
+            echo "borg create failed for $snap_name; subvolume kept on disk" >&2
           fi
         done
 
-        if [ $backed_up -gt 0 ]; then
-          borg compact --lock-wait 7200
-        fi
+        # Retention pruning and compaction are batched by
+        # borgbackup-maintenance.service.
       '';
     };
 
     systemd.timers.borgbackup-root-snapshots = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
-        OnBootSec = "5min";
+        OnBootSec = "45min";
         OnCalendar = "daily";
         Persistent = true;
-        RandomizedDelaySec = 300;
+        RandomizedDelaySec = 1800;
       };
     };
 

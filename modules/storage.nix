@@ -10,8 +10,10 @@
 }:
 let
   username = config.sinnix.user.name;
+  realmRoot = config.sinnix.paths.realmRoot;
   userCfg = lib.attrByPath [ "users" "users" username ] config { };
   primaryGroupName = userCfg.group or "users";
+  trashUid = if (userCfg.uid or null) != null then toString userCfg.uid else "1000";
   userHome = userCfg.home or "/home/${username}";
   baseStoragePackages = with pkgs; [
     rclone
@@ -32,6 +34,10 @@ let
 in
 {
   environment.systemPackages = lib.mkAfter (baseStoragePackages ++ storageMaintenancePackages);
+
+  systemd.tmpfiles.rules = lib.mkAfter [
+    "d ${realmRoot}/.Trash-${trashUid} 0700 ${username} ${primaryGroupName} -"
+  ];
 
   system.activationScripts.fixRclonePermissions.text = ''
     if [ -f ${userHome}/.config/rclone/rclone.conf ]; then

@@ -27,8 +27,12 @@ qt = true
 kitty = true
 vscode = true
 
-[bar]
+# Bars are defined as [bar.<name>] tables (the default bar is "default").
+# thickness is the bar height in px; Noctalia's default is 34, which is tiny on
+# the 48" 4K panel at scale 1. Raise it here or in Settings -> Bar (persists here).
+[bar.default]
 position = "top"
+thickness = 56
 
 [plugins.screen-recorder]
 outputDirectory = "/realm/data/captures/screen"

@@ -46,5 +46,9 @@
         assertion = lib.hasInfix "chmod 600" fixRclonePermissions;
         message = "Rclone permission repair must lock the credentials file to mode 600";
       }
+      {
+        assertion = builtins.elem "d /realm/.Trash-1000 0700 sinity users -" config.systemd.tmpfiles.rules;
+        message = "Realm mount must expose a FreeDesktop trash directory for file managers";
+      }
     ];
 }

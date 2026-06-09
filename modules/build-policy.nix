@@ -31,7 +31,6 @@ in
           "https://sinity.cachix.org"
           "https://nix-community.cachix.org"
           "https://nix-gaming.cachix.org"
-          "https://hyprland.cachix.org"
           "https://devenv.cachix.org"
           "https://nixpkgs-wayland.cachix.org"
           "https://chaotic-nyx.cachix.org"
@@ -43,7 +42,6 @@ in
           "sinity.cachix.org-1:i5YsUuuRv9r790gdwwE+FiJiUcWULV1lEOmKE50Y+TI="
           "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
           "nix-gaming.cachix.org-1:nbjlureqMbRAxR1gJ/f3hxemL9svXaZF/Ees8vCUUs4="
-          "hyprland.cachix.org-1:a7pgxzMz7+chwVL3/pzj6jIBMioiJM7ypFP8PwtkuGc="
           "devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw="
           "nixpkgs-wayland.cachix.org-1:3lwxaILxMRkVhehr5StQprHdEo4IrE8sRho9R9HOLYA="
           "chaotic-nyx.cachix.org-1:HfnXSw4pj95iI/n17rIDy40agHj12WfF+Gqk6SonIT8="
@@ -52,8 +50,8 @@ in
         ];
         netrc-file = "/etc/nix/netrc";
 
-        max-jobs = 4;
-        cores = 4;
+        max-jobs = 3;
+        cores = 3;
         builders-use-substitutes = true;
         keep-outputs = true;
         keep-derivations = true;
@@ -91,20 +89,15 @@ in
       };
     };
 
-    environment.systemPackages = lib.mkAfter [
-      pkgs.sccache
-    ];
-
-    environment.variables = {
-      RUSTC_WRAPPER = "${pkgs.sccache}/bin/sccache";
-      SCCACHE_DIR = "/var/cache/sccache";
-      SCCACHE_IDLE_TIMEOUT = "300";
-      SCCACHE_MAX_CACHE_SIZE = "20G";
-    };
+    # sccache is intentionally NOT wired as RUSTC_WRAPPER. The only Rust
+    # consumers on this host (sinex, intercept-bounce, scribe-tap) use
+    # incremental compilation for fast warm rebuilds; sccache bypasses
+    # incremental and measured ~0 benefit (even slower on cold builds — see
+    # sinex .agent/scratch/048). Re-add here if a non-incremental Rust workload
+    # ever needs cross-checkout caching.
 
     systemd.tmpfiles.rules = lib.mkAfter [
       "d /var/cache/nix-build 0755 root root -"
-      "d /var/cache/sccache 0775 ${username} users -"
       "d /var/cache/sinex 0775 ${username} users -"
     ];
 
@@ -123,10 +116,9 @@ in
         };
         script = ''
           install -d -m 0755 -o root -g root /var/cache/nix-build
-          install -d -m 0775 -o ${username} -g users /var/cache/sccache
           install -d -m 0775 -o ${username} -g users /var/cache/sinex
 
-          chattr +C /var/cache/nix-build /var/cache/sccache /var/cache/sinex || true
+          chattr +C /var/cache/nix-build /var/cache/sinex || true
         '';
       };
 

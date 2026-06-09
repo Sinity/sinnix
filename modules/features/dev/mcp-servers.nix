@@ -17,7 +17,15 @@ mkFeatureModule {
     "mcp-servers"
   ];
   description = "MCP servers and AI tool integration";
-  extraOptions = { };
+  extraOptions = {
+    # Internal: exposes the generated Codex config derivation for test assertions
+    # so tests can read its content without re-instantiating nixpkgs.
+    codexConfigSource = lib.mkOption {
+      type = lib.types.path;
+      internal = true;
+      description = "Path to the generated Codex config derivation (for tests)";
+    };
+  };
   meta.dotfiles = {
     configFile = {
       "ripgrep-all/config.jsonc" = "ripgrep-all/config.jsonc";
@@ -133,6 +141,8 @@ mkFeatureModule {
       '';
     in
     {
+      sinnix.features.dev.mcp-servers.codexConfigSource = codexConfigFile;
+
       home-manager.users.${user} =
         {
           pkgs,
@@ -181,17 +191,18 @@ mkFeatureModule {
                   fi
                 ''
               );
+              # Write config.toml as a writable file (not a symlink to the Nix
+              # store) so Codex can append runtime state such as project trust
+              # entries. Nix settings always win on activation; trust entries
+              # added between rebuilds survive until the next switch.
+              codexConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+                run cp ${lib.escapeShellArg (toString codexConfigFile)} "$HOME/.codex/config.toml"
+                run chmod 644 "$HOME/.codex/config.toml"
+              '';
             };
           };
 
           home.file = {
-            # Canonical Codex location is ~/.codex. Static defaults live in
-            # dots/codex/config.toml; MCP server entries are appended from the
-            # shared registry so Codex does not drift from Claude/Gemini/Hermes.
-            ".codex/config.toml" = {
-              source = codexConfigFile;
-              force = true;
-            };
             ".local/bin/mcp-firecrawl" = {
               source = "${mcpFirecrawlBin}/bin/mcp-firecrawl";
               force = true;

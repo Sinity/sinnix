@@ -45,8 +45,10 @@ mkFeatureModule {
         powertop
         bash-language-server
         yaml-language-server
+        pyright
         sysstat
         strace
+        py-spy
         gallery-dl
         vulkan-validation-layers
         wayland-utils

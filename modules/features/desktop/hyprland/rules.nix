@@ -203,6 +203,18 @@ let
       float = true;
       center = true;
     })
+    # Floating, dismissable file-preview popup. scripts/open-text-preview launches
+    # `kitty --app-id=sinnix-preview -- bat`; wired as the text/* default handler
+    # in modules/features/desktop/mime.nix.
+    (mkRule "sinnix-text-preview" {
+      class = "^(sinnix-preview)$";
+      float = true;
+      center = true;
+      size = {
+        w = 0.6;
+        h = 0.7;
+      };
+    })
   ];
 
   # ========================================

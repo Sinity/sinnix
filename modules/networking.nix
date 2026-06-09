@@ -78,9 +78,7 @@ in
       timesyncd = {
         enable = true;
         servers = [ "192.168.1.1" ];
-        extraConfig = ''
-          FallbackNTP=0.nixos.pool.ntp.org 1.nixos.pool.ntp.org
-        '';
+        settings.Time.FallbackNTP = "0.nixos.pool.ntp.org 1.nixos.pool.ntp.org";
       };
 
       openssh = {

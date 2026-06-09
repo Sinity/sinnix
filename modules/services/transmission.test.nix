@@ -25,14 +25,29 @@ let
     {
       assertion =
         with config.systemd.services.transmission.serviceConfig;
-        Nice == 10 && CPUWeight == 20 && IOWeight == 10 && IOSchedulingClass == "idle";
-      message = "Transmission must run below interactive desktop priority";
+        Nice == 10
+        && CPUWeight == 5
+        && IOWeight == 5
+        && IOSchedulingClass == "idle"
+        && !(config.systemd.services.transmission.serviceConfig ? IOSchedulingPriority);
+      message = "Transmission must yield during desktop I/O pressure";
     }
     {
       assertion =
         with config.systemd.services.transmission.serviceConfig;
-        MemoryHigh == "1G" && MemoryMax == "4G";
+        MemoryHigh == "1G" && MemoryMax == "3G";
       message = "Transmission must not be able to consume unbounded memory";
+    }
+    {
+      assertion =
+        with config.services.transmission.settings;
+        start-added-torrents == true
+        && cache-size-mb == 128
+        && download-queue-enabled == false
+        && download-queue-size == 20
+        && queue-stalled-enabled == false
+        && seed-queue-enabled == false;
+      message = "Transmission must actively start added torrents and avoid silent stalled queues";
     }
   ];
 in

@@ -34,6 +34,15 @@ let
     scratchpadSpecs = scratchpadData.ruleSpecs;
   };
 
+  protectedUWSMUnits = [
+    "wayland-session-bindpid@.service"
+    "wayland-wm@.service"
+    "wayland-wm-env@.service"
+    "wayland-session@.target"
+    "wayland-session-envelope@.target"
+    "xdg-desktop-portal-hyprland.service"
+  ];
+
   scriptLinks = [
     {
       target = "audio";
@@ -86,26 +95,22 @@ in
 
   config = lib.mkMerge [
     # Prevent nixos-rebuild switch from tearing down the running graphical
-    # session.  uwsm's wayland-session-bindpid@<HYPRLAND_PID>.service waits
-    # on Hyprland's PID with `waitpid` and fires
-    # `OnSuccess=wayland-session-shutdown.target` on clean exit — which
-    # triggers a graceful session teardown.  When switch-to-configuration
-    # restarts this unit because its store path changed (it embeds the
-    # util-linux store path in ExecStart), SIGTERM exits waitpid cleanly
-    # → OnSuccess fires → graphical-session.target stops → every kitty
-    # scope under app.slice is reaped.  Annotating the template with
-    # X-RestartIfChanged=false tells switch-to-configuration to leave the
-    # running instance alone across rebuilds; new sessions still pick up
-    # the updated unit on next login.  Keep this outside cfg.enable so a bad
-    # repair generation cannot omit the protection while Hyprland is active.
+    # session. UWSM units are tightly bound together; restarting the compositor,
+    # envelope, or bindpid units propagates into wayland-session-shutdown.target
+    # and kills the active desktop. New unit definitions take effect on next
+    # login, while the current session stays intact across rebuilds. Keep this
+    # outside cfg.enable so a bad repair generation cannot omit the protection
+    # while Hyprland is active.
     {
-      systemd.user.units."wayland-session-bindpid@.service" = {
+      systemd.user.units = lib.genAttrs protectedUWSMUnits (_: {
         overrideStrategy = "asDropin";
         text = ''
           [Unit]
+          X-OnlyManualStart=true
           X-RestartIfChanged=false
+          X-ReloadIfChanged=false
         '';
-      };
+      });
     }
 
     (lib.mkIf cfg.enable {
@@ -219,7 +224,6 @@ in
                 special_scale_factor = 1.0;
                 split_width_multiplier = 1.0;
                 use_active_for_splits = true;
-                pseudotile = "yes";
                 preserve_split = "yes";
               };
 
@@ -228,7 +232,9 @@ in
                 # why mkForce: stylix sets this true; keep the logo visible
                 # during startup as a "compositor alive" indicator.
                 disable_hyprland_logo = lib.mkForce false;
-                vrr = 2;
+                # Fullscreen VRR causes the AORUS OLED to briefly drop signal
+                # when mpv enters or leaves fullscreen.
+                vrr = 0;
                 mouse_move_enables_dpms = true;
                 key_press_enables_dpms = true;
                 always_follow_on_dnd = true;
@@ -292,6 +298,14 @@ in
                 extra = if rules ? extraConfig then rules.extraConfig else "";
               in
               lib.mkAfter extra;
+          };
+
+          xdg.configFile."hypr/hyprland.conf" = {
+            force = true;
+            # Home Manager's default onChange runs `hyprctl reload config-only`.
+            # During a NixOS switch, unit churn is already risky enough; apply
+            # new compositor config on the next session or by explicit reload.
+            onChange = lib.mkForce "";
           };
 
           # Scratchpad config files + script links

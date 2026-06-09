@@ -23,12 +23,9 @@ mkFeatureModule {
     let
       aiTools = inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system};
 
-      # FHS environment for self-updating npm-based agent CLIs.
-      # Agents installed via npm inside this env auto-update natively; Nix
-      # only owns the bootstrap wrapper and the FHS runtime deps.
-      agentFhsEnv = pkgs.buildFHSEnv {
-        name = "agent-fhs";
-        targetPkgs = p: with p; [
+      agentRuntimePath = lib.makeBinPath (
+        with pkgs;
+        [
           nodejs_22
           git
           bash
@@ -37,33 +34,34 @@ mkFeatureModule {
           which
           coreutils
           gcc
-        ];
-        runScript = "bash";
-      };
+        ]
+      );
 
-      # Shared FHS bootstrap prelude — generates: FHS env variable, state-dir
-      # setup, first-run npm install, and a regenerated launcher script.
-      mkFhsBootstrap =
+      # Shared npm bootstrap prelude — generates state-dir setup, first-run
+      # npm install, and a regenerated launcher script. The long-lived agent
+      # process launches directly, not through buildFHSEnv/bubblewrap, so sudo
+      # and other privileged helpers do not inherit no_new_privileges.
+      mkNpmBootstrap =
         {
           stateDir,
           npmPackage,
           binaryName,
         }:
         ''
-          FHS="${agentFhsEnv}/bin/agent-fhs"
           STATE="$HOME/.local/state/${stateDir}"
           export npm_config_prefix="$STATE/npm"
+          export PATH="${agentRuntimePath}:$STATE/npm/bin:$PATH"
           mkdir -p "$STATE/npm"
 
           if [ ! -x "$STATE/npm/bin/${binaryName}" ]; then
             echo "${binaryName}: bootstrapping (npm install -g ${npmPackage})..." >&2
-            "$FHS" -c "npm install -g ${npmPackage}"
+            npm install -g ${npmPackage}
           fi
 
           cat > "$STATE/launch.sh" <<'LAUNCHER'
         '' + ''
           #!/usr/bin/env bash
-          PATH="$HOME/.local/state/${stateDir}/npm/bin:$PATH"
+          PATH="${agentRuntimePath}:$HOME/.local/state/${stateDir}/npm/bin:$PATH"
           exec ${binaryName} "$@"
         '' + ''
           LAUNCHER
@@ -116,7 +114,7 @@ mkFeatureModule {
             #!/usr/bin/env bash
             set -euo pipefail
 
-            ${mkFhsBootstrap {
+            ${mkNpmBootstrap {
               stateDir = "claude-code";
               npmPackage = "@anthropic-ai/claude-code";
               binaryName = "claude";
@@ -143,7 +141,7 @@ mkFeatureModule {
               claude_args+=(--add-dir "/home/${user}")
             fi
 
-            run_agent_scoped "$FHS" "$STATE/launch.sh" "''${claude_args[@]}" "$@"
+            run_agent_scoped "$STATE/launch.sh" "''${claude_args[@]}" "$@"
           '';
           executable = true;
           force = true;
@@ -155,7 +153,7 @@ mkFeatureModule {
             #!/usr/bin/env bash
             set -euo pipefail
 
-            ${mkFhsBootstrap {
+            ${mkNpmBootstrap {
               stateDir = "codex";
               npmPackage = "@openai/codex";
               binaryName = "codex";
@@ -168,7 +166,7 @@ mkFeatureModule {
               codex_args+=(--profile ${lib.escapeShellArg profile})
             ''}
 
-            run_agent_scoped "$FHS" "$STATE/launch.sh" "''${codex_args[@]}" "$@"
+            run_agent_scoped "$STATE/launch.sh" "''${codex_args[@]}" "$@"
           '';
           executable = true;
           force = true;
@@ -189,8 +187,8 @@ mkFeatureModule {
             directory = ".gemini";
             mode = "0700";
           }
-          # FHS-bootstrapped npm installs — survive impermanence cold boots
-          # so agents don't re-download on every activation.
+          # npm installs survive impermanence cold boots so agents do not
+          # re-download on every activation.
           ".local/state/claude-code"
           ".local/state/codex"
           ".local/state/gemini"
@@ -371,7 +369,7 @@ mkFeatureModule {
               #!/usr/bin/env bash
               set -euo pipefail
 
-              ${mkFhsBootstrap {
+              ${mkNpmBootstrap {
                 stateDir = "gemini";
                 npmPackage = "@google/gemini-cli";
                 binaryName = "gemini";
@@ -379,7 +377,7 @@ mkFeatureModule {
 
               ${agentScopePrelude}
 
-              run_agent_scoped "$FHS" "$STATE/launch.sh" "$@"
+              run_agent_scoped "$STATE/launch.sh" "$@"
             '';
             executable = true;
             force = true;

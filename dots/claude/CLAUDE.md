@@ -85,6 +85,14 @@
 
 **§18 Output discipline** — Never pipe long-running command output through `| tail -N`, `| head -N`, or `2>&1 | tail`. Use background execution for long commands; continue working, check results when needed.
 
+**§18a Background-shell discipline** — The harness re-invokes you when a background task it tracks finishes. So:
+
+- **Never busy-wait.** Do not write `until <cond>; do sleep N; done` polling loops to watch for a background command's output. When the watched condition never materializes — buffered output, a producer that was killed, a typo in the grep — the loop runs *forever*. (This literally burned 2h+ shells in a prior session.) Launch the work in the background, do other work, and read the result once on the completion notification.
+- **One process per shared resource.** Do not launch a second run of something while the first is still in flight, especially when they share state (a fixed tmpfs/basetemp, a DB, a lockfile, an out-link). Concurrent runs corrupt each other and produce false failures you'll then waste time triaging. If you must restart, kill the first.
+- **Don't proliferate; clean up.** Before launching a replacement, kill the stale one (`pkill -f <pattern>`) and confirm zero survivors. Reuse one output file per purpose rather than spawning N shells that never close.
+- **Redirect to a file, read once.** For a long background command, write to a known file (`> /tmp/x.log 2>&1; echo "EXIT=$?" >> /tmp/x.log`) and read it a single time when notified — not via a waiter loop.
+- **Verify a moving tree is settled.** If a subagent is committing while you test, you are testing a moving target. Confirm the producer is *done* (agent completed, clean `git status`) before running the gate.
+
 **§19 Proactive fixes** — Fix issues stumbled upon, preexisting or not. Test things yourself in addition to writing automated tests.
 
 **§19a Inherited failures** — Pre-existing test failures at session start are inherited obligations. They are part of the current session's workload and must be resolved before the session's work is complete. A clean baseline is the entry condition; if the baseline is dirty, the first task is to clean it.

@@ -11,9 +11,9 @@ Canonical references:
 - `/realm/project/sinnix/dots/_ai/skills/history-cleanup/METHODOLOGY.md`
 - `/realm/project/sinnix/dots/_ai/skills/history-cleanup/COMMIT_MESSAGE_CONTRACT.md`
 
-Canonical root is `_ai/skills/history-cleanup`. The `codex/skills/...` and
-`claude/skills/...` entries are agent-facing symlink aliases to this shared
-toolkit.
+Canonical root is `_ai/skills/history-cleanup`. The `codex/skills/...` entries
+are Codex-facing symlink aliases to this shared toolkit; Claude receives the
+shared `_ai/skills` tree directly through Home Manager.
 
 Primary toolkit commands:
 

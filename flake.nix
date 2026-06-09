@@ -21,7 +21,7 @@
     };
 
     # User environment management
-    home-manager.url = "github:nix-community/home-manager";
+    home-manager.url = "git+https://github.com/nix-community/home-manager?ref=release-26.05";
     home-manager.inputs.nixpkgs.follows = "nixpkgs";
 
     # Secret management with age encryption
@@ -71,7 +71,7 @@
     # Sinex is sourced from GitHub so system deployments follow reviewed upstream
     # history instead of implicitly consuming the local checkout state.
     sinex = {
-      url = "git+https://github.com/Sinity/sinex?ref=feature/sinexd-collapse";
+      url = "git+https://github.com/Sinity/sinex?ref=master";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.agenix.follows = "agenix";
     };
@@ -101,19 +101,6 @@
     # dependency graph. Sinnix wraps/projects these tools locally instead of
     # owning their package derivations.
     llm-agents.url = "github:numtide/llm-agents.nix";
-
-    # aw-server-rust upstream master. The previous pin to the operator's
-    # fork (Sinity/aw-server-rust @ fix/heartbeat-replace-event-id-mismatch,
-    # commit e9ec01d) was BEHIND upstream's PR #555 fix by one critical
-    # line: after a successful heartbeat-merge, upstream sets
-    # `merged_heartbeat.id = Some(event_id);` so the in-memory cache
-    # preserves the row id for the next heartbeat. The fork drops it,
-    # making every other heartbeat trip ok_or_else on a None id and
-    # re-fetch from DB. Functional but fragile.
-    aw-server-rust = {
-      url = "github:ActivityWatch/aw-server-rust";
-      flake = false;
-    };
 
     # Code formatting (multi-formatter via flake-parts)
     treefmt-nix = {

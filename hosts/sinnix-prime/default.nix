@@ -62,7 +62,7 @@
     };
     lynchpin = {
       enable = true;
-      refreshTimer.enable = true;
+      materializationTimer.enable = true;
     };
   };
   # This board's fTPM blocks system activation in systemd-tpm2-setup. Keep
@@ -79,10 +79,10 @@
       Storage=persistent
       Compress=yes
       SyncIntervalSec=2min
-      SystemMaxUse=2G
+      SystemMaxUse=128G
       SystemKeepFree=10G
-      SystemMaxFileSize=16M
-      MaxFileSec=1day
+      SystemMaxFileSize=128M
+      MaxFileSec=1week
       MaxRetentionSec=0
       RateLimitIntervalSec=30s
       RateLimitBurst=500

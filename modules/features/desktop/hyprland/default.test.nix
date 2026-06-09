@@ -12,7 +12,17 @@ mkFeatureTest {
     let
       hm = hmFor config;
       binds = hm.wayland.windowManager.hyprland.settings.bind or [ ];
+      dwindle = hm.wayland.windowManager.hyprland.settings.dwindle or { };
       debug = hm.wayland.windowManager.hyprland.settings.debug or { };
+      hyprConfig = hm.xdg.configFile."hypr/hyprland.conf" or { };
+      protectedUWSMUnits = [
+        "wayland-session-bindpid@.service"
+        "wayland-wm@.service"
+        "wayland-wm-env@.service"
+        "wayland-session@.target"
+        "wayland-session-envelope@.target"
+        "xdg-desktop-portal-hyprland.service"
+      ];
       sudoRules = config.security.sudo.extraRules or [ ];
       packageNames = map (pkg: lib.getName pkg) config.environment.systemPackages;
     in
@@ -38,12 +48,31 @@ mkFeatureTest {
         message = "TTY login autostart must have uwsm on the system PATH";
       }
       {
-        assertion =
-          config.systemd.user.units."wayland-session-bindpid@.service".overrideStrategy == "asDropin"
-          &&
-            lib.hasInfix "X-RestartIfChanged=false"
-              config.systemd.user.units."wayland-session-bindpid@.service".text;
-        message = "nixos-rebuild switch must not restart UWSM's bindpid unit and tear down Hyprland";
+        assertion = builtins.all (
+          name:
+          let
+            unit = config.systemd.user.units.${name} or { };
+          in
+          unit.overrideStrategy == "asDropin"
+          && lib.hasInfix "[Unit]" unit.text
+          && lib.hasInfix "X-OnlyManualStart=true" unit.text
+          && lib.hasInfix "X-RestartIfChanged=false" unit.text
+          && lib.hasInfix "X-ReloadIfChanged=false" unit.text
+          && !(lib.hasInfix "[Service]" unit.text)
+        ) protectedUWSMUnits;
+        message = "nixos-rebuild switch must not restart or reload UWSM units and tear down Hyprland";
+      }
+      {
+        assertion = hyprConfig.force == true && (hyprConfig.onChange or null) == "";
+        message = "Hyprland config must overwrite stale generated files without activation-time reloads";
+      }
+      {
+        assertion = builtins.any (bind: bind == "SUPER, Y, layoutmsg, togglesplit") binds;
+        message = "Hyprland split toggle binding must use layoutmsg togglesplit";
+      }
+      {
+        assertion = !(dwindle ? pseudotile);
+        message = "Hyprland dwindle config must not emit removed pseudotile option";
       }
       {
         assertion =

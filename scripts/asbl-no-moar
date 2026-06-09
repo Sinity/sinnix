@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Disable ASBL (Automatic Screen Brightness Limiting) on monitors
-# runtimeInputs: coreutils procps
+# runtimeInputs: coreutils procps bc jq hyprland
 # asbl-no-moar - Prevent OLED/LCD ASBL by periodically pulsing screen brightness
 #
 # Usage: asbl-no-moar [start|stop|status|toggle|once] [options]
@@ -11,6 +11,7 @@
 #   -d, --duration SECS    Duration of each pulse (default: 0.05)
 #   -v, --intensity MULT   Brightness multiplier (default: 1.25)
 #   -m, --mode MODE        Pulse mode: brightness, dim, invert (default: brightness)
+#   --restore-fp16         Restore Hyprland FP16 after invert pulse
 
 set -euo pipefail
 
@@ -21,6 +22,7 @@ INTENSITY=1.5
 BASELINE=1.25
 MODE="brightness"
 SHADER_FILE="/tmp/asbl-pulse.glsl"
+RESTORE_FP16="${ASBL_RESTORE_FP16:-0}"
 
 show_help() {
     cat << EOF
@@ -41,9 +43,10 @@ Options:
   -v, --intensity MULT   Brightness multiplier for pulse (Default: $INTENSITY)
   -b, --baseline MULT    Baseline brightness multiplier (Default: $BASELINE)
   -m, --mode MODE        Mode: brightness, dim, invert (Default: $MODE)
+      --restore-fp16     Restore Hyprland render:use_fp16 after invert pulse
 
 Environment:
-  ASBL_INTERVAL, ASBL_DURATION, ASBL_INTENSITY, ASBL_BASELINE, ASBL_MODE
+  ASBL_INTERVAL, ASBL_DURATION, ASBL_INTENSITY, ASBL_BASELINE, ASBL_MODE, ASBL_RESTORE_FP16
 EOF
 }
 
@@ -65,6 +68,7 @@ while [[ $# -gt 0 ]]; do
         -v|--intensity) INTENSITY="$2"; shift 2 ;;
         -b|--baseline) BASELINE="$2"; shift 2 ;;
         -m|--mode) MODE="$2"; shift 2 ;;
+        --restore-fp16) RESTORE_FP16=1; shift ;;
         -h|--help) show_help; exit 0 ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
@@ -178,10 +182,24 @@ pulse() {
             hyprctl keyword decoration:dim_strength "$current" >/dev/null 2>&1
             ;;
         invert)
+            local original_use_fp16
+            original_use_fp16=$(hyprctl getoption render:use_fp16 -j 2>/dev/null | jq -r '.int // empty' 2>/dev/null || true)
+            cleanup_invert() {
+                hyprctl keyword decoration:screen_shader "" >/dev/null 2>&1 || true
+                if [[ "$RESTORE_FP16" == "1" && -n "${original_use_fp16:-}" && "$original_use_fp16" != "0" ]]; then
+                    hyprctl keyword render:use_fp16 "$original_use_fp16" >/dev/null 2>&1 || true
+                fi
+            }
+            trap cleanup_invert RETURN
+
+            if [[ -n "$original_use_fp16" && "$original_use_fp16" != "0" ]]; then
+                hyprctl keyword render:use_fp16 0 >/dev/null 2>&1
+            fi
             write_invert_shader
             hyprctl keyword decoration:screen_shader "$SHADER_FILE" >/dev/null 2>&1
             sleep "$DURATION"
-            hyprctl keyword decoration:screen_shader "" >/dev/null 2>&1
+            cleanup_invert
+            trap - RETURN
             ;;
     esac
 }

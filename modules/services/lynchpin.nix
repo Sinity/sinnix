@@ -5,14 +5,14 @@
 # demand by AI agent runtimes via the stdio transport registered in
 # mcp-registry.nix.
 #
-# Substrate refresh is a daily oneshot systemd timer (Arc E.2).
-# When `enable = true` and `refreshTimer.enable = true`, the full DAG
+# Substrate materialization is a daily oneshot systemd timer (Arc E.2).
+# When `enable = true` and `materializationTimer.enable = true`, the full DAG
 # runs daily and promotes results to the DuckDB substrate so observability
 # answers don't lag the week.
 #
 # Enable with:
 #   sinnix.services.lynchpin.enable = true;
-#   sinnix.services.lynchpin.refreshTimer.enable = true;
+#   sinnix.services.lynchpin.materializationTimer.enable = true;
 {
   config,
   lib,
@@ -28,13 +28,13 @@ in
   options.sinnix.services.lynchpin = {
     enable = lib.mkEnableOption "lynchpin substrate + MCP server";
 
-    refreshTimer = {
-      enable = lib.mkEnableOption "daily substrate refresh timer";
+    materializationTimer = {
+      enable = lib.mkEnableOption "daily substrate materialization timer";
 
       onCalendar = lib.mkOption {
         type = lib.types.str;
         default = "*-*-* 03:00:00";
-        description = "systemd OnCalendar expression for the substrate refresh (daily by default).";
+        description = "systemd OnCalendar expression for substrate materialization (daily by default).";
       };
 
       randomizedDelaySec = lib.mkOption {
@@ -43,6 +43,7 @@ in
         description = "Max randomized delay in seconds (spreads load).";
       };
     };
+
   };
 
   config = lib.mkIf cfg.enable {
@@ -55,15 +56,15 @@ in
       LYNCHPIN_MCP_PROVIDED = "1";
     };
 
-    # Optional: daily substrate refresh (Arc E.2).
+    # Optional: daily substrate materialization (Arc E.2).
     # Runs the full analysis DAG + promotes results to DuckDB. The
     # substrate is queryable by MCP clients immediately after.
-    systemd.services.lynchpin-refresh = lib.mkIf cfg.refreshTimer.enable {
-      description = "Lynchpin analysis DAG refresh";
+    systemd.services.lynchpin-materialize = lib.mkIf cfg.materializationTimer.enable {
+      description = "Lynchpin analysis DAG materialization";
       after = [ "network.target" ];
       serviceConfig = {
         Type = "oneshot";
-        ExecStart = "${scriptPkgs.lynchpin-python}/bin/lynchpin-python -m lynchpin.analysis refresh";
+        ExecStart = "${scriptPkgs.lynchpin-python}/bin/lynchpin-python -m lynchpin.analysis materialize";
         User = "sinity";
         Group = "users";
         # 4-hour timeout — the full DAG can be heavy.
@@ -71,14 +72,15 @@ in
       };
     };
 
-    systemd.timers.lynchpin-refresh = lib.mkIf cfg.refreshTimer.enable {
-      description = "Daily lynchpin analysis refresh";
+    systemd.timers.lynchpin-materialize = lib.mkIf cfg.materializationTimer.enable {
+      description = "Daily lynchpin analysis materialization";
       wantedBy = [ "timers.target" ];
       timerConfig = {
-        OnCalendar = cfg.refreshTimer.onCalendar;
-        RandomizedDelaySec = toString cfg.refreshTimer.randomizedDelaySec;
+        OnCalendar = cfg.materializationTimer.onCalendar;
+        RandomizedDelaySec = toString cfg.materializationTimer.randomizedDelaySec;
         Persistent = true;
       };
     };
+
   };
 }

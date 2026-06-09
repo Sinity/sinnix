@@ -60,8 +60,13 @@ mkServiceModule {
           download-dir = torrentDownloadDir;
           incomplete-dir = torrentPartialDir;
           incomplete-dir-enabled = true;
+          cache-size-mb = 128;
           preallocation = 0;
-          start-added-torrents = false;
+          start-added-torrents = true;
+          download-queue-enabled = false;
+          download-queue-size = 20;
+          queue-stalled-enabled = false;
+          seed-queue-enabled = false;
           rpc-enabled = true;
           rpc-bind-address = "127.0.0.1";
           rpc-port = 9091;
@@ -121,7 +126,14 @@ mkServiceModule {
           (lib.sinnix.mkRuntimeServiceConfig {
             runtimeInventory = config.sinnix.runtime.inventory;
             unit = "transmission.service";
-            overrides.CPUWeight = 20;
+            overrides = {
+              Nice = 10;
+              CPUWeight = 5;
+              IOSchedulingClass = "idle";
+              IOWeight = 5;
+              MemoryHigh = "1G";
+              MemoryMax = "3G";
+            };
           })
           (lib.sinnix.systemd.mkRestartPolicy {
             strategy = "on-failure";

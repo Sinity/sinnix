@@ -151,21 +151,30 @@ mkFeatureTest {
       )
       (expect.hmFileTextContainsAll hm ".local/bin/codex" [
         "npm install -g @openai/codex"
-        ''run_agent_scoped "$FHS" "$STATE/launch.sh"''
-      ] "Codex wrapper must FHS-bootstrap from @openai/codex")
+        ''run_agent_scoped "$STATE/launch.sh"''
+      ] "Codex wrapper must bootstrap @openai/codex without wrapping launches in FHS")
+      (expect.hmFileTextNotMatches hm ".local/bin/claude" ".*agent-fhs.*"
+        "Claude wrapper must not launch through buildFHSEnv/bubblewrap"
+      )
+      (expect.hmFileTextNotMatches hm ".local/bin/codex" ".*agent-fhs.*"
+        "Codex wrapper must not launch through buildFHSEnv/bubblewrap"
+      )
+      (expect.hmFileTextNotMatches hm ".local/bin/gemini" ".*agent-fhs.*"
+        "Gemini wrapper must not launch through buildFHSEnv/bubblewrap"
+      )
       (expect.persistedHomeDir config ".config/claude"
         "Claude config directory must be persisted under ~/.config/claude"
       )
       (expect.persistedHomeDir config ".codex" "Codex home directory must be persisted under ~/.codex")
       (expect.persistedHomeDir config ".gemini" "Gemini home directory must be persisted under ~/.gemini")
       (expect.persistedHomeDir config ".local/state/claude-code"
-        "Claude Code FHS npm state must be persisted"
+        "Claude Code npm state must be persisted"
       )
       (expect.persistedHomeDir config ".local/state/codex"
-        "Codex FHS npm state must be persisted"
+        "Codex npm state must be persisted"
       )
       (expect.persistedHomeDir config ".local/state/gemini"
-        "Gemini FHS npm state must be persisted"
+        "Gemini npm state must be persisted"
       )
       (expect.hmFileExists hm ".local/bin/gemini" "Gemini wrapper must exist")
       (expect.hmFileTextContainsAll hm ".local/bin/gemini" [
@@ -179,8 +188,8 @@ mkFeatureTest {
       )
       (expect.hmFileTextContainsAll hm ".local/bin/gemini" [
         "npm install -g @google/gemini-cli"
-        ''run_agent_scoped "$FHS" "$STATE/launch.sh"''
-      ] "Gemini wrapper must FHS-bootstrap from @google/gemini-cli")
+        ''run_agent_scoped "$STATE/launch.sh"''
+      ] "Gemini wrapper must bootstrap @google/gemini-cli without wrapping launches in FHS")
       (expect.xdgConfigFileExists hm "claude/CLAUDE.md" "Claude instruction root must exist")
       (expect.xdgConfigFileExists hm "claude/skills" "Claude skills symlink must exist")
       {

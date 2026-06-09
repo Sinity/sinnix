@@ -27,7 +27,7 @@
           assertion =
             serverService.Nice == 10
             && serverService.IOSchedulingClass == "idle"
-            && serverService.IOWeight == 10
+            && serverService.IOWeight == 5
             && serverService.MemoryHigh == "1G"
             && serverService.MemoryMax == "2G";
           message = "ActivityWatch must run with background resource guardrails";

@@ -17,7 +17,6 @@ mkFeatureModule {
         "qutebrowser/greasemonkey/cookie-nag-zapper.user.js";
       "qutebrowser/greasemonkey/readable-medium.user.js" =
         "qutebrowser/greasemonkey/readable-medium.user.js";
-      "qutebrowser/greasemonkey/template.user.js" = "qutebrowser/greasemonkey/template.user.js";
     };
     homeFile = {
       ".local/share/qutebrowser/userscripts/open-in-mpv" = "qutebrowser/userscripts/open-in-mpv";

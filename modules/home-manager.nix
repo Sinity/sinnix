@@ -52,6 +52,7 @@ in
       };
 
       programs.home-manager.enable = true;
+      systemd.user.startServices = "suggest";
     };
   };
 }

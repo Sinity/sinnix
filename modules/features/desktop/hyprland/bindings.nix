@@ -15,8 +15,7 @@ in
     "SUPER, Q, killactive"
     "SUPER, F, fullscreen, 0"
     # Launcher + lock are Noctalia surfaces (IPC).
-    # NOTE (v5 alpha): verify exact IPC targets against `qs -c noctalia-shell ipc`.
-    "SUPER, D, exec, qs -c noctalia-shell ipc call launcher toggle"
+    "SUPER, D, exec, noctalia msg panel-toggle launcher"
     "SUPER, Escape, exec, qs -c noctalia-shell ipc call lockScreen toggle"
     "SUPER, Slash, exec, qs -c noctalia-shell ipc call plugin:keybind-cheatsheet toggle"
 
@@ -54,9 +53,10 @@ in
     "SUPER SHIFT, 9, movetoworkspace, 9"
     "SUPER SHIFT, 0, movetoworkspace, 10"
 
-    "SUPER, grave, exec, uwsm app -- ${script "toggle-scratch"} term"
+    # Disabled for now (user request): term (SUPER+grave) + notes (SUPER+N) scratchpads.
+    # "SUPER, grave, exec, uwsm app -- ${script "toggle-scratch"} term"
     "SUPER, S, exec, uwsm app -- ${script "toggle-scratch"} spotify"
-    "SUPER, N, exec, uwsm app -- ${script "toggle-scratch"} notes"
+    # "SUPER, N, exec, uwsm app -- ${script "toggle-scratch"} notes"
 
     "SUPER, V, exec, uwsm app -- kitty --class clipse -e clipse"
     ", Print, exec, ${script "hdr-screenshot"} area --dir ${screenshotDir}"
@@ -64,7 +64,6 @@ in
 
     # F-key bindings
     ", F3, exec, asbl-no-moar once --mode invert --duration 0.05"
-    ", F5, exec, uwsm app -- ${script "toggle-scratch"} agent2"
     ", F6, exec, uwsm app -- ${script "toggle-scratch"} weechat"
     ", F8, exec, uwsm app -- ${script "toggle-scratch"} rawlog"
     ", F9, exec, sudo -n ${scriptPkgs.nuke-builds}/bin/nuke-builds"
@@ -117,7 +116,7 @@ in
     "SUPER ALT, J, moveactive, 0 80"
 
     "SUPER, P, pseudo"
-    "SUPER, Y, togglesplit"
+    "SUPER, Y, layoutmsg, togglesplit"
   ];
 
   bindl = [

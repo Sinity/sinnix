@@ -20,6 +20,18 @@ let
         message = "airvpn-seed peer must keep full-tunnel allowed IPs";
       }
       {
+        assertion = peer.name == "airvpn-seed";
+        message = "airvpn-seed peer unit name must be stable for service overrides";
+      }
+      {
+        assertion =
+          config.systemd.services.wireguard-airvpn-seed-peer-airvpn-seed.serviceConfig.Restart == "on-failure"
+          && config.systemd.services.wireguard-airvpn-seed-peer-airvpn-seed.serviceConfig.RestartSec == "10s"
+          && builtins.elem "network-online.target" config.systemd.services.wireguard-airvpn-seed-peer-airvpn-seed.after
+          && builtins.elem "network-online.target" config.systemd.services.wireguard-airvpn-seed-peer-airvpn-seed.wants;
+        message = "airvpn-seed peer must retry transient boot-time DNS failures";
+      }
+      {
         assertion =
           builtins.elem "wireguard-airvpn-seed.target" transmissionAfter
           && builtins.elem "wireguard-airvpn-seed.target" transmissionWants;

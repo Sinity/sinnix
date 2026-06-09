@@ -45,8 +45,15 @@ mkServiceTest {
           && lib.hasInfix "latency_oversleep_ms" source
           && lib.hasInfix "fan.hwmon_unavailable" source
           && lib.hasInfix "service_state" source
+          && lib.hasInfix "block_device_sample" source
+          && lib.hasInfix "service_cgroup_io_sample" source
+          && lib.hasInfix "service_cgroup_pressure_sample" source
+          && lib.hasInfix "process_io_delta_sample" source
+          && lib.hasInfix "/proc\") / pid / \"io\"" source
+          && lib.hasInfix "/proc/diskstats" source
+          && lib.hasInfix "/sys/fs/cgroup" source
           && lib.hasInfix "--machine=" source;
-        message = "machine-telemetry must capture power, latency, missing fan gaps, and service state";
+        message = "machine-telemetry must capture power, latency, missing fan gaps, service state, block device counters, service cgroup I/O counters, service cgroup pressure counters, and bounded process I/O deltas";
       }
       {
         assertion = hasTmpfilesRule "/realm/data/captures/machine";

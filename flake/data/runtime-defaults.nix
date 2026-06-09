@@ -71,9 +71,10 @@ rec {
     background-maintenance = mkClass "Bulk maintenance that should yield to interaction" {
       Nice = 10;
       IOSchedulingClass = "idle";
-      IOWeight = 10;
+      CPUWeight = 5;
+      IOWeight = 5;
       MemoryHigh = "1G";
-      MemoryMax = "4G";
+      MemoryMax = "3G";
     };
     backup-maintenance = mkClass "Snapshot and backup jobs" {
       Nice = 10;
@@ -90,8 +91,11 @@ rec {
       MemoryMax = "8G";
     };
     capture-substrate = mkClass "Databases and queues backing capture daemons" {
-      Nice = 5;
-      IOWeight = 50;
+      Nice = 8;
+      IOSchedulingClass = "best-effort";
+      IOSchedulingPriority = 7;
+      IOWeight = 20;
+      MemoryHigh = "8G";
     };
     observability = mkClass "Monitoring that should remain responsive during contention" {
       Slice = "system-critical.slice";
@@ -107,6 +111,7 @@ rec {
     "AGENT_SESSION_ID"
     "CARGO_BUILD_JOBS"
     "CARGO_HOME"
+    "CARGO_INCREMENTAL"
     "CARGO_TARGET_DIR"
     "CMAKE_BUILD_PARALLEL_LEVEL"
     "CODEX_HOME"
@@ -172,10 +177,11 @@ rec {
       ioniceClass = "best-effort";
       ionicePriority = 7;
       envDefaults = {
-        CARGO_BUILD_JOBS = "4";
-        CMAKE_BUILD_PARALLEL_LEVEL = "4";
-        MAKEFLAGS = "-j4";
-        NIX_BUILD_CORES = "4";
+        CARGO_BUILD_JOBS = "3";
+        CARGO_INCREMENTAL = "0";
+        CMAKE_BUILD_PARALLEL_LEVEL = "3";
+        MAKEFLAGS = "-j3";
+        NIX_BUILD_CORES = "3";
         SCCACHE_IDLE_TIMEOUT = "10";
       };
     };
@@ -200,47 +206,57 @@ rec {
   slices = {
     system = {
       background = {
-        CPUWeight = 10;
-        IOWeight = 5;
-        MemoryHigh = "4G";
-        MemoryMax = "10G";
+        CPUWeight = 3;
+        IOWeight = 1;
+        MemoryHigh = "2G";
+        MemoryMax = "4G";
+        ManagedOOMMemoryPressure = "kill";
+        ManagedOOMMemoryPressureLimit = "25%";
       };
       nix-build = {
-        CPUWeight = 20;
-        IOWeight = 10;
-        MemoryHigh = "8G";
-        MemoryMax = "16G";
+        CPUWeight = 5;
+        IOWeight = 2;
+        MemoryHigh = "3G";
+        MemoryMax = "8G";
+        ManagedOOMMemoryPressure = "kill";
+        ManagedOOMMemoryPressureLimit = "30%";
       };
       system-critical = {
-        CPUWeight = 200;
-        IOWeight = 100;
-        MemoryLow = "512M";
+        CPUWeight = 400;
+        IOWeight = 300;
+        MemoryLow = "2G";
       };
     };
     user = {
       agent = {
-        CPUWeight = 200;
-        IOWeight = 100;
-        MemoryLow = "1G";
+        CPUWeight = 400;
+        IOWeight = 300;
+        MemoryLow = "3G";
         MemoryHigh = "12G";
       };
       background = {
-        CPUWeight = 10;
-        IOWeight = 5;
-        MemoryHigh = "4G";
-        MemoryMax = "10G";
+        CPUWeight = 3;
+        IOWeight = 1;
+        MemoryHigh = "2G";
+        MemoryMax = "4G";
+        ManagedOOMMemoryPressure = "kill";
+        ManagedOOMMemoryPressureLimit = "25%";
       };
       build = {
-        CPUWeight = 20;
-        IOWeight = 10;
-        MemoryHigh = "8G";
-        MemoryMax = "16G";
+        CPUWeight = 5;
+        IOWeight = 2;
+        MemoryHigh = "3G";
+        MemoryMax = "8G";
+        ManagedOOMMemoryPressure = "kill";
+        ManagedOOMMemoryPressureLimit = "30%";
       };
       nix-build = {
-        CPUWeight = 20;
-        IOWeight = 10;
-        MemoryHigh = "8G";
-        MemoryMax = "16G";
+        CPUWeight = 5;
+        IOWeight = 2;
+        MemoryHigh = "3G";
+        MemoryMax = "8G";
+        ManagedOOMMemoryPressure = "kill";
+        ManagedOOMMemoryPressureLimit = "30%";
       };
     };
   };

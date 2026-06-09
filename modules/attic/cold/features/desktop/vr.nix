@@ -2,6 +2,17 @@
 # Revive by `git mv` back to modules/features/desktop/vr.nix.
 # Reason: VR streaming to standalone headsets — no current use; revival pending
 # nixpkgs cached monado-25 (building from source caused multi-minute RAM spikes).
+#
+# TODO: If revived, split the generic host plumbing from higher-level Quest
+# management. The generic module should install ADB/scrcpy/SideQuest and VR
+# streaming tools; private per-device/app policy belongs outside public sinnix.
+#
+# TODO: Consider a declarative Quest reconciler instead of only installing
+# host tools. Shape: Nix declares desired APKs, package names, versions, hashes,
+# pushed files, and device settings; a generated `quest-sync` command compares
+# that declaration against `adb shell pm ...`/device state and installs,
+# updates, removes, or reports drift. This is reconciliation over ADB, not true
+# NixOS-style control of Horizon OS.
 # VR streaming to standalone headsets.
 {
   mkFeatureModule,
@@ -96,6 +107,22 @@ mkFeatureModule {
 
       # ── Quest tools: ADB, SideQuest, scrcpy ─────────────────────────────────
       (lib.mkIf cfg.quest-tools.enable {
+        # TODO: Refresh this before revival. Current nixpkgs reports the old
+        # android-udev-rules package removed because systemd uaccess handles
+        # Android device permissions; the minimum host surface may now be only
+        # pkgs.android-tools plus any still-needed local group/udev fallback.
+        #
+        # TODO: If adding declarative management, keep these as host tools and
+        # add a separate reconciler app. Candidate capabilities:
+        # - dump installed third-party packages/version codes from a connected
+        #   headset as a seed manifest;
+        # - install/update pinned APKs with `adb install -r`;
+        # - optionally remove explicitly disallowed package names;
+        # - push viewer configs/media manifests to /sdcard paths;
+        # - apply SideQuest-like device settings via documented ADB commands;
+        # - ingest Meta "owned apps/content" exports when available, but treat
+        #   account entitlements as advisory because ADB only sees installed
+        #   packages.
         # Meta/Oculus USB vendor ID for udev
         services.udev.extraRules = ''
           # Meta Quest headsets (vendor 2833)

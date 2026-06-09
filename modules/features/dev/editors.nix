@@ -165,14 +165,6 @@ mkFeatureModule {
                 userMcp = mkDotsFile "/vscode/User/mcp.json";
               };
             };
-
-            xdg.configFile = {
-              "Code/User/mcp" = {
-                source = mkDotsFile "/vscode/User/mcp";
-                force = true;
-              };
-            };
-
           };
       })
 

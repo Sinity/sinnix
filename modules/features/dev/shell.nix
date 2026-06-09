@@ -98,8 +98,8 @@ mkFeatureModule {
 
                   set -o vi
 
-                  if [ -z "$FLAKE" ]; then
-                    export FLAKE="$(find-flake-root)"
+                  if [ -z "$NH_FLAKE" ]; then
+                    export NH_FLAKE="$(find-flake-root)"
                   fi
 
                   show_file_or_dir_preview='if [ -d {} ]; then eza --tree --color=always {} | head -200; else bat -n --color=always --line-range :500 {}; fi'
@@ -408,9 +408,6 @@ mkFeatureModule {
             home.activation.rebuildBatCache = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
               ${lib.getExe pkgs.bat} cache --build 2>/dev/null || true
             '';
-
-            # CLI wrappers
-            home.file.".serena/serena_config.yml".source = mkDotsFile "/serena/serena_config.yml";
 
             # Bash integration for direnv
             home.file.".bashrc" = {

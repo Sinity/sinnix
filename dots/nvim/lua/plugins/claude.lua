@@ -1,4 +1,3 @@
-local HOME = os.getenv("HOME")
 local in_vscode = vim.g.vscode
 return {
   {
