@@ -27,6 +27,21 @@ mkFeatureTest {
         message = "Kitty must launch through the capture wrapper";
       }
       {
+        assertion = hm.programs.kitty.settings.font_family == "SauceCodePro Nerd Font Mono";
+        message = "Kitty must keep the configured monospace font when Stylix's Kitty target is disabled";
+      }
+      {
+        assertion = hm.programs.kitty.settings.font_size == 16;
+        message = "Kitty must keep the configured terminal font size when Stylix's Kitty target is disabled";
+      }
+      {
+        assertion =
+          hm.programs.kitty.settings.background == "#101014"
+          && hm.programs.kitty.settings.foreground == "#e6e1e5"
+          && hm.programs.kitty.settings.color5 == "#d0bcff";
+        message = "Kitty must carry an explicit Noctalia-aligned palette instead of relying on Stylix includes";
+      }
+      {
         assertion = hm.programs.kitty.settings.open_url_with == "xdg-open";
         message = "Kitty URL opening must stay delegated to xdg-open";
       }

@@ -124,6 +124,12 @@ in
             ++ lib.optionals (!runtimeEnabled && databasePrepared) [ sinexPkgs.xtask ]
           );
         };
+      mkScopedSinexToolPackage =
+        toolName: sinexPkgs:
+        pkgs.symlinkJoin {
+          name = "${toolName}-${sinexEnvironment}";
+          paths = [ sinexPkgs.sinex ];
+        };
     in
     lib.mkMerge [
       (lib.mkIf (!runtimeEnabled) {
@@ -155,7 +161,8 @@ in
         in
         {
           services.sinex.package = lib.mkDefault (mkScopedSinexPackage sinexPkgs);
-          services.sinex.cliPackage = lib.mkDefault sinexPkgs.sinexctl;
+          services.sinex.cliPackage = lib.mkDefault (mkScopedSinexToolPackage "sinexctl" sinexPkgs);
+          services.sinex.adminPackage = lib.mkDefault (mkScopedSinexToolPackage "xtask" sinexPkgs);
           services.sinex.users.target = targetUserName;
           sinex.secrets.paths = lib.mkForce (
             lib.mapAttrs (_: path: toString path) (

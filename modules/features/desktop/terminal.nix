@@ -31,11 +31,49 @@ mkFeatureModule {
             # subfeatures that collide with the custom zsh prompt pipeline.
             shellIntegration.mode = "no-prompt-mark no-title no-cursor";
             settings = {
-              # why mkForce: stylix derives background from the active
-              # palette (typically a dark grey). This terminal wants pure
-              # black for maximum contrast and OLED-friendliness.
-              background = lib.mkForce "#000000";
-              background_opacity = lib.mkForce "1.0";
+              font_family = "SauceCodePro Nerd Font Mono";
+              bold_font = "auto";
+              italic_font = "auto";
+              bold_italic_font = "auto";
+              font_size = 16;
+              disable_ligatures = "never";
+
+              # Keep Kitty self-contained instead of re-enabling Stylix's
+              # generated include. The palette follows Noctalia's dark
+              # Material-style surfaces: near-black chrome, soft text, blue
+              # primary, and teal/rose accents.
+              foreground = "#e6e1e5";
+              background = "#101014";
+              background_opacity = "0.96";
+              selection_foreground = "#101014";
+              selection_background = "#c9c2dc";
+              cursor = "#d0bcff";
+              cursor_text_color = "#101014";
+              url_color = "#8ecaff";
+
+              active_tab_foreground = "#101014";
+              active_tab_background = "#d0bcff";
+              inactive_tab_foreground = "#cac4d0";
+              inactive_tab_background = "#1d1b20";
+              tab_bar_background = "#101014";
+
+              color0 = "#1d1b20";
+              color1 = "#ffb4ab";
+              color2 = "#b5f0b5";
+              color3 = "#f3d58c";
+              color4 = "#a8c7fa";
+              color5 = "#d0bcff";
+              color6 = "#8fd8d2";
+              color7 = "#cac4d0";
+              color8 = "#49454f";
+              color9 = "#ffdad6";
+              color10 = "#d1f8d1";
+              color11 = "#ffe7a8";
+              color12 = "#d3e3ff";
+              color13 = "#eaddff";
+              color14 = "#a7f0e9";
+              color15 = "#f4eff4";
+
               window_padding_width = 10;
               scrollback_lines = 50000;
               enable_audio_bell = "no";
