@@ -152,6 +152,10 @@
         message = "Long-running Sinex runtime services must not stop during desktop activation";
       }
       {
+        assertion = (serviceConfig "sinexd").TimeoutStopSec == "10min";
+        message = "sinexd must allow enough graceful stop time for WAL/material drains during activation";
+      }
+      {
         assertion = builtins.all (
           name:
           let

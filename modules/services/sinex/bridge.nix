@@ -489,6 +489,7 @@ in
             sinexd = {
               restartIfChanged = false;
               stopIfChanged = false;
+              serviceConfig.TimeoutStopSec = lib.mkForce "10min";
             };
           }
           (lib.genAttrs maintenanceTimerServiceNames (_: {

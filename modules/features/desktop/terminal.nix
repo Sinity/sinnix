@@ -51,7 +51,6 @@ mkFeatureModule {
               cursor_trail = 3;
               confirm_os_window_close = 0;
               allow_remote_control = "socket-only";
-              listen_on = "unix:" + "\${XDG_RUNTIME_DIR}/kitty-" + "\${USER}";
               open_url_with = "xdg-open";
               detect_urls = "yes";
               url_prefixes = "http https file ftp";
@@ -67,7 +66,7 @@ mkFeatureModule {
             extraConfig = ''
               # Noctalia owns Kitty colors through its native wallpaper-derived
               # template: ~/.config/kitty/themes/noctalia.conf.
-              globinclude ~/.config/kitty/themes/noctalia.conf
+              include ~/.config/kitty/themes/noctalia.conf
 
               map ctrl+shift+f12 debug_config
 

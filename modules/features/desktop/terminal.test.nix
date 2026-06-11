@@ -39,7 +39,7 @@ mkFeatureTest {
         message = "Kitty automatic config reload must stay disabled to avoid runaway inotify watches";
       }
       {
-        assertion = lib.hasInfix "globinclude ~/.config/kitty/themes/noctalia.conf" (
+        assertion = lib.hasInfix "include ~/.config/kitty/themes/noctalia.conf" (
           hm.programs.kitty.extraConfig or ""
         );
         message = "Kitty must consume Noctalia's native generated theme instead of owning colors in Sinnix";
