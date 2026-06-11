@@ -210,8 +210,6 @@ rec {
         IOWeight = 1;
         MemoryHigh = "2G";
         MemoryMax = "4G";
-        ManagedOOMMemoryPressure = "kill";
-        ManagedOOMMemoryPressureLimit = "25%";
       };
       nix-build = {
         CPUWeight = 5;
@@ -221,10 +219,8 @@ rec {
         # without killing the build; MemoryMax is the hard safety ceiling.
         # Previously 3G/8G — far too low, causing constant thrashing that made
         # the desktop unresponsive during builds even though SCHED_IDLE was set.
-        MemoryHigh = "10G";
-        MemoryMax = "18G";
-        ManagedOOMMemoryPressure = "kill";
-        ManagedOOMMemoryPressureLimit = "30%";
+        MemoryHigh = "14G";
+        MemoryMax = "22G";
       };
       system-critical = {
         CPUWeight = 400;
@@ -244,24 +240,18 @@ rec {
         IOWeight = 1;
         MemoryHigh = "2G";
         MemoryMax = "4G";
-        ManagedOOMMemoryPressure = "kill";
-        ManagedOOMMemoryPressureLimit = "25%";
       };
       build = {
         CPUWeight = 5;
         IOWeight = 2;
-        MemoryHigh = "3G";
-        MemoryMax = "8G";
-        ManagedOOMMemoryPressure = "kill";
-        ManagedOOMMemoryPressureLimit = "30%";
+        MemoryHigh = "14G";
+        MemoryMax = "22G";
       };
       nix-build = {
         CPUWeight = 5;
         IOWeight = 2;
-        MemoryHigh = "3G";
-        MemoryMax = "8G";
-        ManagedOOMMemoryPressure = "kill";
-        ManagedOOMMemoryPressureLimit = "30%";
+        MemoryHigh = "14G";
+        MemoryMax = "22G";
       };
     };
   };

@@ -66,7 +66,7 @@
       }
       {
         assertion = config.systemd.oomd.enable && config.services.earlyoom.enable;
-        message = "systemd-oomd must provide slice-local pressure kills while earlyoom handles global emergencies";
+        message = "oomd stays available while earlyoom handles global emergencies";
       }
       {
         assertion =
@@ -152,40 +152,40 @@
           && systemBackground.IOWeight == 1
           && systemBackground.MemoryHigh == "2G"
           && systemBackground.MemoryMax == "4G"
-          && systemBackground.ManagedOOMMemoryPressure == "kill"
-          && systemBackground.ManagedOOMMemoryPressureLimit == "25%"
+          && !(systemBackground ? ManagedOOMMemoryPressure)
+          && !(systemBackground ? ManagedOOMMemoryPressureLimit)
           && nixParent.CPUWeight == 5
           && nixParent.IOWeight == 2
           && nixBuild.CPUWeight == 5
           && nixBuild.IOWeight == 2
-          && nixBuild.MemoryHigh == "10G"
-          && nixBuild.MemoryMax == "18G"
-          && nixBuild.ManagedOOMMemoryPressure == "kill"
-          && nixBuild.ManagedOOMMemoryPressureLimit == "30%"
+          && nixBuild.MemoryHigh == "14G"
+          && nixBuild.MemoryMax == "22G"
+          && !(nixBuild ? ManagedOOMMemoryPressure)
+          && !(nixBuild ? ManagedOOMMemoryPressureLimit)
           && systemCritical.CPUWeight == 400
           && systemCritical.IOWeight == 300
           && systemCritical.MemoryLow == "2G"
           && userBackground.CPUWeight == 3
           && userBackground.IOWeight == 1
           && userBackground.MemoryMax == "4G"
-          && userBackground.ManagedOOMMemoryPressure == "kill"
-          && userBackground.ManagedOOMMemoryPressureLimit == "25%"
+          && !(userBackground ? ManagedOOMMemoryPressure)
+          && !(userBackground ? ManagedOOMMemoryPressureLimit)
           && userBuild.CPUWeight == 5
           && userBuild.IOWeight == 2
-          && userBuild.MemoryHigh == "3G"
-          && userBuild.MemoryMax == "8G"
-          && userBuild.ManagedOOMMemoryPressure == "kill"
-          && userBuild.ManagedOOMMemoryPressureLimit == "30%"
+          && userBuild.MemoryHigh == "14G"
+          && userBuild.MemoryMax == "22G"
+          && !(userBuild ? ManagedOOMMemoryPressure)
+          && !(userBuild ? ManagedOOMMemoryPressureLimit)
           && userNixBuild.CPUWeight == 5
           && userNixBuild.IOWeight == 2
-          && userNixBuild.MemoryHigh == "3G"
-          && userNixBuild.MemoryMax == "8G"
-          && userNixBuild.ManagedOOMMemoryPressure == "kill"
-          && userNixBuild.ManagedOOMMemoryPressureLimit == "30%"
+          && userNixBuild.MemoryHigh == "14G"
+          && userNixBuild.MemoryMax == "22G"
+          && !(userNixBuild ? ManagedOOMMemoryPressure)
+          && !(userNixBuild ? ManagedOOMMemoryPressureLimit)
           && userAgent.CPUWeight == 400
           && userAgent.IOWeight == 300
           && userAgent.MemoryLow == "3G";
-        message = "background/build/agent slices must keep measured resource budgets and pressure backpressure";
+        message = "background/build/agent slices must keep measured budgets without oomd PSI kills";
       }
       {
         assertion =
@@ -287,9 +287,10 @@
       }
       {
         assertion =
-          lib.hasInfix "systemd-oomd provides slice-local pressure backpressure" performanceModule
+          lib.hasInfix "build and" performanceModule
+          && lib.hasInfix "background slices intentionally do not opt into PSI-triggered kills" performanceModule
           && !(lib.hasInfix "while this host is being retuned" performanceModule);
-        message = "OOM policy notes must be present-tense rather than retuning history";
+        message = "OOM policy notes must describe the present build/background kill policy";
       }
     ];
 }

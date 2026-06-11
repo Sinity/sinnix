@@ -185,8 +185,8 @@ in
       enable = true;
       enableNotifications = true;
       # Act before multi-GiB disk-swap residency turns into sustained major
-      # faults and Btrfs queue collapse. systemd-oomd handles slice-local
-      # pressure first; earlyoom remains the global emergency guard.
+      # faults and Btrfs queue collapse. Build/background slices stay weighted
+      # and capped, but oomd does not kill them on PSI alone.
       # Fire early on memory pressure, before swap gets meaningfully used.
       # 15% of 32 GiB = ~5 GiB free — kills misbehaving processes while the
       # system is still responsive. Swap is a last-ditch cushion, not a sink.
@@ -203,9 +203,10 @@ in
       ];
     };
 
-    # systemd-oomd provides slice-local pressure backpressure for build and
-    # background scopes. Critical and interactive slices are intentionally not
-    # managed by oomd; earlyoom remains the global emergency fallback.
+    # Keep oomd available for upstream/default users, but Sinnix build and
+    # background slices intentionally do not opt into PSI-triggered kills.
+    # Earlier measurements showed false-positive kills with plenty of memory
+    # available; earlyoom remains the global emergency fallback.
     systemd.oomd.enable = true;
 
     systemd.slices =
