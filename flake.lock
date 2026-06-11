@@ -1113,11 +1113,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1781167654,
-        "narHash": "sha256-9EA0Z39SncbtIrzGR//YqfF3AHmTvdEaFI8/6QSMVc4=",
+        "lastModified": 1781214641,
+        "narHash": "sha256-So5N6qzh+AgGO502HznpmlKZnNRXc2dBZ+3OboBBEpw=",
         "ref": "fix/dlq-bisect-program-limit",
-        "rev": "47c1ce3758e339bf8225a15fe7092828de89be80",
-        "revCount": 1042,
+        "rev": "330b2a7c23d34e65ed11e5af2b2dba8d63659f0f",
+        "revCount": 1043,
         "type": "git",
         "url": "https://github.com/Sinity/sinex"
       },
