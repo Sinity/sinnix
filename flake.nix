@@ -21,7 +21,7 @@
     };
 
     # User environment management
-    home-manager.url = "git+https://github.com/nix-community/home-manager?ref=release-26.05";
+    home-manager.url = "github:nix-community/home-manager/master";
     home-manager.inputs.nixpkgs.follows = "nixpkgs";
 
     # Secret management with age encryption
@@ -52,7 +52,7 @@
     };
 
     polylogue = {
-      url = "github:Sinity/polylogue/master";
+      url = "github:Sinity/polylogue/fix/live-insight-memory-headroom";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -68,10 +68,10 @@
       inputs.polylogueSrc.follows = "polylogue";
     };
 
-    # Sinex is sourced from GitHub so system deployments follow reviewed upstream
+    # Sinex is sourced from GitHub so system deployments follow pushed upstream
     # history instead of implicitly consuming the local checkout state.
     sinex = {
-      url = "git+https://github.com/Sinity/sinex?ref=master";
+      url = "git+https://github.com/Sinity/sinex?ref=fix/dlq-bisect-program-limit";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.agenix.follows = "agenix";
     };

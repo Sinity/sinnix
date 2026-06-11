@@ -31,7 +31,10 @@ let
   };
   iocostInit = pkgs.writeShellApplication {
     name = "sinnix-iocost-init";
-    runtimeInputs = [ pkgs.coreutils pkgs.gnugrep ];
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.gnugrep
+    ];
     text = ''
       set -eu
 
@@ -101,41 +104,40 @@ in
 
     systemd.settings.Manager.StatusUnitFormat = "name";
 
-    boot.kernel.sysctl =
-      {
-        # Keep process (anon) memory resident; reclaim file cache before swapping.
-        # Diagnosed 2026-06-07: swappiness=60 + vfs_cache_pressure=50 made the box
-        # hoard ~18 GiB page cache while paging ~17 GiB of anon to swap (incl.
-        # ~9 GiB to the disk swapfile) despite ~20 GiB available RAM. swappiness=10
-        # + vfs_cache_pressure=100 inverts that: drop cache first, keep anon in RAM,
-        # use the (now tiny) swap only as an OOM cushion.
-        "vm.swappiness" = 10;
-        "vm.page-cluster" = 0;
-        "vm.vfs_cache_pressure" = 100;
-        # Keep Btrfs/NVMe writeback from accumulating multi-GiB dirty bursts.
-        # The Crucial P3 /realm drive has shown 30s NVMe command timeouts under
-        # mixed build/database writeback; bounded dirty bytes push back earlier
-        # and make stalls shorter and more attributable.
-        "vm.dirty_background_bytes" = 64 * 1024 * 1024;
-        "vm.dirty_bytes" = 256 * 1024 * 1024;
+    boot.kernel.sysctl = {
+      # Keep process (anon) memory resident; reclaim file cache before swapping.
+      # Diagnosed 2026-06-07: swappiness=60 + vfs_cache_pressure=50 made the box
+      # hoard ~18 GiB page cache while paging ~17 GiB of anon to swap (incl.
+      # ~9 GiB to the disk swapfile) despite ~20 GiB available RAM. swappiness=10
+      # + vfs_cache_pressure=100 inverts that: drop cache first, keep anon in RAM,
+      # use the (now tiny) swap only as an OOM cushion.
+      "vm.swappiness" = 10;
+      "vm.page-cluster" = 0;
+      "vm.vfs_cache_pressure" = 100;
+      # Keep Btrfs/NVMe writeback from accumulating multi-GiB dirty bursts.
+      # The Crucial P3 /realm drive has shown 30s NVMe command timeouts under
+      # mixed build/database writeback; bounded dirty bytes push back earlier
+      # and make stalls shorter and more attributable.
+      "vm.dirty_background_bytes" = 64 * 1024 * 1024;
+      "vm.dirty_bytes" = 256 * 1024 * 1024;
 
-        # Preserve crash diagnostics without turning ordinary hung-task reports
-        # into automatic workstation reboots.
-        "kernel.hung_task_panic" = 0;
-        "kernel.hung_task_timeout_secs" = 120;
-        "kernel.panic" = 60;
-        "kernel.oops_all_cpu_backtrace" = 1;
-        "kernel.hardlockup_all_cpu_backtrace" = 1;
-        "kernel.softlockup_all_cpu_backtrace" = 1;
-      }
-      // lib.optionalAttrs
-        (
-          lib.attrByPath [ "sinnix" "services" "sinex" "prepareHost" ] false config
-          || lib.attrByPath [ "sinnix" "services" "sinex" "enable" ] false config
-        )
-        {
-          "fs.inotify.max_user_watches" = 524288;
-        };
+      # Rebuild and Home Manager activation reload a large user unit/D-Bus
+      # surface in bursts. Keep inotify capacity high enough that dbus-broker
+      # and the user manager can attach their watches instead of timing out
+      # during switch activation.
+      "fs.inotify.max_user_watches" = 1048576;
+      "fs.inotify.max_user_instances" = 8192;
+      "fs.inotify.max_queued_events" = 65536;
+
+      # Preserve crash diagnostics without turning ordinary hung-task reports
+      # into automatic workstation reboots.
+      "kernel.hung_task_panic" = 0;
+      "kernel.hung_task_timeout_secs" = 120;
+      "kernel.panic" = 60;
+      "kernel.oops_all_cpu_backtrace" = 1;
+      "kernel.hardlockup_all_cpu_backtrace" = 1;
+      "kernel.softlockup_all_cpu_backtrace" = 1;
+    };
 
     boot.kernelModules = [ "ramoops" ];
     boot.kernelParams = [

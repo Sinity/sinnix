@@ -50,15 +50,13 @@ in
         ];
         netrc-file = "/etc/nix/netrc";
 
-        # 2 parallel derivations × 10 cores each = 20 SCHED_IDLE threads max.
-        # Keeping max-jobs=2 bounds peak memory (one big Rust job at 4-8 GB,
-        # not four). Raising cores 2→10 gives rustc 10 threads per job, cutting
-        # sinexd build time from ~16 min back to ~3-4 min (the historic baseline
-        # before the overcautious 2/2 setting was introduced 2026-04-18).
-        # The daemon lives in nix-build.slice (CPUWeight=5/IOWeight=2/MemHigh=16G)
-        # so builds yield to foreground work even at 20 active threads.
+        # Keep ordinary rebuilds latency-bounded. The daemon lives in
+        # nix-build.slice, but evaluation/build client memory and cache
+        # substitution tails still affect the interactive session; use explicit
+        # opt-in overrides for throughput experiments instead of making every
+        # switch a 20-thread compile.
         max-jobs = 2;
-        cores = 10;
+        cores = 2;
         builders-use-substitutes = true;
         keep-outputs = true;
         keep-derivations = true;

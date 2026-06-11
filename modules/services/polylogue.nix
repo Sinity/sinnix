@@ -116,6 +116,13 @@ in
         # `service` or `extraServiceConfig`; systemd unit tuning is now
         # owned upstream.
       };
+
+      systemd.user.services.polylogued.Service = {
+        # Keep the soft reclaim threshold tight enough to protect the desktop,
+        # but leave hard headroom for large catch-up insight refreshes.
+        MemoryHigh = lib.mkForce "4G";
+        MemoryMax = lib.mkForce "6G";
+      };
     };
 
     # ── Runtime-surface registration (sinnix-specific) ─────────────

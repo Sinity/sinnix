@@ -170,12 +170,8 @@ mkFeatureTest {
       (expect.persistedHomeDir config ".local/state/claude-code"
         "Claude Code npm state must be persisted"
       )
-      (expect.persistedHomeDir config ".local/state/codex"
-        "Codex npm state must be persisted"
-      )
-      (expect.persistedHomeDir config ".local/state/gemini"
-        "Gemini npm state must be persisted"
-      )
+      (expect.persistedHomeDir config ".local/state/codex" "Codex npm state must be persisted")
+      (expect.persistedHomeDir config ".local/state/gemini" "Gemini npm state must be persisted")
       (expect.hmFileExists hm ".local/bin/gemini" "Gemini wrapper must exist")
       (expect.hmFileTextContainsAll hm ".local/bin/gemini" [
         ''scope_bin="''

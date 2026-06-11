@@ -129,7 +129,6 @@ mkFeatureModule {
       mcpPolylogueBin = mkMcpWrapper "mcp-polylogue" {
         command = "${scriptPkgs.polylogue-cli}/bin/polylogue-mcp";
       };
-      geminiPkg = inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.gemini-cli;
       inherit (mcpRegistry)
         selectClientServers
         renderCodexServer
@@ -171,10 +170,6 @@ mkFeatureModule {
               find_comm_in_free_text = true;
             };
           };
-
-          home.packages = [
-            geminiPkg
-          ];
 
           home = {
             activation = {

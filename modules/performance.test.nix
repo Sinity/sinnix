@@ -56,6 +56,7 @@
       userBackground = config.systemd.user.slices.background.sliceConfig;
       userBuild = config.systemd.user.slices.build.sliceConfig;
       userNixBuild = config.systemd.user.slices."nix-build".sliceConfig;
+      userDbusBroker = config.systemd.user.services.dbus-broker;
     in
     [
       {
@@ -71,6 +72,20 @@
           config.boot.kernel.sysctl."vm.dirty_background_bytes" == 64 * 1024 * 1024
           && config.boot.kernel.sysctl."vm.dirty_bytes" == 256 * 1024 * 1024;
         message = "desktop dirty writeback must stay byte-bounded for NVMe/Btrfs latency";
+      }
+      {
+        assertion =
+          config.boot.kernel.sysctl."fs.inotify.max_user_watches" == 1048576
+          && config.boot.kernel.sysctl."fs.inotify.max_user_instances" == 8192
+          && config.boot.kernel.sysctl."fs.inotify.max_queued_events" == 65536;
+        message = "desktop inotify capacity must absorb rebuild and user-manager activation bursts";
+      }
+      {
+        assertion =
+          !userDbusBroker.reloadIfChanged
+          && !userDbusBroker.restartIfChanged
+          && !userDbusBroker.stopIfChanged;
+        message = "user dbus-broker must not be reloaded or restarted during switch activation";
       }
       {
         assertion =

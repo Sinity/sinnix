@@ -15,6 +15,7 @@
       surfaces = config.sinnix.runtime.surfaces;
       transmission = config.services.transmission.settings;
       transmissionService = config.systemd.services.transmission;
+      firewall = config.networking.firewall;
       sinexRuntimeTimerWantedBy =
         lib.attrByPath [ "systemd" "timers" "sinex-runtime" "wantedBy" ] [ ]
           config;
@@ -51,6 +52,10 @@
           && transmission.bind-address-ipv4 == "10.148.66.217"
           && transmission.bind-address-ipv6 == "::1"
           && transmission.peer-port == 20241
+          && !(builtins.elem 20241 firewall.allowedTCPPorts)
+          && !(builtins.elem 20241 firewall.allowedUDPPorts)
+          && firewall.interfaces.airvpn-seed.allowedTCPPorts == [ 20241 ]
+          && firewall.interfaces.airvpn-seed.allowedUDPPorts == [ 20241 ]
           && builtins.elem "wireguard-airvpn-seed.target" (transmissionService.wants or [ ])
           && builtins.elem "wireguard-airvpn-seed.target" (transmissionService.after or [ ]);
         message = "sinnix-prime must keep AirVPN seeding enabled while Transmission owns tunnel startup";

@@ -49,7 +49,9 @@ mkServiceModule {
     {
       services.transmission = {
         enable = true;
-        openFirewall = true;
+        # AirVPN owns the peer ingress rule on its WireGuard interface. Do not
+        # let the upstream module open the peer port globally on every network.
+        openPeerPorts = false;
         package = pkgs.transmission_4;
         user = username;
         group = "users";

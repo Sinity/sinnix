@@ -236,6 +236,10 @@ in
 
             core = {
               enable = runtimeEnabled;
+              event_engine = {
+                rejectInitialReplay = false;
+                startupCatchUpMaxConcurrent = 1;
+              };
               api = {
                 enable = runtimeEnabled;
                 autoGenerateTls = true;
@@ -416,35 +420,34 @@ in
       #     mask::--- and nullifying the sinex traverse grant. Ordering after
       #     the Home Manager service ensures the ACL is set last.
       (lib.mkIf runtimeEnabled {
-        sinnix.runtime.surfaces =
-          {
-            sinex-runtime = {
-              unit = "sinex-runtime.target";
-              kind = "target";
-              resourceClass = "capture-runtime";
-              observe = {
-                enable = runtimeAutoStart;
-                restartable = false;
-              };
-            };
-            sinex-runtime-timer = {
-              unit = "sinex-runtime.timer";
-              kind = "timer";
-              resourceClass = "capture-runtime";
-            };
-            nats = {
-              unit = "nats.service";
-              resourceClass = "capture-substrate";
-            };
-            postgresql = {
-              unit = "postgresql.service";
-              resourceClass = "capture-substrate";
-            };
-            sinex-document-scan = {
-              unit = "sinex-document-scan.service";
-              resourceClass = "background-maintenance";
+        sinnix.runtime.surfaces = {
+          sinex-runtime = {
+            unit = "sinex-runtime.target";
+            kind = "target";
+            resourceClass = "capture-runtime";
+            observe = {
+              enable = runtimeAutoStart;
+              restartable = false;
             };
           };
+          sinex-runtime-timer = {
+            unit = "sinex-runtime.timer";
+            kind = "timer";
+            resourceClass = "capture-runtime";
+          };
+          nats = {
+            unit = "nats.service";
+            resourceClass = "capture-substrate";
+          };
+          postgresql = {
+            unit = "postgresql.service";
+            resourceClass = "capture-substrate";
+          };
+          sinex-document-scan = {
+            unit = "sinex-document-scan.service";
+            resourceClass = "background-maintenance";
+          };
+        };
 
         systemd.services = lib.mkMerge [
           {

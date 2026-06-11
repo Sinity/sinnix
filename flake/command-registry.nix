@@ -341,8 +341,7 @@ in
           ${pkgs.nixos-rebuild}/bin/nixos-rebuild test-vm --flake "path:$_invoke_flake_dir#sinnix-prime" \
           --max-jobs "$rebuild_jobs" \
           --cores "$rebuild_cores" \
-          "''${nix_override_args[@]}" \
-          --log-format internal-json -v 2>&1 | ${pkgs.nix-output-monitor}/bin/nom --json
+          "''${nix_override_args[@]}"
       '';
     };
 
@@ -361,6 +360,7 @@ in
           ${pkgs.coreutils}/bin/env -u FLAKE NH_FLAKE="$_invoke_flake_dir" \
             ${pkgs.nh}/bin/nh os test \
             "''${_invoke_flake_dir}#sinnix-prime" \
+            --no-nom \
             --max-jobs "$rebuild_jobs" \
             --cores "$rebuild_cores" \
             "''${nix_override_args[@]}"
@@ -382,6 +382,7 @@ in
           ${pkgs.coreutils}/bin/env -u FLAKE NH_FLAKE="$_invoke_flake_dir" \
             ${pkgs.nh}/bin/nh os boot \
             "''${_invoke_flake_dir}#sinnix-prime" \
+            --no-nom \
             --max-jobs "$rebuild_jobs" \
             --cores "$rebuild_cores" \
             "''${nix_override_args[@]}"
@@ -403,6 +404,7 @@ in
           ${pkgs.coreutils}/bin/env -u FLAKE NH_FLAKE="$_invoke_flake_dir" \
             ${pkgs.nh}/bin/nh os switch \
             "''${_invoke_flake_dir}#sinnix-prime" \
+            --no-nom \
             --max-jobs "$rebuild_jobs" \
             --cores "$rebuild_cores" \
             "''${nix_override_args[@]}"

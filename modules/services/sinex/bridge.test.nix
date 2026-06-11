@@ -29,9 +29,11 @@
         "sinex-kitty-setup"
       ]
       ++ (config.sinex._generatedUnits or [ ])
-      ++ lib.optionals (lib.attrByPath [ "services" "sinex" "sources" "document" "enable" ] false config) [
-        "sinex-document-scan"
-      ];
+      ++
+        lib.optionals (lib.attrByPath [ "services" "sinex" "sources" "document" "enable" ] false config)
+          [
+            "sinex-document-scan"
+          ];
       runtimeServices = lib.unique (
         builtins.filter (name: builtins.hasAttr name config.systemd.services) candidateRuntimeServices
       );
@@ -193,6 +195,14 @@
         message = "sinex-runtime.target must pull in postgresql.target";
       }
       {
+        assertion = config.services.sinex.core.event_engine.rejectInitialReplay == false;
+        message = "Sinnix Sinex runtime must explicitly allow raw-stream recovery replay when the event_engine durable is missing";
+      }
+      {
+        assertion = config.services.sinex.core.event_engine.startupCatchUpMaxConcurrent == 1;
+        message = "Sinnix Sinex runtime must serialize startup catch-up to reduce interactive I/O pressure";
+      }
+      {
         assertion = !preflightEnabled && !(builtins.elem "sinex-preflight.service" runtimeWants);
         message = "Sinex production preflight must stay manual instead of running during desktop activation";
       }
@@ -231,13 +241,9 @@
       }
       {
         assertion = builtins.all (
-          name:
-          if config.sinnix.services.sinex.autoStart then
-            maintenanceTimerWantedBy name == [ "sinex-runtime.target" ]
-          else
-            maintenanceTimerWantedBy name == [ ]
+          name: maintenanceTimerWantedBy name == [ "sinex-runtime.target" ]
         ) sinexMaintenanceTimers;
-        message = "Sinex maintenance timers must respect the host delayed-runtime auto-start policy";
+        message = "Sinex maintenance timers must attach to the runtime target even when delayed auto-start is disabled";
       }
       {
         assertion = builtins.all (

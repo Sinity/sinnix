@@ -21,8 +21,6 @@ mkFeatureModule {
       ...
     }:
     let
-      aiTools = inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system};
-
       agentRuntimePath = lib.makeBinPath (
         with pkgs;
         [
@@ -59,11 +57,13 @@ mkFeatureModule {
           fi
 
           cat > "$STATE/launch.sh" <<'LAUNCHER'
-        '' + ''
+        ''
+        + ''
           #!/usr/bin/env bash
           PATH="${agentRuntimePath}:$HOME/.local/state/${stateDir}/npm/bin:$PATH"
           exec ${binaryName} "$@"
-        '' + ''
+        ''
+        + ''
           LAUNCHER
           chmod +x "$STATE/launch.sh"
         '';
@@ -147,7 +147,9 @@ mkFeatureModule {
           force = true;
         };
       mkCodexWrapper =
-        { profile ? null }:
+        {
+          profile ? null,
+        }:
         {
           text = ''
             #!/usr/bin/env bash
@@ -212,19 +214,6 @@ mkFeatureModule {
             scriptPkgs.render-agents
             scriptPkgs.normalize-agent-projects
             scriptPkgs.verify-agent-topology
-
-            # Upstream agent ecosystem tools. Sinnix owns projection/wrappers;
-            # llm-agents.nix owns fast-moving package supply.
-            aiTools.agent-browser
-            aiTools.agent-deck
-            aiTools.agentsview
-            aiTools.beads-rust
-            aiTools.beads-viewer
-            aiTools.claude-agent-acp
-            aiTools.codex-acp
-            aiTools.herdr
-            aiTools.opencode
-            aiTools.skills
           ];
 
           programs.zsh = {

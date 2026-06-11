@@ -1,6 +1,5 @@
 {
   mkFeatureModule,
-  inputs,
   pkgs,
   lib,
   ...
@@ -37,15 +36,10 @@ mkFeatureModule {
       config,
       pkgs,
       lib,
-      inputs,
       cfg,
       user,
       ...
     }:
-    let
-      aiTools = inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system};
-      claude-code = aiTools.claude-code;
-    in
     lib.mkMerge [
       # Nix tooling
       (lib.mkIf cfg.nix.enable {
@@ -117,8 +111,6 @@ mkFeatureModule {
           pkgs.gh
           pkgs.delta
           pkgs.jetbrains-mono
-          claude-code
-          aiTools.codex
         ];
       })
     ];

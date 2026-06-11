@@ -31,8 +31,7 @@ let
       }
       {
         assertion = daemonService.ExecStart != null;
-        message = "Polylogue daemon must have an ExecStart"
-          + "(either via source symlink or inline text)";
+        message = "Polylogue daemon must have an ExecStart" + "(either via source symlink or inline text)";
       }
       (expect.textContains daemonExecStart "/bin/polylogued run"
         "Polylogue daemon unit must invoke polylogued run"
@@ -45,9 +44,12 @@ let
       (expect.attrPathEq daemonService [
         "Restart"
       ] "on-failure" "Polylogue daemon must restart on failure")
-      # NOTE(2026-05-28): Memory/I/O guardrails and hardening now owned by
-      # upstream polylogue HM module; removed service.* override surface.
-      # NOTE(2026-05-28): CPU/IO/Memory guardrails owned by upstream module.
+      (expect.attrPathEq daemonService [
+        "MemoryHigh"
+      ] "4G" "Polylogue daemon must have enough soft memory headroom for live insight refresh")
+      (expect.attrPathEq daemonService [
+        "MemoryMax"
+      ] "6G" "Polylogue daemon must keep hard memory headroom above its soft reclaim threshold")
     ];
 in
 [
