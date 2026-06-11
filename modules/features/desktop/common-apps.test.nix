@@ -31,8 +31,9 @@ mkFeatureTest {
       {
         assertion =
           lib.hasInfix "image_delay = 0" yaziConfig
+          && lib.hasInfix "dark = \"noctalia\"" yaziConfig
           && lib.hasInfix "run = \"sinnix-video-preview\"" yaziConfig;
-        message = "Yazi must use the custom instant video preview configuration";
+        message = "Yazi must use the Noctalia flavor and custom instant video preview configuration";
       }
     ];
 }

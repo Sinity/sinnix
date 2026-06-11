@@ -15,6 +15,7 @@ mkFeatureTest {
       dwindle = hm.wayland.windowManager.hyprland.settings.dwindle or { };
       debug = hm.wayland.windowManager.hyprland.settings.debug or { };
       hyprConfig = hm.xdg.configFile."hypr/hyprland.conf" or { };
+      hyprExtraConfig = hm.wayland.windowManager.hyprland.extraConfig or "";
       protectedUWSMUnits = [
         "wayland-session-bindpid@.service"
         "wayland-wm@.service"
@@ -65,6 +66,12 @@ mkFeatureTest {
       {
         assertion = hyprConfig.force == true && (hyprConfig.onChange or null) == "";
         message = "Hyprland config must overwrite stale generated files without activation-time reloads";
+      }
+      {
+        assertion =
+          lib.hasInfix "source = ~/.config/hypr/noctalia.conf" hyprExtraConfig
+          && hm.home.activation ? seedNoctaliaHyprlandTheme;
+        message = "Hyprland must consume Noctalia's generated theme without Home Manager owning the generated file";
       }
       {
         assertion = builtins.any (bind: bind == "SUPER, Y, layoutmsg, togglesplit") binds;

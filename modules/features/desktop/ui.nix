@@ -1,16 +1,17 @@
 # System-wide UI theme configuration
 #
+# NOCTALIA MANAGES:
+#   - Shell, wallpaper, lock/OSD/launcher/notifications
+#   - Live wallpaper-derived app templates for Kitty, GTK, Qt, Hyprland,
+#     Zed, Neovim, and Yazi where native templates are available
+#
 # STYLIX MANAGES:
-#   - Color scheme (base16, gruvbox) for apps — fonts, cursor, GTK/QT, and
-#     base16 app colors (nvim, bat, foot, …)
+#   - Fonts, cursor, and static base16 fallback colors for apps that do not yet
+#     have a safe Noctalia template path.
 #
-# Wallpaper DISPLAY and the live shell palette are Noctalia's (noctalia.nix);
-# stylix does NOT run hyprpaper (disabled below) so the two don't fight over the
-# wallpaper. Moving the app palette onto Noctalia's wallpaper-derived templates
-# (retiring this static scheme) is a tracked follow-up needing per-app validation.
-#
-# DO NOT manually configure:
-#   - Application color schemes (use stylix.targets.<app>.enable)
+# Wallpaper display and the live shell palette are Noctalia's (noctalia.nix);
+# stylix does NOT run hyprpaper (disabled below) so the two do not fight over
+# wallpaper ownership.
 #
 # To disable stylix for specific apps:
 #   stylix.targets.<app>.enable = false;
@@ -88,9 +89,12 @@ mkFeatureModule {
       home-manager.users.${config.sinnix.user.name} = {
         gtk.gtk4.theme = lib.mkDefault null;
 
-        # Noctalia owns the displayed wallpaper; stylix keeps the image only for
-        # color derivation, so its hyprpaper wallpaper-setter must stay off.
-        stylix.targets.hyprpaper.enable = lib.mkForce false;
+        # Noctalia owns the displayed wallpaper and live palette, so Stylix's
+        # wallpaper setter and generated app color surfaces must stay off.
+        stylix.targets = {
+          gtk.enable = lib.mkForce false;
+          hyprpaper.enable = lib.mkForce false;
+        };
 
         # Force unset portal env var in all shells (prevents stale session vars)
         programs.zsh.initContent = lib.mkBefore ''
@@ -106,12 +110,9 @@ mkFeatureModule {
 
       stylix = {
         enable = true;
-        # Stylix themes apps/fonts/cursor from this base16 palette. Noctalia owns
-        # the displayed wallpaper (cycling) and recolors its own shell live from
-        # it. Moving the *app* palette onto Noctalia's wallpaper-derived templates
-        # (retiring this static scheme) is a follow-up that needs per-app
-        # validation — deriving the scheme from the image conflicts with hardcoded
-        # colors in dotfiles (e.g. dots/broot/conf.hjson char_match).
+        # Static fallback only. Noctalia owns live wallpaper-derived coloring;
+        # app-specific colors should use Noctalia-generated templates where
+        # possible instead of adding new Stylix targets.
         base16Scheme = "${pkgs.base16-schemes}/share/themes/gruvbox-dark-medium.yaml";
         image = pkgs.writeText "stylix-fallback.svg" ''
           <svg xmlns="http://www.w3.org/2000/svg" width="1" height="1">

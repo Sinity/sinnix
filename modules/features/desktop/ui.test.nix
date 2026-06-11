@@ -31,6 +31,10 @@ mkFeatureTest {
         message = "Home Manager must not duplicate system portal DBus activation files";
       }
       {
+        assertion = hm.stylix.targets.gtk.enable == false && hm.stylix.targets.hyprpaper.enable == false;
+        message = "Noctalia must own GTK colors and wallpaper without Stylix-generated conflicts";
+      }
+      {
         assertion = !builtins.any (lib.hasPrefix "xdg-desktop-portal-") hmPackageNames;
         message = "Home Manager packages must not re-export portal DBus activation files";
       }

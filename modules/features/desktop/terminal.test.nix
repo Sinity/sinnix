@@ -35,11 +35,14 @@ mkFeatureTest {
         message = "Kitty must keep the configured terminal font size when Stylix's Kitty target is disabled";
       }
       {
-        assertion =
-          hm.programs.kitty.settings.background == "#101014"
-          && hm.programs.kitty.settings.foreground == "#e6e1e5"
-          && hm.programs.kitty.settings.color5 == "#d0bcff";
-        message = "Kitty must carry an explicit Noctalia-aligned palette instead of relying on Stylix includes";
+        assertion = hm.programs.kitty.settings.auto_reload_config == -1;
+        message = "Kitty automatic config reload must stay disabled to avoid runaway inotify watches";
+      }
+      {
+        assertion = lib.hasInfix "globinclude ~/.config/kitty/themes/noctalia.conf" (
+          hm.programs.kitty.extraConfig or ""
+        );
+        message = "Kitty must consume Noctalia's native generated theme instead of owning colors in Sinnix";
       }
       {
         assertion = hm.programs.kitty.settings.open_url_with == "xdg-open";

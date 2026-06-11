@@ -203,8 +203,8 @@ in
       ];
     };
 
-    # Keep oomd available for upstream/default users, but Sinnix build and
-    # background slices intentionally do not opt into PSI-triggered kills.
+    # Keep systemd-oomd enabled at the platform level, but Sinnix's own
+    # build/background policy intentionally does not use PSI-triggered kills.
     # Earlier measurements showed false-positive kills with plenty of memory
     # available; earlyoom remains the global emergency fallback.
     systemd.oomd.enable = true;

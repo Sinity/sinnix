@@ -4,9 +4,9 @@
 # and wallpaper, and acts as the live Material-You color authority (wallpaper
 # palette -> app templates). Retires waybar, tofi, fnott, hyprlock, polkit-gnome.
 #
-# Config follows the repo's dots/ convention: config.toml and plugins.json are
-# OUT-OF-STORE symlinks into dots/noctalia/ (writable + live-editable + tracked),
-# via meta.dotfiles below. Noctalia reads AND writes config.toml, so the GUI
+# Config follows the repo's dots/ convention: config.toml, plugins.json, and
+# local user templates are OUT-OF-STORE symlinks into dots/noctalia/ via
+# meta.dotfiles below. Noctalia reads AND writes config.toml, so the GUI
 # settings panel works and persists back into the repo — not a read-only store
 # file. The runtime-fetched plugin *code* under ~/.config/noctalia/plugins lives
 # in impermanence-persisted state.
@@ -25,6 +25,7 @@ mkFeatureModule {
   meta.dotfiles.configFile = {
     "noctalia/config.toml" = "noctalia/config.toml";
     "noctalia/plugins.json" = "noctalia/plugins.json";
+    "noctalia/templates".source = "noctalia/templates";
   };
   configFn =
     {

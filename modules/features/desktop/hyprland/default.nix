@@ -211,12 +211,11 @@ in
                 gaps_out = 20;
                 layout = "dwindle";
                 resize_on_border = true;
-                # Animated gradient on the active border; the angle is animated
-                # by the borderangle rule in hyprland-animations.nix.
-                # mkForce: stylix's hyprland target sets a flat col.active_border;
-                # Phase 2 will source these from Noctalia's wallpaper palette.
-                "col.active_border" = lib.mkForce "rgba(83a598ee) rgba(d3869bee) rgba(b8bb26ee) 45deg";
-                "col.inactive_border" = lib.mkForce "rgba(3c3836aa)";
+                # Noctalia owns the live border palette through its native
+                # Hyprland template included below. These are first-session
+                # fallbacks before ~/.config/hypr/noctalia.conf exists.
+                "col.active_border" = lib.mkForce "rgba(d0bcffee) rgba(a8c7faee) rgba(8fd8d2ee) 45deg";
+                "col.inactive_border" = lib.mkForce "rgba(49454faa)";
               };
 
               dwindle = {
@@ -297,7 +296,14 @@ in
               let
                 extra = if rules ? extraConfig then rules.extraConfig else "";
               in
-              lib.mkAfter extra;
+              lib.mkAfter ''
+                # Generated and live-reloaded by Noctalia's wallpaper-derived
+                # Hyprland template. The file is seeded below so first login
+                # does not depend on template generation order.
+                source = ~/.config/hypr/noctalia.conf
+
+                ${extra}
+              '';
           };
 
           xdg.configFile."hypr/hyprland.conf" = {
@@ -307,6 +313,14 @@ in
             # new compositor config on the next session or by explicit reload.
             onChange = lib.mkForce "";
           };
+
+          home.activation.seedNoctaliaHyprlandTheme = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+            theme_file="''${XDG_CONFIG_HOME:-$HOME/.config}/hypr/noctalia.conf"
+            if [ ! -e "$theme_file" ]; then
+              mkdir -p "$(dirname "$theme_file")"
+              printf '%s\n' '# Seed file overwritten by Noctalia native Hyprland template.' > "$theme_file"
+            fi
+          '';
 
           # Scratchpad config files + script links
           home.file =

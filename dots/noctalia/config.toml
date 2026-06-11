@@ -9,23 +9,35 @@
 # file in its full, correct schema the first time you change anything there.
 # Bar too small on this 4K display? Settings -> Bar -> Scale (it saves here).
 
-[colorScheme]
-useWallpaperColors = true
-darkMode = true
+[theme]
+mode = "dark"
+source = "wallpaper"
+wallpaper_scheme = "m3-content"
+
+[theme.templates]
+enable_builtin_templates = true
+builtin_ids = ["gtk3", "gtk4", "kitty", "qt", "hyprland"]
+enable_community_templates = true
+community_ids = ["zed", "yazi"]
+
+[theme.templates.user.neovim]
+enabled = true
+input_path = "templates/nvim-matugen.lua"
+output_path = "$XDG_STATE_HOME/noctalia/nvim/matugen.lua"
+pre_hook = "mkdir -p \"${XDG_STATE_HOME:-$HOME/.local/state}/noctalia/nvim\""
+post_hook = "pkill -SIGUSR1 nvim >/dev/null 2>&1 || true"
 
 [wallpaper]
 enabled = true
 directory = "/home/sinity/wallpaper"
-randomEnabled = true
-randomIntervalSec = 1800
-transitionType = "fade"
-transitionDuration = 800
+transition = ["fade"]
+transition_duration = 800
 
-[appTheming]
-gtk = true
-qt = true
-kitty = true
-vscode = true
+[wallpaper.automation]
+enabled = true
+interval_seconds = 1800
+order = "random"
+recursive = true
 
 # Bars are defined as [bar.<name>] tables (the default bar is "default").
 # thickness is the bar height in px; Noctalia's default is 34, which is tiny on
@@ -34,8 +46,8 @@ vscode = true
 position = "top"
 thickness = 56
 
-[notifications]
-daemon = true
+[notification]
+enable_daemon = true
 allowed_urgencies = [ "low", "normal", "critical" ]
 blacklist = []
 blacklist_allow_critical = true
@@ -46,30 +58,4 @@ position = "top-right"
 scale = 1.0
 show_actions = true
 show_app_name = true
-toast_opacity = 0.96
-
-[plugins.screen-recorder]
-outputDirectory = "/realm/data/captures/screen"
-replayDirectory = "/realm/data/captures/replay"
-replayDurationSec = 60
-fps = 60
-codec = "hevc"
-audioSource = "system"
-
-[plugins.nvibrant]
-vibrance = 512
-displayCount = 1
-
-[plugins.model-usage]
-providers = ["claude", "codex"]
-metric = "usage"
-
-[plugins.linux-wallpaperengine-controller]
-workshopDirectory = "/home/sinity/.local/share/Steam/steamapps/workshop/content/431960"
-syncWallpaperColors = true
-
-[widgets.types.taskbar]
-group_by_workspace = false
-
-[widgets.types.workspaces]
-hide_empty_workspaces = true
+background_opacity = 0.96

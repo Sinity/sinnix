@@ -288,7 +288,7 @@
       {
         assertion =
           lib.hasInfix "build and" performanceModule
-          && lib.hasInfix "background slices intentionally do not opt into PSI-triggered kills" performanceModule
+          && lib.hasInfix "build/background policy intentionally does not use PSI-triggered kills" performanceModule
           && !(lib.hasInfix "while this host is being retuned" performanceModule);
         message = "OOM policy notes must describe the present build/background kill policy";
       }
