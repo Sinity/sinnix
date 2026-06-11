@@ -324,6 +324,7 @@
       {
         assertion =
           config.services.nats.settings.jetstream.max_file == "32G"
+          && config.services.nats.settings.max_payload == 8388608
           && natsService.MemoryHigh == "8G"
           && !(natsService ? MemoryMax)
           && natsService.Nice == 8

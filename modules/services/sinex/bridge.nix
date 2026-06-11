@@ -210,6 +210,11 @@ in
               autoSetup = runtimeEnabled;
               dataDir = "/var/lib/nats";
               jetstreamMaxStore = "32G";
+              # Entity-enricher checkpoints currently exceed NATS' 1 MiB
+              # default payload limit during recovery. The local server is
+              # loopback-only; raise the transport ceiling so checkpoints can
+              # persist while upstream trims checkpoint state size.
+              extraSettings.max_payload = lib.mkDefault 8388608;
               # The dedicated /cache NVMe was removed after sustained I/O
               # failures. Keep JetStream under the normal NATS state root.
               storeDir = "/var/lib/nats/jetstream";
