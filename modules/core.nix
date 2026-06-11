@@ -110,6 +110,14 @@ in
     # NOTE: dbus-broker hardening removed - it needs setgroups() to drop privileges
     # for spawned services. The ~@privileged syscall filter blocked this, causing
     # crashes at boot. See: journalctl -b -3 | grep dbus-broker
+    # User dbus-broker reloads have timed out during switch activation after
+    # inotify ENOSPC bursts. Keep the live session bus stable; unit changes can
+    # take effect on the next login instead of failing the whole deployment.
+    systemd.user.services.dbus-broker = {
+      reloadIfChanged = lib.mkForce false;
+      restartIfChanged = lib.mkForce false;
+      stopIfChanged = lib.mkForce false;
+    };
 
     # nsncd opens its compatibility socket at /var/run/nscd/socket. On the
     # current systemd/nixpkgs generation the upstream unit bind-mounts /run/nscd

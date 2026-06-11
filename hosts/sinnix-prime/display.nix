@@ -57,19 +57,33 @@ lib.mkMerge [
         __GL_VRR_ALLOWED = "0";
       };
 
-      # v1 catch-all — monitorv2 below takes precedence. Keep this SDR: the
-      # 10-bit HDR path can fail XR30 buffer allocation and drop the session.
+      # v1 catch-all — monitorv2 below takes precedence for the primary DP-3
+      # path. Keep the catch-all SDR so unknown/cable-swapped outputs do not
+      # inherit unverified HDR settings.
       wayland.windowManager.hyprland.settings.monitor = [
         ",3840x2160@120,auto,1"
       ];
 
-      # AORUS FO48U OLED — connector names are NVIDIA-assigned (DP-3, HDMI-A-1)
+      # AORUS FO48U OLED on DP-3. 4K120 HDR/10-bit was verified live via
+      # hyprctl on 2026-06-11 after the Noctalia ext-workspace crash path was
+      # disabled.
       wayland.windowManager.hyprland.settings.monitorv2 = [
         {
           output = "DP-3";
           mode = "3840x2160@120";
           position = "0x0";
           scale = 1;
+          bitdepth = "10";
+          cm = "hdr";
+          sdrbrightness = 1.4;
+          sdrsaturation = 1.0;
+          sdr_min_luminance = 0;
+          sdr_max_luminance = 80;
+          min_luminance = 0;
+          max_luminance = 550;
+          max_avg_luminance = 200;
+          supports_hdr = 1;
+          supports_wide_color = 1;
         }
         {
           # HDMI 2.0 — 60Hz until HDMI 2.1 (48Gbps) cable arrives
@@ -144,8 +158,8 @@ lib.mkMerge [
         LIBVA_DRIVER_NAME = "iHD";
       };
 
-      # v1 catch-all — monitorv2 below takes precedence. Keep this SDR: the
-      # 10-bit HDR path can fail XR30 buffer allocation and drop the session.
+      # v1 catch-all — monitorv2 below takes precedence. Keep this SDR unless
+      # the iGPU path is live-tested separately.
       wayland.windowManager.hyprland.settings.monitor = [
         ",3840x2160@120,auto,1"
       ];

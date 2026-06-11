@@ -36,12 +36,33 @@ let
     map (d: "mkdir -p /btrfs_tmp/@${d}") scaffoldDirs
     ++ map (f: "touch /btrfs_tmp/@${f}") scaffoldCfg.files
   );
+  fstrimCanonical = pkgs.writeShellApplication {
+    name = "sinnix-fstrim-canonical";
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.findutils
+      pkgs.util-linux
+    ];
+    text = ''
+      set -eu
+
+      for mountpoint in /realm; do
+        if findmnt --mountpoint "$mountpoint" >/dev/null; then
+          fstrim --minimum 64MiB --verbose "$mountpoint"
+        fi
+      done
+    '';
+  };
 in
 {
   services = {
-    # Keep discard as explicit manual maintenance on this host. The active
-    # workstation baseline favors predictable foreground I/O over automatic
-    # discard bursts on the root and realm SSDs.
+    # Keep online discard disabled on this host; run batched trim from a
+    # low-priority timer instead. Do not use the stock all-filesystems fstrim
+    # unit: this host has many Btrfs bind mounts and snapshot mounts, and the
+    # root/Nix MX500 has shown very long FITRIM latency even after backlog
+    # cleanup. Scheduled trim therefore covers large extents on the NVMe realm
+    # filesystem only; root trim remains an explicit off-hours maintenance
+    # action.
     fstrim.enable = false;
     gvfs.enable = true; # dynamic mount
 
@@ -71,6 +92,26 @@ in
       ACTION=="add|change", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", ENV{ID_SERIAL_SHORT}=="2247E6897FB8", ATTR{queue/wbt_lat_usec}="0", ATTR{queue/nr_requests}="64"
       ACTION=="add|change", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", KERNEL=="sd[b-z]", ATTR{queue/wbt_lat_usec}="0"
     '';
+  };
+
+  systemd.services.sinnix-fstrim = {
+    description = "Trim canonical NVMe data filesystem";
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${fstrimCanonical}/bin/sinnix-fstrim-canonical";
+      Nice = 10;
+      IOSchedulingClass = "idle";
+      IOSchedulingPriority = 7;
+    };
+  };
+
+  systemd.timers.sinnix-fstrim = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnCalendar = "weekly";
+      RandomizedDelaySec = "1h";
+      Persistent = true;
+    };
   };
 
   fileSystems = {

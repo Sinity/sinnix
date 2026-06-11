@@ -51,6 +51,7 @@
         || (config.systemd.user.slices.${name}.sliceConfig or { }) == { };
       systemBackground = config.systemd.slices.background.sliceConfig;
       nixBuild = config.systemd.slices."nix-build".sliceConfig;
+      nixParent = config.systemd.slices.nix.sliceConfig;
       systemCritical = config.systemd.slices."system-critical".sliceConfig;
       userAgent = config.systemd.user.slices.agent.sliceConfig;
       userBackground = config.systemd.user.slices.background.sliceConfig;
@@ -75,9 +76,9 @@
       }
       {
         assertion =
-          config.boot.kernel.sysctl."fs.inotify.max_user_watches" == 1048576
-          && config.boot.kernel.sysctl."fs.inotify.max_user_instances" == 8192
-          && config.boot.kernel.sysctl."fs.inotify.max_queued_events" == 65536;
+          config.boot.kernel.sysctl."fs.inotify.max_user_watches" == 2097152
+          && config.boot.kernel.sysctl."fs.inotify.max_user_instances" == 65536
+          && config.boot.kernel.sysctl."fs.inotify.max_queued_events" == 262144;
         message = "desktop inotify capacity must absorb rebuild and user-manager activation bursts";
       }
       {
@@ -139,8 +140,7 @@
       }
       {
         assertion =
-          noLocalSlice "nix"
-          && noLocalSlice "sinnix"
+          noLocalSlice "sinnix"
           && noLocalSlice "sinnix-maintenance"
           && noUserSlice "app"
           && noUserSlice "session";
@@ -154,6 +154,8 @@
           && systemBackground.MemoryMax == "4G"
           && systemBackground.ManagedOOMMemoryPressure == "kill"
           && systemBackground.ManagedOOMMemoryPressureLimit == "25%"
+          && nixParent.CPUWeight == 5
+          && nixParent.IOWeight == 2
           && nixBuild.CPUWeight == 5
           && nixBuild.IOWeight == 2
           && nixBuild.MemoryHigh == "10G"

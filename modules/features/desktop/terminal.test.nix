@@ -18,6 +18,10 @@ mkFeatureTest {
         message = "Kitty must be enabled";
       }
       {
+        assertion = hm.stylix.targets.kitty.enable == false;
+        message = "Kitty must not include Stylix Nix-store color files because its config watcher can exhaust inotify watches";
+      }
+      {
         assertion =
           hm.programs.kitty.settings.shell == "${hm.home.homeDirectory}/.local/bin/sinnix-captured-shell";
         message = "Kitty must launch through the capture wrapper";

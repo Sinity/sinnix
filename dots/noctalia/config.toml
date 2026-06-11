@@ -34,6 +34,20 @@ vscode = true
 position = "top"
 thickness = 56
 
+[notifications]
+daemon = true
+allowed_urgencies = [ "low", "normal", "critical" ]
+blacklist = []
+blacklist_allow_critical = true
+collapse_on_dismiss = true
+layer = "overlay"
+monitors = []
+position = "top-right"
+scale = 1.0
+show_actions = true
+show_app_name = true
+toast_opacity = 0.96
+
 [plugins.screen-recorder]
 outputDirectory = "/realm/data/captures/screen"
 replayDirectory = "/realm/data/captures/replay"

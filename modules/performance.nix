@@ -125,9 +125,9 @@ in
       # surface in bursts. Keep inotify capacity high enough that dbus-broker
       # and the user manager can attach their watches instead of timing out
       # during switch activation.
-      "fs.inotify.max_user_watches" = 1048576;
-      "fs.inotify.max_user_instances" = 8192;
-      "fs.inotify.max_queued_events" = 65536;
+      "fs.inotify.max_user_watches" = 2097152;
+      "fs.inotify.max_user_instances" = 65536;
+      "fs.inotify.max_queued_events" = 262144;
 
       # Preserve crash diagnostics without turning ordinary hung-task reports
       # into automatic workstation reboots.
@@ -208,9 +208,16 @@ in
     # managed by oomd; earlyoom remains the global emergency fallback.
     systemd.oomd.enable = true;
 
-    systemd.slices = lib.mapAttrs (_: sliceConfig: {
-      inherit sliceConfig;
-    }) runtimeInventory.slices.system;
+    systemd.slices =
+      (lib.mapAttrs (_: sliceConfig: {
+        inherit sliceConfig;
+      }) runtimeInventory.slices.system)
+      // {
+        nix.sliceConfig = {
+          CPUWeight = 5;
+          IOWeight = 2;
+        };
+      };
 
     systemd.user.slices = lib.mapAttrs (_: sliceConfig: {
       inherit sliceConfig;

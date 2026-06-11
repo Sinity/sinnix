@@ -20,6 +20,10 @@ mkFeatureModule {
         in
         {
           home.sessionVariables.TERMINAL = "kitty";
+          # Stylix injects an include pointing at a generated Nix-store color
+          # file. Kitty's config watcher can fan that into huge inotify watch
+          # counts, which breaks Hyprland-spawned app scopes.
+          stylix.targets.kitty.enable = false;
 
           programs.kitty = {
             enable = true;

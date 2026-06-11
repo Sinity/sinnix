@@ -230,7 +230,6 @@ in
 
       # Runtime state
       ".local/share/nats" # NATS CLI contexts and plugins
-      ".local/share/polylogue" # polylogue share data
       ".local/state/mpv" # mpv watch-later progress
     ];
   };

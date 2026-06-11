@@ -40,5 +40,22 @@ mkServiceTest {
         ) != null;
       message = "rawlog-loop must back off after fast success exits";
     }
+    {
+      assertion =
+        lib.hasInfix ''hyprctl notify 0 6000 "rgb(33ccff)"'' (
+          builtins.readFile (inputs.self + "/scripts/rawlog")
+        );
+      message = "rawlog context notifications must use Hyprland's color argument syntax";
+    }
+    {
+      assertion =
+        lib.hasInfix ''if [ -z "$msg" ]; then''
+          (builtins.readFile (inputs.self + "/scripts/rawlog")
+        )
+        && lib.hasInfix ''command -v "$PICKER"'' (
+          builtins.readFile (inputs.self + "/scripts/rawlog")
+        );
+      message = "rawlog must not require the interactive picker for explicit message appends";
+    }
   ];
 }

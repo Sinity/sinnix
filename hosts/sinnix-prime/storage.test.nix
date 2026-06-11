@@ -21,6 +21,7 @@
       persistedHomeDirs = map (
         entry: if builtins.isAttrs entry then entry.directory else entry
       ) config.sinnix.persistence.home.directories;
+      storageModule = builtins.readFile (inputs.self + "/hosts/sinnix-prime/storage.nix");
       swapDevice = builtins.head config.swapDevices;
       udevRules = config.services.udev.extraRules;
       rollbackScript = config.boot.initrd.systemd.services.rollback-root.script;
@@ -35,8 +36,13 @@
         message = "sinnix-prime SSD btrfs mounts must not enable online discard";
       }
       {
-        assertion = !(config.services.fstrim.enable or false);
-        message = "sinnix-prime must keep discard as explicit manual maintenance";
+        assertion =
+          !(config.services.fstrim.enable or false)
+          && config.systemd.services.sinnix-fstrim.serviceConfig.IOSchedulingClass == "idle"
+          && config.systemd.timers.sinnix-fstrim.timerConfig.OnCalendar == "weekly"
+          && lib.hasInfix "for mountpoint in /realm" storageModule
+          && lib.hasInfix "fstrim --minimum 64MiB --verbose" storageModule;
+        message = "sinnix-prime must trim large extents on the canonical NVMe data filesystem at idle priority instead of using all-mount fstrim";
       }
       {
         assertion =
@@ -67,7 +73,7 @@
         assertion =
           builtins.length config.swapDevices == 1
           && swapDevice.device == "/swap/swapfile"
-          && swapDevice.size == 32 * 1024
+          && swapDevice.size == 8 * 1024
           && builtins.elem "subvol=@swap" (optionsFor "/swap")
           && builtins.elem "nodatacow" (optionsFor "/swap");
         message = "swapfile must live on a dedicated non-snapshotted btrfs subvolume";
