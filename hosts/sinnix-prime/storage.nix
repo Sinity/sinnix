@@ -46,11 +46,10 @@ let
     text = ''
       set -eu
 
-      for mountpoint in /realm; do
-        if findmnt --mountpoint "$mountpoint" >/dev/null; then
-          fstrim --minimum 64MiB --verbose "$mountpoint"
-        fi
-      done
+      mountpoint=/realm
+      if findmnt --mountpoint "$mountpoint" >/dev/null; then
+        fstrim --minimum 64MiB --verbose "$mountpoint"
+      fi
     '';
   };
 in

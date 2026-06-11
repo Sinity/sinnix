@@ -40,7 +40,7 @@
           !(config.services.fstrim.enable or false)
           && config.systemd.services.sinnix-fstrim.serviceConfig.IOSchedulingClass == "idle"
           && config.systemd.timers.sinnix-fstrim.timerConfig.OnCalendar == "weekly"
-          && lib.hasInfix "for mountpoint in /realm" storageModule
+          && lib.hasInfix "mountpoint=/realm" storageModule
           && lib.hasInfix "fstrim --minimum 64MiB --verbose" storageModule;
         message = "sinnix-prime must trim large extents on the canonical NVMe data filesystem at idle priority instead of using all-mount fstrim";
       }
