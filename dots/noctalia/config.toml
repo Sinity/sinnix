@@ -53,3 +53,9 @@ metric = "usage"
 [plugins.linux-wallpaperengine-controller]
 workshopDirectory = "/home/sinity/.local/share/Steam/steamapps/workshop/content/431960"
 syncWallpaperColors = true
+
+[widgets.types.taskbar]
+group_by_workspace = false
+
+[widgets.types.workspaces]
+hide_empty_workspaces = true

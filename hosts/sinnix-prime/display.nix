@@ -57,30 +57,19 @@ lib.mkMerge [
         __GL_VRR_ALLOWED = "0";
       };
 
-      # v1 catch-all — monitorv2 below takes precedence
+      # v1 catch-all — monitorv2 below takes precedence. Keep this SDR: the
+      # 10-bit HDR path can fail XR30 buffer allocation and drop the session.
       wayland.windowManager.hyprland.settings.monitor = [
-        ",3840x2160@120,auto,1,bitdepth,10,cm,hdr"
+        ",3840x2160@120,auto,1"
       ];
 
-      # AORUS FO48U OLED HDR — connector names are NVIDIA-assigned (DP-3, HDMI-A-1)
-      # Reference: https://github.com/hyprwm/Hyprland/discussions/11677
+      # AORUS FO48U OLED — connector names are NVIDIA-assigned (DP-3, HDMI-A-1)
       wayland.windowManager.hyprland.settings.monitorv2 = [
         {
           output = "DP-3";
           mode = "3840x2160@120";
           position = "0x0";
           scale = 1;
-          bitdepth = "10";
-          cm = "hdr";
-          sdrbrightness = 1.3;
-          sdrsaturation = 1.0;
-          sdr_min_luminance = 0;
-          sdr_max_luminance = 150;
-          min_luminance = 0;
-          max_luminance = 550;
-          max_avg_luminance = 200;
-          supports_hdr = 1;
-          supports_wide_color = 1;
         }
         {
           # HDMI 2.0 — 60Hz until HDMI 2.1 (48Gbps) cable arrives
@@ -88,17 +77,6 @@ lib.mkMerge [
           mode = "3840x2160@60";
           position = "0x0";
           scale = 1;
-          bitdepth = "10";
-          cm = "hdr";
-          sdrbrightness = 1.3;
-          sdrsaturation = 1.0;
-          sdr_min_luminance = 0;
-          sdr_max_luminance = 150;
-          min_luminance = 0;
-          max_luminance = 550;
-          max_avg_luminance = 200;
-          supports_hdr = 1;
-          supports_wide_color = 1;
         }
       ];
     };
@@ -147,7 +125,7 @@ lib.mkMerge [
       # Catch-all: any connected output at preferred mode, auto position.
       # Covers both DP-1 (mobo/iGPU) and DP-3 (dGPU) without hardcoding.
       wayland.windowManager.hyprland.settings.monitor = [
-        ",3840x2160@120,auto,1,bitdepth,10,cm,hdr"
+        ",3840x2160@120,auto,1"
       ];
     };
   })
@@ -166,12 +144,13 @@ lib.mkMerge [
         LIBVA_DRIVER_NAME = "iHD";
       };
 
-      # v1 catch-all — monitorv2 below takes precedence
+      # v1 catch-all — monitorv2 below takes precedence. Keep this SDR: the
+      # 10-bit HDR path can fail XR30 buffer allocation and drop the session.
       wayland.windowManager.hyprland.settings.monitor = [
-        ",3840x2160@120,auto,1,bitdepth,10,cm,hdr"
+        ",3840x2160@120,auto,1"
       ];
 
-      # AORUS FO48U OLED HDR via Intel iGPU — connector is DP-1 (Intel-assigned)
+      # AORUS FO48U OLED via Intel iGPU — connector is DP-1 (Intel-assigned)
       # 4K@120Hz confirmed available via modetest on DP-1
       wayland.windowManager.hyprland.settings.monitorv2 = [
         {
@@ -179,17 +158,6 @@ lib.mkMerge [
           mode = "3840x2160@120";
           position = "0x0";
           scale = 1;
-          bitdepth = "10";
-          cm = "hdr";
-          sdrbrightness = 1.3;
-          sdrsaturation = 1.0;
-          sdr_min_luminance = 0;
-          sdr_max_luminance = 150;
-          min_luminance = 0;
-          max_luminance = 550;
-          max_avg_luminance = 200;
-          supports_hdr = 1;
-          supports_wide_color = 1;
         }
       ];
     };
