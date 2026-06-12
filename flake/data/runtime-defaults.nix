@@ -77,6 +77,7 @@ rec {
       MemoryMax = "3G";
     };
     backup-maintenance = mkClass "Snapshot and backup jobs" {
+      Slice = "background.slice";
       Nice = 10;
       CPUSchedulingPolicy = "idle";
       IOSchedulingClass = "idle";
@@ -246,6 +247,12 @@ rec {
         IOWeight = 300;
         MemoryLow = "3G";
         MemoryHigh = "12G";
+      };
+      backup = {
+        CPUWeight = 20;
+        IOWeight = 20;
+        MemoryHigh = "8G";
+        MemoryMax = "12G";
       };
       background = {
         CPUWeight = 3;

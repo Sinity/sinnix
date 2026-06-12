@@ -62,10 +62,14 @@ let
       {
         assertion =
           lib.hasInfix "polylogue-sqlite-backup" backupExecStart
+          && backupService.Slice == "backup.slice"
+          && backupService.CPUSchedulingPolicy == "idle"
+          && backupService.CPUWeight == 20
           && backupService.IOSchedulingClass == "idle"
+          && backupService.IOWeight == 20
           && backupService.TimeoutStartSec == "2h"
-          && backupService.MemoryHigh == "3G"
-          && backupService.MemoryMax == "6G"
+          && backupService.MemoryHigh == "8G"
+          && backupService.MemoryMax == "12G"
           && backupTimer.OnCalendar == "Sun 04:35:00"
           && backupTimer.Persistent == false;
         message = "Polylogue SQLite DBs must have a low-priority weekly logical backup";

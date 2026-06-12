@@ -203,10 +203,17 @@ in
           Type = "oneshot";
           ExecStart = "${backupScript}/bin/polylogue-sqlite-backup";
           TimeoutStartSec = "2h";
+          Slice = "backup.slice";
           Nice = 10;
+          CPUSchedulingPolicy = "idle";
           IOSchedulingClass = "idle";
-          MemoryHigh = "3G";
-          MemoryMax = "6G";
+          CPUWeight = 20;
+          IOWeight = 20;
+          # The index backup writes a large temporary SQLite copy before
+          # compression. systemd accounts that page cache to the unit; the
+          # first successful run peaked near 9.5 GiB despite a 6 GiB hard cap.
+          MemoryHigh = "8G";
+          MemoryMax = "12G";
         };
       };
 

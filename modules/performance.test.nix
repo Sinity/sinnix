@@ -54,6 +54,7 @@
       nixParent = config.systemd.slices.nix.sliceConfig;
       systemCritical = config.systemd.slices."system-critical".sliceConfig;
       userAgent = config.systemd.user.slices.agent.sliceConfig;
+      userBackup = config.systemd.user.slices.backup.sliceConfig;
       userBackground = config.systemd.user.slices.background.sliceConfig;
       userBuild = config.systemd.user.slices.build.sliceConfig;
       userNixBuild = config.systemd.user.slices."nix-build".sliceConfig;
@@ -179,6 +180,10 @@
           && systemCritical.CPUWeight == 400
           && systemCritical.IOWeight == 300
           && systemCritical.MemoryLow == "2G"
+          && userBackup.CPUWeight == 20
+          && userBackup.IOWeight == 20
+          && userBackup.MemoryHigh == "8G"
+          && userBackup.MemoryMax == "12G"
           && userBackground.CPUWeight == 3
           && userBackground.IOWeight == 1
           && userBackground.MemoryMax == "4G"

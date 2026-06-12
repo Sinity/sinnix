@@ -44,7 +44,8 @@
         name: lib.attrByPath [ "systemd" "services" name "restartIfChanged" ] true config;
       hasBackgroundPriority =
         service:
-        service.Nice == 10
+        service.Slice == "background.slice"
+        && service.Nice == 10
         && service.CPUSchedulingPolicy == "idle"
         && service.IOSchedulingClass == "idle"
         && service.CPUWeight == 20
@@ -53,16 +54,18 @@
         service:
         service.MemoryHigh == "2G"
         && service.MemoryMax == "4G"
-        && service.IOReadBandwidthMax == [
-          "/persist 40M"
-          "/realm 80M"
-          "/outer-realm 40M"
-        ]
-        && service.IOWriteBandwidthMax == [
-          "/persist 20M"
-          "/realm 40M"
-          "/outer-realm 40M"
-        ];
+        &&
+          service.IOReadBandwidthMax == [
+            "/persist 40M"
+            "/realm 80M"
+            "/outer-realm 40M"
+          ]
+        &&
+          service.IOWriteBandwidthMax == [
+            "/persist 20M"
+            "/realm 40M"
+            "/outer-realm 40M"
+          ];
       hasTmpfilesRule =
         pattern:
         builtins.any (rule: builtins.match ".*${pattern}.*" rule != null) config.systemd.tmpfiles.rules;
@@ -181,7 +184,6 @@
           btrbkService.TimeoutStopSec == "15s"
           && !serviceRestartIfChanged "btrbk"
           && hasBackgroundPriority btrbkService
-          && !(btrbkService ? Slice)
           && !(btrbkService ? ExecCondition);
         message = "btrbk must yield CPU and I/O to interactive work";
       }
@@ -195,8 +197,6 @@
           && hasBackgroundPriority realmBorgService
           && hasBackupBounds persistBorgService
           && hasBackupBounds realmBorgService
-          && !(persistBorgService ? Slice)
-          && !(realmBorgService ? Slice)
           && !(persistBorgService ? ExecCondition)
           && !(realmBorgService ? ExecCondition);
         message = "Borg backup jobs must yield CPU/I/O and stay within backup resource bounds";
@@ -207,7 +207,6 @@
           && !serviceRestartIfChanged "borgbackup-check"
           && hasBackgroundPriority borgCheckService
           && hasBackupBounds borgCheckService
-          && !(borgCheckService ? Slice)
           && !(borgCheckService ? ExecCondition);
         message = "Borg integrity checks must yield CPU/I/O and stay within backup resource bounds";
       }
