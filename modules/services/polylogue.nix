@@ -178,14 +178,35 @@ in
           browser-capture.port = cfg.daemon.browserCapturePort;
         };
 
-        # NOTE(2026-05-28): upstream polylogue HM module no longer exposes
-        # `service` or `extraServiceConfig`; systemd unit tuning is now
-        # owned upstream.
+        # NOTE(2026-06-12): upstream renders watch roots in TOML, while
+        # debounce remains a CLI flag on `polylogued run`; keep the Sinnix
+        # operational debounce in the service command rather than inventing a
+        # non-upstream TOML shape.
       };
 
       systemd.user.services.polylogued.Service = {
+        # Each live batch costs ~14 MiB of WAL/FTS index writes
+        # regardless of payload size (measured 2026-06-12: 435
+        # batches/hr ~= 6.3 GiB written per 70 min while tailing two
+        # active agent sessions: roughly 1000x app-level amplification on
+        # few-KB JSONL appends). Coalescing to 30s caps that at
+        # ~2 batches/min for a ~4x steady-state write cut. Tradeoff:
+        # live sessions land in the archive within ~30s instead of
+        # ~2s. The watcher flush loop settles on pending-set size,
+        # so a continuously-appending file cannot starve the window.
         # Keep the soft reclaim threshold tight enough to protect the desktop,
         # but leave hard headroom for large catch-up insight refreshes.
+        ExecStart = lib.mkForce (
+          lib.concatStringsSep " " [
+            "${polyloguePkg}/bin/polylogued"
+            "run"
+            "--debounce-s 30"
+            "--host ${lib.escapeShellArg cfg.daemon.host}"
+            "--port ${toString cfg.daemon.browserCapturePort}"
+            "--api-host ${lib.escapeShellArg cfg.daemon.host}"
+            "--api-port ${toString cfg.daemon.apiPort}"
+          ]
+        );
         IOAccounting = true;
         MemoryHigh = lib.mkForce "4G";
         MemoryMax = lib.mkForce "6G";
