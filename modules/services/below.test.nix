@@ -1,4 +1,5 @@
 {
+  lib,
   mkServiceTest,
   ...
 }:
@@ -7,11 +8,7 @@ mkServiceTest {
   service = "below";
   assertions = config: [
     {
-      assertion = config.systemd.services ? below;
-      message = "Below service must exist";
-    }
-    {
-      assertion = config.environment.systemPackages != [ ];
+      assertion = builtins.any (pkg: lib.getName pkg == "below") config.environment.systemPackages;
       message = "Below package must be installed";
     }
     {

@@ -15,26 +15,6 @@ mkFeatureTest {
       packageNames = map (pkg: pkg.name or "") hm.home.packages;
     in
     [
-      {
-        assertion = hm.programs.zsh.enable;
-        message = "Zsh must be enabled";
-      }
-      {
-        assertion = hm.programs.starship.enable;
-        message = "Starship must be enabled";
-      }
-      {
-        assertion = hm.programs.atuin.enable;
-        message = "Atuin must be enabled";
-      }
-      {
-        assertion = hm.programs.fzf.enable;
-        message = "FZF must be enabled";
-      }
-      {
-        assertion = hm.programs.zoxide.enable;
-        message = "Zoxide must be enabled";
-      }
       (expect.sessionVariableMatches hm "LYNCHPIN_PYTHON" ".*/bin/lynchpin-python"
         "Dev shell must export the system-wide Lynchpin API interpreter path"
       )

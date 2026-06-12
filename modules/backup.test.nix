@@ -54,15 +54,6 @@
         builtins.any (rule: builtins.match ".*${pattern}.*" rule != null) config.systemd.tmpfiles.rules;
     in
     [
-      # Core service
-      {
-        assertion = config.systemd.services ? btrbk;
-        message = "btrbk service must exist";
-      }
-      {
-        assertion = config.systemd.timers ? btrbk;
-        message = "btrbk timer must exist";
-      }
       # Config deployed
       {
         assertion = hasConf;

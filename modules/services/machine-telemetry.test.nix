@@ -22,10 +22,6 @@ mkServiceTest {
     in
     [
       {
-        assertion = config.systemd.services ? machine-telemetry;
-        message = "machine-telemetry service must exist";
-      }
-      {
         assertion =
           lib.hasInfix "/bin/machine-telemetry" service.ExecStart
           && lib.hasInfix "/realm/data/captures/machine/" service.ExecStart

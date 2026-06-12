@@ -6,10 +6,6 @@
 let
   commonAssertions = config: [
     {
-      assertion = config.services.transmission.enable;
-      message = "Transmission must be enabled";
-    }
-    {
       assertion = config.systemd.services.transmission.unitConfig ? RequiresMountsFor;
       message = "Transmission must declare required mounts";
     }

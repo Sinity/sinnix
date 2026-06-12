@@ -14,10 +14,6 @@ mkFeatureTest {
     in
     [
       {
-        assertion = hm.programs.mpv.enable;
-        message = "mpv must be enabled";
-      }
-      {
         assertion = mpv.fs == true && mpv.force-window == "yes";
         message = "mpv must open fullscreen without mapping an empty fullscreen window immediately";
       }

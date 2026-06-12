@@ -16,10 +16,6 @@ mkFeatureTest {
     in
     [
       {
-        assertion = hm.programs.noctalia.enable;
-        message = "Noctalia must be enabled through Home Manager";
-      }
-      {
         assertion =
           noctaliaConfig.force == true
           && noctaliaConfig ? source

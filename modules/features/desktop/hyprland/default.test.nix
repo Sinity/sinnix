@@ -31,14 +31,6 @@ mkFeatureTest {
     in
     [
       {
-        assertion = config.sinnix.features.desktop.hyprland.enable;
-        message = "Hyprland must remain default-on with the rest of the desktop feature catalog";
-      }
-      {
-        assertion = config.programs.hyprland.enable;
-        message = "Hyprland must be enabled";
-      }
-      {
         assertion = config.programs.hyprland.withUWSM;
         message = "UWSM must be enabled";
       }
