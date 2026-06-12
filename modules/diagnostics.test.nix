@@ -53,7 +53,12 @@
           lib.hasInfix "--user-unit" experimentScript
           && lib.hasInfix "systemd_user" experimentScript
           && lib.hasInfix "systemctl_show(unit, user=user)" experimentScript
-          && lib.hasInfix "unit.startswith(\"user:\")" experimentScript;
+          && lib.hasInfix "unit.startswith(\"user:\")" experimentScript
+          && lib.hasInfix "\"stdout_path\"" experimentScript
+          && lib.hasInfix "\"stdout.log\"" experimentScript
+          && lib.hasInfix "\"stderr_path\"" experimentScript
+          && lib.hasInfix "\"stderr.log\"" experimentScript
+          && lib.hasInfix "tee_stream" experimentScript;
         message = "machine-experiment-run must capture user-manager units without misclassifying them as system units";
       }
     ];

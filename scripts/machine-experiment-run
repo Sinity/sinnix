@@ -19,6 +19,7 @@ import platform
 import socket
 import subprocess
 import sys
+import threading
 import uuid
 from pathlib import Path
 from typing import Any
@@ -196,6 +197,35 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
+def tee_stream(stream: Any, log_file: Any, console: Any) -> None:
+    console_buffer = getattr(console, "buffer", console)
+    while True:
+        chunk = stream.read(1024 * 1024)
+        if not chunk:
+            break
+        log_file.write(chunk)
+        log_file.flush()
+        console_buffer.write(chunk)
+        console_buffer.flush()
+
+
+def run_workload(command: list[str], run_dir: Path) -> int:
+    stdout_path = run_dir / "stdout.log"
+    stderr_path = run_dir / "stderr.log"
+    with stdout_path.open("wb") as stdout_log, stderr_path.open("wb") as stderr_log:
+        proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        threads = [
+            threading.Thread(target=tee_stream, args=(proc.stdout, stdout_log, sys.stdout), daemon=True),
+            threading.Thread(target=tee_stream, args=(proc.stderr, stderr_log, sys.stderr), daemon=True),
+        ]
+        for thread in threads:
+            thread.start()
+        returncode = proc.wait()
+        for thread in threads:
+            thread.join()
+    return int(returncode)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=os.environ.get("MACHINE_EXPERIMENT_ROOT"))
@@ -245,19 +275,21 @@ def main() -> int:
         "service_profile": args.service_profile,
         "cache_profile": args.cache_profile,
         "notes": args.note,
+        "stdout_path": "stdout.log",
+        "stderr_path": "stderr.log",
         "started_at": utc_now(),
         "pre_state": observed_state(system_units, user_units),
     }
     write_json(run_dir / "started.json", manifest)
 
-    proc = subprocess.run(command, check=False)
+    exit_status = run_workload(command, run_dir)
 
     manifest["ended_at"] = utc_now()
-    manifest["exit_status"] = proc.returncode
+    manifest["exit_status"] = exit_status
     manifest["post_state"] = observed_state(system_units, user_units)
     write_json(run_dir / "manifest.json", manifest)
     print(run_dir)
-    return int(proc.returncode)
+    return exit_status
 
 
 if __name__ == "__main__":
