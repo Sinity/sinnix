@@ -199,6 +199,12 @@ in
       (lib.mkIf hostPrepared {
         services = {
           postgresql.dataDir = sinexPostgresDataDir;
+          # Compress full-page images in WAL: they dominate WAL volume on a
+          # write-hot database and the data dir sits on the wear-limited
+          # root SSD. lz4 is cheap CPU-wise and reload-safe. Keep
+          # full_page_writes on: the nodatacow @sinex subvol has no btrfs
+          # checksums, so FPW is the remaining torn-page defense.
+          postgresql.settings.wal_compression = "lz4";
 
           sinex = {
             enable = runtimeEnabled;
@@ -590,7 +596,14 @@ in
             sinexd = {
               restartIfChanged = false;
               stopIfChanged = false;
-              serviceConfig.TimeoutStopSec = lib.mkForce "10min";
+              # Bounded drain window, matching the NATS killPolicy convention.
+              # The previous 10min budget assumed a graceful WAL/material
+              # drain, but live stop evidence (2026-06-12, ~10 activations)
+              # shows sinexd ignores SIGTERM and keeps heartbeating until
+              # SIGKILL; every forced kill replayed cleanly via JetStream.
+              # 90s gives a fixed daemon time to drain once the upstream
+              # shutdown bug is fixed while bounding activation stalls.
+              serviceConfig.TimeoutStopSec = lib.mkForce "90s";
             };
           }
           (lib.genAttrs maintenanceTimerServiceNames (_: {

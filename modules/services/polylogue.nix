@@ -186,6 +186,7 @@ in
       systemd.user.services.polylogued.Service = {
         # Keep the soft reclaim threshold tight enough to protect the desktop,
         # but leave hard headroom for large catch-up insight refreshes.
+        IOAccounting = true;
         MemoryHigh = lib.mkForce "4G";
         MemoryMax = lib.mkForce "6G";
       };
@@ -209,6 +210,7 @@ in
           IOSchedulingClass = "idle";
           CPUWeight = 20;
           IOWeight = 20;
+          IOAccounting = true;
           # The index backup writes a large temporary SQLite copy before
           # compression. systemd accounts that page cache to the unit; the
           # first successful run peaked near 9.5 GiB despite a 6 GiB hard cap.

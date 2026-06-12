@@ -21,7 +21,7 @@ nix build .#<output>   # Build specific flake output
 
 ```
 # From inside the devshell (direnv allow or nix develop):
-nix flake check --no-build  # Fast pre-flight
+check --no-build            # Fast pre-flight; curated, sequential, eval-cache disabled
 test-vm                     # Test risky changes in QEMU VM first
 switch                      # Apply to live system (resource-scoped nh os switch)
 boot                        # Safer alternative: set boot default without immediate activation

@@ -102,8 +102,7 @@
         check: builtins.elem check.name expectedObservedSinexNames
       ) runtimeInventory.observedServices;
       observedByName =
-        name:
-        builtins.head (builtins.filter (check: check.name == name) runtimeInventory.observedServices);
+        name: builtins.head (builtins.filter (check: check.name == name) runtimeInventory.observedServices);
       natsService = config.systemd.services.nats.serviceConfig;
       postgresService = config.systemd.services.postgresql.serviceConfig;
       sinexPostgresDumpUnit = config.systemd.services.sinex-postgres-dump;
@@ -176,8 +175,12 @@
         message = "Long-running Sinex runtime services must not stop during desktop activation";
       }
       {
-        assertion = (serviceConfig "sinexd").TimeoutStopSec == "10min";
-        message = "sinexd must allow enough graceful stop time for WAL/material drains during activation";
+        assertion = (serviceConfig "sinexd").TimeoutStopSec == "90s";
+        message = "sinexd stop must be bounded: SIGTERM is currently ignored upstream, so a long budget only stalls activation before the inevitable SIGKILL";
+      }
+      {
+        assertion = config.services.postgresql.settings.wal_compression == "lz4";
+        message = "Sinex postgres must compress WAL full-page images: the data dir sits on the wear-limited root SSD and FPW images dominate WAL volume";
       }
       {
         assertion = builtins.all (
@@ -351,7 +354,9 @@
             && sinexSurface.observe.restartable == false
             && builtins.all (name: builtins.elem name observedServiceNames) expectedObservedSinexNames
             && sinexObservedServices != [ ]
-            && builtins.all (check: check.restartable == false && check.manager == "system") sinexObservedServices
+            && builtins.all (
+              check: check.restartable == false && check.manager == "system"
+            ) sinexObservedServices
             && (observedByName "sinex-runtime").kind == "target"
             && (observedByName "sinex-runtime").resourceClass == "capture-runtime"
             && (observedByName "sinexd").kind == "service"

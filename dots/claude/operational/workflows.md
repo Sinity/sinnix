@@ -48,7 +48,7 @@ python -m lynchpin.views.calendar_views build 2026-03-01 2026-03-07
 ```bash
 cd /realm/project/sinnix
 direnv allow                    # Activate devshell
-nix flake check --no-build      # Fast pre-flight: option types, coverage, assertions
+check --no-build                # Fast pre-flight: curated default checks, sequential
 ```
 
 All rebuild commands use `nh` with systemd-run containment (nice=10):

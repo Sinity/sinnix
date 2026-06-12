@@ -15,6 +15,7 @@
     let
       lib = pkgs.lib;
       scriptPkgs = (import ./scripts.nix { inherit inputs pkgs; }).packageSet;
+      checkTiers = import ./check-tiers.nix { inherit lib; };
       commandRegistry = import ./command-registry.nix {
         inherit inputs pkgs system;
       };
@@ -125,12 +126,39 @@
       devCommands = {
         check = pkgs.writeShellScriptBin "check" ''
           set -euo pipefail
+          ${resolveFlakeDir}
           exec 9>/tmp/sinnix-switch.lock
           if ! ${pkgs.util-linux}/bin/flock --nonblock 9; then
             echo "sinnix check: another heavy nix operation is already running — aborting to prevent thrashing" >&2
             exit 1
           fi
-          NIX_CONFIG="eval-cache = false" SINNIX_REBUILD_ACTIVE=1 exec ${scriptPkgs.nix-safe}/bin/nix-safe flake check "$@"
+
+          for arg in "$@"; do
+            case "$arg" in
+              --no-build)
+                ;;
+              *)
+                echo "sinnix check: unsupported argument '$arg'" >&2
+                echo "This command runs the curated default check tier sequentially; use nix directly for custom checks." >&2
+                exit 64
+                ;;
+            esac
+          done
+
+          default_targets=(
+            ${builtins.concatStringsSep "\n            " (
+              map (name: ''"checks.${system}.${name}"'') checkTiers.defaultCheckNames
+            )}
+          )
+
+          cd "$_flake_dir"
+          for target in "''${default_targets[@]}"; do
+            echo "Running default check: $target"
+            NIX_CONFIG="eval-cache = false" SINNIX_REBUILD_ACTIVE=1 \
+              ${scriptPkgs.nix-safe}/bin/nix-safe build "$_flake_dir#$target" --no-link
+          done
+
+          echo "Default check tier complete."
         '';
         format = pkgs.writeShellScriptBin "format" ''exec ${nix} fmt "$@"'';
         switch = mkNhCommand "switch" "switch";

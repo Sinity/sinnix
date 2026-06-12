@@ -59,6 +59,9 @@ let
       (expect.attrPathEq daemonService [
         "MemoryMax"
       ] "6G" "Polylogue daemon must keep hard memory headroom above its soft reclaim threshold")
+      (expect.attrPathEq daemonService [
+        "IOAccounting"
+      ] true "Polylogue daemon must expose cgroup IO counters for machine telemetry attribution")
       {
         assertion =
           lib.hasInfix "polylogue-sqlite-backup" backupExecStart
@@ -67,6 +70,7 @@ let
           && backupService.CPUWeight == 20
           && backupService.IOSchedulingClass == "idle"
           && backupService.IOWeight == 20
+          && backupService.IOAccounting == true
           && backupService.TimeoutStartSec == "2h"
           && backupService.MemoryHigh == "8G"
           && backupService.MemoryMax == "12G"

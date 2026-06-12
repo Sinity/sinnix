@@ -79,7 +79,10 @@
       Storage=persistent
       Compress=yes
       SyncIntervalSec=2min
-      SystemMaxUse=128G
+      # 32G bounds runaway log spam (~years at the measured ~0.3 GB/day;
+      # sinexd heartbeats are ~90 % of volume). The old 128G cap was
+      # effectively unbounded growth on the wear-limited root SSD.
+      SystemMaxUse=32G
       SystemKeepFree=10G
       SystemMaxFileSize=128M
       MaxFileSec=1week
