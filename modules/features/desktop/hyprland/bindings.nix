@@ -11,7 +11,7 @@ let
 in
 {
   bind = [
-    "SUPER, Return, exec, uwsm app -- kitty"
+    "SUPER, Return, exec, kitty --single-instance --instance-group terminal"
     "SUPER, Q, killactive"
     "SUPER, F, fullscreen, 0"
     # Launcher + lock are Noctalia surfaces (IPC).

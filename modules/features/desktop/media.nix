@@ -74,7 +74,7 @@ mkFeatureModule {
                 input-default-bindings = "no";
                 profile = "normal";
                 fs = true;
-                force-window = "immediate";
+                force-window = "yes";
                 hwdec = "no";
                 video-sync = "display-resample";
                 drm-vrr-enabled = "no";
