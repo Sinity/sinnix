@@ -18,6 +18,7 @@ nix build .#<output>   # Build specific flake output
 ```
 
 **Sinnix rebuild** — ALWAYS use the devshell commands (they wrap `nh` with idle CPU/IO scheduling):
+
 ```
 # From inside the devshell (direnv allow or nix develop):
 nix flake check --no-build  # Fast pre-flight

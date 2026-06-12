@@ -29,6 +29,7 @@ Compile and test wall-time dominates agent throughput on Rust/Python projects. R
 Tracked by the `verify_vs_edit_ratio` lynchpin MCP tool, which computes `verify_calls / edit_calls` per session from polylogue work events.
 
 **Targets**:
+
 - Refactors: ratio < 0.3
 - New features: ratio < 0.5
 - Bug fixes spanning >1 file: ratio < 0.7

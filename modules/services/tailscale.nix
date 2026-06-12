@@ -16,7 +16,9 @@
 let
   cfg = config.sinnix.services.tailscale;
   authKeyArg = "--auth-key=file:${cfg.authKeyFile}";
-  tagArg = lib.optionalString (cfg.tags != [ ]) "--advertise-tags=${lib.concatStringsSep "," cfg.tags}";
+  tagArg = lib.optionalString (
+    cfg.tags != [ ]
+  ) "--advertise-tags=${lib.concatStringsSep "," cfg.tags}";
   exitNodeArg = lib.optionalString cfg.enableExitNode "--advertise-exit-node";
 in
 {

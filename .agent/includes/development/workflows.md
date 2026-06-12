@@ -19,6 +19,7 @@ clean                               # nh clean all — garbage collect + optimis
 ```
 
 **For risky changes — test in VM first:**
+
 ```bash
 test-vm                            # Build QEMU VM, launch it, verify interactively
 switch                              # Apply to live system when confident
@@ -35,6 +36,7 @@ nix-tree                            # Interactive dependency browser (find rebui
 ### Pre-Flight Before Rebuild
 
 Always run `nix flake check --no-build` before `switch`. Catches:
+
 - Option type errors and missing required arguments
 - Coverage manifest consistency (services without coverage entries)
 - Runtime surface invariant violations (duplicate units, kind mismatches, unknown resource classes)
@@ -44,6 +46,7 @@ Always run `nix flake check --no-build` before `switch`. Catches:
 
 All three agent CLIs (Claude Code, Codex, Gemini) are FHS-bootstrapped via npm.
 No Nix rebuild is needed — each agent self-updates natively inside its FHS environment:
+
 - `claude update` updates `@anthropic-ai/claude-code` in `~/.local/state/claude-code/npm/`
 - `codex update` updates `@openai/codex` in `~/.local/state/codex/npm/`
 - `gemini update` updates `@google/gemini-cli` in `~/.local/state/gemini/npm/`

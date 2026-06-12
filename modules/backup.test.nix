@@ -93,13 +93,13 @@
         message = "btrbk config must keep /persist snapshots until the Borg drain deletes them";
       }
       {
-        assertion = !(config.services.borgbackup.jobs ? realm) && !(config.services.borgbackup.jobs ? persist);
+        assertion =
+          !(config.services.borgbackup.jobs ? realm) && !(config.services.borgbackup.jobs ? persist);
         message = "Borg snapshot drains must not use one-shot services.borgbackup.jobs latest-only wrappers";
       }
       {
         assertion =
-          builtins.match ".*BORG_REPO=file:///outer-realm/backup/borg-realm-v2.*" realmBorgUnit.script
-          != null
+          builtins.match ".*BORG_REPO=file:///outer-realm/backup/borg-realm-v2.*" realmBorgUnit.script != null
           &&
             builtins.match ".*BORG_REPO=file:///outer-realm/backup/borg-persist-v1.*" persistBorgUnit.script
             != null;
@@ -126,7 +126,9 @@
           && builtins.match ".*btrfs subvolume delete.*" realmBorgUnit.script != null
           && builtins.match ".*btrfs subvolume delete.*" persistBorgUnit.script != null
           && builtins.match ".*Last realm Borg drain.*seconds ago.*coalescing.*" realmBorgUnit.script != null
-          && builtins.match ".*Last persist Borg drain.*seconds ago.*coalescing.*" persistBorgUnit.script != null;
+          &&
+            builtins.match ".*Last persist Borg drain.*seconds ago.*coalescing.*" persistBorgUnit.script
+            != null;
         message = "Borg drains must archive the newest snapshot and delete snapshots covered by it after throttling";
       }
       {
@@ -212,7 +214,9 @@
           && builtins.match ".*borg prune --lock-wait 60.*" borgMaintenanceService.script != null
           && builtins.match ".*borg compact --lock-wait 60.*" borgMaintenanceService.script != null
           && builtins.match ".*--lock-wait 7200.*" borgMaintenanceService.script == null
-          && builtins.match ".*borg prune.*--keep-within 7d.*--keep-daily 60.*--keep-weekly 26.*--keep-monthly 24.*--keep-yearly 5.*" borgMaintenanceService.script != null
+          &&
+            builtins.match ".*borg prune.*--keep-within 7d.*--keep-daily 60.*--keep-weekly 26.*--keep-monthly 24.*--keep-yearly 5.*" borgMaintenanceService.script
+            != null
           && builtins.match ".*borg compact.*" borgMaintenanceService.script != null;
         message = "Borg retention maintenance must keep broad history without running compaction on every drain";
       }
@@ -269,7 +273,8 @@
           && builtins.match ".*rm -rf --one-file-system.*" rootSnapshotService.script != null
           && builtins.match ".*--exclude \"\\$snap_dir/nix\".*" rootSnapshotService.script != null
           && builtins.match ".*--exclude \"\\$snap_dir/swap\".*" rootSnapshotService.script != null
-          && builtins.match ".*--exclude \"\\$snap_dir/home/\\*/\\.cache\".*" rootSnapshotService.script != null
+          &&
+            builtins.match ".*--exclude \"\\$snap_dir/home/\\*/\\.cache\".*" rootSnapshotService.script != null
           && builtins.match ".*--exclude \"\\$snap_dir/var/cache\".*" rootSnapshotService.script != null
           && builtins.match ".*--lock-wait 60.*" rootSnapshotService.script != null
           && builtins.match ".*--lock-wait 7200.*" rootSnapshotService.script == null;

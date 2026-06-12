@@ -360,7 +360,9 @@ def process_io_delta_rows(
     return rows[:limit]
 
 
-def insert_process_io_deltas(conn: sqlite3.Connection, rows: list[dict[str, object]]) -> None:
+def insert_process_io_deltas(
+    conn: sqlite3.Connection, rows: list[dict[str, object]]
+) -> None:
     if not rows:
         return
     conn.executemany(
@@ -549,7 +551,9 @@ def cgroup_pressure_stats(
     }
 
 
-def insert_cgroup_io_stats(conn: sqlite3.Connection, rows: list[dict[str, object]]) -> None:
+def insert_cgroup_io_stats(
+    conn: sqlite3.Connection, rows: list[dict[str, object]]
+) -> None:
     if not rows:
         return
     conn.executemany(
@@ -768,7 +772,9 @@ def gpu_sampler_thread(
                 # the DB/probe path instead of the handle path. Log to stderr
                 # (captured by journald) and keep sampling; handle-level faults
                 # are recovered by the self-heal in gpu_metrics().
-                print(f"gpu-sampler: sample failed: {exc!r}", file=sys.stderr, flush=True)
+                print(
+                    f"gpu-sampler: sample failed: {exc!r}", file=sys.stderr, flush=True
+                )
             stop.wait(interval)
     finally:
         conn.close()

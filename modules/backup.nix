@@ -48,8 +48,7 @@ let
     };
 
   mkBorgExcludeArgs =
-    exclude:
-    lib.concatMapStringsSep " " (pattern: "--exclude ${lib.escapeShellArg pattern}") exclude;
+    exclude: lib.concatMapStringsSep " " (pattern: "--exclude ${lib.escapeShellArg pattern}") exclude;
 
   borgRetentionArgs = [
     "--keep-within"
