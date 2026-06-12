@@ -90,6 +90,8 @@
         exec ${pkgs.nix}/bin/nix "$@"
       '';
 
+      zramResetGuard = import ./zram-reset-guard.nix { inherit pkgs; };
+
       mkNhCommand =
         name: action:
         pkgs.writeShellScriptBin name ''
@@ -104,7 +106,8 @@
           rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-2}"
           rebuild_cores="''${SINNIX_REBUILD_CORES:-2}"
 
-          exec ${pkgs.systemd}/bin/systemd-run \
+          _rebuild_status=0
+          ${pkgs.systemd}/bin/systemd-run \
             --user \
             --quiet --collect --pipe --service-type=exec --wait \
             --setenv=PATH="${rebuildServicePath}:$PATH" \
@@ -119,7 +122,13 @@
               --no-nom \
               --max-jobs "$rebuild_jobs" \
               --cores "$rebuild_cores" \
-              "''${nix_override_args[@]}"
+              "''${nix_override_args[@]}" || _rebuild_status=$?
+
+          # Run the hygiene pass even when nh reports failure: transient
+          # activation errors still leave a fully-built generation behind,
+          # and the build is what fills zram.
+          ${zramResetGuard}
+          exit "$_rebuild_status"
         '';
 
       # Devshell command wrappers — every listed command is directly typeable

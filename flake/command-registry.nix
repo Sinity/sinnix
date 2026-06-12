@@ -52,6 +52,7 @@ let
     rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-2}"
     rebuild_cores="''${SINNIX_REBUILD_CORES:-2}"
   '';
+  zramResetGuard = import ./zram-reset-guard.nix { inherit pkgs; };
   hostSmokeTerminalScript = ''
     session="sinnix-host-smoke-$$"
     artifact_dir="''${SINNIX_HOST_SMOKE_ARTIFACT_DIR:-}"
@@ -374,6 +375,7 @@ in
         ${avoidRepoCwdForActivation}
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
+        _rebuild_status=0
         ${pkgs.systemd}/bin/systemd-run \
           --user \
           --quiet --collect --pipe --service-type=exec --wait \
@@ -385,7 +387,9 @@ in
             --no-nom \
             --max-jobs "$rebuild_jobs" \
             --cores "$rebuild_cores" \
-            "''${nix_override_args[@]}"
+            "''${nix_override_args[@]}" || _rebuild_status=$?
+        ${zramResetGuard}
+        exit "$_rebuild_status"
       '';
     };
 
@@ -396,6 +400,7 @@ in
         ${avoidRepoCwdForActivation}
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
+        _rebuild_status=0
         ${pkgs.systemd}/bin/systemd-run \
           --user \
           --quiet --collect --pipe --service-type=exec --wait \
@@ -407,7 +412,9 @@ in
             --no-nom \
             --max-jobs "$rebuild_jobs" \
             --cores "$rebuild_cores" \
-            "''${nix_override_args[@]}"
+            "''${nix_override_args[@]}" || _rebuild_status=$?
+        ${zramResetGuard}
+        exit "$_rebuild_status"
       '';
     };
 
