@@ -73,9 +73,6 @@ mkFeatureTest {
       (expect.textContains (managedEntryText
         hm.home.file.".local/bin/mcp-playwright"
       ) "/bin/playwright-mcp" "Playwright wrapper must launch the packaged server entrypoint")
-      (expect.textContains (managedEntrySource
-        hm.home.file.".local/bin/mcp-polylogue"
-      ) "/bin/mcp-polylogue" "Polylogue wrapper must point at the packaged binary")
       (expect.textContains (managedEntryText
         hm.home.file.".local/bin/mcp-polylogue"
       ) "/bin/polylogue-mcp" "Polylogue wrapper must launch the packaged MCP server entrypoint")

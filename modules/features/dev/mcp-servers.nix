@@ -126,9 +126,6 @@ mkFeatureModule {
         export PYTHONPATH="$LYNCHPIN_REPO_ROOT''${PYTHONPATH:+:$PYTHONPATH}"
         exec ${scriptPkgs.lynchpin-python}/bin/lynchpin-python -m lynchpin.mcp.cli "$@"
       '';
-      mcpPolylogueBin = mkMcpWrapper "mcp-polylogue" {
-        command = "${scriptPkgs.polylogue-cli}/bin/polylogue-mcp";
-      };
       inherit (mcpRegistry)
         selectClientServers
         renderCodexServer
@@ -219,8 +216,13 @@ mkFeatureModule {
               force = true;
             };
             ".local/bin/mcp-polylogue" = {
-              source = "${mcpPolylogueBin}/bin/mcp-polylogue";
+              executable = true;
               force = true;
+              text = ''
+                #!${pkgs.runtimeShell}
+                set -euo pipefail
+                exec ${scriptPkgs.polylogue-cli}/bin/polylogue-mcp "$@"
+              '';
             };
             ".local/share/polylogue/inbox/chatgpt" = {
               source = config.lib.file.mkOutOfStoreSymlink "/realm/data/exports/chatlog/raw/chatgpt";
