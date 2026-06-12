@@ -11,6 +11,8 @@ mkServiceTest {
     config:
     let
       service = config.systemd.services.machine-telemetry.serviceConfig;
+      dbScaffold = config.systemd.services.machine-telemetry-db-scaffold;
+      dbScaffoldScript = dbScaffold.script;
       # The collector body was extracted from this .nix into pkgs/machine-telemetry/collector.py.
       # Substring assertions need both files concatenated to keep covering the same surface.
       source =
@@ -24,9 +26,23 @@ mkServiceTest {
       {
         assertion =
           lib.hasInfix "/bin/machine-telemetry" service.ExecStart
-          && lib.hasInfix "/realm/data/captures/machine/" service.ExecStart
+          && lib.hasInfix "/realm/db/machine-telemetry/telemetry.sqlite" service.ExecStart
+          && lib.hasInfix "/realm/data/captures/machine/manifest.json" service.ExecStart
           && lib.hasInfix "telemetry.sqlite" service.ExecStart;
         message = "machine-telemetry must write the canonical machine telemetry SQLite stream";
+      }
+      {
+        assertion =
+          dbScaffold.before == [ "machine-telemetry.service" ]
+          && dbScaffold.requires == [ "realm.mount" ]
+          && lib.hasInfix "btrfs subvolume create /realm/db/machine-telemetry" dbScaffoldScript
+          && lib.hasInfix "chattr +C /realm/db/machine-telemetry" dbScaffoldScript
+          && lib.hasInfix "PRAGMA wal_checkpoint(TRUNCATE)" dbScaffoldScript
+          && lib.hasInfix "cp --reflink=never" dbScaffoldScript
+          && lib.hasInfix "telemetry.sqlite-wal" dbScaffoldScript
+          && lib.hasInfix "telemetry.sqlite-shm" dbScaffoldScript
+          && lib.hasInfix "ln -s /realm/db/machine-telemetry/telemetry.sqlite /realm/data/captures/machine/telemetry.sqlite" dbScaffoldScript;
+        message = "machine-telemetry SQLite must live in a nodatacow DB subvolume while preserving the legacy capture-path symlink";
       }
       {
         assertion =

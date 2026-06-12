@@ -13,11 +13,13 @@
   ...
 }@args:
 let
-  inherit (config.sinnix.paths) capturesRoot;
+  inherit (config.sinnix.paths) capturesRoot realmRoot;
   hostName = config.networking.hostName;
   dataRoot = "${capturesRoot}/machine";
   dataDir = dataRoot;
-  dbPath = "${dataDir}/telemetry.sqlite";
+  legacyDbPath = "${dataDir}/telemetry.sqlite";
+  dbRoot = "${realmRoot}/db/machine-telemetry";
+  dbPath = "${dbRoot}/telemetry.sqlite";
   manifestPath = "${dataDir}/manifest.json";
   username = config.sinnix.user.name;
 
@@ -100,11 +102,65 @@ mkServiceModule {
     in
     {
       systemd.tmpfiles.rules = [
+        "d ${realmRoot}/db 0755 root root -"
         "d ${dataRoot} 0755 root users -"
         "d ${dataDir}/boot 0750 root users -"
         "d ${dataDir}/experiments 0775 root users -"
         "d ${dataDir}/legacy 0775 root users -"
       ];
+
+      systemd.services.machine-telemetry-db-scaffold = {
+        description = "Create machine telemetry SQLite nodatacow subvolume";
+        requiredBy = [ "machine-telemetry.service" ];
+        before = [ "machine-telemetry.service" ];
+        requires = [ "realm.mount" ];
+        after = [ "realm.mount" ];
+        path = [
+          pkgs.btrfs-progs
+          pkgs.coreutils
+          pkgs.e2fsprogs
+          pkgs.sqlite
+        ];
+        serviceConfig.Type = "oneshot";
+        script = ''
+          install -d -m 0755 -o root -g root ${realmRoot}/db
+          install -d -m 0755 -o root -g users ${dataRoot}
+          if ! btrfs subvolume show ${lib.escapeShellArg dbRoot} >/dev/null 2>&1; then
+            btrfs subvolume create ${lib.escapeShellArg dbRoot}
+            chattr +C ${lib.escapeShellArg dbRoot} || true
+          fi
+          chown root:users ${lib.escapeShellArg dbRoot}
+          chmod 0755 ${lib.escapeShellArg dbRoot}
+          chattr +C ${lib.escapeShellArg dbRoot} || true
+
+          if [ -L ${lib.escapeShellArg legacyDbPath} ]; then
+            current="$(readlink ${lib.escapeShellArg legacyDbPath})"
+            if [ "$current" != ${lib.escapeShellArg dbPath} ]; then
+              echo "Refusing to replace unexpected machine telemetry DB symlink ${legacyDbPath} -> $current" >&2
+              exit 1
+            fi
+          elif [ -e ${lib.escapeShellArg legacyDbPath} ]; then
+            sqlite3 ${lib.escapeShellArg legacyDbPath} 'PRAGMA wal_checkpoint(TRUNCATE);'
+            for sidecar in ${lib.escapeShellArg "${legacyDbPath}-wal"} ${lib.escapeShellArg "${legacyDbPath}-shm"}; do
+              if [ -e "$sidecar" ]; then
+                echo "Refusing to migrate machine telemetry DB while SQLite sidecar exists: $sidecar" >&2
+                echo "Stop machine-telemetry and checkpoint/truncate WAL before running machine-telemetry-db-scaffold." >&2
+                exit 1
+              fi
+            done
+            if [ -e ${lib.escapeShellArg dbPath} ]; then
+              echo "Refusing to overwrite existing machine telemetry DB target ${dbPath}" >&2
+              exit 1
+            fi
+            cp --reflink=never --preserve=mode,ownership,timestamps ${lib.escapeShellArg legacyDbPath} ${lib.escapeShellArg "${dbPath}.tmp"}
+            mv ${lib.escapeShellArg "${dbPath}.tmp"} ${lib.escapeShellArg dbPath}
+            rm ${lib.escapeShellArg legacyDbPath}
+            ln -s ${lib.escapeShellArg dbPath} ${lib.escapeShellArg legacyDbPath}
+          elif [ -e ${lib.escapeShellArg dbPath} ]; then
+            ln -s ${lib.escapeShellArg dbPath} ${lib.escapeShellArg legacyDbPath}
+          fi
+        '';
+      };
 
       # Activation hook: append one JSONL line per NixOS generation
       # activation to ${dataDir}/generations.jsonl. Lynchpin reads this
