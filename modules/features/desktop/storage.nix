@@ -28,7 +28,6 @@ mkFeatureModule {
       home-manager.users.${user} = {
         home.packages = with pkgs; [
           gocryptfs
-          encfs
           cryptsetup
           scriptPkgs.encrypt-folder
           scriptPkgs.decrypt-folder
