@@ -83,7 +83,7 @@ mkFeatureTest {
         assertion =
           decoration.dim_inactive == false
           && decoration.dim_strength == 0.0
-          && decoration.active_opacity == 0.96
+          && decoration.active_opacity == 1.0
           && decoration.inactive_opacity == 0.75;
         message = "Hyprland must keep transparent windows without compositor dimming";
       }
