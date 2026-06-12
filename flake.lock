@@ -684,11 +684,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1781257678,
-        "narHash": "sha256-TE2+82hYpmkWrG2Eo6FQXg/fIOW9B1NyaYkYiyvzVVk=",
+        "lastModified": 1781271746,
+        "narHash": "sha256-EiUxtNpbV6fI/WGzdmkNvgMZI0qNzIdOQ3DCVgqQPyc=",
         "ref": "master",
-        "rev": "4437853f69f1303a62a72ddef1641bb394c96f60",
-        "revCount": 1690,
+        "rev": "6469af1d6a4c4507ec14c9be29fd75d33c24957c",
+        "revCount": 1692,
         "type": "git",
         "url": "file:///realm/project/sinity-lynchpin"
       },
@@ -1113,11 +1113,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1781223729,
-        "narHash": "sha256-MLYbFGtocaOZPY5B/fX5ucaekxOhGllQw6beYQhLRGo=",
+        "lastModified": 1781271538,
+        "narHash": "sha256-QBWEv6slZdG2bFPrULbUNf9fxGjlOgkSKFFlD/dPCTQ=",
         "ref": "fix/dlq-bisect-program-limit",
-        "rev": "749bc88f201ba9d4c64d9493aed7185be796247f",
-        "revCount": 1045,
+        "rev": "1f0afe709cccdaa0636132a3f6c6763cc615005f",
+        "revCount": 1046,
         "type": "git",
         "url": "https://github.com/Sinity/sinex"
       },
