@@ -180,6 +180,106 @@ def observed_state(system_units: list[str], user_units: list[str]) -> dict[str, 
     }
 
 
+_QUIET_IO_FULL_AVG10_MAX = 2.0
+_QUIET_IO_SOME_AVG10_MAX = 5.0
+_QUIET_MEMORY_FULL_AVG10_MAX = 1.0
+_QUIET_ZRAM_ORIG_BYTES_MAX = 1024 * 1024 * 1024
+# Maintenance writers that invalidate a quiesced benchmark window.
+_QUIET_BLOCKING_UNITS = [
+    "btrbk.service",
+    "borgbackup-job-persist.service",
+    "borgbackup-job-realm.service",
+    "borgbackup-maintenance.service",
+    "borgbackup-check.service",
+    "btrfs-scrub--.service",
+    "btrfs-scrub-realm.service",
+    "btrfs-scrub-outer\\x2drealm.service",
+]
+# Heavy user-manager scope prefixes (agents, builds) that mean the box is
+# not actually idle no matter what instantaneous PSI says.
+_QUIET_BLOCKING_SCOPE_PREFIXES = ("sinnix-agent-", "sinnix-build-", "sinnix-nix-build-")
+
+
+def _psi_avg10(path: str, line_kind: str) -> float | None:
+    text = read_text(path)
+    if text is None:
+        return None
+    for line in text.splitlines():
+        if line.startswith(line_kind):
+            for field in line.split():
+                if field.startswith("avg10="):
+                    return float(field.removeprefix("avg10="))
+    return None
+
+
+def _own_scope() -> str | None:
+    text = read_text("/proc/self/cgroup")
+    if text is None:
+        return None
+    leaf = text.strip().rsplit("/", 1)[-1]
+    return leaf or None
+
+
+def _active_heavy_scopes() -> list[str]:
+    out = run_stdout(
+        ["systemctl", "--user", "list-units", "--type=scope", "--state=active", "--plain", "--no-legend"],
+        timeout=5.0,
+    )
+    if out is None:
+        return []
+    own = _own_scope()
+    scopes = []
+    for line in out.splitlines():
+        name = line.split()[0] if line.split() else ""
+        if name.startswith(_QUIET_BLOCKING_SCOPE_PREFIXES) and name != own:
+            scopes.append(name)
+    return scopes
+
+
+def quiet_state() -> dict[str, Any]:
+    """Assess whether the box is quiet enough for a clean benchmark window.
+
+    Returns the measured conditions plus a list of violations; an empty
+    violations list means the window is certifiably quiet. The result is
+    recorded in the manifest so each experiment carries its own evidence
+    of (non-)quiescence.
+    """
+    io_full = _psi_avg10("/proc/pressure/io", "full")
+    io_some = _psi_avg10("/proc/pressure/io", "some")
+    memory_full = _psi_avg10("/proc/pressure/memory", "full")
+    zram_raw = read_text("/sys/block/zram0/mm_stat")
+    zram_orig = int(zram_raw.split()[0]) if zram_raw else None
+    active_blocking = [
+        unit
+        for unit in _QUIET_BLOCKING_UNITS
+        if run_stdout(["systemctl", "is-active", unit], timeout=5.0) == "active"
+    ]
+    heavy_scopes = _active_heavy_scopes()
+
+    violations: list[str] = []
+    if io_full is None or io_full >= _QUIET_IO_FULL_AVG10_MAX:
+        violations.append(f"io_psi_full_avg10={io_full} (max {_QUIET_IO_FULL_AVG10_MAX})")
+    if io_some is None or io_some >= _QUIET_IO_SOME_AVG10_MAX:
+        violations.append(f"io_psi_some_avg10={io_some} (max {_QUIET_IO_SOME_AVG10_MAX})")
+    if memory_full is None or memory_full >= _QUIET_MEMORY_FULL_AVG10_MAX:
+        violations.append(f"memory_psi_full_avg10={memory_full} (max {_QUIET_MEMORY_FULL_AVG10_MAX})")
+    if zram_orig is not None and zram_orig > _QUIET_ZRAM_ORIG_BYTES_MAX:
+        violations.append(f"zram_orig_bytes={zram_orig} (max {_QUIET_ZRAM_ORIG_BYTES_MAX})")
+    violations.extend(f"active_maintenance_unit={unit}" for unit in active_blocking)
+    violations.extend(f"active_heavy_scope={scope}" for scope in heavy_scopes)
+
+    return {
+        "io_psi_full_avg10": io_full,
+        "io_psi_some_avg10": io_some,
+        "memory_psi_full_avg10": memory_full,
+        "zram_orig_bytes": zram_orig,
+        "active_maintenance_units": active_blocking,
+        "active_heavy_scopes": heavy_scopes,
+        "violations": violations,
+        "quiet": not violations,
+    }
+
+
 def load_json_arg(value: str | None) -> dict[str, Any]:
     if not value:
         return {}
@@ -241,12 +341,30 @@ def main() -> int:
     )
     parser.add_argument("--user-unit", action="append", default=[], help="user-manager unit to snapshot")
     parser.add_argument("--note", action="append", default=[])
+    parser.add_argument(
+        "--require-quiet",
+        action="store_true",
+        help="refuse to run unless the box is quiesced (PSI, backups, agent/build scopes); records the proven-quiet conditions in the manifest",
+    )
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
 
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         raise SystemExit("missing workload command after --")
+
+    pre_quiet: dict[str, Any] | None = None
+    if args.require_quiet:
+        pre_quiet = quiet_state()
+        if not pre_quiet["quiet"]:
+            for violation in pre_quiet["violations"]:
+                print(f"machine-experiment-run: not quiet: {violation}", file=sys.stderr)
+            print(
+                "machine-experiment-run: refusing to start (--require-quiet); "
+                "stop the listed work or wait for it to drain",
+                file=sys.stderr,
+            )
+            return 75
 
     host = socket.gethostname()
     root = Path(args.root) if args.root else Path("/realm/data/captures/machine") / "experiments"
@@ -280,6 +398,8 @@ def main() -> int:
         "started_at": utc_now(),
         "pre_state": observed_state(system_units, user_units),
     }
+    if pre_quiet is not None:
+        manifest["quiet_check"] = {"required": True, "pre": pre_quiet}
     write_json(run_dir / "started.json", manifest)
 
     exit_status = run_workload(command, run_dir)
@@ -287,6 +407,11 @@ def main() -> int:
     manifest["ended_at"] = utc_now()
     manifest["exit_status"] = exit_status
     manifest["post_state"] = observed_state(system_units, user_units)
+    if pre_quiet is not None:
+        # Re-check after the workload: a window that *stayed* quiet is the
+        # actual evidence a benchmark was unconfounded, not just that it
+        # started clean.
+        manifest["quiet_check"]["post"] = quiet_state()
     write_json(run_dir / "manifest.json", manifest)
     print(run_dir)
     return exit_status

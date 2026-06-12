@@ -61,5 +61,14 @@
           && lib.hasInfix "tee_stream" experimentScript;
         message = "machine-experiment-run must capture user-manager units without misclassifying them as system units";
       }
+      {
+        assertion =
+          lib.hasInfix "--require-quiet" experimentScript
+          && lib.hasInfix "def quiet_state" experimentScript
+          && lib.hasInfix "active_heavy_scope" experimentScript
+          && lib.hasInfix "\"quiet_check\"" experimentScript
+          && lib.hasInfix "return 75" experimentScript;
+        message = "machine-experiment-run must support a quiesced-benchmark gate that refuses dirty windows and records proven-quiet conditions";
+      }
     ];
 }
