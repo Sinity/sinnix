@@ -30,12 +30,10 @@ post_hook = "pkill -SIGUSR1 nvim >/dev/null 2>&1 || true"
 [wallpaper]
 enabled = true
 directory = "/home/sinity/wallpaper"
-transition = ["fade"]
-transition_duration = 800
 
 [wallpaper.automation]
 enabled = true
-interval_seconds = 1800
+interval_seconds = 120
 order = "random"
 recursive = true
 

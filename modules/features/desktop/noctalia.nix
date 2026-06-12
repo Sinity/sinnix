@@ -37,9 +37,15 @@ mkFeatureModule {
     {
       home-manager.users.${user} =
         {
+          config,
+          lib,
+          mkDotsFileFor,
           pkgs,
           ...
         }:
+        let
+          mkDotsFile = mkDotsFileFor config;
+        in
         {
           imports = [ inputs.noctalia.homeModules.default ];
 
@@ -58,6 +64,21 @@ mkFeatureModule {
             linux-wallpaperengine # animated wallpaper engine (controller plugin)
             wlr-randr # display-settings plugin (read-only on Hyprland)
           ];
+
+          # Noctalia persists interactive settings in XDG_STATE_HOME but still
+          # reloads config.toml. Force this one mutable file back to the repo
+          # symlink because the upstream HM module also declares it.
+          xdg.configFile."noctalia/config.toml" = {
+            source = mkDotsFile "/noctalia/config.toml";
+            force = lib.mkForce true;
+          };
+
+          home.activation.reconcileNoctaliaState = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+            settings="''${XDG_STATE_HOME:-$HOME/.local/state}/noctalia/settings.toml"
+            if [ -f "$settings" ]; then
+              ${pkgs.perl}/bin/perl -0pi -e 's/(\[wallpaper\.automation\][^\[]*?interval_seconds\s*=\s*)\d+/''${1}${toString 120}/s' "$settings"
+            fi
+          '';
 
           # Point Noctalia's lock at the dedicated PAM service below (avoids the
           # NixOS "PAM file not generated" gotcha; otherwise it probes login).

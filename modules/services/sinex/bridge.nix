@@ -477,13 +477,17 @@ in
             # home-manager activation calls chmod 700 /home/${targetUserName}
             # which maps the group bits to the POSIX ACL mask, resetting
             # mask::--x → mask::--- and nullifying sinex's traverse grant.
-            # Re-run sinex-desktop-target-access after each home-manager run
-            # so the mask is restored immediately.
+            # Re-run the generated desktop access repair after each
+            # home-manager run so the mask is restored immediately. Execute
+            # the helper directly instead of restarting its systemd unit:
+            # the helper is ordered Before=sinexd.service, and restarting
+            # that unit during activation pulls sinexd into a restart
+            # transaction even when sinexd itself has X-RestartIfChanged=false.
             ${homeManagerServiceName} = {
               # The `+` prefix runs this command as root regardless of the
-              # service user, which has no privilege to restart system services.
+              # service user, which has no privilege to repair user ACLs.
               serviceConfig.ExecStartPost = lib.mkAfter [
-                "+${pkgs.systemd}/bin/systemctl restart --no-block sinex-desktop-target-access.service"
+                "+${config.systemd.services.sinex-desktop-target-access.serviceConfig.ExecStart}"
               ];
             };
             sinexd = {
@@ -509,6 +513,10 @@ in
         ];
         systemd.targets.sinex-runtime = {
           description = lib.mkForce "Delayed automatic Sinex runtime";
+          unitConfig = {
+            X-RestartIfChanged = false;
+            X-StopIfChanged = false;
+          };
           # extraAfter declares ordering against network-online.target; pair
           # it with wants so systemd doesn't emit an unfulfilled-ordering
           # warning at evaluation time.

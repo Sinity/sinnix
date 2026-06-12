@@ -122,6 +122,13 @@
       serviceWants = name: lib.attrByPath [ "systemd" "services" name "wants" ] [ ] config;
       serviceAfter = name: lib.attrByPath [ "systemd" "services" name "after" ] [ ] config;
       serviceBefore = name: lib.attrByPath [ "systemd" "services" name "before" ] [ ] config;
+      homeManagerExecStartPost = lib.attrByPath [
+        "systemd"
+        "services"
+        "home-manager-${config.sinnix.user.name}"
+        "serviceConfig"
+        "ExecStartPost"
+      ] [ ] config;
       targetAccessServices = [
         "sinex-browser-target-access"
         "sinex-desktop-target-access"
@@ -240,8 +247,20 @@
       {
         assertion =
           (targetUnitConfig "sinex-runtime").X-OnlyManualStart == true
+          && (targetUnitConfig "sinex-runtime").X-RestartIfChanged == false
+          && (targetUnitConfig "sinex-runtime").X-StopIfChanged == false
           && (targetUnit "sinex-runtime").description == "Delayed automatic Sinex runtime";
         message = "sinex-runtime.target must keep the activation guard while describing timer-based auto-start";
+      }
+      {
+        assertion =
+          builtins.any (command: lib.hasInfix "sinex-desktop-target-access" command) homeManagerExecStartPost
+          && builtins.all (
+            command:
+            !(lib.hasInfix "systemctl restart" command)
+            && !(lib.hasInfix "sinex-desktop-target-access.service" command)
+          ) homeManagerExecStartPost;
+        message = "Home Manager activation must repair Sinex desktop ACLs without restarting a Before=sinexd unit";
       }
       {
         assertion = builtins.all (

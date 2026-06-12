@@ -14,6 +14,8 @@ mkFeatureTest {
       binds = hm.wayland.windowManager.hyprland.settings.bind or [ ];
       dwindle = hm.wayland.windowManager.hyprland.settings.dwindle or { };
       debug = hm.wayland.windowManager.hyprland.settings.debug or { };
+      render = hm.wayland.windowManager.hyprland.settings.render or { };
+      decoration = hm.wayland.windowManager.hyprland.settings.decoration or { };
       hyprConfig = hm.xdg.configFile."hypr/hyprland.conf" or { };
       hyprExtraConfig = hm.wayland.windowManager.hyprland.extraConfig or "";
       protectedUWSMUnits = [
@@ -72,6 +74,22 @@ mkFeatureTest {
           lib.hasInfix "source = ~/.config/hypr/noctalia.conf" hyprExtraConfig
           && hm.home.activation ? seedNoctaliaHyprlandTheme;
         message = "Hyprland must consume Noctalia's generated theme without Home Manager owning the generated file";
+      }
+      {
+        assertion = hm.services.hyprpaper.enable == false;
+        message = "Noctalia owns wallpaper, so Hyprland must not start hyprpaper";
+      }
+      {
+        assertion =
+          decoration.dim_inactive == false
+          && decoration.dim_strength == 0.0
+          && decoration.active_opacity == 0.96
+          && decoration.inactive_opacity == 0.75;
+        message = "Hyprland must keep transparent windows without compositor dimming";
+      }
+      {
+        assertion = render.use_fp16 == false;
+        message = "Hyprland HDR output must keep FP16 disabled to avoid wallpaper-change dimming";
       }
       {
         assertion = builtins.any (bind: bind == "SUPER, Y, layoutmsg, togglesplit") binds;

@@ -248,12 +248,21 @@ in
                 enable_stdout_logs = false;
               };
 
+              render = {
+                # On the AORUS FO48U HDR path, Hyprland's default FP16 render
+                # path can leave the whole output visually dim after Noctalia
+                # wallpaper changes. The F3 ASBL pulse only fixes the state
+                # when it leaves this disabled, so make that runtime state
+                # persistent instead of depending on the pulse side effect.
+                use_fp16 = false;
+              };
+
               decoration = {
                 rounding = 10;
-                active_opacity = 1.0;
-                inactive_opacity = 0.96;
-                dim_inactive = true;
-                dim_strength = 0.03;
+                active_opacity = 0.96;
+                inactive_opacity = 0.75;
+                dim_inactive = false;
+                dim_strength = 0.0;
 
                 blur = {
                   enabled = true;
@@ -305,6 +314,8 @@ in
                 ${extra}
               '';
           };
+
+          services.hyprpaper.enable = lib.mkForce false;
 
           xdg.configFile."hypr/hyprland.conf" = {
             force = true;

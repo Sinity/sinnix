@@ -60,7 +60,12 @@ Use scopes (`fix(cli): ...`) when the repo is large enough that scope adds clari
 
 ### Branching
 
-- **All code lands via PRs** to default. No direct pushes to `master`/`main` — the PR flow enforces `(#N)`, reviews, CI gating, history navigability. Even on solo repos.
+- **All product/project code lands via PRs** to default. No direct pushes to
+  `master`/`main` — the PR flow enforces `(#N)`, reviews, CI gating, history
+  navigability. This applies to repos such as Sinex, Polylogue, and Lynchpin.
+  **Sinnix is the exception:** it is the operator's live system configuration
+  repo, so work may be committed and pushed directly on `master` after local
+  verification and successful deployment.
 - **Feature branches start from fresh `origin/master`.** `git fetch --all` first.
 - **Name:** `feature/<type>/<short-dash-separated-desc>` (lowercase, no dates/initials/ticket-nums in branch names — those go in commits/PR body).
 - **Rebase, don't merge** when syncing feature branches from master. Global config sets `pull.rebase = true` and `rebase.autoStash = true`.
@@ -232,7 +237,10 @@ Even in auto mode, state specifically what will happen and pause:
 - Deleting branches/worktrees/stashes/tags
 - `git clean -fd`
 
-Never force-push to shared branches without agreement. Never push to `master` / `main` directly — the PR flow is the enforcement surface.
+Never force-push to shared branches without agreement. Never push to `master` /
+`main` directly in product/project repos — the PR flow is the enforcement
+surface. Sinnix is intentionally operated directly on `master`; do not invent a
+branch/PR boundary there unless explicitly requested.
 
 **Force-push alternatives:** before reaching for `--force-with-lease`, ask if a non-destructive path works. Amending your own feature branch: fine. Fixing a typo in a recent master commit: _don't_ — live with it; history isn't worth rewriting over one character. Adding missing `(#N)` to one commit: don't — fix the process, accept the miss.
 
