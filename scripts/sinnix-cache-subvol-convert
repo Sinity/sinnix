@@ -1,0 +1,173 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Convert persisted home cache into a nodatacow Btrfs subvolume
+# runtimeInputs: bash btrfs-progs coreutils e2fsprogs findutils gnugrep util-linux
+
+set -euo pipefail
+
+usage() {
+  cat >&2 <<'EOF'
+usage: sinnix-cache-subvol-convert [--status] [--yes --discard-existing]
+                                    [--path PATH] [--owner USER:GROUP]
+
+Convert the persisted home cache source directory into a nested Btrfs
+subvolume with chattr +C, so cache churn stops riding the snapshotted
+/persist tree.
+
+Default path: /persist/home/sinity/.cache
+
+The command is intentionally guarded. Without --yes it only reports what would
+happen. Existing cache contents are deleted only with --discard-existing.
+EOF
+}
+
+cache_path=/persist/home/sinity/.cache
+owner=sinity:users
+status_only=0
+confirm=0
+discard_existing=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --path)
+      cache_path="$2"
+      shift 2
+      ;;
+    --owner)
+      owner="$2"
+      shift 2
+      ;;
+    --status)
+      status_only=1
+      shift
+      ;;
+    --yes)
+      confirm=1
+      shift
+      ;;
+    --discard-existing)
+      discard_existing=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage
+      exit 64
+      ;;
+  esac
+done
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "sinnix-cache-subvol-convert: run as root" >&2
+  exit 77
+fi
+
+if ! findmnt -T "$cache_path" >/dev/null 2>&1; then
+  echo "sinnix-cache-subvol-convert: $cache_path is not on a mounted filesystem" >&2
+  exit 69
+fi
+
+parent="$(dirname "$cache_path")"
+name="$(basename "$cache_path")"
+
+if btrfs subvolume show "$cache_path" >/dev/null 2>&1; then
+  chattr +C "$cache_path" || true
+  chown "$owner" "$cache_path"
+  chmod 0700 "$cache_path"
+  echo "$cache_path is already a Btrfs subvolume with nodatacow requested"
+  exit 0
+fi
+
+if [ "$status_only" -eq 1 ]; then
+  echo "$cache_path is not a Btrfs subvolume"
+  if [ -e "$cache_path" ]; then
+    du -shx "$cache_path" 2>/dev/null || true
+  fi
+  exit 1
+fi
+
+if [ "$confirm" -ne 1 ]; then
+  echo "$cache_path is not a Btrfs subvolume." >&2
+  if [ -e "$cache_path" ]; then
+    du -shx "$cache_path" >&2 || true
+  fi
+  echo "Re-run with --yes --discard-existing to replace it with an empty nodatacow subvolume." >&2
+  exit 64
+fi
+
+mount_target="$(findmnt -T "$cache_path" --noheadings --output TARGET | head -n 1)"
+mount_source="$(findmnt -T "$cache_path" --noheadings --output SOURCE | head -n 1)"
+source_subpath="${mount_source##*[}"
+if [ "$source_subpath" != "$mount_source" ]; then
+  source_subpath="${source_subpath%]}"
+else
+  source_subpath=
+fi
+
+active_sources=
+if [ -n "$source_subpath" ]; then
+  case "$cache_path" in
+    "$mount_target")
+      source_needle="[$source_subpath]"
+      ;;
+    "$mount_target"/*)
+      rel_path="${cache_path#"$mount_target"/}"
+      source_needle="[$source_subpath/$rel_path]"
+      ;;
+    *)
+      source_needle=
+      ;;
+  esac
+  if [ -n "${source_needle:-}" ]; then
+    active_sources="$(
+      findmnt --raw --noheadings --output TARGET,SOURCE \
+        | grep -F "$source_needle" \
+        | grep -v "^$cache_path " \
+        || true
+    )"
+  fi
+fi
+if [ -n "$active_sources" ]; then
+  echo "$cache_path is an active mount source:" >&2
+  echo "$active_sources" >&2
+  echo "Stop the user session or unmount the bind target before conversion." >&2
+  exit 75
+fi
+
+if [ -e "$cache_path" ] && [ "$discard_existing" -ne 1 ]; then
+  echo "Existing cache contents are present at $cache_path." >&2
+  echo "Use --discard-existing to delete them during conversion." >&2
+  exit 64
+fi
+
+install -d -m 0700 "$parent"
+
+tmp_old=
+cleanup_old() {
+  if [ -n "${tmp_old:-}" ] && [ -e "$tmp_old" ]; then
+    rm -rf --one-file-system "$tmp_old"
+  fi
+}
+trap cleanup_old EXIT
+
+if [ -e "$cache_path" ]; then
+  tmp_old="$parent/${name}.pre-subvol.$(date -u +%Y%m%dT%H%M%SZ)"
+  mv "$cache_path" "$tmp_old"
+fi
+
+btrfs subvolume create "$cache_path"
+chattr +C "$cache_path" || true
+chown "$owner" "$cache_path"
+chmod 0700 "$cache_path"
+
+if [ -n "${tmp_old:-}" ]; then
+  # Cache is explicitly disposable. Keeping a renamed copy under /persist would
+  # keep the same snapshot/write-amplification problem alive.
+  rm -rf --one-file-system "$tmp_old"
+  tmp_old=
+fi
+
+echo "Converted $cache_path to an empty nodatacow Btrfs subvolume"

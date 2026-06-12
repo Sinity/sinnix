@@ -6,11 +6,13 @@
   pkgs,
   lib,
   config,
+  helpers,
   ...
 }:
 let
   username = config.sinnix.user.name;
   realmRoot = config.sinnix.paths.realmRoot;
+  scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   userCfg = lib.attrByPath [ "users" "users" username ] config { };
   primaryGroupName = userCfg.group or "users";
   trashUid = if (userCfg.uid or null) != null then toString userCfg.uid else "1000";
@@ -30,6 +32,7 @@ let
     lvm2
     xfsprogs
     e2fsprogs
+    scriptPkgs.sinnix-cache-subvol-convert
   ];
 in
 {
