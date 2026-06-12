@@ -12,7 +12,6 @@
 let
   username = config.sinnix.user.name;
   inherit (config.sinnix) paths;
-  inherit (config.sinnix.machine) isDesktop;
 in
 {
   config = {
@@ -63,18 +62,6 @@ in
       enable = true;
       allowPing = true;
       allowedTCPPorts = [ 22 ];
-      allowedTCPPortRanges = lib.optionals isDesktop [
-        {
-          from = 1714;
-          to = 1764;
-        }
-      ];
-      allowedUDPPortRanges = lib.optionals isDesktop [
-        {
-          from = 1714;
-          to = 1764;
-        }
-      ];
     };
 
     systemd = {

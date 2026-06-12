@@ -191,10 +191,6 @@ in
       ".local/share/weechat" # logs
 
       # Peripherals
-      {
-        directory = ".config/kdeconnect";
-        mode = "0700";
-      } # device pairing certs
       ".config/solaar" # Logitech device config
 
       # Torrent
