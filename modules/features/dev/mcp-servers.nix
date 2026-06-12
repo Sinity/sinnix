@@ -119,13 +119,6 @@ mkFeatureModule {
           exec ${scriptPkgs.mcp-chrome-devtools}/bin/mcp-chrome-devtools "$@"
         fi
       '';
-      mcpLynchpinBin = pkgs.writeShellScriptBin "mcp-lynchpin" ''
-        set -euo pipefail
-        export LYNCHPIN_REPO_ROOT=/realm/project/sinity-lynchpin
-        export LYNCHPIN_LOCAL_ROOT=/realm/project/sinity-lynchpin/.lynchpin
-        export PYTHONPATH="$LYNCHPIN_REPO_ROOT''${PYTHONPATH:+:$PYTHONPATH}"
-        exec ${scriptPkgs.lynchpin-python}/bin/lynchpin-python -m lynchpin.mcp.cli "$@"
-      '';
       inherit (mcpRegistry)
         selectClientServers
         renderCodexServer
@@ -212,8 +205,16 @@ mkFeatureModule {
               force = true;
             };
             ".local/bin/mcp-lynchpin" = {
-              source = "${mcpLynchpinBin}/bin/mcp-lynchpin";
+              executable = true;
               force = true;
+              text = ''
+                #!${pkgs.runtimeShell}
+                set -euo pipefail
+                export LYNCHPIN_REPO_ROOT=/realm/project/sinity-lynchpin
+                export LYNCHPIN_LOCAL_ROOT=/realm/project/sinity-lynchpin/.lynchpin
+                export PYTHONPATH="$LYNCHPIN_REPO_ROOT''${PYTHONPATH:+:$PYTHONPATH}"
+                exec ${scriptPkgs.lynchpin-python}/bin/lynchpin-python -m lynchpin.mcp.cli "$@"
+              '';
             };
             ".local/bin/mcp-polylogue" = {
               executable = true;
