@@ -96,11 +96,21 @@ let
 in
 {
   config = lib.mkIf config.sinnix.machine.isDesktop {
-    # zram intentionally disabled (2026-06-07): it filled (memoryPercent=50) yet
-    # the box still spilled ~9 GiB to the disk swapfile, so it was not preventing
-    # disk paging. Policy is now "keep anon resident (low swappiness + reclaim
-    # cache first); a tiny disk swap is an OOM cushion only".
-    zramSwap.enable = false;
+    # zram is the ONLY swap on this host (2026-06-12): both disk swapfiles were
+    # deleted (see hosts/sinnix-prime/storage.nix). The 2026-06-07 zram failure
+    # was a swappiness=60 + disk-spill problem — zram filled, then anon still
+    # paged to the disk swapfile. With swappiness=10 AND no disk swap to spill
+    # to, that path is gone: this small RAM-backed (zstd-compressed) cushion
+    # absorbs sub-second allocation spikes without touching either SSD, and
+    # earlyoom fires on the memory threshold before it saturates. Capped at 4 GiB
+    # so it can never grow into a large pressure sink that delays earlyoom.
+    zramSwap = {
+      enable = true;
+      algorithm = "zstd";
+      memoryPercent = 50;
+      memoryMax = 4 * 1024 * 1024 * 1024; # hard cap → effective size = 4 GiB
+      priority = 100;
+    };
 
     systemd.settings.Manager.StatusUnitFormat = "name";
 
@@ -191,9 +201,10 @@ in
       # 15% of 32 GiB = ~5 GiB free — kills misbehaving processes while the
       # system is still responsive. Swap is a last-ditch cushion, not a sink.
       freeMemThreshold = 15;
-      # Fire as soon as swap starts filling — 90% free on 8 GiB = 800 MiB used.
-      # Combined with the memory threshold this ensures earlyoom acts on memory
-      # pressure alone, not after swap has been churned.
+      # Fire as soon as the zram cushion starts filling — 90% free on the 4 GiB
+      # zram = ~400 MiB used. Combined with the memory threshold this ensures
+      # earlyoom acts on memory pressure alone, before the compressed cushion is
+      # churned (and there is no disk swap to fall back to).
       freeSwapThreshold = 90;
       extraArgs = [
         "--prefer"

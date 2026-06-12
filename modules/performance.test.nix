@@ -61,8 +61,15 @@
     in
     [
       {
-        assertion = !config.zramSwap.enable;
-        message = "zram is intentionally disabled (2026-06-07); keep anon resident via low swappiness + cache reclaim, with a tiny disk swap as OOM cushion only";
+        assertion =
+          config.zramSwap.enable
+          && config.zramSwap.algorithm == "zstd"
+          && config.zramSwap.memoryMax == 4 * 1024 * 1024 * 1024;
+        message = "zram is the only swap (2026-06-12): a 4 GiB zstd cushion, no disk swap; earlyoom + cgroup caps prevent freezes";
+      }
+      {
+        assertion = config.swapDevices == [ ];
+        message = "no disk swap on this host: both swapfiles deleted 2026-06-12; zram-only";
       }
       {
         assertion = config.systemd.oomd.enable && config.services.earlyoom.enable;

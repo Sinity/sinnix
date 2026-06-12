@@ -16,17 +16,16 @@ let
   primaryGroupName = config.users.users.${username}.group;
   polylogueArchiveRoot = "${capturesRoot}/polylogue";
   polylogueShareMount = "/home/${username}/.local/share/polylogue";
-  swapFile = "/swap/swapfile";
-  # OOM burst buffer — not a normal pressure sink. Policy: keep this small so
-  # earlyoom fires quickly rather than letting the system swap-thrash into a
-  # freeze. swappiness=10 keeps anon resident; this space is only consumed under
-  # genuine memory exhaustion. earlyoom freeSwapThreshold=90 fires when 800 MiB
-  # is used (7.2 GiB free on 8 GiB), giving it reaction time before exhaustion.
-  swapSizeGiB = 8;
 
-  # The realm btrfs lives on the Crucial P3 NVMe. Swap and /realm share this one
-  # physical filesystem (swap rides a dedicated nested @swap subvolume), so they
-  # are bound to a single symbol to keep the two mounts from drifting apart.
+  # Disk swap removed (2026-06-12): both disk swapfiles were pure liability on
+  # this host. A SATA-root swapfile froze the box under build load (2026-06-03
+  # thrash livelock); moving it to the NVMe avoided the freeze but still wrote
+  # the worn drives and never actually prevented OOM — earlyoom fires on the
+  # memory threshold regardless. Freeze-prevention now comes from cgroup
+  # MemoryMax caps on the build/nix-build slices (a runaway is killed inside its
+  # slice, not by paging) plus a small zram cushion (see modules/performance.nix)
+  # that absorbs sub-second spikes with zero disk I/O. No disk swap = no thrash
+  # path and no swap-write wear on either SSD.
   realmFsDevice = "/dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a";
 
   # Initrd scaffold: early-boot placeholders derived from persistence config
@@ -132,18 +131,22 @@ in
       neededForBoot = true;
     };
 
-    # Swap lives on the NVMe (realm) filesystem, not the slower SATA root SSD.
-    # A disk swapfile on the contended SATA root froze the box under build load
-    # (2026-06-03 swap-thrash livelock); the NVMe's far lower latency and deeper
-    # queue keep heavy eviction from stalling interactive work. The dedicated
-    # @swap subvolume (created by realm-swap-subvol.service) stays out of the
-    # 15-minute btrbk realm snapshots, so the swapfile's extents are never
-    # CoW-shared. nofail keeps boot resilient if the subvolume is ever absent.
-    "/swap" = {
-      device = realmFsDevice;
+    # sinex operational substrate (PostgreSQL + sinex home + state) on a dedicated
+    # @sinex subvolume. Was previously a plain dir inside the EPHEMERAL @ root, so
+    # the Postgres data dir was re-initdb'd on every boot (a durability bug — sinex
+    # is meant to be durable). A dedicated top-level subvol survives the @-rollback,
+    # and `nodatacow` makes the DB write in-place instead of CoW-amplifying every
+    # random page write (~7× fewer writes, the dominant MX500 wear source). It is
+    # deliberately NOT in btrbk's snapshot set (block-snapshotting a live DB is
+    # unsafe). Durability is the persistent subvol itself; FOLLOW-UP: add a
+    # logical pg_dump backup for disaster recovery, since nodatacow implies no
+    # btrfs checksums (standard for DB volumes) and this subvol sits outside the
+    # btrbk→borg path.
+    "/var/lib/sinex" = {
+      device = "/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02";
       fsType = "btrfs";
       options = [
-        "subvol=@swap"
+        "subvol=@sinex"
         "nodatacow"
         "noatime"
         "nodiscard"
@@ -210,14 +213,9 @@ in
 
   };
 
-  # Swap lives on a dedicated Btrfs subvolume so it survives root rollback,
-  # stays out of snapshots, and is created without CoW/compression/holes.
-  swapDevices = [
-    {
-      device = swapFile;
-      size = swapSizeGiB * 1024;
-    }
-  ];
+  # No disk swap on this host — see the comment in the `let` block above and
+  # the zram cushion in modules/performance.nix.
+  swapDevices = [ ];
 
   systemd = {
     services.sinnix-fstrim = {
@@ -258,6 +256,52 @@ in
       };
     };
 
+    # Ensure the dedicated @sinex subvolume exists before /var/lib/sinex is
+    # mounted. The root btrfs top level (subvolid=5) is not normally mounted, so
+    # mount it transiently to create the child subvol with nodatacow. Idempotent:
+    # on an already-provisioned host @sinex already exists and this is a no-op;
+    # the guard keeps a fresh install / bare-metal restore booting.
+    services.ensure-sinex-subvol = {
+      description = "Ensure dedicated @sinex nodatacow subvolume exists on the root btrfs";
+      requiredBy = [ "var-lib-sinex.mount" ];
+      before = [ "var-lib-sinex.mount" ];
+      after = [ "local-fs-pre.target" ];
+      unitConfig.DefaultDependencies = false;
+      path = [
+        pkgs.btrfs-progs
+        pkgs.util-linux
+        pkgs.e2fsprogs
+        pkgs.coreutils
+      ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        dev=/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02
+        tmp=$(mktemp -d)
+        mount -o subvolid=5 "$dev" "$tmp"
+        root="$tmp/@sinex"
+        if ! btrfs subvolume show "$root" >/dev/null 2>&1; then
+          btrfs subvolume create "$root"
+          chattr +C "$root" || true
+        fi
+        # Pre-create the directory skeleton the sinex services' systemd mount
+        # namespacing (ReadWritePaths) requires to PRE-EXIST. On the old layout
+        # these were on @ and recreated each boot by tmpfiles; the bridge's
+        # tmpfiles now run before this mount, so create them here directly on the
+        # @sinex subvol (idempotent; ownership matches modules/services/sinex).
+        install -d -o postgres -g postgres -m 0750 "$root/postgresql" "$root/postgresql/18"
+        install -d -o sinex -g sinex -m 0711 "$root/home"
+        install -d -o sinex -g sinex -m 0700 "$root/state" "$root/state/tls"
+        install -d -o sinex -g sinex -m 0750 \
+          "$root/state/run" "$root/state/logs" "$root/state/blob-repository" \
+          "$root/state/spool" "$root/state/spool/event_engine"
+        umount "$tmp"
+        rmdir "$tmp"
+      '';
+    };
+
     services.realm-scaffold = {
       description = "Create /realm-backed bind mount source directories";
       requires = [ "realm.mount" ];
@@ -270,31 +314,6 @@ in
       path = [ pkgs.coreutils ];
       script = ''
         install -d -m 0700 -o ${username} -g ${primaryGroupName} ${polylogueArchiveRoot}
-      '';
-    };
-
-    # Swap rides a dedicated @swap subvolume on the realm btrfs so it stays out
-    # of btrbk's recursive-free realm snapshots. Realm is never rolled back, so
-    # in practice this creates the subvolume once; the guard keeps boot working
-    # if realm is ever restored from backup without it. Ordered after the realm
-    # mount (its top level is where the child subvolume is created) and before
-    # the /swap mount that consumes it.
-    services.realm-swap-subvol = {
-      description = "Ensure dedicated @swap subvolume exists on the realm NVMe btrfs";
-      requiredBy = [ "swap.mount" ];
-      before = [ "swap.mount" ];
-      requires = [ "realm.mount" ];
-      after = [ "realm.mount" ];
-      unitConfig.DefaultDependencies = false;
-      path = [ pkgs.btrfs-progs ];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-      };
-      script = ''
-        if ! btrfs subvolume show ${realmRoot}/@swap >/dev/null 2>&1; then
-          btrfs subvolume create ${realmRoot}/@swap
-        fi
       '';
     };
 
