@@ -97,6 +97,9 @@
       ) runtimeInventory.observedServices;
       natsService = config.systemd.services.nats.serviceConfig;
       postgresService = config.systemd.services.postgresql.serviceConfig;
+      sinexPostgresDumpUnit = config.systemd.services.sinex-postgres-dump;
+      sinexPostgresDumpService = sinexPostgresDumpUnit.serviceConfig;
+      sinexPostgresDumpTimer = config.systemd.timers.sinex-postgres-dump.timerConfig;
       substrateUnits = [
         "nats"
         "postgresql"
@@ -108,6 +111,7 @@
       # not as standalone services. The sinexd unit carries the memory guardrails.
       boundedAutomataServices = [ "sinexd" ];
       sinexRuntimeRoot = "/var/lib/sinex";
+      sinexPostgresDumpRoot = "/persist/backup/sinex-postgres";
       persistedSystemDirs = config.sinnix.persistence.system.directories;
       postgresqlUnitConfig = serviceUnitConfig "postgresql";
       sinexFilesystem = config.services.sinex.sources.filesystem;
@@ -122,13 +126,17 @@
       serviceWants = name: lib.attrByPath [ "systemd" "services" name "wants" ] [ ] config;
       serviceAfter = name: lib.attrByPath [ "systemd" "services" name "after" ] [ ] config;
       serviceBefore = name: lib.attrByPath [ "systemd" "services" name "before" ] [ ] config;
-      homeManagerExecStartPost = lib.attrByPath [
-        "systemd"
-        "services"
-        "home-manager-${config.sinnix.user.name}"
-        "serviceConfig"
-        "ExecStartPost"
-      ] [ ] config;
+      homeManagerExecStartPost =
+        lib.attrByPath
+          [
+            "systemd"
+            "services"
+            "home-manager-${config.sinnix.user.name}"
+            "serviceConfig"
+            "ExecStartPost"
+          ]
+          [ ]
+          config;
       targetAccessServices = [
         "sinex-browser-target-access"
         "sinex-desktop-target-access"
@@ -389,6 +397,44 @@
           !(builtins.elem "/var/lib/postgresql" persistedSystemDirs)
           && !(builtins.elem "/var/lib/sinex" persistedSystemDirs);
         message = "Sinex/PostgreSQL hot state must not be bind-mounted from /persist";
+      }
+      {
+        assertion =
+          sinexPostgresDumpService.User == "postgres"
+          && sinexPostgresDumpService.Group == "postgres"
+          && sinexPostgresDumpService.Nice == 10
+          && sinexPostgresDumpService.CPUSchedulingPolicy == "idle"
+          && sinexPostgresDumpService.IOSchedulingClass == "idle"
+          && sinexPostgresDumpService.CPUWeight == 20
+          && sinexPostgresDumpService.IOWeight == 20
+          && builtins.elem "postgresql.target" sinexPostgresDumpUnit.requires
+          && builtins.elem "persist.mount" sinexPostgresDumpUnit.requires
+          && builtins.elem sinexRuntimeRoot sinexPostgresDumpUnit.unitConfig.RequiresMountsFor
+          && builtins.elem sinexPostgresDumpRoot sinexPostgresDumpUnit.unitConfig.RequiresMountsFor;
+        message = "Sinex pg_dump backup must run as postgres with backup-maintenance scheduling and required mounts";
+      }
+      {
+        assertion =
+          builtins.elem "d ${sinexPostgresDumpRoot} 0700 postgres postgres -" config.systemd.tmpfiles.rules
+          && lib.hasInfix "PGPASSWORD=\"$(tr -d '\\r\\n' < ${config.sinnix.secrets.paths."sinex-local-db"})\"" sinexPostgresDumpUnit.script
+          && lib.hasInfix "pg_dump" sinexPostgresDumpUnit.script
+          && lib.hasInfix "--host=127.0.0.1" sinexPostgresDumpUnit.script
+          && lib.hasInfix "--port=5432" sinexPostgresDumpUnit.script
+          && lib.hasInfix "--username=sinex" sinexPostgresDumpUnit.script
+          && lib.hasInfix "--dbname=sinex_prod" sinexPostgresDumpUnit.script
+          && lib.hasInfix "--format=custom" sinexPostgresDumpUnit.script
+          && lib.hasInfix sinexPostgresDumpRoot sinexPostgresDumpUnit.script
+          && lib.hasInfix "NR > 14" sinexPostgresDumpUnit.script
+          && builtins.any (pkg: lib.hasPrefix "gawk-" (pkg.name or "")) sinexPostgresDumpUnit.path;
+        message = "Sinex pg_dump backup must dump sinex_prod with the agenix password and retain the newest dumps";
+      }
+      {
+        assertion =
+          config.systemd.timers.sinex-postgres-dump.wantedBy == [ "timers.target" ]
+          && sinexPostgresDumpTimer.OnCalendar == "*-*-* 03:12:00"
+          && sinexPostgresDumpTimer.RandomizedDelaySec == "20min"
+          && sinexPostgresDumpTimer.Persistent == false;
+        message = "Sinex pg_dump backup timer must be scheduled without catch-up storms";
       }
       {
         assertion = builtins.all (name: builtins.elem name sinexFilesystem.ignoredDirectoryNames) [

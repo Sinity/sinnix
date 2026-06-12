@@ -46,6 +46,7 @@ let
   sinexHome = "${sinexRuntimeRoot}/home";
   sinexPostgresRoot = "${sinexRuntimeRoot}/postgresql";
   sinexPostgresDataDir = "${sinexPostgresRoot}/18";
+  sinexPostgresDumpRoot = "/persist/backup/sinex-postgres";
   databaseHost = "127.0.0.1";
   databasePort = 5432;
   databaseUser = "sinex";
@@ -189,6 +190,7 @@ in
             ++ lib.optionals databasePrepared [
               "d ${sinexPostgresRoot} 0750 postgres postgres -"
               "d ${sinexPostgresDataDir} 0750 postgres postgres -"
+              "d ${sinexPostgresDumpRoot} 0700 postgres postgres -"
             ]
           );
         }
@@ -455,6 +457,15 @@ in
             unit = "postgresql.service";
             resourceClass = "capture-substrate";
           };
+          sinex-postgres-dump = {
+            unit = "sinex-postgres-dump.service";
+            resourceClass = "backup-maintenance";
+          };
+          sinex-postgres-dump-timer = {
+            unit = "sinex-postgres-dump.timer";
+            kind = "timer";
+            resourceClass = "backup-maintenance";
+          };
           sinex-document-scan = {
             unit = "sinex-document-scan.service";
             resourceClass = "background-maintenance";
@@ -473,6 +484,76 @@ in
             nats.serviceConfig = lib.sinnix.mkRuntimeServiceConfig {
               runtimeInventory = config.sinnix.runtime.inventory;
               unit = "nats.service";
+            };
+            sinex-postgres-dump = {
+              description = "Dump Sinex PostgreSQL database for disaster recovery";
+              after = [
+                "postgresql.target"
+                "persist.mount"
+              ];
+              requires = [
+                "postgresql.target"
+                "persist.mount"
+              ];
+              unitConfig.RequiresMountsFor = [
+                sinexRuntimeRoot
+                sinexPostgresDumpRoot
+              ];
+              restartIfChanged = false;
+              serviceConfig =
+                (lib.sinnix.mkRuntimeServiceConfig {
+                  runtimeInventory = config.sinnix.runtime.inventory;
+                  unit = "sinex-postgres-dump.service";
+                })
+                // {
+                  Type = "oneshot";
+                  User = "postgres";
+                  Group = "postgres";
+                  TimeoutStopSec = "15s";
+                };
+              path = [
+                config.services.postgresql.package
+                pkgs.coreutils
+                pkgs.findutils
+                pkgs.gawk
+              ];
+              script = ''
+                set -euo pipefail
+
+                umask 077
+                install -d -m 0700 -o postgres -g postgres ${lib.escapeShellArg sinexPostgresDumpRoot}
+
+                stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+                final=${lib.escapeShellArg sinexPostgresDumpRoot}/${databaseName}-"$stamp".dump
+                tmp="$final.tmp"
+
+                cleanup() {
+                  rm -f "$tmp"
+                }
+                trap cleanup EXIT
+
+                PGPASSWORD="$(tr -d '\r\n' < ${lib.escapeShellArg databasePasswordFile})" \
+                  pg_dump \
+                    --host=${databaseHost} \
+                    --port=${toString databasePort} \
+                    --username=${databaseUser} \
+                    --dbname=${databaseName} \
+                    --format=custom \
+                    --file="$tmp"
+
+                chmod 0600 "$tmp"
+                mv -f "$tmp" "$final"
+                trap - EXIT
+
+                find ${lib.escapeShellArg sinexPostgresDumpRoot} \
+                  -maxdepth 1 \
+                  -type f \
+                  -name ${lib.escapeShellArg "${databaseName}-*.dump"} \
+                  -printf '%T@ %p\n' \
+                  | sort -rn \
+                  | awk 'NR > 14 { print substr($0, index($0, $2)) }' \
+                  | xargs -r rm -f
+              '';
             };
             # home-manager activation calls chmod 700 /home/${targetUserName}
             # which maps the group bits to the POSIX ACL mask, resetting
@@ -522,9 +603,20 @@ in
           # warning at evaluation time.
           wants = [ "network-online.target" ] ++ lib.optionals databasePrepared [ "postgresql.target" ];
         };
-        systemd.timers = lib.genAttrs maintenanceTimerServiceNames (_: {
-          timerConfig.Persistent = lib.mkForce false;
-        });
+        systemd.timers =
+          lib.genAttrs maintenanceTimerServiceNames (_: {
+            timerConfig.Persistent = lib.mkForce false;
+          })
+          // {
+            sinex-postgres-dump = {
+              wantedBy = [ "timers.target" ];
+              timerConfig = {
+                OnCalendar = "*-*-* 03:12:00";
+                RandomizedDelaySec = "20min";
+                Persistent = false;
+              };
+            };
+          };
       })
 
       # ── deploymentRole: workstation-thin ────────────────────────────────

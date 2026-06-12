@@ -17,6 +17,8 @@
       isOnlineDiscard = option: option == "discard" || option == "discard=async";
       polylogueShareMount = "/home/${config.sinnix.user.name}/.local/share/polylogue";
       polylogueMounts = builtins.filter (mount: mount.where == polylogueShareMount) config.systemd.mounts;
+      polylogueDbRoot = "${config.sinnix.paths.realmRoot}/db/polylogue";
+      realmScaffoldScript = config.systemd.services.realm-scaffold.script;
       persistedHomeDirs = map (
         entry: if builtins.isAttrs entry then entry.directory else entry
       ) config.sinnix.persistence.home.directories;
@@ -79,12 +81,47 @@
         message = "Polylogue archive bytes must not be impermanence-mounted from /persist";
       }
       {
+        assertion =
+          lib.hasInfix "btrfs subvolume show ${polylogueDbRoot}" realmScaffoldScript
+          && lib.hasInfix "btrfs subvolume create ${polylogueDbRoot}" realmScaffoldScript
+          && lib.hasInfix "chattr +C ${polylogueDbRoot}" realmScaffoldScript
+          && lib.hasInfix "d ${config.sinnix.paths.realmRoot}/db 0755 root root -" (
+            lib.concatStringsSep "\n" config.systemd.tmpfiles.rules
+          );
+        message = "Polylogue SQLite DB root must be a dedicated nodatacow subvolume under /realm/db";
+      }
+      {
+        assertion =
+          lib.hasInfix "index.db-wal" realmScaffoldScript
+          && lib.hasInfix "index.db-shm" realmScaffoldScript
+          && lib.hasInfix "Refusing to migrate Polylogue DB while SQLite sidecar exists" realmScaffoldScript
+          && lib.hasInfix "cp --reflink=never" realmScaffoldScript;
+        message = "Polylogue DB migration must avoid splitting live SQLite WAL/SHM state and must rewrite into nodatacow extents";
+      }
+      {
+        assertion =
+          builtins.all
+            (
+              name:
+              lib.hasInfix "${config.sinnix.paths.capturesRoot}/polylogue/${name}" realmScaffoldScript
+              && lib.hasInfix "${polylogueDbRoot}/${name}" realmScaffoldScript
+              && lib.hasInfix "ln -s ${polylogueDbRoot}/${name}" realmScaffoldScript
+            )
+            [
+              "index.db"
+              "source.db"
+              "embeddings.db"
+              "user.db"
+              "ops.db"
+              "daemon_events.db"
+            ];
+        message = "Every known Polylogue SQLite tier must be symlinked from the archive root into the DB subvolume";
+      }
+      {
         # Disk swap deleted 2026-06-12: both swapfiles were liability-only on
         # this host. Freeze-prevention is cgroup MemoryMax caps + earlyoom; a
         # 4 GiB zram cushion (modules/performance.nix) replaces disk swap.
-        assertion =
-          config.swapDevices == [ ]
-          && !(builtins.hasAttr "/swap" config.fileSystems);
+        assertion = config.swapDevices == [ ] && !(builtins.hasAttr "/swap" config.fileSystems);
         message = "sinnix-prime must carry no disk swap (zram-only)";
       }
       {

@@ -15,6 +15,49 @@ let
   username = config.sinnix.user.name;
   primaryGroupName = config.users.users.${username}.group;
   polylogueArchiveRoot = "${capturesRoot}/polylogue";
+  polylogueDbRoot = "${realmRoot}/db/polylogue";
+  polylogueDbFiles = [
+    "index.db"
+    "source.db"
+    "embeddings.db"
+    "user.db"
+    "ops.db"
+    "daemon_events.db"
+  ];
+  polylogueDbLinkScript = lib.concatMapStringsSep "\n" (
+    name:
+    let
+      archivePath = "${polylogueArchiveRoot}/${name}";
+      targetPath = "${polylogueDbRoot}/${name}";
+    in
+    ''
+      if [ -L ${lib.escapeShellArg archivePath} ]; then
+        current="$(readlink ${lib.escapeShellArg archivePath})"
+        if [ "$current" != ${lib.escapeShellArg targetPath} ]; then
+          echo "Refusing to replace unexpected Polylogue DB symlink ${archivePath} -> $current" >&2
+          exit 1
+        fi
+      elif [ -e ${lib.escapeShellArg archivePath} ]; then
+        for sidecar in ${lib.escapeShellArg "${archivePath}-wal"} ${lib.escapeShellArg "${archivePath}-shm"}; do
+          if [ -e "$sidecar" ]; then
+            echo "Refusing to migrate Polylogue DB while SQLite sidecar exists: $sidecar" >&2
+            echo "Stop polylogued and checkpoint/truncate WAL before running realm-scaffold." >&2
+            exit 1
+          fi
+        done
+        if [ -e ${lib.escapeShellArg targetPath} ]; then
+          echo "Refusing to overwrite existing Polylogue DB target ${targetPath}" >&2
+          exit 1
+        fi
+        cp --reflink=never --preserve=mode,ownership,timestamps ${lib.escapeShellArg archivePath} ${lib.escapeShellArg "${targetPath}.tmp"}
+        mv ${lib.escapeShellArg "${targetPath}.tmp"} ${lib.escapeShellArg targetPath}
+        rm ${lib.escapeShellArg archivePath}
+        ln -s ${lib.escapeShellArg targetPath} ${lib.escapeShellArg archivePath}
+      elif [ -e ${lib.escapeShellArg targetPath} ]; then
+        ln -s ${lib.escapeShellArg targetPath} ${lib.escapeShellArg archivePath}
+      fi
+    ''
+  ) polylogueDbFiles;
   polylogueShareMount = "/home/${username}/.local/share/polylogue";
 
   # Disk swap removed (2026-06-12): both disk swapfiles were pure liability on
@@ -116,8 +159,8 @@ in
     };
 
     # @var subvolume removed (B6): /var is now a plain dir inside @, populated
-    # by /persist bind-mounts declared in modules/persistence.nix.
-    # @var remains on disk as a historical archive — not yet deleted.
+    # by /persist bind-mounts declared in modules/persistence.nix. (The historical
+    # @var subvol is gone from disk as of 2026-06-12 — no top-level @var remains.)
 
     "/persist" = {
       device = "/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02";
@@ -303,7 +346,7 @@ in
     };
 
     services.realm-scaffold = {
-      description = "Create /realm-backed bind mount source directories";
+      description = "Create /realm-backed bind mount source directories and DB subvolumes";
       requires = [ "realm.mount" ];
       after = [ "realm.mount" ];
       before = [
@@ -311,22 +354,40 @@ in
       ];
       unitConfig.DefaultDependencies = false;
       serviceConfig.Type = "oneshot";
-      path = [ pkgs.coreutils ];
+      path = [
+        pkgs.btrfs-progs
+        pkgs.coreutils
+        pkgs.e2fsprogs
+      ];
       script = ''
         install -d -m 0700 -o ${username} -g ${primaryGroupName} ${polylogueArchiveRoot}
+        install -d -m 0755 -o root -g root ${realmRoot}/db
+        if ! btrfs subvolume show ${lib.escapeShellArg polylogueDbRoot} >/dev/null 2>&1; then
+          btrfs subvolume create ${lib.escapeShellArg polylogueDbRoot}
+          chattr +C ${lib.escapeShellArg polylogueDbRoot} || true
+        fi
+        chown ${username}:${primaryGroupName} ${lib.escapeShellArg polylogueDbRoot}
+        chmod 0700 ${lib.escapeShellArg polylogueDbRoot}
+        chattr +C ${lib.escapeShellArg polylogueDbRoot} || true
+
+        ${polylogueDbLinkScript}
       '';
     };
 
     tmpfiles.rules = lib.mkAfter [
       "d ${polylogueArchiveRoot} 0700 ${username} ${primaryGroupName} -"
+      "d ${realmRoot}/db 0755 root root -"
       "d /home/${username}/.local/share 0700 ${username} ${primaryGroupName} -"
       "d ${polylogueShareMount} 0700 ${username} ${primaryGroupName} -"
     ];
 
     # Polylogue's archive is an active SQLite/write-heavy workload. Keep the
     # default XDG path stable for CLI/MCP/service consumers, but place the
-    # bytes on /realm's NVMe instead of the root/persist SATA SSD shared with
-    # PostgreSQL.
+    # archive bytes on /realm's NVMe instead of the root/persist SATA SSD.
+    # The six SQLite tier files are symlinked into a nested nodatacow subvolume
+    # at ${polylogueDbRoot}; SQLite creates WAL/SHM files beside the symlink
+    # target, so DB churn is excluded from /realm btrbk snapshots while blob/
+    # and inbox/ remain in the snapshotted archive root.
     mounts = [
       {
         what = polylogueArchiveRoot;
