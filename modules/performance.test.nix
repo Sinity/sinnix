@@ -77,6 +77,13 @@
       }
       {
         assertion =
+          config.boot.kernel.sysctl."vm.swappiness" == 1
+          && config.boot.kernel.sysctl."vm.page-cluster" == 0
+          && config.boot.kernel.sysctl."vm.vfs_cache_pressure" == 100;
+        message = "desktop VM policy must keep anon resident and treat zram as an emergency cushion";
+      }
+      {
+        assertion =
           config.boot.kernel.sysctl."vm.dirty_background_bytes" == 64 * 1024 * 1024
           && config.boot.kernel.sysctl."vm.dirty_bytes" == 256 * 1024 * 1024;
         message = "desktop dirty writeback must stay byte-bounded for NVMe/Btrfs latency";

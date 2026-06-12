@@ -11,6 +11,8 @@ mkServiceTest {
     config:
     let
       service = config.systemd.services.machine-telemetry.serviceConfig;
+      backupService = config.systemd.services.machine-telemetry-sqlite-backup;
+      backupTimer = config.systemd.timers.machine-telemetry-sqlite-backup.timerConfig;
       dbScaffold = config.systemd.services.machine-telemetry-db-scaffold;
       dbScaffoldScript = dbScaffold.script;
       # The collector body was extracted from this .nix into pkgs/machine-telemetry/collector.py.
@@ -75,8 +77,32 @@ mkServiceTest {
         assertion =
           builtins.elem "d /realm/data/captures/machine 0755 root users -" config.systemd.tmpfiles.rules
           && builtins.elem "d /realm/data/captures/machine/experiments 0775 root users -" config.systemd.tmpfiles.rules
-          && builtins.elem "d /realm/data/captures/machine/legacy 0775 root users -" config.systemd.tmpfiles.rules;
+          && builtins.elem "d /realm/data/captures/machine/legacy 0775 root users -" config.systemd.tmpfiles.rules
+          && builtins.elem "d /persist/backup/machine-telemetry 0700 sinity users -" config.systemd.tmpfiles.rules;
         message = "machine-telemetry tmpfiles ownership must allow system capture plus user experiment manifests";
+      }
+      {
+        assertion =
+          lib.hasInfix "sqlite3 /realm/db/machine-telemetry/telemetry.sqlite" backupService.script
+          && lib.hasInfix ".backup" backupService.script
+          && lib.hasInfix "zstd -T1" backupService.script
+          && lib.hasInfix "/persist/backup/machine-telemetry" backupService.script
+          && lib.hasInfix "NR > 7" backupService.script
+          && backupService.serviceConfig.User == "sinity"
+          && backupService.serviceConfig.Group == "users"
+          && backupService.serviceConfig.MemoryHigh == "2G"
+          && backupService.serviceConfig.MemoryMax == "4G";
+        message = "machine-telemetry SQLite must have a compressed logical backup under backed-up /persist";
+      }
+      {
+        assertion =
+          backupTimer.OnCalendar == "*-*-* 03:42:00"
+          && backupTimer.Persistent == false
+          && config.sinnix.runtime.surfaces.machine-telemetry-sqlite-backup.observe.enable
+          &&
+            config.sinnix.runtime.surfaces.machine-telemetry-sqlite-backup.resourceClass
+            == "backup-maintenance";
+        message = "machine-telemetry SQLite backup must run daily without catch-up storms";
       }
       {
         assertion =

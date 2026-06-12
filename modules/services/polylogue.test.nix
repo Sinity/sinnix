@@ -3,6 +3,7 @@
   mkServiceTest,
   expect,
   hmFor,
+  inputs,
   ...
 }:
 let
@@ -11,11 +12,19 @@ let
     let
       hm = hmFor config;
       daemonService = hm.systemd.user.services.polylogued.Service or { };
+      backupService = hm.systemd.user.services.polylogue-sqlite-backup.Service or { };
+      backupTimer = hm.systemd.user.timers.polylogue-sqlite-backup.Timer or { };
+      source = builtins.readFile (inputs.self + "/modules/services/polylogue.nix");
       # NOTE(2026-05-28): upstream module no longer uses xdg.configFile for
       # polylogue.toml — the daemon writes it at runtime via its own config path.
       daemonExecStart =
         let
           raw = daemonService.ExecStart or [ ];
+        in
+        if builtins.isList raw then builtins.concatStringsSep " " raw else raw;
+      backupExecStart =
+        let
+          raw = backupService.ExecStart or [ ];
         in
         if builtins.isList raw then builtins.concatStringsSep " " raw else raw;
     in
@@ -50,6 +59,29 @@ let
       (expect.attrPathEq daemonService [
         "MemoryMax"
       ] "6G" "Polylogue daemon must keep hard memory headroom above its soft reclaim threshold")
+      {
+        assertion =
+          lib.hasInfix "polylogue-sqlite-backup" backupExecStart
+          && backupService.IOSchedulingClass == "idle"
+          && backupService.TimeoutStartSec == "2h"
+          && backupService.MemoryHigh == "3G"
+          && backupService.MemoryMax == "6G"
+          && backupTimer.OnCalendar == "Sun 04:35:00"
+          && backupTimer.Persistent == false;
+        message = "Polylogue SQLite DBs must have a low-priority weekly logical backup";
+      }
+      {
+        assertion =
+          lib.hasInfix "/persist/backup/polylogue-sqlite" source
+          && builtins.elem "d /persist/backup/polylogue-sqlite 0700 sinity users -" config.systemd.tmpfiles.rules
+          && lib.hasInfix "sqlite3 \"$source\" \".backup '$raw_tmp'\"" source
+          && lib.hasInfix "zstd -T1" source
+          && lib.hasInfix "NR > 3" source
+          && config.sinnix.runtime.surfaces.polylogue-sqlite-backup.manager == "user"
+          && config.sinnix.runtime.surfaces.polylogue-sqlite-backup.observe.enable
+          && config.sinnix.runtime.surfaces.polylogue-sqlite-backup.resourceClass == "backup-maintenance";
+        message = "Polylogue SQLite backups must land under backed-up /persist and be inventory-visible";
+      }
     ];
 in
 [

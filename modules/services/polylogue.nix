@@ -33,6 +33,68 @@ let
   defaultDataDir = "${homeDir}/.local/share/polylogue";
 
   polyloguePkg = pkgs.polylogue;
+  dbRoot = "${config.sinnix.paths.realmRoot}/db/polylogue";
+  backupRoot = "/persist/backup/polylogue-sqlite";
+  dbNames = [
+    "daemon_events.db"
+    "embeddings.db"
+    "index.db"
+    "ops.db"
+    "source.db"
+    "user.db"
+  ];
+  backupScript = pkgs.writeShellApplication {
+    name = "polylogue-sqlite-backup";
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.findutils
+      pkgs.gawk
+      pkgs.sqlite
+      pkgs.zstd
+    ];
+    text = ''
+      set -euo pipefail
+
+      umask 077
+      install -d -m 0700 ${lib.escapeShellArg backupRoot}
+
+      stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+      for db_name in ${lib.escapeShellArgs dbNames}; do
+        source=${lib.escapeShellArg dbRoot}/"$db_name"
+        if [ ! -f "$source" ]; then
+          echo "Skipping missing Polylogue SQLite DB: $source" >&2
+          continue
+        fi
+
+        stem="''${db_name%.db}"
+        raw_tmp=${lib.escapeShellArg backupRoot}/"$stem-$stamp.sqlite.tmp"
+        zst_tmp="$raw_tmp.zst.tmp"
+        final=${lib.escapeShellArg backupRoot}/"$stem-$stamp.sqlite.zst"
+
+        cleanup() {
+          rm -f "$raw_tmp" "$zst_tmp"
+        }
+        trap cleanup EXIT
+
+        sqlite3 "$source" ".backup '$raw_tmp'"
+        chmod 0600 "$raw_tmp"
+        zstd -T1 -q -f "$raw_tmp" -o "$zst_tmp"
+        chmod 0600 "$zst_tmp"
+        mv -f "$zst_tmp" "$final"
+        rm -f "$raw_tmp"
+        trap - EXIT
+
+        find ${lib.escapeShellArg backupRoot} \
+          -maxdepth 1 \
+          -type f \
+          -name "$stem-*.sqlite.zst" \
+          -printf '%T@ %p\n' \
+          | sort -rn \
+          | awk 'NR > 3 { print substr($0, index($0, $2)) }' \
+          | xargs -r rm -f
+      done
+    '';
+  };
 in
 {
   options.sinnix.services.polylogue = {
@@ -92,6 +154,10 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    systemd.tmpfiles.rules = [
+      "d ${backupRoot} 0700 ${userName} users -"
+    ];
+
     # ── Import the upstream Home Manager module ────────────────────
     #     This defines programs.polylogued.* and creates the unit.
     home-manager.users.${userName} = {
@@ -123,16 +189,60 @@ in
         MemoryHigh = lib.mkForce "4G";
         MemoryMax = lib.mkForce "6G";
       };
+
+      systemd.user.services.polylogue-sqlite-backup = {
+        Unit = {
+          Description = "Back up Polylogue SQLite databases";
+          After = [ "default.target" ];
+          RequiresMountsFor = [
+            dbRoot
+            backupRoot
+          ];
+        };
+        Service = {
+          Type = "oneshot";
+          ExecStart = "${backupScript}/bin/polylogue-sqlite-backup";
+          TimeoutStartSec = "2h";
+          Nice = 10;
+          IOSchedulingClass = "idle";
+          MemoryHigh = "3G";
+          MemoryMax = "6G";
+        };
+      };
+
+      systemd.user.timers.polylogue-sqlite-backup = {
+        Unit.Description = "Weekly Polylogue SQLite backup";
+        Timer = {
+          OnCalendar = "Sun 04:35:00";
+          RandomizedDelaySec = "45min";
+          Persistent = false;
+        };
+        Install.WantedBy = [ "timers.target" ];
+      };
     };
 
     # ── Runtime-surface registration (sinnix-specific) ─────────────
-    sinnix.runtime.surfaces.polylogued = {
-      unit = "polylogued.service";
-      manager = "user";
-      resourceClass = "capture-runtime";
-      observe = {
-        enable = true;
-        restartable = true;
+    sinnix.runtime.surfaces = {
+      polylogued = {
+        unit = "polylogued.service";
+        manager = "user";
+        resourceClass = "capture-runtime";
+        observe = {
+          enable = true;
+          restartable = true;
+        };
+      };
+      polylogue-sqlite-backup = {
+        unit = "polylogue-sqlite-backup.service";
+        manager = "user";
+        resourceClass = "backup-maintenance";
+        observe.enable = true;
+      };
+      polylogue-sqlite-backup-timer = {
+        unit = "polylogue-sqlite-backup.timer";
+        kind = "timer";
+        manager = "user";
+        resourceClass = "backup-maintenance";
       };
     };
   };

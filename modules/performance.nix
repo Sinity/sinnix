@@ -99,11 +99,10 @@ in
     # zram is the ONLY swap on this host (2026-06-12): both disk swapfiles were
     # deleted (see hosts/sinnix-prime/storage.nix). The 2026-06-07 zram failure
     # was a swappiness=60 + disk-spill problem — zram filled, then anon still
-    # paged to the disk swapfile. With swappiness=10 AND no disk swap to spill
+    # paged to the disk swapfile. With swappiness=1 AND no disk swap to spill
     # to, that path is gone: this small RAM-backed (zstd-compressed) cushion
-    # absorbs sub-second allocation spikes without touching either SSD, and
-    # earlyoom fires on the memory threshold before it saturates. Capped at 4 GiB
-    # so it can never grow into a large pressure sink that delays earlyoom.
+    # absorbs short allocation spikes without touching either SSD. Capped at
+    # 4 GiB so it can never grow into a large pressure sink that delays earlyoom.
     zramSwap = {
       enable = true;
       algorithm = "zstd";
@@ -118,10 +117,12 @@ in
       # Keep process (anon) memory resident; reclaim file cache before swapping.
       # Diagnosed 2026-06-07: swappiness=60 + vfs_cache_pressure=50 made the box
       # hoard ~18 GiB page cache while paging ~17 GiB of anon to swap (incl.
-      # ~9 GiB to the disk swapfile) despite ~20 GiB available RAM. swappiness=10
+      # ~9 GiB to the disk swapfile) despite ~20 GiB available RAM. swappiness=1
       # + vfs_cache_pressure=100 inverts that: drop cache first, keep anon in RAM,
-      # use the (now tiny) swap only as an OOM cushion.
-      "vm.swappiness" = 10;
+      # use the (now tiny) swap only as an OOM cushion. A full Polylogue SQLite
+      # backup still filled zram at swappiness=10 despite plenty of available RAM,
+      # so keep this at the practical minimum.
+      "vm.swappiness" = 1;
       "vm.page-cluster" = 0;
       "vm.vfs_cache_pressure" = 100;
       # Keep Btrfs/NVMe writeback from accumulating multi-GiB dirty bursts.

@@ -20,6 +20,7 @@ let
   legacyDbPath = "${dataDir}/telemetry.sqlite";
   dbRoot = "${realmRoot}/db/machine-telemetry";
   dbPath = "${dbRoot}/telemetry.sqlite";
+  backupRoot = "/persist/backup/machine-telemetry";
   manifestPath = "${dataDir}/manifest.json";
   username = config.sinnix.user.name;
 
@@ -107,6 +108,7 @@ mkServiceModule {
         "d ${dataDir}/boot 0750 root users -"
         "d ${dataDir}/experiments 0775 root users -"
         "d ${dataDir}/legacy 0775 root users -"
+        "d ${backupRoot} 0700 ${username} users -"
       ];
 
       systemd.services.machine-telemetry-db-scaffold = {
@@ -237,6 +239,98 @@ mkServiceModule {
         // lib.sinnix.mkRuntimeServiceConfig {
           runtimeInventory = config.sinnix.runtime.inventory;
           unit = "machine-telemetry.service";
+        };
+      };
+
+      sinnix.runtime.surfaces = {
+        machine-telemetry-sqlite-backup = {
+          unit = "machine-telemetry-sqlite-backup.service";
+          resourceClass = "backup-maintenance";
+          observe.enable = true;
+        };
+        machine-telemetry-sqlite-backup-timer = {
+          unit = "machine-telemetry-sqlite-backup.timer";
+          kind = "timer";
+          resourceClass = "backup-maintenance";
+        };
+      };
+
+      systemd.services.machine-telemetry-sqlite-backup = {
+        description = "Back up machine telemetry SQLite database";
+        after = [
+          "realm.mount"
+          "persist.mount"
+        ];
+        requires = [
+          "realm.mount"
+          "persist.mount"
+        ];
+        unitConfig.RequiresMountsFor = [
+          dbRoot
+          backupRoot
+        ];
+        restartIfChanged = false;
+        serviceConfig =
+          (lib.sinnix.mkRuntimeServiceConfig {
+            runtimeInventory = config.sinnix.runtime.inventory;
+            unit = "machine-telemetry-sqlite-backup.service";
+          })
+          // {
+            Type = "oneshot";
+            User = username;
+            Group = "users";
+            TimeoutStartSec = "30min";
+            MemoryHigh = "2G";
+            MemoryMax = "4G";
+          };
+        path = [
+          pkgs.coreutils
+          pkgs.findutils
+          pkgs.gawk
+          pkgs.sqlite
+          pkgs.zstd
+        ];
+        script = ''
+          set -euo pipefail
+
+          umask 077
+          install -d -m 0700 -o ${lib.escapeShellArg username} -g users ${lib.escapeShellArg backupRoot}
+
+          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          raw_tmp=${lib.escapeShellArg backupRoot}/telemetry-"$stamp".sqlite.tmp
+          zst_tmp="$raw_tmp.zst.tmp"
+          final=${lib.escapeShellArg backupRoot}/telemetry-"$stamp".sqlite.zst
+
+          cleanup() {
+            rm -f "$raw_tmp" "$zst_tmp"
+          }
+          trap cleanup EXIT
+
+          sqlite3 ${lib.escapeShellArg dbPath} ".backup '$raw_tmp'"
+          chmod 0600 "$raw_tmp"
+          zstd -T1 -q -f "$raw_tmp" -o "$zst_tmp"
+          chmod 0600 "$zst_tmp"
+          mv -f "$zst_tmp" "$final"
+          rm -f "$raw_tmp"
+          trap - EXIT
+
+          find ${lib.escapeShellArg backupRoot} \
+            -maxdepth 1 \
+            -type f \
+            -name 'telemetry-*.sqlite.zst' \
+            -printf '%T@ %p\n' \
+            | sort -rn \
+            | awk 'NR > 7 { print substr($0, index($0, $2)) }' \
+            | xargs -r rm -f
+        '';
+      };
+
+      systemd.timers.machine-telemetry-sqlite-backup = {
+        wantedBy = [ "timers.target" ];
+        timerConfig = {
+          OnCalendar = "*-*-* 03:42:00";
+          RandomizedDelaySec = "30min";
+          Persistent = false;
         };
       };
     };
