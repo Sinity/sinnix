@@ -69,6 +69,7 @@ let
     "host-sinnix-prime-observability-policy"
     "minimal-no-features"
     "core-performance-policy"
+    "core-diagnostics-tools"
     "desktop-bluetooth-persistence"
     "paths-configured"
     "password-secrets-wiring"
@@ -108,6 +109,7 @@ let
     "host-sinnix-prime-storage-discard-policy"
     "host-sinnix-prime-observability-policy"
     "core-performance-policy"
+    "core-diagnostics-tools"
     "router-config-evaluates"
     "backup-btrbk"
   ];

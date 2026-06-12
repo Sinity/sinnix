@@ -92,9 +92,18 @@
       sinexSurface = config.sinnix.runtime.surfaces.sinex-runtime;
       runtimeInventory = builtins.fromJSON config.environment.etc."sinnix/runtime-inventory.json".text;
       observedServiceNames = map (check: check.name) runtimeInventory.observedServices;
+      expectedObservedSinexNames = [
+        "sinex-runtime"
+        "sinexd"
+        "nats"
+        "postgresql"
+      ];
       sinexObservedServices = builtins.filter (
-        check: check.name == "sinex-runtime"
+        check: builtins.elem check.name expectedObservedSinexNames
       ) runtimeInventory.observedServices;
+      observedByName =
+        name:
+        builtins.head (builtins.filter (check: check.name == name) runtimeInventory.observedServices);
       natsService = config.systemd.services.nats.serviceConfig;
       postgresService = config.systemd.services.postgresql.serviceConfig;
       sinexPostgresDumpUnit = config.systemd.services.sinex-postgres-dump;
@@ -340,15 +349,20 @@
           if config.sinnix.services.sinex.autoStart then
             sinexSurface.observe.enable
             && sinexSurface.observe.restartable == false
-            && builtins.elem "sinex-runtime" observedServiceNames
+            && builtins.all (name: builtins.elem name observedServiceNames) expectedObservedSinexNames
             && sinexObservedServices != [ ]
-            && (builtins.head sinexObservedServices).restartable == false
-            && (builtins.head sinexObservedServices).manager == "system"
-            && (builtins.head sinexObservedServices).kind == "target"
-            && (builtins.head sinexObservedServices).resourceClass == "capture-runtime"
+            && builtins.all (check: check.restartable == false && check.manager == "system") sinexObservedServices
+            && (observedByName "sinex-runtime").kind == "target"
+            && (observedByName "sinex-runtime").resourceClass == "capture-runtime"
+            && (observedByName "sinexd").kind == "service"
+            && (observedByName "sinexd").resourceClass == "capture-runtime"
+            && (observedByName "nats").kind == "service"
+            && (observedByName "nats").resourceClass == "capture-substrate"
+            && (observedByName "postgresql").kind == "service"
+            && (observedByName "postgresql").resourceClass == "capture-substrate"
           else
             !sinexSurface.observe.enable
-            && !(builtins.elem "sinex-runtime" observedServiceNames)
+            && builtins.all (name: !(builtins.elem name observedServiceNames)) expectedObservedSinexNames
             && sinexObservedServices == [ ];
         message = "Sinex observability inventory must respect whether the runtime auto-starts";
       }

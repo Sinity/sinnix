@@ -449,13 +449,29 @@ in
             kind = "timer";
             resourceClass = "capture-runtime";
           };
+          sinexd = {
+            unit = "sinexd.service";
+            resourceClass = "capture-runtime";
+            observe = {
+              enable = runtimeAutoStart;
+              restartable = false;
+            };
+          };
           nats = {
             unit = "nats.service";
             resourceClass = "capture-substrate";
+            observe = {
+              enable = runtimeAutoStart;
+              restartable = false;
+            };
           };
           postgresql = {
             unit = "postgresql.service";
             resourceClass = "capture-substrate";
+            observe = {
+              enable = runtimeAutoStart;
+              restartable = false;
+            };
           };
           sinex-postgres-dump = {
             unit = "sinex-postgres-dump.service";
