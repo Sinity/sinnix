@@ -28,6 +28,18 @@ in
   options.sinnix.services.lynchpin = {
     enable = lib.mkEnableOption "lynchpin substrate + MCP server";
 
+    repoRoot = lib.mkOption {
+      type = lib.types.str;
+      default = "/realm/project/sinity-lynchpin";
+      description = ''
+        Absolute path to the lynchpin checkout. The materialization CLI is
+        repo-rooted: it reads/writes `.lynchpin/` relative to this directory.
+        Used as the service WorkingDirectory and to export
+        LYNCHPIN_REPO_ROOT/LYNCHPIN_LOCAL_ROOT so the job does not depend on
+        the process's inherited CWD.
+      '';
+    };
+
     materializationTimer = {
       enable = lib.mkEnableOption "daily substrate materialization timer";
 
@@ -62,11 +74,21 @@ in
     systemd.services.lynchpin-materialize = lib.mkIf cfg.materializationTimer.enable {
       description = "Lynchpin analysis DAG materialization";
       after = [ "network.target" ];
+      # The materialization CLI resolves `.lynchpin/` relative to its working
+      # directory (repo-rooted, like git). Without WorkingDirectory the unit
+      # ran from `/` and failed nightly with
+      # `PermissionError: [Errno 13] Permission denied: '.lynchpin'`, silently
+      # freezing the analysis substrate. Pin CWD and the root env vars.
       serviceConfig = {
         Type = "oneshot";
         ExecStart = "${scriptPkgs.lynchpin-python}/bin/lynchpin-python -m lynchpin.analysis materialize";
         User = "sinity";
         Group = "users";
+        WorkingDirectory = cfg.repoRoot;
+        Environment = [
+          "LYNCHPIN_REPO_ROOT=${cfg.repoRoot}"
+          "LYNCHPIN_LOCAL_ROOT=${cfg.repoRoot}/.lynchpin"
+        ];
         # 4-hour timeout — the full DAG can be heavy.
         TimeoutStartSec = 14400;
       };

@@ -93,26 +93,6 @@ in
     '';
   };
 
-  systemd.services.sinnix-fstrim = {
-    description = "Trim canonical NVMe data filesystem";
-    serviceConfig = {
-      Type = "oneshot";
-      ExecStart = "${fstrimCanonical}/bin/sinnix-fstrim-canonical";
-      Nice = 10;
-      IOSchedulingClass = "idle";
-      IOSchedulingPriority = 7;
-    };
-  };
-
-  systemd.timers.sinnix-fstrim = {
-    wantedBy = [ "timers.target" ];
-    timerConfig = {
-      OnCalendar = "weekly";
-      RandomizedDelaySec = "1h";
-      Persistent = true;
-    };
-  };
-
   fileSystems = {
     "/" = {
       device = "/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02";
@@ -240,6 +220,44 @@ in
   ];
 
   systemd = {
+    services.sinnix-fstrim = {
+      description = "Trim canonical NVMe data filesystem";
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${fstrimCanonical}/bin/sinnix-fstrim-canonical";
+        Nice = 10;
+        IOSchedulingClass = "idle";
+        IOSchedulingPriority = 7;
+      };
+    };
+
+    services."btrfs-scrub--".serviceConfig = {
+      Slice = "background.slice";
+      IOWeight = 1;
+      CPUWeight = 5;
+    };
+
+    services."btrfs-scrub-realm".serviceConfig = {
+      Slice = "background.slice";
+      IOWeight = 1;
+      CPUWeight = 5;
+    };
+
+    services."btrfs-scrub-outer\\x2drealm".serviceConfig = {
+      Slice = "background.slice";
+      IOWeight = 1;
+      CPUWeight = 5;
+    };
+
+    timers.sinnix-fstrim = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnCalendar = "weekly";
+        RandomizedDelaySec = "1h";
+        Persistent = true;
+      };
+    };
+
     services.realm-scaffold = {
       description = "Create /realm-backed bind mount source directories";
       requires = [ "realm.mount" ];

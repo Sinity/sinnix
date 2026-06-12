@@ -25,6 +25,11 @@
       swapDevice = builtins.head config.swapDevices;
       udevRules = config.services.udev.extraRules;
       rollbackScript = config.boot.initrd.systemd.services.rollback-root.script;
+      scrubServices = [
+        config.systemd.services."btrfs-scrub--".serviceConfig
+        config.systemd.services."btrfs-scrub-realm".serviceConfig
+        config.systemd.services."btrfs-scrub-outer\\x2drealm".serviceConfig
+      ];
     in
     [
       {
@@ -43,6 +48,12 @@
           && lib.hasInfix "mountpoint=/realm" storageModule
           && lib.hasInfix "fstrim --minimum 64MiB --verbose" storageModule;
         message = "sinnix-prime must trim large extents on the canonical NVMe data filesystem at idle priority instead of using all-mount fstrim";
+      }
+      {
+        assertion = builtins.all (
+          service: service.Slice == "background.slice" && service.IOWeight == 1 && service.CPUWeight == 5
+        ) scrubServices;
+        message = "sinnix-prime btrfs scrubs must run in the background resource class";
       }
       {
         assertion =
