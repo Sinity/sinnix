@@ -49,6 +49,20 @@
         && service.IOSchedulingClass == "idle"
         && service.CPUWeight == 20
         && service.IOWeight == 20;
+      hasBackupBounds =
+        service:
+        service.MemoryHigh == "2G"
+        && service.MemoryMax == "4G"
+        && service.IOReadBandwidthMax == [
+          "/persist 40M"
+          "/realm 80M"
+          "/outer-realm 40M"
+        ]
+        && service.IOWriteBandwidthMax == [
+          "/persist 20M"
+          "/realm 40M"
+          "/outer-realm 40M"
+        ];
       hasTmpfilesRule =
         pattern:
         builtins.any (rule: builtins.match ".*${pattern}.*" rule != null) config.systemd.tmpfiles.rules;
@@ -179,28 +193,30 @@
           && !serviceRestartIfChanged "borgbackup-job-realm"
           && hasBackgroundPriority persistBorgService
           && hasBackgroundPriority realmBorgService
+          && hasBackupBounds persistBorgService
+          && hasBackupBounds realmBorgService
           && !(persistBorgService ? Slice)
           && !(realmBorgService ? Slice)
           && !(persistBorgService ? ExecCondition)
           && !(realmBorgService ? ExecCondition);
-        message = "Borg backup jobs must yield CPU and I/O to interactive work";
+        message = "Borg backup jobs must yield CPU/I/O and stay within backup resource bounds";
       }
       {
         assertion =
           borgCheckService.TimeoutStopSec == "15s"
           && !serviceRestartIfChanged "borgbackup-check"
           && hasBackgroundPriority borgCheckService
+          && hasBackupBounds borgCheckService
           && !(borgCheckService ? Slice)
-          && !(borgCheckService ? ExecCondition)
-          && !(borgCheckService ? IOReadBandwidthMax)
-          && !(borgCheckService ? IOWriteBandwidthMax);
-        message = "Borg integrity checks must yield CPU and I/O to interactive work";
+          && !(borgCheckService ? ExecCondition);
+        message = "Borg integrity checks must yield CPU/I/O and stay within backup resource bounds";
       }
       {
         assertion =
           borgMaintenanceServiceConfig.TimeoutStopSec == "15s"
           && !serviceRestartIfChanged "borgbackup-maintenance"
           && hasBackgroundPriority borgMaintenanceServiceConfig
+          && hasBackupBounds borgMaintenanceServiceConfig
           && borgMaintenanceTimer.Persistent == false
           && builtins.match ".*borg prune --lock-wait 60.*" borgMaintenanceService.script != null
           && builtins.match ".*borg compact --lock-wait 60.*" borgMaintenanceService.script != null
@@ -209,23 +225,7 @@
             builtins.match ".*borg prune.*--keep-within 7d.*--keep-daily 60.*--keep-weekly 26.*--keep-monthly 24.*--keep-yearly 5.*" borgMaintenanceService.script
             != null
           && builtins.match ".*borg compact.*" borgMaintenanceService.script != null;
-        message = "Borg retention maintenance must keep broad history without running compaction on every drain";
-      }
-      {
-        assertion =
-          !(persistBorgService ? MemoryHigh)
-          && !(persistBorgService ? MemoryMax)
-          && !(realmBorgService ? MemoryHigh)
-          && !(realmBorgService ? MemoryMax);
-        message = "Borg backup jobs must not carry cgroup memory guardrails";
-      }
-      {
-        assertion =
-          !(persistBorgService ? IOReadBandwidthMax)
-          && !(persistBorgService ? IOWriteBandwidthMax)
-          && !(realmBorgService ? IOReadBandwidthMax)
-          && !(realmBorgService ? IOWriteBandwidthMax);
-        message = "Borg backup jobs must rely on scheduling and low weights, not hard bandwidth caps";
+        message = "Borg retention maintenance must keep broad history without running compaction on every drain and within backup resource bounds";
       }
       {
         assertion = builtins.any (

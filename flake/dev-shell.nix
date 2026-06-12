@@ -83,6 +83,9 @@
             fi
           fi
         fi
+        if [ "$_cmd" = "build" ] || { [ "$_cmd" = "flake" ] && [ "$_sub" = "check" ]; }; then
+          export NIX_CONFIG="eval-cache = false"
+        fi
         exec ${pkgs.nix}/bin/nix "$@"
       '';
 
@@ -104,6 +107,7 @@
             --user \
             --quiet --collect --pipe --service-type=exec --wait \
             --setenv=PATH="${rebuildServicePath}:$PATH" \
+            --setenv=NIX_CONFIG="eval-cache = false" \
             --setenv=SINNIX_REBUILD_ACTIVE=1 \
             --slice=nix-build.slice \
             -p CPUSchedulingPolicy=idle \
@@ -126,7 +130,7 @@
             echo "sinnix check: another heavy nix operation is already running — aborting to prevent thrashing" >&2
             exit 1
           fi
-          SINNIX_REBUILD_ACTIVE=1 exec ${scriptPkgs.nix-safe}/bin/nix-safe flake check "$@"
+          NIX_CONFIG="eval-cache = false" SINNIX_REBUILD_ACTIVE=1 exec ${scriptPkgs.nix-safe}/bin/nix-safe flake check "$@"
         '';
         format = pkgs.writeShellScriptBin "format" ''exec ${nix} fmt "$@"'';
         switch = mkNhCommand "switch" "switch";

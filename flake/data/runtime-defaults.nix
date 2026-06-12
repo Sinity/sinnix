@@ -82,6 +82,18 @@ rec {
       IOSchedulingClass = "idle";
       CPUWeight = 20;
       IOWeight = 20;
+      MemoryHigh = "2G";
+      MemoryMax = "4G";
+      IOReadBandwidthMax = [
+        "/persist 40M"
+        "/realm 80M"
+        "/outer-realm 40M"
+      ];
+      IOWriteBandwidthMax = [
+        "/persist 20M"
+        "/realm 40M"
+        "/outer-realm 40M"
+      ];
     };
     capture-runtime = mkClass "Long-running capture daemons" {
       Nice = 10;

@@ -24,6 +24,7 @@ fi
 
 safe_jobs="${NIX_SAFE_MAX_JOBS:-2}"
 safe_cores="${NIX_SAFE_CORES:-2}"
+safe_eval_cache="${NIX_SAFE_EVAL_CACHE:-false}"
 
 if [[ "$safe_jobs" != "auto" && ! "$safe_jobs" =~ ^[1-9][0-9]*$ ]]; then
   safe_jobs="auto"
@@ -80,6 +81,14 @@ fi
 
 if (( cores_set == 0 )) && [[ -n "$safe_cores" ]]; then
   args+=(--cores "$safe_cores")
+fi
+
+if [[ "$safe_eval_cache" != "true" && "$safe_eval_cache" != "1" && "$safe_eval_cache" != "yes" ]]; then
+  if [[ -n "${NIX_CONFIG:-}" ]]; then
+    export NIX_CONFIG="${NIX_CONFIG}"$'\n'"eval-cache = false"
+  else
+    export NIX_CONFIG="eval-cache = false"
+  fi
 fi
 
 if [[ -z "${NIX_SAFE_SCOPED:-}" ]] && command -v sinnix-scope >/dev/null 2>&1; then
