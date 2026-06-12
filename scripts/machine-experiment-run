@@ -100,46 +100,82 @@ def gpu_state() -> dict[str, Any]:
     }
 
 
-def systemd_state(units: list[str]) -> dict[str, dict[str, str]]:
+def unit_manager(unit: str) -> tuple[str, str]:
+    if unit.startswith("user:"):
+        return "user", unit.removeprefix("user:")
+    if unit.startswith("system:"):
+        return "system", unit.removeprefix("system:")
+    return "system", unit
+
+
+def systemctl_show(unit: str, *, user: bool = False) -> str | None:
+    args = [
+        "systemctl",
+        "show",
+        unit,
+        "--no-pager",
+        "-p",
+        "LoadState",
+        "-p",
+        "ActiveState",
+        "-p",
+        "SubState",
+        "-p",
+        "FragmentPath",
+        "-p",
+        "MemoryCurrent",
+        "-p",
+        "CPUUsageNSec",
+        "-p",
+        "IOReadBytes",
+        "-p",
+        "IOWriteBytes",
+    ]
+    if user:
+        args.insert(1, "--user")
+    return run_stdout(args)
+
+
+def parse_systemctl_show(out: str) -> dict[str, str]:
+    props = {}
+    for line in out.splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            props[key] = value
+    return props
+
+
+def systemd_state(units: list[str], *, user: bool = False) -> dict[str, dict[str, str]]:
     result: dict[str, dict[str, str]] = {}
     for unit in units:
-        out = run_stdout([
-            "systemctl",
-            "show",
-            unit,
-            "--no-pager",
-            "-p",
-            "ActiveState",
-            "-p",
-            "SubState",
-            "-p",
-            "MemoryCurrent",
-            "-p",
-            "CPUUsageNSec",
-            "-p",
-            "IOReadBytes",
-            "-p",
-            "IOWriteBytes",
-        ])
+        out = systemctl_show(unit, user=user)
         if not out:
             continue
-        props = {}
-        for line in out.splitlines():
-            if "=" in line:
-                key, value = line.split("=", 1)
-                props[key] = value
-        result[unit] = props
+        result[unit] = parse_systemctl_show(out)
     return result
 
 
-def observed_state(units: list[str]) -> dict[str, Any]:
+def split_units(units: list[str], user_units: list[str]) -> tuple[list[str], list[str]]:
+    system_result: list[str] = []
+    user_result: list[str] = list(user_units)
+    for unit in units:
+        manager, name = unit_manager(unit)
+        if manager == "user":
+            user_result.append(name)
+        else:
+            system_result.append(name)
+    return system_result, user_result
+
+
+def observed_state(system_units: list[str], user_units: list[str]) -> dict[str, Any]:
     return {
         "boot_id": read_text("/proc/sys/kernel/random/boot_id"),
         "kernel": platform.release(),
         "nix_system": os.path.realpath("/run/current-system") if Path("/run/current-system").exists() else None,
         "cpu": cpu_state(),
         "gpu": gpu_state(),
-        "systemd": systemd_state(units),
+        "systemd": systemd_state(system_units),
+        "systemd_user": systemd_state(user_units, user=True),
     }
 
 
@@ -167,7 +203,13 @@ def main() -> int:
     parser.add_argument("--service-profile", default="unspecified")
     parser.add_argument("--cache-profile", default="unspecified")
     parser.add_argument("--planned-treatment", help="JSON object or path")
-    parser.add_argument("--unit", action="append", default=[])
+    parser.add_argument(
+        "--unit",
+        action="append",
+        default=[],
+        help="system unit to snapshot; prefix with user: for a user-manager unit",
+    )
+    parser.add_argument("--user-unit", action="append", default=[], help="user-manager unit to snapshot")
     parser.add_argument("--note", action="append", default=[])
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
@@ -189,6 +231,7 @@ def main() -> int:
         "btrbk.service",
         "nix-daemon.service",
     ]
+    system_units, user_units = split_units(units, args.user_unit)
     cwd = Path.cwd()
     manifest: dict[str, Any] = {
         "schema": SCHEMA,
@@ -203,7 +246,7 @@ def main() -> int:
         "cache_profile": args.cache_profile,
         "notes": args.note,
         "started_at": utc_now(),
-        "pre_state": observed_state(units),
+        "pre_state": observed_state(system_units, user_units),
     }
     write_json(run_dir / "started.json", manifest)
 
@@ -211,7 +254,7 @@ def main() -> int:
 
     manifest["ended_at"] = utc_now()
     manifest["exit_status"] = proc.returncode
-    manifest["post_state"] = observed_state(units)
+    manifest["post_state"] = observed_state(system_units, user_units)
     write_json(run_dir / "manifest.json", manifest)
     print(run_dir)
     return int(proc.returncode)

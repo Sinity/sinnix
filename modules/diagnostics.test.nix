@@ -22,6 +22,7 @@
     config:
     let
       zramResetScript = builtins.readFile (inputs.self + "/scripts/sinnix-zram-reset");
+      experimentScript = builtins.readFile (inputs.self + "/scripts/machine-experiment-run");
     in
     [
       {
@@ -46,6 +47,14 @@
           && lib.hasInfix "systemctl start systemd-zram-setup@zram0.service" zramResetScript
           && lib.hasInfix "systemctl start dev-zram0.swap" zramResetScript;
         message = "sinnix-zram-reset must use the validated stop/retry-reset/restore/start sequence";
+      }
+      {
+        assertion =
+          lib.hasInfix "--user-unit" experimentScript
+          && lib.hasInfix "systemd_user" experimentScript
+          && lib.hasInfix "systemctl_show(unit, user=user)" experimentScript
+          && lib.hasInfix "unit.startswith(\"user:\")" experimentScript;
+        message = "machine-experiment-run must capture user-manager units without misclassifying them as system units";
       }
     ];
 }
