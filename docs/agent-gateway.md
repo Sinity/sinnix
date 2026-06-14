@@ -25,11 +25,16 @@ The binary is a stdlib-only Python MCP server. It speaks JSON-RPC over stdio and
 - `tools/call`
 - `ping`
 
-It also has a local JSON-RPC HTTP mode for tunnel experiments:
+It also has a local Streamable HTTP-compatible JSON-RPC mode for tunnel experiments:
 
 ```bash
 sinnix-agent-gateway --config /etc/sinnix/agent-gateway/config.json http --host 127.0.0.1 --port 3020
 ```
+
+The HTTP server accepts MCP JSON-RPC POST requests at `/mcp`, returns ordinary
+`application/json` responses by default, and can return single-message SSE when
+the client only accepts `text/event-stream`. The legacy POST `/` endpoint remains
+available for simple local probes.
 
 For stdio MCP clients, use:
 
@@ -55,8 +60,18 @@ Enable the package and configuration surface:
       defaultRef = "master";
       allowWrite = true;
       tasks = {
-        cargo-check = [ "cargo" "check" "--workspace" ];
-        cargo-test = [ "cargo" "test" "--workspace" ];
+        cargo-check = {
+          command = [ "cargo" "check" "--workspace" ];
+          description = "Check all Rust workspace crates.";
+          timeout = 1800;
+        };
+        cargo-test = {
+          command = [ "cargo" "test" "--workspace" ];
+          description = "Run all Rust workspace tests.";
+          timeout = 3600;
+          background = true;
+          risk = "high";
+        };
       };
     };
   };
@@ -85,6 +100,7 @@ sinnix.services.agent-gateway.http = {
 The MCP server currently exposes:
 
 - `gateway_info`
+- `gateway_guide`
 - `audit_tail`
 - `repo_materialize`
 - `repo_status`
@@ -93,6 +109,7 @@ The MCP server currently exposes:
 - `repo_write_file`
 - `repo_search`
 - `repo_pack`
+- `repo_export_bundle`
 - `repo_apply_patch`
 - `repo_diff`
 - `run_command`
@@ -101,16 +118,29 @@ The MCP server currently exposes:
 - `job_list`
 - `artifact_list`
 - `artifact_read`
+- `artifact_read_base64`
 - `host_run`
+
+Every `tools/list` entry includes both `inputSchema` and `outputSchema`.
+Command/task tools use a `oneOf` output schema because they can either return a
+foreground command result or a durable background job descriptor.
+`repo_export_bundle` plus `artifact_read_base64` is the path for agents that
+need their own checkout: reconstruct the bundle in the remote environment and
+run `git clone <bundle>`.
 
 The intended loop:
 
-1. `repo_materialize` a configured repo/ref.
+1. `gateway_guide` for connector-facing workflow guidance.
+2. `repo_materialize` a configured repo/ref.
 2. Use `repo_search`, `repo_tree`, and `repo_read_file` for orientation.
 3. Use `run_command` freely for yolo-mode local work.
 4. Use `repo_write_file` or `repo_apply_patch` for edits.
 5. Use `repo_diff`, `run_task`, and `repo_pack` to validate and report.
 6. Use normal git commands through `run_command` when deliberately pushing from a configured writable workspace.
+
+Configured tasks can be either concise command vectors or metadata-rich objects.
+Metadata is exposed through `gateway_info` so a client can prefer known checks,
+start expensive tasks in the background, and report expected outputs.
 
 ## State layout
 
@@ -121,9 +151,14 @@ Default state root:
   mirrors/      bare git mirrors
   workspaces/   checked-out mutable worktrees
   artifacts/    prompt packs and large outputs
-  jobs/         background job logs
+  jobs/         durable background job records and logs
   audit.jsonl   hash-chained tool-call ledger
 ```
+
+Background jobs are recorded on disk with `job.json`, `stdout.log`,
+`stderr.log`, and `exitcode`. `job_status` and `job_list` can inspect jobs after
+the gateway process restarts, as long as the underlying process or logs still
+exist.
 
 ## Policy stance
 

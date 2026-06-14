@@ -30,6 +30,10 @@
 
   sinnix.persistence.enable = true;
   sinnix.services = {
+    agent-gateway = {
+      enable = true;
+      http.enable = true;
+    };
     transmission = {
       enable = true;
       autoStart = true;

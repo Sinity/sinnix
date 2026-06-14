@@ -22,6 +22,8 @@ python3Packages.buildPythonApplication {
   # that shell out to git/rg/fd/tar; host profiles can still add cargo/nix/etc.
   dependencies = [ ];
 
+  nativeCheckInputs = [ python3Packages.pytest ];
+
   makeWrapperArgs = [
     "--prefix"
     "PATH"
@@ -36,6 +38,12 @@ python3Packages.buildPythonApplication {
       coreutils
     ])
   ];
+
+  checkPhase = ''
+    runHook preCheck
+    pytest test_smoke.py
+    runHook postCheck
+  '';
 
   pythonImportsCheck = [
     "sinnix_agent_gateway"
