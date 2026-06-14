@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sinnix-agent-gateway"
+version = "0.1.0"
+description = "Trusted local MCP gateway for repo, command, artifact, and Sinnix operations"
+requires-python = ">=3.12"
+
+[project.scripts]
+sinnix-agent-gateway = "sinnix_agent_gateway.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["sinnix_agent_gateway*"]
