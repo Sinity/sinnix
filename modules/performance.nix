@@ -208,18 +208,10 @@ in
       # churned (and there is no disk swap to fall back to).
       freeSwapThreshold = 90;
       extraArgs = [
-        # Prefer killing heavy build tooling under pressure — NOT the coding
-        # agents. `node`/`python` were removed here: Claude Code is a `node`
-        # process and the MCP servers are `node`/`python`, so preferring them
-        # made earlyoom kill the running agent (and its MCPs) whenever a second
-        # agent was launched.
         "--prefer"
-        "(cargo|rustc|cc1plus|ld|nix|nix-daemon)"
-        # Protect interactive surfaces. Coding agents (`claude`, `codex`, and
-        # their `node` runtime/MCP children) are interactive work and are
-        # avoided like the desktop apps so launching one never evicts another.
+        "(node|python|cargo|rustc|cc1plus|ld|nix|nix-daemon)"
         "--avoid"
-        "(systemd|systemd-logind|dbus-daemon|sshd|agetty|Hyprland|noctalia|quickshell|foot|kitty|zsh|bash|sudo|doas|below|chrome|chromium|firefox|electron|claude|codex|node)"
+        "(systemd|systemd-logind|dbus-daemon|sshd|agetty|Hyprland|noctalia|quickshell|foot|kitty|zsh|bash|sudo|doas|below|chrome|chromium|firefox|electron)"
       ];
     };
 

@@ -30,7 +30,6 @@
 }:
 let
   cfg = config.sinnix.services.sinex;
-  inherit (config.sinnix.paths) realmRoot;
   mkSinexPkgs = pkgs': inputs.sinex.packages.${pkgs'.stdenv.hostPlatform.system};
   sinexEnvironment = lib.toLower cfg.environment;
   targetUserName = config.sinnix.user.name;
@@ -94,10 +93,6 @@ in
           };
         }
         .${cfg.activationProfile};
-      filesystemWatchPaths = [
-        "${realmRoot}/project"
-        "${realmRoot}/inbox/download"
-      ];
       maintenanceTimerServiceNames = [
         "sinex-document-scan"
       ];
@@ -294,7 +289,7 @@ in
               enable = runtimeEnabled;
               filesystem = {
                 enable = runtimeEnabled && activationProfile.filesystem;
-                watchPaths = filesystemWatchPaths;
+                watchPaths = cfg.filesystem.watchPaths;
                 ignoredDirectoryNames = lib.mkForce [
                   ".btrfs"
                   ".claude"

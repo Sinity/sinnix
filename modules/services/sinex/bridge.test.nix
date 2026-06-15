@@ -123,6 +123,7 @@
       persistedSystemDirs = config.sinnix.persistence.system.directories;
       postgresqlUnitConfig = serviceUnitConfig "postgresql";
       sinexFilesystem = config.services.sinex.sources.filesystem;
+      sinexBridgeSource = builtins.readFile (inputs.self + "/modules/services/sinex/bridge.nix");
       sinexAutomata = config.services.sinex.automata;
       preflightEnabled = lib.attrByPath [
         "services"
@@ -454,6 +455,22 @@
           && sinexPostgresDumpTimer.RandomizedDelaySec == "20min"
           && sinexPostgresDumpTimer.Persistent == false;
         message = "Sinex pg_dump backup timer must be scheduled without catch-up storms";
+      }
+      {
+        assertion =
+          sinexFilesystem.watchPaths == config.sinnix.services.sinex.filesystem.watchPaths
+          && config.sinnix.services.sinex.filesystem.watchPaths == [
+            "${config.sinnix.paths.realmRoot}/project"
+            "${config.sinnix.paths.realmRoot}/inbox/download"
+          ];
+        message = "Sinex bridge must pass host-owned filesystem watch roots through to upstream defaults";
+      }
+      {
+        assertion =
+          !(lib.hasInfix "filesystemWatchPaths = [" sinexBridgeSource)
+          && !(lib.hasInfix "realmRoot}/project" sinexBridgeSource)
+          && !(lib.hasInfix "realmRoot}/inbox/download" sinexBridgeSource);
+        message = "Sinex bridge must not hard-code realm-derived filesystem watch roots";
       }
       {
         assertion = builtins.all (name: builtins.elem name sinexFilesystem.ignoredDirectoryNames) [
