@@ -71,7 +71,7 @@
     # Sinex is sourced from GitHub so system deployments follow pushed upstream
     # history instead of implicitly consuming the local checkout state.
     sinex = {
-      url = "git+https://github.com/Sinity/sinex?ref=fix/dlq-bisect-program-limit";
+      url = "git+https://github.com/Sinity/sinex?ref=master";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.agenix.follows = "agenix";
     };

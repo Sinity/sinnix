@@ -251,10 +251,6 @@ in
 
             core = {
               enable = runtimeEnabled;
-              event_engine = {
-                rejectInitialReplay = false;
-                startupCatchUpMaxConcurrent = 1;
-              };
               api = {
                 enable = runtimeEnabled;
                 autoGenerateTls = true;

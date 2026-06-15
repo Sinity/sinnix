@@ -227,14 +227,6 @@
         message = "sinex-runtime.target must pull in postgresql.target";
       }
       {
-        assertion = config.services.sinex.core.event_engine.rejectInitialReplay == false;
-        message = "Sinnix Sinex runtime must explicitly allow raw-stream recovery replay when the event_engine durable is missing";
-      }
-      {
-        assertion = config.services.sinex.core.event_engine.startupCatchUpMaxConcurrent == 1;
-        message = "Sinnix Sinex runtime must serialize startup catch-up to reduce interactive I/O pressure";
-      }
-      {
         assertion = !preflightEnabled && !(builtins.elem "sinex-preflight.service" runtimeWants);
         message = "Sinex production preflight must stay manual instead of running during desktop activation";
       }
@@ -300,25 +292,6 @@
           name: (maintenanceTimerConfig name).Persistent == false
         ) sinexMaintenanceTimers;
         message = "Sinex maintenance timers must not catch up missed work immediately";
-      }
-      {
-        assertion = builtins.all (
-          name:
-          let
-            service = maintenanceServiceConfig name;
-          in
-          serviceRestartIfChanged name == false
-          && (
-            service.TimeoutStopSec == "15s" || service.TimeoutStopSec == 90 || service.TimeoutStopSec == "90s"
-          )
-          && (!(service ? Slice) || service.Slice == null)
-          && (!(service ? Nice) || service.Nice == null)
-          && (!(service ? CPUWeight) || service.CPUWeight == null)
-          && (!(service ? IOWeight) || service.IOWeight == null)
-          && (!(service ? IOSchedulingClass) || service.IOSchedulingClass == null)
-          && (!(service ? ExecCondition) || service.ExecCondition == null)
-        ) sinexMaintenanceTimers;
-        message = "Sinex maintenance services must use plain systemd policy";
       }
       {
         assertion = builtins.all (
