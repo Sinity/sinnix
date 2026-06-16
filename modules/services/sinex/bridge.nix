@@ -125,7 +125,7 @@ in
         toolName: sinexPkgs:
         pkgs.symlinkJoin {
           name = "${toolName}-${sinexEnvironment}";
-          paths = [ sinexPkgs.sinex ];
+          paths = [ sinexPkgs.${toolName} ];
         };
     in
     lib.mkMerge [
