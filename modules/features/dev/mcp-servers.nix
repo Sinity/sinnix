@@ -33,10 +33,6 @@ mkFeatureModule {
     };
     homeFile = {
       ".codex/skills" = "codex/skills";
-      ".gemini/settings.json" = {
-        source = "gemini/settings.json";
-        force = true;
-      };
       ".gemini/skills" = "_ai/skills";
     };
   };
@@ -119,18 +115,145 @@ mkFeatureModule {
           exec ${scriptPkgs.mcp-chrome-devtools}/bin/mcp-chrome-devtools "$@"
         fi
       '';
+      serenaVersion = "1.5.3";
+      serenaRuntimePath = lib.makeBinPath [
+        pkgs.bash
+        pkgs.coreutils
+        pkgs.git
+        pkgs.gnugrep
+        pkgs.nodejs_22
+        pkgs.pyright
+        pkgs.python313
+        pkgs.rust-analyzer
+        pkgs.uv
+      ];
+      mkSerenaWrapper = commandName: ''
+        #!${pkgs.runtimeShell}
+        set -euo pipefail
+
+        state_dir="$HOME/.local/state/serena"
+        export SERENA_HOME="''${SERENA_HOME:-$HOME/.local/share/serena}"
+        export UV_CACHE_DIR="''${UV_CACHE_DIR:-$HOME/.cache/uv}"
+        export UV_TOOL_DIR="$state_dir/tools"
+        export UV_TOOL_BIN_DIR="$state_dir/bin"
+        export PATH="${serenaRuntimePath}:$UV_TOOL_BIN_DIR:$PATH"
+
+        mkdir -p "$SERENA_HOME" "$UV_CACHE_DIR" "$UV_TOOL_DIR" "$UV_TOOL_BIN_DIR"
+
+        if [ ! -x "$UV_TOOL_BIN_DIR/serena" ] \
+          || ! "$UV_TOOL_BIN_DIR/serena" --version 2>/dev/null | grep -Fq ${lib.escapeShellArg serenaVersion}; then
+          ${pkgs.uv}/bin/uv tool install \
+            --python ${pkgs.python313}/bin/python3 \
+            --no-python-downloads \
+            --force \
+            ${lib.escapeShellArg "serena-agent==${serenaVersion}"}
+        fi
+
+        exec "$UV_TOOL_BIN_DIR/${commandName}" "$@"
+      '';
+      serenaConfigFile = pkgs.writeText "serena_config.yml" ''
+        language_backend: LSP
+        line_ending: lf
+        gui_log_window: false
+        web_dashboard: true
+        web_dashboard_open_on_launch: false
+        web_dashboard_listen_address: 127.0.0.1
+        web_dashboard_trusted_hosts:
+          - 127.0.0.1
+          - localhost
+        log_level: 20
+        trace_lsp_communication: false
+        tool_timeout: 240
+        default_max_tool_answer_chars: 150000
+        symbol_info_budget: 10
+        base_modes:
+          - interactive
+          - editing
+        default_modes: []
+        ignored_paths:
+          - .direnv
+          - .git
+          - .venv
+          - node_modules
+          - target
+          - __pycache__
+        project_serena_folder_location: "$projectDir/.serena"
+        projects:
+          - /realm/project/sinex
+          - /realm/project/polylogue
+          - /realm/project/sinity-lynchpin
+          - /realm/project/sinnix
+      '';
+      codexHooksFile = jsonFormat.generate "codex-hooks.json" {
+        hooks = {
+          PreToolUse = [
+            {
+              matcher = "Bash";
+              hooks = [
+                {
+                  type = "command";
+                  command = "serena-hooks remind --client=codex";
+                }
+              ];
+            }
+          ];
+          SessionStart = [
+            {
+              matcher = "startup|resume";
+              hooks = [
+                {
+                  type = "command";
+                  command = "serena-hooks activate --client=codex";
+                }
+              ];
+            }
+          ];
+          Stop = [
+            {
+              hooks = [
+                {
+                  type = "command";
+                  command = "serena-hooks cleanup --client=codex";
+                }
+              ];
+            }
+          ];
+        };
+      };
       inherit (mcpRegistry)
         selectClientServers
         renderCodexServer
+        renderGeminiServer
         ;
       codexMcpServers = lib.mapAttrs renderCodexServer (selectClientServers "codex");
       codexMcpConfigFile = tomlFormat.generate "codex-mcp.toml" { mcp_servers = codexMcpServers; };
       codexConfigFile = pkgs.runCommandLocal "codex-config.toml" { } ''
         cat ${inputs.self + "/dots/codex/config.toml"} ${codexMcpConfigFile} > "$out"
       '';
+      geminiSettingsBase = removeAttrs (builtins.fromJSON (
+        builtins.readFile (inputs.self + "/dots/gemini/settings.json")
+      )) [ "mcpServers" ];
+      geminiSettingsFile = jsonFormat.generate "gemini-settings.json" (
+        geminiSettingsBase
+        // {
+          mcpServers = lib.mapAttrs renderGeminiServer (selectClientServers "gemini");
+        }
+      );
     in
     {
       sinnix.features.dev.mcp-servers.codexConfigSource = codexConfigFile;
+
+      sinnix.persistence.home.directories = [
+        {
+          directory = ".local/share/codebase-memory-mcp";
+          mode = "0700";
+        }
+        {
+          directory = ".local/share/serena";
+          mode = "0700";
+        }
+        ".local/state/serena"
+      ];
 
       home-manager.users.${user} =
         {
@@ -184,10 +307,57 @@ mkFeatureModule {
                 run cp ${lib.escapeShellArg (toString codexConfigFile)} "$HOME/.codex/config.toml"
                 run chmod 644 "$HOME/.codex/config.toml"
               '';
+              codebaseMemoryMcpConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+                run mkdir -p "$HOME/.local/share/codebase-memory-mcp"
+                run ${pkgs.coreutils}/bin/env CBM_CACHE_DIR="$HOME/.local/share/codebase-memory-mcp" ${
+                  scriptPkgs."codebase-memory-mcp"
+                }/bin/codebase-memory-mcp config set auto_index true
+                run ${pkgs.coreutils}/bin/env CBM_CACHE_DIR="$HOME/.local/share/codebase-memory-mcp" ${
+                  scriptPkgs."codebase-memory-mcp"
+                }/bin/codebase-memory-mcp config set auto_index_limit 50000
+              '';
+              serenaConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+                run mkdir -p "$HOME/.local/share/serena"
+                if [ -f "$HOME/.local/share/serena/serena_config.yml" ] \
+                  && ! ${pkgs.diffutils}/bin/cmp -s ${lib.escapeShellArg (toString serenaConfigFile)} "$HOME/.local/share/serena/serena_config.yml"; then
+                  run cp "$HOME/.local/share/serena/serena_config.yml" "$HOME/.local/share/serena/serena_config.yml.hm-bak"
+                fi
+                run cp ${lib.escapeShellArg (toString serenaConfigFile)} "$HOME/.local/share/serena/serena_config.yml"
+                run chmod 644 "$HOME/.local/share/serena/serena_config.yml"
+              '';
             };
           };
 
           home.file = {
+            ".gemini/settings.json" = {
+              source = geminiSettingsFile;
+              force = true;
+            };
+            ".codex/hooks.json" = {
+              source = codexHooksFile;
+              force = true;
+            };
+            ".local/bin/codebase-memory-mcp" = {
+              executable = true;
+              force = true;
+              text = ''
+                #!${pkgs.runtimeShell}
+                set -euo pipefail
+                export CBM_CACHE_DIR="''${CBM_CACHE_DIR:-$HOME/.local/share/codebase-memory-mcp}"
+                mkdir -p "$CBM_CACHE_DIR"
+                exec ${scriptPkgs."codebase-memory-mcp"}/bin/codebase-memory-mcp "$@"
+              '';
+            };
+            ".local/bin/serena" = {
+              executable = true;
+              force = true;
+              text = mkSerenaWrapper "serena";
+            };
+            ".local/bin/serena-hooks" = {
+              executable = true;
+              force = true;
+              text = mkSerenaWrapper "serena-hooks";
+            };
             ".local/bin/mcp-firecrawl" = {
               source = "${mcpFirecrawlBin}/bin/mcp-firecrawl";
               force = true;

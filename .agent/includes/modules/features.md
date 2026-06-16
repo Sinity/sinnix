@@ -38,7 +38,7 @@ Organized by domain under `modules/features/`:
 - **editors.nix**: VS Code, Zed (with subFeatures for each)
 - **git.nix**: Git config, delta, aliases
 - **languages.nix**: Language toolchains (Python, Rust, Node, etc.)
-- **mcp-servers.nix**: Model Context Protocol server configs
+- **mcp-servers.nix**: Model Context Protocol server configs (Serena, Codebase Memory, Polylogue, Context7, GitHub, Lynchpin, and opt-in browser automation)
 - **shell.nix**: Unified shell environment with subFeatures:
   - `zsh`: Zsh + oh-my-zsh + syntax highlighting
   - `prompt`: Starship + Atuin + Zoxide + FZF

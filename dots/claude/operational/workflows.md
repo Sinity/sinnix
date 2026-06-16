@@ -34,6 +34,32 @@ sinnix-scope build -- <project build/test command>
 sinnix-scope nix-build -- nix build .#target
 ```
 
+**Agent worktree placement (wear policy):** `/tmp` is on the root MX500
+(NOT tmpfs; the wear-limited drive with a 60 GB/day write SLO). A Rust
+worktree's per-checkout `CARGO_TARGET_DIR` writes multiple GB per build.
+Place agent worktrees for heavy-compile repos under `/realm/tmp/worktrees/`
+(NVMe, 400 GB/day budget) instead of `/tmp`:
+
+```bash
+mkdir -p /realm/tmp/worktrees
+git -C /realm/project/<repo> worktree add -b <branch> /realm/tmp/worktrees/<name> origin/master
+```
+
+**Sinex tests from a worktree:** the devshell's `DATABASE_URL` points at the
+worktree's own (non-running) dev postgres, so sqlx macros fail; and
+`SQLX_OFFLINE=true` breaks test files whose queries aren't in `.sqlx`.
+Point macros at the main checkout's live dev DB instead:
+
+```bash
+nix develop --command env \
+  DATABASE_URL="postgresql:///sinex_dev?host=/realm/project/sinex/.sinex/run" \
+  cargo test -p <crate> --lib <filter>
+```
+
+The pre-push drift guard inherits the same broken `DATABASE_URL` — pushing
+from a worktree devshell needs the identical `env DATABASE_URL=… git push`
+override, or sqlx compile errors masquerade as drift-guard rejections.
+
 ### Data Analysis (lynchpin)
 
 ```bash

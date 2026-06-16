@@ -809,9 +809,10 @@ in
 
             test -f "$HOME/.codex/config.toml"
             test ! -L "$HOME/.codex/config.toml"
-            test -L "$HOME/.gemini/settings.json"
+            test -f "$HOME/.gemini/settings.json"
             test -L "$HOME/.config/claude/settings.json"
             test -L "$HOME/.config/claude/mcp.json"
+            test -L "$HOME/.codex/hooks.json"
 
             for wrapper in \
               "$HOME/.local/bin/claude" \
@@ -825,7 +826,10 @@ in
               "$HOME/.local/bin/codex-max" \
               "$HOME/.local/bin/codex-spark" \
               "$HOME/.local/bin/codex-spark-xhigh" \
-              "$HOME/.local/bin/gemini"; do
+              "$HOME/.local/bin/gemini" \
+              "$HOME/.local/bin/codebase-memory-mcp" \
+              "$HOME/.local/bin/serena" \
+              "$HOME/.local/bin/serena-hooks"; do
               test -x "$wrapper"
               bash -n "$wrapper"
             done
@@ -838,6 +842,9 @@ in
 
             jq -e '
               .mcpServers.github.url == "https://api.githubcopilot.com/mcp/" and
+              .mcpServers["codebase-memory-mcp"].command == "codebase-memory-mcp" and
+              .mcpServers.serena.command == "serena" and
+              .mcpServers.serena.args == ["start-mcp-server", "--project-from-cwd", "--context=claude-code"] and
               .mcpServers.lynchpin.command == "mcp-lynchpin" and
               .mcpServers.lynchpin.env.LYNCHPIN_REPO_ROOT == "/realm/project/sinity-lynchpin" and
               .mcpServers.lynchpin.env.LYNCHPIN_LOCAL_ROOT == "/realm/project/sinity-lynchpin/.lynchpin" and
@@ -867,10 +874,24 @@ in
             assert mcp['context7']['url'] == 'https://mcp.context7.com/mcp'
             assert mcp['context7']['bearer_token_env_var'] == 'CONTEXT7_API_KEY'
             assert mcp['github']['bearer_token_env_var'] == 'GITHUB_TOKEN'
+            assert mcp['codebase-memory-mcp']['command'] == 'codebase-memory-mcp'
+            assert mcp['serena']['command'] == 'serena'
+            assert mcp['serena']['startup_timeout_sec'] == 15
+            assert mcp['serena']['args'] == ['start-mcp-server', '--project-from-cwd', '--context=codex']
             assert mcp['polylogue']['command'] == 'mcp-polylogue'
             assert mcp['lynchpin']['env']['LYNCHPIN_REPO_ROOT'] == '/realm/project/sinity-lynchpin'
             assert mcp['lynchpin']['env']['LYNCHPIN_LOCAL_ROOT'] == '/realm/project/sinity-lynchpin/.lynchpin'
+            assert config['features']['codex_hooks'] is True
             PYCODE
+
+            jq -e '
+              .mcpServers["codebase-memory-mcp"].command == "codebase-memory-mcp" and
+              .mcpServers.serena.args == ["start-mcp-server", "--project-from-cwd", "--context=ide"]
+            ' "$HOME/.gemini/settings.json" >/dev/null
+
+            jq -e '
+              .hooks.SessionStart[0].hooks[0].command == "serena-hooks activate --client=codex"
+            ' "$HOME/.codex/hooks.json" >/dev/null
 
 
             grep -Fq 'mcp_args=(--mcp-config "$MCP_CONFIG" --strict-mcp-config)' "$HOME/.local/bin/claude"

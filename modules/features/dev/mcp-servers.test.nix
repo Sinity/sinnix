@@ -41,7 +41,8 @@ mkFeatureTest {
           );
         in
         base // { inherit mcpServers; };
-      geminiSettings = builtins.fromJSON (builtins.readFile (inputs.self + "/dots/gemini/settings.json"));
+      geminiSettings = builtins.fromJSON (builtins.readFile hm.home.file.".gemini/settings.json".source);
+      codexHooks = builtins.fromJSON (builtins.readFile hm.home.file.".codex/hooks.json".source);
     in
     [
       {
@@ -57,6 +58,14 @@ mkFeatureTest {
         assertion = hm.home.activation ? codexConfig;
         message = "Codex config must be deployed via home.activation (writable, not a Nix store symlink)";
       }
+      {
+        assertion = hm.home.activation ? codebaseMemoryMcpConfig;
+        message = "Codebase Memory MCP defaults must be initialized during Home Manager activation";
+      }
+      {
+        assertion = hm.home.activation ? serenaConfig;
+        message = "Serena global config must be managed during Home Manager activation";
+      }
       (expect.hmFileExists hm ".codex/skills"
         "Codex skills must be linked from the dedicated dots/codex/skills tree"
       )
@@ -67,6 +76,31 @@ mkFeatureTest {
       (expect.textContains (managedEntrySource
         hm.home.file.".local/bin/mcp-firecrawl"
       ) "/bin/mcp-firecrawl" "Firecrawl wrapper must point at the packaged binary")
+      (expect.textContains (managedEntryText hm.home.file.".local/bin/codebase-memory-mcp")
+        ".local/share/codebase-memory-mcp"
+        "Codebase Memory wrapper must keep graph state in persistent XDG data"
+      )
+      (expect.textContains (managedEntryText
+        hm.home.file.".local/bin/codebase-memory-mcp"
+      ) "/bin/codebase-memory-mcp" "Codebase Memory wrapper must launch the packaged binary")
+      (expect.textContains (managedEntryText
+        hm.home.file.".local/bin/serena"
+      ) "serena-agent==1.5.3" "Serena wrapper must install the pinned upstream package version")
+      (expect.textContains (managedEntryText
+        hm.home.file.".local/bin/serena"
+      ) ".local/share/serena" "Serena wrapper must keep user data in persistent XDG data")
+      (expect.textContains (managedEntryText
+        hm.home.file.".local/bin/serena-hooks"
+      ) "serena-hooks" "Serena hooks wrapper must dispatch to the Serena hook command")
+      (expect.persistedHomeDir config ".local/share/codebase-memory-mcp"
+        "Codebase Memory graph store must persist across impermanence boots"
+      )
+      (expect.persistedHomeDir config ".local/share/serena"
+        "Serena global configuration and logs must persist across impermanence boots"
+      )
+      (expect.persistedHomeDir config ".local/state/serena"
+        "Serena uv tool installation must persist across impermanence boots"
+      )
       (expect.textContains (managedEntrySource
         hm.home.file.".local/bin/mcp-playwright"
       ) "/bin/mcp-playwright" "Playwright wrapper must point at the packaged binary")
@@ -113,6 +147,45 @@ mkFeatureTest {
       (expect.textContains codexConfigText "bearer_token_env_var = \"GITHUB_TOKEN\""
         "Codex config must keep GitHub token lookup in the environment"
       )
+      (expect.textContains codexConfigText "[mcp_servers.codebase-memory-mcp]"
+        "Codex config must declare the Codebase Memory MCP server"
+      )
+      (expect.textContains codexConfigText "command = \"codebase-memory-mcp\""
+        "Codex config must call the managed Codebase Memory wrapper"
+      )
+      (expect.textContains codexConfigText "[mcp_servers.serena]"
+        "Codex config must declare the Serena MCP server"
+      )
+      (expect.textContains codexConfigText "startup_timeout_sec = 15"
+        "Codex Serena config must allow enough startup time for language-server initialization"
+      )
+      (expect.textContains codexConfigText
+        "args = [\"start-mcp-server\", \"--project-from-cwd\", \"--context=codex\"]"
+        "Codex Serena config must use the Codex context and activate from the working directory"
+      )
+      (expect.attrPathEq claudeSettings [
+        "mcpServers"
+        "codebase-memory-mcp"
+        "command"
+      ] "codebase-memory-mcp" "Claude config must call the managed Codebase Memory wrapper")
+      (expect.attrPathEq claudeSettings [
+        "mcpServers"
+        "serena"
+        "command"
+      ] "serena" "Claude config must call the managed Serena wrapper")
+      (expect.attrPathEq claudeSettings
+        [
+          "mcpServers"
+          "serena"
+          "args"
+        ]
+        [
+          "start-mcp-server"
+          "--project-from-cwd"
+          "--context=claude-code"
+        ]
+        "Claude Serena config must use the Claude Code context and activate from the working directory"
+      )
       (expect.attrPathEq claudeSettings [
         "mcpServers"
         "polylogue"
@@ -136,9 +209,33 @@ mkFeatureTest {
       )
       (expect.attrPathEq geminiSettings [
         "mcpServers"
+        "codebase-memory-mcp"
+        "command"
+      ] "codebase-memory-mcp" "Gemini config must call the managed Codebase Memory wrapper")
+      (expect.attrPathEq geminiSettings
+        [
+          "mcpServers"
+          "serena"
+          "args"
+        ]
+        [
+          "start-mcp-server"
+          "--project-from-cwd"
+          "--context=ide"
+        ]
+        "Gemini Serena config must use the generic IDE context and activate from the working directory"
+      )
+      (expect.attrPathEq geminiSettings [
+        "mcpServers"
         "polylogue"
         "command"
       ] "mcp-polylogue" "Gemini config must call the packaged Polylogue MCP wrapper")
+      {
+        assertion =
+          (builtins.elemAt (builtins.elemAt codexHooks.hooks.SessionStart 0).hooks 0).command
+          == "serena-hooks activate --client=codex";
+        message = "Codex hooks must activate Serena at session start";
+      }
       {
         assertion = !(hm.home.file.".gemini/skills".recursive or false);
         message = "Gemini skills must stay a direct directory symlink, not a recursive materialization";

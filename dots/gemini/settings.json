@@ -36,34 +36,6 @@
   "context": {
     "loadMemoryFromIncludeDirectories": true
   },
-  "mcpServers": {
-    "context7": {
-      "headers": {
-        "Authorization": "Bearer ${CONTEXT7_API_KEY}"
-      },
-      "httpUrl": "https://mcp.context7.com/mcp"
-    },
-    "polylogue": {
-      "command": "mcp-polylogue",
-      "args": []
-    },
-    "github": {
-      "httpUrl": "https://api.githubcopilot.com/mcp/",
-      "headers": {
-        "Authorization": "Bearer ${GITHUB_TOKEN}"
-      }
-    },
-    "playwright": {
-      "command": "mcp-playwright",
-      "args": ["--headless"]
-    },
-    "playwright-headed": {
-      "command": "mcp-playwright-headed"
-    },
-    "chrome-devtools": {
-      "command": "mcp-chrome-devtools"
-    }
-  },
   "tools": {
     "autoAccept": true,
     "shell": {

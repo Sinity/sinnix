@@ -10,6 +10,16 @@
       "type": "http",
       "url": "https://mcp.context7.com/mcp"
     },
+    "codebase-memory-mcp": {
+      "type": "stdio",
+      "command": "codebase-memory-mcp",
+      "args": []
+    },
+    "serena": {
+      "type": "stdio",
+      "command": "serena",
+      "args": ["start-mcp-server", "--context=ide", "--project-from-cwd"]
+    },
     "Parallel Search MCP": {
       "type": "http",
       "url": "https://search-mcp.parallel.ai/mcp"

@@ -49,6 +49,26 @@
   "hooks": {
     "PreToolUse": [
       {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.local/bin/serena-hooks remind --client=claude-code",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__serena__*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.local/bin/serena-hooks auto-approve --client=claude-code",
+            "timeout": 15
+          }
+        ]
+      },
+      {
         "matcher": "Bash",
         "hooks": [
           {
@@ -75,6 +95,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "~/.local/bin/serena-hooks cleanup --client=claude-code",
+            "timeout": 15
+          },
+          {
+            "type": "command",
             "command": "~/.claude/hooks/stop-agent-event.sh",
             "timeout": 3
           }
@@ -84,6 +109,11 @@
     "SessionStart": [
       {
         "hooks": [
+          {
+            "type": "command",
+            "command": "~/.local/bin/serena-hooks activate --client=claude-code",
+            "timeout": 15
+          },
           {
             "type": "command",
             "command": "~/.claude/hooks/sessionstart-polylogue-recall.sh",

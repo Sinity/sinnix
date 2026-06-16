@@ -25,6 +25,44 @@ let
       gemini.headers.Authorization = "Bearer \${GITHUB_TOKEN}";
     };
 
+    codebase-memory-mcp = {
+      transport = "stdio";
+      command = "codebase-memory-mcp";
+      clients = [
+        "codex"
+        "claude"
+        "gemini"
+      ];
+    };
+
+    serena = {
+      transport = "stdio";
+      command = "serena";
+      args = [
+        "start-mcp-server"
+        "--project-from-cwd"
+        "--context=ide"
+      ];
+      clients = [
+        "codex"
+        "claude"
+        "gemini"
+      ];
+      claude.args = [
+        "start-mcp-server"
+        "--project-from-cwd"
+        "--context=claude-code"
+      ];
+      codex = {
+        startup_timeout_sec = 15;
+        args = [
+          "start-mcp-server"
+          "--project-from-cwd"
+          "--context=codex"
+        ];
+      };
+    };
+
     firecrawl = {
       transport = "stdio";
       command = "mcp-firecrawl";
@@ -107,10 +145,13 @@ let
           url = server.url;
         }
       else
+        let
+          claude = server.claude or { };
+        in
         {
           inherit (server) command;
-          args = server.args or [ ];
-          env = server.env or { };
+          args = claude.args or server.args or [ ];
+          env = claude.env or server.env or { };
         }
     );
 
@@ -127,10 +168,14 @@ let
           bearer_token_env_var = codex.bearer_token_env_var or null;
         }
       else
+        let
+          codex = server.codex or { };
+        in
         {
           inherit (server) command;
-          args = server.args or [ ];
-          env = server.env or { };
+          args = codex.args or server.args or [ ];
+          env = codex.env or server.env or { };
+          startup_timeout_sec = codex.startup_timeout_sec or null;
         }
     );
 
@@ -147,10 +192,13 @@ let
           headers = gemini.headers or server.headers or { };
         }
       else
+        let
+          gemini = server.gemini or { };
+        in
         {
           inherit (server) command;
-          args = server.args or [ ];
-          env = server.env or { };
+          args = gemini.args or server.args or [ ];
+          env = gemini.env or server.env or { };
         }
     );
 in
