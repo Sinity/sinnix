@@ -52,7 +52,7 @@
     };
 
     polylogue = {
-      url = "github:Sinity/polylogue/fix/live-insight-memory-headroom";
+      url = "github:Sinity/polylogue/master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 

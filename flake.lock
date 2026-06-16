@@ -961,16 +961,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1781262504,
-        "narHash": "sha256-SuFNmaDp3rQZMO5q5CpHC00M7QbigRx1agWt4ao+N1o=",
+        "lastModified": 1781616081,
+        "narHash": "sha256-bwficmU0vqQl8/YkrckMsxzQcYU8moXijXLDA7xqrnk=",
         "owner": "Sinity",
         "repo": "polylogue",
-        "rev": "a4458ab6144a6468dd635d2b0a07706b82333fe6",
+        "rev": "f3bbd26fc409bbe11691b34c61fec59c0a961fb1",
         "type": "github"
       },
       "original": {
         "owner": "Sinity",
-        "ref": "fix/live-insight-memory-headroom",
+        "ref": "master",
         "repo": "polylogue",
         "type": "github"
       }
