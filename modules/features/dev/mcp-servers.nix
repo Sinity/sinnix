@@ -132,6 +132,7 @@ mkFeatureModule {
         set -euo pipefail
 
         state_dir="$HOME/.local/state/serena"
+        lock_dir="$state_dir/install.lock"
         export SERENA_HOME="''${SERENA_HOME:-$HOME/.local/share/serena}"
         export UV_CACHE_DIR="''${UV_CACHE_DIR:-$HOME/.cache/uv}"
         export UV_TOOL_DIR="$state_dir/tools"
@@ -140,13 +141,49 @@ mkFeatureModule {
 
         mkdir -p "$SERENA_HOME" "$UV_CACHE_DIR" "$UV_TOOL_DIR" "$UV_TOOL_BIN_DIR"
 
-        if [ ! -x "$UV_TOOL_BIN_DIR/serena" ] \
-          || ! "$UV_TOOL_BIN_DIR/serena" --version 2>/dev/null | grep -Fq ${lib.escapeShellArg serenaVersion}; then
+        install_serena() {
           ${pkgs.uv}/bin/uv tool install \
             --python ${pkgs.python313}/bin/python3 \
             --no-python-downloads \
             --force \
             ${lib.escapeShellArg "serena-agent==${serenaVersion}"}
+        }
+
+        serena_ready() {
+          [ -x "$UV_TOOL_BIN_DIR/serena" ] \
+            && [ -x "$UV_TOOL_BIN_DIR/${commandName}" ] \
+            && "$UV_TOOL_BIN_DIR/serena" --version 2>/dev/null | grep -Fq ${lib.escapeShellArg serenaVersion}
+        }
+
+        with_install_lock() {
+          while ! mkdir "$lock_dir" 2>/dev/null; do
+            if [ -f "$lock_dir/pid" ] && ! kill -0 "$(cat "$lock_dir/pid")" 2>/dev/null; then
+              rm -rf "$lock_dir"
+              continue
+            fi
+            sleep 0.1
+          done
+          trap 'rm -rf "$lock_dir"' EXIT
+          printf '%s\n' "$$" > "$lock_dir/pid"
+          "$@"
+          rm -rf "$lock_dir"
+          trap - EXIT
+        }
+
+        if ! serena_ready; then
+          with_install_lock install_serena
+        fi
+
+        if [ ! -x "$UV_TOOL_BIN_DIR/${commandName}" ]; then
+          with_install_lock install_serena
+        fi
+
+        if [ ! -x "$UV_TOOL_BIN_DIR/${commandName}" ]; then
+          echo "serena wrapper: $UV_TOOL_BIN_DIR/${commandName} is unavailable after bootstrap" >&2
+          if [ "${commandName}" = "serena-hooks" ]; then
+            exit 0
+          fi
+          exit 127
         fi
 
         exec "$UV_TOOL_BIN_DIR/${commandName}" "$@"

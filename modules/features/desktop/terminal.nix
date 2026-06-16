@@ -43,7 +43,7 @@ mkFeatureModule {
               auto_reload_config = -1;
 
               window_padding_width = 10;
-              scrollback_lines = 50000;
+              scrollback_lines = 10000;
               enable_audio_bell = "no";
               mouse_hide_wait = 60;
               wheel_scroll_multiplier = 5.0;

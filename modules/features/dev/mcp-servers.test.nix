@@ -92,6 +92,12 @@ mkFeatureTest {
       (expect.textContains (managedEntryText
         hm.home.file.".local/bin/serena-hooks"
       ) "serena-hooks" "Serena hooks wrapper must dispatch to the Serena hook command")
+      (expect.textContains (managedEntryText
+        hm.home.file.".local/bin/serena-hooks"
+      ) "install.lock" "Serena wrapper must serialize uv tool installation")
+      (expect.textContains (managedEntryText
+        hm.home.file.".local/bin/serena-hooks"
+      ) "exit 0" "Serena hook wrapper must not brick agent tool calls when bootstrap fails")
       (expect.persistedHomeDir config ".local/share/codebase-memory-mcp"
         "Codebase Memory graph store must persist across impermanence boots"
       )

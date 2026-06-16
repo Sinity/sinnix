@@ -35,6 +35,10 @@ mkFeatureTest {
         message = "Kitty automatic config reload must stay disabled to avoid runaway inotify watches";
       }
       {
+        assertion = hm.programs.kitty.settings.scrollback_lines == 10000;
+        message = "Kitty scrollback must stay bounded so high-output agent TUIs do not retain gigabytes";
+      }
+      {
         assertion = lib.hasInfix "include ~/.config/kitty/themes/noctalia.conf" (
           hm.programs.kitty.extraConfig or ""
         );
