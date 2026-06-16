@@ -85,6 +85,13 @@ let
       export BORG_PASSCOMMAND=${lib.escapeShellArg "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}"}
       export BORG_CACHE_DIR=/persist/root/.cache/borg
 
+      cleanup_snapshot_bind_mount() {
+        if mountpoint -q ${lib.escapeShellArg bindTarget}; then
+          umount ${lib.escapeShellArg bindTarget}
+        fi
+      }
+      cleanup_snapshot_bind_mount || true
+
       install -d -m 0700 -o root -g root ${lib.escapeShellArg repoPath}
       install -d -m 0700 -o root -g root ${lib.escapeShellArg bindTarget}
       install -d -m 0700 -o root -g root ${lib.escapeShellArg borgDrainStateRoot}
@@ -104,11 +111,6 @@ let
         fi
       fi
 
-      cleanup_snapshot_bind_mount() {
-        if mountpoint -q ${lib.escapeShellArg bindTarget}; then
-          umount ${lib.escapeShellArg bindTarget}
-        fi
-      }
       trap cleanup_snapshot_bind_mount EXIT
 
       snapshot="$(
