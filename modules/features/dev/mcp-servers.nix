@@ -138,10 +138,29 @@ mkFeatureModule {
         export UV_TOOL_DIR="$state_dir/tools"
         export UV_TOOL_BIN_DIR="$state_dir/bin"
         export PATH="${serenaRuntimePath}:$UV_TOOL_BIN_DIR:$PATH"
+        unset PYTHONPATH PYTHONHOME PYTHONBREAKPOINT PYTHONUSERBASE VIRTUAL_ENV
+        export PYTHONNOUSERSITE=1
 
         mkdir -p "$SERENA_HOME" "$UV_CACHE_DIR" "$UV_TOOL_DIR" "$UV_TOOL_BIN_DIR"
 
+        sync_serena_config() {
+          if [ -f "$SERENA_HOME/serena_config.yml" ] \
+            && ! ${pkgs.diffutils}/bin/cmp -s ${lib.escapeShellArg (toString serenaConfigFile)} "$SERENA_HOME/serena_config.yml" \
+            && [ ! -f "$SERENA_HOME/serena_config.yml.hm-bak" ]; then
+            cp "$SERENA_HOME/serena_config.yml" "$SERENA_HOME/serena_config.yml.hm-bak"
+          fi
+          cp ${lib.escapeShellArg (toString serenaConfigFile)} "$SERENA_HOME/serena_config.yml"
+          chmod 644 "$SERENA_HOME/serena_config.yml"
+        }
+
         install_serena() {
+          ${pkgs.uv}/bin/uv tool install \
+            --python ${pkgs.python313}/bin/python3 \
+            --no-python-downloads \
+            ${lib.escapeShellArg "serena-agent==${serenaVersion}"}
+        }
+
+        reinstall_serena() {
           ${pkgs.uv}/bin/uv tool install \
             --python ${pkgs.python313}/bin/python3 \
             --no-python-downloads \
@@ -149,16 +168,26 @@ mkFeatureModule {
             ${lib.escapeShellArg "serena-agent==${serenaVersion}"}
         }
 
-        serena_ready() {
-          [ -x "$UV_TOOL_BIN_DIR/serena" ] \
-            && [ -x "$UV_TOOL_BIN_DIR/${commandName}" ] \
-            && "$UV_TOOL_BIN_DIR/serena" --version 2>/dev/null | grep -Fq ${lib.escapeShellArg serenaVersion}
+        remove_stale_install_lock() {
+          if [ -f "$lock_dir/pid" ] && ! kill -0 "$(cat "$lock_dir/pid")" 2>/dev/null; then
+            rm -rf "$lock_dir"
+            return 0
+          fi
+          return 1
+        }
+
+        wait_for_install_lock() {
+          while [ -d "$lock_dir" ]; do
+            if remove_stale_install_lock; then
+              continue
+            fi
+            sleep 0.1
+          done
         }
 
         with_install_lock() {
           while ! mkdir "$lock_dir" 2>/dev/null; do
-            if [ -f "$lock_dir/pid" ] && ! kill -0 "$(cat "$lock_dir/pid")" 2>/dev/null; then
-              rm -rf "$lock_dir"
+            if remove_stale_install_lock; then
               continue
             fi
             sleep 0.1
@@ -170,13 +199,38 @@ mkFeatureModule {
           trap - EXIT
         }
 
-        if ! serena_ready; then
-          with_install_lock install_serena
-        fi
+        serena_version_matches() {
+          "$UV_TOOL_BIN_DIR/serena" --version 2>/dev/null | grep -Fq ${lib.escapeShellArg serenaVersion}
+        }
 
-        if [ ! -x "$UV_TOOL_BIN_DIR/${commandName}" ]; then
-          with_install_lock install_serena
-        fi
+        serena_ready() {
+          wait_for_install_lock
+          [ -x "$UV_TOOL_BIN_DIR/serena" ] \
+            && [ -x "$UV_TOOL_BIN_DIR/${commandName}" ] \
+            && serena_version_matches
+        }
+
+        repair_serena() {
+          if [ ! -x "$UV_TOOL_BIN_DIR/serena" ] || [ ! -x "$UV_TOOL_BIN_DIR/${commandName}" ]; then
+            install_serena || reinstall_serena
+            return 0
+          fi
+          if ! serena_version_matches; then
+            reinstall_serena
+          fi
+        }
+
+        ensure_serena() {
+          if serena_ready; then
+            return 0
+          fi
+
+          with_install_lock repair_serena
+          wait_for_install_lock
+        }
+
+        sync_serena_config
+        ensure_serena
 
         if [ ! -x "$UV_TOOL_BIN_DIR/${commandName}" ]; then
           echo "serena wrapper: $UV_TOOL_BIN_DIR/${commandName} is unavailable after bootstrap" >&2
@@ -186,6 +240,7 @@ mkFeatureModule {
           exit 127
         fi
 
+        wait_for_install_lock
         exec "$UV_TOOL_BIN_DIR/${commandName}" "$@"
       '';
       serenaConfigFile = pkgs.writeText "serena_config.yml" ''
@@ -279,7 +334,6 @@ mkFeatureModule {
     in
     {
       sinnix.features.dev.mcp-servers.codexConfigSource = codexConfigFile;
-
       sinnix.persistence.home.directories = [
         {
           directory = ".local/share/codebase-memory-mcp";
