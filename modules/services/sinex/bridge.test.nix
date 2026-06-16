@@ -104,6 +104,9 @@
       observedByName =
         name: builtins.head (builtins.filter (check: check.name == name) runtimeInventory.observedServices);
       natsService = config.systemd.services.nats.serviceConfig;
+      natsStreams = config.services.sinex.nats.bootstrapStreams.streams;
+      natsStreamByName =
+        name: builtins.head (builtins.filter (stream: stream.name == name) natsStreams);
       postgresService = config.systemd.services.postgresql.serviceConfig;
       sinexPostgresDumpUnit = config.systemd.services.sinex-postgres-dump;
       sinexPostgresDumpService = sinexPostgresDumpUnit.serviceConfig;
@@ -362,6 +365,10 @@
       {
         assertion = natsService.KillSignal == "SIGTERM" && natsService.TimeoutStopSec == "90s";
         message = "NATS must have bounded but production-sized graceful shutdown time";
+      }
+      {
+        assertion = (natsStreamByName "SINEX_RAW_EVENTS").maxBytes == null;
+        message = "Sinex raw event stream bootstrap must not shrink the live production cap";
       }
       {
         assertion =
