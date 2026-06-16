@@ -67,21 +67,29 @@ if [ ! -e /sys/block/zram0/reset ]; then
 fi
 
 active_swaps="$(swapon --noheadings --raw --show=NAME 2>/dev/null || true)"
-if [ "$active_swaps" != "/dev/zram0" ]; then
+if [ -n "$active_swaps" ] && [ "$active_swaps" != "/dev/zram0" ]; then
   echo "sinnix-zram-reset: refusing because active swap is not exactly /dev/zram0" >&2
   swapon --show >&2 || true
   exit 69
 fi
 
-used_bytes="$(swapon --bytes --noheadings --raw --show=USED /dev/zram0 2>/dev/null || echo 0)"
-if [ "${used_bytes:-0}" = "0" ]; then
-  echo "zram already empty"
-  swapon --show
-  exit 0
+if [ -n "$active_swaps" ]; then
+  used_bytes="$(swapon --bytes --noheadings --raw --show=USED /dev/zram0 2>/dev/null || echo 0)"
+  if [ "${used_bytes:-0}" = "0" ]; then
+    echo "zram already empty"
+    swapon --show
+    exit 0
+  fi
+else
+  used_bytes=0
 fi
 
 if [ "$confirm" -ne 1 ]; then
-  echo "zram currently has $used_bytes bytes in use." >&2
+  if [ -n "$active_swaps" ]; then
+    echo "zram currently has $used_bytes bytes in use." >&2
+  else
+    echo "zram swap is inactive; this will reset and recreate /dev/zram0." >&2
+  fi
   echo "Re-run with --yes to reset /dev/zram0." >&2
   exit 64
 fi
@@ -90,7 +98,7 @@ echo "Before:"
 swapon --show
 free -h
 
-systemctl stop dev-zram0.swap
+systemctl stop dev-zram0.swap || true
 systemctl stop systemd-zram-setup@zram0.service || true
 if ! reset_zram_device; then
   echo "sinnix-zram-reset: /sys/block/zram0/reset stayed busy; restoring zram swap" >&2

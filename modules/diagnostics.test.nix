@@ -33,6 +33,7 @@
         assertion =
           lib.hasInfix "swapon --noheadings --raw --show=NAME" zramResetScript
           && lib.hasInfix "active swap is not exactly /dev/zram0" zramResetScript
+          && lib.hasInfix "zram swap is inactive; this will reset and recreate /dev/zram0" zramResetScript
           && lib.hasInfix "run as root" zramResetScript
           && lib.hasInfix "This is intentionally manual. It is not a polling swap-drain service." zramResetScript;
         message = "sinnix-zram-reset must stay manual and refuse unsafe swap topologies";
