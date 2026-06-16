@@ -286,15 +286,6 @@ in
               inherit (bindings) bind bindl bindm;
               windowrule = if rules ? windowrule then rules.windowrule else [ ];
 
-              # Smart gaps: a workspace holding a single tiled window (or one
-              # fullscreen-tiled window) drops gaps, border, and rounding.
-              # Hyprland 0.54 workspace-rule params supersede the old
-              # windowrulev2 bordersize/rounding hack.
-              workspace = [
-                "w[tv1], gapsout:0, gapsin:0, border:false, rounding:false"
-                "f[1], gapsout:0, gapsin:0, border:false, rounding:false"
-              ];
-
               # NOTE: bar-layer blur (layerrule) omitted — the inline
               # `layerrule = blur, <ns>` form is rejected by Hyprland 0.54.3
               # (syntax changed). Re-add once the 0.54 layerrule form is
