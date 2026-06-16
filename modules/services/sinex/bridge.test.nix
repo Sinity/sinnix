@@ -104,10 +104,8 @@
       observedByName =
         name: builtins.head (builtins.filter (check: check.name == name) runtimeInventory.observedServices);
       natsService = config.systemd.services.nats.serviceConfig;
-      natsStreams = config.services.sinex.nats.bootstrapStreams.streams;
-      natsStreamByName =
-        name: builtins.head (builtins.filter (stream: stream.name == name) natsStreams);
       postgresService = config.systemd.services.postgresql.serviceConfig;
+      sinexdService = config.systemd.services.sinexd.serviceConfig;
       sinexPostgresDumpUnit = config.systemd.services.sinex-postgres-dump;
       sinexPostgresDumpService = sinexPostgresDumpUnit.serviceConfig;
       sinexPostgresDumpTimer = config.systemd.timers.sinex-postgres-dump.timerConfig;
@@ -126,7 +124,6 @@
       persistedSystemDirs = config.sinnix.persistence.system.directories;
       postgresqlUnitConfig = serviceUnitConfig "postgresql";
       sinexFilesystem = config.services.sinex.sources.filesystem;
-      sinexBridgeSource = builtins.readFile (inputs.self + "/modules/services/sinex/bridge.nix");
       sinexAutomata = config.services.sinex.automata;
       preflightEnabled = lib.attrByPath [
         "services"
@@ -183,6 +180,12 @@
         message = "sinexd stop must be bounded: SIGTERM is currently ignored upstream, so a long budget only stalls activation before the inevitable SIGKILL";
       }
       {
+        assertion =
+          builtins.elem "SINEX_DB_MAX_CONNECTIONS=32" sinexdService.Environment
+          && builtins.elem "SINEX_DB_MIN_CONNECTIONS=4" sinexdService.Environment;
+        message = "sinexd DB pool must be bounded below the upstream 100-connection default";
+      }
+      {
         assertion = config.services.postgresql.settings.wal_compression == "lz4";
         message = "Sinex postgres must compress WAL full-page images: the data dir sits on the wear-limited root SSD and FPW images dominate WAL volume";
       }
@@ -228,6 +231,14 @@
       {
         assertion = builtins.elem "postgresql.target" runtimeWants;
         message = "sinex-runtime.target must pull in postgresql.target";
+      }
+      {
+        assertion = builtins.elem "SINEX_EVENT_ENGINE_REJECT_INITIAL_REPLAY=false" sinexdService.Environment;
+        message = "Sinnix Sinex runtime must explicitly allow raw-stream recovery replay when the event_engine durable is missing";
+      }
+      {
+        assertion = builtins.elem "SINEX_EVENT_ENGINE_STARTUP_CATCH_UP_MAX_CONCURRENT=1" sinexdService.Environment;
+        message = "Sinnix Sinex runtime must serialize startup catch-up to reduce interactive I/O pressure";
       }
       {
         assertion = !preflightEnabled && !(builtins.elem "sinex-preflight.service" runtimeWants);
@@ -295,6 +306,25 @@
           name: (maintenanceTimerConfig name).Persistent == false
         ) sinexMaintenanceTimers;
         message = "Sinex maintenance timers must not catch up missed work immediately";
+      }
+      {
+        assertion = builtins.all (
+          name:
+          let
+            service = maintenanceServiceConfig name;
+          in
+          serviceRestartIfChanged name == false
+          && (
+            service.TimeoutStopSec == "15s" || service.TimeoutStopSec == 90 || service.TimeoutStopSec == "90s"
+          )
+          && (!(service ? Slice) || service.Slice == null)
+          && (!(service ? Nice) || service.Nice == null)
+          && (!(service ? CPUWeight) || service.CPUWeight == null)
+          && (!(service ? IOWeight) || service.IOWeight == null)
+          && (!(service ? IOSchedulingClass) || service.IOSchedulingClass == null)
+          && (!(service ? ExecCondition) || service.ExecCondition == null)
+        ) sinexMaintenanceTimers;
+        message = "Sinex maintenance services must use plain systemd policy";
       }
       {
         assertion = builtins.all (
@@ -367,10 +397,6 @@
         message = "NATS must have bounded but production-sized graceful shutdown time";
       }
       {
-        assertion = (natsStreamByName "SINEX_RAW_EVENTS").maxBytes == null;
-        message = "Sinex raw event stream bootstrap must not shrink the live production cap";
-      }
-      {
         assertion =
           postgresService.MemoryHigh == "8G"
           && !(postgresService ? MemoryMax)
@@ -435,22 +461,6 @@
           && sinexPostgresDumpTimer.RandomizedDelaySec == "20min"
           && sinexPostgresDumpTimer.Persistent == false;
         message = "Sinex pg_dump backup timer must be scheduled without catch-up storms";
-      }
-      {
-        assertion =
-          sinexFilesystem.watchPaths == config.sinnix.services.sinex.filesystem.watchPaths
-          && config.sinnix.services.sinex.filesystem.watchPaths == [
-            "${config.sinnix.paths.realmRoot}/project"
-            "${config.sinnix.paths.realmRoot}/inbox/download"
-          ];
-        message = "Sinex bridge must pass host-owned filesystem watch roots through to upstream defaults";
-      }
-      {
-        assertion =
-          !(lib.hasInfix "filesystemWatchPaths = [" sinexBridgeSource)
-          && !(lib.hasInfix "realmRoot}/project" sinexBridgeSource)
-          && !(lib.hasInfix "realmRoot}/inbox/download" sinexBridgeSource);
-        message = "Sinex bridge must not hard-code realm-derived filesystem watch roots";
       }
       {
         assertion = builtins.all (name: builtins.elem name sinexFilesystem.ignoredDirectoryNames) [

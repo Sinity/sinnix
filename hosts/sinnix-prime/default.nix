@@ -30,7 +30,6 @@
 
   sinnix.persistence.enable = true;
   sinnix.services = {
-    agent-gateway.enable = true;
     transmission = {
       enable = true;
       autoStart = true;
@@ -52,10 +51,6 @@
       provisionDatabase = true;
       activationProfile = "full";
       environment = "prod";
-      filesystem.watchPaths = [
-        "/realm/project"
-        "/realm/inbox/download"
-      ];
     };
     polylogue.enable = true;
     machine-telemetry.enable = true;

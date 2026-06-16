@@ -52,7 +52,7 @@
     };
 
     polylogue = {
-      url = "github:Sinity/polylogue/master";
+      url = "github:Sinity/polylogue/fix/live-insight-memory-headroom";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -88,7 +88,7 @@
     # lock, OSD, and wallpaper, and acts as the live Material-You color authority
     # (wallpaper -> palette -> app templates). See modules/features/desktop/noctalia.nix.
     noctalia = {
-      url = "github:noctalia-dev/noctalia-shell/main";
+      url = "github:noctalia-dev/noctalia-shell/v5";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 

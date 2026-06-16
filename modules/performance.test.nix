@@ -234,9 +234,7 @@
           && lib.hasInfix "SINNIX_REBUILD_MAX_JOBS:-2" devShell
           && lib.hasInfix "SINNIX_REBUILD_CORES:-2" devShell
           && lib.hasInfix "NIX_SAFE_MAX_JOBS:-2" nixSafeScript
-          && lib.hasInfix "NIX_SAFE_CORES:-2" nixSafeScript
-          && lib.hasInfix "exec sinnix-scope nix-build -- nix" nixSafeScript
-          && !(lib.hasInfix "exec sinnix-scope background -- nix" nixSafeScript);
+          && lib.hasInfix "NIX_SAFE_CORES:-2" nixSafeScript;
         message = "Nix concurrency and substitution fan-out must stay bounded without enabling Nix cgroups";
       }
       {

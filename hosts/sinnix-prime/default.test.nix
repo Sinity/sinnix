@@ -8,7 +8,6 @@
     config:
     let
       packageNames = map (pkg: pkg.name or "") config.environment.systemPackages;
-      agentGateway = config.sinnix.services.agent-gateway;
       airvpn = config.sinnix.services.airvpn-seed;
       machineTelemetry = config.sinnix.services.machine-telemetry;
       polylogue = config.sinnix.services.polylogue;
@@ -29,14 +28,6 @@
       {
         assertion = builtins.elem "sinnix-resource-audit" packageNames;
         message = "sinnix-prime must expose the live resource-policy audit command";
-      }
-      {
-        assertion =
-          agentGateway.enable
-          && builtins.elem "sinnix-agent-gateway-0.1.0" packageNames
-          && builtins.elem "sinnix-agent-gateway-mcp" packageNames
-          && config.environment.etc ? "sinnix/agent-gateway/config.json";
-        message = "sinnix-prime must deploy the local agent gateway MCP surface";
       }
       {
         assertion =

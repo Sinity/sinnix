@@ -30,6 +30,7 @@
 }:
 let
   cfg = config.sinnix.services.sinex;
+  inherit (config.sinnix.paths) realmRoot;
   mkSinexPkgs = pkgs': inputs.sinex.packages.${pkgs'.stdenv.hostPlatform.system};
   sinexEnvironment = lib.toLower cfg.environment;
   targetUserName = config.sinnix.user.name;
@@ -51,7 +52,6 @@ let
   databaseUser = "sinex";
   databaseName = "sinex_${sinexEnvironment}";
   databasePasswordFile = lib.attrByPath [ "sinnix" "secrets" "paths" "sinex-local-db" ] null config;
-  natsCliMaxBytes = "2147483647";
   hostPrepared = cfg.prepareHost || cfg.enable || cfg.provisionDatabase;
   runtimeEnabled = cfg.enable;
   runtimeAutoStart = runtimeEnabled && cfg.autoStart;
@@ -94,6 +94,10 @@ in
           };
         }
         .${cfg.activationProfile};
+      filesystemWatchPaths = [
+        "${realmRoot}/project"
+        "${realmRoot}/inbox/download"
+      ];
       maintenanceTimerServiceNames = [
         "sinex-document-scan"
       ];
@@ -214,60 +218,6 @@ in
               autoSetup = runtimeEnabled;
               dataDir = "/var/lib/nats";
               jetstreamMaxStore = "32G";
-              bootstrapStreams.streams = lib.mkForce [
-                {
-                  name = "SINEX_RAW_EVENTS";
-                  subjects = [ "events.raw.>" ];
-                  maxAge = "168h";
-                  maxMsgs = 2000000;
-                  # Do not pass --max-bytes for the live raw stream. The
-                  # existing production stream already has a 16 GiB cap, while
-                  # natscli rejects --max-bytes values above signed 32-bit
-                  # range and upstream's generic 2 GiB default would shrink a
-                  # near-full JetStream during host activation.
-                  maxBytes = null;
-                }
-                {
-                  name = "SOURCE_MATERIAL";
-                  subjects = [ "source_material.frames.>" ];
-                  retention = "work";
-                  maxAge = "72h";
-                  maxBytes = natsCliMaxBytes;
-                }
-                {
-                  name = "SINEX_RAW_EVENTS_CONFIRMATIONS";
-                  subjects = [ "events.confirmations.>" ];
-                  maxAge = "72h";
-                  maxBytes = natsCliMaxBytes;
-                  maxMsgsPerSubject = 1;
-                }
-                {
-                  name = "SINEX_RAW_EVENTS_DLQ";
-                  subjects = [ "events.dlq.>" ];
-                  maxAge = "168h";
-                  maxBytes = natsCliMaxBytes;
-                  dupeWindow = "1h";
-                }
-                {
-                  name = "SINEX_RAW_EVENTS_CONFIRMATION_RETRIES";
-                  subjects = [ "events.confirmation_retries.>" ];
-                  maxAge = "72h";
-                  maxBytes = natsCliMaxBytes;
-                  maxMsgsPerSubject = 1;
-                }
-                {
-                  name = "SINEX_RAW_EVENTS_PROCESSING_FAILURES";
-                  subjects = [ "events.processing_failures.>" ];
-                  maxAge = "168h";
-                  maxBytes = natsCliMaxBytes;
-                }
-                {
-                  name = "SINEX_RAW_EVENTS_DERIVED_INVALIDATIONS";
-                  subjects = [ "sinex.derived.invalidation" ];
-                  maxAge = "24h";
-                  maxBytes = natsCliMaxBytes;
-                }
-              ];
               # Entity-enricher checkpoints currently exceed NATS' 1 MiB
               # default payload limit during recovery. The local server is
               # loopback-only; raise the transport ceiling so checkpoints can
@@ -340,7 +290,7 @@ in
               enable = runtimeEnabled;
               filesystem = {
                 enable = runtimeEnabled && activationProfile.filesystem;
-                watchPaths = cfg.filesystem.watchPaths;
+                watchPaths = filesystemWatchPaths;
                 ignoredDirectoryNames = lib.mkForce [
                   ".btrfs"
                   ".claude"
@@ -642,6 +592,18 @@ in
             sinexd = {
               restartIfChanged = false;
               stopIfChanged = false;
+              serviceConfig.Environment = lib.mkAfter [
+                # Production evidence on 2026-06-12 showed sinexd eagerly
+                # holding the upstream default 100-connection pool idle after
+                # heartbeat bursts. Bound it here as host runtime policy; the
+                # daemon can still use 32 concurrent DB sessions under catch-up.
+                "SINEX_DB_MAX_CONNECTIONS=32"
+                "SINEX_DB_MIN_CONNECTIONS=4"
+                # Upstream Sinex now exposes these event-engine policies as
+                # runtime env vars rather than Nix module options.
+                "SINEX_EVENT_ENGINE_REJECT_INITIAL_REPLAY=false"
+                "SINEX_EVENT_ENGINE_STARTUP_CATCH_UP_MAX_CONCURRENT=1"
+              ];
               # Bounded drain window, matching the NATS killPolicy convention.
               # The previous 10min budget assumed a graceful WAL/material
               # drain, but live stop evidence (2026-06-12, ~10 activations)
@@ -657,10 +619,11 @@ in
             stopIfChanged = false;
             serviceConfig = {
               Nice = lib.mkForce null;
+              Slice = lib.mkForce null;
               CPUWeight = lib.mkForce null;
               IOWeight = lib.mkForce null;
               IOSchedulingClass = lib.mkForce null;
-              TimeoutStopSec = lib.mkDefault "15s";
+              TimeoutStopSec = lib.mkForce "15s";
             };
           }))
           (lib.mapAttrs (_: before: {
