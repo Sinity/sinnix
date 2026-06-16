@@ -99,8 +99,8 @@ let
     version = "0.8.1";
 
     src = pkgs.fetchurl {
-      url = "https://github.com/DeusData/codebase-memory-mcp/releases/download/v${version}/codebase-memory-mcp-linux-amd64-portable.tar.gz";
-      hash = "sha256-arh6bAXQSd3ldwCAPKCrQZn88llzoGBmGK8Pzuc/Wr0=";
+      url = "https://github.com/DeusData/codebase-memory-mcp/releases/download/v${version}/codebase-memory-mcp-ui-linux-amd64-portable.tar.gz";
+      hash = "sha256-dO1j468thb/ZjLzOcZEpVTbQpUsITLwLho1p8ichcto=";
     };
 
     sourceRoot = ".";

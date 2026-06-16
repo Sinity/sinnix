@@ -40,6 +40,10 @@ mkFeatureTest {
         message = "Codebase Memory MCP defaults must be initialized during Home Manager activation";
       }
       {
+        assertion = hm.systemd.user.services ? codebase-memory-ui;
+        message = "Codebase Memory Web UI must be managed as a user service";
+      }
+      {
         assertion = hm.home.activation ? serenaConfig;
         message = "Serena global config must be managed during Home Manager activation";
       }

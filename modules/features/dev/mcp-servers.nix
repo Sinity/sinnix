@@ -276,6 +276,14 @@ mkFeatureModule {
           - /realm/project/sinity-lynchpin
           - /realm/project/sinnix
       '';
+      codebaseMemoryUiLauncher = pkgs.writeShellScript "codebase-memory-ui" ''
+        set -euo pipefail
+        export CBM_CACHE_DIR="''${CBM_CACHE_DIR:-$HOME/.local/share/codebase-memory-mcp}"
+        mkdir -p "$CBM_CACHE_DIR"
+        exec ${
+          scriptPkgs."codebase-memory-mcp"
+        }/bin/codebase-memory-mcp --ui=true --port=9749 < <(${pkgs.coreutils}/bin/sleep infinity)
+      '';
       codexHooksFile = jsonFormat.generate "codex-hooks.json" {
         hooks = {
           PreToolUse = [
@@ -406,6 +414,12 @@ mkFeatureModule {
                 run ${pkgs.coreutils}/bin/env CBM_CACHE_DIR="$HOME/.local/share/codebase-memory-mcp" ${
                   scriptPkgs."codebase-memory-mcp"
                 }/bin/codebase-memory-mcp config set auto_index_limit 50000
+                run ${pkgs.coreutils}/bin/env CBM_CACHE_DIR="$HOME/.local/share/codebase-memory-mcp" ${
+                  scriptPkgs."codebase-memory-mcp"
+                }/bin/codebase-memory-mcp config set ui true
+                run ${pkgs.coreutils}/bin/env CBM_CACHE_DIR="$HOME/.local/share/codebase-memory-mcp" ${
+                  scriptPkgs."codebase-memory-mcp"
+                }/bin/codebase-memory-mcp config set port 9749
               '';
               serenaConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
                 run mkdir -p "$HOME/.local/share/serena"
@@ -494,6 +508,19 @@ mkFeatureModule {
               source = config.lib.file.mkOutOfStoreSymlink "/realm/data/exports/chatlog/raw/claude";
               force = true;
             };
+          };
+
+          systemd.user.services.codebase-memory-ui = {
+            Unit = {
+              Description = "Codebase Memory MCP Web UI";
+              After = [ "default.target" ];
+            };
+            Service = {
+              ExecStart = "${codebaseMemoryUiLauncher}";
+              Restart = "on-failure";
+              RestartSec = 5;
+            };
+            Install.WantedBy = [ "default.target" ];
           };
         };
     };
