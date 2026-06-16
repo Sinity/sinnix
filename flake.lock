@@ -192,11 +192,11 @@
     },
     "crane_2": {
       "locked": {
-        "lastModified": 1769737823,
-        "narHash": "sha256-DrBaNpZ+sJ4stXm+0nBX7zqZT9t9P22zbk6m5YhQxS4=",
+        "lastModified": 1780532242,
+        "narHash": "sha256-D+BsdpxmtUwtqGoY0IXPhHgTlmqgcZKCEo1oMyn7ep0=",
         "owner": "ipetkov",
         "repo": "crane",
-        "rev": "b2f45c3830aa96b7456a4c4bc327d04d7a43e1ba",
+        "rev": "59a82a1222dd3b2080b5cc52a1a2e8d5f1b77f37",
         "type": "github"
       },
       "original": {
@@ -274,11 +274,11 @@
         "rust-analyzer-src": "rust-analyzer-src"
       },
       "locked": {
-        "lastModified": 1769583045,
-        "narHash": "sha256-a2Pc8nMJv4AXwGN2XI3NWO9ceguRKQdp5HN4KG+cA00=",
+        "lastModified": 1781609335,
+        "narHash": "sha256-18sPXKaSCsA7QliUlaiH3ADArJ7Bv+8ZscW2BXJLkoE=",
         "owner": "nix-community",
         "repo": "fenix",
-        "rev": "cfa63fbc8f8a4251cee394488b30757a7a05ea19",
+        "rev": "dccb895d0e31771153302845c2b85699f935bd7e",
         "type": "github"
       },
       "original": {
@@ -915,16 +915,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1781018771,
-        "narHash": "sha256-/wIMOo9hJnW9SN0uAsmBWC5f7urFKJLWjNJHCcXgTLM=",
+        "lastModified": 1781623960,
+        "narHash": "sha256-2NI2epryLYZSj/c+yP8BfU/y/yvjTZvwkBUZjqpb2hs=",
         "owner": "noctalia-dev",
         "repo": "noctalia-shell",
-        "rev": "d0b1899953e9596f3a921b7cde970dcca4487b5b",
+        "rev": "2e827c0556c38eacf7c6f8a922b5e918efaac155",
         "type": "github"
       },
       "original": {
         "owner": "noctalia-dev",
-        "ref": "v5",
+        "ref": "main",
         "repo": "noctalia-shell",
         "type": "github"
       }
@@ -961,11 +961,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1781618274,
-        "narHash": "sha256-GRQUAhFLkGvXiS5IOWiY0kwdDskhSDdlly6vuEQMZhs=",
+        "lastModified": 1781625354,
+        "narHash": "sha256-h5MB7zR1qIR1ZxTT8DUgPfmevW0HEQIhjshG3wjWTP8=",
         "owner": "Sinity",
         "repo": "polylogue",
-        "rev": "8647cebb9a4386333877be004f0724b55aaa4fcb",
+        "rev": "81aa7301575ef65ea5518f72124d03f1c9b18d63",
         "type": "github"
       },
       "original": {
@@ -1026,11 +1026,11 @@
     "rust-analyzer-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1769526882,
-        "narHash": "sha256-64CZX2vKsfSLKnTCZ0pbc1jPvixWWwuT382g3QHBz5c=",
+        "lastModified": 1781529264,
+        "narHash": "sha256-aRRvzyZy3zdKEFMOZTklNlkuYpk3hz6gioqN8YVV6Nw=",
         "owner": "rust-lang",
         "repo": "rust-analyzer",
-        "rev": "40cda2f4bd585c1cb99ae4eb025968b8dc2eec42",
+        "rev": "888f5810a42a76a3b708b6f90e1fca8a02e3beb9",
         "type": "github"
       },
       "original": {
@@ -1113,11 +1113,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1781621239,
-        "narHash": "sha256-tfvSv5YH9CYvL1W2FWHuXsXhJETGJ4Y1VyyGH8CXnxw=",
+        "lastModified": 1781624992,
+        "narHash": "sha256-2LN0avlKZ/x2hSOD2eHsELi5NBERuu7jjzIw4mpuuW0=",
         "ref": "master",
-        "rev": "f2867a252b0b5c01a04b91a4ca251c1334f92d61",
-        "revCount": 1148,
+        "rev": "f91059831cc77c3029779ecaf9a5d666ae8506d4",
+        "revCount": 1151,
         "type": "git",
         "url": "https://github.com/Sinity/sinex"
       },
