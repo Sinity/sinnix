@@ -4,6 +4,7 @@ Long-running systemd services in `modules/services/`:
 
 | Service               | Purpose                                        | Has UI?         |
 | --------------------- | ---------------------------------------------- | --------------- |
+| agent-gateway.nix     | Trusted local MCP gateway for coding agents    | No (MCP/HTTP)   |
 | below.nix             | Facebook's cgroup resource monitoring          | Yes (TUI)       |
 | lynchpin.nix          | Data analysis hub (Python/DuckDB)              | No (background) |
 | machine-telemetry.nix | Canonical host telemetry for Lynchpin analysis | No (background) |

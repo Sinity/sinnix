@@ -88,5 +88,21 @@
           runtime is disabled (only the collector/receiver path stays live).
       '';
     };
+    filesystem.watchPaths = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [
+        "/srv/sinex/watch"
+        "/var/lib/sinex/downloads"
+      ];
+      description = ''
+        Host-owned filesystem roots passed through to upstream
+        <literal>services.sinex.sources.filesystem.watchPaths</literal>.
+
+        The module default is empty so reusable Sinnix service wiring does not
+        bake in a personal filesystem topology. Hosts should set this
+        explicitly in their host configuration.
+      '';
+    };
   };
 }

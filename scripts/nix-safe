@@ -93,10 +93,7 @@ fi
 
 if [[ -z "${NIX_SAFE_SCOPED:-}" ]] && command -v sinnix-scope >/dev/null 2>&1; then
   export NIX_SAFE_SCOPED=1
-  if (( EUID == 0 )); then
-    exec sinnix-scope nix-build -- nix "$command_name" "${args[@]}"
-  fi
-  exec sinnix-scope background -- nix "$command_name" "${args[@]}"
+  exec sinnix-scope nix-build -- nix "$command_name" "${args[@]}"
 fi
 
 exec nix "$command_name" "${args[@]}"

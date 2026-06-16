@@ -42,14 +42,7 @@ _tmp_do_not_include_in_version_control.md
 .cache/
 .playwright-mcp/
 
-# Serena shared project config/memories are versioned; machine-local state is not.
-.serena/*
-!.serena/
-!.serena/project.yml
-!.serena/memories/
-!.serena/memories/**
-.serena/cache/
-.serena/project.local.yml
+.serena/
 
 # Only ignore unencrypted secrets
 *.key

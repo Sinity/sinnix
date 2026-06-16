@@ -30,7 +30,6 @@
 }:
 let
   cfg = config.sinnix.services.sinex;
-  inherit (config.sinnix.paths) realmRoot;
   mkSinexPkgs = pkgs': inputs.sinex.packages.${pkgs'.stdenv.hostPlatform.system};
   sinexEnvironment = lib.toLower cfg.environment;
   targetUserName = config.sinnix.user.name;
@@ -52,6 +51,7 @@ let
   databaseUser = "sinex";
   databaseName = "sinex_${sinexEnvironment}";
   databasePasswordFile = lib.attrByPath [ "sinnix" "secrets" "paths" "sinex-local-db" ] null config;
+  natsCliMaxBytes = "2147483647";
   hostPrepared = cfg.prepareHost || cfg.enable || cfg.provisionDatabase;
   runtimeEnabled = cfg.enable;
   runtimeAutoStart = runtimeEnabled && cfg.autoStart;
@@ -94,10 +94,6 @@ in
           };
         }
         .${cfg.activationProfile};
-      filesystemWatchPaths = [
-        "${realmRoot}/project"
-        "${realmRoot}/inbox/download"
-      ];
       maintenanceTimerServiceNames = [
         "sinex-document-scan"
       ];
@@ -218,6 +214,60 @@ in
               autoSetup = runtimeEnabled;
               dataDir = "/var/lib/nats";
               jetstreamMaxStore = "32G";
+              bootstrapStreams.streams = lib.mkForce [
+                {
+                  name = "SINEX_RAW_EVENTS";
+                  subjects = [ "events.raw.>" ];
+                  maxAge = "168h";
+                  maxMsgs = 2000000;
+                  # Do not pass --max-bytes for the live raw stream. The
+                  # existing production stream already has a 16 GiB cap, while
+                  # natscli rejects --max-bytes values above signed 32-bit
+                  # range and upstream's generic 2 GiB default would shrink a
+                  # near-full JetStream during host activation.
+                  maxBytes = null;
+                }
+                {
+                  name = "SOURCE_MATERIAL";
+                  subjects = [ "source_material.frames.>" ];
+                  retention = "work";
+                  maxAge = "72h";
+                  maxBytes = natsCliMaxBytes;
+                }
+                {
+                  name = "SINEX_RAW_EVENTS_CONFIRMATIONS";
+                  subjects = [ "events.confirmations.>" ];
+                  maxAge = "72h";
+                  maxBytes = natsCliMaxBytes;
+                  maxMsgsPerSubject = 1;
+                }
+                {
+                  name = "SINEX_RAW_EVENTS_DLQ";
+                  subjects = [ "events.dlq.>" ];
+                  maxAge = "168h";
+                  maxBytes = natsCliMaxBytes;
+                  dupeWindow = "1h";
+                }
+                {
+                  name = "SINEX_RAW_EVENTS_CONFIRMATION_RETRIES";
+                  subjects = [ "events.confirmation_retries.>" ];
+                  maxAge = "72h";
+                  maxBytes = natsCliMaxBytes;
+                  maxMsgsPerSubject = 1;
+                }
+                {
+                  name = "SINEX_RAW_EVENTS_PROCESSING_FAILURES";
+                  subjects = [ "events.processing_failures.>" ];
+                  maxAge = "168h";
+                  maxBytes = natsCliMaxBytes;
+                }
+                {
+                  name = "SINEX_RAW_EVENTS_DERIVED_INVALIDATIONS";
+                  subjects = [ "sinex.derived.invalidation" ];
+                  maxAge = "24h";
+                  maxBytes = natsCliMaxBytes;
+                }
+              ];
               # Entity-enricher checkpoints currently exceed NATS' 1 MiB
               # default payload limit during recovery. The local server is
               # loopback-only; raise the transport ceiling so checkpoints can
@@ -290,7 +340,7 @@ in
               enable = runtimeEnabled;
               filesystem = {
                 enable = runtimeEnabled && activationProfile.filesystem;
-                watchPaths = filesystemWatchPaths;
+                watchPaths = cfg.filesystem.watchPaths;
                 ignoredDirectoryNames = lib.mkForce [
                   ".btrfs"
                   ".claude"

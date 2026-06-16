@@ -122,6 +122,9 @@
     };
   };
   services = {
+    "agent-gateway" = {
+      layers = [ "eval" ];
+    };
     "airvpn-seed" = {
       layers = [ "eval" ];
     };

@@ -194,6 +194,8 @@ let
       npmDepsHash = "sha256-/duhx34Iiq+7ZOaRTTAWChbGjJhxiVvWOoaLJsH2USc=";
     };
 
+    sinnix-agent-gateway = pkgs.callPackage ../pkgs/sinnix-agent-gateway/pkg.nix { };
+
     sinnix-observe = pkgs.callPackage ../pkgs/sinnix-observe/pkg.nix {
       inherit defaultRuntimeInventoryJson;
     };

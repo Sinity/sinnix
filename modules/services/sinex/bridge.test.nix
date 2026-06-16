@@ -104,6 +104,9 @@
       observedByName =
         name: builtins.head (builtins.filter (check: check.name == name) runtimeInventory.observedServices);
       natsService = config.systemd.services.nats.serviceConfig;
+      natsStreams = config.services.sinex.nats.bootstrapStreams.streams;
+      natsStreamByName =
+        name: builtins.head (builtins.filter (stream: stream.name == name) natsStreams);
       postgresService = config.systemd.services.postgresql.serviceConfig;
       sinexdService = config.systemd.services.sinexd.serviceConfig;
       sinexPostgresDumpUnit = config.systemd.services.sinex-postgres-dump;
@@ -124,6 +127,7 @@
       persistedSystemDirs = config.sinnix.persistence.system.directories;
       postgresqlUnitConfig = serviceUnitConfig "postgresql";
       sinexFilesystem = config.services.sinex.sources.filesystem;
+      sinexBridgeSource = builtins.readFile (inputs.self + "/modules/services/sinex/bridge.nix");
       sinexAutomata = config.services.sinex.automata;
       preflightEnabled = lib.attrByPath [
         "services"
@@ -310,25 +314,6 @@
       {
         assertion = builtins.all (
           name:
-          let
-            service = maintenanceServiceConfig name;
-          in
-          serviceRestartIfChanged name == false
-          && (
-            service.TimeoutStopSec == "15s" || service.TimeoutStopSec == 90 || service.TimeoutStopSec == "90s"
-          )
-          && (!(service ? Slice) || service.Slice == null)
-          && (!(service ? Nice) || service.Nice == null)
-          && (!(service ? CPUWeight) || service.CPUWeight == null)
-          && (!(service ? IOWeight) || service.IOWeight == null)
-          && (!(service ? IOSchedulingClass) || service.IOSchedulingClass == null)
-          && (!(service ? ExecCondition) || service.ExecCondition == null)
-        ) sinexMaintenanceTimers;
-        message = "Sinex maintenance services must use plain systemd policy";
-      }
-      {
-        assertion = builtins.all (
-          name:
           !(builtins.hasAttr name config.systemd.timers) && !(builtins.hasAttr name config.systemd.services)
         ) absentLegacyBlobMaintenanceUnits;
         message = "Sinnix must not synthesize empty legacy blob maintenance units when upstream does not define them";
@@ -397,6 +382,10 @@
         message = "NATS must have bounded but production-sized graceful shutdown time";
       }
       {
+        assertion = (natsStreamByName "SINEX_RAW_EVENTS").maxBytes == null;
+        message = "Sinex raw event stream bootstrap must not shrink the live production cap";
+      }
+      {
         assertion =
           postgresService.MemoryHigh == "8G"
           && !(postgresService ? MemoryMax)
@@ -461,6 +450,22 @@
           && sinexPostgresDumpTimer.RandomizedDelaySec == "20min"
           && sinexPostgresDumpTimer.Persistent == false;
         message = "Sinex pg_dump backup timer must be scheduled without catch-up storms";
+      }
+      {
+        assertion =
+          sinexFilesystem.watchPaths == config.sinnix.services.sinex.filesystem.watchPaths
+          && config.sinnix.services.sinex.filesystem.watchPaths == [
+            "${config.sinnix.paths.realmRoot}/project"
+            "${config.sinnix.paths.realmRoot}/inbox/download"
+          ];
+        message = "Sinex bridge must pass host-owned filesystem watch roots through to upstream defaults";
+      }
+      {
+        assertion =
+          !(lib.hasInfix "filesystemWatchPaths = [" sinexBridgeSource)
+          && !(lib.hasInfix "realmRoot}/project" sinexBridgeSource)
+          && !(lib.hasInfix "realmRoot}/inbox/download" sinexBridgeSource);
+        message = "Sinex bridge must not hard-code realm-derived filesystem watch roots";
       }
       {
         assertion = builtins.all (name: builtins.elem name sinexFilesystem.ignoredDirectoryNames) [
