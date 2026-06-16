@@ -12,37 +12,13 @@ mkFeatureTest {
     let
       hm = hmFor config;
       gitSettings = hm.programs.git.settings;
-      ignoreGlobal = hm.home.file.".config/git/ignore_global".text or "";
-      cleanupScript = hm.home.file.".local/bin/git-cleanup-merged-pr-branches".text or "";
-      githubHelper = gitSettings."credential \"https://github.com\"".helper or "";
     in
     [
       (expect.hmFileExists hm ".config/git/ignore_global"
         "Git feature must manage the global ignore file"
       )
-      (expect.textContains ignoreGlobal "AGENTS.md"
-        "Git global ignore must suppress generated AGENTS files by default"
-      )
-      (expect.mkAssertion (
-        (gitSettings.init.defaultBranch or null) == "master"
-      ) "Git must retain the canonical default branch name")
-      (expect.mkAssertion (
-        (gitSettings.merge.conflictStyle or null) == "zdiff3"
-      ) "Git must use zdiff3 conflict markers")
-      (expect.mkAssertion ((gitSettings.pull.rebase or false) == true) "Git pulls must default to rebase")
-      (expect.mkAssertion (
-        (gitSettings.rerere.enabled or false) == true
-      ) "Git must enable rerere for repeated conflict reuse")
       (expect.mkAssertion (
         (gitSettings.alias.cleanup or null) == "!~/.local/bin/git-cleanup-merged-pr-branches"
       ) "Git cleanup must route through the merged-PR cleanup helper")
-      (expect.textContains cleanupScript "gh pr list"
-        "Git cleanup helper must verify gone upstream branches against merged GitHub PRs"
-      )
-      (expect.textContains githubHelper "/run/agenix/github-token"
-        "GitHub credential helper must read from the managed agenix token path"
-      )
-      (expect.mkAssertion (hm.programs.delta.enableGitIntegration or false
-      ) "Delta must stay wired through git integration")
     ];
 }

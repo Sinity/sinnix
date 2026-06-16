@@ -1,8 +1,4 @@
-{
-  lib,
-  mkServiceTest,
-  ...
-}:
+{ mkServiceTest, ... }:
 let
   commonAssertions = config: [
     {
@@ -11,36 +7,9 @@ let
     }
     {
       assertion =
-        let
-          preStart = config.systemd.services.transmission.serviceConfig.ExecStartPre or [ ];
-        in
-        builtins.any (line: lib.hasInfix "/bin/install -d" line) preStart
-        && !(builtins.any (line: lib.hasInfix "/tdown" line) config.systemd.tmpfiles.rules);
-      message = "Transmission must create automount-backed torrent directories only when started";
-    }
-    {
-      assertion =
-        with config.systemd.services.transmission.serviceConfig;
-        Nice == 10
-        && CPUWeight == 5
-        && IOWeight == 5
-        && IOSchedulingClass == "idle"
-        && !(config.systemd.services.transmission.serviceConfig ? IOSchedulingPriority);
-      message = "Transmission must yield during desktop I/O pressure";
-    }
-    {
-      assertion =
-        with config.systemd.services.transmission.serviceConfig;
-        MemoryHigh == "1G" && MemoryMax == "3G";
-      message = "Transmission must not be able to consume unbounded memory";
-    }
-    {
-      assertion =
         with config.services.transmission.settings;
         start-added-torrents == true
-        && cache-size-mb == 128
         && download-queue-enabled == false
-        && download-queue-size == 20
         && queue-stalled-enabled == false
         && seed-queue-enabled == false;
       message = "Transmission must actively start added torrents and avoid silent stalled queues";

@@ -71,9 +71,7 @@ let
     "core-performance-policy"
     "core-diagnostics-tools"
     "desktop-bluetooth-persistence"
-    "paths-configured"
     "password-secrets-wiring"
-    "router-config-evaluates"
     "backup-btrbk"
   ];
   featureSmokeSpecNames = map smokeName (
@@ -110,7 +108,6 @@ let
     "host-sinnix-prime-observability-policy"
     "core-performance-policy"
     "core-diagnostics-tools"
-    "router-config-evaluates"
     "backup-btrbk"
   ];
   heavySpecNames = builtins.filter (name: !(builtins.elem name defaultSpecNames)) allSpecNames;

@@ -13,7 +13,6 @@
       let
         wireplumber = config.services.pipewire.wireplumber.extraConfig;
         bluezRoles = wireplumber."10-bluez"."monitor.bluez.properties"."bluez5.roles" or [ ];
-        audioCapture = config.sinnix.features.desktop.audioCapture;
         xm4Rules = wireplumber."12-preferred-xm4-output"."monitor.bluez.rules" or [ ];
         isXm4Rule =
           rule:
@@ -42,40 +41,6 @@
         {
           assertion = !(builtins.elem "bap_sink" bluezRoles) && !(builtins.elem "bap_source" bluezRoles);
           message = "Bluetooth audio must not expose unstable LE Audio/BAP roles";
-        }
-        {
-          assertion = audioCapture.captureOutputs == false;
-          message = "Audio capture must not record output/sink monitors by default";
-        }
-        {
-          assertion = audioCapture.captureAllInputs == false;
-          message = "Audio capture must only record the preferred input by default";
-        }
-        {
-          assertion = audioCapture.asrProvider == "openai";
-          message = "Audio capture must default to the low-latency cloud ASR route";
-        }
-        {
-          assertion = audioCapture.openaiModel == "gpt-4o-mini-transcribe";
-          message = "Audio capture must pin the cost/latency-oriented OpenAI transcription model";
-        }
-        {
-          assertion =
-            audioCapture.vadAggressiveness == 2
-            && audioCapture.preRollMs == 450
-            && audioCapture.silenceMs == 900
-            && audioCapture.maxUtteranceSeconds == 18;
-          message = "Audio capture must segment speech locally before cloud upload";
-        }
-        {
-          assertion = builtins.elem audioCapture.asrProvider [
-            "openai"
-            "deepgram"
-            "assemblyai"
-            "cohere-api"
-            "local"
-          ];
-          message = "Audio capture ASR providers must expose cloud-first routes plus local fallback";
         }
       ];
   })

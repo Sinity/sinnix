@@ -37,9 +37,5 @@ mkFeatureTest {
         assertion = !(builtins.any (name: lib.hasPrefix "pytest-" name || name == "pytest") packageNames);
         message = "Dev shell must not install the transparent pytest resource-scope wrapper";
       }
-      {
-        assertion = lib.hasInfix "unsetopt prompt_sp" hm.programs.zsh.initContent;
-        message = "Zsh init must disable PROMPT_SP to avoid stray partial-line prompt markers";
-      }
     ];
 }

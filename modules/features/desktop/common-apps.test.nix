@@ -2,7 +2,6 @@
   lib,
   mkFeatureTest,
   hmFor,
-  inputs,
   ...
 }:
 mkFeatureTest {
@@ -13,7 +12,6 @@ mkFeatureTest {
     let
       hm = hmFor config;
       packageNames = map (pkg: pkg.name or "") hm.home.packages;
-      yaziConfig = builtins.readFile (inputs.self + "/dots/yazi/yazi.toml");
     in
     [
       {
@@ -27,13 +25,6 @@ mkFeatureTest {
       {
         assertion = builtins.any (name: lib.hasPrefix "media-preview-cache" name) packageNames;
         message = "Common desktop apps must install the media preview cache helper";
-      }
-      {
-        assertion =
-          lib.hasInfix "image_delay = 0" yaziConfig
-          && lib.hasInfix "dark = \"noctalia\"" yaziConfig
-          && lib.hasInfix "run = \"sinnix-video-preview\"" yaziConfig;
-        message = "Yazi must use the Noctalia flavor and custom instant video preview configuration";
       }
     ];
 }

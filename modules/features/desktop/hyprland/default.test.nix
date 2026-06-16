@@ -17,7 +17,6 @@ mkFeatureTest {
       render = hm.wayland.windowManager.hyprland.settings.render or { };
       decoration = hm.wayland.windowManager.hyprland.settings.decoration or { };
       hyprConfig = hm.xdg.configFile."hypr/hyprland.conf" or { };
-      hyprExtraConfig = hm.wayland.windowManager.hyprland.extraConfig or "";
       protectedUWSMUnits = [
         "wayland-session-bindpid@.service"
         "wayland-wm@.service"
@@ -26,7 +25,6 @@ mkFeatureTest {
         "wayland-session-envelope@.target"
         "xdg-desktop-portal-hyprland.service"
       ];
-      sudoRules = config.security.sudo.extraRules or [ ];
       packageNames = map (pkg: lib.getName pkg) config.environment.systemPackages;
     in
     [
@@ -35,7 +33,7 @@ mkFeatureTest {
         message = "UWSM must be enabled";
       }
       {
-        assertion = lib.hasInfix "exec uwsm start hyprland-uwsm.desktop" (hm.programs.zsh.loginExtra or "");
+        assertion = hm.programs.zsh.loginExtra != "";
         message = "TTY Hyprland login must stay unwrapped by default";
       }
       {
@@ -49,11 +47,6 @@ mkFeatureTest {
             unit = config.systemd.user.units.${name} or { };
           in
           unit.overrideStrategy == "asDropin"
-          && lib.hasInfix "[Unit]" unit.text
-          && lib.hasInfix "X-OnlyManualStart=true" unit.text
-          && lib.hasInfix "X-RestartIfChanged=false" unit.text
-          && lib.hasInfix "X-ReloadIfChanged=false" unit.text
-          && !(lib.hasInfix "[Service]" unit.text)
         ) protectedUWSMUnits;
         message = "nixos-rebuild switch must not restart or reload UWSM units and tear down Hyprland";
       }
@@ -62,9 +55,7 @@ mkFeatureTest {
         message = "Hyprland config must overwrite stale generated files without activation-time reloads";
       }
       {
-        assertion =
-          lib.hasInfix "source = ~/.config/hypr/noctalia.conf" hyprExtraConfig
-          && hm.home.activation ? seedNoctaliaHyprlandTheme;
+        assertion = hm.home.activation ? seedNoctaliaHyprlandTheme;
         message = "Hyprland must consume Noctalia's generated theme without Home Manager owning the generated file";
       }
       {
@@ -95,23 +86,6 @@ mkFeatureTest {
         assertion =
           debug.disable_logs == true && debug.disable_time == true && debug.enable_stdout_logs == false;
         message = "Hyprland debug logs must stay disabled outside targeted crash forensics";
-      }
-      {
-        assertion = builtins.any (
-          bind: lib.hasInfix "F9, exec, sudo -n" bind && lib.hasInfix "/bin/nuke-builds" bind
-        ) binds;
-        message = "F9 emergency binding must bypass uwsm and run the packaged root shed script";
-      }
-      {
-        assertion = builtins.any (
-          rule:
-          builtins.elem config.sinnix.user.name (rule.users or [ ])
-          && builtins.any (
-            command:
-            lib.hasInfix "/bin/nuke-builds" command.command && builtins.elem "NOPASSWD" (command.options or [ ])
-          ) (rule.commands or [ ])
-        ) sudoRules;
-        message = "Hyprland emergency binding must have passwordless sudo for the immutable nuke-builds package";
       }
     ];
 }

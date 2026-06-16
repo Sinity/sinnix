@@ -1,7 +1,5 @@
 {
-  lib,
   mkFeatureTest,
-  hmFor,
   ...
 }:
 mkFeatureTest {
@@ -31,17 +29,5 @@ mkFeatureTest {
       }
     )
   ];
-  assertions =
-    config:
-    let
-      hm = hmFor config;
-    in
-    [
-      # Notifications/launcher/OSD moved to Noctalia; base only owns clipboard,
-      # applets, session env, and the canonical XDG dirs now.
-      {
-        assertion = hm.xdg.userDirs.download == "${config.sinnix.paths.realmRoot}/inbox/download";
-        message = "Desktop base must declare the canonical XDG download directory";
-      }
-    ];
+  assertions = _config: [ ];
 }

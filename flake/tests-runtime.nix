@@ -881,7 +881,7 @@ in
             assert mcp['polylogue']['command'] == 'mcp-polylogue'
             assert mcp['lynchpin']['env']['LYNCHPIN_REPO_ROOT'] == '/realm/project/sinity-lynchpin'
             assert mcp['lynchpin']['env']['LYNCHPIN_LOCAL_ROOT'] == '/realm/project/sinity-lynchpin/.lynchpin'
-            assert config['features']['codex_hooks'] is True
+            assert config['features']['hooks'] is True
             PYCODE
 
             jq -e '

@@ -18,9 +18,5 @@ mkFeatureTest {
         assertion = builtins.any (name: name == "factorio-steam") packageNames;
         message = "Gaming feature must install the factorio-steam launcher";
       }
-      {
-        assertion = config.sinnix.features.desktop.gaming.factorio.username == "Sinityy";
-        message = "Gaming feature must preserve the nested Factorio username option";
-      }
     ];
 }

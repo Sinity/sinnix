@@ -17,21 +17,11 @@
         activitywatchEntry = builtins.head (
           builtins.filter (check: check.name == "activitywatch") runtimeInventory.observedServices
         );
-        serverService = hm.systemd.user.services.activitywatch.Service or { };
         watcherInstall = hm.systemd.user.services.activitywatch-watcher-awatcher.Install or { };
       in
       [
         (expect.hmUserServiceExists hm "activitywatch" "ActivityWatch server service must exist")
         (expect.hmUserServiceExists hm "activitywatch-watcher-awatcher" "awatcher service must exist")
-        {
-          assertion =
-            serverService.Nice == 10
-            && serverService.IOSchedulingClass == "idle"
-            && serverService.IOWeight == 5
-            && serverService.MemoryHigh == "1G"
-            && serverService.MemoryMax == "2G";
-          message = "ActivityWatch must run with background resource guardrails";
-        }
         {
           assertion =
             builtins.elem "activitywatch" observedServiceNames

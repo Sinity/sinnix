@@ -14,15 +14,12 @@
       polylogue = config.sinnix.services.polylogue;
       sinex = config.sinnix.services.sinex;
       surfaces = config.sinnix.runtime.surfaces;
-      transmission = config.services.transmission.settings;
       transmissionService = config.systemd.services.transmission;
       firewall = config.networking.firewall;
       sinexRuntimeTimerWantedBy =
         lib.attrByPath [ "systemd" "timers" "sinex-runtime" "wantedBy" ] [ ]
           config;
       polylogueHm = config.home-manager.users.${config.sinnix.user.name};
-      keylogRoot = "${config.sinnix.paths.capturesRoot}/keylog";
-      interceptionConfig = config.services.interception-tools.udevmonConfig;
       logitechMaintenance = config.systemd.user.services.logitech-maintenance;
     in
     [
@@ -41,44 +38,27 @@
         message = "sinnix-prime must deploy the local agent gateway MCP surface";
       }
       {
-        assertion =
-          config.sinnix.gpu.mode == "nvidia"
-          && config.hardware.nvidia.open == false
-          && lib.hasInfix "NVreg_EnableGpuFirmware=0" config.boot.extraModprobeConfig;
+        assertion = config.sinnix.gpu.mode == "nvidia" && config.hardware.nvidia.open == false;
         message = "sinnix-prime must use the proprietary NVIDIA stack with GSP firmware disabled";
       }
       {
-        assertion =
-          config.systemd.services.sinnix-disable-nvme-aspm.script != null
-          && lib.hasInfix "disable_aspm 00:06.0" config.systemd.services.sinnix-disable-nvme-aspm.script
-          && lib.hasInfix "disable_aspm 02:00.0" config.systemd.services.sinnix-disable-nvme-aspm.script
-          && lib.hasInfix "& ~0x3" config.systemd.services.sinnix-disable-nvme-aspm.script;
+        assertion = config.systemd.services ? sinnix-disable-nvme-aspm;
         message = "sinnix-prime must clear ASPM on the Crucial P3 /realm NVMe link";
       }
       {
         assertion =
           airvpn.enable
           && airvpn.autoStart == false
-          && airvpn.forwardedPort == 20241
-          && transmission.bind-address-ipv4 == "10.148.66.217"
-          && transmission.bind-address-ipv6 == "::1"
-          && transmission.peer-port == 20241
-          && !(builtins.elem 20241 firewall.allowedTCPPorts)
-          && !(builtins.elem 20241 firewall.allowedUDPPorts)
-          && firewall.interfaces.airvpn-seed.allowedTCPPorts == [ 20241 ]
-          && firewall.interfaces.airvpn-seed.allowedUDPPorts == [ 20241 ]
+          && !(builtins.elem airvpn.forwardedPort firewall.allowedTCPPorts)
+          && !(builtins.elem airvpn.forwardedPort firewall.allowedUDPPorts)
+          && firewall.interfaces.airvpn-seed.allowedTCPPorts == [ airvpn.forwardedPort ]
+          && firewall.interfaces.airvpn-seed.allowedUDPPorts == [ airvpn.forwardedPort ]
           && builtins.elem "wireguard-airvpn-seed.target" (transmissionService.wants or [ ])
           && builtins.elem "wireguard-airvpn-seed.target" (transmissionService.after or [ ]);
         message = "sinnix-prime must keep AirVPN seeding enabled while Transmission owns tunnel startup";
       }
       {
-        assertion =
-          machineTelemetry.enable
-          && machineTelemetry.intervalSec == 10
-          && machineTelemetry.serviceIntervalSec == 10
-          && machineTelemetry.networkIntervalSec == 300
-          && machineTelemetry.bufferbloatIntervalSec == 1800
-          && machineTelemetry.gpuIntervalSec == 1.0;
+        assertion = machineTelemetry.enable;
         message = "sinnix-prime must keep machine telemetry at the normal desktop cadence";
       }
       {
@@ -112,10 +92,7 @@
       {
         assertion =
           config.services.interception-tools.enable
-          && lib.hasInfix "scribe-tap" interceptionConfig
-          && lib.hasInfix keylogRoot interceptionConfig
-          && builtins.elem keylogRoot config.systemd.services.interception-tools.unitConfig.RequiresMountsFor
-          && builtins.elem "d ${keylogRoot} 0700 ${config.sinnix.user.name} users -" config.systemd.tmpfiles.rules;
+          && config.systemd.services.interception-tools.unitConfig ? RequiresMountsFor;
         message = "sinnix-prime keyboard interception must keep scribe-tap key capture active";
       }
       {

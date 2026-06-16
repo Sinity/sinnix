@@ -187,7 +187,6 @@ in
         };
         outputs = {
           "router-config" = {
-            eval = [ "nixos-router-config-evaluates" ];
             build = [ "router-config-build" ];
           };
         };

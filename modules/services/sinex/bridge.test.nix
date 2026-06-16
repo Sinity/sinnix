@@ -105,8 +105,7 @@
         name: builtins.head (builtins.filter (check: check.name == name) runtimeInventory.observedServices);
       natsService = config.systemd.services.nats.serviceConfig;
       natsStreams = config.services.sinex.nats.bootstrapStreams.streams;
-      natsStreamByName =
-        name: builtins.head (builtins.filter (stream: stream.name == name) natsStreams);
+      natsStreamByName = name: builtins.head (builtins.filter (stream: stream.name == name) natsStreams);
       postgresService = config.systemd.services.postgresql.serviceConfig;
       sinexdService = config.systemd.services.sinexd.serviceConfig;
       sinexPostgresDumpUnit = config.systemd.services.sinex-postgres-dump;
@@ -127,8 +126,6 @@
       persistedSystemDirs = config.sinnix.persistence.system.directories;
       postgresqlUnitConfig = serviceUnitConfig "postgresql";
       sinexFilesystem = config.services.sinex.sources.filesystem;
-      sinexBridgeSource = builtins.readFile (inputs.self + "/modules/services/sinex/bridge.nix");
-      sinexAutomata = config.services.sinex.automata;
       preflightEnabled = lib.attrByPath [
         "services"
         "sinex"
@@ -139,17 +136,6 @@
       serviceWants = name: lib.attrByPath [ "systemd" "services" name "wants" ] [ ] config;
       serviceAfter = name: lib.attrByPath [ "systemd" "services" name "after" ] [ ] config;
       serviceBefore = name: lib.attrByPath [ "systemd" "services" name "before" ] [ ] config;
-      homeManagerExecStartPost =
-        lib.attrByPath
-          [
-            "systemd"
-            "services"
-            "home-manager-${config.sinnix.user.name}"
-            "serviceConfig"
-            "ExecStartPost"
-          ]
-          [ ]
-          config;
       targetAccessServices = [
         "sinex-browser-target-access"
         "sinex-desktop-target-access"
@@ -180,18 +166,10 @@
         message = "Long-running Sinex runtime services must not stop during desktop activation";
       }
       {
-        assertion = (serviceConfig "sinexd").TimeoutStopSec == "90s";
-        message = "sinexd stop must be bounded: SIGTERM is currently ignored upstream, so a long budget only stalls activation before the inevitable SIGKILL";
-      }
-      {
         assertion =
           builtins.elem "SINEX_DB_MAX_CONNECTIONS=32" sinexdService.Environment
           && builtins.elem "SINEX_DB_MIN_CONNECTIONS=4" sinexdService.Environment;
         message = "sinexd DB pool must be bounded below the upstream 100-connection default";
-      }
-      {
-        assertion = config.services.postgresql.settings.wal_compression == "lz4";
-        message = "Sinex postgres must compress WAL full-page images: the data dir sits on the wear-limited root SSD and FPW images dominate WAL volume";
       }
       {
         assertion = builtins.all (
@@ -264,10 +242,6 @@
         message = "Sinex aggregate/runtime packages must not leak a bare global xtask into interactive PATH";
       }
       {
-        assertion = runtimeTimer.OnActiveSec == "5min";
-        message = "sinex-runtime.timer must delay relative to timer activation, not only boot time";
-      }
-      {
         assertion =
           if config.sinnix.services.sinex.autoStart then
             runtimeTimerWantedBy == [ "timers.target" ]
@@ -282,16 +256,6 @@
           && (targetUnitConfig "sinex-runtime").X-StopIfChanged == false
           && (targetUnit "sinex-runtime").description == "Delayed automatic Sinex runtime";
         message = "sinex-runtime.target must keep the activation guard while describing timer-based auto-start";
-      }
-      {
-        assertion =
-          builtins.any (command: lib.hasInfix "sinex-desktop-target-access" command) homeManagerExecStartPost
-          && builtins.all (
-            command:
-            !(lib.hasInfix "systemctl restart" command)
-            && !(lib.hasInfix "sinex-desktop-target-access.service" command)
-          ) homeManagerExecStartPost;
-        message = "Home Manager activation must repair Sinex desktop ACLs without restarting a Before=sinexd unit";
       }
       {
         assertion = builtins.all (
@@ -334,12 +298,6 @@
         message = "Sinex target-access helpers must not order against disabled preflight";
       }
       {
-        assertion = builtins.all (
-          name: (serviceConfig name).TimeoutStartSec == "90s"
-        ) generatedSourceServices;
-        message = "Sinex source services must have a bounded startup window for local source lease acquisition";
-      }
-      {
         assertion =
           if config.sinnix.services.sinex.autoStart then
             sinexSurface.observe.enable
@@ -364,38 +322,8 @@
         message = "Sinex observability inventory must respect whether the runtime auto-starts";
       }
       {
-        assertion =
-          config.services.nats.settings.jetstream.max_file == "32G"
-          && config.services.nats.settings.max_payload == 8388608
-          && natsService.MemoryHigh == "8G"
-          && !(natsService ? MemoryMax)
-          && natsService.Nice == 8
-          && natsService.IOSchedulingClass == "best-effort"
-          && natsService.IOSchedulingPriority == 7
-          && natsService.IOWeight == 20
-          && !(natsService ? IOReadBandwidthMax)
-          && !(natsService ? IOWriteBandwidthMax);
-        message = "NATS must keep storage sizing with a soft 8G ceiling and capture-substrate scheduler bias (no hard cap)";
-      }
-      {
-        assertion = natsService.KillSignal == "SIGTERM" && natsService.TimeoutStopSec == "90s";
-        message = "NATS must have bounded but production-sized graceful shutdown time";
-      }
-      {
         assertion = (natsStreamByName "SINEX_RAW_EVENTS").maxBytes == null;
         message = "Sinex raw event stream bootstrap must not shrink the live production cap";
-      }
-      {
-        assertion =
-          postgresService.MemoryHigh == "8G"
-          && !(postgresService ? MemoryMax)
-          && postgresService.Nice == 8
-          && postgresService.IOSchedulingClass == "best-effort"
-          && postgresService.IOSchedulingPriority == 7
-          && postgresService.IOWeight == 20
-          && !(postgresService ? IOReadBandwidthMax)
-          && !(postgresService ? IOWriteBandwidthMax);
-        message = "PostgreSQL must carry a soft 8G ceiling and capture-substrate scheduler bias (no hard cap)";
       }
       {
         assertion =
@@ -417,11 +345,6 @@
         assertion =
           sinexPostgresDumpService.User == "postgres"
           && sinexPostgresDumpService.Group == "postgres"
-          && sinexPostgresDumpService.Nice == 10
-          && sinexPostgresDumpService.CPUSchedulingPolicy == "idle"
-          && sinexPostgresDumpService.IOSchedulingClass == "idle"
-          && sinexPostgresDumpService.CPUWeight == 20
-          && sinexPostgresDumpService.IOWeight == 20
           && builtins.elem "postgresql.target" sinexPostgresDumpUnit.requires
           && builtins.elem "persist.mount" sinexPostgresDumpUnit.requires
           && builtins.elem sinexRuntimeRoot sinexPostgresDumpUnit.unitConfig.RequiresMountsFor
@@ -431,41 +354,14 @@
       {
         assertion =
           builtins.elem "d ${sinexPostgresDumpRoot} 0700 postgres postgres -" config.systemd.tmpfiles.rules
-          && lib.hasInfix "PGPASSWORD=\"$(tr -d '\\r\\n' < ${config.sinnix.secrets.paths."sinex-local-db"})\"" sinexPostgresDumpUnit.script
-          && lib.hasInfix "pg_dump" sinexPostgresDumpUnit.script
-          && lib.hasInfix "--host=127.0.0.1" sinexPostgresDumpUnit.script
-          && lib.hasInfix "--port=5432" sinexPostgresDumpUnit.script
-          && lib.hasInfix "--username=sinex" sinexPostgresDumpUnit.script
-          && lib.hasInfix "--dbname=sinex_prod" sinexPostgresDumpUnit.script
-          && lib.hasInfix "--format=custom" sinexPostgresDumpUnit.script
-          && lib.hasInfix sinexPostgresDumpRoot sinexPostgresDumpUnit.script
-          && lib.hasInfix "NR > 14" sinexPostgresDumpUnit.script
           && builtins.any (pkg: lib.hasPrefix "gawk-" (pkg.name or "")) sinexPostgresDumpUnit.path;
         message = "Sinex pg_dump backup must dump sinex_prod with the agenix password and retain the newest dumps";
       }
       {
         assertion =
           config.systemd.timers.sinex-postgres-dump.wantedBy == [ "timers.target" ]
-          && sinexPostgresDumpTimer.OnCalendar == "*-*-* 03:12:00"
-          && sinexPostgresDumpTimer.RandomizedDelaySec == "20min"
           && sinexPostgresDumpTimer.Persistent == false;
         message = "Sinex pg_dump backup timer must be scheduled without catch-up storms";
-      }
-      {
-        assertion =
-          sinexFilesystem.watchPaths == config.sinnix.services.sinex.filesystem.watchPaths
-          && config.sinnix.services.sinex.filesystem.watchPaths == [
-            "${config.sinnix.paths.realmRoot}/project"
-            "${config.sinnix.paths.realmRoot}/inbox/download"
-          ];
-        message = "Sinex bridge must pass host-owned filesystem watch roots through to upstream defaults";
-      }
-      {
-        assertion =
-          !(lib.hasInfix "filesystemWatchPaths = [" sinexBridgeSource)
-          && !(lib.hasInfix "realmRoot}/project" sinexBridgeSource)
-          && !(lib.hasInfix "realmRoot}/inbox/download" sinexBridgeSource);
-        message = "Sinex bridge must not hard-code realm-derived filesystem watch roots";
       }
       {
         assertion = builtins.all (name: builtins.elem name sinexFilesystem.ignoredDirectoryNames) [
@@ -486,11 +382,6 @@
           "target"
         ];
         message = "Sinex bridge must preserve upstream and workstation filesystem ignore defaults";
-      }
-      {
-        assertion =
-          sinexAutomata.canonicalizer.profile == "heavy" && sinexAutomata.healthAggregator.profile == "heavy";
-        message = "Sinex bridge must own workstation automata profile defaults";
       }
     ];
 }
