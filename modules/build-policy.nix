@@ -50,13 +50,12 @@ in
         ];
         netrc-file = "/etc/nix/netrc";
 
-        # Keep ordinary rebuilds latency-bounded. The daemon lives in
-        # nix-build.slice, but evaluation/build client memory and cache
-        # substitution tails still affect the interactive session; use explicit
-        # opt-in overrides for throughput experiments instead of making every
-        # switch a 20-thread compile.
+        # Keep ordinary rebuilds scoped without leaving most of the workstation
+        # idle. Nix job fanout is kept modest so heavyweight derivations do not
+        # multiply; the per-derivation core budget lets Cargo/rustc use the
+        # i7-13700K's hardware threads.
         max-jobs = 2;
-        cores = 2;
+        cores = 12;
         builders-use-substitutes = true;
         keep-outputs = true;
         keep-derivations = true;
@@ -139,11 +138,9 @@ in
           Slice = "nix-build.slice";
           # Soft + hard memory ceilings: reclaim from build processes before
           # they evict desktop/video/sinexd working sets, and kill the build
-          # cgroup before global pressure reaches earlyoom territory. The host
-          # has 32G total but runs a large always-on terminal/browser/Postgres
-          # stack, so 16G+ build residency is not operationally acceptable.
-          MemoryHigh = "9G";
-          MemoryMax = "14G";
+          # cgroup before global pressure reaches earlyoom territory.
+          MemoryHigh = "18G";
+          MemoryMax = "24G";
           MemorySwapMax = "0";
         };
       };

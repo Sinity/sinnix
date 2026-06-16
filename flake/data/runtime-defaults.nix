@@ -195,11 +195,11 @@ rec {
       ioniceClass = "best-effort";
       ionicePriority = 7;
       envDefaults = {
-        CARGO_BUILD_JOBS = "3";
+        CARGO_BUILD_JOBS = "12";
         CARGO_INCREMENTAL = "0";
-        CMAKE_BUILD_PARALLEL_LEVEL = "3";
-        MAKEFLAGS = "-j3";
-        NIX_BUILD_CORES = "3";
+        CMAKE_BUILD_PARALLEL_LEVEL = "12";
+        MAKEFLAGS = "-j12";
+        NIX_BUILD_CORES = "12";
         SCCACHE_IDLE_TIMEOUT = "10";
       };
     };
@@ -232,13 +232,10 @@ rec {
       nix-build = {
         CPUWeight = 5;
         IOWeight = 2;
-        # Rust workspace and NixOS checks can consume large anon spikes, but a
-        # 22G ceiling left too little room for the always-on desktop/database
-        # stack on a 32G host. Keep builds possible while making reclaim start
-        # early and killing the build cgroup before the interactive session
-        # enters global memory pressure.
-        MemoryHigh = "9G";
-        MemoryMax = "14G";
+        # Rust workspaces and NixOS rebuilds should use the workstation, while
+        # still leaving room for the desktop and always-on data services.
+        MemoryHigh = "18G";
+        MemoryMax = "24G";
         MemorySwapMax = "0";
       };
       system-critical = {
@@ -252,8 +249,8 @@ rec {
         CPUWeight = 400;
         IOWeight = 300;
         MemoryLow = "3G";
-        MemoryHigh = "9G";
-        MemoryMax = "14G";
+        MemoryHigh = "18G";
+        MemoryMax = "24G";
         MemorySwapMax = "0";
       };
       backup = {
@@ -271,15 +268,15 @@ rec {
       build = {
         CPUWeight = 5;
         IOWeight = 2;
-        MemoryHigh = "9G";
-        MemoryMax = "14G";
+        MemoryHigh = "18G";
+        MemoryMax = "24G";
         MemorySwapMax = "0";
       };
       nix-build = {
         CPUWeight = 5;
         IOWeight = 2;
-        MemoryHigh = "9G";
-        MemoryMax = "14G";
+        MemoryHigh = "18G";
+        MemoryMax = "24G";
         MemorySwapMax = "0";
       };
     };

@@ -23,6 +23,14 @@
 let
   cfg = config.sinnix.services.lynchpin;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
+  localRoot = "${cfg.repoRoot}/.lynchpin";
+  localHotDirs = [
+    "cache"
+    "duck"
+    "enrich"
+    "refresh"
+  ];
+  localHotDirArgs = lib.concatMapStringsSep " " (dir: lib.escapeShellArg "${localRoot}/${dir}") localHotDirs;
 in
 {
   options.sinnix.services.lynchpin = {
@@ -68,12 +76,36 @@ in
       LYNCHPIN_MCP_PROVIDED = "1";
     };
 
+    systemd.services.lynchpin-local-attrs = {
+      description = "Prepare Lynchpin local cache directories";
+      wantedBy = [ "multi-user.target" ];
+      path = [
+        pkgs.coreutils
+        pkgs.e2fsprogs
+      ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        install -d -m 0775 -o sinity -g users ${lib.escapeShellArg localRoot}
+        for dir in ${localHotDirArgs}; do
+          install -d -m 0775 -o sinity -g users "$dir"
+          chattr +C "$dir" || true
+        done
+      '';
+    };
+
     # Optional: daily substrate materialization (Arc E.2).
     # Runs the full analysis DAG + promotes results to DuckDB. The
     # substrate is queryable by MCP clients immediately after.
     systemd.services.lynchpin-materialize = lib.mkIf cfg.materializationTimer.enable {
       description = "Lynchpin analysis DAG materialization";
-      after = [ "network.target" ];
+      requires = [ "lynchpin-local-attrs.service" ];
+      after = [
+        "network.target"
+        "lynchpin-local-attrs.service"
+      ];
       # The materialization CLI resolves `.lynchpin/` relative to its working
       # directory (repo-rooted, like git). Without WorkingDirectory the unit
       # ran from `/` and failed nightly with

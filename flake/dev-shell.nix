@@ -104,7 +104,7 @@
           ${resolveFlakeDir}
           ${localInputOverrideArgs}
           rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-2}"
-          rebuild_cores="''${SINNIX_REBUILD_CORES:-2}"
+          rebuild_cores="''${SINNIX_REBUILD_CORES:-12}"
 
           _rebuild_status=0
           ${pkgs.systemd}/bin/systemd-run \
@@ -179,7 +179,7 @@
           ${resolveFlakeDir}
           ${localInputOverrideArgs}
           rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-2}"
-          rebuild_cores="''${SINNIX_REBUILD_CORES:-2}"
+          rebuild_cores="''${SINNIX_REBUILD_CORES:-12}"
 
           exec sudo ${pkgs.systemd}/bin/systemd-run \
             --quiet --collect --pipe --service-type=exec --wait \
