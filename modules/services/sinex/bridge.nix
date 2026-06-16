@@ -127,6 +127,12 @@ in
           name = "${toolName}-${sinexEnvironment}";
           paths = [ sinexPkgs.${toolName} ];
         };
+      mkProjectedSinexToolPackage =
+        toolName: runtimePackage:
+        pkgs.runCommand "${toolName}-${sinexEnvironment}" { } ''
+          install -d "$out/bin"
+          ln -s ${runtimePackage}/bin/${toolName} "$out/bin/${toolName}"
+        '';
     in
     lib.mkMerge [
       (lib.mkIf (!runtimeEnabled) {
@@ -155,11 +161,18 @@ in
       (lib.mkIf hostPrepared (
         let
           sinexPkgs = mkSinexPkgs pkgs;
+          sinexPackage = mkScopedSinexPackage sinexPkgs;
+          mkToolPackage =
+            toolName:
+            if runtimeEnabled then
+              mkProjectedSinexToolPackage toolName sinexPackage
+            else
+              mkScopedSinexToolPackage toolName sinexPkgs;
         in
         {
-          services.sinex.package = lib.mkDefault (mkScopedSinexPackage sinexPkgs);
-          services.sinex.cliPackage = lib.mkDefault (mkScopedSinexToolPackage "sinexctl" sinexPkgs);
-          services.sinex.adminPackage = lib.mkDefault (mkScopedSinexToolPackage "xtask" sinexPkgs);
+          services.sinex.package = lib.mkDefault sinexPackage;
+          services.sinex.cliPackage = lib.mkDefault (mkToolPackage "sinexctl");
+          services.sinex.adminPackage = lib.mkDefault (mkToolPackage "xtask");
           services.sinex.users.target = targetUserName;
           sinex.secrets.paths = lib.mkForce (
             lib.mapAttrs (_: path: toString path) (
