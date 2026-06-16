@@ -17,46 +17,99 @@ let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   jsonFormat = pkgs.formats.json { };
 
-  repositoryType = lib.types.submodule ({ name, ... }: {
-    options = {
-      url = lib.mkOption {
-        type = lib.types.str;
-        default = "https://github.com/${name}.git";
-        description = "Git remote URL used by repo_materialize.";
-      };
+  repositoryType = lib.types.submodule (
+    { name, ... }:
+    let
+      taskType = lib.types.either (lib.types.listOf lib.types.str) (
+        lib.types.submodule {
+          options = {
+            command = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              description = "Command vector executed by run_task.";
+            };
 
-      defaultRef = lib.mkOption {
-        type = lib.types.str;
-        default = "master";
-        description = "Default branch/ref checked out by repo_materialize.";
-      };
+            description = lib.mkOption {
+              type = lib.types.str;
+              default = "";
+              description = "Human/model-facing task purpose.";
+            };
 
-      allowWrite = lib.mkOption {
-        type = lib.types.bool;
-        default = true;
-        description = "Human-facing marker that this repo may be mutated by yolo workflows.";
-      };
+            timeout = lib.mkOption {
+              type = lib.types.nullOr lib.types.int;
+              default = null;
+              description = "Optional task-specific timeout in seconds.";
+            };
 
-      env = lib.mkOption {
-        type = lib.types.attrsOf lib.types.str;
-        default = { };
-        description = "Extra environment variables for commands run in this repository.";
-      };
+            background = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = "Default to durable background execution for this task.";
+            };
 
-      tasks = lib.mkOption {
-        type = lib.types.attrsOf (lib.types.listOf lib.types.str);
-        default = { };
-        example = {
-          check = [
-            "nix"
-            "flake"
-            "check"
-          ];
+            risk = lib.mkOption {
+              type = lib.types.enum [
+                "low"
+                "normal"
+                "high"
+              ];
+              default = "normal";
+              description = "Operator hint exposed through gateway_info.";
+            };
+
+            outputs = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [ ];
+              description = "Workspace-relative output paths the task commonly produces.";
+            };
+          };
+        }
+      );
+    in
+    {
+      options = {
+        url = lib.mkOption {
+          type = lib.types.str;
+          default = "https://github.com/${name}.git";
+          description = "Git remote URL used by repo_materialize.";
         };
-        description = "Named command vectors exposed through the run_task MCP tool.";
+
+        defaultRef = lib.mkOption {
+          type = lib.types.str;
+          default = "master";
+          description = "Default branch/ref checked out by repo_materialize.";
+        };
+
+        allowWrite = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = "Human-facing marker that this repo may be mutated by yolo workflows.";
+        };
+
+        env = lib.mkOption {
+          type = lib.types.attrsOf lib.types.str;
+          default = { };
+          description = "Extra environment variables for commands run in this repository.";
+        };
+
+        tasks = lib.mkOption {
+          type = lib.types.attrsOf taskType;
+          default = { };
+          example = {
+            check = {
+              command = [
+                "nix"
+                "flake"
+                "check"
+              ];
+              description = "Run the repository flake check.";
+              timeout = 3600;
+            };
+          };
+          description = "Named command vectors or metadata-rich task definitions exposed through run_task.";
+        };
       };
-    };
-  });
+    }
+  );
 
   configFile = jsonFormat.generate "sinnix-agent-gateway-config.json" {
     stateDir = cfg.stateDir;
@@ -160,16 +213,27 @@ in
           defaultRef = "master";
           allowWrite = true;
           tasks = {
-            flake-check = [
-              "nix"
-              "flake"
-              "check"
-            ];
-            eval-prime = [
-              "nix"
-              "eval"
-              ".#nixosConfigurations.sinnix-prime.config.system.build.toplevel.drvPath"
-            ];
+            flake-check = {
+              command = [
+                "nix"
+                "flake"
+                "check"
+              ];
+              description = "Run the full flake check; expensive, use near completion.";
+              timeout = 3600;
+              background = true;
+              risk = "high";
+            };
+            eval-prime = {
+              command = [
+                "nix"
+                "eval"
+                ".#nixosConfigurations.sinnix-prime.config.system.build.toplevel.drvPath"
+              ];
+              description = "Evaluate the sinnix-prime system derivation path.";
+              timeout = 600;
+              risk = "normal";
+            };
           };
         };
 
@@ -178,22 +242,37 @@ in
           defaultRef = "master";
           allowWrite = true;
           tasks = {
-            cargo-check = [
-              "cargo"
-              "check"
-              "--workspace"
-            ];
-            cargo-test = [
-              "cargo"
-              "test"
-              "--workspace"
-            ];
-            cargo-metadata = [
-              "cargo"
-              "metadata"
-              "--format-version"
-              "1"
-            ];
+            cargo-check = {
+              command = [
+                "cargo"
+                "check"
+                "--workspace"
+              ];
+              description = "Check all Rust workspace crates.";
+              timeout = 1800;
+            };
+            cargo-test = {
+              command = [
+                "cargo"
+                "test"
+                "--workspace"
+              ];
+              description = "Run all Rust workspace tests.";
+              timeout = 3600;
+              background = true;
+              risk = "high";
+            };
+            cargo-metadata = {
+              command = [
+                "cargo"
+                "metadata"
+                "--format-version"
+                "1"
+              ];
+              description = "Return Cargo workspace metadata.";
+              timeout = 300;
+              risk = "low";
+            };
           };
         };
 
@@ -202,11 +281,16 @@ in
           defaultRef = "master";
           allowWrite = true;
           tasks = {
-            test = [
-              "python"
-              "-m"
-              "pytest"
-            ];
+            test = {
+              command = [
+                "python"
+                "-m"
+                "pytest"
+              ];
+              description = "Run the Polylogue pytest suite.";
+              timeout = 1800;
+              background = true;
+            };
           };
         };
       };
@@ -248,11 +332,12 @@ in
         };
 
         Service = {
-          ExecStartPre = "${pkgs.coreutils}/bin/mkdir -p ${cfg.stateDir}";
+          ExecStartPre = "${pkgs.coreutils}/bin/mkdir -p ${cfg.stateDir} ${cfg.stateDir}/log";
           ExecStart = "${gatewayBin} --config ${configFile} http --host ${cfg.http.host} --port ${toString cfg.http.port}";
           Restart = "on-failure";
           RestartSec = "5s";
           WorkingDirectory = cfg.stateDir;
+          StandardError = "append:${cfg.stateDir}/log/http.log";
           Environment = [
             "SINNIX_AGENT_GATEWAY_CONFIG=${configFile}"
             "SINNIX_AGENT_GATEWAY_STATE=${cfg.stateDir}"

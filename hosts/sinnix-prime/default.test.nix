@@ -33,8 +33,10 @@
       {
         assertion =
           agentGateway.enable
+          && agentGateway.http.enable
           && builtins.elem "sinnix-agent-gateway-0.1.0" packageNames
           && builtins.elem "sinnix-agent-gateway-mcp" packageNames
+          && config.home-manager.users.sinity.systemd.user.services ? sinnix-agent-gateway-http
           && config.environment.etc ? "sinnix/agent-gateway/config.json";
         message = "sinnix-prime must deploy the local agent gateway MCP surface";
       }
