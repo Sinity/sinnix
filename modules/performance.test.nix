@@ -1,6 +1,9 @@
-{ ... }:
+{ mountTmpfsRoots, baseTestConfig, ... }:
 {
   name = "core-performance-policy";
-  modules = [ ];
+  modules = [
+    mountTmpfsRoots
+    baseTestConfig
+  ];
   assertions = _config: [ ];
 }
