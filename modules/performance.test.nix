@@ -173,8 +173,9 @@
           && nixParent.IOWeight == 2
           && nixBuild.CPUWeight == 5
           && nixBuild.IOWeight == 2
-          && nixBuild.MemoryHigh == "14G"
-          && nixBuild.MemoryMax == "22G"
+          && nixBuild.MemoryHigh == "9G"
+          && nixBuild.MemoryMax == "14G"
+          && nixBuild.MemorySwapMax == "0"
           && !(nixBuild ? ManagedOOMMemoryPressure)
           && !(nixBuild ? ManagedOOMMemoryPressureLimit)
           && systemCritical.CPUWeight == 400
@@ -191,19 +192,24 @@
           && !(userBackground ? ManagedOOMMemoryPressureLimit)
           && userBuild.CPUWeight == 5
           && userBuild.IOWeight == 2
-          && userBuild.MemoryHigh == "14G"
-          && userBuild.MemoryMax == "22G"
+          && userBuild.MemoryHigh == "9G"
+          && userBuild.MemoryMax == "14G"
+          && userBuild.MemorySwapMax == "0"
           && !(userBuild ? ManagedOOMMemoryPressure)
           && !(userBuild ? ManagedOOMMemoryPressureLimit)
           && userNixBuild.CPUWeight == 5
           && userNixBuild.IOWeight == 2
-          && userNixBuild.MemoryHigh == "14G"
-          && userNixBuild.MemoryMax == "22G"
+          && userNixBuild.MemoryHigh == "9G"
+          && userNixBuild.MemoryMax == "14G"
+          && userNixBuild.MemorySwapMax == "0"
           && !(userNixBuild ? ManagedOOMMemoryPressure)
           && !(userNixBuild ? ManagedOOMMemoryPressureLimit)
           && userAgent.CPUWeight == 400
           && userAgent.IOWeight == 300
-          && userAgent.MemoryLow == "3G";
+          && userAgent.MemoryLow == "3G"
+          && userAgent.MemoryHigh == "9G"
+          && userAgent.MemoryMax == "14G"
+          && userAgent.MemorySwapMax == "0";
         message = "background/build/agent slices must keep measured budgets without oomd PSI kills";
       }
       {
@@ -255,6 +261,9 @@
           && lib.hasInfix "ionice -c 2 -n" scopeScript
           && lib.hasInfix "nice -n \"$nice_level\"" scopeScript
           && lib.hasInfix "ionice -c 3" scopeScript
+          && lib.hasInfix ".commandClasses[$class].systemdProperties" scopeScript
+          && lib.hasInfix "--property=MemorySwapMax=0" scopeScript
+          && lib.hasInfix "\"\${property_args[@]}\"" scopeScript
           && lib.hasInfix "--unit=\"$unit\"" scopeScript
           && lib.hasInfix "--user" scopeScript;
         message = "sinnix-scope must place heavy work in explicit resource slices and scheduler classes";
@@ -267,6 +276,8 @@
           && runtimeInventory.commandClasses.build.envDefaults.MAKEFLAGS == "-j3"
           && runtimeInventory.commandClasses.build.envDefaults.CARGO_INCREMENTAL == "0"
           && runtimeInventory.commandClasses.agent.resourceClass == "interactive-agent"
+          && runtimeInventory.commandClasses.agent.systemdProperties.MemoryMax == "12G"
+          && runtimeInventory.commandClasses.agent.systemdProperties.MemorySwapMax == "0"
           && runtimeInventory.classes.observability.serviceConfig.Slice == "system-critical.slice"
           && runtimeInventory.classes.interactive-access.serviceConfig.Slice == "system-critical.slice"
           && runtimeInventory.classes.backup-maintenance.serviceConfig.CPUWeight == 20

@@ -137,13 +137,14 @@ in
           # nix module; the slice adds IO weight and the memory guard below.
           # Without this, nix-daemon lives in system.slice with no memory cap.
           Slice = "nix-build.slice";
-          # Soft memory ceiling: kernel reclaims from build processes before
-          # they evict desktop/video/sinexd working sets. Rust workspace builds
-          # can spike to ~8 GB per job; at max-jobs=2 that's up to ~16 GB peak.
-          # 16G gives the two concurrent jobs room without starving the system
-          # (32 GB total → 16 GB headroom for OS + sinexd + desktop).
-          # The previous 10G limit caused the nix-daemon to crash mid-Rust-build.
-          MemoryHigh = "16G";
+          # Soft + hard memory ceilings: reclaim from build processes before
+          # they evict desktop/video/sinexd working sets, and kill the build
+          # cgroup before global pressure reaches earlyoom territory. The host
+          # has 32G total but runs a large always-on terminal/browser/Postgres
+          # stack, so 16G+ build residency is not operationally acceptable.
+          MemoryHigh = "9G";
+          MemoryMax = "14G";
+          MemorySwapMax = "0";
         };
       };
     };

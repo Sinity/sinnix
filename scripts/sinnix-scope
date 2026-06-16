@@ -69,14 +69,31 @@ ionice_class="$(inventory_value ".commandClasses.\"$class\".ioniceClass" "")"
 ionice_priority="$(inventory_value ".commandClasses.\"$class\".ionicePriority" "")"
 
 scoped_command=("$@")
+property_args=()
 
 if inventory_readable; then
+  while IFS='=' read -r name value; do
+    [ -n "$name" ] || continue
+    property_args+=("--property=$name=$value")
+  done < <(jq -r --arg class "$class" '
+    .commandClasses[$class].systemdProperties // {}
+    | to_entries[]
+    | select(.key | test("^[A-Za-z][A-Za-z0-9_]*$"))
+    | "\(.key)=\(.value)"
+  ' "$inventory_file")
+
   while IFS='=' read -r name value; do
     [ -n "$name" ] || continue
     if [ "${!name+x}" != x ]; then
       export "$name=$value"
     fi
   done < <(jq -r --arg class "$class" '.commandClasses[$class].envDefaults // {} | to_entries[] | "\(.key)=\(.value)"' "$inventory_file")
+elif [ "$class" = agent ]; then
+  property_args=(
+    "--property=MemoryHigh=6G"
+    "--property=MemoryMax=12G"
+    "--property=MemorySwapMax=0"
+  )
 elif [ "$class" = build ]; then
   : "${CARGO_BUILD_JOBS:=4}"
   : "${CARGO_INCREMENTAL:=0}"
@@ -144,6 +161,7 @@ if [ "${EUID:-$(id -u)}" -eq 0 ]; then
     --same-dir \
     --unit="$unit" \
     --slice="$slice" \
+    "${property_args[@]}" \
     "${env_args[@]}" \
     -- "${scoped_command[@]}"
 fi
@@ -158,6 +176,7 @@ if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
     --same-dir \
     --unit="$unit" \
     --slice="$slice" \
+    "${property_args[@]}" \
     "${env_args[@]}" \
     -- "${scoped_command[@]}"
 fi

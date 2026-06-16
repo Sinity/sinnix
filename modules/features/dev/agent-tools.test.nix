@@ -55,6 +55,10 @@ mkFeatureTest {
         message = "Claude team wrapper must not flatten arguments via $*";
       }
       {
+        assertion = lib.any (pkg: lib.getName pkg == "chatgpt-share-export") hm.home.packages;
+        message = "Agent tools must put chatgpt-share-export on PATH";
+      }
+      {
         assertion = sharedSkillSelfLinks == [ ];
         message = "Shared skills tree must not contain self-referential symlinks: ${lib.concatStringsSep ", " sharedSkillSelfLinks}";
       }

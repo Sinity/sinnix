@@ -100,7 +100,7 @@ mkFeatureModule {
 
       systemd.user.services.wireplumber.serviceConfig = lib.mkMerge [
         (lib.sinnix.systemd.mkRestartPolicy {
-          strategy = "on-failure";
+          strategy = "always";
           delaySec = 2;
         })
         {

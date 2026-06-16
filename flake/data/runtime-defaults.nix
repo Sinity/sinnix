@@ -181,6 +181,11 @@ rec {
       nice = null;
       ioniceClass = null;
       ionicePriority = null;
+      systemdProperties = {
+        MemoryHigh = "6G";
+        MemoryMax = "12G";
+        MemorySwapMax = "0";
+      };
       envDefaults = { };
     };
     build = {
@@ -227,13 +232,14 @@ rec {
       nix-build = {
         CPUWeight = 5;
         IOWeight = 2;
-        # Rust workspace builds (sinex ~473K LOC) can consume 8-12 GB of anon
-        # memory across parallel codegen units. MemoryHigh triggers reclaim
-        # without killing the build; MemoryMax is the hard safety ceiling.
-        # Previously 3G/8G — far too low, causing constant thrashing that made
-        # the desktop unresponsive during builds even though SCHED_IDLE was set.
-        MemoryHigh = "14G";
-        MemoryMax = "22G";
+        # Rust workspace and NixOS checks can consume large anon spikes, but a
+        # 22G ceiling left too little room for the always-on desktop/database
+        # stack on a 32G host. Keep builds possible while making reclaim start
+        # early and killing the build cgroup before the interactive session
+        # enters global memory pressure.
+        MemoryHigh = "9G";
+        MemoryMax = "14G";
+        MemorySwapMax = "0";
       };
       system-critical = {
         CPUWeight = 400;
@@ -246,7 +252,9 @@ rec {
         CPUWeight = 400;
         IOWeight = 300;
         MemoryLow = "3G";
-        MemoryHigh = "12G";
+        MemoryHigh = "9G";
+        MemoryMax = "14G";
+        MemorySwapMax = "0";
       };
       backup = {
         CPUWeight = 20;
@@ -263,14 +271,16 @@ rec {
       build = {
         CPUWeight = 5;
         IOWeight = 2;
-        MemoryHigh = "14G";
-        MemoryMax = "22G";
+        MemoryHigh = "9G";
+        MemoryMax = "14G";
+        MemorySwapMax = "0";
       };
       nix-build = {
         CPUWeight = 5;
         IOWeight = 2;
-        MemoryHigh = "14G";
-        MemoryMax = "22G";
+        MemoryHigh = "9G";
+        MemoryMax = "14G";
+        MemorySwapMax = "0";
       };
     };
   };

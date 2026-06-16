@@ -12,6 +12,8 @@
       scriptRegistry = import ./scripts.nix { inherit inputs pkgs; };
       publicPackageNames = [
         "ccusage"
+        "chatgpt-share-export"
+        "codebase-memory-mcp"
         "lynchpin-cli"
         "lynchpin-python"
         "mcp-chrome-devtools"

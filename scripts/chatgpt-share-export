@@ -1,0 +1,331 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Export ChatGPT shared conversations from embedded page state
+# runtimeInputs: coreutils python3
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import re
+import sys
+import urllib.error
+import urllib.request
+from pathlib import Path
+from urllib.parse import urlparse
+
+
+ENQUEUE_RE = re.compile(
+    r"streamController\.enqueue\((?P<arg>\"(?:\\.|[^\"\\])*\")\);",
+    re.DOTALL,
+)
+
+
+def fetch_url(url: str) -> str:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            charset = response.headers.get_content_charset() or "utf-8"
+            return response.read().decode(charset, errors="replace")
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"HTTP {exc.code} while fetching {url}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"failed to fetch {url}: {exc.reason}") from exc
+
+
+def share_id_from_url(url: str) -> str:
+    parsed = urlparse(url)
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) >= 2 and parts[0] == "share":
+        return parts[1]
+    raise ValueError(f"not a ChatGPT share URL: {url}")
+
+
+def extract_router_stream(html: str) -> str:
+    chunks = ENQUEUE_RE.findall(html)
+    if not chunks:
+        raise RuntimeError("no React Router streamController.enqueue payload found")
+    return "\n".join(f"window.__reactRouterContext.streamController.enqueue({chunk});" for chunk in chunks)
+
+
+def load_first_router_chunk(router_stream: str) -> str:
+    match = ENQUEUE_RE.search(router_stream)
+    if not match:
+        raise RuntimeError("router stream has no decodable enqueue chunk")
+    return json.loads(match.group("arg"))
+
+
+def decode_table(table):
+    seen = {}
+
+    def dec(value):
+        if isinstance(value, int):
+            if value < 0:
+                return None
+            return dec_ref(value)
+        if value is None or isinstance(value, (str, float, bool)):
+            return value
+        if isinstance(value, list):
+            return [dec(item) for item in value]
+        if isinstance(value, dict):
+            out = {}
+            for key, val in value.items():
+                if key.startswith("_") and key[1:].isdigit():
+                    decoded_key = dec_ref(int(key[1:]))
+                else:
+                    decoded_key = key
+                out[str(decoded_key)] = dec(val)
+            return out
+        return value
+
+    def dec_ref(index: int):
+        if index in seen:
+            return seen[index]
+        raw = table[index]
+        if isinstance(raw, (list, dict)):
+            placeholder = [] if isinstance(raw, list) else {}
+            seen[index] = placeholder
+            decoded = dec(raw)
+            if isinstance(placeholder, list):
+                placeholder.extend(decoded)
+            else:
+                placeholder.update(decoded)
+            return placeholder
+        seen[index] = raw
+        return raw
+
+    return dec_ref(0)
+
+
+def message_text(message: dict) -> str:
+    content = message.get("content") or {}
+    parts = content.get("parts")
+    if isinstance(parts, list):
+        rendered = []
+        for part in parts:
+            if isinstance(part, str):
+                rendered.append(part)
+            elif isinstance(part, dict):
+                if isinstance(part.get("text"), str):
+                    rendered.append(part["text"])
+                elif part.get("name"):
+                    rendered.append(f"[attachment: {part['name']}]")
+                else:
+                    rendered.append(json.dumps(part, ensure_ascii=False))
+            else:
+                rendered.append(str(part))
+        return "\n".join(rendered).strip()
+    text = content.get("text")
+    return text.strip() if isinstance(text, str) else ""
+
+
+def ordered_messages(route_data: dict) -> list[dict]:
+    mapping = route_data["serverResponse"]["data"]["mapping"]
+    nodes = list(mapping.values())
+    children = {node.get("id"): node.get("children") or [] for node in nodes}
+    parent_by_child = {}
+    for parent, child_ids in children.items():
+        for child in child_ids:
+            parent_by_child[child] = parent
+
+    roots = [
+        node
+        for node in nodes
+        if node.get("parent") is None or node.get("id") not in parent_by_child
+    ]
+    by_id = {node.get("id"): node for node in nodes}
+    current = roots[0] if roots else nodes[0]
+    order = []
+    while current:
+        order.append(current)
+        child_ids = current.get("children") or []
+        current = by_id.get(child_ids[-1]) if child_ids else None
+
+    messages = []
+    for node in order:
+        message = node.get("message")
+        if not message:
+            continue
+        role = ((message.get("author") or {}).get("role") or "").strip()
+        text = message_text(message)
+        if not role and not text:
+            continue
+        messages.append(
+            {
+                "node_id": node.get("id"),
+                "message_id": message.get("id"),
+                "parent": node.get("parent"),
+                "children": node.get("children") or [],
+                "role": role,
+                "create_time": message.get("create_time"),
+                "update_time": message.get("update_time"),
+                "status": message.get("status"),
+                "metadata": message.get("metadata") or {},
+                "text": text,
+            }
+        )
+    return messages
+
+
+def route_data_from_stream(router_stream: str) -> dict:
+    table = json.loads(load_first_router_chunk(router_stream))
+    decoded_root = decode_table(table)
+    try:
+        return decoded_root["loaderData"]["routes/share.$shareId.($action)"]
+    except KeyError as exc:
+        raise RuntimeError("decoded page did not contain the ChatGPT share route data") from exc
+
+
+def export_conversation(url: str, output_dir: Path, write_visible_body: bool) -> dict:
+    share_id = share_id_from_url(url)
+    html = fetch_url(url)
+    router_stream = extract_router_stream(html)
+    route_data = route_data_from_stream(router_stream)
+
+    server_data = route_data["serverResponse"]["data"]
+    server_meta = route_data.get("meta") or {}
+    messages = ordered_messages(route_data)
+    title = server_data.get("title") or server_meta.get("pageTitle") or "ChatGPT shared conversation"
+
+    result = {
+        "source_url": url,
+        "shared_conversation_id": route_data.get("sharedConversationId"),
+        "conversation_id": server_data.get("conversation_id"),
+        "title": title,
+        "default_model_slug": server_data.get("default_model_slug"),
+        "create_time": server_data.get("create_time"),
+        "update_time": server_data.get("update_time"),
+        "mapping_node_count": len(server_data.get("mapping") or {}),
+        "messages": messages,
+        "message_count": len(messages),
+    }
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    stem = share_id
+    json_path = output_dir / f"{stem}.messages.json"
+    md_path = output_dir / f"{stem}.md"
+    stream_path = output_dir / f"{stem}.router-stream.js"
+    html_path = output_dir / f"{stem}.html"
+
+    json_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
+    stream_path.write_text(router_stream)
+    html_path.write_text(html)
+    if write_visible_body:
+        visible = re.sub(r"<script\b.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE)
+        visible = re.sub(r"<style\b.*?</style>", "", visible, flags=re.DOTALL | re.IGNORECASE)
+        visible = re.sub(r"<[^>]+>", "\n", visible)
+        visible = re.sub(r"\n{3,}", "\n\n", visible)
+        (output_dir / f"{stem}.visible-body-probe.txt").write_text(visible.strip() + "\n")
+
+    write_markdown(result, md_path)
+    return {
+        "source_url": url,
+        "shared_conversation_id": result["shared_conversation_id"],
+        "conversation_id": result["conversation_id"],
+        "title": title,
+        "default_model_slug": result["default_model_slug"],
+        "message_count": result["message_count"],
+        "mapping_node_count": result["mapping_node_count"],
+        "markdown": md_path.name,
+        "messages_json": json_path.name,
+        "raw_router_stream": stream_path.name,
+        "raw_html": html_path.name,
+    }
+
+
+def write_markdown(result: dict, path: Path) -> None:
+    lines = [
+        "---",
+        f"title: {json.dumps(result['title'], ensure_ascii=False)}",
+        f"source_url: {json.dumps(result['source_url'], ensure_ascii=False)}",
+        f"conversation_id: {json.dumps(result['conversation_id'], ensure_ascii=False)}",
+        f"shared_conversation_id: {json.dumps(result['shared_conversation_id'], ensure_ascii=False)}",
+        f"model: {json.dumps(result['default_model_slug'], ensure_ascii=False)}",
+        f"message_count: {result['message_count']}",
+        f"mapping_node_count: {result['mapping_node_count']}",
+        f"create_time: {json.dumps(result['create_time'], ensure_ascii=False)}",
+        f"update_time: {json.dumps(result['update_time'], ensure_ascii=False)}",
+        "---",
+        "",
+        f"# {result['title']}",
+        "",
+    ]
+    for index, message in enumerate(result["messages"], 1):
+        role = message["role"] or "unknown"
+        lines.append(f"## {index}. {role}")
+        lines.append("")
+        if message["create_time"] is not None:
+            lines.append(f"_create_time: {message['create_time']}_")
+            lines.append("")
+        lines.append(message["text"] or "[empty message]")
+        lines.append("")
+    path.write_text("\n".join(lines))
+
+
+def default_output_dir() -> Path:
+    stamp = dt.datetime.now().strftime("%Y%m%d")
+    return Path("/realm/data/exports/chatlog/raw") / f"chatgpt-share-{stamp}"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Export public ChatGPT share URLs from embedded structured page state.",
+    )
+    parser.add_argument("url", nargs="+", help="ChatGPT share URL(s), e.g. https://chatgpt.com/share/...")
+    parser.add_argument(
+        "-o",
+        "--output-dir",
+        type=Path,
+        default=default_output_dir(),
+        help="directory for markdown, JSON, raw HTML, raw router stream, and MANIFEST.json",
+    )
+    parser.add_argument(
+        "--visible-body-probe",
+        action="store_true",
+        help="also write a rough HTML text projection for comparison/debugging",
+    )
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    entries = []
+    failed = 0
+    for url in args.url:
+        try:
+            entry = export_conversation(url, args.output_dir, args.visible_body_probe)
+        except Exception as exc:
+            failed += 1
+            print(f"error: {url}: {exc}", file=sys.stderr)
+            continue
+        entries.append(entry)
+        print(
+            f"exported {entry['message_count']} messages: "
+            f"{args.output_dir / entry['markdown']}",
+            file=sys.stderr,
+        )
+
+    if entries:
+        manifest_path = args.output_dir / "MANIFEST.json"
+        manifest = {
+            "created_at": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
+            "method": "ChatGPT shared-page React Router stream decode; not DOM scrape",
+            "entries": entries,
+        }
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+        print(manifest_path)
+
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

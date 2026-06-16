@@ -211,6 +211,7 @@ mkFeatureModule {
         {
           home.packages = [
             scriptPkgs.sinnix-scope
+            scriptPkgs.chatgpt-share-export
             scriptPkgs.render-agents
             scriptPkgs.normalize-agent-projects
             scriptPkgs.verify-agent-topology

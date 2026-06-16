@@ -32,6 +32,10 @@
           message = "Desktop audio must enable WirePlumber";
         }
         {
+          assertion = config.systemd.user.services.wireplumber.serviceConfig.Restart == "always";
+          message = "WirePlumber must restart after clean exits so Bluetooth A2DP endpoints return";
+        }
+        {
           assertion = builtins.any isXm4Rule xm4Rules;
           message = "WH-1000XM4 must be preferred as the default Bluetooth sink when it appears";
         }
