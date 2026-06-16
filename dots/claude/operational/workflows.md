@@ -45,19 +45,24 @@ mkdir -p /realm/tmp/worktrees
 git -C /realm/project/<repo> worktree add -b <branch> /realm/tmp/worktrees/<name> origin/master
 ```
 
-**Sinex tests from a worktree:** the devshell's `DATABASE_URL` points at the
-worktree's own (non-running) dev postgres, so sqlx macros fail; and
-`SQLX_OFFLINE=true` breaks test files whose queries aren't in `.sqlx`.
-Point macros at the main checkout's live dev DB instead:
+**Sinex tests from a worktree:** use a live dev database socket, not sqlx's
+offline query cache. Plain `nix develop` now relocates the per-checkout dev
+database under `/var/cache/sinex/$USER/<checkout-hash>/dev-state`; read the
+current checkout's `DATABASE_URL` from its devshell before overriding another
+worktree:
 
 ```bash
-nix develop --command env \
-  DATABASE_URL="postgresql:///sinex_dev?host=/realm/project/sinex/.sinex/run" \
-  cargo test -p <crate> --lib <filter>
+SINEX_MAIN_DATABASE_URL="$(
+  git -C /realm/project/sinex status --short >/dev/null &&
+  nix develop /realm/project/sinex --command sh -c 'printf %s "$DATABASE_URL"'
+)"
+
+env DATABASE_URL="$SINEX_MAIN_DATABASE_URL" \
+  nix develop --command cargo test -p <crate> --lib <filter>
 ```
 
 The pre-push drift guard inherits the same broken `DATABASE_URL` — pushing
-from a worktree devshell needs the identical `env DATABASE_URL=… git push`
+from a worktree devshell needs the identical `env DATABASE_URL=... git push`
 override, or sqlx compile errors masquerade as drift-guard rejections.
 
 ### Data Analysis (lynchpin)
