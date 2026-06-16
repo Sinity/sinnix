@@ -474,12 +474,12 @@ in
       # subvolumes/devices; anything under @ here is stale pre-mount data.
       for path in nix swap persist realm outer-realm neo-outer-realm; do
         if [ -d "/btrfs_tmp/@/$path" ]; then
-          ${pkgs.findutils}/bin/find "/btrfs_tmp/@/$path" -mindepth 1 -xdev -exec ${pkgs.coreutils}/bin/rm -rf -- {} +
+          ${pkgs.findutils}/bin/find "/btrfs_tmp/@/$path" -mindepth 1 -xdev -ignore_readdir_race -exec ${pkgs.coreutils}/bin/rm -rf -- {} +
         fi
       done
       for cache_path in /btrfs_tmp/@/root/.cache /btrfs_tmp/@/var/cache /btrfs_tmp/@/home/*/.cache; do
         if [ -d "$cache_path" ]; then
-          ${pkgs.findutils}/bin/find "$cache_path" -mindepth 1 -xdev -exec ${pkgs.coreutils}/bin/rm -rf -- {} +
+          ${pkgs.findutils}/bin/find "$cache_path" -mindepth 1 -xdev -ignore_readdir_race -exec ${pkgs.coreutils}/bin/rm -rf -- {} +
         fi
       done
 
