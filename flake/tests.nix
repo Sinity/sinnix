@@ -188,6 +188,7 @@ in
         outputs = {
           "router-config" = {
             build = [ "router-config-build" ];
+            eval = [ "router-config-build" ];
           };
         };
       };

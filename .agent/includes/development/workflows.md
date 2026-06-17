@@ -5,7 +5,7 @@
 ```bash
 cd /realm/project/sinnix
 direnv allow                        # Activate devshell (provides switch, check, etc.)
-check --no-build                    # Fast pre-flight: curated default checks, sequential
+switch                              # Build, evaluate, and activate immediately
 ```
 
 All rebuild commands use `nh` under the hood (systemd-run containment, nice=10):
@@ -35,11 +35,13 @@ nix-tree                            # Interactive dependency browser (find rebui
 
 ### Pre-Flight Before Rebuild
 
-Always run `check --no-build` before `switch`. The devshell wrapper runs the
-curated default check tier sequentially, serializes heavy Nix operations, and
-forces `eval-cache = false`. Avoid raw `nix flake check --no-build` for routine
-pre-flight work on this host; that traversal has filled zram and wedged in
-uninterruptible sleep. The curated check catches:
+Use `check --no-build` when you need a non-activating gate before committing or
+when the user explicitly asks for a pre-flight. Do not run it before `switch`
+when the user asks to apply a live repair now; `switch` already evaluates and
+builds before activation, so a separate check only delays recovery. Avoid raw
+`nix flake check --no-build` for routine pre-flight work on this host; that
+traversal has filled zram and wedged in uninterruptible sleep. The curated check
+catches:
 
 - Option type errors and missing required arguments
 - Coverage manifest consistency (services without coverage entries)
@@ -69,8 +71,8 @@ vim modules/features/desktop/new-feature.nix
 # 3. Enable in host or bundle
 vim hosts/sinnix-prime/default.nix  # Add to sinnix.features.desktop.new-feature
 
-# 4. Test
-check --no-build && test-vm && switch
+# 4. Test/apply
+test-vm && switch
 
 # 5. Update CLAUDE.md includes
 vim .agent/includes/modules/features.md  # Add to feature list
@@ -90,8 +92,8 @@ vim flake/test-coverage.nix  # Add to services section
 # 4. Enable in host
 vim hosts/sinnix-prime/default.nix
 
-# 5. Test
-check --no-build && switch
+# 5. Apply
+switch
 ```
 
 ### Add New Package Overlay

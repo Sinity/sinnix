@@ -12,7 +12,7 @@
 [theme]
 mode = "dark"
 source = "wallpaper"
-wallpaper_scheme = "m3-content"
+wallpaper_scheme = "vibrant"
 
 [theme.templates]
 enable_builtin_templates = true

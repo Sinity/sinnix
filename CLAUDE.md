@@ -11,6 +11,9 @@
 - Reconfirm no compatibility aliases/shims are introduced.
 - Reconfirm existing scripts/skills were checked before adding new helpers.
 - Reconfirm commit boundary is coherent and validated.
+- For live desktop/system repairs, if the user asks to apply or switch now,
+  run `switch` directly. Do not insert `check --no-build` first; `switch`
+  already evaluates/builds before activation.
 
 ## Context Architecture
 

@@ -73,6 +73,56 @@ mkFeatureModule {
             force = lib.mkForce true;
           };
 
+          systemd.user.services.noctalia-hyprland-reload = {
+            Unit = {
+              Description = "Reload Hyprland after Noctalia updates generated colors";
+              StartLimitIntervalSec = 0;
+            };
+            Service = {
+              Type = "oneshot";
+              ExecStart =
+                let
+                  reloadScript = pkgs.writeShellScript "noctalia-hyprland-reload" ''
+                    set -euo pipefail
+
+                    runtime_dir="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+                    hypr_dir="$runtime_dir/hypr"
+                    latest=""
+                    latest_mtime=0
+
+                    if [ ! -d "$hypr_dir" ]; then
+                      exit 0
+                    fi
+
+                    for dir in "$hypr_dir"/*; do
+                      [ -S "$dir/.socket.sock" ] || continue
+                      mtime="$(${pkgs.coreutils}/bin/stat -c %Y "$dir")"
+                      if [ "$mtime" -ge "$latest_mtime" ]; then
+                        latest="$dir"
+                        latest_mtime="$mtime"
+                      fi
+                    done
+
+                    [ -n "$latest" ] || exit 0
+                    export HYPRLAND_INSTANCE_SIGNATURE="''${latest##*/}"
+                    exec ${pkgs.hyprland}/bin/hyprctl reload
+                  '';
+                in
+                "${reloadScript}";
+            };
+          };
+
+          systemd.user.paths.noctalia-hyprland-reload = {
+            Unit = {
+              Description = "Watch Noctalia-generated Hyprland colors";
+            };
+            Path = {
+              PathChanged = "${config.home.homeDirectory}/.config/hypr/noctalia.conf";
+              Unit = "noctalia-hyprland-reload.service";
+            };
+            Install.WantedBy = [ "default.target" ];
+          };
+
           home.activation.reconcileNoctaliaState = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
             settings="''${XDG_STATE_HOME:-$HOME/.local/state}/noctalia/settings.toml"
             if [ -f "$settings" ]; then
