@@ -245,6 +245,13 @@ rec {
         CPUWeight = 400;
         IOWeight = 300;
         MemoryLow = "3G";
+        MemorySwapMax = "0";
+      };
+      app = {
+        MemorySwapMax = "0";
+      };
+      session = {
+        MemorySwapMax = "0";
       };
       backup = {
         CPUWeight = 20;

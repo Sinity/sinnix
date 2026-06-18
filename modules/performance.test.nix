@@ -29,10 +29,12 @@
         name:
         !(builtins.hasAttr name config.systemd.slices)
         || (config.systemd.slices.${name}.sliceConfig or { }) == { };
-      noUserSlice =
+      noWholeSessionCaps =
         name:
-        !(builtins.hasAttr name config.systemd.user.slices)
-        || (config.systemd.user.slices.${name}.sliceConfig or { }) == { };
+        let
+          sliceConfig = config.systemd.user.slices.${name}.sliceConfig or { };
+        in
+        !(sliceConfig ? MemoryHigh) && !(sliceConfig ? MemoryMax);
       noOomdPressure =
         sliceConfig:
         !(sliceConfig ? ManagedOOMMemoryPressure) && !(sliceConfig ? ManagedOOMMemoryPressureLimit);
@@ -81,9 +83,9 @@
         assertion =
           noLocalSlice "sinnix"
           && noLocalSlice "sinnix-maintenance"
-          && noUserSlice "app"
-          && noUserSlice "session";
-        message = "Sinnix must not resurrect retired whole-session or maintenance slice policy";
+          && noWholeSessionCaps "app"
+          && noWholeSessionCaps "session";
+        message = "Sinnix must not resurrect retired whole-session memory caps or maintenance slice policy";
       }
       {
         assertion =
@@ -108,9 +110,15 @@
           runtimeInventory.commandClasses.agent.systemdProperties == { }
           && !(config.systemd.user.slices.agent.sliceConfig ? MemoryHigh)
           && !(config.systemd.user.slices.agent.sliceConfig ? MemoryMax)
-          && !(config.systemd.user.slices.agent.sliceConfig ? MemorySwapMax)
+          && config.systemd.user.slices.agent.sliceConfig.MemorySwapMax == "0"
           && config.systemd.user.slices.agent.sliceConfig.MemoryLow == "3G";
         message = "interactive agent frontends must not share a cgroup memory throttle";
+      }
+      {
+        assertion =
+          config.systemd.user.slices.app.sliceConfig.MemorySwapMax == "0"
+          && config.systemd.user.slices.session.sliceConfig.MemorySwapMax == "0";
+        message = "interactive app and session slices must not be pushed into zram";
       }
     ];
 }
