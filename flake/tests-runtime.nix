@@ -848,10 +848,7 @@ in
               .mcpServers.lynchpin.command == "mcp-lynchpin" and
               .mcpServers.lynchpin.env.LYNCHPIN_REPO_ROOT == "/realm/project/sinity-lynchpin" and
               .mcpServers.lynchpin.env.LYNCHPIN_LOCAL_ROOT == "/realm/project/sinity-lynchpin/.lynchpin" and
-              .mcpServers.polylogue.command == "mcp-polylogue" and
-              (.mcpServers | has("playwright") | not) and
-              (.mcpServers | has("playwright-headed") | not) and
-              (.mcpServers | has("chrome-devtools") | not)
+              .mcpServers.polylogue.command == "mcp-polylogue"
             ' "$HOME/.config/claude/mcp.json" >/dev/null
 
             python3 - <<'PYCODE'
@@ -884,18 +881,12 @@ in
             assert mcp['polylogue']['command'] == 'mcp-polylogue'
             assert mcp['lynchpin']['env']['LYNCHPIN_REPO_ROOT'] == '/realm/project/sinity-lynchpin'
             assert mcp['lynchpin']['env']['LYNCHPIN_LOCAL_ROOT'] == '/realm/project/sinity-lynchpin/.lynchpin'
-            assert 'playwright' not in mcp
-            assert 'playwright-headed' not in mcp
-            assert 'chrome-devtools' not in mcp
             assert config['features']['hooks'] is True
             PYCODE
 
             jq -e '
               .mcpServers["codebase-memory-mcp"].command == "codebase-memory-mcp" and
-              .mcpServers.serena.args == ["start-mcp-server", "--project-from-cwd", "--context=ide"] and
-              (.mcpServers | has("playwright") | not) and
-              (.mcpServers | has("playwright-headed") | not) and
-              (.mcpServers | has("chrome-devtools") | not)
+              .mcpServers.serena.args == ["start-mcp-server", "--project-from-cwd", "--context=ide"]
             ' "$HOME/.gemini/settings.json" >/dev/null
 
             jq -e '
