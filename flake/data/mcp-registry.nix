@@ -98,14 +98,11 @@ let
     playwright = {
       transport = "stdio";
       command = "mcp-playwright";
-      # Headless is the safe default for autonomous agents; per-client overrides
-      # can swap to the headed variant when interacting with the user's session.
+      # Available as a manual MCP wrapper. Do not include browser automation in
+      # default agent configs: every agent instance would otherwise spawn its
+      # own browser-control daemon set.
       args = [ "--headless" ];
-      clients = [
-        "claude"
-        "codex"
-        "gemini"
-      ];
+      clients = [ ];
     };
 
     # Headed Playwright variant against a persistent dev profile. Use when an
@@ -114,21 +111,13 @@ let
     playwright-headed = {
       transport = "stdio";
       command = "mcp-playwright-headed";
-      clients = [
-        "claude"
-        "codex"
-        "gemini"
-      ];
+      clients = [ ];
     };
 
     chrome-devtools = {
       transport = "stdio";
       command = "mcp-chrome-devtools";
-      clients = [
-        "claude"
-        "codex"
-        "gemini"
-      ];
+      clients = [ ];
     };
   };
 
