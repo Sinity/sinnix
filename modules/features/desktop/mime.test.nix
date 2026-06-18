@@ -5,7 +5,9 @@ mkFeatureTest {
   assertions =
     config:
     let
-      defaultApps = (hmFor config).xdg.mimeApps.defaultApplications;
+      hm = hmFor config;
+      defaultApps = hm.xdg.mimeApps.defaultApplications;
+      dataFiles = hm.xdg.dataFile;
     in
     [
       {
@@ -19,6 +21,14 @@ mkFeatureTest {
       {
         assertion = defaultApps."text/html" == [ "google-chrome.desktop" ];
         message = "HTML documents must default to Google Chrome";
+      }
+      {
+        assertion = defaultApps."text/markdown" == [ "sinnix-text-preview.desktop" ];
+        message = "Markdown documents must default to the Sinnix text preview handler";
+      }
+      {
+        assertion = dataFiles ? "applications/sinnix-text-preview.desktop";
+        message = "Sinnix text preview desktop entry must be installed";
       }
     ];
 }

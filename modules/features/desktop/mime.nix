@@ -99,18 +99,20 @@ mkFeatureModule {
             mimeType = browserMimeTypes;
           };
 
-          xdg.desktopEntries.sinnix-text-preview = {
-            name = "Sinnix Text Preview";
-            genericName = "Text Viewer";
-            comment = "Open text files in a floating, dismissable preview popup";
-            exec = "${config.home.homeDirectory}/.local/bin/open-text-preview %F";
-            terminal = false;
-            noDisplay = true;
-            categories = [
-              "Utility"
-              "TextEditor"
-            ];
-            mimeType = textPreviewTypes;
+          xdg.dataFile."applications/sinnix-text-preview.desktop" = {
+            force = true;
+            text = ''
+              [Desktop Entry]
+              Type=Application
+              Name=Sinnix Text Preview
+              GenericName=Text Viewer
+              Comment=Open text files in a floating, dismissable preview popup
+              Exec=${config.home.homeDirectory}/.local/bin/open-text-preview %F
+              Terminal=false
+              NoDisplay=true
+              Categories=Utility;TextEditor;
+              MimeType=${lib.concatStringsSep ";" textPreviewTypes};
+            '';
           };
 
           home.file.".local/bin/open-text-preview" = {
