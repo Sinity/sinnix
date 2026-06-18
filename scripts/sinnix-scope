@@ -88,12 +88,6 @@ if inventory_readable; then
       export "$name=$value"
     fi
   done < <(jq -r --arg class "$class" '.commandClasses[$class].envDefaults // {} | to_entries[] | "\(.key)=\(.value)"' "$inventory_file")
-elif [ "$class" = agent ]; then
-  property_args=(
-    "--property=MemoryHigh=6G"
-    "--property=MemoryMax=12G"
-    "--property=MemorySwapMax=0"
-  )
 elif [ "$class" = build ]; then
   : "${CARGO_BUILD_JOBS:=12}"
   : "${CARGO_INCREMENTAL:=0}"

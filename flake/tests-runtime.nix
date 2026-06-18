@@ -919,6 +919,10 @@ in
               grep -Fq 'launch.sh' "$wrapper"
               grep -Fq 'run_agent_scoped "$STATE/launch.sh"' "$wrapper"
             done
+            if grep -R 'MemoryHigh\|MemoryMax\|MemorySwapMax' "$HOME/.local/bin/claude" "$HOME/.local/bin/codex" "$HOME/.local/bin/gemini"; then
+              echo "interactive agent wrappers must not impose shared memory caps" >&2
+              exit 1
+            fi
             grep -Fq 'npm install -g @anthropic-ai/claude-code' "$HOME/.local/bin/claude"
             grep -Fq 'npm install -g @openai/codex' "$HOME/.local/bin/codex"
             grep -Fq 'npm install -g @google/gemini-cli' "$HOME/.local/bin/gemini"

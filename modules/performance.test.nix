@@ -103,5 +103,14 @@
           && builtins.elem "SINEX_DEV_CACHE_ROOT" runtimeInventory.environmentAllowList;
         message = "runtime policy registry must be the single source for command classes and declared surfaces";
       }
+      {
+        assertion =
+          runtimeInventory.commandClasses.agent.systemdProperties == { }
+          && !(config.systemd.user.slices.agent.sliceConfig ? MemoryHigh)
+          && !(config.systemd.user.slices.agent.sliceConfig ? MemoryMax)
+          && !(config.systemd.user.slices.agent.sliceConfig ? MemorySwapMax)
+          && config.systemd.user.slices.agent.sliceConfig.MemoryLow == "3G";
+        message = "interactive agent frontends must not share a cgroup memory throttle";
+      }
     ];
 }

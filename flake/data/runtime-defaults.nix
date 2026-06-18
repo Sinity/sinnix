@@ -181,11 +181,7 @@ rec {
       nice = null;
       ioniceClass = null;
       ionicePriority = null;
-      systemdProperties = {
-        MemoryHigh = "6G";
-        MemoryMax = "12G";
-        MemorySwapMax = "0";
-      };
+      systemdProperties = { };
       envDefaults = { };
     };
     build = {
@@ -249,9 +245,6 @@ rec {
         CPUWeight = 400;
         IOWeight = 300;
         MemoryLow = "3G";
-        MemoryHigh = "18G";
-        MemoryMax = "24G";
-        MemorySwapMax = "0";
       };
       backup = {
         CPUWeight = 20;
