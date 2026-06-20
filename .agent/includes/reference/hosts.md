@@ -9,7 +9,7 @@ Each host:
 
 1. Imports shared modules via `../modules`
 2. Sets machine-specific options (boot, storage, display, input)
-3. Enables bundles/features selectively
+3. Enables services and opts out of default-on features selectively
 
 Example:
 
@@ -25,9 +25,9 @@ Example:
   ];
 
   sinnix = {
-    bundles.desktop.enable = true;
-    bundles.dev.enable = true;
     services.sinex.enable = true;
+    services.polylogue.enable = true;
+    features.desktop.gaming.enable = false;
   };
 }
 ```

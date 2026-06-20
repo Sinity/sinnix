@@ -58,7 +58,7 @@ in {
 | **DSLs**                   | `lib/hyprland-rules.nix`    | `mkRule`, `mkScratchpad` → transform declarative data to config syntax     |
 | **Systemd Hardening**      | `lib/systemd-hardening.nix` | `mkHardenedService { level = "strict" }` — preset security profiles        |
 | **Runtime Inventory**      | `runtime.nix`               | Declared units/captures → resource placement and runtime inventory         |
-| **Bundles**                | `bundles/*.nix`             | Pure composition — only enable other features, no direct config            |
+| **Profiles**               | `profiles/*.nix`            | Host-shape defaults for deployment classes                                 |
 | **Out-of-Store Symlinks**  | `lib/features.nix`          | `mkDotsFileFor` — instant dotfile propagation without rebuild              |
 | **Conditional Merge**      | `services/sinex.nix`        | `lib.mkMerge [ base (lib.mkIf cond extra) ]` — layered composition         |
 | **Config Assertion Tests** | `flake/tests.nix`           | Fast checks via `assertions` — no VM boot, just evaluation                 |
@@ -87,15 +87,15 @@ Example: sinex has db-only provisioning vs full service mode.
 ### Layered Abstraction (the pyramid)
 
 ```
-Host config → Bundle → Feature → lib helper
-   (what)      (preset)  (how)    (util)
+Host config → Feature/Service → lib helper
+   (what)          (how)       (util)
 ```
 
 Each layer focuses on one job:
 
-- **Hosts** say "desktop" or "server"
-- **Bundles** wire related features together
+- **Hosts** import shared modules and set machine-specific policy
 - **Features** implement user-facing capabilities
+- **Services** implement long-running daemon surfaces
 - **Libs** provide building blocks
 
 ---

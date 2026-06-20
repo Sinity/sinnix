@@ -22,4 +22,4 @@ error: infinite recursion encountered
 error: option 'sinnix.old.path.enable' used but not defined
 ```
 
-**Fix**: Search for old option path in host configs and bundles, update references.
+**Fix**: Search for old option path in host configs, feature modules, and service modules; update references in the same change.

@@ -126,7 +126,7 @@ After structural changes:
 - **Removed**: `modules/lib/lsp-root.nix` (obsolete)
 - **Consolidated**: 5 activation blocks in `shell.nix` → 2 (`linkConfigs`, `rebuildBatCache`)
 - **Added**: Shell alias `zed = "zeditor"`, removed wrapper script from `editors.nix`
-- **Added tests**: `bundle-desktop`, `services-sinex`, `desktop-hyprland`
+- **Added tests** for desktop and Sinex module evaluation
 - **Added**: Header comments to 4 core modules (core.nix, home-manager.nix, performance.nix, storage.nix)
 - **Documented**: Hyprland composite module pattern in features.md
 
@@ -135,7 +135,7 @@ After structural changes:
 - **Moved**: `modules/nix-ld.nix` → `modules/features/system/nix-ld.nix`
 - **Created**: `modules/features/system/default.nix` (auto-discovery)
 - **Consolidated**: `modules/features/dev/shell/` (4 files) → `modules/features/dev/shell.nix` (single file with subFeatures)
-- **Created**: `modules/bundles/default.nix` (auto-discovery)
+- **Standardized**: feature auto-discovery under `modules/features/`
 - **Updated**: `modules/default.nix` to use `mkAutoImports` with `lib` exclusion
 - **Removed**: Unused `mkDotsSymlink` helper from `lib/features.nix`
 - **Option paths preserved**: `sinnix.features.dev.shell.enable` still works; new subFeature toggles added:
@@ -150,7 +150,7 @@ After structural changes:
 - **Moved**: `modules/audio.nix` → `modules/features/desktop/audio.nix`
 - **Moved**: `modules/ui.nix` → `modules/features/desktop/ui.nix`
 - **Rationale**: Audio and UI are desktop-specific, not system infrastructure
-- **Updated**: Imports in `modules/default.nix`, `features/desktop/default.nix`, `bundles/desktop.nix`
+- **Updated**: Imports in `modules/default.nix` and `features/desktop/default.nix`
 - **Option paths changed**:
   - `sinnix.audio.enable` → `sinnix.features.desktop.audio.enable`
   - `sinnix.ui.enable` → `sinnix.features.desktop.ui.enable`

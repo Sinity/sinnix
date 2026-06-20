@@ -68,8 +68,8 @@ vim modules/features/desktop/new-feature.nix
 
 # 2. Auto-discovered by default.nix — no wiring needed
 
-# 3. Enable in host or bundle
-vim hosts/sinnix-prime/default.nix  # Add to sinnix.features.desktop.new-feature
+# 3. Feature modules default on; opt out per host only when needed
+vim hosts/sinnix-prime/default.nix  # Set sinnix.features.desktop.new-feature.enable = false if excluded
 
 # 4. Test/apply
 test-vm && switch

@@ -40,7 +40,7 @@ modules/
 ├── *.nix              # Infrastructure & platform (system-level)
 ├── features/          # User-facing capabilities (what users interact with)
 ├── services/          # Long-running systemd daemons
-├── bundles/           # Convenience presets (groups of features)
+├── profiles/          # Host-shape defaults for non-desktop environments
 └── lib/               # Helper functions
 ```
 
@@ -57,8 +57,8 @@ MATCH config_type:
   | Systemd daemon (primary purpose is background service)
     → modules/services/*.nix
 
-  | Convenience preset (enables multiple features)
-    → modules/bundles/*.nix
+  | Host-shape defaults for a deployment class
+    → modules/profiles/*.nix
 
   | Reusable helper function
     → modules/lib/*.nix
