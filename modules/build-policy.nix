@@ -141,7 +141,6 @@ in
           # cgroup before global pressure reaches earlyoom territory.
           MemoryHigh = "18G";
           MemoryMax = "24G";
-          MemorySwapMax = "0";
         };
       };
     };

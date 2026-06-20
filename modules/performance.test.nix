@@ -110,15 +110,19 @@
           runtimeInventory.commandClasses.agent.systemdProperties == { }
           && !(config.systemd.user.slices.agent.sliceConfig ? MemoryHigh)
           && !(config.systemd.user.slices.agent.sliceConfig ? MemoryMax)
-          && config.systemd.user.slices.agent.sliceConfig.MemorySwapMax == "0"
+          && !(config.systemd.user.slices.agent.sliceConfig ? MemorySwapMax)
           && config.systemd.user.slices.agent.sliceConfig.MemoryLow == "3G";
-        message = "interactive agent frontends must not share a cgroup memory throttle";
+        message = "interactive agent frontends must not share a cgroup memory throttle or swap ban";
       }
       {
         assertion =
-          config.systemd.user.slices.app.sliceConfig.MemorySwapMax == "0"
-          && config.systemd.user.slices.session.sliceConfig.MemorySwapMax == "0";
-        message = "interactive app and session slices must not be pushed into zram";
+          !(config.systemd.user.slices.app.sliceConfig ? MemorySwapMax)
+          && !(config.systemd.user.slices.session.sliceConfig ? MemorySwapMax)
+          && !(config.systemd.user.slices.build.sliceConfig ? MemorySwapMax)
+          && !(config.systemd.user.slices.nix-build.sliceConfig ? MemorySwapMax)
+          && !(config.systemd.slices.nix-build.sliceConfig ? MemorySwapMax)
+          && !(config.systemd.services.nix-daemon.serviceConfig ? MemorySwapMax);
+        message = "broad user/build slices must not ban the capped zram cushion";
       }
     ];
 }

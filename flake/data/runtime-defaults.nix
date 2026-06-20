@@ -232,7 +232,6 @@ rec {
         # still leaving room for the desktop and always-on data services.
         MemoryHigh = "18G";
         MemoryMax = "24G";
-        MemorySwapMax = "0";
       };
       system-critical = {
         CPUWeight = 400;
@@ -245,14 +244,9 @@ rec {
         CPUWeight = 400;
         IOWeight = 300;
         MemoryLow = "3G";
-        MemorySwapMax = "0";
       };
-      app = {
-        MemorySwapMax = "0";
-      };
-      session = {
-        MemorySwapMax = "0";
-      };
+      app = { };
+      session = { };
       backup = {
         CPUWeight = 20;
         IOWeight = 20;
@@ -270,14 +264,12 @@ rec {
         IOWeight = 2;
         MemoryHigh = "18G";
         MemoryMax = "24G";
-        MemorySwapMax = "0";
       };
       nix-build = {
         CPUWeight = 5;
         IOWeight = 2;
         MemoryHigh = "18G";
         MemoryMax = "24G";
-        MemorySwapMax = "0";
       };
     };
   };
