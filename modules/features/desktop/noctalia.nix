@@ -73,52 +73,81 @@ mkFeatureModule {
             force = lib.mkForce true;
           };
 
-          systemd.user.services.noctalia-hyprland-reload = {
+          systemd.user.services.noctalia-hyprland-colors = {
             Unit = {
-              Description = "Reload Hyprland after Noctalia updates generated colors";
+              Description = "Apply Noctalia-generated Hyprland colors";
               StartLimitIntervalSec = 0;
             };
             Service = {
               Type = "oneshot";
               ExecStart =
                 let
-                  reloadScript = pkgs.writeShellScript "noctalia-hyprland-reload" ''
+                  applyScript = pkgs.writeShellScript "noctalia-hyprland-colors" ''
                     set -euo pipefail
 
-                    runtime_dir="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
-                    hypr_dir="$runtime_dir/hypr"
-                    latest=""
-                    latest_mtime=0
+                    config_file="''${XDG_CONFIG_HOME:-$HOME/.config}/hypr/noctalia.conf"
+                    [ -r "$config_file" ] || exit 0
 
-                    if [ ! -d "$hypr_dir" ]; then
-                      exit 0
-                    fi
+                    color_for() {
+                      ${pkgs.gawk}/bin/awk -v name="$1" '
+                        $1 == "$" name && $2 == "=" {
+                          print $3
+                          found = 1
+                          exit
+                        }
+                        END { exit found ? 0 : 1 }
+                      ' "$config_file"
+                    }
 
-                    for dir in "$hypr_dir"/*; do
-                      [ -S "$dir/.socket.sock" ] || continue
-                      mtime="$(${pkgs.coreutils}/bin/stat -c %Y "$dir")"
-                      if [ "$mtime" -ge "$latest_mtime" ]; then
-                        latest="$dir"
-                        latest_mtime="$mtime"
-                      fi
-                    done
+                    primary="$(color_for primary || true)"
+                    surface="$(color_for surface || true)"
+                    secondary="$(color_for secondary || true)"
+                    error="$(color_for error || true)"
 
-                    [ -n "$latest" ] || exit 0
-                    export HYPRLAND_INSTANCE_SIGNATURE="''${latest##*/}"
-                    exec ${pkgs.hyprland}/bin/hyprctl reload
+                    [ -n "$primary" ] || exit 0
+                    [ -n "$surface" ] || exit 0
+                    [ -n "$secondary" ] || exit 0
+                    [ -n "$error" ] || exit 0
+
+                    ${pkgs.hyprland}/bin/hyprctl eval "
+                    hl.config({
+                      general = {
+                        col = {
+                          active_border = \"$primary\",
+                          inactive_border = \"$surface\",
+                        },
+                      },
+                      group = {
+                        col = {
+                          border_active = \"$secondary\",
+                          border_inactive = \"$surface\",
+                          border_locked_active = \"$error\",
+                          border_locked_inactive = \"$surface\",
+                        },
+                        groupbar = {
+                          col = {
+                            active = \"$secondary\",
+                            inactive = \"$surface\",
+                            locked_active = \"$error\",
+                            locked_inactive = \"$surface\",
+                          },
+                        },
+                      },
+                    })
+                    "
                   '';
                 in
-                "${reloadScript}";
+                "${applyScript}";
             };
           };
 
-          systemd.user.paths.noctalia-hyprland-reload = {
+          systemd.user.paths.noctalia-hyprland-colors = {
             Unit = {
               Description = "Watch Noctalia-generated Hyprland colors";
             };
             Path = {
               PathChanged = "${config.home.homeDirectory}/.config/hypr/noctalia.conf";
-              Unit = "noctalia-hyprland-reload.service";
+              Unit = "noctalia-hyprland-colors.service";
             };
             Install.WantedBy = [ "default.target" ];
           };
