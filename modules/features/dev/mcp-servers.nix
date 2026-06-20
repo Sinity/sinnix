@@ -1,8 +1,8 @@
 # Model Context Protocol (MCP) servers and AI-integrated tool settings
 #
 # Provides:
-# - MCP server wrappers (Firecrawl, Playwright)
-# - MCP server registry (Context7 remote, GitHub, Firecrawl, Playwright, Polylogue)
+# - MCP server wrappers (Firecrawl, Chrome DevTools, Polylogue, Lynchpin)
+# - MCP server registry (Context7 remote, GitHub, Firecrawl, Chrome DevTools, Polylogue)
 # - Claude/Codex/Gemini dotfile linking and integration
 # - System monitoring tools (htop)
 {
@@ -84,37 +84,49 @@ mkFeatureModule {
           FIRECRAWL_API_KEY = firecrawlSecretPath;
         };
       };
-      mcpPlaywrightBin = mkMcpWrapper "mcp-playwright" {
-        command = "${pkgs.playwright-mcp}/bin/playwright-mcp";
-      };
-      # Headed Playwright variant against a persistent dev profile under
-      # ~/.local/share/sinnix-browser/playwright-headed. Lets agents drive a
-      # real browser session (e.g. for browser-extension dev) instead of a
-      # fresh sandbox per call.
-      mcpPlaywrightHeadedBin = pkgs.writeShellScriptBin "mcp-playwright-headed" ''
-        set -euo pipefail
-        profile_dir="''${SINNIX_PLAYWRIGHT_PROFILE:-$HOME/.local/share/sinnix-browser/playwright-headed}"
-        mkdir -p "$profile_dir"
-        exec ${pkgs.playwright-mcp}/bin/playwright-mcp \
-          --user-data-dir "$profile_dir" \
-          "$@"
-      '';
       # Chrome DevTools MCP — vendored npm package built via mkNodeCliPackage.
-      # By default attaches to the user's running Chrome on the loopback debug
-      # port (configured by modules/features/desktop/browser.nix:47). Override
-      # via SINNIX_CHROME_DEVTOOLS_URL for a different endpoint, or set it to
-      # the empty string to let Chrome DevTools MCP launch its own browser.
+      # Attaches to the user's running Chrome on the loopback debug port
+      # (configured by modules/features/desktop/browser.nix:47). Private agent
+      # browsers use mcp-chrome-devtools-private instead of this live profile.
       mcpChromeDevtoolsBin = pkgs.writeShellScriptBin "mcp-chrome-devtools" ''
         set -euo pipefail
         target="''${SINNIX_CHROME_DEVTOOLS_URL-http://127.0.0.1:9222}"
-        if [ -n "$target" ]; then
-          exec ${scriptPkgs.mcp-chrome-devtools}/bin/mcp-chrome-devtools \
-            --browserUrl "$target" \
-            "$@"
-        else
-          exec ${scriptPkgs.mcp-chrome-devtools}/bin/mcp-chrome-devtools "$@"
+        if [ -z "$target" ]; then
+          echo "SINNIX_CHROME_DEVTOOLS_URL must name a Chrome DevTools endpoint" >&2
+          exit 2
         fi
+        exec ${scriptPkgs.mcp-chrome-devtools}/bin/mcp-chrome-devtools \
+          --browserUrl "$target" \
+          "$@"
       '';
+      # Agent-owned Chrome DevTools MCP. This gives agents the same DevTools tool
+      # shape as the user's live Chrome, but against a private persistent profile.
+      # It is headless by default; set SINNIX_AGENT_CHROME_HEADLESS=0 when a
+      # visible private browser window is desired for operator inspection.
+      mcpChromeDevtoolsPrivateBin = pkgs.writeShellScriptBin "mcp-chrome-devtools-private" ''
+        set -euo pipefail
+        profile_dir="''${SINNIX_AGENT_CHROME_PROFILE:-$HOME/.local/share/sinnix-browser/chrome-devtools-private}"
+        viewport="''${SINNIX_AGENT_CHROME_VIEWPORT:-1440x1000}"
+        headless="''${SINNIX_AGENT_CHROME_HEADLESS:-1}"
+        mkdir -p "$profile_dir"
+
+        args=(
+          --userDataDir "$profile_dir"
+          --viewport "$viewport"
+          --no-usage-statistics
+        )
+        if [ "$headless" != "0" ]; then
+          args+=(--headless)
+        fi
+
+        exec ${scriptPkgs.mcp-chrome-devtools}/bin/mcp-chrome-devtools "''${args[@]}" "$@"
+      '';
+      mcpChromeDevtoolsPrivateVisibleBin = pkgs.writeShellScriptBin "mcp-chrome-devtools-private-visible" ''
+        set -euo pipefail
+        export SINNIX_AGENT_CHROME_HEADLESS=0
+        exec ${mcpChromeDevtoolsPrivateBin}/bin/mcp-chrome-devtools-private "$@"
+      '';
+      desktopControlScripts = inputs.self + "/dots/_ai/skills/desktop-control-plane/scripts";
       serenaVersion = "1.5.3";
       serenaRuntimePath = lib.makeBinPath [
         pkgs.bash
@@ -467,17 +479,138 @@ mkFeatureModule {
               source = "${mcpFirecrawlBin}/bin/mcp-firecrawl";
               force = true;
             };
-            ".local/bin/mcp-playwright" = {
-              source = "${mcpPlaywrightBin}/bin/mcp-playwright";
-              force = true;
-            };
-            ".local/bin/mcp-playwright-headed" = {
-              source = "${mcpPlaywrightHeadedBin}/bin/mcp-playwright-headed";
-              force = true;
-            };
             ".local/bin/mcp-chrome-devtools" = {
               source = "${mcpChromeDevtoolsBin}/bin/mcp-chrome-devtools";
               force = true;
+            };
+            ".local/bin/mcp-chrome-devtools-private" = {
+              source = "${mcpChromeDevtoolsPrivateBin}/bin/mcp-chrome-devtools-private";
+              force = true;
+            };
+            ".local/bin/mcp-chrome-devtools-private-visible" = {
+              source = "${mcpChromeDevtoolsPrivateVisibleBin}/bin/mcp-chrome-devtools-private-visible";
+              force = true;
+            };
+            ".local/bin/sinnix-chrome-control" = {
+              source = "${desktopControlScripts}/chrome-control.sh";
+              force = true;
+            };
+            ".local/bin/sinnix-hypr-control" = {
+              source = "${desktopControlScripts}/hypr-control.sh";
+              force = true;
+            };
+            ".local/bin/sinnix-keyboard-control" = {
+              source = "${desktopControlScripts}/keyboard-control.sh";
+              force = true;
+            };
+            ".local/bin/sinnix-kitty-control" = {
+              source = "${desktopControlScripts}/kitty-remote-control.sh";
+              force = true;
+            };
+            ".local/bin/sinnix-screenshot-control" = {
+              source = "${desktopControlScripts}/screenshot-color-lab.sh";
+              force = true;
+            };
+            ".local/bin/sinnix-agent-control-status" = {
+              executable = true;
+              force = true;
+              text = ''
+                #!${pkgs.runtimeShell}
+                set -euo pipefail
+
+                have() {
+                  if command -v "$1" >/dev/null 2>&1; then
+                    printf 'ok\t%s\t%s\n' "$1" "$(command -v "$1")"
+                  else
+                    printf 'missing\t%s\t\n' "$1"
+                  fi
+                }
+
+                service() {
+                  manager="$1"
+                  unit="$2"
+                  if [ "$manager" = "user" ]; then
+                    if systemctl --user is-active --quiet "$unit" 2>/dev/null; then
+                      printf 'ok\t%s\tuser:%s\n' "$unit" "$(systemctl --user is-active "$unit" 2>/dev/null || printf unknown)"
+                    else
+                      printf 'missing\t%s\tuser:%s\n' "$unit" "$(systemctl --user is-active "$unit" 2>/dev/null || printf inactive)"
+                    fi
+                  elif systemctl is-active --quiet "$unit" 2>/dev/null; then
+                    printf 'ok\t%s\tsystem:%s\n' "$unit" "$(systemctl is-active "$unit" 2>/dev/null || printf unknown)"
+                  else
+                    printf 'missing\t%s\tsystem:%s\n' "$unit" "$(systemctl is-active "$unit" 2>/dev/null || printf inactive)"
+                  fi
+                }
+
+                path_probe() {
+                  name="$1"
+                  path="$2"
+                  if [ -e "$path" ]; then
+                    printf 'ok\t%s\t%s\n' "$name" "$path"
+                  else
+                    printf 'missing\t%s\t%s\n' "$name" "$path"
+                  fi
+                }
+
+                printf 'surface\tname\tdetail\n'
+                for cmd in \
+                  codebase-memory-mcp \
+                  mcp-chrome-devtools \
+                  mcp-chrome-devtools-private \
+                  mcp-chrome-devtools-private-visible \
+                  mcp-lynchpin \
+                  mcp-polylogue \
+                  polylogue \
+                  polylogued \
+                  serena \
+                  sinnix-observe \
+                  sinnix-chrome-control \
+                  sinnix-hypr-control \
+                  sinnix-keyboard-control \
+                  sinnix-kitty-control \
+                  sinnix-screenshot-control \
+                  hyprctl \
+                  wtype \
+                  wl-copy \
+                  wl-paste \
+                  grim \
+                  grimblast \
+                  slurp \
+                  websocat; do
+                  have "$cmd"
+                done
+
+                if command -v curl >/dev/null 2>&1; then
+                  if version="$(curl -fsS --max-time 2 http://127.0.0.1:9222/json/version 2>/dev/null)"; then
+                    browser="$(printf '%s' "$version" | ${pkgs.jq}/bin/jq -r '.Browser // "unknown"' 2>/dev/null || printf unknown)"
+                    printf 'ok\tchrome-cdp\t%s\n' "$browser"
+                  else
+                    printf 'missing\tchrome-cdp\thttp://127.0.0.1:9222\n'
+                  fi
+                else
+                  printf 'missing\tchrome-cdp\tcurl unavailable\n'
+                fi
+
+                if command -v hyprctl >/dev/null 2>&1; then
+                  if active="$(hyprctl -j activewindow 2>/dev/null | ${pkgs.jq}/bin/jq -r '[.class // "", .title // ""] | @tsv' 2>/dev/null)"; then
+                    printf 'ok\thypr-active-window\t%s\n' "$active"
+                  else
+                    printf 'missing\thypr-active-window\thyprctl query failed\n'
+                  fi
+                fi
+
+                service user polylogued.service
+                service system machine-telemetry.service
+                service system lynchpin-materialize.timer
+                service system sinex.service
+
+                path_probe runtime-inventory /etc/sinnix/runtime-inventory.json
+                path_probe polylogue-archive "$HOME/.local/share/polylogue"
+                path_probe machine-telemetry /realm/data/captures/machine
+                path_probe screenshots /realm/data/captures/screenshot
+                path_probe kitty-scrollback /realm/data/captures/kitty-scrollback
+                path_probe chatlog-exports /realm/data/exports/chatlog
+              '';
             };
             ".local/bin/mcp-lynchpin" = {
               executable = true;

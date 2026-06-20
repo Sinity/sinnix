@@ -273,7 +273,14 @@ MCP:
 
 - Tools/resources into agents.
 - Agent Mail as coordination MCP.
-- Existing Playwright/Chrome/GitHub/Lynchpin/Polylogue MCPs stay registry-projected per client.
+- Existing Chrome/GitHub/Lynchpin/Polylogue MCPs stay registry-projected per client.
+- Polylogue and Lynchpin are evidence-plane MCPs, not live-control MCPs:
+  Polylogue answers agent transcript/session questions, while Lynchpin answers
+  cross-source timeline/correlation questions over materialized chats, git,
+  ActivityWatch, shell, health, and machine telemetry.
+- Sinnix observability remains the raw runtime plane:
+  `/etc/sinnix/runtime-inventory.json`, `sinnix-observe`, and capture roots under
+  `/realm/data/captures/**`.
 
 ACP:
 

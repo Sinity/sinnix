@@ -15,6 +15,22 @@ impermanence module plus Home Manager activation. Persistent home state such as
 SSH keys lives at `/persist/home/sinity/.ssh` and appears at runtime as
 `/home/sinity/.ssh`.
 
+### Orientation Rules
+
+- Do not assume freedesktop directories live under `/home/sinity`. Query them
+  with `xdg-user-dir <NAME>` when the user says Downloads, Documents, Desktop,
+  etc.
+- The configured downloads directory is `/realm/inbox/download`; `~/Downloads`
+  may not exist. Incoming bundles, patches, browser downloads, and cleanup
+  artifacts usually land there or under `/realm/inbox/download/misc`.
+- Use `/realm/tmp/` for throwaway analysis output that may be large or useful
+  across a short session. Avoid `/tmp` for heavy repo work; it is on the
+  wear-limited root disk.
+- Use `/realm/tmp/worktrees/` for agent worktrees or any compile-heavy checkout.
+  This keeps build output on NVMe and avoids root-disk wear.
+- Treat `/realm/data/` as canonical user data, not scratch. Read from it for
+  evidence; only write there through the owning tool or workflow.
+
 ### /realm/data - Data Lake Structure
 
 ```

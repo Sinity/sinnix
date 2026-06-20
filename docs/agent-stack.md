@@ -22,20 +22,22 @@ Raw-log themes that matter here:
 - The recurring failure mode is not lack of ideas; it is unprioritized meta-infrastructure becoming another jurisdiction.
 - The useful direction is a control plane that reduces hand-shuffling of sessions and preserves evidence, not another grand ontology.
 
-## Adopt now
+## Upstream Candidates
 
-These are already available from `llm-agents.nix` and should be installed/exposed by Sinnix rather than locally packaged:
+These are available from `llm-agents.nix` and should be installed/exposed by
+Sinnix only when a Sinnix module gives them a clear role, persistence, and agent
+vocabulary:
 
 - `herdr`: terminal-native agent runtime/control layer. Strong fit for persistent multi-agent panes plus runtime API.
 - `codex-acp`: NixOS-compatible ACP adapter for Codex, especially useful for Zed/ACP clients.
 - `claude-agent-acp`: ACP adapter for Claude Agent SDK.
 - `beads-rust` + `beads-viewer`: local-first issue graph and dependency/prioritization viewer.
-- `agent-browser`: ready headless browser automation surface.
 - `agent-deck` / `agentsview`: evaluate as lightweight dashboards/viewers before building local UI.
 - `opencode`: additional terminal agent surface, useful as a cross-agent comparison target.
 - `skills`: upstream skill tooling; keep Sinnix/Hermes skills authoritative locally.
 
-Sinnix now installs these as packages. That is deliberately lower-risk than wiring services or changing session ownership.
+The active browser automation surface is the Chrome DevTools MCP trio from the
+Sinnix registry, not a separate upstream browser package.
 
 ## Evaluate next, in order
 
@@ -82,16 +84,29 @@ Adopt per-repo only where dependency graph/critical path beats a plain scratch f
 
 4. Browser/desktop control
 
-Existing registry already exposes Playwright headless, Playwright headed, and Chrome DevTools MCPs to agents. Current desktop control exists as Hyprland/wtype/grim skill instructions, not an MCP server.
+Existing registry exposes Chrome DevTools MCPs to agents for both the user's
+live browser and agent-owned private Chrome profiles. Current desktop control
+exists as Hyprland/wtype/grim skill instructions and stable `sinnix-*` helper
+commands, not a typed MCP server.
 
-Evaluate ready tools in this order:
+Browser-control lanes:
 
-- `agent-browser` from `llm-agents.nix` for private browser automation.
-- existing `mcp-playwright` for headless browser work.
-- existing `mcp-playwright-headed` / `mcp-chrome-devtools` for real browser/session interaction.
-- only then consider writing a local desktop-control MCP around `hyprctl`, `wtype`, `grim`, `wl-copy`, `wl-paste`.
+- `chrome-devtools-private` / `chrome-devtools-private-visible` for private
+  agent browser work.
+- `chrome-devtools` for real browser/session interaction.
+- A future local desktop-control MCP should wrap `hyprctl`, `wtype`, `grim`,
+  `wl-copy`, and `wl-paste` when the shell helpers stop being enough.
 
 The desktop-control MCP should be tiny and typed if built: list windows, active window, focus, workspace, type text, keypress, screenshot. Do not expose broad shell execution through it.
+
+Control and evidence stay separate. DevTools/Hyprland/Kitty helpers are for live
+action and perception; Polylogue is the transcript/session archive, Lynchpin is
+cross-source interpretation over chats/git/ActivityWatch/shell/health/telemetry,
+and Sinnix observability is raw runtime truth via `/etc/sinnix/runtime-inventory.json`,
+`sinnix-observe`, and `/realm/data/captures/**`. `sinnix-agent-control-status`
+is the compact bridge: it probes live control surfaces plus the evidence
+services and capture roots an agent should consult before reconstructing events
+from memory.
 
 ## Evaluate later / be suspicious
 

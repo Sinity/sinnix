@@ -93,6 +93,25 @@ mkFeatureTest {
       ] "mcp-polylogue" "Claude config must call the packaged Polylogue MCP wrapper")
       (expect.attrPathEq claudeSettings [
         "mcpServers"
+        "chrome-devtools"
+        "command"
+      ] "mcp-chrome-devtools" "Claude config must expose the user's Chrome DevTools MCP")
+      (expect.attrPathEq claudeSettings [
+        "mcpServers"
+        "chrome-devtools-private"
+        "command"
+      ] "mcp-chrome-devtools-private" "Claude config must expose the private Chrome DevTools MCP")
+      (expect.attrPathEq claudeSettings
+        [
+          "mcpServers"
+          "chrome-devtools-private-visible"
+          "command"
+        ]
+        "mcp-chrome-devtools-private-visible"
+        "Claude config must expose the visible private Chrome DevTools MCP"
+      )
+      (expect.attrPathEq claudeSettings [
+        "mcpServers"
         "lynchpin"
         "env"
         "LYNCHPIN_REPO_ROOT"
@@ -130,6 +149,25 @@ mkFeatureTest {
         "polylogue"
         "command"
       ] "mcp-polylogue" "Gemini config must call the packaged Polylogue MCP wrapper")
+      (expect.attrPathEq geminiSettings [
+        "mcpServers"
+        "chrome-devtools"
+        "command"
+      ] "mcp-chrome-devtools" "Gemini config must expose the user's Chrome DevTools MCP")
+      (expect.attrPathEq geminiSettings [
+        "mcpServers"
+        "chrome-devtools-private"
+        "command"
+      ] "mcp-chrome-devtools-private" "Gemini config must expose the private Chrome DevTools MCP")
+      (expect.attrPathEq geminiSettings
+        [
+          "mcpServers"
+          "chrome-devtools-private-visible"
+          "command"
+        ]
+        "mcp-chrome-devtools-private-visible"
+        "Gemini config must expose the visible private Chrome DevTools MCP"
+      )
       {
         assertion =
           (builtins.elemAt (builtins.elemAt codexHooks.hooks.SessionStart 0).hooks 0).command
@@ -178,5 +216,23 @@ mkFeatureTest {
         "model"
         "maxSessionTurns"
       ] (-1) "Gemini must keep unlimited session turns")
+      (expect.hmFileExists hm ".local/bin/sinnix-chrome-control"
+        "Agent Chrome CDP helper must be available on PATH"
+      )
+      (expect.hmFileExists hm ".local/bin/sinnix-hypr-control"
+        "Agent Hyprland helper must be available on PATH"
+      )
+      (expect.hmFileExists hm ".local/bin/sinnix-keyboard-control"
+        "Agent keyboard helper must be available on PATH"
+      )
+      (expect.hmFileExists hm ".local/bin/sinnix-kitty-control"
+        "Agent Kitty helper must be available on PATH"
+      )
+      (expect.hmFileExists hm ".local/bin/sinnix-screenshot-control"
+        "Agent screenshot helper must be available on PATH"
+      )
+      (expect.hmFileExists hm ".local/bin/sinnix-agent-control-status"
+        "Agent control surface probe must be available on PATH"
+      )
     ];
 }

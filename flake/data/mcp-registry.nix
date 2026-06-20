@@ -95,35 +95,29 @@ let
       ];
     };
 
-    playwright = {
-      transport = "stdio";
-      command = "mcp-playwright";
-      # Headless is the safe default for autonomous agents; per-client overrides
-      # can swap to the headed variant when interacting with the user's session.
-      args = [ "--headless" ];
-      clients = [
-        "claude"
-        "codex"
-        "gemini"
-      ];
-    };
-
-    # Headed Playwright variant against a persistent dev profile. Use when an
-    # extension or auth-required UI must be exercised against a real browser
-    # session. The wrapper resolves to `mcp-playwright-headed`.
-    playwright-headed = {
-      transport = "stdio";
-      command = "mcp-playwright-headed";
-      clients = [
-        "claude"
-        "codex"
-        "gemini"
-      ];
-    };
-
     chrome-devtools = {
       transport = "stdio";
       command = "mcp-chrome-devtools";
+      clients = [
+        "claude"
+        "codex"
+        "gemini"
+      ];
+    };
+
+    chrome-devtools-private = {
+      transport = "stdio";
+      command = "mcp-chrome-devtools-private";
+      clients = [
+        "claude"
+        "codex"
+        "gemini"
+      ];
+    };
+
+    chrome-devtools-private-visible = {
+      transport = "stdio";
+      command = "mcp-chrome-devtools-private-visible";
       clients = [
         "claude"
         "codex"

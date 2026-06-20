@@ -100,8 +100,16 @@ in
           ".local/bin/codex-spark"
           ".local/bin/codex-spark-xhigh"
           ".local/bin/mcp-firecrawl"
-          ".local/bin/mcp-playwright"
+          ".local/bin/mcp-chrome-devtools"
+          ".local/bin/mcp-chrome-devtools-private"
+          ".local/bin/mcp-chrome-devtools-private-visible"
           ".local/bin/mcp-polylogue"
+          ".local/bin/sinnix-agent-control-status"
+          ".local/bin/sinnix-chrome-control"
+          ".local/bin/sinnix-hypr-control"
+          ".local/bin/sinnix-keyboard-control"
+          ".local/bin/sinnix-kitty-control"
+          ".local/bin/sinnix-screenshot-control"
         ];
         xdgConfigFiles = [
           "claude/mcp.json"
@@ -848,7 +856,10 @@ in
               .mcpServers.lynchpin.command == "mcp-lynchpin" and
               .mcpServers.lynchpin.env.LYNCHPIN_REPO_ROOT == "/realm/project/sinity-lynchpin" and
               .mcpServers.lynchpin.env.LYNCHPIN_LOCAL_ROOT == "/realm/project/sinity-lynchpin/.lynchpin" and
-              .mcpServers.polylogue.command == "mcp-polylogue"
+              .mcpServers.polylogue.command == "mcp-polylogue" and
+              .mcpServers["chrome-devtools"].command == "mcp-chrome-devtools" and
+              .mcpServers["chrome-devtools-private"].command == "mcp-chrome-devtools-private" and
+              .mcpServers["chrome-devtools-private-visible"].command == "mcp-chrome-devtools-private-visible"
             ' "$HOME/.config/claude/mcp.json" >/dev/null
 
             python3 - <<'PYCODE'
@@ -881,12 +892,18 @@ in
             assert mcp['polylogue']['command'] == 'mcp-polylogue'
             assert mcp['lynchpin']['env']['LYNCHPIN_REPO_ROOT'] == '/realm/project/sinity-lynchpin'
             assert mcp['lynchpin']['env']['LYNCHPIN_LOCAL_ROOT'] == '/realm/project/sinity-lynchpin/.lynchpin'
+            assert mcp['chrome-devtools']['command'] == 'mcp-chrome-devtools'
+            assert mcp['chrome-devtools-private']['command'] == 'mcp-chrome-devtools-private'
+            assert mcp['chrome-devtools-private-visible']['command'] == 'mcp-chrome-devtools-private-visible'
             assert config['features']['hooks'] is True
             PYCODE
 
             jq -e '
               .mcpServers["codebase-memory-mcp"].command == "codebase-memory-mcp" and
-              .mcpServers.serena.args == ["start-mcp-server", "--project-from-cwd", "--context=ide"]
+              .mcpServers.serena.args == ["start-mcp-server", "--project-from-cwd", "--context=ide"] and
+              .mcpServers["chrome-devtools"].command == "mcp-chrome-devtools" and
+              .mcpServers["chrome-devtools-private"].command == "mcp-chrome-devtools-private" and
+              .mcpServers["chrome-devtools-private-visible"].command == "mcp-chrome-devtools-private-visible"
             ' "$HOME/.gemini/settings.json" >/dev/null
 
             jq -e '
@@ -928,7 +945,16 @@ in
             grep -Fq 'npm install -g @google/gemini-cli' "$HOME/.local/bin/gemini"
 
             "$HOME/.local/bin/mcp-polylogue" --help | grep -q 'Start the Polylogue MCP stdio bridge'
-            "$HOME/.local/bin/mcp-playwright" --help | grep -q 'Usage: Playwright MCP'
+            for helper in \
+              "$HOME/.local/bin/sinnix-agent-control-status" \
+              "$HOME/.local/bin/sinnix-chrome-control" \
+              "$HOME/.local/bin/sinnix-hypr-control" \
+              "$HOME/.local/bin/sinnix-keyboard-control" \
+              "$HOME/.local/bin/sinnix-kitty-control" \
+              "$HOME/.local/bin/sinnix-screenshot-control"; do
+              test -x "$helper"
+              bash -n "$helper"
+            done
           '';
         }
       );

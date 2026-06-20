@@ -24,73 +24,87 @@ This skill provides:
 
 ## Scripts
 
+The scripts are installed on Sinnix as stable `~/.local/bin/sinnix-*` commands
+for ambient use by agents. The source files below remain the maintenance copy.
+Run `sinnix-agent-control-status` first when you need a quick live inventory of
+browser, desktop, screenshot, keyboard, and terminal-control availability.
+For browser MCP choice: `chrome-devtools` targets the user's live Chrome,
+`chrome-devtools-private` launches an agent-owned headless Chrome profile, and
+`chrome-devtools-private-visible` launches the same agent-owned profile visibly.
+
 ### 1) Kitty Remote Control
 
-`scripts/kitty-remote-control.sh`
+Installed command: `sinnix-kitty-control`
+
+Source: `scripts/kitty-remote-control.sh`
 
 Examples:
 
 ```bash
 # List windows
-scripts/kitty-remote-control.sh list
+sinnix-kitty-control list
 
 # Send command to matching window and press Enter
-scripts/kitty-remote-control.sh send --match 'title:Codex' --text 'git status --short' --enter
+sinnix-kitty-control send --match 'title:Codex' --text 'git status --short' --enter
 
 # Capture scrollback to file
-scripts/kitty-remote-control.sh capture --match 'title:Codex' --extent all --out /tmp/codex-scrollback.txt
+sinnix-kitty-control capture --match 'title:Codex' --extent all --out /tmp/codex-scrollback.txt
 
 # Wait until terminal output contains a pattern
-scripts/kitty-remote-control.sh await --match 'title:Codex' --pattern 'finished|done' --timeout-sec 90
+sinnix-kitty-control await --match 'title:Codex' --pattern 'finished|done' --timeout-sec 90
 
 # Send command and wait for sentinel output
-scripts/kitty-remote-control.sh send-await --match 'title:Codex' --text 'echo TASK_DONE' --enter --pattern 'TASK_DONE'
+sinnix-kitty-control send-await --match 'title:Codex' --text 'echo TASK_DONE' --enter --pattern 'TASK_DONE'
 ```
 
 ### 2) Hyprland Control
 
-`scripts/hypr-control.sh`
+Installed command: `sinnix-hypr-control`
+
+Source: `scripts/hypr-control.sh`
 
 Examples:
 
 ```bash
 # Current focused monitor/window/workspace + color management
-scripts/hypr-control.sh status
+sinnix-hypr-control status
 
 # Find screenshot-related keybinds
-scripts/hypr-control.sh binds --grep 'Print|grimblast|screenshot'
+sinnix-hypr-control binds --grep 'Print|grimblast|screenshot'
 
 # Enumerate candidate windows before targeting one
-scripts/hypr-control.sh clients --grep 'Steam|obs|kitty'
+sinnix-hypr-control clients --grep 'Steam|obs|kitty'
 
 # Focus a specific window using a Hyprland selector
-scripts/hypr-control.sh focus-window 'class:^(steam)$'
+sinnix-hypr-control focus-window 'class:^(steam)$'
 
 # Send a shortcut to a specific app
-scripts/hypr-control.sh send-shortcut CTRL V 'class:^(steam)$'
+sinnix-hypr-control send-shortcut CTRL V 'class:^(steam)$'
 
 # Paste text into a paste-aware GUI app and optionally press Enter
-scripts/hypr-control.sh paste 'class:^(steam)$' --text 'download_depot 427520 427523 3610450483505928345' --enter
+sinnix-hypr-control paste 'class:^(steam)$' --text 'download_depot 427520 427523 3610450483505928345' --enter
 
 # Dispatch any Hyprland action
-scripts/hypr-control.sh dispatch workspace 3
+sinnix-hypr-control dispatch workspace 3
 ```
 
 ### 3) Screenshot Color Lab (HDR)
 
-`scripts/screenshot-color-lab.sh`
+Installed command: `sinnix-screenshot-control`
+
+Source: `scripts/screenshot-color-lab.sh`
 
 Examples:
 
 ```bash
 # Probe HDR state and tool availability
-scripts/screenshot-color-lab.sh probe
+sinnix-screenshot-control probe
 
 # Capture focused output with raw files + corrected sidecars
-scripts/screenshot-color-lab.sh capture-output --fix-hdr
+sinnix-screenshot-control capture-output --fix-hdr
 
 # Apply manual correction to a file
-scripts/screenshot-color-lab.sh tone-map --in /path/image.png --brightness 105 --saturation 125 --gamma 0.90
+sinnix-screenshot-control tone-map --in /path/image.png --brightness 105 --saturation 125 --gamma 0.90
 ```
 
 ## Notes
@@ -104,5 +118,5 @@ scripts/screenshot-color-lab.sh tone-map --in /path/image.png --brightness 105 -
 - `send-await` defaults to `--extent last_cmd_output` to avoid false positives from echoed input.
 - For window layout/navigation primitives, reuse existing system scripts in `/realm/project/sinnix/scripts`:
   - `kitty-grid` for deterministic grid placement
-  - `kitty-hypr-nav` for directional focus/move/resize fallback between Kitty and Hyprland
+  - `kitty-hypr-nav` for directional focus/move/resize between Kitty and Hyprland
 - For ready-made automation examples, see `references/control-recipes.md`.

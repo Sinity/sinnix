@@ -11,7 +11,7 @@ CDP_BASE="http://${CDP_HOST}:${CDP_PORT}"
 
 usage() {
   cat <<'USAGE'
-Usage: chrome-control.sh <command> [options]
+Usage: sinnix-chrome-control <command> [options]
 
 Commands:
   list                            List all open pages (id, title, url, type)
@@ -47,12 +47,12 @@ Commands:
                                   Poll a JS expression until it returns truthy
 
 Examples:
-  chrome-control.sh list
-  chrome-control.sh screenshot <id> --out /tmp/page.png
-  chrome-control.sh evaluate <id> --js 'document.title'
-  chrome-control.sh fill-form <id> --selector '#search' --value 'my query'
-  chrome-control.sh click <id> --selector 'button.submit'
-  chrome-control.sh navigate <id> --url 'https://example.com'
+  sinnix-chrome-control list
+  sinnix-chrome-control screenshot <id> --out /tmp/page.png
+  sinnix-chrome-control evaluate <id> --js 'document.title'
+  sinnix-chrome-control fill-form <id> --selector '#search' --value 'my query'
+  sinnix-chrome-control click <id> --selector 'button.submit'
+  sinnix-chrome-control navigate <id> --url 'https://example.com'
 USAGE
 }
 
