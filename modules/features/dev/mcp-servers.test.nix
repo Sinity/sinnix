@@ -60,6 +60,9 @@ mkFeatureTest {
       (expect.persistedHomeDir config ".local/share/serena"
         "Serena global configuration and logs must persist across impermanence boots"
       )
+      (expect.persistedHomeDir config ".local/share/turso"
+        "Agent Turso MCP databases must persist across impermanence boots"
+      )
       (expect.persistedHomeDir config ".local/state/serena"
         "Serena uv tool installation must persist across impermanence boots"
       )
@@ -91,6 +94,11 @@ mkFeatureTest {
         "polylogue"
         "command"
       ] "mcp-polylogue" "Claude config must call the packaged Polylogue MCP wrapper")
+      (expect.attrPathEq claudeSettings [
+        "mcpServers"
+        "turso"
+        "command"
+      ] "mcp-turso" "Claude config must call the managed Turso MCP wrapper")
       (expect.attrPathEq claudeSettings [
         "mcpServers"
         "chrome-devtools"
@@ -149,6 +157,11 @@ mkFeatureTest {
         "polylogue"
         "command"
       ] "mcp-polylogue" "Gemini config must call the packaged Polylogue MCP wrapper")
+      (expect.attrPathEq geminiSettings [
+        "mcpServers"
+        "turso"
+        "command"
+      ] "mcp-turso" "Gemini config must call the managed Turso MCP wrapper")
       (expect.attrPathEq geminiSettings [
         "mcpServers"
         "chrome-devtools"

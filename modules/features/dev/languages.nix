@@ -100,6 +100,7 @@ mkFeatureModule {
         home-manager.users.${user}.home.packages = with pkgs; [
           sqlite
           sqlite-vec
+          turso
           pgcli
         ];
       })

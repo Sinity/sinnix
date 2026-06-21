@@ -4,6 +4,7 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -141,6 +142,13 @@ def test_http_mcp_endpoint(tmp_path: Path):
         content_type, body = post_json(url, {"jsonrpc": "2.0", "id": 2, "method": "ping"}, accept="text/event-stream")
         assert content_type.startswith("text/event-stream")
         assert "data: " in body
+
+        try:
+            post_json(f"http://127.0.0.1:{port}/", {"jsonrpc": "2.0", "id": 3, "method": "ping"})
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 404
+        else:
+            raise AssertionError("POST / endpoint must not be accepted")
     finally:
         if proc is not None:
             proc.terminate()

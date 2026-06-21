@@ -14,8 +14,7 @@ Run local Streamable HTTP-compatible JSON-RPC for tunnel experiments:
 sinnix-agent-gateway --config ~/.config/sinnix-agent-gateway/config.json http --host 127.0.0.1 --port 3020
 ```
 
-The HTTP server accepts MCP JSON-RPC requests at `/mcp` and keeps the legacy
-POST `/` endpoint for local smoke tests.
+The HTTP server accepts MCP JSON-RPC requests at `/mcp`.
 
 Tool definitions include `inputSchema` and `outputSchema`; command/task tools
 declare foreground command results and durable background job descriptors.

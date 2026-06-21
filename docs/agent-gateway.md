@@ -33,8 +33,7 @@ sinnix-agent-gateway --config /etc/sinnix/agent-gateway/config.json http --host 
 
 The HTTP server accepts MCP JSON-RPC POST requests at `/mcp`, returns ordinary
 `application/json` responses by default, and can return single-message SSE when
-the client only accepts `text/event-stream`. The legacy POST `/` endpoint remains
-available for simple local probes.
+the client only accepts `text/event-stream`.
 
 For stdio MCP clients, use:
 

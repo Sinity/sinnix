@@ -836,6 +836,7 @@ in
               "$HOME/.local/bin/codex-spark-xhigh" \
               "$HOME/.local/bin/gemini" \
               "$HOME/.local/bin/codebase-memory-mcp" \
+              "$HOME/.local/bin/mcp-turso" \
               "$HOME/.local/bin/serena" \
               "$HOME/.local/bin/serena-hooks"; do
               test -x "$wrapper"
@@ -857,6 +858,7 @@ in
               .mcpServers.lynchpin.env.LYNCHPIN_REPO_ROOT == "/realm/project/sinity-lynchpin" and
               .mcpServers.lynchpin.env.LYNCHPIN_LOCAL_ROOT == "/realm/project/sinity-lynchpin/.lynchpin" and
               .mcpServers.polylogue.command == "mcp-polylogue" and
+              .mcpServers.turso.command == "mcp-turso" and
               .mcpServers["chrome-devtools"].command == "mcp-chrome-devtools" and
               .mcpServers["chrome-devtools-private"].command == "mcp-chrome-devtools-private" and
               .mcpServers["chrome-devtools-private-visible"].command == "mcp-chrome-devtools-private-visible"
@@ -890,6 +892,7 @@ in
             assert mcp['serena']['startup_timeout_sec'] == 15
             assert mcp['serena']['args'] == ['start-mcp-server', '--project-from-cwd', '--context=codex']
             assert mcp['polylogue']['command'] == 'mcp-polylogue'
+            assert mcp['turso']['command'] == 'mcp-turso'
             assert mcp['lynchpin']['env']['LYNCHPIN_REPO_ROOT'] == '/realm/project/sinity-lynchpin'
             assert mcp['lynchpin']['env']['LYNCHPIN_LOCAL_ROOT'] == '/realm/project/sinity-lynchpin/.lynchpin'
             assert mcp['chrome-devtools']['command'] == 'mcp-chrome-devtools'
@@ -901,6 +904,7 @@ in
             jq -e '
               .mcpServers["codebase-memory-mcp"].command == "codebase-memory-mcp" and
               .mcpServers.serena.args == ["start-mcp-server", "--project-from-cwd", "--context=ide"] and
+              .mcpServers.turso.command == "mcp-turso" and
               .mcpServers["chrome-devtools"].command == "mcp-chrome-devtools" and
               .mcpServers["chrome-devtools-private"].command == "mcp-chrome-devtools-private" and
               .mcpServers["chrome-devtools-private-visible"].command == "mcp-chrome-devtools-private-visible"
@@ -945,6 +949,7 @@ in
             grep -Fq 'npm install -g @google/gemini-cli' "$HOME/.local/bin/gemini"
 
             "$HOME/.local/bin/mcp-polylogue" --help | grep -q 'Start the Polylogue MCP stdio bridge'
+            "$HOME/.local/bin/mcp-turso" --help | grep -q 'Start MCP server'
             for helper in \
               "$HOME/.local/bin/sinnix-agent-control-status" \
               "$HOME/.local/bin/sinnix-chrome-control" \

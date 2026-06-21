@@ -442,7 +442,7 @@ def serve_stdio(g):
 class Handler(BaseHTTPRequestHandler):
     gateway: Gateway
     def do_POST(self):
-        if self.path not in ("/","/mcp"):
+        if self.path != "/mcp":
             self.send_error(404); return
         raw=self.rfile.read(int(self.headers.get("content-length") or 0)); out=Rpc(self.gateway).handle(json.loads(raw.decode()))
         payload=json.dumps(out or {"jsonrpc":"2.0","result":None},ensure_ascii=False)
