@@ -84,34 +84,6 @@ mkFeatureModule {
           FIRECRAWL_API_KEY = firecrawlSecretPath;
         };
       };
-      mcpTursoBin = pkgs.writeShellScriptBin "mcp-turso" ''
-        set -euo pipefail
-
-        db="''${SINNIX_TURSO_MCP_DATABASE:-$HOME/.local/share/turso/agent.db}"
-        mkdir -p "$(${pkgs.coreutils}/bin/dirname "$db")"
-
-        args=()
-        if [ "''${SINNIX_TURSO_MCP_READONLY:-0}" = "1" ]; then
-          args+=(--readonly)
-        fi
-        if [ "''${SINNIX_TURSO_MCP_EXPERIMENTAL_VIEWS:-0}" = "1" ]; then
-          args+=(--experimental-views)
-        fi
-        if [ "''${SINNIX_TURSO_MCP_EXPERIMENTAL_ATTACH:-0}" = "1" ]; then
-          args+=(--experimental-attach)
-        fi
-        if [ "''${SINNIX_TURSO_MCP_EXPERIMENTAL_GENERATED_COLUMNS:-0}" = "1" ]; then
-          args+=(--experimental-generated-columns)
-        fi
-        if [ "''${SINNIX_TURSO_MCP_EXPERIMENTAL_INDEX_METHOD:-0}" = "1" ]; then
-          args+=(--experimental-index-method)
-        fi
-        if [ "''${SINNIX_TURSO_MCP_EXPERIMENTAL_MULTIPROCESS_WAL:-0}" = "1" ]; then
-          args+=(--experimental-multiprocess-wal)
-        fi
-
-        exec ${pkgs.turso}/bin/tursodb "''${args[@]}" "$db" --mcp "$@"
-      '';
       # Chrome DevTools MCP — vendored npm package built via mkNodeCliPackage.
       # Attaches to the user's running Chrome on the loopback debug port
       # (configured by modules/features/desktop/browser.nix:47). Private agent
@@ -391,10 +363,6 @@ mkFeatureModule {
           directory = ".local/share/serena";
           mode = "0700";
         }
-        {
-          directory = ".local/share/turso";
-          mode = "0700";
-        }
         ".local/state/serena"
       ];
 
@@ -511,10 +479,6 @@ mkFeatureModule {
               source = "${mcpFirecrawlBin}/bin/mcp-firecrawl";
               force = true;
             };
-            ".local/bin/mcp-turso" = {
-              source = "${mcpTursoBin}/bin/mcp-turso";
-              force = true;
-            };
             ".local/bin/mcp-chrome-devtools" = {
               source = "${mcpChromeDevtoolsBin}/bin/mcp-chrome-devtools";
               force = true;
@@ -596,11 +560,9 @@ mkFeatureModule {
                   mcp-chrome-devtools-private-visible \
                   mcp-lynchpin \
                   mcp-polylogue \
-                  mcp-turso \
                   polylogue \
                   polylogued \
                   serena \
-                  tursodb \
                   sinnix-observe \
                   sinnix-chrome-control \
                   sinnix-hypr-control \
@@ -644,7 +606,6 @@ mkFeatureModule {
 
                 path_probe runtime-inventory /etc/sinnix/runtime-inventory.json
                 path_probe polylogue-archive "$HOME/.local/share/polylogue"
-                path_probe turso-agent-db "$HOME/.local/share/turso/agent.db"
                 path_probe machine-telemetry /realm/data/captures/machine
                 path_probe screenshots /realm/data/captures/screenshot
                 path_probe kitty-scrollback /realm/data/captures/kitty-scrollback

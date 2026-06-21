@@ -95,16 +95,6 @@ let
       ];
     };
 
-    turso = {
-      transport = "stdio";
-      command = "mcp-turso";
-      clients = [
-        "codex"
-        "claude"
-        "gemini"
-      ];
-    };
-
     chrome-devtools = {
       transport = "stdio";
       command = "mcp-chrome-devtools";
