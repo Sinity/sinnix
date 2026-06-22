@@ -338,6 +338,20 @@ in
               }) scriptLinks
             );
 
+          systemd.user.services.weechat-scratchpad = {
+            Unit = {
+              Description = "Keep WeeChat scratchpad tmux session alive";
+              After = [ "default.target" ];
+              PartOf = [ "default.target" ];
+            };
+            Service = {
+              Type = "oneshot";
+              RemainAfterExit = true;
+              ExecStart = "%h/.local/bin/weechat-scratchpad --ensure";
+            };
+            Install.WantedBy = [ "default.target" ];
+          };
+
           home.packages = with pkgs; [
             brightnessctl
             grim
