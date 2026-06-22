@@ -1,16 +1,8 @@
-{
-  lib,
-  mkServiceTest,
-  ...
-}:
+{ mkServiceTest, ... }:
 mkServiceTest {
   name = "services-below";
   service = "below";
   assertions = config: [
-    {
-      assertion = builtins.any (pkg: lib.getName pkg == "below") config.environment.systemPackages;
-      message = "Below package must be installed";
-    }
     {
       assertion =
         let

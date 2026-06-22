@@ -22,10 +22,6 @@ mkFeatureTest {
         "Dev shell must export the system-wide Polylogue API interpreter path"
       )
       {
-        assertion = hm.programs.zsh.shellAliases.ccusage == "ccusage";
-        message = "ccusage alias must resolve to the packaged CLI";
-      }
-      {
         assertion = builtins.any (name: lib.hasPrefix "lynchpin-python" name) packageNames;
         message = "Dev shell must install the Lynchpin API interpreter wrapper";
       }

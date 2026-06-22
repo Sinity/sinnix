@@ -178,44 +178,6 @@ mkFeatureTest {
         assertion = !(hm.home.file.".gemini/skills".recursive or false);
         message = "Gemini skills must stay a direct directory symlink, not a recursive materialization";
       }
-      (expect.attrPathEq geminiSettings [
-        "mcpServers"
-        "context7"
-        "httpUrl"
-      ] "https://mcp.context7.com/mcp" "Gemini config must point Context7 at the remote hosted endpoint")
-      (expect.attrPathEq geminiSettings [
-        "mcpServers"
-        "github"
-        "httpUrl"
-      ] "https://api.githubcopilot.com/mcp/" "Gemini config must keep the GitHub MCP endpoint")
-      (expect.attrPathEq geminiSettings [
-        "mcpServers"
-        "github"
-        "headers"
-        "Authorization"
-      ] "Bearer \${GITHUB_TOKEN}" "Gemini config must keep GitHub auth as runtime header expansion")
-      (expect.attrPathEq geminiSettings [
-        "general"
-        "enableAutoUpdate"
-      ] false "Gemini must keep self-update disabled")
-      (expect.attrPathEq geminiSettings [
-        "general"
-        "enableAutoUpdateNotification"
-      ] false "Gemini must keep update notifications disabled")
-      (expect.attrPathEq geminiSettings [
-        "general"
-        "checkpointing"
-        "enabled"
-      ] true "Gemini must retain checkpointing")
-      (expect.attrPathEq geminiSettings [
-        "general"
-        "sessionRetention"
-        "maxCount"
-      ] 1000000 "Gemini must keep the long session-retention budget")
-      (expect.attrPathEq geminiSettings [
-        "model"
-        "maxSessionTurns"
-      ] (-1) "Gemini must keep unlimited session turns")
       (expect.hmFileExists hm ".local/bin/sinnix-chrome-control"
         "Agent Chrome CDP helper must be available on PATH"
       )

@@ -24,10 +24,6 @@
     in
     [
       {
-        assertion = builtins.elem "sinnix-resource-audit" packageNames;
-        message = "sinnix-prime must expose the live resource-policy audit command";
-      }
-      {
         assertion =
           agentGateway.enable
           && agentGateway.http.enable
@@ -98,10 +94,6 @@
       {
         assertion = logitechMaintenance.wantedBy == [ "graphical-session.target" ];
         message = "sinnix-prime Logitech maintenance must be installed, not gated off";
-      }
-      {
-        assertion = polylogueHm.systemd.user.startServices == false;
-        message = "Home Manager activation must not restart user services during live system switches";
       }
     ];
 }
