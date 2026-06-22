@@ -47,6 +47,10 @@ let
     if [ -n "''${SINNIX_LYNCHPIN_OVERRIDE:-}" ]; then
       append_override_arg lynchpin "$SINNIX_LYNCHPIN_OVERRIDE"
     fi
+    nh_extra_args=()
+    if [ "''${#nix_override_args[@]}" -gt 0 ]; then
+      nh_extra_args=(-- "''${nix_override_args[@]}")
+    fi
   '';
   rebuildDefaultArgs = ''
     rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-2}"
@@ -364,7 +368,7 @@ in
             --no-nom \
             --max-jobs "$rebuild_jobs" \
             --cores "$rebuild_cores" \
-            "''${nix_override_args[@]}"
+            "''${nh_extra_args[@]}"
       '';
     };
 
@@ -387,7 +391,7 @@ in
             --no-nom \
             --max-jobs "$rebuild_jobs" \
             --cores "$rebuild_cores" \
-            "''${nix_override_args[@]}" || _rebuild_status=$?
+            "''${nh_extra_args[@]}" || _rebuild_status=$?
         ${zramResetGuard}
         exit "$_rebuild_status"
       '';
@@ -412,7 +416,7 @@ in
             --no-nom \
             --max-jobs "$rebuild_jobs" \
             --cores "$rebuild_cores" \
-            "''${nix_override_args[@]}" || _rebuild_status=$?
+            "''${nh_extra_args[@]}" || _rebuild_status=$?
         ${zramResetGuard}
         exit "$_rebuild_status"
       '';

@@ -50,6 +50,10 @@
         if [ -n "''${SINNIX_LYNCHPIN_OVERRIDE:-}" ]; then
           append_override_arg lynchpin "$SINNIX_LYNCHPIN_OVERRIDE"
         fi
+        nh_extra_args=()
+        if [ "''${#nix_override_args[@]}" -gt 0 ]; then
+          nh_extra_args=(-- "''${nix_override_args[@]}")
+        fi
       '';
       # Wrapper for nix that serializes heavy subcommands (build, flake check)
       # behind the same lock as switch/boot/test. Passes through all other
@@ -122,7 +126,7 @@
               --no-nom \
               --max-jobs "$rebuild_jobs" \
               --cores "$rebuild_cores" \
-              "''${nix_override_args[@]}" || _rebuild_status=$?
+              "''${nh_extra_args[@]}" || _rebuild_status=$?
 
           # Run the hygiene pass even when nh reports failure: transient
           # activation errors still leave a fully-built generation behind,
