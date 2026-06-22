@@ -16,8 +16,9 @@ fi
 
 while true; do
   started_at=${SECONDS}
-  # Clear the terminal so each capture starts fresh.
-  printf '\033c'
+  # Clear screen and scrollback so the warm scratchpad does not retain old gum
+  # render buffers across many captures.
+  printf '\033[H\033[2J\033[3J'
   "$RAWLOG_CAPTURE_BIN"
   status=$?
   runtime=$((SECONDS - started_at))

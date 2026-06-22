@@ -68,6 +68,12 @@ let
         "--single-instance"
         "--override"
         "font_size=22"
+        "--override"
+        "scrollback_lines=200"
+        "--override"
+        "detect_urls=no"
+        "--override"
+        "allow_hyperlinks=no"
         "$HOME/.local/bin/rawlog-loop"
       ];
       waitTries = 50;
