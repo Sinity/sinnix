@@ -162,6 +162,8 @@ in
     #     This defines programs.polylogued.* and creates the unit.
     home-manager.users.${userName} = {
       imports = [ inputs.polylogue.homeManagerModules.default ];
+      systemd.user.startServices = lib.mkForce "sd-switch";
+
       programs.polylogued = {
         enable = true;
         package = polyloguePkg;

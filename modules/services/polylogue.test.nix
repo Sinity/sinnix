@@ -27,6 +27,10 @@ let
         assertion = daemonService.ExecStart != null;
         message = "Polylogue daemon must have an ExecStart" + "(either via source symlink or inline text)";
       }
+      {
+        assertion = hm.systemd.user.startServices == true;
+        message = "Polylogue daemon package changes must restart the user service during Home Manager activation";
+      }
       # No standalone browser-capture unit — the daemon owns it in-process.
       {
         assertion = !(builtins.hasAttr "polylogue-browser-capture" hm.systemd.user.services);
