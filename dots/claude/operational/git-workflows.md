@@ -45,7 +45,9 @@ Use scopes (`fix(cli): ...`) when the repo is large enough that scope adds clari
 
 - Blank line between subject and body; wrap at 72 chars
 - Four sections worth writing (not all always required): **Problem** (what observation/constraint triggered this), **What changed** (higher level than the diff), **Alternatives rejected** (only if there was a real fork), **Compatibility/migration** (breaking changes)
-- Issue refs in body: `Closes #N`, `Ref #N`
+- Issue refs in body: use `Ref #N` by default. Use GitHub
+  auto-resolution keywords only when the PR is intentionally meant to mark
+  the referenced issue resolved on merge.
 - `BREAKING CHANGE: ...` footer for breaking changes (Conventional Commits detect it)
 - Co-author trailer:
   ```
@@ -86,6 +88,16 @@ full issue thread, not only the body. Later comments may supersede, narrow,
 correct, or expand the body, and can be more important than the original
 description. If the body and comments conflict, preserve the evidence in your
 own issue/PR comment and state the interpretation you are implementing.
+
+**Auto-resolution keyword discipline.** In issue comments, PR bodies, commit
+messages, and bot/review replies, do not write GitHub's resolving keyword forms
+next to an issue number unless the intended effect is for GitHub to mark that
+issue resolved. This includes negative phrasing, audit notes, and sentences
+like "this PR does not close #N"; GitHub still parses the resolver word. Use a
+neutral reference plus remaining-work wording instead, for example `Ref #N` and
+then "remaining work:" or "not enough for the full issue scope." Only final PRs
+that actually satisfy the issue should use resolving keywords such as the
+`close`/`fix`/`resolve` family, including inflected forms.
 
 **Leave an implementation trail.** Agents working an issue should comment with:
 their understanding of scope; important constraints or non-goals; what they
@@ -141,7 +153,12 @@ issue open unless the remaining acceptance criteria are demonstrably unrelated.
 - Ends with `(#N)` — clickable jump back to PR discussion
 - Accurate: don't claim "unified"/"aligned"/"fixed" unless the diff actually achieves it
 
-**PR body = squash-merge body.** Required sections: **Summary** (one para), **Problem** (evidence/motivation — not "user asked"), **Solution** (modules touched, non-obvious decisions, rejected alternatives), **Verification** (exact commands run + output line that matters, not "tests pass"). Optional: Migration notes, Follow-ups, Breaking changes. Link issues in body (`Closes #N` auto-closes).
+**PR body = squash-merge body.** Required sections: **Summary** (one para),
+**Problem** (evidence/motivation — not "user asked"), **Solution** (modules
+touched, non-obvious decisions, rejected alternatives), **Verification** (exact
+commands run + output line that matters, not "tests pass"). Optional: Migration
+notes, Follow-ups, Breaking changes. Link issues with `Ref #N` unless the PR is
+intentionally meant to mark the issue resolved on merge.
 
 **Claim verification — grep the diff before asserting:**
 
@@ -155,14 +172,14 @@ issue open unless the remaining acceptance criteria are demonstrably unrelated.
 each item explicitly in the PR or issue comment that claims completion. Mark
 each criterion as satisfied, deferred to a follow-up issue, or misframed by new
 evidence. If an issue has no AC list, say what concrete decision, behavior, or
-verification closes it. Never close an issue on a partial subset without making
-the remaining work durable.
+verification satisfies it. Never mark an issue resolved on a partial subset
+without making the remaining work durable.
 
 Tests are not a substitute for missing runtime wiring. If an issue asks for an
 operator flow, actuator behavior, deployment observation, CLI command, or replay
 path, tests can prove those paths only when the paths exist and are exercised.
-Do not close implementation issues on data-model or test-only changes unless
-the issue itself was explicitly narrowed to that surface.
+Do not mark implementation issues resolved on data-model or test-only changes
+unless the issue itself was explicitly narrowed to that surface.
 
 **Automated reviews are review input.** Before merging, inspect every automated
 review/comment/check that posts substantive text: CodeRabbit, Copilot, proof
