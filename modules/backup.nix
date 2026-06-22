@@ -40,6 +40,13 @@ let
   borgPassphrasePath = config.sinnix.secrets.paths."borg-passphrase";
   outerRealmMountUnit = "outer\\x2drealm.mount";
   borgLockWaitSec = 60;
+  borgCacheDir = "/persist/root/.cache/borg";
+  borgStaleLockMinutes = 120;
+  borgGlobalLock = "/run/lock/sinnix-borg.lock";
+  borgStatusLockWaitSec = 5;
+  borgStatusLog = "${config.sinnix.paths.capturesRoot}/machine/borg_status.jsonl";
+  borgArchiveMaxAgeSec = 6 * 60 * 60;
+  borgSnapshotQueueMaxAgeSec = 6 * 60 * 60;
   backupServiceConfig =
     unit:
     lib.sinnix.mkRuntimeServiceConfig {
@@ -65,6 +72,47 @@ let
 
   mkBorgRetentionArgs = lib.concatMapStringsSep " " lib.escapeShellArg borgRetentionArgs;
 
+  mkBorgCommonScript =
+    repo:
+    repoPath:
+    ''
+      export BORG_REPO=${lib.escapeShellArg repo}
+      export BORG_PASSCOMMAND=${lib.escapeShellArg "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}"}
+      export BORG_CACHE_DIR=${lib.escapeShellArg borgCacheDir}
+
+      with_borg_lock() {
+        flock ${lib.escapeShellArg borgGlobalLock} "$@"
+      }
+
+      recover_stale_borg_locks() {
+        if [ ! -e ${lib.escapeShellArg "${repoPath}/config"} ]; then
+          return
+        fi
+
+        stale_lock="$(
+          find ${lib.escapeShellArg repoPath} \
+            -maxdepth 2 -type d -name lock.exclusive \
+            -mmin +${toString borgStaleLockMinutes} -print -quit 2>/dev/null || true
+        )"
+        if [ -z "$stale_lock" ]; then
+          if ! find ${lib.escapeShellArg borgCacheDir} \
+            -maxdepth 2 -type d -name lock.exclusive \
+            -mmin +${toString borgStaleLockMinutes} -print -quit 2>/dev/null | grep -q .; then
+            return
+          fi
+          stale_lock="stale Borg cache lock"
+        fi
+
+        if pgrep -x borg >/dev/null 2>&1; then
+          echo "Stale-looking Borg lock remains for ${repo}, but a Borg process is alive; refusing break-lock" >&2
+          return
+        fi
+
+        echo "Breaking stale Borg lock for ${repo}: $stale_lock" >&2
+        with_borg_lock borg break-lock ${lib.escapeShellArg repo}
+      }
+    '';
+
   mkSnapshotDrainScript =
     {
       label,
@@ -81,9 +129,7 @@ let
       set -euo pipefail
       shopt -s nullglob
 
-      export BORG_REPO=${lib.escapeShellArg repo}
-      export BORG_PASSCOMMAND=${lib.escapeShellArg "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}"}
-      export BORG_CACHE_DIR=/persist/root/.cache/borg
+      ${mkBorgCommonScript repo repoPath}
 
       cleanup_snapshot_bind_mount() {
         if mountpoint -q ${lib.escapeShellArg bindTarget}; then
@@ -96,8 +142,10 @@ let
       install -d -m 0700 -o root -g root ${lib.escapeShellArg bindTarget}
       install -d -m 0700 -o root -g root ${lib.escapeShellArg borgDrainStateRoot}
 
+      recover_stale_borg_locks
+
       if [ ! -e ${lib.escapeShellArg "${repoPath}/config"} ]; then
-        borg init --encryption repokey-blake2 "$BORG_REPO"
+        with_borg_lock borg init --encryption repokey-blake2 "$BORG_REPO"
       fi
 
       stamp=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.stamp"}
@@ -126,14 +174,14 @@ let
       snapshot_path=${lib.escapeShellArg snapshotDir}/"$snapshot"
       archive_name=${lib.escapeShellArg archivePrefix}-"$snapshot"
 
-      if borg info "::$archive_name" >/dev/null 2>&1; then
+      if with_borg_lock borg list --short --glob-archives "$archive_name" "$BORG_REPO" | grep -Fxq "$archive_name"; then
         echo "Archive $archive_name already exists"
       else
 
         cleanup_snapshot_bind_mount || true
         mount --bind "$snapshot_path" ${lib.escapeShellArg bindTarget}
 
-        if borg create \
+        if with_borg_lock borg create \
           --compression auto,zstd,1 \
           --lock-wait ${toString borgLockWaitSec} \
           ${mkBorgExcludeArgs exclude} \
@@ -158,6 +206,13 @@ let
       # Retention pruning and compaction are deliberately batched in
       # borgbackup-maintenance.service. Running compaction on every path wake
       # would turn "continuous" backups into repeated HDD churn.
+      marker=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.last-success"}
+      {
+        printf 'archive=%s\n' "$archive_name"
+        printf 'snapshot=%s\n' "$snapshot"
+        printf 'epoch=%s\n' "$(date +%s)"
+      } > "$marker.tmp"
+      mv "$marker.tmp" "$marker"
       touch "$stamp"
     '';
 
@@ -192,11 +247,122 @@ let
     "**/dist"
     "**/*.pyc"
     "**/.Trash-1000"
-    # Regenerable local capture products.
-    "**/data/captures/polylogue"
-    "**/data/captures/syslog"
-    "**/data/captures/machine/below"
   ];
+
+  mkBorgStatusScript = ''
+    set -euo pipefail
+
+    install -d -m 0755 ${lib.escapeShellArg (builtins.dirOf borgStatusLog)}
+    now="$(date +%s)"
+    status=0
+
+    json_escape() {
+      jq -Rsa .
+    }
+
+    latest_archive_epoch() {
+      label="$1"
+      marker=${lib.escapeShellArg borgDrainStateRoot}/"$label.last-success"
+      stamp=${lib.escapeShellArg borgDrainStateRoot}/"$label.stamp"
+
+      if [ -s "$marker" ]; then
+        sed -n 's/^epoch=//p' "$marker" | tail -n 1
+      elif [ -e "$stamp" ]; then
+        stat -c %Y "$stamp"
+      fi
+    }
+
+    oldest_snapshot_epoch() {
+      dir="$1"
+      glob="$2"
+      find "$dir" -maxdepth 1 -mindepth 1 -type d -name "$glob" -printf "%f\n" \
+        | sort \
+        | head -n 1 \
+        | sed -E 's/^[^.]+\.([0-9]{8})T([0-9]{6})([+-][0-9]{4})$/\1 \2 \3/' \
+        | while read -r day time tz; do
+            [ -n "''${day:-}" ] || continue
+            date -d "''${day:0:4}-''${day:4:2}-''${day:6:2} ''${time:0:2}:''${time:2:2}:''${time:4:2} $tz" +%s
+          done
+    }
+
+    check_archive() {
+      label="$1"
+      latest_status=0
+      latest="$(latest_archive_epoch "$label")" || latest_status=$?
+      if [ -z "$latest" ]; then
+        age=-1
+        ok=false
+        if [ "$latest_status" -eq 0 ]; then
+          message="no successful Borg drain marker found"
+        else
+          message="Borg drain marker unreadable"
+        fi
+        status=1
+      else
+        age=$((now - latest))
+        if [ "$age" -le ${toString borgArchiveMaxAgeSec} ]; then
+          ok=true
+          message="archive fresh"
+        else
+          ok=false
+          message="latest archive too old"
+          status=1
+        fi
+      fi
+
+      jq -cn \
+        --arg type archive_freshness \
+        --arg label "$label" \
+        --arg message "$message" \
+        --argjson ok "$ok" \
+        --argjson age "$age" \
+        --argjson max_age ${toString borgArchiveMaxAgeSec} \
+        --arg ts "$(date -Iseconds)" \
+        '{ts:$ts,type:$type,label:$label,ok:$ok,age_sec:$age,max_age_sec:$max_age,message:$message}' \
+        >> ${lib.escapeShellArg borgStatusLog}
+    }
+
+    check_queue() {
+      label="$1"
+      dir="$2"
+      glob="$3"
+      count="$(find "$dir" -maxdepth 1 -mindepth 1 -type d -name "$glob" | wc -l)"
+      oldest="$(oldest_snapshot_epoch "$dir" "$glob" || true)"
+      if [ -z "$oldest" ]; then
+        age=0
+      else
+        age=$((now - oldest))
+      fi
+
+      if [ "$age" -le ${toString borgSnapshotQueueMaxAgeSec} ]; then
+        ok=true
+        message="snapshot queue fresh"
+      else
+        ok=false
+        message="snapshot queue too old"
+        status=1
+      fi
+
+      jq -cn \
+        --arg type snapshot_queue \
+        --arg label "$label" \
+        --arg message "$message" \
+        --argjson ok "$ok" \
+        --argjson count "$count" \
+        --argjson age "$age" \
+        --argjson max_age ${toString borgSnapshotQueueMaxAgeSec} \
+        --arg ts "$(date -Iseconds)" \
+        '{ts:$ts,type:$type,label:$label,ok:$ok,count:$count,oldest_age_sec:$age,max_age_sec:$max_age,message:$message}' \
+        >> ${lib.escapeShellArg borgStatusLog}
+    }
+
+    check_archive persist
+    check_archive realm
+    check_queue persist ${lib.escapeShellArg persistSnapshots} 'persist.*'
+    check_queue realm ${lib.escapeShellArg realmSnapshots} 'realm.*'
+
+    exit "$status"
+  '';
 
   btrbkConfig = ''
     # === Global settings ===
@@ -252,18 +418,58 @@ in
       borgbackup-job-persist = {
         unit = "borgbackup-job-persist.service";
         resourceClass = "backup-maintenance";
+        observe = {
+          enable = true;
+          restartable = false;
+        };
       };
       borgbackup-job-realm = {
         unit = "borgbackup-job-realm.service";
         resourceClass = "backup-maintenance";
+        observe = {
+          enable = true;
+          restartable = false;
+        };
       };
       borgbackup-check = {
         unit = "borgbackup-check.service";
         resourceClass = "backup-maintenance";
+        observe = {
+          enable = true;
+          restartable = false;
+        };
       };
       borgbackup-maintenance = {
         unit = "borgbackup-maintenance.service";
         resourceClass = "backup-maintenance";
+        observe = {
+          enable = true;
+          restartable = false;
+        };
+      };
+      borgbackup-status = {
+        unit = "borgbackup-status.service";
+        resourceClass = "backup-maintenance";
+        observe = {
+          enable = true;
+          restartable = false;
+        };
+        captures = [
+          {
+            name = "borg-status";
+            path = borgStatusLog;
+            eventDriven = true;
+          }
+        ];
+      };
+      borgbackup-status-timer = {
+        unit = "borgbackup-status.timer";
+        kind = "timer";
+        resourceClass = "backup-maintenance";
+        observe = {
+          enable = true;
+          restartable = false;
+        };
       };
       btrfs-metadata-image-backup = {
         unit = "btrfs-metadata-image-backup.service";
@@ -323,6 +529,8 @@ in
         btrfs-progs
         coreutils
         findutils
+        gnugrep
+        procps
         util-linux
       ];
       script = mkSnapshotDrainScript {
@@ -357,6 +565,8 @@ in
         btrfs-progs
         coreutils
         findutils
+        gnugrep
+        procps
         util-linux
       ];
       script = mkSnapshotDrainScript {
@@ -369,21 +579,6 @@ in
         archivePrefix = "realm";
         minIntervalSec = 3600;
         exclude = realmExcludes;
-      };
-    };
-
-    systemd.paths.borgbackup-job-persist = {
-      wantedBy = [ "multi-user.target" ];
-      pathConfig = {
-        PathChanged = persistSnapshots;
-        Unit = "borgbackup-job-persist.service";
-      };
-    };
-    systemd.paths.borgbackup-job-realm = {
-      wantedBy = [ "multi-user.target" ];
-      pathConfig = {
-        PathChanged = realmSnapshots;
-        Unit = "borgbackup-job-realm.service";
       };
     };
 
@@ -412,7 +607,23 @@ in
       }
       // backupServiceConfig "borgbackup-check.service";
       environment.BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
+      environment.BORG_CACHE_DIR = borgCacheDir;
+      path = with pkgs; [
+        borgbackup
+        coreutils
+        findutils
+        gnugrep
+        procps
+        util-linux
+      ];
       script = ''
+        set -euo pipefail
+
+        ${mkBorgCommonScript borgRepoPersist borgRepoPersistPath}
+        recover_stale_borg_locks
+        ${mkBorgCommonScript borgRepoRealm borgRepoRealmPath}
+        recover_stale_borg_locks
+
         ${pkgs.borgbackup}/bin/borg check --repository-only ${borgRepoPersist}
         ${pkgs.borgbackup}/bin/borg check --repository-only ${borgRepoRealm}
       '';
@@ -440,13 +651,50 @@ in
       }
       // backupServiceConfig "borgbackup-maintenance.service";
       environment.BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
-      environment.BORG_CACHE_DIR = "/persist/root/.cache/borg";
+      environment.BORG_CACHE_DIR = borgCacheDir;
       path = with pkgs; [
         borgbackup
         coreutils
+        findutils
+        gnugrep
+        procps
+        util-linux
       ];
       script = ''
         set -euo pipefail
+
+        export BORG_CACHE_DIR=${lib.escapeShellArg borgCacheDir}
+
+        with_borg_lock() {
+          flock ${lib.escapeShellArg borgGlobalLock} "$@"
+        }
+
+        recover_stale_borg_locks() {
+          repo="$1"
+          repo_path="''${repo#file://}"
+
+          stale_lock="$(
+            find "$repo_path" \
+              -maxdepth 2 -type d -name lock.exclusive \
+              -mmin +${toString borgStaleLockMinutes} -print -quit 2>/dev/null || true
+          )"
+          if [ -z "$stale_lock" ]; then
+            if ! find ${lib.escapeShellArg borgCacheDir} \
+              -maxdepth 2 -type d -name lock.exclusive \
+              -mmin +${toString borgStaleLockMinutes} -print -quit 2>/dev/null | grep -q .; then
+              return
+            fi
+            stale_lock="stale Borg cache lock"
+          fi
+
+          if pgrep -x borg >/dev/null 2>&1; then
+            echo "Stale-looking Borg lock remains for $repo, but a Borg process is alive; refusing break-lock" >&2
+            return
+          fi
+
+          echo "Breaking stale Borg lock for $repo: $stale_lock" >&2
+          with_borg_lock borg break-lock "$repo"
+        }
 
         maintain_repo() {
           repo="$1"
@@ -455,8 +703,9 @@ in
             return
           fi
 
-          borg prune --lock-wait ${toString borgLockWaitSec} ${mkBorgRetentionArgs} "$repo"
-          borg compact --lock-wait ${toString borgLockWaitSec} "$repo"
+          recover_stale_borg_locks "$repo"
+          with_borg_lock borg prune --lock-wait ${toString borgLockWaitSec} ${mkBorgRetentionArgs} "$repo"
+          with_borg_lock borg compact --lock-wait ${toString borgLockWaitSec} "$repo"
         }
 
         maintain_repo ${lib.escapeShellArg borgRepoPersist}
@@ -470,6 +719,44 @@ in
         OnCalendar = "*-*-* 04:50:00";
         Persistent = false;
         RandomizedDelaySec = "45min";
+      };
+    };
+
+    systemd.services.borgbackup-status = {
+      description = "Check Borg backup freshness and snapshot queue age";
+      restartIfChanged = false;
+      after = [
+        "persist.mount"
+        "realm.mount"
+        outerRealmMountUnit
+      ];
+      requires = [
+        "persist.mount"
+        "realm.mount"
+        outerRealmMountUnit
+      ];
+      serviceConfig = {
+        Type = "oneshot";
+        TimeoutStopSec = "15s";
+        TimeoutStartSec = "30s";
+      }
+      // backupServiceConfig "borgbackup-status.service";
+      path = with pkgs; [
+        borgbackup
+        coreutils
+        findutils
+        gnugrep
+        jq
+        util-linux
+      ];
+      script = mkBorgStatusScript;
+    };
+    systemd.timers.borgbackup-status = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnCalendar = "hourly";
+        Persistent = true;
+        RandomizedDelaySec = "10min";
       };
     };
 
@@ -554,8 +841,9 @@ in
       "d ${borgRepoRoot} 0750 root users -"
       "d ${borgRepoRootSnapshotsPath} 0700 root root -"
       "d ${btrfsImageRoot} 0700 root root -"
-      "d /persist/root/.cache/borg 0700 root root -"
+      "d ${borgCacheDir} 0700 root root -"
       "d ${borgDrainStateRoot} 0700 root root -"
+      "f ${borgGlobalLock} 0600 root root -"
     ];
 
     # systemd services for btrbk
@@ -603,14 +891,20 @@ in
       // backupServiceConfig "borgbackup-root-snapshots.service";
       environment.BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
       environment.BORG_REPO = borgRepoRootSnapshots;
-      environment.BORG_CACHE_DIR = "/persist/root/.cache/borg";
+      environment.BORG_CACHE_DIR = borgCacheDir;
       path = with pkgs; [
         btrfs-progs
         borgbackup
         coreutils
+        findutils
+        gnugrep
+        procps
         util-linux
       ];
       script = ''
+        ${mkBorgCommonScript borgRepoRootSnapshots borgRepoRootSnapshotsPath}
+        recover_stale_borg_locks
+
         PERSIST_DEV="/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02"
         TMP_ROOT=$(mktemp -d)
         cleanup() {
@@ -623,7 +917,7 @@ in
 
         if [ ! -e "${borgRepoRootSnapshotsPath}/config" ]; then
           install -d -m 0700 -o root -g root "${borgRepoRootSnapshotsPath}"
-          borg init --encryption repokey-blake2 "$BORG_REPO"
+          with_borg_lock borg init --encryption repokey-blake2 "$BORG_REPO"
         fi
 
         delete_archived_snapshot() {
@@ -641,14 +935,14 @@ in
           snap_name=$(basename "$snap_dir")
           archive_name="root-$snap_name"
 
-          if borg info "::$archive_name" >/dev/null 2>&1; then
+          if with_borg_lock borg list --short --glob-archives "$archive_name" "$BORG_REPO" | grep -Fxq "$archive_name"; then
             echo "Archive $archive_name already exists; deleting archived snapshot $snap_name"
             delete_archived_snapshot "$snap_dir"
             backed_up=$((backed_up + 1))
             continue
           fi
 
-          if borg create \
+          if with_borg_lock borg create \
             --compression auto,zstd,1 \
             --lock-wait ${toString borgLockWaitSec} \
             --exclude "$snap_dir/dev" \
@@ -714,7 +1008,7 @@ in
       ];
       environment = {
         BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
-        BORG_CACHE_DIR = "/persist/root/.cache/borg";
+        BORG_CACHE_DIR = borgCacheDir;
       };
       path = with pkgs; [
         borgbackup
