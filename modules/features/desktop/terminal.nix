@@ -51,6 +51,7 @@ mkFeatureModule {
               cursor_trail = 3;
               confirm_os_window_close = 0;
               allow_remote_control = "socket-only";
+              listen_on = "unix:$XDG_RUNTIME_DIR/kitty-${user}-{kitty_pid}";
               open_url_with = "xdg-open";
               detect_urls = "yes";
               url_prefixes = "http https file ftp";
