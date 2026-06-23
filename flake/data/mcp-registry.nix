@@ -5,8 +5,10 @@ let
   registry = {
     context7 = {
       transport = "http";
+      tier = "remote-core";
       url = "https://mcp.context7.com/mcp";
       clients = [
+        "claude"
         "codex"
         "gemini"
       ];
@@ -15,6 +17,7 @@ let
 
     github = {
       transport = "http";
+      tier = "remote-core";
       url = "https://api.githubcopilot.com/mcp/";
       clients = [
         "claude"
@@ -27,6 +30,7 @@ let
 
     codebase-memory-mcp = {
       transport = "stdio";
+      tier = "code-semantic";
       command = "codebase-memory-mcp";
       clients = [
         "codex"
@@ -37,6 +41,7 @@ let
 
     serena = {
       transport = "stdio";
+      tier = "code-semantic";
       command = "serena";
       args = [
         "start-mcp-server"
@@ -65,6 +70,7 @@ let
 
     firecrawl = {
       transport = "stdio";
+      tier = "browser-mcp";
       command = "mcp-firecrawl";
       clients = [
         "claude"
@@ -73,6 +79,7 @@ let
 
     lynchpin = {
       transport = "stdio";
+      tier = "deep-evidence";
       command = "mcp-lynchpin";
       env = {
         LYNCHPIN_REPO_ROOT = "/realm/project/sinity-lynchpin";
@@ -87,6 +94,7 @@ let
 
     polylogue = {
       transport = "stdio";
+      tier = "recall";
       command = "mcp-polylogue";
       clients = [
         "codex"
@@ -97,6 +105,7 @@ let
 
     chrome-devtools = {
       transport = "stdio";
+      tier = "browser-mcp";
       command = "mcp-chrome-devtools";
       clients = [
         "claude"
@@ -107,6 +116,7 @@ let
 
     chrome-devtools-private = {
       transport = "stdio";
+      tier = "browser-mcp";
       command = "mcp-chrome-devtools-private";
       clients = [
         "claude"
@@ -117,6 +127,7 @@ let
 
     chrome-devtools-private-visible = {
       transport = "stdio";
+      tier = "browser-mcp";
       command = "mcp-chrome-devtools-private-visible";
       clients = [
         "claude"
@@ -126,8 +137,36 @@ let
     };
   };
 
-  selectClientServers =
-    client: lib.filterAttrs (_: server: builtins.elem client server.clients) registry;
+  profileTiers = {
+    lean = [
+      "remote-core"
+      "recall"
+    ];
+    full = [
+      "remote-core"
+      "recall"
+      "deep-evidence"
+      "code-semantic"
+    ];
+    browser = [
+      "remote-core"
+      "recall"
+      "deep-evidence"
+      "code-semantic"
+      "browser-mcp"
+    ];
+  };
+
+  selectClientServersForProfile =
+    profile: client:
+    let
+      tiers = profileTiers.${profile};
+    in
+    lib.filterAttrs (
+      _: server: builtins.elem client server.clients && builtins.elem (server.tier or "full") tiers
+    ) registry;
+
+  selectClientServers = selectClientServersForProfile "full";
 
   # Claude Code mcpServers entry.
   renderClaudeServer =
@@ -199,7 +238,9 @@ in
 {
   inherit
     registry
+    profileTiers
     selectClientServers
+    selectClientServersForProfile
     renderClaudeServer
     renderCodexServer
     renderGeminiServer

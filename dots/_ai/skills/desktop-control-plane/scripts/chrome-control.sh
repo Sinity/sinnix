@@ -2,18 +2,50 @@
 set -euo pipefail
 
 # Chrome DevTools Protocol (CDP) remote control for Google Chrome.
-# Chrome must be running with --remote-debugging-port=9222.
+# The live target expects the user's Chrome on --remote-debugging-port=9222.
+# Private targets launch isolated agent-owned profiles on separate ports.
 # Uses curl for HTTP endpoints and websocat for WebSocket CDP commands.
 
+TARGET="live"
 CDP_HOST="${CDP_HOST:-127.0.0.1}"
-CDP_PORT="${CDP_PORT:-9222}"
+LIVE_CDP_PORT="${LIVE_CDP_PORT:-9222}"
+PRIVATE_CDP_PORT="${PRIVATE_CDP_PORT:-9223}"
+PRIVATE_VISIBLE_CDP_PORT="${PRIVATE_VISIBLE_CDP_PORT:-9224}"
+PRIVATE_PROFILE_DIR="${SINNIX_AGENT_CHROME_PROFILE:-$HOME/.local/share/sinnix-browser/private-control}"
+PRIVATE_VISIBLE_PROFILE_DIR="${SINNIX_AGENT_CHROME_VISIBLE_PROFILE:-$HOME/.local/share/sinnix-browser/private-visible-control}"
+CHROME_BIN="${SINNIX_AGENT_CHROME_EXECUTABLE:-google-chrome-stable}"
+CDP_PORT="$LIVE_CDP_PORT"
 CDP_BASE="http://${CDP_HOST}:${CDP_PORT}"
+
+set_target() {
+  TARGET="$1"
+  case "$TARGET" in
+  live)
+    CDP_PORT="$LIVE_CDP_PORT"
+    ;;
+  private)
+    CDP_PORT="$PRIVATE_CDP_PORT"
+    ;;
+  private-visible)
+    CDP_PORT="$PRIVATE_VISIBLE_CDP_PORT"
+    ;;
+  *)
+    echo "unknown target: $TARGET" >&2
+    exit 2
+    ;;
+  esac
+  CDP_BASE="http://${CDP_HOST}:${CDP_PORT}"
+}
 
 usage() {
   cat <<'USAGE'
-Usage: sinnix-chrome-control <command> [options]
+Usage: sinnix-chrome-control [--target live|private|private-visible] <command> [options]
 
 Commands:
+  status                          Probe the selected target
+  private-start [--visible] [--url <url>]
+                                  Start an isolated private Chrome target
+  private-stop [--visible]        Stop the private Chrome target
   list                            List all open pages (id, title, url, type)
   list-tabs                       List only page-type targets
   info <page_id>                  Get detailed info for a page
@@ -43,11 +75,15 @@ Commands:
   fill-form <page_id> --selector <css> --value <text>
                                   Set the value of a form field and dispatch input event
 
+  wait-selector <page_id> --selector <css> [--timeout-sec <n>] [--interval-ms <n>]
+                                  Wait until an element matching CSS selector exists
+
   await <page_id> --js <javascript> [--timeout-sec <n>] [--interval-ms <n>]
                                   Poll a JS expression until it returns truthy
 
 Examples:
-  sinnix-chrome-control list
+  sinnix-chrome-control --target private private-start --url https://example.com
+  sinnix-chrome-control --target private list
   sinnix-chrome-control screenshot <id> --out /tmp/page.png
   sinnix-chrome-control evaluate <id> --js 'document.title'
   sinnix-chrome-control fill-form <id> --selector '#search' --value 'my query'
@@ -66,6 +102,145 @@ need_cmd() {
 need_cmd curl
 need_cmd jq
 need_cmd websocat
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+  --target)
+    set_target "${2:?missing target}"
+    shift 2
+    ;;
+  --target=*)
+    set_target "${1#--target=}"
+    shift
+    ;;
+  --help | -h)
+    usage
+    exit 0
+    ;;
+  *)
+    break
+    ;;
+  esac
+done
+
+target_profile_dir() {
+  if [[ $TARGET == "private-visible" ]]; then
+    printf '%s\n' "$PRIVATE_VISIBLE_PROFILE_DIR"
+  else
+    printf '%s\n' "$PRIVATE_PROFILE_DIR"
+  fi
+}
+
+target_headless_flag() {
+  if [[ $TARGET == "private" ]]; then
+    printf '%s\n' "--headless=new"
+  fi
+}
+
+chrome_pid_file() {
+  printf '%s/chrome.pid\n' "$(target_profile_dir)"
+}
+
+target_status() {
+  if curl -fsS --max-time 2 "${CDP_BASE}/json/version" | jq .; then
+    return 0
+  fi
+  echo "unavailable: ${TARGET} (${CDP_BASE})" >&2
+  return 1
+}
+
+start_private_chrome() {
+  local visible=0 url="about:blank" profile_dir pid_file headless_arg
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --visible)
+      visible=1
+      shift
+      ;;
+    --url)
+      url="${2:?missing url}"
+      shift 2
+      ;;
+    *)
+      echo "unknown arg: $1" >&2
+      exit 2
+      ;;
+    esac
+  done
+
+  if [[ $visible -eq 1 ]]; then
+    set_target private-visible
+  elif [[ $TARGET == "live" ]]; then
+    set_target private
+  fi
+
+  if curl -fsS --max-time 1 "${CDP_BASE}/json/version" >/dev/null 2>&1; then
+    target_status
+    return 0
+  fi
+
+  profile_dir="$(target_profile_dir)"
+  pid_file="$(chrome_pid_file)"
+  mkdir -p "$profile_dir"
+  headless_arg="$(target_headless_flag)"
+
+  nohup "$CHROME_BIN" \
+    --remote-debugging-address="$CDP_HOST" \
+    --remote-debugging-port="$CDP_PORT" \
+    --user-data-dir="$profile_dir" \
+    --no-first-run \
+    --no-default-browser-check \
+    ${headless_arg:+"$headless_arg"} \
+    "$url" \
+    >"$profile_dir/chrome.log" 2>&1 &
+  printf '%s\n' "$!" >"$pid_file"
+
+  for _ in {1..50}; do
+    if curl -fsS --max-time 1 "${CDP_BASE}/json/version" >/dev/null 2>&1; then
+      target_status
+      return 0
+    fi
+    sleep 0.1
+  done
+
+  echo "private Chrome did not become ready: ${CDP_BASE}" >&2
+  exit 1
+}
+
+stop_private_chrome() {
+  local visible=0 pid_file pid
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --visible)
+      visible=1
+      shift
+      ;;
+    *)
+      echo "unknown arg: $1" >&2
+      exit 2
+      ;;
+    esac
+  done
+  if [[ $visible -eq 1 ]]; then
+    set_target private-visible
+  elif [[ $TARGET == "live" ]]; then
+    set_target private
+  fi
+  if [[ $TARGET == "live" ]]; then
+    echo "refusing to stop live browser target" >&2
+    exit 2
+  fi
+  pid_file="$(chrome_pid_file)"
+  if [[ -f $pid_file ]]; then
+    pid="$(cat "$pid_file")"
+    if [[ -n $pid ]] && kill "$pid" 2>/dev/null; then
+      rm -f "$pid_file"
+      echo "stopped: $TARGET"
+      return 0
+    fi
+  fi
+  echo "no managed private Chrome pid for $TARGET"
+}
 
 # ── CDP WebSocket helpers ──────────────────────────────────────────────
 
@@ -123,6 +298,18 @@ cmd="${1:-}"
 shift || true
 
 case "$cmd" in
+status)
+  target_status
+  ;;
+
+private-start)
+  start_private_chrome "$@"
+  ;;
+
+private-stop)
+  stop_private_chrome "$@"
+  ;;
+
 list | list-tabs)
   filter="."
   [[ $cmd == "list-tabs" ]] && filter='map(select(.type == "page"))'
@@ -590,6 +777,46 @@ fill-form)
   params=$(jq -nc --arg expr "$expr" '{expression: $expr, returnByValue: true}')
   result=$(cdp_send_with_result "$ws_url" "Runtime.evaluate" "$params" | jq -r '.result.value // empty')
   echo "$result"
+  ;;
+
+wait-selector)
+  page_id=""
+  selector=""
+  timeout_sec=30
+  interval_ms=500
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --selector)
+      selector="${2:?missing selector}"
+      shift 2
+      ;;
+    --timeout-sec)
+      timeout_sec="${2:?missing timeout}"
+      shift 2
+      ;;
+    --interval-ms)
+      interval_ms="${2:?missing interval}"
+      shift 2
+      ;;
+    *)
+      if [[ -z $page_id ]]; then
+        page_id="$1"
+        shift
+      else
+        echo "unknown arg: $1" >&2
+        exit 2
+      fi
+      ;;
+    esac
+  done
+  [[ -n $page_id && -n $selector ]] || {
+    echo "wait-selector requires page_id and --selector" >&2
+    exit 2
+  }
+  "$0" --target "$TARGET" await "$page_id" \
+    --js "document.querySelector($(jq -nc --arg selector "$selector" '$selector')) !== null" \
+    --timeout-sec "$timeout_sec" \
+    --interval-ms "$interval_ms"
   ;;
 
 await)

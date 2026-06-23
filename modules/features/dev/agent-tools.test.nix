@@ -46,22 +46,15 @@ mkFeatureTest {
         message = "Shared skills tree must not contain self-referential symlinks: ${lib.concatStringsSep ", " sharedSkillSelfLinks}";
       }
       (expect.hmFileExists hm ".local/bin/claude" "Claude wrapper must exist")
-      (expect.hmFileExists hm ".local/bin/claude-opus" "Claude Opus wrapper must exist")
-      (expect.hmFileExists hm ".local/bin/claude-sonnet" "Claude Sonnet wrapper must exist")
-      (expect.hmFileExists hm ".local/bin/claude-lite" "Claude bare/no-MCP wrapper must exist")
+      (expect.hmFileExists hm ".local/bin/claude-lean" "Claude lean wrapper must exist")
+      (expect.hmFileExists hm ".local/bin/claude-browser" "Claude browser wrapper must exist")
       {
         assertion = lib.any (pkg: lib.getName pkg == "sinnix-scope") hm.home.packages;
         message = "sinnix-scope must be in the user profile so wrapper runtime fallbacks are real";
       }
-      (expect.hmFileExists hm ".local/bin/deepseek" "DeepSeek wrapper must exist")
       (expect.hmFileExists hm ".local/bin/codex" "Codex wrapper must exist")
-      (expect.hmFileExists hm ".local/bin/codex-fast" "Codex fast profile wrapper must exist")
-      (expect.hmFileExists hm ".local/bin/codex-deep" "Codex deep profile wrapper must exist")
-      (expect.hmFileExists hm ".local/bin/codex-max" "Codex max profile wrapper must exist")
-      (expect.hmFileExists hm ".local/bin/codex-spark" "Codex Spark profile wrapper must exist")
-      (expect.hmFileExists hm ".local/bin/codex-spark-xhigh"
-        "Codex Spark xhigh profile wrapper must exist"
-      )
+      (expect.hmFileExists hm ".local/bin/codex-lean" "Codex lean wrapper must exist")
+      (expect.hmFileExists hm ".local/bin/codex-browser" "Codex browser wrapper must exist")
       (expect.hmFileTextNotMatches hm ".local/bin/codex" ".*render-agents.*"
         "Codex wrapper must not render AGENTS on every launch"
       )
@@ -89,10 +82,14 @@ mkFeatureTest {
         "Gemini wrapper must not render instructions on every launch"
       )
       (expect.xdgConfigFileExists hm "claude/CLAUDE.md" "Claude instruction root must exist")
-      (expect.xdgConfigFileExists hm "claude/skills" "Claude skills symlink must exist")
+      (expect.xdgConfigFileExists hm "claude/skills" "Claude curated skills symlink must exist")
       {
         assertion = !(hm.xdg.configFile."claude/skills".recursive or false);
-        message = "Claude skills must stay a direct directory symlink, not a recursive materialization";
+        message = "Claude skills must stay a direct curated directory symlink";
+      }
+      {
+        assertion = !(hm.xdg.configFile ? "claude/skills/persona");
+        message = "Claude persona skill must not be exposed by default";
       }
       (expect.xdgConfigFileExists hm "claude/world-model" "Claude world model tree must exist")
       (expect.xdgConfigFileExists hm "claude/operational" "Claude operational knowledge tree must exist")

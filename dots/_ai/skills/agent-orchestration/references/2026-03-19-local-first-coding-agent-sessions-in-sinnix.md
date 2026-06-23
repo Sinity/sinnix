@@ -57,7 +57,9 @@ Sinnix’s shell feature persists the major agent state directories:
 - `~/.codex` (Codex CLI config + state). fileciteturn24file0L1-L1
 - `~/.claude.json` (Claude CLI auth token file). fileciteturn24file0L1-L1
 
-Sinnix also ships a `claude-team` wrapper that launches Claude Code inside tmux, which is an existing integration point for “team split panes” and suggests tmux is already acceptable as an operator primitive. fileciteturn24file0L1-L1
+Sinnix intentionally keeps team-style orchestration in explicit Kitty/control
+scripts instead of a dedicated Claude wrapper. That keeps the main agent command
+fully capable while preserving tmux/Kitty as operator primitives. fileciteturn24file0L1-L1
 
 ### Security posture and risk
 

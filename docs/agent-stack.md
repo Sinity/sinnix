@@ -36,8 +36,9 @@ vocabulary:
 - `opencode`: additional terminal agent surface, useful as a cross-agent comparison target.
 - `skills`: upstream skill tooling; keep Sinnix/Hermes skills authoritative locally.
 
-The active browser automation surface is the Chrome DevTools MCP trio from the
-Sinnix registry, not a separate upstream browser package.
+The default browser automation surface is `sinnix-chrome-control`, not an
+always-on Chrome DevTools MCP. The MCP trio remains available through the
+explicit browser agent profile when the shell CDP helper is too small.
 
 ## Evaluate next, in order
 
@@ -84,16 +85,16 @@ Adopt per-repo only where dependency graph/critical path beats a plain scratch f
 
 4. Browser/desktop control
 
-Existing registry exposes Chrome DevTools MCPs to agents for both the user's
-live browser and agent-owned private Chrome profiles. Current desktop control
-exists as Hyprland/wtype/grim skill instructions and stable `sinnix-*` helper
-commands, not a typed MCP server.
+The registry keeps Chrome DevTools MCPs in the explicit browser tier. Current
+desktop/browser control exists as stable `sinnix-*` helper commands plus skill
+instructions, not a typed desktop MCP server.
 
 Browser-control lanes:
 
-- `chrome-devtools-private` / `chrome-devtools-private-visible` for private
-  agent browser work.
-- `chrome-devtools` for real browser/session interaction.
+- `sinnix-chrome-control --target private` / `--target private-visible` for
+  agent-owned private browser work.
+- `sinnix-chrome-control --target live` for real browser/session interaction.
+- `claude-browser` / `codex-browser` for the Chrome DevTools MCP superset.
 - A future local desktop-control MCP should wrap `hyprctl`, `wtype`, `grim`,
   `wl-copy`, and `wl-paste` when the shell helpers stop being enough.
 
@@ -103,7 +104,7 @@ Control and evidence stay separate. DevTools/Hyprland/Kitty helpers are for live
 action and perception; Polylogue is the transcript/session archive, Lynchpin is
 cross-source interpretation over chats/git/ActivityWatch/shell/health/telemetry,
 and Sinnix observability is raw runtime truth via `/etc/sinnix/runtime-inventory.json`,
-`sinnix-observe`, and `/realm/data/captures/**`. `sinnix-agent-control-status`
+`sinnix-observe`, and `/realm/data/captures/**`. `sinnix-agent-status`
 is the compact bridge: it probes live control surfaces plus the evidence
 services and capture roots an agent should consult before reconstructing events
 from memory.
@@ -116,12 +117,14 @@ from memory.
 
 ## Keep local
 
-- `modules/lib/mcp-registry.nix`: canonical per-client MCP projection.
+- `flake/data/mcp-registry.nix`: canonical per-client/profile MCP projection.
 - `modules/services/hermes.nix`: Hermes config and mode wrappers.
 - `modules/features/dev/mcp-servers.nix`: registry renderers for Codex/Forge/Gemini/Claude/Hermes MCP client configs.
 - `modules/features/dev/agent-tools.nix`: agent CLI wrappers, profile launchers, and installed upstream package set.
-- `dots/codex/config.toml`: Codex static defaults only; MCP entries are generated from the registry at activation/build time.
-- `dots/_ai/skills/`: shared project skills.
+- `dots/codex/config.toml`: Codex static defaults only; full/lean/browser MCP
+  entries are generated from the registry at activation/build time.
+- `dots/_ai/skills/`: shared project skills; Home Manager exposes only the
+  curated default set to reduce cognitive overhead.
 - `scripts/render-agents`, `normalize-agent-projects`, `verify-agent-topology`: local projection/verification.
 
 ## Interactive profiles
@@ -129,18 +132,13 @@ from memory.
 Use explicit launchers instead of mutating shared global defaults mid-session:
 
 - Claude Code:
-  - `claude`: default Claude Code with managed MCP config and `/realm/project` access.
-  - `claude-opus`: Opus, high effort, same managed MCP surface.
-  - `claude-sonnet`: Sonnet, medium effort, same managed MCP surface.
-  - `claude-lite`: bare/no-MCP startup for debugging config or isolating provider/tool issues.
-  - `deepseek`: Claude Code protocol against DeepSeek v4-pro 1m with max effort.
+  - `claude`: full non-browser profile with GitHub, Context7, Polylogue, Lynchpin, Serena, and Codebase Memory.
+  - `claude-lean`: GitHub, Context7, and Polylogue only.
+  - `claude-browser`: full profile plus Chrome DevTools MCPs.
 - Codex:
-  - `codex`: default gpt-5.5 medium.
-  - `codex-fast`: gpt-5.5 low effort.
-  - `codex-deep`: gpt-5.5 high effort.
-  - `codex-max`: gpt-5.5 xhigh effort.
-  - `codex-spark`: gpt-5.3-codex-spark medium.
-  - `codex-spark-xhigh`: gpt-5.3-codex-spark xhigh.
+  - `codex`: full non-browser profile with GitHub, Context7, Polylogue, Lynchpin, Serena, and Codebase Memory.
+  - `codex-lean`: GitHub, Context7, and Polylogue only.
+  - `codex-browser`: full profile plus Chrome DevTools MCPs.
 
 These wrappers are projections, not new authorities: MCP capability is still registry-generated; instructions still render from Claude/AGENTS sources; persistence remains under each tool's native home.
 

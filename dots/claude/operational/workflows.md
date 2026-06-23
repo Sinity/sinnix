@@ -97,7 +97,7 @@ python -m lynchpin.views.calendar_views build 2026-03-01 2026-03-07
 ```bash
 cd /realm/project/sinnix
 direnv allow                    # Activate devshell
-check --no-build                # Fast pre-flight: curated default checks, sequential
+switch                          # Build, evaluate, and activate through Sinnix wrappers
 ```
 
 All rebuild commands use `nh` with systemd-run containment (nice=10):
@@ -111,6 +111,10 @@ clean                           # nh clean all — garbage collect + optimise st
 ```
 
 For risky changes, test in VM first: `test-vm` → launch QEMU → verify → `switch`.
+
+Do not run `check --no-build` as default pre-flight before `switch`; it repeats
+work that `switch` must perform anyway. Use a focused test/eval for the edited
+surface, then `switch` when the user wants the live system updated.
 
 **All three agent CLIs self-update via FHS npm bootstrap** — no Nix rebuild
 needed. `claude update`, `codex update`, `gemini` self-update inside

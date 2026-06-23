@@ -26,11 +26,11 @@ This skill provides:
 
 The scripts are installed on Sinnix as stable `~/.local/bin/sinnix-*` commands
 for ambient use by agents. The source files below remain the maintenance copy.
-Run `sinnix-agent-control-status` first when you need a quick live inventory of
-browser, desktop, screenshot, keyboard, and terminal-control availability.
-For browser MCP choice: `chrome-devtools` targets the user's live Chrome,
-`chrome-devtools-private` launches an agent-owned headless Chrome profile, and
-`chrome-devtools-private-visible` launches the same agent-owned profile visibly.
+Run `sinnix-agent-status` first when you need a quick live inventory of browser,
+desktop, screenshot, keyboard, terminal-control, and evidence availability.
+For browser work, prefer `sinnix-chrome-control --target live|private|private-visible`.
+Use the browser MCP profile (`claude-browser`/`codex-browser`) only when the
+shell CDP helper is too small for the task.
 
 ### 1) Kitty Remote Control
 
@@ -105,6 +105,30 @@ sinnix-screenshot-control capture-output --fix-hdr
 
 # Apply manual correction to a file
 sinnix-screenshot-control tone-map --in /path/image.png --brightness 105 --saturation 125 --gamma 0.90
+```
+
+### 4) Browser Control
+
+Installed command: `sinnix-chrome-control`
+
+Source: `scripts/chrome-control.sh`
+
+Examples:
+
+```bash
+# Probe the user's live Chrome CDP endpoint
+sinnix-chrome-control --target live status
+
+# Start and use an agent-owned private browser profile
+sinnix-chrome-control --target private private-start --url https://example.com
+sinnix-chrome-control --target private list-tabs
+
+# Use a visible private browser when the operator should inspect it
+sinnix-chrome-control --target private-visible private-start --url https://example.com
+
+# Wait for an element and read page text
+sinnix-chrome-control --target private wait-selector <page_id> --selector 'main'
+sinnix-chrome-control --target private get-text <page_id>
 ```
 
 ## Notes

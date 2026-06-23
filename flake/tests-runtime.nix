@@ -89,22 +89,17 @@ in
         homeFiles = [
           ".gemini/settings.json"
           ".local/bin/claude"
-          ".local/bin/claude-lite"
-          ".local/bin/claude-opus"
-          ".local/bin/claude-sonnet"
-          ".local/bin/claude-team"
+          ".local/bin/claude-lean"
+          ".local/bin/claude-browser"
           ".local/bin/codex"
-          ".local/bin/codex-deep"
-          ".local/bin/codex-fast"
-          ".local/bin/codex-max"
-          ".local/bin/codex-spark"
-          ".local/bin/codex-spark-xhigh"
+          ".local/bin/codex-lean"
+          ".local/bin/codex-browser"
           ".local/bin/mcp-firecrawl"
           ".local/bin/mcp-chrome-devtools"
           ".local/bin/mcp-chrome-devtools-private"
           ".local/bin/mcp-chrome-devtools-private-visible"
           ".local/bin/mcp-polylogue"
-          ".local/bin/sinnix-agent-control-status"
+          ".local/bin/sinnix-agent-status"
           ".local/bin/sinnix-chrome-control"
           ".local/bin/sinnix-hypr-control"
           ".local/bin/sinnix-keyboard-control"
@@ -113,6 +108,8 @@ in
         ];
         xdgConfigFiles = [
           "claude/mcp.json"
+          "claude/mcp-lean.json"
+          "claude/mcp-browser.json"
           "claude/settings.json"
         ];
         useHmZshrc = true;
@@ -140,6 +137,12 @@ in
       agentToolsRuntimeConfig = (evalTestSpec system devAgentToolsRuntimeSpec).config;
       agentToolsCodexConfigSource =
         agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexConfigSource;
+      agentToolsCodexFullConfigSource =
+        agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexFullConfigSource;
+      agentToolsCodexLeanConfigSource =
+        agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexLeanConfigSource;
+      agentToolsCodexBrowserConfigSource =
+        agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexBrowserConfigSource;
       backupRuntimeEval = evalTestSpec system {
         name = "backup-borg-hook-runtime";
         modules = [
@@ -810,7 +813,13 @@ in
           setup = agentToolsFixture.setup + ''
             mkdir -p "$HOME/.codex"
             cp ${lib.escapeShellArg (toString agentToolsCodexConfigSource)} "$HOME/.codex/config.toml"
+            cp ${lib.escapeShellArg (toString agentToolsCodexFullConfigSource)} "$HOME/.codex/full.config.toml"
+            cp ${lib.escapeShellArg (toString agentToolsCodexLeanConfigSource)} "$HOME/.codex/lean.config.toml"
+            cp ${lib.escapeShellArg (toString agentToolsCodexBrowserConfigSource)} "$HOME/.codex/browser.config.toml"
             chmod 644 "$HOME/.codex/config.toml"
+            chmod 644 "$HOME/.codex/full.config.toml"
+            chmod 644 "$HOME/.codex/lean.config.toml"
+            chmod 644 "$HOME/.codex/browser.config.toml"
           '';
           script = ''
             trap 'echo "dev-agent-tools-runtime failed at line $LINENO" >&2' ERR
@@ -824,16 +833,11 @@ in
 
             for wrapper in \
               "$HOME/.local/bin/claude" \
-              "$HOME/.local/bin/claude-opus" \
-              "$HOME/.local/bin/claude-sonnet" \
-              "$HOME/.local/bin/claude-lite" \
-              "$HOME/.local/bin/claude-team" \
+              "$HOME/.local/bin/claude-lean" \
+              "$HOME/.local/bin/claude-browser" \
               "$HOME/.local/bin/codex" \
-              "$HOME/.local/bin/codex-fast" \
-              "$HOME/.local/bin/codex-deep" \
-              "$HOME/.local/bin/codex-max" \
-              "$HOME/.local/bin/codex-spark" \
-              "$HOME/.local/bin/codex-spark-xhigh" \
+              "$HOME/.local/bin/codex-lean" \
+              "$HOME/.local/bin/codex-browser" \
               "$HOME/.local/bin/gemini" \
               "$HOME/.local/bin/codebase-memory-mcp" \
               "$HOME/.local/bin/serena" \
@@ -850,6 +854,7 @@ in
 
             jq -e '
               .mcpServers.github.url == "https://api.githubcopilot.com/mcp/" and
+              .mcpServers.context7.url == "https://mcp.context7.com/mcp" and
               .mcpServers["codebase-memory-mcp"].command == "codebase-memory-mcp" and
               .mcpServers.serena.command == "serena" and
               .mcpServers.serena.args == ["start-mcp-server", "--project-from-cwd", "--context=claude-code"] and
@@ -857,10 +862,26 @@ in
               .mcpServers.lynchpin.env.LYNCHPIN_REPO_ROOT == "/realm/project/sinity-lynchpin" and
               .mcpServers.lynchpin.env.LYNCHPIN_LOCAL_ROOT == "/realm/project/sinity-lynchpin/.lynchpin" and
               .mcpServers.polylogue.command == "mcp-polylogue" and
+              (.mcpServers | has("chrome-devtools") | not)
+            ' "$HOME/.config/claude/mcp.json" >/dev/null
+
+            jq -e '
+              .mcpServers.github.url == "https://api.githubcopilot.com/mcp/" and
+              .mcpServers.context7.url == "https://mcp.context7.com/mcp" and
+              .mcpServers.polylogue.command == "mcp-polylogue" and
+              (.mcpServers | has("lynchpin") | not) and
+              (.mcpServers | has("serena") | not) and
+              (.mcpServers | has("codebase-memory-mcp") | not) and
+              (.mcpServers | has("chrome-devtools") | not)
+            ' "$HOME/.config/claude/mcp-lean.json" >/dev/null
+
+            jq -e '
               .mcpServers["chrome-devtools"].command == "mcp-chrome-devtools" and
               .mcpServers["chrome-devtools-private"].command == "mcp-chrome-devtools-private" and
-              .mcpServers["chrome-devtools-private-visible"].command == "mcp-chrome-devtools-private-visible"
-            ' "$HOME/.config/claude/mcp.json" >/dev/null
+              .mcpServers["chrome-devtools-private-visible"].command == "mcp-chrome-devtools-private-visible" and
+              .mcpServers.lynchpin.command == "mcp-lynchpin" and
+              .mcpServers.serena.command == "serena"
+            ' "$HOME/.config/claude/mcp-browser.json" >/dev/null
 
             python3 - <<'PYCODE'
             import pathlib, tomllib
@@ -870,40 +891,39 @@ in
             assert config['model_reasoning_effort'] == 'medium'
             assert config['approval_policy'] == 'never'
             assert config['sandbox_mode'] == 'danger-full-access'
-            expected_profiles = {
-                'fast': ('gpt-5.5', 'low'),
-                'deep': ('gpt-5.5', 'high'),
-                'max': ('gpt-5.5', 'xhigh'),
-                'spark_medium': ('gpt-5.3-codex-spark', 'medium'),
-                'spark_xhigh': ('gpt-5.3-codex-spark', 'xhigh'),
-            }
-            for name, (model, effort) in expected_profiles.items():
-                profile = config['profiles'][name]
-                assert profile['model'] == model, name
-                assert profile['model_reasoning_effort'] == effort, name
-            mcp = config['mcp_servers']
-            assert mcp['context7']['url'] == 'https://mcp.context7.com/mcp'
-            assert mcp['context7']['bearer_token_env_var'] == 'CONTEXT7_API_KEY'
-            assert mcp['github']['bearer_token_env_var'] == 'GITHUB_TOKEN'
-            assert mcp['codebase-memory-mcp']['command'] == 'codebase-memory-mcp'
-            assert mcp['serena']['command'] == 'serena'
-            assert mcp['serena']['startup_timeout_sec'] == 15
-            assert mcp['serena']['args'] == ['start-mcp-server', '--project-from-cwd', '--context=codex']
-            assert mcp['polylogue']['command'] == 'mcp-polylogue'
-            assert mcp['lynchpin']['env']['LYNCHPIN_REPO_ROOT'] == '/realm/project/sinity-lynchpin'
-            assert mcp['lynchpin']['env']['LYNCHPIN_LOCAL_ROOT'] == '/realm/project/sinity-lynchpin/.lynchpin'
-            assert mcp['chrome-devtools']['command'] == 'mcp-chrome-devtools'
-            assert mcp['chrome-devtools-private']['command'] == 'mcp-chrome-devtools-private'
-            assert mcp['chrome-devtools-private-visible']['command'] == 'mcp-chrome-devtools-private-visible'
+            assert 'mcp_servers' not in config
             assert config['features']['hooks'] is True
+
+            full = tomllib.loads(pathlib.Path.home().joinpath('.codex/full.config.toml').read_text())['mcp_servers']
+            lean = tomllib.loads(pathlib.Path.home().joinpath('.codex/lean.config.toml').read_text())['mcp_servers']
+            browser = tomllib.loads(pathlib.Path.home().joinpath('.codex/browser.config.toml').read_text())['mcp_servers']
+            assert full['context7']['url'] == 'https://mcp.context7.com/mcp'
+            assert full['context7']['bearer_token_env_var'] == 'CONTEXT7_API_KEY'
+            assert full['github']['bearer_token_env_var'] == 'GITHUB_TOKEN'
+            assert full['codebase-memory-mcp']['command'] == 'codebase-memory-mcp'
+            assert full['serena']['command'] == 'serena'
+            assert full['serena']['startup_timeout_sec'] == 15
+            assert full['serena']['args'] == ['start-mcp-server', '--project-from-cwd', '--context=codex']
+            assert full['polylogue']['command'] == 'mcp-polylogue'
+            assert full['lynchpin']['env']['LYNCHPIN_REPO_ROOT'] == '/realm/project/sinity-lynchpin'
+            assert full['lynchpin']['env']['LYNCHPIN_LOCAL_ROOT'] == '/realm/project/sinity-lynchpin/.lynchpin'
+            assert 'chrome-devtools' not in full
+            assert lean['github']['bearer_token_env_var'] == 'GITHUB_TOKEN'
+            assert lean['context7']['url'] == 'https://mcp.context7.com/mcp'
+            assert lean['polylogue']['command'] == 'mcp-polylogue'
+            assert 'lynchpin' not in lean
+            assert 'serena' not in lean
+            assert 'codebase-memory-mcp' not in lean
+            assert 'chrome-devtools' not in lean
+            assert browser['chrome-devtools']['command'] == 'mcp-chrome-devtools'
+            assert browser['chrome-devtools-private']['command'] == 'mcp-chrome-devtools-private'
+            assert browser['chrome-devtools-private-visible']['command'] == 'mcp-chrome-devtools-private-visible'
             PYCODE
 
             jq -e '
               .mcpServers["codebase-memory-mcp"].command == "codebase-memory-mcp" and
               .mcpServers.serena.args == ["start-mcp-server", "--project-from-cwd", "--context=ide"] and
-              .mcpServers["chrome-devtools"].command == "mcp-chrome-devtools" and
-              .mcpServers["chrome-devtools-private"].command == "mcp-chrome-devtools-private" and
-              .mcpServers["chrome-devtools-private-visible"].command == "mcp-chrome-devtools-private-visible"
+              (.mcpServers | has("chrome-devtools") | not)
             ' "$HOME/.gemini/settings.json" >/dev/null
 
             jq -e '
@@ -911,17 +931,12 @@ in
             ' "$HOME/.codex/hooks.json" >/dev/null
 
 
-            grep -Fq 'mcp_args=(--mcp-config "$MCP_CONFIG" --strict-mcp-config)' "$HOME/.local/bin/claude"
-            grep -Fq 'wrapper_args=(--model opus --effort high)' "$HOME/.local/bin/claude-opus"
-            grep -Fq 'wrapper_args=(--model sonnet --effort medium)' "$HOME/.local/bin/claude-sonnet"
-            grep -Fq 'wrapper_args=(--bare)' "$HOME/.local/bin/claude-lite"
-            grep -Fq 'exec tmux new-session -s ct "$claude_cmd"' "$HOME/.local/bin/claude-team"
-            # Codex profile wrappers must contain their profile arg.
-            grep -Fq 'codex_args+=(--profile fast)' "$HOME/.local/bin/codex-fast"
-            grep -Fq 'codex_args+=(--profile deep)' "$HOME/.local/bin/codex-deep"
-            grep -Fq 'codex_args+=(--profile max)' "$HOME/.local/bin/codex-max"
-            grep -Fq 'codex_args+=(--profile spark_medium)' "$HOME/.local/bin/codex-spark"
-            grep -Fq 'codex_args+=(--profile spark_xhigh)' "$HOME/.local/bin/codex-spark-xhigh"
+            grep -Fq 'MCP_CONFIG="$HOME/.config/claude/mcp.json"' "$HOME/.local/bin/claude"
+            grep -Fq 'MCP_CONFIG="$HOME/.config/claude/mcp-lean.json"' "$HOME/.local/bin/claude-lean"
+            grep -Fq 'MCP_CONFIG="$HOME/.config/claude/mcp-browser.json"' "$HOME/.local/bin/claude-browser"
+            grep -Fq 'codex_args=(--profile full)' "$HOME/.local/bin/codex"
+            grep -Fq 'codex_args=(--profile lean)' "$HOME/.local/bin/codex-lean"
+            grep -Fq 'codex_args=(--profile browser)' "$HOME/.local/bin/codex-browser"
 
             # All agent wrappers must bootstrap from npm packages without
             # launching through buildFHSEnv/bubblewrap.
@@ -946,7 +961,7 @@ in
 
             "$HOME/.local/bin/mcp-polylogue" --help | grep -q 'Start the Polylogue MCP stdio bridge'
             for helper in \
-              "$HOME/.local/bin/sinnix-agent-control-status" \
+              "$HOME/.local/bin/sinnix-agent-status" \
               "$HOME/.local/bin/sinnix-chrome-control" \
               "$HOME/.local/bin/sinnix-hypr-control" \
               "$HOME/.local/bin/sinnix-keyboard-control" \

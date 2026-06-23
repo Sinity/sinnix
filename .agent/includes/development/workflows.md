@@ -33,18 +33,20 @@ nvd diff /nix/var/nix/profiles/system-{N,N+1}-link  # Compare specific generatio
 nix-tree                            # Interactive dependency browser (find rebuild root causes)
 ```
 
-### Pre-Flight Before Rebuild
+### Verification Before Rebuild
 
-Use `check --no-build` when you need a non-activating gate before committing or
-when the user explicitly asks for a pre-flight. Do not run it before `switch`
-when the user asks to apply a live repair now; `switch` already evaluates and
-builds before activation, so a separate check only delays recovery. If `switch`
-already evaluated/built and failed during activation, patch the activation
-blocker and rerun `switch` directly; do not insert `check --no-build` between
-those attempts. Avoid raw `nix flake check --no-build` for routine pre-flight
-work on this host; that
-traversal has filled zram and wedged in uninterruptible sleep. The curated check
-catches:
+Use the narrow test or evaluation that covers the edited surface, then run
+`switch` when the user wants the live system updated. Do not run
+`check --no-build` as routine pre-flight before `switch`; `switch` already
+evaluates and builds, so the separate check repeats work while delaying
+recovery. If `switch` already evaluated/built and failed during activation,
+patch the activation blocker and rerun `switch` directly. Avoid raw
+`nix flake check --no-build` for routine work on this host; that traversal has
+filled zram and wedged in uninterruptible sleep.
+
+Use `check --no-build` only when the user explicitly asks for that diagnostic
+or when you need a non-activating gate and have a concrete reason. The curated
+check catches:
 
 - Option type errors and missing required arguments
 - Coverage manifest consistency (services without coverage entries)

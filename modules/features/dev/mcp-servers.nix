@@ -2,7 +2,7 @@
 #
 # Provides:
 # - MCP server wrappers (Firecrawl, Chrome DevTools, Polylogue, Lynchpin)
-# - MCP server registry (Context7 remote, GitHub, Firecrawl, Chrome DevTools, Polylogue)
+# - MCP server registry and explicit lean/full/browser agent profiles
 # - Claude/Codex/Gemini dotfile linking and integration
 # - System monitoring tools (htop)
 {
@@ -25,16 +25,28 @@ mkFeatureModule {
       internal = true;
       description = "Path to the generated Codex config derivation (for tests)";
     };
+    codexFullConfigSource = lib.mkOption {
+      type = lib.types.path;
+      internal = true;
+      description = "Path to the generated Codex full profile derivation (for tests)";
+    };
+    codexLeanConfigSource = lib.mkOption {
+      type = lib.types.path;
+      internal = true;
+      description = "Path to the generated Codex lean profile derivation (for tests)";
+    };
+    codexBrowserConfigSource = lib.mkOption {
+      type = lib.types.path;
+      internal = true;
+      description = "Path to the generated Codex browser profile derivation (for tests)";
+    };
   };
   meta.dotfiles = {
     configFile = {
       "ripgrep-all/config.jsonc" = "ripgrep-all/config.jsonc";
       "marimo/marimo.toml" = "marimo/marimo.toml";
     };
-    homeFile = {
-      ".codex/skills" = "codex/skills";
-      ".gemini/skills" = "_ai/skills";
-    };
+    homeFile = { };
   };
   configFn =
     {
@@ -339,27 +351,67 @@ mkFeatureModule {
         };
       };
       inherit (mcpRegistry)
-        selectClientServers
+        selectClientServersForProfile
         renderCodexServer
         renderGeminiServer
         ;
-      codexMcpServers = lib.mapAttrs renderCodexServer (selectClientServers "codex");
-      codexMcpConfigFile = tomlFormat.generate "codex-mcp.toml" { mcp_servers = codexMcpServers; };
-      codexConfigFile = pkgs.runCommandLocal "codex-config.toml" { } ''
-        cat ${inputs.self + "/dots/codex/config.toml"} ${codexMcpConfigFile} > "$out"
-      '';
+      mkCodexProfileFile =
+        profile:
+        tomlFormat.generate "codex-${profile}-profile.toml" {
+          mcp_servers = lib.mapAttrs renderCodexServer (
+            selectClientServersForProfile profile "codex"
+          );
+        };
+      codexConfigFile = inputs.self + "/dots/codex/config.toml";
+      codexFullConfigFile = mkCodexProfileFile "full";
+      codexLeanConfigFile = mkCodexProfileFile "lean";
+      codexBrowserConfigFile = mkCodexProfileFile "browser";
+      sharedSkillNames = [
+        "adversarial-loop"
+        "agent-orchestration"
+        "analyze"
+        "assured-close"
+        "desktop-control-plane"
+        "enhance"
+        "evidence-harness"
+        "greedy-batching"
+        "history-cleanup"
+        "lynchpin"
+        "meta"
+        "recap"
+        "swarm"
+      ];
+      sharedSkillLinks = map (name: {
+        inherit name;
+        path = inputs.self + "/dots/_ai/skills/${name}";
+      }) sharedSkillNames;
+      sharedSkillFarm = pkgs.linkFarm "sinnix-shared-agent-skills" sharedSkillLinks;
+      codexSkillFarm = pkgs.linkFarm "sinnix-codex-agent-skills" (
+        sharedSkillLinks
+        ++ [
+          {
+            name = ".system";
+            path = inputs.self + "/dots/codex/skills/.system";
+          }
+        ]
+      );
       geminiSettingsBase = removeAttrs (builtins.fromJSON (
         builtins.readFile (inputs.self + "/dots/gemini/settings.json")
       )) [ "mcpServers" ];
       geminiSettingsFile = jsonFormat.generate "gemini-settings.json" (
         geminiSettingsBase
         // {
-          mcpServers = lib.mapAttrs renderGeminiServer (selectClientServers "gemini");
+          mcpServers = lib.mapAttrs renderGeminiServer (
+            selectClientServersForProfile "full" "gemini"
+          );
         }
       );
     in
     {
       sinnix.features.dev.mcp-servers.codexConfigSource = codexConfigFile;
+      sinnix.features.dev.mcp-servers.codexFullConfigSource = codexFullConfigFile;
+      sinnix.features.dev.mcp-servers.codexLeanConfigSource = codexLeanConfigFile;
+      sinnix.features.dev.mcp-servers.codexBrowserConfigSource = codexBrowserConfigFile;
       sinnix.persistence.home.directories = [
         {
           directory = ".local/share/codebase-memory-mcp";
@@ -422,7 +474,13 @@ mkFeatureModule {
               # added between rebuilds survive until the next switch.
               codexConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
                 run cp ${lib.escapeShellArg (toString codexConfigFile)} "$HOME/.codex/config.toml"
+                run cp ${lib.escapeShellArg (toString codexFullConfigFile)} "$HOME/.codex/full.config.toml"
+                run cp ${lib.escapeShellArg (toString codexLeanConfigFile)} "$HOME/.codex/lean.config.toml"
+                run cp ${lib.escapeShellArg (toString codexBrowserConfigFile)} "$HOME/.codex/browser.config.toml"
                 run chmod 644 "$HOME/.codex/config.toml"
+                run chmod 644 "$HOME/.codex/full.config.toml"
+                run chmod 644 "$HOME/.codex/lean.config.toml"
+                run chmod 644 "$HOME/.codex/browser.config.toml"
               '';
               codebaseMemoryMcpConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
                 run mkdir -p "$HOME/.local/share/codebase-memory-mcp"
@@ -452,6 +510,14 @@ mkFeatureModule {
           };
 
           home.file = {
+            ".codex/skills" = {
+              source = codexSkillFarm;
+              force = true;
+            };
+            ".gemini/skills" = {
+              source = sharedSkillFarm;
+              force = true;
+            };
             ".gemini/settings.json" = {
               source = geminiSettingsFile;
               force = true;
@@ -517,7 +583,7 @@ mkFeatureModule {
               source = "${desktopControlScripts}/screenshot-color-lab.sh";
               force = true;
             };
-            ".local/bin/sinnix-agent-control-status" = {
+            ".local/bin/sinnix-agent-status" = {
               executable = true;
               force = true;
               text = ''
@@ -616,6 +682,12 @@ mkFeatureModule {
                 service system sinex.service
 
                 path_probe runtime-inventory /etc/sinnix/runtime-inventory.json
+                path_probe codex-full-profile "$HOME/.codex/full.config.toml"
+                path_probe codex-lean-profile "$HOME/.codex/lean.config.toml"
+                path_probe codex-browser-profile "$HOME/.codex/browser.config.toml"
+                path_probe claude-full-profile "$HOME/.config/claude/mcp.json"
+                path_probe claude-lean-profile "$HOME/.config/claude/mcp-lean.json"
+                path_probe claude-browser-profile "$HOME/.config/claude/mcp-browser.json"
                 path_probe polylogue-archive "$HOME/.local/share/polylogue"
                 path_probe machine-telemetry /realm/data/captures/machine
                 path_probe screenshots /realm/data/captures/screenshot

@@ -21,7 +21,6 @@ nix build .#<output>   # Build specific flake output
 
 ```
 # From inside the devshell (direnv allow or nix develop):
-check --no-build            # Fast pre-flight; curated, sequential, eval-cache disabled
 test-vm                     # Test risky changes in QEMU VM first
 switch                      # Apply to live system (resource-scoped nh os switch)
 boot                        # Safer alternative: set boot default without immediate activation
@@ -38,3 +37,8 @@ cd /realm/project/sinnix && nix develop --command switch
 > consume all 32 GB of RAM, thrashing the system and making video unplayable even though
 > CPU cycles were yielded correctly. Always use `switch`/`boot` devshell commands or
 > `nix develop --command switch` — these ensure proper resource context.
+>
+> Do not insert `check --no-build` before `switch` as routine agent hygiene.
+> `switch` already evaluates/builds, and repeating eval adds latency/load on the
+> exact path used for recovery. Use focused tests for edited modules, then
+> `switch` when applying live Sinnix changes.

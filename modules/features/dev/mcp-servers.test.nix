@@ -23,10 +23,13 @@ mkFeatureTest {
         let
           base = builtins.fromJSON (builtins.readFile (inputs.self + "/dots/claude/settings.json"));
           mcpServers = (inputs.nixpkgs.lib).mapAttrs mcpRegistry.renderClaudeServer (
-            mcpRegistry.selectClientServers "claude"
+            mcpRegistry.selectClientServersForProfile "full" "claude"
           );
         in
         base // { inherit mcpServers; };
+      claudeBrowserMcpServers = (inputs.nixpkgs.lib).mapAttrs mcpRegistry.renderClaudeServer (
+        mcpRegistry.selectClientServersForProfile "browser" "claude"
+      );
       geminiSettings = builtins.fromJSON (builtins.readFile hm.home.file.".gemini/settings.json".source);
       codexHooks = builtins.fromJSON (builtins.readFile hm.home.file.".codex/hooks.json".source);
     in
@@ -48,11 +51,15 @@ mkFeatureTest {
         message = "Serena global config must be managed during Home Manager activation";
       }
       (expect.hmFileExists hm ".codex/skills"
-        "Codex skills must be linked from the dedicated dots/codex/skills tree"
+        "Codex curated skills tree must be linked"
       )
       {
         assertion = !(hm.home.file.".codex/skills".recursive or false);
-        message = "Codex skills must stay a direct directory symlink, not a recursive materialization";
+        message = "Codex skills must stay a direct curated directory symlink";
+      }
+      {
+        assertion = !(hm.home.file ? ".codex/skills/persona");
+        message = "Codex persona skill must not be exposed by default";
       }
       (expect.persistedHomeDir config ".local/share/codebase-memory-mcp"
         "Codebase Memory graph store must persist across impermanence boots"
@@ -91,25 +98,15 @@ mkFeatureTest {
         "polylogue"
         "command"
       ] "mcp-polylogue" "Claude config must call the packaged Polylogue MCP wrapper")
-      (expect.attrPathEq claudeSettings [
+      {
+        assertion = !(claudeSettings.mcpServers ? "chrome-devtools");
+        message = "Claude full profile must not expose browser MCP by default";
+      }
+      (expect.attrPathEq { mcpServers = claudeBrowserMcpServers; } [
         "mcpServers"
         "chrome-devtools"
         "command"
-      ] "mcp-chrome-devtools" "Claude config must expose the user's Chrome DevTools MCP")
-      (expect.attrPathEq claudeSettings [
-        "mcpServers"
-        "chrome-devtools-private"
-        "command"
-      ] "mcp-chrome-devtools-private" "Claude config must expose the private Chrome DevTools MCP")
-      (expect.attrPathEq claudeSettings
-        [
-          "mcpServers"
-          "chrome-devtools-private-visible"
-          "command"
-        ]
-        "mcp-chrome-devtools-private-visible"
-        "Claude config must expose the visible private Chrome DevTools MCP"
-      )
+      ] "mcp-chrome-devtools" "Claude browser profile must expose the user's Chrome DevTools MCP")
       (expect.attrPathEq claudeSettings [
         "mcpServers"
         "lynchpin"
@@ -149,25 +146,10 @@ mkFeatureTest {
         "polylogue"
         "command"
       ] "mcp-polylogue" "Gemini config must call the packaged Polylogue MCP wrapper")
-      (expect.attrPathEq geminiSettings [
-        "mcpServers"
-        "chrome-devtools"
-        "command"
-      ] "mcp-chrome-devtools" "Gemini config must expose the user's Chrome DevTools MCP")
-      (expect.attrPathEq geminiSettings [
-        "mcpServers"
-        "chrome-devtools-private"
-        "command"
-      ] "mcp-chrome-devtools-private" "Gemini config must expose the private Chrome DevTools MCP")
-      (expect.attrPathEq geminiSettings
-        [
-          "mcpServers"
-          "chrome-devtools-private-visible"
-          "command"
-        ]
-        "mcp-chrome-devtools-private-visible"
-        "Gemini config must expose the visible private Chrome DevTools MCP"
-      )
+      {
+        assertion = !(geminiSettings.mcpServers ? "chrome-devtools");
+        message = "Gemini full profile must not expose browser MCP by default";
+      }
       {
         assertion =
           (builtins.elemAt (builtins.elemAt codexHooks.hooks.SessionStart 0).hooks 0).command
@@ -175,8 +157,16 @@ mkFeatureTest {
         message = "Codex hooks must activate Serena at session start";
       }
       {
+        assertion = hm.home.file ? ".gemini/skills";
+        message = "Gemini curated skills tree must be linked";
+      }
+      {
         assertion = !(hm.home.file.".gemini/skills".recursive or false);
-        message = "Gemini skills must stay a direct directory symlink, not a recursive materialization";
+        message = "Gemini skills must stay a direct curated directory symlink";
+      }
+      {
+        assertion = !(hm.home.file ? ".gemini/skills/persona");
+        message = "Gemini persona skill must not be exposed by default";
       }
       (expect.hmFileExists hm ".local/bin/sinnix-chrome-control"
         "Agent Chrome CDP helper must be available on PATH"
@@ -193,7 +183,7 @@ mkFeatureTest {
       (expect.hmFileExists hm ".local/bin/sinnix-screenshot-control"
         "Agent screenshot helper must be available on PATH"
       )
-      (expect.hmFileExists hm ".local/bin/sinnix-agent-control-status"
+      (expect.hmFileExists hm ".local/bin/sinnix-agent-status"
         "Agent control surface probe must be available on PATH"
       )
     ];

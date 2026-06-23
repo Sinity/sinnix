@@ -145,11 +145,11 @@ if [[ $# -lt 1 ]]; then
   exit 2
 fi
 
-# Set default models per agent if not specified
+# Set only the model defaults required by current batch runners. Claude uses
+# the configured CLI default unless --model is explicitly supported downstream.
 if [[ -z ${model} ]]; then
   case "${agent}" in
   claude)
-    model="claude-opus-4.6"
     ;;
   codex)
     model="gpt-5.5"

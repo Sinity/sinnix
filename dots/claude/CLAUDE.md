@@ -89,12 +89,12 @@ Browser, desktop, and terminal control are normal local capabilities on this
 machine. Interpret user language directly:
 
 - **"your browser" / "an agent browser"** → use an agent-private Chrome through
-  `chrome-devtools-private`. Use `chrome-devtools-private-visible` when the user
-  should be able to see the agent browser.
+  `sinnix-chrome-control --target private`. Use `--target private-visible` when
+  the user should be able to see the agent browser.
 - **"my browser" / "the real browser" / "my tabs"** → use the user's live Chrome
-  profile through `chrome-devtools` or `sinnix-chrome-control`. This is a
-  high-authority surface: it can see authenticated pages/cookies and non-active
-  tabs via `127.0.0.1:9222`.
+  profile through `sinnix-chrome-control --target live`. This is a high-authority
+  surface: it can see authenticated pages/cookies and non-active tabs via
+  `127.0.0.1:9222`.
 - **"desktop" / "window" / "screen"** → use Hyprland and screenshot helpers:
   `sinnix-hypr-control`, `sinnix-keyboard-control`, and
   `sinnix-screenshot-control`.
@@ -103,11 +103,12 @@ machine. Interpret user language directly:
   matching title/window. Prefer this over global keyboard injection for
   terminals.
 
-Prefer typed MCP tools for browser work when available. Use the `sinnix-*`
-helpers for desktop/window/terminal perception and control, and load the
-`desktop-control-plane` skill when a task needs recipes, screenshots, HDR
-handling, or careful GUI interaction. Run `sinnix-agent-control-status` when
-you need a quick live probe of available control surfaces.
+Prefer the `sinnix-*` helpers for browser/desktop/window/terminal perception and
+control. Use `claude-browser`/`codex-browser` only when Chrome DevTools MCP
+capabilities are specifically needed. Load the `desktop-control-plane` skill
+when a task needs recipes, screenshots, HDR handling, or careful GUI
+interaction. Run `sinnix-agent-status` when you need a quick live probe of
+available control surfaces.
 
 ### Evidence and Telemetry
 

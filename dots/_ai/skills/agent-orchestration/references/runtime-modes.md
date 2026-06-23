@@ -43,7 +43,8 @@ Hyprland tip:
 
 - Spark lane: `--model gpt-5.3-codex-spark`
 - Higher-depth lane: switch `--model` to a larger Codex model when synthesis quality dominates latency.
-- Use profiles: `codex exec --profile spark_xhigh` for pre-configured model+effort combos.
+- Do not rely on Sinnix model alias wrappers here; use explicit `--model` and
+  per-run effort flags when a batch lane needs a non-default model.
 
 ## Decision Table
 

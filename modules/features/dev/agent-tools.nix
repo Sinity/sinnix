@@ -74,7 +74,13 @@ mkFeatureModule {
       jsonFormat = pkgs.formats.json { };
       inherit (helpers.data) mcpRegistry;
       claudeMcpServers = lib.mapAttrs mcpRegistry.renderClaudeServer (
-        mcpRegistry.selectClientServers "claude"
+        mcpRegistry.selectClientServersForProfile "full" "claude"
+      );
+      claudeLeanMcpServers = lib.mapAttrs mcpRegistry.renderClaudeServer (
+        mcpRegistry.selectClientServersForProfile "lean" "claude"
+      );
+      claudeBrowserMcpServers = lib.mapAttrs mcpRegistry.renderClaudeServer (
+        mcpRegistry.selectClientServersForProfile "browser" "claude"
       );
       # Dedicated registry-driven MCP config consumed via `claude --mcp-config`.
       # Claude Code 2.x does NOT read `mcpServers` from settings.json — only
@@ -84,10 +90,37 @@ mkFeatureModule {
       claudeMcpConfigFile = jsonFormat.generate "claude-mcp.json" {
         mcpServers = claudeMcpServers;
       };
+      claudeLeanMcpConfigFile = jsonFormat.generate "claude-mcp-lean.json" {
+        mcpServers = claudeLeanMcpServers;
+      };
+      claudeBrowserMcpConfigFile = jsonFormat.generate "claude-mcp-browser.json" {
+        mcpServers = claudeBrowserMcpServers;
+      };
       claudeSettingsBase = builtins.fromJSON (
         builtins.readFile (inputs.self + "/dots/claude/settings.json")
       );
       claudeSettingsFile = jsonFormat.generate "claude-settings.json" claudeSettingsBase;
+      sharedSkillNames = [
+        "adversarial-loop"
+        "agent-orchestration"
+        "analyze"
+        "assured-close"
+        "desktop-control-plane"
+        "enhance"
+        "evidence-harness"
+        "greedy-batching"
+        "history-cleanup"
+        "lynchpin"
+        "meta"
+        "recap"
+        "swarm"
+      ];
+      sharedSkillFarm = pkgs.linkFarm "sinnix-shared-agent-skills" (
+        map (name: {
+          inherit name;
+          path = inputs.self + "/dots/_ai/skills/${name}";
+        }) sharedSkillNames
+      );
       agentScopePrelude = ''
         run_agent_scoped() {
           if [[ -z "''${SINNIX_AGENT_SCOPED:-}" ]]; then
@@ -105,9 +138,7 @@ mkFeatureModule {
       '';
       mkClaudeCodeWrapper =
         {
-          useMcp ? true,
-          extraEnv ? "",
-          extraArgs ? [ ],
+          mcpConfigName ? "mcp",
         }:
         {
           text = ''
@@ -120,20 +151,16 @@ mkFeatureModule {
               binaryName = "claude";
             }}
 
-            ${extraEnv}
             ${agentScopePrelude}
 
             mcp_args=()
-            ${lib.optionalString useMcp ''
-              if [ -r "$HOME/.config/claude/mcp.json" ]; then
-                mcp_args=(--mcp-config "$HOME/.config/claude/mcp.json" --strict-mcp-config)
-              fi
-            ''}
-            wrapper_args=(${lib.concatStringsSep " " (map lib.escapeShellArg extraArgs)})
+            MCP_CONFIG="$HOME/.config/claude/${mcpConfigName}.json"
+            if [ -r "$MCP_CONFIG" ]; then
+              mcp_args=(--mcp-config "$MCP_CONFIG" --strict-mcp-config)
+            fi
 
             claude_args=(
               "''${mcp_args[@]}"
-              "''${wrapper_args[@]}"
             )
             if [ -d "${sinnixCfg.paths.realmRoot}" ]; then
               claude_args+=(--add-dir "${sinnixCfg.paths.realmRoot}" "/home/${user}")
@@ -148,7 +175,7 @@ mkFeatureModule {
         };
       mkCodexWrapper =
         {
-          profile ? null,
+          profile,
         }:
         {
           text = ''
@@ -163,10 +190,7 @@ mkFeatureModule {
 
             ${agentScopePrelude}
 
-            codex_args=()
-            ${lib.optionalString (profile != null) ''
-              codex_args+=(--profile ${lib.escapeShellArg profile})
-            ''}
+            codex_args=(--profile ${lib.escapeShellArg profile})
 
             run_agent_scoped "$STATE/launch.sh" "''${codex_args[@]}" "$@"
           '';
@@ -219,18 +243,12 @@ mkFeatureModule {
 
           programs.zsh = {
             shellAliases = {
-              cl = "~/.local/bin/claude";
               claude = "~/.local/bin/claude";
-              claude-lite = "~/.local/bin/claude-lite";
-              claude-opus = "~/.local/bin/claude-opus";
-              claude-sonnet = "~/.local/bin/claude-sonnet";
-              ct = "~/.local/bin/claude-team";
-              codex-deep = "~/.local/bin/codex-deep";
-              codex-fast = "~/.local/bin/codex-fast";
-              codex-max = "~/.local/bin/codex-max";
-              codex-spark = "~/.local/bin/codex-spark";
-              codex-spark-xhigh = "~/.local/bin/codex-spark-xhigh";
-              deepseek = "~/.local/bin/deepseek";
+              claude-lean = "~/.local/bin/claude-lean";
+              claude-browser = "~/.local/bin/claude-browser";
+              codex = "~/.local/bin/codex";
+              codex-lean = "~/.local/bin/codex-lean";
+              codex-browser = "~/.local/bin/codex-browser";
               gemini = "~/.local/bin/gemini";
             };
           };
@@ -246,6 +264,8 @@ mkFeatureModule {
             "claude/settings.json".source = claudeSettingsFile;
             # Registry-driven MCP config consumed by the claude wrapper.
             "claude/mcp.json".source = claudeMcpConfigFile;
+            "claude/mcp-lean.json".source = claudeLeanMcpConfigFile;
+            "claude/mcp-browser.json".source = claudeBrowserMcpConfigFile;
             "claude/CLAUDE.md".source = mkDotsFile "/claude/CLAUDE.md";
             "claude/world-model" = {
               source = mkDotsFile "/claude/world-model";
@@ -257,9 +277,10 @@ mkFeatureModule {
               force = true;
               recursive = true;
             };
-            # Single symlink → _ai/skills (shared skill source with real dirs).
-            # No recursive — one symlink for the whole directory.
-            "claude/skills".source = mkDotsFile "/_ai/skills";
+            "claude/skills" = {
+              source = sharedSkillFarm;
+              force = true;
+            };
           };
 
           home.activation.claudeSymlink = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
@@ -283,76 +304,16 @@ mkFeatureModule {
           '';
 
           home.file.".local/bin/claude" = mkClaudeCodeWrapper { };
-
-          home.file.".local/bin/claude-opus" = mkClaudeCodeWrapper {
-            extraArgs = [
-              "--model"
-              "opus"
-              "--effort"
-              "high"
-            ];
+          home.file.".local/bin/claude-lean" = mkClaudeCodeWrapper {
+            mcpConfigName = "mcp-lean";
+          };
+          home.file.".local/bin/claude-browser" = mkClaudeCodeWrapper {
+            mcpConfigName = "mcp-browser";
           };
 
-          home.file.".local/bin/claude-sonnet" = mkClaudeCodeWrapper {
-            extraArgs = [
-              "--model"
-              "sonnet"
-              "--effort"
-              "medium"
-            ];
-          };
-
-          home.file.".local/bin/claude-lite" = mkClaudeCodeWrapper {
-            useMcp = false;
-            extraArgs = [ "--bare" ];
-          };
-
-          home.file.".local/bin/deepseek" = mkClaudeCodeWrapper {
-            extraEnv = ''
-              DEEPSEEK_KEY_FILE="/run/agenix/deepseek-api-key"
-              if [ ! -r "$DEEPSEEK_KEY_FILE" ]; then
-                echo "deepseek: cannot read $DEEPSEEK_KEY_FILE" >&2
-                exit 1
-              fi
-
-              export ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic"
-              export ANTHROPIC_AUTH_TOKEN="$(<"$DEEPSEEK_KEY_FILE")"
-              DEEPSEEK_MODEL="deepseek-v4-pro[1m]"
-              export ANTHROPIC_MODEL="$DEEPSEEK_MODEL"
-              export ANTHROPIC_DEFAULT_OPUS_MODEL="$DEEPSEEK_MODEL"
-              export ANTHROPIC_DEFAULT_SONNET_MODEL="$DEEPSEEK_MODEL"
-              export ANTHROPIC_DEFAULT_HAIKU_MODEL="$DEEPSEEK_MODEL"
-              export CLAUDE_CODE_SUBAGENT_MODEL="$DEEPSEEK_MODEL"
-              export CLAUDE_CODE_EFFORT_LEVEL="max"
-            '';
-          };
-
-          home.file.".local/bin/claude-team" = {
-            text = ''
-              #!/usr/bin/env bash
-              # Launch a selected Claude Code wrapper inside tmux for agent team split panes.
-              # Override CLAUDE_WRAPPER=claude-opus/claude-sonnet/deepseek when desired.
-              set -euo pipefail
-
-              CLAUDE="$HOME/.local/bin/''${CLAUDE_WRAPPER:-claude}"
-
-              if [ -n "''${TMUX:-}" ]; then
-                exec "$CLAUDE" "$@"
-              fi
-
-              printf -v claude_cmd '%q ' "$CLAUDE" "$@"
-              exec tmux new-session -s ct "$claude_cmd"
-            '';
-            executable = true;
-            force = true;
-          };
-
-          home.file.".local/bin/codex" = mkCodexWrapper { };
-          home.file.".local/bin/codex-fast" = mkCodexWrapper { profile = "fast"; };
-          home.file.".local/bin/codex-deep" = mkCodexWrapper { profile = "deep"; };
-          home.file.".local/bin/codex-max" = mkCodexWrapper { profile = "max"; };
-          home.file.".local/bin/codex-spark" = mkCodexWrapper { profile = "spark_medium"; };
-          home.file.".local/bin/codex-spark-xhigh" = mkCodexWrapper { profile = "spark_xhigh"; };
+          home.file.".local/bin/codex" = mkCodexWrapper { profile = "full"; };
+          home.file.".local/bin/codex-lean" = mkCodexWrapper { profile = "lean"; };
+          home.file.".local/bin/codex-browser" = mkCodexWrapper { profile = "browser"; };
 
           home.file.".local/bin/gemini" = {
             text = ''
