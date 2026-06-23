@@ -33,6 +33,16 @@ only when debugging `xtask` itself, when a Sinex maintainer explicitly asks for
 that command, or when a documented `xtask` recipe says to run the direct command
 as part of the workflow.
 
+Resource pressure during heavy work is a runtime scheduling problem first, not
+a project semantics problem. Do not permanently lower build jobs, optimization
+levels, feature sets, test coverage, cache policy, or package profiles just
+because one live host is under RAM/IO pressure. First classify the live pressure
+with process/cgroup memory, PSI, swap, active timers, D-state IO, and OOM logs.
+If throttling is needed to finish the immediate operation, prefer a one-shot
+environment override or the Sinnix wrapper/slice layer, and leave durable
+project defaults alone unless the project itself has a reproducible,
+cross-machine resource bug.
+
 Use an explicit scope only outside a recognized devshell or for one-off custom
 commands that are expected to run for a long time or scan/write large stores:
 

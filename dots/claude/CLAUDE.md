@@ -68,6 +68,18 @@
   lockfile, or output path. If restarting, stop the old run first.
 - Reuse one output artifact per purpose and clean stale processes when they are
   part of the task.
+- Do not turn transient live-host pressure into permanent project policy.
+  Resource incidents during a rebuild, deploy, or local verification should be
+  handled with one-shot environment overrides, stopping unrelated live
+  workloads, changing the service/runtime containment layer, or retrying under
+  an appropriate wrapper. Do not permanently reduce build parallelism,
+  optimization level, cache behavior, retention, or feature coverage merely to
+  make the current host survive a momentary RAM/IO spike.
+- Before changing build policy for resource reasons, identify the pressure
+  source in live evidence: process RSS/PSS, swap, PSI, cgroups, journal OOM
+  events, active timers, and disk IO state. A high `used` number in `free` is
+  not itself a leak; separate anonymous process memory, tmpfs/zram, page cache,
+  and D-state IO backlog before acting.
 
 ---
 
