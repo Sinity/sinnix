@@ -45,9 +45,11 @@ Use scopes (`fix(cli): ...`) when the repo is large enough that scope adds clari
 
 - Blank line between subject and body; wrap at 72 chars
 - Four sections worth writing (not all always required): **Problem** (what observation/constraint triggered this), **What changed** (higher level than the diff), **Alternatives rejected** (only if there was a real fork), **Compatibility/migration** (breaking changes)
-- Issue refs in body: use `Ref #N` by default. Use GitHub
-  auto-resolution keywords only when the PR is intentionally meant to mark
-  the referenced issue resolved on merge.
+- Issue refs in body: use neutral references only, e.g. `Ref #N`.
+  Do not put GitHub resolver keywords adjacent to issue numbers in
+  agent-authored text. If a human explicitly wants a specific PR to
+  change a specific issue's GitHub state, get that instruction for that
+  exact PR and issue immediately before writing the resolver phrase.
 - `BREAKING CHANGE: ...` footer for breaking changes (Conventional Commits detect it)
 - Co-author trailer:
   ```
@@ -89,15 +91,18 @@ correct, or expand the body, and can be more important than the original
 description. If the body and comments conflict, preserve the evidence in your
 own issue/PR comment and state the interpretation you are implementing.
 
-**Auto-resolution keyword discipline.** In issue comments, PR bodies, commit
-messages, and bot/review replies, do not write GitHub's resolving keyword forms
-next to an issue number unless the intended effect is for GitHub to mark that
-issue resolved. This includes negative phrasing, audit notes, and sentences
-like "this PR does not close #N"; GitHub still parses the resolver word. Use a
-neutral reference plus remaining-work wording instead, for example `Ref #N` and
-then "remaining work:" or "not enough for the full issue scope." Only final PRs
-that actually satisfy the issue should use resolving keywords such as the
-`close`/`fix`/`resolve` family, including inflected forms.
+**GitHub resolver keyword discipline.** In issue comments, PR bodies, commit
+messages, and bot/review replies, do not write GitHub resolver keyword forms
+next to issue numbers in agent-authored text. This includes negative phrasing,
+audit notes, prompts, examples, and descriptions of partial work. Use neutral
+references plus explicit residual wording instead: `Ref #N` and
+`Remaining #N scope:`. Do not include example resolver phrases in prompts or
+docs; agents copy examples.
+
+Resolver phrases are permitted only when the user explicitly instructs that a
+specific PR should change a specific issue's GitHub state, and the current
+evidence proves the full issue scope is satisfied. Otherwise leave GitHub state
+to a separate explicit human/agent action.
 
 **Leave an implementation trail.** Agents working an issue should comment with:
 their understanding of scope; important constraints or non-goals; what they
@@ -157,8 +162,9 @@ issue open unless the remaining acceptance criteria are demonstrably unrelated.
 **Problem** (evidence/motivation — not "user asked"), **Solution** (modules
 touched, non-obvious decisions, rejected alternatives), **Verification** (exact
 commands run + output line that matters, not "tests pass"). Optional: Migration
-notes, Follow-ups, Breaking changes. Link issues with `Ref #N` unless the PR is
-intentionally meant to mark the issue resolved on merge.
+notes, Follow-ups, Breaking changes. Link issues with `Ref #N` and describe
+residual work as `Remaining #N scope:` when needed. Do not use resolver
+keywords in PR bodies by default.
 
 **Claim verification — grep the diff before asserting:**
 
@@ -166,20 +172,21 @@ intentionally meant to mark the issue resolved on merge.
 2. Check all call sites if claiming "every path now uses X."
 3. Read the PR's GitHub diff (not just local) — catches force-push/merge artifacts.
 4. Revise the claim if the code doesn't support it; "partially unified" is valid, "unified" when half-done is a lie.
-5. Test the claim. If PR says "fixes #123," the verification section shows #123's repro passing.
+5. Test the claim. If a PR claims to repair a bug, the verification section shows that bug's repro passing.
 
 **Acceptance-criteria honesty.** If an issue has acceptance criteria, address
 each item explicitly in the PR or issue comment that claims completion. Mark
 each criterion as satisfied, deferred to a follow-up issue, or misframed by new
 evidence. If an issue has no AC list, say what concrete decision, behavior, or
-verification satisfies it. Never mark an issue resolved on a partial subset
-without making the remaining work durable.
+verification satisfies it. Never claim a partial subset satisfies the full
+issue scope without making the remaining work durable.
 
 Tests are not a substitute for missing runtime wiring. If an issue asks for an
 operator flow, actuator behavior, deployment observation, CLI command, or replay
 path, tests can prove those paths only when the paths exist and are exercised.
-Do not mark implementation issues resolved on data-model or test-only changes
-unless the issue itself was explicitly narrowed to that surface.
+Do not claim implementation issues are fully handled by data-model or
+test-only changes unless the issue itself was explicitly narrowed to that
+surface.
 
 **Automated reviews are review input.** Before merging, inspect every automated
 review/comment/check that posts substantive text: CodeRabbit, Copilot, proof
