@@ -88,6 +88,16 @@ cdp_send_with_result() {
   cdp_send "$ws_url" "$method" "$params_json" | jq -r '.result // empty'
 }
 
+print_cdp_http_response() {
+  local response
+  response="$1"
+  if jq -e . >/dev/null 2>&1 <<<"$response"; then
+    jq . <<<"$response"
+  else
+    printf '%s\n' "$response"
+  fi
+}
+
 # ── Page lookup ────────────────────────────────────────────────────────
 
 get_ws_url() {
@@ -144,7 +154,12 @@ new-tab)
       ;;
     esac
   done
-  curl -s "${CDP_BASE}/json/new?${url}" | jq '{id, title, url}'
+  response=$(curl -fsS -X PUT "${CDP_BASE}/json/new?${url}")
+  if ! jq -e . >/dev/null 2>&1 <<<"$response"; then
+    printf 'unexpected /json/new response: %s\n' "$response" >&2
+    exit 1
+  fi
+  jq '{id, title, url}' <<<"$response"
   ;;
 
 close)
@@ -153,7 +168,8 @@ close)
     exit 2
   }
   page_id=$(resolve_page_id "$1")
-  curl -s "${CDP_BASE}/json/close/${page_id}" | jq .
+  response=$(curl -fsS "${CDP_BASE}/json/close/${page_id}")
+  print_cdp_http_response "$response"
   ;;
 
 activate)
@@ -162,7 +178,8 @@ activate)
     exit 2
   }
   page_id=$(resolve_page_id "$1")
-  curl -s "${CDP_BASE}/json/activate/${page_id}" | jq .
+  response=$(curl -fsS "${CDP_BASE}/json/activate/${page_id}")
+  print_cdp_http_response "$response"
   ;;
 
 screenshot)

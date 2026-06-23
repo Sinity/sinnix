@@ -25,6 +25,14 @@ heavy commands. In Sinex and Polylogue devshells, ordinary commands such as
 Sinnix build/background slices automatically, so agents should run the normal
 project command first.
 
+Resource containment is not a verification contract. In Sinex, use `xtask` for
+build/check/test verification because it owns the repo's schema, SQLx, database,
+feature, and formatting assumptions. Do not bypass it with direct `cargo`
+commands merely to get a narrower-looking signal. Direct `cargo` is acceptable
+only when debugging `xtask` itself, when a Sinex maintainer explicitly asks for
+that command, or when a documented `xtask` recipe says to run the direct command
+as part of the workflow.
+
 Use an explicit scope only outside a recognized devshell or for one-off custom
 commands that are expected to run for a long time or scan/write large stores:
 

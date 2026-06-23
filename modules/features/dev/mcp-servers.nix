@@ -108,9 +108,15 @@ mkFeatureModule {
         profile_dir="''${SINNIX_AGENT_CHROME_PROFILE:-$HOME/.local/share/sinnix-browser/chrome-devtools-private}"
         viewport="''${SINNIX_AGENT_CHROME_VIEWPORT:-1440x1000}"
         headless="''${SINNIX_AGENT_CHROME_HEADLESS:-1}"
+        chrome_bin="''${SINNIX_AGENT_CHROME_EXECUTABLE:-${pkgs.google-chrome}/bin/google-chrome-stable}"
         mkdir -p "$profile_dir"
+        if [ ! -x "$chrome_bin" ]; then
+          echo "SINNIX_AGENT_CHROME_EXECUTABLE does not name an executable Chrome: $chrome_bin" >&2
+          exit 2
+        fi
 
         args=(
+          --executablePath "$chrome_bin"
           --userDataDir "$profile_dir"
           --viewport "$viewport"
           --no-usage-statistics
@@ -585,10 +591,15 @@ mkFeatureModule {
                     browser="$(printf '%s' "$version" | ${pkgs.jq}/bin/jq -r '.Browser // "unknown"' 2>/dev/null || printf unknown)"
                     printf 'ok\tchrome-cdp\t%s\n' "$browser"
                   else
-                    printf 'missing\tchrome-cdp\thttp://127.0.0.1:9222\n'
+                    printf 'missing\tchrome-cdp\thttp://127.0.0.1:9222 (launch Google Chrome through the Sinnix desktop entry)\n'
                   fi
                 else
                   printf 'missing\tchrome-cdp\tcurl unavailable\n'
+                fi
+                if [ -x ${pkgs.google-chrome}/bin/google-chrome-stable ]; then
+                  printf 'ok\tchrome-private-executable\t%s\n' '${pkgs.google-chrome}/bin/google-chrome-stable'
+                else
+                  printf 'missing\tchrome-private-executable\t%s\n' '${pkgs.google-chrome}/bin/google-chrome-stable'
                 fi
 
                 if command -v hyprctl >/dev/null 2>&1; then
