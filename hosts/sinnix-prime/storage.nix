@@ -38,7 +38,25 @@ let
           exit 1
         fi
       elif [ -e ${lib.escapeShellArg archivePath} ]; then
-        for sidecar in ${lib.escapeShellArg "${archivePath}-wal"} ${lib.escapeShellArg "${archivePath}-shm"}; do
+        wal=${lib.escapeShellArg "${archivePath}-wal"}
+        shm=${lib.escapeShellArg "${archivePath}-shm"}
+        if [ -s "$wal" ]; then
+          echo "Refusing to migrate Polylogue DB while SQLite WAL has content: $wal" >&2
+          echo "Stop polylogued and checkpoint/truncate WAL before running realm-scaffold." >&2
+          exit 1
+        fi
+        for sidecar in "$wal" "$shm"; do
+          if [ -e "$sidecar" ]; then
+            if [ "$sidecar" = "$wal" ] || [ ! -e "$wal" ] || [ ! -s "$wal" ]; then
+              rm -f "$sidecar"
+            else
+              echo "Refusing to migrate Polylogue DB while SQLite sidecar exists: $sidecar" >&2
+              echo "Stop polylogued and checkpoint/truncate WAL before running realm-scaffold." >&2
+              exit 1
+            fi
+          fi
+        done
+        for sidecar in "$wal" "$shm"; do
           if [ -e "$sidecar" ]; then
             echo "Refusing to migrate Polylogue DB while SQLite sidecar exists: $sidecar" >&2
             echo "Stop polylogued and checkpoint/truncate WAL before running realm-scaffold." >&2
@@ -474,12 +492,12 @@ in
       # subvolumes/devices; anything under @ here is stale pre-mount data.
       for path in nix swap persist realm outer-realm neo-outer-realm; do
         if [ -d "/btrfs_tmp/@/$path" ]; then
-          ${pkgs.findutils}/bin/find "/btrfs_tmp/@/$path" -mindepth 1 -xdev -ignore_readdir_race -exec ${pkgs.coreutils}/bin/rm -rf -- {} +
+          ${pkgs.findutils}/bin/find "/btrfs_tmp/@/$path" -mindepth 1 -xdev -ignore_readdir_race -exec ${pkgs.coreutils}/bin/rm -rf -- {} + || true
         fi
       done
       for cache_path in /btrfs_tmp/@/root/.cache /btrfs_tmp/@/var/cache /btrfs_tmp/@/home/*/.cache; do
         if [ -d "$cache_path" ]; then
-          ${pkgs.findutils}/bin/find "$cache_path" -mindepth 1 -xdev -ignore_readdir_race -exec ${pkgs.coreutils}/bin/rm -rf -- {} +
+          ${pkgs.findutils}/bin/find "$cache_path" -mindepth 1 -xdev -ignore_readdir_race -exec ${pkgs.coreutils}/bin/rm -rf -- {} + || true
         fi
       done
 

@@ -681,11 +681,6 @@ in
             restartIfChanged = false;
             stopIfChanged = false;
             serviceConfig = {
-              Nice = lib.mkForce null;
-              Slice = lib.mkForce null;
-              CPUWeight = lib.mkForce null;
-              IOWeight = lib.mkForce null;
-              IOSchedulingClass = lib.mkForce null;
               TimeoutStopSec = lib.mkForce "15s";
             };
           }))
