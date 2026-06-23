@@ -1,16 +1,16 @@
 ---
 name: assured-close
-description: Close a GitHub issue using the AC-matrix + adversarial-loop pattern. Use when finalizing any reopened or scope-heavy issue, especially when you want the close-out to survive future audits. Refuses abandonment — no "future work" / "phase 2" / "incremental" without an open issue number.
+description: Audit issue satisfaction using an AC-matrix + adversarial-loop pattern. Use when finalizing any reopened or scope-heavy issue, especially when you want the completion claim to survive future audits. Does not change GitHub issue state unless the operator explicitly requests that separate action.
 metadata:
-  short-description: AC-driven issue closure with adversarial verification
+  short-description: AC-driven completion audit with adversarial verification
 ---
 
 # Assured Close
 
-Close an issue so that a future audit cannot legitimately reopen it.
-The pattern is evidence-driven, AC-internalizing, and adversarial-loop-verified.
+Audit an issue so that any completion claim is evidence-driven,
+AC-internalizing, and adversarial-loop-verified.
 
-**Arguments**: `$ARGUMENTS` — the issue number to close (e.g. `818`).
+**Arguments**: `$ARGUMENTS` — the issue number to audit.
 
 This is the methodology distilled from PRs #1002/#1004/#1006/#1010 on
 Sinity/polylogue, which closed four issues by catching three coherence
@@ -117,10 +117,11 @@ open issue number — is abandonment, not deferral.
 
 ### 7. After merge
 
-The squash-merge commit body **is** the closeout. `Closes #N` in the
-PR body auto-closes the issue and the AC matrix lands on master as the
-durable history record. No separate closeout comment needed unless you
-want to add a brief "patterns I'd reuse" note.
+The squash-merge commit body is the durable implementation record. Use
+neutral issue references such as `Ref #N` plus exact residual wording.
+Do not include GitHub issue-state keywords in the PR body, merge body,
+commit message, or issue comment. Issue state changes are a separate
+operator action after deployed/runtime evidence is reviewed.
 
 ---
 
@@ -149,9 +150,9 @@ want to add a brief "patterns I'd reuse" note.
 
 ## Anti-patterns
 
-- Closing with "remaining edges are incremental" — that's the
+- Claiming completion with "remaining edges are incremental" — that's the
   abandonment pattern. Refuse to write this even if it matches the
-  vibe of recent project closes.
+  vibe of recent project writeups.
 - AC matrix that uses paraphrased AC language. Use the verbatim text
   from the issue or its comments. Paraphrase loses the spec.
 - Skipping the adversarial loop because "I've already checked

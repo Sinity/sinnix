@@ -104,6 +104,11 @@ specific PR should change a specific issue's GitHub state, and the current
 evidence proves the full issue scope is satisfied. Otherwise leave GitHub state
 to a separate explicit human/agent action.
 
+Prefer disabling GitHub's repository setting that auto-closes issues when
+linked PRs merge. Even with that disabled, keep the neutral-reference rule:
+GitHub settings drift, squash bodies become permanent history, and agents copy
+nearby examples.
+
 **Leave an implementation trail.** Agents working an issue should comment with:
 their understanding of scope; important constraints or non-goals; what they
 changed; what they intentionally did not change; acceptance criteria satisfied,
