@@ -175,15 +175,11 @@ in
           daemon = {
             host = cfg.daemon.host;
             port = cfg.daemon.apiPort;
+            debounce-s = 30;
           };
 
           browser-capture.port = cfg.daemon.browserCapturePort;
         };
-
-        # NOTE(2026-06-12): upstream renders watch roots in TOML, while
-        # debounce remains a CLI flag on `polylogued run`; keep the Sinnix
-        # operational debounce in the service command rather than inventing a
-        # non-upstream TOML shape.
       };
 
       systemd.user.services.polylogued.Service = {
@@ -198,17 +194,6 @@ in
         # so a continuously-appending file cannot starve the window.
         # Keep the soft reclaim threshold tight enough to protect the desktop,
         # but leave hard headroom for large catch-up insight refreshes.
-        ExecStart = lib.mkForce (
-          lib.concatStringsSep " " [
-            "${polyloguePkg}/bin/polylogued"
-            "run"
-            "--debounce-s 30"
-            "--host ${lib.escapeShellArg cfg.daemon.host}"
-            "--port ${toString cfg.daemon.browserCapturePort}"
-            "--api-host ${lib.escapeShellArg cfg.daemon.host}"
-            "--api-port ${toString cfg.daemon.apiPort}"
-          ]
-        );
         IOAccounting = true;
         MemoryHigh = lib.mkForce "4G";
         MemoryMax = lib.mkForce "6G";
