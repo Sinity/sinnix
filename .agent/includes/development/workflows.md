@@ -38,8 +38,11 @@ nix-tree                            # Interactive dependency browser (find rebui
 Use `check --no-build` when you need a non-activating gate before committing or
 when the user explicitly asks for a pre-flight. Do not run it before `switch`
 when the user asks to apply a live repair now; `switch` already evaluates and
-builds before activation, so a separate check only delays recovery. Avoid raw
-`nix flake check --no-build` for routine pre-flight work on this host; that
+builds before activation, so a separate check only delays recovery. If `switch`
+already evaluated/built and failed during activation, patch the activation
+blocker and rerun `switch` directly; do not insert `check --no-build` between
+those attempts. Avoid raw `nix flake check --no-build` for routine pre-flight
+work on this host; that
 traversal has filled zram and wedged in uninterruptible sleep. The curated check
 catches:
 

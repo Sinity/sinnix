@@ -38,39 +38,39 @@ let
           exit 1
         fi
       elif [ -e ${lib.escapeShellArg archivePath} ]; then
-        wal=${lib.escapeShellArg "${archivePath}-wal"}
-        shm=${lib.escapeShellArg "${archivePath}-shm"}
-        if [ -s "$wal" ]; then
-          echo "Refusing to migrate Polylogue DB while SQLite WAL has content: $wal" >&2
-          echo "Stop polylogued and checkpoint/truncate WAL before running realm-scaffold." >&2
-          exit 1
-        fi
-        for sidecar in "$wal" "$shm"; do
-          if [ -e "$sidecar" ]; then
-            if [ "$sidecar" = "$wal" ] || [ ! -e "$wal" ] || [ ! -s "$wal" ]; then
-              rm -f "$sidecar"
-            else
+        if [ -e ${lib.escapeShellArg targetPath} ]; then
+          echo "Polylogue DB target ${targetPath} already exists; leaving existing archive DB ${archivePath} in place" >&2
+        else
+          wal=${lib.escapeShellArg "${archivePath}-wal"}
+          shm=${lib.escapeShellArg "${archivePath}-shm"}
+          if [ -s "$wal" ]; then
+            echo "Refusing to migrate Polylogue DB while SQLite WAL has content: $wal" >&2
+            echo "Stop polylogued and checkpoint/truncate WAL before running realm-scaffold." >&2
+            exit 1
+          fi
+          for sidecar in "$wal" "$shm"; do
+            if [ -e "$sidecar" ]; then
+              if [ "$sidecar" = "$wal" ] || [ ! -e "$wal" ] || [ ! -s "$wal" ]; then
+                rm -f "$sidecar"
+              else
+                echo "Refusing to migrate Polylogue DB while SQLite sidecar exists: $sidecar" >&2
+                echo "Stop polylogued and checkpoint/truncate WAL before running realm-scaffold." >&2
+                exit 1
+              fi
+            fi
+          done
+          for sidecar in "$wal" "$shm"; do
+            if [ -e "$sidecar" ]; then
               echo "Refusing to migrate Polylogue DB while SQLite sidecar exists: $sidecar" >&2
               echo "Stop polylogued and checkpoint/truncate WAL before running realm-scaffold." >&2
               exit 1
             fi
-          fi
-        done
-        for sidecar in "$wal" "$shm"; do
-          if [ -e "$sidecar" ]; then
-            echo "Refusing to migrate Polylogue DB while SQLite sidecar exists: $sidecar" >&2
-            echo "Stop polylogued and checkpoint/truncate WAL before running realm-scaffold." >&2
-            exit 1
-          fi
-        done
-        if [ -e ${lib.escapeShellArg targetPath} ]; then
-          echo "Refusing to overwrite existing Polylogue DB target ${targetPath}" >&2
-          exit 1
+          done
+          cp --reflink=never --preserve=mode,ownership,timestamps ${lib.escapeShellArg archivePath} ${lib.escapeShellArg "${targetPath}.tmp"}
+          mv ${lib.escapeShellArg "${targetPath}.tmp"} ${lib.escapeShellArg targetPath}
+          rm ${lib.escapeShellArg archivePath}
+          ln -s ${lib.escapeShellArg targetPath} ${lib.escapeShellArg archivePath}
         fi
-        cp --reflink=never --preserve=mode,ownership,timestamps ${lib.escapeShellArg archivePath} ${lib.escapeShellArg "${targetPath}.tmp"}
-        mv ${lib.escapeShellArg "${targetPath}.tmp"} ${lib.escapeShellArg targetPath}
-        rm ${lib.escapeShellArg archivePath}
-        ln -s ${lib.escapeShellArg targetPath} ${lib.escapeShellArg archivePath}
       elif [ -e ${lib.escapeShellArg targetPath} ]; then
         ln -s ${lib.escapeShellArg targetPath} ${lib.escapeShellArg archivePath}
       fi

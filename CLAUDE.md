@@ -14,6 +14,10 @@
 - For live desktop/system repairs, if the user asks to apply or switch now,
   run `switch` directly. Do not insert `check --no-build` first; `switch`
   already evaluates/builds before activation.
+- If `switch` already evaluated/built and failed only during activation, fix the
+  activation blocker and rerun `switch`. Do not add an intervening
+  `check --no-build`; it repeats evidence already gathered while delaying
+  recovery and adding load to a possibly degraded host.
 
 ## Context Architecture
 
