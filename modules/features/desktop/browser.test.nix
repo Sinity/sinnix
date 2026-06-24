@@ -41,5 +41,11 @@ mkFeatureTest {
           && builtins.elem "x-scheme-handler/https" localChromeDesktop.mimeType;
         message = "Local Chrome desktop entry must override default launches with the scoped launcher";
       }
+      {
+        assertion =
+          hm.home.sessionVariables.SINNIX_POLYLOGUE_BROWSER_EXTENSION_DIR
+          == "/realm/project/polylogue/browser-extension";
+        message = "Chrome must know the Polylogue browser-capture extension checkout path";
+      }
     ];
 }

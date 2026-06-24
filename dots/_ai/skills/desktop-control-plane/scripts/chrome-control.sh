@@ -52,6 +52,7 @@ Commands:
   new-tab [--url <url>]           Open a new tab (optionally with URL)
   close <page_id>                 Close a page/tab
   activate <page_id>              Bring a page to the front
+  load-extension --path <dir>      Runtime-load an unpacked extension into the selected browser
 
   screenshot <page_id> [--format png|jpeg] [--quality 80] [--full-page] [--out <file>]
                                   Take a screenshot of a page via CDP
@@ -89,6 +90,7 @@ Examples:
   sinnix-chrome-control fill-form <id> --selector '#search' --value 'my query'
   sinnix-chrome-control click <id> --selector 'button.submit'
   sinnix-chrome-control navigate <id> --url 'https://example.com'
+  sinnix-chrome-control load-extension --path /realm/project/polylogue/browser-extension
 USAGE
 }
 
@@ -280,6 +282,10 @@ get_ws_url() {
   curl -s "${CDP_BASE}/json" | jq -r --arg id "$page_id" '.[] | select(.id == $id) | .webSocketDebuggerUrl'
 }
 
+get_browser_ws_url() {
+  curl -fsS --max-time 2 "${CDP_BASE}/json/version" | jq -r '.webSocketDebuggerUrl // empty'
+}
+
 resolve_page_id() {
   local maybe_id="$1"
   # If it looks like a full UUID, use it directly
@@ -367,6 +373,47 @@ activate)
   page_id=$(resolve_page_id "$1")
   response=$(curl -fsS "${CDP_BASE}/json/activate/${page_id}")
   print_cdp_http_response "$response"
+  ;;
+
+load-extension)
+  extension_path=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --path)
+      extension_path="${2:?missing extension path}"
+      shift 2
+      ;;
+    *)
+      echo "unknown arg: $1" >&2
+      exit 2
+      ;;
+    esac
+  done
+  [[ -n $extension_path ]] || {
+    echo "load-extension requires --path" >&2
+    exit 2
+  }
+  [[ -d $extension_path ]] || {
+    echo "extension path is not a directory: $extension_path" >&2
+    exit 1
+  }
+  [[ -f $extension_path/manifest.json ]] || {
+    echo "extension path has no manifest.json: $extension_path" >&2
+    exit 1
+  }
+  ws_url=$(get_browser_ws_url)
+  [[ -n $ws_url ]] || {
+    echo "browser websocket unavailable for ${TARGET} (${CDP_BASE})" >&2
+    exit 1
+  }
+
+  params=$(jq -nc --arg path "$extension_path" '{path: $path}')
+  response=$(cdp_send "$ws_url" "Extensions.loadUnpacked" "$params")
+  if jq -e '.error' >/dev/null 2>&1 <<<"$response"; then
+    jq . <<<"$response" >&2
+    exit 1
+  fi
+  jq '{id: .result.id, path: $path}' --arg path "$extension_path" <<<"$response"
   ;;
 
 screenshot)

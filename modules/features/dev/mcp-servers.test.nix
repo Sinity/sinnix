@@ -1,4 +1,5 @@
 {
+  lib,
   mkFeatureTest,
   expect,
   hmFor,
@@ -171,6 +172,12 @@ mkFeatureTest {
       (expect.hmFileExists hm ".local/bin/sinnix-chrome-control"
         "Agent Chrome CDP helper must be available on PATH"
       )
+      {
+        assertion =
+          lib.hasInfix "load-extension --path"
+            (builtins.readFile hm.home.file.".local/bin/sinnix-chrome-control".source);
+        message = "Agent Chrome CDP helper must expose runtime unpacked-extension loading";
+      }
       (expect.hmFileExists hm ".local/bin/sinnix-hypr-control"
         "Agent Hyprland helper must be available on PATH"
       )

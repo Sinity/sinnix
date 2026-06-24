@@ -39,6 +39,7 @@ mkFeatureModule {
     }:
     let
       repoRoot = config.sinnix.paths.projectRoot;
+      polylogueRoot = config.sinnix.projects.polylogue;
     in
     {
       home-manager.users.${user} =
@@ -59,6 +60,7 @@ mkFeatureModule {
           # Side effect: loopback-only debug port allows local processes to
           # read cookies via CDP. Acceptable on this single-user machine.
           chromeUserDataDir = "${config.home.homeDirectory}/.config/chrome-ws";
+          polylogueBrowserExtensionDir = "${polylogueRoot}/browser-extension";
           chromeArgs = lib.concatStringsSep " " [
             "--disable-features=WaylandWpColorManagerV1"
             "--remote-debugging-port=9222"
@@ -78,9 +80,13 @@ mkFeatureModule {
             ];
             text = ''
               chrome_bin="${chromePkg}/bin/google-chrome-stable"
+              polylogue_extension_dir="${polylogueBrowserExtensionDir}"
+              chrome_extra_args=(
+                "--load-extension=$polylogue_extension_dir"
+              )
 
               if [ "''${SINNIX_CHROME_SCOPED:-0}" = "1" ]; then
-                exec "$chrome_bin" "$@"
+                exec "$chrome_bin" "''${chrome_extra_args[@]}" "$@"
               fi
 
               if systemctl --user show-environment >/dev/null 2>&1; then
@@ -111,11 +117,11 @@ mkFeatureModule {
                   fi
                 done
 
-                exec systemd-run "''${run_args[@]}" "$chrome_bin" "$@"
+                exec systemd-run "''${run_args[@]}" "$chrome_bin" "''${chrome_extra_args[@]}" "$@"
               fi
 
               export SINNIX_CHROME_SCOPED=1
-              exec "$chrome_bin" "$@"
+              exec "$chrome_bin" "''${chrome_extra_args[@]}" "$@"
             '';
           };
           chromeDesktopMimeTypes = [
@@ -131,6 +137,7 @@ mkFeatureModule {
           home = {
             sessionVariables = {
               BROWSER = browserLinkCmd;
+              SINNIX_POLYLOGUE_BROWSER_EXTENSION_DIR = polylogueBrowserExtensionDir;
             };
 
             packages = with pkgs; [

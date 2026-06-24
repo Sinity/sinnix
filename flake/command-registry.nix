@@ -101,7 +101,7 @@ let
         SINNIX_REBUILD_ACTIVE=1 NIX_CONFIG="eval-cache = false" \
           ${pkgs.nix}/bin/nix-store -r "$_toplevel_drv"
       )"
-      ${pkgs.sudo}/bin/sudo "$_toplevel_out/bin/switch-to-configuration" switch
+      /run/wrappers/bin/sudo "$_toplevel_out/bin/switch-to-configuration" switch
       _rebuild_status=0
     fi
   '';
