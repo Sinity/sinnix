@@ -52,6 +52,7 @@ mkServiceModule {
       virtualisation.oci-containers.containers.openedai-speech = {
         image = cfg.image;
         autoStart = true;
+        pull = "never";
         ports = [ "127.0.0.1:8000:8000" ];
         volumes = [
           "${ttsDir}/voices:/app/voices"
@@ -59,5 +60,8 @@ mkServiceModule {
         ];
         extraOptions = [ "--device=nvidia.com/gpu=all" ];
       };
+
+      systemd.services.podman-openedai-speech.serviceConfig.TimeoutStartSec =
+        lib.mkForce "2min";
     };
 } args

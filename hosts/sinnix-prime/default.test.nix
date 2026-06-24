@@ -13,6 +13,8 @@
       machineTelemetry = config.sinnix.services.machine-telemetry;
       polylogue = config.sinnix.services.polylogue;
       sinex = config.sinnix.services.sinex;
+      ttsContainer = config.virtualisation.oci-containers.containers.openedai-speech;
+      ttsService = config.systemd.services.podman-openedai-speech;
       surfaces = config.sinnix.runtime.surfaces;
       transmissionService = config.systemd.services.transmission;
       firewall = config.networking.firewall;
@@ -74,6 +76,13 @@
           && surfaces.sinex-runtime.observe.enable
           && sinexRuntimeTimerWantedBy == [ "timers.target" ];
         message = "sinnix-prime must install the delayed Sinex runtime timer";
+      }
+      {
+        assertion =
+          ttsContainer.autoStart
+          && ttsContainer.pull == "never"
+          && ttsService.serviceConfig.TimeoutStartSec == "2min";
+        message = "sinnix-prime TTS container must not block rebuilds on registry pulls";
       }
       {
         assertion =
