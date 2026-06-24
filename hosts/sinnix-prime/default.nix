@@ -73,7 +73,29 @@
       enable = true;
       materializationTimer.enable = true;
     };
+
+    # ── Local AI platform ───────────────────────────────────────────────────
+    # Weights/state live on durable /realm; everything binds 127.0.0.1 (reach
+    # over Tailscale later). CUDA via per-package overrides — see
+    # flake/overlay/package/local-ai.nix and the cuda-maintainers cache below.
+    ollama.enable = true; # LLM/VLM hub (OpenAI API :11434) + abliterated pre-pull + RAG embeddings
+    open-webui.enable = true; # chat/RAG/voice frontend :8080
+    koboldcpp.enable = true; # all-in-one offload + native image gen :5001 (on-demand)
+    llama-cpp.enable = false; # opt-in raw llama-server :8081 (set .model first)
+    whisper.enable = true; # speech-to-text :8090 (on-demand, auto-downloads model)
+    comfyui.enable = true; # SOTA image + text-to-video :8188 (container, CDI GPU)
+    tts.enable = true; # OpenedAI-Speech TTS bridge :8000 (container)
+    # Image digests pinned and verified; enable when wanted (heavier, on-demand):
+    musicgen.enable = false; # MusicGen/Bark audio toolkit (container)
+    ocr.enable = false; # marker/Surya OCR (container)
   };
+
+  # CUDA builds (ollama-cuda, koboldcpp/llama-cpp/whisper-cpp -cuda) are served
+  # by this cache; without it they compile locally. Trusted at switch time.
+  nix.settings.substituters = [ "https://cuda-maintainers.cachix.org" ];
+  nix.settings.trusted-public-keys = [
+    "cuda-maintainers.cachix.org-1:0dq3bujKpuEPMCX6U4WylrUDZ9JyUG0VpVZa7CNfq5E="
+  ];
   # This board's fTPM blocks system activation in systemd-tpm2-setup. Keep
   # TPM2 setup masked on sinnix-prime; Secure Boot key material is file-backed.
   systemd.services.systemd-tpm2-setup.enable = lib.mkForce false;

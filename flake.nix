@@ -4,9 +4,14 @@
   nixConfig = {
     extra-substituters = [
       "https://numtide.cachix.org"
+      # CUDA builds (ollama-cuda, koboldcpp/llama-cpp/whisper-cpp with
+      # cudaSupport) are not reliably served by cache.nixos.org; this cache
+      # turns the nvcc compiles into downloads. See flake/overlay/package/local-ai.nix.
+      "https://cuda-maintainers.cachix.org"
     ];
     extra-trusted-public-keys = [
       "numtide.cachix.org-1:2ps1kLBUWjxIneOy1Ik6cQjb41X0iXVXeHigGmycPPE="
+      "cuda-maintainers.cachix.org-1:0dq3bujKpuEPMCX6U4WylrUDZ9JyUG0VpVZa7CNfq5E="
     ];
     # Do not bake workstation-local parallelism throttles into repository-level
     # flake config; the host owns containment policy.
