@@ -55,6 +55,37 @@
           nh_extra_args=(-- "''${nix_override_args[@]}")
         fi
       '';
+      rebuildPressurePreflight = name: ''
+        rebuild_pressure_preflight() {
+          if [ "''${SINNIX_REBUILD_SKIP_PRESSURE_PREFLIGHT:-0}" = "1" ]; then
+            return 0
+          fi
+
+          _mem_total_kb="$(${pkgs.gawk}/bin/awk '/^MemTotal:/ {print $2}' /proc/meminfo)"
+          _mem_avail_kb="$(${pkgs.gawk}/bin/awk '/^MemAvailable:/ {print $2}' /proc/meminfo)"
+          _swap_total_kb="$(${pkgs.gawk}/bin/awk '/^SwapTotal:/ {print $2}' /proc/meminfo)"
+          _swap_free_kb="$(${pkgs.gawk}/bin/awk '/^SwapFree:/ {print $2}' /proc/meminfo)"
+          _min_mem_kb="''${SINNIX_REBUILD_MIN_MEM_AVAILABLE_KB:-8388608}"
+          _min_swap_free_percent="''${SINNIX_REBUILD_MIN_SWAP_FREE_PERCENT:-90}"
+          _swap_free_percent=100
+          if [ "''${_swap_total_kb:-0}" -gt 0 ]; then
+            _swap_free_percent=$(( _swap_free_kb * 100 / _swap_total_kb ))
+          fi
+
+          if [ "''${_mem_avail_kb:-0}" -lt "$_min_mem_kb" ] \
+            || [ "$_swap_free_percent" -lt "$_min_swap_free_percent" ]; then
+            {
+              echo "sinnix ${name}: refusing to start host rebuild under memory pressure"
+              echo "  MemAvailable=$(( _mem_avail_kb / 1024 )) MiB; required=$(( _min_mem_kb / 1024 )) MiB"
+              echo "  SwapFree=$_swap_free_percent%; required>=''${_min_swap_free_percent}%"
+              echo "  Override for a deliberate risky run: SINNIX_REBUILD_SKIP_PRESSURE_PREFLIGHT=1 ${name}"
+              echo "  Top RSS processes:"
+              ${pkgs.procps}/bin/ps -eo pid,rss,comm,args --sort=-rss | ${pkgs.coreutils}/bin/head -8
+            } >&2
+            exit 75
+          fi
+        }
+      '';
       # Wrapper for nix that serializes heavy subcommands (build, flake check)
       # behind the same lock as switch/boot/test. Passes through all other
       # subcommands (eval, develop, shell, run, fmt, flake update, etc.)
@@ -109,6 +140,9 @@
           ${localInputOverrideArgs}
           rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-2}"
           rebuild_cores="''${SINNIX_REBUILD_CORES:-12}"
+          ${zramResetGuard}
+          ${rebuildPressurePreflight name}
+          rebuild_pressure_preflight
 
           _rebuild_status=0
           ${pkgs.systemd}/bin/systemd-run \
@@ -127,6 +161,23 @@
               --max-jobs "$rebuild_jobs" \
               --cores "$rebuild_cores" \
               "''${nh_extra_args[@]}" || _rebuild_status=$?
+
+          if [ "${action}" = "switch" ] && [ "$_rebuild_status" -ne 0 ] && [ "$_rebuild_status" -ne 130 ]; then
+            echo "sinnix ${name}: nh failed with status $_rebuild_status; trying exact toplevel activation fallback" >&2
+            _toplevel_drv="$(
+              SINNIX_REBUILD_ACTIVE=1 NIX_CONFIG="eval-cache = false" \
+                ${pkgs.nix}/bin/nix eval \
+                  "path:$_flake_dir#nixosConfigurations.sinnix-prime.config.system.build.toplevel.drvPath" \
+                  --raw \
+                  "''${nix_override_args[@]}"
+            )"
+            _toplevel_out="$(
+              SINNIX_REBUILD_ACTIVE=1 NIX_CONFIG="eval-cache = false" \
+                ${pkgs.nix}/bin/nix-store -r "$_toplevel_drv"
+            )"
+            ${pkgs.sudo}/bin/sudo "$_toplevel_out/bin/switch-to-configuration" switch
+            _rebuild_status=0
+          fi
 
           # Run the hygiene pass even when nh reports failure: transient
           # activation errors still leave a fully-built generation behind,
