@@ -79,6 +79,7 @@
     # over Tailscale later). CUDA via per-package overrides — see
     # flake/overlay/package/local-ai.nix and the cuda-maintainers cache below.
     ollama.enable = true; # LLM/VLM hub (OpenAI API :11434) + abliterated pre-pull + RAG embeddings
+    litellm.enable = true; # Anthropic↔OpenAI gateway :4000 — local models through Claude Code/Codex
     open-webui.enable = true; # chat/RAG/voice frontend :8080
     koboldcpp.enable = true; # all-in-one offload + native image gen :5001 (on-demand)
     llama-cpp.enable = false; # opt-in raw llama-server :8081 (set .model first)

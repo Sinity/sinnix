@@ -71,6 +71,15 @@ mkFeatureModule {
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
       sinnixCfg = config.sinnix;
 
+      # Runtime path of the agenix-decrypted DeepSeek API key (read at launch by
+      # the deepseek wrappers; falls back gracefully when the secret is absent).
+      deepseekSecretPath = lib.attrByPath [
+        "sinnix"
+        "secrets"
+        "paths"
+        "deepseek-api-key"
+      ] "/run/agenix/deepseek-api-key" config;
+
       jsonFormat = pkgs.formats.json { };
       inherit (helpers.data) mcpRegistry;
       claudeMcpServers = lib.mapAttrs mcpRegistry.renderClaudeServer (
@@ -139,6 +148,10 @@ mkFeatureModule {
       mkClaudeCodeWrapper =
         {
           mcpConfigName ? "mcp",
+          # Extra shell injected after the npm bootstrap and before launch — used
+          # to point Claude Code at a non-Anthropic backend (DeepSeek, local
+          # gateway) via ANTHROPIC_BASE_URL / ANTHROPIC_MODEL / auth env vars.
+          extraEnv ? "",
         }:
         {
           text = ''
@@ -150,6 +163,8 @@ mkFeatureModule {
               npmPackage = "@anthropic-ai/claude-code";
               binaryName = "claude";
             }}
+
+            ${extraEnv}
 
             ${agentScopePrelude}
 
@@ -176,6 +191,9 @@ mkFeatureModule {
       mkCodexWrapper =
         {
           profile,
+          # Extra shell injected after the npm bootstrap — used to export the
+          # provider API key the layered `<profile>.config.toml` expects.
+          extraEnv ? "",
         }:
         {
           text = ''
@@ -187,6 +205,8 @@ mkFeatureModule {
               npmPackage = "@openai/codex";
               binaryName = "codex";
             }}
+
+            ${extraEnv}
 
             ${agentScopePrelude}
 
@@ -243,12 +263,22 @@ mkFeatureModule {
 
           programs.zsh = {
             shellAliases = {
-              claude = "~/.local/bin/claude";
+              # `claude` routes through claude-full (NOT a bare ~/.local/bin/claude):
+              # Claude Code's native local-installer claims the literal path
+              # ~/.local/bin/claude and clobbers any symlink there on auto-update,
+              # which is what repeatedly broke the bare command. Suffixed names are
+              # never touched, so the wrapper lives at claude-full and the alias
+              # points here.
+              claude = "~/.local/bin/claude-full";
               claude-lean = "~/.local/bin/claude-lean";
               claude-browser = "~/.local/bin/claude-browser";
+              claude-deepseek = "~/.local/bin/claude-deepseek";
+              claude-local = "~/.local/bin/claude-local";
               codex = "~/.local/bin/codex";
               codex-lean = "~/.local/bin/codex-lean";
               codex-browser = "~/.local/bin/codex-browser";
+              codex-deepseek = "~/.local/bin/codex-deepseek";
+              codex-local = "~/.local/bin/codex-local";
               gemini = "~/.local/bin/gemini";
             };
           };
@@ -303,7 +333,9 @@ mkFeatureModule {
             fi
           '';
 
-          home.file.".local/bin/claude" = mkClaudeCodeWrapper { };
+          # Full/default profile. Named claude-full (not claude) so Claude Code's
+          # native local-installer can't clobber it; the `claude` alias points here.
+          home.file.".local/bin/claude-full" = mkClaudeCodeWrapper { };
           home.file.".local/bin/claude-lean" = mkClaudeCodeWrapper {
             mcpConfigName = "mcp-lean";
           };
@@ -311,9 +343,69 @@ mkFeatureModule {
             mcpConfigName = "mcp-browser";
           };
 
+          # DeepSeek through the real Claude Code harness via its native
+          # Anthropic-compatible endpoint. Full/default MCP profile.
+          home.file.".local/bin/claude-deepseek" = mkClaudeCodeWrapper {
+            extraEnv = ''
+              if [ ! -r ${lib.escapeShellArg deepseekSecretPath} ]; then
+                echo "claude-deepseek: cannot read ${deepseekSecretPath}" >&2
+                exit 1
+              fi
+              export ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic"
+              ANTHROPIC_AUTH_TOKEN="$(<${lib.escapeShellArg deepseekSecretPath})"
+              export ANTHROPIC_AUTH_TOKEN
+              DEEPSEEK_MODEL="deepseek-chat"
+              export ANTHROPIC_MODEL="$DEEPSEEK_MODEL"
+              export ANTHROPIC_DEFAULT_OPUS_MODEL="$DEEPSEEK_MODEL"
+              export ANTHROPIC_DEFAULT_SONNET_MODEL="$DEEPSEEK_MODEL"
+              export ANTHROPIC_DEFAULT_HAIKU_MODEL="$DEEPSEEK_MODEL"
+              export CLAUDE_CODE_SUBAGENT_MODEL="$DEEPSEEK_MODEL"
+            '';
+          };
+
+          # Local models through the real Claude Code harness, via the LiteLLM
+          # gateway that translates Anthropic ↔ OpenAI (modules/services/litellm.nix).
+          # Full/default MCP profile. Model names are defined in that module's
+          # model_list; keep ANTHROPIC_MODEL in sync with an entry there.
+          home.file.".local/bin/claude-local" = mkClaudeCodeWrapper {
+            extraEnv = ''
+              export ANTHROPIC_BASE_URL="http://127.0.0.1:4000"
+              # LiteLLM binds loopback with no master key; Claude Code still
+              # requires a non-empty token, so send a dummy.
+              export ANTHROPIC_AUTH_TOKEN="sk-local"
+              LOCAL_MODEL="local-llama"
+              export ANTHROPIC_MODEL="$LOCAL_MODEL"
+              export ANTHROPIC_DEFAULT_OPUS_MODEL="$LOCAL_MODEL"
+              export ANTHROPIC_DEFAULT_SONNET_MODEL="$LOCAL_MODEL"
+              export ANTHROPIC_DEFAULT_HAIKU_MODEL="$LOCAL_MODEL"
+              export CLAUDE_CODE_SUBAGENT_MODEL="$LOCAL_MODEL"
+            '';
+          };
+
           home.file.".local/bin/codex" = mkCodexWrapper { profile = "full"; };
           home.file.".local/bin/codex-lean" = mkCodexWrapper { profile = "lean"; };
           home.file.".local/bin/codex-browser" = mkCodexWrapper { profile = "browser"; };
+
+          # DeepSeek / local through Codex. The layered <profile>.config.toml
+          # (generated in mcp-servers.nix) carries the model + model_provider +
+          # full MCP table; the wrapper only supplies the provider API key env.
+          home.file.".local/bin/codex-deepseek" = mkCodexWrapper {
+            profile = "deepseek";
+            extraEnv = ''
+              if [ ! -r ${lib.escapeShellArg deepseekSecretPath} ]; then
+                echo "codex-deepseek: cannot read ${deepseekSecretPath}" >&2
+                exit 1
+              fi
+              DEEPSEEK_API_KEY="$(<${lib.escapeShellArg deepseekSecretPath})"
+              export DEEPSEEK_API_KEY
+            '';
+          };
+          home.file.".local/bin/codex-local" = mkCodexWrapper {
+            profile = "local";
+            # LiteLLM needs no real key on loopback; the provider's env_key must
+            # still resolve to a non-empty value.
+            extraEnv = ''export LITELLM_LOCAL_KEY="sk-local"'';
+          };
 
           home.file.".local/bin/gemini" = {
             text = ''

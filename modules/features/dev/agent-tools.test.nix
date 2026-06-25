@@ -45,9 +45,24 @@ mkFeatureTest {
         assertion = sharedSkillSelfLinks == [ ];
         message = "Shared skills tree must not contain self-referential symlinks: ${lib.concatStringsSep ", " sharedSkillSelfLinks}";
       }
-      (expect.hmFileExists hm ".local/bin/claude" "Claude wrapper must exist")
+      # `claude-full` (NOT a bare ~/.local/bin/claude): Claude Code's native
+      # local-installer owns the bare path and clobbers it, so the wrapper is
+      # suffixed and the `claude` shell alias points to it.
+      (expect.hmFileExists hm ".local/bin/claude-full" "Claude full wrapper must exist")
+      {
+        assertion = !(hm.home.file ? ".local/bin/claude");
+        message = "Bare ~/.local/bin/claude must not be declared — it collides with Claude Code's local-installer";
+      }
       (expect.hmFileExists hm ".local/bin/claude-lean" "Claude lean wrapper must exist")
       (expect.hmFileExists hm ".local/bin/claude-browser" "Claude browser wrapper must exist")
+      (expect.hmFileExists hm ".local/bin/claude-deepseek" "Claude DeepSeek wrapper must exist")
+      (expect.hmFileExists hm ".local/bin/claude-local" "Claude local-model wrapper must exist")
+      (expect.hmFileTextContains hm ".local/bin/claude-deepseek" "api.deepseek.com/anthropic"
+        "claude-deepseek must target DeepSeek's Anthropic-compatible endpoint"
+      )
+      (expect.hmFileTextContains hm ".local/bin/claude-local" "127.0.0.1:4000"
+        "claude-local must target the LiteLLM gateway"
+      )
       {
         assertion = lib.any (pkg: lib.getName pkg == "sinnix-scope") hm.home.packages;
         message = "sinnix-scope must be in the user profile so wrapper runtime fallbacks are real";
@@ -55,10 +70,18 @@ mkFeatureTest {
       (expect.hmFileExists hm ".local/bin/codex" "Codex wrapper must exist")
       (expect.hmFileExists hm ".local/bin/codex-lean" "Codex lean wrapper must exist")
       (expect.hmFileExists hm ".local/bin/codex-browser" "Codex browser wrapper must exist")
+      (expect.hmFileExists hm ".local/bin/codex-deepseek" "Codex DeepSeek wrapper must exist")
+      (expect.hmFileExists hm ".local/bin/codex-local" "Codex local-model wrapper must exist")
+      (expect.hmFileTextContains hm ".local/bin/codex-deepseek" "--profile deepseek"
+        "codex-deepseek must layer the deepseek profile"
+      )
+      (expect.hmFileTextContains hm ".local/bin/codex-local" "--profile local"
+        "codex-local must layer the local profile"
+      )
       (expect.hmFileTextNotMatches hm ".local/bin/codex" ".*render-agents.*"
         "Codex wrapper must not render AGENTS on every launch"
       )
-      (expect.hmFileTextNotMatches hm ".local/bin/claude" ".*agent-fhs.*"
+      (expect.hmFileTextNotMatches hm ".local/bin/claude-full" ".*agent-fhs.*"
         "Claude wrapper must not launch through buildFHSEnv/bubblewrap"
       )
       (expect.hmFileTextNotMatches hm ".local/bin/codex" ".*agent-fhs.*"

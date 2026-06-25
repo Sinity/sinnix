@@ -132,15 +132,19 @@ from memory.
 Use explicit launchers instead of mutating shared global defaults mid-session:
 
 - Claude Code:
-  - `claude`: full non-browser profile with GitHub, Context7, Polylogue, Lynchpin, Serena, and Codebase Memory.
+  - `claude`: full non-browser profile with GitHub, Context7, Polylogue, Lynchpin, Serena, and Codebase Memory. This is a shell alias to the `claude-full` wrapper — the bare `~/.local/bin/claude` path is deliberately left unmanaged because Claude Code's native local-installer claims and clobbers it on auto-update.
   - `claude-lean`: GitHub, Context7, and Polylogue only.
   - `claude-browser`: full profile plus Chrome DevTools MCPs.
+  - `claude-deepseek`: full profile, but the model runs on DeepSeek via its native Anthropic-compatible endpoint (`api.deepseek.com/anthropic`, key from agenix `deepseek-api-key`).
+  - `claude-local`: full profile, model served by the local Ollama hub through the LiteLLM gateway (`127.0.0.1:4000`) that translates Anthropic↔OpenAI.
 - Codex:
   - `codex`: full non-browser profile with GitHub, Context7, Polylogue, Lynchpin, Serena, and Codebase Memory.
   - `codex-lean`: GitHub, Context7, and Polylogue only.
   - `codex-browser`: full profile plus Chrome DevTools MCPs.
+  - `codex-deepseek`: full MCP profile layered with the DeepSeek OpenAI endpoint (`api.deepseek.com/v1`).
+  - `codex-local`: full MCP profile layered with the local model via the LiteLLM OpenAI endpoint (`127.0.0.1:4000/v1`).
 
-These wrappers are projections, not new authorities: MCP capability is still registry-generated; instructions still render from Claude/AGENTS sources; persistence remains under each tool's native home.
+These wrappers are projections, not new authorities: MCP capability is still registry-generated; instructions still render from Claude/AGENTS sources; persistence remains under each tool's native home. The DeepSeek/local variants keep the full (default) MCP table — they swap only the inference backend. Local model names are defined once, in `modules/services/litellm.nix` (`model_list`); keep the wrappers' `ANTHROPIC_MODEL` / Codex `model` in sync with an entry there.
 
 ## Delete/refactor targets
 

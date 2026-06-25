@@ -88,12 +88,16 @@ in
         ];
         homeFiles = [
           ".gemini/settings.json"
-          ".local/bin/claude"
+          ".local/bin/claude-full"
           ".local/bin/claude-lean"
           ".local/bin/claude-browser"
+          ".local/bin/claude-deepseek"
+          ".local/bin/claude-local"
           ".local/bin/codex"
           ".local/bin/codex-lean"
           ".local/bin/codex-browser"
+          ".local/bin/codex-deepseek"
+          ".local/bin/codex-local"
           ".local/bin/mcp-firecrawl"
           ".local/bin/mcp-chrome-devtools"
           ".local/bin/mcp-chrome-devtools-private"
@@ -832,12 +836,16 @@ in
             test -L "$HOME/.codex/hooks.json"
 
             for wrapper in \
-              "$HOME/.local/bin/claude" \
+              "$HOME/.local/bin/claude-full" \
               "$HOME/.local/bin/claude-lean" \
               "$HOME/.local/bin/claude-browser" \
+              "$HOME/.local/bin/claude-deepseek" \
+              "$HOME/.local/bin/claude-local" \
               "$HOME/.local/bin/codex" \
               "$HOME/.local/bin/codex-lean" \
               "$HOME/.local/bin/codex-browser" \
+              "$HOME/.local/bin/codex-deepseek" \
+              "$HOME/.local/bin/codex-local" \
               "$HOME/.local/bin/gemini" \
               "$HOME/.local/bin/codebase-memory-mcp" \
               "$HOME/.local/bin/serena" \
@@ -918,6 +926,20 @@ in
             assert browser['chrome-devtools']['command'] == 'mcp-chrome-devtools'
             assert browser['chrome-devtools-private']['command'] == 'mcp-chrome-devtools-private'
             assert browser['chrome-devtools-private-visible']['command'] == 'mcp-chrome-devtools-private-visible'
+
+            # Alternate-backend profiles carry the full MCP table plus a model
+            # + provider that override the gpt-5.5 default when layered.
+            deepseek = tomllib.loads(pathlib.Path.home().joinpath('.codex/deepseek.config.toml').read_text())
+            assert deepseek['model'] == 'deepseek-chat'
+            assert deepseek['model_provider'] == 'deepseek'
+            assert deepseek['model_providers']['deepseek']['base_url'] == 'https://api.deepseek.com/v1'
+            assert deepseek['model_providers']['deepseek']['env_key'] == 'DEEPSEEK_API_KEY'
+            assert deepseek['mcp_servers']['serena']['command'] == 'serena'
+            local = tomllib.loads(pathlib.Path.home().joinpath('.codex/local.config.toml').read_text())
+            assert local['model'] == 'local-llama'
+            assert local['model_provider'] == 'local'
+            assert local['model_providers']['local']['base_url'] == 'http://127.0.0.1:4000/v1'
+            assert local['mcp_servers']['serena']['command'] == 'serena'
             PYCODE
 
             jq -e '
@@ -931,17 +953,24 @@ in
             ' "$HOME/.codex/hooks.json" >/dev/null
 
 
-            grep -Fq 'MCP_CONFIG="$HOME/.config/claude/mcp.json"' "$HOME/.local/bin/claude"
+            grep -Fq 'MCP_CONFIG="$HOME/.config/claude/mcp.json"' "$HOME/.local/bin/claude-full"
             grep -Fq 'MCP_CONFIG="$HOME/.config/claude/mcp-lean.json"' "$HOME/.local/bin/claude-lean"
             grep -Fq 'MCP_CONFIG="$HOME/.config/claude/mcp-browser.json"' "$HOME/.local/bin/claude-browser"
+            # DeepSeek/local variants use the full (default) MCP profile.
+            grep -Fq 'MCP_CONFIG="$HOME/.config/claude/mcp.json"' "$HOME/.local/bin/claude-deepseek"
+            grep -Fq 'MCP_CONFIG="$HOME/.config/claude/mcp.json"' "$HOME/.local/bin/claude-local"
+            grep -Fq 'https://api.deepseek.com/anthropic' "$HOME/.local/bin/claude-deepseek"
+            grep -Fq 'ANTHROPIC_BASE_URL="http://127.0.0.1:4000"' "$HOME/.local/bin/claude-local"
             grep -Fq 'codex_args=(--profile full)' "$HOME/.local/bin/codex"
             grep -Fq 'codex_args=(--profile lean)' "$HOME/.local/bin/codex-lean"
             grep -Fq 'codex_args=(--profile browser)' "$HOME/.local/bin/codex-browser"
+            grep -Fq 'codex_args=(--profile deepseek)' "$HOME/.local/bin/codex-deepseek"
+            grep -Fq 'codex_args=(--profile local)' "$HOME/.local/bin/codex-local"
 
             # All agent wrappers must bootstrap from npm packages without
             # launching through buildFHSEnv/bubblewrap.
             for wrapper in \
-              "$HOME/.local/bin/claude" \
+              "$HOME/.local/bin/claude-full" \
               "$HOME/.local/bin/codex" \
               "$HOME/.local/bin/gemini"; do
               if grep -Fq 'agent-fhs' "$wrapper"; then
@@ -951,11 +980,11 @@ in
               grep -Fq 'launch.sh' "$wrapper"
               grep -Fq 'run_agent_scoped "$STATE/launch.sh"' "$wrapper"
             done
-            if grep -R 'MemoryHigh\|MemoryMax\|MemorySwapMax' "$HOME/.local/bin/claude" "$HOME/.local/bin/codex" "$HOME/.local/bin/gemini"; then
+            if grep -R 'MemoryHigh\|MemoryMax\|MemorySwapMax' "$HOME/.local/bin/claude-full" "$HOME/.local/bin/codex" "$HOME/.local/bin/gemini"; then
               echo "interactive agent wrappers must not impose shared memory caps" >&2
               exit 1
             fi
-            grep -Fq 'npm install -g @anthropic-ai/claude-code' "$HOME/.local/bin/claude"
+            grep -Fq 'npm install -g @anthropic-ai/claude-code' "$HOME/.local/bin/claude-full"
             grep -Fq 'npm install -g @openai/codex' "$HOME/.local/bin/codex"
             grep -Fq 'npm install -g @google/gemini-cli' "$HOME/.local/bin/gemini"
 

@@ -40,6 +40,16 @@ mkFeatureModule {
       internal = true;
       description = "Path to the generated Codex browser profile derivation (for tests)";
     };
+    codexDeepseekConfigSource = lib.mkOption {
+      type = lib.types.path;
+      internal = true;
+      description = "Path to the generated Codex deepseek profile derivation (for tests)";
+    };
+    codexLocalConfigSource = lib.mkOption {
+      type = lib.types.path;
+      internal = true;
+      description = "Path to the generated Codex local profile derivation (for tests)";
+    };
   };
   meta.dotfiles = {
     configFile = {
@@ -358,14 +368,44 @@ mkFeatureModule {
       mkCodexProfileFile =
         profile:
         tomlFormat.generate "codex-${profile}-profile.toml" {
-          mcp_servers = lib.mapAttrs renderCodexServer (
-            selectClientServersForProfile profile "codex"
-          );
+          mcp_servers = lib.mapAttrs renderCodexServer (selectClientServersForProfile profile "codex");
         };
       codexConfigFile = inputs.self + "/dots/codex/config.toml";
       codexFullConfigFile = mkCodexProfileFile "full";
       codexLeanConfigFile = mkCodexProfileFile "lean";
       codexBrowserConfigFile = mkCodexProfileFile "browser";
+      # Alternate-backend profiles: the full MCP table plus a model + provider.
+      # `codex --profile <name>` layers these over ~/.codex/config.toml, so the
+      # provider's base_url/env_key and the chosen model override the gpt-5.5
+      # defaults while keeping the full MCP surface.
+      mkCodexBackendProfileFile =
+        name: extra:
+        tomlFormat.generate "codex-${name}-profile.toml" (
+          {
+            mcp_servers = lib.mapAttrs renderCodexServer (selectClientServersForProfile "full" "codex");
+          }
+          // extra
+        );
+      codexDeepseekConfigFile = mkCodexBackendProfileFile "deepseek" {
+        model = "deepseek-chat";
+        model_provider = "deepseek";
+        model_providers.deepseek = {
+          name = "DeepSeek";
+          base_url = "https://api.deepseek.com/v1";
+          env_key = "DEEPSEEK_API_KEY";
+        };
+      };
+      # Local models via the LiteLLM gateway (modules/services/litellm.nix). Keep
+      # `model` in sync with that module's model_list.
+      codexLocalConfigFile = mkCodexBackendProfileFile "local" {
+        model = "local-llama";
+        model_provider = "local";
+        model_providers.local = {
+          name = "Local (LiteLLM)";
+          base_url = "http://127.0.0.1:4000/v1";
+          env_key = "LITELLM_LOCAL_KEY";
+        };
+      };
       sharedSkillNames = [
         "adversarial-loop"
         "agent-orchestration"
@@ -401,9 +441,7 @@ mkFeatureModule {
       geminiSettingsFile = jsonFormat.generate "gemini-settings.json" (
         geminiSettingsBase
         // {
-          mcpServers = lib.mapAttrs renderGeminiServer (
-            selectClientServersForProfile "full" "gemini"
-          );
+          mcpServers = lib.mapAttrs renderGeminiServer (selectClientServersForProfile "full" "gemini");
         }
       );
     in
@@ -412,6 +450,8 @@ mkFeatureModule {
       sinnix.features.dev.mcp-servers.codexFullConfigSource = codexFullConfigFile;
       sinnix.features.dev.mcp-servers.codexLeanConfigSource = codexLeanConfigFile;
       sinnix.features.dev.mcp-servers.codexBrowserConfigSource = codexBrowserConfigFile;
+      sinnix.features.dev.mcp-servers.codexDeepseekConfigSource = codexDeepseekConfigFile;
+      sinnix.features.dev.mcp-servers.codexLocalConfigSource = codexLocalConfigFile;
       sinnix.persistence.home.directories = [
         {
           directory = ".local/share/codebase-memory-mcp";
@@ -477,10 +517,14 @@ mkFeatureModule {
                 run cp ${lib.escapeShellArg (toString codexFullConfigFile)} "$HOME/.codex/full.config.toml"
                 run cp ${lib.escapeShellArg (toString codexLeanConfigFile)} "$HOME/.codex/lean.config.toml"
                 run cp ${lib.escapeShellArg (toString codexBrowserConfigFile)} "$HOME/.codex/browser.config.toml"
+                run cp ${lib.escapeShellArg (toString codexDeepseekConfigFile)} "$HOME/.codex/deepseek.config.toml"
+                run cp ${lib.escapeShellArg (toString codexLocalConfigFile)} "$HOME/.codex/local.config.toml"
                 run chmod 644 "$HOME/.codex/config.toml"
                 run chmod 644 "$HOME/.codex/full.config.toml"
                 run chmod 644 "$HOME/.codex/lean.config.toml"
                 run chmod 644 "$HOME/.codex/browser.config.toml"
+                run chmod 644 "$HOME/.codex/deepseek.config.toml"
+                run chmod 644 "$HOME/.codex/local.config.toml"
               '';
               codebaseMemoryMcpConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
                 run mkdir -p "$HOME/.local/share/codebase-memory-mcp"
