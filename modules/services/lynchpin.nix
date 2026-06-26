@@ -106,6 +106,9 @@ in
         "network.target"
         "lynchpin-local-attrs.service"
       ];
+      path = [
+        pkgs.git
+      ];
       # The materialization CLI resolves `.lynchpin/` relative to its working
       # directory (repo-rooted, like git). Without WorkingDirectory the unit
       # ran from `/` and failed nightly with

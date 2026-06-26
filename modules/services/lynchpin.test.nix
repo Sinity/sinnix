@@ -1,7 +1,11 @@
 {
+  inputs,
   mkServiceTest,
   ...
 }:
+let
+  gitPkg = inputs.nixpkgs.legacyPackages.x86_64-linux.git;
+in
 mkServiceTest {
   name = "services-lynchpin";
   service = "lynchpin";
@@ -34,6 +38,12 @@ mkServiceTest {
         config.systemd.services.lynchpin-materialize.serviceConfig.Environment or [ ]
       );
       message = "Lynchpin materialization service must export LYNCHPIN_REPO_ROOT";
+    }
+    {
+      assertion = builtins.elem gitPkg (
+        config.systemd.services.lynchpin-materialize.path or [ ]
+      );
+      message = "Lynchpin materialization service must have git on PATH";
     }
     {
       assertion = !(config.systemd.services ? lynchpin-refresh-worker);
