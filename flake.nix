@@ -75,9 +75,19 @@
 
     # Sinex is sourced from GitHub so system deployments follow pushed upstream
     # history instead of implicitly consuming the local checkout state.
+    #
+    # NOTE: nixpkgs is deliberately NOT `follows`. Sinex is a ~464K-LOC Rust
+    # workspace built from source by crane; if its nixpkgs followed sinnix's,
+    # every `nix flake update` would rehash its buildInputs and force a full
+    # recompile (peak ~10 GiB rustc RSS — the deploy-OOM saga). Pinning sinex to
+    # its OWN locked nixpkgs makes the derivation hash identical to what sinex CI
+    # builds and pushes to sinity.cachix.org, so the desktop substitutes the
+    # prebuilt runtime instead of compiling it. Trade: a small amount of store
+    # duplication (sinex's glibc/openssl/systemd vs the system's). Bump sinex's
+    # nixpkgs deliberately via `nix flake update --flake github:Sinity/sinex`-style
+    # rev bumps, not implicitly through sinnix.
     sinex = {
       url = "git+https://github.com/Sinity/sinex?ref=master";
-      inputs.nixpkgs.follows = "nixpkgs";
       inputs.agenix.follows = "agenix";
     };
 

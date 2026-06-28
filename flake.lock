@@ -908,6 +908,22 @@
         "type": "github"
       }
     },
+    "nixpkgs_6": {
+      "locked": {
+        "lastModified": 1782467914,
+        "narHash": "sha256-pGvFkM8N0xEkIIXDe5YYfbEAvHrk4IxBrjB/x8OomhE=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "e73de5be04e0eff4190a1432b946d469c794e7b4",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
     "noctalia": {
       "inputs": {
         "nixpkgs": [
@@ -1108,16 +1124,14 @@
         "crane": "crane_2",
         "fenix": "fenix",
         "flake-utils": "flake-utils_3",
-        "nixpkgs": [
-          "nixpkgs"
-        ]
+        "nixpkgs": "nixpkgs_6"
       },
       "locked": {
-        "lastModified": 1782057986,
-        "narHash": "sha256-64WOue/g8W2znXUaRG84QtzpdtwCtoyHGr2qQh1itsY=",
+        "lastModified": 1782607465,
+        "narHash": "sha256-uC+Z788HqeHxYpYmmWHrj9bcp+GHhOpT0Ds6yJjatGE=",
         "ref": "master",
-        "rev": "33ad3187d072bca996b82bee70758cf28e955722",
-        "revCount": 1330,
+        "rev": "e3ee89eeef23fe31ed92fc6df3d72b6d6527d790",
+        "revCount": 1435,
         "type": "git",
         "url": "https://github.com/Sinity/sinex"
       },
