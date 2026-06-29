@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Drop reclaimable caches and report memory headroom
+# runtimeInputs: bash coreutils procps util-linux
+
+set -euo pipefail
+
+usage() {
+  cat >&2 <<'EOF'
+usage: sinnix-free-headroom
+
+Synchronize dirty data, drop reclaimable kernel caches, and print before/after
+memory and swap state. This is a manual pre-flight for known-heavy agent/build
+sessions when real free pages matter more than retaining warm page cache.
+EOF
+}
+
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  "")
+    ;;
+  *)
+    usage
+    exit 64
+    ;;
+esac
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "sinnix-free-headroom: run as root, for example: sudo sinnix-free-headroom" >&2
+  exit 77
+fi
+
+report() {
+  free -h
+  echo
+  swapon --show || true
+  echo
+  awk '
+    /^(MemFree|MemAvailable|Cached|SReclaimable|SUnreclaim|Slab|Shmem|Dirty|Writeback):/ {
+      printf "%-16s %10.1f MiB\n", $1, $2 / 1024
+    }
+  ' /proc/meminfo
+}
+
+echo "Before:"
+report
+
+sync
+printf 3 > /proc/sys/vm/drop_caches
+
+echo
+echo "After:"
+report

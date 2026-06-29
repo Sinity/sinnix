@@ -55,6 +55,14 @@
         message = "desktop memory policy must use zram without disk swap";
       }
       {
+        assertion =
+          config.boot.kernel.sysctl."vm.swappiness" == 1
+          && config.boot.kernel.sysctl."vm.vfs_cache_pressure" == 200
+          && config.boot.kernel.sysctl."vm.min_free_kbytes" == 1048576
+          && config.boot.kernel.sysctl."vm.watermark_scale_factor" == 200;
+        message = "desktop VM policy must prefer real free-page headroom over cache hoarding";
+      }
+      {
         assertion = config.systemd.oomd.enable && config.services.earlyoom.enable;
         message = "oomd stays available while earlyoom handles global emergencies";
       }

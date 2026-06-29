@@ -114,17 +114,22 @@ in
     systemd.settings.Manager.StatusUnitFormat = "name";
 
     boot.kernel.sysctl = {
-      # Keep process (anon) memory resident; reclaim file cache before swapping.
+      # Keep process (anon) memory resident; reclaim file cache before swapping,
+      # and start reclaim early enough that interactive work sees real free
+      # pages instead of relying on last-second cache eviction.
       # Diagnosed 2026-06-07: swappiness=60 + vfs_cache_pressure=50 made the box
       # hoard ~18 GiB page cache while paging ~17 GiB of anon to swap (incl.
       # ~9 GiB to the disk swapfile) despite ~20 GiB available RAM. swappiness=1
-      # + vfs_cache_pressure=100 inverts that: drop cache first, keep anon in RAM,
-      # use the (now tiny) swap only as an OOM cushion. A full Polylogue SQLite
-      # backup still filled zram at swappiness=10 despite plenty of available RAM,
-      # so keep this at the practical minimum.
+      # + vfs_cache_pressure=100 inverted that path. The 2026-06-29 agent/build
+      # failure mode was different: truly-free pages were low, zram was full,
+      # and new rustc processes needed multi-GiB allocations immediately.
+      # Maintain a concrete free-page reserve and apply stronger VFS pressure so
+      # "available" memory does not depend on painful last-second reclaim.
       "vm.swappiness" = 1;
       "vm.page-cluster" = 0;
-      "vm.vfs_cache_pressure" = 100;
+      "vm.vfs_cache_pressure" = 200;
+      "vm.min_free_kbytes" = 1048576;
+      "vm.watermark_scale_factor" = 200;
       # Keep Btrfs/NVMe writeback from accumulating multi-GiB dirty bursts.
       # The Crucial P3 /realm drive has shown 30s NVMe command timeouts under
       # mixed build/database writeback; bounded dirty bytes push back earlier

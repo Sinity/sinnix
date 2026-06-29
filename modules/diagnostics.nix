@@ -138,6 +138,7 @@ in
         scriptPkgs.asbl-no-moar
         scriptPkgs.nuke-builds
         scriptPkgs.sinnix-observe
+        scriptPkgs."sinnix-free-headroom"
         scriptPkgs.sinnix-zram-reset
         scriptPkgs.machine-experiment-run
         scriptPkgs.syslog-index
