@@ -188,8 +188,11 @@ EOF
           shift
         done
 
-        capture_dir="/realm/data/captures/machine/agent-mcp-sweep"
-        mkdir -p "$capture_dir"
+        capture_dir="''${SINNIX_MCP_SWEEP_CAPTURE_DIR:-/realm/data/captures/machine/agent-mcp-sweep}"
+        if ! mkdir -p "$capture_dir" 2>/dev/null; then
+          capture_dir="''${XDG_STATE_HOME:-$HOME/.local/state}/sinnix/agent-mcp-sweep"
+          mkdir -p "$capture_dir"
+        fi
         log_file="$capture_dir/sweep.jsonl"
         user_manager_pid="$(systemctl --user show --property=MainPID --value 2>/dev/null || true)"
         now="$(${pkgs.coreutils}/bin/date -u +%Y-%m-%dT%H:%M:%SZ)"
