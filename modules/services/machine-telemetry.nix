@@ -98,6 +98,31 @@ mkServiceModule {
       default = 60.0;
       description = "Seconds between process smaps_rollup PSS/private memory samples. 0 disables process-memory sampling.";
     };
+    extraMonitoredCgroups = lib.mkOption {
+      type = lib.types.listOf (
+        lib.types.submodule {
+          options = {
+            label = lib.mkOption {
+              type = lib.types.str;
+              description = "Stable label for this cgroup memory sample.";
+            };
+            scope = lib.mkOption {
+              type = lib.types.enum [
+                "system"
+                "user"
+              ];
+              description = "Whether the cgroup is under the system or user manager tree.";
+            };
+            path = lib.mkOption {
+              type = lib.types.str;
+              description = "Absolute cgroup-v2 path below /sys/fs/cgroup.";
+            };
+          };
+        }
+      );
+      default = [ ];
+      description = "Additional aggregate cgroups and slices sampled for memory-capacity/admission analysis.";
+    };
   };
   configFn =
     {
@@ -110,6 +135,53 @@ mkServiceModule {
     let
       surfaceUnits = map (surface: surface.unit) config.sinnix.runtime.inventory.observedServices;
       unitArgs = lib.concatStringsSep "," (lib.unique surfaceUnits);
+      userUid = "1000";
+      defaultMonitoredCgroups = [
+        {
+          label = "system.background";
+          scope = "system";
+          path = "/background.slice";
+        }
+        {
+          label = "system.nix";
+          scope = "system";
+          path = "/nix.slice";
+        }
+        {
+          label = "system.nix-build";
+          scope = "system";
+          path = "/nix.slice/nix-build.slice";
+        }
+        {
+          label = "user.agent";
+          scope = "user";
+          path = "/user.slice/user-${userUid}.slice/user@${userUid}.service/agent.slice";
+        }
+        {
+          label = "user.build";
+          scope = "user";
+          path = "/user.slice/user-${userUid}.slice/user@${userUid}.service/build.slice";
+        }
+        {
+          label = "user.background";
+          scope = "user";
+          path = "/user.slice/user-${userUid}.slice/user@${userUid}.service/background.slice";
+        }
+        {
+          label = "user.nix-build";
+          scope = "user";
+          path = "/user.slice/user-${userUid}.slice/user@${userUid}.service/nix-build.slice";
+        }
+        {
+          label = "user.backup";
+          scope = "user";
+          path = "/user.slice/user-${userUid}.slice/user@${userUid}.service/backup.slice";
+        }
+      ];
+      cgroupSpecs = defaultMonitoredCgroups ++ cfg.extraMonitoredCgroups;
+      cgroupArgs = lib.concatStringsSep "," (
+        map (item: "${item.label}|${item.scope}|${item.path}") cgroupSpecs
+      );
     in
     {
       systemd.tmpfiles.rules = [
@@ -242,7 +314,7 @@ mkServiceModule {
           Environment = lib.optionals (config.sinnix.gpu.mode != "igpu") [
             "LD_LIBRARY_PATH=/run/opengl-driver/lib"
           ];
-          ExecStart = "${machineTelemetry}/bin/machine-telemetry --db ${dbPath} --manifest ${manifestPath} --host ${hostName} --interval ${toString cfg.intervalSec} --service-interval ${toString cfg.serviceIntervalSec} --network-interval ${toString cfg.networkIntervalSec} --network-interface ${cfg.networkInterfaceName} --network-gateway ${cfg.networkGateway} --bufferbloat-interval ${toString cfg.bufferbloatIntervalSec} --gpu-interval ${toString cfg.gpuIntervalSec} --process-memory-top ${toString cfg.processMemoryTop} --process-memory-interval ${toString cfg.processMemoryIntervalSec} --units ${unitArgs} --user-name ${username}";
+          ExecStart = "${machineTelemetry}/bin/machine-telemetry --db ${dbPath} --manifest ${manifestPath} --host ${hostName} --interval ${toString cfg.intervalSec} --service-interval ${toString cfg.serviceIntervalSec} --network-interval ${toString cfg.networkIntervalSec} --network-interface ${cfg.networkInterfaceName} --network-gateway ${cfg.networkGateway} --bufferbloat-interval ${toString cfg.bufferbloatIntervalSec} --gpu-interval ${toString cfg.gpuIntervalSec} --process-memory-top ${toString cfg.processMemoryTop} --process-memory-interval ${toString cfg.processMemoryIntervalSec} --cgroups ${cgroupArgs} --units ${unitArgs} --user-name ${username}";
           Restart = "on-failure";
           RestartSec = "5s";
         }

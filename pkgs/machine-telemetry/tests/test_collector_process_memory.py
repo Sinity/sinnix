@@ -112,3 +112,112 @@ def test_process_memory_rows_insert_into_sqlite(tmp_path) -> None:
         ).fetchone()
 
     assert row == ("codex", 1500, 1200, 40)
+
+
+def test_parse_cgroup_spec_requires_label_scope_and_path() -> None:
+    collector = _collector()
+
+    assert collector.parse_cgroup_spec("system.nix|system|/nix.slice") == (
+        "system.nix",
+        "system",
+        "/nix.slice",
+    )
+    assert collector.parse_cgroup_spec("missing-parts") is None
+
+
+def test_cgroup_memory_sample_reads_capacity_fields(monkeypatch, tmp_path) -> None:
+    collector = _collector()
+    root = tmp_path / "sys-fs-cgroup" / "nix.slice"
+    root.mkdir(parents=True)
+    values = {
+        "memory.current": "100",
+        "memory.peak": "200",
+        "memory.swap.current": "3",
+        "memory.swap.peak": "4",
+        "memory.high": "max",
+        "memory.max": "4096",
+        "cgroup.events": "populated 1\nfrozen 1\n",
+        "cgroup.freeze": "1",
+    }
+    for name, value in values.items():
+        (root / name).write_text(value, encoding="utf-8")
+
+    monkeypatch.setattr(collector, "cgroup_path", lambda _control_group: root)
+    monkeypatch.setattr(
+        collector,
+        "cgroup_memory_stat",
+        lambda _control_group: {
+            "memory_anon_bytes": 64,
+            "memory_file_bytes": 32,
+            "memory_kernel_bytes": 8,
+            "memory_slab_bytes": 4,
+            "memory_sock_bytes": 2,
+            "memory_shmem_bytes": 1,
+            "memory_swapcached_bytes": 0,
+            "memory_zswap_bytes": 0,
+            "memory_zswapped_bytes": 0,
+        },
+    )
+
+    row = collector.cgroup_memory_sample(
+        "2026-06-30T00:00:00+00:00",
+        "sinnix-prime",
+        "boot-id",
+        label="system.nix",
+        scope="system",
+        control_group="/nix.slice",
+    )
+
+    assert row is not None
+    assert row["memory_current_bytes"] == 100
+    assert row["memory_high_bytes"] is None
+    assert row["memory_max_bytes"] == 4096
+    assert row["memory_anon_bytes"] == 64
+    assert row["cgroup_frozen"] == 1
+    assert row["cgroup_freeze"] == 1
+
+
+def test_cgroup_memory_rows_insert_into_sqlite(tmp_path) -> None:
+    collector = _collector()
+    db = tmp_path / "telemetry.sqlite"
+    rows = [
+        {
+            "observed_at": "2026-06-30T00:00:00+00:00",
+            "host": "sinnix-prime",
+            "boot_id": "boot-id",
+            "schema_version": collector.SCHEMA_VERSION,
+            "label": "system.nix",
+            "scope": "system",
+            "control_group": "/nix.slice",
+            "memory_current_bytes": 100,
+            "memory_peak_bytes": 200,
+            "memory_swap_current_bytes": 0,
+            "memory_swap_peak_bytes": 0,
+            "memory_high_bytes": None,
+            "memory_max_bytes": 4096,
+            "memory_anon_bytes": 64,
+            "memory_file_bytes": 32,
+            "memory_kernel_bytes": 8,
+            "memory_slab_bytes": 4,
+            "memory_sock_bytes": 2,
+            "memory_shmem_bytes": 1,
+            "memory_swapcached_bytes": 0,
+            "memory_zswap_bytes": 0,
+            "memory_zswapped_bytes": 0,
+            "cgroup_populated": 1,
+            "cgroup_frozen": 0,
+            "cgroup_freeze": 0,
+        }
+    ]
+
+    with collector.sqlite3.connect(db) as conn:
+        collector.init_db(conn)
+        collector.insert_cgroup_memory_stats(conn, rows)
+        row = conn.execute(
+            """
+            SELECT label, memory_current_bytes, memory_anon_bytes, memory_max_bytes
+            FROM cgroup_memory_sample
+            """
+        ).fetchone()
+
+    assert row == ("system.nix", 100, 64, 4096)

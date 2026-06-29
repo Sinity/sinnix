@@ -694,6 +694,133 @@ def cgroup_memory_stat(control_group: str | None) -> dict[str, int | None]:
     }
 
 
+def cgroup_path(control_group: str | None) -> Path | None:
+    if not control_group:
+        return None
+    return Path("/sys/fs/cgroup") / control_group.lstrip("/")
+
+
+def parse_cgroup_spec(raw: str) -> tuple[str, str, str] | None:
+    parts = raw.split("|", 2)
+    if len(parts) != 3 or not all(part.strip() for part in parts):
+        return None
+    label, scope, control_group = (part.strip() for part in parts)
+    return label, scope, control_group
+
+
+def parse_cgroup_events(control_group: str | None) -> dict[str, int | None]:
+    root = cgroup_path(control_group)
+    raw = read_text(root / "cgroup.events") if root is not None else None
+    if not raw:
+        return {}
+    values: dict[str, int] = {}
+    for line in raw.splitlines():
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        parsed = int_or_none(parts[1])
+        if parsed is not None:
+            values[parts[0]] = parsed
+    return {
+        "cgroup_populated": values.get("populated"),
+        "cgroup_frozen": values.get("frozen"),
+    }
+
+
+def cgroup_memory_sample(
+    observed_at: str,
+    host: str,
+    boot_id: str | None,
+    *,
+    label: str,
+    scope: str,
+    control_group: str,
+) -> dict[str, object] | None:
+    root = cgroup_path(control_group)
+    if root is None or not root.exists():
+        return None
+    stat = cgroup_memory_stat(control_group)
+    events = parse_cgroup_events(control_group)
+    return {
+        "observed_at": observed_at,
+        "host": host,
+        "boot_id": boot_id,
+        "schema_version": SCHEMA_VERSION,
+        "label": label,
+        "scope": scope,
+        "control_group": control_group,
+        "memory_current_bytes": int_or_none(read_text(root / "memory.current")),
+        "memory_peak_bytes": int_or_none(read_text(root / "memory.peak")),
+        "memory_swap_current_bytes": int_or_none(read_text(root / "memory.swap.current")),
+        "memory_swap_peak_bytes": int_or_none(read_text(root / "memory.swap.peak")),
+        "memory_high_bytes": int_or_none(read_text(root / "memory.high")),
+        "memory_max_bytes": int_or_none(read_text(root / "memory.max")),
+        "memory_anon_bytes": stat.get("memory_anon_bytes"),
+        "memory_file_bytes": stat.get("memory_file_bytes"),
+        "memory_kernel_bytes": stat.get("memory_kernel_bytes"),
+        "memory_slab_bytes": stat.get("memory_slab_bytes"),
+        "memory_sock_bytes": stat.get("memory_sock_bytes"),
+        "memory_shmem_bytes": stat.get("memory_shmem_bytes"),
+        "memory_swapcached_bytes": stat.get("memory_swapcached_bytes"),
+        "memory_zswap_bytes": stat.get("memory_zswap_bytes"),
+        "memory_zswapped_bytes": stat.get("memory_zswapped_bytes"),
+        "cgroup_populated": events.get("cgroup_populated"),
+        "cgroup_frozen": events.get("cgroup_frozen"),
+        "cgroup_freeze": int_or_none(read_text(root / "cgroup.freeze")),
+    }
+
+
+def cgroup_memory_samples(
+    observed_at: str,
+    host: str,
+    boot_id: str | None,
+    specs: list[tuple[str, str, str]],
+) -> list[dict[str, object]]:
+    rows = []
+    for label, scope, control_group in specs:
+        row = cgroup_memory_sample(
+            observed_at,
+            host,
+            boot_id,
+            label=label,
+            scope=scope,
+            control_group=control_group,
+        )
+        if row is not None:
+            rows.append(row)
+    return rows
+
+
+def insert_cgroup_memory_stats(
+    conn: sqlite3.Connection, rows: list[dict[str, object]]
+) -> None:
+    if not rows:
+        return
+    conn.executemany(
+        """
+        INSERT INTO cgroup_memory_sample (
+          observed_at, host, boot_id, schema_version, label, scope, control_group,
+          memory_current_bytes, memory_peak_bytes, memory_swap_current_bytes,
+          memory_swap_peak_bytes, memory_high_bytes, memory_max_bytes,
+          memory_anon_bytes, memory_file_bytes, memory_kernel_bytes,
+          memory_slab_bytes, memory_sock_bytes, memory_shmem_bytes,
+          memory_swapcached_bytes, memory_zswap_bytes, memory_zswapped_bytes,
+          cgroup_populated, cgroup_frozen, cgroup_freeze
+        ) VALUES (
+          :observed_at, :host, :boot_id, :schema_version, :label, :scope,
+          :control_group, :memory_current_bytes, :memory_peak_bytes,
+          :memory_swap_current_bytes, :memory_swap_peak_bytes,
+          :memory_high_bytes, :memory_max_bytes, :memory_anon_bytes,
+          :memory_file_bytes, :memory_kernel_bytes, :memory_slab_bytes,
+          :memory_sock_bytes, :memory_shmem_bytes, :memory_swapcached_bytes,
+          :memory_zswap_bytes, :memory_zswapped_bytes, :cgroup_populated,
+          :cgroup_frozen, :cgroup_freeze
+        )
+        """,
+        rows,
+    )
+
+
 def insert_cgroup_io_stats(
     conn: sqlite3.Connection, rows: list[dict[str, object]]
 ) -> None:
@@ -1157,6 +1284,36 @@ def init_db(conn: sqlite3.Connection) -> None:
           memory_full_total_us REAL
         );
         CREATE INDEX IF NOT EXISTS service_cgroup_pressure_sample_unit_time ON service_cgroup_pressure_sample(unit, observed_at);
+        CREATE TABLE IF NOT EXISTS cgroup_memory_sample (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          observed_at TEXT NOT NULL,
+          host TEXT NOT NULL,
+          boot_id TEXT,
+          schema_version INTEGER NOT NULL,
+          label TEXT NOT NULL,
+          scope TEXT NOT NULL,
+          control_group TEXT NOT NULL,
+          memory_current_bytes INTEGER,
+          memory_peak_bytes INTEGER,
+          memory_swap_current_bytes INTEGER,
+          memory_swap_peak_bytes INTEGER,
+          memory_high_bytes INTEGER,
+          memory_max_bytes INTEGER,
+          memory_anon_bytes INTEGER,
+          memory_file_bytes INTEGER,
+          memory_kernel_bytes INTEGER,
+          memory_slab_bytes INTEGER,
+          memory_sock_bytes INTEGER,
+          memory_shmem_bytes INTEGER,
+          memory_swapcached_bytes INTEGER,
+          memory_zswap_bytes INTEGER,
+          memory_zswapped_bytes INTEGER,
+          cgroup_populated INTEGER,
+          cgroup_frozen INTEGER,
+          cgroup_freeze INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS cgroup_memory_sample_label_time ON cgroup_memory_sample(label, observed_at);
+        CREATE INDEX IF NOT EXISTS cgroup_memory_sample_scope_time ON cgroup_memory_sample(scope, observed_at);
         CREATE TABLE IF NOT EXISTS process_io_delta_sample (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           observed_at TEXT NOT NULL,
@@ -1637,6 +1794,7 @@ def main() -> int:
     parser.add_argument("--process-io-top", type=int, default=40)
     parser.add_argument("--process-memory-top", type=int, default=50)
     parser.add_argument("--process-memory-interval", type=float, default=60.0)
+    parser.add_argument("--cgroups", default="")
     parser.add_argument("--units", default="")
     parser.add_argument("--user-name", required=True)
     args = parser.parse_args()
@@ -1655,6 +1813,13 @@ def main() -> int:
     rapl_zones = discover_rapl()
     boot_id = read_text("/proc/sys/kernel/random/boot_id")
     units = [unit for unit in args.units.split(",") if unit]
+    cgroup_specs = [
+        spec
+        for raw in args.cgroups.split(",")
+        if raw
+        for spec in [parse_cgroup_spec(raw)]
+        if spec is not None
+    ]
 
     nvml_init()
 
@@ -1951,6 +2116,10 @@ def main() -> int:
                 next_process_memory = sample_start + args.process_memory_interval
             if sample_start >= next_service:
                 insert_service_states(conn, args.host, boot_id, units, args.user_name)
+                insert_cgroup_memory_stats(
+                    conn,
+                    cgroup_memory_samples(observed_at, args.host, boot_id, cgroup_specs),
+                )
                 next_service = sample_start + args.service_interval
             if args.network_interval > 0 and sample_start >= next_network:
                 do_bloat = (
