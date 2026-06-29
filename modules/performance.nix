@@ -93,6 +93,62 @@ let
       printf '%s\n' 150000000 >"$package/constraint_1_power_limit_uw"
     '';
   };
+  cacheTrim = pkgs.writeShellApplication {
+    name = "sinnix-cache-trim";
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.gawk
+      pkgs.procps
+    ];
+    text = ''
+      set -eu
+
+      # Keep kernel file cache from becoming an opaque multi-GiB resident
+      # claimant on the interactive workstation. This deliberately trades warm
+      # filesystem cache for predictable headroom and less swap residue.
+      cache_limit_mib="''${SINNIX_CACHE_TRIM_CACHE_LIMIT_MIB:-4096}"
+      dirty_limit_mib="''${SINNIX_CACHE_TRIM_DIRTY_LIMIT_MIB:-512}"
+
+      snapshot() {
+        awk '
+          /^(MemTotal|MemFree|MemAvailable|Cached|Buffers|SReclaimable|SUnreclaim|Slab|AnonPages|SwapTotal|SwapFree|Dirty|Writeback):/ {
+            value[$1] = $2
+          }
+          END {
+            total = value["MemTotal:"]
+            free = value["MemFree:"]
+            avail = value["MemAvailable:"]
+            cached = value["Cached:"] + value["Buffers:"] + value["SReclaimable:"]
+            dirty = value["Dirty:"] + value["Writeback:"]
+            swap_used = value["SwapTotal:"] - value["SwapFree:"]
+            printf "mem_total_mib=%d mem_free_mib=%d mem_available_mib=%d cache_reclaimable_mib=%d anon_mib=%d slab_unreclaimable_mib=%d dirty_writeback_mib=%d swap_used_mib=%d\n",
+              total / 1024, free / 1024, avail / 1024, cached / 1024,
+              value["AnonPages:"] / 1024, value["SUnreclaim:"] / 1024,
+              dirty / 1024, swap_used / 1024
+          }
+        ' /proc/meminfo
+      }
+
+      before="$(snapshot)"
+      cache_mib="$(printf '%s\n' "$before" | tr ' ' '\n' | awk -F= '$1 == "cache_reclaimable_mib" { print $2 }')"
+      dirty_mib="$(printf '%s\n' "$before" | tr ' ' '\n' | awk -F= '$1 == "dirty_writeback_mib" { print $2 }')"
+
+      if [ "''${cache_mib:-0}" -lt "$cache_limit_mib" ]; then
+        echo "sinnix-cache-trim: skip reason=below-cache-limit cache_limit_mib=$cache_limit_mib $before"
+        exit 0
+      fi
+
+      if [ "''${dirty_mib:-0}" -gt "$dirty_limit_mib" ]; then
+        echo "sinnix-cache-trim: skip reason=dirty-writeback-high dirty_limit_mib=$dirty_limit_mib $before"
+        exit 0
+      fi
+
+      sync
+      printf 3 > /proc/sys/vm/drop_caches
+      after="$(snapshot)"
+      echo "sinnix-cache-trim: trimmed cache_limit_mib=$cache_limit_mib before=[$before] after=[$after]"
+    '';
+  };
 in
 {
   config = lib.mkIf config.sinnix.machine.isDesktop {
@@ -120,7 +176,7 @@ in
       # "available" memory does not depend on painful last-second reclaim.
       "vm.swappiness" = 1;
       "vm.page-cluster" = 0;
-      "vm.vfs_cache_pressure" = 200;
+      "vm.vfs_cache_pressure" = 1000;
       "vm.min_free_kbytes" = 1048576;
       "vm.watermark_scale_factor" = 200;
       # Keep Btrfs/NVMe writeback from accumulating multi-GiB dirty bursts.
@@ -187,6 +243,24 @@ in
         Type = "oneshot";
         RemainAfterExit = true;
         ExecStart = "${applyCpuPowerLimits}/bin/sinnix-apply-cpu-power-limits";
+      };
+    };
+
+    systemd.services.sinnix-cache-trim = {
+      description = "Bound reclaimable kernel file cache for interactive headroom";
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${cacheTrim}/bin/sinnix-cache-trim";
+      };
+    };
+
+    systemd.timers.sinnix-cache-trim = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnBootSec = "3min";
+        OnUnitActiveSec = "2min";
+        AccuracySec = "20s";
+        Unit = "sinnix-cache-trim.service";
       };
     };
 

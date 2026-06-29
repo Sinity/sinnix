@@ -155,7 +155,13 @@ mkFeatureModule {
           home.activation.reconcileNoctaliaState = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
             settings="''${XDG_STATE_HOME:-$HOME/.local/state}/noctalia/settings.toml"
             if [ -f "$settings" ]; then
-              ${pkgs.perl}/bin/perl -0pi -e 's/(\[wallpaper\.automation\][^\[]*?interval_seconds\s*=\s*)\d+/''${1}${toString 120}/s' "$settings"
+              ${pkgs.perl}/bin/perl -0pi -e '
+                s/(\[wallpaper\.automation\][^\[]*?interval_seconds\s*=\s*)\d+/''${1}${toString 120}/s;
+                if (/\[widget\.sysmon\]/) {
+                  s/(\[widget\.sysmon\][^\[]*?stat\s*=\s*)"[^"]*"/''${1}"ram_pct"/s
+                    or s/(\[widget\.sysmon\][^\[]*)/''${1}stat = "ram_pct"\n/s;
+                }
+              ' "$settings"
             fi
           '';
 

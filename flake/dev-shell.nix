@@ -63,21 +63,12 @@
 
           _mem_total_kb="$(${pkgs.gawk}/bin/awk '/^MemTotal:/ {print $2}' /proc/meminfo)"
           _mem_avail_kb="$(${pkgs.gawk}/bin/awk '/^MemAvailable:/ {print $2}' /proc/meminfo)"
-          _swap_total_kb="$(${pkgs.gawk}/bin/awk '/^SwapTotal:/ {print $2}' /proc/meminfo)"
-          _swap_free_kb="$(${pkgs.gawk}/bin/awk '/^SwapFree:/ {print $2}' /proc/meminfo)"
           _min_mem_kb="''${SINNIX_REBUILD_MIN_MEM_AVAILABLE_KB:-8388608}"
-          _min_swap_free_percent="''${SINNIX_REBUILD_MIN_SWAP_FREE_PERCENT:-90}"
-          _swap_free_percent=100
-          if [ "''${_swap_total_kb:-0}" -gt 0 ]; then
-            _swap_free_percent=$(( _swap_free_kb * 100 / _swap_total_kb ))
-          fi
 
-          if [ "''${_mem_avail_kb:-0}" -lt "$_min_mem_kb" ] \
-            || [ "$_swap_free_percent" -lt "$_min_swap_free_percent" ]; then
+          if [ "''${_mem_avail_kb:-0}" -lt "$_min_mem_kb" ]; then
             {
-              echo "sinnix ${name}: refusing to start host rebuild under memory pressure"
+              echo "sinnix ${name}: refusing to start host rebuild with low reclaim-aware memory headroom"
               echo "  MemAvailable=$(( _mem_avail_kb / 1024 )) MiB; required=$(( _min_mem_kb / 1024 )) MiB"
-              echo "  SwapFree=$_swap_free_percent%; required>=''${_min_swap_free_percent}%"
               echo "  Override for a deliberate risky run: SINNIX_REBUILD_SKIP_PRESSURE_PREFLIGHT=1 ${name}"
               echo "  Top RSS processes:"
               ${pkgs.procps}/bin/ps -eo pid,rss,comm,args --sort=-rss | ${pkgs.coreutils}/bin/head -8

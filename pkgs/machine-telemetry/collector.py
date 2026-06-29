@@ -13,7 +13,7 @@ import threading
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 UTC = dt.timezone.utc
 DISKSTAT_FIELDS = (
     "reads_completed",
@@ -259,6 +259,11 @@ def process_identity(pid: str) -> dict[str, object] | None:
         exe = os.readlink(proc / "exe")
     except OSError:
         exe = None
+    try:
+        cmdline = (proc / "cmdline").read_bytes().replace(b"\0", b" ")
+        command_line = cmdline.decode("utf-8", errors="replace").strip()
+    except OSError:
+        command_line = None
     cgroup = process_cgroup(pid)
     unit, scope = process_unit_from_cgroup(cgroup)
     return {
@@ -266,6 +271,7 @@ def process_identity(pid: str) -> dict[str, object] | None:
         "process_start_time_ticks": start_time,
         "comm": comm,
         "exe": exe,
+        "command_line": command_line[:500] if command_line else None,
         "cgroup": cgroup,
         "unit": unit,
         "scope": scope,
@@ -336,6 +342,7 @@ def process_io_delta_rows(
                 "process_start_time_ticks": after_row.get("process_start_time_ticks"),
                 "comm": after_row.get("comm"),
                 "exe": after_row.get("exe"),
+                "command_line": after_row.get("command_line"),
                 "cgroup": after_row.get("cgroup"),
                 "unit": after_row.get("unit"),
                 "scope": after_row.get("scope"),
@@ -370,12 +377,14 @@ def insert_process_io_deltas(
         INSERT INTO process_io_delta_sample (
           observed_at, host, boot_id, schema_version, interval_s,
           pid, process_start_time_ticks, comm, exe, cgroup, unit, scope,
+          command_line,
           read_bytes_delta, write_bytes_delta, cancelled_write_bytes_delta,
           read_chars_delta, write_chars_delta, read_syscalls_delta,
           write_syscalls_delta, total_bytes_delta, total_syscalls_delta
         ) VALUES (
           :observed_at, :host, :boot_id, :schema_version, :interval_s,
           :pid, :process_start_time_ticks, :comm, :exe, :cgroup, :unit, :scope,
+          :command_line,
           :read_bytes_delta, :write_bytes_delta, :cancelled_write_bytes_delta,
           :read_chars_delta, :write_chars_delta, :read_syscalls_delta,
           :write_syscalls_delta, :total_bytes_delta, :total_syscalls_delta
@@ -548,6 +557,34 @@ def cgroup_pressure_stats(
         "memory_full_avg60": memory.get("full_avg60"),
         "memory_full_avg300": memory.get("full_avg300"),
         "memory_full_total_us": memory.get("full_total"),
+    }
+
+
+def cgroup_memory_stat(control_group: str | None) -> dict[str, int | None]:
+    if not control_group:
+        return {}
+    path = Path("/sys/fs/cgroup") / control_group.lstrip("/") / "memory.stat"
+    raw = read_text(path)
+    if not raw:
+        return {}
+    values: dict[str, int] = {}
+    for line in raw.splitlines():
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        parsed = int_or_none(parts[1])
+        if parsed is not None:
+            values[parts[0]] = parsed
+    return {
+        "memory_anon_bytes": values.get("anon"),
+        "memory_file_bytes": values.get("file"),
+        "memory_kernel_bytes": values.get("kernel"),
+        "memory_slab_bytes": values.get("slab"),
+        "memory_sock_bytes": values.get("sock"),
+        "memory_shmem_bytes": values.get("shmem"),
+        "memory_swapcached_bytes": values.get("swapcached"),
+        "memory_zswap_bytes": values.get("zswap"),
+        "memory_zswapped_bytes": values.get("zswapped"),
     }
 
 
@@ -845,8 +882,16 @@ def init_db(conn: sqlite3.Connection) -> None:
           gpu_pcie_width INTEGER,
           load_1m REAL,
           load_5m REAL,
+          mem_total_mb INTEGER,
           mem_used_mb INTEGER,
           mem_avail_mb INTEGER,
+          mem_anon_mb INTEGER,
+          mem_file_cache_mb INTEGER,
+          mem_slab_reclaimable_mb INTEGER,
+          mem_slab_unreclaimable_mb INTEGER,
+          mem_dirty_mb INTEGER,
+          mem_writeback_mb INTEGER,
+          mem_shmem_mb INTEGER,
           swap_used_mb INTEGER,
           cpu_psi_some_avg10 REAL,
           cpu_psi_some_avg60 REAL,
@@ -912,6 +957,15 @@ def init_db(conn: sqlite3.Connection) -> None:
           main_pid INTEGER,
           control_group TEXT,
           memory_current_bytes INTEGER,
+          memory_anon_bytes INTEGER,
+          memory_file_bytes INTEGER,
+          memory_kernel_bytes INTEGER,
+          memory_slab_bytes INTEGER,
+          memory_sock_bytes INTEGER,
+          memory_shmem_bytes INTEGER,
+          memory_swapcached_bytes INTEGER,
+          memory_zswap_bytes INTEGER,
+          memory_zswapped_bytes INTEGER,
           cpu_usage_nsec INTEGER,
           io_read_bytes INTEGER,
           io_write_bytes INTEGER
@@ -1008,6 +1062,7 @@ def init_db(conn: sqlite3.Connection) -> None:
           process_start_time_ticks INTEGER NOT NULL,
           comm TEXT,
           exe TEXT,
+          command_line TEXT,
           cgroup TEXT,
           unit TEXT,
           scope TEXT,
@@ -1072,6 +1127,36 @@ def init_db(conn: sqlite3.Connection) -> None:
             "memory_psi_full_avg60": "REAL",
             "memory_psi_full_avg300": "REAL",
             "memory_psi_full_total_us": "REAL",
+            "mem_total_mb": "INTEGER",
+            "mem_anon_mb": "INTEGER",
+            "mem_file_cache_mb": "INTEGER",
+            "mem_slab_reclaimable_mb": "INTEGER",
+            "mem_slab_unreclaimable_mb": "INTEGER",
+            "mem_dirty_mb": "INTEGER",
+            "mem_writeback_mb": "INTEGER",
+            "mem_shmem_mb": "INTEGER",
+        },
+    )
+    ensure_columns(
+        conn,
+        "service_state",
+        {
+            "memory_anon_bytes": "INTEGER",
+            "memory_file_bytes": "INTEGER",
+            "memory_kernel_bytes": "INTEGER",
+            "memory_slab_bytes": "INTEGER",
+            "memory_sock_bytes": "INTEGER",
+            "memory_shmem_bytes": "INTEGER",
+            "memory_swapcached_bytes": "INTEGER",
+            "memory_zswap_bytes": "INTEGER",
+            "memory_zswapped_bytes": "INTEGER",
+        },
+    )
+    ensure_columns(
+        conn,
+        "process_io_delta_sample",
+        {
+            "command_line": "TEXT",
         },
     )
 
@@ -1253,11 +1338,22 @@ def memory_metrics() -> dict[str, int | None]:
     avail = values.get("MemAvailable")
     swap_total = values.get("SwapTotal", 0)
     swap_free = values.get("SwapFree", 0)
+    cached = values.get("Cached", 0)
+    buffers = values.get("Buffers", 0)
+    sreclaimable = values.get("SReclaimable", 0)
     return {
+        "mem_total_mb": int(total / 1024) if total is not None else None,
         "mem_used_mb": int((total - avail) / 1024)
         if total is not None and avail is not None
         else None,
         "mem_avail_mb": int(avail / 1024) if avail is not None else None,
+        "mem_anon_mb": int(values.get("AnonPages", 0) / 1024),
+        "mem_file_cache_mb": int((cached + buffers) / 1024),
+        "mem_slab_reclaimable_mb": int(sreclaimable / 1024),
+        "mem_slab_unreclaimable_mb": int(values.get("SUnreclaim", 0) / 1024),
+        "mem_dirty_mb": int(values.get("Dirty", 0) / 1024),
+        "mem_writeback_mb": int(values.get("Writeback", 0) / 1024),
+        "mem_shmem_mb": int(values.get("Shmem", 0) / 1024),
         "swap_used_mb": int((swap_total - swap_free) / 1024)
         if swap_total is not None and swap_free is not None
         else None,
@@ -1326,6 +1422,7 @@ def insert_service_states(
             continue
         scope = "user" if user else "system"
         control_group = props.get("ControlGroup")
+        memory_stat = cgroup_memory_stat(control_group)
         rows.append(
             (
                 observed_at,
@@ -1338,6 +1435,15 @@ def insert_service_states(
                 int_or_none(props.get("MainPID")),
                 control_group,
                 int_or_none(props.get("MemoryCurrent")),
+                memory_stat.get("memory_anon_bytes"),
+                memory_stat.get("memory_file_bytes"),
+                memory_stat.get("memory_kernel_bytes"),
+                memory_stat.get("memory_slab_bytes"),
+                memory_stat.get("memory_sock_bytes"),
+                memory_stat.get("memory_shmem_bytes"),
+                memory_stat.get("memory_swapcached_bytes"),
+                memory_stat.get("memory_zswap_bytes"),
+                memory_stat.get("memory_zswapped_bytes"),
                 int_or_none(props.get("CPUUsageNSec")),
                 int_or_none(props.get("IOReadBytes")),
                 int_or_none(props.get("IOWriteBytes")),
@@ -1368,9 +1474,12 @@ def insert_service_states(
             """
             INSERT INTO service_state (
               observed_at, host, boot_id, unit, scope, active_state, sub_state,
-              main_pid, control_group, memory_current_bytes, cpu_usage_nsec,
-              io_read_bytes, io_write_bytes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              main_pid, control_group, memory_current_bytes,
+              memory_anon_bytes, memory_file_bytes, memory_kernel_bytes,
+              memory_slab_bytes, memory_sock_bytes, memory_shmem_bytes,
+              memory_swapcached_bytes, memory_zswap_bytes, memory_zswapped_bytes,
+              cpu_usage_nsec, io_read_bytes, io_write_bytes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )
@@ -1599,8 +1708,16 @@ def main() -> int:
                 "gpu_pcie_width": gpu.get("gpu_pcie_width"),
                 "load_1m": load_1,
                 "load_5m": load_5,
+                "mem_total_mb": mem["mem_total_mb"],
                 "mem_used_mb": mem["mem_used_mb"],
                 "mem_avail_mb": mem["mem_avail_mb"],
+                "mem_anon_mb": mem["mem_anon_mb"],
+                "mem_file_cache_mb": mem["mem_file_cache_mb"],
+                "mem_slab_reclaimable_mb": mem["mem_slab_reclaimable_mb"],
+                "mem_slab_unreclaimable_mb": mem["mem_slab_unreclaimable_mb"],
+                "mem_dirty_mb": mem["mem_dirty_mb"],
+                "mem_writeback_mb": mem["mem_writeback_mb"],
+                "mem_shmem_mb": mem["mem_shmem_mb"],
                 "swap_used_mb": mem["swap_used_mb"],
                 "cpu_psi_some_avg10": psi_cpu.get("some_avg10"),
                 "cpu_psi_some_avg60": psi_cpu.get("some_avg60"),
@@ -1637,7 +1754,10 @@ def main() -> int:
                   gpu_power_limit_w, gpu_fan_pct, gpu_util_pct,
                   gpu_mem_util_pct, gpu_clock_mhz, gpu_mem_clock_mhz,
                   gpu_pstate, gpu_pcie_gen, gpu_pcie_width, load_1m,
-                  load_5m, mem_used_mb, mem_avail_mb, swap_used_mb,
+                  load_5m, mem_total_mb, mem_used_mb, mem_avail_mb,
+                  mem_anon_mb, mem_file_cache_mb, mem_slab_reclaimable_mb,
+                  mem_slab_unreclaimable_mb, mem_dirty_mb, mem_writeback_mb,
+                  mem_shmem_mb, swap_used_mb,
                   cpu_psi_some_avg10, cpu_psi_some_avg60,
                   cpu_psi_some_avg300, cpu_psi_some_total_us,
                   io_psi_some_avg10, io_psi_some_avg60,
@@ -1659,7 +1779,10 @@ def main() -> int:
                   :gpu_power_limit_w, :gpu_fan_pct, :gpu_util_pct,
                   :gpu_mem_util_pct, :gpu_clock_mhz, :gpu_mem_clock_mhz,
                   :gpu_pstate, :gpu_pcie_gen, :gpu_pcie_width, :load_1m,
-                  :load_5m, :mem_used_mb, :mem_avail_mb, :swap_used_mb,
+                  :load_5m, :mem_total_mb, :mem_used_mb, :mem_avail_mb,
+                  :mem_anon_mb, :mem_file_cache_mb, :mem_slab_reclaimable_mb,
+                  :mem_slab_unreclaimable_mb, :mem_dirty_mb, :mem_writeback_mb,
+                  :mem_shmem_mb, :swap_used_mb,
                   :cpu_psi_some_avg10, :cpu_psi_some_avg60,
                   :cpu_psi_some_avg300, :cpu_psi_some_total_us,
                   :io_psi_some_avg10, :io_psi_some_avg60,
