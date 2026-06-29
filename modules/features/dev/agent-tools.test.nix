@@ -69,6 +69,7 @@ mkFeatureTest {
       }
       (expect.hmFileExists hm ".local/bin/codex" "Codex wrapper must exist")
       (expect.hmFileExists hm ".local/bin/codex-lean" "Codex lean wrapper must exist")
+      (expect.hmFileExists hm ".local/bin/codex-full" "Codex full wrapper must exist")
       (expect.hmFileExists hm ".local/bin/codex-browser" "Codex browser wrapper must exist")
       (expect.hmFileExists hm ".local/bin/codex-deepseek" "Codex DeepSeek wrapper must exist")
       (expect.hmFileExists hm ".local/bin/codex-local" "Codex local-model wrapper must exist")
@@ -77,6 +78,12 @@ mkFeatureTest {
       )
       (expect.hmFileTextContains hm ".local/bin/codex-local" "--profile local"
         "codex-local must layer the local profile"
+      )
+      (expect.hmFileTextContains hm ".local/bin/codex" "--profile full"
+        "default Codex must retain the full MCP profile"
+      )
+      (expect.hmFileTextContains hm ".local/bin/codex-full" "--profile full"
+        "codex-full must retain the deliberate full MCP profile"
       )
       (expect.hmFileTextNotMatches hm ".local/bin/codex" ".*render-agents.*"
         "Codex wrapper must not render AGENTS on every launch"

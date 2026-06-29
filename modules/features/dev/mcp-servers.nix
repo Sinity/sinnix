@@ -35,6 +35,11 @@ mkFeatureModule {
       internal = true;
       description = "Path to the generated Codex lean profile derivation (for tests)";
     };
+    codexEvidenceConfigSource = lib.mkOption {
+      type = lib.types.path;
+      internal = true;
+      description = "Path to the generated Codex evidence profile derivation (for tests)";
+    };
     codexBrowserConfigSource = lib.mkOption {
       type = lib.types.path;
       internal = true;
@@ -153,6 +158,98 @@ mkFeatureModule {
         set -euo pipefail
         export SINNIX_AGENT_CHROME_HEADLESS=0
         exec ${mcpChromeDevtoolsPrivateBin}/bin/mcp-chrome-devtools-private "$@"
+      '';
+      mcpSweepBin = pkgs.writeShellScriptBin "sinnix-mcp-sweep" ''
+        set -euo pipefail
+
+        dry_run=0
+        quiet=0
+        orphans_only=0
+        while [ "$#" -gt 0 ]; do
+          case "$1" in
+            --dry-run) dry_run=1 ;;
+            --quiet) quiet=1 ;;
+            --orphans-only) orphans_only=1 ;;
+            --help)
+              cat <<'EOF'
+Usage: sinnix-mcp-sweep [--orphans-only] [--dry-run] [--quiet]
+
+Reap orphaned MCP and language-server helper processes left behind by agent
+session exits. Writes JSONL evidence to
+/realm/data/captures/machine/agent-mcp-sweep/sweep.jsonl.
+EOF
+              exit 0
+              ;;
+            *)
+              echo "sinnix-mcp-sweep: unknown argument: $1" >&2
+              exit 2
+              ;;
+          esac
+          shift
+        done
+
+        capture_dir="/realm/data/captures/machine/agent-mcp-sweep"
+        mkdir -p "$capture_dir"
+        log_file="$capture_dir/sweep.jsonl"
+        user_manager_pid="$(systemctl --user show --property=MainPID --value 2>/dev/null || true)"
+        now="$(${pkgs.coreutils}/bin/date -u +%Y-%m-%dT%H:%M:%SZ)"
+        host="$(${pkgs.nettools}/bin/hostname 2>/dev/null || echo unknown)"
+        killed=0
+        matched=0
+
+        is_candidate() {
+          case "$1" in
+            *"serena start-mcp-server"*|*"codebase-memory-mcp"*|*"mcp-polylogue"*|*"mcp-lynchpin"*|*"typescript-language-server --stdio"*|*"tsserver.js"*|*"typingsInstaller.js"*|*"pyright-langserver --stdio"*|*"rust-analyzer"*)
+              return 0
+              ;;
+            *)
+              return 1
+              ;;
+          esac
+        }
+
+        is_orphan() {
+          [ "$1" = "1" ] || { [ -n "$user_manager_pid" ] && [ "$1" = "$user_manager_pid" ]; }
+        }
+
+        ${pkgs.procps}/bin/ps -eo pid=,ppid=,rss=,comm=,args= |
+          while read -r pid ppid rss comm args; do
+            [ -n "''${pid:-}" ] || continue
+            is_candidate "$args" || continue
+            matched=$((matched + 1))
+            action="keep"
+            reason="attached"
+            if is_orphan "$ppid"; then
+              reason="orphaned"
+              action="kill"
+            elif [ "$orphans_only" -eq 0 ]; then
+              reason="matched"
+            fi
+
+            if [ "$action" = "kill" ]; then
+              if [ "$dry_run" -eq 0 ]; then
+                kill -TERM "$pid" 2>/dev/null || true
+              fi
+              killed=$((killed + 1))
+            fi
+
+            ${pkgs.jq}/bin/jq -cn \
+              --arg ts "$now" \
+              --arg host "$host" \
+              --arg pid "$pid" \
+              --arg ppid "$ppid" \
+              --arg rss_kib "$rss" \
+              --arg comm "$comm" \
+              --arg action "$action" \
+              --arg reason "$reason" \
+              --arg args "$args" \
+              '{ts:$ts,host:$host,pid:($pid|tonumber),ppid:($ppid|tonumber),rss_kib:($rss_kib|tonumber),comm:$comm,action:$action,reason:$reason,args:$args}' \
+              >> "$log_file"
+
+            if [ "$quiet" -eq 0 ]; then
+              printf '%s pid=%s ppid=%s rss=%sKiB %s %s\n' "$action" "$pid" "$ppid" "$rss" "$comm" "$reason"
+            fi
+          done
       '';
       desktopControlScripts = inputs.self + "/dots/_ai/skills/desktop-control-plane/scripts";
       serenaVersion = "1.5.3";
@@ -343,6 +440,10 @@ mkFeatureModule {
               hooks = [
                 {
                   type = "command";
+                  command = "sinnix-mcp-sweep --orphans-only --quiet";
+                }
+                {
+                  type = "command";
                   command = "serena-hooks activate --client=codex";
                 }
               ];
@@ -351,6 +452,10 @@ mkFeatureModule {
           Stop = [
             {
               hooks = [
+                {
+                  type = "command";
+                  command = "sinnix-mcp-sweep --orphans-only --quiet";
+                }
                 {
                   type = "command";
                   command = "serena-hooks cleanup --client=codex";
@@ -373,6 +478,7 @@ mkFeatureModule {
       codexConfigFile = inputs.self + "/dots/codex/config.toml";
       codexFullConfigFile = mkCodexProfileFile "full";
       codexLeanConfigFile = mkCodexProfileFile "lean";
+      codexEvidenceConfigFile = mkCodexProfileFile "evidence";
       codexBrowserConfigFile = mkCodexProfileFile "browser";
       # Alternate-backend profiles: the full MCP table plus a model + provider.
       # `codex --profile <name>` layers these over ~/.codex/config.toml, so the
@@ -449,6 +555,7 @@ mkFeatureModule {
       sinnix.features.dev.mcp-servers.codexConfigSource = codexConfigFile;
       sinnix.features.dev.mcp-servers.codexFullConfigSource = codexFullConfigFile;
       sinnix.features.dev.mcp-servers.codexLeanConfigSource = codexLeanConfigFile;
+      sinnix.features.dev.mcp-servers.codexEvidenceConfigSource = codexEvidenceConfigFile;
       sinnix.features.dev.mcp-servers.codexBrowserConfigSource = codexBrowserConfigFile;
       sinnix.features.dev.mcp-servers.codexDeepseekConfigSource = codexDeepseekConfigFile;
       sinnix.features.dev.mcp-servers.codexLocalConfigSource = codexLocalConfigFile;
@@ -516,12 +623,14 @@ mkFeatureModule {
                 run cp ${lib.escapeShellArg (toString codexConfigFile)} "$HOME/.codex/config.toml"
                 run cp ${lib.escapeShellArg (toString codexFullConfigFile)} "$HOME/.codex/full.config.toml"
                 run cp ${lib.escapeShellArg (toString codexLeanConfigFile)} "$HOME/.codex/lean.config.toml"
+                run cp ${lib.escapeShellArg (toString codexEvidenceConfigFile)} "$HOME/.codex/evidence.config.toml"
                 run cp ${lib.escapeShellArg (toString codexBrowserConfigFile)} "$HOME/.codex/browser.config.toml"
                 run cp ${lib.escapeShellArg (toString codexDeepseekConfigFile)} "$HOME/.codex/deepseek.config.toml"
                 run cp ${lib.escapeShellArg (toString codexLocalConfigFile)} "$HOME/.codex/local.config.toml"
                 run chmod 644 "$HOME/.codex/config.toml"
                 run chmod 644 "$HOME/.codex/full.config.toml"
                 run chmod 644 "$HOME/.codex/lean.config.toml"
+                run chmod 644 "$HOME/.codex/evidence.config.toml"
                 run chmod 644 "$HOME/.codex/browser.config.toml"
                 run chmod 644 "$HOME/.codex/deepseek.config.toml"
                 run chmod 644 "$HOME/.codex/local.config.toml"
@@ -590,6 +699,10 @@ mkFeatureModule {
               executable = true;
               force = true;
               text = mkSerenaWrapper "serena-hooks";
+            };
+            ".local/bin/sinnix-mcp-sweep" = {
+              source = "${mcpSweepBin}/bin/sinnix-mcp-sweep";
+              force = true;
             };
             ".local/bin/mcp-firecrawl" = {
               source = "${mcpFirecrawlBin}/bin/mcp-firecrawl";

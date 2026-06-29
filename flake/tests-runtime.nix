@@ -95,6 +95,7 @@ in
           ".local/bin/claude-local"
           ".local/bin/codex"
           ".local/bin/codex-lean"
+          ".local/bin/codex-full"
           ".local/bin/codex-browser"
           ".local/bin/codex-deepseek"
           ".local/bin/codex-local"
@@ -103,6 +104,7 @@ in
           ".local/bin/mcp-chrome-devtools-private"
           ".local/bin/mcp-chrome-devtools-private-visible"
           ".local/bin/mcp-polylogue"
+          ".local/bin/sinnix-mcp-sweep"
           ".local/bin/sinnix-agent-status"
           ".local/bin/sinnix-chrome-control"
           ".local/bin/sinnix-hypr-control"
@@ -145,6 +147,8 @@ in
         agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexFullConfigSource;
       agentToolsCodexLeanConfigSource =
         agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexLeanConfigSource;
+      agentToolsCodexEvidenceConfigSource =
+        agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexEvidenceConfigSource;
       agentToolsCodexBrowserConfigSource =
         agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexBrowserConfigSource;
       backupRuntimeEval = evalTestSpec system {
@@ -819,6 +823,7 @@ in
             cp ${lib.escapeShellArg (toString agentToolsCodexConfigSource)} "$HOME/.codex/config.toml"
             cp ${lib.escapeShellArg (toString agentToolsCodexFullConfigSource)} "$HOME/.codex/full.config.toml"
             cp ${lib.escapeShellArg (toString agentToolsCodexLeanConfigSource)} "$HOME/.codex/lean.config.toml"
+            cp ${lib.escapeShellArg (toString agentToolsCodexEvidenceConfigSource)} "$HOME/.codex/evidence.config.toml"
             cp ${lib.escapeShellArg (toString agentToolsCodexBrowserConfigSource)} "$HOME/.codex/browser.config.toml"
             chmod 644 "$HOME/.codex/config.toml"
             chmod 644 "$HOME/.codex/full.config.toml"
@@ -904,6 +909,7 @@ in
 
             full = tomllib.loads(pathlib.Path.home().joinpath('.codex/full.config.toml').read_text())['mcp_servers']
             lean = tomllib.loads(pathlib.Path.home().joinpath('.codex/lean.config.toml').read_text())['mcp_servers']
+            evidence = tomllib.loads(pathlib.Path.home().joinpath('.codex/evidence.config.toml').read_text())['mcp_servers']
             browser = tomllib.loads(pathlib.Path.home().joinpath('.codex/browser.config.toml').read_text())['mcp_servers']
             assert full['context7']['url'] == 'https://mcp.context7.com/mcp'
             assert full['context7']['bearer_token_env_var'] == 'CONTEXT7_API_KEY'
@@ -923,6 +929,13 @@ in
             assert 'serena' not in lean
             assert 'codebase-memory-mcp' not in lean
             assert 'chrome-devtools' not in lean
+            assert evidence['github']['bearer_token_env_var'] == 'GITHUB_TOKEN'
+            assert evidence['context7']['url'] == 'https://mcp.context7.com/mcp'
+            assert evidence['polylogue']['command'] == 'mcp-polylogue'
+            assert evidence['lynchpin']['env']['LYNCHPIN_REPO_ROOT'] == '/realm/project/sinity-lynchpin'
+            assert 'serena' not in evidence
+            assert 'codebase-memory-mcp' not in evidence
+            assert 'chrome-devtools' not in evidence
             assert browser['chrome-devtools']['command'] == 'mcp-chrome-devtools'
             assert browser['chrome-devtools-private']['command'] == 'mcp-chrome-devtools-private'
             assert browser['chrome-devtools-private-visible']['command'] == 'mcp-chrome-devtools-private-visible'
@@ -963,6 +976,7 @@ in
             grep -Fq 'ANTHROPIC_BASE_URL="http://127.0.0.1:4000"' "$HOME/.local/bin/claude-local"
             grep -Fq 'codex_args=(--profile full)' "$HOME/.local/bin/codex"
             grep -Fq 'codex_args=(--profile lean)' "$HOME/.local/bin/codex-lean"
+            grep -Fq 'codex_args=(--profile full)' "$HOME/.local/bin/codex-full"
             grep -Fq 'codex_args=(--profile browser)' "$HOME/.local/bin/codex-browser"
             grep -Fq 'codex_args=(--profile deepseek)' "$HOME/.local/bin/codex-deepseek"
             grep -Fq 'codex_args=(--profile local)' "$HOME/.local/bin/codex-local"

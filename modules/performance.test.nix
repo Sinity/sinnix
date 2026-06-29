@@ -68,6 +68,12 @@
       }
       {
         assertion =
+          config.services.earlyoom.freeMemThreshold == 40
+          && config.services.earlyoom.freeSwapThreshold == 75;
+        message = "earlyoom must treat material swap use as an early pressure incident";
+      }
+      {
+        assertion =
           !userDbusBroker.reloadIfChanged
           && !userDbusBroker.restartIfChanged
           && !userDbusBroker.stopIfChanged;

@@ -276,6 +276,7 @@ mkFeatureModule {
               claude-local = "~/.local/bin/claude-local";
               codex = "~/.local/bin/codex";
               codex-lean = "~/.local/bin/codex-lean";
+              codex-full = "~/.local/bin/codex-full";
               codex-browser = "~/.local/bin/codex-browser";
               codex-deepseek = "~/.local/bin/codex-deepseek";
               codex-local = "~/.local/bin/codex-local";
@@ -384,6 +385,7 @@ mkFeatureModule {
 
           home.file.".local/bin/codex" = mkCodexWrapper { profile = "full"; };
           home.file.".local/bin/codex-lean" = mkCodexWrapper { profile = "lean"; };
+          home.file.".local/bin/codex-full" = mkCodexWrapper { profile = "full"; };
           home.file.".local/bin/codex-browser" = mkCodexWrapper { profile = "browser"; };
 
           # DeepSeek / local through Codex. The layered <profile>.config.toml

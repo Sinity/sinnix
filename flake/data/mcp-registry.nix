@@ -142,6 +142,11 @@ let
       "remote-core"
       "recall"
     ];
+    evidence = [
+      "remote-core"
+      "recall"
+      "deep-evidence"
+    ];
     full = [
       "remote-core"
       "recall"

@@ -200,18 +200,13 @@ in
     services.earlyoom = {
       enable = true;
       enableNotifications = true;
-      # Act before multi-GiB disk-swap residency turns into sustained major
-      # faults and Btrfs queue collapse. Build/background slices stay weighted
-      # and capped, but oomd does not kill them on PSI alone.
-      # Fire early on memory pressure, before swap gets meaningfully used.
-      # 15% of 32 GiB = ~5 GiB free — kills misbehaving processes while the
-      # system is still responsive. Swap is a last-ditch cushion, not a sink.
-      freeMemThreshold = 15;
-      # Fire as soon as the zram cushion starts filling — 90% free on the 4 GiB
-      # zram = ~400 MiB used. Combined with the memory threshold this ensures
-      # earlyoom acts on memory pressure alone, before the compressed cushion is
-      # churned (and there is no disk swap to fall back to).
-      freeSwapThreshold = 90;
+      # Earlyoom requires BOTH the memory and swap thresholds to be crossed.
+      # Keep swap as a short overflow signal, not extra working memory: once
+      # available memory is below roughly 12-13 GiB and more than ~1 GiB of the
+      # 4 GiB zram cushion is occupied, kill the best heavy-process candidate
+      # while the desktop can still recover.
+      freeMemThreshold = 40;
+      freeSwapThreshold = 75;
       extraArgs = [
         # Prefer killing heavy build tooling under pressure — NOT the coding
         # agents. `node`/`python` were removed here: Claude Code is a `node`

@@ -154,8 +154,20 @@ mkFeatureTest {
       {
         assertion =
           (builtins.elemAt (builtins.elemAt codexHooks.hooks.SessionStart 0).hooks 0).command
+          == "sinnix-mcp-sweep --orphans-only --quiet";
+        message = "Codex hooks must reap orphaned MCP helpers at session start";
+      }
+      {
+        assertion =
+          (builtins.elemAt (builtins.elemAt codexHooks.hooks.SessionStart 0).hooks 1).command
           == "serena-hooks activate --client=codex";
-        message = "Codex hooks must activate Serena at session start";
+        message = "Codex hooks must activate Serena after orphan cleanup";
+      }
+      {
+        assertion =
+          (builtins.elemAt (builtins.elemAt codexHooks.hooks.Stop 0).hooks 0).command
+          == "sinnix-mcp-sweep --orphans-only --quiet";
+        message = "Codex hooks must reap orphaned MCP helpers at stop";
       }
       {
         assertion = hm.home.file ? ".gemini/skills";
@@ -192,6 +204,9 @@ mkFeatureTest {
       )
       (expect.hmFileExists hm ".local/bin/sinnix-agent-status"
         "Agent control surface probe must be available on PATH"
+      )
+      (expect.hmFileExists hm ".local/bin/sinnix-mcp-sweep"
+        "Agent MCP lifecycle sweep helper must be available on PATH"
       )
     ];
 }
