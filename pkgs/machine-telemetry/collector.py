@@ -245,8 +245,16 @@ def process_unit_from_cgroup(cgroup: str | None) -> tuple[str | None, str | None
     for segment in reversed(cgroup.split("/")):
         if segment.endswith((".service", ".scope")):
             scope = "user" if "user.slice" in cgroup else "system"
-            return segment, scope
+            return systemd_unescape_fragment(segment), scope
     return None, None
+
+
+def systemd_unescape_fragment(fragment: str) -> str:
+    return re.sub(
+        r"\\x([0-9A-Fa-f]{2})",
+        lambda match: chr(int(match.group(1), 16)),
+        fragment,
+    )
 
 
 def process_identity(pid: str) -> dict[str, object] | None:
@@ -294,6 +302,104 @@ def process_io_snapshot() -> dict[tuple[int, int], dict[str, object]]:
             continue
         snapshot[(parsed_pid, start_time)] = {**identity, "counters": counters}
     return snapshot
+
+
+def parse_smaps_rollup(pid: str) -> dict[str, int] | None:
+    raw = read_text(Path("/proc") / pid / "smaps_rollup")
+    if not raw:
+        return None
+    values: dict[str, int] = {}
+    for line in raw.splitlines():
+        parts = line.split()
+        if len(parts) < 2 or not parts[0].endswith(":"):
+            continue
+        parsed = int_or_none(parts[1])
+        if parsed is not None:
+            values[parts[0][:-1]] = parsed
+    return values if values else None
+
+
+def process_memory_rows(
+    observed_at: str,
+    host: str,
+    boot_id: str | None,
+    *,
+    limit: int,
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    if limit <= 0:
+        return rows
+    for proc_dir in Path("/proc").glob("[0-9]*"):
+        pid = proc_dir.name
+        rollup = parse_smaps_rollup(pid)
+        if not rollup or rollup.get("Pss", 0) <= 0:
+            continue
+        identity = process_identity(pid)
+        if identity is None:
+            continue
+        parsed_pid = identity.get("pid")
+        start_time = identity.get("process_start_time_ticks")
+        if not isinstance(parsed_pid, int) or not isinstance(start_time, int):
+            continue
+        rows.append(
+            {
+                "observed_at": observed_at,
+                "host": host,
+                "boot_id": boot_id,
+                "schema_version": SCHEMA_VERSION,
+                "pid": parsed_pid,
+                "process_start_time_ticks": start_time,
+                "comm": identity.get("comm"),
+                "exe": identity.get("exe"),
+                "command_line": identity.get("command_line"),
+                "cgroup": identity.get("cgroup"),
+                "unit": identity.get("unit"),
+                "scope": identity.get("scope"),
+                "rss_kb": rollup.get("Rss", 0),
+                "pss_kb": rollup.get("Pss", 0),
+                "pss_anon_kb": rollup.get("Pss_Anon"),
+                "pss_file_kb": rollup.get("Pss_File"),
+                "pss_shmem_kb": rollup.get("Pss_Shmem"),
+                "private_clean_kb": rollup.get("Private_Clean", 0),
+                "private_dirty_kb": rollup.get("Private_Dirty", 0),
+                "shared_clean_kb": rollup.get("Shared_Clean", 0),
+                "shared_dirty_kb": rollup.get("Shared_Dirty", 0),
+                "swap_kb": rollup.get("Swap", 0),
+            }
+        )
+    rows.sort(
+        key=lambda row: (
+            -int(row["pss_kb"]),
+            -int(row["private_dirty_kb"]) - int(row["private_clean_kb"]),
+            str(row.get("comm") or ""),
+        )
+    )
+    return rows[:limit]
+
+
+def insert_process_memory_rows(
+    conn: sqlite3.Connection, rows: list[dict[str, object]]
+) -> None:
+    if not rows:
+        return
+    conn.executemany(
+        """
+        INSERT INTO process_memory_sample (
+          observed_at, host, boot_id, schema_version,
+          pid, process_start_time_ticks, comm, exe, cgroup, unit, scope,
+          command_line, rss_kb, pss_kb, pss_anon_kb, pss_file_kb,
+          pss_shmem_kb, private_clean_kb, private_dirty_kb,
+          shared_clean_kb, shared_dirty_kb, swap_kb
+        ) VALUES (
+          :observed_at, :host, :boot_id, :schema_version,
+          :pid, :process_start_time_ticks, :comm, :exe, :cgroup, :unit, :scope,
+          :command_line, :rss_kb, :pss_kb, :pss_anon_kb, :pss_file_kb,
+          :pss_shmem_kb, :private_clean_kb, :private_dirty_kb,
+          :shared_clean_kb, :shared_dirty_kb, :swap_kb
+        )
+        """,
+        rows,
+    )
 
 
 def positive_delta(before: object, after: object) -> int:
@@ -1079,6 +1185,34 @@ def init_db(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS process_io_delta_sample_observed_at ON process_io_delta_sample(observed_at);
         CREATE INDEX IF NOT EXISTS process_io_delta_sample_unit_time ON process_io_delta_sample(unit, observed_at);
         CREATE INDEX IF NOT EXISTS process_io_delta_sample_process_time ON process_io_delta_sample(pid, process_start_time_ticks, observed_at);
+        CREATE TABLE IF NOT EXISTS process_memory_sample (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          observed_at TEXT NOT NULL,
+          host TEXT NOT NULL,
+          boot_id TEXT,
+          schema_version INTEGER NOT NULL,
+          pid INTEGER NOT NULL,
+          process_start_time_ticks INTEGER NOT NULL,
+          comm TEXT,
+          exe TEXT,
+          command_line TEXT,
+          cgroup TEXT,
+          unit TEXT,
+          scope TEXT,
+          rss_kb INTEGER NOT NULL,
+          pss_kb INTEGER NOT NULL,
+          pss_anon_kb INTEGER,
+          pss_file_kb INTEGER,
+          pss_shmem_kb INTEGER,
+          private_clean_kb INTEGER NOT NULL,
+          private_dirty_kb INTEGER NOT NULL,
+          shared_clean_kb INTEGER NOT NULL,
+          shared_dirty_kb INTEGER NOT NULL,
+          swap_kb INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS process_memory_sample_observed_at ON process_memory_sample(observed_at);
+        CREATE INDEX IF NOT EXISTS process_memory_sample_unit_time ON process_memory_sample(unit, observed_at);
+        CREATE INDEX IF NOT EXISTS process_memory_sample_process_time ON process_memory_sample(pid, process_start_time_ticks, observed_at);
         CREATE TABLE IF NOT EXISTS source_status (
           source TEXT PRIMARY KEY,
           checked_at TEXT NOT NULL,
@@ -1501,6 +1635,8 @@ def main() -> int:
     parser.add_argument("--bufferbloat-interval", type=float, default=1800.0)
     parser.add_argument("--network-probe-once", action="store_true")
     parser.add_argument("--process-io-top", type=int, default=40)
+    parser.add_argument("--process-memory-top", type=int, default=50)
+    parser.add_argument("--process-memory-interval", type=float, default=60.0)
     parser.add_argument("--units", default="")
     parser.add_argument("--user-name", required=True)
     args = parser.parse_args()
@@ -1585,6 +1721,7 @@ def main() -> int:
         prev_time = time.monotonic()
         next_service = 0.0
         next_network = 0.0
+        next_process_memory = 0.0
         last_bloat = 0.0
 
         # Probe fan-tacho capability once at startup. Many motherboards
@@ -1801,6 +1938,17 @@ def main() -> int:
             )
             insert_block_device_stats(conn, observed_at, args.host, boot_id)
             insert_process_io_deltas(conn, process_io_rows)
+            if args.process_memory_interval > 0 and sample_start >= next_process_memory:
+                insert_process_memory_rows(
+                    conn,
+                    process_memory_rows(
+                        observed_at,
+                        args.host,
+                        boot_id,
+                        limit=max(args.process_memory_top, 0),
+                    ),
+                )
+                next_process_memory = sample_start + args.process_memory_interval
             if sample_start >= next_service:
                 insert_service_states(conn, args.host, boot_id, units, args.user_name)
                 next_service = sample_start + args.service_interval
