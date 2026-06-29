@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Safe clipboard->yt-dlp watcher (drains the wl-paste pipe; won't freeze kitty)
+# runtimeInputs: wl-clipboard yt-dlp coreutils util-linux
+#
+# Watch the Wayland clipboard for download sessions: every copied http(s) URL is
+# handed to yt-dlp. Run it manually when you want a batch of copies downloaded;
+# Ctrl-C stops it.
+#
+# Why this script exists instead of the obvious one-liner:
+#
+#   wl-paste -w sh -c 'url="$(wl-paste)"; [[ "$url" =~ ^https?:// ]] && yt-dlp "$url"'
+#
+# `wl-paste --watch <cmd>` runs <cmd> with the *new clipboard content on its
+# stdin*. That one-liner ignores stdin and instead spawns a nested `wl-paste`
+# to re-fetch the selection. Nothing ever drains the pipe wl-paste opened, so
+# the selection owner (e.g. a single-instance kitty serving the copy) blocks in
+# write() once the content exceeds the 64 KiB pipe buffer — on its UI thread.
+# Result: every terminal of that kitty freezes on a large copy, no new windows,
+# killactive can't reach the stuck client. This version reads stdin (draining
+# the pipe) and never re-reads the clipboard, so the owner's write always
+# completes.
+
+set -euo pipefail
+
+DEST=${YTDLP_CLIP_DIR:-/realm/inbox/download}
+
+# Internal handler: invoked by `wl-paste --watch` with the selection on stdin.
+if [ "${1:-}" = "--handle" ]; then
+  url=$(cat) # drain stdin == the new clipboard content; this is the fix
+  case "$url" in
+  http://* | https://*) ;;
+  *) exit 0 ;;
+  esac
+  mkdir -p "$DEST"
+  # Detach so a long download never stalls the next clipboard event.
+  setsid -f yt-dlp --paths "$DEST" --no-playlist -- "$url" >/dev/null 2>&1 || true
+  exit 0
+fi
+
+mkdir -p "$DEST"
+echo "ytdlp-clip-watch: watching clipboard; copied URLs download to $DEST"
+echo "  (set YTDLP_CLIP_DIR to change destination; Ctrl-C to stop)"
+exec wl-paste --type text/plain --watch "$0" --handle

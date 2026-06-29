@@ -43,10 +43,12 @@ mkFeatureModule {
       pkgs,
       cfg,
       user,
+      helpers,
       ...
     }:
     let
       inherit (config.sinnix.paths) capturesRoot;
+      scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
     in
     lib.mkMerge [
       # MPV video player
@@ -239,6 +241,10 @@ mkFeatureModule {
           gpu-screen-recorder-gtk
           ffmpeg
           yt-dlp
+          # Safe clipboard->yt-dlp watcher; replaces the deadlock-prone
+          # `wl-paste -w sh -c 'url="$(wl-paste)"; ... yt-dlp'` one-liner that
+          # froze single-instance kitty by never draining wl-paste's pipe.
+          scriptPkgs.ytdlp-clip-watch
         ];
       })
     ];
