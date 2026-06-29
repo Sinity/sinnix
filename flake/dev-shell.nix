@@ -125,8 +125,6 @@
         exec ${pkgs.nix}/bin/nix "$@"
       '';
 
-      zramResetGuard = import ./zram-reset-guard.nix { inherit pkgs; };
-
       mkNhCommand =
         name: action:
         pkgs.writeShellScriptBin name ''
@@ -140,7 +138,6 @@
           ${localInputOverrideArgs}
           rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-2}"
           rebuild_cores="''${SINNIX_REBUILD_CORES:-12}"
-          ${zramResetGuard}
           ${rebuildPressurePreflight name}
           rebuild_pressure_preflight
 
@@ -179,10 +176,6 @@
             _rebuild_status=0
           fi
 
-          # Run the hygiene pass even when nh reports failure: transient
-          # activation errors still leave a fully-built generation behind,
-          # and the build is what fills zram.
-          ${zramResetGuard}
           exit "$_rebuild_status"
         '';
 

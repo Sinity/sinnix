@@ -78,15 +78,53 @@ let
   ) polylogueDbFiles;
   polylogueShareMount = "/home/${username}/.local/share/polylogue";
 
-  # Disk swap removed (2026-06-12): both disk swapfiles were pure liability on
-  # this host. A SATA-root swapfile froze the box under build load (2026-06-03
-  # thrash livelock); moving it to the NVMe avoided the freeze but still wrote
-  # the worn drives and never actually prevented OOM — earlyoom fires on the
-  # memory threshold regardless. Freeze-prevention now comes from cgroup
-  # MemoryMax caps on the build/nix-build slices (a runaway is killed inside its
-  # slice, not by paging) plus a small zram cushion (see modules/performance.nix)
-  # that absorbs sub-second spikes with zero disk I/O. No disk swap = no thrash
-  # path and no swap-write wear on either SSD.
+  swapFile = "/swap/swapfile";
+  swapSizeGiB = 4;
+
+  # Keep swap as a small file-backed overflow signal, not an extension of RAM.
+  # zram is disabled in modules/performance.nix because compressed-RAM swap
+  # competes with the real working set and can leave stale pressure after build
+  # bursts. The 4 GiB file below gives the kernel a bounded emergency landing
+  # zone while earlyoom kills once meaningful swap is occupied.
+  prepareSwapfile = pkgs.writeShellApplication {
+    name = "sinnix-prime-prepare-swapfile";
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.e2fsprogs
+      pkgs.util-linux
+    ];
+    text = ''
+      set -euo pipefail
+
+      swap_dir="$(dirname ${swapFile})"
+      desired_size=$(( ${toString swapSizeGiB} * 1024 * 1024 * 1024 ))
+
+      mkdir -p "$swap_dir"
+      chmod 700 "$swap_dir"
+
+      if [ ! -e "${swapFile}" ]; then
+        chattr +C "$swap_dir" 2>/dev/null || true
+      fi
+
+      current_size=0
+      if [ -f "${swapFile}" ]; then
+        current_size=$(stat --printf=%s "${swapFile}" 2>/dev/null || echo 0)
+      fi
+
+      if [ "$current_size" -ne "$desired_size" ]; then
+        swapoff "${swapFile}" >/dev/null 2>&1 || true
+        rm -f "${swapFile}"
+        touch "${swapFile}"
+        chattr +C "${swapFile}" 2>/dev/null || true
+        fallocate -l ${toString swapSizeGiB}G "${swapFile}"
+        chmod 600 "${swapFile}"
+        mkswap "${swapFile}" >/dev/null
+      else
+        chmod 600 "${swapFile}"
+      fi
+    '';
+  };
+
   realmFsDevice = "/dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a";
 
   # Initrd scaffold: early-boot placeholders derived from persistence config
@@ -274,11 +312,29 @@ in
 
   };
 
-  # No disk swap on this host — see the comment in the `let` block above and
-  # the zram cushion in modules/performance.nix.
-  swapDevices = [ ];
+  swapDevices = [
+    {
+      device = swapFile;
+      priority = 10;
+    }
+  ];
 
   systemd = {
+    services.prepare-swapfile = {
+      description = "Create and maintain the bounded sinnix-prime swapfile";
+      requiredBy = [ "swap-swapfile.swap" ];
+      before = [ "swap-swapfile.swap" ];
+      after = [
+        "systemd-remount-fs.service"
+        "local-fs.target"
+      ];
+      unitConfig.DefaultDependencies = false;
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${prepareSwapfile}/bin/sinnix-prime-prepare-swapfile";
+      };
+    };
+
     services.sinnix-fstrim = {
       description = "Trim canonical NVMe data filesystem";
       serviceConfig = {
@@ -393,6 +449,7 @@ in
     };
 
     tmpfiles.rules = lib.mkAfter [
+      "d /swap 0750 root root -"
       "d ${polylogueArchiveRoot} 0700 ${username} ${primaryGroupName} -"
       "d ${realmRoot}/db 0755 root root -"
       "d /home/${username}/.local/share 0700 ${username} ${primaryGroupName} -"

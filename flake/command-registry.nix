@@ -17,8 +17,7 @@ let
   ];
   defaultCheckNames = checkTiers.defaultCheckNames;
   heavyCheckNames =
-    map (name: "nixos-${name}") checkTiers.heavySpecNames
-    ++ checkTiers.runtimeCheckNames
+    checkTiers.runtimeCheckNames
     ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux checkTiers.vmCheckNames
     ++ lib.optionals (system == "x86_64-linux") checkTiers.hostBuildCheckNames;
   resolveFlakeDir = ''
@@ -105,7 +104,6 @@ let
       _rebuild_status=0
     fi
   '';
-  zramResetGuard = import ./zram-reset-guard.nix { inherit pkgs; };
   hostSmokeTerminalScript = ''
     session="sinnix-host-smoke-$$"
     artifact_dir="''${SINNIX_HOST_SMOKE_ARTIFACT_DIR:-}"
@@ -428,7 +426,6 @@ in
         ${avoidRepoCwdForActivation}
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
-        ${zramResetGuard}
         ${rebuildPressurePreflight "boot"}
         rebuild_pressure_preflight
         _rebuild_status=0
@@ -444,7 +441,6 @@ in
             --max-jobs "$rebuild_jobs" \
             --cores "$rebuild_cores" \
             "''${nh_extra_args[@]}" || _rebuild_status=$?
-        ${zramResetGuard}
         exit "$_rebuild_status"
       '';
     };
@@ -456,7 +452,6 @@ in
         ${avoidRepoCwdForActivation}
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
-        ${zramResetGuard}
         ${rebuildPressurePreflight "switch"}
         rebuild_pressure_preflight
         _rebuild_status=0
@@ -473,7 +468,6 @@ in
             --cores "$rebuild_cores" \
             "''${nh_extra_args[@]}" || _rebuild_status=$?
         ${switchFallback}
-        ${zramResetGuard}
         exit "$_rebuild_status"
       '';
     };

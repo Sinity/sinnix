@@ -212,36 +212,7 @@ let
         }) message;
     };
 
-  coverageDiscoveryEval = extendedLib.nixosSystem {
-    system = "x86_64-linux";
-    modules = baseModules ++ [
-      mountTmpfsRoots
-      baseTestConfig
-      {
-        networking.hostName = "coverage-discovery";
-      }
-    ];
-    specialArgs = sharedSpecialArgs // {
-      lib = extendedLib;
-    };
-  };
-
-  autoDiscoveredCoverageSurfaces = {
-    features = lib.concatMap (
-      domain:
-      map (subject: "${domain}.${subject}") (
-        builtins.attrNames coverageDiscoveryEval.config.sinnix.features.${domain}
-      )
-    ) (builtins.attrNames coverageDiscoveryEval.config.sinnix.features);
-    services = builtins.attrNames coverageDiscoveryEval.config.sinnix.services;
-    hosts = builtins.attrNames ((import ./nixos.nix { inherit inputs; }).flake.nixosConfigurations);
-    # Flake outputs do not live under the module tree; keep the public surface
-    # list explicit until router outputs move behind the same discovery path.
-    outputs = [ "router-config" ];
-  };
-
   # Convenience accessor for the canonical Home Manager user attrset.
-  # Used by *.test.nix specs to keep assertion bodies terse.
   hmFor = config: config.home-manager.users.${config.sinnix.user.name};
 
   # Create a test for a single feature
@@ -638,173 +609,6 @@ let
       // extraAttrs
     );
 
-  validateCoverageManifest =
-    {
-      coverage,
-      discovered ? autoDiscoveredCoverageSurfaces,
-      evidence ? { },
-      availableChecks ? [ ],
-      availableCommands ? [ ],
-    }:
-    let
-      ensure = condition: message: if condition then true else throw message;
-      allowedLayers =
-        coverage.allowedLayers or [
-          "build"
-          "eval"
-          "runtime"
-          "pty"
-          "vm"
-          "host"
-        ];
-      allowedLayerSet = lib.listToAttrs (
-        map (layer: {
-          name = layer;
-          value = true;
-        }) allowedLayers
-      );
-      availableEvidenceSet = lib.listToAttrs (
-        map (name: {
-          inherit name;
-          value = true;
-        }) (availableChecks ++ availableCommands)
-      );
-      categories = [
-        "features"
-        "services"
-        "hosts"
-        "outputs"
-      ];
-      autoEvalCategories = [
-        "features"
-        "services"
-      ];
-      attrNamesFor = set: category: builtins.attrNames (set.${category} or { });
-      listFor = set: category: set.${category} or [ ];
-      missingSubjects =
-        category:
-        builtins.filter (name: !(builtins.hasAttr name (coverage.${category} or { }))) (
-          listFor discovered category
-        );
-      extraSubjects =
-        category:
-        builtins.filter (name: !(builtins.elem name (listFor discovered category))) (
-          attrNamesFor coverage category
-        );
-      validateEntry =
-        category: name: entry:
-        ensure (builtins.isAttrs entry) "Coverage ${category}.${name} must be an attribute set"
-        && ensure (entry ? layers) "Coverage ${category}.${name} must declare layers"
-        && ensure (builtins.isList entry.layers) "Coverage ${category}.${name}.layers must be a list"
-        && ensure (entry.layers != [ ]) "Coverage ${category}.${name}.layers must not be empty"
-        && ensure (builtins.all (
-          layer: builtins.hasAttr layer allowedLayerSet
-        ) entry.layers) "Coverage ${category}.${name}.layers contains an unknown layer"
-        && true;
-      validateCategory =
-        category:
-        let
-          items = coverage.${category} or { };
-        in
-        ensure (missingSubjects category == [ ])
-          "Coverage ${category} is missing public surfaces: ${builtins.concatStringsSep ", " (missingSubjects category)}"
-        &&
-          ensure (extraSubjects category == [ ])
-            "Coverage ${category} contains unknown surfaces: ${builtins.concatStringsSep ", " (extraSubjects category)}"
-        && builtins.all (name: validateEntry category name items.${name}) (builtins.attrNames items);
-      validateEvidenceEntry =
-        category: subject: layer: names:
-        ensure (builtins.hasAttr subject (
-          coverage.${category} or { }
-        )) "Coverage evidence references unknown ${category}.${subject}"
-        && ensure (builtins.elem layer (
-          coverage.${category}.${subject}.layers or [ ]
-        )) "Coverage evidence references undeclared layer ${layer} for ${category}.${subject}"
-        && ensure (
-          builtins.isList names && names != [ ]
-        ) "Coverage evidence for ${category}.${subject}.${layer} must be a non-empty list"
-        && ensure (builtins.all (name: builtins.hasAttr name availableEvidenceSet)
-          names
-        ) "Coverage evidence for ${category}.${subject}.${layer} references unavailable checks or commands"
-        && true;
-      validateEvidenceCategory =
-        category:
-        let
-          items = evidence.${category} or { };
-        in
-        builtins.all (
-          subject:
-          let
-            subjectEvidence = items.${subject};
-          in
-          ensure (builtins.isAttrs subjectEvidence) "Coverage evidence for ${category}.${subject} must be an attribute set"
-          && builtins.all (layer: validateEvidenceEntry category subject layer subjectEvidence.${layer}) (
-            builtins.attrNames subjectEvidence
-          )
-        ) (builtins.attrNames items);
-      layerNeedsEvidence =
-        category: layer: !(layer == "eval" && builtins.elem category autoEvalCategories);
-      validateRequiredEvidence =
-        category:
-        let
-          items = coverage.${category} or { };
-          categoryEvidence = evidence.${category} or { };
-        in
-        builtins.all (
-          subject:
-          builtins.all (
-            layer:
-            if layerNeedsEvidence category layer then
-              ensure (
-                lib.attrByPath [ subject layer ] null categoryEvidence != null
-              ) "Coverage ${category}.${subject}.${layer} has no concrete evidence binding"
-            else
-              true
-          ) items.${subject}.layers
-        ) (builtins.attrNames items);
-    in
-    builtins.all validateCategory categories
-    && builtins.all validateEvidenceCategory categories
-    && builtins.all validateRequiredEvidence categories;
-
-  mkCoverageManifestCheck =
-    system:
-    {
-      name,
-      coverage,
-      discovered ? autoDiscoveredCoverageSurfaces,
-      evidence ? { },
-      availableChecks ? [ ],
-      availableCommands ? [ ],
-    }:
-    let
-      pkgs = inputs.nixpkgs.legacyPackages.${system};
-      validatedJson =
-        assert validateCoverageManifest {
-          inherit
-            coverage
-            discovered
-            evidence
-            availableChecks
-            availableCommands
-            ;
-        };
-        builtins.toFile "${name}.json" (
-          builtins.toJSON {
-            inherit
-              coverage
-              discovered
-              evidence
-              availableChecks
-              availableCommands
-              ;
-          }
-        );
-    in
-    pkgs.runCommand "sinnix-${name}" { } ''
-      cp ${validatedJson} "$out"
-    '';
-
   mkHostBuildCheck =
     system:
     {
@@ -829,34 +633,6 @@ let
         touch "$out"
       '';
 
-  # Build an evaluation-only test check derivation from a spec.
-  # This forces the NixOS module graph and assertion list without building the
-  # full system toplevel. Build coverage lives in dedicated host/output checks.
-  mkTestForSystem =
-    system: spec:
-    let
-      pkgs = inputs.nixpkgs.legacyPackages.${system};
-      evaluated = evalTestSpec system spec;
-      assertionReport = builtins.toFile "${spec.name}-assertions.json" (
-        builtins.toJSON {
-          toplevelDrvPath = builtins.unsafeDiscardStringContext evaluated.config.system.build.toplevel.drvPath;
-        }
-      );
-    in
-    pkgs.runCommand "nixos-${spec.name}-config-check" { } ''
-      cp ${assertionReport} "$out"
-    '';
-
-  # Generate checks for all systems from a list of test specs
-  mkSystemChecks =
-    system: testSpecs:
-    lib.listToAttrs (
-      map (spec: {
-        name = "nixos-${spec.name}";
-        value = mkTestForSystem system spec;
-      }) testSpecs
-    );
-
 in
 {
   inherit sanitizedInputs baseModules sharedSpecialArgs;
@@ -872,9 +648,6 @@ in
     mkRuntimeCheck
     mkHmRuntimeCheck
     mkVmCheck
-    mkCoverageManifestCheck
     mkHostBuildCheck
     ;
-  inherit autoDiscoveredCoverageSurfaces;
-  inherit mkTestForSystem mkSystemChecks;
 }

@@ -96,20 +96,13 @@ let
 in
 {
   config = lib.mkIf config.sinnix.machine.isDesktop {
-    # zram is the ONLY swap on this host (2026-06-12): both disk swapfiles were
-    # deleted (see hosts/sinnix-prime/storage.nix). The 2026-06-07 zram failure
-    # was a swappiness=60 + disk-spill problem — zram filled, then anon still
-    # paged to the disk swapfile. With swappiness=1 AND no disk swap to spill
-    # to, that path is gone: this small RAM-backed (zstd-compressed) cushion
-    # absorbs short allocation spikes without touching either SSD. Capped at
-    # 4 GiB so it can never grow into a large pressure sink that delays earlyoom.
-    zramSwap = {
-      enable = true;
-      algorithm = "zstd";
-      memoryPercent = 50;
-      memoryMax = 4 * 1024 * 1024 * 1024; # hard cap → effective size = 4 GiB
-      priority = 100;
-    };
+    # Swap is host-owned storage policy, not a RAM expansion mechanism. Keep
+    # zram disabled: on this workload it hides pressure inside compressed RAM,
+    # competes with the real working set, and leaves stale residue after large
+    # builds. Hosts that need overflow swap provide a small file-backed device
+    # (sinnix-prime uses a 4 GiB /swap/swapfile) and earlyoom treats meaningful
+    # swap occupancy as a kill signal before interactive I/O degrades.
+    zramSwap.enable = false;
 
     systemd.settings.Manager.StatusUnitFormat = "name";
 
@@ -203,8 +196,8 @@ in
       # Earlyoom requires BOTH the memory and swap thresholds to be crossed.
       # Keep swap as a short overflow signal, not extra working memory: once
       # available memory is below roughly 12-13 GiB and more than ~1 GiB of the
-      # 4 GiB zram cushion is occupied, kill the best heavy-process candidate
-      # while the desktop can still recover.
+      # 4 GiB swapfile is occupied, kill the best heavy-process candidate while
+      # the desktop can still recover.
       freeMemThreshold = 40;
       freeSwapThreshold = 75;
       extraArgs = [

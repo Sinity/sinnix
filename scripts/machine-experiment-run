@@ -183,7 +183,7 @@ def observed_state(system_units: list[str], user_units: list[str]) -> dict[str, 
 _QUIET_IO_FULL_AVG10_MAX = 2.0
 _QUIET_IO_SOME_AVG10_MAX = 5.0
 _QUIET_MEMORY_FULL_AVG10_MAX = 1.0
-_QUIET_ZRAM_ORIG_BYTES_MAX = 1024 * 1024 * 1024
+_QUIET_SWAP_USED_BYTES_MAX = 1024 * 1024 * 1024
 # Maintenance writers that invalidate a quiesced benchmark window.
 _QUIET_BLOCKING_UNITS = [
     "btrbk.service",
@@ -247,8 +247,18 @@ def quiet_state() -> dict[str, Any]:
     io_full = _psi_avg10("/proc/pressure/io", "full")
     io_some = _psi_avg10("/proc/pressure/io", "some")
     memory_full = _psi_avg10("/proc/pressure/memory", "full")
-    zram_raw = read_text("/sys/block/zram0/mm_stat")
-    zram_orig = int(zram_raw.split()[0]) if zram_raw else None
+    meminfo = {
+        parts[0].rstrip(":"): int(parts[1]) * 1024
+        for line in (read_text("/proc/meminfo") or "").splitlines()
+        if len(parts := line.split()) >= 2 and parts[1].isdigit()
+    }
+    swap_total = meminfo.get("SwapTotal")
+    swap_free = meminfo.get("SwapFree")
+    swap_used = (
+        swap_total - swap_free
+        if swap_total is not None and swap_free is not None
+        else None
+    )
     active_blocking = [
         unit
         for unit in _QUIET_BLOCKING_UNITS
@@ -263,8 +273,8 @@ def quiet_state() -> dict[str, Any]:
         violations.append(f"io_psi_some_avg10={io_some} (max {_QUIET_IO_SOME_AVG10_MAX})")
     if memory_full is None or memory_full >= _QUIET_MEMORY_FULL_AVG10_MAX:
         violations.append(f"memory_psi_full_avg10={memory_full} (max {_QUIET_MEMORY_FULL_AVG10_MAX})")
-    if zram_orig is not None and zram_orig > _QUIET_ZRAM_ORIG_BYTES_MAX:
-        violations.append(f"zram_orig_bytes={zram_orig} (max {_QUIET_ZRAM_ORIG_BYTES_MAX})")
+    if swap_used is not None and swap_used > _QUIET_SWAP_USED_BYTES_MAX:
+        violations.append(f"swap_used_bytes={swap_used} (max {_QUIET_SWAP_USED_BYTES_MAX})")
     violations.extend(f"active_maintenance_unit={unit}" for unit in active_blocking)
     violations.extend(f"active_heavy_scope={scope}" for scope in heavy_scopes)
 
@@ -272,7 +282,8 @@ def quiet_state() -> dict[str, Any]:
         "io_psi_full_avg10": io_full,
         "io_psi_some_avg10": io_some,
         "memory_psi_full_avg10": memory_full,
-        "zram_orig_bytes": zram_orig,
+        "swap_total_bytes": swap_total,
+        "swap_used_bytes": swap_used,
         "active_maintenance_units": active_blocking,
         "active_heavy_scopes": heavy_scopes,
         "violations": violations,

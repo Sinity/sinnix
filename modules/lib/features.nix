@@ -171,7 +171,6 @@ let
             type == "regular"
             && name != "default.nix"
             && lib.hasSuffix ".nix" name
-            && !(lib.hasSuffix ".test.nix" name)
           )
           || (type == "directory" && builtins.pathExists (dir + "/${name}/default.nix"))
         );

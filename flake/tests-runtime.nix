@@ -1,10 +1,8 @@
 # Runtime/VM/host check perSystem block.
 #
-# Extracted from the legacy `flake/tests.nix` monolith so that fast assertion
-# specs (now co-located `*.test.nix` files) stay separate from the heavyweight
-# runtime/PTY/VM/host-build checks that depend on a Linux host and real
-# tooling. flake-parts merges this perSystem block with the spec block in
-# `flake/tests.nix`.
+# Runtime/PTY/VM/host-build checks that depend on a Linux host and real tooling.
+# The old co-located assertion-spec layer was removed because it mostly
+# duplicated declarative config instead of exercising behavior.
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;
