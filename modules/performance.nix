@@ -267,26 +267,30 @@ in
     services.earlyoom = {
       enable = true;
       enableNotifications = true;
-      # Emergency brake only. The previous 40/75 thresholds killed ordinary
-      # rustc work while MemAvailable was still around 10 GiB; that prevents
-      # the intended dev-local Sinex loop from starting under normal desktop
-      # load. Keep swap as an overflow signal, but do not treat a small amount
-      # of occupied swap as reason to kill a build while plenty of RAM remains.
-      freeMemThreshold = 15;
-      freeSwapThreshold = 25;
+      # earlyoom acts only when BOTH memory and swap are below threshold. Keep
+      # the memory gate deliberately high so the small swapfile is treated as an
+      # overflow signal rather than as 4 GiB of working memory. The swap gate
+      # below trips only after ~3.2 GiB of the 4 GiB file is occupied, so a
+      # small amount of swap residue does not kill work, but a nearly-full
+      # swapfile no longer leaves the desktop doing real work from disk. Keep
+      # the trip point below 25%: live activation evidence showed killing one
+      # swapped rust-analyzer cleared swap to ~25%, and a 25% threshold kept
+      # selecting unrelated processes after the useful kill had already landed.
+      freeMemThreshold = 95;
+      freeSwapThreshold = 20;
       extraArgs = [
-        # Prefer killing heavy build tooling under pressure — NOT the coding
-        # agents. `node`/`python` were removed here: Claude Code is a `node`
-        # process and the MCP servers are `node`/`python`, so preferring them
-        # made earlyoom kill the running agent (and its MCPs) whenever a second
-        # agent was launched.
+        # Prefer killing rebuildable heavy tooling under pressure — NOT the
+        # coding agents. rust-analyzer can be restarted by the editor, and it is
+        # often the largest swapped process after Rust compile/index bursts.
         "--prefer"
-        "(cargo|rustc|cc1plus|ld|nix|nix-daemon)"
+        "(cargo|rustc|rust-analyzer|cc1plus|ld)"
         # Protect interactive surfaces. Coding agents (`claude`, `codex`, and
-        # their `node` runtime/MCP children) are interactive work and are
+        # their node/python runtime/MCP children) are interactive work and are
         # avoided like the desktop apps so launching one never evicts another.
+        # Also avoid Nix activation/control-plane processes and local dev
+        # daemons; they are coordination surfaces, not bulk memory consumers.
         "--avoid"
-        "(systemd|systemd-logind|dbus-daemon|sshd|agetty|Hyprland|noctalia|quickshell|foot|kitty|zsh|bash|sudo|doas|below|chrome|chromium|firefox|electron|claude|codex|node)"
+        "(systemd|systemd-logind|dbus-daemon|sshd|agetty|Hyprland|noctalia|quickshell|foot|kitty|zsh|bash|sudo|doas|below|chrome|chromium|firefox|electron|claude|codex|node|python|serena|polylogue|lynchpin|codebase-memory|sinexd|nix|nix-daemon)"
       ];
     };
 
