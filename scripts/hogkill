@@ -1,94 +1,404 @@
 #!/usr/bin/env bash
 # @sinnix-package
-# description: Interactive memory hog killer with gum UI
-# runtimeInputs: coreutils gum procps gawk gnugrep gnused
+# description: Interactive resource hog inspector and killer
+# runtimeInputs: bash coreutils gum procps gawk gnugrep gnused systemd
 set -euo pipefail
 
-# kill-hog: Interactive process killer using gum
-# Dependencies: gum, ps, kill
+usage() {
+  cat <<'EOF'
+usage: hogkill [options]
 
-if ! command -v gum &> /dev/null; then
-    echo "Error: 'gum' is not installed or not in PATH."
-    echo "Please install gum to use this script."
-    exit 1
+Inspect CPU/memory-heavy processes, show their systemd unit context, and
+optionally stop/kill the selected process or unit.
+
+Options:
+  -s, --sort cpu|mem|rss   Sort rows by CPU%, MEM%, or RSS bytes (default: rss)
+  -n, --limit N            Number of rows to show (default: 30)
+      --unit UNIT          Show processes in a specific systemd unit/cgroup
+      --list               Print the table and exit
+      --dry-run            Show the selected action without executing it
+      --no-interactive     Disable gum prompts; implies --list unless --pid is set
+      --pid PID            Act on a specific PID instead of opening the picker
+  -h, --help               Show this help
+
+Examples:
+  hogkill
+  hogkill --sort mem --limit 50
+  hogkill --unit polylogued.service --list
+  hogkill --pid 12345 --dry-run
+EOF
+}
+
+sort_key="rss"
+limit=30
+unit_filter=""
+list_only=0
+dry_run=0
+interactive=1
+selected_pid=""
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -s|--sort)
+      sort_key="${2:-}"
+      shift 2
+      ;;
+    -n|--limit)
+      limit="${2:-}"
+      shift 2
+      ;;
+    --unit)
+      unit_filter="${2:-}"
+      shift 2
+      ;;
+    --list)
+      list_only=1
+      shift
+      ;;
+    --dry-run)
+      dry_run=1
+      shift
+      ;;
+    --no-interactive)
+      interactive=0
+      shift
+      ;;
+    --pid)
+      selected_pid="${2:-}"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "hogkill: unknown option: $1" >&2
+      usage >&2
+      exit 64
+      ;;
+  esac
+done
+
+case "$sort_key" in
+  cpu|mem|rss) ;;
+  *)
+    echo "hogkill: --sort must be cpu, mem, or rss" >&2
+    exit 64
+    ;;
+esac
+
+case "$limit" in
+  ''|*[!0-9]*)
+    echo "hogkill: --limit must be a positive integer" >&2
+    exit 64
+    ;;
+esac
+if [ "$limit" -lt 1 ]; then
+  echo "hogkill: --limit must be greater than zero" >&2
+  exit 64
 fi
 
-# 1. Select Resource Type
-RESOURCE_TYPE=$(gum choose "CPU Usage" "Memory Usage")
-
-if [[ "$RESOURCE_TYPE" == "Memory Usage" ]]; then
-    SORT_FLAG="-%mem"
-    LABEL="Memory"
-else
-    SORT_FLAG="-%cpu"
-    LABEL="CPU"
+if [ "$interactive" -eq 0 ] && [ -z "$selected_pid" ]; then
+  list_only=1
 fi
 
-# 2. Select Process
-# We grab the top 50 processes by selected resource.
-# Format: PID | User | CPU% | MEM% | Command
-# we skip the header in ps output for easier parsing
-PS_OUTPUT=$(ps -eo pid,user,%cpu,%mem,args --sort="$SORT_FLAG" | head -n 51 | tail -n +2)
-
-if [ -z "$PS_OUTPUT" ]; then
-    echo "No processes found?"
-    exit 1
+have_gum=0
+if command -v gum >/dev/null 2>&1; then
+  have_gum=1
+fi
+if [ "$interactive" -eq 1 ] && [ "$list_only" -eq 0 ] && [ "$have_gum" -eq 0 ]; then
+  echo "hogkill: gum is unavailable; use --list or install gum for interactive actions" >&2
+  exit 69
 fi
 
-# We use awk to format it nicely for the menu
-# $1=PID, $2=USER, $3=CPU, $4=MEM, $5...=CMD
-# we pad columns to align them somewhat
-FORMATTED_LIST=$(echo "$PS_OUTPUT" | awk '{
-    printf "%-8s %-10s %-6s %-6s ", $1, $2, $3, $4;
-    for (i=5; i<=NF; i++) printf "%s ", $i;
-    printf "\n"
-}')
+tmp_dir="$(mktemp -d -t hogkill.XXXXXX)"
+rows_tsv="$tmp_dir/rows.tsv"
+table_txt="$tmp_dir/table.txt"
+trap 'rm -rf "$tmp_dir"' EXIT
 
-echo "Select a process to kill (Top 50 by $LABEL):"
-SELECTED_LINE=$(echo "$FORMATTED_LIST" | gum filter --placeholder "Search process..." --height 20)
+bytes_human() {
+  awk -v bytes="${1:-0}" 'BEGIN {
+    split("B KiB MiB GiB TiB", units, " ");
+    value = bytes + 0;
+    unit = 1;
+    while (value >= 1024 && unit < 5) {
+      value = value / 1024;
+      unit++;
+    }
+    if (unit == 1) {
+      printf "%d %s", value, units[unit];
+    } else if (value >= 10) {
+      printf "%.1f %s", value, units[unit];
+    } else {
+      printf "%.2f %s", value, units[unit];
+    }
+  }'
+}
 
-if [ -z "$SELECTED_LINE" ]; then
-    echo "No process selected. Exiting."
+print_pressure_summary() {
+  local mem_total mem_available swap_total swap_free load
+  mem_total="$(awk '/^MemTotal:/ {print $2 * 1024}' /proc/meminfo)"
+  mem_available="$(awk '/^MemAvailable:/ {print $2 * 1024}' /proc/meminfo)"
+  swap_total="$(awk '/^SwapTotal:/ {print $2 * 1024}' /proc/meminfo)"
+  swap_free="$(awk '/^SwapFree:/ {print $2 * 1024}' /proc/meminfo)"
+  load="$(cut -d' ' -f1-3 /proc/loadavg)"
+
+  echo "Host pressure"
+  printf "  load: %s\n" "$load"
+  printf "  memory: %s available / %s total\n" "$(bytes_human "$mem_available")" "$(bytes_human "$mem_total")"
+  if [ "${swap_total:-0}" -gt 0 ]; then
+    printf "  swap: %s free / %s total\n" "$(bytes_human "$swap_free")" "$(bytes_human "$swap_total")"
+  fi
+  if [ -r /proc/pressure/memory ]; then
+    printf "  memory PSI: %s\n" "$(tr '\n' ';' < /proc/pressure/memory | sed 's/;$//')"
+  fi
+  if [ -r /proc/pressure/io ]; then
+    printf "  io PSI: %s\n" "$(tr '\n' ';' < /proc/pressure/io | sed 's/;$//')"
+  fi
+  echo
+}
+
+unit_from_cgroup() {
+  local cgroup="$1"
+  local unit=""
+
+  unit="$(printf '%s\n' "$cgroup" | grep -oE '[^/]+\.(service|scope)' | tail -n 1 || true)"
+  if [ -n "$unit" ]; then
+    printf '%s' "$unit"
+    return
+  fi
+
+  unit="$(printf '%s\n' "$cgroup" | grep -oE '[^/]+\.(timer|socket|target|slice)' | tail -n 1 || true)"
+  printf '%s' "$unit"
+}
+
+shorten() {
+  local max="$1"
+  local value="$2"
+  if [ "${#value}" -le "$max" ]; then
+    printf '%s' "$value"
+  else
+    printf '%s...' "${value:0:$((max - 3))}"
+  fi
+}
+
+collect_rows() {
+  : > "$rows_tsv"
+  ps -eo pid=,user=,%cpu=,%mem=,rss=,stat=,args= --no-headers |
+    while read -r pid user cpu mem rss_kib stat cmd; do
+      [ -n "${pid:-}" ] || continue
+      cgroup="$(sed -n 's/^[^:]*:[^:]*://p' "/proc/$pid/cgroup" 2>/dev/null | head -n 1 || true)"
+      [ -n "$cgroup" ] || cgroup="-"
+      unit="$(unit_from_cgroup "$cgroup")"
+      if [ -n "$unit_filter" ] && [[ "$cgroup" != *"$unit_filter"* && "$unit" != "$unit_filter" ]]; then
+        continue
+      fi
+      manager="system"
+      if [[ "$cgroup" =~ /user\.slice/user-[0-9]+\.slice/user@[0-9]+\.service/ ]]; then
+        manager="user"
+      fi
+      printf "%s\t%s\t%.1f\t%.1f\t%d\t%s\t%s\t%s\t%s\t%s\n" \
+        "$pid" "$user" "$cpu" "$mem" "$((rss_kib * 1024))" "$stat" "$manager" "$unit" "$cgroup" "${cmd:-}" \
+        >> "$rows_tsv"
+    done
+}
+
+sort_rows() {
+  case "$sort_key" in
+    cpu) sort -t $'\t' -k3,3nr "$rows_tsv" ;;
+    mem) sort -t $'\t' -k4,4nr "$rows_tsv" ;;
+    rss) sort -t $'\t' -k5,5nr "$rows_tsv" ;;
+  esac | awk -v limit="$limit" 'NR <= limit { print }'
+}
+
+render_table() {
+  {
+    printf "%-7s %-12s %6s %6s %10s %-5s %-6s %-32s %s\n" \
+      "PID" "USER" "CPU%" "MEM%" "RSS" "STAT" "MGR" "UNIT" "COMMAND"
+    sort_rows | while IFS=$'\t' read -r pid user cpu mem rss stat manager unit cgroup cmd; do
+      if [ -z "$unit" ]; then
+        unit="-"
+      fi
+      printf "%-7s %-12s %6s %6s %10s %-5s %-6s %-32s %s\n" \
+        "$pid" \
+        "$(shorten 12 "$user")" \
+        "$cpu" \
+        "$mem" \
+        "$(bytes_human "$rss")" \
+        "$stat" \
+        "$manager" \
+        "$(shorten 32 "$unit")" \
+        "$(shorten 100 "$cmd")"
+    done
+  } > "$table_txt"
+}
+
+row_for_pid() {
+  local pid="$1"
+  awk -F '\t' -v pid="$pid" '$1 == pid { print; found = 1; exit } END { exit found ? 0 : 1 }' "$rows_tsv"
+}
+
+describe_row() {
+  local row="$1"
+  IFS=$'\t' read -r pid user cpu mem rss stat manager unit cgroup cmd <<<"$row"
+  echo "Selected process"
+  printf "  pid:     %s\n" "$pid"
+  printf "  user:    %s\n" "$user"
+  printf "  usage:   CPU %s%%, MEM %s%%, RSS %s, STAT %s\n" "$cpu" "$mem" "$(bytes_human "$rss")" "$stat"
+  printf "  manager: %s\n" "$manager"
+  printf "  unit:    %s\n" "${unit:-none detected}"
+  printf "  cgroup:  %s\n" "$cgroup"
+  printf "  command: %s\n" "$cmd"
+}
+
+choose_pid() {
+  local selected
+  selected="$(
+    cat "$table_txt" |
+      gum filter \
+        --height 24 \
+        --placeholder "Search by PID, command, user, or unit..."
+  )"
+  if [ -z "$selected" ]; then
+    echo "hogkill: no process selected"
     exit 0
+  fi
+  awk '{print $1}' <<<"$selected"
+}
+
+run_action() {
+  local label="$1"
+  shift
+  printf "Action: %s\n" "$label"
+  printf "Command:"
+  printf " %q" "$@"
+  printf "\n"
+
+  if [ "$dry_run" -eq 1 ]; then
+    echo "Dry run: command not executed."
+    return 0
+  fi
+
+  "$@"
+}
+
+verify_pid_gone_or_report() {
+  local pid="$1"
+  sleep 0.5
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "PID $pid is still running."
+    return 1
+  fi
+  echo "PID $pid is gone."
+}
+
+collect_rows
+render_table
+
+if [ ! -s "$rows_tsv" ]; then
+  echo "hogkill: no processes matched"
+  exit 0
 fi
 
-PID=$(echo "$SELECTED_LINE" | awk '{print $1}')
-CMD_NAME=$(echo "$SELECTED_LINE" | awk '{for (i=5; i<=NF; i++) printf "%s ", $i;}' | cut -c 1-50)
+print_pressure_summary
+cat "$table_txt"
 
-echo "Selected: $PID ($CMD_NAME...)"
-
-# 3. Select Signal
-# Explaining the difference between TERM and KILL
-SIGNAL_CHOICE=$(gum choose \
-    "SIGTERM (15) - Polite request (Cleanup allowed)" \
-    "SIGKILL (9)  - Force kill (No cleanup, immediate)" \
-    "Cancel")
-
-if [[ "$SIGNAL_CHOICE" == "Cancel" ]]; then
-    echo "Cancelled."
-    exit 0
+if [ "$list_only" -eq 1 ]; then
+  exit 0
 fi
 
-SIGNAL="15"
-if [[ "$SIGNAL_CHOICE" == *"SIGKILL"* ]]; then
-    SIGNAL="9"
+if [ -z "$selected_pid" ]; then
+  selected_pid="$(choose_pid)"
 fi
 
-# 4. Confirm and Kill
-echo "About to send signal $SIGNAL to PID $PID."
-if gum confirm "Are you sure?"; then
-    kill -$SIGNAL "$PID"
-    
-    # Verify
-    sleep 0.5
-    if kill -0 "$PID" 2>/dev/null; then
-        echo "Process $PID is still running."
-        if [[ "$SIGNAL" == "15" ]]; then
-            echo "It might be ignoring SIGTERM. Try SIGKILL."
-        fi
-    else
-        echo "Process $PID terminated."
+selected_row="$(row_for_pid "$selected_pid" || true)"
+if [ -z "$selected_row" ]; then
+  echo "hogkill: PID $selected_pid was not found in the current process table" >&2
+  exit 1
+fi
+
+echo
+describe_row "$selected_row"
+IFS=$'\t' read -r pid user cpu mem rss stat manager unit cgroup cmd <<<"$selected_row"
+
+choices=(
+  "pid: SIGTERM $pid"
+  "pid: SIGKILL $pid"
+)
+if [ -n "$unit" ] && [[ "$unit" == *.service || "$unit" == *.scope ]]; then
+  choices+=(
+    "unit: stop $unit"
+    "unit: restart $unit"
+    "unit: kill $unit with SIGTERM"
+    "unit: kill $unit with SIGKILL"
+  )
+fi
+choices+=("inspect: systemctl status" "cancel")
+
+echo
+action="$(printf '%s\n' "${choices[@]}" | gum choose --height "${#choices[@]}")"
+
+case "$action" in
+  "pid: SIGTERM "*)
+    if gum confirm "Send SIGTERM to PID $pid?"; then
+      run_action "send SIGTERM to PID $pid" kill -TERM "$pid"
+      verify_pid_gone_or_report "$pid" || true
     fi
-else
+    ;;
+  "pid: SIGKILL "*)
+    if gum confirm "Send SIGKILL to PID $pid?"; then
+      run_action "send SIGKILL to PID $pid" kill -KILL "$pid"
+      verify_pid_gone_or_report "$pid" || true
+    fi
+    ;;
+  "unit: stop "*)
+    if gum confirm "Stop systemd unit $unit?"; then
+      if [ "$manager" = "user" ]; then
+        run_action "stop user unit $unit" systemctl --user stop "$unit"
+      else
+        run_action "stop system unit $unit" systemctl stop "$unit"
+      fi
+    fi
+    ;;
+  "unit: restart "*)
+    if gum confirm "Restart systemd unit $unit?"; then
+      if [ "$manager" = "user" ]; then
+        run_action "restart user unit $unit" systemctl --user restart "$unit"
+      else
+        run_action "restart system unit $unit" systemctl restart "$unit"
+      fi
+    fi
+    ;;
+  "unit: kill "*"SIGTERM")
+    if gum confirm "Send SIGTERM to all processes in $unit?"; then
+      if [ "$manager" = "user" ]; then
+        run_action "systemd kill user unit $unit with SIGTERM" systemctl --user kill --signal=TERM "$unit"
+      else
+        run_action "systemd kill system unit $unit with SIGTERM" systemctl kill --signal=TERM "$unit"
+      fi
+    fi
+    ;;
+  "unit: kill "*"SIGKILL")
+    if gum confirm "Send SIGKILL to all processes in $unit?"; then
+      if [ "$manager" = "user" ]; then
+        run_action "systemd kill user unit $unit with SIGKILL" systemctl --user kill --signal=KILL "$unit"
+      else
+        run_action "systemd kill system unit $unit with SIGKILL" systemctl kill --signal=KILL "$unit"
+      fi
+    fi
+    ;;
+  "inspect: systemctl status")
+    if [ -n "$unit" ]; then
+      if [ "$manager" = "user" ]; then
+        systemctl --user status --no-pager "$unit" || true
+      else
+        systemctl status --no-pager "$unit" || true
+      fi
+    else
+      echo "No systemd unit detected for PID $pid."
+    fi
+    ;;
+  cancel|"")
     echo "Cancelled."
-fi
+    ;;
+esac
