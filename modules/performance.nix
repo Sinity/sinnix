@@ -174,7 +174,7 @@ in
       # and new rustc processes needed multi-GiB allocations immediately.
       # Maintain a concrete free-page reserve and apply stronger VFS pressure so
       # "available" memory does not depend on painful last-second reclaim.
-      "vm.swappiness" = 1;
+      "vm.swappiness" = 0;
       "vm.page-cluster" = 0;
       "vm.vfs_cache_pressure" = 1000;
       "vm.min_free_kbytes" = 1048576;
@@ -268,16 +268,16 @@ in
       enable = true;
       enableNotifications = true;
       # earlyoom acts only when BOTH memory and swap are below threshold. Keep
-      # the memory gate deliberately high so the small swapfile is treated as an
-      # overflow signal rather than as 4 GiB of working memory. The swap gate
-      # below trips only after ~3.2 GiB of the 4 GiB file is occupied, so a
-      # small amount of swap residue does not kill work, but a nearly-full
-      # swapfile no longer leaves the desktop doing real work from disk. Keep
-      # the trip point below 25%: live activation evidence showed killing one
-      # swapped rust-analyzer cleared swap to ~25%, and a 25% threshold kept
-      # selecting unrelated processes after the useful kill had already landed.
-      freeMemThreshold = 95;
-      freeSwapThreshold = 20;
+      # the memory gate low enough that swap residue alone cannot trigger a
+      # kill loop while RAM is still abundant. Live evidence on 2026-06-30
+      # showed the previous 95% memory threshold behaving as a swap-only gate:
+      # with ~50-85% available RAM and a full/transiently-disabled swapfile,
+      # earlyoom repeatedly killed rustc, xtask, Postgres children, weechat, and
+      # Xwayland. Treat the 4 GiB overflow file as a pressure tripwire instead:
+      # once RAM is genuinely scarce and swap is about 25% occupied, kill bulk
+      # work before the desktop starts living on disk.
+      freeMemThreshold = 7;
+      freeSwapThreshold = 75;
       extraArgs = [
         # Prefer killing rebuildable heavy tooling under pressure — NOT the
         # coding agents. rust-analyzer can be restarted by the editor, and it is
@@ -290,8 +290,13 @@ in
         # Also avoid Nix activation/control-plane processes and local dev
         # daemons; they are coordination surfaces, not bulk memory consumers.
         "--avoid"
-        "(systemd|systemd-logind|dbus-daemon|sshd|agetty|Hyprland|noctalia|quickshell|foot|kitty|zsh|bash|sudo|doas|below|chrome|chromium|firefox|electron|claude|codex|node|python|serena|polylogue|lynchpin|codebase-memory|sinexd|nix|nix-daemon)"
+        "(systemd|systemd-logind|dbus-daemon|dbus-broker|dbus-broker-launch|sshd|agetty|Hyprland|Xwayland|noctalia|quickshell|xdg-desktop-portal|pipewire|wireplumber|foot|kitty|zsh|bash|sudo|doas|below|weechat|asciinema|aw-server|chrome|chromium|firefox|electron|claude|codex|node|python|serena|polylogue|lynchpin|codebase-memory|sinexd|postgres|nats-server|nix|nix-daemon)"
       ];
+    };
+
+    systemd.services.earlyoom = {
+      wants = [ "swap.target" ];
+      after = [ "swap.target" ];
     };
 
     # Keep systemd-oomd enabled at the platform level, but Sinnix's own
