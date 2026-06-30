@@ -338,16 +338,29 @@ in
               }) scriptLinks
             );
 
+          # WeeChat must run from login and stay up independent of the F6
+          # scratchpad so IRC logs are captured continuously. The old
+          # Type=oneshot unit fired once and then stopped tracking the tmux
+          # server (Tasks:0); when that server later died (crash/earlyoom)
+          # nothing restarted it, so weechat only reappeared when the
+          # scratchpad was opened — silently dropping every log line in
+          # between. Supervise the tmux server as the unit's main process and
+          # restart it if it dies. ExecStartPre clears any session created by
+          # the scratchpad attach fallback so the forked server is always the
+          # tracked PID. The scratchpad/F6 path now only attaches.
           systemd.user.services.weechat-scratchpad = {
             Unit = {
-              Description = "Keep WeeChat scratchpad tmux session alive";
+              Description = "Persistent WeeChat tmux session (attachable via F6 scratchpad)";
               After = [ "default.target" ];
-              PartOf = [ "default.target" ];
             };
             Service = {
-              Type = "oneshot";
-              RemainAfterExit = true;
-              ExecStart = "%h/.local/bin/weechat-scratchpad --ensure";
+              Type = "forking";
+              ExecStartPre = "-${pkgs.tmux}/bin/tmux -S /tmp/tmux-weechat-%U kill-server";
+              ExecStart = "${pkgs.tmux}/bin/tmux -S /tmp/tmux-weechat-%U new-session -d -s weechat-persistent ${pkgs.weechat}/bin/weechat";
+              ExecStartPost = "${pkgs.tmux}/bin/tmux -S /tmp/tmux-weechat-%U set-option -t weechat-persistent destroy-unattached off";
+              ExecStop = "${pkgs.tmux}/bin/tmux -S /tmp/tmux-weechat-%U kill-server";
+              Restart = "always";
+              RestartSec = 5;
             };
             Install.WantedBy = [ "default.target" ];
           };
