@@ -62,6 +62,27 @@ mkServiceModule {
     let
       keyFile = "/run/agenix/airvpn-seed-key";
       pskFile = "/run/agenix/airvpn-seed-psk";
+      endpointHost = lib.head (lib.splitString ":" cfg.endpoint);
+      waitForEndpointDns = pkgs.writeShellApplication {
+        name = "airvpn-seed-wait-for-endpoint-dns";
+        runtimeInputs = [
+          pkgs.coreutils
+          pkgs.glibc.bin
+        ];
+        text = ''
+          set -eu
+
+          host="$1"
+          deadline="$((SECONDS + 60))"
+          while ! getent ahostsv4 "$host" >/dev/null; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "airvpn-seed: timed out waiting for DNS: $host" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+        '';
+      };
     in
     {
       # ── WireGuard interface ─────────────────────────────────────────
@@ -113,6 +134,7 @@ mkServiceModule {
         after = [ "network-online.target" ];
         wants = [ "network-online.target" ];
         serviceConfig = {
+          ExecStartPre = "${waitForEndpointDns}/bin/airvpn-seed-wait-for-endpoint-dns ${endpointHost}";
           Restart = "on-failure";
           RestartSec = "10s";
         };
