@@ -25,6 +25,8 @@
   sinnix.features.desktop.audioCapture = {
     asrProvider = "openai";
     asrDiarization = false;
+    enableAsrServer = false;
+    enableAudioDaemon = false;
   };
   sinnix.features.dev.editors.vscode.enable = true;
   sinnix.features.dev.editors.antigravity.enable = true;
@@ -33,7 +35,10 @@
   sinnix.services = {
     agent-gateway = {
       enable = true;
-      http.enable = true;
+      http = {
+        enable = true;
+        autoStart = false;
+      };
     };
     transmission = {
       enable = true;
@@ -52,7 +57,7 @@
       enable = true;
       # Start through the delayed `sinex-runtime.target`, not during the
       # graphical boot transaction.
-      autoStart = true;
+      autoStart = false;
       provisionDatabase = true;
       activationProfile = "full";
       environment = "prod";
@@ -78,14 +83,29 @@
     # Weights/state live on durable /realm; everything binds 127.0.0.1 (reach
     # over Tailscale later). CUDA via per-package overrides — see
     # flake/overlay/package/local-ai.nix and the cuda-maintainers cache below.
-    ollama.enable = true; # LLM/VLM hub (OpenAI API :11434) + abliterated pre-pull + RAG embeddings
-    litellm.enable = true; # Anthropic↔OpenAI gateway :4000 — local models through Claude Code/Codex
-    open-webui.enable = true; # chat/RAG/voice frontend :8080
+    ollama = {
+      enable = true; # LLM/VLM hub (OpenAI API :11434) + abliterated pre-pull + RAG embeddings
+      autoStart = false;
+    };
+    litellm = {
+      enable = true; # Anthropic↔OpenAI gateway :4000 — local models through Claude Code/Codex
+      autoStart = false;
+    };
+    open-webui = {
+      enable = true; # chat/RAG/voice frontend :8080
+      autoStart = false;
+    };
     koboldcpp.enable = true; # all-in-one offload + native image gen :5001 (on-demand)
     llama-cpp.enable = false; # opt-in raw llama-server :8081 (set .model first)
     whisper.enable = true; # speech-to-text :8090 (on-demand, auto-downloads model)
-    comfyui.enable = true; # SOTA image + text-to-video :8188 (container, CDI GPU)
-    tts.enable = true; # OpenedAI-Speech TTS bridge :8000 (container)
+    comfyui = {
+      enable = true; # SOTA image + text-to-video :8188 (container, CDI GPU)
+      autoStart = false;
+    };
+    tts = {
+      enable = true; # OpenedAI-Speech TTS bridge :8000 (container)
+      autoStart = false;
+    };
     # Image digests pinned and verified; enable when wanted (heavier, on-demand):
     musicgen.enable = false; # MusicGen/Bark audio toolkit (container)
     ocr.enable = false; # marker/Surya OCR (container)

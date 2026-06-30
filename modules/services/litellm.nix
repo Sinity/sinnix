@@ -34,8 +34,17 @@ mkServiceModule {
       restartable = true;
     };
   };
+  extraOptions = {
+    autoStart = (
+      args.lib.mkOption {
+        type = args.lib.types.bool;
+        default = true;
+        description = "Start LiteLLM automatically at boot.";
+      }
+    );
+  };
   configFn =
-    { ... }:
+    { cfg, lib, ... }:
     {
       services.litellm = {
         enable = true;
@@ -72,6 +81,9 @@ mkServiceModule {
       };
 
       # Gateway is useless without the backend; order startup after it.
-      systemd.services.litellm.after = [ "ollama.service" ];
+      systemd.services.litellm = {
+        after = [ "ollama.service" ];
+        wantedBy = lib.mkIf (!cfg.autoStart) (lib.mkForce [ ]);
+      };
     };
 } args

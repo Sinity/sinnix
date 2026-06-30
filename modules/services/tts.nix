@@ -22,6 +22,13 @@ mkServiceModule {
     };
   };
   extraOptions = {
+    autoStart = (
+      args.lib.mkOption {
+        type = args.lib.types.bool;
+        default = true;
+        description = "Start the OpenedAI-Speech container automatically at boot.";
+      }
+    );
     image = (
       args.lib.mkOption {
         type = args.lib.types.str;
@@ -51,7 +58,7 @@ mkServiceModule {
 
       virtualisation.oci-containers.containers.openedai-speech = {
         image = cfg.image;
-        autoStart = true;
+        autoStart = cfg.autoStart;
         pull = "never";
         ports = [ "127.0.0.1:8000:8000" ];
         volumes = [

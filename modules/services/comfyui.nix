@@ -29,6 +29,13 @@ mkServiceModule {
     };
   };
   extraOptions = {
+    autoStart = (
+      args.lib.mkOption {
+        type = args.lib.types.bool;
+        default = true;
+        description = "Start the ComfyUI container automatically at boot.";
+      }
+    );
     image = (
       args.lib.mkOption {
         type = args.lib.types.str;
@@ -71,7 +78,7 @@ mkServiceModule {
 
       virtualisation.oci-containers.containers.comfyui = {
         image = cfg.image;
-        autoStart = true;
+        autoStart = cfg.autoStart;
         ports = [ "127.0.0.1:8188:8188" ];
         volumes = [ "${mnt}:/comfy/mnt" ];
         environment = {

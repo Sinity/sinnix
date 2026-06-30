@@ -300,6 +300,12 @@ in
     http = {
       enable = lib.mkEnableOption "local JSON-RPC HTTP endpoint for tunnel experiments";
 
+      autoStart = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Start the local JSON-RPC HTTP endpoint at user login.";
+      };
+
       host = lib.mkOption {
         type = lib.types.str;
         default = "127.0.0.1";
@@ -344,7 +350,7 @@ in
           ];
         };
 
-        Install.WantedBy = [ "default.target" ];
+        Install.WantedBy = lib.optionals cfg.http.autoStart [ "default.target" ];
       };
     };
   };

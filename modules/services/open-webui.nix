@@ -27,8 +27,18 @@ mkServiceModule {
       restartable = true;
     };
   };
+  extraOptions = {
+    autoStart = (
+      args.lib.mkOption {
+        type = args.lib.types.bool;
+        default = true;
+        description = "Start Open WebUI automatically at boot.";
+      }
+    );
+  };
   configFn =
     {
+      cfg,
       config,
       lib,
       ...
@@ -73,6 +83,7 @@ mkServiceModule {
         User = "open-webui";
         Group = "open-webui";
       };
+      systemd.services.open-webui.wantedBy = lib.mkIf (!cfg.autoStart) (lib.mkForce [ ]);
 
       sinnix.persistence.system.directories = [ "/var/lib/open-webui" ];
     };

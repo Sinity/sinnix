@@ -27,6 +27,13 @@ mkServiceModule {
     };
   };
   extraOptions = {
+    autoStart = (
+      args.lib.mkOption {
+        type = args.lib.types.bool;
+        default = true;
+        description = "Start Ollama automatically at boot.";
+      }
+    );
     loadModels = (
       args.lib.mkOption {
         type = args.lib.types.listOf args.lib.types.str;
@@ -87,5 +94,10 @@ mkServiceModule {
       ];
 
       environment.systemPackages = [ pkgs.ollama-cuda ]; # `ollama` CLI on PATH
+
+      systemd.services = lib.mkIf (!cfg.autoStart) {
+        ollama.wantedBy = lib.mkForce [ ];
+        ollama-model-loader.wantedBy = lib.mkForce [ ];
+      };
     };
 } args

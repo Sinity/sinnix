@@ -95,6 +95,8 @@ in
         }
         .${cfg.activationProfile};
       maintenanceTimerServiceNames = [
+        "sinex-blob-cas-fsck"
+        "sinex-blob-cas-sweep"
         "sinex-document-scan"
       ];
       # Post-Wave-B fold all source bindings run inside sinexd, not per-source
@@ -701,11 +703,18 @@ in
         };
         systemd.timers =
           lib.genAttrs maintenanceTimerServiceNames (_: {
+            enable = lib.mkIf (!runtimeAutoStart) (lib.mkForce false);
+            wantedBy =
+              if runtimeAutoStart then
+                [ "sinex-runtime.target" ]
+              else
+                lib.mkForce [ ];
             timerConfig.Persistent = lib.mkForce false;
           })
           // {
             sinex-postgres-dump = {
-              wantedBy = [ "timers.target" ];
+              enable = lib.mkIf (!runtimeAutoStart) (lib.mkForce false);
+              wantedBy = lib.optionals runtimeAutoStart [ "timers.target" ];
               timerConfig = {
                 OnCalendar = "*-*-* 03:12:00";
                 RandomizedDelaySec = "20min";
