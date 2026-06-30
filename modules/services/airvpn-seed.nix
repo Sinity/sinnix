@@ -67,7 +67,7 @@ mkServiceModule {
         name = "airvpn-seed-wait-for-endpoint-dns";
         runtimeInputs = [
           pkgs.coreutils
-          pkgs.glibc.bin
+          pkgs.glibc.getent
         ];
         text = ''
           set -eu
