@@ -267,30 +267,26 @@ in
     services.earlyoom = {
       enable = true;
       enableNotifications = true;
-      # earlyoom acts only when BOTH memory and swap are below threshold. Keep
-      # the memory gate low enough that swap residue alone cannot trigger a
-      # kill loop while RAM is still abundant. Live evidence on 2026-06-30
-      # showed the previous 95% memory threshold behaving as a swap-only gate:
-      # with ~50-85% available RAM and a full/transiently-disabled swapfile,
-      # earlyoom repeatedly killed rustc, xtask, Postgres children, weechat, and
-      # Xwayland. Treat the 4 GiB overflow file as a pressure tripwire instead:
-      # once RAM is genuinely scarce and swap is about 25% occupied, kill bulk
-      # work before the desktop starts living on disk.
+      # earlyoom acts only when BOTH memory and swap are below threshold.
+      # Keep the memory gate tied to real MemAvailable pressure, but do not
+      # require swap occupancy: the 2026-06-30 desktop stall hit 314 MiB
+      # MemAvailable with swap still empty, so the old swap gate suppressed
+      # the emergency kill until the compositor/session was already wedged.
       freeMemThreshold = 7;
-      freeSwapThreshold = 75;
+      freeSwapThreshold = 100;
       extraArgs = [
         # Prefer killing rebuildable heavy tooling under pressure — NOT the
         # coding agents. rust-analyzer can be restarted by the editor, and it is
         # often the largest swapped process after Rust compile/index bursts.
         "--prefer"
-        "(cargo|rustc|rust-analyzer|cc1plus|ld)"
+        "(cargo|rustc|rust-analyzer|cc1plus|ld|codebase-memory-mcp|codebase-memory)"
         # Protect interactive surfaces. Coding agents (`claude`, `codex`, and
         # their node/python runtime/MCP children) are interactive work and are
         # avoided like the desktop apps so launching one never evicts another.
         # Also avoid Nix activation/control-plane processes and local dev
         # daemons; they are coordination surfaces, not bulk memory consumers.
         "--avoid"
-        "(systemd|systemd-logind|dbus-daemon|dbus-broker|dbus-broker-launch|sshd|agetty|Hyprland|Xwayland|noctalia|quickshell|xdg-desktop-portal|pipewire|wireplumber|foot|kitty|zsh|bash|sudo|doas|below|weechat|asciinema|aw-server|chrome|chromium|firefox|electron|claude|codex|node|python|serena|polylogue|lynchpin|codebase-memory|sinexd|postgres|nats-server|nix|nix-daemon)"
+        "(systemd|systemd-logind|dbus-daemon|dbus-broker|dbus-broker-launch|sshd|agetty|Hyprland|Xwayland|noctalia|quickshell|xdg-desktop-portal|pipewire|wireplumber|foot|kitty|zsh|bash|sudo|doas|below|weechat|asciinema|aw-server|chrome|chromium|firefox|electron|claude|codex|node|python|serena|polylogue|lynchpin|sinexd|postgres|nats-server|nix|nix-daemon)"
       ];
     };
 

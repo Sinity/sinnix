@@ -124,6 +124,45 @@ let
       fi
     '';
   };
+  drainSwapfile = pkgs.writeShellApplication {
+    name = "sinnix-prime-drain-swapfile";
+    runtimeInputs = [
+      pkgs.gawk
+      pkgs.util-linux
+    ];
+    text = ''
+      set -euo pipefail
+
+      swap_file=${lib.escapeShellArg swapFile}
+      min_headroom_kib=$(( 2 * 1024 * 1024 ))
+
+      if ! swapon --noheadings --raw --show=NAME | awk -v swap_file="$swap_file" '$1 == swap_file { found = 1 } END { exit found ? 0 : 1 }'; then
+        exit 0
+      fi
+
+      read -r mem_available_kib swap_total_kib swap_free_kib < <(
+        awk '
+          $1 == "MemAvailable:" { mem = $2 }
+          $1 == "SwapTotal:" { total = $2 }
+          $1 == "SwapFree:" { free = $2 }
+          END { print mem + 0, total + 0, free + 0 }
+        ' /proc/meminfo
+      )
+
+      swap_used_kib=$(( swap_total_kib - swap_free_kib ))
+      if [ "$swap_used_kib" -le 0 ]; then
+        exit 0
+      fi
+
+      if [ "$mem_available_kib" -le "$(( swap_used_kib + min_headroom_kib ))" ]; then
+        echo "Leaving swap resident: MemAvailable=''${mem_available_kib}KiB SwapUsed=''${swap_used_kib}KiB" >&2
+        exit 0
+      fi
+
+      swapoff "$swap_file"
+      swapon "$swap_file"
+    '';
+  };
 
   realmFsDevice = "/dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a";
 
@@ -326,12 +365,26 @@ in
       before = [ "swap-swapfile.swap" ];
       after = [
         "systemd-remount-fs.service"
-        "local-fs.target"
       ];
       unitConfig.DefaultDependencies = false;
       serviceConfig = {
         Type = "oneshot";
         ExecStart = "${prepareSwapfile}/bin/sinnix-prime-prepare-swapfile";
+      };
+    };
+
+    services.sinnix-drain-swapfile = {
+      description = "Drain resident pages from the bounded sinnix-prime swapfile";
+      after = [
+        "swap-swapfile.swap"
+        "multi-user.target"
+      ];
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${drainSwapfile}/bin/sinnix-prime-drain-swapfile";
+        Nice = 10;
+        IOSchedulingClass = "idle";
+        IOSchedulingPriority = 7;
       };
     };
 
@@ -370,6 +423,16 @@ in
         OnCalendar = "weekly";
         RandomizedDelaySec = "1h";
         Persistent = true;
+      };
+    };
+
+    timers.sinnix-drain-swapfile = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnBootSec = "2min";
+        OnUnitActiveSec = "5min";
+        AccuracySec = "30s";
+        Persistent = false;
       };
     };
 
