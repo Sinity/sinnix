@@ -910,11 +910,11 @@
     },
     "nixpkgs_6": {
       "locked": {
-        "lastModified": 1782467914,
-        "narHash": "sha256-pGvFkM8N0xEkIIXDe5YYfbEAvHrk4IxBrjB/x8OomhE=",
+        "lastModified": 1781074563,
+        "narHash": "sha256-md8WlXOlfnIeHeOScMTTHFyf2d6iaTwPl2apR5EQ3P4=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "e73de5be04e0eff4190a1432b946d469c794e7b4",
+        "rev": "9ae611a455b90cf061d8f332b977e387bda8e1ca",
         "type": "github"
       },
       "original": {
@@ -1127,11 +1127,11 @@
         "nixpkgs": "nixpkgs_6"
       },
       "locked": {
-        "lastModified": 1782607465,
-        "narHash": "sha256-uC+Z788HqeHxYpYmmWHrj9bcp+GHhOpT0Ds6yJjatGE=",
+        "lastModified": 1782653676,
+        "narHash": "sha256-jETDRxZIPjdjRu8DNmJX3AYYb6V/IsyWDObAm3amyHo=",
         "ref": "master",
-        "rev": "e3ee89eeef23fe31ed92fc6df3d72b6d6527d790",
-        "revCount": 1435,
+        "rev": "b7f281653b9d05bc2460585d06babe22a5b28426",
+        "revCount": 1441,
         "type": "git",
         "url": "https://github.com/Sinity/sinex"
       },
