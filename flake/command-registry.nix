@@ -6,7 +6,6 @@
 let
   lib = pkgs.lib;
   scriptPkgs = (import ./scripts.nix { inherit inputs pkgs; }).packageSet;
-  checkTiers = import ./check-tiers.nix { inherit lib; };
   rebuildServicePath = lib.makeBinPath [
     pkgs.coreutils
     pkgs.findutils
@@ -15,13 +14,16 @@ let
     pkgs.systemd
     pkgs.util-linux
   ];
-  defaultCheckNames = checkTiers.defaultCheckNames;
-  heavyCheckNames =
-    checkTiers.runtimeCheckNames
-    ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux checkTiers.vmCheckNames
-    ++ lib.optionals (system == "x86_64-linux") checkTiers.hostBuildCheckNames;
   resolveFlakeDir = ''
     _flake_dir="''${SINNIX_FLAKE_DIR:-''${NH_FLAKE:-''${FLAKE:-${inputs.self}}}}"
+  '';
+  loadCheckTargets = outputName: ''
+    mapfile -t ${outputName}_targets < <(
+      ${pkgs.nix}/bin/nix eval "$_flake_dir#${outputName}.${system}" \
+        --apply builtins.attrNames \
+        --json \
+        | ${pkgs.jq}/bin/jq -r '.[] | "${outputName}.${system}.\(.)"'
+    )
   '';
   avoidRepoCwdForActivation = ''
     # nixos-rebuild-ng can trip over a git checkout cwd during activation.
@@ -306,13 +308,9 @@ in
         ${resolveFlakeDir}
         cd "$_flake_dir"
 
-        heavy_targets=(
-          ${builtins.concatStringsSep "\n          " (
-            map (name: ''"heavyChecks.${system}.${name}"'') heavyCheckNames
-          )}
-        )
+        ${loadCheckTargets "heavyChecks"}
 
-        for target in "''${heavy_targets[@]}"; do
+        for target in "''${heavyChecks_targets[@]}"; do
           echo "Running heavy check: $target"
           ${scriptPkgs.nix-safe}/bin/nix-safe build "$_flake_dir#$target"
         done
@@ -328,35 +326,19 @@ in
         cd "$_flake_dir"
 
         echo "Running default semantic checks..."
-        default_targets=(
-          ${builtins.concatStringsSep "\n          " (
-            map (name: ''"checks.${system}.${name}"'') defaultCheckNames
-          )}
-        )
+        ${loadCheckTargets "checks"}
 
-        for target in "''${default_targets[@]}"; do
+        for target in "''${checks_targets[@]}"; do
           echo "Running default check: $target"
           ${scriptPkgs.nix-safe}/bin/nix-safe build "$_flake_dir#$target"
         done
 
         echo "Running heavy checks..."
-        ${
-          let
-            heavyTargets = builtins.concatStringsSep "\n          " (
-              map (name: ''"heavyChecks.${system}.${name}"'') heavyCheckNames
-            );
-          in
-          ''
-            heavy_targets=(
-              ${heavyTargets}
-            )
-
-            for target in "''${heavy_targets[@]}"; do
-              echo "Running heavy check: $target"
-              ${scriptPkgs.nix-safe}/bin/nix-safe build "$_flake_dir#$target"
-            done
-          ''
-        }
+        ${loadCheckTargets "heavyChecks"}
+        for target in "''${heavyChecks_targets[@]}"; do
+          echo "Running heavy check: $target"
+          ${scriptPkgs.nix-safe}/bin/nix-safe build "$_flake_dir#$target"
+        done
 
         echo "Full non-host semantic check suite complete."
       '';

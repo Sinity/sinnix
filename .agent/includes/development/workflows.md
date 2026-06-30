@@ -49,7 +49,6 @@ or when you need a non-activating gate and have a concrete reason. The curated
 check catches:
 
 - Option type errors and missing required arguments
-- Coverage manifest consistency (services without coverage entries)
 - Runtime surface invariant violations (duplicate units, kind mismatches, unknown resource classes)
 - Module evaluation errors (stale option names, removed upstream interfaces)
 
@@ -91,13 +90,10 @@ vim modules/services/my-service.nix
 
 # 2. Auto-discovered — no wiring needed
 
-# 3. Declare coverage in test-coverage.nix
-vim flake/test-coverage.nix  # Add to services section
-
-# 4. Enable in host
+# 3. Enable in host
 vim hosts/sinnix-prime/default.nix
 
-# 5. Apply
+# 4. Apply
 switch
 ```
 

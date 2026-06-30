@@ -15,7 +15,6 @@
     let
       lib = pkgs.lib;
       scriptPkgs = (import ./scripts.nix { inherit inputs pkgs; }).packageSet;
-      checkTiers = import ./check-tiers.nix { inherit lib; };
       commandRegistry = import ./command-registry.nix {
         inherit inputs pkgs system;
       };
@@ -193,10 +192,11 @@
             esac
           done
 
-          default_targets=(
-            ${builtins.concatStringsSep "\n            " (
-              map (name: ''"checks.${system}.${name}"'') checkTiers.defaultCheckNames
-            )}
+          mapfile -t default_targets < <(
+            ${nix} eval "$_flake_dir#checks.${system}" \
+              --apply builtins.attrNames \
+              --json \
+              | ${pkgs.jq}/bin/jq -r '.[] | "checks.${system}.\(.)"'
           )
 
           cd "$_flake_dir"

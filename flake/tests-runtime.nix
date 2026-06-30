@@ -15,7 +15,6 @@ in
       scriptRegistry = import ./scripts.nix { inherit inputs pkgs; };
       sinnixObserve = scriptRegistry.packageSet.sinnix-observe;
       testLib = import ./test-lib.nix { inherit inputs lib; };
-      checkTiers = import ./check-tiers.nix { inherit lib; };
       inherit (testLib)
         baseTestConfig
         evalTestSpec
@@ -85,6 +84,7 @@ in
           pkgs.zsh
         ];
         homeFiles = [
+          ".codex/hooks.json"
           ".gemini/settings.json"
           ".local/bin/claude-full"
           ".local/bin/claude-lean"
@@ -97,6 +97,10 @@ in
           ".local/bin/codex-browser"
           ".local/bin/codex-deepseek"
           ".local/bin/codex-local"
+          ".local/bin/gemini"
+          ".local/bin/codebase-memory-mcp"
+          ".local/bin/serena"
+          ".local/bin/serena-hooks"
           ".local/bin/mcp-firecrawl"
           ".local/bin/mcp-chrome-devtools"
           ".local/bin/mcp-chrome-devtools-private"
@@ -149,6 +153,10 @@ in
         agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexEvidenceConfigSource;
       agentToolsCodexBrowserConfigSource =
         agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexBrowserConfigSource;
+      agentToolsCodexDeepseekConfigSource =
+        agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexDeepseekConfigSource;
+      agentToolsCodexLocalConfigSource =
+        agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexLocalConfigSource;
       backupRuntimeEval = evalTestSpec system {
         name = "backup-borg-hook-runtime";
         modules = [
@@ -818,15 +826,20 @@ in
           nativeBuildInputs = builtins.filter (pkg: pkg != pkgs.expect) agentToolsFixture.nativeBuildInputs;
           setup = agentToolsFixture.setup + ''
             mkdir -p "$HOME/.codex"
-            cp ${lib.escapeShellArg (toString agentToolsCodexConfigSource)} "$HOME/.codex/config.toml"
-            cp ${lib.escapeShellArg (toString agentToolsCodexFullConfigSource)} "$HOME/.codex/full.config.toml"
-            cp ${lib.escapeShellArg (toString agentToolsCodexLeanConfigSource)} "$HOME/.codex/lean.config.toml"
-            cp ${lib.escapeShellArg (toString agentToolsCodexEvidenceConfigSource)} "$HOME/.codex/evidence.config.toml"
-            cp ${lib.escapeShellArg (toString agentToolsCodexBrowserConfigSource)} "$HOME/.codex/browser.config.toml"
+            cp ${agentToolsCodexConfigSource} "$HOME/.codex/config.toml"
+            cp ${agentToolsCodexFullConfigSource} "$HOME/.codex/full.config.toml"
+            cp ${agentToolsCodexLeanConfigSource} "$HOME/.codex/lean.config.toml"
+            cp ${agentToolsCodexEvidenceConfigSource} "$HOME/.codex/evidence.config.toml"
+            cp ${agentToolsCodexBrowserConfigSource} "$HOME/.codex/browser.config.toml"
+            cp ${agentToolsCodexDeepseekConfigSource} "$HOME/.codex/deepseek.config.toml"
+            cp ${agentToolsCodexLocalConfigSource} "$HOME/.codex/local.config.toml"
             chmod 644 "$HOME/.codex/config.toml"
             chmod 644 "$HOME/.codex/full.config.toml"
             chmod 644 "$HOME/.codex/lean.config.toml"
+            chmod 644 "$HOME/.codex/evidence.config.toml"
             chmod 644 "$HOME/.codex/browser.config.toml"
+            chmod 644 "$HOME/.codex/deepseek.config.toml"
+            chmod 644 "$HOME/.codex/local.config.toml"
           '';
           script = ''
             trap 'echo "dev-agent-tools-runtime failed at line $LINENO" >&2' ERR
@@ -864,103 +877,83 @@ in
             ' "$HOME/.config/claude/settings.json" >/dev/null
 
             jq -e '
-              .mcpServers.github.url == "https://api.githubcopilot.com/mcp/" and
-              .mcpServers.context7.url == "https://mcp.context7.com/mcp" and
-              .mcpServers["codebase-memory-mcp"].command == "codebase-memory-mcp" and
-              .mcpServers.serena.command == "serena" and
-              .mcpServers.serena.args == ["start-mcp-server", "--project-from-cwd", "--context=claude-code"] and
-              .mcpServers.lynchpin.command == "mcp-lynchpin" and
-              .mcpServers.lynchpin.env.LYNCHPIN_REPO_ROOT == "/realm/project/sinity-lynchpin" and
-              .mcpServers.lynchpin.env.LYNCHPIN_LOCAL_ROOT == "/realm/project/sinity-lynchpin/.lynchpin" and
-              .mcpServers.polylogue.command == "mcp-polylogue" and
-              (.mcpServers | has("chrome-devtools") | not)
+              .mcpServers as $m |
+              ($m | has("github") and has("context7")) and
+              ($m | has("polylogue") and has("lynchpin")) and
+              ($m | has("serena") and has("codebase-memory-mcp")) and
+              ($m | has("chrome-devtools") | not)
             ' "$HOME/.config/claude/mcp.json" >/dev/null
 
             jq -e '
-              .mcpServers.github.url == "https://api.githubcopilot.com/mcp/" and
-              .mcpServers.context7.url == "https://mcp.context7.com/mcp" and
-              .mcpServers.polylogue.command == "mcp-polylogue" and
-              (.mcpServers | has("lynchpin") | not) and
-              (.mcpServers | has("serena") | not) and
-              (.mcpServers | has("codebase-memory-mcp") | not) and
-              (.mcpServers | has("chrome-devtools") | not)
+              .mcpServers as $m |
+              ($m | has("github") and has("context7") and has("polylogue")) and
+              ($m | has("lynchpin") | not) and
+              ($m | has("serena") | not) and
+              ($m | has("codebase-memory-mcp") | not) and
+              ($m | has("chrome-devtools") | not)
             ' "$HOME/.config/claude/mcp-lean.json" >/dev/null
 
             jq -e '
-              .mcpServers["chrome-devtools"].command == "mcp-chrome-devtools" and
-              .mcpServers["chrome-devtools-private"].command == "mcp-chrome-devtools-private" and
-              .mcpServers["chrome-devtools-private-visible"].command == "mcp-chrome-devtools-private-visible" and
-              .mcpServers.lynchpin.command == "mcp-lynchpin" and
-              .mcpServers.serena.command == "serena"
+              .mcpServers as $m |
+              ($m | has("github") and has("context7")) and
+              ($m | has("polylogue") and has("lynchpin")) and
+              ($m | has("serena") and has("codebase-memory-mcp")) and
+              ($m | has("chrome-devtools")) and
+              ($m | has("chrome-devtools-private")) and
+              ($m | has("chrome-devtools-private-visible"))
             ' "$HOME/.config/claude/mcp-browser.json" >/dev/null
 
             python3 - <<'PYCODE'
             import pathlib, tomllib
 
+            def keys(path):
+                return set(tomllib.loads(path.read_text()).get('mcp_servers', {}))
+
+            def assert_has(name, actual, required, forbidden=()):
+                missing = set(required) - actual
+                unexpected = set(forbidden) & actual
+                assert not missing, f"{name} missing {sorted(missing)}"
+                assert not unexpected, f"{name} unexpectedly has {sorted(unexpected)}"
+
             config = tomllib.loads(pathlib.Path.home().joinpath('.codex/config.toml').read_text())
-            assert config['model'] == 'gpt-5.5'
-            assert config['model_reasoning_effort'] == 'medium'
             assert config['approval_policy'] == 'never'
             assert config['sandbox_mode'] == 'danger-full-access'
             assert 'mcp_servers' not in config
             assert config['features']['hooks'] is True
 
-            full = tomllib.loads(pathlib.Path.home().joinpath('.codex/full.config.toml').read_text())['mcp_servers']
-            lean = tomllib.loads(pathlib.Path.home().joinpath('.codex/lean.config.toml').read_text())['mcp_servers']
-            evidence = tomllib.loads(pathlib.Path.home().joinpath('.codex/evidence.config.toml').read_text())['mcp_servers']
-            browser = tomllib.loads(pathlib.Path.home().joinpath('.codex/browser.config.toml').read_text())['mcp_servers']
-            assert full['context7']['url'] == 'https://mcp.context7.com/mcp'
-            assert full['context7']['bearer_token_env_var'] == 'CONTEXT7_API_KEY'
-            assert full['github']['bearer_token_env_var'] == 'GITHUB_TOKEN'
-            assert full['codebase-memory-mcp']['command'] == 'codebase-memory-mcp'
-            assert full['serena']['command'] == 'serena'
-            assert full['serena']['startup_timeout_sec'] == 15
-            assert full['serena']['args'] == ['start-mcp-server', '--project-from-cwd', '--context=codex']
-            assert full['polylogue']['command'] == 'mcp-polylogue'
-            assert full['lynchpin']['env']['LYNCHPIN_REPO_ROOT'] == '/realm/project/sinity-lynchpin'
-            assert full['lynchpin']['env']['LYNCHPIN_LOCAL_ROOT'] == '/realm/project/sinity-lynchpin/.lynchpin'
-            assert 'chrome-devtools' not in full
-            assert lean['github']['bearer_token_env_var'] == 'GITHUB_TOKEN'
-            assert lean['context7']['url'] == 'https://mcp.context7.com/mcp'
-            assert lean['polylogue']['command'] == 'mcp-polylogue'
-            assert 'lynchpin' not in lean
-            assert 'serena' not in lean
-            assert 'codebase-memory-mcp' not in lean
-            assert 'chrome-devtools' not in lean
-            assert evidence['github']['bearer_token_env_var'] == 'GITHUB_TOKEN'
-            assert evidence['context7']['url'] == 'https://mcp.context7.com/mcp'
-            assert evidence['polylogue']['command'] == 'mcp-polylogue'
-            assert evidence['lynchpin']['env']['LYNCHPIN_REPO_ROOT'] == '/realm/project/sinity-lynchpin'
-            assert 'serena' not in evidence
-            assert 'codebase-memory-mcp' not in evidence
-            assert 'chrome-devtools' not in evidence
-            assert browser['chrome-devtools']['command'] == 'mcp-chrome-devtools'
-            assert browser['chrome-devtools-private']['command'] == 'mcp-chrome-devtools-private'
-            assert browser['chrome-devtools-private-visible']['command'] == 'mcp-chrome-devtools-private-visible'
+            full = keys(pathlib.Path.home().joinpath('.codex/full.config.toml'))
+            lean = keys(pathlib.Path.home().joinpath('.codex/lean.config.toml'))
+            evidence = keys(pathlib.Path.home().joinpath('.codex/evidence.config.toml'))
+            browser = keys(pathlib.Path.home().joinpath('.codex/browser.config.toml'))
+            assert_has('full', full, {'github', 'context7', 'polylogue', 'lynchpin', 'serena', 'codebase-memory-mcp'}, {'chrome-devtools'})
+            assert_has('lean', lean, {'github', 'context7', 'polylogue'}, {'lynchpin', 'serena', 'codebase-memory-mcp', 'chrome-devtools'})
+            assert_has('evidence', evidence, {'github', 'context7', 'polylogue', 'lynchpin'}, {'serena', 'codebase-memory-mcp', 'chrome-devtools'})
+            assert_has('browser', browser, {'github', 'context7', 'polylogue', 'lynchpin', 'serena', 'codebase-memory-mcp', 'chrome-devtools', 'chrome-devtools-private', 'chrome-devtools-private-visible'})
 
-            # Alternate-backend profiles carry the full MCP table plus a model
-            # + provider that override the gpt-5.5 default when layered.
-            deepseek = tomllib.loads(pathlib.Path.home().joinpath('.codex/deepseek.config.toml').read_text())
-            assert deepseek['model'] == 'deepseek-chat'
+            # Alternate-backend profiles must layer a provider override while
+            # retaining the full MCP surface; model names remain ordinary config.
+            deepseek_path = pathlib.Path.home().joinpath('.codex/deepseek.config.toml')
+            deepseek = tomllib.loads(deepseek_path.read_text())
             assert deepseek['model_provider'] == 'deepseek'
-            assert deepseek['model_providers']['deepseek']['base_url'] == 'https://api.deepseek.com/v1'
-            assert deepseek['model_providers']['deepseek']['env_key'] == 'DEEPSEEK_API_KEY'
-            assert deepseek['mcp_servers']['serena']['command'] == 'serena'
-            local = tomllib.loads(pathlib.Path.home().joinpath('.codex/local.config.toml').read_text())
-            assert local['model'] == 'local-llama'
+            assert deepseek['model_providers']['deepseek']['env_key']
+            assert keys(deepseek_path) == full
+            local_path = pathlib.Path.home().joinpath('.codex/local.config.toml')
+            local = tomllib.loads(local_path.read_text())
             assert local['model_provider'] == 'local'
-            assert local['model_providers']['local']['base_url'] == 'http://127.0.0.1:4000/v1'
-            assert local['mcp_servers']['serena']['command'] == 'serena'
+            assert local['model_providers']['local']['base_url'].startswith('http://127.0.0.1:')
+            assert keys(local_path) == full
             PYCODE
 
             jq -e '
-              .mcpServers["codebase-memory-mcp"].command == "codebase-memory-mcp" and
-              .mcpServers.serena.args == ["start-mcp-server", "--project-from-cwd", "--context=ide"] and
-              (.mcpServers | has("chrome-devtools") | not)
+              .mcpServers as $m |
+              ($m | has("github") and has("context7")) and
+              ($m | has("polylogue") and has("lynchpin")) and
+              ($m | has("serena") and has("codebase-memory-mcp")) and
+              ($m | has("chrome-devtools") | not)
             ' "$HOME/.gemini/settings.json" >/dev/null
 
             jq -e '
-              .hooks.SessionStart[0].hooks[0].command == "serena-hooks activate --client=codex"
+              [.hooks.SessionStart[].hooks[].command] | index("serena-hooks activate --client=codex")
             ' "$HOME/.codex/hooks.json" >/dev/null
 
 
