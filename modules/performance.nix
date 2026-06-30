@@ -267,13 +267,13 @@ in
     services.earlyoom = {
       enable = true;
       enableNotifications = true;
-      # Earlyoom requires BOTH the memory and swap thresholds to be crossed.
-      # Keep swap as a short overflow signal, not extra working memory: once
-      # available memory is below roughly 12-13 GiB and more than ~1 GiB of the
-      # 4 GiB swapfile is occupied, kill the best heavy-process candidate while
-      # the desktop can still recover.
-      freeMemThreshold = 40;
-      freeSwapThreshold = 75;
+      # Emergency brake only. The previous 40/75 thresholds killed ordinary
+      # rustc work while MemAvailable was still around 10 GiB; that prevents
+      # the intended dev-local Sinex loop from starting under normal desktop
+      # load. Keep swap as an overflow signal, but do not treat a small amount
+      # of occupied swap as reason to kill a build while plenty of RAM remains.
+      freeMemThreshold = 15;
+      freeSwapThreshold = 25;
       extraArgs = [
         # Prefer killing heavy build tooling under pressure — NOT the coding
         # agents. `node`/`python` were removed here: Claude Code is a `node`

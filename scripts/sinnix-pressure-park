@@ -1,0 +1,214 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Park or resume background units based on live PSI pressure
+# runtimeInputs: bash coreutils gawk gnugrep systemd sudo
+
+set -euo pipefail
+
+default_units=(
+  borgbackup-job-realm.service
+  borgbackup-job-persist.service
+  borgbackup-maintenance.service
+  borgbackup-check.service
+)
+
+usage() {
+  cat <<'EOF'
+usage: sinnix-pressure-park status|auto|freeze|thaw [options] [UNIT...]
+
+Options:
+  --io-full PCT       I/O full avg10 threshold for auto-freeze (default: 5)
+  --mem-full PCT      memory full avg10 threshold for auto-freeze (default: 2)
+  --resume-io PCT     I/O full avg10 threshold for auto-thaw (default: 1)
+  --resume-mem PCT    memory full avg10 threshold for auto-thaw (default: 0.5)
+  --dry-run           show intended actions without writing cgroup.freeze
+
+Default units are Borg backup jobs. This tool is an admission/parking actuator:
+it freezes background cgroups under real pressure and thaws them when pressure
+has fallen. It does not kill work and does not change build parallelism.
+EOF
+}
+
+die() {
+  printf 'sinnix-pressure-park: %s\n' "$*" >&2
+  exit 1
+}
+
+psi_avg10() {
+  local file="$1" kind="$2"
+  awk -v kind="$kind" '$1 == kind { for (i = 2; i <= NF; i++) { split($i, kv, "="); if (kv[1] == "avg10") print kv[2] } }' "$file"
+}
+
+control_group_for_unit() {
+  systemctl show "$1" --property=ControlGroup --value --no-pager 2>/dev/null || true
+}
+
+cgroup_root() {
+  local control_group="$1"
+  if [ -z "$control_group" ] || [ "$control_group" = "/" ]; then
+    return 1
+  fi
+  printf '/sys/fs/cgroup%s\n' "$control_group"
+}
+
+read_num_file() {
+  local path="$1"
+  if [ -r "$path" ]; then
+    cat "$path"
+  else
+    printf '0'
+  fi
+}
+
+bytes_to_mib() {
+  awk -v b="${1:-0}" 'BEGIN { printf "%.1f", b / 1048576 }'
+}
+
+unit_status_line() {
+  local unit="$1" root="$2"
+  local active sub freezer freeze frozen populated current anon file slab high max
+  active="$(systemctl show "$unit" --property=ActiveState --value --no-pager 2>/dev/null || true)"
+  sub="$(systemctl show "$unit" --property=SubState --value --no-pager 2>/dev/null || true)"
+  freezer="$(systemctl show "$unit" --property=FreezerState --value --no-pager 2>/dev/null || true)"
+  freeze="$(read_num_file "$root/cgroup.freeze")"
+  current="$(read_num_file "$root/memory.current")"
+  high="$(read_num_file "$root/memory.high")"
+  max="$(read_num_file "$root/memory.max")"
+  populated="$(awk '$1 == "populated" { print $2 }' "$root/cgroup.events" 2>/dev/null || true)"
+  frozen="$(awk '$1 == "frozen" { print $2 }' "$root/cgroup.events" 2>/dev/null || true)"
+  anon="$(awk '$1 == "anon" { print $2 }' "$root/memory.stat" 2>/dev/null || true)"
+  file="$(awk '$1 == "file" { print $2 }' "$root/memory.stat" 2>/dev/null || true)"
+  slab="$(awk '$1 == "slab" { print $2 }' "$root/memory.stat" 2>/dev/null || true)"
+  printf '%s active=%s sub=%s freezer=%s freeze=%s frozen=%s populated=%s current_mib=%s anon_mib=%s file_mib=%s slab_mib=%s high=%s max=%s\n' \
+    "$unit" "${active:-unknown}" "${sub:-unknown}" "${freezer:-unknown}" \
+    "${freeze:-unknown}" "${frozen:-unknown}" "${populated:-unknown}" \
+    "$(bytes_to_mib "${current:-0}")" "$(bytes_to_mib "${anon:-0}")" \
+    "$(bytes_to_mib "${file:-0}")" "$(bytes_to_mib "${slab:-0}")" \
+    "${high:-unknown}" "${max:-unknown}"
+}
+
+write_freeze() {
+  local root="$1" value="$2"
+  if [ ! -w "$root/cgroup.freeze" ]; then
+    die "cgroup.freeze is not writable: $root/cgroup.freeze"
+  fi
+  printf '%s' "$value" > "$root/cgroup.freeze"
+}
+
+action="${1:-}"
+if [ -z "$action" ] || [ "$action" = "-h" ] || [ "$action" = "--help" ]; then
+  usage
+  exit 0
+fi
+shift
+
+case "$action" in
+  status | auto | freeze | thaw) ;;
+  *) die "unknown action: $action" ;;
+esac
+
+io_full_threshold=5
+mem_full_threshold=2
+resume_io_threshold=1
+resume_mem_threshold=0.5
+dry_run=0
+units=()
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --io-full)
+      io_full_threshold="${2:?missing --io-full value}"
+      shift 2
+      ;;
+    --mem-full)
+      mem_full_threshold="${2:?missing --mem-full value}"
+      shift 2
+      ;;
+    --resume-io)
+      resume_io_threshold="${2:?missing --resume-io value}"
+      shift 2
+      ;;
+    --resume-mem)
+      resume_mem_threshold="${2:?missing --resume-mem value}"
+      shift 2
+      ;;
+    --dry-run)
+      dry_run=1
+      shift
+      ;;
+    --)
+      shift
+      while [ "$#" -gt 0 ]; do
+        units+=("$1")
+        shift
+      done
+      ;;
+    -*)
+      die "unknown option: $1"
+      ;;
+    *)
+      units+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [ "${#units[@]}" -eq 0 ]; then
+  units=("${default_units[@]}")
+fi
+
+io_full="$(psi_avg10 /proc/pressure/io full)"
+mem_full="$(psi_avg10 /proc/pressure/memory full)"
+printf 'pressure io_full_avg10=%s mem_full_avg10=%s thresholds.freeze_io=%s thresholds.freeze_mem=%s thresholds.resume_io=%s thresholds.resume_mem=%s dry_run=%s\n' \
+  "${io_full:-0}" "${mem_full:-0}" "$io_full_threshold" "$mem_full_threshold" \
+  "$resume_io_threshold" "$resume_mem_threshold" "$dry_run"
+
+target=""
+case "$action" in
+  freeze) target=1 ;;
+  thaw) target=0 ;;
+  auto)
+    target="$(
+      awk \
+        -v io="${io_full:-0}" \
+        -v mem="${mem_full:-0}" \
+        -v freeze_io="$io_full_threshold" \
+        -v freeze_mem="$mem_full_threshold" \
+        -v resume_io="$resume_io_threshold" \
+        -v resume_mem="$resume_mem_threshold" \
+        'BEGIN {
+          if (io >= freeze_io || mem >= freeze_mem) print 1;
+          else if (io <= resume_io && mem <= resume_mem) print 0;
+          else print "";
+        }'
+    )"
+    ;;
+esac
+
+if [ "$action" != "status" ] && [ "$dry_run" -eq 0 ] && [ -n "$target" ] && [ "${EUID:-$(id -u)}" -ne 0 ]; then
+  exec sudo -- "$0" "$action" \
+    --io-full "$io_full_threshold" \
+    --mem-full "$mem_full_threshold" \
+    --resume-io "$resume_io_threshold" \
+    --resume-mem "$resume_mem_threshold" \
+    "${units[@]}"
+fi
+
+for unit in "${units[@]}"; do
+  control_group="$(control_group_for_unit "$unit")"
+  root="$(cgroup_root "$control_group" || true)"
+  if [ -z "${root:-}" ] || [ ! -d "$root" ]; then
+    printf '%s missing-control-group\n' "$unit" >&2
+    continue
+  fi
+  if [ -n "$target" ] && [ "$action" != "status" ]; then
+    if [ "$dry_run" -eq 1 ]; then
+      printf '%s would_set_freeze=%s\n' "$unit" "$target"
+    else
+      write_freeze "$root" "$target"
+    fi
+  elif [ "$action" = "auto" ]; then
+    printf '%s auto_hold reason=within-hysteresis\n' "$unit"
+  fi
+  unit_status_line "$unit" "$root"
+done

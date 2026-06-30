@@ -177,6 +177,62 @@ def test_cgroup_memory_sample_reads_capacity_fields(monkeypatch, tmp_path) -> No
     assert row["cgroup_freeze"] == 1
 
 
+def test_service_cgroup_memory_sample_labels_unit(monkeypatch) -> None:
+    collector = _collector()
+
+    calls = []
+
+    def fake_cgroup_memory_sample(
+        observed_at,
+        host,
+        boot_id,
+        *,
+        label,
+        scope,
+        control_group,
+    ):
+        calls.append((observed_at, host, boot_id, label, scope, control_group))
+        return {"label": label, "scope": scope, "control_group": control_group}
+
+    monkeypatch.setattr(collector, "cgroup_memory_sample", fake_cgroup_memory_sample)
+
+    row = collector.service_cgroup_memory_sample(
+        "2026-06-30T00:00:00+00:00",
+        "sinnix-prime",
+        "boot-id",
+        unit="borgbackup-job-realm.service",
+        scope="system",
+        control_group="/background.slice/borgbackup-job-realm.service",
+    )
+
+    assert row == {
+        "label": "unit:borgbackup-job-realm.service",
+        "scope": "system",
+        "control_group": "/background.slice/borgbackup-job-realm.service",
+    }
+    assert calls == [
+        (
+            "2026-06-30T00:00:00+00:00",
+            "sinnix-prime",
+            "boot-id",
+            "unit:borgbackup-job-realm.service",
+            "system",
+            "/background.slice/borgbackup-job-realm.service",
+        )
+    ]
+    assert (
+        collector.service_cgroup_memory_sample(
+            "2026-06-30T00:00:00+00:00",
+            "sinnix-prime",
+            "boot-id",
+            unit="missing.service",
+            scope="system",
+            control_group=None,
+        )
+        is None
+    )
+
+
 def test_cgroup_memory_rows_insert_into_sqlite(tmp_path) -> None:
     collector = _collector()
     db = tmp_path / "telemetry.sqlite"

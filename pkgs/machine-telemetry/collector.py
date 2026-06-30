@@ -791,6 +791,27 @@ def cgroup_memory_samples(
     return rows
 
 
+def service_cgroup_memory_sample(
+    observed_at: str,
+    host: str,
+    boot_id: str | None,
+    *,
+    unit: str,
+    scope: str,
+    control_group: str | None,
+) -> dict[str, object] | None:
+    if not control_group:
+        return None
+    return cgroup_memory_sample(
+        observed_at,
+        host,
+        boot_id,
+        label=f"unit:{unit}",
+        scope=scope,
+        control_group=control_group,
+    )
+
+
 def insert_cgroup_memory_stats(
     conn: sqlite3.Connection, rows: list[dict[str, object]]
 ) -> None:
@@ -1706,6 +1727,7 @@ def insert_service_states(
     rows = []
     io_rows: list[dict[str, object]] = []
     pressure_rows: list[dict[str, object]] = []
+    cgroup_memory_rows: list[dict[str, object]] = []
     for unit in units:
         user = unit == "polylogued.service"
         props = systemctl_props(unit, user=user, user_name=user_name)
@@ -1760,6 +1782,16 @@ def insert_service_states(
         )
         if pressure is not None:
             pressure_rows.append(pressure)
+        service_memory = service_cgroup_memory_sample(
+            observed_at,
+            host,
+            boot_id,
+            unit=unit,
+            scope=scope,
+            control_group=control_group,
+        )
+        if service_memory is not None:
+            cgroup_memory_rows.append(service_memory)
     if rows:
         conn.executemany(
             """
@@ -1776,6 +1808,7 @@ def insert_service_states(
         )
     insert_cgroup_io_stats(conn, io_rows)
     insert_cgroup_pressure_stats(conn, pressure_rows)
+    insert_cgroup_memory_stats(conn, cgroup_memory_rows)
 
 
 def main() -> int:
