@@ -27,7 +27,7 @@ let
   # Helper to import sub-modules which might need args
   bindings = import ./bindings.nix {
     inherit pkgs scriptPkgs;
-    sinnix = config.sinnix;
+    inherit (config) sinnix;
   };
   rules = import ./rules.nix {
     inherit lib;
@@ -284,7 +284,7 @@ in
               animations.enabled = false;
 
               inherit (bindings) bind bindl bindm;
-              windowrule = if rules ? windowrule then rules.windowrule else [ ];
+              windowrule = rules.windowrule or [ ];
 
               # NOTE: bar-layer blur (layerrule) omitted — the inline
               # `layerrule = blur, <ns>` form is rejected by Hyprland 0.54.3
@@ -295,7 +295,7 @@ in
 
             extraConfig =
               let
-                extra = if rules ? extraConfig then rules.extraConfig else "";
+                extra = rules.extraConfig or "";
               in
               lib.mkAfter ''
                 # Generated and live-reloaded by Noctalia's wallpaper-derived

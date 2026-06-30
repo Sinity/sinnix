@@ -751,7 +751,9 @@ def cgroup_memory_sample(
         "control_group": control_group,
         "memory_current_bytes": int_or_none(read_text(root / "memory.current")),
         "memory_peak_bytes": int_or_none(read_text(root / "memory.peak")),
-        "memory_swap_current_bytes": int_or_none(read_text(root / "memory.swap.current")),
+        "memory_swap_current_bytes": int_or_none(
+            read_text(root / "memory.swap.current")
+        ),
         "memory_swap_peak_bytes": int_or_none(read_text(root / "memory.swap.peak")),
         "memory_high_bytes": int_or_none(read_text(root / "memory.high")),
         "memory_max_bytes": int_or_none(read_text(root / "memory.max")),
@@ -2151,7 +2153,9 @@ def main() -> int:
                 insert_service_states(conn, args.host, boot_id, units, args.user_name)
                 insert_cgroup_memory_stats(
                     conn,
-                    cgroup_memory_samples(observed_at, args.host, boot_id, cgroup_specs),
+                    cgroup_memory_samples(
+                        observed_at, args.host, boot_id, cgroup_specs
+                    ),
                 )
                 next_service = sample_start + args.service_interval
             if args.network_interval > 0 and sample_start >= next_network:

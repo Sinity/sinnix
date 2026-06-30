@@ -112,15 +112,15 @@ let
   );
 
   configFile = jsonFormat.generate "sinnix-agent-gateway-config.json" {
-    stateDir = cfg.stateDir;
-    auditPath = cfg.auditPath;
-    yolo = cfg.yolo;
-    allowArbitraryCommands = cfg.allowArbitraryCommands;
-    allowedHostCommands = cfg.allowedHostCommands;
-    outputLimit = cfg.outputLimit;
+    inherit (cfg) stateDir;
+    inherit (cfg) auditPath;
+    inherit (cfg) yolo;
+    inherit (cfg) allowArbitraryCommands;
+    inherit (cfg) allowedHostCommands;
+    inherit (cfg) outputLimit;
     defaultTimeout = cfg.defaultTimeoutSec;
     maxTimeout = cfg.maxTimeoutSec;
-    globalEnv = cfg.globalEnv;
+    inherit (cfg) globalEnv;
     repositories = lib.mapAttrs (_: repo: {
       inherit (repo)
         url

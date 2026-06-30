@@ -6,8 +6,7 @@
 #
 # NOTE (v5 alpha): verify the exact Noctalia lock IPC target against the running
 # shell, e.g. `qs -c noctalia-shell ipc call <lockTarget> <action>`.
-{ ... }:
-{
+_: {
   services.hypridle = {
     enable = true;
     settings = {

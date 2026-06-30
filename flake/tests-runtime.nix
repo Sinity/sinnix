@@ -62,13 +62,10 @@ in
         name = "dev-agent-tools-runtime";
         feature = "sinnix.features.dev.agentTools.enable";
         extraModules = [
-          (
-            { ... }:
-            {
-              sinnix.features.dev.shell.enable = true;
-              sinnix.features.dev.mcp-servers.enable = true;
-            }
-          )
+          (_: {
+            sinnix.features.dev.shell.enable = true;
+            sinnix.features.dev.mcp-servers.enable = true;
+          })
         ];
         assertions = _config: [ ];
       };
@@ -162,12 +159,9 @@ in
         modules = [
           mountTmpfsRoots
           baseTestConfig
-          (
-            { ... }:
-            {
-              networking.hostName = "backup-runtime";
-            }
-          )
+          (_: {
+            networking.hostName = "backup-runtime";
+          })
         ];
         assertions = _config: [ ];
       };
@@ -176,9 +170,29 @@ in
         builtins.replaceStrings (map (replacement: replacement.from) replacements) (map (
           replacement: replacement.to
         ) replacements) hook;
-      realmBorgPreHook =
-        rewriteBackupHook backupRuntimeEval.config.services.borgbackup.jobs.realm.preHook
+      realmBorgDrainScript =
+        rewriteBackupHook backupRuntimeEval.config.systemd.services.borgbackup-job-realm.script
           [
+            {
+              from = "/outer-realm/backup/borg-realm-v2";
+              to = "$TMPDIR/repos/borg-realm-v2";
+            }
+            {
+              from = "/persist/root/.cache/borg-drain";
+              to = "$TMPDIR/state/borg-drain";
+            }
+            {
+              from = "/persist/root/.cache/borg";
+              to = "$TMPDIR/state/borg-cache";
+            }
+            {
+              from = "/run/lock/sinnix-borg.lock";
+              to = "$TMPDIR/state/sinnix-borg.lock";
+            }
+            {
+              from = "install -d -m 0700 -o root -g root";
+              to = "install -d -m 0700";
+            }
             {
               from = "${pkgs.util-linux}/bin/mountpoint";
               to = "$TMPDIR/mock-bin/mountpoint";
@@ -200,9 +214,29 @@ in
               to = "$TMPDIR/bind/realm";
             }
           ];
-      persistBorgPreHook =
-        rewriteBackupHook backupRuntimeEval.config.services.borgbackup.jobs.persist.preHook
+      persistBorgDrainScript =
+        rewriteBackupHook backupRuntimeEval.config.systemd.services.borgbackup-job-persist.script
           [
+            {
+              from = "/outer-realm/backup/borg-persist-v1";
+              to = "$TMPDIR/repos/borg-persist-v1";
+            }
+            {
+              from = "/persist/root/.cache/borg-drain";
+              to = "$TMPDIR/state/borg-drain";
+            }
+            {
+              from = "/persist/root/.cache/borg";
+              to = "$TMPDIR/state/borg-cache";
+            }
+            {
+              from = "/run/lock/sinnix-borg.lock";
+              to = "$TMPDIR/state/sinnix-borg.lock";
+            }
+            {
+              from = "install -d -m 0700 -o root -g root";
+              to = "install -d -m 0700";
+            }
             {
               from = "${pkgs.util-linux}/bin/mountpoint";
               to = "$TMPDIR/mock-bin/mountpoint";
@@ -224,9 +258,29 @@ in
               to = "$TMPDIR/bind/persist";
             }
           ];
-      missingRealmBorgPreHook =
-        rewriteBackupHook backupRuntimeEval.config.services.borgbackup.jobs.realm.preHook
+      missingRealmBorgDrainScript =
+        rewriteBackupHook backupRuntimeEval.config.systemd.services.borgbackup-job-realm.script
           [
+            {
+              from = "/outer-realm/backup/borg-realm-v2";
+              to = "$TMPDIR/repos/borg-realm-v2";
+            }
+            {
+              from = "/persist/root/.cache/borg-drain";
+              to = "$TMPDIR/state/borg-drain";
+            }
+            {
+              from = "/persist/root/.cache/borg";
+              to = "$TMPDIR/state/borg-cache";
+            }
+            {
+              from = "/run/lock/sinnix-borg.lock";
+              to = "$TMPDIR/state/sinnix-borg.lock";
+            }
+            {
+              from = "install -d -m 0700 -o root -g root";
+              to = "install -d -m 0700";
+            }
             {
               from = "${pkgs.util-linux}/bin/mountpoint";
               to = "$TMPDIR/mock-bin/mountpoint";
@@ -285,6 +339,25 @@ in
             { pkgs, ... }:
             {
               environment.systemPackages = [ pkgs.jq ];
+              sinnix.features.desktop = {
+                activitywatch.enable = false;
+                agentVerifyTimer.enable = false;
+                audio.enable = false;
+                audioCapture.enable = false;
+                base.enable = false;
+                browser.enable = false;
+                "common-apps".enable = false;
+                gaming.enable = false;
+                hyprland.enable = false;
+                hyprlandAnimations.enable = false;
+                media.enable = false;
+                mime.enable = false;
+                noctalia.enable = false;
+                storage.enable = false;
+                terminal.enable = false;
+                theming.enable = false;
+                ui.enable = false;
+              };
               sinnix.services.polylogue.enable = true;
             };
           testScript = ''
@@ -301,7 +374,9 @@ in
             machine.succeed(f"{as_user} systemctl --user is-active --quiet polylogued.service")
             machine.fail(f"{as_user} systemctl --user cat polylogue-run.service")
             machine.fail(f"{as_user} systemctl --user cat polylogue-run.timer")
-            machine.succeed(f"{as_user} polylogued status --format json | jq -e '.daemon == \"polylogued\" and (.live.source_count >= 0)' >/dev/null")
+            machine.succeed(f"{as_user} ${
+              inputs.polylogue.packages.${system}.default
+            }/bin/polylogued status --format json | jq -e '.daemon == \"polylogued\" and (.live.source_count >= 0)' >/dev/null")
           '';
         };
         transmission-vm = mkVmCheck system {
@@ -313,11 +388,31 @@ in
                 pkgs.curl
                 pkgs.jq
               ];
+              sinnix.features.desktop = {
+                activitywatch.enable = false;
+                agentVerifyTimer.enable = false;
+                audio.enable = false;
+                audioCapture.enable = false;
+                base.enable = false;
+                browser.enable = false;
+                "common-apps".enable = false;
+                gaming.enable = false;
+                hyprland.enable = false;
+                hyprlandAnimations.enable = false;
+                media.enable = false;
+                mime.enable = false;
+                noctalia.enable = false;
+                storage.enable = false;
+                terminal.enable = false;
+                theming.enable = false;
+                ui.enable = false;
+              };
               sinnix.services.transmission.enable = true;
             };
           testScript = ''
             start_all()
             machine.wait_for_unit("multi-user.target")
+            machine.succeed("systemctl start transmission.service")
             machine.wait_for_unit("transmission.service")
             machine.wait_until_succeeds("test -d /neo-outer-realm/inbox")
 
@@ -333,12 +428,16 @@ in
           pkgs.coreutils
           pkgs.findutils
           pkgs.gnugrep
+          pkgs.util-linux
         ];
         script = ''
           mkdir -p \
             "$TMPDIR/mock-bin" \
             "$TMPDIR/logs" \
             "$TMPDIR/bind" \
+            "$TMPDIR/repos" \
+            "$TMPDIR/state" \
+            "$TMPDIR/state/borg-cache" \
             "$TMPDIR/realm-snapshots" \
             "$TMPDIR/persist-snapshots" \
             "$TMPDIR/realm-empty"
@@ -371,7 +470,57 @@ in
           printf '%s\n' "$target_path" >> "$TMPDIR/logs/umount.log"
           EOF
 
-          chmod +x "$TMPDIR/mock-bin/mountpoint" "$TMPDIR/mock-bin/mount" "$TMPDIR/mock-bin/umount"
+          cat > "$TMPDIR/mock-bin/borg" <<'EOF'
+          #!${pkgs.bash}/bin/bash
+          set -euo pipefail
+          printf '%s\n' "$*" >> "$TMPDIR/logs/borg.log"
+          case "$1" in
+            init)
+              repo="''${@: -1}"
+              repo_path="''${repo#file://}"
+              mkdir -p "$repo_path"
+              touch "$repo_path/config"
+              ;;
+            list)
+              exit 2
+              ;;
+            create)
+              ;;
+            break-lock)
+              ;;
+            *)
+              echo "unexpected borg command: $*" >&2
+              exit 64
+              ;;
+          esac
+          EOF
+
+          cat > "$TMPDIR/mock-bin/btrfs" <<'EOF'
+          #!${pkgs.bash}/bin/bash
+          set -euo pipefail
+          printf '%s\n' "$*" >> "$TMPDIR/logs/btrfs.log"
+          if [ "$1" = subvolume ] && [ "$2" = delete ]; then
+            rm -rf "$3"
+            exit 0
+          fi
+          echo "unexpected btrfs command: $*" >&2
+          exit 64
+          EOF
+
+          cat > "$TMPDIR/mock-bin/pgrep" <<'EOF'
+          #!${pkgs.bash}/bin/bash
+          exit 1
+          EOF
+
+          chmod +x \
+            "$TMPDIR/mock-bin/mountpoint" \
+            "$TMPDIR/mock-bin/mount" \
+            "$TMPDIR/mock-bin/umount" \
+            "$TMPDIR/mock-bin/borg" \
+            "$TMPDIR/mock-bin/btrfs" \
+            "$TMPDIR/mock-bin/pgrep"
+
+          export PATH="$TMPDIR/mock-bin:$PATH"
 
           mkdir -p \
             "$TMPDIR/realm-snapshots/realm.2026-04-02T010000" \
@@ -382,19 +531,19 @@ in
           cat > "$TMPDIR/run-realm-hook.sh" <<'EOF'
           #!${pkgs.bash}/bin/bash
           set -euo pipefail
-          ${realmBorgPreHook}
+          ${realmBorgDrainScript}
           EOF
 
           cat > "$TMPDIR/run-persist-hook.sh" <<'EOF'
           #!${pkgs.bash}/bin/bash
           set -euo pipefail
-          ${persistBorgPreHook}
+          ${persistBorgDrainScript}
           EOF
 
           cat > "$TMPDIR/run-missing-realm-hook.sh" <<'EOF'
           #!${pkgs.bash}/bin/bash
           set -euo pipefail
-          ${missingRealmBorgPreHook}
+          ${missingRealmBorgDrainScript}
           EOF
 
           chmod +x \
@@ -409,14 +558,18 @@ in
           grep -q "$TMPDIR/persist-snapshots/persist.2026-04-02T011500 => $TMPDIR/bind/persist" "$TMPDIR/logs/mount.log"
           grep -q "$TMPDIR/bind/realm" "$TMPDIR/logs/umount.log"
           grep -q "$TMPDIR/bind/persist" "$TMPDIR/logs/umount.log"
+          grep -q "create .*::realm-realm.2026-04-02T011500" "$TMPDIR/logs/borg.log"
+          grep -q "create .*::persist-persist.2026-04-02T011500" "$TMPDIR/logs/borg.log"
+          grep -q "subvolume delete $TMPDIR/realm-snapshots/realm.2026-04-02T010000" "$TMPDIR/logs/btrfs.log"
+          grep -q "subvolume delete $TMPDIR/persist-snapshots/persist.2026-04-02T010000" "$TMPDIR/logs/btrfs.log"
 
           set +e
           "$TMPDIR/run-missing-realm-hook.sh" > "$TMPDIR/missing-realm.log" 2>&1
           missing_status=$?
           set -e
 
-          test "$missing_status" -eq 1
-          grep -q "No realm snapshot found" "$TMPDIR/missing-realm.log"
+          test "$missing_status" -eq 0
+          ! grep -q "borg create failed" "$TMPDIR/missing-realm.log"
         '';
       };
       sinnixObserveRuntime =
@@ -580,7 +733,7 @@ in
         pkgs.runCommand "sinnix-terminal-capture-runtime-check"
           {
             nativeBuildInputs = [
-              pkgs.asciinema_3
+              pkgs.asciinema
               pkgs.coreutils
               pkgs.findutils
               pkgs.gnugrep
@@ -593,7 +746,7 @@ in
             export HOME="$TMPDIR/home"
             export PATH="${
               lib.makeBinPath [
-                pkgs.asciinema_3
+                pkgs.asciinema
                 pkgs.coreutils
                 pkgs.findutils
                 pkgs.gnugrep
@@ -697,7 +850,7 @@ in
         pkgs.runCommand "sinnix-terminal-capture-runtime-failure-check"
           {
             nativeBuildInputs = [
-              pkgs.asciinema_3
+              pkgs.asciinema
               pkgs.coreutils
               pkgs.findutils
               pkgs.gnugrep
@@ -1016,7 +1169,8 @@ in
         ];
         script = ''
           polylogue --help | grep -q '^Usage: polylogue'
-          polylogue schema list --help | grep -q 'List available schema packages'
+          polylogue find --help | grep -q 'Search the archive'
+          polylogue config --help | grep -q 'Show resolved Polylogue configuration'
           polylogue-python - <<'EOF'
           import sys
           print(sys.executable)

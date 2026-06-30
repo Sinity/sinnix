@@ -21,14 +21,12 @@ mkFeatureModule {
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
     in
     {
-      home-manager.users.${user} =
-        { ... }:
-        {
-          home.packages = [
-            scriptPkgs.polylogue-cli
-            scriptPkgs.polylogue-python
-            scriptPkgs.polylogued
-          ];
-        };
+      home-manager.users.${user} = _: {
+        home.packages = [
+          scriptPkgs.polylogue-cli
+          scriptPkgs.polylogue-python
+          scriptPkgs.polylogued
+        ];
+      };
     };
 } args

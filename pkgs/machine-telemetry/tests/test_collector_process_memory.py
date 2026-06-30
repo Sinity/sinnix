@@ -18,7 +18,9 @@ def test_systemd_unescape_fragment_decodes_hex_escapes() -> None:
     collector = _collector()
 
     assert (
-        collector.systemd_unescape_fragment("wayland-wm@hyprland\\x2duwsm.desktop.service")
+        collector.systemd_unescape_fragment(
+            "wayland-wm@hyprland\\x2duwsm.desktop.service"
+        )
         == "wayland-wm@hyprland-uwsm.desktop.service"
     )
 

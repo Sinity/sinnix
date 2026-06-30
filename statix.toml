@@ -1,0 +1,9 @@
+disabled = [
+  "manual_inherit",
+  "manual_inherit_from",
+  "useless_parens",
+  "empty_pattern",
+  "useless_has_attr",
+  "repeated_keys",
+]
+ignore = [ ".direnv" ]

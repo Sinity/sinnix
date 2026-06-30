@@ -30,7 +30,14 @@ def test_stdio_smoke(tmp_path: Path):
     cfg_path.write_text(json.dumps(cfg))
 
     proc = subprocess.Popen(
-        [sys.executable, "-m", "sinnix_agent_gateway.server", "--config", str(cfg_path), "stdio"],
+        [
+            sys.executable,
+            "-m",
+            "sinnix_agent_gateway.server",
+            "--config",
+            str(cfg_path),
+            "stdio",
+        ],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -39,29 +46,71 @@ def test_stdio_smoke(tmp_path: Path):
     try:
         assert proc.stdin is not None
         assert proc.stdout is not None
-        proc.stdin.write(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}) + "\n")
+        proc.stdin.write(
+            json.dumps(
+                {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
+            )
+            + "\n"
+        )
         proc.stdin.flush()
         init = json.loads(proc.stdout.readline())
         assert init["result"]["serverInfo"]["name"] == "sinnix-agent-gateway"
 
-        proc.stdin.write(json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}) + "\n")
+        proc.stdin.write(
+            json.dumps(
+                {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+            )
+            + "\n"
+        )
         proc.stdin.flush()
         tools = json.loads(proc.stdout.readline())["result"]["tools"]
-        assert {tool["name"] for tool in tools} >= {"gateway_guide", "repo_materialize", "run_command", "repo_pack", "repo_export_bundle", "artifact_read_base64"}
+        assert {tool["name"] for tool in tools} >= {
+            "gateway_guide",
+            "repo_materialize",
+            "run_command",
+            "repo_pack",
+            "repo_export_bundle",
+            "artifact_read_base64",
+        }
         assert all("outputSchema" in tool for tool in tools)
         materialize = next(tool for tool in tools if tool["name"] == "repo_materialize")
         assert "Use this before" in materialize["description"]
         assert "description" in materialize["inputSchema"]["properties"]["repo"]
-        assert materialize["outputSchema"]["properties"]["workspace"]["type"] == "string"
+        assert (
+            materialize["outputSchema"]["properties"]["workspace"]["type"] == "string"
+        )
 
-        proc.stdin.write(json.dumps({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "gateway_info", "arguments": {}}}) + "\n")
+        proc.stdin.write(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {"name": "gateway_info", "arguments": {}},
+                }
+            )
+            + "\n"
+        )
         proc.stdin.flush()
         info = json.loads(proc.stdout.readline())["result"]["structuredContent"]
         assert info["yolo"] is True
         assert info["transports"]["streamable_http_path"] == "/mcp"
-        assert info["repositories"]["local/test"]["tasks"]["echo"]["description"] == "Say hi."
+        assert (
+            info["repositories"]["local/test"]["tasks"]["echo"]["description"]
+            == "Say hi."
+        )
 
-        proc.stdin.write(json.dumps({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "gateway_guide", "arguments": {}}}) + "\n")
+        proc.stdin.write(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 4,
+                    "method": "tools/call",
+                    "params": {"name": "gateway_guide", "arguments": {}},
+                }
+            )
+            + "\n"
+        )
         proc.stdin.flush()
         guide = json.loads(proc.stdout.readline())["result"]["structuredContent"]
         assert "repo_materialize" in " ".join(guide["rules"])
@@ -79,8 +128,16 @@ def test_binary_artifact_base64_chunks(tmp_path: Path):
 
     g = Gateway({"stateDir": str(tmp_path / "state")})
     artifact = g.art("sample.bin", b"abcdef")
-    first = g.artifact_read_base64({"artifact": artifact["artifact"], "offset": 0, "max_bytes": 3})
-    second = g.artifact_read_base64({"artifact": artifact["artifact"], "offset": first["next_offset"], "max_bytes": 3})
+    first = g.artifact_read_base64(
+        {"artifact": artifact["artifact"], "offset": 0, "max_bytes": 3}
+    )
+    second = g.artifact_read_base64(
+        {
+            "artifact": artifact["artifact"],
+            "offset": first["next_offset"],
+            "max_bytes": 3,
+        }
+    )
     assert first["base64"] == "YWJj"
     assert second["base64"] == "ZGVm"
     assert second["next_offset"] is None
@@ -102,7 +159,9 @@ def test_info_uses_user_state_by_default(tmp_path: Path):
     assert info["state_dir"] == str(tmp_path / "state-home" / "sinnix-agent-gateway")
 
 
-def post_json(url: str, payload: dict, *, accept: str = "application/json") -> tuple[str, str]:
+def post_json(
+    url: str, payload: dict, *, accept: str = "application/json"
+) -> tuple[str, str]:
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode(),
@@ -122,7 +181,18 @@ def test_http_mcp_endpoint(tmp_path: Path):
     proc = None
     try:
         proc = subprocess.Popen(
-            [sys.executable, "-m", "sinnix_agent_gateway.server", "--config", str(cfg_path), "http", "--host", "127.0.0.1", "--port", str(port)],
+            [
+                sys.executable,
+                "-m",
+                "sinnix_agent_gateway.server",
+                "--config",
+                str(cfg_path),
+                "http",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+            ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -130,7 +200,9 @@ def test_http_mcp_endpoint(tmp_path: Path):
         url = f"http://127.0.0.1:{port}/mcp"
         for _ in range(50):
             try:
-                content_type, body = post_json(url, {"jsonrpc": "2.0", "id": 1, "method": "ping"})
+                content_type, body = post_json(
+                    url, {"jsonrpc": "2.0", "id": 1, "method": "ping"}
+                )
                 break
             except OSError:
                 time.sleep(0.05)
@@ -139,12 +211,19 @@ def test_http_mcp_endpoint(tmp_path: Path):
         assert content_type.startswith("application/json")
         assert json.loads(body)["result"] == {}
 
-        content_type, body = post_json(url, {"jsonrpc": "2.0", "id": 2, "method": "ping"}, accept="text/event-stream")
+        content_type, body = post_json(
+            url,
+            {"jsonrpc": "2.0", "id": 2, "method": "ping"},
+            accept="text/event-stream",
+        )
         assert content_type.startswith("text/event-stream")
         assert "data: " in body
 
         try:
-            post_json(f"http://127.0.0.1:{port}/", {"jsonrpc": "2.0", "id": 3, "method": "ping"})
+            post_json(
+                f"http://127.0.0.1:{port}/",
+                {"jsonrpc": "2.0", "id": 3, "method": "ping"},
+            )
         except urllib.error.HTTPError as exc:
             assert exc.code == 404
         else:
@@ -163,8 +242,19 @@ def test_durable_background_job_survives_gateway_instance(tmp_path: Path):
 
     workspace = tmp_path / "state" / "workspaces" / "w"
     workspace.mkdir(parents=True)
-    (workspace / ".sinnix-agent-workspace.json").write_text(json.dumps({"repo": "local/test", "workspace": "w"}))
-    cfg = {"stateDir": str(tmp_path / "state"), "repositories": {"local/test": {"tasks": {"slow": {"command": ["sh", "-c", "echo done"], "background": True}}}}}
+    (workspace / ".sinnix-agent-workspace.json").write_text(
+        json.dumps({"repo": "local/test", "workspace": "w"})
+    )
+    cfg = {
+        "stateDir": str(tmp_path / "state"),
+        "repositories": {
+            "local/test": {
+                "tasks": {
+                    "slow": {"command": ["sh", "-c", "echo done"], "background": True}
+                }
+            }
+        },
+    }
 
     first = Gateway(cfg)
     started = first.run_task({"workspace": "w", "task": "slow"})

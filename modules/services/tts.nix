@@ -22,20 +22,16 @@ mkServiceModule {
     };
   };
   extraOptions = {
-    autoStart = (
-      args.lib.mkOption {
-        type = args.lib.types.bool;
-        default = true;
-        description = "Start the OpenedAI-Speech container automatically at boot.";
-      }
-    );
-    image = (
-      args.lib.mkOption {
-        type = args.lib.types.str;
-        default = "ghcr.io/matatonic/openedai-speech@sha256:3ef4f857d5a757cfe8e9b61185df1bd3c52c45f950716a54e4399c27c3e91396";
-        description = "Digest-pinned OpenedAI-Speech image. Use the -min image for Piper-only (no XTTS).";
-      }
-    );
+    autoStart = args.lib.mkOption {
+      type = args.lib.types.bool;
+      default = true;
+      description = "Start the OpenedAI-Speech container automatically at boot.";
+    };
+    image = args.lib.mkOption {
+      type = args.lib.types.str;
+      default = "ghcr.io/matatonic/openedai-speech@sha256:3ef4f857d5a757cfe8e9b61185df1bd3c52c45f950716a54e4399c27c3e91396";
+      description = "Digest-pinned OpenedAI-Speech image. Use the -min image for Piper-only (no XTTS).";
+    };
   };
   configFn =
     {
@@ -57,8 +53,8 @@ mkServiceModule {
       ];
 
       virtualisation.oci-containers.containers.openedai-speech = {
-        image = cfg.image;
-        autoStart = cfg.autoStart;
+        inherit (cfg) image;
+        inherit (cfg) autoStart;
         pull = "never";
         ports = [ "127.0.0.1:8000:8000" ];
         volumes = [
@@ -68,7 +64,6 @@ mkServiceModule {
         extraOptions = [ "--device=nvidia.com/gpu=all" ];
       };
 
-      systemd.services.podman-openedai-speech.serviceConfig.TimeoutStartSec =
-        lib.mkForce "2min";
+      systemd.services.podman-openedai-speech.serviceConfig.TimeoutStartSec = lib.mkForce "2min";
     };
 } args

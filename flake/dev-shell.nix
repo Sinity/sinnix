@@ -13,13 +13,12 @@
       ...
     }:
     let
-      lib = pkgs.lib;
+      inherit (pkgs) lib;
       scriptPkgs = (import ./scripts.nix { inherit inputs pkgs; }).packageSet;
       commandRegistry = import ./command-registry.nix {
         inherit inputs pkgs system;
       };
       nix = "${pkgs.nix}/bin/nix";
-      safeSudoPathPrefix = "${pkgs.coreutils}/bin";
       rebuildServicePath = lib.makeBinPath [
         pkgs.coreutils
         pkgs.findutils

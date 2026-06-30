@@ -8,8 +8,7 @@
 #
 # `ollama-cuda` is already a prebuilt top-level attribute upstream, so it needs
 # no override here — services/ollama.nix references `pkgs.ollama-cuda` directly.
-{ ... }:
-_final: prev: {
+_: _final: prev: {
   # koboldcpp gates CUDA on `cublasSupport`, not `cudaSupport`.
   koboldcpp-cuda = prev.koboldcpp.override { cublasSupport = true; };
   llama-cpp-cuda = prev.llama-cpp.override { cudaSupport = true; };

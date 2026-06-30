@@ -160,99 +160,99 @@ mkFeatureModule {
         exec ${mcpChromeDevtoolsPrivateBin}/bin/mcp-chrome-devtools-private "$@"
       '';
       mcpSweepBin = pkgs.writeShellScriptBin "sinnix-mcp-sweep" ''
-        set -euo pipefail
+                set -euo pipefail
 
-        dry_run=0
-        quiet=0
-        orphans_only=0
-        while [ "$#" -gt 0 ]; do
-          case "$1" in
-            --dry-run) dry_run=1 ;;
-            --quiet) quiet=1 ;;
-            --orphans-only) orphans_only=1 ;;
-            --help)
-              cat <<'EOF'
-Usage: sinnix-mcp-sweep [--orphans-only] [--dry-run] [--quiet]
+                dry_run=0
+                quiet=0
+                orphans_only=0
+                while [ "$#" -gt 0 ]; do
+                  case "$1" in
+                    --dry-run) dry_run=1 ;;
+                    --quiet) quiet=1 ;;
+                    --orphans-only) orphans_only=1 ;;
+                    --help)
+                      cat <<'EOF'
+        Usage: sinnix-mcp-sweep [--orphans-only] [--dry-run] [--quiet]
 
-Reap orphaned MCP and language-server helper processes left behind by agent
-session exits. Writes JSONL evidence to
-/realm/data/captures/machine/agent-mcp-sweep/sweep.jsonl.
-EOF
-              exit 0
-              ;;
-            *)
-              echo "sinnix-mcp-sweep: unknown argument: $1" >&2
-              exit 2
-              ;;
-          esac
-          shift
-        done
+        Reap orphaned MCP and language-server helper processes left behind by agent
+        session exits. Writes JSONL evidence to
+        /realm/data/captures/machine/agent-mcp-sweep/sweep.jsonl.
+        EOF
+                      exit 0
+                      ;;
+                    *)
+                      echo "sinnix-mcp-sweep: unknown argument: $1" >&2
+                      exit 2
+                      ;;
+                  esac
+                  shift
+                done
 
-        capture_dir="''${SINNIX_MCP_SWEEP_CAPTURE_DIR:-/realm/data/captures/machine/agent-mcp-sweep}"
-        if ! mkdir -p "$capture_dir" 2>/dev/null; then
-          capture_dir="''${XDG_STATE_HOME:-$HOME/.local/state}/sinnix/agent-mcp-sweep"
-          mkdir -p "$capture_dir"
-        fi
-        log_file="$capture_dir/sweep.jsonl"
-        user_manager_pid="$(systemctl --user show --property=MainPID --value 2>/dev/null || true)"
-        now="$(${pkgs.coreutils}/bin/date -u +%Y-%m-%dT%H:%M:%SZ)"
-        host="$(${pkgs.nettools}/bin/hostname 2>/dev/null || echo unknown)"
-        killed=0
-        matched=0
+                capture_dir="''${SINNIX_MCP_SWEEP_CAPTURE_DIR:-/realm/data/captures/machine/agent-mcp-sweep}"
+                if ! mkdir -p "$capture_dir" 2>/dev/null; then
+                  capture_dir="''${XDG_STATE_HOME:-$HOME/.local/state}/sinnix/agent-mcp-sweep"
+                  mkdir -p "$capture_dir"
+                fi
+                log_file="$capture_dir/sweep.jsonl"
+                user_manager_pid="$(systemctl --user show --property=MainPID --value 2>/dev/null || true)"
+                now="$(${pkgs.coreutils}/bin/date -u +%Y-%m-%dT%H:%M:%SZ)"
+                host="$(${pkgs.nettools}/bin/hostname 2>/dev/null || echo unknown)"
+                killed=0
+                matched=0
 
-        is_candidate() {
-          case "$1" in
-            *"serena start-mcp-server"*|*"codebase-memory-mcp"*|*"mcp-polylogue"*|*"mcp-lynchpin"*|*"typescript-language-server --stdio"*|*"tsserver.js"*|*"typingsInstaller.js"*|*"pyright-langserver --stdio"*|*"rust-analyzer"*)
-              return 0
-              ;;
-            *)
-              return 1
-              ;;
-          esac
-        }
+                is_candidate() {
+                  case "$1" in
+                    *"serena start-mcp-server"*|*"codebase-memory-mcp"*|*"mcp-polylogue"*|*"mcp-lynchpin"*|*"typescript-language-server --stdio"*|*"tsserver.js"*|*"typingsInstaller.js"*|*"pyright-langserver --stdio"*|*"rust-analyzer"*)
+                      return 0
+                      ;;
+                    *)
+                      return 1
+                      ;;
+                  esac
+                }
 
-        is_orphan() {
-          [ "$1" = "1" ] || { [ -n "$user_manager_pid" ] && [ "$1" = "$user_manager_pid" ]; }
-        }
+                is_orphan() {
+                  [ "$1" = "1" ] || { [ -n "$user_manager_pid" ] && [ "$1" = "$user_manager_pid" ]; }
+                }
 
-        ${pkgs.procps}/bin/ps -eo pid=,ppid=,rss=,comm=,args= |
-          while read -r pid ppid rss comm args; do
-            [ -n "''${pid:-}" ] || continue
-            is_candidate "$args" || continue
-            matched=$((matched + 1))
-            action="keep"
-            reason="attached"
-            if is_orphan "$ppid"; then
-              reason="orphaned"
-              action="kill"
-            elif [ "$orphans_only" -eq 0 ]; then
-              reason="matched"
-            fi
+                ${pkgs.procps}/bin/ps -eo pid=,ppid=,rss=,comm=,args= |
+                  while read -r pid ppid rss comm args; do
+                    [ -n "''${pid:-}" ] || continue
+                    is_candidate "$args" || continue
+                    matched=$((matched + 1))
+                    action="keep"
+                    reason="attached"
+                    if is_orphan "$ppid"; then
+                      reason="orphaned"
+                      action="kill"
+                    elif [ "$orphans_only" -eq 0 ]; then
+                      reason="matched"
+                    fi
 
-            if [ "$action" = "kill" ]; then
-              if [ "$dry_run" -eq 0 ]; then
-                kill -TERM "$pid" 2>/dev/null || true
-              fi
-              killed=$((killed + 1))
-            fi
+                    if [ "$action" = "kill" ]; then
+                      if [ "$dry_run" -eq 0 ]; then
+                        kill -TERM "$pid" 2>/dev/null || true
+                      fi
+                      killed=$((killed + 1))
+                    fi
 
-            ${pkgs.jq}/bin/jq -cn \
-              --arg ts "$now" \
-              --arg host "$host" \
-              --arg pid "$pid" \
-              --arg ppid "$ppid" \
-              --arg rss_kib "$rss" \
-              --arg comm "$comm" \
-              --arg action "$action" \
-              --arg reason "$reason" \
-              --arg args "$args" \
-              '{ts:$ts,host:$host,pid:($pid|tonumber),ppid:($ppid|tonumber),rss_kib:($rss_kib|tonumber),comm:$comm,action:$action,reason:$reason,args:$args}' \
-              >> "$log_file"
+                    ${pkgs.jq}/bin/jq -cn \
+                      --arg ts "$now" \
+                      --arg host "$host" \
+                      --arg pid "$pid" \
+                      --arg ppid "$ppid" \
+                      --arg rss_kib "$rss" \
+                      --arg comm "$comm" \
+                      --arg action "$action" \
+                      --arg reason "$reason" \
+                      --arg args "$args" \
+                      '{ts:$ts,host:$host,pid:($pid|tonumber),ppid:($ppid|tonumber),rss_kib:($rss_kib|tonumber),comm:$comm,action:$action,reason:$reason,args:$args}' \
+                      >> "$log_file"
 
-            if [ "$quiet" -eq 0 ]; then
-              printf '%s pid=%s ppid=%s rss=%sKiB %s %s\n' "$action" "$pid" "$ppid" "$rss" "$comm" "$reason"
-            fi
-          done
+                    if [ "$quiet" -eq 0 ]; then
+                      printf '%s pid=%s ppid=%s rss=%sKiB %s %s\n' "$action" "$pid" "$ppid" "$rss" "$comm" "$reason"
+                    fi
+                  done
       '';
       desktopControlScripts = inputs.self + "/dots/_ai/skills/desktop-control-plane/scripts";
       serenaVersion = "1.5.3";
@@ -623,13 +623,13 @@ EOF
               # entries. Nix settings always win on activation; trust entries
               # added between rebuilds survive until the next switch.
               codexConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-                run cp ${lib.escapeShellArg (toString codexConfigFile)} "$HOME/.codex/config.toml"
-                run cp ${lib.escapeShellArg (toString codexFullConfigFile)} "$HOME/.codex/full.config.toml"
-                run cp ${lib.escapeShellArg (toString codexLeanConfigFile)} "$HOME/.codex/lean.config.toml"
-                run cp ${lib.escapeShellArg (toString codexEvidenceConfigFile)} "$HOME/.codex/evidence.config.toml"
-                run cp ${lib.escapeShellArg (toString codexBrowserConfigFile)} "$HOME/.codex/browser.config.toml"
-                run cp ${lib.escapeShellArg (toString codexDeepseekConfigFile)} "$HOME/.codex/deepseek.config.toml"
-                run cp ${lib.escapeShellArg (toString codexLocalConfigFile)} "$HOME/.codex/local.config.toml"
+                run cp ${codexConfigFile} "$HOME/.codex/config.toml"
+                run cp ${codexFullConfigFile} "$HOME/.codex/full.config.toml"
+                run cp ${codexLeanConfigFile} "$HOME/.codex/lean.config.toml"
+                run cp ${codexEvidenceConfigFile} "$HOME/.codex/evidence.config.toml"
+                run cp ${codexBrowserConfigFile} "$HOME/.codex/browser.config.toml"
+                run cp ${codexDeepseekConfigFile} "$HOME/.codex/deepseek.config.toml"
+                run cp ${codexLocalConfigFile} "$HOME/.codex/local.config.toml"
                 run chmod 644 "$HOME/.codex/config.toml"
                 run chmod 644 "$HOME/.codex/full.config.toml"
                 run chmod 644 "$HOME/.codex/lean.config.toml"

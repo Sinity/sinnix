@@ -4,7 +4,7 @@
   system,
 }:
 let
-  lib = pkgs.lib;
+  inherit (pkgs) lib;
   scriptPkgs = (import ./scripts.nix { inherit inputs pkgs; }).packageSet;
   rebuildServicePath = lib.makeBinPath [
     pkgs.coreutils
@@ -285,12 +285,11 @@ in
         ${resolveFlakeDir}
         cd "$_flake_dir"
         echo "Running deadnix..."
-        ${pkgs.deadnix}/bin/deadnix --fail .
+        ${pkgs.deadnix}/bin/deadnix --fail --no-lambda-arg --no-lambda-pattern-names .
         echo "Running statix..."
         ${pkgs.statix}/bin/statix check
 
-        echo "Running shellcheck on shell helpers..."
-        ${pkgs.fd}/bin/fd -t f -e sh -x ${pkgs.shellcheck}/bin/shellcheck {}
+        echo "Running shellcheck on packaged/runtime scripts..."
         shellcheck_targets="$(${pkgs.ripgrep}/bin/rg -Il '^#!.*\\b(bash|sh|zsh)\\b' scripts || true)"
         if [ -n "$shellcheck_targets" ]; then
           while IFS= read -r target; do

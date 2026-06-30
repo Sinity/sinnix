@@ -17,12 +17,10 @@ mkFeatureModule {
       ...
     }:
     {
-      home-manager.users.${user} =
-        { ... }:
-        {
-          home.packages = [
-            pkgs.yt-polisher
-          ];
-        };
+      home-manager.users.${user} = _: {
+        home.packages = [
+          pkgs.yt-polisher
+        ];
+      };
     };
 } args

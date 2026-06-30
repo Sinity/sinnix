@@ -20,7 +20,7 @@ let
   discovery = import ./script-discovery.nix { inherit lib pkgs; };
   discovered = discovery.discover (inputs.self + "/scripts");
 
-  registry = discovered.registry;
+  inherit (discovered) registry;
   scriptPackages = lib.mapAttrs (_: v: v.package) registry;
   runtimeDefaults = import ./data/runtime-defaults.nix { inherit lib; };
   defaultRuntimeInventoryJson = builtins.toJSON (

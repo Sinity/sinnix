@@ -28,13 +28,11 @@ mkServiceModule {
     };
   };
   extraOptions = {
-    autoStart = (
-      args.lib.mkOption {
-        type = args.lib.types.bool;
-        default = true;
-        description = "Start Open WebUI automatically at boot.";
-      }
-    );
+    autoStart = args.lib.mkOption {
+      type = args.lib.types.bool;
+      default = true;
+      description = "Start Open WebUI automatically at boot.";
+    };
   };
   configFn =
     {

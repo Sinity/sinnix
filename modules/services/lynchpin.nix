@@ -30,7 +30,9 @@ let
     "enrich"
     "refresh"
   ];
-  localHotDirArgs = lib.concatMapStringsSep " " (dir: lib.escapeShellArg "${localRoot}/${dir}") localHotDirs;
+  localHotDirArgs = lib.concatMapStringsSep " " (
+    dir: lib.escapeShellArg "${localRoot}/${dir}"
+  ) localHotDirs;
 in
 {
   options.sinnix.services.lynchpin = {

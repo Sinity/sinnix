@@ -21,13 +21,11 @@ mkServiceModule {
     };
   };
   extraOptions = {
-    model = (
-      args.lib.mkOption {
-        type = args.lib.types.str;
-        default = "base.en";
-        description = "whisper.cpp ggml model short-name (e.g. base.en, large-v3-turbo). Auto-downloaded if missing.";
-      }
-    );
+    model = args.lib.mkOption {
+      type = args.lib.types.str;
+      default = "base.en";
+      description = "whisper.cpp ggml model short-name (e.g. base.en, large-v3-turbo). Auto-downloaded if missing.";
+    };
   };
   configFn =
     {

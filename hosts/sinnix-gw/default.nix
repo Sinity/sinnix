@@ -245,7 +245,7 @@ in
         band = "2g";
         channel = "auto";
         htmode = "HT40";
-        country = wifi.country;
+        inherit (wifi) country;
         disabled = false;
         # Disable legacy 802.11b rates for performance
         legacy_rates = false;
@@ -271,7 +271,7 @@ in
         band = "5g";
         channel = "auto";
         htmode = "VHT80"; # 802.11ac 80 MHz
-        country = wifi.country;
+        inherit (wifi) country;
         disabled = false;
         legacy_rates = false;
       };
@@ -363,9 +363,9 @@ in
       map (lease: {
         name = "host_${builtins.replaceStrings [ "-" "." ] [ "_" "_" ] lease.name}";
         value = mkSection "host" {
-          name = lease.name;
-          mac = lease.mac;
-          ip = lease.ip;
+          inherit (lease) name;
+          inherit (lease) mac;
+          inherit (lease) ip;
           dns = true; # Also register in dnsmasq as <name>.lan
         };
       }) staticLeases
@@ -510,11 +510,11 @@ in
       map (pf: {
         name = "redirect_${builtins.replaceStrings [ "-" "." ] [ "_" "_" ] pf.name}";
         value = mkSection "redirect" {
-          name = pf.name;
-          src = pf.src;
-          dest = pf.dest;
+          inherit (pf) name;
+          inherit (pf) src;
+          inherit (pf) dest;
           dest_ip = pf.destIp;
-          proto = pf.proto;
+          inherit (pf) proto;
           dest_port = pf.destPort;
           src_dport = pf.srcDport;
           target = "DNAT";
@@ -531,7 +531,7 @@ in
     sqm = {
       wan_qos = mkSection "queue" {
         enabled = true;
-        interface = wan.interface;
+        inherit (wan) interface;
         qdisc = "fq_codel";
         script = "simple.qos"; # fq_codel uses simple.qos, not piece_of_cake
         linklayer = "ethernet";

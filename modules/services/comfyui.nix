@@ -29,34 +29,26 @@ mkServiceModule {
     };
   };
   extraOptions = {
-    autoStart = (
-      args.lib.mkOption {
-        type = args.lib.types.bool;
-        default = true;
-        description = "Start the ComfyUI container automatically at boot.";
-      }
-    );
-    image = (
-      args.lib.mkOption {
-        type = args.lib.types.str;
-        default = "docker.io/mmartial/comfyui-nvidia-docker@sha256:144dd59ffc29a7c384020eededde1dbfb66d81c6e072c912d51e58becfd3cd00";
-        description = "Digest-pinned ComfyUI image. Re-resolve with `skopeo inspect` to update.";
-      }
-    );
-    uid = (
-      args.lib.mkOption {
-        type = args.lib.types.int;
-        default = 1000;
-        description = "UID the container drops to (must own the /realm mount).";
-      }
-    );
-    gid = (
-      args.lib.mkOption {
-        type = args.lib.types.int;
-        default = 100; # `users` group
-        description = "GID the container drops to.";
-      }
-    );
+    autoStart = args.lib.mkOption {
+      type = args.lib.types.bool;
+      default = true;
+      description = "Start the ComfyUI container automatically at boot.";
+    };
+    image = args.lib.mkOption {
+      type = args.lib.types.str;
+      default = "docker.io/mmartial/comfyui-nvidia-docker@sha256:144dd59ffc29a7c384020eededde1dbfb66d81c6e072c912d51e58becfd3cd00";
+      description = "Digest-pinned ComfyUI image. Re-resolve with `skopeo inspect` to update.";
+    };
+    uid = args.lib.mkOption {
+      type = args.lib.types.int;
+      default = 1000;
+      description = "UID the container drops to (must own the /realm mount).";
+    };
+    gid = args.lib.mkOption {
+      type = args.lib.types.int;
+      default = 100; # `users` group
+      description = "GID the container drops to.";
+    };
   };
   configFn =
     {
@@ -77,8 +69,8 @@ mkServiceModule {
       ];
 
       virtualisation.oci-containers.containers.comfyui = {
-        image = cfg.image;
-        autoStart = cfg.autoStart;
+        inherit (cfg) image;
+        inherit (cfg) autoStart;
         ports = [ "127.0.0.1:8188:8188" ];
         volumes = [ "${mnt}:/comfy/mnt" ];
         environment = {

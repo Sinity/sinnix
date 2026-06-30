@@ -23,27 +23,21 @@ mkServiceModule {
     };
   };
   extraOptions = {
-    model = (
-      args.lib.mkOption {
-        type = args.lib.types.str;
-        default = "";
-        description = "GGUF filename under model/gguf to serve (required when enabled).";
-      }
-    );
-    gpuLayers = (
-      args.lib.mkOption {
-        type = args.lib.types.int;
-        default = 999;
-        description = "Layers offloaded to GPU; remainder runs on CPU/RAM.";
-      }
-    );
-    controlVector = (
-      args.lib.mkOption {
-        type = args.lib.types.str;
-        default = "";
-        description = "Control-vector GGUF filename under model/control-vectors to apply (empty = none).";
-      }
-    );
+    model = args.lib.mkOption {
+      type = args.lib.types.str;
+      default = "";
+      description = "GGUF filename under model/gguf to serve (required when enabled).";
+    };
+    gpuLayers = args.lib.mkOption {
+      type = args.lib.types.int;
+      default = 999;
+      description = "Layers offloaded to GPU; remainder runs on CPU/RAM.";
+    };
+    controlVector = args.lib.mkOption {
+      type = args.lib.types.str;
+      default = "";
+      description = "Control-vector GGUF filename under model/control-vectors to apply (empty = none).";
+    };
   };
   configFn =
     {

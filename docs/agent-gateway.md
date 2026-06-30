@@ -131,11 +131,11 @@ The intended loop:
 
 1. `gateway_guide` for connector-facing workflow guidance.
 2. `repo_materialize` a configured repo/ref.
-2. Use `repo_search`, `repo_tree`, and `repo_read_file` for orientation.
-3. Use `run_command` freely for yolo-mode local work.
-4. Use `repo_write_file` or `repo_apply_patch` for edits.
-5. Use `repo_diff`, `run_task`, and `repo_pack` to validate and report.
-6. Use normal git commands through `run_command` when deliberately pushing from a configured writable workspace.
+3. Use `repo_search`, `repo_tree`, and `repo_read_file` for orientation.
+4. Use `run_command` freely for yolo-mode local work.
+5. Use `repo_write_file` or `repo_apply_patch` for edits.
+6. Use `repo_diff`, `run_task`, and `repo_pack` to validate and report.
+7. Use normal git commands through `run_command` when deliberately pushing from a configured writable workspace.
 
 Configured tasks can be either concise command vectors or metadata-rich objects.
 Metadata is exposed through `gateway_info` so a client can prefer known checks,

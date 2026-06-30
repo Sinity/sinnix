@@ -12,8 +12,7 @@
 #   nix run .#router-shell                 # SSH shell into the router
 #   nix run .#router-health                # verify router health post-deploy
 
-{ inputs, ... }:
-{
+_: {
   perSystem =
     { pkgs, lib, ... }:
     let

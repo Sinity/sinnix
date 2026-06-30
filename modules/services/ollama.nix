@@ -27,28 +27,24 @@ mkServiceModule {
     };
   };
   extraOptions = {
-    autoStart = (
-      args.lib.mkOption {
-        type = args.lib.types.bool;
-        default = true;
-        description = "Start Ollama automatically at boot.";
-      }
-    );
-    loadModels = (
-      args.lib.mkOption {
-        type = args.lib.types.listOf args.lib.types.str;
-        default = [
-          # Abliterated/uncensored LLM that fits ~10 GB at Q4. Edit to taste; a
-          # failed pull only fails the loader oneshot, not the system.
-          "huihui_ai/llama3.2-abliterate"
-          # Vision (VLM)
-          "llava"
-          # Embeddings for Open WebUI RAG / document chat
-          "nomic-embed-text"
-        ];
-        description = "Models pre-pulled by the ollama-model-loader oneshot.";
-      }
-    );
+    autoStart = args.lib.mkOption {
+      type = args.lib.types.bool;
+      default = true;
+      description = "Start Ollama automatically at boot.";
+    };
+    loadModels = args.lib.mkOption {
+      type = args.lib.types.listOf args.lib.types.str;
+      default = [
+        # Abliterated/uncensored LLM that fits ~10 GB at Q4. Edit to taste; a
+        # failed pull only fails the loader oneshot, not the system.
+        "huihui_ai/llama3.2-abliterate"
+        # Vision (VLM)
+        "llava"
+        # Embeddings for Open WebUI RAG / document chat
+        "nomic-embed-text"
+      ];
+      description = "Models pre-pulled by the ollama-model-loader oneshot.";
+    };
   };
   configFn =
     {
@@ -75,7 +71,7 @@ mkServiceModule {
         port = 11434;
         openFirewall = false;
         models = modelsDir;
-        loadModels = cfg.loadModels;
+        inherit (cfg) loadModels;
         environmentVariables = {
           OLLAMA_FLASH_ATTENTION = "1";
           OLLAMA_KEEP_ALIVE = "30m";

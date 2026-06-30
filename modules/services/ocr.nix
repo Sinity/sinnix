@@ -22,27 +22,21 @@ mkServiceModule {
     };
   };
   extraOptions = {
-    image = (
-      args.lib.mkOption {
-        type = args.lib.types.str;
-        default = "docker.io/savatar101/marker-api@sha256:5c5660cd0c38309630bbb96c15dafdc2a382143c8bfc5dac8ca1760f97ba84de";
-        description = "Digest-pinned OCR image (default: marker-api / Surya). Re-resolve via skopeo inspect to update.";
-      }
-    );
-    port = (
-      args.lib.mkOption {
-        type = args.lib.types.port;
-        default = 8020;
-        description = "Host port (bound to 127.0.0.1) for the OCR API.";
-      }
-    );
-    containerPort = (
-      args.lib.mkOption {
-        type = args.lib.types.port;
-        default = 8080; # marker-api default
-        description = "Port the chosen image listens on inside the container.";
-      }
-    );
+    image = args.lib.mkOption {
+      type = args.lib.types.str;
+      default = "docker.io/savatar101/marker-api@sha256:5c5660cd0c38309630bbb96c15dafdc2a382143c8bfc5dac8ca1760f97ba84de";
+      description = "Digest-pinned OCR image (default: marker-api / Surya). Re-resolve via skopeo inspect to update.";
+    };
+    port = args.lib.mkOption {
+      type = args.lib.types.port;
+      default = 8020;
+      description = "Host port (bound to 127.0.0.1) for the OCR API.";
+    };
+    containerPort = args.lib.mkOption {
+      type = args.lib.types.port;
+      default = 8080; # marker-api default
+      description = "Port the chosen image listens on inside the container.";
+    };
   };
   configFn =
     {
@@ -60,7 +54,7 @@ mkServiceModule {
       systemd.tmpfiles.rules = [ "d ${dir} 0755 ${user} users -" ];
 
       virtualisation.oci-containers.containers.ocr = {
-        image = cfg.image;
+        inherit (cfg) image;
         autoStart = false;
         ports = [ "127.0.0.1:${toString cfg.port}:${toString cfg.containerPort}" ];
         volumes = [ "${dir}:/root/.cache/huggingface" ];

@@ -249,7 +249,7 @@ _will_ apply.
   ([Tom's Hardware](https://www.tomshardware.com/reviews/gigabyte-aorus-fo48u),
   [HardForum p.7](https://hardforum.com/threads/gigabyte-aorus-fo48u-48-4k-120hz-oled.2011874/page-7))
 - **HDR on NVIDIA Wayland = washed-out and/or too dim** (general, applies here):
-  the egl-wayland Colorspace property bug leaves NV_INPUT_COLORSPACE = None even
+  the egl-wayland Colorspace property bug leaves `NV_INPUT_COLORSPACE = None` even
   when PQ/BT2020 is signaled ([egl-wayland #108](https://github.com/NVIDIA/egl-wayland/issues/108));
   KWin caps HDR at SDR brightness on some setups (Plasma 6.1 added brightness
   sliders — [KDE discuss](https://discuss.kde.org/t/hdr-mode-too-dim-when-displaying-hdr-content/41790),

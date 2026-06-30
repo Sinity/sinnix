@@ -46,13 +46,13 @@ let
     "1"
   ];
   uinputCmd = "${interceptTools}/bin/uinput -d $DEVNODE";
-  pipeline = lib.concatStringsSep " | " ([
+  pipeline = lib.concatStringsSep " | " [
     interceptCmd
     bounceCmd
     scribeCmd
     capsCmd
     uinputCmd
-  ]);
+  ];
 
   logitechMaintenance = pkgs.writeShellScript "logitech-maintenance" ''
     #!/usr/bin/env bash

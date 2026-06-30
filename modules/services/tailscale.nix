@@ -75,8 +75,8 @@ in
     services.tailscale = {
       enable = true;
       openFirewall = true;
-      useRoutingFeatures = cfg.useRoutingFeatures;
-      interfaceName = cfg.interfaceName;
+      inherit (cfg) useRoutingFeatures;
+      inherit (cfg) interfaceName;
       extraUpFlags = lib.filter (s: s != "") [
         authKeyArg
         tagArg

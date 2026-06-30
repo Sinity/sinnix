@@ -16,7 +16,6 @@
   ...
 }@args:
 let
-  username = config.sinnix.user.name;
   vpnIP = "10.148.66.217";
   vpnRoutingTable = 200;
 in
@@ -96,7 +95,7 @@ mkServiceModule {
             name = "airvpn-seed";
             publicKey = "PyLCXAQT8KkM4T+dUsOQfn+Ub3pGxfGlxkIApuig+hk=";
             presharedKeyFile = pskFile;
-            endpoint = cfg.endpoint;
+            inherit (cfg) endpoint;
             # Keep WireGuard peer selection complete while routing those
             # prefixes through the dedicated policy table below.
             allowedIPs = [ "0.0.0.0/0" ];

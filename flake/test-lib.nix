@@ -48,34 +48,32 @@ let
   sharedSpecialArgs = mkSharedSpecialArgs sanitizedInputs;
 
   # Mock filesystem roots for test VMs (prevents real FS dependencies)
-  mountTmpfsRoots =
-    { ... }:
-    {
-      fileSystems."/" = {
-        device = "tmpfs";
-        fsType = "tmpfs";
-      };
-      fileSystems."/realm" = {
-        device = "tmpfs";
-        fsType = "tmpfs";
-        neededForBoot = true;
-      };
-      fileSystems."/outer-realm" = {
-        device = "tmpfs";
-        fsType = "tmpfs";
-        neededForBoot = true;
-      };
-      fileSystems."/persist" = {
-        device = "tmpfs";
-        fsType = "tmpfs";
-        neededForBoot = true;
-      };
-      fileSystems."/neo-outer-realm" = {
-        device = "tmpfs";
-        fsType = "tmpfs";
-        neededForBoot = true;
-      };
+  mountTmpfsRoots = _: {
+    fileSystems."/" = {
+      device = "tmpfs";
+      fsType = "tmpfs";
     };
+    fileSystems."/realm" = {
+      device = "tmpfs";
+      fsType = "tmpfs";
+      neededForBoot = true;
+    };
+    fileSystems."/outer-realm" = {
+      device = "tmpfs";
+      fsType = "tmpfs";
+      neededForBoot = true;
+    };
+    fileSystems."/persist" = {
+      device = "tmpfs";
+      fsType = "tmpfs";
+      neededForBoot = true;
+    };
+    fileSystems."/neo-outer-realm" = {
+      device = "tmpfs";
+      fsType = "tmpfs";
+      neededForBoot = true;
+    };
+  };
 
   # Base test configuration: minimal, no desktop
   baseTestConfig =
@@ -234,7 +232,7 @@ let
         mountTmpfsRoots
         baseTestConfig
         (
-          { ... }:
+          _:
           {
             networking.hostName = name;
           }
@@ -478,7 +476,7 @@ let
     }:
     let
       evaluated = evalTestSpec system spec;
-      config = evaluated.config;
+      inherit (evaluated) config;
       userName = config.sinnix.user.name;
       hm = config.home-manager.users.${userName};
       homeDir = hm.home.homeDirectory;

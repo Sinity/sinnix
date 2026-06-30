@@ -35,13 +35,11 @@ mkServiceModule {
     };
   };
   extraOptions = {
-    autoStart = (
-      args.lib.mkOption {
-        type = args.lib.types.bool;
-        default = true;
-        description = "Start LiteLLM automatically at boot.";
-      }
-    );
+    autoStart = args.lib.mkOption {
+      type = args.lib.types.bool;
+      default = true;
+      description = "Start LiteLLM automatically at boot.";
+    };
   };
   configFn =
     { cfg, lib, ... }:

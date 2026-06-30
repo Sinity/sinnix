@@ -12,7 +12,7 @@
   ...
 }:
 let
-  inherit (lib) types mkOption mkIf;
+  inherit (lib) types mkOption;
   cfg = config.sinnix;
 in
 {

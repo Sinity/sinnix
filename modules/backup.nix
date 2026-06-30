@@ -43,7 +43,6 @@ let
   borgCacheDir = "/persist/root/.cache/borg";
   borgStaleLockMinutes = 120;
   borgGlobalLock = "/run/lock/sinnix-borg.lock";
-  borgStatusLockWaitSec = 5;
   borgStatusLog = "${config.sinnix.paths.capturesRoot}/machine/borg_status.jsonl";
   borgArchiveMaxAgeSec = 6 * 60 * 60;
   borgSnapshotQueueMaxAgeSec = 6 * 60 * 60;
@@ -72,46 +71,43 @@ let
 
   mkBorgRetentionArgs = lib.concatMapStringsSep " " lib.escapeShellArg borgRetentionArgs;
 
-  mkBorgCommonScript =
-    repo:
-    repoPath:
-    ''
-      export BORG_REPO=${lib.escapeShellArg repo}
-      export BORG_PASSCOMMAND=${lib.escapeShellArg "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}"}
-      export BORG_CACHE_DIR=${lib.escapeShellArg borgCacheDir}
+  mkBorgCommonScript = repo: repoPath: ''
+    export BORG_REPO=${lib.escapeShellArg repo}
+    export BORG_PASSCOMMAND=${lib.escapeShellArg "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}"}
+    export BORG_CACHE_DIR=${lib.escapeShellArg borgCacheDir}
 
-      with_borg_lock() {
-        flock ${lib.escapeShellArg borgGlobalLock} "$@"
-      }
+    with_borg_lock() {
+      flock ${lib.escapeShellArg borgGlobalLock} "$@"
+    }
 
-      recover_stale_borg_locks() {
-        if [ ! -e ${lib.escapeShellArg "${repoPath}/config"} ]; then
+    recover_stale_borg_locks() {
+      if [ ! -e ${lib.escapeShellArg "${repoPath}/config"} ]; then
+        return
+      fi
+
+      stale_lock="$(
+        find ${lib.escapeShellArg repoPath} \
+          -maxdepth 2 -type d -name lock.exclusive \
+          -mmin +${toString borgStaleLockMinutes} -print -quit 2>/dev/null || true
+      )"
+      if [ -z "$stale_lock" ]; then
+        if ! find ${lib.escapeShellArg borgCacheDir} \
+          -maxdepth 2 -type d -name lock.exclusive \
+          -mmin +${toString borgStaleLockMinutes} -print -quit 2>/dev/null | grep -q .; then
           return
         fi
+        stale_lock="stale Borg cache lock"
+      fi
 
-        stale_lock="$(
-          find ${lib.escapeShellArg repoPath} \
-            -maxdepth 2 -type d -name lock.exclusive \
-            -mmin +${toString borgStaleLockMinutes} -print -quit 2>/dev/null || true
-        )"
-        if [ -z "$stale_lock" ]; then
-          if ! find ${lib.escapeShellArg borgCacheDir} \
-            -maxdepth 2 -type d -name lock.exclusive \
-            -mmin +${toString borgStaleLockMinutes} -print -quit 2>/dev/null | grep -q .; then
-            return
-          fi
-          stale_lock="stale Borg cache lock"
-        fi
+      if pgrep -x borg >/dev/null 2>&1; then
+        echo "Stale-looking Borg lock remains for ${repo}, but a Borg process is alive; refusing break-lock" >&2
+        return
+      fi
 
-        if pgrep -x borg >/dev/null 2>&1; then
-          echo "Stale-looking Borg lock remains for ${repo}, but a Borg process is alive; refusing break-lock" >&2
-          return
-        fi
-
-        echo "Breaking stale Borg lock for ${repo}: $stale_lock" >&2
-        with_borg_lock borg break-lock ${lib.escapeShellArg repo}
-      }
-    '';
+      echo "Breaking stale Borg lock for ${repo}: $stale_lock" >&2
+      with_borg_lock borg break-lock ${lib.escapeShellArg repo}
+    }
+  '';
 
   mkSnapshotDrainScript =
     {

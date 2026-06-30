@@ -65,7 +65,7 @@ in
     };
 
     systemd = {
-      tmpfiles.rules = lib.mkAfter ([
+      tmpfiles.rules = lib.mkAfter [
         "d ${paths.realmRoot} 0755 root root -"
         "d ${paths.outerRealm} 0755 root root -"
         "d ${paths.outerRealm}/inbox 0755 ${username} users -"
@@ -89,7 +89,7 @@ in
         "d ${paths.exportsRoot}/lastpass 0755 ${username} users -"
         "d ${paths.exportsRoot}/lastpass/raw 0755 ${username} users -"
         "d /var/run/nscd 0755 nscd nscd -"
-      ]);
+      ];
 
     };
 

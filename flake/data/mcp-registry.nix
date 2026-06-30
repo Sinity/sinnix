@@ -180,7 +180,7 @@ let
       if server.transport == "http" then
         {
           type = "http";
-          url = server.url;
+          inherit (server) url;
         }
       else
         let

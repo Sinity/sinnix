@@ -17,7 +17,7 @@
 }:
 let
   cfg = config.sinnix.services.borg;
-  storagebox = cfg.storagebox;
+  inherit (cfg) storagebox;
   resolvedRepo =
     {
       local = null;

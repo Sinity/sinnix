@@ -177,7 +177,7 @@ in
           services.sinex.adminPackage = lib.mkDefault (mkToolPackage "xtask");
           services.sinex.users.target = targetUserName;
           sinex.secrets.paths = lib.mkForce (
-            lib.mapAttrs (_: path: toString path) (
+            lib.mapAttrs (_: toString) (
               lib.filterAttrs (
                 name: _: lib.hasPrefix "sinex-" name || lib.hasPrefix "nats-" name
               ) config.sinnix.secrets.paths
@@ -495,11 +495,11 @@ in
       #     local data-source lease before the unit start deadline
       #   - drop workstation-civil scheduler bias from one-shot maintenance
       #     timers and force their next-fire semantics
-      #   - re-run sinex-desktop-target-access after every nixos-rebuild switch
-      #     because home-manager activation calls chmod 700 on the target home,
-      #     maps the group bits to the POSIX ACL mask, resetting mask::--x →
-      #     mask::--- and nullifying the sinex traverse grant. Ordering after
-      #     the Home Manager service ensures the ACL is set last.
+      #   - on desktop profiles, re-run sinex-desktop-target-access after every
+      #     nixos-rebuild switch because home-manager activation calls chmod 700
+      #     on the target home, maps the group bits to the POSIX ACL mask,
+      #     resetting mask::--x → mask::--- and nullifying the sinex traverse
+      #     grant. Foundation/replica hosts do not create that helper.
       (lib.mkIf runtimeEnabled {
         sinnix.runtime.surfaces = {
           sinex-runtime = {
@@ -647,7 +647,7 @@ in
             # the helper is ordered Before=sinexd.service, and restarting
             # that unit during activation pulls sinexd into a restart
             # transaction even when sinexd itself has X-RestartIfChanged=false.
-            ${homeManagerServiceName} = {
+            ${homeManagerServiceName} = lib.mkIf activationProfile.desktop {
               # The `+` prefix runs this command as root regardless of the
               # service user, which has no privilege to repair user ACLs.
               serviceConfig.ExecStartPost = lib.mkAfter [
@@ -704,11 +704,7 @@ in
         systemd.timers =
           lib.genAttrs maintenanceTimerServiceNames (_: {
             enable = lib.mkIf (!runtimeAutoStart) (lib.mkForce false);
-            wantedBy =
-              if runtimeAutoStart then
-                [ "sinex-runtime.target" ]
-              else
-                lib.mkForce [ ];
+            wantedBy = if runtimeAutoStart then [ "sinex-runtime.target" ] else lib.mkForce [ ];
             timerConfig.Persistent = lib.mkForce false;
           })
           // {

@@ -30,15 +30,10 @@
 let
   inherit (lib)
     attrByPath
-    concatLists
     filter
-    foldl'
     hasPrefix
     listToAttrs
-    mapAttrs
     nameValuePair
-    optional
-    optionalAttrs
     removeSuffix
     splitString
     trim
@@ -79,7 +74,7 @@ let
       { mode = "missing"; }
     else
       let
-        marker = (lib.head markerLines);
+        marker = lib.head markerLines;
         markerText = trim marker.line;
       in
       if markerText == "@sinnix-package: skip" || markerText == "@sinnix-package:skip" then

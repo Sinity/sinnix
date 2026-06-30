@@ -83,6 +83,9 @@ mkServiceModule {
       systemd.tmpfiles.rules = lib.mkAfter [
         "d /var/lib/transmission/.config 0750 ${username} users -"
         "d ${transmissionConfigDir} 0750 ${username} users -"
+        "d ${torrentInbox} 2775 ${username} users -"
+        "d ${torrentDownloadDir} 2775 ${username} users -"
+        "d ${torrentPartialDir} 2775 ${username} users -"
         "f ${transmissionConfigDir}/queue.json 0644 ${username} users - []"
       ];
 

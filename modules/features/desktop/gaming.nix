@@ -41,9 +41,8 @@ mkFeatureModule {
       ...
     }:
     let
-      sinnix = config.sinnix;
+      inherit (config) sinnix;
       capturesRoot = sinnix.paths.capturesRoot;
-      projectRoot = sinnix.paths.projectRoot;
       replayDir = "${capturesRoot}/replay";
 
       factorioTokenPath = sinnix.secrets.paths."factorio-token";

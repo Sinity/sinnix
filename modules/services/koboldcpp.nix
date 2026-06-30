@@ -26,34 +26,26 @@ mkServiceModule {
     };
   };
   extraOptions = {
-    model = (
-      args.lib.mkOption {
-        type = args.lib.types.str;
-        default = "";
-        description = "GGUF text/vision model filename under model/gguf to load at start (empty = none).";
-      }
-    );
-    sdmodel = (
-      args.lib.mkOption {
-        type = args.lib.types.str;
-        default = "";
-        description = "Stable Diffusion checkpoint filename under model/sd-checkpoints for image gen (empty = none).";
-      }
-    );
-    gpuLayers = (
-      args.lib.mkOption {
-        type = args.lib.types.int;
-        default = 999;
-        description = "Layers offloaded to GPU; remainder spills to RAM. 999 = offload as many as fit.";
-      }
-    );
-    controlVector = (
-      args.lib.mkOption {
-        type = args.lib.types.str;
-        default = "";
-        description = "Control-vector GGUF filename under model/control-vectors to apply (empty = none).";
-      }
-    );
+    model = args.lib.mkOption {
+      type = args.lib.types.str;
+      default = "";
+      description = "GGUF text/vision model filename under model/gguf to load at start (empty = none).";
+    };
+    sdmodel = args.lib.mkOption {
+      type = args.lib.types.str;
+      default = "";
+      description = "Stable Diffusion checkpoint filename under model/sd-checkpoints for image gen (empty = none).";
+    };
+    gpuLayers = args.lib.mkOption {
+      type = args.lib.types.int;
+      default = 999;
+      description = "Layers offloaded to GPU; remainder spills to RAM. 999 = offload as many as fit.";
+    };
+    controlVector = args.lib.mkOption {
+      type = args.lib.types.str;
+      default = "";
+      description = "Control-vector GGUF filename under model/control-vectors to apply (empty = none).";
+    };
   };
   configFn =
     {
