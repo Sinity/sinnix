@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 # @sinnix-package
-# description: Random-archive deep-verify drill across each Borg repo
+# description: Bounded Borg verification drill across each Borg repo
 # runtimeInputs: bash coreutils borgbackup jq util-linux
 
-# Picks one random archive from each repo and runs `borg check
-# --verify-data` against it, logging timing and outcome to a JSONL
-# trail. This complements the existing weekly `borg check
-# --repository-only` (which validates the chunk graph but not chunk
-# content) by sampling deep data integrity over time.
+# Runs a bounded partial repository check for each repo, logging timing and
+# outcome to a JSONL trail. Borg's --max-duration repository checks resume
+# across runs, so this avoids surprise multi-hour archive data verification
+# while still advancing repository integrity coverage over time.
 #
 # Required environment:
 #   BORG_PASSCOMMAND  — how to fetch the passphrase (set by the systemd unit)
@@ -16,7 +15,11 @@
 #   --repo URL[,URL,...]   override the default repo list
 #   --log PATH             override the JSONL output path
 #   --within-days N        only consider archives within the last N days
-#                          (default 30; bounds runtime + keeps drill fresh)
+#                          for explicit --verify-data mode
+#   --max-duration N       seconds per repository for default partial checks
+#                          (default 1800)
+#   --verify-data          explicit full archive-data verification mode; this
+#                          can take many hours and is not used by the timer
 
 set -euo pipefail
 
@@ -26,6 +29,8 @@ DEFAULT_REPOS=(
 )
 LOG_FILE="/realm/data/captures/machine/borg_drill.jsonl"
 WITHIN_DAYS=30
+MAX_DURATION=1800
+VERIFY_DATA=0
 REPOS=()
 
 while [ $# -gt 0 ]; do
@@ -33,8 +38,10 @@ while [ $# -gt 0 ]; do
     --repo)         IFS=',' read -ra REPOS <<<"$2"; shift 2 ;;
     --log)          LOG_FILE="$2"; shift 2 ;;
     --within-days)  WITHIN_DAYS="$2"; shift 2 ;;
+    --max-duration) MAX_DURATION="$2"; shift 2 ;;
+    --verify-data)  VERIFY_DATA=1; shift ;;
     --help|-h)
-      sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
@@ -49,6 +56,8 @@ fi
 
 mkdir -p "$(dirname "$LOG_FILE")"
 
+LOCK_FILE="${SINNIX_BORG_GLOBAL_LOCK:-/run/lock/sinnix-borg.lock}"
+
 cutoff=$(date -u -d "${WITHIN_DAYS} days ago" '+%Y-%m-%dT%H:%M:%S')
 
 emit_jsonl() {
@@ -61,7 +70,9 @@ emit_jsonl() {
     --argjson exit_code "$6" \
     --arg status "$7" \
     --arg stderr_tail "$8" \
+    --arg mode "$9" \
     --argjson within_days "$WITHIN_DAYS" \
+    --argjson max_duration_s "$MAX_DURATION" \
     '{
       repo: $repo,
       archive: $archive,
@@ -71,21 +82,55 @@ emit_jsonl() {
       exit_code: $exit_code,
       status: $status,
       stderr_tail: $stderr_tail,
-      within_days: $within_days
+      mode: $mode,
+      within_days: $within_days,
+      max_duration_s: $max_duration_s
     }' >> "$LOG_FILE"
 }
 
 overall_exit=0
+started_at="$(date -u -Iseconds)"
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+  echo "another Borg operation is active; skipping drill and keeping it queued for the next timer run" >&2
+  emit_jsonl "all" "" "$started_at" "$(date -u -Iseconds)" 0 0 "skipped_busy" "another Borg operation holds $LOCK_FILE" "repository_partial"
+  exit 0
+fi
 
 for repo in "${REPOS[@]}"; do
   echo "=== drill: $repo ==="
+  if [ "$VERIFY_DATA" -eq 0 ]; then
+    started_at="$(date -u -Iseconds)"
+    start_epoch="$(date +%s)"
+    stderr_file="$(mktemp)"
+    set +e
+    borg check --repository-only --max-duration "$MAX_DURATION" "$repo" 2>"$stderr_file"
+    exit_code=$?
+    set -e
+    end_epoch="$(date +%s)"
+    ended_at="$(date -u -Iseconds)"
+    duration=$((end_epoch - start_epoch))
+    stderr_tail="$(tail -c 2048 "$stderr_file" 2>/dev/null || true)"
+    rm -f "$stderr_file"
+
+    if [ "$exit_code" -eq 0 ]; then
+      status="ok"
+    else
+      status="failed"
+      overall_exit=1
+    fi
+    echo "  status=$status exit=$exit_code duration=${duration}s mode=repository_partial"
+    emit_jsonl "$repo" "" "$started_at" "$ended_at" "$duration" "$exit_code" "$status" "$stderr_tail" "repository_partial"
+    continue
+  fi
+
   # `borg list --json` is reliable across versions; filter to archives whose
   # `time` is newer than the cutoff and pick one uniformly at random.
   archives_json="$(borg list --json "$repo" 2>/dev/null || echo '{"archives":[]}')"
   candidate_count="$(echo "$archives_json" | jq --arg cutoff "$cutoff" '[.archives[] | select(.time > $cutoff)] | length')"
   if [ "$candidate_count" -eq 0 ]; then
     echo "  no archives newer than $cutoff in $repo; skipping" >&2
-    emit_jsonl "$repo" "" "$(date -u -Iseconds)" "$(date -u -Iseconds)" 0 0 "no_archives" ""
+    emit_jsonl "$repo" "" "$(date -u -Iseconds)" "$(date -u -Iseconds)" 0 0 "no_archives" "" "archive_verify_data"
     continue
   fi
   archive_name="$(echo "$archives_json" | jq -r --arg cutoff "$cutoff" \
@@ -112,7 +157,7 @@ for repo in "${REPOS[@]}"; do
     overall_exit=1
   fi
   echo "  status=$status exit=$exit_code duration=${duration}s"
-  emit_jsonl "$repo" "$archive_name" "$started_at" "$ended_at" "$duration" "$exit_code" "$status" "$stderr_tail"
+  emit_jsonl "$repo" "$archive_name" "$started_at" "$ended_at" "$duration" "$exit_code" "$status" "$stderr_tail" "archive_verify_data"
 done
 
 exit "$overall_exit"

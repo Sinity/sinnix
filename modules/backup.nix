@@ -77,7 +77,24 @@ let
     export BORG_CACHE_DIR=${lib.escapeShellArg borgCacheDir}
 
     with_borg_lock() {
-      flock ${lib.escapeShellArg borgGlobalLock} "$@"
+      if [ "''${SINNIX_BORG_GLOBAL_LOCK_HELD:-0}" = 1 ]; then
+        "$@"
+      else
+        flock ${lib.escapeShellArg borgGlobalLock} "$@"
+      fi
+    }
+
+    acquire_borg_global_lock_or_skip() {
+      if [ "''${SINNIX_BORG_GLOBAL_LOCK_HELD:-0}" = 1 ]; then
+        return
+      fi
+      reason="$1"
+      exec 9>${lib.escapeShellArg borgGlobalLock}
+      if ! flock -n 9; then
+        echo "Another Borg operation is active; skipping $reason and keeping work queued"
+        exit 0
+      fi
+      export SINNIX_BORG_GLOBAL_LOCK_HELD=1
     }
 
     recover_stale_borg_locks() {
@@ -126,6 +143,8 @@ let
       shopt -s nullglob
 
       ${mkBorgCommonScript repo repoPath}
+
+      acquire_borg_global_lock_or_skip "${label} Borg drain"
 
       cleanup_snapshot_bind_mount() {
         if mountpoint -q ${lib.escapeShellArg bindTarget}; then
@@ -616,6 +635,7 @@ in
         set -euo pipefail
 
         ${mkBorgCommonScript borgRepoPersist borgRepoPersistPath}
+        acquire_borg_global_lock_or_skip "Borg repository check"
         recover_stale_borg_locks
         ${mkBorgCommonScript borgRepoRealm borgRepoRealmPath}
         recover_stale_borg_locks
@@ -662,7 +682,24 @@ in
         export BORG_CACHE_DIR=${lib.escapeShellArg borgCacheDir}
 
         with_borg_lock() {
-          flock ${lib.escapeShellArg borgGlobalLock} "$@"
+          if [ "''${SINNIX_BORG_GLOBAL_LOCK_HELD:-0}" = 1 ]; then
+            "$@"
+          else
+            flock ${lib.escapeShellArg borgGlobalLock} "$@"
+          fi
+        }
+
+        acquire_borg_global_lock_or_skip() {
+          if [ "''${SINNIX_BORG_GLOBAL_LOCK_HELD:-0}" = 1 ]; then
+            return
+          fi
+          reason="$1"
+          exec 9>${lib.escapeShellArg borgGlobalLock}
+          if ! flock -n 9; then
+            echo "Another Borg operation is active; skipping $reason"
+            exit 0
+          fi
+          export SINNIX_BORG_GLOBAL_LOCK_HELD=1
         }
 
         recover_stale_borg_locks() {
@@ -699,6 +736,7 @@ in
             return
           fi
 
+          acquire_borg_global_lock_or_skip "Borg maintenance"
           recover_stale_borg_locks "$repo"
           with_borg_lock borg prune --lock-wait ${toString borgLockWaitSec} ${mkBorgRetentionArgs} "$repo"
           with_borg_lock borg compact --lock-wait ${toString borgLockWaitSec} "$repo"
@@ -899,6 +937,7 @@ in
       ];
       script = ''
         ${mkBorgCommonScript borgRepoRootSnapshots borgRepoRootSnapshotsPath}
+        acquire_borg_global_lock_or_skip "root snapshot Borg drain"
         recover_stale_borg_locks
 
         PERSIST_DEV="/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02"
@@ -979,19 +1018,16 @@ in
       };
     };
 
-    # Weekly random-archive deep-verify drill.
+    # Weekly bounded Borg verification drill.
     #
-    # The existing `services.borgbackup.jobs.*.doCheck` runs
-    # `borg check --repository-only` which validates the chunk graph
-    # without re-reading chunk data — fast, but cannot detect chunk-store
-    # bit rot. The drill picks one random archive per repo (within the
-    # last 30 days, to bound runtime + keep the verification fresh) and
-    # runs `borg check --verify-data --first 1 -P <archive>` against it,
-    # appending a JSONL record to
-    # /realm/data/captures/machine/borg_drill.jsonl so lynchpin and
-    # operator reports can chart pass/fail history from the canonical capture.
+    # Full `borg check --verify-data` archive drills have proven able to run for
+    # most of a day on the local HDD. The scheduled drill instead uses Borg's
+    # resumable `--repository-only --max-duration` mode so integrity checking
+    # progresses without monopolizing the host. Full archive-data verification
+    # remains available as an explicit manual `sinnix-borg-drill --verify-data`
+    # command.
     systemd.services.sinnix-borg-drill = {
-      description = "Borg random-archive deep-verify drill";
+      description = "Borg bounded verification drill";
       # Detach from nixos-rebuild switch: this is a multi-hour oneshot;
       # switch-to-configuration must not block waiting for it to finish
       # when the unit hash changes or the Persistent=true timer wants to
@@ -1005,6 +1041,7 @@ in
       environment = {
         BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
         BORG_CACHE_DIR = borgCacheDir;
+        SINNIX_BORG_GLOBAL_LOCK = borgGlobalLock;
       };
       path = with pkgs; [
         borgbackup
