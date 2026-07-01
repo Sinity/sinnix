@@ -79,7 +79,11 @@ if inventory_readable; then
     .commandClasses[$class].systemdProperties // {}
     | to_entries[]
     | select(.key | test("^[A-Za-z][A-Za-z0-9_]*$"))
-    | "\(.key)=\(.value)"
+    | if (.value | type) == "array" then
+        .key as $key | .value[] | "\($key)=\(.)"
+      else
+        "\(.key)=\(.value)"
+      end
   ' "$inventory_file")
 
   while IFS='=' read -r name value; do

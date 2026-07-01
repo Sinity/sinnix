@@ -181,7 +181,10 @@ rec {
       nice = null;
       ioniceClass = null;
       ionicePriority = null;
-      systemdProperties = { };
+      systemdProperties = {
+        IOAccounting = true;
+        IOWeight = 300;
+      };
       envDefaults = { };
     };
     build = {
@@ -190,6 +193,10 @@ rec {
       nice = 5;
       ioniceClass = "best-effort";
       ionicePriority = 7;
+      systemdProperties = {
+        IOAccounting = true;
+        IOWeight = 2;
+      };
       envDefaults = {
         CARGO_BUILD_JOBS = "12";
         CARGO_INCREMENTAL = "0";
@@ -205,6 +212,10 @@ rec {
       nice = 10;
       ioniceClass = "idle";
       ionicePriority = null;
+      systemdProperties = {
+        IOAccounting = true;
+        IOWeight = 1;
+      };
       envDefaults = { };
     };
     nix-build = {
@@ -213,6 +224,10 @@ rec {
       nice = 10;
       ioniceClass = "idle";
       ionicePriority = null;
+      systemdProperties = {
+        IOAccounting = true;
+        IOWeight = 2;
+      };
       envDefaults = { };
     };
   };
@@ -234,6 +249,7 @@ rec {
         MemoryMax = "28G";
       };
       system-critical = {
+        IOAccounting = true;
         CPUWeight = 400;
         IOWeight = 300;
         MemoryLow = "2G";
@@ -241,31 +257,42 @@ rec {
     };
     user = {
       agent = {
+        IOAccounting = true;
         CPUWeight = 400;
         IOWeight = 300;
         MemoryLow = "3G";
       };
-      app = { };
-      session = { };
+      app = {
+        IOAccounting = true;
+        IOWeight = 300;
+      };
+      session = {
+        IOAccounting = true;
+        IOWeight = 300;
+      };
       backup = {
+        IOAccounting = true;
         CPUWeight = 20;
         IOWeight = 20;
         MemoryHigh = "8G";
         MemoryMax = "12G";
       };
       background = {
+        IOAccounting = true;
         CPUWeight = 3;
         IOWeight = 1;
         MemoryHigh = "2G";
         MemoryMax = "4G";
       };
       build = {
+        IOAccounting = true;
         CPUWeight = 5;
         IOWeight = 2;
         MemoryHigh = "22G";
         MemoryMax = "28G";
       };
       nix-build = {
+        IOAccounting = true;
         CPUWeight = 5;
         IOWeight = 2;
         MemoryHigh = "22G";
