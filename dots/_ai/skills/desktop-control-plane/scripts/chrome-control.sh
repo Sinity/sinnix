@@ -3,7 +3,9 @@ set -euo pipefail
 
 # Chrome DevTools Protocol (CDP) remote control for Google Chrome.
 # The live target expects the user's Chrome on --remote-debugging-port=9222.
-# Private targets launch isolated agent-owned profiles on separate ports.
+# Private targets launch agent-owned profiles on separate ports. By default
+# they are seeded from the live Chrome profile before launch, so agents can use
+# authenticated state without operating on the visible live browser.
 # Uses curl for HTTP endpoints and websocat for WebSocket CDP commands.
 
 TARGET="live"
@@ -11,8 +13,10 @@ CDP_HOST="${CDP_HOST:-127.0.0.1}"
 LIVE_CDP_PORT="${LIVE_CDP_PORT:-9222}"
 PRIVATE_CDP_PORT="${PRIVATE_CDP_PORT:-9223}"
 PRIVATE_VISIBLE_CDP_PORT="${PRIVATE_VISIBLE_CDP_PORT:-9224}"
-PRIVATE_PROFILE_DIR="${SINNIX_AGENT_CHROME_PROFILE:-$HOME/.local/share/sinnix-browser/private-control}"
-PRIVATE_VISIBLE_PROFILE_DIR="${SINNIX_AGENT_CHROME_VISIBLE_PROFILE:-$HOME/.local/share/sinnix-browser/private-visible-control}"
+PRIVATE_PROFILE_DIR="${SINNIX_AGENT_CHROME_PROFILE:-$HOME/.local/share/sinnix-browser/private-live-state-control}"
+PRIVATE_VISIBLE_PROFILE_DIR="${SINNIX_AGENT_CHROME_VISIBLE_PROFILE:-$HOME/.local/share/sinnix-browser/private-live-state-visible-control}"
+LIVE_PROFILE_DIR="${SINNIX_AGENT_CHROME_LIVE_PROFILE:-$HOME/.config/chrome-ws}"
+SEED_FROM_LIVE="${SINNIX_AGENT_CHROME_SEED_FROM_LIVE:-1}"
 CHROME_BIN="${SINNIX_AGENT_CHROME_EXECUTABLE:-google-chrome-stable}"
 CDP_PORT="$LIVE_CDP_PORT"
 CDP_BASE="http://${CDP_HOST}:${CDP_PORT}"
@@ -44,7 +48,8 @@ Usage: sinnix-chrome-control [--target live|private|private-visible] <command> [
 Commands:
   status                          Probe the selected target
   private-start [--visible] [--url <url>]
-                                  Start an isolated private Chrome target
+                                  Start a private Chrome target, seeding profile state from live Chrome by default
+  private-sync-state [--visible]  Copy live Chrome profile state into the selected private target profile
   private-stop [--visible]        Stop the private Chrome target
   list                            List all open pages (id, title, url, type)
   list-tabs                       List only page-type targets
@@ -143,6 +148,103 @@ chrome_pid_file() {
   printf '%s/chrome.pid\n' "$(target_profile_dir)"
 }
 
+cleanup_stale_private_locks() {
+  local profile_dir lock target pid
+  profile_dir="$(target_profile_dir)"
+  lock="$profile_dir/SingletonLock"
+  [[ -L $lock ]] || return 0
+  target="$(readlink "$lock" 2>/dev/null || true)"
+  pid="${target##*-}"
+  if [[ $pid =~ ^[0-9]+$ ]] && ! kill -0 "$pid" 2>/dev/null; then
+    rm -f "$profile_dir"/SingletonLock "$profile_dir"/SingletonCookie "$profile_dir"/SingletonSocket
+  fi
+}
+
+private_profile_in_use() {
+  local profile_dir pid_file pid
+  profile_dir="$(target_profile_dir)"
+  pid_file="$(chrome_pid_file)"
+  if [[ -f $pid_file ]]; then
+    pid="$(cat "$pid_file")"
+    if [[ -n $pid ]] && kill -0 "$pid" 2>/dev/null; then
+      return 0
+    fi
+  fi
+  [[ -e $profile_dir/SingletonLock ]]
+}
+
+sync_private_state_from_live() {
+  local visible=0 profile_dir
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --visible)
+      visible=1
+      shift
+      ;;
+    *)
+      echo "unknown arg: $1" >&2
+      exit 2
+      ;;
+    esac
+  done
+
+  if [[ $visible -eq 1 ]]; then
+    set_target private-visible
+  elif [[ $TARGET == "live" ]]; then
+    set_target private
+  fi
+  if [[ $TARGET == "live" ]]; then
+    echo "refusing to sync live browser target onto itself" >&2
+    exit 2
+  fi
+
+  if [[ $SEED_FROM_LIVE == "0" ]]; then
+    echo "private Chrome state sync disabled by SINNIX_AGENT_CHROME_SEED_FROM_LIVE=0"
+    return 0
+  fi
+
+  [[ -d $LIVE_PROFILE_DIR ]] || {
+    echo "live Chrome profile not found: $LIVE_PROFILE_DIR" >&2
+    exit 1
+  }
+
+  profile_dir="$(target_profile_dir)"
+  cleanup_stale_private_locks
+  if private_profile_in_use; then
+    echo "refusing to sync while $TARGET Chrome profile is in use: $profile_dir" >&2
+    exit 2
+  fi
+
+  need_cmd rsync
+  mkdir -p "$profile_dir"
+
+  sync_live_profile_path "Local State"
+  sync_live_profile_path "Default/Cookies"
+  sync_live_profile_path "Default/Network/Cookies"
+  sync_live_profile_path "Default/Local Storage"
+  sync_live_profile_path "Default/Session Storage"
+  sync_live_profile_path "Default/IndexedDB"
+  sync_live_profile_path "Default/Web Data"
+
+  echo "synced live Chrome profile state into $TARGET profile: $profile_dir"
+}
+
+sync_live_profile_path() {
+  local rel src dst
+  rel="$1"
+  src="$LIVE_PROFILE_DIR/$rel"
+  dst="$(target_profile_dir)/$rel"
+  [[ -e $src ]] || return 0
+
+  mkdir -p "$(dirname "$dst")"
+  if [[ -d $src ]]; then
+    mkdir -p "$dst"
+    rsync -a --delete "$src"/ "$dst"/
+  else
+    rsync -a "$src" "$dst"
+  fi
+}
+
 target_status() {
   if curl -fsS --max-time 2 "${CDP_BASE}/json/version" | jq .; then
     return 0
@@ -153,6 +255,7 @@ target_status() {
 
 start_private_chrome() {
   local visible=0 url="about:blank" profile_dir pid_file headless_arg
+  local launch_args=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
     --visible)
@@ -184,21 +287,30 @@ start_private_chrome() {
   profile_dir="$(target_profile_dir)"
   pid_file="$(chrome_pid_file)"
   mkdir -p "$profile_dir"
+  sync_private_state_from_live
   headless_arg="$(target_headless_flag)"
 
-  nohup "$CHROME_BIN" \
+  launch_args=(
     --remote-debugging-address="$CDP_HOST" \
     --remote-debugging-port="$CDP_PORT" \
     --user-data-dir="$profile_dir" \
     --no-first-run \
-    --no-default-browser-check \
-    ${headless_arg:+"$headless_arg"} \
-    "$url" \
-    >"$profile_dir/chrome.log" 2>&1 &
+    --no-default-browser-check
+  )
+  if [[ -n $headless_arg ]]; then
+    launch_args+=("$headless_arg" --no-startup-window)
+  else
+    launch_args+=("$url")
+  fi
+
+  setsid "$CHROME_BIN" "${launch_args[@]}" >"$profile_dir/chrome.log" 2>&1 &
   printf '%s\n' "$!" >"$pid_file"
 
   for _ in {1..50}; do
     if curl -fsS --max-time 1 "${CDP_BASE}/json/version" >/dev/null 2>&1; then
+      if [[ -n $headless_arg ]]; then
+        curl -fsS -X PUT "${CDP_BASE}/json/new?${url}" >/dev/null
+      fi
       target_status
       return 0
     fi
@@ -310,6 +422,10 @@ status)
 
 private-start)
   start_private_chrome "$@"
+  ;;
+
+private-sync-state)
+  sync_private_state_from_live "$@"
   ;;
 
 private-stop)

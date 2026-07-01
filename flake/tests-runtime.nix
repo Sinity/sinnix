@@ -1157,6 +1157,9 @@ in
               test -x "$helper"
               bash -n "$helper"
             done
+            grep -Fq 'private-sync-state' "$HOME/.local/bin/sinnix-chrome-control"
+            grep -Fq 'SINNIX_AGENT_CHROME_LIVE_PROFILE' "$HOME/.local/bin/sinnix-chrome-control"
+            grep -Fq 'private-sync-state' "$HOME/.local/bin/mcp-chrome-devtools-private"
           '';
         }
       );

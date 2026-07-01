@@ -37,8 +37,11 @@ vocabulary:
 - `skills`: upstream skill tooling; keep Sinnix/Hermes skills authoritative locally.
 
 The default browser automation surface is `sinnix-chrome-control`, not an
-always-on Chrome DevTools MCP. The MCP trio remains available through the
-explicit browser agent profile when the shell CDP helper is too small.
+always-on Chrome DevTools MCP. The private browser profile is seeded from the
+live Chrome profile before launch, so agents can use authenticated browser state
+without opening tabs or navigating in the visible user browser. The MCP trio
+remains available through the explicit browser agent profile when the shell CDP
+helper is too small.
 
 ## Evaluate next, in order
 
@@ -92,7 +95,7 @@ instructions, not a typed desktop MCP server.
 Browser-control lanes:
 
 - `sinnix-chrome-control --target private` / `--target private-visible` for
-  agent-owned private browser work.
+  agent-owned private browser work backed by copied live profile state.
 - `sinnix-chrome-control --target live` for real browser/session interaction.
 - `claude-browser` / `codex-browser` for the Chrome DevTools MCP superset.
 - A future local desktop-control MCP should wrap `hyprctl`, `wtype`, `grim`,

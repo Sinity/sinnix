@@ -127,12 +127,15 @@ mkFeatureModule {
           "$@"
       '';
       # Agent-owned Chrome DevTools MCP. This gives agents the same DevTools tool
-      # shape as the user's live Chrome, but against a private persistent profile.
-      # It is headless by default; set SINNIX_AGENT_CHROME_HEADLESS=0 when a
-      # visible private browser window is desired for operator inspection.
+      # shape as the user's live Chrome, but against a private persistent profile
+      # seeded from live Chrome state before launch. It stays separate from the
+      # shell CDP helper's private profile so concurrent MCP and shell browser
+      # sessions cannot fight over a Chrome profile lock. It is headless by
+      # default; set SINNIX_AGENT_CHROME_HEADLESS=0 when a visible private
+      # browser window is desired for operator inspection.
       mcpChromeDevtoolsPrivateBin = pkgs.writeShellScriptBin "mcp-chrome-devtools-private" ''
         set -euo pipefail
-        profile_dir="''${SINNIX_AGENT_CHROME_PROFILE:-$HOME/.local/share/sinnix-browser/chrome-devtools-private}"
+        profile_dir="''${SINNIX_AGENT_CHROME_PROFILE:-$HOME/.local/share/sinnix-browser/chrome-devtools-private-live-state}"
         viewport="''${SINNIX_AGENT_CHROME_VIEWPORT:-1440x1000}"
         headless="''${SINNIX_AGENT_CHROME_HEADLESS:-1}"
         chrome_bin="''${SINNIX_AGENT_CHROME_EXECUTABLE:-${pkgs.google-chrome}/bin/google-chrome-stable}"
@@ -141,6 +144,8 @@ mkFeatureModule {
           echo "SINNIX_AGENT_CHROME_EXECUTABLE does not name an executable Chrome: $chrome_bin" >&2
           exit 2
         fi
+        SINNIX_AGENT_CHROME_PROFILE="$profile_dir" \
+          "$HOME/.local/bin/sinnix-chrome-control" --target private private-sync-state
 
         args=(
           --executablePath "$chrome_bin"
@@ -280,6 +285,10 @@ mkFeatureModule {
         export PATH="${serenaRuntimePath}:$UV_TOOL_BIN_DIR:$PATH"
         unset PYTHONPATH PYTHONHOME PYTHONBREAKPOINT PYTHONUSERBASE VIRTUAL_ENV
         export PYTHONNOUSERSITE=1
+
+        if [ "${commandName}" = "serena-hooks" ] && [ "''${1:-}" = "remind" ]; then
+          exit 0
+        fi
 
         mkdir -p "$SERENA_HOME" "$UV_CACHE_DIR" "$UV_TOOL_DIR" "$UV_TOOL_BIN_DIR"
 
@@ -426,17 +435,6 @@ mkFeatureModule {
       '';
       codexHooksFile = jsonFormat.generate "codex-hooks.json" {
         hooks = {
-          PreToolUse = [
-            {
-              matcher = "Bash";
-              hooks = [
-                {
-                  type = "command";
-                  command = "serena-hooks remind --client=codex";
-                }
-              ];
-            }
-          ];
           SessionStart = [
             {
               matcher = "startup|resume";

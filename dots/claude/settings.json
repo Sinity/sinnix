@@ -44,16 +44,6 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.local/bin/serena-hooks remind --client=claude-code",
-            "timeout": 15
-          }
-        ]
-      },
-      {
         "matcher": "mcp__serena__*",
         "hooks": [
           {

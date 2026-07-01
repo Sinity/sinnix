@@ -89,8 +89,11 @@ Browser, desktop, and terminal control are normal local capabilities on this
 machine. Interpret user language directly:
 
 - **"your browser" / "an agent browser"** → use an agent-private Chrome through
-  `sinnix-chrome-control --target private`. Use `--target private-visible` when
-  the user should be able to see the agent browser.
+  `sinnix-chrome-control --target private`. This private profile is seeded from
+  the live Chrome profile by default, so agents can use authenticated state
+  without opening tabs or navigating in the user's visible browser. Use
+  `--target private-visible` when the user should be able to see the agent
+  browser.
 - **"my browser" / "the real browser" / "my tabs"** → use the user's live Chrome
   profile through `sinnix-chrome-control --target live`. This is a high-authority
   surface: it can see authenticated pages/cookies and non-active tabs via
