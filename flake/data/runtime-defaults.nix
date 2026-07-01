@@ -230,8 +230,8 @@ rec {
         IOWeight = 2;
         # Rust workspaces and NixOS rebuilds should use the workstation, while
         # still leaving room for the desktop and always-on data services.
-        MemoryHigh = "18G";
-        MemoryMax = "24G";
+        MemoryHigh = "22G";
+        MemoryMax = "28G";
       };
       system-critical = {
         CPUWeight = 400;
@@ -262,14 +262,14 @@ rec {
       build = {
         CPUWeight = 5;
         IOWeight = 2;
-        MemoryHigh = "18G";
-        MemoryMax = "24G";
+        MemoryHigh = "22G";
+        MemoryMax = "28G";
       };
       nix-build = {
         CPUWeight = 5;
         IOWeight = 2;
-        MemoryHigh = "18G";
-        MemoryMax = "24G";
+        MemoryHigh = "22G";
+        MemoryMax = "28G";
       };
     };
   };

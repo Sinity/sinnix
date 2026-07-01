@@ -272,7 +272,10 @@ in
       # require swap occupancy: the 2026-06-30 desktop stall hit 314 MiB
       # MemAvailable with swap still empty, so the old swap gate suppressed
       # the emergency kill until the compositor/session was already wedged.
-      freeMemThreshold = 7;
+      # earlyoom v1.9 computes this percentage against "user mem total"
+      # (MemAvailable + AnonPages), which is ~26 GiB on sinnix-prime under
+      # current desktop load; 5% is about 1.3 GiB of MemAvailable headroom.
+      freeMemThreshold = 5;
       freeSwapThreshold = 100;
       extraArgs = [
         # Prefer killing rebuildable heavy tooling under pressure — NOT the

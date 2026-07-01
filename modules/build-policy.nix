@@ -139,8 +139,8 @@ in
           # Soft + hard memory ceilings: reclaim from build processes before
           # they evict desktop/video/sinexd working sets, and kill the build
           # cgroup before global pressure reaches earlyoom territory.
-          MemoryHigh = "18G";
-          MemoryMax = "24G";
+          MemoryHigh = "22G";
+          MemoryMax = "28G";
         };
       };
     };
