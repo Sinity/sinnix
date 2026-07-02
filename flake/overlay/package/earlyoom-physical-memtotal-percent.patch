@@ -1,0 +1,34 @@
+diff --git a/meminfo.c b/meminfo.c
+index 4b6f4c2..1abfd58 100644
+--- a/meminfo.c
++++ b/meminfo.c
+@@ -112,7 +112,7 @@ meminfo_t parse_meminfo()
+     m.UserMemTotalKiB = m.MemAvailableKiB + m.AnonPagesKiB;
+ 
+     // Calculate percentages
+-    m.MemAvailablePercent = (double)m.MemAvailableKiB * 100 / (double)m.UserMemTotalKiB;
++    m.MemAvailablePercent = (double)m.MemAvailableKiB * 100 / (double)m.MemTotalKiB;
+     if (m.SwapTotalKiB > 0) {
+         m.SwapFreePercent = (double)m.SwapFreeKiB * 100 / (double)m.SwapTotalKiB;
+     } else {
+@@ -278,7 +278,7 @@ void print_mem_stats(int __attribute__((format(printf, 1, 2))) (*out_func)(const
+ {
+     out_func("mem avail: %5lld of %5lld MiB (" PRIPCT "), swap free: %4lld of %4lld MiB (" PRIPCT ")\n",
+         m.MemAvailableKiB / 1024,
+-        m.UserMemTotalKiB / 1024,
++        m.MemTotalKiB / 1024,
+         m.MemAvailablePercent,
+         m.SwapFreeKiB / 1024,
+         m.SwapTotalKiB / 1024,
+diff --git a/meminfo.h b/meminfo.h
+index 74e8ab4..b107be5 100644
+--- a/meminfo.h
++++ b/meminfo.h
+@@ -19,7 +19,7 @@ typedef struct {
+     // Represents the total amount of memory that may be used by user processes.
+     long long UserMemTotalKiB;
+     // Calculated percentages
+-    double MemAvailablePercent; // percent of total memory that is available
++    double MemAvailablePercent; // percent of physical memory that is available
+     double SwapFreePercent; // percent of total swap that is free
+ } meminfo_t;
