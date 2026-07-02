@@ -143,11 +143,15 @@ in
 
       autoStart = lib.mkOption {
         type = lib.types.bool;
-        default = true;
+        default = false;
         description = ''
           Start the polylogued user systemd unit at login
           (``WantedBy = default.target``). Mapped to
           ``programs.polylogued.autoStart``.
+
+          Defaults to false so updating the Polylogue package/MCP/runtime
+          surface does not implicitly start archive convergence; operators can
+          enable daemon ingestion deliberately per host.
         '';
       };
     };
