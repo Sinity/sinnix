@@ -66,7 +66,10 @@
         "/realm/inbox/download"
       ];
     };
-    polylogue.enable = true;
+    polylogue = {
+      enable = true;
+      embedding.enable = true;
+    };
     machine-telemetry.enable = true;
     weechat-log-sealer.enable = true;
     airvpn-seed = {

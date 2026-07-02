@@ -155,6 +155,36 @@ in
         '';
       };
     };
+
+    embedding = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Enable Polylogue's daemon-side embedding stage. The Voyage API key is
+          expected to come from the user manager environment; this option does
+          not render secrets into the generated polylogue.toml.
+        '';
+      };
+
+      model = lib.mkOption {
+        type = lib.types.str;
+        default = "voyage-4";
+        description = "Voyage embedding model for Polylogue.";
+      };
+
+      dimension = lib.mkOption {
+        type = lib.types.ints.unsigned;
+        default = 1024;
+        description = "Embedding vector dimension for the configured model.";
+      };
+
+      maxCostUsd = lib.mkOption {
+        type = lib.types.number;
+        default = 1000.0;
+        description = "Polylogue embedding cost cap in USD; 0 means unlimited upstream.";
+      };
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -183,6 +213,13 @@ in
           };
 
           browser-capture.port = cfg.daemon.browserCapturePort;
+
+          embedding = {
+            enabled = cfg.embedding.enable;
+            model = cfg.embedding.model;
+            dimension = cfg.embedding.dimension;
+            max-cost-usd = cfg.embedding.maxCostUsd;
+          };
         };
       };
 
