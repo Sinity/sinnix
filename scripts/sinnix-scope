@@ -70,6 +70,17 @@ ionice_priority="$(inventory_value ".commandClasses.\"$class\".ionicePriority" "
 
 scoped_command=("$@")
 property_args=()
+unscoped_background_xtask=0
+
+command_base="$(basename -- "${1:-}")"
+if [ "$command_base" = "xtask" ]; then
+  for arg in "$@"; do
+    if [ "$arg" = "--bg" ]; then
+      unscoped_background_xtask=1
+      break
+    fi
+  done
+fi
 
 if inventory_readable; then
   while IFS='=' read -r name value; do
@@ -115,6 +126,15 @@ fi
 
 if [ -n "$nice_level" ] && command -v nice >/dev/null 2>&1; then
   scoped_command=(nice -n "$nice_level" "${scoped_command[@]}")
+fi
+
+if [ "$unscoped_background_xtask" = 1 ]; then
+  # `xtask ... --bg` intentionally forks a long-lived child and returns. A
+  # systemd-run scope is the wrong ownership boundary for that shape: when the
+  # launcher exits, the transient scope stops and kills the background job.
+  # Keep the nice/ionice/env policy above, but leave lifecycle ownership to
+  # xtask's job table and reaper.
+  exec "${scoped_command[@]}"
 fi
 
 if grep -q "/$slice" /proc/self/cgroup 2>/dev/null; then
