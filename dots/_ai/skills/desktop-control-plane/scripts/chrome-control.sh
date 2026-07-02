@@ -291,10 +291,10 @@ start_private_chrome() {
   headless_arg="$(target_headless_flag)"
 
   launch_args=(
-    --remote-debugging-address="$CDP_HOST" \
-    --remote-debugging-port="$CDP_PORT" \
-    --user-data-dir="$profile_dir" \
-    --no-first-run \
+    --remote-debugging-address="$CDP_HOST"
+    --remote-debugging-port="$CDP_PORT"
+    --user-data-dir="$profile_dir"
+    --no-first-run
     --no-default-browser-check
   )
   if [[ -n $headless_arg ]]; then
