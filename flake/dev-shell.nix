@@ -320,6 +320,7 @@
           pkgs.nix-output-monitor
           pkgs.jq
           pkgs.yq
+          pkgs.duckdb
           pkgs.fd
           pkgs.ripgrep
           scriptPkgs.lsp-root

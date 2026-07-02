@@ -14,6 +14,10 @@
 - For live desktop/system repairs, if the user asks to apply or switch now,
   run `switch` directly. Do not insert `check --no-build` first; `switch`
   already evaluates/builds before activation.
+- For Sinnix NixOS config edits, do not run standalone `nix eval`,
+  `nix build`, or flake-check probes as agent hygiene unless the user
+  explicitly asks for that diagnostic. They are slow on this host and repeat
+  work that `switch` performs through the intended resource wrapper.
 - If `switch` already evaluated/built and failed only during activation, fix the
   activation blocker and rerun `switch`. Do not add an intervening
   `check --no-build`; it repeats evidence already gathered while delaying

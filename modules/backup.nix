@@ -46,6 +46,7 @@ let
   borgStatusLog = "${config.sinnix.paths.capturesRoot}/machine/borg_status.jsonl";
   borgArchiveMaxAgeSec = 6 * 60 * 60;
   borgSnapshotQueueMaxAgeSec = 6 * 60 * 60;
+  borgDrainMinIntervalSec = 4 * 60 * 60;
   backupServiceConfig =
     unit:
     lib.sinnix.mkRuntimeServiceConfig {
@@ -556,7 +557,7 @@ in
         snapshotGlob = "persist.*";
         bindTarget = borgPersistSnapshotBind;
         archivePrefix = "persist";
-        minIntervalSec = 3600;
+        minIntervalSec = borgDrainMinIntervalSec;
         exclude = persistExcludes;
       };
     };
@@ -592,7 +593,7 @@ in
         snapshotGlob = "realm.*";
         bindTarget = borgRealmSnapshotBind;
         archivePrefix = "realm";
-        minIntervalSec = 3600;
+        minIntervalSec = borgDrainMinIntervalSec;
         exclude = realmExcludes;
       };
     };
@@ -901,7 +902,7 @@ in
     systemd.timers.btrbk = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
-        OnCalendar = "*-*-* *:00/15:00";
+        OnCalendar = "*-*-* *:00/30:00";
         Persistent = false;
       };
     };

@@ -35,14 +35,14 @@ nix-tree                            # Interactive dependency browser (find rebui
 
 ### Verification Before Rebuild
 
-Use the narrow test or evaluation that covers the edited surface, then run
-`switch` when the user wants the live system updated. Do not run
-`check --no-build` as routine pre-flight before `switch`; `switch` already
-evaluates and builds, so the separate check repeats work while delaying
-recovery. If `switch` already evaluated/built and failed during activation,
-patch the activation blocker and rerun `switch` directly. Avoid raw
-`nix flake check --no-build` for routine work on this host; that traversal has
-filled zram and wedged in uninterruptible sleep.
+For Sinnix NixOS config edits, use `switch` as the default verification path
+when applying the change. Do not run standalone `nix eval`, `nix build`, or
+flake-check probes as agent hygiene unless the user explicitly asks for that
+diagnostic; they are slow on this host and repeat work that `switch` performs
+through the intended resource wrapper. If `switch` already evaluated/built and
+failed during activation, patch the activation blocker and rerun `switch`
+directly. Avoid raw `nix flake check --no-build` for routine work on this host;
+that traversal has filled zram and wedged in uninterruptible sleep.
 
 Use `check --no-build` only when the user explicitly asks for that diagnostic
 or when you need a non-activating gate and have a concrete reason. The curated

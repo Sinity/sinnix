@@ -37,10 +37,13 @@
       "mcp__claude_ai_SimpleScraper__*",
       "mcp__claude_ai_Mermaid_Chart__*"
     ],
-    "deny": ["Bash(rm -rf /:*)"],
+    "deny": [
+      "Bash(rm -rf /:*)"
+    ],
     "ask": [],
     "defaultMode": "auto"
   },
+  "model": "claude-fable-5[1m]",
   "hooks": {
     "PreToolUse": [
       {
@@ -108,6 +111,10 @@
       }
     ]
   },
+  "statusLine": {
+    "type": "command",
+    "command": "bash /home/sinity/.claude/statusline-command.sh"
+  },
   "enabledPlugins": {
     "context7@claude-plugins-official": false,
     "feature-dev@claude-plugins-official": false,
@@ -132,11 +139,8 @@
     "atomic-agents@claude-plugins-official": false
   },
   "alwaysThinkingEnabled": true,
-  "effortLevel": "medium",
+  "effortLevel": "high",
+  "tui": "fullscreen",
   "skipDangerousModePermissionPrompt": true,
-  "skipAutoPermissionPrompt": true,
-  "statusLine": {
-    "type": "command",
-    "command": "bash /home/sinity/.claude/statusline-command.sh"
-  }
+  "skipAutoPermissionPrompt": true
 }
