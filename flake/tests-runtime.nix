@@ -67,7 +67,19 @@ in
             sinnix.features.dev.mcp-servers.enable = true;
           })
         ];
-        assertions = _config: [ ];
+        assertions =
+          config:
+          let
+            settingsSource =
+              toString
+                config.home-manager.users.${config.sinnix.user.name}.xdg.configFile."claude/settings.json".source;
+          in
+          [
+            {
+              assertion = settingsSource == "${config.sinnix.paths.dotsRoot}/claude/settings.json";
+              message = "Claude settings.json must stay an out-of-store dots symlink source, not a generated store file.";
+            }
+          ];
       };
       agentToolsFixture = {
         spec = devAgentToolsRuntimeSpec;
@@ -1001,6 +1013,8 @@ in
             test ! -L "$HOME/.codex/config.toml"
             test -f "$HOME/.gemini/settings.json"
             test -L "$HOME/.config/claude/settings.json"
+            claude_settings_store_link="$(readlink "$HOME/.config/claude/settings.json")"
+            test "$(readlink "$claude_settings_store_link")" = "/realm/project/sinnix/dots/claude/settings.json"
             test -L "$HOME/.config/claude/mcp.json"
             test -L "$HOME/.codex/hooks.json"
 
@@ -1027,7 +1041,7 @@ in
               (has("mcpServers") | not) and
               .alwaysThinkingEnabled == true and
               .skipDangerousModePermissionPrompt == true
-            ' "$HOME/.config/claude/settings.json" >/dev/null
+            ' ${inputs.self}/dots/claude/settings.json >/dev/null
 
             jq -e '
               .mcpServers as $m |

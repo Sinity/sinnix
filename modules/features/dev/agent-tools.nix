@@ -105,10 +105,6 @@ mkFeatureModule {
       claudeBrowserMcpConfigFile = jsonFormat.generate "claude-mcp-browser.json" {
         mcpServers = claudeBrowserMcpServers;
       };
-      claudeSettingsBase = builtins.fromJSON (
-        builtins.readFile (inputs.self + "/dots/claude/settings.json")
-      );
-      claudeSettingsFile = jsonFormat.generate "claude-settings.json" claudeSettingsBase;
       sharedSkillNames = [
         "adversarial-loop"
         "agent-orchestration"
@@ -288,11 +284,10 @@ mkFeatureModule {
             "claude/hooks/pretooluse-bash.sh".source = mkDotsFile "/claude/hooks/pretooluse-bash.sh";
             "claude/hooks/sessionstart-polylogue-recall.sh".source =
               mkDotsFile "/claude/hooks/sessionstart-polylogue-recall.sh";
-            # Static settings.json fragment (permissions, hooks, plugins). MCP
-            # servers are NOT here because Claude Code 2.x ignores any
-            # `mcpServers` block in settings.json — they're delivered via
-            # `--mcp-config` from the wrapper instead (see ./claude-mcp.json).
-            "claude/settings.json".source = claudeSettingsFile;
+            # Mutable Claude settings live in dots as an out-of-store symlink.
+            # Claude Code rewrites this file in place when toggling settings,
+            # so pointing it at a generated store path breaks the CLI.
+            "claude/settings.json".source = mkDotsFile "/claude/settings.json";
             # Registry-driven MCP config consumed by the claude wrapper.
             "claude/mcp.json".source = claudeMcpConfigFile;
             "claude/mcp-lean.json".source = claudeLeanMcpConfigFile;
