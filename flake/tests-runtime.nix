@@ -70,14 +70,17 @@ in
         assertions =
           config:
           let
-            settingsSource =
-              toString
-                config.home-manager.users.${config.sinnix.user.name}.xdg.configFile."claude/settings.json".source;
+            hm = config.home-manager.users.${config.sinnix.user.name};
+            activationText = hm.home.activation.claudeSymlink.data or "";
           in
           [
             {
-              assertion = settingsSource == "${config.sinnix.paths.dotsRoot}/claude/settings.json";
-              message = "Claude settings.json must stay an out-of-store dots symlink source, not a generated store file.";
+              assertion = !(hm.xdg.configFile ? "claude/settings.json");
+              message = "Claude settings.json must not be managed through Home Manager xdg.configFile.";
+            }
+            {
+              assertion = lib.hasInfix "${config.sinnix.paths.dotsRoot}/claude/settings.json" activationText;
+              message = "Claude settings.json must be linked directly to dots during activation.";
             }
           ];
       };
@@ -127,7 +130,6 @@ in
           "claude/mcp.json"
           "claude/mcp-lean.json"
           "claude/mcp-browser.json"
-          "claude/settings.json"
         ];
         useHmZshrc = true;
         zshrcPreamble = ''
@@ -1012,9 +1014,6 @@ in
             test -f "$HOME/.codex/config.toml"
             test ! -L "$HOME/.codex/config.toml"
             test -f "$HOME/.gemini/settings.json"
-            test -L "$HOME/.config/claude/settings.json"
-            claude_settings_store_link="$(readlink "$HOME/.config/claude/settings.json")"
-            test "$(readlink "$claude_settings_store_link")" = "/realm/project/sinnix/dots/claude/settings.json"
             test -L "$HOME/.config/claude/mcp.json"
             test -L "$HOME/.codex/hooks.json"
 

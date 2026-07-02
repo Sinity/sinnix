@@ -284,10 +284,6 @@ mkFeatureModule {
             "claude/hooks/pretooluse-bash.sh".source = mkDotsFile "/claude/hooks/pretooluse-bash.sh";
             "claude/hooks/sessionstart-polylogue-recall.sh".source =
               mkDotsFile "/claude/hooks/sessionstart-polylogue-recall.sh";
-            # Mutable Claude settings live in dots as an out-of-store symlink.
-            # Claude Code rewrites this file in place when toggling settings,
-            # so pointing it at a generated store path breaks the CLI.
-            "claude/settings.json".source = mkDotsFile "/claude/settings.json";
             # Registry-driven MCP config consumed by the claude wrapper.
             "claude/mcp.json".source = claudeMcpConfigFile;
             "claude/mcp-lean.json".source = claudeLeanMcpConfigFile;
@@ -309,8 +305,10 @@ mkFeatureModule {
             };
           };
 
-          home.activation.claudeSymlink = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+          home.activation.claudeSymlink = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+            mkdir -p $HOME/.config/claude
             ln -sfn .config/claude $HOME/.claude
+            ln -sfn ${sinnixCfg.paths.dotsRoot}/claude/settings.json $HOME/.config/claude/settings.json
           '';
           home.activation.renderGlobalCodexAgents = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
             mkdir -p "$HOME/.codex"
