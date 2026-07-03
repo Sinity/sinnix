@@ -243,6 +243,16 @@ in
                   maxBytes = null;
                 }
                 {
+                  name = "SINEX_RAW_EVENTS_CONFIRMED";
+                  subjects = [ "events.confirmed.>" ];
+                  maxAge = "72h";
+                  maxMsgs = 2000000;
+                  # Match the raw stream policy above: production needs this
+                  # stream to be large enough for catch-up bursts, and natscli
+                  # cannot reconcile the intended >2 GiB cap.
+                  maxBytes = null;
+                }
+                {
                   name = "SOURCE_MATERIAL";
                   subjects = [ "source_material.frames.>" ];
                   retention = "work";
@@ -641,18 +651,28 @@ in
             # home-manager activation calls chmod 700 /home/${targetUserName}
             # which maps the group bits to the POSIX ACL mask, resetting
             # mask::--x → mask::--- and nullifying sinex's traverse grant.
-            # Re-run the generated desktop access repair after each
+            # Re-run the generated source access repairs after each
             # home-manager run so the mask is restored immediately. Execute
-            # the helper directly instead of restarting its systemd unit:
-            # the helper is ordered Before=sinexd.service, and restarting
-            # that unit during activation pulls sinexd into a restart
+            # helpers directly instead of restarting their systemd units:
+            # the helpers are ordered Before=sinexd.service, and restarting
+            # those units during activation pulls sinexd into a restart
             # transaction even when sinexd itself has X-RestartIfChanged=false.
-            ${homeManagerServiceName} = lib.mkIf activationProfile.desktop {
+            ${homeManagerServiceName} = lib.mkIf (
+              activationProfile.desktop || activationProfile.terminal || activationProfile.browser
+            ) {
               # The `+` prefix runs this command as root regardless of the
               # service user, which has no privilege to repair user ACLs.
-              serviceConfig.ExecStartPost = lib.mkAfter [
-                "+${config.systemd.services.sinex-desktop-target-access.serviceConfig.ExecStart}"
-              ];
+              serviceConfig.ExecStartPost = lib.mkAfter (
+                lib.optionals activationProfile.terminal [
+                  "+${config.systemd.services.sinex-terminal-target-access.serviceConfig.ExecStart}"
+                ]
+                ++ lib.optionals activationProfile.browser [
+                  "+${config.systemd.services.sinex-browser-target-access.serviceConfig.ExecStart}"
+                ]
+                ++ lib.optionals activationProfile.desktop [
+                  "+${config.systemd.services.sinex-desktop-target-access.serviceConfig.ExecStart}"
+                ]
+              );
             };
             sinexd = {
               restartIfChanged = false;
@@ -664,6 +684,12 @@ in
                 # daemon can still use 32 concurrent DB sessions under catch-up.
                 "SINEX_DB_MAX_CONNECTIONS=32"
                 "SINEX_DB_MIN_CONNECTIONS=4"
+                # git-commit-history invokes git asynchronously inside sinexd,
+                # after per-binding env guards have released. Keep this
+                # service-level and scoped to the single configured repo.
+                "GIT_CONFIG_COUNT=1"
+                "GIT_CONFIG_KEY_0=safe.directory"
+                "GIT_CONFIG_VALUE_0=/realm/project/sinex"
                 # Upstream Sinex now exposes these event-engine policies as
                 # runtime env vars rather than Nix module options.
                 "SINEX_EVENT_ENGINE_REJECT_INITIAL_REPLAY=false"
