@@ -4,6 +4,8 @@
 # runtimeInputs: bash coreutils gum procps gawk gnugrep gnused systemd
 set -euo pipefail
 
+export LC_ALL=C
+
 usage() {
   cat <<'EOF'
 usage: hogkill [options]
