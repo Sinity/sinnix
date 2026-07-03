@@ -132,7 +132,13 @@ mkFeatureModule {
       mkClaudeCodeWrapper =
         {
           mcpConfigName ? "mcp",
-          profile ? if mcpConfigName == "mcp-lean" then "lean" else if mcpConfigName == "mcp-browser" then "browser" else "full",
+          profile ?
+            if mcpConfigName == "mcp-lean" then
+              "lean"
+            else if mcpConfigName == "mcp-browser" then
+              "browser"
+            else
+              "full",
           # Extra shell injected after the npm bootstrap and before launch — used
           # to point Claude Code at a non-Anthropic backend (DeepSeek, local
           # gateway) via ANTHROPIC_BASE_URL / ANTHROPIC_MODEL / auth env vars.
@@ -276,6 +282,10 @@ mkFeatureModule {
             "claude/hooks/pretooluse-bash.sh".source = mkDotsFile "/claude/hooks/pretooluse-bash.sh";
             "claude/hooks/sessionstart-polylogue-recall.sh".source =
               mkDotsFile "/claude/hooks/sessionstart-polylogue-recall.sh";
+            "claude/hooks/sessionstart-sinex-recall.sh" = {
+              text = builtins.readFile ../../../dots/claude/hooks/sessionstart-sinex-recall.sh;
+              executable = true;
+            };
             "claude/hooks/sessionstart-beads-prime.sh".source =
               mkDotsFile "/claude/hooks/sessionstart-beads-prime.sh";
             # Registry-driven MCP config consumed by the claude wrapper.
@@ -368,6 +378,15 @@ mkFeatureModule {
               export ANTHROPIC_DEFAULT_HAIKU_MODEL="$LOCAL_MODEL"
               export CLAUDE_CODE_SUBAGENT_MODEL="$LOCAL_MODEL"
             '';
+          };
+
+          home.file.".local/bin/sessionstart-sinex-recall" = {
+            text = ''
+              #!${pkgs.runtimeShell}
+              exec "$HOME/.claude/hooks/sessionstart-sinex-recall.sh" "$@"
+            '';
+            executable = true;
+            force = true;
           };
 
           home.file.".local/bin/codex" = mkCodexWrapper { profile = "full"; };

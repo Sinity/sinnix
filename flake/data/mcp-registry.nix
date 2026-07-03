@@ -103,6 +103,17 @@ let
       ];
     };
 
+    sinex = {
+      transport = "stdio";
+      tier = "recall";
+      command = "mcp-sinex";
+      clients = [
+        "codex"
+        "claude"
+        "gemini"
+      ];
+    };
+
     chrome-devtools = {
       transport = "stdio";
       tier = "browser-mcp";

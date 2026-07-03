@@ -107,6 +107,11 @@
           },
           {
             "type": "command",
+            "command": "~/.claude/hooks/sessionstart-sinex-recall.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
             "command": "~/.claude/hooks/sessionstart-beads-prime.sh",
             "timeout": 10
           }

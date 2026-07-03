@@ -118,6 +118,7 @@ in
           ".local/bin/mcp-chrome-devtools-private"
           ".local/bin/mcp-chrome-devtools-private-visible"
           ".local/bin/mcp-polylogue"
+          ".local/bin/mcp-sinex"
           ".local/bin/sinnix-mcp-sweep"
           ".local/bin/sinnix-agent-status"
           ".local/bin/sinnix-chrome-control"
@@ -1047,6 +1048,8 @@ in
               .skipDangerousModePermissionPrompt == true and
               ([.hooks.SessionStart[].hooks[].command]
                 | any(contains("SINNIX_CLAUDE_PROFILE") and contains("serena-hooks activate --client=claude-code"))) and
+              ([.hooks.SessionStart[].hooks[].command]
+                | any(contains("sessionstart-sinex-recall.sh"))) and
               ([.hooks.Stop[].hooks[].command]
                 | any(contains("SINNIX_CLAUDE_PROFILE") and contains("serena-hooks cleanup --client=claude-code")))
             ' ${inputs.self}/dots/claude/settings.json >/dev/null
@@ -1134,6 +1137,9 @@ in
             jq -e '
               [.hooks.SessionStart[].hooks[].command] | index("bd-prime-if-present")
             ' "$HOME/.codex/hooks.json" >/dev/null
+            jq -e '
+              [.hooks.SessionStart[].hooks[].command] | index("sessionstart-sinex-recall")
+            ' "$HOME/.codex/hooks.json" >/dev/null
 
 
             grep -Fq 'MCP_CONFIG="$HOME/.config/claude/mcp.json"' "$HOME/.local/bin/claude-full"
@@ -1175,6 +1181,7 @@ in
             grep -Fq 'npm install -g @google/gemini-cli' "$HOME/.local/bin/gemini"
 
             "$HOME/.local/bin/mcp-polylogue" --help | grep -q 'Start the Polylogue MCP stdio bridge'
+            grep -Fq 'sinex-mcp-server' "$HOME/.local/bin/mcp-sinex"
             for helper in \
               "$HOME/.local/bin/sinnix-agent-status" \
               "$HOME/.local/bin/sinnix-chrome-control" \

@@ -172,7 +172,7 @@ insights. Do not mirror ordinary task notes there.
 
 ---
 
-## Session recall (polylogue)
+## Session recall (polylogue + Sinex)
 
 Claude Code has a `SessionStart` hook at
 `~/.claude/hooks/sessionstart-polylogue-recall.sh`. If `polylogue` is on PATH,
@@ -180,9 +180,18 @@ the hook attempts to print up to three recent sessions matching the current
 project directory via `polylogue --cwd-prefix "$CLAUDE_PROJECT_DIR" ... list`.
 It exits silently when no matching archive data is available.
 
-Do not assume that same hook exists in every agent runtime. Codex receives the
-rendered global `AGENTS.md` and has the Polylogue MCP/server substrate, but its
-configured hooks are separate.
+Claude Code also has `~/.claude/hooks/sessionstart-sinex-recall.sh`. Codex
+SessionStart hooks call the same installed command as
+`sessionstart-sinex-recall`. The hook prints a compact Sinex machine-context
+block from `sinexctl recall`, preferring a project-local
+`.sinex/state/runtime-target.json`, then `SINEX_RUNTIME_TARGET_CONFIG`, then
+ordinary `sinexctl` config. It exits silently on missing runtime, missing auth,
+timeout, or empty recall output.
+
+Set `SINEX_SESSIONSTART_RECALL=0` to disable the Sinex preamble for one launch.
+Use `SINEX_SESSIONSTART_RECALL_WINDOW`, `SINEX_SESSIONSTART_RECALL_LIMIT`, and
+`SINEX_SESSIONSTART_RECALL_TIMEOUT_SECS` for local tuning; defaults are `2h`,
+`8`, and `4` seconds.
 
 For deeper history, use Polylogue MCP/search rather than guessing from memory.
 `polylogued.service` is the live ingestion daemon for Claude/Codex session

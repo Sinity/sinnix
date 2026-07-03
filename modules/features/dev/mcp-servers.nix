@@ -460,6 +460,10 @@ mkFeatureModule {
                   type = "command";
                   command = "bd-prime-if-present";
                 }
+                {
+                  type = "command";
+                  command = "sessionstart-sinex-recall";
+                }
               ];
             }
           ];
@@ -888,6 +892,37 @@ mkFeatureModule {
                 #!${pkgs.runtimeShell}
                 set -euo pipefail
                 exec ${scriptPkgs.polylogue-cli}/bin/polylogue-mcp "$@"
+              '';
+            };
+            ".local/bin/mcp-sinex" = {
+              executable = true;
+              force = true;
+              text = ''
+                #!${pkgs.runtimeShell}
+                set -euo pipefail
+                if [ -z "''${SINEX_RUNTIME_TARGET_CONFIG:-}" ] \
+                  && [ -r /realm/project/sinex/.sinex/state/runtime-target.json ]; then
+                  export SINEX_RUNTIME_TARGET_CONFIG=/realm/project/sinex/.sinex/state/runtime-target.json
+                fi
+                if [ -n "''${SINEX_MCP_SERVER_BIN:-}" ]; then
+                  exec "$SINEX_MCP_SERVER_BIN" "$@"
+                fi
+                if command -v sinex-mcp-server >/dev/null 2>&1; then
+                  exec sinex-mcp-server "$@"
+                fi
+                sinex_checkout=/realm/project/sinex
+                sinex_checkout_hash="$(
+                  printf '%s' "$sinex_checkout" \
+                    | ${pkgs.coreutils}/bin/sha256sum \
+                    | ${pkgs.coreutils}/bin/cut -c1-12
+                )"
+                sinex_user="''${USER:-$(${pkgs.coreutils}/bin/id -un)}"
+                sinex_warm_bin="/var/cache/sinex/$sinex_user/$sinex_checkout_hash/target/debug/sinex-mcp-server"
+                if [ -x "$sinex_warm_bin" ]; then
+                  exec "$sinex_warm_bin" "$@"
+                fi
+                cd /realm/project/sinex
+                exec ${pkgs.nix}/bin/nix develop --command sinex-mcp-server "$@"
               '';
             };
             ".local/share/polylogue/inbox/chatgpt" = {
