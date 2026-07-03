@@ -132,6 +132,7 @@ mkFeatureModule {
       mkClaudeCodeWrapper =
         {
           mcpConfigName ? "mcp",
+          profile ? if mcpConfigName == "mcp-lean" then "lean" else if mcpConfigName == "mcp-browser" then "browser" else "full",
           # Extra shell injected after the npm bootstrap and before launch — used
           # to point Claude Code at a non-Anthropic backend (DeepSeek, local
           # gateway) via ANTHROPIC_BASE_URL / ANTHROPIC_MODEL / auth env vars.
@@ -152,6 +153,7 @@ mkFeatureModule {
 
             ${agentScopePrelude}
 
+            export SINNIX_CLAUDE_PROFILE=${lib.escapeShellArg profile}
             mcp_args=()
             MCP_CONFIG="$HOME/.config/claude/${mcpConfigName}.json"
             if [ -r "$MCP_CONFIG" ]; then
@@ -194,6 +196,7 @@ mkFeatureModule {
 
             ${agentScopePrelude}
 
+            export SINNIX_CODEX_PROFILE=${lib.escapeShellArg profile}
             codex_args=(--profile ${lib.escapeShellArg profile})
 
             run_agent_scoped "$STATE/launch.sh" "''${codex_args[@]}" "$@"

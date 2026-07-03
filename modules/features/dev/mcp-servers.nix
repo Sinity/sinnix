@@ -450,7 +450,11 @@ mkFeatureModule {
                 }
                 {
                   type = "command";
-                  command = "serena-hooks activate --client=codex";
+                  command = ''
+                    case "''${SINNIX_CODEX_PROFILE:-full}" in
+                      full|browser|deepseek|local) serena-hooks activate --client=codex ;;
+                    esac
+                  '';
                 }
                 {
                   type = "command";
@@ -478,7 +482,11 @@ mkFeatureModule {
                 }
                 {
                   type = "command";
-                  command = "serena-hooks cleanup --client=codex";
+                  command = ''
+                    case "''${SINNIX_CODEX_PROFILE:-full}" in
+                      full|browser|deepseek|local) serena-hooks cleanup --client=codex ;;
+                    esac
+                  '';
                 }
               ];
             }

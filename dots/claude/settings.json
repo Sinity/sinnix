@@ -81,7 +81,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.local/bin/serena-hooks cleanup --client=claude-code",
+            "command": "case \"${SINNIX_CLAUDE_PROFILE:-full}\" in full|browser|deepseek|local) ~/.local/bin/serena-hooks cleanup --client=claude-code ;; esac",
             "timeout": 15
           },
           {
@@ -97,7 +97,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.local/bin/serena-hooks activate --client=claude-code",
+            "command": "case \"${SINNIX_CLAUDE_PROFILE:-full}\" in full|browser|deepseek|local) ~/.local/bin/serena-hooks activate --client=claude-code ;; esac",
             "timeout": 15
           },
           {

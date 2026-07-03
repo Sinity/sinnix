@@ -1044,7 +1044,11 @@ in
             jq -e '
               (has("mcpServers") | not) and
               .alwaysThinkingEnabled == true and
-              .skipDangerousModePermissionPrompt == true
+              .skipDangerousModePermissionPrompt == true and
+              ([.hooks.SessionStart[].hooks[].command]
+                | any(contains("SINNIX_CLAUDE_PROFILE") and contains("serena-hooks activate --client=claude-code"))) and
+              ([.hooks.Stop[].hooks[].command]
+                | any(contains("SINNIX_CLAUDE_PROFILE") and contains("serena-hooks cleanup --client=claude-code")))
             ' ${inputs.self}/dots/claude/settings.json >/dev/null
 
             jq -e '
@@ -1124,7 +1128,8 @@ in
             ' "$HOME/.gemini/settings.json" >/dev/null
 
             jq -e '
-              [.hooks.SessionStart[].hooks[].command] | index("serena-hooks activate --client=codex")
+              [.hooks.SessionStart[].hooks[].command]
+              | any(contains("SINNIX_CODEX_PROFILE") and contains("serena-hooks activate --client=codex"))
             ' "$HOME/.codex/hooks.json" >/dev/null
             jq -e '
               [.hooks.SessionStart[].hooks[].command] | index("bd-prime-if-present")
@@ -1132,6 +1137,7 @@ in
 
 
             grep -Fq 'MCP_CONFIG="$HOME/.config/claude/mcp.json"' "$HOME/.local/bin/claude-full"
+            grep -Fq 'export SINNIX_CLAUDE_PROFILE=lean' "$HOME/.local/bin/claude-lean"
             grep -Fq 'MCP_CONFIG="$HOME/.config/claude/mcp-lean.json"' "$HOME/.local/bin/claude-lean"
             grep -Fq 'MCP_CONFIG="$HOME/.config/claude/mcp-browser.json"' "$HOME/.local/bin/claude-browser"
             # DeepSeek/local variants use the full (default) MCP profile.
@@ -1140,6 +1146,7 @@ in
             grep -Fq 'https://api.deepseek.com/anthropic' "$HOME/.local/bin/claude-deepseek"
             grep -Fq 'ANTHROPIC_BASE_URL="http://127.0.0.1:4000"' "$HOME/.local/bin/claude-local"
             grep -Fq 'codex_args=(--profile full)' "$HOME/.local/bin/codex"
+            grep -Fq 'export SINNIX_CODEX_PROFILE=lean' "$HOME/.local/bin/codex-lean"
             grep -Fq 'codex_args=(--profile lean)' "$HOME/.local/bin/codex-lean"
             grep -Fq 'codex_args=(--profile full)' "$HOME/.local/bin/codex-full"
             grep -Fq 'codex_args=(--profile browser)' "$HOME/.local/bin/codex-browser"
