@@ -21,9 +21,12 @@ mkFeatureModule {
       ...
     }:
     let
+      scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
       agentRuntimePath = lib.makeBinPath (
-        with pkgs;
         [
+          scriptPkgs.beads
+        ]
+        ++ (with pkgs; [
           nodejs_22
           git
           bash
@@ -32,7 +35,7 @@ mkFeatureModule {
           which
           coreutils
           gcc
-        ]
+        ])
       );
 
       # Shared npm bootstrap prelude — generates state-dir setup, first-run
@@ -68,7 +71,6 @@ mkFeatureModule {
           chmod +x "$STATE/launch.sh"
         '';
 
-      scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
       sinnixCfg = config.sinnix;
 
       # Runtime path of the agenix-decrypted DeepSeek API key (read at launch by
@@ -105,21 +107,7 @@ mkFeatureModule {
       claudeBrowserMcpConfigFile = jsonFormat.generate "claude-mcp-browser.json" {
         mcpServers = claudeBrowserMcpServers;
       };
-      sharedSkillNames = [
-        "adversarial-loop"
-        "agent-orchestration"
-        "analyze"
-        "assured-close"
-        "desktop-control-plane"
-        "enhance"
-        "evidence-harness"
-        "greedy-batching"
-        "history-cleanup"
-        "lynchpin"
-        "meta"
-        "recap"
-        "swarm"
-      ];
+      sharedSkillNames = import ../../../flake/data/shared-agent-skills.nix;
       sharedSkillFarm = pkgs.linkFarm "sinnix-shared-agent-skills" (
         map (name: {
           inherit name;
@@ -250,6 +238,7 @@ mkFeatureModule {
         in
         {
           home.packages = [
+            scriptPkgs.beads
             scriptPkgs.sinnix-scope
             scriptPkgs.chatgpt-share-export
             scriptPkgs.render-agents
@@ -284,6 +273,8 @@ mkFeatureModule {
             "claude/hooks/pretooluse-bash.sh".source = mkDotsFile "/claude/hooks/pretooluse-bash.sh";
             "claude/hooks/sessionstart-polylogue-recall.sh".source =
               mkDotsFile "/claude/hooks/sessionstart-polylogue-recall.sh";
+            "claude/hooks/sessionstart-beads-prime.sh".source =
+              mkDotsFile "/claude/hooks/sessionstart-beads-prime.sh";
             # Registry-driven MCP config consumed by the claude wrapper.
             "claude/mcp.json".source = claudeMcpConfigFile;
             "claude/mcp-lean.json".source = claudeLeanMcpConfigFile;
@@ -421,5 +412,9 @@ mkFeatureModule {
             force = true;
           };
         };
+
+      environment.systemPackages = [
+        scriptPkgs.beads
+      ];
     };
 } args

@@ -1,0 +1,16 @@
+[
+  "adversarial-loop"
+  "agent-orchestration"
+  "analyze"
+  "assured-close"
+  "beads"
+  "desktop-control-plane"
+  "enhance"
+  "evidence-harness"
+  "greedy-batching"
+  "history-cleanup"
+  "lynchpin"
+  "meta"
+  "recap"
+  "swarm"
+]

@@ -36,6 +36,11 @@
   A single call site is not proof of consistency.
 - Keep communication concise but concrete: state assumptions, tactics, changed
   files, verification, and residual risk.
+- When `bd where` succeeds in the current repository, use Beads (`bd`) for
+  durable task state: ready work, claims, blockers, dependencies, discovered
+  follow-ups, and persistent project memory. Use local plans only for the
+  current turn's execution checklist; do not make markdown TODOs the shared
+  source of truth. Run `bd prime` for the current Beads workflow context.
 
 ### Safety And Git
 
@@ -43,8 +48,10 @@
   you did not make unless explicitly asked.
 - Treat destructive operations as explicit acts. State what will be deleted,
   reset, force-pushed, rebased, killed, or history-rewritten before doing it.
-- Commit locally only when it is part of the requested workflow or established
-  repo practice. Do not push unless asked.
+- Commit locally when a coherent change is verified. Push proactively when the
+  repository workflow allows it; for product repos this means pushing feature
+  branches and opening/updating PRs, not direct pushes to protected default
+  branches. Do not push when the user, repo, or active workflow says to hold.
 - Stage by path, not broad sweeps, when secrets or unrelated work could be
   captured.
 
@@ -136,6 +143,11 @@ Polylogue, Lynchpin, or Sinnix captures can answer directly.
 ---
 
 
+
+Raw-log lives at `/realm/data/knowledgebase/logs.raw-log.md`. It is the
+append-only, low-friction operator stream used by `rawlog`, `rawlog-capture`,
+and `oracle`; read it when the user references raw-log/rawlog, recent subjective
+context, or "what have I been saying/thinking lately?"
 
 Capture only durable, non-obvious decisions, tensions, dead ends, and cross-session
 insights. Do not mirror ordinary task notes there.

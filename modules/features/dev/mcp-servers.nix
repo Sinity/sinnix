@@ -55,6 +55,11 @@ mkFeatureModule {
       internal = true;
       description = "Path to the generated Codex local profile derivation (for tests)";
     };
+    codexHooksSource = lib.mkOption {
+      type = lib.types.path;
+      internal = true;
+      description = "Path to the generated Codex hooks derivation (for tests)";
+    };
   };
   meta.dotfiles = {
     configFile = {
@@ -447,6 +452,20 @@ mkFeatureModule {
                   type = "command";
                   command = "serena-hooks activate --client=codex";
                 }
+                {
+                  type = "command";
+                  command = "bd-prime-if-present";
+                }
+              ];
+            }
+          ];
+          UserPromptSubmit = [
+            {
+              hooks = [
+                {
+                  type = "command";
+                  command = "bd-prime-if-present --memories-only";
+                }
               ];
             }
           ];
@@ -513,21 +532,7 @@ mkFeatureModule {
           env_key = "LITELLM_LOCAL_KEY";
         };
       };
-      sharedSkillNames = [
-        "adversarial-loop"
-        "agent-orchestration"
-        "analyze"
-        "assured-close"
-        "desktop-control-plane"
-        "enhance"
-        "evidence-harness"
-        "greedy-batching"
-        "history-cleanup"
-        "lynchpin"
-        "meta"
-        "recap"
-        "swarm"
-      ];
+      sharedSkillNames = import ../../../flake/data/shared-agent-skills.nix;
       sharedSkillLinks = map (name: {
         inherit name;
         path = inputs.self + "/dots/_ai/skills/${name}";
@@ -560,6 +565,7 @@ mkFeatureModule {
       sinnix.features.dev.mcp-servers.codexBrowserConfigSource = codexBrowserConfigFile;
       sinnix.features.dev.mcp-servers.codexDeepseekConfigSource = codexDeepseekConfigFile;
       sinnix.features.dev.mcp-servers.codexLocalConfigSource = codexLocalConfigFile;
+      sinnix.features.dev.mcp-servers.codexHooksSource = codexHooksFile;
       sinnix.persistence.home.directories = [
         {
           directory = ".local/share/codebase-memory-mcp";
@@ -628,6 +634,7 @@ mkFeatureModule {
                 run cp ${codexBrowserConfigFile} "$HOME/.codex/browser.config.toml"
                 run cp ${codexDeepseekConfigFile} "$HOME/.codex/deepseek.config.toml"
                 run cp ${codexLocalConfigFile} "$HOME/.codex/local.config.toml"
+                run cp ${codexHooksFile} "$HOME/.codex/hooks.json"
                 run chmod 644 "$HOME/.codex/config.toml"
                 run chmod 644 "$HOME/.codex/full.config.toml"
                 run chmod 644 "$HOME/.codex/lean.config.toml"
@@ -635,6 +642,7 @@ mkFeatureModule {
                 run chmod 644 "$HOME/.codex/browser.config.toml"
                 run chmod 644 "$HOME/.codex/deepseek.config.toml"
                 run chmod 644 "$HOME/.codex/local.config.toml"
+                run chmod 644 "$HOME/.codex/hooks.json"
               '';
               codebaseMemoryMcpConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
                 run mkdir -p "$HOME/.local/share/codebase-memory-mcp"
@@ -676,10 +684,6 @@ mkFeatureModule {
               source = geminiSettingsFile;
               force = true;
             };
-            ".codex/hooks.json" = {
-              source = codexHooksFile;
-              force = true;
-            };
             ".local/bin/codebase-memory-mcp" = {
               executable = true;
               force = true;
@@ -703,6 +707,10 @@ mkFeatureModule {
             };
             ".local/bin/sinnix-mcp-sweep" = {
               source = "${mcpSweepBin}/bin/sinnix-mcp-sweep";
+              force = true;
+            };
+            ".local/bin/bd-prime-if-present" = {
+              source = "${scriptPkgs.bd-prime-if-present}/bin/bd-prime-if-present";
               force = true;
             };
             ".local/bin/mcp-firecrawl" = {

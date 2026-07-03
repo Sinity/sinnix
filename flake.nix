@@ -117,6 +117,12 @@
     # owning their package derivations.
     llm-agents.url = "github:numtide/llm-agents.nix";
 
+    # Beads (`bd`) durable issue tracker for coding-agent work memory.
+    beads = {
+      url = "github:gastownhall/beads/v1.0.4";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     # Code formatting (multi-formatter via flake-parts)
     treefmt-nix = {
       url = "github:numtide/treefmt-nix";

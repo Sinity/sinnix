@@ -96,7 +96,6 @@ in
           pkgs.zsh
         ];
         homeFiles = [
-          ".codex/hooks.json"
           ".gemini/settings.json"
           ".local/bin/claude-full"
           ".local/bin/claude-lean"
@@ -113,6 +112,7 @@ in
           ".local/bin/codebase-memory-mcp"
           ".local/bin/serena"
           ".local/bin/serena-hooks"
+          ".local/bin/bd-prime-if-present"
           ".local/bin/mcp-firecrawl"
           ".local/bin/mcp-chrome-devtools"
           ".local/bin/mcp-chrome-devtools-private"
@@ -168,6 +168,8 @@ in
         agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexDeepseekConfigSource;
       agentToolsCodexLocalConfigSource =
         agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexLocalConfigSource;
+      agentToolsCodexHooksSource =
+        agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexHooksSource;
       backupRuntimeEval = evalTestSpec system {
         name = "backup-borg-hook-runtime";
         modules = [
@@ -1000,6 +1002,7 @@ in
             cp ${agentToolsCodexBrowserConfigSource} "$HOME/.codex/browser.config.toml"
             cp ${agentToolsCodexDeepseekConfigSource} "$HOME/.codex/deepseek.config.toml"
             cp ${agentToolsCodexLocalConfigSource} "$HOME/.codex/local.config.toml"
+            cp ${agentToolsCodexHooksSource} "$HOME/.codex/hooks.json"
             chmod 644 "$HOME/.codex/config.toml"
             chmod 644 "$HOME/.codex/full.config.toml"
             chmod 644 "$HOME/.codex/lean.config.toml"
@@ -1007,15 +1010,16 @@ in
             chmod 644 "$HOME/.codex/browser.config.toml"
             chmod 644 "$HOME/.codex/deepseek.config.toml"
             chmod 644 "$HOME/.codex/local.config.toml"
+            chmod 644 "$HOME/.codex/hooks.json"
           '';
           script = ''
             trap 'echo "dev-agent-tools-runtime failed at line $LINENO" >&2' ERR
 
             test -f "$HOME/.codex/config.toml"
             test ! -L "$HOME/.codex/config.toml"
+            test ! -L "$HOME/.codex/hooks.json"
             test -f "$HOME/.gemini/settings.json"
             test -L "$HOME/.config/claude/mcp.json"
-            test -L "$HOME/.codex/hooks.json"
 
             for wrapper in \
               "$HOME/.local/bin/claude-full" \
@@ -1031,7 +1035,8 @@ in
               "$HOME/.local/bin/gemini" \
               "$HOME/.local/bin/codebase-memory-mcp" \
               "$HOME/.local/bin/serena" \
-              "$HOME/.local/bin/serena-hooks"; do
+              "$HOME/.local/bin/serena-hooks" \
+              "$HOME/.local/bin/bd-prime-if-present"; do
               test -x "$wrapper"
               bash -n "$wrapper"
             done
@@ -1120,6 +1125,9 @@ in
 
             jq -e '
               [.hooks.SessionStart[].hooks[].command] | index("serena-hooks activate --client=codex")
+            ' "$HOME/.codex/hooks.json" >/dev/null
+            jq -e '
+              [.hooks.SessionStart[].hooks[].command] | index("bd-prime-if-present")
             ' "$HOME/.codex/hooks.json" >/dev/null
 
 

@@ -11,6 +11,7 @@
     let
       scriptRegistry = import ./scripts.nix { inherit inputs pkgs; };
       publicPackageNames = [
+        "beads"
         "ccusage"
         "chatgpt-share-export"
         "codebase-memory-mcp"

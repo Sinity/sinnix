@@ -130,6 +130,8 @@ let
   polylogueSrc = inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
   externalPackages = {
+    beads = inputs.beads.packages.${pkgs.stdenv.hostPlatform.system}.default;
+
     codebase-memory-mcp = codebaseMemoryMcp;
 
     lynchpin-python = pkgs.writeShellScriptBin "lynchpin-python" ''

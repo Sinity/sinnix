@@ -37,9 +37,7 @@
       "mcp__claude_ai_SimpleScraper__*",
       "mcp__claude_ai_Mermaid_Chart__*"
     ],
-    "deny": [
-      "Bash(rm -rf /:*)"
-    ],
+    "deny": ["Bash(rm -rf /:*)"],
     "ask": [],
     "defaultMode": "auto"
   },
@@ -106,6 +104,22 @@
             "type": "command",
             "command": "~/.claude/hooks/sessionstart-polylogue-recall.sh",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/sessionstart-beads-prime.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/sessionstart-beads-prime.sh --memories-only",
+            "timeout": 10
           }
         ]
       }

@@ -12,7 +12,7 @@ Navigable signals: conventional prefix (`feat:`/`fix:`/...), `(#N)` suffix on sq
 
 ### Committing
 
-**Commit freely and proactively.** Commit each logical unit as it lands on a feature branch — don't wait to be asked. Pushing is the explicit action; local commits are not.
+**Commit and push proactively within repo policy.** Commit each logical unit as it lands on a feature branch — don't wait to be asked. Push feature branches after verification so work is backed up and PRs can be opened or updated. For solo direct-master repos such as Sinnix and Lynchpin, committing and pushing `master` is allowed after local verification and deployment rules are satisfied. Do not push only when the user, repo, or current workflow explicitly says to hold.
 
 **Atomicity test:** can you write a subject without "and"? If you need "and", split. Err toward more commits — you can always squash before PR.
 
@@ -382,7 +382,7 @@ Read when you notice yourself about to do one.
 
 ### Interaction patterns (quick)
 
-**Proactive or requested commit:** parallel `git status`/`diff --staged`/`diff`/`log --oneline -10` → review → draft intent-shaped message → stage by name → commit with heredoc → `git status` → report `[git] N files — "<subject>"`. Don't push.
+**Proactive or requested commit:** parallel `git status`/`diff --staged`/`diff`/`log --oneline -10` → review → draft intent-shaped message → stage by name → commit with heredoc → `git status` → push when the branch/repo workflow allows it → report `[git] N files — "<subject>"` plus push/PR state.
 
 **PR:** parallel `status`/`diff`/`log origin/master..HEAD`/upstream-check → review full branch diff → push with `-u` if untracked → `gh pr create --title --body` (heredoc with Summary/Problem/Solution/Verification) → report URL.
 
