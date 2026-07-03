@@ -32,6 +32,19 @@
 - Module placement is ordinary repo taxonomy, documented below. Do not add a
   dedicated skill or separate procedural layer for it.
 
+## Beads Issue Tracking
+
+This repository uses `bd` (Beads) for durable project task tracking.
+
+- Run `bd prime` when task context, ready work, blockers, or durable project
+  memory matter.
+- Use `bd ready --json`, `bd show <id> --json`, `bd update <id> --claim --json`,
+  and `bd close <id> --reason "..." --json` for tracked work.
+- Create linked Beads issues for discovered follow-up work instead of leaving
+  markdown TODO lists as the source of truth.
+- `bd dolt push` follows the same repo policy as `git push`: Sinnix may push
+  verified `master` work directly; do not bypass explicit hold instructions.
+
 ## No-Alias Rule
 
 - Do not preserve deprecated compatibility interfaces for renamed files/modules/options/commands.

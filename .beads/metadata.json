@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "sinnix",
+  "project_id": "9af77aa3-a8e2-442b-aa2b-3043fee7e8cd"
+}
