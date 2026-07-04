@@ -96,6 +96,24 @@ let
       transport = "stdio";
       tier = "recall";
       command = "mcp-polylogue";
+      profiles = {
+        full.args = [
+          "--role"
+          "write"
+        ];
+        evidence.args = [
+          "--role"
+          "write"
+        ];
+        browser.args = [
+          "--role"
+          "write"
+        ];
+        lean.args = [
+          "--role"
+          "read"
+        ];
+      };
       clients = [
         "codex"
         "claude"
@@ -178,9 +196,19 @@ let
     let
       tiers = profileTiers.${profile};
     in
-    lib.filterAttrs (
-      _: server: builtins.elem client server.clients && builtins.elem (server.tier or "full") tiers
-    ) registry;
+    lib.mapAttrs
+      (
+        _: server:
+        let
+          profileOverride = (server.profiles or { }).${profile} or { };
+        in
+        lib.recursiveUpdate server profileOverride
+      )
+      (
+        lib.filterAttrs (
+          _: server: builtins.elem client server.clients && builtins.elem (server.tier or "full") tiers
+        ) registry
+      );
 
   selectClientServers = selectClientServersForProfile "full";
 

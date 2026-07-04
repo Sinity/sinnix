@@ -1059,7 +1059,8 @@ in
               ($m | has("github") and has("context7")) and
               ($m | has("polylogue") and has("lynchpin")) and
               ($m | has("serena") and has("codebase-memory-mcp")) and
-              ($m | has("chrome-devtools") | not)
+              ($m | has("chrome-devtools") | not) and
+              ($m.polylogue.args == ["--role", "write"])
             ' "$HOME/.config/claude/mcp.json" >/dev/null
 
             jq -e '
@@ -1068,7 +1069,8 @@ in
               ($m | has("lynchpin") | not) and
               ($m | has("serena") | not) and
               ($m | has("codebase-memory-mcp") | not) and
-              ($m | has("chrome-devtools") | not)
+              ($m | has("chrome-devtools") | not) and
+              ($m.polylogue.args == ["--role", "read"])
             ' "$HOME/.config/claude/mcp-lean.json" >/dev/null
 
             jq -e '
@@ -1078,7 +1080,8 @@ in
               ($m | has("serena") and has("codebase-memory-mcp")) and
               ($m | has("chrome-devtools")) and
               ($m | has("chrome-devtools-private")) and
-              ($m | has("chrome-devtools-private-visible"))
+              ($m | has("chrome-devtools-private-visible")) and
+              ($m.polylogue.args == ["--role", "write"])
             ' "$HOME/.config/claude/mcp-browser.json" >/dev/null
 
             python3 - <<'PYCODE'
@@ -1120,6 +1123,14 @@ in
             assert local['model_provider'] == 'local'
             assert local['model_providers']['local']['base_url'].startswith('http://127.0.0.1:')
             assert keys(local_path) == full
+            for path_name, expected_role in [
+                ('full.config.toml', 'write'),
+                ('evidence.config.toml', 'write'),
+                ('browser.config.toml', 'write'),
+                ('lean.config.toml', 'read'),
+            ]:
+                data = tomllib.loads(pathlib.Path.home().joinpath('.codex', path_name).read_text())
+                assert data['mcp_servers']['polylogue']['args'] == ['--role', expected_role]
             PYCODE
 
             jq -e '
@@ -1127,7 +1138,8 @@ in
               ($m | has("github") and has("context7")) and
               ($m | has("polylogue") and has("lynchpin")) and
               ($m | has("serena") and has("codebase-memory-mcp")) and
-              ($m | has("chrome-devtools") | not)
+              ($m | has("chrome-devtools") | not) and
+              ($m.polylogue.args == ["--role", "write"])
             ' "$HOME/.gemini/settings.json" >/dev/null
 
             jq -e '
