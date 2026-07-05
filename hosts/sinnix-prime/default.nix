@@ -69,6 +69,7 @@
     polylogue = {
       enable = true;
       embedding.enable = true;
+      daemon.autoStart = true;
     };
     machine-telemetry.enable = true;
     weechat-log-sealer.enable = true;
