@@ -891,6 +891,16 @@ mkFeatureModule {
               text = ''
                 #!${pkgs.runtimeShell}
                 set -euo pipefail
+                # The polylogue repo's .claude/settings.json pins
+                # POLYLOGUE_ARCHIVE_ROOT to the cloud-lane fixture
+                # (/tmp/polylogue-archive) for CI/cloud agents. That env leaks into
+                # locally-launched MCP servers and would point recall at an empty
+                # archive. Drop the cloud-lane leak so recall resolves the
+                # operator's real live archive (an intentional override to any
+                # other path is preserved).
+                if [ "''${POLYLOGUE_ARCHIVE_ROOT:-}" = "/tmp/polylogue-archive" ]; then
+                  unset POLYLOGUE_ARCHIVE_ROOT
+                fi
                 exec ${scriptPkgs.polylogue-cli}/bin/polylogue-mcp "$@"
               '';
             };
