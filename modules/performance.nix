@@ -304,16 +304,12 @@ in
     # available; earlyoom remains the global emergency fallback.
     systemd.oomd.enable = true;
 
-    systemd.slices =
-      (lib.mapAttrs (_: sliceConfig: {
-        inherit sliceConfig;
-      }) runtimeInventory.slices.system)
-      // {
-        nix.sliceConfig = {
-          CPUWeight = 5;
-          IOWeight = 2;
-        };
-      };
+    # nix.slice has no explicit unit here: it exists only as the implicit
+    # dash-hierarchy parent of nix-build.slice (systemd creates parent slices
+    # automatically), and it has exactly one child, so giving it its own
+    # CPUWeight/IOWeight (previously byte-identical to nix-build.slice's) had
+    # no sibling to compete against and did nothing.
+    systemd.slices = lib.mapAttrs (_: sliceConfig: { inherit sliceConfig; }) runtimeInventory.slices.system;
 
     systemd.user.slices = lib.mapAttrs (_: sliceConfig: {
       inherit sliceConfig;

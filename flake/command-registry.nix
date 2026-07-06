@@ -76,9 +76,37 @@ let
     }
   '';
   rebuildDefaultArgs = ''
-    rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-2}"
-    rebuild_cores="''${SINNIX_REBUILD_CORES:-12}"
+    rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-1}"
+    rebuild_cores="''${SINNIX_REBUILD_CORES:-16}"
   '';
+  # Single source of truth for rebuild concurrency + resource containment, so
+  # `nix run .#switch` (this file's appCommands) and the devshell `switch`
+  # binary (flake/dev-shell.nix's mkNhCommand) can't drift apart: both must
+  # serialize on the same lock and run under the same idle scheduling, or one
+  # path becomes an escape hatch around the other's containment.
+  rebuildLock = name: ''
+    exec 9>/tmp/sinnix-switch.lock
+    if ! ${pkgs.util-linux}/bin/flock --nonblock 9; then
+      echo "sinnix ${name}: another rebuild is already running — aborting to prevent concurrent builds" >&2
+      exit 1
+    fi
+  '';
+  # NOT a ''...'' block: this is spliced mid-line into a backslash-continued
+  # systemd-run invocation at each call site. A ''...'' string's own trailing
+  # newline plus the call site's template newline produced a blank line in
+  # the middle of the continued command, which bash treats as a broken
+  # continuation — systemd-run silently got zero command args (2026-07-06
+  # incident). concatStringsSep has no trailing separator, so this can't
+  # reproduce that regardless of how it's indented at the call site.
+  rebuildContainmentFlags =
+    lib.concatStringsSep " \\\n    " [
+      ''--setenv=NIX_CONFIG="eval-cache = false"''
+      "--setenv=SINNIX_REBUILD_ACTIVE=1"
+      "--slice=nix-build.slice"
+      "-p CPUSchedulingPolicy=idle"
+      "-p IOSchedulingClass=idle"
+    ]
+    + " \\";
   switchFallback = ''
     if [ "$_rebuild_status" -ne 0 ] && [ "$_rebuild_status" -ne 130 ]; then
       echo "sinnix switch: nh failed with status $_rebuild_status; trying exact toplevel activation fallback" >&2
@@ -278,6 +306,8 @@ let
   '';
 in
 {
+  inherit rebuildLock rebuildContainmentFlags rebuildDefaultArgs;
+
   appCommands = {
     lint = {
       description = "Lint Nix and shell files without modifying sources";
@@ -351,6 +381,7 @@ in
           echo "Error: This command must be run as root (use 'sudo nix run $_flake_dir#test-vm')"
           exit 1
         fi
+        ${rebuildLock "test-vm"}
         ${avoidRepoCwdForActivation}
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
@@ -361,7 +392,7 @@ in
           --service-type=exec \
           --wait \
           --setenv=PATH="${rebuildServicePath}:$PATH" \
-          -p Nice=10 \
+          ${rebuildContainmentFlags}
           ${pkgs.nixos-rebuild}/bin/nixos-rebuild test-vm --flake "path:$_invoke_flake_dir#sinnix-prime" \
           --max-jobs "$rebuild_jobs" \
           --cores "$rebuild_cores" \
@@ -373,6 +404,7 @@ in
       description = "Test configuration without applying it to the system (nh os test)";
       script = ''
         ${resolveFlakeDir}
+        ${rebuildLock "test-system"}
         ${avoidRepoCwdForActivation}
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
@@ -380,7 +412,7 @@ in
           --user \
           --quiet --collect --pipe --service-type=exec --wait \
           --setenv=PATH="${rebuildServicePath}:$PATH" \
-          -p Nice=10 \
+          ${rebuildContainmentFlags}
           ${pkgs.coreutils}/bin/env -u FLAKE NH_FLAKE="$_invoke_flake_dir" \
             ${pkgs.nh}/bin/nh os test \
             "''${_invoke_flake_dir}#sinnix-prime" \
@@ -395,6 +427,7 @@ in
       description = "Build + set boot default, activate on next reboot (nh os boot)";
       script = ''
         ${resolveFlakeDir}
+        ${rebuildLock "boot"}
         ${avoidRepoCwdForActivation}
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
@@ -405,7 +438,7 @@ in
           --user \
           --quiet --collect --pipe --service-type=exec --wait \
           --setenv=PATH="${rebuildServicePath}:$PATH" \
-          -p Nice=10 \
+          ${rebuildContainmentFlags}
           ${pkgs.coreutils}/bin/env -u FLAKE NH_FLAKE="$_invoke_flake_dir" \
             ${pkgs.nh}/bin/nh os boot \
             "''${_invoke_flake_dir}#sinnix-prime" \
@@ -421,6 +454,7 @@ in
       description = "Apply configuration changes to the system (nh os switch)";
       script = ''
         ${resolveFlakeDir}
+        ${rebuildLock "switch"}
         ${avoidRepoCwdForActivation}
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
@@ -431,7 +465,7 @@ in
           --user \
           --quiet --collect --pipe --service-type=exec --wait \
           --setenv=PATH="${rebuildServicePath}:$PATH" \
-          -p Nice=10 \
+          ${rebuildContainmentFlags}
           ${pkgs.coreutils}/bin/env -u FLAKE NH_FLAKE="$_invoke_flake_dir" \
             ${pkgs.nh}/bin/nh os switch \
             "''${_invoke_flake_dir}#sinnix-prime" \

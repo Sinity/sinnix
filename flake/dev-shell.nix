@@ -118,15 +118,10 @@
         name: action:
         pkgs.writeShellScriptBin name ''
           set -euo pipefail
-          exec 9>/tmp/sinnix-switch.lock
-          if ! ${pkgs.util-linux}/bin/flock --nonblock 9; then
-            echo "sinnix ${name}: another rebuild is already running — aborting to prevent concurrent builds" >&2
-            exit 1
-          fi
+          ${commandRegistry.rebuildLock name}
           ${resolveFlakeDir}
           ${localInputOverrideArgs}
-          rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-2}"
-          rebuild_cores="''${SINNIX_REBUILD_CORES:-12}"
+          ${commandRegistry.rebuildDefaultArgs}
           ${rebuildPressurePreflight name}
           rebuild_pressure_preflight
 
@@ -135,11 +130,7 @@
             --user \
             --quiet --collect --pipe --service-type=exec --wait \
             --setenv=PATH="${rebuildServicePath}:$PATH" \
-            --setenv=NIX_CONFIG="eval-cache = false" \
-            --setenv=SINNIX_REBUILD_ACTIVE=1 \
-            --slice=nix-build.slice \
-            -p CPUSchedulingPolicy=idle \
-            -p IOSchedulingClass=idle \
+            ${commandRegistry.rebuildContainmentFlags}
             ${pkgs.coreutils}/bin/env -u FLAKE NH_FLAKE="''${_flake_dir}" \
               ${pkgs.nh}/bin/nh os ${action} \
               "''${_flake_dir}#sinnix-prime" \
@@ -214,17 +205,18 @@
         # nh doesn't wrap build-vm; keep direct nixos-rebuild.
         test-vm = pkgs.writeShellScriptBin "test-vm" ''
           set -euo pipefail
+          ${commandRegistry.rebuildLock "test-vm"}
           ${resolveFlakeDir}
           ${localInputOverrideArgs}
-          rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-2}"
-          rebuild_cores="''${SINNIX_REBUILD_CORES:-12}"
+          ${commandRegistry.rebuildDefaultArgs}
 
-          exec sudo ${pkgs.systemd}/bin/systemd-run \
+          # Not `exec`: sudo may close inherited fds (incl. the lock fd held
+          # above), so the lock must stay held by this shell until the build
+          # actually completes rather than being handed off across the hop.
+          sudo ${pkgs.systemd}/bin/systemd-run \
             --quiet --collect --pipe --service-type=exec --wait \
             --setenv=PATH="${rebuildServicePath}:$PATH" \
-            --slice=nix-build.slice \
-            -p CPUSchedulingPolicy=idle \
-            -p IOSchedulingClass=idle \
+            ${commandRegistry.rebuildContainmentFlags}
             ${pkgs.nixos-rebuild}/bin/nixos-rebuild build-vm \
               --flake "path:$_flake_dir#sinnix-prime" \
               --max-jobs "$rebuild_jobs" \
@@ -233,7 +225,21 @@
         '';
         lint = pkgs.writeShellScriptBin "lint" ''exec ${nix} run .#lint -- "$@"'';
         check-all = pkgs.writeShellScriptBin "check-all" ''exec ${nix} run .#check-all -- "$@"'';
-        update = pkgs.writeShellScriptBin "update" ''exec ${nix} flake update "$@"'';
+        update = pkgs.writeShellScriptBin "update" ''
+          set -euo pipefail
+          if [ "$#" -gt 0 ]; then
+            exec ${nix} flake update "$@"
+          fi
+          # Routine (no-arg) updates bump every input EXCEPT nixpkgs-ai: that
+          # input feeds CUDA-narrowed AI packages (flake/overlay/package/local-ai.nix)
+          # whose derivation hash breaks on any nixpkgs rev change, forcing an
+          # hours-long recompile. Bump it deliberately: `update nixpkgs-ai`.
+          mapfile -t _routine_inputs < <(
+            ${nix} flake metadata --json \
+              | ${pkgs.jq}/bin/jq -r '.locks.nodes.root.inputs | keys[] | select(. != "nixpkgs-ai")'
+          )
+          exec ${nix} flake update "''${_routine_inputs[@]}"
+        '';
         clean = pkgs.writeShellScriptBin "clean" ''
           exec ${pkgs.nh}/bin/nh clean all --no-ask
         '';

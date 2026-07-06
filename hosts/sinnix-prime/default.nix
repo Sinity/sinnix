@@ -135,10 +135,14 @@
       Storage=persistent
       Compress=yes
       SyncIntervalSec=2min
-      # 32G bounds runaway log spam (~years at the measured ~0.3 GB/day;
-      # sinexd heartbeats are ~90 % of volume). The old 128G cap was
-      # effectively unbounded growth on the wear-limited root SSD.
-      SystemMaxUse=32G
+      # Persistent (not volatile) is deliberate, not drift: a 2026-05-22
+      # decision moved this to volatile, then it was reverted because the
+      # journal is now the forensic source for OOM/earlyoom kill events
+      # (sinnix-fjq's kill_event capture greps this journal). 4G (down from
+      # 32G) tightens the worst-case footprint on the MX500 root SSD (~104%
+      # rated NAND endurance) while still holding ~weeks at the measured
+      # ~0.3 GB/day volume (sinexd heartbeats are ~90% of it).
+      SystemMaxUse=4G
       SystemKeepFree=10G
       SystemMaxFileSize=128M
       MaxFileSec=1week

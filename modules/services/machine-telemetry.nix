@@ -98,6 +98,11 @@ mkServiceModule {
       default = 60.0;
       description = "Seconds between process smaps_rollup PSS/private memory samples. 0 disables process-memory sampling.";
     };
+    killEventIntervalSec = lib.mkOption {
+      type = lib.types.numbers.nonnegative;
+      default = 30.0;
+      description = "Seconds between journald scans for earlyoom/systemd-oomd/kernel OOM kill events. 0 disables kill-event capture.";
+    };
     extraMonitoredCgroups = lib.mkOption {
       type = lib.types.listOf (
         lib.types.submodule {
@@ -314,7 +319,7 @@ mkServiceModule {
           Environment = lib.optionals (config.sinnix.gpu.mode != "igpu") [
             "LD_LIBRARY_PATH=/run/opengl-driver/lib"
           ];
-          ExecStart = "${machineTelemetry}/bin/machine-telemetry --db ${dbPath} --manifest ${manifestPath} --host ${hostName} --interval ${toString cfg.intervalSec} --service-interval ${toString cfg.serviceIntervalSec} --network-interval ${toString cfg.networkIntervalSec} --network-interface ${cfg.networkInterfaceName} --network-gateway ${cfg.networkGateway} --bufferbloat-interval ${toString cfg.bufferbloatIntervalSec} --gpu-interval ${toString cfg.gpuIntervalSec} --process-memory-top ${toString cfg.processMemoryTop} --process-memory-interval ${toString cfg.processMemoryIntervalSec} --cgroups ${cgroupArgs} --units ${unitArgs} --user-name ${username}";
+          ExecStart = "${machineTelemetry}/bin/machine-telemetry --db ${dbPath} --manifest ${manifestPath} --host ${hostName} --interval ${toString cfg.intervalSec} --service-interval ${toString cfg.serviceIntervalSec} --network-interval ${toString cfg.networkIntervalSec} --network-interface ${cfg.networkInterfaceName} --network-gateway ${cfg.networkGateway} --bufferbloat-interval ${toString cfg.bufferbloatIntervalSec} --gpu-interval ${toString cfg.gpuIntervalSec} --process-memory-top ${toString cfg.processMemoryTop} --process-memory-interval ${toString cfg.processMemoryIntervalSec} --kill-event-interval ${toString cfg.killEventIntervalSec} --cgroups ${cgroupArgs} --units ${unitArgs} --user-name ${username}";
           Restart = "on-failure";
           RestartSec = "5s";
         }

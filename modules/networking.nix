@@ -67,6 +67,11 @@ in
             FallbackDNS = "";
             # Avahi owns local mDNS service discovery on this host.
             MulticastDNS = false;
+            # LAN name-spoofing surface with zero legitimate use on a
+            # workstation with proper DNS (router-authoritative + .lan via
+            # dnsmasq below); was listening on 0.0.0.0:5355 with nothing
+            # depending on it.
+            LLMNR = false;
             # Resolve .lan names via the router's dnsmasq.
             Domains = [ "~lan" ];
           };
