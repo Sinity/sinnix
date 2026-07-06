@@ -241,7 +241,7 @@
           exec ${nix} flake update "''${_routine_inputs[@]}"
         '';
         clean = pkgs.writeShellScriptBin "clean" ''
-          exec ${pkgs.nh}/bin/nh clean all --no-ask
+          exec ${pkgs.nh}/bin/nh clean all
         '';
         agenix = pkgs.writeShellScriptBin "agenix" ''exec ${nix} run .#agenix -- "$@"'';
         diff-closure = pkgs.writeShellScriptBin "diff-closure" ''

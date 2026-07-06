@@ -485,7 +485,7 @@ in
           echo "Error: This command must be run as root (use 'sudo nix run .#clean')"
           exit 1
         fi
-        exec ${pkgs.nh}/bin/nh clean all --no-ask
+        exec ${pkgs.nh}/bin/nh clean all
       '';
     };
 
