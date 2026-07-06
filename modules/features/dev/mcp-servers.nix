@@ -895,10 +895,18 @@ mkFeatureModule {
                 # POLYLOGUE_ARCHIVE_ROOT to the cloud-lane fixture
                 # (/tmp/polylogue-archive) for CI/cloud agents. That env leaks into
                 # locally-launched MCP servers and would point recall at an empty
-                # archive. Drop the cloud-lane leak so recall resolves the
-                # operator's real live archive (an intentional override to any
-                # other path is preserved).
-                if [ "''${POLYLOGUE_ARCHIVE_ROOT:-}" = "/tmp/polylogue-archive" ]; then
+                # archive. Drop any leaked override that doesn't resolve to a real
+                # directory (not just the one known cloud-lane literal — 2026-07-06:
+                # an exact-string check alone left a long-lived MCP server stuck
+                # pointing at the cloud fixture for its entire process lifetime
+                # whenever it had been spawned with the leak present; checking
+                # existence instead of one hardcoded path is the same fix generalized,
+                # though it still can't un-stick a server process already running with
+                # the leak baked into its own inherited environment — that needs the
+                # MCP connection itself restarted) so recall resolves the operator's
+                # real live archive (an intentional override to any real path is
+                # preserved).
+                if [ -n "''${POLYLOGUE_ARCHIVE_ROOT:-}" ] && [ ! -d "''${POLYLOGUE_ARCHIVE_ROOT}" ]; then
                   unset POLYLOGUE_ARCHIVE_ROOT
                 fi
                 exec ${scriptPkgs.polylogue-cli}/bin/polylogue-mcp "$@"
