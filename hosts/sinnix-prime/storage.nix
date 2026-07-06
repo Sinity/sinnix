@@ -310,7 +310,9 @@ in
       options = [
         "subvol=/"
         "compress=zstd"
-        "relatime"
+        # Capture lake is write-heavy; atime writes on read are pure waste.
+        # Matches root's noatime (was relatime — an unintentional divergence).
+        "noatime"
         "lazytime"
         "nodiscard"
         "nofail"

@@ -131,14 +131,6 @@ mkServiceModule {
           (lib.sinnix.mkRuntimeServiceConfig {
             runtimeInventory = config.sinnix.runtime.inventory;
             unit = "transmission.service";
-            overrides = {
-              Nice = 10;
-              CPUWeight = 5;
-              IOSchedulingClass = "idle";
-              IOWeight = 5;
-              MemoryHigh = "1G";
-              MemoryMax = "3G";
-            };
           })
           (lib.sinnix.systemd.mkRestartPolicy {
             strategy = "on-failure";

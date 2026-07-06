@@ -20,6 +20,17 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
+    # Same branch as `nixpkgs`, but NOT `follows`-ed and NOT bumped by routine
+    # `update` (see flake/dev-shell.nix's `update` command). Feeds the
+    # CUDA-narrowed AI package set (flake/overlay/package/local-ai.nix:
+    # llama-cpp/whisper-cpp/koboldcpp/ollama-cuda via pkgsForCudaArch.sm_86).
+    # Every `nixpkgs` rev bump invalidates those derivation hashes with no
+    # possible cache hit (cuda-maintainers/chaotic-nyx build different
+    # nixpkgs revs than this repo pins), forcing an hours-long from-source CUDA
+    # recompile on every routine flake update. Bump deliberately and rarely:
+    # `sinnix update nixpkgs-ai`.
+    nixpkgs-ai.url = "github:NixOS/nixpkgs/nixos-unstable";
+
     flake-parts = {
       url = "github:hercules-ci/flake-parts";
       inputs.nixpkgs-lib.follows = "nixpkgs";

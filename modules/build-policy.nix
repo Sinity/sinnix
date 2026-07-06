@@ -50,12 +50,14 @@ in
         ];
         netrc-file = "/etc/nix/netrc";
 
-        # Keep ordinary rebuilds scoped without leaving most of the workstation
-        # idle. Nix job fanout is kept modest so heavyweight derivations do not
-        # multiply; the per-derivation core budget lets Cargo/rustc use the
-        # i7-13700K's hardware threads.
-        max-jobs = 2;
-        cores = 12;
+        # One derivation at a time: two concurrent heavy builds (e.g. two CUDA
+        # ggml derivations) each try to use most of the box and jointly exceed
+        # available RAM (2026-07-06 incident: max-jobs=2 let koboldcpp and
+        # noctalia collide, earlyoom killed cc1plus). Serializing to a single
+        # job and giving it the full core budget keeps peak memory bounded to
+        # one derivation's needs.
+        max-jobs = 1;
+        cores = 16;
         builders-use-substitutes = true;
         keep-outputs = true;
         keep-derivations = true;

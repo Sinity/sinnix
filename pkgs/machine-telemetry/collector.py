@@ -13,7 +13,7 @@ import threading
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 UTC = dt.timezone.utc
 DISKSTAT_FIELDS = (
     "reads_completed",
@@ -42,6 +42,27 @@ PROC_IO_FIELDS = (
     "wchar",
     "syscr",
     "syscw",
+)
+# /proc/vmstat keys captured verbatim as cumulative counters (consumers
+# compute deltas), same convention as the psi *_total_us columns. These are
+# the reclaim/refault/swap/OOM signals that the 2026-07-06 lag investigation
+# found invisible to telemetry: workingset_refault_file=967M and
+# pgscan_file=21.8e9 during the incident, with zero PSI-memory signal because
+# the box was still meeting demand via reclaim, just slowly.
+VMSTAT_FIELDS = (
+    "workingset_refault_file",
+    "workingset_refault_anon",
+    "workingset_activate_file",
+    "workingset_activate_anon",
+    "pgscan_kswapd",
+    "pgscan_direct",
+    "pgsteal_kswapd",
+    "pgsteal_direct",
+    "pswpin",
+    "pswpout",
+    "allocstall_normal",
+    "allocstall_movable",
+    "oom_kill",
 )
 
 
@@ -727,6 +748,31 @@ def parse_cgroup_events(control_group: str | None) -> dict[str, int | None]:
     }
 
 
+def parse_memory_events(control_group: str | None) -> dict[str, int | None]:
+    # cgroup v2 memory.events: cumulative counters distinct from cgroup.events
+    # above (which tracks populated/frozen, not memory pressure). `high`/`max`
+    # here are breach counts, not the memory.high/memory.max byte limits
+    # already captured as memory_high_bytes/memory_max_bytes.
+    root = cgroup_path(control_group)
+    raw = read_text(root / "memory.events") if root is not None else None
+    if not raw:
+        return {}
+    values: dict[str, int] = {}
+    for line in raw.splitlines():
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        parsed = int_or_none(parts[1])
+        if parsed is not None:
+            values[parts[0]] = parsed
+    return {
+        "memory_events_high": values.get("high"),
+        "memory_events_max": values.get("max"),
+        "memory_events_oom": values.get("oom"),
+        "memory_events_oom_kill": values.get("oom_kill"),
+    }
+
+
 def cgroup_memory_sample(
     observed_at: str,
     host: str,
@@ -741,6 +787,7 @@ def cgroup_memory_sample(
         return None
     stat = cgroup_memory_stat(control_group)
     events = parse_cgroup_events(control_group)
+    mem_events = parse_memory_events(control_group)
     return {
         "observed_at": observed_at,
         "host": host,
@@ -769,6 +816,10 @@ def cgroup_memory_sample(
         "cgroup_populated": events.get("cgroup_populated"),
         "cgroup_frozen": events.get("cgroup_frozen"),
         "cgroup_freeze": int_or_none(read_text(root / "cgroup.freeze")),
+        "memory_events_high": mem_events.get("memory_events_high"),
+        "memory_events_max": mem_events.get("memory_events_max"),
+        "memory_events_oom": mem_events.get("memory_events_oom"),
+        "memory_events_oom_kill": mem_events.get("memory_events_oom_kill"),
     }
 
 
@@ -828,7 +879,9 @@ def insert_cgroup_memory_stats(
           memory_anon_bytes, memory_file_bytes, memory_kernel_bytes,
           memory_slab_bytes, memory_sock_bytes, memory_shmem_bytes,
           memory_swapcached_bytes, memory_zswap_bytes, memory_zswapped_bytes,
-          cgroup_populated, cgroup_frozen, cgroup_freeze
+          cgroup_populated, cgroup_frozen, cgroup_freeze,
+          memory_events_high, memory_events_max, memory_events_oom,
+          memory_events_oom_kill
         ) VALUES (
           :observed_at, :host, :boot_id, :schema_version, :label, :scope,
           :control_group, :memory_current_bytes, :memory_peak_bytes,
@@ -837,7 +890,9 @@ def insert_cgroup_memory_stats(
           :memory_file_bytes, :memory_kernel_bytes, :memory_slab_bytes,
           :memory_sock_bytes, :memory_shmem_bytes, :memory_swapcached_bytes,
           :memory_zswap_bytes, :memory_zswapped_bytes, :cgroup_populated,
-          :cgroup_frozen, :cgroup_freeze
+          :cgroup_frozen, :cgroup_freeze,
+          :memory_events_high, :memory_events_max, :memory_events_oom,
+          :memory_events_oom_kill
         )
         """,
         rows,
@@ -1171,7 +1226,20 @@ def init_db(conn: sqlite3.Connection) -> None:
           memory_psi_full_total_us REAL,
           dstate_task_count INTEGER,
           dstate_wchan_summary TEXT,
-          gap_codes_json TEXT NOT NULL DEFAULT '[]'
+          gap_codes_json TEXT NOT NULL DEFAULT '[]',
+          vmstat_workingset_refault_file INTEGER,
+          vmstat_workingset_refault_anon INTEGER,
+          vmstat_workingset_activate_file INTEGER,
+          vmstat_workingset_activate_anon INTEGER,
+          vmstat_pgscan_kswapd INTEGER,
+          vmstat_pgscan_direct INTEGER,
+          vmstat_pgsteal_kswapd INTEGER,
+          vmstat_pgsteal_direct INTEGER,
+          vmstat_pswpin INTEGER,
+          vmstat_pswpout INTEGER,
+          vmstat_allocstall_normal INTEGER,
+          vmstat_allocstall_movable INTEGER,
+          vmstat_oom_kill INTEGER
         );
         CREATE INDEX IF NOT EXISTS metric_sample_observed_at ON metric_sample(observed_at);
         CREATE TABLE IF NOT EXISTS hardware_state (
@@ -1333,10 +1401,31 @@ def init_db(conn: sqlite3.Connection) -> None:
           memory_zswapped_bytes INTEGER,
           cgroup_populated INTEGER,
           cgroup_frozen INTEGER,
-          cgroup_freeze INTEGER
+          cgroup_freeze INTEGER,
+          memory_events_high INTEGER,
+          memory_events_max INTEGER,
+          memory_events_oom INTEGER,
+          memory_events_oom_kill INTEGER
         );
         CREATE INDEX IF NOT EXISTS cgroup_memory_sample_label_time ON cgroup_memory_sample(label, observed_at);
         CREATE INDEX IF NOT EXISTS cgroup_memory_sample_scope_time ON cgroup_memory_sample(scope, observed_at);
+        CREATE TABLE IF NOT EXISTS kill_event (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          observed_at TEXT NOT NULL,
+          host TEXT NOT NULL,
+          boot_id TEXT,
+          schema_version INTEGER NOT NULL,
+          killer TEXT NOT NULL,
+          victim_comm TEXT,
+          victim_pid INTEGER,
+          victim_rss_mib INTEGER,
+          cgroup_path TEXT,
+          oom_score INTEGER,
+          raw_line TEXT NOT NULL,
+          journal_cursor TEXT
+        );
+        CREATE INDEX IF NOT EXISTS kill_event_observed_at ON kill_event(observed_at);
+        CREATE INDEX IF NOT EXISTS kill_event_killer_time ON kill_event(killer, observed_at);
         CREATE TABLE IF NOT EXISTS process_io_delta_sample (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           observed_at TEXT NOT NULL,
@@ -1449,6 +1538,29 @@ def init_db(conn: sqlite3.Connection) -> None:
             "mem_dirty_mb": "INTEGER",
             "mem_writeback_mb": "INTEGER",
             "mem_shmem_mb": "INTEGER",
+            "vmstat_workingset_refault_file": "INTEGER",
+            "vmstat_workingset_refault_anon": "INTEGER",
+            "vmstat_workingset_activate_file": "INTEGER",
+            "vmstat_workingset_activate_anon": "INTEGER",
+            "vmstat_pgscan_kswapd": "INTEGER",
+            "vmstat_pgscan_direct": "INTEGER",
+            "vmstat_pgsteal_kswapd": "INTEGER",
+            "vmstat_pgsteal_direct": "INTEGER",
+            "vmstat_pswpin": "INTEGER",
+            "vmstat_pswpout": "INTEGER",
+            "vmstat_allocstall_normal": "INTEGER",
+            "vmstat_allocstall_movable": "INTEGER",
+            "vmstat_oom_kill": "INTEGER",
+        },
+    )
+    ensure_columns(
+        conn,
+        "cgroup_memory_sample",
+        {
+            "memory_events_high": "INTEGER",
+            "memory_events_max": "INTEGER",
+            "memory_events_oom": "INTEGER",
+            "memory_events_oom_kill": "INTEGER",
         },
     )
     ensure_columns(
@@ -1674,6 +1786,18 @@ def memory_metrics() -> dict[str, int | None]:
     }
 
 
+def vmstat_metrics() -> dict[str, int | None]:
+    values: dict[str, int] = {}
+    for line in Path("/proc/vmstat").read_text(encoding="utf-8").splitlines():
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        parsed = int_or_none(parts[1])
+        if parsed is not None:
+            values[parts[0]] = parsed
+    return {f"vmstat_{key}": values.get(key) for key in VMSTAT_FIELDS}
+
+
 def systemctl_props(
     unit: str, *, user: bool = False, user_name: str | None = None
 ) -> dict[str, str]:
@@ -1813,6 +1937,157 @@ def insert_service_states(
     insert_cgroup_memory_stats(conn, cgroup_memory_rows)
 
 
+# journalctl -g pre-filters at the journald layer so a cursor-less backfill
+# over weeks of history doesn't have to pipe every uninteresting line through
+# Python. Patterns calibrated 2026-07-06 against this host's real incidents
+# (2026-06-30 earlyoom storm, 2026-07-04 79x-kitten storm) — see the earlyoom
+# message shape below; systemd-oomd and kernel-OOM patterns are best-effort
+# from documented formats since this host has not yet had a real kill from
+# either (raw_line is always kept so an imperfect field match loses nothing).
+KILL_EVENT_GREP = (
+    r"sending (SIGTERM|SIGKILL) to process|"
+    r"^Killed process|"
+    r"oom-kill:constraint=|"
+    r"^Killed /"
+)
+KILL_EVENT_PATTERNS = (
+    (
+        "earlyoom",
+        re.compile(
+            r'sending (?:SIGTERM|SIGKILL) to process (?P<pid>\d+) uid \d+ '
+            r'"(?P<comm>[^"]+)": oom_score (?P<oom_score>\d+), '
+            r"oom_score_adj -?\d+, VmRSS (?P<rss_mib>\d+) MiB"
+        ),
+    ),
+    (
+        "kernel-oom",
+        re.compile(
+            r"Killed process (?P<pid>\d+) \((?P<comm>[^)]+)\).*?"
+            r"anon-rss:(?P<anon_rss_kb>\d+)kB"
+        ),
+    ),
+    (
+        "memcg-oom",
+        re.compile(
+            r"oom-kill:constraint=(?P<constraint>\S+).*?"
+            r"task_memcg=(?P<memcg>\S+).*?task=(?P<comm>\S+),pid=(?P<pid>\d+)"
+        ),
+    ),
+    (
+        "systemd-oomd",
+        re.compile(
+            r"^Killed (?P<cgroup>\S+)(?: with pid (?P<pid>\d+) \((?P<comm>[^)]+)\))? due to"
+        ),
+    ),
+)
+# First run (no stored cursor) backfills from here: journald is
+# Storage=persistent SystemMaxUse=32G and this predates the earliest incident
+# this issue was written to investigate. Only used once — every subsequent
+# run resumes from the persisted cursor regardless of this constant.
+KILL_EVENT_BACKFILL_SINCE = "2026-06-17"
+KILL_EVENT_SOURCE = "machine.kill_event"
+
+
+def classify_kill_line(message: str) -> tuple[str, dict[str, object]] | None:
+    for killer, pattern in KILL_EVENT_PATTERNS:
+        match = pattern.search(message)
+        if match:
+            return killer, match.groupdict()
+    return None
+
+
+def load_kill_event_cursor(conn: sqlite3.Connection) -> str | None:
+    row = conn.execute(
+        "SELECT payload_json FROM source_status WHERE source = ?",
+        (KILL_EVENT_SOURCE,),
+    ).fetchone()
+    if row is None:
+        return None
+    try:
+        return json.loads(row[0]).get("cursor")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def save_kill_event_cursor(conn: sqlite3.Connection, cursor: str) -> None:
+    conn.execute(
+        "INSERT OR REPLACE INTO source_status (source, checked_at, status, reason, payload_json) VALUES (?, ?, ?, ?, ?)",
+        (KILL_EVENT_SOURCE, now_iso(), "ok", None, json.dumps({"cursor": cursor})),
+    )
+
+
+def scan_kill_events(
+    host: str, boot_id: str | None, after_cursor: str | None
+) -> tuple[list[dict[str, object]], str | None]:
+    cmd = ["journalctl", "-o", "json", "--no-pager", "-g", KILL_EVENT_GREP]
+    if after_cursor:
+        cmd += ["--after-cursor", after_cursor]
+    else:
+        cmd += ["--since", KILL_EVENT_BACKFILL_SINCE]
+    try:
+        proc = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.TimeoutExpired):
+        return [], None
+    rows: list[dict[str, object]] = []
+    new_cursor = after_cursor
+    for line in proc.stdout.splitlines():
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        cursor = entry.get("__CURSOR")
+        if cursor:
+            new_cursor = cursor
+        message = entry.get("MESSAGE")
+        if not isinstance(message, str):
+            continue
+        classified = classify_kill_line(message)
+        if classified is None:
+            continue
+        killer, fields = classified
+        rows.append(
+            {
+                "observed_at": now_iso(),
+                "host": host,
+                "boot_id": boot_id,
+                "schema_version": SCHEMA_VERSION,
+                "killer": killer,
+                "victim_comm": fields.get("comm"),
+                "victim_pid": int_or_none(fields.get("pid")),
+                "victim_rss_mib": int_or_none(fields.get("rss_mib"))
+                or (
+                    int(anon_rss_kb) // 1024
+                    if (anon_rss_kb := fields.get("anon_rss_kb")) is not None
+                    else None
+                ),
+                "cgroup_path": fields.get("memcg") or fields.get("cgroup"),
+                "oom_score": int_or_none(fields.get("oom_score")),
+                "raw_line": message,
+                "journal_cursor": cursor,
+            }
+        )
+    return rows, new_cursor
+
+
+def insert_kill_events(conn: sqlite3.Connection, rows: list[dict[str, object]]) -> None:
+    if not rows:
+        return
+    conn.executemany(
+        """
+        INSERT INTO kill_event (
+          observed_at, host, boot_id, schema_version, killer, victim_comm,
+          victim_pid, victim_rss_mib, cgroup_path, oom_score, raw_line,
+          journal_cursor
+        ) VALUES (
+          :observed_at, :host, :boot_id, :schema_version, :killer, :victim_comm,
+          :victim_pid, :victim_rss_mib, :cgroup_path, :oom_score, :raw_line,
+          :journal_cursor
+        )
+        """,
+        rows,
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--db", required=True)
@@ -1829,6 +2104,7 @@ def main() -> int:
     parser.add_argument("--process-io-top", type=int, default=40)
     parser.add_argument("--process-memory-top", type=int, default=50)
     parser.add_argument("--process-memory-interval", type=float, default=60.0)
+    parser.add_argument("--kill-event-interval", type=float, default=30.0)
     parser.add_argument("--cgroups", default="")
     parser.add_argument("--units", default="")
     parser.add_argument("--user-name", required=True)
@@ -1922,6 +2198,8 @@ def main() -> int:
         next_service = 0.0
         next_network = 0.0
         next_process_memory = 0.0
+        next_kill_event = 0.0
+        kill_event_cursor = load_kill_event_cursor(conn)
         last_bloat = 0.0
 
         # Probe fan-tacho capability once at startup. Many motherboards
@@ -1986,6 +2264,7 @@ def main() -> int:
             psi_mem = parse_psi("/proc/pressure/memory")
             dstate_count, dstate_waits = dstate_tasks()
             mem = memory_metrics()
+            vmstat = vmstat_metrics()
             load_parts = read_text("/proc/loadavg")
             load_1 = load_5 = None
             if load_parts:
@@ -2079,6 +2358,7 @@ def main() -> int:
                 "dstate_task_count": dstate_count,
                 "dstate_wchan_summary": dstate_waits,
                 "gap_codes_json": json.dumps(sorted(set(gaps))),
+                **vmstat,
             }
             conn.execute(
                 """
@@ -2106,7 +2386,14 @@ def main() -> int:
                   memory_psi_full_avg10, memory_psi_full_avg60,
                   memory_psi_full_avg300, memory_psi_full_total_us,
                   dstate_task_count,
-                  dstate_wchan_summary, gap_codes_json
+                  dstate_wchan_summary, gap_codes_json,
+                  vmstat_workingset_refault_file, vmstat_workingset_refault_anon,
+                  vmstat_workingset_activate_file, vmstat_workingset_activate_anon,
+                  vmstat_pgscan_kswapd, vmstat_pgscan_direct,
+                  vmstat_pgsteal_kswapd, vmstat_pgsteal_direct,
+                  vmstat_pswpin, vmstat_pswpout,
+                  vmstat_allocstall_normal, vmstat_allocstall_movable,
+                  vmstat_oom_kill
                 ) VALUES (
                   :observed_at, :host, :boot_id, :schema_version, :interval_s,
                   :latency_oversleep_ms, :collector_duration_ms,
@@ -2131,7 +2418,14 @@ def main() -> int:
                   :memory_psi_full_avg10, :memory_psi_full_avg60,
                   :memory_psi_full_avg300, :memory_psi_full_total_us,
                   :dstate_task_count,
-                  :dstate_wchan_summary, :gap_codes_json
+                  :dstate_wchan_summary, :gap_codes_json,
+                  :vmstat_workingset_refault_file, :vmstat_workingset_refault_anon,
+                  :vmstat_workingset_activate_file, :vmstat_workingset_activate_anon,
+                  :vmstat_pgscan_kswapd, :vmstat_pgscan_direct,
+                  :vmstat_pgsteal_kswapd, :vmstat_pgsteal_direct,
+                  :vmstat_pswpin, :vmstat_pswpout,
+                  :vmstat_allocstall_normal, :vmstat_allocstall_movable,
+                  :vmstat_oom_kill
                 )
                 """,
                 row,
@@ -2176,6 +2470,15 @@ def main() -> int:
                 if do_bloat:
                     last_bloat = sample_start
                 next_network = sample_start + args.network_interval
+            if args.kill_event_interval > 0 and sample_start >= next_kill_event:
+                kill_rows, new_cursor = scan_kill_events(
+                    args.host, boot_id, kill_event_cursor
+                )
+                insert_kill_events(conn, kill_rows)
+                if new_cursor and new_cursor != kill_event_cursor:
+                    kill_event_cursor = new_cursor
+                    save_kill_event_cursor(conn, new_cursor)
+                next_kill_event = sample_start + args.kill_event_interval
             conn.commit()
 
 
