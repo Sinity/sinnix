@@ -545,6 +545,8 @@ squash-merges, non-empty body, specific subject, one-logical-change-per-PR.
 
 **Commit and push proactively within repo policy.** Commit each logical unit as it lands on a feature branch — don't wait to be asked. Push feature branches after verification so work is backed up and PRs can be opened or updated. For solo direct-master repos such as Sinnix and Lynchpin, committing and pushing `master` is allowed after local verification and deployment rules are satisfied. Do not push only when the user, repo, or current workflow explicitly says to hold.
 
+**Merging is part of the job — standing authorization.** These are solo-operated repos: agent-opened PRs have no human co-reviewer, so the merge gate is checks + triage, not a human click. Squash-merge your own PR (`gh pr merge --squash`) as soon as (a) required checks are green and (b) every substantive automated-review finding is triaged — actionable items fixed, false positives answered with a brief reply. Do not park green, triaged PRs "for review"; do not ask permission to merge them. Hold a merge only when the user, repo policy, or the PR body explicitly says hold, or a red substantive gate remains. This authorization is durable and applies in auto mode.
+
 **Atomicity test:** can you write a subject without "and"? If you need "and", split. Err toward more commits — you can always squash before PR.
 
 **Conventional prefixes** (pick accurately — reviewers filter by type):
@@ -714,11 +716,19 @@ Even in auto mode, state specifically what will happen and pause:
 
 - `git reset --hard` on a branch with uncommitted changes
 - `git push --force` on any branch (`--force-with-lease` on shared branches is still disruptive)
-- `git branch -D` on unmerged branch
+- `git branch -D` on a branch whose content is NOT on the default branch
 - Amending a pushed commit
 - `git rebase` rewriting published history
-- Deleting branches/worktrees/stashes/tags
+- Deleting unmerged branches, stashes, or tags
 - `git clean -fd`
+
+**Routine cleanup is not destructive — standing authorization, no
+confirmation needed:** deleting local and remote branches whose PRs are
+merged, removing their worktrees, and pruning stale remote-tracking refs.
+Squash-merged branches fail `git branch -d` by design (the tip is not an
+ancestor of master); verify the merge (`gh pr view <N> --json state` says
+MERGED, or the squash commit is visible on the default branch), then `-D`
+is the correct, routine command — not a pause-worthy act.
 
 Never force-push to shared branches without agreement. Never push to `master` /
 `main` directly in product/project repos. Sinnix and Lynchpin are intentionally
