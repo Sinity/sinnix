@@ -103,8 +103,8 @@ in
     # while Hyprland is active.
     {
       systemd.user.units = lib.genAttrs protectedUWSMUnits (_: {
-        overrideStrategy = "asDropin";
-        text = ''
+        overrideStrategy = lib.mkForce "asDropin";
+        text = lib.mkForce ''
           [Unit]
           X-OnlyManualStart=true
           X-RestartIfChanged=false

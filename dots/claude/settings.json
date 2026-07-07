@@ -37,7 +37,9 @@
       "mcp__claude_ai_SimpleScraper__*",
       "mcp__claude_ai_Mermaid_Chart__*"
     ],
-    "deny": ["Bash(rm -rf /:*)"],
+    "deny": [
+      "Bash(rm -rf /:*)"
+    ],
     "ask": [],
     "defaultMode": "auto"
   },
@@ -161,5 +163,6 @@
   "effortLevel": "high",
   "tui": "fullscreen",
   "skipDangerousModePermissionPrompt": true,
+  "switchModelsOnFlag": false,
   "skipAutoPermissionPrompt": true
 }

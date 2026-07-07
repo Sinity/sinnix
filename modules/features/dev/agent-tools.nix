@@ -22,19 +22,27 @@ mkFeatureModule {
     }:
     let
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
-      agentRuntimePath = lib.makeBinPath (
-        [
-          scriptPkgs.beads
-        ]
+      agentRuntimePackages = [
+        scriptPkgs.beads
+      ]
+      ++ (with pkgs; [
+        nodejs_22
+        git
+        bash
+        gnutar
+        gzip
+        which
+        coreutils
+        gcc
+      ]);
+      agentRuntimePath = lib.makeBinPath agentRuntimePackages;
+      hermesRuntimePath = lib.makeBinPath (
+        agentRuntimePackages
         ++ (with pkgs; [
-          nodejs_22
-          git
-          bash
-          gnutar
-          gzip
-          which
-          coreutils
-          gcc
+          uv
+          python313
+          ripgrep
+          ffmpeg
         ])
       );
 
@@ -210,6 +218,83 @@ mkFeatureModule {
           executable = true;
           force = true;
         };
+      hermesBootstrap = ''
+        export HERMES_HOME="''${HERMES_HOME:-$HOME/.hermes}"
+        export HERMES_INSTALL_DIR="''${HERMES_INSTALL_DIR:-$HERMES_HOME/hermes-agent}"
+        export PATH="${hermesRuntimePath}:$PATH"
+        export UV_NO_CONFIG=1
+        export UV_PYTHON="${pkgs.python313}/bin/python3"
+
+        ensure_hermes() {
+          mkdir -p "$HERMES_HOME"
+
+          if [ ! -d "$HERMES_INSTALL_DIR/.git" ]; then
+            rm -rf "$HERMES_INSTALL_DIR"
+            git clone --depth=1 https://github.com/NousResearch/hermes-agent.git "$HERMES_INSTALL_DIR"
+          fi
+
+          if [ ! -x "$HERMES_INSTALL_DIR/venv/bin/hermes" ]; then
+            (
+              cd "$HERMES_INSTALL_DIR"
+              UV_PROJECT_ENVIRONMENT="$HERMES_INSTALL_DIR/venv" uv sync --extra all --locked
+            )
+          fi
+
+          mkdir -p \
+            "$HERMES_HOME/cron" \
+            "$HERMES_HOME/sessions" \
+            "$HERMES_HOME/logs" \
+            "$HERMES_HOME/pairing" \
+            "$HERMES_HOME/hooks" \
+            "$HERMES_HOME/image_cache" \
+            "$HERMES_HOME/audio_cache" \
+            "$HERMES_HOME/memories" \
+            "$HERMES_HOME/skills"
+
+          if [ ! -f "$HERMES_HOME/.env" ] && [ -f "$HERMES_INSTALL_DIR/.env.example" ]; then
+            cp "$HERMES_INSTALL_DIR/.env.example" "$HERMES_HOME/.env"
+            chmod 600 "$HERMES_HOME/.env"
+          fi
+
+          if [ ! -f "$HERMES_HOME/config.yaml" ] && [ -f "$HERMES_INSTALL_DIR/cli-config.yaml.example" ]; then
+            cp "$HERMES_INSTALL_DIR/cli-config.yaml.example" "$HERMES_HOME/config.yaml"
+          fi
+
+          if [ ! -f "$HERMES_HOME/SOUL.md" ]; then
+            {
+              echo "# Hermes"
+              echo
+              echo "Local Sinnix-managed Hermes home. Edit this file to define the agent persona."
+            } > "$HERMES_HOME/SOUL.md"
+          fi
+        }
+
+        configure_hermes_local() {
+          "$HERMES_INSTALL_DIR/venv/bin/hermes" config set model.provider custom >/dev/null
+          "$HERMES_INSTALL_DIR/venv/bin/hermes" config set model.default local-llama >/dev/null
+          "$HERMES_INSTALL_DIR/venv/bin/hermes" config set model.base_url http://127.0.0.1:4000/v1 >/dev/null
+        }
+      '';
+      mkHermesWrapper =
+        {
+          entrypoint ? "hermes",
+          extraPrelude ? "",
+        }:
+        {
+          text = ''
+            #!/usr/bin/env bash
+            set -euo pipefail
+
+            ${hermesBootstrap}
+
+            ensure_hermes
+            ${extraPrelude}
+
+            exec "$HERMES_INSTALL_DIR/venv/bin/${entrypoint}" "$@"
+          '';
+          executable = true;
+          force = true;
+        };
     in
     {
       sinnix.persistence.home = {
@@ -231,6 +316,7 @@ mkFeatureModule {
           ".local/state/claude-code"
           ".local/state/codex"
           ".local/state/gemini"
+          ".hermes"
         ];
         files = [ ".claude.json" ];
       };
@@ -250,8 +336,6 @@ mkFeatureModule {
             scriptPkgs.beads
             scriptPkgs.sinnix-scope
             scriptPkgs.chatgpt-share-export
-            scriptPkgs.render-agents
-            scriptPkgs.normalize-agent-projects
             scriptPkgs.verify-agent-topology
           ];
 
@@ -275,6 +359,10 @@ mkFeatureModule {
               codex-deepseek = "~/.local/bin/codex-deepseek";
               codex-local = "~/.local/bin/codex-local";
               gemini = "~/.local/bin/gemini";
+              hermes = "~/.local/bin/hermes";
+              hermes-local = "~/.local/bin/hermes-local";
+              hermes-acp = "~/.local/bin/hermes-acp";
+              hermes-update = "~/.local/bin/hermes-update";
             };
           };
 
@@ -293,16 +381,6 @@ mkFeatureModule {
             "claude/mcp-lean.json".source = claudeLeanMcpConfigFile;
             "claude/mcp-browser.json".source = claudeBrowserMcpConfigFile;
             "claude/CLAUDE.md".source = mkDotsFile "/claude/CLAUDE.md";
-            "claude/world-model" = {
-              source = mkDotsFile "/claude/world-model";
-              force = true;
-              recursive = true;
-            };
-            "claude/operational" = {
-              source = mkDotsFile "/claude/operational";
-              force = true;
-              recursive = true;
-            };
             "claude/skills" = {
               source = sharedSkillFarm;
               force = true;
@@ -314,21 +392,13 @@ mkFeatureModule {
             ln -sfn .config/claude $HOME/.claude
             ln -sfn ${sinnixCfg.paths.dotsRoot}/claude/settings.json $HOME/.config/claude/settings.json
           '';
-          home.activation.renderGlobalCodexAgents = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
-            mkdir -p "$HOME/.codex"
-            if [ -f "$HOME/.config/claude/CLAUDE.md" ]; then
-              ${scriptPkgs.render-agents}/bin/render-agents \
-                --input "$HOME/.config/claude/CLAUDE.md" \
-                --output "$HOME/.codex/AGENTS.md"
-            fi
-          '';
-          home.activation.renderGlobalGeminiAgents = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
-            mkdir -p "$HOME/.gemini"
-            if [ -f "$HOME/.config/claude/CLAUDE.md" ]; then
-              ${scriptPkgs.render-agents}/bin/render-agents \
-                --input "$HOME/.config/claude/CLAUDE.md" \
-                --output "$HOME/.gemini/GEMINI.md"
-            fi
+          # Codex/Gemini read the global instruction file directly; CLAUDE.md is
+          # flat (no @-transclusion), so a symlink replaces the old render step
+          # and can never go stale between activations.
+          home.activation.linkGlobalAgentInstructions = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+            mkdir -p "$HOME/.codex" "$HOME/.gemini"
+            ln -sfn "$HOME/.config/claude/CLAUDE.md" "$HOME/.codex/AGENTS.md"
+            ln -sfn "$HOME/.config/claude/CLAUDE.md" "$HOME/.gemini/GEMINI.md"
           '';
 
           # Full/default profile. Named claude-full (not claude) so Claude Code's
@@ -429,6 +499,36 @@ mkFeatureModule {
               ${agentScopePrelude}
 
               run_agent_scoped "$STATE/launch.sh" "$@"
+            '';
+            executable = true;
+            force = true;
+          };
+
+          home.file.".local/bin/hermes" = mkHermesWrapper { };
+          home.file.".local/bin/hermes-acp" = mkHermesWrapper {
+            entrypoint = "hermes-acp";
+          };
+          home.file.".local/bin/hermes-local" = mkHermesWrapper {
+            extraPrelude = ''
+              export OPENAI_BASE_URL="http://127.0.0.1:4000/v1"
+              export OPENAI_API_KEY="sk-local"
+              configure_hermes_local
+            '';
+          };
+          home.file.".local/bin/hermes-update" = {
+            text = ''
+              #!/usr/bin/env bash
+              set -euo pipefail
+
+              ${hermesBootstrap}
+
+              ensure_hermes
+              git -C "$HERMES_INSTALL_DIR" pull --ff-only
+              (
+                cd "$HERMES_INSTALL_DIR"
+                UV_PROJECT_ENVIRONMENT="$HERMES_INSTALL_DIR/venv" uv sync --extra all --locked
+              )
+              exec "$HERMES_INSTALL_DIR/venv/bin/hermes" --version
             '';
             executable = true;
             force = true;
