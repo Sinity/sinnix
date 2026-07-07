@@ -11,6 +11,7 @@
   "history-cleanup"
   "lynchpin"
   "meta"
+  "polylogue"
   "recap"
   "swarm"
 ]
