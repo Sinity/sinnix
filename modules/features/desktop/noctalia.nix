@@ -69,7 +69,7 @@ mkFeatureModule {
           # reloads config.toml. Force this one mutable file back to the repo
           # symlink because the upstream HM module also declares it.
           xdg.configFile."noctalia/config.toml" = {
-            source = mkDotsFile "/noctalia/config.toml";
+            source = lib.mkForce (mkDotsFile "/noctalia/config.toml");
             force = lib.mkForce true;
           };
 

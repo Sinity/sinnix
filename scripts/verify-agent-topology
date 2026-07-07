@@ -1,21 +1,15 @@
 #!/usr/bin/env bash
 # @sinnix-package
-# description: Verify CLAUDE/AGENTS topology and sync invariants across project repos
-# runtimeInputs: coreutils findutils git gnugrep python3
+# description: Verify CLAUDE/AGENTS topology invariants across project repos
+# runtimeInputs: coreutils findutils git gnugrep
 set -euo pipefail
+
+# Convention (2026-07): per-repo CLAUDE.md is the canonical instruction file,
+# flat (no @-transclusion outside code fences), and AGENTS.md is a committed
+# symlink pointing at CLAUDE.md. There is no render step.
 
 ROOT="${1:-/realm/project}"
 MAX_DEPTH="${2:-4}"
-RENDER_BIN="${RENDER_BIN:-$(dirname "$0")/render-agents}"
-
-if [ ! -x "$RENDER_BIN" ]; then
-  RENDER_BIN="$(command -v render-agents 2>/dev/null || true)"
-fi
-
-if [ -z "$RENDER_BIN" ] || [ ! -x "$RENDER_BIN" ]; then
-  echo "error: render-agents not executable" >&2
-  exit 1
-fi
 
 if [ ! -d "$ROOT" ]; then
   echo "error: root directory not found: $ROOT" >&2
@@ -43,6 +37,17 @@ done
 
 mapfile -t repos < <(printf '%s\n' "${!repos_seen[@]}" | sort)
 
+# @-include lines outside fenced code blocks mean the file still relies on
+# Claude-only transclusion and other agents would read an incomplete doc.
+has_includes() {
+  awk '
+    /^[[:space:]]*(```|~~~)/ { fence = !fence; next }
+    fence { next }
+    /^[[:space:]]*@[.\/~]/ { found = 1; exit }
+    END { exit found ? 0 : 1 }
+  ' "$1"
+}
+
 checked=0
 failed=0
 for repo in "${repos[@]}"; do
@@ -54,21 +59,29 @@ for repo in "${repos[@]}"; do
   override="$repo/AGENTS.override.md"
 
   if [ -L "$claude" ]; then
-    target="$(readlink "$claude" || true)"
-    if [ "$target" = "AGENTS.md" ]; then
-      echo "fail: $repo: CLAUDE.md is a legacy symlink to AGENTS.md"
-      repo_failed=1
-    fi
-  fi
-
-  if [ ! -f "$claude" ]; then
+    echo "fail: $repo: CLAUDE.md must be a regular file, not a symlink"
+    repo_failed=1
+  elif [ ! -f "$claude" ]; then
     echo "fail: $repo: missing CLAUDE.md source"
     repo_failed=1
+  elif has_includes "$claude"; then
+    echo "fail: $repo: CLAUDE.md contains @-include lines; flatten it (AGENTS.md consumers cannot expand includes)"
+    repo_failed=1
   fi
 
-  if [ ! -f "$agents" ]; then
-    echo "fail: $repo: missing generated AGENTS.md"
+  if [ ! -L "$agents" ]; then
+    if [ -e "$agents" ]; then
+      echo "fail: $repo: AGENTS.md must be a symlink to CLAUDE.md (found regular file — legacy generated copy?)"
+    else
+      echo "fail: $repo: missing AGENTS.md symlink"
+    fi
     repo_failed=1
+  else
+    target="$(readlink "$agents")"
+    if [ "$target" != "CLAUDE.md" ]; then
+      echo "fail: $repo: AGENTS.md symlink must point at CLAUDE.md (points at '$target')"
+      repo_failed=1
+    fi
   fi
 
   if [ -f "$override" ]; then
@@ -76,15 +89,9 @@ for repo in "${repos[@]}"; do
     repo_failed=1
   fi
 
-  if [ -f "$claude" ] && ! "$RENDER_BIN" --input "$claude" --output "$agents" --check >/dev/null 2>&1; then
-    echo "fail: $repo: AGENTS.md is out of sync with CLAUDE.md"
-    repo_failed=1
-  fi
-
   if git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    gitignore="$repo/.gitignore"
-    if [ ! -f "$gitignore" ] || ! grep -qx 'AGENTS.md' "$gitignore"; then
-      echo "fail: $repo: .gitignore must contain AGENTS.md"
+    if [ -L "$agents" ] && ! git -C "$repo" ls-files --error-unmatch AGENTS.md >/dev/null 2>&1; then
+      echo "fail: $repo: AGENTS.md symlink is not tracked by git (git add -f AGENTS.md)"
       repo_failed=1
     fi
   fi

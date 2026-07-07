@@ -1,6 +1,13 @@
 # Sinity Environment Memory
 
-> **This file is your persistent environment memory.** It contains compressed understanding of the entire development ecosystem, NixOS configuration, and project constellation. You start every session "pre-grokked".
+> **This file is your persistent environment memory.** It contains compressed
+> understanding of the development ecosystem, NixOS configuration, and project
+> constellation. You start every session "pre-grokked".
+>
+> This is a single flat file — no transclusion. Codex and Gemini read the same
+> content through symlinks (`~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md` →
+> `~/.config/claude/CLAUDE.md` → this file in the sinnix repo). Edits propagate
+> to every agent instantly; there is no render step.
 
 ---
 
@@ -128,6 +135,8 @@ Polylogue, Lynchpin, or Sinnix captures can answer directly.
 
 - **AI session history** → Polylogue. `polylogued` tails Claude/Codex sessions;
   use Polylogue MCP/search for "what did agents do/say/change?" questions.
+  Raw session JSONL also lives under `~/.claude/projects/<project>/*.jsonl`
+  when you need to grep something Polylogue has not ingested yet.
 - **Cross-source personal/system history** → Lynchpin. It materializes chats,
   git, ActivityWatch, shell, health, and machine telemetry into queryable
   analysis products. Use it for timelines, correlations, and "what happened
@@ -139,6 +148,12 @@ Polylogue, Lynchpin, or Sinnix captures can answer directly.
 - **Live browser/desktop/terminal state** → DevTools and `sinnix-*` helpers.
   Capture screenshots or terminal scrollback into the capture lake when the
   observation should survive the session.
+
+Look up history proactively when the user references past work ("remember
+when…", "like before"), after context compaction, or when an error pattern
+feels previously solved. When history access yields durable insight, write it
+down (scratch note, `bd remember`, or the owning CLAUDE.md) instead of
+re-discovering it next session.
 
 ---
 
@@ -153,47 +168,753 @@ Capture only durable, non-obvious decisions, tensions, dead ends, and cross-sess
 insights. Do not mirror ordinary task notes there.
 
 - Quick capture → `seed/YYYY-MM-DD-HHMMSS-slug.md`
-- Append to an existing thread → `stream/NNN-name.md`
 - Durable decision → `crystal/decisions/name.md`
 - Unresolved contradiction → `tension/NNN-name.md`
 - Dead end worth not rediscovering → `graveyard/name.md`
+- Per-subject threads → `subject/{goal,project}/...`
 
 ---
 
-## World Model
+## System Context
 
-@./world-model/index.md
+### Hardware
+
+- **Host**: `sinnix-prime` (desktop workstation)
+- **CPU**: Intel i7-13700K (16 cores, 24 threads); **GPU**: RTX 3080; 32 GB RAM
+- **OS**: NixOS, unstable channel
+- Storage: MX500 1TB SATA = root/system (wear-limited — avoid gratuitous
+  writes); Crucial P3 4TB NVMe = `/realm`; 6TB HDD = `/outer-realm` (backup
+  target); 14TB HDD = `/neo-outer-realm` (bulk media, automount).
+
+### NixOS Environment
+
+```
+# NEVER use nix profile commands - all packages via modules
+# Use nix shell/nix develop for temporary tools
+
+direnv allow           # Activate project devshell
+nix develop            # Enter flake devshell manually
+nix build .#<output>   # Build specific flake output
+```
+
+**Sinnix rebuild** — ALWAYS use the devshell commands (they wrap `nh` with idle
+CPU/IO scheduling and a shared rebuild lock):
+
+```
+# From inside the devshell (direnv allow or nix develop):
+test-vm                     # Test risky changes in QEMU VM first
+switch                      # Apply to live system (resource-scoped nh os switch)
+boot                        # Safer alternative: set boot default without immediate activation
+
+# From outside the devshell (e.g. Claude Code, non-devshell shell):
+cd /realm/project/sinnix && nix develop --command switch
+# NEVER: nix shell nixpkgs#nh --command nh os switch ...
+# NEVER: nh os switch ... (bypasses idle-scheduling wrapper)
+```
+
+> **Why this matters**: `nix.daemonCPUSchedPolicy=idle` only affects scheduler
+> priority — it does NOT cap memory. Without the nix-build.slice placement the
+> daemon runs unconstrained and Rust builds can consume all 32 GB, thrashing
+> the system even though CPU cycles were yielded correctly. Always use
+> `switch`/`boot` devshell commands or `nix develop --command switch`.
+>
+> Do not insert `check --no-build` before `switch` as routine agent hygiene.
+> `switch` already evaluates/builds, and repeating eval adds latency/load on the
+> exact path used for recovery. Use focused tests for edited modules, then
+> `switch` when applying live Sinnix changes.
+
+All three agent CLIs self-update via npm bootstrap — no Nix rebuild needed.
+`claude update`, `codex update`, `gemini` self-update inside
+`~/.local/state/{claude-code,codex,gemini}/npm/` (persisted under
+impermanence).
 
 ---
 
-## Operational Knowledge
+## Filesystem Structure
 
-@./operational/index.md
+### /realm - The Data Kingdom
+
+```
+/realm/
+├── project/           # All active project repositories
+├── data/              # Canonical data lake (see below)
+├── db/                # nodatacow DB subvolumes (polylogue, machine-telemetry)
+├── inbox/             # Staging area for retired/incoming data + downloads
+└── tmp/               # Throwaway analysis output, agent worktrees
+```
+
+User home is `/home/sinity`. It is intentionally not under `/realm`: the live
+home directory is recreated on each boot and populated from `/persist` via the
+impermanence module plus Home Manager activation. Persistent home state such as
+SSH keys lives at `/persist/home/sinity/.ssh` and appears at runtime as
+`/home/sinity/.ssh`.
+
+### Orientation Rules
+
+- Do not assume freedesktop directories live under `/home/sinity`. Query them
+  with `xdg-user-dir <NAME>` when the user says Downloads, Documents, Desktop,
+  etc.
+- The configured downloads directory is `/realm/inbox/download`; `~/Downloads`
+  may not exist. Incoming bundles, patches, browser downloads, and cleanup
+  artifacts usually land there or under `/realm/inbox/download/misc`.
+- Use `/realm/tmp/` for throwaway analysis output that may be large or useful
+  across a short session. Avoid `/tmp` for heavy repo work; it is a small
+  tmpfs and heavy churn belongs on NVMe.
+- Use `/realm/tmp/worktrees/` for agent worktrees or any compile-heavy checkout.
+  This keeps build output on NVMe and avoids root-disk wear.
+- Treat `/realm/data/` as canonical user data, not scratch. Read from it for
+  evidence; only write there through the owning tool or workflow. Read
+  `/realm/data/INVENTORY.md` before reorganizing anything in the lake.
+
+### /realm/data - Data Lake Structure
+
+```
+/realm/data/
+├── captures/          # Continuous local telemetry
+│   ├── activitywatch/ # Window/AFK/browser tracking
+│   ├── webhistory/    # Browser history exports
+│   ├── asciinema/     # Terminal recordings
+│   ├── keylog/        # Keystroke captures (scribe-tap)
+│   ├── audio/         # Audio captures
+│   ├── comms/         # Communication captures
+│   ├── screenshot/    # Screenshots
+│   ├── shell/         # Shell history (Atuin)
+│   ├── syslog/        # System log exports
+│   ├── machine/       # Canonical host machine telemetry
+│   ├── polylogue/     # Polylogue archive root
+│   └── kitty-scrollback/ # Terminal scrollback
+├── exports/           # GDPR/Takeout provider exports
+│   ├── chatlog/       # AI chat archives (Claude, ChatGPT, Codex)
+│   ├── health/        # Samsung Health, Sleep As Android
+│   ├── google/        # Takeout archives
+│   └── ...            # reddit, spotify, raindrop, goodreads, wykop, ...
+├── libraries/         # Curated collections (finance, doc, books, model, ...)
+├── derived/           # Derived analysis products
+└── knowledgebase/     # PKM vault (Obsidian-friendly MOCs, raw-log)
+```
 
 ---
 
-## Session recall (polylogue + Sinex)
+## Project Constellation
+
+### Core Infrastructure
+
+| Project             | Path                             | Purpose                                                        |
+| ------------------- | -------------------------------- | -------------------------------------------------------------- |
+| **sinnix**          | `/realm/project/sinnix`          | NixOS system configuration (flake-parts, home-manager, agenix) |
+| **sinex**           | `/realm/project/sinex`           | Event-driven data capture platform (Rust, NATS, PostgreSQL)    |
+| **sinity-lynchpin** | `/realm/project/sinity-lynchpin` | Analysis coordination hub (Python, DuckDB, HPI-style modules)  |
+
+### Capture & Integration Tools
+
+| Project              | Path                              | Purpose                                                     |
+| -------------------- | --------------------------------- | ----------------------------------------------------------- |
+| **polylogue**        | `/realm/project/polylogue`        | AI chat export archiver (Claude, ChatGPT, Codex → Markdown) |
+| **scribe-tap**       | `/realm/project/scribe-tap`       | Wayland keystroke mirror for Hyprland                       |
+| **intercept-bounce** | `/realm/project/intercept-bounce` | Keyboard debouncing filter (Rust)                           |
+
+### Knowledge & Analysis
+
+| Project           | Path                        | Purpose                            |
+| ----------------- | --------------------------- | ---------------------------------- |
+| **knowledgebase** | `/realm/data/knowledgebase` | PKM vault (Obsidian-friendly MOCs) |
+| **stashbox**      | `/realm/project/stashbox`   | Media library tooling              |
+
+Inactive/archived work lives under `/realm/project/_inactive/` and
+`/realm/project/archives/`; third-party checkouts (snix, tvix, codex) are not
+Sinity projects.
+
+### Project Relationships
+
+```
+sinnix ──────► System packages, services, dotfiles
+    │
+    └──► Enables: sinex service stack, polylogued daemon, scribe-tap
+
+sinex ◄────── Captures events from scribe-tap, polylogue
+    │
+    └──► Feeds: lynchpin via DuckDB/modules
+
+lynchpin ◄─── Aggregates: ActivityWatch, Atuin, git, health, chats
+    │
+    └──► Produces: Calendar views, baselines, narratives
+```
+
+### Environment Variables (set by sinnix)
+
+```
+SINEX_ROOT=/realm/project/sinex
+LYNCHPIN_REPO_ROOT=/realm/project/sinity-lynchpin
+POLYLOGUE_ROOT=/realm/project/polylogue
+KNOWLEDGEBASE_ROOT=/realm/data/knowledgebase
+```
+
+### Documentation Map
+
+| Topic                 | Location                                                             |
+| --------------------- | -------------------------------------------------------------------- |
+| Sinnix modules        | `/realm/project/sinnix/modules/`                                     |
+| Sinnix grok notes     | `/realm/project/sinnix/.agent/scratch/` (architecture + machine map) |
+| Sinex architecture    | `/realm/project/sinex/AGENTS.md`                                     |
+| Lynchpin data sources | `/realm/project/sinity-lynchpin/docs/reference/data-sources.md`      |
+| Data inventory        | `/realm/data/INVENTORY.md`                                           |
+
+**Project-specific details** (module structure, patterns, workflows) live in
+each project's `CLAUDE.md`.
+
+---
+
+## Agent Context Conventions
+
+- **`CLAUDE.md` is the canonical instruction file everywhere** — one flat file
+  per repo, no `@`-transclusion. `AGENTS.md` in each repo is a committed
+  symlink to `CLAUDE.md`, so Claude, Codex, and Gemini always read identical,
+  current content. `verify-agent-topology /realm/project` audits this
+  invariant.
+- **MCP profiles**: registry source of truth is `flake/data/mcp-registry.nix`
+  in sinnix; wiring in `modules/features/dev/mcp-servers.nix`. Plain
+  `claude`/`codex` use the full non-browser profile (GitHub, Context7,
+  Polylogue, Lynchpin, Serena, Codebase Memory). `claude-lean`/`codex-lean`
+  keep GitHub, Context7, and Polylogue only. `claude-browser`/`codex-browser`
+  add the Chrome DevTools MCP tier. `claude` is a shell alias to the
+  `claude-full` wrapper — the bare `~/.local/bin/claude` is deliberately
+  unmanaged because Claude Code's installer claims and clobbers it on
+  auto-update.
+- **Alternate backends (full MCP profile)**: `claude-deepseek`/`codex-deepseek`
+  (DeepSeek endpoints, key from agenix `deepseek-api-key`);
+  `claude-local`/`codex-local` (local Ollama hub via the LiteLLM gateway on
+  `127.0.0.1:4000`, `modules/services/litellm.nix` — local model names are
+  defined once in its `model_list`).
+- **Shared skills** live in `dots/_ai/skills/` (sinnix repo) and are linked
+  into `~/.config/claude/skills`, `~/.codex/skills`, `~/.gemini/skills`.
+- **Desktop environment**: Hyprland (Wayland) + Noctalia shell; terminals
+  foot/kitty; browser qutebrowser + Chrome (CDP on :9222).
+- **Dotfile pattern**: everything in sinnix `dots/` reaches `$HOME` via Home
+  Manager out-of-store symlinks — edits propagate instantly without rebuild.
+- **Context7**: documentation discovery via `resolve-library-id` →
+  `query-docs`. Cheap, prevents stale-API mistakes; use it for unfamiliar or
+  fast-moving third-party APIs.
+
+---
+
+## Common Workflows
+
+### Workspace Inventory
+
+For a fast read-only snapshot across many repos, use the shared scanner rather
+than hand-rolling `find`/`git status` loops:
+
+```bash
+python3 /realm/project/sinnix/dots/_ai/tools/workspace_recon_scan.py --root /realm/project
+python3 /realm/project/sinnix/dots/_ai/tools/workspace_recon_scan.py --root /realm/project --changed-only --with-size --json
+```
+
+### Heavy Agent Work
+
+Recognized project dev environments install transparent wrappers for common
+heavy commands. In Sinex and Polylogue devshells, ordinary commands such as
+`xtask`, `cargo`, `pytest`, `uv`, `polylogue`, and `nix` are routed into the
+Sinnix build/background slices automatically, so agents should run the normal
+project command first.
+
+Resource containment is not a verification contract. In Sinex, use `xtask` for
+build/check/test verification because it owns the repo's schema, SQLx, database,
+feature, and formatting assumptions. Do not bypass it with direct `cargo`
+commands merely to get a narrower-looking signal.
+
+Resource pressure during heavy work is a runtime scheduling problem first, not
+a project semantics problem (see Runtime Discipline above). If throttling is
+needed to finish the immediate operation, prefer a one-shot environment
+override or the Sinnix wrapper/slice layer; leave durable project defaults
+alone unless the project itself has a reproducible, cross-machine resource bug.
+
+Use an explicit scope only outside a recognized devshell or for one-off custom
+commands that are expected to run for a long time or scan/write large stores:
+
+```bash
+sinnix-scope background -- <long-running scan/import/db command>
+sinnix-scope build -- <project build/test command>
+sinnix-scope nix-build -- nix build .#target
+```
+
+**Agent worktree placement (wear policy):** a Rust worktree's per-checkout
+`CARGO_TARGET_DIR` writes multiple GB per build. Place agent worktrees for
+heavy-compile repos under `/realm/tmp/worktrees/` (NVMe), never `/tmp`:
+
+```bash
+mkdir -p /realm/tmp/worktrees
+git -C /realm/project/<repo> worktree add -b <branch> /realm/tmp/worktrees/<name> origin/master
+```
+
+**Sinex tests from a worktree:** use a live dev database socket, not sqlx's
+offline query cache. Plain `nix develop` relocates the per-checkout dev
+database under `/var/cache/sinex/$USER/<checkout-hash>/dev-state`; read the
+current checkout's `DATABASE_URL` from its devshell before overriding another
+worktree:
+
+```bash
+SINEX_MAIN_DATABASE_URL="$(
+  git -C /realm/project/sinex status --short >/dev/null &&
+  nix develop /realm/project/sinex --command sh -c 'printf %s "$DATABASE_URL"'
+)"
+
+env DATABASE_URL="$SINEX_MAIN_DATABASE_URL" \
+  nix develop --command cargo test -p <crate> --lib <filter>
+```
+
+The pre-push drift guard inherits the same broken `DATABASE_URL` — pushing
+from a worktree devshell needs the identical `env DATABASE_URL=... git push`
+override, or sqlx compile errors masquerade as drift-guard rejections.
+
+### Data Analysis (lynchpin)
+
+```bash
+cd /realm/project/sinity-lynchpin
+just                                        # List all recipes
+python -m lynchpin.analysis materialize     # DAG-orchestrated substrate materialization
+python -m lynchpin.cli.current_state --start 2026-05-01 --end 2026-05-05
+```
+
+### Agent Orchestration (Multi-Agent Work)
+
+When dispatching multiple coding agents to execute a plan (e.g., parallel lanes),
+state the isolation model explicitly. The rules below are for worktree-isolated
+agents only; if agents intentionally share one checkout, the coordinator owns
+branching/committing/merging and agents should report patches or commit only by
+explicit instruction.
+
+**Worktree discipline — CRITICAL when using worktree isolation:**
+
+- Agents run in isolated worktrees (`isolation: "worktree"`). The isolation
+  system auto-cleans worktrees on completion, discarding uncommitted
+  working-tree changes. **Agents MUST `git commit` every logical chunk.** Even
+  a WIP commit is fine; the branch persists.
+- **Never `cd /realm/project/<name>` from inside a worktree agent.** The
+  worktree is the agent's root. If an agent `cd`s to the main checkout, commits
+  land on the main branch — corrupting both.
+- **Verify git remote.** Before pushing, confirm `git remote -v` and
+  `git branch --show-current` match the worktree branch.
+
+**Write-scope separation:**
+
+- Before dispatching, identify shared files (e.g., `schema/mod.rs`, `apply.rs`,
+  `lib.rs`). These are conflict hotspots.
+- When two lanes MUST touch the same file, serialize them: first lane commits +
+  merges, second lane rebases.
+- For additive changes to shared files, pre-define which lane owns each line
+  range.
+
+**Commit cadence:** commit after each project check passes, not after "all work
+done". First commit once the first relevant check passes, then per milestone.
+This prevents worktree auto-cleanup data loss and makes incremental merge
+possible.
+
+**Pre-flight checklist for each agent prompt:**
+
+1. Specify exact files the agent OWNS vs AVOIDS
+2. Include a "FIRST: comment on issue #N with scope" step
+3. Include a "commit after each successful check" instruction
+4. Warn about worktree cleanup: "commit or lose it"
+
+**Post-agent merge checklist:**
+
+1. Verify the worktree branch has commits: `git log <branch> --oneline -5`
+2. If no commits, check working tree: `git -C <worktree> status --short`
+3. Cherry-pick or diff-apply if the agent committed to the wrong branch
+4. `git worktree remove` stale worktrees after merging
+
+### Daily oracle digest
+
+
+---
+
+## Git Protocol
+
+Universal git/GitHub protocol. Project-specific extensions go in each repo's CLAUDE.md / CONTRIBUTING.md.
+
+### History is durable
+
+`master` / `main` is a permanent artifact. Three readers pick it up cold —
+future-you, future-agents, `git bisect` — and all fail when a commit subject is
+`asdf`, the body is empty, or the PR boundary is lost.
+
+Navigable signals: conventional prefix (`feat:`/`fix:`/...), `(#N)` suffix on
+squash-merges, non-empty body, specific subject, one-logical-change-per-PR.
+
+### Committing
+
+**Commit and push proactively within repo policy.** Commit each logical unit as it lands on a feature branch — don't wait to be asked. Push feature branches after verification so work is backed up and PRs can be opened or updated. For solo direct-master repos such as Sinnix and Lynchpin, committing and pushing `master` is allowed after local verification and deployment rules are satisfied. Do not push only when the user, repo, or current workflow explicitly says to hold.
+
+**Atomicity test:** can you write a subject without "and"? If you need "and", split. Err toward more commits — you can always squash before PR.
+
+**Conventional prefixes** (pick accurately — reviewers filter by type):
+
+| Prefix           | Meaning                                  |
+| ---------------- | ---------------------------------------- |
+| `feat:`          | User-visible new capability              |
+| `fix:`           | Bug fix                                  |
+| `refactor:`      | Internal restructure, no behavior change |
+| `perf:`          | Optimization (include measurement)       |
+| `test:`          | Test-only                                |
+| `docs:`          | Documentation only                       |
+| `chore:`         | Tooling/deps/config                      |
+| `build:` / `ci:` | Build system / CI config                 |
+| `style:`         | Formatting only                          |
+| `archive:`       | Move to `archive/` instead of delete     |
+
+Use scopes (`fix(cli): ...`) when the repo is large enough that scope adds clarity.
+
+**Subject line (≤72 chars):**
+
+- Present-tense imperative (`add X`, not `added X`)
+- Describes what _landed_, not what was _worked on_
+- Specific nouns, not vague gerunds (`fix: handle null cursor in pagination`, not `fix: pagination bug`)
+- No trailing period
+
+**Body (required for anything non-trivial):**
+
+- Blank line between subject and body; wrap at 72 chars
+- Four sections worth writing (not all always required): **Problem** (what observation/constraint triggered this), **What changed** (higher level than the diff), **Alternatives rejected** (only if there was a real fork), **Compatibility/migration** (breaking changes)
+- Issue refs in body: use neutral references only, e.g. `Ref #N`.
+  Do not put GitHub resolver keywords adjacent to issue numbers in
+  agent-authored text. If a human explicitly wants a specific PR to
+  change a specific issue's GitHub state, get that instruction for that
+  exact PR and issue immediately before writing the resolver phrase.
+- `BREAKING CHANGE: ...` footer for breaking changes
+- Co-author trailer:
+  ```
+  Co-Authored-By: Claude <noreply@anthropic.com>
+  ```
+
+**Staging:** by name (`git add <file>`). Never `git add -A` / `git commit -a` on significant changes — sweeps in `.env`, credentials, build output. Review with `git diff --staged` before commit.
+
+**Hooks:** never skip (`--no-verify`, `--no-gpg-sign`) unless the user explicitly asked. Hook failure = no commit; fix the root cause and make a NEW commit (don't `--amend` — that modifies the previous successful commit).
+
+### Branching
+
+- **All product/project code lands via PRs** to default. No direct pushes to
+  `master`/`main` — the PR flow enforces `(#N)`, reviews, CI gating, history
+  navigability. This applies to repos such as Sinex and Polylogue.
+  **Sinnix and Lynchpin are the exceptions:** both are operated solo and may be
+  committed and pushed directly on `master` after local verification (and, for
+  Sinnix, successful deployment). Still write navigable commit messages.
+- **Feature branches start from fresh `origin/master`.** `git fetch --all` first.
+- **Name:** `feature/<type>/<short-dash-separated-desc>` (lowercase, no dates/initials/ticket-nums in branch names — those go in commits/PR body).
+- **Rebase, don't merge** when syncing feature branches from master. Global config sets `pull.rebase = true` and `rebase.autoStash = true`.
+- **Before opening PR:** `git tidy` (interactive rebase on upstream) to squash fixups, reword subjects, reorder, drop reverted work. Then `git push --force-with-lease`.
+
+### Pull Requests
+
+**Open an issue first** for: work spanning multiple PRs, architectural decisions, bug reports needing repro, research questions, follow-up chains, durable debt discovered mid-implementation. Skip for self-contained PRs where the body is sufficient record.
+
+**Convert anonymous debt into tracked debt.** When you discover an expected-failure test, a persistent TODO, or out-of-scope work: open an issue and reference it from the code/PR. Anonymous TODOs rot.
+
+**Issue comments are part of the spec.** Before implementing an issue, read the
+full issue thread, not only the body. Later comments may supersede, narrow,
+correct, or expand the body. If the body and comments conflict, preserve the
+evidence in your own issue/PR comment and state the interpretation you are
+implementing.
+
+**GitHub resolver keyword discipline.** In issue comments, PR bodies, commit
+messages, and bot/review replies, do not write GitHub resolver keyword forms
+next to issue numbers in agent-authored text. This includes negative phrasing,
+audit notes, prompts, examples, and descriptions of partial work. Use neutral
+references plus explicit residual wording instead: `Ref #N` and
+`Remaining #N scope:`. Do not include example resolver phrases in prompts or
+docs; agents copy examples. Resolver phrases are permitted only when the user
+explicitly instructs that a specific PR should change a specific issue's GitHub
+state, and the current evidence proves the full issue scope is satisfied.
+
+**Leave an implementation trail.** Agents working an issue should comment with:
+their understanding of scope; important constraints or non-goals; what they
+changed; what they intentionally did not change; acceptance criteria satisfied,
+deferred, or found misframed; verification run; and follow-up issues opened.
+Do not let meaningful research, scope decisions, or discovered drift survive
+only in chat or scratch notes.
+
+**PR size and shape:** prefer substantial, cohesive PRs over micro-PRs that
+burn CI/review cycles. A good PR may contain multiple atomic commits while in
+review, then squash to one permanent master commit. Size the PR around a
+complete issue slice or coherent implementation phase. Tiny PRs are appropriate
+only for urgent fixes, risky isolated changes, or when a larger branch would
+mix unrelated concepts. If a slice is large but coherent, keep it as one PR
+with a read order, self-review notes, and focused commits.
+
+**Issue phase batching:** when an issue has several adjacent acceptance criteria
+that touch the same subsystem, keep them on one branch until the coherent phase
+is exhausted. Use multiple commits as review waypoints, not multiple PRs by
+default. Before opening a PR, update the issue/PR narrative with a compact
+matrix: satisfied, intentionally deferred, misframed, and still open.
+
+**Verification cadence:** do not run the slowest gate after every small edit.
+During implementation, run the narrow command that proves the changed behavior
+plus cheap static checks. Run the broad local gate once when the phase is ready
+to publish, again only after material changes to the tested surface or after a
+failure fix. If a broad suite exposes an unrelated flaky/pre-existing failure,
+rerun the exact node to classify it, record the evidence, and avoid turning the
+current PR into an unrelated cleanup unless the fix is necessary and local.
+
+**CI/review economy:** don't wait passively on known-quota or known-slow CI when
+local gates and required impact reports already give enough evidence for the
+next action. Classify rate limits, pending capacity, and tool failures quickly
+instead of letting them stall implementation. Green checks are not a substitute
+for reading substantive comments. This economy rule never authorizes merging
+through a failed substantive gate: a red schema/build/test/security/proof check
+is a blocker until fixed or until the user explicitly accepts that exact
+failure.
+
+**PR title = squash-merge subject.** ≤72 chars, conventional prefix,
+imperative, describes what changed, ends with `(#N)`, accurate — don't claim
+"unified"/"fixed" unless the diff achieves it.
+
+**PR body = squash-merge body.** Required sections: **Summary** (one para),
+**Problem** (evidence/motivation — not "user asked"), **Solution** (modules
+touched, non-obvious decisions, rejected alternatives), **Verification** (exact
+commands run + the output line that matters, not "tests pass"). Optional:
+Migration notes, Follow-ups, Breaking changes. Link issues with `Ref #N`.
+
+**Claim verification — grep the diff before asserting:**
+
+1. Grep for duplicated logic. If you claim "unified into one helper," is the old helper actually gone?
+2. Check all call sites if claiming "every path now uses X."
+3. Read the PR's GitHub diff (not just local) — catches force-push/merge artifacts.
+4. Revise the claim if the code doesn't support it; "partially unified" is valid, "unified" when half-done is a lie.
+5. Test the claim. If a PR claims to repair a bug, the verification section shows that bug's repro passing.
+
+**Acceptance-criteria honesty.** If an issue has acceptance criteria, address
+each item explicitly in the PR or issue comment that claims completion: mark
+each as satisfied, deferred to a follow-up issue, or misframed by new evidence.
+Never claim a partial subset satisfies the full issue scope without making the
+remaining work durable. Tests are not a substitute for missing runtime wiring:
+if an issue asks for an operator flow, actuator behavior, CLI command, or
+replay path, data-model or test-only changes do not close it unless the issue
+was explicitly narrowed to that surface.
+
+**Automated reviews are review input.** Before merging, inspect every automated
+review/comment/check that posts substantive text (CodeRabbit, Copilot, proof
+packs, scanners). Classify each item as actionable, false positive/noise,
+informational, or tool failure. Address actionable items with code or tests;
+leave a brief comment for false positives when the reason matters. Do not merge
+while a bot reports unresolved actionable findings.
+
+**Proof/impact reports.** When a repo posts generated impact reports, use them
+to choose gates and focus review. Triage known-gap dumps and boilerplate gates
+rather than following them blindly; if the report is noisy or misleading,
+improve the report or record the mismatch in the owning issue.
+
+### Squash-merge hygiene
+
+**`(#N)` suffix on master.** GitHub's "Default commit message: Pull request title and description" setting auto-appends `(#N)` and copies the PR body. Enforcement options per repo: a Ruleset with subject regex, or the repo default-commit-message setting. When running `gh pr merge <N> --squash` with custom `--subject`/`--body`, supply `(#N)` manually — the default is bypassed.
+
+**Granularity is forward-only.** Prefer fewer, fatter PRs; fix granularity at PR-open time. Do not post-hoc combine or rewrite merged history — that destroys PR boundaries and external links. Live with imperfect merged commits; fix the process, not the past.
+
+### Destructive operations — require explicit confirmation
+
+Even in auto mode, state specifically what will happen and pause:
+
+- `git reset --hard` on a branch with uncommitted changes
+- `git push --force` on any branch (`--force-with-lease` on shared branches is still disruptive)
+- `git branch -D` on unmerged branch
+- Amending a pushed commit
+- `git rebase` rewriting published history
+- Deleting branches/worktrees/stashes/tags
+- `git clean -fd`
+
+Never force-push to shared branches without agreement. Never push to `master` /
+`main` directly in product/project repos. Sinnix and Lynchpin are intentionally
+operated directly on `master`; do not invent a branch/PR boundary there unless
+explicitly requested.
+
+**Force-push alternatives:** amending your own feature branch is fine. Fixing a
+typo in a recent master commit: _don't_ — history isn't worth rewriting over
+one character. Adding a missing `(#N)` to one commit: don't — fix the process,
+accept the miss.
+
+### Repository settings (set once per repo)
+
+- Branch protection on default: require PRs, prevent direct pushes.
+- Required CI status checks before merge.
+- **Squash-merge only.** Disable merge commits + rebase-merges.
+- **Default commit message:** "Pull request title and description".
+- Auto-delete head branches; allow "Update branch" for stale PRs.
+- Prefer disabling GitHub's auto-close-issues-on-merge repository setting.
+
+### Merge conflicts
+
+Investigate before resolving — read both sides, don't auto-prefer `theirs`/`ours`. Global `conflictStyle = zdiff3` shows the common ancestor alongside both versions. Run the verify command after resolving. If the conflict reveals a genuine design collision, open a tension/issue — don't collapse silently.
+
+### Worktrees
+
+Parallel checkouts sharing `.git`. Useful for parallel feature work, isolated agent sessions, bisect without touching the working copy.
+
+```bash
+git worktree add ../repo-featureX feature/featureX
+git worktree add -b feature/new ../repo-new
+git worktree list
+git worktree remove ../repo-featureX
+```
+
+Can't check out the same branch twice. Each worktree has its own HEAD/index; stashes are per-worktree.
+
+### History archaeology
+
+```bash
+git log --oneline -20 <file>         # file history
+git log --follow <file>              # across renames
+git log -S '<string>' -- <path>      # pickaxe (string appeared/disappeared)
+git log -G '<regex>' -- <path>       # pickaxe regex
+git log origin/master..HEAD          # commits on branch not yet in master
+git log --first-parent               # main-line only (aliased: git lg)
+git blame -w <file>                  # ignore whitespace-only changes
+git blame --first-parent             # skip merge commits (aliased: blamef)
+git log -L <s>,<e>:<file>            # evolution of line range over time
+git show <commit>:<path>             # contents at commit
+```
+
+**Reflog** saves you from bad rebases/resets — commits retained ~30 days after being unreferenced. `git reset --hard HEAD@{5}` to go back.
+
+**Bisect** works because history is clean. `git bisect start; git bisect bad; git bisect good <old>; ...; git bisect reset`.
+
+### Tags / releases
+
+- Signed tags for releases: `git tag -s vX.Y.Z -m "..."`.
+- Always annotated (`-a` or `-s`), never lightweight.
+- Canonical version file matches the tag.
+- Push with `git pst` (alias for `--follow-tags`).
+
+### GitHub (`gh`) essentials
+
+```bash
+gh pr list --state merged --json number,title,body,mergeCommit
+gh pr view <N> --json title,body,mergeCommit
+gh pr view <N> --comments                  # top-level
+gh api repos/<org>/<repo>/pulls/<N>/comments   # inline review comments
+gh pr create --title "..." --body "$(cat <<'EOF' ... EOF)"
+gh pr merge <N> --squash                   # include (#N) in --subject if overriding
+gh pr checks <N>
+gh issue list --state open --label <label>
+```
+
+### Stash / navigation
+
+- Name stashes: `git stash push -m "desc"`. Unnamed stashes become mysteries.
+- Don't stash long — if work deserves to survive a week, it deserves a branch.
+- `git switch` (not `checkout`) for branches; `git restore` for files.
+
+### Anti-patterns (tripwire list)
+
+- Empty body on non-trivial commit; subject describing work-done not change-landed; vague nouns (`fix: stuff`).
+- Claiming "unified"/"fixed"/"converged" when the diff doesn't support it.
+- Multi-topic commits; mixed formatting + logic; committing unrelated sweeps silently.
+- `git add -A` sweeping secrets/artifacts; `git commit -a` without review.
+- `--no-verify` to bypass a failing hook; amending after hook failure.
+- Pushing directly to `master` in PR-flow repos; "WIP:" PR titles that survive to merge; merging with red CI.
+- Silently ignoring review comments; LGTM without reading; "CI will catch it" instead of running verify locally.
+- Force-push without agreement; `-D` on unmerged branch; post-hoc squashing of merged history.
+- Ceremonial "done!" without `file:line` citation or verification output.
+
+### Interaction patterns (quick)
+
+**Proactive or requested commit:** parallel `git status`/`diff --staged`/`diff`/`log --oneline -10` → review → draft intent-shaped message → stage by name → commit with heredoc → `git status` → push when the branch/repo workflow allows it → report `[git] N files — "<subject>"` plus push/PR state.
+
+**PR:** parallel `status`/`diff`/`log origin/master..HEAD`/upstream-check → review full branch diff → push with `-u` if untracked → `gh pr create --title --body` (heredoc with Summary/Problem/Solution/Verification) → report URL.
+
+**PR state check:** `gh pr view <N>` + `gh pr checks <N>` + `gh api .../pulls/<N>/comments` (inline) + `--comments` (top-level) → report state/CI/unresolved/next-action.
+
+---
+
+## Codebase Analysis
+
+### Survey → Narrate → Synthesize
+
+For thorough code review or bug hunting, use the `analyze` or `swarm` skill:
+
+1. **Survey** (BFS): List all items at the current level, note concerns without deep-diving
+2. **Narrate** (DFS): For the highest-concern item, verbalize line-by-line what each piece does
+3. **Synthesize**: Return to the broad view, cross-reference findings across related code
+
+Empirically validated techniques: line-by-line narration (forces attention),
+cross-referencing related functions (e.g. `register()` vs `list()` key-format
+mismatches), checking get→modify→put patterns for races in distributed code.
+
+### Semantic MCPs
+
+Serena and `codebase-memory-mcp` are registered for Codex, Claude, Gemini, and
+VS Code. They overlap but are not interchangeable. Default sequence:
+
+1. `rg` for exact literal text and unindexed/generated surfaces.
+2. Codebase Memory `search_code` for broad "where does this concept show up?"
+   queries — fast, persistent, returns containing symbols with graph metadata.
+3. Serena near an edit boundary: symbol overviews, precise lookup, references
+   grouped by containing symbol, diagnostics, rename, safe-delete, symbol-body
+   replacement.
+
+Serena is configured for `sinex`, `polylogue`, `sinity-lynchpin`, and `sinnix`
+via `.serena/project.yml`; it activates from the current working directory. If
+Serena tools are missing in Codex despite an active config, use tool discovery
+for the exact operation name — lazy loading can hide active tools.
+
+Codebase Memory: use `get_code_snippet` after `search_graph`/`search_code`
+yields an exact qualified name. Treat `get_architecture`, vector search,
+`trace_path`, `detect_changes`, and custom Cypher as exploratory hints until
+validated against source/Serena; re-index before relying on change-impact
+answers:
+
+```bash
+codebase-memory-mcp cli index_repository '{"repo_path": "/realm/project/<repo>"}'
+codebase-memory-mcp cli search_code '{"project": "realm-project-<repo>", "pattern": "MaterialReadySet"}'
+```
+
+Indexes live under `~/.local/share/codebase-memory-mcp`; Serena state under
+`~/.local/share/serena` (installs under `~/.local/state/serena`).
+
+---
+
+## Thinking in Markdown
+
+Externalize reasoning to scratch files. Context is expensive, files are cheap.
+
+**When:** non-trivial analysis, multi-step debugging, architectural decisions;
+proactively for anything that took >1 tool call to discover; especially for
+cross-session or compaction-spanning work.
+
+**Where:**
+
+| Scope                | Location                                  |
+| -------------------- | ----------------------------------------- |
+| Global/cross-project | `~/.claude/scratch/NNN-<topic>.md`        |
+| Project-specific     | `.agent/scratch/<date-or-NNN>-<topic>.md` |
+
+- If a project lacks `.agent/scratch/`, create it early and ensure `.gitignore`
+  covers it before accumulating notes.
+- **Never use `.claude/` for per-project auxiliary content** — Claude Code
+  treats it as protected and prompts on every write. `.agent/` is the
+  project-local convention.
+- Structure: YAML frontmatter (`created`, `purpose`, `status`, `project`), then
+  Context / Findings / Outcome.
+- When referring the user to a scratch file, always summarize the key points in
+  your response — don't just point at the file.
+- Projects can pin ongoing-relevance notes in their CLAUDE.md via a "Pinned
+  Notes" section with bare `@path` lines (Claude-only transclusion; keep repo
+  CLAUDE.md flat otherwise).
+
+---
+
+## Session Recall (hooks)
 
 Claude Code has a `SessionStart` hook at
-`~/.claude/hooks/sessionstart-polylogue-recall.sh`. If `polylogue` is on PATH,
-the hook attempts to print up to three recent sessions matching the current
-project directory via `polylogue --cwd-prefix "$CLAUDE_PROJECT_DIR" ... list`.
-It exits silently when no matching archive data is available.
+`~/.claude/hooks/sessionstart-polylogue-recall.sh`: if `polylogue` is on PATH it
+prints up to three recent sessions matching the current project directory, and
+exits silently when no archive data is available.
 
-Claude Code also has `~/.claude/hooks/sessionstart-sinex-recall.sh`. Codex
-SessionStart hooks call the same installed command as
-`sessionstart-sinex-recall`. The hook prints a compact Sinex machine-context
-block from `sinexctl recall`, preferring a project-local
+`~/.claude/hooks/sessionstart-sinex-recall.sh` (Codex calls the same command as
+`sessionstart-sinex-recall`) prints a compact Sinex machine-context block from
+`sinexctl recall`, preferring a project-local
 `.sinex/state/runtime-target.json`, then `SINEX_RUNTIME_TARGET_CONFIG`, then
-ordinary `sinexctl` config. It exits silently on missing runtime, missing auth,
-timeout, or empty recall output.
-
-Set `SINEX_SESSIONSTART_RECALL=0` to disable the Sinex preamble for one launch.
-Use `SINEX_SESSIONSTART_RECALL_WINDOW`, `SINEX_SESSIONSTART_RECALL_LIMIT`, and
-`SINEX_SESSIONSTART_RECALL_TIMEOUT_SECS` for local tuning; defaults are `2h`,
-`8`, and `4` seconds.
+ordinary `sinexctl` config. It exits silently on missing runtime, auth,
+timeout, or empty output. Tune with `SINEX_SESSIONSTART_RECALL=0` (disable),
+`SINEX_SESSIONSTART_RECALL_WINDOW/LIMIT/TIMEOUT_SECS` (defaults `2h`, `8`, 4s).
 
 For deeper history, use Polylogue MCP/search rather than guessing from memory.
-`polylogued.service` is the live ingestion daemon for Claude/Codex session
-JSONL; verify freshness with `polylogued status` or Polylogue queries when it
-matters.
+`polylogued.service` is the live ingestion daemon; verify freshness with
+`polylogued status` when it matters.

@@ -50,8 +50,6 @@ _tmp_do_not_include_in_version_control.md
 *.env
 *.gpg
 
-AGENTS.md
-
 # Beads / Dolt files (added by bd init)
 .dolt/
 *.db

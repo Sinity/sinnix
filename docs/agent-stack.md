@@ -128,7 +128,7 @@ from memory.
   entries are generated from the registry at activation/build time.
 - `dots/_ai/skills/`: shared project skills; Home Manager exposes only the
   curated default set to reduce cognitive overhead.
-- `scripts/render-agents`, `normalize-agent-projects`, `verify-agent-topology`: local projection/verification.
+- `scripts/verify-agent-topology`: audits the flat-CLAUDE.md + AGENTS.md-symlink convention across repos.
 
 ## Interactive profiles
 

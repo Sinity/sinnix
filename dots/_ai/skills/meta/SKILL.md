@@ -51,9 +51,8 @@ Rule: If it's static knowledge → CLAUDE.md. If it's a workflow → skill.
 **What goes where**
 | Content | Location |
 |---------|----------|
-| Behavioral rules | Global CLAUDE.md |
-| Cross-project patterns | `~/.claude/{world-model,operational}/` |
-| Project-specific | Project CLAUDE.md or `.claude/{modules,development,reference}/` |
+| Behavioral rules + cross-project patterns | Global CLAUDE.md (flat; `dots/claude/CLAUDE.md` in sinnix) |
+| Project-specific | Project CLAUDE.md (flat; AGENTS.md is a symlink to it) |
 | Interactive workflows | `skills/` |
 | Isolated/different-model tasks | `agents/` |
 | Preserved but unused | `archive/` |
