@@ -26,7 +26,6 @@ let
     inherit (inputs)
       agenix
       home-manager
-      llm-agents
       lynchpin
       sinex
       polylogue

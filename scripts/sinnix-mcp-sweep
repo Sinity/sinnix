@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Reap orphaned MCP/language-server helper processes left behind by agent session exits
+# runtimeInputs: bash coreutils procps jq nettools
+set -euo pipefail
+
+dry_run=0
+quiet=0
+orphans_only=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --dry-run) dry_run=1 ;;
+    --quiet) quiet=1 ;;
+    --orphans-only) orphans_only=1 ;;
+    --help)
+      cat <<'EOF'
+Usage: sinnix-mcp-sweep [--orphans-only] [--dry-run] [--quiet]
+
+Reap orphaned MCP and language-server helper processes left behind by agent
+session exits. Writes JSONL evidence to
+/realm/data/captures/machine/agent-mcp-sweep/sweep.jsonl.
+EOF
+      exit 0
+      ;;
+    *)
+      echo "sinnix-mcp-sweep: unknown argument: $1" >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+capture_dir="${SINNIX_MCP_SWEEP_CAPTURE_DIR:-/realm/data/captures/machine/agent-mcp-sweep}"
+if ! mkdir -p "$capture_dir" 2>/dev/null; then
+  capture_dir="${XDG_STATE_HOME:-$HOME/.local/state}/sinnix/agent-mcp-sweep"
+  mkdir -p "$capture_dir"
+fi
+log_file="$capture_dir/sweep.jsonl"
+user_manager_pid="$(systemctl --user show --property=MainPID --value 2>/dev/null || true)"
+now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+host="$(hostname 2>/dev/null || echo unknown)"
+killed=0
+matched=0
+
+is_candidate() {
+  case "$1" in
+    *"serena start-mcp-server"*|*"codebase-memory-mcp"*|*"mcp-polylogue"*|*"mcp-lynchpin"*|*"typescript-language-server --stdio"*|*"tsserver.js"*|*"typingsInstaller.js"*|*"pyright-langserver --stdio"*|*"rust-analyzer"*|*"dmypy run"*|*"gopls"*|*"ruff-lsp"*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+is_orphan() {
+  [ "$1" = "1" ] || { [ -n "$user_manager_pid" ] && [ "$1" = "$user_manager_pid" ]; }
+}
+
+ps -eo pid=,ppid=,rss=,comm=,args= |
+  while read -r pid ppid rss comm args; do
+    [ -n "${pid:-}" ] || continue
+    is_candidate "$args" || continue
+    matched=$((matched + 1))
+    action="keep"
+    reason="attached"
+    if is_orphan "$ppid"; then
+      reason="orphaned"
+      action="kill"
+    elif [ "$orphans_only" -eq 0 ]; then
+      reason="matched"
+    fi
+
+    if [ "$action" = "kill" ]; then
+      if [ "$dry_run" -eq 0 ]; then
+        kill -TERM "$pid" 2>/dev/null || true
+      fi
+      killed=$((killed + 1))
+    fi
+
+    jq -cn \
+      --arg ts "$now" \
+      --arg host "$host" \
+      --arg pid "$pid" \
+      --arg ppid "$ppid" \
+      --arg rss_kib "$rss" \
+      --arg comm "$comm" \
+      --arg action "$action" \
+      --arg reason "$reason" \
+      --arg args "$args" \
+      '{ts:$ts,host:$host,pid:($pid|tonumber),ppid:($ppid|tonumber),rss_kib:($rss_kib|tonumber),comm:$comm,action:$action,reason:$reason,args:$args}' \
+      >> "$log_file"
+
+    if [ "$quiet" -eq 0 ]; then
+      printf '%s pid=%s ppid=%s rss=%sKiB %s %s\n' "$action" "$pid" "$ppid" "$rss" "$comm" "$reason"
+    fi
+  done

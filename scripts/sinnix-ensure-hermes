@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Idempotently clone/sync the Hermes agent checkout and seed its default state files
+# runtimeInputs: bash coreutils
+#
+# Relies on the caller having already exported HERMES_HOME, HERMES_INSTALL_DIR,
+# and a PATH containing git/uv (the hermes wrapper prelude sets these before
+# invoking this script, so the same PATH extension is inherited here and by
+# the final exec'd hermes process).
+set -euo pipefail
+
+: "${HERMES_HOME:?HERMES_HOME must be set}"
+: "${HERMES_INSTALL_DIR:?HERMES_INSTALL_DIR must be set}"
+
+mkdir -p "$HERMES_HOME"
+
+if [ ! -d "$HERMES_INSTALL_DIR/.git" ]; then
+  rm -rf "$HERMES_INSTALL_DIR"
+  git clone --depth=1 https://github.com/NousResearch/hermes-agent.git "$HERMES_INSTALL_DIR"
+fi
+
+if [ ! -x "$HERMES_INSTALL_DIR/venv/bin/hermes" ]; then
+  (
+    cd "$HERMES_INSTALL_DIR"
+    UV_PROJECT_ENVIRONMENT="$HERMES_INSTALL_DIR/venv" uv sync --extra all --locked
+  )
+fi
+
+mkdir -p \
+  "$HERMES_HOME/cron" \
+  "$HERMES_HOME/sessions" \
+  "$HERMES_HOME/logs" \
+  "$HERMES_HOME/pairing" \
+  "$HERMES_HOME/hooks" \
+  "$HERMES_HOME/image_cache" \
+  "$HERMES_HOME/audio_cache" \
+  "$HERMES_HOME/memories" \
+  "$HERMES_HOME/skills"
+
+if [ ! -f "$HERMES_HOME/.env" ] && [ -f "$HERMES_INSTALL_DIR/.env.example" ]; then
+  cp "$HERMES_INSTALL_DIR/.env.example" "$HERMES_HOME/.env"
+  chmod 600 "$HERMES_HOME/.env"
+fi
+
+if [ ! -f "$HERMES_HOME/config.yaml" ] && [ -f "$HERMES_INSTALL_DIR/cli-config.yaml.example" ]; then
+  cp "$HERMES_INSTALL_DIR/cli-config.yaml.example" "$HERMES_HOME/config.yaml"
+fi
+
+if [ ! -f "$HERMES_HOME/SOUL.md" ]; then
+  {
+    echo "# Hermes"
+    echo
+    echo "Local Sinnix-managed Hermes home. Edit this file to define the agent persona."
+  } > "$HERMES_HOME/SOUL.md"
+fi

@@ -39,7 +39,6 @@ let
         machine
         paths
         projects
-        storage
         ;
       secrets = {
         inherit (cfg.secrets) enable;

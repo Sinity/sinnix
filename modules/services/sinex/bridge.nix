@@ -227,6 +227,16 @@ in
               environment = sinexEnvironment;
               enable = runtimeEnabled;
               autoSetup = runtimeEnabled;
+              # dataDir/storeDir stay at the upstream default path (not moved
+              # onto @sinex — that would need the raw-subvolume bootstrapping
+              # dance hosts/sinnix-prime/storage.nix's ensure-sinex-subvol does
+              # for @sinex, which doesn't apply here). Instead the whole tree
+              # is persisted via the standard impermanence bind mount below
+              # (sinnix.persistence.system.directories), the same boring
+              # mechanism already used for /var/log/journal and dozens of
+              # other paths — no bootstrapping concern, ordinary local-fs.target
+              # bind mount (sinnix-v3p, fixed 2026-07-08: previously wiped every
+              # reboot, losing in-flight confirmations and the DLQ).
               dataDir = "/var/lib/nats";
               jetstreamMaxStore = "32G";
               bootstrapStreams.streams = lib.mkForce [
@@ -511,6 +521,10 @@ in
       #     resetting mask::--x → mask::--- and nullifying the sinex traverse
       #     grant. Foundation/replica hosts do not create that helper.
       (lib.mkIf runtimeEnabled {
+        # NATS JetStream state (raw-event buffer, unconfirmed events, DLQ) —
+        # persist so a reboot doesn't silently discard in-flight capture data.
+        sinnix.persistence.system.directories = [ "/var/lib/nats" ];
+
         sinnix.runtime.surfaces = {
           sinex-runtime = {
             unit = "sinex-runtime.target";

@@ -24,6 +24,11 @@ let
     "ops.db"
     "daemon_events.db"
   ];
+  # The one-time copy-and-symlink migration (archive DB -> db/polylogue subvol)
+  # completed (sinnix-qs7, verified 2026-07-08: all polylogueDbFiles are live
+  # symlinks to polylogueDbRoot). Retired the WAL/sidecar-checking migration
+  # dance; kept only the steady-state sanity check + fresh-bootstrap symlink
+  # creation, which is all realm-scaffold needs going forward.
   polylogueDbLinkScript = lib.concatMapStringsSep "\n" (
     name:
     let
@@ -37,41 +42,7 @@ let
           echo "Refusing to replace unexpected Polylogue DB symlink ${archivePath} -> $current" >&2
           exit 1
         fi
-      elif [ -e ${lib.escapeShellArg archivePath} ]; then
-        if [ -e ${lib.escapeShellArg targetPath} ]; then
-          echo "Polylogue DB target ${targetPath} already exists; leaving existing archive DB ${archivePath} in place" >&2
-        else
-          wal=${lib.escapeShellArg "${archivePath}-wal"}
-          shm=${lib.escapeShellArg "${archivePath}-shm"}
-          if [ -s "$wal" ]; then
-            echo "Refusing to migrate Polylogue DB while SQLite WAL has content: $wal" >&2
-            echo "Stop polylogued and checkpoint/truncate WAL before running realm-scaffold." >&2
-            exit 1
-          fi
-          for sidecar in "$wal" "$shm"; do
-            if [ -e "$sidecar" ]; then
-              if [ "$sidecar" = "$wal" ] || [ ! -e "$wal" ] || [ ! -s "$wal" ]; then
-                rm -f "$sidecar"
-              else
-                echo "Refusing to migrate Polylogue DB while SQLite sidecar exists: $sidecar" >&2
-                echo "Stop polylogued and checkpoint/truncate WAL before running realm-scaffold." >&2
-                exit 1
-              fi
-            fi
-          done
-          for sidecar in "$wal" "$shm"; do
-            if [ -e "$sidecar" ]; then
-              echo "Refusing to migrate Polylogue DB while SQLite sidecar exists: $sidecar" >&2
-              echo "Stop polylogued and checkpoint/truncate WAL before running realm-scaffold." >&2
-              exit 1
-            fi
-          done
-          cp --reflink=never --preserve=mode,ownership,timestamps ${lib.escapeShellArg archivePath} ${lib.escapeShellArg "${targetPath}.tmp"}
-          mv ${lib.escapeShellArg "${targetPath}.tmp"} ${lib.escapeShellArg targetPath}
-          rm ${lib.escapeShellArg archivePath}
-          ln -s ${lib.escapeShellArg targetPath} ${lib.escapeShellArg archivePath}
-        fi
-      elif [ -e ${lib.escapeShellArg targetPath} ]; then
+      elif [ ! -e ${lib.escapeShellArg archivePath} ] && [ -e ${lib.escapeShellArg targetPath} ]; then
         ln -s ${lib.escapeShellArg targetPath} ${lib.escapeShellArg archivePath}
       fi
     ''

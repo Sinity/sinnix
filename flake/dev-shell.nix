@@ -19,39 +19,9 @@
         inherit inputs pkgs system;
       };
       nix = "${pkgs.nix}/bin/nix";
-      rebuildServicePath = lib.makeBinPath [
-        pkgs.coreutils
-        pkgs.findutils
-        pkgs.gnugrep
-        pkgs.gnused
-        pkgs.systemd
-        pkgs.util-linux
-      ];
+      inherit (commandRegistry) rebuildServicePath localInputOverrideArgs;
       resolveFlakeDir = ''
         _flake_dir="''${PRJ_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-      '';
-      localInputOverrideArgs = ''
-        nix_override_args=()
-
-        append_override_arg() {
-          nix_override_args+=(
-            --override-input "$1" "$2"
-            --no-write-lock-file
-          )
-        }
-        if [ -n "''${SINNIX_SINEX_OVERRIDE:-}" ]; then
-          append_override_arg sinex "$SINNIX_SINEX_OVERRIDE"
-        fi
-        if [ -n "''${SINNIX_POLYLOGUE_OVERRIDE:-}" ]; then
-          append_override_arg polylogue "$SINNIX_POLYLOGUE_OVERRIDE"
-        fi
-        if [ -n "''${SINNIX_LYNCHPIN_OVERRIDE:-}" ]; then
-          append_override_arg lynchpin "$SINNIX_LYNCHPIN_OVERRIDE"
-        fi
-        nh_extra_args=()
-        if [ "''${#nix_override_args[@]}" -gt 0 ]; then
-          nh_extra_args=(-- "''${nix_override_args[@]}")
-        fi
       '';
       rebuildPressurePreflight = name: ''
         rebuild_pressure_preflight() {
@@ -152,8 +122,25 @@
               SINNIX_REBUILD_ACTIVE=1 NIX_CONFIG="eval-cache = false" \
                 ${pkgs.nix}/bin/nix-store -r "$_toplevel_drv"
             )"
-            /run/wrappers/bin/sudo "$_toplevel_out/bin/switch-to-configuration" switch
             _rebuild_status=0
+            /run/wrappers/bin/sudo "$_toplevel_out/bin/switch-to-configuration" switch || _rebuild_status=$?
+            # switch-to-configuration exits non-zero whenever ANY unit fails
+            # to (re)start, even one wholly unrelated to this config change
+            # (sinnix-ihi, 2026-07-08: a pre-existing nvidia-container-
+            # toolkit-cdi-generator failure silently blocked profile/
+            # bootloader registration for 4+ days -- every switch looked
+            # successful but never advanced the boot generation).
+            # Registering the built generation as the persistent boot
+            # default is orthogonal to whether every service started
+            # cleanly, so always do it as a separate step -- but keep the
+            # real "switch" exit status (unless this step itself fails
+            # worse) so a genuine regression still surfaces instead of
+            # being silently masked.
+            _boot_status=0
+            /run/wrappers/bin/sudo "$_toplevel_out/bin/switch-to-configuration" boot || _boot_status=$?
+            if [ "$_boot_status" -ne 0 ]; then
+              _rebuild_status="$_boot_status"
+            fi
           fi
 
           exit "$_rebuild_status"

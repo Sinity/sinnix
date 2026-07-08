@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Resolve and launch the sinex MCP server (warm cache, then nix develop fallback)
+# runtimeInputs: bash coreutils nix
+set -euo pipefail
+
+if [ -z "${SINEX_RUNTIME_TARGET_CONFIG:-}" ] \
+  && [ -r /realm/project/sinex/.sinex/state/runtime-target.json ]; then
+  export SINEX_RUNTIME_TARGET_CONFIG=/realm/project/sinex/.sinex/state/runtime-target.json
+fi
+if [ -n "${SINEX_MCP_SERVER_BIN:-}" ]; then
+  exec "$SINEX_MCP_SERVER_BIN" "$@"
+fi
+if command -v sinex-mcp-server >/dev/null 2>&1; then
+  exec sinex-mcp-server "$@"
+fi
+sinex_checkout=/realm/project/sinex
+sinex_checkout_hash="$(
+  printf '%s' "$sinex_checkout" \
+    | sha256sum \
+    | cut -c1-12
+)"
+sinex_user="${USER:-$(id -un)}"
+sinex_warm_bin="/var/cache/sinex/$sinex_user/$sinex_checkout_hash/target/debug/sinex-mcp-server"
+if [ -x "$sinex_warm_bin" ]; then
+  exec "$sinex_warm_bin" "$@"
+fi
+cd /realm/project/sinex
+exec nix develop --command sinex-mcp-server "$@"

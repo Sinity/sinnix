@@ -80,11 +80,11 @@ mkFeatureModule {
       };
 
       systemd.user.services.pipewire.serviceConfig = lib.mkMerge [
-        (lib.sinnix.systemd.mkPriorityConfig {
-          nice = -11;
-          rtprio = 95;
-          memlock = "infinity";
-        })
+        {
+          Nice = -11;
+          LimitRTPRIO = 95;
+          LimitMEMLOCK = "infinity";
+        }
         (lib.sinnix.systemd.mkRestartPolicy {
           strategy = "on-failure";
           delaySec = 2;

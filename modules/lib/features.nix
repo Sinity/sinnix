@@ -35,6 +35,11 @@ let
       # subFeatures = { vscode = { description = "VSCode"; default = true; }; ... }
       subFeatures ? { },
       meta ? { },
+      # Features are default-ON by contract (see comment below). A caller
+      # that needs a narrower default belongs in modules/attic/, not a
+      # defaultOn override here — this exists only as an explicit escape
+      # hatch, not routine per-module tuning.
+      defaultOn ? true,
       configFn,
     }:
     args@{ config, ... }:
@@ -52,12 +57,22 @@ let
       # sinnix host's default character. Hosts express exceptions via
       # `sinnix.features.<path>.enable = false;`. Capabilities that are not
       # default-on belong in modules/attic/, not features/.
-      optionsForPath = lib.recursiveUpdate extraOptions subFeatureOpts // {
-        enable = (lib.mkEnableOption description) // {
-          default = true;
-        };
-        meta = mkMetaOption meta;
-      };
+      #
+      # extraOptions must not define its own top-level `enable`: the `//`
+      # merge below replaces it wholesale, silently discarding whatever a
+      # caller declared there (sinnix-tgy, 2026-07-08 — a module comment
+      # claimed "disabled by default" via extraOptions.enable while this
+      # factory forced enable.default=true underneath it, unnoticed).
+      optionsForPath =
+        if extraOptions ? enable then
+          throw "mkFeatureModule ${builtins.concatStringsSep "." path}: extraOptions must not define 'enable' (generated automatically, default = ${lib.boolToString defaultOn}); use the defaultOn argument instead"
+        else
+          lib.recursiveUpdate extraOptions subFeatureOpts // {
+            enable = (lib.mkEnableOption description) // {
+              default = defaultOn;
+            };
+            meta = mkMetaOption meta;
+          };
       cfg = lib.getAttrFromPath featurePath config;
       user = config.sinnix.user.name;
     in

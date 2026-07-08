@@ -104,14 +104,39 @@ mkServiceModule {
         ];
         wants = [ "network-online.target" ];
         serviceConfig = lib.mkMerge [
-          (lib.sinnix.systemd.mkHardenedService {
-            level = "strict";
-            readWritePaths = [
+          {
+            PrivateTmp = true;
+            NoNewPrivileges = true;
+            ProtectKernelTunables = true;
+            ProtectKernelModules = true;
+            ProtectControlGroups = true;
+            RestrictRealtime = true;
+            LockPersonality = true;
+            RestrictNamespaces = true;
+            RestrictSUIDSGID = true;
+            ProtectSystem = "strict";
+            ProtectHome = "read-only";
+            PrivateDevices = true;
+            ProtectKernelLogs = true;
+            ProtectProc = "invisible";
+            ProcSubset = "pid";
+            RestrictAddressFamilies = [
+              "AF_UNIX"
+              "AF_INET"
+              "AF_INET6"
+            ];
+            SystemCallFilter = [
+              "@system-service"
+              "~@privileged"
+            ];
+            ReadWritePaths = [
               torrentInbox
               torrentPartialDir
               "/var/lib/transmission"
             ];
-          })
+            ReadOnlyPaths = [ ];
+            BindPaths = [ ];
+          }
           {
             # Transmission 4.1.1 uses RPC/session-info paths that are killed by
             # the generic syscall deny-list on this host. Keep filesystem,

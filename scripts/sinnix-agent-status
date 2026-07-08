@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Live probe of agent control-plane surfaces (browser, desktop, MCP, services)
+# runtimeInputs: bash jq google-chrome
+set -euo pipefail
+
+have() {
+  if command -v "$1" >/dev/null 2>&1; then
+    printf 'ok\t%s\t%s\n' "$1" "$(command -v "$1")"
+  else
+    printf 'missing\t%s\t\n' "$1"
+  fi
+}
+
+service() {
+  manager="$1"
+  unit="$2"
+  if [ "$manager" = "user" ]; then
+    if systemctl --user is-active --quiet "$unit" 2>/dev/null; then
+      printf 'ok\t%s\tuser:%s\n' "$unit" "$(systemctl --user is-active "$unit" 2>/dev/null || printf unknown)"
+    else
+      printf 'missing\t%s\tuser:%s\n' "$unit" "$(systemctl --user is-active "$unit" 2>/dev/null || printf inactive)"
+    fi
+  elif systemctl is-active --quiet "$unit" 2>/dev/null; then
+    printf 'ok\t%s\tsystem:%s\n' "$unit" "$(systemctl is-active "$unit" 2>/dev/null || printf unknown)"
+  else
+    printf 'missing\t%s\tsystem:%s\n' "$unit" "$(systemctl is-active "$unit" 2>/dev/null || printf inactive)"
+  fi
+}
+
+path_probe() {
+  name="$1"
+  path="$2"
+  if [ -e "$path" ]; then
+    printf 'ok\t%s\t%s\n' "$name" "$path"
+  else
+    printf 'missing\t%s\t%s\n' "$name" "$path"
+  fi
+}
+
+printf 'surface\tname\tdetail\n'
+for cmd in \
+  codebase-memory-mcp \
+  mcp-chrome-devtools \
+  mcp-chrome-devtools-private \
+  mcp-chrome-devtools-private-visible \
+  mcp-lynchpin \
+  mcp-polylogue \
+  polylogue \
+  polylogued \
+  serena \
+  sinnix-observe \
+  sinnix-chrome-control \
+  sinnix-hypr-control \
+  sinnix-keyboard-control \
+  sinnix-kitty-control \
+  sinnix-screenshot-control \
+  hyprctl \
+  wtype \
+  wl-copy \
+  wl-paste \
+  grim \
+  grimblast \
+  slurp \
+  websocat; do
+  have "$cmd"
+done
+
+if command -v curl >/dev/null 2>&1; then
+  if version="$(curl -fsS --max-time 2 http://127.0.0.1:9222/json/version 2>/dev/null)"; then
+    browser="$(printf '%s' "$version" | jq -r '.Browser // "unknown"' 2>/dev/null || printf unknown)"
+    printf 'ok\tchrome-cdp\t%s\n' "$browser"
+  else
+    printf 'missing\tchrome-cdp\thttp://127.0.0.1:9222 (launch Google Chrome through the Sinnix desktop entry)\n'
+  fi
+else
+  printf 'missing\tchrome-cdp\tcurl unavailable\n'
+fi
+if chrome_stable="$(command -v google-chrome-stable)" && [ -x "$chrome_stable" ]; then
+  printf 'ok\tchrome-private-executable\t%s\n' "$chrome_stable"
+else
+  printf 'missing\tchrome-private-executable\t%s\n' 'google-chrome-stable'
+fi
+
+if command -v hyprctl >/dev/null 2>&1; then
+  if active="$(hyprctl -j activewindow 2>/dev/null | jq -r '[.class // "", .title // ""] | @tsv' 2>/dev/null)"; then
+    printf 'ok\thypr-active-window\t%s\n' "$active"
+  else
+    printf 'missing\thypr-active-window\thyprctl query failed\n'
+  fi
+fi
+
+service user polylogued.service
+service system machine-telemetry.service
+service system lynchpin-materialize.timer
+service system sinex.service
+
+path_probe runtime-inventory /etc/sinnix/runtime-inventory.json
+path_probe codex-full-profile "$HOME/.codex/full.config.toml"
+path_probe codex-lean-profile "$HOME/.codex/lean.config.toml"
+path_probe codex-browser-profile "$HOME/.codex/browser.config.toml"
+path_probe claude-full-profile "$HOME/.config/claude/mcp.json"
+path_probe claude-lean-profile "$HOME/.config/claude/mcp-lean.json"
+path_probe claude-browser-profile "$HOME/.config/claude/mcp-browser.json"
+path_probe polylogue-archive "$HOME/.local/share/polylogue"
+path_probe machine-telemetry /realm/data/captures/machine
+path_probe screenshots /realm/data/captures/screenshot
+path_probe kitty-scrollback /realm/data/captures/kitty-scrollback
+path_probe chatlog-exports /realm/data/exports/chatlog
