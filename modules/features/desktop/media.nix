@@ -192,14 +192,14 @@ mkFeatureModule {
           { pkgs, lib, ... }:
           {
             home.packages = with pkgs; [
-              imvWithExtras # from overlay: includes AVIF/HEIF/JXL support
+              imv
               gimp
             ];
 
             xdg.desktopEntries.imv = {
               name = "imv";
               genericName = "Image Viewer";
-              comment = "Lightweight image viewer with extended format support";
+              comment = "Lightweight image viewer (nixpkgs' meson build already enables libheif/libjxl/libwebp)";
               exec = "imv %F";
               terminal = false;
               categories = [
