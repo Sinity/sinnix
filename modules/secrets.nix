@@ -29,64 +29,59 @@ let
 
   secretNames = lib.mapAttrsToList (name: _: lib.removeSuffix ".age" name) secretFiles;
 
+  # Declarative per-secret overrides. Any secret NOT listed here falls back to
+  # the defaults below (owner = username, mode = "0400", exportEnv = true).
+  # Add a special-cased secret by adding one attrset entry -- no control flow.
+  secretMeta = {
+    "github-token" = {
+      group = "nixbld";
+      mode = "0440";
+    };
+    "sinex-local-db" = {
+      group = if config.users.groups ? postgres then "postgres" else primaryGroupName;
+      mode = "0440";
+    };
+    ${userPasswordSecret} = {
+      owner = "root";
+      group = "root";
+      exportEnv = false;
+    };
+    "root-password" = {
+      owner = "root";
+      group = "root";
+      exportEnv = false;
+    };
+    "router-sinnix-prime-mac".exportEnv = false;
+    "borg-passphrase".exportEnv = false;
+    "configstore-update-notifier".exportEnv = false;
+    "factorio-token".exportEnv = false;
+    "wifi-psk".exportEnv = false;
+  };
+
   secretSpecs = lib.mapAttrs' (filename: _: {
     name = lib.removeSuffix ".age" filename;
     value =
       let
         secretName = lib.removeSuffix ".age" filename;
-        defaultSpec = {
-          owner = username;
-          mode = "0400";
-        };
-        rootOwnedSpec = defaultSpec // {
-          owner = "root";
-          group = "root";
-        };
+        meta = secretMeta.${secretName} or { };
       in
       {
         file = secretDir + "/${filename}";
+        path = "/run/agenix/${secretName}";
+        owner = meta.owner or username;
+        mode = meta.mode or "0400";
       }
-      // (
-        if secretName == "github-token" then
-          defaultSpec
-          // {
-            group = "nixbld";
-            mode = "0440";
-            path = "/run/agenix/github-token";
-          }
-        else if secretName == "sinex-local-db" then
-          defaultSpec
-          // {
-            group = if config.users.groups ? postgres then "postgres" else primaryGroupName;
-            mode = "0440";
-            path = "/run/agenix/sinex-local-db";
-          }
-        else if secretName == userPasswordSecret then
-          rootOwnedSpec // { path = "/run/agenix/${userPasswordSecret}"; }
-        else if secretName == "root-password" then
-          rootOwnedSpec // { path = "/run/agenix/root-password"; }
-        else
-          defaultSpec // { path = "/run/agenix/${secretName}"; }
-      );
+      // lib.optionalAttrs (meta ? group) { inherit (meta) group; };
   }) secretFiles;
-
-  secretsExcludedFromEnv = [
-    userPasswordSecret
-    "root-password"
-    "router-sinnix-prime-mac"
-    "borg-passphrase"
-    "configstore-update-notifier"
-    "factorio-token"
-    "wifi-psk"
-  ];
 
   mkSecretExport =
     secretName:
     let
       envName = lib.toUpper (lib.replaceStrings [ "-" "." ] [ "_" "_" ] secretName);
       spec = lib.getAttr secretName secretSpecs;
+      exportEnv = (secretMeta.${secretName} or { }).exportEnv or true;
     in
-    lib.optionalString (!lib.elem secretName secretsExcludedFromEnv) ''
+    lib.optionalString exportEnv ''
       if [[ -r "${spec.path}" ]]; then
         export ${envName}="$(<${spec.path})"
       fi
