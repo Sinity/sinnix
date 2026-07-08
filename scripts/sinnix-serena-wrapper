@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Bootstrap and dispatch to the uv-tool-installed serena/serena-hooks binaries
+# runtimeInputs: bash coreutils gnugrep
+#
+# Backs both ~/.local/bin/serena and ~/.local/bin/serena-hooks. The thin
+# per-command Nix wrapper (mkSerenaWrapper in
+# modules/features/dev/mcp-servers.nix) sets the Nix-time values below as
+# environment variables and execs this script, which owns all the bootstrap
+# logic: syncing the generated serena_config.yml, installing/repairing the
+# pinned serena-agent version via `uv tool install`, and dispatching to
+# either `serena` or `serena-hooks` under an install lock.
+#
+# Required environment (set by the Nix wrapper):
+#   SINNIX_SERENA_COMMAND_NAME  — "serena" or "serena-hooks"
+#   SINNIX_SERENA_VERSION       — pinned serena-agent version (e.g. "1.5.3")
+#   SINNIX_SERENA_CONFIG_FILE   — store path to the generated serena_config.yml
+#   SINNIX_SERENA_RUNTIME_PATH  — makeBinPath of the tools serena/serena-hooks need on PATH
+#   SINNIX_SERENA_UV_BIN        — absolute path to uv
+#   SINNIX_SERENA_PYTHON_BIN    — absolute path to the pinned python3 used for `uv tool install --python`
+#   SINNIX_SERENA_CMP_BIN       — absolute path to cmp (diffutils)
+set -euo pipefail
+
+: "${SINNIX_SERENA_COMMAND_NAME:?SINNIX_SERENA_COMMAND_NAME must be set to serena or serena-hooks}"
+: "${SINNIX_SERENA_VERSION:?SINNIX_SERENA_VERSION must name the pinned serena-agent version}"
+: "${SINNIX_SERENA_CONFIG_FILE:?SINNIX_SERENA_CONFIG_FILE must name the generated serena_config.yml store path}"
+: "${SINNIX_SERENA_RUNTIME_PATH:?SINNIX_SERENA_RUNTIME_PATH must name the serena runtime PATH}"
+: "${SINNIX_SERENA_UV_BIN:?SINNIX_SERENA_UV_BIN must name the uv binary}"
+: "${SINNIX_SERENA_PYTHON_BIN:?SINNIX_SERENA_PYTHON_BIN must name the pinned python3 binary}"
+: "${SINNIX_SERENA_CMP_BIN:?SINNIX_SERENA_CMP_BIN must name the cmp binary}"
+
+command_name="$SINNIX_SERENA_COMMAND_NAME"
+
+state_dir="$HOME/.local/state/serena"
+lock_dir="$state_dir/install.lock"
+export SERENA_HOME="${SERENA_HOME:-$HOME/.local/share/serena}"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-$HOME/.cache/uv}"
+export UV_TOOL_DIR="$state_dir/tools"
+export UV_TOOL_BIN_DIR="$state_dir/bin"
+export PATH="$SINNIX_SERENA_RUNTIME_PATH:$UV_TOOL_BIN_DIR:$PATH"
+unset PYTHONPATH PYTHONHOME PYTHONBREAKPOINT PYTHONUSERBASE VIRTUAL_ENV
+export PYTHONNOUSERSITE=1
+
+if [ "$command_name" = "serena-hooks" ] && [ "${1:-}" = "remind" ]; then
+  exit 0
+fi
+
+mkdir -p "$SERENA_HOME" "$UV_CACHE_DIR" "$UV_TOOL_DIR" "$UV_TOOL_BIN_DIR"
+
+sync_serena_config() {
+  if [ -f "$SERENA_HOME/serena_config.yml" ] \
+    && ! "$SINNIX_SERENA_CMP_BIN" -s "$SINNIX_SERENA_CONFIG_FILE" "$SERENA_HOME/serena_config.yml" \
+    && [ ! -f "$SERENA_HOME/serena_config.yml.hm-bak" ]; then
+    cp "$SERENA_HOME/serena_config.yml" "$SERENA_HOME/serena_config.yml.hm-bak"
+  fi
+  cp "$SINNIX_SERENA_CONFIG_FILE" "$SERENA_HOME/serena_config.yml"
+  chmod 644 "$SERENA_HOME/serena_config.yml"
+}
+
+install_serena() {
+  "$SINNIX_SERENA_UV_BIN" tool install \
+    --python "$SINNIX_SERENA_PYTHON_BIN" \
+    --no-python-downloads \
+    "serena-agent==$SINNIX_SERENA_VERSION"
+}
+
+reinstall_serena() {
+  "$SINNIX_SERENA_UV_BIN" tool install \
+    --python "$SINNIX_SERENA_PYTHON_BIN" \
+    --no-python-downloads \
+    --force \
+    "serena-agent==$SINNIX_SERENA_VERSION"
+}
+
+remove_stale_install_lock() {
+  if [ -f "$lock_dir/pid" ] && ! kill -0 "$(cat "$lock_dir/pid")" 2>/dev/null; then
+    rm -rf "$lock_dir"
+    return 0
+  fi
+  return 1
+}
+
+wait_for_install_lock() {
+  while [ -d "$lock_dir" ]; do
+    if remove_stale_install_lock; then
+      continue
+    fi
+    sleep 0.1
+  done
+}
+
+with_install_lock() {
+  while ! mkdir "$lock_dir" 2>/dev/null; do
+    if remove_stale_install_lock; then
+      continue
+    fi
+    sleep 0.1
+  done
+  trap 'rm -rf "$lock_dir"' EXIT
+  printf '%s\n' "$$" > "$lock_dir/pid"
+  "$@"
+  rm -rf "$lock_dir"
+  trap - EXIT
+}
+
+serena_version_matches() {
+  "$UV_TOOL_BIN_DIR/serena" --version 2>/dev/null | grep -Fq "$SINNIX_SERENA_VERSION"
+}
+
+serena_ready() {
+  wait_for_install_lock
+  [ -x "$UV_TOOL_BIN_DIR/serena" ] \
+    && [ -x "$UV_TOOL_BIN_DIR/$command_name" ] \
+    && serena_version_matches
+}
+
+repair_serena() {
+  if [ ! -x "$UV_TOOL_BIN_DIR/serena" ] || [ ! -x "$UV_TOOL_BIN_DIR/$command_name" ]; then
+    install_serena || reinstall_serena
+    return 0
+  fi
+  if ! serena_version_matches; then
+    reinstall_serena
+  fi
+}
+
+ensure_serena() {
+  if serena_ready; then
+    return 0
+  fi
+
+  with_install_lock repair_serena
+  wait_for_install_lock
+}
+
+sync_serena_config
+ensure_serena
+
+if [ ! -x "$UV_TOOL_BIN_DIR/$command_name" ]; then
+  echo "serena wrapper: $UV_TOOL_BIN_DIR/$command_name is unavailable after bootstrap" >&2
+  if [ "$command_name" = "serena-hooks" ]; then
+    exit 0
+  fi
+  exit 127
+fi
+
+wait_for_install_lock
+exec "$UV_TOOL_BIN_DIR/$command_name" "$@"
