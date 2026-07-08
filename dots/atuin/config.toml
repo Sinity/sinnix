@@ -1,0 +1,9 @@
+auto_sync = false
+filter_mode = "global"
+inline_height = 30
+invert = true
+keymap_mode = "vim-normal"
+search_mode = "fuzzy"
+show_preview = true
+style = "compact"
+up_arrow = false

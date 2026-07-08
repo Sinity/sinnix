@@ -17,7 +17,10 @@
   # "igpu"        = Intel UHD 770, discrete GPU physically absent
   sinnix.gpu.mode = "nvidia";
 
-  sinnix.machine.isDesktop = true;
+  # Interactive workstation posture: isDesktop=true plus the resource-
+  # governance stack (slices, earlyoom, cache-trim timer, io.cost init, RAPL
+  # caps, memory sysctls) — see modules/profiles/workstation.nix.
+  sinnix.profiles.workstation.enable = true;
 
   # Every capability in modules/features/ is default-on; this host expresses
   # only configuration detail (subfeatures and option values), not enables.
@@ -158,7 +161,7 @@
   # scratch, compile-server sockets, short-lived app temp files) into RAM
   # for the common case, at zero disk writes. Correction to the sinnix-een
   # bead's stated premise: zram swap is disabled on this host
-  # (modules/performance.nix, zramSwap.enable = false) — swap is a small
+  # (modules/profiles/workstation.nix, zramSwap.enable = false) — swap is a small
   # 4G file-backed overflow on the same root SSD (hosts/sinnix-prime/
   # storage.nix). So under real memory pressure, evicted tmpfs pages would
   # still land on the worn disk via that swapfile, not on zram. This is

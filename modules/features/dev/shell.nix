@@ -62,8 +62,18 @@ mkFeatureModule {
       # ========================================
       (lib.mkIf cfg.zsh.enable {
         home-manager.users.${user} =
-          { lib, ... }:
           {
+            lib,
+            config,
+            mkDotsFileFor,
+            ...
+          }:
+          let
+            mkDotsFile = mkDotsFileFor config;
+          in
+          {
+            xdg.configFile."zsh/init.zsh".source = mkDotsFile "/zsh/init.zsh";
+
             programs.zsh = {
               enable = true;
               enableCompletion = true;
@@ -90,60 +100,15 @@ mkFeatureModule {
                 ];
               };
 
-              initContent = lib.mkMerge [
-                (lib.mkBefore ''
-                  DISABLE_AUTO_UPDATE=true
-                  DISABLE_MAGIC_FUNCTIONS=true
-                  export "MICRO_TRUECOLOR=1"
-
-                  set -o vi
-
-                  if [ -z "$NH_FLAKE" ]; then
-                    export NH_FLAKE="$(find-flake-root)"
-                  fi
-
-                  show_file_or_dir_preview='if [ -d {} ]; then eza --tree --color=always {} | head -200; else bat -n --color=always --line-range :500 {}; fi'
-
-                  _fzf_compgen_path() {
-                    fd --hidden --exclude .git . "$1"
-                  }
-
-                  _fzf_compgen_dir() {
-                    fd --type=d --hidden --exclude .git . "$1"
-                  }
-
-                  _fzf_comprun() {
-                    local command=$1
-                    shift
-
-                    case "$command" in
-                      cd)           fzf --preview 'eza --tree --color=always {} | head -200' "$@" ;;
-                      ssh)          fzf --preview 'dig {}'                   "$@" ;;
-                      *)            fzf --preview "$show_file_or_dir_preview" "$@" ;;
-                    esac
-                  }
-
-                  stty -ixon
-                  unsetopt prompt_sp
-
-                  update_terminal_title() {
-                    local last_cmd="$1"
-                    printf '\033]2;%s; %s\007' "$PWD" "$last_cmd"
-                  }
-                  _terminal_title_preexec() { update_terminal_title "$1" }
-                  _terminal_title_precmd() { update_terminal_title "" }
-
-                  autoload -U add-zsh-hook
-                  add-zsh-hook preexec _terminal_title_preexec
-                  add-zsh-hook precmd _terminal_title_precmd
-                  zmodload zsh/zpty
-
-                  autoload -Uz bracketed-paste-magic
-                  zle -N bracketed-paste bracketed-paste-magic
-                  autoload -Uz url-quote-magic
-                  zle -N self-insert url-quote-magic
-                '')
-              ];
+              # Pure-config init (aliases-adjacent shell setup, fzf preview
+              # helpers, terminal title hooks) lives in dots/zsh/init.zsh as a
+              # live out-of-store symlink (xdg.configFile above) so edits take
+              # effect in new shells without a rebuild. Keep this literal
+              # (no Nix interpolation) so the sourced path never depends on a
+              # store hash.
+              initContent = lib.mkBefore ''
+                source ~/.config/zsh/init.zsh
+              '';
 
               shellAliases = {
                 c = "clear";
@@ -187,9 +152,24 @@ mkFeatureModule {
       # ========================================
       (lib.mkIf cfg.prompt.enable {
         home-manager.users.${user} =
-          { lib, ... }:
           {
-            # Starship Prompt
+            lib,
+            config,
+            mkDotsFileFor,
+            ...
+          }:
+          let
+            mkDotsFile = mkDotsFileFor config;
+          in
+          {
+            # Starship settings stay in Nix (not moved to dots/): Stylix's
+            # `stylix.targets.starship` merges live theme-derived
+            # `palette`/`palettes.base16` keys into this same
+            # `programs.starship.settings` attrset, and HM's starship module
+            # only supports generating starship.toml from the fully-merged
+            # settings (no raw-file passthrough). Bypassing the module would
+            # mean hand-copying the current palette into a static dots/ file,
+            # which would silently desync from future Stylix scheme changes.
             programs.starship = {
               enable = true;
               enableBashIntegration = true;
@@ -278,23 +258,22 @@ mkFeatureModule {
             };
 
             # Atuin History
+            #
+            # Settings live in dots/atuin/config.toml (live out-of-store
+            # symlink) instead of `programs.atuin.settings`: this host never
+            # sets `home.preferXdgDirectories` or enables the atuin daemon, so
+            # HM's atuin module contributes no other keys into the merged
+            # settings attrset here — safe to fully bypass the module's
+            # generated config file. If either of those get enabled later,
+            # revisit (they inject logs.dir/daemon settings into the same
+            # generated file).
             programs.atuin = {
               enable = true;
               enableNushellIntegration = false;
               enableZshIntegration = true;
               flags = [ "--disable-up-arrow" ];
-              settings = {
-                auto_sync = false;
-                search_mode = "fuzzy";
-                filter_mode = "global";
-                style = "compact";
-                inline_height = 30;
-                up_arrow = false;
-                show_preview = true;
-                invert = true;
-                keymap_mode = "vim-normal";
-              };
             };
+            xdg.configFile."atuin/config.toml".source = mkDotsFile "/atuin/config.toml";
 
             # Zoxide (directory jumping)
             programs.zoxide = {
@@ -304,6 +283,12 @@ mkFeatureModule {
             };
 
             # FZF (fuzzy finder)
+            #
+            # Kept as HM options, not moved to dots/: these fields render into
+            # `home.sessionVariables` (FZF_DEFAULT_COMMAND etc.), which HM
+            # exports globally (all shells/services), not just zsh. Sourcing
+            # them from a zsh-only dots/ file would narrow that to interactive
+            # zsh sessions — a real behavior change, not a pure config move.
             programs.fzf = {
               enable = true;
               defaultCommand = "fd --hidden --strip-cwd-prefix --exclude .git";

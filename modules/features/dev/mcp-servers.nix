@@ -479,28 +479,19 @@ mkFeatureModule {
           lib,
           config,
           secretPaths,
+          mkDotsFileFor,
           ...
         }:
+        let
+          mkDotsFile = mkDotsFileFor config;
+        in
         {
-          programs.htop = {
-            enable = true;
-            settings = {
-              detailed_cpu_time = true;
-              hide_kernel_threads = true;
-              hide_userland_threads = true;
-              show_cpu_frequency = true;
-              show_cpu_temperature = true;
-              tree_view = true;
-              sort_key = "PERCENT_CPU";
-              show_program_path = false;
-              highlight_base_name = true;
-              highlight_megabytes = true;
-              # Cumulative metrics and cleaner tree
-              account_guest_in_cpu_meter = true;
-              all_branches_collapsed = true;
-              find_comm_in_free_text = true;
-            };
-          };
+          # htoprc lives in dots/htop/htoprc (live out-of-store symlink)
+          # instead of `programs.htop.settings`: no other module touches
+          # this option, so bypassing HM's settings-to-htoprc generator is
+          # safe and edits take effect without a rebuild.
+          programs.htop.enable = true;
+          xdg.configFile."htop/htoprc".source = mkDotsFile "/htop/htoprc";
 
           home = {
             activation = {

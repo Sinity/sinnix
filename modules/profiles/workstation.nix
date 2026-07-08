@@ -1,9 +1,14 @@
-# Performance baseline
+# Interactive workstation profile.
 #
-# Keep desktop-critical processes protected while build/background workloads are
-# explicitly placed into lower-weight slices by `sinnix-scope`. Root-backed
-# build scratch and bounded slice budgets are the current baseline; /realm stays
-# data/capture storage rather than latency-sensitive build workspace.
+# Coarse aggregate for a desktop/interactive host (sinnix-prime). Sets
+# `sinnix.machine.isDesktop = true` and owns the resource-governance stack
+# that keeps desktop-critical processes protected while build/background
+# workloads are explicitly placed into lower-weight slices by
+# `sinnix-scope`: systemd slices, earlyoom policy, the cache-trim timer,
+# io.cost init, RAPL power caps, and the interactive memory sysctls.
+#
+# Mirrors modules/profiles/cloud.nix's shape (enable-gated aggregate a host
+# opts into) rather than scattering `isDesktop` conditionals across modules.
 {
   lib,
   config,
@@ -11,6 +16,7 @@
   ...
 }:
 let
+  cfg = config.sinnix.profiles.workstation;
   runtimeInventory = config.sinnix.runtime.inventory;
   panicLogCapture = pkgs.writeShellApplication {
     name = "panic-log-capture";
@@ -151,7 +157,11 @@ let
   };
 in
 {
-  config = lib.mkIf config.sinnix.machine.isDesktop {
+  options.sinnix.profiles.workstation.enable = lib.mkEnableOption "Interactive workstation profile";
+
+  config = lib.mkIf cfg.enable {
+    sinnix.machine.isDesktop = lib.mkForce true;
+
     # Swap is host-owned storage policy, not a RAM expansion mechanism. Keep
     # zram disabled: on this workload it hides pressure inside compressed RAM,
     # competes with the real working set, and leaves stale residue after large
@@ -309,7 +319,9 @@ in
     # automatically), and it has exactly one child, so giving it its own
     # CPUWeight/IOWeight (previously byte-identical to nix-build.slice's) had
     # no sibling to compete against and did nothing.
-    systemd.slices = lib.mapAttrs (_: sliceConfig: { inherit sliceConfig; }) runtimeInventory.slices.system;
+    systemd.slices = lib.mapAttrs (_: sliceConfig: {
+      inherit sliceConfig;
+    }) runtimeInventory.slices.system;
 
     systemd.user.slices = lib.mapAttrs (_: sliceConfig: {
       inherit sliceConfig;
