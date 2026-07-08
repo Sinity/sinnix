@@ -79,7 +79,7 @@ modules/
 ├── *.nix              # Infrastructure & platform (system-level)
 ├── features/          # User-facing capabilities (what users interact with)
 ├── services/          # Long-running systemd daemons
-├── profiles/          # Host-shape defaults (e.g. cloud.nix for headless hosts)
+├── profiles/          # Host-shape defaults (cloud.nix headless, workstation.nix desktop)
 └── lib/               # Helper functions (not modules)
 ```
 
@@ -102,10 +102,11 @@ Boundary rules:
 - Top-level highlights: `foundation.nix` (user/paths/projects identity),
   `build-policy.nix` (nix daemon: max-jobs=1/cores=16, build scratch at
   `/var/cache/nix-build`), `runtime.nix` (runtime inventory — see below),
-  `persistence.nix` (impermanence collector), `performance.nix` (slices,
-  sysctls, earlyoom, io.cost init), `backup.nix` (btrbk→Borg pipeline),
-  `secrets.nix` (agenix auto-discovery), `dotfiles-sweep.nix`,
-  `introspection.nix` (`/etc/sinnix/config.json`).
+  `persistence.nix` (impermanence collector), `backup.nix` (btrbk→Borg
+  pipeline), `secrets.nix` (agenix auto-discovery), `dotfiles-sweep.nix`,
+  `introspection.nix` (`/etc/sinnix/config.json`). Desktop resource
+  governance (slices, sysctls, earlyoom, io.cost init) lives in
+  `profiles/workstation.nix`, not a top-level module — see below.
 
 ## Factory Contracts
 

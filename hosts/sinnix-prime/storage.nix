@@ -53,7 +53,7 @@ let
   swapSizeGiB = 4;
 
   # Keep swap as a small file-backed overflow signal, not an extension of RAM.
-  # zram is disabled in modules/performance.nix because compressed-RAM swap
+  # zram is disabled in modules/profiles/workstation.nix because compressed-RAM swap
   # competes with the real working set and can leave stale pressure after build
   # bursts. The 4 GiB file below gives the kernel a bounded emergency landing
   # zone while earlyoom kills once meaningful swap is occupied.
