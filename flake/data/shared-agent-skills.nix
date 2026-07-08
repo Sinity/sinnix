@@ -3,6 +3,7 @@
   "agent-orchestration"
   "analyze"
   "assured-close"
+  "bead-loop"
   "beads"
   "desktop-control-plane"
   "enhance"
