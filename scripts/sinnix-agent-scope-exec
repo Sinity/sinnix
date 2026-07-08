@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Exec a command under sinnix-scope's agent slice unless already scoped
+# runtimeInputs: bash coreutils @sinnix-scope
+set -euo pipefail
+
+if [[ -z "${SINNIX_AGENT_SCOPED:-}" ]]; then
+  scope_bin="$(command -v sinnix-scope 2>/dev/null || true)"
+  if [[ -n "$scope_bin" && -x "$scope_bin" ]]; then
+    exec "$scope_bin" agent -- env SINNIX_AGENT_SCOPED=1 "$@"
+  fi
+fi
+
+exec "$@"

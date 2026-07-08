@@ -9,22 +9,14 @@
 # Inert until explicitly enabled per host. Default routing/firewall changes
 # only land when `sinnix.services.tailscale.enable = true`.
 {
-  config,
+  mkServiceModule,
   lib,
   ...
-}:
-let
-  cfg = config.sinnix.services.tailscale;
-  authKeyArg = "--auth-key=file:${cfg.authKeyFile}";
-  tagArg = lib.optionalString (
-    cfg.tags != [ ]
-  ) "--advertise-tags=${lib.concatStringsSep "," cfg.tags}";
-  exitNodeArg = lib.optionalString cfg.enableExitNode "--advertise-exit-node";
-in
-{
-  options.sinnix.services.tailscale = {
-    enable = lib.mkEnableOption "Tailscale mesh networking";
-
+}@args:
+mkServiceModule {
+  name = "tailscale";
+  description = "Tailscale mesh networking";
+  extraOptions = {
     authKeyFile = lib.mkOption {
       type = lib.types.path;
       default = "/run/agenix/tailscale-authkey";
@@ -70,25 +62,33 @@ in
       description = "Tailscale network interface name.";
     };
   };
+  configFn =
+    { cfg, lib, ... }:
+    let
+      authKeyArg = "--auth-key=file:${cfg.authKeyFile}";
+      tagArg = lib.optionalString (
+        cfg.tags != [ ]
+      ) "--advertise-tags=${lib.concatStringsSep "," cfg.tags}";
+      exitNodeArg = lib.optionalString cfg.enableExitNode "--advertise-exit-node";
+    in
+    {
+      services.tailscale = {
+        enable = true;
+        openFirewall = true;
+        inherit (cfg) useRoutingFeatures;
+        inherit (cfg) interfaceName;
+        extraUpFlags = lib.filter (s: s != "") [
+          authKeyArg
+          tagArg
+          exitNodeArg
+          (lib.optionalString (!cfg.enableMagicDNS) "--accept-dns=false")
+        ];
+      };
 
-  config = lib.mkIf cfg.enable {
-    services.tailscale = {
-      enable = true;
-      openFirewall = true;
-      inherit (cfg) useRoutingFeatures;
-      inherit (cfg) interfaceName;
-      extraUpFlags = lib.filter (s: s != "") [
-        authKeyArg
-        tagArg
-        exitNodeArg
-        (lib.optionalString (!cfg.enableMagicDNS) "--accept-dns=false")
-      ];
+      # Tailscale's autoconnect unit needs the authkey at start time.
+      systemd.services.tailscaled-autoconnect = {
+        after = [ "agenix.service" ];
+        requires = [ "agenix.service" ];
+      };
     };
-
-    # Tailscale's autoconnect unit needs the authkey at start time.
-    systemd.services.tailscaled-autoconnect = {
-      after = [ "agenix.service" ];
-      requires = [ "agenix.service" ];
-    };
-  };
-}
+} args

@@ -119,61 +119,6 @@ rec {
     system = mkClass "Ordinary system services without Sinnix-specific placement" { };
   };
 
-  environmentAllowList = [
-    "AGENT_NAME"
-    "AGENT_SESSION_ID"
-    "CARGO_BUILD_JOBS"
-    "CARGO_HOME"
-    "CARGO_INCREMENTAL"
-    "CARGO_TARGET_DIR"
-    "CMAKE_BUILD_PARALLEL_LEVEL"
-    "CODEX_HOME"
-    "DATABASE_URL"
-    "GEMINI_API_KEY"
-    "GITHUB_TOKEN"
-    "HOME"
-    "LANG"
-    "LC_ALL"
-    "LOGNAME"
-    "MAKEFLAGS"
-    "NIX_BUILD_CORES"
-    "NIX_CONFIG"
-    "NIX_PATH"
-    "NIXPKGS_ALLOW_UNFREE"
-    "PATH"
-    "PGHOST"
-    "PGPORT"
-    "POLYLOGUE_ROOT"
-    "PWD"
-    "PYTHONHOME"
-    "PYTHONPATH"
-    "RUSTC_WRAPPER"
-    "RUST_LOG"
-    "RUSTUP_HOME"
-    "SCCACHE_DIR"
-    "SCCACHE_IDLE_TIMEOUT"
-    "SHELL"
-    "SINEX_CACHE_DIR"
-    "SINEX_DEV_CACHE_ROOT"
-    "SINEX_DEV_STATE_DIR"
-    "SINEX_NATS_DIR"
-    "SINEX_ROOT"
-    "SINEX_STATE_DIR"
-    "SINEX_TEST_RESULTS_DIR"
-    "TERM"
-    "TERM_PROGRAM"
-    "TMPDIR"
-    "USER"
-    "UV_CACHE_DIR"
-    "UV_PROJECT_ENVIRONMENT"
-    "VIRTUAL_ENV"
-    "XDG_CACHE_HOME"
-    "XDG_CONFIG_HOME"
-    "XDG_DATA_HOME"
-    "XDG_RUNTIME_DIR"
-    "XDG_STATE_HOME"
-  ];
-
   commandClasses = {
     agent = {
       resourceClass = "interactive-agent";
@@ -313,11 +258,6 @@ rec {
       unit = "sshd.service";
       resourceClass = "interactive-access";
     };
-    sshd-socket = {
-      unit = "sshd.socket";
-      kind = "socket";
-      resourceClass = "interactive-access";
-    };
     nix-gc = {
       unit = "nix-gc.service";
       resourceClass = "background-maintenance";
@@ -341,7 +281,6 @@ rec {
         hostname
         classes
         commandClasses
-        environmentAllowList
         slices
         ;
       surfaces = lib.mapAttrs (_: normalizeSurface) surfaces;

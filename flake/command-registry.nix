@@ -121,8 +121,24 @@ let
         SINNIX_REBUILD_ACTIVE=1 NIX_CONFIG="eval-cache = false" \
           ${pkgs.nix}/bin/nix-store -r "$_toplevel_drv"
       )"
-      /run/wrappers/bin/sudo "$_toplevel_out/bin/switch-to-configuration" switch
       _rebuild_status=0
+      /run/wrappers/bin/sudo "$_toplevel_out/bin/switch-to-configuration" switch || _rebuild_status=$?
+      # switch-to-configuration exits non-zero whenever ANY unit fails to
+      # (re)start, even one wholly unrelated to this config change
+      # (sinnix-ihi, 2026-07-08: a pre-existing nvidia-container-toolkit-
+      # cdi-generator failure silently blocked profile/bootloader
+      # registration for 4+ days -- every switch looked successful but
+      # never advanced the boot generation). Registering the built
+      # generation as the persistent boot default is orthogonal to
+      # whether every service started cleanly, so always do it as a
+      # separate step -- but keep the real "switch" exit status (unless
+      # this step itself fails worse) so a genuine regression still
+      # surfaces instead of being silently masked.
+      _boot_status=0
+      /run/wrappers/bin/sudo "$_toplevel_out/bin/switch-to-configuration" boot || _boot_status=$?
+      if [ "$_boot_status" -ne 0 ]; then
+        _rebuild_status="$_boot_status"
+      fi
     fi
   '';
   hostSmokeTerminalScript = ''
@@ -306,7 +322,13 @@ let
   '';
 in
 {
-  inherit rebuildLock rebuildContainmentFlags rebuildDefaultArgs;
+  inherit
+    rebuildLock
+    rebuildContainmentFlags
+    rebuildDefaultArgs
+    rebuildServicePath
+    localInputOverrideArgs
+    ;
 
   appCommands = {
     lint = {
@@ -374,18 +396,13 @@ in
     };
 
     test-vm = {
-      description = "Build a QEMU VM from current configuration for smoke-testing without switching";
+      description = "Build a QEMU VM from current configuration and launch it (nixos-rebuild build-vm)";
       script = ''
         ${resolveFlakeDir}
-        if [ "$(id -u)" -ne 0 ]; then
-          echo "Error: This command must be run as root (use 'sudo nix run $_flake_dir#test-vm')"
-          exit 1
-        fi
         ${rebuildLock "test-vm"}
-        ${avoidRepoCwdForActivation}
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
-        ${pkgs.systemd}/bin/systemd-run \
+        sudo ${pkgs.systemd}/bin/systemd-run \
           --quiet \
           --collect \
           --pipe \
@@ -393,10 +410,11 @@ in
           --wait \
           --setenv=PATH="${rebuildServicePath}:$PATH" \
           ${rebuildContainmentFlags}
-          ${pkgs.nixos-rebuild}/bin/nixos-rebuild test-vm --flake "path:$_invoke_flake_dir#sinnix-prime" \
+          ${pkgs.nixos-rebuild}/bin/nixos-rebuild build-vm --flake "path:$_flake_dir#sinnix-prime" \
           --max-jobs "$rebuild_jobs" \
           --cores "$rebuild_cores" \
           "''${nix_override_args[@]}"
+        exec ./result/bin/run-sinnix-prime-vm
       '';
     };
 
@@ -549,7 +567,7 @@ in
     {
       name = "test-vm";
       category = "Core";
-      description = "Build QEMU VM for smoke-testing (nixos-rebuild test-vm)";
+      description = "Build + launch QEMU VM for smoke-testing (nixos-rebuild build-vm)";
     }
     {
       name = "lint";

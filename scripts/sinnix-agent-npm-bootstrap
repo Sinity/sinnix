@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Bootstrap an npm-installed AI agent CLI into its per-tool state dir and (re)generate its launcher
+# runtimeInputs: bash coreutils nodejs_22 git gnutar gzip which gcc
+#
+# The long-lived agent process launches via the generated launch.sh directly,
+# not through buildFHSEnv/bubblewrap, so sudo and other privileged helpers do
+# not inherit no_new_privileges.
+set -euo pipefail
+
+if [ "$#" -ne 4 ]; then
+  echo "usage: sinnix-agent-npm-bootstrap <state-dir-name> <npm-package> <binary-name> <runtime-path>" >&2
+  exit 2
+fi
+
+state_dir_name=$1
+npm_package=$2
+binary_name=$3
+runtime_path=$4
+
+STATE="$HOME/.local/state/$state_dir_name"
+export npm_config_prefix="$STATE/npm"
+export PATH="$runtime_path:$STATE/npm/bin:$PATH"
+mkdir -p "$STATE/npm"
+
+if [ ! -x "$STATE/npm/bin/$binary_name" ]; then
+  echo "$binary_name: bootstrapping (npm install -g $npm_package)..." >&2
+  npm install -g "$npm_package"
+fi
+
+cat > "$STATE/launch.sh" <<LAUNCHER
+#!/usr/bin/env bash
+PATH="$runtime_path:\$HOME/.local/state/$state_dir_name/npm/bin:\$PATH"
+exec $binary_name "\$@"
+LAUNCHER
+chmod +x "$STATE/launch.sh"

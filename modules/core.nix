@@ -18,8 +18,6 @@ in
     nixpkgs = {
       config = {
         allowUnfree = true;
-        allowAliases = true;
-        doCheck = false;
         checkMeta = false;
       };
       hostPlatform = "x86_64-linux";

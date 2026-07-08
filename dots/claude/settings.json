@@ -90,6 +90,11 @@
             "type": "command",
             "command": "~/.claude/hooks/stop-agent-event.sh",
             "timeout": 3
+          },
+          {
+            "type": "command",
+            "command": "~/.local/bin/sinnix-mcp-sweep --orphans-only --quiet",
+            "timeout": 10
           }
         ]
       }
@@ -101,6 +106,11 @@
             "type": "command",
             "command": "case \"${SINNIX_CLAUDE_PROFILE:-full}\" in full|browser|deepseek|local) ~/.local/bin/serena-hooks activate --client=claude-code ;; esac",
             "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "~/.local/bin/sinnix-mcp-sweep --orphans-only --quiet",
+            "timeout": 10
           },
           {
             "type": "command",

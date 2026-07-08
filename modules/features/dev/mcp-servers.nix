@@ -66,7 +66,6 @@ mkFeatureModule {
       "ripgrep-all/config.jsonc" = "ripgrep-all/config.jsonc";
       "marimo/marimo.toml" = "marimo/marimo.toml";
     };
-    homeFile = { };
   };
   configFn =
     {
@@ -140,129 +139,13 @@ mkFeatureModule {
       # browser window is desired for operator inspection.
       mcpChromeDevtoolsPrivateBin = pkgs.writeShellScriptBin "mcp-chrome-devtools-private" ''
         set -euo pipefail
-        profile_dir="''${SINNIX_AGENT_CHROME_PROFILE:-$HOME/.local/share/sinnix-browser/chrome-devtools-private-live-state}"
-        viewport="''${SINNIX_AGENT_CHROME_VIEWPORT:-1440x1000}"
-        headless="''${SINNIX_AGENT_CHROME_HEADLESS:-1}"
-        chrome_bin="''${SINNIX_AGENT_CHROME_EXECUTABLE:-${pkgs.google-chrome}/bin/google-chrome-stable}"
-        mkdir -p "$profile_dir"
-        if [ ! -x "$chrome_bin" ]; then
-          echo "SINNIX_AGENT_CHROME_EXECUTABLE does not name an executable Chrome: $chrome_bin" >&2
-          exit 2
-        fi
-        SINNIX_AGENT_CHROME_PROFILE="$profile_dir" \
-          "$HOME/.local/bin/sinnix-chrome-control" --target private private-sync-state
-
-        args=(
-          --executablePath "$chrome_bin"
-          --userDataDir "$profile_dir"
-          --viewport "$viewport"
-          --no-usage-statistics
-        )
-        if [ "$headless" != "0" ]; then
-          args+=(--headless)
-        fi
-
-        exec ${scriptPkgs.mcp-chrome-devtools}/bin/mcp-chrome-devtools "''${args[@]}" "$@"
+        export SINNIX_MCP_CHROME_DEVTOOLS_BIN=${lib.escapeShellArg "${scriptPkgs.mcp-chrome-devtools}/bin/mcp-chrome-devtools"}
+        exec ${scriptPkgs.sinnix-mcp-chrome-devtools-private}/bin/sinnix-mcp-chrome-devtools-private "$@"
       '';
       mcpChromeDevtoolsPrivateVisibleBin = pkgs.writeShellScriptBin "mcp-chrome-devtools-private-visible" ''
         set -euo pipefail
         export SINNIX_AGENT_CHROME_HEADLESS=0
         exec ${mcpChromeDevtoolsPrivateBin}/bin/mcp-chrome-devtools-private "$@"
-      '';
-      mcpSweepBin = pkgs.writeShellScriptBin "sinnix-mcp-sweep" ''
-                set -euo pipefail
-
-                dry_run=0
-                quiet=0
-                orphans_only=0
-                while [ "$#" -gt 0 ]; do
-                  case "$1" in
-                    --dry-run) dry_run=1 ;;
-                    --quiet) quiet=1 ;;
-                    --orphans-only) orphans_only=1 ;;
-                    --help)
-                      cat <<'EOF'
-        Usage: sinnix-mcp-sweep [--orphans-only] [--dry-run] [--quiet]
-
-        Reap orphaned MCP and language-server helper processes left behind by agent
-        session exits. Writes JSONL evidence to
-        /realm/data/captures/machine/agent-mcp-sweep/sweep.jsonl.
-        EOF
-                      exit 0
-                      ;;
-                    *)
-                      echo "sinnix-mcp-sweep: unknown argument: $1" >&2
-                      exit 2
-                      ;;
-                  esac
-                  shift
-                done
-
-                capture_dir="''${SINNIX_MCP_SWEEP_CAPTURE_DIR:-/realm/data/captures/machine/agent-mcp-sweep}"
-                if ! mkdir -p "$capture_dir" 2>/dev/null; then
-                  capture_dir="''${XDG_STATE_HOME:-$HOME/.local/state}/sinnix/agent-mcp-sweep"
-                  mkdir -p "$capture_dir"
-                fi
-                log_file="$capture_dir/sweep.jsonl"
-                user_manager_pid="$(systemctl --user show --property=MainPID --value 2>/dev/null || true)"
-                now="$(${pkgs.coreutils}/bin/date -u +%Y-%m-%dT%H:%M:%SZ)"
-                host="$(${pkgs.nettools}/bin/hostname 2>/dev/null || echo unknown)"
-                killed=0
-                matched=0
-
-                is_candidate() {
-                  case "$1" in
-                    *"serena start-mcp-server"*|*"codebase-memory-mcp"*|*"mcp-polylogue"*|*"mcp-lynchpin"*|*"typescript-language-server --stdio"*|*"tsserver.js"*|*"typingsInstaller.js"*|*"pyright-langserver --stdio"*|*"rust-analyzer"*)
-                      return 0
-                      ;;
-                    *)
-                      return 1
-                      ;;
-                  esac
-                }
-
-                is_orphan() {
-                  [ "$1" = "1" ] || { [ -n "$user_manager_pid" ] && [ "$1" = "$user_manager_pid" ]; }
-                }
-
-                ${pkgs.procps}/bin/ps -eo pid=,ppid=,rss=,comm=,args= |
-                  while read -r pid ppid rss comm args; do
-                    [ -n "''${pid:-}" ] || continue
-                    is_candidate "$args" || continue
-                    matched=$((matched + 1))
-                    action="keep"
-                    reason="attached"
-                    if is_orphan "$ppid"; then
-                      reason="orphaned"
-                      action="kill"
-                    elif [ "$orphans_only" -eq 0 ]; then
-                      reason="matched"
-                    fi
-
-                    if [ "$action" = "kill" ]; then
-                      if [ "$dry_run" -eq 0 ]; then
-                        kill -TERM "$pid" 2>/dev/null || true
-                      fi
-                      killed=$((killed + 1))
-                    fi
-
-                    ${pkgs.jq}/bin/jq -cn \
-                      --arg ts "$now" \
-                      --arg host "$host" \
-                      --arg pid "$pid" \
-                      --arg ppid "$ppid" \
-                      --arg rss_kib "$rss" \
-                      --arg comm "$comm" \
-                      --arg action "$action" \
-                      --arg reason "$reason" \
-                      --arg args "$args" \
-                      '{ts:$ts,host:$host,pid:($pid|tonumber),ppid:($ppid|tonumber),rss_kib:($rss_kib|tonumber),comm:$comm,action:$action,reason:$reason,args:$args}' \
-                      >> "$log_file"
-
-                    if [ "$quiet" -eq 0 ]; then
-                      printf '%s pid=%s ppid=%s rss=%sKiB %s %s\n' "$action" "$pid" "$ppid" "$rss" "$comm" "$reason"
-                    fi
-                  done
       '';
       desktopControlScripts = inputs.self + "/dots/_ai/skills/desktop-control-plane/scripts";
       serenaVersion = "1.5.3";
@@ -718,7 +601,7 @@ mkFeatureModule {
               text = mkSerenaWrapper "serena-hooks";
             };
             ".local/bin/sinnix-mcp-sweep" = {
-              source = "${mcpSweepBin}/bin/sinnix-mcp-sweep";
+              source = "${scriptPkgs.sinnix-mcp-sweep}/bin/sinnix-mcp-sweep";
               force = true;
             };
             ".local/bin/bd-prime-if-present" = {
@@ -762,116 +645,8 @@ mkFeatureModule {
               force = true;
             };
             ".local/bin/sinnix-agent-status" = {
-              executable = true;
+              source = "${scriptPkgs.sinnix-agent-status}/bin/sinnix-agent-status";
               force = true;
-              text = ''
-                #!${pkgs.runtimeShell}
-                set -euo pipefail
-
-                have() {
-                  if command -v "$1" >/dev/null 2>&1; then
-                    printf 'ok\t%s\t%s\n' "$1" "$(command -v "$1")"
-                  else
-                    printf 'missing\t%s\t\n' "$1"
-                  fi
-                }
-
-                service() {
-                  manager="$1"
-                  unit="$2"
-                  if [ "$manager" = "user" ]; then
-                    if systemctl --user is-active --quiet "$unit" 2>/dev/null; then
-                      printf 'ok\t%s\tuser:%s\n' "$unit" "$(systemctl --user is-active "$unit" 2>/dev/null || printf unknown)"
-                    else
-                      printf 'missing\t%s\tuser:%s\n' "$unit" "$(systemctl --user is-active "$unit" 2>/dev/null || printf inactive)"
-                    fi
-                  elif systemctl is-active --quiet "$unit" 2>/dev/null; then
-                    printf 'ok\t%s\tsystem:%s\n' "$unit" "$(systemctl is-active "$unit" 2>/dev/null || printf unknown)"
-                  else
-                    printf 'missing\t%s\tsystem:%s\n' "$unit" "$(systemctl is-active "$unit" 2>/dev/null || printf inactive)"
-                  fi
-                }
-
-                path_probe() {
-                  name="$1"
-                  path="$2"
-                  if [ -e "$path" ]; then
-                    printf 'ok\t%s\t%s\n' "$name" "$path"
-                  else
-                    printf 'missing\t%s\t%s\n' "$name" "$path"
-                  fi
-                }
-
-                printf 'surface\tname\tdetail\n'
-                for cmd in \
-                  codebase-memory-mcp \
-                  mcp-chrome-devtools \
-                  mcp-chrome-devtools-private \
-                  mcp-chrome-devtools-private-visible \
-                  mcp-lynchpin \
-                  mcp-polylogue \
-                  polylogue \
-                  polylogued \
-                  serena \
-                  sinnix-observe \
-                  sinnix-chrome-control \
-                  sinnix-hypr-control \
-                  sinnix-keyboard-control \
-                  sinnix-kitty-control \
-                  sinnix-screenshot-control \
-                  hyprctl \
-                  wtype \
-                  wl-copy \
-                  wl-paste \
-                  grim \
-                  grimblast \
-                  slurp \
-                  websocat; do
-                  have "$cmd"
-                done
-
-                if command -v curl >/dev/null 2>&1; then
-                  if version="$(curl -fsS --max-time 2 http://127.0.0.1:9222/json/version 2>/dev/null)"; then
-                    browser="$(printf '%s' "$version" | ${pkgs.jq}/bin/jq -r '.Browser // "unknown"' 2>/dev/null || printf unknown)"
-                    printf 'ok\tchrome-cdp\t%s\n' "$browser"
-                  else
-                    printf 'missing\tchrome-cdp\thttp://127.0.0.1:9222 (launch Google Chrome through the Sinnix desktop entry)\n'
-                  fi
-                else
-                  printf 'missing\tchrome-cdp\tcurl unavailable\n'
-                fi
-                if [ -x ${pkgs.google-chrome}/bin/google-chrome-stable ]; then
-                  printf 'ok\tchrome-private-executable\t%s\n' '${pkgs.google-chrome}/bin/google-chrome-stable'
-                else
-                  printf 'missing\tchrome-private-executable\t%s\n' '${pkgs.google-chrome}/bin/google-chrome-stable'
-                fi
-
-                if command -v hyprctl >/dev/null 2>&1; then
-                  if active="$(hyprctl -j activewindow 2>/dev/null | ${pkgs.jq}/bin/jq -r '[.class // "", .title // ""] | @tsv' 2>/dev/null)"; then
-                    printf 'ok\thypr-active-window\t%s\n' "$active"
-                  else
-                    printf 'missing\thypr-active-window\thyprctl query failed\n'
-                  fi
-                fi
-
-                service user polylogued.service
-                service system machine-telemetry.service
-                service system lynchpin-materialize.timer
-                service system sinex.service
-
-                path_probe runtime-inventory /etc/sinnix/runtime-inventory.json
-                path_probe codex-full-profile "$HOME/.codex/full.config.toml"
-                path_probe codex-lean-profile "$HOME/.codex/lean.config.toml"
-                path_probe codex-browser-profile "$HOME/.codex/browser.config.toml"
-                path_probe claude-full-profile "$HOME/.config/claude/mcp.json"
-                path_probe claude-lean-profile "$HOME/.config/claude/mcp-lean.json"
-                path_probe claude-browser-profile "$HOME/.config/claude/mcp-browser.json"
-                path_probe polylogue-archive "$HOME/.local/share/polylogue"
-                path_probe machine-telemetry /realm/data/captures/machine
-                path_probe screenshots /realm/data/captures/screenshot
-                path_probe kitty-scrollback /realm/data/captures/kitty-scrollback
-                path_probe chatlog-exports /realm/data/exports/chatlog
-              '';
             };
             ".local/bin/mcp-lynchpin" = {
               executable = true;
@@ -913,35 +688,8 @@ mkFeatureModule {
               '';
             };
             ".local/bin/mcp-sinex" = {
-              executable = true;
+              source = "${scriptPkgs.sinnix-mcp-sinex}/bin/sinnix-mcp-sinex";
               force = true;
-              text = ''
-                #!${pkgs.runtimeShell}
-                set -euo pipefail
-                if [ -z "''${SINEX_RUNTIME_TARGET_CONFIG:-}" ] \
-                  && [ -r /realm/project/sinex/.sinex/state/runtime-target.json ]; then
-                  export SINEX_RUNTIME_TARGET_CONFIG=/realm/project/sinex/.sinex/state/runtime-target.json
-                fi
-                if [ -n "''${SINEX_MCP_SERVER_BIN:-}" ]; then
-                  exec "$SINEX_MCP_SERVER_BIN" "$@"
-                fi
-                if command -v sinex-mcp-server >/dev/null 2>&1; then
-                  exec sinex-mcp-server "$@"
-                fi
-                sinex_checkout=/realm/project/sinex
-                sinex_checkout_hash="$(
-                  printf '%s' "$sinex_checkout" \
-                    | ${pkgs.coreutils}/bin/sha256sum \
-                    | ${pkgs.coreutils}/bin/cut -c1-12
-                )"
-                sinex_user="''${USER:-$(${pkgs.coreutils}/bin/id -un)}"
-                sinex_warm_bin="/var/cache/sinex/$sinex_user/$sinex_checkout_hash/target/debug/sinex-mcp-server"
-                if [ -x "$sinex_warm_bin" ]; then
-                  exec "$sinex_warm_bin" "$@"
-                fi
-                cd /realm/project/sinex
-                exec ${pkgs.nix}/bin/nix develop --command sinex-mcp-server "$@"
-              '';
             };
             ".local/share/polylogue/inbox/chatgpt" = {
               source = config.lib.file.mkOutOfStoreSymlink "/realm/data/exports/chatlog/raw/chatgpt";
@@ -964,6 +712,34 @@ mkFeatureModule {
               RestartSec = 5;
             };
             Install.WantedBy = [ "default.target" ];
+          };
+
+          # Session-boundary hooks (Codex/Claude SessionStart+Stop) only reap
+          # orphans at session start/end -- a daemon orphaned mid-session (an
+          # agent's Bash tool call killed, or a tracking file like
+          # .dmypy.json deleted out from under a live daemon) survives
+          # unbounded until the next session boundary. This periodic sweep
+          # closes that gap structurally, independent of any agent behaving
+          # correctly (2026-07-08 incident: 14 orphaned `dmypy run` daemons,
+          # ~15GB RSS, accumulated over one session with no session
+          # boundary to trigger the existing hook-based sweep).
+          systemd.user.services.sinnix-mcp-sweep-periodic = {
+            Unit = {
+              Description = "Periodically reap orphaned MCP/language-server/dev-daemon processes";
+            };
+            Service = {
+              Type = "oneshot";
+              ExecStart = "${scriptPkgs.sinnix-mcp-sweep}/bin/sinnix-mcp-sweep --orphans-only --quiet";
+            };
+          };
+          systemd.user.timers.sinnix-mcp-sweep-periodic = {
+            Unit.Description = "Timer for periodic orphaned dev-daemon reaping";
+            Timer = {
+              OnBootSec = "10min";
+              OnUnitActiveSec = "15min";
+              AccuracySec = "1min";
+            };
+            Install.WantedBy = [ "timers.target" ];
           };
         };
     };

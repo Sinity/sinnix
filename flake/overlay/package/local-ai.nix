@@ -36,6 +36,10 @@ let
 in
 {
   # koboldcpp gates CUDA on `cublasSupport`, not `cudaSupport`.
+  # recheck: whenever nixpkgs-ai is deliberately bumped (`sinnix update
+  # nixpkgs-ai`) — koboldcpp may rename/unify this option flag to match
+  # llama-cpp/whisper-cpp's `cudaSupport`, which would silently no-op this
+  # override if the old attr name is simply ignored rather than erroring.
   koboldcpp-cuda = aiPkgs.pkgsForCudaArch.sm_86.koboldcpp.override { cublasSupport = true; };
   llama-cpp-cuda = aiPkgs.pkgsForCudaArch.sm_86.llama-cpp.override { cudaSupport = true; };
   whisper-cpp-cuda = aiPkgs.pkgsForCudaArch.sm_86.whisper-cpp.override { cudaSupport = true; };

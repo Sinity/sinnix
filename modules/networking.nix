@@ -110,10 +110,6 @@ in
       runtimeInventory = config.sinnix.runtime.inventory;
       unit = "sshd.service";
     };
-    systemd.sockets.sshd.socketConfig = {
-      Slice = config.sinnix.runtime.inventory.classes.interactive-access.serviceConfig.Slice;
-    };
-
     # Bluetooth hardening handled by nixpkgs - it needs kernel module/tunable access
     systemd.services.bluetooth = lib.mkIf isDesktop {
       serviceConfig = lib.sinnix.systemd.mkRestartPolicy {

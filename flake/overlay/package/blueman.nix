@@ -1,3 +1,14 @@
+# recheck: unknown — needs manual audit. The D-Bus service rename
+# (obex-data-server.service -> org.openobex.service) and the removed
+# blueman.desktop autostart entry both look like permanent Sinnix policy
+# rather than a temporary upstream-bug workaround, but that hasn't been
+# confirmed against nixpkgs' obex_data_server/blueman packaging history or
+# any upstream issue — a search for an open nixpkgs issue/PR renaming the
+# D-Bus service file turned up nothing relevant. Needs someone to check
+# whether nixpkgs' obex_data_server ever ships the service file already
+# named org.openobex.service, and whether blueman's autostart entry is
+# ever made conditional upstream, before this can get a real condition (or
+# be marked "no recheck needed — permanent policy").
 _: final: prev:
 let
   fixedObexDataServer = prev.obex_data_server.overrideAttrs (old: {

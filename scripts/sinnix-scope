@@ -145,30 +145,15 @@ if ! command -v systemd-run >/dev/null 2>&1; then
   exec "${scoped_command[@]}"
 fi
 
-if inventory_readable; then
-  mapfile -t env_names < <(jq -r '.environmentAllowList[]?' "$inventory_file")
-else
-  env_names=(
-    AGENT_NAME AGENT_SESSION_ID
-    CARGO_HOME CARGO_TARGET_DIR CODEX_HOME
-    CARGO_BUILD_JOBS CMAKE_BUILD_PARALLEL_LEVEL MAKEFLAGS
-    DATABASE_URL
-    GEMINI_API_KEY GITHUB_TOKEN HOME LANG LC_ALL LOGNAME
-    NIX_BUILD_CORES NIX_CONFIG NIX_PATH NIXPKGS_ALLOW_UNFREE
-    PATH PGHOST PGPORT POLYLOGUE_ROOT PWD PYTHONHOME PYTHONPATH
-    RUSTC_WRAPPER RUST_LOG RUSTUP_HOME SCCACHE_DIR SCCACHE_IDLE_TIMEOUT SHELL
-    SINEX_CACHE_DIR SINEX_DEV_CACHE_ROOT SINEX_DEV_STATE_DIR SINEX_NATS_DIR SINEX_ROOT SINEX_STATE_DIR SINEX_TEST_RESULTS_DIR
-    TERM TERM_PROGRAM TMPDIR USER UV_CACHE_DIR UV_PROJECT_ENVIRONMENT VIRTUAL_ENV
-    XDG_CACHE_HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_RUNTIME_DIR XDG_STATE_HOME
-  )
-fi
-
-env_args=()
-for name in "${env_names[@]}"; do
-  if [ "${!name+x}" = x ]; then
-    env_args+=("--setenv=$name=${!name}")
-  fi
-done
+# `systemd-run --scope` moves the launched process into a cgroup scope; it
+# does NOT sandbox the environment the way a transient --service launch would.
+# The child inherits the calling shell's full environment regardless of any
+# allowlist, so there is no env boundary to enforce here (sinnix-tgy sibling
+# issue sinnix-b9o: the previous per-var --setenv plumbing only re-asserted
+# values already inherited — a phantom boundary, deleted 2026-07-08). If a
+# real env boundary is ever wanted, switch these launches to service mode
+# (drop --scope) and build a complete, deliberately-maintained allowlist —
+# don't resurrect a partial one under --scope.
 
 if [ "${EUID:-$(id -u)}" -eq 0 ]; then
   unit="sinnix-${class}-$(date +%s%N)-$$"
@@ -180,7 +165,6 @@ if [ "${EUID:-$(id -u)}" -eq 0 ]; then
     --unit="$unit" \
     --slice="$slice" \
     "${property_args[@]}" \
-    "${env_args[@]}" \
     -- "${scoped_command[@]}"
 fi
 
@@ -195,7 +179,6 @@ if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
     --unit="$unit" \
     --slice="$slice" \
     "${property_args[@]}" \
-    "${env_args[@]}" \
     -- "${scoped_command[@]}"
 fi
 

@@ -153,6 +153,11 @@ in
       "d ${journaldBaseDir}/index 0750 ${username} users -"
     ];
 
+    # Cross-host default. sinnix-prime overrides this wholesale via mkForce
+    # (hosts/sinnix-prime/default.nix) with tighter wear-endurance-tuned
+    # values, so this block is inert there by design — it remains the live
+    # policy on hosts (e.g. sinnix-ethereal) that don't override it. Not
+    # dead/duplicate config; each host owns its own value here deliberately.
     services.journald.extraConfig = ''
       # Storage configuration
       Storage=persistent

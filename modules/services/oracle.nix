@@ -13,19 +13,15 @@
 # Not yet wired into flake.nix — that's a separate decision once the MVP has
 # logged a few days of useful output.
 {
-  config,
+  mkServiceModule,
   lib,
   pkgs,
   ...
-}:
-let
-  cfg = config.sinnix.services.oracle;
-  oracleScript = "/realm/project/sinnix/scripts/oracle";
-in
-{
-  options.sinnix.services.oracle = {
-    enable = lib.mkEnableOption "oracle daily reverse-prompting digest";
-
+}@args:
+mkServiceModule {
+  name = "oracle";
+  description = "oracle daily reverse-prompting digest";
+  extraOptions = {
     timer = {
       enable = lib.mkEnableOption "daily oracle digest timer";
 
@@ -48,27 +44,33 @@ in
       description = "Directory where YYYY-MM-DD.md digests are written.";
     };
   };
+  configFn =
+    { cfg, pkgs, ... }:
+    let
+      oracleScript = "/realm/project/sinnix/scripts/oracle";
+    in
+    {
+      sinnix.persistence.home.directories = [ ".local/share/oracle" ];
 
-  config = lib.mkIf cfg.enable {
-    systemd.user.services.oracle = {
-      description = "Oracle daily reverse-prompting digest";
-      after = [ "network-online.target" ];
-      wants = [ "network-online.target" ];
-      serviceConfig = {
-        Type = "oneshot";
-        ExecStart = "${pkgs.bash}/bin/bash -lc '${oracleScript}'";
-        TimeoutStartSec = 600;
+      systemd.user.services.oracle = {
+        description = "Oracle daily reverse-prompting digest";
+        after = [ "network-online.target" ];
+        wants = [ "network-online.target" ];
+        serviceConfig = {
+          Type = "oneshot";
+          ExecStart = "${pkgs.bash}/bin/bash -lc '${oracleScript}'";
+          TimeoutStartSec = 600;
+        };
+      };
+
+      systemd.user.timers.oracle = lib.mkIf cfg.timer.enable {
+        description = "Daily oracle digest";
+        wantedBy = [ "timers.target" ];
+        timerConfig = {
+          OnCalendar = cfg.timer.onCalendar;
+          RandomizedDelaySec = toString cfg.timer.randomizedDelaySec;
+          Persistent = true;
+        };
       };
     };
-
-    systemd.user.timers.oracle = lib.mkIf cfg.timer.enable {
-      description = "Daily oracle digest";
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnCalendar = cfg.timer.onCalendar;
-        RandomizedDelaySec = toString cfg.timer.randomizedDelaySec;
-        Persistent = true;
-      };
-    };
-  };
-}
+} args

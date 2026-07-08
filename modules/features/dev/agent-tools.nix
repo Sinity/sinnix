@@ -46,10 +46,14 @@ mkFeatureModule {
         ])
       );
 
-      # Shared npm bootstrap prelude — generates state-dir setup, first-run
-      # npm install, and a regenerated launcher script. The long-lived agent
-      # process launches directly, not through buildFHSEnv/bubblewrap, so sudo
-      # and other privileged helpers do not inherit no_new_privileges.
+      # Shared npm bootstrap prelude — delegates state-dir setup, first-run npm
+      # install, and launcher regeneration to the packaged
+      # sinnix-agent-npm-bootstrap script (scripts/sinnix-agent-npm-bootstrap).
+      # The long-lived agent process launches directly via the generated
+      # launch.sh, not through buildFHSEnv/bubblewrap, so sudo and other
+      # privileged helpers do not inherit no_new_privileges. `STATE` is
+      # recomputed here (not exported by the bootstrap subprocess) because the
+      # wrapper needs it below for the final agent-scope-exec/launch call.
       mkNpmBootstrap =
         {
           stateDir,
@@ -58,25 +62,11 @@ mkFeatureModule {
         }:
         ''
           STATE="$HOME/.local/state/${stateDir}"
-          export npm_config_prefix="$STATE/npm"
-          export PATH="${agentRuntimePath}:$STATE/npm/bin:$PATH"
-          mkdir -p "$STATE/npm"
-
-          if [ ! -x "$STATE/npm/bin/${binaryName}" ]; then
-            echo "${binaryName}: bootstrapping (npm install -g ${npmPackage})..." >&2
-            npm install -g ${npmPackage}
-          fi
-
-          cat > "$STATE/launch.sh" <<'LAUNCHER'
-        ''
-        + ''
-          #!/usr/bin/env bash
-          PATH="${agentRuntimePath}:$HOME/.local/state/${stateDir}/npm/bin:$PATH"
-          exec ${binaryName} "$@"
-        ''
-        + ''
-          LAUNCHER
-          chmod +x "$STATE/launch.sh"
+          ${scriptPkgs.sinnix-agent-npm-bootstrap}/bin/sinnix-agent-npm-bootstrap \
+            ${lib.escapeShellArg stateDir} \
+            ${lib.escapeShellArg npmPackage} \
+            ${lib.escapeShellArg binaryName} \
+            ${lib.escapeShellArg agentRuntimePath}
         '';
 
       sinnixCfg = config.sinnix;
@@ -122,21 +112,9 @@ mkFeatureModule {
           path = inputs.self + "/dots/_ai/skills/${name}";
         }) sharedSkillNames
       );
-      agentScopePrelude = ''
-        run_agent_scoped() {
-          if [[ -z "''${SINNIX_AGENT_SCOPED:-}" ]]; then
-            scope_bin="${scriptPkgs.sinnix-scope}/bin/sinnix-scope"
-            if [[ ! -x "$scope_bin" ]]; then
-              scope_bin="$(command -v sinnix-scope 2>/dev/null || true)"
-            fi
-            if [[ -n "$scope_bin" && -x "$scope_bin" ]]; then
-              exec "$scope_bin" agent -- ${pkgs.coreutils}/bin/env SINNIX_AGENT_SCOPED=1 "$@"
-            fi
-          fi
-
-          exec "$@"
-        }
-      '';
+      # Runs the given launcher under sinnix-scope's agent slice unless already
+      # scoped (see scripts/sinnix-agent-scope-exec).
+      agentScopeExec = "${scriptPkgs.sinnix-agent-scope-exec}/bin/sinnix-agent-scope-exec";
       mkClaudeCodeWrapper =
         {
           mcpConfigName ? "mcp",
@@ -165,8 +143,6 @@ mkFeatureModule {
 
             ${extraEnv}
 
-            ${agentScopePrelude}
-
             export SINNIX_CLAUDE_PROFILE=${lib.escapeShellArg profile}
             mcp_args=()
             MCP_CONFIG="$HOME/.config/claude/${mcpConfigName}.json"
@@ -183,7 +159,7 @@ mkFeatureModule {
               claude_args+=(--add-dir "/home/${user}")
             fi
 
-            run_agent_scoped "$STATE/launch.sh" "''${claude_args[@]}" "$@"
+            exec ${agentScopeExec} "$STATE/launch.sh" "''${claude_args[@]}" "$@"
           '';
           executable = true;
           force = true;
@@ -208,73 +184,28 @@ mkFeatureModule {
 
             ${extraEnv}
 
-            ${agentScopePrelude}
-
             export SINNIX_CODEX_PROFILE=${lib.escapeShellArg profile}
             codex_args=(--profile ${lib.escapeShellArg profile})
 
-            run_agent_scoped "$STATE/launch.sh" "''${codex_args[@]}" "$@"
+            exec ${agentScopeExec} "$STATE/launch.sh" "''${codex_args[@]}" "$@"
           '';
           executable = true;
           force = true;
         };
+      # Env-only prelude for Hermes wrappers. PATH/HERMES_HOME/HERMES_INSTALL_DIR
+      # must be exported here (not in a subprocess) because the final `exec` of
+      # the hermes binary below needs to inherit them. The actual clone/sync/
+      # scaffold bootstrap logic lives in scripts/sinnix-ensure-hermes, which
+      # runs as a subprocess relying on this already-exported PATH/env.
       hermesBootstrap = ''
         export HERMES_HOME="''${HERMES_HOME:-$HOME/.hermes}"
         export HERMES_INSTALL_DIR="''${HERMES_INSTALL_DIR:-$HERMES_HOME/hermes-agent}"
         export PATH="${hermesRuntimePath}:$PATH"
         export UV_NO_CONFIG=1
         export UV_PYTHON="${pkgs.python313}/bin/python3"
-
-        ensure_hermes() {
-          mkdir -p "$HERMES_HOME"
-
-          if [ ! -d "$HERMES_INSTALL_DIR/.git" ]; then
-            rm -rf "$HERMES_INSTALL_DIR"
-            git clone --depth=1 https://github.com/NousResearch/hermes-agent.git "$HERMES_INSTALL_DIR"
-          fi
-
-          if [ ! -x "$HERMES_INSTALL_DIR/venv/bin/hermes" ]; then
-            (
-              cd "$HERMES_INSTALL_DIR"
-              UV_PROJECT_ENVIRONMENT="$HERMES_INSTALL_DIR/venv" uv sync --extra all --locked
-            )
-          fi
-
-          mkdir -p \
-            "$HERMES_HOME/cron" \
-            "$HERMES_HOME/sessions" \
-            "$HERMES_HOME/logs" \
-            "$HERMES_HOME/pairing" \
-            "$HERMES_HOME/hooks" \
-            "$HERMES_HOME/image_cache" \
-            "$HERMES_HOME/audio_cache" \
-            "$HERMES_HOME/memories" \
-            "$HERMES_HOME/skills"
-
-          if [ ! -f "$HERMES_HOME/.env" ] && [ -f "$HERMES_INSTALL_DIR/.env.example" ]; then
-            cp "$HERMES_INSTALL_DIR/.env.example" "$HERMES_HOME/.env"
-            chmod 600 "$HERMES_HOME/.env"
-          fi
-
-          if [ ! -f "$HERMES_HOME/config.yaml" ] && [ -f "$HERMES_INSTALL_DIR/cli-config.yaml.example" ]; then
-            cp "$HERMES_INSTALL_DIR/cli-config.yaml.example" "$HERMES_HOME/config.yaml"
-          fi
-
-          if [ ! -f "$HERMES_HOME/SOUL.md" ]; then
-            {
-              echo "# Hermes"
-              echo
-              echo "Local Sinnix-managed Hermes home. Edit this file to define the agent persona."
-            } > "$HERMES_HOME/SOUL.md"
-          fi
-        }
-
-        configure_hermes_local() {
-          "$HERMES_INSTALL_DIR/venv/bin/hermes" config set model.provider custom >/dev/null
-          "$HERMES_INSTALL_DIR/venv/bin/hermes" config set model.default local-llama >/dev/null
-          "$HERMES_INSTALL_DIR/venv/bin/hermes" config set model.base_url http://127.0.0.1:4000/v1 >/dev/null
-        }
       '';
+      ensureHermes = "${scriptPkgs.sinnix-ensure-hermes}/bin/sinnix-ensure-hermes";
+      hermesConfigureLocal = "${scriptPkgs.sinnix-hermes-configure-local}/bin/sinnix-hermes-configure-local";
       mkHermesWrapper =
         {
           entrypoint ? "hermes",
@@ -287,7 +218,7 @@ mkFeatureModule {
 
             ${hermesBootstrap}
 
-            ensure_hermes
+            ${ensureHermes}
             ${extraPrelude}
 
             exec "$HERMES_INSTALL_DIR/venv/bin/${entrypoint}" "$@"
@@ -496,9 +427,7 @@ mkFeatureModule {
                 binaryName = "gemini";
               }}
 
-              ${agentScopePrelude}
-
-              run_agent_scoped "$STATE/launch.sh" "$@"
+              exec ${agentScopeExec} "$STATE/launch.sh" "$@"
             '';
             executable = true;
             force = true;
@@ -512,7 +441,7 @@ mkFeatureModule {
             extraPrelude = ''
               export OPENAI_BASE_URL="http://127.0.0.1:4000/v1"
               export OPENAI_API_KEY="sk-local"
-              configure_hermes_local
+              ${hermesConfigureLocal}
             '';
           };
           home.file.".local/bin/hermes-update" = {
@@ -522,7 +451,7 @@ mkFeatureModule {
 
               ${hermesBootstrap}
 
-              ensure_hermes
+              ${ensureHermes}
               git -C "$HERMES_INSTALL_DIR" pull --ff-only
               (
                 cd "$HERMES_INSTALL_DIR"

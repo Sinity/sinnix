@@ -122,12 +122,6 @@
     nix-vscode-extensions.url = "github:nix-community/nix-vscode-extensions";
     nix-vscode-extensions.inputs.nixpkgs.follows = "nixpkgs";
 
-    # Fast-moving agent CLI package supply. Keep its nixpkgs independent:
-    # upstream packages are daily-updated and often expect their own pinned
-    # dependency graph. Sinnix wraps/projects these tools locally instead of
-    # owning their package derivations.
-    llm-agents.url = "github:numtide/llm-agents.nix";
-
     # Beads (`bd`) durable issue tracker for coding-agent work memory.
     beads = {
       url = "github:gastownhall/beads/v1.0.4";

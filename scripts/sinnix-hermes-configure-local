@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Point an existing Hermes install at the local LiteLLM gateway
+# runtimeInputs: bash
+set -euo pipefail
+
+: "${HERMES_INSTALL_DIR:?HERMES_INSTALL_DIR must be set}"
+
+"$HERMES_INSTALL_DIR/venv/bin/hermes" config set model.provider custom >/dev/null
+"$HERMES_INSTALL_DIR/venv/bin/hermes" config set model.default local-llama >/dev/null
+"$HERMES_INSTALL_DIR/venv/bin/hermes" config set model.base_url http://127.0.0.1:4000/v1 >/dev/null

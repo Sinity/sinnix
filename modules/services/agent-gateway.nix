@@ -5,14 +5,14 @@
 # ngrok + ssh-mcp shell bridge with a first-class MCP server plus an optional
 # local JSON-RPC HTTP endpoint for tunnel experiments.
 {
+  mkServiceModule,
   config,
   lib,
   helpers,
   pkgs,
   ...
-}:
+}@args:
 let
-  cfg = config.sinnix.services.agent-gateway;
   userName = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   jsonFormat = pkgs.formats.json { };
@@ -111,38 +111,12 @@ let
     }
   );
 
-  configFile = jsonFormat.generate "sinnix-agent-gateway-config.json" {
-    inherit (cfg) stateDir;
-    inherit (cfg) auditPath;
-    inherit (cfg) yolo;
-    inherit (cfg) allowArbitraryCommands;
-    inherit (cfg) allowedHostCommands;
-    inherit (cfg) outputLimit;
-    defaultTimeout = cfg.defaultTimeoutSec;
-    maxTimeout = cfg.maxTimeoutSec;
-    inherit (cfg) globalEnv;
-    repositories = lib.mapAttrs (_: repo: {
-      inherit (repo)
-        url
-        defaultRef
-        allowWrite
-        env
-        tasks
-        ;
-    }) cfg.repositories;
-  };
-
   gatewayBin = "${scriptPkgs.sinnix-agent-gateway}/bin/sinnix-agent-gateway";
-
-  mcpWrapper = pkgs.writeShellScriptBin "sinnix-agent-gateway-mcp" ''
-    set -euo pipefail
-    exec ${gatewayBin} --config ${configFile} stdio
-  '';
 in
-{
-  options.sinnix.services.agent-gateway = {
-    enable = lib.mkEnableOption "trusted local MCP gateway for repo/code/system agent workflows";
-
+mkServiceModule {
+  name = "agent-gateway";
+  description = "trusted local MCP gateway for repo/code/system agent workflows";
+  extraOptions = {
     yolo = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -177,7 +151,7 @@ in
 
     auditPath = lib.mkOption {
       type = lib.types.str;
-      default = "${cfg.stateDir}/audit.jsonl";
+      default = "${config.sinnix.services.agent-gateway.stateDir}/audit.jsonl";
       description = "Append-only JSONL audit ledger path.";
     };
 
@@ -319,39 +293,67 @@ in
       };
     };
   };
+  configFn =
+    { cfg, pkgs, ... }:
+    let
+      configFile = jsonFormat.generate "sinnix-agent-gateway-config.json" {
+        inherit (cfg) stateDir;
+        inherit (cfg) auditPath;
+        inherit (cfg) yolo;
+        inherit (cfg) allowArbitraryCommands;
+        inherit (cfg) allowedHostCommands;
+        inherit (cfg) outputLimit;
+        defaultTimeout = cfg.defaultTimeoutSec;
+        maxTimeout = cfg.maxTimeoutSec;
+        inherit (cfg) globalEnv;
+        repositories = lib.mapAttrs (_: repo: {
+          inherit (repo)
+            url
+            defaultRef
+            allowWrite
+            env
+            tasks
+            ;
+        }) cfg.repositories;
+      };
 
-  config = lib.mkIf cfg.enable {
-    environment.systemPackages = [
-      scriptPkgs.sinnix-agent-gateway
-      mcpWrapper
-    ];
+      mcpWrapper = pkgs.writeShellScriptBin "sinnix-agent-gateway-mcp" ''
+        set -euo pipefail
+        exec ${gatewayBin} --config ${configFile} stdio
+      '';
+    in
+    {
+      environment.systemPackages = [
+        scriptPkgs.sinnix-agent-gateway
+        mcpWrapper
+      ];
 
-    environment.etc."sinnix/agent-gateway/config.json".source = configFile;
+      environment.etc."sinnix/agent-gateway/config.json".source = configFile;
 
-    home-manager.users.${userName} = {
-      home.file.".config/sinnix-agent-gateway/config.json".source = configFile;
+      home-manager.users.${userName} = {
+        home.file.".config/sinnix-agent-gateway/config.json".source = configFile;
 
-      systemd.user.services.sinnix-agent-gateway-http = lib.mkIf cfg.http.enable {
-        Unit = {
-          Description = "Sinnix Agent Gateway JSON-RPC HTTP endpoint";
-          After = [ "network.target" ];
+        systemd.user.services.sinnix-agent-gateway-http = lib.mkIf cfg.http.enable {
+          Unit = {
+            Description = "Sinnix Agent Gateway JSON-RPC HTTP endpoint";
+            After = [ "network.target" ];
+          };
+
+          Service = {
+            ExecStartPre = "${pkgs.coreutils}/bin/mkdir -p ${cfg.stateDir} ${cfg.stateDir}/log";
+            ExecStart = "${gatewayBin} --config ${configFile} http --host ${cfg.http.host} --port ${toString cfg.http.port}";
+            Restart = "on-failure";
+            RestartSec = "5s";
+            WorkingDirectory = cfg.stateDir;
+            StandardError = "append:${cfg.stateDir}/log/http.log";
+            Environment = [
+              "SINNIX_AGENT_GATEWAY_CONFIG=${configFile}"
+              "SINNIX_AGENT_GATEWAY_STATE=${cfg.stateDir}"
+            ];
+          };
+
+          Install.WantedBy = lib.optionals cfg.http.autoStart [ "default.target" ];
         };
-
-        Service = {
-          ExecStartPre = "${pkgs.coreutils}/bin/mkdir -p ${cfg.stateDir} ${cfg.stateDir}/log";
-          ExecStart = "${gatewayBin} --config ${configFile} http --host ${cfg.http.host} --port ${toString cfg.http.port}";
-          Restart = "on-failure";
-          RestartSec = "5s";
-          WorkingDirectory = cfg.stateDir;
-          StandardError = "append:${cfg.stateDir}/log/http.log";
-          Environment = [
-            "SINNIX_AGENT_GATEWAY_CONFIG=${configFile}"
-            "SINNIX_AGENT_GATEWAY_STATE=${cfg.stateDir}"
-          ];
-        };
-
-        Install.WantedBy = lib.optionals cfg.http.autoStart [ "default.target" ];
       };
     };
-  };
-}
+} args

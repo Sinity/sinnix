@@ -144,12 +144,6 @@ in
       default = { };
     };
 
-    storage = mkOption {
-      type = types.attrs;
-      default = { };
-      description = "Reserved storage namespace for config introspection.";
-    };
-
   };
 
   config = {
