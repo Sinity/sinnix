@@ -1,3 +1,5 @@
+# AI agent CLI wrappers (claude/codex/gemini/hermes), shared skills, and
+# per-agent runtime state. Wrapper-builder machinery lives in backends.nix.
 {
   mkFeatureModule,
   lib,
@@ -46,29 +48,6 @@ mkFeatureModule {
         ])
       );
 
-      # Shared npm bootstrap prelude — delegates state-dir setup, first-run npm
-      # install, and launcher regeneration to the packaged
-      # sinnix-agent-npm-bootstrap script (scripts/sinnix-agent-npm-bootstrap).
-      # The long-lived agent process launches directly via the generated
-      # launch.sh, not through buildFHSEnv/bubblewrap, so sudo and other
-      # privileged helpers do not inherit no_new_privileges. `STATE` is
-      # recomputed here (not exported by the bootstrap subprocess) because the
-      # wrapper needs it below for the final agent-scope-exec/launch call.
-      mkNpmBootstrap =
-        {
-          stateDir,
-          npmPackage,
-          binaryName,
-        }:
-        ''
-          STATE="$HOME/.local/state/${stateDir}"
-          ${scriptPkgs.sinnix-agent-npm-bootstrap}/bin/sinnix-agent-npm-bootstrap \
-            ${lib.escapeShellArg stateDir} \
-            ${lib.escapeShellArg npmPackage} \
-            ${lib.escapeShellArg binaryName} \
-            ${lib.escapeShellArg agentRuntimePath}
-        '';
-
       sinnixCfg = config.sinnix;
 
       # Runtime path of the agenix-decrypted DeepSeek API key (read at launch by
@@ -105,7 +84,7 @@ mkFeatureModule {
       claudeBrowserMcpConfigFile = jsonFormat.generate "claude-mcp-browser.json" {
         mcpServers = claudeBrowserMcpServers;
       };
-      sharedSkillNames = import ../../../flake/data/shared-agent-skills.nix;
+      sharedSkillNames = import ../../../../flake/data/shared-agent-skills.nix;
       sharedSkillFarm = pkgs.linkFarm "sinnix-shared-agent-skills" (
         map (name: {
           inherit name;
@@ -115,117 +94,28 @@ mkFeatureModule {
       # Runs the given launcher under sinnix-scope's agent slice unless already
       # scoped (see scripts/sinnix-agent-scope-exec).
       agentScopeExec = "${scriptPkgs.sinnix-agent-scope-exec}/bin/sinnix-agent-scope-exec";
-      mkClaudeCodeWrapper =
-        {
-          mcpConfigName ? "mcp",
-          profile ?
-            if mcpConfigName == "mcp-lean" then
-              "lean"
-            else if mcpConfigName == "mcp-browser" then
-              "browser"
-            else
-              "full",
-          # Extra shell injected after the npm bootstrap and before launch — used
-          # to point Claude Code at a non-Anthropic backend (DeepSeek, local
-          # gateway) via ANTHROPIC_BASE_URL / ANTHROPIC_MODEL / auth env vars.
-          extraEnv ? "",
-        }:
-        {
-          text = ''
-            #!/usr/bin/env bash
-            set -euo pipefail
 
-            ${mkNpmBootstrap {
-              stateDir = "claude-code";
-              npmPackage = "@anthropic-ai/claude-code";
-              binaryName = "claude";
-            }}
-
-            ${extraEnv}
-
-            export SINNIX_CLAUDE_PROFILE=${lib.escapeShellArg profile}
-            mcp_args=()
-            MCP_CONFIG="$HOME/.config/claude/${mcpConfigName}.json"
-            if [ -r "$MCP_CONFIG" ]; then
-              mcp_args=(--mcp-config "$MCP_CONFIG" --strict-mcp-config)
-            fi
-
-            claude_args=(
-              "''${mcp_args[@]}"
-            )
-            if [ -d "${sinnixCfg.paths.realmRoot}" ]; then
-              claude_args+=(--add-dir "${sinnixCfg.paths.realmRoot}" "/home/${user}")
-            else
-              claude_args+=(--add-dir "/home/${user}")
-            fi
-
-            exec ${agentScopeExec} "$STATE/launch.sh" "''${claude_args[@]}" "$@"
-          '';
-          executable = true;
-          force = true;
-        };
-      mkCodexWrapper =
-        {
-          profile,
-          # Extra shell injected after the npm bootstrap — used to export the
-          # provider API key the layered `<profile>.config.toml` expects.
-          extraEnv ? "",
-        }:
-        {
-          text = ''
-            #!/usr/bin/env bash
-            set -euo pipefail
-
-            ${mkNpmBootstrap {
-              stateDir = "codex";
-              npmPackage = "@openai/codex";
-              binaryName = "codex";
-            }}
-
-            ${extraEnv}
-
-            export SINNIX_CODEX_PROFILE=${lib.escapeShellArg profile}
-            codex_args=(--profile ${lib.escapeShellArg profile})
-
-            exec ${agentScopeExec} "$STATE/launch.sh" "''${codex_args[@]}" "$@"
-          '';
-          executable = true;
-          force = true;
-        };
-      # Env-only prelude for Hermes wrappers. PATH/HERMES_HOME/HERMES_INSTALL_DIR
-      # must be exported here (not in a subprocess) because the final `exec` of
-      # the hermes binary below needs to inherit them. The actual clone/sync/
-      # scaffold bootstrap logic lives in scripts/sinnix-ensure-hermes, which
-      # runs as a subprocess relying on this already-exported PATH/env.
-      hermesBootstrap = ''
-        export HERMES_HOME="''${HERMES_HOME:-$HOME/.hermes}"
-        export HERMES_INSTALL_DIR="''${HERMES_INSTALL_DIR:-$HERMES_HOME/hermes-agent}"
-        export PATH="${hermesRuntimePath}:$PATH"
-        export UV_NO_CONFIG=1
-        export UV_PYTHON="${pkgs.python313}/bin/python3"
-      '';
-      ensureHermes = "${scriptPkgs.sinnix-ensure-hermes}/bin/sinnix-ensure-hermes";
-      hermesConfigureLocal = "${scriptPkgs.sinnix-hermes-configure-local}/bin/sinnix-hermes-configure-local";
-      mkHermesWrapper =
-        {
-          entrypoint ? "hermes",
-          extraPrelude ? "",
-        }:
-        {
-          text = ''
-            #!/usr/bin/env bash
-            set -euo pipefail
-
-            ${hermesBootstrap}
-
-            ${ensureHermes}
-            ${extraPrelude}
-
-            exec "$HERMES_INSTALL_DIR/venv/bin/${entrypoint}" "$@"
-          '';
-          executable = true;
-          force = true;
-        };
+      backends = import ./backends.nix {
+        inherit
+          lib
+          pkgs
+          scriptPkgs
+          agentRuntimePath
+          hermesRuntimePath
+          agentScopeExec
+          sinnixCfg
+          user
+          ;
+      };
+      inherit (backends)
+        mkNpmBootstrap
+        mkClaudeCodeWrapper
+        mkCodexWrapper
+        hermesBootstrap
+        ensureHermes
+        hermesConfigureLocal
+        mkHermesWrapper
+        ;
     in
     {
       sinnix.persistence.home = {
@@ -302,7 +192,7 @@ mkFeatureModule {
             "claude/hooks/sessionstart-polylogue-recall.sh".source =
               mkDotsFile "/claude/hooks/sessionstart-polylogue-recall.sh";
             "claude/hooks/sessionstart-sinex-recall.sh" = {
-              text = builtins.readFile ../../../dots/claude/hooks/sessionstart-sinex-recall.sh;
+              text = builtins.readFile ../../../../dots/claude/hooks/sessionstart-sinex-recall.sh;
               executable = true;
             };
             "claude/hooks/sessionstart-beads-prime.sh".source =
@@ -396,8 +286,9 @@ mkFeatureModule {
           home.file.".local/bin/codex-browser" = mkCodexWrapper { profile = "browser"; };
 
           # DeepSeek / local through Codex. The layered <profile>.config.toml
-          # (generated in mcp-servers.nix) carries the model + model_provider +
-          # full MCP table; the wrapper only supplies the provider API key env.
+          # (generated in mcp.nix's client-profiles.nix) carries the model +
+          # model_provider + full MCP table; the wrapper only supplies the
+          # provider API key env.
           home.file.".local/bin/codex-deepseek" = mkCodexWrapper {
             profile = "deepseek";
             extraEnv = ''
