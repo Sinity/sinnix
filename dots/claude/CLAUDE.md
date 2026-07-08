@@ -372,16 +372,14 @@ each project's `CLAUDE.md`.
   current content. `verify-agent-topology /realm/project` audits this
   invariant.
 - **MCP profiles**: registry source of truth is `flake/data/mcp-registry.nix`
-  in sinnix; wiring lives in `modules/features/dev/agents/` (`mcp.nix` +
-  sibling helpers `mcp-tools.nix`/`client-profiles.nix`/`serena.nix`/
-  `browser.nix`/`hooks.nix`; regrouped from the former `mcp-servers.nix`,
-  sinnix-9u6). Plain `claude`/`codex` use the full non-browser profile
-  (GitHub, Context7, Polylogue, Lynchpin, Serena, Codebase Memory).
-  `claude-lean`/`codex-lean` keep GitHub, Context7, and Polylogue only.
-  `claude-browser`/`codex-browser` add the Chrome DevTools MCP tier. `claude`
-  is a shell alias to the `claude-full` wrapper — the bare `~/.local/bin/claude`
-  is deliberately unmanaged because Claude Code's installer claims and
-  clobbers it on auto-update.
+  in sinnix; wiring in `modules/features/dev/mcp-servers.nix`. Plain
+  `claude`/`codex` use the full non-browser profile (GitHub, Context7,
+  Polylogue, Lynchpin, Serena, Codebase Memory). `claude-lean`/`codex-lean`
+  keep GitHub, Context7, and Polylogue only. `claude-browser`/`codex-browser`
+  add the Chrome DevTools MCP tier. `claude` is a shell alias to the
+  `claude-full` wrapper — the bare `~/.local/bin/claude` is deliberately
+  unmanaged because Claude Code's installer claims and clobbers it on
+  auto-update.
 - **Alternate backends (full MCP profile)**: `claude-deepseek`/`codex-deepseek`
   (DeepSeek endpoints, key from agenix `deepseek-api-key`);
   `claude-local`/`codex-local` (local Ollama hub via the LiteLLM gateway on

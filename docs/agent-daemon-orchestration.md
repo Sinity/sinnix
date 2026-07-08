@@ -357,7 +357,7 @@ This reframes terminals as projections. The session lives in a runtime plane wit
 Current observed state while writing this doc:
 
 - Sinnix already has docs/agent-stack.md with Herdr/ACP/Beads/Agent Deck priority map.
-- `modules/features/dev/agents/clis.nix` (formerly `agent-tools.nix`) declares packages from `llm-agents.nix`.
+- `modules/features/dev/agent-tools.nix` declares packages from `llm-agents.nix`.
 - The live PATH in this session did not expose those binaries yet, so package installation is not deployed into the current shell/profile.
 
 Action:
