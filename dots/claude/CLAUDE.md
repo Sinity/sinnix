@@ -523,6 +523,36 @@ possible.
 3. Cherry-pick or diff-apply if the agent committed to the wrong branch
 4. `git worktree remove` stale worktrees after merging
 
+### Cross-item batch execution (content-aware)
+
+The unit of work is a **cluster of related items**, not one tracker item at a
+time. Before claiming, look at what else in the ready set touches the same
+files/area (in beads repos: design-field anchors, prework packets, or a
+clustering helper where the repo has one).
+
+- **Overlapping footprints** (same modules): claim the cluster, one branch,
+  rewrite the area once satisfying every item's AC, per-item commits as review
+  waypoints, one sweep PR with a per-item AC matrix. Paying the area-reading
+  cost once and avoiding self-conflicts between successive PRs is the point.
+- **Disjoint footprints**: separate PRs (squash-merge = one master commit per
+  logical change), but pipeline them in one session/checkout: branch A →
+  commit → push → PR, then branch B from fresh master immediately while A's
+  CI runs. Never idle-wait on CI.
+- **Parallel subagent worktrees** only when ≥3 disjoint lanes exist, each
+  execution-grade (full design or packet), with no shared hotspot files —
+  then the packet/design IS the subagent prompt. Otherwise one agent
+  pipelining beats coordination overhead.
+- **Verification amortization**: narrow per-item checks while batching; the
+  broad gate once per branch at the publish boundary — never per item.
+- **Content-aware shapes**: mechanical sweeps (lint/docs/renames) batch
+  hardest; schema/migration bumps must batch per tier/window; investigation
+  items batch over a shared evidence pass; decision items batch into one
+  operator review session.
+- **Beads repos**: closing/updating beads on a feature branch can silently
+  revert on `git checkout` (the post-checkout hook re-imports the target
+  branch's committed jsonl). Close after merge, or re-`bd import` the branch's
+  jsonl after switching. Batch all bd mutations into one export+commit.
+
 ### Daily oracle digest
 
 
@@ -589,6 +619,15 @@ Use scopes (`fix(cli): ...`) when the repo is large enough that scope adds clari
   ```
 
 **Staging:** by name (`git add <file>`). Never `git add -A` / `git commit -a` on significant changes — sweeps in `.env`, credentials, build output. Review with `git diff --staged` before commit.
+
+**Shared-checkout safety:** multiple agent sessions may work the same live
+checkout concurrently. Before committing, check `git status` for staged files
+you did not stage and confirm the current branch is the one you think it is
+(`git branch --show-current`) — another session may have switched it under
+you. When contention is possible, commit by explicit pathspec
+(`git commit -- <your paths>`) so a bare `git commit` cannot sweep a
+co-worker's staged work into your commit; prefer a dedicated worktree for
+anything longer than a quick fix.
 
 **Hooks:** never skip (`--no-verify`, `--no-gpg-sign`) unless the user explicitly asked. Hook failure = no commit; fix the root cause and make a NEW commit (don't `--amend` — that modifies the previous successful commit).
 
