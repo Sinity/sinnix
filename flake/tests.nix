@@ -1,7 +1,11 @@
 # Test director.
 #
-# Runtime/VM/host build checks live in `./tests-runtime.nix`. This file keeps
-# only non-config-duplication flake checks.
+# Runtime/VM/host build checks live in `./tests/<domain>.nix`, one file per
+# logical domain (agent-tools, terminal-capture, backup, observability, cli,
+# git-languages, vm, host-build). This file keeps only non-config-duplication
+# flake checks plus the transposed `heavyChecks` option definition, and
+# imports every domain file so their `checks`/`heavyChecks` contributions
+# merge into the flake's outputs.
 #
 # Run all: nix flake check
 # Run one: nix build .#checks.x86_64-linux.router-config-build
@@ -21,7 +25,14 @@ in
       };
       file = ./tests.nix;
     })
-    ./tests-runtime.nix
+    ./tests/agent-tools.nix
+    ./tests/terminal-capture.nix
+    ./tests/backup.nix
+    ./tests/observability.nix
+    ./tests/cli.nix
+    ./tests/git-languages.nix
+    ./tests/vm.nix
+    ./tests/host-build.nix
   ];
 
   perSystem =
