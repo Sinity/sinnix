@@ -222,11 +222,17 @@ non-script externals (lynchpin/polylogue pythons, vendored npm CLIs, beads);
   skills`, `~/.codex/skills`, `~/.gemini/skills`) are linkFarms over it.
   Codex-only system skills: `dots/codex/skills/.system/`.
 - MCP registry: `flake/data/mcp-registry.nix` (servers, tiers,
-  lean/evidence/full/browser profiles, per-client render). Wiring + wrappers:
-  `modules/features/dev/mcp-servers.nix`. Agent CLI wrappers + backends:
-  `modules/features/dev/agent-tools.nix` (npm-bootstrapped into
-  `~/.local/state/<agent>/npm`, self-updating; `claude` aliases `claude-full`
-  because the upstream installer clobbers the bare path).
+  lean/evidence/full/browser profiles, per-client render). Wiring + agent CLI
+  wrappers live in `modules/features/dev/agents/` (regrouped from the former
+  `agent-tools.nix`/`mcp-servers.nix`, sinnix-9u6): `clis.nix`
+  (`sinnix.features.dev.agentTools`) + `backends.nix` own the CLI wrapper
+  builders (npm-bootstrapped into `~/.local/state/<agent>/npm`, self-updating;
+  `claude` aliases `claude-full` because the upstream installer clobbers the
+  bare path); `mcp.nix` (`sinnix.features.dev.mcp-servers`) + `mcp-tools.nix`/
+  `client-profiles.nix`/`serena.nix`/`browser.nix`/`hooks.nix` own the MCP
+  registry wiring and per-client (Codex/Gemini) config generation. Only
+  `clis.nix`/`mcp.nix` are real NixOS modules; the sibling files are plain-nix
+  helpers imported directly, not auto-imported.
 
 ## Secrets
 

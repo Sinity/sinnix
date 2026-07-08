@@ -5,7 +5,7 @@
 # translator that lets the real Claude Code harness drive a local model: it
 # exposes BOTH `/v1/messages` (Anthropic) and `/v1/chat/completions` (OpenAI)
 # on one loopback port and forwards to Ollama. The `claude-local` and
-# `codex-local` wrappers (modules/features/dev/agent-tools.nix) both target it,
+# `codex-local` wrappers (modules/features/dev/agents/clis.nix) both target it,
 # so local model names live in exactly one place — the `model_list` below.
 #
 # Stateless gateway: the only on-disk state is the UI scratch dir and the

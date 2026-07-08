@@ -76,6 +76,7 @@ Adopt for Zed/editor integration only. Do not redesign the whole agent topology 
 
 3. Beads
 
+Question: can beads provide lightweight local task graphs without duplicating GitHub issues or project documentation?
 
 Evaluation:
 
@@ -122,8 +123,8 @@ from memory.
 
 - `flake/data/mcp-registry.nix`: canonical per-client/profile MCP projection.
 - `modules/services/hermes.nix`: Hermes config and mode wrappers.
-- `modules/features/dev/mcp-servers.nix`: registry renderers for Codex/Forge/Gemini/Claude/Hermes MCP client configs.
-- `modules/features/dev/agent-tools.nix`: agent CLI wrappers, profile launchers, and installed upstream package set.
+- `modules/features/dev/agents/mcp.nix` (+ `mcp-tools.nix`/`client-profiles.nix`/`serena.nix`/`browser.nix`/`hooks.nix`): registry renderers for Codex/Forge/Gemini/Claude/Hermes MCP client configs.
+- `modules/features/dev/agents/clis.nix` (+ `backends.nix`): agent CLI wrappers, profile launchers, and installed upstream package set.
 - `dots/codex/config.toml`: Codex static defaults only; full/lean/browser MCP
   entries are generated from the registry at activation/build time.
 - `dots/_ai/skills/`: shared project skills; Home Manager exposes only the
@@ -158,7 +159,7 @@ Only delete after an audit proves duplication:
 - any agent skill that duplicates an upstream command without local policy/context;
 - any UI/dashboard experiment superseded by Herdr/agent-deck/agentsview.
 
-The local `claude-code` override in `agent-tools.nix` / `languages.nix` was removed once upstream `llm-agents.nix` caught up to and surpassed the pinned version. If upstream lags again, reintroduce the same `overrideAttrs` pattern (fresh `fetchurl` from `storage.googleapis.com/claude-code-dist-…/claude-code-releases/<version>/linux-x64/claude`) and delete it once upstream catches up.
+The local `claude-code` override in `agents/clis.nix` (formerly `agent-tools.nix`) / `languages.nix` was removed once upstream `llm-agents.nix` caught up to and surpassed the pinned version. If upstream lags again, reintroduce the same `overrideAttrs` pattern (fresh `fetchurl` from `storage.googleapis.com/claude-code-dist-…/claude-code-releases/<version>/linux-x64/claude`) and delete it once upstream catches up.
 
 ## Daemonic orchestration direction
 
