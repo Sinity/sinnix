@@ -1047,11 +1047,11 @@
         "nixpkgs": "nixpkgs_5"
       },
       "locked": {
-        "lastModified": 1783628231,
-        "narHash": "sha256-r7Lk19DmVDBis92AjsscYQmYWGBCnDq/XEKKU14VRPM=",
+        "lastModified": 1783633216,
+        "narHash": "sha256-c4lMMxTcFWoAJKQkri3xy1z+bkoUfpsOScf4WsvJYw8=",
         "ref": "master",
-        "rev": "24e198ee93332552269284244304399c435ccbc7",
-        "revCount": 1687,
+        "rev": "86d2fe4070c1e8afca12fe82b042e849205eec73",
+        "revCount": 1689,
         "type": "git",
         "url": "https://github.com/Sinity/sinex"
       },
