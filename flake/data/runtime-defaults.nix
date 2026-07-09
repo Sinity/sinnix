@@ -191,6 +191,13 @@ rec {
         IOWeight = 1;
         MemoryHigh = "2G";
         MemoryMax = "4G";
+        # PSI-scoped oomd (sinnix-3gb): sacrificial work is killed at cgroup
+        # granularity when ITS OWN memory pressure stalls it, instead of
+        # letting global earlyoom pick victims. 50%/30s (not the 10%/5s
+        # defaults) so only a genuinely wedged scope dies, not a busy one.
+        ManagedOOMMemoryPressure = "kill";
+        ManagedOOMMemoryPressureLimit = "50%";
+        ManagedOOMMemoryPressureDurationSec = "30s";
       };
       nix-build = {
         CPUWeight = 5;
@@ -199,6 +206,13 @@ rec {
         # still leaving room for the desktop and always-on data services.
         MemoryHigh = "22G";
         MemoryMax = "28G";
+        # PSI-scoped oomd (sinnix-3gb): sacrificial work is killed at cgroup
+        # granularity when ITS OWN memory pressure stalls it, instead of
+        # letting global earlyoom pick victims. 50%/30s (not the 10%/5s
+        # defaults) so only a genuinely wedged scope dies, not a busy one.
+        ManagedOOMMemoryPressure = "kill";
+        ManagedOOMMemoryPressureLimit = "50%";
+        ManagedOOMMemoryPressureDurationSec = "30s";
       };
       system-critical = {
         IOAccounting = true;
@@ -235,6 +249,13 @@ rec {
         IOWeight = 1;
         MemoryHigh = "2G";
         MemoryMax = "4G";
+        # PSI-scoped oomd (sinnix-3gb): sacrificial work is killed at cgroup
+        # granularity when ITS OWN memory pressure stalls it, instead of
+        # letting global earlyoom pick victims. 50%/30s (not the 10%/5s
+        # defaults) so only a genuinely wedged scope dies, not a busy one.
+        ManagedOOMMemoryPressure = "kill";
+        ManagedOOMMemoryPressureLimit = "50%";
+        ManagedOOMMemoryPressureDurationSec = "30s";
       };
       build = {
         IOAccounting = true;
@@ -242,6 +263,13 @@ rec {
         IOWeight = 2;
         MemoryHigh = "22G";
         MemoryMax = "28G";
+        # PSI-scoped oomd (sinnix-3gb): sacrificial work is killed at cgroup
+        # granularity when ITS OWN memory pressure stalls it, instead of
+        # letting global earlyoom pick victims. 50%/30s (not the 10%/5s
+        # defaults) so only a genuinely wedged scope dies, not a busy one.
+        ManagedOOMMemoryPressure = "kill";
+        ManagedOOMMemoryPressureLimit = "50%";
+        ManagedOOMMemoryPressureDurationSec = "30s";
       };
       nix-build = {
         IOAccounting = true;
@@ -249,6 +277,13 @@ rec {
         IOWeight = 2;
         MemoryHigh = "22G";
         MemoryMax = "28G";
+        # PSI-scoped oomd (sinnix-3gb): sacrificial work is killed at cgroup
+        # granularity when ITS OWN memory pressure stalls it, instead of
+        # letting global earlyoom pick victims. 50%/30s (not the 10%/5s
+        # defaults) so only a genuinely wedged scope dies, not a busy one.
+        ManagedOOMMemoryPressure = "kill";
+        ManagedOOMMemoryPressureLimit = "50%";
+        ManagedOOMMemoryPressureDurationSec = "30s";
       };
     };
   };

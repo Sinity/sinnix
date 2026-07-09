@@ -52,11 +52,11 @@ let
   swapFile = "${realmRoot}/swap/swapfile";
   swapSizeGiB = 8;
 
-  # Keep swap as a small file-backed overflow signal, not an extension of RAM.
-  # zram is disabled in modules/profiles/workstation.nix because compressed-RAM swap
-  # competes with the real working set and can leave stale pressure after build
-  # bursts. The file below gives the kernel a bounded emergency landing zone
-  # while earlyoom kills once meaningful swap is occupied.
+  # Overflow tier of the tiered swap posture (sinnix-mys, 2026-07-10):
+  # zram (priority 100, modules/profiles/workstation.nix) absorbs bursts at
+  # RAM speed; this NVMe file (priority 10) takes sustained overflow so cold
+  # anon leaves RAM entirely instead of accumulating compressed. earlyoom is
+  # the deep emergency floor (-m3, swap gate 50%), no longer a hair trigger.
   #
   # Moved to /realm (Crucial P3 NVMe) 2026-07-09: previously lived at
   # /swap/swapfile on the root MX500 SATA SSD. Once vm.swappiness went from
