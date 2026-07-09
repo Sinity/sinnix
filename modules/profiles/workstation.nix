@@ -345,6 +345,20 @@ in
     # available; earlyoom remains the global emergency fallback.
     systemd.oomd.enable = true;
 
+    # Devshell/agent scratch belongs on /realm NVMe, not the RAM-backed /tmp
+    # tmpfs. `nix develop` creates its per-shell TMPDIR (nix-shell.XXXXXX)
+    # under the ambient TMPDIR, and heavy test suites (lynchpin pytest duckdb
+    # fixtures) write GiBs there; every shell gets a fresh dir, so per-tool
+    # retention (e.g. pytest's keep-last-3) never prunes across sessions.
+    # 2026-07-09: 345 accumulated dirs pinned 5.8 GiB of the 6 GiB /tmp tmpfs
+    # as unreclaimable shmem and drove that evening's earlyoom storm
+    # (sinnix-7yd). Pointing the session TMPDIR at NVMe keeps /tmp tmpfs for
+    # small system churn while shell/test scratch lands on wear-tolerant
+    # storage with age-based cleanup (the `7d` field below; NVMe contents
+    # also survive reboots, unlike tmpfs, hence the aging is load-bearing).
+    environment.sessionVariables.TMPDIR = "/realm/tmp/shell";
+    systemd.tmpfiles.rules = [ "d /realm/tmp/shell 1777 root root 7d" ];
+
     # nix.slice has no explicit unit here: it exists only as the implicit
     # dash-hierarchy parent of nix-build.slice (systemd creates parent slices
     # automatically), and it has exactly one child, so giving it its own
