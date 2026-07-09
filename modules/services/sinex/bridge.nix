@@ -302,6 +302,56 @@ in
                   maxAge = "24h";
                   maxBytes = natsCliMaxBytes;
                 }
+                # ── Reflection lane ──────────────────────────────────────
+                # Self-observation streams: sinexd starts a reflection-lane
+                # consumer unconditionally and refuses to serve that lane
+                # against an incomplete externally-managed topology
+                # (sinex-bor, PR #2423). Values mirror sinex's own
+                # nixos/modules/nats.nix bootstrapStreams defaults exactly —
+                # this override list shadows those defaults via mkForce, so
+                # it must be kept in sync by hand until sinex-bor's residual
+                # "single canonical spec" scope lands.
+                {
+                  name = "SINEX_REFLECTION_EVENTS";
+                  subjects = [ "events.reflection.raw.>" ];
+                  retention = "work";
+                  maxAge = "24h";
+                  maxMsgs = 2000000;
+                  maxBytes = "268435456"; # 256 MiB
+                  discard = "old";
+                }
+                {
+                  name = "SINEX_REFLECTION_EVENTS_CONFIRMED";
+                  subjects = [ "events.reflection.confirmed.>" ];
+                  maxAge = "24h";
+                  maxMsgs = 2000000;
+                  maxBytes = "268435456"; # 256 MiB
+                  discard = "old";
+                }
+                {
+                  name = "SINEX_REFLECTION_EVENTS_DLQ";
+                  subjects = [ "events.reflection.dlq.>" ];
+                  maxAge = "24h";
+                  maxBytes = "67108864"; # 64 MiB
+                  dupeWindow = "1h";
+                  allowDirect = true;
+                  discard = "new";
+                }
+                {
+                  name = "SINEX_REFLECTION_EVENTS_PROCESSING_FAILURES";
+                  subjects = [ "events.reflection.processing_failures.>" ];
+                  maxAge = "24h";
+                  maxBytes = "67108864"; # 64 MiB
+                  dupeWindow = "1h";
+                  allowDirect = true;
+                  discard = "new";
+                }
+                {
+                  name = "SINEX_REFLECTION_EVENTS_DERIVED_INVALIDATIONS";
+                  subjects = [ "sinex.reflection.derived.invalidation" ];
+                  maxAge = "24h";
+                  maxBytes = natsCliMaxBytes;
+                }
               ];
               # Entity-enricher checkpoints currently exceed NATS' 1 MiB
               # default payload limit during recovery. The local server is
