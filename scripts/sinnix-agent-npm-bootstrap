@@ -30,6 +30,8 @@ fi
 
 cat > "$STATE/launch.sh" <<LAUNCHER
 #!/usr/bin/env bash
+export npm_config_prefix="\$HOME/.local/state/$state_dir_name/npm"
+export NPM_CONFIG_PREFIX="\$HOME/.local/state/$state_dir_name/npm"
 PATH="$runtime_path:\$HOME/.local/state/$state_dir_name/npm/bin:\$PATH"
 exec $binary_name "\$@"
 LAUNCHER

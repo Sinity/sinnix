@@ -333,6 +333,8 @@ in
             grep -Fq 'npm install -g @anthropic-ai/claude-code' "$HOME/.local/bin/claude-full"
             grep -Fq 'npm install -g @openai/codex' "$HOME/.local/bin/codex"
             grep -Fq 'npm install -g @google/gemini-cli' "$HOME/.local/bin/gemini"
+            grep -Fq 'export npm_config_prefix="$HOME/.local/state/$state_dir_name/npm"' '${../../scripts/sinnix-agent-npm-bootstrap}'
+            grep -Fq 'export NPM_CONFIG_PREFIX="$HOME/.local/state/$state_dir_name/npm"' '${../../scripts/sinnix-agent-npm-bootstrap}'
 
             "$HOME/.local/bin/mcp-polylogue" --help | grep -q 'Start the Polylogue MCP stdio bridge'
             grep -Fq 'sinex-mcp-server' "$HOME/.local/bin/mcp-sinex"
