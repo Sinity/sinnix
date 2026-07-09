@@ -4,9 +4,10 @@
 # runtimeInputs: coreutils git gnugrep gh claude-code
 # oracle — daily reverse-prompting digest.
 #
-# seeds, open GitHub issues, and the latest lynchpin current-state pack into a
-# single substrate, then asks Claude (headless mode) for a four-section
-# capped digest: Resume / Reverse-prompt questions / Drift / One thing.
+# Concatenates rawlog tail, recent cross-project git activity, open GitHub
+# issues, and the latest lynchpin current-state pack into a single substrate,
+# then asks Claude (headless mode) for a four-section capped digest:
+# Resume / Reverse-prompt questions / Drift / One thing.
 #
 # Usage:
 #   oracle                       # today, default output path
@@ -68,20 +69,6 @@ trap 'rm -f "$SUBSTRATE"' EXIT
   echo '```'
   echo
 
-  echo '```'
-  echo '```'
-  echo
-
-  echo "## Crystallized decisions (do not re-propose)"
-  echo '```'
-  echo '```'
-  echo
-
-  echo "## Graveyard (dead ends, do not propose anything matching)"
-  echo '```'
-  echo '```'
-  echo
-
   echo "## Open GitHub issues (most-recently-updated, up to 30 per repo)"
   for r in "${GH_REPOS[@]}"; do
     echo
@@ -126,19 +113,17 @@ KNOWN_PROJECTS="sinex, polylogue, sinity-lynchpin, sinnix, knowledgebase, sinex-
 
 PROMPT=$(cat <<EOF
 You are the daily oracle for ${DATE}. You are given a substrate dump below
-crystallized decisions, graveyard (dead ends), open GitHub issues across 6
-repos, and the latest lynchpin current-state pack.
+covering: rawlog tail, recent git commits across 5 repos, open GitHub issues
+across 6 repos, and the latest lynchpin current-state pack.
 
 Your job: produce a four-section markdown digest with HARD CAPS. Be terse,
 specific, evidence-grounded. Citations are mandatory — every bullet must
-reference at least one of: a seed filename, an issue number with repo
-date. No-citation = no bullet. Drop the bullet rather than invent.
+reference at least one of: an issue number with repo (e.g. sinex#1450), a
+commit oid prefix, a current-state pack path, or a rawlog date. No-citation =
+no bullet. Drop the bullet rather than invent.
 
 KNOWN PROJECTS (do not name any project not in this list):
 ${KNOWN_PROJECTS}
-
-DO NOT propose anything that matches a filename in the "Crystallized
-decisions" or "Graveyard" lists shown in the substrate. Those are settled.
 
 OUTPUT FORMAT (exactly these four sections, in this order, with these caps):
 

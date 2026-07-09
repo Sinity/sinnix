@@ -48,9 +48,17 @@ let
     if [ -n "''${SINNIX_LYNCHPIN_OVERRIDE:-}" ]; then
       append_override_arg lynchpin "$SINNIX_LYNCHPIN_OVERRIDE"
     fi
-    nh_extra_args=()
+    # --impure: modules/secrets.nix reads agenix secrets from
+    # /realm/data/secrets/sinnix, outside the flake source (moved out of git
+    # 2026-07 -- see that module). Pure flake evaluation cannot see paths
+    # outside the flake's own store copy at all (builtins.pathExists/readDir
+    # on such a path silently returns false/empty rather than erroring, so
+    # this failure mode is silent: a system with zero secrets configured,
+    # not a build error). This is a real host-local-data dependency, not a
+    # purity shortcut being taken for convenience.
+    nh_extra_args=(-- --impure)
     if [ "''${#nix_override_args[@]}" -gt 0 ]; then
-      nh_extra_args=(-- "''${nix_override_args[@]}")
+      nh_extra_args+=("''${nix_override_args[@]}")
     fi
   '';
   rebuildPressurePreflight = name: ''
@@ -113,8 +121,9 @@ let
       _toplevel_drv="$(
         SINNIX_REBUILD_ACTIVE=1 NIX_CONFIG="eval-cache = false" \
           ${pkgs.nix}/bin/nix eval \
-            "path:$_invoke_flake_dir#nixosConfigurations.sinnix-prime.config.system.build.toplevel.drvPath" \
+            "$_invoke_flake_dir#nixosConfigurations.sinnix-prime.config.system.build.toplevel.drvPath" \
             --raw \
+            --impure \
             "''${nix_override_args[@]}"
       )"
       _toplevel_out="$(
@@ -410,9 +419,10 @@ in
           --wait \
           --setenv=PATH="${rebuildServicePath}:$PATH" \
           ${rebuildContainmentFlags}
-          ${pkgs.nixos-rebuild}/bin/nixos-rebuild build-vm --flake "path:$_flake_dir#sinnix-prime" \
+          ${pkgs.nixos-rebuild}/bin/nixos-rebuild build-vm --flake "$_flake_dir#sinnix-prime" \
           --max-jobs "$rebuild_jobs" \
           --cores "$rebuild_cores" \
+          --impure \
           "''${nix_override_args[@]}"
         exec ./result/bin/run-sinnix-prime-vm
       '';
@@ -510,7 +520,7 @@ in
     agenix = {
       description = "Manage encrypted secrets with agenix";
       script = ''
-        ${inputs.agenix.packages.${system}.default}/bin/agenix "$@"
+        cd /realm/data/secrets/sinnix && exec ${inputs.agenix.packages.${system}.default}/bin/agenix "$@"
       '';
     };
 
