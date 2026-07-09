@@ -166,8 +166,9 @@ in
     # zram disabled: on this workload it hides pressure inside compressed RAM,
     # competes with the real working set, and leaves stale residue after large
     # builds. Hosts that need overflow swap provide a small file-backed device
-    # (sinnix-prime uses a 4 GiB /swap/swapfile) and earlyoom treats meaningful
-    # swap occupancy as a kill signal before interactive I/O degrades.
+    # (sinnix-prime uses an 8 GiB /realm/swap/swapfile, moved off the root
+    # SATA SSD onto NVMe 2026-07-09) and earlyoom treats meaningful swap
+    # occupancy as a kill signal before interactive I/O degrades.
     zramSwap.enable = false;
 
     systemd.settings.Manager.StatusUnitFormat = "name";

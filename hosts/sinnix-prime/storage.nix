@@ -49,14 +49,26 @@ let
   ) polylogueDbFiles;
   polylogueShareMount = "/home/${username}/.local/share/polylogue";
 
-  swapFile = "/swap/swapfile";
-  swapSizeGiB = 4;
+  swapFile = "${realmRoot}/swap/swapfile";
+  swapSizeGiB = 8;
 
   # Keep swap as a small file-backed overflow signal, not an extension of RAM.
   # zram is disabled in modules/profiles/workstation.nix because compressed-RAM swap
   # competes with the real working set and can leave stale pressure after build
-  # bursts. The 4 GiB file below gives the kernel a bounded emergency landing
-  # zone while earlyoom kills once meaningful swap is occupied.
+  # bursts. The file below gives the kernel a bounded emergency landing zone
+  # while earlyoom kills once meaningful swap is occupied.
+  #
+  # Moved to /realm (Crucial P3 NVMe) 2026-07-09: previously lived at
+  # /swap/swapfile on the root MX500 SATA SSD. Once vm.swappiness went from
+  # 0 to 10 (see workstation.nix) to stop earlyoom killing brief rustc
+  # bursts, real swap activity started competing on the SAME wear-limited
+  # disk as Postgres data and the nix store, saturating it (measured 90ms
+  # write await, 59% util) and freezing terminals. The NVMe has no such
+  # wear-sensitivity flag and far higher throughput/lower latency, so this
+  # is a straightforward move, not a new tradeoff. Sized up from 4 to 8 GiB
+  # since a single large-crate rustc compile has been observed needing
+  # ~7-11 GiB RSS in this codebase and swap is no longer the scarce/wear-
+  # sensitive resource it was on the SATA disk.
   prepareSwapfile = pkgs.writeShellApplication {
     name = "sinnix-prime-prepare-swapfile";
     runtimeInputs = [
