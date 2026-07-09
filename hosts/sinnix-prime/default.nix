@@ -161,16 +161,16 @@
   # scratch, compile-server sockets, short-lived app temp files) into RAM
   # for the common case, at zero disk writes. Correction to the sinnix-een
   # bead's stated premise: zram swap is disabled on this host
-  # (modules/profiles/workstation.nix, zramSwap.enable = false) — swap is a small
-  # 4G file-backed overflow on the same root SSD (hosts/sinnix-prime/
-  # storage.nix). So under real memory pressure, evicted tmpfs pages would
-  # still land on the worn disk via that swapfile, not on zram. This is
-  # still a net win: normal desktop use has ~13GiB available RAM headroom
-  # (measured 2026-07-06), a 6G tmpfsSize cap keeps worst-case swap
-  # pressure bounded, and drainSwapfile already evicts resident swap
-  # opportunistically. Heavy/large scratch already belongs on
-  # /realm/tmp per policy, not /tmp, so this tmpfs is sized for routine
-  # small-file churn, not build output.
+  # (modules/profiles/workstation.nix, zramSwap.enable = false) — swap is a
+  # file-backed overflow (hosts/sinnix-prime/storage.nix). As of 2026-07-09
+  # that swapfile moved off the root SSD onto /realm (NVMe, not
+  # wear-sensitive), so evicted tmpfs pages landing in swap no longer add
+  # wear to the worn disk. This is still a net win regardless: normal
+  # desktop use has ~13GiB available RAM headroom (measured 2026-07-06), a
+  # 6G tmpfsSize cap keeps worst-case swap pressure bounded, and
+  # drainSwapfile already evicts resident swap opportunistically.
+  # Heavy/large scratch already belongs on /realm/tmp per policy, not /tmp,
+  # so this tmpfs is sized for routine small-file churn, not build output.
   boot.tmp.useTmpfs = true;
   boot.tmp.tmpfsSize = "6G";
 }
