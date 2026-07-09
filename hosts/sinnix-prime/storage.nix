@@ -263,14 +263,22 @@ in
     # logical pg_dump backup for disaster recovery, since nodatacow implies no
     # btrfs checksums (standard for DB volumes) and this subvol sits outside the
     # btrbk→borg path.
+    # Migrated off the worn MX500 (~104% rated NAND) to the /realm NVMe on
+    # 2026-07-10 (sinnix-6b4): rsync'd 268G with services stopped for the
+    # final delta pass. The whole-mount `nodatacow` option is gone on
+    # purpose — postgresql/ carries chattr +C (inherited per-file, verified
+    # post-copy), so the DB keeps in-place writes and no-checksums
+    # semantics, while the 167G append-only blob store now gets zstd:3
+    # like the rest of the filesystem (268G source -> ~112G written).
+    # The old @sinex subvol on the MX500 stays for a 48h burn-in, then
+    # gets deleted + filtered balance (checklist in sinnix-6b4).
     "/var/lib/sinex" = {
-      device = "/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02";
+      device = "/dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a";
       fsType = "btrfs";
       options = [
-        "subvol=@sinex"
-        "nodatacow"
+        "subvol=/sinex"
+        "compress=zstd:3"
         "noatime"
-        "nodiscard"
         "nofail"
       ];
     };
