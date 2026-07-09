@@ -12,8 +12,8 @@ __pycache__/
 
 # AI
 .aider*
-**/.claude/settings.local.json
-**/.claude/scheduled_tasks.lock
+.claude/
+.mcp.json
 
 # Editors and OS
 .vscode/
@@ -37,8 +37,10 @@ dots/Kvantum/
 build.log
 compilation.log
 _tmp_do_not_include_in_version_control.md
-.agent/scratch/*
-!.agent/scratch/.gitkeep
+# Agent working state is private even when it is technically interesting.
+# Promote reusable conclusions into reviewed docs or Beads issues instead.
+.agent/scratch/
+.agent/ops/
 .cache/
 .playwright-mcp/
 
