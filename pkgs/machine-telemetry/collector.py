@@ -1555,6 +1555,10 @@ def init_db(conn: sqlite3.Connection) -> None:
             "vmstat_allocstall_normal": "INTEGER",
             "vmstat_allocstall_movable": "INTEGER",
             "vmstat_oom_kill": "INTEGER",
+            "zram_orig_mb": "INTEGER",
+            "zram_compr_mb": "INTEGER",
+            "zram_mem_used_mb": "INTEGER",
+            "swaps_json": "TEXT",
         },
     )
     ensure_columns(
@@ -1788,6 +1792,47 @@ def memory_metrics() -> dict[str, int | None]:
         if swap_total is not None and swap_free is not None
         else None,
     }
+
+
+def swap_tier_metrics() -> dict[str, object]:
+    """Sample the tiered swap posture: zram compression economics + per-device
+    occupancy. zram mm_stat answers "how much RAM is the compressed tier
+    actually costing vs holding" (the load-bearing number for the sinnix-mys
+    zram-return decision); /proc/swaps shows how pressure distributes across
+    the zram (prio 100) and NVMe-file (prio 10) tiers."""
+    out: dict[str, object] = {
+        "zram_orig_mb": None,
+        "zram_compr_mb": None,
+        "zram_mem_used_mb": None,
+        "swaps_json": None,
+    }
+    try:
+        fields = Path("/sys/block/zram0/mm_stat").read_text(encoding="utf-8").split()
+        # mm_stat: orig_data_size compr_data_size mem_used_total mem_limit
+        #          mem_used_max same_pages pages_compacted [huge_pages ...]
+        out["zram_orig_mb"] = int(int(fields[0]) / 1048576)
+        out["zram_compr_mb"] = int(int(fields[1]) / 1048576)
+        out["zram_mem_used_mb"] = int(int(fields[2]) / 1048576)
+    except (OSError, ValueError, IndexError):
+        pass
+    try:
+        swaps = []
+        for line in Path("/proc/swaps").read_text(encoding="utf-8").splitlines()[1:]:
+            parts = line.split()
+            if len(parts) >= 5:
+                swaps.append(
+                    {
+                        "device": parts[0],
+                        "type": parts[1],
+                        "size_kb": int_or_none(parts[2]),
+                        "used_kb": int_or_none(parts[3]),
+                        "priority": int_or_none(parts[4]),
+                    }
+                )
+        out["swaps_json"] = json.dumps(swaps, sort_keys=True)
+    except OSError:
+        pass
+    return out
 
 
 def vmstat_metrics() -> dict[str, int | None]:
@@ -2270,6 +2315,7 @@ def main() -> int:
             dstate_count, dstate_waits = dstate_tasks()
             mem = memory_metrics()
             vmstat = vmstat_metrics()
+            swap_tiers = swap_tier_metrics()
             load_parts = read_text("/proc/loadavg")
             load_1 = load_5 = None
             if load_parts:
@@ -2364,6 +2410,7 @@ def main() -> int:
                 "dstate_wchan_summary": dstate_waits,
                 "gap_codes_json": json.dumps(sorted(set(gaps))),
                 **vmstat,
+                **swap_tiers,
             }
             conn.execute(
                 """
@@ -2398,7 +2445,8 @@ def main() -> int:
                   vmstat_pgsteal_kswapd, vmstat_pgsteal_direct,
                   vmstat_pswpin, vmstat_pswpout,
                   vmstat_allocstall_normal, vmstat_allocstall_movable,
-                  vmstat_oom_kill
+                  vmstat_oom_kill,
+                  zram_orig_mb, zram_compr_mb, zram_mem_used_mb, swaps_json
                 ) VALUES (
                   :observed_at, :host, :boot_id, :schema_version, :interval_s,
                   :latency_oversleep_ms, :collector_duration_ms,
@@ -2430,7 +2478,8 @@ def main() -> int:
                   :vmstat_pgsteal_kswapd, :vmstat_pgsteal_direct,
                   :vmstat_pswpin, :vmstat_pswpout,
                   :vmstat_allocstall_normal, :vmstat_allocstall_movable,
-                  :vmstat_oom_kill
+                  :vmstat_oom_kill,
+                  :zram_orig_mb, :zram_compr_mb, :zram_mem_used_mb, :swaps_json
                 )
                 """,
                 row,

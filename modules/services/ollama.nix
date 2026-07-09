@@ -70,7 +70,7 @@ mkServiceModule {
         host = "127.0.0.1";
         port = 11434;
         openFirewall = false;
-        models = modelsDir;
+        inherit modelsDir;
         inherit (cfg) loadModels;
         environmentVariables = {
           OLLAMA_FLASH_ATTENTION = "1";
