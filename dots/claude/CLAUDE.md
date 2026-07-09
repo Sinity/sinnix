@@ -552,8 +552,28 @@ clustering helper where the repo has one).
   operator review session.
 - **Beads repos**: closing/updating beads on a feature branch can silently
   revert on `git checkout` (the post-checkout hook re-imports the target
-  branch's committed jsonl). Close after merge, or re-`bd import` the branch's
-  jsonl after switching. Batch all bd mutations into one export+commit.
+  branch's committed jsonl) — this is bd's correct, by-design sync model, not
+  a bug, but it actively fights a workflow that spins up many short-lived
+  branches: a bead closed on branch A reads back as open on branch B if B was
+  created from an older `master` and hasn't merged A's commit yet. Nothing is
+  lost (the close is safe in git history), but `bd show`/`bd ready` output is
+  stale until a commit carrying that state lands on your current branch.
+  Mitigate by (1) not spinning a new `chore(beads): ...` branch while one is
+  already open — merge it first or add to it; (2) merging bd-only bookkeeping
+  branches immediately rather than leaving them open while other branches
+  diverge from `master` in the meantime; (3) folding a single `bd
+  claim`/`close` into the same branch as the code change it accompanies
+  instead of a dedicated branch per mutation; (4) re-verifying with `bd show
+  <id> --json` after any checkout/merge/worktree-add before trusting bd's
+  query output for a bead you just touched. `bd export` (and the pre-commit
+  hook that calls it) resolves its output path from bd's own database
+  location, independent of the invoking shell's cwd — inside a temporary
+  conflict-resolution worktree it silently no-ops on that worktree's own
+  file, so resolving a `.beads/*.jsonl` merge conflict via `bd export` can
+  leave literal conflict markers in place. Instead extract both sides
+  directly (`git show :2:.beads/issues.jsonl` / `:3:...`), hand-merge bead-by-
+  id preferring whichever side has the later `updated_at`, verify every line
+  parses as JSON, then `git add`.
 
 ### Daily oracle digest
 
