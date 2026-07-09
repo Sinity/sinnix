@@ -48,7 +48,13 @@ mkFeatureModule {
               mouse_hide_wait = 60;
               wheel_scroll_multiplier = 5.0;
               touch_scroll_multiplier = 5.0;
-              cursor_trail = 3;
+              # cursor_trail 3 -> 0 (2026-07-10, sinnix-878 phase 1): kitty
+              # 0.47.4 instances leak ~60-90 MB/h of anon heap while idle;
+              # the trail animation is the prime suspect (continuous
+              # allocator, young feature). Re-enable only if the leak slope
+              # (machine-telemetry process_memory_sample) is unchanged after
+              # ~24h and the experiment moves to phase 2 (MALLOC_ARENA_MAX).
+              cursor_trail = 0;
               confirm_os_window_close = 0;
               allow_remote_control = "socket-only";
               listen_on = "unix:$XDG_RUNTIME_DIR/kitty-${user}-{kitty_pid}";
