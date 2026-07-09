@@ -106,14 +106,24 @@ in
   config = lib.mkIf cfg.enable {
     sinnix.machine.isDesktop = lib.mkForce true;
 
-    # Swap is host-owned storage policy, not a RAM expansion mechanism. Keep
-    # zram disabled: on this workload it hides pressure inside compressed RAM,
-    # competes with the real working set, and leaves stale residue after large
-    # builds. Hosts that need overflow swap provide a small file-backed device
-    # (sinnix-prime uses an 8 GiB /realm/swap/swapfile, moved off the root
-    # SATA SSD onto NVMe 2026-07-09) and earlyoom treats meaningful swap
-    # occupancy as a kill signal before interactive I/O degrades.
-    zramSwap.enable = false;
+    # Tiered swap posture (2026-07-10, resolves sinnix-mys under the
+    # operator axiom "things getting killed >> thrash"): zram is the fast
+    # first tier that absorbs allocation bursts at RAM speed, the NVMe
+    # swapfile (hosts/sinnix-prime/storage.nix, priority 10) is the overflow
+    # tier for sustained pressure. An 8 GiB zram device costs ~20 MiB until
+    # used and ~1 byte per ~3 bytes of cold anon it holds (zstd); the
+    # earlier "compressed RAM hides pressure" objection is now covered by
+    # instrumentation instead of prohibition — machine-telemetry samples
+    # zram mm_stat, per-device swap occupancy, PSI, and refaults, so a
+    # thrash regression is visible within hours. The 2026-07-09 kill storm
+    # (17 rustc SIGTERMs with 7.5 GiB of swap idle) is the failure mode this
+    # exists to end: bursts must have somewhere fast to go.
+    zramSwap = {
+      enable = true;
+      algorithm = "zstd";
+      memoryMax = 8 * 1024 * 1024 * 1024;
+      priority = 100;
+    };
 
     systemd.settings.Manager.StatusUnitFormat = "name";
 
@@ -238,7 +248,15 @@ in
       # v1.9 computes this percentage against "user mem total"
       # (MemAvailable + AnonPages), which is ~26 GiB on sinnix-prime under
       # current desktop load; 5% is about 1.3 GiB of MemAvailable headroom.
-      freeMemThreshold = 5;
+      # Demoted 5 -> 3 (sinnix-3gb, 2026-07-10): with PSI-scoped oomd now
+      # killing wedged sacrificial slices (runtime-defaults.nix) and the
+      # zram+NVMe swap tiers absorbing bursts, earlyoom is the emergency
+      # floor for true exhaustion, not the first responder. History says the
+      # first responder role was actively harmful: zero kernel OOMs ever
+      # recorded, while earlyoom itself generated the outages (186 kills on
+      # 2026-06-30, a 79-process kitten cascade on 07-04, 17 rustc kills on
+      # 07-09).
+      freeMemThreshold = 3;
       # Re-diagnosed 2026-07-10: 100 was set after the 2026-06-30 desktop
       # stall (314 MiB MemAvailable with swap still empty -- the old ~10%
       # swap gate suppressed the emergency kill until the compositor was
@@ -263,11 +281,12 @@ in
       # ~10% default that caused the June wedge).
       freeSwapThreshold = 50;
       extraArgs = [
-        # Prefer killing rebuildable heavy tooling under pressure — NOT the
-        # coding agents. rust-analyzer can be restarted by the editor, and it is
-        # often the largest swapped process after Rust compile/index bursts.
-        "--prefer"
-        "(cargo|rustc|rust-analyzer|cc1plus|ld|codebase-memory-mcp|codebase-memory)"
+        # No --prefer regex (removed 2026-07-10, sinnix-3gb): victim steering
+        # was an arms race of same-day threshold rewrites, and at the -m3
+        # floor earlyoom only fires at true exhaustion where oom_score-based
+        # choice is appropriate. Slice-scoped oomd now handles the "kill the
+        # runaway build, not the desktop" case at cgroup granularity.
+        #
         # Protect interactive surfaces. Coding agents (`claude`, `codex`, and
         # their node/python runtime/MCP children) are interactive work and are
         # avoided like the desktop apps so launching one never evicts another.
@@ -283,10 +302,14 @@ in
       after = [ "swap.target" ];
     };
 
-    # Keep systemd-oomd enabled at the platform level, but Sinnix's own
-    # build/background policy intentionally does not use PSI-triggered kills.
-    # Earlier measurements showed false-positive kills with plenty of memory
-    # available; earlyoom remains the global emergency fallback.
+    # systemd-oomd is the first-line kill policy (sinnix-3gb, 2026-07-10):
+    # sacrificial slices (build/nix-build/background, both scopes) carry
+    # ManagedOOMMemoryPressure=kill at 50%/30s in runtime-defaults.nix, so a
+    # wedged build dies as a cgroup while the desktop and agents never
+    # qualify. The earlier false-positive history was the 10%/5s defaults
+    # (killed Codex 2026-05-07) — the 50%/30s gate only fires on scopes that
+    # are genuinely stalled on their own memory. earlyoom remains the global
+    # emergency floor at -m3.
     systemd.oomd.enable = true;
 
     # Devshell/agent scratch belongs on /realm NVMe, not the RAM-backed /tmp

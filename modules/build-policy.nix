@@ -133,16 +133,12 @@ in
         after = [ "sinnix-root-cache-attrs.service" ];
         serviceConfig = {
           # Place the daemon — and all build processes it spawns — into
-          # nix-build.slice so the slice's CPUWeight=5/IOWeight=2 apply.
-          # The daemon already carries CPUSchedulingPolicy=idle from the NixOS
-          # nix module; the slice adds IO weight and the memory guard below.
-          # Without this, nix-daemon lives in system.slice with no memory cap.
+          # nix-build.slice so the slice's resource policy applies. The
+          # slice (flake/data/runtime-defaults.nix) is the single source of
+          # CPU/IO weights, the 22G/28G memory ceilings, and the PSI-scoped
+          # oomd kill policy; do not duplicate caps here (sinnix-3gb removed
+          # the unit-level MemoryHigh/Max copy that had drifted alongside).
           Slice = "nix-build.slice";
-          # Soft + hard memory ceilings: reclaim from build processes before
-          # they evict desktop/video/sinexd working sets, and kill the build
-          # cgroup before global pressure reaches earlyoom territory.
-          MemoryHigh = "22G";
-          MemoryMax = "28G";
         };
       };
     };
