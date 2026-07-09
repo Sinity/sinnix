@@ -184,7 +184,18 @@ in
       # and new rustc processes needed multi-GiB allocations immediately.
       # Maintain a concrete free-page reserve and apply stronger VFS pressure so
       # "available" memory does not depend on painful last-second reclaim.
-      "vm.swappiness" = 0;
+      #
+      # Re-diagnosed 2026-07-09: swappiness=0 left the 4 GiB disk swapfile
+      # completely unused (0B, even mid-OOM-kill) while earlyoom repeatedly
+      # killed short-lived rustc bursts (~6-7 GiB RSS for 30-60s, single
+      # large-crate compiles, not sustained growth) with several GiB of idle
+      # swap sitting right there. A brief burst is exactly the case swap
+      # should absorb without triggering the 2026-06-07 thrashing pattern
+      # (that was *sustained* 17 GiB anon pressure, a different shape). Bumped
+      # to a small nonzero value so the kernel prefers swapping a transient
+      # spike over an immediate earlyoom kill, without going back to the
+      # heavy-swap-hoarding regime that caused the original diagnosis.
+      "vm.swappiness" = 10;
       "vm.page-cluster" = 0;
       "vm.vfs_cache_pressure" = 1000;
       "vm.min_free_kbytes" = 1048576;
