@@ -14,6 +14,10 @@ import time
 from pathlib import Path
 
 SCHEMA_VERSION = 5
+# Interval between explicit `wal_checkpoint(TRUNCATE)` runs on the main
+# writer connection; see the checkpoint block at the bottom of the heartbeat
+# loop for why the implicit autocheckpoint is not enough here.
+WAL_CHECKPOINT_INTERVAL_S = 900.0
 UTC = dt.timezone.utc
 DISKSTAT_FIELDS = (
     "reads_completed",
@@ -2199,6 +2203,7 @@ def main() -> int:
         next_network = 0.0
         next_process_memory = 0.0
         next_kill_event = 0.0
+        next_wal_checkpoint = time.monotonic() + WAL_CHECKPOINT_INTERVAL_S
         kill_event_cursor = load_kill_event_cursor(conn)
         last_bloat = 0.0
 
@@ -2480,6 +2485,26 @@ def main() -> int:
                     save_kill_event_cursor(conn, new_cursor)
                 next_kill_event = sample_start + args.kill_event_interval
             conn.commit()
+            # SQLite's PASSIVE autocheckpoints never shrink the WAL file, and
+            # they silently make no progress while any reader (lynchpin
+            # analysis queries over this DB) holds an older snapshot. Left
+            # alone, one long-reader episode grew the WAL to 1.3 GiB and it
+            # stayed there indefinitely (2026-07-10, sinnix-bdi). TRUNCATE
+            # both drains and shrinks it; with the 5s busy handler a blocked
+            # attempt degrades to a logged retry on the next interval instead
+            # of stalling sampling.
+            if sample_start >= next_wal_checkpoint:
+                next_wal_checkpoint = sample_start + WAL_CHECKPOINT_INTERVAL_S
+                try:
+                    ck = conn.execute("PRAGMA wal_checkpoint(TRUNCATE);").fetchone()
+                    if ck and ck[0]:
+                        print(
+                            "wal-checkpoint: blocked by concurrent reader "
+                            f"(log_frames={ck[1]} checkpointed={ck[2]}); retrying next interval",
+                            flush=True,
+                        )
+                except sqlite3.Error as exc:
+                    print(f"wal-checkpoint: failed: {exc!r}", flush=True)
 
 
 if __name__ == "__main__":
