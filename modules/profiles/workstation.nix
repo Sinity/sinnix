@@ -4,8 +4,8 @@
 # `sinnix.machine.isDesktop = true` and owns the resource-governance stack
 # that keeps desktop-critical processes protected while build/background
 # workloads are explicitly placed into lower-weight slices by
-# `sinnix-scope`: systemd slices, earlyoom policy, the cache-trim timer,
-# io.cost init, RAPL power caps, and the interactive memory sysctls.
+# `sinnix-scope`: systemd slices, earlyoom policy, io.cost init, RAPL power
+# caps, and the interactive memory sysctls.
 #
 # Mirrors modules/profiles/cloud.nix's shape (enable-gated aggregate a host
 # opts into) rather than scattering `isDesktop` conditionals across modules.
@@ -99,62 +99,6 @@ let
       printf '%s\n' 150000000 >"$package/constraint_1_power_limit_uw"
     '';
   };
-  cacheTrim = pkgs.writeShellApplication {
-    name = "sinnix-cache-trim";
-    runtimeInputs = [
-      pkgs.coreutils
-      pkgs.gawk
-      pkgs.procps
-    ];
-    text = ''
-      set -eu
-
-      # Keep kernel file cache from becoming an opaque multi-GiB resident
-      # claimant on the interactive workstation. This deliberately trades warm
-      # filesystem cache for predictable headroom and less swap residue.
-      cache_limit_mib="''${SINNIX_CACHE_TRIM_CACHE_LIMIT_MIB:-4096}"
-      dirty_limit_mib="''${SINNIX_CACHE_TRIM_DIRTY_LIMIT_MIB:-512}"
-
-      snapshot() {
-        awk '
-          /^(MemTotal|MemFree|MemAvailable|Cached|Buffers|SReclaimable|SUnreclaim|Slab|AnonPages|SwapTotal|SwapFree|Dirty|Writeback):/ {
-            value[$1] = $2
-          }
-          END {
-            total = value["MemTotal:"]
-            free = value["MemFree:"]
-            avail = value["MemAvailable:"]
-            cached = value["Cached:"] + value["Buffers:"] + value["SReclaimable:"]
-            dirty = value["Dirty:"] + value["Writeback:"]
-            swap_used = value["SwapTotal:"] - value["SwapFree:"]
-            printf "mem_total_mib=%d mem_free_mib=%d mem_available_mib=%d cache_reclaimable_mib=%d anon_mib=%d slab_unreclaimable_mib=%d dirty_writeback_mib=%d swap_used_mib=%d\n",
-              total / 1024, free / 1024, avail / 1024, cached / 1024,
-              value["AnonPages:"] / 1024, value["SUnreclaim:"] / 1024,
-              dirty / 1024, swap_used / 1024
-          }
-        ' /proc/meminfo
-      }
-
-      before="$(snapshot)"
-      cache_mib="$(printf '%s\n' "$before" | tr ' ' '\n' | awk -F= '$1 == "cache_reclaimable_mib" { print $2 }')"
-      dirty_mib="$(printf '%s\n' "$before" | tr ' ' '\n' | awk -F= '$1 == "dirty_writeback_mib" { print $2 }')"
-
-      if [ "''${cache_mib:-0}" -lt "$cache_limit_mib" ]; then
-        echo "sinnix-cache-trim: skip reason=below-cache-limit cache_limit_mib=$cache_limit_mib $before"
-        exit 0
-      fi
-
-      if [ "''${dirty_mib:-0}" -gt "$dirty_limit_mib" ]; then
-        echo "sinnix-cache-trim: skip reason=dirty-writeback-high dirty_limit_mib=$dirty_limit_mib $before"
-        exit 0
-      fi
-
-      sync
-      printf 3 > /proc/sys/vm/drop_caches
-      after="$(snapshot)"
-      echo "sinnix-cache-trim: trimmed cache_limit_mib=$cache_limit_mib before=[$before] after=[$after]"
-    '';
-  };
 in
 {
   options.sinnix.profiles.workstation.enable = lib.mkEnableOption "Interactive workstation profile";
@@ -183,8 +127,9 @@ in
       # + vfs_cache_pressure=100 inverted that path. The 2026-06-29 agent/build
       # failure mode was different: truly-free pages were low, zram was full,
       # and new rustc processes needed multi-GiB allocations immediately.
-      # Maintain a concrete free-page reserve and apply stronger VFS pressure so
-      # "available" memory does not depend on painful last-second reclaim.
+      # Maintain a concrete free-page reserve (min_free_kbytes +
+      # watermark_scale_factor) so "available" memory does not depend on
+      # painful last-second reclaim.
       #
       # Re-diagnosed 2026-07-09: swappiness=0 left the 4 GiB disk swapfile
       # completely unused (0B, even mid-OOM-kill) while earlyoom repeatedly
@@ -198,7 +143,14 @@ in
       # heavy-swap-hoarding regime that caused the original diagnosis.
       "vm.swappiness" = 10;
       "vm.page-cluster" = 0;
-      "vm.vfs_cache_pressure" = 1000;
+      # 2026-07-10: returned 1000 -> 100 (kernel default) per sinnix-mys.
+      # The 2026-06-07 diagnosis actually credited vfs=100 for the fix; 1000
+      # was an overshoot that, together with the (now removed) 2-minute
+      # drop_caches timer, kept dentries/inodes permanently cold — PID1 alone
+      # re-read ~390 GiB/day of unit fragments and mmap'd libraries. Burst
+      # headroom is owned by min_free_kbytes + watermark_scale_factor below,
+      # not by suppressing the VFS caches.
+      "vm.vfs_cache_pressure" = 100;
       "vm.min_free_kbytes" = 1048576;
       "vm.watermark_scale_factor" = 200;
       # Keep Btrfs/NVMe writeback from accumulating multi-GiB dirty bursts.
@@ -268,24 +220,16 @@ in
       };
     };
 
-    systemd.services.sinnix-cache-trim = {
-      description = "Bound reclaimable kernel file cache for interactive headroom";
-      serviceConfig = {
-        Type = "oneshot";
-        ExecStart = "${cacheTrim}/bin/sinnix-cache-trim";
-      };
-    };
-
-    systemd.timers.sinnix-cache-trim = {
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnBootSec = "3min";
-        OnUnitActiveSec = "2min";
-        AccuracySec = "20s";
-        Unit = "sinnix-cache-trim.service";
-      };
-    };
-
+    # There is deliberately NO periodic cache-drop machinery here. The former
+    # sinnix-cache-trim timer ran `sync; echo 3 > drop_caches` every 2 minutes
+    # whenever reclaimable cache exceeded 4 GiB. Measured on 2026-07-09/10
+    # (machine-telemetry metric_sample): 8-14 MILLION file workingset
+    # refaults per hour and ~3.5 TiB/day of block reads (polylogued 1.3T,
+    # PID1 ~0.4T re-faulting mmap'd libs/units, machine-telemetry 0.4T) —
+    # the trim manufactured the very pressure it claimed to relieve, since
+    # MemAvailable already counts reclaimable cache as available. Removed
+    # per the operator-approved posture decision (sinnix-mys); kernel LRU
+    # reclaim is the cache bound.
     services.earlyoom = {
       enable = true;
       enableNotifications = true;
