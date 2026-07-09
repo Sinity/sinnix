@@ -9,7 +9,6 @@
 # minor eval overhead but eliminates the need for a separate manifest file.
 {
   lib,
-  inputs,
   config,
   ...
 }:
@@ -17,7 +16,12 @@ let
   username = config.sinnix.user.name;
   primaryGroupName = config.users.users.${username}.group or username;
   userPasswordSecret = "${username}-password";
-  secretDir = inputs.self + "/secret";
+  # Lives outside the flake checkout entirely (not just gitignored inside
+  # it) — encrypted ciphertext + the agenix recipient/inventory manifest
+  # shouldn't be at risk from repo-local git operations, and keeping them
+  # out of `inputs.self` means they're invisible to Nix's flake-source
+  # filtering by construction, not by convention.
+  secretDir = /realm/data/secrets/sinnix/secret;
   cfg = config.sinnix.secrets;
 
   # Auto-discover .age files - evaluated once per flake eval

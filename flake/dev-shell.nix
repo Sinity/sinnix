@@ -114,8 +114,9 @@
             _toplevel_drv="$(
               SINNIX_REBUILD_ACTIVE=1 NIX_CONFIG="eval-cache = false" \
                 ${pkgs.nix}/bin/nix eval \
-                  "path:$_flake_dir#nixosConfigurations.sinnix-prime.config.system.build.toplevel.drvPath" \
+                  "$_flake_dir#nixosConfigurations.sinnix-prime.config.system.build.toplevel.drvPath" \
                   --raw \
+                  --impure \
                   "''${nix_override_args[@]}"
             )"
             _toplevel_out="$(
@@ -205,9 +206,10 @@
             --setenv=PATH="${rebuildServicePath}:$PATH" \
             ${commandRegistry.rebuildContainmentFlags}
             ${pkgs.nixos-rebuild}/bin/nixos-rebuild build-vm \
-              --flake "path:$_flake_dir#sinnix-prime" \
+              --flake "$_flake_dir#sinnix-prime" \
               --max-jobs "$rebuild_jobs" \
               --cores "$rebuild_cores" \
+              --impure \
               "''${nix_override_args[@]}"
         '';
         lint = pkgs.writeShellScriptBin "lint" ''exec ${nix} run .#lint -- "$@"'';
@@ -230,7 +232,13 @@
         clean = pkgs.writeShellScriptBin "clean" ''
           exec ${pkgs.nh}/bin/nh clean all
         '';
-        agenix = pkgs.writeShellScriptBin "agenix" ''exec ${nix} run .#agenix -- "$@"'';
+        # secrets.nix + secret/*.age live outside the checkout at
+        # /realm/data/secrets/sinnix (see modules/secrets.nix) — cd there so
+        # RULES defaults to ./secrets.nix and relative FILE args like
+        # `secret/foo.age` keep resolving exactly as before the move.
+        agenix = pkgs.writeShellScriptBin "agenix" ''
+          cd /realm/data/secrets/sinnix && exec ${inputs.agenix.packages.${system}.default}/bin/agenix "$@"
+        '';
         diff-closure = pkgs.writeShellScriptBin "diff-closure" ''
           set -euo pipefail
           if [ $# -ge 2 ]; then
