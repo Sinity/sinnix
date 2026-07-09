@@ -288,10 +288,15 @@ config in `secrets.nix` (repo root).
   (`heavyChecks` flake output: HM runtime checks, VM checks, host builds).
   `lint` = deadnix/statix/shellcheck. `smoke [terminal|services|all]` = live
   host probes.
-- **Live-drift tripwire:** `nixos-version --revision` reports the commit the
-  running generation was built from. If it isn't repo HEAD, recent commits
-  (and boot-time options like `boot.tmp.*`) are not live yet — say so instead
-  of assuming config == reality.
+- **Live-drift tripwire:** `nixos-version --configuration-revision` reports
+  the sinnix commit the running generation was built from
+  (`system.configurationRevision` stamped in `flake/nixos.nix`; a `-dirty`
+  suffix means uncommitted tree state was included). If it isn't repo HEAD,
+  recent commits (and boot-time options like `boot.tmp.*`) are not live yet —
+  say so instead of assuming config == reality. Plain `--revision` reports
+  the NIXPKGS revision — an equally plausible-looking sha; do not read it as
+  a sinnix commit. Generations older than 2026-07-10 predate the stamp and
+  print nothing for `--configuration-revision`.
 
 ## Maintenance Protocol
 
