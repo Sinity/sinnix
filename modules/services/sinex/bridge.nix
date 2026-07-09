@@ -394,6 +394,20 @@ in
               api = {
                 enable = runtimeEnabled;
                 autoGenerateTls = true;
+                # sinex-d4qg: the shared per-service pool default (4,
+                # database.connectionPool.maxConnections) starves the API's
+                # own traffic under real load -- confirmed live 2026-07-10:
+                # a single replay preview transaction over a real-volume
+                # scope held a connection long enough that even periodic
+                # telemetry sampling on the same pool started timing out.
+                # 16 matches sinex's own Rust-level PoolConfig::default()
+                # (crate/sinex-db/src/pool.rs) -- the value the shared
+                # default itself overrode down to 4 -- so this isn't a new
+                # number, it's reverting the API specifically to the
+                # upstream code's own judgment of a reasonable pool size.
+                # Automata and the event engine are untouched (still 4);
+                # they weren't observed under this kind of pressure.
+                poolMaxConnections = 16;
               };
             };
 
