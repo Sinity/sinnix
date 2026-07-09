@@ -290,15 +290,34 @@ in
       enable = true;
       enableNotifications = true;
       # earlyoom acts only when BOTH memory and swap are below threshold.
-      # Keep the memory gate tied to real MemAvailable pressure, but do not
-      # require swap occupancy: the 2026-06-30 desktop stall hit 314 MiB
-      # MemAvailable with swap still empty, so the old swap gate suppressed
-      # the emergency kill until the compositor/session was already wedged.
-      # earlyoom v1.9 computes this percentage against "user mem total"
+      # Keep the memory gate tied to real MemAvailable pressure. earlyoom
+      # v1.9 computes this percentage against "user mem total"
       # (MemAvailable + AnonPages), which is ~26 GiB on sinnix-prime under
       # current desktop load; 5% is about 1.3 GiB of MemAvailable headroom.
       freeMemThreshold = 5;
-      freeSwapThreshold = 100;
+      # Re-diagnosed 2026-07-10: 100 was set after the 2026-06-30 desktop
+      # stall (314 MiB MemAvailable with swap still empty -- the old ~10%
+      # swap gate suppressed the emergency kill until the compositor was
+      # already wedged). At the time swap lived on the root SATA SSD, so
+      # letting swap fill up meant fighting for I/O with everything else on
+      # that disk -- waiting for it to help was actively harmful. freeSwap
+      # Threshold=100 made the swap condition a no-op (any nonzero swap
+      # usage satisfies "below 100% free"), so earlyoom fires the instant
+      # MemAvailable alone dips under freeMemThreshold, regardless of how
+      # much swap capacity sits idle.
+      #
+      # Since the swapfile moved to /realm (NVMe, hosts/sinnix-prime/
+      # storage.nix) and vm.swappiness went 0 -> 10, that tradeoff no
+      # longer holds: swap I/O is fast and doesn't contend with anything
+      # wear-sensitive or latency-critical. Confirmed live the same night
+      # a fresh rustc burst got SIGTERM'd with swap at 97.6% free (465 MiB
+      # of 8 GiB used) -- the swap capacity that should have absorbed the
+      # spike was sitting idle because the gate never gave it a chance.
+      # Loosened to 50: lets a burst use up to ~4 GiB of swap before
+      # earlyoom panics (a real grace window, unlike 100), while still
+      # acting well before swap is anywhere near exhausted (unlike the old
+      # ~10% default that caused the June wedge).
+      freeSwapThreshold = 50;
       extraArgs = [
         # Prefer killing rebuildable heavy tooling under pressure — NOT the
         # coding agents. rust-analyzer can be restarted by the editor, and it is
