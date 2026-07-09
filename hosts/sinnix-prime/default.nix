@@ -18,8 +18,8 @@
   sinnix.gpu.mode = "nvidia";
 
   # Interactive workstation posture: isDesktop=true plus the resource-
-  # governance stack (slices, earlyoom, cache-trim timer, io.cost init, RAPL
-  # caps, memory sysctls) — see modules/profiles/workstation.nix.
+  # governance stack (slices, earlyoom, io.cost init, RAPL caps, memory
+  # sysctls) — see modules/profiles/workstation.nix.
   sinnix.profiles.workstation.enable = true;
 
   # Every capability in modules/features/ is default-on; this host expresses
