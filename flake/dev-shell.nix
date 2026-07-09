@@ -144,6 +144,10 @@
             fi
           fi
 
+          if [ "${action}" = "switch" ]; then
+            ${commandRegistry.sinexCachePush}
+          fi
+
           exit "$_rebuild_status"
         '';
 

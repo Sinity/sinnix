@@ -176,9 +176,12 @@ or `pkgs/<name>/` for real derivations.
   `pkgsForCudaArch.sm_86`). Routine `update` (devshell command) deliberately
   excludes it; bumping it forces an hours-long CUDA recompile. Bump only via
   `update nixpkgs-ai`.
-- `sinex` deliberately does NOT follow sinnix's nixpkgs: its derivation hash
-  must match what sinex CI pushes to sinity.cachix.org so the desktop
-  substitutes instead of compiling a ~464K-LOC Rust workspace.
+- `sinex` deliberately does NOT follow sinnix's nixpkgs, so its derivation
+  hash stays stable across sinnix nixpkgs bumps and each sinex rev is
+  compiled at most once. sinex CI no longer pushes to sinity.cachix.org
+  (sinex#883 disabled automatic hosted Actions): the desktop is the builder
+  of record, and `switch` publishes the sinex closure to the cache after a
+  successful activation (`sinexCachePush`, flake/command-registry.nix).
 - `lynchpin` is a local `git+file://` input; sinex/polylogue/scribe-tap/
   yt-polisher come from GitHub so deploys don't consume local checkout state.
   One-off local testing: `SINNIX_{SINEX,POLYLOGUE,LYNCHPIN}_OVERRIDE=<path>
