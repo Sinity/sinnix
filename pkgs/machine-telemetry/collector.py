@@ -5,6 +5,7 @@ import datetime as dt
 import glob
 import json
 import os
+import pwd
 import re
 import sqlite3
 import subprocess
@@ -1853,7 +1854,28 @@ def systemctl_props(
     cmd = ["systemctl"]
     if user:
         if user_name:
-            cmd.extend(["--user", f"--machine={user_name}@"])
+            # PAM-free user-manager access. The previous
+            # `--user --machine=<user>@` path rides systemd-stdio-bridge
+            # through a full PAM login on EVERY sample tick: a session
+            # scope + a run-pN transient unit + a lastlog2 write each time,
+            # ~32K journal lines/day of pure scaffolding — the single
+            # biggest journal noise source on the host (2026-07-10 audit)
+            # and the thing tripping the lastlog2 wear canary. setpriv
+            # switches uid without PAM, and dbus-broker admits the matching
+            # uid to the user bus directly.
+            pw = pwd.getpwnam(user_name)
+            cmd = [
+                "setpriv",
+                f"--reuid={pw.pw_uid}",
+                f"--regid={pw.pw_gid}",
+                "--init-groups",
+                "env",
+                f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{pw.pw_uid}/bus",
+                f"XDG_RUNTIME_DIR=/run/user/{pw.pw_uid}",
+                f"HOME={pw.pw_dir}",
+                "systemctl",
+                "--user",
+            ]
         else:
             cmd.append("--user")
     cmd += [
