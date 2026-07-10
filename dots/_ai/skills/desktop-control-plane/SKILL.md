@@ -122,6 +122,7 @@ sinnix-chrome-control --target live status
 # Start and use an agent-owned private browser profile
 sinnix-chrome-control --target private private-start --url https://example.com
 sinnix-chrome-control --target private list-tabs
+sinnix-chrome-control --target private new-tab --background --url https://example.com
 
 # Use a visible private browser when the operator should inspect it
 sinnix-chrome-control --target private-visible private-start --url https://example.com
@@ -129,7 +130,25 @@ sinnix-chrome-control --target private-visible private-start --url https://examp
 # Wait for an element and read page text
 sinnix-chrome-control --target private wait-selector <page_id> --selector 'main'
 sinnix-chrome-control --target private get-text <page_id>
+
+# Attach local context without a file-picker dialog
+sinnix-chrome-control --target private upload-files <page_id> \
+  --selector 'input[type=file]' --file /path/to/context.md
 ```
+
+### Browser Focus Safety
+
+- Prefer the browser CLI or CDP API over visible UI automation.
+- Treat `private-visible` as shared across concurrent agents. Own explicit page
+  target IDs and keep work on background CDP targets.
+- Use `new-tab --background` for new work and `upload-files` for attachments;
+  neither requires activating a tab or opening a native file picker.
+- Never activate another agent's target. Avoid coordinate clicks; address a
+  known page target and selector instead.
+- When an operation genuinely depends on OS focus, inspect Hyprland's focused
+  window immediately before sending input and verify focus again afterward.
+- Use `private` for unattended work. Use `private-visible` only when the
+  operator needs to inspect the agent browser.
 
 ## Notes
 

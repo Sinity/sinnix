@@ -13,6 +13,7 @@ schema_file=""
 json_mode=0
 skip_agents_render=0
 ephemeral=0
+claude_api_key_auth=0
 
 usage() {
   cat <<'EOF'
@@ -34,6 +35,7 @@ Options:
   --json
   --skip-agents-render
   --ephemeral
+  --claude-api-key-auth       Keep ANTHROPIC_API_KEY for Claude instead of subscription auth
 EOF
 }
 
@@ -87,6 +89,10 @@ while [[ $# -gt 0 ]]; do
     ephemeral=1
     shift
     ;;
+  --claude-api-key-auth)
+    claude_api_key_auth=1
+    shift
+    ;;
   -h | --help)
     usage
     exit 0
@@ -124,12 +130,40 @@ fi
 
 cd "${workdir}"
 
+resolve_agent_bin() {
+  case "$1" in
+  claude)
+    if command -v claude-full >/dev/null 2>&1; then
+      command -v claude-full
+    elif command -v claude >/dev/null 2>&1; then
+      command -v claude
+    else
+      return 1
+    fi
+    ;;
+  codex | gemini)
+    command -v "$1"
+    ;;
+  *)
+    return 1
+    ;;
+  esac
+}
+
+agent_bin="$(resolve_agent_bin "${agent}")" || {
+  echo "${agent} runtime not found (Claude accepts claude or claude-full)" >&2
+  exit 1
+}
+
 run_with_optional_env() {
-  if [[ ${skip_agents_render} -eq 1 ]]; then
-    SINNIX_SKIP_AGENTS_RENDER=1 "$@"
-  else
-    "$@"
+  local -a env_args=(env)
+  if [[ ${agent} == "claude" && ${claude_api_key_auth} -eq 0 ]]; then
+    env_args+=(-u ANTHROPIC_API_KEY)
   fi
+  if [[ ${skip_agents_render} -eq 1 ]]; then
+    env_args+=(SINNIX_SKIP_AGENTS_RENDER=1)
+  fi
+  "${env_args[@]}" "$@"
 }
 
 case "${agent}" in
@@ -139,7 +173,7 @@ codex)
     exit 2
   fi
 
-  cmd=(codex exec -C "${workdir}" --model "${model}" --output-last-message "${last_file}")
+  cmd=("${agent_bin}" exec -C "${workdir}" --model "${model}" --output-last-message "${last_file}")
   if [[ -n ${reasoning_effort} ]]; then
     cmd+=(-c "model_reasoning_effort=\"${reasoning_effort}\"")
   fi
@@ -162,19 +196,39 @@ codex)
   ;;
 claude)
   prompt_text="$(cat "${prompt_file}")"
-  cmd=(claude --print -p "${prompt_text}" --workdir "${workdir}")
+  cmd=("${agent_bin}" --print -p "${prompt_text}")
+  if [[ -n ${model} ]]; then
+    cmd+=(--model "${model}")
+  fi
+  if [[ -n ${reasoning_effort} ]]; then
+    cmd+=(--effort "${reasoning_effort}")
+  fi
+  if [[ -n ${schema_file} ]]; then
+    [[ -f ${schema_file} ]] || {
+      echo "missing schema: ${schema_file}" >&2
+      exit 1
+    }
+    cmd+=(--json-schema "$(<"${schema_file}")")
+  fi
 
   if [[ ${json_mode} -eq 1 ]]; then
+    cmd+=(--output-format json)
     run_with_optional_env "${cmd[@]}" >"${json_file}" 2>"${log_file}"
+    if [[ -n ${last_file} ]]; then
+      jq -r '.result // empty' "${json_file}" >"${last_file}"
+    fi
   else
     run_with_optional_env "${cmd[@]}" >"${log_file}" 2>&1
+    if [[ -n ${last_file} ]]; then
+      cp "${log_file}" "${last_file}"
+    fi
   fi
   ;;
 gemini)
   if [[ ${json_mode} -eq 1 ]]; then
-    run_with_optional_env gemini <"${prompt_file}" >"${json_file}" 2>"${log_file}"
+    run_with_optional_env "${agent_bin}" <"${prompt_file}" >"${json_file}" 2>"${log_file}"
   else
-    run_with_optional_env gemini <"${prompt_file}" >"${log_file}" 2>&1
+    run_with_optional_env "${agent_bin}" <"${prompt_file}" >"${log_file}" 2>&1
   fi
   ;;
 *)

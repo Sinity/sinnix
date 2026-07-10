@@ -1,55 +1,156 @@
 # Runtime Modes
 
-## Batch Mode
+## Contents
 
-Use when reproducibility and machine-ingestable logs are primary.
+- [Choose a Lane](#choose-a-lane)
+- [Direct Local Execution](#direct-local-execution)
+- [Codex Cloud](#codex-cloud)
+- [Prepared Prompt Batches](#prepared-prompt-batches)
+- [Kitty Sessions](#kitty-sessions)
 
-Traits:
+## Choose a Lane
 
-- deterministic CLI invocation,
-- easy to rerun in scripts,
-- no UI dependency.
+| Need | Lane |
+| --- | --- |
+| Deterministic local run and log | Direct `codex exec` or Claude `--print` |
+| Resumable unattended Claude work | Claude native `--background` |
+| Hosted/offloaded repository work | Codex Cloud |
+| Several prepared prompt files | `launch_agent_tabs.sh --mode batch` |
+| Visible prompt run with process-level interruption | Kitty |
 
-Supported agents:
+Keep Kitty out of unattended execution paths. Native runtimes have fewer focus
+and window-management failure modes.
 
-- `codex exec` — full exec mode with `--ephemeral`, `--json`, `--output-schema`.
-- `claude --print` — non-interactive one-shot mode.
-- `gemini` — non-interactive mode.
+## Direct Local Execution
 
-## Kitty Mode
+### Codex
 
-Use when you need live observability and manual interruption.
+Set the repository, model, and reasoning effort on every unattended run:
 
-Traits:
+```bash
+codex exec -C <repo> \
+  --model <model> \
+  -c 'model_reasoning_effort="high"' \
+  - < <prompt-file>
+```
 
-- one tab/window per agent,
-- remote launch through `kitty @ launch`,
-- compatible with Hyprland workflow routing.
+Persist the session by omitting `--ephemeral`. Resume it from the repository so
+Codex applies the expected current-directory filtering and instructions:
 
-Hyprland tip:
+```bash
+cd <repo>
+codex exec resume <session-id> \
+  --model <model> \
+  -c 'model_reasoning_effort="high"' \
+  - < <follow-up-prompt-file>
+```
 
-- launch in separate Kitty OS windows (`--launch-type os-window`) and move windows to a dedicated workspace using your existing `hyprctl dispatch` patterns.
-- this skill does not hardcode `hyprctl` behavior because workspace naming/layouts differ by setup.
+Use `codex exec resume --last ...` only when the newest matching session is
+unambiguous. Add `--json`, `--output-schema <file>`, or
+`--output-last-message <file>` when a machine-readable or durable artifact is
+required.
 
-## Agent-Specific Invocation
+### Claude
 
-| Agent  | Batch command                                | Interactive command         |
-| ------ | -------------------------------------------- | --------------------------- |
-| codex  | `codex exec -C <dir> [--model M] - < prompt` | Same, launched in Kitty tab |
-| claude | `claude --print -p "$(cat prompt)"`          | `claude` in Kitty tab       |
-| gemini | `gemini < prompt`                            | `gemini` in Kitty tab       |
+Sinnix manages Claude through `claude-full`. Run from the repository; Claude
+has no `--workdir` option. Unset `ANTHROPIC_API_KEY` by default so the managed
+CLI uses subscription authentication:
 
-## Model Selection (Codex)
+```bash
+cd <repo>
+env -u ANTHROPIC_API_KEY claude-full --print \
+  --model <model> \
+  --effort high \
+  -p "$(cat <prompt-file>)"
+```
 
-- Spark lane: `--model gpt-5.3-codex-spark`
-- Higher-depth lane: switch `--model` to a larger Codex model when synthesis quality dominates latency.
-- Do not rely on Sinnix model alias wrappers here; use explicit `--model` and
-  per-run effort flags when a batch lane needs a non-default model.
+Keep `ANTHROPIC_API_KEY` only when API-key billing is explicitly intended.
 
-## Decision Table
+For resumable unattended work, use Claude's native background mode instead of
+putting the process in a Kitty tab:
 
-1. Need explicit model control? → Use `codex exec` workflow.
-2. Need strict machine output contracts (`--output-schema`)? → Prefer `codex exec`.
-3. Need fast iterative collaboration in one thread? → Use in-session subagents.
-4. Need live observability and manual steering? → Use Kitty mode.
-5. Need unattended repeatable run with stable artifacts? → Use batch mode.
+```bash
+cd <repo>
+env -u ANTHROPIC_API_KEY claude-full --background \
+  --model <model> \
+  --effort high \
+  "$(cat <prompt-file>)"
+```
+
+Manage native background sessions through the bootstrap launcher that owns the
+installed Claude runtime:
+
+```bash
+~/.local/state/claude-code/launch.sh agents --json
+~/.local/state/claude-code/launch.sh logs <agent-id>
+~/.local/state/claude-code/launch.sh stop <agent-id>
+```
+
+Save the returned agent ID; `logs` and `stop` require it.
+
+## Codex Cloud
+
+Submit a hosted task with an explicit environment. The command returns the task
+ID used by every later operation:
+
+```bash
+codex cloud exec --env <env-id> --branch <branch> "<prompt>"
+codex cloud list --env <env-id> --json
+codex cloud status <task-id>
+codex cloud diff <task-id>
+codex cloud apply <task-id>
+```
+
+For best-of-N tasks, pass `--attempts <n>` to `exec`, then select an attempt
+with `codex cloud diff --attempt <n> <task-id>` and
+`codex cloud apply --attempt <n> <task-id>`. Inspect the diff before `apply`;
+`apply` changes the current checkout.
+
+## Prepared Prompt Batches
+
+`launch_agent_tabs.sh` reads `<prompt-dir>/<name>.prompt` and writes per-task
+logs and last-message artifacts under the output directory. Bound direct batch
+concurrency with a positive integer:
+
+```bash
+scripts/launch_agent_tabs.sh \
+  --agent codex \
+  --mode batch \
+  --parallel 4 \
+  --model <model> \
+  --reasoning-effort high \
+  --workdir <repo> \
+  --prompt-dir <prompt-dir> \
+  --output-dir <output-dir> \
+  task-a task-b task-c task-d
+```
+
+`--parallel` greater than one is valid only with `--mode batch`. Claude runs
+through the helper unset `ANTHROPIC_API_KEY` unless
+`--claude-api-key-auth` explicitly opts into API-key auth.
+
+## Kitty Sessions
+
+Use Kitty only when a human or coordinator needs a visible prompt run with
+process-level interruption. `launch_agent_tabs.sh` still invokes the
+non-interactive prompt runner; use `agent_instance_control.sh` or a manually
+launched interactive agent when conversational mid-turn steering is required.
+The launcher uses `kitty @ launch --keep-focus`, so dispatch does not take focus
+from the operator. Route separate OS windows silently when isolation is useful:
+
+```bash
+scripts/launch_agent_tabs.sh \
+  --agent codex \
+  --mode kitty \
+  --launch-type os-window \
+  --workspace <workspace> \
+  --model <model> \
+  --reasoning-effort high \
+  --workdir <repo> \
+  --prompt-dir <prompt-dir> \
+  --output-dir <output-dir> \
+  task-a task-b
+```
+
+`--workspace` requires Kitty `os-window` mode and
+`sinnix-hypr-control`. Do not use `--parallel` in Kitty mode.
