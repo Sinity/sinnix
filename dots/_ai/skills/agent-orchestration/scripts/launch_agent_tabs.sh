@@ -183,7 +183,7 @@ if [[ -z ${model} ]]; then
   claude)
     ;;
   codex)
-    model="gpt-5.5"
+    model="gpt-5.6-terra"
     ;;
   gemini)
     model="gemini-2.0-flash"
@@ -375,6 +375,9 @@ run_kitty_agent() {
 # Special handling for codex with spark model
 if [[ ${model} == "gpt-5.3-codex-spark" && -z ${reasoning_effort} ]]; then
   reasoning_effort="xhigh"
+fi
+if [[ ${agent} == "codex" && -z ${reasoning_effort} ]]; then
+  reasoning_effort="high"
 fi
 
 batch_active=0

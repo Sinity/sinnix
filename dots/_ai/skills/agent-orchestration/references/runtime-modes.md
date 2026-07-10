@@ -25,11 +25,14 @@ and window-management failure modes.
 
 ### Codex
 
-Set the repository, model, and reasoning effort on every unattended run:
+Use `gpt-5.6-terra` with high reasoning for unattended execution. The
+interactive coordinating default is `gpt-5.6-sol` with high reasoning. Set the
+repository, model, and effort explicitly on every run and verify the launch
+receipt reports the requested model:
 
 ```bash
 codex exec -C <repo> \
-  --model <model> \
+  --model gpt-5.6-terra \
   -c 'model_reasoning_effort="high"' \
   - < <prompt-file>
 ```
@@ -40,7 +43,7 @@ Codex applies the expected current-directory filtering and instructions:
 ```bash
 cd <repo>
 codex exec resume <session-id> \
-  --model <model> \
+  --model gpt-5.6-terra \
   -c 'model_reasoning_effort="high"' \
   - < <follow-up-prompt-file>
 ```
@@ -49,6 +52,12 @@ Use `codex exec resume --last ...` only when the newest matching session is
 unambiguous. Add `--json`, `--output-schema <file>`, or
 `--output-last-message <file>` when a machine-readable or durable artifact is
 required.
+
+Execution prompts must require worker-owned verification: focused real-route
+tests, exact-path static checks, and an affected-area check proportional to the
+change. They must also name the anti-vacuity mutation that would make the test
+fail. More RAM is a reason to verify concurrently under cgroup limits, not a
+reason to accept narrow self-confirming tests.
 
 ### Claude
 

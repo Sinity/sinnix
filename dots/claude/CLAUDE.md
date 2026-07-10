@@ -545,6 +545,21 @@ agents only; if agents intentionally share one checkout, the coordinator owns
 branching/committing/merging and agents should report patches or commit only by
 explicit instruction.
 
+**Codex model contract:** the coordinating interactive session uses
+`gpt-5.6-sol` at high reasoning by default. Unattended implementation/review
+workers use `gpt-5.6-terra` at high reasoning. Always pass the model and effort
+explicitly and verify them in the launch receipt; never silently fall back to a
+stale configured model. `gpt-5.5` is retired for new work.
+
+**Worker verification ownership:** parallel workers verify their own changes,
+not merely produce diffs. Prompts require focused real-route behavior tests,
+exact-path static checks, and a broader affected-area check when a change spans
+modules/contracts. Require an anti-vacuity statement naming the production
+dependency exercised and the implementation mutation/removal that makes the
+test fail. Toy replicas, test-only validators, self-authorized registries, and
+mocks that only prove their own wrapping are rejected even when green. The
+coordinator still performs independent review and publish-boundary gates.
+
 **Worktree discipline — CRITICAL when using worktree isolation:**
 
 - Agents run in isolated worktrees (`isolation: "worktree"`). The isolation
@@ -604,8 +619,9 @@ clustering helper where the repo has one).
   execution-grade (full design or packet), with no shared hotspot files —
   then the packet/design IS the subagent prompt. Otherwise one agent
   pipelining beats coordination overhead.
-- **Verification amortization**: narrow per-item checks while batching; the
-  broad gate once per branch at the publish boundary — never per item.
+- **Verification amortization**: workers run focused real-route checks plus the
+  affected-area check their own change warrants. The coordinator runs the broad
+  gate once per branch at the publish boundary, not once per item.
 - **Content-aware shapes**: mechanical sweeps (lint/docs/renames) batch
   hardest; schema/migration bumps must batch per tier/window; investigation
   items batch over a shared evidence pass; decision items batch into one

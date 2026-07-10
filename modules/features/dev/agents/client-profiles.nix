@@ -29,7 +29,7 @@ let
   codexBrowserConfigFile = mkCodexProfileFile "browser";
   # Alternate-backend profiles: the full MCP table plus a model + provider.
   # `codex --profile <name>` layers these over ~/.codex/config.toml, so the
-  # provider's base_url/env_key and the chosen model override the gpt-5.5
+  # provider's base_url/env_key and the chosen model override the gpt-5.6-sol
   # defaults while keeping the full MCP surface.
   mkCodexBackendProfileFile =
     name: extra:
