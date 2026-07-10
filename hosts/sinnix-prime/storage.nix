@@ -72,8 +72,10 @@ let
   prepareSwapfile = pkgs.writeShellApplication {
     name = "sinnix-prime-prepare-swapfile";
     runtimeInputs = [
+      pkgs.btrfs-progs
       pkgs.coreutils
       pkgs.e2fsprogs
+      pkgs.gnugrep
       pkgs.util-linux
     ];
     text = ''
@@ -82,12 +84,26 @@ let
       swap_dir="$(dirname ${swapFile})"
       desired_size=$(( ${toString swapSizeGiB} * 1024 * 1024 * 1024 ))
 
-      mkdir -p "$swap_dir"
-      chmod 700 "$swap_dir"
+      # The swap dir must be its own btrfs subvolume, not a plain directory:
+      # an active swapfile pins its extents, so `btrfs subvolume snapshot`
+      # of the containing subvolume fails with ETXTBSY. A plain dir here
+      # silently killed every btrbk /realm snapshot (and thus the Borg
+      # drain) from 2026-07-09T22:33 until diagnosed. Nested subvolumes are
+      # excluded from parent snapshots, which also keeps swap contents out
+      # of backups.
+      if [ -d "$swap_dir" ] && [ "$(stat --format=%i "$swap_dir")" != "256" ]; then
+        if swapon --noheadings --raw --show=NAME | grep -qxF "${swapFile}"; then
+          swapoff "${swapFile}"
+        fi
+        rm -f "${swapFile}"
+        rmdir "$swap_dir"
+      fi
 
-      if [ ! -e "${swapFile}" ]; then
+      if [ ! -d "$swap_dir" ]; then
+        btrfs subvolume create "$swap_dir" >/dev/null
         chattr +C "$swap_dir" 2>/dev/null || true
       fi
+      chmod 700 "$swap_dir"
 
       current_size=0
       if [ -f "${swapFile}" ]; then
