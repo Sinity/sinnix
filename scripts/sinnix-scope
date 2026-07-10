@@ -5,13 +5,83 @@
 
 set -euo pipefail
 
-if [ "$#" -lt 3 ] || [ "$2" != "--" ]; then
-  echo "usage: sinnix-scope <class> -- <command> [args...]" >&2
+if [ "$#" -lt 3 ]; then
+  echo "usage: sinnix-scope <class> [--unit <name>] [--agent-property <Name=Value>] -- <command> [args...]" >&2
   exit 64
 fi
 
 class="$1"
-shift 2
+shift
+
+unit_override=""
+agent_properties=()
+
+validate_agent_property() {
+  local property="$1"
+  local name="${property%%=*}"
+  local value="${property#*=}"
+
+  if [ "$name" = "$property" ] || [ -z "$value" ]; then
+    echo "sinnix-scope: invalid agent property: $property" >&2
+    exit 64
+  fi
+
+  case "$name" in
+    MemoryHigh|MemoryMax)
+      [[ "$value" =~ ^([0-9]+|[0-9]+[KMGTP]([iB])?|infinity)$ ]] || {
+        echo "sinnix-scope: invalid $name value: $value" >&2
+        exit 64
+      }
+      ;;
+    CPUWeight|IOWeight)
+      [[ "$value" =~ ^[0-9]+$ ]] && [ "$value" -ge 1 ] && [ "$value" -le 10000 ] || {
+        echo "sinnix-scope: invalid $name value: $value" >&2
+        exit 64
+      }
+      ;;
+    *)
+      echo "sinnix-scope: unsupported agent property: $name" >&2
+      exit 64
+      ;;
+  esac
+}
+
+while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
+  case "$1" in
+    --unit)
+      [ "$class" = "agent" ] || {
+        echo "sinnix-scope: --unit is valid only for the agent class" >&2
+        exit 64
+      }
+      unit_override="${2:?sinnix-scope: --unit requires a value}"
+      [[ "$unit_override" =~ ^[A-Za-z0-9][A-Za-z0-9_.@-]*\.scope$ ]] || {
+        echo "sinnix-scope: invalid scope unit: $unit_override" >&2
+        exit 64
+      }
+      shift 2
+      ;;
+    --agent-property)
+      [ "$class" = "agent" ] || {
+        echo "sinnix-scope: --agent-property is valid only for the agent class" >&2
+        exit 64
+      }
+      property="${2:?sinnix-scope: --agent-property requires a value}"
+      validate_agent_property "$property"
+      agent_properties+=("$property")
+      shift 2
+      ;;
+    *)
+      echo "sinnix-scope: unknown option: $1" >&2
+      exit 64
+      ;;
+  esac
+done
+
+if [ "$#" -lt 2 ] || [ "$1" != "--" ]; then
+  echo "usage: sinnix-scope <class> [--unit <name>] [--agent-property <Name=Value>] -- <command> [args...]" >&2
+  exit 64
+fi
+shift
 
 if [ -n "${SINNIX_RUNTIME_INVENTORY_FILE:-}" ]; then
   inventory_file="$SINNIX_RUNTIME_INVENTORY_FILE"
@@ -113,6 +183,12 @@ elif [ "$class" = build ]; then
   export CARGO_BUILD_JOBS CARGO_INCREMENTAL CMAKE_BUILD_PARALLEL_LEVEL MAKEFLAGS NIX_BUILD_CORES SCCACHE_IDLE_TIMEOUT
 fi
 
+# Explicit job limits are overrides, so append them after inventory defaults.
+# systemd-run applies the last occurrence when a property is specified twice.
+for property in "${agent_properties[@]}"; do
+  property_args+=("--property=$property")
+done
+
 if [ -n "$ionice_class" ] && command -v ionice >/dev/null 2>&1; then
   case "$ionice_class" in
     best-effort)
@@ -138,6 +214,10 @@ if [ "$unscoped_background_xtask" = 1 ]; then
 fi
 
 if grep -q "/$slice" /proc/self/cgroup 2>/dev/null; then
+  if [ -n "$unit_override" ] || [ "${#agent_properties[@]}" -gt 0 ]; then
+    echo "sinnix-scope: cannot apply a job scope or overrides from an existing scope" >&2
+    exit 64
+  fi
   exec "${scoped_command[@]}"
 fi
 
@@ -156,7 +236,7 @@ fi
 # don't resurrect a partial one under --scope.
 
 if [ "${EUID:-$(id -u)}" -eq 0 ]; then
-  unit="sinnix-${class}-$(date +%s%N)-$$"
+  unit="${unit_override:-sinnix-${class}-$(date +%s%N)-$$}"
   exec systemd-run \
     --scope \
     --quiet \
@@ -169,7 +249,7 @@ if [ "${EUID:-$(id -u)}" -eq 0 ]; then
 fi
 
 if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
-  unit="sinnix-${class}-$(date +%s%N)-$$"
+  unit="${unit_override:-sinnix-${class}-$(date +%s%N)-$$}"
   exec systemd-run \
     --user \
     --scope \

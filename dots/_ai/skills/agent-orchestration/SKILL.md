@@ -41,7 +41,12 @@ it contains the verified commands, auth rules, and mode constraints.
 ## Helpers
 
 - `scripts/run_agent_prompt.sh` runs one prompt through Claude, Codex, or
-  Gemini and records its output.
+  Gemini, records its output, and emits an attested manifest for each
+  headless job. Use `--job-id`, `--job-role`, `--work-item`, and the narrow
+  resource options when an operator needs a stable control handle.
+- `scripts/agent_job_control.sh` lists or refreshes a manifest and interrupts
+  only by an attested job ID; it deliberately rejects PID, title, and window
+  targeting.
 - `scripts/launch_agent_tabs.sh` runs prompt batches directly or in Kitty,
   including bounded batch concurrency and optional workspace routing.
 - `scripts/agent_instance_control.sh` discovers, captures, interrupts, or sends

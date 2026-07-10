@@ -4,11 +4,65 @@
 # runtimeInputs: bash coreutils @sinnix-scope
 set -euo pipefail
 
+unit=""
+properties=()
+
+usage() {
+  echo "usage: sinnix-agent-scope-exec [--unit <name.scope>] [--property <Name=Value>] -- <command> [args...]" >&2
+}
+
+while [[ $# -gt 0 && $1 != "--" ]]; do
+  case "$1" in
+    --unit)
+      unit="${2:?sinnix-agent-scope-exec: --unit requires a value}"
+      shift 2
+      ;;
+    --property)
+      properties+=("${2:?sinnix-agent-scope-exec: --property requires a value}")
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      if [[ $1 == -* ]]; then
+        usage
+        exit 64
+      fi
+      break
+      ;;
+  esac
+done
+
+if [[ $# -eq 0 ]]; then
+  usage
+  exit 64
+fi
+if [[ $1 == "--" ]]; then
+  shift
+fi
+
 if [[ -z "${SINNIX_AGENT_SCOPED:-}" ]]; then
   scope_bin="$(command -v sinnix-scope 2>/dev/null || true)"
   if [[ -n "$scope_bin" && -x "$scope_bin" ]]; then
-    exec "$scope_bin" agent -- env SINNIX_AGENT_SCOPED=1 "$@"
+    scope_args=(agent)
+    if [[ -n "$unit" ]]; then
+      scope_args+=(--unit "$unit")
+    fi
+    for property in "${properties[@]}"; do
+      scope_args+=(--agent-property "$property")
+    done
+    exec "$scope_bin" "${scope_args[@]}" -- env \
+      SINNIX_AGENT_SCOPED=1 \
+      SINNIX_AGENT_SCOPE_UNIT="$unit" \
+      "$@"
   fi
+fi
+
+if [[ ${#properties[@]} -gt 0 ]]; then
+  echo "sinnix-agent-scope-exec: cannot apply resource overrides inside an existing agent scope" >&2
+  exit 64
 fi
 
 exec "$@"
