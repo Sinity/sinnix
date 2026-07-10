@@ -19,11 +19,24 @@ it contains the verified commands, auth rules, and mode constraints.
 ## Workflow
 
 1. Choose direct local exec, a native background agent, Codex Cloud, or Kitty.
-2. Set the working directory explicitly and preserve the returned session/task
+2. For Codex, use `gpt-5.6-terra` with high reasoning for unattended execution
+   lanes. Use `gpt-5.6-sol` with high reasoning for the coordinating interactive
+   session unless the operator selects another tier. Never inherit or guess a
+   stale model default; inspect the launch receipt.
+3. Set the working directory explicitly and preserve the returned session/task
    handle plus output artifacts.
-3. Set model and effort explicitly when the lane supports them.
-4. Use bounded concurrency for prompt batches; do not start unbounded workers.
-5. Inspect results and diffs before applying or merging agent work.
+4. Set model and effort explicitly when the lane supports them.
+5. Use bounded concurrency for prompt batches; do not start unbounded workers.
+6. Make each worker verify its own behavior. Require focused real-route tests,
+   exact-path static checks, and a broader affected-area check when the change
+   crosses modules or contracts. Resource containment exists to make this
+   affordable; do not export all verification cost to the coordinator.
+7. Require an anti-vacuity statement in implementation prompts: the worker must
+   say what production dependency the test enters and what implementation
+   mutation/removal makes it fail. Reject toy replicas, test-only validators,
+   self-authored registries, and mocks that merely surround themselves.
+8. Inspect results and diffs independently before applying or merging agent
+   work. Worker verification is necessary, not sufficient.
 
 ## Helpers
 

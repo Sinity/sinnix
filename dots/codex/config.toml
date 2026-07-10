@@ -4,8 +4,8 @@
 # MCP servers are registry-generated into full/lean/browser profile files by
 # modules/features/dev/mcp-servers.nix. The wrapper invokes the intended
 # profile explicitly so lean sessions do not inherit the full MCP table.
-model = "gpt-5.5"
-model_reasoning_effort = "medium"
+model = "gpt-5.6-sol"
+model_reasoning_effort = "high"
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
 project_doc_max_bytes = 262144
@@ -68,7 +68,8 @@ gpt-5-codex = "gpt-5.3-codex"
 status_line = ["current-dir", "model-with-reasoning", "context-remaining", "context-window-size", "five-hour-limit", "weekly-limit", "session-id"]
 
 [tui.model_availability_nux]
-"gpt-5.5" = 4
+"gpt-5.6-sol" = 4
+"gpt-5.6-terra" = 4
 
 [features]
 rmcp_client = true

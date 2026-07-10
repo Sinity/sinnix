@@ -2,7 +2,7 @@
 set -euo pipefail
 
 agent="codex"
-model="gpt-5.5"
+model="gpt-5.6-terra"
 probe_model=0
 workdir="${PWD}"
 skip_agents_render=1
