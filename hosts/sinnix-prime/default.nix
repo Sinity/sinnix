@@ -158,11 +158,16 @@
       # decision moved this to volatile, then it was reverted because the
       # journal is now the forensic source for OOM/earlyoom kill events
       # (sinnix-fjq's kill_event capture greps this journal).
-      SystemMaxUse=128G
+      # Retention intent is ~ONE YEAR (operator, 2026-07-10) — time-based
+      # prune is the primary knob; the size cap is a backstop, not a
+      # preallocation (journald only occupies what it grows to). Interim
+      # posture: once sinex is trusted as the durable journal archive this
+      # local window shrinks back to weeks and the duplication ends.
+      MaxRetentionSec=365day
+      SystemMaxUse=64G
       SystemKeepFree=200G
       SystemMaxFileSize=128M
       MaxFileSec=1week
-      MaxRetentionSec=0
       RateLimitIntervalSec=30s
       RateLimitBurst=500
       ForwardToSyslog=no
