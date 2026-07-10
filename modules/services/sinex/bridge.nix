@@ -218,6 +218,13 @@ in
           # full_page_writes on: the nodatacow @sinex subvol has no btrfs
           # checksums, so FPW is the remaining torn-page defense.
           postgresql.settings.wal_compression = "lz4";
+          # Connection audit logging (sinex's module defaults these on via
+          # mkDefault) is pure noise on a localhost-only single-app DB:
+          # ~100 log lines/hour from sinexctl/lynchpin short-lived
+          # connections, which the syslog capture source then re-ingests
+          # into sinex's own dataset (journal self-noise, 2026-07-10 audit).
+          postgresql.settings.log_connections = false;
+          postgresql.settings.log_disconnections = false;
 
           sinex = {
             enable = runtimeEnabled;
