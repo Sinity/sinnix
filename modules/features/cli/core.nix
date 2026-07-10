@@ -69,6 +69,15 @@ mkFeatureModule {
       # Prevent PAM from starting keyring on login (conflicts with gpg-agent SSH)
       security.pam.services.login.enableGnomeKeyring = lib.mkForce false;
 
+      # Drop pam_lastlog2 from the login stack (sinnix-82m). On this
+      # single-operator host its last-login display is worthless, it issues a
+      # root-SSD SQLite write on every session open, and its SQLite access has
+      # no busy timeout — concurrent session storms (systemd-stdio-bridge
+      # bursts from agent traffic) hit SQLITE_BUSY and fail PAM session setup
+      # outright (3-9 refusals/day observed, week of 2026-07-04..10).
+      # (mkForce: upstream pam.nix asserts enable = true at normal priority.)
+      security.pam.services.login.rules.session.lastlog.enable = lib.mkForce false;
+
       home-manager.users.${user} =
         {
           lib,
