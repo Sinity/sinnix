@@ -137,6 +137,42 @@ when a task needs recipes, screenshots, HDR handling, or careful GUI
 interaction. Run `sinnix-agent-status` when you need a quick live probe of
 available control surfaces.
 
+### Agent Runtime Control
+
+Prefer native non-interactive runtimes for unattended work; use Kitty only
+when a human or coordinator needs a visible, interruptible process or a
+deliberately interactive agent session.
+
+- **Codex local**: use `codex exec -C <repo> --model <model> -c
+  'model_reasoning_effort="<effort>"' ...`; use `codex exec resume <id>` for a
+  continued worker. Set model and effort per run instead of relying on the
+  interactive session's defaults.
+- **Claude local**: use `env -u ANTHROPIC_API_KEY claude-full --print ...` for
+  subscription-backed batch work. Use `claude-full --background` for a
+  resumable native worker, and manage it with
+  `~/.local/state/claude-code/launch.sh agents|logs|stop`. Preserve the key only
+  when API-key billing is explicitly intended.
+- **Codex Cloud**: use `codex cloud exec|list|status|diff|apply`; the CLI is the
+  control plane and the task id is the recovery handle. Do not automate the
+  Codex web UI when the CLI covers the operation.
+- **Browser-backed cloud work**: prefer background CDP targets. The
+  `private-visible` profile is shared by concurrent agents, so own explicit
+  page target ids, never activate another agent's target, and avoid coordinate
+  clicks. Verify the focused Hyprland window when operator focus matters.
+- **Kitty workers**: launch with keep-focus semantics and route separate OS
+  windows with `movetoworkspacesilent` when isolation is useful. Do not bring
+  worker windows to the current workspace as a side effect of dispatch.
+
+Do not try to change the current agent's model or reasoning effort by injecting
+commands into its own live TUI while it is sampling. Choose these controls at
+worker launch or between turns.
+
+For coordination, Beads owns work and dependencies. Polylogue blackboard
+assertions are durable asynchronous notes, not a delivered group chat: until
+`polylogue-1hj` / `polylogue-s7ae.3` provide watch, unread, addressing, ack, and
+wakeup semantics, use explicit runtime task ids plus an append-only shared
+dialogue for active cross-agent design.
+
 ### Evidence and Telemetry
 
 Use the control plane for live action; use the evidence plane to reconstruct

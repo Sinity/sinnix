@@ -14,6 +14,9 @@ json_mode=0
 dry_run=0
 skip_agents_render=0
 ephemeral=0
+parallel=1
+workspace=""
+claude_api_key_auth=0
 
 usage() {
   cat <<'EOF'
@@ -30,12 +33,15 @@ Options:
   --mode <batch|kitty>         Execution mode (default: batch)
   --launch-type <tab|os-window> Kitty launch type (default: tab)
   --model <name>               Agent model (agent-specific default)
-  --reasoning-effort <value>   model_reasoning_effort (minimal|low|medium|high|xhigh, codex only)
+  --reasoning-effort <value>   Agent effort level (agent-specific values)
   --xhigh                      Convenience: --reasoning-effort xhigh (codex only)
   --spark                      Convenience: set --model gpt-5.3-codex-spark (codex only)
-  --schema <file>              JSON schema path for --output-schema (codex only)
+  --schema <file>              JSON schema path for structured output
   --json                       Enable agent --json output
   --ephemeral                  Run each exec without persisting session files (codex only)
+  --parallel <n>               Concurrent batch workers (default: 1; batch mode only)
+  --workspace <name>           Silently move Kitty OS windows to this Hyprland workspace
+  --claude-api-key-auth        Keep ANTHROPIC_API_KEY for Claude instead of subscription auth
   --skip-agents-render         Set SINNIX_SKIP_AGENTS_RENDER=1 for launched agent commands
   --dry-run                    Print commands without executing
 
@@ -98,6 +104,18 @@ while [[ $# -gt 0 ]]; do
     ephemeral=1
     shift
     ;;
+  --parallel)
+    parallel="${2:?missing value for --parallel}"
+    shift 2
+    ;;
+  --workspace)
+    workspace="${2:?missing value for --workspace}"
+    shift 2
+    ;;
+  --claude-api-key-auth)
+    claude_api_key_auth=1
+    shift
+    ;;
   --skip-agents-render)
     skip_agents_render=1
     shift
@@ -140,13 +158,26 @@ if [[ ${launch_type} != "tab" && ${launch_type} != "os-window" ]]; then
   exit 2
 fi
 
+if [[ ! ${parallel} =~ ^[1-9][0-9]*$ ]]; then
+  echo "invalid --parallel value: ${parallel}" >&2
+  exit 2
+fi
+if [[ ${parallel} -gt 1 && ${mode} != "batch" ]]; then
+  echo "--parallel is supported only with --mode batch" >&2
+  exit 2
+fi
+if [[ -n ${workspace} && ( ${mode} != "kitty" || ${launch_type} != "os-window" ) ]]; then
+  echo "--workspace requires --mode kitty --launch-type os-window" >&2
+  exit 2
+fi
+
 if [[ $# -lt 1 ]]; then
   echo "no prompt files specified" >&2
   exit 2
 fi
 
 # Set only the model defaults required by current batch runners. Claude uses
-# the configured CLI default unless --model is explicitly supported downstream.
+# the configured CLI default unless --model is supplied.
 if [[ -z ${model} ]]; then
   case "${agent}" in
   claude)
@@ -164,8 +195,13 @@ if [[ -z ${model} ]]; then
   esac
 fi
 
-if ! command -v "${agent}" >/dev/null 2>&1; then
-  echo "${agent} not found on PATH" >&2
+if [[ ${agent} == "claude" ]]; then
+  if ! command -v claude-full >/dev/null 2>&1 && ! command -v claude >/dev/null 2>&1; then
+    echo "claude runtime not found (expected claude or claude-full)" >&2
+    exit 1
+  fi
+elif ! command -v "${agent}" >/dev/null 2>&1; then
+  echo "${agent} runtime not found on PATH" >&2
   exit 1
 fi
 
@@ -186,6 +222,10 @@ if [[ ${mode} == "kitty" ]]; then
   fi
   if [[ -z ${KITTY_LISTEN_ON:-} ]]; then
     echo "KITTY_LISTEN_ON is empty; cannot use kitty remote control" >&2
+    exit 1
+  fi
+  if [[ -n ${workspace} ]] && ! command -v sinnix-hypr-control >/dev/null 2>&1; then
+    echo "sinnix-hypr-control not found; cannot route Kitty window to ${workspace}" >&2
     exit 1
   fi
 fi
@@ -233,6 +273,9 @@ run_batch_agent() {
   fi
   if [[ ${ephemeral} -eq 1 ]]; then
     cmd+=(--ephemeral)
+  fi
+  if [[ ${claude_api_key_auth} -eq 1 ]]; then
+    cmd+=(--claude-api-key-auth)
   fi
 
   if [[ ${dry_run} -eq 1 ]]; then
@@ -289,19 +332,44 @@ run_kitty_agent() {
   if [[ ${ephemeral} -eq 1 ]]; then
     launch_cmd+=(--ephemeral)
   fi
+  if [[ ${claude_api_key_auth} -eq 1 ]]; then
+    launch_cmd+=(--claude-api-key-auth)
+  fi
+
+  local window_title="agent-${prompt_name//[^A-Za-z0-9_.-]/-}"
 
   if [[ ${dry_run} -eq 1 ]]; then
-    printf 'DRY-RUN (%s): kitty @ launch --type=%s --tab-title %q --cwd %q -- ' "${prompt_name}" "${launch_type}" "${prompt_name}" "${workdir}"
+    printf 'DRY-RUN (%s): kitty @ launch --keep-focus --type=%s --title %q --tab-title %q --cwd %q -- ' "${prompt_name}" "${launch_type}" "${window_title}" "${prompt_name}" "${workdir}"
     printf '%q ' "${launch_cmd[@]}"
+    if [[ -n ${workspace} ]]; then
+      printf '; move silently to workspace %q' "${workspace}"
+    fi
     echo
     return 0
   fi
 
   kitty @ launch \
+    --keep-focus \
     --type="${launch_type}" \
+    --title "${window_title}" \
     --tab-title "${prompt_name}" \
     --cwd "${workdir}" \
     -- "${launch_cmd[@]}"
+
+  if [[ -n ${workspace} ]]; then
+    local selector="title:^(${window_title})$"
+    local moved=0
+    for _ in {1..20}; do
+      if sinnix-hypr-control dispatch movetoworkspacesilent "${workspace},${selector}" >/dev/null 2>&1; then
+        moved=1
+        break
+      fi
+      sleep 0.05
+    done
+    if [[ ${moved} -ne 1 ]]; then
+      echo "warning: launched ${prompt_name} but could not route it to workspace ${workspace}" >&2
+    fi
+  fi
 }
 
 # Special handling for codex with spark model
@@ -309,14 +377,33 @@ if [[ ${model} == "gpt-5.3-codex-spark" && -z ${reasoning_effort} ]]; then
   reasoning_effort="xhigh"
 fi
 
+batch_active=0
+batch_failed=0
 for prompt_name in "$@"; do
   # Remove .prompt extension if provided
   prompt_name="${prompt_name%.prompt}"
 
   if [[ ${mode} == "batch" ]]; then
-    run_batch_agent "${prompt_name}"
+    run_batch_agent "${prompt_name}" &
+    batch_active=$((batch_active + 1))
+    if [[ ${batch_active} -ge ${parallel} ]]; then
+      if ! wait -n; then
+        batch_failed=1
+      fi
+      batch_active=$((batch_active - 1))
+    fi
   else
     run_kitty_agent "${prompt_name}"
     sleep 0.2
   fi
 done
+
+if [[ ${mode} == "batch" ]]; then
+  while [[ ${batch_active} -gt 0 ]]; do
+    if ! wait -n; then
+      batch_failed=1
+    fi
+    batch_active=$((batch_active - 1))
+  done
+  exit "${batch_failed}"
+fi

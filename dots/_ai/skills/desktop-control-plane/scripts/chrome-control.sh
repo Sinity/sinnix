@@ -54,7 +54,8 @@ Commands:
   list                            List all open pages (id, title, url, type)
   list-tabs                       List only page-type targets
   info <page_id>                  Get detailed info for a page
-  new-tab [--url <url>]           Open a new tab (optionally with URL)
+  new-tab [--url <url>] [--background]
+                                  Open a new tab without activating it when requested
   close <page_id>                 Close a page/tab
   activate <page_id>              Bring a page to the front
   load-extension --path <dir>      Runtime-load an unpacked extension into the selected browser
@@ -80,6 +81,8 @@ Commands:
 
   fill-form <page_id> --selector <css> --value <text>
                                   Set the value of a form field and dispatch input event
+  upload-files <page_id> --selector <css> --file <path> [--file <path> ...]
+                                  Attach local files to a file input through CDP
 
   wait-selector <page_id> --selector <css> [--timeout-sec <n>] [--interval-ms <n>]
                                   Wait until an element matching CSS selector exists
@@ -92,6 +95,8 @@ Examples:
   sinnix-chrome-control --target private list
   sinnix-chrome-control screenshot <id> --out /tmp/page.png
   sinnix-chrome-control evaluate <id> --js 'document.title'
+  sinnix-chrome-control new-tab --background --url https://example.com
+  sinnix-chrome-control upload-files <id> --selector 'input[type=file]' --file /path/to/report.md
   sinnix-chrome-control fill-form <id> --selector '#search' --value 'my query'
   sinnix-chrome-control click <id> --selector 'button.submit'
   sinnix-chrome-control navigate <id> --url 'https://example.com'
@@ -377,6 +382,19 @@ cdp_send_with_result() {
   cdp_send "$ws_url" "$method" "$params_json" | jq -r '.result // empty'
 }
 
+cdp_read_response() {
+  local fd expected_id line
+  fd="$1"
+  expected_id="$2"
+  while IFS= read -r line <&"$fd"; do
+    if jq -e --argjson id "$expected_id" '.id == $id' >/dev/null 2>&1 <<<"$line"; then
+      printf '%s\n' "$line"
+      return 0
+    fi
+  done
+  return 1
+}
+
 print_cdp_http_response() {
   local response
   response="$1"
@@ -451,11 +469,16 @@ info)
 
 new-tab)
   url="about:blank"
+  background=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
     --url)
       url="${2:?missing url}"
       shift 2
+      ;;
+    --background)
+      background=1
+      shift
       ;;
     *)
       echo "unknown arg: $1" >&2
@@ -463,6 +486,22 @@ new-tab)
       ;;
     esac
   done
+  if [[ $background -eq 1 ]]; then
+    ws_url=$(get_browser_ws_url)
+    [[ -n $ws_url ]] || {
+      echo "browser websocket unavailable for ${TARGET} (${CDP_BASE})" >&2
+      exit 1
+    }
+    params=$(jq -nc --arg url "$url" '{url: $url, background: true}')
+    response=$(cdp_send "$ws_url" "Target.createTarget" "$params")
+    if jq -e '.error' >/dev/null 2>&1 <<<"$response"; then
+      jq . <<<"$response" >&2
+      exit 1
+    fi
+    jq '{id: .result.targetId, title: "", url: $url, background: true}' --arg url "$url" <<<"$response"
+    exit 0
+  fi
+
   response=$(curl -fsS -X PUT "${CDP_BASE}/json/new?${url}")
   if ! jq -e . >/dev/null 2>&1 <<<"$response"; then
     printf 'unexpected /json/new response: %s\n' "$response" >&2
@@ -940,6 +979,95 @@ fill-form)
   params=$(jq -nc --arg expr "$expr" '{expression: $expr, returnByValue: true}')
   result=$(cdp_send_with_result "$ws_url" "Runtime.evaluate" "$params" | jq -r '.result.value // empty')
   echo "$result"
+  ;;
+
+upload-files)
+  page_id=""
+  selector=""
+  files=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --selector)
+      selector="${2:?missing selector}"
+      shift 2
+      ;;
+    --file)
+      files+=("${2:?missing file}")
+      shift 2
+      ;;
+    *)
+      if [[ -z $page_id ]]; then
+        page_id="$1"
+        shift
+      else
+        echo "unknown arg: $1" >&2
+        exit 2
+      fi
+      ;;
+    esac
+  done
+  [[ -n $page_id && -n $selector && ${#files[@]} -gt 0 ]] || {
+    echo "upload-files requires page_id, --selector, and at least one --file" >&2
+    exit 2
+  }
+  page_id=$(resolve_page_id "$page_id")
+  ws_url=$(get_ws_url "$page_id")
+  [[ -n $ws_url ]] || {
+    echo "page not found: $page_id" >&2
+    exit 1
+  }
+
+  files_json='[]'
+  for file in "${files[@]}"; do
+    [[ -f $file ]] || {
+      echo "upload file not found: $file" >&2
+      exit 1
+    }
+    file=$(realpath "$file")
+    files_json=$(jq -nc --argjson files "$files_json" --arg file "$file" '$files + [$file]')
+  done
+
+  coproc SINNIX_CDP_UPLOAD { websocat -B 2097152 "$ws_url" 2>/dev/null; }
+  read_fd="${SINNIX_CDP_UPLOAD[0]}"
+  write_fd="${SINNIX_CDP_UPLOAD[1]}"
+
+  request=$(jq -nc --arg selector "$selector" \
+    '{id: 1, method: "Runtime.evaluate", params: {expression: ("document.querySelector(" + ($selector | tojson) + ")")}}')
+  printf '%s\n' "$request" >&"$write_fd"
+  response=$(cdp_read_response "$read_fd" 1) || {
+    echo "CDP connection closed while resolving file input" >&2
+    exit 1
+  }
+  object_id=$(jq -r '.result.result.objectId // empty' <<<"$response")
+  [[ -n $object_id ]] || {
+    echo "file input selector did not resolve: $selector" >&2
+    exit 1
+  }
+
+  request=$(jq -nc --arg objectId "$object_id" --argjson files "$files_json" \
+    '{id: 2, method: "DOM.setFileInputFiles", params: {objectId: $objectId, files: $files}}')
+  printf '%s\n' "$request" >&"$write_fd"
+  response=$(cdp_read_response "$read_fd" 2) || {
+    echo "CDP connection closed while attaching files" >&2
+    exit 1
+  }
+  if jq -e '.error' >/dev/null 2>&1 <<<"$response"; then
+    jq . <<<"$response" >&2
+    exit 1
+  fi
+
+  request=$(jq -nc --arg objectId "$object_id" \
+    '{id: 3, method: "Runtime.callFunctionOn", params: {objectId: $objectId, functionDeclaration: "function(){this.dispatchEvent(new Event(\"input\",{bubbles:true}));this.dispatchEvent(new Event(\"change\",{bubbles:true}));return this.files.length}", returnByValue: true}}')
+  printf '%s\n' "$request" >&"$write_fd"
+  response=$(cdp_read_response "$read_fd" 3) || {
+    echo "CDP connection closed while dispatching file events" >&2
+    exit 1
+  }
+  attached=$(jq -r '.result.result.value // 0' <<<"$response")
+  exec {write_fd}>&-
+  wait "$SINNIX_CDP_UPLOAD_PID" || true
+  jq -nc --arg id "$page_id" --arg selector "$selector" --argjson attached "$attached" \
+    '{id: $id, selector: $selector, attached: $attached}'
   ;;
 
 wait-selector)
