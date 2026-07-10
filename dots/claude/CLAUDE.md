@@ -71,6 +71,17 @@
   branches. Do not push when the user, repo, or active workflow says to hold.
 - Stage by path, not broad sweeps, when secrets or unrelated work could be
   captured.
+- Don't leave transient work-in-progress artifacts (git stashes, scratch merge
+  files, temp branches) sitting around once they're confirmed superseded or
+  redundant — clean them up as part of finishing the task, not as a separate
+  ask. This applies to things you created yourself this session for your own
+  bookkeeping (e.g. a stash you popped and merged, a scratch file used to
+  resolve a conflict): once you've verified its content is fully captured
+  elsewhere (committed, merged, or superseded by a newer state), remove it
+  rather than leaving it as clutter for the user to notice and ask about
+  later. This is distinct from destructive-operation caution around content
+  you did NOT create or haven't verified is redundant — verify first, then
+  clean up without waiting to be asked.
 
 ### Verification
 
