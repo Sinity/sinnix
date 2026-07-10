@@ -137,6 +137,28 @@ in
 
     systemd.settings.Manager.StatusUnitFormat = "name";
 
+    # No polkit password dialogs for wheel on service management and power
+    # actions (2026-07-10, operator request). Rationale: the 2026-07-06
+    # root-equivalence decision already accepts that every agent-as-sinity
+    # process is root-equivalent (NOPASSWD sudo + nix trusted-users), so a
+    # polkit prompt for `systemctl restart foo` is friction without a
+    # security boundary behind it — the same actor can `sudo systemctl`
+    # promptlessly. Scoped to systemd unit management + login1 power/session
+    # actions rather than a blanket YES so genuinely unusual actions
+    # (disk reformat via udisks, etc.) still surface.
+    security.polkit.extraConfig = ''
+      polkit.addRule(function(action, subject) {
+        if (!subject.isInGroup("wheel")) return undefined;
+        if (action.id.indexOf("org.freedesktop.systemd1.") === 0) {
+          return polkit.Result.YES;
+        }
+        if (action.id.indexOf("org.freedesktop.login1.") === 0) {
+          return polkit.Result.YES;
+        }
+        return undefined;
+      });
+    '';
+
     boot.kernel.sysctl = {
       # Keep process (anon) memory resident; reclaim file cache before swapping,
       # and start reclaim early enough that interactive work sees real free
