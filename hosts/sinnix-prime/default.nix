@@ -140,7 +140,7 @@
   # runs volatile in /run until realm mounts, then
   # systemd-journal-flush.service moves logs over — the standard sequence.
   fileSystems."/var/log/journal" = {
-    device = "/realm/db/journal";
+    device = "/realm/state/journal";
     fsType = "none";
     options = [
       "bind"

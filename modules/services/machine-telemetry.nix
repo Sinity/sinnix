@@ -18,11 +18,11 @@ let
   dataRoot = "${capturesRoot}/machine";
   dataDir = dataRoot;
   legacyDbPath = "${dataDir}/telemetry.sqlite";
-  dbRoot = "${realmRoot}/db/machine-telemetry";
+  dbRoot = "${realmRoot}/state/machine-telemetry";
   dbPath = "${dbRoot}/telemetry.sqlite";
   # 2026-07-10: moved off /persist (worn MX500) to /realm; still inside the
   # /realm btrbk→borg coverage.
-  backupRoot = "/realm/backup/machine-telemetry";
+  backupRoot = "/realm/staging/machine-telemetry";
   manifestPath = "${dataDir}/manifest.json";
   username = config.sinnix.user.name;
 

@@ -44,6 +44,31 @@ This repository uses `bd` (Beads) for durable project task tracking.
 - `bd dolt push` follows the same repo policy as `git push`: Sinnix may push
   verified `master` work directly; do not bypass explicit hold instructions.
 
+## Public Repository Boundary
+
+Assume every tracked file, commit, branch, tag, Beads issue, Actions log, and
+GitHub discussion is public.
+
+- Machine-specific configuration and the operator's ordinary public identity
+  are intentional repository content. Secrets, private datasets, raw captures
+  or exports, private narratives or transcripts, and unrelated personal
+  information are not.
+- `.agent/scratch/`, `.agent/ops/`, root `.claude/`, root `.mcp.json`, secret
+  payloads, and `.beads/interactions.jsonl` are local-only. Promote reusable
+  technical conclusions into reviewed source, documentation, or Beads issues.
+- Beads `issues.jsonl` is public technical archaeology; all of its fields must
+  satisfy the same publication boundary as source and documentation.
+- Before every commit, review the complete staged diff and run
+  `scripts/check-publication-boundary`. The checker only catches known path and
+  file shapes; it cannot judge prose, fixtures, or arbitrary data.
+- If there is any doubt whether content belongs in the public repository,
+  confirm with the operator before committing it.
+- Publish only `master`. Never push `--mirror`, `--all`, or `--tags`; any new
+  branch or tag requires an explicit publication review first.
+- If private material was committed, stop publication, rotate any live secret,
+  rewrite the allowed branch, and verify a fresh clone. Deleting the current
+  file does not remove it from history.
+
 ## No-Alias Rule
 
 - Do not preserve deprecated compatibility interfaces for renamed
@@ -266,9 +291,9 @@ config in `secrets.nix` (repo root).
 ## Storage & Wear Invariants
 
 - Root MX500 is wear-limited: build scratch belongs on `/var/cache/nix-build`
-  (chattr +C, deliberate), heavy repo scratch and agent worktrees on
-  `/realm/tmp/`, DB-shaped workloads on nodatacow subvols (`@sinex`,
-  `/realm/db/*`). Do not add write-heavy paths to `/` or `/persist` casually.
+  (chattr +C, deliberate), heavy repo scratch on `/realm/tmp/`, agent worktrees
+  on `/realm/worktrees/`, DB-shaped workloads on nodatacow subvols (`@sinex`,
+  `/realm/state/*`). Do not add write-heavy paths to `/` or `/persist` casually.
 - Persistence is declared next to the owning module via
   `sinnix.persistence.{system,home}.{directories,files}`; anything not
   declared is wiped on reboot. New service state ⇒ add a persistence entry in

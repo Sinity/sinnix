@@ -37,7 +37,7 @@ mkServiceModule {
     }:
     let
       user = config.sinnix.user.name;
-      whisperDir = "${config.sinnix.paths.librariesRoot}/model/whisper";
+      whisperDir = "${config.sinnix.paths.mediaRoot}/model/whisper";
       modelFile = "${whisperDir}/ggml-${cfg.model}.bin";
     in
     {

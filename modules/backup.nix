@@ -259,6 +259,16 @@ let
   ];
 
   realmExcludes = [
+    # Re-acquirable media (taxonomy 2026-07-10, sinnix-4ib): Steam and model
+    # weights re-download; stashbox regenerable members carry their own
+    # provenance. Precious-small media (books, videos, substack, edu,
+    # music-audio-features, web-content) deliberately stays in coverage.
+    "media/Steam"
+    "media/model"
+    "media/stashbox/models"
+    "media/stashbox/generated"
+    "media/stashbox/analysis-cache"
+    "media/stashbox/gpu-venv"
     # Top-level regenerable-cache root (sinex cargo/dev caches via the
     # /var/cache/sinex bind, nix-build, sccache) — pure churn, never backup
     # material (2026-07-10 impermanence audit).

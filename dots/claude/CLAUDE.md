@@ -294,10 +294,13 @@ impermanence).
 ```
 /realm/
 ├── project/           # All active project repositories
-├── data/              # Canonical data lake (see below)
-├── db/                # nodatacow DB subvolumes (polylogue, machine-telemetry)
+├── data/              # Canonical PERSONAL data lake (see below)
+├── media/             # Consumption/media collections (Steam, books, model weights, stashbox)
+├── state/             # Always-on service state (journal, polylogue, machine-telemetry, containers; nodatacow subvols)
+├── staging/           # Backup staging (drained to /outer-realm by borg jobs)
+├── worktrees/         # Agent/compile-heavy git worktrees (not aged)
 ├── inbox/             # Staging area for retired/incoming data + downloads
-└── tmp/               # Throwaway analysis output, agent worktrees
+└── tmp/               # Throwaway analysis output, aged shell TMPDIR
 ```
 
 User home is `/home/sinity`. It is intentionally not under `/realm`: the live
@@ -317,7 +320,7 @@ SSH keys lives at `/persist/home/sinity/.ssh` and appears at runtime as
 - Use `/realm/tmp/` for throwaway analysis output that may be large or useful
   across a short session. Avoid `/tmp` for heavy repo work; it is a small
   tmpfs and heavy churn belongs on NVMe.
-- Use `/realm/tmp/worktrees/` for agent worktrees or any compile-heavy checkout.
+- Use `/realm/worktrees/` for agent worktrees or any compile-heavy checkout.
   This keeps build output on NVMe and avoids root-disk wear.
 - Treat `/realm/data/` as canonical user data, not scratch. Read from it for
   evidence; only write there through the owning tool or workflow. Read
@@ -498,11 +501,11 @@ sinnix-scope nix-build -- nix build .#target
 
 **Agent worktree placement (wear policy):** a Rust worktree's per-checkout
 `CARGO_TARGET_DIR` writes multiple GB per build. Place agent worktrees for
-heavy-compile repos under `/realm/tmp/worktrees/` (NVMe), never `/tmp`:
+heavy-compile repos under `/realm/worktrees/` (NVMe), never `/tmp`:
 
 ```bash
-mkdir -p /realm/tmp/worktrees
-git -C /realm/project/<repo> worktree add -b <branch> /realm/tmp/worktrees/<name> origin/master
+mkdir -p /realm/worktrees
+git -C /realm/project/<repo> worktree add -b <branch> /realm/worktrees/<name> origin/master
 ```
 
 **Sinex tests from a worktree:** use a live dev database socket, not sqlx's

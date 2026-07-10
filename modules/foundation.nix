@@ -56,7 +56,15 @@ in
             };
             mediaRoot = mkOption {
               type = types.str;
-              default = "${config.librariesRoot}/media";
+              default = "${config.realmRoot}/media";
+            };
+            stateRoot = mkOption {
+              type = types.str;
+              default = "${config.realmRoot}/state";
+            };
+            stagingRoot = mkOption {
+              type = types.str;
+              default = "${config.realmRoot}/staging";
             };
             outerRealm = mkOption {
               type = types.str;

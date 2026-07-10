@@ -57,7 +57,7 @@ mkServiceModule {
     }:
     let
       user = config.sinnix.user.name;
-      modelRoot = "${config.sinnix.paths.librariesRoot}/model";
+      modelRoot = "${config.sinnix.paths.mediaRoot}/model";
       args' = lib.concatStringsSep " " (
         [
           "${pkgs.koboldcpp-cuda}/bin/koboldcpp"

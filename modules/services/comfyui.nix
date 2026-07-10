@@ -59,7 +59,7 @@ mkServiceModule {
     }:
     let
       user = config.sinnix.user.name;
-      mnt = "${config.sinnix.paths.dataRoot}/comfyui";
+      mnt = "${config.sinnix.paths.stateRoot}/comfyui";
     in
     {
       sinnix.ml.containerRuntime.enable = true;

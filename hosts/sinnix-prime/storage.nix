@@ -562,7 +562,7 @@ in
       "d ${realmRoot}/backup 0755 root root -"
       # Keep Stashbox state on /realm while preserving its stable XDG path.
       # Regenerable members stay outside frequent persist backup coverage.
-      "L+ /home/${username}/.local/share/stashbox - - - - ${realmRoot}/data/libraries/stashbox"
+      "L+ /home/${username}/.local/share/stashbox - - - - ${realmRoot}/media/stashbox"
     ];
 
     # Polylogue's archive is an active SQLite/write-heavy workload. Keep the
