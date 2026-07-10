@@ -3,6 +3,7 @@
   lib,
   pkgs,
   config,
+  utils,
   ...
 }:
 let
@@ -50,6 +51,10 @@ let
   polylogueShareMount = "/home/${username}/.local/share/polylogue";
 
   swapFile = "${realmRoot}/swap/swapfile";
+  # Generated unit name follows the swapfile PATH (systemd path escaping);
+  # the 2026-07-09 move to /realm changed it from swap-swapfile.swap, which
+  # silently orphaned the prepare/drain unit wiring below. Derive it.
+  swapUnit = "${utils.escapeSystemdPath swapFile}.swap";
   swapSizeGiB = 8;
 
   # Overflow tier of the tiered swap posture (sinnix-mys, 2026-07-10):
@@ -391,8 +396,8 @@ in
   systemd = {
     services.prepare-swapfile = {
       description = "Create and maintain the bounded sinnix-prime swapfile";
-      requiredBy = [ "swap-swapfile.swap" ];
-      before = [ "swap-swapfile.swap" ];
+      requiredBy = [ swapUnit ];
+      before = [ swapUnit ];
       after = [
         "systemd-remount-fs.service"
       ];
@@ -406,7 +411,7 @@ in
     services.sinnix-drain-swapfile = {
       description = "Drain resident pages from the bounded sinnix-prime swapfile";
       after = [
-        "swap-swapfile.swap"
+        swapUnit
         "multi-user.target"
       ];
       serviceConfig = {
