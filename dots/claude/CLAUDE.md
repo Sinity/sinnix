@@ -43,6 +43,16 @@
   A single call site is not proof of consistency.
 - Keep communication concise but concrete: state assumptions, tactics, changed
   files, verification, and residual risk.
+- Do not pipe command output into `tail`/`head`/`grep -c`/similar truncating
+  filters as a default habit (e.g. `devtools test ... 2>&1 | tail -60`). The
+  user reviewing the transcript loses the actual output — failures, stack
+  traces, warnings — behind a fixed line count you chose blind. Let commands
+  print their natural output; if a command is genuinely voluminous, redirect
+  to a file and read/grep that file deliberately afterward, or use a
+  narrower selector/flag the tool itself provides (verbosity flags, `-k`
+  filters) rather than truncating post hoc. Reserve `tail`/`head` for cases
+  where you have a specific, stated reason (e.g. re-reading a known-large
+  log file's final section after already having seen the full run once).
 - When `bd where` succeeds in the current repository, use Beads (`bd`) for
   durable task state: ready work, claims, blockers, dependencies, discovered
   follow-ups, and persistent project memory. Use local plans only for the
@@ -668,46 +678,57 @@ anything longer than a quick fix.
 
 ### Pull Requests
 
-**Open an issue first** for: work spanning multiple PRs, architectural decisions, bug reports needing repro, research questions, follow-up chains, durable debt discovered mid-implementation. Skip for self-contained PRs where the body is sufficient record.
+**Substrate choice — check before writing "open an issue" anywhere below.**
+Where `bd where` succeeds in the current repo, Beads (`bd create`) is the
+task substrate — every "issue" reference in this section means "bead" there
+(sinex retired GitHub Issues entirely 2026-07-10; see its CONTRIBUTING.md).
+Where the repo has no `.beads/` workspace, GitHub Issues remain the
+substrate and the text below applies literally. Do not let this section's
+GitHub-flavored wording pull a beads-repo agent back toward opening a GitHub
+issue out of instruction-following inertia.
 
-**Convert anonymous debt into tracked debt.** When you discover an expected-failure test, a persistent TODO, or out-of-scope work: open an issue and reference it from the code/PR. Anonymous TODOs rot.
+**File a tracking item first** for: work spanning multiple PRs, architectural decisions, bug reports needing repro, research questions, follow-up chains, durable debt discovered mid-implementation. Skip for self-contained PRs where the body is sufficient record.
 
-**Issue comments are part of the spec.** Before implementing an issue, read the
-full issue thread, not only the body. Later comments may supersede, narrow,
-correct, or expand the body. If the body and comments conflict, preserve the
-evidence in your own issue/PR comment and state the interpretation you are
-implementing.
+**Convert anonymous debt into tracked debt.** When you discover an expected-failure test, a persistent TODO, or out-of-scope work: file a bead or issue and reference it from the code/PR. Anonymous TODOs rot.
 
-**GitHub resolver keyword discipline.** In issue comments, PR bodies, commit
-messages, and bot/review replies, do not write GitHub resolver keyword forms
-next to issue numbers in agent-authored text. This includes negative phrasing,
-audit notes, prompts, examples, and descriptions of partial work. Use neutral
+**Tracking-item comments/notes are part of the spec.** Before implementing a
+bead or issue, read its full thread/notes, not only the description. Later
+comments may supersede, narrow, correct, or expand the original. If they
+conflict, preserve the evidence in your own bead note / issue-or-PR comment
+and state the interpretation you are implementing.
+
+**GitHub resolver keyword discipline (GitHub-issue repos only — beads has no
+resolver-keyword hazard).** In issue comments, PR bodies, commit messages,
+and bot/review replies, do not write GitHub resolver keyword forms next to
+issue numbers in agent-authored text. This includes negative phrasing, audit
+notes, prompts, examples, and descriptions of partial work. Use neutral
 references plus explicit residual wording instead: `Ref #N` and
 `Remaining #N scope:`. Do not include example resolver phrases in prompts or
 docs; agents copy examples. Resolver phrases are permitted only when the user
 explicitly instructs that a specific PR should change a specific issue's GitHub
 state, and the current evidence proves the full issue scope is satisfied.
 
-**Leave an implementation trail.** Agents working an issue should comment with:
-their understanding of scope; important constraints or non-goals; what they
-changed; what they intentionally did not change; acceptance criteria satisfied,
-deferred, or found misframed; verification run; and follow-up issues opened.
-Do not let meaningful research, scope decisions, or discovered drift survive
-only in chat or scratch notes.
+**Leave an implementation trail.** Agents working a bead or issue should
+comment/update it with: their understanding of scope; important constraints
+or non-goals; what they changed; what they intentionally did not change;
+acceptance criteria satisfied, deferred, or found misframed; verification
+run; and follow-up tracking items opened. Do not let meaningful research,
+scope decisions, or discovered drift survive only in chat or scratch notes.
 
 **PR size and shape:** prefer substantial, cohesive PRs over micro-PRs that
 burn CI/review cycles. A good PR may contain multiple atomic commits while in
 review, then squash to one permanent master commit. Size the PR around a
-complete issue slice or coherent implementation phase. Tiny PRs are appropriate
-only for urgent fixes, risky isolated changes, or when a larger branch would
-mix unrelated concepts. If a slice is large but coherent, keep it as one PR
-with a read order, self-review notes, and focused commits.
+complete tracking-item slice or coherent implementation phase. Tiny PRs are
+appropriate only for urgent fixes, risky isolated changes, or when a larger
+branch would mix unrelated concepts. If a slice is large but coherent, keep
+it as one PR with a read order, self-review notes, and focused commits.
 
-**Issue phase batching:** when an issue has several adjacent acceptance criteria
-that touch the same subsystem, keep them on one branch until the coherent phase
-is exhausted. Use multiple commits as review waypoints, not multiple PRs by
-default. Before opening a PR, update the issue/PR narrative with a compact
-matrix: satisfied, intentionally deferred, misframed, and still open.
+**Phase batching:** when a bead or issue has several adjacent acceptance
+criteria that touch the same subsystem, keep them on one branch until the
+coherent phase is exhausted. Use multiple commits as review waypoints, not
+multiple PRs by default. Before opening a PR, update the tracking-item/PR
+narrative with a compact matrix: satisfied, intentionally deferred,
+misframed, and still open.
 
 **Verification cadence:** do not run the slowest gate after every small edit.
 During implementation, run the narrow command that proves the changed behavior
@@ -734,7 +755,8 @@ imperative, describes what changed, ends with `(#N)`, accurate — don't claim
 **Problem** (evidence/motivation — not "user asked"), **Solution** (modules
 touched, non-obvious decisions, rejected alternatives), **Verification** (exact
 commands run + the output line that matters, not "tests pass"). Optional:
-Migration notes, Follow-ups, Breaking changes. Link issues with `Ref #N`.
+Migration notes, Follow-ups, Breaking changes. Link the tracking item: bead id
+(e.g. `sinex-abcd`) or `Ref #N` for a GitHub issue.
 
 **Claim verification — grep the diff before asserting:**
 
@@ -744,14 +766,15 @@ Migration notes, Follow-ups, Breaking changes. Link issues with `Ref #N`.
 4. Revise the claim if the code doesn't support it; "partially unified" is valid, "unified" when half-done is a lie.
 5. Test the claim. If a PR claims to repair a bug, the verification section shows that bug's repro passing.
 
-**Acceptance-criteria honesty.** If an issue has acceptance criteria, address
-each item explicitly in the PR or issue comment that claims completion: mark
-each as satisfied, deferred to a follow-up issue, or misframed by new evidence.
-Never claim a partial subset satisfies the full issue scope without making the
-remaining work durable. Tests are not a substitute for missing runtime wiring:
-if an issue asks for an operator flow, actuator behavior, CLI command, or
-replay path, data-model or test-only changes do not close it unless the issue
-was explicitly narrowed to that surface.
+**Acceptance-criteria honesty.** If a bead or issue has acceptance criteria,
+address each item explicitly in the PR or tracking-item comment that claims
+completion: mark each as satisfied, deferred to a follow-up tracking item, or
+misframed by new evidence. Never claim a partial subset satisfies the full
+scope without making the remaining work durable. Tests are not a substitute
+for missing runtime wiring: if the tracking item asks for an operator flow,
+actuator behavior, CLI command, or replay path, data-model or test-only
+changes do not close it unless the item was explicitly narrowed to that
+surface.
 
 **Automated reviews are review input.** Before merging, inspect every automated
 review/comment/check that posts substantive text (CodeRabbit, Copilot, proof
@@ -763,7 +786,7 @@ while a bot reports unresolved actionable findings.
 **Proof/impact reports.** When a repo posts generated impact reports, use them
 to choose gates and focus review. Triage known-gap dumps and boilerplate gates
 rather than following them blindly; if the report is noisy or misleading,
-improve the report or record the mismatch in the owning issue.
+improve the report or record the mismatch in the owning tracking item.
 
 ### Squash-merge hygiene
 
@@ -812,7 +835,7 @@ accept the miss.
 
 ### Merge conflicts
 
-Investigate before resolving — read both sides, don't auto-prefer `theirs`/`ours`. Global `conflictStyle = zdiff3` shows the common ancestor alongside both versions. Run the verify command after resolving. If the conflict reveals a genuine design collision, open a tension/issue — don't collapse silently.
+Investigate before resolving — read both sides, don't auto-prefer `theirs`/`ours`. Global `conflictStyle = zdiff3` shows the common ancestor alongside both versions. Run the verify command after resolving. If the conflict reveals a genuine design collision, open a tension/bead/issue — don't collapse silently.
 
 ### Worktrees
 
