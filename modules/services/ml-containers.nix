@@ -15,7 +15,7 @@
 }:
 let
   cfg = config.sinnix.ml.containerRuntime;
-  containersRoot = "${config.sinnix.paths.dataRoot}/containers";
+  containersRoot = "${config.sinnix.paths.stateRoot}/containers";
 in
 {
   options.sinnix.ml.containerRuntime.enable =

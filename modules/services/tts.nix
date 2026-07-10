@@ -41,7 +41,7 @@ mkServiceModule {
     }:
     let
       user = config.sinnix.user.name;
-      ttsDir = "${config.sinnix.paths.librariesRoot}/model/tts";
+      ttsDir = "${config.sinnix.paths.mediaRoot}/model/tts";
     in
     {
       sinnix.ml.containerRuntime.enable = true;

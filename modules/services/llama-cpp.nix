@@ -48,7 +48,7 @@ mkServiceModule {
       ...
     }:
     let
-      modelRoot = "${config.sinnix.paths.librariesRoot}/model";
+      modelRoot = "${config.sinnix.paths.mediaRoot}/model";
     in
     {
       services.llama-cpp = {

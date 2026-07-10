@@ -48,7 +48,7 @@ mkServiceModule {
     }:
     let
       user = config.sinnix.user.name;
-      dir = "${config.sinnix.paths.librariesRoot}/model/musicgen";
+      dir = "${config.sinnix.paths.mediaRoot}/model/musicgen";
     in
     {
       sinnix.ml.containerRuntime.enable = true;

@@ -47,7 +47,7 @@ let
   sinexPostgresDataDir = "${sinexPostgresRoot}/18";
   # 2026-07-10: moved off /persist (worn MX500, double-writing every backup
   # byte) to /realm; still inside the /realm btrbk→borg coverage.
-  sinexPostgresDumpRoot = "/realm/backup/sinex-postgres";
+  sinexPostgresDumpRoot = "/realm/staging/sinex-postgres";
   databaseHost = "127.0.0.1";
   databasePort = 5432;
   databaseUser = "sinex";
@@ -744,23 +744,23 @@ in
             # the helpers are ordered Before=sinexd.service, and restarting
             # those units during activation pulls sinexd into a restart
             # transaction even when sinexd itself has X-RestartIfChanged=false.
-            ${homeManagerServiceName} = lib.mkIf (
-              activationProfile.desktop || activationProfile.terminal || activationProfile.browser
-            ) {
-              # The `+` prefix runs this command as root regardless of the
-              # service user, which has no privilege to repair user ACLs.
-              serviceConfig.ExecStartPost = lib.mkAfter (
-                lib.optionals activationProfile.terminal [
-                  "+${config.systemd.services.sinex-terminal-target-access.serviceConfig.ExecStart}"
-                ]
-                ++ lib.optionals activationProfile.browser [
-                  "+${config.systemd.services.sinex-browser-target-access.serviceConfig.ExecStart}"
-                ]
-                ++ lib.optionals activationProfile.desktop [
-                  "+${config.systemd.services.sinex-desktop-target-access.serviceConfig.ExecStart}"
-                ]
-              );
-            };
+            ${homeManagerServiceName} =
+              lib.mkIf (activationProfile.desktop || activationProfile.terminal || activationProfile.browser)
+                {
+                  # The `+` prefix runs this command as root regardless of the
+                  # service user, which has no privilege to repair user ACLs.
+                  serviceConfig.ExecStartPost = lib.mkAfter (
+                    lib.optionals activationProfile.terminal [
+                      "+${config.systemd.services.sinex-terminal-target-access.serviceConfig.ExecStart}"
+                    ]
+                    ++ lib.optionals activationProfile.browser [
+                      "+${config.systemd.services.sinex-browser-target-access.serviceConfig.ExecStart}"
+                    ]
+                    ++ lib.optionals activationProfile.desktop [
+                      "+${config.systemd.services.sinex-desktop-target-access.serviceConfig.ExecStart}"
+                    ]
+                  );
+                };
             sinexd = {
               restartIfChanged = false;
               stopIfChanged = false;

@@ -46,7 +46,7 @@ mkServiceModule {
     }:
     let
       user = config.sinnix.user.name;
-      dir = "${config.sinnix.paths.librariesRoot}/model/ocr";
+      dir = "${config.sinnix.paths.mediaRoot}/model/ocr";
     in
     {
       sinnix.ml.containerRuntime.enable = true;
