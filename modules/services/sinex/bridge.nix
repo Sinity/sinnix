@@ -45,7 +45,9 @@ let
   sinexHome = "${sinexRuntimeRoot}/home";
   sinexPostgresRoot = "${sinexRuntimeRoot}/postgresql";
   sinexPostgresDataDir = "${sinexPostgresRoot}/18";
-  sinexPostgresDumpRoot = "/persist/backup/sinex-postgres";
+  # 2026-07-10: moved off /persist (worn MX500, double-writing every backup
+  # byte) to /realm; still inside the /realm btrbk→borg coverage.
+  sinexPostgresDumpRoot = "/realm/backup/sinex-postgres";
   databaseHost = "127.0.0.1";
   databasePort = 5432;
   databaseUser = "sinex";
@@ -660,11 +662,11 @@ in
               description = "Dump Sinex PostgreSQL database for disaster recovery";
               after = [
                 "postgresql.target"
-                "persist.mount"
+                "realm.mount"
               ];
               requires = [
                 "postgresql.target"
-                "persist.mount"
+                "realm.mount"
               ];
               unitConfig.RequiresMountsFor = [
                 sinexRuntimeRoot
@@ -805,20 +807,29 @@ in
           # warning at evaluation time.
           wants = [ "network-online.target" ] ++ lib.optionals databasePrepared [ "postgresql.target" ];
         };
+        # Maintenance timers follow the runtime TARGET, not the auto-start
+        # POLICY. The previous force-disable on manual-start hosts rendered
+        # these units masked, and on this host — where the runtime is
+        # manual-start by policy but in practice runs 24/7 — the postgres
+        # disaster-recovery dump was silently dead 2026-06-29 → 07-10 (11
+        # days without dumps; found by the backup audit). wantedBy pulls a
+        # timer up whenever sinex-runtime.target starts (manual or auto);
+        # PartOf stops it with the target; nothing is ever masked.
         systemd.timers =
           lib.genAttrs maintenanceTimerServiceNames (_: {
-            enable = lib.mkIf (!runtimeAutoStart) (lib.mkForce false);
-            wantedBy = if runtimeAutoStart then [ "sinex-runtime.target" ] else lib.mkForce [ ];
+            wantedBy = lib.mkForce [ "sinex-runtime.target" ];
+            unitConfig.PartOf = [ "sinex-runtime.target" ];
             timerConfig.Persistent = lib.mkForce false;
           })
           // {
             sinex-postgres-dump = {
-              enable = lib.mkIf (!runtimeAutoStart) (lib.mkForce false);
-              wantedBy = lib.optionals runtimeAutoStart [ "timers.target" ];
+              wantedBy = [ "sinex-runtime.target" ];
+              unitConfig.PartOf = [ "sinex-runtime.target" ];
               timerConfig = {
                 OnCalendar = "*-*-* 03:12:00";
                 RandomizedDelaySec = "20min";
-                Persistent = false;
+                # A missed daily DR dump should catch up after downtime.
+                Persistent = true;
               };
             };
           };

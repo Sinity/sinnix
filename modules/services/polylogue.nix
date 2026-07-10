@@ -133,7 +133,9 @@ mkServiceModule {
     let
       polyloguePkg = pkgs.polylogue;
       dbRoot = "${config.sinnix.paths.realmRoot}/db/polylogue";
-      backupRoot = "/persist/backup/polylogue-sqlite";
+      # 2026-07-10: moved off /persist (worn MX500) to /realm; still inside
+      # the /realm btrbk→borg coverage.
+      backupRoot = "/realm/backup/polylogue-sqlite";
       dbNames = [
         "daemon_events.db"
         "embeddings.db"
