@@ -217,7 +217,6 @@ in
       ".local/share/sinex" # content-store and runtime state
 
       # Large data
-      ".local/share/stashbox" # StashApp DB, models, generated media, plugins, scrapers
       ".local/share/uv" # uv-managed Python installs
       ".insightface" # InsightFace face-recognition models
       ".duckdb" # DuckDB extensions cache

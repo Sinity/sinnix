@@ -536,6 +536,12 @@ in
       # Excluded from btrbk→borg — never persist-grade data.
       "d ${realmRoot}/cache 0755 root root -"
       "d ${realmRoot}/cache/sinex 0775 ${username} users -"
+      # DB-backup staging (telemetry/polylogue sqlite, sinex pg dumps) —
+      # moved off /persist 2026-07-10; covered by the /realm borg job.
+      "d ${realmRoot}/backup 0755 root root -"
+      # Keep Stashbox state on /realm while preserving its stable XDG path.
+      # Regenerable members stay outside frequent persist backup coverage.
+      "L+ /home/${username}/.local/share/stashbox - - - - ${realmRoot}/data/libraries/stashbox"
     ];
 
     # Polylogue's archive is an active SQLite/write-heavy workload. Keep the

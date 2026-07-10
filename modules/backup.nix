@@ -33,10 +33,12 @@ let
   borgRepoPersistPath = "${borgRepoRoot}/borg-persist-v1";
   borgRepoRealmPath = "${borgRepoRoot}/borg-realm-v2";
   borgRepoRootSnapshotsPath = "${borgRepoRoot}/borg-root-snapshots-v1";
+  borgRepoSinexBlobsPath = "${borgRepoRoot}/borg-sinex-blobs-v1";
   btrfsImageRoot = "${borgRepoRoot}/btrfs-images";
   borgRepoPersist = "file://${borgRepoPersistPath}";
   borgRepoRealm = "file://${borgRepoRealmPath}";
   borgRepoRootSnapshots = "file://${borgRepoRootSnapshotsPath}";
+  borgRepoSinexBlobs = "file://${borgRepoSinexBlobsPath}";
   borgPassphrasePath = config.sinnix.secrets.paths."borg-passphrase";
   outerRealmMountUnit = "outer\\x2drealm.mount";
   borgLockWaitSec = 60;
@@ -245,6 +247,12 @@ let
     # User caches are regenerable and currently large enough to dominate
     # backup churn if included.
     "home/sinity/.cache"
+    # 2026-07-10 impermanence audit: pure regenerable caches/logs that were
+    # riding the hourly persist archives (npm cache 4.8G, nvim mason 1.2G,
+    # hyprland session logs 1G).
+    "home/sinity/.npm/_cacache"
+    "home/sinity/.local/share/nvim/mason"
+    "home/sinity/.local/share/hyprland/logs"
     "var/lib/systemd/coredump"
     # Sinex runtime state is backed up through structured service tooling.
     "var/lib/sinex"
@@ -451,6 +459,14 @@ in
           restartable = false;
         };
       };
+      borgbackup-job-sinex-blobs = {
+        unit = "borgbackup-job-sinex-blobs.service";
+        resourceClass = "backup-maintenance";
+        observe = {
+          enable = true;
+          restartable = false;
+        };
+      };
       borgbackup-check = {
         unit = "borgbackup-check.service";
         resourceClass = "backup-maintenance";
@@ -617,6 +633,67 @@ in
       };
     };
 
+    # ─── Sinex blob-repository Borg job ───
+    # The capture blob store (/realm/sinex/state/blob-repository, ~167G of
+    # append-only content-addressed files) lives on a NESTED subvolume, so it
+    # is invisible to the /realm btrbk snapshots the realm job drains — the
+    # 2026-07-10 backup audit found the original captured data had NO backup
+    # path at all (and never had one on the old @sinex subvol either). A CAS
+    # of immutable files needs no snapshot for consistency: back it up live,
+    # daily. Persistent=true so a missed run catches up after downtime —
+    # unlike the hourly drains, a whole missed day here is a real gap.
+    systemd.services.borgbackup-job-sinex-blobs = {
+      description = "Back up sinex blob repository into Borg";
+      restartIfChanged = false;
+      after = [
+        "realm.mount"
+        outerRealmMountUnit
+      ];
+      requires = [
+        "realm.mount"
+        outerRealmMountUnit
+      ];
+      serviceConfig = (backupServiceConfig "borgbackup-job-sinex-blobs.service") // {
+        Type = "oneshot";
+        TimeoutStopSec = "15s";
+      };
+      path = with pkgs; [
+        borgbackup
+        coreutils
+        gnugrep
+        procps
+        util-linux
+      ];
+      script = ''
+        set -euo pipefail
+        ${mkBorgCommonScript borgRepoSinexBlobs borgRepoSinexBlobsPath}
+
+        install -d -m 0700 -o root -g root ${lib.escapeShellArg borgRepoSinexBlobsPath}
+        recover_stale_borg_locks
+
+        if [ ! -e ${lib.escapeShellArg "${borgRepoSinexBlobsPath}/config"} ]; then
+          with_borg_lock borg init --encryption repokey-blake2 "$BORG_REPO"
+        fi
+
+        archive_name="sinex-blobs-$(date -u +%Y%m%dT%H%M%SZ)"
+        with_borg_lock borg create \
+          --compression auto,zstd,1 \
+          --lock-wait ${toString borgLockWaitSec} \
+          "::$archive_name" \
+          /realm/sinex/state/blob-repository
+        echo "sinex blob backup complete: $archive_name"
+      '';
+    };
+
+    systemd.timers.borgbackup-job-sinex-blobs = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnCalendar = "*-*-* 05:40:00";
+        RandomizedDelaySec = "10min";
+        Persistent = true;
+      };
+    };
+
     # Failure surfacing for the two borg verification/integrity units
     # (sinnix-borg-drill, borgbackup-check): a restore drill or repo check
     # that fails silently is worse than none — 2026-07-01 found
@@ -688,6 +765,7 @@ in
 
         ${pkgs.borgbackup}/bin/borg check --repository-only ${borgRepoPersist}
         ${pkgs.borgbackup}/bin/borg check --repository-only ${borgRepoRealm}
+        ${pkgs.borgbackup}/bin/borg check --repository-only ${borgRepoSinexBlobs}
       '';
     };
     systemd.timers.borgbackup-check = {
@@ -790,6 +868,7 @@ in
 
         maintain_repo ${lib.escapeShellArg borgRepoPersist}
         maintain_repo ${lib.escapeShellArg borgRepoRealm}
+        maintain_repo ${lib.escapeShellArg borgRepoSinexBlobs}
         maintain_repo ${lib.escapeShellArg borgRepoRootSnapshots}
       '';
     };
@@ -904,6 +983,7 @@ in
       ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${borgRepoPersistPath}
       ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${borgRepoRealmPath}
       ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${borgRepoRootSnapshotsPath}
+      ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${borgRepoSinexBlobsPath}
       ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${btrfsImageRoot}
     '';
 
