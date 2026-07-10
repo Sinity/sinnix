@@ -141,6 +141,14 @@ rec {
       systemdProperties = {
         IOAccounting = true;
         IOWeight = 2;
+        # Shutdown debris cap (2026-07-10 reboot postmortem): leftover
+        # sacrificial scopes (e.g. per-checkout sinex dev-postgres in
+        # nix-build scopes) each burned the full 90s DefaultTimeoutStopSec
+        # serially during reboot, and held /var/lib/sinex + /var/cache/sinex
+        # mounts busy past their unmount attempts. Sacrificial work gets 15s
+        # after SIGTERM, then SIGKILL; postgres/rustc state here is
+        # regenerable by design.
+        TimeoutStopSec = "15s";
       };
       envDefaults = {
         # Matches the single-job/16-core nix rebuild policy (build-policy.nix,
@@ -167,6 +175,14 @@ rec {
       systemdProperties = {
         IOAccounting = true;
         IOWeight = 1;
+        # Shutdown debris cap (2026-07-10 reboot postmortem): leftover
+        # sacrificial scopes (e.g. per-checkout sinex dev-postgres in
+        # nix-build scopes) each burned the full 90s DefaultTimeoutStopSec
+        # serially during reboot, and held /var/lib/sinex + /var/cache/sinex
+        # mounts busy past their unmount attempts. Sacrificial work gets 15s
+        # after SIGTERM, then SIGKILL; postgres/rustc state here is
+        # regenerable by design.
+        TimeoutStopSec = "15s";
       };
       envDefaults = { };
     };
@@ -179,6 +195,14 @@ rec {
       systemdProperties = {
         IOAccounting = true;
         IOWeight = 2;
+        # Shutdown debris cap (2026-07-10 reboot postmortem): leftover
+        # sacrificial scopes (e.g. per-checkout sinex dev-postgres in
+        # nix-build scopes) each burned the full 90s DefaultTimeoutStopSec
+        # serially during reboot, and held /var/lib/sinex + /var/cache/sinex
+        # mounts busy past their unmount attempts. Sacrificial work gets 15s
+        # after SIGTERM, then SIGKILL; postgres/rustc state here is
+        # regenerable by design.
+        TimeoutStopSec = "15s";
       };
       envDefaults = { };
     };
