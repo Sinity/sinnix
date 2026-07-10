@@ -156,6 +156,7 @@ mkFeatureModule {
           home.packages = [
             scriptPkgs.beads
             scriptPkgs.sinnix-scope
+            scriptPkgs.sinnix-agent-scope-exec
             scriptPkgs.chatgpt-share-export
             scriptPkgs.verify-agent-topology
           ];
