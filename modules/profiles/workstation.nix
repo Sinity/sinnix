@@ -121,7 +121,17 @@ in
     zramSwap = {
       enable = true;
       algorithm = "zstd";
-      memoryMax = 8 * 1024 * 1024 * 1024;
+      # 8G -> 12G (2026-07-10, same night): the first real stress test — 88
+      # concurrent test-binary links — filled the 8G tier completely at a
+      # measured 3.6:1 ratio (6.9G data in 1.9G RAM, zero kills, ~1% memory
+      # PSI) and spilled correctly to the NVMe file. 12G costs ~3.3G
+      # resident when full at that ratio and widens the burst absorber; do
+      # not go past ~12G on 32G RAM without a zram residue-reset hygiene
+      # (dead post-build pages park compressed until faulted or reset —
+      # sinnix-mys follow-up) because the incompressible worst case
+      # approaches 1:1. Disksize change applies to /dev/zram0 on reboot;
+      # a live switch cannot resize an active swap device.
+      memoryMax = 12 * 1024 * 1024 * 1024;
       priority = 100;
     };
 
