@@ -283,6 +283,27 @@ in
       ];
     };
 
+    # Sinex devshell build caches (CARGO_TARGET_DIR + per-checkout dev-state;
+    # the /var/cache/sinex path itself is hardcoded by the sinex devshell and
+    # sinnix-direnvrc, so we relocate what backs it, not the path). Audit
+    # 2026-07-10 (sinnix impermanence sweep): 127 GiB of cargo target churn
+    # accumulated on the EPHEMERAL MX500 root within one 25h boot — maximum
+    # wear for zero benefit, since the root wipe destroys the warm cache
+    # every reboot and forces full recompiles that write it all again.
+    # Backing the path with /realm NVMe keeps caches warm across boots and
+    # moves the churn to the wear-tolerant disk; /realm/cache is excluded
+    # from the btrbk→borg pipeline (build caches are regenerable, see
+    # modules/backup.nix realmExcludes).
+    "/var/cache/sinex" = {
+      device = "/realm/cache/sinex";
+      fsType = "none";
+      options = [
+        "bind"
+        "nofail"
+      ];
+      depends = [ "/realm" ];
+    };
+
     "/boot" = {
       device = "/dev/disk/by-uuid/9E84-C199";
       fsType = "vfat";
@@ -510,6 +531,11 @@ in
       "d ${realmRoot}/db 0755 root root -"
       "d /home/${username}/.local/share 0700 ${username} ${primaryGroupName} -"
       "d ${polylogueShareMount} 0700 ${username} ${primaryGroupName} -"
+      # NVMe-backed regenerable-cache root (bind-mount source for
+      # /var/cache/sinex; nix-build/sccache siblings live here too).
+      # Excluded from btrbk→borg — never persist-grade data.
+      "d ${realmRoot}/cache 0755 root root -"
+      "d ${realmRoot}/cache/sinex 0775 ${username} users -"
     ];
 
     # Polylogue's archive is an active SQLite/write-heavy workload. Keep the
