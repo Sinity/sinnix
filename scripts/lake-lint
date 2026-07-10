@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Assert the level-1 node sets of /realm and /outer-realm match the taxonomy
+# runtimeInputs: bash coreutils
+#
+# Taxonomy source of truth: /realm/INVENTORY.md and /outer-realm/INVENTORY.md
+# (sinnix-4ib). Main nodes only at level 1 — anything unexpected at a root is
+# either debris to triage or a taxonomy change that must update the INVENTORY
+# and this manifest in the same commit.
+set -euo pipefail
+
+status=0
+
+check_root() {
+  local root="$1"
+  shift
+  local -a allowed=("$@")
+  local entry base ok
+  [ -d "$root" ] || {
+    echo "lake-lint: SKIP $root (not present)" >&2
+    return 0
+  }
+  for entry in "$root"/* "$root"/.[!.]*; do
+    [ -e "$entry" ] || continue
+    base="$(basename "$entry")"
+    ok=1
+    for a in "${allowed[@]}"; do
+      if [ "$base" = "$a" ]; then
+        ok=0
+        break
+      fi
+    done
+    if [ "$ok" -ne 0 ]; then
+      echo "lake-lint: UNEXPECTED node: $entry"
+      status=1
+    fi
+  done
+}
+
+# /realm level-1 manifest. db/ is transitional (polylogue move deferred until
+# the active rebuild-index lane drains); remove it from this list when the
+# post-burn-in state pass lands (with sinex/ and nats).
+check_root /realm \
+  project data media state staging db sinex swap cache worktrees tmp inbox \
+  INVENTORY.md .btrfs .Trash-1000
+
+check_root /outer-realm \
+  backup archive inbox INVENTORY.md \
+  archive-staged \
+  .Trash-1000
+
+# /realm/data level-1 manifest (personal lake only).
+check_root /realm/data \
+  captures exports libraries knowledgebase derived secrets INVENTORY.md
+
+if [ "$status" -eq 0 ]; then
+  echo "lake-lint: all roots match taxonomy"
+fi
+exit "$status"
