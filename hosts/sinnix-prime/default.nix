@@ -129,9 +129,25 @@
   systemd.services.systemd-tpm2-setup.enable = lib.mkForce false;
   systemd.services.systemd-tpm2-setup-early.enable = lib.mkForce false;
 
-  # Persist the system journal on the root SSD. /realm is data/capture storage,
-  # not the boot-critical journal path.
-  sinnix.persistence.system.directories = [ "/var/log/journal" ];
+  # Long-term journal on the /realm NVMe (2026-07-10, operator decision):
+  # the old posture (4G on the persisted MX500 root) was a wear compromise
+  # capping retention at ~2 weeks. The NVMe has no wear flag, btrfs zstd:3
+  # compresses journal files well beyond journald's per-field compression,
+  # and the operator wants ~infinite retention: 128G size cap, no time cap.
+  # The nested subvol /realm/db/journal keeps journal churn out of the
+  # /realm btrbk→borg snapshots (sinex's syslog capture is the durable
+  # journal archive; this is the queryable window). Early boot: journald
+  # runs volatile in /run until realm mounts, then
+  # systemd-journal-flush.service moves logs over — the standard sequence.
+  fileSystems."/var/log/journal" = {
+    device = "/realm/db/journal";
+    fsType = "none";
+    options = [
+      "bind"
+      "nofail"
+    ];
+    depends = [ "/realm" ];
+  };
   services.journald = {
     storage = lib.mkForce "persistent";
     extraConfig = lib.mkForce ''
@@ -141,12 +157,9 @@
       # Persistent (not volatile) is deliberate, not drift: a 2026-05-22
       # decision moved this to volatile, then it was reverted because the
       # journal is now the forensic source for OOM/earlyoom kill events
-      # (sinnix-fjq's kill_event capture greps this journal). 4G (down from
-      # 32G) tightens the worst-case footprint on the MX500 root SSD (~104%
-      # rated NAND endurance) while still holding ~weeks at the measured
-      # ~0.3 GB/day volume (sinexd heartbeats are ~90% of it).
-      SystemMaxUse=4G
-      SystemKeepFree=10G
+      # (sinnix-fjq's kill_event capture greps this journal).
+      SystemMaxUse=128G
+      SystemKeepFree=200G
       SystemMaxFileSize=128M
       MaxFileSec=1week
       MaxRetentionSec=0
