@@ -115,6 +115,27 @@ with `codex cloud diff --attempt <n> <task-id>` and
 `codex cloud apply --attempt <n> <task-id>`. Inspect the diff before `apply`;
 `apply` changes the current checkout.
 
+The Cloud CLI does not select or report the serving model. Treat model identity
+as unknown even when the local Codex default is explicit. Use Cloud for bounded
+repository work whose acceptance boundary can be executed inside the checkout;
+do not make it the sole authority for architecture or trust-boundary decisions.
+
+For non-trivial Cloud work:
+
+1. Name real production symbols, data paths, or existing test node IDs. Require
+   zero-collection, missing-node, and corrupt-reference failures where a runner
+   composes existing tests.
+2. Include the adversarial ordering or fault that distinguishes the requested
+   behavior from a favorable happy path. Assert the final externally visible
+   system state, not only an intermediate artifact.
+3. Explicitly forbid toy stores, substitute DDL, and reimplemented production
+   algorithms when the task is test or verification infrastructure.
+4. Prefer `--attempts 2` when two independent diffs are worth the extra run;
+   otherwise schedule a separate semantic review.
+5. Apply only in an isolated worktree, then audit against current source and the
+   task contract before running focused checks. Never apply directly over a
+   dirty canonical checkout.
+
 ## Prepared Prompt Batches
 
 `launch_agent_tabs.sh` reads `<prompt-dir>/<name>.prompt` and writes per-task
