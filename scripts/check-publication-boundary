@@ -8,7 +8,7 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
-forbidden_path_re='^(\.agent/(scratch|ops)(/|$)|\.beads/interactions\.jsonl$|\.claude(/|$)|\.mcp\.json$|secret(s)?(/|$)|data(/|$)|captures(/|$)|exports(/|$)|docs/sinnix-prime-storage-map\.md$|docs/superpowers/specs(/|$))'
+forbidden_path_re='^(\.agent/(scratch|ops)(/|$)|\.beads/interactions\.jsonl$|\.claude(/|$)|\.mcp\.json$|dots/codex/skills/\.system(/|$)|secret(s)?(/|$)|data(/|$)|captures(/|$)|exports(/|$)|docs/sinnix-prime-storage-map\.md$|docs/superpowers/specs(/|$))'
 forbidden_file_re='(^|/)(\.env($|\.)|id_(rsa|dsa|ecdsa|ed25519)(\.|$))|\.(age|pem|key|p12|pfx|kdbx)$'
 
 violations=()
