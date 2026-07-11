@@ -1,0 +1,54 @@
+From a8676ad293b7299efbde4712314609dd9cfc99a0 Mon Sep 17 00:00:00 2001
+From: Sinity <ezo.dev@gmail.com>
+Date: Sat, 11 Jul 2026 16:08:36 +0200
+Subject: [PATCH 2/2] launch: always exit when the broker child dies
+
+launcher_on_child_exit() committed a diagnostic before calling
+sd_event_exit(), and returned the log error if that commit failed. A
+callback error does not stop the event loop, it only disables the
+event source - so on a failed log write the launcher lost its only
+child-exit notification and kept running indefinitely with a dead
+broker. The service unit then keeps masquerading as running (the
+launcher is its main process), and the service manager keeps
+reconnecting to a bus socket that nobody will ever answer, instead of
+observing the failure and applying its restart policy.
+
+This is not hypothetical: the log write fails precisely when the
+journal is unavailable, which is also when the broker itself is most
+likely to have died (journald teardown during system shutdown; see the
+previous commit). Observed in production: broker dead at shutdown
+start, launcher alive for the remaining ~15 minutes, PID 1 blocking on
+bus reconnects the whole time.
+
+Commit the diagnostic best-effort and exit regardless.
+---
+ src/launch/launcher.c | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/src/launch/launcher.c b/src/launch/launcher.c
+index 0d1cfe3..deb5b26 100644
+--- a/src/launch/launcher.c
++++ b/src/launch/launcher.c
+@@ -388,9 +388,18 @@ static int launcher_on_child_exit(sd_event_source *source, const siginfo_t *si,
+         log_append_here(&launcher->log, LOG_INFO, si->si_errno, DBUS_BROKER_CATALOG_BROKER_EXITED);
+         log_append_siginfo(&launcher->log, si);
+ 
++        /*
++         * The diagnostic is best-effort: if committing it fails (e.g., the
++         * journal is already gone during system shutdown), the launcher must
++         * still exit. Returning the log error here used to skip
++         * sd_event_exit(), leaving the launcher alive with a dead broker:
++         * the service unit then keeps masquerading as running, and the
++         * service manager keeps reconnecting to a bus socket nobody will
++         * ever answer.
++         */
+         r = log_commitf(&launcher->log, "Caught SIGCHLD of broker.\n");
+         if (r)
+-                return error_fold(r);
++                error_trace(r);
+ 
+         return sd_event_exit(sd_event_source_get_event(source),
+                              (si->si_code == CLD_EXITED) ? si->si_status : EXIT_FAILURE);
+-- 
+2.54.0
+

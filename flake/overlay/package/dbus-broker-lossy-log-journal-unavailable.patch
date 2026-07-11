@@ -1,0 +1,188 @@
+From 44fb58c43f021509d7c19934490b01ba7caa8a72 Mon Sep 17 00:00:00 2001
+From: Sinity <ezo.dev@gmail.com>
+Date: Sat, 11 Jul 2026 16:06:20 +0200
+Subject: [PATCH 1/2] util/log: do not treat an unavailable journal as fatal in
+ lossy mode
+
+The log layer already has an explicit lossy mode, set unconditionally
+by both the broker and the launcher, whose documented contract is that
+messages may be dropped when they cannot be sent. However,
+log_journal_send() only honored that contract for EAGAIN: any other
+send(2) failure was propagated as a hard error, and callers such as
+peer_queue_unicast() fold log errors into their own return value, so a
+single failed diagnostic write unwinds through driver_dispatch() into
+broker_run() and terminates the broker.
+
+The journal socket being gone is not a hypothetical: journald tears
+down its sockets during system shutdown, restarts on upgrades, and a
+connected AF_UNIX datagram socket then fails with ECONNREFUSED (first
+send) or ENOTCONN (subsequent sends). Observed in production during a
+system shutdown: a policy-denial diagnostic raced journald teardown,
+log_journal_send() returned ECONNREFUSED, the broker exited while
+PID 1 still depended on it, and the remaining shutdown serialized
+behind PID 1's bus reconnect timeouts (90 s per attempt, ~15 minutes
+total).
+
+In lossy mode, treat the journal being unavailable (ECONNREFUSED,
+ECONNRESET, ENOTCONN, ENOENT, EPIPE, ENOBUFS, ESHUTDOWN) like the
+existing EAGAIN case and drop the message. The dropped-messages marker
+in out_drop is made best-effort in lossy mode as well (with
+MSG_DONTWAIT, so it cannot block either), since failing to send *that*
+would reintroduce the same fatal path. Non-lossy contexts keep
+surfacing all errors unchanged.
+
+Add a unit test covering both the unavailable-journal case (peer
+closed: ECONNREFUSED, then ENOTCONN on subsequent sends) and the
+pre-existing full-queue EAGAIN case.
+---
+ src/meson.build     |  3 ++
+ src/util/log.c      | 29 ++++++++++++++++--
+ src/util/test-log.c | 75 +++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 105 insertions(+), 2 deletions(-)
+ create mode 100644 src/util/test-log.c
+
+diff --git a/src/meson.build b/src/meson.build
+index 2d60346..a76b8c4 100644
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -324,6 +324,9 @@ test('D-Bus Match Handling', test_match, suite: 'unit')
+ test_message = executable('test-message', sources: ['dbus/test-message.c'], kwargs: test_kwargs)
+ test('D-Bus Message Abstraction', test_message, suite: 'unit')
+ 
++test_log = executable('test-log', sources: ['util/test-log.c'], kwargs: test_kwargs)
++test('Log Context', test_log, suite: 'unit')
++
+ test_misc = executable('test-misc', sources: ['util/test-misc.c'], kwargs: test_kwargs)
+ test('Miscellaneous Helpers', test_misc, suite: 'unit')
+ 
+diff --git a/src/util/log.c b/src/util/log.c
+index 6a609c4..203240c 100644
+--- a/src/util/log.c
++++ b/src/util/log.c
+@@ -409,6 +409,24 @@ static int log_journal_send(Log *log) {
+                 return LOG_E_TRUNCATED;
+         } else if (errno == EAGAIN) {
+                 goto out_drop;
++        } else if (log->lossy && (errno == ECONNREFUSED ||
++                                  errno == ECONNRESET ||
++                                  errno == ENOTCONN ||
++                                  errno == ENOENT ||
++                                  errno == EPIPE ||
++                                  errno == ENOBUFS ||
++                                  errno == ESHUTDOWN)) {
++                /*
++                 * The journal socket is gone or refuses us: journald is
++                 * restarting, has torn down its socket during shutdown, or
++                 * its queue overflowed. In lossy mode we are explicitly
++                 * allowed to drop diagnostics, and losing a log message must
++                 * never escalate into a fatal broker error: on system
++                 * shutdown that would take the message bus down while PID 1
++                 * still depends on it, serializing the remaining teardown
++                 * behind bus reconnect timeouts.
++                 */
++                goto out_drop;
+         } else if (errno != EMSGSIZE) {
+                 return error_origin(-errno);
+         }
+@@ -465,8 +483,15 @@ out_drop:
+                 l = send(log->log_fd,
+                          LOG_WARNING_DROPPED,
+                          strlen(LOG_WARNING_DROPPED),
+-                         MSG_NOSIGNAL);
+-                if (l < 0)
++                         MSG_NOSIGNAL | (log->lossy ? MSG_DONTWAIT : 0));
++                /*
++                 * The dropped-messages marker is best-effort in lossy mode:
++                 * if the journal cannot take it either, dropping it is
++                 * exactly what lossy mode promises. Failing here would
++                 * reintroduce the fatal-log-write path this label exists to
++                 * avoid. In non-lossy mode, keep surfacing the error.
++                 */
++                if (l < 0 && !log->lossy)
+                         return error_origin(-errno);
+         }
+ 
+diff --git a/src/util/test-log.c b/src/util/test-log.c
+new file mode 100644
+index 0000000..1f44749
+--- /dev/null
++++ b/src/util/test-log.c
+@@ -0,0 +1,75 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++/* SPDX-FileCopyrightText: D-Bus Broker Developers */
++
++/*
++ * Test log context helpers
++ */
++
++#undef NDEBUG
++#include <c-stdaux.h>
++#include <stdlib.h>
++#include <sys/socket.h>
++#include <unistd.h>
++#include "util/log.h"
++
++/*
++ * In lossy mode, a journal that is gone (its socket closed, e.g. journald
++ * torn down during system shutdown) must lead to dropped messages, not to a
++ * fatal error: log emission failures escalating out of the log layer took
++ * the whole broker down in production.
++ */
++static void test_lossy_journal_gone(void) {
++        _c_cleanup_(log_deinit) Log log = LOG_NULL;
++        int fds[2], r;
++
++        r = socketpair(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0, fds);
++        c_assert(!r);
++
++        log_init_journal_consume(&log, fds[0]);
++        log_set_lossy(&log, true);
++
++        /* Peer closed: send(2) on the connected datagram socket now fails
++         * with ECONNREFUSED. */
++        close(fds[1]);
++
++        log_append_here(&log, LOG_WARNING, 0, NULL);
++        r = log_commitf(&log, "diagnostic while journal is gone\n");
++        c_assert(!r);
++
++        /* Subsequent messages keep being dropped silently. */
++        log_append_here(&log, LOG_WARNING, 0, NULL);
++        r = log_commitf(&log, "another diagnostic\n");
++        c_assert(!r);
++}
++
++/*
++ * In lossy mode, a full journal socket queue (EAGAIN) drops messages; this
++ * covered the pre-existing lossy path and must keep working alongside the
++ * unavailable-journal handling.
++ */
++static void test_lossy_journal_full(void) {
++        _c_cleanup_(log_deinit) Log log = LOG_NULL;
++        int fds[2], r;
++
++        r = socketpair(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0, fds);
++        c_assert(!r);
++
++        log_init_journal_consume(&log, fds[0]);
++        log_set_lossy(&log, true);
++
++        /* Nobody reads fds[1]: fill the queue until EAGAIN, all calls must
++         * still report success. */
++        for (unsigned int i = 0; i < 1024; ++i) {
++                log_append_here(&log, LOG_WARNING, 0, NULL);
++                r = log_commitf(&log, "flood diagnostic %u\n", i);
++                c_assert(!r);
++        }
++
++        close(fds[1]);
++}
++
++int main(int argc, char **argv) {
++        test_lossy_journal_gone();
++        test_lossy_journal_full();
++        return 0;
++}
+-- 
+2.54.0
+
