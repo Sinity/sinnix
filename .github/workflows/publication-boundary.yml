@@ -12,7 +12,7 @@ jobs:
   audit:
     # Automatic runs begin when the repository becomes public. A private
     # workflow_dispatch remains available for deliberate pre-publication runs.
-    if: github.event_name == 'workflow_dispatch' || github.event.repository.private == false
+    if: ${{ github.event_name == 'workflow_dispatch' || github.repository_visibility == 'public' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
