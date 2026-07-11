@@ -35,7 +35,9 @@ it contains the verified commands, auth rules, and mode constraints.
    say what production dependency the test enters and what implementation
    mutation/removal makes it fail. Reject toy replicas, test-only validators,
    self-authored registries, and mocks that merely surround themselves.
-8. Inspect results and diffs independently before applying or merging agent
+8. Separate implementation from semantic certification when risk warrants. A
+   green self-authored harness is evidence, not independent review.
+9. Inspect results and diffs independently before applying or merging agent
    work. Worker verification is necessary, not sufficient.
 
 ## Helpers
