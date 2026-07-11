@@ -53,9 +53,11 @@ GitHub discussion is public.
   are intentional repository content. Secrets, private datasets, raw captures
   or exports, private narratives or transcripts, and unrelated personal
   information are not.
-- `.agent/scratch/`, `.agent/ops/`, root `.claude/`, root `.mcp.json`, secret
-  payloads, and `.beads/interactions.jsonl` are local-only. Promote reusable
-  technical conclusions into reviewed source, documentation, or Beads issues.
+- `.agent/scratch/`, `.agent/ops/`, root `.claude/`, root `.mcp.json`,
+  `dots/codex/skills/.system/`, secret payloads, and
+  `.beads/interactions.jsonl` are local-only. The Codex system-skill tree is
+  tool-managed checkout state, not project source. Promote reusable technical
+  conclusions into reviewed source, documentation, or Beads issues.
 - Beads `issues.jsonl` is public technical archaeology; all of its fields must
   satisfy the same publication boundary as source and documentation.
 - Before every commit, review the complete staged diff and run
