@@ -123,6 +123,15 @@
               SINNIX_REBUILD_ACTIVE=1 NIX_CONFIG="eval-cache = false" \
                 ${pkgs.nix}/bin/nix-store -r "$_toplevel_drv"
             )"
+            # Register the generation BEFORE activating: without the profile
+            # entry, switch-to-configuration boot has no generation to point
+            # the bootloader at, activation succeeds only in memory, and the
+            # next reboot silently resurrects the previous generation
+            # (2026-07-11 incident: taxonomy switch activated live, exit-4 on
+            # a failed unit meant nh never ran its profile step, reboot came
+            # back on the pre-taxonomy config and recreated retired paths).
+            /run/wrappers/bin/sudo ${pkgs.nix}/bin/nix-env \
+              --profile /nix/var/nix/profiles/system --set "$_toplevel_out"
             _rebuild_status=0
             /run/wrappers/bin/sudo "$_toplevel_out/bin/switch-to-configuration" switch || _rebuild_status=$?
             # switch-to-configuration exits non-zero whenever ANY unit fails
