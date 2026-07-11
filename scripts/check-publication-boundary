@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Reject tracked paths outside Sinnix's public repository boundary
+# runtimeInputs: bash git coreutils
+
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+forbidden_path_re='^(\.agent/(scratch|ops)(/|$)|\.beads/interactions\.jsonl$|\.claude(/|$)|\.mcp\.json$|secret(s)?(/|$)|data(/|$)|captures(/|$)|exports(/|$)|docs/sinnix-prime-storage-map\.md$|docs/superpowers/specs(/|$))'
+forbidden_file_re='(^|/)(\.env($|\.)|id_(rsa|dsa|ecdsa|ed25519)(\.|$))|\.(age|pem|key|p12|pfx|kdbx)$'
+
+violations=()
+while IFS= read -r -d '' path; do
+  if [[ "$path" =~ $forbidden_path_re || "$path" =~ $forbidden_file_re ]]; then
+    violations+=("$path")
+  fi
+done < <(git ls-files -z)
+
+if ((${#violations[@]})); then
+  printf 'publication boundary rejects these tracked paths:\n' >&2
+  printf '  %s\n' "${violations[@]}" >&2
+  exit 1
+fi
+
+git diff --cached --check
+
+printf '%s\n' 'publication path boundary: clean'
+printf '%s\n' 'manual gate: review staged prose, fixtures, identifiers, and Beads issue fields'
