@@ -14,7 +14,7 @@ mkFeatureModule {
     }:
     {
       home-manager.users.${user} =
-        { config, ... }:
+        { config, pkgs, ... }:
         let
           captureShellCmd = "${config.home.homeDirectory}/.local/bin/sinnix-captured-shell";
         in
@@ -27,6 +27,19 @@ mkFeatureModule {
 
           programs.kitty = {
             enable = true;
+            # sinnix-878 phase 2: discriminate glibc arena bloat/fragmentation
+            # from a true kitty leak — scoped to the kitty process itself (its
+            # `env` directive would only affect children). Applies to
+            # instances started after the next switch; compare telemetry
+            # slopes across the fleet (process_memory_sample).
+            package = pkgs.symlinkJoin {
+              name = "kitty-malloc-capped";
+              paths = [ pkgs.kitty ];
+              nativeBuildInputs = [ pkgs.makeWrapper ];
+              postBuild = ''
+                wrapProgram $out/bin/kitty --set MALLOC_ARENA_MAX 2
+              '';
+            };
             # Keep Kitty's shell helpers, but turn off the prompt/title/cursor
             # subfeatures that collide with the custom zsh prompt pipeline.
             shellIntegration.mode = "no-prompt-mark no-title no-cursor";
@@ -48,12 +61,12 @@ mkFeatureModule {
               mouse_hide_wait = 60;
               wheel_scroll_multiplier = 5.0;
               touch_scroll_multiplier = 5.0;
-              # cursor_trail 3 -> 0 (2026-07-10, sinnix-878 phase 1): kitty
-              # 0.47.4 instances leak ~60-90 MB/h of anon heap while idle;
-              # the trail animation is the prime suspect (continuous
-              # allocator, young feature). Re-enable only if the leak slope
-              # (machine-telemetry process_memory_sample) is unchanged after
-              # ~24h and the experiment moves to phase 2 (MALLOC_ARENA_MAX).
+              # cursor_trail 3 -> 0 (2026-07-10, sinnix-878 phase 1). Phase 1
+              # CONCLUDED 2026-07-11: telemetry over the 07-10..07-11 boot
+              # shows 86 MB/h growth WITH the trail disabled — cursor_trail is
+              # exonerated. Keeping it off pending the leak fix regardless (no
+              # animation attachment). Evidence trail in sinnix-878; upstream
+              # report filed against kitty 0.47.4.
               cursor_trail = 0;
               confirm_os_window_close = 0;
               allow_remote_control = "socket-only";

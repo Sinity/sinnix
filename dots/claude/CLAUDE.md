@@ -212,23 +212,10 @@ feels previously solved. When history access yields durable insight, write it
 down (scratch note, `bd remember`, or the owning CLAUDE.md) instead of
 re-discovering it next session.
 
----
-
-
-
 Raw-log lives at `/realm/data/knowledgebase/logs.raw-log.md`. It is the
 append-only, low-friction operator stream used by `rawlog`, `rawlog-capture`,
 and `oracle`; read it when the user references raw-log/rawlog, recent subjective
 context, or "what have I been saying/thinking lately?"
-
-Capture only durable, non-obvious decisions, tensions, dead ends, and cross-session
-insights. Do not mirror ordinary task notes there.
-
-- Quick capture → `seed/YYYY-MM-DD-HHMMSS-slug.md`
-- Durable decision → `crystal/decisions/name.md`
-- Unresolved contradiction → `tension/NNN-name.md`
-- Dead end worth not rediscovering → `graveyard/name.md`
-- Per-subject threads → `subject/{goal,project}/...`
 
 ---
 
@@ -479,6 +466,13 @@ heavy commands. In Sinex and Polylogue devshells, ordinary commands such as
 Sinnix build/background slices automatically, so agents should run the normal
 project command first.
 
+Invoke heavy test runners by their wrapper names (`pytest`, `cargo`,
+`xtask`), never as `python -m pytest` or via absolute `.venv/bin/` paths: the
+devshell routes commands into build/background slices by command name, and
+bypassing the name also bypasses slice containment, stop-timeout caps, and
+oomd policy (2026-07-11 forensics: a `python -m pytest` xdist swarm inherited
+a protected agent scope and sat resident for 35 hours).
+
 Resource containment is not a verification contract. In Sinex, use `xtask` for
 build/check/test verification because it owns the repo's schema, SQLx, database,
 feature, and formatting assumptions. Do not bypass it with direct `cargo`
@@ -653,6 +647,7 @@ clustering helper where the repo has one).
 
 ### Daily oracle digest
 
+`/realm/project/sinnix/scripts/oracle` produces a daily reverse-prompting digest from the rawlog tail, recent project activity, open GitHub issues, and the latest lynchpin current-state pack, then asks `claude -p` for a four-section capped summary (Resume / Reverse-prompt questions / Drift / One thing — each bullet citation-required). Run `oracle` for today, `oracle --date YYYY-MM-DD` for a specific day, `--output PATH` to override the default `~/.local/share/oracle/YYYY-MM-DD.md` destination, and `--show` to also print to stdout. The CLI unsets `ANTHROPIC_API_KEY` before invoking claude so it uses the operator's subscription auth rather than the zero-balance automation key.
 
 ---
 
