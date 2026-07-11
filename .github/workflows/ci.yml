@@ -1,9 +1,12 @@
 name: CI
 
 on:
-  # GitHub Actions billing is unavailable for now. Keep manual CI available
-  # without spending failed automatic runs on every push/PR.
+  push:
+  pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -11,15 +14,18 @@ concurrency:
 
 jobs:
   checks:
+    # Automatic runs begin when the repository becomes public. A private
+    # workflow_dispatch remains available for deliberate pre-publication runs.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.repository_visibility == 'public' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Install Nix
-        uses: cachix/install-nix-action@v27
+        uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
         with:
-          install_url: https://releases.nixos.org/nix/nix-2.19.2/install
           extra_nix_config: |
             experimental-features = nix-command flakes
             extra-substituters = https://numtide.cachix.org https://sinity.cachix.org
