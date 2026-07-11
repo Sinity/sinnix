@@ -321,7 +321,7 @@ No process status goes to raw-log.
 
 Use multiple views over the same runtime:
 
-- F5/Hermes: user-facing Conductor and cognitive mirror surface.
+- F5/Hermes: user-facing Conductor surface.
 - Herdr TUI: live terminal/pane control.
 - Agent Mail web/TUI: coordination/inbox/reservations.
 - Beads Viewer: task/dependency graph and ready-work routing.
