@@ -1,85 +1,72 @@
-# NixOS Configuration
+# Sinnix
 
-A declarative, modular NixOS system configuration using flake-parts and devenv.
+Personal NixOS and Home Manager configuration for a desktop workstation,
+headless host, and OpenWrt router. It is the live deployment repository for
+those machines, not a portable NixOS framework or a supported configuration
+template.
 
-## Quick Start
+The flake uses flake-parts for composition, Home Manager for user state, and
+agenix for runtime secrets. Encrypted payloads and their recipient inventory
+live outside the checkout; the public tree contains only the runtime path and
+service contracts that consume them.
+
+## How configuration is assembled
+
+- `modules/default.nix` recursively discovers NixOS modules. `modules/lib/`
+  contains helper functions and `modules/attic/` contains retired code, so both
+  are excluded from auto-import.
+- `hosts/` supplies machine-specific choices and enables the features,
+  services, bundles, and profiles each host needs.
+- `modules/features/` owns user-facing capabilities; `modules/services/` owns
+  daemons and timers; top-level `modules/*.nix` owns platform infrastructure.
+- `dots/` is linked into the operator's home through Home Manager.
+- `flake/` owns host construction, package/overlay wiring, development
+  commands, checks, and the OpenWrt router surface.
+
+Auto-import removes registration boilerplate; it does not auto-enable optional
+features. Host modules and typed options remain the explicit composition
+boundary.
+
+## Working with the repository
+
+Enter the development shell first:
 
 ```bash
-# Enter development environment
 cd /realm/project/sinnix
-direnv allow   # Or: nix develop
-
-# Validate configuration
-check
-
-# Apply configuration
-switch
+direnv allow
+# or: nix develop
 ```
 
-## Structure
+The shell exposes the supported operations:
 
-- `flake.nix` – Dependency declarations and flake-part wiring
-- `flake/` – Flake components (`nixos.nix`, `dev-shell.nix`, `apps.nix`, `tests.nix`, overlays/packages)
-- `modules/` – NixOS modules by taxonomy:
-  - top-level `modules/*.nix` = infrastructure/platform
-  - `modules/features/` = user-facing capabilities (cli/desktop/dev/system)
-  - `modules/services/` = long-running daemons/timers
-  - `modules/bundles/` = composition-only presets
-  - `modules/lib/` = reusable helpers/factories
-- `hosts/` – Host-specific overrides (e.g. `hosts/sinnix-prime`)
-- `dots/` – Declarative dotfiles linked via Home Manager
+- `check` — build the curated default check tier sequentially.
+- `lint` — run deadnix, statix, and shellcheck without changing files.
+- `format` — format through treefmt/nixfmt.
+- `switch` — build and activate the workstation configuration.
+- `boot` — build and register the next boot generation without activating it.
+- `test-system` — test activation without making it the boot default.
+- `test-vm` — build and launch the NixOS VM smoke surface.
 
-Encrypted secrets (agenix) live outside this checkout, not under a repo path.
+These wrappers own rebuild locking and resource containment. Direct `nh os
+switch` invocations bypass that policy.
 
-Hosts import shared modules and selectively enable bundles/features/services.
+## Repository shape
 
-## Core Commands
+```text
+flake.nix       flake-parts entry point and inputs
+flake/          host construction, dev shell, checks, packages, router
+hosts/          per-machine configuration
+modules/        auto-imported platform, feature, service, and profile modules
+modules/lib/    module factories and shared Nix helpers
+dots/           Home Manager-managed dotfiles and shared agent tooling
+scripts/        packaged operational commands
+archive/        retained historical source excluded from normal composition
+```
 
-**Development Environment:**
+The desktop configuration is intentionally specific: Hyprland and Noctalia,
+qutebrowser/mpv integration, local capture and analysis services, explicit
+storage/backup policy, and resource-scoped build and agent workflows are part
+of the artifact.
 
-- `check` - Validate configuration
-- `format` - Format Nix code
-- `switch` - Apply configuration changes (requires sudo)
-- `test-system` - Build and test activation without switching
-
-**Direct Nix Commands:**
-
-- `check --no-build` - Run the curated default check tier through the devshell-safe sequential wrapper
-- `nix fmt` - Format code via treefmt
-- `nix flake update` - Update flake inputs
-
-**Flake App Commands:**
-
-- `nix run .#lint` - Check code quality
-- `test-system` - Test without applying
-- `switch` - Apply configuration
-- `clean` - Clean old generations
-- `nix run .#agenix` - Manage secrets
-
-## Features
-
-- Modular system with flake-parts
-- Development environment with devenv.sh
-- Automated code quality (pre-commit hooks)
-- Secret management with agenix
-- Comprehensive home-manager configuration
-- Sinex module uses the `sinex` input directly; set `sinnix.services.sinex.*` to provision Postgres without enabling services
-
-## Desktop Workflow Highlights
-
-- **Hyprland + qutebrowser**: Hyprland groups replace browser tabs; each qutebrowser page spawns a native window bound to the active workspace layout.
-- **Noctalia shell**: Noctalia owns the bar, launcher, notifications, lock screen, OSD, wallpaper, and live Material-You palette.
-- **mpv-centered media**: `open-in-mpv`/`yt-related` userscripts offload streaming and SponsorBlock/RYD logic to mpv with bundled scripts.
-- **Dual editors**: VS Code and Zed both default to plain zsh terminals and hide internal tab bars so Hyprland groups and kitty layouts stay consistent.
-- **Automation hooks**: qutebrowser config ships ActivityWatch heartbeats, tab dedupe/cap logic, and research capture scripts; borg backups run daily via user timers.
-
-## Design Philosophy
-
-- Explicit over implicit: Modules are explicitly imported
-- Modularity: Each component has a single responsibility
-- Composability: System built from independent, focused modules
-- Structure: Consistent organization and conventions
-
-## Documentation
-
-- `CLAUDE.md` – canonical agent instruction file (flat; `AGENTS.md` is a symlink to it)
+Agent and contribution rules live in `CLAUDE.md`; `AGENTS.md` is a symlink to
+that same file.
