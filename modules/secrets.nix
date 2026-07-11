@@ -33,6 +33,18 @@ let
 
   secretNames = lib.mapAttrsToList (name: _: lib.removeSuffix ".age" name) secretFiles;
 
+  # Public runtime contracts referenced by this configuration. Listing a name
+  # here only makes its conventional /run/agenix path available during pure
+  # evaluation; it does not declare a secret or assert that ciphertext exists.
+  runtimeSecretContracts = [
+    "assemblyai-api-key"
+    "cohere-api-key"
+    "deepgram-api-key"
+    "firecrawl-api-key"
+    "openai-api-key"
+    "sinex-api-admin-token"
+  ];
+
   # Declarative per-secret overrides. Any secret NOT listed here falls back to
   # the defaults below (owner = username, mode = "0400", exportEnv = true).
   # Add a special-cased secret by adding one attrset entry -- no control flow.
@@ -78,16 +90,24 @@ let
       // lib.optionalAttrs (meta ? group) { inherit (meta) group; };
   }) secretFiles;
 
+  # Consumers need stable runtime paths during pure public evaluation, where
+  # Nix deliberately cannot inspect the external ciphertext directory. The
+  # actual age.secrets declarations remain limited to files discovered during
+  # an impure/live evaluation.
+  declaredSecretNames = lib.unique (
+    secretNames ++ runtimeSecretContracts ++ builtins.attrNames secretMeta
+  );
+  secretPaths = lib.genAttrs declaredSecretNames (name: "/run/agenix/${name}");
+
   mkSecretExport =
     secretName:
     let
       envName = lib.toUpper (lib.replaceStrings [ "-" "." ] [ "_" "_" ] secretName);
-      spec = lib.getAttr secretName secretSpecs;
       exportEnv = (secretMeta.${secretName} or { }).exportEnv or true;
     in
     lib.optionalString exportEnv ''
-      if [[ -r "${spec.path}" ]]; then
-        export ${envName}="$(<${spec.path})"
+      if [[ -r "${secretPaths.${secretName}}" ]]; then
+        export ${envName}="$(<${secretPaths.${secretName}})"
       fi
     '';
 
@@ -118,7 +138,7 @@ in
     # mkForce: Ensure these options are authoritative regardless of module import order
     sinnix.secrets.exportScript = lib.mkForce (if cfg.enable then secretsExportScript else "");
     sinnix.secrets.paths = lib.mkForce (
-      if cfg.enable then lib.mapAttrs (_: spec: spec.path) secretSpecs else { }
+      if cfg.enable then secretPaths else { }
     );
 
     age = {
