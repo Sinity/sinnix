@@ -27,17 +27,25 @@ mkFeatureModule {
 
           programs.kitty = {
             enable = true;
-            # sinnix-878 phase 2: discriminate glibc arena bloat/fragmentation
-            # from a true kitty leak — scoped to the kitty process itself (its
-            # `env` directive would only affect children). Applies to
-            # instances started after the next switch; compare telemetry
-            # slopes across the fleet (process_memory_sample).
+            # sinnix-878 RESOLVED 2026-07-11: the "leak" is glibc retaining
+            # kitty's freed MB-scale scrollback (historybuf) segments. glibc's
+            # dynamic M_MMAP_THRESHOLD rises above the segment size after the
+            # first few frees, so segments are served from brk and closing a
+            # window strands them in bins forever (reproduced: +177MB RSS
+            # after two open/fill/close cycles with zero windows left;
+            # malloc_trim(0) recovered ~all of it). Pinning the threshold
+            # disables the dynamic ratchet so segments go through mmap and
+            # are returned on free. Scoped to the kitty process itself (its
+            # `env` directive would only affect children). Upstream trail:
+            # kitty issue 10249.
             package = pkgs.symlinkJoin {
-              name = "kitty-malloc-capped";
+              name = "kitty-malloc-tuned";
               paths = [ pkgs.kitty ];
               nativeBuildInputs = [ pkgs.makeWrapper ];
               postBuild = ''
-                wrapProgram $out/bin/kitty --set MALLOC_ARENA_MAX 2
+                wrapProgram $out/bin/kitty \
+                  --set MALLOC_MMAP_THRESHOLD_ 131072 \
+                  --set MALLOC_ARENA_MAX 2
               '';
             };
             # Keep Kitty's shell helpers, but turn off the prompt/title/cursor
