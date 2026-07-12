@@ -248,120 +248,47 @@ in
               # reboot, losing in-flight confirmations and the DLQ).
               dataDir = "/var/lib/nats";
               jetstreamMaxStore = "32G";
-              bootstrapStreams.streams = lib.mkForce [
-                {
-                  name = "SINEX_RAW_EVENTS";
-                  subjects = [ "events.raw.>" ];
+              # Express ONLY this host's genuine deltas against sinex's own
+              # canonical topology (services.sinex.nats.bootstrapStreams.streams
+              # is now an attrset keyed by stream name whose fields sinex ships
+              # at mkDefault priority — sinex-dffy). Every field not set here is
+              # inherited from sinex's nixos/modules/nats.nix defaults, and any
+              # stream sinex adds later flows in automatically instead of being
+              # silently shadowed by a hand-copied mkForce list (the 2026-07-09
+              # 6-day sinexd outage). Do NOT re-declare byte-identical streams.
+              bootstrapStreams.streams = {
+                # natscli rejects --max-bytes above signed 32-bit range, and the
+                # live production stream already carries a 16 GiB cap; passing no
+                # --max-bytes leaves that cap intact instead of shrinking a
+                # near-full JetStream during activation. Raw retention is 7 days
+                # on this host vs sinex's 72h dev default.
+                SINEX_RAW_EVENTS = {
                   maxAge = "168h";
-                  maxMsgs = 2000000;
-                  # Do not pass --max-bytes for the live raw stream. The
-                  # existing production stream already has a 16 GiB cap, while
-                  # natscli rejects --max-bytes values above signed 32-bit
-                  # range and upstream's generic 2 GiB default would shrink a
-                  # near-full JetStream during host activation.
                   maxBytes = null;
-                }
-                {
-                  name = "SINEX_RAW_EVENTS_CONFIRMED";
-                  subjects = [ "events.confirmed.>" ];
-                  maxAge = "72h";
-                  maxMsgs = 2000000;
-                  # Match the raw stream policy above: production needs this
-                  # stream to be large enough for catch-up bursts, and natscli
-                  # cannot reconcile the intended >2 GiB cap.
-                  maxBytes = null;
-                }
-                {
-                  name = "SOURCE_MATERIAL";
-                  subjects = [ "source_material.frames.>" ];
-                  retention = "work";
-                  maxAge = "72h";
-                  maxBytes = natsCliMaxBytes;
-                }
-                {
-                  name = "SINEX_RAW_EVENTS_CONFIRMATIONS";
+                };
+                # Same natscli >2 GiB ceiling workaround for the confirmed bus.
+                SINEX_RAW_EVENTS_CONFIRMED.maxBytes = null;
+                # 7-day diagnostic retention on this host vs sinex's 72h default.
+                SINEX_RAW_EVENTS_DLQ.maxAge = "168h";
+                SINEX_RAW_EVENTS_PROCESSING_FAILURES.maxAge = "168h";
+
+                # Host-local streams NOT in sinex's canonical topology: the
+                # confirmation-watermark lanes this deployment provisions ahead
+                # of the Rust runtime consuming them. maxMsgsPerSubject=1 keeps
+                # them as compacted last-value lanes.
+                SINEX_RAW_EVENTS_CONFIRMATIONS = {
                   subjects = [ "events.confirmations.>" ];
                   maxAge = "72h";
                   maxBytes = natsCliMaxBytes;
                   maxMsgsPerSubject = 1;
-                }
-                {
-                  name = "SINEX_RAW_EVENTS_DLQ";
-                  subjects = [ "events.dlq.>" ];
-                  maxAge = "168h";
-                  maxBytes = natsCliMaxBytes;
-                  dupeWindow = "1h";
-                }
-                {
-                  name = "SINEX_RAW_EVENTS_CONFIRMATION_RETRIES";
+                };
+                SINEX_RAW_EVENTS_CONFIRMATION_RETRIES = {
                   subjects = [ "events.confirmation_retries.>" ];
                   maxAge = "72h";
                   maxBytes = natsCliMaxBytes;
                   maxMsgsPerSubject = 1;
-                }
-                {
-                  name = "SINEX_RAW_EVENTS_PROCESSING_FAILURES";
-                  subjects = [ "events.processing_failures.>" ];
-                  maxAge = "168h";
-                  maxBytes = natsCliMaxBytes;
-                }
-                {
-                  name = "SINEX_RAW_EVENTS_DERIVED_INVALIDATIONS";
-                  subjects = [ "sinex.derived.invalidation" ];
-                  maxAge = "24h";
-                  maxBytes = natsCliMaxBytes;
-                }
-                # ── Reflection lane ──────────────────────────────────────
-                # Self-observation streams: sinexd starts a reflection-lane
-                # consumer unconditionally and refuses to serve that lane
-                # against an incomplete externally-managed topology
-                # (sinex-bor, PR #2423). Values mirror sinex's own
-                # nixos/modules/nats.nix bootstrapStreams defaults exactly —
-                # this override list shadows those defaults via mkForce, so
-                # it must be kept in sync by hand until sinex-bor's residual
-                # "single canonical spec" scope lands.
-                {
-                  name = "SINEX_REFLECTION_EVENTS";
-                  subjects = [ "events.reflection.raw.>" ];
-                  retention = "work";
-                  maxAge = "24h";
-                  maxMsgs = 2000000;
-                  maxBytes = "268435456"; # 256 MiB
-                  discard = "old";
-                }
-                {
-                  name = "SINEX_REFLECTION_EVENTS_CONFIRMED";
-                  subjects = [ "events.reflection.confirmed.>" ];
-                  maxAge = "24h";
-                  maxMsgs = 2000000;
-                  maxBytes = "268435456"; # 256 MiB
-                  discard = "old";
-                }
-                {
-                  name = "SINEX_REFLECTION_EVENTS_DLQ";
-                  subjects = [ "events.reflection.dlq.>" ];
-                  maxAge = "24h";
-                  maxBytes = "67108864"; # 64 MiB
-                  dupeWindow = "1h";
-                  allowDirect = true;
-                  discard = "new";
-                }
-                {
-                  name = "SINEX_REFLECTION_EVENTS_PROCESSING_FAILURES";
-                  subjects = [ "events.reflection.processing_failures.>" ];
-                  maxAge = "24h";
-                  maxBytes = "67108864"; # 64 MiB
-                  dupeWindow = "1h";
-                  allowDirect = true;
-                  discard = "new";
-                }
-                {
-                  name = "SINEX_REFLECTION_EVENTS_DERIVED_INVALIDATIONS";
-                  subjects = [ "sinex.reflection.derived.invalidation" ];
-                  maxAge = "24h";
-                  maxBytes = natsCliMaxBytes;
-                }
-              ];
+                };
+              };
               # Entity-enricher checkpoints currently exceed NATS' 1 MiB
               # default payload limit during recovery. The local server is
               # loopback-only; raise the transport ceiling so checkpoints can
