@@ -1,9 +1,6 @@
-# Trusted local MCP gateway for coding-agent workflows.
-#
-# Successor to attic/museum/services/chatgpt-mcp.nix. This keeps the useful part
-# — a ChatGPT/Codex-reachable local tool substrate — and replaces the old
-# ngrok + ssh-mcp shell bridge with a first-class MCP server plus an optional
-# local JSON-RPC HTTP endpoint for tunnel experiments.
+# Trusted local MCP gateway for coding-agent workflows. Provides a first-class
+# repository/command/artifact surface over stdio MCP, with an optional local
+# JSON-RPC HTTP endpoint.
 {
   mkServiceModule,
   config,

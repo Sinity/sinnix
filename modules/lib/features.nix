@@ -35,10 +35,10 @@ let
       # subFeatures = { vscode = { description = "VSCode"; default = true; }; ... }
       subFeatures ? { },
       meta ? { },
-      # Features are default-ON by contract (see comment below). A caller
-      # that needs a narrower default belongs in modules/attic/, not a
-      # defaultOn override here — this exists only as an explicit escape
-      # hatch, not routine per-module tuning.
+      # Features are default-ON by contract (see comment below). defaultOn is
+      # an explicit escape hatch, not routine per-module tuning; optional
+      # background capabilities normally belong in the default-off service
+      # namespace instead.
       defaultOn ? true,
       configFn,
     }:
@@ -56,7 +56,8 @@ let
       # Features sitting in modules/features/ are unconditionally part of a
       # sinnix host's default character. Hosts express exceptions via
       # `sinnix.features.<path>.enable = false;`. Capabilities that are not
-      # default-on belong in modules/attic/, not features/.
+      # part of the normal interactive character should be default-off
+      # services or omitted from the active module tree.
       #
       # extraOptions must not define its own top-level `enable`: the `//`
       # merge below replaces it wholesale, silently discarding whatever a
@@ -67,7 +68,8 @@ let
         if extraOptions ? enable then
           throw "mkFeatureModule ${builtins.concatStringsSep "." path}: extraOptions must not define 'enable' (generated automatically, default = ${lib.boolToString defaultOn}); use the defaultOn argument instead"
         else
-          lib.recursiveUpdate extraOptions subFeatureOpts // {
+          lib.recursiveUpdate extraOptions subFeatureOpts
+          // {
             enable = (lib.mkEnableOption description) // {
               default = defaultOn;
             };
