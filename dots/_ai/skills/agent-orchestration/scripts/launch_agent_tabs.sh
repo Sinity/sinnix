@@ -178,29 +178,65 @@ if [[ ${status_only} -eq 1 ]]; then
     echo "--status requires an existing --output-dir" >&2
     exit 2
   fi
-  printf '%-30s %-9s %s\n' TASK STATE DETAIL
-  found_any=0
-  for exit_file in "${output_dir}"/*.exit; do
-    [[ -e ${exit_file} ]] || continue
-    found_any=1
-    task_name="$(basename "${exit_file%.exit}")"
-    task_ec="$(<"${exit_file}")"
-    if [[ ${task_ec} == "0" ]]; then
-      printf '%-30s %-9s %s\n' "${task_name}" DONE "${output_dir}/${task_name}.last.md"
+  # One row per canonical task. Relaunch generations (<task>.resume-N.log,
+  # <task>.headless-N.log) collapse onto the base task name; the newest log
+  # generation represents the task. RUNNING requires a live process holding
+  # the log open (evidence), never inferred from marker absence. A log with
+  # no writer and no exit marker is STALE (killed / never completed).
+  log_has_writer() {
+    if command -v fuser >/dev/null 2>&1; then
+      fuser -s "$1" 2>/dev/null
     else
-      printf '%-30s %-9s exit=%s %s\n' "${task_name}" FAILED "${task_ec}" "${output_dir}/${task_name}.log"
+      local target fd
+      target="$(readlink -f "$1")" || return 1
+      for fd in /proc/[0-9]*/fd/*; do
+        [[ "$(readlink "${fd}" 2>/dev/null)" == "${target}" ]] && return 0
+      done
+      return 1
     fi
-  done
+  }
+  declare -A newest_log newest_mtime
   for log_file in "${output_dir}"/*.log; do
     [[ -e ${log_file} ]] || continue
-    task_name="$(basename "${log_file%.log}")"
-    [[ -e "${output_dir}/${task_name}.exit" ]] && continue
-    found_any=1
-    printf '%-30s %-9s log %s\n' "${task_name}" RUNNING "$(du -h "${log_file}" 2>/dev/null | cut -f1)"
+    base="$(basename "${log_file%.log}")"
+    task_name="${base%.headless-*}"
+    task_name="${task_name%.resume-*}"
+    mtime="$(stat -c %Y "${log_file}" 2>/dev/null || echo 0)"
+    if [[ -z ${newest_mtime[${task_name}]:-} || ${mtime} -gt ${newest_mtime[${task_name}]} ]]; then
+      newest_mtime[${task_name}]="${mtime}"
+      newest_log[${task_name}]="${log_file}"
+    fi
   done
-  if [[ ${found_any} -eq 0 ]]; then
+  for exit_file in "${output_dir}"/*.exit; do
+    [[ -e ${exit_file} ]] || continue
+    task_name="$(basename "${exit_file%.exit}")"
+    [[ -n ${newest_log[${task_name}]:-} ]] || newest_log[${task_name}]=""
+  done
+  if [[ ${#newest_log[@]} -eq 0 ]]; then
     echo "(no task artifacts in ${output_dir})"
+    exit 0
   fi
+  printf '%-34s %-9s %s\n' TASK STATE DETAIL
+  now="$(date +%s)"
+  while IFS= read -r task_name; do
+    log_file="${newest_log[${task_name}]}"
+    exit_file="${output_dir}/${task_name}.exit"
+    if [[ -n ${log_file} ]] && log_has_writer "${log_file}"; then
+      age=$(( now - ${newest_mtime[${task_name}]:-now} ))
+      printf '%-34s %-9s log %s (%ss ago, %s)\n' "${task_name}" RUNNING \
+        "$(du -h "${log_file}" 2>/dev/null | cut -f1)" "${age}" "$(basename "${log_file}")"
+    elif [[ -e ${exit_file} ]]; then
+      task_ec="$(<"${exit_file}")"
+      if [[ ${task_ec} == "0" ]]; then
+        printf '%-34s %-9s %s\n' "${task_name}" DONE "${output_dir}/${task_name}.last.md"
+      else
+        printf '%-34s %-9s exit=%s %s\n' "${task_name}" FAILED "${task_ec}" "${log_file:-${output_dir}/${task_name}.log}"
+      fi
+    else
+      printf '%-34s %-9s no live process, no exit marker (%s)\n' "${task_name}" STALE \
+        "$(basename "${log_file:-none}")"
+    fi
+  done < <(printf '%s\n' "${!newest_log[@]}" | sort)
   exit 0
 fi
 
