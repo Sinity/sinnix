@@ -18,6 +18,7 @@
 let
   cfg = config.sinnix.profiles.workstation;
   runtimeInventory = config.sinnix.runtime.inventory;
+  user = config.sinnix.user.name;
   panicLogCapture = pkgs.writeShellApplication {
     name = "panic-log-capture";
     runtimeInputs = [ pkgs.coreutils ];
@@ -356,7 +357,13 @@ in
     # storage with age-based cleanup (the `7d` field below; NVMe contents
     # also survive reboots, unlike tmpfs, hence the aging is load-bearing).
     environment.sessionVariables.TMPDIR = "/realm/tmp/shell";
-    systemd.tmpfiles.rules = [ "d /realm/tmp/shell 1777 root root 7d" ];
+    systemd.tmpfiles.rules = [
+      "d /realm/tmp/shell 1777 root root 7d"
+      # Claude Code bypasses TMPDIR for task output captures. Managed Claude
+      # wrappers point CLAUDE_CODE_TMPDIR here so 12+ concurrent subagents
+      # cannot fill the shared 6 GiB /tmp tmpfs again (sinnix-77w).
+      "d /realm/tmp/claude-code 0700 ${user} users 7d"
+    ];
 
     # nix.slice has no explicit unit here: it exists only as the implicit
     # dash-hierarchy parent of nix-build.slice (systemd creates parent slices
