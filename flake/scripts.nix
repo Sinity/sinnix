@@ -130,7 +130,20 @@ let
   polylogueSrc = inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
   externalPackages = {
-    beads = inputs.beads.packages.${pkgs.stdenv.hostPlatform.system}.default;
+    # bd needs the dolt binary on PATH for sql-server mode (per-project server,
+    # auto-started on demand). Embedded mode serializes every invocation on a
+    # process-exclusive lock — under multi-agent fanouts that convoys for
+    # minutes, and it pays ~2.3s engine startup per call vs ~65ms as a server
+    # client. Wrap rather than add dolt globally so every bd consumer (hooks,
+    # devshells, agent lanes) gets server capability unconditionally.
+    beads = pkgs.symlinkJoin {
+      name = "beads-with-dolt";
+      paths = [ inputs.beads.packages.${pkgs.stdenv.hostPlatform.system}.default ];
+      nativeBuildInputs = [ pkgs.makeWrapper ];
+      postBuild = ''
+        wrapProgram $out/bin/bd --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.dolt ]}
+      '';
+    };
 
     codebase-memory-mcp = codebaseMemoryMcp;
 
