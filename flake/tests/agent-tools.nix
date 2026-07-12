@@ -305,6 +305,18 @@ in
             grep -Fq 'MCP_CONFIG="$HOME/.config/claude/mcp.json"' "$HOME/.local/bin/claude-local"
             grep -Fq 'https://api.deepseek.com/anthropic' "$HOME/.local/bin/claude-deepseek"
             grep -Fq 'ANTHROPIC_BASE_URL="http://127.0.0.1:4000"' "$HOME/.local/bin/claude-local"
+            for wrapper in \
+              "$HOME/.local/bin/claude-full" \
+              "$HOME/.local/bin/claude-lean" \
+              "$HOME/.local/bin/claude-browser" \
+              "$HOME/.local/bin/claude-deepseek" \
+              "$HOME/.local/bin/claude-local"; do
+              # Claude's supported task-capture override must default off the
+              # bounded /tmp tmpfs while preserving an operator-supplied path.
+              grep -Fq 'if [ -z "''${CLAUDE_CODE_TMPDIR:-}" ]; then' "$wrapper"
+              grep -Fq 'export CLAUDE_CODE_TMPDIR=/realm/tmp/claude-code' "$wrapper"
+              grep -Fq '/bin/install -d -m 0700 "$CLAUDE_CODE_TMPDIR"' "$wrapper"
+            done
             grep -Fq 'codex_args=(--profile full)' "$HOME/.local/bin/codex"
             grep -Fq 'export SINNIX_CODEX_PROFILE=lean' "$HOME/.local/bin/codex-lean"
             grep -Fq 'codex_args=(--profile lean)' "$HOME/.local/bin/codex-lean"

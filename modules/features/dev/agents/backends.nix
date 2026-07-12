@@ -13,6 +13,8 @@
   user,
 }:
 let
+  claudeTmpRoot = "${sinnixCfg.paths.realmRoot}/tmp/claude-code";
+
   # Shared npm bootstrap prelude — delegates state-dir setup, first-run npm
   # install, and launcher regeneration to the packaged
   # sinnix-agent-npm-bootstrap script (scripts/sinnix-agent-npm-bootstrap).
@@ -63,6 +65,19 @@ let
         }}
 
         ${extraEnv}
+
+        # Claude Code does not use the ordinary TMPDIR for Bash/task output
+        # captures. Its supported override is CLAUDE_CODE_TMPDIR; without it,
+        # concurrent subagents accumulate under /tmp/claude-$UID and can
+        # exhaust the workstation's bounded /tmp tmpfs (sinnix-77w).
+        if [ -z "''${CLAUDE_CODE_TMPDIR:-}" ]; then
+          if [ -d "${sinnixCfg.paths.realmRoot}" ]; then
+            export CLAUDE_CODE_TMPDIR=${lib.escapeShellArg claudeTmpRoot}
+          else
+            export CLAUDE_CODE_TMPDIR="''${TMPDIR:-/tmp}/claude-code-$UID"
+          fi
+        fi
+        ${pkgs.coreutils}/bin/install -d -m 0700 "$CLAUDE_CODE_TMPDIR"
 
         export SINNIX_CLAUDE_PROFILE=${lib.escapeShellArg profile}
         mcp_args=()
