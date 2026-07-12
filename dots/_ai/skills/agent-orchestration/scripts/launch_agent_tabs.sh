@@ -17,6 +17,11 @@ ephemeral=0
 parallel=1
 workspace=""
 claude_api_key_auth=0
+persist_windows=0
+per_task_workdir_base=""
+job_prefix=""
+status_only=0
+persist_shell="${SHELL:-bash}"
 
 usage() {
   cat <<'EOF'
@@ -43,6 +48,15 @@ Options:
   --workspace <name>           Silently move Kitty OS windows to this Hyprland workspace
   --claude-api-key-auth        Keep ANTHROPIC_API_KEY for Claude instead of subscription auth
   --skip-agents-render         Set SINNIX_SKIP_AGENTS_RENDER=1 for launched agent commands
+  --persist-windows            Kitty mode: keep each window open after the runner
+                               exits (drops to an interactive shell in the task
+                               workdir) and write <name>.exit status markers
+  --per-task-workdir-base <dir> Resolve each task's workdir as <dir>/<prompt_name>
+                               (e.g. per-lane git worktrees); makes --workdir optional
+  --job-prefix <prefix>        Pass attested job identity to the runner:
+                               --job-id <prefix><name> --work-item <name>
+  --status                     Report task states from --output-dir (.exit/.log
+                               markers) instead of launching; then exit
   --dry-run                    Print commands without executing
 
 Prompt file convention:
@@ -116,6 +130,22 @@ while [[ $# -gt 0 ]]; do
     claude_api_key_auth=1
     shift
     ;;
+  --persist-windows)
+    persist_windows=1
+    shift
+    ;;
+  --per-task-workdir-base)
+    per_task_workdir_base="${2:?missing value for --per-task-workdir-base}"
+    shift 2
+    ;;
+  --job-prefix)
+    job_prefix="${2:?missing value for --job-prefix}"
+    shift 2
+    ;;
+  --status)
+    status_only=1
+    shift
+    ;;
   --skip-agents-render)
     skip_agents_render=1
     shift
@@ -143,7 +173,38 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z ${workdir} || -z ${prompt_dir} || -z ${output_dir} ]]; then
+if [[ ${status_only} -eq 1 ]]; then
+  if [[ -z ${output_dir} || ! -d ${output_dir} ]]; then
+    echo "--status requires an existing --output-dir" >&2
+    exit 2
+  fi
+  printf '%-30s %-9s %s\n' TASK STATE DETAIL
+  found_any=0
+  for exit_file in "${output_dir}"/*.exit; do
+    [[ -e ${exit_file} ]] || continue
+    found_any=1
+    task_name="$(basename "${exit_file%.exit}")"
+    task_ec="$(<"${exit_file}")"
+    if [[ ${task_ec} == "0" ]]; then
+      printf '%-30s %-9s %s\n' "${task_name}" DONE "${output_dir}/${task_name}.last.md"
+    else
+      printf '%-30s %-9s exit=%s %s\n' "${task_name}" FAILED "${task_ec}" "${output_dir}/${task_name}.log"
+    fi
+  done
+  for log_file in "${output_dir}"/*.log; do
+    [[ -e ${log_file} ]] || continue
+    task_name="$(basename "${log_file%.log}")"
+    [[ -e "${output_dir}/${task_name}.exit" ]] && continue
+    found_any=1
+    printf '%-30s %-9s log %s\n' "${task_name}" RUNNING "$(du -h "${log_file}" 2>/dev/null | cut -f1)"
+  done
+  if [[ ${found_any} -eq 0 ]]; then
+    echo "(no task artifacts in ${output_dir})"
+  fi
+  exit 0
+fi
+
+if [[ -z ${workdir} && -z ${per_task_workdir_base} ]] || [[ -z ${prompt_dir} || -z ${output_dir} ]]; then
   usage >&2
   exit 2
 fi
@@ -230,25 +291,43 @@ if [[ ${mode} == "kitty" ]]; then
   fi
 fi
 
+resolve_task_workdir() {
+  local prompt_name="$1"
+  if [[ -n ${per_task_workdir_base} ]]; then
+    printf '%s/%s' "${per_task_workdir_base}" "${prompt_name}"
+  else
+    printf '%s' "${workdir}"
+  fi
+}
+
 run_batch_agent() {
   local prompt_name="$1"
   local prompt_file="${prompt_dir}/${prompt_name}.prompt"
   local log_file="${output_dir}/${prompt_name}.log"
   local last_file="${output_dir}/${prompt_name}.last.md"
   local json_file="${output_dir}/${prompt_name}.jsonl"
+  local task_workdir
+  task_workdir="$(resolve_task_workdir "${prompt_name}")"
 
   if [[ ! -f ${prompt_file} ]]; then
     echo "missing prompt: ${prompt_file}" >&2
+    return 1
+  fi
+  if [[ ! -d ${task_workdir} ]]; then
+    echo "missing workdir for ${prompt_name}: ${task_workdir}" >&2
     return 1
   fi
 
   local -a cmd=(
     "${runner}"
     --agent "${agent}"
-    --workdir "${workdir}"
+    --workdir "${task_workdir}"
     --prompt-file "${prompt_file}"
     --log-file "${log_file}"
   )
+  if [[ -n ${job_prefix} ]]; then
+    cmd+=(--job-id "${job_prefix}${prompt_name}" --work-item "${prompt_name}")
+  fi
 
   if [[ -n ${json_file} ]]; then
     cmd+=(--json-file "${json_file}")
@@ -285,7 +364,14 @@ run_batch_agent() {
     return 0
   fi
 
-  "${cmd[@]}"
+  local ec=0
+  if "${cmd[@]}"; then
+    ec=0
+  else
+    ec=$?
+  fi
+  printf '%s\n' "${ec}" >"${output_dir}/${prompt_name}.exit"
+  return "${ec}"
 }
 
 run_kitty_agent() {
@@ -294,19 +380,28 @@ run_kitty_agent() {
   local log_file="${output_dir}/${prompt_name}.log"
   local last_file="${output_dir}/${prompt_name}.last.md"
   local json_file="${output_dir}/${prompt_name}.jsonl"
+  local task_workdir
+  task_workdir="$(resolve_task_workdir "${prompt_name}")"
 
   if [[ ! -f ${prompt_file} ]]; then
     echo "missing prompt: ${prompt_file}" >&2
+    return 1
+  fi
+  if [[ ! -d ${task_workdir} ]]; then
+    echo "missing workdir for ${prompt_name}: ${task_workdir}" >&2
     return 1
   fi
 
   local -a launch_cmd=(
     "${runner}"
     --agent "${agent}"
-    --workdir "${workdir}"
+    --workdir "${task_workdir}"
     --prompt-file "${prompt_file}"
     --log-file "${log_file}"
   )
+  if [[ -n ${job_prefix} ]]; then
+    launch_cmd+=(--job-id "${job_prefix}${prompt_name}" --work-item "${prompt_name}")
+  fi
 
   if [[ -n ${json_file} ]]; then
     launch_cmd+=(--json-file "${json_file}")
@@ -338,9 +433,21 @@ run_kitty_agent() {
 
   local window_title="agent-${prompt_name//[^A-Za-z0-9_.-]/-}"
 
+  local -a exec_argv=("${launch_cmd[@]}")
+  if [[ ${persist_windows} -eq 1 ]]; then
+    local exit_file="${output_dir}/${prompt_name}.exit"
+    local inner
+    inner="$(printf '%q ' "${launch_cmd[@]}")"
+    inner+="; ec=\$?"
+    inner+="; printf '%s\\n' \"\${ec}\" > $(printf '%q' "${exit_file}")"
+    inner+="; printf '[%s finished exit=%s — window persists for inspection]\\n' $(printf '%q' "${prompt_name}") \"\${ec}\""
+    inner+="; exec ${persist_shell} -i"
+    exec_argv=("${persist_shell}" -lc "${inner}")
+  fi
+
   if [[ ${dry_run} -eq 1 ]]; then
-    printf 'DRY-RUN (%s): kitty @ launch --keep-focus --type=%s --title %q --tab-title %q --cwd %q -- ' "${prompt_name}" "${launch_type}" "${window_title}" "${prompt_name}" "${workdir}"
-    printf '%q ' "${launch_cmd[@]}"
+    printf 'DRY-RUN (%s): kitty @ launch --keep-focus --type=%s --title %q --tab-title %q --cwd %q -- ' "${prompt_name}" "${launch_type}" "${window_title}" "${prompt_name}" "${task_workdir}"
+    printf '%q ' "${exec_argv[@]}"
     if [[ -n ${workspace} ]]; then
       printf '; move silently to workspace %q' "${workspace}"
     fi
@@ -353,8 +460,8 @@ run_kitty_agent() {
     --type="${launch_type}" \
     --title "${window_title}" \
     --tab-title "${prompt_name}" \
-    --cwd "${workdir}" \
-    -- "${launch_cmd[@]}"
+    --cwd "${task_workdir}" \
+    -- "${exec_argv[@]}"
 
   if [[ -n ${workspace} ]]; then
     local selector="title:^(${window_title})$"

@@ -183,4 +183,39 @@ scripts/launch_agent_tabs.sh \
 ```
 
 `--workspace` requires Kitty `os-window` mode and
-`sinnix-hypr-control`. Do not use `--parallel` in Kitty mode.
+`sinnix-hypr-control`. Do not use `--parallel` in Kitty mode — Kitty launches
+are fire-and-forget, so N prompt names already run as N concurrent workers;
+bound the fanout by how many prompts you pass.
+
+For parallel worktree fanouts, three flags remove the mode's historical
+drawbacks:
+
+- `--persist-windows` keeps each window open after the runner exits (drops to
+  an interactive shell in the task workdir with the exit code printed) and
+  writes `<name>.exit` markers to the output dir.
+- `--per-task-workdir-base <dir>` resolves each task's workdir as
+  `<dir>/<prompt-name>` — one git worktree per lane; makes `--workdir`
+  optional.
+- `--job-prefix <p>` passes attested job identity (`--job-id <p><name>`,
+  `--work-item <name>`) to the runner so `agent_job_control.sh` can
+  list/interrupt lanes by ID.
+
+Aggregate completion afterwards with
+`launch_agent_tabs.sh --status --output-dir <output-dir>` (DONE / FAILED /
+RUNNING per task, read from exit markers and logs; batch mode writes the same
+markers). Caveat: workers launched in Kitty die with the Kitty instance; use
+batch mode when survivability matters more than visibility.
+
+```bash
+scripts/launch_agent_tabs.sh \
+  --agent codex \
+  --mode kitty \
+  --launch-type os-window \
+  --workspace 6 \
+  --persist-windows \
+  --per-task-workdir-base /realm/worktrees \
+  --job-prefix fanout- \
+  --prompt-dir <prompt-dir> \
+  --output-dir <output-dir> \
+  lane-a lane-b lane-c
+```
