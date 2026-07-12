@@ -19,6 +19,19 @@ let
   cfg = config.sinnix.profiles.workstation;
   runtimeInventory = config.sinnix.runtime.inventory;
   user = config.sinnix.user.name;
+  earlyoomAvoidPattern = runtimeInventory.earlyoomEmergencyAvoidPattern;
+  forbiddenEarlyoomAvoidTokens = [
+    "bash"
+    "chrome"
+    "chromium"
+    "claude"
+    "codex"
+    "electron"
+    "firefox"
+    "node"
+    "python"
+    "zsh"
+  ];
   panicLogCapture = pkgs.writeShellApplication {
     name = "panic-log-capture";
     runtimeInputs = [ pkgs.coreutils ];
@@ -105,6 +118,17 @@ in
   options.sinnix.profiles.workstation.enable = lib.mkEnableOption "Interactive workstation profile";
 
   config = lib.mkIf cfg.enable {
+    assertions = [
+      {
+        assertion = lib.all (token: !(lib.hasInfix token earlyoomAvoidPattern)) forbiddenEarlyoomAvoidTokens;
+        message = "earlyoom must not exempt agents, browsers, language runtimes, or generic shells";
+      }
+      {
+        assertion = lib.hasInfix "start-hyprland" earlyoomAvoidPattern;
+        message = "earlyoom must protect the lowercase Hyprland session launcher used by UWSM";
+      }
+    ];
+
     sinnix.machine.isDesktop = lib.mkForce true;
 
     # Tiered swap posture (2026-07-10, resolves sinnix-mys under the
@@ -320,13 +344,15 @@ in
         # choice is appropriate. Slice-scoped oomd now handles the "kill the
         # runaway build, not the desktop" case at cgroup granularity.
         #
-        # Protect interactive surfaces. Coding agents (`claude`, `codex`, and
-        # their node/python runtime/MCP children) are interactive work and are
-        # avoided like the desktop apps so launching one never evicts another.
-        # Also avoid Nix activation/control-plane processes and local dev
-        # daemons; they are coordination surfaces, not bulk memory consumers.
+        # Protect only recovery-critical surfaces. Agents are isolated by
+        # finite per-scope MemoryHigh/MemoryMax limits and intentionally remain
+        # eligible here: the 2026-07-12 incident proved a child can retain the
+        # comm name `claude.exe`, consume 15.8 GiB RSS, and otherwise make
+        # earlyoom kill dozens of tiny processes (including start-hyprland)
+        # before reaching the actual hog. Process-name avoidance is not a
+        # containment boundary.
         "--avoid"
-        "(systemd|systemd-logind|dbus-daemon|dbus-broker|dbus-broker-launch|sshd|agetty|Hyprland|Xwayland|noctalia|quickshell|xdg-desktop-portal|pipewire|wireplumber|foot|kitty|zsh|bash|sudo|doas|below|weechat|asciinema|aw-server|chrome|chromium|firefox|electron|claude|codex|node|python|serena|polylogue|lynchpin|sinexd|postgres|nats-server|nix|nix-daemon)"
+        earlyoomAvoidPattern
       ];
     };
 

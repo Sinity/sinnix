@@ -10,6 +10,8 @@ in
     { system, ... }:
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
+      runtimeDefaults = import ../data/runtime-defaults.nix { inherit lib; };
+      agentScopeProperties = runtimeDefaults.commandClasses.agent.systemdProperties;
       testLib = import ../test-lib.nix { inherit inputs lib; };
       inherit (testLib)
         evalTestSpec
@@ -33,6 +35,22 @@ in
             activationText = hm.home.activation.claudeSymlink.data or "";
           in
           [
+            {
+              assertion = (agentScopeProperties.MemoryHigh or null) == "8G";
+              message = "Each transient agent scope must begin reclaim pressure at 8G.";
+            }
+            {
+              assertion = (agentScopeProperties.MemoryMax or null) == "12G";
+              message = "Each transient agent scope must stop before exceeding 12G.";
+            }
+            {
+              assertion = !(agentScopeProperties ? OOMScoreAdjust);
+              message = "OOMScoreAdjust is not valid on transient scope units.";
+            }
+            {
+              assertion = !(agentScopeProperties ? MemorySwapMax);
+              message = "Agent containment must not restore brittle per-scope swap ceilings.";
+            }
             {
               assertion = !(hm.xdg.configFile ? "claude/settings.json");
               message = "Claude settings.json must not be managed through Home Manager xdg.configFile.";
@@ -130,6 +148,39 @@ in
         agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexLocalConfigSource;
       agentToolsCodexHooksSource =
         agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexHooksSource;
+
+      agentResourcePolicy =
+        let
+          avoidPattern = runtimeDefaults.earlyoomEmergencyAvoidPattern;
+          forbiddenAvoidTokens = [
+            "bash"
+            "chrome"
+            "chromium"
+            "claude"
+            "codex"
+            "electron"
+            "firefox"
+            "node"
+            "python"
+            "zsh"
+          ];
+        in
+        assert lib.assertMsg ((agentScopeProperties.MemoryHigh or null) == "8G")
+          "transient agent scopes must begin reclaim pressure at 8G";
+        assert lib.assertMsg ((agentScopeProperties.MemoryMax or null) == "12G")
+          "transient agent scopes must stop before exceeding 12G";
+        assert lib.assertMsg (!(agentScopeProperties ? OOMScoreAdjust))
+          "OOMScoreAdjust is not valid on transient scope units";
+        assert lib.assertMsg (!(agentScopeProperties ? MemorySwapMax))
+          "agent containment must not restore brittle per-scope swap ceilings";
+        assert lib.assertMsg (lib.hasInfix "start-hyprland" avoidPattern)
+          "the earlyoom fallback must protect the lowercase UWSM session launcher";
+        assert lib.assertMsg
+          (lib.all (token: !(lib.hasInfix token avoidPattern)) forbiddenAvoidTokens)
+          "the earlyoom fallback must not exempt agents, browsers, runtimes, or generic shells";
+        pkgs.runCommand "sinnix-agent-resource-policy-check" { } ''
+          touch "$out"
+        '';
 
       devAgentToolsRuntime = mkHmRuntimeCheck system (
         agentToolsFixture
@@ -339,7 +390,7 @@ in
               grep -Fq 'run_agent_scoped "$STATE/launch.sh"' "$wrapper"
             done
             if grep -R 'MemoryHigh\|MemoryMax\|MemorySwapMax' "$HOME/.local/bin/claude-full" "$HOME/.local/bin/codex" "$HOME/.local/bin/gemini"; then
-              echo "interactive agent wrappers must not impose shared memory caps" >&2
+              echo "agent wrappers must not hardcode resource limits; runtime inventory owns per-scope defaults" >&2
               exit 1
             fi
             grep -Fq 'npm install -g @anthropic-ai/claude-code' "$HOME/.local/bin/claude-full"
@@ -368,6 +419,10 @@ in
       );
     in
     {
+      checks = {
+        agent-resource-policy = agentResourcePolicy;
+      };
+
       heavyChecks = {
         dev-agent-tools-runtime = devAgentToolsRuntime;
       };
