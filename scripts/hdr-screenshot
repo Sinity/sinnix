@@ -85,15 +85,19 @@ case "$subcommand" in
     y="$(jq -r '.y' <<<"$monitor_json")"
     scale="$(jq -r '.scale' <<<"$monitor_json")"
     cm="$(jq -r '.colorManagementPreset // ""' <<<"$monitor_json")"
-    sdr_brightness="$(jq -r '.sdrBrightness // 1.0' <<<"$monitor_json")"
-    sdr_saturation="$(jq -r '.sdrSaturation // 1.0' <<<"$monitor_json")"
 
-    restore_rule="$monitor,${width}x${height}@${refresh},${x}x${y},${scale},bitdepth,10,cm,hdr,sdrbrightness,${sdr_brightness},sdrsaturation,${sdr_saturation}"
     capture_rule="$monitor,${width}x${height}@${refresh},${x}x${y},${scale},bitdepth,8,cm,srgb"
 
     restore_monitor() {
       if [ "$cm" = "hdr" ]; then
-        hyprctl keyword monitor "$restore_rule" >/dev/null 2>&1 || true
+        # A v1 `keyword monitor` line cannot express monitorv2-only params
+        # (sdr_min_luminance, max_luminance, supports_hdr, ...) — a keyword
+        # restore silently drops them and leaves the output drifted from
+        # config until something else reapplies it (observed live: the drift
+        # persisted until a wallpaper change). `hyprctl reload` reapplies the
+        # full configured monitorv2 rule exactly; the Hyprland config uses
+        # only exec-once, so reload has no exec side effects.
+        hyprctl reload >/dev/null 2>&1 || true
       fi
     }
 
