@@ -25,6 +25,7 @@ let
   sanitizedInputs = {
     inherit (inputs)
       agenix
+      beads
       home-manager
       lynchpin
       sinex
