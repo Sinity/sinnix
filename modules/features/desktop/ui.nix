@@ -87,6 +87,7 @@ mkFeatureModule {
       };
 
       home-manager.users.${config.sinnix.user.name} = {
+        home.pointerCursor.enable = true;
         gtk.gtk4.theme = lib.mkDefault null;
 
         # Noctalia owns the displayed wallpaper and live palette, so Stylix's

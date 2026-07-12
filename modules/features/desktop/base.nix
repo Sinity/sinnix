@@ -40,14 +40,16 @@ mkFeatureModule {
         # Clipboard
         services.clipse = {
           enable = true;
-          historySize = 99999;
-          allowDuplicates = false;
           systemdTarget = graphicalTarget;
-          imageDisplay = {
-            type = "kitty";
-            scaleX = 9;
-            scaleY = 9;
-            heightCut = 2;
+          settings = {
+            maxHistory = 99999;
+            allowDuplicates = false;
+            imageDisplay = {
+              type = "kitty";
+              scaleX = 9;
+              scaleY = 9;
+              heightCut = 2;
+            };
           };
         };
 

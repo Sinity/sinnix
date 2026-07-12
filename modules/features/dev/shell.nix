@@ -293,11 +293,15 @@ mkFeatureModule {
               enable = true;
               defaultCommand = "fd --hidden --strip-cwd-prefix --exclude .git";
               defaultOptions = [ "--border='rounded'" ];
-              fileWidgetOptions = [
+              fileWidget.options = [
                 "--preview 'if [ -d {} ]; then eza --tree --color=always {} | head -200; else bat -n --color=always --line-range :500 {}; fi'"
               ];
-              changeDirWidgetCommand = "fd --type=d --hidden --strip-cwd-prefix --exclude .git";
-              changeDirWidgetOptions = [ "--preview 'eza --tree --color=always {} | head -200'" ];
+              changeDirWidget = {
+                command = "fd --type=d --hidden --strip-cwd-prefix --exclude .git";
+                options = [ "--preview 'eza --tree --color=always {} | head -200'" ];
+              };
+              # Atuin owns Ctrl-R; keep fzf's file and directory widgets only.
+              historyWidget.command = "";
               enableZshIntegration = true;
             };
           };
