@@ -21,6 +21,9 @@ persist_windows=0
 per_task_workdir_base=""
 job_prefix=""
 status_only=0
+tails_mode=0
+tails_n=12
+tails_all=0
 persist_shell="${SHELL:-bash}"
 
 usage() {
@@ -56,7 +59,14 @@ Options:
   --job-prefix <prefix>        Pass attested job identity to the runner:
                                --job-id <prefix><name> --work-item <name>
   --status                     Report task states from --output-dir (.exit/.log
-                               markers) instead of launching; then exit
+                               markers) instead of launching; then exit.
+                               Colored on a tty (NO_COLOR disables); shows
+                               runtime and idle (time since last log write)
+  --tails [n]                  Show the last n lines (default 12) of each
+                               RUNNING task's newest log, legibly separated;
+                               add task names to limit, or --tails-all to
+                               include finished/stale tasks
+  --tails-all                  With --tails: include non-running tasks
   --dry-run                    Print commands without executing
 
 Prompt file convention:
@@ -146,6 +156,18 @@ while [[ $# -gt 0 ]]; do
     status_only=1
     shift
     ;;
+  --tails)
+    tails_mode=1
+    if [[ ${2:-} =~ ^[0-9]+$ ]]; then
+      tails_n="$2"
+      shift
+    fi
+    shift
+    ;;
+  --tails-all)
+    tails_all=1
+    shift
+    ;;
   --skip-agents-render)
     skip_agents_render=1
     shift
@@ -173,34 +195,56 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ ${status_only} -eq 1 ]]; then
+if [[ ${status_only} -eq 1 || ${tails_mode} -eq 1 ]]; then
   if [[ -z ${output_dir} || ! -d ${output_dir} ]]; then
-    echo "--status requires an existing --output-dir" >&2
+    echo "--status/--tails require an existing --output-dir" >&2
     exit 2
   fi
+  # Colors: on for a tty unless NO_COLOR; FORCE_COLOR overrides.
+  if [[ (-t 1 && -z ${NO_COLOR:-}) || -n ${FORCE_COLOR:-} ]]; then
+    c_grn=$'\e[32m' c_red=$'\e[31m' c_yel=$'\e[33m' c_cyn=$'\e[36m'
+    c_dim=$'\e[2m' c_bld=$'\e[1m' c_off=$'\e[0m'
+  else
+    c_grn='' c_red='' c_yel='' c_cyn='' c_dim='' c_bld='' c_off=''
+  fi
+  fmt_dur() {
+    local s=$1
+    (( s < 0 )) && s=0
+    if (( s >= 3600 )); then printf '%dh%02dm' $((s / 3600)) $((s % 3600 / 60))
+    elif (( s >= 60 )); then printf '%dm%02ds' $((s / 60)) $((s % 60))
+    else printf '%ds' "${s}"; fi
+  }
   # One row per canonical task. Relaunch generations (<task>.resume-N.log,
-  # <task>.headless-N.log) collapse onto the base task name; the newest log
-  # generation represents the task. RUNNING requires a live process holding
-  # the log open (evidence), never inferred from marker absence. A log with
-  # no writer and no exit marker is STALE (killed / never completed).
-  log_has_writer() {
+  # <task>.headless-N.log, <task>.review-N.log) collapse onto the base task
+  # name; the newest log generation represents the task. RUNNING requires a
+  # live process holding the log open (evidence), never inferred from marker
+  # absence. A log with no writer and no exit marker is STALE.
+  writer_pid=""
+  log_writer_pid() {
+    writer_pid=""
+    local pids target fd
     if command -v fuser >/dev/null 2>&1; then
-      fuser -s "$1" 2>/dev/null
+      pids="$(fuser "$1" 2>/dev/null)" || return 1
+      writer_pid="$(awk '{print $1; exit}' <<<"${pids}")"
+      [[ -n ${writer_pid} ]]
     else
-      local target fd
       target="$(readlink -f "$1")" || return 1
       for fd in /proc/[0-9]*/fd/*; do
-        [[ "$(readlink "${fd}" 2>/dev/null)" == "${target}" ]] && return 0
+        if [[ "$(readlink "${fd}" 2>/dev/null)" == "${target}" ]]; then
+          writer_pid="$(cut -d/ -f3 <<<"${fd}")"
+          return 0
+        fi
       done
       return 1
     fi
   }
-  declare -A newest_log newest_mtime
+  declare -A newest_log newest_mtime task_state task_run task_idle task_detail
   for log_file in "${output_dir}"/*.log; do
     [[ -e ${log_file} ]] || continue
     base="$(basename "${log_file%.log}")"
     task_name="${base%.headless-*}"
     task_name="${task_name%.resume-*}"
+    task_name="${task_name%.review-*}"
     mtime="$(stat -c %Y "${log_file}" 2>/dev/null || echo 0)"
     if [[ -z ${newest_mtime[${task_name}]:-} || ${mtime} -gt ${newest_mtime[${task_name}]} ]]; then
       newest_mtime[${task_name}]="${mtime}"
@@ -216,27 +260,83 @@ if [[ ${status_only} -eq 1 ]]; then
     echo "(no task artifacts in ${output_dir})"
     exit 0
   fi
-  printf '%-34s %-9s %s\n' TASK STATE DETAIL
   now="$(date +%s)"
-  while IFS= read -r task_name; do
-    log_file="${newest_log[${task_name}]}"
-    exit_file="${output_dir}/${task_name}.exit"
-    if [[ -n ${log_file} ]] && log_has_writer "${log_file}"; then
-      age=$(( now - ${newest_mtime[${task_name}]:-now} ))
-      printf '%-34s %-9s log %s (%ss ago, %s)\n' "${task_name}" RUNNING \
-        "$(du -h "${log_file}" 2>/dev/null | cut -f1)" "${age}" "$(basename "${log_file}")"
-    elif [[ -e ${exit_file} ]]; then
-      task_ec="$(<"${exit_file}")"
-      if [[ ${task_ec} == "0" ]]; then
-        printf '%-34s %-9s %s\n' "${task_name}" DONE "${output_dir}/${task_name}.last.md"
+  classify() { # sets task_state/task_run/task_idle/task_detail for $1
+    local task="$1" log exit_f run='-' idle='-' etimes
+    log="${newest_log[${task}]}"
+    exit_f="${output_dir}/${task}.exit"
+    if [[ -n ${log} ]] && log_writer_pid "${log}"; then
+      etimes="$(ps -o etimes= -p "${writer_pid}" 2>/dev/null | tr -d ' ')"
+      [[ -n ${etimes} ]] && run="$(fmt_dur "${etimes}")"
+      idle="$(fmt_dur $((now - ${newest_mtime[${task}]:-now})))"
+      task_state[${task}]="RUNNING"
+      task_detail[${task}]="log $(du -h "${log}" 2>/dev/null | cut -f1) ($(basename "${log}"))"
+    elif [[ -e ${exit_f} ]]; then
+      local ec finished_ago
+      ec="$(<"${exit_f}")"
+      finished_ago="$(fmt_dur $((now - $(stat -c %Y "${exit_f}"))))"
+      idle="${finished_ago}"
+      if [[ ${ec} == "0" ]]; then
+        task_state[${task}]="DONE"
+        task_detail[${task}]="${output_dir}/${task}.last.md"
       else
-        printf '%-34s %-9s exit=%s %s\n' "${task_name}" FAILED "${task_ec}" "${log_file:-${output_dir}/${task_name}.log}"
+        task_state[${task}]="FAILED"
+        task_detail[${task}]="exit=${ec} ${log:-${output_dir}/${task}.log}"
       fi
     else
-      printf '%-34s %-9s no live process, no exit marker (%s)\n' "${task_name}" STALE \
-        "$(basename "${log_file:-none}")"
+      task_state[${task}]="STALE"
+      idle="$(fmt_dur $((now - ${newest_mtime[${task}]:-now})))"
+      task_detail[${task}]="no live process, no exit marker ($(basename "${log:-none}"))"
     fi
-  done < <(printf '%s\n' "${!newest_log[@]}" | sort)
+    task_run[${task}]="${run}"
+    task_idle[${task}]="${idle}"
+  }
+  state_color() {
+    case "$1" in
+      RUNNING) printf '%s' "${c_cyn}" ;;
+      DONE) printf '%s' "${c_grn}" ;;
+      FAILED) printf '%s' "${c_red}" ;;
+      *) printf '%s' "${c_yel}" ;;
+    esac
+  }
+  mapfile -t all_tasks < <(printf '%s\n' "${!newest_log[@]}" | sort)
+  for t in "${all_tasks[@]}"; do classify "${t}"; done
+  if [[ ${tails_mode} -eq 1 ]]; then
+    # Positional args (task names) limit the tail set.
+    tail_tasks=("${all_tasks[@]}")
+    if [[ $# -gt 0 ]]; then tail_tasks=("$@"); fi
+    shown=0
+    for t in "${tail_tasks[@]}"; do
+      state="${task_state[${t}]:-}"
+      [[ -z ${state} ]] && { echo "unknown task: ${t}" >&2; continue; }
+      if [[ ${state} != RUNNING && ${tails_all} -ne 1 ]]; then continue; fi
+      log="${newest_log[${t}]}"
+      src="${log}"
+      [[ ${state} == DONE && -e "${output_dir}/${t}.last.md" ]] && src="${output_dir}/${t}.last.md"
+      printf '%s── %s%s %s%s(%s, run %s, idle %s — %s)%s\n' \
+        "${c_bld}" "$(state_color "${state}")" "${t}" "${c_off}" "${c_dim}" \
+        "${state}" "${task_run[${t}]}" "${task_idle[${t}]}" "$(basename "${src:-none}")" "${c_off}"
+      [[ -n ${src} && -e ${src} ]] && tail -n "${tails_n}" "${src}" | sed 's/^/  /'
+      echo
+      shown=$((shown + 1))
+    done
+    [[ ${shown} -eq 0 ]] && echo "(no matching tasks to tail; use --tails-all for finished ones)"
+    exit 0
+  fi
+  printf '%s%-34s %-8s %8s %8s  %s%s\n' "${c_bld}" TASK STATE RUN IDLE DETAIL "${c_off}"
+  declare -A state_counts
+  for t in "${all_tasks[@]}"; do
+    state="${task_state[${t}]}"
+    state_counts[${state}]=$(( ${state_counts[${state}]:-0} + 1 ))
+    printf '%-34s %s%-8s%s %8s %8s  %s%s%s\n' \
+      "${t}" "$(state_color "${state}")" "${state}" "${c_off}" \
+      "${task_run[${t}]}" "${task_idle[${t}]}" "${c_dim}" "${task_detail[${t}]}" "${c_off}"
+  done
+  summary=""
+  for s in RUNNING DONE FAILED STALE; do
+    [[ -n ${state_counts[${s}]:-} ]] && summary+="${s,,} ${state_counts[${s}]}  "
+  done
+  printf '%s%s%s\n' "${c_dim}" "${summary}" "${c_off}"
   exit 0
 fi
 
