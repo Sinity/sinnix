@@ -201,10 +201,17 @@ drawbacks:
   list/interrupt lanes by ID.
 
 Aggregate completion afterwards with
-`launch_agent_tabs.sh --status --output-dir <output-dir>` (DONE / FAILED /
-RUNNING per task, read from exit markers and logs; batch mode writes the same
-markers). Caveat: workers launched in Kitty die with the Kitty instance; use
-batch mode when survivability matters more than visibility.
+`launch_agent_tabs.sh --status --output-dir <output-dir>`. The table shows one
+row per canonical task (relaunch generations `<task>.resume-N.log` /
+`.headless-N.log` / `.review-N.log` collapse onto the base name) with colored
+states, process runtime, and idle time since the last log write. RUNNING is
+evidence-based — it requires a live process holding the log open; a log with
+no writer and no exit marker reports STALE, never a false RUNNING. Use
+`--tails [n] [--tails-all] [task...]` for legibly separated per-task log
+tails (running tasks by default; DONE tasks show their last-message artifact).
+Colors follow tty detection, `NO_COLOR`, and `FORCE_COLOR`. Caveat: workers
+launched in Kitty die with the Kitty instance; use batch mode when
+survivability matters more than visibility.
 
 ```bash
 scripts/launch_agent_tabs.sh \
