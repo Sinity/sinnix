@@ -1,0 +1,305 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Tie sinex per-checkout dev-postgres lifetime to its devshell (owner-watcher + idle reaper)
+# runtimeInputs: bash coreutils procps util-linux postgresql_18
+#
+# The sinex devshell starts a per-checkout PostgreSQL under
+#   /var/cache/sinex/<user>/<checkout-hash>/dev-state/data/postgres
+# via `pg_ctl start`, which daemonizes the postmaster so it is reparented away
+# from the launching shell and outlives it. Before this helper, those instances
+# (postmaster + ~5 background workers = "six processes per checkout") survived
+# their devshells, burned 90s systemd stop-timeouts at shutdown, and pinned the
+# /var/lib/sinex + /var/cache/sinex mounts busy (sinnix reboot postmortem
+# sinnix-eaw / sinex-grlv).
+#
+# Two mechanisms, both implemented here:
+#
+#   watch <dev-state-dir>   PRIMARY. A detached singleton (per checkout) started
+#                           by sinnix-direnvrc on devshell entry. It polls the
+#                           per-checkout "owners" registry (one file per live
+#                           interactive shell that entered the checkout). When
+#                           no owning shell is left alive AND no client is
+#                           connected, it stops the dev-postgres. Because it is
+#                           poll-based it catches `kill -9` of the shell, not
+#                           just a clean `exit` — no EXIT trap can do that.
+#
+#   reap [--idle-secs N]    BACKSTOP. A periodic systemd user timer sweep over
+#                           every checkout's dev-state. Stops instances that
+#                           have no live owner, no active client connection, and
+#                           have been up longer than the idle threshold (2h by
+#                           default). This is the safety net for cases the
+#                           watcher never saw (host crash, a `nix develop`
+#                           one-shot that bypassed the direnv hook, a watcher
+#                           that itself died).
+#
+# Never-reap invariant (shared by both): an instance with a live owning shell OR
+# an active client connection is NEVER stopped. That protects an in-use devshell
+# and any `xtask ... --bg` / sinexd that legitimately outlives the shell — it is
+# reaped only once it genuinely disconnects.
+
+set -euo pipefail
+
+CACHE_ROOT="${SINEX_DEV_CACHE_BASE:-/var/cache/sinex}"
+POLL_INTERVAL="${SINEX_DEV_DB_POLL_SECS:-15}"
+PG_PORT="${SINEX_DEV_PG_PORT:-5432}"
+DEFAULT_IDLE_SECS="${SINEX_DEV_DB_IDLE_SECS:-7200}" # 2h backstop
+STOP_FAST_WAIT=25                                   # SIGINT (fast) grace, seconds
+STOP_IMMEDIATE_WAIT=5                               # SIGQUIT (immediate) grace, seconds
+
+log() { printf '[sinnix-sinex-dev-db] %s\n' "$*" >&2; }
+
+# ── path helpers for a dev-state dir ────────────────────────────────────────
+pgdata_of() { printf '%s/data/postgres' "$1"; }
+pgrun_of() { printf '%s/run' "$1"; }
+socket_of() { printf '%s/run/.s.PGSQL.%s' "$1" "$PG_PORT"; }
+owners_of() { printf '%s/owners' "$1"; }
+
+# Echo the live postmaster PID for a dev-state dir iff a running process owns
+# that exact data directory (guards against a recycled/unrelated PID).
+pg_pid_of() {
+  local state_dir="$1" pgdata pidfile pid cmdline
+  pgdata="$(pgdata_of "$state_dir")"
+  pidfile="$pgdata/postmaster.pid"
+  [ -r "$pidfile" ] || return 1
+  pid="$(head -n1 "$pidfile" 2>/dev/null | tr -d '[:space:]')"
+  case "$pid" in '' | *[!0-9]*) return 1 ;; esac
+  kill -0 "$pid" 2>/dev/null || return 1
+  cmdline="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null || true)"
+  case "$cmdline" in *"$pgdata"*)
+    printf '%s\n' "$pid"
+    return 0
+    ;;
+  esac
+  return 1
+}
+
+pg_running() { pg_pid_of "$1" >/dev/null 2>&1; }
+
+# Count live owning shells; prune dead/malformed owner entries as a side effect.
+live_owner_count() {
+  local owners="$1" f pid n=0
+  [ -d "$owners" ] || {
+    printf 0
+    return 0
+  }
+  for f in "$owners"/*; do
+    [ -e "$f" ] || continue
+    pid="${f##*/}"
+    case "$pid" in '' | *[!0-9]*)
+      rm -f "$f" 2>/dev/null || true
+      continue
+      ;;
+    esac
+    if kill -0 "$pid" 2>/dev/null; then
+      n=$((n + 1))
+    else
+      rm -f "$f" 2>/dev/null || true
+    fi
+  done
+  printf '%s' "$n"
+}
+
+# True (0) if the instance has an active client backend other than our own probe.
+# The dev socket is trust-auth by design (initdb --auth=trust), so no password is
+# needed. If we cannot verify (server not answering), fail SAFE = assume in use.
+pg_in_use() {
+  local state_dir="$1" run count
+  run="$(pgrun_of "$state_dir")"
+  count="$(
+    psql -h "$run" -p "$PG_PORT" -U postgres -d postgres -tAqc \
+      "SELECT count(*) FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND backend_type = 'client backend'" \
+      2>/dev/null
+  )" || return 0
+  count="${count//[[:space:]]/}"
+  case "$count" in
+    '' | *[!0-9]*) return 0 ;; # unparseable → assume in use
+    0) return 1 ;;             # no other clients → not in use
+    *) return 0 ;;             # in use
+  esac
+}
+
+clean_sockets() {
+  local sock
+  sock="$(socket_of "$1")"
+  rm -f "$sock" "$sock.lock" 2>/dev/null || true
+}
+
+# Wait up to $2 seconds for PID $1 to exit; return 0 as soon as it is gone.
+wait_pid_gone() {
+  local pid="$1" secs="$2"
+  while [ "$secs" -gt 0 ]; do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 1
+    secs=$((secs - 1))
+  done
+  ! kill -0 "$pid" 2>/dev/null
+}
+
+# Stop the dev-postgres for a dev-state dir with a BOUNDED, escalating shutdown
+# so a wedged instance can never re-create the 90s stop-timeout hang:
+#   SIGINT  (fast: rollback + disconnect, clean)  → wait STOP_FAST_WAIT
+#   SIGQUIT (immediate: no clean shutdown)         → wait STOP_IMMEDIATE_WAIT
+#   SIGKILL (last resort)
+stop_pg() {
+  local state_dir="$1" pid
+  pid="$(pg_pid_of "$state_dir")" || return 0
+  log "stopping orphaned dev-postgres pid=$pid ($state_dir)"
+  kill -INT "$pid" 2>/dev/null || true
+  if wait_pid_gone "$pid" "$STOP_FAST_WAIT"; then
+    clean_sockets "$state_dir"
+    return 0
+  fi
+  log "fast shutdown timed out; escalating to immediate (pid=$pid)"
+  kill -QUIT "$pid" 2>/dev/null || true
+  if wait_pid_gone "$pid" "$STOP_IMMEDIATE_WAIT"; then
+    clean_sockets "$state_dir"
+    return 0
+  fi
+  log "immediate shutdown timed out; SIGKILL (pid=$pid)"
+  kill -KILL "$pid" 2>/dev/null || true
+  clean_sockets "$state_dir"
+}
+
+# Best-effort: also stop the checkout's dev nats-server. It is the same orphan
+# class and its JetStream store under <dev-state>/data/nats holds the same
+# /var/cache/sinex mount busy at shutdown. Strictly matched to this dev-state so
+# it can never touch another checkout's or the prod NATS.
+stop_nats() {
+  local state_dir="$1" pid cmd
+  command -v pgrep >/dev/null 2>&1 || return 0
+  for pid in $(pgrep -x nats-server 2>/dev/null || true); do
+    cmd="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null || true)"
+    case "$cmd" in *"$state_dir"*)
+      log "stopping orphaned dev nats-server pid=$pid ($state_dir)"
+      kill -TERM "$pid" 2>/dev/null || true
+      ;;
+    esac
+  done
+}
+
+# Decide + act for a single dev-state dir. Returns without acting unless the
+# never-reap invariant is clear. `require_idle_secs` gates the reaper's slower
+# sweep; the watcher passes 0 (it already established the owner is gone).
+maybe_stop() {
+  local state_dir="$1" require_idle_secs="${2:-0}" now sock mtime idle
+  pg_running "$state_dir" || return 1
+  [ "$(live_owner_count "$(owners_of "$state_dir")")" -eq 0 ] || return 1
+  if pg_in_use "$state_dir"; then return 1; fi
+  if [ "$require_idle_secs" -gt 0 ]; then
+    now="$(date +%s)"
+    sock="$(socket_of "$state_dir")"
+    if [ -e "$sock" ]; then
+      mtime="$(stat -c %Y "$sock" 2>/dev/null || echo "$now")"
+    else
+      mtime="$now"
+    fi
+    idle=$((now - mtime))
+    [ "$idle" -ge "$require_idle_secs" ] || return 1
+    log "reaping idle orphan dev-postgres (idle=${idle}s ≥ ${require_idle_secs}s): $state_dir"
+  fi
+  stop_pg "$state_dir"
+  stop_nats "$state_dir"
+  return 0
+}
+
+# ── subcommand: watch ───────────────────────────────────────────────────────
+cmd_watch() {
+  local state_dir="${1:-}"
+  [ -n "$state_dir" ] || {
+    log "watch: missing <dev-state-dir>"
+    return 64
+  }
+  mkdir -p "$state_dir" 2>/dev/null || true
+  local lock="$state_dir/dev-db-watcher.lock"
+  # Singleton per checkout: hold an exclusive lock for the watcher's lifetime.
+  exec 9>"$lock" || {
+    log "watch: cannot open lock $lock"
+    return 1
+  }
+  if ! flock -n 9; then
+    exit 0 # another watcher already owns this checkout
+  fi
+  local owners
+  owners="$(owners_of "$state_dir")"
+  while :; do
+    sleep "$POLL_INTERVAL"
+    if [ "$(live_owner_count "$owners")" -gt 0 ]; then
+      continue # an owning shell is still alive
+    fi
+    if ! pg_running "$state_dir"; then
+      break # no owners and nothing running → job done
+    fi
+    if pg_in_use "$state_dir"; then
+      continue # genuinely in use (bg sinexd/xtask) → wait for it to disconnect
+    fi
+    maybe_stop "$state_dir" 0 || true
+    break
+  done
+  exit 0
+}
+
+# ── subcommand: reap ────────────────────────────────────────────────────────
+cmd_reap() {
+  local idle_secs="$DEFAULT_IDLE_SECS"
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --idle-secs)
+        idle_secs="${2:-}"
+        shift 2
+        ;;
+      --idle-secs=*)
+        idle_secs="${1#*=}"
+        shift
+        ;;
+      --now)
+        idle_secs=0
+        shift
+        ;;
+      *)
+        log "reap: unknown argument $1"
+        return 64
+        ;;
+    esac
+  done
+  case "$idle_secs" in '' | *[!0-9]*)
+    log "reap: invalid --idle-secs value"
+    return 64
+    ;;
+  esac
+  [ -d "$CACHE_ROOT" ] || return 0
+  local user_dir state_dir
+  for user_dir in "$CACHE_ROOT"/*/; do
+    [ -d "$user_dir" ] || continue
+    for state_dir in "$user_dir"*/dev-state; do
+      [ -d "$state_dir" ] || continue
+      maybe_stop "$state_dir" "$idle_secs" || true
+    done
+  done
+}
+
+usage() {
+  cat >&2 <<'EOF'
+usage: sinnix-sinex-dev-db <command> [args]
+
+  watch <dev-state-dir>     Detached per-checkout owner-watcher (primary).
+  reap  [--idle-secs N]     Sweep all checkouts, stop idle orphans (backstop).
+                            --now is an alias for --idle-secs 0.
+EOF
+}
+
+main() {
+  local cmd="${1:-}"
+  [ "$#" -gt 0 ] && shift || true
+  case "$cmd" in
+    watch) cmd_watch "$@" ;;
+    reap) cmd_reap "$@" ;;
+    -h | --help | help | '') usage ;;
+    *)
+      log "unknown command: $cmd"
+      usage
+      return 64
+      ;;
+  esac
+}
+
+main "$@"
