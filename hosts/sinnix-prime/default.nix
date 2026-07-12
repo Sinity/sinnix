@@ -76,6 +76,9 @@
     };
     machine-telemetry.enable = true;
     weechat-log-sealer.enable = true;
+    # Backstop reaper for orphaned per-checkout sinex dev-postgres instances
+    # (primary cleanup is sinnix-direnvrc's owner-watcher). See sinex-grlv.
+    sinex-dev-db-reaper.enable = true;
     airvpn-seed = {
       enable = true;
       autoStart = false;

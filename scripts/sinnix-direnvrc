@@ -165,6 +165,84 @@ _sinnix_setup_sinex_dev_cache() {
     export SINEX_NATS_DIR="$SINEX_DEV_STATE_DIR/nats"
     mkdir -p "$SINEX_STATE_DIR" "$SINEX_NATS_DIR"
   fi
+
+  # Tie the per-checkout dev-postgres lifetime to this devshell (sinex-grlv).
+  # The sinex devshell starts postgres via `pg_ctl start`, which daemonizes it
+  # so it outlives the launching shell. Register this interactive shell as an
+  # owner and ensure a detached watcher is running; when the last owning shell
+  # dies (including via kill -9) and nothing is connected, the watcher stops the
+  # instance. See scripts/sinnix-sinex-dev-db.
+  _sinnix_register_sinex_dev_owner "$SINEX_DEV_STATE_DIR" "$project_root"
+}
+
+# Best-effort resolution of the interactive shell PID that entered the checkout.
+# Under direnv this rc is evaluated inside a bash child of the `direnv` process,
+# whose own parent is the interactive shell; walk up to `direnv` and return its
+# parent so the watcher tracks a PID that dies when the shell dies.
+_sinnix_interactive_shell_pid() {
+  local pid="$$"
+  local comm ppid
+  while [ "${pid:-1}" != "" ] && [ "${pid:-1}" -gt 1 ] 2>/dev/null; do
+    comm="$(cat "/proc/$pid/comm" 2>/dev/null || true)"
+    ppid="$(awk '/^PPid:/ {print $2}' "/proc/$pid/status" 2>/dev/null || true)"
+    if [ "$comm" = "direnv" ] && [ -n "$ppid" ]; then
+      printf '%s' "$ppid"
+      return 0
+    fi
+    [ -n "$ppid" ] || break
+    pid="$ppid"
+  done
+  printf '%s' "$PPID"
+}
+
+_sinnix_register_sinex_dev_owner() {
+  local state_dir="$1"
+  local project_root="$2"
+  local shell_pid owners
+  [ -n "$state_dir" ] || return 0
+
+  shell_pid="$(_sinnix_interactive_shell_pid)"
+  case "$shell_pid" in '' | *[!0-9]*) return 0 ;; esac
+
+  owners="$state_dir/owners"
+  mkdir -p "$owners" 2>/dev/null || return 0
+  printf '%s\t%s\n' "$project_root" "$(date -u +%FT%TZ 2>/dev/null || true)" \
+    >"$owners/$shell_pid" 2>/dev/null || true
+
+  _sinnix_ensure_sinex_dev_watcher "$state_dir"
+}
+
+_sinnix_ensure_sinex_dev_watcher() {
+  local state_dir="$1"
+  local lock="$state_dir/dev-db-watcher.lock"
+  local bin _fd _n
+
+  # Skip if a watcher already holds the lock for this checkout.
+  if command -v flock >/dev/null 2>&1; then
+    if ! flock -n "$lock" true 2>/dev/null; then
+      return 0
+    fi
+  fi
+
+  bin="$(command -v sinnix-sinex-dev-db 2>/dev/null || true)"
+  if [ -z "$bin" ] && [ -x /realm/project/sinnix/scripts/sinnix-sinex-dev-db ]; then
+    bin=/realm/project/sinnix/scripts/sinnix-sinex-dev-db
+  fi
+  [ -n "$bin" ] || return 0
+
+  # Detach into its own session so a kill -9 / terminal-close (SIGHUP) of the
+  # owning shell does not take the watcher down with it, and close inherited
+  # direnv FDs (>2) so its private pipes are not held open (would hang direnv).
+  (
+    for _fd in "/proc/$$/fd/"*; do
+      _n="${_fd##*/}"
+      [ "$_n" -le 2 ] 2>/dev/null && continue
+      eval "exec ${_n}>&-" 2>/dev/null || true
+    done
+    exec setsid "$bin" watch "$state_dir" \
+      </dev/null >>"$state_dir/dev-db-watcher.log" 2>&1
+  ) &
+  disown 2>/dev/null || true
 }
 
 _sinnix_project_scope_setup() {
