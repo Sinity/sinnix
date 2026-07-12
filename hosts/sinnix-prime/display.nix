@@ -77,7 +77,13 @@ lib.mkMerge [
           cm = "hdr";
           sdrbrightness = 1.4;
           sdrsaturation = 1.0;
-          sdr_min_luminance = 0;
+          # 0.2 (Hyprland's default) lifts the OLED black floor just enough
+          # that inactive-window opacity blends are actually visible —
+          # operator-preferred look (2026-07-13). With 0, dark regions crush
+          # to pure black and the configured inactive_opacity reads as
+          # opaque. 0.2 also matches what a lossy runtime `keyword monitor`
+          # reset produces, so screenshot flows can no longer flip the look.
+          sdr_min_luminance = 0.2;
           sdr_max_luminance = 80;
           min_luminance = 0;
           max_luminance = 550;
