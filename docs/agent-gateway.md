@@ -1,170 +1,123 @@
-# Sinnix Agent Gateway
+# Agent gateway
 
-`agent-gateway` is a trusted local MCP gateway for coding-agent workflows. It is the successor to the archived `chatgpt-mcp` bridge in `modules/attic/museum/`: instead of exposing a generic SSH shell through ngrok, it exposes a first-class tool surface for repositories, commands, patches, artifacts, jobs, and selected host operations.
+The Sinnix agent gateway is a trusted local MCP surface for repository work.
+It gives an external coding agent a bounded vocabulary for materializing a
+repository, inspecting and editing files, running commands, collecting large
+outputs as artifacts, and following background jobs across process restarts.
 
-The default posture is deliberately **trusted operator / yolo-friendly**. Sinnix already runs local coding agents with broad authority; the gateway should be useful enough to replace ad-hoc shell bridges. It keeps a few rails where they matter:
+It is an operator tool, not a security sandbox. The gateway assumes that the
+configured agent is trusted to work inside the repositories it exposes. Its
+rails make operations inspectable and recoverable:
 
-- normal work happens in materialized workspaces under the gateway state dir;
-- stdout/stderr are capped inline and larger outputs can become artifacts;
-- every tool call writes an append-only hash-chained audit ledger;
-- host-level commands are separate from workspace commands and disabled by default;
-- remote writes are intentionally left to normal git commands in a workspace or future explicit tools.
+- repositories are materialized under a dedicated state root;
+- every call is appended to a hash-chained audit ledger;
+- foreground output is bounded and larger results become artifacts;
+- background jobs retain metadata and logs on disk;
+- host commands are a separate, disabled-by-default authority;
+- repository write access is explicit per configured repository.
 
-## Package
+## Interfaces
 
-The flake exports:
+The flake exports the package directly:
 
 ```bash
 nix run .#sinnix-agent-gateway -- info
 ```
 
-The binary is a stdlib-only Python MCP server. It speaks JSON-RPC over stdio and implements the minimal MCP methods used by current MCP clients:
-
-- `initialize`
-- `tools/list`
-- `tools/call`
-- `ping`
-
-It also has a local Streamable HTTP-compatible JSON-RPC mode for tunnel experiments:
-
-```bash
-sinnix-agent-gateway --config /etc/sinnix/agent-gateway/config.json http --host 127.0.0.1 --port 3020
-```
-
-The HTTP server accepts MCP JSON-RPC POST requests at `/mcp`, returns ordinary
-`application/json` responses by default, and can return single-message SSE when
-the client only accepts `text/event-stream`.
-
-For stdio MCP clients, use:
+Configured MCP clients use the generated stdio wrapper:
 
 ```bash
 sinnix-agent-gateway-mcp
 ```
 
-## NixOS module
+An optional loopback HTTP endpoint exposes the same JSON-RPC tool surface for
+local connector experiments:
 
-Enable the package and configuration surface:
+```bash
+sinnix-agent-gateway \
+  --config /etc/sinnix/agent-gateway/config.json \
+  http --host 127.0.0.1 --port 3020
+```
+
+The HTTP transport accepts MCP JSON-RPC requests at `/mcp`, returning ordinary
+JSON or a single-message server-sent event when requested by the client.
+
+## NixOS configuration
 
 ```nix
 {
   sinnix.services.agent-gateway = {
     enable = true;
-
-    # Default: useful, not precious.
     yolo = true;
     allowArbitraryCommands = true;
 
-    repositories."Sinity/sinex" = {
-      url = "https://github.com/Sinity/sinex.git";
+    repositories."example/project" = {
+      url = "https://github.com/example/project.git";
       defaultRef = "master";
       allowWrite = true;
-      tasks = {
-        cargo-check = {
-          command = [ "cargo" "check" "--workspace" ];
-          description = "Check all Rust workspace crates.";
-          timeout = 1800;
-        };
-        cargo-test = {
-          command = [ "cargo" "test" "--workspace" ];
-          description = "Run all Rust workspace tests.";
-          timeout = 3600;
-          background = true;
-          risk = "high";
-        };
+      tasks.check = {
+        command = [ "nix" "flake" "check" ];
+        description = "Evaluate and build the project checks.";
+        timeout = 1800;
+        background = true;
+        risk = "high";
       };
     };
   };
 }
 ```
 
-The module installs:
+The module installs the gateway binary and MCP wrapper, renders matching
+system/user configuration files, and can optionally define a user service for
+the loopback HTTP endpoint.
 
-- `sinnix-agent-gateway`
-- `sinnix-agent-gateway-mcp`
-- `/etc/sinnix/agent-gateway/config.json`
-- `~/.config/sinnix-agent-gateway/config.json`
+## Tool model
 
-Optional local HTTP endpoint:
+The tool surface falls into six groups:
 
-```nix
-sinnix.services.agent-gateway.http = {
-  enable = true;
-  host = "127.0.0.1";
-  port = 3020;
-};
-```
+| Group | Representative tools | Role |
+| --- | --- | --- |
+| Orientation | `gateway_info`, `gateway_guide` | Discover configured repositories, tasks, limits, and workflow guidance. |
+| Repository lifecycle | `repo_materialize`, `repo_status`, `repo_tree` | Create and inspect durable working copies. |
+| Read/write | `repo_read_file`, `repo_write_file`, `repo_search`, `repo_apply_patch` | Perform structured repository operations. |
+| Verification | `repo_diff`, `run_command`, `run_task` | Inspect changes and execute arbitrary or declared checks. |
+| Durable work | `job_status`, `job_list`, `artifact_list`, `artifact_read` | Follow background processes and retrieve large outputs. |
+| Authority | `host_run`, ordinary Git commands in a workspace | Perform explicitly enabled host or remote operations. |
 
-## Tool surface
+A normal client flow is:
 
-The MCP server currently exposes:
+1. Read `gateway_guide`.
+2. Materialize a configured repository and ref.
+3. Inspect with tree/search/read tools.
+4. Apply edits and inspect the resulting diff.
+5. Run a configured task or command.
+6. Pack large results as artifacts or export a Git bundle when another
+   environment needs its own checkout.
 
-- `gateway_info`
-- `gateway_guide`
-- `audit_tail`
-- `repo_materialize`
-- `repo_status`
-- `repo_tree`
-- `repo_read_file`
-- `repo_write_file`
-- `repo_search`
-- `repo_pack`
-- `repo_export_bundle`
-- `repo_apply_patch`
-- `repo_diff`
-- `run_command`
-- `run_task`
-- `job_status`
-- `job_list`
-- `artifact_list`
-- `artifact_read`
-- `artifact_read_base64`
-- `host_run`
+Configured task metadata is returned by `gateway_info`, allowing clients to
+prefer the repository's known verification commands and move expensive work to
+durable background jobs.
 
-Every `tools/list` entry includes both `inputSchema` and `outputSchema`.
-Command/task tools use a `oneOf` output schema because they can either return a
-foreground command result or a durable background job descriptor.
-`repo_export_bundle` plus `artifact_read_base64` is the path for agents that
-need their own checkout: reconstruct the bundle in the remote environment and
-run `git clone <bundle>`.
-
-The intended loop:
-
-1. `gateway_guide` for connector-facing workflow guidance.
-2. `repo_materialize` a configured repo/ref.
-3. Use `repo_search`, `repo_tree`, and `repo_read_file` for orientation.
-4. Use `run_command` freely for yolo-mode local work.
-5. Use `repo_write_file` or `repo_apply_patch` for edits.
-6. Use `repo_diff`, `run_task`, and `repo_pack` to validate and report.
-7. Use normal git commands through `run_command` when deliberately pushing from a configured writable workspace.
-
-Configured tasks can be either concise command vectors or metadata-rich objects.
-Metadata is exposed through `gateway_info` so a client can prefer known checks,
-start expensive tasks in the background, and report expected outputs.
-
-## State layout
-
-Default state root:
+## State and recovery
 
 ```text
 ~/.local/state/sinnix-agent-gateway/
-  mirrors/      bare git mirrors
-  workspaces/   checked-out mutable worktrees
-  artifacts/    prompt packs and large outputs
-  jobs/         durable background job records and logs
-  audit.jsonl   hash-chained tool-call ledger
+  mirrors/      bare repository mirrors
+  workspaces/   mutable materialized checkouts
+  artifacts/    large outputs and repository bundles
+  jobs/         job metadata, stdout, stderr, and exit status
+  audit.jsonl   hash-chained call ledger
 ```
 
-Background jobs are recorded on disk with `job.json`, `stdout.log`,
-`stderr.log`, and `exitcode`. `job_status` and `job_list` can inspect jobs after
-the gateway process restarts, as long as the underlying process or logs still
-exist.
+The on-disk job and artifact model is intentionally independent of one MCP
+connection. A restarted gateway can still report completed work and serve its
+logs. The audit ledger records the request boundary even when the command it
+launched outlives the original client.
 
-## Policy stance
+## Trust boundary
 
-This is not a high-assurance sandbox. It is a productive local toolgate for a trusted owner. The module does not try to prevent all agent mistakes because that would make it useless for real development. Instead it separates the dangerous planes:
-
-- workspace commands: allowed by default;
-- host commands: opt-in with `allowedHostCommands = true`;
-- remote writes: use normal git commands in a workspace or add future explicit write tools.
-
-That gives ChatGPT/Codex the missing "clone, grep, build, test, patch, pack" capability without making the ChatGPT Python/container side need direct network access.
+`yolo` mode is appropriate only for a trusted local operator and trusted agent.
+It deliberately permits useful repository commands rather than simulating a
+high-assurance sandbox. Host commands require separate opt-in, and the HTTP
+transport should remain loopback-only unless an authenticated tunnel provides
+the external boundary.
