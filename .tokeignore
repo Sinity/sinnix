@@ -1,0 +1,7 @@
+# Repository statistics describe authored, reviewable project surfaces. Local
+# tracker/runtime state and generated dependency payloads are measured by their
+# owning tools instead of being presented as Sinnix implementation.
+.git/
+.beads/
+.agent/
+**/package-lock.json
