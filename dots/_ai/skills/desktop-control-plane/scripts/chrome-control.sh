@@ -3,9 +3,10 @@ set -euo pipefail
 
 # Chrome DevTools Protocol (CDP) remote control for Google Chrome.
 # The live target expects the user's Chrome on --remote-debugging-port=9222.
-# Private targets launch agent-owned profiles on separate ports. By default
-# they are seeded from the live Chrome profile before launch, so agents can use
-# authenticated state without operating on the visible live browser.
+# Private targets launch agent-owned profiles on separate ports. A missing
+# profile is initially seeded from live Chrome so agents can authenticate; an
+# existing private profile is preserved across restart. Replacing it is a
+# separate, explicitly destructive operation.
 # Uses curl for HTTP endpoints and websocat for WebSocket CDP commands.
 
 TARGET="live"
@@ -48,8 +49,10 @@ Usage: sinnix-chrome-control [--target live|private|private-visible] <command> [
 Commands:
   status                          Probe the selected target
   private-start [--visible] [--url <url>]
-                                  Start a private Chrome target, seeding profile state from live Chrome by default
-  private-sync-state [--visible]  Copy live Chrome profile state into the selected private target profile
+                                  Start a private Chrome target; seed only a missing profile
+  private-sync-state [--visible]  Seed only a missing private profile; preserve an existing profile
+  private-reseed-state --yes [--visible]
+                                  DESTRUCTIVE: replace selected profile state from live Chrome
   private-stop [--visible]        Stop the private Chrome target
   list                            List all open pages (id, title, url, type)
   list-tabs                       List only page-type targets
@@ -179,11 +182,19 @@ private_profile_in_use() {
 }
 
 sync_private_state_from_live() {
-  local visible=0 profile_dir
+  local visible=0 profile_dir reseed=0 confirmed=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
     --visible)
       visible=1
+      shift
+      ;;
+    --reseed)
+      reseed=1
+      shift
+      ;;
+    --yes)
+      confirmed=1
       shift
       ;;
     *)
@@ -203,6 +214,21 @@ sync_private_state_from_live() {
     exit 2
   fi
 
+  profile_dir="$(target_profile_dir)"
+  # A prior private Chrome crash can leave SingletonLock behind. Clear a lock
+  # only when its recorded owner is gone before treating an existing profile as
+  # an intentional no-op; otherwise a normal restart would preserve the state
+  # but fail to launch Chrome.
+  cleanup_stale_private_locks
+  if [[ $reseed -eq 1 && $confirmed -ne 1 ]]; then
+    echo "refusing destructive reseed without --yes: $profile_dir" >&2
+    exit 2
+  fi
+  if [[ $reseed -eq 0 && -d $profile_dir ]]; then
+    echo "preserved existing $TARGET Chrome profile: $profile_dir (use private-reseed-state --yes to replace it)"
+    return 0
+  fi
+
   if [[ $SEED_FROM_LIVE == "0" ]]; then
     echo "private Chrome state sync disabled by SINNIX_AGENT_CHROME_SEED_FROM_LIVE=0"
     return 0
@@ -213,8 +239,6 @@ sync_private_state_from_live() {
     exit 1
   }
 
-  profile_dir="$(target_profile_dir)"
-  cleanup_stale_private_locks
   if private_profile_in_use; then
     echo "refusing to sync while $TARGET Chrome profile is in use: $profile_dir" >&2
     exit 2
@@ -223,6 +247,12 @@ sync_private_state_from_live() {
   need_cmd rsync
   mkdir -p "$profile_dir"
 
+  if [[ $reseed -eq 1 ]]; then
+    echo "DESTRUCTIVE reseed: replacing selected $TARGET Chrome profile state from live Chrome: $profile_dir"
+  else
+    echo "seeding missing $TARGET Chrome profile state from live Chrome: $profile_dir"
+  fi
+
   sync_live_profile_path "Local State"
   sync_live_profile_path "Default/Cookies"
   sync_live_profile_path "Default/Network/Cookies"
@@ -230,8 +260,12 @@ sync_private_state_from_live() {
   sync_live_profile_path "Default/Session Storage"
   sync_live_profile_path "Default/IndexedDB"
   sync_live_profile_path "Default/Web Data"
+  # Deliberately do not sync Default/Local Extension Settings: that directory
+  # holds extension chrome.storage.local data, including Polylogue's recovery
+  # checkpoint. An explicit reseed is destructive for browser auth state, but
+  # it must not silently erase the ledger that explains that recovery is needed.
 
-  echo "synced live Chrome profile state into $TARGET profile: $profile_dir"
+  echo "seeded live Chrome profile state into $TARGET profile: $profile_dir"
 }
 
 sync_live_profile_path() {
@@ -291,8 +325,11 @@ start_private_chrome() {
 
   profile_dir="$(target_profile_dir)"
   pid_file="$(chrome_pid_file)"
-  mkdir -p "$profile_dir"
+  # Ordinary restart preserves an existing profile (and its extension-origin
+  # IndexedDB). The initial authenticated seed is only permitted before the
+  # profile directory exists.
   sync_private_state_from_live
+  mkdir -p "$profile_dir"
   headless_arg="$(target_headless_flag)"
 
   launch_args=(
@@ -444,6 +481,10 @@ private-start)
 
 private-sync-state)
   sync_private_state_from_live "$@"
+  ;;
+
+private-reseed-state)
+  sync_private_state_from_live --reseed "$@"
   ;;
 
 private-stop)

@@ -4,8 +4,8 @@
 # runtimeInputs: bash coreutils google-chrome
 #
 # Gives agents the same DevTools tool shape as the user's live Chrome, but
-# against a private persistent profile seeded from live Chrome state before
-# launch. It stays separate from the shell CDP helper's private profile so
+# against a private persistent profile initially seeded from live Chrome state.
+# Existing state is preserved across restart. It stays separate from the shell CDP helper's private profile so
 # concurrent MCP and shell browser sessions cannot fight over a Chrome
 # profile lock. It is headless by default; set SINNIX_AGENT_CHROME_HEADLESS=0
 # when a visible private browser window is desired for operator inspection.
@@ -20,7 +20,6 @@ profile_dir="${SINNIX_AGENT_CHROME_PROFILE:-$HOME/.local/share/sinnix-browser/ch
 viewport="${SINNIX_AGENT_CHROME_VIEWPORT:-1440x1000}"
 headless="${SINNIX_AGENT_CHROME_HEADLESS:-1}"
 chrome_bin="${SINNIX_AGENT_CHROME_EXECUTABLE:-$(command -v google-chrome-stable || true)}"
-mkdir -p "$profile_dir"
 if [ -z "$chrome_bin" ] || [ ! -x "$chrome_bin" ]; then
   echo "SINNIX_AGENT_CHROME_EXECUTABLE does not name an executable Chrome: $chrome_bin" >&2
   exit 2

@@ -412,7 +412,16 @@ in
               bash -n "$helper"
             done
             grep -Fq 'private-sync-state' "$HOME/.local/bin/sinnix-chrome-control"
+            grep -Fq 'private-reseed-state --yes' "$HOME/.local/bin/sinnix-chrome-control"
+            grep -Fq 'preserved existing $TARGET Chrome profile' "$HOME/.local/bin/sinnix-chrome-control"
+            grep -Fq 'refusing destructive reseed without --yes' "$HOME/.local/bin/sinnix-chrome-control"
             grep -Fq 'SINNIX_AGENT_CHROME_LIVE_PROFILE' "$HOME/.local/bin/sinnix-chrome-control"
+            grep -Fq 'cleanup_stale_private_locks' "$HOME/.local/bin/sinnix-chrome-control"
+            grep -Fq 'Deliberately do not sync Default/Local Extension Settings' "$HOME/.local/bin/sinnix-chrome-control"
+            if grep -Fq 'sync_live_profile_path "Default/Local Extension Settings"' "$HOME/.local/bin/sinnix-chrome-control"; then
+              echo "private profile sync must preserve extension recovery checkpoints" >&2
+              exit 1
+            fi
             grep -Fq 'private-sync-state' "$HOME/.local/bin/mcp-chrome-devtools-private"
           '';
         }
