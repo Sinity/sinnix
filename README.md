@@ -156,6 +156,8 @@ heavy commands bypass the containment and concurrency policy encoded here.
 
 - [`docs/agent-gateway.md`](docs/agent-gateway.md) — trusted repository and
   command gateway for coding agents.
+- [`docs/ethereal-bootstrap.md`](docs/ethereal-bootstrap.md) — destructive
+  first install and steady-state deployment of the headless replica.
 
 Editing and publication rules live in [`CLAUDE.md`](CLAUDE.md);
 [`AGENTS.md`](AGENTS.md) is a symlink to the same contract.
