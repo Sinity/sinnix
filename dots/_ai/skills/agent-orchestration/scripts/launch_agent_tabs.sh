@@ -244,6 +244,7 @@ if [[ ${status_only} -eq 1 || ${tails_mode} -eq 1 ]]; then
     base="$(basename "${log_file%.log}")"
     task_name="${base%.headless-*}"
     task_name="${task_name%.resume-*}"
+    task_name="${task_name%.phase-*}"
     task_name="${task_name%.review-*}"
     mtime="$(stat -c %Y "${log_file}" 2>/dev/null || echo 0)"
     if [[ -z ${newest_mtime[${task_name}]:-} || ${mtime} -gt ${newest_mtime[${task_name}]} ]]; then
