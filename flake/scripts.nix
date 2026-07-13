@@ -136,14 +136,26 @@ let
     # minutes, and it pays ~2.3s engine startup per call vs ~65ms as a server
     # client. Wrap rather than add dolt globally so every bd consumer (hooks,
     # devshells, agent lanes) gets server capability unconditionally.
-    beads = pkgs.symlinkJoin {
-      name = "beads-with-dolt";
-      paths = [ inputs.beads.packages.${pkgs.stdenv.hostPlatform.system}.default ];
-      nativeBuildInputs = [ pkgs.makeWrapper ];
-      postBuild = ''
-        wrapProgram $out/bin/bd --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.dolt ]}
-      '';
-    };
+    beads =
+      let
+        beadsBase = pkgs.callPackage (inputs.beads + "/default.nix") {
+          self = inputs.beads;
+          buildGoModule = pkgs.buildGo126Module;
+        };
+        patchedBeads = beadsBase.overrideAttrs (old: {
+          patches = (old.patches or [ ]) ++ [
+            ./patches/beads-server-auto-import-empty-check.patch
+          ];
+        });
+      in
+      pkgs.symlinkJoin {
+        name = "beads-with-dolt";
+        paths = [ patchedBeads ];
+        nativeBuildInputs = [ pkgs.makeWrapper ];
+        postBuild = ''
+          wrapProgram $out/bin/bd --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.dolt ]}
+        '';
+      };
 
     codebase-memory-mcp = codebaseMemoryMcp;
 

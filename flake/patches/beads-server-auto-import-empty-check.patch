@@ -1,0 +1,21 @@
+diff --git a/cmd/bd/auto_import_upgrade.go b/cmd/bd/auto_import_upgrade.go
+index bfc70b3..d45abf2 100644
+--- a/cmd/bd/auto_import_upgrade.go
++++ b/cmd/bd/auto_import_upgrade.go
+@@ -49,0 +50,16 @@ func maybeAutoImportJSONL(ctx context.Context, s storage.DoltStorage, beadsDir st
++	// Embedded stores perform the emptiness check atomically inside
++	// ImportJSONLData. Server-backed stores use the fallback importer below,
++	// so they must check explicitly before importing. Without this guard every
++	// mutating bd command re-imports the currently checked-out issues.jsonl and
++	// can overwrite newer server state after a branch switch.
++	if _, ok := s.(jsonlImporter); !ok {
++		stats, err := s.GetStatistics(ctx)
++		if err != nil {
++			fmt.Fprintf(os.Stderr, "warning: auto-import: failed to check whether database is empty: %v\n", err)
++			return
++		}
++		if stats.TotalIssues > 0 {
++			return
++		}
++	}
++
