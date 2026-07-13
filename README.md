@@ -12,6 +12,8 @@ can remain reproducible while still accommodating local state, heavy developer
 workloads, private data, hardware-specific behavior, and continuously evolving
 automation.
 
+[Project overview](https://sinity.github.io/sinnix/) · [Roadmap and operating record](https://sinity.github.io/sinnix/beads/)
+
 ## The system at a glance
 
 | Surface | What Sinnix provides |

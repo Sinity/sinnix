@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Sinnix is a complete NixOS and Home Manager operating environment for a workstation, replica host, router, local data systems, and coding agents.">
+  <title>Sinnix — a legible personal operating environment</title>
+  <link rel="stylesheet" href="assets/project.css">
+  <script defer src="assets/project.js"></script>
+</head>
+<body>
+  <header class="site-header"><div class="header-inner"><a class="brand" href="./">sin<span>nix</span></a><nav class="header-nav"><a href="#system">System</a><a href="#documentation">Documentation</a><a href="beads/">Roadmap</a><a href="https://github.com/Sinity/sinnix">GitHub</a></nav><button class="theme-toggle" data-theme-toggle type="button" aria-label="Toggle color theme">◐</button></div></header>
+  <main class="shell">
+    <section class="hero">
+      <p class="eyebrow">NixOS · Home Manager · operating policy</p>
+      <h1>One personal system, made legible.</h1>
+      <p class="lede">Sinnix versions the workstation as a whole: hosts, desktop behavior, services, storage and recovery, observability, local evidence capture, developer environments, and the control surfaces used by coding agents.</p>
+      <div class="actions"><a class="button primary" href="#system">See the system design →</a><a class="button" href="beads/">Browse the operating record</a><a class="button" href="https://github.com/Sinity/sinnix">Read the configuration</a></div>
+    </section>
+    <section class="section" id="system">
+      <p class="eyebrow">Composition</p>
+      <h2>Reproducible without pretending the machine is generic</h2>
+      <p class="section-intro">The repository keeps reusable policy in modules and leaves concrete hardware, roles, and service choices visible at the host boundary.</p>
+      <div class="flow">
+        <article class="card"><span class="label">01 · Flake</span><h3>Assemble</h3><p>flake-parts wires hosts, packages, scripts, checks, overlays, and deployment outputs.</p></article>
+        <article class="card"><span class="label">02 · Modules</span><h3>Describe policy</h3><p>Features, services, profiles, persistence, networking, storage, and runtime governance compose through typed options.</p></article>
+        <article class="card"><span class="label">03 · Hosts</span><h3>Choose the machine</h3><p>The workstation, headless replica, and OpenWrt router remain explicit final composition boundaries.</p></article>
+        <article class="card"><span class="label">04 · Runtime</span><h3>Observe and recover</h3><p>Systemd inventory, resource classes, telemetry, snapshots, backups, and restore drills keep the live system answerable.</p></article>
+      </div>
+    </section>
+    <section class="section">
+      <p class="eyebrow">What the repository owns</p>
+      <h2>Configuration, behavior, and operational truth in one place</h2>
+      <div class="grid">
+        <article class="card"><span class="label">Daily workstation</span><h3>A specific desktop, deliberately</h3><p>Hyprland and Noctalia, NVIDIA/Intel modes, audio, terminals, browsers, editors, local models, capture tools, and actively edited dotfiles.</p></article>
+        <article class="card"><span class="label">Runtime control</span><h3>Resource policy is service design</h3><p>Typed inventory drives systemd slices, memory and IO posture, scoped command wrappers, live observation, and evaluation-time consistency checks.</p></article>
+        <article class="card"><span class="label">Local evidence stack</span><h3>Capture systems are composed services</h3><p>Sinex, Polylogue, Lynchpin, ActivityWatch, terminal capture, and machine telemetry share explicit ownership and lifecycle boundaries.</p></article>
+        <article class="card"><span class="label">State and recovery</span><h3>Durable, rebuildable, and bulk data diverge</h3><p>Impermanence, persistence declarations, Btrfs, Borg, staging, and restore exercises encode different recovery contracts for different data classes.</p></article>
+      </div>
+    </section>
+    <section class="section" id="documentation">
+      <p class="eyebrow">Documentation</p>
+      <h2>Read it as a system, not a module catalog</h2>
+      <p class="section-intro">Sinnix is a personal configuration, not a supported NixOS framework. Its reusable value is the way the boundaries fit together.</p>
+      <div class="docs">
+        <a class="doc-link" href="https://github.com/Sinity/sinnix#architecture">Architecture<small>Flake, module, host, and dotfile composition.</small></a>
+        <a class="doc-link" href="https://github.com/Sinity/sinnix#what-this-achieves">System outcomes<small>Rebuilds, resource policy, local data systems, and recovery.</small></a>
+        <a class="doc-link" href="https://github.com/Sinity/sinnix#working-with-the-repository">Repository workflow<small>Evaluate, test, build, boot, and switch through the intended wrappers.</small></a>
+        <a class="doc-link" href="https://github.com/Sinity/sinnix/blob/master/docs/agent-gateway.md">Agent gateway<small>Trusted repository and command access for local coding agents.</small></a>
+        <a class="doc-link" href="https://github.com/Sinity/sinnix/blob/master/docs/ethereal-bootstrap.md">Replica bootstrap<small>Bring the headless host into the same declarative system.</small></a>
+        <a class="doc-link" href="https://github.com/Sinity/sinnix/blob/master/SECURITY.md">Security<small>Publication, secrets, and reporting boundaries.</small></a>
+      </div>
+    </section>
+  </main>
+  <footer class="footer"><div class="footer-inner"><span>Sinnix · a personal NixOS operating environment</span><span><a href="beads/">Operating record</a> · <a href="https://github.com/Sinity/sinnix">Source</a></span></div></footer>
+</body>
+</html>
