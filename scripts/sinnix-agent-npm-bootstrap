@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Bootstrap an npm-installed AI agent CLI into its per-tool state dir and (re)generate its launcher
-# runtimeInputs: bash coreutils nodejs_22 git gnutar gzip which gcc
+# runtimeInputs: bash coreutils nodejs_22 git gnutar gzip which gcc util-linux
 #
 # The long-lived agent process launches via the generated launch.sh directly,
 # not through buildFHSEnv/bubblewrap, so sudo and other privileged helpers do
@@ -23,7 +23,42 @@ export npm_config_prefix="$STATE/npm"
 export PATH="$runtime_path:$STATE/npm/bin:$PATH"
 mkdir -p "$STATE/npm"
 
+cleanup_stale_reify_entries() {
+  local package_name package_parent candidate suffix
+
+  package_name=${npm_package##*/}
+  case "$npm_package" in
+    @*/*) package_parent="$STATE/npm/lib/node_modules/${npm_package%/*}" ;;
+    *) package_parent="$STATE/npm/lib/node_modules" ;;
+  esac
+
+  mkdir -p "$package_parent" "$STATE/npm/bin"
+  for candidate in \
+    "$package_parent/.$package_name-"* \
+    "$package_parent/..$package_name-"* \
+    "$STATE/npm/bin/.$binary_name-"*; do
+    if [ ! -e "$candidate" ] && [ ! -L "$candidate" ]; then
+      continue
+    fi
+
+    suffix=${candidate##*-}
+    if [[ ! $suffix =~ ^[[:alnum:]]{8}$ ]]; then
+      continue
+    fi
+
+    echo "$binary_name: removing interrupted npm retirement entry $candidate" >&2
+    rm -rf -- "$candidate"
+  done
+}
+
+# A missing binary means an earlier install may have been interrupted after npm
+# retired the old package. Serialize recovery so concurrent wrappers cannot both
+# enter npm's non-atomic reify phase and collide on its deterministic temp names.
+exec 9>"$STATE/npm-bootstrap.lock"
+flock 9
+
 if [ ! -x "$STATE/npm/bin/$binary_name" ]; then
+  cleanup_stale_reify_entries
   echo "$binary_name: bootstrapping (npm install -g $npm_package)..." >&2
   npm install -g "$npm_package"
 fi
