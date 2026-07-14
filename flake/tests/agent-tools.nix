@@ -182,6 +182,73 @@ in
           touch "$out"
         '';
 
+      agentNpmBootstrapRecovery = pkgs.runCommand "sinnix-agent-npm-bootstrap-recovery-check" {
+        nativeBuildInputs = [
+          pkgs.bash
+          pkgs.coreutils
+          pkgs.util-linux
+        ];
+      } ''
+        export HOME="$TMPDIR/home"
+        state="$HOME/.local/state/fake-agent/npm"
+        package_parent="$state/lib/node_modules/@example"
+        mkdir -p \
+          "$package_parent/.fake-cli-AbCd1234" \
+          "$package_parent/..fake-cli-ZyXw9876" \
+          "$state/bin" \
+          "$TMPDIR/bin"
+        ln -s /missing "$state/bin/.fakeagent-Qwer1234"
+
+        cat > "$TMPDIR/bin/npm" <<'EOF'
+        #!${pkgs.bash}/bin/bash
+        set -euo pipefail
+        package_parent="$npm_config_prefix/lib/node_modules/@example"
+        test ! -e "$package_parent/.fake-cli-AbCd1234"
+        test ! -e "$package_parent/..fake-cli-ZyXw9876"
+        test ! -L "$npm_config_prefix/bin/.fakeagent-Qwer1234"
+
+        exec 8>>"$HOME/npm-invocations.lock"
+        flock 8
+        count=0
+        if [ -f "$HOME/npm-invocations" ]; then
+          count=$(cat "$HOME/npm-invocations")
+        fi
+        printf '%s\n' "$((count + 1))" > "$HOME/npm-invocations"
+        sleep 0.2
+
+        mkdir -p "$npm_config_prefix/bin"
+        cat > "$npm_config_prefix/bin/fakeagent" <<'AGENT'
+        #!${pkgs.bash}/bin/bash
+        printf 'fakeagent 1.0\n'
+        AGENT
+        chmod +x "$npm_config_prefix/bin/fakeagent"
+        EOF
+        chmod +x "$TMPDIR/bin/npm"
+
+        runtime_path="$TMPDIR/bin:${lib.makeBinPath [ pkgs.bash pkgs.coreutils pkgs.util-linux ]}"
+        bootstrap=${../../scripts/sinnix-agent-npm-bootstrap}
+        ${pkgs.bash}/bin/bash "$bootstrap" fake-agent @example/fake-cli fakeagent "$runtime_path" &
+        first=$!
+        ${pkgs.bash}/bin/bash "$bootstrap" fake-agent @example/fake-cli fakeagent "$runtime_path" &
+        second=$!
+        wait "$first"
+        wait "$second"
+
+        test "$(cat "$HOME/npm-invocations")" = 1
+        test ! -e "$package_parent/.fake-cli-AbCd1234"
+        test ! -e "$package_parent/..fake-cli-ZyXw9876"
+        test ! -L "$state/bin/.fakeagent-Qwer1234"
+        test -x "$state/bin/fakeagent"
+
+        # A healthy canonical binary must bypass cleanup and npm entirely.
+        mkdir "$package_parent/.fake-cli-Keep1234"
+        ${pkgs.bash}/bin/bash "$bootstrap" fake-agent @example/fake-cli fakeagent "$runtime_path"
+        test "$(cat "$HOME/npm-invocations")" = 1
+        test -d "$package_parent/.fake-cli-Keep1234"
+        test "$(${pkgs.bash}/bin/bash "$HOME/.local/state/fake-agent/launch.sh" --version)" = "fakeagent 1.0"
+        touch "$out"
+      '';
+
       devAgentToolsRuntime = mkHmRuntimeCheck system (
         agentToolsFixture
         // {
@@ -430,6 +497,7 @@ in
     {
       checks = {
         agent-resource-policy = agentResourcePolicy;
+        agent-npm-bootstrap-recovery = agentNpmBootstrapRecovery;
       };
 
       heavyChecks = {
