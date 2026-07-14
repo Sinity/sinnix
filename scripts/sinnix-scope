@@ -5,6 +5,99 @@
 
 set -euo pipefail
 
+supervise_scope_command() {
+  if [ "$#" -lt 2 ] || [ "$1" != "--" ]; then
+    echo "sinnix-scope: invalid internal supervisor invocation" >&2
+    exit 64
+  fi
+  shift
+
+  local child_pid=""
+  local command_status=0
+  local cgroup_path=""
+  local cgroup_procs=""
+  local hierarchy controllers path pid signal
+  local -a remaining_pids=()
+
+  forward_signal() {
+    signal="$1"
+    if [ -n "$child_pid" ]; then
+      kill -s "$signal" "$child_pid" 2>/dev/null || true
+    fi
+  }
+
+  collect_remaining_pids() {
+    remaining_pids=()
+    while IFS= read -r pid; do
+      [[ "$pid" =~ ^[0-9]+$ ]] || continue
+      [ "$pid" -gt 1 ] || continue
+      [ "$pid" != "$BASHPID" ] || continue
+      if kill -0 "$pid" 2>/dev/null; then
+        remaining_pids+=("$pid")
+      fi
+    done <"$cgroup_procs"
+  }
+
+  terminate_remaining_pids() {
+    collect_remaining_pids
+    [ "${#remaining_pids[@]}" -gt 0 ] || return 0
+
+    for pid in "${remaining_pids[@]}"; do
+      kill -s TERM "$pid" 2>/dev/null || true
+    done
+    for _ in {1..50}; do
+      sleep 0.1
+      collect_remaining_pids
+      [ "${#remaining_pids[@]}" -gt 0 ] || return 0
+    done
+    for pid in "${remaining_pids[@]}"; do
+      kill -s KILL "$pid" 2>/dev/null || true
+    done
+  }
+
+  trap 'forward_signal HUP' HUP
+  trap 'forward_signal INT' INT
+  trap 'forward_signal QUIT' QUIT
+  trap 'forward_signal TERM' TERM
+
+  "$@" &
+  child_pid=$!
+  set +e
+  wait "$child_pid"
+  command_status=$?
+  set -e
+  trap - HUP INT QUIT TERM
+
+  if [ -n "${SINNIX_SCOPE_CGROUP_PROCS:-}" ]; then
+    cgroup_procs="$SINNIX_SCOPE_CGROUP_PROCS"
+  else
+    while IFS=: read -r hierarchy controllers path; do
+      if [ "$hierarchy" = 0 ] && [ -z "$controllers" ]; then
+        cgroup_path="$path"
+        break
+      fi
+    done </proc/self/cgroup
+    cgroup_procs="/sys/fs/cgroup${cgroup_path}/cgroup.procs"
+  fi
+
+  if [ -n "$cgroup_path" ] || [ -n "${SINNIX_SCOPE_CGROUP_PROCS:-}" ]; then
+    if [ -r "$cgroup_procs" ]; then
+      terminate_remaining_pids
+    else
+      echo "sinnix-scope: cannot read scope membership at $cgroup_procs" >&2
+    fi
+  else
+    echo "sinnix-scope: cannot resolve the current cgroup" >&2
+  fi
+
+  exit "$command_status"
+}
+
+if [ "${1:-}" = "--internal-supervise" ]; then
+  shift
+  supervise_scope_command "$@"
+fi
+
 if [ "$#" -lt 3 ]; then
   echo "usage: sinnix-scope <class> [--unit <name>] [--agent-property <Name=Value>] -- <command> [args...]" >&2
   exit 64
@@ -234,6 +327,13 @@ fi
 # real env boundary is ever wanted, switch these launches to service mode
 # (drop --scope) and build a complete, deliberately-maintained allowlist —
 # don't resurrect a partial one under --scope.
+#
+# A scope remains active while any descendant remains in its cgroup; it has no
+# service-style MainPID whose exit ends the unit. Run the requested command
+# under a small supervisor so a daemonized database, MCP server, or test worker
+# cannot keep a completed launcher scope alive indefinitely. Intentional
+# background xtask jobs bypass the scope above and retain their own lifecycle.
+scoped_command=("$0" --internal-supervise -- "${scoped_command[@]}")
 
 if [ "${EUID:-$(id -u)}" -eq 0 ]; then
   unit="${unit_override:-sinnix-${class}-$(date +%s%N)-$$}"
