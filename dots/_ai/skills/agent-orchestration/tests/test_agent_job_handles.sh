@@ -217,11 +217,16 @@ cat >"${tmp}/runtime-inventory.json" <<'EOF'
   }
 }
 EOF
+# Explicit </dev/null: the supervisor-wrapping decision below is keyed off
+# whether sinnix-scope's own stdin is a terminal (interactive launches skip
+# it so bash doesn't redirect the child's stdin from /dev/null and break TTY
+# programs -- see scripts/sinnix-scope). Force the non-interactive path
+# regardless of how this test script itself was invoked.
 SYSTEMD_RUN_RECEIPT="${tmp}/systemd-run.receipt" \
   SINNIX_RUNTIME_INVENTORY_FILE="${tmp}/runtime-inventory.json" \
   XDG_RUNTIME_DIR="${tmp}/runtime" PATH="${tmp}/scope-bin:${PATH}" \
   "${scope}" agent --unit sinnix-agent-job-scope-test.scope \
-  --agent-property MemoryHigh=2G --agent-property CPUWeight=200 -- true
+  --agent-property MemoryHigh=2G --agent-property CPUWeight=200 -- true </dev/null
 jq -Rsc -e '
   (split("\n") | map(select(length > 0))) as $args |
   ($args | map(select(startswith("--property=MemoryHigh=")))) ==
