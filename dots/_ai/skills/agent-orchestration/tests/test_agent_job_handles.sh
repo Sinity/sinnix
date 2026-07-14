@@ -229,7 +229,31 @@ jq -Rsc -e '
   ($args | map(select(startswith("--property=CPUWeight=")))) ==
     ["--property=CPUWeight=100", "--property=CPUWeight=200"] and
   ($args | index("--unit=sinnix-agent-job-scope-test.scope")) != null and
-  ($args | index("--slice=agent-test.slice")) != null
+  ($args | index("--slice=agent-test.slice")) != null and
+  ($args | index("--internal-supervise")) != null
 ' "${tmp}/systemd-run.receipt" >/dev/null
+
+# A scope has no MainPID lifecycle: a daemonized descendant otherwise keeps it
+# active after the requested command exits. Exercise the production supervisor
+# against a real orphan child, and require both cleanup and status propagation.
+orphan_pid_file="${tmp}/orphan.pid"
+cgroup_procs="${tmp}/cgroup.procs"
+set +e
+SINNIX_SCOPE_CGROUP_PROCS="$cgroup_procs" \
+  "$scope" --internal-supervise -- bash -c '
+    sleep 300 &
+    orphan=$!
+    printf "%s\n" "$BASHPID" "$orphan" >"$1"
+    printf "%s\n" "$orphan" >"$2"
+    exit 23
+  ' bash "$cgroup_procs" "$orphan_pid_file"
+supervisor_status=$?
+set -e
+[[ $supervisor_status -eq 23 ]]
+orphan_pid="$(<"$orphan_pid_file")"
+if kill -0 "$orphan_pid" 2>/dev/null; then
+  echo "scope supervisor left orphan process $orphan_pid alive" >&2
+  exit 1
+fi
 
 echo "agent job handle tests passed"
