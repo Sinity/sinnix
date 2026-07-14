@@ -333,7 +333,25 @@ fi
 # under a small supervisor so a daemonized database, MCP server, or test worker
 # cannot keep a completed launcher scope alive indefinitely. Intentional
 # background xtask jobs bypass the scope above and retain their own lifecycle.
-scoped_command=("$0" --internal-supervise -- "${scoped_command[@]}")
+#
+# Interactive launches (a real controlling terminal on stdin) skip the
+# supervisor: `supervise_scope_command` backgrounds the target with `"$@" &`,
+# and bash — running non-interactively here, no job control (`-m`) — redirects
+# a backgrounded command's stdin from /dev/null per POSIX ("If job control is
+# not in effect... asynchronous commands... have standard input redirected
+# from /dev/null"). That silently broke every interactive agent CLI routed
+# through this scope (codex, claude, etc. all reported "stdin is not a
+# terminal") the same day this supervisor landed. The orphan-cleanup problem
+# this supervisor fixes is a background/headless-launch failure mode (a
+# checkout database, MCP server, or test worker outliving its unwatched
+# launcher) — an interactive session the operator is actively watching does
+# not need it, and normal terminal signal delivery (SIGHUP on terminal close,
+# Ctrl-C) already reaches the whole foreground process group without help.
+if [ -t 0 ]; then
+  :
+else
+  scoped_command=("$0" --internal-supervise -- "${scoped_command[@]}")
+fi
 
 if [ "${EUID:-$(id -u)}" -eq 0 ]; then
   unit="${unit_override:-sinnix-${class}-$(date +%s%N)-$$}"
