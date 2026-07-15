@@ -14,7 +14,7 @@ mkFeatureModule {
     }:
     {
       home-manager.users.${user} =
-        { config, pkgs, ... }:
+        { config, ... }:
         let
           captureShellCmd = "${config.home.homeDirectory}/.local/bin/sinnix-captured-shell";
         in
@@ -27,27 +27,6 @@ mkFeatureModule {
 
           programs.kitty = {
             enable = true;
-            # sinnix-878 RESOLVED 2026-07-11: the "leak" is glibc retaining
-            # kitty's freed MB-scale scrollback (historybuf) segments. glibc's
-            # dynamic M_MMAP_THRESHOLD rises above the segment size after the
-            # first few frees, so segments are served from brk and closing a
-            # window strands them in bins forever (reproduced: +177MB RSS
-            # after two open/fill/close cycles with zero windows left;
-            # malloc_trim(0) recovered ~all of it). Pinning the threshold
-            # disables the dynamic ratchet so segments go through mmap and
-            # are returned on free. Scoped to the kitty process itself (its
-            # `env` directive would only affect children). Upstream trail:
-            # kitty issue 10249.
-            package = pkgs.symlinkJoin {
-              name = "kitty-malloc-tuned";
-              paths = [ pkgs.kitty ];
-              nativeBuildInputs = [ pkgs.makeWrapper ];
-              postBuild = ''
-                wrapProgram $out/bin/kitty \
-                  --set MALLOC_MMAP_THRESHOLD_ 131072 \
-                  --set MALLOC_ARENA_MAX 2
-              '';
-            };
             # Keep Kitty's shell helpers, but turn off the prompt/title/cursor
             # subfeatures that collide with the custom zsh prompt pipeline.
             shellIntegration.mode = "no-prompt-mark no-title no-cursor";
@@ -72,9 +51,8 @@ mkFeatureModule {
               # cursor_trail 3 -> 0 (2026-07-10, sinnix-878 phase 1). Phase 1
               # CONCLUDED 2026-07-11: telemetry over the 07-10..07-11 boot
               # shows 86 MB/h growth WITH the trail disabled — cursor_trail is
-              # exonerated. Keeping it off pending the leak fix regardless (no
-              # animation attachment). Evidence trail in sinnix-878; upstream
-              # report filed against kitty 0.47.4.
+              # exonerated. Keep it off while the globally patched kitty build
+              # establishes a clean post-fix memory-slope baseline.
               cursor_trail = 0;
               confirm_os_window_close = 0;
               allow_remote_control = "socket-only";
