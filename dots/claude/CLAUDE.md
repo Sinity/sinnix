@@ -87,9 +87,15 @@
 
 - Tests should protect behavior, contracts, invariants, reproduced bugs,
   security boundaries, parser semantics, or cross-module contracts.
-- Do not add tests that merely memorialize a diff: a rename, deleted spelling,
-  moved command, removed list entry, or changed literal. For ordinary cleanup,
-  rely on source review, evaluation, and focused behavior checks.
+- Do not add tests, static scans, policy gates, allowlists, or deny lists that
+  merely memorialize a refactoring diff: a renamed variable/type/module,
+  deleted spelling, moved command, removed list entry, changed literal, or
+  import path. A refactoring is verified through independently valuable
+  behavior, type, build, and architecture checks—not by forbidding the old
+  textual shape or requiring the new one. If such fossilized-diff checks
+  already exist in the touched surface, remove them instead of updating them
+  to encode the latest spelling. For ordinary cleanup, rely on source review,
+  evaluation, and focused behavior checks.
 - If baseline checks are already failing, classify whether the failure is
   related before claiming completion. Do not hide inherited failure state.
 - Before declaring completion, cite the changed files, report exact verification
