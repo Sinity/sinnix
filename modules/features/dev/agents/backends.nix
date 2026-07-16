@@ -139,6 +139,26 @@ let
     export PATH="${hermesRuntimePath}:$PATH"
     export UV_NO_CONFIG=1
     export UV_PYTHON="${pkgs.python313}/bin/python3"
+    export LD_LIBRARY_PATH="${
+      lib.makeLibraryPath [
+        pkgs.portaudio
+        pkgs.ffmpeg
+        pkgs.zlib
+      ]
+    }:''${LD_LIBRARY_PATH:-}"
+    # NeMo Relay reads exporter settings from its launch environment. ATIF stays
+    # beneath HERMES_HOME so Polylogue's native Hermes watcher discovers each
+    # JSON trajectory; the neighboring ATOF JSONL preserves raw diagnostics.
+    export HERMES_NEMO_RELAY_ATOF_ENABLED=1
+    export HERMES_NEMO_RELAY_ATOF_OUTPUT_DIRECTORY="$HERMES_HOME/observability/nemo-relay/atof"
+    export HERMES_NEMO_RELAY_ATOF_FILENAME="events.jsonl"
+    export HERMES_NEMO_RELAY_ATOF_MODE=append
+    export HERMES_NEMO_RELAY_ATIF_ENABLED=1
+    export HERMES_NEMO_RELAY_ATIF_OUTPUT_DIRECTORY="$HERMES_HOME/observability/nemo-relay/atif"
+    export HERMES_NEMO_RELAY_ATIF_FILENAME_TEMPLATE="trajectory-{session_id}.json"
+    export HERMES_NEMO_RELAY_ATIF_AGENT_NAME="Sinnix Hermes Agent"
+    export HERMES_NEMO_RELAY_ATIF_AGENT_VERSION="local"
+    export HERMES_NEMO_RELAY_ATIF_SUBAGENT_EXPORT_MODE=all
   '';
   ensureHermes = "${scriptPkgs.sinnix-ensure-hermes}/bin/sinnix-ensure-hermes";
   hermesConfigureLocal = "${scriptPkgs.sinnix-hermes-configure-local}/bin/sinnix-hermes-configure-local";
@@ -146,12 +166,17 @@ let
     {
       entrypoint ? "hermes",
       extraPrelude ? "",
+      profile ? null,
     }:
     {
       text = ''
         #!/usr/bin/env bash
         set -euo pipefail
 
+        ${lib.optionalString (profile != null) ''
+          export HERMES_HOME="$HOME/.hermes/profiles/${profile}"
+          export HERMES_INSTALL_DIR="$HOME/.hermes/hermes-agent"
+        ''}
         ${hermesBootstrap}
 
         ${ensureHermes}

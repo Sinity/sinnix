@@ -33,6 +33,10 @@ jsonFormat.generate "codex-hooks.json" {
             type = "command";
             command = "sessionstart-sinex-recall";
           }
+          {
+            type = "command";
+            command = "polylogue-hook SessionStart --provider codex";
+          }
         ];
       }
     ];
@@ -42,6 +46,30 @@ jsonFormat.generate "codex-hooks.json" {
           {
             type = "command";
             command = "bd-prime-if-present --memories-only";
+          }
+          {
+            type = "command";
+            command = "polylogue-hook UserPromptSubmit --provider codex";
+          }
+        ];
+      }
+    ];
+    PreToolUse = [
+      {
+        hooks = [
+          {
+            type = "command";
+            command = "polylogue-hook PreToolUse --provider codex";
+          }
+        ];
+      }
+    ];
+    PostToolUse = [
+      {
+        hooks = [
+          {
+            type = "command";
+            command = "polylogue-hook PostToolUse --provider codex";
           }
         ];
       }
@@ -60,6 +88,10 @@ jsonFormat.generate "codex-hooks.json" {
                 full|browser|deepseek|local) serena-hooks cleanup --client=codex ;;
               esac
             '';
+          }
+          {
+            type = "command";
+            command = "polylogue-hook Stop --provider codex";
           }
         ];
       }

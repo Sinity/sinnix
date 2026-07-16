@@ -79,11 +79,9 @@
     # Backstop reaper for orphaned per-checkout sinex dev-postgres instances
     # (primary cleanup is sinnix-direnvrc's owner-watcher). See sinex-grlv.
     sinex-dev-db-reaper.enable = true;
-    airvpn-seed = {
-      enable = true;
-      autoStart = false;
-      forwardedPort = 20241;
-    };
+    # Keep the optional AirVPN tunnel inactive; Transmission uses the normal
+    # host network and the router's existing 51413 port forward.
+    airvpn-seed.enable = false;
     lynchpin = {
       enable = true;
       materializationTimer.enable = true;

@@ -11,21 +11,41 @@ let
         "claude"
         "codex"
         "gemini"
+        "antigravity"
+        "hermes"
       ];
       codex.bearer_token_env_var = "CONTEXT7_API_KEY";
+      hermes.headers.Authorization = "Bearer \${CONTEXT7_API_KEY}";
     };
 
     github = {
-      transport = "http";
+      transport = "stdio";
       tier = "remote-core";
-      url = "https://api.githubcopilot.com/mcp/";
+      command = "npx";
+      args = [ "-y" "@modelcontextprotocol/server-github" ];
+      env = {
+        GITHUB_PERSONAL_ACCESS_TOKEN = "\${GITHUB_TOKEN}";
+      };
       clients = [
         "claude"
         "codex"
         "gemini"
+        "antigravity"
+        "hermes"
       ];
-      codex.bearer_token_env_var = "GITHUB_TOKEN";
-      gemini.headers.Authorization = "Bearer \${GITHUB_TOKEN}";
+    };
+
+    agent-control = {
+      transport = "stdio";
+      tier = "agent-control";
+      command = "sinnix-agent-control-mcp";
+      clients = [
+        "claude"
+        "codex"
+        "gemini"
+        "antigravity"
+        "hermes"
+      ];
     };
 
     codebase-memory-mcp = {
@@ -36,6 +56,7 @@ let
         "codex"
         "claude"
         "gemini"
+        "antigravity"
       ];
     };
 
@@ -52,6 +73,7 @@ let
         "codex"
         "claude"
         "gemini"
+        "antigravity"
       ];
       claude.args = [
         "start-mcp-server"
@@ -74,6 +96,7 @@ let
       command = "mcp-firecrawl";
       clients = [
         "claude"
+        "hermes"
       ];
     };
 
@@ -89,6 +112,8 @@ let
         "codex"
         "claude"
         "gemini"
+        "antigravity"
+        "hermes"
       ];
     };
 
@@ -118,6 +143,8 @@ let
         "codex"
         "claude"
         "gemini"
+        "antigravity"
+        "hermes"
       ];
     };
 
@@ -129,6 +156,8 @@ let
         "codex"
         "claude"
         "gemini"
+        "antigravity"
+        "hermes"
       ];
     };
 
@@ -181,6 +210,7 @@ let
       "recall"
       "deep-evidence"
       "code-semantic"
+      "agent-control"
     ];
     browser = [
       "remote-core"
@@ -188,6 +218,13 @@ let
       "deep-evidence"
       "code-semantic"
       "browser-mcp"
+      "agent-control"
+    ];
+    orchestrate = [
+      "remote-core"
+      "recall"
+      "deep-evidence"
+      "agent-control"
     ];
   };
 
@@ -278,6 +315,55 @@ let
           env = gemini.env or server.env or { };
         }
     );
+
+  # Antigravity CLI uses the same stdio shape as Gemini, but names remote
+  # endpoints `serverUrl` in ~/.gemini/config/mcp_config.json.
+  renderAntigravityServer =
+    _name: server:
+    pruneAttrs (
+      if server.transport == "http" then
+        let
+          antigravity = server.antigravity or { };
+        in
+        {
+          serverUrl = server.url;
+          headers = antigravity.headers or server.headers or { };
+        }
+      else
+        let
+          antigravity = server.antigravity or { };
+        in
+        {
+          inherit (server) command;
+          args = antigravity.args or server.args or [ ];
+          env = antigravity.env or server.env or { };
+        }
+    );
+
+  # Hermes mcp_servers entry.  Its YAML format accepts the native stdio and
+  # streamable-HTTP shapes, including config-level ${VAR} substitution.
+  renderHermesServer =
+    _name: server:
+    pruneAttrs (
+      if server.transport == "http" then
+        let
+          hermes = server.hermes or { };
+        in
+        {
+          inherit (server) url;
+          headers = hermes.headers or server.headers or { };
+        }
+      else
+        let
+          hermes = server.hermes or { };
+        in
+        {
+          inherit (server) command;
+          args = hermes.args or server.args or [ ];
+          env = hermes.env or server.env or { };
+        }
+    );
+
 in
 {
   inherit
@@ -288,5 +374,7 @@ in
     renderClaudeServer
     renderCodexServer
     renderGeminiServer
+    renderAntigravityServer
+    renderHermesServer
     ;
 }

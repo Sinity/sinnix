@@ -64,6 +64,11 @@ mkFeatureModule {
       internal = true;
       description = "Path to the generated Codex hooks derivation (for tests)";
     };
+    antigravityMcpConfigSource = lib.mkOption {
+      type = lib.types.path;
+      internal = true;
+      description = "Path to the generated Antigravity MCP configuration (for tests)";
+    };
   };
   meta.dotfiles = {
     configFile = {
@@ -141,6 +146,7 @@ mkFeatureModule {
         sharedSkillFarm
         codexSkillFarm
         geminiSettingsFile
+        antigravityMcpConfigFile
         ;
     in
     {
@@ -152,6 +158,7 @@ mkFeatureModule {
       sinnix.features.dev.mcp-servers.codexDeepseekConfigSource = codexDeepseekConfigFile;
       sinnix.features.dev.mcp-servers.codexLocalConfigSource = codexLocalConfigFile;
       sinnix.features.dev.mcp-servers.codexHooksSource = codexHooksFile;
+      sinnix.features.dev.mcp-servers.antigravityMcpConfigSource = antigravityMcpConfigFile;
       sinnix.persistence.home.directories = [
         {
           directory = ".local/share/codebase-memory-mcp";
@@ -261,6 +268,15 @@ mkFeatureModule {
               source = geminiSettingsFile;
               force = true;
             };
+            ".gemini/config/mcp_config.json" = {
+              source = antigravityMcpConfigFile;
+              force = true;
+            };
+            ".gemini/config/skills" = {
+              source = sharedSkillFarm;
+              force = true;
+            };
+            ".gemini/config/AGENTS.md".source = mkDotsFile "/claude/CLAUDE.md";
             ".local/bin/codebase-memory-mcp" = {
               executable = true;
               force = true;

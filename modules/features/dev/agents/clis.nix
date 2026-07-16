@@ -1,4 +1,4 @@
-# AI agent CLI wrappers (claude/codex/gemini/hermes), shared skills, and
+# AI agent CLI wrappers (claude/codex/gemini/agy/hermes), shared skills, and
 # per-agent runtime state. Wrapper-builder machinery lives in backends.nix.
 {
   mkFeatureModule,
@@ -13,6 +13,16 @@ mkFeatureModule {
     "agentTools"
   ];
   description = "AI agent CLIs, shared skills, and runtime state";
+  extraOptions.hermesConfigSource = lib.mkOption {
+    type = lib.types.path;
+    internal = true;
+    description = "Path to the generated default Hermes configuration (for tests)";
+  };
+  extraOptions.hermesProfileConfigSources = lib.mkOption {
+    type = lib.types.attrsOf lib.types.path;
+    internal = true;
+    description = "Paths to generated mode-specific Hermes configurations (for tests)";
+  };
   configFn =
     {
       config,
@@ -45,6 +55,7 @@ mkFeatureModule {
           python313
           ripgrep
           ffmpeg
+          portaudio
         ])
       );
 
@@ -60,7 +71,135 @@ mkFeatureModule {
       ] "/run/agenix/deepseek-api-key" config;
 
       jsonFormat = pkgs.formats.json { };
+      yamlFormat = pkgs.formats.yaml { };
       inherit (helpers.data) mcpRegistry;
+      hermesMcpServers = lib.mapAttrs mcpRegistry.renderHermesServer (
+        mcpRegistry.selectClientServersForProfile "evidence" "hermes"
+      );
+      hermesResearchMcpServers = lib.mapAttrs mcpRegistry.renderHermesServer (
+        mcpRegistry.selectClientServersForProfile "browser" "hermes"
+      );
+      hermesOrchestrateMcpServers = lib.mapAttrs mcpRegistry.renderHermesServer (
+        mcpRegistry.selectClientServersForProfile "orchestrate" "hermes"
+      );
+      mkHermesConfig =
+        {
+          name,
+          toolsets,
+          mcpServers ? hermesMcpServers,
+          reasoningEffort ? "medium",
+          delegation ? { },
+          voiceEnabled ? true,
+        }:
+        yamlFormat.generate "hermes-${name}-config.yaml" {
+          _config_version = 33;
+          model = {
+            default = "gpt-5.6-terra";
+            provider = "openai-codex";
+          };
+          fallback_providers = [
+            {
+              provider = "gemini";
+              model = "gemini-2.5-flash";
+            }
+          ];
+          terminal = {
+            backend = "local";
+            cwd = ".";
+            timeout = 180;
+            home_mode = "auto";
+          };
+          agent = {
+            max_turns = 100;
+            verify_on_stop = true;
+            reasoning_effort = reasoningEffort;
+          };
+          approvals.mode = "off";
+          memory = {
+            memory_enabled = true;
+            user_profile_enabled = true;
+            memory_char_limit = 8000;
+            user_char_limit = 4500;
+            nudge_interval = 10;
+            flush_min_turns = 6;
+          };
+          skills = {
+            creation_nudge_interval = 15;
+            external_dirs = [
+              "/home/${user}/.config/hermes/skills"
+              "/home/${user}/.hermes/skills"
+            ];
+          };
+          plugins.enabled = [ "observability/nemo_relay" ];
+          delegation = {
+            max_iterations = 100;
+            max_concurrent_children = 3;
+            max_spawn_depth = 1;
+          }
+          // delegation;
+          platform_toolsets.cli = toolsets;
+          mcp_servers = mcpServers;
+          voice = {
+            record_key = "ctrl+b";
+            max_recording_seconds = 120;
+            auto_tts = voiceEnabled;
+            beep_enabled = voiceEnabled;
+            silence_threshold = 200;
+            silence_duration = 1.2;
+          };
+          stt = {
+            enabled = voiceEnabled;
+            provider = "local";
+            local.model = "base";
+          };
+          tts = {
+            provider = "edge";
+            edge.voice = "en-US-AriaNeural";
+          };
+          updates = {
+            pre_update_backup = true;
+            backup_keep = 5;
+            non_interactive_local_changes = "stash";
+          };
+        };
+      hermesConfigFile = mkHermesConfig {
+        name = "default";
+        toolsets = [ "hermes-cli" ];
+      };
+      hermesResearchConfigFile = mkHermesConfig {
+        name = "research";
+        mcpServers = hermesResearchMcpServers;
+        toolsets = [
+          "web"
+          "browser"
+          "file"
+          "skills"
+          "todo"
+          "memory"
+          "session_search"
+          "code_execution"
+          "delegation"
+          "clarify"
+        ];
+        reasoningEffort = "high";
+        delegation = {
+          max_iterations = 60;
+          max_concurrent_children = 6;
+          max_spawn_depth = 1;
+        };
+        voiceEnabled = false;
+      };
+      hermesOrchestrateConfigFile = mkHermesConfig {
+        name = "orchestrate";
+        mcpServers = hermesOrchestrateMcpServers;
+        toolsets = [ "skills" "todo" "memory" "session_search" "clarify" ];
+        reasoningEffort = "high";
+        voiceEnabled = false;
+      };
+      hermesMirrorConfigFile = mkHermesConfig {
+        name = "mirror";
+        toolsets = [ "skills" "todo" "memory" "session_search" "clarify" "tts" ];
+      };
       claudeMcpServers = lib.mapAttrs mcpRegistry.renderClaudeServer (
         mcpRegistry.selectClientServersForProfile "full" "claude"
       );
@@ -118,6 +257,12 @@ mkFeatureModule {
         ;
     in
     {
+      sinnix.features.dev.agentTools.hermesConfigSource = hermesConfigFile;
+      sinnix.features.dev.agentTools.hermesProfileConfigSources = {
+        research = hermesResearchConfigFile;
+        orchestrate = hermesOrchestrateConfigFile;
+        mirror = hermesMirrorConfigFile;
+      };
       sinnix.persistence.home = {
         directories = [
           {
@@ -159,6 +304,7 @@ mkFeatureModule {
             scriptPkgs.sinnix-agent-scope-exec
             scriptPkgs.chatgpt-share-export
             scriptPkgs.verify-agent-topology
+            scriptPkgs.sinnix-agent-control-mcp
           ];
 
           programs.zsh = {
@@ -181,7 +327,11 @@ mkFeatureModule {
               codex-deepseek = "~/.local/bin/codex-deepseek";
               codex-local = "~/.local/bin/codex-local";
               gemini = "~/.local/bin/gemini";
+              agy = "~/.local/bin/agy-sinnix";
               hermes = "~/.local/bin/hermes";
+              hermes-research = "~/.local/bin/hermes-research";
+              hermes-orchestrate = "~/.local/bin/hermes-orchestrate";
+              hermes-mirror = "~/.local/bin/hermes-mirror";
               hermes-local = "~/.local/bin/hermes-local";
               hermes-acp = "~/.local/bin/hermes-acp";
               hermes-update = "~/.local/bin/hermes-update";
@@ -213,6 +363,24 @@ mkFeatureModule {
             mkdir -p $HOME/.config/claude
             ln -sfn .config/claude $HOME/.claude
             ln -sfn ${sinnixCfg.paths.dotsRoot}/claude/settings.json $HOME/.config/claude/settings.json
+          '';
+          home.activation.hermesConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+            mkdir -p "$HOME/.hermes"
+            cp ${hermesConfigFile} "$HOME/.hermes/config.yaml"
+            chmod 600 "$HOME/.hermes/config.yaml"
+
+            for profile in research orchestrate mirror; do
+              mkdir -p "$HOME/.hermes/profiles/$profile"
+              ln -sfn ../../auth.json "$HOME/.hermes/profiles/$profile/auth.json"
+              ln -sfn ../../.env "$HOME/.hermes/profiles/$profile/.env"
+              ln -sfn ../../SOUL.md "$HOME/.hermes/profiles/$profile/SOUL.md"
+            done
+            cp ${hermesResearchConfigFile} "$HOME/.hermes/profiles/research/config.yaml"
+            cp ${hermesOrchestrateConfigFile} "$HOME/.hermes/profiles/orchestrate/config.yaml"
+            cp ${hermesMirrorConfigFile} "$HOME/.hermes/profiles/mirror/config.yaml"
+            chmod 600 "$HOME/.hermes/profiles/research/config.yaml" \
+              "$HOME/.hermes/profiles/orchestrate/config.yaml" \
+              "$HOME/.hermes/profiles/mirror/config.yaml"
           '';
           # Codex/Gemini read the global instruction file directly; CLAUDE.md is
           # flat (no @-transclusion), so a symlink replaces the old render step
@@ -325,7 +493,28 @@ mkFeatureModule {
             force = true;
           };
 
+          # The vendor-managed ~/.local/bin/agy self-updates. Keep it as the
+          # canonical binary and route interactive shell use through this
+          # distinct wrapper so Antigravity jobs get the same agent.slice
+          # containment as the other terminal agents.
+          home.file.".local/bin/agy-sinnix" = {
+            text = ''
+              #!/usr/bin/env bash
+              set -euo pipefail
+              exec ${agentScopeExec} "$HOME/.local/bin/agy" "$@"
+            '';
+            executable = true;
+            force = true;
+          };
+
+          home.file.".config/hermes/skills" = {
+            source = sharedSkillFarm;
+            force = true;
+          };
           home.file.".local/bin/hermes" = mkHermesWrapper { };
+          home.file.".local/bin/hermes-research" = mkHermesWrapper { profile = "research"; };
+          home.file.".local/bin/hermes-orchestrate" = mkHermesWrapper { profile = "orchestrate"; };
+          home.file.".local/bin/hermes-mirror" = mkHermesWrapper { profile = "mirror"; };
           home.file.".local/bin/hermes-acp" = mkHermesWrapper {
             entrypoint = "hermes-acp";
           };
@@ -347,7 +536,7 @@ mkFeatureModule {
               git -C "$HERMES_INSTALL_DIR" pull --ff-only
               (
                 cd "$HERMES_INSTALL_DIR"
-                UV_PROJECT_ENVIRONMENT="$HERMES_INSTALL_DIR/venv" uv sync --extra all --locked
+                UV_PROJECT_ENVIRONMENT="$HERMES_INSTALL_DIR/venv" uv sync --extra all --extra voice --extra edge-tts --extra nemo-relay --locked
               )
               exec "$HERMES_INSTALL_DIR/venv/bin/hermes" --version
             '';
