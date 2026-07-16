@@ -674,6 +674,17 @@ squash-merges, non-empty body, specific subject, one-logical-change-per-PR.
 
 **Commit and push proactively within repo policy.** Commit each logical unit as it lands on a feature branch — don't wait to be asked. Push feature branches after verification so work is backed up and PRs can be opened or updated. For solo direct-master repos such as Sinnix and Lynchpin, committing and pushing `master` is allowed after local verification and deployment rules are satisfied. Do not push only when the user, repo, or current workflow explicitly says to hold.
 
+**Signing must be GitHub-verifiable, not merely cryptographically valid.**
+Before committing, confirm the effective committer identity is a verified
+GitHub identity and the configured signing key belongs to that identity. Never
+set a synthetic repository-local `user.name` or `user.email` for agent work;
+use co-author trailers for agent attribution. A good local `git verify-commit`
+result is insufficient when the signer cannot be bound to the recorded
+committer. For any history-signing rewrite, preserve author date, committer
+date, tree, message bytes (including PR/issue links), and parent topology in an
+old-to-new manifest, then audit GitHub's `verification.verified` result after
+publication.
+
 **Merging is part of the job — standing authorization.** These are solo-operated repos: agent-opened PRs have no human co-reviewer, so the merge gate is checks + triage, not a human click. Squash-merge your own PR (`gh pr merge --squash`) as soon as (a) required checks are green and (b) every substantive automated-review finding is triaged — actionable items fixed, false positives answered with a brief reply. Do not park green, triaged PRs "for review"; do not ask permission to merge them. Hold a merge only when the user, repo policy, or the PR body explicitly says hold, or a red substantive gate remains. This authorization is durable and applies in auto mode.
 
 **Atomicity test:** can you write a subject without "and"? If you need "and", split. Err toward more commits — you can always squash before PR.
