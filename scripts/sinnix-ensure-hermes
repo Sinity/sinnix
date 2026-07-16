@@ -19,10 +19,10 @@ if [ ! -d "$HERMES_INSTALL_DIR/.git" ]; then
   git clone --depth=1 https://github.com/NousResearch/hermes-agent.git "$HERMES_INSTALL_DIR"
 fi
 
-if [ ! -x "$HERMES_INSTALL_DIR/venv/bin/hermes" ]; then
+if [ ! -x "$HERMES_INSTALL_DIR/venv/bin/hermes" ] || ! "$HERMES_INSTALL_DIR/venv/bin/python" -c 'import nemo_relay' >/dev/null 2>&1; then
   (
     cd "$HERMES_INSTALL_DIR"
-    UV_PROJECT_ENVIRONMENT="$HERMES_INSTALL_DIR/venv" uv sync --extra all --locked
+    UV_PROJECT_ENVIRONMENT="$HERMES_INSTALL_DIR/venv" uv sync --extra all --extra voice --extra edge-tts --extra nemo-relay --locked
   )
 fi
 

@@ -49,9 +49,9 @@ mkServiceModule {
     {
       services.transmission = {
         enable = true;
-        # AirVPN owns the peer ingress rule on its WireGuard interface. Do not
-        # let the upstream module open the peer port globally on every network.
-        openPeerPorts = false;
+        # The router forwards 51413/TCP+UDP to this host, so admit the matching
+        # peer traffic through the workstation firewall without a VPN tunnel.
+        openPeerPorts = true;
         package = pkgs.transmission_4;
         user = username;
         group = "users";
@@ -69,6 +69,10 @@ mkServiceModule {
           download-queue-size = 20;
           queue-stalled-enabled = false;
           seed-queue-enabled = false;
+          peer-port = 51413;
+          # The gateway owns the static port forward; do not also request an
+          # automatic UPnP/NAT-PMP mapping from Transmission.
+          port-forwarding-enabled = false;
           rpc-enabled = true;
           rpc-bind-address = "127.0.0.1";
           rpc-port = 9091;

@@ -22,6 +22,7 @@
         "polylogue-cli"
         "polylogue-python"
         "polylogued"
+        "sinnix-agent-control-mcp"
         "sinnix-agent-gateway"
         "sinnix-observe"
         "verify-agent-topology"

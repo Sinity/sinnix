@@ -16,6 +16,7 @@ let
     selectClientServersForProfile
     renderCodexServer
     renderGeminiServer
+    renderAntigravityServer
     ;
   mkCodexProfileFile =
     profile:
@@ -83,6 +84,11 @@ let
       mcpServers = lib.mapAttrs renderGeminiServer (selectClientServersForProfile "full" "gemini");
     }
   );
+  antigravityMcpConfigFile = jsonFormat.generate "antigravity-mcp-config.json" {
+    mcpServers = lib.mapAttrs renderAntigravityServer (
+      selectClientServersForProfile "full" "antigravity"
+    );
+  };
 in
 {
   inherit
@@ -96,5 +102,6 @@ in
     sharedSkillFarm
     codexSkillFarm
     geminiSettingsFile
+    antigravityMcpConfigFile
     ;
 }

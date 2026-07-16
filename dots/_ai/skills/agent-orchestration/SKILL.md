@@ -40,6 +40,22 @@ it contains the verified commands, auth rules, and mode constraints.
 9. Inspect results and diffs independently before applying or merging agent
    work. Worker verification is necessary, not sufficient.
 
+## MCP Control Plane
+
+When an MCP-capable client is available, prefer `agent-control` over direct
+shell invocation. It exposes only `start_agent_job`, `list_agent_jobs`,
+`agent_job_status`, `read_agent_job_output`, and `interrupt_agent_job`.
+
+- Start work with an explicit backend, absolute workdir, bounded prompt, model,
+  and reasoning effort where applicable.
+- Persist and use only the returned `job_id`; do not control jobs by PID,
+  process title, terminal window, or arbitrary artifact path.
+- Use a second native job for independent semantic certification when the
+  implementation has meaningful risk.
+- The MCP adapter starts the existing attested runner asynchronously. It is the
+  preferred agent-facing interface; the shell helpers below remain the operator
+  and implementation layer.
+
 ## Helpers
 
 - `scripts/run_agent_prompt.sh` runs one prompt through Claude, Codex, or

@@ -43,7 +43,7 @@
     "ask": [],
     "defaultMode": "auto"
   },
-  "model": "claude-fable-5[1m]",
+  "model": "sonnet",
   "hooks": {
     "PreToolUse": [
       {
@@ -65,6 +65,15 @@
             "timeout": 3
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "polylogue-hook PreToolUse --provider claude-code",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -74,6 +83,11 @@
             "type": "command",
             "command": "~/.claude/hooks/posttooluse-agent-event.sh",
             "timeout": 3
+          },
+          {
+            "type": "command",
+            "command": "polylogue-hook PostToolUse --provider claude-code",
+            "timeout": 5
           }
         ]
       }
@@ -95,6 +109,11 @@
             "type": "command",
             "command": "~/.local/bin/sinnix-mcp-sweep --orphans-only --quiet",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "polylogue-hook Stop --provider claude-code",
+            "timeout": 5
           }
         ]
       }
@@ -126,6 +145,22 @@
             "type": "command",
             "command": "~/.claude/hooks/sessionstart-beads-prime.sh",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "polylogue-hook SessionStart --provider claude-code",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "polylogue-hook UserPromptSubmit --provider claude-code",
+            "timeout": 5
           }
         ]
       }
@@ -173,6 +208,7 @@
   "effortLevel": "high",
   "tui": "fullscreen",
   "skipDangerousModePermissionPrompt": true,
+  "skipWorkflowUsageWarning": true,
   "switchModelsOnFlag": false,
   "skipAutoPermissionPrompt": true
 }
