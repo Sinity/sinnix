@@ -28,17 +28,36 @@ Every pack should have a manifest stating:
 - privacy/account boundary;
 - checksum when the pack will move between systems.
 
-Prefer the smallest pack that preserves the mission's dependency graph:
+Provide all relevant evidence the executor can use within the authorized
+privacy and upload boundaries. Do not assume uploaded attachment bytes consume
+the model's active prompt context or token window: attachment retrieval and
+accounting are executor-specific. For ChatGPT Pro-style browser agents, a full
+repository snapshot, complete design corpus, tracker export, generated
+evidence, and focused navigation index may coexist when they help the mission.
+Omit evidence for a demonstrated provider limit, privacy boundary, upload
+failure, or irrelevance -- never merely to "save context."
 
-- targeted source, tests, schemas, and design records for a bounded change;
-- a tracked-file repository snapshot for architecture-wide work;
+Choose representations for navigability rather than artificial scarcity:
+
+- a tracked-file repository snapshot whenever broader source may resolve
+  dependencies or prevent invented APIs;
+- targeted source, tests, schemas, design records, and a searchable index that
+  direct the executor to the likely working set without withholding the rest;
 - a git bundle only when history is part of the question;
 - live data only when necessary, minimized, and explicitly authorized.
 
-Do not attach several redundant representations of the same repository. Large
-XML concats, full chat archives, or unrelated historical packs often encourage
-shallow summarization. Put the actual mission in the prompt, not at the end of
-an attachment.
+Redundant representations are acceptable when they serve different retrieval
+needs (for example, a full source archive plus a focused Repomix index). Avoid
+duplicates only when they create upload failures, ambiguity about authority,
+or needless packaging/integration work. Large generated evidence and full chat
+archives are valid inputs when relevant; pair them with a manifest and explicit
+inspection instructions. Put the actual mission in the prompt, not at the end
+of an attachment.
+
+If a provider demonstrably counts attachments against a model token limit or
+cannot retrieve them reliably, record that as a provider-specific constraint
+and prepare a focused pack for that provider. Do not generalize the constraint
+to other browser agents.
 
 For code that is changing concurrently, package a named commit plus a separate
 working-tree patch, or package a clean integration branch. Never call an
@@ -107,7 +126,8 @@ summarize what changed. Do not restart with a vague “try again.”
 
 - Is the real job visible in the first paragraph?
 - Can a human understand the prompt without knowing the tracker id?
-- Is the context fresh, identified, and no broader than useful?
+- Is the evidence complete enough to prevent avoidable guessing, with a clear
+  manifest and navigation path through large attachments?
 - Are executor limitations explicit and verification claims honest?
 - Does the requested output include both substantive explanation and an
   integration artifact when appropriate?

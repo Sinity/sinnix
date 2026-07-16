@@ -68,7 +68,8 @@ Identify who will run it and what that executor can actually do:
 - command execution and test verification;
 - network or source access;
 - attachment input/output support;
-- context window and likely duration;
+- context window, attachment retrieval/accounting semantics, and likely
+  duration (do not assume attachment bytes are injected into active context);
 - authority to mutate code, trackers, branches, or external systems.
 
 Never ask a browser-only model to claim tests passed. Never give a read-only
@@ -82,9 +83,15 @@ naming files, APIs, or acceptance criteria. State the authority order when
 stale notes or generated packets may conflict with live code.
 
 For external agents, record context freshness (commit, date, source paths) and
-use a targeted pack by default. A whole repository is appropriate only when the
-mission genuinely crosses it or the executor can navigate it without shallow
-summarization.
+provide all relevant authorized evidence by default. For browser agents whose
+attachments are retrieved separately from active prompt context, a whole
+repository plus complete design/tracker/evidence corpora is appropriate even
+for a bounded mission; add a focused index and explicit inspection route for
+navigability rather than withholding potentially useful inputs. Use a smaller
+pack only for a demonstrated provider token/upload/retrieval constraint,
+privacy boundary, or genuine irrelevance. Provider-specific limitations (for
+example, an AI Studio attachment-token cap) must not become a generic handoff
+rule.
 
 ### 4. Build the prompt mission-first
 
