@@ -22,6 +22,15 @@ mkFeatureModule {
         csvkit
         httpie
         websocat
+        # CI workflow authoring, validation, and local reproduction.
+        circleci-cli
+        act
+        actionlint
+        yamllint
+        hadolint
+        # Pre-push security and dependency/image scanning.
+        gitleaks
+        trivy
         tokei
         ast-grep
         mprocs
