@@ -131,7 +131,11 @@ mkServiceModule {
       ...
     }:
     let
-      polyloguePkg = inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.default;
+      # 2026-07-21 (polylogue-dcz5): free-threaded 3.14t build so daemon
+      # thread-parse fan-outs actually run parallel (GIL writer-commit
+      # interference ~5000x on 3.13 vs ~0 on 3.14t). Rollback = repin
+      # `.default`.
+      polyloguePkg = inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.polylogue-freethreaded;
       dbRoot = "${config.sinnix.paths.realmRoot}/db/polylogue";
       # 2026-07-10: moved off /persist (worn MX500) to /realm; still inside
       # the /realm btrbk→borg coverage.
@@ -211,6 +215,10 @@ mkServiceModule {
         programs.polylogued = {
           enable = true;
           package = polyloguePkg;
+          # The daemon runs the free-threaded build; the PATH CLI stays the
+          # standard-CPython polylogue-cli wrapper — without this the two
+          # collide on bin/polylogue in the home profile.
+          installPackage = false;
           autoStart = cfg.daemon.autoStart;
 
           settings = {

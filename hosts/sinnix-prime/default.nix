@@ -71,7 +71,11 @@
     };
     polylogue = {
       enable = true;
-      embedding.enable = true;
+      # 2026-07-21 (polylogue-dcz5/04kl): embedding OFF until the 777K-vector
+      # content-hash rescue lands — the rebuilt embeddings tier is empty and
+      # daemon catch-up would re-embed the whole corpus through the paid
+      # Voyage API. Re-enable after polylogue-04kl executes.
+      embedding.enable = false;
       daemon.autoStart = true;
     };
     machine-telemetry.enable = true;
