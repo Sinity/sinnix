@@ -71,6 +71,9 @@
     };
     polylogue = {
       enable = true;
+      # The promoted archive lives on the realm NVMe volume, not in the
+      # impermanent home-directory default.
+      dataDir = "/realm/db/polylogue";
       # 2026-07-21 (polylogue-dcz5/04kl): embedding OFF until the 777K-vector
       # content-hash rescue lands — the rebuilt embeddings tier is empty and
       # daemon catch-up would re-embed the whole corpus through the paid
