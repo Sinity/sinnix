@@ -241,10 +241,17 @@ mkServiceModule {
           };
         };
 
-        systemd.user.services.polylogued.Service = lib.sinnix.mkRuntimeServiceConfig {
-          runtimeInventory = config.sinnix.runtime.inventory;
-          unit = "polylogued.service";
-        };
+        systemd.user.services.polylogued.Service =
+          (lib.sinnix.mkRuntimeServiceConfig {
+            runtimeInventory = config.sinnix.runtime.inventory;
+            unit = "polylogued.service";
+          })
+          // {
+            # The upstream unit does not pass its rendered TOML path to the
+            # daemon process. Keep the service's startup-bound archive root
+            # aligned with the generated user configuration.
+            Environment = [ "POLYLOGUE_ARCHIVE_ROOT=${cfg.dataDir}" ];
+          };
 
         systemd.user.services.polylogue-sqlite-backup = {
           Unit = {
