@@ -50,9 +50,10 @@ in
               type = types.str;
               default = "${config.dataRoot}/exports";
             };
-            librariesRoot = mkOption {
+            selfRoot = mkOption {
               type = types.str;
-              default = "${config.dataRoot}/libraries";
+              default = "${config.dataRoot}/self";
+              description = "Personal-identity records: genome, finance, private, code-archives, photos. Renamed from librariesRoot (2026-07-27) — the old name conflated curated reference material (which lives at mediaRoot/books) with records that are about the operator, not a reference collection.";
             };
             mediaRoot = mkOption {
               type = types.str;
