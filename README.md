@@ -94,6 +94,11 @@ Sinnix runs the host-facing parts of a broader local evidence system:
 - **Machine telemetry**, ActivityWatch, shell, and terminal capture preserve
   the host context those systems need.
 
+This composition is operational rather than a shared database or merged
+authority plane. Each project retains its own storage, provenance, and product
+boundaries; Sinnix owns the service wiring, resource policy, paths, and recovery
+contracts between them.
+
 The repository owns deployment and capture wiring, not the private datasets.
 Raw captures, exports, personal notes, generated analyses, and secret payloads
 live outside the checkout.
@@ -154,9 +159,9 @@ heavy commands bypass the containment and concurrency policy encoded here.
 
 ## Further reading
 
-- [`docs/agent-gateway.md`](docs/agent-gateway.md) — trusted repository and
+- [`docs/agent-gateway.md`](docs/agent-gateway.md) - trusted repository and
   command gateway for coding agents.
-- [`docs/ethereal-bootstrap.md`](docs/ethereal-bootstrap.md) — destructive
+- [`docs/ethereal-bootstrap.md`](docs/ethereal-bootstrap.md) - destructive
   first install and steady-state deployment of the headless replica.
 
 Editing and publication rules live in [`CLAUDE.md`](CLAUDE.md);
