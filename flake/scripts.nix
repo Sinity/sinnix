@@ -173,13 +173,17 @@ let
       };
     };
 
-    # polylogue's own postFixup already wraps all CLI binaries and the api-python
-    # interpreter with PYTHONPATH/PYTHONHOME/… unset. Use symlink trees to expose
-    # only the intended commands per package.
+    # polylogue's own postFixup wraps polylogue/polylogued/polylogue-mcp with
+    # PYTHONPATH/PYTHONHOME/… unset (it does NOT cover polylogue-hook, which
+    # ships as an unwrapped console_scripts entry point — a narrower version
+    # of the same leak class as polylogue-xikl, since hook subprocesses run
+    # from arbitrary agent-devshell environments). Use symlink trees to
+    # expose only the intended commands per package.
     polylogue-cli = pkgs.runCommand "polylogue-cli" { } ''
       mkdir -p "$out/bin"
       ln -s "${polylogueSrc}/bin/polylogue" "$out/bin/polylogue"
       ln -s "${polylogueSrc}/bin/polylogue-mcp" "$out/bin/polylogue-mcp"
+      ln -s "${polylogueSrc}/bin/polylogue-hook" "$out/bin/polylogue-hook"
     '';
 
     polylogue-python = pkgs.runCommand "polylogue-python" { } ''
