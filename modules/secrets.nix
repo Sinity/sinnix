@@ -72,6 +72,7 @@ let
     "configstore-update-notifier".exportEnv = false;
     "factorio-token".exportEnv = false;
     "wifi-psk".exportEnv = false;
+    "pypi-recovery-codes".exportEnv = false;
   };
 
   secretSpecs = lib.mapAttrs' (filename: _: {
