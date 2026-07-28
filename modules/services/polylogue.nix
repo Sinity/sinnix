@@ -245,6 +245,20 @@ mkServiceModule {
           (lib.sinnix.mkRuntimeServiceConfig {
             runtimeInventory = config.sinnix.runtime.inventory;
             unit = "polylogued.service";
+            # 2026-07-28: the shared resource class's 2G MemoryMax was
+            # observed live-thrashing (memory.events max counter at 306K+
+            # within 35 minutes post-restart, MemoryCurrent pinned exactly at
+            # MemoryMax) against a 36GB/5-tier archive with ~4.9M blocks --
+            # every ingest/status-component read was stalling in
+            # folio_wait_bit_common (page reclaim under cgroup memory
+            # pressure), not a code bug. Overriding just this unit rather
+            # than the shared class, matching the same order of magnitude
+            # already used for polylogue-sqlite-backup (8G/12G) which
+            # touches comparable data volume.
+            overrides = {
+              MemoryHigh = lib.mkForce "6G";
+              MemoryMax = lib.mkForce "8G";
+            };
           })
           // {
             # The upstream unit does not pass its rendered TOML path to the
