@@ -296,11 +296,26 @@ mkServiceModule {
         };
 
         systemd.user.timers.polylogue-sqlite-backup = {
-          Unit.Description = "Weekly Polylogue SQLite backup";
+          Unit.Description = "Daily Polylogue SQLite backup";
           Timer = {
-            OnCalendar = "Sun 04:35:00";
+            # 2026-07-29 (polylogue-2a6d): /realm/db/polylogue lives on a
+            # nested Btrfs subvolume (created 2026-07-06 specifically so
+            # SQLite WAL churn is excluded from the parent /realm btrbk
+            # snapshots — see hosts/sinnix-prime/storage.nix's
+            # polylogueDbRoot comment), which also makes it invisible to
+            # borgbackup-job-realm's snapshot-based drain. This job is the
+            # actual coverage path: it reads the live .db files directly
+            # and stages compressed copies under /realm/staging/
+            # polylogue-sqlite/, an ordinary directory the realm Borg job
+            # does capture. A weekly cadence with Persistent=false left up
+            # to 7 days of RPO on user.db (irreplaceable) and source.db
+            # (rebuild-root) with no catch-up after a missed run — far
+            # wider than the daily cadence used for the same failure class
+            # elsewhere (borgbackup-job-sinex-blobs, machine-telemetry-
+            # sqlite-backup). Tightened to daily + Persistent=true to match.
+            OnCalendar = "*-*-* 04:35:00";
             RandomizedDelaySec = "45min";
-            Persistent = false;
+            Persistent = true;
           };
           Install.WantedBy = [ "timers.target" ];
         };
