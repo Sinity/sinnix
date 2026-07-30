@@ -140,13 +140,24 @@ mkServiceModule {
       # 2026-07-10: moved off /persist (worn MX500) to /realm; still inside
       # the /realm btrbk→borg coverage.
       backupRoot = "/realm/staging/polylogue-sqlite";
+      # Ordered most-irreplaceable first. A run that dies partway (the 2h
+      # TimeoutStartSec, an OOM, a reboot) then still leaves the tiers that
+      # cannot be rebuilt covered. The 2026-07-30 failure did the opposite:
+      # alphabetical order spent the whole window on the two large derived
+      # tiers and was killed before reaching source.db, so the run following a
+      # full index rebuild -- exactly when a durable-tier snapshot matters
+      # most -- captured no durable tier at all.
+      #
+      # `daemon_events.db` is deliberately absent: it has been a 0-byte file
+      # with no tables since 2026-07-17 (daemon events live in ops.db), and
+      # backing it up produced a 71-byte artifact every run that reads as
+      # coverage while covering nothing.
       dbNames = [
-        "daemon_events.db"
-        "embeddings.db"
-        "index.db"
-        "ops.db"
-        "source.db"
         "user.db"
+        "source.db"
+        "index.db"
+        "embeddings.db"
+        "ops.db"
       ];
       backupScript = pkgs.writeShellApplication {
         name = "polylogue-sqlite-backup";
@@ -177,11 +188,24 @@ mkServiceModule {
             final=${lib.escapeShellArg backupRoot}/"$stem-$stamp.sqlite.zst"
 
             cleanup() {
-              rm -f "$raw_tmp" "$zst_tmp"
+              rm -f "$raw_tmp" "$raw_tmp-journal" "$raw_tmp-wal" "$zst_tmp"
             }
             trap cleanup EXIT
 
-            sqlite3 "$source" ".backup '$raw_tmp'"
+            # `VACUUM INTO`, not `.backup`. The sqlite3 backup API restarts the
+            # copy from the beginning whenever the source is written mid-copy,
+            # so against a busy archive it does not merely run slowly -- it can
+            # livelock, rewriting the same partial copy indefinitely. Observed
+            # 2026-07-30: this step sat for the full 2h timeout on source.db
+            # while a full index rebuild was writing, was killed, and had
+            # written 1.5 TB to disk for a database of 1.7 GB compressed.
+            #
+            # `VACUUM INTO` takes one read transaction instead. Under WAL that
+            # is a stable snapshot, so a concurrent writer cannot force a
+            # restart: it completes in a single pass, or fails outright. It also
+            # emits a compacted database rather than a page-for-page copy.
+            rm -f "$raw_tmp"
+            sqlite3 "$source" "VACUUM INTO '$raw_tmp'"
             chmod 0600 "$raw_tmp"
             zstd -T1 -q -f "$raw_tmp" -o "$zst_tmp"
             chmod 0600 "$zst_tmp"
