@@ -51,7 +51,7 @@ check_root /outer-realm \
 
 # /realm/data level-1 manifest (personal lake only).
 check_root /realm/data \
-  captures exports libraries knowledgebase derived secrets INVENTORY.md
+  captures exports self knowledgebase derived secrets INVENTORY.md
 
 if [ "$status" -eq 0 ]; then
   echo "lake-lint: all roots match taxonomy"
