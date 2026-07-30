@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- SLOT: title -->
+<title>Report Title — YYYY-MM-DD</title>
+<style>
+:root{
+  --bg:#f6f7f9; --panel:#ffffff; --ink:#1a2129; --muted:#5b6773;
+  --line:#dde3e9; --accent:#2563eb; --accent-ink:#ffffff;
+  --ok:#0f7b46; --ok-bg:#e2f5eb; --warn:#8a5a00; --warn-bg:#fdf0d3;
+  --bad:#a01c1c; --bad-bg:#fbe4e4; --info:#1d4ed8; --info-bg:#e3ebfd;
+  --todo:#6b21a8; --todo-bg:#f1e6fb; --code-bg:#eef1f4;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#12161b; --panel:#1a2027; --ink:#e6ebf0; --muted:#94a1ad;
+  --line:#2b333c; --accent:#5b8def; --accent-ink:#0d1117;
+  --ok:#4cc98a; --ok-bg:#12301f; --warn:#e2b93b; --warn-bg:#33290e;
+  --bad:#ef7070; --bad-bg:#391717; --info:#7ea6f4; --info-bg:#16223b;
+  --todo:#c793ef; --todo-bg:#2a1738; --code-bg:#232a32;
+}}
+:root[data-theme="light"]{color-scheme:light}
+:root[data-theme="dark"]{color-scheme:dark}
+:root[data-theme="dark"]{
+  --bg:#12161b; --panel:#1a2027; --ink:#e6ebf0; --muted:#94a1ad;
+  --line:#2b333c; --accent:#5b8def; --accent-ink:#0d1117;
+  --ok:#4cc98a; --ok-bg:#12301f; --warn:#e2b93b; --warn-bg:#33290e;
+  --bad:#ef7070; --bad-bg:#391717; --info:#7ea6f4; --info-bg:#16223b;
+  --todo:#c793ef; --todo-bg:#2a1738; --code-bg:#232a32;
+}
+:root[data-theme="light"]{
+  --bg:#f6f7f9; --panel:#ffffff; --ink:#1a2129; --muted:#5b6773;
+  --line:#dde3e9; --accent:#2563eb; --accent-ink:#ffffff;
+  --ok:#0f7b46; --ok-bg:#e2f5eb; --warn:#8a5a00; --warn-bg:#fdf0d3;
+  --bad:#a01c1c; --bad-bg:#fbe4e4; --info:#1d4ed8; --info-bg:#e3ebfd;
+  --todo:#6b21a8; --todo-bg:#f1e6fb; --code-bg:#eef1f4;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
+header.page{position:sticky;top:0;z-index:5;background:var(--panel);
+  border-bottom:1px solid var(--line);padding:.7rem 1.2rem;
+  display:flex;flex-wrap:wrap;align-items:baseline;gap:.6rem}
+header.page h1{font-size:1.15rem;margin:0}
+header.page .spacer{flex:1}
+.chip{display:inline-block;padding:.1rem .55rem;border:1px solid var(--line);
+  border-radius:99px;font-size:.78rem;color:var(--muted);background:var(--bg)}
+button.theme{border:1px solid var(--line);background:var(--bg);color:var(--ink);
+  border-radius:.4rem;padding:.15rem .6rem;cursor:pointer;font-size:.8rem}
+.layout{display:grid;grid-template-columns:15rem minmax(0,1fr);
+  max-width:78rem;margin:0 auto;gap:1.2rem;padding:1.2rem}
+@media(max-width:60rem){.layout{grid-template-columns:minmax(0,1fr)}nav#toc{display:none}}
+nav#toc{position:sticky;top:3.6rem;align-self:start;font-size:.85rem;
+  border-right:1px solid var(--line);padding-right:.8rem;max-height:85vh;overflow:auto}
+nav#toc a{display:block;color:var(--muted);text-decoration:none;padding:.14rem 0}
+nav#toc a.h3{padding-left:.9rem;font-size:.8rem}
+nav#toc a:hover{color:var(--accent)}
+main{min-width:0}
+section{background:var(--panel);border:1px solid var(--line);border-radius:.6rem;
+  padding:1rem 1.2rem;margin-bottom:1.1rem}
+h2{font-size:1.05rem;margin:.1rem 0 .6rem}
+h3{font-size:.93rem;margin:1rem 0 .4rem}
+p{margin:.4rem 0}
+a{color:var(--accent)}
+code,kbd{background:var(--code-bg);border-radius:.3rem;padding:.08rem .35rem;
+  font:.86em ui-monospace,SFMono-Regular,Menlo,monospace}
+pre{background:var(--code-bg);padding:.7rem .9rem;border-radius:.5rem;
+  overflow-x:auto}
+pre code{background:none;padding:0}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(9.5rem,1fr));
+  gap:.7rem;margin:.4rem 0 .8rem}
+.tile{border:1px solid var(--line);border-radius:.55rem;padding:.55rem .8rem;background:var(--bg)}
+.tile .n{font-size:1.35rem;font-weight:650;display:block}
+.tile .l{font-size:.76rem;color:var(--muted)}
+.badge{display:inline-block;font-size:.72rem;font-weight:600;letter-spacing:.02em;
+  padding:.08rem .5rem;border-radius:99px}
+.ok{color:var(--ok);background:var(--ok-bg)} .warn{color:var(--warn);background:var(--warn-bg)}
+.bad{color:var(--bad);background:var(--bad-bg)} .info{color:var(--info);background:var(--info-bg)}
+.todo{color:var(--todo);background:var(--todo-bg)}
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:.88rem}
+th,td{border-bottom:1px solid var(--line);text-align:left;padding:.35rem .55rem;vertical-align:top}
+th{color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;
+  cursor:pointer;user-select:none;white-space:nowrap}
+th.nosort{cursor:default}
+tr:hover td{background:color-mix(in srgb, var(--accent) 6%, transparent)}
+details{border:1px solid var(--line);border-radius:.5rem;padding:.45rem .8rem;margin:.45rem 0;background:var(--bg)}
+summary{cursor:pointer;font-weight:600;font-size:.9rem}
+details[open]{padding-bottom:.6rem}
+input.filter{width:100%;max-width:24rem;margin:.2rem 0 .5rem;padding:.3rem .6rem;
+  border:1px solid var(--line);border-radius:.4rem;background:var(--bg);color:var(--ink)}
+footer{color:var(--muted);font-size:.78rem;text-align:center;padding:1rem}
+</style>
+</head>
+<body>
+<header class="page">
+  <!-- SLOT: header -->
+  <h1>Report Title</h1>
+  <span class="chip">YYYY-MM-DD</span>
+  <span class="chip">author / actor</span>
+  <span class="spacer"></span>
+  <button class="theme" onclick="tgl()">◐ theme</button>
+</header>
+
+<div class="layout">
+<nav id="toc" aria-label="contents"></nav>
+<main>
+
+<section id="summary">
+  <h2>Summary</h2>
+  <!-- SLOT: stat tiles -->
+  <div class="tiles">
+    <div class="tile"><span class="n">42</span><span class="l">things counted</span></div>
+    <div class="tile"><span class="n">7</span><span class="l">actions taken</span></div>
+  </div>
+  <p><!-- SLOT: one-paragraph lead --></p>
+</section>
+
+<section id="findings">
+  <h2>Findings</h2>
+  <input class="filter" placeholder="filter rows…" oninput="flt(this,'t1')">
+  <div class="tablewrap">
+  <table id="t1">
+    <thead><tr><th>Item</th><th>Size</th><th class="nosort">Verdict</th><th>Evidence</th></tr></thead>
+    <tbody>
+      <!-- SLOT: rows. Size cells: put sortable number in data-v. -->
+      <tr><td><code>/some/path</code></td><td data-v="204">204G</td>
+          <td><span class="badge warn">needs-judgment</span></td><td>why</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <details><summary>Method / caveats</summary>
+    <p><!-- SLOT --></p>
+  </details>
+</section>
+
+<!-- SLOT: more sections -->
+
+</main>
+</div>
+<footer><!-- SLOT: provenance line — generated by X on Y from Z --></footer>
+
+<script>
+/* theme toggle */
+function tgl(){const r=document.documentElement,
+  d=(r.dataset.theme||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'))==='dark';
+  r.dataset.theme=d?'light':'dark'}
+/* auto-TOC from h2/h3 */
+(()=>{const t=document.getElementById('toc');if(!t)return;
+document.querySelectorAll('main h2, main h3').forEach(h=>{
+  const s=h.closest('section')||h;if(!h.id)h.id=(h.textContent||'').trim().toLowerCase()
+    .replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+  const a=document.createElement('a');a.href='#'+(h.tagName==='H2'&&s.id?s.id:h.id);
+  a.textContent=h.textContent;if(h.tagName==='H3')a.className='h3';t.appendChild(a)})})();
+/* sortable tables: click th (data-v overrides cell text; class nosort skips) */
+document.querySelectorAll('table').forEach(tb=>{
+  tb.querySelectorAll('th:not(.nosort)').forEach((th,i)=>th.addEventListener('click',()=>{
+    const dir=th.dataset.d=th.dataset.d==='a'?'d':'a';
+    const val=td=>td.dataset.v!==undefined?+td.dataset.v:td.textContent.trim();
+    [...tb.tBodies[0].rows].sort((r1,r2)=>{const a=val(r1.cells[i]),b=val(r2.cells[i]);
+      const c=(typeof a=='number'&&typeof b=='number')?a-b:String(a).localeCompare(String(b));
+      return dir==='a'?c:-c}).forEach(r=>tb.tBodies[0].appendChild(r))})))});
+/* row filter */
+function flt(inp,id){const q=inp.value.toLowerCase();
+  document.querySelectorAll('#'+id+' tbody tr').forEach(r=>
+    r.style.display=r.textContent.toLowerCase().includes(q)?'':'none')}
+</script>
+</body>
+</html>
