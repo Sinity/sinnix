@@ -76,7 +76,10 @@ mkFeatureModule {
                 input-default-bindings = "no";
                 profile = "normal";
                 fs = true;
-                force-window = "yes";
+                # No window for audio-only playback: with force-window=yes an
+                # audio file opened a fullscreen black window ("screen blank").
+                # Video files still open a window when the video track loads.
+                force-window = "no";
                 hwdec = "no";
                 video-sync = "display-resample";
                 drm-vrr-enabled = "no";
