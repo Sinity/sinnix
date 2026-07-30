@@ -10,6 +10,7 @@
   "evidence-harness"
   "greedy-batching"
   "grilling"
+  "html-report"
   "lynchpin"
   "meta"
   "polylogue"
