@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: On-demand control plane for local AI services (list/status/start/stop/logs)
+# runtimeInputs: bash coreutils systemd curl gnugrep gawk gnused jq
+set -euo pipefail
+
+export LC_ALL=C
+
+# Registry: name|unit|port|probe-path|description
+# Keep in sync with modules/services/*.nix (ports are module defaults).
+REGISTRY="$(cat <<'EOF'
+whisper|whisper-server|8090|/|whisper.cpp STT server (CUDA, large-v3-turbo)
+tts|podman-openedai-speech|8000|/v1/models|OpenedAI-Speech TTS (Piper + XTTS, container)
+ollama|ollama|11434|/api/tags|Ollama LLM/VLM hub (CUDA)
+litellm|litellm|4000|/health/liveliness|LiteLLM gateway (Anthropic<->OpenAI, fronts Ollama)
+llama-cpp|llama-cpp|8081|/health|llama.cpp HTTP server (CUDA, GGUF)
+koboldcpp|koboldcpp|5001|/api/v1/info|koboldcpp all-in-one (text/vision/SD, GGUF)
+comfyui|podman-comfyui|8188|/system_stats|ComfyUI image/video generation (container)
+musicgen|podman-musicgen|8010|/|MusicGen/Bark text-to-audio (container)
+ocr|podman-ocr|8020|/|OCR / document understanding (marker-api, container)
+open-webui|open-webui|8080|/health|Open WebUI chat frontend (fronts Ollama)
+EOF
+)"
+
+usage() {
+  cat <<'EOF'
+usage: sinnix-ai <command> [args]
+
+commands:
+  list                 All AI services: state, port, autostart, description
+  status [name]        Detail for one service (or GPU + active summary)
+  start <name>...      Start service(s) (sudo systemctl start)
+  stop <name>...       Stop service(s) and free VRAM
+  logs <name> [-n N]   Recent journal for a service (default 50 lines)
+  gpu                  VRAM snapshot (nvidia-smi)
+
+Services are on-demand by design: start them when needed, stop them to
+reclaim VRAM. Registry lives in this script; ports are module defaults
+from sinnix modules/services/*.nix.
+EOF
+}
+
+lookup() {
+  local name="$1" line
+  line=$(grep -m1 "^${name}|" <<<"$REGISTRY" || true)
+  [[ -n "$line" ]] || { echo "unknown service: ${name} (see: sinnix-ai list)" >&2; exit 1; }
+  IFS='|' read -r REG_NAME REG_UNIT REG_PORT REG_PROBE REG_DESC <<<"$line"
+}
+
+unit_installed() { systemctl cat "$1" >/dev/null 2>&1; }
+
+unit_state() {
+  if ! unit_installed "$1"; then echo "not-installed"; return; fi
+  systemctl is-active "$1" 2>/dev/null || true
+}
+
+autostart_state() {
+  local wanted
+  wanted=$(systemctl show -p WantedBy --value "$1" 2>/dev/null || true)
+  if [[ -n "$wanted" ]]; then echo "boot"; else echo "on-demand"; fi
+}
+
+port_alive() {
+  curl -fsS -m 2 -o /dev/null "http://127.0.0.1:$1$2" 2>/dev/null && echo yes || echo no
+}
+
+cmd_list() {
+  printf '%-11s %-13s %-6s %-10s %s\n' NAME STATE PORT START DESCRIPTION
+  while IFS='|' read -r name unit port probe desc; do
+    [[ -n "$name" ]] || continue
+    local state astart="-"
+    state=$(unit_state "$unit")
+    [[ "$state" == "not-installed" ]] || astart=$(autostart_state "$unit")
+    printf '%-11s %-13s %-6s %-10s %s\n' "$name" "$state" "$port" "$astart" "$desc"
+  done <<<"$REGISTRY"
+}
+
+cmd_gpu() {
+  if command -v nvidia-smi >/dev/null; then
+    nvidia-smi --query-gpu=memory.used,memory.total,utilization.gpu --format=csv,noheader
+    nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader 2>/dev/null || true
+  else
+    echo "nvidia-smi not available" >&2
+  fi
+}
+
+cmd_status() {
+  if [[ $# -eq 0 ]]; then
+    echo "== GPU =="; cmd_gpu; echo; echo "== active AI services =="
+    cmd_list | awk 'NR==1 || $2=="active"'
+    return
+  fi
+  lookup "$1"
+  echo "service: $REG_NAME — $REG_DESC"
+  echo "unit:    $REG_UNIT ($(unit_state "$REG_UNIT"), $(autostart_state "$REG_UNIT"))"
+  echo "port:    127.0.0.1:$REG_PORT (responding: $(port_alive "$REG_PORT" "$REG_PROBE"))"
+  if unit_installed "$REG_UNIT"; then
+    systemctl status --no-pager -n 5 "$REG_UNIT" 2>/dev/null | sed -n '1,12p' || true
+  fi
+}
+
+cmd_start() {
+  [[ $# -ge 1 ]] || { usage; exit 1; }
+  local name
+  for name in "$@"; do
+    lookup "$name"
+    unit_installed "$REG_UNIT" || { echo "$name: unit $REG_UNIT not installed on this host (enable its sinnix module)" >&2; exit 1; }
+    echo "starting $REG_NAME ($REG_UNIT)..."
+    sudo systemctl start "$REG_UNIT"
+    local i
+    for i in $(seq 1 30); do
+      [[ "$(port_alive "$REG_PORT" "$REG_PROBE")" == yes ]] && break
+      sleep 1
+    done
+    echo "$REG_NAME: $(unit_state "$REG_UNIT"), port $REG_PORT responding: $(port_alive "$REG_PORT" "$REG_PROBE")"
+  done
+}
+
+cmd_stop() {
+  [[ $# -ge 1 ]] || { usage; exit 1; }
+  local name
+  for name in "$@"; do
+    lookup "$name"
+    echo "stopping $REG_NAME ($REG_UNIT)..."
+    sudo systemctl stop "$REG_UNIT"
+    echo "$REG_NAME: $(unit_state "$REG_UNIT")"
+  done
+}
+
+cmd_logs() {
+  lookup "$1"; shift
+  local n=50
+  [[ "${1:-}" == "-n" ]] && n="$2"
+  journalctl -u "$REG_UNIT" -n "$n" --no-pager
+}
+
+case "${1:-}" in
+  list) cmd_list ;;
+  status) shift; cmd_status "$@" ;;
+  start) shift; cmd_start "$@" ;;
+  stop) shift; cmd_stop "$@" ;;
+  logs) shift; cmd_logs "$@" ;;
+  gpu) cmd_gpu ;;
+  -h|--help|help|"") usage ;;
+  *) echo "unknown command: $1" >&2; usage; exit 1 ;;
+esac
