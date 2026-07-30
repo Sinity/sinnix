@@ -135,7 +135,7 @@ mkServiceModule {
       # thread-parse fan-outs actually run parallel (GIL writer-commit
       # interference ~5000x on 3.13 vs ~0 on 3.14t). Rollback = repin
       # `.default`.
-      polyloguePkg = inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.polylogue-freethreaded;
+      polyloguePkg = inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.polylogue;
       dbRoot = "${config.sinnix.paths.realmRoot}/db/polylogue";
       # 2026-07-10: moved off /persist (worn MX500) to /realm; still inside
       # the /realm btrbk→borg coverage.
