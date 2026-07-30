@@ -76,10 +76,7 @@ mkFeatureModule {
                 input-default-bindings = "no";
                 profile = "normal";
                 fs = true;
-                # No window for audio-only playback: with force-window=yes an
-                # audio file opened a fullscreen black window ("screen blank").
-                # Video files still open a window when the video track loads.
-                force-window = "no";
+                force-window = "yes";
                 hwdec = "no";
                 video-sync = "display-resample";
                 drm-vrr-enabled = "no";
@@ -102,6 +99,14 @@ mkFeatureModule {
               };
 
               profiles = {
+                # Audio-only playback keeps its window (controls still work)
+                # but never fullscreens — a fullscreen black window over an
+                # HDR desktop was the "screen blanked" complaint.
+                audio-only = {
+                  profile-cond = ''p["current-tracks/video"] == nil or p["current-tracks/video/image"] == true'';
+                  profile-restore = "copy";
+                  fs = "no";
+                };
                 normal = {
                   ytdl-format = "bestvideo[height<=?1440]+bestaudio/best";
                   hr-seek-framedrop = "no";
