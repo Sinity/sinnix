@@ -252,7 +252,13 @@ is the signal to bead it or kill it.
    annotation/decision/questionnaire widgets + handback button) — paste only
    what the artifact needs.
 3. Name it `<topic>-<YYYY-MM-DD>.html`, place it next to the deliverable it
-   documents (or scratch/`/realm/tmp` for throwaways).
+   documents. If it's meant to persist or be cross-referenced (a case-study
+   series, a wiki-style artifact, anything you or another agent will link back
+   to later), its durable home is `/realm/data/derived/reports/` — not
+   `/realm/tmp`, which has no expiry of its own but sits inside a tree whose
+   sibling directories are auto-reaped on a 7-day tmpfiles timer. Reserve
+   scratch/`/realm/tmp` for genuinely single-use output you will not need to
+   reference again.
 4. Deliver it. When the `Artifact` tool is available (Claude Code sessions),
    **publish by default** — artifacts are private until the operator shares
    them, and a browsable link (`claude.ai/code/artifacts`) is more useful long
