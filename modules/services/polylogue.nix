@@ -136,10 +136,8 @@ mkServiceModule {
       # interference ~5000x on 3.13 vs ~0 on 3.14t). Rollback = repin
       # `.default`.
       polyloguePkg = inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.polylogue;
-      dbRoot = "${config.sinnix.paths.realmRoot}/db/polylogue";
       # 2026-07-10: moved off /persist (worn MX500) to /realm; still inside
       # the /realm btrbk→borg coverage.
-      backupRoot = "/realm/staging/polylogue-sqlite";
       # Ordered most-irreplaceable first. A run that dies partway (the 2h
       # TimeoutStartSec, an OOM, a reboot) then still leaves the tiers that
       # cannot be rebuilt covered. The 2026-07-30 failure did the opposite:
@@ -152,84 +150,8 @@ mkServiceModule {
       # with no tables since 2026-07-17 (daemon events live in ops.db), and
       # backing it up produced a 71-byte artifact every run that reads as
       # coverage while covering nothing.
-      dbNames = [
-        "user.db"
-        "source.db"
-        "index.db"
-        "embeddings.db"
-        "ops.db"
-      ];
-      backupScript = pkgs.writeShellApplication {
-        name = "polylogue-sqlite-backup";
-        runtimeInputs = [
-          pkgs.coreutils
-          pkgs.findutils
-          pkgs.gawk
-          pkgs.sqlite
-          pkgs.zstd
-        ];
-        text = ''
-          set -euo pipefail
-
-          umask 077
-          install -d -m 0700 ${lib.escapeShellArg backupRoot}
-
-          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-          for db_name in ${lib.escapeShellArgs dbNames}; do
-            source=${lib.escapeShellArg dbRoot}/"$db_name"
-            if [ ! -f "$source" ]; then
-              echo "Skipping missing Polylogue SQLite DB: $source" >&2
-              continue
-            fi
-
-            stem="''${db_name%.db}"
-            raw_tmp=${lib.escapeShellArg backupRoot}/"$stem-$stamp.sqlite.tmp"
-            zst_tmp="$raw_tmp.zst.tmp"
-            final=${lib.escapeShellArg backupRoot}/"$stem-$stamp.sqlite.zst"
-
-            cleanup() {
-              rm -f "$raw_tmp" "$raw_tmp-journal" "$raw_tmp-wal" "$zst_tmp"
-            }
-            trap cleanup EXIT
-
-            # `VACUUM INTO`, not `.backup`. The sqlite3 backup API restarts the
-            # copy from the beginning whenever the source is written mid-copy,
-            # so against a busy archive it does not merely run slowly -- it can
-            # livelock, rewriting the same partial copy indefinitely. Observed
-            # 2026-07-30: this step sat for the full 2h timeout on source.db
-            # while a full index rebuild was writing, was killed, and had
-            # written 1.5 TB to disk for a database of 1.7 GB compressed.
-            #
-            # `VACUUM INTO` takes one read transaction instead. Under WAL that
-            # is a stable snapshot, so a concurrent writer cannot force a
-            # restart: it completes in a single pass, or fails outright. It also
-            # emits a compacted database rather than a page-for-page copy.
-            rm -f "$raw_tmp"
-            sqlite3 "$source" "VACUUM INTO '$raw_tmp'"
-            chmod 0600 "$raw_tmp"
-            zstd -T1 -q -f "$raw_tmp" -o "$zst_tmp"
-            chmod 0600 "$zst_tmp"
-            mv -f "$zst_tmp" "$final"
-            rm -f "$raw_tmp"
-            trap - EXIT
-
-            find ${lib.escapeShellArg backupRoot} \
-              -maxdepth 1 \
-              -type f \
-              -name "$stem-*.sqlite.zst" \
-              -printf '%T@ %p\n' \
-              | sort -rn \
-              | awk 'NR > 3 { print substr($0, index($0, $2)) }' \
-              | xargs -r rm -f
-          done
-        '';
-      };
     in
     {
-      systemd.tmpfiles.rules = [
-        "d ${backupRoot} 0700 ${userName} users -"
-      ];
-
       # ── Import the upstream Home Manager module ────────────────────
       #     This defines programs.polylogued.* and creates the unit.
       home-manager.users.${userName} = {
@@ -276,12 +198,18 @@ mkServiceModule {
             # every ingest/status-component read was stalling in
             # folio_wait_bit_common (page reclaim under cgroup memory
             # pressure), not a code bug. Overriding just this unit rather
-            # than the shared class, matching the same order of magnitude
-            # already used for polylogue-sqlite-backup (8G/12G) which
-            # touches comparable data volume.
+            # than the shared class. (The former polylogue-sqlite-backup
+            # unit, since removed, used 8G/12G for comparable data volume.)
+            #
+            # 2026-07-31: 6G/8G proved too low in practice -- polylogued was
+            # throttled CONTINUOUSLY against it (polylogue-e98k), because
+            # BULK_BUILD_MMAP_SIZE_BYTES is 4 GiB and SQLite mmap counts
+            # toward the cgroup budget. A runtime override to 14G stopped
+            # the throttling; raised here so a rebuild does not silently
+            # revert that finding.
             overrides = {
-              MemoryHigh = lib.mkForce "6G";
-              MemoryMax = lib.mkForce "8G";
+              MemoryHigh = lib.mkForce "14G";
+              MemoryMax = lib.mkForce "18G";
             };
           })
           // {
@@ -291,58 +219,7 @@ mkServiceModule {
             Environment = [ "POLYLOGUE_ARCHIVE_ROOT=${cfg.dataDir}" ];
           };
 
-        systemd.user.services.polylogue-sqlite-backup = {
-          Unit = {
-            Description = "Back up Polylogue SQLite databases";
-            After = [ "default.target" ];
-            RequiresMountsFor = [
-              dbRoot
-              backupRoot
-            ];
-          };
-          Service = {
-            Type = "oneshot";
-            ExecStart = "${backupScript}/bin/polylogue-sqlite-backup";
-            TimeoutStartSec = "2h";
-            Slice = "backup.slice";
-            Nice = 10;
-            CPUSchedulingPolicy = "idle";
-            IOSchedulingClass = "idle";
-            CPUWeight = 20;
-            IOWeight = 20;
-            IOAccounting = true;
-            # The index backup writes a large temporary SQLite copy before
-            # compression. systemd accounts that page cache to the unit; the
-            # first successful run peaked near 9.5 GiB despite a 6 GiB hard cap.
-            MemoryHigh = "8G";
-            MemoryMax = "12G";
-          };
-        };
 
-        systemd.user.timers.polylogue-sqlite-backup = {
-          Unit.Description = "Daily Polylogue SQLite backup";
-          Timer = {
-            # 2026-07-29 (polylogue-2a6d): /realm/db/polylogue lives on a
-            # nested Btrfs subvolume (created 2026-07-06 specifically so
-            # SQLite WAL churn is excluded from the parent /realm btrbk
-            # snapshots — see hosts/sinnix-prime/storage.nix's
-            # polylogueDbRoot comment), which also makes it invisible to
-            # borgbackup-job-realm's snapshot-based drain. This job is the
-            # actual coverage path: it reads the live .db files directly
-            # and stages compressed copies under /realm/staging/
-            # polylogue-sqlite/, an ordinary directory the realm Borg job
-            # does capture. A weekly cadence with Persistent=false left up
-            # to 7 days of RPO on user.db (irreplaceable) and source.db
-            # (rebuild-root) with no catch-up after a missed run — far
-            # wider than the daily cadence used for the same failure class
-            # elsewhere (borgbackup-job-sinex-blobs, machine-telemetry-
-            # sqlite-backup). Tightened to daily + Persistent=true to match.
-            OnCalendar = "*-*-* 04:35:00";
-            RandomizedDelaySec = "45min";
-            Persistent = true;
-          };
-          Install.WantedBy = [ "timers.target" ];
-        };
       };
 
       # ── Runtime-surface registration (sinnix-specific) ─────────────
@@ -359,18 +236,6 @@ mkServiceModule {
             enable = true;
             restartable = true;
           };
-        };
-        polylogue-sqlite-backup = {
-          unit = "polylogue-sqlite-backup.service";
-          manager = "user";
-          resourceClass = "backup-maintenance";
-          observe.enable = true;
-        };
-        polylogue-sqlite-backup-timer = {
-          unit = "polylogue-sqlite-backup.timer";
-          kind = "timer";
-          manager = "user";
-          resourceClass = "backup-maintenance";
         };
       };
     };
