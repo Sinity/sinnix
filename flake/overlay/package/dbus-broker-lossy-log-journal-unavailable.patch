@@ -1,65 +1,76 @@
-From 44fb58c43f021509d7c19934490b01ba7caa8a72 Mon Sep 17 00:00:00 2001
+From b4849638ecc5b5882b108ec9030e4ebd2cdd5dd9 Mon Sep 17 00:00:00 2001
 From: Sinity <ezo.dev@gmail.com>
 Date: Sat, 11 Jul 2026 16:06:20 +0200
 Subject: [PATCH 1/2] util/log: do not treat an unavailable journal as fatal in
  lossy mode
 
-The log layer already has an explicit lossy mode, set unconditionally
-by both the broker and the launcher, whose documented contract is that
-messages may be dropped when they cannot be sent. However,
-log_journal_send() only honored that contract for EAGAIN: any other
-send(2) failure was propagated as a hard error, and callers such as
-peer_queue_unicast() fold log errors into their own return value, so a
-single failed diagnostic write unwinds through driver_dispatch() into
-broker_run() and terminates the broker.
+The log layer has an explicit lossy mode, set unconditionally by both
+the broker and the launcher, whose contract is that diagnostics may
+be dropped when they cannot be sent. log_journal_send() only honors
+that for EAGAIN: every other send(2) failure - apart from the
+EMSGSIZE truncation path - propagates as a hard error, and callers
+such as peer_queue_unicast() fold log errors into their own return
+value, so a single failed diagnostic write unwinds through
+driver_dispatch() into broker_run() and terminates the broker.
 
-The journal socket being gone is not a hypothetical: journald tears
-down its sockets during system shutdown, restarts on upgrades, and a
-connected AF_UNIX datagram socket then fails with ECONNREFUSED (first
-send) or ENOTCONN (subsequent sends). Observed in production during a
-system shutdown: a policy-denial diagnostic raced journald teardown,
-log_journal_send() returned ECONNREFUSED, the broker exited while
-PID 1 still depended on it, and the remaining shutdown serialized
-behind PID 1's bus reconnect timeouts (90 s per attempt, ~15 minutes
-total).
+A connected AF_UNIX/SOCK_DGRAM journal socket can outlive its peer: a
+full journald restart (socket units included - which stopping
+journald for journal-file maintenance requires, since socket
+activation otherwise resurrects it) destroys and recreates the
+listening socket, permanently orphaning every already-connected
+client. The orphaned socket fails the next send with ECONNREFUSED
+and every later one with ENOTCONN, while the journal itself is long
+back and healthy.
 
-In lossy mode, treat the journal being unavailable (ECONNREFUSED,
-ECONNRESET, ENOTCONN, ENOENT, EPIPE, ENOBUFS, ESHUTDOWN) like the
-existing EAGAIN case and drop the message. The dropped-messages marker
-in out_drop is made best-effort in lossy mode as well (with
-MSG_DONTWAIT, so it cannot block either), since failing to send *that*
-would reintroduce the same fatal path. Non-lossy contexts keep
-surfacing all errors unchanged.
+Observed twice in production (dbus-broker 37, systemd 260.2): a
+journald restart orphaned the broker's log socket, and the next lossy
+diagnostic - a policy send-denial emitted during session teardown at
+shutdown, 25 hours later in one case and 4 days in the other -
+killed the broker while the journal was alive (it recorded the
+broker's own error trace, via the stderr stream, at the same
+instant). PID 1 then serialized the rest of the shutdown behind 90 s
+bus-reconnect timeouts, ~15 minutes in total.
 
-Add a unit test covering both the unavailable-journal case (peer
-closed: ECONNREFUSED, then ENOTCONN on subsequent sends) and the
-pre-existing full-queue EAGAIN case.
+In lossy mode, treat journal unavailability like the existing EAGAIN
+case and drop the message. ECONNREFUSED and ENOTCONN are the errnos
+observed in production; ECONNRESET, EPIPE, ENOBUFS - and, as a
+conservative superset for unconnected or unusual log fds, ENOENT and
+ESHUTDOWN - are included as the same "cannot deliver right now"
+class. The dropped-messages marker in out_drop becomes best-effort
+under the same reasoning (with MSG_DONTWAIT, so it cannot block
+either): failing to send the "messages got dropped" marker must not
+resurrect the fatal path it exists to soften. Non-lossy contexts
+keep surfacing all errors unchanged.
+
+Add a unit test covering the dead-peer case (ECONNREFUSED, then
+ENOTCONN on subsequent sends) and the pre-existing full-queue EAGAIN
+case.
 ---
  src/meson.build     |  3 ++
- src/util/log.c      | 29 ++++++++++++++++--
- src/util/test-log.c | 75 +++++++++++++++++++++++++++++++++++++++++++++
+ src/util/log.c      | 28 +++++++++++++++--
+ src/util/test-log.c | 76 +++++++++++++++++++++++++++++++++++++++++++++
  3 files changed, 105 insertions(+), 2 deletions(-)
  create mode 100644 src/util/test-log.c
 
 diff --git a/src/meson.build b/src/meson.build
-index 2d60346..a76b8c4 100644
+index 2d60346..995085d 100644
 --- a/src/meson.build
 +++ b/src/meson.build
-@@ -324,6 +324,9 @@ test('D-Bus Match Handling', test_match, suite: 'unit')
- test_message = executable('test-message', sources: ['dbus/test-message.c'], kwargs: test_kwargs)
- test('D-Bus Message Abstraction', test_message, suite: 'unit')
+@@ -318,6 +318,9 @@ test('Utility File-Desciptor Lists', test_fdlist, suite: 'unit')
+ test_fs = executable('test-fs', sources: ['util/test-fs.c'], kwargs: test_kwargs)
+ test('File System Helpers', test_fs, suite: 'unit')
  
 +test_log = executable('test-log', sources: ['util/test-log.c'], kwargs: test_kwargs)
 +test('Log Context', test_log, suite: 'unit')
 +
- test_misc = executable('test-misc', sources: ['util/test-misc.c'], kwargs: test_kwargs)
- test('Miscellaneous Helpers', test_misc, suite: 'unit')
+ test_match = executable('test-match', sources: ['bus/test-match.c'], kwargs: test_kwargs)
+ test('D-Bus Match Handling', test_match, suite: 'unit')
  
 diff --git a/src/util/log.c b/src/util/log.c
-index 6a609c4..203240c 100644
+index 6a609c4..6e499ee 100644
 --- a/src/util/log.c
 +++ b/src/util/log.c
-@@ -409,6 +409,24 @@ static int log_journal_send(Log *log) {
+@@ -409,6 +409,23 @@ static int log_journal_send(Log *log) {
                  return LOG_E_TRUNCATED;
          } else if (errno == EAGAIN) {
                  goto out_drop;
@@ -71,20 +82,19 @@ index 6a609c4..203240c 100644
 +                                  errno == ENOBUFS ||
 +                                  errno == ESHUTDOWN)) {
 +                /*
-+                 * The journal socket is gone or refuses us: journald is
-+                 * restarting, has torn down its socket during shutdown, or
-+                 * its queue overflowed. In lossy mode we are explicitly
-+                 * allowed to drop diagnostics, and losing a log message must
-+                 * never escalate into a fatal broker error: on system
-+                 * shutdown that would take the message bus down while PID 1
-+                 * still depends on it, serializing the remaining teardown
-+                 * behind bus reconnect timeouts.
++                 * The journal peer is gone or refuses us: journald may be
++                 * restarting, or a past restart recreated its sockets and
++                 * left this long-connected socket permanently attached to
++                 * the dead peer. In lossy mode we are explicitly allowed
++                 * to drop diagnostics, and losing a log message must never
++                 * escalate into a fatal error that takes the message bus
++                 * down with it.
 +                 */
 +                goto out_drop;
          } else if (errno != EMSGSIZE) {
                  return error_origin(-errno);
          }
-@@ -465,8 +483,15 @@ out_drop:
+@@ -465,8 +482,15 @@ out_drop:
                  l = send(log->log_fd,
                           LOG_WARNING_DROPPED,
                           strlen(LOG_WARNING_DROPPED),
@@ -104,10 +114,10 @@ index 6a609c4..203240c 100644
  
 diff --git a/src/util/test-log.c b/src/util/test-log.c
 new file mode 100644
-index 0000000..1f44749
+index 0000000..fe0d46a
 --- /dev/null
 +++ b/src/util/test-log.c
-@@ -0,0 +1,75 @@
+@@ -0,0 +1,76 @@
 +/* SPDX-License-Identifier: GPL-3.0-or-later */
 +/* SPDX-FileCopyrightText: D-Bus Broker Developers */
 +
@@ -123,10 +133,11 @@ index 0000000..1f44749
 +#include "util/log.h"
 +
 +/*
-+ * In lossy mode, a journal that is gone (its socket closed, e.g. journald
-+ * torn down during system shutdown) must lead to dropped messages, not to a
-+ * fatal error: log emission failures escalating out of the log layer took
-+ * the whole broker down in production.
++ * In lossy mode, a journal that is gone (its socket closed, e.g. a journald
++ * restart recreated its sockets and orphaned this long-connected client)
++ * must lead to dropped messages, not to a fatal error: log emission
++ * failures escalating out of the log layer took the whole broker down in
++ * production.
 + */
 +static void test_lossy_journal_gone(void) {
 +        _c_cleanup_(log_deinit) Log log = LOG_NULL;
