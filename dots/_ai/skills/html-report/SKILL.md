@@ -103,15 +103,39 @@ The `<template>` must be a **direct child** of the element it previews. A
 sibling silently binds the popup to the surrounding paragraph instead.
 
 **Code blocks** use `<figure class="code">` with a `<figcaption>` carrying the
-filename, language, and a copy button; `<pre class="ln">` numbers lines when
-each is wrapped in `<span class="line">`, and `hl` marks the lines that matter.
-Highlight tokens with `tk-k`/`tk-s`/`tk-c`/`tk-n`/`tk-f` **as you write** — you
-already know which token is a keyword, so shipping a runtime highlighter would
-be a dependency bought for nothing.
+filename, `<span class="lang">` for the language (gets the accent color), and a
+copy button; `<pre class="ln">` numbers lines when each is wrapped in
+`<span class="line">`, and `hl` marks the lines that matter. Highlight tokens
+with `tk-k`/`tk-s`/`tk-c`/`tk-n`/`tk-f` **as you write** — you already know
+which token is a keyword, so shipping a runtime highlighter would be a
+dependency bought for nothing.
 
-**Sidenotes** (`<span class="sn">`) put caveats in the margin on wide screens
-and behind a tap on narrow ones, with no JS. Use them for the qualification
-that would otherwise break a sentence in half.
+**Quotes are never the same box as your own narration.** This is the single
+most common legibility failure in a report with any back-and-forth structure
+(corrections, timelines, review threads): wrapping *both* the paraphrase
+you're writing and the words someone actually said in one identically-styled
+box. A reader can't tell which is which without parsing every sentence.
+Fix it structurally, not by remembering: narration is a **plain paragraph**,
+no border, no background — exactly like the rest of your prose. The moment
+you're relaying words someone actually wrote or said, switch to
+`<blockquote class="q">…<cite>who, when</cite></blockquote>` — it renders in
+an italic serif face (the template's one deliberate typographic pairing) with
+an oversized opening quotation mark, so *quote-ness* reads at a glance,
+independent of who's speaking. Add `.user` or `.ext` to recolor the left bar
+by speaker; the serif treatment itself never changes, because "is this a
+quote" and "who said it" are different facts and should look like different
+facts. A short quote inside a running sentence doesn't need the full block —
+`<span class="iq">` gives it a tinted italic run with no box.
+
+**Sidenotes** (`<span class="sn" tabindex="0"><template class="pop">…`) are a
+small superscript marker using the *same* popup mechanism as path/evidence
+previews, not a separate margin-column trick. A true wide-margin sidenote
+needs a page layout that reserves real margin space (gwern's does); a
+`left: calc(50% + Nrem)` guess relative to the viewport has no real containing
+block in a single-column report layout, and drifts off-position — verified
+broken in production, not a hypothetical — the moment a real viewport hits
+the boundary the guess assumed. One interaction pattern for every aside beats
+maintaining a second, fragile one.
 
 ## Operator input: annotations, corrections, questionnaires
 

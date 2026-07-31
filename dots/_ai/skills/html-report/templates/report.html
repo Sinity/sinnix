@@ -115,6 +115,21 @@ time.age{color:var(--muted);font-size:.85em;font-variant-numeric:tabular-nums}
 time.age.stale{color:var(--warn);font-weight:600}
 time.age.stale::after{content:" ⚠"}
 
+/* ---- per-block revision marks: data-added / data-changed on ANY element.
+        Answers "when did this part of the doc appear?" for a report an agent
+        edits over many sessions. Rendered as a quiet marginal stamp, and
+        highlighted while it is newer than the reader's last visit. ---- */
+[data-added],[data-changed]{position:relative}
+[data-added]>.rev,[data-changed]>.rev{display:none}
+.revmark{float:right;font-size:.72rem;color:var(--muted);font-variant-numeric:tabular-nums;
+  margin-left:.6rem;white-space:nowrap;user-select:none}
+.revmark.new{color:var(--accent);font-weight:600}
+.revmark.new::before{content:"● ";font-size:.8em}
+section.isnew,tr.isnew td{background:color-mix(in srgb,var(--accent) 5%,transparent)}
+tr.isnew td:first-child{box-shadow:inset .18rem 0 0 var(--accent)}
+.revbar{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;font-size:.85rem;
+  color:var(--muted);margin:.2rem 0 .6rem}
+
 /* ---- paths: openable + previewable ---- */
 a.path{font:.9em ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code-bg);
   border-radius:.3rem;padding:.08rem .35rem;text-decoration:none;
@@ -136,8 +151,10 @@ figure.code{margin:.7rem 0;border:1px solid var(--line);border-radius:.5rem;over
 figure.code figcaption{display:flex;gap:.5rem;align-items:center;background:var(--bg);
   border-bottom:1px solid var(--line);padding:.3rem .7rem;font:.85rem ui-monospace,monospace;
   color:var(--muted)}
+figure.code figcaption .lang{font-weight:700;letter-spacing:.03em;color:var(--accent);
+  text-transform:uppercase;font-size:.72rem}
 figure.code figcaption .sp{flex:1}
-figure.code pre{margin:0;border-radius:0}
+figure.code pre{margin:0;border-radius:0;tab-size:4}
 pre.ln{counter-reset:l}
 pre.ln code>span.line{counter-increment:l;display:block;white-space:pre}
 pre.ln code>span.line::before{content:counter(l);display:inline-block;width:2.5em;
@@ -147,24 +164,43 @@ pre code .hl{background:color-mix(in srgb,var(--warn) 22%,transparent);display:b
 .tk-k{color:var(--todo)} .tk-s{color:var(--ok)} .tk-c{color:var(--muted);font-style:italic}
 .tk-n{color:var(--info)} .tk-f{color:var(--accent)}
 
-/* ---- sidenotes: margin on wide screens, inline detail on narrow ---- */
-.sn{display:inline}
-.sn>input{display:none}
-.sn>label{color:var(--accent);cursor:pointer;font-size:.8em;vertical-align:super}
-.sn>.note{display:none;font-size:.9rem;color:var(--muted)}
-@media(min-width:88rem){
-  .sn>.note{display:block;position:absolute;left:calc(50% + 34rem);width:15rem;
-    text-align:left;border-left:2px solid var(--line);padding-left:.6rem;margin-top:-1.2rem}
-  .sn>label{display:none}
-}
-@media(max-width:88rem){.sn>input:checked~.note{display:block;border-left:2px solid var(--line);
-  padding-left:.6rem;margin:.3rem 0}}
+/* ---- verbatim quotes: typographically distinct from the prose describing them.
+        Narration/paraphrase is a PLAIN paragraph (no box) — only text actually
+        spoken/written by someone gets the quote treatment. A serif italic face
+        (system-installed, no webfont) + an oversized glyph mark it as reported
+        speech at a glance, independent of theme or who is being quoted. ---- */
+blockquote.q{position:relative;margin:.55rem 0 .4rem;padding:.6rem 1.1rem .6rem 2.3rem;
+  background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);
+  border-radius:0 .45rem .45rem 0;
+  font:italic 1rem/1.55 Georgia,"Iowan Old Style","Palatino Linotype","Noto Serif",ui-serif,serif}
+blockquote.q::before{content:"\201C";position:absolute;left:.45rem;top:.15rem;
+  font:italic 2.2rem/1 Georgia,ui-serif,serif;color:var(--accent);opacity:.5}
+blockquote.q.user{border-left-color:var(--todo)}
+blockquote.q.user::before{color:var(--todo)}
+blockquote.q.ext{border-left-color:var(--muted)}
+blockquote.q.ext::before{color:var(--muted)}
+blockquote.q cite{display:block;margin-top:.4rem;font:600 .72rem/1 system-ui,sans-serif;
+  text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-style:normal}
+/* short quotes inline in running prose — same signal, no box */
+q.iq,.iq{font-style:italic;background:color-mix(in srgb,var(--accent) 8%,transparent);
+  padding:.02rem .3rem;border-radius:.2rem;box-decoration-break:clone}
+
+/* ---- sidenotes: reuse the popup mechanism (a small superscript marker,
+        click/hover to see the note) instead of faking a margin column. A true
+        wide-margin note needs a page layout that reserves real margin space;
+        this template's single content column doesn't, and a viewport-relative
+        `left:` guess drifts off-position and collides with content below it
+        the moment the assumption breaks (verified broken in production).
+        One interaction pattern for every aside — same as path/evidence
+        popups — is more robust than maintaining two. ---- */
+.sn{display:inline-block;color:var(--accent);cursor:pointer;font-size:.72em;
+  vertical-align:super;font-weight:700;line-height:1;padding:0 .1rem}
+.sn:hover,.sn:focus{text-decoration:underline}
 
 @media print{header.page,nav#toc,button,input.filter,.pop{display:none}
   .layout{grid-template-columns:1fr;max-width:none}
   section{break-inside:avoid;border:none;padding:0}
-  details{border:none}details:not([open])>*:not(summary){display:revert}
-  .sn>.note{display:block;position:static;width:auto;border-left:2px solid var(--line)}}
+  details{border:none}details:not([open])>*:not(summary){display:revert}}
 </style>
 </head>
 <body>
@@ -226,7 +262,7 @@ pre code .hl{background:color-mix(in srgb,var(--warn) 22%,transparent);display:b
 </section>
 
 <!-- ============ DELETE THIS SECTION — it is a live usage crib ============ -->
-<section id="crib">
+<section id="crib" data-added="2026-07-31">
   <h2>Element crib (delete before shipping)</h2>
 
   <h3>Paths: openable, and previewable without any request</h3>
@@ -250,7 +286,7 @@ Polylogue is a **local, single-writer archive for AI coding/chat sessions**.</co
   <h3>Code with chrome</h3>
   <figure class="code">
     <figcaption><span>polylogue/sources/dispatch.py</span><span class="sp"></span>
-      <span>python</span><button class="cp fs">⧉ copy</button></figcaption>
+      <span class="lang">python</span><button class="cp fs">⧉ copy</button></figcaption>
 <pre class="ln"><code><span class="line"><span class="tk-k">def</span> <span class="tk-f">detect_provider</span>(payload):</span>
 <span class="line">    <span class="tk-c"># tightness order, not filename order</span></span>
 <span class="line hl">    <span class="tk-k">return</span> <span class="tk-s">"claude-ai-export"</span></span>
@@ -260,13 +296,30 @@ Polylogue is a **local, single-writer archive for AI coding/chat sessions**.</co
   <code>hl</code> to the lines that matter. Token classes are
   <code>tk-k</code> keyword, <code>tk-s</code> string, <code>tk-c</code> comment,
   <code>tk-n</code> number, <code>tk-f</code> function — apply them as you write, since a
-  runtime highlighter would be a dependency for something you already know the answer to.</p>
+  runtime highlighter would be a dependency for something you already know the answer to.
+  <code>.lang</code> on the language chip gives it the accent color shown above.</p>
 
-  <h3>Sidenotes</h3>
-  <p>A claim that needs a caveat but not an interruption<span class="sn"><input type="checkbox"
-    id="sn1"><label for="sn1">[note]</label><span class="note">Margin note on wide screens;
-    a tap-to-expand inline note on narrow ones. No JS.</span></span> reads better with the
-  caveat in the margin.</p>
+  <h3>Quotes vs. your own narration — never the same box</h3>
+  <p>Narration is a plain paragraph, exactly like this one — no border, no background. The
+  moment you're relaying words someone actually said or wrote, switch construct:</p>
+  <blockquote class="q">DOM should either get stable provider ids, or be retired for providers
+  with a working native path.<cite>assistant, turn 41</cite></blockquote>
+  <p><code>blockquote.q</code> renders in an italic serif face — the one deliberate
+  typographic pairing in this template — plus an oversized opening quotation mark, so a
+  reader can tell "this is reported speech" without parsing the sentence. Add
+  <code>.user</code> or <code>.ext</code> to recolor the left bar for who's speaking; the
+  serif treatment stays constant regardless of speaker, because <em>quote-ness</em> and
+  <em>who said it</em> are different facts. A short quote inside a running sentence doesn't
+  need the full block — use <code>&lt;span class="iq"&gt;</code> instead: it reads like
+  <span class="iq">this</span>, a tinted italic run, no box.</p>
+
+  <h3 data-added="2026-07-31">Sidenotes — asides that pop, not a fake margin column</h3>
+  <p>A claim that needs a caveat but not an interruption<span class="sn" tabindex="0"
+    data-pop-title="aside">[†]<template class="pop">Same popup mechanism as path previews —
+    hover, focus, or click-to-pin. A true margin note needs a page layout that reserves real
+    margin space (gwern's does); faking one with a viewport-relative <code>left:</code> guess
+    drifts off-position the moment the assumption breaks.</template></span> gets a small
+  superscript marker instead of competing for column width.</p>
 
   <h3>Epistemic basis</h3>
   <p>Tag a claim with what it actually rests on:
@@ -328,6 +381,53 @@ document.querySelectorAll('time.age').forEach(t=>{
   t.title=d.toString();
   const budget=+(t.dataset.staleDays||0);
   if(budget&&ms>budget*864e5)t.classList.add('stale')})})();
+
+/* ---- per-block revision marks. Put data-added="YYYY-MM-DD" (and optionally
+        data-changed="YYYY-MM-DD") on any section/tr/details/p the agent adds
+        in a later pass. Each gets a quiet date stamp; anything newer than the
+        reader's LAST VISIT to this file is marked ●new and tinted, so a
+        re-read shows what moved without a diff. Last-visit is per-file in
+        localStorage and updates on unload, so "new" survives until you
+        actually come back. "Show only new" filters the whole page. ---- */
+(()=>{
+const KEY='htmlreport_seen:'+location.pathname;
+let seen=null; try{seen=localStorage.getItem(KEY)}catch(e){}
+const els=[...document.querySelectorAll('[data-added],[data-changed]')];
+if(els.length){
+  let newest='',count=0;
+  els.forEach(el=>{
+    const a=el.dataset.added||'',c=el.dataset.changed||'',d=c>a?c:a;
+    if(d>newest)newest=d;
+    const isNew=seen&&d>seen;
+    if(isNew){count++;el.classList.add('isnew')}
+    const s=document.createElement('span');
+    s.className='revmark'+(isNew?' new':'');
+    s.textContent=(c&&c!==a?'edited '+c:'added '+a);
+    s.title=(a?'added '+a:'')+(c?' · edited '+c:'');
+    const host=el.matches('tr')?el.cells[el.cells.length-1]:el;
+    host.insertBefore(s,host.firstChild);
+  });
+  // control bar under the page header
+  const bar=document.createElement('div');bar.className='revbar';
+  bar.innerHTML=seen
+    ? `<span>last read <b>${seen}</b> — <b>${count}</b> block(s) new since</span>`
+    : `<span>first read of this file — every block shown as-is</span>`;
+  const b=document.createElement('button');b.className='fs';b.textContent='show only new';
+  let only=false;
+  b.onclick=()=>{only=!only;b.textContent=only?'show all':'show only new';
+    document.querySelectorAll('main section').forEach(s=>{
+      const has=s.classList.contains('isnew')||s.querySelector('.isnew');
+      s.style.display=(!only||has)?'':'none'});
+    document.querySelectorAll('main tbody tr').forEach(r=>{
+      r.style.display=(!only||r.classList.contains('isnew'))?'':'none'})};
+  if(seen&&count)bar.appendChild(b);
+  const mark=document.createElement('button');mark.className='fs';
+  mark.textContent='mark all read';
+  mark.onclick=()=>{try{localStorage.setItem(KEY,newest)}catch(e){};location.reload()};
+  bar.appendChild(mark);
+  const main=document.querySelector('main');main.insertBefore(bar,main.firstChild);
+  addEventListener('beforeunload',()=>{ /* only advance if user asked; see mark button */ });
+}})();
 
 /* ---- popups: any <a data-pop> or element with a child <template class="pop">
         previews on hover/focus, click pins it. Content is INLINE — the page
