@@ -98,16 +98,15 @@
         ]
       },
       "locked": {
-        "lastModified": 1778198278,
-        "narHash": "sha256-a356lk3dWJg2VzXmvBL0xVYUMgICDY/6s6A5km8cjBU=",
+        "lastModified": 1785459931,
+        "narHash": "sha256-joqsKEDYnZzRZw5oVQl8D6gKcxcfBppzQqplDlMzUzY=",
         "owner": "gastownhall",
         "repo": "beads",
-        "rev": "ce242a87967836a361a8f11f0674335173fdbb27",
+        "rev": "8bb0d36be08e16fa7324cb079520a2b168741ec0",
         "type": "github"
       },
       "original": {
         "owner": "gastownhall",
-        "ref": "v1.0.4",
         "repo": "beads",
         "type": "github"
       }
@@ -874,11 +873,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1785367887,
-        "narHash": "sha256-iAKVGotP3ECIQZHLsUP+XO1NmqNg8GyH0O/ZJCDGLpk=",
+        "lastModified": 1785514246,
+        "narHash": "sha256-zmHrRKtwD33+SZdjx1zvKfjB1EVjtt4T03xrD9rRChA=",
         "owner": "Sinity",
         "repo": "polylogue",
-        "rev": "5e23e6abfc37529e0fe359344ff8b4305aedac5e",
+        "rev": "fe12a1ff9e77335a0f656e7cdf71490f72d02341",
         "type": "github"
       },
       "original": {
