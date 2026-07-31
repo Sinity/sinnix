@@ -1,4 +1,4 @@
-From a8676ad293b7299efbde4712314609dd9cfc99a0 Mon Sep 17 00:00:00 2001
+From 8ad374b830b7a0a6573ade2740b51a4d0cbf4f31 Mon Sep 17 00:00:00 2001
 From: Sinity <ezo.dev@gmail.com>
 Date: Sat, 11 Jul 2026 16:08:36 +0200
 Subject: [PATCH 2/2] launch: always exit when the broker child dies
@@ -9,16 +9,15 @@ callback error does not stop the event loop, it only disables the
 event source - so on a failed log write the launcher lost its only
 child-exit notification and kept running indefinitely with a dead
 broker. The service unit then keeps masquerading as running (the
-launcher is its main process), and the service manager keeps
-reconnecting to a bus socket that nobody will ever answer, instead of
-observing the failure and applying its restart policy.
+launcher is its main process), so the service manager neither applies
+its restart policy nor stops directing clients at the dead bus socket.
 
-This is not hypothetical: the log write fails precisely when the
-journal is unavailable, which is also when the broker itself is most
-likely to have died (journald teardown during system shutdown; see the
-previous commit). Observed in production: broker dead at shutdown
-start, launcher alive for the remaining ~15 minutes, PID 1 blocking on
-bus reconnects the whole time.
+This is not hypothetical: the diagnostic commit fails precisely when
+the journal socket is orphaned or unavailable - the same condition
+that just killed the broker (see the previous commit). Observed in
+production: broker dead at shutdown start, launcher alive for the
+remaining ~15 minutes, PID 1 blocking on bus reconnects the whole
+time.
 
 Commit the diagnostic best-effort and exit regardless.
 ---
@@ -26,7 +25,7 @@ Commit the diagnostic best-effort and exit regardless.
  1 file changed, 10 insertions(+), 1 deletion(-)
 
 diff --git a/src/launch/launcher.c b/src/launch/launcher.c
-index 0d1cfe3..deb5b26 100644
+index 0d1cfe3..6d02912 100644
 --- a/src/launch/launcher.c
 +++ b/src/launch/launcher.c
 @@ -388,9 +388,18 @@ static int launcher_on_child_exit(sd_event_source *source, const siginfo_t *si,
@@ -35,7 +34,7 @@ index 0d1cfe3..deb5b26 100644
  
 +        /*
 +         * The diagnostic is best-effort: if committing it fails (e.g., the
-+         * journal is already gone during system shutdown), the launcher must
++         * journal socket is orphaned or unavailable), the launcher must
 +         * still exit. Returning the log error here used to skip
 +         * sd_event_exit(), leaving the launcher alive with a dead broker:
 +         * the service unit then keeps masquerading as running, and the
