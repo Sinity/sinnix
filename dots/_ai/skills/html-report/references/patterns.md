@@ -38,6 +38,55 @@ no external requests, JS-optional where possible.
 </style>
 ```
 
+## Correction ladder (claim → challenge → reversal, kept visible)
+
+For a report whose whole point is *how a conclusion moved* (a debugging
+session, a review thread, a multi-pass investigation) — a vertical sequence
+of rungs, each one **narration you wrote** optionally followed by **a quote
+someone actually said**, never merged into one box. Narration is a plain
+`<p>`; only the `<blockquote class="q">` gets the quote treatment (see
+"Quotes vs. narration" above the crib in the template). Reuse the badge
+classes for stage labels.
+
+```html
+<ol class="ladder">
+  <li class="claim">
+    <p class="who">assistant <span class="stage stage-claim">claim</span></p>
+    <blockquote class="q">DOM should either get stable ids or be
+      retired for providers with a working native path.<cite>assistant</cite></blockquote>
+  </li>
+  <li class="challenge">
+    <p class="who">operator <span class="stage stage-challenge">push</span></p>
+    <blockquote class="q user">but do we actually want this fallback, or is it
+      cargo culting?<cite>operator</cite></blockquote>
+  </li>
+  <li class="reversal">
+    <p class="who">assistant <span class="stage stage-reversal">reversal</span></p>
+    <p>Counts the archive: the fallback fired 17 times, and none of those
+      sessions also has a native capture — it's the only surviving record for
+      24 of them.</p>
+    <blockquote class="q">That inverts my recommendation.<cite>assistant</cite></blockquote>
+  </li>
+</ol>
+<style>
+.ladder{list-style:none;margin:.6rem 0;padding:0;border-left:3px solid var(--line)}
+.ladder li{position:relative;padding:.55rem 0 .55rem 1.3rem}
+.ladder li::before{content:"";position:absolute;left:-.62rem;top:1.05rem;width:.7rem;
+  height:.7rem;border-radius:50%;background:var(--muted);border:2px solid var(--panel)}
+.ladder li.claim::before{background:var(--info)}
+.ladder li.challenge::before{background:var(--todo)}
+.ladder li.reversal::before{background:var(--warn)}
+.ladder .who{font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;
+  color:var(--muted);font-weight:700;margin:0 0 .2rem}
+</style>
+```
+
+The narration paragraph is optional per rung (a bare claim/challenge/reversal
+often needs nothing but the quote); the quote is optional too (a rung can be
+pure narration, e.g. "assistant re-tests, finds X" with no direct words to
+show). What must never happen is both living in the same box — that's the
+"which part is the quote?" failure this pattern exists to prevent.
+
 ## Annotated diff / code callouts
 
 ```html
@@ -219,7 +268,9 @@ row (works inside any table the template already sorts/filters):
 ```
 
 **Decision widget** — approve/defer/reject + optional note, dropped straight
-into a decision-queue row:
+into a decision-queue row. **Each row needs its own `name`** (`d1`, `d2`, …):
+radio grouping is by `name`, so reusing it across rows silently merges them
+into one group even when `data-field` differs:
 
 ```html
 <td>
