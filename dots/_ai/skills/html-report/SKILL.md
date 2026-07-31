@@ -133,6 +133,38 @@ operator will mark up, or a plan needing a go/no-go per item — this turns
 "send a report, then wait for prose feedback" into "send a report, get a
 structured answer back in one paste."
 
+## Marking what changed between passes
+
+When you *revise* a report across sessions — a living workspace, a status page
+you update weekly — the reader needs to know which parts are new without
+diffing. Put `data-added="YYYY-MM-DD"` (and `data-changed="…"` when you rewrite
+in place) on any `section`, `tr`, `details`, or paragraph you add in a later
+pass. The template stamps each one with a quiet date, remembers the reader's
+last visit per file, tints anything newer, and offers "show only new".
+
+Two rules make it work: **tag at the granularity the reader cares about**
+(a section or a table row, not every `<p>`), and **only set `data-changed` for
+a real revision** — re-stamping untouched blocks makes the whole mechanism
+noise. Undated blocks are simply "was already there", which is the right
+default for the original pass.
+
+## Improving this skill as you use it
+
+This skill is expected to get better through use, not through occasional
+rewrites. `references/field-notes.md` is the staging area: after building an
+artifact, if you hit a template bug, lost a cycle to a silent failure,
+invented a pattern the skill lacked, or got a correction from the operator —
+**append a note**. Most sessions add nothing; that is fine.
+
+Notes get folded into `SKILL.md` / `patterns.md` / the template once confirmed
+or once the file grows past ~15 entries, and are deleted when folded. Verify
+before folding: a note is one agent's experience and may be wrong.
+
+Before shipping any artifact, run the two checks that file's own notes were
+written from — extract the `<script>` and `node --check` it, then headless-render
+and grep the DOM for evidence the JS actually ran. A syntax error anywhere in
+the script block silently kills every interactive feature on the page.
+
 ## Contract (every HTML artifact)
 
 1. **One file, zero external requests.** All CSS/JS inline; images as
@@ -197,9 +229,25 @@ is the signal to bead it or kill it.
    what the artifact needs.
 3. Name it `<topic>-<YYYY-MM-DD>.html`, place it next to the deliverable it
    documents (or scratch/`/realm/tmp` for throwaways).
-4. Claude Code: send with `SendUserFile` (`display: "render"`). Other
-   agents: print the path; `xdg-open` works.
-5. Feeding back: HTML artifacts re-read fine as agent input; keep ids/classes
+4. Deliver it. When the `Artifact` tool is available (Claude Code sessions),
+   **publish by default** — artifacts are private until the operator shares
+   them, and a browsable link (`claude.ai/code/artifacts`) is more useful long
+   after the turn ends than a file sitting in scratch. Skim the content first
+   for anything genuinely sensitive (credentials, unredacted personal data,
+   material the operator hasn't seen if you didn't author it this turn) —
+   internal paths, hostnames, and ordinary project/engineering detail are not
+   a reason to hold back. Also send it with `SendUserFile`
+   (`display: "render"`) so it previews inline in the same turn — the two
+   aren't redundant: `SendUserFile` is the immediate look, `Artifact` is the
+   thing that still exists next week. Skip the `Artifact` publish only when
+   the tool genuinely isn't available (other agents/harnesses: print the
+   path; `xdg-open` works), the content is explicitly scratch/throwaway, or
+   the operator asked to keep it local.
+5. Updating a living workspace across sessions: republish the **same
+   `file_path`** to redeploy to the same `Artifact` URL rather than minting a
+   new one each pass — that's what makes the browsable-later property work
+   for a document that gets revised repeatedly.
+6. Feeding back: HTML artifacts re-read fine as agent input; keep ids/classes
    semantic so a later agent can parse the DOM.
 
 ## Layout quick-reference
