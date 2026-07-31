@@ -36,61 +36,135 @@
   --bad:#a01c1c; --bad-bg:#fbe4e4; --info:#1d4ed8; --info-bg:#e3ebfd;
   --todo:#6b21a8; --todo-bg:#f1e6fb; --code-bg:#eef1f4;
 }
+/* Reading size. --fs is the ONE knob; everything below is relative to it.
+   17px is the floor for a document a human reads end-to-end — do NOT lower it,
+   and do not reintroduce absolute px sizes anywhere else. A-/A+ persist. */
+:root{--fs:17px}
 *{box-sizing:border-box}
+html{font-size:var(--fs)}
 body{margin:0;background:var(--bg);color:var(--ink);
-  font:15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
+  font:1rem/1.62 system-ui,-apple-system,"Segoe UI",sans-serif}
 header.page{position:sticky;top:0;z-index:5;background:var(--panel);
   border-bottom:1px solid var(--line);padding:.7rem 1.2rem;
   display:flex;flex-wrap:wrap;align-items:baseline;gap:.6rem}
-header.page h1{font-size:1.15rem;margin:0}
+header.page h1{font-size:1.3rem;margin:0}
 header.page .spacer{flex:1}
-.chip{display:inline-block;padding:.1rem .55rem;border:1px solid var(--line);
-  border-radius:99px;font-size:.78rem;color:var(--muted);background:var(--bg)}
-button.theme{border:1px solid var(--line);background:var(--bg);color:var(--ink);
-  border-radius:.4rem;padding:.15rem .6rem;cursor:pointer;font-size:.8rem}
-.layout{display:grid;grid-template-columns:15rem minmax(0,1fr);
-  max-width:78rem;margin:0 auto;gap:1.2rem;padding:1.2rem}
-@media(max-width:60rem){.layout{grid-template-columns:minmax(0,1fr)}nav#toc{display:none}}
-nav#toc{position:sticky;top:3.6rem;align-self:start;font-size:.85rem;
+.chip{display:inline-block;padding:.12rem .6rem;border:1px solid var(--line);
+  border-radius:99px;font-size:.85rem;color:var(--muted);background:var(--bg)}
+button.theme,button.fs{border:1px solid var(--line);background:var(--bg);color:var(--ink);
+  border-radius:.4rem;padding:.2rem .6rem;cursor:pointer;font-size:.85rem}
+.layout{display:grid;grid-template-columns:16rem minmax(0,1fr);
+  max-width:80rem;margin:0 auto;gap:1.2rem;padding:1.2rem}
+@media(max-width:62rem){.layout{grid-template-columns:minmax(0,1fr)}nav#toc{display:none}}
+nav#toc{position:sticky;top:3.8rem;align-self:start;font-size:.92rem;
   border-right:1px solid var(--line);padding-right:.8rem;max-height:85vh;overflow:auto}
-nav#toc a{display:block;color:var(--muted);text-decoration:none;padding:.14rem 0}
-nav#toc a.h3{padding-left:.9rem;font-size:.8rem}
+nav#toc a{display:block;color:var(--muted);text-decoration:none;padding:.16rem 0}
+nav#toc a.h3{padding-left:.9rem;font-size:.87rem}
 nav#toc a:hover{color:var(--accent)}
 main{min-width:0}
 section{background:var(--panel);border:1px solid var(--line);border-radius:.6rem;
-  padding:1rem 1.2rem;margin-bottom:1.1rem}
-h2{font-size:1.05rem;margin:.1rem 0 .6rem}
-h3{font-size:.93rem;margin:1rem 0 .4rem}
-p{margin:.4rem 0}
+  padding:1.1rem 1.3rem;margin-bottom:1.1rem}
+h2{font-size:1.28rem;margin:.1rem 0 .7rem;line-height:1.3}
+h3{font-size:1.07rem;margin:1.1rem 0 .45rem;line-height:1.35}
+p{margin:.5rem 0;max-width:76ch}
 a{color:var(--accent)}
 code,kbd{background:var(--code-bg);border-radius:.3rem;padding:.08rem .35rem;
-  font:.86em ui-monospace,SFMono-Regular,Menlo,monospace}
-pre{background:var(--code-bg);padding:.7rem .9rem;border-radius:.5rem;
-  overflow-x:auto}
-pre code{background:none;padding:0}
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(9.5rem,1fr));
-  gap:.7rem;margin:.4rem 0 .8rem}
-.tile{border:1px solid var(--line);border-radius:.55rem;padding:.55rem .8rem;background:var(--bg)}
-.tile .n{font-size:1.35rem;font-weight:650;display:block}
-.tile .l{font-size:.76rem;color:var(--muted)}
-.badge{display:inline-block;font-size:.72rem;font-weight:600;letter-spacing:.02em;
-  padding:.08rem .5rem;border-radius:99px}
+  font:.9em ui-monospace,SFMono-Regular,Menlo,monospace}
+pre{background:var(--code-bg);padding:.75rem .9rem;border-radius:.5rem;
+  overflow-x:auto;font-size:.92rem;line-height:1.5}
+pre code{background:none;padding:0;font-size:1em}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(10.5rem,1fr));
+  gap:.7rem;margin:.4rem 0 .9rem}
+.tile{border:1px solid var(--line);border-radius:.55rem;padding:.6rem .85rem;background:var(--bg)}
+.tile .n{font-size:1.6rem;font-weight:650;display:block;line-height:1.2}
+.tile .l{font-size:.85rem;color:var(--muted)}
+.badge{display:inline-block;font-size:.8rem;font-weight:600;letter-spacing:.02em;
+  padding:.1rem .55rem;border-radius:99px;white-space:nowrap}
 .ok{color:var(--ok);background:var(--ok-bg)} .warn{color:var(--warn);background:var(--warn-bg)}
 .bad{color:var(--bad);background:var(--bad-bg)} .info{color:var(--info);background:var(--info-bg)}
 .todo{color:var(--todo);background:var(--todo-bg)}
 .tablewrap{overflow-x:auto}
-table{border-collapse:collapse;width:100%;font-size:.88rem}
-th,td{border-bottom:1px solid var(--line);text-align:left;padding:.35rem .55rem;vertical-align:top}
-th{color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;
+table{border-collapse:collapse;width:100%;font-size:.95rem}
+th,td{border-bottom:1px solid var(--line);text-align:left;padding:.42rem .6rem;vertical-align:top}
+th{color:var(--muted);font-size:.85rem;text-transform:uppercase;letter-spacing:.04em;
   cursor:pointer;user-select:none;white-space:nowrap}
 th.nosort{cursor:default}
 tr:hover td{background:color-mix(in srgb, var(--accent) 6%, transparent)}
-details{border:1px solid var(--line);border-radius:.5rem;padding:.45rem .8rem;margin:.45rem 0;background:var(--bg)}
-summary{cursor:pointer;font-weight:600;font-size:.9rem}
+details{border:1px solid var(--line);border-radius:.5rem;padding:.5rem .85rem;margin:.5rem 0;background:var(--bg)}
+summary{cursor:pointer;font-weight:600;font-size:1rem}
 details[open]{padding-bottom:.6rem}
-input.filter{width:100%;max-width:24rem;margin:.2rem 0 .5rem;padding:.3rem .6rem;
-  border:1px solid var(--line);border-radius:.4rem;background:var(--bg);color:var(--ink)}
-footer{color:var(--muted);font-size:.78rem;text-align:center;padding:1rem}
+input.filter{width:100%;max-width:26rem;margin:.2rem 0 .55rem;padding:.35rem .65rem;
+  border:1px solid var(--line);border-radius:.4rem;background:var(--bg);color:var(--ink);
+  font-size:.95rem}
+footer{color:var(--muted);font-size:.88rem;text-align:center;padding:1rem}
+
+/* ---- metadata block (page provenance + epistemic status) ---- */
+.meta{display:grid;grid-template-columns:auto 1fr;gap:.2rem .9rem;font-size:.9rem;
+  border-left:3px solid var(--line);padding:.1rem 0 .1rem .9rem;margin:.2rem 0 .9rem}
+.meta dt{color:var(--muted)}
+.meta dd{margin:0}
+/* epistemic basis of a claim — the axis that matters for generated output */
+.ev{display:inline-block;font-size:.72rem;font-weight:700;letter-spacing:.03em;
+  padding:0 .35rem;border-radius:.25rem;vertical-align:.1em;text-transform:uppercase}
+.ev-measured{color:var(--ok);background:var(--ok-bg)}
+.ev-derived{color:var(--info);background:var(--info-bg)}
+.ev-inferred{color:var(--warn);background:var(--warn-bg)}
+.ev-assumed{color:var(--bad);background:var(--bad-bg)}
+/* age: JS rewrites to "3d ago" and flags stale past the data-stale-days budget */
+time.age{color:var(--muted);font-size:.85em;font-variant-numeric:tabular-nums}
+time.age.stale{color:var(--warn);font-weight:600}
+time.age.stale::after{content:" ⚠"}
+
+/* ---- paths: openable + previewable ---- */
+a.path{font:.9em ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code-bg);
+  border-radius:.3rem;padding:.08rem .35rem;text-decoration:none;
+  border-bottom:1px dotted var(--accent)}
+a.path::after{content:"↗";font-size:.75em;color:var(--muted);margin-left:.15rem}
+a.path.haspop::after{content:"⧉";color:var(--accent)}
+
+/* ---- popups (hover/focus preview, click to pin) ---- */
+.pop{position:fixed;z-index:50;max-width:min(46rem,92vw);max-height:70vh;overflow:auto;
+  background:var(--panel);border:1px solid var(--line);border-radius:.5rem;
+  box-shadow:0 .6rem 2rem rgba(0,0,0,.28);padding:.7rem .9rem;font-size:.92rem}
+.pop h4{margin:0 0 .35rem;font-size:.92rem;font-family:ui-monospace,monospace;color:var(--muted)}
+.pop pre{margin:0;max-height:52vh;font-size:.86rem}
+.pop .pin{float:right;border:none;background:none;color:var(--muted);cursor:pointer}
+@media(hover:none){.pop{max-width:94vw}}
+
+/* ---- code blocks with chrome ---- */
+figure.code{margin:.7rem 0;border:1px solid var(--line);border-radius:.5rem;overflow:hidden}
+figure.code figcaption{display:flex;gap:.5rem;align-items:center;background:var(--bg);
+  border-bottom:1px solid var(--line);padding:.3rem .7rem;font:.85rem ui-monospace,monospace;
+  color:var(--muted)}
+figure.code figcaption .sp{flex:1}
+figure.code pre{margin:0;border-radius:0}
+pre.ln{counter-reset:l}
+pre.ln code>span.line{counter-increment:l;display:block;white-space:pre}
+pre.ln code>span.line::before{content:counter(l);display:inline-block;width:2.5em;
+  margin-right:.9em;text-align:right;color:var(--muted);user-select:none}
+pre code .hl{background:color-mix(in srgb,var(--warn) 22%,transparent);display:block}
+/* token colors — set by the inline highlighter, no external library */
+.tk-k{color:var(--todo)} .tk-s{color:var(--ok)} .tk-c{color:var(--muted);font-style:italic}
+.tk-n{color:var(--info)} .tk-f{color:var(--accent)}
+
+/* ---- sidenotes: margin on wide screens, inline detail on narrow ---- */
+.sn{display:inline}
+.sn>input{display:none}
+.sn>label{color:var(--accent);cursor:pointer;font-size:.8em;vertical-align:super}
+.sn>.note{display:none;font-size:.9rem;color:var(--muted)}
+@media(min-width:88rem){
+  .sn>.note{display:block;position:absolute;left:calc(50% + 34rem);width:15rem;
+    text-align:left;border-left:2px solid var(--line);padding-left:.6rem;margin-top:-1.2rem}
+  .sn>label{display:none}
+}
+@media(max-width:88rem){.sn>input:checked~.note{display:block;border-left:2px solid var(--line);
+  padding-left:.6rem;margin:.3rem 0}}
+
+@media print{header.page,nav#toc,button,input.filter,.pop{display:none}
+  .layout{grid-template-columns:1fr;max-width:none}
+  section{break-inside:avoid;border:none;padding:0}
+  details{border:none}details:not([open])>*:not(summary){display:revert}
+  .sn>.note{display:block;position:static;width:auto;border-left:2px solid var(--line)}}
 </style>
 </head>
 <body>
@@ -100,6 +174,8 @@ footer{color:var(--muted);font-size:.78rem;text-align:center;padding:1rem}
   <span class="chip">YYYY-MM-DD</span>
   <span class="chip">author / actor</span>
   <span class="spacer"></span>
+  <button class="fs" onclick="fs(-1)" title="smaller text">A−</button>
+  <button class="fs" onclick="fs(1)" title="larger text">A+</button>
   <button class="theme" onclick="tgl()">◐ theme</button>
 </header>
 
@@ -109,6 +185,20 @@ footer{color:var(--muted);font-size:.78rem;text-align:center;padding:1rem}
 
 <section id="summary">
   <h2>Summary</h2>
+
+  <!-- SLOT: metadata block. Delete rows that don't apply; keep generated+as-of.
+       status: notes | draft | in-progress | finished
+       basis:  what the CONCLUSION rests on, not what you wish it rested on -->
+  <dl class="meta">
+    <dt>generated</dt><dd><time class="age" datetime="2026-01-01T00:00:00Z"></time></dd>
+    <dt>data as of</dt><dd><time class="age" datetime="2026-01-01T00:00:00Z"
+        data-stale-days="7"></time> — figures below were measured then</dd>
+    <dt>status</dt><dd><span class="badge warn">in-progress</span></dd>
+    <dt>basis</dt><dd><span class="ev ev-measured">measured</span> counts ·
+      <span class="ev ev-inferred">inferred</span> cause</dd>
+    <dt>source</dt><dd><a class="path" href="file:///path/to/thing">/path/to/thing</a></dd>
+  </dl>
+
   <!-- SLOT: stat tiles -->
   <div class="tiles">
     <div class="tile"><span class="n">42</span><span class="l">things counted</span></div>
@@ -135,6 +225,59 @@ footer{color:var(--muted);font-size:.78rem;text-align:center;padding:1rem}
   </details>
 </section>
 
+<!-- ============ DELETE THIS SECTION — it is a live usage crib ============ -->
+<section id="crib">
+  <h2>Element crib (delete before shipping)</h2>
+
+  <h3>Paths: openable, and previewable without any request</h3>
+  <p>A plain openable path — <a class="path" href="file:///etc/hostname">/etc/hostname</a>.
+  Add a <code>&lt;template class="pop"&gt;</code> child and it previews on hover, focus, or
+  click-to-pin (Esc closes; ctrl/cmd-click still opens the file):</p>
+  <p><a class="path" href="file:///realm/project/polylogue/CLAUDE.md"
+        data-pop-title="CLAUDE.md — lines 1-4">/realm/project/polylogue/CLAUDE.md<template
+        class="pop"><pre><code># Polylogue
+
+Polylogue is a **local, single-writer archive for AI coding/chat sessions**.</code></pre></template></a>
+  </p>
+  <p>The <code>&lt;template&gt;</code> must be a <b>child</b> of the element it previews, not a
+  sibling — <code>:has(&gt; template.pop)</code> binds the popup to the direct parent, so a
+  stray sibling silently attaches the preview to the whole paragraph.</p>
+  <p><b>You must paste the excerpt in yourself</b> — the page cannot read the disk. That is the
+  point: the preview is a quote you took while you had the file open, so it stays true offline
+  and forever. Editor-opening links work too:
+  <code>vscode://file/&lt;abs-path&gt;:&lt;line&gt;</code>.</p>
+
+  <h3>Code with chrome</h3>
+  <figure class="code">
+    <figcaption><span>polylogue/sources/dispatch.py</span><span class="sp"></span>
+      <span>python</span><button class="cp fs">⧉ copy</button></figcaption>
+<pre class="ln"><code><span class="line"><span class="tk-k">def</span> <span class="tk-f">detect_provider</span>(payload):</span>
+<span class="line">    <span class="tk-c"># tightness order, not filename order</span></span>
+<span class="line hl">    <span class="tk-k">return</span> <span class="tk-s">"claude-ai-export"</span></span>
+</code></pre>
+  </figure>
+  <p>Wrap each line in <code>&lt;span class="line"&gt;</code> for numbering; add
+  <code>hl</code> to the lines that matter. Token classes are
+  <code>tk-k</code> keyword, <code>tk-s</code> string, <code>tk-c</code> comment,
+  <code>tk-n</code> number, <code>tk-f</code> function — apply them as you write, since a
+  runtime highlighter would be a dependency for something you already know the answer to.</p>
+
+  <h3>Sidenotes</h3>
+  <p>A claim that needs a caveat but not an interruption<span class="sn"><input type="checkbox"
+    id="sn1"><label for="sn1">[note]</label><span class="note">Margin note on wide screens;
+    a tap-to-expand inline note on narrow ones. No JS.</span></span> reads better with the
+  caveat in the margin.</p>
+
+  <h3>Epistemic basis</h3>
+  <p>Tag a claim with what it actually rests on:
+  <span class="ev ev-measured">measured</span> ran a query,
+  <span class="ev ev-derived">derived</span> computed from measurements,
+  <span class="ev ev-inferred">inferred</span> reasoned from evidence,
+  <span class="ev ev-assumed">assumed</span> taken on faith and untested.
+  The last one is not an admission of failure — an unlabelled assumption is.</p>
+</section>
+<!-- ========================= end crib ========================= -->
+
 <!-- SLOT: more sections -->
 
 </main>
@@ -145,7 +288,14 @@ footer{color:var(--muted);font-size:.78rem;text-align:center;padding:1rem}
 /* theme toggle */
 function tgl(){const r=document.documentElement,
   d=(r.dataset.theme||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'))==='dark';
-  r.dataset.theme=d?'light':'dark'}
+  r.dataset.theme=d?'light':'dark';try{localStorage.htmlreport_theme=r.dataset.theme}catch(e){}}
+/* reading size: A-/A+ step --fs, both persisted; restore on load */
+function fs(d){const r=document.documentElement,
+  cur=parseFloat(getComputedStyle(r).getPropertyValue('--fs'))||17,
+  next=Math.min(24,Math.max(13,cur+d));
+  r.style.setProperty('--fs',next+'px');try{localStorage.htmlreport_fs=next}catch(e){}}
+try{if(localStorage.htmlreport_fs)document.documentElement.style.setProperty('--fs',localStorage.htmlreport_fs+'px');
+    if(localStorage.htmlreport_theme)document.documentElement.dataset.theme=localStorage.htmlreport_theme}catch(e){}
 /* auto-TOC from h2/h3 */
 (()=>{const t=document.getElementById('toc');if(!t)return;
 document.querySelectorAll('main h2, main h3').forEach(h=>{
@@ -160,11 +310,69 @@ document.querySelectorAll('table').forEach(tb=>{
     const val=td=>td.dataset.v!==undefined?+td.dataset.v:td.textContent.trim();
     [...tb.tBodies[0].rows].sort((r1,r2)=>{const a=val(r1.cells[i]),b=val(r2.cells[i]);
       const c=(typeof a=='number'&&typeof b=='number')?a-b:String(a).localeCompare(String(b));
-      return dir==='a'?c:-c}).forEach(r=>tb.tBodies[0].appendChild(r))})))});
+      return dir==='a'?c:-c}).forEach(r=>tb.tBodies[0].appendChild(r))}))});
 /* row filter */
 function flt(inp,id){const q=inp.value.toLowerCase();
   document.querySelectorAll('#'+id+' tbody tr').forEach(r=>
     r.style.display=r.textContent.toLowerCase().includes(q)?'':'none')}
+
+/* ---- relative age + staleness. <time class="age" datetime="..."
+        [data-stale-days="7"]> renders "3d ago" and goes amber past budget.
+        Absolute date stays in the title attribute. ---- */
+(()=>{const U=[[31536e6,'y'],[2592e6,'mo'],[6048e5,'w'],[864e5,'d'],[36e5,'h'],[6e4,'m']];
+document.querySelectorAll('time.age').forEach(t=>{
+  const d=new Date(t.dateTime);if(isNaN(d))return;const ms=Date.now()-d;
+  let s='just now';for(const[u,n]of U){if(Math.abs(ms)>=u){s=Math.floor(Math.abs(ms)/u)+n+(ms<0?' ahead':' ago');break}}
+  const iso=d.toISOString().slice(0,16).replace('T',' ');
+  if(!t.textContent.trim())t.textContent=iso+' ('+s+')';else t.textContent+=' ('+s+')';
+  t.title=d.toString();
+  const budget=+(t.dataset.staleDays||0);
+  if(budget&&ms>budget*864e5)t.classList.add('stale')})})();
+
+/* ---- popups: any <a data-pop> or element with a child <template class="pop">
+        previews on hover/focus, click pins it. Content is INLINE — the page
+        makes no requests, so this works from file:// forever. ---- */
+(()=>{let cur=null,pinned=false,timer=null;
+const kill=()=>{if(cur&&!pinned){cur.remove();cur=null}};
+const show=(host,html,title)=>{
+  if(cur)cur.remove();
+  const p=document.createElement('div');p.className='pop';
+  p.innerHTML='<button class="pin" title="pin (or click the link)">📌</button>'+
+    (title?'<h4>'+title+'</h4>':'')+html;
+  document.body.appendChild(p);
+  const r=host.getBoundingClientRect(),pr=p.getBoundingClientRect();
+  let top=r.bottom+8; if(top+pr.height>innerHeight-8)top=Math.max(8,r.top-pr.height-8);
+  let left=Math.min(r.left,innerWidth-pr.width-8);
+  p.style.top=top+'px';p.style.left=Math.max(8,left)+'px';
+  p.querySelector('.pin').onclick=()=>{pinned=false;kill()};
+  p.onmouseenter=()=>clearTimeout(timer);
+  p.onmouseleave=()=>{timer=setTimeout(kill,220)};
+  cur=p};
+const src=el=>{
+  const t=el.querySelector(':scope > template.pop');
+  if(t)return[t.innerHTML,el.dataset.popTitle||''];
+  if(el.dataset.pop)return['<pre><code>'+el.dataset.pop.replace(/[<&]/g,c=>c=='<'?'&lt;':'&amp;')+
+    '</code></pre>',el.dataset.popTitle||el.getAttribute('href')||''];
+  return null};
+document.querySelectorAll('[data-pop], :has(> template.pop)').forEach(el=>{
+  const s=src(el);if(!s)return;
+  if(el.tagName==='A')el.classList.add('haspop');
+  el.tabIndex=el.tabIndex||0;
+  const open=()=>{clearTimeout(timer);pinned=false;show(el,s[0],s[1])};
+  el.addEventListener('mouseenter',()=>{clearTimeout(timer);timer=setTimeout(open,180)});
+  el.addEventListener('mouseleave',()=>{clearTimeout(timer);timer=setTimeout(kill,220)});
+  el.addEventListener('focus',open);
+  el.addEventListener('click',e=>{
+    if(el.tagName==='A'&&(e.metaKey||e.ctrlKey))return;  // let real open through
+    e.preventDefault();if(!cur)open();pinned=!pinned});
+});
+addEventListener('keydown',e=>{if(e.key==='Escape'){pinned=false;kill()}});})();
+
+/* ---- copy buttons on code figures ---- */
+document.querySelectorAll('figure.code figcaption button.cp').forEach(b=>b.onclick=()=>{
+  const c=b.closest('figure').querySelector('code');
+  navigator.clipboard.writeText(c.innerText);const o=b.textContent;b.textContent='✓';
+  setTimeout(()=>b.textContent=o,1200)});
 </script>
 </body>
 </html>

@@ -97,8 +97,160 @@ if(e.key==='ArrowLeft'&&i>0)S[i].classList.remove('on'),S[--i].classList.add('on
 ```
 Contact sheets: CSS grid of `figure` cells, `data:` URI thumbnails, captions.
 
+## Lead register (living workspace spine)
+
+One row per lead, state as a badge, provenance as an id. Duds stay in the table
+with their reason — that is the whole point. Filter box + sortable `th` come
+free from the template.
+
+```html
+<input class="filter" placeholder="filter leads…" oninput="flt(this,'leads')">
+<div class="tablewrap"><table id="leads">
+<thead><tr><th>ID</th><th>Lead</th><th>State</th><th data-v>Value</th>
+  <th class="nosort">Evidence / why</th><th>Tracker</th></tr></thead>
+<tbody>
+<tr data-state="open"><td><code>A3</code></td><td>move repair.py to maintenance/</td>
+  <td><span class="badge todo">open</span></td><td data-v="2">med</td>
+  <td>doctrine conflict, undecided in hotspots doc</td><td><code>—</code></td></tr>
+<tr data-state="dud"><td><code>A8</code></td><td>render burden</td>
+  <td><span class="badge info">dud</span></td><td data-v="0">none</td>
+  <td>all 17 targets derive from source; cannot go stale</td><td><code>—</code></td></tr>
+</tbody></table></div>
+```
+
+Add quick state filters with plain buttons over `data-state` when the register
+grows past ~20 rows:
+
+```html
+<button class="fs" onclick="st('')">all</button>
+<button class="fs" onclick="st('open')">open only</button>
+<script>function st(s){document.querySelectorAll('#leads tbody tr').forEach(r=>
+  r.style.display=(!s||r.dataset.state===s)?'':'none')}</script>
+```
+
 ## Checklist table for decision queues
 
 Use `.badge todo` → `.badge ok` cells; one row per decision, columns:
 priority badge · decision · blocker/owner · evidence link. Sortable for free
 via the template's table JS.
+
+## Annotations, corrections & handback (operator input → paste back to agent)
+
+A `file://` page has no backend — it cannot push an edit anywhere on its own.
+Two techniques close the loop without breaking the one-file/zero-request
+contract:
+
+1. **Autosave to `localStorage`**, keyed by the page's own path, the same way
+   the template already persists theme/font-size. Chromium treats each
+   absolute `file://` path as a stable origin, so edits genuinely survive
+   closing and reopening *that exact file* — free durability, no agent
+   involved. It does **not** get the data back to the agent; the agent can't
+   read the browser's storage.
+2. **A "copy for agent" button** that serializes every tagged field into one
+   JSON blob, shown in a visible, pre-selected `<textarea>` and pushed to the
+   clipboard. This is the actual bridge: the operator pastes that block into
+   the chat. Show the textarea always (don't rely on the clipboard API alone)
+   — it is the fallback when `navigator.clipboard` is blocked, and it doubles
+   as visible confirmation that something was captured.
+
+True realtime two-way sync (agent sees edits without a paste) needs either a
+companion local server — which breaks the zero-external-request contract this
+skill is built on — or Claude's Artifact runtime capabilities (`window.claude.*`,
+gated behind the `artifact-capabilities` skill), which only apply when the
+deliverable is specifically published as a Claude Artifact, not a generic file
+opened by Codex/Gemini or via `file://`. Out of scope here; the copy-button
+handback below is the general-purpose answer.
+
+**Core script** (put once, near the other scripts):
+
+```html
+<script>
+/* ---- tagged-field state: collect/restore/handback ---------------------
+   Tag any input/textarea/select with data-field="unique-key". Radio groups:
+   put the same data-field on every <input type=radio> in the group. ---- */
+function collectState(){
+  const o={};
+  document.querySelectorAll('[data-field]').forEach(el=>{
+    const k=el.dataset.field;
+    if(el.type==='checkbox')o[k]=el.checked;
+    else if(el.type==='radio'){if(el.checked)o[k]=el.value}
+    else o[k]=el.value});
+  return o}
+const HR_SKEY='hr_state:'+location.pathname;
+function saveState(){try{localStorage.setItem(HR_SKEY,JSON.stringify(collectState()))}catch(e){}}
+function restoreState(){try{
+  const s=JSON.parse(localStorage.getItem(HR_SKEY)||'{}');
+  document.querySelectorAll('[data-field]').forEach(el=>{
+    if(!(el.dataset.field in s))return;const v=s[el.dataset.field];
+    if(el.type==='checkbox')el.checked=!!v;
+    else if(el.type==='radio')el.checked=(el.value===v);
+    else el.value=v})}catch(e){}}
+document.addEventListener('input',saveState);restoreState();
+function copyState(){
+  const txt='```json\n'+JSON.stringify(collectState(),null,2)+'\n```';
+  const ta=document.getElementById('handback');
+  ta.value=txt;ta.style.display='block';ta.select();
+  navigator.clipboard.writeText(txt).catch(()=>{});
+  const b=document.getElementById('handback-btn');
+  if(b){const o=b.textContent;b.textContent='✓ copied — paste into the chat';setTimeout(()=>b.textContent=o,2000)}}
+</script>
+```
+
+**Handback control** (place once, wherever the operator will finish — end of
+the decision queue is typical):
+
+```html
+<button id="handback-btn" class="fs" onclick="copyState()">📋 copy annotations for agent</button>
+<textarea id="handback" readonly rows="6" style="display:none;width:100%;margin-top:.5rem;
+  font:.85em ui-monospace,monospace;background:var(--code-bg);color:var(--ink);
+  border:1px solid var(--line);border-radius:.4rem;padding:.5rem .7rem"></textarea>
+```
+
+**Annotation/correction cell** — free-text note or fix attached to a finding
+row (works inside any table the template already sorts/filters):
+
+```html
+<tr><td><code>/some/path</code></td><td data-v="204">204G</td>
+  <td><span class="badge warn">needs-judgment</span></td>
+  <td><textarea data-field="note.some-path" rows="1" placeholder="annotate / correct…"
+      style="width:100%;resize:vertical;background:var(--bg);color:var(--ink);
+      border:1px solid var(--line);border-radius:.3rem;padding:.2rem .4rem;font:.85em inherit"
+      oninput="this.rows=Math.max(1,this.value.split('\n').length)"></textarea></td></tr>
+```
+
+**Decision widget** — approve/defer/reject + optional note, dropped straight
+into a decision-queue row:
+
+```html
+<td>
+  <label><input type="radio" name="d1" data-field="decision.204g-cache" value="approve"> approve</label>
+  <label><input type="radio" name="d1" data-field="decision.204g-cache" value="defer"> defer</label>
+  <label><input type="radio" name="d1" data-field="decision.204g-cache" value="reject"> reject</label>
+  <input type="text" data-field="decision.204g-cache.note" placeholder="note (optional)"
+    style="width:12rem;margin-left:.4rem;background:var(--bg);color:var(--ink);
+    border:1px solid var(--line);border-radius:.3rem;padding:.15rem .4rem">
+</td>
+<style>td label{display:inline-flex;align-items:center;gap:.25rem;margin-right:.7rem;font-size:.9rem}</style>
+```
+
+**Questionnaire block** — a self-contained fieldset for a one-off question
+(naming scheme, priority ranking, yes/no with reasoning):
+
+```html
+<fieldset class="q">
+  <legend>Which naming scheme for the JPK pipeline stages?</legend>
+  <label><input type="radio" name="q1" data-field="q.jpk-naming" value="kebab"> kebab-case (00-source-…)</label>
+  <label><input type="radio" name="q1" data-field="q.jpk-naming" value="keep"> keep the existing 00_jpk_…</label>
+  <textarea data-field="q.jpk-naming.why" rows="2" placeholder="why (optional)"
+    style="width:100%;margin-top:.4rem;background:var(--bg);color:var(--ink);
+    border:1px solid var(--line);border-radius:.3rem;padding:.3rem .5rem;font:inherit"></textarea>
+</fieldset>
+<style>.q{border:1px solid var(--line);border-radius:.5rem;padding:.6rem .9rem;margin:.6rem 0}
+.q legend{padding:0 .4rem;font-weight:600;font-size:.92rem}
+.q label{display:block;margin:.25rem 0}</style>
+```
+
+Field-key convention: dotted, lowercase, stable across regenerations of the
+same report (`decision.<row-id>`, `note.<row-id>`, `q.<topic>`) — that lets a
+later agent match a pasted-back blob to the exact rows it came from without
+guessing.
