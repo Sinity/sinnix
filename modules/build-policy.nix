@@ -86,7 +86,10 @@ in
       gc = {
         automatic = true;
         dates = "weekly";
-        options = "--delete-generations +10";
+        # `--delete-generations +N` is a nix-env flag, not nix-collect-garbage's —
+        # this silently failed every weekly run since at least 2026-07-04
+        # ("unrecognised flag"), letting 141 generations accumulate unbounded.
+        options = "--delete-older-than 30d";
       };
 
       optimise = {
