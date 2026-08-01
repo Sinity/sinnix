@@ -586,12 +586,28 @@ done". First commit once the first relevant check passes, then per milestone.
 This prevents worktree auto-cleanup data loss and makes incremental merge
 possible.
 
+**Foreground-only execution:** every command a worker runs must execute
+synchronously in the worker's own turn; never launch a background job and
+idle-wait on it across turns. A worker that backgrounds a test/build run
+and then reports "waiting for it to finish" wastes real wall-clock and
+coordinator attention every time (repeatedly observed, polylogue
+2026-08-01 fanout) — always run it in the foreground and let the turn
+take as long as it takes.
+
 **Pre-flight checklist for each agent prompt:**
 
 1. Specify exact files the agent OWNS vs AVOIDS
 2. Include a "FIRST: comment on issue #N with scope" step
 3. Include a "commit after each successful check" instruction
 4. Warn about worktree cleanup: "commit or lose it"
+5. After spawn, verify the worktree actually exists, is a linked worktree
+   (not the main checkout), and is on the expected branch before trusting
+   any output — `isolation: "worktree"` can silently fail to create one,
+   in which case the agent runs directly in the main checkout and its
+   diff is not isolated (confirmed incident, polylogue 2026-08-01: an
+   agent's unreviewed schema-regeneration output landed directly in the
+   coordinator's live tree). In repos with `devtools`:
+   `devtools workspace verify-worktree <path> --expect-branch <branch>`.
 
 **Post-agent merge checklist:**
 
@@ -621,7 +637,17 @@ clustering helper where the repo has one).
   pipelining beats coordination overhead.
 - **Verification amortization**: workers run focused real-route checks plus the
   affected-area check their own change warrants. The coordinator runs the broad
-  gate once per branch at the publish boundary, not once per item.
+  gate once per branch at the publish boundary, not once per item. In a
+  multi-merge fanout session, run this broad gate on the *merged master
+  state* at each merge-train boundary, not only pre-merge on the feature
+  branch — a global drift-latch class (an unrelated enum/vocabulary change
+  breaking an assertion elsewhere) is invisible to any single PR's affected-
+  test selection and only surfaces when the merged result is tested as a
+  whole. Schedule one full, non-affected-only suite run per heavy multi-merge
+  session before declaring it done; per-PR CI deliberately skipping the heavy
+  suite means nothing else will catch this class (confirmed incident,
+  polylogue 2026-08-01: two master-red root causes found only by an
+  incidental full-suite run after ~15 PRs had already merged clean).
 - **Content-aware shapes**: mechanical sweeps (lint/docs/renames) batch
   hardest; schema/migration bumps must batch per tier/window; investigation
   items batch over a shared evidence pass; decision items batch into one
@@ -649,7 +675,18 @@ clustering helper where the repo has one).
   leave literal conflict markers in place. Instead extract both sides
   directly (`git show :2:.beads/issues.jsonl` / `:3:...`), hand-merge bead-by-
   id preferring whichever side has the later `updated_at`, verify every line
-  parses as JSON, then `git add`.
+  parses as JSON, then `git add`. The reimport hazard is not limited to
+  checkout/merge: it fires on *any* `bd` invocation from an aging
+  worktree, including a plain read-only `bd show <id>` — every `bd` call
+  reimports the invoking checkout's `.beads/issues.jsonl` into the shared
+  DB, so a worktree frozen at an older commit can silently time-machine
+  live bead state on a coordinator's concurrent writes even from a lane
+  that never touches beads intentionally (confirmed repeatedly, polylogue
+  2026-08-01: 5+ coordinator closes reverted this way in one session).
+  Lane agents dispatched into worktrees should make no `bd` writes at
+  all; the coordinator should audit bead state (diff expected vs. `bd show
+  --json`) at merge-train boundaries and re-apply anything reverted,
+  rather than trust a single write to have stuck.
 
 ### Daily oracle digest
 
