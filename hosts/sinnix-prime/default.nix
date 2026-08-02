@@ -126,6 +126,18 @@
     ocr.enable = false; # marker/Surya OCR (container)
   };
 
+  # Hard memory ceiling for the collapsed sinexd daemon (event_engine + API +
+  # automata + hosted source bindings all run in one systemd unit, governed
+  # by exactly this resource block per nixos/modules/sources.nix). The
+  # upstream default only sets a soft MemoryHigh=8G throttle; memoryMax is
+  # null (uncapped) unless set here. A bulk re-import (the exact shape of the
+  # Phase C rebuild) is the highest-memory-pressure workload sinexd runs, so
+  # an unbounded leak/backlog spike would otherwise compete with Postgres for
+  # all 32G of host RAM until host-level earlyoom intervenes instead of a
+  # clean systemd-scoped restart. 14G leaves headroom for Postgres/NATS/the
+  # rest of the workstation stack on this 32G host (sinex-audit-nomemcap).
+  services.sinex.core.api.resources.memoryMax = "14G";
+
   # CUDA builds (ollama-cuda, koboldcpp/llama-cpp/whisper-cpp -cuda) are served
   # by this cache; without it they compile locally. Trusted at switch time.
   nix.settings.substituters = [ "https://cuda-maintainers.cachix.org" ];
