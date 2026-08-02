@@ -280,10 +280,12 @@ in
     # and `nodatacow` makes the DB write in-place instead of CoW-amplifying every
     # random page write (~7× fewer writes, the dominant MX500 wear source). It is
     # deliberately NOT in btrbk's snapshot set (block-snapshotting a live DB is
-    # unsafe). Durability is the persistent subvol itself; FOLLOW-UP: add a
-    # logical pg_dump backup for disaster recovery, since nodatacow implies no
-    # btrfs checksums (standard for DB volumes) and this subvol sits outside the
-    # btrbk→borg path.
+    # unsafe). Durability is the persistent subvol itself; disaster recovery
+    # is the logical pg_dump backup wired in modules/services/sinex/bridge.nix
+    # (sinex-postgres-dump.service+.timer, daily, 14-dump retention, staged
+    # at /realm/staging/sinex-postgres which IS covered by the /realm
+    # btrbk→borg path) — added 2026-07-10 (344e38b), closing the FOLLOW-UP
+    # this comment used to describe.
     # Migrated off the worn MX500 (~104% rated NAND) to the /realm NVMe on
     # 2026-07-10 (sinnix-6b4): rsync'd 268G with services stopped for the
     # final delta pass. The whole-mount `nodatacow` option is gone on
