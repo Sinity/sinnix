@@ -71,6 +71,13 @@ case "$subcommand" in
       need_cmd slurp
     fi
 
+    # Concurrent invocations race on the shared SDR-switch state: the second
+    # instance reads the already-switched cm=srgb, skips its own switch, and
+    # captures after the first instance restored HDR — yielding a second
+    # selection prompt and a washed-out frame.
+    exec 9>"${XDG_RUNTIME_DIR:-/tmp}/hdr-screenshot.lock"
+    flock -n 9 || die "another capture is already in progress"
+
     mkdir -p "$target_dir"
     path="${target_dir}/$(date +'%Y-%m-%d-At-%Hh%Mm%Ss').png"
 
@@ -101,6 +108,15 @@ case "$subcommand" in
       fi
     }
 
+    if [ "$subcommand" = "area" ]; then
+      # Select before any modeset: switching the output under the slurp
+      # overlay disturbs the selection surface, and selecting first keeps the
+      # visible SDR window at ~0.3s instead of the whole selection time.
+      # Geometry stays valid — the capture rule keeps resolution and scale.
+      geom="$(slurp)"
+      [ -n "$geom" ] || die "area selection cancelled"
+    fi
+
     if [ "$cm" = "hdr" ]; then
       trap restore_monitor EXIT
       hyprctl keyword monitor "$capture_rule" >/dev/null
@@ -109,8 +125,6 @@ case "$subcommand" in
 
     case "$subcommand" in
       area)
-        geom="$(slurp)"
-        [ -n "$geom" ] || die "area selection cancelled"
         grim -g "$geom" "$path"
         ;;
       output)
