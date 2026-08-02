@@ -202,6 +202,21 @@ revision's timestamp. This matters most for living workspaces revised many times
 one long session, where the temptation to eyeball "roughly N minutes since last time"
 is strongest and the compounding error is largest.
 
+### 2026-08-01 — decision-widget radios are too small to be usable controls
+**What happened:** Operator feedback, unprompted, on a decision-queue report: "these aren't
+tiny little controls to hunt for" — the patterns.md decision widget renders as native
+`<input type=radio>` + short text label at body font size, which is a genuinely small click
+target once a table has 10+ decision rows packed for density.
+**Root cause / mechanism:** The widget pattern optimized for markup simplicity (bare radio +
+label, no wrapper styling) and never got operator eyes on a real dense decision queue — the
+crib/patterns doc examples are all single-row demos, which hide how small the controls read
+once repeated down a column.
+**Fix or pattern:** Replaced with a segmented-button style: hide the native radio
+(`display:none`), style its `<label for=id>` as a real button (padding, border, rounded), and
+use `input:checked + label` to fill it solid on selection. Needs unique `id`/`for` pairs per
+option (not just unique `name` per row, which the widget already required per the 2026-07-31
+note above). Folded into `patterns.md`'s Decision widget section.
+
 ## 2026-07-31 — headless-render check: harness sandbox kills Chrome silently
 `google-chrome-stable --headless --dump-dom file://…` under the sandboxed Bash tool
 produced 0-byte DOM (new-headless) or exit 144/hang (old headless), with no useful stderr.
@@ -210,3 +225,81 @@ Re-running the identical command with sandbox disabled rendered fine. Symptom to
 check with the sandbox off (it only reads the local file), fresh `--user-data-dir` under
 /realm/tmp, `--virtual-time-budget=4000`, and `timeout 90` (chrome may not exit after
 dumping; exit 124 with a full DOM is a PASS, not a failure).
+
+## 2026-08-01 — provenance-aware time series: era bands + event markers + synthetic-region hatch
+Built for the polylogue trajectory report (rev 2). When part of a time axis is
+known-unreliable (here: git author dates backdated by a history rewrite), tinted
+era bands + dashed event markers are not enough — readers still read the bars as
+data. Adding a 45° hatch `<pattern>` overlay across the unreliable region, plus
+an inline italic label ("synthetic dates (rebuilt history)") and reduced bar
+opacity, made the provenance boundary unmissable while keeping the series
+plottable. Stagger marker labels vertically (`y - (i%3)*13`) when events cluster
+within a few weeks, or they overprint. Verified headless-rendered. Candidate for
+patterns.md if it recurs.
+
+## 2026-08-02 — evidence-tag scope is invisible in dense prose: the `.claim` wrapper
+**Symptom (operator-reported):** a paragraph carrying 3-4 `ev-measured` tags mid-sentence
+reads as "flairs floating near text" — it is genuinely undecidable which words each tag
+certifies (whole sentence? the last number? the clause?).
+**Fix / pattern:** wrap EXACTLY the certified words + their tag in a scope span:
+`<span class="claim">13,671 rows are duplicates<span class="ev ev-measured">measured</span></span>`
+with CSS `.claim{border-bottom:1px dotted color-mix(in srgb,var(--ink) 45%,transparent);
+border-radius:.15rem} .claim:hover{background:color-mix(in srgb,var(--accent) 10%,transparent)}
+.claim>.ev{margin-left:.28em}`. The dotted underline delimits scope; hover highlights the
+claim+tag as one unit. Convention: in tables/stat tiles the tag scopes the whole row/tile and
+needs no wrapper — say so once in the metadata `basis` row (one demo inline there teaches the
+reader the convention). Candidate for template + SKILL.md's evidence section.
+
+## 2026-08-02 — hand-placed SVG diagrams: rules that prevented a layout-fix round-trip
+Operator flagged "obvious issues" on a 5-lane dataflow SVG built with ad-hoc coordinates.
+What fixed it, as reusable rules: (1) **pins/markers as rounded `<rect>`s, never small
+circles** — 3-char labels overflow r=11 circles; rect w = 22 + 6·chars, h=18, seated ON the
+border of the box they annotate (half in, half out) so their attachment is visually
+unambiguous; (2) **orthogonal elbow arrows only, routed through inter-lane gutters**
+(`M x1,y1 V gutter H x2 V y2`) — diagonal arrows always end up crossing text at some
+viewport; (3) **lane bands as tinted background rects with labels ABOVE the band**
+(labels inside the band collide with row boxes sooner or later); (4) **a legend row inside
+the SVG** for any marker color semantics — colors alone don't explain amber-vs-red pins;
+(5) **proofread SVG `<text>` content separately** — typos like a missing space
+("·761,602") live outside every automated check (tag balance, node --check, headless render
+all pass). Layout constants that worked: box h=48-70, 3 text lines max (13px title / 11px
+subs), ≥30px vertical gutters between lanes, viewBox padded ~40px below the last row for
+the legend.
+
+## 2026-08-02 — timestamps must come from the clock, not the narrative
+Operator caught `generated`/`data as of` values that were round-number guesses ("12:30",
+"11:00"). For a data-derived report the fix is mechanical: run `date -Iseconds` at write
+time for `generated`, and re-execute the headline queries at that same moment so
+`data as of` is a real measurement timestamp (cheap — the headline set is 5-6 COUNT/SUM
+queries), noting in the meta row that detail queries ran earlier in the session. A guessed
+timestamp on a report whose whole pitch is "every number is traceable to a query"
+undermines the rest.
+
+## 2026-08-02 — worktree-sandboxed agents: heredoc/redirect Bash is refused; use Write for helpers
+In a worktree-isolated Claude Code agent, any Bash with heredocs/redirects targeting paths
+outside the worktree can be refused as "too complex to verify". Pattern that works: create
+helper scripts (_check.py, _dom.js) via the Write tool into the scratchpad, then invoke them
+with a plain `python3/node <path> <args>` command line. Same applies to the script-extraction
++ `node --check` shipping check — write the extractor as a file, don't pipe.
+
+## 2026-08-02 — evidence-tag scope, round 2: dotted underline was not enough; tint through the text
+Follow-up to the same-day `.claim` note above: operator escalated — the dotted underline still
+did not clearly anchor which words a measured/derived/inferred tag certifies. What settled it:
+a colored tint RUNNING THROUGH the certified text, colored BY evidence class, so scope and
+class are one visual: `.claim{border-radius:.25rem;padding:.02rem .2rem;
+box-decoration-break:clone;-webkit-box-decoration-break:clone}` plus per-class variants
+`.claim-m` (ok-color bg at 11% + `box-shadow:inset 0 -2px 0` at 50% for a bottom rule),
+`.claim-d` (info), `.claim-i` (warn). `box-decoration-break:clone` matters — multi-line claims
+keep the tint on every fragment. The tag sits INSIDE the span; the metadata `basis` row
+carries a one-line inline demo of the convention (green = measured, blue = derived, amber =
+inferred). Supersedes the dotted-underline variant; fold into template + patterns.md.
+
+## 2026-08-02 — atlas-class reports: two patterns folded, publish-by-default made explicit
+Built the polylogue-atlas (comprehensive standalone system+codebase report). Two reusable
+outcomes folded into patterns.md same day: "Measured treemap (SVG, no libs)" — generate
+rects from measured data with slice-and-dice, never hand-place; and "Lens-first system
+explainer" — organize by 4-7 design-commitment lenses with consequences traced to measured
+facts, not by package tour. Also per operator standing instruction: SKILL.md workflow step 4
+now states Artifact publishing is the DEFAULT shipping step for every HTML report (it's a
+private-to-operator view, so sensitivity bar is low); previously worded as advisory and
+sessions skipped it.
