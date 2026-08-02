@@ -123,6 +123,13 @@ in
       } # GCloud auth + credentials
       ".config/cachix" # cachix auth token
       {
+        directory = ".android";
+        mode = "0700";
+      } # adb keys — losing them deauthorizes paired devices
+      ".pkuseg" # pkuseg NLP model data (downloaded, slow to refetch)
+      ".dolt" # dolt global config/identity
+      ".beads" # beads global state
+      {
         directory = ".config/io.datasette.llm";
         mode = "0700";
       } # LLM CLI keys + logs
