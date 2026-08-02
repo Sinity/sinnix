@@ -83,6 +83,18 @@ an *unlabelled* assumption is. In practice this pays for itself: re-measuring
 something previously tagged `inferred` is where a large share of real findings
 come from.
 
+**Scope the tag, don't float it.** In prose, wrap exactly the certified words in
+a claim tint — `<span class="claim claim-m">…words…<span class="ev
+ev-measured">measured</span></span>` (`claim-m/d/i` = measured/derived/inferred;
+template-native, `box-decoration-break:clone` keeps multi-line claims tinted). In
+tables and stat tiles the tag scopes the whole row/tile — state that convention
+once in the meta `basis` row with a one-line inline demo.
+
+**Measured is the default; tag the exceptions.** In a report where nearly every
+number was queried, an identical green chip on all of them carries no
+information and buries the few that are derived or inferred — declare
+"measured unless tagged" once in the basis row, then tag only departures.
+
 Also carry gwern's **status** vocabulary when the document will be revisited:
 `notes` → `draft` → `in-progress` → `finished`.
 
@@ -184,10 +196,132 @@ Notes get folded into `SKILL.md` / `patterns.md` / the template once confirmed
 or once the file grows past ~15 entries, and are deleted when folded. Verify
 before folding: a note is one agent's experience and may be wrong.
 
-Before shipping any artifact, run the two checks that file's own notes were
-written from — extract the `<script>` and `node --check` it, then headless-render
-and grep the DOM for evidence the JS actually ran. A syntax error anywhere in
-the script block silently kills every interactive feature on the page.
+## Shipping checks (run before delivering any artifact)
+
+Each of these exists because its absence shipped a real defect:
+
+1. **`node --check` the extracted `<script>`.** One syntax error silently kills
+   every interactive feature — theme, TOC, sort, popups — with nothing logged.
+   Write the extractor as a helper file and invoke it plainly (heredoc/redirect
+   one-liners get refused in sandboxed worktree agents).
+2. **Headless-render and judge the DOM, not the exit code.**
+   `timeout 180 google-chrome-stable --headless=new --no-sandbox --disable-gpu
+   --user-data-dir=<fresh tmp> --virtual-time-budget=4000 --dump-dom` — run with
+   the Bash sandbox off (it only reads a local file); chrome may hang after a
+   complete dump, so exit 124 with a full DOM is a PASS. Before asserting,
+   confirm the dump is non-empty **and newer than the HTML** — a killed chrome
+   leaves a zero-byte or stale file that reads as a pass. Then grep for evidence
+   the JS ran: populated `nav#toc`, `ago)` in rewritten times, `haspop`,
+   `tabindex="0"` on popup hosts, filled `data-calc` values.
+3. **Grep for `POP-TODO`.** The template's stat tiles carry a query-popup slot
+   with that sentinel; any survivor means a headline number shipped without its
+   query.
+4. **Timestamps come from the clock, never the narrative.** Run
+   `date -u +%Y-%m-%dT%H:%M:%SZ` at write time for `generated`, and re-execute
+   the headline queries at that moment so `data as of` is a real measurement
+   time. Agents systematically underestimate elapsed wall-clock (hours read as
+   "a few sections"), and `time.age` renders against the viewer's real clock, so
+   a guessed value is visibly wrong the moment the page opens. Never increment
+   from a prior revision's estimate.
+5. **Proofread SVG `<text>` content separately** — it is outside every
+   automated check above.
+
+## Data-derived reports (when the content came from a system)
+
+A report computed from a database, an archive, a test run, or a live system is
+a different artifact from one written from memory, and it earns a different
+standard: **every number should be traceable to the query that produced it.**
+
+The failure mode is specific and common. An analysis gets written by *reading*
+the source material — scrolling a transcript, skimming logs — and produces
+confident round numbers with a quiet disclaimer that they are approximate. That
+disclaimer is the tell: the data existed and was queryable, and the report
+guessed anyway. If a system can answer the question exactly, asking it is not
+extra rigour, it is the job.
+
+So, in order of importance:
+
+1. **Query, don't estimate.** If the number is in a database, select it. Reserve
+   `ev-inferred` for things genuinely not measurable, and label those honestly
+   instead of dressing them up as measurements.
+2. **Attach the query to the number.** See "Query-attributed metric" in
+   `references/patterns.md` — a `<template class="pop">` on the tile carrying the
+   exact invocation. The reader can verify; the next agent can regenerate; and a
+   number whose query no longer runs becomes visibly stale rather than silently
+   wrong.
+3. **Show the holes.** When a query *should* have produced a number and did not
+   — timeout, missing surface, unimplemented view — show the gap. A visible hole
+   is information about the system; a substituted estimate is not.
+4. **Separate measured from derived from inferred**, and put the split in the
+   metadata block. A report that is 90% measured and says so is far more useful
+   than one that is 100% confident and 60% measured.
+
+When the reporting *is* the demonstration — showing what a tool can do — this
+matters twice over, because an unverifiable claim about a tool's capability is
+worth less than a small verifiable one. Prefer three numbers the reader can
+reproduce over thirty they cannot.
+
+## Generators: a recurring report shape is a program, not a document
+
+A report that will be produced more than once — a backlog state page, a fleet
+dashboard, a filesystem census — should be emitted by a script, not hand-written
+each time. Hand-authored recurring reports rot in a specific way: sections get
+updated at different moments and start contradicting each other, and claims
+outlive the evidence that once supported them. The generator genre fixes both
+structurally. Reference implementation: polylogue's
+`devtools workspace beads-state-report` (the "Beads backlog — state of the
+graph" artifact), which demonstrates every rule below at 1,500-entity scale.
+
+- **Findings are conditional predicates, not prose.** Each finding is emitted
+  by a condition the generator checks at render time — a claim that stops being
+  true stops being printed. No hand-authored judgment can silently outlive its
+  evidence.
+- **A provenance table maps every section to its origin**: measured from input /
+  derived reconstruction / authored framing / operator-supplied constant. The
+  framing sentences are deliberately data-free.
+- **`--fresh` semantics**: the generator re-exports its input first; without it,
+  the report describes whatever the input file last held, and says so.
+- **The regenerate command is printed in the artifact** — a report that names
+  its own generator is one command from current.
+
+Placement: repo-coupled generators (beads state, test dashboards) live in that
+repo's own tooling. Repo-agnostic ones live inside this skill at
+`generators/` — first resident: `reports-index.py`, which builds the index page
+over a reports directory (see Corpus conventions below). One-off investigations
+(incident forensics, a design review) stay hand-authored — the generator tax is
+only worth paying for shapes that recur.
+
+## Corpus conventions (many reports, one directory)
+
+Reports accumulate; a directory of twenty undated-vs-dated, superseded-vs-live
+files with no index is its own legibility failure (observed live, 2026-08-02).
+
+- **Durable home**: `/realm/data/derived/reports/` (workflow step 3). Keep the
+  generated index current: `python3 generators/reports-index.py
+  /realm/data/derived/reports` (idempotent; run it after adding a report).
+- **Supersession is explicit.** A replaced report gets a `superseded-by` meta
+  row + banner pointing forward (and the successor a `supersedes` row back).
+  Never leave two siblings that both look current. For artifacts, republish the
+  same `file_path` so the URL stays stable instead of minting a sibling.
+- **Living workspaces get a stable filename** (no date suffix) — the date
+  belongs in the metadata block, the filename is the bookmark. One-shot reports
+  keep `<topic>-<YYYY-MM-DD>.html`.
+- **Companions row**: a report belonging to a suite links its siblings in the
+  meta block (see the atlas), never summarizes them inline.
+
+## Visual identity (which report is this, at a glance)
+
+The template's structure, controls, and semantic colors are a house style and
+never vary. The **accent is per-subject**: set `data-accent` on `<html>` —
+`forensic` (amber) / `ops` (violet) / `finance` (teal) / `archive` (magenta) /
+`design` (olive) / unset = infra blue. Pick deliberately; six reports that all
+ship the default blue are indistinguishable in a tab strip, which defeats the
+point of having an identity at all. Status colors (`ok/warn/bad/info/todo`) are
+semantic and identical in every report — identity never rides on them.
+
+For any chart beyond the template's histogram/dist-bar patterns, load the
+`dataviz` skill before writing chart code — it owns chart form, palettes, and
+accessibility; this skill owns the page around the chart.
 
 ## Contract (every HTML artifact)
 
@@ -231,6 +365,12 @@ Required elements, beyond the ordinary report shell:
   about which claims were fragile.
 - **Provenance per claim** — a PR number, bead id, commit, or the command that
   produced the figure. Unsourced numbers in a resumed session are unusable.
+- **Summary tiles are computed, not typed.** Any headline countable from the
+  document's own rows uses `data-calc="count:SELECTOR"` / `sum:SELECTOR` so a
+  revision cannot leave the summary contradicting the body (confirmed failure
+  mode: one workspace simultaneously claimed 128, 24, and 101+27 for the same
+  count in three hand-maintained places). Hand-write only numbers that come
+  from outside the document.
 
 Keep it one file. Split-per-thread markdown was the previous shape and its cost
 was that the index and the threads drifted.
@@ -259,10 +399,13 @@ is the signal to bead it or kill it.
    sibling directories are auto-reaped on a 7-day tmpfiles timer. Reserve
    scratch/`/realm/tmp` for genuinely single-use output you will not need to
    reference again.
-4. Deliver it. When the `Artifact` tool is available (Claude Code sessions),
-   **publish by default** — artifacts are private until the operator shares
-   them, and a browsable link (`claude.ai/code/artifacts`) is more useful long
-   after the turn ends than a file sitting in scratch. Skim the content first
+4. Deliver it. **Publishing as an Artifact is the DEFAULT step of shipping any
+   HTML report, not an optional extra** — do it in the same breath as copying
+   the file to its durable home, without waiting to be asked (operator standing
+   instruction, 2026-08-02). Artifacts are private-to-the-operator until they
+   share them ("publishing" here just means the operator's own browsable view),
+   and a link at `claude.ai/code/artifacts` is more useful long after the turn
+   ends than a file sitting in scratch. Skim the content first
    for anything genuinely sensitive (credentials, unredacted personal data,
    material the operator hasn't seen if you didn't author it this turn) —
    internal paths, hostnames, and ordinary project/engineering detail are not
@@ -289,5 +432,8 @@ is the signal to bead it or kill it.
 - Comparisons: CSS grid `grid-template-columns: repeat(auto-fit, minmax(20rem,1fr))`.
 - Status color: use the badge classes (`.ok .warn .bad .info .todo`) — never
   raw reds/greens; they're theme-tuned in the template.
+- Sortable numeric columns: EVERY cell needs `data-v` — one bare "—" cell
+  downgrades the whole column to string compare, which reorders wrongly rather
+  than failing. Give n/a cells an out-of-band sentinel (`data-v="-1"`).
 - Diagrams: hand-write inline SVG (boxes+arrows beat ASCII art); label every
   edge; `viewBox` only, no fixed px sizes.

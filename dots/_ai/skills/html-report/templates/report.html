@@ -1,5 +1,9 @@
 <!doctype html>
-<html lang="en">
+<!-- SLOT: identity. Pick data-accent for the SUBJECT, don't ship the default
+     blue reflexively: forensic (amber) · ops (violet) · finance (teal) ·
+     archive (magenta) · design (olive) · omit attribute = infra/tooling blue.
+     Semantic status colors never change with identity. -->
+<html lang="en" data-accent="">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -36,6 +40,33 @@
   --bad:#a01c1c; --bad-bg:#fbe4e4; --info:#1d4ed8; --info-bg:#e3ebfd;
   --todo:#6b21a8; --todo-bg:#f1e6fb; --code-bg:#eef1f4;
 }
+/* ---- subject identity: pick ONE accent per report, keyed to the subject.
+        Set data-accent on <html>. The default blue is for tooling/infra docs;
+        do not let every report default into it — a reader with six reports
+        open should be able to tell them apart by hue. Semantic colors
+        (ok/warn/bad/info/todo) NEVER vary with identity. ---- */
+html[data-accent="forensic"]{--accent:#b45309;--accent-ink:#fff}   /* ambers: investigations, incident work */
+html[data-accent="ops"]{--accent:#7c3aed;--accent-ink:#fff}        /* violet: coordination, fleets, process */
+html[data-accent="finance"]{--accent:#0f766e;--accent-ink:#fff}    /* teal: money, admin, personal records */
+html[data-accent="archive"]{--accent:#9d174d;--accent-ink:#fff}    /* magenta: data lakes, storage, provenance */
+html[data-accent="design"]{--accent:#4d7c0f;--accent-ink:#fff}     /* olive: proposals, plans, architecture */
+@media (prefers-color-scheme: dark){
+  html[data-accent="forensic"]{--accent:#e8a04c;--accent-ink:#1a1206}
+  html[data-accent="ops"]{--accent:#b08df2;--accent-ink:#160d24}
+  html[data-accent="finance"]{--accent:#4fc5b8;--accent-ink:#062020}
+  html[data-accent="archive"]{--accent:#e87faa;--accent-ink:#24101a}
+  html[data-accent="design"]{--accent:#a3c76d;--accent-ink:#141c06}
+}
+html[data-theme="dark"][data-accent="forensic"]{--accent:#e8a04c;--accent-ink:#1a1206}
+html[data-theme="dark"][data-accent="ops"]{--accent:#b08df2;--accent-ink:#160d24}
+html[data-theme="dark"][data-accent="finance"]{--accent:#4fc5b8;--accent-ink:#062020}
+html[data-theme="dark"][data-accent="archive"]{--accent:#e87faa;--accent-ink:#24101a}
+html[data-theme="dark"][data-accent="design"]{--accent:#a3c76d;--accent-ink:#141c06}
+html[data-theme="light"][data-accent="forensic"]{--accent:#b45309;--accent-ink:#fff}
+html[data-theme="light"][data-accent="ops"]{--accent:#7c3aed;--accent-ink:#fff}
+html[data-theme="light"][data-accent="finance"]{--accent:#0f766e;--accent-ink:#fff}
+html[data-theme="light"][data-accent="archive"]{--accent:#9d174d;--accent-ink:#fff}
+html[data-theme="light"][data-accent="design"]{--accent:#4d7c0f;--accent-ink:#fff}
 /* Reading size. --fs is the ONE knob; everything below is relative to it.
    17px is the floor for a document a human reads end-to-end — do NOT lower it,
    and do not reintroduce absolute px sizes anywhere else. A-/A+ persist. */
@@ -61,9 +92,13 @@ nav#toc{position:sticky;top:3.8rem;align-self:start;font-size:.92rem;
 nav#toc a{display:block;color:var(--muted);text-decoration:none;padding:.16rem 0}
 nav#toc a.h3{padding-left:.9rem;font-size:.87rem}
 nav#toc a:hover{color:var(--accent)}
+nav#toc a.on{color:var(--accent);font-weight:600;
+  box-shadow:inset .16rem 0 0 var(--accent);padding-left:.35rem}
+nav#toc a.h3.on{padding-left:1.25rem}
 main{min-width:0}
 section{background:var(--panel);border:1px solid var(--line);border-radius:.6rem;
   padding:1.1rem 1.3rem;margin-bottom:1.1rem}
+h1,h2,h3{text-wrap:balance}
 h2{font-size:1.28rem;margin:.1rem 0 .7rem;line-height:1.3}
 h3{font-size:1.07rem;margin:1.1rem 0 .45rem;line-height:1.35}
 p{margin:.5rem 0;max-width:76ch}
@@ -76,8 +111,11 @@ pre code{background:none;padding:0;font-size:1em}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(10.5rem,1fr));
   gap:.7rem;margin:.4rem 0 .9rem}
 .tile{border:1px solid var(--line);border-radius:.55rem;padding:.6rem .85rem;background:var(--bg)}
-.tile .n{font-size:1.6rem;font-weight:650;display:block;line-height:1.2}
+.tile .n{font-size:1.6rem;font-weight:650;display:block;line-height:1.2;
+  font-variant-numeric:tabular-nums}
 .tile .l{font-size:.85rem;color:var(--muted)}
+.tile.qa{position:relative;cursor:help}
+.tile.qa::after{content:"⌕";position:absolute;top:.35rem;right:.45rem;opacity:.35;font-size:.8rem}
 .badge{display:inline-block;font-size:.8rem;font-weight:600;letter-spacing:.02em;
   padding:.1rem .55rem;border-radius:99px;white-space:nowrap}
 .ok{color:var(--ok);background:var(--ok-bg)} .warn{color:var(--warn);background:var(--warn-bg)}
@@ -89,6 +127,7 @@ th,td{border-bottom:1px solid var(--line);text-align:left;padding:.42rem .6rem;v
 th{color:var(--muted);font-size:.85rem;text-transform:uppercase;letter-spacing:.04em;
   cursor:pointer;user-select:none;white-space:nowrap}
 th.nosort{cursor:default}
+td.num,td[data-v]{text-align:right;font-variant-numeric:tabular-nums}
 tr:hover td{background:color-mix(in srgb, var(--accent) 6%, transparent)}
 details{border:1px solid var(--line);border-radius:.5rem;padding:.5rem .85rem;margin:.5rem 0;background:var(--bg)}
 summary{cursor:pointer;font-weight:600;font-size:1rem}
@@ -110,6 +149,20 @@ footer{color:var(--muted);font-size:.88rem;text-align:center;padding:1rem}
 .ev-derived{color:var(--info);background:var(--info-bg)}
 .ev-inferred{color:var(--warn);background:var(--warn-bg)}
 .ev-assumed{color:var(--bad);background:var(--bad-bg)}
+/* claim scope: a tint running through EXACTLY the certified words, colored by
+   evidence class, tag inside the span. In tables/tiles the tag covers the whole
+   row/tile and needs no wrapper — state that convention once in the meta basis
+   row. Convention: measured is the DEFAULT for a data-derived report; tag only
+   derived/inferred/assumed exceptions, or the tags drown in their own green. */
+.claim{border-radius:.25rem;padding:.02rem .2rem;
+  box-decoration-break:clone;-webkit-box-decoration-break:clone}
+.claim>.ev{margin-left:.28em}
+.claim-m{background:color-mix(in srgb,var(--ok) 11%,transparent);
+  box-shadow:inset 0 -2px 0 color-mix(in srgb,var(--ok) 50%,transparent)}
+.claim-d{background:color-mix(in srgb,var(--info) 11%,transparent);
+  box-shadow:inset 0 -2px 0 color-mix(in srgb,var(--info) 50%,transparent)}
+.claim-i{background:color-mix(in srgb,var(--warn) 11%,transparent);
+  box-shadow:inset 0 -2px 0 color-mix(in srgb,var(--warn) 50%,transparent)}
 /* age: JS rewrites to "3d ago" and flags stale past the data-stale-days budget */
 time.age{color:var(--muted);font-size:.85em;font-variant-numeric:tabular-nums}
 time.age.stale{color:var(--warn);font-weight:600}
@@ -233,12 +286,21 @@ q.iq,.iq{font-style:italic;background:color-mix(in srgb,var(--accent) 8%,transpa
     <dt>basis</dt><dd><span class="ev ev-measured">measured</span> counts ·
       <span class="ev ev-inferred">inferred</span> cause</dd>
     <dt>source</dt><dd><a class="path" href="file:///path/to/thing">/path/to/thing</a></dd>
+    <!-- optional, for revised/replaced docs — keep the chain navigable:
+    <dt>supersedes</dt><dd><a class="path" href="file:///old/report.html">old-report</a></dd>
+    -->
   </dl>
 
-  <!-- SLOT: stat tiles -->
+  <!-- SLOT: stat tiles. Every headline tile in a data-derived report carries
+       the query that produced it as a popup (fill the template or delete it —
+       the shipping check greps for the POP-TODO sentinel). A tile whose value
+       is countable from this page's own rows should COMPUTE it via data-calc
+       instead of hard-coding a number that can drift from the rows. -->
   <div class="tiles">
-    <div class="tile"><span class="n">42</span><span class="l">things counted</span></div>
-    <div class="tile"><span class="n">7</span><span class="l">actions taken</span></div>
+    <div class="tile qa"><span class="n">42</span><span class="l">things counted</span>
+      <template class="pop"><pre><code>POP-TODO: exact command/query that produced 42</code></pre></template></div>
+    <div class="tile"><span class="n" data-calc="count:#t1 tbody tr"></span>
+      <span class="l">rows below (computed)</span></div>
   </div>
   <p><!-- SLOT: one-paragraph lead --></p>
 </section>
@@ -328,6 +390,24 @@ Polylogue is a **local, single-writer archive for AI coding/chat sessions**.</co
   <span class="ev ev-inferred">inferred</span> reasoned from evidence,
   <span class="ev ev-assumed">assumed</span> taken on faith and untested.
   The last one is not an admission of failure — an unlabelled assumption is.</p>
+  <p>In prose, delimit the tag's scope with a claim tint running through exactly
+  the certified words: <span class="claim claim-m">13,671 rows are byte-identical
+  duplicates<span class="ev ev-measured">measured</span></span> — or
+  <span class="claim claim-d">79% of quarantined bytes<span class="ev ev-derived">derived</span></span>,
+  <span class="claim claim-i">probably a capture-time defect<span class="ev ev-inferred">inferred</span></span>.
+  Convention for measurement-heavy reports: state once in the meta basis row that
+  <em>measured is the default</em>, and tag only the exceptions — a page where
+  every number wears an identical green chip has hidden the ones that matter.</p>
+
+  <h3 data-added="2026-08-02">Computed tiles — the summary cannot contradict the body</h3>
+  <p>A living document revised across sessions drifts: someone updates a row and
+  forgets the headline (confirmed failure, 2026-08-02: one report simultaneously
+  claimed 128, 24, and 101+27 for the same count in three places). Any summary
+  number countable from this page's own rows should be
+  <code>&lt;span class="n" data-calc="count:#t1 tbody tr:not(.closed)"&gt;</code> —
+  filled from the live DOM at load. <code>sum:SELECTOR</code> adds
+  <code>data-v</code> (else numeric text) over the matched elements. Hand-write
+  only numbers that come from outside the document.</p>
 </section>
 <!-- ========================= end crib ========================= -->
 
@@ -356,6 +436,31 @@ document.querySelectorAll('main h2, main h3').forEach(h=>{
     .replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
   const a=document.createElement('a');a.href='#'+(h.tagName==='H2'&&s.id?s.id:h.id);
   a.textContent=h.textContent;if(h.tagName==='H3')a.className='h3';t.appendChild(a)})})();
+/* TOC scrollspy: highlight the section under the viewport top */
+(()=>{const t=document.getElementById('toc');if(!t||!('IntersectionObserver'in window))return;
+const map=new Map();t.querySelectorAll('a[href^="#"]').forEach(a=>{
+  const h=document.getElementById(decodeURIComponent(a.hash.slice(1)));if(h)map.set(h,a)});
+let cur=null;
+const io=new IntersectionObserver(es=>{
+  es.forEach(e=>{if(e.isIntersecting){if(cur)cur.classList.remove('on');
+    cur=map.get(e.target);if(cur){cur.classList.add('on');
+      if(cur.scrollIntoView&&!t.matches(':hover'))cur.scrollIntoView({block:'nearest'})}}})},
+  {rootMargin:'-8% 0px -80% 0px'});
+map.forEach((a,h)=>io.observe(h))})();
+/* computed tiles: single-residence summaries. <span class="n"
+   data-calc="count:SELECTOR"> or data-calc="sum:SELECTOR" fills itself from the
+   live DOM at load (sum reads data-v, else numeric text). A summary that is
+   computed from the rows below it cannot contradict them after a revision. */
+(()=>{document.querySelectorAll('[data-calc]').forEach(el=>{
+  const m=/^(count|sum):(.+)$/.exec(el.dataset.calc||'');if(!m)return;
+  const els=[...document.querySelectorAll(m[2])];
+  let v;
+  if(m[1]==='count')v=els.length;
+  else v=els.reduce((s,e)=>{const x=e.dataset&&e.dataset.v!==undefined?
+    +e.dataset.v:parseFloat((e.textContent||'').replace(/[^0-9.\-]/g,''));
+    return s+(isNaN(x)?0:x)},0);
+  el.textContent=Number.isInteger(v)?v.toLocaleString('en-US'):v.toLocaleString('en-US',{maximumFractionDigits:1});
+  el.title=el.dataset.calc})})();
 /* sortable tables: click th (data-v overrides cell text; class nosort skips) */
 document.querySelectorAll('table').forEach(tb=>{
   tb.querySelectorAll('th:not(.nosort)').forEach((th,i)=>th.addEventListener('click',()=>{
@@ -376,7 +481,8 @@ function flt(inp,id){const q=inp.value.toLowerCase();
 document.querySelectorAll('time.age').forEach(t=>{
   const d=new Date(t.dateTime);if(isNaN(d))return;const ms=Date.now()-d;
   let s='just now';for(const[u,n]of U){if(Math.abs(ms)>=u){s=Math.floor(Math.abs(ms)/u)+n+(ms<0?' ahead':' ago');break}}
-  const iso=d.toISOString().slice(0,16).replace('T',' ');
+  const pad=n=>String(n).padStart(2,'0');
+  const iso=d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+' '+pad(d.getHours())+':'+pad(d.getMinutes());
   if(!t.textContent.trim())t.textContent=iso+' ('+s+')';else t.textContent+=' ('+s+')';
   t.title=d.toString();
   const budget=+(t.dataset.staleDays||0);
@@ -402,7 +508,13 @@ if(els.length){
     if(isNew){count++;el.classList.add('isnew')}
     const s=document.createElement('span');
     s.className='revmark'+(isNew?' new':'');
-    s.textContent=(c&&c!==a?'edited '+c:'added '+a);
+    const fmt=v=>{if(!v)return v;
+      const m=/^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}))?/.exec(v);
+      if(!m)return v; const dt=new Date(v);
+      if(m[2]&&!isNaN(dt)){const p=n=>String(n).padStart(2,'0');
+        return dt.getFullYear()+'-'+p(dt.getMonth()+1)+'-'+p(dt.getDate())+' '+p(dt.getHours())+':'+p(dt.getMinutes());}
+      return m[1];};
+    s.textContent=(c&&c!==a?'edited '+fmt(c):'added '+fmt(a));
     s.title=(a?'added '+a:'')+(c?' · edited '+c:'');
     const host=el.matches('tr')?el.cells[el.cells.length-1]:el;
     host.insertBefore(s,host.firstChild);
@@ -410,7 +522,7 @@ if(els.length){
   // control bar under the page header
   const bar=document.createElement('div');bar.className='revbar';
   bar.innerHTML=seen
-    ? `<span>last read <b>${seen}</b> — <b>${count}</b> block(s) new since</span>`
+    ? `<span>last read <b>${seen.replace('T',' ').slice(0,16)}</b> — <b>${count}</b> block(s) new since</span>`
     : `<span>first read of this file — every block shown as-is</span>`;
   const b=document.createElement('button');b.className='fs';b.textContent='show only new';
   let only=false;
@@ -457,7 +569,7 @@ const src=el=>{
 document.querySelectorAll('[data-pop], :has(> template.pop)').forEach(el=>{
   const s=src(el);if(!s)return;
   if(el.tagName==='A')el.classList.add('haspop');
-  el.tabIndex=el.tabIndex||0;
+  if(el.tabIndex<0)el.tabIndex=0;  // a div defaults to -1, which is truthy: ||0 keeps it
   const open=()=>{clearTimeout(timer);pinned=false;show(el,s[0],s[1])};
   el.addEventListener('mouseenter',()=>{clearTimeout(timer);timer=setTimeout(open,180)});
   el.addEventListener('mouseleave',()=>{clearTimeout(timer);timer=setTimeout(kill,220)});

@@ -268,21 +268,43 @@ row (works inside any table the template already sorts/filters):
 ```
 
 **Decision widget** — approve/defer/reject + optional note, dropped straight
-into a decision-queue row. **Each row needs its own `name`** (`d1`, `d2`, …):
-radio grouping is by `name`, so reusing it across rows silently merges them
-into one group even when `data-field` differs:
+into a decision-queue row. Style as real buttons, not bare radios — a plain
+`<input type=radio>` plus a short text label is a genuinely small click target
+once a table has 10+ rows stacked for density, and operators notice ("these
+aren't tiny little controls to hunt for" — confirmed complaint, 2026-08-01).
+Hide the native input, style its `<label for=id>` as a button, fill it solid
+on `:checked`. **Two uniqueness requirements, both load-bearing**: every row
+needs its own `name` (`d1`, `d2`, …) — radio grouping is by `name`, so reusing
+it across rows silently merges rows into one group even when `data-field`
+differs — *and* every option within a row needs its own `id`/`for` pair (the
+`input:checked + label` selector needs a real sibling relationship per option):
 
 ```html
 <td>
-  <label><input type="radio" name="d1" data-field="decision.204g-cache" value="approve"> approve</label>
-  <label><input type="radio" name="d1" data-field="decision.204g-cache" value="defer"> defer</label>
-  <label><input type="radio" name="d1" data-field="decision.204g-cache" value="reject"> reject</label>
+  <div class="seg" role="group" aria-label="decision">
+    <input type="radio" id="d1-a" name="d1" data-field="decision.204g-cache" value="approve"><label for="d1-a">✅ approve</label>
+    <input type="radio" id="d1-b" name="d1" data-field="decision.204g-cache" value="defer"><label for="d1-b">⏸ defer</label>
+    <input type="radio" id="d1-c" name="d1" data-field="decision.204g-cache" value="reject"><label for="d1-c">✕ reject</label>
+  </div>
   <input type="text" data-field="decision.204g-cache.note" placeholder="note (optional)"
     style="width:12rem;margin-left:.4rem;background:var(--bg);color:var(--ink);
-    border:1px solid var(--line);border-radius:.3rem;padding:.15rem .4rem">
+    border:1px solid var(--line);border-radius:.3rem;padding:.3rem .5rem;font-size:.95rem">
 </td>
-<style>td label{display:inline-flex;align-items:center;gap:.25rem;margin-right:.7rem;font-size:.9rem}</style>
+<style>
+.seg{display:inline-flex;flex-wrap:wrap;gap:.4rem;margin:.15rem 0}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg label{display:inline-block;padding:.45rem 1rem;border:2px solid var(--line);
+  border-radius:.5rem;cursor:pointer;font-size:.95rem;font-weight:600;
+  background:var(--bg);color:var(--ink);user-select:none;transition:background .1s,border-color .1s}
+.seg label:hover{border-color:var(--accent)}
+.seg input:checked+label{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.seg input:focus-visible+label{outline:2px solid var(--accent);outline-offset:2px}
+</style>
 ```
+
+Same technique works for any single-choice row control (approve/defer/reject,
+priority tiers, yes/no/unsure) — swap the option count and labels, keep the
+hide-input/style-label/`:checked+label` mechanism.
 
 **Questionnaire block** — a self-contained fieldset for a one-off question
 (naming scheme, priority ranking, yes/no with reasoning):
@@ -305,3 +327,289 @@ Field-key convention: dotted, lowercase, stable across regenerations of the
 same report (`decision.<row-id>`, `note.<row-id>`, `q.<topic>`) — that lets a
 later agent match a pasted-back blob to the exact rows it came from without
 guessing.
+
+---
+
+# Data-derived reports (numbers that came from a real query)
+
+The patterns above shape *narrative*. These shape *measurement* — reports whose
+content was computed from a system rather than written from memory. The
+governing rule: **a number the reader cannot trace is a number they have to
+take on faith**, and this skill's whole provenance apparatus exists to avoid
+exactly that.
+
+## Query-attributed metric (the flagship)
+
+Every headline number carries the exact invocation that produced it. Click the
+figure, see the command. This makes a report self-verifying, turns "the tool
+can do this" into something checkable, and — the practical payoff — means the
+next agent regenerating the report knows precisely how each cell was derived.
+
+```html
+<div class="tile qa">
+  <b>4,905,637</b>
+  <span>messages archived</span>
+  <template class="pop"><figure class="code"><figcaption>measured 2026-07-31</figcaption><pre>
+sqlite3 "file:$ARCHIVE/index.db?mode=ro" \
+  "select count(*) from messages;"</pre></figure></template>
+</div>
+```
+
+```css
+.tile.qa{position:relative;cursor:help}
+.tile.qa::after{content:"⌕";position:absolute;top:.35rem;right:.45rem;
+  opacity:.35;font-size:.8rem}
+```
+
+Bind with the same popup engine as `a.path` — the `<template class="pop">` must
+be a **direct child** of the element it annotates (the binding selector is
+`:has(> template.pop)`), or the preview silently attaches to the parent block.
+
+The template's stat-tile slot now ships with this popup pre-wired and a
+`POP-TODO` sentinel inside — fill the query in or delete the template
+deliberately; the shipping check greps for the sentinel so a forgotten one is
+visible. Adoption history says this matters: when the slot lived only in this
+file, four of six shipped reports carried zero query popups.
+
+Use `ev-measured` on anything carrying a query, `ev-derived` for arithmetic over
+measured values, `ev-inferred` for reasoning. If a number came from reading
+prose rather than querying, say so — an honest `ev-inferred` beats a confident
+figure nobody can reproduce. Where a query was *supposed* to produce a number
+and could not (timeout, missing surface), show the gap rather than substituting
+an estimate; a visible hole is information.
+
+## Conversation exchange
+
+For transcript excerpts. Role is not enough — chat archives distinguish
+*authoredness* (who actually wrote this) from *role* (what slot it occupies),
+because protocol/tool rows often carry `role=user` while being machine-written.
+Style them differently or every statistic downstream reads wrong.
+
+```html
+<div class="xc">
+  <div class="turn human"><b>operator</b><time datetime="2026-07-31T08:12:00Z">08:12</time>
+    <p>why is beads an origin? beads is not a chatlog</p></div>
+  <div class="turn asst"><b>assistant</b><time datetime="2026-07-31T08:13:04Z">08:13</time>
+    <p>Because ingestion treats any parseable record stream as a session…</p></div>
+  <div class="turn proto"><b>runtime_protocol</b><span class="mo">role=user, machine-authored</span></div>
+</div>
+```
+
+```css
+.xc{display:flex;flex-direction:column;gap:.5rem;margin:.8rem 0}
+.turn{border-left:3px solid var(--line);padding:.4rem .7rem;border-radius:0 .3rem .3rem 0}
+.turn b{font-size:.82rem;letter-spacing:.02em}
+.turn time{float:right;font-size:.78rem;opacity:.6}
+.turn p{margin:.25rem 0 0}
+.turn.human{border-left-color:var(--accent);background:color-mix(in oklab,var(--accent) 6%,transparent)}
+.turn.asst{border-left-color:var(--line)}
+.turn.proto{opacity:.6;font-size:.85rem;border-left-style:dashed}
+.turn .mo{font-size:.78rem;opacity:.7;margin-left:.5rem}
+```
+
+Truncate long turns to the load-bearing sentences and mark the elision (`…`) —
+a "full transcript" nobody scrolls is worse than a chosen excerpt that makes
+the point. Never paste an entire session into a report.
+
+## Activity histogram (pure SVG, no library)
+
+Messages per hour, commits per day, errors per run. Compute the bars yourself
+and emit a `viewBox`-only SVG; it scales, prints, and needs no JS.
+
+```html
+<figure class="chart">
+  <svg viewBox="0 0 240 40" role="img" aria-label="messages per hour">
+    <!-- one <rect> per bucket: x = i*4, height = v/max*36, y = 40-height -->
+    <rect x="0"  y="28" width="3" height="12" class="bar"/>
+    <rect x="4"  y="10" width="3" height="30" class="bar"/>
+    <rect x="8"  y="4"  width="3" height="36" class="bar peak"/>
+  </svg>
+  <figcaption>messages/hour · peak 214 at 03:00 UTC · <span class="ev-measured">measured</span></figcaption>
+</figure>
+```
+
+```css
+.chart svg{width:100%;height:auto;max-height:5rem}
+.bar{fill:var(--accent);opacity:.55}
+.bar.peak{opacity:1}
+```
+
+Always label the peak and the units in the caption — an unlabelled shape is
+decoration. For a sparkline inside a table cell, same technique at
+`viewBox="0 0 60 14"` with `height:1em`.
+
+## Distribution bars (in-table)
+
+Ranked counts read faster as bars than as digits. Keep the number too — the bar
+gives shape, the number gives fact.
+
+```html
+<td class="dist"><span style="--w:78%"></span><b>1,204</b></td>
+```
+
+```css
+.dist{position:relative;text-align:right;white-space:nowrap}
+.dist span{position:absolute;left:0;top:.25rem;bottom:.25rem;width:var(--w);
+  background:var(--accent);opacity:.18;border-radius:.2rem}
+.dist b{position:relative;font-variant-numeric:tabular-nums}
+```
+
+Normalize `--w` against the column max, not the total, or everything below rank
+one becomes an invisible sliver.
+
+## Hierarchy / delegation tree
+
+Subagent fan-out, session lineage (fork/resume/compaction), call trees. Nested
+`<ul>` with CSS connectors beats hand-drawn SVG here: it reflows, stays
+selectable, and degrades to a plain indented list with CSS off.
+
+```html
+<ul class="tree">
+  <li>coordinator <span class="meta">1,861 msgs</span>
+    <ul>
+      <li>audit: invariants <span class="meta ok">30 checked</span></li>
+      <li>audit: fidelity <span class="meta warn">running</span></li>
+    </ul>
+  </li>
+</ul>
+```
+
+```css
+.tree,.tree ul{list-style:none;margin:0;padding-left:1.1rem}
+.tree li{position:relative;padding:.15rem 0 .15rem .8rem}
+.tree li::before{content:"";position:absolute;left:0;top:0;bottom:0;
+  border-left:1px solid var(--line)}
+.tree li::after{content:"";position:absolute;left:0;top:.85rem;width:.65rem;
+  border-top:1px solid var(--line)}
+.tree>li:last-child::before{bottom:auto;height:.85rem}
+.tree .meta{font-size:.8rem;opacity:.7;margin-left:.4rem}
+```
+
+## Two-subject comparison
+
+Comparing two runs/sessions/branches: put them on a **shared scale** or the
+comparison lies. Grid with a label column beats two separate tables — the eye
+compares rows, not pages.
+
+```html
+<table class="cmp">
+  <thead><tr><th>metric</th><th>session A</th><th>session B</th><th>Δ</th></tr></thead>
+  <tbody>
+    <tr><th scope="row">messages</th><td>1,493</td><td>1,861</td><td class="up">+368</td></tr>
+  </tbody>
+</table>
+```
+
+```css
+.cmp td{text-align:right;font-variant-numeric:tabular-nums}
+.cmp th[scope=row]{text-align:left;font-weight:500}
+.cmp .up{color:var(--ok)} .cmp .down{color:var(--bad)}
+```
+
+State the direction convention in a caption ("Δ = B − A"). A signed number with
+no stated sign convention is a coin flip.
+
+## Measured treemap (SVG, no libs)
+
+For "codebase atlas" / disk-usage / any part-of-whole breakdown where area should equal a
+measured quantity. Don't hand-place rects — generate them from the data with a 10-line
+slice-and-dice layout, then paste the fragment into the report's `<svg>`:
+
+```python
+# rows: big items get the top band sized by their share; the tail shares the bottom band.
+data=[(name, value, files), ...]           # sorted desc, measured
+W,H=960,300; total=sum(v for _,v,_ in data)
+row1, row2 = data[:7], data[7:]            # split so top row labels stay readable
+s1=sum(v for _,v,_ in row1); h1=H*s1/total
+x=0
+for name,v,f in row1:
+    w=W*v/s1
+    emit(f'<g><rect x="{x:.1f}" y="0" width="{w:.1f}" height="{h1:.1f}" '
+         f'fill="var(--e2)" opacity=".28" stroke="var(--panel)" stroke-width="2"/>'
+         f'<text ...>{name}</text><title>{name}: {v:,} lines, {f} files</title></g>')
+    x+=w
+# same loop for row2 at y=h1, height H-h1; label only when w>52, abbreviate when w>34
+```
+
+Rules learned building it: `stroke="var(--panel)" stroke-width="2"` gives clean cell
+separation in both themes; fill with theme vars at low opacity (.22-.28) so labels stay
+readable; every cell gets a `<title>` (free hover tooltip, no JS); suppress labels below
+~34px width rather than letting them overflow; put the exact numbers in a companion
+sortable table — the treemap is for proportion-at-a-glance, the table is for lookup.
+
+## Entity chip (dense inline reference — micro-DSL)
+
+For reports that reference many tracked entities (beads, PRs, findings, hosts),
+a chip encodes id + priority + status + type + degree in one inline token, with
+the expanded reading on hover. Proven at scale in the beads-state generator
+(1,500 chips on one page). The notation must be **explained once in a legend
+section** — it is a DSL the reader learns, not self-evident.
+
+```html
+<span class="bchip p0 open" title="P0 open bug polylogue-kadx — blocks 3 open beads">
+  <b>P0</b>○<code>polylogue-kadx</code>✕<small>↓3</small></span>
+<style>
+.bchip{display:inline-flex;align-items:center;gap:.15rem;border:1px solid var(--line);
+  border-radius:.3rem;padding:0 .35rem;font-size:.82rem;white-space:nowrap;
+  border-left:3px solid var(--muted)}
+.bchip.p0{border-left-color:var(--bad)} .bchip.p1{border-left-color:var(--warn)}
+.bchip.p2{border-left-color:var(--info)}
+.bchip.closed code{text-decoration:line-through;opacity:.6}
+.bchip.inprog{outline:1px solid var(--info)}
+.bchip small{opacity:.7}
+</style>
+```
+
+Glyph conventions that worked: `○` open · `◐` in progress · `●` closed ·
+`▪` task · `✕` bug · `✦` feature · `▣` epic · `↑n`/`↓n` blocked-by/blocks
+degree. Strike the id when closed; dashed border for deferred.
+
+## Hand-placed SVG diagrams — layout rules that survive contact
+
+Rules extracted from a real layout-fix round-trip (5-lane dataflow, 2026-08-02):
+
+1. **Pins/markers are rounded `<rect>`s, never small circles** — 3-char labels
+   overflow r=11 circles; rect w ≈ 22 + 6·chars, h=18, seated ON the border of
+   the box they annotate (half in, half out) so attachment is unambiguous.
+2. **Orthogonal elbow arrows only**, routed through inter-lane gutters
+   (`M x1,y1 V gutter H x2 V y2`) — diagonals always cross text at some viewport.
+3. **Lane bands as tinted background rects with labels ABOVE the band** —
+   labels inside the band collide with row boxes sooner or later.
+4. **A legend row inside the SVG** for any marker-color semantics.
+5. **Proofread SVG `<text>` separately** — typos there pass every automated
+   check (tag balance, node --check, headless render).
+
+Working constants: box h 48-70, ≤3 text lines (13px title / 11px subs),
+≥30px vertical gutters, viewBox padded ~40px below the last row for the legend.
+
+## Provenance-aware time series (era bands + event markers + synthetic hatch)
+
+When part of a time axis is known-unreliable (rewritten git history, backfilled
+data), tinted era bands and dashed event markers are not enough — readers still
+read the bars as data. Add a 45° hatch `<pattern>` overlay across the unreliable
+region, reduce bar opacity there, and set an inline italic label naming the
+defect ("synthetic dates — rebuilt history"). Stagger clustered marker labels
+vertically (`y - (i%3)*13`) or they overprint. Used twice (trajectory rev 2+3).
+
+## Lens-first system explainer (structure for "explain this whole codebase/system")
+
+A comprehensive system report organized as a package tour reads as inventory and teaches
+nothing. The structure that worked (polylogue-atlas, 2026-08-02):
+
+1. **One-paragraph thesis** — what the system IS, no history.
+2. **N lenses (4-7)** — each a design commitment stated in one bold sentence, then one
+   short paragraph tracing its consequences into measured structural facts ("hence
+   storage is 25% of the product"). Each lens gets a `.lens` card with a distinct
+   left-border color reused consistently in every later diagram.
+3. **Measured atlas** — treemap + heavy-modules table + one-line-per-package collapsed
+   table. Numbers here, not in the lenses.
+4. **2-4 core diagrams** (tiers/data-model/flows) that *draw* the lenses.
+5. **Honest tensions table** — where the code fights its own lenses; link deep-dives
+   instead of restating them.
+6. **"How to read this codebase" ordered file list** — the exit ramp into the real thing.
+
+Anti-fluff rules that held: every section is a diagram or a table plus at most two short
+paragraphs; every fact appears exactly once (link, don't repeat); companion reports get
+linked in the meta block, never summarized inline. The lenses double as review
+checklists — "code that fights its lens is where the next incident lives" gives the
+report an operational point beyond description.
