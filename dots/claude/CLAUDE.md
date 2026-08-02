@@ -354,7 +354,9 @@ SSH keys lives at `/persist/home/sinity/.ssh` and appears at runtime as
   artifacts usually land there or under `/realm/inbox/download/misc`.
 - Use `/realm/tmp/` for throwaway analysis output that may be large or useful
   across a short session. Avoid `/tmp` for heavy repo work; it is a small
-  tmpfs and heavy churn belongs on NVMe.
+  tmpfs and heavy churn belongs on NVMe. Put ad-hoc output FILES in
+  `/realm/tmp/work/` (auto-aged 30d), never at the `/realm/tmp` root — the
+  root is deliberately unaged and root litter requires manual sweeps.
 - Use `/realm/worktrees/` for agent worktrees or any compile-heavy checkout.
   This keeps build output on NVMe and avoids root-disk wear.
 - Treat `/realm/data/` as canonical user data, not scratch. Read from it for

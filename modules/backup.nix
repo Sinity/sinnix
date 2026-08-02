@@ -773,9 +773,16 @@ in
         ${mkBorgCommonScript borgRepoRealm borgRepoRealmPath}
         recover_stale_borg_locks
 
-        ${pkgs.borgbackup}/bin/borg check --repository-only ${borgRepoPersist}
-        ${pkgs.borgbackup}/bin/borg check --repository-only ${borgRepoRealm}
-        ${pkgs.borgbackup}/bin/borg check --repository-only ${borgRepoSinexBlobs}
+        # --max-duration makes the repository check INCREMENTAL: each run
+        # verifies segments for at most the budget and records progress in the
+        # repo, so successive weekly runs cycle through the full repository
+        # without ever monopolizing the repo lock for a whole day. Observed
+        # 2026-08-02: an unbounded realm check ran 10h+ on the backup HDD,
+        # starving the hourly drains (35 snapshots queued) and firing the
+        # freshness alarm (sinnix-txa).
+        ${pkgs.borgbackup}/bin/borg check --repository-only --max-duration 1800 ${borgRepoPersist}
+        ${pkgs.borgbackup}/bin/borg check --repository-only --max-duration 7200 ${borgRepoRealm}
+        ${pkgs.borgbackup}/bin/borg check --repository-only --max-duration 1800 ${borgRepoSinexBlobs}
       '';
     };
     systemd.timers.borgbackup-check = {

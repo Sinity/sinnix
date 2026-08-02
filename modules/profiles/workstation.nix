@@ -389,6 +389,12 @@ in
       # wrappers point CLAUDE_CODE_TMPDIR here so 12+ concurrent subagents
       # cannot fill the shared 6 GiB /tmp tmpfs again (sinnix-77w).
       "d /realm/tmp/claude-code 0700 ${user} users 7d"
+      # The designated home for ad-hoc session/agent output files (bead work
+      # notes, query dumps, one-off analysis). Root /realm/tmp stays unaged
+      # (operator decision 2026-08-02: manual sweeps only) — the aged subdir
+      # exists so new litter has somewhere to expire instead of accumulating
+      # at the root forever (1,237 top-level entries >30d as of 2026-08-02).
+      "d /realm/tmp/work 1777 root root 30d"
     ];
 
     # nix.slice has no explicit unit here: it exists only as the implicit
