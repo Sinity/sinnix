@@ -60,9 +60,10 @@ GitHub discussion is public.
   conclusions into reviewed source, documentation, or Beads issues.
 - Beads `issues.jsonl` is public technical archaeology; all of its fields must
   satisfy the same publication boundary as source and documentation.
-- Before every commit, review the complete staged diff and run
-  `scripts/check-publication-boundary`. The checker only catches known path and
-  file shapes; it cannot judge prose, fixtures, or arbitrary data.
+- Before every commit, review the complete staged diff for private prose,
+  fixtures, identifiers, and datasets. Known private path and file shapes are
+  blocked by `.gitignore`; no script can judge content — that review is the
+  committer's job.
 - If there is any doubt whether content belongs in the public repository,
   confirm with the operator before committing it.
 - Publish only `master`. Never push `--mirror`, `--all`, or `--tags`; any new

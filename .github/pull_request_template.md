@@ -45,8 +45,8 @@ Anything that should become a separate issue after this lands.
 - [ ] The PR body explains scope and non-goals clearly.
 - [ ] Verification is recorded honestly.
 - [ ] Docs / operational impact is called out if relevant.
-- [ ] `scripts/check-publication-boundary` passes and the staged content was
-      reviewed for private prose, fixtures, identifiers, and datasets.
+- [ ] The staged content was reviewed for private prose, fixtures,
+      identifiers, and datasets (path shapes are covered by `.gitignore`).
 - [ ] No unreviewed branch, tag, generated artifact, or Beads interaction log
       is part of the publication surface.
 - [ ] Remaining follow-up work is split out instead of hidden.

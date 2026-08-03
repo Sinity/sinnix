@@ -47,11 +47,31 @@ _tmp_do_not_include_in_version_control.md
 
 .serena/
 
-# Only ignore unencrypted secrets
+# Secrets and secret-shaped files. Encrypted agenix payloads live outside
+# the checkout entirely (/realm/data/secrets/sinnix); anything matching
+# these shapes inside the repo is a mistake.
 *.key
 *.pem
 *.env
 *.gpg
+*.age
+*.p12
+*.pfx
+*.kdbx
+id_rsa*
+id_dsa*
+id_ecdsa*
+id_ed25519*
+/secret/
+/secrets/
+
+# Data-lake shapes must never take root in the repo
+/data/
+/captures/
+/exports/
+
+# Beads interaction log is local-only (issues.jsonl stays public)
+.beads/interactions.jsonl
 
 # Beads / Dolt files (added by bd init)
 .dolt/
