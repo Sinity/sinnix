@@ -106,6 +106,20 @@
   already exist in the touched surface, remove them instead of updating them
   to encode the latest spelling. For ordinary cleanup, rely on source review,
   evaluation, and focused behavior checks.
+- Never enforce a process or invariant by pattern-matching natural language.
+  A lint or gate that greps prose — commit messages, close reasons, comments,
+  docstrings, PR bodies, notes fields — for magic phrases ("follow-up",
+  "tracked separately", resolver keywords, TODO markers) is machinery trying
+  to programmatically interface with language it cannot parse. The results
+  are reliably bad: false positives, phrasing chosen to satisfy the regex,
+  suppression allowlists that themselves rot, and a false sense that the
+  invariant is enforced. If an invariant matters enough to enforce
+  mechanically, give it a structured carrier first (a typed field, a required
+  id/link reference, a schema column, an exit code) and enforce that. If no
+  structured carrier is worth adding, the invariant is enforced by judgment
+  at authoring/review time — or it is not enforced. Prose is for readers.
+  The same applies in reverse: never make prose load-bearing for machines by
+  writing it in a stilted register so a tool can grep it later.
 - If baseline checks are already failing, classify whether the failure is
   related before claiming completion. Do not hide inherited failure state.
 - Before declaring completion, cite the changed files, report exact verification
