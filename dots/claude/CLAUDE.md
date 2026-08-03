@@ -577,7 +577,7 @@ override, or sqlx compile errors masquerade as drift-guard rejections.
 ```bash
 cd /realm/project/sinity-lynchpin
 just                                        # List all recipes
-python -m lynchpin.analysis materialize     # DAG-orchestrated substrate materialization
+python -m lynchpin.cli.materialize --all    # DAG-orchestrated substrate materialization
 python -m lynchpin.cli.current_state --start 2026-05-01 --end 2026-05-05
 ```
 
