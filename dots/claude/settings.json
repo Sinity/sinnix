@@ -1,6 +1,9 @@
 {
   "cleanupPeriodDays": 99999,
-  "env": {},
+  "env": {
+    "CLAUDE_CODE_FORK_SUBAGENT": "1",
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
   "permissions": {
     "allow": [
       "Bash",
@@ -43,9 +46,19 @@
     "ask": [],
     "defaultMode": "auto"
   },
-  "model": "claude-fable-5[1m]",
+  "model": "sonnet",
   "hooks": {
     "PreToolUse": [
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/realm/project/sinnix/dots/claude/hooks/pretooluse-agent-model.sh",
+            "timeout": 5
+          }
+        ]
+      },
       {
         "matcher": "mcp__serena__*",
         "hooks": [
@@ -70,7 +83,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "polylogue-hook PreToolUse --provider claude-code --sidecar-dir /home/sinity/.local/share/polylogue/hooks",
+            "command": "polylogue-hook PreToolUse --provider claude-code",
             "timeout": 5
           }
         ]
@@ -86,7 +99,7 @@
           },
           {
             "type": "command",
-            "command": "polylogue-hook PostToolUse --provider claude-code --sidecar-dir /home/sinity/.local/share/polylogue/hooks",
+            "command": "polylogue-hook PostToolUse --provider claude-code",
             "timeout": 5
           }
         ]
@@ -112,7 +125,7 @@
           },
           {
             "type": "command",
-            "command": "polylogue-hook Stop --provider claude-code --sidecar-dir /home/sinity/.local/share/polylogue/hooks",
+            "command": "polylogue-hook Stop --provider claude-code",
             "timeout": 5
           }
         ]
@@ -148,7 +161,7 @@
           },
           {
             "type": "command",
-            "command": "polylogue-hook SessionStart --provider claude-code --sidecar-dir /home/sinity/.local/share/polylogue/hooks",
+            "command": "polylogue-hook SessionStart --provider claude-code",
             "timeout": 5
           }
         ]
@@ -159,7 +172,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "polylogue-hook UserPromptSubmit --provider claude-code --sidecar-dir /home/sinity/.local/share/polylogue/hooks",
+            "command": "polylogue-hook UserPromptSubmit --provider claude-code",
             "timeout": 5
           }
         ]
