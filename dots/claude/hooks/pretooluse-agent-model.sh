@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# PreToolUse hook (matcher: Agent) — warn on subagent dispatches that omit an
-# explicit model. Soft warning only (never blocks): the standing dispatch rule
-# is "no silent model inheritance" (sonnet/haiku for implementation lanes,
-# fable/opus only as an explicit judgment-lane choice; forks exempt because
-# they inherit by design). Repo-level policy may harden this to a deny; the
-# global default stays advisory so built-in flows are never broken.
+# PreToolUse hook (matcher: Agent) — enforce explicit model on subagent
+# dispatches. Policy (global CLAUDE.md, "Claude Code Dispatch Doctrine"):
+#   - fork subagents: exempt (they inherit context+model by design)
+#   - named agent types (custom defs / built-ins like Explore, Plan,
+#     claude-code-guide): the definition may carry the model -> soft warn only
+#   - bespoke-prompt types (general-purpose, claude, or no subagent_type):
+#     HARD DENY without an explicit model. These were 473/504 of measured
+#     dispatches and the entire model-inheritance leak.
 set -euo pipefail
 python3 - <<'PY'
 import json, sys
@@ -14,16 +16,29 @@ except Exception:
     sys.exit(0)
 ti = payload.get("tool_input") or {}
 sub = (ti.get("subagent_type") or "").lower()
-if sub == "fork":
-    sys.exit(0)  # forks inherit parent model by design
-if ti.get("model"):
+if sub == "fork" or ti.get("model"):
+    sys.exit(0)
+bespoke = sub in ("", "general-purpose", "claude", "default")
+if bespoke:
+    print(json.dumps({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": (
+                "dispatch-hygiene: bespoke-prompt Agent dispatches MUST carry an "
+                "explicit model (this is enforced, not advisory). Re-dispatch with "
+                "model=sonnet (implementation), model=haiku (triage-grade), or "
+                "model=opus/fable only as a deliberate judgment-lane choice. "
+                "Forks and named agent definitions are exempt."
+            ),
+        }
+    }))
     sys.exit(0)
 print(json.dumps({
     "systemMessage": (
-        "dispatch-hygiene: this Agent call omits an explicit model and will "
-        "inherit the session model. Standing rule: pick the model per lane "
-        "(sonnet default, haiku for triage, fable/opus only as an explicit "
-        "judgment-lane choice). Add model=... unless inheritance is truly intended."
+        f"dispatch-hygiene: Agent call to '{sub}' omits model; the agent "
+        "definition's frontmatter model applies if declared, otherwise this "
+        "inherits the session model. Prefer explicit model per lane."
     )
 }))
 PY

@@ -236,8 +236,11 @@ claude-code-guide agent when it matters.
 - **Explicit model on every fresh Agent dispatch.** Sonnet default, Haiku for
   triage-grade read-only lanes, Fable/Opus permitted for judgment lanes
   (design review, adjudication, postmortem synthesis) as an explicit choice —
-  never via inheritance. A global PreToolUse hook warns on model-less
-  dispatches; repos may harden it to a deny.
+  never via inheritance. **This is mechanically enforced**: a global
+  PreToolUse hook DENIES bespoke-prompt dispatches (general-purpose/claude/
+  no type) that omit `model` — they simply will not run. Named agent
+  definitions get a soft warning only (their frontmatter may carry the
+  model); forks are exempt.
 - **Forks are exempt** (`/subtask`, `fork` subagent type, enabled via
   `CLAUDE_CODE_FORK_SUBAGENT=1`): they inherit the parent's context AND model
   by design (prompt-cache reuse). Right tool for context-heavy side-tasks;
