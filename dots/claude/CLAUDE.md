@@ -772,6 +772,27 @@ clustering helper where the repo has one).
   all; the coordinator should audit bead state (diff expected vs. `bd show
   --json`) at merge-train boundaries and re-apply anything reverted,
   rather than trust a single write to have stuck.
+- **Batch `.beads/issues.jsonl` commits per unit of work, not per bd
+  operation.** Confirmed pattern (polylogue, 2026-08-03): a single 5-hour
+  fanout/triage session produced ~85 separate `chore(beads): ...` commits
+  to `master`, one per bead closed/filed/annotated, drowning out real
+  `feat`/`fix` commits in the log (67 of the last 100 commits on one repo
+  were beads-only). The root cause was never subagents committing directly
+  — lane agents correctly make no bd writes — it was the coordinator
+  running `git commit` reflexively after every individual `bd close`/
+  `bd create`/`bd update --notes` call instead of accumulating a batch.
+  `bd export` re-derives the full jsonl regardless of how many bd calls
+  preceded it, so batching costs nothing: do every bd write for one
+  coherent unit of work (a full triage pass, one roadmap-digestion
+  session, closing every bead landed by a merge train, one fanout wave's
+  worth of findings), then `bd export` + a single `git commit` covering
+  the whole batch, summarizing the batch in the subject (e.g. "close 10
+  beads landed via merged PRs 3598-3605"). Do not commit mid-batch just
+  because a natural pause occurred; commit at the boundary of the logical
+  unit. A submodule/subrepo split for `.beads/` is not the fix — it
+  relocates the same per-operation commit habit into a second repo's
+  history and adds submodule-pointer-bump commits in the first; the fix
+  is commit cadence, not commit location.
 
 ### Daily oracle digest
 
