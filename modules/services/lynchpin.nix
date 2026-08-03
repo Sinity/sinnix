@@ -107,6 +107,10 @@ mkServiceModule {
       # substrate is queryable by MCP clients immediately after.
       systemd.services.lynchpin-materialize = lib.mkIf cfg.materializationTimer.enable {
         description = "Lynchpin analysis DAG materialization";
+        # This unit has now silently failed nightly TWICE (CWD PermissionError,
+        # then a renamed CLI command rotting the ExecStart for weeks) — route
+        # failures to the desktop like the backup jobs do.
+        onFailure = [ "sinnix-service-failure-notify@%n.service" ];
         requires = [ "lynchpin-local-attrs.service" ];
         after = [
           "network.target"
@@ -122,7 +126,11 @@ mkServiceModule {
         # freezing the analysis substrate. Pin CWD and the root env vars.
         serviceConfig = {
           Type = "oneshot";
-          ExecStart = "${scriptPkgs.lynchpin-python}/bin/lynchpin-python -m lynchpin.analysis materialize";
+          # `lynchpin.analysis materialize` no longer exists as a subcommand;
+          # the transparent-DAG runner is lynchpin.cli.materialize (requires
+          # explicit --all). Journal showed UsageError on every run since at
+          # least 2026-07-11 with zero surfacing.
+          ExecStart = "${scriptPkgs.lynchpin-python}/bin/lynchpin-python -m lynchpin.cli.materialize --all";
           User = "sinity";
           Group = "users";
           WorkingDirectory = cfg.repoRoot;
