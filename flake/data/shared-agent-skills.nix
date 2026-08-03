@@ -7,6 +7,7 @@
   "beads"
   "claude-self-knowledge"
   "desktop-control-plane"
+  "drive"
   "enhance"
   "evidence-harness"
   "greedy-batching"
