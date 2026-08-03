@@ -5,6 +5,7 @@
   "assured-close"
   "bead-loop"
   "beads"
+  "claude-self-knowledge"
   "desktop-control-plane"
   "enhance"
   "evidence-harness"
@@ -14,6 +15,7 @@
   "lynchpin"
   "meta"
   "polylogue"
+  "prompting"
   "recap"
   "swarm"
 ]
