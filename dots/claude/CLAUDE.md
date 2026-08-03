@@ -226,6 +226,44 @@ Do not try to change the current agent's model or reasoning effort by injecting
 commands into its own live TUI while it is sampling. Choose these controls at
 worker launch or between turns.
 
+### Claude Code Dispatch Doctrine
+
+Grounded in measured fanout ops (2026-08-02 report) + capability research
+(2026-08-03, digest: polylogue `.agent/scratch/2026-08-03-claude-code-dispatch-capabilities.md`).
+Facts here are version-gated; verify with `claude --version` / the
+claude-code-guide agent when it matters.
+
+- **Explicit model on every fresh Agent dispatch.** Sonnet default, Haiku for
+  triage-grade read-only lanes, Fable/Opus permitted for judgment lanes
+  (design review, adjudication, postmortem synthesis) as an explicit choice —
+  never via inheritance. A global PreToolUse hook warns on model-less
+  dispatches; repos may harden it to a deny.
+- **Forks are exempt** (`/subtask`, `fork` subagent type, enabled via
+  `CLAUDE_CODE_FORK_SUBAGENT=1`): they inherit the parent's context AND model
+  by design (prompt-cache reuse). Right tool for context-heavy side-tasks;
+  using a fork as a de-facto implementation lane violates the explicit-model
+  rule in disguise. Forks cannot nest.
+- **Agent teams are enabled experimentally**
+  (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`): teammates are full sessions
+  sharing a task list + SendMessage mailboxes (`~/.claude/teams/`,
+  `~/.claude/tasks/`). Known limits: no resume of in-process teammates, one
+  team per session, no nesting, teammates do NOT inherit the lead's model
+  (specify per spawn; they DO inherit effort). Treat as a lab capability:
+  useful for coordinated parallel work, not yet load-bearing process.
+- **Never poll background agents.** Completion notifications are automatic
+  (Claude Code >=2.1.211). Monitor only with an until-condition; ScheduleWakeup
+  only for genuine wall-clock deadlines (CI grace windows, external state).
+- **Bake standing contracts into agent definitions** (`.claude/agents/*.md`):
+  the markdown body IS the subagent's system prompt; frontmatter supports
+  `model`, `effort`, `tools`/`disallowedTools`, `isolation: worktree`,
+  `skills` preload, `memory`, `maxTurns`, per-agent hooks. Dispatch prompts
+  should then carry only task content. `subagent_type` resolves against the
+  frontmatter `name` field.
+- **Scripted judgment calls** (durable drivers, cron, pipelines): prefer
+  `claude -p --output-format json --json-schema '<schema>'` for validated
+  structured verdicts (+ session id + cost), `--resume <id>` for continuity,
+  `--bare` for deterministic scripted invocations. SIGTERM-safe (exit 143).
+
 For coordination, Beads owns work and dependencies. Polylogue blackboard
 assertions are durable asynchronous notes, not a delivered group chat: until
 `polylogue-1hj` / `polylogue-s7ae.3` provide watch, unread, addressing, ack, and
