@@ -14,6 +14,9 @@
 }:
 let
   claudeTmpRoot = "${sinnixCfg.paths.realmRoot}/tmp/claude-code";
+  # Mirrors environment.sessionVariables.TMPDIR in profiles/workstation.nix;
+  # the wrappers re-assert it because inheritance is not guaranteed.
+  shellTmpRoot = "${sinnixCfg.paths.realmRoot}/tmp/shell";
 
   # Shared npm bootstrap prelude — delegates state-dir setup, first-run npm
   # install, and launcher regeneration to the packaged
@@ -31,6 +34,19 @@ let
     }:
     ''
       STATE="$HOME/.local/state/${stateDir}"
+      # Guarantee the NVMe scratch TMPDIR rather than trusting inheritance.
+      # environment.sessionVariables.TMPDIR (profiles/workstation.nix) only
+      # reaches processes whose session imported it; a long-lived agent CLI
+      # started outside that path runs with TMPDIR unset, so every devshell
+      # and test run underneath it falls back to the 6 GiB /tmp tmpfs and
+      # refills it (confirmed 2026-08-03: one agent session exhausted /tmp
+      # three times in a single turn, truncating shell heredocs mid-write,
+      # while `systemctl --user show-environment` correctly showed the
+      # variable set).
+      if [ -z "''${TMPDIR:-}" ] && [ -d ${lib.escapeShellArg sinnixCfg.paths.realmRoot} ]; then
+        export TMPDIR=${lib.escapeShellArg shellTmpRoot}
+        ${pkgs.coreutils}/bin/install -d -m 1777 "$TMPDIR" 2>/dev/null || true
+      fi
       ${scriptPkgs.sinnix-agent-npm-bootstrap}/bin/sinnix-agent-npm-bootstrap \
         ${lib.escapeShellArg stateDir} \
         ${lib.escapeShellArg npmPackage} \
