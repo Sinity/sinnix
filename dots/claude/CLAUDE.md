@@ -21,6 +21,16 @@
   smaller, or more familiar product decision.
 - Prefer surgical renewal. Remove obsolete paths, flags, wrappers, aliases, and
   stale docs in the same change that replaces them. No deprecation theater.
+- Unfinished is not obsolete. When you find half-built work (a wired-but-unused
+  parser, a dead-looking function with tests, a partially-connected pipeline),
+  the presumption is to COMPLETE it, not delete it. Deletion needs positive
+  evidence the capability is unwanted: superseded by a shipped replacement,
+  contradicted by a recorded decision, or explicitly retired by the operator.
+  "No production callers yet" is what half-done work looks like, not proof of
+  abandonment; check git history, tracker items, and design docs for the
+  intent before choosing removal over completion. When completion is too large
+  for the current task, file a tracking item and leave the code; do not
+  "clean it up" into a capability regression.
 - Respect the local architecture. Use established modules, helpers, data flows,
   and typed interfaces before adding machinery.
 - Work evidence-first. When uncertain, inspect the live config/source/history
