@@ -80,6 +80,21 @@ apps = true
 tui_app_server = true
 js_repl = true
 
+# Multi-agent V2 fanout ceiling. The base session (model/effort/sandbox/
+# approval above) already applies to every invocation via the `codex` wrapper
+# (--profile full); subagents inherit those same permissive settings unless a
+# custom agent file overrides them, so no separate writable_roots/sandbox
+# carve-out is needed here. default_subagent_model keeps ACCIDENTAL
+# inheritance/delegation cheap (a stray fanout becomes a Luna, not another
+# Sol) — deliberate delegation to a specific tier still goes through an
+# explicit custom-agent file (see project .codex/agents/).
+[agents]
+enabled = true
+interrupt_message = true
+max_concurrent_threads_per_session = 24
+default_subagent_model = "gpt-5.6-luna"
+default_subagent_reasoning_effort = "medium"
+
 [plugins."google-calendar@openai-curated"]
 enabled = false
 
