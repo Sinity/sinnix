@@ -66,6 +66,9 @@ Commands:
   screenshot <page_id> [--format png|jpeg] [--quality 80] [--full-page] [--out <file>]
                                   Take a screenshot of a page via CDP
 
+  network-log <page_id> [--seconds 15] [--filter <regex>]
+                                  Stream CDP Network request/response events
+
   evaluate <page_id> --js <javascript> [--out <file>]
                                   Evaluate JavaScript in a page, return result
 
@@ -721,14 +724,86 @@ evaluate)
     exit 1
   }
 
-  params=$(jq -nc --arg expr "$js" '{expression: $expr, returnByValue: true}')
+  # awaitPromise: an async IIFE or any promise-returning expression resolves
+  # before we read it, instead of returning an opaque "Promise" object and
+  # forcing callers into a store-on-window-then-poll workaround.
+  # userGesture: lets evaluate drive gesture-gated APIs (clipboard, autoplay).
+  # Errors surface as exceptionDetails, which returnByValue alone discards --
+  # print them to stderr and exit non-zero rather than emitting a silent null.
+  params=$(jq -nc --arg expr "$js" \
+    '{expression: $expr, returnByValue: true, awaitPromise: true, userGesture: true}')
   result=$(cdp_send_with_result "$ws_url" "Runtime.evaluate" "$params")
   if [[ -n $out_file ]]; then
     echo "$result" | jq --arg expr "$js" '{expression: $expr, result: .}' >"$out_file"
     echo "saved: $out_file"
   else
+    exception=$(echo "$result" | jq -r '.exceptionDetails // empty')
+    if [[ -n $exception ]]; then
+      echo "$result" | jq -r '
+        .exceptionDetails
+        | (.exception.description // .text // "evaluation failed")
+          + (if .lineNumber then "  (line \(.lineNumber))" else "" end)' >&2
+      exit 1
+    fi
     echo "$result" | jq -r '.result.value // .result.description // .'
   fi
+  ;;
+
+network-log)
+  # Stream CDP Network-domain events for a bounded window. Page-level fetch
+  # hooking misses anything the app issued before the hook installed, anything
+  # on another origin, and non-fetch transports; the Network domain sees all of
+  # it. cdp_send uses `websocat -n1`, which closes after one message and cannot
+  # observe events, so this opens its own connection and holds it open by
+  # keeping stdin alive for the duration.
+  page_id=""
+  duration=15
+  filter=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --seconds)
+      duration="${2:?missing seconds}"
+      shift 2
+      ;;
+    --filter)
+      filter="${2:?missing filter}"
+      shift 2
+      ;;
+    *)
+      if [[ -z $page_id ]]; then
+        page_id="$1"
+        shift
+      else
+        echo "unknown arg: $1" >&2
+        exit 2
+      fi
+      ;;
+    esac
+  done
+  [[ -n $page_id ]] || {
+    echo "network-log requires page_id" >&2
+    exit 2
+  }
+  page_id=$(resolve_page_id "$page_id")
+  ws_url=$(get_ws_url "$page_id")
+  [[ -n $ws_url ]] || {
+    echo "page not found: $page_id" >&2
+    exit 1
+  }
+  {
+    echo '{"id":1,"method":"Network.enable"}'
+    sleep "$duration"
+  } | websocat -B 2097152 "$ws_url" 2>/dev/null |
+    jq -c --arg f "$filter" '
+      select(.method == "Network.requestWillBeSent" or .method == "Network.responseReceived")
+      | if .method == "Network.requestWillBeSent" then
+          {phase: "request", method: .params.request.method, url: .params.request.url,
+           type: .params.type, id: .params.requestId}
+        else
+          {phase: "response", status: .params.response.status, url: .params.response.url,
+           mime: .params.response.mimeType, type: .params.type, id: .params.requestId}
+        end
+      | select($f == "" or (.url | test($f)))'
   ;;
 
 navigate)
