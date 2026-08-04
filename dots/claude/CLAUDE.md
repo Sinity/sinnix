@@ -559,10 +559,9 @@ each project's `CLAUDE.md`.
   `browser.nix`/`hooks.nix`; regrouped from the former `mcp-servers.nix`,
   sinnix-9u6). Plain `codex` uses the lean non-browser profile, while
   `codex-full` uses the full profile (GitHub, Context7, Polylogue, Lynchpin,
-  Serena, Codebase Memory). Plain `claude` remains the full profile. The
-  `claude-lean` profile keeps GitHub, Context7, and Polylogue only.
+  Serena, Codebase Memory). Plain `claude` uses the lean profile.
   `claude-browser`/`codex-browser` add the Chrome DevTools MCP tier. `claude`
-  is a shell alias to the `claude-full` wrapper — the bare `~/.local/bin/claude`
+  is a shell alias to the `claude-lean` wrapper — the bare `~/.local/bin/claude`
   is deliberately unmanaged because Claude Code's installer claims and
   clobbers it on auto-update.
 - **Alternate backends (full MCP profile)**: `claude-deepseek`/`codex-deepseek`
