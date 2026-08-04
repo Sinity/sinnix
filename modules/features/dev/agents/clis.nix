@@ -330,14 +330,14 @@ mkFeatureModule {
 
           programs.zsh = {
             shellAliases = {
-              # `claude` routes through claude-full (NOT a bare ~/.local/bin/claude):
+              # `claude` routes through claude-lean (NOT a bare ~/.local/bin/claude):
               # Claude Code's native local-installer claims the literal path
               # ~/.local/bin/claude and clobbers any symlink there on auto-update,
               # which is what repeatedly broke the bare command. Suffixed names are
-              # never touched, so the wrapper lives at claude-full and the alias
+              # never touched, so the wrapper lives at claude-lean and the alias
               # points here.
-              claude = "~/.local/bin/claude-full";
-              claude-lean = "~/.local/bin/claude-lean";
+              claude = "~/.local/bin/claude-lean";
+              claude-full = "~/.local/bin/claude-full";
               claude-browser = "~/.local/bin/claude-browser";
               claude-deepseek = "~/.local/bin/claude-deepseek";
               claude-local = "~/.local/bin/claude-local";
