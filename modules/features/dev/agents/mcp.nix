@@ -139,6 +139,8 @@ mkFeatureModule {
         ;
       inherit (clientProfiles)
         codexConfigFile
+        codexModelsV1File
+        codexExplorerAgentFile
         codexFullConfigFile
         codexLeanConfigFile
         codexEvidenceConfigFile
@@ -213,7 +215,10 @@ mkFeatureModule {
               # entries. Nix settings always win on activation; trust entries
               # added between rebuilds survive until the next switch.
               codexConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+                run mkdir -p "$HOME/.codex/agents"
                 run cp ${codexConfigFile} "$HOME/.codex/config.toml"
+                run cp ${codexModelsV1File} "$HOME/.codex/models-v1.json"
+                run cp ${codexExplorerAgentFile} "$HOME/.codex/agents/explorer.toml"
                 run cp ${codexFullConfigFile} "$HOME/.codex/full.config.toml"
                 run cp ${codexLeanConfigFile} "$HOME/.codex/lean.config.toml"
                 run cp ${codexEvidenceConfigFile} "$HOME/.codex/evidence.config.toml"
@@ -222,6 +227,8 @@ mkFeatureModule {
                 run cp ${codexLocalConfigFile} "$HOME/.codex/local.config.toml"
                 run cp ${codexHooksFile} "$HOME/.codex/hooks.json"
                 run chmod 644 "$HOME/.codex/config.toml"
+                run chmod 644 "$HOME/.codex/models-v1.json"
+                run chmod 644 "$HOME/.codex/agents/explorer.toml"
                 run chmod 644 "$HOME/.codex/full.config.toml"
                 run chmod 644 "$HOME/.codex/lean.config.toml"
                 run chmod 644 "$HOME/.codex/evidence.config.toml"

@@ -6,6 +6,7 @@
 # profile explicitly so lean sessions do not inherit the full MCP table.
 model = "gpt-5.6-sol"
 model_reasoning_effort = "high"
+model_catalog_json = "/home/sinity/.codex/models-v1.json"
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
 project_doc_max_bytes = 262144
@@ -74,6 +75,7 @@ status_line = ["current-dir", "model-with-reasoning", "context-remaining", "cont
 [features]
 hooks = true
 multi_agent = true
+multi_agent_v2 = false
 prevent_idle_sleep = true
 apps = true
 
@@ -91,6 +93,10 @@ interrupt_message = true
 max_concurrent_threads_per_session = 24
 default_subagent_model = "gpt-5.6-luna"
 default_subagent_reasoning_effort = "medium"
+
+[agents.explorer]
+description = "Fast read-only codebase exploration and evidence gathering."
+config_file = "agents/explorer.toml"
 
 [plugins."google-calendar@openai-curated"]
 enabled = false
