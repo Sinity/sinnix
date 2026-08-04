@@ -26,7 +26,7 @@ and window-management failure modes.
 ### Codex
 
 Use `gpt-5.6-terra` with high reasoning for unattended execution. The
-interactive coordinating default is `gpt-5.6-sol` with high reasoning. Set the
+interactive coordinating default is `gpt-5.6-luna` with high reasoning. Set the
 repository, model, and effort explicitly on every run and verify the launch
 receipt reports the requested model:
 

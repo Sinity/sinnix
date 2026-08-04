@@ -83,7 +83,6 @@ in
           ".local/bin/claude-deepseek"
           ".local/bin/claude-local"
           ".local/bin/codex"
-          ".local/bin/codex-lean"
           ".local/bin/codex-full"
           ".local/bin/codex-browser"
           ".local/bin/codex-deepseek"
@@ -375,7 +374,7 @@ in
               "$HOME/.local/bin/claude-deepseek" \
               "$HOME/.local/bin/claude-local" \
               "$HOME/.local/bin/codex" \
-              "$HOME/.local/bin/codex-lean" \
+              "$HOME/.local/bin/codex-full" \
               "$HOME/.local/bin/codex-browser" \
               "$HOME/.local/bin/codex-deepseek" \
               "$HOME/.local/bin/codex-local" \
@@ -552,9 +551,8 @@ in
               grep -Fq 'export CLAUDE_CODE_TMPDIR=/realm/tmp/claude-code' "$wrapper"
               grep -Fq '/bin/install -d -m 0700 "$CLAUDE_CODE_TMPDIR"' "$wrapper"
             done
-            grep -Fq 'codex_args=(--profile full)' "$HOME/.local/bin/codex"
-            grep -Fq 'export SINNIX_CODEX_PROFILE=lean' "$HOME/.local/bin/codex-lean"
-            grep -Fq 'codex_args=(--profile lean)' "$HOME/.local/bin/codex-lean"
+            grep -Fq 'export SINNIX_CODEX_PROFILE=lean' "$HOME/.local/bin/codex"
+            grep -Fq 'codex_args=(--profile lean)' "$HOME/.local/bin/codex"
             grep -Fq 'codex_args=(--profile full)' "$HOME/.local/bin/codex-full"
             grep -Fq 'codex_args=(--profile browser)' "$HOME/.local/bin/codex-browser"
             grep -Fq 'codex_args=(--profile deepseek)' "$HOME/.local/bin/codex-deepseek"
@@ -612,7 +610,9 @@ in
               exit 1
             fi
 
-            agent_control_mcp=${inputs.self.packages.${system}.sinnix-agent-control-mcp}/bin/sinnix-agent-control-mcp
+            agent_control_mcp=${
+              inputs.self.packages.${system}.sinnix-agent-control-mcp
+            }/bin/sinnix-agent-control-mcp
             test -x "$agent_control_mcp"
             mcp_fixture="$TMPDIR/agent-control-mcp"
             mkdir -p "$mcp_fixture/skill/scripts" "$mcp_fixture/state" "$mcp_fixture/repo"

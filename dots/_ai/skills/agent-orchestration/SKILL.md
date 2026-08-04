@@ -20,7 +20,7 @@ it contains the verified commands, auth rules, and mode constraints.
 
 1. Choose direct local exec, a native background agent, Codex Cloud, or Kitty.
 2. For Codex, use `gpt-5.6-terra` with high reasoning for unattended execution
-   lanes. Use `gpt-5.6-sol` with high reasoning for the coordinating interactive
+   lanes. Use `gpt-5.6-luna` with high reasoning for the coordinating interactive
    session unless the operator selects another tier. Never inherit or guess a
    stale model default; inspect the launch receipt.
 3. Set the working directory explicitly and preserve the returned session/task

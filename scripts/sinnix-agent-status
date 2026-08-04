@@ -97,7 +97,7 @@ service system sinex.service
 
 path_probe runtime-inventory /etc/sinnix/runtime-inventory.json
 path_probe codex-full-profile "$HOME/.codex/full.config.toml"
-path_probe codex-lean-profile "$HOME/.codex/lean.config.toml"
+path_probe codex-profile "$HOME/.codex/lean.config.toml"
 path_probe codex-browser-profile "$HOME/.codex/browser.config.toml"
 path_probe claude-full-profile "$HOME/.config/claude/mcp.json"
 path_probe claude-lean-profile "$HOME/.config/claude/mcp-lean.json"
