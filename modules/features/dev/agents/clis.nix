@@ -192,13 +192,26 @@ mkFeatureModule {
       hermesOrchestrateConfigFile = mkHermesConfig {
         name = "orchestrate";
         mcpServers = hermesOrchestrateMcpServers;
-        toolsets = [ "skills" "todo" "memory" "session_search" "clarify" ];
+        toolsets = [
+          "skills"
+          "todo"
+          "memory"
+          "session_search"
+          "clarify"
+        ];
         reasoningEffort = "high";
         voiceEnabled = false;
       };
       hermesMirrorConfigFile = mkHermesConfig {
         name = "mirror";
-        toolsets = [ "skills" "todo" "memory" "session_search" "clarify" "tts" ];
+        toolsets = [
+          "skills"
+          "todo"
+          "memory"
+          "session_search"
+          "clarify"
+          "tts"
+        ];
       };
       claudeMcpServers = lib.mapAttrs mcpRegistry.renderClaudeServer (
         mcpRegistry.selectClientServersForProfile "full" "claude"
