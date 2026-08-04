@@ -10,6 +10,7 @@
   mcpRegistry,
   tomlFormat,
   jsonFormat,
+  dotsRoot,
 }:
 let
   inherit (mcpRegistry)
@@ -61,17 +62,29 @@ let
     };
   };
   sharedSkillNames = import ../../../../flake/data/shared-agent-skills.nix;
+  # Out-of-store by construction — see the matching comment in clis.nix. The
+  # farm is a store directory whose entries symlink into the live dots
+  # checkout, so editing a skill needs no rebuild; only adding or removing a
+  # skill name does.
+  mkSkillFarm =
+    farmName: entries:
+    pkgs.runCommand farmName { } ''
+      mkdir -p "$out"
+      ${lib.concatMapStringsSep "\n" (e: ''
+        ln -s ${lib.escapeShellArg e.path} "$out/${e.name}"
+      '') entries}
+    '';
   sharedSkillLinks = map (name: {
     inherit name;
-    path = inputs.self + "/dots/_ai/skills/${name}";
+    path = "${dotsRoot}/_ai/skills/${name}";
   }) sharedSkillNames;
-  sharedSkillFarm = pkgs.linkFarm "sinnix-shared-agent-skills" sharedSkillLinks;
-  codexSkillFarm = pkgs.linkFarm "sinnix-codex-agent-skills" (
+  sharedSkillFarm = mkSkillFarm "sinnix-shared-agent-skills" sharedSkillLinks;
+  codexSkillFarm = mkSkillFarm "sinnix-codex-agent-skills" (
     sharedSkillLinks
     ++ [
       {
         name = ".system";
-        path = inputs.self + "/dots/codex/skills/.system";
+        path = "${dotsRoot}/codex/skills/.system";
       }
     ]
   );

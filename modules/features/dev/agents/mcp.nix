@@ -101,6 +101,7 @@ mkFeatureModule {
           scriptPkgs
           inputs
           ;
+        dotsRoot = config.sinnix.paths.dotsRoot;
       };
       mcpTools = import ./mcp-tools.nix {
         inherit
@@ -119,6 +120,7 @@ mkFeatureModule {
           tomlFormat
           jsonFormat
           ;
+        dotsRoot = config.sinnix.paths.dotsRoot;
       };
       codexHooksFile = import ./hooks.nix { inherit pkgs; };
 
@@ -323,23 +325,23 @@ mkFeatureModule {
               force = true;
             };
             ".local/bin/sinnix-chrome-control" = {
-              source = "${desktopControlScripts}/chrome-control.sh";
+              source = config.lib.file.mkOutOfStoreSymlink "${desktopControlScripts}/chrome-control.sh";
               force = true;
             };
             ".local/bin/sinnix-hypr-control" = {
-              source = "${desktopControlScripts}/hypr-control.sh";
+              source = config.lib.file.mkOutOfStoreSymlink "${desktopControlScripts}/hypr-control.sh";
               force = true;
             };
             ".local/bin/sinnix-keyboard-control" = {
-              source = "${desktopControlScripts}/keyboard-control.sh";
+              source = config.lib.file.mkOutOfStoreSymlink "${desktopControlScripts}/keyboard-control.sh";
               force = true;
             };
             ".local/bin/sinnix-kitty-control" = {
-              source = "${desktopControlScripts}/kitty-remote-control.sh";
+              source = config.lib.file.mkOutOfStoreSymlink "${desktopControlScripts}/kitty-remote-control.sh";
               force = true;
             };
             ".local/bin/sinnix-screenshot-control" = {
-              source = "${desktopControlScripts}/screenshot-color-lab.sh";
+              source = config.lib.file.mkOutOfStoreSymlink "${desktopControlScripts}/screenshot-color-lab.sh";
               force = true;
             };
             ".local/bin/sinnix-agent-status" = {

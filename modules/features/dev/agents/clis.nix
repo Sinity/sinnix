@@ -224,12 +224,20 @@ mkFeatureModule {
         mcpServers = claudeBrowserMcpServers;
       };
       sharedSkillNames = import ../../../../flake/data/shared-agent-skills.nix;
-      sharedSkillFarm = pkgs.linkFarm "sinnix-shared-agent-skills" (
-        map (name: {
-          inherit name;
-          path = inputs.self + "/dots/_ai/skills/${name}";
-        }) sharedSkillNames
-      );
+      # Out-of-store by construction: the farm is a store directory, but every
+      # entry symlinks into the live dots checkout rather than a copied source.
+      # Editing a skill's SKILL.md/template therefore takes effect immediately
+      # for claude/codex/gemini/hermes, matching every other dots file here.
+      # Only ADDING or REMOVING a skill name still needs a rebuild.
+      sharedSkillFarm = mkSkillFarm "sinnix-shared-agent-skills" sharedSkillNames;
+      mkSkillFarm =
+        farmName: names:
+        pkgs.runCommand farmName { } ''
+          mkdir -p "$out"
+          ${lib.concatMapStringsSep "\n" (n: ''
+            ln -s ${lib.escapeShellArg "${sinnixCfg.paths.dotsRoot}/_ai/skills/${n}"} "$out/${n}"
+          '') names}
+        '';
       # Runs the given launcher under sinnix-scope's agent slice unless already
       # scoped (see scripts/sinnix-agent-scope-exec).
       agentScopeExec = "${scriptPkgs.sinnix-agent-scope-exec}/bin/sinnix-agent-scope-exec";

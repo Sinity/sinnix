@@ -7,6 +7,7 @@
   pkgs,
   scriptPkgs,
   inputs,
+  dotsRoot,
 }:
 let
   # Chrome DevTools MCP — vendored npm package built via mkNodeCliPackage.
@@ -41,7 +42,13 @@ let
     export SINNIX_AGENT_CHROME_HEADLESS=0
     exec ${mcpChromeDevtoolsPrivateBin}/bin/mcp-chrome-devtools-private "$@"
   '';
-  desktopControlScripts = inputs.self + "/dots/_ai/skills/desktop-control-plane/scripts";
+  # Live dots path, not `inputs.self + ...`: these are operator/agent control
+  # scripts that get iterated on constantly, and a store copy means every edit
+  # needs a rebuild before it can be exercised. Same reasoning as the shared
+  # skill farm in clis.nix. Consumers must reference this via
+  # mkOutOfStoreSymlink rather than string interpolation, or Nix copies the
+  # directory into the store and the indirection is lost.
+  desktopControlScripts = dotsRoot + "/_ai/skills/desktop-control-plane/scripts";
 in
 {
   inherit
