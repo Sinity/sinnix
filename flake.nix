@@ -128,8 +128,12 @@
     nix-vscode-extensions.inputs.nixpkgs.follows = "nixpkgs";
 
     # Beads (`bd`) durable issue tracker for coding-agent work memory.
+    # Unpinned: track the default branch so `nix flake update beads` picks up
+    # releases without a manual version bump. Pinning to v1.0.4 left us three
+    # releases (~2.5 months) behind, missing fixes for defects we were working
+    # around locally -- including the auto-import guard our own patch carried.
     beads = {
-      url = "github:gastownhall/beads/v1.0.4";
+      url = "github:gastownhall/beads";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
