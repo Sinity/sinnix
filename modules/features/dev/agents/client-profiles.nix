@@ -25,6 +25,8 @@ let
       mcp_servers = lib.mapAttrs renderCodexServer (selectClientServersForProfile profile "codex");
     };
   codexConfigFile = inputs.self + "/dots/codex/config.toml";
+  codexModelsV1File = inputs.self + "/dots/codex/models-v1.json";
+  codexExplorerAgentFile = inputs.self + "/dots/codex/agents/explorer.toml";
   codexFullConfigFile = mkCodexProfileFile "full";
   codexLeanConfigFile = mkCodexProfileFile "lean";
   codexEvidenceConfigFile = mkCodexProfileFile "evidence";
@@ -106,6 +108,8 @@ in
 {
   inherit
     codexConfigFile
+    codexModelsV1File
+    codexExplorerAgentFile
     codexFullConfigFile
     codexLeanConfigFile
     codexEvidenceConfigFile
