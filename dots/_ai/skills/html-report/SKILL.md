@@ -114,6 +114,21 @@ preview is a quote you actually took, not a promise to read later.
 The `<template>` must be a **direct child** of the element it previews. A
 sibling silently binds the popup to the surrounding paragraph instead.
 
+**Bundle popups with a compiler, not by hand, for `a.path` links.** A `file://`
+link only opens for a reader on the *same machine* with the *same absolute
+paths* — someone else's machine, an Artifact-hosted copy, or a screenshot all
+leave it dead, and the popup is what keeps the reference useful anyway. But
+hand-typing the excerpt means reading the file into your own context just to
+retype a piece of it back out, and it goes stale on the next edit. Instead,
+mark the link `data-embed` (bare, or `data-embed="4000"` to override the
+per-file char cap) while composing the report — no excerpt, just the marker —
+then run `generators/embed-path-popups.py <report.html>` once before shipping;
+it reads each marked file fresh from disk and inserts the popup for you.
+Idempotent (a link with an existing `<template class="pop">` child is left
+alone), so re-run it after adding more `data-embed` links without disturbing
+hand-edited ones. Reserve manual excerpt-typing for the rare case where you
+want to quote a *specific* passage rather than a file's head.
+
 **Code blocks** use `<figure class="code">` with a `<figcaption>` carrying the
 filename, `<span class="lang">` for the language (gets the accent color), and a
 copy button; `<pre class="ln">` numbers lines when each is wrapped in

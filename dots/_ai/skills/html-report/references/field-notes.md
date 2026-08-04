@@ -58,3 +58,35 @@ specific to its situation.
 > "Data-derived reports". Artifact-publish-by-default → SKILL.md workflow
 > step 4. The `rg -rn` trap was general tool hygiene, not skill material —
 > dropped.
+
+### 2026-08-03 — `file://` links are dead when the report ships via Artifact
+**What happened:** operator correction on a report published via the `Artifact` tool: every
+`<a class="path" href="file:///...">` link was non-functional — clicking did nothing useful,
+since the page was served from claude.ai's Artifact hosting, not opened locally. The report
+had bare path links with no `<template class="pop">` child, so there was no fallback either.
+**Root cause / mechanism:** the skill's "openable path" pattern (SKILL.md, "Paths, popups, and
+code") assumes the reader opens the HTML file locally via `file://`, where such links resolve
+on the reader's own filesystem. That assumption silently breaks the moment the same artifact
+is *also* published via `Artifact` (which the skill's own workflow step 4 says to do by
+default) — the Artifact-hosted copy runs in a browser sandbox with no access to the operator's
+local files, and `file://` navigation from an `https://` origin is blocked outright by the
+browser besides. A report that is *both* saved locally *and* published (the normal case now)
+needs to work in both contexts, and only the popup half of the pattern survives Artifact
+hosting.
+**Fix or pattern:** treat the popup as load-bearing, not optional, for any `a.path` in a report
+that will be published via `Artifact` — the `href="file:///..."` still helps the local-file
+reader and costs nothing, but every such link should also carry a `<template class="pop">`
+with a real excerpt. A same-session follow-up correction sharpened the fix further: hand-typing
+that excerpt means reading the file into the agent's own context just to retype a piece back
+out (the operator called this out directly — "without abusrd stuff like you retyping
+everything"). **Folded**: `generators/embed-path-popups.py` compiles a bare `data-embed` marker
+into the bundled popup by reading the file fresh from disk, and SKILL.md's "Paths, popups, and
+code" section now names it as the default path — manual excerpt-typing is the exception, for
+quoting one specific passage rather than a file's head.
+
+## 2026-08-03 — POP-TODO grep matches the template's own SLOT comment
+The shipping-check grep for `POP-TODO` fires on the stat-tiles SLOT comment
+("the shipping check greps for the POP-TODO sentinel") even after every tile is
+filled — delete that comment block when filling the tiles, or the check
+false-positives. Consider rewording the template comment to not contain the
+literal sentinel.
