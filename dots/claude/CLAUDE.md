@@ -557,9 +557,10 @@ each project's `CLAUDE.md`.
   in sinnix; wiring lives in `modules/features/dev/agents/` (`mcp.nix` +
   sibling helpers `mcp-tools.nix`/`client-profiles.nix`/`serena.nix`/
   `browser.nix`/`hooks.nix`; regrouped from the former `mcp-servers.nix`,
-  sinnix-9u6). Plain `claude`/`codex` use the full non-browser profile
-  (GitHub, Context7, Polylogue, Lynchpin, Serena, Codebase Memory).
-  `claude-lean`/`codex-lean` keep GitHub, Context7, and Polylogue only.
+  sinnix-9u6). Plain `codex` uses the lean non-browser profile, while
+  `codex-full` uses the full profile (GitHub, Context7, Polylogue, Lynchpin,
+  Serena, Codebase Memory). Plain `claude` remains the full profile. The
+  `claude-lean` profile keeps GitHub, Context7, and Polylogue only.
   `claude-browser`/`codex-browser` add the Chrome DevTools MCP tier. `claude`
   is a shell alias to the `claude-full` wrapper — the bare `~/.local/bin/claude`
   is deliberately unmanaged because Claude Code's installer claims and
@@ -675,7 +676,7 @@ branching/committing/merging and agents should report patches or commit only by
 explicit instruction.
 
 **Codex model contract:** the coordinating interactive session uses
-`gpt-5.6-sol` at high reasoning by default. Unattended implementation/review
+`gpt-5.6-luna` at high reasoning by default. Unattended implementation/review
 workers use `gpt-5.6-terra` at high reasoning. Always pass the model and effort
 explicitly and verify them in the launch receipt; never silently fall back to a
 stale configured model. `gpt-5.5` is retired for new work.
