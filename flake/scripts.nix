@@ -138,19 +138,22 @@ let
     # devshells, agent lanes) gets server capability unconditionally.
     beads =
       let
+        # No local patches: beads-server-auto-import-empty-check.patch was
+        # dropped at the v1.0.4 -> v1.1.2 bump. Upstream now carries its own
+        # guard for the same defect (a stale issues.jsonl re-imposed over
+        # newer Dolt rows on every mutating command after a branch switch) --
+        # see the GetStatistics emptiness guard and its "cf. PR #3630"
+        # comment in cmd/bd/auto_import_upgrade.go. Our patch no longer
+        # applies cleanly against the rewritten function and produced a
+        # non-compiling tree, which is itself the signal that it is obsolete.
         beadsBase = pkgs.callPackage (inputs.beads + "/default.nix") {
           self = inputs.beads;
           buildGoModule = pkgs.buildGo126Module;
         };
-        patchedBeads = beadsBase.overrideAttrs (old: {
-          patches = (old.patches or [ ]) ++ [
-            ./patches/beads-server-auto-import-empty-check.patch
-          ];
-        });
       in
       pkgs.symlinkJoin {
         name = "beads-with-dolt";
-        paths = [ patchedBeads ];
+        paths = [ beadsBase ];
         nativeBuildInputs = [ pkgs.makeWrapper ];
         postBuild = ''
           wrapProgram $out/bin/bd --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.dolt ]}
