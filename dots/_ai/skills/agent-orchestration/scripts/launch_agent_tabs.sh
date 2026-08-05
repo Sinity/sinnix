@@ -32,7 +32,7 @@ Usage:
   launch_agent_tabs.sh [options] <prompt_file...>
 
 Required:
-  --agent <claude|codex|gemini>
+  --agent <claude|codex|gemini|grok|antigravity>
   --workdir <path>
   --prompt-dir <path>
   --output-dir <path>
@@ -209,9 +209,11 @@ if [[ ${status_only} -eq 1 || ${tails_mode} -eq 1 ]]; then
   fi
   fmt_dur() {
     local s=$1
-    (( s < 0 )) && s=0
-    if (( s >= 3600 )); then printf '%dh%02dm' $((s / 3600)) $((s % 3600 / 60))
-    elif (( s >= 60 )); then printf '%dm%02ds' $((s / 60)) $((s % 60))
+    ((s < 0)) && s=0
+    if ((s >= 3600)); then
+      printf '%dh%02dm' $((s / 3600)) $((s % 3600 / 60))
+    elif ((s >= 60)); then
+      printf '%dm%02ds' $((s / 60)) $((s % 60))
     else printf '%ds' "${s}"; fi
   }
   # One row per canonical task. Relaunch generations (<task>.resume-N.log,
@@ -294,10 +296,10 @@ if [[ ${status_only} -eq 1 || ${tails_mode} -eq 1 ]]; then
   }
   state_color() {
     case "$1" in
-      RUNNING) printf '%s' "${c_cyn}" ;;
-      DONE) printf '%s' "${c_grn}" ;;
-      FAILED) printf '%s' "${c_red}" ;;
-      *) printf '%s' "${c_yel}" ;;
+    RUNNING) printf '%s' "${c_cyn}" ;;
+    DONE) printf '%s' "${c_grn}" ;;
+    FAILED) printf '%s' "${c_red}" ;;
+    *) printf '%s' "${c_yel}" ;;
     esac
   }
   mapfile -t all_tasks < <(printf '%s\n' "${!newest_log[@]}" | sort)
@@ -309,7 +311,10 @@ if [[ ${status_only} -eq 1 || ${tails_mode} -eq 1 ]]; then
     shown=0
     for t in "${tail_tasks[@]}"; do
       state="${task_state[${t}]:-}"
-      [[ -z ${state} ]] && { echo "unknown task: ${t}" >&2; continue; }
+      [[ -z ${state} ]] && {
+        echo "unknown task: ${t}" >&2
+        continue
+      }
       if [[ ${state} != RUNNING && ${tails_all} -ne 1 ]]; then continue; fi
       log="${newest_log[${t}]}"
       src="${log}"
@@ -328,7 +333,7 @@ if [[ ${status_only} -eq 1 || ${tails_mode} -eq 1 ]]; then
   declare -A state_counts
   for t in "${all_tasks[@]}"; do
     state="${task_state[${t}]}"
-    state_counts[${state}]=$(( ${state_counts[${state}]:-0} + 1 ))
+    state_counts[${state}]=$((${state_counts[${state}]:-0} + 1))
     printf '%-34s %s%-8s%s %8s %8s  %s%s%s\n' \
       "${t}" "$(state_color "${state}")" "${state}" "${c_off}" \
       "${task_run[${t}]}" "${task_idle[${t}]}" "${c_dim}" "${task_detail[${t}]}" "${c_off}"
@@ -364,7 +369,7 @@ if [[ ${parallel} -gt 1 && ${mode} != "batch" ]]; then
   echo "--parallel is supported only with --mode batch" >&2
   exit 2
 fi
-if [[ -n ${workspace} && ( ${mode} != "kitty" || ${launch_type} != "os-window" ) ]]; then
+if [[ -n ${workspace} && (${mode} != "kitty" || ${launch_type} != "os-window") ]]; then
   echo "--workspace requires --mode kitty --launch-type os-window" >&2
   exit 2
 fi
@@ -386,6 +391,12 @@ if [[ -z ${model} ]]; then
   gemini)
     model="gemini-2.0-flash"
     ;;
+  grok)
+    model="grok-4.5"
+    ;;
+  antigravity)
+    model="gemini-3.1-pro-high"
+    ;;
   *)
     echo "unknown agent: ${agent}" >&2
     exit 2
@@ -393,12 +404,16 @@ if [[ -z ${model} ]]; then
   esac
 fi
 
-if [[ ${agent} == "claude" ]]; then
-  if ! command -v claude-full >/dev/null 2>&1 && ! command -v claude >/dev/null 2>&1; then
-    echo "claude runtime not found (expected claude or claude-full)" >&2
-    exit 1
-  fi
-elif ! command -v "${agent}" >/dev/null 2>&1; then
+resolve_agent_bin() {
+  case "${agent}" in
+  claude) command -v claude-full >/dev/null 2>&1 || command -v claude >/dev/null 2>&1 ;;
+  codex | gemini) command -v "${agent}" >/dev/null 2>&1 ;;
+  grok) command -v grok-sinnix >/dev/null 2>&1 || command -v grok >/dev/null 2>&1 ;;
+  antigravity) command -v agy-sinnix >/dev/null 2>&1 || command -v agy >/dev/null 2>&1 ;;
+  *) return 1 ;;
+  esac
+}
+if ! resolve_agent_bin; then
   echo "${agent} runtime not found on PATH" >&2
   exit 1
 fi
@@ -575,7 +590,7 @@ run_kitty_agent() {
     local exit_file="${output_dir}/${prompt_name}.exit"
     local inner
     inner="$(printf '%q ' "${launch_cmd[@]}")"
-    inner+="; ec=\$?"
+    inner+='; ec=$?'
     inner+="; printf '%s\\n' \"\${ec}\" > $(printf '%q' "${exit_file}")"
     inner+="; printf '[%s finished exit=%s — window persists for inspection]\\n' $(printf '%q' "${prompt_name}") \"\${ec}\""
     inner+="; exec ${persist_shell} -i"
@@ -621,6 +636,9 @@ if [[ ${model} == "gpt-5.3-codex-spark" && -z ${reasoning_effort} ]]; then
   reasoning_effort="xhigh"
 fi
 if [[ ${agent} == "codex" && -z ${reasoning_effort} ]]; then
+  reasoning_effort="high"
+fi
+if [[ ${agent} == "grok" || ${agent} == "antigravity" ]] && [[ -z ${reasoning_effort} ]]; then
   reasoning_effort="high"
 fi
 

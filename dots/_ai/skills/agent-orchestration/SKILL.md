@@ -58,9 +58,9 @@ shell invocation. It exposes only `start_agent_job`, `list_agent_jobs`,
 
 ## Helpers
 
-- `scripts/run_agent_prompt.sh` runs one prompt through Claude, Codex, or
-  Gemini, records its output, and emits an attested manifest for each
-  headless job. Use `--job-id`, `--job-role`, `--work-item`, and the narrow
+- `scripts/run_agent_prompt.sh` runs one prompt through Claude, Codex, Gemini,
+  Grok, or Antigravity, records its output, and emits an attested manifest for
+  each headless job. Use `--job-id`, `--job-role`, `--work-item`, and the narrow
   resource options when an operator needs a stable control handle.
 - `scripts/agent_job_control.sh` lists or refreshes a manifest and interrupts
   only by an attested job ID; it deliberately rejects PID, title, and window
@@ -72,6 +72,26 @@ shell invocation. It exposes only `start_agent_job`, `list_agent_jobs`,
 - `scripts/build_plan_batch_prompts.py` renders prompt files from plan JSON.
 - `scripts/probe_agent_runtime.sh` and `scripts/probe_host_control_plane.sh`
   check runtime and terminal-control availability.
+
+## Backend capabilities
+
+The native backends are intentionally explicit in job manifests and runtime
+probes:
+
+| Backend     | Headless entrypoint    | Default model         | Notes                                                                   |
+| ----------- | ---------------------- | --------------------- | ----------------------------------------------------------------------- |
+| Grok        | `grok-sinnix --single` | `grok-4.5`            | OAuth login, vendor state under `~/.grok`                               |
+| Antigravity | `agy-sinnix --print`   | `gemini-3.1-pro-high` | Google keyring/browser login, MCP at `~/.gemini/config/mcp_config.json` |
+
+Grok and Antigravity retain their vendor-managed binaries. The Sinnix wrappers
+add scope containment without allowing vendor updates to overwrite the managed
+entrypoints. `~/.local/state/sinnix/agent-jobs` is persisted so job manifests,
+prompts, logs, and final artifacts remain available for inspection after a
+reboot. Antigravity uses the coding and orchestration MCP tiers without the
+slow deep-evidence tier because its print mode blocks indefinitely while an MCP
+is still starting. Use `probe_agent_runtime.sh --agent <backend> --probe-model`
+before a paid or quota-sensitive batch when the serving account or model
+availability is uncertain.
 
 Use `desktop-control-plane` for browser, Hyprland, screenshot, and focus-safe
 desktop control.

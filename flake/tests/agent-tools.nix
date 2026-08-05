@@ -59,6 +59,16 @@ in
               assertion = lib.hasInfix "${config.sinnix.paths.dotsRoot}/claude/settings.json" activationText;
               message = "Claude settings.json must be linked directly to dots during activation.";
             }
+            {
+              assertion = builtins.all (path: builtins.hasAttr path hm.home.file) [
+                ".local/bin/sinnix-chrome-control"
+                ".local/bin/sinnix-hypr-control"
+                ".local/bin/sinnix-keyboard-control"
+                ".local/bin/sinnix-kitty-control"
+                ".local/bin/sinnix-screenshot-control"
+              ];
+              message = "Desktop control helpers must be installed through Home Manager.";
+            }
           ];
       };
       agentToolsFixture = {
@@ -88,6 +98,7 @@ in
           ".local/bin/codex-deepseek"
           ".local/bin/codex-local"
           ".local/bin/gemini"
+          ".local/bin/grok-sinnix"
           ".local/bin/agy-sinnix"
           ".local/bin/hermes"
           ".local/bin/hermes-research"
@@ -104,12 +115,34 @@ in
           ".local/bin/mcp-sinex"
           ".local/bin/sinnix-mcp-sweep"
           ".local/bin/sinnix-agent-status"
-          ".local/bin/sinnix-chrome-control"
-          ".local/bin/sinnix-hypr-control"
-          ".local/bin/sinnix-keyboard-control"
-          ".local/bin/sinnix-kitty-control"
-          ".local/bin/sinnix-screenshot-control"
           ".config/hermes/skills"
+        ];
+        fixtureAssets = [
+          {
+            target = ".local/bin/sinnix-chrome-control";
+            source = ../../dots/_ai/skills/desktop-control-plane/scripts/chrome-control.sh;
+            executable = true;
+          }
+          {
+            target = ".local/bin/sinnix-hypr-control";
+            source = ../../dots/_ai/skills/desktop-control-plane/scripts/hypr-control.sh;
+            executable = true;
+          }
+          {
+            target = ".local/bin/sinnix-keyboard-control";
+            source = ../../dots/_ai/skills/desktop-control-plane/scripts/keyboard-control.sh;
+            executable = true;
+          }
+          {
+            target = ".local/bin/sinnix-kitty-control";
+            source = ../../dots/_ai/skills/desktop-control-plane/scripts/kitty-remote-control.sh;
+            executable = true;
+          }
+          {
+            target = ".local/bin/sinnix-screenshot-control";
+            source = ../../dots/_ai/skills/desktop-control-plane/scripts/screenshot-color-lab.sh;
+            executable = true;
+          }
         ];
         xdgConfigFiles = [
           "claude/mcp.json"
@@ -290,8 +323,7 @@ in
             cp ${agentToolsCodexDeepseekConfigSource} "$HOME/.codex/deepseek.config.toml"
             cp ${agentToolsCodexLocalConfigSource} "$HOME/.codex/local.config.toml"
             cp ${agentToolsCodexHooksSource} "$HOME/.codex/hooks.json"
-            mkdir -p "$HOME/.gemini/config"
-            cp ${agentToolsAntigravityMcpConfigSource} "$HOME/.gemini/config/mcp_config.json"
+            test "$(readlink -f "$HOME/.gemini/config/mcp_config.json")" = ${agentToolsAntigravityMcpConfigSource}
             mkdir -p "$HOME/.hermes"
             cp ${agentToolsHermesConfigSource} "$HOME/.hermes/config.yaml"
             for profile in research orchestrate mirror; do
@@ -378,6 +410,7 @@ in
               "$HOME/.local/bin/codex-deepseek" \
               "$HOME/.local/bin/codex-local" \
               "$HOME/.local/bin/gemini" \
+              "$HOME/.local/bin/grok-sinnix" \
               "$HOME/.local/bin/agy-sinnix" \
               "$HOME/.local/bin/hermes" \
               "$HOME/.local/bin/hermes-research" \
@@ -502,7 +535,8 @@ in
             jq -e '
               .mcpServers as $m |
               ($m | has("github") and has("context7") and has("agent-control")) and
-              ($m | has("polylogue") and has("lynchpin")) and
+              ($m | has("polylogue") and has("sinex")) and
+              ($m | has("lynchpin") | not) and
               ($m | has("serena")) and
               ($m | has("chrome-devtools") | not) and
               ($m.polylogue.args == ["--role", "write"])
@@ -520,11 +554,11 @@ in
             ' "$HOME/.codex/hooks.json" >/dev/null
             jq -e '
               . as $root
-              | all(["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"][]; . as $event | [$root.hooks[$event][]?.hooks[]?.command] | index("polylogue-hook \($event) --provider codex"))
+              | all(["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"][]; . as $event | [$root.hooks[$event][]?.hooks[]?.command] | any(startswith("polylogue-hook \($event) --provider codex")))
             ' "$HOME/.codex/hooks.json" >/dev/null
             jq -e '
               . as $root
-              | all(["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"][]; . as $event | [$root.hooks[$event][]?.hooks[]?.command] | index("polylogue-hook \($event) --provider claude-code"))
+              | all(["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"][]; . as $event | [$root.hooks[$event][]?.hooks[]?.command] | any(startswith("polylogue-hook \($event) --provider claude-code")))
             ' '${../../dots/claude/settings.json}' >/dev/null
 
             grep -Fq 'MCP_CONFIG="$HOME/.config/claude/mcp.json"' "$HOME/.local/bin/claude-full"
@@ -569,6 +603,7 @@ in
               grep -Fq 'sinnix-agent-scope-exec "$STATE/launch.sh"' "$wrapper"
             done
             grep -Fq 'sinnix-agent-scope-exec "$HOME/.local/bin/agy"' "$HOME/.local/bin/agy-sinnix"
+            grep -Fq 'sinnix-agent-scope-exec "$HOME/.grok/bin/grok"' "$HOME/.local/bin/grok-sinnix"
             if grep -R 'MemoryHigh\|MemoryMax\|MemorySwapMax' "$HOME/.local/bin/claude-full" "$HOME/.local/bin/codex" "$HOME/.local/bin/gemini"; then
               echo "agent wrappers must not hardcode resource limits; runtime inventory owns per-scope defaults" >&2
               exit 1
@@ -592,7 +627,10 @@ in
               "$HOME/.local/bin/sinnix-keyboard-control" \
               "$HOME/.local/bin/sinnix-kitty-control" \
               "$HOME/.local/bin/sinnix-screenshot-control"; do
-              test -x "$helper"
+              if ! test -x "$helper"; then
+                echo "expected executable helper is missing: $helper" >&2
+                exit 1
+              fi
               bash -n "$helper"
             done
             grep -Fq 'private-sync-state' "$HOME/.local/bin/sinnix-chrome-control"
@@ -669,8 +707,13 @@ in
                 process.stdin.flush()
             responses = [json.loads(process.stdout.readline()) for _ in requests]
             assert responses[0]["result"]["serverInfo"]["name"] == "sinnix-agent-control"
-            tools = {tool["name"] for tool in responses[1]["result"]["tools"]}
+            listed_tools = responses[1]["result"]["tools"]
+            tools = {tool["name"] for tool in listed_tools}
             assert tools == {"start_agent_job", "list_agent_jobs", "agent_job_status", "read_agent_job_output", "interrupt_agent_job"}
+            start_tool = next(tool for tool in listed_tools if tool["name"] == "start_agent_job")
+            assert start_tool["inputSchema"]["properties"]["backend"]["enum"] == [
+                "claude", "codex", "gemini", "grok", "antigravity"
+            ]
             job_id = responses[2]["result"]["structuredContent"]["job_id"]
             assert responses[3]["result"]["structuredContent"][0]["job_id"] == job_id
             process.stdin.write(json.dumps({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "read_agent_job_output", "arguments": {"job_id": job_id, "artifact": "final"}}}) + "\n")

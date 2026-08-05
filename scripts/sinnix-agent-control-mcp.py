@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # @sinnix-package
 # name: sinnix-agent-control-mcp
-# description: Typed MCP control plane for attested native Claude, Codex, and Gemini jobs
+# description: Typed MCP control plane for attested native Claude, Codex, Gemini, Grok, and Antigravity jobs
 # runtimeInputs: bash coreutils jq @sinnix-agent-scope-exec
 """Stdio MCP adapter for the Sinnix native-agent orchestration scripts.
 
@@ -37,7 +37,9 @@ def state_dir() -> Path:
     if configured:
         return Path(configured).expanduser().resolve()
     xdg_state = os.environ.get("XDG_STATE_HOME")
-    base = Path(xdg_state).expanduser() if xdg_state else Path.home() / ".local" / "state"
+    base = (
+        Path(xdg_state).expanduser() if xdg_state else Path.home() / ".local" / "state"
+    )
     return (base / "sinnix" / "agent-jobs").resolve()
 
 
@@ -45,7 +47,9 @@ def skill_dir() -> Path:
     configured = os.environ.get("SINNIX_AGENT_ORCHESTRATION_SKILL_DIR")
     if configured:
         return Path(configured).expanduser().resolve()
-    return (Path.home() / ".config" / "hermes" / "skills" / "agent-orchestration").resolve()
+    return (
+        Path.home() / ".config" / "hermes" / "skills" / "agent-orchestration"
+    ).resolve()
 
 
 def runner() -> Path:
@@ -68,7 +72,9 @@ def require_object(arguments: Any) -> dict[str, Any]:
     return arguments
 
 
-def require_string(arguments: dict[str, Any], name: str, *, limit: int | None = None) -> str:
+def require_string(
+    arguments: dict[str, Any], name: str, *, limit: int | None = None
+) -> str:
     value = arguments.get(name)
     if not isinstance(value, str) or not value.strip():
         raise ToolError(f"{name} must be a non-empty string")
@@ -77,7 +83,9 @@ def require_string(arguments: dict[str, Any], name: str, *, limit: int | None = 
     return value
 
 
-def optional_string(arguments: dict[str, Any], name: str, *, limit: int = 256) -> str | None:
+def optional_string(
+    arguments: dict[str, Any], name: str, *, limit: int = 256
+) -> str | None:
     value = arguments.get(name)
     if value is None:
         return None
@@ -107,14 +115,23 @@ def load_manifest(job_id: str) -> dict[str, Any]:
         raise ToolError(f"unknown job ID: {job_id}") from exc
     except json.JSONDecodeError as exc:
         raise ToolError(f"malformed job manifest: {job_id}") from exc
-    if not isinstance(value, dict) or value.get("schema_version") != 1 or value.get("job_id") != job_id:
+    if (
+        not isinstance(value, dict)
+        or value.get("schema_version") != 1
+        or value.get("job_id") != job_id
+    ):
         raise ToolError(f"unattested job manifest: {job_id}")
     return value
 
 
 def json_text(value: Any) -> dict[str, Any]:
     return {
-        "content": [{"type": "text", "text": json.dumps(value, ensure_ascii=False, sort_keys=True)}],
+        "content": [
+            {
+                "type": "text",
+                "text": json.dumps(value, ensure_ascii=False, sort_keys=True),
+            }
+        ],
         "structuredContent": value,
     }
 
@@ -127,7 +144,11 @@ def run_control(*args: str) -> Any:
         check=False,
     )
     if result.returncode != 0:
-        raise ToolError(result.stderr.strip() or result.stdout.strip() or "agent job controller failed")
+        raise ToolError(
+            result.stderr.strip()
+            or result.stdout.strip()
+            or "agent job controller failed"
+        )
     try:
         return json.loads(result.stdout)
     except json.JSONDecodeError as exc:
@@ -156,8 +177,10 @@ def safe_artifact(manifest: dict[str, Any], artifact: str) -> Path:
 def start_agent_job(arguments: Any) -> dict[str, Any]:
     a = require_object(arguments)
     backend = require_string(a, "backend", limit=16)
-    if backend not in {"claude", "codex", "gemini"}:
-        raise ToolError("backend must be one of: claude, codex, gemini")
+    if backend not in {"claude", "codex", "gemini", "grok", "antigravity"}:
+        raise ToolError(
+            "backend must be one of: claude, codex, gemini, grok, antigravity"
+        )
 
     workdir = Path(require_string(a, "workdir", limit=4096)).expanduser().resolve()
     if not workdir.is_dir():
@@ -202,6 +225,12 @@ def start_agent_job(arguments: Any) -> dict[str, Any]:
     ]
     if backend == "codex" and model is None:
         model = "gpt-5.6-terra"
+    if backend == "grok" and model is None:
+        model = "grok-4.5"
+    if backend == "antigravity" and model is None:
+        model = "gemini-3.1-pro-high"
+    if backend in {"grok", "antigravity"} and effort is None:
+        effort = "high"
     if model is not None:
         command.extend(["--model", model])
     if effort is not None:
@@ -288,12 +317,15 @@ def read_agent_job_output(arguments: Any) -> dict[str, Any]:
 TOOLS = [
     {
         "name": "start_agent_job",
-        "description": "Launch an attested native Claude, Codex, or Gemini coding job asynchronously.",
+        "description": "Launch an attested native Claude, Codex, Gemini, Grok, or Antigravity coding job asynchronously.",
         "inputSchema": {
             "type": "object",
             "required": ["backend", "workdir", "prompt"],
             "properties": {
-                "backend": {"type": "string", "enum": ["claude", "codex", "gemini"]},
+                "backend": {
+                    "type": "string",
+                    "enum": ["claude", "codex", "gemini", "grok", "antigravity"],
+                },
                 "workdir": {"type": "string"},
                 "prompt": {"type": "string"},
                 "model": {"type": "string"},
@@ -308,7 +340,11 @@ TOOLS = [
     {
         "name": "list_agent_jobs",
         "description": "List attested native-agent jobs and their current scope state.",
-        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
     },
     {
         "name": "agent_job_status",
@@ -329,7 +365,11 @@ TOOLS = [
             "properties": {
                 "job_id": {"type": "string"},
                 "artifact": {"type": "string", "enum": ["log", "final", "json"]},
-                "max_chars": {"type": "integer", "minimum": 1, "maximum": MAX_OUTPUT_CHARS},
+                "max_chars": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": MAX_OUTPUT_CHARS,
+                },
             },
             "additionalProperties": False,
         },
@@ -352,7 +392,11 @@ def ok(message_id: Any, result: Any) -> dict[str, Any]:
 
 
 def error(message_id: Any, code: int, message: str) -> dict[str, Any]:
-    return {"jsonrpc": "2.0", "id": message_id, "error": {"code": code, "message": message}}
+    return {
+        "jsonrpc": "2.0",
+        "id": message_id,
+        "error": {"code": code, "message": message},
+    }
 
 
 def handle(message: dict[str, Any]) -> dict[str, Any] | None:
@@ -395,7 +439,8 @@ def handle(message: dict[str, Any]) -> dict[str, Any] | None:
         return error(message_id, -32601, f"method not found: {method}")
     except ToolError as exc:
         return error(message_id, -32000, str(exc))
-    except Exception as exc:  # Preserve actionable context without terminating the server.
+    # Preserve actionable context without terminating the server.
+    except Exception as exc:
         return error(message_id, -32603, f"internal agent-control error: {exc}")
 
 
