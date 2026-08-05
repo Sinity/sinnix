@@ -10,11 +10,8 @@ Usage:
   hdr-screenshot output [--dir DIR] [--no-notify]
 
 Captures the selected area or focused output, saves it, and copies it to the
-clipboard. Captures directly in the output's current mode: with Hyprland's
-render:cm_enabled=false (this setup), HDR-mode screencopy already yields
-correct sRGB frames, so no monitor reconfiguration is needed or performed.
-If the CM pipeline is ever enabled and captures wash out again, revisit —
-the old SDR-switch workaround caused visible output blanking and races.
+clipboard. On Hyprland HDR outputs, temporarily switches the focused output to
+SDR for capture because the HDR screencopy path can produce black frames.
 EOF
 }
 
@@ -67,34 +64,68 @@ case "$subcommand" in
   area|output)
     need_cmd date
     need_cmd grim
+    need_cmd hyprctl
+    need_cmd jq
     need_cmd wl-copy
     if [ "$subcommand" = "area" ]; then
       need_cmd slurp
-    else
-      need_cmd hyprctl
-      need_cmd jq
     fi
 
-    # A second Print press during an in-flight capture must not start a
-    # parallel selection/capture pair.
+    # Concurrent invocations race on the shared SDR-switch state: the second
+    # instance reads the already-switched cm=srgb, skips its own switch, and
+    # captures after the first instance restored HDR.
     exec 9>"${XDG_RUNTIME_DIR:-/tmp}/hdr-screenshot.lock"
     flock -n 9 || die "another capture is already in progress"
 
     mkdir -p "$target_dir"
     path="${target_dir}/$(date +'%Y-%m-%d-At-%Hh%Mm%Ss').png"
 
+    monitor_json="$(hyprctl -j monitors | jq -c 'map(select(.focused == true))[0]')"
+    [ -n "$monitor_json" ] && [ "$monitor_json" != "null" ] || die "no focused monitor found"
+
+    monitor="$(jq -r '.name' <<<"$monitor_json")"
+    width="$(jq -r '.width' <<<"$monitor_json")"
+    height="$(jq -r '.height' <<<"$monitor_json")"
+    refresh="$(jq -r '.refreshRate | round | tostring' <<<"$monitor_json")"
+    x="$(jq -r '.x' <<<"$monitor_json")"
+    y="$(jq -r '.y' <<<"$monitor_json")"
+    scale="$(jq -r '.scale' <<<"$monitor_json")"
+    cm="$(jq -r '.colorManagementPreset // ""' <<<"$monitor_json")"
+
+    capture_rule="$monitor,${width}x${height}@${refresh},${x}x${y},${scale},bitdepth,8,cm,srgb"
+
+    restore_monitor() {
+      if [ "$cm" = "hdr" ]; then
+        # A v1 monitor keyword cannot restore monitorv2-only luminance and HDR
+        # metadata. Reload the configured monitorv2 rule instead.
+        hyprctl reload >/dev/null 2>&1 || true
+      fi
+    }
+
+    if [ "$subcommand" = "area" ]; then
+      # Select before the modeset so the picker is not disturbed and the SDR
+      # interval lasts only for the capture itself.
+      geom="$(slurp)"
+      [ -n "$geom" ] || die "area selection cancelled"
+    fi
+
+    if [ "$cm" = "hdr" ]; then
+      trap restore_monitor EXIT
+      hyprctl keyword monitor "$capture_rule" >/dev/null
+      sleep 0.2
+    fi
+
     case "$subcommand" in
       area)
-        geom="$(slurp)"
-        [ -n "$geom" ] || die "area selection cancelled"
         grim -g "$geom" "$path"
         ;;
       output)
-        monitor="$(hyprctl -j monitors | jq -r 'map(select(.focused == true))[0].name // empty')"
-        [ -n "$monitor" ] || die "no focused monitor found"
         grim -c -o "$monitor" "$path"
         ;;
     esac
+
+    restore_monitor
+    trap - EXIT
 
     [ -s "$path" ] || die "capture did not produce an image"
     wl-copy --type image/png <"$path"
