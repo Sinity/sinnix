@@ -80,10 +80,6 @@ let
       target = "kitty-scrollback-view";
       source = "kitty-scrollback-view";
     }
-    {
-      target = "hdr-screenshot";
-      source = "hdr-screenshot";
-    }
   ];
 in
 {
@@ -255,6 +251,13 @@ in
                 # when it leaves this disabled, so make that runtime state
                 # persistent instead of depending on the pulse side effect.
                 use_fp16 = false;
+                # Hyprland 0.55 can return transparent or stale screencopy
+                # frames in HDR. Keep the SDR copy unconditionally instead of
+                # relying on the intermittent automatic path.
+                keep_unmodified_copy = 1;
+                # Preserve inactive-window background blur when the retained
+                # screencopy buffer participates in HDR composition.
+                use_shader_blur_blend = true;
               };
 
               decoration = {

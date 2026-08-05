@@ -9,6 +9,14 @@
 # file in its full, correct schema the first time you change anything there.
 # Bar too small on this 4K display? Settings -> Bar -> Scale (it saves here).
 
+[shell.screenshot]
+save_to_file = true
+copy_to_clipboard = true
+directory = "/realm/data/captures/screenshot"
+filename_pattern = "%Y-%m-%d-At-%Hh%Mm%Ss"
+freeze_screen = false
+confirm_region = false
+
 [theme]
 mode = "dark"
 source = "wallpaper"

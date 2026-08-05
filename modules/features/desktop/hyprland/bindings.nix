@@ -7,7 +7,6 @@
 }:
 let
   script = rel: "${sinnix.paths.projectRoot}/scripts/${rel}";
-  screenshotDir = "${sinnix.paths.capturesRoot}/screenshot";
 in
 {
   bind = [
@@ -59,8 +58,8 @@ in
     # "SUPER, N, exec, uwsm app -- ${script "toggle-scratch"} notes"
 
     "SUPER, V, exec, uwsm app -- kitty --class clipse -e clipse"
-    ", Print, exec, ${script "hdr-screenshot"} area --dir ${screenshotDir}"
-    "SUPER, Print, exec, ${script "hdr-screenshot"} output --dir ${screenshotDir}"
+    ", Print, exec, noctalia msg screenshot-region"
+    "SUPER, Print, exec, noctalia msg screenshot-fullscreen"
 
     # F-key bindings
     ", F3, exec, asbl-no-moar once --mode invert --duration 0.05"
