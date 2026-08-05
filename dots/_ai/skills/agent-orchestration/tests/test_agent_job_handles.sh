@@ -57,6 +57,28 @@ printf 'fake final\n' >"${last}"
 if [[ ${FAKE_CODEX_HOLD:-0} == 1 ]]; then sleep 30; fi
 exit "${FAKE_CODEX_EXIT:-0}"
 EOF
+cat >"${tmp}/bin/grok-sinnix" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --single) shift 2 ;;
+    *) shift ;;
+  esac
+done
+printf 'fake grok final\n'
+EOF
+cat >"${tmp}/bin/agy-sinnix" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --print) [[ $2 == "fake prompt" ]]; shift 2 ;;
+    *) shift ;;
+  esac
+done
+printf 'fake antigravity final\n'
+EOF
 cat >"${tmp}/bin/systemctl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -96,11 +118,29 @@ run_job() {
     --memory-high 2G --memory-max 3G --cpu-weight 200 --io-weight 300
 }
 
+run_backend_job() {
+  local backend="$1"
+  local id="$2"
+  env -u SINNIX_AGENT_SCOPED -u SINNIX_AGENT_SCOPE_UNIT -u SINNIX_AGENT_SCOPE_CGROUP \
+    PATH="${tmp}/bin:${PATH}" SINNIX_AGENT_SCOPE_EXEC="${tmp}/bin/scope-exec" \
+    FAKE_SCOPE_RECEIPT_DIR="${tmp}/scope-receipts" \
+    "${runner}" --job-id "${id}" --job-state-dir "${tmp}/state" --agent "${backend}" \
+    --model fake --reasoning-effort high --workdir "${tmp}/worktree" \
+    --prompt-file "${tmp}/prompt.prompt" --log-file "${tmp}/output/${id}.log" \
+    --last-file "${tmp}/output/${id}.final"
+}
+
 run_job job-one "${tmp}/prompt.prompt"
 run_job job-two "${tmp}/prompt.prompt"
+run_backend_job grok job-grok
+run_backend_job antigravity job-antigravity
 
 [[ -f ${tmp}/state/job-one.json && -f ${tmp}/state/job-two.json ]]
 [[ -f ${tmp}/output/job-one.log && -f ${tmp}/output/job-one.final ]]
+jq -e '.backend == "grok" and .lifecycle == "completed"' "${tmp}/state/job-grok.json" >/dev/null
+jq -e '.backend == "antigravity" and .lifecycle == "completed"' "${tmp}/state/job-antigravity.json" >/dev/null
+grep -Fxq 'fake grok final' "${tmp}/output/job-grok.final"
+grep -Fxq 'fake antigravity final' "${tmp}/output/job-antigravity.final"
 jq -e --arg repo "${tmp}/repo" --arg worktree "${tmp}/worktree" '
   .job_id == "job-one" and .lifecycle == "completed" and .exit_status == 0 and
   .repo == $repo and .worktree == $worktree and .backend == "codex" and .model == "fake" and

@@ -1,5 +1,5 @@
 # CLI wrapper-builder machinery for clis.nix: the shared npm bootstrap
-# prelude and the per-backend (Claude/Codex/Hermes) launcher-script builders.
+# prelude and the per-backend launcher-script builders.
 # Plain helper (not a NixOS module) — imported directly by clis.nix's
 # configFn, not picked up by auto-import.
 {
@@ -144,6 +144,34 @@ let
       executable = true;
       force = true;
     };
+  mkGrokWrapper = {
+    text = ''
+      #!/usr/bin/env bash
+      set -euo pipefail
+
+      if [ ! -x "$HOME/.grok/bin/grok" ]; then
+        echo "grok-sinnix: install the official Grok CLI first: curl -fsSL https://x.ai/cli/install.sh | bash" >&2
+        exit 1
+      fi
+      exec ${agentScopeExec} "$HOME/.grok/bin/grok" "$@"
+    '';
+    executable = true;
+    force = true;
+  };
+  mkAntigravityWrapper = {
+    text = ''
+      #!/usr/bin/env bash
+      set -euo pipefail
+
+      if [ ! -x "$HOME/.local/bin/agy" ]; then
+        echo "agy-sinnix: install the official Antigravity CLI first: curl -fsSL https://antigravity.google/cli/install.sh | bash" >&2
+        exit 1
+      fi
+      exec ${agentScopeExec} "$HOME/.local/bin/agy" "$@"
+    '';
+    executable = true;
+    force = true;
+  };
   # Env-only prelude for Hermes wrappers. PATH/HERMES_HOME/HERMES_INSTALL_DIR
   # must be exported here (not in a subprocess) because the final `exec` of
   # the hermes binary below needs to inherit them. The actual clone/sync/
@@ -209,6 +237,8 @@ in
     mkNpmBootstrap
     mkClaudeCodeWrapper
     mkCodexWrapper
+    mkGrokWrapper
+    mkAntigravityWrapper
     hermesBootstrap
     ensureHermes
     hermesConfigureLocal

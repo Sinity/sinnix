@@ -22,7 +22,10 @@ let
       transport = "stdio";
       tier = "remote-core";
       command = "npx";
-      args = [ "-y" "@modelcontextprotocol/server-github" ];
+      args = [
+        "-y"
+        "@modelcontextprotocol/server-github"
+      ];
       env = {
         GITHUB_PERSONAL_ACCESS_TOKEN = "\${GITHUB_TOKEN}";
       };
@@ -122,6 +125,10 @@ let
           "--role"
           "write"
         ];
+        antigravity.args = [
+          "--role"
+          "write"
+        ];
         lean.args = [
           "--role"
           "read"
@@ -212,6 +219,15 @@ let
       "remote-core"
       "recall"
       "deep-evidence"
+      "agent-control"
+    ];
+    # Antigravity blocks print-mode startup while any MCP remains pending.
+    # Keep the ordinary coding and orchestration surface, but leave slow
+    # deep-evidence servers to clients with bounded MCP startup handling.
+    antigravity = [
+      "remote-core"
+      "recall"
+      "code-semantic"
       "agent-control"
     ];
   };

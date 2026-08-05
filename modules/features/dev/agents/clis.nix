@@ -1,4 +1,4 @@
-# AI agent CLI wrappers (claude/codex/gemini/agy/hermes), shared skills, and
+# AI agent CLI wrappers (claude/codex/gemini/grok/agy/hermes), shared skills, and
 # per-agent runtime state. Wrapper-builder machinery lives in backends.nix.
 {
   mkFeatureModule,
@@ -271,6 +271,8 @@ mkFeatureModule {
         mkNpmBootstrap
         mkClaudeCodeWrapper
         mkCodexWrapper
+        mkGrokWrapper
+        mkAntigravityWrapper
         hermesBootstrap
         ensureHermes
         hermesConfigureLocal
@@ -303,6 +305,11 @@ mkFeatureModule {
           ".local/state/claude-code"
           ".local/state/codex"
           ".local/state/gemini"
+          ".local/state/sinnix/agent-jobs"
+          {
+            directory = ".grok";
+            mode = "0700";
+          }
           ".hermes"
         ];
         files = [ ".claude.json" ];
@@ -347,6 +354,7 @@ mkFeatureModule {
               codex-deepseek = "~/.local/bin/codex-deepseek";
               codex-local = "~/.local/bin/codex-local";
               gemini = "~/.local/bin/gemini";
+              grok = "~/.local/bin/grok-sinnix";
               agy = "~/.local/bin/agy-sinnix";
               hermes = "~/.local/bin/hermes";
               hermes-research = "~/.local/bin/hermes-research";
@@ -512,19 +520,11 @@ mkFeatureModule {
             force = true;
           };
 
-          # The vendor-managed ~/.local/bin/agy self-updates. Keep it as the
-          # canonical binary and route interactive shell use through this
-          # distinct wrapper so Antigravity jobs get the same agent.slice
-          # containment as the other terminal agents.
-          home.file.".local/bin/agy-sinnix" = {
-            text = ''
-              #!/usr/bin/env bash
-              set -euo pipefail
-              exec ${agentScopeExec} "$HOME/.local/bin/agy" "$@"
-            '';
-            executable = true;
-            force = true;
-          };
+          # Vendor-managed CLIs self-update in place. Keep their canonical
+          # binaries untouched and route use through distinct Nix-managed
+          # wrappers so launches share agent.slice containment.
+          home.file.".local/bin/grok-sinnix" = mkGrokWrapper;
+          home.file.".local/bin/agy-sinnix" = mkAntigravityWrapper;
 
           home.file.".config/hermes/skills" = {
             source = sharedSkillFarm;

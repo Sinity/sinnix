@@ -101,7 +101,7 @@ let
   );
   antigravityMcpConfigFile = jsonFormat.generate "antigravity-mcp-config.json" {
     mcpServers = lib.mapAttrs renderAntigravityServer (
-      selectClientServersForProfile "full" "antigravity"
+      selectClientServersForProfile "antigravity" "antigravity"
     );
   };
 in

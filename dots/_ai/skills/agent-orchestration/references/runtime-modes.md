@@ -4,19 +4,20 @@
 
 - [Choose a Lane](#choose-a-lane)
 - [Direct Local Execution](#direct-local-execution)
+- [Grok and Antigravity](#grok-and-antigravity)
 - [Codex Cloud](#codex-cloud)
 - [Prepared Prompt Batches](#prepared-prompt-batches)
 - [Kitty Sessions](#kitty-sessions)
 
 ## Choose a Lane
 
-| Need | Lane |
-| --- | --- |
-| Deterministic local run and log | Direct `codex exec` or Claude `--print` |
-| Resumable unattended Claude work | Claude native `--background` |
-| Hosted/offloaded repository work | Codex Cloud |
-| Several prepared prompt files | `launch_agent_tabs.sh --mode batch` |
-| Visible prompt run with process-level interruption | Kitty |
+| Need                                               | Lane                                    |
+| -------------------------------------------------- | --------------------------------------- |
+| Deterministic local run and log                    | Direct `codex exec` or Claude `--print` |
+| Resumable unattended Claude work                   | Claude native `--background`            |
+| Hosted/offloaded repository work                   | Codex Cloud                             |
+| Several prepared prompt files                      | `launch_agent_tabs.sh --mode batch`     |
+| Visible prompt run with process-level interruption | Kitty                                   |
 
 Keep Kitty out of unattended execution paths. Native runtimes have fewer focus
 and window-management failure modes.
@@ -96,6 +97,39 @@ installed Claude runtime:
 ```
 
 Save the returned agent ID; `logs` and `stop` require it.
+
+### Grok and Antigravity
+
+Both vendor CLIs expose a real print mode and can run through the attested
+runner. Use the Sinnix wrappers so the job receives the same containment and
+manifest lifecycle as the other local agents:
+
+```bash
+scripts/run_agent_prompt.sh \
+  --agent grok \
+  --model grok-4.5 \
+  --reasoning-effort high \
+  --workdir <repo> \
+  --prompt-file <prompt-file> \
+  --log-file <log-file> \
+  --last-file <final-file>
+
+scripts/run_agent_prompt.sh \
+  --agent antigravity \
+  --model gemini-3.1-pro-high \
+  --reasoning-effort high \
+  --workdir <repo> \
+  --prompt-file <prompt-file> \
+  --log-file <log-file> \
+  --last-file <final-file>
+```
+
+Grok uses `grok --single` and Antigravity uses `agy --print`. Their model lists
+are account-dependent, so run `grok models` or `agy models` when a default is
+rejected. The first login is interactive: Grok uses `grok login --oauth`, while
+Antigravity opens Google Sign-In or prints a remote authorization URL. Their
+vendor state is persisted by Sinnix. Do not pass private repository data to a
+consumer/free account unless its data controls permit it.
 
 ## Codex Cloud
 
