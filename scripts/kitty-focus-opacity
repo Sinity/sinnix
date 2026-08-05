@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# @sinnix-package: skip
+
+set -u
+
+active_opacity="${KITTY_ACTIVE_BACKGROUND_OPACITY:-0.96}"
+inactive_opacity="${KITTY_INACTIVE_BACKGROUND_OPACITY:-0.72}"
+runtime_dir="${KITTY_OPACITY_RUNTIME_DIR:-${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is required}}"
+socket_prefix="kitty-${USER:?USER is required}-"
+hyprctl_bin="${HYPRCTL_BIN:-hyprctl}"
+kitty_bin="${KITTY_BIN:-kitty}"
+jq_bin="${JQ_BIN:-jq}"
+socat_bin="${SOCAT_BIN:-socat}"
+
+kitty_remote() {
+  local socket="$1"
+  shift
+  "$kitty_bin" @ --to "unix:${socket}" set-background-opacity "$@" >/dev/null 2>&1
+}
+
+apply_opacity() {
+  local active_json active_class active_pid active_socket socket
+
+  active_json="$($hyprctl_bin -j activewindow 2>/dev/null)" || return 0
+  active_class="$(printf '%s' "$active_json" | "$jq_bin" -r '.class // ""')" || return 0
+  active_pid="$(printf '%s' "$active_json" | "$jq_bin" -r '.pid // 0')" || return 0
+
+  shopt -s nullglob
+  for socket in "$runtime_dir"/"$socket_prefix"*; do
+    kitty_remote "$socket" --all "$inactive_opacity" || true
+  done
+  shopt -u nullglob
+
+  case "$active_class" in
+    kitty*) ;;
+    *) return 0 ;;
+  esac
+
+  active_socket="$runtime_dir/${socket_prefix}${active_pid}"
+  for _ in {1..20}; do
+    if [[ -e "$active_socket" || -S "$active_socket" ]]; then
+      kitty_remote "$active_socket" "$active_opacity" || true
+      return 0
+    fi
+    sleep 0.1
+  done
+}
+
+if [[ "${1:-}" == "--once" ]]; then
+  apply_opacity
+  exit 0
+fi
+
+apply_opacity
+hypr_socket="$runtime_dir/hypr/${HYPRLAND_INSTANCE_SIGNATURE:?HYPRLAND_INSTANCE_SIGNATURE is required}/.socket2.sock"
+
+while true; do
+  while IFS= read -r event; do
+    case "$event" in
+      activewindowv2\>\>*|openwindow\>\>*|closewindow\>\>*) apply_opacity ;;
+    esac
+  done < <("$socat_bin" -u "UNIX-CONNECT:${hypr_socket}" - 2>/dev/null)
+  sleep 1
+done

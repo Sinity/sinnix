@@ -189,6 +189,8 @@ in
 
               xwayland.force_zero_scaling = true;
 
+              cursor.no_warps = true;
+
               input = {
                 kb_layout = "pl";
                 repeat_rate = 40;
@@ -263,14 +265,17 @@ in
               decoration = {
                 rounding = 10;
                 active_opacity = 1.0;
-                inactive_opacity = 0.75;
+                # Kitty changes only its background alpha on focus, preserving
+                # bright text. Keep compositor-wide fading off so browsers and
+                # other applications remain legible.
+                inactive_opacity = 1.0;
                 dim_inactive = false;
                 dim_strength = 0.0;
 
                 blur = {
                   enabled = true;
-                  size = 8;
-                  passes = 3;
+                  size = 3;
+                  passes = 1;
                   new_optimizations = true;
                   vibrancy = 0.15;
                   vibrancy_darkness = 0.2;
