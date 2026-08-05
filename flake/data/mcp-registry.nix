@@ -48,18 +48,6 @@ let
       ];
     };
 
-    codebase-memory-mcp = {
-      transport = "stdio";
-      tier = "code-semantic";
-      command = "codebase-memory-mcp";
-      clients = [
-        "codex"
-        "claude"
-        "gemini"
-        "antigravity"
-      ];
-    };
-
     serena = {
       transport = "stdio";
       tier = "code-semantic";

@@ -14,7 +14,6 @@
         "beads"
         "ccusage"
         "chatgpt-share-export"
-        "codebase-memory-mcp"
         "lynchpin-cli"
         "lynchpin-python"
         "mcp-chrome-devtools"

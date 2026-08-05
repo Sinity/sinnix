@@ -94,39 +94,6 @@ let
       };
     };
 
-  codebaseMemoryMcp = pkgs.stdenvNoCC.mkDerivation rec {
-    pname = "codebase-memory-mcp";
-    version = "0.8.1";
-
-    src = pkgs.fetchurl {
-      url = "https://github.com/DeusData/codebase-memory-mcp/releases/download/v${version}/codebase-memory-mcp-ui-linux-amd64-portable.tar.gz";
-      hash = "sha256-dO1j468thb/ZjLzOcZEpVTbQpUsITLwLho1p8ichcto=";
-    };
-
-    sourceRoot = ".";
-
-    installPhase = ''
-      runHook preInstall
-
-      install -Dm755 codebase-memory-mcp "$out/bin/codebase-memory-mcp"
-      for notice in THIRD_PARTY_NOTICES.md LICENSE README.md; do
-        if [ -f "$notice" ]; then
-          install -Dm644 "$notice" "$out/share/doc/${pname}/$notice"
-        fi
-      done
-
-      runHook postInstall
-    '';
-
-    meta = {
-      description = "Codebase knowledge graph MCP server for AI coding agents";
-      homepage = "https://github.com/DeusData/codebase-memory-mcp";
-      license = lib.licenses.mit;
-      mainProgram = "codebase-memory-mcp";
-      platforms = [ "x86_64-linux" ];
-    };
-  };
-
   polylogueSrc = inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
   externalPackages = {
@@ -159,8 +126,6 @@ let
           wrapProgram $out/bin/bd --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.dolt ]}
         '';
       };
-
-    codebase-memory-mcp = codebaseMemoryMcp;
 
     lynchpin-python = pkgs.writeShellScriptBin "lynchpin-python" ''
       set -euo pipefail

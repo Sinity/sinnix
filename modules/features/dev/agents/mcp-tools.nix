@@ -1,7 +1,6 @@
-# Generic MCP server tool wrappers: the shared runtime-secret-export
-# builder, the Firecrawl MCP wrapper, and the Codebase Memory MCP web UI
-# launcher. Plain helper (not a NixOS module) — imported directly by
-# mcp.nix's configFn, not picked up by auto-import.
+# Generic MCP server tool wrappers: the shared runtime-secret-export builder
+# and Firecrawl MCP wrapper. Plain helper (not a NixOS module), imported
+# directly by mcp.nix's configFn rather than picked up by auto-import.
 {
   lib,
   pkgs,
@@ -41,14 +40,6 @@ let
       FIRECRAWL_API_KEY = firecrawlSecretPath;
     };
   };
-  codebaseMemoryUiLauncher = pkgs.writeShellScript "codebase-memory-ui" ''
-    set -euo pipefail
-    export CBM_CACHE_DIR="''${CBM_CACHE_DIR:-$HOME/.local/share/codebase-memory-mcp}"
-    mkdir -p "$CBM_CACHE_DIR"
-    exec ${
-      scriptPkgs."codebase-memory-mcp"
-    }/bin/codebase-memory-mcp --ui=true --port=9749 < <(${pkgs.coreutils}/bin/sleep infinity)
-  '';
   # `home.file` text for the Lynchpin/Polylogue/Sinex MCP wrappers. These are
   # plain launch scripts (no HM-scoped `config` needed) so they live here
   # alongside the other generic MCP tool wrappers rather than inline in
@@ -90,7 +81,6 @@ in
     mkRuntimeSecretExports
     mkMcpWrapper
     mcpFirecrawlBin
-    codebaseMemoryUiLauncher
     mcpLynchpinText
     mcpPolylogueText
     ;

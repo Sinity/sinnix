@@ -7,7 +7,7 @@
 # - System monitoring tools (htop)
 #
 # Domain pieces live in sibling plain-nix helpers, imported below:
-# mcp-tools.nix (Firecrawl + Codebase Memory UI), client-profiles.nix
+# mcp-tools.nix (generic MCP wrappers), client-profiles.nix
 # (registry-driven Codex/Gemini config), serena.nix, browser.nix, hooks.nix.
 {
   mkFeatureModule,
@@ -133,7 +133,6 @@ mkFeatureModule {
         ;
       inherit (mcpTools)
         mcpFirecrawlBin
-        codebaseMemoryUiLauncher
         mcpLynchpinText
         mcpPolylogueText
         ;
@@ -164,10 +163,6 @@ mkFeatureModule {
       sinnix.features.dev.mcp-servers.codexHooksSource = codexHooksFile;
       sinnix.features.dev.mcp-servers.antigravityMcpConfigSource = antigravityMcpConfigFile;
       sinnix.persistence.home.directories = [
-        {
-          directory = ".local/share/codebase-memory-mcp";
-          mode = "0700";
-        }
         {
           directory = ".local/share/serena";
           mode = "0700";
@@ -237,21 +232,6 @@ mkFeatureModule {
                 run chmod 644 "$HOME/.codex/local.config.toml"
                 run chmod 644 "$HOME/.codex/hooks.json"
               '';
-              codebaseMemoryMcpConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-                run mkdir -p "$HOME/.local/share/codebase-memory-mcp"
-                run ${pkgs.coreutils}/bin/env CBM_CACHE_DIR="$HOME/.local/share/codebase-memory-mcp" ${
-                  scriptPkgs."codebase-memory-mcp"
-                }/bin/codebase-memory-mcp config set auto_index true
-                run ${pkgs.coreutils}/bin/env CBM_CACHE_DIR="$HOME/.local/share/codebase-memory-mcp" ${
-                  scriptPkgs."codebase-memory-mcp"
-                }/bin/codebase-memory-mcp config set auto_index_limit 50000
-                run ${pkgs.coreutils}/bin/env CBM_CACHE_DIR="$HOME/.local/share/codebase-memory-mcp" ${
-                  scriptPkgs."codebase-memory-mcp"
-                }/bin/codebase-memory-mcp config set ui true
-                run ${pkgs.coreutils}/bin/env CBM_CACHE_DIR="$HOME/.local/share/codebase-memory-mcp" ${
-                  scriptPkgs."codebase-memory-mcp"
-                }/bin/codebase-memory-mcp config set port 9749
-              '';
               serenaConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
                 run mkdir -p "$HOME/.local/share/serena"
                 if [ -f "$HOME/.local/share/serena/serena_config.yml" ] \
@@ -286,17 +266,6 @@ mkFeatureModule {
               force = true;
             };
             ".gemini/config/AGENTS.md".source = mkDotsFile "/claude/CLAUDE.md";
-            ".local/bin/codebase-memory-mcp" = {
-              executable = true;
-              force = true;
-              text = ''
-                #!${pkgs.runtimeShell}
-                set -euo pipefail
-                export CBM_CACHE_DIR="''${CBM_CACHE_DIR:-$HOME/.local/share/codebase-memory-mcp}"
-                mkdir -p "$CBM_CACHE_DIR"
-                exec ${scriptPkgs."codebase-memory-mcp"}/bin/codebase-memory-mcp "$@"
-              '';
-            };
             ".local/bin/serena" = {
               executable = true;
               force = true;
@@ -377,19 +346,6 @@ mkFeatureModule {
               source = config.lib.file.mkOutOfStoreSymlink "/realm/data/exports/chatlog/raw/claude";
               force = true;
             };
-          };
-
-          systemd.user.services.codebase-memory-ui = {
-            Unit = {
-              Description = "Codebase Memory MCP Web UI";
-              After = [ "default.target" ];
-            };
-            Service = {
-              ExecStart = "${codebaseMemoryUiLauncher}";
-              Restart = "on-failure";
-              RestartSec = 5;
-            };
-            Install.WantedBy = [ "default.target" ];
           };
 
           # Session-boundary hooks (Codex/Claude SessionStart+Stop) only reap
