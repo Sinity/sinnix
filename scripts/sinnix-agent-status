@@ -40,7 +40,6 @@ path_probe() {
 
 printf 'surface\tname\tdetail\n'
 for cmd in \
-  codebase-memory-mcp \
   mcp-chrome-devtools \
   mcp-chrome-devtools-private \
   mcp-chrome-devtools-private-visible \

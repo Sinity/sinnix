@@ -559,7 +559,7 @@ each project's `CLAUDE.md`.
   `browser.nix`/`hooks.nix`; regrouped from the former `mcp-servers.nix`,
   sinnix-9u6). Plain `codex` uses the lean non-browser profile, while
   `codex-full` uses the full profile (GitHub, Context7, Polylogue, Lynchpin,
-  Serena, Codebase Memory). Plain `claude` uses the lean profile.
+  Serena). Plain `claude` uses the lean profile.
   `claude-browser`/`codex-browser` add the Chrome DevTools MCP tier. `claude`
   is a shell alias to the `claude-lean` wrapper — the bare `~/.local/bin/claude`
   is deliberately unmanaged because Claude Code's installer claims and
@@ -1198,13 +1198,10 @@ mismatches), checking get→modify→put patterns for races in distributed code.
 
 ### Semantic MCPs
 
-Serena and `codebase-memory-mcp` are registered for Codex, Claude, Gemini, and
-VS Code. They overlap but are not interchangeable. Default sequence:
+Serena is registered for Codex, Claude, Gemini, and VS Code. Default sequence:
 
 1. `rg` for exact literal text and unindexed/generated surfaces.
-2. Codebase Memory `search_code` for broad "where does this concept show up?"
-   queries — fast, persistent, returns containing symbols with graph metadata.
-3. Serena near an edit boundary: symbol overviews, precise lookup, references
+2. Serena near an edit boundary: symbol overviews, precise lookup, references
    grouped by containing symbol, diagnostics, rename, safe-delete, symbol-body
    replacement.
 
@@ -1213,19 +1210,8 @@ via `.serena/project.yml`; it activates from the current working directory. If
 Serena tools are missing in Codex despite an active config, use tool discovery
 for the exact operation name — lazy loading can hide active tools.
 
-Codebase Memory: use `get_code_snippet` after `search_graph`/`search_code`
-yields an exact qualified name. Treat `get_architecture`, vector search,
-`trace_path`, `detect_changes`, and custom Cypher as exploratory hints until
-validated against source/Serena; re-index before relying on change-impact
-answers:
-
-```bash
-codebase-memory-mcp cli index_repository '{"repo_path": "/realm/project/<repo>"}'
-codebase-memory-mcp cli search_code '{"project": "realm-project-<repo>", "pattern": "MaterialReadySet"}'
-```
-
-Indexes live under `~/.local/share/codebase-memory-mcp`; Serena state under
-`~/.local/share/serena` (installs under `~/.local/state/serena`).
+Serena state lives under `~/.local/share/serena` (installs under
+`~/.local/state/serena`).
 
 ---
 

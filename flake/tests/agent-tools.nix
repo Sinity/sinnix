@@ -93,7 +93,6 @@ in
           ".local/bin/hermes-research"
           ".local/bin/hermes-orchestrate"
           ".local/bin/hermes-mirror"
-          ".local/bin/codebase-memory-mcp"
           ".local/bin/serena"
           ".local/bin/serena-hooks"
           ".local/bin/bd-prime-if-present"
@@ -384,7 +383,6 @@ in
               "$HOME/.local/bin/hermes-research" \
               "$HOME/.local/bin/hermes-orchestrate" \
               "$HOME/.local/bin/hermes-mirror" \
-              "$HOME/.local/bin/codebase-memory-mcp" \
               "$HOME/.local/bin/serena" \
               "$HOME/.local/bin/serena-hooks" \
               "$HOME/.local/bin/bd-prime-if-present"; do
@@ -417,7 +415,7 @@ in
               .mcpServers as $m |
               ($m | has("github") and has("context7") and has("agent-control")) and
               ($m | has("polylogue") and has("lynchpin")) and
-              ($m | has("serena") and has("codebase-memory-mcp")) and
+              ($m | has("serena")) and
               ($m | has("chrome-devtools") | not) and
               ($m.polylogue.args == ["--role", "write"])
             ' "$HOME/.config/claude/mcp.json" >/dev/null
@@ -428,7 +426,6 @@ in
               ($m | has("agent-control") | not) and
               ($m | has("lynchpin") | not) and
               ($m | has("serena") | not) and
-              ($m | has("codebase-memory-mcp") | not) and
               ($m | has("chrome-devtools") | not) and
               ($m.polylogue.args == ["--role", "read"])
             ' "$HOME/.config/claude/mcp-lean.json" >/dev/null
@@ -437,7 +434,7 @@ in
               .mcpServers as $m |
               ($m | has("github") and has("context7") and has("agent-control")) and
               ($m | has("polylogue") and has("lynchpin")) and
-              ($m | has("serena") and has("codebase-memory-mcp")) and
+              ($m | has("serena")) and
               ($m | has("chrome-devtools")) and
               ($m | has("chrome-devtools-private")) and
               ($m | has("chrome-devtools-private-visible")) and
@@ -466,10 +463,10 @@ in
             lean = keys(pathlib.Path.home().joinpath('.codex/lean.config.toml'))
             evidence = keys(pathlib.Path.home().joinpath('.codex/evidence.config.toml'))
             browser = keys(pathlib.Path.home().joinpath('.codex/browser.config.toml'))
-            assert_has('full', full, {'github', 'context7', 'polylogue', 'lynchpin', 'serena', 'codebase-memory-mcp', 'agent-control'}, {'chrome-devtools'})
-            assert_has('lean', lean, {'github', 'context7', 'polylogue'}, {'agent-control', 'lynchpin', 'serena', 'codebase-memory-mcp', 'chrome-devtools'})
-            assert_has('evidence', evidence, {'github', 'context7', 'polylogue', 'lynchpin'}, {'agent-control', 'serena', 'codebase-memory-mcp', 'chrome-devtools'})
-            assert_has('browser', browser, {'github', 'context7', 'polylogue', 'lynchpin', 'serena', 'codebase-memory-mcp', 'agent-control', 'chrome-devtools', 'chrome-devtools-private', 'chrome-devtools-private-visible'})
+            assert_has('full', full, {'github', 'context7', 'polylogue', 'lynchpin', 'serena', 'agent-control'}, {'chrome-devtools'})
+            assert_has('lean', lean, {'github', 'context7', 'polylogue'}, {'agent-control', 'lynchpin', 'serena', 'chrome-devtools'})
+            assert_has('evidence', evidence, {'github', 'context7', 'polylogue', 'lynchpin'}, {'agent-control', 'serena', 'chrome-devtools'})
+            assert_has('browser', browser, {'github', 'context7', 'polylogue', 'lynchpin', 'serena', 'agent-control', 'chrome-devtools', 'chrome-devtools-private', 'chrome-devtools-private-visible'})
 
             # Alternate-backend profiles must layer a provider override while
             # retaining the full MCP surface; model names remain ordinary config.
@@ -497,7 +494,7 @@ in
               .mcpServers as $m |
               ($m | has("github") and has("context7") and has("agent-control")) and
               ($m | has("polylogue") and has("lynchpin")) and
-              ($m | has("serena") and has("codebase-memory-mcp")) and
+              ($m | has("serena")) and
               ($m | has("chrome-devtools") | not) and
               ($m.polylogue.args == ["--role", "write"])
             ' "$HOME/.gemini/settings.json" >/dev/null
@@ -506,7 +503,7 @@ in
               .mcpServers as $m |
               ($m | has("github") and has("context7") and has("agent-control")) and
               ($m | has("polylogue") and has("lynchpin")) and
-              ($m | has("serena") and has("codebase-memory-mcp")) and
+              ($m | has("serena")) and
               ($m | has("chrome-devtools") | not) and
               ($m.polylogue.args == ["--role", "write"])
             ' "$HOME/.gemini/config/mcp_config.json" >/dev/null
