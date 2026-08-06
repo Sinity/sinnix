@@ -105,6 +105,40 @@ in
             default = "system";
             description = "Sinnix runtime resource class.";
           };
+          resources = {
+            MemoryHigh = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+            };
+            MemoryMax = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+            };
+            MemoryLow = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+            };
+            CPUWeight = lib.mkOption {
+              type = lib.types.nullOr lib.types.int;
+              default = null;
+            };
+            IOWeight = lib.mkOption {
+              type = lib.types.nullOr lib.types.int;
+              default = null;
+            };
+            Nice = lib.mkOption {
+              type = lib.types.nullOr lib.types.int;
+              default = null;
+            };
+            TimeoutStartSec = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+            };
+            TimeoutStopSec = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+            };
+          };
           workload = {
             class = lib.mkOption {
               type = lib.types.enum [

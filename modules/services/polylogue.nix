@@ -191,26 +191,6 @@ mkServiceModule {
           (lib.sinnix.mkRuntimeServiceConfig {
             runtimeInventory = config.sinnix.runtime.inventory;
             unit = "polylogued.service";
-            # 2026-07-28: the shared resource class's 2G MemoryMax was
-            # observed live-thrashing (memory.events max counter at 306K+
-            # within 35 minutes post-restart, MemoryCurrent pinned exactly at
-            # MemoryMax) against a 36GB/5-tier archive with ~4.9M blocks --
-            # every ingest/status-component read was stalling in
-            # folio_wait_bit_common (page reclaim under cgroup memory
-            # pressure), not a code bug. Overriding just this unit rather
-            # than the shared class. (The former polylogue-sqlite-backup
-            # unit, since removed, used 8G/12G for comparable data volume.)
-            #
-            # 2026-07-31: 6G/8G proved too low in practice -- polylogued was
-            # throttled CONTINUOUSLY against it (polylogue-e98k), because
-            # BULK_BUILD_MMAP_SIZE_BYTES is 4 GiB and SQLite mmap counts
-            # toward the cgroup budget. A runtime override to 14G stopped
-            # the throttling; raised here so a rebuild does not silently
-            # revert that finding.
-            overrides = {
-              MemoryHigh = lib.mkForce "14G";
-              MemoryMax = lib.mkForce "18G";
-            };
           })
           // {
             # The upstream unit does not pass its rendered TOML path to the
@@ -232,6 +212,10 @@ mkServiceModule {
           unit = "polylogued.service";
           manager = "user";
           resourceClass = "capture-runtime";
+          resources = {
+            MemoryHigh = "14G";
+            MemoryMax = "18G";
+          };
           observe = {
             enable = true;
             restartable = true;

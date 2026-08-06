@@ -33,6 +33,7 @@ in
     ./tests/git-languages.nix
     ./tests/vm.nix
     ./tests/host-build.nix
+    ./tests/runtime.nix
   ];
 
   perSystem =
