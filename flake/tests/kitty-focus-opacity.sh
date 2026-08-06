@@ -11,70 +11,76 @@ touch "$test_root/runtime/kitty-test-41" "$test_root/runtime/kitty-test-42"
 
 cat >"$test_root/bin/hyprctl" <<'EOF'
 #!/usr/bin/env bash
-printf '%s\n' '{"class":"kitty","pid":42}'
+printf '%s\n' '{"class":"kitty","pid":42,"title":"⠇ sinnix"}'
 EOF
 
 cat >"$test_root/bin/kitty" <<'EOF'
 #!/usr/bin/env bash
-printf '%s\n' "$*" >>"$KITTY_TEST_LOG"
+socket=""
+for ((i = 1; i <= $#; i++)); do
+  if [[ "${!i}" == "--to" ]]; then
+    next=$((i + 1))
+    socket="${!next}"
+  fi
+done
+
+if [[ "${*: -1}" == "ls" ]]; then
+  case "$socket" in
+    *kitty-test-41)
+      printf '%s\n' '[{"id":5,"tabs":[{"windows":[{"id":5,"title":"other"}]}]}]'
+      ;;
+    *kitty-test-42)
+      printf '%s\n' '[{"id":16,"tabs":[{"windows":[{"id":16,"title":"⠏ sinnix"}]}]},{"id":19,"tabs":[{"windows":[{"id":3,"title":"⠏ polylogue"}]}]}]'
+      ;;
+  esac
+else
+  printf '%s\n' "$*" >>"$KITTY_TEST_LOG"
+fi
 EOF
 
 chmod +x "$test_root/bin/hyprctl" "$test_root/bin/kitty"
 
-env \
-  USER=test \
-  KITTY_TEST_LOG="$test_root/kitty.log" \
-  KITTY_OPACITY_RUNTIME_DIR="$test_root/runtime" \
-  HYPRCTL_BIN="$test_root/bin/hyprctl" \
-  KITTY_BIN="$test_root/bin/kitty" \
-  "$repo_root/scripts/kitty-focus-opacity" --once
+run_once() {
+  env \
+    USER=test \
+    KITTY_TEST_LOG="$test_root/kitty.log" \
+    KITTY_OPACITY_RUNTIME_DIR="$test_root/runtime" \
+    HYPRCTL_BIN="$test_root/bin/hyprctl" \
+    KITTY_BIN="$test_root/bin/kitty" \
+    "$repo_root/scripts/kitty-focus-opacity" --once
+}
+
+run_once
 
 expected="$test_root/expected.log"
 cat >"$expected" <<EOF
-@ --to unix:$test_root/runtime/kitty-test-41 set-background-opacity --all 0.72
-@ --to unix:$test_root/runtime/kitty-test-42 set-background-opacity --all 0.72
-@ --to unix:$test_root/runtime/kitty-test-42 set-background-opacity 0.96
+@ --to unix:$test_root/runtime/kitty-test-42 set-background-opacity --match id:16 0.35
+@ --to unix:$test_root/runtime/kitty-test-41 set-background-opacity --all 0.20
+@ --to unix:$test_root/runtime/kitty-test-42 set-background-opacity --match not id:16 0.20
 EOF
 
 diff -u "$expected" "$test_root/kitty.log"
 
 cat >"$test_root/bin/hyprctl" <<'EOF'
 #!/usr/bin/env bash
-printf '%s\n' '{"class":"google-chrome","pid":99}'
+printf '%s\n' '{"class":"google-chrome","pid":99,"title":"browser"}'
 EOF
 
 : >"$test_root/kitty.log"
-env \
-  USER=test \
-  KITTY_TEST_LOG="$test_root/kitty.log" \
-  KITTY_OPACITY_RUNTIME_DIR="$test_root/runtime" \
-  HYPRCTL_BIN="$test_root/bin/hyprctl" \
-  KITTY_BIN="$test_root/bin/kitty" \
-  "$repo_root/scripts/kitty-focus-opacity" --once
+run_once
 
-if [[ "$(wc -l <"$test_root/kitty.log")" -ne 2 ]]; then
-  printf 'browser focus should only apply inactive opacity\n' >&2
-  exit 1
-fi
+cat >"$expected" <<EOF
+@ --to unix:$test_root/runtime/kitty-test-41 set-background-opacity --all 0.20
+@ --to unix:$test_root/runtime/kitty-test-42 set-background-opacity --all 0.20
+EOF
+
+diff -u "$expected" "$test_root/kitty.log"
 
 cat >"$test_root/bin/hyprctl" <<'EOF'
 #!/usr/bin/env bash
-printf '%s\n' '{"class":"kitty","pid":43}'
+printf '%s\n' '{"class":"kitty","pid":42,"title":"missing"}'
 EOF
 
 : >"$test_root/kitty.log"
-(
-  sleep 0.2
-  touch "$test_root/runtime/kitty-test-43"
-) &
-env \
-  USER=test \
-  KITTY_TEST_LOG="$test_root/kitty.log" \
-  KITTY_OPACITY_RUNTIME_DIR="$test_root/runtime" \
-  HYPRCTL_BIN="$test_root/bin/hyprctl" \
-  KITTY_BIN="$test_root/bin/kitty" \
-  "$repo_root/scripts/kitty-focus-opacity" --once
-
-grep -Fqx \
-  "@ --to unix:$test_root/runtime/kitty-test-43 set-background-opacity 0.96" \
-  "$test_root/kitty.log"
+run_once
+diff -u "$expected" "$test_root/kitty.log"

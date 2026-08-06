@@ -3,8 +3,8 @@
 
 set -u
 
-active_opacity="${KITTY_ACTIVE_BACKGROUND_OPACITY:-0.96}"
-inactive_opacity="${KITTY_INACTIVE_BACKGROUND_OPACITY:-0.72}"
+active_opacity="${KITTY_ACTIVE_BACKGROUND_OPACITY:-0.35}"
+inactive_opacity="${KITTY_INACTIVE_BACKGROUND_OPACITY:-0.20}"
 runtime_dir="${KITTY_OPACITY_RUNTIME_DIR:-${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is required}}"
 socket_prefix="kitty-${USER:?USER is required}-"
 hyprctl_bin="${HYPRCTL_BIN:-hyprctl}"
@@ -19,31 +19,47 @@ kitty_remote() {
 }
 
 apply_opacity() {
-  local active_json active_class active_pid active_socket socket
+  local active_json active_class active_pid active_socket active_title active_window_id socket
 
   active_json="$($hyprctl_bin -j activewindow 2>/dev/null)" || return 0
   active_class="$(printf '%s' "$active_json" | "$jq_bin" -r '.class // ""')" || return 0
   active_pid="$(printf '%s' "$active_json" | "$jq_bin" -r '.pid // 0')" || return 0
+  active_title="$(printf '%s' "$active_json" | "$jq_bin" -r '.title // ""')" || return 0
+
+  case "$active_class" in
+    kitty*)
+      active_socket="$runtime_dir/${socket_prefix}${active_pid}"
+      if [[ -e "$active_socket" || -S "$active_socket" ]]; then
+        active_window_id="$($kitty_bin @ --to "unix:${active_socket}" ls 2>/dev/null | "$jq_bin" -r --arg title "$active_title" '
+          [
+            .[] | .tabs[].windows[]
+            | select(
+                .title == $title
+                or (.title | sub("^[⠀-⣿] "; "")) == ($title | sub("^[⠀-⣿] "; ""))
+              )
+            | .id
+          ]
+          | if length == 1 then .[0] else empty end
+        ')" || active_window_id=""
+      fi
+      ;;
+  esac
+
+  # Raise the active terminal before touching any inactive terminal. The old
+  # all-inactive pre-pass visibly flashed the focused window on every event.
+  if [[ -n "${active_window_id:-}" ]]; then
+    kitty_remote "$active_socket" --match "id:${active_window_id}" "$active_opacity" || true
+  fi
 
   shopt -s nullglob
   for socket in "$runtime_dir"/"$socket_prefix"*; do
-    kitty_remote "$socket" --all "$inactive_opacity" || true
+    if [[ -n "${active_window_id:-}" && "$socket" == "$active_socket" ]]; then
+      kitty_remote "$socket" --match "not id:${active_window_id}" "$inactive_opacity" || true
+    else
+      kitty_remote "$socket" --all "$inactive_opacity" || true
+    fi
   done
   shopt -u nullglob
-
-  case "$active_class" in
-    kitty*) ;;
-    *) return 0 ;;
-  esac
-
-  active_socket="$runtime_dir/${socket_prefix}${active_pid}"
-  for _ in {1..20}; do
-    if [[ -e "$active_socket" || -S "$active_socket" ]]; then
-      kitty_remote "$active_socket" "$active_opacity" || true
-      return 0
-    fi
-    sleep 0.1
-  done
 }
 
 if [[ "${1:-}" == "--once" ]]; then
@@ -53,11 +69,24 @@ fi
 
 apply_opacity
 hypr_socket="$runtime_dir/hypr/${HYPRLAND_INSTANCE_SIGNATURE:?HYPRLAND_INSTANCE_SIGNATURE is required}/.socket2.sock"
+last_active_address="$($hyprctl_bin -j activewindow 2>/dev/null | "$jq_bin" -r '.address // ""')"
+last_active_address="${last_active_address#0x}"
 
 while true; do
   while IFS= read -r event; do
     case "$event" in
-      activewindowv2\>\>*|openwindow\>\>*|closewindow\>\>*) apply_opacity ;;
+      activewindowv2\>\>*)
+        active_address="${event#*>>}"
+        if [[ "$active_address" != "$last_active_address" ]]; then
+          apply_opacity
+          last_active_address="$active_address"
+        fi
+        ;;
+      openwindow\>\>*|closewindow\>\>*)
+        apply_opacity
+        last_active_address="$($hyprctl_bin -j activewindow 2>/dev/null | "$jq_bin" -r '.address // ""')"
+        last_active_address="${last_active_address#0x}"
+        ;;
     esac
   done < <("$socat_bin" -u "UNIX-CONNECT:${hypr_socket}" - 2>/dev/null)
   sleep 1

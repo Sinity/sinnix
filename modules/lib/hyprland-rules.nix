@@ -44,6 +44,7 @@ let
     ++ (lib.optional (rule.tile or false) "tile = yes")
     ++ (lib.optional (rule.fullscreen or false) "fullscreen = yes")
     ++ (lib.optional (rule.immediate or false) "immediate = yes")
+    ++ (lib.optional (rule.noBlur or false) "no_blur = on")
     ++ (lib.optional (rule ? size) "size = ${formatSize rule.size}")
     ++ (lib.optional (rule ? move) "move = ${formatPos rule.move}")
     ++ (lib.optional (rule ? workspace) "workspace = ${rule.workspace}")
