@@ -54,7 +54,6 @@ def _journal_rows(limit: int) -> tuple[list[dict[str, Any]], str | None]:
         result = subprocess.run(
             [
                 "journalctl",
-                "--user",
                 "-t",
                 "sinnix-agent-job",
                 "-o",
