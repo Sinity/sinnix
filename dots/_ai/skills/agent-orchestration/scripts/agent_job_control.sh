@@ -55,14 +55,22 @@ require_manifest() {
   manifest="$(manifest_for "${job_id}")"
   [[ -r ${manifest} ]] || { echo "unknown job ID: ${job_id}" >&2; exit 1; }
   jq -e --arg job_id "${job_id}" '
-    .schema_version == 2 and .job_id == $job_id and
+    .schema_version == 2 and .job_id == $job_id
+  ' "${manifest}" >/dev/null || {
+    echo "refusing malformed manifest: ${manifest}" >&2
+    exit 1
+  }
+}
+
+require_attested_manifest() {
+  jq -e '
     (.launcher.pid | type == "number") and
     (.launcher.proc_start | type == "string" and length > 0) and
     (.launcher.scope_unit | type == "string" and length > 0) and
     (.launcher.cgroup | type == "string" and length > 0) and
     (.worktree | type == "string" and length > 0)
   ' "${manifest}" >/dev/null || {
-    echo "refusing malformed or unattested manifest: ${manifest}" >&2
+    echo "refusing unattested manifest: ${manifest}" >&2
     exit 1
   }
 }
@@ -174,6 +182,7 @@ case "${command}" in
     ;;
   interrupt)
     require_manifest
+    require_attested_manifest
     pid="$(jq -r '.launcher.pid' "${manifest}")"
     unit="$(jq -r '.launcher.scope_unit' "${manifest}")"
     expected_unit="sinnix-agent-job-${job_id}.scope"
