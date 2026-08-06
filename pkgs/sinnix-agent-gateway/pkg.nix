@@ -118,7 +118,10 @@ python3Packages.buildPythonApplication {
 
   dependencies = [ mcp-sdk ];
 
-  nativeCheckInputs = [ python3Packages.pytest ];
+  nativeCheckInputs = [
+    python3Packages.pytest
+    ripgrep
+  ];
 
   makeWrapperArgs = [
     "--prefix"
