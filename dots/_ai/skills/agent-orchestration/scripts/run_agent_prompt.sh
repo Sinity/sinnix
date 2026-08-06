@@ -258,6 +258,7 @@ event() {
 write_manifest() {
   local lifecycle="$1"
   local exit_status="${2:-}"
+  local launcher_pid="$BASHPID"
   local updated_at
   updated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   local created_at="$updated_at"
@@ -287,8 +288,8 @@ write_manifest() {
     --arg work_item "${work_item}" \
     --arg scope_unit "${SINNIX_AGENT_SCOPE_UNIT:-${scope_unit}}" \
     --arg scope_cgroup "${scope_cgroup}" \
-    --arg launcher_pid "${BASHPID}" \
-    --arg launcher_start "$(proc_start "${BASHPID}")" \
+    --arg launcher_pid "${launcher_pid}" \
+    --arg launcher_start "$(proc_start "${launcher_pid}")" \
     --arg exit_status "${exit_status}" \
     --arg memory_high "${memory_high}" \
     --arg memory_max "${memory_max}" \
