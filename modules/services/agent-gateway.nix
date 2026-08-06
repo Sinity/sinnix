@@ -62,6 +62,7 @@ mkServiceModule {
       agentController = "/home/${userName}/.config/hermes/skills/agent-orchestration/scripts/agent_job_control.sh";
       configFile = jsonFormat.generate "sinnix-agent-gateway.json" {
         inherit (cfg) stateDir maxResultBytes;
+        approvedManifestHash = cfg.tunnel.approvedManifestHash;
         runtimeInventory = "/etc/sinnix/runtime-inventory.json";
         agentRunner = "/home/${userName}/.config/hermes/skills/agent-orchestration/scripts/run_agent_prompt.sh";
         inherit agentController;
