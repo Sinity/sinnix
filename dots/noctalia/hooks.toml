@@ -1,0 +1,8 @@
+# Curated hook-owned settings. Noctalia merges this fragment before its
+# application-owned settings.toml sidecar.
+[theme.templates.user.neovim]
+enabled = true
+input_path = "templates/nvim-matugen.lua"
+output_path = "$XDG_STATE_HOME/noctalia/nvim/matugen.lua"
+pre_hook = "mkdir -p \"${XDG_STATE_HOME:-$HOME/.local/state}/noctalia/nvim\""
+post_hook = "pkill -SIGUSR1 nvim >/dev/null 2>&1 || true"

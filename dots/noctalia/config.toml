@@ -28,13 +28,6 @@ builtin_ids = ["gtk3", "gtk4", "kitty", "qt"]
 enable_community_templates = true
 community_ids = ["zed", "yazi"]
 
-[theme.templates.user.neovim]
-enabled = true
-input_path = "templates/nvim-matugen.lua"
-output_path = "$XDG_STATE_HOME/noctalia/nvim/matugen.lua"
-pre_hook = "mkdir -p \"${XDG_STATE_HOME:-$HOME/.local/state}/noctalia/nvim\""
-post_hook = "pkill -SIGUSR1 nvim >/dev/null 2>&1 || true"
-
 [wallpaper]
 enabled = true
 directory = "/home/sinity/wallpaper"
@@ -54,7 +47,6 @@ thickness = 56
 
 [notification]
 enable_daemon = true
-allowed_urgencies = [ "low", "normal", "critical" ]
 blacklist = []
 blacklist_allow_critical = true
 collapse_on_dismiss = true

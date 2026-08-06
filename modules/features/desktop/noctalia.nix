@@ -4,12 +4,12 @@
 # and wallpaper, and acts as the live Material-You color authority (wallpaper
 # palette -> app templates). Retires waybar, tofi, fnott, hyprlock, polkit-gnome.
 #
-# Config follows the repo's dots/ convention: config.toml, plugins.json, and
+# Config follows the repo's dots/ convention: config.toml, plugins.toml, and
+# hooks.toml are curated fragments, while settings.toml is app-owned state.
 # local user templates are OUT-OF-STORE symlinks into dots/noctalia/ via
 # meta.dotfiles below. Noctalia reads AND writes config.toml, so the GUI
 # settings panel works and persists back into the repo — not a read-only store
-# file. The runtime-fetched plugin *code* under ~/.config/noctalia/plugins lives
-# in impermanence-persisted state.
+# file. The pinned plugin trees are immutable Nix path sources.
 {
   mkFeatureModule,
   pkgs,
@@ -24,7 +24,8 @@ mkFeatureModule {
   description = "Noctalia Wayland shell (bar, launcher, notifications, lock, OSD, wallpaper, dynamic color)";
   meta.dotfiles.configFile = {
     "noctalia/config.toml" = "noctalia/config.toml";
-    "noctalia/plugins.json" = "noctalia/plugins.json";
+    "noctalia/plugins.toml" = "noctalia/plugins.toml";
+    "noctalia/hooks.toml" = "noctalia/hooks.toml";
     "noctalia/templates".source = "noctalia/templates";
   };
   configFn =
@@ -45,6 +46,18 @@ mkFeatureModule {
         }:
         let
           mkDotsFile = mkDotsFileFor config;
+          officialPlugins = pkgs.fetchFromGitHub {
+            owner = "noctalia-dev";
+            repo = "official-plugins";
+            rev = "c1369385bd71cfad30614dbc6679eb7df752bc94";
+            hash = "sha256-6QDLMbYqlSL643XQk+h8x7ltHPdTIaC4K2AjT8dHuDA=";
+          };
+          communityPlugins = pkgs.fetchFromGitHub {
+            owner = "noctalia-dev";
+            repo = "community-plugins";
+            rev = "2a697bea88502513b7efe851ac7d33584d34bd69";
+            hash = "sha256-eGUtF9j975ONBMzktCNwAxMQA8/YgKIexqAZjlvKECc=";
+          };
         in
         {
           imports = [ inputs.noctalia.homeModules.default ];
@@ -58,6 +71,9 @@ mkFeatureModule {
             systemd.enable = true;
           };
 
+          home.file.".local/share/noctalia/pinned/official/timer".source = "${officialPlugins}/timer";
+          home.file.".local/share/noctalia/pinned/community/keybind-cheatsheet".source = "${communityPlugins}/keybind-cheatsheet";
+
           home.packages = with pkgs; [
             nvibrant # digital vibrance (nvibrant plugin)
             gpu-screen-recorder # screen-recorder plugin backend
@@ -65,9 +81,8 @@ mkFeatureModule {
             wlr-randr # display-settings plugin (read-only on Hyprland)
           ];
 
-          # Noctalia persists interactive settings in XDG_STATE_HOME but still
-          # reloads config.toml. Force this one mutable file back to the repo
-          # symlink because the upstream HM module also declares it.
+          # Keep the curated config writable and repository-owned. The upstream
+          # module declares the same path when validation is enabled.
           xdg.configFile."noctalia/config.toml" = {
             source = lib.mkForce (mkDotsFile "/noctalia/config.toml");
             force = lib.mkForce true;
@@ -152,32 +167,11 @@ mkFeatureModule {
             Install.WantedBy = [ "default.target" ];
           };
 
-          home.activation.reconcileNoctaliaState = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-            settings="''${XDG_STATE_HOME:-$HOME/.local/state}/noctalia/settings.toml"
-            if [ -f "$settings" ]; then
-              ${pkgs.perl}/bin/perl -0pi -e '
-                s/(\[wallpaper\.automation\][^\[]*?interval_seconds\s*=\s*)\d+/''${1}${toString 120}/s;
-                if (/\[widget\.sysmon\]/) {
-                  s/(\[widget\.sysmon\][^\[]*?stat\s*=\s*)"[^"]*"/''${1}"ram_used"/s
-                    or s/(\[widget\.sysmon\][^\[]*)/''${1}stat = "ram_used"\n/s;
-                }
-              ' "$settings"
-            fi
-          '';
-
-          # Point Noctalia's lock at the dedicated PAM service below (avoids the
-          # NixOS "PAM file not generated" gotcha; otherwise it probes login).
-          home.sessionVariables.NOCTALIA_PAM_SERVICE = "noctalia";
         };
 
-      # Lock-screen authentication. Noctalia has no native PAM module, so the
-      # service file must exist on the system. Mirrors the default `login` stack.
-      security.pam.services.noctalia = { };
-
-      # Persist runtime-fetched plugin code + palette cache (config.toml and
-      # plugins.json are out-of-store symlinks into the repo, not persisted here).
+      # Persist Noctalia's app-owned settings and palette cache. Curated TOML
+      # fragments are out-of-store symlinks into the repository.
       sinnix.persistence.home.directories = [
-        ".config/noctalia"
         ".local/state/noctalia"
         ".cache/noctalia/community-templates"
         ".cache/noctalia/community-palettes"

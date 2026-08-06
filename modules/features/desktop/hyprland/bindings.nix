@@ -15,8 +15,8 @@ in
     "SUPER, F, fullscreen, 0"
     # Launcher + lock are Noctalia surfaces (IPC).
     "SUPER, D, exec, noctalia msg panel-toggle launcher"
-    "SUPER, Escape, exec, qs -c noctalia-shell ipc call lockScreen toggle"
-    "SUPER, Slash, exec, qs -c noctalia-shell ipc call plugin:keybind-cheatsheet toggle"
+    "SUPER, Escape, exec, noctalia msg session lock"
+    "SUPER, Slash, exec, noctalia msg panel-toggle kenn/keybind-cheatsheet:cheatsheet"
 
     "SUPER, H, exec, ${script "kitty-hypr-nav"} focus left"
     "SUPER, J, exec, ${script "kitty-hypr-nav"} focus down"
