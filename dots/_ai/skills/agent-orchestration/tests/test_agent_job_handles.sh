@@ -198,6 +198,9 @@ for _ in {1..100}; do
 done
 [[ $(jq -r .lifecycle "${tmp}/state/job-hold.json") == running ]]
 manifest_pid="$(jq -r .launcher.pid "${tmp}/state/job-hold.json")"
+live_stat="$(<"/proc/${manifest_pid}/stat")"
+live_start="$(printf '%s\n' "${live_stat##*) }" | awk '{print $20}')"
+[[ "$live_start" == "$(jq -r .launcher.proc_start "${tmp}/state/job-hold.json")" ]]
 mkdir -p "${tmp}/proc/${manifest_pid}"
 printf 'x x x x x x x x x x x x x x x x x x x %s\n' "$(jq -r .launcher.proc_start "${tmp}/state/job-hold.json")" >"${tmp}/proc/${manifest_pid}/stat"
 printf '0::/wrong/cgroup\n' >"${tmp}/proc/${manifest_pid}/cgroup"
