@@ -1,8 +1,8 @@
 # Hyprland idle / DPMS management.
 #
 # The lock screen UI is provided by Noctalia (see noctalia.nix). This keeps
-# hypridle only for display power management — blank the OLED on idle, restore
-# on resume — and points the session lock action at Noctalia.
+# hypridle owns the ordered OLED power and lock stages. Media and game
+# inhibitors remain in the Hyprland rules module.
 #
 _: {
   services.hypridle = {
@@ -16,8 +16,13 @@ _: {
 
       listener = [
         {
-          timeout = 300;
+          timeout = 420;
           on-timeout = "hyprctl dispatch dpms off";
+          on-resume = "hyprctl dispatch dpms on";
+        }
+        {
+          timeout = 1500;
+          on-timeout = "noctalia msg session lock";
           on-resume = "hyprctl dispatch dpms on";
         }
       ];
