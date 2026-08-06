@@ -193,51 +193,48 @@ mkServiceModule {
         };
       };
 
-      home-manager.users.${userName}.home.activation.agentGatewayStateMigration =
-        lib.hm.dag.entryAfter [ "writeBoundary" ]
-          ''
-            run ${gatewayBin} --config ${configFile} migrate-state --source ${lib.escapeShellArg legacyStateDir} >/dev/null
-            run ${agentController} --state-dir ${lib.escapeShellArg "${cfg.stateDir}/jobs"} list >/dev/null
-          '';
-
-      home-manager.users.${userName}.systemd.user.services.sinnix-agent-gateway-tunnel =
-        lib.mkIf cfg.tunnel.enable
-          {
-            Unit = {
-              Description = "OpenAI Secure MCP Tunnel to Sinnix remote-readonly gateway";
-              After = [ "network-online.target" ];
-              Wants = [ "network-online.target" ];
-              ConditionPathExists = cfg.tunnel.runtimeKeyFile;
-              StartLimitIntervalSec = 300;
-              StartLimitBurst = 8;
-            };
-            Service = {
-              Type = "simple";
-              ExecStartPre = [
-                stateReconcile
-              ]
-              ++ lib.optionals (cfg.tunnel.approvedManifestHash != null) [
-                approvedManifestGate
-              ];
-              ExecStart = ''
-                ${tunnelClient}/bin/tunnel-client run \
-                  --control-plane.tunnel-id ${lib.escapeShellArg cfg.tunnel.tunnelId} \
-                  --control-plane.api-key file:%d/runtime-key \
-                  --mcp.command ${lib.escapeShellArg "command=${mcpWrapper}/bin/sinnix-agent-gateway-mcp --profile remote-readonly,channel=main"} \
-                  --health.listen-addr 127.0.0.1:${toString cfg.tunnel.healthPort} \
-                  --log.format json
-              '';
-              LoadCredential = "runtime-key:${cfg.tunnel.runtimeKeyFile}";
-              Restart = "on-failure";
-              RestartSec = "5s";
-              NoNewPrivileges = true;
-              PrivateTmp = true;
-              ProtectSystem = "strict";
-              ProtectHome = "read-only";
-              ReadWritePaths = [ cfg.stateDir ];
-              UMask = "0077";
-            };
-            Install.WantedBy = lib.optionals cfg.tunnel.autoStart [ "default.target" ];
+      home-manager.users.${userName} = {
+        home.activation.agentGatewayStateMigration = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+          run ${gatewayBin} --config ${configFile} migrate-state --source ${lib.escapeShellArg legacyStateDir} >/dev/null
+          run ${agentController} --state-dir ${lib.escapeShellArg "${cfg.stateDir}/jobs"} list >/dev/null
+        '';
+        systemd.user.services.sinnix-agent-gateway-tunnel = lib.mkIf cfg.tunnel.enable {
+          Unit = {
+            Description = "OpenAI Secure MCP Tunnel to Sinnix remote-readonly gateway";
+            After = [ "network-online.target" ];
+            Wants = [ "network-online.target" ];
+            ConditionPathExists = cfg.tunnel.runtimeKeyFile;
+            StartLimitIntervalSec = 300;
+            StartLimitBurst = 8;
           };
+          Service = {
+            Type = "simple";
+            ExecStartPre = [
+              stateReconcile
+            ]
+            ++ lib.optionals (cfg.tunnel.approvedManifestHash != null) [
+              approvedManifestGate
+            ];
+            ExecStart = ''
+              ${tunnelClient}/bin/tunnel-client run \
+                --control-plane.tunnel-id ${lib.escapeShellArg cfg.tunnel.tunnelId} \
+                --control-plane.api-key file:%d/runtime-key \
+                --mcp.command ${lib.escapeShellArg "command=${mcpWrapper}/bin/sinnix-agent-gateway-mcp --profile remote-readonly,channel=main"} \
+                --health.listen-addr 127.0.0.1:${toString cfg.tunnel.healthPort} \
+                --log.format json
+            '';
+            LoadCredential = "runtime-key:${cfg.tunnel.runtimeKeyFile}";
+            Restart = "on-failure";
+            RestartSec = "5s";
+            NoNewPrivileges = true;
+            PrivateTmp = true;
+            ProtectSystem = "strict";
+            ProtectHome = "read-only";
+            ReadWritePaths = [ cfg.stateDir ];
+            UMask = "0077";
+          };
+          Install.WantedBy = lib.optionals cfg.tunnel.autoStart [ "default.target" ];
+        };
+      };
     };
 } args
