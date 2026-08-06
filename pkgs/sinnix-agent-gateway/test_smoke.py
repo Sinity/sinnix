@@ -35,6 +35,7 @@ def config(tmp_path: Path, *, remote_write: bool = False) -> GatewayConfig:
                 remote_write=remote_write,
             )
         },
+        approved_manifest_hash="approved-fixture-hash",
     )
 
 
@@ -208,6 +209,13 @@ def test_runtime_audit_carries_returned_job_correlation(tmp_path: Path) -> None:
     )
     payload = runtime.audit.tail(1)["events"][0]["payload"]
     assert payload == {"job_id": "job-correlation", "correlation_id": "job-correlation"}
+
+
+def test_gateway_status_exposes_gated_remote_manifest_hash(tmp_path: Path) -> None:
+    runtime = Runtime.create(config(tmp_path), "remote-readonly")
+    status = runtime.observe.gateway_status("remote-readonly", "capability-hash")
+    assert status["manifest_hash"] == "approved-fixture-hash"
+    assert status["capability_contract_hash"] == "capability-hash"
 
 
 def test_state_is_private_and_artifact_ids_are_opaque(tmp_path: Path) -> None:

@@ -72,6 +72,11 @@ class ObserveService:
             "status": "ready",
             "profile": profile,
             "capability_contract_hash": capability_contract_hash,
+            "manifest_hash": (
+                self.config.approved_manifest_hash
+                if profile == "remote-readonly"
+                else None
+            ),
             "runtime_inventory": "available" if inventory_available else "unavailable",
             "transport": "stdio",
         }

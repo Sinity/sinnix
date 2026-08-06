@@ -41,6 +41,7 @@ class GatewayConfig:
     agent_controller: Path = DEFAULT_AGENT_CONTROLLER
     observe_command: str = "sinnix-observe"
     max_result_bytes: int = 262_144
+    approved_manifest_hash: str | None = None
 
     @classmethod
     def load(cls, path: Path | None) -> "GatewayConfig":
@@ -71,6 +72,7 @@ class GatewayConfig:
             ),
             observe_command=raw.get("observeCommand", "sinnix-observe"),
             max_result_bytes=int(raw.get("maxResultBytes", 262_144)),
+            approved_manifest_hash=raw.get("approvedManifestHash"),
         )
 
     def initialize_state(self) -> None:
