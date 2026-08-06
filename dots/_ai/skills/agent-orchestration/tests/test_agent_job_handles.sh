@@ -248,6 +248,22 @@ FAKE_ACTIVE_STATE=inactive FAKE_SUB_STATE=dead FAKE_RESULT=timeout \
   | jq -e '.lifecycle == "timed_out" and .exit_status == 124 and .live.Result == "timeout"' >/dev/null
 [[ $(jq -r .lifecycle "${tmp}/state/job-timeout.json") == timed_out ]]
 
+# Status remains readable during the accepted/starting phase, before the
+# cancellation identity has a cgroup attestation.
+jq '.job_id="job-starting" | .lifecycle="starting" | .launcher.cgroup=""' \
+  "${tmp}/state/job-one.json" >"${tmp}/state/job-starting.json"
+FAKE_SYSTEMD_CGROUP=/fake/pending \
+  SINNIX_AGENT_SYSTEMCTL="${tmp}/bin/systemctl" \
+  "${control}" --state-dir "${tmp}/state" status --job job-starting \
+  | jq -e '.lifecycle == "starting" and .live.available == true' >/dev/null
+if FAKE_SYSTEMD_CGROUP=/fake/pending FAKE_STOP_MARKER="${tmp}/starting-stopped" \
+  SINNIX_AGENT_SYSTEMCTL="${tmp}/bin/systemctl" \
+  "${control}" --state-dir "${tmp}/state" interrupt --job job-starting; then
+  echo "unattested starting job was interruptible" >&2
+  exit 1
+fi
+[[ ! -e ${tmp}/starting-stopped ]]
+
 # Exercise the production bridge: options must reach sinnix-scope, and the
 # attestation environment must reach the child command.
 cat >"${tmp}/bridge-bin/sinnix-scope" <<'EOF'
