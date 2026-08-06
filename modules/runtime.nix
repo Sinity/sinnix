@@ -6,11 +6,13 @@
   lib,
   config,
   helpers,
+  pkgs,
   ...
 }:
 let
   cfg = config.sinnix;
   inherit (helpers.data) runtimeDefaults;
+  scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   resourceClassNames = builtins.attrNames runtimeDefaults.classes;
 
   surfaces = config.sinnix.runtime.surfaces;
@@ -209,5 +211,6 @@ in
       text = builtins.toJSON config.sinnix.runtime.inventory;
       mode = "0444";
     };
+    environment.systemPackages = [ scriptPkgs.sinnix-heavy-lease ];
   };
 }
