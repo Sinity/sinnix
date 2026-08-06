@@ -48,6 +48,18 @@ mkServiceModule {
       '';
     };
 
+    memoryBudgetGiB = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 16;
+      description = ''
+        Polylogued's cgroup memory budget in GiB. MemoryHigh is derived as
+        7/8 of this budget, leaving 1/8 for pre-limit throttling headroom;
+        MemoryMax is derived as 9/8, leaving another 1/8 for transient
+        bursts above the throttle. The value must be divisible by 8 so both
+        derived limits remain whole GiB values.
+      '';
+    };
+
     daemon = {
       host = lib.mkOption {
         type = lib.types.str;
@@ -136,6 +148,9 @@ mkServiceModule {
       # interference ~5000x on 3.13 vs ~0 on 3.14t). Rollback = repin
       # `.default`.
       polyloguePkg = inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.polylogue;
+      memoryBudgetBytes = cfg.memoryBudgetGiB * 1024 * 1024 * 1024;
+      memoryHighGiB = cfg.memoryBudgetGiB * 7 / 8;
+      memoryMaxGiB = cfg.memoryBudgetGiB * 9 / 8;
       # 2026-07-10: moved off /persist (worn MX500) to /realm; still inside
       # the /realm btrbk→borg coverage.
       # Ordered most-irreplaceable first. A run that dies partway (the 2h
@@ -152,6 +167,13 @@ mkServiceModule {
       # coverage while covering nothing.
     in
     {
+      assertions = [
+        {
+          assertion = cfg.memoryBudgetGiB / 8 * 8 == cfg.memoryBudgetGiB;
+          message = "sinnix.services.polylogue.memoryBudgetGiB must be divisible by 8";
+        }
+      ];
+
       # ── Import the upstream Home Manager module ────────────────────
       #     This defines programs.polylogued.* and creates the unit.
       home-manager.users.${userName} = {
@@ -208,17 +230,19 @@ mkServiceModule {
             # the throttling; raised here so a rebuild does not silently
             # revert that finding.
             overrides = {
-              MemoryHigh = lib.mkForce "14G";
-              MemoryMax = lib.mkForce "18G";
+              MemoryHigh = lib.mkForce "${toString memoryHighGiB}G";
+              MemoryMax = lib.mkForce "${toString memoryMaxGiB}G";
             };
           })
           // {
             # The upstream unit does not pass its rendered TOML path to the
             # daemon process. Keep the service's startup-bound archive root
             # aligned with the generated user configuration.
-            Environment = [ "POLYLOGUE_ARCHIVE_ROOT=${cfg.dataDir}" ];
+            Environment = [
+              "POLYLOGUE_ARCHIVE_ROOT=${cfg.dataDir}"
+              "POLYLOGUE_MEMORY_BUDGET_BYTES=${toString memoryBudgetBytes}"
+            ];
           };
-
 
       };
 
