@@ -135,6 +135,12 @@ validate_agent_property() {
         exit 64
       }
       ;;
+    RuntimeMaxSec)
+      [[ "$value" =~ ^[0-9]+$ ]] && [ "$value" -ge 1 ] || {
+        echo "sinnix-scope: invalid $name value: $value" >&2
+        exit 64
+      }
+      ;;
     *)
       echo "sinnix-scope: unsupported agent property: $name" >&2
       exit 64
