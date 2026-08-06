@@ -17,6 +17,11 @@ let
         restartable = false;
       };
       captures = [ ];
+      workload = {
+        class = "unclassified";
+        rationale = "";
+        processMatchers = [ ];
+      };
     }
     // surface;
 
@@ -51,6 +56,7 @@ let
           resourceClass
           unit
           ;
+        workload = surface.workload;
         type = surfaceType surface;
         restartable = surface.observe.restartable;
       })

@@ -138,6 +138,47 @@ in
               type = types.str;
               default = "/realm/data/knowledgebase";
             };
+            entries = mkOption {
+              type = types.attrsOf (
+                types.submodule {
+                  options = {
+                    path = mkOption { type = types.str; };
+                    remote = mkOption { type = types.nullOr types.str; default = null; };
+                    defaultRef = mkOption { type = types.str; default = "master"; };
+                    remoteRead = mkOption { type = types.bool; default = false; };
+                    remoteWrite = mkOption { type = types.bool; default = false; };
+                  };
+                }
+              );
+              readOnly = true;
+              default = {
+                sinnix = {
+                  path = config.sinnix;
+                  remote = "https://github.com/Sinity/sinnix.git";
+                  remoteRead = true;
+                  remoteWrite = true;
+                };
+                sinex = {
+                  path = config.sinex;
+                  remote = "https://github.com/Sinity/sinex.git";
+                  remoteRead = true;
+                  remoteWrite = true;
+                };
+                polylogue = {
+                  path = config.polylogue;
+                  remote = "https://github.com/Sinity/polylogue.git";
+                  remoteRead = true;
+                  remoteWrite = true;
+                };
+                lynchpin = {
+                  path = config.lynchpin;
+                  remote = "https://github.com/Sinity/sinity-lynchpin.git";
+                  remoteRead = true;
+                  remoteWrite = true;
+                };
+              };
+              description = "Canonical project metadata consumed by agent and evidence surfaces.";
+            };
             lynchpinExported = mkOption {
               type = types.str;
               default = "${config.root}/__lynchpin_exported";

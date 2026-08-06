@@ -264,6 +264,12 @@ non-script externals (lynchpin/polylogue pythons, vendored npm CLIs, beads);
   registry wiring and per-client (Codex/Gemini) config generation. Only
   `clis.nix`/`mcp.nix` are real NixOS modules; the sibling files are plain-nix
   helpers imported directly, not auto-imported.
+- Agent gateway: `modules/services/agent-gateway.nix` renders one canonical
+  project contract and one official-SDK stdio MCP implementation with
+  `remote-readonly`, `local-agent-control`, and `remote-operator` profiles.
+  `sinnix-agent-control-mcp` is a thin local wrapper around that implementation.
+  Remote ChatGPT access uses the pinned OpenAI `tunnel-client` user service;
+  the gateway has no custom HTTP/SSE transport or separate PID job substrate.
 
 ## Secrets
 

@@ -24,6 +24,7 @@
         "sinnix-agent-control-mcp"
         "sinnix-agent-gateway"
         "sinnix-observe"
+        "tunnel-client"
         "verify-agent-topology"
       ];
     in

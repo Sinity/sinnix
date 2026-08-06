@@ -1,6 +1,3 @@
-# Trusted local MCP gateway for coding-agent workflows. Provides a first-class
-# repository/command/artifact surface over stdio MCP, with an optional local
-# JSON-RPC HTTP endpoint.
 {
   mkServiceModule,
   config,
@@ -13,344 +10,164 @@ let
   userName = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   jsonFormat = pkgs.formats.json { };
-
-  repositoryType = lib.types.submodule (
-    { name, ... }:
-    let
-      taskType = lib.types.either (lib.types.listOf lib.types.str) (
-        lib.types.submodule {
-          options = {
-            command = lib.mkOption {
-              type = lib.types.listOf lib.types.str;
-              description = "Command vector executed by run_task.";
-            };
-
-            description = lib.mkOption {
-              type = lib.types.str;
-              default = "";
-              description = "Human/model-facing task purpose.";
-            };
-
-            timeout = lib.mkOption {
-              type = lib.types.nullOr lib.types.int;
-              default = null;
-              description = "Optional task-specific timeout in seconds.";
-            };
-
-            background = lib.mkOption {
-              type = lib.types.bool;
-              default = false;
-              description = "Default to durable background execution for this task.";
-            };
-
-            risk = lib.mkOption {
-              type = lib.types.enum [
-                "low"
-                "normal"
-                "high"
-              ];
-              default = "normal";
-              description = "Operator hint exposed through gateway_info.";
-            };
-
-            outputs = lib.mkOption {
-              type = lib.types.listOf lib.types.str;
-              default = [ ];
-              description = "Workspace-relative output paths the task commonly produces.";
-            };
-          };
-        }
-      );
-    in
-    {
-      options = {
-        url = lib.mkOption {
-          type = lib.types.str;
-          default = "https://github.com/${name}.git";
-          description = "Git remote URL used by repo_materialize.";
-        };
-
-        defaultRef = lib.mkOption {
-          type = lib.types.str;
-          default = "master";
-          description = "Default branch/ref checked out by repo_materialize.";
-        };
-
-        allowWrite = lib.mkOption {
-          type = lib.types.bool;
-          default = true;
-          description = "Human-facing marker that this repo may be mutated by yolo workflows.";
-        };
-
-        env = lib.mkOption {
-          type = lib.types.attrsOf lib.types.str;
-          default = { };
-          description = "Extra environment variables for commands run in this repository.";
-        };
-
-        tasks = lib.mkOption {
-          type = lib.types.attrsOf taskType;
-          default = { };
-          example = {
-            check = {
-              command = [
-                "nix"
-                "flake"
-                "check"
-              ];
-              description = "Run the repository flake check.";
-              timeout = 3600;
-            };
-          };
-          description = "Named command vectors or metadata-rich task definitions exposed through run_task.";
-        };
-      };
-    }
-  );
-
   gatewayBin = "${scriptPkgs.sinnix-agent-gateway}/bin/sinnix-agent-gateway";
+  tunnelClient = scriptPkgs.tunnel-client;
 in
 mkServiceModule {
   name = "agent-gateway";
-  description = "trusted local MCP gateway for repo/code/system agent workflows";
+  description = "capability-profiled MCP gateway over one attested agent-job substrate";
   extraOptions = {
-    yolo = lib.mkOption {
-      type = lib.types.bool;
-      default = true;
-      description = ''
-        Trusted-operator mode. When true, the gateway defaults to broad local
-        coding-agent ergonomics: arbitrary workspace commands are allowed and the
-        MCP server behaves like a useful local assistant, not a locked cabinet.
-      '';
-    };
-
-    allowArbitraryCommands = lib.mkOption {
-      type = lib.types.bool;
-      default = true;
-      description = "Expose run_command for arbitrary commands inside materialized workspaces.";
-    };
-
-    allowedHostCommands = lib.mkOption {
-      type = lib.types.bool;
-      default = false;
-      description = ''
-        Expose host_run for commands outside a workspace. Keep false for the
-        normal coding-agent loop; flip true when deliberately using ChatGPT as a
-        local operator surface.
-      '';
-    };
-
     stateDir = lib.mkOption {
       type = lib.types.str;
-      default = "/home/${userName}/.local/state/sinnix-agent-gateway";
-      description = "Persistent state root for mirrors, workspaces, jobs, artifacts, and audit logs.";
+      default = "/home/${userName}/.local/state/sinnix/agent-gateway";
+      description = "Private persisted gateway audit, artifact, migration, and job state.";
     };
-
-    auditPath = lib.mkOption {
-      type = lib.types.str;
-      default = "${config.sinnix.services.agent-gateway.stateDir}/audit.jsonl";
-      description = "Append-only JSONL audit ledger path.";
-    };
-
-    outputLimit = lib.mkOption {
+    maxResultBytes = lib.mkOption {
       type = lib.types.int;
       default = 262144;
-      description = "Default maximum stdout/stderr/tool text bytes returned inline.";
+      description = "Maximum bytes returned by bounded project, observe, and artifact operations.";
     };
-
-    defaultTimeoutSec = lib.mkOption {
-      type = lib.types.int;
-      default = 300;
-      description = "Default command timeout in seconds.";
-    };
-
-    maxTimeoutSec = lib.mkOption {
-      type = lib.types.int;
-      default = 3600;
-      description = "Maximum command timeout accepted by MCP calls.";
-    };
-
-    globalEnv = lib.mkOption {
-      type = lib.types.attrsOf lib.types.str;
-      default = { };
-      description = "Environment variables inherited by gateway-spawned commands.";
-    };
-
-    repositories = lib.mkOption {
-      type = lib.types.attrsOf repositoryType;
-      default = {
-        "Sinity/sinnix" = {
-          url = "https://github.com/Sinity/sinnix.git";
-          defaultRef = "master";
-          allowWrite = true;
-          tasks = {
-            flake-check = {
-              command = [
-                "nix"
-                "flake"
-                "check"
-              ];
-              description = "Run the full flake check; expensive, use near completion.";
-              timeout = 3600;
-              background = true;
-              risk = "high";
-            };
-            eval-prime = {
-              command = [
-                "nix"
-                "eval"
-                ".#nixosConfigurations.sinnix-prime.config.system.build.toplevel.drvPath"
-              ];
-              description = "Evaluate the sinnix-prime system derivation path.";
-              timeout = 600;
-              risk = "normal";
-            };
-          };
-        };
-
-        "Sinity/sinex" = {
-          url = "https://github.com/Sinity/sinex.git";
-          defaultRef = "master";
-          allowWrite = true;
-          tasks = {
-            cargo-check = {
-              command = [
-                "cargo"
-                "check"
-                "--workspace"
-              ];
-              description = "Check all Rust workspace crates.";
-              timeout = 1800;
-            };
-            cargo-test = {
-              command = [
-                "cargo"
-                "test"
-                "--workspace"
-              ];
-              description = "Run all Rust workspace tests.";
-              timeout = 3600;
-              background = true;
-              risk = "high";
-            };
-            cargo-metadata = {
-              command = [
-                "cargo"
-                "metadata"
-                "--format-version"
-                "1"
-              ];
-              description = "Return Cargo workspace metadata.";
-              timeout = 300;
-              risk = "low";
-            };
-          };
-        };
-
-        "Sinity/polylogue" = {
-          url = "https://github.com/Sinity/polylogue.git";
-          defaultRef = "master";
-          allowWrite = true;
-          tasks = {
-            test = {
-              command = [
-                "python"
-                "-m"
-                "pytest"
-              ];
-              description = "Run the Polylogue pytest suite.";
-              timeout = 1800;
-              background = true;
-            };
-          };
-        };
-      };
-      description = "Repositories the gateway can materialize and operate on.";
-    };
-
-    http = {
-      enable = lib.mkEnableOption "local JSON-RPC HTTP endpoint for tunnel experiments";
-
+    tunnel = {
+      enable = lib.mkEnableOption "OpenAI Secure MCP Tunnel for the remote-readonly profile";
       autoStart = lib.mkOption {
         type = lib.types.bool;
         default = true;
-        description = "Start the local JSON-RPC HTTP endpoint at user login.";
+        description = "Start the supervised tunnel at user login.";
       };
-
-      host = lib.mkOption {
+      tunnelId = lib.mkOption {
         type = lib.types.str;
-        default = "127.0.0.1";
-        description = "Host address for the optional HTTP endpoint.";
+        default = "";
+        description = "Non-secret OpenAI tunnel identifier.";
       };
-
-      port = lib.mkOption {
+      runtimeKeyFile = lib.mkOption {
+        type = lib.types.str;
+        default = config.sinnix.secrets.paths."openai-tunnel-runtime-key";
+        description = "Agenix runtime key with tunnel Read and Use permissions.";
+      };
+      healthPort = lib.mkOption {
         type = lib.types.port;
-        default = 3020;
-        description = "Port for the optional HTTP endpoint.";
+        default = 3088;
+        description = "Loopback health, readiness, metrics, and operator UI port.";
+      };
+      approvedManifestHash = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "Frozen ChatGPT connector manifest SHA-256 after publication.";
       };
     };
   };
   configFn =
-    { cfg, pkgs, ... }:
+    { cfg, ... }:
     let
-      configFile = jsonFormat.generate "sinnix-agent-gateway-config.json" {
-        inherit (cfg) stateDir;
-        inherit (cfg) auditPath;
-        inherit (cfg) yolo;
-        inherit (cfg) allowArbitraryCommands;
-        inherit (cfg) allowedHostCommands;
-        inherit (cfg) outputLimit;
-        defaultTimeout = cfg.defaultTimeoutSec;
-        maxTimeout = cfg.maxTimeoutSec;
-        inherit (cfg) globalEnv;
-        repositories = lib.mapAttrs (_: repo: {
-          inherit (repo)
-            url
-            defaultRef
-            allowWrite
-            env
-            tasks
-            ;
-        }) cfg.repositories;
+      configFile = jsonFormat.generate "sinnix-agent-gateway.json" {
+        inherit (cfg) stateDir maxResultBytes;
+        runtimeInventory = "/etc/sinnix/runtime-inventory.json";
+        agentRunner = "/home/${userName}/.config/hermes/skills/agent-orchestration/scripts/run_agent_prompt.sh";
+        agentController = "/home/${userName}/.config/hermes/skills/agent-orchestration/scripts/agent_job_control.sh";
+        observeCommand = "${scriptPkgs.sinnix-observe}/bin/sinnix-observe";
+        projects = config.sinnix.projects.entries;
       };
-
       mcpWrapper = pkgs.writeShellScriptBin "sinnix-agent-gateway-mcp" ''
         set -euo pipefail
-        exec ${gatewayBin} --config ${configFile} stdio
+        profile="remote-readonly"
+        if [[ ''${1:-} == --profile ]]; then
+          profile="''${2:?--profile requires a value}"
+          shift 2
+        fi
+        exec ${gatewayBin} --config ${configFile} --profile "$profile" serve "$@"
+      '';
+      manifestCheck = pkgs.writeShellScriptBin "sinnix-agent-gateway-schema" ''
+        set -euo pipefail
+        profile="''${1:-remote-readonly}"
+        exec ${gatewayBin} --config ${configFile} --profile "$profile" manifest
+      '';
+      approvedManifestGate = pkgs.writeShellScript "sinnix-agent-gateway-manifest-gate" ''
+        set -euo pipefail
+        actual="$(${gatewayBin} --config ${configFile} --profile remote-readonly manifest | ${pkgs.jq}/bin/jq -r .sha256)"
+        expected=${lib.escapeShellArg (
+          if cfg.tunnel.approvedManifestHash == null then "" else cfg.tunnel.approvedManifestHash
+        )}
+        if [[ "$actual" != "$expected" ]]; then
+          echo "remote-readonly tool manifest drift: expected $expected, got $actual" >&2
+          exit 1
+        fi
       '';
     in
     {
-      environment.systemPackages = [
-        scriptPkgs.sinnix-agent-gateway
-        mcpWrapper
+      assertions = [
+        {
+          assertion = !cfg.tunnel.enable || cfg.tunnel.tunnelId != "";
+          message = "sinnix.services.agent-gateway.tunnel.tunnelId must be set when the tunnel is enabled";
+        }
       ];
 
-      environment.etc."sinnix/agent-gateway/config.json".source = configFile;
+      environment.systemPackages = [
+        scriptPkgs.sinnix-agent-gateway
+        tunnelClient
+        mcpWrapper
+        manifestCheck
+      ];
 
-      home-manager.users.${userName} = {
-        home.file.".config/sinnix-agent-gateway/config.json".source = configFile;
+      environment.etc."sinnix/agent-gateway.json".source = configFile;
 
-        systemd.user.services.sinnix-agent-gateway-http = lib.mkIf cfg.http.enable {
-          Unit = {
-            Description = "Sinnix Agent Gateway JSON-RPC HTTP endpoint";
-            After = [ "network.target" ];
+      sinnix.persistence.home.directories = [
+        {
+          directory = ".local/state/sinnix/agent-gateway";
+          mode = "0700";
+        }
+      ];
+
+      sinnix.runtime.surfaces = lib.mkIf cfg.tunnel.enable {
+        agent-gateway-tunnel = {
+          unit = "sinnix-agent-gateway-tunnel.service";
+          manager = "user";
+          resourceClass = "interactive-agent";
+          observe = {
+            enable = true;
+            restartable = true;
           };
-
-          Service = {
-            ExecStartPre = "${pkgs.coreutils}/bin/mkdir -p ${cfg.stateDir} ${cfg.stateDir}/log";
-            ExecStart = "${gatewayBin} --config ${configFile} http --host ${cfg.http.host} --port ${toString cfg.http.port}";
-            Restart = "on-failure";
-            RestartSec = "5s";
-            WorkingDirectory = cfg.stateDir;
-            StandardError = "append:${cfg.stateDir}/log/http.log";
-            Environment = [
-              "SINNIX_AGENT_GATEWAY_CONFIG=${configFile}"
-              "SINNIX_AGENT_GATEWAY_STATE=${cfg.stateDir}"
-            ];
+          workload = {
+            class = "protected";
+            rationale = "Outbound operator control path; bounded and restartable.";
+            processMatchers = [ "tunnel-client" ];
           };
-
-          Install.WantedBy = lib.optionals cfg.http.autoStart [ "default.target" ];
         };
       };
+
+      home-manager.users.${userName}.systemd.user.services.sinnix-agent-gateway-tunnel =
+        lib.mkIf cfg.tunnel.enable {
+          Unit = {
+            Description = "OpenAI Secure MCP Tunnel to Sinnix remote-readonly gateway";
+            After = [ "network-online.target" ];
+            Wants = [ "network-online.target" ];
+            ConditionPathExists = cfg.tunnel.runtimeKeyFile;
+            StartLimitIntervalSec = 300;
+            StartLimitBurst = 8;
+          };
+          Service = {
+            Type = "simple";
+            ExecStartPre = lib.optionals (cfg.tunnel.approvedManifestHash != null) [
+              approvedManifestGate
+            ];
+            ExecStart = ''
+              ${tunnelClient}/bin/tunnel-client run \
+                --control-plane.tunnel-id ${lib.escapeShellArg cfg.tunnel.tunnelId} \
+                --control-plane.api-key file:%d/runtime-key \
+                --mcp.command ${lib.escapeShellArg "command=${mcpWrapper}/bin/sinnix-agent-gateway-mcp --profile remote-readonly,channel=main"} \
+                --health.listen-addr 127.0.0.1:${toString cfg.tunnel.healthPort} \
+                --log.format json
+            '';
+            LoadCredential = "runtime-key:${cfg.tunnel.runtimeKeyFile}";
+            Restart = "on-failure";
+            RestartSec = "5s";
+            NoNewPrivileges = true;
+            PrivateTmp = true;
+            ProtectSystem = "strict";
+            ProtectHome = "read-only";
+            ReadWritePaths = [ cfg.stateDir ];
+            UMask = "0077";
+          };
+          Install.WantedBy = lib.optionals cfg.tunnel.autoStart [ "default.target" ];
+        };
     };
 } args

@@ -1,270 +1,243 @@
+from __future__ import annotations
+
+import concurrent.futures
 import json
 import os
-import socket
-import subprocess
 import sys
-import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 
+import anyio
+import pytest
+from mcp import ClientSession
+from mcp.client.stdio import StdioServerParameters, stdio_client
 
-def test_stdio_smoke(tmp_path: Path):
-    cfg = {
-        "stateDir": str(tmp_path / "state"),
-        "repositories": {
-            "local/test": {
-                "url": str(tmp_path / "missing.git"),
-                "tasks": {
-                    "echo": {
-                        "command": ["echo", "hi"],
-                        "description": "Say hi.",
-                        "timeout": 30,
-                        "risk": "low",
+from sinnix_agent_gateway.app import Runtime, create_server
+from sinnix_agent_gateway.capabilities import PolicyError
+from sinnix_agent_gateway.cli import build_manifest
+from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
+from sinnix_agent_gateway.projects import ProjectError
+
+
+def config(tmp_path: Path, *, remote_write: bool = False) -> GatewayConfig:
+    project = tmp_path / "project"
+    project.mkdir()
+    return GatewayConfig(
+        state_dir=tmp_path / "state",
+        projects={
+            "fixture": ProjectConfig(
+                project_id="fixture",
+                path=project,
+                remote_read=True,
+                remote_write=remote_write,
+            )
+        },
+    )
+
+
+def test_official_sdk_profiles_have_stable_distinct_manifests(tmp_path: Path) -> None:
+    cfg = config(tmp_path, remote_write=True)
+    readonly = anyio.run(build_manifest, cfg, "remote-readonly")
+    local = anyio.run(build_manifest, cfg, "local-agent-control")
+    operator = anyio.run(build_manifest, cfg, "remote-operator")
+    readonly_names = {row["name"] for row in readonly["tools"]}
+    local_names = {row["name"] for row in local["tools"]}
+    operator_names = {row["name"] for row in operator["tools"]}
+    assert "project_write" not in readonly_names
+    assert "agent_launch" not in readonly_names
+    assert {"agent_launch", "job_cancel"} <= local_names
+    assert {"project_write", "project_apply_patch"} <= operator_names
+    assert readonly["sha256"] != local["sha256"] != operator["sha256"]
+    assert all("inputSchema" in row and "outputSchema" in row for row in readonly["tools"])
+    assert all(
+        row["annotations"]
+        == {
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        }
+        for row in readonly["tools"]
+    )
+
+
+def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> None:
+    cfg = config(tmp_path)
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "stateDir": str(cfg.state_dir),
+                "projects": {
+                    "fixture": {
+                        "path": str(cfg.projects["fixture"].path),
+                        "remoteRead": True,
+                        "remoteWrite": True,
                     }
                 },
             }
-        },
-    }
-    cfg_path = tmp_path / "config.json"
-    cfg_path.write_text(json.dumps(cfg))
-
-    proc = subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "sinnix_agent_gateway.server",
-            "--config",
-            str(cfg_path),
-            "stdio",
-        ],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    try:
-        assert proc.stdin is not None
-        assert proc.stdout is not None
-        proc.stdin.write(
-            json.dumps(
-                {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
-            )
-            + "\n"
         )
-        proc.stdin.flush()
-        init = json.loads(proc.stdout.readline())
-        assert init["result"]["serverInfo"]["name"] == "sinnix-agent-gateway"
-
-        proc.stdin.write(
-            json.dumps(
-                {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
-            )
-            + "\n"
-        )
-        proc.stdin.flush()
-        tools = json.loads(proc.stdout.readline())["result"]["tools"]
-        assert {tool["name"] for tool in tools} >= {
-            "gateway_guide",
-            "repo_materialize",
-            "run_command",
-            "repo_pack",
-            "repo_export_bundle",
-            "artifact_read_base64",
-        }
-        assert all("outputSchema" in tool for tool in tools)
-        materialize = next(tool for tool in tools if tool["name"] == "repo_materialize")
-        assert "Use this before" in materialize["description"]
-        assert "description" in materialize["inputSchema"]["properties"]["repo"]
-        assert (
-            materialize["outputSchema"]["properties"]["workspace"]["type"] == "string"
-        )
-
-        proc.stdin.write(
-            json.dumps(
-                {
-                    "jsonrpc": "2.0",
-                    "id": 3,
-                    "method": "tools/call",
-                    "params": {"name": "gateway_info", "arguments": {}},
-                }
-            )
-            + "\n"
-        )
-        proc.stdin.flush()
-        info = json.loads(proc.stdout.readline())["result"]["structuredContent"]
-        assert info["yolo"] is True
-        assert info["transports"]["streamable_http_path"] == "/mcp"
-        assert (
-            info["repositories"]["local/test"]["tasks"]["echo"]["description"]
-            == "Say hi."
-        )
-
-        proc.stdin.write(
-            json.dumps(
-                {
-                    "jsonrpc": "2.0",
-                    "id": 4,
-                    "method": "tools/call",
-                    "params": {"name": "gateway_guide", "arguments": {}},
-                }
-            )
-            + "\n"
-        )
-        proc.stdin.flush()
-        guide = json.loads(proc.stdout.readline())["result"]["structuredContent"]
-        assert "repo_materialize" in " ".join(guide["rules"])
-        assert "repo_export_bundle" in " ".join(guide["rules"])
-    finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-
-
-def test_binary_artifact_base64_chunks(tmp_path: Path):
-    from sinnix_agent_gateway.server import Gateway
-
-    g = Gateway({"stateDir": str(tmp_path / "state")})
-    artifact = g.art("sample.bin", b"abcdef")
-    first = g.artifact_read_base64(
-        {"artifact": artifact["artifact"], "offset": 0, "max_bytes": 3}
-    )
-    second = g.artifact_read_base64(
-        {
-            "artifact": artifact["artifact"],
-            "offset": first["next_offset"],
-            "max_bytes": 3,
-        }
-    )
-    assert first["base64"] == "YWJj"
-    assert second["base64"] == "ZGVm"
-    assert second["next_offset"] is None
-
-
-def test_info_uses_user_state_by_default(tmp_path: Path):
-    env = os.environ.copy()
-    env["XDG_STATE_HOME"] = str(tmp_path / "state-home")
-
-    proc = subprocess.run(
-        [sys.executable, "-m", "sinnix_agent_gateway.server", "info"],
-        capture_output=True,
-        check=True,
-        env=env,
-        text=True,
     )
 
-    info = json.loads(proc.stdout)
-    assert info["state_dir"] == str(tmp_path / "state-home" / "sinnix-agent-gateway")
-
-
-def post_json(
-    url: str, payload: dict, *, accept: str = "application/json"
-) -> tuple[str, str]:
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode(),
-        headers={"content-type": "application/json", "accept": accept},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=5) as resp:
-        return resp.headers.get("content-type", ""), resp.read().decode()
-
-
-def test_http_mcp_endpoint(tmp_path: Path):
-    cfg_path = tmp_path / "config.json"
-    cfg_path.write_text(json.dumps({"stateDir": str(tmp_path / "state")}))
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
-    proc = None
-    try:
-        proc = subprocess.Popen(
+    async def probe() -> None:
+        executable = os.environ.get("SINNIX_GATEWAY_TEST_EXECUTABLE")
+        command = executable or sys.executable
+        args = [] if executable else ["-m", "sinnix_agent_gateway.cli"]
+        args.extend(
             [
-                sys.executable,
-                "-m",
-                "sinnix_agent_gateway.server",
                 "--config",
-                str(cfg_path),
-                "http",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                str(port),
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
+                str(config_path),
+                "--profile",
+                "remote-readonly",
+                "serve",
+            ]
         )
-        url = f"http://127.0.0.1:{port}/mcp"
-        for _ in range(50):
-            try:
-                content_type, body = post_json(
-                    url, {"jsonrpc": "2.0", "id": 1, "method": "ping"}
-                )
-                break
-            except OSError:
-                time.sleep(0.05)
-        else:
-            raise AssertionError("HTTP MCP endpoint did not start")
-        assert content_type.startswith("application/json")
-        assert json.loads(body)["result"] == {}
-
-        content_type, body = post_json(
-            url,
-            {"jsonrpc": "2.0", "id": 2, "method": "ping"},
-            accept="text/event-stream",
+        parameters = StdioServerParameters(
+            command=command,
+            args=args,
         )
-        assert content_type.startswith("text/event-stream")
-        assert "data: " in body
+        async with stdio_client(parameters) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                initialized = await session.initialize()
+                tools = await session.list_tools()
+                names = {tool.name for tool in tools.tools}
+                assert initialized.server_info.name == "sinnix-agent-gateway"
+                assert "project_read" in names
+                assert "project_write" not in names
+                assert "agent_launch" not in names
 
-        try:
-            post_json(
-                f"http://127.0.0.1:{port}/",
-                {"jsonrpc": "2.0", "id": 3, "method": "ping"},
-            )
-        except urllib.error.HTTPError as exc:
-            assert exc.code == 404
-        else:
-            raise AssertionError("POST / endpoint must not be accepted")
-    finally:
-        if proc is not None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+    anyio.run(probe)
 
 
-def test_durable_background_job_survives_gateway_instance(tmp_path: Path):
-    from sinnix_agent_gateway.server import Gateway
+def test_readonly_policy_is_checked_inside_write_operation(tmp_path: Path) -> None:
+    cfg = config(tmp_path, remote_write=True)
+    runtime = Runtime.create(cfg, "remote-readonly")
+    assert runtime.projects.list()["projects"][0]["remote_write"] is False
+    target = cfg.projects["fixture"].path / "forbidden.txt"
+    with pytest.raises(PolicyError):
+        runtime.projects.write("fixture", target.name, "forbidden")
+    assert not target.exists()
 
-    workspace = tmp_path / "state" / "workspaces" / "w"
-    workspace.mkdir(parents=True)
-    (workspace / ".sinnix-agent-workspace.json").write_text(
-        json.dumps({"repo": "local/test", "workspace": "w"})
+
+def test_project_read_applies_late_line_range_before_byte_bound(tmp_path: Path) -> None:
+    cfg = config(tmp_path)
+    target = cfg.projects["fixture"].path / "large.txt"
+    target.write_text("".join(f"line-{line:04d} padding\n" for line in range(1, 301)))
+    runtime = Runtime.create(cfg, "remote-readonly")
+    result = runtime.projects.read("fixture", "large.txt", 250, 251, 128)
+    assert "line-0250" in result["content"]
+    assert "line-0251" in result["content"]
+
+
+def test_project_tree_and_read_reject_symlink_escape(tmp_path: Path) -> None:
+    cfg = config(tmp_path)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("private")
+    (cfg.projects["fixture"].path / "escape.txt").symlink_to(outside)
+    runtime = Runtime.create(cfg, "remote-readonly")
+    with pytest.raises(ProjectError):
+        runtime.projects.read("fixture", "escape.txt")
+    assert runtime.projects.tree("fixture")["entries"] == []
+
+
+def test_remote_project_tools_hide_local_only_agent_state(tmp_path: Path) -> None:
+    cfg = config(tmp_path)
+    project = cfg.projects["fixture"].path
+    private_files = (
+        project / ".agent" / "scratch" / "private.md",
+        project / ".beads" / "interactions.jsonl",
+        project / ".beads" / "dolt-server-config.yaml",
+        project / ".claude" / "settings.json",
+        project / ".mcp.json",
+        project / "dots" / "codex" / "skills" / ".system" / "private.md",
     )
-    cfg = {
-        "stateDir": str(tmp_path / "state"),
-        "repositories": {
-            "local/test": {
-                "tasks": {
-                    "slow": {"command": ["sh", "-c", "echo done"], "background": True}
-                }
+    for path in private_files:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("gateway-private-marker")
+
+    runtime = Runtime.create(cfg, "remote-readonly")
+    for path in private_files:
+        with pytest.raises(ProjectError):
+            runtime.projects.read("fixture", str(path.relative_to(project)))
+
+    tree_paths = {entry["path"] for entry in runtime.projects.tree("fixture")["entries"]}
+    assert not tree_paths.intersection(
+        str(path.relative_to(project)) for path in private_files
+    )
+    assert runtime.projects.search("fixture", "gateway-private-marker")["matches"] == []
+
+
+def test_audit_chain_survives_concurrent_writers(tmp_path: Path) -> None:
+    runtime = Runtime.create(config(tmp_path), "remote-readonly")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=32) as executor:
+        list(
+            executor.map(
+                lambda ordinal: runtime.audit.append(
+                    "concurrency_probe", "ok", {"ordinal": ordinal}
+                ),
+                range(240),
+            )
+        )
+    verification = runtime.audit.verify()
+    assert verification["valid"] is True
+    assert verification["checked"] == 240
+    assert len(verification["head_hash"]) == 64
+
+
+def test_state_is_private_and_artifact_ids_are_opaque(tmp_path: Path) -> None:
+    cfg = config(tmp_path)
+    runtime = Runtime.create(cfg, "local-agent-control")
+    source = cfg.state_dir / "jobs" / "job.log"
+    source.write_bytes(b"abcdef")
+    source.chmod(0o600)
+    first = runtime.artifacts.register(source, kind="log", owner_id="job-a")
+    second = runtime.artifacts.register(source, kind="log", owner_id="job-a")
+    assert first != second
+    assert oct(cfg.state_dir.stat().st_mode & 0o777) == "0o700"
+    chunk = runtime.artifacts.read(first, offset=3, max_bytes=3)
+    assert chunk["base64"] == "ZGVm"
+    assert "source" not in chunk
+
+
+def test_malformed_job_records_are_visible(tmp_path: Path) -> None:
+    runtime = Runtime.create(config(tmp_path), "local-agent-control")
+    (runtime.jobs.root / "broken.json").write_text("{not-json")
+    result = runtime.jobs.list()
+    assert result["jobs"] == []
+    assert result["malformed_records"][0]["record"] == "broken.json"
+
+
+def test_agent_environment_is_explicitly_allowlisted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SINNIX_GATEWAY_PROBE_SECRET", "must-not-propagate")
+    runtime = Runtime.create(config(tmp_path), "local-agent-control")
+    environment = runtime.jobs._environment()
+    assert "SINNIX_GATEWAY_PROBE_SECRET" not in environment
+    assert "PATH" in environment
+
+
+def test_unknown_profile_is_rejected_before_server_creation(tmp_path: Path) -> None:
+    with pytest.raises(PolicyError):
+        create_server(config(tmp_path), "unknown")
+
+
+def test_config_load_uses_one_project_contract(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    path = tmp_path / "gateway.json"
+    path.write_text(
+        json.dumps(
+            {
+                "stateDir": str(tmp_path / "state"),
+                "projects": {
+                    "fixture": {
+                        "path": str(project),
+                        "remoteRead": True,
+                        "remoteWrite": False,
+                    }
+                },
             }
-        },
-    }
-
-    first = Gateway(cfg)
-    started = first.run_task({"workspace": "w", "task": "slow"})
-    job_id = started["job_id"]
-
-    second = Gateway(cfg)
-    for _ in range(50):
-        status = second.job_status({"job_id": job_id})
-        if not status["running"]:
-            break
-        time.sleep(0.05)
-    assert status["returncode"] == 0
-    assert "done" in status["stdout_tail"]
+        )
+    )
+    loaded = GatewayConfig.load(path)
+    assert loaded.projects["fixture"].path == project
+    assert loaded.projects["fixture"].remote_read is True
+    assert loaded.projects["fixture"].remote_write is False

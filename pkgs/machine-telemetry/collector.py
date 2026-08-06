@@ -875,6 +875,17 @@ def insert_cgroup_memory_stats(
 ) -> None:
     if not rows:
         return
+    normalized_rows = []
+    for row in rows:
+        normalized = dict(row)
+        for column in (
+            "memory_events_high",
+            "memory_events_max",
+            "memory_events_oom",
+            "memory_events_oom_kill",
+        ):
+            normalized.setdefault(column, None)
+        normalized_rows.append(normalized)
     conn.executemany(
         """
         INSERT INTO cgroup_memory_sample (
@@ -900,7 +911,7 @@ def insert_cgroup_memory_stats(
           :memory_events_oom_kill
         )
         """,
-        rows,
+        normalized_rows,
     )
 
 
