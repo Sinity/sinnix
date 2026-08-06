@@ -44,6 +44,7 @@
         tunnelId = "tunnel_6a2eb972c3bc8191be437670f455ebd9";
       };
     };
+    ops-reducer.enable = true;
     transmission = {
       enable = true;
       autoStart = true;
