@@ -249,7 +249,7 @@ event() {
     '{schema_version:2,at:$at,job_id:$job_id,lifecycle:$lifecycle,scope_unit:$scope,cgroup:$cgroup,exit_status:(if $status == "" then null else ($status|tonumber) end)}' >>"$events"
   chmod 0600 "$events"
   if [[ ${SINNIX_AGENT_JOURNAL:-1} == 1 ]] && command -v logger >/dev/null 2>&1; then
-    printf 'MESSAGE=agent job %s entered %s\nSINNIX_JOB_ID=%s\nSINNIX_JOB_LIFECYCLE=%s\nSINNIX_SCOPE_UNIT=%s\nSINNIX_CGROUP=%s\n' \
+    printf 'SYSLOG_IDENTIFIER=sinnix-agent-job\nMESSAGE=agent job %s entered %s\nSINNIX_JOB_ID=%s\nSINNIX_JOB_LIFECYCLE=%s\nSINNIX_SCOPE_UNIT=%s\nSINNIX_CGROUP=%s\n' \
       "$job_id" "$lifecycle" "$job_id" "$lifecycle" "${SINNIX_AGENT_SCOPE_UNIT:-${scope_unit}}" "$scope_cgroup" |
       logger --journald 2>/dev/null || true
   fi

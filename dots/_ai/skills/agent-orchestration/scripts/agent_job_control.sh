@@ -114,6 +114,28 @@ live_scope_json() {
   fi
 }
 
+record_terminal_event() {
+  local source_manifest="$1"
+  local lifecycle="$2"
+  local exit_status="$3"
+  local event_path="${source_manifest%.json}.events.jsonl"
+  local event_json
+  event_json="$(jq -cn \
+    --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --arg job_id "$(jq -r '.job_id' "${source_manifest}")" \
+    --arg lifecycle "${lifecycle}" \
+    --arg scope "$(jq -r '.launcher.scope_unit // ""' "${source_manifest}")" \
+    --arg cgroup "$(jq -r '.launcher.cgroup // ""' "${source_manifest}")" \
+    --argjson exit_status "${exit_status}" \
+    '{schema_version:2,at:$at,job_id:$job_id,lifecycle:$lifecycle,scope_unit:$scope,cgroup:$cgroup,exit_status:$exit_status}')"
+  printf '%s\n' "${event_json}" >>"${event_path}"
+  chmod 0600 "${event_path}"
+  if [[ ${SINNIX_AGENT_JOURNAL:-1} == 1 ]] && command -v logger >/dev/null 2>&1; then
+    jq -r '"SYSLOG_IDENTIFIER=sinnix-agent-job\nMESSAGE=agent job \(.job_id) entered \(.lifecycle)\nSINNIX_JOB_ID=\(.job_id)\nSINNIX_JOB_LIFECYCLE=\(.lifecycle)\nSINNIX_SCOPE_UNIT=\(.scope_unit)\nSINNIX_CGROUP=\(.cgroup)"' <<<"${event_json}" \
+      | logger --journald 2>/dev/null || true
+  fi
+}
+
 reconcile_terminal_manifest() {
   local source_manifest="$1"
   local live="$2"
@@ -140,6 +162,7 @@ reconcile_terminal_manifest() {
     "${source_manifest}" >"${tmp}"
   chmod 0600 "${tmp}"
   mv -f "${tmp}" "${source_manifest}"
+  record_terminal_event "${source_manifest}" "${terminal}" "${exit_status}"
 }
 
 job_status() {
@@ -235,6 +258,7 @@ case "${command}" in
     jq --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.lifecycle="cancelled" | .updated_at=$at | .exit_status=143' "${manifest}" >"${tmp}"
     chmod 0600 "${tmp}"
     mv -f "${tmp}" "${manifest}"
+    record_terminal_event "${manifest}" cancelled 143
     printf '{"job_id":"%s","cancelled":true,"already_terminal":false}\n' "${job_id}"
     ;;
 esac

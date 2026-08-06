@@ -234,6 +234,7 @@ FAKE_SYSTEMD_PID="${manifest_pid}" \
   SINNIX_AGENT_PROC_ROOT="${tmp}/proc" \
   "${control}" --state-dir "${tmp}/state" interrupt --job job-hold
 [[ -e ${tmp}/stopped ]]
+[[ $(jq -sr '[.[] | select(.lifecycle == "cancelled")][-1].exit_status' "${tmp}/state/job-hold.events.jsonl") == 143 ]]
 
 # A systemd deadline can terminate the scope before the runner writes its final
 # state. Status is the reconciliation boundary for the shared manifest.
@@ -247,6 +248,7 @@ FAKE_ACTIVE_STATE=inactive FAKE_SUB_STATE=dead FAKE_RESULT=timeout \
   "${control}" --state-dir "${tmp}/state" status --job job-timeout \
   | jq -e '.lifecycle == "timed_out" and .exit_status == 124 and .live.Result == "timeout"' >/dev/null
 [[ $(jq -r .lifecycle "${tmp}/state/job-timeout.json") == timed_out ]]
+[[ $(jq -sr '[.[] | select(.lifecycle == "timed_out")][-1].exit_status' "${tmp}/state/job-timeout.events.jsonl") == 124 ]]
 
 # Status remains readable during the accepted/starting phase, before the
 # cancellation identity has a cgroup attestation.
