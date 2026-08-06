@@ -100,6 +100,11 @@ mkServiceModule {
         set -euo pipefail
         ${agentController} --state-dir ${lib.escapeShellArg "${cfg.stateDir}/jobs"} list >/dev/null
       '';
+      stateMigration = pkgs.writeShellScript "sinnix-agent-gateway-state-migration" ''
+        set -euo pipefail
+        ${gatewayBin} --config ${configFile} migrate-state --source ${lib.escapeShellArg legacyStateDir} >/dev/null
+        ${stateReconcile}
+      '';
     in
     {
       assertions = [
@@ -194,15 +199,24 @@ mkServiceModule {
       };
 
       home-manager.users.${userName} = {
-        home.activation.agentGatewayStateMigration = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-          run ${gatewayBin} --config ${configFile} migrate-state --source ${lib.escapeShellArg legacyStateDir} >/dev/null
-          run ${agentController} --state-dir ${lib.escapeShellArg "${cfg.stateDir}/jobs"} list >/dev/null
-        '';
+        systemd.user.services.sinnix-agent-gateway-migrate = {
+          Unit.Description = "Archive legacy Sinnix agent gateway state";
+          Service = {
+            Type = "oneshot";
+            ExecStart = stateMigration;
+            UMask = "0077";
+          };
+          Install.WantedBy = [ "default.target" ];
+        };
         systemd.user.services.sinnix-agent-gateway-tunnel = lib.mkIf cfg.tunnel.enable {
           Unit = {
             Description = "OpenAI Secure MCP Tunnel to Sinnix remote-readonly gateway";
-            After = [ "network-online.target" ];
+            After = [
+              "network-online.target"
+              "sinnix-agent-gateway-migrate.service"
+            ];
             Wants = [ "network-online.target" ];
+            Requires = [ "sinnix-agent-gateway-migrate.service" ];
             ConditionPathExists = cfg.tunnel.runtimeKeyFile;
             StartLimitIntervalSec = 300;
             StartLimitBurst = 8;
