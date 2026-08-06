@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .runtime_inventory import resource_class_from_cgroup
+from .runtime_inventory import resource_class_from_cgroup, workload_for_cgroup
 from .sources.xtask import infer_sinex_resource_class
 from .util import normalize_timestamp
 
@@ -205,6 +205,7 @@ def build_workload_rows(
                 "resource_class": infer_resource_class_from_cgroup(
                     proc.get("cgroup") or ""
                 ),
+                "workload": workload_for_cgroup(proc.get("cgroup") or ""),
                 "metrics": proc,
                 "gaps": gaps,
             }

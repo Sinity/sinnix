@@ -9,6 +9,7 @@ from ..runtime_inventory import (
     managed_units,
     observed_slices,
     resource_class_for_unit,
+    workload_for_unit,
 )
 from ..util import int_or_none, run_cmd, split_props, words
 
@@ -116,6 +117,7 @@ def unit_row(unit: str, manager: str, props: dict[str, str]) -> dict[str, Any]:
         "control_group": props.get("ControlGroup") or None,
         "slice": props.get("Slice") or None,
         "resource_class": resource_class_for_unit(unit),
+        "workload": workload_for_unit(unit),
         "policy": {
             "memory_current": props.get("MemoryCurrent"),
             "memory_swap_current": props.get("MemorySwapCurrent"),

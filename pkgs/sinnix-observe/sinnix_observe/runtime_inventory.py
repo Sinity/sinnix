@@ -70,6 +70,37 @@ def resource_class_for_unit(unit: str) -> str | None:
     return None
 
 
+def workload_for_unit(unit: str) -> dict[str, Any]:
+    for surface in surfaces().values():
+        if surface.get("unit") == unit:
+            workload = surface.get("workload")
+            return dict(workload) if isinstance(workload, dict) else {"class": "unknown"}
+    return {
+        "kind": "unknown",
+        "lifecycle": "unknown",
+        "expendability": "unknown",
+        "operatorProtection": "unknown",
+        "class": "unknown",
+        "source": "unknown",
+    }
+
+
+def workload_for_cgroup(cgroup: str) -> dict[str, Any]:
+    for surface in surfaces().values():
+        unit = str(surface.get("unit") or "")
+        if unit and unit in cgroup:
+            workload = workload_for_unit(unit)
+            return {**workload, "source": "unit", "unit": unit}
+    return {
+        "kind": "unknown",
+        "lifecycle": "unknown",
+        "expendability": "unknown",
+        "operatorProtection": "unknown",
+        "class": "unknown",
+        "source": "unknown",
+    }
+
+
 def cgroup_segments(cgroup: str) -> set[str]:
     return {segment for segment in cgroup.split("/") if segment}
 

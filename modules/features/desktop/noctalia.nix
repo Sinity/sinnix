@@ -45,6 +45,10 @@ mkFeatureModule {
         manager = "user";
         resourceClass = "desktop-shell";
         workload = {
+          kind = "frontend";
+          lifecycle = "persistent";
+          expendability = "protected";
+          operatorProtection = "operator";
           class = "interactive";
           rationale = "Visible desktop shell must remain responsive while remaining cgroup-containable.";
           processMatchers = [ "noctalia" ];
