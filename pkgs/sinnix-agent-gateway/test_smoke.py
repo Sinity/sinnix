@@ -17,7 +17,9 @@ from sinnix_agent_gateway.app import Runtime, create_server
 from sinnix_agent_gateway.capabilities import PolicyError
 from sinnix_agent_gateway.cli import build_manifest, migrate_legacy
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
+from sinnix_agent_gateway.jobs import JobError
 from sinnix_agent_gateway.projects import ProjectError
+from sinnix_agent_gateway.schemas import AgentLaunchRequest
 
 
 def config(tmp_path: Path, *, remote_write: bool = False) -> GatewayConfig:
@@ -261,6 +263,28 @@ def test_gateway_status_uses_shared_native_controller(tmp_path: Path) -> None:
     assert status["lifecycle"] == "timed_out"
     assert status["live"]["Result"] == "timeout"
     assert status["live"]["MemoryHigh"] == "2G"
+
+
+def test_gateway_rejects_runner_job_id_collision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    job_id = "00000000-0000-4000-8000-000000000001"
+    runner = tmp_path / "runner"
+    runner.write_text("#!/bin/sh\nexit 2\n")
+    runner.chmod(0o700)
+    cfg = dataclasses.replace(config(tmp_path), agent_runner=runner)
+    runtime = Runtime.create(cfg, "local-agent-control")
+    old_prompt = runtime.jobs.root / f"{job_id}.prompt.md"
+    old_prompt.write_text("original")
+    (runtime.jobs.root / f"{job_id}.json").write_text(
+        json.dumps({"schema_version": 2, "job_id": job_id, "launch_id": "original"})
+    )
+    monkeypatch.setattr("sinnix_agent_gateway.jobs.uuid.uuid4", lambda: job_id)
+    with pytest.raises(JobError, match="collision"):
+        runtime.jobs.launch_agent(
+            AgentLaunchRequest(project_id="fixture", prompt="new", backend="codex")
+        )
+    assert old_prompt.read_text() == "original"
 
 
 def test_agent_environment_is_explicitly_allowlisted(
