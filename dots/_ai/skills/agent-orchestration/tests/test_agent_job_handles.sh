@@ -52,10 +52,11 @@ while [[ $# -gt 0 ]]; do
     *) shift ;;
   esac
 done
-cat >/dev/null
+payload="$(cat)"
 printf 'fake final\n' >"${last}"
-if [[ ${FAKE_CODEX_HOLD:-0} == 1 ]]; then sleep 30; fi
-exit "${FAKE_CODEX_EXIT:-0}"
+if [[ $payload == *hold* ]]; then sleep 30; fi
+if [[ $payload == *fail* ]]; then exit 23; fi
+exit 0
 EOF
 cat >"${tmp}/bin/grok-sinnix" <<'EOF'
 #!/usr/bin/env bash
@@ -163,7 +164,8 @@ FAKE_SYSTEMD_CGROUP=/fake/sinnix-agent-job-job-one.scope \
   SINNIX_AGENT_SYSTEMCTL="${tmp}/bin/systemctl" "${control}" --state-dir "${tmp}/state" status --job job-one |
   jq -e '.live.MemoryHigh == "2G" and .live.MemoryMax == "3G" and .live.CPUWeight == "200" and .live.IOWeight == "300"' >/dev/null
 
-if FAKE_CODEX_EXIT=23 run_job job-fail "${tmp}/prompt.prompt"; then
+printf 'fail\n' >"${tmp}/fail.prompt"
+if run_job job-fail "${tmp}/fail.prompt"; then
   echo "failing backend unexpectedly succeeded" >&2
   exit 1
 fi
@@ -175,7 +177,7 @@ if run_job job-one "${tmp}/prompt.prompt"; then
 fi
 
 env -u SINNIX_AGENT_SCOPED -u SINNIX_AGENT_SCOPE_UNIT -u SINNIX_AGENT_SCOPE_CGROUP \
-  PATH="${tmp}/bin:${PATH}" SINNIX_AGENT_SCOPE_EXEC="${tmp}/bin/scope-exec" FAKE_CODEX_HOLD=1 \
+  PATH="${tmp}/bin:${PATH}" SINNIX_AGENT_SCOPE_EXEC="${tmp}/bin/scope-exec" \
   FAKE_SCOPE_RECEIPT_DIR="${tmp}/scope-receipts" \
   "${runner}" --job-id job-hold --job-state-dir "${tmp}/state" --agent codex --model fake \
   --workdir "${tmp}/worktree" --prompt-file "${tmp}/hold.prompt" \
