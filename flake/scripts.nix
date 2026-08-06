@@ -209,6 +209,8 @@ let
     sinnix-observe = pkgs.callPackage ../pkgs/sinnix-observe/pkg.nix {
       inherit defaultRuntimeInventoryJson;
     };
+
+    sinnix-ops-reducer = pkgs.callPackage ../pkgs/sinnix-ops-reducer/pkg.nix { };
   };
 
   packageSet = scriptPackages // externalPackages;
