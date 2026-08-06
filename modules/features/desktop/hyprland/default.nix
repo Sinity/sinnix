@@ -265,7 +265,7 @@ in
               decoration = {
                 rounding = 10;
                 active_opacity = 1.0;
-                inactive_opacity = 0.75;
+                inactive_opacity = 1.0;
                 dim_inactive = false;
                 dim_strength = 0.0;
 
