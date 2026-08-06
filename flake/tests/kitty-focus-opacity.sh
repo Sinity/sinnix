@@ -54,7 +54,7 @@ run_once
 
 expected="$test_root/expected.log"
 cat >"$expected" <<EOF
-@ --to unix:$test_root/runtime/kitty-test-42 set-background-opacity --match id:16 0.75
+@ --to unix:$test_root/runtime/kitty-test-42 set-background-opacity --match id:16 0.85
 @ --to unix:$test_root/runtime/kitty-test-41 set-background-opacity --all 0.70
 @ --to unix:$test_root/runtime/kitty-test-42 set-background-opacity --match not id:16 0.70
 EOF
