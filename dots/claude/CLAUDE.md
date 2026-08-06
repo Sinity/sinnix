@@ -237,8 +237,8 @@ Prefer the `sinnix-*` helpers for browser/desktop/window/terminal perception and
 control. Use `claude-browser`/`codex-browser` only when Chrome DevTools MCP
 capabilities are specifically needed. Load the `desktop-control-plane` skill
 when a task needs recipes, screenshots, HDR handling, or careful GUI
-interaction. Run `sinnix-agent-status` when you need a quick live probe of
-available control surfaces.
+interaction. Run `sinnix-observe` when you need a live, correlated probe of
+runtime and control surfaces.
 
 ### Agent Runtime Control
 

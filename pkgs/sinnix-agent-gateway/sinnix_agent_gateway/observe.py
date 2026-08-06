@@ -36,13 +36,13 @@ class ObserveService:
             output.seek(0)
             data = output.read(self.config.max_result_bytes + 1)
         if result.returncode != 0:
-            return {"available": False, "reason": "sinnix-observe failed"}
+            return {"available": False, "failure_class": "collector_failed", "reason": "sinnix-observe failed"}
         if len(data) > self.config.max_result_bytes:
-            return {"available": False, "reason": "sinnix-observe exceeded response bound"}
+            return {"available": False, "failure_class": "response_bound", "reason": "sinnix-observe exceeded response bound"}
         try:
             return {"available": True, "report": json.loads(data)}
         except json.JSONDecodeError:
-            return {"available": False, "reason": "sinnix-observe returned malformed JSON"}
+            return {"available": False, "failure_class": "malformed_report", "reason": "sinnix-observe returned malformed JSON"}
 
     def gateway_status(self, profile: str, capability_contract_hash: str) -> dict[str, Any]:
         self.principal.require(Capability.MACHINE_READ)

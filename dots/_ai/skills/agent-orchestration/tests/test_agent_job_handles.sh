@@ -137,27 +137,27 @@ run_backend_job antigravity job-antigravity
 
 [[ -f ${tmp}/state/job-one.json && -f ${tmp}/state/job-two.json ]]
 [[ -f ${tmp}/output/job-one.log && -f ${tmp}/output/job-one.final ]]
-jq -e '.backend == "grok" and .lifecycle == "completed"' "${tmp}/state/job-grok.json" >/dev/null
-jq -e '.backend == "antigravity" and .lifecycle == "completed"' "${tmp}/state/job-antigravity.json" >/dev/null
+jq -e '.schema_version == 2 and .backend == "grok" and .lifecycle == "succeeded"' "${tmp}/state/job-grok.json" >/dev/null
+jq -e '.schema_version == 2 and .backend == "antigravity" and .lifecycle == "succeeded"' "${tmp}/state/job-antigravity.json" >/dev/null
 grep -Fxq 'fake grok final' "${tmp}/output/job-grok.final"
 grep -Fxq 'fake antigravity final' "${tmp}/output/job-antigravity.final"
 jq -e --arg repo "${tmp}/repo" --arg worktree "${tmp}/worktree" '
-  .job_id == "job-one" and .lifecycle == "completed" and .exit_status == 0 and
+  .schema_version == 2 and .job_id == "job-one" and .lifecycle == "succeeded" and .exit_status == 0 and
   .repo == $repo and .worktree == $worktree and .backend == "codex" and .model == "fake" and
   (.prompt.sha256 | length == 64) and .artifacts.final != "" and
   .launcher.scope_unit == "sinnix-agent-job-job-one.scope" and
   .launcher.cgroup == "/fake/sinnix-agent-job-job-one.scope"
 ' "${tmp}/state/job-one.json" >/dev/null
 mapfile -t forwarded_properties <"${tmp}/scope-receipts/sinnix-agent-job-job-one.scope"
-[[ ${forwarded_properties[*]} == "MemoryHigh=2G MemoryMax=3G CPUWeight=200 IOWeight=300" ]]
+[[ ${forwarded_properties[*]} == "MemoryHigh=2G MemoryMax=3G CPUWeight=200 IOWeight=300 RuntimeMaxSec=14400" ]]
 
-jq -e '[.[] | .job_id] == ["job-one", "job-two"]' <(
+jq -e '(.jobs | map(.job_id)) as $ids | ($ids | index("job-one")) != null and ($ids | index("job-two")) != null' <(
   FAKE_SYSTEMD_CGROUP=/fake/unused SINNIX_AGENT_SYSTEMCTL="${tmp}/bin/systemctl" \
     "${control}" --state-dir "${tmp}/state" list
 ) >/dev/null
 FAKE_MISSING_UNIT=sinnix-agent-job-job-two.scope FAKE_SYSTEMD_CGROUP=/fake/unused \
   SINNIX_AGENT_SYSTEMCTL="${tmp}/bin/systemctl" "${control}" --state-dir "${tmp}/state" list |
-  jq -e 'length == 2 and (map(select(.job_id == "job-two"))[0].live.available == false)' >/dev/null
+  jq -e '(.jobs | map(select(.job_id == "job-two"))[0].live.available) == false' >/dev/null
 
 FAKE_SYSTEMD_CGROUP=/fake/sinnix-agent-job-job-one.scope \
   SINNIX_AGENT_SYSTEMCTL="${tmp}/bin/systemctl" "${control}" --state-dir "${tmp}/state" status --job job-one |
@@ -188,6 +188,7 @@ done
 [[ $(jq -r .lifecycle "${tmp}/state/job-hold.json") == running ]]
 manifest_pid="$(jq -r .launcher.pid "${tmp}/state/job-hold.json")"
 mkdir -p "${tmp}/proc/${manifest_pid}"
+printf 'x x x x x x x x x x x x x x x x x x x %s\n' "$(jq -r .launcher.proc_start "${tmp}/state/job-hold.json")" >"${tmp}/proc/${manifest_pid}/stat"
 printf '0::/wrong/cgroup\n' >"${tmp}/proc/${manifest_pid}/cgroup"
 ln -s "${tmp}/worktree" "${tmp}/proc/${manifest_pid}/cwd"
 

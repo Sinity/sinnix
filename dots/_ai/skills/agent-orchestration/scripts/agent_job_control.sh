@@ -4,6 +4,7 @@ set -euo pipefail
 state_dir="${SINNIX_AGENT_JOB_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/sinnix/agent-jobs}"
 systemctl_bin="${SINNIX_AGENT_SYSTEMCTL:-systemctl}"
 proc_root="${SINNIX_AGENT_PROC_ROOT:-/proc}"
+archive_dir="${state_dir}/legacy"
 
 usage() {
   cat <<'EOF'
@@ -54,8 +55,9 @@ require_manifest() {
   manifest="$(manifest_for "${job_id}")"
   [[ -r ${manifest} ]] || { echo "unknown job ID: ${job_id}" >&2; exit 1; }
   jq -e --arg job_id "${job_id}" '
-    .schema_version == 1 and .job_id == $job_id and
+    .schema_version == 2 and .job_id == $job_id and
     (.launcher.pid | type == "number") and
+    (.launcher.proc_start | type == "string" and length > 0) and
     (.launcher.scope_unit | type == "string" and length > 0) and
     (.launcher.cgroup | type == "string" and length > 0) and
     (.worktree | type == "string" and length > 0)
@@ -63,6 +65,24 @@ require_manifest() {
     echo "refusing malformed or unattested manifest: ${manifest}" >&2
     exit 1
   }
+}
+
+proc_start() {
+  local stat
+  stat="$(cat "${proc_root}/$1/stat" 2>/dev/null || true)"
+  printf '%s\n' "${stat##*) }" | awk '{print $20}'
+}
+
+migrate_or_archive_legacy() {
+  mkdir -p -m 0700 "$archive_dir"
+  for source in "$state_dir"/*.json; do
+    [[ -e $source ]] || continue
+    if jq -e '.schema_version == 1' "$source" >/dev/null 2>&1; then
+      # PID-only records cannot be upgraded safely because start-time and
+      # cgroup attestations were never recorded. Preserve evidence privately.
+      mv "$source" "$archive_dir/$(basename "$source").legacy"
+    fi
+  done
 }
 
 live_scope_json() {
@@ -98,22 +118,23 @@ case "${command}" in
     umask 077
     mkdir -p -m 0700 "${state_dir}"
     chmod 0700 "${state_dir}"
+    migrate_or_archive_legacy
     shopt -s nullglob
     manifests=("${state_dir}"/*.json)
     if [[ ${#manifests[@]} -eq 0 ]]; then
-      printf '{"jobs":[],"malformed_records":[]}\n'
+      printf '{"jobs":[],"malformed_records":[],"archived_legacy_records":[]}\n'
     else
       results=()
       malformed=()
       for source_manifest in "${manifests[@]}"; do
-        if jq -e '.schema_version == 1 and (.job_id | type == "string")' "${source_manifest}" >/dev/null 2>&1; then
+        if jq -e '.schema_version == 2 and (.job_id | type == "string")' "${source_manifest}" >/dev/null 2>&1; then
           results+=("$(job_status "${source_manifest}")")
         else
           malformed+=("$(basename "${source_manifest}")")
         fi
       done
-      printf '%s\n' "${results[@]}" | jq -s --argjson malformed "$(printf '%s\n' "${malformed[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')" \
-        '{jobs: sort_by(.created_at), malformed_records: $malformed}'
+      printf '%s\n' "${results[@]}" | jq -s --argjson malformed "$(printf '%s\n' "${malformed[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')" --argjson archived "$(find "$archive_dir" -maxdepth 1 -type f -name '*.legacy' -printf '%f\n' 2>/dev/null | jq -Rsc 'split("\n") | map(select(length > 0))')" \
+        '{jobs: sort_by(.created_at), malformed_records: $malformed, archived_legacy_records: $archived}'
     fi
     ;;
   status)
@@ -128,7 +149,7 @@ case "${command}" in
     recorded_cgroup="$(jq -r '.launcher.cgroup' "${manifest}")"
     worktree="$(jq -r '.worktree' "${manifest}")"
     lifecycle="$(jq -r '.lifecycle' "${manifest}")"
-    [[ ${lifecycle} == starting || ${lifecycle} == running ]] || {
+    [[ ${lifecycle} == accepted || ${lifecycle} == starting || ${lifecycle} == running ]] || {
       echo "refusing to interrupt non-live job ${job_id} (${lifecycle})" >&2
       exit 1
     }
@@ -137,6 +158,7 @@ case "${command}" in
       exit 1
     }
     kill -0 "${pid}" 2>/dev/null || { echo "refusing stale job PID: ${pid}" >&2; exit 1; }
+    [[ "$(proc_start "${pid}")" == "$(jq -r '.launcher.proc_start' "${manifest}")" ]] || { echo "refusing PID start-time mismatch for job ${job_id}" >&2; exit 1; }
     [[ -r ${proc_root}/${pid}/cgroup ]] || { echo "refusing unreadable cgroup for PID: ${pid}" >&2; exit 1; }
     grep -Fxq "0::${recorded_cgroup}" "${proc_root}/${pid}/cgroup" || {
       echo "refusing cgroup mismatch for job ${job_id}" >&2
@@ -160,6 +182,12 @@ case "${command}" in
       echo "refusing systemd PID mismatch for job ${job_id}" >&2
       exit 1
     }
+    tmp="$(mktemp "${manifest}.cancel.XXXXXX")"
+    jq '.lifecycle = "cancel_requested" | .updated_at = (now | todateiso8601)' "${manifest}" >"${tmp}"
+    chmod 0600 "$tmp"
+    mv -f "$tmp" "${manifest}"
     "${systemctl_bin}" --user stop "${unit}"
+    # Repeated cancel is idempotent. Terminal state is persisted by the runner
+    # when its scope receives the stop signal.
     ;;
 esac

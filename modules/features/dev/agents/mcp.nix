@@ -320,10 +320,6 @@ mkFeatureModule {
               source = config.lib.file.mkOutOfStoreSymlink "${desktopControlScripts}/screenshot-color-lab.sh";
               force = true;
             };
-            ".local/bin/sinnix-agent-status" = {
-              source = "${scriptPkgs.sinnix-agent-status}/bin/sinnix-agent-status";
-              force = true;
-            };
             ".local/bin/mcp-lynchpin" = {
               executable = true;
               force = true;

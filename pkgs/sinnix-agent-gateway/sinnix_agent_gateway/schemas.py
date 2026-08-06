@@ -26,6 +26,7 @@ class AgentLaunchRequest(GatewayModel):
     job_role: str | None = Field(default=None, max_length=512)
     work_item: str | None = Field(default=None, max_length=512)
     timeout_seconds: int = Field(default=14_400, ge=30, le=86_400)
+    credential_profile: str = Field(default="subscription", pattern="^(subscription|api)$")
 
 
 JsonObject = dict[str, Any]

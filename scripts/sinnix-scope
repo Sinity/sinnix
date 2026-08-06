@@ -99,7 +99,7 @@ if [ "${1:-}" = "--internal-supervise" ]; then
 fi
 
 if [ "$#" -lt 3 ]; then
-  echo "usage: sinnix-scope <class> [--unit <name>] [--agent-property <Name=Value>] -- <command> [args...]" >&2
+  echo "usage: sinnix-scope <class> [--unit <name>] [--agent-property <Name=Value>] [--job-id <uuid>] [--project <id>] [--work-item <id>] -- <command> [args...]" >&2
   exit 64
 fi
 
@@ -108,6 +108,9 @@ shift
 
 unit_override=""
 agent_properties=()
+job_id="${SINNIX_JOB_ID:-}"
+project_id="${SINNIX_PROJECT_ID:-}"
+work_item="${SINNIX_WORK_ITEM:-}"
 
 validate_agent_property() {
   local property="$1"
@@ -163,6 +166,18 @@ while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
       agent_properties+=("$property")
       shift 2
       ;;
+    --job-id)
+      job_id="${2:?sinnix-scope: --job-id requires a value}"
+      shift 2
+      ;;
+    --project)
+      project_id="${2:?sinnix-scope: --project requires a value}"
+      shift 2
+      ;;
+    --work-item)
+      work_item="${2:?sinnix-scope: --work-item requires a value}"
+      shift 2
+      ;;
     *)
       echo "sinnix-scope: unknown option: $1" >&2
       exit 64
@@ -171,7 +186,7 @@ while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
 done
 
 if [ "$#" -lt 2 ] || [ "$1" != "--" ]; then
-  echo "usage: sinnix-scope <class> [--unit <name>] [--agent-property <Name=Value>] -- <command> [args...]" >&2
+  echo "usage: sinnix-scope <class> [--unit <name>] [--agent-property <Name=Value>] [--job-id <uuid>] [--project <id>] [--work-item <id>] -- <command> [args...]" >&2
   exit 64
 fi
 shift
@@ -183,7 +198,7 @@ elif [ -r /etc/sinnix/runtime-inventory.json ]; then
 else
   inventory_file="/run/current-system/etc/sinnix/runtime-inventory.json"
 fi
-fallback_classes="agent build background nix-build"
+fallback_classes="agent build background nix-build heavy"
 
 inventory_value() {
   local query="$1"
@@ -223,6 +238,7 @@ case "$class" in
   build) fallback_slice="build.slice" ;;
   background) fallback_slice="background.slice" ;;
   nix-build) fallback_slice="nix-build.slice" ;;
+  heavy) fallback_slice="build.slice" ;;
   *) fallback_slice="$class.slice" ;;
 esac
 
@@ -234,6 +250,15 @@ ionice_priority="$(inventory_value ".commandClasses.\"$class\".ionicePriority" "
 scoped_command=("$@")
 property_args=()
 unscoped_background_xtask=0
+
+lease_required=0
+lease_wait_seconds=0
+lease_state_subdir="sinnix/heavy-lease"
+if inventory_readable; then
+  lease_required="$(inventory_value ".commandClasses.\"$class\".lease.required" "false")"
+  lease_wait_seconds="$(inventory_value ".commandClasses.\"$class\".lease.waitSeconds" "0")"
+  lease_state_subdir="$(inventory_value ".commandClasses.\"$class\".lease.stateSubdir" "$lease_state_subdir")"
+fi
 
 command_base="$(basename -- "${1:-}")"
 if [ "$command_base" = "xtask" ]; then
@@ -274,6 +299,20 @@ elif [ "$class" = build ]; then
   : "${NIX_BUILD_CORES:=12}"
   : "${SCCACHE_IDLE_TIMEOUT:=10}"
   export CARGO_BUILD_JOBS CARGO_INCREMENTAL CMAKE_BUILD_PARALLEL_LEVEL MAKEFLAGS NIX_BUILD_CORES SCCACHE_IDLE_TIMEOUT
+fi
+
+if [ "$lease_required" = true ] && [ -z "${SINNIX_HEAVY_LEASE_TOKEN:-}" ]; then
+  lease_bin="${SINNIX_HEAVY_LEASE_BIN:-$(command -v sinnix-heavy-lease 2>/dev/null || true)}"
+  if [ -z "$lease_bin" ]; then
+    echo "sinnix-scope: lease-required class $class has no sinnix-heavy-lease command" >&2
+    exit 125
+  fi
+  lease_state_dir="${SINNIX_HEAVY_LEASE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/$lease_state_subdir}"
+  scoped_command=("$lease_bin" --state-dir "$lease_state_dir" --wait-seconds "$lease_wait_seconds")
+  [[ -z "$job_id" ]] || scoped_command+=(--job-id "$job_id")
+  [[ -z "$project_id" ]] || scoped_command+=(--project "$project_id")
+  [[ -z "$work_item" ]] || scoped_command+=(--work-item "$work_item")
+  scoped_command+=(-- "$@")
 fi
 
 # Explicit job limits are overrides, so append them after inventory defaults.

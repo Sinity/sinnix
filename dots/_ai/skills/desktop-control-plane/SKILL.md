@@ -26,8 +26,8 @@ This skill provides:
 
 The scripts are installed on Sinnix as stable `~/.local/bin/sinnix-*` commands
 for ambient use by agents. The source files below remain the maintenance copy.
-Run `sinnix-agent-status` first when you need a quick live inventory of browser,
-desktop, screenshot, keyboard, terminal-control, and evidence availability.
+Run `sinnix-observe` first when you need a correlated runtime inventory. Use
+the individual control helpers below to probe browser and desktop availability.
 For browser work, prefer `sinnix-chrome-control --target live|private|private-visible`.
 Use the browser MCP profile (`claude-browser`/`codex-browser`) only when the
 shell CDP helper is too small for the task.
