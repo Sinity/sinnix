@@ -97,14 +97,19 @@ if [[ $2 == show ]]; then
     exit 1
   fi
   cat <<OUT
-ActiveState=active
-SubState=running
+ActiveState=${FAKE_ACTIVE_STATE:-active}
+SubState=${FAKE_SUB_STATE:-running}
 MainPID=${FAKE_SYSTEMD_PID:-0}
 ControlGroup=${FAKE_SYSTEMD_CGROUP:?missing FAKE_SYSTEMD_CGROUP}
 MemoryHigh=2G
 MemoryMax=3G
+MemoryCurrent=1G
+MemoryPeak=1536M
 CPUWeight=200
 IOWeight=300
+RuntimeMaxUSec=600000000
+CPUUsageNSec=42000000
+Result=${FAKE_RESULT:-success}
 OUT
 elif [[ $2 == stop ]]; then
   : "${FAKE_STOP_MARKER:?missing FAKE_STOP_MARKER}"
@@ -229,6 +234,19 @@ FAKE_SYSTEMD_PID="${manifest_pid}" \
   SINNIX_AGENT_PROC_ROOT="${tmp}/proc" \
   "${control}" --state-dir "${tmp}/state" interrupt --job job-hold
 [[ -e ${tmp}/stopped ]]
+
+# A systemd deadline can terminate the scope before the runner writes its final
+# state. Status is the reconciliation boundary for the shared manifest.
+jq '.lifecycle="running" | .launcher.scope_unit="sinnix-agent-job-job-timeout.scope"' \
+  "${tmp}/state/job-one.json" >"${tmp}/state/job-timeout.json"
+jq '.job_id="job-timeout"' "${tmp}/state/job-timeout.json" >"${tmp}/state/job-timeout.tmp"
+mv "${tmp}/state/job-timeout.tmp" "${tmp}/state/job-timeout.json"
+FAKE_ACTIVE_STATE=inactive FAKE_SUB_STATE=dead FAKE_RESULT=timeout \
+  FAKE_SYSTEMD_CGROUP=/fake/sinnix-agent-job-job-timeout.scope \
+  SINNIX_AGENT_SYSTEMCTL="${tmp}/bin/systemctl" \
+  "${control}" --state-dir "${tmp}/state" status --job job-timeout \
+  | jq -e '.lifecycle == "timed_out" and .exit_status == 124 and .live.Result == "timeout"' >/dev/null
+[[ $(jq -r .lifecycle "${tmp}/state/job-timeout.json") == timed_out ]]
 
 # Exercise the production bridge: options must reach sinnix-scope, and the
 # attestation environment must reach the child command.

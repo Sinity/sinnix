@@ -92,7 +92,9 @@ live_scope_json() {
     "${systemctl_bin}" --user show "${unit}" \
       --property=ActiveState --property=SubState --property=MainPID \
       --property=ControlGroup --property=MemoryHigh --property=MemoryMax \
-      --property=CPUWeight --property=IOWeight 2>/dev/null
+      --property=MemoryCurrent --property=MemoryPeak \
+      --property=CPUWeight --property=IOWeight --property=RuntimeMaxUSec \
+      --property=CPUUsageNSec --property=Result 2>/dev/null
   )"; then
     jq -Rn --arg properties "${properties}" '
       ($properties | split("\n")
@@ -104,12 +106,41 @@ live_scope_json() {
   fi
 }
 
+reconcile_terminal_manifest() {
+  local source_manifest="$1"
+  local live="$2"
+  local lifecycle active_state result terminal exit_status tmp
+  lifecycle="$(jq -r '.lifecycle' "${source_manifest}")"
+  [[ ${lifecycle} == running || ${lifecycle} == cancel_requested ]] || return 0
+  active_state="$(jq -r '.ActiveState // empty' <<<"${live}")"
+  [[ ${active_state} == inactive || ${active_state} == failed ]] || return 0
+  result="$(jq -r '.Result // empty' <<<"${live}")"
+  if [[ ${lifecycle} == cancel_requested ]]; then
+    terminal=cancelled
+    exit_status=143
+  elif [[ ${result} == timeout ]]; then
+    terminal=timed_out
+    exit_status=124
+  else
+    terminal=failed
+    exit_status=1
+  fi
+  tmp="$(mktemp "${source_manifest}.reconcile.XXXXXX")"
+  jq --arg lifecycle "${terminal}" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --argjson exit_status "${exit_status}" \
+    '.lifecycle=$lifecycle | .updated_at=$at | .exit_status=$exit_status' \
+    "${source_manifest}" >"${tmp}"
+  chmod 0600 "${tmp}"
+  mv -f "${tmp}" "${source_manifest}"
+}
+
 job_status() {
   local source_manifest="$1"
   local unit
   unit="$(jq -r '.launcher.scope_unit' "${source_manifest}")"
   local live
   live="$(live_scope_json "${unit}")"
+  reconcile_terminal_manifest "${source_manifest}" "${live}"
   jq --argjson live "${live}" '. + {live: $live}' "${source_manifest}"
 }
 

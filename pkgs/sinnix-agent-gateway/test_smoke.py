@@ -231,6 +231,38 @@ def test_malformed_job_records_are_visible(tmp_path: Path) -> None:
     assert result["malformed_records"][0]["record"] == "broken.json"
 
 
+def test_gateway_status_uses_shared_native_controller(tmp_path: Path) -> None:
+    controller = tmp_path / "agent-job-control"
+    controller.write_text(
+        f"#!{sys.executable}\n"
+        "import json, pathlib, sys\n"
+        "value=json.loads((pathlib.Path(sys.argv[2]) / f'{sys.argv[5]}.json').read_text())\n"
+        "value['lifecycle']='timed_out'\n"
+        "value['live']={'available':True,'Result':'timeout','MemoryHigh':'2G'}\n"
+        "print(json.dumps(value))\n"
+    )
+    controller.chmod(0o700)
+    cfg = dataclasses.replace(config(tmp_path), agent_controller=controller)
+    runtime = Runtime.create(cfg, "local-agent-control")
+    manifest = {
+        "schema_version": 2,
+        "job_id": "deadline-job",
+        "lifecycle": "running",
+        "launcher": {
+            "pid": 1,
+            "proc_start": "1",
+            "scope_unit": "sinnix-agent-job-deadline-job.scope",
+            "cgroup": "/fixture",
+        },
+        "worktree": str(cfg.projects["fixture"].path),
+    }
+    (runtime.jobs.root / "deadline-job.json").write_text(json.dumps(manifest))
+    status = runtime.jobs.status("deadline-job")
+    assert status["lifecycle"] == "timed_out"
+    assert status["live"]["Result"] == "timeout"
+    assert status["live"]["MemoryHigh"] == "2G"
+
+
 def test_agent_environment_is_explicitly_allowlisted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
