@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import select
+import signal
 import subprocess
-import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -54,7 +56,9 @@ class ProjectService:
         self.principal = principal
 
     def _project(self, project_id: str, *, write: bool = False) -> ProjectConfig:
-        self.principal.require(Capability.PROJECT_WRITE if write else Capability.PROJECT_READ)
+        self.principal.require(
+            Capability.PROJECT_WRITE if write else Capability.PROJECT_READ
+        )
         try:
             project = self.config.projects[project_id]
         except KeyError as exc:
@@ -62,7 +66,9 @@ class ProjectService:
         if self.principal.profile.startswith("remote-"):
             allowed = project.remote_write if write else project.remote_read
             if not allowed:
-                raise ProjectError(f"project is unavailable to {self.principal.profile}")
+                raise ProjectError(
+                    f"project is unavailable to {self.principal.profile}"
+                )
         if not project.path.is_dir():
             raise ProjectError(f"project checkout is unavailable: {project_id}")
         return project
@@ -102,7 +108,9 @@ class ProjectService:
             )
         return {"projects": sorted(rows, key=lambda row: row["project_id"])}
 
-    def tree(self, project_id: str, path: str = ".", max_entries: int = 500) -> dict[str, Any]:
+    def tree(
+        self, project_id: str, path: str = ".", max_entries: int = 500
+    ) -> dict[str, Any]:
         project = self._project(project_id)
         root = self._safe_path(project, path, existing=True)
         if not root.is_dir():
@@ -161,7 +169,9 @@ class ProjectService:
                 if used + len(encoded) > max_bytes:
                     remaining = max_bytes - used
                     if remaining:
-                        content.append(encoded[:remaining].decode("utf-8", errors="ignore"))
+                        content.append(
+                            encoded[:remaining].decode("utf-8", errors="ignore")
+                        )
                     truncated = True
                     break
                 content.append(line)
@@ -182,28 +192,60 @@ class ProjectService:
             "LANG": os.environ.get("LANG", "C.UTF-8"),
             "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
         }
-        with tempfile.TemporaryFile() as output:
-            try:
-                result = subprocess.run(
-                    command,
-                    cwd=cwd,
-                    stdin=subprocess.DEVNULL,
-                    stdout=output,
-                    stderr=subprocess.STDOUT,
-                    timeout=timeout,
-                    check=False,
-                    env=safe_env,
+        process = subprocess.Popen(
+            command,
+            cwd=cwd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            env=safe_env,
+            start_new_session=True,
+        )
+        assert process.stdout is not None
+        deadline = time.monotonic() + timeout
+        data = bytearray()
+        bounded = False
+        try:
+            while len(data) <= self.config.max_result_bytes:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(command, timeout)
+                ready, _, _ = select.select([process.stdout], [], [], remaining)
+                if not ready:
+                    raise subprocess.TimeoutExpired(command, timeout)
+                chunk = os.read(
+                    process.stdout.fileno(),
+                    min(65_536, self.config.max_result_bytes + 1 - len(data)),
                 )
-            except subprocess.TimeoutExpired as exc:
-                raise ProjectError("project operation timed out") from exc
-            output.seek(0)
-            data = output.read(self.config.max_result_bytes + 1)
+                if not chunk:
+                    break
+                data.extend(chunk)
+            bounded = len(data) > self.config.max_result_bytes
+            if bounded:
+                if process.poll() is None:
+                    os.killpg(process.pid, signal.SIGTERM)
+                try:
+                    result_code = process.wait(timeout=0.5)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    result_code = process.wait()
+            else:
+                result_code = process.wait(
+                    timeout=max(0.1, deadline - time.monotonic())
+                )
+        except subprocess.TimeoutExpired as exc:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
+            raise ProjectError("project operation timed out") from exc
         text = data[: self.config.max_result_bytes].decode("utf-8", errors="replace")
-        if result.returncode not in (0, 1):
+        if not bounded and result_code not in (0, 1):
             raise ProjectError(text.strip() or "project operation failed")
         return text
 
-    def search(self, project_id: str, query: str, max_matches: int = 200) -> dict[str, Any]:
+    def search(
+        self, project_id: str, query: str, max_matches: int = 200
+    ) -> dict[str, Any]:
         project = self._project(project_id)
         if not query or len(query) > 1000:
             raise ProjectError("query must contain 1-1000 characters")
@@ -242,7 +284,10 @@ class ProjectService:
         command = ["git", "diff", "--no-ext-diff", "--"]
         if ref is not None:
             command = ["git", "diff", "--no-ext-diff", ref, "--"]
-        return {"project_id": project_id, "diff": self._run_bounded(command, project.path)}
+        return {
+            "project_id": project_id,
+            "diff": self._run_bounded(command, project.path),
+        }
 
     def write(self, project_id: str, path: str, content: str) -> dict[str, Any]:
         project = self._project(project_id, write=True)

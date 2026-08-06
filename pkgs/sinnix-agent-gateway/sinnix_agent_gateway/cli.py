@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -32,12 +33,28 @@ async def build_manifest(config: GatewayConfig, profile: str) -> dict[str, Any]:
 def migrate_legacy(config: GatewayConfig, source: Path) -> dict[str, Any]:
     config.initialize_state()
     destination = config.state_dir / "legacy" / "sinnix-agent-gateway"
+    if source.resolve() == config.state_dir.resolve():
+        return {
+            "migrated": False,
+            "reason": "legacy source is the active state directory",
+        }
     if not source.exists():
         return {"migrated": False, "reason": "legacy state absent"}
+    if source.is_symlink():
+        return {"migrated": False, "reason": "legacy state symlinks are refused"}
     if destination.exists():
         return {"migrated": False, "reason": "legacy state already archived"}
     source.rename(destination)
-    destination.chmod(0o700)
+    for root, directories, files in os.walk(destination, followlinks=False):
+        Path(root).chmod(0o700)
+        for name in directories:
+            target = Path(root) / name
+            if not target.is_symlink():
+                target.chmod(0o700)
+        for name in files:
+            target = Path(root) / name
+            if not target.is_symlink() and stat.S_ISREG(target.stat().st_mode):
+                target.chmod(0o600)
     return {"migrated": True, "destination": "legacy/sinnix-agent-gateway"}
 
 
@@ -73,7 +90,9 @@ def main() -> None:
     if command == "serve":
         create_server(config, arguments.profile).run("stdio")
     elif command == "manifest":
-        print(json.dumps(anyio.run(build_manifest, config, arguments.profile), indent=2))
+        print(
+            json.dumps(anyio.run(build_manifest, config, arguments.profile), indent=2)
+        )
     elif command == "info":
         print(
             json.dumps(

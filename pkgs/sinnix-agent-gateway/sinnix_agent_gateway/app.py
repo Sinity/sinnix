@@ -18,7 +18,6 @@ from .projects import ProjectService
 from .redaction import public_error
 from .schemas import AgentLaunchRequest
 
-
 T = TypeVar("T")
 
 READ_ONLY_TOOL = ToolAnnotations(
@@ -74,7 +73,15 @@ class Runtime:
             message = public_error(exc)
             self.audit.append(operation, "error", {"error": message})
             raise ValueError(message) from None
-        self.audit.append(operation, "ok")
+        payload: dict[str, Any] = {}
+        if isinstance(result, dict):
+            for key in ("job_id", "artifact_id", "project_id"):
+                value = result.get(key)
+                if isinstance(value, (str, int, float, bool)):
+                    payload[key] = value
+            if "job_id" in payload:
+                payload["correlation_id"] = payload["job_id"]
+        self.audit.append(operation, "ok", payload)
         return result
 
 
@@ -82,7 +89,9 @@ def _profile_contract(profile: str) -> str:
     principal = Principal.for_profile(profile)
     payload = {
         "profile": profile,
-        "capabilities": sorted(capability.value for capability in principal.capabilities),
+        "capabilities": sorted(
+            capability.value for capability in principal.capabilities
+        ),
     }
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
@@ -260,7 +269,8 @@ def create_server(config: GatewayConfig, profile: str) -> MCPServer:
         def project_write(project_id: str, path: str, content: str) -> dict[str, Any]:
             """Atomically write one project-relative file under remote-operator policy."""
             return runtime.execute(
-                "project_write", lambda: runtime.projects.write(project_id, path, content)
+                "project_write",
+                lambda: runtime.projects.write(project_id, path, content),
             )
 
         @mcp.tool(title="Apply project patch", annotations=DESTRUCTIVE_TOOL)

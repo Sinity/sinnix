@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+from datetime import datetime, timezone
 
 from sinnix_observe import SCHEMA, cli, joins, render, runtime_inventory, util
 from sinnix_observe.sources import (
@@ -228,28 +229,68 @@ def test_cli_collect_report_offline() -> None:
     assert "gaps_summary" in report
 
 
-def test_agent_gateway_correlates_manifest_audit_history_and_quota(tmp_path, monkeypatch) -> None:
+def test_agent_gateway_correlates_manifest_audit_history_and_quota(
+    tmp_path, monkeypatch
+) -> None:
     root = tmp_path / "gateway"
     jobs = root / "jobs"
     audit_dir = root / "audit"
     jobs.mkdir(parents=True)
     audit_dir.mkdir()
     job_id = "00000000-0000-4000-8000-000000000001"
-    (jobs / f"{job_id}.json").write_text(json.dumps({"schema_version": 2, "job_id": job_id, "launcher": {"scope_unit": "sinnix-agent-job-x.scope", "cgroup": "/agent.slice/x"}}))
+    (jobs / f"{job_id}.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "job_id": job_id,
+                "launcher": {
+                    "scope_unit": "sinnix-agent-job-x.scope",
+                    "cgroup": "/agent.slice/x",
+                },
+            }
+        )
+    )
     db = sqlite3.connect(audit_dir / "events.sqlite3")
-    db.execute("create table events(sequence integer,event_id text,occurred_at real,profile text,operation text,outcome text,payload_json text)")
-    db.execute("insert into events values(1,'event-1',1.0,'local-agent-control','agent_launch','ok',?)", (json.dumps({"correlation_id": job_id}),))
-    db.commit(); db.close()
-    history = root / "history.jsonl"
-    history.write_text(json.dumps({"job_id": job_id, "provider_session_id": "session-1"}) + "\n")
+    db.execute(
+        "create table events(sequence integer,event_id text,occurred_at real,profile text,operation text,outcome text,payload_json text)"
+    )
+    db.execute(
+        "insert into events values(1,'event-1',1.0,'local-agent-control','agent_launch','ok',?)",
+        (json.dumps({"correlation_id": job_id}),),
+    )
+    db.commit()
+    db.close()
+    journal = root / "journal.jsonl"
+    journal.write_text(
+        json.dumps({"SINNIX_JOB_ID": job_id, "SINNIX_JOB_LIFECYCLE": "running"}) + "\n"
+    )
+    polylogue = root / "index.db"
+    history_db = sqlite3.connect(polylogue)
+    history_db.execute(
+        "create virtual table messages_fts using fts5(session_id unindexed, text)"
+    )
+    history_db.execute(
+        "insert into messages_fts values('codex-session:session-1', ?)",
+        (f"agent job {job_id}",),
+    )
+    history_db.commit()
+    history_db.close()
     quota = root / "quota.json"
-    quota.write_text(json.dumps({"observed_at": "2026-08-06T00:00:00Z", "remaining": 42}))
+    quota.write_text(
+        json.dumps(
+            {"observed_at": datetime.now(timezone.utc).isoformat(), "remaining": 42}
+        )
+    )
     monkeypatch.setenv("SINNIX_AGENT_GATEWAY_STATE_DIR", str(root))
-    monkeypatch.setenv("SINNIX_AGENT_HISTORY_FILE", str(history))
+    monkeypatch.setenv("SINNIX_AGENT_JOURNAL_FILE", str(journal))
+    monkeypatch.setenv("SINNIX_POLYLOGUE_INDEX_DB", str(polylogue))
     monkeypatch.setenv("SINNIX_AGENT_QUOTA_FILE", str(quota))
     out = agent_gateway.collect_agent_gateway()
     assert out["correlations"][0]["complete"] is True
     assert out["correlations"][0]["cgroup"] == "/agent.slice/x"
+    assert (
+        out["correlations"][0]["polylogue"]["session_id"] == "codex-session:session-1"
+    )
     assert out["quota"]["provenance"] == "observed"
 
 
@@ -262,3 +303,45 @@ def test_agent_gateway_bounds_malformed_sources(tmp_path, monkeypatch) -> None:
     out = agent_gateway.collect_agent_gateway()
     assert out["malformed_records"] == ["broken.json"]
     assert out["quota"]["provenance"] == "inferred"
+
+
+def test_agent_gateway_rejects_stale_quota_as_observation(
+    tmp_path, monkeypatch
+) -> None:
+    root = tmp_path / "gateway"
+    (root / "jobs").mkdir(parents=True)
+    quota = root / "quota.json"
+    quota.write_text(
+        json.dumps({"observed_at": "2020-01-01T00:00:00Z", "remaining": 42})
+    )
+    monkeypatch.setenv("SINNIX_AGENT_GATEWAY_STATE_DIR", str(root))
+    monkeypatch.setenv("SINNIX_AGENT_QUOTA_FILE", str(quota))
+    monkeypatch.setenv("SINNIX_POLYLOGUE_INDEX_DB", str(root / "missing.db"))
+    out = agent_gateway.collect_agent_gateway()
+    assert out["quota"]["provenance"] == "inferred"
+    assert out["quota"]["reason"] == "provider observation is stale"
+
+
+def test_gateway_rows_use_attested_nested_manifest_fields() -> None:
+    rows = joins.build_gateway_rows(
+        {
+            "jobs": [
+                {
+                    "job_id": "j",
+                    "lifecycle": "running",
+                    "launcher": {
+                        "scope_unit": "sinnix-agent-job-j.scope",
+                        "cgroup": "/agent.slice/j",
+                    },
+                    "declared": {"work_item": "sinnix-056.6"},
+                    "resource_overrides": {"MemoryHigh": "2G"},
+                }
+            ],
+            "quota": {},
+        },
+        {},
+    )
+    assert rows[0]["unit"] == "sinnix-agent-job-j.scope"
+    assert rows[0]["cgroup"] == "/agent.slice/j"
+    assert rows[0]["metrics"]["work_item"] == "sinnix-056.6"
+    assert rows[0]["metrics"]["resource_overrides"]["MemoryHigh"] == "2G"
