@@ -190,6 +190,34 @@ if run_job job-one "${tmp}/prompt.prompt"; then
   exit 1
 fi
 
+set +e
+env -u SINNIX_AGENT_SCOPED -u SINNIX_AGENT_SCOPE_UNIT -u SINNIX_AGENT_SCOPE_CGROUP \
+  PATH="${tmp}/bin:${PATH}" SINNIX_AGENT_SCOPE_EXEC="${tmp}/bin/scope-exec" \
+  FAKE_SCOPE_RECEIPT_DIR="${tmp}/scope-receipts" \
+  "${runner}" --job-id job-collision --launch-id collision-a --job-state-dir "${tmp}/state" \
+  --agent codex --model fake --workdir "${tmp}/worktree" --prompt-file "${tmp}/prompt.prompt" \
+  --log-file "${tmp}/output/job-collision.log" --last-file "${tmp}/output/job-collision.final" &
+collision_a=$!
+env -u SINNIX_AGENT_SCOPED -u SINNIX_AGENT_SCOPE_UNIT -u SINNIX_AGENT_SCOPE_CGROUP \
+  PATH="${tmp}/bin:${PATH}" SINNIX_AGENT_SCOPE_EXEC="${tmp}/bin/scope-exec" \
+  FAKE_SCOPE_RECEIPT_DIR="${tmp}/scope-receipts" \
+  "${runner}" --job-id job-collision --launch-id collision-b --job-state-dir "${tmp}/state" \
+  --agent codex --model fake --workdir "${tmp}/worktree" --prompt-file "${tmp}/prompt.prompt" \
+  --log-file "${tmp}/output/job-collision.log" --last-file "${tmp}/output/job-collision.final" &
+collision_b=$!
+wait "${collision_a}"
+collision_a_status=$?
+wait "${collision_b}"
+collision_b_status=$?
+set -e
+if ! { [[ ${collision_a_status} -eq 0 && ${collision_b_status} -ne 0 ]] || \
+  [[ ${collision_a_status} -ne 0 && ${collision_b_status} -eq 0 ]]; }; then
+  echo "concurrent same-ID launches did not produce exactly one owner" >&2
+  exit 1
+fi
+reserved_launch="$(<"${tmp}/state/.reservations/job-collision/launch-id")"
+[[ $(jq -r .launch_id "${tmp}/state/job-collision.json") == "${reserved_launch}" ]]
+
 env -u SINNIX_AGENT_SCOPED -u SINNIX_AGENT_SCOPE_UNIT -u SINNIX_AGENT_SCOPE_CGROUP \
   PATH="${tmp}/bin:${PATH}" SINNIX_AGENT_SCOPE_EXEC="${tmp}/bin/scope-exec" \
   FAKE_SCOPE_RECEIPT_DIR="${tmp}/scope-receipts" \

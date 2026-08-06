@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
+import signal
 import uuid
 import subprocess
 import time
@@ -64,6 +66,20 @@ class JobService:
             raise JobError("invalid job ID")
         return self.root / f"{job_id}.json"
 
+    @staticmethod
+    def _abort_launch(process: subprocess.Popen[bytes]) -> None:
+        if process.poll() is not None:
+            return
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+            process.wait(timeout=1)
+        except (ProcessLookupError, subprocess.TimeoutExpired):
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait(timeout=1)
+            except ProcessLookupError:
+                pass
+
     def _load(self, job_id: str) -> dict[str, Any]:
         path = self._manifest_path(job_id)
         try:
@@ -88,7 +104,8 @@ class JobService:
             raise JobError("agent runner is unavailable")
 
         job_id = str(uuid.uuid4())
-        prompt_path = self.root / f"{job_id}.prompt.md"
+        launch_id = secrets.token_hex(16)
+        prompt_path = self.root / f"{job_id}.{launch_id}.prompt.md"
         log_path = self.root / f"{job_id}.log"
         final_path = self.root / f"{job_id}.final.md"
         prompt_path.write_text(request.prompt)
@@ -107,6 +124,8 @@ class JobService:
             str(final_path),
             "--job-id",
             job_id,
+            "--launch-id",
+            launch_id,
             "--job-state-dir",
             str(self.root),
             "--timeout-seconds",
@@ -154,6 +173,16 @@ class JobService:
             if manifest.exists() or process.poll() is not None:
                 break
             time.sleep(0.05)
+        try:
+            value = self._load(job_id)
+        except JobError as exc:
+            self._abort_launch(process)
+            prompt_path.unlink(missing_ok=True)
+            raise JobError("agent runner did not create its manifest") from exc
+        if value.get("launch_id") != launch_id:
+            self._abort_launch(process)
+            prompt_path.unlink(missing_ok=True)
+            raise JobError("job ID collision was rejected")
         return {
             "job_id": job_id,
             "accepted": True,

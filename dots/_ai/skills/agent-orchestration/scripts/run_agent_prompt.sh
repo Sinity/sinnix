@@ -16,6 +16,7 @@ ephemeral=0
 claude_api_key_auth=0
 credential_profile="subscription"
 job_id=""
+launch_id=""
 job_state_dir="${SINNIX_AGENT_JOB_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/sinnix/agent-jobs}"
 job_role=""
 work_item=""
@@ -51,6 +52,7 @@ Existing options:
 
 Attested job options:
   --job-id <stable-id>        Generated when omitted
+  --launch-id <opaque-id>     Generated when omitted
   --job-state-dir <path>      Default: $XDG_STATE_HOME/sinnix/agent-jobs
   --job-role <description>
   --work-item <bead-or-label>
@@ -102,6 +104,10 @@ while [[ $# -gt 0 ]]; do
     ;;
   --job-id)
     job_id="${2:?missing value for --job-id}"
+    shift 2
+    ;;
+  --launch-id)
+    launch_id="${2:?missing value for --launch-id}"
     shift 2
     ;;
   --job-state-dir)
@@ -197,8 +203,15 @@ command -v sha256sum >/dev/null 2>&1 || {
 if [[ -z ${job_id} ]]; then
   job_id="$(cat /proc/sys/kernel/random/uuid)"
 fi
+if [[ -z ${launch_id} ]]; then
+  launch_id="$(cat /proc/sys/kernel/random/uuid)"
+fi
 [[ ${job_id} =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]] || {
   echo "invalid --job-id: ${job_id}" >&2
+  exit 2
+}
+[[ ${launch_id} =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]] || {
+  echo "invalid --launch-id: ${launch_id}" >&2
   exit 2
 }
 [[ ${timeout_seconds} =~ ^[0-9]+$ && ${timeout_seconds} -ge 30 && ${timeout_seconds} -le 86400 ]] || {
@@ -212,15 +225,28 @@ fi
 [[ ${credential_profile} != api ]] || claude_api_key_auth=1
 
 umask 077
-mkdir -p -m 0700 "${job_state_dir}" "$(dirname "${log_file}")"
+mkdir -p -m 0700 "${job_state_dir}" "${job_state_dir}/.reservations" "$(dirname "${log_file}")"
 chmod 0700 "${job_state_dir}"
+chmod 0700 "${job_state_dir}/.reservations"
 [[ -z ${json_file} ]] || mkdir -p "$(dirname "${json_file}")"
 [[ -z ${last_file} ]] || mkdir -p "$(dirname "${last_file}")"
 
 manifest="${job_state_dir}/${job_id}.json"
 events="${job_state_dir}/${job_id}.events.jsonl"
-if [[ ${internal_agent_scope} -eq 0 && -e ${manifest} ]]; then
-  echo "refusing to overwrite existing job handle: ${job_id}" >&2
+reservation="${job_state_dir}/.reservations/${job_id}"
+if [[ ${internal_agent_scope} -eq 0 ]]; then
+  if ! mkdir -m 0700 "${reservation}" 2>/dev/null; then
+    echo "refusing reserved job handle: ${job_id}" >&2
+    exit 2
+  fi
+  printf '%s\n' "${launch_id}" >"${reservation}/launch-id"
+  chmod 0600 "${reservation}/launch-id"
+  if [[ -e ${manifest} ]]; then
+    echo "refusing to overwrite existing job handle: ${job_id}" >&2
+    exit 2
+  fi
+elif [[ ! -r ${reservation}/launch-id || $(<"${reservation}/launch-id") != "${launch_id}" ]]; then
+  echo "refusing mismatched job reservation: ${job_id}" >&2
   exit 2
 fi
 worktree="$(cd "${workdir}" && pwd -P)"
@@ -270,6 +296,7 @@ write_manifest() {
   tmp="$(mktemp "${manifest}.tmp.XXXXXX")"
   jq -n \
     --arg job_id "${job_id}" \
+    --arg launch_id "${launch_id}" \
     --arg created_at "${created_at}" \
     --arg updated_at "${updated_at}" \
     --arg lifecycle "${lifecycle}" \
@@ -296,7 +323,7 @@ write_manifest() {
     --arg cpu_weight "${cpu_weight}" \
     --arg io_weight "${io_weight}" \
     --arg timeout_seconds "${timeout_seconds}" \
-    '{schema_version: 2, job_id: $job_id, created_at: $created_at, updated_at: $updated_at,
+    '{schema_version: 2, job_id: $job_id, launch_id: $launch_id, created_at: $created_at, updated_at: $updated_at,
       lifecycle: $lifecycle, backend: $backend, model: $model, effort: $effort,
       repo: $repo, worktree: $worktree, branch: $branch,
       prompt: {path: $prompt_path, sha256: $prompt_sha256},
@@ -326,7 +353,7 @@ if [[ ${internal_agent_scope} -eq 0 && -z ${SINNIX_AGENT_SCOPED:-} ]]; then
   [[ -z ${io_weight} ]] || scope_args+=(--property "IOWeight=${io_weight}")
   scope_args+=(--property "RuntimeMaxSec=${timeout_seconds}")
   inner_args=(
-    "$0" --internal-agent-scope --job-id "${job_id}" --job-state-dir "${job_state_dir}"
+    "$0" --internal-agent-scope --job-id "${job_id}" --launch-id "${launch_id}" --job-state-dir "${job_state_dir}"
     --agent "${agent}" --workdir "${workdir}" --prompt-file "${prompt_file}" --log-file "${log_file}"
     --timeout-seconds "${timeout_seconds}"
   )
