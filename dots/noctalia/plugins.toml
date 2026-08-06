@@ -1,0 +1,15 @@
+# Curated Noctalia v5 plugin sources and enabled entries.
+# Source locations are stable home paths backed by immutable Nix sources.
+[plugins]
+auto_update = false
+enabled = ["noctalia/timer", "kenn/keybind-cheatsheet"]
+
+[[plugins.source]]
+name = "official"
+kind = "path"
+location = "~/.local/share/noctalia/pinned/official"
+
+[[plugins.source]]
+name = "community"
+kind = "path"
+location = "~/.local/share/noctalia/pinned/community"

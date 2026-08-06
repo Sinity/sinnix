@@ -119,7 +119,7 @@
     # lock, OSD, and wallpaper, and acts as the live Material-You color authority
     # (wallpaper -> palette -> app templates). See modules/features/desktop/noctalia.nix.
     noctalia = {
-      url = "github:noctalia-dev/noctalia-shell/main";
+      url = "github:noctalia-dev/noctalia-shell/v5.0.0-beta.5";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
