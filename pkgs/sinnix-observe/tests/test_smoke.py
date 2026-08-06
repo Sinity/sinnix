@@ -114,6 +114,41 @@ def test_runtime_inventory_fallback_excludes_retired_slices(monkeypatch) -> None
     assert sshd_class in inventory["classes"]
 
 
+def test_workload_identity_prefers_registered_unit(monkeypatch, tmp_path) -> None:
+    inventory_path = tmp_path / "runtime-inventory.json"
+    inventory_path.write_text(
+        json.dumps(
+            {
+                "surfaces": {
+                    "shell": {
+                        "unit": "shell.service",
+                        "workload": {
+                            "kind": "frontend",
+                            "lifecycle": "persistent",
+                            "expendability": "protected",
+                            "operatorProtection": "operator",
+                            "class": "interactive",
+                        },
+                    }
+                }
+            }
+        )
+    )
+    monkeypatch.setenv("SINNIX_RUNTIME_INVENTORY_FILE", str(inventory_path))
+    assert (
+        runtime_inventory.workload_for_cgroup(
+            "/system.slice/shell.service/process.scope"
+        )["source"]
+        == "unit"
+    )
+    assert (
+        runtime_inventory.workload_for_cgroup("/user.slice/unknown.scope")[
+            "expendability"
+        ]
+        == "unknown"
+    )
+
+
 def test_storage_offline_returns_marker() -> None:
     out = storage.collect_storage(offline=True)
     assert out == {"offline": True, "mounts": [], "discard_queues": []}

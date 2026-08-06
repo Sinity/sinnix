@@ -18,8 +18,12 @@ let
           restartable = false;
         };
         captures = [ ];
-        workload = {
-          class = "unclassified";
+      workload = {
+        kind = "unknown";
+        lifecycle = "unknown";
+        expendability = "unknown";
+        operatorProtection = "unknown";
+        class = "unclassified";
           rationale = "";
           processMatchers = [ ];
         };
@@ -412,6 +416,18 @@ rec {
     };
   };
 
+  earlyoomPatternFor = surfaces:
+    let
+      protectedMatchers = lib.concatLists (
+        lib.mapAttrsToList (_: surface:
+          if (surface.workload.expendability or "unknown") == "protected" then
+            surface.workload.processMatchers or [ ]
+          else
+            [ ]) surfaces
+      );
+    in
+    "(systemd|systemd-logind|dbus-daemon|dbus-broker|dbus-broker-launch|sshd|agetty|uwsm|start-hyprland|Hyprland|Xwayland|pipewire|wireplumber|foot|kitty|below|nix-daemon|${lib.concatStringsSep "|" protectedMatchers})";
+
   mkInventory =
     {
       hostname ? "",
@@ -425,9 +441,9 @@ rec {
         hostname
         classes
         commandClasses
-        earlyoomEmergencyAvoidPattern
         slices
         ;
+      earlyoomEmergencyAvoidPattern = earlyoomPatternFor (lib.mapAttrs (_: normalizeSurface) surfaces);
       heavyLease = {
         schemaVersion = 1;
         commandClasses = lib.filterAttrs (_: command: command.lease.required) commandClasses;
