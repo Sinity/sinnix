@@ -39,7 +39,16 @@
         else
           "system";
       serviceConfig =
-        if builtins.hasAttr resolvedResourceClass runtimeInventory.classes then
+        if unit != null then
+          let
+            matchingSurfaces = lib.filterAttrs (_: surface: surface.unit == unit) runtimeInventory.surfaces;
+            surfaceNames = builtins.attrNames matchingSurfaces;
+          in
+          if surfaceNames == [ ] then
+            throw "unknown Sinnix runtime surface unit: ${unit}"
+          else
+            matchingSurfaces.${builtins.head surfaceNames}.effectiveResources
+        else if builtins.hasAttr resolvedResourceClass runtimeInventory.classes then
           runtimeInventory.classes.${resolvedResourceClass}.serviceConfig
         else
           throw "unknown Sinnix runtime resource class: ${resolvedResourceClass}";

@@ -8,22 +8,41 @@ let
 
   normalizeSurface =
     surface:
-    {
-      manager = "system";
-      kind = "service";
-      resourceClass = "system";
-      observe = {
-        enable = false;
-        restartable = false;
-      };
-      captures = [ ];
-      workload = {
-        class = "unclassified";
-        rationale = "";
-        processMatchers = [ ];
-      };
-    }
-    // surface;
+    let
+      normalized = {
+        manager = "system";
+        kind = "service";
+        resourceClass = "system";
+        observe = {
+          enable = false;
+          restartable = false;
+        };
+        captures = [ ];
+        workload = {
+          class = "unclassified";
+          rationale = "";
+          processMatchers = [ ];
+        };
+        resources = { };
+      }
+      // surface;
+    in
+    normalized
+    // {
+      effectiveResources = lib.filterAttrs (_: value: value != null) normalized.resources;
+    };
+
+  effectiveSurface =
+    resourceClasses: surface:
+    let
+      normalized = normalizeSurface surface;
+      classResources = resourceClasses.${normalized.resourceClass}.serviceConfig or { };
+    in
+    normalized
+    // {
+      effectiveResources =
+        classResources // lib.filterAttrs (_: value: value != null) normalized.resources;
+    };
 
   captureRows =
     surfaces:
@@ -69,8 +88,7 @@ rec {
   # workload containment; this process-name fallback protects only surfaces
   # needed to keep or recover the graphical/login session. Agents, language
   # runtimes, browsers, and generic shells deliberately remain eligible.
-  earlyoomEmergencyAvoidPattern =
-    "(systemd|systemd-logind|dbus-daemon|dbus-broker|dbus-broker-launch|sshd|agetty|uwsm|start-hyprland|Hyprland|Xwayland|noctalia|quickshell|xdg-desktop-po|pipewire|wireplumber|foot|kitty|below|nix-daemon)";
+  earlyoomEmergencyAvoidPattern = "(systemd|systemd-logind|dbus-daemon|dbus-broker|dbus-broker-launch|sshd|agetty|uwsm|start-hyprland|Hyprland|Xwayland|noctalia|quickshell|xdg-desktop-po|pipewire|wireplumber|foot|kitty|below|nix-daemon)";
 
   classes = {
     interactive-agent = mkClass "Interactive AI agent shells and frontends" { };
@@ -138,7 +156,11 @@ rec {
   commandClasses = {
     agent = {
       resourceClass = "interactive-agent";
-      lease = { required = false; stateSubdir = "sinnix/heavy-lease"; waitSeconds = 0; };
+      lease = {
+        required = false;
+        stateSubdir = "sinnix/heavy-lease";
+        waitSeconds = 0;
+      };
       slice = "agent.slice";
       nice = null;
       ioniceClass = null;
@@ -197,7 +219,11 @@ rec {
     };
     background = {
       resourceClass = "background-maintenance";
-      lease = { required = false; stateSubdir = "sinnix/heavy-lease"; waitSeconds = 0; };
+      lease = {
+        required = false;
+        stateSubdir = "sinnix/heavy-lease";
+        waitSeconds = 0;
+      };
       slice = "background.slice";
       nice = 10;
       ioniceClass = "idle";
@@ -408,11 +434,25 @@ rec {
         stateDir = "/home/sinity/.local/state/sinnix/heavy-lease";
       };
       dynamicSurfaces = {
-        agentJobs = { manager = "user"; unitPattern = "sinnix-agent-job-*.scope"; resourceClass = "interactive-agent"; manifestSchema = "sinnix-agent-job-v2"; };
-        gatewayChildren = { manager = "user"; processPattern = "sinnix-agent-gateway"; resourceClass = "interactive-agent"; transport = "stdio"; };
-        heavyLease = { manager = "user"; statePath = "$XDG_STATE_HOME/sinnix/heavy-lease"; schema = "sinnix-heavy-lease-v1"; };
+        agentJobs = {
+          manager = "user";
+          unitPattern = "sinnix-agent-job-*.scope";
+          resourceClass = "interactive-agent";
+          manifestSchema = "sinnix-agent-job-v2";
+        };
+        gatewayChildren = {
+          manager = "user";
+          processPattern = "sinnix-agent-gateway";
+          resourceClass = "interactive-agent";
+          transport = "stdio";
+        };
+        heavyLease = {
+          manager = "user";
+          statePath = "$XDG_STATE_HOME/sinnix/heavy-lease";
+          schema = "sinnix-heavy-lease-v1";
+        };
       };
-      surfaces = lib.mapAttrs (_: normalizeSurface) surfaces;
+      surfaces = lib.mapAttrs (_: effectiveSurface classes) surfaces;
       inherit mounts backups;
       observedServices = observedServiceRows surfaces;
       captures = captureRows surfaces;

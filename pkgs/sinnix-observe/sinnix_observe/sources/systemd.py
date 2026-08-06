@@ -28,7 +28,9 @@ def collect_noctalia_health() -> dict[str, Any]:
     return {
         "status": "healthy" if proc.returncode == 0 else "invalid",
         "config_warning_count": warnings,
-        "plugin_compatibility": "compatible" if proc.returncode == 0 and warnings == 0 else "warning",
+        "plugin_compatibility": "compatible"
+        if proc.returncode == 0 and warnings == 0
+        else "warning",
     }
 
 
@@ -140,7 +142,9 @@ def unit_row(unit: str, manager: str, props: dict[str, str]) -> dict[str, Any]:
             "part_of": words(props.get("PartOf")),
         },
         "result": props.get("Result") or None,
-        "health": collect_noctalia_health() if unit == "noctalia.service" and manager == "user" else None,
+        "health": collect_noctalia_health()
+        if unit == "noctalia.service" and manager == "user"
+        else None,
     }
 
 
