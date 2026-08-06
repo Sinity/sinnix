@@ -1587,6 +1587,8 @@ def init_db(conn: sqlite3.Connection) -> None:
         conn,
         "service_state",
         {
+            "memory_swap_current_bytes": "INTEGER",
+            "restart_count": "INTEGER",
             "memory_anon_bytes": "INTEGER",
             "memory_file_bytes": "INTEGER",
             "memory_kernel_bytes": "INTEGER",
@@ -1904,6 +1906,10 @@ def systemctl_props(
         "-p",
         "MemoryCurrent",
         "-p",
+        "MemorySwapCurrent",
+        "-p",
+        "NRestarts",
+        "-p",
         "CPUUsageNSec",
         "-p",
         "IOReadBytes",
@@ -1937,7 +1943,7 @@ def insert_service_states(
     pressure_rows: list[dict[str, object]] = []
     cgroup_memory_rows: list[dict[str, object]] = []
     for unit in units:
-        user = unit == "polylogued.service"
+        user = unit in {"polylogued.service", "noctalia.service"}
         props = systemctl_props(unit, user=user, user_name=user_name)
         if not props:
             continue
@@ -1956,6 +1962,8 @@ def insert_service_states(
                 int_or_none(props.get("MainPID")),
                 control_group,
                 int_or_none(props.get("MemoryCurrent")),
+                int_or_none(props.get("MemorySwapCurrent")),
+                int_or_none(props.get("NRestarts")),
                 memory_stat.get("memory_anon_bytes"),
                 memory_stat.get("memory_file_bytes"),
                 memory_stat.get("memory_kernel_bytes"),
@@ -2006,11 +2014,12 @@ def insert_service_states(
             INSERT INTO service_state (
               observed_at, host, boot_id, unit, scope, active_state, sub_state,
               main_pid, control_group, memory_current_bytes,
+              memory_swap_current_bytes, restart_count,
               memory_anon_bytes, memory_file_bytes, memory_kernel_bytes,
               memory_slab_bytes, memory_sock_bytes, memory_shmem_bytes,
               memory_swapcached_bytes, memory_zswap_bytes, memory_zswapped_bytes,
               cpu_usage_nsec, io_read_bytes, io_write_bytes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )

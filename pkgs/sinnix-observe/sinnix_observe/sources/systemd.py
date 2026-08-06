@@ -13,6 +13,25 @@ from ..runtime_inventory import (
 from ..util import int_or_none, run_cmd, split_props, words
 
 
+def collect_noctalia_health() -> dict[str, Any]:
+    proc = run_cmd(["noctalia", "config", "validate"], timeout=3)
+    if proc is None:
+        return {
+            "status": "unavailable",
+            "config_warning_count": None,
+            "plugin_compatibility": "unknown",
+        }
+    output = f"{proc.stdout}\n{proc.stderr}"
+    warnings = sum(
+        1 for line in output.splitlines() if "WRN" in line or "warning" in line.lower()
+    )
+    return {
+        "status": "healthy" if proc.returncode == 0 else "invalid",
+        "config_warning_count": warnings,
+        "plugin_compatibility": "compatible" if proc.returncode == 0 and warnings == 0 else "warning",
+    }
+
+
 def systemctl_show(unit: str, user: bool = False) -> dict[str, str]:
     cmd = ["systemctl"]
     if user:
@@ -37,6 +56,10 @@ def systemctl_show(unit: str, user: bool = False) -> dict[str, str]:
         "Slice",
         "-p",
         "MemoryCurrent",
+        "-p",
+        "MemorySwapCurrent",
+        "-p",
+        "NRestarts",
         "-p",
         "MemoryHigh",
         "-p",
@@ -93,6 +116,8 @@ def unit_row(unit: str, manager: str, props: dict[str, str]) -> dict[str, Any]:
         "resource_class": resource_class_for_unit(unit),
         "policy": {
             "memory_current": props.get("MemoryCurrent"),
+            "memory_swap_current": props.get("MemorySwapCurrent"),
+            "restart_count": props.get("NRestarts"),
             "memory_high": props.get("MemoryHigh"),
             "memory_max": props.get("MemoryMax"),
             "cpu_weight": props.get("CPUWeight"),
@@ -115,6 +140,7 @@ def unit_row(unit: str, manager: str, props: dict[str, str]) -> dict[str, Any]:
             "part_of": words(props.get("PartOf")),
         },
         "result": props.get("Result") or None,
+        "health": collect_noctalia_health() if unit == "noctalia.service" and manager == "user" else None,
     }
 
 
