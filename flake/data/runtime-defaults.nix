@@ -135,6 +135,7 @@ rec {
   commandClasses = {
     agent = {
       resourceClass = "interactive-agent";
+      lease = { required = false; stateSubdir = "sinnix/heavy-lease"; waitSeconds = 0; };
       slice = "agent.slice";
       nice = null;
       ioniceClass = null;
@@ -185,9 +186,15 @@ rec {
         NIX_BUILD_CORES = "16";
         SCCACHE_IDLE_TIMEOUT = "10";
       };
+      lease = {
+        required = true;
+        stateSubdir = "sinnix/heavy-lease";
+        waitSeconds = 0;
+      };
     };
     background = {
       resourceClass = "background-maintenance";
+      lease = { required = false; stateSubdir = "sinnix/heavy-lease"; waitSeconds = 0; };
       slice = "background.slice";
       nice = 10;
       ioniceClass = "idle";
@@ -225,6 +232,29 @@ rec {
         TimeoutStopSec = "15s";
       };
       envDefaults = { };
+      lease = {
+        required = true;
+        stateSubdir = "sinnix/heavy-lease";
+        waitSeconds = 0;
+      };
+    };
+    heavy = {
+      resourceClass = "developer-build";
+      slice = "build.slice";
+      nice = 5;
+      ioniceClass = "best-effort";
+      ionicePriority = 7;
+      systemdProperties = {
+        IOAccounting = true;
+        IOWeight = 2;
+        TimeoutStopSec = "15s";
+      };
+      envDefaults = { };
+      lease = {
+        required = true;
+        stateSubdir = "sinnix/heavy-lease";
+        waitSeconds = 0;
+      };
     };
   };
 
@@ -363,6 +393,16 @@ rec {
         earlyoomEmergencyAvoidPattern
         slices
         ;
+      heavyLease = {
+        schemaVersion = 1;
+        commandClasses = lib.filterAttrs (_: command: command.lease.required) commandClasses;
+        stateDir = "/home/sinity/.local/state/sinnix/heavy-lease";
+      };
+      dynamicSurfaces = {
+        agentJobs = { manager = "user"; unitPattern = "sinnix-agent-job-*.scope"; resourceClass = "interactive-agent"; manifestSchema = "sinnix-agent-job-v2"; };
+        gatewayChildren = { manager = "user"; processPattern = "sinnix-agent-gateway"; resourceClass = "interactive-agent"; transport = "stdio"; };
+        heavyLease = { manager = "user"; statePath = "$XDG_STATE_HOME/sinnix/heavy-lease"; schema = "sinnix-heavy-lease-v1"; };
+      };
       surfaces = lib.mapAttrs (_: normalizeSurface) surfaces;
       inherit mounts backups;
       observedServices = observedServiceRows surfaces;

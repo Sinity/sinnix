@@ -60,6 +60,9 @@ class AuditService:
         event_id = str(uuid.uuid4())
         occurred_at = time.time()
         clean_payload = json.loads(redact(json.dumps(payload or {}, sort_keys=True)))
+        correlation_id = clean_payload.get("correlation_id") or clean_payload.get("job_id")
+        if correlation_id:
+            clean_payload["correlation_id"] = str(correlation_id)
         with self._connect() as connection:
             connection.execute("begin immediate")
             previous = connection.execute(

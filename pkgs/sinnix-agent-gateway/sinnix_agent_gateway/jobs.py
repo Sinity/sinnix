@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
-import secrets
+import uuid
 import subprocess
 import time
 from pathlib import Path
@@ -56,7 +56,6 @@ class JobService:
         environment = {
             name: value for name, value in os.environ.items() if name in allowed_names
         }
-        environment.update(self.config.safe_environment)
         environment["SINNIX_AGENT_JOB_STATE_DIR"] = str(self.root)
         return environment
 
@@ -73,7 +72,7 @@ class JobService:
             raise JobError("unknown job ID") from exc
         except json.JSONDecodeError as exc:
             raise JobError("malformed job manifest") from exc
-        if value.get("schema_version") != 1 or value.get("job_id") != job_id:
+        if value.get("schema_version") != 2 or value.get("job_id") != job_id:
             raise JobError("unattested job manifest")
         return value
 
@@ -88,7 +87,7 @@ class JobService:
         if not self.config.agent_runner.is_file():
             raise JobError("agent runner is unavailable")
 
-        job_id = f"agent-{int(time.time())}-{secrets.token_hex(12)}"
+        job_id = str(uuid.uuid4())
         prompt_path = self.root / f"{job_id}.prompt.md"
         log_path = self.root / f"{job_id}.log"
         final_path = self.root / f"{job_id}.final.md"
@@ -112,6 +111,8 @@ class JobService:
             str(self.root),
             "--timeout-seconds",
             str(request.timeout_seconds),
+            "--credential-profile",
+            request.credential_profile,
         ]
         model = request.model
         effort = request.reasoning_effort
@@ -139,7 +140,12 @@ class JobService:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
-                env=self._environment(),
+                env={
+                    **self._environment(),
+                    "SINNIX_CORRELATION_ID": job_id,
+                    "SINNIX_PROJECT": request.project_id,
+                    **({"SINNIX_WORK_ITEM": request.work_item} if request.work_item else {}),
+                },
             )
         except OSError as exc:
             raise JobError("failed to launch attested agent job") from exc
@@ -212,7 +218,7 @@ class JobService:
             try:
                 value = json.loads(path.read_text())
                 job_id = value.get("job_id")
-                if value.get("schema_version") != 1 or not isinstance(job_id, str):
+                if value.get("schema_version") != 2 or not isinstance(job_id, str):
                     raise ValueError("invalid manifest contract")
                 jobs.append(self.status(job_id))
             except (ValueError, json.JSONDecodeError, JobError) as exc:
@@ -241,7 +247,7 @@ class JobService:
         )
         if result.returncode != 0:
             raise JobError(result.stderr.strip() or "job cancellation was refused")
-        return {"job_id": job_id, "cancelled": True}
+        return {"job_id": job_id, "cancelled": True, "lifecycle": "cancelled"}
 
     def read_output(
         self, job_id: str, artifact: str = "log", offset: int = 0, max_bytes: int = 64_000

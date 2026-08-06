@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -40,7 +40,6 @@ class GatewayConfig:
     agent_runner: Path = DEFAULT_AGENT_RUNNER
     agent_controller: Path = DEFAULT_AGENT_CONTROLLER
     observe_command: str = "sinnix-observe"
-    safe_environment: dict[str, str] = field(default_factory=dict)
     max_result_bytes: int = 262_144
 
     @classmethod
@@ -71,10 +70,6 @@ class GatewayConfig:
                 raw.get("agentController", DEFAULT_AGENT_CONTROLLER)
             ),
             observe_command=raw.get("observeCommand", "sinnix-observe"),
-            safe_environment={
-                str(key): str(value)
-                for key, value in raw.get("safeEnvironment", {}).items()
-            },
             max_result_bytes=int(raw.get("maxResultBytes", 262_144)),
         )
 

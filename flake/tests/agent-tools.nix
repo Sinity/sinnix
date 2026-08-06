@@ -114,7 +114,6 @@ in
           ".local/bin/mcp-polylogue"
           ".local/bin/mcp-sinex"
           ".local/bin/sinnix-mcp-sweep"
-          ".local/bin/sinnix-agent-status"
           ".config/hermes/skills"
         ];
         fixtureAssets = [
@@ -621,7 +620,6 @@ in
             "$HOME/.local/bin/mcp-polylogue" --help | grep -q 'Start the Polylogue MCP stdio bridge'
             grep -Fq 'sinnix-mcp-sinex-script' "$(readlink -f "$HOME/.local/bin/mcp-sinex")"
             for helper in \
-              "$HOME/.local/bin/sinnix-agent-status" \
               "$HOME/.local/bin/sinnix-chrome-control" \
               "$HOME/.local/bin/sinnix-hypr-control" \
               "$HOME/.local/bin/sinnix-keyboard-control" \

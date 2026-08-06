@@ -115,9 +115,45 @@ mkServiceModule {
           directory = ".local/state/sinnix/agent-gateway";
           mode = "0700";
         }
+        {
+          directory = ".local/state/sinnix/heavy-lease";
+          mode = "0700";
+        }
       ];
 
-      sinnix.runtime.surfaces = lib.mkIf cfg.tunnel.enable {
+      sinnix.runtime.surfaces = {
+        agent-gateway-jobs = {
+          unit = "sinnix-agent-job-.scope";
+          manager = "user";
+          kind = "capture";
+          dynamic = true;
+          resourceClass = "interactive-agent";
+          observe.enable = true;
+          workload = {
+            class = "protected";
+            rationale = "Attested gateway and local agent child scopes.";
+            processMatchers = [ "sinnix-agent-job-" ];
+          };
+          captures = [ { name = "agent-job-manifests"; path = "${cfg.stateDir}/jobs"; eventDriven = true; } ];
+        };
+        heavy-lease = {
+          unit = "sinnix-heavy-lease";
+          manager = "user";
+          kind = "capture";
+          dynamic = true;
+          resourceClass = "developer-build";
+          observe.enable = true;
+          workload = {
+            class = "sacrificial";
+            rationale = "Single attested owner for build and Nix build contention.";
+            processMatchers = [ "sinnix-heavy-lease" ];
+          };
+          captures = [
+            { name = "heavy-lease-owner"; path = "/home/${userName}/.local/state/sinnix/heavy-lease/owner.json"; eventDriven = true; }
+            { name = "heavy-lease-audit"; path = "/home/${userName}/.local/state/sinnix/heavy-lease/audit.jsonl"; eventDriven = true; }
+          ];
+        };
+      } // lib.optionalAttrs cfg.tunnel.enable {
         agent-gateway-tunnel = {
           unit = "sinnix-agent-gateway-tunnel.service";
           manager = "user";

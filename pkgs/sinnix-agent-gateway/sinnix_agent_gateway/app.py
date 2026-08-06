@@ -229,6 +229,7 @@ def create_server(config: GatewayConfig, profile: str) -> MCPServer:
             job_role: str | None = None,
             work_item: str | None = None,
             timeout_seconds: int = 14_400,
+            credential_profile: str = "subscription",
         ) -> dict[str, Any]:
             """Launch an attested native coding-agent job in an allowlisted project."""
             request = AgentLaunchRequest(
@@ -240,6 +241,7 @@ def create_server(config: GatewayConfig, profile: str) -> MCPServer:
                 job_role=job_role,
                 work_item=work_item,
                 timeout_seconds=timeout_seconds,
+                credential_profile=credential_profile,
             )
             return runtime.execute(
                 "agent_launch", lambda: runtime.jobs.launch_agent(request)

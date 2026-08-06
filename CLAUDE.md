@@ -181,6 +181,10 @@ One contract governs unit placement and observability:
   consumed at runtime by `sinnix-scope`, `sinnix-observe`, and machine
   telemetry. When adding a daemon: declare the surface, apply
   `mkRuntimeServiceConfig`, done — no ad-hoc Nice/IOWeight overrides.
+- Build, Nix build, and explicit heavy command classes acquire the shared
+  attested heavy-work lease. Agent/source work stays concurrent. Gateway and
+  native launches share versioned UUID manifests and correlation IDs consumed
+  by `sinnix-observe`.
 
 ## Flake Layout & Input Pinning
 

@@ -14,6 +14,7 @@ json_mode=0
 skip_agents_render=0
 ephemeral=0
 claude_api_key_auth=0
+credential_profile="subscription"
 job_id=""
 job_state_dir="${SINNIX_AGENT_JOB_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/sinnix/agent-jobs}"
 job_role=""
@@ -46,6 +47,7 @@ Existing options:
   --skip-agents-render
   --ephemeral
   --claude-api-key-auth       Keep ANTHROPIC_API_KEY for Claude instead of subscription auth
+  --credential-profile <subscription|api>
 
 Attested job options:
   --job-id <stable-id>        Generated when omitted
@@ -152,7 +154,12 @@ while [[ $# -gt 0 ]]; do
     ;;
   --claude-api-key-auth)
     claude_api_key_auth=1
+    credential_profile="api"
     shift
+    ;;
+  --credential-profile)
+    credential_profile="${2:?missing value for --credential-profile}"
+    shift 2
     ;;
   -h | --help)
     usage
@@ -188,7 +195,7 @@ command -v sha256sum >/dev/null 2>&1 || {
 }
 
 if [[ -z ${job_id} ]]; then
-  job_id="agent-$(date -u +%Y%m%dT%H%M%S)-$$-$RANDOM"
+  job_id="$(cat /proc/sys/kernel/random/uuid)"
 fi
 [[ ${job_id} =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]] || {
   echo "invalid --job-id: ${job_id}" >&2
@@ -198,6 +205,8 @@ fi
   echo "invalid --timeout-seconds: ${timeout_seconds}" >&2
   exit 2
 }
+[[ ${credential_profile} == subscription || ${credential_profile} == api ]] || { echo "invalid --credential-profile" >&2; exit 2; }
+[[ ${credential_profile} != api ]] || claude_api_key_auth=1
 
 umask 077
 mkdir -p -m 0700 "${job_state_dir}" "$(dirname "${log_file}")"
@@ -206,6 +215,7 @@ chmod 0700 "${job_state_dir}"
 [[ -z ${last_file} ]] || mkdir -p "$(dirname "${last_file}")"
 
 manifest="${job_state_dir}/${job_id}.json"
+events="${job_state_dir}/${job_id}.events.jsonl"
 if [[ ${internal_agent_scope} -eq 0 && -e ${manifest} ]]; then
   echo "refusing to overwrite existing job handle: ${job_id}" >&2
   exit 2
@@ -224,6 +234,18 @@ scope_cgroup="${SINNIX_AGENT_SCOPE_CGROUP:-}"
 if [[ -z ${scope_cgroup} && -n ${SINNIX_AGENT_SCOPE_UNIT:-} ]]; then
   scope_cgroup="$(awk -F: -v unit="${SINNIX_AGENT_SCOPE_UNIT}" '$3 ~ ("/" unit "$|/" unit "/") { print $3; exit }' /proc/self/cgroup 2>/dev/null || true)"
 fi
+
+proc_start() {
+  local stat
+  stat="$(cat "/proc/$1/stat" 2>/dev/null || true)"
+  printf '%s\n' "${stat##*) }" | awk '{print $20}'
+}
+event() {
+  local lifecycle="$1" exit_status="${2:-}"
+  jq -cn --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg job_id "$job_id" --arg lifecycle "$lifecycle" --arg scope "${SINNIX_AGENT_SCOPE_UNIT:-${scope_unit}}" --arg cgroup "$scope_cgroup" --arg status "$exit_status" \
+    '{schema_version:2,at:$at,job_id:$job_id,lifecycle:$lifecycle,scope_unit:$scope,cgroup:$cgroup,exit_status:(if $status == "" then null else ($status|tonumber) end)}' >>"$events"
+  chmod 0600 "$events"
+}
 
 write_manifest() {
   local lifecycle="$1"
@@ -258,25 +280,29 @@ write_manifest() {
     --arg scope_unit "${SINNIX_AGENT_SCOPE_UNIT:-${scope_unit}}" \
     --arg scope_cgroup "${scope_cgroup}" \
     --arg launcher_pid "${BASHPID}" \
+    --arg launcher_start "$(proc_start "${BASHPID}")" \
     --arg exit_status "${exit_status}" \
     --arg memory_high "${memory_high}" \
     --arg memory_max "${memory_max}" \
     --arg cpu_weight "${cpu_weight}" \
     --arg io_weight "${io_weight}" \
     --arg timeout_seconds "${timeout_seconds}" \
-    '{schema_version: 1, job_id: $job_id, created_at: $created_at, updated_at: $updated_at,
+    '{schema_version: 2, job_id: $job_id, created_at: $created_at, updated_at: $updated_at,
       lifecycle: $lifecycle, backend: $backend, model: $model, effort: $effort,
       repo: $repo, worktree: $worktree, branch: $branch,
       prompt: {path: $prompt_path, sha256: $prompt_sha256},
       artifacts: {log: $log_path, json: $json_path, final: $final_path},
       declared: {role: $role, work_item: $work_item},
-      launcher: {pid: ($launcher_pid | tonumber), scope_unit: $scope_unit, cgroup: $scope_cgroup},
+      launcher: {pid: ($launcher_pid | tonumber), proc_start: $launcher_start, scope_unit: $scope_unit, cgroup: $scope_cgroup},
       resource_overrides: {MemoryHigh: $memory_high, MemoryMax: $memory_max, CPUWeight: $cpu_weight, IOWeight: $io_weight, RuntimeMaxSec: $timeout_seconds},
       exit_status: (if $exit_status == "" then null else ($exit_status | tonumber) end)}' >"${tmp}"
+  chmod 0600 "${tmp}"
   mv -f "${tmp}" "${manifest}"
+  event "$lifecycle" "$exit_status"
 }
 
 if [[ ${internal_agent_scope} -eq 0 && -z ${SINNIX_AGENT_SCOPED:-} ]]; then
+  write_manifest accepted
   write_manifest starting
   scope_exec="${SINNIX_AGENT_SCOPE_EXEC:-$(command -v sinnix-agent-scope-exec 2>/dev/null || true)}"
   [[ -n ${scope_exec} && -x ${scope_exec} ]] || {
@@ -310,12 +336,13 @@ if [[ ${internal_agent_scope} -eq 0 && -z ${SINNIX_AGENT_SCOPED:-} ]]; then
   [[ ${skip_agents_render} -eq 0 ]] || inner_args+=(--skip-agents-render)
   [[ ${ephemeral} -eq 0 ]] || inner_args+=(--ephemeral)
   [[ ${claude_api_key_auth} -eq 0 ]] || inner_args+=(--claude-api-key-auth)
+  inner_args+=(--credential-profile "${credential_profile}")
   set +e
   "${scope_exec}" "${scope_args[@]}" -- "${inner_args[@]}"
   scope_status=$?
   set -e
   lifecycle="$(jq -r '.lifecycle // empty' "${manifest}")"
-  if [[ ${lifecycle} == starting || ${lifecycle} == running ]]; then
+  if [[ ${lifecycle} == accepted || ${lifecycle} == starting || ${lifecycle} == running ]]; then
     write_manifest failed "${scope_status}"
   fi
   exit "${scope_status}"
@@ -340,7 +367,11 @@ finalize_job() {
   local status=$?
   if [[ ${job_finalized} -eq 0 ]]; then
     if [[ ${status} -eq 0 ]]; then
-      write_manifest completed 0
+      write_manifest succeeded 0
+    elif [[ $(jq -r '.lifecycle // empty' "${manifest}") == cancel_requested ]]; then
+      write_manifest cancelled "${status}"
+    elif [[ ${status} -eq 124 || ${status} -eq 137 || ${status} -eq 143 ]]; then
+      write_manifest timed_out "${status}"
     else
       write_manifest failed "${status}"
     fi
@@ -364,8 +395,12 @@ agent_bin="$(resolve_agent_bin "${agent}")" || {
 }
 
 run_with_optional_env() {
-  local -a env_args=(env)
-  [[ ${agent} != claude || ${claude_api_key_auth} -eq 1 ]] || env_args+=(-u ANTHROPIC_API_KEY)
+  local -a env_args=(env -i)
+  for key in HOME LANG LC_ALL PATH SHELL TERM USER XDG_CONFIG_HOME XDG_DATA_HOME XDG_RUNTIME_DIR XDG_STATE_HOME DBUS_SESSION_BUS_ADDRESS DISPLAY WAYLAND_DISPLAY SSH_AUTH_SOCK SINNIX_AGENT_JOB_STATE_DIR SINNIX_AGENT_SCOPED SINNIX_AGENT_SCOPE_UNIT SINNIX_AGENT_SCOPE_CGROUP SINNIX_CORRELATION_ID SINNIX_HEAVY_LEASE_TOKEN; do
+    [[ -z ${!key+x} ]] || env_args+=("$key=${!key}")
+  done
+  [[ ${agent} != claude || ${claude_api_key_auth} -eq 1 || -z ${ANTHROPIC_API_KEY+x} ]] || :
+  if [[ ${agent} == claude && ${claude_api_key_auth} -eq 1 && -n ${ANTHROPIC_API_KEY+x} ]]; then env_args+=("ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"); fi
   [[ ${skip_agents_render} -eq 0 ]] || env_args+=(SINNIX_SKIP_AGENTS_RENDER=1)
   "${env_args[@]}" "$@"
 }
@@ -470,7 +505,7 @@ esac
 status=$?
 set -e
 
-if [[ ${status} -eq 0 ]]; then write_manifest completed 0; else write_manifest failed "${status}"; fi
+if [[ ${status} -eq 0 ]]; then write_manifest succeeded 0; else write_manifest failed "${status}"; fi
 job_finalized=1
 trap - EXIT
 exit "${status}"

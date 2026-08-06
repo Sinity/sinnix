@@ -10,9 +10,10 @@ from collections import Counter
 from typing import Any
 
 from . import SCHEMA
-from .joins import build_workload_rows
+from .joins import build_gateway_rows, build_workload_rows
 from .render import render_human
 from .sources.below import collect_below
+from .sources.agent_gateway import collect_agent_gateway
 from .sources.chrome import collect_chrome_io
 from .sources.polylogue import collect_polylogue_live_attempts
 from .sources.pressure import collect_blocked_tasks, collect_pressure
@@ -40,7 +41,8 @@ def collect_report(args: argparse.Namespace) -> dict[str, Any]:
     polylogue = collect_polylogue_live_attempts(args.limit)
     below = collect_below(args.since, args.duration, args.limit, args.offline)
     chrome_io = collect_chrome_io(args.offline, below, args.limit)
-    workload_rows = build_workload_rows(systemd_units, sinex, polylogue, below)
+    gateway = collect_agent_gateway(args.limit)
+    workload_rows = build_workload_rows(systemd_units, sinex, polylogue, below) + build_gateway_rows(gateway, below)
     return {
         "schema": SCHEMA,
         "generated_at": utc_now(),
@@ -66,6 +68,7 @@ def collect_report(args: argparse.Namespace) -> dict[str, Any]:
         "sinex_xtask_history": sinex,
         "polylogue_live_attempts": polylogue,
         "below": below,
+        "agent_gateway": gateway,
         "workload_rows": workload_rows,
         "gaps_summary": dict(
             Counter(gap for row in workload_rows for gap in row.get("gaps", []))

@@ -210,3 +210,11 @@ def build_workload_rows(
             }
         )
     return rows
+
+
+def build_gateway_rows(gateway: dict[str, Any], below: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = []
+    for job in gateway.get("jobs", []):
+        cgroup = job.get("cgroup")
+        rows.append({"workload_id": f"agent-gateway:{job.get('job_id')}", "source": "agent-gateway", "project": "agent-gateway", "kind": "attested-job", "name": job.get("job_id"), "run_id": job.get("job_id"), "status": job.get("lifecycle"), "unit": job.get("scope_unit"), "cgroup": cgroup, "resource_class": infer_resource_class_from_cgroup(cgroup or ""), "below": match_below(str(job.get("job_id")), cgroup, below), "metrics": {"work_item": job.get("work_item"), "quota_provenance": gateway.get("quota")}, "gaps": list(gateway.get("collector_failures", []))})
+    return rows

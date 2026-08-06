@@ -38,6 +38,7 @@ python3Packages.buildPythonApplication {
     "sinnix_observe.render"
     "sinnix_observe.runtime_inventory"
     "sinnix_observe.sources.below"
+    "sinnix_observe.sources.agent_gateway"
     "sinnix_observe.sources.chrome"
     "sinnix_observe.sources.polylogue"
     "sinnix_observe.sources.pressure"
