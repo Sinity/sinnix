@@ -99,8 +99,8 @@ mkFeatureModule {
             execStart = "${config.home.homeDirectory}/.local/bin/kitty-focus-opacity";
             restart = "always";
             serviceExtra.Environment = [
-              "KITTY_ACTIVE_BACKGROUND_OPACITY=0.70"
-              "KITTY_INACTIVE_BACKGROUND_OPACITY=0.20"
+              "KITTY_ACTIVE_BACKGROUND_OPACITY=0.75"
+              "KITTY_INACTIVE_BACKGROUND_OPACITY=0.70"
               "HYPRCTL_BIN=${pkgs.hyprland}/bin/hyprctl"
               "JQ_BIN=${pkgs.jq}/bin/jq"
               "KITTY_BIN=${pkgs.kitty}/bin/kitty"
