@@ -278,13 +278,15 @@ SYSTEMD_RUN_RECEIPT="${tmp}/systemd-run.receipt" \
   SINNIX_RUNTIME_INVENTORY_FILE="${tmp}/runtime-inventory.json" \
   XDG_RUNTIME_DIR="${tmp}/runtime" PATH="${tmp}/scope-bin:${PATH}" \
   "${scope}" agent --unit sinnix-agent-job-scope-test.scope \
-  --agent-property MemoryHigh=2G --agent-property CPUWeight=200 -- true </dev/null
+  --agent-property MemoryHigh=2G --agent-property CPUWeight=200 \
+  --agent-property RuntimeMaxSec=600 -- true </dev/null
 jq -Rsc -e '
   (split("\n") | map(select(length > 0))) as $args |
   ($args | map(select(startswith("--property=MemoryHigh=")))) ==
     ["--property=MemoryHigh=1G", "--property=MemoryHigh=2G"] and
   ($args | map(select(startswith("--property=CPUWeight=")))) ==
     ["--property=CPUWeight=100", "--property=CPUWeight=200"] and
+  ($args | index("--property=RuntimeMaxSec=600")) != null and
   ($args | index("--unit=sinnix-agent-job-scope-test.scope")) != null and
   ($args | index("--slice=agent-test.slice")) != null and
   ($args | index("--internal-supervise")) != null
