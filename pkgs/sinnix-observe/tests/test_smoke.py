@@ -76,6 +76,29 @@ def test_systemd_offline_returns_empty() -> None:
     assert row["active_state"] == "active"
 
 
+def test_noctalia_health_fixture(monkeypatch) -> None:
+    class Result:
+        returncode = 0
+        stdout = "Config is valid"
+        stderr = ""
+
+    monkeypatch.setattr(systemd, "run_cmd", lambda *_args, **_kwargs: Result())
+    health = systemd.collect_noctalia_health()
+    assert health == {
+        "status": "healthy",
+        "config_warning_count": 0,
+        "plugin_compatibility": "compatible",
+    }
+    row = systemd.unit_row(
+        "noctalia.service",
+        "user",
+        {"ActiveState": "active", "MemorySwapCurrent": "7", "NRestarts": "2"},
+    )
+    assert row["policy"]["memory_swap_current"] == "7"
+    assert row["policy"]["restart_count"] == "2"
+    assert row["health"]["plugin_compatibility"] == "compatible"
+
+
 def test_runtime_inventory_fallback_excludes_retired_slices(monkeypatch) -> None:
     monkeypatch.setenv("SINNIX_RUNTIME_INVENTORY_FILE", "/does/not/exist")
     inventory = runtime_inventory.load_inventory()

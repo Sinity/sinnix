@@ -80,6 +80,9 @@ rec {
       IOSchedulingClass = "best-effort";
       IOSchedulingPriority = 0;
     };
+    desktop-shell = mkClass "Interactive desktop shell UI" {
+      Slice = "desktop-shell.slice";
+    };
     developer-build = mkClass "User-initiated builds, tests, and Nix work" { };
     background-maintenance = mkClass "Bulk maintenance that should yield to interaction" {
       Nice = 10;
@@ -309,6 +312,12 @@ rec {
       session = {
         IOAccounting = true;
         IOWeight = 300;
+      };
+      desktop-shell = {
+        IOAccounting = true;
+        CPUWeight = 400;
+        IOWeight = 300;
+        MemoryLow = "512M";
       };
       backup = {
         IOAccounting = true;

@@ -30,12 +30,31 @@ mkFeatureModule {
   };
   configFn =
     {
+      config,
       pkgs,
       inputs,
       user,
       ...
     }:
+    let
+      nixosConfig = config;
+    in
     {
+      sinnix.runtime.surfaces.noctalia = {
+        unit = "noctalia.service";
+        manager = "user";
+        resourceClass = "desktop-shell";
+        workload = {
+          class = "interactive";
+          rationale = "Visible desktop shell must remain responsive while remaining cgroup-containable.";
+          processMatchers = [ "noctalia" ];
+        };
+        observe = {
+          enable = true;
+          restartable = true;
+        };
+      };
+
       home-manager.users.${user} =
         {
           config,
@@ -69,6 +88,11 @@ mkFeatureModule {
             enable = true;
             package = inputs.noctalia.packages.${pkgs.stdenv.hostPlatform.system}.default;
             systemd.enable = true;
+          };
+
+          systemd.user.services.noctalia.Service = lib.sinnix.mkRuntimeServiceConfig {
+            runtimeInventory = nixosConfig.sinnix.runtime.inventory;
+            unit = "noctalia.service";
           };
 
           home.file.".local/share/noctalia/pinned/official/timer".source = "${officialPlugins}/timer";
