@@ -149,6 +149,10 @@ case "${command}" in
     recorded_cgroup="$(jq -r '.launcher.cgroup' "${manifest}")"
     worktree="$(jq -r '.worktree' "${manifest}")"
     lifecycle="$(jq -r '.lifecycle' "${manifest}")"
+    if [[ ${lifecycle} == cancelled ]]; then
+      printf '{"job_id":"%s","cancelled":true,"already_terminal":true}\n' "${job_id}"
+      exit 0
+    fi
     [[ ${lifecycle} == accepted || ${lifecycle} == starting || ${lifecycle} == running ]] || {
       echo "refusing to interrupt non-live job ${job_id} (${lifecycle})" >&2
       exit 1
@@ -187,7 +191,10 @@ case "${command}" in
     chmod 0600 "$tmp"
     mv -f "$tmp" "${manifest}"
     "${systemctl_bin}" --user stop "${unit}"
-    # Repeated cancel is idempotent. Terminal state is persisted by the runner
-    # when its scope receives the stop signal.
+    tmp="$(mktemp "${manifest}.tmp.XXXXXX")"
+    jq --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.lifecycle="cancelled" | .updated_at=$at | .exit_status=143' "${manifest}" >"${tmp}"
+    chmod 0600 "${tmp}"
+    mv -f "${tmp}" "${manifest}"
+    printf '{"job_id":"%s","cancelled":true,"already_terminal":false}\n' "${job_id}"
     ;;
 esac
