@@ -161,47 +161,38 @@ class JobService:
             "project_id": request.project_id,
         }
 
-    def _live(self, manifest: dict[str, Any]) -> dict[str, Any]:
-        unit = manifest.get("launcher", {}).get("scope_unit")
-        if not isinstance(unit, str) or not unit:
-            return {"available": False, "reason": "missing attested unit"}
+    def _controller_status(self, job_id: str) -> dict[str, Any]:
+        if not self.config.agent_controller.is_file():
+            raise JobError("agent controller is unavailable")
         result = subprocess.run(
             [
-                "systemctl",
-                "--user",
-                "show",
-                unit,
-                "--property=ActiveState",
-                "--property=SubState",
-                "--property=MainPID",
-                "--property=ControlGroup",
-                "--property=InvocationID",
-                "--property=MemoryCurrent",
-                "--property=MemoryPeak",
-                "--property=MemoryHigh",
-                "--property=MemoryMax",
-                "--property=CPUWeight",
-                "--property=IOWeight",
-                "--property=RuntimeMaxUSec",
-                "--property=CPUUsageNSec",
-                "--property=Result",
+                str(self.config.agent_controller),
+                "--state-dir",
+                str(self.root),
+                "status",
+                "--job",
+                job_id,
             ],
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             check=False,
             text=True,
             env=self._environment(),
         )
         if result.returncode != 0:
-            return {"available": False, "reason": "unit unavailable"}
-        return {
-            "available": True,
-            **dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line),
-        }
+            raise JobError(result.stderr.strip() or "agent status lookup failed")
+        try:
+            value = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise JobError("agent controller returned malformed status") from exc
+        if value.get("schema_version") != 2 or value.get("job_id") != job_id:
+            raise JobError("agent controller returned unattested status")
+        return value
 
     def status(self, job_id: str) -> dict[str, Any]:
         self.principal.require(Capability.JOB_READ)
-        manifest = self._load(job_id)
+        self._load(job_id)
+        manifest = self._controller_status(job_id)
         sanitized = json.loads(json.dumps(manifest))
         for section in ("prompt", "artifacts"):
             if isinstance(sanitized.get(section), dict):
@@ -211,7 +202,6 @@ class JobService:
                     sanitized[section][key] = bool(sanitized[section][key])
         sanitized.pop("repo", None)
         sanitized.pop("worktree", None)
-        sanitized["live"] = self._live(manifest)
         return sanitized
 
     def list(self, limit: int = 100) -> dict[str, Any]:
