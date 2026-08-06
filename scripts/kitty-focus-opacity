@@ -3,8 +3,8 @@
 
 set -u
 
-active_opacity="${KITTY_ACTIVE_BACKGROUND_OPACITY:-0.70}"
-inactive_opacity="${KITTY_INACTIVE_BACKGROUND_OPACITY:-0.20}"
+active_opacity="${KITTY_ACTIVE_BACKGROUND_OPACITY:-0.75}"
+inactive_opacity="${KITTY_INACTIVE_BACKGROUND_OPACITY:-0.70}"
 runtime_dir="${KITTY_OPACITY_RUNTIME_DIR:-${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is required}}"
 socket_prefix="kitty-${USER:?USER is required}-"
 hyprctl_bin="${HYPRCTL_BIN:-hyprctl}"

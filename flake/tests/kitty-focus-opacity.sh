@@ -54,9 +54,9 @@ run_once
 
 expected="$test_root/expected.log"
 cat >"$expected" <<EOF
-@ --to unix:$test_root/runtime/kitty-test-42 set-background-opacity --match id:16 0.70
-@ --to unix:$test_root/runtime/kitty-test-41 set-background-opacity --all 0.20
-@ --to unix:$test_root/runtime/kitty-test-42 set-background-opacity --match not id:16 0.20
+@ --to unix:$test_root/runtime/kitty-test-42 set-background-opacity --match id:16 0.75
+@ --to unix:$test_root/runtime/kitty-test-41 set-background-opacity --all 0.70
+@ --to unix:$test_root/runtime/kitty-test-42 set-background-opacity --match not id:16 0.70
 EOF
 
 diff -u "$expected" "$test_root/kitty.log"
@@ -70,8 +70,8 @@ EOF
 run_once
 
 cat >"$expected" <<EOF
-@ --to unix:$test_root/runtime/kitty-test-41 set-background-opacity --all 0.20
-@ --to unix:$test_root/runtime/kitty-test-42 set-background-opacity --all 0.20
+@ --to unix:$test_root/runtime/kitty-test-41 set-background-opacity --all 0.70
+@ --to unix:$test_root/runtime/kitty-test-42 set-background-opacity --all 0.70
 EOF
 
 diff -u "$expected" "$test_root/kitty.log"
