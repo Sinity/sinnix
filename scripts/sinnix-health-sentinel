@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Emit deduplicated runtime health transitions from inventory declarations
+# runtimeInputs: bash coreutils findutils jq systemd
+set -euo pipefail
+
+inventory=/etc/sinnix/runtime-inventory.json
+runtime_root="${XDG_RUNTIME_DIR:-/run/sinnix}"
+state="$runtime_root/health-sentinel-state.json"
+output="$runtime_root/health-transitions.jsonl"
+failure_unit=
+failure_result=
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --inventory) inventory="$2"; shift 2 ;;
+    --state) state="$2"; shift 2 ;;
+    --output) output="$2"; shift 2 ;;
+    --failure-unit) failure_unit="$2"; shift 2 ;;
+    --failure-result) failure_result="$2"; shift 2 ;;
+    --check) shift ;;
+    *) echo "sinnix-health-sentinel: unknown option: $1" >&2; exit 64 ;;
+  esac
+done
+
+mkdir -p "$(dirname "$state")" "$(dirname "$output")"
+[ -s "$state" ] || printf '{}\n' > "$state"
+[ -e "$output" ] || : > "$output"
+chmod 0664 "$state" "$output"
+
+emit() {
+  local key="$1" type="$2" unit="$3" status="$4" evidence="$5" previous
+  previous="$(jq -r --arg key "$key" '.[$key] // ""' "$state")"
+  [ "$previous" = "$status" ] && return 0
+  jq --arg key "$key" --arg status "$status" '.[$key] = $status' "$state" > "$state.tmp"
+  chmod 0664 "$state.tmp"
+  mv -f "$state.tmp" "$state"
+  jq -cn \
+    --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --arg type "$type" --arg unit "$unit" --arg status "$status" --arg evidence "$evidence" \
+    '{schema:"sinnix-health-transition-v1",ts:$ts,type:$type,unit:$unit,status:$status,ok:($status == "healthy"),evidence:$evidence}' \
+    >> "$output"
+}
+
+if [ -n "$failure_unit" ]; then
+  emit "service:$failure_unit" service_failure "$failure_unit" failed "result=${failure_result:-unknown}"
+  exit 0
+fi
+
+now="$(date +%s)"
+while IFS=$'\t' read -r name path cadence; do
+  [ -n "$path" ] || continue
+  newest="$(find "$path" -type f -printf '%T@\n' 2>/dev/null | sort -nr | head -n 1 || true)"
+  if [ -z "$newest" ]; then
+    emit "capture:$name" capture_stale "$name" stale "path=$path;reason=no-file"
+    continue
+  fi
+  newest_sec="${newest%%.*}"
+  age=$((now - newest_sec))
+  if [ "$age" -gt $((cadence * 2)) ]; then
+    emit "capture:$name" capture_stale "$name" stale "path=$path;age_seconds=$age;cadence_seconds=$cadence"
+  else
+    emit "capture:$name" capture_stale "$name" healthy "path=$path;age_seconds=$age;cadence_seconds=$cadence"
+  fi
+done < <(jq -r '.captures[]? | select(.expectedCadenceSeconds != null) | [.name,.path,.expectedCadenceSeconds] | @tsv' "$inventory")
+
+while IFS=$'\t' read -r path warn fail; do
+  usage="$(df -P "$path" 2>/dev/null | awk 'NR == 2 {gsub(/%/,"",$5); print $5}' || true)"
+  [ -n "$usage" ] || usage=100
+  status=healthy
+  [ "$usage" -ge "$warn" ] && status=warning
+  [ "$usage" -ge "$fail" ] && status=failed
+  emit "mount:$path" mount_capacity "$path" "$status" "usage_percent=$usage;warn_percent=$warn;fail_percent=$fail"
+done < <(jq -r '.mounts[]? | [.path,.warnPct,.failPct] | @tsv' "$inventory")
+
+while IFS=$'\t' read -r manager unit; do
+  [ -n "$unit" ] || continue
+  if [ "$manager" = user ]; then
+    active="$(systemctl --user show "$unit" -p ActiveState --value 2>/dev/null || echo unknown)"
+  else
+    active="$(systemctl show "$unit" -p ActiveState --value 2>/dev/null || echo unknown)"
+  fi
+  status=healthy
+  [ "$active" = active ] || status=failed
+  emit "service:$manager:$unit" service_failure "$unit" "$status" "manager=$manager;active_state=$active"
+done < <(jq -r '.observedServices[]? | select(.kind == "service") | [.manager,.unit] | @tsv' "$inventory")

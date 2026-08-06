@@ -265,6 +265,51 @@ in
       text = builtins.toJSON config.sinnix.runtime.inventory;
       mode = "0444";
     };
-    environment.systemPackages = [ scriptPkgs.sinnix-heavy-lease ];
+    environment.systemPackages = [
+      scriptPkgs.sinnix-heavy-lease
+      scriptPkgs.sinnix-health-sentinel
+    ];
+    systemd.tmpfiles.rules = [ "d /run/sinnix 0775 root users -" ];
+    systemd.services = {
+      sinnix-health-sentinel = {
+        description = "Inventory-driven runtime health sentinel";
+        serviceConfig = {
+          Type = "oneshot";
+          ExecStart = "${scriptPkgs.sinnix-health-sentinel}/bin/sinnix-health-sentinel --check";
+        };
+      };
+      "sinnix-health-transition@" = {
+        description = "Record an inventory health transition for %i";
+        serviceConfig = {
+          Type = "oneshot";
+          ExecStart = "${scriptPkgs.sinnix-health-sentinel}/bin/sinnix-health-sentinel --failure-unit %i";
+        };
+      };
+    } // lib.mapAttrs' (_name: surface:
+      lib.nameValuePair (lib.removeSuffix ".service" surface.unit) {
+        unitConfig.OnFailure = [ "sinnix-health-transition@%n" ];
+      }
+    ) (lib.filterAttrs (_: surface: surface.manager == "system" && surface.kind == "service" && surface.observe.enable) surfaces);
+    systemd.timers.sinnix-health-sentinel = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnBootSec = "1min";
+        OnUnitActiveSec = "1min";
+        Persistent = true;
+      };
+    };
+    home-manager.users.${cfg.user.name}.systemd.user.services = {
+      "sinnix-health-transition@" = {
+        Unit.Description = "Record a user-manager health transition for %i";
+        Service = {
+          Type = "oneshot";
+          ExecStart = "${scriptPkgs.sinnix-health-sentinel}/bin/sinnix-health-sentinel --failure-unit %i";
+        };
+      };
+    } // lib.mapAttrs' (_name: surface:
+      lib.nameValuePair (lib.removeSuffix ".service" surface.unit) {
+        Unit.OnFailure = [ "sinnix-health-transition@%n" ];
+      }
+    ) (lib.filterAttrs (_: surface: surface.manager == "user" && surface.kind == "service" && surface.observe.enable) surfaces);
   };
 }
