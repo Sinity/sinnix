@@ -103,6 +103,29 @@ in
             default = "system";
             description = "Sinnix runtime resource class.";
           };
+          workload = {
+            class = lib.mkOption {
+              type = lib.types.enum [
+                "interactive"
+                "protected"
+                "sacrificial"
+                "substrate"
+                "unclassified"
+              ];
+              default = "unclassified";
+              description = "Workload policy class for runtime, telemetry, and pressure decisions.";
+            };
+            rationale = lib.mkOption {
+              type = lib.types.str;
+              default = "";
+              description = "Reason this surface has its workload class.";
+            };
+            processMatchers = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [ ];
+              description = "Bounded fallback matchers for children without their own unit identity.";
+            };
+          };
           observe = {
             enable = lib.mkOption {
               type = lib.types.bool;

@@ -22,6 +22,7 @@ memory_high=""
 memory_max=""
 cpu_weight=""
 io_weight=""
+timeout_seconds="14400"
 internal_agent_scope=0
 
 usage() {
@@ -55,6 +56,7 @@ Attested job options:
   --memory-max <limit>
   --cpu-weight <1-10000>
   --io-weight <1-10000>
+  --timeout-seconds <seconds>  Enforced by systemd RuntimeMaxSec
 EOF
 }
 
@@ -128,6 +130,10 @@ while [[ $# -gt 0 ]]; do
     io_weight="${2:?missing value for --io-weight}"
     shift 2
     ;;
+  --timeout-seconds)
+    timeout_seconds="${2:?missing value for --timeout-seconds}"
+    shift 2
+    ;;
   --internal-agent-scope)
     internal_agent_scope=1
     shift
@@ -188,8 +194,14 @@ fi
   echo "invalid --job-id: ${job_id}" >&2
   exit 2
 }
+[[ ${timeout_seconds} =~ ^[0-9]+$ && ${timeout_seconds} -ge 30 && ${timeout_seconds} -le 86400 ]] || {
+  echo "invalid --timeout-seconds: ${timeout_seconds}" >&2
+  exit 2
+}
 
-mkdir -p "${job_state_dir}" "$(dirname "${log_file}")"
+umask 077
+mkdir -p -m 0700 "${job_state_dir}" "$(dirname "${log_file}")"
+chmod 0700 "${job_state_dir}"
 [[ -z ${json_file} ]] || mkdir -p "$(dirname "${json_file}")"
 [[ -z ${last_file} ]] || mkdir -p "$(dirname "${last_file}")"
 
@@ -251,6 +263,7 @@ write_manifest() {
     --arg memory_max "${memory_max}" \
     --arg cpu_weight "${cpu_weight}" \
     --arg io_weight "${io_weight}" \
+    --arg timeout_seconds "${timeout_seconds}" \
     '{schema_version: 1, job_id: $job_id, created_at: $created_at, updated_at: $updated_at,
       lifecycle: $lifecycle, backend: $backend, model: $model, effort: $effort,
       repo: $repo, worktree: $worktree, branch: $branch,
@@ -258,7 +271,7 @@ write_manifest() {
       artifacts: {log: $log_path, json: $json_path, final: $final_path},
       declared: {role: $role, work_item: $work_item},
       launcher: {pid: ($launcher_pid | tonumber), scope_unit: $scope_unit, cgroup: $scope_cgroup},
-      resource_overrides: {MemoryHigh: $memory_high, MemoryMax: $memory_max, CPUWeight: $cpu_weight, IOWeight: $io_weight},
+      resource_overrides: {MemoryHigh: $memory_high, MemoryMax: $memory_max, CPUWeight: $cpu_weight, IOWeight: $io_weight, RuntimeMaxSec: $timeout_seconds},
       exit_status: (if $exit_status == "" then null else ($exit_status | tonumber) end)}' >"${tmp}"
   mv -f "${tmp}" "${manifest}"
 }
@@ -276,9 +289,11 @@ if [[ ${internal_agent_scope} -eq 0 && -z ${SINNIX_AGENT_SCOPED:-} ]]; then
   [[ -z ${memory_max} ]] || scope_args+=(--property "MemoryMax=${memory_max}")
   [[ -z ${cpu_weight} ]] || scope_args+=(--property "CPUWeight=${cpu_weight}")
   [[ -z ${io_weight} ]] || scope_args+=(--property "IOWeight=${io_weight}")
+  scope_args+=(--property "RuntimeMaxSec=${timeout_seconds}")
   inner_args=(
     "$0" --internal-agent-scope --job-id "${job_id}" --job-state-dir "${job_state_dir}"
     --agent "${agent}" --workdir "${workdir}" --prompt-file "${prompt_file}" --log-file "${log_file}"
+    --timeout-seconds "${timeout_seconds}"
   )
   [[ -z ${model} ]] || inner_args+=(--model "${model}")
   [[ -z ${reasoning_effort} ]] || inner_args+=(--reasoning-effort "${reasoning_effort}")

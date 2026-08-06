@@ -38,9 +38,10 @@
   sinnix.services = {
     agent-gateway = {
       enable = true;
-      http = {
+      tunnel = {
         enable = true;
-        autoStart = false;
+        approvedManifestHash = "7078f104e482052bd0f2f3728a3beb1eaba3985a3895962ca553562c0e2aa3a5";
+        tunnelId = "tunnel_6a2eb972c3bc8191be437670f455ebd9";
       };
     };
     transmission = {

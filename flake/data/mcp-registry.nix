@@ -205,7 +205,6 @@ let
       "recall"
       "deep-evidence"
       "code-semantic"
-      "agent-control"
     ];
     browser = [
       "remote-core"
@@ -213,7 +212,6 @@ let
       "deep-evidence"
       "code-semantic"
       "browser-mcp"
-      "agent-control"
     ];
     orchestrate = [
       "remote-core"

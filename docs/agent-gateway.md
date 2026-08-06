@@ -1,123 +1,107 @@
 # Agent gateway
 
-The Sinnix agent gateway is a trusted local MCP surface for repository work.
-It gives an external coding agent a bounded vocabulary for materializing a
-repository, inspecting and editing files, running commands, collecting large
-outputs as artifacts, and following background jobs across process restarts.
+The Sinnix agent gateway is one official-SDK MCP implementation with three capability profiles. It exposes canonical project and runtime evidence, reuses the attested transient-systemd agent substrate, and keeps remote transport outside the MCP process.
 
-It is an operator tool, not a security sandbox. The gateway assumes that the
-configured agent is trusted to work inside the repositories it exposes. Its
-rails make operations inspectable and recoverable:
+## Architecture
 
-- repositories are materialized under a dedicated state root;
-- every call is appended to a hash-chained audit ledger;
-- foreground output is bounded and larger results become artifacts;
-- background jobs retain metadata and logs on disk;
-- host commands are a separate, disabled-by-default authority;
-- repository write access is explicit per configured repository.
+```text
+ChatGPT remote-readonly connector
+    -> OpenAI Secure MCP Tunnel
+    -> tunnel-client user service
+    -> stdio: sinnix-agent-gateway-mcp --profile remote-readonly
+    -> shared project, job, artifact, audit, and observe services
+
+Local coordinators
+    -> sinnix-agent-control-mcp
+    -> stdio: sinnix-agent-gateway --profile local-agent-control
+    -> run_agent_prompt.sh and agent_job_control.sh
+    -> transient systemd scope, manifest, cgroup, and bounded artifacts
+```
+
+There is no gateway-owned HTTP server, SSE parser, listening port, PID-only job authority, repository registry, or command registry. The official OpenAI tunnel owns the remote connection and launches the MCP server over stdio. The gateway uses the official MCP Python SDK v2 for protocol parsing and typed tool schemas.
+
+## Capability profiles
+
+| Profile | Intended caller | Read projects, jobs, artifacts, audit, machine | Launch and cancel jobs | Write projects |
+| --- | --- | --- | --- | --- |
+| `remote-readonly` | Current ChatGPT connector | Yes | No | No |
+| `local-agent-control` | Trusted local coordinators | Yes | Yes | No |
+| `remote-operator` | Local testing and a future write-capable remote workspace | Yes | Yes | Yes, only for projects with `remoteWrite = true` |
+
+Tool registration follows the profile. A denied capability is absent from `tools/list`, and the underlying service enforces the same capability again. `remote-readonly` therefore cannot obtain a write path by calling an unlisted function directly.
+
+Ordinary full and browser agent profiles do not receive `agent-control`. Explicit orchestration profiles do. This keeps process mutation out of broad always-on tool surfaces.
 
 ## Interfaces
 
-The flake exports the package directly:
+The configured commands are:
 
 ```bash
-nix run .#sinnix-agent-gateway -- info
+sinnix-agent-gateway-mcp --profile remote-readonly
+sinnix-agent-control-mcp
+sinnix-agent-gateway-schema remote-readonly
+sinnix-agent-gateway --config /etc/sinnix/agent-gateway.json --profile remote-readonly info
 ```
 
-Configured MCP clients use the generated stdio wrapper:
+`sinnix-agent-gateway-schema` emits a canonical, sorted tool manifest and SHA-256. Compare this hash with both the live tunnel `tools/list` response and the frozen ChatGPT connector snapshot whenever tools change. Updating the local server does not update an already approved connector schema.
 
-```bash
-sinnix-agent-gateway-mcp
-```
+The common read surface includes:
 
-An optional loopback HTTP endpoint exposes the same JSON-RPC tool surface for
-local connector experiments:
+- `gateway_status` and `machine_report`
+- `project_list`, `project_tree`, `project_read`, `project_search`, and `project_diff`
+- `job_list`, `job_status`, and `job_read_output`
+- `artifact_list` and `artifact_read`
+- `audit_tail` and `audit_verify`
 
-```bash
-sinnix-agent-gateway \
-  --config /etc/sinnix/agent-gateway/config.json \
-  http --host 127.0.0.1 --port 3020
-```
+`local-agent-control` adds `agent_launch` and `job_cancel`. `remote-operator` also adds `project_write` and `project_apply_patch`.
 
-The HTTP transport accepts MCP JSON-RPC requests at `/mcp`, returning ordinary
-JSON or a single-message server-sent event when requested by the client.
+## Project and path authority
+
+`sinnix.projects.entries` is the only project registry. It is derived from the existing project paths in `modules/foundation.nix` and rendered into `/etc/sinnix/agent-gateway.json`. Remote visibility and writes are explicit per project.
+
+Project paths are always relative. Reads and writes reject absolute paths, parent traversal, sensitive path components, and symlink escapes. Tree traversal does not follow symlinks. File reads apply the requested line range before the byte bound, so late ranges do not silently return the beginning of a large file. Git and ripgrep output is written to a temporary file and read back through a fixed response bound instead of being fully buffered in memory.
+
+## Jobs and artifacts
+
+The gateway does not implement another job runner. `agent_launch` calls the shared `run_agent_prompt.sh`, which creates a transient systemd scope and a versioned manifest containing the stable job ID, cgroup, unit, worktree, prompt digest, resource overrides, timeout, lifecycle, and artifact locations. `RuntimeMaxSec` enforces the declared timeout. Cancellation accepts only an attested job ID and verifies the unit, PID, cgroup, and working directory before stopping the scope.
+
+Only an explicit environment allowlist reaches launched agents. Unrelated exported secrets are not inherited. Job state and generated prompt, manifest, log, and artifact metadata are private to the user.
+
+Artifacts use random opaque UUIDs. The public metadata omits host paths, and reads use offset plus a bounded byte count. Malformed job and artifact records remain visible as malformed evidence instead of disappearing from listings.
+
+## Audit and observe
+
+Audit events live in a private SQLite WAL ledger. Appends use an immediate transaction and chain each canonical event to the previous hash. Concurrent MCP calls therefore serialize the ledger head without rereading the complete history. `audit_verify` checks the full chain.
+
+The tunnel is registered in `/etc/sinnix/runtime-inventory.json` when enabled. Its workload classification, restartability, and process matcher are part of the same runtime-surface declaration consumed by `sinnix-observe` and machine telemetry. `machine_report` delegates to `sinnix-observe` and bounds the returned JSON.
 
 ## NixOS configuration
 
+The local MCP implementation is enabled independently of remote transport:
+
 ```nix
-{
-  sinnix.services.agent-gateway = {
-    enable = true;
-    yolo = true;
-    allowArbitraryCommands = true;
-
-    repositories."example/project" = {
-      url = "https://github.com/example/project.git";
-      defaultRef = "master";
-      allowWrite = true;
-      tasks.check = {
-        command = [ "nix" "flake" "check" ];
-        description = "Evaluate and build the project checks.";
-        timeout = 1800;
-        background = true;
-        risk = "high";
-      };
-    };
-  };
-}
+sinnix.services.agent-gateway.enable = true;
 ```
 
-The module installs the gateway binary and MCP wrapper, renders matching
-system/user configuration files, and can optionally define a user service for
-the loopback HTTP endpoint.
+After creating a tunnel and a dedicated runtime key with Read and Use permissions:
 
-## Tool model
-
-The tool surface falls into six groups:
-
-| Group | Representative tools | Role |
-| --- | --- | --- |
-| Orientation | `gateway_info`, `gateway_guide` | Discover configured repositories, tasks, limits, and workflow guidance. |
-| Repository lifecycle | `repo_materialize`, `repo_status`, `repo_tree` | Create and inspect durable working copies. |
-| Read/write | `repo_read_file`, `repo_write_file`, `repo_search`, `repo_apply_patch` | Perform structured repository operations. |
-| Verification | `repo_diff`, `run_command`, `run_task` | Inspect changes and execute arbitrary or declared checks. |
-| Durable work | `job_status`, `job_list`, `artifact_list`, `artifact_read` | Follow background processes and retrieve large outputs. |
-| Authority | `host_run`, ordinary Git commands in a workspace | Perform explicitly enabled host or remote operations. |
-
-A normal client flow is:
-
-1. Read `gateway_guide`.
-2. Materialize a configured repository and ref.
-3. Inspect with tree/search/read tools.
-4. Apply edits and inspect the resulting diff.
-5. Run a configured task or command.
-6. Pack large results as artifacts or export a Git bundle when another
-   environment needs its own checkout.
-
-Configured task metadata is returned by `gateway_info`, allowing clients to
-prefer the repository's known verification commands and move expensive work to
-durable background jobs.
-
-## State and recovery
-
-```text
-~/.local/state/sinnix-agent-gateway/
-  mirrors/      bare repository mirrors
-  workspaces/   mutable materialized checkouts
-  artifacts/    large outputs and repository bundles
-  jobs/         job metadata, stdout, stderr, and exit status
-  audit.jsonl   hash-chained call ledger
+```nix
+sinnix.services.agent-gateway.tunnel = {
+  enable = true;
+  tunnelId = "tunnel_...";
+  approvedManifestHash = "...";
+};
 ```
 
-The on-disk job and artifact model is intentionally independent of one MCP
-connection. A restarted gateway can still report completed work and serve its
-logs. The audit ledger records the request boundary even when the command it
-launched outlives the original client.
+The runtime key is the agenix secret `openai-tunnel-runtime-key`. Tunnel-management credentials are not installed in the steady-state service. The pinned `tunnel-client` runs in foreground mode under one systemd user service. Its health, readiness, metrics, and UI endpoint listens on loopback port 3088 by default.
 
-## Trust boundary
+## Deployment and proof
 
-`yolo` mode is appropriate only for a trusted local operator and trusted agent.
-It deliberately permits useful repository commands rather than simulating a
-high-assurance sandbox. Host commands require separate opt-in, and the HTTP
-transport should remain loopback-only unless an authenticated tunnel provides
-the external boundary.
+1. Run `switch` so the pinned SDK, tunnel client, generated configuration, runtime inventory, and user units are one generation.
+2. Compare `sinnix-agent-gateway-schema remote-readonly` with a direct stdio `tools/list` call.
+3. Enable the tunnel only after its ID and dedicated runtime credential exist.
+4. Verify `http://127.0.0.1:3088/healthz` and `/readyz`, then inspect the tunnel logs through systemd.
+5. Create or refresh the ChatGPT connector from the tunnel, approve the exact read-only tool snapshot, and invoke `gateway_status` plus a bounded project read from ChatGPT.
+6. Record the approved manifest hash in the Nix option and compare it during subsequent deployments.
+
+The old prototype state may be retained under the canonical state root's `legacy/` directory for forensic inspection. It must not be loaded as active jobs, artifacts, repositories, tasks, or audit data.

@@ -273,9 +273,11 @@ def test_cgroup_memory_rows_insert_into_sqlite(tmp_path) -> None:
         collector.insert_cgroup_memory_stats(conn, rows)
         row = conn.execute(
             """
-            SELECT label, memory_current_bytes, memory_anon_bytes, memory_max_bytes
+            SELECT label, memory_current_bytes, memory_anon_bytes, memory_max_bytes,
+                   memory_events_high, memory_events_max, memory_events_oom,
+                   memory_events_oom_kill
             FROM cgroup_memory_sample
             """
         ).fetchone()
 
-    assert row == ("system.nix", 100, 64, 4096)
+    assert row == ("system.nix", 100, 64, 4096, None, None, None, None)

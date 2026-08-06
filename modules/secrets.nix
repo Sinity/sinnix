@@ -42,6 +42,7 @@ let
     "deepgram-api-key"
     "firecrawl-api-key"
     "openai-api-key"
+    "openai-tunnel-runtime-key"
     "sinex-api-admin-token"
   ];
 

@@ -95,15 +95,25 @@ job_status() {
 
 case "${command}" in
   list)
-    mkdir -p "${state_dir}"
+    umask 077
+    mkdir -p -m 0700 "${state_dir}"
+    chmod 0700 "${state_dir}"
     shopt -s nullglob
     manifests=("${state_dir}"/*.json)
     if [[ ${#manifests[@]} -eq 0 ]]; then
-      printf '[]\n'
+      printf '{"jobs":[],"malformed_records":[]}\n'
     else
+      results=()
+      malformed=()
       for source_manifest in "${manifests[@]}"; do
-        job_status "${source_manifest}"
-      done | jq -s 'sort_by(.created_at)'
+        if jq -e '.schema_version == 1 and (.job_id | type == "string")' "${source_manifest}" >/dev/null 2>&1; then
+          results+=("$(job_status "${source_manifest}")")
+        else
+          malformed+=("$(basename "${source_manifest}")")
+        fi
+      done
+      printf '%s\n' "${results[@]}" | jq -s --argjson malformed "$(printf '%s\n' "${malformed[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')" \
+        '{jobs: sort_by(.created_at), malformed_records: $malformed}'
     fi
     ;;
   status)
