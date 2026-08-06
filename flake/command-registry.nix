@@ -87,11 +87,18 @@ let
     rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-1}"
     rebuild_cores="''${SINNIX_REBUILD_CORES:-16}"
   '';
+  rebuildLease = name: ''
+    if [ "''${SINNIX_HEAVY_LEASE_ENTERED:-0}" != 1 ]; then
+      exec ${pkgs.coreutils}/bin/env SINNIX_HEAVY_LEASE_ENTERED=1 \
+        ${scriptPkgs.sinnix-heavy-lease}/bin/sinnix-heavy-lease \
+        --project sinnix --work-item ${lib.escapeShellArg "host-${name}"} -- "$0" "$@"
+    fi
+  '';
   # Single source of truth for rebuild concurrency + resource containment, so
   # `nix run .#switch` (this file's appCommands) and the devshell `switch`
   # binary (flake/dev-shell.nix's mkNhCommand) can't drift apart: both must
-  # serialize on the same lock and run under the same idle scheduling, or one
-  # path becomes an escape hatch around the other's containment.
+  # acquire the host-wide lease before the rebuild lock and run under the same
+  # idle scheduling, or one path becomes an escape hatch around containment.
   rebuildLock = name: ''
     exec 9>/tmp/sinnix-switch.lock
     if ! ${pkgs.util-linux}/bin/flock --nonblock 9; then
@@ -363,6 +370,7 @@ let
 in
 {
   inherit
+    rebuildLease
     rebuildLock
     rebuildContainmentFlags
     rebuildDefaultArgs
@@ -440,6 +448,7 @@ in
       description = "Build a QEMU VM from current configuration and launch it (nixos-rebuild build-vm)";
       script = ''
         ${resolveFlakeDir}
+        ${rebuildLease "test-vm"}
         ${rebuildLock "test-vm"}
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
@@ -464,6 +473,7 @@ in
       description = "Test configuration without applying it to the system (nh os test)";
       script = ''
         ${resolveFlakeDir}
+        ${rebuildLease "test-system"}
         ${rebuildLock "test-system"}
         ${avoidRepoCwdForActivation}
         ${localInputOverrideArgs}
@@ -487,6 +497,7 @@ in
       description = "Build + set boot default, activate on next reboot (nh os boot)";
       script = ''
         ${resolveFlakeDir}
+        ${rebuildLease "boot"}
         ${rebuildLock "boot"}
         ${avoidRepoCwdForActivation}
         ${localInputOverrideArgs}
@@ -514,6 +525,7 @@ in
       description = "Apply configuration changes to the system (nh os switch)";
       script = ''
         ${resolveFlakeDir}
+        ${rebuildLease "switch"}
         ${rebuildLock "switch"}
         ${avoidRepoCwdForActivation}
         ${localInputOverrideArgs}
