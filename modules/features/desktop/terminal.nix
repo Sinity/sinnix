@@ -57,6 +57,9 @@ mkFeatureModule {
               confirm_os_window_close = 0;
               allow_remote_control = "socket-only";
               listen_on = "unix:$XDG_RUNTIME_DIR/kitty-${user}-{kitty_pid}";
+              # Make only Kitty's themed background translucent. Glyphs keep
+              # full opacity and focus changes do not alter this value.
+              background_opacity = 0.72;
               open_url_with = "xdg-open";
               detect_urls = "yes";
               url_prefixes = "http https file ftp";
