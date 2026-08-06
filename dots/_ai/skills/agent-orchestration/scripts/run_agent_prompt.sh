@@ -205,7 +205,10 @@ fi
   echo "invalid --timeout-seconds: ${timeout_seconds}" >&2
   exit 2
 }
-[[ ${credential_profile} == subscription || ${credential_profile} == api ]] || { echo "invalid --credential-profile" >&2; exit 2; }
+[[ ${credential_profile} == subscription || ${credential_profile} == api ]] || {
+  echo "invalid --credential-profile" >&2
+  exit 2
+}
 [[ ${credential_profile} != api ]] || claude_api_key_auth=1
 
 umask 077
@@ -245,6 +248,11 @@ event() {
   jq -cn --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg job_id "$job_id" --arg lifecycle "$lifecycle" --arg scope "${SINNIX_AGENT_SCOPE_UNIT:-${scope_unit}}" --arg cgroup "$scope_cgroup" --arg status "$exit_status" \
     '{schema_version:2,at:$at,job_id:$job_id,lifecycle:$lifecycle,scope_unit:$scope,cgroup:$cgroup,exit_status:(if $status == "" then null else ($status|tonumber) end)}' >>"$events"
   chmod 0600 "$events"
+  if [[ ${SINNIX_AGENT_JOURNAL:-1} == 1 ]] && command -v logger >/dev/null 2>&1; then
+    printf 'MESSAGE=agent job %s entered %s\nSINNIX_JOB_ID=%s\nSINNIX_JOB_LIFECYCLE=%s\nSINNIX_SCOPE_UNIT=%s\nSINNIX_CGROUP=%s\n' \
+      "$job_id" "$lifecycle" "$job_id" "$lifecycle" "${SINNIX_AGENT_SCOPE_UNIT:-${scope_unit}}" "$scope_cgroup" |
+      logger --journald 2>/dev/null || true
+  fi
 }
 
 write_manifest() {

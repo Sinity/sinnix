@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export SINNIX_AGENT_JOURNAL=0
 
-skill_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-repo_root="$(git -C "${skill_dir}" rev-parse --show-toplevel)"
+skill_dir="${SINNIX_AGENT_TEST_SKILL_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)}"
+repo_root="${SINNIX_AGENT_TEST_REPO_ROOT:-$(git -C "${skill_dir}" rev-parse --show-toplevel)}"
 runner="${skill_dir}/scripts/run_agent_prompt.sh"
 control="${skill_dir}/scripts/agent_job_control.sh"
 scope_exec="${repo_root}/scripts/sinnix-agent-scope-exec"
@@ -15,6 +16,14 @@ cleanup() {
   rm -rf "${tmp}"
 }
 trap cleanup EXIT
+
+make_executable() {
+  local target
+  for target in "$@"; do
+    sed -i "1c#!$(command -v bash)" "$target"
+    chmod +x "$target"
+  done
+}
 
 mkdir -p "${tmp}/bin" "${tmp}/bridge-bin" "${tmp}/scope-bin" "${tmp}/repo" \
   "${tmp}/state" "${tmp}/output" "${tmp}/proc" "${tmp}/scope-receipts" \
@@ -104,7 +113,7 @@ else
   exit 64
 fi
 EOF
-chmod +x "${tmp}/bin/"*
+make_executable "${tmp}/bin/"*
 
 run_job() {
   local id="$1"
@@ -229,7 +238,7 @@ while [[ $# -gt 0 && $1 != -- ]]; do shift; done
 shift
 exec "$@"
 EOF
-chmod +x "${tmp}/bridge-bin/sinnix-scope"
+make_executable "${tmp}/bridge-bin/sinnix-scope"
 # The child shell, not this test process, expands the attestation variables.
 # shellcheck disable=SC2016
 env -u SINNIX_AGENT_SCOPED -u SINNIX_AGENT_SCOPE_UNIT -u SINNIX_AGENT_SCOPE_CGROUP \
@@ -249,7 +258,7 @@ cat >"${tmp}/scope-bin/systemd-run" <<'EOF'
 set -euo pipefail
 printf '%s\n' "$@" >"${SYSTEMD_RUN_RECEIPT:?}"
 EOF
-chmod +x "${tmp}/scope-bin/systemd-run"
+make_executable "${tmp}/scope-bin/systemd-run"
 cat >"${tmp}/runtime-inventory.json" <<'EOF'
 {
   "commandClasses": {

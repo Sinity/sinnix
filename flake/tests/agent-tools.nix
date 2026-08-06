@@ -651,11 +651,89 @@ in
           '';
         }
       );
+      heavyWorkLeaseFixture =
+        pkgs.runCommand "heavy-work-lease-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.gawk
+              pkgs.gnused
+              pkgs.jq
+              pkgs.util-linux
+            ];
+          }
+          ''
+            export HOME="$TMPDIR/home"
+            mkdir -p "$HOME"
+            export PATH=${
+              lib.makeBinPath [
+                pkgs.bash
+                pkgs.coreutils
+                pkgs.gawk
+                pkgs.gnused
+                pkgs.jq
+                pkgs.util-linux
+              ]
+            }
+            cp ${../../scripts/sinnix-heavy-lease} "$TMPDIR/sinnix-heavy-lease"
+            chmod +x "$TMPDIR/sinnix-heavy-lease"
+            sed -i "1c#!${pkgs.bash}/bin/bash" "$TMPDIR/sinnix-heavy-lease"
+            ${pkgs.bash}/bin/bash ${../../flake/tests/heavy-work-lease.sh} "$TMPDIR/sinnix-heavy-lease"
+            touch "$out"
+          '';
+      agentJobHandleFixture =
+        pkgs.runCommand "agent-job-handle-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.findutils
+              pkgs.git
+              pkgs.gawk
+              pkgs.gnugrep
+              pkgs.gnused
+              pkgs.jq
+              pkgs.util-linux
+            ];
+          }
+          ''
+            export HOME="$TMPDIR/home"
+            mkdir -p "$HOME"
+            export PATH=${
+              lib.makeBinPath [
+                pkgs.bash
+                pkgs.coreutils
+                pkgs.findutils
+                pkgs.git
+                pkgs.gawk
+                pkgs.gnugrep
+                pkgs.gnused
+                pkgs.jq
+                pkgs.util-linux
+              ]
+            }
+            fixture_source="$TMPDIR/source"
+            fixture_skill="$fixture_source/dots/_ai/skills/agent-orchestration"
+            mkdir -p "$fixture_skill/scripts" "$fixture_source/scripts"
+            cp ${../../dots/_ai/skills/agent-orchestration/scripts/run_agent_prompt.sh} "$fixture_skill/scripts/run_agent_prompt.sh"
+            cp ${../../dots/_ai/skills/agent-orchestration/scripts/agent_job_control.sh} "$fixture_skill/scripts/agent_job_control.sh"
+            cp ${../../scripts/sinnix-agent-scope-exec} "$fixture_source/scripts/sinnix-agent-scope-exec"
+            cp ${../../scripts/sinnix-scope} "$fixture_source/scripts/sinnix-scope"
+            chmod +x "$fixture_skill/scripts/"* "$fixture_source/scripts/"*
+            patchShebangs "$fixture_skill/scripts" "$fixture_source/scripts"
+            export SINNIX_AGENT_TEST_REPO_ROOT="$fixture_source"
+            export SINNIX_AGENT_TEST_SKILL_DIR="$fixture_skill"
+            ${pkgs.bash}/bin/bash ${../../dots/_ai/skills/agent-orchestration/tests/test_agent_job_handles.sh}
+            touch "$out"
+          '';
     in
     {
       checks = {
         agent-resource-policy = agentResourcePolicy;
         agent-npm-bootstrap-recovery = agentNpmBootstrapRecovery;
+        heavy-work-lease = heavyWorkLeaseFixture;
+        agent-job-handles = agentJobHandleFixture;
       };
 
       heavyChecks = {

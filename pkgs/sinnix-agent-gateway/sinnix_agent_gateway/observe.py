@@ -23,28 +23,49 @@ class ObserveService:
             "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
             "XDG_RUNTIME_DIR": os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000"),
         }
-        with tempfile.TemporaryFile() as output:
-            result = subprocess.run(
-                [self.config.observe_command, "--format", "json", "--limit", "20"],
-                stdin=subprocess.DEVNULL,
-                stdout=output,
-                stderr=subprocess.STDOUT,
-                timeout=20,
-                check=False,
-                env=environment,
-            )
-            output.seek(0)
-            data = output.read(self.config.max_result_bytes + 1)
+        try:
+            with tempfile.TemporaryFile() as output:
+                result = subprocess.run(
+                    [self.config.observe_command, "--format", "json", "--limit", "20"],
+                    stdin=subprocess.DEVNULL,
+                    stdout=output,
+                    stderr=subprocess.STDOUT,
+                    timeout=20,
+                    check=False,
+                    env=environment,
+                )
+                output.seek(0)
+                data = output.read(self.config.max_result_bytes + 1)
+        except subprocess.TimeoutExpired:
+            return {
+                "available": False,
+                "failure_class": "collector_timeout",
+                "reason": "sinnix-observe timed out",
+            }
         if result.returncode != 0:
-            return {"available": False, "failure_class": "collector_failed", "reason": "sinnix-observe failed"}
+            return {
+                "available": False,
+                "failure_class": "collector_failed",
+                "reason": "sinnix-observe failed",
+            }
         if len(data) > self.config.max_result_bytes:
-            return {"available": False, "failure_class": "response_bound", "reason": "sinnix-observe exceeded response bound"}
+            return {
+                "available": False,
+                "failure_class": "response_bound",
+                "reason": "sinnix-observe exceeded response bound",
+            }
         try:
             return {"available": True, "report": json.loads(data)}
         except json.JSONDecodeError:
-            return {"available": False, "failure_class": "malformed_report", "reason": "sinnix-observe returned malformed JSON"}
+            return {
+                "available": False,
+                "failure_class": "malformed_report",
+                "reason": "sinnix-observe returned malformed JSON",
+            }
 
-    def gateway_status(self, profile: str, capability_contract_hash: str) -> dict[str, Any]:
+    def gateway_status(
+        self, profile: str, capability_contract_hash: str
+    ) -> dict[str, Any]:
         self.principal.require(Capability.MACHINE_READ)
         inventory_available = self.config.runtime_inventory.is_file()
         return {

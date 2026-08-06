@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import concurrent.futures
+import dataclasses
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -10,10 +12,10 @@ import anyio
 import pytest
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
-
+from sinnix_agent_gateway import observe as observe_module
 from sinnix_agent_gateway.app import Runtime, create_server
 from sinnix_agent_gateway.capabilities import PolicyError
-from sinnix_agent_gateway.cli import build_manifest
+from sinnix_agent_gateway.cli import build_manifest, migrate_legacy
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.projects import ProjectError
 
@@ -47,7 +49,9 @@ def test_official_sdk_profiles_have_stable_distinct_manifests(tmp_path: Path) ->
     assert {"agent_launch", "job_cancel"} <= local_names
     assert {"project_write", "project_apply_patch"} <= operator_names
     assert readonly["sha256"] != local["sha256"] != operator["sha256"]
-    assert all("inputSchema" in row and "outputSchema" in row for row in readonly["tools"])
+    assert all(
+        "inputSchema" in row and "outputSchema" in row for row in readonly["tools"]
+    )
     assert all(
         row["annotations"]
         == {
@@ -128,6 +132,16 @@ def test_project_read_applies_late_line_range_before_byte_bound(tmp_path: Path) 
     assert "line-0251" in result["content"]
 
 
+def test_project_subprocess_output_is_bounded_before_storage(tmp_path: Path) -> None:
+    cfg = dataclasses.replace(config(tmp_path), max_result_bytes=4096)
+    runtime = Runtime.create(cfg, "remote-readonly")
+    output = runtime.projects._run_bounded(
+        [sys.executable, "-c", "import sys; sys.stdout.write('x' * 10000000)"],
+        cfg.projects["fixture"].path,
+    )
+    assert len(output.encode()) == 4096
+
+
 def test_project_tree_and_read_reject_symlink_escape(tmp_path: Path) -> None:
     cfg = config(tmp_path)
     outside = tmp_path / "outside.txt"
@@ -159,7 +173,9 @@ def test_remote_project_tools_hide_local_only_agent_state(tmp_path: Path) -> Non
         with pytest.raises(ProjectError):
             runtime.projects.read("fixture", str(path.relative_to(project)))
 
-    tree_paths = {entry["path"] for entry in runtime.projects.tree("fixture")["entries"]}
+    tree_paths = {
+        entry["path"] for entry in runtime.projects.tree("fixture")["entries"]
+    }
     assert not tree_paths.intersection(
         str(path.relative_to(project)) for path in private_files
     )
@@ -181,6 +197,15 @@ def test_audit_chain_survives_concurrent_writers(tmp_path: Path) -> None:
     assert verification["valid"] is True
     assert verification["checked"] == 240
     assert len(verification["head_hash"]) == 64
+
+
+def test_runtime_audit_carries_returned_job_correlation(tmp_path: Path) -> None:
+    runtime = Runtime.create(config(tmp_path), "local-agent-control")
+    runtime.execute(
+        "agent_launch", lambda: {"job_id": "job-correlation", "secret": "hidden"}
+    )
+    payload = runtime.audit.tail(1)["events"][0]["payload"]
+    assert payload == {"job_id": "job-correlation", "correlation_id": "job-correlation"}
 
 
 def test_state_is_private_and_artifact_ids_are_opaque(tmp_path: Path) -> None:
@@ -206,7 +231,9 @@ def test_malformed_job_records_are_visible(tmp_path: Path) -> None:
     assert result["malformed_records"][0]["record"] == "broken.json"
 
 
-def test_agent_environment_is_explicitly_allowlisted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_agent_environment_is_explicitly_allowlisted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("SINNIX_GATEWAY_PROBE_SECRET", "must-not-propagate")
     runtime = Runtime.create(config(tmp_path), "local-agent-control")
     environment = runtime.jobs._environment()
@@ -241,3 +268,29 @@ def test_config_load_uses_one_project_contract(tmp_path: Path) -> None:
     assert loaded.projects["fixture"].path == project
     assert loaded.projects["fixture"].remote_read is True
     assert loaded.projects["fixture"].remote_write is False
+
+
+def test_legacy_state_is_archived_automatically_and_privately(tmp_path: Path) -> None:
+    cfg = config(tmp_path)
+    legacy = tmp_path / "legacy-state"
+    legacy.mkdir(mode=0o755)
+    (legacy / "job.json").write_text('{"pid": 42}')
+    result = migrate_legacy(cfg, legacy)
+    destination = cfg.state_dir / result["destination"]
+    assert result["migrated"] is True
+    assert not legacy.exists()
+    assert oct(destination.stat().st_mode & 0o777) == "0o700"
+    assert oct((destination / "job.json").stat().st_mode & 0o777) == "0o600"
+
+
+def test_machine_report_timeout_is_a_typed_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = Runtime.create(config(tmp_path), "remote-readonly")
+
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired("sinnix-observe", 20)
+
+    monkeypatch.setattr(observe_module.subprocess, "run", timeout)
+    result = runtime.observe.machine_report()
+    assert result["failure_class"] == "collector_timeout"
