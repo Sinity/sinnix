@@ -145,6 +145,46 @@ def test_project_subprocess_output_is_bounded_before_storage(tmp_path: Path) -> 
     assert len(output.encode()) == 4096
 
 
+def test_project_diff_rejects_option_injection_before_external_driver(
+    tmp_path: Path,
+) -> None:
+    cfg = config(tmp_path)
+    project = cfg.projects["fixture"].path
+    marker = tmp_path / "external-diff-ran"
+    driver = tmp_path / "external-diff"
+    driver.write_text(
+        f"#!{sys.executable}\n"
+        "from pathlib import Path\n"
+        f"Path({str(marker)!r}).touch()\n"
+    )
+    driver.chmod(0o700)
+    subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+    subprocess.run(["git", "config", "user.name", "Gateway Test"], cwd=project, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "gateway-test@example.invalid"],
+        cwd=project,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "diff.hostile.command", str(driver)],
+        cwd=project,
+        check=True,
+    )
+    (project / ".gitattributes").write_text("tracked.txt diff=hostile\n")
+    (project / "tracked.txt").write_text("before\n")
+    subprocess.run(["git", "add", ".gitattributes", "tracked.txt"], cwd=project, check=True)
+    subprocess.run(["git", "commit", "-qm", "fixture"], cwd=project, check=True)
+    (project / "tracked.txt").write_text("after\n")
+
+    runtime = Runtime.create(cfg, "remote-readonly")
+    with pytest.raises(ProjectError, match="invalid git ref"):
+        runtime.projects.diff("fixture", "--ext-diff")
+    assert not marker.exists()
+    result = runtime.projects.diff("fixture", "HEAD")
+    assert "before" in result["diff"] and "after" in result["diff"]
+    assert not marker.exists()
+
+
 def test_project_tree_and_read_reject_symlink_escape(tmp_path: Path) -> None:
     cfg = config(tmp_path)
     outside = tmp_path / "outside.txt"

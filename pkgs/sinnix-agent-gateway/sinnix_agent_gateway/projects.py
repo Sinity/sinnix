@@ -279,11 +279,22 @@ class ProjectService:
 
     def diff(self, project_id: str, ref: str | None = None) -> dict[str, Any]:
         project = self._project(project_id)
-        if ref is not None and not re.fullmatch(r"[A-Za-z0-9_./-]{1,200}", ref):
-            raise ProjectError("invalid git ref")
-        command = ["git", "diff", "--no-ext-diff", "--"]
+        resolved_ref = None
         if ref is not None:
-            command = ["git", "diff", "--no-ext-diff", ref, "--"]
+            if ref.startswith("-") or not re.fullmatch(
+                r"[A-Za-z0-9_./-]{1,200}", ref
+            ):
+                raise ProjectError("invalid git ref")
+            resolved_ref = self._run_bounded(
+                ["git", "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}"],
+                project.path,
+            ).strip()
+            if not re.fullmatch(r"[0-9a-f]{40,64}", resolved_ref):
+                raise ProjectError("git ref did not resolve to a commit")
+        command = ["git", "diff", "--no-ext-diff", "--no-textconv"]
+        if resolved_ref is not None:
+            command.append(resolved_ref)
+        command.append("--")
         return {
             "project_id": project_id,
             "diff": self._run_bounded(command, project.path),

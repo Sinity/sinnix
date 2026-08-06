@@ -119,6 +119,7 @@ python3Packages.buildPythonApplication {
   dependencies = [ mcp-sdk ];
 
   nativeCheckInputs = [
+    git
     python3Packages.pytest
     ripgrep
   ];
