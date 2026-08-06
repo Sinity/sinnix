@@ -34,6 +34,7 @@ in
     ./tests/vm.nix
     ./tests/host-build.nix
     ./tests/runtime.nix
+    ./tests/health-sentinel.nix
   ];
 
   perSystem =

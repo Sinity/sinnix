@@ -23,6 +23,7 @@ in
                   MemoryMax = "900M";
                   Nice = 7;
                 };
+                observe.enable = true;
               };
               runtime-policy-user = {
                 unit = "runtime-policy-user.service";
@@ -31,8 +32,11 @@ in
                 resources = {
                   MemoryLow = "768M";
                 };
+                observe.enable = true;
               };
             };
+            systemd.services.runtime-policy-system = { };
+            home-manager.users.sinity.systemd.user.services.runtime-policy-user = { };
           })
         ];
         assertions = config: [
@@ -56,6 +60,14 @@ in
             assertion =
               config.sinnix.runtime.inventory.surfaces.runtime-policy-user.effectiveResources.CPUWeight == 400;
             message = "resource-class defaults must remain under user overrides";
+          }
+          {
+            assertion = config.systemd.services.runtime-policy-system.unitConfig.OnFailure == [ "sinnix-health-transition@%n" ];
+            message = "observed system services must receive the system health transition template";
+          }
+          {
+            assertion = config.home-manager.users.sinity.systemd.user.services.runtime-policy-user.Unit.OnFailure == [ "sinnix-health-transition@%n" ];
+            message = "observed user services must receive the user health transition template";
           }
         ];
       };

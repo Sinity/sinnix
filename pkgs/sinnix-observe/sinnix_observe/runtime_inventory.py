@@ -74,7 +74,9 @@ def workload_for_unit(unit: str) -> dict[str, Any]:
     for surface in surfaces().values():
         if surface.get("unit") == unit:
             workload = surface.get("workload")
-            return dict(workload) if isinstance(workload, dict) else {"class": "unknown"}
+            return (
+                dict(workload) if isinstance(workload, dict) else {"class": "unknown"}
+            )
     return {
         "kind": "unknown",
         "lifecycle": "unknown",
