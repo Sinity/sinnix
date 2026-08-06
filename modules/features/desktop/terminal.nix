@@ -1,4 +1,9 @@
-{ mkFeatureModule, config, ... }@args:
+{
+  mkFeatureModule,
+  config,
+  pkgs,
+  ...
+}@args:
 mkFeatureModule {
   path = [
     "desktop"
@@ -12,6 +17,9 @@ mkFeatureModule {
       user,
       ...
     }:
+    let
+      repoRoot = config.sinnix.paths.projectRoot;
+    in
     {
       home-manager.users.${user} =
         { config, ... }:
@@ -20,6 +28,10 @@ mkFeatureModule {
         in
         {
           home.sessionVariables.TERMINAL = "kitty";
+          home.file.".local/bin/kitty-focus-opacity" = {
+            source = config.lib.file.mkOutOfStoreSymlink "${repoRoot}/scripts/kitty-focus-opacity";
+            force = true;
+          };
           # Stylix injects an include pointing at a generated Nix-store color
           # file. Kitty's config watcher can fan that into huge inotify watch
           # counts, which breaks Hyprland-spawned app scopes.
@@ -57,9 +69,8 @@ mkFeatureModule {
               confirm_os_window_close = 0;
               allow_remote_control = "socket-only";
               listen_on = "unix:$XDG_RUNTIME_DIR/kitty-${user}-{kitty_pid}";
-              # Make only Kitty's themed background translucent. Glyphs keep
-              # full opacity and focus changes do not alter this value.
               background_opacity = 0.72;
+              dynamic_background_opacity = "yes";
               open_url_with = "xdg-open";
               detect_urls = "yes";
               url_prefixes = "http https file ftp";
@@ -81,6 +92,18 @@ mkFeatureModule {
 
               map ctrl+shift+enter launch --type=tab --cwd=current
             '';
+          };
+
+          systemd.user.services.kitty-focus-opacity = lib.sinnix.systemd.mkGraphicalUserService {
+            description = "Adjust Kitty background opacity on Hyprland focus changes";
+            execStart = "${config.home.homeDirectory}/.local/bin/kitty-focus-opacity";
+            restart = "always";
+            serviceExtra.Environment = [
+              "HYPRCTL_BIN=${pkgs.hyprland}/bin/hyprctl"
+              "JQ_BIN=${pkgs.jq}/bin/jq"
+              "KITTY_BIN=${pkgs.kitty}/bin/kitty"
+              "SOCAT_BIN=${pkgs.socat}/bin/socat"
+            ];
           };
         };
     };
