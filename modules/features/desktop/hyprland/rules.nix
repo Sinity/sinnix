@@ -148,6 +148,10 @@ let
   # Application-Specific Rules
   # ========================================
   appRules = [
+    (mkRule "kitty-clear-transparency" {
+      class = "^(kitty)$";
+      noBlur = true;
+    })
     (mkRule "clipse-manager" {
       class = "^(clipse)$";
       float = true;

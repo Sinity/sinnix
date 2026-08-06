@@ -69,7 +69,7 @@ mkFeatureModule {
               confirm_os_window_close = 0;
               allow_remote_control = "socket-only";
               listen_on = "unix:$XDG_RUNTIME_DIR/kitty-${user}-{kitty_pid}";
-              background_opacity = 0.72;
+              background_opacity = 0.20;
               dynamic_background_opacity = "yes";
               open_url_with = "xdg-open";
               detect_urls = "yes";
@@ -99,6 +99,8 @@ mkFeatureModule {
             execStart = "${config.home.homeDirectory}/.local/bin/kitty-focus-opacity";
             restart = "always";
             serviceExtra.Environment = [
+              "KITTY_ACTIVE_BACKGROUND_OPACITY=0.35"
+              "KITTY_INACTIVE_BACKGROUND_OPACITY=0.20"
               "HYPRCTL_BIN=${pkgs.hyprland}/bin/hyprctl"
               "JQ_BIN=${pkgs.jq}/bin/jq"
               "KITTY_BIN=${pkgs.kitty}/bin/kitty"
