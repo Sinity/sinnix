@@ -16,7 +16,7 @@ let
 in
 mkServiceModule {
   name = "ops-reducer";
-  description = "Read-only Sinnix operator current-state reducer";
+  description = "Sinnix operator current-state reducer and bounded action receipts";
   configFn =
     {
       cfg,
@@ -29,7 +29,7 @@ mkServiceModule {
           message = "sinnix.services.ops-reducer.intervalSeconds must not poll collectors faster than 5 seconds";
         }
       ];
-      environment.systemPackages = [ reducer quota quota.passthru.codexbar ];
+      environment.systemPackages = [ reducer quota quota.passthru.codexbar scriptPkgs.sinnix-pressure-park ];
       systemd.tmpfiles.rules = [ "d /realm/state/sinnix-ops 0700 ${userName} users -" ];
       sinnix.runtime.surfaces.ops-reducer = {
         unit = "sinnix-ops-reducer.service";
@@ -67,12 +67,12 @@ mkServiceModule {
         };
         systemd.user.services.sinnix-ops-reducer = {
           Unit = {
-            Description = "Sinnix read-only operator current-state reducer";
+            Description = "Sinnix operator current-state reducer and bounded actions";
             After = [ "sinnix-ops-reducer.socket" ];
           };
           Service = {
             Type = "simple";
-            ExecStart = "${reducer}/bin/sinnix-ops-reducer --runtime-dir %t --state-dir ${stateDir} --observe-command ${observe}/bin/sinnix-observe --interval ${toString cfg.intervalSeconds}";
+            ExecStart = "${reducer}/bin/sinnix-ops-reducer --runtime-dir %t --state-dir ${stateDir} --inventory /etc/sinnix/runtime-inventory.json --agent-controller /home/${userName}/.config/hermes/skills/agent-orchestration/scripts/agent_job_control.sh --observe-command ${observe}/bin/sinnix-observe --interval ${toString cfg.intervalSeconds}";
             Restart = "on-failure";
             RestartSec = "2s";
             NoNewPrivileges = true;
