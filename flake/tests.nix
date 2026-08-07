@@ -37,6 +37,7 @@ in
     ./tests/health-sentinel.nix
     ./tests/ops-reducer.nix
     ./tests/quota.nix
+    ./tests/noctalia.nix
   ];
 
   perSystem =

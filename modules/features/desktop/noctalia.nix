@@ -101,6 +101,7 @@ mkFeatureModule {
 
           home.file.".local/share/noctalia/pinned/official/timer".source = "${officialPlugins}/timer";
           home.file.".local/share/noctalia/pinned/community/keybind-cheatsheet".source = "${communityPlugins}/keybind-cheatsheet";
+          home.file.".local/share/noctalia/local/sinnix-ops".source = mkDotsFile "/noctalia/plugins/sinnix-ops";
 
           home.packages = with pkgs; [
             nvibrant # digital vibrance (nvibrant plugin)

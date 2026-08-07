@@ -1,0 +1,50 @@
+id = "sinity/sinnix-ops"
+name = "Sinnix Operations"
+version = "0.1.0"
+plugin_api = 9
+author = "Sinity"
+license = "MIT"
+tags = ["bar", "panel", "system", "observability"]
+icon = "monitor_heart"
+description = "Read-only current state from the Sinnix operations reducer."
+
+[[service]]
+id = "bridge"
+entry = "service.luau"
+
+[[setting]]
+key = "endpoint"
+type = "string"
+label_key = "settings.endpoint.label"
+description_key = "settings.endpoint.description"
+default = "http://127.0.0.1:3090"
+
+[[setting]]
+key = "token_path"
+type = "file"
+label_key = "settings.token_path.label"
+description_key = "settings.token_path.description"
+default = "$XDG_RUNTIME_DIR/sinnix/ops.token"
+
+[[setting]]
+key = "stale_seconds"
+type = "int"
+label_key = "settings.stale_seconds.label"
+description_key = "settings.stale_seconds.description"
+default = 30
+min = 5
+max = 300
+step = 5
+
+[[widget]]
+id = "capsule"
+entry = "bar.luau"
+
+[[panel]]
+id = "now"
+entry = "panel.luau"
+width = 680
+height = 620
+placement = "floating"
+position = "top_right"
+open_near_click = true
