@@ -10,6 +10,7 @@ let
   userName = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   reducer = scriptPkgs.sinnix-ops-reducer;
+  quota = scriptPkgs.sinnix-quota;
   observe = scriptPkgs.sinnix-observe;
   stateDir = "/realm/state/sinnix-ops";
 in
@@ -28,7 +29,7 @@ mkServiceModule {
           message = "sinnix.services.ops-reducer.intervalSeconds must not poll collectors faster than 5 seconds";
         }
       ];
-      environment.systemPackages = [ reducer ];
+      environment.systemPackages = [ reducer quota quota.passthru.codexbar ];
       systemd.tmpfiles.rules = [ "d /realm/state/sinnix-ops 0700 ${userName} users -" ];
       sinnix.runtime.surfaces.ops-reducer = {
         unit = "sinnix-ops-reducer.service";
@@ -49,7 +50,7 @@ mkServiceModule {
         };
       };
       home-manager.users.${userName} = {
-        home.packages = [ reducer ];
+        home.packages = [ reducer quota quota.passthru.codexbar ];
         systemd.user.sockets.sinnix-ops-reducer = {
           Unit = {
             Description = "Sinnix operator reducer Unix and loopback sockets";

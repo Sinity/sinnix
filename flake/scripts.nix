@@ -211,6 +211,8 @@ let
     };
 
     sinnix-ops-reducer = pkgs.callPackage ../pkgs/sinnix-ops-reducer/pkg.nix { };
+
+    sinnix-quota = pkgs.callPackage ../pkgs/sinnix-quota/pkg.nix { };
   };
 
   packageSet = scriptPackages // externalPackages;
