@@ -729,6 +729,26 @@ in
             ${pkgs.bash}/bin/bash ${../../dots/_ai/skills/agent-orchestration/tests/test_agent_job_handles.sh}
             touch "$out"
           '';
+      mcpSweepFixture =
+        pkgs.runCommand "mcp-sweep-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.findutils
+              pkgs.gawk
+              pkgs.jq
+              pkgs.procps
+            ];
+          }
+          ''
+            sweep="$TMPDIR/sinnix-mcp-sweep"
+            cp ${../../scripts/sinnix-mcp-sweep} "$sweep"
+            chmod +x "$sweep"
+            patchShebangs "$sweep"
+            ${pkgs.bash}/bin/bash ${../../flake/tests/mcp-sweep.sh} "$sweep"
+            touch "$out"
+          '';
     in
     {
       checks = {
@@ -736,6 +756,7 @@ in
         agent-npm-bootstrap-recovery = agentNpmBootstrapRecovery;
         heavy-work-lease = heavyWorkLeaseFixture;
         agent-job-handles = agentJobHandleFixture;
+        mcp-sweep = mcpSweepFixture;
       };
 
       heavyChecks = {

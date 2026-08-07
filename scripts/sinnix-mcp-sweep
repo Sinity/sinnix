@@ -31,16 +31,114 @@ EOF
 done
 
 capture_dir="${SINNIX_MCP_SWEEP_CAPTURE_DIR:-/realm/data/captures/machine/agent-mcp-sweep}"
+proc_root="${SINNIX_MCP_SWEEP_PROC_ROOT:-/proc}"
+job_state_dir="${SINNIX_AGENT_JOB_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/sinnix/agent-jobs}"
 if ! mkdir -p "$capture_dir" 2>/dev/null; then
   capture_dir="${XDG_STATE_HOME:-$HOME/.local/state}/sinnix/agent-mcp-sweep"
   mkdir -p "$capture_dir"
 fi
 log_file="$capture_dir/sweep.jsonl"
-user_manager_pid="$(systemctl --user show --property=MainPID --value 2>/dev/null || true)"
 now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 host="$(hostname 2>/dev/null || echo unknown)"
+before_count=0
+before_pss_anon_kib=0
 killed=0
 matched=0
+uncertain=0
+
+proc_field() {
+  local pid="$1" field="$2"
+  [ -r "$proc_root/$pid/status" ] || return 1
+  awk -v wanted="$field" '$1 == wanted ":" { print $2; exit }' "$proc_root/$pid/status"
+}
+
+proc_cgroup() {
+  local pid="$1"
+  [ -r "$proc_root/$pid/cgroup" ] || return 1
+  awk -F: '$1 == "0" { print $3; exit }' "$proc_root/$pid/cgroup"
+}
+
+proc_pss_anon_kib() {
+  local pid="$1" value
+  value="$(awk '/^Pss_Anon:/ { print $2; exit }' "$proc_root/$pid/smaps_rollup" 2>/dev/null || true)"
+  [[ "$value" =~ ^[0-9]+$ ]] && printf '%s\n' "$value" || printf '0\n'
+}
+
+is_active_lifecycle() {
+  case "$1" in
+    starting|running|cancel_requested) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+active_identity_matches() {
+  local pid="$1" process_cgroup manifest lifecycle expected_cgroup launcher_pid actual_pid
+  process_cgroup="$(proc_cgroup "$pid" 2>/dev/null || true)"
+  [ -n "$process_cgroup" ] || return 1
+  for manifest in "$job_state_dir"/*.json; do
+    [ -r "$manifest" ] || continue
+    lifecycle="$(jq -r '.lifecycle // empty' "$manifest" 2>/dev/null || true)"
+    is_active_lifecycle "$lifecycle" || continue
+    expected_cgroup="$(jq -r '.launcher.cgroup // .actual_agent.cgroup // empty' "$manifest" 2>/dev/null || true)"
+    if [ -n "$expected_cgroup" ] && [ "$process_cgroup" = "$expected_cgroup" ]; then
+      return 0
+    fi
+    launcher_pid="$(jq -r '.launcher.pid // empty' "$manifest" 2>/dev/null || true)"
+    actual_pid="$(jq -r '.actual_agent.pid // empty' "$manifest" 2>/dev/null || true)"
+    if [ "$pid" = "$launcher_pid" ] || [ "$pid" = "$actual_pid" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+terminal_identity_matches() {
+  local pid="$1" process_cgroup manifest lifecycle expected_cgroup launcher_pid actual_pid
+  process_cgroup="$(proc_cgroup "$pid" 2>/dev/null || true)"
+  [ -n "$process_cgroup" ] || return 1
+  for manifest in "$job_state_dir"/*.json; do
+    [ -r "$manifest" ] || continue
+    lifecycle="$(jq -r '.lifecycle // empty' "$manifest" 2>/dev/null || true)"
+    case "$lifecycle" in
+      completed|failed|cancelled|timed_out) ;;
+      *) continue ;;
+    esac
+    expected_cgroup="$(jq -r '.launcher.cgroup // .actual_agent.cgroup // empty' "$manifest" 2>/dev/null || true)"
+    [ "$process_cgroup" = "$expected_cgroup" ] || continue
+    launcher_pid="$(jq -r '.launcher.pid // empty' "$manifest" 2>/dev/null || true)"
+    actual_pid="$(jq -r '.actual_agent.pid // empty' "$manifest" 2>/dev/null || true)"
+    [ -n "$launcher_pid" ] && [ -e "$proc_root/$launcher_pid" ] && continue
+    [ -n "$actual_pid" ] && [ -e "$proc_root/$actual_pid" ] && continue
+    return 0
+  done
+  return 1
+}
+
+is_attested_agent_scope() {
+  case "$1" in
+    /user.slice/user-*.slice/user@*.service/sinnix-agent-job-*.scope|/user.slice/user-*.slice/user@*.service/sinnix-agent-*.scope) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+record_summary() {
+  local after_count after_pss_anon_kib
+  after_count=0
+  after_pss_anon_kib=0
+  while read -r pid; do
+    [ -n "$pid" ] || continue
+    is_candidate "$(cat "$proc_root/$pid/cmdline" 2>/dev/null | tr '\0' ' ')" || continue
+    after_count=$((after_count + 1))
+    after_pss_anon_kib=$((after_pss_anon_kib + $(proc_pss_anon_kib "$pid")))
+  done < <(find "$proc_root" -mindepth 1 -maxdepth 1 -type d -name '[0-9]*' -printf '%f\n' 2>/dev/null)
+  jq -cn \
+    --arg ts "$now" --arg host "$host" \
+    --arg before_count "$before_count" --arg before_pss_anon_kib "$before_pss_anon_kib" \
+    --arg after_count "$after_count" --arg after_pss_anon_kib "$after_pss_anon_kib" \
+    --arg matched "$matched" --arg killed "$killed" --arg uncertain "$uncertain" \
+    '{ts:$ts,host:$host,event:"summary",before:{count:($before_count|tonumber),pss_anon_kib:($before_pss_anon_kib|tonumber)},after:{count:($after_count|tonumber),pss_anon_kib:($after_pss_anon_kib|tonumber)},matched:($matched|tonumber),killed:($killed|tonumber),uncertain:($uncertain|tonumber)}' \
+    >> "$log_file"
+}
 
 is_candidate() {
   case "$1" in
@@ -53,22 +151,29 @@ is_candidate() {
   esac
 }
 
-is_orphan() {
-  [ "$1" = "1" ] || { [ -n "$user_manager_pid" ] && [ "$1" = "$user_manager_pid" ]; }
-}
-
-ps -eo pid=,ppid=,rss=,comm=,args= |
-  while read -r pid ppid rss comm args; do
+while read -r pid; do
     [ -n "${pid:-}" ] || continue
+    [ -r "$proc_root/$pid/cmdline" ] || continue
+    args="$(cat "$proc_root/$pid/cmdline" 2>/dev/null | tr '\0' ' ')"
     is_candidate "$args" || continue
+    rss="$(proc_field "$pid" VmRSS 2>/dev/null || printf '0')"
+    pss_anon_kib="$(proc_pss_anon_kib "$pid")"
+    before_count=$((before_count + 1))
+    before_pss_anon_kib=$((before_pss_anon_kib + pss_anon_kib))
+    ppid="$(awk '/^PPid:/ { print $2; exit }' "$proc_root/$pid/status" 2>/dev/null || printf '0')"
+    comm="$(awk '/^Name:/ { print $2; exit }' "$proc_root/$pid/status" 2>/dev/null || printf 'unknown')"
+    process_cgroup="$(proc_cgroup "$pid" 2>/dev/null || true)"
     matched=$((matched + 1))
     action="keep"
     reason="attached"
-    if is_orphan "$ppid"; then
+    if active_identity_matches "$pid"; then
+      reason="attested-live-session"
+    elif is_attested_agent_scope "$process_cgroup" && terminal_identity_matches "$pid"; then
       reason="orphaned"
       action="kill"
-    elif [ "$orphans_only" -eq 0 ]; then
-      reason="matched"
+    else
+      reason="uncertain-identity"
+      uncertain=$((uncertain + 1))
     fi
 
     if [ "$action" = "kill" ]; then
@@ -84,14 +189,18 @@ ps -eo pid=,ppid=,rss=,comm=,args= |
       --arg pid "$pid" \
       --arg ppid "$ppid" \
       --arg rss_kib "$rss" \
+      --arg pss_anon_kib "$pss_anon_kib" \
       --arg comm "$comm" \
+      --arg cgroup "$process_cgroup" \
       --arg action "$action" \
       --arg reason "$reason" \
       --arg args "$args" \
-      '{ts:$ts,host:$host,pid:($pid|tonumber),ppid:($ppid|tonumber),rss_kib:($rss_kib|tonumber),comm:$comm,action:$action,reason:$reason,args:$args}' \
+      '{ts:$ts,host:$host,pid:($pid|tonumber),ppid:($ppid|tonumber),rss_kib:($rss_kib|tonumber),pss_anon_kib:($pss_anon_kib|tonumber),comm:$comm,cgroup:$cgroup,action:$action,reason:$reason,args:$args}' \
       >> "$log_file"
 
     if [ "$quiet" -eq 0 ]; then
       printf '%s pid=%s ppid=%s rss=%sKiB %s %s\n' "$action" "$pid" "$ppid" "$rss" "$comm" "$reason"
     fi
-  done
+done < <(find "$proc_root" -mindepth 1 -maxdepth 1 -type d -name '[0-9]*' -printf '%f\n' 2>/dev/null)
+
+record_summary
