@@ -17,6 +17,9 @@ output="$({
   SINNIX_PREFLIGHT_PERSISTED_PREFIXES="$tmp/home/persisted" \
   SINNIX_PREFLIGHT_MEMINFO="$tmp/meminfo" \
   SINNIX_PREFLIGHT_MEMORY_PRESSURE="$tmp/pressure" \
+  SINNIX_PREFLIGHT_NVIDIA_MODULE_VERSION=570.1 \
+  SINNIX_PREFLIGHT_NVIDIA_USERSPACE_VERSION=560.1 \
+  SINNIX_PREFLIGHT_SNAPSHOT_FREE_KIB=100 \
   "$preflight" reboot
 } 2>&1)"
 status=$?
@@ -24,6 +27,8 @@ set -e
 [ "$status" -eq 0 ]
 grep -Fq 'BLOCK unpersisted-valuables: 1 large unpersisted files' <<<"$output"
 grep -Fq 'largest=105906176 bytes' <<<"$output"
+grep -Fq 'BLOCK nvidia-pairing: module=570.1, userspace=560.1' <<<"$output"
+grep -Fq 'BLOCK snapshot-headroom: free=100 KiB' <<<"$output"
 ! grep -Fq 'private.bin' <<<"$output"
 
 set +e
