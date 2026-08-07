@@ -383,6 +383,7 @@ in
             imagemagick
             jq
             libnotify
+            tesseract
             wl-clipboard
             wl-screenrec
           ];
