@@ -101,7 +101,6 @@ mkFeatureModule {
             serviceExtra.Environment = [
               "KITTY_ACTIVE_BACKGROUND_OPACITY=0.90"
               "KITTY_INACTIVE_BACKGROUND_OPACITY=0.70"
-              "HYPRCTL_BIN=${pkgs.hyprland}/bin/hyprctl"
               "JQ_BIN=${pkgs.jq}/bin/jq"
               "KITTY_BIN=${pkgs.kitty}/bin/kitty"
               "SOCAT_BIN=${pkgs.socat}/bin/socat"
