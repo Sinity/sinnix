@@ -75,6 +75,13 @@ mkFeatureModule {
       "ripgrep-all/config.jsonc" = "ripgrep-all/config.jsonc";
       "marimo/marimo.toml" = "marimo/marimo.toml";
     };
+    homeFile = {
+      ".config/claude/agents" = {
+        source = "claude/agents";
+        recursive = true;
+        force = true;
+      };
+    };
   };
   configFn =
     {

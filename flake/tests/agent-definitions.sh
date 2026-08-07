@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+agents_dir=${1:?agent definitions directory}
+schemas_dir="$agents_dir/schemas"
+test -d "$agents_dir" -a -d "$schemas_dir"
+
+for name in lane triage review judge; do
+  file="$agents_dir/$name.md"
+  test -f "$file"
+  frontmatter=$(awk 'BEGIN { in_fm=0 } /^---$/ { in_fm++; next } in_fm == 1 { print } in_fm == 2 { exit }' "$file")
+  printf '%s\n' "$frontmatter" | grep -q "^name: $name$"
+  printf '%s\n' "$frontmatter" | grep -q '^model: '
+  printf '%s\n' "$frontmatter" | grep -q '^effort: '
+  printf '%s\n' "$frontmatter" | grep -q '^tools: \['
+  printf '%s\n' "$frontmatter" | grep -q '^disallowedTools: \['
+done
+
+lane_fm=$(awk 'BEGIN { n=0 } /^---$/ { n++; next } n == 1 { print } n == 2 { exit }' "$agents_dir/lane.md")
+printf '%s\n' "$lane_fm" | grep -q '^isolation: worktree$'
+printf '%s\n' "$lane_fm" | grep -q 'Write'
+
+for name in triage judge; do
+  test -f "$schemas_dir/$name.schema.json"
+  jq -e '.type == "object" and .additionalProperties == false and (.required | length) > 0' \
+    "$schemas_dir/$name.schema.json" >/dev/null
+done
+
+jq -e '.verdict == "confirmed" and .confidence == 1 and (.evidence | length) == 1 and (.unsupported | length) == 0 and ((keys | sort) == ["confidence", "evidence", "unsupported", "verdict"])' \
+  >/dev/null <<<'{"verdict":"confirmed","confidence":1,"evidence":["fixture:1"],"unsupported":[]}'
+jq -e '.verdict == "unsupported" and .refutation_attempted == true and (.evidence | length) == 1 and (.unsupported | length) == 1 and ((keys | sort) == ["confidence", "evidence", "refutation_attempted", "unsupported", "verdict"])' \
+  >/dev/null <<<'{"verdict":"unsupported","confidence":0.2,"evidence":["fixture:2"],"refutation_attempted":true,"unsupported":["missing live route"]}'
+
+# Disposable fanout: a lane's committed output survives worker cleanup, while
+# the triage contract's write capabilities remain explicitly denied.
+fanout=$(mktemp -d)
+trap 'rm -rf "$fanout"' EXIT
+git -C "$fanout" init -q
+git -C "$fanout" config user.email fixture@example.invalid
+git -C "$fanout" config user.name fixture
+printf 'lane result\n' > "$fanout/result"
+git -C "$fanout" add result
+git -C "$fanout" commit -qm 'fixture: preserve lane result'
+commit=$(git -C "$fanout" rev-parse HEAD)
+test "$(git -C "$fanout" show --format=%s --no-patch "$commit")" = 'fixture: preserve lane result'
+triage_fm=$(awk 'BEGIN { n=0 } /^---$/ { n++; next } n == 1 { print } n == 2 { exit }' "$agents_dir/triage.md")
+printf '%s\n' "$triage_fm" | grep -q 'Write'
+printf '%s\n' "$triage_fm" | grep -q 'Edit'
+test -f "$fanout/result"
