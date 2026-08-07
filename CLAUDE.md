@@ -319,8 +319,11 @@ config in `secrets.nix` (repo root).
 
 - Applying config: `switch` (devshell) or `nix develop --command switch`.
   Risky changes: `test-vm` first, or `boot` + reboot. All rebuild paths share
-  one lock, nix-build.slice containment, and a memory preflight
-  (`SINNIX_REBUILD_SKIP_PRESSURE_PREFLIGHT=1` to override deliberately).
+  one lock, nix-build.slice containment, and the read-only
+  `sinnix-preflight switch` gate. Reboot inspection uses
+  `sinnix-preflight reboot`; `SINNIX_PREFLIGHT_FORCE=1` or the existing
+  `SINNIX_REBUILD_SKIP_PRESSURE_PREFLIGHT=1` override is deliberate and
+  explicit.
 - `check` = curated default tier (cheap; `nix flake check` traversal has
   wedged this host — don't run it raw). `check-all` adds the heavy tier
   (`heavyChecks` flake output: HM runtime checks, VM checks, host builds).
