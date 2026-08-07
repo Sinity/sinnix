@@ -7,6 +7,10 @@ description: Orchestrate parallel subagents to divide and conquer complex tasks
 
 Decompose complex tasks into parallelizable subtasks, launch appropriate subagents, collect and synthesize results.
 
+This skill is a routing recipe over `agent-orchestration`, the shared agent
+definitions, and the global dispatch contract. It does not define a process
+launcher or a second receipt format.
+
 **Task**: $ARGUMENTS
 
 ---
@@ -16,7 +20,7 @@ Decompose complex tasks into parallelizable subtasks, launch appropriate subagen
 ### Should You Swarm?
 
 ```
-IF task decomposes into 3+ independent units
+IF task decomposes into 3+ independent units with disjoint write scopes
    AND parallelism provides real speedup
    AND synthesis of multiple perspectives adds value
 THEN swarm
@@ -24,6 +28,29 @@ ELSE do it single-threaded
 ```
 
 Don't swarm when: task is inherently sequential, or you'd spawn agents just to spawn them.
+
+### Lane manifest
+
+Before launching lanes, write a manifest with one entry per lane:
+
+```yaml
+lanes:
+  - id: runtime-read
+    agent: triage
+    model: haiku
+    effort: medium
+    owns: [modules/runtime.nix]
+    avoids: [modules/services/]
+    verification: [focused-check, affected-check]
+    merge_order: 1
+```
+
+Validate that every lane has an explicit global agent definition, model,
+effort, ownership, avoided paths, verification commands, and merge order.
+Reject overlapping `owns` paths before dispatch. Serialize lanes that must
+share a file, and choose a single lane when the work does not justify three
+independent units. Dispatch through the commands and MCP control plane in
+`agent-orchestration`; preserve the returned job handles and receipts.
 
 ### Agent Selection
 
@@ -42,7 +69,7 @@ MATCH task_type:
 ### Model Selection
 
 ```
-MATCH complexity:
+MATCH complexity, then name the selected model in the manifest:
   | trivial (counting, grep, boilerplate)        → haiku
   | standard (surveys, reviews, most work)       → sonnet [DEFAULT]
   | high (security, race conditions, subtle bugs) → opus
@@ -55,6 +82,11 @@ quick:    1-3 agents, highest-impact targets only
 medium:   4-6 agents, main areas covered
 thorough: 7-12 agents, comprehensive coverage
 ```
+
+Every implementation lane must state the production dependency its
+verification enters and the mutation that would make the verification fail.
+Do not accept a toy replica, self-authored registry, or test-only validator as
+evidence that the production route works.
 
 ---
 

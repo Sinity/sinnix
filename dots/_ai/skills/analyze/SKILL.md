@@ -7,6 +7,13 @@ description: Interactive codebase analysis with user steering (survey → narrat
 
 Step-by-step codebase analysis with user steering. Unlike using the `swarm` skill with `--preset analyze` (autonomous parallel), this pauses for input between phases.
 
+Persist the phase state in a project-local `.agent/scratch/` analysis ledger.
+The ledger is the resume handle after compaction. It records the target,
+source survey, selected narration items, evidence paths, open questions,
+findings, and the current phase. Do not create a second process launcher or
+duplicate the shared agent-definition and receipt contracts from
+`agent-orchestration`.
+
 **Target**: $ARGUMENTS
 
 ---
@@ -16,6 +23,12 @@ Step-by-step codebase analysis with user steering. Unlike using the `swarm` skil
 ```
 survey → >>> user input → narrate → >>> user input → synthesize → >>> (write|fix|continue)
 ```
+
+At the start of each phase, read the existing ledger if present and append a
+phase transition with the exact files and commands used. If compaction or an
+interruption occurs, resume from the last completed transition instead of
+restarting the survey. Use explicit global agent definitions and model/effort
+choices for any delegated narration lane.
 
 ---
 
