@@ -32,6 +32,7 @@ else
 fi
 EOF
 chmod +x "$test_root/bin/fake-claude"
+sed -i "1c#!$(command -v bash)" "$test_root/bin/fake-claude"
 
 cat >"$test_root/schema.json" <<'EOF'
 {"type":"object","properties":{"verdict":{"type":"string"}},"required":["verdict"],"additionalProperties":false}
@@ -58,7 +59,7 @@ CLAUDE_JUDGE_MODE=invalid-once run_judge 'retry this verdict' >"$test_root/resul
 test "$(<"$test_root/result")" = '{"verdict":"allow"}'
 test "$(<"$test_root/count")" = 2
 grep -F -- '--resume session-1' "$test_root/args"
-jq -e '.attempts | length == 2 and .[0].validation == "failed" and .[1].validation == "passed"' \
+jq -e 'select(.attempts | length == 2) | .attempts[0].validation == "failed" and .attempts[1].validation == "passed"' \
   "$test_root"/receipts/*.json >/dev/null
 
 : >"$test_root/args"
