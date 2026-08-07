@@ -42,7 +42,7 @@ done
 validate_sample() {
   schema=$1
   sample=$2
-  jq -e --slurpfile schema "$schema" --argjson sample "$sample" '
+  jq -n -e --slurpfile schema "$schema" --argjson sample "$sample" '
     (($schema[0].required - ($sample | keys)) | length) == 0
     and ((($sample | keys) - ($schema[0].properties | keys)) | length) == 0
     and (($sample.confidence | type) == "number" and $sample.confidence >= 0 and $sample.confidence <= 1)
