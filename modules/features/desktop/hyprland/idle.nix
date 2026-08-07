@@ -16,6 +16,11 @@ _: {
 
       listener = [
         {
+          timeout = 1800;
+          on-timeout = "sinnix-ops-afk-start";
+          on-resume = "sinnix-ops-afk-resume";
+        }
+        {
           timeout = 420;
           on-timeout = "hyprctl dispatch dpms off";
           on-resume = "hyprctl dispatch dpms on";

@@ -12,6 +12,7 @@ from typing import Any, Callable
 
 from . import SCHEMA
 from .attention import normalize_attention
+from .anchor import expire_anchor, reduce_anchor_event
 
 
 def now_iso() -> str:
@@ -55,6 +56,8 @@ class Reducer:
         self.previous_health: dict[str, str] = {}
         self._snapshot: dict[str, Any] = {}
         self.ambient_source = ambient_source
+        self.anchor_event_path: Path | None = None
+        self.anchor: dict[str, Any] | None = None
 
     def _load_sequence(self) -> int:
         if self.state_path is None:
@@ -95,12 +98,13 @@ class Reducer:
             }
         self.sequence += 1
         ambient, ambient_health = self._ambient_snapshot(observed_at)
+        anchor = self._anchor_snapshot(observed_at)
         snapshot = {
             "schema": SCHEMA,
             "sequence": self.sequence,
             "observed_at": observed_at,
             "sources": {"sinnix-observe": source_health, "ambient-intelligence": ambient_health},
-            "state": {**report, "ambient_intelligence": ambient} if source_health["status"] == "healthy" else None,
+            "state": {**report, "ambient_intelligence": ambient, "session_anchor": anchor} if source_health["status"] == "healthy" else None,
             "degradation": source_health["degradation"],
         }
         atomic_json(self.snapshot_path, snapshot)
@@ -120,6 +124,18 @@ class Reducer:
             self.events.append(event)
             self.previous_health["sinnix-observe"] = status
         return snapshot
+
+    def _anchor_snapshot(self, observed_at: str) -> dict[str, Any] | None:
+        now = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+        if self.anchor_event_path is not None and self.anchor_event_path.exists():
+            try:
+                event = json.loads(self.anchor_event_path.read_text(encoding="utf-8"))
+                self.anchor = reduce_anchor_event(event, now, previous=self.anchor)
+                self.anchor_event_path.unlink(missing_ok=True)
+            except (OSError, json.JSONDecodeError):
+                pass
+        self.anchor = expire_anchor(self.anchor, now)
+        return self.anchor
 
     def _ambient_snapshot(self, observed_at: str) -> tuple[dict[str, Any] | None, dict[str, Any]]:
         if self.ambient_source is None:

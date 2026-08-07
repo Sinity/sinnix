@@ -1,0 +1,15 @@
+# @sinnix-package
+# description: Record an AFK resume event for the operations reducer
+# runtimeInputs: bash coreutils
+#!/usr/bin/env bash
+set -euo pipefail
+dir="${XDG_RUNTIME_DIR:?}/sinnix"
+start="$dir/afk-start"
+event="$dir/afk-resume.json"
+if [[ ! -s "$start" ]]; then exit 0; fi
+resumed="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+started="$(<"$start")"
+tmp="$event.tmp.$$"
+printf '{"started_at":"%s","resumed_at":"%s","interval_id":"%s:%s"}\n' "$started" "$resumed" "$started" "$resumed" > "$tmp"
+mv "$tmp" "$event"
+rm -f "$start"

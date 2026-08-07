@@ -29,7 +29,7 @@ mkServiceModule {
           message = "sinnix.services.ops-reducer.intervalSeconds must not poll collectors faster than 5 seconds";
         }
       ];
-      environment.systemPackages = [ reducer quota quota.passthru.codexbar scriptPkgs.sinnix-pressure-park scriptPkgs.sinnix-rebuild-override ];
+      environment.systemPackages = [ reducer quota quota.passthru.codexbar scriptPkgs.sinnix-pressure-park scriptPkgs.sinnix-rebuild-override scriptPkgs.sinnix-ops-afk-start scriptPkgs.sinnix-ops-afk-resume ];
       systemd.tmpfiles.rules = [ "d /realm/state/sinnix-ops 0700 ${userName} users -" ];
       sinnix.runtime.surfaces.ops-reducer = {
         unit = "sinnix-ops-reducer.service";
@@ -72,7 +72,7 @@ mkServiceModule {
           };
           Service = {
             Type = "simple";
-            ExecStart = "${reducer}/bin/sinnix-ops-reducer --runtime-dir %t --state-dir ${stateDir} --inventory /etc/sinnix/runtime-inventory.json --ambient-product /realm/project/sinity-lynchpin/.lynchpin/generated/analysis/ambient_intelligence.json --agent-controller /home/${userName}/.config/hermes/skills/agent-orchestration/scripts/agent_job_control.sh --observe-command ${observe}/bin/sinnix-observe --interval ${toString cfg.intervalSeconds}";
+            ExecStart = "${reducer}/bin/sinnix-ops-reducer --runtime-dir %t --state-dir ${stateDir} --inventory /etc/sinnix/runtime-inventory.json --ambient-product /realm/project/sinity-lynchpin/.lynchpin/generated/analysis/ambient_intelligence.json --anchor-events %t/sinnix/afk-resume.json --agent-controller /home/${userName}/.config/hermes/skills/agent-orchestration/scripts/agent_job_control.sh --observe-command ${observe}/bin/sinnix-observe --interval ${toString cfg.intervalSeconds}";
             Restart = "on-failure";
             RestartSec = "2s";
             NoNewPrivileges = true;
