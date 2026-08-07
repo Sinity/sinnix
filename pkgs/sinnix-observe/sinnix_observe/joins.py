@@ -217,6 +217,11 @@ def build_gateway_rows(
     gateway: dict[str, Any], below: dict[str, Any]
 ) -> list[dict[str, Any]]:
     rows = []
+    orphan_by_job = {
+        str(row.get("job_id")): row
+        for row in gateway.get("orphaned_jobs", [])
+        if isinstance(row, dict) and row.get("job_id")
+    }
     for job in gateway.get("jobs", []):
         launcher = job.get("launcher") or {}
         declared = job.get("declared") or {}
@@ -243,6 +248,7 @@ def build_gateway_rows(
                     "completion": job.get("completion"),
                     "resource_overrides": job.get("resource_overrides", {}),
                     "quota_provenance": gateway.get("quota"),
+                    "orphan": orphan_by_job.get(str(job.get("job_id"))),
                 },
                 "gaps": [
                     value
