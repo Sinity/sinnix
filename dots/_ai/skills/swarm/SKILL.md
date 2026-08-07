@@ -45,7 +45,7 @@ lanes:
     merge_order: 1
 ```
 
-Validate that every lane has an explicit global agent definition, model,
+Validate with `sinnix-validate-lane-manifest` that every lane has an explicit global agent definition, model,
 effort, ownership, avoided paths, verification commands, and merge order.
 Reject overlapping `owns` paths before dispatch. Serialize lanes that must
 share a file, and choose a single lane when the work does not justify three
