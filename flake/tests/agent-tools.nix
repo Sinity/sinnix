@@ -749,6 +749,29 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/mcp-sweep.sh} "$sweep"
             touch "$out"
           '';
+      preflightFixture =
+        pkgs.runCommand "preflight-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.findutils
+              pkgs.gawk
+              pkgs.gnugrep
+              pkgs.jq
+              pkgs.procps
+              pkgs.systemd
+              pkgs.util-linux
+            ];
+          }
+          ''
+            preflight="$TMPDIR/sinnix-preflight"
+            cp ${../../scripts/sinnix-preflight} "$preflight"
+            chmod +x "$preflight"
+            patchShebangs "$preflight"
+            ${pkgs.bash}/bin/bash ${../../flake/tests/preflight.sh} "$preflight"
+            touch "$out"
+          '';
     in
     {
       checks = {
@@ -757,6 +780,7 @@ in
         heavy-work-lease = heavyWorkLeaseFixture;
         agent-job-handles = agentJobHandleFixture;
         mcp-sweep = mcpSweepFixture;
+        preflight = preflightFixture;
       };
 
       heavyChecks = {

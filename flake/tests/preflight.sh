@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+preflight="$1"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+mkdir -p "$tmp/home/persisted" "$tmp/home/unpersisted" "$tmp/var" "$tmp/bin"
+truncate -s 101M "$tmp/home/persisted/keep.bin"
+truncate -s 101M "$tmp/home/unpersisted/private.bin"
+printf 'MemTotal:       1000000 kB\nMemAvailable:   1000 kB\n' >"$tmp/meminfo"
+printf 'some avg10=1.00 avg60=2.00 avg300=3.00 total=4\n' >"$tmp/pressure"
+
+set +e
+output="$({
+  SINNIX_PREFLIGHT_HOME_ROOT="$tmp/home" \
+  SINNIX_PREFLIGHT_VARLIB_ROOT="$tmp/var" \
+  SINNIX_PREFLIGHT_PERSISTED_PREFIXES="$tmp/home/persisted" \
+  SINNIX_PREFLIGHT_MEMINFO="$tmp/meminfo" \
+  SINNIX_PREFLIGHT_MEMORY_PRESSURE="$tmp/pressure" \
+  "$preflight" reboot
+} 2>&1)"
+status=$?
+set -e
+[ "$status" -eq 0 ]
+grep -Fq 'BLOCK unpersisted-valuables: 1 large unpersisted files' <<<"$output"
+grep -Fq 'largest=105906176 bytes' <<<"$output"
+! grep -Fq 'private.bin' <<<"$output"
+
+set +e
+SINNIX_PREFLIGHT_MEMINFO="$tmp/meminfo" "$preflight" switch >/dev/null 2>&1
+status=$?
+set -e
+[ "$status" -eq 75 ]
+SINNIX_PREFLIGHT_FORCE=1 SINNIX_PREFLIGHT_MEMINFO="$tmp/meminfo" "$preflight" switch >/dev/null
+echo 'preflight fixture passed'

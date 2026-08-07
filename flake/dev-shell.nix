@@ -23,28 +23,6 @@
       resolveFlakeDir = ''
         _flake_dir="''${PRJ_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
       '';
-      rebuildPressurePreflight = name: ''
-        rebuild_pressure_preflight() {
-          if [ "''${SINNIX_REBUILD_SKIP_PRESSURE_PREFLIGHT:-0}" = "1" ]; then
-            return 0
-          fi
-
-          _mem_total_kb="$(${pkgs.gawk}/bin/awk '/^MemTotal:/ {print $2}' /proc/meminfo)"
-          _mem_avail_kb="$(${pkgs.gawk}/bin/awk '/^MemAvailable:/ {print $2}' /proc/meminfo)"
-          _min_mem_kb="''${SINNIX_REBUILD_MIN_MEM_AVAILABLE_KB:-8388608}"
-
-          if [ "''${_mem_avail_kb:-0}" -lt "$_min_mem_kb" ]; then
-            {
-              echo "sinnix ${name}: refusing to start host rebuild with low reclaim-aware memory headroom"
-              echo "  MemAvailable=$(( _mem_avail_kb / 1024 )) MiB; required=$(( _min_mem_kb / 1024 )) MiB"
-              echo "  Override for a deliberate risky run: SINNIX_REBUILD_SKIP_PRESSURE_PREFLIGHT=1 ${name}"
-              echo "  Top RSS processes:"
-              ${pkgs.procps}/bin/ps -eo pid,rss,comm,args --sort=-rss | ${pkgs.coreutils}/bin/head -8
-            } >&2
-            exit 75
-          fi
-        }
-      '';
       # Wrapper for nix that serializes heavy subcommands (build, flake check)
       # behind the same lock as switch/boot/test. Passes through all other
       # subcommands (eval, develop, shell, run, fmt, flake update, etc.)
@@ -94,8 +72,7 @@
           ${resolveFlakeDir}
           ${localInputOverrideArgs}
           ${commandRegistry.rebuildDefaultArgs}
-          ${rebuildPressurePreflight name}
-          rebuild_pressure_preflight
+          ${scriptPkgs.sinnix-preflight}/bin/sinnix-preflight switch
 
           _rebuild_status=0
           ${pkgs.systemd}/bin/systemd-run \
