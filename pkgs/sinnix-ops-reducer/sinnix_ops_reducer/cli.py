@@ -27,6 +27,7 @@ def main() -> None:
     )
     parser.add_argument("--interval", type=float, default=10.0)
     parser.add_argument("--ambient-product", type=Path, default=Path(os.environ.get("SINNIX_AMBIENT_PRODUCT", "/realm/project/sinity-lynchpin/.lynchpin/generated/analysis/ambient_intelligence.json")))
+    parser.add_argument("--anchor-events", type=Path, default=None)
     parser.add_argument(
         "--inventory", type=Path, default=Path("/etc/sinnix/runtime-inventory.json")
     )
@@ -51,6 +52,7 @@ def main() -> None:
         args.state_dir / "reducer.json",
         ambient_source=product_source(args.ambient_product),
     )
+    reducer.anchor_event_path = args.anchor_events or (root / "afk-resume.json")
     actions = ActionService(
         reducer.snapshot,
         args.inventory,
