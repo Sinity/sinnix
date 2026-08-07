@@ -7,6 +7,8 @@
   "beads"
   "claude-self-knowledge"
   "context-hygiene"
+  "incident-evidence-freeze"
+  "recovery-decision-tree"
   "desktop-control-plane"
   "drive"
   "enhance"
