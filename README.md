@@ -161,6 +161,7 @@ the repository.
 ## Further reading
 
 - [Agent gateway](docs/agent-gateway.md)
+- [Agent environment reference](docs/agent-environment.md)
 - [Headless replica bootstrap](docs/ethereal-bootstrap.md)
 - [Project overview](https://sinity.github.io/sinnix/)
 - [Roadmap and operating record](https://sinity.github.io/sinnix/beads/)

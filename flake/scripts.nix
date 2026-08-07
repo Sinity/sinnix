@@ -23,6 +23,26 @@ let
   inherit (discovered) registry;
   scriptPackages = lib.mapAttrs (_: v: v.package) registry;
   runtimeDefaults = import ./data/runtime-defaults.nix { inherit lib; };
+  mcpRegistry = import ./data/mcp-registry.nix { inherit lib; };
+  sharedAgentSkills = import ./data/shared-agent-skills.nix;
+  agentEnvironmentData = pkgs.writeText "sinnix-agent-environment-data.json" (builtins.toJSON {
+    profiles = lib.concatMap (
+      profile:
+      map (client: {
+        name = profile;
+        inherit client;
+        tiers = mcpRegistry.profileTiers.${profile};
+        servers = lib.attrNames (mcpRegistry.selectClientServersForProfile profile client);
+      }) [ "claude" "codex" "gemini" "antigravity" "hermes" ]
+    ) [ "lean" "evidence" "full" "browser" "orchestrate" "antigravity" ];
+    servers = lib.mapAttrsToList (name: server: {
+      inherit name;
+      inherit (server) tier transport clients;
+      command = server.command or null;
+      url = server.url or null;
+    }) mcpRegistry.registry;
+    skills = sharedAgentSkills;
+  });
   defaultRuntimeInventoryJson = builtins.toJSON (
     runtimeDefaults.mkInventory {
       hostname = "sinnix-fallback";
@@ -213,12 +233,25 @@ let
     sinnix-ops-reducer = pkgs.callPackage ../pkgs/sinnix-ops-reducer/pkg.nix { };
 
     sinnix-quota = pkgs.callPackage ../pkgs/sinnix-quota/pkg.nix { };
+
+    sinnix-agent-environment-doc = pkgs.writeShellApplication {
+      name = "sinnix-agent-environment-doc";
+      runtimeInputs = [ pkgs.bash pkgs.coreutils pkgs.findutils pkgs.gawk pkgs.jq pkgs.ripgrep ];
+      text = ''
+        exec ${pkgs.bash}/bin/bash ${pkgs.writeText "sinnix-agent-environment-doc-source" (builtins.readFile ../scripts/sinnix-agent-environment-doc)} \
+          --data ${agentEnvironmentData} \
+          --skills-root "''${SINNIX_AGENT_SKILLS_ROOT:-$PWD/dots/_ai/skills}" \
+          --agents-root "''${SINNIX_AGENT_DEFS_ROOT:-$PWD/dots/claude/agents}" \
+          "$@"
+      '';
+      meta.description = "Render the generated Sinnix agent environment reference";
+    };
   };
 
   packageSet = scriptPackages // externalPackages;
 in
 {
-  packages = scriptPackages;
+  packages = scriptPackages // { inherit (externalPackages) sinnix-agent-environment-doc; };
   inherit packageSet;
   inherit registry;
   list = lib.attrNames registry;
