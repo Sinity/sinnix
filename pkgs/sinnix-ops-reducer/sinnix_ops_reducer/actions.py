@@ -65,6 +65,7 @@ ACTION_FIELDS = {
     "expected_revision",
     "idempotency_key",
     "operator_reason",
+    "parameters",
 }
 ACTIONS = {
     "focus",
@@ -72,6 +73,9 @@ ACTIONS = {
     "freeze",
     "thaw",
     "reset_policy",
+    "set_policy",
+    "park",
+    "rebuild_override",
     "heavy_lease",
     "restart",
 }
@@ -108,16 +112,45 @@ def validate_request(value: Any) -> dict[str, Any]:
         raise ActionError("expected_revision must be a non-negative integer")
     key = _string(value["idempotency_key"], "idempotency_key", 128)
     reason = _string(value["operator_reason"], "operator_reason", 512)
+    parameters = value["parameters"]
+    if not isinstance(parameters, dict):
+        raise ActionError("parameters must be an object")
     if "job_id" in target and action not in {"focus", "interrupt"}:
         raise ActionError("job targets only support focus and interrupt")
     if action == "focus" and "unit" in target:
         raise ActionError("focus requires an attested job target")
+    if action in {"set_policy", "reset_policy", "park", "thaw"} and "unit" not in target:
+        raise ActionError(f"{action} requires a runtime unit target")
+    if action == "set_policy":
+        if set(parameters) != {"property", "value"}:
+            raise ActionError("set_policy requires property and value")
+        _string(parameters["property"], "property", 32)
+        _string(parameters["value"], "value", 64)
+        if parameters["property"] not in {
+            "MemoryHigh", "MemoryMax", "MemoryLow", "CPUWeight", "IOWeight", "Nice"
+        }:
+            raise ActionError("unsupported runtime policy property")
+    if action == "park":
+        if set(parameters) != {"deadline_seconds"}:
+            raise ActionError("park requires deadline_seconds")
+        deadline = parameters["deadline_seconds"]
+        if isinstance(deadline, bool) or not isinstance(deadline, int) or not 1 <= deadline <= 86400:
+            raise ActionError("deadline_seconds must be between 1 and 86400")
+    if action in {"reset_policy", "thaw"} and parameters:
+        raise ActionError(f"{action} does not accept parameters")
+    if action == "rebuild_override":
+        if set(parameters) != {"name", "value"}:
+            raise ActionError("rebuild_override requires name and value")
+        if parameters["name"] not in {"max_jobs", "cores", "eval_cache"}:
+            raise ActionError("unsupported rebuild override")
+        _string(parameters["value"], "value", 32)
     return {
         "action": action,
         "target": target,
         "expected_revision": expected,
         "idempotency_key": key,
         "operator_reason": reason,
+        "parameters": parameters,
     }
 
 
@@ -198,6 +231,15 @@ class ActionService:
         surfaces = self._inventory().get("surfaces", {})
         surface = surfaces.get(target["unit"])
         if not isinstance(surface, dict):
+            surface = next(
+                (
+                    candidate
+                    for candidate in surfaces.values()
+                    if isinstance(candidate, dict) and candidate.get("unit") == target["unit"]
+                ),
+                None,
+            )
+        if not isinstance(surface, dict):
             raise ActionError("runtime unit is not in the inventory", 403)
         if request["action"] == "restart" and not surface.get("observe", {}).get(
             "restartable", False
@@ -217,11 +259,29 @@ class ActionService:
                     "idempotency key is already bound to another request", 409
                 )
             return prior
-        snapshot = self.snapshot()
-        if request["expected_revision"] != snapshot.get("sequence"):
-            raise ActionError("expected_revision is stale", 409)
-        resolved = self._resolve(request, snapshot)
-        adapter_receipt = self.adapter(request, resolved)
+        try:
+            snapshot = self.snapshot()
+            if request["expected_revision"] != snapshot.get("sequence"):
+                raise ActionError("expected_revision is stale", 409)
+            resolved = self._resolve(request, snapshot)
+            adapter_receipt = self.adapter(request, resolved)
+        except ActionError as error:
+            rejected = {
+                "schema": "sinnix-ops-action-v1",
+                "receipt_id": str(uuid.uuid4()),
+                "idempotency_key": request["idempotency_key"],
+                "request_hash": digest,
+                "action": request["action"],
+                "target": request["target"],
+                "operator_reason": request["operator_reason"],
+                "expected_revision": request["expected_revision"],
+                "status": "rejected",
+                "error": str(error),
+                "created_at": now_iso(),
+            }
+            self.receipts[request["idempotency_key"]] = rejected
+            atomic_json(self.receipts_path, self.receipts)
+            raise
         receipt = {
             "schema": "sinnix-ops-action-v1",
             "receipt_id": str(uuid.uuid4()),
@@ -271,6 +331,51 @@ class ActionService:
                 action,
                 "--",
                 resolved["surface"]["unit"],
+            ]
+        elif action == "park":
+            surface = resolved["surface"]
+            unit = surface["unit"]
+            suffix = hashlib.sha256(unit.encode()).hexdigest()[:16]
+            manager = surface["manager"]
+            prefix = ["systemd-run", "--quiet", "--collect"]
+            if manager == "user":
+                prefix.insert(1, "--user")
+            command = [
+                *prefix,
+                f"--unit=sinnix-ops-thaw-{suffix}",
+                f"--on-active={request['parameters']['deadline_seconds']}",
+                "sinnix-pressure-park",
+                "thaw",
+                "--",
+                unit,
+            ]
+            subprocess.run(
+                ["sinnix-pressure-park", "freeze", "--", unit],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=True,
+            )
+        elif action == "set_policy":
+            surface = resolved["surface"]
+            property_name = request["parameters"]["property"]
+            value = request["parameters"]["value"]
+            allowed = {"MemoryHigh", "MemoryMax", "MemoryLow", "CPUWeight", "IOWeight", "Nice"}
+            if property_name not in allowed:
+                raise ActionError("unsupported runtime policy property", 403)
+            declared = surface.get("effectiveResources", {})
+            if property_name not in declared:
+                raise ActionError("property is not declared by the runtime inventory", 403)
+            manager = surface["manager"]
+            command = [
+                "systemctl", "--user" if manager == "user" else "--system",
+                "set-property", surface["unit"], f"{property_name}={value}",
+            ]
+        elif action == "rebuild_override":
+            command = [
+                "sinnix-rebuild-override", "put",
+                "--name", request["parameters"]["name"],
+                "--value", request["parameters"]["value"],
             ]
         elif action == "reset_policy":
             surface = resolved["surface"]

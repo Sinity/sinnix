@@ -86,6 +86,15 @@ let
   rebuildDefaultArgs = ''
     rebuild_jobs="''${SINNIX_REBUILD_MAX_JOBS:-1}"
     rebuild_cores="''${SINNIX_REBUILD_CORES:-16}"
+    if command -v sinnix-rebuild-override >/dev/null 2>&1; then
+      while IFS='=' read -r _override_name _override_value; do
+        case "$_override_name" in
+          SINNIX_REBUILD_MAX_JOBS) rebuild_jobs="$_override_value" ;;
+          SINNIX_REBUILD_CORES) rebuild_cores="$_override_value" ;;
+          SINNIX_REBUILD_EVAL_CACHE) export NIX_CONFIG="eval-cache = $_override_value" ;;
+        esac
+      done < <(sinnix-rebuild-override consume)
+    fi
   '';
   rebuildLease = name: ''
     if [ "''${SINNIX_HEAVY_LEASE_ENTERED:-0}" != 1 ]; then

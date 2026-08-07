@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Store and consume private one-shot Sinnix rebuild overrides
+# runtimeInputs: bash coreutils jq
+set -euo pipefail
+
+state_dir="${SINNIX_REBUILD_OVERRIDE_DIR:-/realm/state/sinnix-ops}"
+state_file="$state_dir/rebuild-override.json"
+usage() { echo "usage: sinnix-rebuild-override put --name NAME --value VALUE | consume" >&2; }
+mkdir -p "$state_dir"
+umask 077
+
+if [[ "${1:-}" == put ]]; then
+  shift
+  name=""; value=""
+  while (($#)); do
+    case "$1" in
+      --name) name="${2:?missing name}"; shift 2 ;;
+      --value) value="${2:?missing value}"; shift 2 ;;
+      *) usage; exit 64 ;;
+    esac
+  done
+  [[ "$name" =~ ^(max_jobs|cores|eval_cache)$ ]] || { echo "unsupported override" >&2; exit 64; }
+  case "$name" in
+    max_jobs|cores) [[ "$value" =~ ^[1-9][0-9]*$ ]] || { echo "value must be positive integer" >&2; exit 64; } ;;
+    eval_cache) [[ "$value" == true || "$value" == false ]] || { echo "value must be true or false" >&2; exit 64; } ;;
+  esac
+  tmp="$state_file.$$.tmp"
+  jq -cn --arg name "$name" --arg value "$value" --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{schema:"sinnix-rebuild-override-v1",name:$name,value:$value,created_at:$created}' >"$tmp"
+  chmod 600 "$tmp"
+  mv -f "$tmp" "$state_file"
+  echo "stored $name"
+  exit 0
+fi
+
+[[ "${1:-}" == consume && $# == 1 ]] || { usage; exit 64; }
+if [[ ! -s "$state_file" ]]; then exit 0; fi
+name="$(jq -r '.name' "$state_file")"
+value="$(jq -r '.value' "$state_file")"
+case "$name" in
+  max_jobs) printf '%s\n' "SINNIX_REBUILD_MAX_JOBS=$value" ;;
+  cores) printf '%s\n' "SINNIX_REBUILD_CORES=$value" ;;
+  eval_cache) printf '%s\n' "SINNIX_REBUILD_EVAL_CACHE=$value" ;;
+  *) echo "invalid override state" >&2; exit 65 ;;
+esac
+rm -f "$state_file"

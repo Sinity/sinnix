@@ -1,5 +1,5 @@
 --!nonstrict
--- Read-only Now panel for the Sinnix operations snapshot.
+-- Sinnix operations panel for current state, policy, and action receipts.
 
 local view = noctalia.state.get("sinity-ops.view") or { status = "disconnected" }
 
@@ -50,6 +50,28 @@ local function attentionText()
   return tostring(attention.pending_count or 0) .. " pending"
 end
 
+local function policyText()
+  local inventory = stateValue("runtime_inventory")
+  if type(inventory) ~= "table" or type(inventory.surfaces) ~= "table" then return "unavailable" end
+  local declared = 0
+  local live = 0
+  for _, surface in pairs(inventory.surfaces) do
+    if type(surface) == "table" then
+      if type(surface.effectiveResources) == "table" then declared = declared + 1 end
+      if type(surface.resources) == "table" then live = live + 1 end
+    end
+  end
+  return tostring(declared) .. " declared, " .. tostring(live) .. " live policies"
+end
+
+local function receiptText()
+  if type(view.receipts) ~= "table" or type(view.receipts.receipts) ~= "table" then return "unavailable" end
+  local receipts = view.receipts.receipts
+  if #receipts == 0 then return "none" end
+  local latest = receipts[#receipts]
+  return tostring(#receipts) .. " recent, latest " .. text(latest.action) .. " " .. text(latest.adapter and latest.adapter.status)
+end
+
 local function render()
   local rows = {
     ui.label({ text = "Sinnix operations", fontSize = 18, fontWeight = "bold", color = "primary" }),
@@ -58,13 +80,15 @@ local function render()
     ui.column({ gap = 6, padding = 10, fill = "surface_variant/0.4", radius = 8 }, {
       ui.label({ text = "Pressure and memory: " .. pressureText(), color = "on_surface" }),
       ui.label({ text = "GPU: " .. compact(stateValue("gpu")), color = "on_surface" }),
-      ui.label({ text = "Heavy lease: " .. compact(stateValue("runtime_inventory")), color = "on_surface" }),
+      ui.label({ text = "Workload policy: " .. policyText(), color = "on_surface" }),
+      ui.label({ text = "Heavy lease: " .. compact(stateValue("agent_gateway")), color = "on_surface" }),
       ui.label({ text = "Drift: " .. gapText(), color = "on_surface" }),
       ui.label({ text = "Backup and capture: " .. compact(stateValue("storage")), color = "on_surface" }),
       ui.label({ text = "Incidents: " .. incidentText(), color = "on_surface" }),
       ui.label({ text = "Attention: " .. attentionText(), color = "on_surface" }),
+      ui.label({ text = "Action receipts: " .. receiptText(), color = "on_surface" }),
     }),
-    ui.label({ text = "Read-only. Data expires after the configured freshness window.", color = "on_surface_variant", fontSize = 12 }),
+    ui.label({ text = "Actions use the typed reducer contract. Data expires after the configured freshness window.", color = "on_surface_variant", fontSize = 12 }),
   }
   panel.render(ui.column({ gap = 12, padding = 16 }, rows))
 end

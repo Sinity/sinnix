@@ -89,6 +89,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path == "/v1/receipts":
+            receipts = list(self.reducer.actions.receipts.values())[-20:]
+            self._write(HTTPStatus.OK, {"schema": "sinnix-ops-receipts-v1", "receipts": receipts})
         elif self.path.startswith("/v1/actions/"):
             key = self.path.removeprefix("/v1/actions/")
             receipt = self.reducer.actions.lookup(key)

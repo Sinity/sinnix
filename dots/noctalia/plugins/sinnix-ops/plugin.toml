@@ -6,7 +6,7 @@ author = "Sinity"
 license = "MIT"
 tags = ["bar", "panel", "system", "observability"]
 icon = "monitor_heart"
-description = "Read-only current state from the Sinnix operations reducer."
+description = "Current state, workload policy, and typed action receipts from the Sinnix operations reducer."
 
 [[service]]
 id = "bridge"

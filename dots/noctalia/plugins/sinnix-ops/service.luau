@@ -6,6 +6,7 @@ local TOKEN_PATH = noctalia.getConfig("token_path") or "$XDG_RUNTIME_DIR/sinnix/
 local STALE_SECONDS = tonumber(noctalia.getConfig("stale_seconds")) or 30
 local STREAM_PATH = ENDPOINT .. "/v1/events"
 local SNAPSHOT_PATH = ENDPOINT .. "/v1/snapshot"
+local RECEIPTS_PATH = ENDPOINT .. "/v1/receipts"
 local stream = nil
 local reconnectAt = 0
 local lastReceived = 0
@@ -79,6 +80,13 @@ local function requestSnapshot()
     else
       publish("source-stale", "sse", decoded, source and source.degradation or "reducer source unavailable")
     end
+    noctalia.http({ url = RECEIPTS_PATH, headers = { "Authorization: Bearer " .. value, "Accept: " .. "application/json" } }, function(receipts)
+      local current = noctalia.state.get("sinity-ops.view") or {}
+      if receipts.ok and receipts.status == 200 then
+        current.receipts = noctalia.json.decode(receipts.body)
+        noctalia.state.set("sinity-ops.view", current)
+      end
+    end)
   end)
 end
 
@@ -109,6 +117,8 @@ local function startStream()
   if stream == nil then
     reconnectAt = noctalia.nowMs() + 2000
     fallback("event stream could not start")
+  else
+    requestSnapshot()
   end
 end
 

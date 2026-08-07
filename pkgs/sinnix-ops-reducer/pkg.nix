@@ -13,7 +13,7 @@ python3Packages.buildPythonApplication {
     runHook postCheck
   '';
   meta = {
-    description = "Read-only current-state reducer for Sinnix operator surfaces";
+    description = "Current-state reducer and bounded action contract for Sinnix operator surfaces";
     mainProgram = "sinnix-ops-reducer";
     license = lib.licenses.mit;
   };
