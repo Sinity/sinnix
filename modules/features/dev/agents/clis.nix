@@ -338,6 +338,7 @@ mkFeatureModule {
             scriptPkgs.sinnix-attention
             scriptPkgs.sinnix-context-handoff
             scriptPkgs.sinnix-claude-judge
+            scriptPkgs.sinnix-agent-profile-benchmark
           ];
 
           programs.zsh = {
