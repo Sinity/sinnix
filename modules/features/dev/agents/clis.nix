@@ -337,6 +337,7 @@ mkFeatureModule {
             scriptPkgs.sinnix-agent-register
             scriptPkgs.sinnix-attention
             scriptPkgs.sinnix-context-handoff
+            scriptPkgs.sinnix-claude-judge
           ];
 
           programs.zsh = {
