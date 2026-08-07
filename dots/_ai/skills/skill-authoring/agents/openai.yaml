@@ -1,0 +1,4 @@
+interface:
+  display_name: "Skill Authoring"
+  short_description: "Design, validate, and retire routed Codex skills"
+  default_prompt: "Use the skill-authoring lifecycle to craft trigger descriptions, keep instructions lean, validate references, and record routing evidence."

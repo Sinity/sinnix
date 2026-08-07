@@ -854,6 +854,24 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/context-handoff.sh} "$writer"
             touch "$out"
           '';
+      skillAuthoringFixture =
+        pkgs.runCommand "skill-authoring-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.jq
+              pkgs.python3
+            ];
+          }
+          ''
+            validator="$TMPDIR/validate_skill.py"
+            cp ${../../dots/_ai/skills/skill-authoring/scripts/validate_skill.py} "$validator"
+            chmod +x "$validator"
+            patchShebangs "$validator"
+            ${pkgs.bash}/bin/bash ${../../flake/tests/skill-authoring.sh} "$validator"
+            touch "$out"
+          '';
     in
     {
       checks = {
@@ -867,6 +885,7 @@ in
         kitty-agent-here = kittyAgentHereFixture;
         bd-safety-hook = bdSafetyHookFixture;
         context-handoff = contextHandoffFixture;
+        skill-authoring = skillAuthoringFixture;
       };
 
       heavyChecks = {
