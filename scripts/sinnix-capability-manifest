@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Render a derived sinnix-prime capability and lifecycle manifest
+# runtimeInputs: bash coreutils findutils jq
+
+set -euo pipefail
+
+source_root=""
+inventory="/etc/sinnix/runtime-inventory.json"
+output="-"
+
+usage() {
+  printf 'usage: %s --source-root DIR [--inventory FILE] [--output FILE]\n' "$0" >&2
+  exit 2
+}
+
+while (($#)); do
+  case "$1" in
+    --source-root) source_root=${2-}; shift 2 ;;
+    --inventory) inventory=${2-}; shift 2 ;;
+    --output) output=${2-}; shift 2 ;;
+    *) usage ;;
+  esac
+done
+
+[[ -n "$source_root" && -d "$source_root" ]] || usage
+[[ -r "$inventory" ]] || {
+  printf 'missing readable runtime inventory: %s\n' "$inventory" >&2
+  exit 1
+}
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+source_revision=$(git -C "$source_root" rev-parse HEAD 2>/dev/null || printf unknown)
+configuration_revision=$(nixos-version --configuration-revision 2>/dev/null || printf unknown)
+hostname=$(hostname 2>/dev/null || printf unknown)
+
+find_files() {
+  local root=$1
+  if [[ -d "$source_root/$root" ]]; then
+    find "$source_root/$root" -type f -name '*.nix' -printf '%P\n' | sort
+  fi
+}
+
+find_scripts() {
+  if [[ -d "$source_root/scripts" ]]; then
+    find "$source_root/scripts" -maxdepth 1 -type f -printf '%f\n' | sort
+  fi
+}
+
+features_json=$(find_files modules/features | jq -Rsc 'split("\n") | map(select(length > 0) | {path: ("modules/features/" + .), lifecycle: "interactive", evidence: "source-declaration"})')
+services_json=$(find_files modules/services | jq -Rsc 'split("\n") | map(select(length > 0) | {path: ("modules/services/" + .), lifecycle: "unknown", evidence: "source-declaration"})')
+scripts_json=$(find_scripts | jq -Rsc 'split("\n") | map(select(length > 0) | {path: ("scripts/" + .), lifecycle: "on-demand", evidence: "packaged-script-declaration"})')
+
+surface_rows=$(jq -c '
+  .surfaces | to_entries | map(. as $entry | $entry.value as $surface |
+    ($surface.unit // "") as $unit |
+    ($surface.manager // "system") as $manager |
+    {name: $entry.key, unit: $unit, manager: $manager, kind: ($surface.kind // "unknown"), resourceClass: ($surface.resourceClass // "unknown"), workload: ($surface.workload // {}), observe: ($surface.observe // {}), captures: ($surface.captures // []), lifecycle: (($surface.workload.lifecycle // "unknown")), state: "unknown", stateEvidence: "runtime-inventory"}
+  )' "$inventory")
+
+live_rows=$(printf '%s' "$surface_rows" | jq -c '
+  map(. as $row |
+    ($row.manager == "user") as $user |
+    ($row.unit) as $unit |
+    ($row | .state = "unknown")
+  )')
+
+while IFS=$'\t' read -r name manager unit; do
+  [[ -n "$name" ]] || continue
+  if [[ "$manager" == user ]]; then
+    state=$(systemctl --user show "$unit" --no-pager --value -p ActiveState 2>/dev/null || printf unknown)
+  else
+    state=$(systemctl show "$unit" --no-pager --value -p ActiveState 2>/dev/null || printf unknown)
+  fi
+  state=${state:-unknown}
+  live_rows=$(jq -c --arg name "$name" --arg state "$state" 'map(if .name == $name then .state = $state | .stateEvidence = "live-systemd" else . end)' <<<"$live_rows")
+done < <(jq -r '.[] | [.name, .manager, .unit] | @tsv' <<<"$surface_rows")
+
+paths_json=$(rg -o --no-filename '/(realm|persist)(/[A-Za-z0-9_.-]+){1,5}' "$source_root/modules" "$source_root/hosts" 2>/dev/null | sort -u | jq -Rsc 'split("\n") | map(select(length > 0) | {path: ., evidence: "source-reference", lifecycle: "persistent-or-runtime"})')
+
+jq -n \
+  --arg schema "sinnix-capability-manifest-v1" \
+  --arg generatedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --arg hostname "$hostname" \
+  --arg sourceRevision "$source_revision" \
+  --arg configurationRevision "$configuration_revision" \
+  --argjson inventory "$(cat "$inventory")" \
+  --argjson features "$features_json" \
+  --argjson services "$services_json" \
+  --argjson scripts "$scripts_json" \
+  --argjson surfaces "$live_rows" \
+  --argjson paths "$paths_json" \
+  '{schema: $schema, generatedAt: $generatedAt, host: $hostname, sourceRevision: $sourceRevision, configurationRevision: $configurationRevision, authorities: {runtimeInventory: "runtime-inventory.json", systemd: "live-systemd", sourceTree: "source-declaration"}, features: $features, services: $services, scripts: $scripts, runtimeSurfaces: $surfaces, persistentAndRuntimePaths: $paths, dormantHosts: [{host: "sinnix-ethereal", state: "dormant", evidence: "host-source-not-live"}], unknowns: [{scope: "service-source-to-runtime-surface", reason: "source declarations without an explicit runtime surface remain unknown until evaluated host evidence is available"}], inventorySchema: ($inventory.schema // "unknown")}' > "$tmp/manifest.json"
+
+jq -e '(.schema == "sinnix-capability-manifest-v1") and (.runtimeSurfaces | type == "array") and (.dormantHosts[0].state == "dormant")' "$tmp/manifest.json" >/dev/null
+
+if [[ "$output" == - ]]; then
+  cat "$tmp/manifest.json"
+else
+  mkdir -p "$(dirname "$output")"
+  install -m 0644 "$tmp/manifest.json" "$output"
+fi
