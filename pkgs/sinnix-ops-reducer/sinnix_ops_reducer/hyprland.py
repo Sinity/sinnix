@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 import glob
+import os
 import socket
 from dataclasses import dataclass
 from typing import Any
@@ -40,7 +41,8 @@ class Socket2Adapter:
 
     def poll(self, state: HyprlandState) -> None:
         if self.socket is None:
-            paths = glob.glob("/tmp/hypr/*/.socket2.sock")
+            runtime = os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000")
+            paths = glob.glob(f"{runtime}/hypr/*/.socket2.sock")
             if not paths:
                 return
             try:
