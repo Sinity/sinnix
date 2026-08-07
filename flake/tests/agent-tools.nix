@@ -858,6 +858,16 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/bd-safety.sh} "$hook"
             touch "$out"
           '';
+      egressGuardFixture = pkgs.runCommand "egress-guard-fixture" {
+        nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.jq pkgs.python3 ];
+      } ''
+        scanner="$TMPDIR/sinnix-egress-scan"
+        cp ${../../scripts/sinnix-egress-scan} "$scanner"
+        chmod +x "$scanner"
+        patchShebangs "$scanner"
+        ${pkgs.bash}/bin/bash ${../../flake/tests/egress-guard.sh} "$scanner" "$TMPDIR/egress"
+        touch "$out"
+      '';
       contextHandoffFixture =
         pkgs.runCommand "context-handoff-fixture"
           {
@@ -1043,6 +1053,7 @@ in
         hogkill = hogkillFixture;
         kitty-agent-here = kittyAgentHereFixture;
         bd-safety-hook = bdSafetyHookFixture;
+        egress-guard = egressGuardFixture;
         context-handoff = contextHandoffFixture;
         skill-authoring = skillAuthoringFixture;
         desktop-capture = desktopCaptureFixture;

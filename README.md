@@ -163,6 +163,7 @@ the repository.
 - [Agent gateway](docs/agent-gateway.md)
 - [Agent environment reference](docs/agent-environment.md)
 - [Infrastructure default audit](docs/config-default-audit-infrastructure.md)
+- [Publication egress guard](docs/egress-guard.md)
 - [Headless replica bootstrap](docs/ethereal-bootstrap.md)
 - [Project overview](https://sinity.github.io/sinnix/)
 - [Roadmap and operating record](https://sinity.github.io/sinnix/beads/)
