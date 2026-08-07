@@ -214,6 +214,38 @@ in
             default = [ ];
             description = "Capture outputs produced by this runtime surface.";
           };
+          activation = {
+            mode = lib.mkOption {
+              type = lib.types.enum [ "direct" "socket-proxy" ];
+              default = "direct";
+              description = "How this surface is activated and exposed to local clients.";
+            };
+            publicEndpoint = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "Local endpoint presented to clients, if any.";
+            };
+            backendEndpoint = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "Private backend endpoint behind an activation proxy, if any.";
+            };
+            idleTimeout = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "Idle timeout after which an activated backend may stop.";
+            };
+            exclusiveResource = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "Resource admission key shared by mutually exclusive surfaces.";
+            };
+            dependsOn = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [ ];
+              description = "Runtime surface names required by this activation path.";
+            };
+          };
           dynamic = lib.mkOption {
             type = lib.types.bool;
             default = false;

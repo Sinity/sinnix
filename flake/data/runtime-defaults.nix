@@ -18,12 +18,20 @@ let
           restartable = false;
         };
         captures = [ ];
-      workload = {
-        kind = "unknown";
-        lifecycle = "unknown";
-        expendability = "unknown";
-        operatorProtection = "unknown";
-        class = "unclassified";
+        activation = {
+          mode = "direct";
+          publicEndpoint = null;
+          backendEndpoint = null;
+          idleTimeout = null;
+          exclusiveResource = null;
+          dependsOn = [ ];
+        };
+        workload = {
+          kind = "unknown";
+          lifecycle = "unknown";
+          expendability = "unknown";
+          operatorProtection = "unknown";
+          class = "unclassified";
           rationale = "";
           processMatchers = [ ];
         };
