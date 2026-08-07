@@ -1,6 +1,6 @@
 ---
 name: recap
-description: Quick context refresh - reduce cognitive load during sessions
+description: Refresh stale session context and prepare a concise handoff. Use after context compaction, when resuming interrupted work, or when the current task, decisions, blockers, and next action are unclear. Do not use for durable project history or ordinary task planning.
 ---
 
 # Session Recap

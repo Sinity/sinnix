@@ -19,5 +19,6 @@
   "polylogue"
   "prompting"
   "recap"
+  "skill-authoring"
   "swarm"
 ]
