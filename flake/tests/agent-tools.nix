@@ -931,6 +931,28 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/recovery-skills.sh} "$freeze" "$recover"
             touch "$out"
           '';
+      hooksHarnessFixture =
+        pkgs.runCommand "hooks-harness-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.gnused
+              pkgs.jq
+              pkgs.shellcheck
+            ];
+          }
+          ''
+            hooks="$TMPDIR/hooks"
+            settings="$TMPDIR/settings.json"
+            mkdir -p "$hooks"
+            cp ${../../dots/claude/hooks}/*.sh "$hooks/"
+            cp ${../../dots/claude/settings.json} "$settings"
+            chmod +x "$hooks"/*.sh
+            patchShebangs "$hooks"
+            ${pkgs.bash}/bin/bash ${../../flake/tests/hooks-harness.sh} "$hooks" "$settings"
+            touch "$out"
+          '';
     in
     {
       checks = {
@@ -948,6 +970,7 @@ in
         desktop-capture = desktopCaptureFixture;
         claude-judge = claudeJudgeFixture;
         recovery-skills = recoverySkillsFixture;
+        hooks-harness = hooksHarnessFixture;
       };
 
       heavyChecks = {
