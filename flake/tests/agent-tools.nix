@@ -911,6 +911,26 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/claude-judge.sh} "$judge" "$review"
             touch "$out"
           '';
+      recoverySkillsFixture =
+        pkgs.runCommand "recovery-skills-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.git
+              pkgs.jq
+            ];
+          }
+          ''
+            freeze="$TMPDIR/freeze.sh"
+            recover="$TMPDIR/recover-probe.sh"
+            cp ${../../dots/_ai/skills/incident-evidence-freeze/scripts/freeze.sh} "$freeze"
+            cp ${../../dots/_ai/skills/recovery-decision-tree/scripts/recover-probe.sh} "$recover"
+            chmod +x "$freeze" "$recover"
+            patchShebangs "$freeze" "$recover"
+            ${pkgs.bash}/bin/bash ${../../flake/tests/recovery-skills.sh} "$freeze" "$recover"
+            touch "$out"
+          '';
     in
     {
       checks = {
@@ -927,6 +947,7 @@ in
         skill-authoring = skillAuthoringFixture;
         desktop-capture = desktopCaptureFixture;
         claude-judge = claudeJudgeFixture;
+        recovery-skills = recoverySkillsFixture;
       };
 
       heavyChecks = {
