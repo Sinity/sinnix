@@ -26,6 +26,8 @@ run_hook() {
 
 model_deny=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_input":{"subagent_type":"general-purpose","prompt":"fixture"}}')
 printf '%s' "$model_deny" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+model_warn=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_input":{"subagent_type":"review"}}')
+printf '%s' "$model_warn" | jq -e '.systemMessage | contains("omits model")' >/dev/null
 test -z "$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_input":{"subagent_type":"general-purpose","model":"sonnet"}}')"
 test -z "$(run_hook "$hooks_dir/pretooluse-agent-model.sh" 'not-json')"
 
