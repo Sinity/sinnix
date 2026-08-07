@@ -823,7 +823,6 @@ in
               pkgs.gnugrep
               pkgs.jq
               pkgs.python3
-              pkgs.sed
             ];
           }
           ''
