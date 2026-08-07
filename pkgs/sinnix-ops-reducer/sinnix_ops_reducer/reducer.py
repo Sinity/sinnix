@@ -13,6 +13,7 @@ from typing import Any, Callable
 from . import SCHEMA
 from .attention import normalize_attention
 from .anchor import expire_anchor, reduce_anchor_event
+from .hyprland import HyprlandState, Socket2Adapter, reduce_socket_event
 
 
 def now_iso() -> str:
@@ -58,6 +59,9 @@ class Reducer:
         self.ambient_source = ambient_source
         self.anchor_event_path: Path | None = None
         self.anchor: dict[str, Any] | None = None
+        self.hyprland_state = HyprlandState()
+        self.hyprland_event_path: Path | None = None
+        self.hyprland_socket = Socket2Adapter()
 
     def _load_sequence(self) -> int:
         if self.state_path is None:
@@ -99,12 +103,13 @@ class Reducer:
         self.sequence += 1
         ambient, ambient_health = self._ambient_snapshot(observed_at)
         anchor = self._anchor_snapshot(observed_at)
+        hyprland = self._hyprland_snapshot()
         snapshot = {
             "schema": SCHEMA,
             "sequence": self.sequence,
             "observed_at": observed_at,
             "sources": {"sinnix-observe": source_health, "ambient-intelligence": ambient_health},
-            "state": {**report, "ambient_intelligence": ambient, "session_anchor": anchor} if source_health["status"] == "healthy" else None,
+            "state": {**report, "ambient_intelligence": ambient, "session_anchor": anchor, "hyprland_automation": hyprland} if source_health["status"] == "healthy" else None,
             "degradation": source_health["degradation"],
         }
         atomic_json(self.snapshot_path, snapshot)
@@ -124,6 +129,17 @@ class Reducer:
             self.events.append(event)
             self.previous_health["sinnix-observe"] = status
         return snapshot
+
+    def _hyprland_snapshot(self) -> dict[str, Any]:
+        self.hyprland_socket.poll(self.hyprland_state)
+        if self.hyprland_event_path is not None and self.hyprland_event_path.exists():
+            try:
+                for line in self.hyprland_event_path.read_text(encoding="utf-8").splitlines()[-32:]:
+                    reduce_socket_event(self.hyprland_state, line)
+                self.hyprland_event_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        return {"fullscreen_game": self.hyprland_state.fullscreen_game, "static_content": self.hyprland_state.static_content, "diagnostics": self.hyprland_state.diagnostics}
 
     def _anchor_snapshot(self, observed_at: str) -> dict[str, Any] | None:
         now = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
