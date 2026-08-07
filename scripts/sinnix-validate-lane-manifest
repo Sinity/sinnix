@@ -1,7 +1,7 @@
+#!/usr/bin/env bash
 # @sinnix-package
 # description: Validate a non-overlapping agent lane manifest
 # runtimeInputs: bash coreutils jq ripgrep
-#!/usr/bin/env bash
 set -euo pipefail
 
 usage() {
