@@ -204,6 +204,12 @@ runtime and control surfaces.
 
 ### Agent Runtime Control
 
+The current Claude Code and Codex hook boundary is recorded in
+`docs/agent-hook-parity.md`. Generated Codex lifecycle hooks are enforced
+where its schema provides the event; Claude-only model, Bash-policy, and
+SubagentStop guards remain manual or unsupported for Codex rather than being
+recreated through terminal scraping.
+
 Prefer native non-interactive runtimes for unattended work; use Kitty only
 when a human or coordinator needs a visible, interruptible process or a
 deliberately interactive agent session.

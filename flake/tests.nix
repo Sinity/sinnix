@@ -30,6 +30,7 @@ in
     ./tests/backup.nix
     ./tests/memory-audit.nix
     ./tests/agent-environment.nix
+    ./tests/agent-parity.nix
     ./tests/observability.nix
     ./tests/cli.nix
     ./tests/git-languages.nix
