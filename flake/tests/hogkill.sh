@@ -24,6 +24,7 @@ case "${1:-}" in
 esac
 EOF
 chmod +x "$bin/ps" "$bin/gum"
+sed -i "1c#!$(command -v bash)" "$bin/ps" "$bin/gum"
 
 for pid in 101 102; do
   cat > "$proc/$pid/cgroup" <<EOF
