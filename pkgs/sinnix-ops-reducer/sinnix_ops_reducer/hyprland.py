@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-import time
 import glob
+import json
 import os
 import socket
+import subprocess
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -34,12 +36,35 @@ def reduce_socket_event(state: HyprlandState, line: str, *, now: float | None = 
     return {"fullscreen_game": state.fullscreen_game, "static_content": state.static_content, "diagnostics": state.diagnostics}
 
 
+def reconcile_activewindow(state: HyprlandState, payload: dict[str, Any], *, now: float | None = None) -> dict[str, Any]:
+    now = time.monotonic() if now is None else now
+    state.fullscreen_game = payload.get("fullscreen") in {1, 2}
+    app = str(payload.get("class", "")).strip().lower()
+    state.static_content = app in {"mpv", "vlc", "gamescope"}
+    state.last_static_transition = now
+    return {"fullscreen_game": state.fullscreen_game, "static_content": state.static_content, "diagnostics": state.diagnostics}
+
+
 class Socket2Adapter:
     def __init__(self) -> None:
         self.socket: socket.socket | None = None
         self.buffer = b""
 
     def poll(self, state: HyprlandState) -> None:
+        try:
+            result = subprocess.run(
+                ["hyprctl", "-j", "activewindow"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=0.5,
+            )
+            if result.returncode == 0:
+                payload = json.loads(result.stdout)
+                if isinstance(payload, dict):
+                    reconcile_activewindow(state, payload)
+        except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+            state.diagnostics = min(state.diagnostics + 1, 32)
         if self.socket is None:
             runtime = os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000")
             paths = glob.glob(f"{runtime}/hypr/*/.socket2.sock")
