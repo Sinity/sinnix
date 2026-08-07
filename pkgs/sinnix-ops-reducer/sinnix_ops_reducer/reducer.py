@@ -44,6 +44,7 @@ class Reducer:
         source: Callable[[], dict[str, Any]],
         state_path: Path | None = None,
         max_events: int = 256,
+        ambient_source: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         self.snapshot_path = snapshot_path
         self.token_path = token_path
@@ -53,6 +54,7 @@ class Reducer:
         self.sequence = self._load_sequence()
         self.previous_health: dict[str, str] = {}
         self._snapshot: dict[str, Any] = {}
+        self.ambient_source = ambient_source
 
     def _load_sequence(self) -> int:
         if self.state_path is None:
@@ -92,12 +94,13 @@ class Reducer:
                 "degradation": str(error)[:240],
             }
         self.sequence += 1
+        ambient, ambient_health = self._ambient_snapshot(observed_at)
         snapshot = {
             "schema": SCHEMA,
             "sequence": self.sequence,
             "observed_at": observed_at,
-            "sources": {"sinnix-observe": source_health},
-            "state": report if source_health["status"] == "healthy" else None,
+            "sources": {"sinnix-observe": source_health, "ambient-intelligence": ambient_health},
+            "state": {**report, "ambient_intelligence": ambient} if source_health["status"] == "healthy" else None,
             "degradation": source_health["degradation"],
         }
         atomic_json(self.snapshot_path, snapshot)
@@ -117,6 +120,15 @@ class Reducer:
             self.events.append(event)
             self.previous_health["sinnix-observe"] = status
         return snapshot
+
+    def _ambient_snapshot(self, observed_at: str) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+        if self.ambient_source is None:
+            return None, {"status": "disabled", "source": "lynchpin-ambient-intelligence", "observed_at": observed_at, "freshness": "unknown", "degradation": "no product configured"}
+        try:
+            value = self.ambient_source()
+            return value, {"status": "healthy", "source": "lynchpin-ambient-intelligence", "observed_at": observed_at, "freshness": "current", "degradation": None}
+        except Exception as error:
+            return None, {"status": "unavailable", "source": "lynchpin-ambient-intelligence", "observed_at": observed_at, "freshness": "unknown", "degradation": str(error)[:240]}
 
     def snapshot(self) -> dict[str, Any]:
         if self._snapshot:
