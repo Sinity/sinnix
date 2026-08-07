@@ -13,6 +13,17 @@ let
 in
 {
   config = {
+    assertions = [
+      {
+        assertion = config.nix.settings.max-jobs == 1;
+        message = "nix.settings.max-jobs must remain 1: concurrent heavy derivations exceeded workstation memory on 2026-07-06";
+      }
+      {
+        assertion = config.nix.settings.cores == 16;
+        message = "nix.settings.cores must remain 16: the serialized build policy reserves the workstation core budget for one derivation";
+      }
+    ];
+
     nix = {
       settings = {
         auto-optimise-store = true;
