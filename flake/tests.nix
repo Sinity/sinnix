@@ -28,6 +28,7 @@ in
     ./tests/agent-tools.nix
     ./tests/terminal-capture.nix
     ./tests/backup.nix
+    ./tests/memory-audit.nix
     ./tests/observability.nix
     ./tests/cli.nix
     ./tests/git-languages.nix
