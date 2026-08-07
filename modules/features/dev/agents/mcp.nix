@@ -83,7 +83,6 @@ mkFeatureModule {
       };
     };
   };
-  config.sinnix.persistence.home.directories = [ ".local/state/sinnix/settings-env-lint" ];
   configFn =
     {
       config,
@@ -171,6 +170,7 @@ mkFeatureModule {
       sinnix.features.dev.mcp-servers.codexHooksSource = codexHooksFile;
       sinnix.features.dev.mcp-servers.antigravityMcpConfigSource = antigravityMcpConfigFile;
       sinnix.persistence.home.directories = [
+        ".local/state/sinnix/settings-env-lint"
         {
           directory = ".local/share/serena";
           mode = "0700";
