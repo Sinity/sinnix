@@ -2,7 +2,7 @@
 # Source locations are stable home paths backed by immutable Nix sources.
 [plugins]
 auto_update = false
-enabled = ["noctalia/timer", "kenn/keybind-cheatsheet"]
+enabled = ["noctalia/timer", "kenn/keybind-cheatsheet", "sinity/sinnix-ops"]
 
 [[plugins.source]]
 name = "official"
@@ -13,3 +13,8 @@ location = "~/.local/share/noctalia/pinned/official"
 name = "community"
 kind = "path"
 location = "~/.local/share/noctalia/pinned/community"
+
+[[plugins.source]]
+name = "sinity"
+kind = "path"
+location = "~/.local/share/noctalia/local"
