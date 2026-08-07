@@ -952,6 +952,7 @@ in
               pkgs.coreutils
               pkgs.gnused
               pkgs.jq
+              pkgs.python3
               pkgs.shellcheck
             ];
           }
