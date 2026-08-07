@@ -14,6 +14,7 @@
   "enhance"
   "evidence-harness"
   "greedy-batching"
+  "git-protocol"
   "grilling"
   "html-report"
   "lynchpin"
@@ -23,4 +24,5 @@
   "recap"
   "skill-authoring"
   "swarm"
+  "writing-style"
 ]
