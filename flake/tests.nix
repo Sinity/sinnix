@@ -36,6 +36,7 @@ in
     ./tests/runtime.nix
     ./tests/health-sentinel.nix
     ./tests/ops-reducer.nix
+    ./tests/quota.nix
   ];
 
   perSystem =
