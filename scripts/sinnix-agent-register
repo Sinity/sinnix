@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Register an existing interactive terminal as an attested agent session
+# runtimeInputs: bash coreutils git jq
+set -euo pipefail
+
+state_dir="${SINNIX_AGENT_JOB_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/sinnix/agent-jobs}"
+job_id=""
+role="interactive"
+work_item=""
+provider=""
+account_hash=""
+kitty_socket="${KITTY_LISTEN_ON:-}"
+kitty_window_id="${KITTY_WINDOW_ID:-}"
+hyprland_address="${HYPRLAND_INSTANCE_SIGNATURE:-}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --job-id) job_id="${2:?missing value for --job-id}"; shift 2 ;;
+    --role) role="${2:?missing value for --role}"; shift 2 ;;
+    --work-item) work_item="${2:?missing value for --work-item}"; shift 2 ;;
+    --provider) provider="${2:?missing value for --provider}"; shift 2 ;;
+    --account-hash) account_hash="${2:?missing value for --account-hash}"; shift 2 ;;
+    --kitty-socket) kitty_socket="${2:?missing value for --kitty-socket}"; shift 2 ;;
+    --kitty-window-id) kitty_window_id="${2:?missing value for --kitty-window-id}"; shift 2 ;;
+    --hyprland-address) hyprland_address="${2:?missing value for --hyprland-address}"; shift 2 ;;
+    *) echo "unknown option: $1" >&2; exit 64 ;;
+  esac
+done
+
+[[ ${job_id} =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]] || { echo "invalid job ID" >&2; exit 64; }
+mkdir -p -m 0700 "${state_dir}"
+manifest="${state_dir}/${job_id}.json"
+events="${state_dir}/${job_id}.events.jsonl"
+[[ ! -e ${manifest} ]] || { echo "job ID already exists" >&2; exit 1; }
+proc_start="$(awk '{print $22}' "/proc/$$/stat")"
+cgroup="$(awk -F: '$1 == "0" {print $3}' /proc/$$/cgroup)"
+worktree="$(pwd -P)"
+repo="$(git rev-parse --show-toplevel 2>/dev/null || printf '%s' "${worktree}")"
+now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+jq -n --arg job_id "${job_id}" --arg now "${now}" --arg role "${role}" --arg work_item "${work_item}" \
+  --arg provider "${provider}" --arg account_hash "${account_hash}" --arg kitty_socket "${kitty_socket}" \
+  --arg kitty_window_id "${kitty_window_id}" --arg hyprland_address "${hyprland_address}" \
+  --arg repo "${repo}" --arg worktree "${worktree}" --arg pid "$$" --arg proc_start "${proc_start}" --arg cgroup "${cgroup}" \
+  '{schema_version:3,job_id:$job_id,launch_id:null,created_at:$now,updated_at:$now,lifecycle:"running",backend:"interactive",model:null,effort:null,repo:$repo,worktree:$worktree,branch:null,prompt:null,artifacts:{},declared:{role:$role,work_item:(if $work_item=="" then null else $work_item end)},delegation:{parent_job_id:null,coordinator_job_id:null},identity:{role:$role,bead_id:(if $work_item=="" then null else $work_item end),provider:(if $provider=="" then null else $provider end),account_hash:(if $account_hash=="" then null else $account_hash end)},correlation:{vendor_session_id:null,polylogue_session_id:null,kitty_socket:(if $kitty_socket=="" then null else $kitty_socket end),kitty_window_id:(if $kitty_window_id=="" then null else $kitty_window_id end),hyprland_address:(if $hyprland_address=="" then null else $hyprland_address end),quota_snapshot_id:null},launcher:{pid:($pid|tonumber),proc_start:$proc_start,scope_unit:null,cgroup:$cgroup},actual_agent:{pid:($pid|tonumber),proc_start:$proc_start,attested_at:$now},interactive:true,resource_overrides:{},completion:null}' >"${manifest}"
+chmod 0600 "${manifest}"
+jq -cn --arg at "${now}" --arg job_id "${job_id}" '{schema_version:2,at:$at,job_id:$job_id,event:"heartbeat",lifecycle:"running",interactive:true}' >"${events}"
+chmod 0600 "${events}"
+printf '%s\n' "${manifest}"

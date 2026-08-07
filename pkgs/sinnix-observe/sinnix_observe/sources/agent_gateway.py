@@ -184,7 +184,7 @@ def collect_agent_gateway(limit: int = 20) -> dict[str, Any]:
         row = _json(path)
         if (
             row
-            and row.get("schema_version") == 2
+            and row.get("schema_version") in {2, 3}
             and isinstance(row.get("job_id"), str)
         ):
             jobs.append(row)
@@ -233,6 +233,13 @@ def collect_agent_gateway(limit: int = 20) -> dict[str, Any]:
             "job_id": row["job_id"],
             "scope_unit": row.get("launcher", {}).get("scope_unit"),
             "cgroup": row.get("launcher", {}).get("cgroup"),
+            "delegation": row.get("delegation", {}),
+            "identity": row.get("identity", {}),
+            "actual_agent": row.get("actual_agent"),
+            "completion": row.get("completion"),
+            "lifecycle_events": _json_lines(
+                job_root / f"{row['job_id']}.events.jsonl", limit=200
+            ),
             "audit_event_ids": audit_by_job.get(row["job_id"], []),
             "journal": journal_by_job.get(row["job_id"], []),
             "polylogue": history.get(row["job_id"]),

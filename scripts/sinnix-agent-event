@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Append a normalized lifecycle event to an attested agent job
+# runtimeInputs: bash coreutils jq
+set -euo pipefail
+
+state_dir="${SINNIX_AGENT_JOB_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/sinnix/agent-jobs}"
+job_id=""
+event_type=""
+payload='{}'
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --job-id) job_id="${2:?missing value for --job-id}"; shift 2 ;;
+    --event) event_type="${2:?missing value for --event}"; shift 2 ;;
+    --payload-json) payload="${2:?missing value for --payload-json}"; shift 2 ;;
+    *) echo "unknown option: $1" >&2; exit 64 ;;
+  esac
+done
+
+[[ ${job_id} =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]] || { echo "invalid job ID" >&2; exit 64; }
+case "${event_type}" in
+  turn|tool|approval|user_wait|rate_limit|heavy_lease|verification|completion|failure|heartbeat) ;;
+  *) echo "unsupported lifecycle event: ${event_type}" >&2; exit 64 ;;
+esac
+jq -e 'type == "object"' <<<"${payload}" >/dev/null || { echo "payload must be a JSON object" >&2; exit 64; }
+
+manifest="${state_dir}/${job_id}.json"
+events="${state_dir}/${job_id}.events.jsonl"
+jq -e --arg job_id "${job_id}" '(.schema_version == 2 or .schema_version == 3) and .job_id == $job_id' "${manifest}" >/dev/null
+jq -cn --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg job_id "${job_id}" --arg event "${event_type}" --argjson payload "${payload}" \
+  '{schema_version:2,at:$at,job_id:$job_id,event:$event,payload:$payload}' >>"${events}"
+chmod 0600 "${events}"

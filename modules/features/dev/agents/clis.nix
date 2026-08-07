@@ -333,6 +333,8 @@ mkFeatureModule {
             scriptPkgs.chatgpt-share-export
             scriptPkgs.verify-agent-topology
             scriptPkgs.sinnix-agent-control-mcp
+            scriptPkgs.sinnix-agent-event
+            scriptPkgs.sinnix-agent-register
           ];
 
           programs.zsh = {

@@ -88,7 +88,7 @@ class JobService:
             raise JobError("unknown job ID") from exc
         except json.JSONDecodeError as exc:
             raise JobError("malformed job manifest") from exc
-        if value.get("schema_version") != 2 or value.get("job_id") != job_id:
+        if value.get("schema_version") not in {2, 3} or value.get("job_id") != job_id:
             raise JobError("unattested job manifest")
         return value
 
@@ -151,6 +151,20 @@ class JobService:
             command.extend(["--job-role", request.job_role])
         if request.work_item:
             command.extend(["--work-item", request.work_item])
+        for option, value in (
+            ("--parent-job-id", request.parent_job_id),
+            ("--coordinator-job-id", request.coordinator_job_id),
+            ("--provider", request.provider),
+            ("--account-hash", request.account_hash),
+            ("--vendor-session-id", request.vendor_session_id),
+            ("--polylogue-session-id", request.polylogue_session_id),
+            ("--kitty-socket", request.kitty_socket),
+            ("--kitty-window-id", request.kitty_window_id),
+            ("--hyprland-address", request.hyprland_address),
+            ("--quota-snapshot-id", request.quota_snapshot_id),
+        ):
+            if value:
+                command.extend([option, value])
 
         try:
             process = subprocess.Popen(
@@ -164,6 +178,8 @@ class JobService:
                     "SINNIX_CORRELATION_ID": job_id,
                     "SINNIX_PROJECT": request.project_id,
                     **({"SINNIX_WORK_ITEM": request.work_item} if request.work_item else {}),
+                    **({"SINNIX_PARENT_JOB_ID": request.parent_job_id} if request.parent_job_id else {}),
+                    **({"SINNIX_COORDINATOR_JOB_ID": request.coordinator_job_id} if request.coordinator_job_id else {}),
                 },
             )
         except OSError as exc:
@@ -214,7 +230,7 @@ class JobService:
             value = json.loads(result.stdout)
         except json.JSONDecodeError as exc:
             raise JobError("agent controller returned malformed status") from exc
-        if value.get("schema_version") != 2 or value.get("job_id") != job_id:
+        if value.get("schema_version") not in {2, 3} or value.get("job_id") != job_id:
             raise JobError("agent controller returned unattested status")
         return value
 
