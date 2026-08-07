@@ -101,9 +101,56 @@ check_generation() {
   fi
 }
 
+check_nvidia() {
+  local loaded userspace
+  loaded="${SINNIX_PREFLIGHT_NVIDIA_MODULE_VERSION:-}"
+  [ -n "$loaded" ] || loaded="$(awk -F: '/Module version/ {gsub(/[[:space:]]/, "", $2); print $2}' /proc/driver/nvidia/version 2>/dev/null || true)"
+  userspace="${SINNIX_PREFLIGHT_NVIDIA_USERSPACE_VERSION:-}"
+  [ -n "$userspace" ] || userspace="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1 || true)"
+  if [ -z "$loaded" ] || [ -z "$userspace" ]; then
+    report 1 nvidia-pairing "module=${loaded:-unavailable}, userspace=${userspace:-unavailable}"
+  elif [ "$loaded" != "$userspace" ]; then
+    report 2 nvidia-pairing "module=$loaded, userspace=$userspace" "reboot into the generation matching the loaded NVIDIA module"
+  else
+    report 0 nvidia-pairing "module=$loaded, userspace=$userspace"
+  fi
+}
+
+check_snapshot() {
+  local snapshot_root available
+  snapshot_root="${SINNIX_PREFLIGHT_SNAPSHOT_ROOT:-/persist/.btrfs/snapshot}"
+  available="${SINNIX_PREFLIGHT_SNAPSHOT_FREE_KIB:-}"
+  [ -n "$available" ] || available="$(df -Pk "$snapshot_root" 2>/dev/null | awk 'NR==2 {print $4}')"
+  if [ -z "$available" ]; then
+    report 1 snapshot-headroom "snapshot filesystem unavailable at $snapshot_root"
+  elif [ "$available" -lt 10485760 ]; then
+    report 2 snapshot-headroom "free=${available} KiB, required=10485760 KiB" "free rollback snapshot headroom before reboot"
+  else
+    report 0 snapshot-headroom "free=${available} KiB"
+  fi
+}
+
+check_flake() {
+  local flake_dir dirty lock_changes
+  flake_dir="${SINNIX_FLAKE_DIR:-$(pwd)}"
+  dirty="$(git -C "$flake_dir" status --porcelain 2>/dev/null | wc -l)"
+  lock_changes="$(git -C "$flake_dir" diff -- flake.lock 2>/dev/null | wc -l)"
+  if [ "$dirty" -gt 0 ] || [ "$lock_changes" -gt 0 ]; then
+    report 1 flake-drift "dirty_paths=$dirty, lock_diff_lines=$lock_changes"
+  else
+    report 0 flake-drift "clean flake tree and unchanged lockfile"
+  fi
+}
+
 check_work() {
   local jobs leases
-  jobs="$(find "${SINNIX_AGENT_JOB_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/sinnix/agent-jobs}" -maxdepth 1 -type f -name '*.json' 2>/dev/null | wc -l)"
+  jobs=0
+  for manifest in "${SINNIX_AGENT_JOB_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/sinnix/agent-jobs}"/*.json; do
+    [ -r "$manifest" ] || continue
+    case "$(jq -r '.lifecycle // empty' "$manifest" 2>/dev/null || true)" in
+      starting|running|cancel_requested) jobs=$((jobs + 1)) ;;
+    esac
+  done
   leases="$(systemctl --user list-units --state=active --no-legend 2>/dev/null | awk '$1 ~ /sinnix-(build|agent|borg)/ {n++} END {print n+0}')"
   if [ "$jobs" -gt 0 ] || [ "$leases" -gt 0 ]; then
     report 1 live-work "agent_manifests=${jobs}, active_work_units=${leases}"
@@ -128,12 +175,15 @@ check_concurrency() {
 if [ "$mode" = reboot ]; then
   scan_unpersisted
   check_generation
+  check_nvidia
+  check_snapshot
   check_work
 else
   check_memory
   check_disk
   check_concurrency
   check_generation
+  check_flake
 fi
 
 if [ "$mode" = switch ] && [ "$worst" -ge 2 ] && [ "$force" != 1 ]; then
