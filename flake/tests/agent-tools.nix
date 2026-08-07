@@ -60,7 +60,14 @@ in
               message = "Claude settings.json must be linked directly to dots during activation.";
             }
             {
-              assertion = builtins.hasAttr ".config/claude/agents" hm.home.file;
+              assertion = builtins.all (path: builtins.hasAttr path hm.home.file) [
+                ".config/claude/agents/lane.md"
+                ".config/claude/agents/triage.md"
+                ".config/claude/agents/review.md"
+                ".config/claude/agents/judge.md"
+                ".config/claude/agents/schemas/triage.schema.json"
+                ".config/claude/agents/schemas/judge.schema.json"
+              ];
               message = "Claude named agent definitions must be linked from the shared dots tree.";
             }
             {
@@ -127,7 +134,12 @@ in
           ".local/bin/mcp-sinex"
           ".local/bin/sinnix-mcp-sweep"
           ".config/hermes/skills"
-          ".config/claude/agents"
+          ".config/claude/agents/lane.md"
+          ".config/claude/agents/triage.md"
+          ".config/claude/agents/review.md"
+          ".config/claude/agents/judge.md"
+          ".config/claude/agents/schemas/triage.schema.json"
+          ".config/claude/agents/schemas/judge.schema.json"
         ];
         fixtureAssets = [
           {
