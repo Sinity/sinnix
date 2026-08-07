@@ -64,6 +64,14 @@ in
               message = "Claude named agent definitions must be linked from the shared dots tree.";
             }
             {
+              assertion = builtins.hasAttr "sinnix-settings-env-lint" hm.systemd.user.services;
+              message = "The settings environment audit service must be declared.";
+            }
+            {
+              assertion = builtins.hasAttr "sinnix-settings-env-lint" hm.systemd.user.timers;
+              message = "The settings environment audit timer must be declared.";
+            }
+            {
               assertion = builtins.all (path: builtins.hasAttr path hm.home.file) [
                 ".local/bin/sinnix-chrome-control"
                 ".local/bin/sinnix-hypr-control"
@@ -974,6 +982,24 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/agent-definitions.sh} ${../../dots/claude/agents}
             touch "$out"
           '';
+      settingsEnvLintFixture =
+        pkgs.runCommand "settings-env-lint-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.jq
+              pkgs.python3
+            ];
+          }
+          ''
+            scanner="$TMPDIR/sinnix-settings-env-lint"
+            cp ${../../scripts/sinnix-settings-env-lint} "$scanner"
+            chmod +x "$scanner"
+            patchShebangs "$scanner"
+            ${pkgs.bash}/bin/bash ${../../flake/tests/settings-env-lint.sh} "$scanner"
+            touch "$out"
+          '';
     in
     {
       checks = {
@@ -993,6 +1019,7 @@ in
         recovery-skills = recoverySkillsFixture;
         hooks-harness = hooksHarnessFixture;
         agent-definitions = agentDefinitionsFixture;
+        settings-env-lint = settingsEnvLintFixture;
       };
 
       heavyChecks = {
