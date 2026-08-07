@@ -946,6 +946,24 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/claude-judge.sh} "$judge" "$review"
             touch "$out"
           '';
+      vacuitySamplerFixture =
+        pkgs.runCommand "vacuity-sampler-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.jq
+              pkgs.python3
+            ];
+          }
+          ''
+            sampler="$TMPDIR/sinnix-vacuity-sampler"
+            cp ${../../scripts/sinnix-vacuity-sampler} "$sampler"
+            chmod +x "$sampler"
+            patchShebangs "$sampler"
+            ${pkgs.bash}/bin/bash ${../../flake/tests/vacuity-sampler.sh} "$sampler"
+            touch "$out"
+          '';
       recoverySkillsFixture =
         pkgs.runCommand "recovery-skills-fixture"
           {
@@ -981,12 +999,16 @@ in
           ''
             hooks="$TMPDIR/hooks"
             settings="$TMPDIR/settings.json"
+            sampler="$TMPDIR/sinnix-vacuity-sampler"
             mkdir -p "$hooks"
             cp ${../../dots/claude/hooks}/*.sh "$hooks/"
             cp ${../../dots/claude/settings.json} "$settings"
+            cp ${../../scripts/sinnix-vacuity-sampler} "$sampler"
             chmod +x "$hooks"/*.sh
+            chmod +x "$sampler"
             patchShebangs "$hooks"
-            ${pkgs.bash}/bin/bash ${../../flake/tests/hooks-harness.sh} "$hooks" "$settings"
+            patchShebangs "$sampler"
+            ${pkgs.bash}/bin/bash ${../../flake/tests/hooks-harness.sh} "$hooks" "$settings" "$sampler"
             touch "$out"
           '';
       agentDefinitionsFixture =
@@ -1058,6 +1080,7 @@ in
         skill-authoring = skillAuthoringFixture;
         desktop-capture = desktopCaptureFixture;
         claude-judge = claudeJudgeFixture;
+        vacuity-sampler = vacuitySamplerFixture;
         recovery-skills = recoverySkillsFixture;
         hooks-harness = hooksHarnessFixture;
         agent-definitions = agentDefinitionsFixture;
