@@ -12,6 +12,11 @@ in
   bindd = [
     "SUPER, End, Open Sinnix system controls, submap, system"
     "SUPER SHIFT, Return, Launch Codex in focused Kitty directory, exec, sinnix-kitty-control launch-agent-here --agent codex"
+    "SUPER SHIFT, O, OCR selected region to clipboard, exec, hyprland-ocr"
+    "SUPER SHIFT, Z, Increase cursor magnification, exec, hyprctl keyword cursor:zoom_factor 2.0"
+    "SUPER SHIFT, X, Reset cursor magnification, exec, hyprctl keyword cursor:zoom_factor 1.0"
+    "SUPER SHIFT, Escape, Dismiss visible scratchpads, exec, dismiss-scratchpads"
+    "SUPER SHIFT, F, Smart fullscreen, fullscreen, 1"
   ];
 
   submaps.system.settings = {

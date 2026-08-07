@@ -114,6 +114,11 @@ in
               any(.[]; . == "SUPER, bracketleft, moveintogroup, l") and
               any(.[]; . == "SUPER, bracketright, moveintogroup, r") and
               any(.[]; . == "SUPER SHIFT, bracketleft, moveoutofgroup") and
+              any(.[]; . == "SUPER SHIFT, O, OCR selected region to clipboard, exec, hyprland-ocr") and
+              any(.[]; . == "SUPER SHIFT, Z, Increase cursor magnification, exec, hyprctl keyword cursor:zoom_factor 2.0") and
+              any(.[]; . == "SUPER SHIFT, X, Reset cursor magnification, exec, hyprctl keyword cursor:zoom_factor 1.0") and
+              any(.[]; . == "SUPER SHIFT, Escape, Dismiss visible scratchpads, exec, dismiss-scratchpads") and
+              any(.[]; . == "SUPER SHIFT, F, Smart fullscreen, fullscreen, 1") and
               (any(.[]; . == "SUPER, G, togglegroup") and (any(.[]; . == "SUPER, T, togglegroup") | not))
             ' bindings.json >/dev/null
             cat > submaps.json <<'EOF_SUBMAPS'

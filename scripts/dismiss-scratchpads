@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Hide visible declared Hyprland scratchpads
+# runtimeInputs: bash coreutils hyprland jq
+set -euo pipefail
+
+command -v hyprctl >/dev/null 2>&1 || {
+  echo "dismiss-scratchpads: hyprctl not found" >&2
+  exit 1
+}
+
+workspaces=$(hyprctl -j workspaces)
+while IFS= read -r workspace; do
+  case "$workspace" in
+    special:*) hyprctl dispatch togglespecialworkspace "${workspace#special:}" >/dev/null ;;
+  esac
+done < <(printf '%s' "$workspaces" | jq -r '.[] | select(.visible == true and (.name | startswith("special:"))) | .name')

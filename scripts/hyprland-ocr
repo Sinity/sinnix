@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Capture a bounded Hyprland region and copy OCR text
+# runtimeInputs: coreutils grim slurp tesseract wl-clipboard
+set -euo pipefail
+
+tmp_dir=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/sinnix-ocr.XXXXXX")
+trap 'rm -rf "$tmp_dir"' EXIT
+
+geometry=$(slurp)
+[ -n "$geometry" ] || exit 0
+grim -g "$geometry" "$tmp_dir/region.png"
+timeout 30s tesseract "$tmp_dir/region.png" stdout 2>/dev/null | wl-copy

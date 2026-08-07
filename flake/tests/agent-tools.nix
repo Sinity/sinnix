@@ -872,6 +872,25 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/skill-authoring.sh} "$validator"
             touch "$out"
           '';
+      desktopCaptureFixture =
+        pkgs.runCommand "desktop-capture-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.jq
+            ];
+          }
+          ''
+            ocr="$TMPDIR/hyprland-ocr"
+            dismiss="$TMPDIR/dismiss-scratchpads"
+            cp ${../../scripts/hyprland-ocr} "$ocr"
+            cp ${../../scripts/dismiss-scratchpads} "$dismiss"
+            chmod +x "$ocr" "$dismiss"
+            patchShebangs "$ocr" "$dismiss"
+            ${pkgs.bash}/bin/bash ${../../flake/tests/desktop-capture.sh} "$ocr" "$dismiss"
+            touch "$out"
+          '';
     in
     {
       checks = {
@@ -886,6 +905,7 @@ in
         bd-safety-hook = bdSafetyHookFixture;
         context-handoff = contextHandoffFixture;
         skill-authoring = skillAuthoringFixture;
+        desktop-capture = desktopCaptureFixture;
       };
 
       heavyChecks = {
