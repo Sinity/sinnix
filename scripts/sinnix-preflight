@@ -151,7 +151,7 @@ check_work() {
       starting|running|cancel_requested) jobs=$((jobs + 1)) ;;
     esac
   done
-  leases="$(systemctl --user list-units --state=active --no-legend 2>/dev/null | awk '$1 ~ /sinnix-(build|agent|borg)/ {n++} END {print n+0}')"
+  leases="$(systemctl --user list-units --state=active --no-legend 2>/dev/null | awk '$1 ~ /sinnix-(build|agent|borg)/ {n++} END {print n+0}' || true)"
   if [ "$jobs" -gt 0 ] || [ "$leases" -gt 0 ]; then
     report 1 live-work "agent_manifests=${jobs}, active_work_units=${leases}"
   else
