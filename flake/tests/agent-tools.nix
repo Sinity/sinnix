@@ -814,6 +814,26 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/kitty-agent-here.sh} "$helper"
             touch "$out"
           '';
+      bdSafetyHookFixture =
+        pkgs.runCommand "bd-safety-hook-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.gnugrep
+              pkgs.jq
+              pkgs.python3
+              pkgs.sed
+            ];
+          }
+          ''
+            hook="$TMPDIR/pretooluse-bash.sh"
+            cp ${../../dots/claude/hooks/pretooluse-bash.sh} "$hook"
+            chmod +x "$hook"
+            patchShebangs "$hook"
+            ${pkgs.bash}/bin/bash ${../../flake/tests/bd-safety.sh} "$hook"
+            touch "$out"
+          '';
     in
     {
       checks = {
@@ -825,6 +845,7 @@ in
         preflight = preflightFixture;
         hogkill = hogkillFixture;
         kitty-agent-here = kittyAgentHereFixture;
+        bd-safety-hook = bdSafetyHookFixture;
       };
 
       heavyChecks = {
