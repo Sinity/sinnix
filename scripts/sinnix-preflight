@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Run read-only reboot and switch safety checks before changing generations
+# runtimeInputs: bash coreutils findutils gawk gnugrep procps systemd util-linux jq @sinnix-heavy-lease
+set -euo pipefail
+
+mode="${1:-}"
+case "$mode" in
+  reboot|switch) ;;
+  *) echo "Usage: sinnix-preflight reboot|switch" >&2; exit 2 ;;
+esac
+
+meminfo="${SINNIX_PREFLIGHT_MEMINFO:-/proc/meminfo}"
+pressure="${SINNIX_PREFLIGHT_MEMORY_PRESSURE:-/proc/pressure/memory}"
+home_root="${SINNIX_PREFLIGHT_HOME_ROOT:-/home/sinity}"
+var_root="${SINNIX_PREFLIGHT_VARLIB_ROOT:-/var/lib}"
+persist_prefixes="${SINNIX_PREFLIGHT_PERSISTED_PREFIXES:-/persist:/realm}"
+min_mem_kib="${SINNIX_REBUILD_MIN_MEM_AVAILABLE_KB:-8388608}"
+min_nix_kib="${SINNIX_PREFLIGHT_MIN_NIX_FREE_KB:-5242880}"
+force="${SINNIX_PREFLIGHT_FORCE:-${SINNIX_REBUILD_SKIP_PRESSURE_PREFLIGHT:-0}}"
+worst=0
+
+status_name() {
+  case "$1" in
+    0) echo PASS ;;
+    1) echo WARN ;;
+    *) echo BLOCK ;;
+  esac
+}
+
+report() {
+  local level="$1" name="$2" evidence="$3" remediation="${4:-}"
+  [ "$level" -gt "$worst" ] && worst="$level"
+  printf '%s %s: %s\n' "$(status_name "$level")" "$name" "$evidence"
+  [ -n "$remediation" ] && printf '  remediation: %s\n' "$remediation"
+  return 0
+}
+
+is_persisted() {
+  local path prefix
+  IFS=: read -ra prefixes <<<"$persist_prefixes"
+  for prefix in "${prefixes[@]}"; do
+    case "$1" in
+      "$prefix"|"$prefix"/*) return 0 ;;
+    esac
+  done
+  return 1
+}
+
+scan_unpersisted() {
+  local root path bytes newest=0 count=0
+  for root in "$home_root" "$var_root"; do
+    [ -d "$root" ] || continue
+    while IFS= read -r -d '' path; do
+      is_persisted "$path" && continue
+      bytes="$(stat -c '%s' "$path" 2>/dev/null || echo 0)"
+      count=$((count + 1))
+      [ "$bytes" -gt "$newest" ] && newest="$bytes"
+    done < <(find "$root" -xdev -type f -size +100M -print0 2>/dev/null)
+  done
+  if [ "$count" -gt 0 ]; then
+    report 2 unpersisted-valuables "$count large unpersisted files; largest=$newest bytes" "move state under a declared persistence or realm bind before reboot"
+  else
+    report 0 unpersisted-valuables "no large unpersisted files found"
+  fi
+}
+
+check_memory() {
+  local available psi
+  available="$(awk '$1 == "MemAvailable:" {print $2}' "$meminfo" 2>/dev/null || echo 0)"
+  psi="$(awk '/some/ {for (i=1;i<=NF;i++) if ($i ~ /^avg60=/) {sub("avg60=", "", $i); print $i; exit}}' "$pressure" 2>/dev/null || echo 0)"
+  if [ "${SINNIX_REBUILD_SKIP_PRESSURE_PREFLIGHT:-0}" = 1 ]; then
+    report 1 memory-headroom "pressure check overridden; MemAvailable=${available:-0} KiB, PSI.some.avg60=${psi:-0}"
+    return
+  fi
+  if [ "${available:-0}" -lt "$min_mem_kib" ]; then
+    report 2 memory-headroom "MemAvailable=${available:-0} KiB, required=${min_mem_kib} KiB, PSI.some.avg60=${psi:-0}" "set SINNIX_REBUILD_SKIP_PRESSURE_PREFLIGHT=1 only for a deliberate override"
+  else
+    report 0 memory-headroom "MemAvailable=${available} KiB, PSI.some.avg60=${psi:-0}"
+  fi
+}
+
+check_disk() {
+  local available
+  available="$(df -Pk /nix 2>/dev/null | awk 'NR==2 {print $4}')"
+  if [ "${available:-0}" -lt "$min_nix_kib" ]; then
+    report 2 nix-storage "free=${available:-0} KiB, required=${min_nix_kib} KiB" "free Nix storage before starting a rebuild"
+  else
+    report 0 nix-storage "free=${available} KiB"
+  fi
+}
+
+check_generation() {
+  local current booted
+  current="$(readlink -f /run/current-system 2>/dev/null || echo unavailable)"
+  booted="$(readlink -f /run/booted-system 2>/dev/null || echo unavailable)"
+  if [ "$mode" = reboot ] && [ "$current" != "$booted" ]; then
+    report 1 generation-pairing "current=${current##*/}, booted=${booted##*/}"
+  else
+    report 0 generation-pairing "current=${current##*/}, booted=${booted##*/}"
+  fi
+}
+
+check_work() {
+  local jobs leases
+  jobs="$(find "${SINNIX_AGENT_JOB_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/sinnix/agent-jobs}" -maxdepth 1 -type f -name '*.json' 2>/dev/null | wc -l)"
+  leases="$(systemctl --user list-units --state=active --no-legend 2>/dev/null | awk '$1 ~ /sinnix-(build|agent|borg)/ {n++} END {print n+0}')"
+  if [ "$jobs" -gt 0 ] || [ "$leases" -gt 0 ]; then
+    report 1 live-work "agent_manifests=${jobs}, active_work_units=${leases}"
+  else
+    report 0 live-work "no active agent or build units observed"
+  fi
+}
+
+check_concurrency() {
+  if sinnix-heavy-lease status >/dev/null 2>&1; then
+    report 1 heavy-lease "another heavy workload owns the shared lease"
+  else
+    report 0 heavy-lease "shared heavy-work lease is available"
+  fi
+  if pgrep -af 'nh os (switch|boot)|nixos-rebuild|nix.*--profile.*/nix/var/nix/profiles/system' >/dev/null 2>&1; then
+    report 2 concurrent-switch "another generation operation is running" "wait for the existing switch or boot operation"
+  else
+    report 0 concurrent-switch "no concurrent generation operation observed"
+  fi
+}
+
+if [ "$mode" = reboot ]; then
+  scan_unpersisted
+  check_generation
+  check_work
+else
+  check_memory
+  check_disk
+  check_concurrency
+  check_generation
+fi
+
+if [ "$mode" = switch ] && [ "$worst" -ge 2 ] && [ "$force" != 1 ]; then
+  exit 75
+fi
+exit 0

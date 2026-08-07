@@ -269,6 +269,7 @@ in
       scriptPkgs.sinnix-heavy-lease
       scriptPkgs.sinnix-health-sentinel
       scriptPkgs.sinnix-config-drift
+      scriptPkgs.sinnix-preflight
     ];
     systemd.tmpfiles.rules = [ "d /run/sinnix 0775 root users -" ];
     systemd.services = {
