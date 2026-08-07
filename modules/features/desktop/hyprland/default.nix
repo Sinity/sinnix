@@ -80,6 +80,14 @@ let
       target = "kitty-scrollback-view";
       source = "kitty-scrollback-view";
     }
+    {
+      target = "hyprland-ocr";
+      source = "hyprland-ocr";
+    }
+    {
+      target = "dismiss-scratchpads";
+      source = "dismiss-scratchpads";
+    }
   ];
 in
 {

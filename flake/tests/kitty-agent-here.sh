@@ -70,14 +70,17 @@ printf 'fallback %s\n' "$*" >>"$KITTY_TEST_LOG"
 EOF
 
 chmod +x "$test_root/bin"/*
+for fixture in "$test_root/bin"/*; do
+  sed -i "1c#!$(command -v bash)" "$fixture"
+done
 
 run_helper() {
-  env PATH="$test_root/bin:$PATH" USER=test XDG_RUNTIME_DIR="$test_root/runtime" SINNIX_KITTY_PROC_ROOT="$test_root/proc" HOME="$test_root/home" KITTY_TEST_LOG="$test_root/kitty.log" KITTY_TEST_CWD="$1" "$helper" launch-agent-here --agent codex
+  env PATH="$test_root/bin:$PATH" USER=test XDG_RUNTIME_DIR="$test_root/runtime" SINNIX_KITTY_PROC_ROOT="$test_root/proc" SINNIX_PROJECT_ROOT="$test_root/work/sinnix" HOME="$test_root/home" KITTY_TEST_LOG="$test_root/kitty.log" KITTY_TEST_CWD="$1" "$helper" launch-agent-here --agent codex
 }
 
 run_helper "$test_root/work/lynchpin"
 grep -F -- '--cwd '"$test_root/work/lynchpin"' --keep-focus' "$test_root/kitty.log"
-grep -F -- "$HOME/.local/bin/codex" "$test_root/kitty.log"
+grep -F -- "$test_root/home/.local/bin/codex" "$test_root/kitty.log"
 
 : >"$test_root/kitty.log"
 run_helper "$test_root/work/sinnix"
@@ -85,14 +88,12 @@ grep -F -- '--cwd '"$test_root/work/sinnix"' --keep-focus' "$test_root/kitty.log
 
 : >"$test_root/kitty.log"
 HYPR_TEST_CLASS=browser run_helper "$test_root/work/lynchpin"
-grep -F -- 'fallback -- kitty --directory /realm/project/sinnix' "$test_root/kitty.log"
+sleep 0.1
+grep -F -- 'fallback app -- kitty --directory '"$test_root/work/sinnix" "$test_root/kitty.log"
 grep -F -- 'notify ' "$test_root/kitty.log"
 
 : >"$test_root/kitty.log"
-{
-  printf 'stale (stale)'
-  printf ' 0%.0s' {1..19}
-  printf ' 200\n'
-} >"$test_root/proc/200/stat"
+rm "$test_root/proc/200/stat"
 run_helper "$test_root/work/lynchpin"
-grep -F -- 'fallback -- kitty --directory /realm/project/sinnix' "$test_root/kitty.log"
+sleep 0.1
+grep -F -- 'fallback app -- kitty --directory '"$test_root/work/sinnix" "$test_root/kitty.log"

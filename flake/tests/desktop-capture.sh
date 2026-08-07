@@ -37,6 +37,9 @@ case "$*" in
 esac
 EOF
 chmod +x "$fixture_bin"/*
+for fixture in "$fixture_bin"/*; do
+  sed -i "1c#!$(command -v bash)" "$fixture"
+done
 
 export OCR_CLIPBOARD=$TMPDIR/clipboard
 PATH="$fixture_bin:$PATH" "$ocr_helper"
