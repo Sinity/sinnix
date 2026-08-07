@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Create an integrity-checked compressed SQLite backup
+# runtimeInputs: python3 zstd coreutils
+
+from __future__ import annotations
+
+import argparse
+import os
+import signal
+import sqlite3
+import subprocess
+import sys
+from pathlib import Path
+
+
+class BackupCancelled(Exception):
+    pass
+
+
+cancel_requested = False
+
+
+def request_cancel(_signum: int, _frame: object) -> None:
+    global cancel_requested
+    cancel_requested = True
+
+
+def backup_database(source_path: Path, output_path: Path) -> None:
+    raw_path = output_path.with_name(output_path.name.removesuffix(".zst") + ".tmp")
+    compressed_path = output_path.with_suffix(output_path.suffix + ".tmp")
+    sidecars = (raw_path, raw_path.with_name(raw_path.name + "-journal"), raw_path.with_name(raw_path.name + "-wal"), compressed_path)
+
+    def cleanup() -> None:
+        for path in sidecars:
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+
+    cleanup()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    source: sqlite3.Connection | None = None
+    target: sqlite3.Connection | None = None
+    try:
+        source = sqlite3.connect(source_path, timeout=5.0)
+        source.execute("PRAGMA busy_timeout=5000")
+        target = sqlite3.connect(raw_path)
+        target.execute("PRAGMA busy_timeout=5000")
+
+        def progress(_status: int, _remaining: int, _total: int) -> None:
+            if cancel_requested:
+                raise BackupCancelled
+
+        source.backup(target, pages=0, progress=progress, sleep=0)
+        target.commit()
+        integrity = target.execute("PRAGMA integrity_check").fetchone()
+        if integrity != ("ok",):
+            raise RuntimeError(f"SQLite integrity_check failed: {integrity!r}")
+        subprocess.run(["zstd", "-T1", "-q", "-f", str(raw_path), "-o", str(compressed_path)], check=True)
+        os.chmod(compressed_path, 0o600)
+        os.replace(compressed_path, output_path)
+        os.chmod(output_path, 0o600)
+    finally:
+        if target is not None:
+            target.close()
+        if source is not None:
+            source.close()
+        cleanup()
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("source", type=Path)
+    parser.add_argument("output", type=Path)
+    args = parser.parse_args()
+    signal.signal(signal.SIGTERM, request_cancel)
+    signal.signal(signal.SIGINT, request_cancel)
+    try:
+        backup_database(args.source, args.output)
+    except BackupCancelled:
+        print("SQLite backup cancelled", file=sys.stderr)
+        return 143
+    except (OSError, RuntimeError, sqlite3.Error, subprocess.CalledProcessError) as error:
+        print(f"SQLite backup failed: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
