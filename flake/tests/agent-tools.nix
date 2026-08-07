@@ -79,6 +79,14 @@ in
               message = "The settings environment audit timer must be declared.";
             }
             {
+              assertion = builtins.hasAttr "sinnix-vacuity-judge" hm.systemd.user.services;
+              message = "The bounded vacuity judge worker must be declared.";
+            }
+            {
+              assertion = builtins.hasAttr "sinnix-vacuity-judge" hm.systemd.user.timers;
+              message = "The bounded vacuity judge timer must be declared.";
+            }
+            {
               assertion = builtins.all (path: builtins.hasAttr path hm.home.file) [
                 ".local/bin/sinnix-chrome-control"
                 ".local/bin/sinnix-hypr-control"

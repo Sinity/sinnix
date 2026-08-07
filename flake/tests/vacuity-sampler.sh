@@ -21,5 +21,8 @@ chmod +x "$test_root/bin/fake-judge"
 HOME="$test_root/home" XDG_STATE_HOME="$test_root/state" SINNIX_CLAUDE_JUDGE="$test_root/bin/fake-judge" PATH="$test_root/bin:$PATH" "$sampler" judge-once
 HOME="$test_root/home" XDG_STATE_HOME="$test_root/state" SINNIX_CLAUDE_JUDGE="$test_root/bin/fake-judge" PATH="$test_root/bin:$PATH" "$sampler" judge-once
 test "$(jq -s '[.[] | select(.type == "vacuity_judgment")] | length' "$test_root/state/claude-code/dispatch-ledger.jsonl")" = 1
+candidate_id=$(jq -r 'select(.type == "vacuity_candidate") | .candidate_id' "$test_root/state/claude-code/dispatch-ledger.jsonl")
+HOME="$test_root/home" XDG_STATE_HOME="$test_root/state" "$sampler" review --candidate-id "$candidate_id" --label false_positive
 HOME="$test_root/home" XDG_STATE_HOME="$test_root/state" "$sampler" report | jq -e '.denominator == 1 and .sampled == 1 and .judged == 1 and .verdict_distribution.unsupported == 1' >/dev/null
+HOME="$test_root/home" XDG_STATE_HOME="$test_root/state" "$sampler" report | jq -e '.reviewed_count == 1 and .reviewed_false_positive_rate == 1' >/dev/null
 echo 'vacuity sampler fixture passed'

@@ -194,23 +194,38 @@ def report() -> int:
     judgments = [row for row in rows if row.get("type") == "vacuity_judgment"]
     distribution: dict[str, int] = {}
     cost = 0.0
+    reviews = [row for row in rows if row.get("type") == "vacuity_review"]
     for row in judgments:
         verdict = row.get("verdict", {}).get("verdict", "unknown")
         distribution[verdict] = distribution.get(verdict, 0) + 1
         if isinstance(row.get("cost_usd"), (int, float)):
             cost += float(row["cost_usd"])
-    print(json.dumps({"schema_version": 1, "policy_version": POLICY_VERSION, "denominator": len(candidates), "sampled": sum(bool(row.get("sampled")) for row in candidates), "judged": len(judgments), "cost_usd": cost, "verdict_distribution": distribution, "reviewed_false_positive_rate": None}, sort_keys=True))
+    false_positives = sum(row.get("label") == "false_positive" for row in reviews)
+    print(json.dumps({"schema_version": 1, "policy_version": POLICY_VERSION, "denominator": len(candidates), "sampled": sum(bool(row.get("sampled")) for row in candidates), "judged": len(judgments), "cost_usd": cost, "verdict_distribution": distribution, "reviewed_count": len(reviews), "reviewed_false_positive_rate": (false_positives / len(reviews) if reviews else None)}, sort_keys=True))
+    return 0
+
+
+def review(candidate_id: str, label: str) -> int:
+    if label not in {"false_positive", "confirmed"}:
+        raise SystemExit("review label must be false_positive or confirmed")
+    append_jsonl(ledger_path(), {"type": "vacuity_review", "candidate_id": candidate_id, "label": label, "timestamp": now(), "policy_version": POLICY_VERSION})
     return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["enqueue", "judge-once", "report"])
+    parser.add_argument("command", choices=["enqueue", "judge-once", "report", "review"])
+    parser.add_argument("--candidate-id")
+    parser.add_argument("--label", choices=["false_positive", "confirmed"])
     args = parser.parse_args()
     if args.command == "enqueue":
         return enqueue(read_payload())
     if args.command == "judge-once":
         return judge_once()
+    if args.command == "review":
+        if not args.candidate_id or not args.label:
+            parser.error("review requires --candidate-id and --label")
+        return review(args.candidate_id, args.label)
     return report()
 
 

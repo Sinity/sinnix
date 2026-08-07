@@ -343,6 +343,23 @@ mkFeatureModule {
             scriptPkgs.sinnix-agent-profile-benchmark
           ];
 
+          systemd.user.services.sinnix-vacuity-judge = {
+            Unit.Description = "Process queued bounded agent-vacuity samples";
+            Service = {
+              Type = "oneshot";
+              ExecStart = "${scriptPkgs.sinnix-vacuity-sampler}/bin/sinnix-vacuity-sampler judge-once";
+            };
+          };
+          systemd.user.timers.sinnix-vacuity-judge = {
+            Unit.Description = "Timer for bounded agent-vacuity judgments";
+            Timer = {
+              OnBootSec = "10min";
+              OnUnitActiveSec = "15min";
+              AccuracySec = "1min";
+            };
+            Install.WantedBy = [ "timers.target" ];
+          };
+
           programs.zsh = {
             shellAliases = {
               # `claude` routes through claude-lean (NOT a bare ~/.local/bin/claude):
