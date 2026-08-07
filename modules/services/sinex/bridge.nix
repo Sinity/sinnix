@@ -521,9 +521,10 @@ in
       #     resetting mask::--x → mask::--- and nullifying the sinex traverse
       #     grant. Foundation/replica hosts do not create that helper.
       (lib.mkIf runtimeEnabled {
-        # NATS JetStream state (raw-event buffer, unconfirmed events, DLQ) —
-        # persist so a reboot doesn't silently discard in-flight capture data.
-        sinnix.persistence.system.directories = [ "/var/lib/nats" ];
+        # NATS JetStream state is mounted from /realm/state/nats by the
+        # workstation storage topology. Keeping it on the realm volume makes
+        # the ownership and backup boundary explicit instead of hiding it in
+        # the impermanence bind tree.
 
         sinnix.runtime.surfaces = {
           sinex-runtime = {
