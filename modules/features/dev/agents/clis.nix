@@ -336,6 +336,7 @@ mkFeatureModule {
             scriptPkgs.sinnix-agent-event
             scriptPkgs.sinnix-agent-register
             scriptPkgs.sinnix-attention
+            scriptPkgs.sinnix-context-handoff
           ];
 
           programs.zsh = {

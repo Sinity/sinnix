@@ -6,6 +6,7 @@
   "bead-loop"
   "beads"
   "claude-self-knowledge"
+  "context-hygiene"
   "desktop-control-plane"
   "drive"
   "enhance"

@@ -194,6 +194,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "sinnix-context-handoff",
+            "timeout": 10
+          },
+          {
+            "type": "command",
             "command": "~/.claude/hooks/sessionstart-beads-prime.sh --memories-only",
             "timeout": 10
           }
