@@ -81,6 +81,9 @@ in
             sinnix.services.ollama.enable = true;
             sinnix.services.koboldcpp.enable = true;
             sinnix.services.litellm.enable = true;
+            sinnix.services.open-webui.enable = true;
+            sinnix.services.whisper.enable = true;
+            sinnix.services.tts.enable = true;
           })
         ];
         assertions = config: [
@@ -117,6 +120,22 @@ in
           {
             assertion = config.sinnix.runtime.inventory.surfaces.litellm.activation.dependsOn == [ "ollama-proxy" ];
             message = "LiteLLM activation must retain the Ollama socket dependency";
+          }
+          {
+            assertion = config.sinnix.runtime.inventory.surfaces.open-webui.activation.publicEndpoint == "127.0.0.1:8080"
+              && config.sinnix.runtime.inventory.surfaces.whisper.activation.publicEndpoint == "127.0.0.1:8090"
+              && config.sinnix.runtime.inventory.surfaces.tts.activation.publicEndpoint == "127.0.0.1:8000";
+            message = "The AI factory must preserve direct loopback endpoints for representative services";
+          }
+          {
+            assertion = config.systemd.services.whisper-server.serviceConfig.ExecStart != null
+              && lib.hasInfix "whisper-server" config.systemd.services.whisper-server.serviceConfig.ExecStart;
+            message = "The AI factory must leave the native whisper command visible";
+          }
+          {
+            assertion = config.systemd.services.podman-openedai-speech.serviceConfig.ExecStart != null
+              && lib.hasInfix "podman" config.systemd.services.podman-openedai-speech.serviceConfig.ExecStart;
+            message = "The AI factory must leave the container launch visible";
           }
         ];
       };

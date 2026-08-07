@@ -5,22 +5,18 @@
 # Digest-pinned OCI container with CDI GPU passthrough (XTTS uses CUDA; Piper is
 # CPU). Web/API on 127.0.0.1:8000. Voices + config persist under model/tts.
 {
-  mkServiceModule,
+  mkAiService,
   lib,
   pkgs,
   ...
 }@args:
-mkServiceModule {
+mkAiService {
   name = "tts";
   description = "OpenedAI-Speech TTS bridge (Piper + XTTS, containerized)";
-  surface = {
-    unit = "podman-openedai-speech.service";
-    resourceClass = "interactive-agent";
-    observe = {
-      enable = true;
-      restartable = true;
-    };
-  };
+  unit = "podman-openedai-speech.service";
+  endpoint = "127.0.0.1:8000";
+  backendKind = "container";
+  requiresCuda = true;
   extraOptions = {
     autoStart = args.lib.mkOption {
       type = args.lib.types.bool;

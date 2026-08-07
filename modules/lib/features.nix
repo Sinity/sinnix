@@ -119,6 +119,53 @@ let
       );
     };
 
+  # AI service specialization. It owns only the repeated surface metadata and
+  # persistence declaration. Launch commands, users, dependencies, and
+  # protocol-specific settings remain in each service module.
+  mkAiService =
+    {
+      name,
+      description,
+      unit,
+      endpoint ? null,
+      activation ? { },
+      resourceClass ? "interactive-agent",
+      stateDirectories ? [ ],
+      backendKind ? "native",
+      requiresCuda ? false,
+      extraOptions ? { },
+      meta ? { },
+      configFn,
+    }:
+    mkServiceModule {
+      inherit name description extraOptions;
+      meta = meta // {
+        ai = {
+          inherit backendKind requiresCuda;
+        };
+      };
+      surface = {
+        inherit unit resourceClass;
+        activation = {
+          mode = "direct";
+        }
+        // lib.optionalAttrs (endpoint != null) {
+          publicEndpoint = endpoint;
+        }
+        // activation;
+        observe = {
+          enable = true;
+          restartable = true;
+        };
+      };
+      configFn = args: lib.mkMerge [
+        (lib.optionalAttrs (stateDirectories != [ ]) {
+          sinnix.persistence.system.directories = stateDirectories;
+        })
+        (configFn args)
+      ];
+    };
+
   # Pre-curried version for extraSpecialArgs - eliminates boilerplate in modules
   # Usage in home-manager.nix extraSpecialArgs:
   #   mkDotsFileFor = helpers.mkDotsFileFor config.sinnix;
@@ -196,6 +243,7 @@ in
   inherit
     mkFeatureModule
     mkServiceModule
+    mkAiService
     mkDotsFileFor
     mkPAMLimits
     ;

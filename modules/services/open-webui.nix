@@ -11,22 +11,18 @@
 # is awkward to persist; we override to a dedicated static user so the state dir
 # is a plain owned path.
 {
-  mkServiceModule,
+  mkAiService,
   lib,
   pkgs,
   ...
 }@args:
-mkServiceModule {
+mkAiService {
   name = "open-webui";
   description = "Open WebUI chat frontend for local models";
-  surface = {
-    unit = "open-webui.service";
-    resourceClass = "interactive-agent";
-    observe = {
-      enable = true;
-      restartable = true;
-    };
-  };
+  unit = "open-webui.service";
+  endpoint = "127.0.0.1:8080";
+  stateDirectories = [ "/var/lib/open-webui" ];
+  requiresCuda = false;
   extraOptions = {
     autoStart = args.lib.mkOption {
       type = args.lib.types.bool;
@@ -83,6 +79,5 @@ mkServiceModule {
       };
       systemd.services.open-webui.wantedBy = lib.mkIf (!cfg.autoStart) (lib.mkForce [ ]);
 
-      sinnix.persistence.system.directories = [ "/var/lib/open-webui" ];
     };
 } args
