@@ -43,14 +43,6 @@ in
 
     system.stateVersion = "24.05";
 
-    # Record the flake commit that produced this generation. Surfaces via
-    # `nixos-version --revision` and is read at activation time by the
-    # lynchpin generation-log script so substrate can join telemetry rows
-    # back to the sinnix git history. Falls through to "dirty"/"unknown"
-    # if the source tree was uncommitted at build time, which is itself
-    # diagnostically useful (rebuilds from local edits are visible).
-    system.configurationRevision = inputs.self.rev or inputs.self.dirtyRev or "unknown";
-
     security = {
       rtkit.enable = true;
       sudo.wheelNeedsPassword = false;
