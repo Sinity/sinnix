@@ -772,6 +772,27 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/preflight.sh} "$preflight"
             touch "$out"
           '';
+      hogkillFixture =
+        pkgs.runCommand "hogkill-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.gawk
+              pkgs.gnugrep
+              pkgs.jq
+              pkgs.procps
+              pkgs.sqlite
+            ];
+          }
+          ''
+            hogkill="$TMPDIR/hogkill"
+            cp ${../../scripts/hogkill} "$hogkill"
+            chmod +x "$hogkill"
+            patchShebangs "$hogkill"
+            ${pkgs.bash}/bin/bash ${../../flake/tests/hogkill.sh} "$hogkill"
+            touch "$out"
+          '';
     in
     {
       checks = {
@@ -781,6 +802,7 @@ in
         agent-job-handles = agentJobHandleFixture;
         mcp-sweep = mcpSweepFixture;
         preflight = preflightFixture;
+        hogkill = hogkillFixture;
       };
 
       heavyChecks = {
