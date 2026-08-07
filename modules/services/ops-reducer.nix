@@ -29,7 +29,7 @@ mkServiceModule {
           message = "sinnix.services.ops-reducer.intervalSeconds must not poll collectors faster than 5 seconds";
         }
       ];
-      environment.systemPackages = [ reducer quota quota.passthru.codexbar scriptPkgs.sinnix-pressure-park ];
+      environment.systemPackages = [ reducer quota quota.passthru.codexbar scriptPkgs.sinnix-pressure-park scriptPkgs.sinnix-rebuild-override ];
       systemd.tmpfiles.rules = [ "d /realm/state/sinnix-ops 0700 ${userName} users -" ];
       sinnix.runtime.surfaces.ops-reducer = {
         unit = "sinnix-ops-reducer.service";

@@ -18,7 +18,8 @@ def inventory(path: Path) -> None:
                     "safe": {
                         "unit": "safe.service",
                         "manager": "user",
-                        "observe": {"restartable": True},
+                "observe": {"restartable": True},
+                        "effectiveResources": {"CPUWeight": 5},
                     },
                     "fixed": {
                         "unit": "fixed.service",
@@ -40,6 +41,7 @@ def request(
         "expected_revision": revision,
         "idempotency_key": key,
         "operator_reason": "test fixture",
+        "parameters": {},
     }
 
 
@@ -127,6 +129,48 @@ def test_action_rejects_unknown_pid_stale_revision_and_unsafe_unit(
         actions.execute(request("restart", {"unit": "safe"}, revision=0))
     with pytest.raises(ActionError, match="restartable"):
         actions.execute(request("restart", {"unit": "fixed"}, key="fixed"))
-    actions.execute(request("restart", {"unit": "safe"}, key="fixed"))
+    actions.execute(request("restart", {"unit": "safe"}, key="fixed-safe"))
     with pytest.raises(ActionError, match="another request"):
         actions.execute(request("reset_policy", {"unit": "safe"}, key="fixed"))
+
+
+def test_policy_properties_and_rebuild_override_are_enumerated(tmp_path: Path) -> None:
+    inventory_path = tmp_path / "inventory.json"
+    inventory(inventory_path)
+    reducer = Reducer(tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []})
+    reducer.refresh()
+    calls = []
+    actions = ActionService(
+        reducer.snapshot,
+        inventory_path,
+        tmp_path / "receipts.json",
+        adapter=lambda value, _resolved: calls.append(value) or {"status": "accepted"},
+    )
+    assert actions.execute(request("set_policy", {"unit": "safe"}, key="policy") | {
+        "parameters": {"property": "CPUWeight", "value": "10"}
+    })["adapter"]["status"] == "accepted"
+    with pytest.raises(ActionError, match="unsupported runtime policy"):
+        actions.execute(request("set_policy", {"unit": "safe"}, key="bad") | {
+            "parameters": {"property": "Slice", "value": "app.slice"}
+        })
+    assert actions.execute(request("rebuild_override", {"unit": "safe"}, key="override") | {
+        "parameters": {"name": "cores", "value": "8"}
+    })["adapter"]["status"] == "accepted"
+
+
+def test_valid_rejected_action_leaves_a_receipt(tmp_path: Path) -> None:
+    inventory_path = tmp_path / "inventory.json"
+    inventory(inventory_path)
+    reducer = Reducer(tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []})
+    reducer.refresh()
+    actions = ActionService(
+        reducer.snapshot,
+        inventory_path,
+        tmp_path / "receipts.json",
+        adapter=lambda *_: {},
+    )
+    with pytest.raises(ActionError, match="not in the inventory"):
+        actions.execute(request("thaw", {"unit": "missing.service"}, key="rejected"))
+    receipt = actions.lookup("rejected")
+    assert receipt is not None
+    assert receipt["status"] == "rejected"
