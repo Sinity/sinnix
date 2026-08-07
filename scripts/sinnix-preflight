@@ -133,8 +133,8 @@ check_snapshot() {
 check_flake() {
   local flake_dir dirty lock_changes
   flake_dir="${SINNIX_FLAKE_DIR:-$(pwd)}"
-  dirty="$(git -C "$flake_dir" status --porcelain 2>/dev/null | wc -l)"
-  lock_changes="$(git -C "$flake_dir" diff -- flake.lock 2>/dev/null | wc -l)"
+  dirty="$(git -C "$flake_dir" status --porcelain 2>/dev/null | wc -l || true)"
+  lock_changes="$(git -C "$flake_dir" diff -- flake.lock 2>/dev/null | wc -l || true)"
   if [ "$dirty" -gt 0 ] || [ "$lock_changes" -gt 0 ]; then
     report 1 flake-drift "dirty_paths=$dirty, lock_diff_lines=$lock_changes"
   else
