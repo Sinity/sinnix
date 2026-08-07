@@ -1,0 +1,72 @@
+{
+  "schema_version": "sinnix-agent-teams-pilot-v1",
+  "hypothesis": "For one fixed read-only research question, two coordinated researchers plus a synthesizer produce equal or better factual quality than three independent subagents with lower coordination cost.",
+  "task": {
+    "question": "Which current Sinnix runtime surfaces are declared in source but absent from the live systemd inventory, and what evidence distinguishes an intentional dormant surface from a deployment defect?",
+    "corpus": [
+      "modules/runtime.nix",
+      "modules/services",
+      "modules/features",
+      "/etc/sinnix/runtime-inventory.json",
+      "sinnix-observe runtime inventory output"
+    ],
+    "mutation_policy": "read_only",
+    "shared_prompt": "Use only the listed corpus. Cite exact files, JSON paths, commands, and significant output. Mark unavailable evidence unsupported. Return a bounded table of surface, source declaration, live state, classification, and confidence."
+  },
+  "runtime": {
+    "model": "sonnet",
+    "effort": "high",
+    "max_turns_per_worker": 20,
+    "max_budget_usd_per_arm": 0.75,
+    "stop_conditions": [
+      "Stop an arm after its budget, turn, or 15 minute wall-clock limit.",
+      "Stop immediately on any attempted write, external publication, or corpus expansion.",
+      "Record provider errors and quota responses as protocol deviations; do not retry beyond one transport retry."
+    ]
+  },
+  "arms": {
+    "teams": {
+      "shape": "two researchers, one synthesizer",
+      "coordination_messages_required": true,
+      "workers": ["researcher-a", "researcher-b", "synthesizer"]
+    },
+    "independent": {
+      "shape": "three independent researchers plus coordinator synthesis",
+      "coordination_messages_required": false,
+      "workers": ["researcher-a", "researcher-b", "researcher-c", "coordinator"]
+    }
+  },
+  "receipt_fields": [
+    "arm",
+    "worker_id",
+    "launch_timestamp",
+    "finish_timestamp",
+    "wall_time_ms",
+    "model",
+    "effort",
+    "provider_usage",
+    "coordination_message_count",
+    "factual_error_count",
+    "protocol_deviations",
+    "blinded_score"
+  ],
+  "blinded_rubric": {
+    "dimensions": {
+      "factual_support": {"max": 4, "weight": 0.4},
+      "coverage": {"max": 4, "weight": 0.3},
+      "unsupported_claim_discipline": {"max": 4, "weight": 0.2},
+      "operational_usefulness": {"max": 4, "weight": 0.1}
+    },
+    "thresholds": {
+      "adopt": "teams_mean >= independent_mean + 0.4 and teams_cost_usd <= independent_cost_usd",
+      "narrow": "absolute mean score difference < 0.4 or one arm has a protocol deviation",
+      "park": "independent_mean > teams_mean + 0.4 or either arm has an unsafe mutation"
+    },
+    "blinding": "Score anonymized arm outputs before revealing arm labels and provider cost."
+  },
+  "decision": {
+    "allowed": ["adopt", "narrow", "park"],
+    "status": "pending_execution",
+    "protocol_deviations": []
+  }
+}

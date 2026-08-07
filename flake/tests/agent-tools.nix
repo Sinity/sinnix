@@ -964,6 +964,18 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/vacuity-sampler.sh} "$sampler"
             touch "$out"
           '';
+      agentTeamsPilotFixture =
+        pkgs.runCommand "agent-teams-pilot-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.jq
+            ];
+          }
+          ''
+            ${pkgs.bash}/bin/bash ${../../flake/tests/agent-teams-pilot.sh} ${../../docs/agent-teams-pilot.json}
+            touch "$out"
+          '';
       recoverySkillsFixture =
         pkgs.runCommand "recovery-skills-fixture"
           {
@@ -1081,6 +1093,7 @@ in
         desktop-capture = desktopCaptureFixture;
         claude-judge = claudeJudgeFixture;
         vacuity-sampler = vacuitySamplerFixture;
+        agent-teams-pilot = agentTeamsPilotFixture;
         recovery-skills = recoverySkillsFixture;
         hooks-harness = hooksHarnessFixture;
         agent-definitions = agentDefinitionsFixture;
