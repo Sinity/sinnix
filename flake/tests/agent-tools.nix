@@ -890,6 +890,27 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/desktop-capture.sh} "$ocr" "$dismiss"
             touch "$out"
           '';
+      claudeJudgeFixture =
+        pkgs.runCommand "claude-judge-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.gnugrep
+              pkgs.jq
+              pkgs.python3
+            ];
+          }
+          ''
+            judge="$TMPDIR/sinnix-claude-judge"
+            review="$TMPDIR/run-review.sh"
+            cp ${../../scripts/sinnix-claude-judge} "$judge"
+            cp ${../../dots/_ai/skills/adversarial-loop/scripts/run-review.sh} "$review"
+            chmod +x "$judge" "$review"
+            patchShebangs "$judge" "$review"
+            ${pkgs.bash}/bin/bash ${../../flake/tests/claude-judge.sh} "$judge" "$review"
+            touch "$out"
+          '';
     in
     {
       checks = {
@@ -905,6 +926,7 @@ in
         context-handoff = contextHandoffFixture;
         skill-authoring = skillAuthoringFixture;
         desktop-capture = desktopCaptureFixture;
+        claude-judge = claudeJudgeFixture;
       };
 
       heavyChecks = {
