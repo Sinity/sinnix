@@ -73,6 +73,15 @@ in
       };
       evaluated = evalTestSpec system spec;
       inventoryJson = builtins.toJSON evaluated.config.sinnix.runtime.inventory;
+      groupSpec = mkFeatureTest {
+        name = "hyprland-groups";
+        feature = "sinnix.features.desktop.hyprland.enable";
+        assertions = _: [ ];
+      };
+      groupEvaluated = evalTestSpec system groupSpec;
+      groupBindingsJson = builtins.toJSON (
+        groupEvaluated.config.home-manager.users.sinity.wayland.windowManager.hyprland.settings.bind or [ ]
+      );
     in
     {
       checks.runtime-surface-policy =
@@ -85,6 +94,25 @@ in
             ${inventoryJson}
             EOF_INVENTORY
             jq -e '.surfaces["runtime-policy-system"].effectiveResources.MemoryMax == "900M" and .surfaces["runtime-policy-user"].effectiveResources.MemoryLow == "768M"' inventory.json >/dev/null
+            touch "$out"
+          '';
+      checks.hyprland-groups =
+        pkgs.runCommand "hyprland-groups-check"
+          {
+            nativeBuildInputs = [ pkgs.jq ];
+          }
+          ''
+            cat > bindings.json <<'EOF_BINDINGS'
+            ${groupBindingsJson}
+            EOF_BINDINGS
+            jq -e '
+              (map(split(",") | {chord: ((.[0] | gsub("^[[:space:]]+|[[:space:]]+$"; "")) + "," + (.[1] | gsub("^[[:space:]]+|[[:space:]]+$"; "")))})
+                | group_by(.chord) | map(select(length > 1)) | length) == 0 and
+              any(.[]; . == "SUPER, bracketleft, moveintogroup, l") and
+              any(.[]; . == "SUPER, bracketright, moveintogroup, r") and
+              any(.[]; . == "SUPER SHIFT, bracketleft, moveoutofgroup") and
+              (any(.[]; . == "SUPER, G, togglegroup") and (any(.[]; . == "SUPER, T, togglegroup") | not))
+            ' bindings.json >/dev/null
             touch "$out"
           '';
     };

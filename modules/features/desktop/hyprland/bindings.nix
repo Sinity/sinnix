@@ -87,6 +87,9 @@ in
     "SUPER, B, exec, uwsm app -- qutebrowser --target window"
     "SUPER SHIFT, B, exec, uwsm app -- qutebrowser --target window"
     "SUPER, G, togglegroup"
+    "SUPER, bracketleft, moveintogroup, l"
+    "SUPER, bracketright, moveintogroup, r"
+    "SUPER SHIFT, bracketleft, moveoutofgroup"
     "SUPER SHIFT, G, exec, uwsm app -- ${script "kitty-grid"}"
     "SUPER CTRL, G, exec, uwsm app -- ${script "kitty-grid"} --grid 3x3"
     "SUPER SHIFT, C, exec, uwsm app -- ${script "kitty-grid"} --class qutebrowser --grid 3x2 --arrange-only"
@@ -102,7 +105,6 @@ in
 
     "SUPER, Tab, changegroupactive, f"
     "SUPER SHIFT, Tab, changegroupactive, b"
-    "SUPER, T, togglegroup"
     "SUPER SHIFT, T, lockactivegroup, toggle"
 
     "SUPER CTRL, H, exec, ${script "kitty-hypr-nav"} resize left"
