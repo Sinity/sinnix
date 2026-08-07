@@ -46,14 +46,16 @@ run_judge() {
     "$judge" --schema "$test_root/schema.json" --context "$test_root/context/ok.txt" --receipt-dir "$test_root/receipts" -- "$@"
 }
 
-test "$(run_judge 'return a verdict')" = '{"verdict":"allow"}'
+run_judge 'return a verdict' >"$test_root/result"
+test "$(<"$test_root/result")" = '{"verdict":"allow"}'
 jq -e '.outcome == "passed" and .attempts == [{number:1,exit_status:0,stderr_bytes:0,validation:"passed"}] and .session_id == "session-1" and .total_cost_usd == 0.01' \
   "$test_root"/receipts/*.json >/dev/null
 test "$(stat -c %a "$test_root/receipts"/*.json)" = 600
 
 : >"$test_root/args"
 : >"$test_root/count"
-test "$(CLAUDE_JUDGE_MODE=invalid-once run_judge 'retry this verdict')" = '{"verdict":"allow"}'
+CLAUDE_JUDGE_MODE=invalid-once run_judge 'retry this verdict' >"$test_root/result"
+test "$(<"$test_root/result")" = '{"verdict":"allow"}'
 test "$(<"$test_root/count")" = 2
 grep -F -- '--resume session-1' "$test_root/args"
 jq -e '.attempts | length == 2 and .[0].validation == "failed" and .[1].validation == "passed"' \
