@@ -28,6 +28,8 @@ let
   borgPersistSnapshotBind = "${borgSnapshotBindRoot}/persist";
   borgRealmSnapshotBind = "${borgSnapshotBindRoot}/realm";
   borgDrainStateRoot = "/persist/root/.cache/borg-drain";
+  borgIntegrityReceipt = "${borgDrainStateRoot}/integrity-check.json";
+  borgIntegrityTransitionState = "${borgDrainStateRoot}/integrity-status-state.json";
 
   # Borg Configuration
   borgRepoPersistPath = "${borgRepoRoot}/borg-persist-v1";
@@ -298,6 +300,72 @@ let
       jq -Rsa .
     }
 
+    integrity_state() {
+      if [ ! -s ${lib.escapeShellArg borgIntegrityReceipt} ]; then
+        printf '%s\n' missing
+        return
+      fi
+
+      if ! jq -e '
+        (.operation_kind == "integrity_check") and
+        (.run_id | type == "string" and length > 0) and
+        (.expected_jobs | type == "array") and
+        (.start_epoch | type == "number") and
+        (.deadline_epoch | type == "number") and
+        (.state | type == "string")
+      ' ${lib.escapeShellArg borgIntegrityReceipt} >/dev/null 2>&1; then
+        printf '%s\n' missing
+        return
+      fi
+
+      jq -r --argjson now "$now" '
+        if .state == "running" and $now <= .deadline_epoch then "maintenance"
+        elif .state == "running" then "expired"
+        elif .state == "completed" then "completed"
+        elif .state == "failed" then "failed"
+        else "missing"
+        end
+      ' ${lib.escapeShellArg borgIntegrityReceipt}
+    }
+
+    integrity_covers() {
+      label="$1"
+      jq -e --arg label "$label" '.expected_jobs | index($label) != null' \
+        ${lib.escapeShellArg borgIntegrityReceipt} >/dev/null 2>&1
+    }
+
+    record_transition() {
+      label="$1"
+      state="$2"
+      run_id="$3"
+      deadline="$4"
+      previous=""
+      if [ -s ${lib.escapeShellArg borgIntegrityTransitionState} ]; then
+        previous="$(jq -r --arg label "$label" '.[$label] // empty' ${lib.escapeShellArg borgIntegrityTransitionState})"
+      fi
+      if [ "$previous" = "$state" ]; then
+        return
+      fi
+      install -d -m 0700 ${lib.escapeShellArg borgDrainStateRoot}
+      jq -cn \
+        --arg type notification_transition \
+        --arg label "$label" \
+        --arg state "$state" \
+        --arg run_id "$run_id" \
+        --argjson deadline "$deadline" \
+        --arg ts "$(date -Iseconds)" \
+        '{ts:$ts,type:$type,label:$label,state:$state,run_id:$run_id,deadline_epoch:$deadline}' \
+        >> ${lib.escapeShellArg borgStatusLog}
+      tmp=${lib.escapeShellArg borgIntegrityTransitionState}.tmp
+      jq --arg label "$label" --arg state "$state" '.[$label] = $state' \
+        ${lib.escapeShellArg borgIntegrityTransitionState} > "$tmp" 2>/dev/null \
+        || jq -cn --arg label "$label" --arg state "$state" '{($label):$state}' \
+        > "$tmp"
+      if [ -s "$tmp" ]; then
+        mv "$tmp" ${lib.escapeShellArg borgIntegrityTransitionState}
+      fi
+    }
+
     latest_archive_epoch() {
       label="$1"
       marker=${lib.escapeShellArg borgDrainStateRoot}/"$label.last-success"
@@ -338,14 +406,34 @@ let
         status=1
       else
         age=$((now - latest))
-        if [ "$age" -le ${toString borgArchiveMaxAgeSec} ]; then
+        integrity="$(integrity_state)"
+        run_id=""
+        deadline=0
+        if [ -s ${lib.escapeShellArg borgIntegrityReceipt} ]; then
+          run_id="$(jq -r '.run_id // empty' ${lib.escapeShellArg borgIntegrityReceipt})"
+          deadline="$(jq -r '.deadline_epoch // 0' ${lib.escapeShellArg borgIntegrityReceipt})"
+        fi
+        if [ "$integrity" = maintenance ] && integrity_covers "$label"; then
           ok=true
+          state=maintenance
+          message="integrity check in planned maintenance"
+        elif [ "$integrity" = failed ] || [ "$integrity" = expired ] || [ "$integrity" = missing ]; then
+          ok=false
+          state=red
+          message="integrity check receipt is $integrity"
+          status=1
+        elif [ "$age" -le ${toString borgArchiveMaxAgeSec} ]; then
+          ok=true
+          state=healthy
           message="archive fresh"
         else
           ok=false
+          state=red
           message="latest archive too old"
           status=1
         fi
+
+        record_transition "$label" "$state" "$run_id" "$deadline"
       fi
 
       jq -cn \
@@ -355,8 +443,11 @@ let
         --argjson ok "$ok" \
         --argjson age "$age" \
         --argjson max_age ${toString borgArchiveMaxAgeSec} \
+        --arg state "''${state:-red}" \
+        --arg run_id "''${run_id:-}" \
+        --argjson deadline_epoch "''${deadline:-0}" \
         --arg ts "$(date -Iseconds)" \
-        '{ts:$ts,type:$type,label:$label,ok:$ok,age_sec:$age,max_age_sec:$max_age,message:$message}' \
+        '{ts:$ts,type:$type,label:$label,ok:$ok,state:$state,run_id:$run_id,deadline_epoch:$deadline_epoch,age_sec:$age,max_age_sec:$max_age,message:$message}' \
         >> ${lib.escapeShellArg borgStatusLog}
     }
 
@@ -374,9 +465,11 @@ let
 
       if [ "$age" -le ${toString borgSnapshotQueueMaxAgeSec} ]; then
         ok=true
+        state=healthy
         message="snapshot queue fresh"
       else
         ok=false
+        state=red
         message="snapshot queue too old"
         status=1
       fi
@@ -389,8 +482,9 @@ let
         --argjson count "$count" \
         --argjson age "$age" \
         --argjson max_age ${toString borgSnapshotQueueMaxAgeSec} \
+        --arg state "$state" \
         --arg ts "$(date -Iseconds)" \
-        '{ts:$ts,type:$type,label:$label,ok:$ok,count:$count,oldest_age_sec:$age,max_age_sec:$max_age,message:$message}' \
+        '{ts:$ts,type:$type,label:$label,ok:$ok,state:$state,count:$count,oldest_age_sec:$age,max_age_sec:$max_age,message:$message}' \
         >> ${lib.escapeShellArg borgStatusLog}
     }
 
@@ -769,6 +863,35 @@ in
 
         ${mkBorgCommonScript borgRepoPersist borgRepoPersistPath}
         acquire_borg_global_lock_or_skip "Borg repository check"
+        run_id="''${INVOCATION_ID:-borg-check-$(date +%s)}"
+        write_integrity_receipt() {
+          state="$1"
+          install -d -m 0700 ${lib.escapeShellArg borgDrainStateRoot}
+          jq -cn \
+            --arg operation_kind integrity_check \
+            --arg run_id "$run_id" \
+            --argjson expected_jobs '["persist","realm"]' \
+            --argjson start_epoch "$start_epoch" \
+            --argjson deadline_epoch "$deadline_epoch" \
+            --arg state "$state" \
+            --arg ts "$(date -Iseconds)" \
+            '{operation_kind:$operation_kind,run_id:$run_id,expected_jobs:$expected_jobs,start_epoch:$start_epoch,deadline_epoch:$deadline_epoch,state:$state,updated_at:$ts}' \
+            > ${lib.escapeShellArg borgIntegrityReceipt}.tmp
+          mv ${lib.escapeShellArg borgIntegrityReceipt}.tmp ${lib.escapeShellArg borgIntegrityReceipt}
+        }
+        start_epoch="$(date +%s)"
+        deadline_epoch=$((start_epoch + 3 * 3600))
+        write_integrity_receipt running
+        finish_integrity_receipt() {
+          rc="$?"
+          if [ "$rc" -eq 0 ]; then
+            write_integrity_receipt completed
+          else
+            write_integrity_receipt failed
+          fi
+          exit "$rc"
+        }
+        trap finish_integrity_receipt EXIT
         recover_stale_borg_locks
         ${mkBorgCommonScript borgRepoRealm borgRepoRealmPath}
         recover_stale_borg_locks
