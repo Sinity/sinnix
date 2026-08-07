@@ -268,6 +268,7 @@ in
     environment.systemPackages = [
       scriptPkgs.sinnix-heavy-lease
       scriptPkgs.sinnix-health-sentinel
+      scriptPkgs.sinnix-config-drift
     ];
     systemd.tmpfiles.rules = [ "d /run/sinnix 0775 root users -" ];
     systemd.services = {
@@ -285,6 +286,15 @@ in
           ExecStart = "${scriptPkgs.sinnix-health-sentinel}/bin/sinnix-health-sentinel --failure-unit %i";
         };
       };
+      sinnix-config-drift = {
+        description = "Compare live state with the evaluated Sinnix configuration";
+        after = [ "local-fs.target" ];
+        wants = [ "local-fs.target" ];
+        serviceConfig = {
+          Type = "oneshot";
+          ExecStart = "${scriptPkgs.sinnix-config-drift}/bin/sinnix-config-drift --manifest /etc/sinnix/config.json --output ${cfg.paths.capturesRoot}/machine/config-drift.jsonl";
+        };
+      };
     } // lib.mapAttrs' (_name: surface:
       lib.nameValuePair (lib.removeSuffix ".service" surface.unit) {
         unitConfig.OnFailure = [ "sinnix-health-transition@%n" ];
@@ -295,6 +305,14 @@ in
       timerConfig = {
         OnBootSec = "1min";
         OnUnitActiveSec = "1min";
+        Persistent = true;
+      };
+    };
+    systemd.timers.sinnix-config-drift = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnBootSec = "2min";
+        OnUnitActiveSec = "5min";
         Persistent = true;
       };
     };

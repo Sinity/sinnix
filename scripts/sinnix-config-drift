@@ -1,0 +1,281 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Compare live machine state with the evaluated Sinnix manifest
+# runtimeInputs: python3 coreutils systemd util-linux
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+
+def read_json(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def command(argv: list[str]) -> tuple[int, str, str]:
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=3, check=False)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return 125, "", str(error)
+    return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
+
+
+def unavailable(check: str, intended: Any, reason: str) -> dict[str, Any]:
+    return {
+        "schema": "sinnix-config-drift-v1",
+        "check": check,
+        "intended": intended,
+        "live": None,
+        "match": None,
+        "status": "unavailable",
+        "severity": "unknown",
+        "reboot_required": False,
+        "evidence": reason,
+    }
+
+
+def result(
+    check: str,
+    intended: Any,
+    live: Any,
+    match: bool,
+    *,
+    severity: str = "error",
+    reboot_required: bool = False,
+    evidence: str = "",
+) -> dict[str, Any]:
+    return {
+        "schema": "sinnix-config-drift-v1",
+        "check": check,
+        "intended": intended,
+        "live": live,
+        "match": match,
+        "status": "matched" if match else "drifted",
+        "severity": "info" if match else severity,
+        "reboot_required": reboot_required,
+        "evidence": evidence,
+    }
+
+
+def proc_value(root: Path, relative: str) -> str | None:
+    path = root / relative.lstrip("/")
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+
+
+def scalar(value: Any) -> str:
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    return str(value)
+
+
+def compare_sysctls(manifest: dict[str, Any], proc_root: Path) -> list[dict[str, Any]]:
+    rows = []
+    for key, expected in sorted(manifest.get("sysctls", {}).items()):
+        relative = "proc/sys/" + key.replace(".", "/")
+        live = proc_value(proc_root, relative)
+        if live is None:
+            rows.append(unavailable(f"sysctl:{key}", scalar(expected), f"missing {relative}"))
+        else:
+            expected_tokens = scalar(expected).split()
+            live_tokens = live.replace("\t", " ").split()
+            match = live_tokens[: len(expected_tokens)] == expected_tokens
+            rows.append(result(f"sysctl:{key}", scalar(expected), live, match))
+    return rows
+
+
+def systemctl_show(systemctl: str, unit: str, manager: str, properties: list[str]) -> dict[str, str] | None:
+    argv = [systemctl]
+    if manager == "user":
+        argv.append("--user")
+    argv += ["show", unit]
+    for prop in properties:
+        argv += ["-p", prop]
+    code, stdout, _ = command(argv)
+    if code not in (0, 1):
+        return None
+    values: dict[str, str] = {}
+    for line in stdout.splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            values[key] = value
+    return values
+
+
+def compare_slices(manifest: dict[str, Any], systemctl: str) -> list[dict[str, Any]]:
+    properties = [
+        "CPUWeight",
+        "IOWeight",
+        "MemoryHigh",
+        "MemoryMax",
+        "MemoryLow",
+        "ManagedOOMMemoryPressure",
+    ]
+    rows = []
+    for manager, groups in manifest.get("slices", {}).items():
+        for name, intended in groups.items():
+            unit = f"{name}.slice"
+            live = systemctl_show(systemctl, unit, manager, properties)
+            check = f"slice:{manager}:{unit}"
+            if live is None:
+                rows.append(unavailable(check, intended, "systemd manager unavailable"))
+                continue
+            expected = {key: str(value) for key, value in intended.items() if key in properties}
+            actual = {key: live.get(key, "") for key in expected}
+            if actual and all(value == "" for value in actual.values()):
+                rows.append(unavailable(check, expected, "systemd manager returned no properties"))
+                continue
+
+            def normalized_expected_value(key: str, value: str) -> str:
+                expected_value = expected[key]
+                if key in {"MemoryHigh", "MemoryMax", "MemoryLow"}:
+                    suffixes = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
+                    if expected_value[-1:] in suffixes:
+                        return str(int(expected_value[:-1]) * suffixes[expected_value[-1]])
+                return expected_value
+
+            normalized_expected = {key: normalized_expected_value(key, value) for key, value in actual.items()}
+            rows.append(result(check, expected, actual, normalized_expected == actual, evidence="systemctl show"))
+    return rows
+
+
+def compare_swap(manifest: dict[str, Any], proc_root: Path) -> dict[str, Any]:
+    expected = manifest.get("swap", [])
+    path = proc_root / "proc/swaps"
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()[1:]
+    except OSError:
+        return unavailable("swap", expected, "missing /proc/swaps")
+    live = []
+    for line in lines:
+        fields = line.split()
+        if len(fields) >= 5:
+            live.append({"device": fields[0], "size": int(fields[2]), "priority": int(fields[4])})
+    expected_identity = [{"device": row.get("device"), "priority": row.get("priority", 0)} for row in expected]
+    live_identity = [{"device": row["device"], "priority": row["priority"]} for row in live]
+    return result("swap", expected, live, expected_identity == live_identity, evidence="/proc/swaps;live size is retained in evidence")
+
+
+def compare_single(manifest: dict[str, Any], key: str, live: Any, *, reboot_required: bool = False) -> dict[str, Any]:
+    expected = manifest.get(key)
+    if expected is None:
+        return unavailable(key, None, "manifest field absent")
+    if live is None:
+        return unavailable(key, expected, "live probe unavailable")
+    return result(key, expected, live, expected == live, reboot_required=reboot_required)
+
+
+def compare_generation(manifest: dict[str, Any], args: argparse.Namespace) -> list[dict[str, Any]]:
+    expected = manifest.get("generation", {}).get("revision")
+
+    def revision(root: str) -> str | None:
+        try:
+            return read_json(Path(root) / "etc/sinnix/config.json").get("meta", {}).get("configurationRevision")
+        except (OSError, json.JSONDecodeError):
+            return None
+
+    current = revision(args.current_system)
+    booted = revision(args.booted_system)
+    rows = [
+        unavailable("generation:current", expected, "current generation manifest unavailable")
+        if current is None
+        else result("generation:current", expected, current, expected == current, reboot_required=True),
+        unavailable("generation:booted", expected, "booted generation manifest unavailable")
+        if booted is None
+        else result("generation:booted", expected, booted, expected == booted, reboot_required=True),
+    ]
+    nvidia_expected = manifest.get("generation", {}).get("nvidia")
+    if nvidia_expected is not None:
+        try:
+            nvidia_live = Path(args.nvidia_version_file).read_text(encoding="utf-8").strip()
+        except OSError:
+            nvidia_live = None
+        if nvidia_live is None:
+            rows.append(unavailable("nvidia", nvidia_expected, "loaded NVIDIA module version unavailable"))
+        else:
+            rows.append(result("nvidia", nvidia_expected, nvidia_live, str(nvidia_expected) in nvidia_live, reboot_required=True, evidence=args.nvidia_version_file))
+    return rows
+
+
+def collect(manifest: dict[str, Any], args: argparse.Namespace) -> list[dict[str, Any]]:
+    proc_root = Path(args.proc_root)
+    rows = compare_sysctls(manifest, proc_root)
+    rows += compare_slices(manifest, args.systemctl)
+    rows.append(compare_swap(manifest, proc_root))
+    journal_code, journal_output, _ = command(["systemd-analyze", "cat-config", "systemd/journald.conf"])
+    journal_expected = manifest.get("journald", {})
+    journal_lines = [line.strip() for line in journal_expected.get("extraConfig", "").splitlines() if "=" in line and not line.lstrip().startswith("#")]
+    if journal_code == 0:
+        rows.append(result("journald", journal_lines, journal_output, all(line in journal_output for line in journal_lines), evidence="systemd-analyze cat-config"))
+    else:
+        rows.append(unavailable("journald", journal_expected, "systemd-analyze cat-config unavailable"))
+    zram_path = proc_root / "sys/block/zram0"
+    try:
+        zram_live = {"enable": True, "disksize": int((zram_path / "disksize").read_text().strip()), "algorithm": (zram_path / "comp_algorithm").read_text().strip()}
+    except OSError:
+        zram_live = {"enable": False}
+    zram_expected = manifest.get("zram", {})
+    zram_match = (not zram_expected.get("enable", False) and not zram_live["enable"]) or (zram_expected.get("enable") and zram_live["enable"] and zram_live["disksize"] == zram_expected.get("memoryMax"))
+    rows.append(result("zram", zram_expected, zram_live, zram_match, evidence="/sys/block/zram0"))
+    qos = proc_root / "sys/fs/cgroup/io.cost.qos"
+    try:
+        qos_live = {"enabled": any("enable=1" in line for line in qos.read_text().splitlines())}
+    except OSError:
+        qos_live = None
+    if qos_live is None:
+        rows.append(unavailable("iocost", manifest.get("iocost"), "io.cost.qos unavailable"))
+    else:
+        expected_iocost = {"enabled": manifest.get("iocost", {}).get("enabled")}
+        rows.append(result("iocost", expected_iocost, qos_live, expected_iocost == qos_live, evidence=str(qos)))
+    pid_code, pid_output, _ = command([args.systemctl, "show", "earlyoom.service", "-p", "MainPID", "--value"])
+    earlyoom_expected = manifest.get("earlyoom", {})
+    try:
+        pid = int(pid_output)
+        cmdline = (proc_root / f"proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode().strip()
+    except (ValueError, OSError, UnicodeDecodeError):
+        cmdline = None
+    expected_tokens = [f"-m{earlyoom_expected.get('freeMemThreshold')}", f"-s{earlyoom_expected.get('freeSwapThreshold')}"] + [str(value) for value in earlyoom_expected.get("extraArgs", [])]
+    if pid_code not in (0, 1) or cmdline is None:
+        rows.append(unavailable("earlyoom", earlyoom_expected, "earlyoom process command line unavailable"))
+    else:
+        rows.append(result("earlyoom", earlyoom_expected, cmdline, all(token in cmdline for token in expected_tokens), evidence=f"/proc/{pid}/cmdline"))
+    rows += compare_generation(manifest, args)
+    return rows
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--manifest", default="/etc/sinnix/config.json")
+    parser.add_argument("--output", default="/realm/data/captures/machine/config-drift.jsonl")
+    parser.add_argument("--proc-root", default="/")
+    parser.add_argument("--systemctl", default="systemctl")
+    parser.add_argument("--current-system", default="/run/current-system")
+    parser.add_argument("--booted-system", default="/run/booted-system")
+    parser.add_argument("--nvidia-version-file", default="/proc/driver/nvidia/version")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(sys.argv[1:] if argv is None else argv)
+    manifest = read_json(Path(args.manifest)).get("sinnix", {}).get("drift", {})
+    rows = collect(manifest, args)
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_name(output.name + ".tmp")
+    with temporary.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, sort_keys=True) + "\n")
+    os.replace(temporary, output)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
