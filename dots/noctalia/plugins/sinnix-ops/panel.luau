@@ -53,8 +53,14 @@ local function agentText()
     local age = orphan.age_seconds ~= nil and (tostring(math.floor(orphan.age_seconds / 60)) .. "m") or "unavailable"
     local provider = identity.provider or "provider unavailable"
     local artifacts = metrics.completion and metrics.completion.artifacts
-    local artifactCount = type(artifacts) == "table" and #artifacts or 0
-    table.insert(lines, "  " .. text(row.name) .. " under " .. tostring(parent) .. ": " .. state .. ", " .. tostring(provider) .. ", " .. attestation .. ", age " .. age .. ", artifacts " .. tostring(artifactCount))
+    local artifactText = "unavailable"
+    if type(artifacts) == "table" then
+      local refs = {}
+      for artifactIndex = 1, math.min(#artifacts, 2) do table.insert(refs, tostring(artifacts[artifactIndex])) end
+      artifactText = #refs > 0 and table.concat(refs, ", ") or "none"
+      if #artifacts > #refs then artifactText = artifactText .. " (" .. tostring(#artifacts - #refs) .. " more)" end
+    end
+    table.insert(lines, "  " .. text(row.name) .. " under " .. tostring(parent) .. ": " .. state .. ", " .. tostring(provider) .. ", " .. attestation .. ", age " .. age .. ", artifacts " .. artifactText)
   end
   if #agents > visible then table.insert(lines, "  " .. tostring(#agents - visible) .. " more agents in the snapshot") end
   return lines
