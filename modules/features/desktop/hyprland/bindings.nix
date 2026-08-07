@@ -9,6 +9,25 @@ let
   script = rel: "${sinnix.paths.projectRoot}/scripts/${rel}";
 in
 {
+  bindd = [
+    "SUPER, End, Open Sinnix system controls, submap, system"
+  ];
+
+  submaps.system.settings = {
+    bindd = [
+      ", S, Screenshot region, exec, noctalia msg screenshot-region"
+      ", F, Screenshot fullscreen, exec, noctalia msg screenshot-fullscreen"
+      ", R, Replay buffer save or start, exec, replay-buffer"
+      "SHIFT, R, Stop replay buffer, exec, replay-buffer-stop"
+      ", P, Park background work, exec, sinnix-pressure-park auto"
+      ", T, Thaw parked background work, exec, sinnix-pressure-park thaw"
+      ", M, Pulse OLED ASBL, exec, asbl-no-moar once --mode invert --duration 0.05"
+      ", H, Show display capture status, exec, sinnix-screenshot-control probe"
+      ", Escape, Exit system controls, submap, reset"
+      ", Return, Exit system controls, submap, reset"
+    ];
+  };
+
   bind = [
     "SUPER, Return, exec, kitty --single-instance --instance-group terminal"
     "SUPER, Q, killactive"

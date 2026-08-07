@@ -291,7 +291,7 @@ in
 
               animations.enabled = false;
 
-              inherit (bindings) bind bindl bindm;
+              inherit (bindings) bind bindd bindl bindm;
               windowrule = rules.windowrule or [ ];
 
               # NOTE: bar-layer blur (layerrule) omitted — the inline
@@ -300,6 +300,8 @@ in
               # confirmed; Noctalia namespaces are noctalia-bar-default /
               # noctalia-wallpaper.
             };
+
+            submaps = bindings.submaps or { };
 
             extraConfig =
               let
