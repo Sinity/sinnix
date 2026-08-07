@@ -1,0 +1,62 @@
+# @sinnix-package
+# description: Validate a non-overlapping agent lane manifest
+# runtimeInputs: bash coreutils jq ripgrep
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  printf 'usage: %s --manifest FILE --agents-root DIR\n' "$0" >&2
+  exit 2
+}
+
+manifest= agents_root=
+while (($#)); do
+  case "$1" in
+    --manifest) manifest=${2-}; shift 2 ;;
+    --agents-root) agents_root=${2-}; shift 2 ;;
+    *) usage ;;
+  esac
+done
+[[ -f "$manifest" && -d "$agents_root" ]] || usage
+
+jq -e 'type == "object" and (.lanes | type == "array" and length >= 3)' "$manifest" >/dev/null
+jq -e '
+  [.lanes[] | .id] as $ids
+  | ($ids | length) == ($ids | unique | length)
+  and all(.lanes[];
+    (.id | type == "string" and length > 0)
+    and (.agent | type == "string" and length > 0)
+    and (.model | type == "string" and length > 0)
+    and (.effort | type == "string" and length > 0)
+    and (.owns | type == "array" and length > 0)
+    and (.avoids | type == "array")
+    and (.verification | type == "array" and length > 0)
+    and (.merge_order | type == "number")
+  )
+' "$manifest" >/dev/null
+
+while IFS= read -r agent; do
+  found=0
+  for definition in "$agents_root"/*.md; do
+    if rg -q "^name:[[:space:]]*$agent$" "$definition"; then found=1; break; fi
+  done
+  ((found)) || { printf 'unknown global agent definition: %s\n' "$agent" >&2; exit 1; }
+done < <(jq -r '.lanes[].agent' "$manifest" | sort -u)
+
+if jq -e '
+  .lanes as $lanes
+  | any(range(0; ($lanes | length)); . as $i
+    | any(range((. + 1); ($lanes | length)); . as $j
+      | any($lanes[$i].owns[]; . as $left
+        | any($lanes[$j].owns[]; . as $right
+          | ($left == $right or ($left + "/" | startswith($right + "/")) or ($right + "/" | startswith($left + "/")))))))
+' "$manifest" >/dev/null; then
+  printf 'overlapping lane ownership\n' >&2
+  exit 1
+fi
+
+jq -e '.lanes | sort_by(.merge_order) | map(.merge_order) == (map(.merge_order) | unique | sort)' "$manifest" >/dev/null || {
+  printf 'merge_order values must be unique\n' >&2
+  exit 1
+}
+printf 'valid lane manifest: %s lanes\n' "$(jq '.lanes | length' "$manifest")"
