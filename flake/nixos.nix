@@ -29,7 +29,7 @@ let
         # may not be live".
         {
           system.configurationRevision =
-            inputs.self.rev or inputs.self.dirtyRev or null;
+            inputs.self.rev or inputs.self.dirtyRev or "unknown";
         }
       ] ++ modules;
       specialArgs = sharedSpecialArgs // {
