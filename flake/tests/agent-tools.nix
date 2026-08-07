@@ -1013,6 +1013,24 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/settings-env-lint.sh} "$scanner"
             touch "$out"
           '';
+      agentProfileBenchmarkFixture =
+        pkgs.runCommand "agent-profile-benchmark-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.jq
+              pkgs.python3
+            ];
+          }
+          ''
+            benchmark="$TMPDIR/sinnix-agent-profile-benchmark"
+            cp ${../../scripts/sinnix-agent-profile-benchmark} "$benchmark"
+            chmod +x "$benchmark"
+            patchShebangs "$benchmark"
+            ${pkgs.bash}/bin/bash ${../../flake/tests/agent-profile-benchmark.sh} "$benchmark"
+            touch "$out"
+          '';
     in
     {
       checks = {
@@ -1033,6 +1051,7 @@ in
         hooks-harness = hooksHarnessFixture;
         agent-definitions = agentDefinitionsFixture;
         settings-env-lint = settingsEnvLintFixture;
+        agent-profile-benchmark = agentProfileBenchmarkFixture;
       };
 
       heavyChecks = {

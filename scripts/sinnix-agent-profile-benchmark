@@ -1,0 +1,274 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Measure agent profile contract and gateway startup cost
+# runtimeInputs: python3
+"""Run a bounded, credential-free benchmark of the active agent profiles."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import shlex
+import subprocess
+import sys
+import time
+import tomllib
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+SCHEMA = "sinnix-agent-profile-benchmark-v1"
+DEFAULT_PROFILES = (
+    "claude-lean", "claude-evidence", "claude-full", "claude-browser",
+    "codex-lean", "codex-evidence", "codex-full", "codex-browser",
+    "gateway-local-agent-control", "gateway-remote-readonly", "gateway-remote-operator",
+)
+GATEWAY_PROFILES = {
+    "gateway-local-agent-control": "local-agent-control",
+    "gateway-remote-readonly": "remote-readonly",
+    "gateway-remote-operator": "remote-operator",
+}
+STATIC_FILES = {
+    "claude-lean": (".config/claude/mcp-lean.json",),
+    "claude-evidence": (".config/claude/mcp.json",),
+    "claude-full": (".config/claude/mcp.json",),
+    "claude-browser": (".config/claude/mcp-browser.json",),
+    "codex-lean": (".codex/lean.config.toml",),
+    "codex-evidence": (".codex/evidence.config.toml",),
+    "codex-full": (".codex/full.config.toml",),
+    "codex-browser": (".codex/browser.config.toml",),
+}
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--output", type=Path, required=True, help="Raw JSON capture path")
+    parser.add_argument("--summary-output", type=Path, required=True)
+    parser.add_argument("--repeats", type=int, default=3)
+    parser.add_argument("--profiles", default=",".join(DEFAULT_PROFILES))
+    parser.add_argument("--home", type=Path, default=Path.home())
+    parser.add_argument("--gateway-bin", default="sinnix-agent-gateway")
+    parser.add_argument("--gateway-config", type=Path)
+    parser.add_argument("--instruction-file", type=Path)
+    parser.add_argument("--skills-root", type=Path)
+    return parser.parse_args()
+
+
+def digest(path: Path) -> tuple[str, int]:
+    if not path.is_file():
+        return "unavailable", 0
+    data = path.read_bytes()
+    return hashlib.sha256(data).hexdigest(), len(data)
+
+
+def files_under(path: Path) -> list[Path]:
+    if not path.is_dir():
+        return []
+    return sorted(item for item in path.rglob("*") if item.is_file() and not item.is_symlink())
+
+
+def contract(args: argparse.Namespace, profile: str) -> dict[str, Any]:
+    home = args.home
+    instruction = args.instruction_file or home / ".config/claude/CLAUDE.md"
+    skills = args.skills_root or home / ".config/claude/skills"
+    roots = [instruction, skills]
+    if profile in STATIC_FILES:
+        roots.extend(home / relative for relative in STATIC_FILES[profile])
+    hashes: list[dict[str, Any]] = []
+    paths: list[str] = []
+    tool_names: list[str] = []
+    total_bytes = 0
+    for root in roots:
+        candidates = [root] if root.is_file() else files_under(root)
+        for path in candidates:
+            file_hash, size = digest(path)
+            hashes.append({"sha256": file_hash, "bytes": size})
+            total_bytes += size
+            paths.append(str(path))
+            try:
+                payload = json.loads(path.read_text()) if path.suffix == ".json" else tomllib.loads(path.read_text())
+                key = "mcpServers" if path.suffix == ".json" else "mcp_servers"
+                servers = payload.get(key, {})
+                if isinstance(servers, dict):
+                    tool_names.extend(str(name) for name in servers)
+            except (OSError, json.JSONDecodeError, tomllib.TOMLDecodeError):
+                pass
+    contract_hash = hashlib.sha256(
+        json.dumps(hashes, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return {
+        "contract_hash": contract_hash,
+        "surface_bytes": total_bytes,
+        "surface_files": len(paths),
+        "surface_paths": paths,
+        "estimated_input_tokens": round(total_bytes / 4),
+        "estimated_input_tokens_method": "bytes_divided_by_4",
+        "tool_count": len(set(tool_names)),
+        "tool_names": sorted(set(tool_names)),
+        "duplicate_tool_names": sorted(name for name in set(tool_names) if tool_names.count(name) > 1),
+        "unused_capabilities": {"status": "unavailable", "reason": "no representative task was started"},
+        "provider_usage": {"status": "unavailable", "reason": "static contract probe"},
+    }
+
+
+def proc_tree(root_pid: int) -> list[int]:
+    parents: dict[int, int] = {}
+    for status in Path("/proc").glob("[0-9]*/status"):
+        try:
+            fields = {
+                line.split(":", 1)[0]: line.split(":", 1)[1].strip()
+                for line in status.read_text().splitlines() if ":" in line
+            }
+            parents[int(status.parent.name)] = int(fields.get("PPid", "0"))
+        except (OSError, ValueError):
+            continue
+    result = [root_pid]
+    changed = True
+    while changed:
+        changed = False
+        for pid, parent in parents.items():
+            if parent in result and pid not in result:
+                result.append(pid)
+                changed = True
+    return result
+
+
+def memory(pid: int) -> tuple[int, int]:
+    rss = pss = 0
+    try:
+        text = (Path("/proc") / str(pid) / "smaps_rollup").read_text()
+        for line in text.splitlines():
+            key, _, value = line.partition(":")
+            if key == "Rss":
+                rss = int(value.strip().split()[0])
+            elif key == "Pss_Anon":
+                pss = int(value.strip().split()[0])
+    except (OSError, ValueError):
+        pass
+    return rss, pss
+
+
+def gateway_run(args: argparse.Namespace, profile: str) -> dict[str, Any]:
+    command = shlex.split(args.gateway_bin)
+    if args.gateway_config:
+        command.extend(["--config", str(args.gateway_config)])
+    command.extend(["--profile", GATEWAY_PROFILES[profile], "manifest"])
+    started = time.monotonic_ns()
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    peak_rss = peak_pss = peak_processes = 0
+    while process.poll() is None:
+        pids = proc_tree(process.pid)
+        peak_processes = max(peak_processes, len(pids))
+        samples = [memory(pid) for pid in pids]
+        peak_rss = max(peak_rss, sum(sample[0] for sample in samples))
+        peak_pss = max(peak_pss, sum(sample[1] for sample in samples))
+        time.sleep(0.005)
+    stdout, stderr = process.communicate(timeout=5)
+    manifest: dict[str, Any] = {}
+    if process.returncode == 0:
+        try:
+            manifest = json.loads(stdout)
+        except json.JSONDecodeError:
+            pass
+    return {
+        "launcher_kind": "gateway_manifest",
+        "command": shlex.join(command),
+        "exit_status": process.returncode,
+        "wall_ns": time.monotonic_ns() - started,
+        "cpu_ns": None,
+        "peak_rss_kb": peak_rss,
+        "peak_pss_anon_kb": peak_pss,
+        "peak_process_count": peak_processes,
+        "tool_count": len(manifest.get("tools", [])),
+        "tool_names": sorted(tool.get("name") for tool in manifest.get("tools", []) if isinstance(tool, dict) and isinstance(tool.get("name"), str)),
+        "duplicate_tool_names": [],
+        "unused_capabilities": {"status": "unavailable", "reason": "no representative task was started"},
+        "manifest_hash": manifest.get("sha256"),
+        "stderr_class": "empty" if not stderr else "diagnostic",
+        "provider_usage": {"status": "unavailable", "reason": "gateway manifest probe does not call a provider"},
+    }
+
+
+def static_run(args: argparse.Namespace, profile: str) -> dict[str, Any]:
+    started = time.monotonic_ns()
+    surface = contract(args, profile)
+    return {
+        "launcher_kind": "static_contract",
+        "command": None,
+        "exit_status": 0,
+        "wall_ns": time.monotonic_ns() - started,
+        "cpu_ns": None,
+        "peak_rss_kb": None,
+        "peak_pss_anon_kb": None,
+        "peak_process_count": None,
+        "manifest_hash": None,
+        **surface,
+    }
+
+
+def main() -> int:
+    args = parse_args()
+    if args.repeats < 3:
+        raise SystemExit("--repeats must be at least 3")
+    profiles = [profile for profile in args.profiles.split(",") if profile]
+    unknown = sorted(set(profiles) - set(DEFAULT_PROFILES))
+    if unknown:
+        raise SystemExit(f"unknown profiles: {', '.join(unknown)}")
+    records: list[dict[str, Any]] = []
+    for profile in profiles:
+        for phase in ("cold", "warm"):
+            for sample in range(1, args.repeats + 1):
+                measurement = gateway_run(args, profile) if profile in GATEWAY_PROFILES else static_run(args, profile)
+                records.append({
+                    "schema": SCHEMA,
+                    "profile": profile,
+                    "phase": phase,
+                    "sample": sample,
+                    "observed_at": datetime.now(timezone.utc).isoformat(),
+                    "client_version": "nixos-profile-current",
+                    **measurement,
+                })
+    args.output.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    args.output.write_text(json.dumps({"schema": SCHEMA, "records": records}, indent=2) + "\n")
+    args.output.chmod(0o600)
+    by_profile: dict[str, dict[str, Any]] = {}
+    for profile in profiles:
+        profile_records = [record for record in records if record["profile"] == profile]
+        successful = [record for record in profile_records if record["exit_status"] == 0]
+        by_profile[profile] = {
+            "profile": profile,
+            "contract_hash": next((record.get("contract_hash") for record in successful if record.get("contract_hash")), None),
+            "sample_count": len(profile_records),
+            "successful_samples": len(successful),
+            "cold_wall_ns": [record["wall_ns"] for record in profile_records if record["phase"] == "cold"],
+            "warm_wall_ns": [record["wall_ns"] for record in profile_records if record["phase"] == "warm"],
+            "tool_count": next((record.get("tool_count") for record in successful if record.get("tool_count") is not None), None),
+            "tool_names": next((record.get("tool_names") for record in successful if record.get("tool_names") is not None), []),
+            "duplicate_tool_names": sorted({name for record in successful for name in record.get("duplicate_tool_names", [])}),
+            "provider_usage": {"status": "unavailable", "reason": "no provider session was started by this credential-free benchmark"},
+        }
+    summary = {
+        "schema": SCHEMA,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "raw_capture": str(args.output),
+        "profiles": by_profile,
+        "recommendations": {
+            "coordinator": "claude-lean",
+            "implementation_worker": "codex-full",
+            "read_only_reviewer": "claude-evidence",
+            "browser_operator": "claude-browser",
+            "gateway_readonly": "gateway-remote-readonly",
+            "task_success_guard": "No budget is enforced from this credential-free probe; require representative task success and observed provider usage before changing defaults.",
+        },
+    }
+    args.summary_output.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    args.summary_output.write_text(json.dumps(summary, indent=2) + "\n")
+    args.summary_output.chmod(0o600)
+    print(json.dumps(summary, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
