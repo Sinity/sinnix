@@ -10,6 +10,7 @@
   lib,
   pkgs,
   config,
+  helpers,
   ...
 }@args:
 let
@@ -25,6 +26,7 @@ let
   backupRoot = "/realm/staging/machine-telemetry";
   manifestPath = "${dataDir}/manifest.json";
   username = config.sinnix.user.name;
+  scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
 
   machineTelemetry = pkgs.writeTextFile {
     name = "machine-telemetry";
@@ -378,8 +380,7 @@ mkServiceModule {
           pkgs.coreutils
           pkgs.findutils
           pkgs.gawk
-          pkgs.sqlite
-          pkgs.zstd
+          scriptPkgs.sinnix-sqlite-backup
         ];
         script = ''
           set -euo pipefail
@@ -388,22 +389,9 @@ mkServiceModule {
           install -d -m 0700 -o ${lib.escapeShellArg username} -g users ${lib.escapeShellArg backupRoot}
 
           stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-          raw_tmp=${lib.escapeShellArg backupRoot}/telemetry-"$stamp".sqlite.tmp
-          zst_tmp="$raw_tmp.zst.tmp"
           final=${lib.escapeShellArg backupRoot}/telemetry-"$stamp".sqlite.zst
 
-          cleanup() {
-            rm -f "$raw_tmp" "$zst_tmp"
-          }
-          trap cleanup EXIT
-
-          sqlite3 ${lib.escapeShellArg dbPath} ".backup '$raw_tmp'"
-          chmod 0600 "$raw_tmp"
-          zstd -T1 -q -f "$raw_tmp" -o "$zst_tmp"
-          chmod 0600 "$zst_tmp"
-          mv -f "$zst_tmp" "$final"
-          rm -f "$raw_tmp"
-          trap - EXIT
+          sinnix-sqlite-backup ${lib.escapeShellArg dbPath} "$final"
 
           find ${lib.escapeShellArg backupRoot} \
             -maxdepth 1 \
