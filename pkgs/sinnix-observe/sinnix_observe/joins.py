@@ -236,6 +236,11 @@ def build_gateway_rows(
                 "below": match_below(str(job.get("job_id")), cgroup, below),
                 "metrics": {
                     "work_item": declared.get("work_item"),
+                    "delegation": job.get("delegation", {}),
+                    "identity": job.get("identity", {}),
+                    "correlation": job.get("correlation", {}),
+                    "actual_agent": job.get("actual_agent"),
+                    "completion": job.get("completion"),
                     "resource_overrides": job.get("resource_overrides", {}),
                     "quota_provenance": gateway.get("quota"),
                 },

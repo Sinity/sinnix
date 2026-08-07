@@ -127,7 +127,11 @@ run_job() {
     PATH="${tmp}/bin:${PATH}" SINNIX_AGENT_SCOPE_EXEC="${tmp}/bin/scope-exec" \
     FAKE_SCOPE_RECEIPT_DIR="${tmp}/scope-receipts" \
     "${runner}" --job-id "${id}" --job-state-dir "${tmp}/state" --job-role source-review \
-    --work-item sinnix-056.1 --agent codex --model fake --reasoning-effort high \
+    --work-item sinnix-056.1 --parent-job-id parent-1 --coordinator-job-id coord-1 \
+    --provider codex --account-hash sha256:test --vendor-session-id vendor-1 \
+    --polylogue-session-id polylogue-1 --kitty-socket unix:/tmp/kitty \
+    --kitty-window-id 42 --hyprland-address address-1 --quota-snapshot-id quota-1 \
+    --agent codex --model fake --reasoning-effort high \
     --workdir "${tmp}/worktree" --prompt-file "${prompt}" \
     --log-file "${tmp}/output/${id}.log" --last-file "${tmp}/output/${id}.final" \
     --memory-high 2G --memory-max 3G --cpu-weight 200 --io-weight 300
@@ -152,17 +156,34 @@ run_backend_job antigravity job-antigravity
 
 [[ -f ${tmp}/state/job-one.json && -f ${tmp}/state/job-two.json ]]
 [[ -f ${tmp}/output/job-one.log && -f ${tmp}/output/job-one.final ]]
-jq -e '.schema_version == 2 and .backend == "grok" and .lifecycle == "succeeded"' "${tmp}/state/job-grok.json" >/dev/null
-jq -e '.schema_version == 2 and .backend == "antigravity" and .lifecycle == "succeeded"' "${tmp}/state/job-antigravity.json" >/dev/null
+jq -e '(.schema_version == 2 or .schema_version == 3) and .backend == "grok" and .lifecycle == "succeeded"' "${tmp}/state/job-grok.json" >/dev/null
+jq -e '(.schema_version == 2 or .schema_version == 3) and .backend == "antigravity" and .lifecycle == "succeeded"' "${tmp}/state/job-antigravity.json" >/dev/null
 grep -Fxq 'fake grok final' "${tmp}/output/job-grok.final"
 grep -Fxq 'fake antigravity final' "${tmp}/output/job-antigravity.final"
 jq -e --arg repo "${tmp}/repo" --arg worktree "${tmp}/worktree" '
-  .schema_version == 2 and .job_id == "job-one" and .lifecycle == "succeeded" and .exit_status == 0 and
+  (.schema_version == 2 or .schema_version == 3) and .job_id == "job-one" and .lifecycle == "succeeded" and .exit_status == 0 and
   .repo == $repo and .worktree == $worktree and .backend == "codex" and .model == "fake" and
   (.prompt.sha256 | length == 64) and .artifacts.final != "" and
   .launcher.scope_unit == "sinnix-agent-job-job-one.scope" and
-  .launcher.cgroup == "/fake/sinnix-agent-job-job-one.scope"
-' "${tmp}/state/job-one.json" >/dev/null
+  .launcher.cgroup == "/fake/sinnix-agent-job-job-one.scope" and
+  .delegation.parent_job_id == "parent-1" and .delegation.coordinator_job_id == "coord-1" and
+  .identity.provider == "codex" and .identity.account_hash == "sha256:test" and
+  .correlation.vendor_session_id == "vendor-1" and .correlation.polylogue_session_id == "polylogue-1" and
+  .correlation.kitty_window_id == "42" and .correlation.hyprland_address == "address-1" and
+  .correlation.quota_snapshot_id == "quota-1" and
+  (.actual_agent.pid | type == "number") and (.actual_agent.proc_start | length > 0) and
+  (.completion.duration_seconds | type == "number") and .completion.verification.outcome == "passed"
+' "${tmp}/state/job-one.json" >/dev/null || {
+  jq '{schema_version, delegation, identity, correlation, actual_agent, completion}' "${tmp}/state/job-one.json" >&2
+  exit 1
+}
+SINNIX_AGENT_JOB_STATE_DIR="${tmp}/state" "${repo_root}/scripts/sinnix-agent-event" \
+  --job-id job-one --event tool --payload-json '{"name":"shell"}'
+jq -sr '.[-1].event == "tool" and .[-1].payload.name == "shell"' "${tmp}/state/job-one.events.jsonl" >/dev/null
+registered="$(SINNIX_AGENT_JOB_STATE_DIR="${tmp}/interactive-state" "${repo_root}/scripts/sinnix-agent-register" \
+  --job-id interactive-one --work-item sinnix-056.1 --provider codex)"
+jq -e '.schema_version == 3 and .interactive == true and .identity.bead_id == "sinnix-056.1" and .identity.provider == "codex"' \
+  "${registered}" >/dev/null
 mapfile -t forwarded_properties <"${tmp}/scope-receipts/sinnix-agent-job-job-one.scope"
 [[ ${forwarded_properties[*]} == "MemoryHigh=2G MemoryMax=3G CPUWeight=200 IOWeight=300 RuntimeMaxSec=14400" ]]
 
@@ -226,11 +247,12 @@ env -u SINNIX_AGENT_SCOPED -u SINNIX_AGENT_SCOPE_UNIT -u SINNIX_AGENT_SCOPE_CGRO
   --log-file "${tmp}/output/job-hold.log" --last-file "${tmp}/output/job-hold.final" &
 hold_pid=$!
 for _ in {1..100}; do
-  [[ -f ${tmp}/state/job-hold.json ]] && [[ $(jq -r .lifecycle "${tmp}/state/job-hold.json") == running ]] && break
+  [[ -f ${tmp}/state/job-hold.json ]] && [[ $(jq -r .lifecycle "${tmp}/state/job-hold.json") == running ]] && [[ $(jq -r '.actual_agent.pid // empty' "${tmp}/state/job-hold.json") =~ ^[0-9]+$ ]] && break
   sleep 0.05
 done
 [[ $(jq -r .lifecycle "${tmp}/state/job-hold.json") == running ]]
 manifest_pid="$(jq -r .launcher.pid "${tmp}/state/job-hold.json")"
+actual_pid="$(jq -r .actual_agent.pid "${tmp}/state/job-hold.json")"
 live_stat="$(<"/proc/${manifest_pid}/stat")"
 live_start="$(printf '%s\n' "${live_stat##*) }" | awk '{print $20}')"
 [[ "$live_start" == "$(jq -r .launcher.proc_start "${tmp}/state/job-hold.json")" ]]
@@ -238,6 +260,11 @@ mkdir -p "${tmp}/proc/${manifest_pid}"
 printf 'x x x x x x x x x x x x x x x x x x x %s\n' "$(jq -r .launcher.proc_start "${tmp}/state/job-hold.json")" >"${tmp}/proc/${manifest_pid}/stat"
 printf '0::/wrong/cgroup\n' >"${tmp}/proc/${manifest_pid}/cgroup"
 ln -s "${tmp}/worktree" "${tmp}/proc/${manifest_pid}/cwd"
+actual_stat="$(<"/proc/${actual_pid}/stat")"
+actual_start="$(printf '%s\n' "${actual_stat##*) }" | awk '{print $20}')"
+mkdir -p "${tmp}/proc/${actual_pid}"
+printf 'x x x x x x x x x x x x x x x x x x x %s\n' "${actual_start}" >"${tmp}/proc/${actual_pid}/stat"
+printf '0::/wrong/cgroup\n' >"${tmp}/proc/${actual_pid}/cgroup"
 
 if FAKE_SYSTEMD_CGROUP=/fake/sinnix-agent-job-job-hold.scope FAKE_STOP_MARKER="${tmp}/stopped" \
   SINNIX_AGENT_SYSTEMCTL="${tmp}/bin/systemctl" SINNIX_AGENT_PROC_ROOT="${tmp}/proc" \
@@ -256,6 +283,7 @@ if "${control}" --state-dir "${tmp}/state" interrupt --title agent-job-hold; the
 fi
 
 printf '0::/fake/sinnix-agent-job-job-hold.scope\n' >"${tmp}/proc/${manifest_pid}/cgroup"
+printf '0::/fake/sinnix-agent-job-job-hold.scope\n' >"${tmp}/proc/${actual_pid}/cgroup"
 FAKE_SYSTEMD_PID="${manifest_pid}" \
   FAKE_SYSTEMD_CGROUP=/fake/sinnix-agent-job-job-hold.scope \
   FAKE_STOP_MARKER="${tmp}/stopped" SINNIX_AGENT_SYSTEMCTL="${tmp}/bin/systemctl" \

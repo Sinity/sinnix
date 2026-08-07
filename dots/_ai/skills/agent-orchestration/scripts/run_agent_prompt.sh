@@ -20,12 +20,25 @@ launch_id=""
 job_state_dir="${SINNIX_AGENT_JOB_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/sinnix/agent-jobs}"
 job_role=""
 work_item=""
+parent_job_id=""
+coordinator_job_id=""
+provider=""
+account_hash=""
+vendor_session_id=""
+polylogue_session_id=""
+kitty_socket=""
+kitty_window_id=""
+hyprland_address=""
+quota_snapshot_id=""
 memory_high=""
 memory_max=""
 cpu_weight=""
 io_weight=""
 timeout_seconds="14400"
 internal_agent_scope=0
+job_started_epoch="$(date +%s)"
+actual_agent_pid=""
+actual_agent_proc_start=""
 
 usage() {
   cat <<'EOF'
@@ -56,6 +69,16 @@ Attested job options:
   --job-state-dir <path>      Default: $XDG_STATE_HOME/sinnix/agent-jobs
   --job-role <description>
   --work-item <bead-or-label>
+  --parent-job-id <stable-id>
+  --coordinator-job-id <stable-id>
+  --provider <provider>
+  --account-hash <hash>
+  --vendor-session-id <id>
+  --polylogue-session-id <id>
+  --kitty-socket <path>
+  --kitty-window-id <id>
+  --hyprland-address <address>
+  --quota-snapshot-id <id>
   --memory-high <limit>
   --memory-max <limit>
   --cpu-weight <1-10000>
@@ -122,6 +145,16 @@ while [[ $# -gt 0 ]]; do
     work_item="${2:?missing value for --work-item}"
     shift 2
     ;;
+  --parent-job-id) parent_job_id="${2:?missing value for --parent-job-id}"; shift 2 ;;
+  --coordinator-job-id) coordinator_job_id="${2:?missing value for --coordinator-job-id}"; shift 2 ;;
+  --provider) provider="${2:?missing value for --provider}"; shift 2 ;;
+  --account-hash) account_hash="${2:?missing value for --account-hash}"; shift 2 ;;
+  --vendor-session-id) vendor_session_id="${2:?missing value for --vendor-session-id}"; shift 2 ;;
+  --polylogue-session-id) polylogue_session_id="${2:?missing value for --polylogue-session-id}"; shift 2 ;;
+  --kitty-socket) kitty_socket="${2:?missing value for --kitty-socket}"; shift 2 ;;
+  --kitty-window-id) kitty_window_id="${2:?missing value for --kitty-window-id}"; shift 2 ;;
+  --hyprland-address) hyprland_address="${2:?missing value for --hyprland-address}"; shift 2 ;;
+  --quota-snapshot-id) quota_snapshot_id="${2:?missing value for --quota-snapshot-id}"; shift 2 ;;
   --memory-high)
     memory_high="${2:?missing value for --memory-high}"
     shift 2
@@ -272,13 +305,56 @@ proc_start() {
 event() {
   local lifecycle="$1" exit_status="${2:-}"
   jq -cn --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg job_id "$job_id" --arg lifecycle "$lifecycle" --arg scope "${SINNIX_AGENT_SCOPE_UNIT:-${scope_unit}}" --arg cgroup "$scope_cgroup" --arg status "$exit_status" \
-    '{schema_version:2,at:$at,job_id:$job_id,lifecycle:$lifecycle,scope_unit:$scope,cgroup:$cgroup,exit_status:(if $status == "" then null else ($status|tonumber) end)}' >>"$events"
+    '{schema_version:2,at:$at,job_id:$job_id,event:(
+      {accepted:"accepted",starting:"starting",running:"heartbeat",succeeded:"completion",failed:"failure",cancel_requested:"approval",cancelled:"completion",timed_out:"failure"}[$lifecycle] // "lifecycle"),lifecycle:$lifecycle,scope_unit:$scope,cgroup:$cgroup,exit_status:(if $status == "" then null else ($status|tonumber) end)}' >>"$events"
   chmod 0600 "$events"
   if [[ ${SINNIX_AGENT_JOURNAL:-1} == 1 ]] && command -v logger >/dev/null 2>&1; then
     printf 'SYSLOG_IDENTIFIER=sinnix-agent-job\nMESSAGE=agent job %s entered %s\nSINNIX_JOB_ID=%s\nSINNIX_JOB_LIFECYCLE=%s\nSINNIX_SCOPE_UNIT=%s\nSINNIX_CGROUP=%s\n' \
       "$job_id" "$lifecycle" "$job_id" "$lifecycle" "${SINNIX_AGENT_SCOPE_UNIT:-${scope_unit}}" "$scope_cgroup" |
       logger --journald 2>/dev/null || true
   fi
+}
+
+update_manifest() {
+  local filter="$1"
+  shift
+  local tmp
+  tmp="$(mktemp "${manifest}.update.XXXXXX")"
+  jq "$@" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${filter} | .updated_at=\$at" "${manifest}" >"${tmp}"
+  chmod 0600 "${tmp}"
+  mv -f "${tmp}" "${manifest}"
+}
+
+record_actual_agent() {
+  local pid="$1" start
+  start="$(proc_start "${pid}")"
+  [[ -n ${start} ]] || return 0
+  actual_agent_proc_start="${start}"
+  update_manifest '.actual_agent={pid:$pid,proc_start:$start,attested_at:(now|todateiso8601)}' \
+    --argjson pid "${pid}" --arg start "${start}"
+}
+
+run_and_attest() {
+  local input_path
+  input_path="$(mktemp "${job_state_dir}/${job_id}.stdin.XXXXXX")"
+  cat >"${input_path}"
+  "$@" <"${input_path}" &
+  actual_agent_pid=$!
+  record_actual_agent "${actual_agent_pid}"
+  wait "${actual_agent_pid}"
+  local result=$?
+  rm -f "${input_path}"
+  return "${result}"
+}
+
+record_completion() {
+  local status="$1" cgroup_root="/sys/fs/cgroup${scope_cgroup}" memory_peak="" cpu_usec="" io_bytes="" duration
+  duration=$(( $(date +%s) - job_started_epoch ))
+  [[ -r ${cgroup_root}/memory.peak ]] && memory_peak="$(<"${cgroup_root}/memory.peak")"
+  [[ -r ${cgroup_root}/cpu.stat ]] && cpu_usec="$(awk '$1 == "usage_usec" {print $2}' "${cgroup_root}/cpu.stat")"
+  [[ -r ${cgroup_root}/io.stat ]] && io_bytes="$(awk '{for (i=1; i<=NF; i++) if ($i ~ /^rbytes=|^wbytes=/) {split($i,a,"="); sum+=a[2]}} END {print sum+0}' "${cgroup_root}/io.stat")"
+  update_manifest '.completion={duration_seconds:($duration|tonumber),peak_memory_bytes:(if $memory_peak=="" then null else ($memory_peak|tonumber) end),cpu_usage_usec:(if $cpu_usec=="" then null else ($cpu_usec|tonumber) end),io_bytes:(if $io_bytes=="" then null else ($io_bytes|tonumber) end),artifacts:.artifacts,verification:{exit_status:($status|tonumber),outcome:(if ($status|tonumber)==0 then "passed" else "failed" end)}}' \
+    --arg status "${status}" --arg duration "${duration}" --arg memory_peak "${memory_peak}" --arg cpu_usec "${cpu_usec}" --arg io_bytes "${io_bytes}"
 }
 
 write_manifest() {
@@ -313,6 +389,16 @@ write_manifest() {
     --arg final_path "${last_file}" \
     --arg role "${job_role}" \
     --arg work_item "${work_item}" \
+    --arg parent_job_id "${parent_job_id}" \
+    --arg coordinator_job_id "${coordinator_job_id}" \
+    --arg provider "${provider}" \
+    --arg account_hash "${account_hash}" \
+    --arg vendor_session_id "${vendor_session_id}" \
+    --arg polylogue_session_id "${polylogue_session_id}" \
+    --arg kitty_socket "${kitty_socket}" \
+    --arg kitty_window_id "${kitty_window_id}" \
+    --arg hyprland_address "${hyprland_address}" \
+    --arg quota_snapshot_id "${quota_snapshot_id}" \
     --arg scope_unit "${SINNIX_AGENT_SCOPE_UNIT:-${scope_unit}}" \
     --arg scope_cgroup "${scope_cgroup}" \
     --arg launcher_pid "${launcher_pid}" \
@@ -323,12 +409,15 @@ write_manifest() {
     --arg cpu_weight "${cpu_weight}" \
     --arg io_weight "${io_weight}" \
     --arg timeout_seconds "${timeout_seconds}" \
-    '{schema_version: 2, job_id: $job_id, launch_id: $launch_id, created_at: $created_at, updated_at: $updated_at,
+    '{schema_version: 3, job_id: $job_id, launch_id: $launch_id, created_at: $created_at, updated_at: $updated_at,
       lifecycle: $lifecycle, backend: $backend, model: $model, effort: $effort,
       repo: $repo, worktree: $worktree, branch: $branch,
       prompt: {path: $prompt_path, sha256: $prompt_sha256},
       artifacts: {log: $log_path, json: $json_path, final: $final_path},
       declared: {role: $role, work_item: $work_item},
+      delegation: {parent_job_id: (if $parent_job_id == "" then null else $parent_job_id end), coordinator_job_id: (if $coordinator_job_id == "" then null else $coordinator_job_id end)},
+      identity: {role: $role, bead_id: (if $work_item == "" then null else $work_item end), provider: (if $provider == "" then null else $provider end), account_hash: (if $account_hash == "" then null else $account_hash end)},
+      correlation: {vendor_session_id: (if $vendor_session_id == "" then null else $vendor_session_id end), polylogue_session_id: (if $polylogue_session_id == "" then null else $polylogue_session_id end), kitty_socket: (if $kitty_socket == "" then null else $kitty_socket end), kitty_window_id: (if $kitty_window_id == "" then null else $kitty_window_id end), hyprland_address: (if $hyprland_address == "" then null else $hyprland_address end), quota_snapshot_id: (if $quota_snapshot_id == "" then null else $quota_snapshot_id end)},
       launcher: {pid: ($launcher_pid | tonumber), proc_start: $launcher_start, scope_unit: $scope_unit, cgroup: $scope_cgroup},
       resource_overrides: {MemoryHigh: $memory_high, MemoryMax: $memory_max, CPUWeight: $cpu_weight, IOWeight: $io_weight, RuntimeMaxSec: $timeout_seconds},
       exit_status: (if $exit_status == "" then null else ($exit_status | tonumber) end)}' >"${tmp}"
@@ -361,6 +450,16 @@ if [[ ${internal_agent_scope} -eq 0 && -z ${SINNIX_AGENT_SCOPED:-} ]]; then
   [[ -z ${reasoning_effort} ]] || inner_args+=(--reasoning-effort "${reasoning_effort}")
   [[ -z ${job_role} ]] || inner_args+=(--job-role "${job_role}")
   [[ -z ${work_item} ]] || inner_args+=(--work-item "${work_item}")
+  [[ -z ${parent_job_id} ]] || inner_args+=(--parent-job-id "${parent_job_id}")
+  [[ -z ${coordinator_job_id} ]] || inner_args+=(--coordinator-job-id "${coordinator_job_id}")
+  [[ -z ${provider} ]] || inner_args+=(--provider "${provider}")
+  [[ -z ${account_hash} ]] || inner_args+=(--account-hash "${account_hash}")
+  [[ -z ${vendor_session_id} ]] || inner_args+=(--vendor-session-id "${vendor_session_id}")
+  [[ -z ${polylogue_session_id} ]] || inner_args+=(--polylogue-session-id "${polylogue_session_id}")
+  [[ -z ${kitty_socket} ]] || inner_args+=(--kitty-socket "${kitty_socket}")
+  [[ -z ${kitty_window_id} ]] || inner_args+=(--kitty-window-id "${kitty_window_id}")
+  [[ -z ${hyprland_address} ]] || inner_args+=(--hyprland-address "${hyprland_address}")
+  [[ -z ${quota_snapshot_id} ]] || inner_args+=(--quota-snapshot-id "${quota_snapshot_id}")
   [[ -z ${memory_high} ]] || inner_args+=(--memory-high "${memory_high}")
   [[ -z ${memory_max} ]] || inner_args+=(--memory-max "${memory_max}")
   [[ -z ${cpu_weight} ]] || inner_args+=(--cpu-weight "${cpu_weight}")
@@ -454,7 +553,7 @@ codex)
   [[ ${ephemeral} -eq 0 ]] || cmd+=(--ephemeral)
   [[ ${json_mode} -eq 0 ]] || cmd+=(--json)
   cmd+=(-)
-  if [[ ${json_mode} -eq 1 ]]; then run_with_optional_env "${cmd[@]}" <"${prompt_file}" >"${json_file}" 2>"${log_file}"; else run_with_optional_env "${cmd[@]}" <"${prompt_file}" >"${log_file}" 2>&1; fi
+  if [[ ${json_mode} -eq 1 ]]; then run_and_attest run_with_optional_env "${cmd[@]}" <"${prompt_file}" >"${json_file}" 2>"${log_file}"; else run_and_attest run_with_optional_env "${cmd[@]}" <"${prompt_file}" >"${log_file}" 2>&1; fi
   ;;
 claude)
   prompt_text="$(<"${prompt_file}")"
@@ -470,15 +569,15 @@ claude)
   fi
   if [[ ${json_mode} -eq 1 ]]; then
     cmd+=(--output-format json)
-    run_with_optional_env "${cmd[@]}" >"${json_file}" 2>"${log_file}"
+    run_and_attest run_with_optional_env "${cmd[@]}" >"${json_file}" 2>"${log_file}"
     [[ -z ${last_file} ]] || jq -r '.result // empty' "${json_file}" >"${last_file}"
   else
-    run_with_optional_env "${cmd[@]}" >"${log_file}" 2>&1
+    run_and_attest run_with_optional_env "${cmd[@]}" >"${log_file}" 2>&1
     [[ -z ${last_file} ]] || cp "${log_file}" "${last_file}"
   fi
   ;;
 gemini)
-  if [[ ${json_mode} -eq 1 ]]; then run_with_optional_env "${agent_bin}" <"${prompt_file}" >"${json_file}" 2>"${log_file}"; else run_with_optional_env "${agent_bin}" <"${prompt_file}" >"${log_file}" 2>&1; fi
+  if [[ ${json_mode} -eq 1 ]]; then run_and_attest run_with_optional_env "${agent_bin}" <"${prompt_file}" >"${json_file}" 2>"${log_file}"; else run_and_attest run_with_optional_env "${agent_bin}" <"${prompt_file}" >"${log_file}" 2>&1; fi
   ;;
 grok)
   prompt_text="$(<"${prompt_file}")"
@@ -499,10 +598,10 @@ grok)
       echo "grok JSON output requires --json-file" >&2
       exit 2
     }
-    run_with_optional_env "${cmd[@]}" >"${json_file}" 2>"${log_file}"
+    run_and_attest run_with_optional_env "${cmd[@]}" >"${json_file}" 2>"${log_file}"
     [[ -z ${last_file} ]] || cp "${json_file}" "${last_file}"
   else
-    run_with_optional_env "${cmd[@]}" >"${log_file}" 2>&1
+    run_and_attest run_with_optional_env "${cmd[@]}" >"${log_file}" 2>&1
     [[ -z ${last_file} ]] || cp "${log_file}" "${last_file}"
   fi
   ;;
@@ -526,10 +625,10 @@ antigravity)
       echo "Antigravity JSON output requires --json-file" >&2
       exit 2
     }
-    run_with_optional_env "${cmd[@]}" >"${json_file}" 2>"${log_file}"
+    run_and_attest run_with_optional_env "${cmd[@]}" >"${json_file}" 2>"${log_file}"
     [[ -z ${last_file} ]] || cp "${json_file}" "${last_file}"
   else
-    run_with_optional_env "${cmd[@]}" >"${log_file}" 2>&1
+    run_and_attest run_with_optional_env "${cmd[@]}" >"${log_file}" 2>&1
     [[ -z ${last_file} ]] || cp "${log_file}" "${last_file}"
   fi
   ;;
@@ -542,6 +641,11 @@ status=$?
 set -e
 
 if [[ ${status} -eq 0 ]]; then write_manifest succeeded 0; else write_manifest failed "${status}"; fi
+if [[ -n ${actual_agent_pid} && -n ${actual_agent_proc_start} ]]; then
+  update_manifest '.actual_agent={pid:$pid,proc_start:$start,attested_at:(now|todateiso8601)}' \
+    --argjson pid "${actual_agent_pid}" --arg start "${actual_agent_proc_start}"
+fi
+record_completion "${status}"
 job_finalized=1
 trap - EXIT
 exit "${status}"

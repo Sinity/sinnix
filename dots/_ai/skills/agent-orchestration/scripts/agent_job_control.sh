@@ -55,7 +55,7 @@ require_manifest() {
   manifest="$(manifest_for "${job_id}")"
   [[ -r ${manifest} ]] || { echo "unknown job ID: ${job_id}" >&2; exit 1; }
   jq -e --arg job_id "${job_id}" '
-    .schema_version == 2 and .job_id == $job_id
+    (.schema_version == 2 or .schema_version == 3) and .job_id == $job_id
   ' "${manifest}" >/dev/null || {
     echo "refusing malformed manifest: ${manifest}" >&2
     exit 1
@@ -64,6 +64,7 @@ require_manifest() {
 
 require_attested_manifest() {
   jq -e '
+    ((.schema_version == 2 or .schema_version == 3)) and
     (.launcher.pid | type == "number") and
     (.launcher.proc_start | type == "string" and length > 0) and
     (.launcher.scope_unit | type == "string" and length > 0) and
@@ -175,7 +176,7 @@ job_status() {
   jq --argjson live "${live}" '. + {live: $live}' "${source_manifest}"
 }
 
-case "${command}" in
+  case "${command}" in
   list)
     umask 077
     mkdir -p -m 0700 "${state_dir}"
@@ -189,7 +190,7 @@ case "${command}" in
       results=()
       malformed=()
       for source_manifest in "${manifests[@]}"; do
-        if jq -e '.schema_version == 2 and (.job_id | type == "string")' "${source_manifest}" >/dev/null 2>&1; then
+        if jq -e '(.schema_version == 2 or .schema_version == 3) and (.job_id | type == "string")' "${source_manifest}" >/dev/null 2>&1; then
           results+=("$(job_status "${source_manifest}")")
         else
           malformed+=("$(basename "${source_manifest}")")
@@ -235,6 +236,20 @@ case "${command}" in
       echo "refusing worktree mismatch for job ${job_id}" >&2
       exit 1
     }
+    actual_pid="$(jq -r '.actual_agent.pid // empty' "${manifest}")"
+    if [[ -n ${actual_pid} ]]; then
+      actual_start="$(jq -r '.actual_agent.proc_start // empty' "${manifest}")"
+      kill -0 "${actual_pid}" 2>/dev/null || { echo "refusing stale actual-agent PID: ${actual_pid}" >&2; exit 1; }
+      [[ "$(proc_start "${actual_pid}")" == "${actual_start}" ]] || {
+        echo "refusing actual-agent PID start-time mismatch for job ${job_id}" >&2
+        exit 1
+      }
+      [[ -r ${proc_root}/${actual_pid}/cgroup ]] || { echo "refusing unreadable actual-agent cgroup: ${actual_pid}" >&2; exit 1; }
+      grep -Fxq "0::${recorded_cgroup}" "${proc_root}/${actual_pid}/cgroup" || {
+        echo "refusing actual-agent cgroup mismatch for job ${job_id}" >&2
+        exit 1
+      }
+    fi
     live="$(live_scope_json "${unit}")"
     [[ "$(jq -r '.available' <<<"${live}")" == true ]] || {
       echo "refusing unavailable systemd scope for job ${job_id}" >&2

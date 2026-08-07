@@ -27,6 +27,16 @@ class AgentLaunchRequest(GatewayModel):
     work_item: str | None = Field(default=None, max_length=512)
     timeout_seconds: int = Field(default=14_400, ge=30, le=86_400)
     credential_profile: str = Field(default="subscription", pattern="^(subscription|api)$")
+    parent_job_id: str | None = Field(default=None, max_length=128)
+    coordinator_job_id: str | None = Field(default=None, max_length=128)
+    provider: str | None = Field(default=None, max_length=64)
+    account_hash: str | None = Field(default=None, max_length=128)
+    vendor_session_id: str | None = Field(default=None, max_length=256)
+    polylogue_session_id: str | None = Field(default=None, max_length=256)
+    kitty_socket: str | None = Field(default=None, max_length=4096)
+    kitty_window_id: str | None = Field(default=None, max_length=128)
+    hyprland_address: str | None = Field(default=None, max_length=256)
+    quota_snapshot_id: str | None = Field(default=None, max_length=256)
 
 
 JsonObject = dict[str, Any]

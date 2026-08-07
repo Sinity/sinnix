@@ -299,14 +299,22 @@ def test_agent_gateway_correlates_manifest_audit_history_and_quota(
     (jobs / f"{job_id}.json").write_text(
         json.dumps(
             {
-                "schema_version": 2,
                 "job_id": job_id,
                 "launcher": {
                     "scope_unit": "sinnix-agent-job-x.scope",
                     "cgroup": "/agent.slice/x",
                 },
+                "schema_version": 3,
+                "identity": {"provider": "codex", "account_hash": "sha256:test"},
+                "delegation": {"parent_job_id": "parent-1"},
+                "actual_agent": {"pid": 22, "proc_start": "44"},
+                "completion": {"duration_seconds": 12},
             }
         )
+    )
+    (jobs / f"{job_id}.events.jsonl").write_text(
+        json.dumps({"schema_version": 2, "job_id": job_id, "event": "completion"})
+        + "\n"
     )
     db = sqlite3.connect(audit_dir / "events.sqlite3")
     db.execute(
@@ -346,6 +354,9 @@ def test_agent_gateway_correlates_manifest_audit_history_and_quota(
     out = agent_gateway.collect_agent_gateway()
     assert out["correlations"][0]["complete"] is True
     assert out["correlations"][0]["cgroup"] == "/agent.slice/x"
+    assert out["correlations"][0]["identity"]["provider"] == "codex"
+    assert out["correlations"][0]["delegation"]["parent_job_id"] == "parent-1"
+    assert out["correlations"][0]["lifecycle_events"][0]["event"] == "completion"
     assert (
         out["correlations"][0]["polylogue"]["session_id"] == "codex-session:session-1"
     )
