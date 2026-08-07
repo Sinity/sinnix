@@ -82,6 +82,9 @@ in
       groupBindingsJson = builtins.toJSON (
         groupEvaluated.config.home-manager.users.sinity.wayland.windowManager.hyprland.settings.bind or [ ]
       );
+      groupSubmapsJson = builtins.toJSON (
+        groupEvaluated.config.home-manager.users.sinity.wayland.windowManager.hyprland.submaps or { }
+      );
     in
     {
       checks.runtime-surface-policy =
@@ -113,6 +116,18 @@ in
               any(.[]; . == "SUPER SHIFT, bracketleft, moveoutofgroup") and
               (any(.[]; . == "SUPER, G, togglegroup") and (any(.[]; . == "SUPER, T, togglegroup") | not))
             ' bindings.json >/dev/null
+            cat > submaps.json <<'EOF_SUBMAPS'
+            ${groupSubmapsJson}
+            EOF_SUBMAPS
+            jq -e '
+              .system.settings.bindd as $binds |
+              (any($binds[]; . == ", S, Screenshot region, exec, noctalia msg screenshot-region") and
+               any($binds[]; . == ", F, Screenshot fullscreen, exec, noctalia msg screenshot-fullscreen") and
+               any($binds[]; . == ", P, Park background work, exec, sinnix-pressure-park auto") and
+               any($binds[]; . == ", H, Show display capture status, exec, sinnix-screenshot-control probe") and
+               any($binds[]; . == ", Escape, Exit system controls, submap, reset") and
+               any($binds[]; . == ", Return, Exit system controls, submap, reset"))
+            ' submaps.json >/dev/null
             touch "$out"
           '';
     };
