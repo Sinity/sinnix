@@ -3,6 +3,7 @@ set -euo pipefail
 
 socket="${KITTY_LISTEN_ON:-}"
 raw_json=0
+proc_root="${SINNIX_KITTY_PROC_ROOT:-/proc}"
 
 usage() {
   cat <<'USAGE'
@@ -11,6 +12,7 @@ Usage: kitty-remote-control.sh [--to SOCKET] <command> [options]
 Commands:
   list [--json]
   focus --match <expr>
+  launch-agent-here --agent <codex|claude|gemini|hermes>
   send --match <expr> --text <text> [--enter] [--bracketed-paste]
   run --match <expr> --command <command>
   key --match <expr> --keys <key1> [key2 ...]
@@ -80,6 +82,102 @@ poll_for_pattern() {
   done
 }
 
+proc_start_time() {
+  local pid="$1"
+  [[ -r "$proc_root/$pid/stat" ]] || return 1
+  awk '{print $22}' "$proc_root/$pid/stat"
+}
+
+is_descendant_of() {
+  local child="$1"
+  local ancestor="$2"
+  local parent
+
+  for _ in {1..32}; do
+    [[ "$child" == "$ancestor" ]] && return 0
+    parent="$(ps -o ppid= -p "$child" 2>/dev/null | tr -d ' ')"
+    [[ "$parent" =~ ^[0-9]+$ && "$parent" != 1 ]] || return 1
+    child="$parent"
+  done
+  return 1
+}
+
+notify_agent_fallback() {
+  local cwd="$1"
+  local reason="$2"
+  if command -v notify-send >/dev/null 2>&1; then
+    notify-send -t 2500 "Agent launch fallback" "$reason. Starting in $cwd."
+  fi
+}
+
+launch_agent_here() {
+  local agent=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --agent)
+      agent="${2:?missing agent}"
+      shift 2
+      ;;
+    *)
+      echo "launch-agent-here: unknown arg: $1" >&2
+      exit 2
+      ;;
+    esac
+  done
+
+  local command_path
+  case "$agent" in
+  codex) command_path="$HOME/.local/bin/codex" ;;
+  claude) command_path="$HOME/.local/bin/claude-lean" ;;
+  gemini) command_path="$HOME/.local/bin/gemini" ;;
+  hermes) command_path="$HOME/.local/bin/hermes" ;;
+  *)
+    echo "launch-agent-here: agent must be codex, claude, gemini, or hermes" >&2
+    exit 2
+    ;;
+  esac
+
+  local fallback_cwd="${SINNIX_AGENT_FALLBACK_CWD:-${SINNIX_PROJECT_ROOT:-/realm/project/sinnix}}"
+  [[ -d "$fallback_cwd" ]] || fallback_cwd="$HOME"
+  local active_json active_class kitty_pid runtime_dir socket_path kitty_json focused_json foreground_json
+  local foreground_pid foreground_cwd kitty_start foreground_start proc_cwd
+  active_json="$(hyprctl -j activewindow 2>/dev/null || true)"
+  active_class="$(printf '%s' "$active_json" | jq -r '.class // ""')"
+  kitty_pid="$(printf '%s' "$active_json" | jq -r '.pid // 0')"
+  runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$UID}"
+  socket_path="$runtime_dir/kitty-${USER:-$(id -u)}-$kitty_pid"
+
+  if [[ "$active_class" != kitty || ! "$kitty_pid" =~ ^[0-9]+$ || "$kitty_pid" == 0 || ! -S "$socket_path" ]]; then
+    notify_agent_fallback "$fallback_cwd" "focused window is not a resolvable Kitty window"
+    uwsm app -- kitty --directory "$fallback_cwd" "$command_path" >/dev/null 2>&1 &
+    return 0
+  fi
+
+  socket="unix:$socket_path"
+  kitty_start="$(proc_start_time "$kitty_pid" || true)"
+  kitty_json="$(kitty @ --to "$socket" ls 2>/dev/null || true)"
+  focused_json="$(printf '%s' "$kitty_json" | jq -c '[.[] | select(.is_focused == true) | .tabs[]? | select(.is_focused == true) | .windows[]? | select(.is_focused == true)][0] // empty')"
+  foreground_json="$(printf '%s' "$focused_json" | jq -c '(.foreground_processes // [])[-1] // empty')"
+  foreground_pid="$(printf '%s' "$foreground_json" | jq -r '.pid // 0')"
+  foreground_cwd="$(printf '%s' "$foreground_json" | jq -r '.cwd // empty')"
+  foreground_start="$(proc_start_time "$foreground_pid" || true)"
+
+  if [[ -z "$kitty_start" || -z "$focused_json" || ! "$foreground_pid" =~ ^[0-9]+$ || "$foreground_pid" == 0 || -z "$foreground_start" || -z "$foreground_cwd" ]] || ! is_descendant_of "$foreground_pid" "$kitty_pid"; then
+    notify_agent_fallback "$fallback_cwd" "focused Kitty process identity could not be verified"
+    uwsm app -- kitty --directory "$fallback_cwd" "$command_path" >/dev/null 2>&1 &
+    return 0
+  fi
+
+  proc_cwd="$(readlink -f "$proc_root/$foreground_pid/cwd" 2>/dev/null || true)"
+  if [[ -z "$proc_cwd" || ! -d "$proc_cwd" ]]; then
+    notify_agent_fallback "$fallback_cwd" "focused Kitty cwd could not be verified"
+    uwsm app -- kitty --directory "$fallback_cwd" "$command_path" >/dev/null 2>&1 &
+    return 0
+  fi
+
+  run_kitty launch --type os-window --cwd "$proc_cwd" --keep-focus "$command_path"
+}
+
 if [[ $# -lt 1 ]]; then
   usage >&2
   exit 2
@@ -94,6 +192,9 @@ cmd="${1:-}"
 shift || true
 
 case "$cmd" in
+launch-agent-here)
+  launch_agent_here "$@"
+  ;;
 list)
   if [[ ${1:-} == "--json" ]]; then
     raw_json=1

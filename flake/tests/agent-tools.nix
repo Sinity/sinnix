@@ -793,6 +793,27 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/hogkill.sh} "$hogkill"
             touch "$out"
           '';
+      kittyAgentHereFixture =
+        pkgs.runCommand "kitty-agent-here-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.gawk
+              pkgs.gnugrep
+              pkgs.gnused
+              pkgs.jq
+              pkgs.python3
+            ];
+          }
+          ''
+            helper="$TMPDIR/kitty-remote-control.sh"
+            cp ${../../dots/_ai/skills/desktop-control-plane/scripts/kitty-remote-control.sh} "$helper"
+            chmod +x "$helper"
+            patchShebangs "$helper"
+            ${pkgs.bash}/bin/bash ${../../flake/tests/kitty-agent-here.sh} "$helper"
+            touch "$out"
+          '';
     in
     {
       checks = {
@@ -803,6 +824,7 @@ in
         mcp-sweep = mcpSweepFixture;
         preflight = preflightFixture;
         hogkill = hogkillFixture;
+        kitty-agent-here = kittyAgentHereFixture;
       };
 
       heavyChecks = {

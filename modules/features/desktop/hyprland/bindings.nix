@@ -11,6 +11,7 @@ in
 {
   bindd = [
     "SUPER, End, Open Sinnix system controls, submap, system"
+    "SUPER SHIFT, Return, Launch Codex in focused Kitty directory, exec, sinnix-kitty-control launch-agent-here --agent codex"
   ];
 
   submaps.system.settings = {
