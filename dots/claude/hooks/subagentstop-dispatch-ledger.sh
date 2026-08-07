@@ -17,11 +17,18 @@
 #   jq -s 'group_by(.session_id) | map({session_id:.[0].session_id, starts:[.[]|select(.type=="dispatch_start")]|length, ends:[.[]|select(.type=="dispatch_end")]|length})' <ledger>
 set -uo pipefail
 
-LEDGER="${HOME}/.local/state/claude-code/dispatch-ledger.jsonl"
-mkdir -p "$(dirname "$LEDGER")" 2>/dev/null || exit 0
+LEDGER="${XDG_STATE_HOME:-${HOME}/.local/state}/claude-code/dispatch-ledger.jsonl"
+mkdir -p "${LEDGER%/*}" 2>/dev/null || exit 0
 
 INPUT=$(cat 2>/dev/null)
 [[ -z "${INPUT:-}" ]] && exit 0
+
+# Candidate sampling is deliberately best-effort and synchronous only for a
+# bounded local append. The judge runs separately so SubagentStop never waits
+# on Claude transport or schema validation.
+if command -v sinnix-vacuity-sampler >/dev/null 2>&1; then
+    printf '%s' "$INPUT" | sinnix-vacuity-sampler enqueue >/dev/null 2>&1 || true
+fi
 
 SESSION_ID=$(jq -r '.session_id // "unknown"' <<<"$INPUT" 2>/dev/null)
 [[ -z "$SESSION_ID" ]] && SESSION_ID="unknown"

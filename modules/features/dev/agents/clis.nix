@@ -339,6 +339,7 @@ mkFeatureModule {
             scriptPkgs.sinnix-attention
             scriptPkgs.sinnix-context-handoff
             scriptPkgs.sinnix-claude-judge
+            scriptPkgs.sinnix-vacuity-sampler
             scriptPkgs.sinnix-agent-profile-benchmark
           ];
 
