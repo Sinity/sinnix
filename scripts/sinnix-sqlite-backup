@@ -52,11 +52,15 @@ def backup_database(source_path: Path, output_path: Path) -> None:
             if cancel_requested:
                 raise BackupCancelled
 
-        source.backup(target, pages=0, progress=progress, sleep=0)
+        source.backup(target, pages=100000, progress=progress, sleep=0)
         target.commit()
         integrity = target.execute("PRAGMA integrity_check").fetchone()
         if integrity != ("ok",):
             raise RuntimeError(f"SQLite integrity_check failed: {integrity!r}")
+        target.close()
+        target = None
+        source.close()
+        source = None
         subprocess.run(["zstd", "-T1", "-q", "-f", str(raw_path), "-o", str(compressed_path)], check=True)
         os.chmod(compressed_path, 0o600)
         os.replace(compressed_path, output_path)
