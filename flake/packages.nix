@@ -22,6 +22,7 @@
         "polylogue-python"
         "polylogued"
         "sinnix-agent-control-mcp"
+        "sinnix-agent-environment-doc"
         "sinnix-agent-gateway"
         "sinnix-observe"
         "tunnel-client"
