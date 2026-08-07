@@ -834,6 +834,26 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/bd-safety.sh} "$hook"
             touch "$out"
           '';
+      contextHandoffFixture =
+        pkgs.runCommand "context-handoff-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.git
+              pkgs.gnugrep
+              pkgs.jq
+              pkgs.ripgrep
+            ];
+          }
+          ''
+            writer="$TMPDIR/sinnix-context-handoff"
+            cp ${../../scripts/sinnix-context-handoff} "$writer"
+            chmod +x "$writer"
+            patchShebangs "$writer"
+            ${pkgs.bash}/bin/bash ${../../flake/tests/context-handoff.sh} "$writer"
+            touch "$out"
+          '';
     in
     {
       checks = {
@@ -846,6 +866,7 @@ in
         hogkill = hogkillFixture;
         kitty-agent-here = kittyAgentHereFixture;
         bd-safety-hook = bdSafetyHookFixture;
+        context-handoff = contextHandoffFixture;
       };
 
       heavyChecks = {

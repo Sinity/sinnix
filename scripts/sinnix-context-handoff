@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Write a private atomic pre-compaction handoff record
+# runtimeInputs: bash coreutils git jq
+set -euo pipefail
+
+umask 077
+input="$(cat)"
+cwd="$(printf '%s' "$input" | jq -r '.cwd // .working_directory // .handoff.cwd // empty')"
+cwd="${cwd:-$PWD}"
+
+repo_root=""
+if [[ -d "$cwd" ]]; then
+  repo_root="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true)"
+fi
+
+if [[ -n "$repo_root" ]]; then
+  target_dir="$repo_root/.agent/scratch"
+  branch="$(git -C "$repo_root" branch --show-current 2>/dev/null || true)"
+  dirty_paths="$(git -C "$repo_root" status --porcelain=v1 2>/dev/null | sed -E 's/^.. //')"
+  worktree="$repo_root"
+else
+  target_dir="${CLAUDE_SCRATCH_ROOT:-${XDG_STATE_HOME:-$HOME/.local/state}/claude/scratch}"
+  branch=""
+  dirty_paths=""
+  worktree=""
+fi
+
+mkdir -p "$target_dir"
+chmod 700 "$target_dir"
+timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+final="$target_dir/compaction-$timestamp.md"
+if [[ -e "$final" ]]; then
+  final="$target_dir/compaction-$timestamp-$$.md"
+fi
+tmp="$(mktemp "$target_dir/.compaction-$timestamp.XXXXXX")"
+trap 'rm -f "$tmp"' EXIT
+
+yaml_string() {
+  jq -rn --arg value "$1" '$value | @json'
+}
+
+yaml_array() {
+  local expression="$1"
+  printf '%s' "$input" | jq -c "${expression} // []"
+}
+
+mission="$(printf '%s' "$input" | jq -r '.handoff.mission // .mission // ""')"
+next_action="$(printf '%s' "$input" | jq -r '.handoff.next_action // .next_action // ""')"
+source_client="$(printf '%s' "$input" | jq -r '.client // .provider // "unknown"')"
+created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+{
+  printf '%s\n' '---'
+  printf 'schema_version: 1\n'
+  printf 'created_at: %s\n' "$(yaml_string "$created_at")"
+  printf 'source_client: %s\n' "$(yaml_string "$source_client")"
+  printf 'repo_root: %s\n' "$(yaml_string "$repo_root")"
+  printf 'branch: %s\n' "$(yaml_string "$branch")"
+  printf 'worktree: %s\n' "$(yaml_string "$worktree")"
+  printf 'dirty_paths: %s\n' "$(printf '%s\n' "$dirty_paths" | jq -Rsc 'split("\n") | map(select(length > 0))')"
+  printf 'bead_ids: %s\n' "$(yaml_array '.handoff.bead_ids // .bead_ids')"
+  printf 'active_jobs: %s\n' "$(yaml_array '.handoff.active_jobs // .active_jobs')"
+  printf 'completed_verification: %s\n' "$(yaml_array '.handoff.completed_verification // .completed_verification')"
+  printf 'evidence_paths: %s\n' "$(yaml_array '.handoff.evidence_paths // .evidence_paths')"
+  printf 'blockers: %s\n' "$(yaml_array '.handoff.blockers // .blockers')"
+  printf 'mission: %s\n' "$(yaml_string "$mission")"
+  printf 'next_action: %s\n' "$(yaml_string "$next_action")"
+  printf '%s\n' '---' '# Pre-compaction handoff' '' 'This record contains structured resume state only. Transcript content and environment values are intentionally excluded.'
+} >"$tmp"
+
+chmod 600 "$tmp"
+mv -f "$tmp" "$final"
+trap - EXIT
+printf '%s\n' "$final"

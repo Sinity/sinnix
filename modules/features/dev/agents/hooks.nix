@@ -54,6 +54,16 @@ jsonFormat.generate "codex-hooks.json" {
         ];
       }
     ];
+    PreCompact = [
+      {
+        hooks = [
+          {
+            type = "command";
+            command = "sinnix-context-handoff";
+          }
+        ];
+      }
+    ];
     PreToolUse = [
       {
         hooks = [
