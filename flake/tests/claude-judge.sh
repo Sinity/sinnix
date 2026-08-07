@@ -20,6 +20,11 @@ if [[ ${CLAUDE_JUDGE_MODE:-valid} == transport ]]; then
   echo 'transport failure' >&2
   exit 7
 fi
+if [[ ${CLAUDE_JUDGE_MODE:-valid} == signal ]]; then
+  printf '%s' "$$" >"${CLAUDE_JUDGE_SIGNAL_MARKER:?}"
+  trap 'exit 143' TERM
+  sleep 30
+fi
 if [[ ${CLAUDE_JUDGE_MODE:-valid} == invalid-once && $count == 1 ]]; then
   printf '%s\n' '{"session_id":"session-1","model":"fixture","result":{"verdict":7}}'
 else
@@ -62,6 +67,18 @@ if CLAUDE_JUDGE_MODE=transport run_judge 'do not retry transport' >/dev/null 2>"
 fi
 test "$(<"$test_root/count")" = 1
 
+: >"$test_root/signal-marker"
+CLAUDE_JUDGE_MODE=signal CLAUDE_JUDGE_SIGNAL_MARKER="$test_root/signal-marker" run_judge 'terminate the child group' >/dev/null 2>"$test_root/signal.err" &
+judge_pid=$!
+sleep 0.2
+kill -TERM "$judge_pid"
+set +e
+wait "$judge_pid"
+signal_status=$?
+set -e
+test "$signal_status" = 143
+! kill -0 "$(<"$test_root/signal-marker")" 2>/dev/null
+
 if SINNIX_CLAUDE_JUDGE_BIN="$test_root/bin/fake-claude" "$judge" --schema "$test_root/schema.json" --context "$test_root/context/missing.txt" --receipt-dir "$test_root/receipts" -- 'reject missing context' >/dev/null 2>&1; then
   echo 'missing context unexpectedly passed' >&2
   exit 1
@@ -76,6 +93,8 @@ if [[ -n $review_helper ]]; then
   cp "$judge" "$test_root/review-bin/sinnix-claude-judge"
   chmod +x "$test_root/review-bin/sinnix-claude-judge"
   PATH="$test_root/review-bin:$PATH" \
+    CLAUDE_JUDGE_COUNT="$test_root/review-count" \
+    CLAUDE_JUDGE_ARGS="$test_root/review-args" \
     SINNIX_CLAUDE_JUDGE_BIN="$test_root/bin/fake-claude" \
     XDG_STATE_HOME="$test_root/state" \
     "$review_helper" "$test_root/schema.json" "$test_root/context/ok.txt" -- 'review through shared wrapper' >/dev/null
