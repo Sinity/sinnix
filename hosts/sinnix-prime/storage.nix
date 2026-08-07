@@ -306,6 +306,20 @@ in
       ];
     };
 
+    # NATS JetStream state moved from the /persist impermanence tree to the
+    # realm state volume on 2026-08-07. The old /persist/var/lib/nats source
+    # remains untouched during burn-in and is removed only after explicit
+    # operator authorization.
+    "/var/lib/nats" = {
+      device = "${realmRoot}/state/nats";
+      fsType = "none";
+      options = [
+        "bind"
+        "nofail"
+      ];
+      depends = [ realmRoot ];
+    };
+
     # Sinex devshell build caches (CARGO_TARGET_DIR + per-checkout dev-state;
     # the /var/cache/sinex path itself is hardcoded by the sinex devshell and
     # sinnix-direnvrc, so we relocate what backs it, not the path). Audit
@@ -559,6 +573,8 @@ in
       # Excluded from btrbk→borg — never persist-grade data.
       "d ${realmRoot}/cache 0755 root root -"
       "d ${realmRoot}/cache/sinex 0775 ${username} users -"
+      # NATS JetStream state, backed up with the realm volume.
+      "d ${realmRoot}/state/nats 0755 nats nats -"
       # DB-backup staging (telemetry/polylogue sqlite, sinex pg dumps) —
       # moved off /persist 2026-07-10; covered by the /realm borg job.
       "d ${realmRoot}/backup 0755 root root -"
