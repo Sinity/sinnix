@@ -37,7 +37,7 @@ let
 
   mkSharedSpecialArgs = specialInputs: {
     inputs = specialInputs;
-    inherit (featureLib) mkFeatureModule mkServiceModule;
+    inherit (featureLib) mkFeatureModule mkServiceModule mkAiService;
     helpers = {
       inherit (featureLib) mkDotsFileFor;
       mkSinnixPackagesFor =

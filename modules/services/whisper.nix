@@ -4,22 +4,17 @@
 # model is auto-downloaded into model/whisper on first start if missing.
 # On-demand (wantedBy = [ ]) so it neither blocks boot nor holds VRAM idle.
 {
-  mkServiceModule,
+  mkAiService,
   lib,
   pkgs,
   ...
 }@args:
-mkServiceModule {
+mkAiService {
   name = "whisper";
   description = "whisper.cpp speech-to-text server (CUDA)";
-  surface = {
-    unit = "whisper-server.service";
-    resourceClass = "interactive-agent";
-    observe = {
-      enable = true;
-      restartable = true;
-    };
-  };
+  unit = "whisper-server.service";
+  endpoint = "127.0.0.1:8090";
+  requiresCuda = true;
   extraOptions = {
     model = args.lib.mkOption {
       type = args.lib.types.str;
