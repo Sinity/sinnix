@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Interactive resource hog inspector and killer
-# runtimeInputs: bash coreutils gum procps gawk gnugrep gnused systemd
+# runtimeInputs: bash coreutils gum procps gawk gnugrep gnused systemd sqlite jq
 set -euo pipefail
 
 export LC_ALL=C
@@ -14,13 +14,16 @@ Inspect CPU/memory-heavy processes, show their systemd unit context, and
 optionally stop/kill the selected process or unit.
 
 Options:
-  -s, --sort cpu|mem|rss   Sort rows by CPU%, MEM%, or RSS bytes (default: rss)
+  -s, --sort cpu|mem|rss|pss_anon   Sort rows by CPU, MEM, RSS, or anonymous PSS (default: pss_anon)
   -n, --limit N            Number of rows to show (default: 30)
       --unit UNIT          Show processes in a specific systemd unit/cgroup
       --list               Print the table and exit
       --dry-run            Show the selected action without executing it
       --no-interactive     Disable gum prompts; implies --list unless --pid is set
       --pid PID            Act on a specific PID instead of opening the picker
+      --json               Emit the bounded candidate model as JSON and exit
+      --processes          Include the per-process table after cgroup rows
+      --trajectory         Print telemetry trajectory for --pid or the selected row
   -h, --help               Show this help
 
 Examples:
@@ -31,13 +34,17 @@ Examples:
 EOF
 }
 
-sort_key="rss"
+sort_key="pss_anon"
 limit=30
 unit_filter=""
 list_only=0
 dry_run=0
 interactive=1
 selected_pid=""
+json_mode=0
+processes_mode=0
+trajectory_mode=0
+thaw_after=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -69,6 +76,24 @@ while [ "$#" -gt 0 ]; do
       selected_pid="${2:-}"
       shift 2
       ;;
+    --json)
+      json_mode=1
+      list_only=1
+      interactive=0
+      shift
+      ;;
+    --processes)
+      processes_mode=1
+      shift
+      ;;
+    --trajectory)
+      trajectory_mode=1
+      shift
+      ;;
+    --thaw-after)
+      thaw_after="${2:-}"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -82,9 +107,9 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$sort_key" in
-  cpu|mem|rss) ;;
+  cpu|mem|rss|pss_anon) ;;
   *)
-    echo "hogkill: --sort must be cpu, mem, or rss" >&2
+    echo "hogkill: --sort must be cpu, mem, rss, or pss_anon" >&2
     exit 64
     ;;
 esac
@@ -99,6 +124,12 @@ if [ "$limit" -lt 1 ]; then
   echo "hogkill: --limit must be greater than zero" >&2
   exit 64
 fi
+case "$thaw_after" in
+  ''|*[!0-9]*)
+    echo "hogkill: --thaw-after must be a non-negative integer" >&2
+    exit 64
+    ;;
+esac
 
 if [ "$interactive" -eq 0 ] && [ -z "$selected_pid" ]; then
   list_only=1
@@ -115,8 +146,12 @@ fi
 
 tmp_dir="$(mktemp -d -t hogkill.XXXXXX)"
 rows_tsv="$tmp_dir/rows.tsv"
+cgroup_rows_tsv="$tmp_dir/cgroup-rows.tsv"
 table_txt="$tmp_dir/table.txt"
 trap 'rm -rf "$tmp_dir"' EXIT
+
+proc_root="${SINNIX_HOGKILL_PROC_ROOT:-/proc}"
+cgroup_root="${SINNIX_HOGKILL_CGROUP_ROOT:-/sys/fs/cgroup}"
 
 bytes_human() {
   awk -v bytes="${1:-0}" 'BEGIN {
@@ -186,10 +221,11 @@ shorten() {
 
 collect_rows() {
   : > "$rows_tsv"
+  : > "$cgroup_rows_tsv"
   ps -eo pid=,user=,%cpu=,%mem=,rss=,stat=,args= --no-headers |
     while read -r pid user cpu mem rss_kib stat cmd; do
       [ -n "${pid:-}" ] || continue
-      cgroup="$(sed -n 's/^[^:]*:[^:]*://p' "/proc/$pid/cgroup" 2>/dev/null | head -n 1 || true)"
+      cgroup="$(sed -n 's/^[^:]*:[^:]*://p' "$proc_root/$pid/cgroup" 2>/dev/null | head -n 1 || true)"
       [ -n "$cgroup" ] || cgroup="-"
       unit="$(unit_from_cgroup "$cgroup")"
       if [ -n "$unit_filter" ] && [[ "$cgroup" != *"$unit_filter"* && "$unit" != "$unit_filter" ]]; then
@@ -199,10 +235,43 @@ collect_rows() {
       if [[ "$cgroup" =~ /user\.slice/user-[0-9]+\.slice/user@[0-9]+\.service/ ]]; then
         manager="user"
       fi
-      printf "%s\t%s\t%.1f\t%.1f\t%d\t%s\t%s\t%s\t%s\t%s\n" \
-        "$pid" "$user" "$cpu" "$mem" "$((rss_kib * 1024))" "$stat" "$manager" "$unit" "$cgroup" "${cmd:-}" \
+      smaps_rollup="$(cat "$proc_root/$pid/smaps_rollup" 2>/dev/null || sudo -n cat "$proc_root/$pid/smaps_rollup" 2>/dev/null || true)"
+      pss_kib="$(awk '/^Pss:/ {print $2; exit}' <<<"$smaps_rollup")"
+      pss_anon_kib="$(awk '/^Pss_Anon:/ {print $2; exit}' <<<"$smaps_rollup")"
+      swap_kib="$(awk '/^VmSwap:/ {print $2; exit}' "$proc_root/$pid/status" 2>/dev/null || true)"
+      pss_kib="${pss_kib:-0}"
+      pss_anon_kib="${pss_anon_kib:-0}"
+      swap_kib="${swap_kib:-0}"
+      warning=""
+      if [[ "$cgroup" == *"/sinnix-agent-"* || "$cmd" =~ (claude|codex|kitty) ]]; then
+        warning="agent-protected"
+      fi
+      if [[ "$cmd" =~ (earlyoom|avoid) ]]; then
+        warning="${warning:+$warning,}earlyoom-protected"
+      fi
+      printf "%s\t%s\t%.1f\t%.1f\t%d\t%d\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+        "$pid" "$user" "$cpu" "$mem" "$((rss_kib * 1024))" "$((pss_kib * 1024))" "$((pss_anon_kib * 1024))" "$((swap_kib * 1024))" "$stat" "$manager" "$unit" "$cgroup" "$warning" "${cmd:-}" \
         >> "$rows_tsv"
     done
+  collect_cgroup_rows
+}
+
+collect_cgroup_rows() {
+  local cgroup cgroup_path current anon file swap unit manager
+  while IFS= read -r cgroup; do
+    [ -n "$cgroup" ] || continue
+    [ "$cgroup" != "-" ] || continue
+    cgroup_path="$cgroup_root$cgroup"
+    [ -d "$cgroup_path" ] || continue
+    current="$(cat "$cgroup_path/memory.current" 2>/dev/null || echo 0)"
+    anon="$(awk '$1 == "anon" {print $2}' "$cgroup_path/memory.stat" 2>/dev/null || echo 0)"
+    file="$(awk '$1 == "file" {print $2}' "$cgroup_path/memory.stat" 2>/dev/null || echo 0)"
+    swap="$(cat "$cgroup_path/memory.swap.current" 2>/dev/null || echo 0)"
+    unit="$(unit_from_cgroup "$cgroup")"
+    manager="system"
+    [[ "$cgroup" =~ /user\.slice/user-[0-9]+\.slice/user@[0-9]+\.service/ ]] && manager="user"
+    printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$current" "$anon" "$file" "$swap" "$manager" "$unit" "$cgroup" >> "$cgroup_rows_tsv"
+  done < <(cut -f12 "$rows_tsv" | sort -u)
 }
 
 sort_rows() {
@@ -210,14 +279,15 @@ sort_rows() {
     cpu) sort -t $'\t' -k3,3nr "$rows_tsv" ;;
     mem) sort -t $'\t' -k4,4nr "$rows_tsv" ;;
     rss) sort -t $'\t' -k5,5nr "$rows_tsv" ;;
+    pss_anon) sort -t $'\t' -k7,7nr "$rows_tsv" ;;
   esac | awk -v limit="$limit" 'NR <= limit { print }'
 }
 
 render_table() {
   {
-    printf "%-7s %-12s %6s %6s %10s %-5s %-6s %-32s %s\n" \
-      "PID" "USER" "CPU%" "MEM%" "RSS" "STAT" "MGR" "UNIT" "COMMAND"
-    sort_rows | while IFS=$'\t' read -r pid user cpu mem rss stat manager unit cgroup cmd; do
+    printf "%-7s %-12s %6s %6s %10s %10s %10s %10s %-5s %-6s %-24s %s\n" \
+      "PID" "USER" "CPU%" "MEM%" "RSS" "PSS" "PSS_ANON" "SWAP" "STAT" "MGR" "UNIT" "COMMAND"
+    sort_rows | while IFS=$'\t' read -r pid user cpu mem rss pss pss_anon swap stat manager unit cgroup warning cmd; do
       if [ -z "$unit" ]; then
         unit="-"
       fi
@@ -227,12 +297,68 @@ render_table() {
         "$cpu" \
         "$mem" \
         "$(bytes_human "$rss")" \
+        "$(bytes_human "$pss")" \
+        "$(bytes_human "$pss_anon")" \
+        "$(bytes_human "$swap")" \
         "$stat" \
         "$manager" \
-        "$(shorten 32 "$unit")" \
+        "$(shorten 24 "$unit")" \
         "$(shorten 100 "$cmd")"
     done
   } > "$table_txt"
+}
+
+render_cgroup_table() {
+  local current anon file swap manager unit cgroup
+  echo "Cgroup reclaim view"
+  printf "%-12s %-12s %-12s %-12s %-6s %-24s %s\n" "CURRENT" "ANON" "FILE" "SWAP" "MGR" "UNIT" "CGROUP"
+  sort -t $'\t' -k2,2nr "$cgroup_rows_tsv" | while IFS=$'\t' read -r current anon file swap manager unit cgroup; do
+    printf "%-12s %-12s %-12s %-12s %-6s %-24s %s\n" \
+      "$(bytes_human "$current")" "$(bytes_human "$anon")" "$(bytes_human "$file")" "$(bytes_human "$swap")" "$manager" "$(shorten 24 "$unit")" "$cgroup"
+  done
+  echo
+}
+
+emit_json() {
+  local first=1
+  printf '{"pressure":'
+  jq -cn --arg load "$(cut -d' ' -f1-3 /proc/loadavg)" '{load:$load}'
+  printf ',"cgroups":['
+  while IFS=$'\t' read -r current anon file swap manager unit cgroup; do
+    [ -n "$current" ] || continue
+    [ "$first" -eq 1 ] || printf ','
+    first=0
+    jq -cn --argjson current "${current:-0}" --argjson anon "${anon:-0}" --argjson file "${file:-0}" --argjson swap "${swap:-0}" --arg manager "$manager" --arg unit "$unit" --arg cgroup "$cgroup" \
+      '{current_bytes:$current,anon_bytes:$anon,file_bytes:$file,swap_bytes:$swap,manager:$manager,unit:$unit,cgroup:$cgroup}'
+  done < <(sort -t $'\t' -k2,2nr "$cgroup_rows_tsv")
+  printf '],"processes":['
+  first=1
+  sort_rows | while IFS=$'\t' read -r pid user cpu mem rss pss pss_anon swap stat manager unit cgroup warning cmd; do
+    [ "$first" -eq 1 ] || printf ','
+    first=0
+    jq -cn --argjson pid "$pid" --arg user "$user" --argjson cpu "$cpu" --argjson mem "$mem" --argjson rss "$rss" --argjson pss "$pss" --argjson pss_anon "$pss_anon" --argjson swap "$swap" --arg stat "$stat" --arg manager "$manager" --arg unit "$unit" --arg cgroup "$cgroup" --arg warning "$warning" --arg command "$cmd" \
+      '{pid:$pid,user:$user,cpu_percent:$cpu,memory_percent:$mem,rss_bytes:$rss,pss_bytes:$pss,pss_anon_bytes:$pss_anon,swap_bytes:$swap,stat:$stat,manager:$manager,unit:$unit,cgroup:$cgroup,warning:(if $warning=="" then null else $warning end),command:$command}'
+  done
+  printf ']}\n'
+}
+
+trajectory() {
+  local pid="$1" start_ticks db row min max latest first_at last_at
+  db="${SINNIX_HOGKILL_TELEMETRY_DB:-/realm/data/captures/machine/telemetry.sqlite}"
+  [ -r "$db" ] || { echo "trajectory: unavailable (telemetry database missing)"; return 0; }
+  start_ticks="$(awk '{print $22}' "$proc_root/$pid/stat" 2>/dev/null || true)"
+  [ -n "$start_ticks" ] || { echo "trajectory: unavailable (process identity missing)"; return 0; }
+  row="$(sqlite3 -readonly -separator $'\t' "$db" "select min(pss_anon_kb), max(pss_anon_kb), (select pss_anon_kb from process_memory_sample where pid=$pid and process_start_time_ticks=$start_ticks order by observed_at desc limit 1), min(observed_at), max(observed_at) from process_memory_sample where pid=$pid and process_start_time_ticks=$start_ticks and observed_at >= datetime('now','-72 hours');" 2>/dev/null || true)"
+  IFS=$'\t' read -r min max latest first_at last_at <<<"$row"
+  if [ -z "${min:-}" ] || [ -z "${max:-}" ]; then
+    echo "trajectory: unavailable (no matching PID/start-time samples)"
+    return 0
+  fi
+  if [ "$((max - min))" -ge 102400 ]; then
+    echo "trajectory: leak signature, ${min} KiB -> ${max} KiB anon PSS, current=${latest} KiB, window=${first_at}..${last_at}"
+  else
+    echo "trajectory: stable, ${min} KiB..${max} KiB anon PSS, current=${latest} KiB, window=${first_at}..${last_at}"
+  fi
 }
 
 row_for_pid() {
@@ -242,14 +368,15 @@ row_for_pid() {
 
 describe_row() {
   local row="$1"
-  IFS=$'\t' read -r pid user cpu mem rss stat manager unit cgroup cmd <<<"$row"
+  IFS=$'\t' read -r pid user cpu mem rss pss pss_anon swap stat manager unit cgroup warning cmd <<<"$row"
   echo "Selected process"
   printf "  pid:     %s\n" "$pid"
   printf "  user:    %s\n" "$user"
-  printf "  usage:   CPU %s%%, MEM %s%%, RSS %s, STAT %s\n" "$cpu" "$mem" "$(bytes_human "$rss")" "$stat"
+  printf "  usage:   CPU %s%%, MEM %s%%, RSS %s, PSS %s, PSS_ANON %s, SWAP %s, STAT %s\n" "$cpu" "$mem" "$(bytes_human "$rss")" "$(bytes_human "$pss")" "$(bytes_human "$pss_anon")" "$(bytes_human "$swap")" "$stat"
   printf "  manager: %s\n" "$manager"
   printf "  unit:    %s\n" "${unit:-none detected}"
   printf "  cgroup:  %s\n" "$cgroup"
+  [ -n "$warning" ] && printf "  warning: %s\n" "$warning"
   printf "  command: %s\n" "$cmd"
 }
 
@@ -284,6 +411,35 @@ run_action() {
   "$@"
 }
 
+confirm_action() {
+  local prompt="$1"
+  if [ -n "${warning:-}" ]; then
+    [ -n "$unit" ] || { echo "Protected target has no unit identity; refusing action." >&2; return 1; }
+    typed="$(gum input --placeholder "Type ${unit} to confirm")"
+    [ "$typed" = "$unit" ] || { echo "Confirmation did not match $unit." >&2; return 1; }
+    return 0
+  fi
+  gum confirm "$prompt"
+}
+
+unit_systemctl() {
+  if [ "$manager" = "user" ]; then
+    systemctl --user "$@"
+  else
+    systemctl "$@"
+  fi
+}
+
+schedule_thaw() {
+  [ "$thaw_after" -gt 0 ] || return 0
+  local unit_name="hogkill-thaw-${unit//[^A-Za-z0-9_.@-]/-}"
+  if [ "$manager" = "user" ]; then
+    run_action "schedule user thaw of $unit after ${thaw_after}s" systemd-run --user --unit="$unit_name" --on-active="${thaw_after}s" systemctl --user thaw "$unit"
+  else
+    run_action "schedule system thaw of $unit after ${thaw_after}s" systemd-run --unit="$unit_name" --on-active="${thaw_after}s" systemctl thaw "$unit"
+  fi
+}
+
 verify_pid_gone_or_report() {
   local pid="$1"
   sleep 0.5
@@ -302,8 +458,16 @@ if [ ! -s "$rows_tsv" ]; then
   exit 0
 fi
 
+if [ "$json_mode" -eq 1 ]; then
+  emit_json
+  exit 0
+fi
+
 print_pressure_summary
-cat "$table_txt"
+render_cgroup_table
+if [ "$processes_mode" -eq 1 ] || [ "$list_only" -eq 0 ]; then
+  cat "$table_txt"
+fi
 
 if [ "$list_only" -eq 1 ]; then
   exit 0
@@ -321,16 +485,22 @@ fi
 
 echo
 describe_row "$selected_row"
-IFS=$'\t' read -r pid user cpu mem rss stat manager unit cgroup cmd <<<"$selected_row"
+IFS=$'\t' read -r pid user cpu mem rss pss pss_anon swap stat manager unit cgroup warning cmd <<<"$selected_row"
+if [ "$trajectory_mode" -eq 1 ]; then
+  trajectory "$pid"
+fi
 
 choices=(
   "pid: SIGTERM $pid"
   "pid: SIGKILL $pid"
+  "pid: pstree SIGTERM $pid"
 )
 if [ -n "$unit" ] && [[ "$unit" == *.service || "$unit" == *.scope ]]; then
   choices+=(
     "unit: stop $unit"
     "unit: restart $unit"
+    "unit: freeze $unit"
+    "unit: thaw $unit"
     "unit: kill $unit with SIGTERM"
     "unit: kill $unit with SIGKILL"
   )
@@ -342,51 +512,51 @@ action="$(printf '%s\n' "${choices[@]}" | gum choose --height "${#choices[@]}")"
 
 case "$action" in
   "pid: SIGTERM "*)
-    if gum confirm "Send SIGTERM to PID $pid?"; then
+    if confirm_action "Send SIGTERM to PID $pid?"; then
       run_action "send SIGTERM to PID $pid" kill -TERM "$pid"
       verify_pid_gone_or_report "$pid" || true
     fi
     ;;
   "pid: SIGKILL "*)
-    if gum confirm "Send SIGKILL to PID $pid?"; then
+    if confirm_action "Send SIGKILL to PID $pid?"; then
       run_action "send SIGKILL to PID $pid" kill -KILL "$pid"
       verify_pid_gone_or_report "$pid" || true
     fi
     ;;
+  "pid: pstree SIGTERM "*)
+    if confirm_action "Send SIGTERM to PID $pid and its descendants?"; then
+      run_action "send SIGTERM to process subtree rooted at $pid" sh -c 'pkill -TERM -P "$1" 2>/dev/null || true; kill -TERM "$1"' sh "$pid"
+    fi
+    ;;
   "unit: stop "*)
-    if gum confirm "Stop systemd unit $unit?"; then
-      if [ "$manager" = "user" ]; then
-        run_action "stop user unit $unit" systemctl --user stop "$unit"
-      else
-        run_action "stop system unit $unit" systemctl stop "$unit"
-      fi
+    if confirm_action "Stop systemd unit $unit?"; then
+      run_action "stop $manager unit $unit" unit_systemctl stop "$unit"
     fi
     ;;
   "unit: restart "*)
-    if gum confirm "Restart systemd unit $unit?"; then
-      if [ "$manager" = "user" ]; then
-        run_action "restart user unit $unit" systemctl --user restart "$unit"
-      else
-        run_action "restart system unit $unit" systemctl restart "$unit"
-      fi
+    if confirm_action "Restart systemd unit $unit?"; then
+      run_action "restart $manager unit $unit" unit_systemctl restart "$unit"
+    fi
+    ;;
+  "unit: freeze "*)
+    if confirm_action "Freeze systemd unit $unit?"; then
+      run_action "freeze $manager unit $unit" unit_systemctl freeze "$unit"
+      schedule_thaw
+    fi
+    ;;
+  "unit: thaw "*)
+    if confirm_action "Thaw systemd unit $unit?"; then
+      run_action "thaw $manager unit $unit" unit_systemctl thaw "$unit"
     fi
     ;;
   "unit: kill "*"SIGTERM")
-    if gum confirm "Send SIGTERM to all processes in $unit?"; then
-      if [ "$manager" = "user" ]; then
-        run_action "systemd kill user unit $unit with SIGTERM" systemctl --user kill --signal=TERM "$unit"
-      else
-        run_action "systemd kill system unit $unit with SIGTERM" systemctl kill --signal=TERM "$unit"
-      fi
+    if confirm_action "Send SIGTERM to all processes in $unit?"; then
+      run_action "systemd kill $manager unit $unit with SIGTERM" unit_systemctl kill --signal=TERM "$unit"
     fi
     ;;
   "unit: kill "*"SIGKILL")
-    if gum confirm "Send SIGKILL to all processes in $unit?"; then
-      if [ "$manager" = "user" ]; then
-        run_action "systemd kill user unit $unit with SIGKILL" systemctl --user kill --signal=KILL "$unit"
-      else
-        run_action "systemd kill system unit $unit with SIGKILL" systemctl kill --signal=KILL "$unit"
-      fi
+    if confirm_action "Send SIGKILL to all processes in $unit?"; then
+      run_action "systemd kill $manager unit $unit with SIGKILL" unit_systemctl kill --signal=KILL "$unit"
     fi
     ;;
   "inspect: systemctl status")
