@@ -21,6 +21,14 @@ mkServiceModule {
   surface = {
     unit = "ollama.service";
     resourceClass = "interactive-agent"; # uncapped memory — required for RAM offload
+    activation = {
+      mode = "socket-proxy";
+      publicEndpoint = "127.0.0.1:11434";
+      backendEndpoint = "127.0.0.1:11435";
+      idleTimeout = "30s";
+      exclusiveResource = "gpu-inference";
+      dependsOn = [ "ollama-proxy" ];
+    };
     observe = {
       enable = true;
       restartable = true;
@@ -68,7 +76,10 @@ mkServiceModule {
         user = "ollama";
         group = "ollama";
         host = "127.0.0.1";
-        port = 11434;
+        # 11434 is reserved for the socket-activated front door. Keep the
+        # daemon on a private loopback port so clients cannot bypass lifecycle
+        # admission and idle teardown.
+        port = 11435;
         openFirewall = false;
         inherit modelsDir;
         inherit (cfg) loadModels;
@@ -91,9 +102,19 @@ mkServiceModule {
 
       environment.systemPackages = [ pkgs.ollama-cuda ]; # `ollama` CLI on PATH
 
-      systemd.services = lib.mkIf (!cfg.autoStart) {
-        ollama.wantedBy = lib.mkForce [ ];
-        ollama-model-loader.wantedBy = lib.mkForce [ ];
-      };
+      systemd.services = lib.mkMerge [
+        (lib.mkIf (!cfg.autoStart) {
+          ollama.wantedBy = lib.mkForce [ ];
+          ollama-model-loader.wantedBy = lib.mkForce [ ];
+        })
+        {
+          ollama.partOf = [ "ollama-proxy.service" ];
+          ollama.bindsTo = [ "ollama-proxy.service" ];
+          ollama.conflicts = [
+            "koboldcpp.service"
+            "koboldcpp-proxy.service"
+          ];
+        }
+      ];
     };
 } args

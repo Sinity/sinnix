@@ -20,6 +20,14 @@ mkServiceModule {
   surface = {
     unit = "koboldcpp.service";
     resourceClass = "interactive-agent";
+    activation = {
+      mode = "socket-proxy";
+      publicEndpoint = "127.0.0.1:5001";
+      backendEndpoint = "127.0.0.1:5002";
+      idleTimeout = "30s";
+      exclusiveResource = "gpu-inference";
+      dependsOn = [ "koboldcpp-proxy" ];
+    };
     observe = {
       enable = true;
       restartable = true;
@@ -62,7 +70,7 @@ mkServiceModule {
         [
           "${pkgs.koboldcpp-cuda}/bin/koboldcpp"
           "--host 127.0.0.1"
-          "--port 5001"
+          "--port 5002"
           "--usecublas normal"
           "--gpulayers ${toString cfg.gpuLayers}"
           "--quiet"
@@ -85,6 +93,12 @@ mkServiceModule {
         description = "koboldcpp all-in-one inference server";
         wantedBy = [ ]; # on-demand
         after = [ "network.target" ];
+        partOf = [ "koboldcpp-proxy.service" ];
+        bindsTo = [ "koboldcpp-proxy.service" ];
+        conflicts = [
+          "ollama.service"
+          "ollama-proxy.service"
+        ];
         serviceConfig = lib.mkMerge [
           {
             User = user;

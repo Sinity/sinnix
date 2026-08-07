@@ -73,6 +73,54 @@ in
       };
       evaluated = evalTestSpec system spec;
       inventoryJson = builtins.toJSON evaluated.config.sinnix.runtime.inventory;
+      aiActivationSpec = mkFeatureTest {
+        name = "ai-activation";
+        feature = "sinnix.features.cli.polylogue.enable";
+        extraModules = [
+          ({ ... }: {
+            sinnix.services.ollama.enable = true;
+            sinnix.services.koboldcpp.enable = true;
+            sinnix.services.litellm.enable = true;
+          })
+        ];
+        assertions = config: [
+          {
+            assertion = config.systemd.sockets.ollama-proxy.listenStreams == [ "127.0.0.1:11434" ];
+            message = "Ollama must expose only its socket-activated loopback front door";
+          }
+          {
+            assertion = config.systemd.services.ollama.unitConfig.PartOf == [ "ollama-proxy.service" ];
+            message = "Stopping an idle Ollama proxy must stop its backend";
+          }
+          {
+            assertion = config.systemd.services.ollama.unitConfig.BindsTo == [ "ollama-proxy.service" ];
+            message = "An idle proxy exit must tear down the Ollama backend cgroup";
+          }
+          {
+            assertion = lib.hasInfix "systemd-socket-proxyd" config.systemd.services.ollama-proxy.serviceConfig.ExecStart;
+            message = "Ollama activation must use the systemd socket proxy";
+          }
+          {
+            assertion = lib.hasInfix "--exit-idle-time=30s" config.systemd.services.ollama-proxy.serviceConfig.ExecStart;
+            message = "AI activation must have a bounded idle timeout";
+          }
+          {
+            assertion = lib.elem "ollama.service" config.systemd.services.koboldcpp.unitConfig.Conflicts
+              && lib.elem "koboldcpp.service" config.systemd.services.ollama.unitConfig.Conflicts;
+            message = "GPU inference backends must be mutually exclusive";
+          }
+          {
+            assertion = config.sinnix.runtime.inventory.surfaces.ollama.activation.backendEndpoint == "127.0.0.1:11435"
+              && config.sinnix.runtime.inventory.surfaces.ollama-proxy.activation.publicEndpoint == "127.0.0.1:11434";
+            message = "Runtime inventory must describe the public and private AI activation endpoints";
+          }
+          {
+            assertion = config.sinnix.runtime.inventory.surfaces.litellm.activation.dependsOn == [ "ollama-proxy" ];
+            message = "LiteLLM activation must retain the Ollama socket dependency";
+          }
+        ];
+      };
+      aiActivationEvaluated = evalTestSpec system aiActivationSpec;
       groupSpec = mkFeatureTest {
         name = "hyprland-groups";
         feature = "sinnix.features.desktop.hyprland.enable";
@@ -97,6 +145,24 @@ in
             ${inventoryJson}
             EOF_INVENTORY
             jq -e '.surfaces["runtime-policy-system"].effectiveResources.MemoryMax == "900M" and .surfaces["runtime-policy-user"].effectiveResources.MemoryLow == "768M"' inventory.json >/dev/null
+            touch "$out"
+          '';
+      checks.ai-activation =
+        pkgs.runCommand "ai-activation-check"
+          {
+            nativeBuildInputs = [ pkgs.jq ];
+          }
+          ''
+            cat > inventory.json <<'EOF_INVENTORY'
+            ${builtins.toJSON aiActivationEvaluated.config.sinnix.runtime.inventory}
+            EOF_INVENTORY
+            jq -e '
+              .surfaces.ollama.activation.mode == "socket-proxy" and
+              .surfaces.ollama.activation.backendEndpoint == "127.0.0.1:11435" and
+              .surfaces["ollama-proxy"].activation.publicEndpoint == "127.0.0.1:11434" and
+              .surfaces["koboldcpp-proxy"].activation.exclusiveResource == "gpu-inference" and
+              .surfaces.litellm.activation.dependsOn == ["ollama-proxy"]
+            ' inventory.json >/dev/null
             touch "$out"
           '';
       checks.hyprland-groups =

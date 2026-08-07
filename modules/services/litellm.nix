@@ -29,6 +29,13 @@ mkServiceModule {
     # streaming, so a hard MemoryMax could kill it mid-response (same reasoning
     # as ollama/open-webui).
     resourceClass = "interactive-agent";
+    activation = {
+      mode = "socket-proxy";
+      publicEndpoint = "127.0.0.1:4000";
+      backendEndpoint = "127.0.0.1:4001";
+      idleTimeout = "30s";
+      dependsOn = [ "ollama-proxy" ];
+    };
     observe = {
       enable = true;
       restartable = true;
@@ -47,7 +54,8 @@ mkServiceModule {
       services.litellm = {
         enable = true;
         host = "127.0.0.1";
-        port = 4000; # 8080 is taken by open-webui
+        # 4000 is reserved for the socket-activated front door.
+        port = 4001;
         openFirewall = false;
         settings = {
           # Model names exposed to the agents. Backed by the Ollama hub on
@@ -81,6 +89,9 @@ mkServiceModule {
       # Gateway is useless without the backend; order startup after it.
       systemd.services.litellm = {
         after = [ "ollama.service" ];
+        requires = [ "ollama-proxy.service" ];
+        partOf = [ "litellm-proxy.service" ];
+        bindsTo = [ "litellm-proxy.service" ];
         wantedBy = lib.mkIf (!cfg.autoStart) (lib.mkForce [ ]);
       };
     };
