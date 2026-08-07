@@ -17,6 +17,7 @@ in
     "SUPER, D, exec, noctalia msg panel-toggle launcher"
     "SUPER, Escape, exec, noctalia msg session lock"
     "SUPER, Slash, exec, noctalia msg panel-toggle kenn/keybind-cheatsheet:cheatsheet"
+    "SUPER, A, exec, ${script "sinnix-attention"}"
 
     "SUPER, H, exec, ${script "kitty-hypr-nav"} focus left"
     "SUPER, J, exec, ${script "kitty-hypr-nav"} focus down"

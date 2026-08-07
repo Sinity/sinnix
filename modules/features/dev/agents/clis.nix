@@ -335,6 +335,7 @@ mkFeatureModule {
             scriptPkgs.sinnix-agent-control-mcp
             scriptPkgs.sinnix-agent-event
             scriptPkgs.sinnix-agent-register
+            scriptPkgs.sinnix-attention
           ];
 
           programs.zsh = {
