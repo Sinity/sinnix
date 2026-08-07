@@ -249,6 +249,7 @@ collect_rows() {
       if [[ "$cmd" =~ (earlyoom|avoid) ]]; then
         warning="${warning:+$warning,}earlyoom-protected"
       fi
+      warning="${warning:-none}"
       printf "%s\t%s\t%.1f\t%.1f\t%d\t%d\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n" \
         "$pid" "$user" "$cpu" "$mem" "$((rss_kib * 1024))" "$((pss_kib * 1024))" "$((pss_anon_kib * 1024))" "$((swap_kib * 1024))" "$stat" "$manager" "$unit" "$cgroup" "$warning" "${cmd:-}" \
         >> "$rows_tsv"
@@ -337,7 +338,7 @@ emit_json() {
     [ "$first" -eq 1 ] || printf ','
     first=0
     jq -cn --argjson pid "$pid" --arg user "$user" --argjson cpu "$cpu" --argjson mem "$mem" --argjson rss "$rss" --argjson pss "$pss" --argjson pss_anon "$pss_anon" --argjson swap "$swap" --arg stat "$stat" --arg manager "$manager" --arg unit "$unit" --arg cgroup "$cgroup" --arg warning "$warning" --arg command "$cmd" \
-      '{pid:$pid,user:$user,cpu_percent:$cpu,memory_percent:$mem,rss_bytes:$rss,pss_bytes:$pss,pss_anon_bytes:$pss_anon,swap_bytes:$swap,stat:$stat,manager:$manager,unit:$unit,cgroup:$cgroup,warning:(if $warning=="" then null else $warning end),command:$command}'
+      '{pid:$pid,user:$user,cpu_percent:$cpu,memory_percent:$mem,rss_bytes:$rss,pss_bytes:$pss,pss_anon_bytes:$pss_anon,swap_bytes:$swap,stat:$stat,manager:$manager,unit:$unit,cgroup:$cgroup,warning:(if $warning=="none" then null else $warning end),command:$command}'
   done
   printf ']}\n'
 }
@@ -376,7 +377,7 @@ describe_row() {
   printf "  manager: %s\n" "$manager"
   printf "  unit:    %s\n" "${unit:-none detected}"
   printf "  cgroup:  %s\n" "$cgroup"
-  [ -n "$warning" ] && printf "  warning: %s\n" "$warning"
+  [ "$warning" != none ] && printf "  warning: %s\n" "$warning"
   printf "  command: %s\n" "$cmd"
 }
 
@@ -486,6 +487,7 @@ fi
 echo
 describe_row "$selected_row"
 IFS=$'\t' read -r pid user cpu mem rss pss pss_anon swap stat manager unit cgroup warning cmd <<<"$selected_row"
+[ "$warning" = none ] && warning=""
 if [ "$trajectory_mode" -eq 1 ]; then
   trajectory "$pid"
 fi
