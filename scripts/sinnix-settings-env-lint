@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Audit project Claude settings environment paths
+# runtimeInputs: python3
+"""Emit an advisory, value-redacting audit of project settings env paths."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import sys
+from pathlib import Path
+
+SCHEMA = "sinnix-settings-env-lint-v1"
+SECRET_KEY = re.compile(r"(?:secret|token|password|passwd|credential|api[_-]?key|private[_-]?key)", re.I)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", type=Path, default=Path("/realm/project"))
+    parser.add_argument(
+        "--intentional-prefix",
+        action="append",
+        default=[],
+        help="Absolute path prefix classified as intentional host-global configuration.",
+    )
+    return parser.parse_args()
+
+
+def under(path: Path, prefix: Path) -> bool:
+    try:
+        path.relative_to(prefix)
+    except ValueError:
+        return False
+    return True
+
+
+def finding(repo: Path, key: str, value: object, value_class: str, evidence: str) -> dict[str, object]:
+    result: dict[str, object] = {
+        "repository": str(repo),
+        "key": key,
+        "value_class": value_class,
+        "evidence": evidence,
+    }
+    if SECRET_KEY.search(key):
+        result["value_redacted"] = True
+    elif isinstance(value, str):
+        result["value"] = value
+    return result
+
+
+def audit(args: argparse.Namespace) -> tuple[dict[str, object], int]:
+    root = args.root.resolve()
+    intentional = [Path(prefix).expanduser().resolve() for prefix in args.intentional_prefix]
+    findings: list[dict[str, object]] = []
+    unexplained = 0
+    if not root.is_dir():
+        return {"schema": SCHEMA, "root": str(root), "findings": [], "error": "root_not_directory"}, 2
+
+    for repo in sorted(path for path in root.iterdir() if path.is_dir()):
+        settings = repo / ".claude" / "settings.json"
+        if not settings.is_file():
+            continue
+        try:
+            payload = json.loads(settings.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            findings.append(finding(repo, "<settings>", None, "malformed_settings", f"cannot parse {settings}: {type(exc).__name__}"))
+            unexplained += 1
+            continue
+        env = payload.get("env", {})
+        if not isinstance(env, dict):
+            findings.append(finding(repo, "<env>", None, "malformed_env", "env must be a JSON object"))
+            unexplained += 1
+            continue
+        repo_root = repo.resolve()
+        for key, value in sorted(env.items()):
+            if SECRET_KEY.search(key):
+                findings.append(finding(repo, key, value, "secret_valued", "key matches a secret-bearing name; value omitted"))
+                continue
+            if not isinstance(value, str) or not os.path.isabs(value):
+                findings.append(finding(repo, key, value, "non_path", "value is not an absolute path"))
+                continue
+            candidate = Path(value).expanduser().resolve(strict=False)
+            if under(candidate, repo_root):
+                value_class = "repository_local"
+                evidence = f"resolved path is under repository root {repo_root}"
+            elif any(under(candidate, prefix) for prefix in intentional):
+                value_class = "host_global_intentional"
+                evidence = "resolved path matches an explicit intentional-prefix allowlist"
+            else:
+                value_class = "suspicious_cross_host"
+                evidence = "absolute path has no repository provenance or explicit intentional-prefix match"
+                unexplained += 1
+            findings.append(finding(repo, key, value, value_class, evidence))
+
+    return {
+        "schema": SCHEMA,
+        "root": str(root),
+        "findings": findings,
+        "unexplained_count": unexplained,
+    }, 2 if unexplained else 0
+
+
+def main() -> int:
+    report, status = audit(parse_args())
+    json.dump(report, sys.stdout, sort_keys=True)
+    sys.stdout.write("\n")
+    return status
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

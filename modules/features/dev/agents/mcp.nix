@@ -83,6 +83,7 @@ mkFeatureModule {
       };
     };
   };
+  config.sinnix.persistence.home.directories = [ ".local/state/sinnix/settings-env-lint" ];
   configFn =
     {
       config,
@@ -349,6 +350,27 @@ mkFeatureModule {
               source = config.lib.file.mkOutOfStoreSymlink "/realm/data/exports/chatlog/raw/claude";
               force = true;
             };
+          };
+
+          # A monthly read-only audit of project Claude settings. The first
+          # live report was triaged on 2026-08-07: the two Polylogue /tmp
+          # roots are intentional workstation-local paths. Keep them explicit
+          # inputs so a new absolute path remains unexplained and fails loud.
+          systemd.user.services.sinnix-settings-env-lint = {
+            Unit.Description = "Audit project agent settings environment paths";
+            Service = {
+              Type = "oneshot";
+              ExecStart = "${pkgs.bash}/bin/bash -c 'install -d -m 0700 \"$XDG_STATE_HOME/sinnix/settings-env-lint\"; ${scriptPkgs.sinnix-settings-env-lint}/bin/sinnix-settings-env-lint --root /realm/project --intentional-prefix /tmp/polylogue-archive --intentional-prefix /tmp/polylogue-pytest > \"$XDG_STATE_HOME/sinnix/settings-env-lint/latest.json\"'";
+            };
+          };
+          systemd.user.timers.sinnix-settings-env-lint = {
+            Unit.Description = "Monthly project agent settings environment audit";
+            Timer = {
+              OnCalendar = "*-*-01 04:20:00";
+              Persistent = true;
+              AccuracySec = "15min";
+            };
+            Install.WantedBy = [ "timers.target" ];
           };
 
           # Session-boundary hooks (Codex/Claude SessionStart+Stop) only reap
