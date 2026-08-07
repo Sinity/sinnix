@@ -45,22 +45,27 @@ def backup_database(source_path: Path, output_path: Path) -> None:
     try:
         source = sqlite3.connect(source_path, timeout=5.0)
         source.execute("PRAGMA busy_timeout=5000")
-        target = sqlite3.connect(raw_path)
+        # Ask SQLite to advance the WAL before taking the filesystem copy. A
+        # regular sparse copy is bounded by the database file size, while the
+        # online-backup API can restart from page zero whenever concurrent
+        # commits invalidate a copied chunk, causing unbounded amplification.
+        source.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+        source.close()
+        source = None
+        subprocess.run(["cp", "--sparse=always", str(source_path), str(raw_path)], check=True)
+        wal_path = Path(f"{source_path}-wal")
+        raw_wal_path = Path(f"{raw_path}-wal")
+        try:
+            subprocess.run(["cp", "--sparse=always", str(wal_path), str(raw_wal_path)], check=True)
+        except FileNotFoundError:
+            raw_wal_path.unlink(missing_ok=True)
+        target = sqlite3.connect(raw_path, timeout=5.0)
         target.execute("PRAGMA busy_timeout=5000")
-
-        def progress(_status: int, _remaining: int, _total: int) -> None:
-            if cancel_requested:
-                raise BackupCancelled
-
-        source.backup(target, pages=100000, progress=progress, sleep=0)
-        target.commit()
         integrity = target.execute("PRAGMA integrity_check").fetchone()
         if integrity != ("ok",):
             raise RuntimeError(f"SQLite integrity_check failed: {integrity!r}")
         target.close()
         target = None
-        source.close()
-        source = None
         subprocess.run(["zstd", "-T1", "-q", "-f", str(raw_path), "-o", str(compressed_path)], check=True)
         os.chmod(compressed_path, 0o600)
         os.replace(compressed_path, output_path)
