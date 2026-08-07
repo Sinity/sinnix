@@ -51,6 +51,7 @@ class Reducer:
         self.events: deque[dict[str, Any]] = deque(maxlen=max_events)
         self.sequence = self._load_sequence()
         self.previous_health: dict[str, str] = {}
+        self._snapshot: dict[str, Any] = {}
 
     def _load_sequence(self) -> int:
         if self.state_path is None:
@@ -97,6 +98,7 @@ class Reducer:
             "degradation": source_health["degradation"],
         }
         atomic_json(self.snapshot_path, snapshot)
+        self._snapshot = snapshot
         self._save_sequence()
         status = str(source_health["status"])
         if self.previous_health.get("sinnix-observe") != status:
@@ -112,6 +114,16 @@ class Reducer:
             self.events.append(event)
             self.previous_health["sinnix-observe"] = status
         return snapshot
+
+    def snapshot(self) -> dict[str, Any]:
+        if self._snapshot:
+            return self._snapshot
+        try:
+            value = json.loads(self.snapshot_path.read_text(encoding="utf-8"))
+            self._snapshot = value if isinstance(value, dict) else {}
+        except (OSError, json.JSONDecodeError):
+            self._snapshot = {}
+        return self._snapshot
 
     def health(self) -> dict[str, Any]:
         return {

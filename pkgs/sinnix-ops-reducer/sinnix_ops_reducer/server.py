@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .reducer import Reducer, atomic_json
+from .actions import ActionError, ActionService
 
 
 def ensure_token(path: Path) -> str:
@@ -88,8 +89,32 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path.startswith("/v1/actions/"):
+            key = self.path.removeprefix("/v1/actions/")
+            receipt = self.reducer.actions.lookup(key)
+            if receipt is None:
+                self._write(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+            else:
+                self._write(HTTPStatus.OK, receipt)
         else:
             self._write(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+
+    def do_POST(self) -> None:
+        if not self._authorized():
+            self._write(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
+            return
+        if self.path != "/v1/actions":
+            self._write(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "-1"))
+            if length < 0 or length > 65536:
+                raise ActionError("request body is missing or too large")
+            value = json.loads(self.rfile.read(length))
+            self._write(HTTPStatus.CREATED, self.reducer.actions.execute(value))
+        except (json.JSONDecodeError, ActionError) as error:
+            status = error.status if isinstance(error, ActionError) else 400
+            self._write(status, {"error": str(error)})
 
     def log_message(self, *_args: object) -> None:
         return
@@ -102,10 +127,17 @@ class UnixServer(ThreadingHTTPServer):
         return
 
 
-def serve(reducer: Reducer, token: str, fds: list[int], interval: float) -> None:
+def serve(
+    reducer: Reducer,
+    token: str,
+    fds: list[int],
+    interval: float,
+    actions: ActionService,
+) -> None:
     reducer.refresh()
     http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     http.reducer = reducer  # type: ignore[attr-defined]
+    reducer.actions = actions  # type: ignore[attr-defined]
     http.token = token  # type: ignore[attr-defined]
     servers: list[ThreadingHTTPServer] = []
     if fds:

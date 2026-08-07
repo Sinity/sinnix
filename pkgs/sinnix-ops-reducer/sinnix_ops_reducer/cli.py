@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from .reducer import Reducer, observe_source
+from .actions import ActionService
 from .server import ensure_token, serve
 
 
@@ -24,6 +25,16 @@ def main() -> None:
         default=["sinnix-observe", "--format", "json", "--limit", "10"],
     )
     parser.add_argument("--interval", type=float, default=10.0)
+    parser.add_argument(
+        "--inventory", type=Path, default=Path("/etc/sinnix/runtime-inventory.json")
+    )
+    parser.add_argument(
+        "--agent-controller",
+        default=os.environ.get(
+            "SINNIX_AGENT_CONTROLLER",
+            "/home/sinity/.config/hermes/skills/agent-orchestration/scripts/agent_job_control.sh",
+        ),
+    )
     args = parser.parse_args()
     observe_command = list(args.observe_command)
     if len(observe_command) == 1:
@@ -37,5 +48,11 @@ def main() -> None:
         observe_source(observe_command),
         args.state_dir / "reducer.json",
     )
+    actions = ActionService(
+        reducer.snapshot,
+        args.inventory,
+        args.state_dir / "action-receipts.json",
+        controller=args.agent_controller,
+    )
     fds = list(range(3, 3 + int(os.environ.get("LISTEN_FDS", "0"))))
-    serve(reducer, token, fds, args.interval)
+    serve(reducer, token, fds, args.interval, actions)
