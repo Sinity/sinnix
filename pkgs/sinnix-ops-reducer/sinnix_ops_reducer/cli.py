@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from .reducer import Reducer, observe_source
+from .ambient import product_source
 from .actions import ActionService
 from .server import ensure_token, serve
 
@@ -25,6 +26,7 @@ def main() -> None:
         default=["sinnix-observe", "--format", "json", "--limit", "10"],
     )
     parser.add_argument("--interval", type=float, default=10.0)
+    parser.add_argument("--ambient-product", type=Path, default=Path(os.environ.get("SINNIX_AMBIENT_PRODUCT", "/realm/project/sinity-lynchpin/.lynchpin/generated/analysis/ambient_intelligence.json")))
     parser.add_argument(
         "--inventory", type=Path, default=Path("/etc/sinnix/runtime-inventory.json")
     )
@@ -47,6 +49,7 @@ def main() -> None:
         root / "ops.token",
         observe_source(observe_command),
         args.state_dir / "reducer.json",
+        ambient_source=product_source(args.ambient_product),
     )
     actions = ActionService(
         reducer.snapshot,

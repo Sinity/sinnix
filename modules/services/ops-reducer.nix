@@ -72,7 +72,7 @@ mkServiceModule {
           };
           Service = {
             Type = "simple";
-            ExecStart = "${reducer}/bin/sinnix-ops-reducer --runtime-dir %t --state-dir ${stateDir} --inventory /etc/sinnix/runtime-inventory.json --agent-controller /home/${userName}/.config/hermes/skills/agent-orchestration/scripts/agent_job_control.sh --observe-command ${observe}/bin/sinnix-observe --interval ${toString cfg.intervalSeconds}";
+            ExecStart = "${reducer}/bin/sinnix-ops-reducer --runtime-dir %t --state-dir ${stateDir} --inventory /etc/sinnix/runtime-inventory.json --ambient-product /realm/project/sinity-lynchpin/.lynchpin/generated/analysis/ambient_intelligence.json --agent-controller /home/${userName}/.config/hermes/skills/agent-orchestration/scripts/agent_job_control.sh --observe-command ${observe}/bin/sinnix-observe --interval ${toString cfg.intervalSeconds}";
             Restart = "on-failure";
             RestartSec = "2s";
             NoNewPrivileges = true;

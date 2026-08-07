@@ -72,6 +72,16 @@ local function receiptText()
   return tostring(#receipts) .. " recent, latest " .. text(latest.action) .. " " .. text(latest.adapter and latest.adapter.status)
 end
 
+local function ambientText()
+  local ambient = stateValue("ambient_intelligence")
+  if type(ambient) ~= "table" then return "unavailable" end
+  local fragmentation = ambient.fragmentation or {}
+  local nudge = fragmentation.nudge or {}
+  local anomalies = ambient.anomalies or {}
+  local chores = ambient.chores or {}
+  return "fragmentation " .. text(fragmentation.risk) .. ", " .. tostring(#anomalies) .. " anomalies, " .. tostring(#chores) .. " chores, nudge " .. text(nudge.reason)
+end
+
 local function render()
   local rows = {
     ui.label({ text = "Sinnix operations", fontSize = 18, fontWeight = "bold", color = "primary" }),
@@ -87,6 +97,7 @@ local function render()
       ui.label({ text = "Incidents: " .. incidentText(), color = "on_surface" }),
       ui.label({ text = "Attention: " .. attentionText(), color = "on_surface" }),
       ui.label({ text = "Action receipts: " .. receiptText(), color = "on_surface" }),
+      ui.label({ text = "Ambient intelligence: " .. ambientText(), color = "on_surface" }),
     }),
     ui.label({ text = "Actions use the typed reducer contract. Data expires after the configured freshness window.", color = "on_surface_variant", fontSize = 12 }),
   }
