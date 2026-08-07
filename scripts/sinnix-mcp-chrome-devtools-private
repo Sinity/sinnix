@@ -16,7 +16,7 @@ set -euo pipefail
 
 : "${SINNIX_MCP_CHROME_DEVTOOLS_BIN:?SINNIX_MCP_CHROME_DEVTOOLS_BIN must name the mcp-chrome-devtools binary}"
 
-profile_dir="${SINNIX_AGENT_CHROME_PROFILE:-$HOME/.local/share/sinnix-browser/chrome-devtools-private-live-state}"
+profile_dir="${SINNIX_AGENT_CHROME_PROFILE:-/realm/cache/browser/chrome-devtools-private-live-state}"
 viewport="${SINNIX_AGENT_CHROME_VIEWPORT:-1440x1000}"
 headless="${SINNIX_AGENT_CHROME_HEADLESS:-1}"
 chrome_bin="${SINNIX_AGENT_CHROME_EXECUTABLE:-$(command -v google-chrome-stable || true)}"
