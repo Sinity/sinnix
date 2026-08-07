@@ -60,6 +60,10 @@ in
               message = "Claude settings.json must be linked directly to dots during activation.";
             }
             {
+              assertion = builtins.hasAttr ".config/claude/agents" hm.home.file;
+              message = "Claude named agent definitions must be linked from the shared dots tree.";
+            }
+            {
               assertion = builtins.all (path: builtins.hasAttr path hm.home.file) [
                 ".local/bin/sinnix-chrome-control"
                 ".local/bin/sinnix-hypr-control"
@@ -115,6 +119,7 @@ in
           ".local/bin/mcp-sinex"
           ".local/bin/sinnix-mcp-sweep"
           ".config/hermes/skills"
+          ".config/claude/agents"
         ];
         fixtureAssets = [
           {
@@ -953,6 +958,22 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/hooks-harness.sh} "$hooks" "$settings"
             touch "$out"
           '';
+      agentDefinitionsFixture =
+        pkgs.runCommand "agent-definitions-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.gawk
+              pkgs.gnugrep
+              pkgs.git
+              pkgs.jq
+            ];
+          }
+          ''
+            ${pkgs.bash}/bin/bash ${../../flake/tests/agent-definitions.sh} ${../../dots/claude/agents}
+            touch "$out"
+          '';
     in
     {
       checks = {
@@ -971,6 +992,7 @@ in
         claude-judge = claudeJudgeFixture;
         recovery-skills = recoverySkillsFixture;
         hooks-harness = hooksHarnessFixture;
+        agent-definitions = agentDefinitionsFixture;
       };
 
       heavyChecks = {
