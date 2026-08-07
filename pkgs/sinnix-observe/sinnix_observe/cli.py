@@ -24,6 +24,7 @@ from .sources.systemd import (
     collect_systemd_units,
 )
 from .sources.xtask import collect_sinex_xtask
+from .sources.drift import collect_config_drift
 from .util import utc_now
 
 DEFAULT_BEGIN = os.environ.get("SINNIX_OBSERVE_BEGIN", "10 min ago")
@@ -42,6 +43,7 @@ def collect_report(args: argparse.Namespace) -> dict[str, Any]:
     below = collect_below(args.since, args.duration, args.limit, args.offline)
     chrome_io = collect_chrome_io(args.offline, below, args.limit)
     gateway = collect_agent_gateway(args.limit)
+    config_drift = collect_config_drift()
     workload_rows = build_workload_rows(systemd_units, sinex, polylogue, below) + build_gateway_rows(gateway, below)
     return {
         "schema": SCHEMA,
@@ -56,6 +58,12 @@ def collect_report(args: argparse.Namespace) -> dict[str, Any]:
                 "path": polylogue.get("db"),
                 "available": polylogue.get("available"),
             },
+            "config_drift": {
+                "available": config_drift.get("available"),
+                "status": config_drift.get("status"),
+                "drift_count": config_drift.get("drift_count", 0),
+                "unavailable_count": config_drift.get("unavailable_count", 0),
+            },
             "below": {"available": below.get("available")},
         },
         "live_pressure": pressure,
@@ -63,6 +71,7 @@ def collect_report(args: argparse.Namespace) -> dict[str, Any]:
         "storage": storage,
         "systemd_units": systemd_units,
         "runtime_inventory": collect_runtime_inventory(args.offline),
+        "config_drift": config_drift,
         "resource_slices": slices,
         "chrome_io": chrome_io,
         "sinex_xtask_history": sinex,
