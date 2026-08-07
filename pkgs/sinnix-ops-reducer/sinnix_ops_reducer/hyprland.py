@@ -22,7 +22,7 @@ def reduce_socket_event(state: HyprlandState, line: str, *, now: float | None = 
     now = time.monotonic() if now is None else now
     event, _, payload = line.partition(">>")
     if event == "fullscreen":
-        state.fullscreen_game = payload.strip() == "1"
+        state.fullscreen_game = payload.strip() in {"1", "2"}
     elif event == "activewindow":
         app = payload.split(",", 1)[0].strip().lower()
         candidate = app in {"mpv", "vlc", "gamescope"}
