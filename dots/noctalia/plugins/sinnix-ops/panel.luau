@@ -22,6 +22,81 @@ local function stateValue(name)
   return view.snapshot.state[name]
 end
 
+local function agentRows()
+  if type(view.snapshot) ~= "table" or type(view.snapshot.state) ~= "table" then return nil end
+  local rows = view.snapshot.state.workload_rows
+  if type(rows) ~= "table" then return nil end
+  local agents = {}
+  for _, row in ipairs(rows) do
+    if type(row) == "table" and row.kind == "attested-job" then
+      table.insert(agents, row)
+    end
+  end
+  return agents
+end
+
+local function agentText()
+  local agents = agentRows()
+  if agents == nil then return { "Agents: unavailable" } end
+  if #agents == 0 then return { "Agents: none reported" } end
+  local visible = math.min(#agents, 4)
+  local lines = { "Agents: " .. tostring(#agents) .. " reported, showing " .. tostring(visible) }
+  for index = 1, visible do
+    local row = agents[index]
+    local metrics = row.metrics or {}
+    local identity = metrics.identity or {}
+    local delegation = metrics.delegation or {}
+    local orphan = metrics.orphan or {}
+    local parent = delegation.parent_job_id or delegation.coordinator_job_id or "root"
+    local state = text(row.status)
+    local attestation = text(orphan.attestation)
+    local age = orphan.age_seconds ~= nil and (tostring(math.floor(orphan.age_seconds / 60)) .. "m") or "unavailable"
+    local provider = identity.provider or "provider unavailable"
+    local artifacts = metrics.completion and metrics.completion.artifacts
+    local artifactCount = type(artifacts) == "table" and #artifacts or 0
+    table.insert(lines, "  " .. text(row.name) .. " under " .. tostring(parent) .. ": " .. state .. ", " .. tostring(provider) .. ", " .. attestation .. ", age " .. age .. ", artifacts " .. tostring(artifactCount))
+  end
+  if #agents > visible then table.insert(lines, "  " .. tostring(#agents - visible) .. " more agents in the snapshot") end
+  return lines
+end
+
+local function quotaText()
+  local gateway = stateValue("agent_gateway")
+  if type(gateway) ~= "table" or type(gateway.quota) ~= "table" then return { "Quotas: unavailable" } end
+  local quota = gateway.quota
+  local lines = { "Quotas: " .. text(quota.provenance) .. ", freshness " .. text(quota.freshness) }
+  if type(quota.values) ~= "table" or next(quota.values) == nil then
+    table.insert(lines, "  provider quota: unavailable")
+    table.insert(lines, "  local tokens: unavailable")
+    table.insert(lines, "  API-equivalent cost: unavailable")
+    return lines
+  end
+  local seen = { provider = false, local_tokens = false, cost = false }
+  for key, value in pairs(quota.values) do
+    local item = type(value) == "table" and value or { value = value }
+    local kind = item.kind or item.category or key
+    local label = tostring(kind)
+    if kind == "provider_quota" or kind == "provider" then seen.provider = true end
+    if kind == "local_tokens" or kind == "local" then seen.local_tokens = true end
+    if kind == "api_equivalent_cost" or kind == "cost" then seen.cost = true end
+    local overlap = item.attribution_overlap and "; overlapping attribution" or ""
+    local forecast = item.forecast and ("; forecast " .. text(item.forecast.source) .. "/" .. text(item.forecast.confidence)) or ""
+    table.insert(lines, "  " .. label .. ": used " .. text(item.used) .. ", remaining " .. text(item.remaining) .. ", units " .. text(item.native_units) .. overlap .. forecast)
+  end
+  if not seen.provider then table.insert(lines, "  provider quota: unavailable") end
+  if not seen.local_tokens then table.insert(lines, "  local tokens: unavailable") end
+  if not seen.cost then table.insert(lines, "  API-equivalent cost: unavailable") end
+  return lines
+end
+
+local function infoSection(title, lines)
+  local children = { ui.label({ text = title, fontWeight = "bold", color = "primary" }) }
+  for _, line in ipairs(lines) do
+    table.insert(children, ui.label({ text = line, color = "on_surface" }))
+  end
+  return ui.column({ gap = 4, padding = 8, fill = "surface_variant/0.25", radius = 6 }, children)
+end
+
 local function pressureText()
   local pressure = stateValue("live_pressure")
   if type(pressure) ~= "table" then return "unavailable" end
@@ -107,6 +182,8 @@ local function render()
       ui.label({ text = "Ambient intelligence: " .. ambientText(), color = "on_surface" }),
       ui.label({ text = "AFK return: " .. anchorText(), color = "on_surface" }),
     }),
+    infoSection("Agents", agentText()),
+    infoSection("Quotas", quotaText()),
     ui.label({ text = "Actions use the typed reducer contract. Data expires after the configured freshness window.", color = "on_surface_variant", fontSize = 12 }),
   }
   panel.render(ui.column({ gap = 12, padding = 16 }, rows))
