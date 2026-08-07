@@ -10,6 +10,55 @@ from typing import Any, Callable
 
 from .reducer import atomic_json, now_iso
 
+
+def focus_registered_session(job: dict[str, Any]) -> dict[str, Any]:
+    """Verify Kitty and Hyprland identities before focusing the registered target."""
+
+    correlation = job.get("correlation")
+    if not isinstance(correlation, dict):
+        raise ActionError("job has no registered terminal target", 409)
+    socket_path = correlation.get("kitty_socket")
+    kitty_window_id = correlation.get("kitty_window_id")
+    hyprland_address = correlation.get("hyprland_address")
+    if not all(isinstance(value, str) and value for value in (socket_path, kitty_window_id, hyprland_address)):
+        raise ActionError("job terminal target is incomplete", 409)
+
+    def run(command: list[str]) -> subprocess.CompletedProcess[str]:
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=5, check=False)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise ActionError(f"focus verification unavailable: {type(error).__name__}", 503) from error
+        if result.returncode != 0:
+            raise ActionError("focus target verification failed", 409)
+        return result
+
+    endpoint = f"unix:{socket_path}"
+    try:
+        kitty_windows = json.loads(run(["kitty", "@", "--to", endpoint, "ls"]).stdout)
+    except (json.JSONDecodeError, TypeError) as error:
+        raise ActionError("Kitty target inventory is malformed", 409) from error
+    matches = [
+        window
+        for os_window in kitty_windows if isinstance(kitty_windows, list)
+        for tab in os_window.get("tabs", []) if isinstance(os_window, dict)
+        for window in tab.get("windows", []) if isinstance(tab, dict)
+        if str(window.get("id")) == kitty_window_id
+    ]
+    if len(matches) != 1:
+        raise ActionError("registered Kitty window is not unique", 409)
+    run(["kitty", "@", "--to", endpoint, "focus-window", "--match", f"id:{kitty_window_id}"])
+    run(["hyprctl", "dispatch", "focuswindow", f"address:{hyprland_address}"])
+    try:
+        active = json.loads(run(["hyprctl", "-j", "activewindow"]).stdout)
+    except (json.JSONDecodeError, TypeError) as error:
+        raise ActionError("Hyprland focus verification is malformed", 409) from error
+    if str(active.get("address")) != hyprland_address:
+        raise ActionError("Hyprland focused window does not match registration", 409)
+    return {
+        "target": {"kitty_window_id": kitty_window_id, "hyprland_address": hyprland_address},
+        "status": "verified",
+    }
+
 ACTION_FIELDS = {
     "action",
     "target",
@@ -114,7 +163,9 @@ class ActionService:
     ) -> dict[str, Any]:
         target = request["target"]
         if "job_id" in target:
-            jobs = (snapshot.get("state") or {}).get("jobs", [])
+            state = snapshot.get("state") or {}
+            gateway = state.get("agent_gateway") if isinstance(state, dict) else None
+            jobs = gateway.get("jobs", []) if isinstance(gateway, dict) else state.get("jobs", [])
             job = next(
                 (item for item in jobs if item.get("job_id") == target["job_id"]), None
             )
@@ -200,6 +251,8 @@ class ActionService:
         self, request: dict[str, Any], resolved: dict[str, Any]
     ) -> dict[str, Any]:
         action = request["action"]
+        if action == "focus":
+            return {"name": action, **focus_registered_session(resolved["job"])}
         if action == "interrupt":
             job_id = resolved["job"]["job_id"]
             command = [self.controller, "interrupt", "--job", job_id]
@@ -252,11 +305,7 @@ class ActionService:
         elif action == "heavy_lease":
             command = ["sinnix-heavy-lease", "status"]
         else:
-            return {
-                "name": "focus",
-                "status": "accepted",
-                "receipt": secrets.token_hex(8),
-            }
+            return {"name": action, "status": "accepted", "receipt": secrets.token_hex(8)}
         result = subprocess.run(
             command, capture_output=True, text=True, timeout=10, check=False
         )

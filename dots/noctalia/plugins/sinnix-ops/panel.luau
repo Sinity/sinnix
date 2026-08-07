@@ -44,6 +44,12 @@ local function incidentText()
   return tostring(#tasks) .. " blocked tasks"
 end
 
+local function attentionText()
+  local attention = stateValue("attention")
+  if type(attention) ~= "table" then return "unavailable" end
+  return tostring(attention.pending_count or 0) .. " pending"
+end
+
 local function render()
   local rows = {
     ui.label({ text = "Sinnix operations", fontSize = 18, fontWeight = "bold", color = "primary" }),
@@ -56,6 +62,7 @@ local function render()
       ui.label({ text = "Drift: " .. gapText(), color = "on_surface" }),
       ui.label({ text = "Backup and capture: " .. compact(stateValue("storage")), color = "on_surface" }),
       ui.label({ text = "Incidents: " .. incidentText(), color = "on_surface" }),
+      ui.label({ text = "Attention: " .. attentionText(), color = "on_surface" }),
     }),
     ui.label({ text = "Read-only. Data expires after the configured freshness window.", color = "on_surface_variant", fontSize = 12 }),
   }

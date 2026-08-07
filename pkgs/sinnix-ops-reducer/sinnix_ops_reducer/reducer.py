@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import SCHEMA
+from .attention import normalize_attention
 
 
 def now_iso() -> str:
@@ -72,6 +73,8 @@ class Reducer:
             report = self.source()
             if not isinstance(report, dict):
                 raise ValueError("collector returned a non-object")
+            report = dict(report)
+            report["attention"] = normalize_attention(report)
             source_health = {
                 "status": "healthy",
                 "source": "sinnix-observe",
