@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sinnix_ops_reducer.anchor import expire_anchor, reduce_anchor_event
 from sinnix_ops_reducer.reducer import Reducer
@@ -23,8 +23,10 @@ def test_short_afk_is_ignored_and_anchor_expires() -> None:
 
 
 def test_reducer_consumes_resume_event_once(tmp_path) -> None:
+    resumed_at = datetime.now(timezone.utc).replace(microsecond=0)
+    started_at = resumed_at - timedelta(hours=1)
     event_path = tmp_path / "resume.json"
-    event_path.write_text(json.dumps({"started_at": "2026-08-07T11:00:00Z", "resumed_at": "2026-08-07T12:00:00Z"}))
+    event_path.write_text(json.dumps({"started_at": started_at.isoformat(), "resumed_at": resumed_at.isoformat()}))
     reducer = Reducer(tmp_path / "snapshot.json", tmp_path / "token", lambda: {"schema": "observe"})
     reducer.anchor_event_path = event_path
     snapshot = reducer.refresh()

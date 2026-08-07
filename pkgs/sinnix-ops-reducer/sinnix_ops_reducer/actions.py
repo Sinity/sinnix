@@ -130,6 +130,11 @@ def validate_request(value: Any) -> dict[str, Any]:
             "MemoryHigh", "MemoryMax", "MemoryLow", "CPUWeight", "IOWeight", "Nice"
         }:
             raise ActionError("unsupported runtime policy property")
+    if action == "interrupt":
+        if set(parameters) - {"orphan_reap"}:
+            raise ActionError("interrupt accepts only orphan_reap")
+        if "orphan_reap" in parameters and not isinstance(parameters["orphan_reap"], bool):
+            raise ActionError("orphan_reap must be boolean")
     if action == "park":
         if set(parameters) != {"deadline_seconds"}:
             raise ActionError("park requires deadline_seconds")
@@ -227,7 +232,15 @@ class ActionService:
             )
             if not attested:
                 raise ActionError("job target is unknown or unattested", 403)
-            return {"kind": "job", "job": job}
+            orphan = next(
+                (
+                    row
+                    for row in (state.get("agent_gateway", {}).get("orphaned_jobs", []) if isinstance(state.get("agent_gateway"), dict) else [])
+                    if isinstance(row, dict) and row.get("job_id") == target["job_id"]
+                ),
+                None,
+            )
+            return {"kind": "job", "job": job, "orphan": orphan}
         surfaces = self._inventory().get("surfaces", {})
         surface = surfaces.get(target["unit"])
         if not isinstance(surface, dict):
@@ -264,6 +277,11 @@ class ActionService:
             if request["expected_revision"] != snapshot.get("sequence"):
                 raise ActionError("expected_revision is stale", 409)
             resolved = self._resolve(request, snapshot)
+            if request["action"] == "interrupt" and request["parameters"].get("orphan_reap"):
+                orphan = resolved.get("orphan")
+                policy = orphan.get("policy") if isinstance(orphan, dict) else None
+                if not isinstance(policy, dict) or policy.get("proposed_action") != "reap":
+                    raise ActionError("orphan reap requires two identical cold expendable observations", 409)
             adapter_receipt = self.adapter(request, resolved)
         except ActionError as error:
             rejected = {

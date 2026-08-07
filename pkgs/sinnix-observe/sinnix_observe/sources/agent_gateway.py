@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .orphans import classify_jobs
+
 
 def _json(path: Path, bound: int = 262_144) -> dict[str, Any] | None:
     try:
@@ -158,7 +160,7 @@ def _quota_view(quota: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
-def collect_agent_gateway(limit: int = 20) -> dict[str, Any]:
+def collect_agent_gateway(limit: int = 20, below: dict[str, Any] | None = None) -> dict[str, Any]:
     root = Path(
         os.environ.get(
             "SINNIX_AGENT_GATEWAY_STATE_DIR",
@@ -255,6 +257,7 @@ def collect_agent_gateway(limit: int = 20) -> dict[str, Any]:
         os.environ.get("SINNIX_AGENT_QUOTA_FILE", str(root / "quota.json"))
     )
     quota = _json(quota_file)
+    orphaned_jobs = classify_jobs(jobs, below)
     return {
         "schema": "sinnix-observe-agent-gateway-v1",
         "available": root.exists(),
@@ -266,5 +269,6 @@ def collect_agent_gateway(limit: int = 20) -> dict[str, Any]:
         "polylogue_error": polylogue_error,
         "lease": _json(lease_root / "owner.json"),
         "correlations": correlations,
+        "orphaned_jobs": orphaned_jobs,
         "quota": _quota_view(quota),
     }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 
@@ -174,3 +175,54 @@ def test_valid_rejected_action_leaves_a_receipt(tmp_path: Path) -> None:
     receipt = actions.lookup("rejected")
     assert receipt is not None
     assert receipt["status"] == "rejected"
+
+
+def test_orphan_reap_requires_two_identical_cold_observations(tmp_path: Path) -> None:
+    inventory_path = tmp_path / "inventory.json"
+    inventory(inventory_path)
+    job = {
+        "job_id": "orphan-1",
+        "schema_version": 3,
+        "worktree": "/realm/worktrees/orphan-1",
+        "launcher": {
+            "pid": 123,
+            "proc_start": "1",
+            "scope_unit": "orphan.scope",
+            "cgroup": "/orphan",
+        },
+    }
+    observation = {
+        "job_id": "orphan-1",
+        "identity_revision": "rev-1",
+        "orphaned": True,
+        "expendability": "expendable",
+        "coldness": {"candidate": True},
+    }
+    source_report = {
+        "agent_gateway": {"jobs": [job], "orphaned_jobs": [observation]}
+    }
+    reducer = Reducer(
+        tmp_path / "status.json",
+        tmp_path / "token",
+        lambda: copy.deepcopy(source_report),
+        tmp_path / "reducer.json",
+    )
+    reducer.refresh()
+    actions = ActionService(
+        reducer.snapshot,
+        inventory_path,
+        tmp_path / "receipts.json",
+        adapter=lambda *_: {"status": "fixture-reaped"},
+    )
+    reap_request = request("interrupt", {"job_id": "orphan-1"}, key="reap-before-second") | {
+        "parameters": {"orphan_reap": True}
+    }
+    with pytest.raises(ActionError, match="two identical"):
+        actions.execute(reap_request)
+    reducer.refresh()
+    accepted = actions.execute(
+        request("interrupt", {"job_id": "orphan-1"}, revision=2, key="reap-after-second")
+        | {"parameters": {"orphan_reap": True}}
+    )
+    assert accepted["adapter"]["status"] == "fixture-reaped"
+    assert accepted["preconditions"]["resolved"]["orphan"]["policy"]["observation_count"] == 2

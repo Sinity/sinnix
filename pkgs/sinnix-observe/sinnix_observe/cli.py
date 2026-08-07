@@ -42,7 +42,7 @@ def collect_report(args: argparse.Namespace) -> dict[str, Any]:
     polylogue = collect_polylogue_live_attempts(args.limit)
     below = collect_below(args.since, args.duration, args.limit, args.offline)
     chrome_io = collect_chrome_io(args.offline, below, args.limit)
-    gateway = collect_agent_gateway(args.limit)
+    gateway = collect_agent_gateway(args.limit, below)
     config_drift = collect_config_drift()
     workload_rows = build_workload_rows(systemd_units, sinex, polylogue, below) + build_gateway_rows(gateway, below)
     return {
