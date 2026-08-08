@@ -90,7 +90,6 @@ in
         enable = true;
         settings = {
           UseDns = false;
-          GSSAPIAuthentication = false;
           PermitRootLogin = lib.mkDefault "no";
           PasswordAuthentication = false;
           KbdInteractiveAuthentication = false;
