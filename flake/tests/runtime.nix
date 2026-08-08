@@ -69,6 +69,15 @@ in
             assertion = config.home-manager.users.sinity.systemd.user.services.runtime-policy-user.Unit.OnFailure == [ "sinnix-health-transition@%n" ];
             message = "observed user services must receive the user health transition template";
           }
+          {
+            assertion = !config.sinnix.runtime.inventory.commandClasses."gpu-runtime".lease.required
+              && lib.elem "stashbox-vlm-serve" config.sinnix.runtime.inventory.commandClasses."gpu-runtime".commandMatchers;
+            message = "GPU VLM launches must use a non-lease command class";
+          }
+          {
+            assertion = config.sinnix.runtime.inventory.slices.user."gpu-runtime".MemoryMax == "12G";
+            message = "GPU runtime scopes must retain a bounded user-slice memory budget";
+          }
         ];
       };
       evaluated = evalTestSpec system spec;

@@ -73,7 +73,57 @@ set -euo pipefail
 
 cmd="${0##*/}"
 case "$cmd" in
-  nix | nixos-rebuild) class="nix-build" ;;
+  nix | nixos-rebuild)
+    class="nix-build"
+    if [ "$cmd" = nix ]; then
+      _runtime_class=""
+      if [ "${1:-}" = develop ]; then
+        _command=""
+        _awaiting_command=0
+        _skip_develop=1
+        for _arg in "$@"; do
+          if [ "$_skip_develop" = 1 ]; then
+            _skip_develop=0
+            continue
+          fi
+          if [ "$_awaiting_command" = 1 ]; then
+            _command="${_arg##*/}"
+            break
+          fi
+          case "$_arg" in
+            --command)
+              _awaiting_command=1
+              ;;
+            --command=*)
+              _command="${_arg#--command=}"
+              _command="${_command##*/}"
+              break
+              ;;
+          esac
+        done
+        if [ -n "$_command" ]; then
+          _runtime_inventory="${SINNIX_RUNTIME_INVENTORY_FILE:-}"
+          if [ -z "$_runtime_inventory" ] && [ -r /etc/sinnix/runtime-inventory.json ]; then
+            _runtime_inventory=/etc/sinnix/runtime-inventory.json
+          fi
+          if [ -z "$_runtime_inventory" ] && [ -r /run/current-system/etc/sinnix/runtime-inventory.json ]; then
+            _runtime_inventory=/run/current-system/etc/sinnix/runtime-inventory.json
+          fi
+          if [ -r "$_runtime_inventory" ] && command -v jq >/dev/null 2>&1; then
+            _runtime_class="$(jq -er --arg command "$_command" '
+              .commandClasses
+              | to_entries
+              | map(select((.value.commandMatchers // []) | index($command)))
+              | .[0].key // empty
+            ' "$_runtime_inventory" 2>/dev/null || true)"
+          fi
+        fi
+      fi
+      if [ -n "$_runtime_class" ]; then
+        class="$_runtime_class"
+      fi
+    fi
+    ;;
   polylogue | sqlite3 | duckdb) class="background" ;;
   *) class="build" ;;
 esac
