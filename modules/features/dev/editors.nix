@@ -185,10 +185,10 @@ mkFeatureModule {
           }:
           let
             mkDotsFile = mkDotsFileFor config;
-            antigravity-wrapped = wrapWaylandEditor "antigravity-wrapped" pkgs.antigravity "antigravity";
+            antigravity-ide-wrapped = wrapWaylandEditor "antigravity-ide-wrapped" pkgs.antigravity-ide "antigravity-ide";
           in
           {
-            home.packages = [ antigravity-wrapped ];
+            home.packages = [ antigravity-ide-wrapped ];
             home.file = {
               ".antigravity/extensions".source =
                 config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/.vscode/extensions";
