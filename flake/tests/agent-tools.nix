@@ -715,6 +715,20 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/heavy-work-lease.sh} "$TMPDIR/sinnix-heavy-lease"
             touch "$out"
           '';
+      scopeWrapperFixture =
+        pkgs.runCommand "scope-wrapper-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.jq
+            ];
+          }
+          ''
+            cp ${../../scripts/sinnix-direnvrc} "$TMPDIR/sinnix-direnvrc"
+            ${pkgs.bash}/bin/bash ${../../flake/tests/scope-wrapper.sh} "$TMPDIR/sinnix-direnvrc"
+            touch "$out"
+          '';
       agentJobHandleFixture =
         pkgs.runCommand "agent-job-handle-fixture"
           {
@@ -1089,6 +1103,7 @@ in
         agent-resource-policy = agentResourcePolicy;
         agent-npm-bootstrap-recovery = agentNpmBootstrapRecovery;
         heavy-work-lease = heavyWorkLeaseFixture;
+        scope-wrapper = scopeWrapperFixture;
         agent-job-handles = agentJobHandleFixture;
         mcp-sweep = mcpSweepFixture;
         preflight = preflightFixture;

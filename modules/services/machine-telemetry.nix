@@ -182,6 +182,11 @@ mkServiceModule {
           path = "/user.slice/user-${userUid}.slice/user@${userUid}.service/nix-build.slice";
         }
         {
+          label = "user.gpu-runtime";
+          scope = "user";
+          path = "/user.slice/user-${userUid}.slice/user@${userUid}.service/gpu-runtime.slice";
+        }
+        {
           label = "user.backup";
           scope = "user";
           path = "/user.slice/user-${userUid}.slice/user@${userUid}.service/backup.slice";

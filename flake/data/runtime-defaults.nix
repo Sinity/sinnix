@@ -149,6 +149,14 @@ rec {
       MemoryHigh = "6G";
       MemoryMax = "8G";
     };
+    gpu-runtime = mkClass "GPU-accelerated runtimes that must not serialize builds" {
+      Nice = 5;
+      IOSchedulingClass = "best-effort";
+      IOSchedulingPriority = 7;
+      IOWeight = 20;
+      MemoryHigh = "8G";
+      MemoryMax = "12G";
+    };
     capture-substrate = mkClass "Databases and queues backing capture daemons" {
       Nice = 8;
       IOSchedulingClass = "best-effort";
@@ -251,6 +259,30 @@ rec {
         # after SIGTERM, then SIGKILL; postgres/rustc state here is
         # regenerable by design.
         TimeoutStopSec = "15s";
+      };
+      envDefaults = { };
+    };
+    gpu-runtime = {
+      resourceClass = "gpu-runtime";
+      commandMatchers = [
+        "stashbox-vlm-serve"
+        "stashbox-llama-vlm-serve-gpu"
+      ];
+      lease = {
+        required = false;
+        stateSubdir = "sinnix/heavy-lease";
+        waitSeconds = 0;
+      };
+      slice = "gpu-runtime.slice";
+      nice = 5;
+      ioniceClass = "best-effort";
+      ionicePriority = 7;
+      systemdProperties = {
+        IOAccounting = true;
+        CPUWeight = 20;
+        IOWeight = 20;
+        MemoryHigh = "8G";
+        MemoryMax = "12G";
       };
       envDefaults = { };
     };
@@ -377,6 +409,13 @@ rec {
         ManagedOOMMemoryPressure = "kill";
         ManagedOOMMemoryPressureLimit = "50%";
         ManagedOOMMemoryPressureDurationSec = "30s";
+      };
+      gpu-runtime = {
+        IOAccounting = true;
+        CPUWeight = 20;
+        IOWeight = 20;
+        MemoryHigh = "8G";
+        MemoryMax = "12G";
       };
       build = {
         IOAccounting = true;
