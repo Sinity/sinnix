@@ -105,7 +105,7 @@ mkServiceModule {
 
       model = lib.mkOption {
         type = lib.types.str;
-        default = "voyage-4";
+        default = "voyage-4-lite";
         description = "Voyage embedding model for Polylogue.";
       };
 
@@ -198,7 +198,6 @@ mkServiceModule {
             # aligned with the generated user configuration.
             Environment = [ "POLYLOGUE_ARCHIVE_ROOT=${cfg.dataDir}" ];
           };
-
 
       };
 
