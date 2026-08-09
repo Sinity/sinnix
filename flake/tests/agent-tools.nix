@@ -127,6 +127,7 @@ in
           ".local/bin/gemini"
           ".local/bin/grok-sinnix"
           ".local/bin/agy-sinnix"
+          ".local/bin/muse-code"
           ".local/bin/hermes"
           ".local/bin/hermes-research"
           ".local/bin/hermes-orchestrate"
@@ -444,6 +445,7 @@ in
               "$HOME/.local/bin/gemini" \
               "$HOME/.local/bin/grok-sinnix" \
               "$HOME/.local/bin/agy-sinnix" \
+              "$HOME/.local/bin/muse-code" \
               "$HOME/.local/bin/hermes" \
               "$HOME/.local/bin/hermes-research" \
               "$HOME/.local/bin/hermes-orchestrate" \
@@ -454,6 +456,8 @@ in
               test -x "$wrapper"
               bash -n "$wrapper"
             done
+
+            grep -Fq 'muse-spark-1.2-contributor' "$HOME/.local/bin/muse-code"
 
             grep -q 'HERMES_NEMO_RELAY_ATOF_ENABLED=1' "$HOME/.local/bin/hermes"
             grep -q 'HERMES_NEMO_RELAY_ATIF_ENABLED=1' "$HOME/.local/bin/hermes"

@@ -72,6 +72,7 @@ id_ed25519*
 
 # Beads interaction log is local-only (issues.jsonl stays public)
 .beads/interactions.jsonl
+.beads/dolt-server-config.yaml
 
 # Beads / Dolt files (added by bd init)
 .dolt/

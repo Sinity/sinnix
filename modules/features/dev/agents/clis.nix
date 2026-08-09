@@ -306,6 +306,10 @@ mkFeatureModule {
           ".local/state/claude-code"
           ".local/state/codex"
           ".local/state/gemini"
+          {
+            directory = ".local/state/muse-code";
+            mode = "0700";
+          }
           ".local/state/sinnix/agent-jobs"
           {
             directory = ".grok";
@@ -388,6 +392,8 @@ mkFeatureModule {
               hermes-local = "~/.local/bin/hermes-local";
               hermes-acp = "~/.local/bin/hermes-acp";
               hermes-update = "~/.local/bin/hermes-update";
+              muse = "~/.local/bin/muse-code";
+              muse-code = "~/.local/bin/muse-code";
             };
           };
 
@@ -550,6 +556,10 @@ mkFeatureModule {
           # wrappers so launches share agent.slice containment.
           home.file.".local/bin/grok-sinnix" = mkGrokWrapper;
           home.file.".local/bin/agy-sinnix" = mkAntigravityWrapper;
+          home.file.".local/bin/muse-code" = {
+            source = "${scriptPkgs.sinnix-muse-code-bootstrap}/bin/sinnix-muse-code-bootstrap";
+            force = true;
+          };
 
           home.file.".config/hermes/skills" = {
             source = sharedSkillFarm;

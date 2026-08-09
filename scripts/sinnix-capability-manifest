@@ -78,7 +78,7 @@ while IFS=$'\t' read -r name manager unit; do
   live_rows=$(jq -c --arg name "$name" --arg state "$state" 'map(if .name == $name then .state = $state | .stateEvidence = "live-systemd" else . end)' <<<"$live_rows")
 done < <(jq -r '.[] | [.name, .manager, .unit] | @tsv' <<<"$surface_rows")
 
-paths_json=$(rg -o --no-filename '/(realm|persist)(/[A-Za-z0-9_.-]+){1,5}' "$source_root/modules" "$source_root/hosts" 2>/dev/null | sort -u | jq -Rsc 'split("\n") | map(select(length > 0) | {path: ., evidence: "source-reference", lifecycle: "persistent-or-runtime"})')
+paths_json=$( { rg -o --no-filename '/(realm|persist)(/[A-Za-z0-9_.-]+){1,5}' "$source_root/modules" "$source_root/hosts" 2>/dev/null || true; } | sort -u | jq -Rsc 'split("\n") | map(select(length > 0) | {path: ., evidence: "source-reference", lifecycle: "persistent-or-runtime"})')
 
 jq -n \
   --arg schema "sinnix-capability-manifest-v1" \
