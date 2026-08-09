@@ -23,6 +23,7 @@ sed -i "1c#!$(command -v bash)" "$fixture/bin/sinnix-scope"
 cat >"$fixture/inventory.json" <<'EOF_INVENTORY'
 {
   "commandClasses": {
+    "background": {"lease": {"required": false}},
     "nix-build": {"lease": {"required": true}},
     "gpu-runtime": {
       "lease": {"required": false},
@@ -36,6 +37,7 @@ cat >"$fixture/inventory.json" <<'EOF_INVENTORY'
 EOF_INVENTORY
 
 ln -s .sinnix-scope-wrapper "$wrapper_dir/nix"
+ln -s .sinnix-scope-wrapper "$wrapper_dir/just"
 export SINNIX_RUNTIME_INVENTORY_FILE="$fixture/inventory.json"
 export SINNIX_SCOPE_BIN="$fixture/bin/sinnix-scope"
 export SINNIX_SCOPE_WRAPPER_DIR="$wrapper_dir"
@@ -46,8 +48,9 @@ export SCOPE_RECORD="$fixture/classes"
 "$wrapper_dir/nix" develop /realm/project/stashbox#analysis --command=stashbox-llama-vlm-serve-gpu
 "$wrapper_dir/nix" develop /realm/project/stashbox#analysis --command cargo test
 "$wrapper_dir/nix" build .#sinnix-prime
+"$wrapper_dir/just" chisel
 
-expected=$'gpu-runtime\ngpu-runtime\nnix-build\nnix-build'
+expected=$'gpu-runtime\ngpu-runtime\nnix-build\nnix-build\nbackground'
 actual="$(<"$SCOPE_RECORD")"
 if [[ "$actual" != "$expected" ]]; then
   printf 'unexpected scope classes:\n%s\n' "$actual" >&2

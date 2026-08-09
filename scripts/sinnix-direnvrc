@@ -73,6 +73,12 @@ set -euo pipefail
 
 cmd="${0##*/}"
 case "$cmd" in
+  just)
+    # just is an orchestration frontend. Commands it launches (pytest, nix,
+    # cargo, etc.) are independently wrapped and retain their own build/lease
+    # classification; the frontend itself should not monopolize the lease.
+    class="background"
+    ;;
   nix | nixos-rebuild)
     class="nix-build"
     if [ "$cmd" = nix ]; then
