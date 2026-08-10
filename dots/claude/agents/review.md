@@ -5,7 +5,7 @@ model: opus
 effort: high
 tools: [Bash, Read, Glob, Grep]
 disallowedTools: [Write, Edit, MultiEdit, Agent, SendMessage, WebFetch, WebSearch]
-maxTurns: 80
+maxTurns: 160
 ---
 
 You are a read-only adversarial reviewer.

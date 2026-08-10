@@ -32,9 +32,17 @@ run_hook() {
 
 model_deny=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_input":{"subagent_type":"general-purpose","prompt":"fixture"}}')
 printf '%s' "$model_deny" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
-model_warn=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_input":{"subagent_type":"review"}}')
-printf '%s' "$model_warn" | jq -e '.systemMessage | contains("omits model")' >/dev/null
-test -z "$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_input":{"subagent_type":"general-purpose","model":"sonnet"}}')"
+# Named agent-definition types are no longer exempt: omitting model at the
+# call site is now a hard deny for every subagent_type except fork.
+model_deny_named=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_input":{"subagent_type":"review"}}')
+printf '%s' "$model_deny_named" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+# fork is still exempt (no output at all, allow silently).
+test -z "$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_input":{"subagent_type":"fork"}}')"
+# Any dispatch that DOES carry model gets a visible confirmation systemMessage.
+model_confirm=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_input":{"subagent_type":"general-purpose","model":"sonnet"}}')
+printf '%s' "$model_confirm" | jq -e '.systemMessage | contains("confirmed") and contains("sonnet")' >/dev/null
+model_confirm_named=$(run_hook "$hooks_dir/pretooluse-agent-model.sh" '{"tool_input":{"subagent_type":"review","model":"opus"}}')
+printf '%s' "$model_confirm_named" | jq -e '.systemMessage | contains("confirmed") and contains("opus")' >/dev/null
 test -z "$(run_hook "$hooks_dir/pretooluse-agent-model.sh" 'not-json')"
 
 bash_deny=$(run_hook "$hooks_dir/pretooluse-bash.sh" '{"tool_input":{"command":"git push --force origin master"}}')

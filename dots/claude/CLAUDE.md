@@ -248,11 +248,21 @@ claude-code-guide agent when it matters.
 - **Explicit model on every fresh Agent dispatch.** Sonnet default, Haiku for
   triage-grade read-only lanes, Fable/Opus permitted for judgment lanes
   (design review, adjudication, postmortem synthesis) as an explicit choice —
-  never via inheritance. **This is mechanically enforced**: a global
-  PreToolUse hook DENIES bespoke-prompt dispatches (general-purpose/claude/
-  no type) that omit `model` — they simply will not run. Named agent
-  definitions get a soft warning only (their frontmatter may carry the
-  model); forks are exempt.
+  never via inheritance. **This is mechanically enforced, hard, for every
+  dispatch type** (tightened 2026-08-11 — the prior "named agent types get a
+  soft warning only" exemption produced warnings with no enforcement teeth
+  and was removed): a global PreToolUse hook DENIES any Agent dispatch —
+  bespoke-prompt (general-purpose/claude/no type), a named agent definition
+  (review/lane/triage/judge/Explore/Plan/...), or a teammate spawn — that
+  omits `model` at the call site. A named agent's own frontmatter `model:`
+  no longer exempts the call; the caller must still pass one explicitly, so
+  every launch is auditable at the dispatch site, not only in a definition
+  file the caller may not have open. Only `fork` is exempt (inherits
+  context+model by design). On every ALLOWED dispatch the hook also emits a
+  visible `systemMessage` confirming exactly which `subagent_type`/`model`
+  (and teammate `name`, if any) was used — affirmative feedback, not just
+  absence of a warning, visible across concurrent sessions' notification
+  streams too.
 - **Forks are exempt** (`/subtask`, `fork` subagent type, enabled via
   `CLAUDE_CODE_FORK_SUBAGENT=1`): they inherit the parent's context AND model
   by design (prompt-cache reuse). Right tool for context-heavy side-tasks;
