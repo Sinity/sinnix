@@ -5,13 +5,23 @@
 # decision below. The deny-hook already intercepts this event; extending it
 # in place avoids a second process reading the same stdin payload.
 #
-# Policy (global CLAUDE.md, "Claude Code Dispatch Doctrine"):
+# Policy (global CLAUDE.md, "Claude Code Dispatch Doctrine"), tightened
+# 2026-08-11 (operator directive: the prior "named agent types get a soft
+# warning only" exemption produced warnings the operator could not act on
+# and had no enforcement teeth, so it is removed):
 #   - fork subagents: exempt (they inherit context+model by design)
-#   - named agent types (custom defs / built-ins like Explore, Plan,
-#     claude-code-guide): the definition may carry the model -> soft warn only
-#   - bespoke-prompt types (general-purpose, claude, or no subagent_type):
-#     HARD DENY without an explicit model. These were 473/504 of measured
-#     dispatches and the entire model-inheritance leak.
+#   - EVERY other dispatch — named agent-definition types (review, lane,
+#     triage, judge, Explore, Plan, claude-code-guide, ...), teammate spawns
+#     (Agent calls carrying a `name`), and bespoke-prompt types
+#     (general-purpose, claude, or no subagent_type) — HARD DENY without an
+#     explicit `model` field at the call site. A named agent's own frontmatter
+#     `model:` no longer exempts the dispatch; the caller must still pass
+#     model explicitly, so every launch is auditable at the call site instead
+#     of only in a definition file the caller may not have open.
+#   - On ALLOW, emit a visible systemMessage confirming exactly which model
+#     the dispatch used, so the operator has affirmative feedback (not just
+#     an absence of a warning) for every launch, including from the
+#     transcript/notification stream of concurrent sessions.
 #
 # Dispatch ledger: ~/.local/state/claude-code/dispatch-ledger.jsonl
 # (append-only; a matching "dispatch_end" row is appended by the SubagentStop
@@ -78,30 +88,37 @@ def _write_ledger_start(payload: dict, ti: dict) -> None:
 _write_ledger_start(payload, ti)
 
 sub = (ti.get("subagent_type") or "").lower()
-if sub == "fork" or ti.get("model"):
+model = ti.get("model")
+name = ti.get("name")
+
+if sub == "fork":
     sys.exit(0)
-bespoke = sub in ("", "general-purpose", "claude", "default")
-if bespoke:
+
+if model:
+    label = sub or "general-purpose"
+    who = f" (teammate name='{name}')" if name else ""
     print(json.dumps({
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
-            "permissionDecisionReason": (
-                "dispatch-hygiene: bespoke-prompt Agent dispatches MUST carry an "
-                "explicit model (this is enforced, not advisory). Re-dispatch with "
-                "model=sonnet (implementation), model=haiku (triage-grade), or "
-                "model=opus/fable only as a deliberate judgment-lane choice. "
-                "Forks and named agent definitions are exempt."
-            ),
-        }
+        "systemMessage": (
+            f"dispatch-hygiene: confirmed — Agent dispatch subagent_type='{label}'{who} "
+            f"model='{model}'."
+        )
     }))
     sys.exit(0)
+
+label = sub or "general-purpose"
 print(json.dumps({
-    "systemMessage": (
-        f"dispatch-hygiene: Agent call to '{sub}' omits model; the agent "
-        "definition's frontmatter model applies if declared, otherwise this "
-        "inherits the session model. Prefer explicit model per lane."
-    )
+    "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": (
+            f"dispatch-hygiene: Agent dispatch to '{label}' omits model. This is HARD "
+            "enforced for every dispatch type as of 2026-08-11, not just bespoke-prompt "
+            "ones — a named agent's own frontmatter model no longer exempts the call site. "
+            "Re-dispatch with model=sonnet (implementation), model=haiku (triage-grade), or "
+            "model=opus/fable as a deliberate judgment-lane choice. Only subagent_type=fork "
+            "is exempt (inherits context+model by design)."
+        ),
+    }
 }))
 PY
 )
