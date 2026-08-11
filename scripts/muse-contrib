@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Muse Code on the contributor tier via the Vercel AI Gateway
+# runtimeInputs: bash coreutils @sinnix-muse-code-bootstrap
+
+# Meta does not offer muse-spark-1.2-contributor to this account directly
+# (the tier is entitlement-gated server-side, "select countries"); the
+# Vercel AI Gateway serves it at contributor list prices. The tier's
+# premise applies on every route: prompts and completions may be used to
+# train Meta models — keep confidential material on plain `muse`.
+#
+# The client-side model catalog accepts the gateway model id via the
+# model_catalog row in ~/.config/muse/settings.json (persisted state).
+set -euo pipefail
+
+key=""
+if [[ -n ${VERCEL_AI_GATEWAY_KEY:-} ]]; then
+  key="$VERCEL_AI_GATEWAY_KEY"
+elif [[ -r /run/agenix/vercel-ai-gateway-key ]]; then
+  key="$(</run/agenix/vercel-ai-gateway-key)"
+elif [[ -r $HOME/.config/muse/vercel-gateway-key ]]; then
+  key="$(<"$HOME/.config/muse/vercel-gateway-key")"
+else
+  echo "muse-contrib: no Vercel AI Gateway key (VERCEL_AI_GATEWAY_KEY, agenix, or ~/.config/muse/vercel-gateway-key)" >&2
+  exit 1
+fi
+
+export META_API_KEY="$key"
+export MUSE_MODEL="meta/muse-spark-1.2-contributor"
+
+flags=(--base-url https://ai-gateway.vercel.sh/v1 --model "$MUSE_MODEL")
+
+# Global flags sit before a prompt but after a subcommand (per-subcommand
+# parsers); splice accordingly so both TUI and headless forms work.
+case "${1:-}" in
+  exec | resume)
+    sub="$1"
+    shift
+    exec sinnix-muse-code-bootstrap "$sub" "${flags[@]}" "$@"
+    ;;
+  *)
+    exec sinnix-muse-code-bootstrap "${flags[@]}" "$@"
+    ;;
+esac
