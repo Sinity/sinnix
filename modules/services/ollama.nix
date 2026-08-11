@@ -28,6 +28,14 @@ mkServiceModule {
       idleTimeout = "30s";
       exclusiveResource = "gpu-inference";
       dependsOn = [ "ollama-proxy" ];
+      # Model pulls are exactly the long-running-consumer case the
+      # activation contract exists for.
+      consumers = [
+        {
+          unit = "ollama-model-loader";
+          environment.OLLAMA_HOST = "127.0.0.1:11434";
+        }
+      ];
     };
     observe = {
       enable = true;
@@ -152,13 +160,6 @@ mkServiceModule {
             "koboldcpp.service"
             "koboldcpp-proxy.service"
           ];
-          # The loader must pull through the FRONT door: pulls against the
-          # private backend port are invisible to the socket-proxy's idle
-          # timer, so 30s into a multi-GB download the proxy idle-exits and
-          # takes ollama (bindsTo) and the loader down with it — observed
-          # 2026-08-11: loader killed at 2min with 0 bytes landed. Front-door
-          # traffic holds the proxy connection open for the whole pull.
-          ollama-model-loader.environment.OLLAMA_HOST = lib.mkForce "127.0.0.1:11434";
         }
       ];
     };

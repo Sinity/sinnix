@@ -245,6 +245,33 @@ in
               default = [ ];
               description = "Runtime surface names required by this activation path.";
             };
+            # Long-running consumers of a socket-proxied surface MUST speak to
+            # the publicEndpoint: traffic against the private backend port is
+            # invisible to the proxy's idle timer, so mid-work the proxy
+            # idle-exits and tears the backend (and the consumer) down with it
+            # (observed 2026-08-11: ollama-model-loader killed at 0 bytes,
+            # twice). Declaring the consumer here renders its environment
+            # override automatically instead of leaving the fix as per-module
+            # folklore.
+            consumers = lib.mkOption {
+              type = lib.types.listOf (
+                lib.types.submodule {
+                  options = {
+                    unit = lib.mkOption {
+                      type = lib.types.str;
+                      description = "systemd service name (without .service) of the consumer.";
+                    };
+                    environment = lib.mkOption {
+                      type = lib.types.attrsOf lib.types.str;
+                      default = { };
+                      description = "Environment forced onto the consumer, pointing it at publicEndpoint.";
+                    };
+                  };
+                }
+              );
+              default = [ ];
+              description = "Units doing long-running work against this surface via the public endpoint.";
+            };
           };
           dynamic = lib.mkOption {
             type = lib.types.bool;
@@ -266,6 +293,19 @@ in
   };
 
   config = {
+    # Render declared activation consumers into forced environment overrides
+    # (front-door routing; see the consumers option comment).
+    systemd.services = lib.mkMerge (
+      lib.concatLists (
+        lib.mapAttrsToList (
+          _: surface:
+          map (c: {
+            ${c.unit}.environment = lib.mapAttrs (_: v: lib.mkForce v) c.environment;
+          }) (surface.activation.consumers or [ ])
+        ) surfaces
+      )
+    );
+
     assertions = [
       {
         assertion = duplicateSurfaceUnitKeys == [ ];
