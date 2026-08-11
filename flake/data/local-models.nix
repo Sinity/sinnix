@@ -194,13 +194,10 @@ rec {
   ggufSideloads = [
     {
       file = "qwen3-reranker-0.6b-q8_0.gguf";
-      # Source URL was not recorded at download time.
-      url = null;
-      # The on-disk file was observed actively growing (94.2MB -> 95.1MB
-      # across seconds) while this registry was authored (2026-08-11,
-      # ollama-model-loader + a manual reranker pull running concurrently) —
-      # not a stable size to freeze here. Re-measure once the pull settles.
-      expectedBytes = null;
+      url = "https://huggingface.co/dean2155/Qwen3-Reranker-0.6B-Q8_0-GGUF/resolve/main/qwen3-reranker-0.6b-q8_0.gguf";
+      # Authoritative size from the HF tree API (the in-flight download the
+      # registry lane observed was mid-pull, not the true size).
+      expectedBytes = 639150304;
     }
     {
       # Referenced in commit addb85c ("the 4B Q4 GGUF sits on disk as the
@@ -209,8 +206,8 @@ rec {
       # since. Kept for registry completeness — re-populate url/expectedBytes
       # if it's re-sideloaded.
       file = "Qwen.Qwen3-Reranker-4B.Q4_K_M.gguf";
-      url = null;
-      expectedBytes = null;
+      url = "https://huggingface.co/DevQuasar/Qwen.Qwen3-Reranker-4B-GGUF/resolve/main/Qwen.Qwen3-Reranker-4B.Q4_K_M.gguf";
+      expectedBytes = null; # populate from the completed download
     }
   ];
 }
