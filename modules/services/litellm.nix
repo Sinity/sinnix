@@ -49,7 +49,7 @@ mkServiceModule {
     };
   };
   configFn =
-    { cfg, lib, ... }:
+    { cfg, lib, helpers, ... }:
     {
       services.litellm = {
         enable = true;
@@ -58,67 +58,12 @@ mkServiceModule {
         port = 4001;
         openFirewall = false;
         settings = {
-          # Model names exposed to the agents. Backed by the Ollama hub on
-          # :11434; edit here to add/swap local models (the `*-local` wrappers
-          # default to `local-chat`).
-          model_list = [
-            {
-              model_name = "local-chat";
-              litellm_params = {
-                model = "ollama_chat/huihui_ai/gemma-4-abliterated:12b";
-                api_base = "http://127.0.0.1:11434";
-              };
-            }
-            {
-              model_name = "local-vision";
-              litellm_params = {
-                model = "ollama_chat/gemma4:12b-it-qat";
-                api_base = "http://127.0.0.1:11434";
-              };
-            }
-            {
-              model_name = "local-coder";
-              litellm_params = {
-                model = "ollama_chat/qwen2.5-coder:7b";
-                api_base = "http://127.0.0.1:11434";
-              };
-            }
-            {
-              model_name = "local-coder-moe";
-              litellm_params = {
-                model = "ollama_chat/qwen3-coder:30b";
-                api_base = "http://127.0.0.1:11434";
-              };
-            }
-            {
-              model_name = "local-reasoner";
-              litellm_params = {
-                model = "ollama_chat/gpt-oss:20b";
-                api_base = "http://127.0.0.1:11434";
-              };
-            }
-            {
-              model_name = "local-thinker";
-              litellm_params = {
-                model = "ollama_chat/qwen3:30b";
-                api_base = "http://127.0.0.1:11434";
-              };
-            }
-            {
-              model_name = "local-reader";
-              litellm_params = {
-                model = "ollama_chat/hf.co/rbehzadan/ReaderLM-v2.gguf";
-                api_base = "http://127.0.0.1:11434";
-              };
-            }
-            {
-              model_name = "local-multimodal-moe";
-              litellm_params = {
-                model = "ollama_chat/gemma4:26b";
-                api_base = "http://127.0.0.1:11434";
-              };
-            }
-          ];
+          # Model names exposed to the agents, backed by the Ollama hub on
+          # :11434. Sourced from flake/data/local-models.nix (the roster
+          # shared with ollama.nix's loadModels and open-webui.nix's
+          # RAG_EMBEDDING_MODEL) — edit the roster there, not here. The
+          # `*-local` wrappers default to `local-chat`.
+          model_list = helpers.data.localModels.litellmModelList;
           litellm_settings = {
             # Silently drop sampling params the local backend doesn't support
             # instead of 400-ing the whole request (Claude Code/Codex send a

@@ -89,8 +89,9 @@ Evaluation pipeline: `flake.nix` (flake-parts) → `flake/nixos.nix` `mkHost` �
 - `mkFeatureModule` / `mkServiceModule` — module factories
   (`modules/lib/features.nix`), injected directly into specialArgs.
 - `helpers.data` — pure data tables from `flake/data/` (`mcpRegistry`,
-  `runtimeDefaults`), evaluated once at flake init and shared by reference.
-  Modules consume them via specialArgs; never re-`import` the data files.
+  `runtimeDefaults`, `localModels`), evaluated once at flake init and shared
+  by reference. Modules consume them via specialArgs; never re-`import` the
+  data files.
 - `helpers.mkSinnixPackagesFor pkgs` — the script package set (see Scripts).
 - `lib.sinnix` — factory helpers, `systemd` hardening helpers,
   `mkRuntimeServiceConfig`, `mkAutoImports`, overlay helpers.
@@ -195,7 +196,8 @@ truth for lock/containment/preflight shared by devshell binaries and
 `packages.nix` (public package surface), `tests.nix` + `tests-runtime.nix` +
 `test-lib.nix`, `router.nix` (sinnix-gw), `deploy.nix` (colmena +
 nixos-anywhere), `overlay/package/*.nix` (per-package overlays),
-`data/*.nix` (pure data: MCP registry, runtime defaults, shared skill list).
+`data/*.nix` (pure data: MCP registry, runtime defaults, local model roster,
+shared skill list).
 
 Overlays vs packages: override/patch an existing nixpkgs package → overlay
 file; new standalone tool → usually a script under `scripts/` (see below),
