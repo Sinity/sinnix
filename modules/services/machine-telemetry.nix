@@ -201,7 +201,6 @@ mkServiceModule {
       systemd.tmpfiles.rules = [
         "d ${realmRoot}/db 0755 root root -"
         "d ${dataRoot} 0755 root users -"
-        "d ${dataDir}/boot 0750 root users -"
         "d ${dataDir}/experiments 0775 root users -"
         "d ${dataDir}/legacy 0775 root users -"
         "d ${backupRoot} 0700 ${username} users -"
