@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Docling — PDF/office document conversion to structured markdown
+# runtimeInputs: bash coreutils uv
+
+# Declarative entry point over a uv-managed install (persisted under
+# ~/.local/share/uv). Layout/TableFormer model weights download to
+# ~/.cache/docling on first conversion (persisted). Use --pipeline vlm
+# --vlm-model smoldocling for the compact VLM path.
+set -euo pipefail
+tool_bin="$HOME/.local/share/uv/tools/docling/bin"
+if [[ ! -x "$tool_bin/docling" ]]; then
+  uv tool install --quiet docling
+fi
+exec "$tool_bin/docling" "$@"
