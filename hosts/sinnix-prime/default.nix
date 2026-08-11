@@ -113,7 +113,14 @@
       autoStart = false;
     };
     koboldcpp.enable = true; # all-in-one offload + native image gen :5001 (on-demand)
-    llama-cpp.enable = false; # opt-in raw llama-server :8081 (set .model first)
+    # llama-server :8081 serving the local reranker (/v1/rerank — an API
+    # ollama does not provide). 0.6b Q8 rides fully in VRAM next to other
+    # models; the 4B Q4 GGUF sits on disk as the quality-tier swap.
+    llama-cpp = {
+      enable = true;
+      model = "qwen3-reranker-0.6b-q8_0.gguf";
+      extraFlags.reranking = true;
+    };
     whisper.enable = true; # speech-to-text :8090 (on-demand, auto-downloads model)
     comfyui = {
       enable = true; # SOTA image + text-to-video :8188 (container, CDI GPU)

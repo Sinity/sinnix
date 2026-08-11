@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Rerank documents against a query via the local llama-server or the Jina API
+# runtimeInputs: bash curl jq coreutils
+
+# Two-stage retrieval's second stage as a composable CLI: feed a query plus
+# candidate documents (one per line on stdin, or --docs-json), get back
+# relevance-ordered results. Backends:
+#   local (default) — llama-server /v1/rerank on 127.0.0.1:8081
+#                     (qwen3-reranker; sinnix.services.llama-cpp)
+#   jina            — Jina Reranker API (JINA_API_KEY from the agenix
+#                     environment; model jina-reranker-v3)
+set -euo pipefail
+
+backend="local"
+top_n=10
+model=""
+query=""
+docs_json=""
+
+usage() {
+  cat >&2 <<'EOF'
+usage: sinnix-rerank [--backend local|jina] [--top-n N] [--model NAME] --query "..." [--docs-json '["...","..."]']
+Documents are read from stdin (one per line) unless --docs-json is given.
+Output: JSON array of {index, document, relevance_score}, best first.
+EOF
+  exit 2
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --backend) backend="${2:?}"; shift 2 ;;
+    --top-n) top_n="${2:?}"; shift 2 ;;
+    --model) model="${2:?}"; shift 2 ;;
+    --query) query="${2:?}"; shift 2 ;;
+    --docs-json) docs_json="${2:?}"; shift 2 ;;
+    -h | --help) usage ;;
+    *) echo "sinnix-rerank: unknown argument $1" >&2; usage ;;
+  esac
+done
+[[ -n $query ]] || usage
+
+if [[ -z $docs_json ]]; then
+  docs_json="$(jq -R -s 'split("\n") | map(select(length > 0))' -)"
+fi
+
+case "$backend" in
+  local)
+    body="$(jq -n --arg q "$query" --argjson docs "$docs_json" --argjson n "$top_n" \
+      '{query: $q, documents: $docs, top_n: $n}')"
+    curl -sfS http://127.0.0.1:8081/v1/rerank \
+      -H 'Content-Type: application/json' -d "$body" |
+      jq --argjson docs "$docs_json" \
+        '[.results[] | {index, document: $docs[.index], relevance_score}]'
+    ;;
+  jina)
+    : "${JINA_API_KEY:?sinnix-rerank: JINA_API_KEY not set (agenix jina-api-key)}"
+    body="$(jq -n --arg q "$query" --arg m "${model:-jina-reranker-v3}" \
+      --argjson docs "$docs_json" --argjson n "$top_n" \
+      '{model: $m, query: $q, documents: $docs, top_n: $n}')"
+    curl -sfS https://api.jina.ai/v1/rerank \
+      -H "Authorization: Bearer $JINA_API_KEY" -H 'Content-Type: application/json' \
+      -d "$body" |
+      jq '[.results[] | {index, document: (.document.text // .document), relevance_score}]'
+    ;;
+  *)
+    echo "sinnix-rerank: unknown backend $backend" >&2
+    exit 2
+    ;;
+esac
