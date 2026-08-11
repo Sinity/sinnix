@@ -46,8 +46,10 @@ mkServiceModule {
         # Abliterated/uncensored LLM that fits ~10 GB at Q4. Edit to taste; a
         # failed pull only fails the loader oneshot, not the system.
         "huihui_ai/llama3.2-abliterate"
-        # Vision (VLM)
-        "llava"
+        # Vision + general multimodal tier: Gemma 4 12B QAT (7.2 GB, dense,
+        # fully VRAM-resident, text+image+audio in, 128K ctx). Replaces
+        # llava, which it outclasses across the board.
+        "gemma4:12b-it-qat"
         # Embeddings for Open WebUI RAG / document chat
         "nomic-embed-text"
         # Coding, GPU-resident tier: dense 7B coder fits the 3080's 10 GB at
@@ -60,6 +62,12 @@ mkServiceModule {
         # General reasoning/agentic MoE (~3.6B active, native MXFP4, 14 GB).
         # Same partial-offload story as qwen3-coder.
         "gpt-oss:20b"
+        # General MoE with hybrid thinking mode (~3B active, 19 GB Q4) —
+        # reasoning-heavy non-code tasks.
+        "qwen3:30b"
+        # Multimodal MoE (18 GB, 256K ctx, Arena 1441) — the strongest
+        # local generalist this host can run via partial offload.
+        "gemma4:26b"
       ];
       description = "Models pre-pulled by the ollama-model-loader oneshot.";
     };
