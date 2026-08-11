@@ -17,26 +17,10 @@
 
 - Be a finisher, not a planner. Carry work to a verified done-state unless a
   concrete blocker remains.
-- No fake-temporal deferral. "This is a long session," "it's getting late,"
-  "let's not push our luck," or similar wall-clock/turn-count framing is not a
-  real risk assessment and must not be used to justify deferring, softening
-  scope, or declining a task you have the context and tools to do now.
-  Session length and turn count do not correlate with actual capability or
-  actual risk; remaining context-window budget does, and it is directly
-  checkable (ask, or read what the harness reports) instead of guessed at.
-  Confirmed pattern (operator correction, polylogue, 2026-08-03, session at
-  ~25% context): proposed deferring an architectural parser rewrite citing
-  "end of an already very long session," when the actual state was
-  well-informed (had just read the exact code in question) and low context
-  pressure — the "long session" framing was empty filler standing in for an
-  unstated real concern. If there is a genuine reason to defer or scope down
-  (a concrete blast-radius/verification-cost tradeoff, needing operator
-  sign-off on an irreversible action, a real missing capability), name that
-  reason specifically and explain what state would need to change to resolve
-  it — "some other time" is not a coherent answer unless you can say what is
-  different about that other time. If nothing would concretely change, that
-  is itself the signal the real blocker is something else (or there isn't
-  one) — surface the real reason or proceed.
+- No fake-temporal deferral. "Long session" / "it's getting late" framing is
+  not a risk assessment; session length does not correlate with capability.
+  Context budget does, and it is directly checkable. To defer or scope down,
+  name the concrete blocker and what would change it — otherwise proceed.
 - Preserve intent. Implement the requested outcome; do not substitute a safer,
   smaller, or more familiar product decision.
 - Prefer surgical renewal. Remove obsolete paths, flags, wrappers, aliases, and
@@ -73,16 +57,11 @@
   A single call site is not proof of consistency.
 - Keep communication concise but concrete: state assumptions, tactics, changed
   files, verification, and residual risk.
-- Do not pipe command output into `tail`/`head`/`grep -c`/similar truncating
-  filters as a default habit (e.g. `devtools test ... 2>&1 | tail -60`). The
-  user reviewing the transcript loses the actual output — failures, stack
-  traces, warnings — behind a fixed line count you chose blind. Let commands
-  print their natural output; if a command is genuinely voluminous, redirect
-  to a file and read/grep that file deliberately afterward, or use a
-  narrower selector/flag the tool itself provides (verbosity flags, `-k`
-  filters) rather than truncating post hoc. Reserve `tail`/`head` for cases
-  where you have a specific, stated reason (e.g. re-reading a known-large
-  log file's final section after already having seen the full run once).
+- Do not pipe command output into `tail`/`head`/`grep -c` truncating filters
+  as a default habit — the transcript loses failures and stack traces behind
+  a blind line count. Let commands print naturally; for genuinely voluminous
+  output, redirect to a file and read it deliberately, or use the tool's own
+  narrowing flags. Truncate only with a specific, stated reason.
 - When `bd where` succeeds in the current repository, use Beads (`bd`) for
   durable task state: ready work, claims, blockers, dependencies, discovered
   follow-ups, and persistent project memory. Use local plans only for the
@@ -126,20 +105,12 @@
   already exist in the touched surface, remove them instead of updating them
   to encode the latest spelling. For ordinary cleanup, rely on source review,
   evaluation, and focused behavior checks.
-- Never enforce a process or invariant by pattern-matching natural language.
-  A lint or gate that greps prose — commit messages, close reasons, comments,
-  docstrings, PR bodies, notes fields — for magic phrases ("follow-up",
-  "tracked separately", resolver keywords, TODO markers) is machinery trying
-  to programmatically interface with language it cannot parse. The results
-  are reliably bad: false positives, phrasing chosen to satisfy the regex,
-  suppression allowlists that themselves rot, and a false sense that the
-  invariant is enforced. If an invariant matters enough to enforce
-  mechanically, give it a structured carrier first (a typed field, a required
-  id/link reference, a schema column, an exit code) and enforce that. If no
-  structured carrier is worth adding, the invariant is enforced by judgment
-  at authoring/review time — or it is not enforced. Prose is for readers.
-  The same applies in reverse: never make prose load-bearing for machines by
-  writing it in a stilted register so a tool can grep it later.
+- Never enforce a process or invariant by pattern-matching natural language
+  (grepping commit messages, close reasons, or notes for magic phrases). If
+  an invariant matters enough to enforce mechanically, give it a structured
+  carrier (typed field, id reference, exit code) and enforce that; otherwise
+  it is enforced by judgment at review time — or not enforced. The reverse
+  too: never write prose in a stilted register so a tool can grep it later.
 - If baseline checks are already failing, classify whether the failure is
   related before claiming completion. Do not hide inherited failure state.
 - Before declaring completion, cite the changed files, report exact verification
@@ -153,18 +124,14 @@
   lockfile, or output path. If restarting, stop the old run first.
 - Reuse one output artifact per purpose and clean stale processes when they are
   part of the task.
-- Do not turn transient live-host pressure into permanent project policy.
-  Resource incidents during a rebuild, deploy, or local verification should be
-  handled with one-shot environment overrides, stopping unrelated live
-  workloads, changing the service/runtime containment layer, or retrying under
-  an appropriate wrapper. Do not permanently reduce build parallelism,
-  optimization level, cache behavior, retention, or feature coverage merely to
-  make the current host survive a momentary RAM/IO spike.
+- Do not turn transient live-host pressure into permanent project policy:
+  handle resource incidents with one-shot overrides, stopping unrelated
+  workloads, or the containment layer — never by permanently reducing build
+  parallelism, cache behavior, retention, or coverage for a momentary spike.
 - Before changing build policy for resource reasons, identify the pressure
-  source in live evidence: process RSS/PSS, swap, PSI, cgroups, journal OOM
-  events, active timers, and disk IO state. A high `used` number in `free` is
-  not itself a leak; separate anonymous process memory, tmpfs/zram, page cache,
-  and D-state IO backlog before acting.
+  source in live evidence (process RSS/PSS, swap, PSI, cgroups, journal OOM
+  events, active timers, disk IO state). A high `used` in `free` is not a
+  leak; separate anon memory, tmpfs/zram, page cache, and D-state backlog.
 
 ---
 
@@ -240,54 +207,25 @@ worker launch or between turns.
 
 ### Claude Code Dispatch Doctrine
 
-Grounded in measured fanout ops (2026-08-02 report) + capability research
-(2026-08-03, digest: polylogue `.agent/scratch/2026-08-03-claude-code-dispatch-capabilities.md`).
-Facts here are version-gated; verify with `claude --version` / the
-claude-code-guide agent when it matters.
+Mechanics, caveats, and history live in the `claude-self-knowledge` skill.
+The standing rules:
 
-- **Explicit model on every fresh Agent dispatch.** Sonnet default, Haiku for
-  triage-grade read-only lanes, Fable/Opus permitted for judgment lanes
-  (design review, adjudication, postmortem synthesis) as an explicit choice —
-  never via inheritance. **This is mechanically enforced, hard, for every
-  dispatch type** (tightened 2026-08-11 — the prior "named agent types get a
-  soft warning only" exemption produced warnings with no enforcement teeth
-  and was removed): a global PreToolUse hook DENIES any Agent dispatch —
-  bespoke-prompt (general-purpose/claude/no type), a named agent definition
-  (review/lane/triage/judge/Explore/Plan/...), or a teammate spawn — that
-  omits `model` at the call site. A named agent's own frontmatter `model:`
-  no longer exempts the call; the caller must still pass one explicitly, so
-  every launch is auditable at the dispatch site, not only in a definition
-  file the caller may not have open. Only `fork` is exempt (inherits
-  context+model by design). On every ALLOWED dispatch the hook also emits a
-  visible `systemMessage` confirming exactly which `subagent_type`/`model`
-  (and teammate `name`, if any) was used — affirmative feedback, not just
-  absence of a warning, visible across concurrent sessions' notification
-  streams too.
-- **Forks are exempt** (`/subtask`, `fork` subagent type, enabled via
-  `CLAUDE_CODE_FORK_SUBAGENT=1`): they inherit the parent's context AND model
-  by design (prompt-cache reuse). Right tool for context-heavy side-tasks;
-  using a fork as a de-facto implementation lane violates the explicit-model
-  rule in disguise. Forks cannot nest.
-- **Agent teams are enabled experimentally**
-  (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`): teammates are full sessions
-  sharing a task list + SendMessage mailboxes (`~/.claude/teams/`,
-  `~/.claude/tasks/`). Known limits: no resume of in-process teammates, one
-  team per session, no nesting, teammates do NOT inherit the lead's model
-  (specify per spawn; they DO inherit effort). Treat as a lab capability:
-  useful for coordinated parallel work, not yet load-bearing process.
-- **Never poll background agents.** Completion notifications are automatic
-  (Claude Code >=2.1.211). Monitor only with an until-condition; ScheduleWakeup
-  only for genuine wall-clock deadlines (CI grace windows, external state).
-- **Bake standing contracts into agent definitions** (`.claude/agents/*.md`):
-  the markdown body IS the subagent's system prompt; frontmatter supports
-  `model`, `effort`, `tools`/`disallowedTools`, `isolation: worktree`,
-  `skills` preload, `memory`, `maxTurns`, per-agent hooks. Dispatch prompts
-  should then carry only task content. `subagent_type` resolves against the
-  frontmatter `name` field.
-- **Scripted judgment calls** (durable drivers, cron, pipelines): prefer
-  `claude -p --output-format json --json-schema '<schema>'` for validated
-  structured verdicts (+ session id + cost), `--resume <id>` for continuity,
-  `--bare` for deterministic scripted invocations. SIGTERM-safe (exit 143).
+- **Explicit model on every fresh Agent dispatch** — Sonnet default, Haiku
+  for triage-grade read-only lanes, Fable/Opus for judgment lanes as an
+  explicit choice. Hard-enforced: a global PreToolUse hook DENIES model-less
+  dispatches of every type and emits a visible confirmation on allowed ones.
+- **Forks are exempt**: they inherit context and model by design. Using a
+  fork as a de-facto implementation lane violates the rule in disguise.
+- **Agent teams are experimental** (env-gated): coordinated parallel work,
+  not load-bearing process; teammates do not inherit the lead's model.
+- **Never poll background agents** — completion notifications are automatic.
+  Monitor only with an until-condition; ScheduleWakeup only for genuine
+  wall-clock deadlines.
+- **Bake standing contracts into agent definitions** (`.claude/agents/*.md`);
+  dispatch prompts carry only task content.
+- **Scripted judgment calls**: `claude -p --output-format json
+  --json-schema` for validated verdicts; `--resume` for continuity;
+  `--bare` for deterministic scripted invocations.
 
 For coordination, Beads owns work and dependencies. Polylogue blackboard
 assertions are durable asynchronous notes, not a delivered group chat: until
@@ -620,25 +558,8 @@ mkdir -p /realm/worktrees
 git -C /realm/project/<repo> worktree add -b <branch> /realm/worktrees/<name> origin/master
 ```
 
-**Sinex tests from a worktree:** use a live dev database socket, not sqlx's
-offline query cache. Plain `nix develop` relocates the per-checkout dev
-database under `/var/cache/sinex/$USER/<checkout-hash>/dev-state`; read the
-current checkout's `DATABASE_URL` from its devshell before overriding another
-worktree:
-
-```bash
-SINEX_MAIN_DATABASE_URL="$(
-  git -C /realm/project/sinex status --short >/dev/null &&
-  nix develop /realm/project/sinex --command sh -c 'printf %s "$DATABASE_URL"'
-)"
-
-env DATABASE_URL="$SINEX_MAIN_DATABASE_URL" \
-  nix develop --command cargo test -p <crate> --lib <filter>
-```
-
-The pre-push drift guard inherits the same broken `DATABASE_URL` — pushing
-from a worktree devshell needs the identical `env DATABASE_URL=... git push`
-override, or sqlx compile errors masquerade as drift-guard rejections.
+**Sinex tests from a worktree** need the live dev-DB `DATABASE_URL` (and so
+does `git push` past the drift guard) — recipe in sinex's CLAUDE.md.
 
 ### Data Analysis (lynchpin)
 
@@ -651,179 +572,49 @@ python -m lynchpin.cli.current_state --start 2026-05-01 --end 2026-05-05
 
 ### Agent Orchestration (Multi-Agent Work)
 
-When dispatching multiple coding agents to execute a plan (e.g., parallel lanes),
-state the isolation model explicitly. The rules below are for worktree-isolated
-agents only; if agents intentionally share one checkout, the coordinator owns
-branching/committing/merging and agents should report patches or commit only by
-explicit instruction.
+Full procedure (worktree discipline, write-scope separation, pre-flight and
+post-merge checklists, batching shapes, Codex model contract) lives in the
+`agent-orchestration` skill — read it before any multi-agent dispatch. The
+non-negotiables:
 
-**Codex model contract:** the coordinating interactive session uses
-`gpt-5.6-luna` at high reasoning by default. Unattended implementation/review
-workers use `gpt-5.6-terra` at high reasoning. Always pass the model and effort
-explicitly and verify them in the launch receipt; never silently fall back to a
-stale configured model. `gpt-5.5` is retired for new work.
-
-**Worker verification ownership:** parallel workers verify their own changes,
-not merely produce diffs. Prompts require focused real-route behavior tests,
-exact-path static checks, and a broader affected-area check when a change spans
-modules/contracts. Require an anti-vacuity statement naming the production
-dependency exercised and the implementation mutation/removal that makes the
-test fail. Toy replicas, test-only validators, self-authorized registries, and
-mocks that only prove their own wrapping are rejected even when green. The
-coordinator still performs independent review and publish-boundary gates.
-
-**Worktree discipline — CRITICAL when using worktree isolation:**
-
-- Agents run in isolated worktrees (`isolation: "worktree"`). The isolation
-  system auto-cleans worktrees on completion, discarding uncommitted
-  working-tree changes. **Agents MUST `git commit` every logical chunk.** Even
-  a WIP commit is fine; the branch persists.
-- **Never `cd /realm/project/<name>` from inside a worktree agent.** The
-  worktree is the agent's root. If an agent `cd`s to the main checkout, commits
-  land on the main branch — corrupting both.
-- **Verify git remote.** Before pushing, confirm `git remote -v` and
-  `git branch --show-current` match the worktree branch.
-
-**Write-scope separation:**
-
-- Before dispatching, identify shared files (e.g., `schema/mod.rs`, `apply.rs`,
-  `lib.rs`). These are conflict hotspots.
-- When two lanes MUST touch the same file, serialize them: first lane commits +
-  merges, second lane rebases.
-- For additive changes to shared files, pre-define which lane owns each line
-  range.
-
-**Commit cadence:** commit after each project check passes, not after "all work
-done". First commit once the first relevant check passes, then per milestone.
-This prevents worktree auto-cleanup data loss and makes incremental merge
-possible.
-
-**Foreground-only execution:** every command a worker runs must execute
-synchronously in the worker's own turn; never launch a background job and
-idle-wait on it across turns. A worker that backgrounds a test/build run
-and then reports "waiting for it to finish" wastes real wall-clock and
-coordinator attention every time (repeatedly observed, polylogue
-2026-08-01 fanout) — always run it in the foreground and let the turn
-take as long as it takes.
-
-**Pre-flight checklist for each agent prompt:**
-
-1. Specify exact files the agent OWNS vs AVOIDS
-2. Include a "FIRST: comment on issue #N with scope" step
-3. Include a "commit after each successful check" instruction
-4. Warn about worktree cleanup: "commit or lose it"
-5. After spawn, verify the worktree actually exists, is a linked worktree
-   (not the main checkout), and is on the expected branch before trusting
-   any output — `isolation: "worktree"` can silently fail to create one,
-   in which case the agent runs directly in the main checkout and its
-   diff is not isolated (confirmed incident, polylogue 2026-08-01: an
-   agent's unreviewed schema-regeneration output landed directly in the
-   coordinator's live tree). In repos with `devtools`:
-   `devtools workspace verify-worktree <path> --expect-branch <branch>`.
-
-**Post-agent merge checklist:**
-
-1. Verify the worktree branch has commits: `git log <branch> --oneline -5`
-2. If no commits, check working tree: `git -C <worktree> status --short`
-3. Cherry-pick or diff-apply if the agent committed to the wrong branch
-4. `git worktree remove` stale worktrees after merging
+- State the isolation model explicitly (worktree-isolated vs shared checkout;
+  in shared checkouts the coordinator owns branching/committing/merging).
+- Worktree agents MUST `git commit` every logical chunk — isolation
+  auto-cleanup discards uncommitted work. Never `cd` to the main checkout
+  from inside a worktree.
+- After spawn, verify the worktree exists, is a linked worktree, and is on
+  the expected branch before trusting output — `isolation: "worktree"` can
+  silently fail and land the agent in the live tree.
+- Foreground-only execution: workers run every command synchronously in
+  their own turn; never background-and-wait.
+- Workers verify their own changes with real-route tests plus an
+  anti-vacuity statement; the coordinator still reviews independently.
+- Codex contract: `gpt-5.6-luna` (coordinator) / `gpt-5.6-terra` (workers),
+  high reasoning, always explicit, verified in the launch receipt.
 
 ### Cross-item batch execution (content-aware)
 
-The unit of work is a **cluster of related items**, not one tracker item at a
-time. Before claiming, look at what else in the ready set touches the same
-files/area (in beads repos: design-field anchors, prework packets, or a
-clustering helper where the repo has one).
+The unit of work is a cluster of related items, not one tracker item at a
+time; full shapes in the `agent-orchestration` skill
+(`references/batch-and-worktree-execution.md`). The rules:
 
-- **Overlapping footprints** (same modules): claim the cluster, one branch,
-  rewrite the area once satisfying every item's AC, per-item commits as review
-  waypoints, one sweep PR with a per-item AC matrix. Paying the area-reading
-  cost once and avoiding self-conflicts between successive PRs is the point.
-- **Disjoint footprints**: separate PRs (squash-merge = one master commit per
-  logical change), but pipeline them in one session/checkout: branch A →
-  commit → push → PR, then branch B from fresh master immediately while A's
-  CI runs. Never idle-wait on CI.
-- **Parallel subagent worktrees** only when ≥3 disjoint lanes exist, each
-  execution-grade (full design or packet), with no shared hotspot files —
-  then the packet/design IS the subagent prompt. Otherwise one agent
-  pipelining beats coordination overhead.
-- **Verification amortization**: workers run focused real-route checks plus the
-  affected-area check their own change warrants. The coordinator runs the broad
-  gate once per branch at the publish boundary, not once per item. In a
-  multi-merge fanout session, run this broad gate on the *merged master
-  state* at each merge-train boundary, not only pre-merge on the feature
-  branch — a global drift-latch class (an unrelated enum/vocabulary change
-  breaking an assertion elsewhere) is invisible to any single PR's affected-
-  test selection and only surfaces when the merged result is tested as a
-  whole. Schedule one full, non-affected-only suite run per heavy multi-merge
-  session before declaring it done; per-PR CI deliberately skipping the heavy
-  suite means nothing else will catch this class (confirmed incident,
-  polylogue 2026-08-01: two master-red root causes found only by an
-  incidental full-suite run after ~15 PRs had already merged clean).
-- **Content-aware shapes**: mechanical sweeps (lint/docs/renames) batch
-  hardest; schema/migration bumps must batch per tier/window; investigation
-  items batch over a shared evidence pass; decision items batch into one
-  operator review session.
-- **Beads repos**: closing/updating beads on a feature branch can silently
-  revert on `git checkout` (the post-checkout hook re-imports the target
-  branch's committed jsonl) — this is bd's correct, by-design sync model, not
-  a bug, but it actively fights a workflow that spins up many short-lived
-  branches: a bead closed on branch A reads back as open on branch B if B was
-  created from an older `master` and hasn't merged A's commit yet. Nothing is
-  lost (the close is safe in git history), but `bd show`/`bd ready` output is
-  stale until a commit carrying that state lands on your current branch.
-  Mitigate by (1) not spinning a new `chore(beads): ...` branch while one is
-  already open — merge it first or add to it; (2) merging bd-only bookkeeping
-  branches immediately rather than leaving them open while other branches
-  diverge from `master` in the meantime; (3) folding a single `bd
-  claim`/`close` into the same branch as the code change it accompanies
-  instead of a dedicated branch per mutation; (4) re-verifying with `bd show
-  <id> --json` after any checkout/merge/worktree-add before trusting bd's
-  query output for a bead you just touched. `bd export` (and the pre-commit
-  hook that calls it) resolves its output path from bd's own database
-  location, independent of the invoking shell's cwd — inside a temporary
-  conflict-resolution worktree it silently no-ops on that worktree's own
-  file, so resolving a `.beads/*.jsonl` merge conflict via `bd export` can
-  leave literal conflict markers in place. Instead extract both sides
-  directly (`git show :2:.beads/issues.jsonl` / `:3:...`), hand-merge bead-by-
-  id preferring whichever side has the later `updated_at`, verify every line
-  parses as JSON, then `git add`. The reimport hazard is not limited to
-  checkout/merge: it fires on *any* `bd` invocation from an aging
-  worktree, including a plain read-only `bd show <id>` — every `bd` call
-  reimports the invoking checkout's `.beads/issues.jsonl` into the shared
-  DB, so a worktree frozen at an older commit can silently time-machine
-  live bead state on a coordinator's concurrent writes even from a lane
-  that never touches beads intentionally (confirmed repeatedly, polylogue
-  2026-08-01: 5+ coordinator closes reverted this way in one session).
-  Lane agents dispatched into worktrees should make no `bd` writes at
-  all; the coordinator should audit bead state (diff expected vs. `bd show
-  --json`) at merge-train boundaries and re-apply anything reverted,
-  rather than trust a single write to have stuck.
-- **Batch `.beads/issues.jsonl` commits per unit of work, not per bd
-  operation.** Confirmed pattern (polylogue, 2026-08-03): a single 5-hour
-  fanout/triage session produced ~85 separate `chore(beads): ...` commits
-  to `master`, one per bead closed/filed/annotated, drowning out real
-  `feat`/`fix` commits in the log (67 of the last 100 commits on one repo
-  were beads-only). The root cause was never subagents committing directly
-  — lane agents correctly make no bd writes — it was the coordinator
-  running `git commit` reflexively after every individual `bd close`/
-  `bd create`/`bd update --notes` call instead of accumulating a batch.
-  `bd export` re-derives the full jsonl regardless of how many bd calls
-  preceded it, so batching costs nothing: do every bd write for one
-  coherent unit of work (a full triage pass, one roadmap-digestion
-  session, closing every bead landed by a merge train, one fanout wave's
-  worth of findings), then `bd export` + a single `git commit` covering
-  the whole batch, summarizing the batch in the subject (e.g. "close 10
-  beads landed via merged PRs 3598-3605"). Do not commit mid-batch just
-  because a natural pause occurred; commit at the boundary of the logical
-  unit. A submodule/subrepo split for `.beads/` is not the fix — it
-  relocates the same per-operation commit habit into a second repo's
-  history and adds submodule-pointer-bump commits in the first; the fix
-  is commit cadence, not commit location.
+- Overlapping footprints: one branch, rewrite the area once against every
+  item's AC, per-item commits, one sweep PR with an AC matrix.
+- Disjoint footprints: separate PRs, pipelined — never idle-wait on CI.
+- Parallel worktree lanes only for ≥3 disjoint, execution-grade lanes with
+  no shared hotspot files; otherwise one agent pipelining wins.
+- Run one full, non-affected-only suite on merged master per heavy
+  multi-merge session — per-PR CI cannot catch cross-PR drift latches.
+- Beads under branch churn: every `bd` call reimports the invoking
+  checkout's jsonl (stale branches/worktrees time-machine live state); lane
+  agents make no `bd` writes; batch jsonl commits per unit of work, not per
+  operation. Hazard recipes in the `beads` skill.
 
 ### Daily oracle digest
 
-`/realm/project/sinnix/scripts/oracle` produces a daily reverse-prompting digest from the rawlog tail, recent project activity, open GitHub issues, and the latest lynchpin current-state pack, then asks `claude -p` for a four-section capped summary (Resume / Reverse-prompt questions / Drift / One thing — each bullet citation-required). Run `oracle` for today, `oracle --date YYYY-MM-DD` for a specific day, `--output PATH` to override the default `~/.local/share/oracle/YYYY-MM-DD.md` destination, and `--show` to also print to stdout. The CLI unsets `ANTHROPIC_API_KEY` before invoking claude so it uses the operator's subscription auth rather than the zero-balance automation key.
+`scripts/oracle` (sinnix) builds a daily reverse-prompting digest from the
+rawlog tail, project activity, and lynchpin state via `claude -p`
+(subscription auth). Run `oracle`; flags via `--help`.
 
 ---
 

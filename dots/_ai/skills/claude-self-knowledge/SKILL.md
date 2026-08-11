@@ -10,7 +10,7 @@ Anything version-gated (harness features, model ids, pricing, limits) must be
 verified against a live source — `claude --version`, the claude-code-guide
 agent (docs lookup), the `claude-api` skill (API/pricing) — not recalled from
 training or from this file when precision matters. This file is the map, not
-the territory; its snapshot date is 2026-08-03.
+the territory; its snapshot date is 2026-08-11.
 
 ## Models (the family, and what tier means)
 
@@ -65,8 +65,40 @@ the territory; its snapshot date is 2026-08-03.
   `~/.claude/` (settings.json, CLAUDE.md, hooks are instant-propagating;
   ADDING new skills/hook files needs a home-manager switch — check
   `readlink -f` when unsure which regime a file is in).
-- Enabled here: fork subagents + experimental agent teams (settings env);
-  global PreToolUse warn on model-less Agent dispatches.
+- Enabled here: fork subagents + experimental agent teams (settings env).
+
+## Dispatch doctrine (this machine)
+
+Grounded in measured fanout ops (2026-08-02) + capability research
+(2026-08-03, digest: polylogue
+`.agent/scratch/2026-08-03-claude-code-dispatch-capabilities.md`).
+
+- **Explicit model on every fresh Agent dispatch.** Sonnet default, Haiku for
+  triage-grade read-only lanes, Fable/Opus permitted for judgment lanes
+  (design review, adjudication, postmortem synthesis) as an explicit choice —
+  never via inheritance. **Mechanically enforced, hard, for every dispatch
+  type** (tightened 2026-08-11): a global PreToolUse hook DENIES any Agent
+  dispatch — bespoke-prompt, named agent definition, or teammate spawn —
+  that omits `model` at the call site. A named agent's own frontmatter
+  `model:` does not exempt the call; every launch is auditable at the
+  dispatch site. On every ALLOWED dispatch the hook emits a visible
+  `systemMessage` confirming the resolved `subagent_type`/`model` (and
+  teammate name) — affirmative feedback, visible across concurrent sessions.
+- **Forks are exempt** (`/subtask`, `fork` type): they inherit context AND
+  model by design (prompt-cache reuse). Right tool for context-heavy
+  side-tasks; using a fork as a de-facto implementation lane violates the
+  explicit-model rule in disguise. Forks cannot nest.
+- **Teams caveats** (beyond the one-liner above): no resume of in-process
+  teammates, one team per session, no nesting, teammates do NOT inherit the
+  lead's model (specify per spawn; they DO inherit effort). Lab capability,
+  not load-bearing process.
+- **Never poll background agents** — completion notifications are automatic;
+  Monitor only with an until-condition; ScheduleWakeup only for genuine
+  wall-clock deadlines (CI grace windows, external state).
+- A **fanout dispatch ledger** records every dispatch via PreToolUse +
+  SubagentStop hooks.
+- For coordination, Beads owns work and dependencies; Polylogue blackboard
+  assertions are durable asynchronous notes, not a delivered group chat.
 - Wrappers: `claude` → `claude-full` (full MCP profile); `claude-lean`,
   `claude-browser`, backend variants (`claude-deepseek`, `claude-local`).
 - Session history is ingested by Polylogue (`polylogued`); your own past

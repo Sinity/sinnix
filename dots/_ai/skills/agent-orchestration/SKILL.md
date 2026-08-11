@@ -14,7 +14,11 @@ metadata:
 Prefer native non-interactive runtimes for unattended work. Use Kitty only when
 an operator needs a visible, interruptible prompt run. Read
 [`references/runtime-modes.md`](references/runtime-modes.md) before launching;
-it contains the verified commands, auth rules, and mode constraints.
+it contains the verified commands, auth rules, and mode constraints. For
+multi-agent fanout — worktree discipline, write-scope separation, pre-flight
+and post-merge checklists, cross-item batching shapes, and the Codex model
+contract — read
+[`references/batch-and-worktree-execution.md`](references/batch-and-worktree-execution.md).
 
 ## Workflow
 
