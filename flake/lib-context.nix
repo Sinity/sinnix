@@ -13,6 +13,7 @@ let
     mcpRegistry = import ./data/mcp-registry.nix { inherit lib; };
     runtimeDefaults = import ./data/runtime-defaults.nix { inherit lib; };
     localModels = import ./data/local-models.nix { inherit lib; };
+    agentLanes = import ./data/agent-lanes.nix;
   };
 
   extendedLib = lib.extend (
