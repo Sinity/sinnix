@@ -293,19 +293,6 @@ in
   };
 
   config = {
-    # Render declared activation consumers into forced environment overrides
-    # (front-door routing; see the consumers option comment).
-    systemd.services = lib.mkMerge (
-      lib.concatLists (
-        lib.mapAttrsToList (
-          _: surface:
-          map (c: {
-            ${c.unit}.environment = lib.mapAttrs (_: v: lib.mkForce v) c.environment;
-          }) (surface.activation.consumers or [ ])
-        ) surfaces
-      )
-    );
-
     assertions = [
       {
         assertion = duplicateSurfaceUnitKeys == [ ];
@@ -345,7 +332,20 @@ in
       scriptPkgs.sinnix-capability-manifest
     ];
     systemd.tmpfiles.rules = [ "d /run/sinnix 0775 root users -" ];
-    systemd.services = {
+    # Consumer entries from activation.consumers render as forced environment
+    # overrides (front-door routing; see the consumers option comment),
+    # merged with the sentinel/observe units.
+    systemd.services = lib.mkMerge (
+      lib.concatLists (
+        lib.mapAttrsToList (
+          _: surface:
+          map (c: {
+            ${c.unit}.environment = lib.mapAttrs (_: v: lib.mkForce v) c.environment;
+          }) (surface.activation.consumers or [ ])
+        ) surfaces
+      )
+      ++ [
+        ({
       sinnix-health-sentinel = {
         description = "Inventory-driven runtime health sentinel";
         serviceConfig = {
@@ -373,7 +373,9 @@ in
       lib.nameValuePair (lib.removeSuffix ".service" surface.unit) {
         unitConfig.OnFailure = [ "sinnix-health-transition@%n" ];
       }
-    ) (lib.filterAttrs (_: surface: surface.manager == "system" && surface.kind == "service" && surface.observe.enable) surfaces);
+    ) (lib.filterAttrs (_: surface: surface.manager == "system" && surface.kind == "service" && surface.observe.enable) surfaces))
+      ]
+    );
     systemd.timers.sinnix-health-sentinel = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
