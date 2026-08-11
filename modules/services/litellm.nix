@@ -60,12 +60,12 @@ mkServiceModule {
         settings = {
           # Model names exposed to the agents. Backed by the Ollama hub on
           # :11434; edit here to add/swap local models (the `*-local` wrappers
-          # default to `local-llama`).
+          # default to `local-chat`).
           model_list = [
             {
-              model_name = "local-llama";
+              model_name = "local-chat";
               litellm_params = {
-                model = "ollama_chat/huihui_ai/llama3.2-abliterate";
+                model = "ollama_chat/huihui_ai/gemma-4-abliterated:12b";
                 api_base = "http://127.0.0.1:11434";
               };
             }
