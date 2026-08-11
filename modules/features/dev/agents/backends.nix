@@ -54,6 +54,94 @@ let
         ${lib.escapeShellArg agentRuntimePath}
     '';
 
+  # Resolves an agenix secret name to its runtime path, honoring a live
+  # config override under sinnix.secrets.paths.<name> the same way
+  # clis.nix's former per-secret `deepseekSecretPath` local did (that was
+  # `lib.attrByPath [ "sinnix" "secrets" "paths" name ] default config`;
+  # sinnixCfg here already IS `config.sinnix`, so the attrByPath drops the
+  # leading "sinnix" segment).
+  resolveSecretPath =
+    secretName: lib.attrByPath [ "secrets" "paths" secretName ] "/run/agenix/${secretName}" sinnixCfg;
+
+  # Shared backend-switch env builder for the claude-deepseek/claude-local
+  # wrappers (see flake/data/agent-lanes.nix claudeLanes): points Claude
+  # Code's native Anthropic-protocol client at a non-Anthropic endpoint and
+  # fans one model name out across every ANTHROPIC_*MODEL var Claude Code
+  # reads. `name` is the lane name (e.g. "deepseek"); it drives the
+  # intermediate shell variable name and the wrapper's own error-caller name
+  # so error text stays wrapper-specific without extra data fields.
+  mkClaudeBackendEnv =
+    {
+      name,
+      baseUrl,
+      model,
+      # Either { secretName = "<agenix secret>"; } (read at launch, wrapper
+      # exits loudly if unreadable) or { literal = "<static token>"; } (a
+      # loopback gateway that enforces no real auth but still needs a
+      # non-empty token).
+      authToken,
+    }:
+    let
+      modelVar = "${lib.toUpper name}_MODEL";
+      authFragment =
+        if authToken ? secretName then
+          let
+            path = resolveSecretPath authToken.secretName;
+          in
+          ''
+            if [ ! -r ${lib.escapeShellArg path} ]; then
+              echo "claude-${name}: cannot read ${path}" >&2
+              exit 1
+            fi
+            export ANTHROPIC_BASE_URL="${baseUrl}"
+            ANTHROPIC_AUTH_TOKEN="$(<${lib.escapeShellArg path})"
+            export ANTHROPIC_AUTH_TOKEN
+          ''
+        else
+          ''
+            export ANTHROPIC_BASE_URL="${baseUrl}"
+            export ANTHROPIC_AUTH_TOKEN="${authToken.literal}"
+          '';
+    in
+    ''
+      ${authFragment}
+      ${modelVar}="${model}"
+      export ANTHROPIC_MODEL="$${modelVar}"
+      export ANTHROPIC_DEFAULT_OPUS_MODEL="$${modelVar}"
+      export ANTHROPIC_DEFAULT_SONNET_MODEL="$${modelVar}"
+      export ANTHROPIC_DEFAULT_HAIKU_MODEL="$${modelVar}"
+      export CLAUDE_CODE_SUBAGENT_MODEL="$${modelVar}"
+    '';
+
+  # Shared backend-switch env builder for the codex-deepseek/codex-local
+  # wrappers (see flake/data/agent-lanes.nix codexLanes): the layered
+  # `<profile>.config.toml` (mcp.nix's client-profiles.nix) already carries
+  # model + model_provider + the full MCP table, so the wrapper only needs
+  # to export the one env var that provider's `env_key` names.
+  mkCodexBackendEnv =
+    {
+      name,
+      varName,
+      # Either secretName (agenix, read-checked at launch) or literal (a
+      # static loopback dev token) — exactly one is set per lane.
+      secretName ? null,
+      literal ? null,
+    }:
+    if secretName != null then
+      let
+        path = resolveSecretPath secretName;
+      in
+      ''
+        if [ ! -r ${lib.escapeShellArg path} ]; then
+          echo "codex-${name}: cannot read ${path}" >&2
+          exit 1
+        fi
+        ${varName}="$(<${lib.escapeShellArg path})"
+        export ${varName}
+      ''
+    else
+      ''export ${varName}="${literal}"'';
+
   mkClaudeCodeWrapper =
     {
       mcpConfigName ? "mcp",
@@ -234,6 +322,9 @@ in
 {
   inherit
     mkNpmBootstrap
+    resolveSecretPath
+    mkClaudeBackendEnv
+    mkCodexBackendEnv
     mkClaudeCodeWrapper
     mkCodexWrapper
     mkGrokWrapper
