@@ -1,15 +1,10 @@
 # Sinity Environment Memory
 
-> **This file is your persistent environment memory.** It contains compressed
-> understanding of the development ecosystem, NixOS configuration, and project
-> constellation. You start every session "pre-grokked".
->
-> This is a single flat file — no transclusion. Codex and Gemini read the same
-> content through symlinks (`~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md` →
-> `~/.config/claude/CLAUDE.md` → this file in the sinnix repo). Edits propagate
-> to every agent instantly; there is no render step.
+> **This file is your persistent environment memory** — compressed
+> understanding of the ecosystem, NixOS config, and project constellation.
+> One flat file, no transclusion; Codex/Gemini read it via symlinks from the
+> sinnix repo, so edits propagate to every agent instantly.
 
----
 
 ## Operating Contract
 
@@ -133,8 +128,6 @@
   events, active timers, disk IO state). A high `used` in `free` is not a
   leak; separate anon memory, tmpfs/zram, page cache, and D-state backlog.
 
----
-
 ## Writing Style
 
 Load the shared `writing-style` skill when writing or editing human-facing prose. Its trigger and full rules cover GitHub content, commit messages, chat replies, and documentation.
@@ -178,32 +171,14 @@ SubagentStop guards remain manual or unsupported for Codex rather than being
 recreated through terminal scraping.
 
 Prefer native non-interactive runtimes for unattended work; use Kitty only
-when a human or coordinator needs a visible, interruptible process or a
-deliberately interactive agent session.
-
-- **Codex local**: use `codex exec -C <repo> --model <model> -c
-  'model_reasoning_effort="<effort>"' ...`; use `codex exec resume <id>` for a
-  continued worker. Set model and effort per run instead of relying on the
-  interactive session's defaults.
-- **Claude local**: use `env -u ANTHROPIC_API_KEY claude-full --print ...` for
-  subscription-backed batch work. Use `claude-full --background` for a
-  resumable native worker, and manage it with
-  `~/.local/state/claude-code/launch.sh agents|logs|stop`. Preserve the key only
-  when API-key billing is explicitly intended.
-- **Codex Cloud**: use `codex cloud exec|list|status|diff|apply`; the CLI is the
-  control plane and the task id is the recovery handle. Do not automate the
-  Codex web UI when the CLI covers the operation.
-- **Browser-backed cloud work**: prefer background CDP targets. The
-  `private-visible` profile is shared by concurrent agents, so own explicit
-  page target ids, never activate another agent's target, and avoid coordinate
-  clicks. Verify the focused Hyprland window when operator focus matters.
-- **Kitty workers**: launch with keep-focus semantics and route separate OS
-  windows with `movetoworkspacesilent` when isolation is useful. Do not bring
-  worker windows to the current workspace as a side effect of dispatch.
-
-Do not try to change the current agent's model or reasoning effort by injecting
-commands into its own live TUI while it is sampling. Choose these controls at
-worker launch or between turns.
+when a human needs a visible, interruptible process. Launch commands, auth
+rules, and mode constraints live in the `agent-orchestration` skill
+(`references/runtime-modes.md`). Standing rules: set model/effort per run,
+never inherit stale defaults; the `private-visible` browser profile is shared
+by concurrent agents — own explicit page target ids, never activate another
+agent's target; Kitty workers keep focus and route to other workspaces
+silently; never inject model/effort changes into a live agent TUI while it is
+sampling.
 
 ### Claude Code Dispatch Doctrine
 
@@ -266,7 +241,6 @@ append-only, low-friction operator stream used by `rawlog`, `rawlog-capture`,
 and `oracle`; read it when the user references raw-log/rawlog, recent subjective
 context, or "what have I been saying/thinking lately?"
 
----
 
 ## System Context
 
@@ -305,23 +279,14 @@ cd /realm/project/sinnix && nix develop --command switch
 # NEVER: nh os switch ... (bypasses idle-scheduling wrapper)
 ```
 
-> **Why this matters**: `nix.daemonCPUSchedPolicy=idle` only affects scheduler
-> priority — it does NOT cap memory. Without the nix-build.slice placement the
-> daemon runs unconstrained and Rust builds can consume all 32 GB, thrashing
-> the system even though CPU cycles were yielded correctly. Always use
-> `switch`/`boot` devshell commands or `nix develop --command switch`.
->
-> Do not insert `check --no-build` before `switch` as routine agent hygiene.
-> `switch` already evaluates/builds, and repeating eval adds latency/load on the
-> exact path used for recovery. Use focused tests for edited modules, then
-> `switch` when applying live Sinnix changes.
+> **Why**: only the nix-build.slice placement caps build memory; bypassing
+> the wrapper lets Rust builds consume all 32 GB. Do not insert
+> `check --no-build` before `switch` as hygiene — `switch` already
+> evaluates/builds; repeating eval only loads the recovery path.
 
-All three agent CLIs self-update via npm bootstrap — no Nix rebuild needed.
-`claude update`, `codex update`, `gemini` self-update inside
-`~/.local/state/{claude-code,codex,gemini}/npm/` (persisted under
-impermanence).
+Agent CLIs self-update via npm bootstrap (`~/.local/state/<agent>/npm`,
+persisted) — no Nix rebuild needed.
 
----
 
 ## Filesystem Structure
 
@@ -391,7 +356,6 @@ SSH keys lives at `/persist/home/sinity/.ssh` and appears at runtime as
 └── knowledgebase/     # PKM vault (Obsidian-friendly MOCs, raw-log)
 ```
 
----
 
 ## Project Constellation
 
@@ -424,19 +388,9 @@ Sinity projects.
 
 ### Project Relationships
 
-```
-sinnix ──────► System packages, services, dotfiles
-    │
-    └──► Enables: sinex service stack, polylogued daemon, scribe-tap
-
-sinex ◄────── Captures events from scribe-tap, polylogue
-    │
-    └──► Feeds: lynchpin via DuckDB/modules
-
-lynchpin ◄─── Aggregates: ActivityWatch, Atuin, git, health, chats
-    │
-    └──► Produces: Calendar views, baselines, narratives
-```
+Flow: sinnix enables the service stack → sinex captures events
+(scribe-tap, polylogue) → lynchpin aggregates everything (ActivityWatch,
+Atuin, git, health, chats) into calendar views, baselines, narratives.
 
 ### Environment Variables (set by sinnix)
 
@@ -449,18 +403,11 @@ KNOWLEDGEBASE_ROOT=/realm/data/knowledgebase
 
 ### Documentation Map
 
-| Topic                 | Location                                                             |
-| --------------------- | -------------------------------------------------------------------- |
-| Sinnix modules        | `/realm/project/sinnix/modules/`                                     |
-| Sinnix grok notes     | `/realm/project/sinnix/.agent/scratch/` (architecture + machine map) |
-| Sinex architecture    | `/realm/project/sinex/AGENTS.md`                                     |
-| Lynchpin data sources | `/realm/project/sinity-lynchpin/docs/reference/data-sources.md`      |
-| Data inventory        | `/realm/data/INVENTORY.md`                                           |
+Sinnix grok notes: `sinnix/.agent/scratch/` (architecture + machine map);
+lynchpin data sources: `sinity-lynchpin/docs/reference/data-sources.md`;
+data inventory: `/realm/data/INVENTORY.md`. Project detail (structure,
+patterns, workflows) lives in each project's `CLAUDE.md`.
 
-**Project-specific details** (module structure, patterns, workflows) live in
-each project's `CLAUDE.md`.
-
----
 
 ## Agent Context Conventions
 
@@ -469,27 +416,19 @@ each project's `CLAUDE.md`.
   symlink to `CLAUDE.md`, so Claude, Codex, and Gemini always read identical,
   current content.
 - **MCP profiles**: registry source of truth is `flake/data/mcp-registry.nix`
-  in sinnix; wiring lives in `modules/features/dev/agents/` (`mcp.nix` +
-  sibling helpers `mcp-tools.nix`/`client-profiles.nix`/`serena.nix`/
-  `browser.nix`/`hooks.nix`; regrouped from the former `mcp-servers.nix`,
-  sinnix-9u6). Plain `codex` uses the lean non-browser profile, while
-  `codex-full` uses the full profile (GitHub, Context7, Polylogue, Lynchpin,
-  Serena). Plain `claude` uses the lean profile.
-  `claude-browser`/`codex-browser` add the Chrome DevTools MCP tier. `claude`
-  is a shell alias to the `claude-lean` wrapper — the bare `~/.local/bin/claude`
-  is deliberately unmanaged because Claude Code's installer claims and
-  clobbers it on auto-update.
-- **Alternate backends (full MCP profile)**: `claude-deepseek`/`codex-deepseek`
-  (DeepSeek endpoints, key from agenix `deepseek-api-key`);
-  `claude-local`/`codex-local` (local Ollama hub via the LiteLLM gateway on
-  `127.0.0.1:4000`, `modules/services/litellm.nix` — local model names are
-  defined once in its `model_list`); `muse-contrib`/`hermes-muse` (Muse Spark
-  1.2 contributor tier via the Vercel AI Gateway, key from agenix
-  `vercel-ai-gateway-key` — Meta gates the tier server-side and does not
-  serve it to this account directly; prompts/completions on it may train
-  Meta models, so keep confidential material on plain `muse`/standard
-  tiers). LiteLLM stays local-models-only by design; remote backends are
-  wired per-wrapper with agenix keys.
+  in sinnix; wiring in `modules/features/dev/agents/`. Plain `claude`/`codex`
+  = lean profile; `claude-full`/`codex-full` = full (GitHub, Context7,
+  Polylogue, Lynchpin, Serena); `*-browser` adds Chrome DevTools MCP. The
+  bare `~/.local/bin/claude` is deliberately unmanaged (the installer
+  clobbers it); `claude` aliases the managed lean wrapper.
+- **Alternate backends**: `claude-deepseek`/`codex-deepseek` (agenix
+  `deepseek-api-key`); `claude-local`/`codex-local`/`hermes-local` (local
+  Ollama hub via LiteLLM `127.0.0.1:4000`; model names live once in
+  `litellm.nix`); `muse-contrib`/`hermes-muse` (Muse Spark contributor tier
+  via the Vercel AI Gateway, agenix `vercel-ai-gateway-key` — Meta gates the
+  tier server-side; **prompts/completions on it may train Meta models — keep
+  confidential material off it**). LiteLLM stays local-models-only; remote
+  backends are wired per-wrapper with agenix keys.
 - **Shared skills** live in `dots/_ai/skills/` (sinnix repo) and are linked
   into `~/.config/claude/skills`, `~/.codex/skills`, `~/.gemini/skills`.
 - **Desktop environment**: Hyprland (Wayland) + Noctalia shell; terminals
@@ -500,19 +439,14 @@ each project's `CLAUDE.md`.
   `query-docs`. Cheap, prevents stale-API mistakes; use it for unfamiliar or
   fast-moving third-party APIs.
 
----
 
 ## Common Workflows
 
 ### Workspace Inventory
 
-For a fast read-only snapshot across many repos, use the shared scanner rather
-than hand-rolling `find`/`git status` loops:
-
-```bash
-python3 /realm/project/sinnix/dots/_ai/tools/workspace_recon_scan.py --root /realm/project
-python3 /realm/project/sinnix/dots/_ai/tools/workspace_recon_scan.py --root /realm/project --changed-only --with-size --json
-```
+For a fast read-only snapshot across many repos, don't hand-roll `find`/`git
+status` loops: `python3 dots/_ai/tools/workspace_recon_scan.py --root
+/realm/project` (sinnix repo; `--changed-only --with-size --json` variants).
 
 ### Heavy Agent Work
 
@@ -523,52 +457,32 @@ Sinnix build/background slices automatically, so agents should run the normal
 project command first.
 
 Invoke heavy test runners by their wrapper names (`pytest`, `cargo`,
-`xtask`), never as `python -m pytest` or via absolute `.venv/bin/` paths: the
-devshell routes commands into build/background slices by command name, and
-bypassing the name also bypasses slice containment, stop-timeout caps, and
-oomd policy (2026-07-11 forensics: a `python -m pytest` xdist swarm inherited
-a protected agent scope and sat resident for 35 hours).
+`xtask`), never as `python -m pytest` or absolute `.venv/bin/` paths —
+routing is by command name, and bypassing it bypasses slice containment,
+stop-timeout caps, and oomd policy (2026-07-11: an unwrapped xdist swarm sat
+resident in a protected scope for 35 hours).
 
-Resource containment is not a verification contract. In Sinex, use `xtask` for
-build/check/test verification because it owns the repo's schema, SQLx, database,
-feature, and formatting assumptions. Do not bypass it with direct `cargo`
-commands merely to get a narrower-looking signal.
+Resource containment is not a verification contract: in Sinex use `xtask`,
+which owns the schema/SQLx/feature/formatting assumptions — don't bypass it
+with direct `cargo` for a narrower-looking signal. Resource pressure during
+heavy work is a scheduling problem, not a project-semantics problem: one-shot
+overrides or the wrapper/slice layer, never durable project defaults.
 
-Resource pressure during heavy work is a runtime scheduling problem first, not
-a project semantics problem (see Runtime Discipline above). If throttling is
-needed to finish the immediate operation, prefer a one-shot environment
-override or the Sinnix wrapper/slice layer; leave durable project defaults
-alone unless the project itself has a reproducible, cross-machine resource bug.
+Outside a recognized devshell, scope long/heavy one-offs explicitly:
+`sinnix-scope {background|build|nix-build} -- <cmd>`.
 
-Use an explicit scope only outside a recognized devshell or for one-off custom
-commands that are expected to run for a long time or scan/write large stores:
-
-```bash
-sinnix-scope background -- <long-running scan/import/db command>
-sinnix-scope build -- <project build/test command>
-sinnix-scope nix-build -- nix build .#target
-```
-
-**Agent worktree placement (wear policy):** a Rust worktree's per-checkout
-`CARGO_TARGET_DIR` writes multiple GB per build. Place agent worktrees for
-heavy-compile repos under `/realm/worktrees/` (NVMe), never `/tmp`:
-
-```bash
-mkdir -p /realm/worktrees
-git -C /realm/project/<repo> worktree add -b <branch> /realm/worktrees/<name> origin/master
-```
+**Worktree placement (wear policy):** heavy-compile worktrees go under
+`/realm/worktrees/` (NVMe), never `/tmp` — a Rust `CARGO_TARGET_DIR` writes
+multiple GB per build.
 
 **Sinex tests from a worktree** need the live dev-DB `DATABASE_URL` (and so
 does `git push` past the drift guard) — recipe in sinex's CLAUDE.md.
 
 ### Data Analysis (lynchpin)
 
-```bash
-cd /realm/project/sinity-lynchpin
-just                                        # List all recipes
-python -m lynchpin.cli.materialize --all    # DAG-orchestrated substrate materialization
-python -m lynchpin.cli.current_state --start 2026-05-01 --end 2026-05-05
-```
+`cd /realm/project/sinity-lynchpin && just` lists all recipes;
+`python -m lynchpin.cli.materialize --all` runs the DAG-orchestrated
+substrate materialization; `...cli.current_state --start/--end` for windows.
 
 ### Agent Orchestration (Multi-Agent Work)
 
@@ -616,8 +530,6 @@ time; full shapes in the `agent-orchestration` skill
 rawlog tail, project activity, and lynchpin state via `claude -p`
 (subscription auth). Run `oracle`; flags via `--help`.
 
----
-
 ## Git Protocol
 
 Load the shared `git-protocol` skill for detailed Git, GitHub, commit, branch, pull request, staging, merge, conflict, and publication procedure. The operating contract above remains authoritative for safety, repository policy, and direct-master exceptions.
@@ -653,53 +565,27 @@ for the exact operation name — lazy loading can hide active tools.
 Serena state lives under `~/.local/share/serena` (installs under
 `~/.local/state/serena`).
 
----
-
 ## Thinking in Markdown
 
 Externalize reasoning to scratch files. Context is expensive, files are cheap.
 
 **When:** non-trivial analysis, multi-step debugging, architectural decisions;
-proactively for anything that took >1 tool call to discover; especially for
-cross-session or compaction-spanning work.
+anything that took >1 tool call to discover; cross-session work.
 
-**Where:**
-
-| Scope                | Location                                  |
-| -------------------- | ----------------------------------------- |
-| Global/cross-project | `~/.claude/scratch/NNN-<topic>.md`        |
-| Project-specific     | `.agent/scratch/<date-or-NNN>-<topic>.md` |
-
-- If a project lacks `.agent/scratch/`, create it early and ensure `.gitignore`
-  covers it before accumulating notes.
-- **Never use `.claude/` for per-project auxiliary content** — Claude Code
-  treats it as protected and prompts on every write. `.agent/` is the
-  project-local convention.
-- Structure: YAML frontmatter (`created`, `purpose`, `status`, `project`), then
-  Context / Findings / Outcome.
-- When referring the user to a scratch file, always summarize the key points in
-  your response — don't just point at the file.
-- Projects can pin ongoing-relevance notes in their CLAUDE.md via a "Pinned
-  Notes" section with bare `@path` lines (Claude-only transclusion; keep repo
-  CLAUDE.md flat otherwise).
-
----
+**Where:** global → `~/.claude/scratch/NNN-<topic>.md`; project-specific →
+`.agent/scratch/<date-or-NNN>-<topic>.md` (create early, ensure `.gitignore`
+covers it). **Never `.claude/` for per-project content** — Claude Code
+treats it as protected and prompts on every write. YAML frontmatter
+(`created`, `purpose`, `status`, `project`), then Context/Findings/Outcome.
+When referring the user to a scratch file, summarize the key points in your
+reply — don't just point. Projects may pin notes in CLAUDE.md via a "Pinned
+Notes" section of bare `@path` lines (Claude-only transclusion).
 
 ## Session Recall (hooks)
 
-Claude Code has a `SessionStart` hook at
-`~/.claude/hooks/sessionstart-polylogue-recall.sh`: if `polylogue` is on PATH it
-prints up to three recent sessions matching the current project directory, and
-exits silently when no archive data is available.
-
-`~/.claude/hooks/sessionstart-sinex-recall.sh` (Codex calls the same command as
-`sessionstart-sinex-recall`) prints a compact Sinex machine-context block from
-`sinexctl recall`, preferring a project-local
-`.sinex/state/runtime-target.json`, then `SINEX_RUNTIME_TARGET_CONFIG`, then
-ordinary `sinexctl` config. It exits silently on missing runtime, auth,
-timeout, or empty output. Tune with `SINEX_SESSIONSTART_RECALL=0` (disable),
-`SINEX_SESSIONSTART_RECALL_WINDOW/LIMIT/TIMEOUT_SECS` (defaults `2h`, `8`, 4s).
-
-For deeper history, use Polylogue MCP/search rather than guessing from memory.
-`polylogued.service` is the live ingestion daemon; verify freshness with
+SessionStart hooks (`~/.claude/hooks/sessionstart-{polylogue,sinex}-recall.sh`;
+Codex runs the same commands) print recent matching sessions and a Sinex
+machine-context block; both exit silently when data is unavailable. For deeper
+history use Polylogue MCP/search rather than guessing from memory;
+`polylogued.service` is the live ingestion daemon — verify freshness with
 `polylogued status` when it matters.
