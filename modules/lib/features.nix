@@ -205,6 +205,45 @@ let
       })
     ];
 
+  # Standard shell env-var name for a secret (matches modules/secrets.nix's
+  # own agenix-export derivation): upper-SNAKE_CASE, dots and dashes both
+  # collapse to underscores.
+  secretEnvName = secretName: lib.toUpper (lib.replaceStrings [ "-" "." ] [ "_" "_" ] secretName);
+
+  # Standard secret-resolution shell fragment: prefer an already-exported env
+  # var, else read the agenix runtime path if readable, else fail loudly.
+  # Leaves the resolved value exported in `varName` (defaults to the secret's
+  # derived env-var name).
+  #
+  # Usage: mkSecretLookup { secretName = "vercel-ai-gateway-key"; varName = "OPENAI_API_KEY"; caller = "hermes-muse"; }
+  mkSecretLookup =
+    {
+      # Bare secret name as it appears under secret/<name>.age and
+      # /run/agenix/<name> (see modules/secrets.nix auto-discovery).
+      secretName,
+      # Wrapper/script name used in the error message, e.g. "hermes-muse".
+      caller,
+      # Shell variable the resolved value ends up exported in.
+      varName ? secretEnvName secretName,
+      # Runtime path override; defaults to the standard agenix path.
+      agenixPath ? "/run/agenix/${secretName}",
+    }:
+    let
+      envName = secretEnvName secretName;
+      path = lib.escapeShellArg agenixPath;
+    in
+    ''
+      if [ -n "''${${envName}:-}" ]; then
+        ${varName}="''${${envName}}"
+      elif [ -r ${path} ]; then
+        ${varName}="$(<${path})"
+      else
+        echo "${caller}: no ${secretName} available (set ${envName} or ensure ${agenixPath} is readable)" >&2
+        exit 1
+      fi
+      export ${varName}
+    '';
+
   # ============================================================================
   # Auto-Discovery Helpers
   # ============================================================================
@@ -246,6 +285,7 @@ in
     mkAiService
     mkDotsFileFor
     mkPAMLimits
+    mkSecretLookup
     ;
   inherit mkAutoImports;
 }
