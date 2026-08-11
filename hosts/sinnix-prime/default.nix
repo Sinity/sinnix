@@ -116,6 +116,8 @@
     # llama-server :8081 serving the local reranker (/v1/rerank — an API
     # ollama does not provide). 0.6b Q8 rides fully in VRAM next to other
     # models; the 4B Q4 GGUF sits on disk as the quality-tier swap.
+    # Weekly evidence-joined usage census (bead sinnix-yfr).
+    census.enable = true;
     llama-cpp = {
       enable = true;
       model = "qwen3-reranker-0.6b-q8_0.gguf";
