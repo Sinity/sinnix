@@ -293,8 +293,8 @@ in
     # post-copy), so the DB keeps in-place writes and no-checksums
     # semantics, while the 167G append-only blob store now gets zstd:3
     # like the rest of the filesystem (268G source -> ~112G written).
-    # The old @sinex subvol on the MX500 stays for a 48h burn-in, then
-    # gets deleted + filtered balance (checklist in sinnix-6b4).
+    # The old MX500 @sinex subvol was deleted 2026-08-11 after a month of
+    # NVMe burn-in (sinnix-6b4), reclaiming ~266G on the worn disk.
     "/var/lib/sinex" = {
       device = "/dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a";
       fsType = "btrfs";
@@ -487,8 +487,10 @@ in
       };
     };
 
-    # Ensure the dedicated @sinex subvolume exists before /var/lib/sinex is
-    # mounted. The root btrfs top level (subvolid=5) is not normally mounted, so
+    # Ensure the dedicated sinex subvolume exists on the /realm NVMe before
+    # /var/lib/sinex is mounted (retargeted 2026-08-11: it previously created
+    # the pre-migration @sinex on the MX500 — vestigial since sinnix-6b4).
+    # The btrfs top level (subvolid=5) is not normally mounted, so
     # mount it transiently to create the child subvol with nodatacow. Idempotent:
     # on an already-provisioned host @sinex already exists and this is a no-op;
     # the guard keeps a fresh install / bare-metal restore booting.
@@ -509,10 +511,10 @@ in
         RemainAfterExit = true;
       };
       script = ''
-        dev=/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02
+        dev=/dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a
         tmp=$(mktemp -d)
         mount -o subvolid=5 "$dev" "$tmp"
-        root="$tmp/@sinex"
+        root="$tmp/sinex"
         if ! btrfs subvolume show "$root" >/dev/null 2>&1; then
           btrfs subvolume create "$root"
           chattr +C "$root" || true
