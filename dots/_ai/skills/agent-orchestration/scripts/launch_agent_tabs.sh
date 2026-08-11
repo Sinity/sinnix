@@ -25,6 +25,11 @@ tails_mode=0
 tails_n=12
 tails_all=0
 persist_shell="${SHELL:-bash}"
+codex_sandbox=""
+codex_home=""
+codex_skip_git_check=0
+max_retries=""
+no_agents_md=0
 
 usage() {
   cat <<'EOF'
@@ -51,6 +56,18 @@ Options:
   --workspace <name>           Silently move Kitty OS windows to this Hyprland workspace
   --claude-api-key-auth        Keep ANTHROPIC_API_KEY for Claude instead of subscription auth
   --skip-agents-render         Set SINNIX_SKIP_AGENTS_RENDER=1 for launched agent commands
+  --sandbox <mode>              Codex only: passthrough to `codex exec -s <mode>`
+                                (e.g. read-only). Not persisted; pass every run.
+  --codex-home <path>           Codex only: override CODEX_HOME for every task
+  --no-agents-md                Codex only: auto-provision (and cache, refreshed
+                                when the real config.toml changes) a scratch
+                                CODEX_HOME with auth.json/config.toml/models
+                                copied over but no AGENTS.md, so tasks run
+                                without the global environment-memory file.
+                                Equivalent to a managed --codex-home.
+  --skip-git-repo-check         Codex only: passthrough --skip-git-repo-check
+  --max-retries <n>              Passthrough retry count for the shared-launcher
+                                race (default from run_agent_prompt.sh: 3)
   --persist-windows            Kitty mode: keep each window open after the runner
                                exits (drops to an interactive shell in the task
                                workdir) and write <name>.exit status markers
@@ -171,6 +188,26 @@ while [[ $# -gt 0 ]]; do
   --skip-agents-render)
     skip_agents_render=1
     shift
+    ;;
+  --sandbox)
+    codex_sandbox="${2:?missing value for --sandbox}"
+    shift 2
+    ;;
+  --codex-home)
+    codex_home="${2:?missing value for --codex-home}"
+    shift 2
+    ;;
+  --no-agents-md)
+    no_agents_md=1
+    shift
+    ;;
+  --skip-git-repo-check)
+    codex_skip_git_check=1
+    shift
+    ;;
+  --max-retries)
+    max_retries="${2:?missing value for --max-retries}"
+    shift 2
     ;;
   --dry-run)
     dry_run=1
@@ -508,6 +545,18 @@ run_batch_agent() {
   if [[ ${claude_api_key_auth} -eq 1 ]]; then
     cmd+=(--claude-api-key-auth)
   fi
+  if [[ -n ${codex_sandbox} ]]; then
+    cmd+=(--sandbox "${codex_sandbox}")
+  fi
+  if [[ -n ${codex_home} ]]; then
+    cmd+=(--codex-home "${codex_home}")
+  fi
+  if [[ ${codex_skip_git_check} -eq 1 ]]; then
+    cmd+=(--skip-git-repo-check)
+  fi
+  if [[ -n ${max_retries} ]]; then
+    cmd+=(--max-retries "${max_retries}")
+  fi
 
   if [[ ${dry_run} -eq 1 ]]; then
     printf 'DRY-RUN (%s): ' "${prompt_name}"
@@ -582,6 +631,18 @@ run_kitty_agent() {
   if [[ ${claude_api_key_auth} -eq 1 ]]; then
     launch_cmd+=(--claude-api-key-auth)
   fi
+  if [[ -n ${codex_sandbox} ]]; then
+    launch_cmd+=(--sandbox "${codex_sandbox}")
+  fi
+  if [[ -n ${codex_home} ]]; then
+    launch_cmd+=(--codex-home "${codex_home}")
+  fi
+  if [[ ${codex_skip_git_check} -eq 1 ]]; then
+    launch_cmd+=(--skip-git-repo-check)
+  fi
+  if [[ -n ${max_retries} ]]; then
+    launch_cmd+=(--max-retries "${max_retries}")
+  fi
 
   local window_title="agent-${prompt_name//[^A-Za-z0-9_.-]/-}"
 
@@ -630,6 +691,28 @@ run_kitty_agent() {
     fi
   fi
 }
+
+if [[ (-n ${codex_sandbox} || -n ${codex_home} || ${no_agents_md} -eq 1 || ${codex_skip_git_check} -eq 1) && ${agent} != "codex" ]]; then
+  echo "--sandbox/--codex-home/--no-agents-md/--skip-git-repo-check require --agent codex" >&2
+  exit 2
+fi
+if [[ ${no_agents_md} -eq 1 && -n ${codex_home} ]]; then
+  echo "--no-agents-md and --codex-home are mutually exclusive (--no-agents-md manages its own CODEX_HOME)" >&2
+  exit 2
+fi
+if [[ ${no_agents_md} -eq 1 ]]; then
+  real_codex_home="${CODEX_HOME:-$HOME/.codex}"
+  scratch_codex_home="${XDG_STATE_HOME:-$HOME/.local/state}/sinnix/agent-orchestration/codex-home-no-agents-md"
+  if [[ ! -f ${scratch_codex_home}/config.toml || ${real_codex_home}/config.toml -nt ${scratch_codex_home}/config.toml ]]; then
+    mkdir -p "${scratch_codex_home}"
+    for f in auth.json config.toml models-v1.json; do
+      [[ -f ${real_codex_home}/${f} ]] && cp -f "${real_codex_home}/${f}" "${scratch_codex_home}/${f}"
+    done
+    rm -f "${scratch_codex_home}/AGENTS.md"
+    echo "launch_agent_tabs.sh: (re)provisioned no-AGENTS.md CODEX_HOME at ${scratch_codex_home}" >&2
+  fi
+  codex_home="${scratch_codex_home}"
+fi
 
 # Special handling for codex with spark model
 if [[ ${model} == "gpt-5.3-codex-spark" && -z ${reasoning_effort} ]]; then

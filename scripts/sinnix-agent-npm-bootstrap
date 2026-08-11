@@ -63,11 +63,25 @@ if [ ! -x "$STATE/npm/bin/$binary_name" ]; then
   npm install -g "$npm_package"
 fi
 
-cat > "$STATE/launch.sh" <<LAUNCHER
+# Every invocation of this bootstrap regenerates launch.sh unconditionally
+# (even when content is unchanged), and callers immediately execve() that
+# same path afterward. Writing in place raced a sibling process's execve()
+# against this process's open-for-write: the kernel returns ETXTBSY ("Text
+# file busy") for any execve() of a file currently open for writing, which
+# is unrelated to the flock above (that only serializes the npm reify step,
+# not exec-vs-write). Fanning out many concurrent agent invocations (e.g. a
+# large parallel audit wave) hits this reliably. Fix: write to a sibling
+# temp file and rename(2) into place. rename is atomic on the same
+# filesystem and never triggers ETXTBSY on the target, so concurrent
+# execve() callers always see either the fully-old or fully-new file, never
+# a partial write, and are never blocked by another process's write.
+launch_tmp="$STATE/launch.sh.tmp.$$"
+cat > "$launch_tmp" <<LAUNCHER
 #!/usr/bin/env bash
 export npm_config_prefix="\$HOME/.local/state/$state_dir_name/npm"
 export NPM_CONFIG_PREFIX="\$HOME/.local/state/$state_dir_name/npm"
 PATH="$runtime_path:\$HOME/.local/state/$state_dir_name/npm/bin:\$PATH"
 exec $binary_name "\$@"
 LAUNCHER
-chmod +x "$STATE/launch.sh"
+chmod +x "$launch_tmp"
+mv -f "$launch_tmp" "$STATE/launch.sh"
