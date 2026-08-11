@@ -620,15 +620,11 @@ mkFeatureModule {
           home.file.".local/bin/hermes-muse" = mkHermesWrapper {
             profile = "muse";
             extraPrelude = ''
-              if [ -n "''${VERCEL_AI_GATEWAY_KEY:-}" ]; then
-                export OPENAI_API_KEY="$VERCEL_AI_GATEWAY_KEY"
-              elif [ -r /run/agenix/vercel-ai-gateway-key ]; then
-                OPENAI_API_KEY="$(cat /run/agenix/vercel-ai-gateway-key)"
-                export OPENAI_API_KEY
-              else
-                echo "hermes-muse: no Vercel AI Gateway key available" >&2
-                exit 1
-              fi
+              ${lib.sinnix.mkSecretLookup {
+                secretName = "vercel-ai-gateway-key";
+                varName = "OPENAI_API_KEY";
+                caller = "hermes-muse";
+              }}
               export OPENAI_BASE_URL="https://ai-gateway.vercel.sh/v1"
             '';
           };

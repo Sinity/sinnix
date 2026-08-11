@@ -18,7 +18,7 @@ let
   extendedLib = lib.extend (
     _final: _prev: {
       sinnix = {
-        inherit (featureLib) mkPAMLimits mkAutoImports;
+        inherit (featureLib) mkPAMLimits mkSecretLookup mkAutoImports;
         systemd = systemdLib;
         inherit (systemdLib) mkRuntimeServiceConfig;
         overlay = overlayLib;
