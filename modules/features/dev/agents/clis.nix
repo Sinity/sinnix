@@ -62,27 +62,22 @@ mkFeatureModule {
 
       sinnixCfg = config.sinnix;
 
-      # Runtime path of the agenix-decrypted DeepSeek API key (read at launch by
-      # the deepseek wrappers; falls back gracefully when the secret is absent).
-      deepseekSecretPath = lib.attrByPath [
-        "sinnix"
-        "secrets"
-        "paths"
-        "deepseek-api-key"
-      ] "/run/agenix/deepseek-api-key" config;
+      # The runtime path of the agenix-decrypted DeepSeek API key (read at
+      # launch by the claude-deepseek/codex-deepseek wrappers) is now
+      # resolved by backends.nix's resolveSecretPath, using the same
+      # sinnix.secrets.paths.<name> override lookup this used to do inline.
 
       jsonFormat = pkgs.formats.json { };
       yamlFormat = pkgs.formats.yaml { };
-      inherit (helpers.data) mcpRegistry;
-      hermesMcpServers = lib.mapAttrs mcpRegistry.renderHermesServer (
-        mcpRegistry.selectClientServersForProfile "evidence" "hermes"
-      );
-      hermesResearchMcpServers = lib.mapAttrs mcpRegistry.renderHermesServer (
-        mcpRegistry.selectClientServersForProfile "browser" "hermes"
-      );
-      hermesOrchestrateMcpServers = lib.mapAttrs mcpRegistry.renderHermesServer (
-        mcpRegistry.selectClientServersForProfile "orchestrate" "hermes"
-      );
+      inherit (helpers.data) mcpRegistry agentLanes;
+      hermesMcpServersForProfile =
+        mcpProfile:
+        lib.mapAttrs mcpRegistry.renderHermesServer (
+          mcpRegistry.selectClientServersForProfile mcpProfile "hermes"
+        );
+      # Default MCP tier for the base (non-profile) `hermes` config and any
+      # registry profile that doesn't override `mcpProfile`.
+      hermesMcpServers = hermesMcpServersForProfile "evidence";
       mkHermesConfig =
         {
           name,
@@ -164,107 +159,74 @@ mkFeatureModule {
             non_interactive_local_changes = "stash";
           };
         };
+      # Base (non-profile) `hermes` config — not a registry lane, since
+      # there is nothing to vary it against (see agent-lanes.nix header).
       hermesConfigFile = mkHermesConfig {
         name = "default";
         toolsets = [ "hermes-cli" ];
       };
-      hermesResearchConfigFile = mkHermesConfig {
-        name = "research";
-        mcpServers = hermesResearchMcpServers;
-        toolsets = [
-          "web"
-          "browser"
-          "file"
-          "skills"
-          "todo"
-          "memory"
-          "session_search"
-          "code_execution"
-          "delegation"
-          "clarify"
-        ];
-        reasoningEffort = "high";
-        delegation = {
-          max_iterations = 60;
-          max_concurrent_children = 6;
-          max_spawn_depth = 1;
-        };
-        voiceEnabled = false;
-      };
-      hermesOrchestrateConfigFile = mkHermesConfig {
-        name = "orchestrate";
-        mcpServers = hermesOrchestrateMcpServers;
-        toolsets = [
-          "skills"
-          "todo"
-          "memory"
-          "session_search"
-          "clarify"
-        ];
-        reasoningEffort = "high";
-        voiceEnabled = false;
-      };
-      hermesMirrorConfigFile = mkHermesConfig {
-        name = "mirror";
-        toolsets = [
-          "skills"
-          "todo"
-          "memory"
-          "session_search"
-          "clarify"
-          "tts"
-        ];
-      };
-      # Muse Spark contributor tier via the Vercel AI Gateway. Meta gates the
-      # tier server-side ("select countries") and does not serve it to this
-      # account directly; the gateway carries it at contributor list prices.
-      # The hermes-muse wrapper exports OPENAI_API_KEY from the
-      # vercel-ai-gateway-key agenix secret (custom endpoints prefer
-      # OPENAI_API_KEY — hermes-agent issue #560).
-      hermesMuseConfigFile = mkHermesConfig {
-        name = "muse";
-        toolsets = [ "hermes-cli" ];
-        model = {
-          default = "meta/muse-spark-1.2-contributor";
-          provider = "custom";
-          base_url = "https://ai-gateway.vercel.sh/v1";
-        };
-      };
-      # Local Ollama hub via the LiteLLM gateway; model names live in
-      # litellm.nix's model_list. A profile (not an imperative `hermes config
-      # set` at launch) so the default config is never mutated.
-      hermesLocalConfigFile = mkHermesConfig {
-        name = "local";
-        toolsets = [ "hermes-cli" ];
-        model = {
-          default = "local-chat";
-          provider = "custom";
-          base_url = "http://127.0.0.1:4000/v1";
-        };
-      };
-      claudeMcpServers = lib.mapAttrs mcpRegistry.renderClaudeServer (
-        mcpRegistry.selectClientServersForProfile "full" "claude"
-      );
-      claudeLeanMcpServers = lib.mapAttrs mcpRegistry.renderClaudeServer (
-        mcpRegistry.selectClientServersForProfile "lean" "claude"
-      );
-      claudeBrowserMcpServers = lib.mapAttrs mcpRegistry.renderClaudeServer (
-        mcpRegistry.selectClientServersForProfile "browser" "claude"
-      );
+      # One mkHermesConfig call per flake/data/agent-lanes.nix hermesProfiles
+      # entry, keyed by profile name (research/orchestrate/mirror/muse/local).
+      hermesProfileConfigFiles = lib.mapAttrs (
+        name: profile:
+        mkHermesConfig (
+          {
+            inherit name;
+            toolsets = profile.toolsets;
+            mcpServers = hermesMcpServersForProfile (profile.mcpProfile or "evidence");
+          }
+          // lib.optionalAttrs (profile ? reasoningEffort) { inherit (profile) reasoningEffort; }
+          // lib.optionalAttrs (profile ? delegation) { inherit (profile) delegation; }
+          // lib.optionalAttrs (profile ? voiceEnabled) { inherit (profile) voiceEnabled; }
+          // lib.optionalAttrs (profile ? model) { inherit (profile) model; }
+        )
+      ) agentLanes.hermesProfiles;
+      # Extra launch-time shell for hermes-<name> wrappers whose model uses a
+      # custom (non-default) endpoint: OPENAI_BASE_URL always comes straight
+      # from the profile's own `model.base_url` (one source for the URL);
+      # OPENAI_API_KEY comes from an agenix secret (`preludeSecret`) via
+      # lib.sinnix.mkSecretLookup, or a static loopback dev token
+      # (`apiKeyLiteral`) for lanes with neither.
+      hermesWrapperExtraPrelude =
+        name: profile:
+        if profile ? preludeSecret then
+          ''
+            ${lib.sinnix.mkSecretLookup {
+              secretName = profile.preludeSecret;
+              varName = "OPENAI_API_KEY";
+              caller = "hermes-${name}";
+            }}
+            export OPENAI_BASE_URL="${profile.model.base_url}"
+          ''
+        else if profile ? apiKeyLiteral then
+          ''
+            export OPENAI_BASE_URL="${profile.model.base_url}"
+            export OPENAI_API_KEY="${profile.apiKeyLiteral}"
+          ''
+        else
+          "";
       # Dedicated registry-driven MCP config consumed via `claude --mcp-config`.
       # Claude Code 2.x does NOT read `mcpServers` from settings.json — only
       # `.mcp.json` (project), `~/.claude.json` (user, managed by `claude mcp add`),
       # or `--mcp-config <file>` recognise stdio servers. This file is the
       # registry's connection point.
-      claudeMcpConfigFile = jsonFormat.generate "claude-mcp.json" {
-        mcpServers = claudeMcpServers;
-      };
-      claudeLeanMcpConfigFile = jsonFormat.generate "claude-mcp-lean.json" {
-        mcpServers = claudeLeanMcpServers;
-      };
-      claudeBrowserMcpConfigFile = jsonFormat.generate "claude-mcp-browser.json" {
-        mcpServers = claudeBrowserMcpServers;
-      };
+      #
+      # Only "full"/"lean"/"browser" are distinct MCP tiers — deepseek/local
+      # (see agent-lanes.nix claudeLanes) intentionally reuse "full"'s file,
+      # so this builds one config per distinct `mcpProfile` value rather than
+      # one per lane.
+      claudeMcpFileBaseName = mcpProfile: if mcpProfile == "full" then "mcp" else "mcp-${mcpProfile}";
+      claudeMcpProfiles = lib.unique (
+        lib.mapAttrsToList (_: lane: lane.mcpProfile) agentLanes.claudeLanes
+      );
+      claudeMcpConfigFilesByProfile = lib.genAttrs claudeMcpProfiles (
+        mcpProfile:
+        jsonFormat.generate "claude-${claudeMcpFileBaseName mcpProfile}.json" {
+          mcpServers = lib.mapAttrs mcpRegistry.renderClaudeServer (
+            mcpRegistry.selectClientServersForProfile mcpProfile "claude"
+          );
+        }
+      );
       sharedSkillNames = import ../../../../flake/data/shared-agent-skills.nix;
       # Out-of-store by construction: the farm is a store directory, but every
       # entry symlinks into the live dots checkout rather than a copied source.
@@ -298,6 +260,8 @@ mkFeatureModule {
       };
       inherit (backends)
         mkNpmBootstrap
+        mkClaudeBackendEnv
+        mkCodexBackendEnv
         mkClaudeCodeWrapper
         mkCodexWrapper
         mkGrokWrapper
@@ -309,13 +273,7 @@ mkFeatureModule {
     in
     {
       sinnix.features.dev.agentTools.hermesConfigSource = hermesConfigFile;
-      sinnix.features.dev.agentTools.hermesProfileConfigSources = {
-        research = hermesResearchConfigFile;
-        orchestrate = hermesOrchestrateConfigFile;
-        mirror = hermesMirrorConfigFile;
-        muse = hermesMuseConfigFile;
-        local = hermesLocalConfigFile;
-      };
+      sinnix.features.dev.agentTools.hermesProfileConfigSources = hermesProfileConfigFiles;
       sinnix.persistence.home = {
         directories = [
           {
@@ -400,38 +358,50 @@ mkFeatureModule {
           };
 
           programs.zsh = {
-            shellAliases = {
-              # `claude` routes through claude-lean (NOT a bare ~/.local/bin/claude):
-              # Claude Code's native local-installer claims the literal path
-              # ~/.local/bin/claude and clobbers any symlink there on auto-update,
-              # which is what repeatedly broke the bare command. Suffixed names are
-              # never touched, so the wrapper lives at claude-lean and the alias
-              # points here.
-              claude = "~/.local/bin/claude-lean";
-              claude-full = "~/.local/bin/claude-full";
-              claude-browser = "~/.local/bin/claude-browser";
-              claude-deepseek = "~/.local/bin/claude-deepseek";
-              claude-local = "~/.local/bin/claude-local";
-              codex = "~/.local/bin/codex";
-              codex-full = "~/.local/bin/codex-full";
-              codex-browser = "~/.local/bin/codex-browser";
-              codex-deepseek = "~/.local/bin/codex-deepseek";
-              codex-local = "~/.local/bin/codex-local";
-              gemini = "~/.local/bin/gemini";
-              grok = "~/.local/bin/grok-sinnix";
-              agy = "~/.local/bin/agy-sinnix";
-              hermes = "~/.local/bin/hermes";
-              hermes-research = "~/.local/bin/hermes-research";
-              hermes-orchestrate = "~/.local/bin/hermes-orchestrate";
-              hermes-mirror = "~/.local/bin/hermes-mirror";
-              hermes-local = "~/.local/bin/hermes-local";
-              hermes-muse = "~/.local/bin/hermes-muse";
-              muse-contrib = "~/.local/bin/muse-contrib";
-              hermes-acp = "~/.local/bin/hermes-acp";
-              hermes-update = "~/.local/bin/hermes-update";
-              muse = "~/.local/bin/muse-code";
-              muse-code = "~/.local/bin/muse-code";
-            };
+            # Derived from flake/data/agent-lanes.nix rather than hand-listed:
+            # every generated wrapper gets a self-alias (its own binName),
+            # except claude-lean (its file is named claude-lean specifically
+            # to dodge Claude Code's local-installer clobbering
+            # ~/.local/bin/claude on auto-update — see claudeLanes.lean in
+            # agent-lanes.nix) and the base `hermes` command, `grok`/`agy`
+            # vendor passthroughs, and `muse` (hardcoded remaps below since
+            # they have no registry lane of their own or point at a
+            # differently-named lane).
+            shellAliases =
+              let
+                selfAlias = binName: lib.nameValuePair binName "~/.local/bin/${binName}";
+              in
+              (lib.listToAttrs (
+                lib.concatMap (
+                  name: lib.optional (name != "lean") (selfAlias agentLanes.claudeLanes.${name}.binName)
+                ) (lib.attrNames agentLanes.claudeLanes)
+              ))
+              // (lib.listToAttrs (
+                map (name: selfAlias agentLanes.codexLanes.${name}.binName) (lib.attrNames agentLanes.codexLanes)
+              ))
+              // (lib.listToAttrs (
+                map (name: lib.nameValuePair "hermes-${name}" "~/.local/bin/hermes-${name}") (
+                  lib.attrNames agentLanes.hermesProfiles
+                )
+              ))
+              // (lib.listToAttrs (map selfAlias (lib.attrNames agentLanes.museLanes)))
+              // {
+                # `claude` routes through claude-lean (NOT a bare
+                # ~/.local/bin/claude): Claude Code's native local-installer
+                # claims the literal path ~/.local/bin/claude and clobbers
+                # any symlink there on auto-update, which is what repeatedly
+                # broke the bare command. Suffixed names are never touched,
+                # so the wrapper lives at claude-lean and the alias points
+                # here.
+                claude = "~/.local/bin/claude-lean";
+                gemini = "~/.local/bin/gemini";
+                grok = "~/.local/bin/grok-sinnix";
+                agy = "~/.local/bin/agy-sinnix";
+                hermes = "~/.local/bin/hermes";
+                hermes-acp = "~/.local/bin/hermes-acp";
+                hermes-update = "~/.local/bin/hermes-update";
+                muse = "~/.local/bin/muse-code";
+              };
           };
 
           xdg.configFile = {
@@ -444,16 +414,18 @@ mkFeatureModule {
             };
             "claude/hooks/sessionstart-beads-prime.sh".source =
               mkDotsFile "/claude/hooks/sessionstart-beads-prime.sh";
-            # Registry-driven MCP config consumed by the claude wrapper.
-            "claude/mcp.json".source = claudeMcpConfigFile;
-            "claude/mcp-lean.json".source = claudeLeanMcpConfigFile;
-            "claude/mcp-browser.json".source = claudeBrowserMcpConfigFile;
             "claude/CLAUDE.md".source = mkDotsFile "/claude/CLAUDE.md";
             "claude/skills" = {
               source = sharedSkillFarm;
               force = true;
             };
-          };
+          }
+          # Registry-driven MCP configs consumed by the claude wrapper, one
+          # per distinct claudeLanes mcpProfile ("mcp"/"mcp-lean"/"mcp-browser").
+          // lib.mapAttrs' (
+            mcpProfile: file:
+            lib.nameValuePair "claude/${claudeMcpFileBaseName mcpProfile}.json" { source = file; }
+          ) claudeMcpConfigFilesByProfile;
 
           home.activation.claudeSymlink = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
             mkdir -p $HOME/.config/claude
@@ -465,22 +437,14 @@ mkFeatureModule {
             cp ${hermesConfigFile} "$HOME/.hermes/config.yaml"
             chmod 600 "$HOME/.hermes/config.yaml"
 
-            for profile in research orchestrate mirror muse local; do
-              mkdir -p "$HOME/.hermes/profiles/$profile"
-              ln -sfn ../../auth.json "$HOME/.hermes/profiles/$profile/auth.json"
-              ln -sfn ../../.env "$HOME/.hermes/profiles/$profile/.env"
-              ln -sfn ../../SOUL.md "$HOME/.hermes/profiles/$profile/SOUL.md"
-            done
-            cp ${hermesResearchConfigFile} "$HOME/.hermes/profiles/research/config.yaml"
-            cp ${hermesOrchestrateConfigFile} "$HOME/.hermes/profiles/orchestrate/config.yaml"
-            cp ${hermesMirrorConfigFile} "$HOME/.hermes/profiles/mirror/config.yaml"
-            cp ${hermesMuseConfigFile} "$HOME/.hermes/profiles/muse/config.yaml"
-            cp ${hermesLocalConfigFile} "$HOME/.hermes/profiles/local/config.yaml"
-            chmod 600 "$HOME/.hermes/profiles/research/config.yaml" \
-              "$HOME/.hermes/profiles/orchestrate/config.yaml" \
-              "$HOME/.hermes/profiles/mirror/config.yaml" \
-              "$HOME/.hermes/profiles/muse/config.yaml" \
-              "$HOME/.hermes/profiles/local/config.yaml"
+            ${lib.concatMapStringsSep "\n" (name: ''
+              mkdir -p "$HOME/.hermes/profiles/${name}"
+              ln -sfn ../../auth.json "$HOME/.hermes/profiles/${name}/auth.json"
+              ln -sfn ../../.env "$HOME/.hermes/profiles/${name}/.env"
+              ln -sfn ../../SOUL.md "$HOME/.hermes/profiles/${name}/SOUL.md"
+              cp ${hermesProfileConfigFiles.${name}} "$HOME/.hermes/profiles/${name}/config.yaml"
+              chmod 600 "$HOME/.hermes/profiles/${name}/config.yaml"
+            '') (lib.attrNames hermesProfileConfigFiles)}
           '';
           # Codex/Gemini read the global instruction file directly; CLAUDE.md is
           # flat (no @-transclusion), so a symlink replaces the old render step
@@ -491,168 +455,132 @@ mkFeatureModule {
             ln -sfn "$HOME/.config/claude/CLAUDE.md" "$HOME/.gemini/GEMINI.md"
           '';
 
-          # Full/default profile. Named claude-full (not claude) so Claude Code's
-          # native local-installer can't clobber it; the `claude` alias points here.
-          home.file.".local/bin/claude-full" = mkClaudeCodeWrapper { };
-          home.file.".local/bin/claude-lean" = mkClaudeCodeWrapper {
-            mcpConfigName = "mcp-lean";
-          };
-          home.file.".local/bin/claude-browser" = mkClaudeCodeWrapper {
-            mcpConfigName = "mcp-browser";
-          };
-
-          # DeepSeek through the real Claude Code harness via its native
-          # Anthropic-compatible endpoint. Full/default MCP profile.
-          home.file.".local/bin/claude-deepseek" = mkClaudeCodeWrapper {
-            extraEnv = ''
-              if [ ! -r ${lib.escapeShellArg deepseekSecretPath} ]; then
-                echo "claude-deepseek: cannot read ${deepseekSecretPath}" >&2
-                exit 1
-              fi
-              export ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic"
-              ANTHROPIC_AUTH_TOKEN="$(<${lib.escapeShellArg deepseekSecretPath})"
-              export ANTHROPIC_AUTH_TOKEN
-              DEEPSEEK_MODEL="deepseek-chat"
-              export ANTHROPIC_MODEL="$DEEPSEEK_MODEL"
-              export ANTHROPIC_DEFAULT_OPUS_MODEL="$DEEPSEEK_MODEL"
-              export ANTHROPIC_DEFAULT_SONNET_MODEL="$DEEPSEEK_MODEL"
-              export ANTHROPIC_DEFAULT_HAIKU_MODEL="$DEEPSEEK_MODEL"
-              export CLAUDE_CODE_SUBAGENT_MODEL="$DEEPSEEK_MODEL"
-            '';
-          };
-
-          # Local models through the real Claude Code harness, via the LiteLLM
-          # gateway that translates Anthropic ↔ OpenAI (modules/services/litellm.nix).
-          # Full/default MCP profile. Model names are defined in that module's
-          # model_list; keep ANTHROPIC_MODEL in sync with an entry there.
-          home.file.".local/bin/claude-local" = mkClaudeCodeWrapper {
-            extraEnv = ''
-              export ANTHROPIC_BASE_URL="http://127.0.0.1:4000"
-              # LiteLLM binds loopback with no master key; Claude Code still
-              # requires a non-empty token, so send a dummy.
-              export ANTHROPIC_AUTH_TOKEN="sk-local"
-              LOCAL_MODEL="local-chat"
-              export ANTHROPIC_MODEL="$LOCAL_MODEL"
-              export ANTHROPIC_DEFAULT_OPUS_MODEL="$LOCAL_MODEL"
-              export ANTHROPIC_DEFAULT_SONNET_MODEL="$LOCAL_MODEL"
-              export ANTHROPIC_DEFAULT_HAIKU_MODEL="$LOCAL_MODEL"
-              export CLAUDE_CODE_SUBAGENT_MODEL="$LOCAL_MODEL"
-            '';
-          };
-
-          home.file.".local/bin/sessionstart-sinex-recall" = {
-            text = ''
-              #!${pkgs.runtimeShell}
-              exec "$HOME/.claude/hooks/sessionstart-sinex-recall.sh" "$@"
-            '';
-            executable = true;
-            force = true;
-          };
-
-          home.file.".local/bin/codex" = mkCodexWrapper { profile = "lean"; };
-          home.file.".local/bin/codex-full" = mkCodexWrapper { profile = "full"; };
-          home.file.".local/bin/codex-browser" = mkCodexWrapper { profile = "browser"; };
-
-          # DeepSeek / local through Codex. The layered <profile>.config.toml
-          # (generated in mcp.nix's client-profiles.nix) carries the model +
-          # model_provider + full MCP table; the wrapper only supplies the
-          # provider API key env.
-          home.file.".local/bin/codex-deepseek" = mkCodexWrapper {
-            profile = "deepseek";
-            extraEnv = ''
-              if [ ! -r ${lib.escapeShellArg deepseekSecretPath} ]; then
-                echo "codex-deepseek: cannot read ${deepseekSecretPath}" >&2
-                exit 1
-              fi
-              DEEPSEEK_API_KEY="$(<${lib.escapeShellArg deepseekSecretPath})"
-              export DEEPSEEK_API_KEY
-            '';
-          };
-          home.file.".local/bin/codex-local" = mkCodexWrapper {
-            profile = "local";
-            # LiteLLM needs no real key on loopback; the provider's env_key must
-            # still resolve to a non-empty value.
-            extraEnv = ''export LITELLM_LOCAL_KEY="sk-local"'';
-          };
-
-          home.file.".local/bin/gemini" = {
-            text = ''
-              #!/usr/bin/env bash
-              set -euo pipefail
-
-              ${mkNpmBootstrap {
-                stateDir = "gemini";
-                npmPackage = "@google/gemini-cli";
-                binaryName = "gemini";
-              }}
-
-              exec ${agentScopeExec} "$STATE/launch.sh" "$@"
-            '';
-            executable = true;
-            force = true;
-          };
-
-          # Vendor-managed CLIs self-update in place. Keep their canonical
-          # binaries untouched and route use through distinct Nix-managed
-          # wrappers so launches share agent.slice containment.
-          home.file.".local/bin/grok-sinnix" = mkGrokWrapper;
-          home.file.".local/bin/agy-sinnix" = mkAntigravityWrapper;
-          home.file.".local/bin/muse-code" = {
-            source = "${scriptPkgs.sinnix-muse-code-bootstrap}/bin/sinnix-muse-code-bootstrap";
-            force = true;
-          };
-          home.file.".local/bin/muse-contrib" = {
-            source = "${scriptPkgs.muse-contrib}/bin/muse-contrib";
-            force = true;
-          };
-
-          home.file.".config/hermes/skills" = {
-            source = sharedSkillFarm;
-            force = true;
-          };
-          home.file.".local/bin/hermes" = mkHermesWrapper { };
-          home.file.".local/bin/hermes-research" = mkHermesWrapper { profile = "research"; };
-          home.file.".local/bin/hermes-orchestrate" = mkHermesWrapper { profile = "orchestrate"; };
-          home.file.".local/bin/hermes-mirror" = mkHermesWrapper { profile = "mirror"; };
-          home.file.".local/bin/hermes-acp" = mkHermesWrapper {
-            entrypoint = "hermes-acp";
-          };
-          home.file.".local/bin/hermes-muse" = mkHermesWrapper {
-            profile = "muse";
-            extraPrelude = ''
-              ${lib.sinnix.mkSecretLookup {
-                secretName = "vercel-ai-gateway-key";
-                varName = "OPENAI_API_KEY";
-                caller = "hermes-muse";
-              }}
-              export OPENAI_BASE_URL="https://ai-gateway.vercel.sh/v1"
-            '';
-          };
-          home.file.".local/bin/hermes-local" = mkHermesWrapper {
-            profile = "local";
-            extraPrelude = ''
-              export OPENAI_BASE_URL="http://127.0.0.1:4000/v1"
-              export OPENAI_API_KEY="sk-local"
-            '';
-          };
-          home.file.".local/bin/hermes-update" = {
-            text = ''
-              #!/usr/bin/env bash
-              set -euo pipefail
-
-              ${hermesBootstrap}
-
-              ${ensureHermes}
-              git -C "$HERMES_INSTALL_DIR" pull --ff-only
-              (
-                cd "$HERMES_INSTALL_DIR"
-                UV_PROJECT_ENVIRONMENT="$HERMES_INSTALL_DIR/venv" uv sync --extra all --extra voice --extra edge-tts --extra nemo-relay --locked
+          # A single merged home.file set: static entries below plus one
+          # generated entry per flake/data/agent-lanes.nix lane
+          # (claude/codex/hermes/muse). Kept as one `//`-merged assignment
+          # (rather than scattered home.file.".local/bin/x = ..." statements
+          # alongside it) because Nix attrpath merging inside one attrset
+          # literal only combines further dotted bindings under a prefix —
+          # mixing that with a direct `home.file = {...}` assignment for the
+          # same attribute is a duplicate-definition error, not a merge.
+          home.file =
+            # One entry per claudeLanes lane (full/lean/browser get no
+            # extraEnv; deepseek/local layer a backend switch via
+            # backends.nix's mkClaudeBackendEnv). "full" is named claude-full
+            # (not claude) so Claude Code's native local-installer can't
+            # clobber it; the `claude` alias points here.
+            (lib.mapAttrs' (
+              name: lane:
+              lib.nameValuePair ".local/bin/${lane.binName}" (
+                mkClaudeCodeWrapper (
+                  {
+                    mcpConfigName = claudeMcpFileBaseName lane.mcpProfile;
+                  }
+                  // lib.optionalAttrs (lane ? env) {
+                    extraEnv = mkClaudeBackendEnv {
+                      inherit name;
+                      inherit (lane) model;
+                      inherit (lane.env) baseUrl authToken;
+                    };
+                  }
+                )
               )
-              exec "$HERMES_INSTALL_DIR/venv/bin/hermes" --version
-            '';
-            executable = true;
-            force = true;
-          };
+            ) agentLanes.claudeLanes)
+            # One entry per codexLanes lane. The layered <profile>.config.toml
+            # (generated in mcp.nix's client-profiles.nix) carries the model +
+            # model_provider + full MCP table for deepseek/local; the wrapper
+            # only supplies the provider API key env via backends.nix's
+            # mkCodexBackendEnv.
+            // (lib.mapAttrs' (
+              name: lane:
+              lib.nameValuePair ".local/bin/${lane.binName}" (
+                mkCodexWrapper (
+                  {
+                    profile = lane.mcpProfile;
+                  }
+                  // lib.optionalAttrs (lane ? env) {
+                    extraEnv = mkCodexBackendEnv ({ inherit name; } // lane.env);
+                  }
+                )
+              )
+            ) agentLanes.codexLanes)
+            # One entry per hermesProfiles lane.
+            // (lib.mapAttrs' (
+              name: profile:
+              lib.nameValuePair ".local/bin/hermes-${name}" (mkHermesWrapper {
+                profile = name;
+                extraPrelude = hermesWrapperExtraPrelude name profile;
+              })
+            ) agentLanes.hermesProfiles)
+            # museLanes: thin passthrough wrappers around packaged scripts.
+            // (lib.mapAttrs' (
+              name: lane:
+              lib.nameValuePair ".local/bin/${name}" {
+                source = "${scriptPkgs.${lane.script}}/bin/${lane.script}";
+                force = true;
+              }
+            ) agentLanes.museLanes)
+            // {
+              ".local/bin/sessionstart-sinex-recall" = {
+                text = ''
+                  #!${pkgs.runtimeShell}
+                  exec "$HOME/.claude/hooks/sessionstart-sinex-recall.sh" "$@"
+                '';
+                executable = true;
+                force = true;
+              };
+
+              ".local/bin/gemini" = {
+                text = ''
+                  #!/usr/bin/env bash
+                  set -euo pipefail
+
+                  ${mkNpmBootstrap {
+                    stateDir = "gemini";
+                    npmPackage = "@google/gemini-cli";
+                    binaryName = "gemini";
+                  }}
+
+                  exec ${agentScopeExec} "$STATE/launch.sh" "$@"
+                '';
+                executable = true;
+                force = true;
+              };
+
+              # Vendor-managed CLIs self-update in place. Keep their canonical
+              # binaries untouched and route use through distinct Nix-managed
+              # wrappers so launches share agent.slice containment.
+              ".local/bin/grok-sinnix" = mkGrokWrapper;
+              ".local/bin/agy-sinnix" = mkAntigravityWrapper;
+
+              ".config/hermes/skills" = {
+                source = sharedSkillFarm;
+                force = true;
+              };
+              # Base (non-profile) hermes command — not a registry lane.
+              ".local/bin/hermes" = mkHermesWrapper { };
+              ".local/bin/hermes-acp" = mkHermesWrapper {
+                entrypoint = "hermes-acp";
+              };
+              ".local/bin/hermes-update" = {
+                text = ''
+                  #!/usr/bin/env bash
+                  set -euo pipefail
+
+                  ${hermesBootstrap}
+
+                  ${ensureHermes}
+                  git -C "$HERMES_INSTALL_DIR" pull --ff-only
+                  (
+                    cd "$HERMES_INSTALL_DIR"
+                    UV_PROJECT_ENVIRONMENT="$HERMES_INSTALL_DIR/venv" uv sync --extra all --extra voice --extra edge-tts --extra nemo-relay --locked
+                  )
+                  exec "$HERMES_INSTALL_DIR/venv/bin/hermes" --version
+                '';
+                executable = true;
+                force = true;
+              };
+            };
         };
 
       environment.systemPackages = [
