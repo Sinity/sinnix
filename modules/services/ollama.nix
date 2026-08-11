@@ -85,6 +85,9 @@ mkServiceModule {
         # Voyage 4 nano — the open-weight member of the Voyage 4 shared
         # embedding space (community GGUF).
         "hf.co/jsonMartin/voyage-4-nano-gguf"
+        # ReaderLM-v2: Jina's open 1.5B HTML->markdown/JSON converter
+        # (beats GPT-4o-class on that niche; 512K combined tokens).
+        "hf.co/rbehzadan/ReaderLM-v2.gguf"
       ];
       description = "Models pre-pulled by the ollama-model-loader oneshot.";
     };

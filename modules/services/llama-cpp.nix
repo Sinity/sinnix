@@ -38,6 +38,11 @@ mkServiceModule {
       default = "";
       description = "Control-vector GGUF filename under model/control-vectors to apply (empty = none).";
     };
+    extraFlags = args.lib.mkOption {
+      type = args.lib.types.attrsOf args.lib.types.anything;
+      default = { };
+      description = "Extra llama-server settings merged verbatim (e.g. { reranking = true; }).";
+    };
   };
   configFn =
     {
@@ -65,7 +70,8 @@ mkServiceModule {
         }
         // lib.optionalAttrs (cfg.controlVector != "") {
           control-vector = "${modelRoot}/control-vectors/${cfg.controlVector}";
-        };
+        }
+        // cfg.extraFlags;
       };
     };
 } args

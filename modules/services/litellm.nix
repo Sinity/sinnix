@@ -105,6 +105,13 @@ mkServiceModule {
               };
             }
             {
+              model_name = "local-reader";
+              litellm_params = {
+                model = "ollama_chat/hf.co/rbehzadan/ReaderLM-v2.gguf";
+                api_base = "http://127.0.0.1:11434";
+              };
+            }
+            {
               model_name = "local-multimodal-moe";
               litellm_params = {
                 model = "ollama_chat/gemma4:26b";
