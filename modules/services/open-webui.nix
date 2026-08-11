@@ -35,6 +35,7 @@ mkAiService {
       cfg,
       config,
       lib,
+      helpers,
       ...
     }:
     {
@@ -50,9 +51,12 @@ mkAiService {
           DO_NOT_TRACK = "True";
           ENABLE_OPENAI_API = "False";
 
-          # RAG / document chat via the Ollama embedding model.
+          # RAG / document chat via the Ollama embedding model. Sourced from
+          # flake/data/local-models.nix (the roster shared with ollama.nix's
+          # loadModels and litellm.nix's model_list) — edit the roster
+          # there, not here.
           RAG_EMBEDDING_ENGINE = "ollama";
-          RAG_EMBEDDING_MODEL = "qwen3-embedding:0.6b";
+          RAG_EMBEDDING_MODEL = helpers.data.localModels.ragEmbeddingOllamaTag;
           RAG_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 
           # Read-aloud / voice-call via the OpenedAI-Speech bridge (TTS service).
