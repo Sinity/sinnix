@@ -39,6 +39,10 @@ internal_agent_scope=0
 job_started_epoch="$(date +%s)"
 actual_agent_pid=""
 actual_agent_proc_start=""
+codex_sandbox=""
+codex_home=""
+codex_skip_git_check=0
+max_retries=3
 
 usage() {
   cat <<'EOF'
@@ -62,6 +66,20 @@ Existing options:
   --ephemeral
   --claude-api-key-auth       Keep ANTHROPIC_API_KEY for Claude instead of subscription auth
   --credential-profile <subscription|api>
+
+Codex-specific options (ignored by other backends):
+  --sandbox <mode>            Passthrough to `codex exec -s <mode>` (e.g. read-only)
+  --codex-home <path>         Override CODEX_HOME for this invocation only (e.g. a
+                               scratch dir with no AGENTS.md, to run without global
+                               environment-memory context)
+  --skip-git-repo-check       Passthrough to `codex exec --skip-git-repo-check`
+
+Resilience:
+  --max-retries <n>           Retry the agent invocation up to n times (default 3)
+                               if its log shows a transient launcher race
+                               ("Text file busy" from the shared npm-bootstrap
+                               launcher regenerating mid-exec under concurrent
+                               fanout). 0 disables retry.
 
 Attested job options:
   --job-id <stable-id>        Generated when omitted
@@ -200,6 +218,22 @@ while [[ $# -gt 0 ]]; do
     credential_profile="${2:?missing value for --credential-profile}"
     shift 2
     ;;
+  --sandbox)
+    codex_sandbox="${2:?missing value for --sandbox}"
+    shift 2
+    ;;
+  --codex-home)
+    codex_home="${2:?missing value for --codex-home}"
+    shift 2
+    ;;
+  --skip-git-repo-check)
+    codex_skip_git_check=1
+    shift
+    ;;
+  --max-retries)
+    max_retries="${2:?missing value for --max-retries}"
+    shift 2
+    ;;
   -h | --help)
     usage
     exit 0
@@ -253,6 +287,10 @@ fi
 }
 [[ ${credential_profile} == subscription || ${credential_profile} == api ]] || {
   echo "invalid --credential-profile" >&2
+  exit 2
+}
+[[ ${max_retries} =~ ^[0-9]+$ && ${max_retries} -le 10 ]] || {
+  echo "invalid --max-retries: ${max_retries}" >&2
   exit 2
 }
 [[ ${credential_profile} != api ]] || claude_api_key_auth=1
@@ -467,6 +505,10 @@ if [[ ${internal_agent_scope} -eq 0 && -z ${SINNIX_AGENT_SCOPED:-} ]]; then
   [[ -z ${json_file} ]] || inner_args+=(--json-file "${json_file}")
   [[ -z ${last_file} ]] || inner_args+=(--last-file "${last_file}")
   [[ -z ${schema_file} ]] || inner_args+=(--schema-file "${schema_file}")
+  [[ -z ${codex_sandbox} ]] || inner_args+=(--sandbox "${codex_sandbox}")
+  [[ -z ${codex_home} ]] || inner_args+=(--codex-home "${codex_home}")
+  [[ ${codex_skip_git_check} -eq 0 ]] || inner_args+=(--skip-git-repo-check)
+  inner_args+=(--max-retries "${max_retries}")
   [[ ${json_mode} -eq 0 ]] || inner_args+=(--json)
   [[ ${skip_agents_render} -eq 0 ]] || inner_args+=(--skip-agents-render)
   [[ ${ephemeral} -eq 0 ]] || inner_args+=(--ephemeral)
@@ -537,10 +579,26 @@ run_with_optional_env() {
   [[ ${agent} != claude || ${claude_api_key_auth} -eq 1 || -z ${ANTHROPIC_API_KEY+x} ]] || :
   if [[ ${agent} == claude && ${claude_api_key_auth} -eq 1 && -n ${ANTHROPIC_API_KEY+x} ]]; then env_args+=("ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"); fi
   [[ ${skip_agents_render} -eq 0 ]] || env_args+=(SINNIX_SKIP_AGENTS_RENDER=1)
+  [[ ${agent} != codex || -z ${codex_home} ]] || env_args+=("CODEX_HOME=${codex_home}")
   "${env_args[@]}" "$@"
 }
 
+# Detects the transient sinnix-agent-npm-bootstrap launcher race: every
+# wrapped-CLI invocation regenerates ~/.local/state/<tool>/launch.sh
+# in-place and then execve()s it; a sibling process's execve() during that
+# window returns ETXTBSY ("Text file busy"), independent of the model/task
+# itself. Fixed at the source (atomic rename) in
+# scripts/sinnix-agent-npm-bootstrap, but this retry is kept as defense in
+# depth for hosts that haven't rebuilt yet and for any other transient
+# collision in the launcher chain. Never retries a genuine task failure.
+looks_like_launcher_race() {
+  local target="$1"
+  [[ -s ${target} ]] && grep -Fq 'Text file busy' "${target}"
+}
+
 set +e
+retry_attempt=0
+while true; do
 case "${agent}" in
 codex)
   [[ -n ${model} && -n ${last_file} ]] || {
@@ -550,6 +608,8 @@ codex)
   cmd=("${agent_bin}" exec -C "${workdir}" --model "${model}" --output-last-message "${last_file}")
   [[ -z ${reasoning_effort} ]] || cmd+=(-c "model_reasoning_effort=\"${reasoning_effort}\"")
   [[ -z ${schema_file} ]] || cmd+=(--output-schema "${schema_file}")
+  [[ -z ${codex_sandbox} ]] || cmd+=(-s "${codex_sandbox}")
+  [[ ${codex_skip_git_check} -eq 0 ]] || cmd+=(--skip-git-repo-check)
   [[ ${ephemeral} -eq 0 ]] || cmd+=(--ephemeral)
   [[ ${json_mode} -eq 0 ]] || cmd+=(--json)
   cmd+=(-)
@@ -638,6 +698,23 @@ antigravity)
   ;;
 esac
 status=$?
+if [[ ${status} -eq 0 || ${retry_attempt} -ge ${max_retries} ]]; then
+  break
+fi
+race_detected=0
+looks_like_launcher_race "${log_file}" && race_detected=1
+if [[ ${race_detected} -eq 0 && -n ${json_file} ]]; then
+  looks_like_launcher_race "${json_file}" && race_detected=1
+fi
+if [[ ${race_detected} -eq 0 ]]; then
+  break
+fi
+retry_attempt=$((retry_attempt + 1))
+mv -f "${log_file}" "${log_file}.attempt${retry_attempt}" 2>/dev/null || true
+[[ -z ${json_file} ]] || mv -f "${json_file}" "${json_file}.attempt${retry_attempt}" 2>/dev/null || true
+echo "run_agent_prompt.sh: launcher race detected, retrying (attempt ${retry_attempt}/${max_retries})" >&2
+sleep "0.$(( (RANDOM % 900) + 100 ))" 2>/dev/null || sleep 1
+done
 set -e
 
 if [[ ${status} -eq 0 ]]; then write_manifest succeeded 0; else write_manifest failed "${status}"; fi

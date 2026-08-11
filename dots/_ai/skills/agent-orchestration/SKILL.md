@@ -99,3 +99,55 @@ availability is uncertain.
 
 Use `desktop-control-plane` for browser, Hyprland, screenshot, and focus-safe
 desktop control.
+
+## Fast fixed-scope audit fanout (Codex Spark)
+
+`gpt-5.3-codex-spark` is a real, fast, small-context-window Codex model
+(`~/.codex/models-v1.json`, `default_reasoning_level: "high"`) suited to
+launching many concurrent narrow-scope reviewers rather than one broad one —
+e.g. one instance per file or small file cluster, each told to narrate
+through the code before reporting. `launch_agent_tabs.sh --spark` sets the
+model and defaults reasoning effort to `xhigh`; combine with:
+
+- `--sandbox read-only` — sandbox-enforced read-only, not just a prompt
+  instruction, for pure-audit fanout.
+- `--no-agents-md` — auto-provisions and caches (refreshed whenever the real
+  `~/.codex/config.toml` changes) a scratch `CODEX_HOME` under
+  `$XDG_STATE_HOME/sinnix/agent-orchestration/codex-home-no-agents-md`, copying
+  `auth.json`/`config.toml`/`models-v1.json` but never the global `AGENTS.md`
+  environment-memory file — appropriate when the global file's content (other
+  projects, host-specific doctrine) would just spend a small model's context
+  budget on irrelevant text. Use plain `--codex-home <path>` instead for any
+  other custom profile. Do not combine the two.
+- `--skip-git-repo-check` when a target isn't its own repo checkout.
+- `--max-retries <n>` (default 3) — resilience against the shared
+  `sinnix-agent-npm-bootstrap` launcher's regenerate-then-exec race (every
+  wrapped-CLI invocation rewrites `~/.local/state/<tool>/launch.sh` in place;
+  a sibling process executing that file during the rewrite gets `ETXTBSY`
+  ("Text file busy"), a launcher-plumbing failure with nothing to do with the
+  task). Fixed at the source via atomic rename (`scripts/sinnix-agent-npm-bootstrap`)
+  so this should be rare after a rebuild, but the retry stays as defense in
+  depth — it only retries on a detected `Text file busy` marker in the log,
+  never a genuine task failure, and preserves prior attempts as
+  `<name>.log.attempt<N>`.
+- `--parallel <n>` — `run_batch_agent`'s loop uses `wait -n` (refill-a-slot,
+  not wait-for-the-whole-batch), so concurrency stays at `n` continuously;
+  don't hand-roll a batch-of-n-with-barrier loop, it serializes on the
+  slowest member of every batch for no reason. Pick `n` conservatively
+  (~5-10) — the launcher race above scales with how many `codex` processes
+  start within the same second, and each instance still needs real CPU/API
+  throughput.
+
+Prompt design for narrow fixed-scope reviewers: point at literal absolute
+file paths (spark's own system prompt discourages open-ended exploration
+like `rg --files`/`ls -R`, so an unscoped "explore the codebase" prompt
+fights the model's own instincts — hand it exact paths instead). Ask it to
+narrate through the code section by section before concluding anything
+(CLAUDE.md: "line-by-line narration forces attention" — catches issues in
+code that looks fine at a glance). Naming specific things to check for
+(silent error swallowing, unwired validation, resource leaks on error
+paths, unconstructed enum variants, duplicated config resolution) measurably
+improves recall without a large prompt, but always add an explicit
+instruction not to limit itself to that list — the list is a floor, not a
+ceiling. See `references/runtime-modes.md` for the exact command shape and a
+worked fanout example.

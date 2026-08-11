@@ -191,7 +191,43 @@ scripts/launch_agent_tabs.sh \
 
 `--parallel` greater than one is valid only with `--mode batch`. Claude runs
 through the helper unset `ANTHROPIC_API_KEY` unless
-`--claude-api-key-auth` explicitly opts into API-key auth.
+`--claude-api-key-auth` explicitly opts into API-key auth. The batch loop
+uses `wait -n` per slot (refills as soon as any one task finishes), not a
+fixed-size barrier — concurrency stays at `--parallel` continuously rather
+than dropping to zero between batches.
+
+### Fast fixed-scope Codex Spark fanout
+
+For a large audit/review fanout of many narrow-scope Codex Spark reviewers
+(one instance per file or small cluster; see SKILL.md's "Fast fixed-scope
+audit fanout" section for the full rationale):
+
+```bash
+scripts/launch_agent_tabs.sh \
+  --agent codex --mode batch --parallel 6 \
+  --spark \
+  --sandbox read-only \
+  --no-agents-md \
+  --skip-git-repo-check \
+  --max-retries 3 \
+  --job-prefix "audit-wave-1-" \
+  --workdir <repo> \
+  --prompt-dir <prompt-dir> \
+  --output-dir <output-dir> \
+  task-a task-b task-c ...
+```
+
+`--spark` sets `--model gpt-5.3-codex-spark` and defaults reasoning effort to
+`xhigh`. `--no-agents-md` auto-provisions and caches a scratch `CODEX_HOME`
+without the global `AGENTS.md`; `--sandbox read-only` is a real
+sandbox-enforced constraint, not just a prompt instruction. Each
+`<name>.prompt` file should point at literal absolute file paths (spark's
+own system prompt discourages open-ended exploration) and ask for a
+narrate-through pass before reporting findings — see SKILL.md for the full
+prompt-design guidance. After the batch completes, `<output-dir>/<name>.exit`
+holds each task's exit code and `<name>.last.md` holds its final report;
+`--status`/`--tails` against the same `--output-dir` show live progress
+mid-run.
 
 ## Kitty Sessions
 
