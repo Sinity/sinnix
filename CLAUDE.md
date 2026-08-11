@@ -89,9 +89,9 @@ Evaluation pipeline: `flake.nix` (flake-parts) → `flake/nixos.nix` `mkHost` �
 - `mkFeatureModule` / `mkServiceModule` — module factories
   (`modules/lib/features.nix`), injected directly into specialArgs.
 - `helpers.data` — pure data tables from `flake/data/` (`mcpRegistry`,
-  `runtimeDefaults`, `localModels`), evaluated once at flake init and shared
-  by reference. Modules consume them via specialArgs; never re-`import` the
-  data files.
+  `runtimeDefaults`, `localModels`, `agentLanes`), evaluated once at flake
+  init and shared by reference. Modules consume them via specialArgs; never
+  re-`import` the data files.
 - `helpers.mkSinnixPackagesFor pkgs` — the script package set (see Scripts).
 - `lib.sinnix` — factory helpers, `systemd` hardening helpers,
   `mkRuntimeServiceConfig`, `mkAutoImports`, overlay helpers.
@@ -197,7 +197,7 @@ truth for lock/containment/preflight shared by devshell binaries and
 `test-lib.nix`, `router.nix` (sinnix-gw), `deploy.nix` (colmena +
 nixos-anywhere), `overlay/package/*.nix` (per-package overlays),
 `data/*.nix` (pure data: MCP registry, runtime defaults, local model roster,
-shared skill list).
+shared skill list, agent CLI wrapper lane registry).
 
 Overlays vs packages: override/patch an existing nixpkgs package → overlay
 file; new standalone tool → usually a script under `scripts/` (see below),
@@ -267,11 +267,19 @@ full `sinnix-<name>`) — it needs zero wiring when a new script is added.
   `agent-tools.nix`/`mcp-servers.nix`, sinnix-9u6): `clis.nix`
   (`sinnix.features.dev.agentTools`) + `backends.nix` own the CLI wrapper
   builders (npm-bootstrapped into `~/.local/state/<agent>/npm`, self-updating;
-  `claude` aliases `claude-full` because the upstream installer clobbers the
-  bare path); `mcp.nix` (`sinnix.features.dev.mcp-servers`) + `mcp-tools.nix`/
-  `client-profiles.nix`/`serena.nix`/`browser.nix`/`hooks.nix` own the MCP
-  registry wiring and per-client (Codex/Gemini) config generation. Only
-  `clis.nix`/`mcp.nix` are real NixOS modules; the sibling files are plain-nix
+  `claude` aliases `claude-lean` because the upstream installer clobbers the
+  bare path). The per-client/backend variant axis (which MCP tier, which
+  model/backend, which key source — hermes profiles, claude/codex
+  full/lean/browser/deepseek/local lanes, the muse-code/muse-contrib
+  passthroughs) is pure data in `flake/data/agent-lanes.nix`
+  (`helpers.data.agentLanes`); `clis.nix` renders it by mapping over the
+  registry, `backends.nix` supplies the shared backend-env builders
+  (`mkClaudeBackendEnv`/`mkCodexBackendEnv`) the deepseek/local lanes
+  parameterize. `mcp.nix` (`sinnix.features.dev.mcp-servers`) +
+  `mcp-tools.nix`/`client-profiles.nix`/`serena.nix`/`browser.nix`/
+  `hooks.nix` own the MCP registry wiring and per-client (Codex/Gemini)
+  config generation. Only `clis.nix`/`mcp.nix` are real NixOS modules; the
+  sibling files are plain-nix
   helpers imported directly, not auto-imported.
 - Agent gateway: `modules/services/agent-gateway.nix` renders one canonical
   project contract and one official-SDK stdio MCP implementation with
