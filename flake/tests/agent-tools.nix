@@ -128,10 +128,12 @@ in
           ".local/bin/grok-sinnix"
           ".local/bin/agy-sinnix"
           ".local/bin/muse-code"
+          ".local/bin/muse-contrib"
           ".local/bin/hermes"
           ".local/bin/hermes-research"
           ".local/bin/hermes-orchestrate"
           ".local/bin/hermes-mirror"
+          ".local/bin/hermes-muse"
           ".local/bin/serena"
           ".local/bin/serena-hooks"
           ".local/bin/bd-prime-if-present"
@@ -446,10 +448,12 @@ in
               "$HOME/.local/bin/grok-sinnix" \
               "$HOME/.local/bin/agy-sinnix" \
               "$HOME/.local/bin/muse-code" \
+              "$HOME/.local/bin/muse-contrib" \
               "$HOME/.local/bin/hermes" \
               "$HOME/.local/bin/hermes-research" \
               "$HOME/.local/bin/hermes-orchestrate" \
               "$HOME/.local/bin/hermes-mirror" \
+              "$HOME/.local/bin/hermes-muse" \
               "$HOME/.local/bin/serena" \
               "$HOME/.local/bin/serena-hooks" \
               "$HOME/.local/bin/bd-prime-if-present"; do
@@ -458,11 +462,13 @@ in
             done
 
             grep -Fq 'muse-spark-1.2-contributor' "$HOME/.local/bin/muse-code"
+            grep -Fq 'ai-gateway.vercel.sh' "$HOME/.local/bin/muse-contrib"
+            grep -Fq 'ai-gateway.vercel.sh' "$HOME/.local/bin/hermes-muse"
 
             grep -q 'HERMES_NEMO_RELAY_ATOF_ENABLED=1' "$HOME/.local/bin/hermes"
             grep -q 'HERMES_NEMO_RELAY_ATIF_ENABLED=1' "$HOME/.local/bin/hermes"
             grep -q 'HERMES_NEMO_RELAY_ATIF_SUBAGENT_EXPORT_MODE=all' "$HOME/.local/bin/hermes"
-            for profile in research orchestrate mirror; do
+            for profile in research orchestrate mirror muse; do
               wrapper="$HOME/.local/bin/hermes-$profile"
               grep -Fq "export HERMES_HOME=\"\$HOME/.hermes/profiles/$profile\"" "$wrapper"
               grep -Fq 'export HERMES_INSTALL_DIR="$HOME/.hermes/hermes-agent"' "$wrapper"

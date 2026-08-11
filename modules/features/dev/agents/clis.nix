@@ -91,13 +91,14 @@ mkFeatureModule {
           reasoningEffort ? "medium",
           delegation ? { },
           voiceEnabled ? true,
+          model ? {
+            default = "gpt-5.6-terra";
+            provider = "openai-codex";
+          },
         }:
         yamlFormat.generate "hermes-${name}-config.yaml" {
           _config_version = 33;
-          model = {
-            default = "gpt-5.6-terra";
-            provider = "openai-codex";
-          };
+          inherit model;
           fallback_providers = [
             {
               provider = "gemini";
@@ -214,6 +215,21 @@ mkFeatureModule {
           "tts"
         ];
       };
+      # Muse Spark contributor tier via the Vercel AI Gateway. Meta gates the
+      # tier server-side ("select countries") and does not serve it to this
+      # account directly; the gateway carries it at contributor list prices.
+      # The hermes-muse wrapper exports OPENAI_API_KEY from the
+      # vercel-ai-gateway-key agenix secret (custom endpoints prefer
+      # OPENAI_API_KEY — hermes-agent issue #560).
+      hermesMuseConfigFile = mkHermesConfig {
+        name = "muse";
+        toolsets = [ "hermes-cli" ];
+        model = {
+          default = "meta/muse-spark-1.2-contributor";
+          provider = "custom";
+          base_url = "https://ai-gateway.vercel.sh/v1";
+        };
+      };
       claudeMcpServers = lib.mapAttrs mcpRegistry.renderClaudeServer (
         mcpRegistry.selectClientServersForProfile "full" "claude"
       );
@@ -286,6 +302,7 @@ mkFeatureModule {
         research = hermesResearchConfigFile;
         orchestrate = hermesOrchestrateConfigFile;
         mirror = hermesMirrorConfigFile;
+        muse = hermesMuseConfigFile;
       };
       sinnix.persistence.home = {
         directories = [
@@ -308,6 +325,13 @@ mkFeatureModule {
           ".local/state/gemini"
           {
             directory = ".local/state/muse-code";
+            mode = "0700";
+          }
+          # Muse Code auth (Meta OAuth + api key), settings (incl. the local
+          # model_catalog row for the gateway-served contributor model), and
+          # the pre-agenix gateway-key fallback.
+          {
+            directory = ".config/muse";
             mode = "0700";
           }
           ".local/state/sinnix/agent-jobs"
@@ -390,6 +414,8 @@ mkFeatureModule {
               hermes-orchestrate = "~/.local/bin/hermes-orchestrate";
               hermes-mirror = "~/.local/bin/hermes-mirror";
               hermes-local = "~/.local/bin/hermes-local";
+              hermes-muse = "~/.local/bin/hermes-muse";
+              muse-contrib = "~/.local/bin/muse-contrib";
               hermes-acp = "~/.local/bin/hermes-acp";
               hermes-update = "~/.local/bin/hermes-update";
               muse = "~/.local/bin/muse-code";
@@ -428,7 +454,7 @@ mkFeatureModule {
             cp ${hermesConfigFile} "$HOME/.hermes/config.yaml"
             chmod 600 "$HOME/.hermes/config.yaml"
 
-            for profile in research orchestrate mirror; do
+            for profile in research orchestrate mirror muse; do
               mkdir -p "$HOME/.hermes/profiles/$profile"
               ln -sfn ../../auth.json "$HOME/.hermes/profiles/$profile/auth.json"
               ln -sfn ../../.env "$HOME/.hermes/profiles/$profile/.env"
@@ -437,9 +463,11 @@ mkFeatureModule {
             cp ${hermesResearchConfigFile} "$HOME/.hermes/profiles/research/config.yaml"
             cp ${hermesOrchestrateConfigFile} "$HOME/.hermes/profiles/orchestrate/config.yaml"
             cp ${hermesMirrorConfigFile} "$HOME/.hermes/profiles/mirror/config.yaml"
+            cp ${hermesMuseConfigFile} "$HOME/.hermes/profiles/muse/config.yaml"
             chmod 600 "$HOME/.hermes/profiles/research/config.yaml" \
               "$HOME/.hermes/profiles/orchestrate/config.yaml" \
-              "$HOME/.hermes/profiles/mirror/config.yaml"
+              "$HOME/.hermes/profiles/mirror/config.yaml" \
+              "$HOME/.hermes/profiles/muse/config.yaml"
           '';
           # Codex/Gemini read the global instruction file directly; CLAUDE.md is
           # flat (no @-transclusion), so a symlink replaces the old render step
@@ -560,6 +588,10 @@ mkFeatureModule {
             source = "${scriptPkgs.sinnix-muse-code-bootstrap}/bin/sinnix-muse-code-bootstrap";
             force = true;
           };
+          home.file.".local/bin/muse-contrib" = {
+            source = "${scriptPkgs.muse-contrib}/bin/muse-contrib";
+            force = true;
+          };
 
           home.file.".config/hermes/skills" = {
             source = sharedSkillFarm;
@@ -571,6 +603,24 @@ mkFeatureModule {
           home.file.".local/bin/hermes-mirror" = mkHermesWrapper { profile = "mirror"; };
           home.file.".local/bin/hermes-acp" = mkHermesWrapper {
             entrypoint = "hermes-acp";
+          };
+          home.file.".local/bin/hermes-muse" = mkHermesWrapper {
+            profile = "muse";
+            extraPrelude = ''
+              if [ -n "''${VERCEL_AI_GATEWAY_KEY:-}" ]; then
+                export OPENAI_API_KEY="$VERCEL_AI_GATEWAY_KEY"
+              elif [ -r /run/agenix/vercel-ai-gateway-key ]; then
+                OPENAI_API_KEY="$(cat /run/agenix/vercel-ai-gateway-key)"
+                export OPENAI_API_KEY
+              elif [ -r "$HOME/.config/muse/vercel-gateway-key" ]; then
+                OPENAI_API_KEY="$(cat "$HOME/.config/muse/vercel-gateway-key")"
+                export OPENAI_API_KEY
+              else
+                echo "hermes-muse: no Vercel AI Gateway key available" >&2
+                exit 1
+              fi
+              export OPENAI_BASE_URL="https://ai-gateway.vercel.sh/v1"
+            '';
           };
           home.file.".local/bin/hermes-local" = mkHermesWrapper {
             extraPrelude = ''
