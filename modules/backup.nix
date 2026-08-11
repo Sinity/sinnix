@@ -272,7 +272,7 @@ let
     "media/stashbox/analysis-cache"
     "media/stashbox/gpu-venv"
     # Top-level regenerable-cache root (sinex cargo/dev caches via the
-    # /var/cache/sinex bind, nix-build, sccache) — pure churn, never backup
+    # /var/cache/sinex bind, nix-build) — pure churn, never backup
     # material (2026-07-10 impermanence audit).
     "cache"
     "**/inbox/monero"

@@ -221,15 +221,11 @@ rec {
         # SINNIX_REBUILD_CORES): one heavy build gets the full physical core
         # count instead of splitting budget across concurrent jobs.
         CARGO_BUILD_JOBS = "16";
-        # Deliberately NOT set: CARGO_INCREMENTAL=0 contradicted
-        # build-policy.nix's sccache rationale (incremental compilation is
-        # why this host doesn't wire sccache as RUSTC_WRAPPER). No measured
-        # reason for disabling it turned up in history — it was added
-        # mechanically alongside a job-count bump. Removed 2026-07-06.
+        # CARGO_INCREMENTAL deliberately left at default (build-policy.nix:
+        # incremental compilation is this host's Rust caching strategy).
         CMAKE_BUILD_PARALLEL_LEVEL = "16";
         MAKEFLAGS = "-j16";
         NIX_BUILD_CORES = "16";
-        SCCACHE_IDLE_TIMEOUT = "10";
       };
       lease = {
         required = true;
