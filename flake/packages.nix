@@ -27,7 +27,6 @@
         "sinnix-capability-manifest"
         "sinnix-observe"
         "tunnel-client"
-        "verify-agent-topology"
       ];
     in
     {

@@ -18,10 +18,8 @@ if [[ -n ${VERCEL_AI_GATEWAY_KEY:-} ]]; then
   key="$VERCEL_AI_GATEWAY_KEY"
 elif [[ -r /run/agenix/vercel-ai-gateway-key ]]; then
   key="$(</run/agenix/vercel-ai-gateway-key)"
-elif [[ -r $HOME/.config/muse/vercel-gateway-key ]]; then
-  key="$(<"$HOME/.config/muse/vercel-gateway-key")"
 else
-  echo "muse-contrib: no Vercel AI Gateway key (VERCEL_AI_GATEWAY_KEY, agenix, or ~/.config/muse/vercel-gateway-key)" >&2
+  echo "muse-contrib: no Vercel AI Gateway key (VERCEL_AI_GATEWAY_KEY or /run/agenix/vercel-ai-gateway-key)" >&2
   exit 1
 fi
 

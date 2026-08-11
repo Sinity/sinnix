@@ -529,8 +529,7 @@ each project's `CLAUDE.md`.
 - **`CLAUDE.md` is the canonical instruction file everywhere** — one flat file
   per repo, no `@`-transclusion. `AGENTS.md` in each repo is a committed
   symlink to `CLAUDE.md`, so Claude, Codex, and Gemini always read identical,
-  current content. `verify-agent-topology /realm/project` audits this
-  invariant.
+  current content.
 - **MCP profiles**: registry source of truth is `flake/data/mcp-registry.nix`
   in sinnix; wiring lives in `modules/features/dev/agents/` (`mcp.nix` +
   sibling helpers `mcp-tools.nix`/`client-profiles.nix`/`serena.nix`/

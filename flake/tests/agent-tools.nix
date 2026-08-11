@@ -361,7 +361,7 @@ in
             test "$(readlink -f "$HOME/.gemini/config/mcp_config.json")" = ${agentToolsAntigravityMcpConfigSource}
             mkdir -p "$HOME/.hermes"
             cp ${agentToolsHermesConfigSource} "$HOME/.hermes/config.yaml"
-            for profile in research orchestrate mirror; do
+            for profile in research orchestrate mirror muse local; do
               mkdir -p "$HOME/.hermes/profiles/$profile"
               ln -s ../../auth.json "$HOME/.hermes/profiles/$profile/auth.json"
               ln -s ../../.env "$HOME/.hermes/profiles/$profile/.env"
@@ -370,8 +370,11 @@ in
             cp ${agentToolsHermesProfileConfigSources.research} "$HOME/.hermes/profiles/research/config.yaml"
             cp ${agentToolsHermesProfileConfigSources.orchestrate} "$HOME/.hermes/profiles/orchestrate/config.yaml"
             cp ${agentToolsHermesProfileConfigSources.mirror} "$HOME/.hermes/profiles/mirror/config.yaml"
+            cp ${agentToolsHermesProfileConfigSources.muse} "$HOME/.hermes/profiles/muse/config.yaml"
+            cp ${agentToolsHermesProfileConfigSources.local} "$HOME/.hermes/profiles/local/config.yaml"
             chmod 600 "$HOME/.hermes/config.yaml" "$HOME/.hermes/profiles/research/config.yaml" \
-              "$HOME/.hermes/profiles/orchestrate/config.yaml" "$HOME/.hermes/profiles/mirror/config.yaml"
+              "$HOME/.hermes/profiles/orchestrate/config.yaml" "$HOME/.hermes/profiles/mirror/config.yaml" \
+              "$HOME/.hermes/profiles/muse/config.yaml" "$HOME/.hermes/profiles/local/config.yaml"
             chmod 644 "$HOME/.codex/config.toml"
             chmod 644 "$HOME/.codex/full.config.toml"
             chmod 644 "$HOME/.codex/lean.config.toml"
@@ -468,7 +471,7 @@ in
             grep -q 'HERMES_NEMO_RELAY_ATOF_ENABLED=1' "$HOME/.local/bin/hermes"
             grep -q 'HERMES_NEMO_RELAY_ATIF_ENABLED=1' "$HOME/.local/bin/hermes"
             grep -q 'HERMES_NEMO_RELAY_ATIF_SUBAGENT_EXPORT_MODE=all' "$HOME/.local/bin/hermes"
-            for profile in research orchestrate mirror muse; do
+            for profile in research orchestrate mirror muse local; do
               wrapper="$HOME/.local/bin/hermes-$profile"
               grep -Fq "export HERMES_HOME=\"\$HOME/.hermes/profiles/$profile\"" "$wrapper"
               grep -Fq 'export HERMES_INSTALL_DIR="$HOME/.hermes/hermes-agent"' "$wrapper"
