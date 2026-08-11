@@ -251,8 +251,7 @@ non-script externals (lynchpin/polylogue pythons, vendored npm CLIs, beads);
   transclusion). `~/.codex/AGENTS.md` and `~/.gemini/GEMINI.md` are symlinks
   to it via `~/.config/claude/CLAUDE.md`. There is no render pipeline.
 - Repo convention across the constellation: per-repo `CLAUDE.md` is canonical
-  and flat; `AGENTS.md` is a committed symlink to it. Audit with
-  `verify-agent-topology /realm/project`.
+  and flat; `AGENTS.md` is a committed symlink to it.
 - Shared skills live in `dots/_ai/skills/`; agent trees (`~/.config/claude/
   skills`, `~/.codex/skills`, `~/.gemini/skills`) are linkFarms over it.
   Codex-only system skills: `dots/codex/skills/.system/`.

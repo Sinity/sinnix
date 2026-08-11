@@ -230,6 +230,18 @@ mkFeatureModule {
           base_url = "https://ai-gateway.vercel.sh/v1";
         };
       };
+      # Local Ollama hub via the LiteLLM gateway; model names live in
+      # litellm.nix's model_list. A profile (not an imperative `hermes config
+      # set` at launch) so the default config is never mutated.
+      hermesLocalConfigFile = mkHermesConfig {
+        name = "local";
+        toolsets = [ "hermes-cli" ];
+        model = {
+          default = "local-llama";
+          provider = "custom";
+          base_url = "http://127.0.0.1:4000/v1";
+        };
+      };
       claudeMcpServers = lib.mapAttrs mcpRegistry.renderClaudeServer (
         mcpRegistry.selectClientServersForProfile "full" "claude"
       );
@@ -292,7 +304,6 @@ mkFeatureModule {
         mkAntigravityWrapper
         hermesBootstrap
         ensureHermes
-        hermesConfigureLocal
         mkHermesWrapper
         ;
     in
@@ -303,6 +314,7 @@ mkFeatureModule {
         orchestrate = hermesOrchestrateConfigFile;
         mirror = hermesMirrorConfigFile;
         muse = hermesMuseConfigFile;
+        local = hermesLocalConfigFile;
       };
       sinnix.persistence.home = {
         directories = [
@@ -360,7 +372,6 @@ mkFeatureModule {
             scriptPkgs.sinnix-scope
             scriptPkgs.sinnix-agent-scope-exec
             scriptPkgs.chatgpt-share-export
-            scriptPkgs.verify-agent-topology
             scriptPkgs.sinnix-agent-control-mcp
             scriptPkgs.sinnix-agent-event
             scriptPkgs.sinnix-agent-register
@@ -454,7 +465,7 @@ mkFeatureModule {
             cp ${hermesConfigFile} "$HOME/.hermes/config.yaml"
             chmod 600 "$HOME/.hermes/config.yaml"
 
-            for profile in research orchestrate mirror muse; do
+            for profile in research orchestrate mirror muse local; do
               mkdir -p "$HOME/.hermes/profiles/$profile"
               ln -sfn ../../auth.json "$HOME/.hermes/profiles/$profile/auth.json"
               ln -sfn ../../.env "$HOME/.hermes/profiles/$profile/.env"
@@ -464,10 +475,12 @@ mkFeatureModule {
             cp ${hermesOrchestrateConfigFile} "$HOME/.hermes/profiles/orchestrate/config.yaml"
             cp ${hermesMirrorConfigFile} "$HOME/.hermes/profiles/mirror/config.yaml"
             cp ${hermesMuseConfigFile} "$HOME/.hermes/profiles/muse/config.yaml"
+            cp ${hermesLocalConfigFile} "$HOME/.hermes/profiles/local/config.yaml"
             chmod 600 "$HOME/.hermes/profiles/research/config.yaml" \
               "$HOME/.hermes/profiles/orchestrate/config.yaml" \
               "$HOME/.hermes/profiles/mirror/config.yaml" \
-              "$HOME/.hermes/profiles/muse/config.yaml"
+              "$HOME/.hermes/profiles/muse/config.yaml" \
+              "$HOME/.hermes/profiles/local/config.yaml"
           '';
           # Codex/Gemini read the global instruction file directly; CLAUDE.md is
           # flat (no @-transclusion), so a symlink replaces the old render step
@@ -612,9 +625,6 @@ mkFeatureModule {
               elif [ -r /run/agenix/vercel-ai-gateway-key ]; then
                 OPENAI_API_KEY="$(cat /run/agenix/vercel-ai-gateway-key)"
                 export OPENAI_API_KEY
-              elif [ -r "$HOME/.config/muse/vercel-gateway-key" ]; then
-                OPENAI_API_KEY="$(cat "$HOME/.config/muse/vercel-gateway-key")"
-                export OPENAI_API_KEY
               else
                 echo "hermes-muse: no Vercel AI Gateway key available" >&2
                 exit 1
@@ -623,10 +633,10 @@ mkFeatureModule {
             '';
           };
           home.file.".local/bin/hermes-local" = mkHermesWrapper {
+            profile = "local";
             extraPrelude = ''
               export OPENAI_BASE_URL="http://127.0.0.1:4000/v1"
               export OPENAI_API_KEY="sk-local"
-              ${hermesConfigureLocal}
             '';
           };
           home.file.".local/bin/hermes-update" = {

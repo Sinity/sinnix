@@ -205,7 +205,6 @@ let
     export HERMES_NEMO_RELAY_ATIF_SUBAGENT_EXPORT_MODE=all
   '';
   ensureHermes = "${scriptPkgs.sinnix-ensure-hermes}/bin/sinnix-ensure-hermes";
-  hermesConfigureLocal = "${scriptPkgs.sinnix-hermes-configure-local}/bin/sinnix-hermes-configure-local";
   mkHermesWrapper =
     {
       entrypoint ? "hermes",
@@ -241,7 +240,6 @@ in
     mkAntigravityWrapper
     hermesBootstrap
     ensureHermes
-    hermesConfigureLocal
     mkHermesWrapper
     ;
 }
