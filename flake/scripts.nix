@@ -21,7 +21,12 @@ let
   discovered = discovery.discover (inputs.self + "/scripts");
 
   inherit (discovered) registry;
-  scriptPackages = lib.mapAttrs (_: v: v.package) registry;
+  scriptPackages = lib.mapAttrs (_: v: v.package) registry // {
+    # Generated meta-CLI front door over every packaged script above. Kept
+    # in scriptPackages (not externalPackages) because it is derived
+    # entirely from `registry`, not from an external flake input.
+    sinnix = import ./cli-dispatcher.nix { inherit lib pkgs registry; };
+  };
   runtimeDefaults = import ./data/runtime-defaults.nix { inherit lib; };
   mcpRegistry = import ./data/mcp-registry.nix { inherit lib; };
   sharedAgentSkills = import ./data/shared-agent-skills.nix;

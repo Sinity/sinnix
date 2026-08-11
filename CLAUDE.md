@@ -240,6 +240,10 @@ or, for scripts launched directly (Hyprland keybindings, shell-sourced):
 There is no manual wrapper registration. `flake/scripts.nix` only adds
 non-script externals (lynchpin/polylogue pythons, vendored npm CLIs, beads);
 `flake/packages.nix` curates the small public `nix run` surface.
+`sinnix` (`flake/cli-dispatcher.nix`, installed by `modules/features/cli/core.nix`)
+is a generated meta-CLI front door over the whole packaged registry: `sinnix
+help` lists every script, `sinnix <name>` dispatches to it (short name or
+full `sinnix-<name>`) — it needs zero wiring when a new script is added.
 
 ## Dotfiles & Agent Context
 
