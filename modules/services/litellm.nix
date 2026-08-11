@@ -72,7 +72,7 @@ mkServiceModule {
             {
               model_name = "local-vision";
               litellm_params = {
-                model = "ollama/llava";
+                model = "ollama_chat/gemma4:12b-it-qat";
                 api_base = "http://127.0.0.1:11434";
               };
             }
@@ -94,6 +94,20 @@ mkServiceModule {
               model_name = "local-reasoner";
               litellm_params = {
                 model = "ollama_chat/gpt-oss:20b";
+                api_base = "http://127.0.0.1:11434";
+              };
+            }
+            {
+              model_name = "local-thinker";
+              litellm_params = {
+                model = "ollama_chat/qwen3:30b";
+                api_base = "http://127.0.0.1:11434";
+              };
+            }
+            {
+              model_name = "local-multimodal-moe";
+              litellm_params = {
+                model = "ollama_chat/gemma4:26b";
                 api_base = "http://127.0.0.1:11434";
               };
             }
