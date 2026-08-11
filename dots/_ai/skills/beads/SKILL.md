@@ -60,3 +60,44 @@ bd close <id> --reason="Completed" --json
 - Link discovered follow-up work with Beads dependencies when there is a parent task.
 - Treat `bd dolt push` like `git push`: allowed when the repository/user/orchestrator policy authorizes pushing, but do not bypass default-branch or PR rules.
 - Repository instructions override generic Beads template text.
+
+## Hazards (branch switching, worktrees, commit cadence)
+
+These are bd's by-design sync semantics colliding with branch-heavy workflows —
+not bugs, but they will silently revert or stale your view of bead state.
+
+- **Every `bd` invocation reimports the invoking checkout's committed
+  `.beads/issues.jsonl` into the shared DB** — including plain read-only calls
+  like `bd show`. A bead closed on branch A reads back as open on branch B if
+  B forked from an older master; nothing is lost (the close is in git
+  history), but `bd show`/`bd ready` output is stale until a commit carrying
+  that state lands on the current branch.
+- The same reimport fires from **aging worktrees**: a worktree frozen at an
+  older commit can time-machine live bead state over a coordinator's
+  concurrent writes, even from a lane that never touches beads intentionally
+  (confirmed repeatedly, polylogue 2026-08-01: 5+ coordinator closes reverted
+  in one session). **Lane agents dispatched into worktrees make no `bd`
+  writes at all**; the coordinator audits bead state (diff expected vs
+  `bd show --json`) at merge-train boundaries and re-applies anything
+  reverted, rather than trusting a single write to have stuck.
+- Mitigations for branch churn: don't open a new `chore(beads):` branch while
+  one is open — merge or extend it; merge bd-only bookkeeping branches
+  immediately; fold a `bd claim`/`close` into the same branch as the code
+  change it accompanies; re-verify with `bd show <id> --json` after any
+  checkout/merge/worktree-add before trusting query output for a bead you
+  just touched.
+- **`.beads/*.jsonl` merge conflicts**: `bd export` resolves its output path
+  from bd's own database location, independent of cwd — inside a temporary
+  conflict-resolution worktree it silently no-ops on that worktree's own
+  file, leaving literal conflict markers in place. Instead extract both sides
+  (`git show :2:.beads/issues.jsonl` / `:3:...`), hand-merge bead-by-id
+  preferring the later `updated_at`, verify every line parses as JSON, then
+  `git add`.
+- **Batch `.beads/issues.jsonl` commits per unit of work, not per bd
+  operation.** `bd export` re-derives the full jsonl regardless of how many
+  bd calls preceded it, so batching costs nothing: do every bd write for one
+  coherent unit (a triage pass, closing every bead landed by a merge train,
+  one fanout wave's findings), then one commit summarizing the batch. A
+  5-hour session once produced ~85 separate `chore(beads):` commits — one
+  per operation — drowning real work in the log (polylogue 2026-08-03). A
+  submodule split is not the fix; commit cadence is.
