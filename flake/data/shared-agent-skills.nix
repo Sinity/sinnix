@@ -16,6 +16,7 @@
   "greedy-batching"
   "git-protocol"
   "grilling"
+  "grok"
   "html-report"
   "lynchpin"
   "meta"
