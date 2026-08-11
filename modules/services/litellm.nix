@@ -76,6 +76,27 @@ mkServiceModule {
                 api_base = "http://127.0.0.1:11434";
               };
             }
+            {
+              model_name = "local-coder";
+              litellm_params = {
+                model = "ollama_chat/qwen2.5-coder:7b";
+                api_base = "http://127.0.0.1:11434";
+              };
+            }
+            {
+              model_name = "local-coder-moe";
+              litellm_params = {
+                model = "ollama_chat/qwen3-coder:30b";
+                api_base = "http://127.0.0.1:11434";
+              };
+            }
+            {
+              model_name = "local-reasoner";
+              litellm_params = {
+                model = "ollama_chat/gpt-oss:20b";
+                api_base = "http://127.0.0.1:11434";
+              };
+            }
           ];
           litellm_settings = {
             # Silently drop sampling params the local backend doesn't support
