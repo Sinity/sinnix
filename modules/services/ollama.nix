@@ -72,6 +72,19 @@ mkServiceModule {
         # Multimodal MoE (18 GB, 256K ctx, Arena 1441) — the strongest
         # local generalist this host can run via partial offload.
         "gemma4:26b"
+        # Experimental embedding pulls (HF GGUF, community/official builds) —
+        # kept LAST so an unsupported-architecture pull failure cannot block
+        # the core roster above. Verify each actually loads before relying
+        # on it (novel embedder archs can outrun ollama's llama.cpp vintage).
+        # Jina v5 text-small retrieval-tuned (official GGUF; ~71.7 MTEB v2
+        # class at 677M).
+        "hf.co/jinaai/jina-embeddings-v5-text-small-retrieval-GGUF"
+        # Microsoft Harrier-OSS v1 0.6b (MIT; the family's headline 74.3
+        # multilingual score is the 27b — this small one will land lower).
+        "hf.co/SuperPauly/harrier-oss-v1-0.6b-gguf"
+        # Voyage 4 nano — the open-weight member of the Voyage 4 shared
+        # embedding space (community GGUF).
+        "hf.co/jsonMartin/voyage-4-nano-gguf"
       ];
       description = "Models pre-pulled by the ollama-model-loader oneshot.";
     };
