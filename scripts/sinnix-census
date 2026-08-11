@@ -158,7 +158,8 @@ def declared_services() -> dict[str, dict]:
         return {}
     return {
         name: {"declared_in": "runtime-inventory", "unit": s.get("unit"),
-               "manager": s.get("manager", "system")}
+               "manager": s.get("manager", "system"), "kind": s.get("kind", "service"),
+               "captures": [c.get("path") for c in s.get("captures", [])]}
         for name, s in inv.get("surfaces", {}).items()
     }
 
@@ -261,17 +262,36 @@ def main() -> int:
         for name, meta in declared_secrets().items():
             refs = static_refs(name)
             ev = {"atuin": None, "polylogue": None, "journald": None}
+            # OPERATOR RULE (2026-08-11): secrets are NEVER pruning
+            # candidates — losing key material is irreversible in a way no
+            # other class is. Rows are informational inventory only.
             rows.append({"class": "secrets", "name": name, **meta,
                          "evidence": ev, "static_refs": refs[:6],
-                         # runtime env reads are invisible; vocabulary reflects it
-                         "verdict": "referenced-only" if refs else "no-static-consumers"})
+                         "never_prune": True,
+                         "verdict": "referenced-only" if refs else "informational-no-static-consumers"})
 
     if "services" in wanted:
         for name, meta in declared_services().items():
             unit = meta.get("unit") or ""
-            base = unit.removesuffix(".service")
-            n = journal_count(base, args.window_days, meta.get("manager") == "user",
-                              r"Started|Starting") if unit.endswith(".service") else None
+            kind = meta.get("kind", "service")
+            n = None
+            if kind in ("service", "timer", "socket", "target"):
+                # journalctl accepts the full unit name for all these kinds;
+                # timers/sockets log their trigger/incoming events too.
+                n = journal_count(unit, args.window_days, meta.get("manager") == "user",
+                                  r"Started|Starting|Triggering|Incoming|Listening|Reached")
+            elif kind == "capture":
+                # capture surfaces attest via their capture files: fresh
+                # mtime within the window = the surface is producing.
+                cutoff = now - args.window_days * 86400
+                fresh = 0
+                for cpath in meta.get("captures", []):
+                    try:
+                        if cpath and Path(cpath).exists() and Path(cpath).stat().st_mtime > cutoff:
+                            fresh += 1
+                    except OSError:
+                        pass
+                n = fresh or None
             ev = {"atuin": None, "polylogue": None, "journald": {"n": n} if n else None}
             rows.append({"class": "services", "name": name,
                          "declared_in": meta["declared_in"],
