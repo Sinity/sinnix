@@ -11,10 +11,14 @@ mkFeatureModule {
       pkgs,
       lib,
       user,
+      helpers,
       ...
     }:
+    let
+      scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
+    in
     {
-      environment.systemPackages = with pkgs; [
+      environment.systemPackages = (with pkgs; [
         git
         taskwarrior3
         timewarrior
@@ -41,7 +45,10 @@ mkFeatureModule {
         gping
         doggo
         dust
-      ];
+      ])
+      # `sinnix` -- discoverable front door over the whole packaged script
+      # registry (`sinnix help`, `sinnix <name> [args...]`).
+      ++ [ scriptPkgs.sinnix ];
 
       programs = {
         zsh.enable = true;
