@@ -50,6 +50,16 @@ mkServiceModule {
         "llava"
         # Embeddings for Open WebUI RAG / document chat
         "nomic-embed-text"
+        # Coding, GPU-resident tier: dense 7B coder fits the 3080's 10 GB at
+        # Q4 with room for KV cache. Triage/dedup/format-verdict grade.
+        "qwen2.5-coder:7b"
+        # Coding, stretch tier: 30B MoE with only ~3B active params (19 GB
+        # Q4). Ollama splits GPU/CPU automatically; the active-expert
+        # working set keeps token rates usable despite not fitting VRAM.
+        "qwen3-coder:30b"
+        # General reasoning/agentic MoE (~3.6B active, native MXFP4, 14 GB).
+        # Same partial-offload story as qwen3-coder.
+        "gpt-oss:20b"
       ];
       description = "Models pre-pulled by the ollama-model-loader oneshot.";
     };
