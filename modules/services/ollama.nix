@@ -70,6 +70,78 @@ mkServiceModule {
     let
       user = config.sinnix.user.name;
       modelsDir = "${config.sinnix.paths.mediaRoot}/model/ollama";
+      ollamaBin = lib.getExe pkgs.ollama-cuda;
+      awkBin = lib.getExe pkgs.gawk;
+      # Upstream's ollama-model-loader (nixpkgs services.ollama.loadModels)
+      # pulls every tag in one `parallel` invocation with no per-model retry:
+      # one transient transfer flake (observed 2026-08-11, `hf.co/rbehzadan/
+      # ReaderLM-v2.gguf`: "max retries exceeded: EOF") aborts the whole
+      # oneshot mid-list, silently leaving the roster incomplete while
+      # LiteLLM keeps advertising the missing model. Replace the generated
+      # script with one that retries each tag independently (bounded
+      # backoff), keeps going on exhaustion instead of aborting, then
+      # verifies the full roster against `ollama list` and names exactly
+      # which tags are still missing before failing the unit.
+      modelLoaderScript = ''
+        declare -a models=( ${lib.escapeShellArgs cfg.loadModels} )
+        declare -a delays=(10 30 60 120)
+        max_attempts=5
+        declare -a failed_pulls=()
+
+        for model in "''${models[@]}"; do
+          attempt=1
+          pulled=0
+          while (( attempt <= max_attempts )); do
+            echo "ollama-model-loader: pulling ''${model} (attempt ''${attempt}/''${max_attempts})"
+            if ${ollamaBin} pull "''${model}"; then
+              pulled=1
+              break
+            fi
+            if (( attempt < max_attempts )); then
+              delay="''${delays[attempt - 1]}"
+              echo "ollama-model-loader: pull of ''${model} failed (attempt ''${attempt}/''${max_attempts}); retrying in ''${delay}s" >&2
+              sleep "''${delay}"
+            fi
+            attempt=$(( attempt + 1 ))
+          done
+          if (( pulled == 0 )); then
+            echo "ollama-model-loader: giving up on ''${model} after ''${max_attempts} attempts; continuing with remaining models" >&2
+            failed_pulls+=("''${model}")
+          fi
+        done
+
+        if (( ''${#failed_pulls[@]} > 0 )); then
+          echo "ollama-model-loader: exhausted retries for: ''${failed_pulls[*]}" >&2
+        fi
+
+        # Roster verification. `ollama list` prints tags pulled without an
+        # explicit tag with an added ":latest" suffix (e.g. hf.co/foo/bar.gguf
+        # lists as hf.co/foo/bar.gguf:latest) -- treat `tag` and `tag:latest`
+        # as the same model when comparing against the declared roster.
+        installed="$(${ollamaBin} list | ${awkBin} 'NR > 1 {print $1}')"
+
+        declare -a still_missing=()
+        for model in "''${models[@]}"; do
+          found=0
+          while IFS= read -r have; do
+            [ -z "''${have}" ] && continue
+            if [ "''${have}" = "''${model}" ] || [ "''${have}" = "''${model}:latest" ]; then
+              found=1
+              break
+            fi
+          done <<< "''${installed}"
+          if (( found == 0 )); then
+            still_missing+=("''${model}")
+          fi
+        done
+
+        if (( ''${#still_missing[@]} > 0 )); then
+          echo "ollama-model-loader: roster verification failed, missing tags: ''${still_missing[*]}" >&2
+          exit 1
+        fi
+
+        echo "ollama-model-loader: roster verified, all ''${#models[@]} declared models present"
+      '';
     in
     {
       services.ollama = {
@@ -119,6 +191,10 @@ mkServiceModule {
             "koboldcpp.service"
             "koboldcpp-proxy.service"
           ];
+          # Full override (mkForce): the upstream `script` is a plain
+          # (non-mkForce) definition, so an un-forced override here would
+          # concatenate rather than replace it.
+          ollama-model-loader.script = lib.mkForce modelLoaderScript;
         }
       ];
     };
