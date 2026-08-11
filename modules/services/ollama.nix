@@ -43,15 +43,19 @@ mkServiceModule {
     loadModels = args.lib.mkOption {
       type = args.lib.types.listOf args.lib.types.str;
       default = [
-        # Abliterated/uncensored LLM that fits ~10 GB at Q4. Edit to taste; a
-        # failed pull only fails the loader oneshot, not the system.
-        "huihui_ai/llama3.2-abliterate"
+        # Edit to taste; a failed pull only fails the loader oneshot, not
+        # the system.
+        # Uncensored chat tier: Gemma 4 12B abliterated (current gen, dense,
+        # VRAM-resident). Replaces the 2024-era llama3.2-abliterate 3B.
+        "huihui_ai/gemma-4-abliterated:12b"
         # Vision + general multimodal tier: Gemma 4 12B QAT (7.2 GB, dense,
         # fully VRAM-resident, text+image+audio in, 128K ctx). Replaces
         # llava, which it outclasses across the board.
         "gemma4:12b-it-qat"
-        # Embeddings for Open WebUI RAG / document chat
-        "nomic-embed-text"
+        # Embeddings for Open WebUI RAG / document chat. qwen3-embedding
+        # 0.6b: 70.7 MTEB-eng-v2 vs nomic-embed-text's ~62 at 1.2 GB.
+        # Existing RAG collections re-embed on next use.
+        "qwen3-embedding:0.6b"
         # Coding, GPU-resident tier: dense 7B coder fits the 3080's 10 GB at
         # Q4 with room for KV cache. Triage/dedup/format-verdict grade.
         "qwen2.5-coder:7b"

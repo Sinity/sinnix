@@ -52,7 +52,7 @@ mkAiService {
 
           # RAG / document chat via the Ollama embedding model.
           RAG_EMBEDDING_ENGINE = "ollama";
-          RAG_EMBEDDING_MODEL = "nomic-embed-text";
+          RAG_EMBEDDING_MODEL = "qwen3-embedding:0.6b";
           RAG_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 
           # Read-aloud / voice-call via the OpenedAI-Speech bridge (TTS service).

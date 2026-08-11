@@ -55,7 +55,7 @@ let
   # Local models via the LiteLLM gateway (modules/services/litellm.nix). Keep
   # `model` in sync with that module's model_list.
   codexLocalConfigFile = mkCodexBackendProfileFile "local" {
-    model = "local-llama";
+    model = "local-chat";
     model_provider = "local";
     model_providers.local = {
       name = "Local (LiteLLM)";

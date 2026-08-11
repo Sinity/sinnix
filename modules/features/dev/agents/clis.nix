@@ -237,7 +237,7 @@ mkFeatureModule {
         name = "local";
         toolsets = [ "hermes-cli" ];
         model = {
-          default = "local-llama";
+          default = "local-chat";
           provider = "custom";
           base_url = "http://127.0.0.1:4000/v1";
         };
@@ -531,7 +531,7 @@ mkFeatureModule {
               # LiteLLM binds loopback with no master key; Claude Code still
               # requires a non-empty token, so send a dummy.
               export ANTHROPIC_AUTH_TOKEN="sk-local"
-              LOCAL_MODEL="local-llama"
+              LOCAL_MODEL="local-chat"
               export ANTHROPIC_MODEL="$LOCAL_MODEL"
               export ANTHROPIC_DEFAULT_OPUS_MODEL="$LOCAL_MODEL"
               export ANTHROPIC_DEFAULT_SONNET_MODEL="$LOCAL_MODEL"
