@@ -314,7 +314,7 @@ mkFeatureModule {
         # Persistence for AI tools and dev caches (colocated with their config)
         sinnix.persistence.home = {
           directories = [
-            ".cache" # entire cache dir — nix eval, sccache, uv, etc.
+            ".cache" # entire cache dir — nix eval, uv, etc.
             ".cargo" # Rust crate registry + git checkouts
             ".npm" # npm package cache
           ];
