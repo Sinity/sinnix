@@ -142,7 +142,7 @@ mkServiceModule {
           # takes ollama (bindsTo) and the loader down with it — observed
           # 2026-08-11: loader killed at 2min with 0 bytes landed. Front-door
           # traffic holds the proxy connection open for the whole pull.
-          ollama-model-loader.environment.OLLAMA_HOST = "127.0.0.1:11434";
+          ollama-model-loader.environment.OLLAMA_HOST = lib.mkForce "127.0.0.1:11434";
         }
       ];
     };
