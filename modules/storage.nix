@@ -41,7 +41,7 @@ in
     # user-writable .Trash-1000 at the volume top, every trash attempt under
     # /outer-realm fails (the mountpoint is root-owned, so the trasher
     # cannot create it either) — this is what broke yazi deletion in the
-    # archive/inbox/misc dumping grounds (diagnosed 2026-07-10).
+    # archive/inbox/misc dumping grounds.
     # /neo-outer-realm is deliberately excluded: it is an automount and a
     # boot-time tmpfiles touch would spin it up every boot; its .Trash-1000
     # was created manually instead.

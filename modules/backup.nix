@@ -249,9 +249,8 @@ let
     # User caches are regenerable and currently large enough to dominate
     # backup churn if included.
     "home/sinity/.cache"
-    # 2026-07-10 impermanence audit: pure regenerable caches/logs that were
-    # riding the hourly persist archives (npm cache 4.8G, nvim mason 1.2G,
-    # hyprland session logs 1G).
+    # Pure regenerable caches/logs; excluded so they don't ride the hourly
+    # persist archives.
     "home/sinity/.npm/_cacache"
     "home/sinity/.local/share/nvim/mason"
     "home/sinity/.local/share/hyprland/logs"
@@ -261,8 +260,8 @@ let
   ];
 
   realmExcludes = [
-    # Re-acquirable media (taxonomy 2026-07-10, sinnix-4ib): Steam and model
-    # weights re-download; stashbox regenerable members carry their own
+    # Re-acquirable media: Steam and model weights re-download; stashbox
+    # regenerable members carry their own
     # provenance. Precious-small media (books, videos, substack, edu,
     # music-audio-features, web-content) deliberately stays in coverage.
     "media/Steam"
@@ -272,8 +271,7 @@ let
     "media/stashbox/analysis-cache"
     "media/stashbox/gpu-venv"
     # Top-level regenerable-cache root (sinex cargo/dev caches via the
-    # /var/cache/sinex bind, nix-build) — pure churn, never backup
-    # material (2026-07-10 impermanence audit).
+    # /var/cache/sinex bind, nix-build) — pure churn, never backup material.
     "cache"
     "**/inbox/monero"
     "**/node_modules"
@@ -740,9 +738,7 @@ in
     # ─── Sinex blob-repository Borg job ───
     # The capture blob store (/realm/sinex/state/blob-repository, ~167G of
     # append-only content-addressed files) lives on a NESTED subvolume, so it
-    # is invisible to the /realm btrbk snapshots the realm job drains — the
-    # 2026-07-10 backup audit found the original captured data had NO backup
-    # path at all (and never had one on the old @sinex subvol either). A CAS
+    # is invisible to the /realm btrbk snapshots the realm job drains. A CAS
     # of immutable files needs no snapshot for consistency: back it up live,
     # daily. Persistent=true so a missed run catches up after downtime —
     # unlike the hourly drains, a whole missed day here is a real gap.
