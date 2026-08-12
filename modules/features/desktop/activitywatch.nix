@@ -44,6 +44,14 @@ mkFeatureModule {
             enable = true;
             restartable = true;
           };
+          captures = [
+            {
+              name = "activitywatch";
+              path = "${nixosConfig.sinnix.paths.capturesRoot}/activitywatch";
+              eventDriven = true;
+              staleAfterSeconds = 3600;
+            }
+          ];
         };
         activitywatch-watcher-awatcher = {
           unit = "activitywatch-watcher-awatcher.service";
