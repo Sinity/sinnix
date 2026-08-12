@@ -1,0 +1,241 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Wallpaper corpus + Noctalia palette CLI (current/next/prev/pin/import/status)
+# runtimeInputs: bash coreutils gnused gawk jq imagemagick @sinnix-wallpaper-generate
+set -euo pipefail
+
+export LC_ALL=C
+
+CORPUS="${SINNIX_WALLPAPER_CORPUS:-/realm/media/wallpaper}"
+WALLPAPER_DIR="${HOME}/wallpaper"
+CONFIG_TOML="${XDG_CONFIG_HOME:-$HOME/.config}/noctalia/config.toml"
+NOCTALIA_BIN="${SINNIX_NOCTALIA_BIN:-noctalia}"
+
+usage() {
+  cat <<'EOF'
+usage: sinnix-wallpaper <command> [args]
+
+commands:
+  current                  Active wallpaper path, color-scheme source, theme mode
+  palette [path]            Show the Material-You palette a wallpaper resolves to
+                             (current wallpaper if no path given)
+  next / prev / random      Advance the live wallpaper (Noctalia IPC)
+  pin <path>                Set one wallpaper and pause automation until unpin
+  unpin                     Resume automation after pin
+  import <file>... [opts]   Copy image(s) into the corpus pool, optionally classify
+      --mood <name>          Time-of-day set (morning/day/evening/night)
+      --mode <dark|light>    Theme-mode subset (requires --mood)
+      --no-oled-check        Skip the brightness/uniformity OLED heuristic
+  classify <pool-path> --mood <name> --mode <dark|light>
+                             Symlink an already-imported/generated image into a set
+  generate [args...]        Trigger a ComfyUI batch (see sinnix-wallpaper-generate --help;
+                             requires sinnix.services.wallpaper-generate.enable)
+  status                    Corpus counts, active set, timers
+
+Corpus root defaults to /realm/media/wallpaper (override via
+SINNIX_WALLPAPER_CORPUS). Live directory: ~/wallpaper (dark/light are
+symlinks retargeted by the time-of-day timer -- see
+modules/features/desktop/wallpaper.nix).
+EOF
+}
+
+require_daemon() {
+  if ! "$NOCTALIA_BIN" msg wallpaper-get >/dev/null 2>&1; then
+    echo "sinnix-wallpaper: noctalia.service does not appear to be running (msg IPC failed)" >&2
+    exit 1
+  fi
+}
+
+cmd_current() {
+  require_daemon
+  local path scheme_source scheme_name mode
+  path=$("$NOCTALIA_BIN" msg wallpaper-get)
+  read -r scheme_source scheme_name <<<"$("$NOCTALIA_BIN" msg color-scheme-get)"
+  mode=$("$NOCTALIA_BIN" msg theme-mode-get)
+  echo "wallpaper: ${path}"
+  echo "mode:      ${mode}"
+  echo "scheme:    ${scheme_source} / ${scheme_name}"
+}
+
+cmd_palette() {
+  local path="${1:-}"
+  if [[ -z "$path" ]]; then
+    require_daemon
+    path=$("$NOCTALIA_BIN" msg wallpaper-get)
+  fi
+  [[ -r "$path" ]] || { echo "sinnix-wallpaper: cannot read $path" >&2; exit 1; }
+  local scheme="vibrant"
+  local scheme_line
+  if scheme_line=$("$NOCTALIA_BIN" msg color-scheme-get 2>/dev/null); then
+    read -r _ scheme <<<"$scheme_line"
+  fi
+  local json
+  json=$("$NOCTALIA_BIN" theme "$path" --scheme "$scheme" --both)
+  echo "$json" | jq -r '
+    "source_color: " + .dark.source_color,
+    "dark:  primary=" + .dark.primary  + " surface=" + .dark.surface,
+    "light: primary=" + .light.primary + " surface=" + .light.surface
+  '
+}
+
+cmd_next()   { require_daemon; "$NOCTALIA_BIN" msg wallpaper-next; }
+cmd_prev()   { require_daemon; "$NOCTALIA_BIN" msg wallpaper-previous; }
+cmd_random() { require_daemon; "$NOCTALIA_BIN" msg wallpaper-random; }
+
+# Automation enable/disable is not exposed over IPC (verified: absent from
+# `noctalia msg --help`); config.toml's [wallpaper.automation] enabled key is
+# the only lever, so pin/unpin edit that one line in-place, scoped to the
+# [wallpaper.automation] table only so nothing else in the GUI-managed file
+# is touched.
+set_automation() {
+  local value="$1"
+  [[ -w "$CONFIG_TOML" ]] || { echo "sinnix-wallpaper: $CONFIG_TOML not writable" >&2; exit 1; }
+  awk -v val="$value" '
+    /^\[wallpaper\.automation\]/ { insection=1; print; next }
+    /^\[/ { insection=0; print; next }
+    insection && /^enabled[[:space:]]*=/ { print "enabled = " val; next }
+    { print }
+  ' "$CONFIG_TOML" > "${CONFIG_TOML}.tmp"
+  mv "${CONFIG_TOML}.tmp" "$CONFIG_TOML"
+  "$NOCTALIA_BIN" msg config-reload >/dev/null 2>&1 || true
+}
+
+cmd_pin() {
+  local path="${1:?usage: sinnix-wallpaper pin <path>}"
+  require_daemon
+  [[ -r "$path" ]] || { echo "sinnix-wallpaper: cannot read $path" >&2; exit 1; }
+  "$NOCTALIA_BIN" msg wallpaper-set "$path"
+  set_automation false
+  echo "pinned: ${path} (automation paused -- 'sinnix-wallpaper unpin' to resume)"
+}
+
+cmd_unpin() {
+  set_automation true
+  require_daemon
+  "$NOCTALIA_BIN" msg wallpaper-random || true
+  echo "automation resumed"
+}
+
+oled_check() {
+  local path="$1"
+  local stats mean stddev
+  stats=$(magick "$path" -resize 64x64 -colorspace Gray -format "%[fx:mean] %[fx:standard_deviation]" info: 2>/dev/null) || return 0
+  read -r mean stddev <<<"$stats"
+  # Heuristic: bright average + low variance == a large, flat bright region
+  # (the OLED burn-in risk shape on a static wallpaper). Threshold picked
+  # from ordinary photographic wallpapers (mean ~0.2-0.45, stddev >0.15);
+  # skies/whiteouts push mean up and stddev down together.
+  awk -v mean="$mean" -v stddev="$stddev" -v path="$path" 'BEGIN {
+    if (mean+0 > 0.55 && stddev+0 < 0.15) {
+      printf "warning: %s looks bright and low-contrast (mean=%.2f stddev=%.2f) -- large static bright regions are the OLED burn-in risk shape on this panel\n", path, mean, stddev > "/dev/stderr"
+    }
+  }'
+}
+
+cmd_import() {
+  local files=() mood="" mode="" check_oled=1
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --mood) mood="$2"; shift 2 ;;
+      --mode) mode="$2"; shift 2 ;;
+      --no-oled-check) check_oled=0; shift ;;
+      *) files+=("$1"); shift ;;
+    esac
+  done
+  [[ ${#files[@]} -ge 1 ]] || { usage; exit 1; }
+  if [[ -n "$mode" && -z "$mood" ]]; then
+    echo "sinnix-wallpaper: --mode requires --mood" >&2; exit 1
+  fi
+  mkdir -p "${CORPUS}/pool"
+  local f base dest
+  for f in "${files[@]}"; do
+    [[ -r "$f" ]] || { echo "sinnix-wallpaper: cannot read $f, skipping" >&2; continue; }
+    base=$(basename "$f")
+    dest="${CORPUS}/pool/${base}"
+    if [[ -e "$dest" ]]; then
+      dest="${CORPUS}/pool/$(date +%s)-${base}"
+    fi
+    cp -- "$f" "$dest"
+    echo "imported: $dest"
+    if [[ "$check_oled" == "1" ]]; then oled_check "$dest"; fi
+    if [[ -n "$mood" ]]; then
+      cmd_classify "$dest" --mood "$mood" --mode "${mode:-dark}"
+      if [[ -z "$mode" ]]; then cmd_classify "$dest" --mood "$mood" --mode "light"; fi
+    fi
+  done
+  if [[ -z "$mood" ]]; then
+    echo "not classified into a set -- 'sinnix-wallpaper classify <path> --mood <name> --mode <dark|light>' when ready"
+  fi
+}
+
+cmd_classify() {
+  local path="${1:?usage: sinnix-wallpaper classify <pool-path> --mood <name> --mode <dark|light>}"
+  shift
+  local mood="" mode=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --mood) mood="$2"; shift 2 ;;
+      --mode) mode="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  [[ -n "$mood" && -n "$mode" ]] || { echo "sinnix-wallpaper: classify needs --mood and --mode" >&2; exit 1; }
+  case "$mode" in dark|light) ;; *) echo "sinnix-wallpaper: --mode must be dark or light" >&2; exit 1 ;; esac
+  [[ -r "$path" ]] || { echo "sinnix-wallpaper: cannot read $path" >&2; exit 1; }
+  local dir="${CORPUS}/sets/${mood}/${mode}"
+  mkdir -p "$dir"
+  ln -sf "$(readlink -f "$path")" "${dir}/$(basename "$path")"
+  echo "classified: ${mood}/${mode} <- $(basename "$path")"
+}
+
+cmd_status() {
+  echo "== corpus (${CORPUS}) =="
+  local mood mode dir count
+  for mood in morning day evening night; do
+    for mode in dark light; do
+      dir="${CORPUS}/sets/${mood}/${mode}"
+      count=0
+      if [[ -d "$dir" ]]; then count=$(find "$dir" -maxdepth 1 -type l 2>/dev/null | wc -l); fi
+      printf '  %-8s %-6s %d\n' "$mood" "$mode" "$count"
+    done
+  done
+  count=0
+  if [[ -d "${CORPUS}/pool" ]]; then count=$(find "${CORPUS}/pool" -maxdepth 1 -type f 2>/dev/null | wc -l); fi
+  echo "  pool: ${count} unclassified"
+  echo
+  echo "== live directory (${WALLPAPER_DIR}) =="
+  for mode in dark light; do
+    if [[ -L "${WALLPAPER_DIR}/${mode}" ]]; then
+      echo "  ${mode} -> $(readlink "${WALLPAPER_DIR}/${mode}")"
+    else
+      echo "  ${mode}: not linked yet (timer runs every 15min, or run sinnix-wallpaper-timeofday once)"
+    fi
+  done
+  echo
+  echo "== timers =="
+  systemctl --user list-timers --no-pager 2>/dev/null | grep -E "wallpaper|^NEXT" || echo "  (none active)"
+}
+
+cmd_generate() {
+  command -v sinnix-wallpaper-generate >/dev/null 2>&1 || {
+    echo "sinnix-wallpaper: sinnix-wallpaper-generate not found. Enable sinnix.services.wallpaper-generate to install it." >&2
+    exit 1
+  }
+  exec sinnix-wallpaper-generate "$@"
+}
+
+case "${1:-}" in
+  current) cmd_current ;;
+  palette) shift; cmd_palette "$@" ;;
+  next) cmd_next ;;
+  prev|previous) cmd_prev ;;
+  random) cmd_random ;;
+  pin) shift; cmd_pin "$@" ;;
+  unpin) cmd_unpin ;;
+  import) shift; cmd_import "$@" ;;
+  classify) shift; cmd_classify "$@" ;;
+  generate) shift; cmd_generate "$@" ;;
+  status) cmd_status ;;
+  -h|--help|help|"") usage ;;
+  *) echo "unknown command: $1" >&2; usage; exit 1 ;;
+esac
