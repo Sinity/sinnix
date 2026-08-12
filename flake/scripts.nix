@@ -239,6 +239,15 @@ let
 
     sinnix-quota = pkgs.callPackage ../pkgs/sinnix-quota/pkg.nix { };
 
+    # NOTE: depends on pkgs/sinnix-capture/ (sinnix-mufn, the shared
+    # sinnix-capture-v1 envelope writer lib) existing as a sibling package --
+    # not yet merged onto this branch as of sinnix-fp9v. sinnix-capture-a11y's
+    # pkg.nix references it via a relative `../sinnix-capture/pkg.nix` path,
+    # so this line (and the a11y module that consumes it) will resolve once
+    # sinnix-mufn lands; until then `nix eval` on this attribute fails with a
+    # missing-path error for pkgs/sinnix-capture, not a bug in this package.
+    sinnix-capture-a11y = pkgs.callPackage ../pkgs/sinnix-capture-a11y/pkg.nix { };
+
     sinnix-agent-environment-doc = pkgs.writeShellApplication {
       name = "sinnix-agent-environment-doc";
       runtimeInputs = [ pkgs.bash pkgs.coreutils pkgs.findutils pkgs.gawk pkgs.jq pkgs.ripgrep ];
