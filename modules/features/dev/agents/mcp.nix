@@ -246,28 +246,11 @@ mkFeatureModule {
           };
 
           home.file = {
-            ".config/claude/agents/lane.md" = {
-              source = mkDotsFile "/claude/agents/lane.md";
-              force = true;
-            };
-            ".config/claude/agents/triage.md" = {
-              source = mkDotsFile "/claude/agents/triage.md";
-              force = true;
-            };
-            ".config/claude/agents/review.md" = {
-              source = mkDotsFile "/claude/agents/review.md";
-              force = true;
-            };
-            ".config/claude/agents/judge.md" = {
-              source = mkDotsFile "/claude/agents/judge.md";
-              force = true;
-            };
-            ".config/claude/agents/schemas/triage.schema.json" = {
-              source = mkDotsFile "/claude/agents/schemas/triage.schema.json";
-              force = true;
-            };
-            ".config/claude/agents/schemas/judge.schema.json" = {
-              source = mkDotsFile "/claude/agents/schemas/judge.schema.json";
+            # One directory symlink, not per-file entries: a new agent
+            # definition dropped into dots/claude/agents/ is live
+            # immediately, no registration and no rebuild.
+            ".config/claude/agents" = {
+              source = mkDotsFile "/claude/agents";
               force = true;
             };
             ".codex/skills" = {
