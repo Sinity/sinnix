@@ -148,17 +148,25 @@ mkServiceModule {
               # gsr-kms-server through NixOS's setcap wrapper
               # (config.security.wrapperDir), which grants cap_sys_admin
               # via file capabilities at exec time -- exactly the kind of
-              # privilege-gain no_new_privs exists to block. With it set,
-              # the wrapper's socket bind fails ("Read-only file system",
-              # the kernel's no_new_privs-triggered denial surfacing as a
-              # bind() error rather than a clearer EPERM). Caught live
-              # 2026-08-12: switch succeeded, unit registered, but
-              # crash-looped on every start until this fix. Every other
-              # sandboxing directive stays in place; this is the minimum
-              # necessary relaxation, not a general loosening.
+              # privilege-gain no_new_privs exists to block.
               ProtectSystem = "strict";
               ProtectHome = "read-only";
-              ReadWritePaths = [ replayDir ];
+              # gsr-kms-server binds its IPC socket under $XDG_RUNTIME_DIR
+              # (its own convention: ".gsr-kms-socket-%s") -- ProtectSystem
+              # =strict makes everything read-only except ReadWritePaths,
+              # so without the runtime dir listed the bind() call fails
+              # with EROFS ("Read-only file system"). "%t" is systemd's
+              # specifier for the unit's runtime directory
+              # ($XDG_RUNTIME_DIR for a user unit). Caught live
+              # 2026-08-12: removing NoNewPrivileges alone did NOT fix
+              # this -- same error persisted, crash-looping every start
+              # until this second, actual root cause was found; corrected
+              # in-place rather than leaving a wrong comment from the
+              # first attempt.
+              ReadWritePaths = [
+                replayDir
+                "%t"
+              ];
               UMask = "0077";
             };
           };
