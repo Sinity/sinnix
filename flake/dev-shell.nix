@@ -57,9 +57,8 @@
           if [ "$_cmd" = "build" ] || { [ "$_cmd" = "flake" ] && [ "$_sub" = "check" ]; }; then
             exec 9>/tmp/sinnix-switch.lock
             if ! ${pkgs.util-linux}/bin/flock --nonblock 9; then
-              echo "nix $1: another heavy nix operation is already running — aborting to prevent thrashing" >&2
-              echo "  Tip: wait for the running build to finish, or kill it first." >&2
-              exit 1
+              echo "nix $1: another heavy nix operation is running — queued behind it (waiting for the lock)" >&2
+              ${pkgs.util-linux}/bin/flock 9
             fi
           fi
         fi
@@ -109,8 +108,8 @@
           ${resolveFlakeDir}
           exec 9>/tmp/sinnix-switch.lock
           if ! ${pkgs.util-linux}/bin/flock --nonblock 9; then
-            echo "sinnix check: another heavy nix operation is already running — aborting to prevent thrashing" >&2
-            exit 1
+            echo "sinnix check: another heavy nix operation is running — queued behind it (waiting for the lock)" >&2
+            ${pkgs.util-linux}/bin/flock 9
           fi
 
           for arg in "$@"; do

@@ -27,13 +27,10 @@ let
           dependsOn = [ ];
         };
         workload = {
-          kind = "unknown";
-          lifecycle = "unknown";
-          expendability = "unknown";
-          operatorProtection = "unknown";
           class = "unclassified";
           rationale = "";
           processMatchers = [ ];
+          earlyoomAvoid = false;
         };
         resources = { };
       }
@@ -103,7 +100,33 @@ rec {
   # workload containment; this process-name fallback protects only surfaces
   # needed to keep or recover the graphical/login session. Agents, language
   # runtimes, browsers, and generic shells deliberately remain eligible.
-  earlyoomEmergencyAvoidPattern = "(systemd|systemd-logind|dbus-daemon|dbus-broker|dbus-broker-launch|sshd|agetty|uwsm|start-hyprland|Hyprland|Xwayland|noctalia|quickshell|xdg-desktop-po|pipewire|wireplumber|foot|kitty|below|nix-daemon)";
+  # Single base list: earlyoomPatternFor extends exactly this with the
+  # processMatchers of surfaces that opt in via workload.earlyoomAvoid (a
+  # previous hand-copied second list silently diverged and dropped
+  # quickshell/xdg-desktop-po from the live pattern).
+  earlyoomEmergencyAvoidBase = [
+    "systemd"
+    "systemd-logind"
+    "dbus-daemon"
+    "dbus-broker"
+    "dbus-broker-launch"
+    "sshd"
+    "agetty"
+    "uwsm"
+    "start-hyprland"
+    "Hyprland"
+    "Xwayland"
+    "noctalia"
+    "quickshell"
+    "xdg-desktop-po"
+    "pipewire"
+    "wireplumber"
+    "foot"
+    "kitty"
+    "below"
+    "nix-daemon"
+  ];
+  earlyoomEmergencyAvoidPattern = "(${lib.concatStringsSep "|" earlyoomEmergencyAvoidBase})";
 
   classes = {
     interactive-agent = mkClass "Interactive AI agent shells and frontends" { };
@@ -275,19 +298,6 @@ rec {
       };
       envDefaults = { };
     };
-    heavy = {
-      resourceClass = "developer-build";
-      slice = "build.slice";
-      nice = 5;
-      ioniceClass = "best-effort";
-      ionicePriority = 7;
-      systemdProperties = {
-        IOAccounting = true;
-        IOWeight = 2;
-        TimeoutStopSec = "15s";
-      };
-      envDefaults = { };
-    };
   };
 
   slices = {
@@ -428,14 +438,11 @@ rec {
       protectedMatchers = lib.concatLists (
         lib.mapAttrsToList (
           _: surface:
-          if (surface.workload.expendability or "unknown") == "protected" then
-            surface.workload.processMatchers or [ ]
-          else
-            [ ]
+          if surface.workload.earlyoomAvoid or false then surface.workload.processMatchers or [ ] else [ ]
         ) surfaces
       );
     in
-    "(systemd|systemd-logind|dbus-daemon|dbus-broker|dbus-broker-launch|sshd|agetty|uwsm|start-hyprland|Hyprland|Xwayland|pipewire|wireplumber|foot|kitty|below|nix-daemon|${lib.concatStringsSep "|" protectedMatchers})";
+    "(${lib.concatStringsSep "|" (lib.unique (earlyoomEmergencyAvoidBase ++ protectedMatchers))})";
 
   mkInventory =
     {
@@ -453,20 +460,6 @@ rec {
         slices
         ;
       earlyoomEmergencyAvoidPattern = earlyoomPatternFor (lib.mapAttrs (_: normalizeSurface) surfaces);
-      dynamicSurfaces = {
-        agentJobs = {
-          manager = "user";
-          unitPattern = "sinnix-agent-job-*.scope";
-          resourceClass = "interactive-agent";
-          manifestSchema = "sinnix-agent-job-v2";
-        };
-        gatewayChildren = {
-          manager = "user";
-          processPattern = "sinnix-agent-gateway";
-          resourceClass = "interactive-agent";
-          transport = "stdio";
-        };
-      };
       surfaces = lib.mapAttrs (_: effectiveSurface classes) surfaces;
       inherit mounts backups;
       observedServices = observedServiceRows surfaces;

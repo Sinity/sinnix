@@ -28,7 +28,7 @@ def _proc(proc_root: Path, pid: int, start: str, cgroup: str) -> None:
     directory.joinpath("cgroup").write_text(f"0::{cgroup}\n")
 
 
-def test_classification_distinguishes_attestation_and_cold_expendability(tmp_path: Path, monkeypatch) -> None:
+def test_classification_distinguishes_attestation_and_cold_workload_class(tmp_path: Path, monkeypatch) -> None:
     proc_root = tmp_path / "proc"
     cgroup_root = tmp_path / "cgroups"
     inventory = tmp_path / "inventory.json"
@@ -36,8 +36,8 @@ def test_classification_distinguishes_attestation_and_cold_expendability(tmp_pat
         json.dumps(
             {
                 "surfaces": {
-                    "cold": {"unit": "cold.scope", "workload": {"expendability": "expendable"}},
-                    "protected": {"unit": "protected.scope", "workload": {"expendability": "protected"}},
+                    "cold": {"unit": "cold.scope", "workload": {"class": "sacrificial"}},
+                    "protected": {"unit": "protected.scope", "workload": {"class": "protected"}},
                 }
             }
         )
@@ -76,5 +76,5 @@ def test_classification_distinguishes_attestation_and_cold_expendability(tmp_pat
     assert by_id["cold"]["orphaned"] is True
     assert by_id["cold"]["coldness"]["candidate"] is True
     assert by_id["cold"]["proposed_action"] == "notify"
-    assert by_id["protected"]["expendability"] == "protected"
+    assert by_id["protected"]["workload"]["class"] == "protected"
     assert by_id["reused"]["attestation"] == "pid_reuse"

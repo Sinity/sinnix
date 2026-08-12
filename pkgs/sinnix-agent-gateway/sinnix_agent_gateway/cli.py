@@ -4,7 +4,6 @@ import argparse
 import hashlib
 import json
 import os
-import stat
 from pathlib import Path
 from typing import Any
 
@@ -30,34 +29,6 @@ async def build_manifest(config: GatewayConfig, profile: str) -> dict[str, Any]:
     return canonical_manifest(await create_server(config, profile).list_tools())
 
 
-def migrate_legacy(config: GatewayConfig, source: Path) -> dict[str, Any]:
-    config.initialize_state()
-    destination = config.state_dir / "legacy" / "sinnix-agent-gateway"
-    if source.resolve() == config.state_dir.resolve():
-        return {
-            "migrated": False,
-            "reason": "legacy source is the active state directory",
-        }
-    if not source.exists():
-        return {"migrated": False, "reason": "legacy state absent"}
-    if source.is_symlink():
-        return {"migrated": False, "reason": "legacy state symlinks are refused"}
-    if destination.exists():
-        return {"migrated": False, "reason": "legacy state already archived"}
-    source.rename(destination)
-    for root, directories, files in os.walk(destination, followlinks=False):
-        Path(root).chmod(0o700)
-        for name in directories:
-            target = Path(root) / name
-            if not target.is_symlink():
-                target.chmod(0o700)
-        for name in files:
-            target = Path(root) / name
-            if not target.is_symlink() and stat.S_ISREG(target.stat().st_mode):
-                target.chmod(0o600)
-    return {"migrated": True, "destination": "legacy/sinnix-agent-gateway"}
-
-
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(prog="sinnix-agent-gateway")
     result.add_argument(
@@ -74,12 +45,6 @@ def parser() -> argparse.ArgumentParser:
     subcommands.add_parser("serve")
     subcommands.add_parser("manifest")
     subcommands.add_parser("info")
-    migrate = subcommands.add_parser("migrate-state")
-    migrate.add_argument(
-        "--source",
-        type=Path,
-        default=Path.home() / ".local" / "state" / "sinnix-agent-gateway",
-    )
     return result
 
 
@@ -105,8 +70,6 @@ def main() -> None:
                 indent=2,
             )
         )
-    elif command == "migrate-state":
-        print(json.dumps(migrate_legacy(config, arguments.source), indent=2))
 
 
 if __name__ == "__main__":

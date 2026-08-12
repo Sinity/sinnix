@@ -143,7 +143,6 @@ def classify_jobs(
                 pass
         descendants = [value for value in procs if value != pid]
         workload = workload_for_cgroup(expected_cgroup)
-        expendability = workload.get("expendability", "unknown")
         peak = _peak_for_cgroup(expected_cgroup, below)
         swap_bytes = _number(cgroup_path / "memory.swap.current") if cgroup_path else 0
         io_bytes = _io_bytes(cgroup_path / "io.stat") if cgroup_path else 0
@@ -177,7 +176,6 @@ def classify_jobs(
                 "descendant_pids": descendants,
                 "orphaned": orphaned,
                 "workload": workload,
-                "expendability": expendability,
                 "coldness": {
                     "candidate": cold,
                     "cpu_percent_max": cpu_percent,

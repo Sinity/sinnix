@@ -140,46 +140,6 @@ in
             };
           };
           workload = {
-            kind = lib.mkOption {
-              type = lib.types.enum [
-                "daemon"
-                "job"
-                "frontend"
-                "database"
-                "unknown"
-              ];
-              default = "unknown";
-              description = "Normalized workload kind for policy consumers.";
-            };
-            lifecycle = lib.mkOption {
-              type = lib.types.enum [
-                "persistent"
-                "transient"
-                "oneshot"
-                "unknown"
-              ];
-              default = "unknown";
-              description = "Expected workload lifecycle.";
-            };
-            expendability = lib.mkOption {
-              type = lib.types.enum [
-                "protected"
-                "normal"
-                "expendable"
-                "unknown"
-              ];
-              default = "unknown";
-              description = "Whether automatic pressure policy may sacrifice this workload.";
-            };
-            operatorProtection = lib.mkOption {
-              type = lib.types.enum [
-                "operator"
-                "ordinary"
-                "unknown"
-              ];
-              default = "unknown";
-              description = "Operator-facing protection level.";
-            };
             class = lib.mkOption {
               type = lib.types.enum [
                 "interactive"
@@ -200,6 +160,11 @@ in
               type = lib.types.listOf lib.types.str;
               default = [ ];
               description = "Bounded fallback matchers for children without their own unit identity.";
+            };
+            earlyoomAvoid = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = "Add this surface's processMatchers to the earlyoom emergency avoid pattern (session-recovery surfaces only).";
             };
           };
           observe = {

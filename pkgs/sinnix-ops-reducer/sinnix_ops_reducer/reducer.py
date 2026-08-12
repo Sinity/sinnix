@@ -103,7 +103,7 @@ class Reducer:
                 "count": count,
                 "identity_revision": row.get("identity_revision"),
             }
-            expendable = row.get("expendability") == "expendable"
+            expendable = (row.get("workload") or {}).get("class") == "sacrificial"
             cold = bool((row.get("coldness") or {}).get("candidate"))
             proposed = "reap" if row.get("orphaned") and cold and expendable and count >= 2 else "notify"
             reduced.append({**row, "policy": {"observation_count": count, "proposed_action": proposed}})
