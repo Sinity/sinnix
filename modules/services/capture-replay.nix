@@ -143,7 +143,19 @@ mkServiceModule {
               ];
               Restart = "on-failure";
               RestartSec = "5s";
-              NoNewPrivileges = true;
+              # NoNewPrivileges must stay OFF for this unit specifically:
+              # gpu-screen-recorder's KMS capture path execs
+              # gsr-kms-server through NixOS's setcap wrapper
+              # (config.security.wrapperDir), which grants cap_sys_admin
+              # via file capabilities at exec time -- exactly the kind of
+              # privilege-gain no_new_privs exists to block. With it set,
+              # the wrapper's socket bind fails ("Read-only file system",
+              # the kernel's no_new_privs-triggered denial surfacing as a
+              # bind() error rather than a clearer EPERM). Caught live
+              # 2026-08-12: switch succeeded, unit registered, but
+              # crash-looped on every start until this fix. Every other
+              # sandboxing directive stays in place; this is the minimum
+              # necessary relaxation, not a general loosening.
               ProtectSystem = "strict";
               ProtectHome = "read-only";
               ReadWritePaths = [ replayDir ];

@@ -145,14 +145,23 @@ echo ""
 
 total_captured=0
 total_failed=0
+total_stale=0
 
 for socket in "${sockets[@]}"; do
   pid=$(basename "$socket" | sed 's/kitty-[^-]*-//')
   echo "● Instance pid:$pid"
 
+  # A socket file existing under a scanned glob does not mean the kitty
+  # process behind it is still alive -- a crashed/closed instance can
+  # leave its socket on disk. "cannot connect" here is that ordinary,
+  # expected case, not a capture failure: there is no window to capture.
+  # Caught live 2026-08-12: 10 of 16 scanned sockets were stale on a
+  # routine run, and counting each as a failure made every timer tick
+  # exit 1, which is why this lane had never actually run successfully
+  # via systemd despite the underlying capture logic working correctly.
   windows_json=$(kitty @ --to "unix:$socket" ls 2>/dev/null) || {
-    echo "  ⚠ cannot connect"
-    ((total_failed++)) || true
+    echo "  ⚠ stale instance (no longer running), skipping"
+    ((total_stale++)) || true
     continue
   }
 
@@ -170,7 +179,11 @@ for socket in "${sockets[@]}"; do
 done
 
 echo ""
-echo "Total: $total_captured window(s) captured, $total_failed failed"
+echo "Total: $total_captured window(s) captured, $total_failed failed, $total_stale stale instance(s) skipped"
 echo "Output: $CAPTURE_DIR"
 
+# Only a REAL capture failure (a live, reachable instance whose window
+# capture itself failed) fails the unit -- stale sockets are routine
+# and must never do so, or the timer would never succeed on a host that
+# has ever had a kitty window close since its last run.
 [ "$total_failed" -eq 0 ] || exit 1
