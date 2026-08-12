@@ -52,7 +52,7 @@ process list. It can, because the estate already names its own work:
   id, so a live job shows its backend, model, work item and elapsed time, and
   the ones whose launcher has exited are listed separately, with the reducer's
   orphan policy on the ones that need a decision.
-- **The heavy-work lease**, when that subsystem is present on the host, heads
+- **The heavy-work lease** is GONE from sinnix (removed as counterproductive; see bd memory heavy-work-lease-removed). The renderer still tolerates its absence, which heads
   the page: who currently holds the right to run heavy work.
 
 Long-lived scopes are labelled as such rather than filtered out. A devshell
