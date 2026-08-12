@@ -32,11 +32,14 @@
 #     firewall before it reaches a socket that was never bound for it anyway.
 #
 # ── Why there is no second control plane ────────────────────────────────────
-# The AI panel's buttons post to the ops-reducer's existing action API through
-# a reverse-proxied path. That API owns admission (targets must be attested
-# runtime-inventory units), optimistic concurrency (expected_revision),
-# idempotency keys, and receipts. The hub adds no shell-out, no sudo, and no
-# privileged helper: it is a view over a contract that already existed.
+# Every button on every page posts to the ops-reducer's existing action API
+# through a reverse-proxied path. That API owns admission (targets must be
+# attested runtime-inventory units or attested agent jobs), optimistic
+# concurrency (expected_revision), idempotency keys, and receipts. The hub adds
+# no shell-out, no sudo, and no privileged helper: it is a view over a contract
+# that already existed. Where the contract cannot express something — an ad-hoc
+# `sinnix-scope` placement is neither an inventory unit nor an attested job —
+# the page says so instead of growing a private kill path.
 {
   mkServiceModule,
   config,
@@ -197,17 +200,9 @@ mkServiceModule {
             inherit name;
             inherit (frontend) label port upstream;
           }) activeFrontends;
+          # The pages themselves are reachable from the nav on every page, so
+          # this list is only the things a link is the *only* way to reach.
           links = [
-            {
-              label = "Reports";
-              href = "/reports/";
-              note = "generated HTML reports, browsable and linkable";
-            }
-            {
-              label = "AI control";
-              href = "/ai/";
-              note = "state and start/stop for the local AI backends";
-            }
             {
               label = "Ops snapshot (JSON)";
               href = "/ops/v1/snapshot";

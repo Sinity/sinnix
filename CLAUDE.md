@@ -320,9 +320,12 @@ config in `secrets.nix` (repo root).
   volume. Journald capped 4G persistent (OOM forensics). fTPM broken →
   systemd-tpm2-setup masked. `sinnix.services.hub`
   (`modules/services/hub.nix`, docs/hub.md) is the browser front door:
-  Caddy in the user manager serving `/reports/`, a server-rendered estate
-  dashboard, and an AI control panel whose buttons post to the ops-reducer's
-  bounded action API — no second control plane. It binds loopback plus the
+  Caddy in the user manager serving `/reports/` plus four server-rendered
+  pages — estate verdict, `/work/` (semantic workload view over scopes, the
+  project ledger and gateway jobs), `/services/`, `/ai/` — whose buttons post
+  to the ops-reducer's bounded action API. No second control plane: where the
+  action API cannot express a target the page says so rather than growing a
+  private kill path. It binds loopback plus the
   tailscale0 address via an explicit Caddy `bind` (site addresses alone
   collapse to a `:PORT` wildcard) and opens its ports on tailscale0 only.
 - **sinnix-ethereal** — Hetzner AX42 headless replica
