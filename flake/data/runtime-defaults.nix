@@ -101,15 +101,17 @@ rec {
   # needed to keep or recover the graphical/login session. Agents, language
   # runtimes, browsers, and generic shells deliberately remain eligible.
   # Single base list: earlyoomPatternFor extends exactly this with the
-  # processMatchers of surfaces that opt in via workload.earlyoomAvoid (a
-  # previous hand-copied second list silently diverged and dropped
-  # quickshell/xdg-desktop-po from the live pattern).
+  # processMatchers of surfaces that opt in via workload.earlyoomAvoid.
+  # Entries are matched unanchored against /proc/<pid>/comm (15 chars max,
+  # hence the truncated xdg-desktop-po), so keep every entry <=15 chars and
+  # drop entries whose process cannot exist on our hosts: dbus-daemon
+  # (core.nix forces dbus-broker), quickshell (noctalia v5 is a standalone
+  # binary), foot (not installed), dbus-broker-launch (substring-covered by
+  # dbus-broker and unmatchable at 18 chars anyway).
   earlyoomEmergencyAvoidBase = [
     "systemd"
     "systemd-logind"
-    "dbus-daemon"
     "dbus-broker"
-    "dbus-broker-launch"
     "sshd"
     "agetty"
     "uwsm"
@@ -117,11 +119,9 @@ rec {
     "Hyprland"
     "Xwayland"
     "noctalia"
-    "quickshell"
     "xdg-desktop-po"
     "pipewire"
     "wireplumber"
-    "foot"
     "kitty"
     "below"
     "nix-daemon"
