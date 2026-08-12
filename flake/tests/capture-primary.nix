@@ -191,8 +191,8 @@ in
             EOF_SURFACE
             jq -e '
               # ExecStart may render as a plain string or a single-element
-              # array depending on the systemd option type's merge/apply
-              # behavior -- normalize before substring checks.
+              # array depending on the systemd option merge/apply behavior
+              # -- normalize before substring checks.
               (.Service.ExecStart | if type == "array" then join(" ") else . end) as $execStart |
               ($execStart | contains("wl-paste --primary --watch")) and
               ($execStart | contains("sinnix-capture-primary-watch")) and
