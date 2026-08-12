@@ -51,6 +51,12 @@
     tailscale = {
       enable = true;
       tags = [ "tag:workstation" ];
+      # Zero-blast-radius posture (operator burned by tailscale-owned DNS
+      # before): never touch DNS -- the router stays DNS authority -- and
+      # accept/advertise no routes. The join adds only the tailscale0
+      # interface + 100.64/10 peer routes; rollback = stop tailscaled.
+      enableMagicDNS = false;
+      useRoutingFeatures = "none";
     };
     # ── Capture-machinery program (2026-08-12) ──────────────────────────────
     capture-notifications.enable = true;
