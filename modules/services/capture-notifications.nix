@@ -33,7 +33,13 @@ mkServiceModule {
   surface = {
     unit = "sinnix-capture-notifications.service";
     manager = "user";
-    kind = "capture";
+    # No explicit `kind`: this is a real owned systemd .service unit (the
+    # listener below), so it defaults to "service" like every other daemon
+    # surface in the repo. `kind = "capture"` is reserved for surfaces with
+    # no real backing unit -- see capture-registry.nix's docstring and
+    # terminal-capture.nix (hook-based, no persistent daemon). Getting this
+    # wrong silently drops the unit from runtime.nix's OnFailure
+    # health-transition wiring (kind == "service" filter).
     resourceClass = "capture-runtime";
     observe = {
       enable = true;
@@ -77,15 +83,19 @@ mkServiceModule {
             Description = "Forward desktop notifications (org.freedesktop.Notifications) to sinnix-capture";
             After = [ "default.target" ];
           };
-          Service = {
-            Type = "simple";
-            ExecStart = "${listener}/bin/sinnix-capture-notifications-listener --capture-bin ${captureCli}/bin/sinnix-capture --capture-root ${config.sinnix.paths.capturesRoot} --lane ${lane}";
-            Restart = "on-failure";
-            RestartSec = "5s";
-            NoNewPrivileges = true;
-            ProtectSystem = "strict";
-            ProtectHome = "read-only";
-            ReadWritePaths = [ laneDir ];
+          Service = lib.sinnix.mkRuntimeServiceConfig {
+            runtimeInventory = config.sinnix.runtime.inventory;
+            unit = "sinnix-capture-notifications.service";
+            overrides = {
+              Type = "simple";
+              ExecStart = "${listener}/bin/sinnix-capture-notifications-listener --capture-bin ${captureCli}/bin/sinnix-capture --capture-root ${config.sinnix.paths.capturesRoot} --lane ${lane}";
+              Restart = "on-failure";
+              RestartSec = "5s";
+              NoNewPrivileges = true;
+              ProtectSystem = "strict";
+              ProtectHome = "read-only";
+              ReadWritePaths = [ laneDir ];
+            };
           };
           Install.WantedBy = [ "default.target" ];
         };
