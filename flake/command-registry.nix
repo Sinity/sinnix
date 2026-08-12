@@ -49,13 +49,12 @@ let
       append_override_arg lynchpin "$SINNIX_LYNCHPIN_OVERRIDE"
     fi
     # --impure: modules/secrets.nix reads agenix secrets from
-    # /realm/data/secrets/sinnix, outside the flake source (moved out of git
-    # 2026-07 -- see that module). Pure flake evaluation cannot see paths
-    # outside the flake's own store copy at all (builtins.pathExists/readDir
-    # on such a path silently returns false/empty rather than erroring, so
-    # this failure mode is silent: a system with zero secrets configured,
-    # not a build error). This is a real host-local-data dependency, not a
-    # purity shortcut being taken for convenience.
+    # /realm/data/secrets/sinnix, outside the flake source. Pure flake
+    # evaluation cannot see paths outside the flake's own store copy at all
+    # (builtins.pathExists/readDir on such a path silently returns
+    # false/empty rather than erroring, so this failure mode is silent: a
+    # system with zero secrets configured, not a build error). This is a
+    # real host-local-data dependency, not a purity shortcut for convenience.
     nh_extra_args=(-- --impure)
     if [ "''${#nix_override_args[@]}" -gt 0 ]; then
       nh_extra_args+=("''${nix_override_args[@]}")
@@ -95,11 +94,11 @@ let
   '';
   # NOT a ''...'' block: this is spliced mid-line into a backslash-continued
   # systemd-run invocation at each call site. A ''...'' string's own trailing
-  # newline plus the call site's template newline produced a blank line in
+  # newline plus the call site's template newline produces a blank line in
   # the middle of the continued command, which bash treats as a broken
-  # continuation — systemd-run silently got zero command args (2026-07-06
-  # incident). concatStringsSep has no trailing separator, so this can't
-  # reproduce that regardless of how it's indented at the call site.
+  # continuation — systemd-run silently gets zero command args.
+  # concatStringsSep has no trailing separator, so this can't reproduce that
+  # regardless of how it's indented at the call site.
   rebuildContainmentFlags =
     lib.concatStringsSep " \\\n    " [
       ''--setenv=NIX_CONFIG="eval-cache = false"''
@@ -109,17 +108,14 @@ let
       "-p IOSchedulingClass=idle"
     ]
     + " \\";
-  # sinex CI stopped auto-pushing package builds to sinity.cachix.org when
-  # hosted Actions went manual-only (sinex#883 "disable automatic paid
-  # Actions"), so the desktop now compiles the sinex workspace locally on
-  # every input bump — a single sinexd rustc peaks at 8-11.5 GiB RSS
-  # (2026-07-09: 17 earlyoom kills before one attempt fit). Publish the
-  # freshly activated sinex closure back to the cache after a successful
-  # switch so sinnix-ethereal deploys, reinstalls, and post-GC rebuilds
-  # substitute instead of repeating that build (sinnix-iln). Best-effort:
-  # needs the operator cachix auth token (~/.config/cachix); the push runs
-  # as a detached user unit in background.slice so the rebuild command
-  # returns without waiting on uploads, and any failure is visible via
+  # sinex CI does not auto-push package builds to sinity.cachix.org, so the
+  # desktop compiles the sinex workspace locally on every input bump.
+  # Publish the freshly activated sinex closure back to the cache after a
+  # successful switch so sinnix-ethereal deploys, reinstalls, and post-GC
+  # rebuilds substitute instead of repeating that build. Best-effort: needs
+  # the operator cachix auth token (~/.config/cachix); the push runs as a
+  # detached user unit in background.slice so the rebuild command returns
+  # without waiting on uploads, and any failure is visible via
   # `journalctl --user` rather than failing the switch.
   sinexCachePush = ''
     if [ "$_rebuild_status" -eq 0 ]; then
@@ -151,23 +147,19 @@ let
       # Register the generation BEFORE activating: without the profile entry,
       # switch-to-configuration boot has no generation to point the bootloader
       # at, activation succeeds only in memory, and the next reboot silently
-      # resurrects the previous generation (2026-07-11 incident; see
-      # flake/dev-shell.nix twin comment).
+      # resurrects the previous generation (see flake/dev-shell.nix twin
+      # comment).
       /run/wrappers/bin/sudo ${pkgs.nix}/bin/nix-env \
         --profile /nix/var/nix/profiles/system --set "$_toplevel_out"
       _rebuild_status=0
       /run/wrappers/bin/sudo "$_toplevel_out/bin/switch-to-configuration" switch || _rebuild_status=$?
       # switch-to-configuration exits non-zero whenever ANY unit fails to
-      # (re)start, even one wholly unrelated to this config change
-      # (sinnix-ihi, 2026-07-08: a pre-existing nvidia-container-toolkit-
-      # cdi-generator failure silently blocked profile/bootloader
-      # registration for 4+ days -- every switch looked successful but
-      # never advanced the boot generation). Registering the built
-      # generation as the persistent boot default is orthogonal to
-      # whether every service started cleanly, so always do it as a
-      # separate step -- but keep the real "switch" exit status (unless
-      # this step itself fails worse) so a genuine regression still
-      # surfaces instead of being silently masked.
+      # (re)start, even one wholly unrelated to this config change.
+      # Registering the built generation as the persistent boot default is
+      # orthogonal to whether every service started cleanly, so always do it
+      # as a separate step -- but keep the real "switch" exit status (unless
+      # this step itself fails worse) so a genuine regression still surfaces
+      # instead of being silently masked.
       _boot_status=0
       /run/wrappers/bin/sudo "$_toplevel_out/bin/switch-to-configuration" boot || _boot_status=$?
       if [ "$_boot_status" -ne 0 ]; then
