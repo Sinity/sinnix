@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Monitor org.freedesktop.Notifications via busctl and forward each Notify() call to sinnix-capture write
+# runtimeInputs: python3 systemd
+
+"""Desktop notification capture listener (sinnix-sz0c).
+
+Runs ``busctl --user monitor --json=short org.freedesktop.Notifications`` as
+a long-lived subprocess, parses its one-JSON-object-per-line stream, and
+forwards every ``Notify`` method call (the notification-daemon RPC every
+desktop-notification client uses -- see the freedesktop.org Desktop
+Notifications spec) through ``sinnix-capture write`` as one envelope per
+notification.
+
+``busctl`` (systemd) was chosen over ``dbus-monitor`` or a Python D-Bus
+binding (dbus-python / dbus-next / jeepney) because it is already vendored
+transitively via systemd itself -- no new dependency for this repo -- and
+its ``--json=short`` mode gives one structured JSON object per D-Bus
+message, which is far more robust to parse than dbus-monitor's
+human-readable multi-line text format.
+
+Only the ``Notify`` method call is forwarded. ``NotificationClosed`` /
+``ActionInvoked`` signals and daemon-introspection calls
+(``GetCapabilities``, ``GetServerInformation``) are seen on the same
+monitor stream but are out of scope for this lane (see sinnix-sz0c) --
+its payload contract is app_name/summary/body/urgency/timestamp/actions.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import signal
+import subprocess
+import sys
+from typing import Any
+
+
+def _hint_value(hints: dict[str, Any], key: str) -> Any:
+    entry = hints.get(key)
+    if not isinstance(entry, dict):
+        return None
+    return entry.get("data")
+
+
+def _pair_actions(actions: list[str]) -> list[dict[str, str]]:
+    # Desktop Notifications spec: actions is a flat array alternating
+    # (action_key, localized_label) pairs. Guard against an odd-length
+    # array from a misbehaving sender instead of raising.
+    paired = []
+    for i in range(0, len(actions) - 1, 2):
+        paired.append({"id": actions[i], "label": actions[i + 1]})
+    return paired
+
+
+def notify_payload(record: dict[str, Any]) -> dict[str, Any] | None:
+    """Extract a sinnix-capture payload from one busctl --json=short record.
+
+    Returns None if the record is not an org.freedesktop.Notifications
+    Notify() method call.
+    """
+    if record.get("type") != "method_call":
+        return None
+    if record.get("interface") != "org.freedesktop.Notifications":
+        return None
+    if record.get("member") != "Notify":
+        return None
+    payload = record.get("payload") or {}
+    data = payload.get("data")
+    # Notify signature is "susssasa{sv}i":
+    # app_name, replaces_id, app_icon, summary, body, actions, hints, expire_timeout
+    if not isinstance(data, list) or len(data) != 8:
+        return None
+    app_name, replaces_id, app_icon, summary, body, actions, hints, expire_timeout = data
+    hints = hints if isinstance(hints, dict) else {}
+    ts_realtime_us = record.get("timestamp-realtime")
+    return {
+        "app_name": app_name,
+        "app_icon": app_icon,
+        "replaces_id": replaces_id,
+        "summary": summary,
+        "body": body,
+        "actions": _pair_actions(actions if isinstance(actions, list) else []),
+        "urgency": _hint_value(hints, "urgency"),
+        "hints": {k: _hint_value(hints, k) for k in hints},
+        "expire_timeout": expire_timeout,
+        "sender": record.get("sender"),
+        "timestamp": (ts_realtime_us / 1_000_000) if isinstance(ts_realtime_us, (int, float)) else None,
+    }
+
+
+def _forward(capture_bin: str, capture_root: str, lane: str, payload: dict[str, Any]) -> None:
+    proc = subprocess.run(
+        [capture_bin, "write", "--capture-root", capture_root, "--lane", lane],
+        input=json.dumps(payload),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        print(
+            f"sinnix-capture-notifications-listener: write failed (exit {proc.returncode}): {proc.stderr.strip()}",
+            file=sys.stderr,
+        )
+
+
+def run(capture_bin: str, capture_root: str, lane: str, busctl_bin: str) -> int:
+    monitor = subprocess.Popen(
+        [busctl_bin, "--user", "monitor", "--json=short", "org.freedesktop.Notifications"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+
+    def _terminate(*_args: object) -> None:
+        monitor.terminate()
+
+    signal.signal(signal.SIGTERM, _terminate)
+    signal.signal(signal.SIGINT, _terminate)
+
+    assert monitor.stdout is not None
+    try:
+        for raw_line in monitor.stdout:
+            raw_line = raw_line.strip()
+            if not raw_line:
+                continue
+            try:
+                record = json.loads(raw_line)
+            except json.JSONDecodeError:
+                continue
+            payload = notify_payload(record)
+            if payload is not None:
+                _forward(capture_bin, capture_root, lane, payload)
+    finally:
+        monitor.wait()
+
+    # busctl monitor exiting (bus restart, daemon crash) is not a clean
+    # shutdown path for a supposedly-continuous listener -- exit non-zero so
+    # systemd's Restart=on-failure reconnects, except when we asked for the
+    # termination ourselves via SIGTERM/SIGINT (returncode is negative then).
+    if monitor.returncode is not None and monitor.returncode < 0:
+        return 0
+    return 1 if monitor.returncode else 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--capture-bin", default="sinnix-capture", help="Path to the sinnix-capture CLI (default: resolved via PATH)")
+    parser.add_argument("--capture-root", required=True, help="sinnix-capture root directory (lane subdirectory is created underneath it)")
+    parser.add_argument("--lane", default="notifications", help="sinnix-capture lane name (default: notifications)")
+    parser.add_argument("--busctl-bin", default="busctl", help="Path to busctl (default: resolved via PATH)")
+    args = parser.parse_args(argv)
+    return run(args.capture_bin, args.capture_root, args.lane, args.busctl_bin)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
