@@ -39,37 +39,17 @@ lib.mkMerge [
     # 2026-08-13: "No /dev/i2c devices exist"). This is the only route to the
     # FO48U's own controls -- brightness, and the OSD-side settings behind its
     # ASBL dimming -- from software; the shader/brightness pulse in
-    # scripts/asbl-no-moar is a workaround for not having it.
+    # scripts/asbl-no-moar is a shader/brightness FLASH, which the operator
+    # finds annoying -- that is why it stays on a keybind (F3) rather than a
+    # timer, and why the wallpaper rotation carries the routine mitigation.
+    # A DDC brightness nudge (VCP 0x10) touches the panel's own register with
+    # no visible flash, which is the actual fix -- see bead sinnix-70eq.
     # The i2c group grants the operator access without sudo per call.
     boot.kernelModules = [ "i2c-dev" ];
     hardware.i2c.enable = true;
     users.users.${user}.extraGroups = [ "i2c" ];
     environment.systemPackages = [ pkgs.ddcutil ];
 
-    # Run the ASBL pulse continuously instead of leaving it on F3. The script
-    # has existed since the panel arrived but was only ever bound to a key
-    # (bindings.nix F3 / system-submap M), so the dimming it exists to defeat
-    # came back whenever the operator did not think to press it -- which is
-    # exactly the complaint. `start` is the script's own daemon mode; its
-    # default 120s interval is tuned to the FO48U's dimming timer.
-    home-manager.users.${user}.systemd.user.services.asbl-no-moar = {
-      Unit = {
-        Description = "Keep the FO48U's auto static brightness limiter from dimming the screen";
-        After = [ "graphical-session.target" ];
-        PartOf = [ "graphical-session.target" ];
-      };
-      Service = {
-        Type = "simple";
-        # `loop`, not `start`: start forks the loop and disowns, which a
-        # Type=simple unit would read as immediate exit. `loop` is the
-        # foreground daemon, and the flag parser runs before the subcommand
-        # dispatch so options still apply.
-        ExecStart = "${(helpers.mkSinnixPackagesFor pkgs).asbl-no-moar}/bin/asbl-no-moar loop --mode invert";
-        Restart = "on-failure";
-        RestartSec = "10s";
-      };
-      Install.WantedBy = [ "graphical-session.target" ];
-    };
   }
 
   # ── NVIDIA (both modes) ──────────────────────────────────────────────────────
