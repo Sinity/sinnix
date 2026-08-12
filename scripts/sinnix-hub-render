@@ -521,17 +521,68 @@ async function act(verb, unit, button) {
 """
 
 
+def resolve_ai_services(
+    manifest: dict[str, Any], inventory: dict[str, Any] | None
+) -> list[dict[str, Any]]:
+    """Turn the manifest's AI service *names* into live surface metadata.
+
+    The manifest carries names only. Units, endpoints, idle timeouts, the
+    gpu-inference admission key, and the restartable flag all come from
+    /etc/sinnix/runtime-inventory.json -- the same attested document the
+    ops-reducer's action API resolves targets against. Reading one source for
+    both means the panel can never offer a button the API would refuse for a
+    reason the panel does not know about.
+    """
+    surfaces = {}
+    if isinstance(inventory, dict) and isinstance(inventory.get("surfaces"), dict):
+        surfaces = inventory["surfaces"]
+    resolved: list[dict[str, Any]] = []
+    for name in manifest.get("aiServices", []):
+        if not isinstance(name, str):
+            continue
+        surface = surfaces.get(name)
+        if not isinstance(surface, dict):
+            resolved.append({"name": name, "registered": False})
+            continue
+        activation = (
+            surface.get("activation") if isinstance(surface.get("activation"), dict) else {}
+        )
+        observe = surface.get("observe") if isinstance(surface.get("observe"), dict) else {}
+        resolved.append(
+            {
+                "name": name,
+                "registered": True,
+                "unit": surface.get("unit"),
+                "manager": surface.get("manager", "system"),
+                "restartable": bool(observe.get("restartable")),
+                "activationMode": activation.get("mode"),
+                "publicEndpoint": activation.get("publicEndpoint"),
+                "idleTimeout": activation.get("idleTimeout"),
+                "exclusiveResource": activation.get("exclusiveResource"),
+            }
+        )
+    return resolved
+
+
 def render_ai(
     manifest: dict[str, Any],
     inventory: dict[str, Any] | None,
     generated: str,
 ) -> str:
     host = str(manifest.get("host", "sinnix"))
-    services = [s for s in manifest.get("aiServices", []) if isinstance(s, dict)]
-    states = unit_states([s["unit"] for s in services if s.get("unit")])
+    services = resolve_ai_services(manifest, inventory)
+    states = unit_states([str(s["unit"]) for s in services if s.get("unit")])
 
     rows = ""
     for service in sorted(services, key=lambda s: str(s.get("name"))):
+        if not service.get("registered"):
+            rows += (
+                f"<tr><td><strong>{esc(service.get('name'))}</strong></td>"
+                f"<td>{badge('not registered', 'muted')}</td>"
+                '<td><span class="sub">no runtime surface on this host &mdash; '
+                "the module is not enabled</span></td></tr>"
+            )
+            continue
         unit = str(service.get("unit", ""))
         info = states.get(unit, {})
         active = info.get("ActiveState")
@@ -564,7 +615,10 @@ def render_ai(
                 " &mdash; the action API refuses it</span>"
             )
         else:
-            controls = '<span class="sub">module not enabled on this host</span>'
+            controls = (
+                '<span class="sub">registered in the inventory but systemd '
+                "reports the unit not-found</span>"
+            )
 
         endpoint = service.get("publicEndpoint") or ""
         detail = []
