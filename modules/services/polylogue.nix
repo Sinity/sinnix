@@ -131,25 +131,20 @@ mkServiceModule {
       ...
     }:
     let
-      # 2026-07-21 (polylogue-dcz5): free-threaded 3.14t build so daemon
-      # thread-parse fan-outs actually run parallel (GIL writer-commit
-      # interference ~5000x on 3.13 vs ~0 on 3.14t). Rollback = repin
-      # `.default`.
+      # Free-threaded 3.14t build so daemon thread-parse fan-outs actually
+      # run parallel (GIL writer-commit interference ~5000x on 3.13 vs ~0 on
+      # 3.14t). Rollback = repin `.default`.
       polyloguePkg = inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.polylogue;
-      # 2026-07-10: moved off /persist (worn MX500) to /realm; still inside
-      # the /realm btrbk→borg coverage.
-      # Ordered most-irreplaceable first. A run that dies partway (the 2h
-      # TimeoutStartSec, an OOM, a reboot) then still leaves the tiers that
-      # cannot be rebuilt covered. The 2026-07-30 failure did the opposite:
-      # alphabetical order spent the whole window on the two large derived
-      # tiers and was killed before reaching source.db, so the run following a
-      # full index rebuild -- exactly when a durable-tier snapshot matters
-      # most -- captured no durable tier at all.
+      # Lives on /realm, not /persist (worn MX500); still inside the /realm
+      # btrbk→borg coverage.
+      # Ordered most-irreplaceable first: a run that dies partway (the 2h
+      # TimeoutStartSec, an OOM, a reboot) still leaves the tiers that cannot
+      # be rebuilt covered.
       #
-      # `daemon_events.db` is deliberately absent: it has been a 0-byte file
-      # with no tables since 2026-07-17 (daemon events live in ops.db), and
-      # backing it up produced a 71-byte artifact every run that reads as
-      # coverage while covering nothing.
+      # `daemon_events.db` is deliberately absent: it is a 0-byte file with
+      # no tables (daemon events live in ops.db), and backing it up produces
+      # a 71-byte artifact every run that reads as coverage while covering
+      # nothing.
     in
     {
       # ── Import the upstream Home Manager module ────────────────────

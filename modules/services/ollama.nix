@@ -74,9 +74,8 @@ mkServiceModule {
       awkBin = lib.getExe pkgs.gawk;
       # Upstream's ollama-model-loader (nixpkgs services.ollama.loadModels)
       # pulls every tag in one `parallel` invocation with no per-model retry:
-      # one transient transfer flake (observed 2026-08-11, `hf.co/rbehzadan/
-      # ReaderLM-v2.gguf`: "max retries exceeded: EOF") aborts the whole
-      # oneshot mid-list, silently leaving the roster incomplete while
+      # one transient transfer flake aborts the whole oneshot mid-list,
+      # silently leaving the roster incomplete while
       # LiteLLM keeps advertising the missing model. Replace the generated
       # script with one that retries each tag independently (bounded
       # backoff), keeps going on exhaustion instead of aborting, then
