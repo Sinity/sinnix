@@ -17,7 +17,13 @@
 let
   inherit (pkgs) lib;
 
-  discovery = import ./script-discovery.nix { inherit lib pkgs; };
+  sinnixCaptureLib = pkgs.callPackage ../pkgs/sinnix-capture/pkg.nix { };
+  discovery = import ./script-discovery.nix {
+    inherit lib pkgs;
+    siblingExtras = {
+      sinnix-capture = sinnixCaptureLib;
+    };
+  };
   discovered = discovery.discover (inputs.self + "/scripts");
 
   inherit (discovered) registry;
@@ -30,24 +36,44 @@ let
   runtimeDefaults = import ./data/runtime-defaults.nix { inherit lib; };
   mcpRegistry = import ./data/mcp-registry.nix { inherit lib; };
   sharedAgentSkills = import ./data/shared-agent-skills.nix;
-  agentEnvironmentData = pkgs.writeText "sinnix-agent-environment-data.json" (builtins.toJSON {
-    profiles = lib.concatMap (
-      profile:
-      map (client: {
-        name = profile;
-        inherit client;
-        tiers = mcpRegistry.profileTiers.${profile};
-        servers = lib.attrNames (mcpRegistry.selectClientServersForProfile profile client);
-      }) [ "claude" "codex" "gemini" "antigravity" "hermes" ]
-    ) [ "lean" "evidence" "full" "browser" "orchestrate" "antigravity" ];
-    servers = lib.mapAttrsToList (name: server: {
-      inherit name;
-      inherit (server) tier transport clients;
-      command = server.command or null;
-      url = server.url or null;
-    }) mcpRegistry.registry;
-    skills = sharedAgentSkills;
-  });
+  agentEnvironmentData = pkgs.writeText "sinnix-agent-environment-data.json" (
+    builtins.toJSON {
+      profiles =
+        lib.concatMap
+          (
+            profile:
+            map
+              (client: {
+                name = profile;
+                inherit client;
+                tiers = mcpRegistry.profileTiers.${profile};
+                servers = lib.attrNames (mcpRegistry.selectClientServersForProfile profile client);
+              })
+              [
+                "claude"
+                "codex"
+                "gemini"
+                "antigravity"
+                "hermes"
+              ]
+          )
+          [
+            "lean"
+            "evidence"
+            "full"
+            "browser"
+            "orchestrate"
+            "antigravity"
+          ];
+      servers = lib.mapAttrsToList (name: server: {
+        inherit name;
+        inherit (server) tier transport clients;
+        command = server.command or null;
+        url = server.url or null;
+      }) mcpRegistry.registry;
+      skills = sharedAgentSkills;
+    }
+  );
   defaultRuntimeInventoryJson = builtins.toJSON (
     runtimeDefaults.mkInventory {
       hostname = "sinnix-fallback";
@@ -239,7 +265,7 @@ let
 
     sinnix-quota = pkgs.callPackage ../pkgs/sinnix-quota/pkg.nix { };
 
-    sinnix-capture = pkgs.callPackage ../pkgs/sinnix-capture/pkg.nix { };
+    sinnix-capture = sinnixCaptureLib;
 
     sinnix-capture-a11y = pkgs.callPackage ../pkgs/sinnix-capture-a11y/pkg.nix {
       sinnix-capture-lib = sinnix-capture;
@@ -253,7 +279,14 @@ let
 
     sinnix-agent-environment-doc = pkgs.writeShellApplication {
       name = "sinnix-agent-environment-doc";
-      runtimeInputs = [ pkgs.bash pkgs.coreutils pkgs.findutils pkgs.gawk pkgs.jq pkgs.ripgrep ];
+      runtimeInputs = [
+        pkgs.bash
+        pkgs.coreutils
+        pkgs.findutils
+        pkgs.gawk
+        pkgs.jq
+        pkgs.ripgrep
+      ];
       text = ''
         exec ${pkgs.bash}/bin/bash ${pkgs.writeText "sinnix-agent-environment-doc-source" (builtins.readFile ../scripts/sinnix-agent-environment-doc)} \
           --data ${agentEnvironmentData} \
@@ -268,7 +301,9 @@ let
   packageSet = scriptPackages // externalPackages;
 in
 {
-  packages = scriptPackages // { inherit (externalPackages) sinnix-agent-environment-doc; };
+  packages = scriptPackages // {
+    inherit (externalPackages) sinnix-agent-environment-doc;
+  };
   inherit packageSet;
   inherit registry;
   list = lib.attrNames registry;
