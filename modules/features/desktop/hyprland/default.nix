@@ -189,6 +189,12 @@ in
                 "uwsm finalize"
                 # Auto-start weechat scratchpad (hidden in special workspace)
                 "uwsm app -- ${pkgs.kitty}/bin/kitty --class scratchpad-weechat --title WeeChat $HOME/.local/bin/weechat-scratchpad"
+                # nav-capture local receiver (origin-chain edges + reading-
+                # stack pushes from the browser extension) + its ambient
+                # widget window -- see sinnix-nav-capture-daemon and
+                # sinnix-reading-stack-widget.
+                "uwsm app -- ${scriptPkgs.sinnix-nav-capture-daemon}/bin/sinnix-nav-capture-daemon"
+                "uwsm app -- ${pkgs.kitty}/bin/kitty --class reading-stack-widget --title reading-stack ${scriptPkgs.sinnix-reading-stack-widget}/bin/sinnix-reading-stack-widget"
               ];
 
               # Override uwsm's "start-hyprland:Hyprland" to clean value

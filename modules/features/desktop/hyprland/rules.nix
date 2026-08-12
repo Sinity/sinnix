@@ -152,6 +152,26 @@ let
       class = "^(kitty)$";
       noBlur = true;
     })
+    # Ambient reading-stack widget (sinnix-reading-stack-widget): pinned
+    # (visible on every workspace) in a small corner window -- this IS the
+    # "standing visibility" mechanism the reading-stack design depends on
+    # (see the script's own docstring). Small/opaque/no-blur so it reads as
+    # a persistent status element, not a normal floating window.
+    (mkRule "reading-stack-widget" {
+      class = "^(reading-stack-widget)$";
+      float = true;
+      pin = true;
+      noBlur = true;
+      size = {
+        w = 420;
+        h = 260;
+      };
+      move = {
+        x = "(monitor_w-440)";
+        y = "(monitor_h-280)";
+      };
+      opacity = 0.9;
+    })
     (mkRule "clipse-manager" {
       class = "^(clipse)$";
       float = true;

@@ -1,0 +1,129 @@
+# @sinnix-package
+# description: Local HTTP receiver for the nav-capture browser extension -- origin-chain edges + reading-stack pushes
+# runtimeInputs: python3 @sinnix-capture
+#!/usr/bin/env python3
+"""sinnix-nav-capture-daemon: the local endpoint the nav-capture WebExtension
+POSTs to. Two routes:
+
+  POST /v1/link-event         -- {source_url, source_title, target_url,
+                                   anchor_text, ts, trigger} -- every link
+                                   click, any trigger type. Written to the
+                                   "browser-nav-edges" capture lane via
+                                   sinnix-capture write. This is the origin-
+                                   chain graph: "how did I get to page X" is
+                                   answerable later by walking edges backward
+                                   from target_url.
+
+  POST /v1/reading-stack/push -- {source_url, source_title, target_url,
+                                   anchor_text, ts} (same shape, minus
+                                   trigger) -- fired only for middle-clicks
+                                   (the content script's remap). Delegates to
+                                   `sinnix-reading-stack push`, which owns the
+                                   bounded-stack state file the widget reads.
+
+Binds 127.0.0.1:8766 only (never 0.0.0.0) -- this is a same-machine
+extension<->daemon channel, not a network service. Port chosen to sit next
+to polylogue's browser-extension receiver (127.0.0.1:8765) without
+colliding.
+
+Deliberately a stdlib-only http.server, matching capture-mpris's own
+"subprocess to sinnix-capture write, no extra deps" pattern -- this daemon
+does no analysis, it's a thin relay.
+"""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+CAPTURE_ROOT = "/realm/data/captures"
+BIND_HOST = "127.0.0.1"
+BIND_PORT = 8766
+
+
+def sinnix_capture_write(lane: str, payload: dict) -> None:
+    subprocess.run(
+        [
+            "sinnix-capture",
+            "write",
+            "--capture-root",
+            CAPTURE_ROOT,
+            "--lane",
+            lane,
+            "--payload",
+            json.dumps(payload),
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+
+def reading_stack_push(payload: dict) -> None:
+    subprocess.run(
+        [
+            "sinnix-reading-stack",
+            "push",
+            "--url",
+            payload.get("target_url", ""),
+            "--title",
+            payload.get("anchor_text") or payload.get("target_url", ""),
+            "--source-url",
+            payload.get("source_url", ""),
+            "--source-title",
+            payload.get("source_title", ""),
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, fmt: str, *args) -> None:  # quiet by default
+        pass
+
+    def _read_json(self) -> dict:
+        length = int(self.headers.get("Content-Length", "0"))
+        raw = self.rfile.read(length) if length else b"{}"
+        return json.loads(raw or b"{}")
+
+    def _respond(self, status: int) -> None:
+        self.send_response(status)
+        self.send_header("Content-Length", "0")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+
+    def do_OPTIONS(self) -> None:  # CORS preflight from the extension
+        self._respond(204)
+
+    def do_POST(self) -> None:
+        try:
+            payload = self._read_json()
+        except json.JSONDecodeError:
+            self._respond(400)
+            return
+
+        try:
+            if self.path == "/v1/link-event":
+                sinnix_capture_write("browser-nav-edges", payload)
+            elif self.path == "/v1/reading-stack/push":
+                reading_stack_push(payload)
+            else:
+                self._respond(404)
+                return
+            self._respond(204)
+        except subprocess.CalledProcessError as exc:
+            print(f"sinnix-nav-capture-daemon: write failed: {exc.stderr!r}", file=sys.stderr)
+            self._respond(500)
+
+
+def main() -> int:
+    server = ThreadingHTTPServer((BIND_HOST, BIND_PORT), Handler)
+    print(f"sinnix-nav-capture-daemon: listening on {BIND_HOST}:{BIND_PORT}", file=sys.stderr)
+    server.serve_forever()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
