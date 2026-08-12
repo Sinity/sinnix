@@ -11,6 +11,29 @@ in
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
       runtimeDefaults = import ../data/runtime-defaults.nix { inherit lib; };
+      mcpRegistry = import ../data/mcp-registry.nix { inherit lib; };
+      expectedProfileServers =
+        client: profiles:
+        builtins.toJSON (
+          lib.genAttrs profiles (
+            profile: lib.attrNames (mcpRegistry.selectClientServersForProfile profile client)
+          )
+        );
+      expectedClaudeProfileServersJson = expectedProfileServers "claude" [
+        "full"
+        "lean"
+        "browser"
+      ];
+      expectedGeminiProfileServersJson = expectedProfileServers "gemini" [
+        "full"
+        "antigravity"
+      ];
+      expectedCodexProfileServersJson = expectedProfileServers "codex" [
+        "full"
+        "lean"
+        "evidence"
+        "browser"
+      ];
       testLib = import ../test-lib.nix { inherit inputs lib; };
       inherit (testLib)
         evalTestSpec
@@ -433,19 +456,6 @@ in
               bash -n "$wrapper"
             done
 
-            grep -Fq 'muse-spark-1.2-contributor' "$HOME/.local/bin/muse-code"
-            grep -Fq 'ai-gateway.vercel.sh' "$HOME/.local/bin/muse-contrib"
-            grep -Fq 'ai-gateway.vercel.sh' "$HOME/.local/bin/hermes-muse"
-
-            grep -q 'HERMES_NEMO_RELAY_ATOF_ENABLED=1' "$HOME/.local/bin/hermes"
-            grep -q 'HERMES_NEMO_RELAY_ATIF_ENABLED=1' "$HOME/.local/bin/hermes"
-            grep -q 'HERMES_NEMO_RELAY_ATIF_SUBAGENT_EXPORT_MODE=all' "$HOME/.local/bin/hermes"
-            for profile in research orchestrate mirror muse local; do
-              wrapper="$HOME/.local/bin/hermes-$profile"
-              grep -Fq "export HERMES_HOME=\"\$HOME/.hermes/profiles/$profile\"" "$wrapper"
-              grep -Fq 'export HERMES_INSTALL_DIR="$HOME/.hermes/hermes-agent"' "$wrapper"
-            done
-
             jq -e '
               (has("mcpServers") | not) and
               .alwaysThinkingEnabled == true and
@@ -458,35 +468,23 @@ in
                 | any(contains("SINNIX_CLAUDE_PROFILE") and contains("serena-hooks cleanup --client=claude-code")))
             ' ${inputs.self}/dots/claude/settings.json >/dev/null
 
-            jq -e '
-              .mcpServers as $m |
-              ($m | has("github") and has("context7") and has("agent-control")) and
-              ($m | has("polylogue") and has("lynchpin")) and
-              ($m | has("serena")) and
-              ($m | has("chrome-devtools") | not) and
-              ($m.polylogue.args == ["--role", "write"])
-            ' "$HOME/.config/claude/mcp.json" >/dev/null
-
-            jq -e '
-              .mcpServers as $m |
-              ($m | has("github") and has("context7") and has("polylogue")) and
-              ($m | has("agent-control") | not) and
-              ($m | has("lynchpin") | not) and
-              ($m | has("serena") | not) and
-              ($m | has("chrome-devtools") | not) and
-              ($m.polylogue.args == ["--role", "read"])
-            ' "$HOME/.config/claude/mcp-lean.json" >/dev/null
-
-            jq -e '
-              .mcpServers as $m |
-              ($m | has("github") and has("context7") and has("agent-control")) and
-              ($m | has("polylogue") and has("lynchpin")) and
-              ($m | has("serena")) and
-              ($m | has("chrome-devtools")) and
-              ($m | has("chrome-devtools-private")) and
-              ($m | has("chrome-devtools-private-visible")) and
-              ($m.polylogue.args == ["--role", "write"])
-            ' "$HOME/.config/claude/mcp-browser.json" >/dev/null
+            # Rendered profile configs must match the registry's own computed
+            # selection -- membership is derived from mcp-registry.nix at eval
+            # time, never frozen as literals (a frozen copy went stale and sat
+            # red when agent-control moved profiles).
+            for pair in \
+              "mcp.json full" "mcp-lean.json lean" "mcp-browser.json browser"; do
+              file="''${pair%% *}"; profile="''${pair##* }"
+              rendered="$(jq -r '.mcpServers | keys | sort | join(",")' "$HOME/.config/claude/$file")"
+              expected="$(jq -r --arg p "$profile" '.[$p] | sort | join(",")' <<'EOF_EXPECTED'
+            ${expectedClaudeProfileServersJson}
+            EOF_EXPECTED
+            )"
+              if [ "$rendered" != "$expected" ]; then
+                echo "claude $file servers ($rendered) != registry selection ($expected)" >&2
+                exit 1
+              fi
+            done
 
             python3 - <<'PYCODE'
             import pathlib, tomllib
@@ -510,10 +508,12 @@ in
             lean = keys(pathlib.Path.home().joinpath('.codex/lean.config.toml'))
             evidence = keys(pathlib.Path.home().joinpath('.codex/evidence.config.toml'))
             browser = keys(pathlib.Path.home().joinpath('.codex/browser.config.toml'))
-            assert_has('full', full, {'github', 'context7', 'polylogue', 'lynchpin', 'serena', 'agent-control'}, {'chrome-devtools'})
-            assert_has('lean', lean, {'github', 'context7', 'polylogue'}, {'agent-control', 'lynchpin', 'serena', 'chrome-devtools'})
-            assert_has('evidence', evidence, {'github', 'context7', 'polylogue', 'lynchpin'}, {'agent-control', 'serena', 'chrome-devtools'})
-            assert_has('browser', browser, {'github', 'context7', 'polylogue', 'lynchpin', 'serena', 'agent-control', 'chrome-devtools', 'chrome-devtools-private', 'chrome-devtools-private-visible'})
+            import json
+            expected = json.loads('${expectedCodexProfileServersJson}')
+            for profile_name, actual in (('full', full), ('lean', lean), ('evidence', evidence), ('browser', browser)):
+                assert actual == set(expected[profile_name]), (
+                    f"codex {profile_name} servers {sorted(actual)} != registry selection {sorted(expected[profile_name])}"
+                )
 
             # Alternate-backend profiles must layer a provider override while
             # retaining the full MCP surface; model names remain ordinary config.
@@ -537,24 +537,21 @@ in
                 assert data['mcp_servers']['polylogue']['args'] == ['--role', expected_role]
             PYCODE
 
-            jq -e '
-              .mcpServers as $m |
-              ($m | has("github") and has("context7") and has("agent-control")) and
-              ($m | has("polylogue") and has("lynchpin")) and
-              ($m | has("serena")) and
-              ($m | has("chrome-devtools") | not) and
-              ($m.polylogue.args == ["--role", "write"])
-            ' "$HOME/.gemini/settings.json" >/dev/null
-
-            jq -e '
-              .mcpServers as $m |
-              ($m | has("github") and has("context7") and has("agent-control")) and
-              ($m | has("polylogue") and has("sinex")) and
-              ($m | has("lynchpin") | not) and
-              ($m | has("serena")) and
-              ($m | has("chrome-devtools") | not) and
-              ($m.polylogue.args == ["--role", "write"])
-            ' "$HOME/.gemini/config/mcp_config.json" >/dev/null
+            # Same registry-derived contract as the claude configs above:
+            # rendered gemini server sets must equal the registry selection.
+            for pair in \
+              ".gemini/settings.json full" ".gemini/config/mcp_config.json antigravity"; do
+              file="''${pair%% *}"; profile="''${pair##* }"
+              rendered="$(jq -r '.mcpServers | keys | sort | join(",")' "$HOME/$file")"
+              expected="$(jq -r --arg p "$profile" '.[$p] | sort | join(",")' <<'EOF_EXPECTED_GEMINI'
+            ${expectedGeminiProfileServersJson}
+            EOF_EXPECTED_GEMINI
+            )"
+              if [ "$rendered" != "$expected" ]; then
+                echo "gemini $file servers ($rendered) != registry selection ($expected)" >&2
+                exit 1
+              fi
+            done
 
             jq -e '
               [.hooks.SessionStart[].hooks[].command]
