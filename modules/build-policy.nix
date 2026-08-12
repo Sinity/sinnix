@@ -13,17 +13,6 @@ let
 in
 {
   config = {
-    assertions = [
-      {
-        assertion = config.nix.settings.max-jobs == 1;
-        message = "nix.settings.max-jobs must remain 1: concurrent heavy derivations exceeded workstation memory on 2026-07-06";
-      }
-      {
-        assertion = config.nix.settings.cores == 16;
-        message = "nix.settings.cores must remain 16: the serialized build policy reserves the workstation core budget for one derivation";
-      }
-    ];
-
     nix = {
       settings = {
         auto-optimise-store = true;
@@ -59,12 +48,16 @@ in
         ];
         netrc-file = "/etc/nix/netrc";
 
-        # One derivation at a time: two concurrent heavy builds (e.g. two CUDA
-        # ggml derivations) each try to use most of the box and jointly
-        # exceed available RAM. Serializing to a single job and giving it
-        # the full core budget keeps peak memory bounded to one derivation.
-        # History/evidence: bd show sinnix-jr8
-        max-jobs = 1;
+        # Bounded parallelism: nix-build.slice's 22G/28G memory ceiling is
+        # the actual overcommit guard (the daemon and every build it spawns
+        # run inside it — see the nix-daemon Slice= below). The 2026-07-06
+        # incident (two concurrent CUDA/ggml compiles OOMing the host,
+        # sinnix-jr8) predated that containment AND was itself a cache-miss
+        # malfunction: the nixpkgs-ai pin exists so CUDA compiles happen
+        # only on an explicit `update nixpkgs-ai`. Serializing every build
+        # host-wide to protect against a contained, rare-by-design workload
+        # was removed 2026-08-12 (with the heavy-work lease, sinnix-qlf).
+        max-jobs = 4;
         cores = 16;
         builders-use-substitutes = true;
         keep-outputs = true;

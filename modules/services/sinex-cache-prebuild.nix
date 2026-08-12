@@ -13,8 +13,8 @@
 # already prebuilt (see scripts/sinnix-sinex-cache-prebuild). When it has
 # moved -- via the routine `update` devshell command, or any other committed
 # flake.lock change -- it builds sinex at that exact locked revision under
-# sinnix-scope's `nix-build` command class (the same heavy-lease-serialized,
-# nix-build.slice-contained path every other heavy build on this host uses)
+# sinnix-scope's `nix-build` command class (the same nix-build.slice-contained
+# path every other heavy build on this host uses)
 # and pushes the result to sinity.cachix.org via the same push logic `switch`
 # uses (scripts/sinnix-sinex-cache-push). By the time an operator/agent next
 # runs an interactive `switch`, the sinex build for that revision is usually

@@ -179,11 +179,6 @@ rec {
   commandClasses = {
     agent = {
       resourceClass = "interactive-agent";
-      lease = {
-        required = false;
-        stateSubdir = "sinnix/heavy-lease";
-        waitSeconds = 0;
-      };
       slice = "agent.slice";
       nice = null;
       ioniceClass = null;
@@ -217,9 +212,8 @@ rec {
         TimeoutStopSec = "15s";
       };
       envDefaults = {
-        # Matches the single-job/16-core nix rebuild policy (build-policy.nix,
-        # SINNIX_REBUILD_CORES): one heavy build gets the full physical core
-        # count instead of splitting budget across concurrent jobs.
+        # Full physical core count per build; concurrency is governed by the
+        # slice memory caps, not serialization (SINNIX_REBUILD_CORES).
         CARGO_BUILD_JOBS = "16";
         # CARGO_INCREMENTAL deliberately left at default (build-policy.nix:
         # incremental compilation is this host's Rust caching strategy).
@@ -227,19 +221,9 @@ rec {
         MAKEFLAGS = "-j16";
         NIX_BUILD_CORES = "16";
       };
-      lease = {
-        required = true;
-        stateSubdir = "sinnix/heavy-lease";
-        waitSeconds = 0;
-      };
     };
     background = {
       resourceClass = "background-maintenance";
-      lease = {
-        required = false;
-        stateSubdir = "sinnix/heavy-lease";
-        waitSeconds = 0;
-      };
       slice = "background.slice";
       nice = 10;
       ioniceClass = "idle";
@@ -261,11 +245,6 @@ rec {
         "stashbox-vlm-serve"
         "stashbox-llama-vlm-serve-gpu"
       ];
-      lease = {
-        required = false;
-        stateSubdir = "sinnix/heavy-lease";
-        waitSeconds = 0;
-      };
       slice = "gpu-runtime.slice";
       nice = 5;
       ioniceClass = "best-effort";
@@ -295,11 +274,6 @@ rec {
         TimeoutStopSec = "15s";
       };
       envDefaults = { };
-      lease = {
-        required = true;
-        stateSubdir = "sinnix/heavy-lease";
-        waitSeconds = 0;
-      };
     };
     heavy = {
       resourceClass = "developer-build";
@@ -313,11 +287,6 @@ rec {
         TimeoutStopSec = "15s";
       };
       envDefaults = { };
-      lease = {
-        required = true;
-        stateSubdir = "sinnix/heavy-lease";
-        waitSeconds = 0;
-      };
     };
   };
 
@@ -453,14 +422,17 @@ rec {
     };
   };
 
-  earlyoomPatternFor = surfaces:
+  earlyoomPatternFor =
+    surfaces:
     let
       protectedMatchers = lib.concatLists (
-        lib.mapAttrsToList (_: surface:
+        lib.mapAttrsToList (
+          _: surface:
           if (surface.workload.expendability or "unknown") == "protected" then
             surface.workload.processMatchers or [ ]
           else
-            [ ]) surfaces
+            [ ]
+        ) surfaces
       );
     in
     "(systemd|systemd-logind|dbus-daemon|dbus-broker|dbus-broker-launch|sshd|agetty|uwsm|start-hyprland|Hyprland|Xwayland|pipewire|wireplumber|foot|kitty|below|nix-daemon|${lib.concatStringsSep "|" protectedMatchers})";
@@ -481,11 +453,6 @@ rec {
         slices
         ;
       earlyoomEmergencyAvoidPattern = earlyoomPatternFor (lib.mapAttrs (_: normalizeSurface) surfaces);
-      heavyLease = {
-        schemaVersion = 1;
-        commandClasses = lib.filterAttrs (_: command: command.lease.required) commandClasses;
-        stateDir = "/home/sinity/.local/state/sinnix/heavy-lease";
-      };
       dynamicSurfaces = {
         agentJobs = {
           manager = "user";
@@ -498,11 +465,6 @@ rec {
           processPattern = "sinnix-agent-gateway";
           resourceClass = "interactive-agent";
           transport = "stdio";
-        };
-        heavyLease = {
-          manager = "user";
-          statePath = "$XDG_STATE_HOME/sinnix/heavy-lease";
-          schema = "sinnix-heavy-lease-v1";
         };
       };
       surfaces = lib.mapAttrs (_: effectiveSurface classes) surfaces;

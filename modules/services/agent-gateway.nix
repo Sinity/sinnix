@@ -129,10 +129,6 @@ mkServiceModule {
           directory = ".local/state/sinnix/agent-gateway";
           mode = "0700";
         }
-        {
-          directory = ".local/state/sinnix/heavy-lease";
-          mode = "0700";
-        }
       ];
 
       sinnix.runtime.surfaces = {
@@ -152,33 +148,6 @@ mkServiceModule {
             {
               name = "agent-job-manifests";
               path = "${cfg.stateDir}/jobs";
-              eventDriven = true;
-              staleAfterSeconds = 3600;
-            }
-          ];
-        };
-        heavy-lease = {
-          unit = "sinnix-heavy-lease";
-          manager = "user";
-          kind = "capture";
-          dynamic = true;
-          resourceClass = "developer-build";
-          observe.enable = true;
-          workload = {
-            class = "sacrificial";
-            rationale = "Single attested owner for build and Nix build contention.";
-            processMatchers = [ "sinnix-heavy-lease" ];
-          };
-          captures = [
-            {
-              name = "heavy-lease-owner";
-              path = "/home/${userName}/.local/state/sinnix/heavy-lease/owner.json";
-              eventDriven = true;
-              staleAfterSeconds = 3600;
-            }
-            {
-              name = "heavy-lease-audit";
-              path = "/home/${userName}/.local/state/sinnix/heavy-lease/audit.jsonl";
               eventDriven = true;
               staleAfterSeconds = 3600;
             }
