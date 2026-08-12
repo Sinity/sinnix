@@ -239,6 +239,8 @@ let
 
     sinnix-quota = pkgs.callPackage ../pkgs/sinnix-quota/pkg.nix { };
 
+    sinnix-capture = pkgs.callPackage ../pkgs/sinnix-capture/pkg.nix { };
+
     sinnix-agent-environment-doc = pkgs.writeShellApplication {
       name = "sinnix-agent-environment-doc";
       runtimeInputs = [ pkgs.bash pkgs.coreutils pkgs.findutils pkgs.gawk pkgs.jq pkgs.ripgrep ];
