@@ -84,6 +84,8 @@ mkServiceModule {
             Description = "AT-SPI2 accessibility-tree capture (focus/text-changed events + focused-window subtree dumps)";
             After = [ "graphical-session.target" ];
             PartOf = [ "graphical-session.target" ];
+            StartLimitIntervalSec = 300;
+            StartLimitBurst = 5;
           };
           Service = {
             Type = "simple";
@@ -110,6 +112,18 @@ mkServiceModule {
             Environment = [
               "GI_TYPELIB_PATH=${pkgs.at-spi2-core}/lib/girepository-1.0:${pkgs.gobject-introspection}/lib/girepository-1.0"
             ];
+            # Caught live 2026-08-12: services.gnome.at-spi2-core.enable=true
+            # (above) flips the NixOS-level option, but the org.a11y.Bus
+            # D-Bus-activation service file and the GTK_A11Y/NO_AT_BRIDGE
+            # session env vars are only applied at graphical-session START
+            # (greeter/PAM/session-env, not systemd --user daemon-reload).
+            # Until the next login, libatspi's C-level _atspi_bus() treats
+            # "no accessibility bus" as fatal (g_log abort -> SIGABRT
+            # coredump, not a catchable Python exception), so this crash
+            # is expected on the FIRST activation of a session that
+            # predates the option flip, self-resolving after a relogin/
+            # reboot. StartLimit bounds the restart storm in the meantime
+            # instead of coredumping indefinitely.
             Restart = "on-failure";
             RestartSec = "5s";
             NoNewPrivileges = true;
