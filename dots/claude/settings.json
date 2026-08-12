@@ -74,7 +74,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/hooks/pretooluse-bash.sh",
+            "command": "/realm/project/sinnix/dots/claude/hooks/pretooluse-bash.sh",
             "timeout": 3
           }
         ]
@@ -147,22 +147,22 @@
           },
           {
             "type": "command",
-            "command": "~/.claude/hooks/sessionstart-polylogue-recall.sh",
+            "command": "/realm/project/sinnix/dots/claude/hooks/sessionstart-polylogue-recall.sh",
             "timeout": 5
           },
           {
             "type": "command",
-            "command": "~/.claude/hooks/sessionstart-sinex-recall.sh",
+            "command": "/realm/project/sinnix/dots/claude/hooks/sessionstart-sinex-recall.sh",
             "timeout": 5
           },
           {
             "type": "command",
-            "command": "~/.claude/hooks/sessionstart-beads-prime.sh",
+            "command": "/realm/project/sinnix/dots/claude/hooks/sessionstart-beads-prime.sh",
             "timeout": 10
           },
           {
             "type": "command",
-            "command": "~/.claude/hooks/sessionstart-steering.sh",
+            "command": "/realm/project/sinnix/dots/claude/hooks/sessionstart-steering.sh",
             "timeout": 8
           },
           {
@@ -194,7 +194,7 @@
           },
           {
             "type": "command",
-            "command": "~/.claude/hooks/sessionstart-beads-prime.sh --memories-only",
+            "command": "/realm/project/sinnix/dots/claude/hooks/sessionstart-beads-prime.sh --memories-only",
             "timeout": 10
           }
         ]
