@@ -153,26 +153,19 @@ mkServiceModule {
               ];
               Restart = "on-failure";
               RestartSec = "5s";
-              # NoNewPrivileges must stay OFF for this unit specifically:
-              # gpu-screen-recorder's KMS capture path execs
-              # gsr-kms-server through NixOS's setcap wrapper
-              # (config.security.wrapperDir), which grants cap_sys_admin
-              # via file capabilities at exec time -- exactly the kind of
-              # privilege-gain no_new_privs exists to block.
-              ProtectSystem = "strict";
-              ProtectHome = "read-only";
-              # gsr-kms-server binds its IPC socket hardcoded under /tmp
-              # (".gsr-kms-socket-<random>", confirmed live via a
-              # systemd-run transient unit with no sandboxing --
-              # `/tmp/.gsr-kms-socket-c1C9qFmFq4`), NOT $XDG_RUNTIME_DIR
-              # as an earlier fix attempt assumed (that attempt added "%t"
-              # to ReadWritePaths, which changed nothing -- same EROFS
-              # error persisted, corrected here rather than left wrong).
-              # PrivateTmp gives this unit its own writable tmpfs /tmp
-              # satisfying that hardcoded path without exposing or
-              # requiring write access to the real host /tmp.
-              PrivateTmp = true;
-              ReadWritePaths = [ replayDir ];
+              # This unit deliberately carries NO mount-namespace sandboxing
+              # (no ProtectSystem/ProtectHome/PrivateTmp/ReadWritePaths) and
+              # NoNewPrivileges stays off: a systemd *user* manager is
+              # unprivileged, so any mount-namespace directive forces a child
+              # USER namespace first, which demotes the cap_sys_admin the
+              # NixOS setcap wrapper grants gsr-kms-server to
+              # namespace-relative -- while DRM_IOCTL_MODE_GETFB2 checks
+              # CAP_SYS_ADMIN against the INITIAL user namespace. The kernel
+              # then returns framebuffers with zeroed GEM handles and the
+              # recorder captures nothing ("drmfb handle is NULL" loop).
+              # Every individual sandbox directive reproduces this and
+              # PrivateUsers=false does not opt out: sandboxing this unit
+              # and capturing the screen are mutually exclusive.
               UMask = "0077";
             };
           };
