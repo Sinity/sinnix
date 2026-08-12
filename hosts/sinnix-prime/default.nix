@@ -95,6 +95,9 @@
     # Backstop reaper for orphaned per-checkout sinex dev-postgres instances
     # (primary cleanup is sinnix-direnvrc's owner-watcher). See sinex-grlv.
     sinex-dev-db-reaper.enable = true;
+    # Pre-build + cachix-push sinex whenever its pinned input moves, off the
+    # interactive switch critical path. See sinnix-m9v.
+    sinex-cache-prebuild.enable = true;
     # Keep the optional AirVPN tunnel inactive; Transmission uses the normal
     # host network and the router's existing 51413 port forward.
     airvpn-seed.enable = false;

@@ -152,21 +152,14 @@ let
   # (2026-07-09: 17 earlyoom kills before one attempt fit). Publish the
   # freshly activated sinex closure back to the cache after a successful
   # switch so sinnix-ethereal deploys, reinstalls, and post-GC rebuilds
-  # substitute instead of repeating that build (sinnix-iln). Best-effort:
-  # needs the operator cachix auth token (~/.config/cachix); the push runs
-  # as a detached user unit in background.slice so the rebuild command
-  # returns without waiting on uploads, and any failure is visible via
-  # `journalctl --user` rather than failing the switch.
+  # substitute instead of repeating that build (sinnix-iln). The actual push
+  # command (scripts/sinnix-sinex-cache-push) is shared with the async
+  # sinex-cache-prebuild timer (modules/services/sinex-cache-prebuild.nix,
+  # sinnix-m9v), which decouples the FIRST switch after a sinex master bump
+  # from paying the local compile cost synchronously in the first place.
   sinexCachePush = ''
     if [ "$_rebuild_status" -eq 0 ]; then
-      _sinex_pkg_paths="$(${pkgs.nix}/bin/nix path-info -r /run/current-system 2>/dev/null | ${pkgs.gnugrep}/bin/grep -E -- '-sinex-[0-9][^/]*$' || true)"
-      if [ -n "$_sinex_pkg_paths" ]; then
-        echo "sinnix switch: publishing sinex package closure to sinity.cachix.org in the background"
-        # shellcheck disable=SC2086
-        ${pkgs.systemd}/bin/systemd-run --user --quiet --collect \
-          --slice=background.slice \
-          ${pkgs.cachix}/bin/cachix push sinity $_sinex_pkg_paths || true
-      fi
+      ${scriptPkgs.sinnix-sinex-cache-push}/bin/sinnix-sinex-cache-push /run/current-system || true
     fi
   '';
   # Shared by this file's own `switch` appCommand and dev-shell.nix's
