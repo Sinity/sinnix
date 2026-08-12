@@ -78,6 +78,11 @@ mkServiceModule {
       default = 60;
       description = "Capture framerate for the replay ring.";
     };
+    target = lib.mkOption {
+      type = lib.types.str;
+      example = "DP-3";
+      description = "gpu-screen-recorder -w capture target. Use the monitor connector name; \"focused\" means focused WINDOW in gsr 5.13.9 and hard-requires -s WxH, so it cannot be a working default for a whole-screen ring.";
+    };
   };
   surface = {
     unit = unit;
@@ -119,6 +124,11 @@ mkServiceModule {
             Description = "Always-on NVENC screen replay ring (last N minutes)";
             After = [ "graphical-session.target" ];
             PartOf = [ "graphical-session.target" ];
+            # A permanently-failing recorder must not churn indefinitely:
+            # ten tries in five minutes, then stay down until a switch or
+            # manual restart.
+            StartLimitIntervalSec = 300;
+            StartLimitBurst = 10;
           };
           Service = lib.sinnix.mkRuntimeServiceConfig {
             runtimeInventory = config.sinnix.runtime.inventory;
@@ -128,21 +138,8 @@ mkServiceModule {
               Environment = "PATH=${config.security.wrapperDir}:/run/current-system/sw/bin";
               ExecStart = lib.escapeShellArgs [
                 "${pkgs.gpu-screen-recorder}/bin/gpu-screen-recorder"
-                # "screen" is NOT a valid gpu-screen-recorder capture target
-                # in this pinned version (5.13.9) -- its usage string lists
-                # window_id|monitor|focused|portal|region|v4l2_device_path.
-                # "focused" tracks whichever monitor currently has input
-                # focus, avoiding a hardcoded monitor name (this host's is
-                # "DP-3" per --list-monitors, but that's not portable and
-                # breaks silently if the connector ever changes). Caught
-                # live 2026-08-12: still not sufficient alone -- see the
-                # NoNewPrivileges/PrivateTmp fixes above and sinnix-60k7 for
-                # the deeper, still-open issue (drmfb handle is NULL
-                # persists even with a correct target, likely this host's
-                # NVIDIA proprietary driver's KMS capture path, not an
-                # argument bug).
                 "-w"
-                "focused"
+                cfg.target
                 "-f"
                 (toString cfg.fps)
                 "-r"
