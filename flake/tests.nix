@@ -27,6 +27,7 @@ in
     })
     ./tests/agent-tools.nix
     ./tests/terminal-capture.nix
+    ./tests/capture-clipboard.nix
     ./tests/backup.nix
     ./tests/memory-audit.nix
     ./tests/agent-environment.nix

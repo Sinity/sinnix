@@ -50,6 +50,12 @@
       autoStart = true;
     };
     terminal-capture.enable = true;
+    # ── Capture-machinery program (2026-08-12) ──────────────────────────────
+    capture-notifications.enable = true;
+    capture-mpris.enable = true;
+    capture-clipboard.enable = true;
+    capture-a11y.enable = true;
+    capture-input-dynamics.enable = true;
     below = {
       enable = true;
       collectIntervalSec = 5;
