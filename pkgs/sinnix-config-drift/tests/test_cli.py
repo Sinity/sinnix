@@ -7,7 +7,15 @@ ROOT = Path(__file__).parents[3]
 SCRIPT = ROOT / "scripts" / "sinnix-config-drift"
 
 
-def run(tmp_path, manifest, *, proc_files=None, systemctl_output=""):
+def run(
+    tmp_path,
+    manifest,
+    *,
+    proc_files=None,
+    systemctl_output="",
+    current_revision="fixture",
+    booted_revision="older",
+):
     proc_root = tmp_path / "root"
     for relative, value in (proc_files or {}).items():
         path = proc_root / relative
@@ -20,7 +28,7 @@ def run(tmp_path, manifest, *, proc_files=None, systemctl_output=""):
     systemctl.chmod(0o755)
     current = tmp_path / "current"
     booted = tmp_path / "booted"
-    for root, revision in ((current, "fixture"), (booted, "older")):
+    for root, revision in ((current, current_revision), (booted, booted_revision)):
         config_path = root / "etc/sinnix/config.json"
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(json.dumps({"meta": {"configurationRevision": revision}}))
@@ -61,6 +69,33 @@ def test_sysctl_drift_and_missing_probe_are_explicit(tmp_path):
     by_check = {row["check"]: row for row in rows}
     assert by_check["sysctl:vm.swappiness"]["match"] is False
     assert by_check["sysctl:vm.page-cluster"]["status"] == "unavailable"
+
+
+def test_generation_unknown_revision_is_always_flagged(tmp_path):
+    # sinnix-6ru: configurationRevision=="unknown" must be reported as a
+    # loud, error-severity finding even when the manifest's own `expected`
+    # value is also "unknown" (the self-referential case that silently
+    # "matched" before this fix, since both sides come from the same
+    # potentially-broken evaluation).
+    rows = run(
+        tmp_path,
+        {
+            "sysctls": {},
+            "slices": {},
+            "swap": [],
+            "generation": {"revision": "unknown"},
+        },
+        proc_files={"proc/swaps": "Filename\ttype\tsize\tused\tpriority\n"},
+        current_revision="unknown",
+        booted_revision="unknown",
+    )
+    by_check = {row["check"]: row for row in rows}
+    for check in ("generation:current", "generation:booted"):
+        assert by_check[check]["live"] == "unknown"
+        assert by_check[check]["match"] is False
+        assert by_check[check]["status"] == "drifted"
+        assert by_check[check]["severity"] == "error"
+        assert by_check[check]["reboot_required"] is True
 
 
 def test_slice_and_generation_mismatch_require_reboot(tmp_path):

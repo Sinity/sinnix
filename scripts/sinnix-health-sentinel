@@ -48,7 +48,7 @@ if [ -n "$failure_unit" ]; then
 fi
 
 now="$(date +%s)"
-while IFS=$'\t' read -r name path cadence; do
+while IFS=$'\t' read -r name path cadence stale_after; do
   [ -n "$path" ] || continue
   newest="$(find "$path" -type f -printf '%T@\n' 2>/dev/null | sort -nr | head -n 1 || true)"
   if [ -z "$newest" ]; then
@@ -57,12 +57,18 @@ while IFS=$'\t' read -r name path cadence; do
   fi
   newest_sec="${newest%%.*}"
   age=$((now - newest_sec))
-  if [ "$age" -gt $((cadence * 2)) ]; then
-    emit "capture:$name" capture_stale "$name" stale "path=$path;age_seconds=$age;cadence_seconds=$cadence"
+  is_stale=0
+  # Cadence-driven lanes: stale once idle past twice their expected cadence.
+  [ -n "$cadence" ] && [ "$cadence" != null ] && [ "$age" -gt $((cadence * 2)) ] && is_stale=1
+  # Event-driven (or cadence + explicit budget) lanes: stale once idle past
+  # their absolute staleness budget, independent of any cadence check above.
+  [ -n "$stale_after" ] && [ "$stale_after" != null ] && [ "$age" -gt "$stale_after" ] && is_stale=1
+  if [ "$is_stale" -eq 1 ]; then
+    emit "capture:$name" capture_stale "$name" stale "path=$path;age_seconds=$age;cadence_seconds=$cadence;stale_after_seconds=$stale_after"
   else
-    emit "capture:$name" capture_stale "$name" healthy "path=$path;age_seconds=$age;cadence_seconds=$cadence"
+    emit "capture:$name" capture_stale "$name" healthy "path=$path;age_seconds=$age;cadence_seconds=$cadence;stale_after_seconds=$stale_after"
   fi
-done < <(jq -r '.captures[]? | select(.expectedCadenceSeconds != null) | [.name,.path,.expectedCadenceSeconds] | @tsv' "$inventory")
+done < <(jq -r '.captures[]? | select(.expectedCadenceSeconds != null or .expectedStaleAfterSeconds != null) | [.name,.path,(.expectedCadenceSeconds // "null"),(.expectedStaleAfterSeconds // "null")] | @tsv' "$inventory")
 
 while IFS=$'\t' read -r path warn fail; do
   usage="$(df -P "$path" 2>/dev/null | awk 'NR == 2 {gsub(/%/,"",$5); print $5}' || true)"
