@@ -198,15 +198,13 @@
       Storage=persistent
       Compress=yes
       SyncIntervalSec=2min
-      # Persistent (not volatile) is deliberate, not drift: a 2026-05-22
-      # decision moved this to volatile, then it was reverted because the
-      # journal is now the forensic source for OOM/earlyoom kill events
-      # (sinnix-fjq's kill_event capture greps this journal).
-      # Retention intent is ~ONE YEAR (operator, 2026-07-10) — time-based
-      # prune is the primary knob; the size cap is a backstop, not a
-      # preallocation (journald only occupies what it grows to). Interim
-      # posture: once sinex is trusted as the durable journal archive this
-      # local window shrinks back to weeks and the duplication ends.
+      # Persistent (not volatile) is deliberate, not drift: the journal is
+      # the forensic source for OOM/earlyoom kill events (sinnix-fjq's
+      # kill_event capture greps it). Retention is time-based (~1 year);
+      # the size cap is a backstop, not a preallocation. Interim posture:
+      # once sinex is trusted as the durable journal archive this local
+      # window shrinks back to weeks and the duplication ends.
+      # History/evidence: bd show sinnix-u63, bd show sinnix-fjq
       MaxRetentionSec=365day
       SystemMaxUse=64G
       SystemKeepFree=200G
@@ -218,23 +216,13 @@
     '';
   };
 
-  # /tmp is plain root-backed btrfs on the MX500 (~104% rated NAND
-  # endurance; sinnix-een). Bounded tmpfs moves routine /tmp churn (build
-  # scratch, compile-server sockets, short-lived app temp files) into RAM
-  # for the common case, at zero disk writes. The sinnix-een bead's stated
-  # premise (evicted tmpfs pages land in swap on the worn root SSD) no
-  # longer holds either way it could fail: zram (modules/profiles/
-  # workstation.nix, zramSwap.enable = true, 12G RAM-backed) absorbs the
-  # first tier of any swap-out, and the NVMe swapfile (hosts/sinnix-prime/
-  # storage.nix) is the file-backed overflow tier — as of 2026-07-09 that
-  # swapfile moved off the root SSD onto /realm (NVMe, not wear-sensitive),
-  # so evicted tmpfs pages landing in swap no longer add wear to the worn
-  # disk either way. This is still a net win regardless: normal
-  # desktop use has ~13GiB available RAM headroom (measured 2026-07-06), a
-  # 6G tmpfsSize cap keeps worst-case swap pressure bounded, and
-  # drainSwapfile already evicts resident swap opportunistically.
-  # Heavy/large scratch already belongs on /realm/tmp per policy, not /tmp,
-  # so this tmpfs is sized for routine small-file churn, not build output.
+  # /tmp is plain root-backed btrfs on the MX500 (wear-limited). Bounded
+  # tmpfs moves routine /tmp churn (build scratch, compile-server sockets,
+  # short-lived app temp files) into RAM for the common case at zero disk
+  # writes; any evicted pages land on the NVMe swap tier, not the worn root
+  # SSD. Heavy/large scratch belongs on /realm/tmp per policy, not here —
+  # this tmpfs is sized for routine small-file churn, not build output.
+  # History/evidence: bd show sinnix-een
   boot.tmp.useTmpfs = true;
   boot.tmp.tmpfsSize = "6G";
 }
