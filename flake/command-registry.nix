@@ -20,7 +20,6 @@ let
   # real rev, silently defeating the live-drift tripwire. Only fall back to
   # the store copy as a genuine last resort, and warn loudly when that
   # happens.
-  # History/evidence: bd show sinnix-6ru
   resolveFlakeDir = ''
     _flake_dir="''${SINNIX_FLAKE_DIR:-''${NH_FLAKE:-''${FLAKE:-''${PRJ_ROOT:-}}}}"
     if [ -z "$_flake_dir" ]; then
@@ -126,7 +125,6 @@ let
   # (scripts/sinnix-sinex-cache-push) is shared with the async
   # sinex-cache-prebuild timer, which decouples the FIRST switch after a
   # sinex master bump from paying that compile cost synchronously.
-  # History/evidence: bd show sinnix-iln, bd show sinnix-m9v
   sinexCachePush = ''
     if [ "$_rebuild_status" -eq 0 ]; then
       ${scriptPkgs.sinnix-sinex-cache-push}/bin/sinnix-sinex-cache-push /run/current-system || true
@@ -136,7 +134,6 @@ let
   # mkNhCommand (switch action only): the exact-toplevel activation fallback,
   # parameterized by `name` so both call sites get an accurate log prefix
   # from one implementation.
-  # History/evidence: bd show sinnix-ihi
   switchFallback = name: ''
     if [ "$_rebuild_status" -ne 0 ] && [ "$_rebuild_status" -ne 130 ]; then
       echo "sinnix ${name}: nh failed with status $_rebuild_status; trying exact toplevel activation fallback" >&2
@@ -156,7 +153,6 @@ let
       # switch-to-configuration boot has no generation to point the
       # bootloader at, and a reboot would silently resurrect the previous
       # generation. Twin comment: flake/dev-shell.nix.
-      # History/evidence: bd show sinnix-ihi
       /run/wrappers/bin/sudo ${pkgs.nix}/bin/nix-env \
         --profile /nix/var/nix/profiles/system --set "$_toplevel_out"
       _rebuild_status=0
@@ -167,7 +163,6 @@ let
       # orthogonal to whether every service started cleanly, so always do it
       # as a separate step — but keep the real "switch" exit status (unless
       # this step itself fails worse) so a genuine regression still surfaces.
-      # History/evidence: bd show sinnix-ihi
       _boot_status=0
       /run/wrappers/bin/sudo "$_toplevel_out/bin/switch-to-configuration" boot || _boot_status=$?
       if [ "$_boot_status" -ne 0 ]; then

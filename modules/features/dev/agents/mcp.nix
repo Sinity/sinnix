@@ -390,15 +390,10 @@ mkFeatureModule {
             Install.WantedBy = [ "timers.target" ];
           };
 
-          # Session-boundary hooks (Codex/Claude SessionStart+Stop) only reap
-          # orphans at session start/end -- a daemon orphaned mid-session (an
-          # agent's Bash tool call killed, or a tracking file like
-          # .dmypy.json deleted out from under a live daemon) survives
-          # unbounded until the next session boundary. This periodic sweep
-          # closes that gap structurally, independent of any agent behaving
-          # correctly (2026-07-08 incident: 14 orphaned `dmypy run` daemons,
-          # ~15GB RSS, accumulated over one session with no session
-          # boundary to trigger the existing hook-based sweep).
+          # Session-boundary hooks only reap orphans at session start/end;
+          # a daemon orphaned mid-session survives unbounded until the next
+          # boundary. This periodic sweep closes that gap structurally,
+          # independent of any agent behaving correctly.
           systemd.user.services.sinnix-mcp-sweep-periodic = {
             Unit = {
               Description = "Periodically reap orphaned MCP/language-server/dev-daemon processes";

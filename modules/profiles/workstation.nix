@@ -137,7 +137,6 @@ in
     # RAM speed; the NVMe swapfile (hosts/sinnix-prime/storage.nix, priority
     # 10) is the overflow tier for sustained pressure. Telemetry samples
     # zram/PSI/refaults so a thrash regression stays visible.
-    # History/evidence: bd show sinnix-mys
     zramSwap = {
       enable = true;
       algorithm = "zstd";
@@ -145,7 +144,6 @@ in
       # load; do not raise further without a zram residue-reset hygiene step
       # (incompressible worst case approaches 1:1). Disksize changes apply
       # to /dev/zram0 only on reboot, not on a live switch.
-      # History/evidence: bd show sinnix-mys
       memoryMax = 12 * 1024 * 1024 * 1024;
       priority = 100;
     };
@@ -180,13 +178,11 @@ in
       # without reverting to the sustained page-cache-hoarding regime that
       # higher values caused. min_free_kbytes/watermark_scale_factor below
       # hold a concrete free-page reserve for burst-alloc starvation.
-      # History/evidence: bd show sinnix-mys
       "vm.swappiness" = 10;
       "vm.page-cluster" = 0;
       # vfs_cache_pressure=100 (kernel default) reclaims file cache normally;
       # a prior overshoot (1000) kept dentries/inodes permanently cold,
       # forcing PID1 alone to re-read ~390 GiB/day of unit fragments.
-      # History/evidence: bd show sinnix-mys
       "vm.vfs_cache_pressure" = 100;
       "vm.min_free_kbytes" = 1048576;
       "vm.watermark_scale_factor" = 200;
@@ -260,7 +256,6 @@ in
     # No periodic cache-drop machinery here: kernel LRU reclaim is the cache
     # bound. A former drop_caches timer manufactured the pressure it claimed
     # to relieve, since MemAvailable already counts reclaimable cache.
-    # History/evidence: bd show sinnix-mys
     services.earlyoom = {
       enable = true;
       enableNotifications = true;
@@ -269,13 +264,11 @@ in
       # -m3 is the emergency floor for true exhaustion, not the first
       # responder: PSI-scoped oomd (below) and the swap tiers handle pressure
       # first, and earlyoom itself generated the kill storms as first responder.
-      # History/evidence: bd show sinnix-3gb
       freeMemThreshold = 3;
       # freeSwapThreshold=50 lets a burst use up to ~4 GiB of fast NVMe/zram
       # swap before earlyoom panics, while still firing well before swap is
       # exhausted. The old ~10% default suppressed the kill until the
       # compositor was already wedged on a slower swap substrate.
-      # History/evidence: bd show sinnix-3gb
       freeSwapThreshold = 50;
       extraArgs = [
         # No --prefer regex: victim steering was an arms race; at the -m3
@@ -284,7 +277,6 @@ in
         # Only recovery-critical surfaces are avoided — agents remain
         # eligible victims (process-name avoidance is not a containment
         # boundary; per-scope MemoryHigh/MemoryMax is).
-        # History/evidence: bd show sinnix-3gb, bd show sinnix-1uo
         "--avoid"
         earlyoomAvoidPattern
       ];
@@ -300,14 +292,12 @@ in
     # 50%/30s (runtime-defaults.nix) so a wedged build dies as a cgroup
     # while the desktop and agents never qualify; earlyoom stays the global
     # emergency floor at -m3.
-    # History/evidence: bd show sinnix-3gb
     systemd.oomd.enable = true;
 
     # Devshell/agent scratch belongs on /realm NVMe, not the RAM-backed /tmp
     # tmpfs: per-shell TMPDIR dirs never get cross-session retention pruning,
     # so heavy test fixtures accumulate and can pin tmpfs RAM. NVMe contents
     # also survive reboots, so the age-based cleanup below is load-bearing.
-    # History/evidence: bd show sinnix-7yd
     environment.sessionVariables.TMPDIR = "/realm/tmp/shell";
     systemd.tmpfiles.rules = [
       "d /realm/tmp/shell 1777 root root 7d"

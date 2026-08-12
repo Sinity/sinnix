@@ -7,7 +7,6 @@
 # client-profiles.nix, serena.nix, browser.nix, hooks.nix) are plain-nix
 # helpers consumed via `import`, not standalone modules — only clis.nix and
 # mcp.nix are real modules.
-# History/evidence: bd show sinnix-9u6
 {
   imports = [
     ./clis.nix

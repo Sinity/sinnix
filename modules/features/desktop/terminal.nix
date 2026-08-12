@@ -63,7 +63,6 @@ mkFeatureModule {
               # cursor_trail=0: exonerated as the kitty idle-memory-leak
               # trigger, but kept off while the globally patched kitty build
               # establishes a clean post-fix memory-slope baseline.
-              # History/evidence: bd show sinnix-878
               cursor_trail = 0;
               confirm_os_window_close = 0;
               allow_remote_control = "socket-only";

@@ -80,7 +80,6 @@ mkServiceModule {
       # independently (bounded backoff), keeps going on exhaustion instead
       # of aborting, then verifies the full roster against `ollama list` and
       # names exactly which tags are still missing before failing the unit.
-      # History/evidence: bd show sinnix-wyg
       modelLoaderScript = ''
         declare -a models=( ${lib.escapeShellArgs cfg.loadModels} )
         declare -a delays=(10 30 60 120)

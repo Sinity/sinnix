@@ -810,7 +810,6 @@ in
     # event to the existing borgStatusLog JSONL (same file/consumer path as
     # the archive_freshness/snapshot_queue events above) and best-effort
     # desktop-notifies the active graphical session.
-    # History/evidence: bd show sinnix-u63
     systemd.services."sinnix-service-failure-notify@" = {
       description = "Record + surface a failed backup-verification unit (%i)";
       serviceConfig.Type = "oneshot";
@@ -907,7 +906,6 @@ in
         # the repo, so successive weekly runs cycle through the full
         # repository without ever monopolizing the repo lock for a whole day
         # and starving the hourly drains.
-        # History/evidence: bd show sinnix-txa
         ${pkgs.borgbackup}/bin/borg check --repository-only --max-duration 1800 ${borgRepoPersist}
         ${pkgs.borgbackup}/bin/borg check --repository-only --max-duration 7200 ${borgRepoRealm}
         ${pkgs.borgbackup}/bin/borg check --repository-only --max-duration 1800 ${borgRepoSinexBlobs}
