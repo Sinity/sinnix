@@ -24,22 +24,14 @@
       omit ? [ ],
     }:
     let
-      resolvedResourceClass =
-        if resourceClass != null then
-          resourceClass
-        else if unit != null then
-          let
-            matchingSurfaces = lib.filterAttrs (_: surface: surface.unit == unit) runtimeInventory.surfaces;
-            surfaceNames = builtins.attrNames matchingSurfaces;
-          in
-          if surfaceNames == [ ] then
-            throw "unknown Sinnix runtime surface unit: ${unit}"
-          else
-            matchingSurfaces.${builtins.head surfaceNames}.resourceClass
+      # A unit lookup takes precedence over an explicit resourceClass (callers
+      # never pass both; see modules/services/* call sites). Resolve the
+      # surface at most once instead of walking runtimeInventory.surfaces
+      # twice for the same unit.
+      surfaceForUnit =
+        if unit == null then
+          null
         else
-          "system";
-      serviceConfig =
-        if unit != null then
           let
             matchingSurfaces = lib.filterAttrs (_: surface: surface.unit == unit) runtimeInventory.surfaces;
             surfaceNames = builtins.attrNames matchingSurfaces;
@@ -47,7 +39,11 @@
           if surfaceNames == [ ] then
             throw "unknown Sinnix runtime surface unit: ${unit}"
           else
-            matchingSurfaces.${builtins.head surfaceNames}.effectiveResources
+            matchingSurfaces.${builtins.head surfaceNames};
+      resolvedResourceClass = if resourceClass != null then resourceClass else "system";
+      serviceConfig =
+        if surfaceForUnit != null then
+          surfaceForUnit.effectiveResources
         else if builtins.hasAttr resolvedResourceClass runtimeInventory.classes then
           runtimeInventory.classes.${resolvedResourceClass}.serviceConfig
         else

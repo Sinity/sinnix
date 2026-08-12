@@ -4,6 +4,7 @@
 #   sinnix.gpu.mode = "nvidia";       # Proprietary driver
 #   sinnix.gpu.mode = "nvidia-open";  # NVIDIA open kernel module
 #   sinnix.gpu.mode = "igpu";         # Intel UHD 770, discrete GPU physically absent
+#   sinnix.gpu.mode = "dual";         # Both i915 (mobo) and NVIDIA (dGPU) active
 #
 # Consumed by: hosts/sinnix-prime/display.nix, hosts/sinnix-prime/boot.nix
 {
