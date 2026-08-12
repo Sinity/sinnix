@@ -19,10 +19,12 @@
         inherit inputs pkgs system;
       };
       nix = "${pkgs.nix}/bin/nix";
-      inherit (commandRegistry) rebuildServicePath localInputOverrideArgs;
-      resolveFlakeDir = ''
-        _flake_dir="''${PRJ_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-      '';
+      # resolveFlakeDir is shared with command-registry.nix's appCommands
+      # (`nix run .#switch` etc.) so both entry points resolve the same way
+      # instead of silently drifting apart -- see command-registry.nix's own
+      # comment for why a naive fallback here previously broke
+      # system.configurationRevision (sinnix-6ru).
+      inherit (commandRegistry) rebuildServicePath localInputOverrideArgs resolveFlakeDir;
       # Wrapper for nix that serializes heavy subcommands (build, flake check)
       # behind the same lock as switch/boot/test. Passes through all other
       # subcommands (eval, develop, shell, run, fmt, flake update, etc.)

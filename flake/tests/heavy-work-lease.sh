@@ -15,13 +15,29 @@ done
 # Source-only work is outside the heavy lease and remains concurrent.
 bash -c 'printf source >"$1"' _ "$fixture/source"
 [[ "$(<"$fixture/source")" == source ]]
-if "$lease_bin" --state-dir "$fixture/state" --project sinnix --work-item test -- bash -c 'printf overlap >>"$1"' _ "$fixture/order"; then
+set +e
+contention_output="$("$lease_bin" --state-dir "$fixture/state" --project sinnix --work-item test -- bash -c 'printf overlap >>"$1"' _ "$fixture/order" 2>&1)"
+contention_status=$?
+set -e
+if [ "$contention_status" -eq 0 ]; then
   echo "contending heavy work overlapped" >&2
   exit 1
 fi
+[ "$contention_status" -eq 75 ]
+grep -Fq 'BLOCKED' <<<"$contention_output"
+grep -Fq 'nothing was built or activated' <<<"$contention_output"
 "$lease_bin" --state-dir "$fixture/state" status | jq -e '.owner.project == "sinex"' >/dev/null
+# status's exit code is the held/free signal gating callers (sinnix-preflight)
+# branch on -- must be 0 while a live owner holds the lease.
+"$lease_bin" --state-dir "$fixture/state" status >/dev/null
 wait "$owner"
 [[ "$(<"$fixture/order")" == startend ]]
+# ...and nonzero once the owner has released it.
+set +e
+"$lease_bin" --state-dir "$fixture/state" status >/dev/null
+status_after_release=$?
+set -e
+[ "$status_after_release" -ne 0 ]
 
 # A cancelled bounded waiter must not acquire later or leave descendants.
 "$lease_bin" --state-dir "$fixture/state" -- bash -c 'sleep 2' &

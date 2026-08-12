@@ -116,6 +116,14 @@ in
   sinnix.runtime.surfaces.interception-tools = {
     unit = "interception-tools.service";
     resourceClass = "interactive-access";
+    captures = [
+      {
+        name = "keylog";
+        path = "${keylogRoot}/logs";
+        eventDriven = true;
+        staleAfterSeconds = 3600;
+      }
+    ];
   };
 
   systemd = {
