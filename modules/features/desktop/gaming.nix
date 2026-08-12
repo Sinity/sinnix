@@ -42,9 +42,6 @@ mkFeatureModule {
     }:
     let
       inherit (config) sinnix;
-      capturesRoot = sinnix.paths.capturesRoot;
-      replayDir = "${capturesRoot}/replay";
-
       factorioTokenPath = sinnix.secrets.paths."factorio-token";
       factorioVersion = pkgs.factorio.version;
       factorioSha256 = pkgs.factorio.src.outputHash;
@@ -116,51 +113,6 @@ mkFeatureModule {
 
           exec ${pkgs.steam-run}/bin/steam-run "$bin_path" "$@"
         '';
-      };
-
-      # gpu-screen-recorder replay buffer script
-      replayBufferScript = pkgs.writeShellApplication {
-        name = "replay-buffer";
-        runtimeInputs = with pkgs; [
-          gpu-screen-recorder
-          coreutils
-          procps
-          libnotify
-        ];
-        text = ''
-          set -euo pipefail
-          REPLAY_DIR="${replayDir}"
-          DURATION="''${1:-60}"
-          PIDFILE="/tmp/replay-buffer.pid"
-
-          if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
-            # Already running — save current replay
-            kill -USR1 "$(cat "$PIDFILE")"
-            notify-send -t 3000 "Replay saved" "$REPLAY_DIR"
-            exit 0
-          fi
-
-          mkdir -p "$REPLAY_DIR"
-          gpu-screen-recorder \
-            -w screen \
-            -f 60 \
-            -r "$DURATION" \
-            -a default_output \
-            -c mp4 \
-            -o "$REPLAY_DIR" &
-          echo $! > "$PIDFILE"
-          notify-send -t 2000 "Replay buffer started" "''${DURATION}s @ 60fps"
-        '';
-      };
-
-      replayBufferStop = pkgs.writeShellApplication {
-        name = "replay-buffer-stop";
-        runtimeInputs = with pkgs; [
-          coreutils
-          procps
-          libnotify
-        ];
-        text = builtins.readFile ./replay-buffer-stop.sh;
       };
     in
     lib.mkMerge [
@@ -258,14 +210,6 @@ mkFeatureModule {
             };
           };
         };
-      })
-
-      # Replay buffer tooling
-      (lib.mkIf cfg.steam.enable {
-        home-manager.users.${user}.home.packages = [
-          replayBufferScript
-          replayBufferStop
-        ];
       })
 
       # Factorio launcher using the agenix-managed token at runtime

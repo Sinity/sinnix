@@ -153,6 +153,7 @@ mkServiceModule {
               name = "agent-job-manifests";
               path = "${cfg.stateDir}/jobs";
               eventDriven = true;
+              staleAfterSeconds = 3600;
             }
           ];
         };
@@ -173,11 +174,13 @@ mkServiceModule {
               name = "heavy-lease-owner";
               path = "/home/${userName}/.local/state/sinnix/heavy-lease/owner.json";
               eventDriven = true;
+              staleAfterSeconds = 3600;
             }
             {
               name = "heavy-lease-audit";
               path = "/home/${userName}/.local/state/sinnix/heavy-lease/audit.jsonl";
               eventDriven = true;
+              staleAfterSeconds = 3600;
             }
           ];
         };

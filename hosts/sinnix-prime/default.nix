@@ -25,12 +25,6 @@
   # Every capability in modules/features/ is default-on; this host expresses
   # only configuration detail (subfeatures and option values), not enables.
   sinnix.features.desktop.hyprlandAnimations.enable = true;
-  sinnix.features.desktop.audioCapture = {
-    asrProvider = "openai";
-    asrDiarization = false;
-    enableAsrServer = false;
-    enableAudioDaemon = false;
-  };
   sinnix.features.dev.editors.vscode.enable = true;
   sinnix.features.dev.editors.antigravity.enable = true;
 
@@ -50,6 +44,22 @@
       autoStart = true;
     };
     terminal-capture.enable = true;
+    # ── Capture-machinery program (2026-08-12) ──────────────────────────────
+    capture-notifications.enable = true;
+    capture-mpris.enable = true;
+    capture-clipboard.enable = true;
+    capture-a11y.enable = true;
+    capture-input-dynamics.enable = true;
+    capture-audio.enable = true;
+    # Phase 3a (sinnix-9pd): per-window screen frames + the always-on
+    # replay ring, promoted to default-on via this host enable per the
+    # mkServiceModule factory contract (services are default-off at the
+    # module level; hosts express the opt-in) rather than baking a
+    # non-standard default into the factory itself.
+    capture-screen.enable = true;
+    capture-replay.enable = true;
+    capture-kitty-scrollback.enable = true;
+    url-ledger.enable = true;
     below = {
       enable = true;
       collectIntervalSec = 5;
@@ -88,6 +98,9 @@
     # Backstop reaper for orphaned per-checkout sinex dev-postgres instances
     # (primary cleanup is sinnix-direnvrc's owner-watcher). See sinex-grlv.
     sinex-dev-db-reaper.enable = true;
+    # Pre-build + cachix-push sinex whenever its pinned input moves, off the
+    # interactive switch critical path. See sinnix-m9v.
+    sinex-cache-prebuild.enable = true;
     # Keep the optional AirVPN tunnel inactive; Transmission uses the normal
     # host network and the router's existing 51413 port forward.
     airvpn-seed.enable = false;
@@ -208,13 +221,15 @@
   # /tmp is plain root-backed btrfs on the MX500 (~104% rated NAND
   # endurance; sinnix-een). Bounded tmpfs moves routine /tmp churn (build
   # scratch, compile-server sockets, short-lived app temp files) into RAM
-  # for the common case, at zero disk writes. Correction to the sinnix-een
-  # bead's stated premise: zram swap is disabled on this host
-  # (modules/profiles/workstation.nix, zramSwap.enable = false) — swap is a
-  # file-backed overflow (hosts/sinnix-prime/storage.nix). As of 2026-07-09
-  # that swapfile moved off the root SSD onto /realm (NVMe, not
-  # wear-sensitive), so evicted tmpfs pages landing in swap no longer add
-  # wear to the worn disk. This is still a net win regardless: normal
+  # for the common case, at zero disk writes. The sinnix-een bead's stated
+  # premise (evicted tmpfs pages land in swap on the worn root SSD) no
+  # longer holds either way it could fail: zram (modules/profiles/
+  # workstation.nix, zramSwap.enable = true, 12G RAM-backed) absorbs the
+  # first tier of any swap-out, and the NVMe swapfile (hosts/sinnix-prime/
+  # storage.nix) is the file-backed overflow tier — as of 2026-07-09 that
+  # swapfile moved off the root SSD onto /realm (NVMe, not wear-sensitive),
+  # so evicted tmpfs pages landing in swap no longer add wear to the worn
+  # disk either way. This is still a net win regardless: normal
   # desktop use has ~13GiB available RAM headroom (measured 2026-07-06), a
   # 6G tmpfsSize cap keeps worst-case swap pressure bounded, and
   # drainSwapfile already evicts resident swap opportunistically.

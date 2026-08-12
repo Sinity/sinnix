@@ -58,7 +58,7 @@ extract_host() {
           if (domain == "features" || leaf == "enable") print domain "\t" path "\t" val
           next
         }
-        # Block open, e.g. `sinnix.services = {` or `sinnix.features.desktop.audioCapture = {`
+        # Block open, e.g. `sinnix.services = {` or `sinnix.features.desktop.hyprlandAnimations = {`
         if (match(line, /^sinnix\.(features|services)[A-Za-z0-9_.-]*[[:space:]]*=[[:space:]]*\{[[:space:]]*$/)) {
           path = line
           sub(/[[:space:]]*=[[:space:]]*\{[[:space:]]*$/, "", path)

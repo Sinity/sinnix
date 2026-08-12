@@ -23,8 +23,8 @@ in
     bindd = [
       ", S, Screenshot region, exec, noctalia msg screenshot-region"
       ", F, Screenshot fullscreen, exec, noctalia msg screenshot-fullscreen"
-      ", R, Replay buffer save or start, exec, replay-buffer"
-      "SHIFT, R, Stop replay buffer, exec, replay-buffer-stop"
+      ", R, Save replay ring, exec, sinnix-replay-save"
+      "SHIFT, R, Stop replay ring, exec, sinnix-replay-stop"
       ", P, Park background work, exec, sinnix-pressure-park auto"
       ", T, Thaw parked background work, exec, sinnix-pressure-park thaw"
       ", M, Pulse OLED ASBL, exec, asbl-no-moar once --mode invert --duration 0.05"
@@ -43,6 +43,11 @@ in
     "SUPER, Escape, exec, noctalia msg session lock"
     "SUPER, Slash, exec, noctalia msg panel-toggle kenn/keybind-cheatsheet:cheatsheet"
     "SUPER, A, exec, ${script "sinnix-attention"}"
+    # Unified picker (sinnix-r4u8 browser-inversion front door): history +
+    # bookmarks + clipboard + recent project dirs, one fuzzy surface.
+    # scriptPkgs (not the raw `script` helper) so runtimeInputs land on
+    # PATH -- this script shells out to fuzzel/kitty/zoxide/wl-copy.
+    "SUPER, O, exec, ${scriptPkgs.sinnix-picker}/bin/sinnix-picker"
 
     "SUPER, H, exec, ${script "kitty-hypr-nav"} focus left"
     "SUPER, J, exec, ${script "kitty-hypr-nav"} focus down"
@@ -93,9 +98,10 @@ in
     ", F8, exec, uwsm app -- ${script "toggle-scratch"} rawlog"
     ", F9, exec, sudo -n ${scriptPkgs.nuke-builds}/bin/nuke-builds"
 
-    # Gaming: replay buffer (F10 = toggle/save, Shift+F10 = stop)
-    ", F10, exec, replay-buffer"
-    "SHIFT, F10, exec, replay-buffer-stop"
+    # Replay ring (F10 = save, Shift+F10 = stop) -- always-on capture
+    # surface (capture-replay.nix), not gaming-specific.
+    ", F10, exec, sinnix-replay-save"
+    "SHIFT, F10, exec, sinnix-replay-stop"
     # Gaming: MangoHud toggle is Shift_R+F12 (handled by MangoHud itself)
 
     # Numpad browser scratchpads (numlock OFF)

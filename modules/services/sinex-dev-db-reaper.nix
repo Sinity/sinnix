@@ -75,12 +75,20 @@ mkServiceModule {
       home-manager.users.${userName} = {
         systemd.user.services.sinex-dev-db-reaper = {
           Unit.Description = "Reap orphaned sinex dev-postgres instances";
-          Service = {
-            Type = "oneshot";
-            ExecStart = "${reaper}/bin/sinnix-sinex-dev-db reap --idle-secs ${toString cfg.idleSeconds}";
-            # A wedged instance escalates SIGINT→SIGQUIT→SIGKILL internally with
-            # bounded waits; cap the whole sweep so a stuck unit cannot linger.
-            TimeoutStartSec = "5min";
+          Service = lib.sinnix.mkRuntimeServiceConfig {
+            runtimeInventory = config.sinnix.runtime.inventory;
+            # The registered surface unit is the *timer*
+            # (sinex-dev-db-reaper.timer, kind = "timer"), so `unit =`
+            # lookup would throw -- resolve the class's serviceConfig
+            # directly instead.
+            resourceClass = "background-maintenance";
+            overrides = {
+              Type = "oneshot";
+              ExecStart = "${reaper}/bin/sinnix-sinex-dev-db reap --idle-secs ${toString cfg.idleSeconds}";
+              # A wedged instance escalates SIGINT→SIGQUIT→SIGKILL internally with
+              # bounded waits; cap the whole sweep so a stuck unit cannot linger.
+              TimeoutStartSec = "5min";
+            };
           };
         };
 
