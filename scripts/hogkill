@@ -292,7 +292,7 @@ render_table() {
       if [ -z "$unit" ]; then
         unit="-"
       fi
-      printf "%-7s %-12s %6s %6s %10s %-5s %-6s %-32s %s\n" \
+      printf "%-7s %-12s %6s %6s %10s %10s %10s %10s %-5s %-6s %-24s %s\n" \
         "$pid" \
         "$(shorten 12 "$user")" \
         "$cpu" \
