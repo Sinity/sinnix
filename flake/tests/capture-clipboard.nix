@@ -49,6 +49,19 @@ in
 
             mkdir -p "$TMPDIR/bin" "$TMPDIR/captures" "$TMPDIR/state" "$TMPDIR/fixture"
 
+            # writeShellApplication bakes `export PATH=<real store paths>` as
+            # the script's first statement, which shadows this fixture's fake
+            # wl-paste/hyprctl with the real binaries -- in the build sandbox
+            # the real wl-paste degrades to a silent no-op and the check can
+            # never pass. Run a copy with exactly that one line stripped: the
+            # capture logic under test is byte-identical, and every tool the
+            # baked PATH provided is supplied by the fixture PATH below.
+            watch="$TMPDIR/watch"
+            cp "$watch_bin" "$watch"
+            test "$(grep -c '^export PATH=' "$watch")" -eq 1
+            sed -i '/^export PATH=/d' "$watch"
+            chmod +x "$watch"
+
             cat > "$TMPDIR/bin/wl-paste" <<'EOF_WLPASTE'
             #!/usr/bin/env bash
             set -euo pipefail
@@ -70,6 +83,10 @@ in
             echo '{}'
             EOF_HYPRCTL
             chmod +x "$TMPDIR/bin/hyprctl"
+            # No /usr/bin/env in the build sandbox: an unpatched fake shebang
+            # fails execve, `|| true` in the watch script swallows it, and the
+            # run degrades to a silent empty-types no-op.
+            patchShebangs "$TMPDIR/bin"
 
             export PATH="$TMPDIR/bin:${captureCli}/bin:${pkgs.jq}/bin:${pkgs.coreutils}/bin:$PATH"
             export SINNIX_CAPTURE_ROOT="$TMPDIR/captures"
@@ -80,11 +97,11 @@ in
             printf 'text/plain;charset=utf-8\n' > "$FIXTURE_DIR/types"
             printf 'hello from the fixture' > "$FIXTURE_DIR/content"
             printf '{"class": "kitty", "title": "test terminal"}' > "$FIXTURE_DIR/activewindow.json"
-            "$watch_bin"
+            "$watch"
 
             # Firing again with the *same* content must be a silent no-op
             # (consecutive-duplicate de-dup).
-            "$watch_bin"
+            "$watch"
 
             index_file="$TMPDIR/captures/clipboard/clipboard-index.jsonl"
             test "$(wc -l < "$index_file")" -eq 1
@@ -104,7 +121,7 @@ in
             # ── Binary capture (new content -> not deduped away) ───────
             printf 'image/png\n' > "$FIXTURE_DIR/types"
             printf 'not-a-real-png-but-binary-enough' > "$FIXTURE_DIR/content"
-            "$watch_bin"
+            "$watch"
 
             test "$(wc -l < "$index_file")" -eq 2
 
