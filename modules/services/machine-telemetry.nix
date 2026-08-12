@@ -21,8 +21,8 @@ let
   legacyDbPath = "${dataDir}/telemetry.sqlite";
   dbRoot = "${realmRoot}/state/machine-telemetry";
   dbPath = "${dbRoot}/telemetry.sqlite";
-  # 2026-07-10: moved off /persist (worn MX500) to /realm; still inside the
-  # /realm btrbk→borg coverage.
+  # Lives on /realm, not /persist (worn MX500); still inside the /realm
+  # btrbk→borg coverage.
   backupRoot = "/realm/staging/machine-telemetry";
   manifestPath = "${dataDir}/manifest.json";
   username = config.sinnix.user.name;
@@ -306,8 +306,7 @@ mkServiceModule {
           # PATH the network probe's `nslookup example.com` invocation
           # returns exit 127, the collector records gap_codes_json carrying
           # network.dns_probe_failed on every sample, and the substrate row
-          # looks like DNS is down (gap-summary surfaced this at 100% share
-          # on 2026-05-18). Keep both for ad-hoc operator debug paths.
+          # looks like DNS is down. Keep both for ad-hoc operator debug paths.
           pkgs.bind
           pkgs.bind.dnsutils
           pkgs.curl
