@@ -158,12 +158,11 @@ def should_capture_periodic(
 # ---------------------------------------------------------------------------
 # Idle-pause trigger: a simple idle-detection heuristic (cursor position
 # stops changing), approximating the "typing pause" trigger from 3.1. A true
-# Phase-1 input-dynamics keystroke-timing signal (sinnix-capture-input-
-# dynamics, `libinput debug-events`) needs the running user's seat-ACL'd
-# graphical session and was not something this lane could cheaply piggyback
-# on without duplicating that daemon's own subprocess -- see daemon.py's
-# module docstring. This is deliberately the "don't over-engineer" reading
-# of the bead, not the full-fidelity keystroke-timing version.
+# keystroke-timing signal (`libinput debug-events`) needs the running
+# user's seat-ACL'd graphical session and its own subprocess/permission
+# shape -- see daemon.py's module docstring. This is deliberately the
+# "don't over-engineer" reading of the bead, not the full-fidelity
+# keystroke-timing version.
 # ---------------------------------------------------------------------------
 
 

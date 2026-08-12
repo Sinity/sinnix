@@ -40,7 +40,6 @@ _No sinnix.features/sinnix.services declarations found in this host's *.nix file
 | `sinnix.services.capture-a11y.enable` | `true` |
 | `sinnix.services.capture-audio.enable` | `true` |
 | `sinnix.services.capture-clipboard.enable` | `true` |
-| `sinnix.services.capture-input-dynamics.enable` | `true` |
 | `sinnix.services.capture-kitty-scrollback.enable` | `true` |
 | `sinnix.services.capture-mpris.enable` | `true` |
 | `sinnix.services.capture-notifications.enable` | `true` |
