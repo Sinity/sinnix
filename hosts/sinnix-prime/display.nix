@@ -3,6 +3,7 @@
 #   sinnix.gpu.mode = "nvidia"       → proprietary NVIDIA kernel module
 #   sinnix.gpu.mode = "nvidia-open"  → NVIDIA open kernel module
 #   sinnix.gpu.mode = "igpu"         → Intel UHD 770 (discrete GPU absent)
+#   sinnix.gpu.mode = "dual"         → both i915 (mobo) and NVIDIA (dGPU) active
 {
   pkgs,
   config,
