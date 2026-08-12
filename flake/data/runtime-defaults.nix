@@ -72,6 +72,9 @@ let
           // lib.optionalAttrs capture.eventDriven {
             expectedCadence = "event-driven";
           }
+          // lib.optionalAttrs ((capture.staleAfterSeconds or null) != null) {
+            expectedStaleAfterSeconds = capture.staleAfterSeconds;
+          }
         ) surface.captures
       ) (lib.mapAttrs (_: normalizeSurface) surfaces)
     );

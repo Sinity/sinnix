@@ -52,6 +52,21 @@ mkServiceModule {
       scriptPath = "${ircRoot}/scripts/seal_logs.py";
     in
     {
+      # The sealer timer owns the surface declaration above; the IRC capture
+      # lane itself is written continuously by weechat (outside this repo's
+      # process management), so register it here where ircRoot is in scope
+      # rather than restructuring the static `surface` block. List-typed
+      # options merge across definitions, so this appends to the timer's
+      # (empty) captures list instead of replacing it.
+      sinnix.runtime.surfaces.weechat-log-sealer.captures = [
+        {
+          name = "comms-irc";
+          path = ircRoot;
+          eventDriven = true;
+          staleAfterSeconds = 3600;
+        }
+      ];
+
       home-manager.users.${userName} = {
         systemd.user.services.weechat-log-sealer = {
           Unit = {
