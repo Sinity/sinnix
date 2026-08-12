@@ -18,37 +18,38 @@ mkFeatureModule {
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
     in
     {
-      environment.systemPackages = (with pkgs; [
-        git
-        taskwarrior3
-        timewarrior
-        repomix
-        difftastic
-        bubblewrap
-        unzip
-        wget
-        # age: same crypto as agenix. Kept system-wide so the master-key
-        # escrow blob (see knowledgebase docs/sinnix-key-recovery.md) can be
-        # created and, more importantly, decrypted during disaster recovery
-        # without fetching tools.
-        age
-        # Modern CLI replacements
-        eza
-        bat
-        fd
-        lnav
-        dua
-        bandwhich
-        # Even more modern tools
-        micro
-        bottom
-        gping
-        doggo
-        dust
-      ])
-      # `sinnix` -- discoverable front door over the whole packaged script
-      # registry (`sinnix help`, `sinnix <name> [args...]`).
-      ++ [ scriptPkgs.sinnix ];
+      environment.systemPackages =
+        (with pkgs; [
+          git
+          taskwarrior3
+          timewarrior
+          repomix
+          difftastic
+          bubblewrap
+          unzip
+          wget
+          # age: same crypto as agenix. Kept system-wide so the master-key
+          # escrow blob (see knowledgebase docs/sinnix-key-recovery.md) can be
+          # created and, more importantly, decrypted during disaster recovery
+          # without fetching tools.
+          age
+          # Modern CLI replacements
+          eza
+          bat
+          fd
+          lnav
+          dua
+          bandwhich
+          # Even more modern tools
+          micro
+          bottom
+          gping
+          doggo
+          dust
+        ])
+        # `sinnix` -- discoverable front door over the whole packaged script
+        # registry (`sinnix help`, `sinnix <name> [args...]`).
+        ++ [ scriptPkgs.sinnix ];
 
       programs = {
         zsh.enable = true;
@@ -76,12 +77,12 @@ mkFeatureModule {
       # Prevent PAM from starting keyring on login (conflicts with gpg-agent SSH)
       security.pam.services.login.enableGnomeKeyring = lib.mkForce false;
 
-      # Drop pam_lastlog2 from the login stack (sinnix-82m). On this
-      # single-operator host its last-login display is worthless, it issues a
-      # root-SSD SQLite write on every session open, and its SQLite access has
-      # no busy timeout — concurrent session storms (systemd-stdio-bridge
-      # bursts from agent traffic) hit SQLITE_BUSY and fail PAM session setup
-      # outright (3-9 refusals/day observed, week of 2026-07-04..10).
+      # Drop pam_lastlog2 from the login stack. On this single-operator host
+      # its last-login display is worthless, it issues a root-SSD SQLite
+      # write on every session open, and its SQLite access has no busy
+      # timeout — concurrent session storms (systemd-stdio-bridge bursts
+      # from agent traffic) hit SQLITE_BUSY and fail PAM session setup
+      # outright.
       # (mkForce: upstream pam.nix asserts enable = true at normal priority.)
       security.pam.services.login.rules.session.lastlog.enable = lib.mkForce false;
 
