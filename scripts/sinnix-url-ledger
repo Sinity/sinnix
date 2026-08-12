@@ -1,0 +1,843 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: URL x visit x archive-snapshot coverage ledger (Wayback/CommonCrawl/Memento CDX join)
+# runtimeInputs: python3 duckdb coreutils
+
+"""URL x visit x archive-snapshot ledger -- Stage 1 (evidence join, no crawling).
+
+Bead sinnix-xt8 (sub-program of sinnix-0d5/sinnix-ngf). Stage 1 only: read the
+estate's browser history, normalize URLs conservatively, and join against
+public CDX/Memento archive-availability APIs to produce a duckdb/parquet
+coverage product. No crawling, no SavePageNow, no browser dependency -- see
+the bead for the full multi-stage design (Stage 2 acts on the gaps found
+here).
+
+Pipeline (three subcommands, chained by `run`):
+
+  ingest   history file(s) -> state/urls.jsonl (distinct normalized URL,
+           all visit timestamps -- not just first/last).
+  resolve  state/urls.jsonl -> query Wayback CDX, Common Crawl CDX, and the
+           Memento TimeTravel aggregator for each not-yet-resolved URL;
+           cache raw responses under <captures>/url-ledger/cdx-raw/<date>/
+           <provider>/ (dated-snapshot convention, precedent: sinnix-0h2 /
+           lynchpin raindrop_archive.py) and append to
+           state/resolution.jsonl (the resumability checkpoint).
+  build    urls.jsonl + resolution.jsonl -> a duckdb table/parquet file
+           under <derived>/url-ledger/ with one row per normalized URL:
+           visit timestamps, per-provider snapshot timestamps, and the
+           nearest archived snapshot to each visit.
+
+Resumability: `resolve` is bounded per invocation (--max-requests) and
+skips any (url, provider) pair already terminally resolved in
+state/resolution.jsonl, so a killed run or a weekly timer tick just picks
+up where the last one left off -- no re-querying of already-resolved URLs.
+
+Memento note (see `MementoProvider` docstring): the only public Memento
+aggregator (timetravel.mementoweb.org) was discontinued in 2025. The
+provider is implemented and wired in per the bead's design, but degrades
+every query to `unavailable` today (DNS failure, sub-second cost) rather
+than crashing the run. `--memento-base-url` lets a future replacement
+aggregator be pointed at without a code change.
+"""
+
+from __future__ import annotations
+
+import argparse
+import calendar
+import hashlib
+import json
+import os
+import socket
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from dataclasses import dataclass, field
+from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+SCHEMA = "sinnix-url-ledger-v1"
+USER_AGENT = "sinnix-url-ledger/1 (personal archival-coverage research; contact ezo.dev@gmail.com)"
+REQUEST_TIMEOUT_SECONDS = 20
+
+DEFAULT_CAPTURES_ROOT = Path("/realm/data/captures")
+DEFAULT_DERIVED_ROOT = Path("/realm/data/derived")
+DEFAULT_HISTORY_PATH = DEFAULT_CAPTURES_ROOT / "webhistory" / "gestalt" / "derived" / "full_history.ndjson"
+
+# ---------------------------------------------------------------------------
+# Conservative URL normalization (bead sinnix-xt8 design constraint: strip
+# fragment + tracking params only, KEEP the rest of the query string --
+# search/reddit/forum URLs are meaning-bearing. This is a simple denylist,
+# not a guess-everything heuristic, and intentionally separate from
+# lynchpin's `web_urls.normalize_url` (which is a more aggressive per-host
+# whitelist used for its own history dedup -- different job).
+# ---------------------------------------------------------------------------
+
+# Any param starting with one of these prefixes is dropped, regardless of
+# host.
+TRACKING_PARAM_PREFIXES = ("utm_",)
+
+# Exact-match tracking/analytics params from the major ad/social/email
+# platforms. Finite and documented, not exhaustive by design.
+TRACKING_PARAM_DENYLIST = {
+    "fbclid",
+    "gclid",
+    "gclsrc",
+    "dclid",
+    "yclid",
+    "msclkid",
+    "twclid",
+    "igshid",
+    "mc_cid",
+    "mc_eid",
+    "mkt_tok",
+    "vero_id",
+    "ref_src",
+    "ref_url",
+    "wt_zmc",
+    "s_kwcid",
+    "_ga",
+    "_gl",
+    "_hsenc",
+    "_hsmi",
+    "oly_anon_id",
+    "oly_enc_id",
+    "trk",
+    "trkcampaign",
+    "spref",
+}
+
+
+def normalize_url(raw: str) -> str | None:
+    """Conservative normalization: lowercase scheme/host, strip default
+    port, strip URL fragment, drop tracking params. Everything else in the
+    query string (order, other params, path casing) is preserved verbatim.
+    Returns None for non-http(s) schemes (chrome://, file://, about:, ...).
+    """
+    if not raw:
+        return None
+    try:
+        parsed = urlsplit(raw.strip())
+    except ValueError:
+        return None
+    scheme = parsed.scheme.lower()
+    if scheme not in ("http", "https"):
+        return None
+    host = parsed.hostname
+    if not host:
+        return None
+    host = host.lower()
+    default_port = 80 if scheme == "http" else 443
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+    netloc = host if port in (None, default_port) else f"{host}:{port}"
+    try:
+        query_pairs = parse_qsl(parsed.query, keep_blank_values=True)
+    except ValueError:
+        query_pairs = []
+    kept_pairs = [
+        (key, value)
+        for key, value in query_pairs
+        if key.lower() not in TRACKING_PARAM_DENYLIST
+        and not key.lower().startswith(TRACKING_PARAM_PREFIXES)
+    ]
+    query = urlencode(kept_pairs, doseq=True)
+    path = parsed.path or "/"
+    return urlunsplit((scheme, netloc, path, query, ""))
+
+
+def url_hash(normalized: str) -> str:
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
+
+
+# ---------------------------------------------------------------------------
+# Stage: ingest (history union + normalization + distinct-URL dedup)
+# ---------------------------------------------------------------------------
+
+
+def iter_history_records(path: Path, url_field: str, time_field: str, stats: dict):
+    """Yield (raw_url, iso_time_str) from a newline-delimited JSON history
+    file. Tolerant of missing/malformed lines (webhistory exports are messy
+    real-world data) -- skips and counts them in `stats["skipped"]` rather
+    than aborting the run.
+    """
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                stats["skipped"] += 1
+                continue
+            url = record.get(url_field)
+            ts = record.get(time_field)
+            if not url or not ts:
+                stats["skipped"] += 1
+                continue
+            yield url, ts
+
+
+def cmd_ingest(args: argparse.Namespace) -> int:
+    history_paths = discover_history_paths(Path(args.history_path))
+    if not history_paths:
+        print(f"sinnix-url-ledger: no history files found under {args.history_path}", file=sys.stderr)
+        return 1
+
+    urls: dict[str, dict] = {}
+    raw_seen = 0
+    dropped_non_web = 0
+    stats = {"skipped": 0}
+    for history_path in history_paths:
+        for raw_url, iso_time in iter_history_records(history_path, args.url_field, args.time_field, stats):
+            raw_seen += 1
+            normalized = normalize_url(raw_url)
+            if normalized is None:
+                dropped_non_web += 1
+                continue
+            entry = urls.get(normalized)
+            if entry is None:
+                entry = {"url": normalized, "visits": set()}
+                urls[normalized] = entry
+            entry["visits"].add(str(iso_time))
+
+    state_dir = Path(args.state_root)
+    state_dir.mkdir(parents=True, exist_ok=True)
+    urls_path = state_dir / "urls.jsonl"
+    tmp_path = urls_path.with_suffix(".jsonl.tmp")
+    with tmp_path.open("w", encoding="utf-8") as handle:
+        for normalized in sorted(urls):
+            visits = sorted(urls[normalized]["visits"])
+            record = {
+                "url": normalized,
+                "visit_count": len(visits),
+                "visits": visits,
+                "first_visit": visits[0],
+                "last_visit": visits[-1],
+            }
+            handle.write(json.dumps(record, sort_keys=True) + "\n")
+    os.replace(tmp_path, urls_path)
+
+    print(
+        f"sinnix-url-ledger ingest: {raw_seen} history rows -> {len(urls)} distinct URLs "
+        f"({dropped_non_web} non-http(s) dropped, {stats['skipped']} malformed skipped) -> {urls_path}"
+    )
+    return 0
+
+
+def discover_history_paths(path: Path) -> list[Path]:
+    if path.is_file():
+        return [path]
+    if path.is_dir():
+        return sorted(
+            p
+            for p in path.iterdir()
+            if p.is_file() and p.suffix in (".ndjson", ".jsonl")
+        )
+    return []
+
+
+# ---------------------------------------------------------------------------
+# Stage: resolve (CDX/Memento provider queries)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ProviderResult:
+    status: str  # "ok" | "error" | "unavailable"
+    snapshots: list[str] = field(default_factory=list)
+    raw: object = None
+    error: str | None = None
+    http_status: int | None = None
+
+
+def http_get(url: str, timeout: int = REQUEST_TIMEOUT_SECONDS) -> tuple[int, bytes]:
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+        return response.status, response.read()
+
+
+class RateLimiter:
+    def __init__(self, delay_seconds: float) -> None:
+        self.delay_seconds = delay_seconds
+        self._last_request: float | None = None
+
+    def wait(self) -> None:
+        if self._last_request is None:
+            self._last_request = time.monotonic()
+            return
+        elapsed = time.monotonic() - self._last_request
+        remaining = self.delay_seconds - elapsed
+        if remaining > 0:
+            time.sleep(remaining)
+        self._last_request = time.monotonic()
+
+
+class WaybackProvider:
+    """Internet Archive CDX API. No officially published rate limit, but
+    IA's own `wayback/available` endpoint returned HTTP 429 within a
+    handful of unthrottled requests during this script's own verification
+    run (2026-08) -- 1.5s/request is a conservative, empirically-motivated
+    default, not a documented SLA.
+    """
+
+    name = "wayback"
+    default_delay_seconds = 1.5
+
+    def __init__(self, base_url: str = "https://web.archive.org/cdx/search/cdx") -> None:
+        self.base_url = base_url
+
+    def query(self, normalized_url: str) -> ProviderResult:
+        query = urlencode(
+            {
+                "url": normalized_url,
+                "output": "json",
+                "fl": "timestamp,statuscode,digest",
+                "collapse": "digest",
+                "limit": "10000",
+            }
+        )
+        try:
+            status, body = http_get(f"{self.base_url}?{query}")
+        except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as error:
+            return ProviderResult(status="error", error=str(error))
+        try:
+            rows = json.loads(body.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            return ProviderResult(status="error", error=f"bad json: {error}", http_status=status)
+        # First row is the CDX header (["urlkey","timestamp",...]); an empty
+        # result set is just the bare `[]` (no header row at all).
+        data_rows = rows[1:] if rows else []
+        snapshots = sorted({row[0] for row in data_rows if row})
+        return ProviderResult(status="ok", snapshots=snapshots, raw=rows, http_status=status)
+
+
+class CommonCrawlProvider:
+    """Common Crawl CDX index. Queried across the N most-recently-published
+    collections (default 3) rather than the full ~120-collection archive:
+    querying every collection for every URL would multiply request volume
+    ~40x for a still-incomplete history-coverage picture, since Common
+    Crawl's crawl selection is itself a sample of the web, not a
+    site-directed archive like Wayback. This is a documented scope choice,
+    not full Common Crawl coverage -- widen via --common-crawl-collections
+    if the operator wants deeper (slower) backfill.
+    """
+
+    name = "commoncrawl"
+    default_delay_seconds = 1.0
+
+    def __init__(
+        self,
+        collinfo_url: str = "https://index.commoncrawl.org/collinfo.json",
+        collection_count: int = 3,
+        cache_dir: Path | None = None,
+        collinfo_cache_max_age_seconds: int = 7 * 86400,
+    ) -> None:
+        self.collinfo_url = collinfo_url
+        self.collection_count = collection_count
+        self.cache_dir = cache_dir
+        self.collinfo_cache_max_age_seconds = collinfo_cache_max_age_seconds
+        self._collections: list[dict] | None = None
+
+    def _load_collections(self) -> list[dict]:
+        if self._collections is not None:
+            return self._collections
+        cache_path = (self.cache_dir / "collinfo.json") if self.cache_dir else None
+        if cache_path and cache_path.exists():
+            age = time.time() - cache_path.stat().st_mtime
+            if age < self.collinfo_cache_max_age_seconds:
+                self._collections = json.loads(cache_path.read_text(encoding="utf-8"))
+                return self._collections
+        status, body = http_get(self.collinfo_url)
+        collections = json.loads(body.decode("utf-8"))
+        if cache_path:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(json.dumps(collections), encoding="utf-8")
+        self._collections = collections
+        return collections
+
+    def query(self, normalized_url: str) -> ProviderResult:
+        try:
+            collections = self._load_collections()
+        except (urllib.error.URLError, socket.timeout, TimeoutError, OSError, json.JSONDecodeError) as error:
+            return ProviderResult(status="error", error=f"collinfo fetch failed: {error}")
+        # collinfo.json is already newest-first per Common Crawl's publishing
+        # convention; take defensively-sorted top N by `to` timestamp.
+        ranked = sorted(collections, key=lambda c: c.get("to", ""), reverse=True)
+        selected = ranked[: self.collection_count]
+        all_snapshots: set[str] = set()
+        raw_pages = []
+        for collection in selected:
+            cdx_api = collection.get("cdx-api")
+            if not cdx_api:
+                continue
+            query = urlencode({"url": normalized_url, "output": "json", "limit": "1000"})
+            try:
+                status, body = http_get(f"{cdx_api}?{query}")
+            except urllib.error.HTTPError as error:
+                if error.code == 404:
+                    # Common Crawl returns 404 for "no captures found", not
+                    # an error -- this is the CC CDX API's designed empty-set
+                    # signal, so treat it as a resolved-empty query.
+                    continue
+                return ProviderResult(status="error", error=f"{collection.get('id')}: HTTP {error.code}")
+            except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as error:
+                return ProviderResult(status="error", error=f"{collection.get('id')}: {error}")
+            # Common Crawl CDX is newline-delimited JSON objects, not a
+            # single JSON array like Wayback's `output=json`.
+            for line in body.decode("utf-8", errors="replace").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                ts = row.get("timestamp")
+                if ts:
+                    all_snapshots.add(ts)
+                raw_pages.append(row)
+        return ProviderResult(status="ok", snapshots=sorted(all_snapshots), raw=raw_pages)
+
+
+class MementoProvider:
+    """Memento TimeTravel aggregator (timetravel.mementoweb.org).
+
+    CONFIRMED DEAD as of this script's writing (2026-08): the domain
+    `mementoweb.org` now resolves to a static GitHub Pages placeholder
+    whose /about/ page states the aggregator "operated between 2015 and
+    2025 as an official service of the Research Library of the Los Alamos
+    National Laboratory" and was "necessarily discontinued as a result of
+    [a] forced migration". `timetravel.mementoweb.org` no longer resolves
+    at all (verified via direct DNS lookup during this script's
+    verification pass).
+
+    The provider is still implemented and wired into `resolve` per the
+    bead's design (a replacement aggregator may appear, and the graceful
+    degradation path is exercised either way), but every query today fails
+    fast at DNS resolution (sub-second) and is recorded as
+    status="unavailable" rather than crashing the run or looking like a
+    silent gap in the ledger.
+    """
+
+    name = "memento"
+    default_delay_seconds = 1.0
+
+    def __init__(self, base_url: str = "http://timetravel.mementoweb.org/timemap/link") -> None:
+        self.base_url = base_url
+
+    def query(self, normalized_url: str) -> ProviderResult:
+        try:
+            status, body = http_get(f"{self.base_url}/{normalized_url}")
+        except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as error:
+            return ProviderResult(status="unavailable", error=str(error))
+        # RFC 7089 Link-format TimeMap: memento entries carry
+        # datetime="<HTTP-date>"; rel="memento".
+        text = body.decode("utf-8", errors="replace")
+        snapshots = []
+        for entry in text.split(","):
+            if 'rel="memento"' not in entry and "rel=memento" not in entry:
+                continue
+            marker = 'datetime="'
+            idx = entry.find(marker)
+            if idx == -1:
+                continue
+            start = idx + len(marker)
+            end = entry.find('"', start)
+            if end == -1:
+                continue
+            snapshots.append(entry[start:end])
+        return ProviderResult(status="ok", snapshots=sorted(set(snapshots)), raw=text, http_status=status)
+
+
+PROVIDERS = {
+    "wayback": WaybackProvider,
+    "commoncrawl": CommonCrawlProvider,
+    "memento": MementoProvider,
+}
+
+
+def load_resolution_state(state_dir: Path) -> dict[tuple[str, str], dict]:
+    """Latest-record-wins replay of the append-only resolution checkpoint."""
+    resolution_path = state_dir / "resolution.jsonl"
+    latest: dict[tuple[str, str], dict] = {}
+    if not resolution_path.exists():
+        return latest
+    with resolution_path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            key = (record.get("url"), record.get("provider"))
+            latest[key] = record
+    return latest
+
+
+TERMINAL_STATUSES = {"ok", "unavailable"}
+
+
+def cmd_resolve(args: argparse.Namespace) -> int:
+    state_dir = Path(args.state_root)
+    urls_path = state_dir / "urls.jsonl"
+    if not urls_path.exists():
+        print(f"sinnix-url-ledger: {urls_path} missing -- run `ingest` first", file=sys.stderr)
+        return 1
+
+    cdx_raw_root = Path(args.cdx_raw_root)
+    run_date = time.strftime("%Y-%m-%d", time.gmtime())
+
+    selected_providers = args.provider or list(PROVIDERS)
+    providers = {}
+    for name in selected_providers:
+        if name == "commoncrawl":
+            providers[name] = CommonCrawlProvider(
+                collection_count=args.common_crawl_collections,
+                cache_dir=cdx_raw_root / "meta",
+            )
+        elif name == "memento":
+            providers[name] = MementoProvider(base_url=args.memento_base_url)
+        else:
+            providers[name] = PROVIDERS[name]()
+
+    rate_limiters = {
+        name: RateLimiter(args.rate_limit_seconds.get(name, provider.default_delay_seconds))
+        for name, provider in providers.items()
+    }
+
+    resolved = load_resolution_state(state_dir)
+    resolution_path = state_dir / "resolution.jsonl"
+    resolution_path.parent.mkdir(parents=True, exist_ok=True)
+
+    requests_made = 0
+    resolved_now = 0
+    already_resolved = 0
+    errors = 0
+
+    with urls_path.open("r", encoding="utf-8") as handle, resolution_path.open(
+        "a", encoding="utf-8"
+    ) as out:
+        for line in handle:
+            if requests_made >= args.max_requests:
+                break
+            line = line.strip()
+            if not line:
+                continue
+            record = json.loads(line)
+            normalized_url = record["url"]
+            for provider_name, provider in providers.items():
+                if requests_made >= args.max_requests:
+                    break
+                key = (normalized_url, provider_name)
+                existing = resolved.get(key)
+                if existing and existing.get("status") in TERMINAL_STATUSES and not args.refresh:
+                    already_resolved += 1
+                    continue
+
+                rate_limiters[provider_name].wait()
+                result = provider.query(normalized_url)
+                requests_made += 1
+
+                raw_cache_rel = None
+                if result.raw is not None:
+                    digest = url_hash(normalized_url)
+                    raw_dir = cdx_raw_root / run_date / provider_name
+                    raw_dir.mkdir(parents=True, exist_ok=True)
+                    raw_path = raw_dir / f"{digest}.json"
+                    raw_path.write_text(
+                        json.dumps({"url": normalized_url, "provider": provider_name, "raw": result.raw}),
+                        encoding="utf-8",
+                    )
+                    raw_cache_rel = str(raw_path.relative_to(cdx_raw_root))
+
+                out_record = {
+                    "url": normalized_url,
+                    "provider": provider_name,
+                    "status": result.status,
+                    "snapshot_count": len(result.snapshots),
+                    "snapshots": result.snapshots,
+                    "queried_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    "raw_cache": raw_cache_rel,
+                    "error": result.error,
+                }
+                out.write(json.dumps(out_record, sort_keys=True) + "\n")
+                out.flush()
+                resolved[key] = out_record
+                if result.status == "error":
+                    errors += 1
+                else:
+                    resolved_now += 1
+
+    print(
+        f"sinnix-url-ledger resolve: {requests_made} provider queries "
+        f"({resolved_now} resolved, {errors} transient errors, "
+        f"{already_resolved} already resolved / skipped)"
+    )
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Stage: build (duckdb/parquet coverage product)
+# ---------------------------------------------------------------------------
+
+
+def _iso_to_epoch(value: str) -> float | None:
+    # Accept plain ISO-8601 (with or without offset/fractional seconds),
+    # CDX-style compact "%Y%m%d%H%M%S" timestamps (Wayback/Common Crawl),
+    # and RFC 7089 HTTP-date (Memento). All parsed as UTC via
+    # calendar.timegm (never time.mktime, which assumes local time).
+    candidate = value.strip()
+    if "T" in candidate:
+        candidate = candidate.split(".")[0].rstrip("Z")
+        try:
+            return float(calendar.timegm(time.strptime(candidate, "%Y-%m-%dT%H:%M:%S")))
+        except ValueError:
+            return None
+    for fmt in ("%Y%m%d%H%M%S", "%a, %d %b %Y %H:%M:%S %Z"):
+        try:
+            return float(calendar.timegm(time.strptime(candidate, fmt)))
+        except ValueError:
+            continue
+    return None
+
+
+def cmd_build(args: argparse.Namespace) -> int:
+    state_dir = Path(args.state_root)
+    urls_path = state_dir / "urls.jsonl"
+    if not urls_path.exists():
+        print(f"sinnix-url-ledger: {urls_path} missing -- run `ingest` first", file=sys.stderr)
+        return 1
+
+    resolution = load_resolution_state(state_dir)
+    provider_names = list(PROVIDERS)
+    window_seconds = args.window_days * 86400
+
+    derived_dir = Path(args.derived_root)
+    derived_dir.mkdir(parents=True, exist_ok=True)
+    coverage_path = derived_dir / "coverage.jsonl"
+
+    total_urls = 0
+    with urls_path.open("r", encoding="utf-8") as handle, coverage_path.open(
+        "w", encoding="utf-8"
+    ) as out:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            record = json.loads(line)
+            normalized_url = record["url"]
+            visits = record["visits"]
+
+            per_provider_snapshots: dict[str, list[str]] = {}
+            resolved_providers = []
+            for provider_name in provider_names:
+                entry = resolution.get((normalized_url, provider_name))
+                if entry is None:
+                    per_provider_snapshots[provider_name] = []
+                    continue
+                if entry.get("status") == "ok":
+                    resolved_providers.append(provider_name)
+                per_provider_snapshots[provider_name] = entry.get("snapshots", []) or []
+
+            all_snapshots: list[tuple[str, str, float]] = []  # (ts_str, provider, epoch)
+            for provider_name, snapshots in per_provider_snapshots.items():
+                for ts in snapshots:
+                    epoch = _iso_to_epoch(ts)
+                    if epoch is not None:
+                        all_snapshots.append((ts, provider_name, epoch))
+
+            nearest_per_visit = []
+            visits_within_window = 0
+            for visit_ts in visits:
+                visit_epoch = _iso_to_epoch(visit_ts)
+                nearest = None
+                if visit_epoch is not None and all_snapshots:
+                    ts, provider_name, epoch = min(all_snapshots, key=lambda s: abs(s[2] - visit_epoch))
+                    gap = abs(epoch - visit_epoch)
+                    nearest = {
+                        "visit_ts": visit_ts,
+                        "nearest_snapshot_ts": ts,
+                        "provider": provider_name,
+                        "gap_seconds": gap,
+                    }
+                    if gap <= window_seconds:
+                        visits_within_window += 1
+                nearest_per_visit.append(nearest)
+
+            out_record = {
+                "normalized_url": normalized_url,
+                "visit_count": record["visit_count"],
+                "visit_timestamps": visits,
+                "wayback_snapshots": per_provider_snapshots.get("wayback", []),
+                "commoncrawl_snapshots": per_provider_snapshots.get("commoncrawl", []),
+                "memento_snapshots": per_provider_snapshots.get("memento", []),
+                "resolved_providers": resolved_providers,
+                "any_snapshot_count": len(all_snapshots),
+                "nearest_snapshot_to_each_visit": nearest_per_visit,
+                "visits_with_snapshot_within_window": visits_within_window,
+                "window_days": args.window_days,
+            }
+            out.write(json.dumps(out_record) + "\n")
+            total_urls += 1
+
+    duckdb_path = derived_dir / "url_ledger.duckdb"
+    parquet_path = derived_dir / "url_ledger.parquet"
+    stats_path = derived_dir / "coverage_stats.json"
+    if duckdb_path.exists():
+        duckdb_path.unlink()
+
+    sql = f"""
+CREATE TABLE url_ledger AS
+  SELECT * FROM read_json_auto('{coverage_path.as_posix()}', format='newline_delimited');
+
+COPY url_ledger TO '{parquet_path.as_posix()}' (FORMAT PARQUET);
+
+COPY (
+  SELECT
+    count(*) AS urls,
+    sum(visit_count) AS visits,
+    sum(any_snapshot_count > 0) AS urls_with_any_snapshot,
+    sum(visits_with_snapshot_within_window) AS visits_with_snapshot_within_window,
+    sum(visit_count) - sum(visits_with_snapshot_within_window) AS visits_with_coverage_gap,
+    CASE WHEN sum(visit_count) > 0
+      THEN sum(visits_with_snapshot_within_window)::DOUBLE / sum(visit_count)
+      ELSE NULL END AS visit_coverage_fraction
+  FROM url_ledger
+) TO '{stats_path.as_posix()}' (FORMAT JSON, ARRAY true);
+"""
+    # duckdb's CLI only durably commits writes against the on-disk file when
+    # driven via `-f <script>` -- piping the same SQL over stdin (even with
+    # a real filename argument) silently no-ops the writes on this duckdb
+    # build (v1.5.4; verified empirically while building this script: a
+    # stdin-piped `CREATE TABLE ...; COPY ...;` returns exit 0 but leaves
+    # an empty database file). `-bail` makes a mid-script SQL error a
+    # non-zero exit instead of continuing past it.
+    sql_script_path = derived_dir / ".build.sql"
+    sql_script_path.write_text(sql, encoding="utf-8")
+    try:
+        proc = subprocess.run(
+            [args.duckdb_bin, "-bail", str(duckdb_path), "-f", str(sql_script_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    finally:
+        sql_script_path.unlink(missing_ok=True)
+    if proc.returncode != 0:
+        print(f"sinnix-url-ledger build: duckdb failed:\n{proc.stderr}", file=sys.stderr)
+        return 1
+
+    print(
+        f"sinnix-url-ledger build: {total_urls} URLs -> {duckdb_path}, {parquet_path}, {stats_path}"
+    )
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+def add_common_paths(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--state-root",
+        default=str(DEFAULT_CAPTURES_ROOT / "url-ledger" / "state"),
+        help="Directory for urls.jsonl / resolution.jsonl (default: %(default)s)",
+    )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    ingest = sub.add_parser("ingest", help="Read history, normalize, dedupe -> state/urls.jsonl")
+    ingest.add_argument("--history-path", default=str(DEFAULT_HISTORY_PATH))
+    ingest.add_argument("--url-field", default="url")
+    ingest.add_argument("--time-field", default="iso_time")
+    add_common_paths(ingest)
+    ingest.set_defaults(func=cmd_ingest)
+
+    resolve = sub.add_parser("resolve", help="Query CDX/Memento providers for unresolved URLs")
+    add_common_paths(resolve)
+    resolve.add_argument("--cdx-raw-root", default=str(DEFAULT_CAPTURES_ROOT / "url-ledger" / "cdx-raw"))
+    resolve.add_argument(
+        "--provider",
+        action="append",
+        choices=list(PROVIDERS),
+        help="Restrict to one provider (repeatable). Default: all providers.",
+    )
+    resolve.add_argument("--max-requests", type=int, default=2000, help="Bound provider queries per run (default: %(default)s)")
+    resolve.add_argument("--common-crawl-collections", type=int, default=3)
+    resolve.add_argument("--memento-base-url", default="http://timetravel.mementoweb.org/timemap/link")
+    resolve.add_argument(
+        "--rate-limit-seconds",
+        action="append",
+        default=[],
+        metavar="PROVIDER=SECONDS",
+        help="Override a provider's per-request delay (repeatable).",
+    )
+    resolve.add_argument("--refresh", action="store_true", help="Re-query URLs already terminally resolved")
+    resolve.set_defaults(func=cmd_resolve)
+
+    build = sub.add_parser("build", help="Join urls.jsonl + resolution.jsonl -> duckdb/parquet product")
+    add_common_paths(build)
+    build.add_argument("--derived-root", default=str(DEFAULT_DERIVED_ROOT / "url-ledger"))
+    build.add_argument("--window-days", type=int, default=30, help="Coverage window in days (default: %(default)s)")
+    build.add_argument("--duckdb-bin", default="duckdb")
+    build.set_defaults(func=cmd_build)
+
+    run = sub.add_parser("run", help="ingest + resolve + build in one invocation (what the timer runs)")
+    run.add_argument("--history-path", default=str(DEFAULT_HISTORY_PATH))
+    run.add_argument("--url-field", default="url")
+    run.add_argument("--time-field", default="iso_time")
+    add_common_paths(run)
+    run.add_argument("--cdx-raw-root", default=str(DEFAULT_CAPTURES_ROOT / "url-ledger" / "cdx-raw"))
+    run.add_argument("--derived-root", default=str(DEFAULT_DERIVED_ROOT / "url-ledger"))
+    run.add_argument("--provider", action="append", choices=list(PROVIDERS))
+    run.add_argument("--max-requests", type=int, default=2000)
+    run.add_argument("--common-crawl-collections", type=int, default=3)
+    run.add_argument("--memento-base-url", default="http://timetravel.mementoweb.org/timemap/link")
+    run.add_argument("--rate-limit-seconds", action="append", default=[], metavar="PROVIDER=SECONDS")
+    run.add_argument("--refresh", action="store_true")
+    run.add_argument("--window-days", type=int, default=30)
+    run.add_argument("--duckdb-bin", default="duckdb")
+    run.set_defaults(func=None)
+
+    return parser
+
+
+def parse_rate_limits(pairs: list[str]) -> dict[str, float]:
+    out = {}
+    for pair in pairs:
+        name, _, value = pair.partition("=")
+        if name and value:
+            out[name] = float(value)
+    return out
+
+
+def main(argv: list[str]) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    args.rate_limit_seconds = parse_rate_limits(getattr(args, "rate_limit_seconds", []) or [])
+
+    if args.command == "run":
+        rc = cmd_ingest(args)
+        if rc != 0:
+            return rc
+        rc = cmd_resolve(args)
+        if rc != 0:
+            return rc
+        return cmd_build(args)
+
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
