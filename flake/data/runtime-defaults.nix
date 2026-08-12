@@ -190,9 +190,9 @@ rec {
         IOWeight = 300;
         # Bound each transient agent independently. A runaway tool child must
         # sacrifice only its owning agent scope before global earlyoom starts
-        # selecting desktop processes. Keep agent.slice itself uncapped: the
-        # 2026-06-18 shared ceiling coupled every interactive session and
-        # froze healthy agents behind one busy peer.
+        # selecting desktop processes. Keep agent.slice itself uncapped: a
+        # shared ceiling here would couple every interactive session and
+        # freeze healthy agents behind one busy peer.
         MemoryHigh = "8G";
         MemoryMax = "12G";
       };
@@ -207,13 +207,12 @@ rec {
       systemdProperties = {
         IOAccounting = true;
         IOWeight = 2;
-        # Shutdown debris cap (2026-07-10 reboot postmortem): leftover
-        # sacrificial scopes (e.g. per-checkout sinex dev-postgres in
-        # nix-build scopes) each burned the full 90s DefaultTimeoutStopSec
-        # serially during reboot, and held /var/lib/sinex + /var/cache/sinex
-        # mounts busy past their unmount attempts. Sacrificial work gets 15s
-        # after SIGTERM, then SIGKILL; postgres/rustc state here is
-        # regenerable by design.
+        # Shutdown debris cap: leftover sacrificial scopes (e.g. per-checkout
+        # sinex dev-postgres in nix-build scopes) can each burn the full 90s
+        # DefaultTimeoutStopSec serially during reboot and hold
+        # /var/lib/sinex + /var/cache/sinex mounts busy past their unmount
+        # attempts. Sacrificial work gets 15s after SIGTERM, then SIGKILL;
+        # postgres/rustc state here is regenerable by design.
         TimeoutStopSec = "15s";
       };
       envDefaults = {
@@ -247,13 +246,12 @@ rec {
       systemdProperties = {
         IOAccounting = true;
         IOWeight = 1;
-        # Shutdown debris cap (2026-07-10 reboot postmortem): leftover
-        # sacrificial scopes (e.g. per-checkout sinex dev-postgres in
-        # nix-build scopes) each burned the full 90s DefaultTimeoutStopSec
-        # serially during reboot, and held /var/lib/sinex + /var/cache/sinex
-        # mounts busy past their unmount attempts. Sacrificial work gets 15s
-        # after SIGTERM, then SIGKILL; postgres/rustc state here is
-        # regenerable by design.
+        # Shutdown debris cap: leftover sacrificial scopes (e.g. per-checkout
+        # sinex dev-postgres in nix-build scopes) can each burn the full 90s
+        # DefaultTimeoutStopSec serially during reboot and hold
+        # /var/lib/sinex + /var/cache/sinex mounts busy past their unmount
+        # attempts. Sacrificial work gets 15s after SIGTERM, then SIGKILL;
+        # postgres/rustc state here is regenerable by design.
         TimeoutStopSec = "15s";
       };
       envDefaults = { };
@@ -291,13 +289,12 @@ rec {
       systemdProperties = {
         IOAccounting = true;
         IOWeight = 2;
-        # Shutdown debris cap (2026-07-10 reboot postmortem): leftover
-        # sacrificial scopes (e.g. per-checkout sinex dev-postgres in
-        # nix-build scopes) each burned the full 90s DefaultTimeoutStopSec
-        # serially during reboot, and held /var/lib/sinex + /var/cache/sinex
-        # mounts busy past their unmount attempts. Sacrificial work gets 15s
-        # after SIGTERM, then SIGKILL; postgres/rustc state here is
-        # regenerable by design.
+        # Shutdown debris cap: leftover sacrificial scopes (e.g. per-checkout
+        # sinex dev-postgres in nix-build scopes) can each burn the full 90s
+        # DefaultTimeoutStopSec serially during reboot and hold
+        # /var/lib/sinex + /var/cache/sinex mounts busy past their unmount
+        # attempts. Sacrificial work gets 15s after SIGTERM, then SIGKILL;
+        # postgres/rustc state here is regenerable by design.
         TimeoutStopSec = "15s";
       };
       envDefaults = { };
@@ -459,14 +456,17 @@ rec {
     };
   };
 
-  earlyoomPatternFor = surfaces:
+  earlyoomPatternFor =
+    surfaces:
     let
       protectedMatchers = lib.concatLists (
-        lib.mapAttrsToList (_: surface:
+        lib.mapAttrsToList (
+          _: surface:
           if (surface.workload.expendability or "unknown") == "protected" then
             surface.workload.processMatchers or [ ]
           else
-            [ ]) surfaces
+            [ ]
+        ) surfaces
       );
     in
     "(systemd|systemd-logind|dbus-daemon|dbus-broker|dbus-broker-launch|sshd|agetty|uwsm|start-hyprland|Hyprland|Xwayland|pipewire|wireplumber|foot|kitty|below|nix-daemon|${lib.concatStringsSep "|" protectedMatchers})";

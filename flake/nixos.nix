@@ -19,19 +19,21 @@ let
     }:
     extendedLib.nixosSystem {
       inherit system;
-      modules = baseModules ++ [
-        # Stamp the running generation with the sinnix repo commit so
-        # `nixos-version --configuration-revision` supports the live-drift tripwire
-        # (CLAUDE.md). Without this it falls back to the NIXPKGS revision,
-        # which reads like a plausible sinnix commit and cost a wrong drift
-        # diagnosis on 2026-07-10. Builds from a dirty tree get the
-        # `<rev>-dirty` marker; treat that as "commits since <rev> may or
-        # may not be live".
-        {
-          system.configurationRevision =
-            inputs.self.rev or inputs.self.dirtyRev or "unknown";
-        }
-      ] ++ modules;
+      modules =
+        baseModules
+        ++ [
+          # Stamp the running generation with the sinnix repo commit so
+          # `nixos-version --configuration-revision` supports the live-drift
+          # tripwire (CLAUDE.md). Without this it falls back to the NIXPKGS
+          # revision, which reads like a plausible sinnix commit and can
+          # produce a wrong drift diagnosis. Builds from a dirty tree get the
+          # `<rev>-dirty` marker; treat that as "commits since <rev> may or
+          # may not be live".
+          {
+            system.configurationRevision = inputs.self.rev or inputs.self.dirtyRev or "unknown";
+          }
+        ]
+        ++ modules;
       specialArgs = sharedSpecialArgs // {
         lib = extendedLib;
       };
