@@ -599,6 +599,9 @@ in
             name = "borg-status";
             path = borgStatusLog;
             eventDriven = true;
+            # borgbackup-status.timer runs hourly (3600s); budget 3x cadence
+            # so one missed/delayed run doesn't false-positive.
+            staleAfterSeconds = 10800;
           }
         ];
       };
@@ -627,6 +630,9 @@ in
             name = "borg-drill";
             path = "${config.sinnix.paths.capturesRoot}/machine/borg_drill.jsonl";
             eventDriven = true;
+            # sinnix-borg-drill.timer runs weekly (604800s); budget 3x
+            # cadence so one missed/delayed run doesn't false-positive.
+            staleAfterSeconds = 1814400;
           }
         ];
       };
