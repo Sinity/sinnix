@@ -1,8 +1,8 @@
-# Local model roster — single source shared by three consumers that were
-# previously hand-edited in lockstep: modules/services/ollama.nix
-# (loadModels), modules/services/litellm.nix (settings.model_list), and
-# modules/services/open-webui.nix (RAG_EMBEDDING_MODEL). Edit the roster
-# here; the consumer modules only render it.
+# Local model roster — single source shared by three consumers:
+# modules/services/ollama.nix (loadModels), modules/services/litellm.nix
+# (settings.model_list), and modules/services/open-webui.nix
+# (RAG_EMBEDDING_MODEL). Edit the roster here; the consumer modules only
+# render it.
 { lib }:
 let
   # Loopback endpoint every local-model consumer targets.

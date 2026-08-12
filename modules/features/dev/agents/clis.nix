@@ -63,9 +63,9 @@ mkFeatureModule {
       sinnixCfg = config.sinnix;
 
       # The runtime path of the agenix-decrypted DeepSeek API key (read at
-      # launch by the claude-deepseek/codex-deepseek wrappers) is now
-      # resolved by backends.nix's resolveSecretPath, using the same
-      # sinnix.secrets.paths.<name> override lookup this used to do inline.
+      # launch by the claude-deepseek/codex-deepseek wrappers) is resolved
+      # by backends.nix's resolveSecretPath (sinnix.secrets.paths.<name>
+      # override lookup).
 
       jsonFormat = pkgs.formats.json { };
       yamlFormat = pkgs.formats.yaml { };

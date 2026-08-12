@@ -126,10 +126,9 @@ mkServiceModule {
         # freezing the analysis substrate. Pin CWD and the root env vars.
         serviceConfig = {
           Type = "oneshot";
-          # `lynchpin.analysis materialize` no longer exists as a subcommand;
-          # the transparent-DAG runner is lynchpin.cli.materialize (requires
-          # explicit --all). Journal showed UsageError on every run since at
-          # least 2026-07-11 with zero surfacing.
+          # `lynchpin.analysis materialize` is not a valid subcommand; the
+          # transparent-DAG runner is lynchpin.cli.materialize (requires
+          # explicit --all).
           ExecStart = "${scriptPkgs.lynchpin-python}/bin/lynchpin-python -m lynchpin.cli.materialize --all";
           User = "sinity";
           Group = "users";

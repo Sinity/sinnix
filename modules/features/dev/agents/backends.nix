@@ -39,10 +39,9 @@ let
       # reaches processes whose session imported it; a long-lived agent CLI
       # started outside that path runs with TMPDIR unset, so every devshell
       # and test run underneath it falls back to the 6 GiB /tmp tmpfs and
-      # refills it (confirmed 2026-08-03: one agent session exhausted /tmp
-      # three times in a single turn, truncating shell heredocs mid-write,
-      # while `systemctl --user show-environment` correctly showed the
-      # variable set).
+      # refills it, silently truncating shell heredocs mid-write even though
+      # `systemctl --user show-environment` correctly shows the session
+      # variable set — inheritance, not the session variable, is the gap.
       if [ -z "''${TMPDIR:-}" ] && [ -d ${lib.escapeShellArg sinnixCfg.paths.realmRoot} ]; then
         export TMPDIR=${lib.escapeShellArg shellTmpRoot}
         ${pkgs.coreutils}/bin/install -d -m 1777 "$TMPDIR" 2>/dev/null || true
