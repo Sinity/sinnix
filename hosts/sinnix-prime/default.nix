@@ -50,7 +50,10 @@
     # or subnet-router role (deliberate).
     tailscale = {
       enable = true;
-      tags = [ "tag:workstation" ];
+      # Empty until the tailnet ACL tagOwners authorizes tag:workstation --
+      # the backend rejected the tagged join 2026-08-12 ("invalid or not
+      # permitted"); node joined untagged. Re-add after the ACL grant.
+      tags = [ ];
       # Zero-blast-radius posture (operator burned by tailscale-owned DNS
       # before): never touch DNS -- the router stays DNS authority -- and
       # accept/advertise no routes. The join adds only the tailscale0
