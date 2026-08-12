@@ -1,23 +1,14 @@
 # PRIMARY-selection capture lane: static service-shape checks (unit
 # ExecStart/Environment/ReadWritePaths, runtime surface metadata).
 #
-# No runtime fixture here (unlike capture-clipboard.nix's
-# heavyChecks.capture-clipboard-runtime): the generated watch script is a
-# `pkgs.writeShellApplication` whose `runtimeInputs` (wl-clipboard,
-# hyprland) get baked into its own `export PATH="<real nix store
-# paths>:$PATH"` line ahead of anything a test fixture puts on the outer
-# PATH, so a fixture `wl-paste`/`hyprctl` earlier on the caller's PATH is
-# always shadowed by the real ones -- and the real ones fail immediately
-# in the hermetic build sandbox (no Wayland socket), so nothing is ever
-# captured. This is a structural property of the shared writeShellApplication
-# + runtimeInputs pattern, not specific to this lane; capture-clipboard's
-# existing runtime fixture has the identical shadowing problem (verified
-# 2026-08-12 empirically, both live and in-sandbox) and cannot exercise its
-# fixture data either. Fixing it for real needs the watch script's
-# wl-paste/hyprctl resolution to be overridable per-test (e.g. via a
-# nixpkgs overlay swapping pkgs.wl-clipboard/pkgs.hyprland for fixture
-# stand-ins) -- a cross-cutting change to the shared pattern, out of scope
-# here. The watch script's actual runtime behavior (including the debounce
+# No runtime fixture here yet. The blocker documented earlier (the watch
+# script's writeShellApplication-baked PATH shadowing fixture fakes, plus
+# /usr/bin/env being absent in the sandbox) was solved for the clipboard
+# lane on 2026-08-12 -- see flake/tests/capture-clipboard.nix's stripped-
+# PATH copy + patchShebangs recipe. A primary-lane runtime fixture can
+# follow that recipe; it additionally needs the debounce collapsed (set
+# debounceMs to 0) so a single fixture invocation writes synchronously.
+# The watch script's actual runtime behavior (including the debounce
 # burst-collapse this module adds) was verified live against a real
 # Wayland session instead; see the module header and the commit history
 # for that evidence.
