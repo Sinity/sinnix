@@ -169,9 +169,14 @@ let
       fi
     fi
   '';
-  switchFallback = ''
+  # Shared by this file's own `switch` appCommand and dev-shell.nix's
+  # mkNhCommand (switch action only) — the exact-toplevel activation
+  # fallback used to be hand-duplicated in both places (2026-07-11
+  # incident fix landed as "twin" copies); parameterized by `name` so both
+  # call sites get an accurate log prefix from one implementation.
+  switchFallback = name: ''
     if [ "$_rebuild_status" -ne 0 ] && [ "$_rebuild_status" -ne 130 ]; then
-      echo "sinnix switch: nh failed with status $_rebuild_status; trying exact toplevel activation fallback" >&2
+      echo "sinnix ${name}: nh failed with status $_rebuild_status; trying exact toplevel activation fallback" >&2
       _toplevel_drv="$(
         SINNIX_REBUILD_ACTIVE=1 NIX_CONFIG="eval-cache = false" \
           ${pkgs.nix}/bin/nix eval \
@@ -187,8 +192,7 @@ let
       # Register the generation BEFORE activating: without the profile entry,
       # switch-to-configuration boot has no generation to point the bootloader
       # at, activation succeeds only in memory, and the next reboot silently
-      # resurrects the previous generation (2026-07-11 incident; see
-      # flake/dev-shell.nix twin comment).
+      # resurrects the previous generation (2026-07-11 incident).
       /run/wrappers/bin/sudo ${pkgs.nix}/bin/nix-env \
         --profile /nix/var/nix/profiles/system --set "$_toplevel_out"
       _rebuild_status=0
@@ -400,6 +404,8 @@ in
     rebuildDefaultArgs
     rebuildServicePath
     localInputOverrideArgs
+    avoidRepoCwdForActivation
+    switchFallback
     sinexCachePush
     ;
 
@@ -567,7 +573,7 @@ in
             --max-jobs "$rebuild_jobs" \
             --cores "$rebuild_cores" \
             "''${nh_extra_args[@]}" || _rebuild_status=$?
-        ${switchFallback}
+        ${switchFallback "switch"}
         ${sinexCachePush}
         exit "$_rebuild_status"
       '';
