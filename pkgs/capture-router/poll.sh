@@ -42,17 +42,27 @@ remote_cmd="sh -s -- $(sq "$prev_offset") $(sq "$prev_first_line")"
 # A capture lane should not depend on interactive config anyway -- state the
 # identity and host key policy explicitly so the lane behaves identically
 # whether a human or a timer runs it.
-SSH_OPTS="-F /dev/null -o BatchMode=yes -o ConnectTimeout=10"
-SSH_OPTS="$SSH_OPTS -o StrictHostKeyChecking=accept-new"
-SSH_OPTS="$SSH_OPTS -o UserKnownHostsFile=${ROUTER_KNOWN_HOSTS:-$HOME/.ssh/known_hosts}"
-SSH_OPTS="$SSH_OPTS -o IdentitiesOnly=yes -i ${ROUTER_IDENTITY:-$HOME/.ssh/id_ed25519}"
-SSH_OPTS="$SSH_OPTS -o User=${ROUTER_USER:-root}"
+# An array, not a string: an unquoted string expansion is what shellcheck
+# rightly rejects (SC2086), and quoting it would pass every flag as one
+# argument.
+ssh_opts=(
+	-F /dev/null
+	-o BatchMode=yes
+	-o ConnectTimeout=10
+	-o StrictHostKeyChecking=accept-new
+	-o "UserKnownHostsFile=${ROUTER_KNOWN_HOSTS:-$HOME/.ssh/known_hosts}"
+	-o IdentitiesOnly=yes
+	-i "${ROUTER_IDENTITY:-$HOME/.ssh/id_ed25519}"
+	-o "User=${ROUTER_USER:-root}"
+)
 
 out_file="$(mktemp)"
 err_file="$(mktemp)"
 trap 'rm -f "$out_file" "$err_file"' EXIT
 
-ssh $SSH_OPTS "$host" "$remote_cmd" \
+# shellcheck disable=SC2029  # client-side expansion is intended: the
+# remote command is built here and the args are single-quote escaped above.
+ssh "${ssh_opts[@]}" "$host" "$remote_cmd" \
 	<"$remote_poll_script" >"$out_file" 2>"$err_file"
 
 watermark_line="$(grep '^WATERMARK ' "$err_file" | tail -n1 || true)"
@@ -120,7 +130,8 @@ done < <(printf '%s\n' "$periods_remote")
 if [ -n "$new_periods" ]; then
 	# shellcheck disable=SC2086 # intentional word-splitting of the period list
 	set -- $new_periods
-	periods_out="$(ssh $SSH_OPTS "$host" "sh -s -- $*" <"$remote_periods_script")"
+	# shellcheck disable=SC2029  # period ids are ours and are expanded here on purpose
+	periods_out="$(ssh "${ssh_opts[@]}" "$host" "sh -s -- $*" <"$remote_periods_script")"
 	for p in "$@"; do
 		rows="$(printf '%s\n' "$periods_out" |
 			awk -v start="===NLBW_PERIOD:$p===" 'index($0,start)==1{f=1;next} /^===NLBW_PERIOD:/{f=0} f' |
