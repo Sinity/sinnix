@@ -86,6 +86,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import select
 import sys
 import time
@@ -133,6 +134,14 @@ def _window_key(window: dict | None) -> str:
 
 
 def run(args: argparse.Namespace) -> int:
+    if not args.runtime_dir or not args.instance_signature:
+        print(
+            "sinnix-capture-screen: --runtime-dir/--instance-signature are unset and "
+            "XDG_RUNTIME_DIR/HYPRLAND_INSTANCE_SIGNATURE are not in the environment "
+            "-- refusing to guess a socket path.",
+            file=sys.stderr,
+        )
+        return 1
     read_json = hypr.make_hyprctl_json_reader(args.hyprctl_bin)
     sock_path = hypr.socket2_path(args.runtime_dir, args.instance_signature)
     try:
@@ -264,8 +273,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="capture-screen")
     parser.add_argument("--capture-root", required=True, type=Path)
     parser.add_argument("--lane", default="screen-frames")
-    parser.add_argument("--runtime-dir", required=True)
-    parser.add_argument("--instance-signature", required=True)
+    # Defaults come from the environment a systemd --user service tied to
+    # graphical-session.target already inherits (UWSM/Hyprland populate
+    # these at session start into the user manager's own environment, the
+    # same inheritance every other Hyprland-dependent user unit in this
+    # repo relies on -- e.g. activitywatch-watcher-awatcher.service).
+    # Explicit flags remain available for tests/manual invocation.
+    parser.add_argument("--runtime-dir", default=os.environ.get("XDG_RUNTIME_DIR"))
+    parser.add_argument("--instance-signature", default=os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"))
     parser.add_argument("--grim-bin", default="grim")
     parser.add_argument("--hyprctl-bin", default="hyprctl")
     parser.add_argument("--sinnix-capture-bin", default="sinnix-capture")
