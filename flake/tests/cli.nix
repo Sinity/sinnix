@@ -4,8 +4,7 @@
 # cli-polylogue-runtime is promoted into the default `checks` tier
 # (sinnix-7bu): it evaluates the cli.polylogue feature module through the
 # full sinnix config tree and only smoke-tests `--help` output with a
-# minimal coreutils/gnugrep closure — cheap relative to the PTY/VM/host-build
-# checks that stay in heavyChecks.
+# minimal coreutils/gnugrep closure.
 #
 # Split out of the former flake/tests-runtime.nix monolith (sinnix-7bu).
 { inputs, ... }:
@@ -156,7 +155,7 @@ in
         cli-polylogue-runtime = cliPolylogueRuntime;
       };
 
-      heavyChecks = {
+      checks = {
         cli-task-tracking-runtime = cliTaskTrackingRuntime;
       };
     };

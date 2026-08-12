@@ -30,6 +30,6 @@ entry = "panel.luau"
 EOF
 
 NOCTALIA_CONFIG_HOME="$test_root/config" \
-NOCTALIA_STATE_HOME="$test_root/state" \
-HOME="$test_root" \
-noctalia config validate
+  NOCTALIA_STATE_HOME="$test_root/state" \
+  HOME="$test_root" \
+  noctalia config validate

@@ -19,7 +19,7 @@ done
 
 receipt=$(mktemp)
 trap 'rm -f "$receipt"; [[ -z "$fanout" ]] || rm -rf "$fanout"' EXIT
-cat > "$receipt" <<'EOF'
+cat >"$receipt" <<'EOF'
 {"lane":{"model":"sonnet","effort":"high","tools":["Bash","Read","Write","Edit","Glob","Grep"],"isolation":"worktree"},"triage":{"model":"haiku","effort":"medium","tools":["Bash","Read","Glob","Grep"],"isolation":null},"review":{"model":"opus","effort":"high","tools":["Bash","Read","Glob","Grep"],"isolation":null},"judge":{"model":"sonnet","effort":"high","tools":["Bash","Read","Glob","Grep"],"isolation":null}}
 EOF
 for name in lane triage review judge; do
@@ -61,7 +61,7 @@ fanout=$(mktemp -d)
 git -C "$fanout" init -q
 git -C "$fanout" config user.email fixture@example.invalid
 git -C "$fanout" config user.name fixture
-printf 'lane result\n' > "$fanout/result"
+printf 'lane result\n' >"$fanout/result"
 git -C "$fanout" add result
 git -C "$fanout" commit -qm 'fixture: preserve lane result'
 commit=$(git -C "$fanout" rev-parse HEAD)

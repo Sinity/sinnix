@@ -1077,7 +1077,7 @@ in
         agent-profile-benchmark = agentProfileBenchmarkFixture;
       };
 
-      heavyChecks = {
+      checks = {
         dev-agent-tools-runtime = devAgentToolsRuntime;
       };
     };

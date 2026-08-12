@@ -156,8 +156,12 @@ in
             ${surfaceJson}
             EOF_SURFACE
             jq -e '
-              (.Service.ExecStart | contains("wl-paste --watch")) and
-              (.Service.ExecStart | contains("sinnix-capture-clipboard-watch")) and
+              # ExecStart may render as a plain string or a single-element
+              # array depending on the systemd option merge/apply behavior
+              # -- normalize before substring checks.
+              (.Service.ExecStart | if type == "array" then join(" ") else . end) as $execStart |
+              ($execStart | contains("wl-paste --watch")) and
+              ($execStart | contains("sinnix-capture-clipboard-watch")) and
               (.Service.Environment | any(startswith("SINNIX_CAPTURE_ROOT="))) and
               (.Service.Environment | any(startswith("SINNIX_CAPTURE_CLIPBOARD_STATE_DIR="))) and
               (.Service.ReadWritePaths | length) == 3 and
@@ -176,7 +180,7 @@ in
             touch "$out"
           '';
 
-      heavyChecks = {
+      checks = {
         capture-clipboard-runtime = clipboardWatchRuntime;
       };
     };

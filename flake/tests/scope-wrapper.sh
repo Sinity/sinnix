@@ -51,7 +51,7 @@ export SCOPE_RECORD="$fixture/classes"
 
 expected=$'gpu-runtime\ngpu-runtime\nnix-build\nnix-build\nbackground'
 actual="$(<"$SCOPE_RECORD")"
-if [[ "$actual" != "$expected" ]]; then
+if [[ $actual != "$expected" ]]; then
   printf 'unexpected scope classes:\n%s\n' "$actual" >&2
   exit 1
 fi

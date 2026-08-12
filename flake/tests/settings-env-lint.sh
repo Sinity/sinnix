@@ -5,16 +5,16 @@ scanner=${1:?scanner path}
 root=$(mktemp -d)
 trap 'rm -rf "$root"' EXIT
 mkdir -p "$root/local/.claude" "$root/global/.claude" "$root/suspicious/.claude" "$root/secret/.claude"
-cat > "$root/local/.claude/settings.json" <<EOF
+cat >"$root/local/.claude/settings.json" <<EOF
 {"env":{"LOCAL":"$root/local/cache"}}
 EOF
-cat > "$root/global/.claude/settings.json" <<'EOF'
+cat >"$root/global/.claude/settings.json" <<'EOF'
 {"env":{"CACHE":"/realm/data/shared-cache"}}
 EOF
-cat > "$root/suspicious/.claude/settings.json" <<'EOF'
+cat >"$root/suspicious/.claude/settings.json" <<'EOF'
 {"env":{"CLOUD":"/tmp/cloud-only-path"}}
 EOF
-cat > "$root/secret/.claude/settings.json" <<'EOF'
+cat >"$root/secret/.claude/settings.json" <<'EOF'
 {"env":{"API_TOKEN":"super-secret-value"}}
 EOF
 
