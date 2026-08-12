@@ -63,10 +63,8 @@ in
 
         # One derivation at a time: two concurrent heavy builds (e.g. two CUDA
         # ggml derivations) each try to use most of the box and jointly exceed
-        # available RAM (2026-07-06 incident: max-jobs=2 let koboldcpp and
-        # noctalia collide, earlyoom killed cc1plus). Serializing to a single
-        # job and giving it the full core budget keeps peak memory bounded to
-        # one derivation's needs.
+        # available RAM. Serializing to a single job and giving it the full
+        # core budget keeps peak memory bounded to one derivation's needs.
         max-jobs = 1;
         cores = 16;
         builders-use-substitutes = true;
@@ -97,9 +95,9 @@ in
       gc = {
         automatic = true;
         dates = "weekly";
-        # `--delete-generations +N` is a nix-env flag, not nix-collect-garbage's —
-        # this silently failed every weekly run since at least 2026-07-04
-        # ("unrecognised flag"), letting 141 generations accumulate unbounded.
+        # `--delete-generations +N` is a nix-env flag, not nix-collect-garbage's
+        # — passing it silently fails every weekly run ("unrecognised flag"),
+        # letting generations accumulate unbounded.
         options = "--delete-older-than 30d";
       };
 

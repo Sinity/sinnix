@@ -53,7 +53,7 @@ in
             selfRoot = mkOption {
               type = types.str;
               default = "${config.dataRoot}/self";
-              description = "Personal-identity records: genome, finance, private, code-archives, photos. Renamed from librariesRoot (2026-07-27) — the old name conflated curated reference material (which lives at mediaRoot/books) with records that are about the operator, not a reference collection.";
+              description = "Personal-identity records: genome, finance, private, code-archives, photos. Distinct from mediaRoot/books, which holds curated reference material, not records about the operator.";
             };
             mediaRoot = mkOption {
               type = types.str;
@@ -143,10 +143,22 @@ in
                 types.submodule {
                   options = {
                     path = mkOption { type = types.str; };
-                    remote = mkOption { type = types.nullOr types.str; default = null; };
-                    defaultRef = mkOption { type = types.str; default = "master"; };
-                    remoteRead = mkOption { type = types.bool; default = false; };
-                    remoteWrite = mkOption { type = types.bool; default = false; };
+                    remote = mkOption {
+                      type = types.nullOr types.str;
+                      default = null;
+                    };
+                    defaultRef = mkOption {
+                      type = types.str;
+                      default = "master";
+                    };
+                    remoteRead = mkOption {
+                      type = types.bool;
+                      default = false;
+                    };
+                    remoteWrite = mkOption {
+                      type = types.bool;
+                      default = false;
+                    };
                   };
                 }
               );
@@ -182,7 +194,7 @@ in
             lynchpinExported = mkOption {
               type = types.str;
               default = "${config.root}/__lynchpin_exported";
-              description = "Lynchpin's derived artifacts (ledgers, dashboards, repo-artefacts) — extracted from knowledgebase in 2026-04.";
+              description = "Lynchpin's derived artifacts (ledgers, dashboards, repo-artefacts), separate from knowledgebase.";
             };
             pwrank = mkOption {
               type = types.str;

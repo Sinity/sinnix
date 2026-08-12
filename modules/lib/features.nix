@@ -61,9 +61,7 @@ let
       #
       # extraOptions must not define its own top-level `enable`: the `//`
       # merge below replaces it wholesale, silently discarding whatever a
-      # caller declared there (sinnix-tgy, 2026-07-08 — a module comment
-      # claimed "disabled by default" via extraOptions.enable while this
-      # factory forced enable.default=true underneath it, unnoticed).
+      # caller declared there.
       optionsForPath =
         if extraOptions ? enable then
           throw "mkFeatureModule ${builtins.concatStringsSep "." path}: extraOptions must not define 'enable' (generated automatically, default = ${lib.boolToString defaultOn}); use the defaultOn argument instead"
@@ -158,12 +156,14 @@ let
           restartable = true;
         };
       };
-      configFn = args: lib.mkMerge [
-        (lib.optionalAttrs (stateDirectories != [ ]) {
-          sinnix.persistence.system.directories = stateDirectories;
-        })
-        (configFn args)
-      ];
+      configFn =
+        args:
+        lib.mkMerge [
+          (lib.optionalAttrs (stateDirectories != [ ]) {
+            sinnix.persistence.system.directories = stateDirectories;
+          })
+          (configFn args)
+        ];
     };
 
   # Pre-curried version for extraSpecialArgs - eliminates boilerplate in modules
