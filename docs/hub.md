@@ -13,13 +13,13 @@ annotations somewhere to go.
 
 Everything below is on the hub port (8880 by default).
 
-| Route                | What it is                                                            |
-| -------------------- | --------------------------------------------------------------------- |
-| `/`                  | Server-rendered dashboard: pressure, sources, storage, units, agents  |
-| `/ai/`               | AI control panel: per-service state plus start/stop/restart           |
-| `/reports/`          | The generated report tree, browsable and linkable                     |
-| `/ops/v1/*`          | Reverse proxy onto the ops-reducer's read and action API              |
-| `/feedback`          | Append-only spool for report annotations                              |
+| Route       | What it is                                                           |
+| ----------- | -------------------------------------------------------------------- |
+| `/`         | Server-rendered dashboard: pressure, sources, storage, units, agents |
+| `/ai/`      | AI control panel: per-service state plus start/stop/restart          |
+| `/reports/` | The generated report tree, browsable and linkable                    |
+| `/ops/v1/*` | Reverse proxy onto the ops-reducer's read and action API             |
+| `/feedback` | Append-only spool for report annotations                             |
 
 The loopback web UIs get one port each rather than a subpath of the hub —
 `8881` Open WebUI, `8882` ComfyUI, `8883` KoboldCpp. They are single-page apps
@@ -40,7 +40,7 @@ it never appears. A hub that cannot bind the tailnet is supposed to be down, not
 listening wider.
 
 The `bind` directive in each site block is load-bearing. Listing two site
-addresses on the same port does *not* produce two listeners: Caddy merges
+addresses on the same port does _not_ produce two listeners: Caddy merges
 same-port sites into one server on `:PORT` — that is `0.0.0.0` — and separates
 them by `Host` header, which is no boundary at all. After any edit to the
 Caddyfile, check the adapted config rather than trusting how it reads:
@@ -55,12 +55,12 @@ Every entry must be an explicit address. A bare `":8880"` is a regression.
 `networking.firewall.interfaces.tailscale0.allowedTCPPorts`. This matters
 because `useRoutingFeatures = "none"` means upstream does not put `tailscale0`
 in `trustedInterfaces` — without the per-interface opening, the phone would be
-dropped; without the per-interface *scoping*, the LAN would not be.
+dropped; without the per-interface _scoping_, the LAN would not be.
 
 ## Why it runs in the user manager
 
 The dashboard's whole value is the ops-reducer's current-state snapshot, and the
-reducer is a *user* service whose Unix socket is `0600` and operator-owned.
+reducer is a _user_ service whose Unix socket is `0600` and operator-owned.
 Running the hub in the same manager reaches that socket, the operator-owned
 reports tree, and the action API without loosening a single permission. Nothing
 here needs a privileged port.
@@ -86,7 +86,7 @@ service whose module is not enabled renders as "not registered" rather than
 silently disappearing.
 
 **The backends are socket-activated.** They sit behind `systemd-socket-proxyd`
-and exit after a 30s idle timeout, so *idle* is the normal resting state, not a
+and exit after a 30s idle timeout, so _idle_ is the normal resting state, not a
 fault, and connecting to the public endpoint starts one with no privileged
 action at all. Ollama and KoboldCpp hold the same `gpu-inference` admission key
 and conflict by design. See `docs/local-ai-activation.md`.
@@ -101,7 +101,7 @@ With a server in front of the reports, that paste step can be one `fetch()`:
 fetch("/feedback", { method: "POST", body: JSON.stringify(collectState()) });
 ```
 
-`collectState()` is the skill's own function. Deliberately a *simple* request —
+`collectState()` is the skill's own function. Deliberately a _simple_ request —
 no custom headers, so no CORS preflight — which means the same line works from a
 report served by the hub and from one opened straight off disk as `file://`
 (`Origin: null`), as long as the hub is reachable and the URL is absolute in the
