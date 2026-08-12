@@ -5,10 +5,7 @@
 # decision below. The deny-hook already intercepts this event; extending it
 # in place avoids a second process reading the same stdin payload.
 #
-# Policy (global CLAUDE.md, "Claude Code Dispatch Doctrine"), tightened
-# 2026-08-11 (operator directive: the prior "named agent types get a soft
-# warning only" exemption produced warnings the operator could not act on
-# and had no enforcement teeth, so it is removed):
+# Policy (global CLAUDE.md, "Claude Code Dispatch Doctrine"):
 #   - fork subagents: exempt (they inherit context+model by design)
 #   - EVERY other dispatch — named agent-definition types (review, lane,
 #     triage, judge, Explore, Plan, claude-code-guide, ...), teammate spawns
@@ -39,11 +36,8 @@ set -euo pipefail
 # NOTE: deliberately NOT `python3 - <<'PY' ... PY` — that form redirects the
 # heredoc body onto python3's own stdin (it's how `python3 -` receives the
 # script to run), which consumes the hook payload before `sys.stdin.read()`
-# ever gets it. Discovered while wiring the ledger below: with the old form
-# `json.load(sys.stdin)` always hit EOF, so the deny path (and now the
-# ledger write) silently never fired even though the script "ran" and exited
-# 0. Building the script text via command substitution and passing it as a
-# `-c` argument leaves the original piped stdin intact for python to read.
+# ever gets it. Building the script text via command substitution and
+# passing it as a `-c` argument leaves the original piped stdin intact.
 PY_SCRIPT=$(cat <<'PY'
 import datetime as _dt
 import hashlib
