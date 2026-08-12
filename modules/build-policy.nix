@@ -49,14 +49,9 @@ in
         netrc-file = "/etc/nix/netrc";
 
         # Bounded parallelism: nix-build.slice's 22G/28G memory ceiling is
-        # the actual overcommit guard (the daemon and every build it spawns
-        # run inside it — see the nix-daemon Slice= below). The 2026-07-06
-        # incident (two concurrent CUDA/ggml compiles OOMing the host,
-        # sinnix-jr8) predated that containment AND was itself a cache-miss
-        # malfunction: the nixpkgs-ai pin exists so CUDA compiles happen
-        # only on an explicit `update nixpkgs-ai`. Serializing every build
-        # host-wide to protect against a contained, rare-by-design workload
-        # was removed 2026-08-12 (with the heavy-work lease, sinnix-qlf).
+        # the overcommit guard (the daemon and every build it spawns run
+        # inside it — see the nix-daemon Slice= below), not serialization.
+        # History/evidence: bd show sinnix-qlf, bd show sinnix-jr8
         max-jobs = 4;
         cores = 16;
         builders-use-substitutes = true;

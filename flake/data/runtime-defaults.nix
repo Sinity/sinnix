@@ -102,10 +102,10 @@ rec {
   # runtimes, browsers, and generic shells deliberately remain eligible.
   # Single base list: earlyoomPatternFor extends exactly this with the
   # processMatchers of surfaces that opt in via workload.earlyoomAvoid.
-  # Entries are matched unanchored against /proc/<pid>/comm (15 chars max,
-  # hence the truncated xdg-desktop-po), so keep every entry <=15 chars and
-  # drop entries whose process cannot exist on our hosts: quickshell
-  # (noctalia v5 is a standalone binary), foot (not installed).
+  # Entries match unanchored against /proc/<pid>/comm (15 chars max, hence
+  # the truncated xdg-desktop-po): keep entries <=15 chars, and only for
+  # processes that can exist on our hosts. History/evidence: commits
+  # 9993f71 + e3f90fc (list unification and dead-entry audit).
   earlyoomEmergencyAvoidBase = [
     "systemd"
     "systemd-logind"
