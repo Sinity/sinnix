@@ -419,19 +419,30 @@ mkFeatureModule {
           home.activation.claudeSymlink = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
             mkdir -p $HOME/.config/claude
             ln -sfn .config/claude $HOME/.claude
-            # settings.json is a plain writable file, seeded once from dots:
-            # the harness persists UI state (model, effort, plugin toggles)
-            # into it on every /model-style change, so a repo symlink would
-            # keep the tracked tree dirty. Durable policy (hooks,
-            # permissions, env) lives in /etc/claude-code/managed-settings.json
-            # instead. Migrate the pre-split symlink if one is still present.
-            if [ -L "$HOME/.config/claude/settings.json" ]; then
-              rm "$HOME/.config/claude/settings.json"
+            # settings.json is a plain writable file: the harness persists UI
+            # state (model, effort, plugin toggles) into it on every
+            # /model-style change, so a repo symlink would keep the tracked
+            # tree dirty. Durable policy lives in
+            # /etc/claude-code/managed-settings.json instead. Migrating from
+            # the pre-split symlink preserves the operator's live UI state:
+            # strip exactly the keys the managed file carries (self-derived,
+            # so the two layers cannot drift into double-firing hooks) and
+            # keep the rest. The seed covers only the fresh-machine case.
+            _claude_settings="$HOME/.config/claude/settings.json"
+            _claude_managed="${sinnixCfg.paths.dotsRoot}/claude/managed-settings.json"
+            if [ -L "$_claude_settings" ]; then
+              _claude_old="$(readlink -f "$_claude_settings" || true)"
+              rm "$_claude_settings"
+              if [ -f "$_claude_old" ]; then
+                ${pkgs.jq}/bin/jq --slurpfile m "$_claude_managed" \
+                  'delpaths([$m[0] | keys[] | [.]])' "$_claude_old" \
+                  > "$_claude_settings"
+              fi
             fi
-            if [ ! -f "$HOME/.config/claude/settings.json" ]; then
-              cp ${sinnixCfg.paths.dotsRoot}/claude/settings-seed.json "$HOME/.config/claude/settings.json"
-              chmod 600 "$HOME/.config/claude/settings.json"
+            if [ ! -f "$_claude_settings" ]; then
+              cp ${sinnixCfg.paths.dotsRoot}/claude/settings-seed.json "$_claude_settings"
             fi
+            chmod 600 "$_claude_settings"
           '';
           home.activation.hermesConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
             mkdir -p "$HOME/.hermes"
