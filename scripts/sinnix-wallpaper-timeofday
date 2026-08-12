@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Retarget ~/wallpaper/{dark,light} to the current time-of-day wallpaper set
+# runtimeInputs: bash coreutils
+set -euo pipefail
+
+export LC_ALL=C
+
+# Config: modules/features/desktop/wallpaper.nix seeds these into the
+# systemd unit and the login session; fall back to the module defaults so
+# this also runs sanely when invoked by hand.
+CORPUS="${SINNIX_WALLPAPER_CORPUS:-/realm/media/wallpaper}"
+WALLPAPER_DIR="${HOME}/wallpaper"
+
+hour=$(date +%H)
+hour=$((10#$hour))
+
+# Mood boundaries. Day/night are the long-dwell windows on this OLED panel;
+# bias toward low-key, high-contrast imagery there (curation-time decision,
+# see `sinnix-wallpaper import`'s brightness heuristic) -- morning/evening
+# are shorter transitional windows where brighter imagery matters less for
+# burn-in exposure.
+if (( hour >= 5 && hour < 11 )); then
+  mood="morning"
+elif (( hour >= 11 && hour < 17 )); then
+  mood="day"
+elif (( hour >= 17 && hour < 21 )); then
+  mood="evening"
+else
+  mood="night"
+fi
+
+target_dark="${CORPUS}/sets/${mood}/dark"
+target_light="${CORPUS}/sets/${mood}/light"
+
+mkdir -p "$WALLPAPER_DIR"
+
+relink() {
+  local link="$1" target="$2"
+  if [[ ! -d "$target" ]]; then
+    echo "sinnix-wallpaper-timeofday: missing set directory $target, skipping" >&2
+    return 1
+  fi
+  local current=""
+  if [[ -L "$link" ]]; then current=$(readlink -f "$link" 2>/dev/null || true); fi
+  local resolved
+  resolved=$(readlink -f "$target")
+  if [[ "$current" != "$resolved" ]]; then
+    ln -sfn "$target" "$link"
+    return 0
+  fi
+  return 2
+}
+
+changed=0
+if relink "${WALLPAPER_DIR}/dark" "$target_dark"; then changed=1; fi
+if relink "${WALLPAPER_DIR}/light" "$target_light"; then changed=1; fi
+
+if [[ "$changed" == "1" ]]; then
+  echo "sinnix-wallpaper-timeofday: switched to '${mood}' set"
+  noctalia_bin="${SINNIX_NOCTALIA_BIN:-noctalia}"
+  # Best-effort: apply immediately instead of waiting for the next
+  # automation rotation. Non-fatal if the shell isn't up yet (e.g. right
+  # after boot before login).
+  "$noctalia_bin" msg wallpaper-random >/dev/null 2>&1 || true
+fi
