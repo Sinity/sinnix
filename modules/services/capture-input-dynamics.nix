@@ -105,30 +105,34 @@ mkServiceModule {
               After = [ "graphical-session.target" ];
               PartOf = [ "graphical-session.target" ];
             };
-            Service = {
-              Type = "simple";
-              ExecStart = lib.escapeShellArgs [
-                "${collector}/bin/capture-input-dynamics"
-                "--capture-root"
-                capturesRoot
-                "--libinput-bin"
-                "${pkgs.libinput}/bin/libinput"
-                "--hyprctl-bin"
-                "${pkgs.hyprland}/bin/hyprctl"
-                "--sinnix-capture-bin"
-                "${scriptPkgs.sinnix-capture}/bin/sinnix-capture"
-              ];
-              Restart = "on-failure";
-              RestartSec = "5s";
-              NoNewPrivileges = true;
-              ProtectSystem = "strict";
-              ProtectHome = "read-only";
-              # Deliberately no PrivateDevices=true: this service's whole
-              # purpose is reading real /dev/input/event* nodes via
-              # libinput, granted through the logind seat ACL described
-              # above.
-              ReadWritePaths = [ laneDir ];
-              UMask = "0077";
+            Service = lib.sinnix.mkRuntimeServiceConfig {
+              runtimeInventory = config.sinnix.runtime.inventory;
+              unit = "sinnix-capture-input-dynamics.service";
+              overrides = {
+                Type = "simple";
+                ExecStart = lib.escapeShellArgs [
+                  "${collector}/bin/capture-input-dynamics"
+                  "--capture-root"
+                  capturesRoot
+                  "--libinput-bin"
+                  "${pkgs.libinput}/bin/libinput"
+                  "--hyprctl-bin"
+                  "${pkgs.hyprland}/bin/hyprctl"
+                  "--sinnix-capture-bin"
+                  "${scriptPkgs.sinnix-capture}/bin/sinnix-capture"
+                ];
+                Restart = "on-failure";
+                RestartSec = "5s";
+                NoNewPrivileges = true;
+                ProtectSystem = "strict";
+                ProtectHome = "read-only";
+                # Deliberately no PrivateDevices=true: this service's whole
+                # purpose is reading real /dev/input/event* nodes via
+                # libinput, granted through the logind seat ACL described
+                # above.
+                ReadWritePaths = [ laneDir ];
+                UMask = "0077";
+              };
             };
             Install.WantedBy = [ "graphical-session.target" ];
           };
