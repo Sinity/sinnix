@@ -331,8 +331,6 @@ mkFeatureModule {
             scriptPkgs.sinnix-agent-scope-exec
             scriptPkgs.chatgpt-share-export
             scriptPkgs.sinnix-agent-control-mcp
-            scriptPkgs.sinnix-agent-event
-            scriptPkgs.sinnix-agent-register
             scriptPkgs.sinnix-attention
             scriptPkgs.sinnix-context-handoff
             scriptPkgs.sinnix-claude-judge

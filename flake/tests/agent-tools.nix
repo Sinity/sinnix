@@ -747,8 +747,6 @@ in
             mkdir -p "$fixture_skill/scripts" "$fixture_source/scripts"
             cp ${../../dots/_ai/skills/agent-orchestration/scripts/run_agent_prompt.sh} "$fixture_skill/scripts/run_agent_prompt.sh"
             cp ${../../dots/_ai/skills/agent-orchestration/scripts/agent_job_control.sh} "$fixture_skill/scripts/agent_job_control.sh"
-            cp ${../../scripts/sinnix-agent-event} "$fixture_source/scripts/sinnix-agent-event"
-            cp ${../../scripts/sinnix-agent-register} "$fixture_source/scripts/sinnix-agent-register"
             cp ${../../scripts/sinnix-agent-scope-exec} "$fixture_source/scripts/sinnix-agent-scope-exec"
             cp ${../../scripts/sinnix-scope} "$fixture_source/scripts/sinnix-scope"
             chmod +x "$fixture_skill/scripts/"* "$fixture_source/scripts/"*
