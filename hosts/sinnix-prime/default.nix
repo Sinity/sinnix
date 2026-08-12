@@ -59,10 +59,7 @@
     # non-standard default into the factory itself.
     capture-screen.enable = true;
     capture-replay = {
-      # OFF until sinnix-60k7 (KMS capture returns drmfb NULL on this
-      # NVIDIA driver -- zero frames ever produced, ~3.4K error lines/min
-      # of journal spam while "active"). Re-enable when 60k7 closes.
-      enable = false;
+      enable = true;
       # Single panel on this host; gsr needs the connector name (see the
       # target option's description for why "focused" cannot work).
       target = "DP-3";
