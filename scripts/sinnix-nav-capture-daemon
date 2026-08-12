@@ -1,9 +1,9 @@
 # @sinnix-package
-# description: Local HTTP receiver for the nav-capture browser extension -- origin-chain edges + reading-stack pushes
+# description: Local HTTP receiver for the nav-capture browser extension -- origin-chain edges, reading-stack pushes, per-tab navigation history
 # runtimeInputs: python3 @sinnix-capture
 #!/usr/bin/env python3
 """sinnix-nav-capture-daemon: the local endpoint the nav-capture WebExtension
-POSTs to. Two routes:
+POSTs to. Three routes:
 
   POST /v1/link-event         -- {source_url, source_title, target_url,
                                    anchor_text, ts, trigger} -- every link
@@ -20,6 +20,18 @@ POSTs to. Two routes:
                                    (the content script's remap). Delegates to
                                    `sinnix-reading-stack push`, which owns the
                                    bounded-stack state file the widget reads.
+
+  POST /v1/tab-history        -- {event, tab_id, transition_type, url,
+                                   entry_index, entry_count, ts}, from the
+                                   background script's ported TabTracker
+                                   (per-tab back/forward navigation DAG,
+                                   closed-tab recovery). Written to the
+                                   "browser-tab-history" lane -- a DIFFERENT
+                                   schema from browser-nav-edges (a stateful
+                                   per-tab sequence with transition
+                                   classification, not a flat edge log), so
+                                   it gets its own lane rather than being
+                                   forced into the edges shape.
 
 Binds 127.0.0.1:8766 only (never 0.0.0.0) -- this is a same-machine
 extension<->daemon channel, not a network service. Port chosen to sit next
@@ -109,6 +121,8 @@ class Handler(BaseHTTPRequestHandler):
                 sinnix_capture_write("browser-nav-edges", payload)
             elif self.path == "/v1/reading-stack/push":
                 reading_stack_push(payload)
+            elif self.path == "/v1/tab-history":
+                sinnix_capture_write("browser-tab-history", payload)
             else:
                 self._respond(404)
                 return
