@@ -64,6 +64,7 @@
     capture-screen.enable = true;
     capture-replay.enable = true;
     capture-kitty-scrollback.enable = true;
+    capture-aw-rollup.enable = true;
     url-ledger.enable = true;
     below = {
       enable = true;

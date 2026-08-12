@@ -44,14 +44,13 @@ mkFeatureModule {
             enable = true;
             restartable = true;
           };
-          captures = [
-            {
-              name = "activitywatch";
-              path = "${nixosConfig.sinnix.paths.capturesRoot}/activitywatch";
-              eventDriven = true;
-              staleAfterSeconds = 3600;
-            }
-          ];
+          # No `captures` entry here: this service's own state is AW's
+          # SQLite DB under ~/.local/share/activitywatch (a persisted home
+          # directory, declared in modules/persistence.nix), not a
+          # captures-lake write path. The `activitywatch` lane under
+          # capturesRoot is owned by the rollup job's own surface in
+          # modules/services/capture-aw-rollup.nix, which is the thing
+          # that actually writes there.
         };
         activitywatch-watcher-awatcher = {
           unit = "activitywatch-watcher-awatcher.service";
