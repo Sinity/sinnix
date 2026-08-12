@@ -21,9 +21,8 @@
       nix = "${pkgs.nix}/bin/nix";
       # resolveFlakeDir is shared with command-registry.nix's appCommands
       # (`nix run .#switch` etc.) so both entry points resolve the same way
-      # instead of silently drifting apart -- see command-registry.nix's own
-      # comment for why a naive fallback here previously broke
-      # system.configurationRevision (sinnix-6ru).
+      # instead of silently drifting apart.
+      # History/evidence: bd show sinnix-6ru
       inherit (commandRegistry)
         rebuildServicePath
         localInputOverrideArgs
