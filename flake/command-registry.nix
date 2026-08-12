@@ -14,8 +14,30 @@ let
     pkgs.systemd
     pkgs.util-linux
   ];
+  # sinnix-6ru: a generation built 2026-08-09 stamped
+  # system.configurationRevision = "unknown" even though the source tree was
+  # clean (not the `<rev>-dirty` case flake/nixos.nix already handles).
+  # Root cause: the old unconditional `${inputs.self}` fallback below
+  # resolves, at THIS file's own eval time, to a Nix-store COPY of the flake
+  # source (self.outPath) -- store copies have no `.git` directory, so any
+  # nixos-rebuild/nh invocation using that path as its `--flake` reference
+  # evaluates a `self` with neither `.rev` nor `.dirtyRev`, and
+  # flake/nixos.nix's `self.rev or self.dirtyRev or "unknown"` falls all the
+  # way through. Any rebuild verb run without SINNIX_FLAKE_DIR/NH_FLAKE/FLAKE
+  # set (e.g. plain `nix run .#switch`) hit this silently. Prefer the live
+  # git checkout at runtime (matches the devshell binaries below, which
+  # never had this bug); only fall back to the store copy as a genuinely
+  # last resort, and warn loudly when that happens since the resulting
+  # generation's revision stamp will be non-probative.
   resolveFlakeDir = ''
-    _flake_dir="''${SINNIX_FLAKE_DIR:-''${NH_FLAKE:-''${FLAKE:-${inputs.self}}}}"
+    _flake_dir="''${SINNIX_FLAKE_DIR:-''${NH_FLAKE:-''${FLAKE:-''${PRJ_ROOT:-}}}}"
+    if [ -z "$_flake_dir" ]; then
+      _flake_dir="$(${pkgs.git}/bin/git rev-parse --show-toplevel 2>/dev/null || true)"
+    fi
+    if [ -z "$_flake_dir" ]; then
+      _flake_dir=${inputs.self}
+      echo "sinnix: WARNING no SINNIX_FLAKE_DIR/NH_FLAKE/FLAKE env var set and \$PWD ($PWD) is not inside a git checkout; falling back to a Nix-store copy of the flake ($_flake_dir). That copy has no git metadata, so system.configurationRevision will stamp \"unknown\" for anything built from this invocation (sinnix-6ru) -- the live-drift tripwire will be non-probative for the resulting generation. Run this from inside the sinnix checkout, or set SINNIX_FLAKE_DIR, to get a real revision stamp." >&2
+    fi
   '';
   loadCheckTargets = outputName: ''
     mapfile -t ${outputName}_targets < <(
@@ -371,6 +393,7 @@ let
 in
 {
   inherit
+    resolveFlakeDir
     rebuildLease
     rebuildLock
     rebuildContainmentFlags
