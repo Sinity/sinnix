@@ -86,6 +86,10 @@
     # Room air quality from the Awair Element's local API (sinnix-agp8) --
     # the first capture lane covering the environment rather than the machine.
     capture-awair.enable = true;
+    # Router telemetry pulled from prime on a timer (sinnix-zihb): syslog
+    # deltas, DHCP leases, wifi associations with signal, and nlbwmon's
+    # seven months of per-device bandwidth. Nothing runs on the router.
+    capture-router.enable = true;
     url-ledger.enable = true;
     below = {
       enable = true;
