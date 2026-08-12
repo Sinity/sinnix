@@ -56,6 +56,22 @@ let
     capsCmd
     uinputCmd
   ];
+  # Separate job for pointer devices: 2026-08-12, scribe-tap gained raw
+  # mouse/pointer capture (motion, buttons, scroll), but this host's
+  # udevmon match only ever covered event-kbd nodes, so no mouse device
+  # was ever actually piped through it -- confirmed live via
+  # /dev/input/by-id (usb-Logitech_USB_Receiver-event-mouse exists,
+  # unmatched). Deliberately NOT reusing the keyboard `pipeline`:
+  # intercept-bounce's 40ms debounce window is tuned for keyboard chatter
+  # and would eat legitimate fast double-clicks/scroll ticks; caps2esc is
+  # a keyboard-specific remapper with no defined behavior for EV_REL/
+  # EV_ABS. Mouse events pass through unmodified other than scribe-tap's
+  # capture tap.
+  mousePipeline = lib.concatStringsSep " | " [
+    interceptCmd
+    scribeCmd
+    uinputCmd
+  ];
 
   logitechMaintenance = pkgs.writeShellScript "logitech-maintenance" ''
     #!/usr/bin/env bash
@@ -108,6 +124,10 @@ in
         - JOB: "${pipeline}"
           DEVICE:
             LINK: "/dev/input/by-id/.*Logitech.*event-kbd"
+            NAME: ".*Logitech.*"
+        - JOB: "${mousePipeline}"
+          DEVICE:
+            LINK: "/dev/input/by-id/.*Logitech.*event-mouse"
             NAME: ".*Logitech.*"
       '';
     };
