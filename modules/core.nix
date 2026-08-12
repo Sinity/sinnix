@@ -84,9 +84,8 @@ in
 
     };
 
-    # Bus implementation: the NixOS default (classic dbus-daemon), deliberate
-    # after retiring dbus-broker and its patch burden on 2026-08-12.
-    # History/evidence: bd show sinnix-not
+    # Bus implementation: the NixOS default (classic dbus-daemon) — a
+    # deliberate choice, not an omission.
 
     # nsncd opens its compatibility socket at /var/run/nscd/socket. On the
     # current systemd/nixpkgs generation the upstream unit bind-mounts /run/nscd

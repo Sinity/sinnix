@@ -184,8 +184,8 @@ One contract governs unit placement and observability:
   `mkRuntimeServiceConfig`, done — no ad-hoc Nice/IOWeight overrides.
 - Concurrency is governed by slice memory caps and weights, not
   serialization; the only build-path lock is `/tmp/sinnix-switch.lock`, a
-  correctness guard against two activations racing on the system profile
-  (history: bd show sinnix-qlf). Gateway and native launches share
+  correctness guard against two activations racing on the system profile.
+  Gateway and native launches share
   versioned UUID manifests and correlation IDs consumed by
   `sinnix-observe`.
 
