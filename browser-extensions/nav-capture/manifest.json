@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Sinnix Navigation Capture",
+  "version": "0.1.0",
+  "description": "Origin-chain link capture + middle-click-to-reading-stack (no new tabs).",
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": ["http://127.0.0.1/*", "<all_urls>"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "commands": {
+    "push-current-page": {
+      "suggested_key": { "default": "Ctrl+Shift+S" },
+      "description": "Push the current page to the reading stack (not just links on it)"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

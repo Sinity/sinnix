@@ -1,0 +1,30 @@
+# @sinnix-package
+# description: Terminal-based ambient viewer for the reading stack -- run inside a pinned kitty window
+# runtimeInputs: bash @sinnix-reading-stack
+#!/usr/bin/env bash
+# This IS the "standing visibility" mechanism the reading-stack design docs
+# reference (see sinnix-reading-stack's own docstring for the psychological
+# reasoning). It is deliberately a plain terminal loop, not a Waybar/eww
+# module: Noctalia (this host's shell) has no scriptable per-widget IPC
+# investigated so far, whereas "a small window, pinned via a Hyprland
+# windowrule" is a mechanism already proven tonight (browser-inversion's
+# whole premise is that Hyprland windows/groups are the universal container
+# -- this is the same idea applied to a status widget instead of a browser
+# tab).
+set -euo pipefail
+
+refresh_secs="${SINNIX_READING_STACK_REFRESH:-5}"
+
+while true; do
+  clear
+  echo "── reading stack ──────────────────────"
+  count="$(sinnix-reading-stack count)"
+  sinnix-reading-stack list --compact --limit 12
+  echo "────────────────────────────────────────"
+  if [ "$count" -gt 20 ]; then
+    echo "  ($count total -- over soft cap, review)"
+  else
+    echo "  ($count total)"
+  fi
+  sleep "$refresh_secs"
+done

@@ -1,0 +1,178 @@
+# @sinnix-package
+# description: Bounded, visible reading-stack -- push/pop/list/peek over a small JSON state file, durable copy via sinnix-capture
+# runtimeInputs: python3 @sinnix-capture
+#!/usr/bin/env python3
+"""sinnix-reading-stack: the replacement for "middle-click dumps a link into
+an ever-growing pile of background tabs."
+
+WHY THIS EXISTS (the actual design problem, not just the mechanism): the
+operator's own diagnosis is that an open tab and a Raindrop bookmark differ
+psychologically even though both are "just a saved link" -- an open tab
+costs nothing to create, stays STANDINGLY VISIBLE with zero re-lookup
+effort, and closing it later is low-stakes/reversible-feeling; filing to
+Raindrop is the same zero-effort write but the item then vanishes from view
+entirely, and the act of filing-away *feels* like a judgment that just
+lowered the link's priority -- which is self-defeating, since the whole
+point was to read it. The fix implemented here is NOT "same behavior,
+different database" (that repeats the failure with extra steps): it is
+(1) a HARD, VISIBLE bound -- this is not allowed to become an unlimited
+backlog, unlike the old tab pile or the Raindrop graveyard, and (2) genuine
+standing visibility via a companion small pinned window
+(sinnix-reading-stack-widget) so the stack has the same "there, in view,
+demanding nothing but present" quality an open tab had, without being an
+actual browser tab.
+
+STATE: a small JSON array at $XDG_STATE_HOME/sinnix/reading-stack.json --
+mutable, LIFO-ish but really just a bounded list (most-recent first).
+DURABLE COPY: every push/pop also writes a sinnix-capture-v1 envelope to the
+"reading-stack" lane (append-only, for later analysis -- e.g. "what fraction
+of pushed items actually get read vs. expire") -- the JSON file is live
+working state, the capture lane is the permanent record; losing the JSON
+file loses your current queue, not the history of ever having one.
+
+SOFT CAP: default 20. Pushing past the cap still succeeds (never block the
+click that triggered it) but `list`/the widget surface a loud warning --
+the cap existing at all is the point: if it's regularly hit, that's a
+signal to actually review/prune, not silently raise the number.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+STATE_DIR = Path.home() / ".local/state/sinnix"
+STATE_FILE = STATE_DIR / "reading-stack.json"
+CAPTURE_ROOT = "/realm/data/captures"
+SOFT_CAP = 20
+
+
+def _load() -> list[dict]:
+    if not STATE_FILE.exists():
+        return []
+    try:
+        return json.loads(STATE_FILE.read_text())
+    except json.JSONDecodeError:
+        return []
+
+
+def _save(items: list[dict]) -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = STATE_FILE.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(items, indent=0))
+    tmp.replace(STATE_FILE)
+
+
+def _capture(event: str, payload: dict) -> None:
+    try:
+        subprocess.run(
+            [
+                "sinnix-capture",
+                "write",
+                "--capture-root",
+                CAPTURE_ROOT,
+                "--lane",
+                "reading-stack",
+                "--payload",
+                json.dumps({"event": event, **payload}),
+            ],
+            check=False,
+            capture_output=True,
+        )
+    except FileNotFoundError:
+        pass  # durable copy is best-effort; never block the interactive path
+
+
+def cmd_push(args: argparse.Namespace) -> int:
+    items = _load()
+    entry = {
+        "url": args.url,
+        "title": args.title or args.url,
+        "source_url": args.source_url or None,
+        "source_title": args.source_title or None,
+        "pushed_at": time.time(),
+    }
+    # De-dup by URL: re-pushing something already queued bumps it to the
+    # top (most-recent-first) instead of creating a second row -- matches
+    # the operator's explicit ask that duplicate pushes not be silently
+    # dropped elsewhere (clipboard), but a reading queue is a different
+    # object: the same link queued twice is one intention, not two.
+    items = [i for i in items if i.get("url") != entry["url"]]
+    items.insert(0, entry)
+    _save(items)
+    _capture("push", entry)
+    if len(items) > SOFT_CAP:
+        print(f"reading-stack: {len(items)} items -- over the soft cap ({SOFT_CAP}); consider reviewing.", file=sys.stderr)
+    return 0
+
+
+def cmd_pop(args: argparse.Namespace) -> int:
+    items = _load()
+    if not items:
+        print("reading-stack: empty", file=sys.stderr)
+        return 1
+    if args.url:
+        idx = next((i for i, e in enumerate(items) if e["url"] == args.url), None)
+        if idx is None:
+            print(f"reading-stack: no entry for {args.url}", file=sys.stderr)
+            return 1
+        entry = items.pop(idx)
+    else:
+        entry = items.pop(0)
+    _save(items)
+    _capture("pop", entry)
+    print(json.dumps(entry))
+    return 0
+
+
+def cmd_list(args: argparse.Namespace) -> int:
+    items = _load()
+    if args.compact:
+        for e in items[: args.limit]:
+            title = (e.get("title") or e["url"])[:60]
+            print(f"{title}\t{e['url']}")
+        if len(items) > SOFT_CAP:
+            print(f"-- {len(items)} total, over soft cap {SOFT_CAP} --")
+    else:
+        print(json.dumps(items[: args.limit], indent=2))
+    return 0
+
+
+def cmd_count(_args: argparse.Namespace) -> int:
+    print(len(_load()))
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="sinnix-reading-stack")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("push")
+    p.add_argument("--url", required=True)
+    p.add_argument("--title", default=None)
+    p.add_argument("--source-url", default=None)
+    p.add_argument("--source-title", default=None)
+    p.set_defaults(func=cmd_push)
+
+    p = sub.add_parser("pop")
+    p.add_argument("--url", default=None, help="pop a specific entry; default is most-recent")
+    p.set_defaults(func=cmd_pop)
+
+    p = sub.add_parser("list")
+    p.add_argument("--compact", action="store_true")
+    p.add_argument("--limit", type=int, default=1000)
+    p.set_defaults(func=cmd_list)
+
+    p = sub.add_parser("count")
+    p.set_defaults(func=cmd_count)
+
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
