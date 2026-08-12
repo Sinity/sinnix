@@ -358,6 +358,32 @@ def bar_block(pairs, unit="", width_label="6.5rem", max_track="30rem"):
     return "\n".join(rows)
 
 
+def skyline(slices):
+    """Slice memory budgets as share of physical RAM (32 GB) — generated
+    from the inventory, so budget changes redraw it."""
+    rows = []
+    seen = set()
+    for s in slices:
+        gb = None
+        for k in ("MemoryMax", "MemoryHigh"):
+            v = s.get(k)
+            if isinstance(v, str) and v.endswith("G"):
+                gb = int(v[:-1]); break
+        if not gb or (s["name"], gb) in seen:
+            continue
+        seen.add((s["name"], gb))
+        label = f'{s["mgr"]}/{s["name"]}'
+        rows.append((label, gb))
+    rows.sort(key=lambda r: -r[1])
+    out = []
+    for label, gb in rows:
+        out.append(f'<div class="bar"><span class="lab" style="width:11rem">{E(label)}</span>'
+                   f'<span class="trk" style="max-width:28rem"><span class="fil" '
+                   f'style="width:{min(100,gb*100//32)}%"></span></span>'
+                   f'<span class="val">{gb}&thinsp;GB cap</span></div>')
+    return "\n".join(out)
+
+
 def calendar_strip(cal):
     cells = []
     for d, n in cal:
@@ -393,6 +419,15 @@ def surface_rows(states):
     return "\n".join(rows)
 
 
+def load_analysis(repo: Path):
+    """Layer 2: reasoned commentary written by an agent per regeneration.
+    Dated and staleness-budgeted so an old analysis expires visibly."""
+    p = repo / "docs/estate-report-analysis.html"
+    if not p.exists():
+        return None
+    return p.read_text()
+
+
 def load_authored():
     """Authored framing lives beside the generator so prose edits do not touch
     collection logic. Falls back to an empty dict when absent."""
@@ -421,6 +456,7 @@ def build(F, holes, authored, out_path: Path):
         for a in F["stalls"].get("attribution", []))
     prov_rows = "\n".join(
         f"<tr><td>{E(sec)}</td><td>{E(org)}</td></tr>" for sec, org in [
+            ("Reasoned analysis", "reasoned — written by an agent over a specific run's data; dated; expires visibly"),
             ("Findings", "predicate — printed only while true"),
             ("Generation & repository", "measured (git, nixos-version)"),
             ("Surface inventory & states", "measured (inventory JSON + systemctl)"),
@@ -440,6 +476,10 @@ def build(F, holes, authored, out_path: Path):
     def sec(key):
         return sections.get(key, f"<p class='hole'>authored section '{E(key)}' missing</p>")
 
+    analysis = load_analysis(Path(F.get("_repo_path", "/realm/project/sinnix"))) or (
+        "<p class='hole'>No analysis layer present for this regeneration. The "
+        "generator emits facts; interpretation requires an agent — write "
+        "docs/estate-report-analysis.html (dated) and regenerate.</p>")
     doc = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -484,6 +524,11 @@ def build(F, holes, authored, out_path: Path):
   {sec('lead')}
 </section>
 
+<section id="analysis">
+  <h2>Reasoned analysis</h2>
+  {analysis}
+</section>
+
 <section id="findings">
   <h2>Standing findings</h2>
   <p>Each line below is a <em>predicate</em>: the generator checks its
@@ -524,6 +569,12 @@ def build(F, holes, authored, out_path: Path):
     <thead><tr><th>Class</th><th>MemHigh</th><th>MemMax</th><th>Nice</th><th>IO</th></tr></thead>
     <tbody>{''.join(f"<tr><td>{E(c['name'])}</td><td>{E(str(c['MemoryHigh'] or '—'))}</td><td>{E(str(c['MemoryMax'] or '—'))}</td><td>{E(str(c['Nice'] if c['Nice'] is not None else '—'))}</td><td>{E(str(c['io'] or '—'))}</td></tr>" for c in F['inventory'].get('classes', []))}</tbody>
   </table></div>
+  <h3>The memory skyline</h3>
+  <p>Slice memory ceilings as a share of the physical 32&nbsp;GB — the
+  over-commitment is deliberate (pressure reclaim and layered kill policy
+  absorb collisions); this chart is generated from the live inventory, so
+  budget changes redraw it:</p>
+  {skyline(F['inventory'].get('slices', []))}
   <h3>30-day stall calendar</h3>
   <p>5-second samples with whole-system memory-pressure "full" above 15%/min
   <span class="ev ev-measured">measured</span>; success for the tuning
@@ -675,6 +726,7 @@ def main():
         sys.exit(verify(Path(args.verify)))
     repo = Path(args.repo)
     F, holes = collect_all(repo, args.no_eval)
+    F["_repo_path"] = str(repo)
     authored = load_authored()
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
