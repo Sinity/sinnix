@@ -403,15 +403,9 @@ mkFeatureModule {
           };
 
           xdg.configFile = {
-            "claude/hooks/pretooluse-bash.sh".source = mkDotsFile "/claude/hooks/pretooluse-bash.sh";
-            "claude/hooks/sessionstart-polylogue-recall.sh".source =
-              mkDotsFile "/claude/hooks/sessionstart-polylogue-recall.sh";
-            "claude/hooks/sessionstart-sinex-recall.sh" = {
-              text = builtins.readFile ../../../../dots/claude/hooks/sessionstart-sinex-recall.sh;
-              executable = true;
-            };
-            "claude/hooks/sessionstart-beads-prime.sh".source =
-              mkDotsFile "/claude/hooks/sessionstart-beads-prime.sh";
+            # Claude hooks are NOT registered here: settings.json references
+            # them dots-direct (dots/claude/hooks/*.sh), so a new hook file
+            # is live the moment it exists — no rebuild, no registration.
             "claude/CLAUDE.md".source = mkDotsFile "/claude/CLAUDE.md";
             "claude/skills" = {
               source = sharedSkillFarm;
@@ -522,7 +516,7 @@ mkFeatureModule {
               ".local/bin/sessionstart-sinex-recall" = {
                 text = ''
                   #!${pkgs.runtimeShell}
-                  exec "$HOME/.claude/hooks/sessionstart-sinex-recall.sh" "$@"
+                  exec "${sinnixCfg.paths.dotsRoot}/claude/hooks/sessionstart-sinex-recall.sh" "$@"
                 '';
                 executable = true;
                 force = true;
