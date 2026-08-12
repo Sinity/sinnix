@@ -41,6 +41,7 @@ in
     ./tests/runtime.nix
     ./tests/health-sentinel.nix
     ./tests/capability-manifest.nix
+    ./tests/hub.nix
     ./tests/ops-reducer.nix
     ./tests/quota.nix
     ./tests/noctalia.nix
