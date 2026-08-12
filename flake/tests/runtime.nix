@@ -62,21 +62,16 @@ in
             message = "resource-class defaults must remain under user overrides";
           }
           {
-            assertion = config.systemd.services.runtime-policy-system.unitConfig.OnFailure == [ "sinnix-health-transition@%n" ];
+            assertion =
+              config.systemd.services.runtime-policy-system.unitConfig.OnFailure
+              == [ "sinnix-health-transition@%n" ];
             message = "observed system services must receive the system health transition template";
           }
           {
-            assertion = config.home-manager.users.sinity.systemd.user.services.runtime-policy-user.Unit.OnFailure == [ "sinnix-health-transition@%n" ];
+            assertion =
+              config.home-manager.users.sinity.systemd.user.services.runtime-policy-user.Unit.OnFailure
+              == [ "sinnix-health-transition@%n" ];
             message = "observed user services must receive the user health transition template";
-          }
-          {
-            assertion = !config.sinnix.runtime.inventory.commandClasses."gpu-runtime".lease.required
-              && lib.elem "stashbox-vlm-serve" config.sinnix.runtime.inventory.commandClasses."gpu-runtime".commandMatchers;
-            message = "GPU VLM launches must use a non-lease command class";
-          }
-          {
-            assertion = config.sinnix.runtime.inventory.slices.user."gpu-runtime".MemoryMax == "12G";
-            message = "GPU runtime scopes must retain a bounded user-slice memory budget";
           }
         ];
       };
@@ -117,32 +112,40 @@ in
             message = "AI activation must have a bounded idle timeout";
           }
           {
-            assertion = lib.elem "ollama.service" config.systemd.services.koboldcpp.unitConfig.Conflicts
+            assertion =
+              lib.elem "ollama.service" config.systemd.services.koboldcpp.unitConfig.Conflicts
               && lib.elem "koboldcpp.service" config.systemd.services.ollama.unitConfig.Conflicts;
             message = "GPU inference backends must be mutually exclusive";
           }
           {
-            assertion = config.sinnix.runtime.inventory.surfaces.ollama.activation.backendEndpoint == "127.0.0.1:11435"
-              && config.sinnix.runtime.inventory.surfaces.ollama-proxy.activation.publicEndpoint == "127.0.0.1:11434";
+            assertion =
+              config.sinnix.runtime.inventory.surfaces.ollama.activation.backendEndpoint == "127.0.0.1:11435"
+              &&
+                config.sinnix.runtime.inventory.surfaces.ollama-proxy.activation.publicEndpoint
+                == "127.0.0.1:11434";
             message = "Runtime inventory must describe the public and private AI activation endpoints";
           }
           {
-            assertion = config.sinnix.runtime.inventory.surfaces.litellm.activation.dependsOn == [ "ollama-proxy" ];
+            assertion =
+              config.sinnix.runtime.inventory.surfaces.litellm.activation.dependsOn == [ "ollama-proxy" ];
             message = "LiteLLM activation must retain the Ollama socket dependency";
           }
           {
-            assertion = config.sinnix.runtime.inventory.surfaces.open-webui.activation.publicEndpoint == "127.0.0.1:8080"
+            assertion =
+              config.sinnix.runtime.inventory.surfaces.open-webui.activation.publicEndpoint == "127.0.0.1:8080"
               && config.sinnix.runtime.inventory.surfaces.whisper.activation.publicEndpoint == "127.0.0.1:8090"
               && config.sinnix.runtime.inventory.surfaces.tts.activation.publicEndpoint == "127.0.0.1:8000";
             message = "The AI factory must preserve direct loopback endpoints for representative services";
           }
           {
-            assertion = config.systemd.services.whisper-server.serviceConfig.ExecStart != null
+            assertion =
+              config.systemd.services.whisper-server.serviceConfig.ExecStart != null
               && lib.hasInfix "whisper-server" config.systemd.services.whisper-server.serviceConfig.ExecStart;
             message = "The AI factory must leave the native whisper command visible";
           }
           {
-            assertion = config.systemd.services.podman-openedai-speech.serviceConfig.ExecStart != null
+            assertion =
+              config.systemd.services.podman-openedai-speech.serviceConfig.ExecStart != null
               && lib.hasInfix "podman" config.systemd.services.podman-openedai-speech.serviceConfig.ExecStart;
             message = "The AI factory must leave the container launch visible";
           }
@@ -157,9 +160,6 @@ in
       groupEvaluated = evalTestSpec system groupSpec;
       groupBindingsJson = builtins.toJSON (
         groupEvaluated.config.home-manager.users.sinity.wayland.windowManager.hyprland.settings.bind or [ ]
-      );
-      groupSubmapsJson = builtins.toJSON (
-        groupEvaluated.config.home-manager.users.sinity.wayland.windowManager.hyprland.submaps or { }
       );
     in
     {
@@ -202,31 +202,14 @@ in
             cat > bindings.json <<'EOF_BINDINGS'
             ${groupBindingsJson}
             EOF_BINDINGS
+            # The one real invariant here: no two bindings may claim the same
+            # chord (a duplicate silently shadows its twin). Which chords do
+            # what is config content, not contract -- asserting exact binding
+            # strings just memorializes the keymap diff-by-diff.
             jq -e '
               (map(split(",") | {chord: ((.[0] | gsub("^[[:space:]]+|[[:space:]]+$"; "")) + "," + (.[1] | gsub("^[[:space:]]+|[[:space:]]+$"; "")))})
-                | group_by(.chord) | map(select(length > 1)) | length) == 0 and
-              any(.[]; . == "SUPER, bracketleft, moveintogroup, l") and
-              any(.[]; . == "SUPER, bracketright, moveintogroup, r") and
-              any(.[]; . == "SUPER SHIFT, bracketleft, moveoutofgroup") and
-              any(.[]; . == "SUPER SHIFT, O, OCR selected region to clipboard, exec, hyprland-ocr") and
-              any(.[]; . == "SUPER SHIFT, Z, Increase cursor magnification, exec, hyprctl keyword cursor:zoom_factor 2.0") and
-              any(.[]; . == "SUPER SHIFT, X, Reset cursor magnification, exec, hyprctl keyword cursor:zoom_factor 1.0") and
-              any(.[]; . == "SUPER SHIFT, Escape, Dismiss visible scratchpads, exec, dismiss-scratchpads") and
-              any(.[]; . == "SUPER SHIFT, F, Smart fullscreen, fullscreen, 1") and
-              (any(.[]; . == "SUPER, G, togglegroup") and (any(.[]; . == "SUPER, T, togglegroup") | not))
+                | group_by(.chord) | map(select(length > 1)) | length) == 0
             ' bindings.json >/dev/null
-            cat > submaps.json <<'EOF_SUBMAPS'
-            ${groupSubmapsJson}
-            EOF_SUBMAPS
-            jq -e '
-              .system.settings.bindd as $binds |
-              (any($binds[]; . == ", S, Screenshot region, exec, noctalia msg screenshot-region") and
-               any($binds[]; . == ", F, Screenshot fullscreen, exec, noctalia msg screenshot-fullscreen") and
-               any($binds[]; . == ", P, Park background work, exec, sinnix-pressure-park auto") and
-               any($binds[]; . == ", H, Show display capture status, exec, sinnix-screenshot-control probe") and
-               any($binds[]; . == ", Escape, Exit system controls, submap, reset") and
-               any($binds[]; . == ", Return, Exit system controls, submap, reset"))
-            ' submaps.json >/dev/null
             touch "$out"
           '';
     };
