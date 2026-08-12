@@ -101,7 +101,14 @@ ACTIONS = {
     "park",
     "rebuild_override",
     "restart",
+    "start",
+    "stop",
 }
+
+# Lifecycle verbs share one admission gate: the target must be an attested
+# runtime-inventory unit that declares observe.restartable. This is what lets
+# the web hub drive on-demand AI backends without a second control plane.
+LIFECYCLE_ACTIONS = {"restart", "start", "stop"}
 
 
 class ActionError(ValueError):
@@ -178,7 +185,7 @@ def validate_request(value: Any) -> dict[str, Any]:
             or not 1 <= deadline <= 86400
         ):
             raise ActionError("deadline_seconds must be between 1 and 86400")
-    if action in {"reset_policy", "thaw"} and parameters:
+    if action in {"reset_policy", "thaw", "start", "stop"} and parameters:
         raise ActionError(f"{action} does not accept parameters")
     if action == "rebuild_override":
         if set(parameters) != {"name", "value"}:
@@ -300,9 +307,9 @@ class ActionService:
             )
         if not isinstance(surface, dict):
             raise ActionError("runtime unit is not in the inventory", 403)
-        if request["action"] == "restart" and not surface.get("observe", {}).get(
-            "restartable", False
-        ):
+        if request["action"] in LIFECYCLE_ACTIONS and not surface.get(
+            "observe", {}
+        ).get("restartable", False):
             raise ActionError("runtime unit is not restartable", 403)
         return {"kind": "unit", "surface": surface}
 
@@ -388,13 +395,13 @@ class ActionService:
         if action == "interrupt":
             job_id = resolved["job"]["job_id"]
             command = [self.controller, "interrupt", "--job", job_id]
-        elif action == "restart":
+        elif action in LIFECYCLE_ACTIONS:
             surface = resolved["surface"]
             manager = surface["manager"]
             command = [
                 "systemctl",
                 "--user" if manager == "user" else "--system",
-                "restart",
+                action,
                 surface["unit"],
             ]
         elif action in {"freeze", "thaw"}:

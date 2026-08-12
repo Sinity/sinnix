@@ -90,6 +90,8 @@ def test_action_fixtures_are_attested_and_idempotent_across_restart(
         ("thaw", {"unit": "safe"}, "k4"),
         ("reset_policy", {"unit": "safe"}, "k5"),
         ("restart", {"unit": "safe"}, "k7"),
+        ("start", {"unit": "safe"}, "k8"),
+        ("stop", {"unit": "safe"}, "k9"),
     ]:
         assert (
             actions.execute(request(action, target, key=key))["adapter"]["status"]
@@ -131,6 +133,20 @@ def test_action_rejects_unknown_pid_stale_revision_and_unsafe_unit(
     actions.execute(request("restart", {"unit": "safe"}, key="fixed-safe"))
     with pytest.raises(ActionError, match="another request"):
         actions.execute(request("reset_policy", {"unit": "safe"}, key="fixed"))
+    # Lifecycle verbs share restart's admission gate and take no parameters,
+    # and they refuse attested-job targets the way every unit verb does.
+    for action in ("start", "stop"):
+        with pytest.raises(ActionError, match="restartable"):
+            actions.execute(request(action, {"unit": "fixed"}, key=f"{action}-fixed"))
+        with pytest.raises(ActionError, match="does not accept parameters"):
+            validate_request(
+                {
+                    **request(action, {"unit": "safe"}, key=f"{action}-params"),
+                    "parameters": {"mode": "graceful"},
+                }
+            )
+        with pytest.raises(ActionError, match="focus and interrupt"):
+            validate_request(request(action, {"job_id": "job-1"}, key=f"{action}-job"))
 
 
 def test_policy_properties_and_rebuild_override_are_enumerated(tmp_path: Path) -> None:
