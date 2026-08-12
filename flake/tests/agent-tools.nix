@@ -807,6 +807,24 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/kitty-agent-here.sh} "$helper"
             touch "$out"
           '';
+      kittyFocusOpacityFixture =
+        pkgs.runCommand "kitty-focus-opacity-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.diffutils
+              pkgs.jq
+            ];
+          }
+          ''
+            helper="$TMPDIR/kitty-focus-opacity"
+            cp ${../../scripts/kitty-focus-opacity} "$helper"
+            chmod +x "$helper"
+            patchShebangs "$helper"
+            ${pkgs.bash}/bin/bash ${../../flake/tests/kitty-focus-opacity.sh} "$helper"
+            touch "$out"
+          '';
       bdSafetyHookFixture =
         pkgs.runCommand "bd-safety-hook-fixture"
           {
@@ -940,18 +958,6 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/vacuity-sampler.sh} "$sampler"
             touch "$out"
           '';
-      agentTeamsPilotFixture =
-        pkgs.runCommand "agent-teams-pilot-fixture"
-          {
-            nativeBuildInputs = [
-              pkgs.bash
-              pkgs.jq
-            ];
-          }
-          ''
-            ${pkgs.bash}/bin/bash ${../../flake/tests/agent-teams-pilot.sh} ${../../docs/agent-teams-pilot.json}
-            touch "$out"
-          '';
       recoverySkillsFixture =
         pkgs.runCommand "recovery-skills-fixture"
           {
@@ -1062,6 +1068,7 @@ in
         preflight = preflightFixture;
         hogkill = hogkillFixture;
         kitty-agent-here = kittyAgentHereFixture;
+        kitty-focus-opacity = kittyFocusOpacityFixture;
         bd-safety-hook = bdSafetyHookFixture;
         egress-guard = egressGuardFixture;
         context-handoff = contextHandoffFixture;
@@ -1069,7 +1076,6 @@ in
         desktop-capture = desktopCaptureFixture;
         claude-judge = claudeJudgeFixture;
         vacuity-sampler = vacuitySamplerFixture;
-        agent-teams-pilot = agentTeamsPilotFixture;
         recovery-skills = recoverySkillsFixture;
         hooks-harness = hooksHarnessFixture;
         agent-definitions = agentDefinitionsFixture;
