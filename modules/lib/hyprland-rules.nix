@@ -48,7 +48,15 @@ let
     ++ (lib.optional (rule ? size) "size = ${formatSize rule.size}")
     ++ (lib.optional (rule ? move) "move = ${formatPos rule.move}")
     ++ (lib.optional (rule ? workspace) "workspace = ${rule.workspace}")
-    ++ (lib.optional (rule ? opacity) "opacity = ${toString rule.opacity} ${toString rule.opacity}")
+    ++ (lib.optional (rule ? opacity) (
+      "opacity = "
+      + (
+        if builtins.isAttrs rule.opacity then
+          "${toString rule.opacity.active} ${toString rule.opacity.inactive}"
+        else
+          "${toString rule.opacity} ${toString rule.opacity}"
+      )
+    ))
     ++ (lib.optional (rule ? group) "group = ${rule.group}")
     ++ (lib.optional (rule ? idleInhibit) "idle_inhibit = ${rule.idleInhibit}");
 
