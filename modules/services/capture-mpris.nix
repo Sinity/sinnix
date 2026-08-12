@@ -48,7 +48,7 @@ mkServiceModule {
     };
   };
   surface = {
-    unit = "capture-mpris.service";
+    unit = "sinnix-capture-mpris.service";
     manager = "user";
     resourceClass = "capture-runtime";
     observe = {
@@ -80,7 +80,7 @@ mkServiceModule {
       home-manager.users.${username} =
         { ... }:
         {
-          systemd.user.services.capture-mpris = {
+          systemd.user.services.sinnix-capture-mpris = {
             Unit = {
               Description = "MPRIS media-player track/status capture with playback heartbeat";
               After = [ "graphical-session.target" ];
@@ -88,7 +88,7 @@ mkServiceModule {
             };
             Service = lib.sinnix.mkRuntimeServiceConfig {
               runtimeInventory = config.sinnix.runtime.inventory;
-              unit = "capture-mpris.service";
+              unit = "sinnix-capture-mpris.service";
               overrides = {
                 Type = "simple";
                 ExecStart = "${monitor}/bin/capture-mpris-monitor --capture-root ${capturesRoot} --lane mpris --playerctl-bin ${pkgs.playerctl}/bin/playerctl --sinnix-capture-bin ${scriptPkgs.sinnix-capture}/bin/sinnix-capture --heartbeat-interval ${toString cfg.heartbeatIntervalSec}";

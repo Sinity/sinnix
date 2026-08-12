@@ -98,9 +98,17 @@ mkServiceModule {
             # gi.repository.Atspi/Atk typelibs aren't a propagated runtime
             # dependency of nixpkgs' pyatspi (at-spi2-core is only a
             # buildInput of *its* derivation) -- point PyGObject at
-            # at-spi2-core's typelib directory explicitly.
+            # at-spi2-core's typelib directory explicitly. pyatspi's
+            # __init__.py also imports gi.repository.DBus at module load
+            # time (unconditionally, not lazily) -- that typelib ships in
+            # gobject-introspection itself, not at-spi2-core, so both
+            # directories must be on GI_TYPELIB_PATH (colon-separated,
+            # matching GLib's own search-path convention) or the daemon
+            # crash-loops with ImportError before ever reaching pyatspi
+            # code. Caught live: switch succeeded, unit registered, but
+            # crash-looped (14 restarts) until this fix.
             Environment = [
-              "GI_TYPELIB_PATH=${pkgs.at-spi2-core}/lib/girepository-1.0"
+              "GI_TYPELIB_PATH=${pkgs.at-spi2-core}/lib/girepository-1.0:${pkgs.gobject-introspection}/lib/girepository-1.0"
             ];
             Restart = "on-failure";
             RestartSec = "5s";
