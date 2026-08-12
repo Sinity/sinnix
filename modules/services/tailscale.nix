@@ -87,10 +87,9 @@ mkServiceModule {
         ];
       };
 
-      # Tailscale's autoconnect unit needs the authkey at start time.
-      systemd.services.tailscaled-autoconnect = {
-        after = [ "agenix.service" ];
-        requires = [ "agenix.service" ];
-      };
+      # No agenix ordering needed: agenix decrypts during system activation,
+      # before units start. (The previous requires/after on "agenix.service"
+      # referenced a unit that does not exist -- agenix is an activation
+      # script, not a service -- which made autoconnect fail to load.)
     };
 } args
