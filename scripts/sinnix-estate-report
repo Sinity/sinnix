@@ -1,0 +1,691 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Generate the living estate report (HTML + figures sidecar) from live probes; --verify diffs a published report against fresh probes
+# runtimeInputs: python3 coreutils gnugrep systemd util-linux git jq iproute2
+
+"""The estate report as a program, not a document.
+
+Every volatile figure is collected at generation time; findings are
+conditional predicates that stop printing when no longer true; authored
+framing is data-free and marked as such in the provenance table. A sidecar
+JSON records every collected figure so `--verify` can re-probe and report
+divergence instead of letting the report lie quietly.
+
+Usage:
+  sinnix-estate-report [--output PATH] [--no-eval] [--repo PATH]
+  sinnix-estate-report --verify [PATH]
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import html
+import json
+import os
+import re
+import shutil
+import sqlite3
+import subprocess
+import sys
+from pathlib import Path
+
+DEFAULT_OUTPUT = "/realm/data/derived/reports/sinnix-estate.html"
+TELEMETRY_DB = "/realm/data/captures/machine/telemetry.sqlite"
+INVENTORY = "/etc/sinnix/runtime-inventory.json"
+
+E = html.escape
+
+
+def run(argv, timeout=30, cwd=None):
+    try:
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, cwd=cwd)
+        return p.returncode, p.stdout, p.stderr
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return 125, "", str(exc)
+
+
+def now_utc():
+    return dt.datetime.now(dt.timezone.utc)
+
+
+# ---------------------------------------------------------------- collectors
+# Each collector returns (figures-dict, holes-list). Figures land in the
+# sidecar for --verify; holes render as visible gaps, never estimates.
+
+def collect_repo(repo: Path):
+    fig, holes = {}, []
+    rc, out, _ = run(["git", "rev-parse", "--short", "HEAD"], cwd=repo)
+    fig["head"] = out.strip() if rc == 0 else None
+    rc, out, _ = run(["git", "rev-list", "--count", "HEAD"], cwd=repo)
+    fig["commits_total"] = int(out) if rc == 0 else None
+    rc, out, _ = run(["git", "log", "--format=%ad", "--date=format:%Y-%m"], cwd=repo, timeout=60)
+    months = {}
+    for line in out.split():
+        months[line] = months.get(line, 0) + 1
+    fig["commits_by_month"] = sorted(months.items())[-16:]
+    today = now_utc().strftime("%Y-%m-%d")
+    rc, out, _ = run(["git", "log", f"--since={today} 00:00", "--format=%ad",
+                      "--date=format:%H"], cwd=repo)
+    hours = {}
+    for line in out.split():
+        hours[line] = hours.get(line, 0) + 1
+    fig["commits_today_by_hour"] = sorted(hours.items())
+    fig["commits_today"] = sum(hours.values())
+    rc, out, _ = run(["git", "rev-list", "origin/master..master", "--count"], cwd=repo)
+    fig["ahead_of_origin"] = int(out) if rc == 0 else None
+    counts = {}
+    for label, glob in [("top", "modules/*.nix"), ("profiles", "modules/profiles/*.nix"),
+                        ("lib", "modules/lib/*.nix")]:
+        counts[label] = len(list(repo.glob(glob)))
+    counts["services"] = len(list((repo / "modules/services").rglob("*.nix")))
+    counts["features"] = len(list((repo / "modules/features").rglob("*.nix")))
+    fig["modules"] = counts
+    fig["modules_total"] = sum(counts.values())
+    fig["scripts"] = len([p for p in (repo / "scripts").iterdir()
+                          if p.name not in ("__pycache__", "tests")])
+    fig["tests"] = len(list((repo / "flake/tests").iterdir()))
+    fig["overlays"] = len(list((repo / "flake/overlay/package").glob("*.nix")))
+    try:
+        lock = json.loads((repo / "flake.lock").read_text())
+        fig["inputs"] = len(lock["nodes"]["root"]["inputs"])
+    except Exception:
+        holes.append("flake.lock unreadable — input count missing")
+    return fig, holes
+
+
+def collect_generation(repo: Path):
+    fig, holes = {}, []
+    rc, out, _ = run(["nixos-version", "--configuration-revision"])
+    fig["live_revision"] = out.strip() if rc == 0 else None
+    rc, out, _ = run(["git", "rev-parse", "HEAD"], cwd=repo)
+    fig["repo_revision"] = out.strip() if rc == 0 else None
+    if fig["live_revision"] and fig["repo_revision"]:
+        fig["drift"] = not fig["live_revision"].startswith(fig["repo_revision"][:12]) \
+            if "-dirty" not in fig["live_revision"] else \
+            not fig["live_revision"].replace("-dirty", "").startswith(fig["repo_revision"][:12])
+    return fig, holes
+
+
+def collect_inventory():
+    fig, holes = {}, []
+    try:
+        inv = json.loads(Path(INVENTORY).read_text())
+    except Exception as exc:
+        return {}, [f"runtime inventory unreadable: {exc}"]
+    fig["surface_count"] = len(inv.get("surfaces", {}))
+    fig["class_count"] = len(inv.get("classes", {}))
+    fig["command_class_count"] = len(inv.get("commandClasses", {}))
+    fig["capture_count"] = len(inv.get("captures", []))
+    classes = []
+    for name, c in sorted(inv.get("classes", {}).items()):
+        sc = c.get("serviceConfig", {})
+        classes.append({"name": name, "MemoryHigh": sc.get("MemoryHigh"),
+                        "MemoryMax": sc.get("MemoryMax"), "Nice": sc.get("Nice"),
+                        "io": sc.get("IOSchedulingClass"),
+                        "desc": c.get("description", "")})
+    fig["classes"] = classes
+    slices = []
+    for mgr, tree in sorted(inv.get("slices", {}).items()):
+        for name, s in sorted(tree.items()):
+            slices.append({"mgr": mgr, "name": name, "CPUWeight": s.get("CPUWeight"),
+                           "MemoryHigh": s.get("MemoryHigh"), "MemoryMax": s.get("MemoryMax")})
+    fig["slices"] = slices
+    surfaces = []
+    for name, s in sorted(inv.get("surfaces", {}).items()):
+        surfaces.append({"name": name, "unit": s.get("unit"), "mgr": s.get("manager"),
+                         "kind": s.get("kind"),
+                         "captures": [c.get("name") for c in s.get("captures", [])]})
+    fig["surfaces"] = surfaces
+    return fig, holes
+
+
+TIMER_DRIVEN = {"borgbackup-check", "borgbackup-job-persist", "borgbackup-job-realm",
+    "borgbackup-job-sinex-blobs", "borgbackup-maintenance", "borgbackup-root-snapshots",
+    "borgbackup-status", "btrbk", "btrfs-metadata-image-backup", "census",
+    "machine-telemetry-sqlite-backup", "nix-gc", "nix-optimise", "sinex-postgres-dump",
+    "sinnix-borg-drill", "capture-audio-index", "capture-kitty-scrollback", "url-ledger",
+    "sinex-document-scan"}
+SOCKET_ACTIVATED = {"ollama", "litellm", "koboldcpp", "open-webui", "tts", "whisper", "comfyui"}
+# Surfaces the operator has acknowledged as intentionally down. Until the
+# acknowledged-outage surface (sinnix-vzja) lands in the inventory itself,
+# this list is the interim carrier; each entry names its reason.
+ACKNOWLEDGED = {
+    "sinexd": "event-platform repair in progress",
+    "nats": "event-platform repair in progress",
+    "postgresql": "event-platform repair in progress",
+    "sinex-runtime": "event-platform repair in progress",
+    "sinex-runtime-timer": "event-platform repair in progress",
+    "sinex-document-scan": "event-platform repair in progress",
+    "sinex-postgres-dump": "event-platform repair in progress",
+    "sinex-postgres-dump-timer": "event-platform repair in progress",
+}
+
+
+def collect_states(surfaces):
+    fig, holes = {}, []
+    rows = []
+    for s in surfaces:
+        unit, mgr = s["unit"], s["mgr"]
+        if not re.search(r"\.(service|timer|socket|target)$", unit or ""):
+            state = "no-unit"
+        else:
+            argv = ["systemctl"] + (["--user"] if mgr == "user" else []) + ["is-active", unit]
+            rc, out, _ = run(argv, timeout=10)
+            state = out.strip() or "unknown"
+        rows.append({**s, "state": state})
+    fig["states"] = rows
+    fig["active"] = sum(1 for r in rows if r["state"] == "active")
+    fig["inactive"] = sum(1 for r in rows if r["state"] in ("inactive", "failed"))
+    return fig, holes
+
+
+def collect_storage():
+    fig, holes = {}, []
+    mounts = {}
+    for mp in ["/", "/realm", "/outer-realm", "/neo-outer-realm"]:
+        try:
+            st = os.statvfs(mp)
+            total = st.f_blocks * st.f_frsize
+            free = st.f_bavail * st.f_frsize
+            mounts[mp] = {"total_gb": round(total / 1e9), "used_pct": round(100 * (1 - free / total))}
+        except OSError:
+            holes.append(f"statvfs failed for {mp}")
+    fig["mounts"] = mounts
+    rc, out, _ = run(["swapon", "--show=NAME,SIZE,USED", "--noheadings", "--bytes"])
+    swaps = []
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 3:
+            swaps.append({"name": parts[0], "size": int(parts[1]), "used": int(parts[2])})
+    fig["swap"] = swaps
+    lake = []
+    for sub in sorted(Path("/realm/data/captures").iterdir()):
+        if not sub.is_dir():
+            continue
+        rc, out, _ = run(["du", "-s", "--block-size=1G", str(sub)], timeout=120)
+        if rc == 0 and out.split():
+            lake.append({"path": f"captures/{sub.name}", "gb": int(out.split()[0])})
+    for sub in ["exports", "libraries", "derived", "knowledgebase"]:
+        rc, out, _ = run(["du", "-s", "--block-size=1G", f"/realm/data/{sub}"], timeout=120)
+        if rc == 0 and out.split():
+            lake.append({"path": sub, "gb": int(out.split()[0])})
+    fig["lake"] = sorted(lake, key=lambda r: -r["gb"])[:14]
+    holes.append("filesystem-usage history is not captured by telemetry, so fill "
+                 "trend / runway remains unmeasurable until a collector exists")
+    return fig, holes
+
+
+def collect_ports():
+    fig, holes = {}, []
+    rc, out, _ = run(["ss", "-tlnp"])
+    ports = {}
+    for line in out.splitlines()[1:]:
+        m = re.search(r":(\d+)\s", line)
+        pm = re.search(r'users:\(\("([^"]+)', line)
+        if m:
+            ports.setdefault(int(m.group(1)), pm.group(1) if pm else "")
+    fig["listeners"] = sorted(ports.items())
+    return fig, holes
+
+
+def collect_beads(repo: Path):
+    fig, holes = {}, []
+    rc, out, _ = run(["bd", "list", "--status=open", "--json"], cwd=repo, timeout=60)
+    if rc != 0:
+        return {}, ["bd unavailable — work-item figures missing"]
+    try:
+        items = json.loads(out)
+        fig["open"] = len(items)
+        pr = {}
+        for it in items:
+            pr[it.get("priority", "?")] = pr.get(it.get("priority", "?"), 0) + 1
+        fig["open_by_priority"] = sorted(pr.items())
+        fig["p1"] = [{"id": it["id"], "title": it["title"]}
+                     for it in items if it.get("priority") == 1]
+    except Exception as exc:
+        holes.append(f"bd output unparsable: {exc}")
+    return fig, holes
+
+
+def collect_checks(repo: Path, skip: bool):
+    if skip:
+        return {}, ["check counts skipped (--no-eval)"]
+    fig, holes = {}, []
+    for attr, key in [("checks", "default"), ("heavyChecks", "heavy")]:
+        rc, out, _ = run(["/run/current-system/sw/bin/nix", "eval",
+                          f"{repo}#{attr}.x86_64-linux", "--apply",
+                          "x: builtins.length (builtins.attrNames x)"], timeout=180)
+        if rc == 0:
+            fig[key] = int(out.strip())
+        else:
+            holes.append(f"nix eval for {attr} failed")
+    return fig, holes
+
+
+def collect_secrets():
+    fig, holes = {}, []
+    enc = list(Path("/realm/data/secrets/sinnix/secret").glob("*.age")) \
+        if Path("/realm/data/secrets/sinnix/secret").is_dir() else []
+    fig["encrypted"] = len(enc)
+    return fig, holes
+
+
+def collect_stalls():
+    fig, holes = {}, []
+    if not Path(TELEMETRY_DB).exists():
+        return {}, ["telemetry database missing — pressure history unavailable"]
+    con = sqlite3.connect(f"file:{TELEMETRY_DB}?mode=ro", uri=True)
+    cur = con.execute(
+        "SELECT date(observed_at), sum(memory_psi_full_avg60 > 15) FROM metric_sample "
+        "WHERE observed_at > datetime('now','-30 days') GROUP BY 1 ORDER BY 1")
+    fig["calendar"] = [(d, int(n or 0)) for d, n in cur.fetchall()]
+    # attribution: for each day with >100 stall samples, the unit whose own
+    # memory-full pressure peaked highest that day
+    attr = []
+    for d, n in fig["calendar"]:
+        if n <= 100:
+            continue
+        cur = con.execute(
+            "SELECT unit, round(max(memory_full_avg60),1) FROM service_cgroup_pressure_sample "
+            "WHERE date(observed_at)=? AND memory_full_avg60 > 5 "
+            "GROUP BY unit ORDER BY 2 DESC LIMIT 3", (d,))
+        attr.append({"day": d, "samples": n,
+                     "top": [{"unit": u, "peak": p} for u, p in cur.fetchall()]})
+    fig["attribution"] = attr
+    con.close()
+    return fig, holes
+
+
+def collect_pilot(repo: Path):
+    fig, holes = {}, []
+    p = repo / "docs/agent-teams-pilot.json"
+    if p.exists():
+        d = json.loads(p.read_text())
+        fig["outcome"] = d.get("decision", {}).get("outcome")
+        fig["scores"] = d.get("results", {}).get("scores")
+    return fig, holes
+
+
+# ------------------------------------------------------------- predicates
+def findings(F):
+    out = []
+    for sw in F.get("storage", {}).get("swap", []):
+        if "zram" in sw["name"] and sw["size"] and sw["used"] / sw["size"] > 0.9:
+            out.append(("warn", f"Compressed swap {sw['name']} is "
+                        f"{100*sw['used']//sw['size']}% full — memory working set "
+                        "exceeds RAM; the tuning programme (sinnix-a1dp) is the fix track."))
+    for mp, m in F.get("storage", {}).get("mounts", {}).items():
+        if m["used_pct"] >= 85:
+            out.append(("warn", f"<code>{E(mp)}</code> is {m['used_pct']}% full."))
+    g = F.get("generation", {})
+    if g.get("drift"):
+        out.append(("bad", "The running generation does NOT match the repository "
+                    "HEAD — recent commits are not live. Run <code>switch</code> "
+                    "or expect this report to describe a future."))
+    ahead = F.get("repo", {}).get("ahead_of_origin")
+    if ahead:
+        out.append(("info", f"{ahead} local commits not yet pushed to origin."))
+    unexplained = [r["name"] for r in F.get("states", {}).get("states", [])
+                   if r["state"] in ("inactive", "failed")
+                   and r["name"] not in TIMER_DRIVEN
+                   and r["name"] not in SOCKET_ACTIVATED
+                   and r["name"] not in ACKNOWLEDGED]
+    if unexplained:
+        out.append(("warn", "Unexplained-inactive surfaces: "
+                    + ", ".join(f"<code>{E(n)}</code>" for n in unexplained)
+                    + " — not timer-driven, not on-demand, not acknowledged."))
+    if any(r["name"] in ACKNOWLEDGED for r in F.get("states", {}).get("states", [])
+           if r["state"] in ("inactive", "failed")):
+        out.append(("info", "The event-platform cluster is down and "
+                    "operator-acknowledged (under repair). Interim carrier for the "
+                    "acknowledgement is this generator; the durable one is sinnix-vzja."))
+    return out
+
+
+# ------------------------------------------------------------- html helpers
+def bar_block(pairs, unit="", width_label="6.5rem", max_track="30rem"):
+    if not pairs:
+        return "<p class='hole'>no data</p>"
+    mx = max(v for _, v in pairs) or 1
+    rows = []
+    for label, v in pairs:
+        rows.append(
+            f'<div class="bar"><span class="lab" style="width:{width_label}">{E(str(label))}</span>'
+            f'<span class="trk" style="max-width:{max_track}"><span class="fil" '
+            f'style="width:{max(1,int(v*100/mx))}%"></span></span>'
+            f'<span class="val">{v:,}{unit}</span></div>')
+    return "\n".join(rows)
+
+
+def calendar_strip(cal):
+    cells = []
+    for d, n in cal:
+        pct = 6 if n == 0 else 25 if n < 50 else 50 if n < 200 else 75 if n < 600 else 100
+        cells.append(f'<div class="cd" title="{d}: {n} stall samples" '
+                     f'style="background:color-mix(in srgb,var(--warn) {pct}%,var(--card))">'
+                     f'<span>{d[8:]}</span></div>')
+    return '<div class="calstrip">' + "".join(cells) + "</div>"
+
+
+def surface_rows(states):
+    rows = []
+    for r in states:
+        name, state = r["name"], r["state"]
+        if name in ACKNOWLEDGED and state in ("inactive", "failed"):
+            badge, note = '<span class="badge info">acked down</span>', ACKNOWLEDGED[name]
+        elif state == "active":
+            badge, note = '<span class="badge ok">active</span>', ""
+        elif state == "no-unit":
+            badge, note = '<span class="badge todo">no unit</span>', \
+                "path-watched output or dynamic unit family"
+        elif name in TIMER_DRIVEN:
+            badge, note = '<span class="badge ok">resting</span>', \
+                "timer-driven one-shot; inactive between runs by design"
+        elif name in SOCKET_ACTIVATED:
+            badge, note = '<span class="badge ok">on-demand</span>', \
+                "socket-activated; its proxy socket wakes it"
+        else:
+            badge, note = '<span class="badge warn">inactive</span>', ""
+        rows.append(f'<tr><td>{E(name)}</td><td><code>{E(r["unit"] or "")}</code></td>'
+                    f'<td>{E(r["mgr"] or "")}</td><td>{E(r["kind"] or "")}</td>'
+                    f'<td>{badge}</td><td>{E(note)}</td></tr>')
+    return "\n".join(rows)
+
+
+def load_authored():
+    """Authored framing lives beside the generator so prose edits do not touch
+    collection logic. Falls back to an empty dict when absent."""
+    for candidate in [Path("/realm/project/sinnix/docs/estate-report-content.json"),
+                      Path(__file__).resolve().parent.parent / "docs/estate-report-content.json"]:
+        if candidate.exists():
+            return json.loads(candidate.read_text())
+    return {}
+
+
+def build(F, holes, authored, out_path: Path):
+    gen = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+    finds = findings(F)
+    finds_html = "\n".join(
+        f'<li><span class="badge {k}">{k}</span> {t}</li>' for k, t in finds) \
+        or "<li>No standing findings — every predicate is currently quiet.</li>"
+    holes_html = "\n".join(f"<li>{E(h)}</li>" for h in holes) or "<li>none</li>"
+    st = F["storage"]
+    swap_html = "; ".join(
+        f'{E(s["name"].split("/")[-1])} {s["used"]//2**30}/{s["size"]//2**30} GB'
+        for s in st.get("swap", []))
+    lake_pairs = [(r["path"], r["gb"]) for r in st.get("lake", [])]
+    attr_rows = "\n".join(
+        f'<tr><td>{a["day"]}</td><td data-v="{a["samples"]}">{a["samples"]}</td>'
+        f'<td>{"; ".join(E(t["unit"]) + " (" + str(t["peak"]) + "%)" for t in a["top"]) or "—"}</td></tr>'
+        for a in F["stalls"].get("attribution", []))
+    prov_rows = "\n".join(
+        f"<tr><td>{E(sec)}</td><td>{E(org)}</td></tr>" for sec, org in [
+            ("Findings", "predicate — printed only while true"),
+            ("Generation & repository", "measured (git, nixos-version)"),
+            ("Surface inventory & states", "measured (inventory JSON + systemctl)"),
+            ("Storage, swap, lake", "measured (statvfs, swapon, du)"),
+            ("Ports", "measured (ss)"),
+            ("Stall calendar & attribution", "measured (telemetry SQL)"),
+            ("Work items", "measured (bd)"),
+            ("Check counts", "measured (nix eval)" if F.get("checks") else "hole (skipped)"),
+            ("Pilot results", "measured (protocol JSON)"),
+            ("Vocabulary, architecture, hosts, doctrine, runbook, failure catalog, why-layer",
+             "authored — deliberately data-free framing"),
+        ])
+    css = authored.get("css", "")
+    js = authored.get("js", "")
+    sections = authored.get("sections", {})
+
+    def sec(key):
+        return sections.get(key, f"<p class='hole'>authored section '{E(key)}' missing</p>")
+
+    doc = f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sinnix — Estate Atlas (living)</title>
+<style>{css}</style>
+</head>
+<body>
+<header class="page">
+  <h1>Sinnix — Estate Atlas</h1>
+  <span class="chip">living · regenerable</span>
+  <span class="chip">@ {E(F['repo'].get('head') or '?')}</span>
+  <span class="spacer"></span>
+  <button class="fs" onclick="fs(-1)">A−</button>
+  <button class="fs" onclick="fs(1)">A+</button>
+  <button class="theme" onclick="tgl()">◐ theme</button>
+</header>
+<div class="layout">
+<nav id="toc" aria-label="contents"></nav>
+<main>
+
+<section id="summary">
+  <h2>Summary</h2>
+  <dl class="meta">
+    <dt>generated</dt><dd><time class="age" datetime="{gen}"></time> — every volatile figure was collected at this moment</dd>
+    <dt>regenerate</dt><dd><code>sinnix estate-report</code> (this page names its own generator; <code>--verify</code> diffs it against fresh probes)</dd>
+    <dt>status</dt><dd><span class="badge ok">living</span> — stable filename, superseding the dated one-shot reports</dd>
+    <dt>basis</dt><dd><span class="ev ev-measured">measured</span> unless a section is marked authored in the provenance table (§ last)</dd>
+    <dt>source</dt><dd><a class="path" href="file:///realm/project/sinnix">/realm/project/sinnix</a> + live probes; generator: <a class="path" href="file:///realm/project/sinnix/scripts/sinnix-estate-report">scripts/sinnix-estate-report</a></dd>
+  </dl>
+  <div class="tiles">
+    <div class="tile"><span class="n">{F['repo'].get('modules_total','?')}</span><span class="l">module files</span></div>
+    <div class="tile"><span class="n">{F['inventory'].get('surface_count','?')}</span><span class="l">runtime surfaces</span></div>
+    <div class="tile"><span class="n">{F['states'].get('active','?')}</span><span class="l">surfaces active now</span></div>
+    <div class="tile"><span class="n">{F['repo'].get('scripts','?')}</span><span class="l">packaged scripts</span></div>
+    <div class="tile"><span class="n">{F['secrets'].get('encrypted','?')}</span><span class="l">managed secrets</span></div>
+    <div class="tile"><span class="n">{F['beads'].get('open','?')}</span><span class="l">open work items</span></div>
+    <div class="tile"><span class="n">{F['repo'].get('commits_today','?')}</span><span class="l">commits today</span></div>
+    <div class="tile"><span class="n">{(F.get('checks') or {}).get('default','—')}&thinsp;+&thinsp;{(F.get('checks') or {}).get('heavy','—')}</span><span class="l">checks (default+heavy)</span></div>
+  </div>
+  {sec('lead')}
+</section>
+
+<section id="findings">
+  <h2>Standing findings</h2>
+  <p>Each line below is a <em>predicate</em>: the generator checks its
+  condition at every run, and a finding that stops being true stops being
+  printed. An empty list is a real result.</p>
+  <ul>{finds_html}</ul>
+  <details><summary>Measurement holes this run</summary><ul>{holes_html}</ul></details>
+</section>
+
+<section id="vocabulary">{sec('vocabulary')}</section>
+<section id="architecture">
+  {sec('architecture_head')}
+  <h3>The repository's own history</h3>
+  <p>Commits per month <span class="ev ev-measured">measured</span> ({F['repo'].get('commits_total','?')} total since 2024-09):</p>
+  {bar_block(F['repo'].get('commits_by_month', []))}
+  {sec('architecture_tail')}
+</section>
+<section id="deployment">{sec('deployment')}</section>
+<section id="hosts">{sec('hosts')}</section>
+
+<section id="storage">
+  <h2>Storage, persistence, and backup</h2>
+  <div class="tiles">
+    {''.join(f'<div class="tile"><span class="n">{m["used_pct"]}%</span><span class="l">{E(mp)} used ({m["total_gb"]}G)</span></div>' for mp, m in st.get('mounts', {}).items())}
+  </div>
+  <p>Swap now <span class="ev ev-measured">measured</span>: {swap_html or 'none'}.</p>
+  <h3>The data lake, measured</h3>
+  {bar_block(lake_pairs, unit='&thinsp;GB', width_label='13rem')}
+  {sec('storage_doctrine')}
+</section>
+
+<section id="secrets">{sec('secrets')}</section>
+
+<section id="runtime-governance">
+  {sec('governance_head')}
+  <h3>Resource classes <span class="ev ev-measured" style="vertical-align:.35em">from the live inventory</span></h3>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Class</th><th>MemHigh</th><th>MemMax</th><th>Nice</th><th>IO</th></tr></thead>
+    <tbody>{''.join(f"<tr><td>{E(c['name'])}</td><td>{E(str(c['MemoryHigh'] or '—'))}</td><td>{E(str(c['MemoryMax'] or '—'))}</td><td>{E(str(c['Nice'] if c['Nice'] is not None else '—'))}</td><td>{E(str(c['io'] or '—'))}</td></tr>" for c in F['inventory'].get('classes', []))}</tbody>
+  </table></div>
+  <h3>30-day stall calendar</h3>
+  <p>5-second samples with whole-system memory-pressure "full" above 15%/min
+  <span class="ev ev-measured">measured</span>; success for the tuning
+  programme is this strip going pale:</p>
+  {calendar_strip(F['stalls'].get('calendar', []))}
+  <h3>Stall attribution</h3>
+  <p>For each day above 100 samples, the units whose <em>own</em> cgroup
+  memory-pressure peaked highest — turning "the machine hurt" into "this did
+  it" <span class="ev ev-measured">measured</span>:</p>
+  <div class="tablewrap"><table><thead><tr><th>Day</th><th>Samples</th><th class="nosort">Top pressure sources (unit, peak full-avg60)</th></tr></thead>
+  <tbody>{attr_rows or '<tr><td colspan=3>no qualifying days in window</td></tr>'}</tbody></table></div>
+  {sec('governance_tail')}
+</section>
+
+<section id="surfaces">
+  <h2>The full surface inventory</h2>
+  <p>All {F['inventory'].get('surface_count','?')} registered surfaces with live
+  state at generation time. "Resting"/"on-demand" are healthy dormancy;
+  "acked down" is operator-acknowledged repair; "no unit" rows are
+  path-watched or dynamic families.</p>
+  <input class="filter" placeholder="filter surfaces…" oninput="flt(this,'surf')">
+  <div class="tablewrap"><table id="surf">
+    <thead><tr><th>Surface</th><th>Unit</th><th>Mgr</th><th>Kind</th><th>State</th><th class="nosort">Note</th></tr></thead>
+    <tbody>{surface_rows(F['states'].get('states', []))}</tbody>
+  </table></div>
+  <p style="font-size:.88rem;color:var(--muted)">Counted from this table:
+  <span data-calc="count:#surf tbody tr"></span> surfaces —
+  <span data-calc="count:#surf tbody tr .ok"></span> healthy,
+  <span data-calc="count:#surf tbody tr .info"></span> acknowledged-down,
+  <span data-calc="count:#surf tbody tr .warn"></span> unexplained-inactive,
+  <span data-calc="count:#surf tbody tr .todo"></span> unit-less by design.</p>
+</section>
+
+<section id="capture">{sec('capture')}</section>
+
+<section id="ai-platform">
+  {sec('ai_head')}
+  <p>Listeners at generation time <span class="ev ev-measured">measured</span>:
+  {', '.join(f'<code>{p}</code>{("&nbsp;" + E(proc)) if proc else ""}' for p, proc in F['ports'].get('listeners', []))}.</p>
+</section>
+
+<section id="agents">{sec('agents')}
+  <h3>The agent-teams experiment</h3>
+  {sec('pilot')}
+</section>
+
+<section id="runbook">{sec('runbook')}</section>
+<section id="failures">{sec('failures')}</section>
+<section id="why">{sec('why')}</section>
+
+<section id="open-work">
+  <h2>Open work</h2>
+  <p>Open items by priority <span class="ev ev-measured">measured</span>:
+  {', '.join(f"P{p}×{n}" for p, n in F['beads'].get('open_by_priority', []))}.
+  Current P1s:</p>
+  <ul>{''.join(f'<li><code>{E(i["id"])}</code> — {E(i["title"])}</li>' for i in F['beads'].get('p1', [])) or '<li>none</li>'}</ul>
+</section>
+
+<section id="provenance">
+  <h2>Provenance</h2>
+  <p>Which sections rest on what. "Authored" sections are deliberately
+  data-free; every number lives in a measured section or carries its own tag.</p>
+  <div class="tablewrap"><table><thead><tr><th>Section</th><th class="nosort">Origin</th></tr></thead>
+  <tbody>{prov_rows}</tbody></table></div>
+  <p>Figures sidecar for <code>--verify</code>:
+  <code>{E(str(out_path))}.data.json</code>.</p>
+</section>
+
+</main>
+</div>
+<footer>Emitted by scripts/sinnix-estate-report · {gen} · regenerate: <code>sinnix estate-report</code></footer>
+<script>{js}</script>
+</body>
+</html>
+"""
+    return doc
+
+
+VOLATILE_KEYS = [
+    ("repo.head", "repository HEAD"),
+    ("inventory.surface_count", "surface count"),
+    ("states.active", "active surfaces"),
+    ("states.inactive", "inactive surfaces"),
+    ("storage.mounts./realm.used_pct", "/realm fill %"),
+    ("secrets.encrypted", "secret count"),
+    ("beads.open", "open work items"),
+]
+
+
+def dig(d, dotted):
+    cur = d
+    for part in dotted.split("."):
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        else:
+            return None
+    return cur
+
+
+def verify(path: Path):
+    side = Path(str(path) + ".data.json")
+    if not side.exists():
+        print(f"no sidecar at {side}", file=sys.stderr)
+        return 2
+    old = json.loads(side.read_text())
+    fresh, _ = collect_all(Path(old.get("_repo", "/realm/project/sinnix")), skip_eval=True)
+    diverged = 0
+    for key, label in VOLATILE_KEYS:
+        a, b = dig(old, key), dig(fresh, key)
+        if a != b:
+            diverged += 1
+            print(f"DIVERGED {label}: report says {a!r}, live says {b!r}")
+    gen_at = old.get("_generated", "?")
+    print(f"checked {len(VOLATILE_KEYS)} volatile figures against a report "
+          f"generated {gen_at}: {diverged} diverged")
+    return 1 if diverged else 0
+
+
+def collect_all(repo: Path, skip_eval: bool):
+    F, holes = {}, []
+    for name, fn in [("repo", lambda: collect_repo(repo)),
+                     ("generation", lambda: collect_generation(repo)),
+                     ("inventory", collect_inventory),
+                     ("storage", collect_storage),
+                     ("ports", collect_ports),
+                     ("beads", lambda: collect_beads(repo)),
+                     ("checks", lambda: collect_checks(repo, skip_eval)),
+                     ("secrets", collect_secrets),
+                     ("stalls", collect_stalls),
+                     ("pilot", lambda: collect_pilot(repo))]:
+        fig, h = fn()
+        F[name] = fig
+        holes += h
+    st_fig, st_holes = collect_states(F["inventory"].get("surfaces", []))
+    F["states"] = st_fig
+    holes += st_holes
+    return F, holes
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--output", default=DEFAULT_OUTPUT)
+    ap.add_argument("--repo", default="/realm/project/sinnix")
+    ap.add_argument("--no-eval", action="store_true",
+                    help="skip nix eval (check counts become a hole)")
+    ap.add_argument("--verify", nargs="?", const=DEFAULT_OUTPUT, default=None)
+    args = ap.parse_args()
+    if args.verify is not None:
+        sys.exit(verify(Path(args.verify)))
+    repo = Path(args.repo)
+    F, holes = collect_all(repo, args.no_eval)
+    authored = load_authored()
+    out = Path(args.output)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    doc = build(F, holes, authored, out)
+    out.write_text(doc)
+    F["_generated"] = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+    F["_repo"] = str(repo)
+    Path(str(out) + ".data.json").write_text(json.dumps(F, default=str))
+    print(f"wrote {out} ({len(doc)//1024} KB) + sidecar; "
+          f"{len(findings(F))} standing findings, {len(holes)} holes")
+
+
+if __name__ == "__main__":
+    main()
