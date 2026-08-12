@@ -78,10 +78,6 @@ def workload_for_unit(unit: str) -> dict[str, Any]:
                 dict(workload) if isinstance(workload, dict) else {"class": "unknown"}
             )
     return {
-        "kind": "unknown",
-        "lifecycle": "unknown",
-        "expendability": "unknown",
-        "operatorProtection": "unknown",
         "class": "unknown",
         "source": "unknown",
     }
@@ -94,10 +90,6 @@ def workload_for_cgroup(cgroup: str) -> dict[str, Any]:
             workload = workload_for_unit(unit)
             return {**workload, "source": "unit", "unit": unit}
     return {
-        "kind": "unknown",
-        "lifecycle": "unknown",
-        "expendability": "unknown",
-        "operatorProtection": "unknown",
         "class": "unknown",
         "source": "unknown",
     }

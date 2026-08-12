@@ -27,8 +27,6 @@ mkServiceModule {
         observe.enable = true;
         workload = {
           class = "sacrificial";
-          kind = "job";
-          lifecycle = "oneshot";
           rationale = "Weekly read-only usage audit; rerunnable at will.";
         };
         captures = [

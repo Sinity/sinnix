@@ -20,7 +20,7 @@ mkServiceModule {
     stateDir = lib.mkOption {
       type = lib.types.str;
       default = "/home/${userName}/.local/state/sinnix/agent-gateway";
-      description = "Private persisted gateway audit, artifact, migration, and job state.";
+      description = "Private persisted gateway audit, artifact, and job state.";
     };
     maxResultBytes = lib.mkOption {
       type = lib.types.int;
@@ -96,15 +96,9 @@ mkServiceModule {
           exit 1
         fi
       '';
-      legacyStateDir = "/home/${userName}/.local/state/sinnix-agent-gateway";
       stateReconcile = pkgs.writeShellScript "sinnix-agent-gateway-state-reconcile" ''
         set -euo pipefail
         ${agentController} --state-dir ${lib.escapeShellArg "${cfg.stateDir}/jobs"} list >/dev/null
-      '';
-      stateMigration = pkgs.writeShellScript "sinnix-agent-gateway-state-migration" ''
-        set -euo pipefail
-        ${gatewayBin} --config ${configFile} migrate-state --source ${lib.escapeShellArg legacyStateDir} >/dev/null
-        ${stateReconcile}
       '';
     in
     {
@@ -172,11 +166,11 @@ mkServiceModule {
       };
 
       home-manager.users.${userName} = {
-        systemd.user.services.sinnix-agent-gateway-migrate = {
-          Unit.Description = "Archive legacy Sinnix agent gateway state";
+        systemd.user.services.sinnix-agent-gateway-reconcile = {
+          Unit.Description = "Reconcile Sinnix agent gateway job state";
           Service = {
             Type = "oneshot";
-            ExecStart = stateMigration;
+            ExecStart = stateReconcile;
             UMask = "0077";
           };
           Install.WantedBy = [ "default.target" ];
@@ -186,10 +180,10 @@ mkServiceModule {
             Description = "OpenAI Secure MCP Tunnel to Sinnix remote-readonly gateway";
             After = [
               "network-online.target"
-              "sinnix-agent-gateway-migrate.service"
+              "sinnix-agent-gateway-reconcile.service"
             ];
             Wants = [ "network-online.target" ];
-            Requires = [ "sinnix-agent-gateway-migrate.service" ];
+            Requires = [ "sinnix-agent-gateway-reconcile.service" ];
             ConditionPathExists = cfg.tunnel.runtimeKeyFile;
             StartLimitIntervalSec = 300;
             StartLimitBurst = 8;

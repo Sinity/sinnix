@@ -45,13 +45,10 @@ mkFeatureModule {
         manager = "user";
         resourceClass = "desktop-shell";
         workload = {
-          kind = "frontend";
-          lifecycle = "persistent";
-          expendability = "protected";
-          operatorProtection = "operator";
           class = "interactive";
           rationale = "Visible desktop shell must remain responsive while remaining cgroup-containable.";
           processMatchers = [ "noctalia" ];
+          earlyoomAvoid = true;
         };
         observe = {
           enable = true;
@@ -100,8 +97,10 @@ mkFeatureModule {
           };
 
           home.file.".local/share/noctalia/pinned/official/timer".source = "${officialPlugins}/timer";
-          home.file.".local/share/noctalia/pinned/community/keybind-cheatsheet".source = "${communityPlugins}/keybind-cheatsheet";
-          home.file.".local/share/noctalia/local/sinnix-ops".source = mkDotsFile "/noctalia/plugins/sinnix-ops";
+          home.file.".local/share/noctalia/pinned/community/keybind-cheatsheet".source =
+            "${communityPlugins}/keybind-cheatsheet";
+          home.file.".local/share/noctalia/local/sinnix-ops".source =
+            mkDotsFile "/noctalia/plugins/sinnix-ops";
 
           home.packages = with pkgs; [
             nvibrant # digital vibrance (nvibrant plugin)

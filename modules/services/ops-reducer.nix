@@ -29,7 +29,15 @@ mkServiceModule {
           message = "sinnix.services.ops-reducer.intervalSeconds must not poll collectors faster than 5 seconds";
         }
       ];
-      environment.systemPackages = [ reducer quota quota.passthru.codexbar scriptPkgs.sinnix-pressure-park scriptPkgs.sinnix-rebuild-override scriptPkgs.sinnix-ops-afk-start scriptPkgs.sinnix-ops-afk-resume ];
+      environment.systemPackages = [
+        reducer
+        quota
+        quota.passthru.codexbar
+        scriptPkgs.sinnix-pressure-park
+        scriptPkgs.sinnix-rebuild-override
+        scriptPkgs.sinnix-ops-afk-start
+        scriptPkgs.sinnix-ops-afk-resume
+      ];
       systemd.tmpfiles.rules = [ "d /realm/state/sinnix-ops 0700 ${userName} users -" ];
       sinnix.runtime.surfaces.ops-reducer = {
         unit = "sinnix-ops-reducer.service";
@@ -41,16 +49,17 @@ mkServiceModule {
         };
         workload = {
           class = "protected";
-          kind = "daemon";
-          lifecycle = "persistent";
-          expendability = "protected";
-          operatorProtection = "operator";
           rationale = "Read-only operator snapshot publisher; it never owns lifecycle actions.";
           processMatchers = [ "sinnix-ops-reducer" ];
+          earlyoomAvoid = true;
         };
       };
       home-manager.users.${userName} = {
-        home.packages = [ reducer quota quota.passthru.codexbar ];
+        home.packages = [
+          reducer
+          quota
+          quota.passthru.codexbar
+        ];
         systemd.user.sockets.sinnix-ops-reducer = {
           Unit = {
             Description = "Sinnix operator reducer Unix and loopback sockets";

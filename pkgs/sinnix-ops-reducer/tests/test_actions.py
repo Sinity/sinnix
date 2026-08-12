@@ -194,7 +194,7 @@ def test_orphan_reap_requires_two_identical_cold_observations(tmp_path: Path) ->
         "job_id": "orphan-1",
         "identity_revision": "rev-1",
         "orphaned": True,
-        "expendability": "expendable",
+        "workload": {"class": "sacrificial"},
         "coldness": {"candidate": True},
     }
     source_report = {

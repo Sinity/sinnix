@@ -15,7 +15,7 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from sinnix_agent_gateway import observe as observe_module
 from sinnix_agent_gateway.app import Runtime, create_server
 from sinnix_agent_gateway.capabilities import PolicyError
-from sinnix_agent_gateway.cli import build_manifest, migrate_legacy
+from sinnix_agent_gateway.cli import build_manifest
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.jobs import JobError
 from sinnix_agent_gateway.projects import ProjectError
@@ -372,19 +372,6 @@ def test_config_load_uses_one_project_contract(tmp_path: Path) -> None:
     assert loaded.projects["fixture"].path == project
     assert loaded.projects["fixture"].remote_read is True
     assert loaded.projects["fixture"].remote_write is False
-
-
-def test_legacy_state_is_archived_automatically_and_privately(tmp_path: Path) -> None:
-    cfg = config(tmp_path)
-    legacy = tmp_path / "legacy-state"
-    legacy.mkdir(mode=0o755)
-    (legacy / "job.json").write_text('{"pid": 42}')
-    result = migrate_legacy(cfg, legacy)
-    destination = cfg.state_dir / result["destination"]
-    assert result["migrated"] is True
-    assert not legacy.exists()
-    assert oct(destination.stat().st_mode & 0o777) == "0o700"
-    assert oct((destination / "job.json").stat().st_mode & 0o777) == "0o600"
 
 
 def test_machine_report_timeout_is_a_typed_failure(

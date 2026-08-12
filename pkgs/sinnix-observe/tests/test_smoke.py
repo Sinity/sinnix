@@ -119,10 +119,6 @@ def test_workload_identity_prefers_registered_unit(monkeypatch, tmp_path) -> Non
                     "shell": {
                         "unit": "shell.service",
                         "workload": {
-                            "kind": "frontend",
-                            "lifecycle": "persistent",
-                            "expendability": "protected",
-                            "operatorProtection": "operator",
                             "class": "interactive",
                         },
                     }
@@ -138,9 +134,7 @@ def test_workload_identity_prefers_registered_unit(monkeypatch, tmp_path) -> Non
         == "unit"
     )
     assert (
-        runtime_inventory.workload_for_cgroup("/user.slice/unknown.scope")[
-            "expendability"
-        ]
+        runtime_inventory.workload_for_cgroup("/user.slice/unknown.scope")["class"]
         == "unknown"
     )
 
