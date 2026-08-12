@@ -14,7 +14,8 @@
 #
 # Socket-activated behind the same idle-aware proxy pattern as
 # ollama/koboldcpp/whisper (modules/services/ai-control.nix): the public port
-# 8880 is the systemd socket front door, the backend container runs on a
+# 8890 is the systemd socket front door (8880 belongs to sinnix-hub);
+# the backend container runs on a
 # private loopback port and exits after 30s idle.
 #
 # Digest-pinned OCI container; weights (~330MB) are baked into the image at
@@ -30,12 +31,12 @@ mkAiService {
   name = "kokoro";
   description = "Kokoro-82M TTS (CPU, OpenAI-compatible /v1/audio/speech, containerized)";
   unit = "podman-kokoro.service";
-  endpoint = "127.0.0.1:8880";
+  endpoint = "127.0.0.1:8890";
   backendKind = "container";
   requiresCuda = false;
   activation = {
     mode = "socket-proxy";
-    backendEndpoint = "127.0.0.1:8881";
+    backendEndpoint = "127.0.0.1:8891";
     idleTimeout = "30s";
     dependsOn = [ "kokoro-proxy" ];
   };
@@ -60,9 +61,9 @@ mkAiService {
         inherit (cfg) image autoStart;
         pull = "never";
         # Container listens on 8880 internally; mapped to the private
-        # backend port the kokoro-proxy socket forwards to (public 8880 is
+        # backend port the kokoro-proxy socket forwards to (public 8890 is
         # the proxy's own listener, not this container's).
-        ports = [ "127.0.0.1:8881:8880" ];
+        ports = [ "127.0.0.1:8891:8880" ];
         environment = {
           # Weights are already baked into the pinned image; skip the
           # runtime re-download check on every start.
