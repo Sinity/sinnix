@@ -248,7 +248,12 @@ mkServiceModule {
                   "SINNIX_CAPTURE_ROOT=${config.sinnix.paths.capturesRoot}"
                   "SINNIX_CAPTURE_PRIMARY_STATE_DIR=${stateDir}"
                   "SINNIX_CAPTURE_PRIMARY_DEBOUNCE_MS=${toString cfg.debounceMs}"
+                  # Session TMPDIR (/realm/tmp/shell) is read-only inside the
+                  # strict sandbox; mktemp failed on every event (2026-08-12,
+                  # same fix as capture-clipboard).
+                  "TMPDIR=/tmp"
                 ];
+                PrivateTmp = true;
                 NoNewPrivileges = true;
                 ProtectSystem = "strict";
                 ProtectHome = "read-only";
