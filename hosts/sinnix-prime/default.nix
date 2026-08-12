@@ -44,6 +44,14 @@
       autoStart = true;
     };
     terminal-capture.enable = true;
+    # Remote access over the tailnet (sinnix-is8, enabled 2026-08-12).
+    # tag:workstation must be authorized in the tailnet ACL tagOwners; the
+    # auth key lives in agenix (tailscale-authkey). Plain node: no exit-node
+    # or subnet-router role (deliberate).
+    tailscale = {
+      enable = true;
+      tags = [ "tag:workstation" ];
+    };
     # ── Capture-machinery program (2026-08-12) ──────────────────────────────
     capture-notifications.enable = true;
     capture-mpris.enable = true;
