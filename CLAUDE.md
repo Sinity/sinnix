@@ -129,7 +129,7 @@ Boundary rules:
   If users **directly interact** with it, it's a feature. If its primary
   purpose is a **daemon** (UI secondary), it's a service.
 - Top-level highlights: `foundation.nix` (user/paths/projects identity),
-  `build-policy.nix` (nix daemon: max-jobs=1/cores=16, build scratch at
+  `build-policy.nix` (nix daemon: max-jobs=4/cores=16, build scratch at
   `/var/cache/nix-build`), `runtime.nix` (runtime inventory — see below),
   `persistence.nix` (impermanence collector), `backup.nix` (btrbk→Borg
   pipeline), `secrets.nix` (agenix auto-discovery), `dotfiles-sweep.nix`,
