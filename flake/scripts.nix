@@ -122,7 +122,7 @@ let
 
   polylogueSrc = inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
-  externalPackages = {
+  externalPackages = rec {
     # bd needs the dolt binary on PATH for sql-server mode (per-project server,
     # auto-started on demand). Embedded mode serializes every invocation on a
     # process-exclusive lock — under multi-agent fanouts that convoys for
@@ -241,7 +241,9 @@ let
 
     sinnix-capture = pkgs.callPackage ../pkgs/sinnix-capture/pkg.nix { };
 
-    sinnix-capture-a11y = pkgs.callPackage ../pkgs/sinnix-capture-a11y/pkg.nix { };
+    sinnix-capture-a11y = pkgs.callPackage ../pkgs/sinnix-capture-a11y/pkg.nix {
+      sinnix-capture-lib = sinnix-capture;
+    };
 
     sinnix-agent-environment-doc = pkgs.writeShellApplication {
       name = "sinnix-agent-environment-doc";
