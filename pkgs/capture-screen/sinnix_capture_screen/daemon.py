@@ -65,12 +65,11 @@ black frames into the lake forever. See the worker report for the full
 live evidence (hyprland.log excerpt, `identify -verbose` stats).
 
 TYPING-PAUSE TRIGGER: the bead allows "a simple idle-detection heuristic
-... don't over-engineer this" if a Phase-1-style input-dynamics signal
-isn't cheaply available. It wasn't, cheaply, here: `libinput debug-events`
-(what sinnix-capture-input-dynamics uses) needs to open
+... don't over-engineer this" if a keystroke-timing signal isn't cheaply
+available. It wasn't, cheaply, here: `libinput debug-events` needs to open
 /dev/input/event*, which is only unprivileged for a systemd --user service
-tied to the active graphical session's logind seat ACL -- duplicating that
-whole daemon's subprocess/permission shape inside capture-screen just for
+tied to the active graphical session's logind seat ACL -- building that
+whole subprocess/permission shape inside capture-screen just for
 a coarse pause signal would be exactly the over-engineering the bead
 warns against. Instead this daemon polls `hyprctl cursorpos` (already
 being called for other reasons) once per loop tick and fires
