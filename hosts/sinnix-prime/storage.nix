@@ -16,7 +16,11 @@ let
   username = config.sinnix.user.name;
   primaryGroupName = config.users.users.${username}.group;
   polylogueArchiveRoot = "${capturesRoot}/polylogue";
-  polylogueDbRoot = "${realmRoot}/db/polylogue";
+  # Moved /db/polylogue -> /state/polylogue on 2026-08-12 (sinnix-eau
+  # taxonomy pass; polylogued was down anyway, polylogue-hgfre). Old source
+  # retained read-only through burn-in; deletion + rmdir /realm/db need
+  # explicit operator authorization.
+  polylogueDbRoot = "${realmRoot}/state/polylogue";
   polylogueDbFiles = [
     "index.db"
     "source.db"
@@ -25,7 +29,7 @@ let
     "ops.db"
     "daemon_events.db"
   ];
-  # One-time archive DB -> db/polylogue subvol migration is complete; only
+  # One-time archive DB -> polylogue subvol migration is complete; only
   # the steady-state sanity check + fresh-bootstrap symlink creation remain.
   # History/evidence: bd show sinnix-qs7
   polylogueDbLinkScript = lib.concatMapStringsSep "\n" (

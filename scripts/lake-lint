@@ -37,9 +37,10 @@ check_root() {
   done
 }
 
-# /realm level-1 manifest. db/ is transitional (polylogue move deferred until
-# the active rebuild-index lane drains); remove it from this list when the
-# post-burn-in state pass lands (with sinex/ and nats).
+# /realm level-1 manifest. db/ and sinex/ are burn-in residue: both moved
+# into state/ on 2026-08-12 (sinnix-eau) with sources retained read-only;
+# drop them from this list in the same change that deletes the sources
+# (explicit operator authorization required).
 check_root /realm \
   project data media state staging db sinex swap cache worktrees tmp inbox \
   INVENTORY.md .btrfs .Trash-1000
