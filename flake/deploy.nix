@@ -25,15 +25,22 @@
 #      decided.
 #   5. `agenix -e secret/borg-storagebox-ssh.age` once the StorageBox is up.
 { inputs, ... }:
+let
+  # Same host module lists + specialArgs that flake/nixos.nix builds
+  # `flake.nixosConfigurations` from. Colmena's hive evaluator (see
+  # `eval.nix` in the colmena flake) treats each node's `imports` as a
+  # regular NixOS module `imports` list and evaluates it itself — it must
+  # not be handed an already-realized `system.build.toplevel` derivation
+  # (sinnix-bw5).
+  hostContext = import ./host-modules.nix { inherit inputs; };
+in
 {
   flake.colmena = {
     meta = {
       nixpkgs = import inputs.nixpkgs {
         system = "x86_64-linux";
       };
-      specialArgs = {
-        inherit inputs;
-      };
+      specialArgs = hostContext.specialArgs;
     };
 
     sinnix-prime = {
@@ -45,9 +52,7 @@
           "primary"
         ];
       };
-      imports = [
-        inputs.self.nixosConfigurations.sinnix-prime.config.system.build.toplevel
-      ];
+      imports = hostContext.hosts.sinnix-prime;
     };
 
     sinnix-ethereal = {
@@ -61,9 +66,7 @@
           "replica"
         ];
       };
-      imports = [
-        inputs.self.nixosConfigurations.sinnix-ethereal.config.system.build.toplevel
-      ];
+      imports = hostContext.hosts.sinnix-ethereal;
     };
   };
 
