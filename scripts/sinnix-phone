@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Reach the phone over the tailnet — status, shell, screen mirror, media pull
+# runtimeInputs: bash coreutils openssh rsync android-tools scrcpy iputils jq
+#
+# The phone (Redmi Note 11, unrooted) is a tailnet peer with two control
+# surfaces: Termux sshd on :8022 for shell/file work, and adbd on :5555 for
+# device-level control (input, screencap, packages, settings). Both ride the
+# tailnet, so this works from anywhere the tailnet reaches — not just the LAN.
+#
+# adbd over TCP does NOT survive a phone reboot; `sinnix-phone adb-restore`
+# re-enables it over USB. Everything else survives.
+set -euo pipefail
+
+PHONE_TS_IP="${SINNIX_PHONE_IP:-100.124.215.25}"
+PHONE_SSH_PORT="${SINNIX_PHONE_SSH_PORT:-8022}"
+PHONE_USER="${SINNIX_PHONE_USER:-u0_a279}"
+ADB_TARGET="${PHONE_TS_IP}:5555"
+LAKE_ROOT="${SINNIX_PHONE_LAKE:-/realm/data/captures/phone}"
+
+ssh_phone() { ssh -p "$PHONE_SSH_PORT" -o ConnectTimeout=10 "${PHONE_USER}@${PHONE_TS_IP}" "$@"; }
+adb_phone() { ANDROID_SERIAL="$ADB_TARGET" adb "$@"; }
+
+ensure_adb() {
+  if ! ANDROID_SERIAL="$ADB_TARGET" adb get-state >/dev/null 2>&1; then
+    adb connect "$ADB_TARGET" >/dev/null 2>&1 || true
+    sleep 1
+  fi
+}
+
+usage() {
+  cat <<'EOF'
+sinnix-phone <command>
+
+  status        tailnet reachability, adb + ssh liveness, battery, storage
+  shell [cmd]   Termux shell over the tailnet (interactive when no cmd)
+  mirror        scrcpy screen mirror/control over the tailnet
+  screenshot    grab the current screen to /realm/tmp/work/
+  pull          rsync camera + downloads + health exports into the lake
+  adb-connect   (re)attach adb over the tailnet
+  adb-restore   re-enable adbd TCP mode (requires the phone on USB)
+EOF
+}
+
+cmd="${1:-status}"
+shift || true
+
+case "$cmd" in
+status)
+  echo "== phone =="
+  if ping -c1 -W3 "$PHONE_TS_IP" >/dev/null 2>&1; then
+    echo "tailnet   : reachable ($PHONE_TS_IP)"
+  else
+    echo "tailnet   : UNREACHABLE ($PHONE_TS_IP)"
+  fi
+  if ssh_phone 'true' >/dev/null 2>&1; then
+    echo "ssh       : up (termux :$PHONE_SSH_PORT)"
+  else
+    echo "ssh       : down — Termux may be stopped; open Termux, run: sshd"
+  fi
+  ensure_adb
+  if ANDROID_SERIAL="$ADB_TARGET" adb get-state >/dev/null 2>&1; then
+    echo "adb       : up ($ADB_TARGET)"
+    lvl=$(adb_phone shell dumpsys battery 2>/dev/null | awk -F': ' '/ level/{print $2}' | tr -d '\r')
+    free=$(adb_phone shell df -h /sdcard 2>/dev/null | awk 'END{print $4}' | tr -d '\r')
+    echo "battery   : ${lvl:-?}%"
+    echo "sdcard    : ${free:-?} free"
+  else
+    echo "adb       : down — run: sinnix-phone adb-restore (needs USB)"
+  fi
+  ;;
+shell)
+  if [ "$#" -eq 0 ]; then ssh_phone; else ssh_phone "$@"; fi
+  ;;
+mirror)
+  ensure_adb
+  exec scrcpy -s "$ADB_TARGET" --window-title "phone (tailnet)" "$@"
+  ;;
+screenshot)
+  ensure_adb
+  mkdir -p /realm/tmp/work
+  out="/realm/tmp/work/phone-$(date +%Y%m%d-%H%M%S).png"
+  adb_phone shell screencap -p /sdcard/.sinnix-shot.png
+  adb_phone pull /sdcard/.sinnix-shot.png "$out" >/dev/null
+  adb_phone shell rm -f /sdcard/.sinnix-shot.png
+  echo "$out"
+  ;;
+pull)
+  # Camera and downloads are the durable originals; the health-export folder
+  # is where the Health Connect scheduled export lands (see bead sinnix-fmkb).
+  # Pull only — never push back, and never delete on the phone.
+  mkdir -p "$LAKE_ROOT"/{camera,download,health}
+  set +e
+  rsync -av --ignore-existing -e "ssh -p $PHONE_SSH_PORT" \
+    "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/DCIM/" "$LAKE_ROOT/camera/"
+  rsync -av --ignore-existing -e "ssh -p $PHONE_SSH_PORT" \
+    "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/Download/" "$LAKE_ROOT/download/"
+  rsync -av --ignore-existing -e "ssh -p $PHONE_SSH_PORT" \
+    "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/HealthConnectExport/" "$LAKE_ROOT/health/" 2>/dev/null
+  set -e
+  du -sh "$LAKE_ROOT" 2>/dev/null
+  ;;
+adb-connect)
+  adb connect "$ADB_TARGET"
+  ;;
+adb-restore)
+  echo "Phone must be on USB with debugging authorized."
+  adb devices
+  adb tcpip 5555
+  sleep 3
+  adb connect "$ADB_TARGET"
+  ;;
+*)
+  usage
+  exit 1
+  ;;
+esac
