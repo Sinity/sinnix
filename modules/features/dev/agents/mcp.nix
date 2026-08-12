@@ -122,7 +122,10 @@ mkFeatureModule {
           ;
         dotsRoot = config.sinnix.paths.dotsRoot;
       };
-      codexHooksFile = import ./hooks.nix { inherit pkgs; };
+      codexHooksFile = import ./hooks.nix {
+        inherit pkgs;
+        dotsRoot = config.sinnix.paths.dotsRoot;
+      };
 
       inherit (serena) serenaConfigFile mkSerenaWrapper;
       inherit (browser)

@@ -3,7 +3,7 @@
 # priming. Plain helper (not a NixOS module) — imported directly by mcp.nix's
 # configFn; the generated file is exposed via the mcp-servers.codexHooksSource
 # option for tests.
-{ pkgs }:
+{ pkgs, dotsRoot }:
 let
   jsonFormat = pkgs.formats.json { };
 in
@@ -31,7 +31,7 @@ jsonFormat.generate "codex-hooks.json" {
           }
           {
             type = "command";
-            command = "sessionstart-sinex-recall";
+            command = "${dotsRoot}/claude/hooks/sessionstart-sinex-recall.sh";
           }
           {
             type = "command";
