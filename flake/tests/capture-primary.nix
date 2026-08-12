@@ -190,8 +190,12 @@ in
             ${surfaceJson}
             EOF_SURFACE
             jq -e '
-              (.Service.ExecStart | contains("wl-paste --primary --watch")) and
-              (.Service.ExecStart | contains("sinnix-capture-primary-watch")) and
+              # ExecStart may render as a plain string or a single-element
+              # array depending on the systemd option type's merge/apply
+              # behavior -- normalize before substring checks.
+              (.Service.ExecStart | if type == "array" then join(" ") else . end) as $execStart |
+              ($execStart | contains("wl-paste --primary --watch")) and
+              ($execStart | contains("sinnix-capture-primary-watch")) and
               (.Service.Environment | any(startswith("SINNIX_CAPTURE_ROOT="))) and
               (.Service.Environment | any(startswith("SINNIX_CAPTURE_PRIMARY_STATE_DIR="))) and
               (.Service.Environment | any(startswith("SINNIX_CAPTURE_PRIMARY_DEBOUNCE_MS="))) and
