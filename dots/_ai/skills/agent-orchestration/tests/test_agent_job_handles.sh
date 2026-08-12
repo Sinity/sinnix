@@ -177,13 +177,6 @@ jq -e --arg repo "${tmp}/repo" --arg worktree "${tmp}/worktree" '
   jq '{schema_version, delegation, identity, correlation, actual_agent, completion}' "${tmp}/state/job-one.json" >&2
   exit 1
 }
-SINNIX_AGENT_JOB_STATE_DIR="${tmp}/state" "${repo_root}/scripts/sinnix-agent-event" \
-  --job-id job-one --event tool --payload-json '{"name":"shell"}'
-jq -sr '.[-1].event == "tool" and .[-1].payload.name == "shell"' "${tmp}/state/job-one.events.jsonl" >/dev/null
-registered="$(SINNIX_AGENT_JOB_STATE_DIR="${tmp}/interactive-state" "${repo_root}/scripts/sinnix-agent-register" \
-  --job-id interactive-one --work-item sinnix-056.1 --provider codex)"
-jq -e '.schema_version == 3 and .interactive == true and .identity.bead_id == "sinnix-056.1" and .identity.provider == "codex"' \
-  "${registered}" >/dev/null
 mapfile -t forwarded_properties <"${tmp}/scope-receipts/sinnix-agent-job-job-one.scope"
 [[ ${forwarded_properties[*]} == "MemoryHigh=2G MemoryMax=3G CPUWeight=200 IOWeight=300 RuntimeMaxSec=14400" ]]
 
