@@ -976,7 +976,7 @@ _nvml_error: str | None = None
 # True only when pynvml itself is absent — a permanent condition, so we stop
 # retrying. An NVMLError at init (driver/libnvidia-ml not ready at boot) is
 # transient and must be retried, or a single bad startup permanently kills GPU
-# capture until the next service restart (the 2026-05-24 incident).
+# capture until the next service restart.
 _nvml_unavailable: bool = False
 _nvml_lock = threading.Lock()
 _nvml_last_init_attempt: float = 0.0
@@ -1132,8 +1132,8 @@ def gpu_sampler_thread(
             except Exception as exc:  # noqa: BLE001 - the sampler must outlive any probe/DB fault
                 # A bare exception here would silently kill the only writer to
                 # gpu_sample and freeze GPU telemetry with no signal — the same
-                # outage class (2026-05-24) the NVML self-heal addresses, but on
-                # the DB/probe path instead of the handle path. Log to stderr
+                # outage class the NVML self-heal addresses, but on the DB/probe
+                # path instead of the handle path. Log to stderr
                 # (captured by journald) and keep sampling; handle-level faults
                 # are recovered by the self-heal in gpu_metrics().
                 print(
@@ -1867,15 +1867,13 @@ def systemctl_props(
     cmd = ["systemctl"]
     if user:
         if user_name:
-            # PAM-free user-manager access. The previous
-            # `--user --machine=<user>@` path rides systemd-stdio-bridge
-            # through a full PAM login on EVERY sample tick: a session
-            # scope + a run-pN transient unit + a lastlog2 write each time,
-            # ~32K journal lines/day of pure scaffolding — the single
-            # biggest journal noise source on the host (2026-07-10 audit)
-            # and the thing tripping the lastlog2 wear canary. setpriv
-            # switches uid without PAM, and dbus-broker admits the matching
-            # uid to the user bus directly.
+            # PAM-free user-manager access. `--user --machine=<user>@` would
+            # ride systemd-stdio-bridge through a full PAM login on EVERY
+            # sample tick: a session scope + a run-pN transient unit + a
+            # lastlog2 write each time — a heavy journal-noise and wear
+            # source at telemetry's sample cadence. setpriv switches uid
+            # without PAM, and dbus-broker admits the matching uid to the
+            # user bus directly.
             pw = pwd.getpwnam(user_name)
             cmd = [
                 "setpriv",
@@ -2030,11 +2028,10 @@ def insert_service_states(
 
 # journalctl -g pre-filters at the journald layer so a cursor-less backfill
 # over weeks of history doesn't have to pipe every uninteresting line through
-# Python. Patterns calibrated 2026-07-06 against this host's real incidents
-# (2026-06-30 earlyoom storm, 2026-07-04 79x-kitten storm) — see the earlyoom
-# message shape below; systemd-oomd and kernel-OOM patterns are best-effort
-# from documented formats since this host has not yet had a real kill from
-# either (raw_line is always kept so an imperfect field match loses nothing).
+# Python. Patterns calibrated against this host's real earlyoom kill message
+# shape below; systemd-oomd and kernel-OOM patterns are best-effort from
+# documented formats since this host has not yet had a real kill from either
+# (raw_line is always kept so an imperfect field match loses nothing).
 KILL_EVENT_GREP = (
     r"sending (SIGTERM|SIGKILL) to process|"
     r"^Killed process|"
@@ -2579,9 +2576,9 @@ def main() -> int:
             # SQLite's PASSIVE autocheckpoints never shrink the WAL file, and
             # they silently make no progress while any reader (lynchpin
             # analysis queries over this DB) holds an older snapshot. Left
-            # alone, one long-reader episode grew the WAL to 1.3 GiB and it
-            # stayed there indefinitely (2026-07-10, sinnix-bdi). TRUNCATE
-            # both drains and shrinks it; with the 5s busy handler a blocked
+            # alone, one long-reader episode can grow the WAL to gigabytes
+            # and leave it there indefinitely. TRUNCATE both drains and
+            # shrinks it; with the 5s busy handler a blocked
             # attempt degrades to a logged retry on the next interval instead
             # of stalling sampling.
             if sample_start >= next_wal_checkpoint:
