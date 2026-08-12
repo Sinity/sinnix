@@ -133,7 +133,6 @@ in
           {
             assertion =
               config.sinnix.runtime.inventory.surfaces.open-webui.activation.publicEndpoint == "127.0.0.1:8080"
-              && config.sinnix.runtime.inventory.surfaces.whisper.activation.publicEndpoint == "127.0.0.1:8090"
               && config.sinnix.runtime.inventory.surfaces.tts.activation.publicEndpoint == "127.0.0.1:8000";
             message = "The AI factory must preserve direct loopback endpoints for representative services";
           }
@@ -142,6 +141,42 @@ in
               config.systemd.services.whisper-server.serviceConfig.ExecStart != null
               && lib.hasInfix "whisper-server" config.systemd.services.whisper-server.serviceConfig.ExecStart;
             message = "The AI factory must leave the native whisper command visible";
+          }
+          {
+            assertion = config.systemd.sockets.whisper-proxy.listenStreams == [ "127.0.0.1:8090" ];
+            message = "Whisper must expose only its socket-activated loopback front door (the shared STT hub)";
+          }
+          {
+            assertion =
+              config.systemd.services.whisper-server.unitConfig.PartOf == [ "whisper-proxy.service" ]
+              && config.systemd.services.whisper-server.unitConfig.BindsTo == [ "whisper-proxy.service" ];
+            message = "An idle whisper-proxy exit must tear down the whisper backend cgroup";
+          }
+          {
+            assertion =
+              lib.hasInfix "systemd-socket-proxyd" config.systemd.services.whisper-proxy.serviceConfig.ExecStart
+              && lib.hasInfix "--exit-idle-time=30s" config.systemd.services.whisper-proxy.serviceConfig.ExecStart;
+            message = "Whisper activation must use the idle-aware systemd socket proxy";
+          }
+          {
+            assertion = lib.hasInfix "--inference-path /v1/audio/transcriptions" config.systemd.services.whisper-server.serviceConfig.ExecStart;
+            message = "The whisper hub must answer the OpenAI-compatible transcriptions route";
+          }
+          {
+            assertion =
+              config.sinnix.runtime.inventory.surfaces.whisper.activation.backendEndpoint == "127.0.0.1:8091"
+              &&
+                config.sinnix.runtime.inventory.surfaces.whisper-proxy.activation.publicEndpoint
+                == "127.0.0.1:8090";
+            message = "Runtime inventory must describe the public and private whisper activation endpoints";
+          }
+          {
+            assertion =
+              lib.elem "whisper-server.service" config.systemd.services.ollama.unitConfig.Conflicts
+              && lib.elem "whisper-server.service" config.systemd.services.koboldcpp.unitConfig.Conflicts
+              && lib.elem "ollama.service" config.systemd.services.whisper-server.unitConfig.Conflicts
+              && lib.elem "koboldcpp.service" config.systemd.services.whisper-server.unitConfig.Conflicts;
+            message = "The STT hub and GPU inference backends must be mutually exclusive (shared gpu-inference admission key)";
           }
           {
             assertion =
