@@ -26,7 +26,13 @@
   resolved via attribute path. A prefix `@` references another packaged
   script in the registry (cyclic resolution is fine — Nix is lazy).
 */
-{ lib, pkgs }:
+{
+  lib,
+  pkgs,
+  # Non-script packages (pkgs/ libraries registered in flake/scripts.nix)
+  # that scripts may reference with the same `@name` syntax as siblings.
+  siblingExtras ? { },
+}:
 let
   inherit (lib)
     attrByPath
@@ -135,7 +141,8 @@ let
       let
         name = lib.substring 1 (lib.stringLength token) token;
       in
-      scriptPackages.${name}.package or (throw "script-discovery: unknown sibling script @${name}")
+      scriptPackages.${name}.package or siblingExtras.${name}
+        or (throw "script-discovery: unknown sibling script @${name}")
     else
       let
         path = splitString "." token;
