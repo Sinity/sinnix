@@ -432,7 +432,7 @@ patterns, workflows) lives in each project's `CLAUDE.md`.
 - **Shared skills** live in `dots/_ai/skills/` (sinnix repo) and are linked
   into `~/.config/claude/skills`, `~/.codex/skills`, `~/.gemini/skills`.
 - **Desktop environment**: Hyprland (Wayland) + Noctalia shell; terminals
-  foot/kitty; browser qutebrowser + Chrome (CDP on :9222).
+  kitty; browser qutebrowser + Chrome (CDP on :9222).
 - **Dotfile pattern**: everything in sinnix `dots/` reaches `$HOME` via Home
   Manager out-of-store symlinks — edits propagate instantly without rebuild.
 - **Context7**: documentation discovery via `resolve-library-id` →
