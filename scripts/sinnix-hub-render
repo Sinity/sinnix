@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # @sinnix-package
-# description: Render the tailnet hub's server-side dashboard and AI control panel
+# description: Render the tailnet hub's server-side dashboard, workload view and control panels
 # runtimeInputs: coreutils systemd
 
 """Server-side renderer for the Sinnix tailnet hub.
@@ -11,11 +11,18 @@ overnight, still shows the estate as of a timestamp it prints, rather than an
 empty skeleton waiting on XHR. Only the *action* buttons need JavaScript, and
 they talk to the ops-reducer's existing bounded action API.
 
+Four pages, one shell:
+
+  /           the three-second read: a verdict, a row of tiles, then detail
+  /work/      what is *running* -- named workloads, not a process list
+  /services/  every attested runtime surface, with lifecycle controls
+  /ai/        the local AI backends and their activation semantics
+
 Inputs (all read-only):
   --manifest    Nix-generated hub manifest (routes, AI roster, frontends)
   --snapshot    the ops-reducer's current-state snapshot (status.json)
   --inventory   /etc/sinnix/runtime-inventory.json
-  --out         directory to write index.html and ai/index.html into
+  --out         directory to write the pages into
 
 The renderer never fails the unit on a missing input: a degraded dashboard
 that says "reducer snapshot unavailable" is more useful than no dashboard.
@@ -32,9 +39,20 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 SCHEMA = "sinnix-hub-manifest-v1"
+LEASE_SCHEMA = "sinnix-heavy-lease-v1"
+
+# Transient scopes the estate creates on purpose. Agent-gateway jobs carry a
+# job id and are drivable through the reducer; sinnix-scope placements are
+# anonymous ad-hoc commands and are read-only here (see WORKLOAD_CONTROL_NOTE).
+AGENT_JOB_PREFIX = "sinnix-agent-job-"
+SCOPE_PREFIX = "sinnix-"
+
+# Command classes that mean "heavy work is happening", as opposed to an agent
+# session that is mostly idle waiting on a model.
+HEAVY_CLASSES = {"build", "nix-build", "heavy"}
 
 
 # --------------------------------------------------------------------------
@@ -56,46 +74,43 @@ def load_json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
     return value, None
 
 
-def unit_states(units: list[tuple[str, str]]) -> dict[str, dict[str, str]]:
-    """Query systemd for (manager, unit) pairs, one call per manager.
+def systemctl(manager: str, *arguments: str, timeout: int = 15) -> str | None:
+    binary = shutil.which("systemctl") or "systemctl"
+    scope = "--user" if manager == "user" else "--system"
+    try:
+        result = subprocess.run(
+            [binary, scope, *arguments],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return result.stdout
+
+
+def show_units(manager: str, units: Iterable[str], properties: Iterable[str]) -> dict[str, dict[str, str]]:
+    """`systemctl show` a batch of units, keyed by unit id.
 
     The manager matters: asking the system manager about a user unit reports
     not-found, which would render as "not installed" and hide a service that is
     running perfectly well.
     """
-    states: dict[str, dict[str, str]] = {}
-    for manager in {manager for manager, _ in units}:
-        names = [unit for owner, unit in units if owner == manager and unit]
-        if names:
-            states.update(show_units(manager, names))
-    return states
-
-
-def show_units(manager: str, units: list[str]) -> dict[str, dict[str, str]]:
-    systemctl = shutil.which("systemctl") or "systemctl"
-    try:
-        result = subprocess.run(
-            [
-                systemctl,
-                "--user" if manager == "user" else "--system",
-                "show",
-                "--property=Id",
-                "--property=ActiveState",
-                "--property=SubState",
-                "--property=UnitFileState",
-                "--property=LoadState",
-                *units,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=15,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired):
+    names = [unit for unit in units if unit]
+    if not names:
+        return {}
+    output = systemctl(
+        manager,
+        "show",
+        *(f"--property={name}" for name in ("Id", *properties)),
+        *names,
+    )
+    if output is None:
         return {}
     states: dict[str, dict[str, str]] = {}
     current: dict[str, str] = {}
-    for line in result.stdout.splitlines():
+    for line in output.splitlines():
         if not line.strip():
             if current.get("Id"):
                 states[current["Id"]] = current
@@ -106,6 +121,40 @@ def show_units(manager: str, units: list[str]) -> dict[str, dict[str, str]]:
     if current.get("Id"):
         states[current["Id"]] = current
     return states
+
+
+UNIT_PROPERTIES = ("ActiveState", "SubState", "UnitFileState", "LoadState")
+SCOPE_PROPERTIES = (
+    "Description",
+    "ActiveState",
+    "Slice",
+    "ControlGroup",
+    "MemoryCurrent",
+    "MemoryHigh",
+    "MemoryMax",
+    "ActiveEnterTimestampMonotonic",
+)
+
+
+def unit_states(units: list[tuple[str, str]]) -> dict[str, dict[str, str]]:
+    states: dict[str, dict[str, str]] = {}
+    for manager in {manager for manager, _ in units}:
+        states.update(
+            show_units(
+                manager,
+                [unit for owner, unit in units if owner == manager],
+                UNIT_PROPERTIES,
+            )
+        )
+    return states
+
+
+def monotonic_now_us() -> int | None:
+    try:
+        with open("/proc/uptime", encoding="utf-8") as handle:
+            return int(float(handle.read().split()[0]) * 1_000_000)
+    except (OSError, ValueError, IndexError):
+        return None
 
 
 def gpu_summary() -> str | None:
@@ -131,7 +180,7 @@ def gpu_summary() -> str | None:
 
 
 # --------------------------------------------------------------------------
-# tiny HTML helpers -- no template engine, no dependencies
+# formatting
 # --------------------------------------------------------------------------
 
 
@@ -139,228 +188,1357 @@ def esc(value: Any) -> str:
     return html.escape("" if value is None else str(value), quote=True)
 
 
+def as_int(value: Any) -> int | None:
+    try:
+        number = int(str(value))
+    except (TypeError, ValueError):
+        return None
+    # systemd reports an unset limit as 2**64-1; treat it as no limit.
+    return None if number >= 2**63 else number
+
+
+def bytes_human(value: Any) -> str:
+    number = as_int(value)
+    if number is None:
+        return "—"
+    if number < 1024:
+        return f"{number} B"
+    for unit, size in (("T", 1024**4), ("G", 1024**3), ("M", 1024**2), ("K", 1024)):
+        if number >= size:
+            scaled = number / size
+            return f"{scaled:.1f} {unit}" if scaled < 100 else f"{scaled:.0f} {unit}"
+    return f"{number} B"
+
+
+def duration_human(seconds: float | None) -> str:
+    if seconds is None or seconds < 0:
+        return "—"
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m {seconds % 60:02d}s"
+    if seconds < 86400:
+        return f"{seconds // 3600}h {(seconds % 3600) // 60:02d}m"
+    return f"{seconds // 86400}d {(seconds % 86400) // 3600}h"
+
+
+def parse_iso(value: Any) -> dt.datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    text = value.replace("Z", "+00:00")
+    try:
+        parsed = dt.datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=dt.timezone.utc)
+
+
+def age_since(value: Any, now: dt.datetime) -> str:
+    moment = parse_iso(value)
+    if moment is None:
+        return "—"
+    return duration_human((now - moment).total_seconds()) + " ago"
+
+
+# --------------------------------------------------------------------------
+# components
+# --------------------------------------------------------------------------
+
+
 def badge(text: str, tone: str = "muted") -> str:
     return f'<span class="badge {tone}">{esc(text)}</span>'
 
 
-def tone_for_active(active: str | None) -> str:
-    return {
-        "active": "ok",
-        "activating": "warn",
-        "deactivating": "warn",
-        "reloading": "warn",
-        "failed": "bad",
-    }.get(active or "", "muted")
+def tile(value: str, label: str, tone: str = "", href: str = "") -> str:
+    body = (
+        f'<span class="n">{value}</span><span class="l">{esc(label)}</span>'
+    )
+    classes = f"tile {tone}".strip()
+    if href:
+        return f'<a class="{classes}" href="{esc(href)}">{body}</a>'
+    return f'<div class="{classes}">{body}</div>'
 
 
-def card(title: str, body: str, subtitle: str = "") -> str:
+def meter(current: int | None, limit: int | None, tone: str = "") -> str:
+    """A single quiet bar. No gauges, no dials -- a bar or nothing."""
+    if current is None:
+        return ""
+    if not limit:
+        return '<div class="meter open"><i style="width:0"></i></div>'
+    ratio = max(0.0, min(1.0, current / limit))
+    grade = tone or ("bad" if ratio > 0.9 else "warn" if ratio > 0.7 else "ok")
+    return f'<div class="meter {grade}"><i style="width:{ratio * 100:.1f}%"></i></div>'
+
+
+def card(title: str, body: str, subtitle: str = "", wide: bool = False, anchor: str = "") -> str:
     sub = f'<p class="sub">{subtitle}</p>' if subtitle else ""
-    return f'<section class="card"><h2>{esc(title)}</h2>{sub}{body}</section>'
+    ident = f' id="{esc(anchor)}"' if anchor else ""
+    classes = "card wide" if wide else "card"
+    return f'<section class="{classes}"{ident}><h2>{esc(title)}</h2>{sub}{body}</section>'
 
 
 def kv_table(rows: list[tuple[str, str]]) -> str:
     if not rows:
         return '<p class="sub">nothing to show</p>'
-    cells = "".join(
-        f"<tr><th>{esc(key)}</th><td>{value}</td></tr>" for key, value in rows
-    )
-    return f"<table class=kv>{cells}</table>"
+    cells = "".join(f"<tr><th>{esc(key)}</th><td>{value}</td></tr>" for key, value in rows)
+    return f'<table class="kv">{cells}</table>'
 
+
+def empty(message: str) -> str:
+    return f'<p class="empty">{esc(message)}</p>'
+
+
+def row(
+    headline: str,
+    meta: list[str],
+    controls: str = "",
+    tone: str = "",
+    search: str = "",
+) -> str:
+    """One workload/service as a stacked block rather than a table row.
+
+    A table needs horizontal room the phone does not have; a block wraps. Each
+    metadata fragment is its own element so the flex gap does the separating --
+    no interpuncts to line up and no run-together text.
+    """
+    control_block = f'<div class="rc">{controls}</div>' if controls else ""
+    fragments = "".join(f"<span>{part}</span>" for part in meta if part)
+    attribute = f' data-search="{esc(search)}"' if search else ""
+    return (
+        f'<div class="row {tone}"{attribute}><div class="rh">{headline}</div>'
+        f'<div class="rm">{fragments}</div>{control_block}</div>'
+    )
+
+
+def dot(tone: str) -> str:
+    return f'<span class="dot {tone}"></span>'
+
+
+# --------------------------------------------------------------------------
+# style -- the estate's house tokens, not a second visual language
+# --------------------------------------------------------------------------
 
 STYLE = """
-:root{color-scheme:light dark;--bg:#fbfbfa;--panel:#fff;--ink:#1b1b1a;--sub:#666;
---line:#e2e2df;--ok:#1a7f4b;--warn:#a06a00;--bad:#b3261e;--acc:#2b5fd9}
-@media (prefers-color-scheme:dark){:root{--bg:#131314;--panel:#1c1c1e;--ink:#e8e8e6;
---sub:#9a9a97;--line:#2e2e31;--ok:#4ec98a;--warn:#e0ac4a;--bad:#f2857c;--acc:#7aa2f7}}
+:root{
+  --bg:#f6f7f9; --panel:#ffffff; --ink:#1a2129; --muted:#5b6773;
+  --line:#dde3e9; --accent:#7c3aed; --accent-ink:#ffffff;
+  --ok:#0f7b46; --ok-bg:#e2f5eb; --warn:#8a5a00; --warn-bg:#fdf0d3;
+  --bad:#a01c1c; --bad-bg:#fbe4e4; --info:#1d4ed8; --info-bg:#e3ebfd;
+  --code-bg:#eef1f4; --fs:17px;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#12161b; --panel:#1a2027; --ink:#e6ebf0; --muted:#94a1ad;
+  --line:#2b333c; --accent:#b08df2; --accent-ink:#160d24;
+  --ok:#4cc98a; --ok-bg:#12301f; --warn:#e2b93b; --warn-bg:#33290e;
+  --bad:#ef7070; --bad-bg:#391717; --info:#7ea6f4; --info-bg:#16223b;
+  --code-bg:#232a32;
+}}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#12161b; --panel:#1a2027; --ink:#e6ebf0; --muted:#94a1ad;
+  --line:#2b333c; --accent:#b08df2; --accent-ink:#160d24;
+  --ok:#4cc98a; --ok-bg:#12301f; --warn:#e2b93b; --warn-bg:#33290e;
+  --bad:#ef7070; --bad-bg:#391717; --info:#7ea6f4; --info-bg:#16223b;
+  --code-bg:#232a32;
+}
+:root[data-theme="light"]{color-scheme:light}
 *{box-sizing:border-box}
-body{margin:0;padding:1rem;background:var(--bg);color:var(--ink);
-font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
-header{max-width:70rem;margin:0 auto 1rem}
-h1{font-size:1.3rem;margin:0 0 .2rem}
-main{max-width:70rem;margin:0 auto;display:grid;gap:1rem;
-grid-template-columns:repeat(auto-fit,minmax(19rem,1fr))}
+html{font-size:var(--fs)}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:1rem/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;
+  -webkit-text-size-adjust:100%}
+
+header.page{position:sticky;top:0;z-index:6;background:var(--panel);
+  border-bottom:1px solid var(--line)}
+.hbar{max-width:74rem;margin:0 auto;padding:.55rem .9rem;display:flex;
+  align-items:baseline;gap:.5rem;flex-wrap:wrap}
+.hbar h1{font-size:1.15rem;margin:0;letter-spacing:-.01em}
+.hbar h1 b{color:var(--accent)}
+.hbar .spacer{flex:1}
+.chip{display:inline-block;padding:.1rem .55rem;border:1px solid var(--line);
+  border-radius:99px;font-size:.78rem;color:var(--muted);background:var(--bg);
+  white-space:nowrap;font-variant-numeric:tabular-nums}
+.hbtn{border:1px solid var(--line);background:var(--bg);color:var(--ink);
+  border-radius:.4rem;padding:.25rem .55rem;cursor:pointer;font:inherit;
+  font-size:.8rem;min-height:2rem;min-width:2rem}
+nav.tabs{max-width:74rem;margin:0 auto;padding:0 .55rem;display:flex;gap:.15rem;
+  overflow-x:auto;scrollbar-width:none}
+nav.tabs::-webkit-scrollbar{display:none}
+nav.tabs a{display:block;padding:.55rem .75rem;min-height:2.75rem;
+  color:var(--muted);text-decoration:none;font-size:.92rem;white-space:nowrap;
+  border-bottom:2px solid transparent}
+nav.tabs a:hover{color:var(--ink)}
+nav.tabs a.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+
+main{max-width:74rem;margin:0 auto;padding:.9rem;display:grid;gap:.9rem;
+  grid-template-columns:repeat(auto-fit,minmax(20rem,1fr))}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:.6rem;
-padding:.85rem 1rem;min-width:0;overflow-wrap:anywhere}
+  padding:.85rem 1rem;min-width:0;overflow-wrap:anywhere}
 .card.wide{grid-column:1/-1}
-h2{font-size:1rem;margin:0 0 .5rem;letter-spacing:.02em}
-p.sub,.sub{color:var(--sub);font-size:.85rem;margin:.15rem 0 .6rem}
-a{color:var(--acc)}
+h2{font-size:1rem;margin:0 0 .5rem;letter-spacing:.01em}
+p.sub,.sub{color:var(--muted);font-size:.85rem;margin:.15rem 0 .6rem}
+.empty{color:var(--muted);font-size:.88rem;margin:.3rem 0;font-style:italic}
+a{color:var(--accent)}
+code{background:var(--code-bg);border-radius:.3rem;padding:.05rem .3rem;
+  font:.86em ui-monospace,SFMono-Regular,Menlo,monospace}
+
+/* verdict: the three-second read, before any number */
+.verdict{grid-column:1/-1;background:var(--panel);border:1px solid var(--line);
+  border-left:.28rem solid var(--line);border-radius:.6rem;padding:.75rem 1rem}
+.verdict.ok{border-left-color:var(--ok)}
+.verdict.warn{border-left-color:var(--warn)}
+.verdict.bad{border-left-color:var(--bad)}
+.verdict p{margin:0;font-size:1.05rem;line-height:1.45;text-wrap:pretty}
+.verdict .sub{margin:.35rem 0 0}
+
+.tiles{grid-column:1/-1;display:grid;gap:.55rem;
+  grid-template-columns:repeat(auto-fit,minmax(8.5rem,1fr))}
+.tile{border:1px solid var(--line);border-radius:.55rem;padding:.55rem .7rem;
+  background:var(--panel);text-decoration:none;color:inherit;display:block}
+a.tile:hover{border-color:var(--accent)}
+.tile .n{font-size:1.45rem;font-weight:650;display:block;line-height:1.2;
+  font-variant-numeric:tabular-nums}
+.tile .l{font-size:.8rem;color:var(--muted)}
+.tile.ok .n{color:var(--ok)} .tile.warn .n{color:var(--warn)}
+.tile.bad .n{color:var(--bad)} .tile.info .n{color:var(--info)}
+
+.badge{display:inline-block;font-size:.75rem;font-weight:600;letter-spacing:.02em;
+  padding:.08rem .5rem;border-radius:99px;white-space:nowrap}
+.badge.ok{color:var(--ok);background:var(--ok-bg)}
+.badge.warn{color:var(--warn);background:var(--warn-bg)}
+.badge.bad{color:var(--bad);background:var(--bad-bg)}
+.badge.info{color:var(--info);background:var(--info-bg)}
+.badge.muted{color:var(--muted);background:var(--code-bg)}
+.dot{display:inline-block;width:.5rem;height:.5rem;border-radius:50%;
+  margin-right:.35rem;vertical-align:.05rem;background:var(--muted)}
+.dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)}
+.dot.bad{background:var(--bad)} .dot.info{background:var(--info)}
+
+/* a workload/service block: wraps on a phone, no horizontal scroll */
+.row{border-top:1px solid var(--line);padding:.6rem 0}
+.row:first-of-type{border-top:none}
+.rh{font-size:.98rem;line-height:1.4;text-wrap:pretty}
+.rh strong{font-weight:650}
+.rm{color:var(--muted);font-size:.83rem;margin-top:.2rem;
+  display:flex;flex-wrap:wrap;gap:.15rem .6rem;align-items:center;
+  font-variant-numeric:tabular-nums}
+.rc{margin-top:.45rem;display:flex;flex-wrap:wrap;gap:.35rem}
+.row.warn{background:color-mix(in srgb,var(--warn) 7%,transparent);
+  border-radius:.4rem;padding-left:.5rem;padding-right:.5rem}
+.row.bad{background:color-mix(in srgb,var(--bad) 7%,transparent);
+  border-radius:.4rem;padding-left:.5rem;padding-right:.5rem}
+
+.meter{height:.32rem;border-radius:99px;background:var(--code-bg);
+  margin:.35rem 0 .1rem;overflow:hidden}
+.meter i{display:block;height:100%;border-radius:99px;background:var(--muted)}
+.meter.ok i{background:var(--ok)} .meter.warn i{background:var(--warn)}
+.meter.bad i{background:var(--bad)}
+.meter.open{opacity:.35}
+
 table{border-collapse:collapse;width:100%;font-size:.88rem}
-.scroll{overflow-x:auto}
-th,td{text-align:left;padding:.28rem .45rem;border-bottom:1px solid var(--line);
-vertical-align:top}
-table.kv th{color:var(--sub);font-weight:500;white-space:nowrap;width:11rem}
+.tablewrap{overflow-x:auto}
+th,td{text-align:left;padding:.3rem .45rem;border-bottom:1px solid var(--line);
+  vertical-align:top}
+th{color:var(--muted);font-weight:500;font-size:.8rem}
+table.kv th{white-space:nowrap;width:10rem}
 tr:last-child th,tr:last-child td{border-bottom:none}
-.badge{display:inline-block;padding:.05rem .45rem;border-radius:.7rem;
-font-size:.78rem;border:1px solid currentColor;white-space:nowrap}
-.badge.ok{color:var(--ok)}.badge.warn{color:var(--warn)}
-.badge.bad{color:var(--bad)}.badge.muted{color:var(--sub)}
+
 ul.links{list-style:none;padding:0;margin:0}
-ul.links li{padding:.3rem 0;border-bottom:1px solid var(--line)}
+ul.links li{padding:.45rem 0;border-bottom:1px solid var(--line)}
 ul.links li:last-child{border-bottom:none}
-button{font:inherit;padding:.3rem .7rem;margin-right:.3rem;border-radius:.4rem;
-border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer;
-min-height:2.1rem}
-button:hover{border-color:var(--acc)}
-button[disabled]{opacity:.4;cursor:not-allowed}
-pre{white-space:pre-wrap;font-size:.8rem;margin:.3rem 0;color:var(--sub)}
-#log{max-height:14rem;overflow:auto}
-footer{max-width:70rem;margin:1.2rem auto 0;color:var(--sub);font-size:.8rem}
+ul.links a{text-decoration:none;font-weight:550}
+ul.links a:hover{text-decoration:underline}
+
+.act{font:inherit;font-size:.85rem;padding:.35rem .8rem;border-radius:.4rem;
+  border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer;
+  min-height:2.4rem;display:inline-flex;align-items:center;text-decoration:none}
+.act:hover{border-color:var(--accent)}
+.act.danger:hover{border-color:var(--bad);color:var(--bad)}
+.act[disabled]{opacity:.4;cursor:not-allowed}
+input.filter{width:100%;padding:.5rem .7rem;margin:.1rem 0 .6rem;font:inherit;
+  font-size:.92rem;border:1px solid var(--line);border-radius:.45rem;
+  background:var(--bg);color:var(--ink);min-height:2.6rem}
+.group{margin-top:.9rem}
+.group:first-of-type{margin-top:.2rem}
+.group>h3{font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;
+  color:var(--muted);margin:0 0 .1rem;font-weight:600}
+/* On a wide screen a one-per-line list of 72 units is a pointless scroll and
+   the right two thirds of the viewport sit empty. Columns, not smaller type. */
+.group.cols{display:grid;gap:0 1.6rem;
+  grid-template-columns:repeat(auto-fit,minmax(23rem,1fr))}
+.group.cols>h3{grid-column:1/-1}
+#log{max-height:13rem;overflow:auto;font-size:.85rem;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+#log div{padding:.15rem 0;border-bottom:1px solid var(--line)}
+footer{max-width:74rem;margin:.6rem auto 1.4rem;padding:0 .9rem;
+  color:var(--muted);font-size:.8rem}
+@media(max-width:32rem){
+  main{padding:.6rem;gap:.6rem;grid-template-columns:minmax(0,1fr)}
+  .card{padding:.75rem .8rem}
+  .tiles{grid-template-columns:repeat(auto-fit,minmax(7rem,1fr))}
+}
 """
 
-
-PORT_LINK_SCRIPT = """
+SHELL_SCRIPT = """
 <script>
-/* Frontends live on sibling ports of whatever host you reached the hub on
-   (127.0.0.1 from the desktop, the tailnet IP from the phone). Rewrite the
-   port-only links to the current host so one rendered page serves both. The
-   <noscript> fallback below every link keeps the port visible regardless. */
-document.querySelectorAll('a[data-port]').forEach((a) => {
+/* Theme and reading size persist per browser; both default to the system.
+   Frontend links carry a port only, so they follow whichever host you reached
+   the hub on (loopback from the desktop, the tailnet address from the phone).
+   Everything else on this page is server-rendered and needs no script. */
+(function(){
+  var t = localStorage.getItem('hub-theme');
+  if (t) document.documentElement.dataset.theme = t;
+  var f = localStorage.getItem('hub-fs');
+  if (f) document.documentElement.style.setProperty('--fs', f);
+})();
+function tgl(){
+  var d = document.documentElement;
+  var dark = d.dataset.theme
+    ? d.dataset.theme === 'dark'
+    : matchMedia('(prefers-color-scheme: dark)').matches;
+  d.dataset.theme = dark ? 'light' : 'dark';
+  localStorage.setItem('hub-theme', d.dataset.theme);
+}
+function fs(step){
+  var d = document.documentElement;
+  var now = parseFloat(getComputedStyle(d).fontSize) || 17;
+  var next = Math.max(14, Math.min(24, now + step)) + 'px';
+  d.style.setProperty('--fs', next);
+  localStorage.setItem('hub-fs', next);
+}
+document.querySelectorAll('a[data-port]').forEach(function(a){
   a.href = location.protocol + '//' + location.hostname + ':' + a.dataset.port + '/';
+});
+var filter = document.getElementById('filter');
+if (filter) filter.addEventListener('input', function(){
+  var needle = filter.value.toLowerCase();
+  document.querySelectorAll('[data-search]').forEach(function(el){
+    el.hidden = needle !== '' && el.dataset.search.indexOf(needle) === -1;
+  });
+  document.querySelectorAll('.group').forEach(function(group){
+    var rows = group.querySelectorAll('[data-search]');
+    var shown = Array.prototype.filter.call(rows, function(r){ return !r.hidden; });
+    group.hidden = rows.length > 0 && shown.length === 0;
+  });
 });
 </script>
 """
 
+ACTION_SCRIPT = """
+<script>
+// The only privileged client-side logic on the hub. All state above is
+// server-rendered; this drives the ops-reducer's bounded action API
+// (/ops/v1/actions), which enforces expected_revision, idempotency keys, and
+// per-target admission on its own side. There is no second control plane and
+// no shell-out from this page.
+function hublog(message, tone){
+  var el = document.getElementById('log');
+  if (!el) return;
+  var first = el.firstElementChild;
+  if (first && first.dataset.placeholder) el.textContent = '';
+  var line = document.createElement('div');
+  if (tone) line.className = tone;
+  line.textContent = new Date().toLocaleTimeString() + '  ' + message;
+  el.prepend(line);
+}
+async function act(verb, kind, id, button){
+  var label = verb + ' ' + id;
+  if (!confirm(label + '?\\n\\nThis posts a bounded action to the ops-reducer and leaves a receipt.')) return;
+  button.disabled = true;
+  try {
+    var snap = await fetch('/ops/v1/snapshot', {headers: {'Accept': 'application/json'}});
+    if (!snap.ok) throw new Error('snapshot ' + snap.status);
+    var revision = (await snap.json()).sequence;
+    var target = {};
+    target[kind] = id;
+    var res = await fetch('/ops/v1/actions', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        action: verb,
+        target: target,
+        expected_revision: revision,
+        idempotency_key: 'hub-' + verb + '-' + id + '-' + Date.now(),
+        operator_reason: 'operator action from the hub control panel',
+        parameters: {}
+      })
+    });
+    var receipt = await res.json();
+    if (!res.ok) throw new Error(receipt.error || ('HTTP ' + res.status));
+    hublog(label + ' accepted, receipt ' + receipt.receipt_id, 'ok');
+    setTimeout(function(){ location.reload(); }, 2500);
+  } catch (error) {
+    hublog('REFUSED ' + label + ': ' + error.message, 'bad');
+  } finally {
+    button.disabled = false;
+  }
+}
+</script>
+"""
+
+
+PAGES = (
+    ("/", "estate"),
+    ("/work/", "work"),
+    ("/services/", "services"),
+    ("/ai/", "ai"),
+    ("/reports/", "reports"),
+)
+
+
+def nav(active: str) -> str:
+    items = "".join(
+        f'<a href="{esc(href)}" class="{"on" if href == active else ""}">{esc(label)}</a>'
+        for href, label in PAGES
+    )
+    return f'<nav class="tabs">{items}</nav>'
+
 
 def page(
-    title: str, host: str, generated: str, nav: str, body: str, tail: str = ""
+    title: str,
+    host: str,
+    chips: list[str],
+    active: str,
+    body: str,
+    footnote: str = "",
+    tail: str = "",
 ) -> str:
+    chip_html = "".join(f'<span class="chip">{esc(chip)}</span>' for chip in chips)
+    note = footnote or (
+        "Server-rendered by <code>sinnix-hub-render</code>, tailnet only. State is "
+        "a snapshot, not a live stream — reload for a newer one."
+    )
     return f"""<!doctype html>
-<html lang=en><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width,initial-scale=1">
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>{esc(title)}</title><style>{STYLE}</style></head>
 <body>
-<header>
-<h1>{esc(title)}</h1>
-<p class=sub>{esc(host)} &middot; rendered {esc(generated)}</p>
-<nav>{nav}</nav>
+<header class="page">
+<div class="hbar"><h1><b>{esc(host)}</b> {esc(title)}</h1>{chip_html}
+<span class="spacer"></span>
+<button class="hbtn" onclick="fs(-1)" title="smaller text">A−</button>
+<button class="hbtn" onclick="fs(1)" title="larger text">A+</button>
+<button class="hbtn" onclick="tgl()" title="switch between light and dark">theme</button></div>
+{nav(active)}
 </header>
 <main>{body}</main>
-<footer>Server-rendered by <code>sinnix-hub-render</code>. Reachable on the
-tailnet only. State is a snapshot, not a live stream &mdash; reload for a newer
-one.</footer>
-{PORT_LINK_SCRIPT}
+<footer>{note}</footer>
+{SHELL_SCRIPT}
 {tail}
 </body></html>
 """
 
 
-NAV = (
-    '<a href="/">dashboard</a> &middot; <a href="/ai/">ai control</a> '
-    '&middot; <a href="/reports/">reports</a>'
+def log_card() -> str:
+    return card(
+        "Action log",
+        '<div id="log"><div class="sub" data-placeholder="1">'
+        "No actions this browser session. The durable record is "
+        '<a href="/ops/v1/receipts">/ops/v1/receipts</a>.</div></div>',
+        wide=True,
+    )
+
+
+# --------------------------------------------------------------------------
+# semantic workload model
+# --------------------------------------------------------------------------
+
+WORKLOAD_CONTROL_NOTE = (
+    "Ad-hoc <code>sinnix-scope</code> placements are shown but not controllable "
+    "from here: the reducer's action API only accepts attested runtime-inventory "
+    "units and attested agent jobs, and an anonymous transient scope is neither. "
+    "Stop one from the terminal that owns it."
 )
 
 
+def command_classes(inventory: dict[str, Any] | None) -> list[str]:
+    if isinstance(inventory, dict) and isinstance(inventory.get("commandClasses"), dict):
+        names = [name for name in inventory["commandClasses"] if isinstance(name, str)]
+        if names:
+            return sorted(names, key=len, reverse=True)
+    return ["nix-build", "background", "gpu-runtime", "build", "agent", "heavy"]
+
+
+def scope_class(unit: str, classes: list[str]) -> str | None:
+    body = unit[len(SCOPE_PREFIX) :]
+    for name in classes:
+        if body.startswith(f"{name}-"):
+            return name
+    return None
+
+
+def cgroup_leader(control_group: str) -> tuple[str | None, str | None]:
+    """The scope's first process, used only to *name* the workload.
+
+    A scope's systemd Description is the `systemd-run` command line, which for
+    a wrapped launch is a store path plus an env prefix -- unreadable. The
+    leader's own cmdline and cwd say what is actually running and where, which
+    is what turns "some scope" into "sinex is compiling".
+    """
+    if not control_group:
+        return None, None
+    procs = Path("/sys/fs/cgroup") / control_group.lstrip("/") / "cgroup.procs"
+    try:
+        pids = procs.read_text(encoding="utf-8").split()
+    except OSError:
+        return None, None
+    for pid in pids[:4]:
+        try:
+            cwd = os.readlink(f"/proc/{pid}/cwd")
+            raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+        except OSError:
+            continue
+        parts = [part for part in raw.decode("utf-8", "replace").split("\0") if part]
+        if not parts:
+            continue
+        return " ".join(parts), cwd
+    return None, None
+
+
+def project_of(path: str | None) -> str | None:
+    if not path:
+        return None
+    parts = Path(path).parts
+    for anchor in ("project", "worktrees"):
+        if anchor in parts:
+            index = parts.index(anchor)
+            if index + 1 < len(parts):
+                return parts[index + 1]
+    return None
+
+
+# Launch wrappers that stand between `sinnix-scope` and the command the
+# operator actually typed. Stripping them is what turns
+# "…/coreutils/bin/env SINNIX_AGENT_SCOPED=1 … nice -n 10 ionice -c 3 -- xtask test"
+# into "xtask test".
+WRAPPER_BINARIES = {"env", "nice", "ionice", "setsid", "stdbuf", "chrt", "time"}
+
+
+def shorten_command(command: str | None) -> str:
+    """Reduce a launch line to the verb the operator recognises."""
+    if not command:
+        return "unnamed command"
+    parts = command.split()
+    while parts:
+        head = parts[0]
+        base = Path(head).name
+        if head in {"--", "--internal-supervise"}:
+            parts.pop(0)
+            continue
+        if "=" in head and not head.startswith("-") and "/" not in head.split("=", 1)[0]:
+            parts.pop(0)
+            continue
+        if (
+            base in {"bash", "sh", "dash", "zsh"}
+            and len(parts) > 1
+            # a store path's basename is hash-prefixed, so match on containment
+            and "sinnix-scope" in Path(parts[1]).name
+        ):
+            parts = parts[2:]
+            continue
+        if base.startswith("sinnix-scope") or base in WRAPPER_BINARIES:
+            parts.pop(0)
+            # eat that wrapper's own options (`-n 10`, `-c 3 -n 7`), never the
+            # target's: this only runs directly after a known wrapper.
+            while (
+                len(parts) > 1
+                and parts[0] != "--"
+                and parts[0].startswith("-")
+                and len(parts[0]) == 2
+            ):
+                parts = parts[2:]
+            continue
+        if base == "nix" and parts[1:3] == ["develop", "--command"]:
+            parts = parts[3:]
+            continue
+        break
+    if not parts:
+        return "unnamed command"
+    parts[0] = Path(parts[0]).name
+    # Long absolute paths are the reason these lines wrap to three lines on a
+    # phone, and their middle is never the informative part.
+    parts = [abbreviate_path(part) for part in parts]
+    text = " ".join(parts)
+    return text if len(text) <= 76 else text[:73] + "…"
+
+
+def abbreviate_path(token: str) -> str:
+    if len(token) <= 30 or token.count("/") < 2:
+        return token
+    tail = Path(token).parts[-2:]
+    return "…/" + "/".join(tail)
+
+
+def collect_scopes(inventory: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Every live sinnix-placed transient scope, named and measured."""
+    classes = command_classes(inventory)
+    monotonic = monotonic_now_us()
+    found: list[dict[str, Any]] = []
+    for manager in ("user", "system"):
+        listing = systemctl(manager, "list-units", "--type=scope", "--state=active", "-o", "json", "--no-pager")
+        if not listing:
+            continue
+        try:
+            units = json.loads(listing)
+        except json.JSONDecodeError:
+            continue
+        names = [
+            entry.get("unit")
+            for entry in units
+            if isinstance(entry, dict)
+            and isinstance(entry.get("unit"), str)
+            and entry["unit"].startswith(SCOPE_PREFIX)
+        ]
+        for unit, info in show_units(manager, names, SCOPE_PROPERTIES).items():
+            started = as_int(info.get("ActiveEnterTimestampMonotonic"))
+            elapsed = (
+                (monotonic - started) / 1_000_000
+                if monotonic is not None and started is not None and started > 0
+                else None
+            )
+            job_id = (
+                unit[len(AGENT_JOB_PREFIX) : -len(".scope")]
+                if unit.startswith(AGENT_JOB_PREFIX) and unit.endswith(".scope")
+                else None
+            )
+            command, cwd = cgroup_leader(info.get("ControlGroup", ""))
+            found.append(
+                {
+                    "unit": unit,
+                    "manager": manager,
+                    "job_id": job_id,
+                    "class": None if job_id else scope_class(unit, classes),
+                    "slice": info.get("Slice"),
+                    "memory": as_int(info.get("MemoryCurrent")),
+                    "memory_high": as_int(info.get("MemoryHigh")),
+                    "memory_max": as_int(info.get("MemoryMax")),
+                    "elapsed": elapsed,
+                    "command": shorten_command(command),
+                    "cwd": cwd,
+                    "project": project_of(cwd),
+                }
+            )
+    found.sort(key=lambda item: item.get("elapsed") or 0, reverse=True)
+    return found
+
+
+def slice_rows(state: dict[str, Any]) -> list[dict[str, Any]]:
+    slices = state.get("resource_slices")
+    if not isinstance(slices, list):
+        return []
+    rows = []
+    for entry in slices:
+        if not isinstance(entry, dict) or entry.get("active_state") != "active":
+            continue
+        policy = entry.get("policy") if isinstance(entry.get("policy"), dict) else {}
+        current = as_int(policy.get("memory_current"))
+        if current is None or current < 8 * 1024 * 1024:
+            continue
+        rows.append(
+            {
+                "unit": entry.get("unit"),
+                "manager": entry.get("manager"),
+                "current": current,
+                "high": as_int(policy.get("memory_high")),
+                "max": as_int(policy.get("memory_max")),
+                "swap": as_int(policy.get("memory_swap_current")),
+                "cpu_weight": policy.get("cpu_weight"),
+            }
+        )
+    rows.sort(key=lambda item: item["current"], reverse=True)
+    return rows
+
+
+def lease_state(lease_path: Path) -> tuple[str, str, str]:
+    """(tone, headline, detail) for the heavy-work lease."""
+    owner, error = load_json(lease_path)
+    if owner is None:
+        if lease_path.parent.exists():
+            return "muted", "No heavy-work lease held", "nothing currently claims the right to run heavy work"
+        return "muted", "Heavy-work lease not in use", esc(error or "")
+    if owner.get("schema") != LEASE_SCHEMA:
+        return "warn", "Heavy-work lease unreadable", f"owner file is not {LEASE_SCHEMA}"
+    holder = owner.get("project") or owner.get("job_id") or "unknown holder"
+    work_item = owner.get("work_item")
+    detail = f"work item {esc(work_item)}" if work_item else "no work item declared"
+    since = owner.get("at") or owner.get("acquired_at")
+    if since:
+        detail += f" · since {esc(since)}"
+    return "info", f"Heavy-work lease held by <strong>{esc(holder)}</strong>", detail
+
+
+def ledger_rows(state: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = state.get("workload_rows")
+    if not isinstance(rows, list):
+        return []
+    ledger = [
+        entry
+        for entry in rows
+        if isinstance(entry, dict) and entry.get("kind") == "project-ledger"
+    ]
+    ledger.sort(key=lambda entry: str(entry.get("started_at") or ""), reverse=True)
+    return ledger
+
+
+def gateway_jobs(state: dict[str, Any]) -> list[dict[str, Any]]:
+    gateway = state.get("agent_gateway")
+    jobs = gateway.get("jobs") if isinstance(gateway, dict) else None
+    return [job for job in jobs if isinstance(job, dict)] if isinstance(jobs, list) else []
+
+
+def orphan_rows(state: dict[str, Any]) -> list[dict[str, Any]]:
+    gateway = state.get("agent_gateway")
+    rows = gateway.get("orphaned_jobs") if isinstance(gateway, dict) else None
+    if not isinstance(rows, list):
+        return []
+    return [row for row in rows if isinstance(row, dict) and row.get("orphaned")]
+
+
 # --------------------------------------------------------------------------
-# dashboard panels
+# work page
 # --------------------------------------------------------------------------
 
 
-def psi_row(pressure: dict[str, Any], key: str) -> str:
+LONG_LIVED_SECONDS = 24 * 3600
+
+
+def scope_block(
+    entry: dict[str, Any],
+    jobs_by_id: dict[str, dict[str, Any]],
+    slice_limits: dict[str, int],
+) -> str:
+    job = jobs_by_id.get(entry["job_id"]) if entry.get("job_id") else None
+    controls = ""
+    if job is not None:
+        declared = job.get("declared") if isinstance(job.get("declared"), dict) else {}
+        headline = (
+            f"<strong>{esc(job.get('backend') or 'agent')} {esc(job.get('model') or '')}</strong>"
+            f" in <code>{esc(project_of(job.get('worktree')) or job.get('worktree') or '?')}</code>"
+        )
+        meta = [badge("gateway job", "info"), esc(duration_human(entry.get("elapsed")))]
+        if declared.get("work_item"):
+            meta.append(f"work item <code>{esc(declared['work_item'])}</code>")
+        if job.get("effort"):
+            meta.append(f"effort {esc(job['effort'])}")
+        controls = (
+            f"<button class=\"act danger\" onclick=\"act('interrupt','job_id',"
+            f"'{esc(entry['job_id'])}',this)\">interrupt</button>"
+        )
+    elif entry.get("job_id"):
+        headline = f"<strong>gateway job</strong> <code>{esc(entry['job_id'])}</code>"
+        meta = [
+            badge("gateway job", "info"),
+            esc(duration_human(entry.get("elapsed"))),
+            "no manifest in the current snapshot",
+        ]
+    else:
+        klass = entry.get("class")
+        project = entry.get("project")
+        where = f" in <code>{esc(project)}</code>" if project else ""
+        headline = f"<strong>{esc(entry['command'])}</strong>{where}"
+        meta = [
+            badge(
+                f"{klass} class" if klass else "unclassified scope",
+                "warn" if klass in HEAVY_CLASSES else "muted",
+            ),
+            esc(duration_human(entry.get("elapsed"))),
+        ]
+        if entry.get("slice"):
+            meta.append(f"<code>{esc(entry['slice'])}</code>")
+
+    elapsed = entry.get("elapsed")
+    if elapsed is not None and elapsed > LONG_LIVED_SECONDS:
+        meta.append(badge("long-lived", "muted"))
+    # A scope's own MemoryHigh is the per-job cap where one exists (agent
+    # scopes carry 8G/12G); otherwise the ceiling that actually binds it is the
+    # slice's, which is the number the operator cares about during a build.
+    ceiling = entry.get("memory_high") or entry.get("memory_max")
+    ceiling_owner = "scope"
+    if not ceiling and entry.get("slice") in slice_limits:
+        ceiling = slice_limits[entry["slice"]]
+        ceiling_owner = str(entry["slice"])
+    memory = entry.get("memory")
+    bar = ""
+    tone = ""
+    if memory is not None:
+        if ceiling:
+            bar = meter(memory, ceiling)
+            meta.append(
+                f"{esc(bytes_human(memory))} of {esc(bytes_human(ceiling))} "
+                f"{esc(ceiling_owner)} ceiling"
+            )
+            if memory / ceiling > 0.9:
+                tone = "bad"
+        else:
+            meta.append(esc(bytes_human(memory)))
+    return row(headline + bar, meta, controls, tone)
+
+
+def scope_groups(scopes: list[dict[str, Any]]) -> list[tuple[str, list[dict[str, Any]]]]:
+    """Sort live scopes into the four things they actually are."""
+    heavy, sessions, jobs, other = [], [], [], []
+    for entry in scopes:
+        if entry.get("job_id"):
+            jobs.append(entry)
+        elif entry.get("class") in HEAVY_CLASSES:
+            heavy.append(entry)
+        elif entry.get("class") == "agent":
+            sessions.append(entry)
+        else:
+            other.append(entry)
+    for bucket in (heavy, sessions, jobs, other):
+        bucket.sort(key=lambda item: item.get("elapsed") or 0)
+    return [
+        ("build, nix-build and heavy scopes", heavy),
+        ("agent-gateway jobs", jobs),
+        ("agent sessions", sessions),
+        ("other scopes", other),
+    ]
+
+
+def running_ledger(state: dict[str, Any]) -> list[dict[str, Any]]:
+    return [entry for entry in ledger_rows(state) if entry.get("status") == "running"]
+
+
+def live_work_card(scopes: list[dict[str, Any]], state: dict[str, Any], now: dt.datetime) -> str:
+    jobs_by_id = {
+        job["job_id"]: job for job in gateway_jobs(state) if isinstance(job.get("job_id"), str)
+    }
+    slice_limits = {
+        str(entry["unit"]): entry["high"] or entry["max"]
+        for entry in slice_rows(state)
+        if entry.get("unit") and (entry.get("high") or entry.get("max"))
+    }
+    body = ""
+    in_flight = running_ledger(state)
+    if in_flight:
+        blocks = ""
+        for entry in in_flight:
+            started = parse_iso(entry.get("started_at"))
+            elapsed = (now - started).total_seconds() if started else None
+            blocks += row(
+                f"<strong>{esc(entry.get('project') or '?')}</strong> is running "
+                f"<code>{esc(entry.get('name') or entry.get('command') or '?')}</code>",
+                [
+                    badge("in flight", "info"),
+                    esc(duration_human(elapsed)),
+                    esc(str(entry.get("resource_class") or "")),
+                ],
+            )
+        body += f'<div class="group"><h3>project commands in flight</h3>{blocks}</div>'
+    for label, bucket in scope_groups(scopes):
+        if not bucket:
+            continue
+        blocks = "".join(scope_block(entry, jobs_by_id, slice_limits) for entry in bucket)
+        body += f'<div class="group"><h3>{esc(label)}</h3>{blocks}</div>'
+    if not body:
+        return card(
+            "Running now",
+            empty(
+                "Nothing is placed in a sinnix scope and no project command is in "
+                "flight — no agent session, build, or scoped command is running."
+            ),
+            "project commands, agent sessions, gateway jobs and sinnix-scope placements",
+            wide=True,
+            anchor="running",
+        )
+    subtitle = (
+        f"{len(in_flight)} project command{'s' if len(in_flight) != 1 else ''} in flight, "
+        f"{len(scopes)} live scope{'s' if len(scopes) != 1 else ''}. {WORKLOAD_CONTROL_NOTE}"
+    )
+    return (
+        '<section class="card wide" id="running"><h2>Running now</h2>'
+        f'<p class="sub">{subtitle}</p>{body}</section>'
+    )
+
+
+def slices_card(state: dict[str, Any]) -> str:
+    rows = slice_rows(state)
+    if not rows:
+        return card("Slice budgets", empty("no slice accounting in the snapshot"))
+    blocks = ""
+    for entry in rows[:8]:
+        limit = entry["high"] or entry["max"]
+        headline = f"<code>{esc(entry['unit'])}</code>"
+        if entry.get("manager"):
+            headline += f' <span class="sub">{esc(entry["manager"])}</span>'
+        meta = [
+            f"{esc(bytes_human(entry['current']))} of {esc(bytes_human(limit))} "
+            f"{'high' if entry['high'] else 'max'}"
+            if limit
+            else f"{esc(bytes_human(entry['current']))}, no memory ceiling"
+        ]
+        if entry.get("cpu_weight") and entry["cpu_weight"] not in {"[not set]", None}:
+            meta.append(f"CPUWeight {esc(entry['cpu_weight'])}")
+        if entry.get("swap"):
+            meta.append(f"swap {esc(bytes_human(entry['swap']))}")
+        blocks += row(headline + meter(entry["current"], limit), meta)
+    return (
+        '<section class="card"><h2>Slice budgets</h2>'
+        '<p class="sub">Where the estate puts work, and what it is allowed to '
+        "cost. Sacrificial slices carry real ceilings; the protected ones do "
+        "not.</p>"
+        f"{blocks}</section>"
+    )
+
+
+def ledger_card(state: dict[str, Any], now: dt.datetime) -> str:
+    rows = ledger_rows(state)
+    if not rows:
+        return card(
+            "Recent project runs",
+            empty("no project ledger rows in the snapshot"),
+            "xtask, cargo and friends record what they ran and what it cost",
+        )
+    blocks = ""
+    for entry in rows[:10]:
+        status = str(entry.get("status") or "unknown")
+        tone = {"success": "ok", "failed": "bad", "running": "info"}.get(status, "muted")
+        metrics = entry.get("metrics") if isinstance(entry.get("metrics"), dict) else {}
+        headline = (
+            f"<strong>{esc(entry.get('project') or '?')}</strong> "
+            f"<code>{esc(entry.get('name') or entry.get('command') or '?')}</code>"
+        )
+        meta = [badge(status, tone)]
+        if entry.get("duration_secs"):
+            meta.append(f"ran {esc(duration_human(entry['duration_secs']))}")
+        rss = metrics.get("rss_mb")
+        if isinstance(rss, (int, float)):
+            meta.append(f"peak {rss / 1024:.1f} G")
+        meta.append(esc(age_since(entry.get("finished_at") or entry.get("started_at"), now)))
+        blocks += row(headline, meta, tone="bad" if status == "failed" else "")
+    return (
+        '<section class="card"><h2>Recent project runs</h2>'
+        '<p class="sub">The project ledger — what the devshell-routed commands '
+        "actually did, from the same records lynchpin reads.</p>"
+        f"{blocks}</section>"
+    )
+
+
+def agent_jobs_card(state: dict[str, Any], live_job_ids: set[str], now: dt.datetime) -> str:
+    jobs = [job for job in gateway_jobs(state) if job.get("job_id") not in live_job_ids]
+    jobs.sort(key=lambda job: str(job.get("updated_at") or ""), reverse=True)
+    orphans = {
+        row["job_id"]: row for row in orphan_rows(state) if isinstance(row.get("job_id"), str)
+    }
+    if not jobs and not orphans:
+        return card("Agent jobs", empty("the gateway has no recorded jobs"))
+    blocks = ""
+    for job in jobs[:10]:
+        job_id = str(job.get("job_id") or "")
+        lifecycle = str(job.get("lifecycle") or "unknown")
+        orphan = orphans.get(job_id)
+        tone = {"completed": "ok", "failed": "bad", "cancelled": "muted"}.get(lifecycle, "info")
+        declared = job.get("declared") if isinstance(job.get("declared"), dict) else {}
+        headline = (
+            f"<strong>{esc(job.get('backend') or 'agent')}</strong> "
+            f"{esc(job.get('model') or '')} · "
+            f"<code>{esc(project_of(job.get('worktree')) or '?')}</code>"
+        )
+        meta = [badge(lifecycle, tone), esc(age_since(job.get("updated_at"), now))]
+        if declared.get("work_item"):
+            meta.append(f"work item <code>{esc(declared['work_item'])}</code>")
+        if isinstance(job.get("exit_status"), int):
+            meta.append(f"exit {job['exit_status']}")
+        controls = ""
+        row_tone = ""
+        if orphan is not None:
+            policy = orphan.get("policy") if isinstance(orphan.get("policy"), dict) else {}
+            proposed = str(policy.get("proposed_action") or "notify")
+            meta.append(badge(f"orphaned, {proposed}", "warn"))
+            row_tone = "warn"
+            controls = (
+                f"<button class=\"act danger\" onclick=\"act('interrupt','job_id',"
+                f"'{esc(job_id)}',this)\">interrupt</button>"
+            )
+        blocks += row(headline, meta, controls, row_tone)
+    return (
+        '<section class="card wide"><h2>Agent jobs, recently</h2>'
+        '<p class="sub">Attested gateway jobs whose launcher has exited. An '
+        "orphan is one whose scope outlived its launcher; the reducer will only "
+        "accept a reap after two identical cold expendable observations.</p>"
+        f"{blocks}</section>"
+    )
+
+
+def render_work(
+    manifest: dict[str, Any],
+    snapshot: dict[str, Any] | None,
+    inventory: dict[str, Any] | None,
+    lease_path: Path,
+    generated: str,
+) -> str:
+    host = str(manifest.get("host", "sinnix"))
+    now = dt.datetime.now(dt.timezone.utc)
+    scopes = collect_scopes(inventory)
+    state = (snapshot or {}).get("state")
+    state = state if isinstance(state, dict) else {}
+
+    tone, headline, detail = lease_state(lease_path)
+    heavy = [entry for entry in scopes if entry.get("class") in HEAVY_CLASSES]
+    agents = [entry for entry in scopes if entry.get("job_id") or entry.get("class") == "agent"]
+    in_flight = running_ledger(state)
+    recent = ledger_rows(state)[:10]
+    failed_recent = sum(1 for entry in recent if entry.get("status") == "failed")
+    body = (
+        f'<div class="verdict {tone if tone != "muted" else ""}">'
+        f"<p>{headline}.</p>"
+        f'<p class="sub">{detail}</p></div>'
+    )
+    body += (
+        '<div class="tiles">'
+        + tile(str(len(in_flight)), "commands in flight", "info" if in_flight else "")
+        + tile(str(len(heavy)), "heavy scopes", "warn" if heavy else "")
+        + tile(str(len(agents)), "agent sessions")
+        + tile(str(failed_recent), "of last 10 runs failed", "bad" if failed_recent else "")
+        + "</div>"
+    )
+    live_job_ids = {entry["job_id"] for entry in scopes if entry.get("job_id")}
+    body += live_work_card(scopes, state, now)
+    body += slices_card(state)
+    body += ledger_card(state, now)
+    body += agent_jobs_card(state, live_job_ids, now)
+    body += log_card()
+    if snapshot is None:
+        body += card(
+            "Reducer snapshot unavailable",
+            '<p class="sub">Live scopes above come straight from systemd and are '
+            "current; slice budgets, the project ledger, and agent jobs need the "
+            "reducer.</p>",
+            wide=True,
+        )
+    return page(
+        "work",
+        host,
+        [f"rendered {generated[11:19]}"],
+        "/work/",
+        body,
+        tail=ACTION_SCRIPT,
+    )
+
+
+# --------------------------------------------------------------------------
+# services page
+# --------------------------------------------------------------------------
+
+
+def surface_rows(inventory: dict[str, Any] | None) -> list[dict[str, Any]]:
+    surfaces = inventory.get("surfaces") if isinstance(inventory, dict) else None
+    if not isinstance(surfaces, dict):
+        return []
+    rows = []
+    for name, surface in surfaces.items():
+        if not isinstance(surface, dict) or not surface.get("unit"):
+            continue
+        observe = surface.get("observe") if isinstance(surface.get("observe"), dict) else {}
+        activation = (
+            surface.get("activation") if isinstance(surface.get("activation"), dict) else {}
+        )
+        rows.append(
+            {
+                "name": name,
+                "unit": str(surface["unit"]),
+                "manager": str(surface.get("manager") or "system"),
+                "kind": str(surface.get("kind") or "service"),
+                "resource_class": str(surface.get("resourceClass") or "unclassified"),
+                "restartable": bool(observe.get("restartable")),
+                "activation": activation,
+            }
+        )
+    rows.sort(key=lambda item: (item["resource_class"], item["name"]))
+    return rows
+
+
+def unit_status(info: dict[str, str], socket_activated: bool = False) -> tuple[str, str]:
+    """(badge html, tone) for one unit's live state."""
+    load = info.get("LoadState", "")
+    active = info.get("ActiveState")
+    if load in {"not-found", ""}:
+        return badge("not installed", "muted"), "muted"
+    if info.get("UnitFileState") == "masked":
+        return badge("masked", "bad"), "bad"
+    if active == "active":
+        return badge(info.get("SubState") or "active", "ok"), "ok"
+    if active == "failed":
+        return badge("failed", "bad"), "bad"
+    if socket_activated:
+        return badge("idle", "muted"), "muted"
+    return badge(active or "inactive", "warn" if active == "activating" else "muted"), "muted"
+
+
+def lifecycle_controls(unit: str, restartable: bool, installed: bool, active: bool) -> str:
+    if not installed:
+        return '<span class="sub">registered in the inventory, unknown to systemd</span>'
+    if not restartable:
+        return (
+            '<span class="sub" title="the runtime inventory does not declare '
+            'observe.restartable, and the action API refuses lifecycle verbs '
+            'for it">not restartable</span>'
+        )
+    verbs = ("stop", "restart") if active else ("start",)
+    return "".join(
+        f'<button class="act{" danger" if verb == "stop" else ""}" '
+        f"onclick=\"act('{verb}','unit','{esc(unit)}',this)\">{verb}</button>"
+        for verb in verbs
+    )
+
+
+def render_services(
+    manifest: dict[str, Any],
+    inventory: dict[str, Any] | None,
+    generated: str,
+) -> str:
+    host = str(manifest.get("host", "sinnix"))
+    rows = surface_rows(inventory)
+    if not rows:
+        body = card(
+            "Runtime inventory unavailable",
+            '<p class="sub">Without <code>/etc/sinnix/runtime-inventory.json</code> '
+            "there is no attested set of units to show, and the action API would "
+            "refuse every target anyway.</p>",
+            wide=True,
+        )
+        return page("services", host, [], "/services/", body)
+
+    states = unit_states([(entry["manager"], entry["unit"]) for entry in rows])
+    groups: dict[str, list[str]] = {}
+    counts = {"active": 0, "failed": 0, "restartable": 0}
+    for entry in rows:
+        info = states.get(entry["unit"], {})
+        socket_activated = entry["activation"].get("mode") == "socket-proxy"
+        status, tone = unit_status(info, socket_activated)
+        installed = info.get("LoadState") not in {"not-found", "", None}
+        active = info.get("ActiveState") == "active"
+        counts["active"] += 1 if active else 0
+        counts["failed"] += 1 if tone == "bad" else 0
+        counts["restartable"] += 1 if entry["restartable"] else 0
+        meta = [status, f"<code>{esc(entry['unit'])}</code>", esc(entry["manager"])]
+        if entry["kind"] != "service":
+            meta.append(esc(entry["kind"]))
+        endpoint = entry["activation"].get("publicEndpoint")
+        if endpoint:
+            meta.append(f"<code>{esc(endpoint)}</code>")
+        groups.setdefault(entry["resource_class"], []).append(
+            row(
+                f"<strong>{esc(entry['name'])}</strong>",
+                meta,
+                lifecycle_controls(entry["unit"], entry["restartable"], installed, active),
+                "bad" if tone == "bad" else "",
+                search=f"{entry['name']} {entry['unit']} {entry['resource_class']}".lower(),
+            )
+        )
+
+    body = (
+        '<div class="tiles">'
+        + tile(str(len(rows)), "attested surfaces")
+        + tile(str(counts["active"]), "active", "ok")
+        + tile(str(counts["failed"]), "failed or masked", "bad" if counts["failed"] else "")
+        + tile(str(counts["restartable"]), "controllable here", "info")
+        + "</div>"
+    )
+    grouped = "".join(
+        f'<div class="group cols"><h3>{esc(name)}</h3>{"".join(blocks)}</div>'
+        for name, blocks in sorted(groups.items())
+    )
+    body += (
+        '<section class="card wide"><h2>Every governed unit</h2>'
+        '<p class="sub">Grouped by the resource class that decides its slice, '
+        "weights, and ceilings. Lifecycle buttons post to the reducer's bounded "
+        "action API, which independently re-checks that the unit is attested and "
+        "declares <code>observe.restartable</code>.</p>"
+        '<input class="filter" id="filter" type="search" placeholder="filter by name, unit, or class" '
+        'autocomplete="off" autocapitalize="off" spellcheck="false">'
+        f"{grouped}</section>"
+    )
+    body += log_card()
+    return page(
+        "services",
+        host,
+        [f"{len(rows)} surfaces"],
+        "/services/",
+        body,
+        tail=ACTION_SCRIPT,
+    )
+
+
+# --------------------------------------------------------------------------
+# dashboard
+# --------------------------------------------------------------------------
+
+
+def psi_avg10(pressure: dict[str, Any], key: str) -> float | None:
     block = pressure.get(key)
     if not isinstance(block, dict):
-        return "&mdash;"
-    parts = []
-    for scope in ("some", "full"):
-        window = block.get(scope)
-        if isinstance(window, dict):
-            parts.append(f"{scope} avg10 {window.get('avg10', '?')}")
-    return esc(" / ".join(parts)) if parts else "&mdash;"
+        return None
+    window = block.get("some")
+    if not isinstance(window, dict):
+        return None
+    try:
+        return float(window.get("avg10"))
+    except (TypeError, ValueError):
+        return None
 
 
-def memory_line(pressure: dict[str, Any]) -> str:
+def memory_figures(pressure: dict[str, Any]) -> tuple[float, float] | None:
+    """(used GiB, total GiB) parsed from `free -h`'s Mem line."""
     free = pressure.get("free_h")
     if not isinstance(free, str):
-        return "&mdash;"
+        return None
     for line in free.splitlines():
-        if line.startswith("Mem:"):
-            return f"<code>{esc(line.strip())}</code>"
-    return "&mdash;"
+        if not line.startswith("Mem:"):
+            continue
+        fields = line.split()
+        if len(fields) < 3:
+            return None
+
+        def gib(text: str) -> float | None:
+            try:
+                if text.endswith("Gi"):
+                    return float(text[:-2])
+                if text.endswith("Mi"):
+                    return float(text[:-2]) / 1024
+                if text.endswith("Ti"):
+                    return float(text[:-2]) * 1024
+            except ValueError:
+                return None
+            return None
+
+        total, used = gib(fields[1]), gib(fields[2])
+        if total is None or used is None:
+            return None
+        return used, total
+    return None
+
+
+def failed_units(state: dict[str, Any]) -> list[dict[str, Any]]:
+    units = state.get("systemd_units")
+    if not isinstance(units, list):
+        return []
+    return [
+        entry
+        for entry in units
+        if isinstance(entry, dict) and entry.get("active_state") == "failed"
+    ]
+
+
+def worst_mount(state: dict[str, Any]) -> tuple[str, float] | None:
+    storage = state.get("storage")
+    mounts = storage.get("mounts") if isinstance(storage, dict) else None
+    if not isinstance(mounts, list):
+        return None
+    interesting = {"/", "/persist", "/realm", "/outer-realm", "/neo-outer-realm", "/nix"}
+    worst: tuple[str, float] | None = None
+    for entry in mounts:
+        if not isinstance(entry, dict) or entry.get("target") not in interesting:
+            continue
+        target = str(entry["target"])
+        try:
+            stat = os.statvfs(target)
+        except OSError:
+            continue
+        total = stat.f_blocks * stat.f_frsize
+        if not total:
+            continue
+        used = (total - stat.f_bavail * stat.f_frsize) / total
+        if worst is None or used > worst[1]:
+            worst = (target, used)
+    return worst
+
+
+def verdict(
+    state: dict[str, Any],
+    scopes: list[dict[str, Any]],
+    memory: tuple[float, float] | None,
+    failed: list[dict[str, Any]],
+    mount: tuple[str, float] | None,
+    sources: dict[str, Any],
+) -> tuple[str, str, str]:
+    """One sentence the operator can read in three seconds, plus a tone."""
+    problems: list[str] = []
+    tone = "ok"
+    if failed:
+        tone = "bad"
+        names = ", ".join(str(entry.get("unit")) for entry in failed[:3])
+        problems.append(f"{len(failed)} unit{'s' if len(failed) != 1 else ''} failed ({names})")
+    degraded = [
+        name
+        for name, value in sources.items()
+        if isinstance(value, dict) and value.get("status") == "unavailable"
+    ]
+    if degraded:
+        tone = "bad" if tone == "bad" else "warn"
+        problems.append(f"{len(degraded)} source{'s' if len(degraded) != 1 else ''} unavailable")
+    if mount and mount[1] > 0.9:
+        tone = "bad"
+        problems.append(f"{mount[0]} is {mount[1] * 100:.0f}% full")
+    if memory and memory[0] / memory[1] > 0.9:
+        tone = "bad" if tone == "bad" else "warn"
+        problems.append("memory is nearly exhausted")
+
+    heavy = [entry for entry in scopes if entry.get("class") in HEAVY_CLASSES]
+    agents = [entry for entry in scopes if entry.get("job_id") or entry.get("class") == "agent"]
+    in_flight = running_ledger(state)
+    activity: list[str] = []
+    if in_flight:
+        named = ", ".join(
+            sorted(
+                {
+                    f"{entry.get('project') or '?'} {entry.get('name') or entry.get('command') or ''}".strip()
+                    for entry in in_flight
+                }
+            )
+        )
+        activity.append(f"running {named}")
+    if heavy:
+        names = ", ".join(
+            sorted({str(entry.get("project") or entry.get("class")) for entry in heavy})
+        )
+        activity.append(
+            f"{len(heavy)} scope{'s' if len(heavy) != 1 else ''} in the build slices ({names})"
+        )
+    if agents:
+        activity.append(f"{len(agents)} agent session{'s' if len(agents) != 1 else ''}")
+    if not activity:
+        activity.append("nothing heavy is running")
+
+    if problems:
+        sentence = "Needs attention: " + "; ".join(problems) + "."
+    else:
+        sentence = "The estate is healthy."
+    detail = ", ".join(activity).capitalize() + "."
+    if memory:
+        detail += f" Memory {memory[0]:.1f} of {memory[1]:.1f} GiB."
+    return tone, sentence, detail
 
 
 def pressure_card(state: dict[str, Any]) -> str:
     pressure = state.get("live_pressure")
     if not isinstance(pressure, dict):
-        return card("Pressure", '<p class="sub">no live_pressure in snapshot</p>')
-    rows = [
-        ("memory", memory_line(pressure)),
-        ("cpu psi", psi_row(pressure, "cpu")),
-        ("io psi", psi_row(pressure, "io")),
-        ("memory psi", psi_row(pressure, "memory")),
-    ]
-    return card("Pressure", kv_table(rows))
-
-
-def failed_units_card(state: dict[str, Any]) -> str:
-    units = state.get("systemd_units")
-    if not isinstance(units, list):
-        return card("Units", '<p class="sub">no systemd_units in snapshot</p>')
-    unhealthy = [
-        row
-        for row in units
-        if isinstance(row, dict) and row.get("active_state") in {"failed", "activating"}
-    ]
-    if not unhealthy:
-        return card(
-            "Units",
-            f"<p>{badge('all observed units healthy', 'ok')}</p>",
-            f"{len(units)} units observed",
-        )
-    cells = "".join(
-        "<tr><td><code>{unit}</code></td><td>{state}</td><td>{sub}</td></tr>".format(
-            unit=esc(row.get("unit")),
-            state=badge(str(row.get("active_state")), tone_for_active(row.get("active_state"))),
-            sub=esc(row.get("sub_state")),
-        )
-        for row in unhealthy
-    )
-    return card(
-        "Units needing attention",
-        f"<div class=scroll><table>{cells}</table></div>",
-        f"{len(unhealthy)} of {len(units)} observed units",
-    )
-
-
-def agents_card(state: dict[str, Any]) -> str:
-    gateway = state.get("agent_gateway")
-    if not isinstance(gateway, dict):
-        return card("Agents", '<p class="sub">no agent_gateway in snapshot</p>')
-    jobs = gateway.get("jobs") if isinstance(gateway.get("jobs"), list) else []
-    orphans = (
-        gateway.get("orphaned_jobs")
-        if isinstance(gateway.get("orphaned_jobs"), list)
-        else []
-    )
-    rows = [
-        ("attested jobs", esc(len(jobs))),
-        (
-            "orphaned jobs",
-            badge(str(len(orphans)), "warn" if orphans else "ok"),
-        ),
-        ("gateway available", esc(gateway.get("available"))),
-    ]
-    return card("Agent gateway", kv_table(rows))
-
-
-def sources_card(snapshot: dict[str, Any]) -> str:
-    sources = snapshot.get("sources")
-    if not isinstance(sources, dict):
-        return card("Sources", '<p class="sub">no source health in snapshot</p>')
-    cells = ""
-    for name, value in sorted(sources.items()):
-        if not isinstance(value, dict):
+        return card("Pressure", empty("no live_pressure in the snapshot"))
+    rows = []
+    for label, key in (("cpu", "cpu"), ("io", "io"), ("memory", "memory")):
+        value = psi_avg10(pressure, key)
+        if value is None:
+            rows.append((f"{label} psi", "—"))
             continue
-        status = str(value.get("status", "unknown"))
-        tone = {"healthy": "ok", "unavailable": "bad"}.get(status, "warn")
-        cells += (
-            f"<tr><td><code>{esc(name)}</code></td>"
-            f"<td>{badge(status, tone)}</td>"
-            f"<td>{esc(value.get('degradation') or value.get('freshness') or '')}</td></tr>"
+        tone = "bad" if value > 40 else "warn" if value > 10 else "ok"
+        rows.append((f"{label} psi", f'{dot(tone)}{value:.2f} <span class="sub">avg10 some</span>'))
+    memory = memory_figures(pressure)
+    if memory:
+        used, total = memory
+        rows.insert(
+            0,
+            (
+                "memory",
+                f"{used:.1f} / {total:.1f} GiB" + meter(int(used * 1024), int(total * 1024)),
+            ),
         )
     return card(
-        "Source health",
-        f"<div class=scroll><table>{cells}</table></div>",
-        f"snapshot sequence {esc(snapshot.get('sequence'))}",
+        "Pressure",
+        kv_table(rows),
+        "PSI avg10 is the share of the last ten seconds something was stalled",
     )
 
 
@@ -368,57 +1546,131 @@ def storage_card(state: dict[str, Any]) -> str:
     storage = state.get("storage")
     mounts = storage.get("mounts") if isinstance(storage, dict) else None
     if not isinstance(mounts, list) or not mounts:
-        return card("Storage", '<p class="sub">no storage mounts in snapshot</p>')
+        return card("Storage", empty("no storage mounts in the snapshot"))
     interesting = {"/", "/persist", "/realm", "/outer-realm", "/neo-outer-realm", "/nix"}
-    cells = ""
-    for row in mounts:
-        if not isinstance(row, dict) or row.get("target") not in interesting:
+    # Several of these are subvolumes of one filesystem and report identical
+    # figures; showing the same bar four times is noise, so collapse them onto
+    # one row that names every mount point sharing the numbers.
+    seen: dict[tuple[int, int], dict[str, Any]] = {}
+    for entry in mounts:
+        if not isinstance(entry, dict) or entry.get("target") not in interesting:
             continue
-        usage = ""
+        target = str(entry["target"])
         try:
-            stat = os.statvfs(str(row.get("target")))
-            total = stat.f_blocks * stat.f_frsize
-            free = stat.f_bavail * stat.f_frsize
-            if total:
-                usage = f"{(total - free) / 1e12:.2f}T / {total / 1e12:.2f}T"
+            stat = os.statvfs(target)
         except OSError:
-            usage = "unreadable"
-        cells += (
-            f"<tr><td><code>{esc(row.get('target'))}</code></td>"
-            f"<td>{esc(row.get('fstype'))}</td><td>{esc(usage)}</td></tr>"
+            continue
+        total = stat.f_blocks * stat.f_frsize
+        free = stat.f_bavail * stat.f_frsize
+        if not total:
+            continue
+        key = (total, free)
+        if key in seen:
+            seen[key]["targets"].append(target)
+            continue
+        seen[key] = {
+            "targets": [target],
+            "total": total,
+            "used": total - free,
+            "fstype": entry.get("fstype"),
+        }
+    blocks = ""
+    for figures in sorted(seen.values(), key=lambda item: item["used"] / item["total"], reverse=True):
+        names = " ".join(f"<code>{esc(name)}</code>" for name in figures["targets"])
+        blocks += row(
+            names + meter(figures["used"], figures["total"]),
+            [
+                f"{figures['used'] / 1e12:.2f} T of {figures['total'] / 1e12:.2f} T",
+                f"{figures['used'] / figures['total'] * 100:.0f}% used",
+                esc(figures["fstype"]),
+            ],
         )
-    return card("Storage", f"<div class=scroll><table>{cells}</table></div>")
+    return card("Storage", blocks or empty("nothing to show"))
+
+
+def sources_card(snapshot: dict[str, Any]) -> str:
+    sources = snapshot.get("sources")
+    if not isinstance(sources, dict):
+        return card("Sources", empty("no source health in the snapshot"))
+    blocks = ""
+    for name, value in sorted(sources.items()):
+        if not isinstance(value, dict):
+            continue
+        status = str(value.get("status", "unknown"))
+        tone = {"healthy": "ok", "unavailable": "bad", "disabled": "muted"}.get(status, "warn")
+        note = value.get("degradation") or value.get("freshness") or ""
+        blocks += row(
+            f"<code>{esc(name)}</code>",
+            [badge(status, tone), esc(note)],
+            tone="bad" if tone == "bad" else "",
+        )
+    return card(
+        "Source health",
+        blocks or empty("nothing to show"),
+        "where the state above came from, and whether it is current",
+    )
+
+
+def failed_card(state: dict[str, Any]) -> str:
+    units = state.get("systemd_units")
+    if not isinstance(units, list):
+        return card("Units", empty("no systemd_units in the snapshot"))
+    unhealthy = [
+        entry
+        for entry in units
+        if isinstance(entry, dict) and entry.get("active_state") in {"failed", "activating"}
+    ]
+    if not unhealthy:
+        return card(
+            "Units",
+            f"<p>{badge('all observed units healthy', 'ok')}</p>",
+            f"{len(units)} observed",
+        )
+    blocks = ""
+    for entry in unhealthy:
+        active = str(entry.get("active_state"))
+        tone = "bad" if active == "failed" else "warn"
+        blocks += row(
+            f"<code>{esc(entry.get('unit'))}</code>",
+            [badge(active, tone), esc(entry.get("sub_state")), esc(entry.get("result") or "")],
+            '<a class="act" href="/services/">manage →</a>' if active == "failed" else "",
+            tone,
+        )
+    return card(
+        "Units needing attention",
+        blocks,
+        f"{len(unhealthy)} of {len(units)} observed units",
+        wide=len(unhealthy) > 3,
+    )
 
 
 def links_card(manifest: dict[str, Any]) -> str:
     items = ""
-    for link in manifest.get("links", []):
-        if not isinstance(link, dict):
-            continue
-        href = link.get("href", "#")
-        note = link.get("note") or ""
-        items += (
-            f'<li><a href="{esc(href)}">{esc(link.get("label", href))}</a>'
-            f'<span class="sub"> {esc(note)}</span></li>'
-        )
     for frontend in manifest.get("frontends", []):
         if not isinstance(frontend, dict):
             continue
         port = frontend.get("port")
         label = frontend.get("label", frontend.get("name"))
         items += (
-            f'<li><a data-port="{esc(port)}" href="http://127.0.0.1:{esc(port)}/">'
-            f"{esc(label)}</a>"
-            f'<span class="sub"> port {esc(port)} &rarr; {esc(frontend.get("upstream"))}</span></li>'
+            f'<li><a data-port="{esc(port)}" href="http://127.0.0.1:{esc(port)}/">{esc(label)}</a>'
+            f'<div class="sub">port {esc(port)} → {esc(frontend.get("upstream"))}</div></li>'
+        )
+    for link in manifest.get("links", []):
+        if not isinstance(link, dict):
+            continue
+        href = link.get("href", "#")
+        items += (
+            f'<li><a href="{esc(href)}">{esc(link.get("label", href))}</a>'
+            f'<div class="sub">{esc(link.get("note") or "")}</div></li>'
         )
     return card(
-        "Everything else",
-        f'<ul class="links">{items}</ul>',
-        "frontend links point at this host on a sibling port",
+        "Elsewhere",
+        f'<ul class="links">{items}</ul>' if items else empty("nothing published"),
+        "web UIs republished on the tailnet, and the reducer's raw documents",
     )
 
 
-def reports_card(reports_dir: Path) -> str:
+def reports_card(reports_dir: Path, now: dt.datetime) -> str:
     try:
         entries = [
             entry
@@ -428,14 +1680,17 @@ def reports_card(reports_dir: Path) -> str:
     except OSError as error:
         return card("Reports", f'<p class="sub">{esc(error)}</p>')
     entries.sort(key=lambda entry: entry.stat().st_mtime, reverse=True)
-    items = "".join(
-        f'<li><a href="/reports/{esc(entry.name)}">{esc(entry.stem)}</a></li>'
-        for entry in entries[:12]
-    )
+    items = ""
+    for entry in entries[:8]:
+        age = duration_human(now.timestamp() - entry.stat().st_mtime)
+        items += (
+            f'<li><a href="/reports/{esc(entry.name)}">{esc(entry.stem)}</a>'
+            f'<div class="sub">{esc(age)} ago</div></li>'
+        )
     return card(
         "Recent reports",
-        f'<ul class="links">{items}</ul>'
-        f'<p class="sub"><a href="/reports/">all {len(entries)} reports &rarr;</a></p>',
+        f'<ul class="links">{items}</ul>' if items else empty("no reports generated yet"),
+        f'<a href="/reports/">all {len(entries)} reports →</a>',
     )
 
 
@@ -443,95 +1698,95 @@ def render_dashboard(
     manifest: dict[str, Any],
     snapshot: dict[str, Any] | None,
     snapshot_error: str | None,
+    inventory: dict[str, Any] | None,
     generated: str,
 ) -> str:
     host = str(manifest.get("host", "sinnix"))
+    now = dt.datetime.now(dt.timezone.utc)
+    reports = Path(manifest.get("reportsDir", "/nonexistent"))
+    scopes = collect_scopes(inventory)
+
     if snapshot is None:
-        body = card(
-            "Estate state unavailable",
-            f'<p class="sub">{esc(snapshot_error)}</p>'
-            "<p>The ops-reducer publishes the estate snapshot; without it this "
-            "page can still route you to reports, AI control, and the proxied "
-            "frontends below.</p>",
+        body = (
+            '<div class="verdict bad"><p>The estate snapshot is unavailable, so '
+            "this page cannot say whether anything is wrong.</p>"
+            f'<p class="sub">{esc(snapshot_error)}</p></div>'
         )
+        body += live_work_card(scopes, {}, now)
         body += links_card(manifest)
-        body += reports_card(Path(manifest.get("reportsDir", "/nonexistent")))
-        return page(f"{host} hub", host, generated, NAV, body)
+        body += reports_card(reports, now)
+        return page("hub", host, ["degraded"], "/", body, tail=ACTION_SCRIPT)
 
     state = snapshot.get("state")
-    if not isinstance(state, dict):
-        state = {}
-    observed = snapshot.get("observed_at") or "unknown"
-    body = card(
-        "Snapshot",
-        kv_table(
-            [
-                ("observed at", esc(observed)),
-                ("sequence", esc(snapshot.get("sequence"))),
-                (
-                    "degradation",
-                    esc(snapshot.get("degradation") or "none"),
-                ),
-            ]
+    state = state if isinstance(state, dict) else {}
+    sources = snapshot.get("sources") if isinstance(snapshot.get("sources"), dict) else {}
+    pressure = state.get("live_pressure") if isinstance(state.get("live_pressure"), dict) else {}
+    memory = memory_figures(pressure)
+    failed = failed_units(state)
+    mount = worst_mount(state)
+
+    tone, sentence, detail = verdict(state, scopes, memory, failed, mount, sources)
+    body = f'<div class="verdict {tone}"><p>{esc(sentence)}</p><p class="sub">{esc(detail)}</p></div>'
+
+    heavy = [entry for entry in scopes if entry.get("class") in HEAVY_CLASSES]
+    in_flight = running_ledger(state)
+    cpu = psi_avg10(pressure, "cpu")
+    tiles = [
+        tile(str(len(failed)), "failed units", "bad" if failed else "ok", "/services/"),
+        tile(
+            str(len(in_flight)),
+            "commands in flight",
+            "info" if in_flight else "",
+            "/work/#running",
         ),
-    )
+        tile(str(len(heavy)), "heavy scopes", "warn" if heavy else "", "/work/"),
+    ]
+    if memory:
+        share = memory[0] / memory[1]
+        tiles.append(
+            tile(
+                f"{memory[0]:.0f}<span class='l'> / {memory[1]:.0f} GiB</span>",
+                "memory",
+                "bad" if share > 0.9 else "warn" if share > 0.75 else "",
+            )
+        )
+    if cpu is not None:
+        tiles.append(
+            tile(f"{cpu:.1f}", "cpu psi avg10", "bad" if cpu > 40 else "warn" if cpu > 10 else "")
+        )
+    if mount:
+        tiles.append(
+            tile(
+                f"{mount[1] * 100:.0f}%",
+                f"{mount[0]} used",
+                "bad" if mount[1] > 0.9 else "warn" if mount[1] > 0.8 else "",
+            )
+        )
+    body += f'<div class="tiles">{"".join(tiles)}</div>'
+
+    if failed:
+        body += failed_card(state)
     body += pressure_card(state)
-    body += agents_card(state)
-    body += sources_card(snapshot)
     body += storage_card(state)
-    body += failed_units_card(state)
+    body += sources_card(snapshot)
     body += links_card(manifest)
-    body += reports_card(Path(manifest.get("reportsDir", "/nonexistent")))
-    return page(f"{host} hub", host, generated, NAV, body)
+    body += reports_card(reports, now)
+    if not failed:
+        body += failed_card(state)
+
+    chips = [
+        f"rendered {generated[11:19]}",
+        f"seq {snapshot.get('sequence')}",
+    ]
+    observed = parse_iso(snapshot.get("observed_at"))
+    if observed is not None:
+        chips.append(f"observed {duration_human((now - observed).total_seconds())} ago")
+    return page("hub", host, chips, "/", body, tail=ACTION_SCRIPT)
 
 
 # --------------------------------------------------------------------------
 # AI control panel
 # --------------------------------------------------------------------------
-
-ACTION_SCRIPT = """
-<script>
-// The only client-side logic on the hub. State above is server-rendered; this
-// drives the ops-reducer's bounded action API (/ops/v1/actions), which enforces
-// expected_revision, idempotency keys, and per-unit admission on its own side.
-const log = (msg) => {
-  const el = document.getElementById('log');
-  const line = document.createElement('div');
-  line.textContent = new Date().toLocaleTimeString() + '  ' + msg;
-  el.prepend(line);
-};
-async function act(verb, unit, button) {
-  const reason = prompt('Operator reason for ' + verb + ' ' + unit + ':', verb + ' from hub');
-  if (!reason) return;
-  button.disabled = true;
-  try {
-    const snap = await fetch('/ops/v1/snapshot', {headers: {'Accept': 'application/json'}});
-    if (!snap.ok) throw new Error('snapshot ' + snap.status);
-    const revision = (await snap.json()).sequence;
-    const res = await fetch('/ops/v1/actions', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        action: verb,
-        target: {unit: unit},
-        expected_revision: revision,
-        idempotency_key: 'hub-' + verb + '-' + unit + '-' + Date.now(),
-        operator_reason: reason,
-        parameters: {}
-      })
-    });
-    const receipt = await res.json();
-    if (!res.ok) throw new Error(receipt.error || ('HTTP ' + res.status));
-    log(verb + ' ' + unit + ' -> receipt ' + receipt.receipt_id);
-    setTimeout(() => location.reload(), 2500);
-  } catch (error) {
-    log('FAILED ' + verb + ' ' + unit + ': ' + error.message);
-  } finally {
-    button.disabled = false;
-  }
-}
-</script>
-"""
 
 
 def resolve_ai_services(
@@ -585,119 +1840,91 @@ def render_ai(
     host = str(manifest.get("host", "sinnix"))
     services = resolve_ai_services(manifest, inventory)
     states = unit_states(
-        [
-            (str(s.get("manager", "system")), str(s["unit"]))
-            for s in services
-            if s.get("unit")
-        ]
+        [(str(s.get("manager", "system")), str(s["unit"])) for s in services if s.get("unit")]
     )
 
-    rows = ""
-    for service in sorted(services, key=lambda s: str(s.get("name"))):
+    blocks = ""
+    running = 0
+    for service in sorted(services, key=lambda item: str(item.get("name"))):
         if not service.get("registered"):
-            rows += (
-                f"<tr><td><strong>{esc(service.get('name'))}</strong></td>"
-                f"<td>{badge('not registered', 'muted')}</td>"
-                '<td><span class="sub">no runtime surface on this host &mdash; '
-                "the module is not enabled</span></td></tr>"
+            blocks += row(
+                f"<strong>{esc(service.get('name'))}</strong>",
+                [
+                    badge("not registered", "muted"),
+                    "no runtime surface on this host — the module is not enabled",
+                ],
             )
             continue
         unit = str(service.get("unit", ""))
         info = states.get(unit, {})
-        active = info.get("ActiveState")
-        load = info.get("LoadState", "")
-        file_state = info.get("UnitFileState", "")
-        restartable = bool(service.get("restartable"))
         socket_activated = service.get("activationMode") == "socket-proxy"
+        status, tone = unit_status(info, socket_activated)
+        installed = info.get("LoadState") not in {"not-found", "", None}
+        active = info.get("ActiveState") == "active"
+        running += 1 if active else 0
 
-        if load in {"not-found", ""}:
-            status = badge("not installed", "muted")
-        elif file_state == "masked":
-            status = badge("masked", "bad")
-        elif active == "active":
-            status = badge("active", "ok")
-        elif socket_activated:
-            status = badge("idle (socket-activated)", "muted")
-        else:
-            status = badge(active or "inactive", tone_for_active(active))
-
-        controls = ""
-        if restartable and load not in {"not-found", ""}:
-            for verb in ("start", "stop", "restart"):
-                controls += (
-                    f"<button onclick=\"act('{esc(verb)}','{esc(unit)}',this)\">"
-                    f"{esc(verb)}</button>"
-                )
-        elif load not in {"not-found", ""}:
-            controls = (
-                '<span class="sub">not restartable in the runtime inventory'
-                " &mdash; the action API refuses it</span>"
-            )
-        else:
-            controls = (
-                '<span class="sub">registered in the inventory but systemd '
-                "reports the unit not-found</span>"
-            )
-
-        endpoint = service.get("publicEndpoint") or ""
-        detail = []
-        if endpoint:
-            detail.append(f"<code>{esc(endpoint)}</code>")
+        meta = [status]
+        if service.get("publicEndpoint"):
+            meta.append(f"<code>{esc(service['publicEndpoint'])}</code>")
         if service.get("idleTimeout"):
-            detail.append(f"idle exit {esc(service['idleTimeout'])}")
+            meta.append(f"idle exit {esc(service['idleTimeout'])}")
         if service.get("exclusiveResource"):
-            detail.append(f"key {esc(service['exclusiveResource'])}")
-
-        rows += (
-            "<tr>"
-            f"<td><strong>{esc(service.get('name'))}</strong><br>"
-            f'<span class="sub">{" &middot; ".join(detail)}</span></td>'
-            f"<td>{status}</td>"
-            f"<td>{controls}</td>"
-            "</tr>"
+            meta.append(f"admission key <code>{esc(service['exclusiveResource'])}</code>")
+        blocks += row(
+            f"<strong>{esc(service.get('name'))}</strong>",
+            meta,
+            lifecycle_controls(unit, bool(service.get("restartable")), installed, active),
+            "bad" if tone == "bad" else "",
         )
 
     gpu = gpu_summary()
-    body = card(
-        "GPU",
-        f"<p><code>{esc(gpu)}</code></p>"
-        if gpu
-        else '<p class="sub">nvidia-smi unavailable</p>',
-        "used / total / utilisation",
-    )
-    body += card(
-        "How this works",
-        "<p>The backends are socket-activated behind "
-        "<code>systemd-socket-proxyd</code> and exit after their idle timeout, "
-        "so <em>idle</em> is the normal resting state, not a fault. Connecting "
-        "to the public endpoint starts one without any privileged action. "
-        "Ollama and KoboldCpp hold the same <code>gpu-inference</code> "
-        "admission key and conflict by design.</p>"
-        "<p>Every button below posts to the ops-reducer's bounded action API "
-        "and produces a receipt. There is no second control plane and no "
-        "shell-out from this page.</p>",
+    body = (
+        '<div class="tiles">'
+        + tile(str(running), "backends up", "info" if running else "ok")
+        + tile(str(len([s for s in services if s.get("registered")])), "registered")
+        + (
+            tile(esc(gpu.split(",")[0].strip()), "gpu memory used", "info")
+            if gpu
+            else tile("—", "gpu", "muted")
+        )
+        + (tile(esc(gpu.split(",")[2].strip()), "gpu utilisation") if gpu and len(gpu.split(",")) > 2 else "")
+        + "</div>"
     )
     body += (
-        '<section class="card wide"><h2>AI services</h2>'
-        f'<div class=scroll><table>{rows}</table></div></section>'
+        '<section class="card wide"><h2>Local AI backends</h2>'
+        "<p class=\"sub\">These sit behind <code>systemd-socket-proxyd</code> and "
+        "exit after their idle timeout, so <em>idle</em> is the resting state, not "
+        "a fault: connecting to the public endpoint starts one with no privileged "
+        "action at all. Ollama and KoboldCpp hold the same "
+        "<code>gpu-inference</code> admission key and conflict by design.</p>"
+        f"{blocks}</section>"
     )
-    body += (
-        '<section class="card wide"><h2>Action log</h2>'
-        '<p class="sub">Receipts from this browser session only; the durable '
-        "record is <code>/ops/v1/receipts</code>.</p>"
-        '<div id=log><div class="sub">no actions yet</div></div></section>'
-    )
+    body += log_card()
     if inventory is None:
         body += card(
-            "Runtime inventory",
-            '<p class="sub">unavailable &mdash; the action API will refuse every '
-            "unit target until <code>/etc/sinnix/runtime-inventory.json</code> "
-            "is readable.</p>",
+            "Runtime inventory unavailable",
+            '<p class="sub">The action API will refuse every unit target until '
+            "<code>/etc/sinnix/runtime-inventory.json</code> is readable.</p>",
+            wide=True,
         )
-    return page(f"{host} AI control", host, generated, NAV, body, ACTION_SCRIPT)
+    return page(
+        "ai",
+        host,
+        [f"rendered {generated[11:19]}"],
+        "/ai/",
+        body,
+        tail=ACTION_SCRIPT,
+    )
 
 
 # --------------------------------------------------------------------------
+
+
+def write_atomic(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(text, encoding="utf-8")
+    os.replace(temporary, path)
 
 
 def main() -> int:
@@ -712,6 +1939,12 @@ def main() -> int:
     )
     parser.add_argument(
         "--inventory", type=Path, default=Path("/etc/sinnix/runtime-inventory.json")
+    )
+    parser.add_argument(
+        "--heavy-lease",
+        type=Path,
+        default=Path.home() / ".local/state/sinnix/heavy-lease/owner.json",
+        help="owner file of the heavy-work lease, when that subsystem is present",
     )
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
@@ -729,19 +1962,19 @@ def main() -> int:
     generated = dt.datetime.now(dt.timezone.utc).astimezone().isoformat(timespec="seconds")
 
     out: Path = args.out
-    (out / "ai").mkdir(parents=True, exist_ok=True)
     write_atomic(
         out / "index.html",
-        render_dashboard(manifest, snapshot, snapshot_error, generated),
+        render_dashboard(manifest, snapshot, snapshot_error, inventory, generated),
+    )
+    write_atomic(
+        out / "work" / "index.html",
+        render_work(manifest, snapshot, inventory, args.heavy_lease, generated),
+    )
+    write_atomic(
+        out / "services" / "index.html", render_services(manifest, inventory, generated)
     )
     write_atomic(out / "ai" / "index.html", render_ai(manifest, inventory, generated))
     return 0
-
-
-def write_atomic(path: Path, text: str) -> None:
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(text, encoding="utf-8")
-    os.replace(temporary, path)
 
 
 if __name__ == "__main__":
