@@ -1,0 +1,15 @@
+[project]
+name = "sinnix-capture-screen"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "pillow",
+  "numpy",
+]
+
+[project.scripts]
+sinnix-capture-screen = "sinnix_capture_screen.cli:main"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"

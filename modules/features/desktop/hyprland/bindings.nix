@@ -23,8 +23,8 @@ in
     bindd = [
       ", S, Screenshot region, exec, noctalia msg screenshot-region"
       ", F, Screenshot fullscreen, exec, noctalia msg screenshot-fullscreen"
-      ", R, Replay buffer save or start, exec, replay-buffer"
-      "SHIFT, R, Stop replay buffer, exec, replay-buffer-stop"
+      ", R, Save replay ring, exec, sinnix-replay-save"
+      "SHIFT, R, Stop replay ring, exec, sinnix-replay-stop"
       ", P, Park background work, exec, sinnix-pressure-park auto"
       ", T, Thaw parked background work, exec, sinnix-pressure-park thaw"
       ", M, Pulse OLED ASBL, exec, asbl-no-moar once --mode invert --duration 0.05"
@@ -93,9 +93,10 @@ in
     ", F8, exec, uwsm app -- ${script "toggle-scratch"} rawlog"
     ", F9, exec, sudo -n ${scriptPkgs.nuke-builds}/bin/nuke-builds"
 
-    # Gaming: replay buffer (F10 = toggle/save, Shift+F10 = stop)
-    ", F10, exec, replay-buffer"
-    "SHIFT, F10, exec, replay-buffer-stop"
+    # Replay ring (F10 = save, Shift+F10 = stop) -- always-on capture
+    # surface (capture-replay.nix), not gaming-specific.
+    ", F10, exec, sinnix-replay-save"
+    "SHIFT, F10, exec, sinnix-replay-stop"
     # Gaming: MangoHud toggle is Shift_R+F12 (handled by MangoHud itself)
 
     # Numpad browser scratchpads (numlock OFF)

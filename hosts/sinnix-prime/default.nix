@@ -51,6 +51,15 @@
     capture-a11y.enable = true;
     capture-input-dynamics.enable = true;
     capture-audio.enable = true;
+    # Phase 3a (sinnix-9pd): per-window screen frames + the always-on
+    # replay ring, promoted to default-on via this host enable per the
+    # mkServiceModule factory contract (services are default-off at the
+    # module level; hosts express the opt-in) rather than baking a
+    # non-standard default into the factory itself.
+    capture-screen.enable = true;
+    capture-replay.enable = true;
+    capture-kitty-scrollback.enable = true;
+    capture-aw-rollup.enable = true;
     url-ledger.enable = true;
     below = {
       enable = true;
