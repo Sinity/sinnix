@@ -152,6 +152,15 @@ in
     # adblock-fast: dnsmasq-based, available in standard OpenWrt repos (unlike adblock-lean)
     "adblock-fast"
     "luci-app-adblock-fast"
+    # adblock-fast needs real coreutils, not busybox applets: without these it
+    # dies at "Sorting combined block-list" / "Failed to create block-list",
+    # which is silent unless you run its status command. Verified broken on
+    # 2026-08-13 -- the router had been advertising adblock while blocking
+    # nothing.
+    "gawk"
+    "grep"
+    "sed"
+    "coreutils-sort"
 
     # UPnP/NAT-PMP: auto port-forwarding for gaming/P2P clients
     # Must use -nftables variant — OpenWrt 24.10 uses fw4 (nftables, not iptables)
