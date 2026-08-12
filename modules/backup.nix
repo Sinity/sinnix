@@ -806,11 +806,11 @@ in
 
     # Failure surfacing for the two borg verification/integrity units
     # (sinnix-borg-drill, borgbackup-check): a restore drill or repo check
-    # that fails silently is worse than none — 2026-07-01 found
-    # sinnix-borg-drill dead on exit=15/TERM with zero durable record.
-    # Appends a `service_failure` event to the existing borgStatusLog JSONL
-    # (same file/consumer path as the archive_freshness/snapshot_queue events
-    # above) and best-effort desktop-notifies the active graphical session.
+    # that fails silently is worse than none. Appends a `service_failure`
+    # event to the existing borgStatusLog JSONL (same file/consumer path as
+    # the archive_freshness/snapshot_queue events above) and best-effort
+    # desktop-notifies the active graphical session.
+    # History/evidence: bd show sinnix-u63
     systemd.services."sinnix-service-failure-notify@" = {
       description = "Record + surface a failed backup-verification unit (%i)";
       serviceConfig.Type = "oneshot";
@@ -903,12 +903,11 @@ in
         recover_stale_borg_locks
 
         # --max-duration makes the repository check INCREMENTAL: each run
-        # verifies segments for at most the budget and records progress in the
-        # repo, so successive weekly runs cycle through the full repository
-        # without ever monopolizing the repo lock for a whole day. Observed
-        # 2026-08-02: an unbounded realm check ran 10h+ on the backup HDD,
-        # starving the hourly drains (35 snapshots queued) and firing the
-        # freshness alarm (sinnix-txa).
+        # verifies segments for at most the budget and records progress in
+        # the repo, so successive weekly runs cycle through the full
+        # repository without ever monopolizing the repo lock for a whole day
+        # and starving the hourly drains.
+        # History/evidence: bd show sinnix-txa
         ${pkgs.borgbackup}/bin/borg check --repository-only --max-duration 1800 ${borgRepoPersist}
         ${pkgs.borgbackup}/bin/borg check --repository-only --max-duration 7200 ${borgRepoRealm}
         ${pkgs.borgbackup}/bin/borg check --repository-only --max-duration 1800 ${borgRepoSinexBlobs}
