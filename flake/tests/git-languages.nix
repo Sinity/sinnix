@@ -5,7 +5,8 @@
 # handful of `git config --get` values plus `delta --version` — cheap
 # relative to dev-languages-runtime, which pulls a much larger closure
 # (python3.withPackages, nodejs, sqlite, gh) via the full HM home path and
-# stays in heavyChecks.
+# used to live in the heavyChecks quarantine tier (promoted 2026-08-12:
+# measured ~22s, and the tier never ran anywhere, letting red checks hide).
 #
 # Split out of the former flake/tests-runtime.nix monolith (sinnix-7bu).
 { inputs, ... }:
@@ -74,7 +75,7 @@ in
         dev-git-runtime = devGitRuntime;
       };
 
-      heavyChecks = {
+      checks = {
         dev-languages-runtime = devLanguagesRuntime;
       };
     };

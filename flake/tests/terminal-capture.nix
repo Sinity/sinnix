@@ -257,7 +257,7 @@ in
           '';
     in
     {
-      heavyChecks = {
+      checks = {
         terminal-capture-runtime = terminalCaptureRuntime;
         terminal-capture-runtime-failure = terminalCaptureRuntimeFailure;
       };

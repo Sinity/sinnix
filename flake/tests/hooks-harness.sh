@@ -13,7 +13,7 @@ ln -s /run/current-system/sw/bin/bash "$test_root/bin/bash"
 for tool in cat date dirname mkdir sleep; do
   ln -s "/run/current-system/sw/bin/$tool" "$test_root/bin/$tool"
 done
-if [[ -n "$sampler" ]]; then
+if [[ -n $sampler ]]; then
   ln -s "$sampler" "$test_root/bin/sinnix-vacuity-sampler"
   ln -s /run/current-system/sw/bin/python3 "$test_root/bin/python3"
 fi
@@ -50,8 +50,11 @@ printf '%s' "$bash_deny" | jq -e '.hookSpecificOutput.permissionDecision == "den
 test -z "$(run_hook "$hooks_dir/pretooluse-bash.sh" '{"tool_input":{"command":"printf \"safe\""}}')"
 test -z "$(run_hook "$hooks_dir/pretooluse-bash.sh" 'not-json' 2>/dev/null)"
 
-test -z "$(PATH="$test_root/bin:${PATH}" run_hook "$hooks_dir/subagentstop-dispatch-ledger.sh" '{}')"
-if [[ -n "$sampler" ]]; then
+# Empty-payload smoke call: must exit clean and silent. Runs against its
+# own scratch state so its ledger rows cannot pollute the dedup/report
+# counts below.
+test -z "$(printf '%s' '{}' | PATH="$test_root/bin:${PATH}" HOME="$test_root/home" XDG_STATE_HOME="$test_root/state-smoke" "$hooks_dir/subagentstop-dispatch-ledger.sh")"
+if [[ -n $sampler ]]; then
   payload='{"session_id":"fixture-session","event_id":"fixture-stop","transcript_path":"/missing","duration_ms":1000,"status":"completed","last_assistant_message":"finished"}'
   PATH="$test_root/bin:${PATH}" SINNIX_VACUITY_SAMPLE_RATE=1 run_hook "$hooks_dir/subagentstop-dispatch-ledger.sh" "$payload"
   PATH="$test_root/bin:${PATH}" SINNIX_VACUITY_SAMPLE_RATE=1 run_hook "$hooks_dir/subagentstop-dispatch-ledger.sh" "$payload"

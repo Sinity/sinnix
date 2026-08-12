@@ -4,10 +4,10 @@ set -euo pipefail
 scanner=$1
 root=$2
 mkdir -p "$root"
-printf '%s\n' 'clean technical text' > "$root/clean.txt"
-printf '%s\n' 'token ghp_123456789012345678901234567890' > "$root/secret.txt"
-head -c 1048577 /dev/zero > "$root/large.bin"
-printf '\0ghp_123456789012345678901234567890' > "$root/binary.bin"
+printf '%s\n' 'clean technical text' >"$root/clean.txt"
+printf '%s\n' 'token ghp_123456789012345678901234567890' >"$root/secret.txt"
+head -c 1048577 /dev/zero >"$root/large.bin"
+printf '\0ghp_123456789012345678901234567890' >"$root/binary.bin"
 
 run() {
   SINNIX_HOOK_COMMAND="$1" SINNIX_HOOK_CWD="$root" XDG_STATE_HOME="$root/state" "$scanner"

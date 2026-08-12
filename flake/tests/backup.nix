@@ -333,26 +333,27 @@ in
         script =
           let
             statusScript = backupRuntimeEval.config.systemd.services.borgbackup-status.script;
-            rewrite = builtins.replaceStrings
-              [
-                "/realm/data/captures/machine/borg_status.jsonl"
-                "/realm/data/captures/machine"
-                "/persist/root/.cache/borg-drain/integrity-check.json"
-                "/persist/root/.cache/borg-drain/integrity-status-state.json"
-                "/persist/root/.cache/borg-drain"
-                "/persist/.btrfs/snapshot"
-                "/realm/.btrfs/snapshot"
-              ]
-              [
-                "/build/status.jsonl"
-                "/build"
-                "/build/state/integrity-check.json"
-                "/build/state/integrity-status-state.json"
-                "/build/state"
-                "/build/persist-snapshots"
-                "/build/realm-snapshots"
-              ]
-              statusScript;
+            rewrite =
+              builtins.replaceStrings
+                [
+                  "/realm/data/captures/machine/borg_status.jsonl"
+                  "/realm/data/captures/machine"
+                  "/persist/root/.cache/borg-drain/integrity-check.json"
+                  "/persist/root/.cache/borg-drain/integrity-status-state.json"
+                  "/persist/root/.cache/borg-drain"
+                  "/persist/.btrfs/snapshot"
+                  "/realm/.btrfs/snapshot"
+                ]
+                [
+                  "/build/status.jsonl"
+                  "/build"
+                  "/build/state/integrity-check.json"
+                  "/build/state/integrity-status-state.json"
+                  "/build/state"
+                  "/build/persist-snapshots"
+                  "/build/realm-snapshots"
+                ]
+                statusScript;
           in
           ''
             mkdir -p "$TMPDIR/state" "$TMPDIR/persist-snapshots" "$TMPDIR/realm-snapshots"
@@ -435,7 +436,7 @@ in
       };
     in
     {
-      heavyChecks = {
+      checks = {
         backup-borg-hook-runtime = backupBorgHookRuntime;
         backup-status-integrity-state-runtime = borgStatusRuntime;
       };

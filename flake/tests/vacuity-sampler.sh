@@ -12,8 +12,8 @@ printf '%s' "$payload" | HOME="$test_root/home" XDG_STATE_HOME="$test_root/state
 printf '%s' "$payload" | HOME="$test_root/home" XDG_STATE_HOME="$test_root/state" SINNIX_VACUITY_SAMPLE_RATE=1 "$sampler" enqueue
 test "$(jq -s '[.[] | select(.type == "vacuity_candidate")] | length' "$test_root/state/claude-code/dispatch-ledger.jsonl")" = 1
 
-printf '%s\n' '{"role":"assistant","content":"finished"}' > "$transcript"
-cat > "$test_root/bin/fake-judge" <<'EOF'
+printf '%s\n' '{"role":"assistant","content":"finished"}' >"$transcript"
+cat >"$test_root/bin/fake-judge" <<'EOF'
 printf '%s\n' '{"verdict":"unsupported","confidence":0.2,"evidence":["fixture:transcript"],"refutation_attempted":true,"unsupported":["fixture evidence"]}'
 EOF
 sed -i "1i#!$(command -v bash)" "$test_root/bin/fake-judge"

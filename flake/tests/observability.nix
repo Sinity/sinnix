@@ -171,7 +171,7 @@
           '';
     in
     {
-      heavyChecks = {
+      checks = {
         sinnix-observe-runtime = sinnixObserveRuntime;
       };
     };
