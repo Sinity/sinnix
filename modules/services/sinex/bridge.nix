@@ -236,16 +236,11 @@ in
               environment = sinexEnvironment;
               enable = runtimeEnabled;
               autoSetup = runtimeEnabled;
-              # dataDir/storeDir stay at the upstream default path (not moved
-              # onto @sinex — that would need the raw-subvolume bootstrapping
-              # dance hosts/sinnix-prime/storage.nix's ensure-sinex-subvol does
-              # for @sinex, which doesn't apply here). Instead the whole tree
-              # is persisted via the standard impermanence bind mount below
-              # (sinnix.persistence.system.directories), the same boring
-              # mechanism already used for /var/log/journal and dozens of
-              # other paths — no bootstrapping concern, ordinary local-fs.target
-              # bind mount (sinnix-v3p, fixed 2026-07-08: previously wiped every
-              # reboot, losing in-flight confirmations and the DLQ).
+              # dataDir/storeDir stay at the upstream default path, persisted
+              # via the standard impermanence bind mount below
+              # (sinnix.persistence.system.directories) rather than moved onto
+              # @sinex — no raw-subvolume bootstrapping needed here.
+              # History/evidence: bd show sinnix-v3p
               dataDir = "/var/lib/nats";
               jetstreamMaxStore = "32G";
               # Express ONLY this host's genuine deltas against sinex's own
