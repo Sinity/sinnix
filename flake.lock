@@ -1000,11 +1000,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1778020226,
-        "narHash": "sha256-3dS0C9wjWtzEnBvFtCq6JfhQGq7Kd9NtjW+tsl+rPhY=",
+        "lastModified": 1786535871,
+        "narHash": "sha256-lVrekGWDY9ec7aukJaCz3pwyCHj58mUhs/0IGVe2Hfs=",
         "owner": "Sinity",
         "repo": "scribe-tap",
-        "rev": "befcaeeff8166c146958d7a9b55309126bb89bf8",
+        "rev": "8cca2ca2ca34005d513da43ae8dcb38401ac7d48",
         "type": "github"
       },
       "original": {
