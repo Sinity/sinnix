@@ -1,7 +1,8 @@
 # Shared GPU container runtime for ML services.
 #
-# ComfyUI / OpenedAI-Speech / MusicGen / OCR are absent from nixpkgs (fragile
-# Python ML closures), so they run as digest-pinned OCI containers with CDI GPU
+# ComfyUI / OpenedAI-Speech / MusicGen / OCR / Kokoro are absent from nixpkgs
+# (fragile Python ML closures), so they run as digest-pinned OCI containers.
+# Kokoro is CPU-only and skips GPU passthrough; the rest use CDI GPU
 # passthrough. Each of those service modules turns on
 # `sinnix.ml.containerRuntime.enable`, and this module configures podman + the
 # NVIDIA container toolkit exactly once.

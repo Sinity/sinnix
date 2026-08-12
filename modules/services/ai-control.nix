@@ -1,7 +1,7 @@
 # sinnix-ai — on-demand control plane for the local AI services
-# (whisper, tts, ollama, litellm, llama-cpp, koboldcpp, comfyui, musicgen,
-# ocr, open-webui). The script carries the service registry; this module
-# only installs it. See scripts/sinnix-ai.
+# (whisper, tts, kokoro, ollama, litellm, llama-cpp, koboldcpp, comfyui,
+# musicgen, ocr, open-webui). The script carries the service registry; this
+# module only installs it. See scripts/sinnix-ai.
 {
   config,
   lib,
@@ -109,6 +109,15 @@ let
     backendEndpoint = "127.0.0.1:4001";
     dependsOn = [ "ollama-proxy" ];
   };
+  # Deliberately no exclusiveResource / conflicts here: Kokoro is CPU-only
+  # (modules/services/kokoro.nix) and must stay answerable regardless of
+  # which CUDA backend, if any, currently holds gpu-inference.
+  kokoroProxy = mkProxy {
+    name = "kokoro-proxy";
+    backendUnit = "podman-kokoro.service";
+    publicEndpoint = "127.0.0.1:8880";
+    backendEndpoint = "127.0.0.1:8881";
+  };
 in
 {
   environment.systemPackages = [ scriptPkgs.sinnix-ai ];
@@ -117,12 +126,14 @@ in
     (lib.mkIf config.sinnix.services.koboldcpp.enable koboldcppProxy.sockets)
     (lib.mkIf config.sinnix.services.whisper.enable whisperProxy.sockets)
     (lib.mkIf config.sinnix.services.litellm.enable litellmProxy.sockets)
+    (lib.mkIf config.sinnix.services.kokoro.enable kokoroProxy.sockets)
   ];
   systemd.services = lib.mkMerge [
     (lib.mkIf config.sinnix.services.ollama.enable ollamaProxy.services)
     (lib.mkIf config.sinnix.services.koboldcpp.enable koboldcppProxy.services)
     (lib.mkIf config.sinnix.services.whisper.enable whisperProxy.services)
     (lib.mkIf config.sinnix.services.litellm.enable litellmProxy.services)
+    (lib.mkIf config.sinnix.services.kokoro.enable kokoroProxy.services)
   ];
   sinnix.runtime.surfaces = lib.mkMerge [
     (lib.mkIf config.sinnix.services.ollama.enable {
@@ -136,6 +147,9 @@ in
     })
     (lib.mkIf config.sinnix.services.litellm.enable {
       litellm-proxy = litellmProxy.runtimeSurface;
+    })
+    (lib.mkIf config.sinnix.services.kokoro.enable {
+      kokoro-proxy = kokoroProxy.runtimeSurface;
     })
   ];
 }
