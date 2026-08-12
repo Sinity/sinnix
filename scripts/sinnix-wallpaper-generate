@@ -1,0 +1,273 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Batch-generate wallpapers via ComfyUI, palette-targeted at chosen color families
+# runtimeInputs: python3 imagemagick @sinnix-ai
+"""Opt-in wallpaper generation lane (bd:sinnix-s6ke.3).
+
+Starts ComfyUI (via `sinnix-ai start comfyui`, the existing on-demand
+control plane -- ComfyUI is NOT in the gpu-inference socket-proxy mesh
+today, see modules/services/ai-control.nix), submits a small batch of
+txt2img jobs against whatever checkpoint is already installed, runs the
+same OLED brightness/uniformity heuristic `sinnix-wallpaper import` uses,
+and classifies passing images straight into the corpus's time-of-day /
+theme-mode sets. ComfyUI is always stopped again at the end (even on
+failure) so a triggered batch never holds the GPU beyond its own run --
+this is the whole point of wiring it through sinnix-ai instead of leaving
+comfyui.service running.
+
+Each "family" below is a (mood, mode, prompt, negative_prompt) tuple picked
+so the Material-You extraction (`noctalia theme <img> --scheme vibrant`)
+should land near a specific hue family; this is checked after generation
+(not just hoped for) by sampling source_color's hue and logging a mismatch
+if the wallpaper drifted, but a hue mismatch does not reject the image --
+only the OLED heuristic does, since color drift is cosmetic and low-key
+composition is the safety property that actually matters on this panel.
+
+Default resolution is 1920x1080 (kept modest on purpose: this is meant to
+be a cheap, few-minutes trigger, not a standing render farm). Pass
+--width/--height for a higher-res batch when you want it.
+"""
+from __future__ import annotations
+
+import argparse
+import colorsys
+import json
+import os
+import subprocess
+import sys
+import time
+import urllib.request
+import urllib.error
+
+COMFY_HOST = "127.0.0.1:8188"
+
+# name -> (mood, mode, target_hue_degrees, positive, negative)
+FAMILIES: dict[str, tuple[str, str, float, str, str]] = {
+    "deep-teal-noir": (
+        "night", "dark", 190.0,
+        "a deep teal and near-black minimalist landscape at night, low-key lighting, "
+        "subtle gradient, small distant light sources, high detail, photographic, no text, no people",
+        "bright sky, large bright area, washed out, overexposed, blown highlights, text, watermark, people, logo",
+    ),
+    "warm-amber-dusk": (
+        "evening", "dark", 30.0,
+        "warm amber and burnt-orange dusk landscape, low-key lighting, silhouetted horizon, "
+        "small warm light accents, high detail, photographic, no text, no people",
+        "bright sky, large bright area, washed out, overexposed, blown highlights, text, watermark, people, logo",
+    ),
+    "violet-nebula": (
+        "night", "light", 270.0,
+        "deep violet and indigo abstract nebula texture, low-key lighting, fine grain detail, "
+        "small bright accent points only, no large bright regions, no text, no people",
+        "bright sky, large bright area, washed out, overexposed, blown highlights, text, watermark, people, logo",
+    ),
+    "forest-emerald": (
+        "day", "light", 150.0,
+        "muted emerald and moss-green forest canopy texture, soft diffuse daylight, "
+        "even midtones, no sky visible, high detail, photographic, no text, no people",
+        "bright sky, large bright area, washed out, overexposed, blown highlights, text, watermark, people, logo",
+    ),
+    "slate-monochrome": (
+        "morning", "light", 210.0,
+        "slate grey and cool blue-grey minimalist misty landscape, soft overcast morning light, "
+        "even midtones, no large bright sky, high detail, photographic, no text, no people",
+        "bright sky, large bright area, washed out, overexposed, blown highlights, text, watermark, people, logo",
+    ),
+    "crimson-ember": (
+        "evening", "dark", 355.0,
+        "deep crimson and ember-red abstract texture, low-key lighting, fine grain, "
+        "small bright accent points only, no large bright regions, no text, no people",
+        "bright sky, large bright area, washed out, overexposed, blown highlights, text, watermark, people, logo",
+    ),
+}
+
+
+def http_json(method: str, path: str, body: dict | None = None) -> dict:
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(f"http://{COMFY_HOST}{path}", data=data, method=method)
+    if data is not None:
+        req.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read())
+
+
+def pick_checkpoint(override: str | None) -> str:
+    if override:
+        return override
+    info = http_json("GET", "/object_info/CheckpointLoaderSimple")
+    names = info["CheckpointLoaderSimple"]["input"]["required"]["ckpt_name"][0]
+    if not names:
+        print(
+            "sinnix-wallpaper-generate: no checkpoint installed in ComfyUI -- "
+            "install one from the web UI (http://127.0.0.1:8188) first",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return names[0]
+
+
+def build_workflow(ckpt: str, positive: str, negative: str, width: int, height: int, seed: int) -> dict:
+    return {
+        "4": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": ckpt}},
+        "5": {"class_type": "EmptyLatentImage", "inputs": {"width": width, "height": height, "batch_size": 1}},
+        "6": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["4", 1], "text": positive}},
+        "7": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["4", 1], "text": negative}},
+        "3": {
+            "class_type": "KSampler",
+            "inputs": {
+                "model": ["4", 0],
+                "positive": ["6", 0],
+                "negative": ["7", 0],
+                "latent_image": ["5", 0],
+                "seed": seed,
+                "steps": 22,
+                "cfg": 6.5,
+                "sampler_name": "euler",
+                "scheduler": "normal",
+                "denoise": 1.0,
+            },
+        },
+        "8": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["4", 2]}},
+        "9": {
+            "class_type": "SaveImage",
+            "inputs": {"images": ["8", 0], "filename_prefix": "sinnix-wallpaper"},
+        },
+    }
+
+
+def wait_for_comfyui(timeout: int = 60) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            http_json("GET", "/system_stats")
+            return
+        except (urllib.error.URLError, ConnectionError, TimeoutError):
+            time.sleep(2)
+    print("sinnix-wallpaper-generate: ComfyUI did not come up in time", file=sys.stderr)
+    sys.exit(1)
+
+
+def run_job(ckpt: str, positive: str, negative: str, width: int, height: int, seed: int, timeout: int) -> dict:
+    workflow = build_workflow(ckpt, positive, negative, width, height, seed)
+    result = http_json("POST", "/prompt", {"prompt": workflow, "client_id": "sinnix-wallpaper-generate"})
+    prompt_id = result["prompt_id"]
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        history = http_json("GET", f"/history/{prompt_id}")
+        entry = history.get(prompt_id)
+        if entry and entry.get("outputs"):
+            images = entry["outputs"].get("9", {}).get("images", [])
+            if images:
+                return images[0]
+        time.sleep(3)
+    raise TimeoutError(f"prompt {prompt_id} did not finish within {timeout}s")
+
+
+def download_image(image_ref: dict, dest: str) -> None:
+    qs = f"filename={image_ref['filename']}&subfolder={image_ref.get('subfolder', '')}&type={image_ref.get('type', 'output')}"
+    with urllib.request.urlopen(f"http://{COMFY_HOST}/view?{qs}", timeout=60) as resp:
+        with open(dest, "wb") as fh:
+            fh.write(resp.read())
+
+
+def oled_ok(path: str) -> bool:
+    try:
+        out = subprocess.run(
+            ["magick", path, "-resize", "64x64", "-colorspace", "Gray",
+             "-format", "%[fx:mean] %[fx:standard_deviation]", "info:"],
+            capture_output=True, text=True, timeout=30, check=True,
+        ).stdout.strip()
+        mean, stddev = (float(x) for x in out.split())
+    except Exception:
+        return True  # don't reject on a broken probe
+    # Same heuristic as sinnix-wallpaper import: bright + low-contrast ==
+    # a large flat bright region, the OLED burn-in risk shape.
+    return not (mean > 0.55 and stddev < 0.15)
+
+
+def check_hue(path: str, target_hue: float) -> None:
+    try:
+        out = subprocess.run(["noctalia", "theme", path, "--scheme", "vibrant", "--dark"],
+                              capture_output=True, text=True, timeout=30, check=True).stdout
+        source_color = json.loads(out)["source_color"].lstrip("#")
+        r, g, b = (int(source_color[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
+        h, _s, _v = colorsys.rgb_to_hsv(r, g, b)
+        hue_deg = h * 360.0
+        delta = min(abs(hue_deg - target_hue), 360.0 - abs(hue_deg - target_hue))
+        if delta > 45.0:
+            print(f"  note: palette drifted from target hue ({hue_deg:.0f}deg vs {target_hue:.0f}deg target)")
+    except Exception as exc:  # noqa: BLE001 - purely informational
+        print(f"  note: palette check skipped ({exc})")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--count", type=int, default=1, help="images per family (default 1)")
+    parser.add_argument("--families", default=",".join(FAMILIES), help="comma-separated family names")
+    parser.add_argument("--corpus", default=os.environ.get("SINNIX_WALLPAPER_CORPUS", "/realm/media/wallpaper"))
+    parser.add_argument("--width", type=int, default=1920)
+    parser.add_argument("--height", type=int, default=1080)
+    parser.add_argument("--checkpoint", default=None, help="override the ComfyUI checkpoint filename")
+    parser.add_argument("--timeout", type=int, default=300, help="seconds to wait per image")
+    parser.add_argument("--list-families", action="store_true")
+    args = parser.parse_args()
+
+    if args.list_families:
+        for name, (mood, mode, hue, *_rest) in FAMILIES.items():
+            print(f"{name}\t{mood}/{mode}\thue~{hue:.0f}deg")
+        return 0
+
+    families = [f.strip() for f in args.families.split(",") if f.strip()]
+    unknown = [f for f in families if f not in FAMILIES]
+    if unknown:
+        print(f"sinnix-wallpaper-generate: unknown families: {unknown} (see --list-families)", file=sys.stderr)
+        return 1
+
+    generated_dir = os.path.join(args.corpus, "generated")
+    rejected_dir = os.path.join(generated_dir, "rejected")
+    os.makedirs(generated_dir, exist_ok=True)
+    os.makedirs(rejected_dir, exist_ok=True)
+
+    subprocess.run(["sinnix-ai", "start", "comfyui"], check=True)
+    try:
+        wait_for_comfyui()
+        ckpt = pick_checkpoint(args.checkpoint)
+        print(f"sinnix-wallpaper-generate: using checkpoint {ckpt}")
+        stamp = int(time.time())
+        n = 0
+        for family in families:
+            mood, mode, hue, positive, negative = FAMILIES[family]
+            for i in range(args.count):
+                seed = stamp + n
+                print(f"[{family} {i + 1}/{args.count}] rendering...")
+                try:
+                    image_ref = run_job(ckpt, positive, negative, args.width, args.height, seed, args.timeout)
+                except TimeoutError as exc:
+                    print(f"  skipped: {exc}", file=sys.stderr)
+                    n += 1
+                    continue
+                filename = f"{family}-{stamp}-{i}.png"
+                dest = os.path.join(generated_dir, filename)
+                download_image(image_ref, dest)
+                if oled_ok(dest):
+                    set_dir = os.path.join(args.corpus, "sets", mood, mode)
+                    os.makedirs(set_dir, exist_ok=True)
+                    link = os.path.join(set_dir, filename)
+                    if os.path.islink(link) or os.path.exists(link):
+                        os.remove(link)
+                    os.symlink(os.path.abspath(dest), link)
+                    print(f"  ok: {dest} -> sets/{mood}/{mode}/{filename}")
+                    check_hue(dest, hue)
+                else:
+                    rejected = os.path.join(rejected_dir, filename)
+                    os.replace(dest, rejected)
+                    print(f"  rejected (OLED heuristic): {rejected}")
+                n += 1
+        print(f"sinnix-wallpaper-generate: done, {n} image(s) attempted")
+        return 0
+    finally:
+        subprocess.run(["sinnix-ai", "stop", "comfyui"], check=False)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
