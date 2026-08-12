@@ -43,6 +43,11 @@ in
     "SUPER, Escape, exec, noctalia msg session lock"
     "SUPER, Slash, exec, noctalia msg panel-toggle kenn/keybind-cheatsheet:cheatsheet"
     "SUPER, A, exec, ${script "sinnix-attention"}"
+    # Unified picker (sinnix-r4u8 browser-inversion front door): history +
+    # bookmarks + clipboard + recent project dirs, one fuzzy surface.
+    # scriptPkgs (not the raw `script` helper) so runtimeInputs land on
+    # PATH -- this script shells out to fuzzel/kitty/zoxide/wl-copy.
+    "SUPER, O, exec, ${scriptPkgs.sinnix-picker}/bin/sinnix-picker"
 
     "SUPER, H, exec, ${script "kitty-hypr-nav"} focus left"
     "SUPER, J, exec, ${script "kitty-hypr-nav"} focus down"

@@ -1,0 +1,295 @@
+# @sinnix-package
+# description: Unified fuzzy picker over history, bookmarks, clipboard, and recent project dirs -- browser-inversion front door
+# runtimeInputs: bash python3 fuzzel kitty zoxide wl-clipboard @sinnix-browser-app
+#!/usr/bin/env python3
+"""sinnix-picker: one fuzzy-search surface over heterogeneous "things I might
+want to jump to" sources, feeding fuzzel's --dmenu protocol.
+
+DESIGN DECISION (unified, not split): sinnix-r4u8 explicitly left the
+unified-vs-split call to the builder. Chose ONE surface, category-prefixed
+per line ("[hist] title -- url", "[mark] ...", "[clip] ...", "[dir] ..."),
+because: (1) the operator's own framing was "convenient access" -- a single
+keybind you don't have to pre-decide a category for beats remembering which
+of 4 keybinds has the thing you're half-remembering; (2) fuzzel's substring
+match already handles heterogeneous corpora fine at this scale (a few
+thousand candidates, not the full 932k-row history -- see recency/frequency
+capping below); (3) the category prefix keeps entries visually
+distinguishable and *is* itself a cheap secondary filter (typing "clip "
+narrows to clipboard). A split-keybind design was considered and rejected:
+it front-loads a decision ("which source has this?") the operator often
+can't answer before they've found the thing.
+
+SOURCES (each optional -- a missing/unreadable source is skipped, never a
+hard failure):
+  - History: /realm/data/captures/webhistory/gestalt/derived/full_history.ndjson
+    (932k+ rows spanning 2013-present) -- capped to the most-recent N by
+    iso_time, deduplicated by normalized URL keeping the newest visit. Full
+    history is too large to hand fuzzel wholesale; recency is the right cut
+    for "convenient access" (old one-off visits are what the URL-ledger /
+    lynchpin are for, not a keybind).
+  - Bookmarks: raindrop processed export
+    (/realm/data/exports/raindrop/processed/bookmarks.csv) AND live Chrome
+    bookmarks (~/.config/chrome-ws/Default/Bookmarks, Chrome's own JSON
+    format, walked recursively for the folder tree).
+  - Clipboard: capture-clipboard's own JSONL lane
+    (/realm/data/captures/clipboard/clipboard-*.jsonl) -- text entries only
+    (image/binary clipboard entries are skipped here; they have no useful
+    single-line picker representation), most recent N.
+  - Recent project directories: zoxide's own database (`zoxide query -l`,
+    already-maintained "places of note" ranking -- reused rather than
+    building a parallel file-recency tracker from scratch).
+
+ONETAB: no export exists anywhere in the lake (checked
+/realm/data/exports and the whole repo) -- NOT implemented as a source.
+This is a real gap, not an oversight; left as an explicit follow-up (the
+OneTab extension's localStorage export would need to be dumped once,
+manually or via a small extension-storage-reading script, before this
+picker could include it).
+
+"Recently touched files of note" beyond project directories (specific
+files, not just dirs) was left out of v1 -- zoxide's directory-level
+granularity is the cheap, already-available signal; a file-level tracker
+would be new capture-lane work, not glue, and is flagged as a design
+decision for the operator rather than built speculatively.
+
+ACTIONS: selecting a [hist]/[mark] line opens the URL via the
+browser-inversion launcher (sinnix-browser-app, --app=URL chromeless
+window); [clip] copies the entry back onto the clipboard (wl-copy);
+[dir] opens a new kitty terminal in that directory.
+"""
+
+from __future__ import annotations
+
+import csv
+import json
+import re
+import subprocess
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+HISTORY_PATH = Path(
+    "/realm/data/captures/webhistory/gestalt/derived/full_history.ndjson"
+)
+RAINDROP_CSV = Path("/realm/data/exports/raindrop/processed/bookmarks.csv")
+CHROME_BOOKMARKS = Path.home() / ".config/chrome-ws/Default/Bookmarks"
+CLIPBOARD_DIR = Path("/realm/data/captures/clipboard")
+
+HISTORY_LIMIT = 4000
+RAINDROP_LIMIT = 4000
+CLIPBOARD_LIMIT = 500
+ZOXIDE_LIMIT = 200
+
+
+@dataclass
+class Entry:
+    category: str
+    label: str
+    payload: str  # url, dir path, or clipboard text
+
+    def line(self) -> str:
+        # Tab-separated: fuzzel shows/matches the whole line; we split back
+        # out the payload on the far side of the last tab on selection.
+        one_line_label = self.label.replace("\t", " ").replace("\n", " ")
+        return f"[{self.category}] {one_line_label}\t{self.category}\t{self.payload}"
+
+
+def load_history() -> list[Entry]:
+    if not HISTORY_PATH.exists():
+        return []
+    # Keep the newest visit per normalized URL; stream rather than sort
+    # 932k rows in memory twice.
+    seen: dict[str, tuple[str, str, str]] = {}
+    try:
+        with HISTORY_PATH.open(encoding="utf-8") as f:
+            for line in f:
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                norm = row.get("norm") or row.get("url")
+                iso_time = row.get("iso_time", "")
+                title = row.get("title") or row.get("url", "")
+                url = row.get("url", "")
+                if not norm or not url:
+                    continue
+                prior = seen.get(norm)
+                if prior is None or iso_time > prior[0]:
+                    seen[norm] = (iso_time, title, url)
+    except OSError:
+        return []
+    ranked = sorted(seen.values(), key=lambda t: t[0], reverse=True)[:HISTORY_LIMIT]
+    return [Entry("hist", f"{title} -- {url}", url) for _, title, url in ranked]
+
+
+def load_raindrop() -> list[Entry]:
+    if not RAINDROP_CSV.exists():
+        return []
+    rows: list[tuple[str, str, str, str]] = []
+    try:
+        with RAINDROP_CSV.open(encoding="utf-8", newline="") as f:
+            for row in csv.DictReader(f):
+                url = row.get("url", "")
+                if not url:
+                    continue
+                rows.append(
+                    (
+                        row.get("created", ""),
+                        row.get("title") or url,
+                        row.get("folder", ""),
+                        url,
+                    )
+                )
+    except OSError:
+        return []
+    # 27k+ raw entries -- too many to hand fuzzel wholesale (sluggish
+    # per-keystroke filtering). Same recency cut as history, for the same
+    # "convenient access" reasoning: older/one-off saves are what
+    # lynchpin's bookmark ingest is for, not a keybind picker.
+    rows.sort(key=lambda t: t[0], reverse=True)
+    out = []
+    for _created, title, folder, url in rows[:RAINDROP_LIMIT]:
+        label = f"{title} -- {url}"
+        if folder:
+            label = f"{label} ({folder})"
+        out.append(Entry("mark", label, url))
+    return out
+
+
+def _walk_chrome_bookmarks(node: dict, path: list[str], out: list[Entry]) -> None:
+    node_type = node.get("type")
+    if node_type == "url":
+        url = node.get("url", "")
+        name = node.get("name", url)
+        if url:
+            folder = "/".join(path) if path else ""
+            label = f"{name} -- {url}"
+            if folder:
+                label = f"{label} ({folder})"
+            out.append(Entry("mark", label, url))
+    elif node_type == "folder":
+        children = node.get("children", [])
+        name = node.get("name", "")
+        for child in children:
+            _walk_chrome_bookmarks(child, path + ([name] if name else []), out)
+
+
+def load_chrome_bookmarks() -> list[Entry]:
+    if not CHROME_BOOKMARKS.exists():
+        return []
+    try:
+        data = json.loads(CHROME_BOOKMARKS.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    out: list[Entry] = []
+    for root in data.get("roots", {}).values():
+        if isinstance(root, dict):
+            _walk_chrome_bookmarks(root, [], out)
+    return out
+
+
+def load_clipboard() -> list[Entry]:
+    if not CLIPBOARD_DIR.exists():
+        return []
+    files = sorted(CLIPBOARD_DIR.glob("clipboard-*.jsonl"), reverse=True)
+    out: list[Entry] = []
+    for path in files:
+        if len(out) >= CLIPBOARD_LIMIT:
+            break
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in reversed(lines):
+            if len(out) >= CLIPBOARD_LIMIT:
+                break
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            payload = row.get("payload", {})
+            if payload.get("category") != "text":
+                continue
+            text = payload.get("text", "")
+            if not text.strip():
+                continue
+            snippet = re.sub(r"\s+", " ", text).strip()[:200]
+            out.append(Entry("clip", snippet, text))
+    return out
+
+
+def load_recent_dirs() -> list[Entry]:
+    try:
+        result = subprocess.run(
+            ["zoxide", "query", "-l"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if result.returncode != 0:
+        return []
+    dirs = [d for d in result.stdout.splitlines() if d.strip()][:ZOXIDE_LIMIT]
+    return [Entry("dir", d, d) for d in dirs]
+
+
+def gather() -> list[Entry]:
+    entries: list[Entry] = []
+    entries.extend(load_recent_dirs())
+    entries.extend(load_clipboard())
+    entries.extend(load_chrome_bookmarks())
+    entries.extend(load_raindrop())
+    entries.extend(load_history())
+    return entries
+
+
+def dispatch(category: str, payload: str) -> None:
+    if category in ("hist", "mark"):
+        subprocess.Popen(
+            ["sinnix-browser-app", payload],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    elif category == "clip":
+        proc = subprocess.Popen(["wl-copy"], stdin=subprocess.PIPE)
+        proc.communicate(payload.encode("utf-8"))
+    elif category == "dir":
+        subprocess.Popen(
+            ["kitty", "--directory", payload],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+
+
+def main() -> int:
+    entries = gather()
+    lines = [e.line() for e in entries]
+    menu_input = "\n".join(l.split("\t")[0] for l in lines)
+
+    result = subprocess.run(
+        ["fuzzel", "--dmenu", "--prompt", "> "],
+        input=menu_input,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return 0  # cancelled
+
+    selected_label = result.stdout.rstrip("\n")
+    for full_line, entry in zip(lines, entries):
+        display = full_line.split("\t")[0]
+        if display == selected_label:
+            dispatch(entry.category, entry.payload)
+            return 0
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
