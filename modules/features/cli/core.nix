@@ -18,37 +18,38 @@ mkFeatureModule {
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
     in
     {
-      environment.systemPackages = (with pkgs; [
-        git
-        taskwarrior3
-        timewarrior
-        repomix
-        difftastic
-        bubblewrap
-        unzip
-        wget
-        # age: same crypto as agenix. Kept system-wide so the master-key
-        # escrow blob (see knowledgebase docs/sinnix-key-recovery.md) can be
-        # created and, more importantly, decrypted during disaster recovery
-        # without fetching tools.
-        age
-        # Modern CLI replacements
-        eza
-        bat
-        fd
-        lnav
-        dua
-        bandwhich
-        # Even more modern tools
-        micro
-        bottom
-        gping
-        doggo
-        dust
-      ])
-      # `sinnix` -- discoverable front door over the whole packaged script
-      # registry (`sinnix help`, `sinnix <name> [args...]`).
-      ++ [ scriptPkgs.sinnix ];
+      environment.systemPackages =
+        (with pkgs; [
+          git
+          taskwarrior3
+          timewarrior
+          repomix
+          difftastic
+          bubblewrap
+          unzip
+          wget
+          # age: same crypto as agenix. Kept system-wide so the master-key
+          # escrow blob (see knowledgebase docs/sinnix-key-recovery.md) can be
+          # created and, more importantly, decrypted during disaster recovery
+          # without fetching tools.
+          age
+          # Modern CLI replacements
+          eza
+          bat
+          fd
+          lnav
+          dua
+          bandwhich
+          # Even more modern tools
+          micro
+          bottom
+          gping
+          doggo
+          dust
+        ])
+        # `sinnix` -- discoverable front door over the whole packaged script
+        # registry (`sinnix help`, `sinnix <name> [args...]`).
+        ++ [ scriptPkgs.sinnix ];
 
       programs = {
         zsh.enable = true;

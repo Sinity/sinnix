@@ -89,7 +89,10 @@ def test_monitor_name_for_id_none_when_missing() -> None:
 
 
 def test_get_cursor_pos_parses_xy() -> None:
-    assert get_cursor_pos(lambda args: json.dumps({"x": 1441, "y": 1209})) == (1441, 1209)
+    assert get_cursor_pos(lambda args: json.dumps({"x": 1441, "y": 1209})) == (
+        1441,
+        1209,
+    )
 
 
 def test_get_cursor_pos_none_on_missing_fields() -> None:

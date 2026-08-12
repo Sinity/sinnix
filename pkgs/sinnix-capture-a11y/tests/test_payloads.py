@@ -8,7 +8,9 @@ from sinnix_capture_a11y.payloads import (
 
 
 def test_focus_payload_shape():
-    p = focus_payload(app="firefox", role="entry", name="Search", window_name="Mozilla Firefox")
+    p = focus_payload(
+        app="firefox", role="entry", name="Search", window_name="Mozilla Firefox"
+    )
     assert p == {
         "kind": "focus",
         "app": "firefox",

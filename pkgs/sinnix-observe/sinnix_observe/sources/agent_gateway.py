@@ -160,7 +160,9 @@ def _quota_view(quota: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
-def collect_agent_gateway(limit: int = 20, below: dict[str, Any] | None = None) -> dict[str, Any]:
+def collect_agent_gateway(
+    limit: int = 20, below: dict[str, Any] | None = None
+) -> dict[str, Any]:
     root = Path(
         os.environ.get(
             "SINNIX_AGENT_GATEWAY_STATE_DIR",

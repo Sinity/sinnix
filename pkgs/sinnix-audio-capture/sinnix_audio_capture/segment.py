@@ -63,7 +63,9 @@ class ChannelProfile:
 # faithfulness to mixed system/app audio at stereo.
 CHANNEL_PROFILES: dict[str, ChannelProfile] = {
     "mic": ChannelProfile(rate=16000, channels=1, bitrate_kbps=24, application="voip"),
-    "sink-monitor": ChannelProfile(rate=48000, channels=2, bitrate_kbps=64, application="audio"),
+    "sink-monitor": ChannelProfile(
+        rate=48000, channels=2, bitrate_kbps=64, application="audio"
+    ),
 }
 
 
@@ -78,7 +80,9 @@ def segment_filename(channel: str, bucket_start_ts: float) -> str:
     return f"audio-{channel}-{stamp}.opus"
 
 
-def opusenc_argv(opusenc_bin: str, profile: ChannelProfile, output_path: Path) -> list[str]:
+def opusenc_argv(
+    opusenc_bin: str, profile: ChannelProfile, output_path: Path
+) -> list[str]:
     return [
         str(opusenc_bin),
         "--quiet",

@@ -3,7 +3,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from PIL import Image
-
 from sinnix_capture_screen.hashing import (
     DailyThrottleGuard,
     PauseDetector,
@@ -13,7 +12,6 @@ from sinnix_capture_screen.hashing import (
     phash64,
     should_capture_periodic,
 )
-
 
 # ---------------------------------------------------------------------------
 # phash64 / hamming_distance / is_near_duplicate
@@ -40,7 +38,9 @@ def _smooth_ui_like(size: int = 32, seed: int = 7) -> np.ndarray:
     DCT energy -- representative of real image content."""
     rng = np.random.default_rng(seed)
     small = rng.uniform(0, 255, size=(8, 8))
-    im = Image.fromarray(small.astype(np.uint8), mode="L").resize((size, size), Image.BILINEAR)
+    im = Image.fromarray(small.astype(np.uint8), mode="L").resize(
+        (size, size), Image.BILINEAR
+    )
     return np.asarray(im, dtype=np.float64)
 
 
@@ -78,7 +78,9 @@ def test_phash64_is_robust_to_tiny_pixel_noise() -> None:
     rng = np.random.default_rng(1234)
     noisy = np.clip(base + rng.normal(0, 2.0, base.shape), 0, 255)
     distance = hamming_distance(phash64(base), phash64(noisy))
-    assert distance <= 6, f"expected a small, correlated hash distance, got {distance}/64 bits"
+    assert distance <= 6, (
+        f"expected a small, correlated hash distance, got {distance}/64 bits"
+    )
 
 
 def test_hamming_distance_identical_is_zero() -> None:
@@ -186,7 +188,9 @@ def test_throttle_guard_restores_persisted_state() -> None:
     from sinnix_capture_screen.hashing import ThrottleState
 
     state = ThrottleState(day="2026-08-12", bytes_written=999_999_000, tripped=False)
-    guard = DailyThrottleGuard(ceiling_bytes=1_000_000_000, clock=lambda: 0.0, state=state)
+    guard = DailyThrottleGuard(
+        ceiling_bytes=1_000_000_000, clock=lambda: 0.0, state=state
+    )
     # Force the same day so the guard doesn't roll over the restored state.
     guard._roll_if_new_day = lambda: None  # type: ignore[method-assign]
     allowed, newly_tripped = guard.allow(2000)
@@ -203,16 +207,28 @@ def test_should_capture_periodic_true_on_first_ever_capture() -> None:
 
 
 def test_should_capture_periodic_false_before_floor_elapses() -> None:
-    assert should_capture_periodic(now=110.0, last_capture_ts=100.0, floor_seconds=30.0) is False
+    assert (
+        should_capture_periodic(now=110.0, last_capture_ts=100.0, floor_seconds=30.0)
+        is False
+    )
 
 
 def test_should_capture_periodic_true_once_floor_elapses() -> None:
-    assert should_capture_periodic(now=130.0, last_capture_ts=100.0, floor_seconds=30.0) is True
+    assert (
+        should_capture_periodic(now=130.0, last_capture_ts=100.0, floor_seconds=30.0)
+        is True
+    )
 
 
 def test_should_capture_periodic_boundary_is_inclusive() -> None:
-    assert should_capture_periodic(now=130.0, last_capture_ts=100.0, floor_seconds=30.0) is True
-    assert should_capture_periodic(now=129.999, last_capture_ts=100.0, floor_seconds=30.0) is False
+    assert (
+        should_capture_periodic(now=130.0, last_capture_ts=100.0, floor_seconds=30.0)
+        is True
+    )
+    assert (
+        should_capture_periodic(now=129.999, last_capture_ts=100.0, floor_seconds=30.0)
+        is False
+    )
 
 
 # ---------------------------------------------------------------------------

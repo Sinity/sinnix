@@ -13,6 +13,7 @@ Everything shown is measured from the files; the generator prints its own
 regenerate command in the page footer. Findings-as-predicates: a report is
 flagged stale/superseded only while the condition holds.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -23,7 +24,10 @@ import sys
 from pathlib import Path
 
 TITLE_RE = re.compile(r"<title>(.*?)</title>", re.S)
-STATUS_RE = re.compile(r'class="badge[^"]*">\s*(notes|draft|in-progress|finished|plan[^<]*|living[^<]*)\s*<', re.I)
+STATUS_RE = re.compile(
+    r'class="badge[^"]*">\s*(notes|draft|in-progress|finished|plan[^<]*|living[^<]*)\s*<',
+    re.I,
+)
 GENERATED_RE = re.compile(r'generated</dt>\s*<dd>\s*<time[^>]*datetime="([^"]+)"')
 ANY_TIME_RE = re.compile(r'<time[^>]*class="age"[^>]*datetime="([^"]+)"')
 SUPERSEDED_RE = re.compile(r"superseded[- ]by", re.I)
@@ -55,9 +59,14 @@ def report_meta(p: Path) -> dict:
 
 def build(reports_dir: Path, out: Path) -> int:
     files = sorted(
-        [p for p in reports_dir.glob("*.html")
-         if p.name != out.name and not p.name.endswith(".pl.html")],
-        key=lambda p: p.stat().st_mtime, reverse=True)
+        [
+            p
+            for p in reports_dir.glob("*.html")
+            if p.name != out.name and not p.name.endswith(".pl.html")
+        ],
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
     rows = []
     for p in files:
         try:
@@ -67,15 +76,21 @@ def build(reports_dir: Path, out: Path) -> int:
     now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     trs = []
     for r in rows:
-        badge = ("<span class='badge info'>superseded</span>" if r["superseded"]
-                 else f"<span class='badge ok'>{html_mod.escape(r['status'])}</span>" if r["status"] else "")
+        badge = (
+            "<span class='badge info'>superseded</span>"
+            if r["superseded"]
+            else f"<span class='badge ok'>{html_mod.escape(r['status'])}</span>"
+            if r["status"]
+            else ""
+        )
         accent = f"<span class='chip'>{r['accent']}</span>" if r["accent"] else ""
         trs.append(
             f"<tr{' class=sup' if r['superseded'] else ''}>"
             f"<td><a href='{html_mod.escape(r['path'].name)}'>{html_mod.escape(r['title'])}</a></td>"
             f"<td data-v='{int(r['mtime'].timestamp())}'>{r['mtime'].strftime('%Y-%m-%d %H:%M')}</td>"
             f"<td>{badge}</td><td>{accent}</td>"
-            f"<td data-v='{r['size_kb']}'>{r['size_kb']} K</td></tr>")
+            f"<td data-v='{r['size_kb']}'>{r['size_kb']} K</td></tr>"
+        )
     page = f"""<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -113,7 +128,7 @@ border-radius:.4rem;background:var(--bg);color:var(--ink)}}
 <input placeholder="filter…" oninput="const q=this.value.toLowerCase();
 document.querySelectorAll('tbody tr').forEach(r=>r.style.display=r.textContent.toLowerCase().includes(q)?'':'none')">
 <table><thead><tr><th>report</th><th>modified</th><th>status</th><th>identity</th><th>size</th></tr></thead>
-<tbody>{''.join(trs)}</tbody></table>
+<tbody>{"".join(trs)}</tbody></table>
 <footer>regenerate: <code>python3 generators/reports-index.py {reports_dir}</code>
 (html-report skill) — every row measured from the files at generation time</footer>
 </main>

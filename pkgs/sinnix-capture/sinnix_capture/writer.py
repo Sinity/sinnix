@@ -34,7 +34,9 @@ def _atomic_append(path: Path, line: str) -> None:
 
 
 class CaptureWriter:
-    def __init__(self, capture_root: Path | str, lane: str, host: str | None = None) -> None:
+    def __init__(
+        self, capture_root: Path | str, lane: str, host: str | None = None
+    ) -> None:
         self.lane = lane
         self.host = host or socket.gethostname()
         self.lane_dir = Path(capture_root) / lane
@@ -47,7 +49,11 @@ class CaptureWriter:
         with open(self._seq_lock_path, "a+") as lock_f:
             fcntl.flock(lock_f, fcntl.LOCK_EX)
             try:
-                current = int(self._seq_path.read_text().strip()) if self._seq_path.exists() else 0
+                current = (
+                    int(self._seq_path.read_text().strip())
+                    if self._seq_path.exists()
+                    else 0
+                )
                 seq = current + 1
                 self._seq_path.write_text(str(seq))
                 return seq
@@ -58,7 +64,9 @@ class CaptureWriter:
         day = time.strftime("%Y%m%d", time.gmtime(ts))
         return self.lane_dir / f"{self.lane}-{day}.jsonl"
 
-    def write(self, payload: dict, raw_ref: str | None = None, ts: float | None = None) -> dict:
+    def write(
+        self, payload: dict, raw_ref: str | None = None, ts: float | None = None
+    ) -> dict:
         ts = time.time() if ts is None else ts
         seq = self._next_seq()
         envelope = build_envelope(

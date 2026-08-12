@@ -5,13 +5,11 @@ import json
 import sqlite3
 import time
 import uuid
-from pathlib import Path
 from typing import Any
 
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
 from .redaction import redact
-
 
 GENESIS_HASH = "0" * 64
 
@@ -60,7 +58,9 @@ class AuditService:
         event_id = str(uuid.uuid4())
         occurred_at = time.time()
         clean_payload = json.loads(redact(json.dumps(payload or {}, sort_keys=True)))
-        correlation_id = clean_payload.get("correlation_id") or clean_payload.get("job_id")
+        correlation_id = clean_payload.get("correlation_id") or clean_payload.get(
+            "job_id"
+        )
         if correlation_id:
             clean_payload["correlation_id"] = str(correlation_id)
         with self._connect() as connection:
@@ -78,7 +78,9 @@ class AuditService:
                 "payload": clean_payload,
                 "previous_hash": previous_hash,
             }
-            entry_hash = hashlib.sha256(previous_hash.encode() + _canonical(body)).hexdigest()
+            entry_hash = hashlib.sha256(
+                previous_hash.encode() + _canonical(body)
+            ).hexdigest()
             connection.execute(
                 "insert into events(event_id, occurred_at, profile, operation, outcome, payload_json, previous_hash, entry_hash) values (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
@@ -138,7 +140,9 @@ class AuditService:
                     "payload": json.loads(row[6]),
                     "previous_hash": row[7],
                 }
-                expected = hashlib.sha256(row[7].encode() + _canonical(body)).hexdigest()
+                expected = hashlib.sha256(
+                    row[7].encode() + _canonical(body)
+                ).hexdigest()
                 if row[7] != previous_hash or row[8] != expected:
                     return {"valid": False, "checked": checked, "broken_at": row[0]}
                 previous_hash = row[8]

@@ -202,8 +202,8 @@ mkServiceModule {
             After = [ "graphical-session.target" ];
             PartOf = [ "graphical-session.target" ];
           };
-          Service =
-            (lib.sinnix.mkRuntimeServiceConfig {
+          Service = (
+            lib.sinnix.mkRuntimeServiceConfig {
               runtimeInventory = config.sinnix.runtime.inventory;
               unit = "sinnix-capture-clipboard.service";
               overrides = {
@@ -225,8 +225,8 @@ mkServiceModule {
                 ];
                 UMask = "0077";
               };
-            })
-          ;
+            }
+          );
           Install.WantedBy = [ "graphical-session.target" ];
         };
       };

@@ -16,9 +16,7 @@ let
   ytPolisher = inputs.yt-polisher.packages.${system}.default.overrideAttrs (old: {
     # buildPythonPackage derives propagatedBuildInputs from `dependencies`;
     # overriding only the derived field leaves the external package unchanged.
-    dependencies = map (
-      input: replaceOpenai input
-    ) (old.dependencies or [ ]);
+    dependencies = map (input: replaceOpenai input) (old.dependencies or [ ]);
     # Also replace the already-materialized field; this is what the final
     # derivation uses when the input package was built by another nixpkgs.
     propagatedBuildInputs = map replaceOpenai (old.propagatedBuildInputs or [ ]);

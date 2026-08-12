@@ -5,7 +5,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from sinnix_ops_reducer.actions import ActionError, ActionService, validate_request
 from sinnix_ops_reducer.reducer import Reducer
 
@@ -19,7 +18,7 @@ def inventory(path: Path) -> None:
                     "safe": {
                         "unit": "safe.service",
                         "manager": "user",
-                "observe": {"restartable": True},
+                        "observe": {"restartable": True},
                         "effectiveResources": {"CPUWeight": 5},
                     },
                     "fixed": {
@@ -137,7 +136,9 @@ def test_action_rejects_unknown_pid_stale_revision_and_unsafe_unit(
 def test_policy_properties_and_rebuild_override_are_enumerated(tmp_path: Path) -> None:
     inventory_path = tmp_path / "inventory.json"
     inventory(inventory_path)
-    reducer = Reducer(tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []})
+    reducer = Reducer(
+        tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}
+    )
     reducer.refresh()
     calls = []
     actions = ActionService(
@@ -146,22 +147,33 @@ def test_policy_properties_and_rebuild_override_are_enumerated(tmp_path: Path) -
         tmp_path / "receipts.json",
         adapter=lambda value, _resolved: calls.append(value) or {"status": "accepted"},
     )
-    assert actions.execute(request("set_policy", {"unit": "safe"}, key="policy") | {
-        "parameters": {"property": "CPUWeight", "value": "10"}
-    })["adapter"]["status"] == "accepted"
+    assert (
+        actions.execute(
+            request("set_policy", {"unit": "safe"}, key="policy")
+            | {"parameters": {"property": "CPUWeight", "value": "10"}}
+        )["adapter"]["status"]
+        == "accepted"
+    )
     with pytest.raises(ActionError, match="unsupported runtime policy"):
-        actions.execute(request("set_policy", {"unit": "safe"}, key="bad") | {
-            "parameters": {"property": "Slice", "value": "app.slice"}
-        })
-    assert actions.execute(request("rebuild_override", {"unit": "safe"}, key="override") | {
-        "parameters": {"name": "cores", "value": "8"}
-    })["adapter"]["status"] == "accepted"
+        actions.execute(
+            request("set_policy", {"unit": "safe"}, key="bad")
+            | {"parameters": {"property": "Slice", "value": "app.slice"}}
+        )
+    assert (
+        actions.execute(
+            request("rebuild_override", {"unit": "safe"}, key="override")
+            | {"parameters": {"name": "cores", "value": "8"}}
+        )["adapter"]["status"]
+        == "accepted"
+    )
 
 
 def test_valid_rejected_action_leaves_a_receipt(tmp_path: Path) -> None:
     inventory_path = tmp_path / "inventory.json"
     inventory(inventory_path)
-    reducer = Reducer(tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []})
+    reducer = Reducer(
+        tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}
+    )
     reducer.refresh()
     actions = ActionService(
         reducer.snapshot,
@@ -197,9 +209,7 @@ def test_orphan_reap_requires_two_identical_cold_observations(tmp_path: Path) ->
         "workload": {"class": "sacrificial"},
         "coldness": {"candidate": True},
     }
-    source_report = {
-        "agent_gateway": {"jobs": [job], "orphaned_jobs": [observation]}
-    }
+    source_report = {"agent_gateway": {"jobs": [job], "orphaned_jobs": [observation]}}
     reducer = Reducer(
         tmp_path / "status.json",
         tmp_path / "token",
@@ -213,15 +223,20 @@ def test_orphan_reap_requires_two_identical_cold_observations(tmp_path: Path) ->
         tmp_path / "receipts.json",
         adapter=lambda *_: {"status": "fixture-reaped"},
     )
-    reap_request = request("interrupt", {"job_id": "orphan-1"}, key="reap-before-second") | {
-        "parameters": {"orphan_reap": True}
-    }
+    reap_request = request(
+        "interrupt", {"job_id": "orphan-1"}, key="reap-before-second"
+    ) | {"parameters": {"orphan_reap": True}}
     with pytest.raises(ActionError, match="two identical"):
         actions.execute(reap_request)
     reducer.refresh()
     accepted = actions.execute(
-        request("interrupt", {"job_id": "orphan-1"}, revision=2, key="reap-after-second")
+        request(
+            "interrupt", {"job_id": "orphan-1"}, revision=2, key="reap-after-second"
+        )
         | {"parameters": {"orphan_reap": True}}
     )
     assert accepted["adapter"]["status"] == "fixture-reaped"
-    assert accepted["preconditions"]["resolved"]["orphan"]["policy"]["observation_count"] == 2
+    assert (
+        accepted["preconditions"]["resolved"]["orphan"]["policy"]["observation_count"]
+        == 2
+    )

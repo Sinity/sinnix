@@ -4,7 +4,8 @@ description: Headless structured judge with an explicit refutation attempt and h
 model: sonnet
 effort: high
 tools: [Bash, Read, Glob, Grep]
-disallowedTools: [Write, Edit, MultiEdit, Agent, SendMessage, WebFetch, WebSearch]
+disallowedTools:
+  [Write, Edit, MultiEdit, Agent, SendMessage, WebFetch, WebSearch]
 maxTurns: 50
 outputSchema: schemas/judge.schema.json
 ---

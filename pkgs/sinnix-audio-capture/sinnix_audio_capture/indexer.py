@@ -76,7 +76,10 @@ def segment_start_ts(path: Path) -> float:
 
 
 def decode_to_pcm16k_mono(
-    ffmpeg_bin: str, opus_path: Path, *, run: Callable[..., subprocess.CompletedProcess] = subprocess.run
+    ffmpeg_bin: str,
+    opus_path: Path,
+    *,
+    run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
 ) -> bytes:
     """Decode a segment to raw s16le mono 16kHz PCM for VAD analysis only."""
     result = run(
@@ -135,11 +138,15 @@ def _speech_spans_for_segment(model, pcm16_bytes: bytes) -> list[SpeechSpan]:
     import torch
     from silero_vad import get_speech_timestamps
 
-    audio = torch.frombuffer(bytearray(pcm16_bytes), dtype=torch.int16).float() / 32768.0
+    audio = (
+        torch.frombuffer(bytearray(pcm16_bytes), dtype=torch.int16).float() / 32768.0
+    )
     timestamps = get_speech_timestamps(
         audio, model, sampling_rate=VAD_SAMPLE_RATE, return_seconds=True
     )
-    return [SpeechSpan(start=float(t["start"]), end=float(t["end"])) for t in timestamps]
+    return [
+        SpeechSpan(start=float(t["start"]), end=float(t["end"])) for t in timestamps
+    ]
 
 
 def run_index_pass(

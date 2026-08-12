@@ -4,7 +4,8 @@ description: Read-only adversarial reviewer that cites exact evidence and tests 
 model: opus
 effort: high
 tools: [Bash, Read, Glob, Grep]
-disallowedTools: [Write, Edit, MultiEdit, Agent, SendMessage, WebFetch, WebSearch]
+disallowedTools:
+  [Write, Edit, MultiEdit, Agent, SendMessage, WebFetch, WebSearch]
 maxTurns: 1000
 ---
 

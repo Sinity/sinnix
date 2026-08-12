@@ -2042,7 +2042,7 @@ KILL_EVENT_PATTERNS = (
     (
         "earlyoom",
         re.compile(
-            r'sending (?:SIGTERM|SIGKILL) to process (?P<pid>\d+) uid \d+ '
+            r"sending (?:SIGTERM|SIGKILL) to process (?P<pid>\d+) uid \d+ "
             r'"(?P<comm>[^"]+)": oom_score (?P<oom_score>\d+), '
             r"oom_score_adj -?\d+, VmRSS (?P<rss_mib>\d+) MiB"
         ),
@@ -2113,7 +2113,9 @@ def scan_kill_events(
     else:
         cmd += ["--since", KILL_EVENT_BACKFILL_SINCE]
     try:
-        proc = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=120)
+        proc = subprocess.run(
+            cmd, check=False, capture_output=True, text=True, timeout=120
+        )
     except (OSError, subprocess.TimeoutExpired):
         return [], None
     rows: list[dict[str, object]] = []

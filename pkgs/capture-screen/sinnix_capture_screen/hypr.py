@@ -51,7 +51,9 @@ def connect_socket2(path: str) -> socket.socket:
 HyprctlJsonReader = Callable[[list[str]], str | None]
 
 
-def make_hyprctl_json_reader(hyprctl_bin: str, timeout: float = 1.0) -> HyprctlJsonReader:
+def make_hyprctl_json_reader(
+    hyprctl_bin: str, timeout: float = 1.0
+) -> HyprctlJsonReader:
     def _read(args: list[str]) -> str | None:
         try:
             proc = subprocess.run(

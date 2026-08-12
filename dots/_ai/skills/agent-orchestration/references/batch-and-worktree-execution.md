@@ -86,8 +86,8 @@ clustering helper where the repo has one).
 - **Verification amortization**: workers run focused real-route checks plus
   the affected-area check their own change warrants. The coordinator runs
   the broad gate once per branch at the publish boundary, not once per item.
-  In a multi-merge fanout session, run this broad gate on the *merged master
-  state* at each merge-train boundary, not only pre-merge on the feature
+  In a multi-merge fanout session, run this broad gate on the _merged master
+  state_ at each merge-train boundary, not only pre-merge on the feature
   branch — a global drift-latch class (an unrelated enum/vocabulary change
   breaking an assertion elsewhere) is invisible to any single PR's
   affected-test selection and only surfaces when the merged result is tested

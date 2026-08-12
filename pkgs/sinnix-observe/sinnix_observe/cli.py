@@ -12,9 +12,10 @@ from typing import Any
 from . import SCHEMA
 from .joins import build_gateway_rows, build_workload_rows
 from .render import render_human
-from .sources.below import collect_below
 from .sources.agent_gateway import collect_agent_gateway
+from .sources.below import collect_below
 from .sources.chrome import collect_chrome_io
+from .sources.drift import collect_config_drift
 from .sources.polylogue import collect_polylogue_live_attempts
 from .sources.pressure import collect_blocked_tasks, collect_pressure
 from .sources.storage import collect_storage
@@ -24,7 +25,6 @@ from .sources.systemd import (
     collect_systemd_units,
 )
 from .sources.xtask import collect_sinex_xtask
-from .sources.drift import collect_config_drift
 from .util import utc_now
 
 DEFAULT_BEGIN = os.environ.get("SINNIX_OBSERVE_BEGIN", "10 min ago")
@@ -44,7 +44,9 @@ def collect_report(args: argparse.Namespace) -> dict[str, Any]:
     chrome_io = collect_chrome_io(args.offline, below, args.limit)
     gateway = collect_agent_gateway(args.limit, below)
     config_drift = collect_config_drift()
-    workload_rows = build_workload_rows(systemd_units, sinex, polylogue, below) + build_gateway_rows(gateway, below)
+    workload_rows = build_workload_rows(
+        systemd_units, sinex, polylogue, below
+    ) + build_gateway_rows(gateway, below)
     return {
         "schema": SCHEMA,
         "generated_at": utc_now(),

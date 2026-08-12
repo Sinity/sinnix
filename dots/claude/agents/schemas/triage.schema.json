@@ -4,9 +4,24 @@
   "additionalProperties": false,
   "required": ["verdict", "confidence", "evidence", "unsupported"],
   "properties": {
-    "verdict": {"type": "string", "enum": ["confirmed", "not_confirmed", "partially_confirmed", "unsupported"]},
-    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-    "evidence": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
-    "unsupported": {"type": "array", "items": {"type": "string", "minLength": 1}}
+    "verdict": {
+      "type": "string",
+      "enum": [
+        "confirmed",
+        "not_confirmed",
+        "partially_confirmed",
+        "unsupported"
+      ]
+    },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "unsupported": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
   }
 }

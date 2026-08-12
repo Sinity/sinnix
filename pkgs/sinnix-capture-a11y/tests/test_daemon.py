@@ -19,7 +19,9 @@ class _FakeTextIface:
 
 
 class FakeAccessible:
-    def __init__(self, role, name, children=None, text=None, app_name="TestApp", parent=None):
+    def __init__(
+        self, role, name, children=None, text=None, app_name="TestApp", parent=None
+    ):
         self._role = role
         self.name = name
         self._children = children or []
@@ -118,8 +120,12 @@ def test_on_text_changed_debounces_rapid_repeat_events(tmp_path: Path):
     daemon, written = _make_daemon(tmp_path, text_debounce_seconds=1000.0)
     acc = FakeAccessible("entry", "Search")
 
-    daemon.on_text_changed(FakeEvent(acc, type_="object:text-changed:insert", any_data="h"))
-    daemon.on_text_changed(FakeEvent(acc, type_="object:text-changed:insert", any_data="he"))
+    daemon.on_text_changed(
+        FakeEvent(acc, type_="object:text-changed:insert", any_data="h")
+    )
+    daemon.on_text_changed(
+        FakeEvent(acc, type_="object:text-changed:insert", any_data="he")
+    )
 
     assert len(written) == 1
     assert written[0]["kind"] == "text-changed"
@@ -131,8 +137,12 @@ def test_on_text_changed_treats_distinct_accessibles_independently(tmp_path: Pat
     acc_a = FakeAccessible("entry", "Search A")
     acc_b = FakeAccessible("entry", "Search B")
 
-    daemon.on_text_changed(FakeEvent(acc_a, type_="object:text-changed:insert", any_data="x"))
-    daemon.on_text_changed(FakeEvent(acc_b, type_="object:text-changed:insert", any_data="y"))
+    daemon.on_text_changed(
+        FakeEvent(acc_a, type_="object:text-changed:insert", any_data="x")
+    )
+    daemon.on_text_changed(
+        FakeEvent(acc_b, type_="object:text-changed:insert", any_data="y")
+    )
 
     assert len(written) == 2
     assert {p["name"] for p in written} == {"Search A", "Search B"}

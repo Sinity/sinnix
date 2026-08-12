@@ -5,7 +5,6 @@
 > One flat file, no transclusion; Codex/Gemini read it via symlinks from the
 > sinnix repo, so edits propagate to every agent instantly.
 
-
 ## Operating Contract
 
 ### Stance
@@ -199,7 +198,7 @@ The standing rules:
 - **Bake standing contracts into agent definitions** (`.claude/agents/*.md`);
   dispatch prompts carry only task content.
 - **Scripted judgment calls**: `claude -p --output-format json
-  --json-schema` for validated verdicts; `--resume` for continuity;
+--json-schema` for validated verdicts; `--resume` for continuity;
   `--bare` for deterministic scripted invocations.
 
 For coordination, Beads owns work and dependencies. Polylogue blackboard
@@ -240,7 +239,6 @@ Raw-log lives at `/realm/data/knowledgebase/logs.raw-log.md`. It is the
 append-only, low-friction operator stream used by `rawlog`, `rawlog-capture`,
 and `oracle`; read it when the user references raw-log/rawlog, recent subjective
 context, or "what have I been saying/thinking lately?"
-
 
 ## System Context
 
@@ -286,7 +284,6 @@ cd /realm/project/sinnix && nix develop --command switch
 
 Agent CLIs self-update via npm bootstrap (`~/.local/state/<agent>/npm`,
 persisted) — no Nix rebuild needed.
-
 
 ## Filesystem Structure
 
@@ -356,7 +353,6 @@ SSH keys lives at `/persist/home/sinity/.ssh` and appears at runtime as
 └── knowledgebase/     # PKM vault (Obsidian-friendly MOCs, raw-log)
 ```
 
-
 ## Project Constellation
 
 ### Core Infrastructure
@@ -408,7 +404,6 @@ lynchpin data sources: `sinity-lynchpin/docs/reference/data-sources.md`;
 data inventory: `/realm/data/INVENTORY.md`. Project detail (structure,
 patterns, workflows) lives in each project's `CLAUDE.md`.
 
-
 ## Agent Context Conventions
 
 - **`CLAUDE.md` is the canonical instruction file everywhere** — one flat file
@@ -438,7 +433,6 @@ patterns, workflows) lives in each project's `CLAUDE.md`.
 - **Context7**: documentation discovery via `resolve-library-id` →
   `query-docs`. Cheap, prevents stale-API mistakes; use it for unfamiliar or
   fast-moving third-party APIs.
-
 
 ## Common Workflows
 

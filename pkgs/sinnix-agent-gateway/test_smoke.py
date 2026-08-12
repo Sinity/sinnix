@@ -153,13 +153,13 @@ def test_project_diff_rejects_option_injection_before_external_driver(
     marker = tmp_path / "external-diff-ran"
     driver = tmp_path / "external-diff"
     driver.write_text(
-        f"#!{sys.executable}\n"
-        "from pathlib import Path\n"
-        f"Path({str(marker)!r}).touch()\n"
+        f"#!{sys.executable}\nfrom pathlib import Path\nPath({str(marker)!r}).touch()\n"
     )
     driver.chmod(0o700)
     subprocess.run(["git", "init", "-q"], cwd=project, check=True)
-    subprocess.run(["git", "config", "user.name", "Gateway Test"], cwd=project, check=True)
+    subprocess.run(
+        ["git", "config", "user.name", "Gateway Test"], cwd=project, check=True
+    )
     subprocess.run(
         ["git", "config", "user.email", "gateway-test@example.invalid"],
         cwd=project,
@@ -172,7 +172,9 @@ def test_project_diff_rejects_option_injection_before_external_driver(
     )
     (project / ".gitattributes").write_text("tracked.txt diff=hostile\n")
     (project / "tracked.txt").write_text("before\n")
-    subprocess.run(["git", "add", ".gitattributes", "tracked.txt"], cwd=project, check=True)
+    subprocess.run(
+        ["git", "add", ".gitattributes", "tracked.txt"], cwd=project, check=True
+    )
     subprocess.run(["git", "commit", "-qm", "fixture"], cwd=project, check=True)
     (project / "tracked.txt").write_text("after\n")
 

@@ -141,13 +141,16 @@ class WindowAccumulator:
 
     @property
     def has_activity(self) -> bool:
-        return bool(self.keystroke_count or self.pointer_move_count or self.pointer_click_count)
+        return bool(
+            self.keystroke_count or self.pointer_move_count or self.pointer_click_count
+        )
 
     def interval_stats_ms(self) -> tuple[float | None, float | None]:
         if len(self._key_times) < 2:
             return (None, None)
         deltas_ms = [
-            (b - a) * 1000.0 for a, b in zip(self._key_times, self._key_times[1:])
+            (b - a) * 1000.0
+            for a, b in zip(self._key_times, self._key_times[1:], strict=False)
         ]
         mean_ms = statistics.fmean(deltas_ms)
         stddev_ms = statistics.pstdev(deltas_ms) if len(deltas_ms) > 1 else 0.0
@@ -237,9 +240,7 @@ def _hyprctl_reader(hyprctl_bin: str) -> Callable[[], str | None]:
     return _read
 
 
-def write_window(
-    window: dict, capture_root: Path, sinnix_capture_bin: str
-) -> None:
+def write_window(window: dict, capture_root: Path, sinnix_capture_bin: str) -> None:
     """Hand one aggregated window to the sinnix-capture writer over stdin.
 
     `window` is exactly the dict produced by `to_window()`/

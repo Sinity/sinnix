@@ -34,7 +34,9 @@ from dataclasses import dataclass, field
 
 FIELD_SEP = "\x1f"  # ASCII unit separator; vanishingly unlikely in track metadata
 FOLLOW_FIELDS = ("player", "status", "title", "artist", "album")
-FOLLOW_FORMAT = FIELD_SEP.join(f"{{{{{f}}}}}" for f in ("playerName", "status", "title", "artist", "album"))
+FOLLOW_FORMAT = FIELD_SEP.join(
+    f"{{{{{f}}}}}" for f in ("playerName", "status", "title", "artist", "album")
+)
 
 
 def log(msg: str) -> None:
@@ -60,7 +62,9 @@ def run(argv: list[str]) -> tuple[int, str, str]:
         return 1, "", str(exc)
 
 
-def fetch_position_and_duration(playerctl_bin: str, player: str) -> tuple[float | None, float | None]:
+def fetch_position_and_duration(
+    playerctl_bin: str, player: str
+) -> tuple[float | None, float | None]:
     rc, out, _err = run([playerctl_bin, "-p", player, "position"])
     position_seconds = float(out) if rc == 0 and out else None
 
@@ -92,10 +96,17 @@ def write_envelope(
         log(f"sinnix-capture write failed (rc={rc}): {err}")
 
 
-def classify_change(state: PlayerState, player: str, status: str, title: str, artist: str, album: str) -> str:
+def classify_change(
+    state: PlayerState, player: str, status: str, title: str, artist: str, album: str
+) -> str:
     if not state.seen:
         return "initial"
-    if (player, title, artist, album) != (state.player, state.title, state.artist, state.album):
+    if (player, title, artist, album) != (
+        state.player,
+        state.title,
+        state.artist,
+        state.album,
+    ):
         return "track"
     if status != state.status:
         return "status"
@@ -137,7 +148,9 @@ def handle_follow_line(
         state.artist = artist
         state.album = album
 
-    position_seconds, duration_seconds = fetch_position_and_duration(playerctl_bin, player)
+    position_seconds, duration_seconds = fetch_position_and_duration(
+        playerctl_bin, player
+    )
     payload = {
         "event": kind,
         "player": player,
@@ -162,7 +175,13 @@ def follow_loop(
     follow_cmd = [playerctl_bin, "--follow", "metadata", "--format", FOLLOW_FORMAT]
     while True:
         try:
-            proc = subprocess.Popen(follow_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+            proc = subprocess.Popen(
+                follow_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+            )
         except FileNotFoundError:
             log(f"playerctl binary not found: {playerctl_bin}")
             sys.exit(1)
@@ -173,13 +192,19 @@ def follow_loop(
             if not line:
                 continue
             try:
-                handle_follow_line(line, state, playerctl_bin, sinnix_capture_bin, capture_root, lane)
-            except Exception as exc:  # defensive: one bad event must not kill the daemon
+                handle_follow_line(
+                    line, state, playerctl_bin, sinnix_capture_bin, capture_root, lane
+                )
+            except (
+                Exception
+            ) as exc:  # defensive: one bad event must not kill the daemon
                 log(f"error handling follow line {line!r}: {exc}")
 
         rc = proc.wait()
         stderr_tail = proc.stderr.read().strip() if proc.stderr else ""
-        log(f"playerctl --follow exited (rc={rc}) {stderr_tail}; retrying in {retry_backoff_seconds}s")
+        log(
+            f"playerctl --follow exited (rc={rc}) {stderr_tail}; retrying in {retry_backoff_seconds}s"
+        )
         time.sleep(retry_backoff_seconds)
 
 
@@ -196,9 +221,17 @@ def heartbeat_loop(
         with state.lock:
             if not (state.seen and state.status == "Playing" and state.player):
                 continue
-            player, status, title, artist, album = state.player, state.status, state.title, state.artist, state.album
+            player, status, title, artist, album = (
+                state.player,
+                state.status,
+                state.title,
+                state.artist,
+                state.album,
+            )
 
-        position_seconds, duration_seconds = fetch_position_and_duration(playerctl_bin, player)
+        position_seconds, duration_seconds = fetch_position_and_duration(
+            playerctl_bin, player
+        )
         payload = {
             "event": "heartbeat",
             "player": player,
@@ -214,25 +247,51 @@ def heartbeat_loop(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--capture-root", required=True, help="sinnix-capture root directory")
+    parser.add_argument(
+        "--capture-root", required=True, help="sinnix-capture root directory"
+    )
     parser.add_argument("--lane", default="mpris", help="Capture lane name")
     parser.add_argument("--playerctl-bin", default="playerctl")
     parser.add_argument("--sinnix-capture-bin", default="sinnix-capture")
-    parser.add_argument("--heartbeat-interval", type=float, default=60.0, help="Seconds between heartbeats while Playing")
-    parser.add_argument("--retry-backoff", type=float, default=5.0, help="Seconds to wait before relaunching a dead playerctl --follow")
+    parser.add_argument(
+        "--heartbeat-interval",
+        type=float,
+        default=60.0,
+        help="Seconds between heartbeats while Playing",
+    )
+    parser.add_argument(
+        "--retry-backoff",
+        type=float,
+        default=5.0,
+        help="Seconds to wait before relaunching a dead playerctl --follow",
+    )
     args = parser.parse_args(argv)
 
     state = PlayerState()
 
     heartbeat_thread = threading.Thread(
         target=heartbeat_loop,
-        args=(state, args.playerctl_bin, args.sinnix_capture_bin, args.capture_root, args.lane, args.heartbeat_interval),
+        args=(
+            state,
+            args.playerctl_bin,
+            args.sinnix_capture_bin,
+            args.capture_root,
+            args.lane,
+            args.heartbeat_interval,
+        ),
         daemon=True,
         name="mpris-heartbeat",
     )
     heartbeat_thread.start()
 
-    follow_loop(state, args.playerctl_bin, args.sinnix_capture_bin, args.capture_root, args.lane, args.retry_backoff)
+    follow_loop(
+        state,
+        args.playerctl_bin,
+        args.sinnix_capture_bin,
+        args.capture_root,
+        args.lane,
+        args.retry_backoff,
+    )
     return 0  # unreachable: follow_loop retries forever
 
 

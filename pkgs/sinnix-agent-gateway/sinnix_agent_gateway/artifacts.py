@@ -36,7 +36,8 @@ class ArtifactService:
             "owner_id": owner_id,
             "source": str(source),
             "bytes": source.stat().st_size,
-            "content_type": mimetypes.guess_type(source.name)[0] or "application/octet-stream",
+            "content_type": mimetypes.guess_type(source.name)[0]
+            or "application/octet-stream",
         }
         metadata_path = directory / "metadata.json"
         metadata_path.write_text(json.dumps(metadata, sort_keys=True) + "\n")
@@ -75,7 +76,9 @@ class ArtifactService:
             rows.append(row)
         return {"artifacts": rows}
 
-    def read(self, artifact_id: str, offset: int = 0, max_bytes: int = 64_000) -> dict[str, Any]:
+    def read(
+        self, artifact_id: str, offset: int = 0, max_bytes: int = 64_000
+    ) -> dict[str, Any]:
         self.principal.require(Capability.ARTIFACT_READ)
         if offset < 0:
             raise ArtifactError("offset must be non-negative")

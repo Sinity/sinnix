@@ -18,7 +18,9 @@ def _default_clock() -> float:
 
 
 class Debouncer:
-    def __init__(self, min_interval: float, clock: Callable[[], float] | None = None) -> None:
+    def __init__(
+        self, min_interval: float, clock: Callable[[], float] | None = None
+    ) -> None:
         self._min_interval = min_interval
         self._clock = clock or _default_clock
         self._last_emit: dict[str, float] = {}

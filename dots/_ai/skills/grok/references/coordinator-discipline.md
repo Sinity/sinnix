@@ -17,12 +17,12 @@ subsystems. Before creating a new tracker item:
    most add a short confirming comment if the new report meaningfully
    sharpens the existing item's understanding (a more precise mechanism, a
    concrete reproduction the original lacked).
-3. If a match exists but the new report *corrects* or *extends* it (a
+3. If a match exists but the new report _corrects_ or _extends_ it (a
    follow-up agent found the original characterization was half-wrong, or
    the fix scope needs widening): update the existing item's description or
    append a correction comment — don't let the correction sit only in a
    chat transcript. Say explicitly what changed and why.
-4. If a match exists and the new report independently derives the *same*
+4. If a match exists and the new report independently derives the _same_
    finding with additional supporting detail (a different code path proving
    the same bug, a concrete exploit chain the original lacked): a
    substantive comment adding that detail is worth it even though no new
@@ -32,15 +32,15 @@ subsystems. Before creating a new tracker item:
 
 If findings feed a gate on some high-stakes downstream operation (a
 migration, a release, a destructive data operation), write down the blocking
-criteria *before* triaging the first finding, and apply them the same way to
+criteria _before_ triaging the first finding, and apply them the same way to
 finding #1 and finding #200. A criteria set that drifts partway through a
 campaign (getting stricter or looser as fatigue sets in) produces an
 inconsistent, hard-to-trust gate. A criteria set that worked well in
 practice:
 
-- Would this finding leave the operation's *output* itself deficient or
+- Would this finding leave the operation's _output_ itself deficient or
   corrupted?
-- Would this finding prevent *detecting* a partial failure of the operation?
+- Would this finding prevent _detecting_ a partial failure of the operation?
 - Is this finding a basic safety precondition specifically for the
   operation (not just "a bug that exists"), independent of whether it's
   otherwise low-severity?

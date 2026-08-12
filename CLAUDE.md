@@ -141,7 +141,7 @@ Boundary rules:
 
 - **Features are default-ON.** `mkFeatureModule` sets `enable.default = true`:
   anything in `modules/features/` is unconditionally part of a sinnix host's
-  default character. Hosts express *exceptions*
+  default character. Hosts express _exceptions_
   (`sinnix.features.<path>.enable = false`) and configuration detail, not
   enables. Optional background capabilities belong in the default-off service
   namespace; retired capabilities leave the active tree.
@@ -173,7 +173,7 @@ One contract governs unit placement and observability:
   (agent.slice is protected CPUWeight=400/MemoryLow=3G; build/nix-build are
   sacrificial MemoryHigh=22G/Max=28G), and the env allowlist.
 - Modules declare `sinnix.runtime.surfaces.<name> = { unit, manager, kind,
-  resourceClass, observe, captures }`. Eval-time assertions reject duplicate
+resourceClass, observe, captures }`. Eval-time assertions reject duplicate
   units, kind/suffix mismatches, and unknown classes.
 - `lib.sinnix.mkRuntimeServiceConfig { runtimeInventory; unit; }` resolves a
   unit to its class serviceConfig (as mkDefault) and **throws on unknown
@@ -227,7 +227,7 @@ or `pkgs/<name>/` for real derivations.
 - `lynchpin` is a local `git+file://` input; sinex/polylogue/scribe-tap/
   yt-polisher come from GitHub so deploys don't consume local checkout state.
   One-off local testing: `SINNIX_{SINEX,POLYLOGUE,LYNCHPIN}_OVERRIDE=<path>
-  switch` (wired as `--override-input --no-write-lock-file`).
+switch` (wired as `--override-input --no-write-lock-file`).
 
 ## Scripts
 
@@ -267,7 +267,7 @@ full `sinnix-<name>`) — it needs zero wiring when a new script is added.
 - Repo convention across the constellation: per-repo `CLAUDE.md` is canonical
   and flat; `AGENTS.md` is a committed symlink to it.
 - Shared skills live in `dots/_ai/skills/`; agent trees (`~/.config/claude/
-  skills`, `~/.codex/skills`, `~/.gemini/skills`) are linkFarms over it.
+skills`, `~/.codex/skills`, `~/.gemini/skills`) are linkFarms over it.
   Codex-only system skills: `dots/codex/skills/.system/`.
 - MCP registry: `flake/data/mcp-registry.nix` (servers, tiers,
   lean/evidence/full/browser profiles, per-client render). Wiring + agent CLI
@@ -317,7 +317,7 @@ config in `secrets.nix` (repo root).
 - **sinnix-ethereal** — Hetzner AX42 headless replica
   (`profiles/cloud.nix`, disko, bootstrap via `nix run .#deploy-ethereal`,
   steady-state via colmena `apply-all`). Runs sinex `deploymentRole =
-  "replica"` (postgres+NATS for remote thin workstations, no local capture).
+"replica"` (postgres+NATS for remote thin workstations, no local capture).
 - **sinnix-gw** — OpenWrt router, config generated from
   `hosts/sinnix-gw/default.nix` and pushed over SSH:
   `nix run .#router-deploy` (backup → opkg → UCI → health check).

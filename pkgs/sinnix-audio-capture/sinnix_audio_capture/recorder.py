@@ -27,7 +27,12 @@ import time
 from pathlib import Path
 
 from .pipewire_defaults import DefaultTargets, parse_default_line, resolve_target
-from .segment import CHANNEL_PROFILES, ChannelProfile, OpusSegmentWriter, opusenc_argv_builder
+from .segment import (
+    CHANNEL_PROFILES,
+    ChannelProfile,
+    OpusSegmentWriter,
+    opusenc_argv_builder,
+)
 from .tee import SeqpacketTee
 
 logger = logging.getLogger("sinnix_audio_capture.recorder")
@@ -41,7 +46,9 @@ def _chunk_bytes(profile: ChannelProfile) -> int:
     return (profile.rate * profile.channels * 2 * _CHUNK_MS) // 1000
 
 
-def pw_record_argv(pw_record_bin: str, profile: ChannelProfile, target: str | None) -> list[str]:
+def pw_record_argv(
+    pw_record_bin: str, profile: ChannelProfile, target: str | None
+) -> list[str]:
     argv = [
         str(pw_record_bin),
         "--rate",
@@ -63,7 +70,14 @@ class DefaultWatcher(threading.Thread):
     `on_change(kind)` (kind: "sink" | "source") whenever the resolved
     default actually changes."""
 
-    def __init__(self, pw_metadata_bin: str, targets: DefaultTargets, on_change, *, popen=subprocess.Popen) -> None:
+    def __init__(
+        self,
+        pw_metadata_bin: str,
+        targets: DefaultTargets,
+        on_change,
+        *,
+        popen=subprocess.Popen,
+    ) -> None:
         super().__init__(daemon=True, name="sinnix-audio-default-watcher")
         self._pw_metadata_bin = pw_metadata_bin
         self._targets = targets
@@ -75,10 +89,14 @@ class DefaultWatcher(threading.Thread):
     def run(self) -> None:
         try:
             self._proc = self._popen(
-                [self._pw_metadata_bin, "-n", "default"], stdout=subprocess.PIPE, text=True
+                [self._pw_metadata_bin, "-n", "default"],
+                stdout=subprocess.PIPE,
+                text=True,
             )
         except Exception:
-            logger.exception("sinnix-audio-capture: failed to start pw-metadata default watcher")
+            logger.exception(
+                "sinnix-audio-capture: failed to start pw-metadata default watcher"
+            )
             return
         assert self._proc.stdout is not None
         for line in self._proc.stdout:
@@ -92,7 +110,9 @@ class DefaultWatcher(threading.Thread):
                 try:
                     self._on_change(kind)
                 except Exception:
-                    logger.exception("sinnix-audio-capture: default-change callback failed")
+                    logger.exception(
+                        "sinnix-audio-capture: default-change callback failed"
+                    )
 
     def stop(self) -> None:
         self._stopped.set()
@@ -132,7 +152,11 @@ def run_recorder(
         argv_builder=opusenc_argv_builder(opusenc_bin, profile),
         popen=popen,
     )
-    tee = SeqpacketTee(tee_socket_path) if (channel == "mic" and tee_socket_path is not None) else None
+    tee = (
+        SeqpacketTee(tee_socket_path)
+        if (channel == "mic" and tee_socket_path is not None)
+        else None
+    )
 
     targets = DefaultTargets()
     restart_requested = threading.Event()

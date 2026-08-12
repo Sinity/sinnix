@@ -4,9 +4,9 @@ import argparse
 import os
 from pathlib import Path
 
-from .reducer import Reducer, observe_source
-from .ambient import product_source
 from .actions import ActionService
+from .ambient import product_source
+from .reducer import Reducer, observe_source
 from .server import ensure_token, serve
 
 
@@ -26,7 +26,16 @@ def main() -> None:
         default=["sinnix-observe", "--format", "json", "--limit", "10"],
     )
     parser.add_argument("--interval", type=float, default=10.0)
-    parser.add_argument("--ambient-product", type=Path, default=Path(os.environ.get("SINNIX_AMBIENT_PRODUCT", "/realm/project/sinity-lynchpin/.lynchpin/generated/analysis/ambient_intelligence.json")))
+    parser.add_argument(
+        "--ambient-product",
+        type=Path,
+        default=Path(
+            os.environ.get(
+                "SINNIX_AMBIENT_PRODUCT",
+                "/realm/project/sinity-lynchpin/.lynchpin/generated/analysis/ambient_intelligence.json",
+            )
+        ),
+    )
     parser.add_argument("--anchor-events", type=Path, default=None)
     parser.add_argument("--hyprland-events", type=Path, default=None)
     parser.add_argument(

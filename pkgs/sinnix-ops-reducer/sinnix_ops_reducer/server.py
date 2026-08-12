@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import secrets
 import socket
 import threading
@@ -11,8 +10,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from .reducer import Reducer, atomic_json
 from .actions import ActionError, ActionService
+from .reducer import Reducer
 
 
 def ensure_token(path: Path) -> str:
@@ -91,7 +90,10 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         elif self.path == "/v1/receipts":
             receipts = list(self.reducer.actions.receipts.values())[-20:]
-            self._write(HTTPStatus.OK, {"schema": "sinnix-ops-receipts-v1", "receipts": receipts})
+            self._write(
+                HTTPStatus.OK,
+                {"schema": "sinnix-ops-receipts-v1", "receipts": receipts},
+            )
         elif self.path.startswith("/v1/actions/"):
             key = self.path.removeprefix("/v1/actions/")
             receipt = self.reducer.actions.lookup(key)

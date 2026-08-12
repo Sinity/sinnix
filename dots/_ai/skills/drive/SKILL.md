@@ -163,12 +163,18 @@ goal: <the user's original goal, verbatim enough to re-derive intent>
 mode: gated | auto(N)
 status: active | stopped(<reason>)
 ---
-## FRONTIER      what is genuinely unexplored / the next prompt
-## ITERATIONS    one compact block per iteration: direction, outcome, artifacts
-## PARKED        directions considered and skipped, with the one-line why
-## ASSUMPTIONS   decisions taken on the user's behalf in auto mode (vetoable)
-## SELF-CORRECTIONS  overturned claims, kept visible with both versions
-## RULES         standing constraints the user has stated mid-flight
+
+## FRONTIER what is genuinely unexplored / the next prompt
+
+## ITERATIONS one compact block per iteration: direction, outcome, artifacts
+
+## PARKED directions considered and skipped, with the one-line why
+
+## ASSUMPTIONS decisions taken on the user's behalf in auto mode (vetoable)
+
+## SELF-CORRECTIONS overturned claims, kept visible with both versions
+
+## RULES standing constraints the user has stated mid-flight
 ```
 
 After any compaction: re-read the ledger before doing anything else.

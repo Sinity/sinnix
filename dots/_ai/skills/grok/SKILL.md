@@ -81,18 +81,18 @@ slices — a region should be small enough for one agent to read every line and
 hold a coherent mental model, not just fit under a number. Target sizes by
 model tier (justified in the partitioning reference):
 
-| Tier | Target region size | Shape |
-|---|---|---|
-| Opus / dense logic | 3K–8K lines | subtle invariants, provenance, admission, DB write chokepoints |
-| Sonnet / coverage | up to ~15K lines | mechanical/repetitive surfaces (handlers, CLI commands) |
-| Fast+tiny-context (e.g. Codex spark tier) | 1–4 files, ~500–2500 lines | narrow narrate-through second pass |
+| Tier                                      | Target region size         | Shape                                                          |
+| ----------------------------------------- | -------------------------- | -------------------------------------------------------------- |
+| Opus / dense logic                        | 3K–8K lines                | subtle invariants, provenance, admission, DB write chokepoints |
+| Sonnet / coverage                         | up to ~15K lines           | mechanical/repetitive surfaces (handlers, CLI commands)        |
+| Fast+tiny-context (e.g. Codex spark tier) | 1–4 files, ~500–2500 lines | narrow narrate-through second pass                             |
 
 ### 3. Dispatch
 
 Give every region agent: exact absolute file paths (don't make it discover
 them — that burns its own budget and, for small/fast models, actively fights
 their instinct to avoid broad exploration), the specific bug shapes to watch
-for (the taxonomy below), an explicit instruction to read *every* file
+for (the taxonomy below), an explicit instruction to read _every_ file
 completely, and — critically — permission to report partial coverage honestly
 rather than end in silence. See
 [`references/model-tiering.md`](references/model-tiering.md) for which model
@@ -116,7 +116,7 @@ A first broad pass (thematic grep-shaped sweep, or a Sonnet/Opus region read
 under time pressure) reliably misses things a close, forced-attention re-read
 catches — especially in files an earlier agent's own report flagged as
 "partially read" or "deprioritized for time." The **narration technique**
-(state what each block does and what invariant it relies on, for the *whole*
+(state what each block does and what invariant it relies on, for the _whole_
 file, before concluding anything) is cheap to run with fast/small models
 against narrow single-file or 2–4-file targets. Full technique and prompt
 template in [`references/techniques.md`](references/techniques.md).
@@ -131,7 +131,7 @@ re-investigation — keep the two separate.
 
 ### 7. Verify
 
-Trust but verify. A subagent or fork's summary describes what it *intended*
+Trust but verify. A subagent or fork's summary describes what it _intended_
 to do; before reporting a campaign's results as done, spot-check a handful of
 its claimed filings for real content, and independently confirm the
 mechanical invariants (dependency graph has no cycles, lint is clean, the

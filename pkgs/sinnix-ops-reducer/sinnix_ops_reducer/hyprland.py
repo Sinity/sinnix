@@ -20,7 +20,9 @@ class HyprlandState:
     diagnostics: int = 0
 
 
-def reduce_socket_event(state: HyprlandState, line: str, *, now: float | None = None) -> dict[str, Any]:
+def reduce_socket_event(
+    state: HyprlandState, line: str, *, now: float | None = None
+) -> dict[str, Any]:
     now = time.monotonic() if now is None else now
     event, _, payload = line.partition(">>")
     if event == "fullscreen":
@@ -28,21 +30,34 @@ def reduce_socket_event(state: HyprlandState, line: str, *, now: float | None = 
     elif event == "activewindow":
         app = payload.split(",", 1)[0].strip().lower()
         candidate = app in {"mpv", "vlc", "gamescope"}
-        if candidate != state.static_content and now - state.last_static_transition >= STATIC_COOLDOWN:
+        if (
+            candidate != state.static_content
+            and now - state.last_static_transition >= STATIC_COOLDOWN
+        ):
             state.static_content = candidate
             state.last_static_transition = now
     else:
         state.diagnostics = min(state.diagnostics + 1, 32)
-    return {"fullscreen_game": state.fullscreen_game, "static_content": state.static_content, "diagnostics": state.diagnostics}
+    return {
+        "fullscreen_game": state.fullscreen_game,
+        "static_content": state.static_content,
+        "diagnostics": state.diagnostics,
+    }
 
 
-def reconcile_activewindow(state: HyprlandState, payload: dict[str, Any], *, now: float | None = None) -> dict[str, Any]:
+def reconcile_activewindow(
+    state: HyprlandState, payload: dict[str, Any], *, now: float | None = None
+) -> dict[str, Any]:
     now = time.monotonic() if now is None else now
     state.fullscreen_game = payload.get("fullscreen") in {1, 2}
     app = str(payload.get("class", "")).strip().lower()
     state.static_content = app in {"mpv", "vlc", "gamescope"}
     state.last_static_transition = now
-    return {"fullscreen_game": state.fullscreen_game, "static_content": state.static_content, "diagnostics": state.diagnostics}
+    return {
+        "fullscreen_game": state.fullscreen_game,
+        "static_content": state.static_content,
+        "diagnostics": state.diagnostics,
+    }
 
 
 class Socket2Adapter:

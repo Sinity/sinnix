@@ -89,7 +89,9 @@ def test_removed_event_uses_id_kind_cache():
 
 def test_removed_event_for_id_not_in_cache_is_dropped():
     events = list(parse_pw_mon_stream(_lines(_REMOVED_NODE)))
-    assert events == []  # no cache entry (predates this process) -> dropped, see module docstring
+    assert (
+        events == []
+    )  # no cache entry (predates this process) -> dropped, see module docstring
 
 
 def test_event_payload_shape():

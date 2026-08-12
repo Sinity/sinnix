@@ -20,7 +20,11 @@
   the dispatcher does no filesystem discovery of its own at runtime and has
   no dependency on the invoking PATH beyond `awk`/`coreutils`.
 */
-{ lib, pkgs, registry }:
+{
+  lib,
+  pkgs,
+  registry,
+}:
 let
   inherit (lib)
     concatStringsSep
@@ -55,20 +59,14 @@ let
 
   maxWidth = foldl' (acc: e: max acc (stringLength e.displayName)) 0 sorted;
 
-  padRight =
-    width: str:
-    str + concatStringsSep "" (genList (_: " ") (width - stringLength str));
+  padRight = width: str: str + concatStringsSep "" (genList (_: " ") (width - stringLength str));
 
   helpLineFor = e: "  ${padRight maxWidth e.displayName}  — ${e.description}";
 
   helpBody =
     if multiTier then
       concatStringsSep "\n\n" (
-        map (
-          t:
-          "${t}:\n"
-          + concatStringsSep "\n" (map helpLineFor (filter (e: e.tier == t) sorted))
-        ) tiers
+        map (t: "${t}:\n" + concatStringsSep "\n" (map helpLineFor (filter (e: e.tier == t) sorted))) tiers
       )
     else
       concatStringsSep "\n" (map helpLineFor sorted);

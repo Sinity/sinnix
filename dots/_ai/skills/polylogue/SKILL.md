@@ -94,7 +94,7 @@ them by their old names:
   `status(scope="archive", include=("provider_usage",))` summary is
   available; per-session or time-bucketed rollups are not.
 - **Coordination status** (`agent_coordination_brief`) remains available as
-  an MCP *prompt*, not a tool — invoke it as a prompt when the harness
+  an MCP _prompt_, not a tool — invoke it as a prompt when the harness
   surfaces it; `status(scope="coordination")` is declared but not yet wired.
 
 ## Query DSL (CLI and `query`)

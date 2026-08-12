@@ -9,7 +9,7 @@ literally do.
 The single highest-yield technique for catching bugs that pattern-matching
 prompts miss. Instruct the agent to walk through the target file(s) and, for
 every function or logical block, state in its own words what it does and what
-invariant or assumption it's relying on — for the *whole* file, not just the
+invariant or assumption it's relying on — for the _whole_ file, not just the
 parts that look suspicious at a glance. Bugs hide precisely in the parts
 nobody looks closely at; forcing a restatement of intent for every block
 surfaces the gap between "what this code is supposed to guarantee" and "what
@@ -89,7 +89,7 @@ comment being updated, or never actually implemented as described).
 Doctor/health checks, verify commands, and CI gates are code like anything
 else, and are routinely under-scrutinized because their own output ("✓ All
 checks passed") reads as authoritative. The specific failure shape to hunt:
-a check that queries and *displays* real state but never actually gates
+a check that queries and _displays_ real state but never actually gates
 pass/fail on it (an `is_healthy()` that ignores half its own struct's
 fields; a check whose `all()` over an empty collection vacuously returns
 true; a dry-run mode whose "passed" flag doesn't reflect a printed error a

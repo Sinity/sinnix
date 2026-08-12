@@ -49,7 +49,12 @@ mkServiceModule {
     };
   };
   configFn =
-    { cfg, lib, helpers, ... }:
+    {
+      cfg,
+      lib,
+      helpers,
+      ...
+    }:
     {
       services.litellm = {
         enable = true;

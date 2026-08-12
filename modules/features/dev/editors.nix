@@ -185,7 +185,9 @@ mkFeatureModule {
           }:
           let
             mkDotsFile = mkDotsFileFor config;
-            antigravity-ide-wrapped = wrapWaylandEditor "antigravity-ide-wrapped" pkgs.antigravity-ide "antigravity-ide";
+            antigravity-ide-wrapped =
+              wrapWaylandEditor "antigravity-ide-wrapped" pkgs.antigravity-ide
+                "antigravity-ide";
           in
           {
             home.packages = [ antigravity-ide-wrapped ];

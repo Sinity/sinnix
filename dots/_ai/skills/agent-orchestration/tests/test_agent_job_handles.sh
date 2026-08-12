@@ -224,7 +224,7 @@ collision_a_status=$?
 wait "${collision_b}"
 collision_b_status=$?
 set -e
-if ! { [[ ${collision_a_status} -eq 0 && ${collision_b_status} -ne 0 ]] || \
+if ! { [[ ${collision_a_status} -eq 0 && ${collision_b_status} -ne 0 ]] ||
   [[ ${collision_a_status} -ne 0 && ${collision_b_status} -eq 0 ]]; }; then
   echo "concurrent same-ID launches did not produce exactly one owner" >&2
   exit 1
@@ -248,7 +248,7 @@ manifest_pid="$(jq -r .launcher.pid "${tmp}/state/job-hold.json")"
 actual_pid="$(jq -r .actual_agent.pid "${tmp}/state/job-hold.json")"
 live_stat="$(<"/proc/${manifest_pid}/stat")"
 live_start="$(printf '%s\n' "${live_stat##*) }" | awk '{print $20}')"
-[[ "$live_start" == "$(jq -r .launcher.proc_start "${tmp}/state/job-hold.json")" ]]
+[[ $live_start == "$(jq -r .launcher.proc_start "${tmp}/state/job-hold.json")" ]]
 mkdir -p "${tmp}/proc/${manifest_pid}"
 printf 'x x x x x x x x x x x x x x x x x x x %s\n' "$(jq -r .launcher.proc_start "${tmp}/state/job-hold.json")" >"${tmp}/proc/${manifest_pid}/stat"
 printf '0::/wrong/cgroup\n' >"${tmp}/proc/${manifest_pid}/cgroup"
@@ -294,8 +294,8 @@ mv "${tmp}/state/job-timeout.tmp" "${tmp}/state/job-timeout.json"
 FAKE_ACTIVE_STATE=inactive FAKE_SUB_STATE=dead FAKE_RESULT=timeout \
   FAKE_SYSTEMD_CGROUP=/fake/sinnix-agent-job-job-timeout.scope \
   SINNIX_AGENT_SYSTEMCTL="${tmp}/bin/systemctl" \
-  "${control}" --state-dir "${tmp}/state" status --job job-timeout \
-  | jq -e '.lifecycle == "timed_out" and .exit_status == 124 and .live.Result == "timeout"' >/dev/null
+  "${control}" --state-dir "${tmp}/state" status --job job-timeout |
+  jq -e '.lifecycle == "timed_out" and .exit_status == 124 and .live.Result == "timeout"' >/dev/null
 [[ $(jq -r .lifecycle "${tmp}/state/job-timeout.json") == timed_out ]]
 [[ $(jq -sr '[.[] | select(.lifecycle == "timed_out")][-1].exit_status' "${tmp}/state/job-timeout.events.jsonl") == 124 ]]
 
@@ -305,8 +305,8 @@ jq '.job_id="job-starting" | .lifecycle="starting" | .launcher.cgroup=""' \
   "${tmp}/state/job-one.json" >"${tmp}/state/job-starting.json"
 FAKE_SYSTEMD_CGROUP=/fake/pending \
   SINNIX_AGENT_SYSTEMCTL="${tmp}/bin/systemctl" \
-  "${control}" --state-dir "${tmp}/state" status --job job-starting \
-  | jq -e '.lifecycle == "starting" and .live.available == true' >/dev/null
+  "${control}" --state-dir "${tmp}/state" status --job job-starting |
+  jq -e '.lifecycle == "starting" and .live.available == true' >/dev/null
 if FAKE_SYSTEMD_CGROUP=/fake/pending FAKE_STOP_MARKER="${tmp}/starting-stopped" \
   SINNIX_AGENT_SYSTEMCTL="${tmp}/bin/systemctl" \
   "${control}" --state-dir "${tmp}/state" interrupt --job job-starting; then

@@ -87,20 +87,29 @@ def _summarize(kind: str, fields: dict, properties: dict) -> dict:
             if k in properties
         }
     if kind == "port":
-        out = {k: properties[k] for k in ("port.name", "port.direction") if k in properties}
+        out = {
+            k: properties[k] for k in ("port.name", "port.direction") if k in properties
+        }
         if "node.id" in properties:
             out["node.id"] = properties["node.id"]
         return out
     if kind == "link":
         return {
             k: fields[k]
-            for k in ("output-node-id", "output-port-id", "input-node-id", "input-port-id")
+            for k in (
+                "output-node-id",
+                "output-port-id",
+                "input-node-id",
+                "input-port-id",
+            )
             if k in fields
         }
     return {}
 
 
-def parse_pw_mon_stream(lines: Iterable[str], *, id_kind_cache: dict[int, str] | None = None) -> Iterator[TopologyEvent]:
+def parse_pw_mon_stream(
+    lines: Iterable[str], *, id_kind_cache: dict[int, str] | None = None
+) -> Iterator[TopologyEvent]:
     """Parse pw-mon -a -p output lines into TopologyEvents for Node/Port/Link
     objects only. `id_kind_cache` (id -> kind), if given, is mutated in
     place: added Node/Port/Link ids are recorded into it and consulted to
@@ -182,7 +191,12 @@ def parse_pw_mon_stream(lines: Iterable[str], *, id_kind_cache: dict[int, str] |
         elif key == "type":
             type_match = _TYPE_RE.match(value)
             obj_type = type_match.group(1) if type_match else value
-        elif key in ("output-node-id", "output-port-id", "input-node-id", "input-port-id"):
+        elif key in (
+            "output-node-id",
+            "output-port-id",
+            "input-node-id",
+            "input-port-id",
+        ):
             fields[key] = value
 
     event = finalize()

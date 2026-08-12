@@ -68,7 +68,9 @@ def normalize_attention(report: dict[str, Any]) -> dict[str, Any]:
                 continue
             kind = event.get("event")
             if kind in TERMINAL:
-                for key in [key for key, item in pending.items() if item["job_id"] == job_id]:
+                for key in [
+                    key for key, item in pending.items() if item["job_id"] == job_id
+                ]:
                     pending.pop(key, None)
                 continue
             state = ACTIONABLE.get(kind)
@@ -95,7 +97,9 @@ def normalize_attention(report: dict[str, Any]) -> dict[str, Any]:
                     if job_correlation.get(key)
                 },
             }
-    items = sorted(pending.values(), key=lambda item: (item["occurred_at"], item["event_id"]))
+    items = sorted(
+        pending.values(), key=lambda item: (item["occurred_at"], item["event_id"])
+    )
     return {
         "schema": "sinnix-attention-v1",
         "pending": items,

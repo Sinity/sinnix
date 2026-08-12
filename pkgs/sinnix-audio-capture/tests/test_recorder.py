@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from sinnix_audio_capture.recorder import _chunk_bytes, pw_record_argv
 from sinnix_audio_capture.segment import CHANNEL_PROFILES
 
@@ -22,7 +21,9 @@ def test_pw_record_argv_mic_no_target():
 
 
 def test_pw_record_argv_includes_target_when_given():
-    argv = pw_record_argv("pw-record", CHANNEL_PROFILES["sink-monitor"], "bluez_output.foo.monitor")
+    argv = pw_record_argv(
+        "pw-record", CHANNEL_PROFILES["sink-monitor"], "bluez_output.foo.monitor"
+    )
     assert "--target" in argv
     assert argv[argv.index("--target") + 1] == "bluez_output.foo.monitor"
     assert argv[-1] == "-"

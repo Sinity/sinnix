@@ -38,10 +38,12 @@ _UNIT_SECONDS = {"s": 1.0, "m": 60.0, "h": 3600.0, "": 1.0}
 
 
 def parse_duration(text: str) -> float:
-    """"30", "30s", "5m", "2h" -> seconds. Bare numbers are seconds."""
+    """ "30", "30s", "5m", "2h" -> seconds. Bare numbers are seconds."""
     match = _DURATION_RE.match(text.strip())
     if match is None:
-        raise ValueError(f"invalid duration: {text!r} (expected e.g. '30s', '5m', '2h', or a bare number of seconds)")
+        raise ValueError(
+            f"invalid duration: {text!r} (expected e.g. '30s', '5m', '2h', or a bare number of seconds)"
+        )
     return float(match.group("value")) * _UNIT_SECONDS[match.group("unit")]
 
 

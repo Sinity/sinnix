@@ -90,7 +90,6 @@ def test_opus_segment_writer_rotates_on_hour_boundary(tmp_path: Path):
 
 
 def test_opus_segment_writer_maybe_rotate_on_quiet_hour(tmp_path: Path):
-    profile = CHANNEL_PROFILES["mic"]
     writer = OpusSegmentWriter(
         output_dir=tmp_path,
         channel="mic",

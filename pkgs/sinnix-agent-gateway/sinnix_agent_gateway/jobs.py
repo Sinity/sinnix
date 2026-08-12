@@ -5,9 +5,9 @@ import os
 import re
 import secrets
 import signal
-import uuid
 import subprocess
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +15,6 @@ from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
 from .schemas import AgentLaunchRequest
-
 
 JOB_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
@@ -177,9 +176,21 @@ class JobService:
                     **self._environment(),
                     "SINNIX_CORRELATION_ID": job_id,
                     "SINNIX_PROJECT": request.project_id,
-                    **({"SINNIX_WORK_ITEM": request.work_item} if request.work_item else {}),
-                    **({"SINNIX_PARENT_JOB_ID": request.parent_job_id} if request.parent_job_id else {}),
-                    **({"SINNIX_COORDINATOR_JOB_ID": request.coordinator_job_id} if request.coordinator_job_id else {}),
+                    **(
+                        {"SINNIX_WORK_ITEM": request.work_item}
+                        if request.work_item
+                        else {}
+                    ),
+                    **(
+                        {"SINNIX_PARENT_JOB_ID": request.parent_job_id}
+                        if request.parent_job_id
+                        else {}
+                    ),
+                    **(
+                        {"SINNIX_COORDINATOR_JOB_ID": request.coordinator_job_id}
+                        if request.coordinator_job_id
+                        else {}
+                    ),
                 },
             )
         except OSError as exc:
@@ -253,7 +264,11 @@ class JobService:
         self.principal.require(Capability.JOB_READ)
         jobs: list[dict[str, Any]] = []
         malformed: list[dict[str, str]] = []
-        paths = sorted(self.root.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True)
+        paths = sorted(
+            self.root.glob("*.json"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
         for path in paths[: max(1, min(limit, 1000))]:
             try:
                 value = json.loads(path.read_text())
@@ -290,7 +305,11 @@ class JobService:
         return {"job_id": job_id, "cancelled": True, "lifecycle": "cancelled"}
 
     def read_output(
-        self, job_id: str, artifact: str = "log", offset: int = 0, max_bytes: int = 64_000
+        self,
+        job_id: str,
+        artifact: str = "log",
+        offset: int = 0,
+        max_bytes: int = 64_000,
     ) -> dict[str, Any]:
         self.principal.require(Capability.JOB_READ)
         if artifact not in {"log", "final", "json"}:

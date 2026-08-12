@@ -281,12 +281,16 @@ class ProjectService:
         project = self._project(project_id)
         resolved_ref = None
         if ref is not None:
-            if ref.startswith("-") or not re.fullmatch(
-                r"[A-Za-z0-9_./-]{1,200}", ref
-            ):
+            if ref.startswith("-") or not re.fullmatch(r"[A-Za-z0-9_./-]{1,200}", ref):
                 raise ProjectError("invalid git ref")
             resolved_ref = self._run_bounded(
-                ["git", "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}"],
+                [
+                    "git",
+                    "rev-parse",
+                    "--verify",
+                    "--end-of-options",
+                    f"{ref}^{{commit}}",
+                ],
                 project.path,
             ).strip()
             if not re.fullmatch(r"[0-9a-f]{40,64}", resolved_ref):

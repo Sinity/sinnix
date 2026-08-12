@@ -47,13 +47,15 @@ let
       drift = {
         sysctls = config.boot.kernel.sysctl;
         slices = config.sinnix.runtime.inventory.slices;
-        swap = (map (swap: {
-          device = swap.device or (swap.label or (swap.uuid or ""));
-          priority = swap.priority or 0;
-        }) config.swapDevices) ++ lib.optional config.zramSwap.enable {
-          device = "/dev/zram0";
-          priority = config.zramSwap.priority;
-        };
+        swap =
+          (map (swap: {
+            device = swap.device or (swap.label or (swap.uuid or ""));
+            priority = swap.priority or 0;
+          }) config.swapDevices)
+          ++ lib.optional config.zramSwap.enable {
+            device = "/dev/zram0";
+            priority = config.zramSwap.priority;
+          };
         journald = {
           storage = config.services.journald.storage;
           extraConfig = config.services.journald.extraConfig;
@@ -77,7 +79,11 @@ let
         generation = {
           revision = config.system.configurationRevision;
           kernel = config.boot.kernelPackages.kernel.version;
-          nvidia = if config ? hardware.nvidia && config.sinnix.gpu.mode != "igpu" then config.hardware.nvidia.package.version else null;
+          nvidia =
+            if config ? hardware.nvidia && config.sinnix.gpu.mode != "igpu" then
+              config.hardware.nvidia.package.version
+            else
+              null;
         };
       };
     };

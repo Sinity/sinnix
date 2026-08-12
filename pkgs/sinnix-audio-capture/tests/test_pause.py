@@ -3,8 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
-from sinnix_audio_capture.pause import build_gap_payload, parse_duration, write_gap_record
+from sinnix_audio_capture.pause import (
+    build_gap_payload,
+    parse_duration,
+    write_gap_record,
+)
 
 
 @pytest.mark.parametrize(
@@ -49,5 +52,10 @@ def test_write_gap_record_uses_now_and_duration(tmp_path: Path):
         now_fn=lambda: 1000.0,
         writer_factory=lambda: fake_writer,
     )
-    assert record == {"kind": "gap", "start": 1000.0, "end": 1060.0, "reason": "mic muted"}
+    assert record == {
+        "kind": "gap",
+        "start": 1000.0,
+        "end": 1060.0,
+        "reason": "mic muted",
+    }
     assert fake_writer.writes == [record]
