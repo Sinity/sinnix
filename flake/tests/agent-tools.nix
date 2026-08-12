@@ -704,6 +704,7 @@ in
               pkgs.bash
               pkgs.coreutils
               pkgs.gawk
+              pkgs.gnugrep
               pkgs.gnused
               pkgs.jq
               pkgs.util-linux
@@ -717,6 +718,7 @@ in
                 pkgs.bash
                 pkgs.coreutils
                 pkgs.gawk
+                pkgs.gnugrep
                 pkgs.gnused
                 pkgs.jq
                 pkgs.util-linux
@@ -726,6 +728,41 @@ in
             chmod +x "$TMPDIR/sinnix-heavy-lease"
             sed -i "1c#!${pkgs.bash}/bin/bash" "$TMPDIR/sinnix-heavy-lease"
             ${pkgs.bash}/bin/bash ${../../flake/tests/heavy-work-lease.sh} "$TMPDIR/sinnix-heavy-lease"
+            touch "$out"
+          '';
+      # sinnix-dv8: proves the shared rebuildLease fragment every rebuild
+      # verb (switch/boot/test-system/test-vm) is built from -- not just the
+      # raw sinnix-heavy-lease binary above -- actually exits non-zero with
+      # an unambiguous message when the lease is held, and never reaches the
+      # code past the lease gate.
+      rebuildLeaseWrapperFixture =
+        let
+          commandRegistry = import ../command-registry.nix { inherit inputs pkgs system; };
+          leaseProbeWrapper = pkgs.writeShellScriptBin "sinnix-switch-lease-probe" ''
+            set -euo pipefail
+            ${commandRegistry.rebuildLease "switch"}
+            echo "SENTINEL: wrapper ran past the lease gate" >&2
+            exit 111
+          '';
+        in
+        pkgs.runCommand "rebuild-lease-wrapper-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.jq
+              pkgs.util-linux
+            ];
+          }
+          ''
+            export HOME="$TMPDIR/home"
+            mkdir -p "$HOME"
+            cp ${../../scripts/sinnix-heavy-lease} "$TMPDIR/sinnix-heavy-lease"
+            chmod +x "$TMPDIR/sinnix-heavy-lease"
+            sed -i "1c#!${pkgs.bash}/bin/bash" "$TMPDIR/sinnix-heavy-lease"
+            ${pkgs.bash}/bin/bash ${../../flake/tests/rebuild-lease-wrapper.sh} \
+              ${leaseProbeWrapper}/bin/sinnix-switch-lease-probe \
+              "$TMPDIR/sinnix-heavy-lease"
             touch "$out"
           '';
       scopeWrapperFixture =
@@ -1116,6 +1153,7 @@ in
         agent-resource-policy = agentResourcePolicy;
         agent-npm-bootstrap-recovery = agentNpmBootstrapRecovery;
         heavy-work-lease = heavyWorkLeaseFixture;
+        rebuild-lease-wrapper = rebuildLeaseWrapperFixture;
         scope-wrapper = scopeWrapperFixture;
         agent-job-handles = agentJobHandleFixture;
         mcp-sweep = mcpSweepFixture;

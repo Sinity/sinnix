@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Push a store path's sinex package closure to sinity.cachix.org in the background
+# runtimeInputs: bash coreutils gnugrep nix cachix systemd
+#
+# Shared push logic, factored out so both the interactive `switch` path
+# (flake/command-registry.nix's sinexCachePush, which passes
+# /run/current-system after a successful activation) and the async
+# sinex-cache-prebuild timer (sinnix-m9v, which passes a freshly `nix build`d
+# sinex output path) publish to sinity.cachix.org the exact same way instead
+# of maintaining two copies of the push command.
+#
+# Best-effort: needs the operator's cachix auth token (~/.config/cachix). The
+# push itself runs as a detached background.slice unit so this command
+# returns immediately; failures are visible via `journalctl --user` rather
+# than failing the caller.
+
+set -euo pipefail
+
+if [ "$#" -eq 0 ]; then
+  echo "usage: sinnix-sinex-cache-push <store-path> [<store-path>...]" >&2
+  exit 64
+fi
+
+sinex_paths="$(nix path-info -r "$@" 2>/dev/null | grep -E -- '-sinex-[0-9][^/]*$' || true)"
+
+if [ -z "$sinex_paths" ]; then
+  echo "sinnix-sinex-cache-push: no sinex package paths found in the given closure(s); nothing to push"
+  exit 0
+fi
+
+echo "sinnix-sinex-cache-push: publishing sinex package closure to sinity.cachix.org in the background"
+# shellcheck disable=SC2086
+systemd-run --user --quiet --collect \
+  --slice=background.slice \
+  cachix push sinity $sinex_paths || true

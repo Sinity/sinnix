@@ -208,6 +208,19 @@ in
                     type = lib.types.bool;
                     default = false;
                   };
+                  staleAfterSeconds = lib.mkOption {
+                    type = lib.types.nullOr lib.types.int;
+                    default = null;
+                    description = ''
+                      Absolute staleness budget in seconds, independent of
+                      cadenceSeconds. Event-driven lanes (eventDriven = true)
+                      have no numeric cadence for the sentinel's 2*cadence
+                      staleness check, so this is the only signal that flags
+                      them stale when writes stop. Lanes with a numeric
+                      cadenceSeconds may set this too; the sentinel flags a
+                      lane stale when EITHER threshold is exceeded.
+                    '';
+                  };
                 };
               }
             );
