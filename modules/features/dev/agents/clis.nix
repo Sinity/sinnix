@@ -162,9 +162,21 @@ mkFeatureModule {
               model = "whisper-1";
             };
           };
+          # Repointed at the shared Kokoro-82M TTS hub (sinnix-w9l increment 1,
+          # modules/services/kokoro.nix) instead of hermes's built-in edge-tts
+          # provider (Microsoft's cloud voice API) -- Kokoro speaks the OpenAI
+          # TTS wire shape hermes already ships a built-in provider for
+          # (agent/tts_tool.py "openai"), so this is a config repoint, not a
+          # hermes patch. api_key is a dummy literal for the same reason as
+          # the stt block above: the hub is unauthenticated loopback-only.
           tts = {
-            provider = "edge";
-            edge.voice = "en-US-AriaNeural";
+            provider = "openai";
+            openai = {
+              base_url = "http://127.0.0.1:8880/v1";
+              api_key = "sk-local";
+              model = "kokoro";
+              voice = "af_bella";
+            };
           };
           updates = {
             pre_update_backup = true;
@@ -589,7 +601,7 @@ mkFeatureModule {
                   git -C "$HERMES_INSTALL_DIR" pull --ff-only
                   (
                     cd "$HERMES_INSTALL_DIR"
-                    UV_PROJECT_ENVIRONMENT="$HERMES_INSTALL_DIR/venv" uv sync --extra all --extra voice --extra edge-tts --extra nemo-relay --locked
+                    UV_PROJECT_ENVIRONMENT="$HERMES_INSTALL_DIR/venv" uv sync --extra all --extra voice --extra nemo-relay --locked
                   )
                   exec "$HERMES_INSTALL_DIR/venv/bin/hermes" --version
                 '';
