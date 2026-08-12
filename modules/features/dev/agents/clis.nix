@@ -172,7 +172,7 @@ mkFeatureModule {
           tts = {
             provider = "openai";
             openai = {
-              base_url = "http://127.0.0.1:8880/v1";
+              base_url = "http://127.0.0.1:8890/v1";
               api_key = "sk-local";
               model = "kokoro";
               voice = "af_bella";

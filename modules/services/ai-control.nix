@@ -115,8 +115,8 @@ let
   kokoroProxy = mkProxy {
     name = "kokoro-proxy";
     backendUnit = "podman-kokoro.service";
-    publicEndpoint = "127.0.0.1:8880";
-    backendEndpoint = "127.0.0.1:8881";
+    publicEndpoint = "127.0.0.1:8890";
+    backendEndpoint = "127.0.0.1:8891";
   };
 in
 {
