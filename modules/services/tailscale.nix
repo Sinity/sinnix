@@ -65,7 +65,6 @@ mkServiceModule {
   configFn =
     { cfg, lib, ... }:
     let
-      authKeyArg = "--auth-key=file:${cfg.authKeyFile}";
       tagArg = lib.optionalString (
         cfg.tags != [ ]
       ) "--advertise-tags=${lib.concatStringsSep "," cfg.tags}";
@@ -77,8 +76,11 @@ mkServiceModule {
         openFirewall = true;
         inherit (cfg) useRoutingFeatures;
         inherit (cfg) interfaceName;
+        # Upstream only generates the tailscaled-autoconnect unit when
+        # authKeyFile is set; passing the key via extraUpFlags left that
+        # unit with no ExecStart (found live 2026-08-12, sinnix-is8).
+        authKeyFile = cfg.authKeyFile;
         extraUpFlags = lib.filter (s: s != "") [
-          authKeyArg
           tagArg
           exitNodeArg
           (lib.optionalString (!cfg.enableMagicDNS) "--accept-dns=false")
