@@ -17,8 +17,11 @@
 # - screenshot: screenshot-color-lab.sh (desktop-control-plane skill),
 #   triggered via the Hyprland "Show display capture status" probe binding
 #   and ad hoc agent/operator screenshot capture, not a daemon.
-# - kitty-scrollback: kitty-scrollback-capture (scripts/), triggered via a
-#   Hyprland keybinding, not a systemd unit.
+#
+# kitty-scrollback used to be listed here as a third orphan lane but now
+# has a real owning systemd --user timer
+# (modules/services/capture-kitty-scrollback.nix) -- see that module
+# instead of this registry.
 { config, ... }:
 let
   capturesRoot = config.sinnix.paths.capturesRoot;
@@ -50,20 +53,6 @@ in
           path = "${capturesRoot}/screenshot";
           eventDriven = true;
           staleAfterSeconds = 604800;
-        }
-      ];
-    };
-    capture-kitty-scrollback = {
-      unit = "sinnix-capture-kitty-scrollback";
-      kind = "capture";
-      dynamic = true;
-      resourceClass = "system";
-      captures = [
-        {
-          name = "kitty-scrollback";
-          path = "${capturesRoot}/kitty-scrollback";
-          eventDriven = true;
-          staleAfterSeconds = 86400;
         }
       ];
     };

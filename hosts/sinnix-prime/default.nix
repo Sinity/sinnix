@@ -63,6 +63,7 @@
     # non-standard default into the factory itself.
     capture-screen.enable = true;
     capture-replay.enable = true;
+    capture-kitty-scrollback.enable = true;
     url-ledger.enable = true;
     below = {
       enable = true;
