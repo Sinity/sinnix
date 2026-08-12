@@ -14,21 +14,13 @@ let
     pkgs.systemd
     pkgs.util-linux
   ];
-  # sinnix-6ru: a generation built 2026-08-09 stamped
-  # system.configurationRevision = "unknown" even though the source tree was
-  # clean (not the `<rev>-dirty` case flake/nixos.nix already handles).
-  # Root cause: the old unconditional `${inputs.self}` fallback below
-  # resolves, at THIS file's own eval time, to a Nix-store COPY of the flake
-  # source (self.outPath) -- store copies have no `.git` directory, so any
-  # nixos-rebuild/nh invocation using that path as its `--flake` reference
-  # evaluates a `self` with neither `.rev` nor `.dirtyRev`, and
-  # flake/nixos.nix's `self.rev or self.dirtyRev or "unknown"` falls all the
-  # way through. Any rebuild verb run without SINNIX_FLAKE_DIR/NH_FLAKE/FLAKE
-  # set (e.g. plain `nix run .#switch`) hit this silently. Prefer the live
-  # git checkout at runtime (matches the devshell binaries below, which
-  # never had this bug); only fall back to the store copy as a genuinely
-  # last resort, and warn loudly when that happens since the resulting
-  # generation's revision stamp will be non-probative.
+  # Prefer the live git checkout at runtime over a bare `${inputs.self}`
+  # fallback: a Nix-store copy of the flake has no `.git` dir, so any rebuild
+  # using it as `--flake` stamps configurationRevision "unknown" instead of a
+  # real rev, silently defeating the live-drift tripwire. Only fall back to
+  # the store copy as a genuine last resort, and warn loudly when that
+  # happens.
+  # History/evidence: bd show sinnix-6ru
   resolveFlakeDir = ''
     _flake_dir="''${SINNIX_FLAKE_DIR:-''${NH_FLAKE:-''${FLAKE:-''${PRJ_ROOT:-}}}}"
     if [ -z "$_flake_dir" ]; then
@@ -96,20 +88,12 @@ let
       done < <(sinnix-rebuild-override consume)
     fi
   '';
-  # `exec` here is load-bearing for the exit-code contract, not just an
-  # optimization: it replaces this shell's own process image with
-  # sinnix-heavy-lease, so when the lease is held by another job (wait
-  # seconds default 0 -- see sinnix-heavy-lease's own --wait-seconds default)
-  # sinnix-heavy-lease's own `exit 75` on contention becomes this rebuild
-  # verb's actual, unmediated process exit code: no wrapper code below this
-  # line ever runs, and "$0" "$@" (this verb re-invoked under the lease) is
-  # never started, so exit 75 always means nothing was built or activated.
-  # Every rebuild verb (switch/boot/test-system/test-vm, both the devshell
-  # binaries in dev-shell.nix and `nix run .#<verb>` in this file's
-  # appCommands) calls this same fragment first, so the contract is uniform
-  # across all of them (sinnix-dv8: a background switch previously appeared
-  # to succeed while deploying nothing -- see sinnix-heavy-lease's usage()
-  # for the full exit-code contract this depends on).
+  # `exec` here is load-bearing, not an optimization: it replaces this
+  # shell's own process image with sinnix-heavy-lease, so a lease-contention
+  # `exit 75` becomes this rebuild verb's actual, unmediated exit code
+  # instead of being masked by wrapper code that never gets a chance to run.
+  # Every rebuild verb calls this same fragment first for a uniform contract.
+  # History/evidence: bd show sinnix-dv8
   rebuildLease = name: ''
     if [ "''${SINNIX_HEAVY_LEASE_ENTERED:-0}" != 1 ]; then
       exec ${pkgs.coreutils}/bin/env SINNIX_HEAVY_LEASE_ENTERED=1 \
@@ -145,28 +129,25 @@ let
       "-p IOSchedulingClass=idle"
     ]
     + " \\";
-  # sinex CI stopped auto-pushing package builds to sinity.cachix.org when
-  # hosted Actions went manual-only (sinex#883 "disable automatic paid
-  # Actions"), so the desktop now compiles the sinex workspace locally on
-  # every input bump — a single sinexd rustc peaks at 8-11.5 GiB RSS
-  # (2026-07-09: 17 earlyoom kills before one attempt fit). Publish the
-  # freshly activated sinex closure back to the cache after a successful
-  # switch so sinnix-ethereal deploys, reinstalls, and post-GC rebuilds
-  # substitute instead of repeating that build (sinnix-iln). The actual push
-  # command (scripts/sinnix-sinex-cache-push) is shared with the async
-  # sinex-cache-prebuild timer (modules/services/sinex-cache-prebuild.nix,
-  # sinnix-m9v), which decouples the FIRST switch after a sinex master bump
-  # from paying the local compile cost synchronously in the first place.
+  # sinex CI no longer auto-pushes package builds to sinity.cachix.org, so
+  # the desktop compiles the sinex workspace locally on every input bump.
+  # Publish the freshly activated closure back to the cache after a
+  # successful switch so ethereal/reinstalls/post-GC rebuilds substitute
+  # instead of repeating that build. The push command
+  # (scripts/sinnix-sinex-cache-push) is shared with the async
+  # sinex-cache-prebuild timer, which decouples the FIRST switch after a
+  # sinex master bump from paying that compile cost synchronously.
+  # History/evidence: bd show sinnix-iln, bd show sinnix-m9v
   sinexCachePush = ''
     if [ "$_rebuild_status" -eq 0 ]; then
       ${scriptPkgs.sinnix-sinex-cache-push}/bin/sinnix-sinex-cache-push /run/current-system || true
     fi
   '';
   # Shared by this file's own `switch` appCommand and dev-shell.nix's
-  # mkNhCommand (switch action only) — the exact-toplevel activation
-  # fallback used to be hand-duplicated in both places (2026-07-11
-  # incident fix landed as "twin" copies); parameterized by `name` so both
-  # call sites get an accurate log prefix from one implementation.
+  # mkNhCommand (switch action only): the exact-toplevel activation fallback,
+  # parameterized by `name` so both call sites get an accurate log prefix
+  # from one implementation.
+  # History/evidence: bd show sinnix-ihi
   switchFallback = name: ''
     if [ "$_rebuild_status" -ne 0 ] && [ "$_rebuild_status" -ne 130 ]; then
       echo "sinnix ${name}: nh failed with status $_rebuild_status; trying exact toplevel activation fallback" >&2
@@ -183,24 +164,21 @@ let
           ${pkgs.nix}/bin/nix-store -r "$_toplevel_drv"
       )"
       # Register the generation BEFORE activating: without the profile entry,
-      # switch-to-configuration boot has no generation to point the bootloader
-      # at, activation succeeds only in memory, and the next reboot silently
-      # resurrects the previous generation (2026-07-11 incident).
+      # switch-to-configuration boot has no generation to point the
+      # bootloader at, and a reboot would silently resurrect the previous
+      # generation. Twin comment: flake/dev-shell.nix.
+      # History/evidence: bd show sinnix-ihi
       /run/wrappers/bin/sudo ${pkgs.nix}/bin/nix-env \
         --profile /nix/var/nix/profiles/system --set "$_toplevel_out"
       _rebuild_status=0
       /run/wrappers/bin/sudo "$_toplevel_out/bin/switch-to-configuration" switch || _rebuild_status=$?
       # switch-to-configuration exits non-zero whenever ANY unit fails to
-      # (re)start, even one wholly unrelated to this config change
-      # (sinnix-ihi, 2026-07-08: a pre-existing nvidia-container-toolkit-
-      # cdi-generator failure silently blocked profile/bootloader
-      # registration for 4+ days -- every switch looked successful but
-      # never advanced the boot generation). Registering the built
-      # generation as the persistent boot default is orthogonal to
-      # whether every service started cleanly, so always do it as a
-      # separate step -- but keep the real "switch" exit status (unless
-      # this step itself fails worse) so a genuine regression still
-      # surfaces instead of being silently masked.
+      # (re)start, even one wholly unrelated to this config change.
+      # Registering the built generation as the persistent boot default is
+      # orthogonal to whether every service started cleanly, so always do it
+      # as a separate step — but keep the real "switch" exit status (unless
+      # this step itself fails worse) so a genuine regression still surfaces.
+      # History/evidence: bd show sinnix-ihi
       _boot_status=0
       /run/wrappers/bin/sudo "$_toplevel_out/bin/switch-to-configuration" boot || _boot_status=$?
       if [ "$_boot_status" -ne 0 ]; then
