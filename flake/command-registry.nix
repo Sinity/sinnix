@@ -74,6 +74,20 @@ let
       done < <(sinnix-rebuild-override consume)
     fi
   '';
+  # `exec` here is load-bearing for the exit-code contract, not just an
+  # optimization: it replaces this shell's own process image with
+  # sinnix-heavy-lease, so when the lease is held by another job (wait
+  # seconds default 0 -- see sinnix-heavy-lease's own --wait-seconds default)
+  # sinnix-heavy-lease's own `exit 75` on contention becomes this rebuild
+  # verb's actual, unmediated process exit code: no wrapper code below this
+  # line ever runs, and "$0" "$@" (this verb re-invoked under the lease) is
+  # never started, so exit 75 always means nothing was built or activated.
+  # Every rebuild verb (switch/boot/test-system/test-vm, both the devshell
+  # binaries in dev-shell.nix and `nix run .#<verb>` in this file's
+  # appCommands) calls this same fragment first, so the contract is uniform
+  # across all of them (sinnix-dv8: a background switch previously appeared
+  # to succeed while deploying nothing -- see sinnix-heavy-lease's usage()
+  # for the full exit-code contract this depends on).
   rebuildLease = name: ''
     if [ "''${SINNIX_HEAVY_LEASE_ENTERED:-0}" != 1 ]; then
       exec ${pkgs.coreutils}/bin/env SINNIX_HEAVY_LEASE_ENTERED=1 \
