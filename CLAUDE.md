@@ -215,7 +215,13 @@ or `pkgs/<name>/` for real derivations.
   compiled at most once. sinex CI no longer pushes to sinity.cachix.org
   (sinex#883 disabled automatic hosted Actions): the desktop is the builder
   of record, and `switch` publishes the sinex closure to the cache after a
-  successful activation (`sinexCachePush`, flake/command-registry.nix).
+  successful activation (`sinexCachePush`, flake/command-registry.nix, backed
+  by the shared `scripts/sinnix-sinex-cache-push` push logic). The FIRST
+  switch after a sinex master bump no longer pays that compile synchronously:
+  `sinnix.services.sinex-cache-prebuild` (`modules/services/sinex-cache-prebuild.nix`,
+  enabled on sinnix-prime) is a periodic timer that diffs flake.lock's sinex
+  revision against a state file, and on a move builds + cache-pushes it async
+  under `sinnix-scope nix-build` (sinnix-m9v).
 - `lynchpin` is a local `git+file://` input; sinex/polylogue/scribe-tap/
   yt-polisher come from GitHub so deploys don't consume local checkout state.
   One-off local testing: `SINNIX_{SINEX,POLYLOGUE,LYNCHPIN}_OVERRIDE=<path>
