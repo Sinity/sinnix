@@ -262,9 +262,9 @@ def main() -> int:
         for name, meta in declared_secrets().items():
             refs = static_refs(name)
             ev = {"atuin": None, "polylogue": None, "journald": None}
-            # OPERATOR RULE (2026-08-11): secrets are NEVER pruning
-            # candidates — losing key material is irreversible in a way no
-            # other class is. Rows are informational inventory only.
+            # OPERATOR RULE: secrets are NEVER pruning candidates — losing
+            # key material is irreversible in a way no other class is.
+            # Rows are informational inventory only.
             rows.append({"class": "secrets", "name": name, **meta,
                          "evidence": ev, "static_refs": refs[:6],
                          "never_prune": True,

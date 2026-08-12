@@ -369,10 +369,10 @@ mkFeatureModule {
             };
           };
 
-          # A monthly read-only audit of project Claude settings. The first
-          # live report was triaged on 2026-08-07: the two Polylogue /tmp
-          # roots are intentional workstation-local paths. Keep them explicit
-          # inputs so a new absolute path remains unexplained and fails loud.
+          # A monthly read-only audit of project Claude settings. The two
+          # Polylogue /tmp roots are intentional workstation-local paths.
+          # Keep them explicit inputs so a new absolute path remains
+          # unexplained and fails loud.
           systemd.user.services.sinnix-settings-env-lint = {
             Unit.Description = "Audit project agent settings environment paths";
             Service = {

@@ -18,8 +18,6 @@ fi
 # any session that did file I/O in this directory. Sessions that did
 # pure text chat with no file ops won't match — accepted limitation
 # until cwd-prefix filter lands.
-# Query-first CLI: the `list` verb was removed; recent sessions are now
-# `read --all` over the cwd-prefix-filtered, date-sorted selection.
 output=$(polylogue --plain --cwd-prefix "$cwd" --sort date --limit 3 read --all 2>/dev/null || true)
 
 if [ -z "$output" ]; then

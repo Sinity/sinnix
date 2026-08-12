@@ -335,12 +335,10 @@ fi
 # `systemd-run --scope` moves the launched process into a cgroup scope; it
 # does NOT sandbox the environment the way a transient --service launch would.
 # The child inherits the calling shell's full environment regardless of any
-# allowlist, so there is no env boundary to enforce here (sinnix-tgy sibling
-# issue sinnix-b9o: the previous per-var --setenv plumbing only re-asserted
-# values already inherited — a phantom boundary, deleted 2026-07-08). If a
-# real env boundary is ever wanted, switch these launches to service mode
-# (drop --scope) and build a complete, deliberately-maintained allowlist —
-# don't resurrect a partial one under --scope.
+# allowlist, so there is no env boundary to enforce here. If a real env
+# boundary is ever wanted, switch these launches to service mode (drop
+# --scope) and build a complete, deliberately-maintained allowlist — don't
+# resurrect a partial one under --scope.
 #
 # A scope remains active while any descendant remains in its cgroup; it has no
 # service-style MainPID whose exit ends the unit. Run the requested command
