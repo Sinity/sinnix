@@ -1,7 +1,8 @@
-{ lib, python3Packages }:
-let
-  sinnixCapture = python3Packages.callPackage ../sinnix-capture/pkg.nix { };
-in
+{
+  lib,
+  python3Packages,
+  sinnix-capture-lib,
+}:
 python3Packages.buildPythonApplication {
   pname = "sinnix-capture-a11y";
   version = "0.1.0";
@@ -15,7 +16,7 @@ python3Packages.buildPythonApplication {
   dependencies = [
     python3Packages.pyatspi
     python3Packages.pygobject3
-    sinnixCapture
+    sinnix-capture-lib
   ];
   nativeCheckInputs = [ python3Packages.pytest ];
   checkPhase = ''
