@@ -98,6 +98,8 @@ mkServiceModule {
         conflicts = [
           "ollama.service"
           "ollama-proxy.service"
+          "whisper-server.service"
+          "whisper-proxy.service"
         ];
         serviceConfig = lib.mkMerge [
           {
