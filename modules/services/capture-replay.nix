@@ -128,8 +128,21 @@ mkServiceModule {
               Environment = "PATH=${config.security.wrapperDir}:/run/current-system/sw/bin";
               ExecStart = lib.escapeShellArgs [
                 "${pkgs.gpu-screen-recorder}/bin/gpu-screen-recorder"
+                # "screen" is NOT a valid gpu-screen-recorder capture target
+                # in this pinned version (5.13.9) -- its usage string lists
+                # window_id|monitor|focused|portal|region|v4l2_device_path.
+                # "focused" tracks whichever monitor currently has input
+                # focus, avoiding a hardcoded monitor name (this host's is
+                # "DP-3" per --list-monitors, but that's not portable and
+                # breaks silently if the connector ever changes). Caught
+                # live 2026-08-12: still not sufficient alone -- see the
+                # NoNewPrivileges/PrivateTmp fixes above and sinnix-60k7 for
+                # the deeper, still-open issue (drmfb handle is NULL
+                # persists even with a correct target, likely this host's
+                # NVIDIA proprietary driver's KMS capture path, not an
+                # argument bug).
                 "-w"
-                "screen"
+                "focused"
                 "-f"
                 (toString cfg.fps)
                 "-r"
