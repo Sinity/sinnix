@@ -56,6 +56,7 @@
     capture-clipboard.enable = true;
     capture-a11y.enable = true;
     capture-input-dynamics.enable = true;
+    url-ledger.enable = true;
     below = {
       enable = true;
       collectIntervalSec = 5;
