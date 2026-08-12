@@ -79,3 +79,5 @@ id_ed25519*
 *.db
 .beads-credential-key
 .beads.gate.lock
+.beads/proxieddb/
+*.gate.lock*
