@@ -23,6 +23,13 @@ let
     "--log-bounces"
     "--stats-json"
   ];
+  # 2026-08-12: scribe-tap dropped --context/--hypr-user (root-privileged
+  # compositor polling that never worked correctly on this host's real
+  # Hyprland runtime layout -- see the scribe-tap repo history, sinnix-mzsh).
+  # Window/app attribution is now a downstream timestamp-join against
+  # ActivityWatch, not something the capture process itself does. This
+  # invocation now also captures raw mouse/pointer events (motion, buttons,
+  # scroll) alongside keyboard content, unconditionally -- no flag needed.
   scribeCmd = lib.escapeShellArgs [
     "${scribePkg}/bin/scribe-tap"
     "--data-dir"
@@ -31,12 +38,8 @@ let
     "${keylogRoot}/logs"
     "--log-mode"
     "events"
-    "--context"
-    "hyprland"
     "--translate"
     "xkb"
-    "--hypr-user"
-    username
     "--xkb-layout"
     "pl"
   ];
