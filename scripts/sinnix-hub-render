@@ -1,0 +1,675 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Render the tailnet hub's server-side dashboard and AI control panel
+# runtimeInputs: coreutils systemd
+
+"""Server-side renderer for the Sinnix tailnet hub.
+
+Every page this writes is complete HTML: the browser fetches no data to show
+state. That is deliberate -- a phone on a flaky link, or a page left open
+overnight, still shows the estate as of a timestamp it prints, rather than an
+empty skeleton waiting on XHR. Only the *action* buttons need JavaScript, and
+they talk to the ops-reducer's existing bounded action API.
+
+Inputs (all read-only):
+  --manifest    Nix-generated hub manifest (routes, AI roster, frontends)
+  --snapshot    the ops-reducer's current-state snapshot (status.json)
+  --inventory   /etc/sinnix/runtime-inventory.json
+  --out         directory to write index.html and ai/index.html into
+
+The renderer never fails the unit on a missing input: a degraded dashboard
+that says "reducer snapshot unavailable" is more useful than no dashboard.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import html
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+SCHEMA = "sinnix-hub-manifest-v1"
+
+
+# --------------------------------------------------------------------------
+# input loading
+# --------------------------------------------------------------------------
+
+
+def load_json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None, f"{path} does not exist"
+    except OSError as error:
+        return None, f"{path} unreadable: {error}"
+    except json.JSONDecodeError as error:
+        return None, f"{path} is not valid JSON: {error}"
+    if not isinstance(value, dict):
+        return None, f"{path} is not a JSON object"
+    return value, None
+
+
+def unit_states(units: list[str]) -> dict[str, dict[str, str]]:
+    """One systemctl call for every unit we care about."""
+    if not units:
+        return {}
+    systemctl = shutil.which("systemctl") or "systemctl"
+    try:
+        result = subprocess.run(
+            [
+                systemctl,
+                "show",
+                "--property=Id",
+                "--property=ActiveState",
+                "--property=SubState",
+                "--property=UnitFileState",
+                "--property=LoadState",
+                *units,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    states: dict[str, dict[str, str]] = {}
+    current: dict[str, str] = {}
+    for line in result.stdout.splitlines():
+        if not line.strip():
+            if current.get("Id"):
+                states[current["Id"]] = current
+            current = {}
+            continue
+        key, _, value = line.partition("=")
+        current[key] = value
+    if current.get("Id"):
+        states[current["Id"]] = current
+    return states
+
+
+def gpu_summary() -> str | None:
+    nvidia = shutil.which("nvidia-smi")
+    if not nvidia:
+        return None
+    try:
+        result = subprocess.run(
+            [
+                nvidia,
+                "--query-gpu=memory.used,memory.total,utilization.gpu",
+                "--format=csv,noheader",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    line = result.stdout.strip().splitlines()
+    return line[0].strip() if line else None
+
+
+# --------------------------------------------------------------------------
+# tiny HTML helpers -- no template engine, no dependencies
+# --------------------------------------------------------------------------
+
+
+def esc(value: Any) -> str:
+    return html.escape("" if value is None else str(value), quote=True)
+
+
+def badge(text: str, tone: str = "muted") -> str:
+    return f'<span class="badge {tone}">{esc(text)}</span>'
+
+
+def tone_for_active(active: str | None) -> str:
+    return {
+        "active": "ok",
+        "activating": "warn",
+        "deactivating": "warn",
+        "reloading": "warn",
+        "failed": "bad",
+    }.get(active or "", "muted")
+
+
+def card(title: str, body: str, subtitle: str = "") -> str:
+    sub = f'<p class="sub">{subtitle}</p>' if subtitle else ""
+    return f'<section class="card"><h2>{esc(title)}</h2>{sub}{body}</section>'
+
+
+def kv_table(rows: list[tuple[str, str]]) -> str:
+    if not rows:
+        return '<p class="sub">nothing to show</p>'
+    cells = "".join(
+        f"<tr><th>{esc(key)}</th><td>{value}</td></tr>" for key, value in rows
+    )
+    return f"<table class=kv>{cells}</table>"
+
+
+STYLE = """
+:root{color-scheme:light dark;--bg:#fbfbfa;--panel:#fff;--ink:#1b1b1a;--sub:#666;
+--line:#e2e2df;--ok:#1a7f4b;--warn:#a06a00;--bad:#b3261e;--acc:#2b5fd9}
+@media (prefers-color-scheme:dark){:root{--bg:#131314;--panel:#1c1c1e;--ink:#e8e8e6;
+--sub:#9a9a97;--line:#2e2e31;--ok:#4ec98a;--warn:#e0ac4a;--bad:#f2857c;--acc:#7aa2f7}}
+*{box-sizing:border-box}
+body{margin:0;padding:1rem;background:var(--bg);color:var(--ink);
+font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+header{max-width:70rem;margin:0 auto 1rem}
+h1{font-size:1.3rem;margin:0 0 .2rem}
+main{max-width:70rem;margin:0 auto;display:grid;gap:1rem;
+grid-template-columns:repeat(auto-fit,minmax(19rem,1fr))}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:.6rem;
+padding:.85rem 1rem;min-width:0;overflow-wrap:anywhere}
+.card.wide{grid-column:1/-1}
+h2{font-size:1rem;margin:0 0 .5rem;letter-spacing:.02em}
+p.sub,.sub{color:var(--sub);font-size:.85rem;margin:.15rem 0 .6rem}
+a{color:var(--acc)}
+table{border-collapse:collapse;width:100%;font-size:.88rem}
+.scroll{overflow-x:auto}
+th,td{text-align:left;padding:.28rem .45rem;border-bottom:1px solid var(--line);
+vertical-align:top}
+table.kv th{color:var(--sub);font-weight:500;white-space:nowrap;width:11rem}
+tr:last-child th,tr:last-child td{border-bottom:none}
+.badge{display:inline-block;padding:.05rem .45rem;border-radius:.7rem;
+font-size:.78rem;border:1px solid currentColor;white-space:nowrap}
+.badge.ok{color:var(--ok)}.badge.warn{color:var(--warn)}
+.badge.bad{color:var(--bad)}.badge.muted{color:var(--sub)}
+ul.links{list-style:none;padding:0;margin:0}
+ul.links li{padding:.3rem 0;border-bottom:1px solid var(--line)}
+ul.links li:last-child{border-bottom:none}
+button{font:inherit;padding:.3rem .7rem;margin-right:.3rem;border-radius:.4rem;
+border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer;
+min-height:2.1rem}
+button:hover{border-color:var(--acc)}
+button[disabled]{opacity:.4;cursor:not-allowed}
+pre{white-space:pre-wrap;font-size:.8rem;margin:.3rem 0;color:var(--sub)}
+#log{max-height:14rem;overflow:auto}
+footer{max-width:70rem;margin:1.2rem auto 0;color:var(--sub);font-size:.8rem}
+"""
+
+
+PORT_LINK_SCRIPT = """
+<script>
+/* Frontends live on sibling ports of whatever host you reached the hub on
+   (127.0.0.1 from the desktop, the tailnet IP from the phone). Rewrite the
+   port-only links to the current host so one rendered page serves both. The
+   <noscript> fallback below every link keeps the port visible regardless. */
+document.querySelectorAll('a[data-port]').forEach((a) => {
+  a.href = location.protocol + '//' + location.hostname + ':' + a.dataset.port + '/';
+});
+</script>
+"""
+
+
+def page(
+    title: str, host: str, generated: str, nav: str, body: str, tail: str = ""
+) -> str:
+    return f"""<!doctype html>
+<html lang=en><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>{esc(title)}</title><style>{STYLE}</style></head>
+<body>
+<header>
+<h1>{esc(title)}</h1>
+<p class=sub>{esc(host)} &middot; rendered {esc(generated)}</p>
+<nav>{nav}</nav>
+</header>
+<main>{body}</main>
+<footer>Server-rendered by <code>sinnix-hub-render</code>. Reachable on the
+tailnet only. State is a snapshot, not a live stream &mdash; reload for a newer
+one.</footer>
+{PORT_LINK_SCRIPT}
+{tail}
+</body></html>
+"""
+
+
+NAV = (
+    '<a href="/">dashboard</a> &middot; <a href="/ai/">ai control</a> '
+    '&middot; <a href="/reports/">reports</a>'
+)
+
+
+# --------------------------------------------------------------------------
+# dashboard panels
+# --------------------------------------------------------------------------
+
+
+def psi_row(pressure: dict[str, Any], key: str) -> str:
+    block = pressure.get(key)
+    if not isinstance(block, dict):
+        return "&mdash;"
+    parts = []
+    for scope in ("some", "full"):
+        window = block.get(scope)
+        if isinstance(window, dict):
+            parts.append(f"{scope} avg10 {window.get('avg10', '?')}")
+    return esc(" / ".join(parts)) if parts else "&mdash;"
+
+
+def memory_line(pressure: dict[str, Any]) -> str:
+    free = pressure.get("free_h")
+    if not isinstance(free, str):
+        return "&mdash;"
+    for line in free.splitlines():
+        if line.startswith("Mem:"):
+            return f"<code>{esc(line.strip())}</code>"
+    return "&mdash;"
+
+
+def pressure_card(state: dict[str, Any]) -> str:
+    pressure = state.get("live_pressure")
+    if not isinstance(pressure, dict):
+        return card("Pressure", '<p class="sub">no live_pressure in snapshot</p>')
+    rows = [
+        ("memory", memory_line(pressure)),
+        ("cpu psi", psi_row(pressure, "cpu")),
+        ("io psi", psi_row(pressure, "io")),
+        ("memory psi", psi_row(pressure, "memory")),
+    ]
+    return card("Pressure", kv_table(rows))
+
+
+def failed_units_card(state: dict[str, Any]) -> str:
+    units = state.get("systemd_units")
+    if not isinstance(units, list):
+        return card("Units", '<p class="sub">no systemd_units in snapshot</p>')
+    unhealthy = [
+        row
+        for row in units
+        if isinstance(row, dict) and row.get("active_state") in {"failed", "activating"}
+    ]
+    if not unhealthy:
+        return card(
+            "Units",
+            f"<p>{badge('all observed units healthy', 'ok')}</p>",
+            f"{len(units)} units observed",
+        )
+    cells = "".join(
+        "<tr><td><code>{unit}</code></td><td>{state}</td><td>{sub}</td></tr>".format(
+            unit=esc(row.get("unit")),
+            state=badge(str(row.get("active_state")), tone_for_active(row.get("active_state"))),
+            sub=esc(row.get("sub_state")),
+        )
+        for row in unhealthy
+    )
+    return card(
+        "Units needing attention",
+        f"<div class=scroll><table>{cells}</table></div>",
+        f"{len(unhealthy)} of {len(units)} observed units",
+    )
+
+
+def agents_card(state: dict[str, Any]) -> str:
+    gateway = state.get("agent_gateway")
+    if not isinstance(gateway, dict):
+        return card("Agents", '<p class="sub">no agent_gateway in snapshot</p>')
+    jobs = gateway.get("jobs") if isinstance(gateway.get("jobs"), list) else []
+    orphans = (
+        gateway.get("orphaned_jobs")
+        if isinstance(gateway.get("orphaned_jobs"), list)
+        else []
+    )
+    rows = [
+        ("attested jobs", esc(len(jobs))),
+        (
+            "orphaned jobs",
+            badge(str(len(orphans)), "warn" if orphans else "ok"),
+        ),
+        ("gateway available", esc(gateway.get("available"))),
+    ]
+    return card("Agent gateway", kv_table(rows))
+
+
+def sources_card(snapshot: dict[str, Any]) -> str:
+    sources = snapshot.get("sources")
+    if not isinstance(sources, dict):
+        return card("Sources", '<p class="sub">no source health in snapshot</p>')
+    cells = ""
+    for name, value in sorted(sources.items()):
+        if not isinstance(value, dict):
+            continue
+        status = str(value.get("status", "unknown"))
+        tone = {"healthy": "ok", "unavailable": "bad"}.get(status, "warn")
+        cells += (
+            f"<tr><td><code>{esc(name)}</code></td>"
+            f"<td>{badge(status, tone)}</td>"
+            f"<td>{esc(value.get('degradation') or value.get('freshness') or '')}</td></tr>"
+        )
+    return card(
+        "Source health",
+        f"<div class=scroll><table>{cells}</table></div>",
+        f"snapshot sequence {esc(snapshot.get('sequence'))}",
+    )
+
+
+def storage_card(state: dict[str, Any]) -> str:
+    storage = state.get("storage")
+    mounts = storage.get("mounts") if isinstance(storage, dict) else None
+    if not isinstance(mounts, list) or not mounts:
+        return card("Storage", '<p class="sub">no storage mounts in snapshot</p>')
+    interesting = {"/", "/persist", "/realm", "/outer-realm", "/neo-outer-realm", "/nix"}
+    cells = ""
+    for row in mounts:
+        if not isinstance(row, dict) or row.get("target") not in interesting:
+            continue
+        usage = ""
+        try:
+            stat = os.statvfs(str(row.get("target")))
+            total = stat.f_blocks * stat.f_frsize
+            free = stat.f_bavail * stat.f_frsize
+            if total:
+                usage = f"{(total - free) / 1e12:.2f}T / {total / 1e12:.2f}T"
+        except OSError:
+            usage = "unreadable"
+        cells += (
+            f"<tr><td><code>{esc(row.get('target'))}</code></td>"
+            f"<td>{esc(row.get('fstype'))}</td><td>{esc(usage)}</td></tr>"
+        )
+    return card("Storage", f"<div class=scroll><table>{cells}</table></div>")
+
+
+def links_card(manifest: dict[str, Any]) -> str:
+    items = ""
+    for link in manifest.get("links", []):
+        if not isinstance(link, dict):
+            continue
+        href = link.get("href", "#")
+        note = link.get("note") or ""
+        items += (
+            f'<li><a href="{esc(href)}">{esc(link.get("label", href))}</a>'
+            f'<span class="sub"> {esc(note)}</span></li>'
+        )
+    for frontend in manifest.get("frontends", []):
+        if not isinstance(frontend, dict):
+            continue
+        port = frontend.get("port")
+        label = frontend.get("label", frontend.get("name"))
+        items += (
+            f'<li><a data-port="{esc(port)}" href="http://127.0.0.1:{esc(port)}/">'
+            f"{esc(label)}</a>"
+            f'<span class="sub"> port {esc(port)} &rarr; {esc(frontend.get("upstream"))}</span></li>'
+        )
+    return card(
+        "Everything else",
+        f'<ul class="links">{items}</ul>',
+        "frontend links point at this host on a sibling port",
+    )
+
+
+def reports_card(reports_dir: Path) -> str:
+    try:
+        entries = [
+            entry
+            for entry in reports_dir.iterdir()
+            if entry.is_file() and entry.suffix == ".html" and entry.name != "index.html"
+        ]
+    except OSError as error:
+        return card("Reports", f'<p class="sub">{esc(error)}</p>')
+    entries.sort(key=lambda entry: entry.stat().st_mtime, reverse=True)
+    items = "".join(
+        f'<li><a href="/reports/{esc(entry.name)}">{esc(entry.stem)}</a></li>'
+        for entry in entries[:12]
+    )
+    return card(
+        "Recent reports",
+        f'<ul class="links">{items}</ul>'
+        f'<p class="sub"><a href="/reports/">all {len(entries)} reports &rarr;</a></p>',
+    )
+
+
+def render_dashboard(
+    manifest: dict[str, Any],
+    snapshot: dict[str, Any] | None,
+    snapshot_error: str | None,
+    generated: str,
+) -> str:
+    host = str(manifest.get("host", "sinnix"))
+    if snapshot is None:
+        body = card(
+            "Estate state unavailable",
+            f'<p class="sub">{esc(snapshot_error)}</p>'
+            "<p>The ops-reducer publishes the estate snapshot; without it this "
+            "page can still route you to reports, AI control, and the proxied "
+            "frontends below.</p>",
+        )
+        body += links_card(manifest)
+        body += reports_card(Path(manifest.get("reportsDir", "/nonexistent")))
+        return page(f"{host} hub", host, generated, NAV, body)
+
+    state = snapshot.get("state")
+    if not isinstance(state, dict):
+        state = {}
+    observed = snapshot.get("observed_at") or "unknown"
+    body = card(
+        "Snapshot",
+        kv_table(
+            [
+                ("observed at", esc(observed)),
+                ("sequence", esc(snapshot.get("sequence"))),
+                (
+                    "degradation",
+                    esc(snapshot.get("degradation") or "none"),
+                ),
+            ]
+        ),
+    )
+    body += pressure_card(state)
+    body += agents_card(state)
+    body += sources_card(snapshot)
+    body += storage_card(state)
+    body += failed_units_card(state)
+    body += links_card(manifest)
+    body += reports_card(Path(manifest.get("reportsDir", "/nonexistent")))
+    return page(f"{host} hub", host, generated, NAV, body)
+
+
+# --------------------------------------------------------------------------
+# AI control panel
+# --------------------------------------------------------------------------
+
+ACTION_SCRIPT = """
+<script>
+// The only client-side logic on the hub. State above is server-rendered; this
+// drives the ops-reducer's bounded action API (/ops/v1/actions), which enforces
+// expected_revision, idempotency keys, and per-unit admission on its own side.
+const log = (msg) => {
+  const el = document.getElementById('log');
+  const line = document.createElement('div');
+  line.textContent = new Date().toLocaleTimeString() + '  ' + msg;
+  el.prepend(line);
+};
+async function act(verb, unit, button) {
+  const reason = prompt('Operator reason for ' + verb + ' ' + unit + ':', verb + ' from hub');
+  if (!reason) return;
+  button.disabled = true;
+  try {
+    const snap = await fetch('/ops/v1/snapshot', {headers: {'Accept': 'application/json'}});
+    if (!snap.ok) throw new Error('snapshot ' + snap.status);
+    const revision = (await snap.json()).sequence;
+    const res = await fetch('/ops/v1/actions', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        action: verb,
+        target: {unit: unit},
+        expected_revision: revision,
+        idempotency_key: 'hub-' + verb + '-' + unit + '-' + Date.now(),
+        operator_reason: reason,
+        parameters: {}
+      })
+    });
+    const receipt = await res.json();
+    if (!res.ok) throw new Error(receipt.error || ('HTTP ' + res.status));
+    log(verb + ' ' + unit + ' -> receipt ' + receipt.receipt_id);
+    setTimeout(() => location.reload(), 2500);
+  } catch (error) {
+    log('FAILED ' + verb + ' ' + unit + ': ' + error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+</script>
+"""
+
+
+def render_ai(
+    manifest: dict[str, Any],
+    inventory: dict[str, Any] | None,
+    generated: str,
+) -> str:
+    host = str(manifest.get("host", "sinnix"))
+    services = [s for s in manifest.get("aiServices", []) if isinstance(s, dict)]
+    states = unit_states([s["unit"] for s in services if s.get("unit")])
+
+    rows = ""
+    for service in sorted(services, key=lambda s: str(s.get("name"))):
+        unit = str(service.get("unit", ""))
+        info = states.get(unit, {})
+        active = info.get("ActiveState")
+        load = info.get("LoadState", "")
+        file_state = info.get("UnitFileState", "")
+        restartable = bool(service.get("restartable"))
+        socket_activated = service.get("activationMode") == "socket-proxy"
+
+        if load in {"not-found", ""}:
+            status = badge("not installed", "muted")
+        elif file_state == "masked":
+            status = badge("masked", "bad")
+        elif active == "active":
+            status = badge("active", "ok")
+        elif socket_activated:
+            status = badge("idle (socket-activated)", "muted")
+        else:
+            status = badge(active or "inactive", tone_for_active(active))
+
+        controls = ""
+        if restartable and load not in {"not-found", ""}:
+            for verb in ("start", "stop", "restart"):
+                controls += (
+                    f"<button onclick=\"act('{esc(verb)}','{esc(unit)}',this)\">"
+                    f"{esc(verb)}</button>"
+                )
+        elif load not in {"not-found", ""}:
+            controls = (
+                '<span class="sub">not restartable in the runtime inventory'
+                " &mdash; the action API refuses it</span>"
+            )
+        else:
+            controls = '<span class="sub">module not enabled on this host</span>'
+
+        endpoint = service.get("publicEndpoint") or ""
+        detail = []
+        if endpoint:
+            detail.append(f"<code>{esc(endpoint)}</code>")
+        if service.get("idleTimeout"):
+            detail.append(f"idle exit {esc(service['idleTimeout'])}")
+        if service.get("exclusiveResource"):
+            detail.append(f"key {esc(service['exclusiveResource'])}")
+
+        rows += (
+            "<tr>"
+            f"<td><strong>{esc(service.get('name'))}</strong><br>"
+            f'<span class="sub">{" &middot; ".join(detail)}</span></td>'
+            f"<td>{status}</td>"
+            f"<td>{controls}</td>"
+            "</tr>"
+        )
+
+    gpu = gpu_summary()
+    body = card(
+        "GPU",
+        f"<p><code>{esc(gpu)}</code></p>"
+        if gpu
+        else '<p class="sub">nvidia-smi unavailable</p>',
+        "used / total / utilisation",
+    )
+    body += card(
+        "How this works",
+        "<p>The backends are socket-activated behind "
+        "<code>systemd-socket-proxyd</code> and exit after their idle timeout, "
+        "so <em>idle</em> is the normal resting state, not a fault. Connecting "
+        "to the public endpoint starts one without any privileged action. "
+        "Ollama and KoboldCpp hold the same <code>gpu-inference</code> "
+        "admission key and conflict by design.</p>"
+        "<p>Every button below posts to the ops-reducer's bounded action API "
+        "and produces a receipt. There is no second control plane and no "
+        "shell-out from this page.</p>",
+    )
+    body += (
+        '<section class="card wide"><h2>AI services</h2>'
+        f'<div class=scroll><table>{rows}</table></div></section>'
+    )
+    body += (
+        '<section class="card wide"><h2>Action log</h2>'
+        '<p class="sub">Receipts from this browser session only; the durable '
+        "record is <code>/ops/v1/receipts</code>.</p>"
+        '<div id=log><div class="sub">no actions yet</div></div></section>'
+    )
+    if inventory is None:
+        body += card(
+            "Runtime inventory",
+            '<p class="sub">unavailable &mdash; the action API will refuse every '
+            "unit target until <code>/etc/sinnix/runtime-inventory.json</code> "
+            "is readable.</p>",
+        )
+    return page(f"{host} AI control", host, generated, NAV, body, ACTION_SCRIPT)
+
+
+# --------------------------------------------------------------------------
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--manifest", type=Path, required=True)
+    parser.add_argument(
+        "--snapshot",
+        type=Path,
+        default=Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000"))
+        / "sinnix"
+        / "status.json",
+    )
+    parser.add_argument(
+        "--inventory", type=Path, default=Path("/etc/sinnix/runtime-inventory.json")
+    )
+    parser.add_argument("--out", type=Path, required=True)
+    args = parser.parse_args()
+
+    manifest, manifest_error = load_json(args.manifest)
+    if manifest is None:
+        print(f"sinnix-hub-render: {manifest_error}", file=sys.stderr)
+        return 1
+    if manifest.get("schema") != SCHEMA:
+        print(f"sinnix-hub-render: manifest is not {SCHEMA}", file=sys.stderr)
+        return 1
+
+    snapshot, snapshot_error = load_json(args.snapshot)
+    inventory, _ = load_json(args.inventory)
+    generated = dt.datetime.now(dt.timezone.utc).astimezone().isoformat(timespec="seconds")
+
+    out: Path = args.out
+    (out / "ai").mkdir(parents=True, exist_ok=True)
+    write_atomic(
+        out / "index.html",
+        render_dashboard(manifest, snapshot, snapshot_error, generated),
+    )
+    write_atomic(out / "ai" / "index.html", render_ai(manifest, inventory, generated))
+    return 0
+
+
+def write_atomic(path: Path, text: str) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(text, encoding="utf-8")
+    os.replace(temporary, path)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
