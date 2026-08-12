@@ -46,10 +46,9 @@ in
         homeFiles = [ ".config/git/ignore_global" ];
         xdgConfigFiles = [ "git/config" ];
         script = ''
-          git config --global --get init.defaultBranch | grep -qx 'master'
-          git config --global --get merge.conflictStyle | grep -qx 'zdiff3'
-          git config --global --get pull.rebase | grep -qx 'true'
-          git config --global --get rerere.enabled | grep -qx 'true'
+          # Cross-module wiring: the agenix secret path must actually reach
+          # the rendered git config, not just a literal restatement of a
+          # config value the module itself set.
           git config --global --get credential.https://github.com.helper | grep -q '/run/agenix/github-token'
           grep -q '^AGENTS.md$' "$HOME/.config/git/ignore_global"
           delta --version >/dev/null

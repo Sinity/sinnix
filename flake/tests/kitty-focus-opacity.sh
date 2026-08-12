@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+helper="${1:?kitty-focus-opacity script path required}"
 test_root="$(mktemp -d)"
 trap 'rm -rf "$test_root"' EXIT
 
@@ -38,6 +38,7 @@ fi
 EOF
 
 chmod +x "$test_root/bin/kitty"
+sed -i "1c#!$(command -v bash)" "$test_root/bin/kitty"
 
 run_once() {
   env \
@@ -45,7 +46,7 @@ run_once() {
     KITTY_TEST_LOG="$test_root/kitty.log" \
     KITTY_OPACITY_RUNTIME_DIR="$test_root/runtime" \
     KITTY_BIN="$test_root/bin/kitty" \
-    "$repo_root/scripts/kitty-focus-opacity" --once
+    "$helper" --once
 }
 
 run_once
