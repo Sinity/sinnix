@@ -1,0 +1,238 @@
+{
+  "cleanupPeriodDays": 99999,
+  "env": {
+    "CLAUDE_CODE_FORK_SUBAGENT": "1",
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+  "permissions": {
+    "allow": [
+      "Bash",
+      "Read",
+      "Write",
+      "Edit",
+      "MultiEdit",
+      "Glob",
+      "Grep",
+      "WebFetch",
+      "WebSearch",
+      "NotebookEdit",
+      "Agent",
+      "Skill",
+      "SendMessage",
+      "TaskCreate",
+      "TaskUpdate",
+      "TaskList",
+      "TaskGet",
+      "TaskStop",
+      "TaskOutput",
+      "EnterPlanMode",
+      "ExitPlanMode",
+      "CronCreate",
+      "CronDelete",
+      "CronList",
+      "RemoteTrigger",
+      "EnterWorktree",
+      "ExitWorktree",
+      "mcp__plugin_context7_context7__resolve-library-id",
+      "mcp__plugin_context7_context7__query-docs",
+      "mcp__claude_ai_Gmail__*",
+      "mcp__claude_ai_Google_Calendar__*",
+      "mcp__claude_ai_SimpleScraper__*",
+      "mcp__claude_ai_Mermaid_Chart__*"
+    ],
+    "deny": [
+      "Bash(rm -rf /:*)"
+    ],
+    "ask": [],
+    "defaultMode": "auto"
+  },
+  "model": "sonnet",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/realm/project/sinnix/dots/claude/hooks/pretooluse-agent-model.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__serena__*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.local/bin/serena-hooks auto-approve --client=claude-code",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/realm/project/sinnix/dots/claude/hooks/pretooluse-bash.sh",
+            "timeout": 3
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "polylogue-hook PreToolUse --provider claude-code",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "polylogue-hook PostToolUse --provider claude-code",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "case \"${SINNIX_CLAUDE_PROFILE:-full}\" in full|browser|deepseek|local) ~/.local/bin/serena-hooks cleanup --client=claude-code ;; esac",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "~/.local/bin/sinnix-mcp-sweep --orphans-only --quiet",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "polylogue-hook Stop --provider claude-code",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/realm/project/sinnix/dots/claude/hooks/subagentstop-dispatch-ledger.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "case \"${SINNIX_CLAUDE_PROFILE:-full}\" in full|browser|deepseek|local) ~/.local/bin/serena-hooks activate --client=claude-code ;; esac",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "~/.local/bin/sinnix-mcp-sweep --orphans-only --quiet",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "/realm/project/sinnix/dots/claude/hooks/sessionstart-polylogue-recall.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "/realm/project/sinnix/dots/claude/hooks/sessionstart-sinex-recall.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "/realm/project/sinnix/dots/claude/hooks/sessionstart-beads-prime.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "/realm/project/sinnix/dots/claude/hooks/sessionstart-steering.sh",
+            "timeout": 8
+          },
+          {
+            "type": "command",
+            "command": "polylogue-hook SessionStart --provider claude-code",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "polylogue-hook UserPromptSubmit --provider claude-code",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sinnix-context-handoff",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "/realm/project/sinnix/dots/claude/hooks/sessionstart-beads-prime.sh --memories-only",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "bash /home/sinity/.claude/statusline-command.sh"
+  },
+  "enabledPlugins": {
+    "context7@claude-plugins-official": false,
+    "feature-dev@claude-plugins-official": false,
+    "agent-sdk-dev@claude-plugins-official": false,
+    "plugin-dev@claude-plugins-official": false,
+    "commit-commands@claude-plugins-official": false,
+    "learning-output-style@claude-plugins-official": false,
+    "rust-analyzer-lsp@claude-plugins-official": false,
+    "superpowers@claude-plugins-official": false,
+    "claude-code-setup@claude-plugins-official": false,
+    "explanatory-output-style@claude-plugins-official": false,
+    "frontend-design@claude-plugins-official": false,
+    "code-review@claude-plugins-official": false,
+    "code-simplifier@claude-plugins-official": false,
+    "claude-md-management@claude-plugins-official": false,
+    "skill-creator@claude-plugins-official": false,
+    "pr-review-toolkit@claude-plugins-official": false,
+    "pyright-lsp@claude-plugins-official": false,
+    "playground@claude-plugins-official": false,
+    "semgrep@claude-plugins-official": false,
+    "chrome-devtools-mcp@claude-plugins-official": false,
+    "atomic-agents@claude-plugins-official": false
+  },
+  "alwaysThinkingEnabled": true,
+  "effortLevel": "medium",
+  "tui": "fullscreen",
+  "skipDangerousModePermissionPrompt": true,
+  "skipWorkflowUsageWarning": true,
+  "switchModelsOnFlag": false,
+  "skipAutoPermissionPrompt": true
+}
