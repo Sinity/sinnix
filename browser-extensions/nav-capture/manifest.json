@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Sinnix Navigation Capture",
   "version": "0.1.0",
-  "description": "Origin-chain link capture + middle-click-to-reading-stack (no new tabs).",
-  "permissions": ["activeTab", "scripting"],
+  "description": "Origin-chain link capture, middle-click-to-reading-stack (no new tabs), and per-tab back/forward navigation history with closed-tab recovery.",
+  "permissions": ["activeTab", "scripting", "tabs", "webNavigation", "storage"],
   "host_permissions": ["http://127.0.0.1/*", "<all_urls>"],
   "background": {
     "service_worker": "background.js",
