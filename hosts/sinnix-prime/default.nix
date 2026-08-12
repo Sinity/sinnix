@@ -186,7 +186,7 @@
   # the old posture (4G on the persisted MX500 root) was a wear compromise
   # capping retention at ~2 weeks. The NVMe has no wear flag, btrfs zstd:3
   # compresses journal files well beyond journald's per-field compression,
-  # and the operator wants ~infinite retention: 128G size cap, no time cap.
+  # and the operator wants long retention: 64G size cap, 365-day time cap.
   # The nested subvol /realm/db/journal keeps journal churn out of the
   # /realm btrbk→borg snapshots (sinex's syslog capture is the durable
   # journal archive; this is the queryable window). Early boot: journald
