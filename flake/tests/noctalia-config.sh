@@ -2,12 +2,12 @@
 
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+dots_dir="${1:?dots/noctalia directory required}"
 test_root="$(mktemp -d)"
 trap 'rm -rf "$test_root"' EXIT
 
 mkdir -p "$test_root/config" "$test_root/state" "$test_root/.local/share/noctalia/pinned/official/timer" "$test_root/.local/share/noctalia/pinned/community/keybind-cheatsheet"
-cp "$repo_root/dots/noctalia/"*.toml "$test_root/config/"
+cp "$dots_dir/"*.toml "$test_root/config/"
 
 cat >"$test_root/.local/share/noctalia/pinned/official/timer/plugin.toml" <<'EOF'
 id = "noctalia/timer"
