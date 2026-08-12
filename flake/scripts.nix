@@ -249,6 +249,8 @@ let
       sinnix-capture-lib = sinnix-capture;
     };
 
+    sinnix-capture-screen = pkgs.callPackage ../pkgs/capture-screen/pkg.nix { };
+
     sinnix-agent-environment-doc = pkgs.writeShellApplication {
       name = "sinnix-agent-environment-doc";
       runtimeInputs = [ pkgs.bash pkgs.coreutils pkgs.findutils pkgs.gawk pkgs.jq pkgs.ripgrep ];

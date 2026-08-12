@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# @sinnix-package: skip
+# @sinnix-package
+# description: Capture full-ANSI-fidelity kitty terminal scrollback across all instances
+# runtimeInputs: bash coreutils kitty jq
 set -euo pipefail
 
 # Capture all kitty terminal scrollbacks with full ANSI fidelity.
