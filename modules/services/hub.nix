@@ -414,7 +414,12 @@ mkServiceModule {
             # Caddyfile interpolates. systemd re-reads EnvironmentFile for each
             # exec, so ExecStart sees what ExecStartPre just wrote.
             ExecStartPre = "${resolveBind} %t/sinnix/hub-bind.env";
-            EnvironmentFile = "%t/sinnix/hub-bind.env";
+            # The leading `-` is load-bearing: systemd loads EnvironmentFile
+            # before running ExecStartPre, so without it the unit dies on a
+            # cold start ("Failed to load environment files") having never
+            # spawned the step that creates the file. Marked optional, the
+            # pre-step writes it and ExecStart's own re-read picks it up.
+            EnvironmentFile = "-%t/sinnix/hub-bind.env";
             Environment = [
               "XDG_DATA_HOME=${cfg.stateDir}/caddy"
               "SINNIX_HUB_RUNTIME=%t"
