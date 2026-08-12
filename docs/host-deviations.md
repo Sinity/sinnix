@@ -25,9 +25,6 @@ _No sinnix.features/sinnix.services declarations found in this host's *.nix file
 
 | Option | Value |
 | --- | --- |
-| `sinnix.features.desktop.audioCapture.asrDiarization` | `false` |
-| `sinnix.features.desktop.audioCapture.enableAsrServer` | `false` |
-| `sinnix.features.desktop.audioCapture.enableAudioDaemon` | `false` |
 | `sinnix.features.desktop.hyprlandAnimations.enable` | `true` |
 | `sinnix.features.dev.editors.antigravity.enable` | `true` |
 | `sinnix.features.dev.editors.vscode.enable` | `true` |
@@ -40,6 +37,13 @@ _No sinnix.features/sinnix.services declarations found in this host's *.nix file
 | `sinnix.services.agent-gateway.tunnel.enable` | `true` |
 | `sinnix.services.airvpn-seed.enable` | `false` |
 | `sinnix.services.below.enable` | `true` |
+| `sinnix.services.capture-a11y.enable` | `true` |
+| `sinnix.services.capture-audio.enable` | `true` |
+| `sinnix.services.capture-clipboard.enable` | `true` |
+| `sinnix.services.capture-input-dynamics.enable` | `true` |
+| `sinnix.services.capture-mpris.enable` | `true` |
+| `sinnix.services.capture-notifications.enable` | `true` |
+| `sinnix.services.census.enable` | `true` |
 | `sinnix.services.comfyui.enable` | `true` |
 | `sinnix.services.koboldcpp.enable` | `true` |
 | `sinnix.services.litellm.enable` | `true` |
@@ -54,11 +58,13 @@ _No sinnix.features/sinnix.services declarations found in this host's *.nix file
 | `sinnix.services.ops-reducer.enable` | `true` |
 | `sinnix.services.polylogue.embedding.enable` | `false` |
 | `sinnix.services.polylogue.enable` | `true` |
+| `sinnix.services.sinex-cache-prebuild.enable` | `true` |
 | `sinnix.services.sinex-dev-db-reaper.enable` | `true` |
 | `sinnix.services.sinex.enable` | `true` |
 | `sinnix.services.terminal-capture.enable` | `true` |
 | `sinnix.services.transmission.enable` | `true` |
 | `sinnix.services.tts.enable` | `true` |
+| `sinnix.services.url-ledger.enable` | `true` |
 | `sinnix.services.weechat-log-sealer.enable` | `true` |
 | `sinnix.services.whisper.enable` | `true` |
 

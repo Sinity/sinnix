@@ -25,12 +25,6 @@
   # Every capability in modules/features/ is default-on; this host expresses
   # only configuration detail (subfeatures and option values), not enables.
   sinnix.features.desktop.hyprlandAnimations.enable = true;
-  sinnix.features.desktop.audioCapture = {
-    asrProvider = "openai";
-    asrDiarization = false;
-    enableAsrServer = false;
-    enableAudioDaemon = false;
-  };
   sinnix.features.dev.editors.vscode.enable = true;
   sinnix.features.dev.editors.antigravity.enable = true;
 
@@ -56,6 +50,7 @@
     capture-clipboard.enable = true;
     capture-a11y.enable = true;
     capture-input-dynamics.enable = true;
+    capture-audio.enable = true;
     url-ledger.enable = true;
     below = {
       enable = true;
