@@ -51,6 +51,25 @@ let
       ip = "${lanSubnet}.10";
       # Desktop gets a low static IP; easy to remember, easy to firewall
     }
+    # IoT endpoints get fixed addresses because they are POLLED by name-less
+    # config: the Awair capture lane targets an IP directly, and a drifting
+    # lease silently breaks the lane. Both were found in the dynamic pool
+    # (2026-08-13); pinning them also makes `<name>.lan` stable for dnsmasq.
+    {
+      name = "awair";
+      mac = "70:88:6b:14:1e:99";
+      ip = "${lanSubnet}.20";
+    }
+    {
+      name = "bulb-desk";
+      mac = "04:cf:8c:b1:8f:90";
+      ip = "${lanSubnet}.21";
+    }
+    {
+      name = "phone";
+      mac = "06:a6:0d:0c:c8:3c";
+      ip = "${lanSubnet}.30";
+    }
   ];
 
   # ========================
@@ -324,6 +343,18 @@ in
         ednspacket_max = 1232;
         # Local search domain pushes .lan names
         local_ttl = 60;
+        # Service names, not just machine names. `hub.lan` is the estate's
+        # browser front door (modules/services/hub.nix on prime); giving it a
+        # name means the operator types a word instead of remembering which
+        # of prime's addresses is the tailnet one. These resolve on the LAN;
+        # the hub itself still only LISTENS on loopback + tailscale0, so a LAN
+        # client resolving the name still cannot reach it -- deliberate, and
+        # the reason `hub` also exists as a tailnet name via MagicDNS-less
+        # direct IP. Relax the hub's binding first if LAN reach is ever wanted.
+        address = [
+          "/hub.lan/${lanSubnet}.10"
+          "/reports.lan/${lanSubnet}.10"
+        ];
       };
 
       lan = mkSection "dhcp" {
