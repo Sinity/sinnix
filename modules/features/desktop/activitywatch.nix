@@ -44,13 +44,27 @@ mkFeatureModule {
             enable = true;
             restartable = true;
           };
-          # No `captures` entry here: this service's own state is AW's
-          # SQLite DB under ~/.local/share/activitywatch (a persisted home
-          # directory, declared in modules/persistence.nix), not a
-          # captures-lake write path. The `activitywatch` lane under
-          # capturesRoot is owned by the rollup job's own surface in
-          # modules/services/capture-aw-rollup.nix, which is the thing
-          # that actually writes there.
+          # Points DIRECTLY at AW's own SQLite DB (persisted home dir,
+          # already covered by the standard backup pipeline -- confirmed
+          # 2026-08-12, .local/share/activitywatch carries no backup
+          # exclude) -- same pattern as atuin's surface
+          # (modules/services/sinex/bridge.nix), which points straight at
+          # atuin's history.db rather than rolling it into a converted
+          # copy. An earlier pass here built a separate capture-aw-rollup
+          # lane (incremental REST poll -> JSONL) to fix the stale-surface
+          # bug; that was over-engineered for what the bug actually
+          # needed -- staleness visibility, not a format conversion durability
+          # was already covered by the backup pipeline, and lynchpin/any
+          # consumer can read AW's sqlite directly the same way it already
+          # reads atuin's. Retired per operator correction 2026-08-12.
+          captures = [
+            {
+              name = "activitywatch";
+              path = "/home/${config.sinnix.user.name}/.local/share/activitywatch/aw-server-rust/sqlite.db";
+              eventDriven = true;
+              staleAfterSeconds = 3600;
+            }
+          ];
         };
         activitywatch-watcher-awatcher = {
           unit = "activitywatch-watcher-awatcher.service";
