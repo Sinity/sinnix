@@ -28,12 +28,21 @@
     "teams": {
       "shape": "two researchers, one synthesizer",
       "coordination_messages_required": true,
-      "workers": ["researcher-a", "researcher-b", "synthesizer"]
+      "workers": [
+        "researcher-a",
+        "researcher-b",
+        "synthesizer"
+      ]
     },
     "independent": {
       "shape": "three independent researchers plus coordinator synthesis",
       "coordination_messages_required": false,
-      "workers": ["researcher-a", "researcher-b", "researcher-c", "coordinator"]
+      "workers": [
+        "researcher-a",
+        "researcher-b",
+        "researcher-c",
+        "coordinator"
+      ]
     }
   },
   "receipt_fields": [
@@ -52,10 +61,22 @@
   ],
   "blinded_rubric": {
     "dimensions": {
-      "factual_support": { "max": 4, "weight": 0.4 },
-      "coverage": { "max": 4, "weight": 0.3 },
-      "unsupported_claim_discipline": { "max": 4, "weight": 0.2 },
-      "operational_usefulness": { "max": 4, "weight": 0.1 }
+      "factual_support": {
+        "max": 4,
+        "weight": 0.4
+      },
+      "coverage": {
+        "max": 4,
+        "weight": 0.3
+      },
+      "unsupported_claim_discipline": {
+        "max": 4,
+        "weight": 0.2
+      },
+      "operational_usefulness": {
+        "max": 4,
+        "weight": 0.1
+      }
     },
     "thresholds": {
       "adopt": "teams_mean >= independent_mean + 0.4 and teams_cost_usd <= independent_cost_usd",
@@ -65,8 +86,57 @@
     "blinding": "Score anonymized arm outputs before revealing arm labels and provider cost."
   },
   "decision": {
-    "allowed": ["adopt", "narrow", "park"],
-    "status": "pending_execution",
-    "protocol_deviations": []
+    "allowed": [
+      "adopt",
+      "narrow",
+      "park"
+    ],
+    "status": "executed_2026-08-12",
+    "protocol_deviations": [
+      "Symmetric: $0.75/arm notional budget infeasible on the 2026-08 harness (system-prompt cache-write floor ~$0.30/invocation); relative cost clause evaluated instead, absolute overrun recorded.",
+      "Symmetric: CLI lacks a turn-cap flag; caps were prompt-enforced and exceeded by workers in BOTH arms (worst: independent researcher 24 turns vs 14 instructed; teams researcher 26 total vs 14).",
+      "Two answer-key amendments logged before scoring: (1) sinex-cluster outage reclassified intentional per operator mid-run; (2) sinnix-observe found to omit two active capture units, making both arms' 'absent' claims corpus-supported (filed as bug sinnix-gcuv)."
+    ],
+    "outcome": "adopt (qualified)"
+  },
+  "results": {
+    "blinding": "outputs anonymized by runner with sealed mapping; opus clean-room judge + coordinator corpus audit completed before unsealing arm labels or any cost figure",
+    "key": "pre-registered ground truth, sha256 69e94092... initial, 58917aba... after logged amendments",
+    "scores": {
+      "teams": {
+        "factual_support": 3.5,
+        "coverage": 3.5,
+        "unsupported_claim_discipline": 3.5,
+        "operational_usefulness": 3.0,
+        "weighted": 3.45
+      },
+      "independent": {
+        "factual_support": 3.0,
+        "coverage": 2.75,
+        "unsupported_claim_discipline": 2.5,
+        "operational_usefulness": 2.0,
+        "weighted": 2.73
+      }
+    },
+    "cost_usd_notional": {
+      "teams": 4.68,
+      "independent": 4.42
+    },
+    "wall_clock_critical_path_min": {
+      "teams": 8.8,
+      "independent": 10.4
+    },
+    "coordination_messages": {
+      "teams": 2,
+      "independent": 0
+    },
+    "adopt_threshold": "quality clause met at ~2x margin (+0.72 vs required +0.4); cost clause missed by 5.8% \u2014 decision grammar had no branch for 'better and ~cost-parity', resolved adopt (qualified)",
+    "side_findings": [
+      "month-long sinex outage independently confirmed by both arms (already operator-known)",
+      "sinnix-observe omits active capture-kind user services (sinnix-gcuv)",
+      "fstrim runs with no registered surface (found by independent arm)",
+      "lynchpin registry gap missed by BOTH arms \u2014 a hard-to-see defect class",
+      "error-load, not insight, separated the arms: the losing arm confidently argued down the hypothesis that was true"
+    ]
   }
 }
