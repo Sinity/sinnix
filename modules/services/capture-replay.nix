@@ -151,22 +151,18 @@ mkServiceModule {
               # privilege-gain no_new_privs exists to block.
               ProtectSystem = "strict";
               ProtectHome = "read-only";
-              # gsr-kms-server binds its IPC socket under $XDG_RUNTIME_DIR
-              # (its own convention: ".gsr-kms-socket-%s") -- ProtectSystem
-              # =strict makes everything read-only except ReadWritePaths,
-              # so without the runtime dir listed the bind() call fails
-              # with EROFS ("Read-only file system"). "%t" is systemd's
-              # specifier for the unit's runtime directory
-              # ($XDG_RUNTIME_DIR for a user unit). Caught live
-              # 2026-08-12: removing NoNewPrivileges alone did NOT fix
-              # this -- same error persisted, crash-looping every start
-              # until this second, actual root cause was found; corrected
-              # in-place rather than leaving a wrong comment from the
-              # first attempt.
-              ReadWritePaths = [
-                replayDir
-                "%t"
-              ];
+              # gsr-kms-server binds its IPC socket hardcoded under /tmp
+              # (".gsr-kms-socket-<random>", confirmed live via a
+              # systemd-run transient unit with no sandboxing --
+              # `/tmp/.gsr-kms-socket-c1C9qFmFq4`), NOT $XDG_RUNTIME_DIR
+              # as an earlier fix attempt assumed (that attempt added "%t"
+              # to ReadWritePaths, which changed nothing -- same EROFS
+              # error persisted, corrected here rather than left wrong).
+              # PrivateTmp gives this unit its own writable tmpfs /tmp
+              # satisfying that hardcoded path without exposing or
+              # requiring write access to the real host /tmp.
+              PrivateTmp = true;
+              ReadWritePaths = [ replayDir ];
               UMask = "0077";
             };
           };
