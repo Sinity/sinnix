@@ -1,0 +1,11 @@
+[project]
+name = "sinnix-capture"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+[project.scripts]
+sinnix-capture = "sinnix_capture.cli:main"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
