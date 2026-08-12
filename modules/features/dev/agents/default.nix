@@ -1,7 +1,7 @@
 # Agent CLI wrappers + MCP server registry — regrouped subtree.
 #
-# Split out of the former modules/features/dev/{agent-tools,mcp-servers}.nix
-# (sinnix-9u6, 2026-07-09). Two independent features live here
+# Split from a former agent-tools.nix/mcp-servers.nix pair. Two independent
+# features live here
 # (sinnix.features.dev.agentTools and sinnix.features.dev.mcp-servers), each
 # with its own option namespace, so this directory is an explicit imports
 # list rather than a further lib.sinnix.mkAutoImports recursion: the
