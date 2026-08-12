@@ -131,10 +131,10 @@ mkServiceModule {
       ...
     }:
     let
-      # 2026-07-21 (polylogue-dcz5): free-threaded 3.14t build so daemon
-      # thread-parse fan-outs actually run parallel (GIL writer-commit
-      # interference ~5000x on 3.13 vs ~0 on 3.14t). Rollback = repin
-      # `.default`.
+      # Free-threaded 3.14t build so daemon thread-parse fan-outs actually
+      # run parallel instead of serializing on GIL writer-commit contention.
+      # Rollback = repin `.default`.
+      # History/evidence: bd show polylogue-dcz5 (polylogue repo)
       polyloguePkg = inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.polylogue;
       # 2026-07-10: moved off /persist (worn MX500) to /realm; still inside
       # the /realm btrbk→borg coverage.
