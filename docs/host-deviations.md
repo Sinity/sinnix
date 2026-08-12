@@ -41,8 +41,12 @@ _No sinnix.features/sinnix.services declarations found in this host's *.nix file
 | `sinnix.services.capture-audio.enable` | `true` |
 | `sinnix.services.capture-clipboard.enable` | `true` |
 | `sinnix.services.capture-input-dynamics.enable` | `true` |
+| `sinnix.services.capture-kitty-scrollback.enable` | `true` |
 | `sinnix.services.capture-mpris.enable` | `true` |
 | `sinnix.services.capture-notifications.enable` | `true` |
+| `sinnix.services.capture-primary.enable` | `true` |
+| `sinnix.services.capture-replay.enable` | `true` |
+| `sinnix.services.capture-screen.enable` | `true` |
 | `sinnix.services.census.enable` | `true` |
 | `sinnix.services.comfyui.enable` | `true` |
 | `sinnix.services.koboldcpp.enable` | `true` |
