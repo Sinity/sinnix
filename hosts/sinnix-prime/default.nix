@@ -83,6 +83,9 @@
       target = "DP-3";
     };
     capture-kitty-scrollback.enable = true;
+    # Room air quality from the Awair Element's local API (sinnix-agp8) --
+    # the first capture lane covering the environment rather than the machine.
+    capture-awair.enable = true;
     url-ledger.enable = true;
     below = {
       enable = true;
