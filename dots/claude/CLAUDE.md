@@ -578,7 +578,8 @@ Notes" section of bare `@path` lines (Claude-only transclusion).
 ## Session Recall (hooks)
 
 SessionStart hooks (`dots/claude/hooks/sessionstart-{polylogue,sinex}-recall.sh`
-in the sinnix repo, referenced dots-direct from settings.json; Codex runs the
+in the sinnix repo, referenced dots-direct from managed-settings.json; Codex
+runs the
 same commands) print recent matching sessions and a Sinex
 machine-context block; both exit silently when data is unavailable. For deeper
 history use Polylogue MCP/search rather than guessing from memory;
