@@ -11,6 +11,7 @@ export LC_ALL=C
 REGISTRY="$(cat <<'EOF'
 whisper|whisper-server|8090|/|whisper.cpp STT server (CUDA, large-v3-turbo)
 tts|podman-openedai-speech|8000|/v1/models|OpenedAI-Speech TTS (Piper + XTTS, container)
+kokoro|podman-kokoro|8880|/health|Kokoro-82M TTS (CPU, OpenAI-compatible, container)
 ollama|ollama|11434|/api/tags|Ollama LLM/VLM hub (CUDA)
 litellm|litellm|4000|/health/liveliness|LiteLLM gateway (Anthropic<->OpenAI, fronts Ollama)
 llama-cpp|llama-cpp|8081|/health|llama.cpp HTTP server (CUDA, GGUF)
