@@ -379,7 +379,7 @@ handle_supervisor_signal() {
   local exit_reason="$1"
   local process_status="$2"
   cleanup_reason="$exit_reason"
-  cleanup_recorder_subtree "$exit_reason" ""
+  cleanup_recorder_subtree "$exit_reason" "$process_status"
   trap - EXIT
   exit "$process_status"
 }
@@ -391,7 +391,7 @@ handle_supervisor_exit() {
     return 0
   fi
 
-  cleanup_recorder_subtree "launcher_exit" ""
+  cleanup_recorder_subtree "launcher_exit" "$exit_status"
 }
 
 trap 'handle_supervisor_signal "terminal_detached" 129' HUP
