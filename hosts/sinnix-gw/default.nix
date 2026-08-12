@@ -58,17 +58,19 @@ let
     {
       name = "awair";
       mac = "70:88:6b:14:1e:99";
-      ip = "${lanSubnet}.20";
+      # Pinned to the address it ALREADY holds: moving it would strand the
+      # capture lane until the device happened to renew (12h lease).
+      ip = "${lanSubnet}.52";
     }
     {
       name = "bulb-desk";
       mac = "04:cf:8c:b1:8f:90";
-      ip = "${lanSubnet}.21";
+      ip = "${lanSubnet}.167";
     }
     {
       name = "phone";
       mac = "06:a6:0d:0c:c8:3c";
-      ip = "${lanSubnet}.30";
+      ip = "${lanSubnet}.51";
     }
   ];
 

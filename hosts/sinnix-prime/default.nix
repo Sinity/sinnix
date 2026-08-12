@@ -163,6 +163,7 @@
       model = "qwen3-reranker-0.6b-q8_0.gguf";
       extraFlags.reranking = true;
     };
+    kokoro.enable = true; # Kokoro-82M TTS :8880 (CPU, on-demand) — replaces edge-tts
     whisper.enable = true; # speech-to-text :8090 (on-demand, auto-downloads model)
     comfyui = {
       enable = true; # SOTA image + text-to-video :8188 (container, CDI GPU)
