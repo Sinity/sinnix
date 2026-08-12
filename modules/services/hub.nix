@@ -230,30 +230,26 @@ mkServiceModule {
       opsSocket = "{$SINNIX_HUB_RUNTIME}/sinnix/ops.sock";
       feedbackSocket = "{$SINNIX_HUB_RUNTIME}/sinnix/hub-feedback.sock";
 
-      # Same-origin gate on the action API. A browser sends Origin on POST even
-      # same-origin, so this cannot be a blanket "reject any Origin" — it
-      # rejects any Origin that is not one of the hub's own. Combined with the
-      # reducer's expected_revision check (which needs a prior read that CORS
-      # denies cross-origin), a blind cross-site POST has nothing to work with.
-      originGuard = ''
-        @crossOrigin {
-          header Origin *
-          not header Origin http://{$SINNIX_HUB_TAILNET_IP}:${toString cfg.port}
-          not header Origin http://127.0.0.1:${toString cfg.port}
-          not header Origin http://localhost:${toString cfg.port}
-        }
-        respond @crossOrigin "cross-origin request refused" 403
-      '';
-
       frontendSites = lib.concatStringsSep "\n" (
         lib.mapAttrsToList (_name: frontend: ''
-          http://{$SINNIX_HUB_TAILNET_IP}:${toString frontend.port}, http://127.0.0.1:${toString frontend.port} {
+          http://:${toString frontend.port} {
+            bind {$SINNIX_HUB_TAILNET_IP} 127.0.0.1
             reverse_proxy ${frontend.upstream}
           }
         '') activeFrontends
       );
 
-      caddyfile = pkgs.writeText "sinnix-hub.Caddyfile" ''
+      # Caddy warns on every start about non-canonical formatting, and the
+      # canonical form is tab-indented -- unreadable to write inside a Nix
+      # indented string. Normalise at build time instead, so the deployed file
+      # is always fmt-clean and the source here stays legible.
+      caddyfile = pkgs.runCommand "sinnix-hub.Caddyfile" { } ''
+        cp ${rawCaddyfile} "$out"
+        chmod +w "$out"
+        ${pkgs.caddy}/bin/caddy fmt --overwrite "$out"
+      '';
+
+      rawCaddyfile = pkgs.writeText "sinnix-hub.Caddyfile.raw" ''
         {
           admin off
           auto_https off
@@ -272,8 +268,20 @@ mkServiceModule {
             file_server browse
           }
 
+          # Same-origin gate on the action API. A browser sends Origin on POST
+          # even same-origin, so this cannot be a blanket "reject any Origin";
+          # it rejects any Origin that is not one of the hub's own. Together
+          # with the reducer's expected_revision check -- which needs a prior
+          # read that CORS denies cross-origin -- a blind cross-site POST has
+          # nothing to work with.
           handle_path /ops/* {
-            ${originGuard}
+            @crossOrigin {
+              header Origin *
+              not header Origin http://{$SINNIX_HUB_TAILNET_IP}:${toString cfg.port}
+              not header Origin http://127.0.0.1:${toString cfg.port}
+              not header Origin http://localhost:${toString cfg.port}
+            }
+            respond @crossOrigin "cross-origin request refused" 403
             reverse_proxy unix/${opsSocket}
           }
 
@@ -287,7 +295,16 @@ mkServiceModule {
           }
         }
 
-        http://{$SINNIX_HUB_TAILNET_IP}:${toString cfg.port}, http://127.0.0.1:${toString cfg.port} {
+        # `bind` is load-bearing, not decoration. Listing two site addresses
+        # (http://<tailnet>:PORT, http://127.0.0.1:PORT) does NOT produce two
+        # listeners: Caddy merges same-port sites into one server listening on
+        # :PORT -- i.e. 0.0.0.0 -- and separates them by Host header, which is
+        # no boundary at all. `bind` sets the socket addresses explicitly, so
+        # the listeners really are the tailnet address and loopback.
+        # Verify after any edit here with:
+        #   caddy adapt | jq '.apps.http.servers | map_values(.listen)'
+        http://:${toString cfg.port} {
+          bind {$SINNIX_HUB_TAILNET_IP} 127.0.0.1
           import hub
         }
 
