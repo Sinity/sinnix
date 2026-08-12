@@ -1,14 +1,13 @@
-# recheck: unknown — needs manual audit. The D-Bus service rename
-# (obex-data-server.service -> org.openobex.service) and the removed
-# blueman.desktop autostart entry both look like permanent Sinnix policy
-# rather than a temporary upstream-bug workaround, but that hasn't been
-# confirmed against nixpkgs' obex_data_server/blueman packaging history or
-# any upstream issue — a search for an open nixpkgs issue/PR renaming the
-# D-Bus service file turned up nothing relevant. Needs someone to check
-# whether nixpkgs' obex_data_server ever ships the service file already
-# named org.openobex.service, and whether blueman's autostart entry is
-# ever made conditional upstream, before this can get a real condition (or
-# be marked "no recheck needed — permanent policy").
+# recheck: when nixpkgs's obex_data_server ships its D-Bus activation file
+# already named org.openobex.service (verified 2026-08-12: stock 0.4.6 still
+# ships the misnamed obex-data-server.service, and D-Bus activation looks
+# the file up by bus name, so the rename is load-bearing for OBEX receive),
+# or if the session stops honoring /etc/xdg/autostart (verified 2026-08-12:
+# xdg-desktop-autostart.target is ACTIVE here via systemd's generator, and
+# blueman-applet is already launched deliberately by the session -- without
+# the autostart removal a duplicate applet starts at every login). Both
+# halves are deliberate permanent policy with the above as their concrete
+# recheck conditions.
 _: final: prev:
 let
   fixedObexDataServer = prev.obex_data_server.overrideAttrs (old: {
