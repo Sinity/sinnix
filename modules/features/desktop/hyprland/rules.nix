@@ -148,9 +148,21 @@ let
   # Application-Specific Rules
   # ========================================
   appRules = [
-    (mkRule "kitty-clear-transparency" {
+    (mkRule "kitty-focus-opacity" {
       class = "^(kitty)$";
       noBlur = true;
+      # Native per-app focus/unfocus fade, replacing the old
+      # kitty-focus-opacity script+service (hyprctl socket2 listener calling
+      # `kitty @ set-background-opacity` per focus event -- laggy). Hyprland
+      # applies this on focus change with zero IPC round-trip. Kitty's own
+      # background_opacity (terminal.nix) stays static; this windowrule does
+      # the focus differentiation, overriding the global
+      # decoration.active_opacity/inactive_opacity = 1.0 (kept opaque for
+      # every other app) for the kitty class only.
+      opacity = {
+        active = 1.0;
+        inactive = 0.70;
+      };
     })
     # Ambient reading-stack widget (sinnix-reading-stack-widget): pinned
     # (visible on every workspace) in a small corner window -- this IS the

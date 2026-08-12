@@ -2,9 +2,8 @@
 
 The socket2 line-classification function is pure (string in, bool out) and
 directly pytest-covered. The hyprctl/socket readers are thin IO wrappers
-with the subprocess/socket call injected as a callable, following the same
-dependency-injection shape as pkgs/capture-input-dynamics/collector.py's
-`get_active_window(run_hyprctl)` -- testable by passing a fake reader.
+with the subprocess/socket call injected as a callable -- testable by
+passing a fake reader.
 """
 
 from __future__ import annotations

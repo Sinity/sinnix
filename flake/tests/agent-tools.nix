@@ -62,19 +62,18 @@ in
               message = "Claude settings.json must not be managed through Home Manager xdg.configFile.";
             }
             {
-              assertion = lib.hasInfix "${config.sinnix.paths.dotsRoot}/claude/settings.json" activationText;
-              message = "Claude settings.json must be linked directly to dots during activation.";
+              assertion = lib.hasInfix "${config.sinnix.paths.dotsRoot}/claude/settings-seed.json" activationText;
+              message = "Claude settings.json must be seeded copy-if-absent from dots so the harness can persist UI state into a plain writable file.";
             }
             {
-              assertion = builtins.all (path: builtins.hasAttr path hm.home.file) [
-                ".config/claude/agents/lane.md"
-                ".config/claude/agents/triage.md"
-                ".config/claude/agents/review.md"
-                ".config/claude/agents/judge.md"
-                ".config/claude/agents/schemas/triage.schema.json"
-                ".config/claude/agents/schemas/judge.schema.json"
-              ];
-              message = "Claude named agent definitions must be linked from the shared dots tree.";
+              assertion =
+                (config.environment.etc."claude-code/managed-settings.json".source or null)
+                == "${config.sinnix.paths.dotsRoot}/claude/managed-settings.json";
+              message = "Claude managed settings must be deployed to /etc/claude-code as a symlink into the live dots checkout.";
+            }
+            {
+              assertion = builtins.hasAttr ".config/claude/agents" hm.home.file;
+              message = "Claude agent definitions must be linked as one directory from the shared dots tree.";
             }
             {
               assertion = builtins.hasAttr "sinnix-settings-env-lint" hm.systemd.user.services;
@@ -151,12 +150,7 @@ in
           ".local/bin/mcp-sinex"
           ".local/bin/sinnix-mcp-sweep"
           ".config/hermes/skills"
-          ".config/claude/agents/lane.md"
-          ".config/claude/agents/triage.md"
-          ".config/claude/agents/review.md"
-          ".config/claude/agents/judge.md"
-          ".config/claude/agents/schemas/triage.schema.json"
-          ".config/claude/agents/schemas/judge.schema.json"
+          ".config/claude/agents"
         ];
         fixtureAssets = [
           {
@@ -458,15 +452,13 @@ in
 
             jq -e '
               (has("mcpServers") | not) and
-              .alwaysThinkingEnabled == true and
-              .skipDangerousModePermissionPrompt == true and
               ([.hooks.SessionStart[].hooks[].command]
                 | any(contains("SINNIX_CLAUDE_PROFILE") and contains("serena-hooks activate --client=claude-code"))) and
               ([.hooks.SessionStart[].hooks[].command]
                 | any(contains("sessionstart-sinex-recall.sh"))) and
               ([.hooks.Stop[].hooks[].command]
                 | any(contains("SINNIX_CLAUDE_PROFILE") and contains("serena-hooks cleanup --client=claude-code")))
-            ' ${inputs.self}/dots/claude/settings.json >/dev/null
+            ' ${inputs.self}/dots/claude/managed-settings.json >/dev/null
 
             # Rendered profile configs must match the registry's own computed
             # selection -- membership is derived from mcp-registry.nix at eval
@@ -561,7 +553,7 @@ in
               [.hooks.SessionStart[].hooks[].command] | index("bd-prime-if-present")
             ' "$HOME/.codex/hooks.json" >/dev/null
             jq -e '
-              [.hooks.SessionStart[].hooks[].command] | index("sessionstart-sinex-recall")
+              [.hooks.SessionStart[].hooks[].command] | any(contains("sessionstart-sinex-recall.sh"))
             ' "$HOME/.codex/hooks.json" >/dev/null
             jq -e '
               . as $root
@@ -570,7 +562,7 @@ in
             jq -e '
               . as $root
               | all(["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"][]; . as $event | [$root.hooks[$event][]?.hooks[]?.command] | any(startswith("polylogue-hook \($event) --provider claude-code")))
-            ' '${../../dots/claude/settings.json}' >/dev/null
+            ' '${../../dots/claude/managed-settings.json}' >/dev/null
 
             grep -Fq 'MCP_CONFIG="$HOME/.config/claude/mcp.json"' "$HOME/.local/bin/claude-full"
             grep -Fq 'export SINNIX_CLAUDE_PROFILE=lean' "$HOME/.local/bin/claude-lean"
@@ -996,7 +988,7 @@ in
             sampler="$TMPDIR/sinnix-vacuity-sampler"
             mkdir -p "$hooks"
             cp ${../../dots/claude/hooks}/*.sh "$hooks/"
-            cp ${../../dots/claude/settings.json} "$settings"
+            cp ${../../dots/claude/managed-settings.json} "$settings"
             cp ${../../scripts/sinnix-vacuity-sampler} "$sampler"
             chmod +x "$hooks"/*.sh
             chmod +x "$sampler"

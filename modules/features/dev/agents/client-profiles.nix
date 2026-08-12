@@ -63,33 +63,10 @@ let
       env_key = "LITELLM_LOCAL_KEY";
     };
   };
-  sharedSkillNames = import ../../../../flake/data/shared-agent-skills.nix;
-  # Out-of-store by construction — see the matching comment in clis.nix. The
-  # farm is a store directory whose entries symlink into the live dots
-  # checkout, so editing a skill needs no rebuild; only adding or removing a
-  # skill name does.
-  mkSkillFarm =
-    farmName: entries:
-    pkgs.runCommand farmName { } ''
-      mkdir -p "$out"
-      ${lib.concatMapStringsSep "\n" (e: ''
-        ln -s ${lib.escapeShellArg e.path} "$out/${e.name}"
-      '') entries}
-    '';
-  sharedSkillLinks = map (name: {
-    inherit name;
-    path = "${dotsRoot}/_ai/skills/${name}";
-  }) sharedSkillNames;
-  sharedSkillFarm = mkSkillFarm "sinnix-shared-agent-skills" sharedSkillLinks;
-  codexSkillFarm = mkSkillFarm "sinnix-codex-agent-skills" (
-    sharedSkillLinks
-    ++ [
-      {
-        name = ".system";
-        path = "${dotsRoot}/codex/skills/.system";
-      }
-    ]
-  );
+  inherit (import ./skill-farm.nix { inherit lib pkgs dotsRoot; })
+    sharedSkillFarm
+    codexSkillFarm
+    ;
   geminiSettingsBase = removeAttrs (builtins.fromJSON (
     builtins.readFile (inputs.self + "/dots/gemini/settings.json")
   )) [ "mcpServers" ];

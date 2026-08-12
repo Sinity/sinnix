@@ -10,8 +10,7 @@ python3Packages.buildPythonApplication {
   build-system = [ python3Packages.setuptools ];
   # No Python-level dependency on sinnix-capture-lib: the daemon shells out
   # to the `sinnix-capture` CLI binary (injected as --sinnix-capture-bin by
-  # modules/services/capture-screen.nix), the same pattern
-  # capture-input-dynamics uses -- not an in-process import.
+  # modules/services/capture-screen.nix) -- not an in-process import.
   dependencies = [
     python3Packages.pillow
     python3Packages.numpy
