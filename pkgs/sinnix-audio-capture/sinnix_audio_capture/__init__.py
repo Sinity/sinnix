@@ -29,14 +29,14 @@ Departures (2026-08-12 design supersession, recorded on sinnix-nm7):
     /realm/data/derived/audio/ (regenerable, borg-excluded), never under
     captures/ -- not yet implemented in this package (see above).
 
-Legacy migration note: this package supersedes the older always-on capture
-lane in `modules/features/desktop/audio-capture.nix` (the
+Legacy migration note: this package superseded the older always-on capture
+lane that lived in `modules/features/desktop/audio-capture.nix` (the
 `sinnix-audio-daemon` + `sinnix-asr-server` scripts: WebRTC-VAD utterance
-segmentation gating a cloud-ASR upload). That module remains the live,
-default-on capture path on sinnix-prime as of this change -- cutover
-(disabling the legacy feature, wiring `sinnix.services.<name>` surfaces +
-persistence for `record`/`topology`/`index`/`pause`, and retiring the two
-legacy scripts per the no-alias rule) is NixOS-module-level work out of
-scope for this Python-package implementation pass and is tracked on
-sinnix-nm7, not duplicated here.
+segmentation gating a cloud-ASR upload). Both `enableAudioDaemon` and
+`enableAsrServer` were already `false` on sinnix-prime by the time of the
+cutover, so retiring that module was behavior-neutral there. The NixOS-
+module-level wiring (`modules/services/capture-audio.nix`, four
+`sinnix.runtime.surfaces` entries for `record`/`topology`/`index`, retiring
+the legacy module + its two scripts per the no-alias rule) landed in the
+same sinnix-nm7 change series as this package.
 """

@@ -38,7 +38,6 @@ in
                 activitywatch.enable = false;
                 agentVerifyTimer.enable = false;
                 audio.enable = false;
-                audioCapture.enable = false;
                 base.enable = false;
                 browser.enable = false;
                 "common-apps".enable = false;
@@ -87,7 +86,6 @@ in
                 activitywatch.enable = false;
                 agentVerifyTimer.enable = false;
                 audio.enable = false;
-                audioCapture.enable = false;
                 base.enable = false;
                 browser.enable = false;
                 "common-apps".enable = false;
