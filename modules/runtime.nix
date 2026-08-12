@@ -141,22 +141,42 @@ in
           };
           workload = {
             kind = lib.mkOption {
-              type = lib.types.enum [ "daemon" "job" "frontend" "database" "unknown" ];
+              type = lib.types.enum [
+                "daemon"
+                "job"
+                "frontend"
+                "database"
+                "unknown"
+              ];
               default = "unknown";
               description = "Normalized workload kind for policy consumers.";
             };
             lifecycle = lib.mkOption {
-              type = lib.types.enum [ "persistent" "transient" "oneshot" "unknown" ];
+              type = lib.types.enum [
+                "persistent"
+                "transient"
+                "oneshot"
+                "unknown"
+              ];
               default = "unknown";
               description = "Expected workload lifecycle.";
             };
             expendability = lib.mkOption {
-              type = lib.types.enum [ "protected" "normal" "expendable" "unknown" ];
+              type = lib.types.enum [
+                "protected"
+                "normal"
+                "expendable"
+                "unknown"
+              ];
               default = "unknown";
               description = "Whether automatic pressure policy may sacrifice this workload.";
             };
             operatorProtection = lib.mkOption {
-              type = lib.types.enum [ "operator" "ordinary" "unknown" ];
+              type = lib.types.enum [
+                "operator"
+                "ordinary"
+                "unknown"
+              ];
               default = "unknown";
               description = "Operator-facing protection level.";
             };
@@ -229,7 +249,10 @@ in
           };
           activation = {
             mode = lib.mkOption {
-              type = lib.types.enum [ "direct" "socket-proxy" ];
+              type = lib.types.enum [
+                "direct"
+                "socket-proxy"
+              ];
               default = "direct";
               description = "How this surface is activated and exposed to local clients.";
             };
@@ -338,7 +361,6 @@ in
       mode = "0444";
     };
     environment.systemPackages = [
-      scriptPkgs.sinnix-heavy-lease
       scriptPkgs.sinnix-health-sentinel
       scriptPkgs.sinnix-config-drift
       scriptPkgs.sinnix-preflight
@@ -358,35 +380,46 @@ in
         ) surfaces
       )
       ++ [
-        ({
-      sinnix-health-sentinel = {
-        description = "Inventory-driven runtime health sentinel";
-        serviceConfig = {
-          Type = "oneshot";
-          ExecStart = "${scriptPkgs.sinnix-health-sentinel}/bin/sinnix-health-sentinel --check";
-        };
-      };
-      "sinnix-health-transition@" = {
-        description = "Record an inventory health transition for %i";
-        serviceConfig = {
-          Type = "oneshot";
-          ExecStart = "${scriptPkgs.sinnix-health-sentinel}/bin/sinnix-health-sentinel --failure-unit %i";
-        };
-      };
-      sinnix-config-drift = {
-        description = "Compare live state with the evaluated Sinnix configuration";
-        after = [ "local-fs.target" ];
-        wants = [ "local-fs.target" ];
-        serviceConfig = {
-          Type = "oneshot";
-          ExecStart = "${scriptPkgs.sinnix-config-drift}/bin/sinnix-config-drift --manifest /etc/sinnix/config.json --output ${cfg.paths.capturesRoot}/machine/config-drift.jsonl";
-        };
-      };
-    } // lib.mapAttrs' (_name: surface:
-      lib.nameValuePair (lib.removeSuffix ".service" surface.unit) {
-        unitConfig.OnFailure = [ "sinnix-health-transition@%n" ];
-      }
-    ) (lib.filterAttrs (_: surface: surface.manager == "system" && surface.kind == "service" && surface.observe.enable) surfaces))
+        (
+          {
+            sinnix-health-sentinel = {
+              description = "Inventory-driven runtime health sentinel";
+              serviceConfig = {
+                Type = "oneshot";
+                ExecStart = "${scriptPkgs.sinnix-health-sentinel}/bin/sinnix-health-sentinel --check";
+              };
+            };
+            "sinnix-health-transition@" = {
+              description = "Record an inventory health transition for %i";
+              serviceConfig = {
+                Type = "oneshot";
+                ExecStart = "${scriptPkgs.sinnix-health-sentinel}/bin/sinnix-health-sentinel --failure-unit %i";
+              };
+            };
+            sinnix-config-drift = {
+              description = "Compare live state with the evaluated Sinnix configuration";
+              after = [ "local-fs.target" ];
+              wants = [ "local-fs.target" ];
+              serviceConfig = {
+                Type = "oneshot";
+                ExecStart = "${scriptPkgs.sinnix-config-drift}/bin/sinnix-config-drift --manifest /etc/sinnix/config.json --output ${cfg.paths.capturesRoot}/machine/config-drift.jsonl";
+              };
+            };
+          }
+          //
+            lib.mapAttrs'
+              (
+                _name: surface:
+                lib.nameValuePair (lib.removeSuffix ".service" surface.unit) {
+                  unitConfig.OnFailure = [ "sinnix-health-transition@%n" ];
+                }
+              )
+              (
+                lib.filterAttrs (
+                  _: surface: surface.manager == "system" && surface.kind == "service" && surface.observe.enable
+                ) surfaces
+              )
+        )
       ]
     );
     systemd.timers.sinnix-health-sentinel = {
@@ -413,10 +446,19 @@ in
           ExecStart = "${scriptPkgs.sinnix-health-sentinel}/bin/sinnix-health-sentinel --failure-unit %i";
         };
       };
-    } // lib.mapAttrs' (_name: surface:
-      lib.nameValuePair (lib.removeSuffix ".service" surface.unit) {
-        Unit.OnFailure = [ "sinnix-health-transition@%n" ];
-      }
-    ) (lib.filterAttrs (_: surface: surface.manager == "user" && surface.kind == "service" && surface.observe.enable) surfaces);
+    }
+    //
+      lib.mapAttrs'
+        (
+          _name: surface:
+          lib.nameValuePair (lib.removeSuffix ".service" surface.unit) {
+            Unit.OnFailure = [ "sinnix-health-transition@%n" ];
+          }
+        )
+        (
+          lib.filterAttrs (
+            _: surface: surface.manager == "user" && surface.kind == "service" && surface.observe.enable
+          ) surfaces
+        );
   };
 }

@@ -90,7 +90,6 @@ def test_action_fixtures_are_attested_and_idempotent_across_restart(
         ("freeze", {"unit": "safe"}, "k3"),
         ("thaw", {"unit": "safe"}, "k4"),
         ("reset_policy", {"unit": "safe"}, "k5"),
-        ("heavy_lease", {"unit": "safe"}, "k6"),
         ("restart", {"unit": "safe"}, "k7"),
     ]:
         assert (

@@ -55,7 +55,6 @@
         case " $* " in *" --profile "*) _nested=1 ;; esac
         if [ -z "$_nested" ]; then
           if [ "$_cmd" = "build" ] || { [ "$_cmd" = "flake" ] && [ "$_sub" = "check" ]; }; then
-            ${commandRegistry.rebuildLease "nix-build"}
             exec 9>/tmp/sinnix-switch.lock
             if ! ${pkgs.util-linux}/bin/flock --nonblock 9; then
               echo "nix $1: another heavy nix operation is already running — aborting to prevent thrashing" >&2
@@ -74,7 +73,6 @@
         name: action:
         pkgs.writeShellScriptBin name ''
           set -euo pipefail
-          ${commandRegistry.rebuildLease name}
           ${commandRegistry.rebuildLock name}
           ${resolveFlakeDir}
           ${avoidRepoCwdForActivation}
@@ -109,7 +107,6 @@
         check = pkgs.writeShellScriptBin "check" ''
           set -euo pipefail
           ${resolveFlakeDir}
-          ${commandRegistry.rebuildLease "check"}
           exec 9>/tmp/sinnix-switch.lock
           if ! ${pkgs.util-linux}/bin/flock --nonblock 9; then
             echo "sinnix check: another heavy nix operation is already running — aborting to prevent thrashing" >&2
@@ -151,7 +148,6 @@
         # nh doesn't wrap build-vm; keep direct nixos-rebuild.
         test-vm = pkgs.writeShellScriptBin "test-vm" ''
           set -euo pipefail
-          ${commandRegistry.rebuildLease "test-vm"}
           ${commandRegistry.rebuildLock "test-vm"}
           ${resolveFlakeDir}
           ${localInputOverrideArgs}

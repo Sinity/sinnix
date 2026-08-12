@@ -168,12 +168,6 @@ def collect_agent_gateway(limit: int = 20, below: dict[str, Any] | None = None) 
         )
     )
     job_root = Path(os.environ.get("SINNIX_AGENT_JOB_STATE_DIR", str(root / "jobs")))
-    lease_root = Path(
-        os.environ.get(
-            "SINNIX_HEAVY_LEASE_STATE_DIR",
-            str(Path.home() / ".local/state/sinnix/heavy-lease"),
-        )
-    )
     jobs: list[dict[str, Any]] = []
     malformed: list[str] = []
     try:
@@ -267,7 +261,6 @@ def collect_agent_gateway(limit: int = 20, below: dict[str, Any] | None = None) 
         "audit_error": audit_error,
         "journal_error": journal_error,
         "polylogue_error": polylogue_error,
-        "lease": _json(lease_root / "owner.json"),
         "correlations": correlations,
         "orphaned_jobs": orphaned_jobs,
         "quota": _quota_view(quota),

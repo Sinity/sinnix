@@ -257,15 +257,6 @@ scoped_command=("$@")
 property_args=()
 unscoped_background_xtask=0
 
-lease_required=0
-lease_wait_seconds=0
-lease_state_subdir="sinnix/heavy-lease"
-if inventory_readable; then
-  lease_required="$(inventory_value ".commandClasses.\"$class\".lease.required" "false")"
-  lease_wait_seconds="$(inventory_value ".commandClasses.\"$class\".lease.waitSeconds" "0")"
-  lease_state_subdir="$(inventory_value ".commandClasses.\"$class\".lease.stateSubdir" "$lease_state_subdir")"
-fi
-
 command_base="$(basename -- "${1:-}")"
 if [ "$command_base" = "xtask" ]; then
   for arg in "$@"; do
@@ -305,20 +296,6 @@ elif [ "$class" = build ]; then
   : "${NIX_BUILD_CORES:=12}"
   : "${SCCACHE_IDLE_TIMEOUT:=10}"
   export CARGO_BUILD_JOBS CARGO_INCREMENTAL CMAKE_BUILD_PARALLEL_LEVEL MAKEFLAGS NIX_BUILD_CORES SCCACHE_IDLE_TIMEOUT
-fi
-
-if [ "$lease_required" = true ] && [ -z "${SINNIX_HEAVY_LEASE_TOKEN:-}" ]; then
-  lease_bin="${SINNIX_HEAVY_LEASE_BIN:-$(command -v sinnix-heavy-lease 2>/dev/null || true)}"
-  if [ -z "$lease_bin" ]; then
-    echo "sinnix-scope: lease-required class $class has no sinnix-heavy-lease command" >&2
-    exit 125
-  fi
-  lease_state_dir="${SINNIX_HEAVY_LEASE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/$lease_state_subdir}"
-  scoped_command=("$lease_bin" --state-dir "$lease_state_dir" --wait-seconds "$lease_wait_seconds")
-  [[ -z "$job_id" ]] || scoped_command+=(--job-id "$job_id")
-  [[ -z "$project_id" ]] || scoped_command+=(--project "$project_id")
-  [[ -z "$work_item" ]] || scoped_command+=(--work-item "$work_item")
-  scoped_command+=(-- "$@")
 fi
 
 # Explicit job limits are overrides, so append them after inventory defaults.

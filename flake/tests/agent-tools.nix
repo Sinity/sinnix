@@ -697,74 +697,6 @@ in
           '';
         }
       );
-      heavyWorkLeaseFixture =
-        pkgs.runCommand "heavy-work-lease-fixture"
-          {
-            nativeBuildInputs = [
-              pkgs.bash
-              pkgs.coreutils
-              pkgs.gawk
-              pkgs.gnugrep
-              pkgs.gnused
-              pkgs.jq
-              pkgs.util-linux
-            ];
-          }
-          ''
-            export HOME="$TMPDIR/home"
-            mkdir -p "$HOME"
-            export PATH=${
-              lib.makeBinPath [
-                pkgs.bash
-                pkgs.coreutils
-                pkgs.gawk
-                pkgs.gnugrep
-                pkgs.gnused
-                pkgs.jq
-                pkgs.util-linux
-              ]
-            }
-            cp ${../../scripts/sinnix-heavy-lease} "$TMPDIR/sinnix-heavy-lease"
-            chmod +x "$TMPDIR/sinnix-heavy-lease"
-            sed -i "1c#!${pkgs.bash}/bin/bash" "$TMPDIR/sinnix-heavy-lease"
-            ${pkgs.bash}/bin/bash ${../../flake/tests/heavy-work-lease.sh} "$TMPDIR/sinnix-heavy-lease"
-            touch "$out"
-          '';
-      # sinnix-dv8: proves the shared rebuildLease fragment every rebuild
-      # verb (switch/boot/test-system/test-vm) is built from -- not just the
-      # raw sinnix-heavy-lease binary above -- actually exits non-zero with
-      # an unambiguous message when the lease is held, and never reaches the
-      # code past the lease gate.
-      rebuildLeaseWrapperFixture =
-        let
-          commandRegistry = import ../command-registry.nix { inherit inputs pkgs system; };
-          leaseProbeWrapper = pkgs.writeShellScriptBin "sinnix-switch-lease-probe" ''
-            set -euo pipefail
-            ${commandRegistry.rebuildLease "switch"}
-            echo "SENTINEL: wrapper ran past the lease gate" >&2
-            exit 111
-          '';
-        in
-        pkgs.runCommand "rebuild-lease-wrapper-fixture"
-          {
-            nativeBuildInputs = [
-              pkgs.bash
-              pkgs.coreutils
-              pkgs.jq
-              pkgs.util-linux
-            ];
-          }
-          ''
-            export HOME="$TMPDIR/home"
-            mkdir -p "$HOME"
-            cp ${../../scripts/sinnix-heavy-lease} "$TMPDIR/sinnix-heavy-lease"
-            chmod +x "$TMPDIR/sinnix-heavy-lease"
-            sed -i "1c#!${pkgs.bash}/bin/bash" "$TMPDIR/sinnix-heavy-lease"
-            ${pkgs.bash}/bin/bash ${../../flake/tests/rebuild-lease-wrapper.sh} \
-              ${leaseProbeWrapper}/bin/sinnix-switch-lease-probe \
-              "$TMPDIR/sinnix-heavy-lease"
-            touch "$out"
-          '';
       scopeWrapperFixture =
         pkgs.runCommand "scope-wrapper-fixture"
           {
@@ -930,16 +862,24 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/bd-safety.sh} "$hook"
             touch "$out"
           '';
-      egressGuardFixture = pkgs.runCommand "egress-guard-fixture" {
-        nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.jq pkgs.python3 ];
-      } ''
-        scanner="$TMPDIR/sinnix-egress-scan"
-        cp ${../../scripts/sinnix-egress-scan} "$scanner"
-        chmod +x "$scanner"
-        patchShebangs "$scanner"
-        ${pkgs.bash}/bin/bash ${../../flake/tests/egress-guard.sh} "$scanner" "$TMPDIR/egress"
-        touch "$out"
-      '';
+      egressGuardFixture =
+        pkgs.runCommand "egress-guard-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.jq
+              pkgs.python3
+            ];
+          }
+          ''
+            scanner="$TMPDIR/sinnix-egress-scan"
+            cp ${../../scripts/sinnix-egress-scan} "$scanner"
+            chmod +x "$scanner"
+            patchShebangs "$scanner"
+            ${pkgs.bash}/bin/bash ${../../flake/tests/egress-guard.sh} "$scanner" "$TMPDIR/egress"
+            touch "$out"
+          '';
       contextHandoffFixture =
         pkgs.runCommand "context-handoff-fixture"
           {
@@ -1152,8 +1092,6 @@ in
       checks = {
         agent-resource-policy = agentResourcePolicy;
         agent-npm-bootstrap-recovery = agentNpmBootstrapRecovery;
-        heavy-work-lease = heavyWorkLeaseFixture;
-        rebuild-lease-wrapper = rebuildLeaseWrapperFixture;
         scope-wrapper = scopeWrapperFixture;
         agent-job-handles = agentJobHandleFixture;
         mcp-sweep = mcpSweepFixture;

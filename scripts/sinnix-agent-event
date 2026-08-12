@@ -20,7 +20,7 @@ done
 
 [[ ${job_id} =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]] || { echo "invalid job ID" >&2; exit 64; }
 case "${event_type}" in
-  turn|tool|approval|user_wait|rate_limit|heavy_lease|verification|completion|failure|heartbeat) ;;
+  turn|tool|approval|user_wait|rate_limit|verification|completion|failure|heartbeat) ;;
   *) echo "unsupported lifecycle event: ${event_type}" >&2; exit 64 ;;
 esac
 jq -e 'type == "object"' <<<"${payload}" >/dev/null || { echo "payload must be a JSON object" >&2; exit 64; }

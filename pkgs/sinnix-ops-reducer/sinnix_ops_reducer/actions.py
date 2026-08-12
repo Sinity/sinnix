@@ -76,7 +76,6 @@ ACTIONS = {
     "set_policy",
     "park",
     "rebuild_override",
-    "heavy_lease",
     "restart",
 }
 
@@ -425,8 +424,6 @@ class ActionService:
                 surface["unit"],
                 *assignments,
             ]
-        elif action == "heavy_lease":
-            command = ["sinnix-heavy-lease", "status"]
         else:
             return {"name": action, "status": "accepted", "receipt": secrets.token_hex(8)}
         result = subprocess.run(

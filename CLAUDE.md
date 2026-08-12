@@ -182,10 +182,13 @@ One contract governs unit placement and observability:
   consumed at runtime by `sinnix-scope`, `sinnix-observe`, and machine
   telemetry. When adding a daemon: declare the surface, apply
   `mkRuntimeServiceConfig`, done — no ad-hoc Nice/IOWeight overrides.
-- Build, Nix build, and explicit heavy command classes acquire the shared
-  attested heavy-work lease. Agent/source work stays concurrent. Gateway and
-  native launches share versioned UUID manifests and correlation IDs consumed
-  by `sinnix-observe`.
+- Concurrency is governed by slice memory caps and weights, not
+  serialization; the only build-path lock is `/tmp/sinnix-switch.lock`, a
+  correctness guard against two activations racing on the system profile
+  (the 2026-08-06 host-wide heavy-work lease was removed 2026-08-12 as
+  unjustified over-serialization — see sinnix-qlf for the evidence).
+  Gateway and native launches share versioned UUID manifests and
+  correlation IDs consumed by `sinnix-observe`.
 
 ## Flake Layout & Input Pinning
 

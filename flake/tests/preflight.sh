@@ -5,12 +5,6 @@ preflight="$1"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/home/persisted" "$tmp/home/unpersisted" "$tmp/var" "$tmp/bin"
-cat > "$tmp/bin/sinnix-heavy-lease" <<'EOF'
-#!/usr/bin/env bash
-exit 1
-EOF
-sed -i "1c#!$(command -v bash)" "$tmp/bin/sinnix-heavy-lease"
-chmod +x "$tmp/bin/sinnix-heavy-lease"
 export PATH="$tmp/bin:$PATH"
 truncate -s 101M "$tmp/home/persisted/keep.bin"
 truncate -s 101M "$tmp/home/unpersisted/private.bin"

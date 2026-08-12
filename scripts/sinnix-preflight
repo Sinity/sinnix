@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Run read-only reboot and switch safety checks before changing generations
-# runtimeInputs: bash coreutils findutils gawk gnugrep procps systemd util-linux jq @sinnix-heavy-lease
+# runtimeInputs: bash coreutils findutils gawk gnugrep procps systemd util-linux jq
 set -euo pipefail
 
 mode="${1:-}"
@@ -160,11 +160,6 @@ check_work() {
 }
 
 check_concurrency() {
-  if sinnix-heavy-lease status >/dev/null 2>&1; then
-    report 1 heavy-lease "another heavy workload owns the shared lease"
-  else
-    report 0 heavy-lease "shared heavy-work lease is available"
-  fi
   if pgrep -af 'nh os (switch|boot)|nixos-rebuild|nix.*--profile.*/nix/var/nix/profiles/system' >/dev/null 2>&1; then
     report 2 concurrent-switch "another generation operation is running" "wait for the existing switch or boot operation"
   else

@@ -23,10 +23,9 @@ sed -i "1c#!$(command -v bash)" "$fixture/bin/sinnix-scope"
 cat >"$fixture/inventory.json" <<'EOF_INVENTORY'
 {
   "commandClasses": {
-    "background": {"lease": {"required": false}},
-    "nix-build": {"lease": {"required": true}},
+    "background": {},
+    "nix-build": {},
     "gpu-runtime": {
-      "lease": {"required": false},
       "commandMatchers": [
         "stashbox-vlm-serve",
         "stashbox-llama-vlm-serve-gpu"
