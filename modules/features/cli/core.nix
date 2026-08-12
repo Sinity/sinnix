@@ -82,7 +82,6 @@ mkFeatureModule {
       # write on every session open, and its SQLite access has no busy
       # timeout, so concurrent agent session storms failed PAM session setup
       # outright. (mkForce: upstream pam.nix asserts enable = true.)
-      # History/evidence: bd show sinnix-82m
       security.pam.services.login.rules.session.lastlog.enable = lib.mkForce false;
 
       home-manager.users.${user} =

@@ -228,7 +228,6 @@ rec {
         # Shutdown debris cap: sacrificial scopes (e.g. per-checkout sinex
         # dev-postgres in nix-build scopes) get 15s after SIGTERM then
         # SIGKILL, not the 90s default — this state is regenerable by design.
-        # History/evidence: bd show sinnix-eaw
         TimeoutStopSec = "15s";
       };
       envDefaults = {
@@ -254,7 +253,6 @@ rec {
         # Shutdown debris cap: sacrificial scopes (e.g. per-checkout sinex
         # dev-postgres in nix-build scopes) get 15s after SIGTERM then
         # SIGKILL, not the 90s default — this state is regenerable by design.
-        # History/evidence: bd show sinnix-eaw
         TimeoutStopSec = "15s";
       };
       envDefaults = { };
@@ -290,7 +288,6 @@ rec {
         # Shutdown debris cap: sacrificial scopes (e.g. per-checkout sinex
         # dev-postgres in nix-build scopes) get 15s after SIGTERM then
         # SIGKILL, not the 90s default — this state is regenerable by design.
-        # History/evidence: bd show sinnix-eaw
         TimeoutStopSec = "15s";
       };
       envDefaults = { };

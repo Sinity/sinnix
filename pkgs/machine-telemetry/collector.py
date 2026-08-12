@@ -53,7 +53,6 @@ PROC_IO_FIELDS = (
 # refault/swap/OOM signals that used to be invisible to telemetry even
 # during a real lag incident, since PSI-memory alone stays quiet while
 # reclaim is still (slowly) meeting demand.
-# History/evidence: bd show sinnix-fjq
 VMSTAT_FIELDS = (
     "workingset_refault_file",
     "workingset_refault_anon",
@@ -1872,7 +1871,6 @@ def systemctl_props(
             # transient unit + lastlog2 write) on every sample tick. setpriv
             # switches uid without PAM; dbus-broker admits the matching uid
             # to the user bus directly.
-            # History/evidence: bd show sinnix-82m
             pw = pwd.getpwnam(user_name)
             cmd = [
                 "setpriv",
@@ -2031,7 +2029,6 @@ def insert_service_states(
 # storms; systemd-oomd and kernel-OOM patterns are best-effort from
 # documented formats (raw_line is always kept, so an imperfect match loses
 # nothing).
-# History/evidence: bd show sinnix-fjq
 KILL_EVENT_GREP = (
     r"sending (SIGTERM|SIGKILL) to process|"
     r"^Killed process|"
@@ -2293,14 +2290,9 @@ def main() -> int:
         kill_event_cursor = load_kill_event_cursor(conn)
         last_bloat = 0.0
 
-        # Probe fan-tacho capability once at startup. Many motherboards
-        # (e.g. Gigabyte boards with no IT87/NCT677x driver match) never
-        # expose fan*_input under /sys/class/hwmon — that is a
-        # capability fact for the hardware, not a per-sample regression.
-        # Emitting fan.hwmon_unavailable on every sample turned the
-        # gap into 35% of the substrate's regression signal (per the
-        # 2026-05-18 gap-summary first-run). Probe once: if fans were
-        # never there, the manifest already records the capability gap;
+        # Probe fan-tacho capability once at startup: missing fan*_input
+        # under /sys/class/hwmon is a hardware capability fact, not a
+        # per-sample regression. The manifest records the capability gap;
         # only emit the per-sample code if fans were present at startup
         # and then disappeared (driver reload / hardware fault).
         had_fans_at_startup = any(Path("/sys/class/hwmon").glob("hwmon*/fan*_input"))
@@ -2580,7 +2572,6 @@ def main() -> int:
             # holds an older snapshot. TRUNCATE both drains and shrinks it;
             # the 5s busy handler degrades a blocked attempt to a logged
             # retry next interval instead of stalling sampling.
-            # History/evidence: bd show sinnix-bdi
             if sample_start >= next_wal_checkpoint:
                 next_wal_checkpoint = sample_start + WAL_CHECKPOINT_INTERVAL_S
                 try:

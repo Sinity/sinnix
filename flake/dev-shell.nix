@@ -22,7 +22,6 @@
       # resolveFlakeDir is shared with command-registry.nix's appCommands
       # (`nix run .#switch` etc.) so both entry points resolve the same way
       # instead of silently drifting apart.
-      # History/evidence: bd show sinnix-6ru
       inherit (commandRegistry)
         rebuildServicePath
         localInputOverrideArgs

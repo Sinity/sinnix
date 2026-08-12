@@ -62,7 +62,6 @@ let
       # extraOptions must not define its own top-level `enable`: the `//`
       # merge below replaces it wholesale, silently discarding whatever a
       # caller declared there.
-      # History/evidence: bd show sinnix-tgy
       optionsForPath =
         if extraOptions ? enable then
           throw "mkFeatureModule ${builtins.concatStringsSep "." path}: extraOptions must not define 'enable' (generated automatically, default = ${lib.boolToString defaultOn}); use the defaultOn argument instead"

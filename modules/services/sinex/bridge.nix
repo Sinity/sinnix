@@ -240,7 +240,6 @@ in
               # via the standard impermanence bind mount below
               # (sinnix.persistence.system.directories) rather than moved onto
               # @sinex — no raw-subvolume bootstrapping needed here.
-              # History/evidence: bd show sinnix-v3p
               dataDir = "/var/lib/nats";
               jetstreamMaxStore = "32G";
               # Express ONLY this host's genuine deltas against sinex's own
@@ -293,10 +292,9 @@ in
               # failures. Keep JetStream under the normal NATS state root.
               storeDir = "/var/lib/nats/jetstream";
               killPolicy = {
-                # Give JetStream enough bounded time to close a
-                # production-sized store cleanly. Live stop evidence on
-                # 2026-05-03 showed the old 10s timeout SIGKILLed NATS
-                # during JetStream shutdown.
+                # Bounded but generous: JetStream needs real time to close a
+                # production-sized store cleanly; a short timeout SIGKILLs
+                # NATS mid-shutdown.
                 signal = "SIGTERM";
                 timeoutStopSec = "90s";
               };
@@ -688,10 +686,9 @@ in
               restartIfChanged = false;
               stopIfChanged = false;
               serviceConfig.Environment = lib.mkAfter [
-                # Production evidence on 2026-06-12 showed sinexd eagerly
-                # holding the upstream default 100-connection pool idle after
-                # heartbeat bursts. Bound it here as host runtime policy; the
-                # daemon can still use 32 concurrent DB sessions under catch-up.
+                # Host runtime policy: bound the DB pool well under the
+                # upstream 100-connection default; 32 concurrent sessions
+                # still covers catch-up bursts.
                 "SINEX_DB_MAX_CONNECTIONS=32"
                 "SINEX_DB_MIN_CONNECTIONS=4"
                 # git-commit-history invokes git asynchronously inside sinexd,
@@ -705,13 +702,10 @@ in
                 "SINEX_EVENT_ENGINE_REJECT_INITIAL_REPLAY=false"
                 "SINEX_EVENT_ENGINE_STARTUP_CATCH_UP_MAX_CONCURRENT=1"
               ];
-              # Bounded drain window, matching the NATS killPolicy convention.
-              # The previous 10min budget assumed a graceful WAL/material
-              # drain, but live stop evidence (2026-06-12, ~10 activations)
-              # shows sinexd ignores SIGTERM and keeps heartbeating until
-              # SIGKILL; every forced kill replayed cleanly via JetStream.
-              # 90s gives a fixed daemon time to drain once the upstream
-              # shutdown bug is fixed while bounding activation stalls.
+              # Bounded drain window, matching the NATS killPolicy
+              # convention: forced kills replay cleanly via JetStream, so
+              # bounding activation stalls beats waiting on a daemon that
+              # may ignore SIGTERM.
               serviceConfig.TimeoutStopSec = lib.mkForce "90s";
             };
           }
