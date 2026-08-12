@@ -266,6 +266,11 @@ mkFeatureModule {
     {
       sinnix.features.dev.agentTools.hermesConfigSource = hermesConfigFile;
       sinnix.features.dev.agentTools.hermesProfileConfigSources = hermesProfileConfigFiles;
+      # Durable Claude Code policy (hooks, permissions, env) ships as the
+      # top-precedence managed settings file. The source is the live dots
+      # checkout, not a store copy, so policy edits propagate instantly.
+      environment.etc."claude-code/managed-settings.json".source =
+        "${sinnixCfg.paths.dotsRoot}/claude/managed-settings.json";
       sinnix.persistence.home = {
         directories = [
           {
@@ -414,7 +419,19 @@ mkFeatureModule {
           home.activation.claudeSymlink = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
             mkdir -p $HOME/.config/claude
             ln -sfn .config/claude $HOME/.claude
-            ln -sfn ${sinnixCfg.paths.dotsRoot}/claude/settings.json $HOME/.config/claude/settings.json
+            # settings.json is a plain writable file, seeded once from dots:
+            # the harness persists UI state (model, effort, plugin toggles)
+            # into it on every /model-style change, so a repo symlink would
+            # keep the tracked tree dirty. Durable policy (hooks,
+            # permissions, env) lives in /etc/claude-code/managed-settings.json
+            # instead. Migrate the pre-split symlink if one is still present.
+            if [ -L "$HOME/.config/claude/settings.json" ]; then
+              rm "$HOME/.config/claude/settings.json"
+            fi
+            if [ ! -f "$HOME/.config/claude/settings.json" ]; then
+              cp ${sinnixCfg.paths.dotsRoot}/claude/settings-seed.json "$HOME/.config/claude/settings.json"
+              chmod 600 "$HOME/.config/claude/settings.json"
+            fi
           '';
           home.activation.hermesConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
             mkdir -p "$HOME/.hermes"

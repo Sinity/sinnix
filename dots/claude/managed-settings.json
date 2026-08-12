@@ -40,13 +40,10 @@
       "mcp__claude_ai_SimpleScraper__*",
       "mcp__claude_ai_Mermaid_Chart__*"
     ],
-    "deny": [
-      "Bash(rm -rf /:*)"
-    ],
+    "deny": ["Bash(rm -rf /:*)"],
     "ask": [],
     "defaultMode": "auto"
   },
-  "model": "sonnet",
   "hooks": {
     "PreToolUse": [
       {
@@ -205,32 +202,6 @@
     "type": "command",
     "command": "bash /home/sinity/.claude/statusline-command.sh"
   },
-  "enabledPlugins": {
-    "context7@claude-plugins-official": false,
-    "feature-dev@claude-plugins-official": false,
-    "agent-sdk-dev@claude-plugins-official": false,
-    "plugin-dev@claude-plugins-official": false,
-    "commit-commands@claude-plugins-official": false,
-    "learning-output-style@claude-plugins-official": false,
-    "rust-analyzer-lsp@claude-plugins-official": false,
-    "superpowers@claude-plugins-official": false,
-    "claude-code-setup@claude-plugins-official": false,
-    "explanatory-output-style@claude-plugins-official": false,
-    "frontend-design@claude-plugins-official": false,
-    "code-review@claude-plugins-official": false,
-    "code-simplifier@claude-plugins-official": false,
-    "claude-md-management@claude-plugins-official": false,
-    "skill-creator@claude-plugins-official": false,
-    "pr-review-toolkit@claude-plugins-official": false,
-    "pyright-lsp@claude-plugins-official": false,
-    "playground@claude-plugins-official": false,
-    "semgrep@claude-plugins-official": false,
-    "chrome-devtools-mcp@claude-plugins-official": false,
-    "atomic-agents@claude-plugins-official": false
-  },
-  "alwaysThinkingEnabled": true,
-  "effortLevel": "medium",
-  "tui": "fullscreen",
   "skipDangerousModePermissionPrompt": true,
   "skipWorkflowUsageWarning": true,
   "switchModelsOnFlag": false,
