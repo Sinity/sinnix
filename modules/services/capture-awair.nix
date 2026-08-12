@@ -89,7 +89,7 @@ mkServiceModule {
       {
         name = "awair";
         path = laneDir;
-        expectedCadenceSeconds = 60;
+        cadenceSeconds = 60;
         # Unlike media or clipboard lanes, silence here is never legitimate:
         # the room always has air. A gap means the device is unplugged, off
         # the network, or the lane is broken -- all worth surfacing.
