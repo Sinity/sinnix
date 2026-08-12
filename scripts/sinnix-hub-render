@@ -56,15 +56,28 @@ def load_json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
     return value, None
 
 
-def unit_states(units: list[str]) -> dict[str, dict[str, str]]:
-    """One systemctl call for every unit we care about."""
-    if not units:
-        return {}
+def unit_states(units: list[tuple[str, str]]) -> dict[str, dict[str, str]]:
+    """Query systemd for (manager, unit) pairs, one call per manager.
+
+    The manager matters: asking the system manager about a user unit reports
+    not-found, which would render as "not installed" and hide a service that is
+    running perfectly well.
+    """
+    states: dict[str, dict[str, str]] = {}
+    for manager in {manager for manager, _ in units}:
+        names = [unit for owner, unit in units if owner == manager and unit]
+        if names:
+            states.update(show_units(manager, names))
+    return states
+
+
+def show_units(manager: str, units: list[str]) -> dict[str, dict[str, str]]:
     systemctl = shutil.which("systemctl") or "systemctl"
     try:
         result = subprocess.run(
             [
                 systemctl,
+                "--user" if manager == "user" else "--system",
                 "show",
                 "--property=Id",
                 "--property=ActiveState",
@@ -571,7 +584,13 @@ def render_ai(
 ) -> str:
     host = str(manifest.get("host", "sinnix"))
     services = resolve_ai_services(manifest, inventory)
-    states = unit_states([str(s["unit"]) for s in services if s.get("unit")])
+    states = unit_states(
+        [
+            (str(s.get("manager", "system")), str(s["unit"]))
+            for s in services
+            if s.get("unit")
+        ]
+    )
 
     rows = ""
     for service in sorted(services, key=lambda s: str(s.get("name"))):
