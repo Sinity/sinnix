@@ -549,7 +549,7 @@ in
               [.hooks.SessionStart[].hooks[].command] | index("bd-prime-if-present")
             ' "$HOME/.codex/hooks.json" >/dev/null
             jq -e '
-              [.hooks.SessionStart[].hooks[].command] | index("sessionstart-sinex-recall")
+              [.hooks.SessionStart[].hooks[].command] | any(contains("sessionstart-sinex-recall.sh"))
             ' "$HOME/.codex/hooks.json" >/dev/null
             jq -e '
               . as $root

@@ -513,15 +513,6 @@ mkFeatureModule {
               }
             ) agentLanes.museLanes)
             // {
-              ".local/bin/sessionstart-sinex-recall" = {
-                text = ''
-                  #!${pkgs.runtimeShell}
-                  exec "${sinnixCfg.paths.dotsRoot}/claude/hooks/sessionstart-sinex-recall.sh" "$@"
-                '';
-                executable = true;
-                force = true;
-              };
-
               ".local/bin/gemini" = {
                 text = ''
                   #!/usr/bin/env bash
