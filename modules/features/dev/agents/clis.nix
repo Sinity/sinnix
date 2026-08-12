@@ -227,21 +227,13 @@ mkFeatureModule {
           );
         }
       );
-      sharedSkillNames = import ../../../../flake/data/shared-agent-skills.nix;
-      # Out-of-store by construction: the farm is a store directory, but every
-      # entry symlinks into the live dots checkout rather than a copied source.
-      # Editing a skill's SKILL.md/template therefore takes effect immediately
-      # for claude/codex/gemini/hermes, matching every other dots file here.
-      # Only ADDING or REMOVING a skill name still needs a rebuild.
-      sharedSkillFarm = mkSkillFarm "sinnix-shared-agent-skills" sharedSkillNames;
-      mkSkillFarm =
-        farmName: names:
-        pkgs.runCommand farmName { } ''
-          mkdir -p "$out"
-          ${lib.concatMapStringsSep "\n" (n: ''
-            ln -s ${lib.escapeShellArg "${sinnixCfg.paths.dotsRoot}/_ai/skills/${n}"} "$out/${n}"
-          '') names}
-        '';
+      inherit
+        (import ./skill-farm.nix {
+          inherit lib pkgs;
+          dotsRoot = sinnixCfg.paths.dotsRoot;
+        })
+        sharedSkillFarm
+        ;
       # Runs the given launcher under sinnix-scope's agent slice unless already
       # scoped (see scripts/sinnix-agent-scope-exec).
       agentScopeExec = "${scriptPkgs.sinnix-agent-scope-exec}/bin/sinnix-agent-scope-exec";
@@ -274,6 +266,11 @@ mkFeatureModule {
     {
       sinnix.features.dev.agentTools.hermesConfigSource = hermesConfigFile;
       sinnix.features.dev.agentTools.hermesProfileConfigSources = hermesProfileConfigFiles;
+      # Durable Claude Code policy (hooks, permissions, env) ships as the
+      # top-precedence managed settings file. The source is the live dots
+      # checkout, not a store copy, so policy edits propagate instantly.
+      environment.etc."claude-code/managed-settings.json".source =
+        "${sinnixCfg.paths.dotsRoot}/claude/managed-settings.json";
       sinnix.persistence.home = {
         directories = [
           {
@@ -403,15 +400,9 @@ mkFeatureModule {
           };
 
           xdg.configFile = {
-            "claude/hooks/pretooluse-bash.sh".source = mkDotsFile "/claude/hooks/pretooluse-bash.sh";
-            "claude/hooks/sessionstart-polylogue-recall.sh".source =
-              mkDotsFile "/claude/hooks/sessionstart-polylogue-recall.sh";
-            "claude/hooks/sessionstart-sinex-recall.sh" = {
-              text = builtins.readFile ../../../../dots/claude/hooks/sessionstart-sinex-recall.sh;
-              executable = true;
-            };
-            "claude/hooks/sessionstart-beads-prime.sh".source =
-              mkDotsFile "/claude/hooks/sessionstart-beads-prime.sh";
+            # Claude hooks are NOT registered here: settings.json references
+            # them dots-direct (dots/claude/hooks/*.sh), so a new hook file
+            # is live the moment it exists — no rebuild, no registration.
             "claude/CLAUDE.md".source = mkDotsFile "/claude/CLAUDE.md";
             "claude/skills" = {
               source = sharedSkillFarm;
@@ -428,7 +419,30 @@ mkFeatureModule {
           home.activation.claudeSymlink = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
             mkdir -p $HOME/.config/claude
             ln -sfn .config/claude $HOME/.claude
-            ln -sfn ${sinnixCfg.paths.dotsRoot}/claude/settings.json $HOME/.config/claude/settings.json
+            # settings.json is a plain writable file: the harness persists UI
+            # state (model, effort, plugin toggles) into it on every
+            # /model-style change, so a repo symlink would keep the tracked
+            # tree dirty. Durable policy lives in
+            # /etc/claude-code/managed-settings.json instead. Migrating from
+            # the pre-split symlink preserves the operator's live UI state:
+            # strip exactly the keys the managed file carries (self-derived,
+            # so the two layers cannot drift into double-firing hooks) and
+            # keep the rest. The seed covers only the fresh-machine case.
+            _claude_settings="$HOME/.config/claude/settings.json"
+            _claude_managed="${sinnixCfg.paths.dotsRoot}/claude/managed-settings.json"
+            if [ -L "$_claude_settings" ]; then
+              _claude_old="$(readlink -f "$_claude_settings" || true)"
+              rm "$_claude_settings"
+              if [ -f "$_claude_old" ]; then
+                ${pkgs.jq}/bin/jq --slurpfile m "$_claude_managed" \
+                  'delpaths([$m[0] | keys[] | [.]])' "$_claude_old" \
+                  > "$_claude_settings"
+              fi
+            fi
+            if [ ! -f "$_claude_settings" ]; then
+              cp ${sinnixCfg.paths.dotsRoot}/claude/settings-seed.json "$_claude_settings"
+            fi
+            chmod 600 "$_claude_settings"
           '';
           home.activation.hermesConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
             mkdir -p "$HOME/.hermes"
@@ -519,15 +533,6 @@ mkFeatureModule {
               }
             ) agentLanes.museLanes)
             // {
-              ".local/bin/sessionstart-sinex-recall" = {
-                text = ''
-                  #!${pkgs.runtimeShell}
-                  exec "$HOME/.claude/hooks/sessionstart-sinex-recall.sh" "$@"
-                '';
-                executable = true;
-                force = true;
-              };
-
               ".local/bin/gemini" = {
                 text = ''
                   #!/usr/bin/env bash

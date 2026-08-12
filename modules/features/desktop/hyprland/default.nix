@@ -279,9 +279,10 @@ in
               decoration = {
                 rounding = 10;
                 active_opacity = 1.0;
-                # Kitty changes only its background alpha on focus, preserving
-                # bright text. Keep compositor-wide fading off so browsers and
-                # other applications remain legible.
+                # Keep compositor-wide fading off so browsers and other
+                # applications remain legible. Kitty's own focus/unfocus fade
+                # is a per-app override (windowrule "kitty-focus-opacity" in
+                # hyprland/rules.nix), not a global opacity change.
                 inactive_opacity = 1.0;
                 dim_inactive = false;
                 dim_strength = 0.0;

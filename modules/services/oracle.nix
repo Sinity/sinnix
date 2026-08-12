@@ -16,6 +16,7 @@
   mkServiceModule,
   lib,
   pkgs,
+  config,
   ...
 }@args:
 mkServiceModule {
@@ -47,7 +48,7 @@ mkServiceModule {
   configFn =
     { cfg, pkgs, ... }:
     let
-      oracleScript = "/realm/project/sinnix/scripts/oracle";
+      oracleScript = "${config.sinnix.paths.projectRoot}/scripts/oracle";
     in
     {
       sinnix.persistence.home.directories = [ ".local/share/oracle" ];

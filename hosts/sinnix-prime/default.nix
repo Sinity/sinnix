@@ -50,7 +50,6 @@
     capture-clipboard.enable = true;
     capture-primary.enable = true;
     capture-a11y.enable = true;
-    capture-input-dynamics.enable = true;
     capture-audio.enable = true;
     # Phase 3a (sinnix-9pd): per-window screen frames + the always-on
     # replay ring, promoted to default-on via this host enable per the

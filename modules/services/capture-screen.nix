@@ -43,7 +43,7 @@ mkServiceModule {
     manager = "user";
     # No explicit `kind`: real owned systemd .service unit -> defaults to
     # "service", matching every sibling capture-* daemon (capture-a11y,
-    # capture-input-dynamics). `kind = "capture"` is reserved for orphan
+    # capture-mpris). `kind = "capture"` is reserved for orphan
     # surfaces with no real backing unit (capture-registry.nix).
     resourceClass = "capture-runtime";
     observe = {
