@@ -58,7 +58,12 @@
     # module level; hosts express the opt-in) rather than baking a
     # non-standard default into the factory itself.
     capture-screen.enable = true;
-    capture-replay.enable = true;
+    capture-replay = {
+      enable = true;
+      # Single panel on this host; gsr needs the connector name (see the
+      # target option's description for why "focused" cannot work).
+      target = "DP-3";
+    };
     capture-kitty-scrollback.enable = true;
     url-ledger.enable = true;
     below = {
