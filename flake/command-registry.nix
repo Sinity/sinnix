@@ -98,8 +98,8 @@ let
   rebuildLock = name: ''
     exec 9>/tmp/sinnix-switch.lock
     if ! ${pkgs.util-linux}/bin/flock --nonblock 9; then
-      echo "sinnix ${name}: another rebuild is already running — aborting to prevent concurrent builds" >&2
-      exit 1
+      echo "sinnix ${name}: another activation is running — queued behind it (waiting for the lock)" >&2
+      ${pkgs.util-linux}/bin/flock 9
     fi
   '';
   # NOT a ''...'' block: this is spliced mid-line into a backslash-continued
