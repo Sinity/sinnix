@@ -58,6 +58,11 @@
       enableMagicDNS = false;
       useRoutingFeatures = "none";
     };
+    # Browser front door to the estate: reports, the reducer's current-state
+    # dashboard, and the AI control panel. Binds loopback plus the tailscale0
+    # address only, and its ports are opened on tailscale0 alone -- the LAN
+    # never sees it. Depends on tailscale above (asserted in the module).
+    hub.enable = true;
     # ── Capture-machinery program (2026-08-12) ──────────────────────────────
     capture-notifications.enable = true;
     capture-mpris.enable = true;
