@@ -48,6 +48,7 @@
     capture-notifications.enable = true;
     capture-mpris.enable = true;
     capture-clipboard.enable = true;
+    capture-primary.enable = true;
     capture-a11y.enable = true;
     capture-input-dynamics.enable = true;
     capture-audio.enable = true;
