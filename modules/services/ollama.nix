@@ -73,15 +73,14 @@ mkServiceModule {
       ollamaBin = lib.getExe pkgs.ollama-cuda;
       awkBin = lib.getExe pkgs.gawk;
       # Upstream's ollama-model-loader (nixpkgs services.ollama.loadModels)
-      # pulls every tag in one `parallel` invocation with no per-model retry:
-      # one transient transfer flake (observed 2026-08-11, `hf.co/rbehzadan/
-      # ReaderLM-v2.gguf`: "max retries exceeded: EOF") aborts the whole
-      # oneshot mid-list, silently leaving the roster incomplete while
-      # LiteLLM keeps advertising the missing model. Replace the generated
-      # script with one that retries each tag independently (bounded
-      # backoff), keeps going on exhaustion instead of aborting, then
-      # verifies the full roster against `ollama list` and names exactly
-      # which tags are still missing before failing the unit.
+      # pulls every tag in one `parallel` invocation with no per-model retry,
+      # so a single transient transfer flake aborts the whole oneshot
+      # mid-list while LiteLLM keeps advertising the now-missing model.
+      # Replace the generated script with one that retries each tag
+      # independently (bounded backoff), keeps going on exhaustion instead
+      # of aborting, then verifies the full roster against `ollama list` and
+      # names exactly which tags are still missing before failing the unit.
+      # History/evidence: bd show sinnix-wyg
       modelLoaderScript = ''
         declare -a models=( ${lib.escapeShellArgs cfg.loadModels} )
         declare -a delays=(10 30 60 120)

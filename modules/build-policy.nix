@@ -60,11 +60,10 @@ in
         netrc-file = "/etc/nix/netrc";
 
         # One derivation at a time: two concurrent heavy builds (e.g. two CUDA
-        # ggml derivations) each try to use most of the box and jointly exceed
-        # available RAM (2026-07-06 incident: max-jobs=2 let koboldcpp and
-        # noctalia collide, earlyoom killed cc1plus). Serializing to a single
-        # job and giving it the full core budget keeps peak memory bounded to
-        # one derivation's needs.
+        # ggml derivations) each try to use most of the box and jointly
+        # exceed available RAM. Serializing to a single job and giving it
+        # the full core budget keeps peak memory bounded to one derivation.
+        # History/evidence: bd show sinnix-jr8
         max-jobs = 1;
         cores = 16;
         builders-use-substitutes = true;
