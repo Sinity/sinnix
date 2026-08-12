@@ -62,8 +62,14 @@ in
               message = "Claude settings.json must not be managed through Home Manager xdg.configFile.";
             }
             {
-              assertion = lib.hasInfix "${config.sinnix.paths.dotsRoot}/claude/settings.json" activationText;
-              message = "Claude settings.json must be linked directly to dots during activation.";
+              assertion = lib.hasInfix "${config.sinnix.paths.dotsRoot}/claude/settings-seed.json" activationText;
+              message = "Claude settings.json must be seeded copy-if-absent from dots so the harness can persist UI state into a plain writable file.";
+            }
+            {
+              assertion =
+                (config.environment.etc."claude-code/managed-settings.json".source or null)
+                == "${config.sinnix.paths.dotsRoot}/claude/managed-settings.json";
+              message = "Claude managed settings must be deployed to /etc/claude-code as a symlink into the live dots checkout.";
             }
             {
               assertion = builtins.hasAttr ".config/claude/agents" hm.home.file;
@@ -446,15 +452,13 @@ in
 
             jq -e '
               (has("mcpServers") | not) and
-              .alwaysThinkingEnabled == true and
-              .skipDangerousModePermissionPrompt == true and
               ([.hooks.SessionStart[].hooks[].command]
                 | any(contains("SINNIX_CLAUDE_PROFILE") and contains("serena-hooks activate --client=claude-code"))) and
               ([.hooks.SessionStart[].hooks[].command]
                 | any(contains("sessionstart-sinex-recall.sh"))) and
               ([.hooks.Stop[].hooks[].command]
                 | any(contains("SINNIX_CLAUDE_PROFILE") and contains("serena-hooks cleanup --client=claude-code")))
-            ' ${inputs.self}/dots/claude/settings.json >/dev/null
+            ' ${inputs.self}/dots/claude/managed-settings.json >/dev/null
 
             # Rendered profile configs must match the registry's own computed
             # selection -- membership is derived from mcp-registry.nix at eval
@@ -558,7 +562,7 @@ in
             jq -e '
               . as $root
               | all(["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"][]; . as $event | [$root.hooks[$event][]?.hooks[]?.command] | any(startswith("polylogue-hook \($event) --provider claude-code")))
-            ' '${../../dots/claude/settings.json}' >/dev/null
+            ' '${../../dots/claude/managed-settings.json}' >/dev/null
 
             grep -Fq 'MCP_CONFIG="$HOME/.config/claude/mcp.json"' "$HOME/.local/bin/claude-full"
             grep -Fq 'export SINNIX_CLAUDE_PROFILE=lean' "$HOME/.local/bin/claude-lean"
@@ -984,7 +988,7 @@ in
             sampler="$TMPDIR/sinnix-vacuity-sampler"
             mkdir -p "$hooks"
             cp ${../../dots/claude/hooks}/*.sh "$hooks/"
-            cp ${../../dots/claude/settings.json} "$settings"
+            cp ${../../dots/claude/managed-settings.json} "$settings"
             cp ${../../scripts/sinnix-vacuity-sampler} "$sampler"
             chmod +x "$hooks"/*.sh
             chmod +x "$sampler"

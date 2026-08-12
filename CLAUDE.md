@@ -259,8 +259,13 @@ full `sinnix-<name>`) — it needs zero wiring when a new script is added.
 
 - Everything in `dots/` reaches `$HOME` via HM out-of-store symlinks
   (`mkDotsFileFor` or `meta.dotfiles`) — edits propagate instantly, no
-  rebuild. Never manage `dots/claude/settings.json` through HM store files;
-  it is linked writable during activation (tested invariant).
+  rebuild. Claude Code settings are split (tested invariant): durable policy
+  (hooks, permissions, env) lives in `dots/claude/managed-settings.json`,
+  deployed as a symlink at `/etc/claude-code/managed-settings.json`;
+  `~/.config/claude/settings.json` is a plain writable file seeded once from
+  `dots/claude/settings-seed.json` so harness UI writes (model, effort,
+  plugin toggles) never dirty the repo. Never manage either through HM store
+  files.
 - `dots/claude/CLAUDE.md` is the **global** agent instruction file (flat, no
   transclusion). `~/.codex/AGENTS.md` and `~/.gemini/GEMINI.md` are symlinks
   to it via `~/.config/claude/CLAUDE.md`. There is no render pipeline.
