@@ -104,8 +104,7 @@ rec {
   # processMatchers of surfaces that opt in via workload.earlyoomAvoid.
   # Entries match unanchored against /proc/<pid>/comm (15 chars max, hence
   # the truncated xdg-desktop-po): keep entries <=15 chars, and only for
-  # processes that can exist on our hosts. History/evidence: commits
-  # 9993f71 + e3f90fc (list unification and dead-entry audit).
+  # processes that can exist on our hosts.
   earlyoomEmergencyAvoidBase = [
     "systemd"
     "systemd-logind"

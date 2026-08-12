@@ -51,7 +51,6 @@ in
         # Bounded parallelism: nix-build.slice's 22G/28G memory ceiling is
         # the overcommit guard (the daemon and every build it spawns run
         # inside it — see the nix-daemon Slice= below), not serialization.
-        # History/evidence: bd show sinnix-qlf, bd show sinnix-jr8
         max-jobs = 4;
         cores = 16;
         builders-use-substitutes = true;
