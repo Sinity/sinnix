@@ -124,7 +124,15 @@ def _load_throttle_state(path: Path, clock) -> ThrottleState | None:
 
 
 def _save_throttle_state(path: Path, state: ThrottleState) -> None:
-    path.write_text(json.dumps({"day": state.day, "bytes_written": state.bytes_written, "tripped": state.tripped}))
+    path.write_text(
+        json.dumps(
+            {
+                "day": state.day,
+                "bytes_written": state.bytes_written,
+                "tripped": state.tripped,
+            }
+        )
+    )
 
 
 def _window_key(window: dict | None) -> str:
@@ -148,7 +156,10 @@ def run(args: argparse.Namespace) -> int:
         sock = hypr.connect_socket2(sock_path)
         sock.setblocking(False)
     except OSError as exc:
-        print(f"sinnix-capture-screen: cannot connect to Hyprland socket2 at {sock_path}: {exc}", file=sys.stderr)
+        print(
+            f"sinnix-capture-screen: cannot connect to Hyprland socket2 at {sock_path}: {exc}",
+            file=sys.stderr,
+        )
         return 1
 
     throttle_state_path = args.capture_root / args.lane / "throttle-state.json"
@@ -170,7 +181,11 @@ def run(args: argparse.Namespace) -> int:
         last_capture_ts = now
         window = hypr.get_active_window(read_json)
         monitors = hypr.get_monitors(read_json)
-        monitor_name = hypr.monitor_name_for_id(monitors, window.get("monitor_id")) if window else None
+        monitor_name = (
+            hypr.monitor_name_for_id(monitors, window.get("monitor_id"))
+            if window
+            else None
+        )
         if monitor_name is None and monitors:
             monitor_name = monitors[0].get("name")
         if monitor_name is None:
@@ -178,12 +193,17 @@ def run(args: argparse.Namespace) -> int:
 
         geometry = window.get("geometry") if window else {}
         grim_geometry = None
-        if window and all(geometry.get(k) is not None for k in ("x", "y", "width", "height")):
+        if window and all(
+            geometry.get(k) is not None for k in ("x", "y", "width", "height")
+        ):
             grim_geometry = f"{geometry['x']},{geometry['y']} {geometry['width']}x{geometry['height']}"
 
         png_bytes = capture.run_grim(args.grim_bin, monitor_name, grim_geometry)
         if png_bytes is None:
-            print(f"sinnix-capture-screen: grim capture failed (trigger={trigger})", file=sys.stderr)
+            print(
+                f"sinnix-capture-screen: grim capture failed (trigger={trigger})",
+                file=sys.stderr,
+            )
             return
 
         im = capture.load_image(png_bytes)
@@ -200,12 +220,18 @@ def run(args: argparse.Namespace) -> int:
 
         window_key = _window_key(window)
         new_hash = phash64(gray)
-        if is_near_duplicate(last_hash_by_window.get(window_key), new_hash, threshold=args.dedup_hamming_threshold):
+        if is_near_duplicate(
+            last_hash_by_window.get(window_key),
+            new_hash,
+            threshold=args.dedup_hamming_threshold,
+        ):
             last_hash_by_window[window_key] = new_hash
             return
         last_hash_by_window[window_key] = new_hash
 
-        webp_bytes = capture.encode_webp(im, max_width=args.max_width, quality=args.quality)
+        webp_bytes = capture.encode_webp(
+            im, max_width=args.max_width, quality=args.quality
+        )
         allowed, newly_tripped = throttle.allow(len(webp_bytes))
         _save_throttle_state(throttle_state_path, throttle.state)
         if newly_tripped:
@@ -222,7 +248,9 @@ def run(args: argparse.Namespace) -> int:
 
         sha256 = hashlib.sha256(webp_bytes).hexdigest()
         seq += 1
-        filename = capture.frame_filename(now, window.get("class") if window else None, seq)
+        filename = capture.frame_filename(
+            now, window.get("class") if window else None, seq
+        )
         payload = capture.build_frame_payload(
             ts=now,
             window_class=window.get("class") if window else None,
@@ -249,7 +277,10 @@ def run(args: argparse.Namespace) -> int:
             if ready:
                 chunk = sock.recv(65536)
                 if chunk == b"":
-                    print("sinnix-capture-screen: Hyprland socket2 closed", file=sys.stderr)
+                    print(
+                        "sinnix-capture-screen: Hyprland socket2 closed",
+                        file=sys.stderr,
+                    )
                     return 1
                 buf += chunk
                 while b"\n" in buf:
@@ -263,7 +294,9 @@ def run(args: argparse.Namespace) -> int:
             if pos is not None and pause_detector.sample(now, *pos):
                 do_capture("idle-pause")
 
-            if should_capture_periodic(now, last_capture_ts, floor_seconds=args.periodic_floor_seconds):
+            if should_capture_periodic(
+                now, last_capture_ts, floor_seconds=args.periodic_floor_seconds
+            ):
                 do_capture("periodic-floor")
     finally:
         sock.close()
@@ -280,7 +313,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     # repo relies on -- e.g. activitywatch-watcher-awatcher.service).
     # Explicit flags remain available for tests/manual invocation.
     parser.add_argument("--runtime-dir", default=os.environ.get("XDG_RUNTIME_DIR"))
-    parser.add_argument("--instance-signature", default=os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"))
+    parser.add_argument(
+        "--instance-signature", default=os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")
+    )
     parser.add_argument("--grim-bin", default="grim")
     parser.add_argument("--hyprctl-bin", default="hyprctl")
     parser.add_argument("--sinnix-capture-bin", default="sinnix-capture")

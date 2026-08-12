@@ -23,7 +23,9 @@ from PIL import Image
 PHASH_IMAGE_SIZE = 32  # hash_size(8) * high_freq_factor(4), see hashing.phash64
 
 
-def run_grim(grim_bin: str, monitor: str, geometry: str | None, *, timeout: float = 5.0) -> bytes | None:
+def run_grim(
+    grim_bin: str, monitor: str, geometry: str | None, *, timeout: float = 5.0
+) -> bytes | None:
     """Capture one PNG frame to stdout via grim (wlr-screencopy protocol).
 
     `geometry`, when given, is a grim `-g "X,Y WxHh"`-style string cropping
@@ -64,7 +66,9 @@ def encode_webp(im: Image.Image, *, max_width: int = 1920, quality: int = 80) ->
 
 def frame_filename(ts: float, window_class: str | None, seq: int) -> str:
     """Deterministic, sortable frame filename: `<ts>-<seq>-<class-slug>.webp`."""
-    slug = "".join(c if (c.isalnum() or c in "-_") else "-" for c in (window_class or "unknown")).strip("-")
+    slug = "".join(
+        c if (c.isalnum() or c in "-_") else "-" for c in (window_class or "unknown")
+    ).strip("-")
     slug = slug[:40] or "unknown"
     return f"{ts:.3f}-{seq}-{slug}.webp"
 

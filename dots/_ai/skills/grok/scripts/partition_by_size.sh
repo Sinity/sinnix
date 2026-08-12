@@ -18,15 +18,15 @@ root=${1:?usage: partition_by_size.sh <root-dir> <target-lines> [file-glob]}
 target=${2:?usage: partition_by_size.sh <root-dir> <target-lines> [file-glob]}
 glob=${3:-*.rs}
 
-if [[ ! -d "$root" ]]; then
+if [[ ! -d $root ]]; then
   echo "error: not a directory: $root" >&2
   exit 1
 fi
 
 total_lines() {
   local dir=$1
-  find "$dir" -maxdepth "${2:-999}" -name "$glob" -not -name "*_test.*" -not -name "*test_*" \
-    | xargs -r cat 2>/dev/null | wc -l
+  find "$dir" -maxdepth "${2:-999}" -name "$glob" -not -name "*_test.*" -not -name "*test_*" |
+    xargs -r cat 2>/dev/null | wc -l
 }
 
 echo "# Partition proposal: $root (glob=$glob, target=$target lines/region)"
@@ -40,23 +40,23 @@ echo
 walk() {
   local dir=$1
   local lines
-  lines=$(total_lines "$dir" 1)  # this dir's own loose files only
+  lines=$(total_lines "$dir" 1) # this dir's own loose files only
   local subtotal=0
   local sub
   for sub in "$dir"/*/; do
-    [[ -d "$sub" ]] || continue
+    [[ -d $sub ]] || continue
     sub=${sub%/}
     local sub_lines
     sub_lines=$(total_lines "$sub")
     subtotal=$((subtotal + sub_lines))
-    if (( sub_lines > target )); then
+    if ((sub_lines > target)); then
       echo "SPLIT $sub_lines $sub"
       walk "$sub"
-    elif (( sub_lines > 0 )); then
+    elif ((sub_lines > 0)); then
       echo "OK    $sub_lines $sub"
     fi
   done
-  if (( lines > 0 )); then
+  if ((lines > 0)); then
     echo "OK    $lines $dir (loose files only, not subdirs)"
   fi
 }

@@ -28,6 +28,7 @@ Only `file://` targets under the local filesystem are read; anything else
 (http(s) links, mailto:, bare `#anchor`) is left alone even if it happens to
 carry `data-embed`.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -45,10 +46,10 @@ DEFAULT_LIMIT = 4000
 ANCHOR_RE = re.compile(
     r'<a\s+class="path"\s+href="file://(?P<path>[^"]+)"(?P<pre_attrs>[^>]*?)'
     r'\s+data-embed(?:="(?P<limit>\d+)")?'
-    r'(?P<post_attrs>[^>]*)>'
-    r'(?P<label>(?:(?!</a>|<template).)*)'
+    r"(?P<post_attrs>[^>]*)>"
+    r"(?P<label>(?:(?!</a>|<template).)*)"
     r'(?P<already>(<template class="pop">.*?</template>)?)'
-    r'</a>',
+    r"</a>",
     re.S,
 )
 
@@ -70,9 +71,13 @@ def bundle(html_text: str, *, default_limit: int) -> tuple[str, list[str]]:
         truncated = len(text) > limit
         excerpt = text[:limit]
         if truncated:
-            excerpt += f"\n\n... (truncated at {limit} chars — full file at the path above)"
+            excerpt += (
+                f"\n\n... (truncated at {limit} chars — full file at the path above)"
+            )
         escaped = html_mod.escape(excerpt)
-        log.append(f"bundled ({len(excerpt)} chars{' truncated' if truncated else ''}): {raw_path}")
+        log.append(
+            f"bundled ({len(excerpt)} chars{' truncated' if truncated else ''}): {raw_path}"
+        )
         attrs = m.group("pre_attrs") + m.group("post_attrs")
         return (
             f'<a class="path" href="file://{m.group("path")}"{attrs}>'
@@ -84,11 +89,22 @@ def bundle(html_text: str, *, default_limit: int) -> tuple[str, list[str]]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("report", type=Path, help="HTML report to bundle popups into")
-    ap.add_argument("--limit", type=int, default=DEFAULT_LIMIT, help=f"default per-file char cap (default {DEFAULT_LIMIT})")
-    ap.add_argument("--in-place", action="store_true", help="write back to the input file (default)")
-    ap.add_argument("--out", type=Path, help="write to a different file instead of in place")
+    ap.add_argument(
+        "--limit",
+        type=int,
+        default=DEFAULT_LIMIT,
+        help=f"default per-file char cap (default {DEFAULT_LIMIT})",
+    )
+    ap.add_argument(
+        "--in-place", action="store_true", help="write back to the input file (default)"
+    )
+    ap.add_argument(
+        "--out", type=Path, help="write to a different file instead of in place"
+    )
     args = ap.parse_args(argv)
 
     html_text = args.report.read_text()
@@ -102,7 +118,10 @@ def main(argv: list[str] | None = None) -> int:
         print(line, file=sys.stderr)
     bundled = sum(1 for line in log if line.startswith("bundled"))
     missing = sum(1 for line in log if line.startswith("MISSING"))
-    print(f"embed-path-popups: {bundled} bundled, {missing} missing, {len(log) - bundled - missing} already-bundled/skipped", file=sys.stderr)
+    print(
+        f"embed-path-popups: {bundled} bundled, {missing} missing, {len(log) - bundled - missing} already-bundled/skipped",
+        file=sys.stderr,
+    )
     return 1 if missing else 0
 
 

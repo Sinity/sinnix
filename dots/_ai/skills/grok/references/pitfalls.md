@@ -10,16 +10,15 @@ A command-line tool argument built inline with backticks or nested quotes
 command substitution instead of being passed literally, corrupting or
 silently failing the whole command. Fix: never build multi-line or
 code-quoting-heavy argument text inline. Write it to a file first via a
-single-quoted heredoc delimiter (`cat > file.txt << 'EOF' ... EOF` — the
-quotes around `EOF` prevent any interpolation), then pass
-`--flag "$(cat file.txt)"`. Command substitution results are not re-parsed
+single-quoted heredoc delimiter (`cat > file.txt << 'EOF' ... EOF`— the
+quotes around`EOF`prevent any interpolation), then pass`--flag "$(cat file.txt)"`. Command substitution results are not re-parsed
 for further shell metacharacters, so this is safe even when the content
 itself contains backticks, quotes, or `$`.
 
 ## Malformed heredoc leaving a shell-command tail in the payload
 
 An improperly terminated heredoc (delimiter typo, mismatched indentation)
-lets the *next* shell command's own tail text leak literally into whatever
+lets the _next_ shell command's own tail text leak literally into whatever
 argument was mid-construction, and error-recovery code paths can silently
 substitute a placeholder ("see description above") instead of failing loudly.
 Always verify a just-created record's actual stored content (re-fetch it)
@@ -65,7 +64,7 @@ A deep investigation-shaped subagent can burn its entire turn budget on real,
 non-repetitive investigation and simply run out of room before ever
 synthesizing a findings report — producing either a single throwaway
 fragment or literally no final text. Fix that reliably worked: resume the
-*same* agent (not a fresh dispatch with the same prompt) with a blunt
+_same_ agent (not a fresh dispatch with the same prompt) with a blunt
 instruction to stop investigating and write up now, based on whatever it's
 already found. Resuming preserves all the accumulated investigation context
 a fresh dispatch would discard. Don't diagnose this as "the turn cap is too

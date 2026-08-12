@@ -19,5 +19,8 @@ echo "Open intentions/activities (agent: surface these when relevant; the"
 echo "operator steers, you hold state — never nag, always know):"
 echo "$ready"
 in_prog=$(bd list --status=in_progress 2>/dev/null | head -6) || true
-[ -n "$in_prog" ] && { echo "In progress:"; echo "$in_prog"; }
+[ -n "$in_prog" ] && {
+  echo "In progress:"
+  echo "$in_prog"
+}
 exit 0

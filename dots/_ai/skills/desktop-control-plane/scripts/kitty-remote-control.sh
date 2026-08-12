@@ -94,9 +94,9 @@ is_descendant_of() {
   local parent
 
   for _ in {1..32}; do
-    [[ "$child" == "$ancestor" ]] && return 0
+    [[ $child == "$ancestor" ]] && return 0
     parent="$(ps -o ppid= -p "$child" 2>/dev/null | tr -d ' ')"
-    [[ "$parent" =~ ^[0-9]+$ && "$parent" != 1 ]] || return 1
+    [[ $parent =~ ^[0-9]+$ && $parent != 1 ]] || return 1
     child="$parent"
   done
   return 1
@@ -138,7 +138,7 @@ launch_agent_here() {
   esac
 
   local fallback_cwd="${SINNIX_AGENT_FALLBACK_CWD:-${SINNIX_PROJECT_ROOT:-/realm/project/sinnix}}"
-  [[ -d "$fallback_cwd" ]] || fallback_cwd="$HOME"
+  [[ -d $fallback_cwd ]] || fallback_cwd="$HOME"
   local active_json active_class kitty_pid runtime_dir socket_path kitty_json focused_json foreground_json
   local foreground_pid foreground_cwd kitty_start foreground_start proc_cwd
   active_json="$(hyprctl -j activewindow 2>/dev/null || true)"
@@ -147,7 +147,7 @@ launch_agent_here() {
   runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$UID}"
   socket_path="$runtime_dir/kitty-${USER:-$(id -u)}-$kitty_pid"
 
-  if [[ "$active_class" != kitty || ! "$kitty_pid" =~ ^[0-9]+$ || "$kitty_pid" == 0 || ! -S "$socket_path" ]]; then
+  if [[ $active_class != kitty || ! $kitty_pid =~ ^[0-9]+$ || $kitty_pid == 0 || ! -S $socket_path ]]; then
     notify_agent_fallback "$fallback_cwd" "focused window is not a resolvable Kitty window"
     uwsm app -- kitty --directory "$fallback_cwd" "$command_path" >/dev/null 2>&1 &
     return 0
@@ -162,14 +162,14 @@ launch_agent_here() {
   foreground_cwd="$(printf '%s' "$foreground_json" | jq -r '.cwd // empty')"
   foreground_start="$(proc_start_time "$foreground_pid" || true)"
 
-  if [[ -z "$kitty_start" || -z "$focused_json" || ! "$foreground_pid" =~ ^[0-9]+$ || "$foreground_pid" == 0 || -z "$foreground_start" || -z "$foreground_cwd" ]] || ! is_descendant_of "$foreground_pid" "$kitty_pid"; then
+  if [[ -z $kitty_start || -z $focused_json || ! $foreground_pid =~ ^[0-9]+$ || $foreground_pid == 0 || -z $foreground_start || -z $foreground_cwd ]] || ! is_descendant_of "$foreground_pid" "$kitty_pid"; then
     notify_agent_fallback "$fallback_cwd" "focused Kitty process identity could not be verified"
     uwsm app -- kitty --directory "$fallback_cwd" "$command_path" >/dev/null 2>&1 &
     return 0
   fi
 
   proc_cwd="$(readlink -f "$proc_root/$foreground_pid/cwd" 2>/dev/null || true)"
-  if [[ -z "$proc_cwd" || ! -d "$proc_cwd" ]]; then
+  if [[ -z $proc_cwd || ! -d $proc_cwd ]]; then
     notify_agent_fallback "$fallback_cwd" "focused Kitty cwd could not be verified"
     uwsm app -- kitty --directory "$fallback_cwd" "$command_path" >/dev/null 2>&1 &
     return 0

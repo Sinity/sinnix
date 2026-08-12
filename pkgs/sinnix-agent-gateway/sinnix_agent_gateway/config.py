@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-
 DEFAULT_AGENT_RUNNER = Path(
     "/home/sinity/.config/hermes/skills/agent-orchestration/scripts/run_agent_prompt.sh"
 )
@@ -16,9 +15,7 @@ DEFAULT_AGENT_CONTROLLER = Path(
 
 
 def default_state_dir() -> Path:
-    base = Path(
-        os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local" / "state"))
-    )
+    base = Path(os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local" / "state")))
     return base / "sinnix" / "agent-gateway"
 
 
@@ -67,9 +64,7 @@ class GatewayConfig:
                 raw.get("runtimeInventory", "/etc/sinnix/runtime-inventory.json")
             ),
             agent_runner=Path(raw.get("agentRunner", DEFAULT_AGENT_RUNNER)),
-            agent_controller=Path(
-                raw.get("agentController", DEFAULT_AGENT_CONTROLLER)
-            ),
+            agent_controller=Path(raw.get("agentController", DEFAULT_AGENT_CONTROLLER)),
             observe_command=raw.get("observeCommand", "sinnix-observe"),
             max_result_bytes=int(raw.get("maxResultBytes", 262_144)),
             approved_manifest_hash=raw.get("approvedManifestHash"),

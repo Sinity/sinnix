@@ -3,7 +3,6 @@ from __future__ import annotations
 import io
 
 from PIL import Image
-
 from sinnix_capture_screen.capture import (
     build_frame_payload,
     encode_webp,

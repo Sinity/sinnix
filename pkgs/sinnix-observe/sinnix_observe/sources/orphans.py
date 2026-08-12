@@ -5,13 +5,12 @@ from __future__ import annotations
 import hashlib
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ..runtime_inventory import load_inventory, workload_for_cgroup
+from ..runtime_inventory import workload_for_cgroup
 from ..util import int_or_none
-
 
 COLD_CPU_PERCENT = 1.0
 COLD_IO_BPS = 4096.0
@@ -103,14 +102,15 @@ def classify_jobs(
     )
     below = below or {}
     now = time.time() if now is None else now
-    inventory = load_inventory()
     rows: list[dict[str, Any]] = []
     for job in jobs:
         launcher = job.get("launcher") if isinstance(job.get("launcher"), dict) else {}
         pid = launcher.get("pid")
         expected_start = str(launcher.get("proc_start") or "")
         expected_cgroup = str(launcher.get("cgroup") or "")
-        pid_path = proc_root / str(pid) if isinstance(pid, int) else proc_root / "missing"
+        pid_path = (
+            proc_root / str(pid) if isinstance(pid, int) else proc_root / "missing"
+        )
         current_start = _proc_start(pid_path / "stat")
         current_cgroup = _proc_cgroup(pid_path / "cgroup")
         launcher_live = bool(
@@ -130,7 +130,9 @@ def classify_jobs(
         else:
             attestation = "unattested"
 
-        cgroup_path = cgroup_root / expected_cgroup.lstrip("/") if expected_cgroup else None
+        cgroup_path = (
+            cgroup_root / expected_cgroup.lstrip("/") if expected_cgroup else None
+        )
         procs: list[int] = []
         if cgroup_path is not None:
             try:
@@ -159,11 +161,16 @@ def classify_jobs(
             and io_bps is not None
             and io_bps <= COLD_IO_BPS
         )
-        orphaned = not launcher_live and bool(descendants) and attestation in {
-            "dead_launcher",
-            "pid_reuse",
-            "cgroup_mismatch",
-        }
+        orphaned = (
+            not launcher_live
+            and bool(descendants)
+            and attestation
+            in {
+                "dead_launcher",
+                "pid_reuse",
+                "cgroup_mismatch",
+            }
+        )
         rows.append(
             {
                 "job_id": job.get("job_id"),

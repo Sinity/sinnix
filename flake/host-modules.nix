@@ -24,8 +24,7 @@ let
   # `<rev>-dirty` marker; treat that as "commits since <rev> may or may not
   # be live".
   revisionModule = {
-    system.configurationRevision =
-      inputs.self.rev or inputs.self.dirtyRev or "unknown";
+    system.configurationRevision = inputs.self.rev or inputs.self.dirtyRev or "unknown";
   };
 in
 {
@@ -33,7 +32,9 @@ in
 
   # Same specialArgs every host is evaluated with directly (mkFeatureModule,
   # mkServiceModule, helpers.data, and the sinnix-extended `lib`).
-  specialArgs = mkSharedSpecialArgs inputs // { lib = extendedLib; };
+  specialArgs = mkSharedSpecialArgs inputs // {
+    lib = extendedLib;
+  };
 
   hosts = {
     sinnix-prime = baseModules ++ [

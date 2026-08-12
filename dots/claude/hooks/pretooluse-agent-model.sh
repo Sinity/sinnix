@@ -44,7 +44,8 @@ set -euo pipefail
 # ledger write) silently never fired even though the script "ran" and exited
 # 0. Building the script text via command substitution and passing it as a
 # `-c` argument leaves the original piped stdin intact for python to read.
-PY_SCRIPT=$(cat <<'PY'
+PY_SCRIPT=$(
+  cat <<'PY'
 import datetime as _dt
 import hashlib
 import json

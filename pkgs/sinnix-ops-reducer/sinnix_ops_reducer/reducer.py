@@ -4,15 +4,14 @@ import json
 import os
 import subprocess
 import tempfile
-import time
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
 from . import SCHEMA
-from .attention import normalize_attention
 from .anchor import expire_anchor, reduce_anchor_event
+from .attention import normalize_attention
 from .hyprland import HyprlandState, Socket2Adapter, reduce_socket_event
 
 
@@ -69,7 +68,9 @@ class Reducer:
         try:
             value = json.loads(self.state_path.read_text(encoding="utf-8"))
             observations = value.get("orphan_observations", {})
-            return int(value.get("sequence", 0)), observations if isinstance(observations, dict) else {}
+            return int(value.get("sequence", 0)), observations if isinstance(
+                observations, dict
+            ) else {}
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             return 0, {}
 
@@ -105,10 +106,21 @@ class Reducer:
             }
             expendable = (row.get("workload") or {}).get("class") == "sacrificial"
             cold = bool((row.get("coldness") or {}).get("candidate"))
-            proposed = "reap" if row.get("orphaned") and cold and expendable and count >= 2 else "notify"
-            reduced.append({**row, "policy": {"observation_count": count, "proposed_action": proposed}})
+            proposed = (
+                "reap"
+                if row.get("orphaned") and cold and expendable and count >= 2
+                else "notify"
+            )
+            reduced.append(
+                {
+                    **row,
+                    "policy": {"observation_count": count, "proposed_action": proposed},
+                }
+            )
         self.orphan_observations = {
-            key: value for key, value in self.orphan_observations.items() if key in active_keys
+            key: value
+            for key, value in self.orphan_observations.items()
+            if key in active_keys
         }
         gateway["orphaned_jobs"] = reduced
 
@@ -145,8 +157,18 @@ class Reducer:
             "schema": SCHEMA,
             "sequence": self.sequence,
             "observed_at": observed_at,
-            "sources": {"sinnix-observe": source_health, "ambient-intelligence": ambient_health},
-            "state": {**report, "ambient_intelligence": ambient, "session_anchor": anchor, "hyprland_automation": hyprland} if source_health["status"] == "healthy" else None,
+            "sources": {
+                "sinnix-observe": source_health,
+                "ambient-intelligence": ambient_health,
+            },
+            "state": {
+                **report,
+                "ambient_intelligence": ambient,
+                "session_anchor": anchor,
+                "hyprland_automation": hyprland,
+            }
+            if source_health["status"] == "healthy"
+            else None,
             "degradation": source_health["degradation"],
         }
         atomic_json(self.snapshot_path, snapshot)
@@ -171,12 +193,18 @@ class Reducer:
         self.hyprland_socket.poll(self.hyprland_state)
         if self.hyprland_event_path is not None and self.hyprland_event_path.exists():
             try:
-                for line in self.hyprland_event_path.read_text(encoding="utf-8").splitlines()[-32:]:
+                for line in self.hyprland_event_path.read_text(
+                    encoding="utf-8"
+                ).splitlines()[-32:]:
                     reduce_socket_event(self.hyprland_state, line)
                 self.hyprland_event_path.unlink(missing_ok=True)
             except OSError:
                 pass
-        return {"fullscreen_game": self.hyprland_state.fullscreen_game, "static_content": self.hyprland_state.static_content, "diagnostics": self.hyprland_state.diagnostics}
+        return {
+            "fullscreen_game": self.hyprland_state.fullscreen_game,
+            "static_content": self.hyprland_state.static_content,
+            "diagnostics": self.hyprland_state.diagnostics,
+        }
 
     def _anchor_snapshot(self, observed_at: str) -> dict[str, Any] | None:
         now = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
@@ -190,14 +218,34 @@ class Reducer:
         self.anchor = expire_anchor(self.anchor, now)
         return self.anchor
 
-    def _ambient_snapshot(self, observed_at: str) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    def _ambient_snapshot(
+        self, observed_at: str
+    ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
         if self.ambient_source is None:
-            return None, {"status": "disabled", "source": "lynchpin-ambient-intelligence", "observed_at": observed_at, "freshness": "unknown", "degradation": "no product configured"}
+            return None, {
+                "status": "disabled",
+                "source": "lynchpin-ambient-intelligence",
+                "observed_at": observed_at,
+                "freshness": "unknown",
+                "degradation": "no product configured",
+            }
         try:
             value = self.ambient_source()
-            return value, {"status": "healthy", "source": "lynchpin-ambient-intelligence", "observed_at": observed_at, "freshness": "current", "degradation": None}
+            return value, {
+                "status": "healthy",
+                "source": "lynchpin-ambient-intelligence",
+                "observed_at": observed_at,
+                "freshness": "current",
+                "degradation": None,
+            }
         except Exception as error:
-            return None, {"status": "unavailable", "source": "lynchpin-ambient-intelligence", "observed_at": observed_at, "freshness": "unknown", "degradation": str(error)[:240]}
+            return None, {
+                "status": "unavailable",
+                "source": "lynchpin-ambient-intelligence",
+                "observed_at": observed_at,
+                "freshness": "unknown",
+                "degradation": str(error)[:240],
+            }
 
     def snapshot(self) -> dict[str, Any]:
         if self._snapshot:

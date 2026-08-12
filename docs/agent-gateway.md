@@ -22,11 +22,11 @@ There is no gateway-owned HTTP server, SSE parser, listening port, PID-only job 
 
 ## Capability profiles
 
-| Profile | Intended caller | Read projects, jobs, artifacts, audit, machine | Launch and cancel jobs | Write projects |
-| --- | --- | --- | --- | --- |
-| `remote-readonly` | Current ChatGPT connector | Yes | No | No |
-| `local-agent-control` | Trusted local coordinators | Yes | Yes | No |
-| `remote-operator` | Local testing and a future write-capable remote workspace | Yes | Yes | Yes, only for projects with `remoteWrite = true` |
+| Profile               | Intended caller                                           | Read projects, jobs, artifacts, audit, machine | Launch and cancel jobs | Write projects                                   |
+| --------------------- | --------------------------------------------------------- | ---------------------------------------------- | ---------------------- | ------------------------------------------------ |
+| `remote-readonly`     | Current ChatGPT connector                                 | Yes                                            | No                     | No                                               |
+| `local-agent-control` | Trusted local coordinators                                | Yes                                            | Yes                    | No                                               |
+| `remote-operator`     | Local testing and a future write-capable remote workspace | Yes                                            | Yes                    | Yes, only for projects with `remoteWrite = true` |
 
 Tool registration follows the profile. A denied capability is absent from `tools/list`, and the underlying service enforces the same capability again. `remote-readonly` therefore cannot obtain a write path by calling an unlisted function directly.
 

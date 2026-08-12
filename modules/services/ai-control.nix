@@ -2,7 +2,13 @@
 # (whisper, tts, ollama, litellm, llama-cpp, koboldcpp, comfyui, musicgen,
 # ocr, open-webui). The script carries the service registry; this module
 # only installs it. See scripts/sinnix-ai.
-{ config, lib, pkgs, helpers, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  helpers,
+  ...
+}:
 let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   systemdSocketProxyd = "${pkgs.systemd}/lib/systemd/systemd-socket-proxyd";
@@ -39,7 +45,12 @@ let
         resourceClass = "interactive-agent";
         activation = {
           mode = "socket-proxy";
-          inherit publicEndpoint backendEndpoint exclusiveResource dependsOn;
+          inherit
+            publicEndpoint
+            backendEndpoint
+            exclusiveResource
+            dependsOn
+            ;
           idleTimeout = "30s";
         };
         observe = {
@@ -56,7 +67,10 @@ let
     backendEndpoint = "127.0.0.1:11435";
     exclusiveResource = "gpu-inference";
     dependsOn = [ "ollama" ];
-    conflicts = [ "koboldcpp.service" "koboldcpp-proxy.service" ];
+    conflicts = [
+      "koboldcpp.service"
+      "koboldcpp-proxy.service"
+    ];
   };
   koboldcppProxy = mkProxy {
     name = "koboldcpp-proxy";
@@ -65,7 +79,10 @@ let
     backendEndpoint = "127.0.0.1:5002";
     exclusiveResource = "gpu-inference";
     dependsOn = [ "koboldcpp" ];
-    conflicts = [ "ollama.service" "ollama-proxy.service" ];
+    conflicts = [
+      "ollama.service"
+      "ollama-proxy.service"
+    ];
   };
   litellmProxy = mkProxy {
     name = "litellm-proxy";

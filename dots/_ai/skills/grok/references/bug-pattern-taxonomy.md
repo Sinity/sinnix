@@ -4,7 +4,7 @@ Six root causes that accounted for a disproportionate share of real findings
 across large campaigns. Put these in every dispatch prompt as the specific
 things to watch for — a generic "find bugs" instruction under-performs a
 prompt naming concrete shapes. Each entry includes a grep-shaped starting
-point; grep finds *candidates*, not verdicts — every hit still needs a real
+point; grep finds _candidates_, not verdicts — every hit still needs a real
 read to confirm it's load-bearing and not already handled elsewhere.
 
 ## A. Hard-fail silently downgraded to soft-degrade
@@ -12,7 +12,7 @@ read to confirm it's load-bearing and not already handled elsewhere.
 The language's error type has no distinction between "this must abort" and
 "this may gracefully degrade." A `.unwrap_or_else(|e| { warn!(...); default()
 })` on something that should hard-fail converts an intended abort into silent
-continuation with a default/empty value — and the log line makes it *look*
+continuation with a default/empty value — and the log line makes it _look_
 handled.
 
 Grep starting points: `unwrap_or_else`, `unwrap_or_default`, `.ok()` on a
@@ -42,15 +42,15 @@ code?
 ## C. Capability-flag-gated dual path, only one branch tested
 
 A generic parameter or feature flag selects between a "real" implementation
-and a test/fixture one. If production *always* takes one branch and the test
-suite *always* takes the other, the production branch has effectively zero
+and a test/fixture one. If production _always_ takes one branch and the test
+suite _always_ takes the other, the production branch has effectively zero
 test coverage regardless of the suite's line-coverage number.
 
 Grep starting points: generic type parameters with a `#[cfg(test)]`-only
 alternate implementation; `if cfg!(test)` or equivalent branching; a trait
 with exactly two implementors, one named `Mock`/`Fake`/`Test`/`Fixture`.
 
-Ask per hit: does any test actually construct the type with the *production*
+Ask per hit: does any test actually construct the type with the _production_
 implementation and exercise the branch a real deployment takes?
 
 ## D. Same conceptual value independently re-resolved
@@ -66,7 +66,7 @@ via more than one direct `env::var`/config-lookup call across the codebase;
 the same computed path (cache dir, work dir, checkpoint path) built via
 different helper functions in different modules.
 
-Ask per hit: is there a single canonical resolver this *should* route
+Ask per hit: is there a single canonical resolver this _should_ route
 through instead? If one site got a bugfix, would the sibling need the
 identical fix applied separately?
 
@@ -111,6 +111,6 @@ producer should exist but doesn't?
 
 State which category (A–F) a finding matches in its filed description —
 this makes cross-region pattern detection possible later ("we have twelve
-category-D findings, the *real* fix is a shared resolver helper, not twelve
+category-D findings, the _real_ fix is a shared resolver helper, not twelve
 independent point fixes") and helps a coordinator recognize when a wave of
 individually-small findings actually points at one structural remedy.

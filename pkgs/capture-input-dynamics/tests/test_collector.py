@@ -8,7 +8,9 @@ from pathlib import Path
 
 def _collector():
     path = Path(__file__).resolve().parents[1] / "collector.py"
-    spec = importlib.util.spec_from_file_location("capture_input_dynamics_collector", path)
+    spec = importlib.util.spec_from_file_location(
+        "capture_input_dynamics_collector", path
+    )
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -47,7 +49,16 @@ SAMPLE_WINDOW_LINES = [
 # The raw key-name/keycode tokens present in the fixture above. If any of
 # these ever appears in a produced window's JSON, the structural
 # no-keystroke-content guarantee has been violated.
-_KEY_IDENTITY_TOKENS = ["KEY_H", "KEY_E", "KEY_L", "KEY_O", "(35)", "(18)", "(38)", "(24)"]
+_KEY_IDENTITY_TOKENS = [
+    "KEY_H",
+    "KEY_E",
+    "KEY_L",
+    "KEY_O",
+    "(35)",
+    "(18)",
+    "(38)",
+    "(24)",
+]
 
 
 def test_parse_debug_event_line_keyboard_key_press() -> None:
@@ -141,7 +152,9 @@ def test_build_window_from_lines_never_leaks_key_identity() -> None:
     serialized = json.dumps(window)
 
     for token in _KEY_IDENTITY_TOKENS:
-        assert token not in serialized, f"key-identity token {token!r} leaked into output window"
+        assert token not in serialized, (
+            f"key-identity token {token!r} leaked into output window"
+        )
 
     # Nothing spells out "HELLO" either, whether concatenated from
     # per-key letters or embedded as a substring of some derived field.

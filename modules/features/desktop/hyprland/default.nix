@@ -305,7 +305,12 @@ in
 
               animations.enabled = false;
 
-              inherit (bindings) bind bindd bindl bindm;
+              inherit (bindings)
+                bind
+                bindd
+                bindl
+                bindm
+                ;
               windowrule = rules.windowrule or [ ];
 
               # NOTE: bar-layer blur (layerrule) omitted — the inline

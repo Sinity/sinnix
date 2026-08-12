@@ -163,16 +163,46 @@ while [[ $# -gt 0 ]]; do
     work_item="${2:?missing value for --work-item}"
     shift 2
     ;;
-  --parent-job-id) parent_job_id="${2:?missing value for --parent-job-id}"; shift 2 ;;
-  --coordinator-job-id) coordinator_job_id="${2:?missing value for --coordinator-job-id}"; shift 2 ;;
-  --provider) provider="${2:?missing value for --provider}"; shift 2 ;;
-  --account-hash) account_hash="${2:?missing value for --account-hash}"; shift 2 ;;
-  --vendor-session-id) vendor_session_id="${2:?missing value for --vendor-session-id}"; shift 2 ;;
-  --polylogue-session-id) polylogue_session_id="${2:?missing value for --polylogue-session-id}"; shift 2 ;;
-  --kitty-socket) kitty_socket="${2:?missing value for --kitty-socket}"; shift 2 ;;
-  --kitty-window-id) kitty_window_id="${2:?missing value for --kitty-window-id}"; shift 2 ;;
-  --hyprland-address) hyprland_address="${2:?missing value for --hyprland-address}"; shift 2 ;;
-  --quota-snapshot-id) quota_snapshot_id="${2:?missing value for --quota-snapshot-id}"; shift 2 ;;
+  --parent-job-id)
+    parent_job_id="${2:?missing value for --parent-job-id}"
+    shift 2
+    ;;
+  --coordinator-job-id)
+    coordinator_job_id="${2:?missing value for --coordinator-job-id}"
+    shift 2
+    ;;
+  --provider)
+    provider="${2:?missing value for --provider}"
+    shift 2
+    ;;
+  --account-hash)
+    account_hash="${2:?missing value for --account-hash}"
+    shift 2
+    ;;
+  --vendor-session-id)
+    vendor_session_id="${2:?missing value for --vendor-session-id}"
+    shift 2
+    ;;
+  --polylogue-session-id)
+    polylogue_session_id="${2:?missing value for --polylogue-session-id}"
+    shift 2
+    ;;
+  --kitty-socket)
+    kitty_socket="${2:?missing value for --kitty-socket}"
+    shift 2
+    ;;
+  --kitty-window-id)
+    kitty_window_id="${2:?missing value for --kitty-window-id}"
+    shift 2
+    ;;
+  --hyprland-address)
+    hyprland_address="${2:?missing value for --hyprland-address}"
+    shift 2
+    ;;
+  --quota-snapshot-id)
+    quota_snapshot_id="${2:?missing value for --quota-snapshot-id}"
+    shift 2
+    ;;
   --memory-high)
     memory_high="${2:?missing value for --memory-high}"
     shift 2
@@ -387,7 +417,7 @@ run_and_attest() {
 
 record_completion() {
   local status="$1" cgroup_root="/sys/fs/cgroup${scope_cgroup}" memory_peak="" cpu_usec="" io_bytes="" duration
-  duration=$(( $(date +%s) - job_started_epoch ))
+  duration=$(($(date +%s) - job_started_epoch))
   [[ -r ${cgroup_root}/memory.peak ]] && memory_peak="$(<"${cgroup_root}/memory.peak")"
   [[ -r ${cgroup_root}/cpu.stat ]] && cpu_usec="$(awk '$1 == "usage_usec" {print $2}' "${cgroup_root}/cpu.stat")"
   [[ -r ${cgroup_root}/io.stat ]] && io_bytes="$(awk '{for (i=1; i<=NF; i++) if ($i ~ /^rbytes=|^wbytes=/) {split($i,a,"="); sum+=a[2]}} END {print sum+0}' "${cgroup_root}/io.stat")"
@@ -599,121 +629,121 @@ looks_like_launcher_race() {
 set +e
 retry_attempt=0
 while true; do
-case "${agent}" in
-codex)
-  [[ -n ${model} && -n ${last_file} ]] || {
-    echo "codex requires --model and --last-file" >&2
+  case "${agent}" in
+  codex)
+    [[ -n ${model} && -n ${last_file} ]] || {
+      echo "codex requires --model and --last-file" >&2
+      exit 2
+    }
+    cmd=("${agent_bin}" exec -C "${workdir}" --model "${model}" --output-last-message "${last_file}")
+    [[ -z ${reasoning_effort} ]] || cmd+=(-c "model_reasoning_effort=\"${reasoning_effort}\"")
+    [[ -z ${schema_file} ]] || cmd+=(--output-schema "${schema_file}")
+    [[ -z ${codex_sandbox} ]] || cmd+=(-s "${codex_sandbox}")
+    [[ ${codex_skip_git_check} -eq 0 ]] || cmd+=(--skip-git-repo-check)
+    [[ ${ephemeral} -eq 0 ]] || cmd+=(--ephemeral)
+    [[ ${json_mode} -eq 0 ]] || cmd+=(--json)
+    cmd+=(-)
+    if [[ ${json_mode} -eq 1 ]]; then run_and_attest run_with_optional_env "${cmd[@]}" <"${prompt_file}" >"${json_file}" 2>"${log_file}"; else run_and_attest run_with_optional_env "${cmd[@]}" <"${prompt_file}" >"${log_file}" 2>&1; fi
+    ;;
+  claude)
+    prompt_text="$(<"${prompt_file}")"
+    cmd=("${agent_bin}" --print -p "${prompt_text}")
+    [[ -z ${model} ]] || cmd+=(--model "${model}")
+    [[ -z ${reasoning_effort} ]] || cmd+=(--effort "${reasoning_effort}")
+    if [[ -n ${schema_file} ]]; then
+      [[ -f ${schema_file} ]] || {
+        echo "missing schema: ${schema_file}" >&2
+        exit 1
+      }
+      cmd+=(--json-schema "$(<"${schema_file}")")
+    fi
+    if [[ ${json_mode} -eq 1 ]]; then
+      cmd+=(--output-format json)
+      run_and_attest run_with_optional_env "${cmd[@]}" >"${json_file}" 2>"${log_file}"
+      [[ -z ${last_file} ]] || jq -r '.result // empty' "${json_file}" >"${last_file}"
+    else
+      run_and_attest run_with_optional_env "${cmd[@]}" >"${log_file}" 2>&1
+      [[ -z ${last_file} ]] || cp "${log_file}" "${last_file}"
+    fi
+    ;;
+  gemini)
+    if [[ ${json_mode} -eq 1 ]]; then run_and_attest run_with_optional_env "${agent_bin}" <"${prompt_file}" >"${json_file}" 2>"${log_file}"; else run_and_attest run_with_optional_env "${agent_bin}" <"${prompt_file}" >"${log_file}" 2>&1; fi
+    ;;
+  grok)
+    prompt_text="$(<"${prompt_file}")"
+    cmd=("${agent_bin}" --cwd "${workdir}" --single "${prompt_text}")
+    [[ -z ${model} ]] || cmd+=(--model "${model}")
+    [[ -z ${reasoning_effort} ]] || cmd+=(--reasoning-effort "${reasoning_effort}")
+    if [[ -n ${schema_file} ]]; then
+      [[ -f ${schema_file} ]] || {
+        echo "missing schema: ${schema_file}" >&2
+        exit 1
+      }
+      cmd+=(--json-schema "$(<"${schema_file}")")
+    elif [[ ${json_mode} -eq 1 ]]; then
+      cmd+=(--output-format json)
+    fi
+    if [[ ${json_mode} -eq 1 || -n ${schema_file} ]]; then
+      [[ -n ${json_file} ]] || {
+        echo "grok JSON output requires --json-file" >&2
+        exit 2
+      }
+      run_and_attest run_with_optional_env "${cmd[@]}" >"${json_file}" 2>"${log_file}"
+      [[ -z ${last_file} ]] || cp "${json_file}" "${last_file}"
+    else
+      run_and_attest run_with_optional_env "${cmd[@]}" >"${log_file}" 2>&1
+      [[ -z ${last_file} ]] || cp "${log_file}" "${last_file}"
+    fi
+    ;;
+  antigravity)
+    prompt_text="$(<"${prompt_file}")"
+    cmd=("${agent_bin}")
+    [[ -z ${model} ]] || cmd+=(--model "${model}")
+    [[ -z ${reasoning_effort} ]] || cmd+=(--effort "${reasoning_effort}")
+    if [[ -n ${schema_file} ]]; then
+      [[ -f ${schema_file} ]] || {
+        echo "missing schema: ${schema_file}" >&2
+        exit 1
+      }
+      cmd+=(--json-schema "${schema_file}")
+    elif [[ ${json_mode} -eq 1 ]]; then
+      cmd+=(--output-format json)
+    fi
+    cmd+=(--print "${prompt_text}")
+    if [[ ${json_mode} -eq 1 || -n ${schema_file} ]]; then
+      [[ -n ${json_file} ]] || {
+        echo "Antigravity JSON output requires --json-file" >&2
+        exit 2
+      }
+      run_and_attest run_with_optional_env "${cmd[@]}" >"${json_file}" 2>"${log_file}"
+      [[ -z ${last_file} ]] || cp "${json_file}" "${last_file}"
+    else
+      run_and_attest run_with_optional_env "${cmd[@]}" >"${log_file}" 2>&1
+      [[ -z ${last_file} ]] || cp "${log_file}" "${last_file}"
+    fi
+    ;;
+  *)
+    echo "unknown agent: ${agent}" >&2
     exit 2
-  }
-  cmd=("${agent_bin}" exec -C "${workdir}" --model "${model}" --output-last-message "${last_file}")
-  [[ -z ${reasoning_effort} ]] || cmd+=(-c "model_reasoning_effort=\"${reasoning_effort}\"")
-  [[ -z ${schema_file} ]] || cmd+=(--output-schema "${schema_file}")
-  [[ -z ${codex_sandbox} ]] || cmd+=(-s "${codex_sandbox}")
-  [[ ${codex_skip_git_check} -eq 0 ]] || cmd+=(--skip-git-repo-check)
-  [[ ${ephemeral} -eq 0 ]] || cmd+=(--ephemeral)
-  [[ ${json_mode} -eq 0 ]] || cmd+=(--json)
-  cmd+=(-)
-  if [[ ${json_mode} -eq 1 ]]; then run_and_attest run_with_optional_env "${cmd[@]}" <"${prompt_file}" >"${json_file}" 2>"${log_file}"; else run_and_attest run_with_optional_env "${cmd[@]}" <"${prompt_file}" >"${log_file}" 2>&1; fi
-  ;;
-claude)
-  prompt_text="$(<"${prompt_file}")"
-  cmd=("${agent_bin}" --print -p "${prompt_text}")
-  [[ -z ${model} ]] || cmd+=(--model "${model}")
-  [[ -z ${reasoning_effort} ]] || cmd+=(--effort "${reasoning_effort}")
-  if [[ -n ${schema_file} ]]; then
-    [[ -f ${schema_file} ]] || {
-      echo "missing schema: ${schema_file}" >&2
-      exit 1
-    }
-    cmd+=(--json-schema "$(<"${schema_file}")")
+    ;;
+  esac
+  status=$?
+  if [[ ${status} -eq 0 || ${retry_attempt} -ge ${max_retries} ]]; then
+    break
   fi
-  if [[ ${json_mode} -eq 1 ]]; then
-    cmd+=(--output-format json)
-    run_and_attest run_with_optional_env "${cmd[@]}" >"${json_file}" 2>"${log_file}"
-    [[ -z ${last_file} ]] || jq -r '.result // empty' "${json_file}" >"${last_file}"
-  else
-    run_and_attest run_with_optional_env "${cmd[@]}" >"${log_file}" 2>&1
-    [[ -z ${last_file} ]] || cp "${log_file}" "${last_file}"
+  race_detected=0
+  looks_like_launcher_race "${log_file}" && race_detected=1
+  if [[ ${race_detected} -eq 0 && -n ${json_file} ]]; then
+    looks_like_launcher_race "${json_file}" && race_detected=1
   fi
-  ;;
-gemini)
-  if [[ ${json_mode} -eq 1 ]]; then run_and_attest run_with_optional_env "${agent_bin}" <"${prompt_file}" >"${json_file}" 2>"${log_file}"; else run_and_attest run_with_optional_env "${agent_bin}" <"${prompt_file}" >"${log_file}" 2>&1; fi
-  ;;
-grok)
-  prompt_text="$(<"${prompt_file}")"
-  cmd=("${agent_bin}" --cwd "${workdir}" --single "${prompt_text}")
-  [[ -z ${model} ]] || cmd+=(--model "${model}")
-  [[ -z ${reasoning_effort} ]] || cmd+=(--reasoning-effort "${reasoning_effort}")
-  if [[ -n ${schema_file} ]]; then
-    [[ -f ${schema_file} ]] || {
-      echo "missing schema: ${schema_file}" >&2
-      exit 1
-    }
-    cmd+=(--json-schema "$(<"${schema_file}")")
-  elif [[ ${json_mode} -eq 1 ]]; then
-    cmd+=(--output-format json)
+  if [[ ${race_detected} -eq 0 ]]; then
+    break
   fi
-  if [[ ${json_mode} -eq 1 || -n ${schema_file} ]]; then
-    [[ -n ${json_file} ]] || {
-      echo "grok JSON output requires --json-file" >&2
-      exit 2
-    }
-    run_and_attest run_with_optional_env "${cmd[@]}" >"${json_file}" 2>"${log_file}"
-    [[ -z ${last_file} ]] || cp "${json_file}" "${last_file}"
-  else
-    run_and_attest run_with_optional_env "${cmd[@]}" >"${log_file}" 2>&1
-    [[ -z ${last_file} ]] || cp "${log_file}" "${last_file}"
-  fi
-  ;;
-antigravity)
-  prompt_text="$(<"${prompt_file}")"
-  cmd=("${agent_bin}")
-  [[ -z ${model} ]] || cmd+=(--model "${model}")
-  [[ -z ${reasoning_effort} ]] || cmd+=(--effort "${reasoning_effort}")
-  if [[ -n ${schema_file} ]]; then
-    [[ -f ${schema_file} ]] || {
-      echo "missing schema: ${schema_file}" >&2
-      exit 1
-    }
-    cmd+=(--json-schema "${schema_file}")
-  elif [[ ${json_mode} -eq 1 ]]; then
-    cmd+=(--output-format json)
-  fi
-  cmd+=(--print "${prompt_text}")
-  if [[ ${json_mode} -eq 1 || -n ${schema_file} ]]; then
-    [[ -n ${json_file} ]] || {
-      echo "Antigravity JSON output requires --json-file" >&2
-      exit 2
-    }
-    run_and_attest run_with_optional_env "${cmd[@]}" >"${json_file}" 2>"${log_file}"
-    [[ -z ${last_file} ]] || cp "${json_file}" "${last_file}"
-  else
-    run_and_attest run_with_optional_env "${cmd[@]}" >"${log_file}" 2>&1
-    [[ -z ${last_file} ]] || cp "${log_file}" "${last_file}"
-  fi
-  ;;
-*)
-  echo "unknown agent: ${agent}" >&2
-  exit 2
-  ;;
-esac
-status=$?
-if [[ ${status} -eq 0 || ${retry_attempt} -ge ${max_retries} ]]; then
-  break
-fi
-race_detected=0
-looks_like_launcher_race "${log_file}" && race_detected=1
-if [[ ${race_detected} -eq 0 && -n ${json_file} ]]; then
-  looks_like_launcher_race "${json_file}" && race_detected=1
-fi
-if [[ ${race_detected} -eq 0 ]]; then
-  break
-fi
-retry_attempt=$((retry_attempt + 1))
-mv -f "${log_file}" "${log_file}.attempt${retry_attempt}" 2>/dev/null || true
-[[ -z ${json_file} ]] || mv -f "${json_file}" "${json_file}.attempt${retry_attempt}" 2>/dev/null || true
-echo "run_agent_prompt.sh: launcher race detected, retrying (attempt ${retry_attempt}/${max_retries})" >&2
-sleep "0.$(( (RANDOM % 900) + 100 ))" 2>/dev/null || sleep 1
+  retry_attempt=$((retry_attempt + 1))
+  mv -f "${log_file}" "${log_file}.attempt${retry_attempt}" 2>/dev/null || true
+  [[ -z ${json_file} ]] || mv -f "${json_file}" "${json_file}.attempt${retry_attempt}" 2>/dev/null || true
+  echo "run_agent_prompt.sh: launcher race detected, retrying (attempt ${retry_attempt}/${max_retries})" >&2
+  sleep "0.$(((RANDOM % 900) + 100))" 2>/dev/null || sleep 1
 done
 set -e
 

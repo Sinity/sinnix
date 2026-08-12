@@ -14,22 +14,22 @@ local data systems, and frequent operational changes.
 
 ## What the repository manages
 
-| Area | Current scope |
-|---|---|
-| Workstation | Hyprland and Noctalia desktop, Home Manager configuration, GPU modes, audio, terminal capture, local AI services, development environments, and desktop applications |
-| Services | typed service inventory, systemd resource classes, cgroup-aware command wrappers, monitoring, and common policy for user and system units |
-| Local data | Sinex, Polylogue, Lynchpin, ActivityWatch, machine telemetry, shell history, and terminal recordings |
-| Storage and recovery | impermanence, explicit persistence, Btrfs snapshots, Borg archives, restore drills, and separate treatment for durable, rebuildable, and bulk data |
-| Agent tooling | shared instructions and skills, generated MCP profiles, browser and desktop control, local model backends, and a trusted repository gateway |
-| Other hosts | a headless NixOS replica using the same module system and a router built from declarative OpenWrt configuration |
+| Area                 | Current scope                                                                                                                                                        |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Workstation          | Hyprland and Noctalia desktop, Home Manager configuration, GPU modes, audio, terminal capture, local AI services, development environments, and desktop applications |
+| Services             | typed service inventory, systemd resource classes, cgroup-aware command wrappers, monitoring, and common policy for user and system units                            |
+| Local data           | Sinex, Polylogue, Lynchpin, ActivityWatch, machine telemetry, shell history, and terminal recordings                                                                 |
+| Storage and recovery | impermanence, explicit persistence, Btrfs snapshots, Borg archives, restore drills, and separate treatment for durable, rebuildable, and bulk data                   |
+| Agent tooling        | shared instructions and skills, generated MCP profiles, browser and desktop control, local model backends, and a trusted repository gateway                          |
+| Other hosts          | a headless NixOS replica using the same module system and a router built from declarative OpenWrt configuration                                                      |
 
 ## Hosts
 
-| Host | Role | Main responsibilities |
-|---|---|---|
-| `sinnix-prime` | interactive workstation and local service host | desktop, development, capture, analysis, local AI, storage, and backups |
-| `sinnix-ethereal` | headless replica | cloud profile, declarative storage, Tailscale, and the replica Sinex role |
-| `sinnix-gw` | OpenWrt router | generated UCI configuration, packages, deployment, and health checks |
+| Host              | Role                                           | Main responsibilities                                                     |
+| ----------------- | ---------------------------------------------- | ------------------------------------------------------------------------- |
+| `sinnix-prime`    | interactive workstation and local service host | desktop, development, capture, analysis, local AI, storage, and backups   |
+| `sinnix-ethereal` | headless replica                               | cloud profile, declarative storage, Tailscale, and the replica Sinex role |
+| `sinnix-gw`       | OpenWrt router                                 | generated UCI configuration, packages, deployment, and health checks      |
 
 ## Repository structure
 
@@ -131,15 +131,15 @@ nix develop
 
 Common commands:
 
-| Command | Purpose |
-|---|---|
-| `check` | run the curated default verification tier sequentially |
-| `lint` | run static Nix and shell checks without modifying files |
-| `format` | format supported source with treefmt |
-| `switch` | build and activate the workstation through the shared lock and resource scope |
-| `boot` | build and register the next boot generation without activating it |
-| `test-system` | test activation without changing the boot default |
-| `test-vm` | build the NixOS VM smoke test |
+| Command       | Purpose                                                                       |
+| ------------- | ----------------------------------------------------------------------------- |
+| `check`       | run the curated default verification tier sequentially                        |
+| `lint`        | run static Nix and shell checks without modifying files                       |
+| `format`      | format supported source with treefmt                                          |
+| `switch`      | build and activate the workstation through the shared lock and resource scope |
+| `boot`        | build and register the next boot generation without activating it             |
+| `test-system` | test activation without changing the boot default                             |
+| `test-vm`     | build the NixOS VM smoke test                                                 |
 
 The wrappers are part of the operating policy. Direct `nh os switch` or
 unscoped heavy commands bypass the resource and concurrency controls encoded in
@@ -147,16 +147,16 @@ the repository.
 
 ## Repository guide
 
-| Path | Purpose |
-|---|---|
-| `flake.nix` | inputs and flake-parts composition |
-| `flake/` | host construction, packages, overlays, checks, development commands, and deployment outputs |
-| `hosts/` | host-specific roles and settings |
-| `modules/` | platform modules plus feature, service, profile, and library trees |
-| `dots/` | Home Manager configuration and shared agent tooling |
-| `scripts/` | packaged operational tools with declared runtime dependencies |
-| `pkgs/` | larger standalone packages maintained with the system |
-| `docs/` | current subsystem, bootstrap, and incident documentation |
+| Path        | Purpose                                                                                     |
+| ----------- | ------------------------------------------------------------------------------------------- |
+| `flake.nix` | inputs and flake-parts composition                                                          |
+| `flake/`    | host construction, packages, overlays, checks, development commands, and deployment outputs |
+| `hosts/`    | host-specific roles and settings                                                            |
+| `modules/`  | platform modules plus feature, service, profile, and library trees                          |
+| `dots/`     | Home Manager configuration and shared agent tooling                                         |
+| `scripts/`  | packaged operational tools with declared runtime dependencies                               |
+| `pkgs/`     | larger standalone packages maintained with the system                                       |
+| `docs/`     | current subsystem, bootstrap, and incident documentation                                    |
 
 ## Further reading
 

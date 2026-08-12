@@ -62,7 +62,9 @@ def main(argv: list[str] | None = None) -> int:
     record_parser = subparsers.add_parser(
         "record", help="Run the always-on recorder loop for one canonical channel"
     )
-    record_parser.add_argument("--channel", required=True, choices=sorted(CHANNEL_PROFILES))
+    record_parser.add_argument(
+        "--channel", required=True, choices=sorted(CHANNEL_PROFILES)
+    )
     _add_capture_root(record_parser)
     record_parser.add_argument("--pw-record-bin", default="pw-record")
     record_parser.add_argument("--pw-metadata-bin", default="pw-metadata")
@@ -76,7 +78,8 @@ def main(argv: list[str] | None = None) -> int:
     record_parser.set_defaults(func=_cmd_record)
 
     topology_parser = subparsers.add_parser(
-        "topology", help="Stream pw-mon Node/Port/Link add/remove events to the audio-topology lane"
+        "topology",
+        help="Stream pw-mon Node/Port/Link add/remove events to the audio-topology lane",
     )
     _add_capture_root(topology_parser)
     topology_parser.add_argument("--pw-mon-bin", default="pw-mon")
@@ -87,7 +90,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     _add_capture_root(index_parser)
     index_parser.add_argument(
-        "--channels", nargs="+", default=sorted(CHANNEL_PROFILES), choices=sorted(CHANNEL_PROFILES)
+        "--channels",
+        nargs="+",
+        default=sorted(CHANNEL_PROFILES),
+        choices=sorted(CHANNEL_PROFILES),
     )
     index_parser.add_argument(
         "--lookback-hours",
@@ -99,9 +105,12 @@ def main(argv: list[str] | None = None) -> int:
     index_parser.set_defaults(func=_cmd_index)
 
     pause_parser = subparsers.add_parser(
-        "pause", help="Write a gap record annotating an interval as intentionally uninteresting"
+        "pause",
+        help="Write a gap record annotating an interval as intentionally uninteresting",
     )
-    pause_parser.add_argument("duration", help="e.g. '30s', '5m', '2h', or a bare number of seconds")
+    pause_parser.add_argument(
+        "duration", help="e.g. '30s', '5m', '2h', or a bare number of seconds"
+    )
     pause_parser.add_argument("--reason", default=None)
     _add_capture_root(pause_parser)
     pause_parser.set_defaults(func=_cmd_pause)

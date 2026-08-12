@@ -11,13 +11,14 @@ CMD=$(echo "$INPUT" | jq -r '.tool_input.command // ""')
 HOOK_CWD=$(echo "$INPUT" | jq -r '.cwd // .tool_input.cwd // ""')
 
 egress_decision="$(SINNIX_HOOK_COMMAND="$CMD" SINNIX_HOOK_CWD="$HOOK_CWD" sinnix-egress-scan 2>/dev/null || true)"
-if [[ -n "$egress_decision" ]] && jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null <<<"$egress_decision"; then
+if [[ -n $egress_decision ]] && jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null <<<"$egress_decision"; then
   printf '%s\n' "$egress_decision"
   exit 0
 fi
 
 bd_guard_reason=""
-bd_guard_script=$(cat <<'PY'
+bd_guard_script=$(
+  cat <<'PY'
 import json
 import os
 import shlex
@@ -86,7 +87,7 @@ for index, token in enumerate(tokens):
 PY
 )
 bd_guard_reason="$(SINNIX_HOOK_COMMAND="$CMD" SINNIX_HOOK_CWD="$HOOK_CWD" python3 -c "$bd_guard_script")"
-if [[ -n "$bd_guard_reason" ]]; then
+if [[ -n $bd_guard_reason ]]; then
   printf '%s\n' "$bd_guard_reason"
   exit 0
 fi

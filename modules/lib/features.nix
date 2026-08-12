@@ -157,12 +157,14 @@ let
           restartable = true;
         };
       };
-      configFn = args: lib.mkMerge [
-        (lib.optionalAttrs (stateDirectories != [ ]) {
-          sinnix.persistence.system.directories = stateDirectories;
-        })
-        (configFn args)
-      ];
+      configFn =
+        args:
+        lib.mkMerge [
+          (lib.optionalAttrs (stateDirectories != [ ]) {
+            sinnix.persistence.system.directories = stateDirectories;
+          })
+          (configFn args)
+        ];
     };
 
   # Pre-curried version for extraSpecialArgs - eliminates boilerplate in modules

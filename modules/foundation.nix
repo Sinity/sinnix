@@ -143,10 +143,22 @@ in
                 types.submodule {
                   options = {
                     path = mkOption { type = types.str; };
-                    remote = mkOption { type = types.nullOr types.str; default = null; };
-                    defaultRef = mkOption { type = types.str; default = "master"; };
-                    remoteRead = mkOption { type = types.bool; default = false; };
-                    remoteWrite = mkOption { type = types.bool; default = false; };
+                    remote = mkOption {
+                      type = types.nullOr types.str;
+                      default = null;
+                    };
+                    defaultRef = mkOption {
+                      type = types.str;
+                      default = "master";
+                    };
+                    remoteRead = mkOption {
+                      type = types.bool;
+                      default = false;
+                    };
+                    remoteWrite = mkOption {
+                      type = types.bool;
+                      default = false;
+                    };
                   };
                 }
               );

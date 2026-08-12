@@ -2,7 +2,6 @@ import json
 import subprocess
 from pathlib import Path
 
-
 ROOT = Path(__file__).parents[3]
 SCRIPT = ROOT / "scripts" / "sinnix-config-drift"
 
@@ -31,7 +30,9 @@ def run(
     for root, revision in ((current, current_revision), (booted, booted_revision)):
         config_path = root / "etc/sinnix/config.json"
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(json.dumps({"meta": {"configurationRevision": revision}}))
+        config_path.write_text(
+            json.dumps({"meta": {"configurationRevision": revision}})
+        )
     output = tmp_path / "drift.jsonl"
     subprocess.run(
         [
@@ -64,7 +65,10 @@ def test_sysctl_drift_and_missing_probe_are_explicit(tmp_path):
             "swap": [],
             "generation": {"revision": "fixture"},
         },
-        proc_files={"proc/sys/vm/swappiness": "1\n", "proc/swaps": "Filename\ttype\tsize\tused\tpriority\n"},
+        proc_files={
+            "proc/sys/vm/swappiness": "1\n",
+            "proc/swaps": "Filename\ttype\tsize\tused\tpriority\n",
+        },
     )
     by_check = {row["check"]: row for row in rows}
     assert by_check["sysctl:vm.swappiness"]["match"] is False

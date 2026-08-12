@@ -44,7 +44,7 @@ the territory; its snapshot date is 2026-08-11.
   one team per session; teammates don't inherit lead model.
 - **Agent definitions** (`.claude/agents/*.md`): body = the subagent's entire
   system prompt; frontmatter: `model`, `effort`, `tools`, `isolation:
-  worktree`, `skills`, `memory`, `maxTurns`, hooks. Bake standing contracts
+worktree`, `skills`, `memory`, `maxTurns`, hooks. Bake standing contracts
   here, not into per-dispatch prompts.
 - **Hooks** (settings.json): lifecycle interception (PreToolUse can inspect
   full tool input and deny/warn; SubagentStart/Stop; SessionStart; Stop).

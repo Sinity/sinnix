@@ -15,7 +15,9 @@ import sys
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
-SCRIPT_PATH = Path(__file__).resolve().parent.parent / "sinnix-capture-notifications-listener"
+SCRIPT_PATH = (
+    Path(__file__).resolve().parent.parent / "sinnix-capture-notifications-listener"
+)
 
 # The script has no `.py` suffix (it is a frontmatter-packaged sinnix
 # script executed by its shebang), so importlib can't infer a loader from
@@ -49,7 +51,10 @@ REAL_NOTIFY_RECORD = {
             "Sinnix Test",
             "capture-notifications probe body",
             [],
-            {"urgency": {"type": "y", "data": 1}, "sender-pid": {"type": "x", "data": 1297637}},
+            {
+                "urgency": {"type": "y", "data": 1},
+                "sender-pid": {"type": "x", "data": 1297637},
+            },
             -1,
         ],
     },

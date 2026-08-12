@@ -6,7 +6,7 @@ Partitioning by intuition ("this directory looks big") or by uniform
 line-count slicing produces regions that don't match how the code is actually
 organized — an agent assigned a 5000-line arbitrary slice spanning three
 unrelated modules can't build the coherent mental model that catches
-cross-function invariant violations. Partitioning by *measured, real*
+cross-function invariant violations. Partitioning by _measured, real_
 directory/file sizes, aligned to module boundaries, does.
 
 ## The sweep
@@ -31,7 +31,7 @@ read, not padding the number with boilerplate.
 a directory tree, sums `.rs`/`.py`/`.ts`/etc. files (configurable) per
 subdirectory, and prints a flat region list where each region is under the
 target — merging small siblings and splitting oversized ones by their own
-subdirectories. Treat its output as a *starting point* to sanity-check against
+subdirectories. Treat its output as a _starting point_ to sanity-check against
 real module boundaries, not a final answer to dispatch blindly.
 
 ## Target sizes by tier
@@ -40,11 +40,11 @@ These aren't arbitrary — they're back-derived from what worked across real
 campaigns (a 25-region wave across ~411K lines, cross-checked against which
 regions later needed a second narrow pass to find more):
 
-| Tier | Target region size | Rationale |
-|---|---|---|
-| Opus, dense/subtle logic | 3K–8K lines | Admission pipelines, transaction boundaries, provenance/identity substrates, DB write chokepoints — code where the bug is in an interaction between two functions, not a local pattern. Needs room to hold cross-function state without losing the thread; going much bigger risks the same "skim, not read" failure a lower-tier model would have at any size. |
-| Sonnet, coverage-shaped | up to ~15K lines | Mechanical/repetitive surfaces: RPC handler stubs, CLI command implementations, source-contract registrations. High volume but each unit is locally comprehensible — the risk isn't losing a cross-cutting invariant, it's simply not reading everything, so the region needs to be small enough that "read every file" is actually followed, not "read the first half and extrapolate." |
-| Fast + tiny-context (e.g. Codex spark-tier), narrate-through | 1–4 files, 500–2500 lines | These models are optimized for speed over context depth and often ship instructions that actively discourage broad exploration. Give them a small, explicit file list and a forced-narration prompt (see `techniques.md`) rather than a directory to explore — they do well at close reading of a small, named target and poorly at self-directed scoping. |
+| Tier                                                         | Target region size        | Rationale                                                                                                                                                                                                                                                                                                                                                                                |
+| ------------------------------------------------------------ | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Opus, dense/subtle logic                                     | 3K–8K lines               | Admission pipelines, transaction boundaries, provenance/identity substrates, DB write chokepoints — code where the bug is in an interaction between two functions, not a local pattern. Needs room to hold cross-function state without losing the thread; going much bigger risks the same "skim, not read" failure a lower-tier model would have at any size.                          |
+| Sonnet, coverage-shaped                                      | up to ~15K lines          | Mechanical/repetitive surfaces: RPC handler stubs, CLI command implementations, source-contract registrations. High volume but each unit is locally comprehensible — the risk isn't losing a cross-cutting invariant, it's simply not reading everything, so the region needs to be small enough that "read every file" is actually followed, not "read the first half and extrapolate." |
+| Fast + tiny-context (e.g. Codex spark-tier), narrate-through | 1–4 files, 500–2500 lines | These models are optimized for speed over context depth and often ship instructions that actively discourage broad exploration. Give them a small, explicit file list and a forced-narration prompt (see `techniques.md`) rather than a directory to explore — they do well at close reading of a small, named target and poorly at self-directed scoping.                               |
 
 If a region doesn't fit comfortably in its tier's target even after drilling
 to file-level granularity (a single file larger than the target — this
@@ -58,7 +58,7 @@ half if the file has an obvious seam.
 
 Cross-reference the partition against what prior sweeps (thematic or
 per-region) already touched. Not "has any agent looked at this file" but
-"has this specific file had a *close* read" — a file mentioned only in a
+"has this specific file had a _close_ read" — a file mentioned only in a
 grep-driven thematic sweep, or read as part of an oversized region an agent
 explicitly flagged as "partially covered, ran out of room," is still
 effectively unaudited. Cold-spot signals worth prioritizing:
@@ -67,7 +67,7 @@ effectively unaudited. Cold-spot signals worth prioritizing:
 - Files an agent's own coverage statement named as "not reached" or
   "deprioritized for time" — these are self-reported gaps, the highest-
   confidence signal you have.
-- The tooling that *verifies* the rest of the codebase (build scripts, CI
+- The tooling that _verifies_ the rest of the codebase (build scripts, CI
   gates, doctor/health checks) — bugs here invalidate the audit's own
   confidence in everything else, and it's routinely under-audited because it
   doesn't look like "the product."

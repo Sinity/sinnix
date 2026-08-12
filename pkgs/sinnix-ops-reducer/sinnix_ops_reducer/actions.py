@@ -20,14 +20,21 @@ def focus_registered_session(job: dict[str, Any]) -> dict[str, Any]:
     socket_path = correlation.get("kitty_socket")
     kitty_window_id = correlation.get("kitty_window_id")
     hyprland_address = correlation.get("hyprland_address")
-    if not all(isinstance(value, str) and value for value in (socket_path, kitty_window_id, hyprland_address)):
+    if not all(
+        isinstance(value, str) and value
+        for value in (socket_path, kitty_window_id, hyprland_address)
+    ):
         raise ActionError("job terminal target is incomplete", 409)
 
     def run(command: list[str]) -> subprocess.CompletedProcess[str]:
         try:
-            result = subprocess.run(command, capture_output=True, text=True, timeout=5, check=False)
+            result = subprocess.run(
+                command, capture_output=True, text=True, timeout=5, check=False
+            )
         except (OSError, subprocess.TimeoutExpired) as error:
-            raise ActionError(f"focus verification unavailable: {type(error).__name__}", 503) from error
+            raise ActionError(
+                f"focus verification unavailable: {type(error).__name__}", 503
+            ) from error
         if result.returncode != 0:
             raise ActionError("focus target verification failed", 409)
         return result
@@ -39,14 +46,27 @@ def focus_registered_session(job: dict[str, Any]) -> dict[str, Any]:
         raise ActionError("Kitty target inventory is malformed", 409) from error
     matches = [
         window
-        for os_window in kitty_windows if isinstance(kitty_windows, list)
-        for tab in os_window.get("tabs", []) if isinstance(os_window, dict)
-        for window in tab.get("windows", []) if isinstance(tab, dict)
+        for os_window in kitty_windows
+        if isinstance(kitty_windows, list)
+        for tab in os_window.get("tabs", [])
+        if isinstance(os_window, dict)
+        for window in tab.get("windows", [])
+        if isinstance(tab, dict)
         if str(window.get("id")) == kitty_window_id
     ]
     if len(matches) != 1:
         raise ActionError("registered Kitty window is not unique", 409)
-    run(["kitty", "@", "--to", endpoint, "focus-window", "--match", f"id:{kitty_window_id}"])
+    run(
+        [
+            "kitty",
+            "@",
+            "--to",
+            endpoint,
+            "focus-window",
+            "--match",
+            f"id:{kitty_window_id}",
+        ]
+    )
     run(["hyprctl", "dispatch", "focuswindow", f"address:{hyprland_address}"])
     try:
         active = json.loads(run(["hyprctl", "-j", "activewindow"]).stdout)
@@ -55,9 +75,13 @@ def focus_registered_session(job: dict[str, Any]) -> dict[str, Any]:
     if str(active.get("address")) != hyprland_address:
         raise ActionError("Hyprland focused window does not match registration", 409)
     return {
-        "target": {"kitty_window_id": kitty_window_id, "hyprland_address": hyprland_address},
+        "target": {
+            "kitty_window_id": kitty_window_id,
+            "hyprland_address": hyprland_address,
+        },
         "status": "verified",
     }
+
 
 ACTION_FIELDS = {
     "action",
@@ -118,7 +142,10 @@ def validate_request(value: Any) -> dict[str, Any]:
         raise ActionError("job targets only support focus and interrupt")
     if action == "focus" and "unit" in target:
         raise ActionError("focus requires an attested job target")
-    if action in {"set_policy", "reset_policy", "park", "thaw"} and "unit" not in target:
+    if (
+        action in {"set_policy", "reset_policy", "park", "thaw"}
+        and "unit" not in target
+    ):
         raise ActionError(f"{action} requires a runtime unit target")
     if action == "set_policy":
         if set(parameters) != {"property", "value"}:
@@ -126,19 +153,30 @@ def validate_request(value: Any) -> dict[str, Any]:
         _string(parameters["property"], "property", 32)
         _string(parameters["value"], "value", 64)
         if parameters["property"] not in {
-            "MemoryHigh", "MemoryMax", "MemoryLow", "CPUWeight", "IOWeight", "Nice"
+            "MemoryHigh",
+            "MemoryMax",
+            "MemoryLow",
+            "CPUWeight",
+            "IOWeight",
+            "Nice",
         }:
             raise ActionError("unsupported runtime policy property")
     if action == "interrupt":
         if set(parameters) - {"orphan_reap"}:
             raise ActionError("interrupt accepts only orphan_reap")
-        if "orphan_reap" in parameters and not isinstance(parameters["orphan_reap"], bool):
+        if "orphan_reap" in parameters and not isinstance(
+            parameters["orphan_reap"], bool
+        ):
             raise ActionError("orphan_reap must be boolean")
     if action == "park":
         if set(parameters) != {"deadline_seconds"}:
             raise ActionError("park requires deadline_seconds")
         deadline = parameters["deadline_seconds"]
-        if isinstance(deadline, bool) or not isinstance(deadline, int) or not 1 <= deadline <= 86400:
+        if (
+            isinstance(deadline, bool)
+            or not isinstance(deadline, int)
+            or not 1 <= deadline <= 86400
+        ):
             raise ActionError("deadline_seconds must be between 1 and 86400")
     if action in {"reset_policy", "thaw"} and parameters:
         raise ActionError(f"{action} does not accept parameters")
@@ -202,7 +240,11 @@ class ActionService:
         if "job_id" in target:
             state = snapshot.get("state") or {}
             gateway = state.get("agent_gateway") if isinstance(state, dict) else None
-            jobs = gateway.get("jobs", []) if isinstance(gateway, dict) else state.get("jobs", [])
+            jobs = (
+                gateway.get("jobs", [])
+                if isinstance(gateway, dict)
+                else state.get("jobs", [])
+            )
             job = next(
                 (item for item in jobs if item.get("job_id") == target["job_id"]), None
             )
@@ -234,7 +276,11 @@ class ActionService:
             orphan = next(
                 (
                     row
-                    for row in (state.get("agent_gateway", {}).get("orphaned_jobs", []) if isinstance(state.get("agent_gateway"), dict) else [])
+                    for row in (
+                        state.get("agent_gateway", {}).get("orphaned_jobs", [])
+                        if isinstance(state.get("agent_gateway"), dict)
+                        else []
+                    )
                     if isinstance(row, dict) and row.get("job_id") == target["job_id"]
                 ),
                 None,
@@ -247,7 +293,8 @@ class ActionService:
                 (
                     candidate
                     for candidate in surfaces.values()
-                    if isinstance(candidate, dict) and candidate.get("unit") == target["unit"]
+                    if isinstance(candidate, dict)
+                    and candidate.get("unit") == target["unit"]
                 ),
                 None,
             )
@@ -276,11 +323,19 @@ class ActionService:
             if request["expected_revision"] != snapshot.get("sequence"):
                 raise ActionError("expected_revision is stale", 409)
             resolved = self._resolve(request, snapshot)
-            if request["action"] == "interrupt" and request["parameters"].get("orphan_reap"):
+            if request["action"] == "interrupt" and request["parameters"].get(
+                "orphan_reap"
+            ):
                 orphan = resolved.get("orphan")
                 policy = orphan.get("policy") if isinstance(orphan, dict) else None
-                if not isinstance(policy, dict) or policy.get("proposed_action") != "reap":
-                    raise ActionError("orphan reap requires two identical cold expendable observations", 409)
+                if (
+                    not isinstance(policy, dict)
+                    or policy.get("proposed_action") != "reap"
+                ):
+                    raise ActionError(
+                        "orphan reap requires two identical cold expendable observations",
+                        409,
+                    )
             adapter_receipt = self.adapter(request, resolved)
         except ActionError as error:
             rejected = {
@@ -377,22 +432,37 @@ class ActionService:
             surface = resolved["surface"]
             property_name = request["parameters"]["property"]
             value = request["parameters"]["value"]
-            allowed = {"MemoryHigh", "MemoryMax", "MemoryLow", "CPUWeight", "IOWeight", "Nice"}
+            allowed = {
+                "MemoryHigh",
+                "MemoryMax",
+                "MemoryLow",
+                "CPUWeight",
+                "IOWeight",
+                "Nice",
+            }
             if property_name not in allowed:
                 raise ActionError("unsupported runtime policy property", 403)
             declared = surface.get("effectiveResources", {})
             if property_name not in declared:
-                raise ActionError("property is not declared by the runtime inventory", 403)
+                raise ActionError(
+                    "property is not declared by the runtime inventory", 403
+                )
             manager = surface["manager"]
             command = [
-                "systemctl", "--user" if manager == "user" else "--system",
-                "set-property", surface["unit"], f"{property_name}={value}",
+                "systemctl",
+                "--user" if manager == "user" else "--system",
+                "set-property",
+                surface["unit"],
+                f"{property_name}={value}",
             ]
         elif action == "rebuild_override":
             command = [
-                "sinnix-rebuild-override", "put",
-                "--name", request["parameters"]["name"],
-                "--value", request["parameters"]["value"],
+                "sinnix-rebuild-override",
+                "put",
+                "--name",
+                request["parameters"]["name"],
+                "--value",
+                request["parameters"]["value"],
             ]
         elif action == "reset_policy":
             surface = resolved["surface"]
@@ -425,7 +495,11 @@ class ActionService:
                 *assignments,
             ]
         else:
-            return {"name": action, "status": "accepted", "receipt": secrets.token_hex(8)}
+            return {
+                "name": action,
+                "status": "accepted",
+                "receipt": secrets.token_hex(8),
+            }
         result = subprocess.run(
             command, capture_output=True, text=True, timeout=10, check=False
         )

@@ -52,10 +52,10 @@
   ],
   "blinded_rubric": {
     "dimensions": {
-      "factual_support": {"max": 4, "weight": 0.4},
-      "coverage": {"max": 4, "weight": 0.3},
-      "unsupported_claim_discipline": {"max": 4, "weight": 0.2},
-      "operational_usefulness": {"max": 4, "weight": 0.1}
+      "factual_support": { "max": 4, "weight": 0.4 },
+      "coverage": { "max": 4, "weight": 0.3 },
+      "unsupported_claim_discipline": { "max": 4, "weight": 0.2 },
+      "operational_usefulness": { "max": 4, "weight": 0.1 }
     },
     "thresholds": {
       "adopt": "teams_mean >= independent_mean + 0.4 and teams_cost_usd <= independent_cost_usd",

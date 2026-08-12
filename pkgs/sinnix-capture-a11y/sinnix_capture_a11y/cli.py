@@ -22,8 +22,15 @@ def main(argv: list[str] | None = None) -> int:
         default=2.0,
         help="Minimum seconds between accepted text-changed records for the same accessible object",
     )
-    parser.add_argument("--max-depth", type=int, default=40, help="Maximum subtree walk depth")
-    parser.add_argument("--max-nodes", type=int, default=2000, help="Maximum node count per subtree dump")
+    parser.add_argument(
+        "--max-depth", type=int, default=40, help="Maximum subtree walk depth"
+    )
+    parser.add_argument(
+        "--max-nodes",
+        type=int,
+        default=2000,
+        help="Maximum node count per subtree dump",
+    )
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args(argv)
 

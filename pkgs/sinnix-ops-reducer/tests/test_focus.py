@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from sinnix_ops_reducer import actions
 
 
-def test_focus_verifies_kitty_and_hyprland_target(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_focus_verifies_kitty_and_hyprland_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: list[list[str]] = []
 
     class Result:
@@ -27,7 +28,13 @@ def test_focus_verifies_kitty_and_hyprland_target(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr(actions.subprocess, "run", run)
     receipt = actions.focus_registered_session(
-        {"correlation": {"kitty_socket": "/tmp/kitty.sock", "kitty_window_id": "42", "hyprland_address": "0xabc"}}
+        {
+            "correlation": {
+                "kitty_socket": "/tmp/kitty.sock",
+                "kitty_window_id": "42",
+                "hyprland_address": "0xabc",
+            }
+        }
     )
     assert receipt["status"] == "verified"
     assert calls[0][:4] == ["kitty", "@", "--to", "unix:/tmp/kitty.sock"]
@@ -43,5 +50,11 @@ def test_focus_rejects_duplicate_kitty_window(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(actions.subprocess, "run", lambda *_args, **_kwargs: Result())
     with pytest.raises(actions.ActionError, match="not unique"):
         actions.focus_registered_session(
-            {"correlation": {"kitty_socket": "/tmp/kitty.sock", "kitty_window_id": "42", "hyprland_address": "0xabc"}}
+            {
+                "correlation": {
+                    "kitty_socket": "/tmp/kitty.sock",
+                    "kitty_window_id": "42",
+                    "hyprland_address": "0xabc",
+                }
+            }
         )

@@ -10,7 +10,7 @@ from sinnix_audio_capture.pipewire_defaults import (
 def test_parse_default_line_sink():
     line = (
         "update: id:0 key:'default.audio.sink' "
-        'value:\'{"name":"bluez_output.AC_80_0A_D4_08_48.1"}\' type:\'Spa:String:JSON\'\n'
+        "value:'{\"name\":\"bluez_output.AC_80_0A_D4_08_48.1\"}' type:'Spa:String:JSON'\n"
     )
     kind, name = parse_default_line(line)
     assert kind == "sink"
@@ -20,7 +20,7 @@ def test_parse_default_line_sink():
 def test_parse_default_line_source():
     line = (
         "update: id:0 key:'default.audio.source' "
-        "value:'{\"name\":\"alsa_input.usb-FiiO_DigiHug_USB_Audio-01.analog-stereo\"}' "
+        'value:\'{"name":"alsa_input.usb-FiiO_DigiHug_USB_Audio-01.analog-stereo"}\' '
         "type:'Spa:String:JSON'\n"
     )
     kind, name = parse_default_line(line)

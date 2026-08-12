@@ -63,7 +63,9 @@ def hamming_distance(a: int, b: int) -> int:
     return bin(a ^ b).count("1")
 
 
-def is_near_duplicate(prev_hash: int | None, new_hash: int, *, threshold: int = 4) -> bool:
+def is_near_duplicate(
+    prev_hash: int | None, new_hash: int, *, threshold: int = 4
+) -> bool:
     """True when `new_hash` is within `threshold` Hamming bits of
     `prev_hash` for the SAME window -- the per-window dedup gate from
     sinnix-9pd 3.2. `prev_hash is None` (first frame ever seen for this
@@ -145,7 +147,9 @@ class DailyThrottleGuard:
 # ---------------------------------------------------------------------------
 
 
-def should_capture_periodic(now: float, last_capture_ts: float | None, *, floor_seconds: float = 30.0) -> bool:
+def should_capture_periodic(
+    now: float, last_capture_ts: float | None, *, floor_seconds: float = 30.0
+) -> bool:
     if last_capture_ts is None:
         return True
     return (now - last_capture_ts) >= floor_seconds

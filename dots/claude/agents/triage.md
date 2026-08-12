@@ -4,7 +4,8 @@ description: Read-only evidence worker returning a closed structured verdict.
 model: haiku
 effort: medium
 tools: [Bash, Read, Glob, Grep]
-disallowedTools: [Write, Edit, MultiEdit, Agent, SendMessage, WebFetch, WebSearch]
+disallowedTools:
+  [Write, Edit, MultiEdit, Agent, SendMessage, WebFetch, WebSearch]
 maxTurns: 60
 outputSchema: schemas/triage.schema.json
 ---

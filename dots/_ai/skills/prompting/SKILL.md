@@ -13,13 +13,13 @@ producing the outcome you actually want.
 
 Before shipping a prompt, simulate a competent-but-literal executor: at every
 fork ("which file? which of these two interpretations? what if the test
-fails?"), does the prompt already contain the decision, the decision *rule*, or
+fails?"), does the prompt already contain the decision, the decision _rule_, or
 an explicit escalation path? If none, the executor decides randomly — and
 plausible-but-wrong beats asking, every time. Fixes, in preference order:
 decide it yourself in the prompt; give the rule ("prefer X when Y"); name the
 fallback ("if ambiguous, report both readings, do not pick").
 
-Mission-first structure: one paragraph of *what outcome*, in ordinary language,
+Mission-first structure: one paragraph of _what outcome_, in ordinary language,
 before any constraints. Opaque ids (bead/issue numbers) are references, never
 the mission. Sections only as needed: context+authority order, scope/non-goals,
 constraints, work strategy, acceptance criteria, deliverable contract.
@@ -46,7 +46,7 @@ For anything discoverable, prefer "inspect X and derive it" over baking in
 facts that rot — but bake in facts the executor cannot discover (operator
 decisions, off-repo context, negative results already known).
 
-Give handoff agents *more* evidence than seems necessary plus an index and an
+Give handoff agents _more_ evidence than seems necessary plus an index and an
 inspection route; withholding for brevity forces re-derivation or guessing.
 The exception is a demonstrated token/upload cap or privacy boundary.
 
@@ -84,13 +84,13 @@ The exception is a demonstrated token/upload cap or privacy boundary.
 
 ## 6. Reusable prompts and caching
 
-- Templates/agent definitions: bake the *standing contract* (rules, output
+- Templates/agent definitions: bake the _standing contract_ (rules, output
   format, hazards) into the definition/system prompt; per-invocation prompts
   carry only task content. One source of truth — pasted contract copies drift.
 - Cache-aware stability: keep the invariant prefix byte-stable (system prompt,
   contract, references) and append the variable part; every gratuitous edit to
   the prefix invalidates provider prompt caches.
-- Few-shot examples are load-bearing: models copy their *form* (including
+- Few-shot examples are load-bearing: models copy their _form_ (including
   flaws) more reliably than the described rules. Never include an example of
   what NOT to do without visibly marking it — negative examples get copied.
   Three good examples beat ten mediocre ones.

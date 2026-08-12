@@ -5,8 +5,8 @@ description: Produce agent output for human reading as self-contained interactiv
 
 # HTML output ("the unreasonable effectiveness of HTML")
 
-Markdown is the default agent output format; for anything a human will *read*
-rather than *re-edit*, it is usually the wrong ceiling. Self-contained HTML
+Markdown is the default agent output format; for anything a human will _read_
+rather than _re-edit_, it is usually the wrong ceiling. Self-contained HTML
 gives information density (tables, grids, badges, swatches), spatial layout
 (side-by-side, timelines, SVG diagrams), and progressive disclosure
 (`<details>`, tabs, sortable/filterable tables) that markdown flattens into
@@ -18,7 +18,7 @@ The structural ideas below — semantic zoom, hover popups, sidenotes, metadata
 blocks carrying status and epistemic confidence, progressive enhancement — are
 adapted from **gwern.net** (`gwern.net/design`), which has been solving
 "one document, many reading depths" for longer than anyone else. Deliberately
-*not* adopted: link archiving and backlink graphs (meaningless in a single
+_not_ adopted: link archiving and backlink graphs (meaningless in a single
 file), dropcaps and Art Nouveau ornament (decoration without a job here), and
 reader mode (the A−/A+ and theme controls already cover it).
 
@@ -38,7 +38,7 @@ scan, filter, drill down, or compare — HTML.
 - Tiny answers where a paragraph suffices.
 
 When both matter (durable note + rich view), the markdown stays canonical and
-the HTML is a *view* — never maintain the same prose in both.
+the HTML is a _view_ — never maintain the same prose in both.
 
 ## Semantic zoom (the organizing principle)
 
@@ -49,11 +49,11 @@ how deep to go rather than choosing for them.
     title -> stat tiles -> metadata block -> lead paragraph -> section headers
       -> tables -> body prose -> collapsed <details> -> hover popups -> the file itself
 
-Each layer must be *complete at its own level* — someone who reads only the
+Each layer must be _complete at its own level_ — someone who reads only the
 tiles and the lead should come away with something true, not a teaser. This is
 what lets one artifact serve both "just tell me" and "show me everything",
 which is the exact tension in agent output. Depth is opt-in; nothing important
-may exist *only* behind a hover.
+may exist _only_ behind a hover.
 
 ## Provenance: timestamps, staleness, and epistemic basis
 
@@ -68,18 +68,18 @@ budget. Always carry two: **generated** (when the document was written) and
 not the same day, and only the second one matters for trust.
 
 **Epistemic basis per claim.** gwern tags pages with confidence on the
-Kesselman scale; for agent output the useful axis is not *how sure am I* but
-*what does this rest on*:
+Kesselman scale; for agent output the useful axis is not _how sure am I_ but
+_what does this rest on_:
 
-| tag | meaning |
-| --- | --- |
-| `<span class="ev ev-measured">measured</span>` | a query/command was run; the number came back |
-| `<span class="ev ev-derived">derived</span>` | computed from measurements shown elsewhere in the doc |
-| `<span class="ev ev-inferred">inferred</span>` | reasoned from evidence, not directly observed |
-| `<span class="ev ev-assumed">assumed</span>` | taken on faith, untested |
+| tag                                            | meaning                                               |
+| ---------------------------------------------- | ----------------------------------------------------- |
+| `<span class="ev ev-measured">measured</span>` | a query/command was run; the number came back         |
+| `<span class="ev ev-derived">derived</span>`   | computed from measurements shown elsewhere in the doc |
+| `<span class="ev ev-inferred">inferred</span>` | reasoned from evidence, not directly observed         |
+| `<span class="ev ev-assumed">assumed</span>`   | taken on faith, untested                              |
 
 Tag anything a reader might act on. `assumed` is not an admission of failure —
-an *unlabelled* assumption is. In practice this pays for itself: re-measuring
+an _unlabelled_ assumption is. In practice this pays for itself: re-measuring
 something previously tagged `inferred` is where a large share of real findings
 come from.
 
@@ -107,7 +107,7 @@ editor from anywhere. Render them monospace so they stay copyable.
 **Popups are quotes, not fetches.** Give any element a child
 `<template class="pop">` and it previews on hover, focus, or click-to-pin (Esc
 closes; ctrl/cmd-click still follows the link). The content is inline, so it
-works from `file://` forever and makes zero requests — but *you* must paste the
+works from `file://` forever and makes zero requests — but _you_ must paste the
 excerpt in while you have the file open. That constraint is a feature: the
 preview is a quote you actually took, not a promise to read later.
 
@@ -115,8 +115,8 @@ The `<template>` must be a **direct child** of the element it previews. A
 sibling silently binds the popup to the surrounding paragraph instead.
 
 **Bundle popups with a compiler, not by hand, for `a.path` links.** A `file://`
-link only opens for a reader on the *same machine* with the *same absolute
-paths* — someone else's machine, an Artifact-hosted copy, or a screenshot all
+link only opens for a reader on the _same machine_ with the _same absolute
+paths_ — someone else's machine, an Artifact-hosted copy, or a screenshot all
 leave it dead, and the popup is what keeps the reference useful anyway. But
 hand-typing the excerpt means reading the file into your own context just to
 retype a piece of it back out, and it goes stale on the next edit. Instead,
@@ -127,7 +127,7 @@ it reads each marked file fresh from disk and inserts the popup for you.
 Idempotent (a link with an existing `<template class="pop">` child is left
 alone), so re-run it after adding more `data-embed` links without disturbing
 hand-edited ones. Reserve manual excerpt-typing for the rare case where you
-want to quote a *specific* passage rather than a file's head.
+want to quote a _specific_ passage rather than a file's head.
 
 **Code blocks** use `<figure class="code">` with a `<figcaption>` carrying the
 filename, `<span class="lang">` for the language (gets the accent color), and a
@@ -139,7 +139,7 @@ dependency bought for nothing.
 
 **Quotes are never the same box as your own narration.** This is the single
 most common legibility failure in a report with any back-and-forth structure
-(corrections, timelines, review threads): wrapping *both* the paraphrase
+(corrections, timelines, review threads): wrapping _both_ the paraphrase
 you're writing and the words someone actually said in one identically-styled
 box. A reader can't tell which is which without parsing every sentence.
 Fix it structurally, not by remembering: narration is a **plain paragraph**,
@@ -147,7 +147,7 @@ no border, no background — exactly like the rest of your prose. The moment
 you're relaying words someone actually wrote or said, switch to
 `<blockquote class="q">…<cite>who, when</cite></blockquote>` — it renders in
 an italic serif face (the template's one deliberate typographic pairing) with
-an oversized opening quotation mark, so *quote-ness* reads at a glance,
+an oversized opening quotation mark, so _quote-ness_ reads at a glance,
 independent of who's speaking. Add `.user` or `.ext` to recolor the left bar
 by speaker; the serif treatment itself never changes, because "is this a
 quote" and "who said it" are different facts and should look like different
@@ -155,7 +155,7 @@ facts. A short quote inside a running sentence doesn't need the full block —
 `<span class="iq">` gives it a tinted italic run with no box.
 
 **Sidenotes** (`<span class="sn" tabindex="0"><template class="pop">…`) are a
-small superscript marker using the *same* popup mechanism as path/evidence
+small superscript marker using the _same_ popup mechanism as path/evidence
 previews, not a separate margin-column trick. A true wide-margin sidenote
 needs a page layout that reserves real margin space (gwern's does); a
 `left: calc(50% + Nrem)` guess relative to the viewport has no real containing
@@ -170,7 +170,7 @@ A report can collect input, not just display it — annotation fields on
 findings rows, approve/defer/reject decision widgets, small questionnaires.
 `file://` has no backend, so nothing the operator types can reach you on its
 own; the pattern is autosave-to-`localStorage` (so edits survive reopening
-*that* file — same mechanism as the template's theme/font-size persistence)
+_that_ file — same mechanism as the template's theme/font-size persistence)
 plus a "copy for agent" button that serializes every tagged field to JSON in
 a visible textarea and the clipboard, for the operator to paste back into the
 chat. True realtime sync would need either a companion server (breaks the
@@ -186,7 +186,7 @@ structured answer back in one paste."
 
 ## Marking what changed between passes
 
-When you *revise* a report across sessions — a living workspace, a status page
+When you _revise_ a report across sessions — a living workspace, a status page
 you update weekly — the reader needs to know which parts are new without
 diffing. Put `data-added="YYYY-MM-DD"` (and `data-changed="…"` when you rewrite
 in place) on any `section`, `tr`, `details`, or paragraph you add in a later
@@ -221,7 +221,7 @@ Each of these exists because its absence shipped a real defect:
    one-liners get refused in sandboxed worktree agents).
 2. **Headless-render and judge the DOM, not the exit code.**
    `timeout 180 google-chrome-stable --headless=new --no-sandbox --disable-gpu
-   --user-data-dir=<fresh tmp> --virtual-time-budget=4000 --dump-dom` — run with
+--user-data-dir=<fresh tmp> --virtual-time-budget=4000 --dump-dom` — run with
    the Bash sandbox off (it only reads a local file); chrome may hang after a
    complete dump, so exit 124 with a full DOM is a PASS. Before asserting,
    confirm the dump is non-empty **and newer than the HTML** — a killed chrome
@@ -247,7 +247,7 @@ A report computed from a database, an archive, a test run, or a live system is
 a different artifact from one written from memory, and it earns a different
 standard: **every number should be traceable to the query that produced it.**
 
-The failure mode is specific and common. An analysis gets written by *reading*
+The failure mode is specific and common. An analysis gets written by _reading_
 the source material — scrolling a transcript, skimming logs — and produces
 confident round numbers with a quiet disclaimer that they are approximate. That
 disclaimer is the tell: the data existed and was queryable, and the report
@@ -264,14 +264,14 @@ So, in order of importance:
    exact invocation. The reader can verify; the next agent can regenerate; and a
    number whose query no longer runs becomes visibly stale rather than silently
    wrong.
-3. **Show the holes.** When a query *should* have produced a number and did not
+3. **Show the holes.** When a query _should_ have produced a number and did not
    — timeout, missing surface, unimplemented view — show the gap. A visible hole
    is information about the system; a substituted estimate is not.
 4. **Separate measured from derived from inferred**, and put the split in the
    metadata block. A report that is 90% measured and says so is far more useful
    than one that is 100% confident and 60% measured.
 
-When the reporting *is* the demonstration — showing what a tool can do — this
+When the reporting _is_ the demonstration — showing what a tool can do — this
 matters twice over, because an unverifiable claim about a tool's capability is
 worth less than a small verifiable one. Prefer three numbers the reader can
 reproduce over thirty they cannot.
@@ -313,7 +313,7 @@ files with no index is its own legibility failure (observed live, 2026-08-02).
 
 - **Durable home**: `/realm/data/derived/reports/` (workflow step 3). Keep the
   generated index current: `python3 generators/reports-index.py
-  /realm/data/derived/reports` (idempotent; run it after adding a report).
+/realm/data/derived/reports` (idempotent; run it after adding a report).
 - **Supersession is explicit.** A replaced report gets a `superseded-by` meta
   row + banner pointing forward (and the successor a `supersedes` row back).
   Never leave two siblings that both look current. For artifacts, republish the
@@ -369,7 +369,7 @@ Required elements, beyond the ordinary report shell:
 
 - **A lead register** — one filterable/sortable table, one row per lead, with
   an explicit state badge: `open` · `in-flight` · `landed` · `dud` ·
-  `rejected`. Duds and rejections stay in the table *with the reason*; deleting
+  `rejected`. Duds and rejections stay in the table _with the reason_; deleting
   them invites re-exploration. This table is the artifact's spine.
 - **Frontier at the top** — what is genuinely unexplored, stated as the first
   thing a cold reader sees, above any narrative.
@@ -392,7 +392,7 @@ was that the index and the threads drifted.
 
 ### Beads / PR repos specifically
 
-Where a repo tracks work in Beads or GitHub, the workspace is a *view over*
+Where a repo tracks work in Beads or GitHub, the workspace is a _view over_
 that tracker, never a competing one. Rows carry the bead id / `#NNNN`; anything
 that becomes real work moves to the tracker and the row's state changes to
 point at it. If a row has lived as `open` with no id for a session or two, that

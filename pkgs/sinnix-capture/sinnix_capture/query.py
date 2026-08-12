@@ -50,6 +50,8 @@ def lane_delta(capture_root: Path | str, lane: str, since_ts: float = 0.0) -> di
     }
 
 
-def query(capture_root: Path | str, since_ts: float = 0.0, lanes: list[str] | None = None) -> list[dict]:
+def query(
+    capture_root: Path | str, since_ts: float = 0.0, lanes: list[str] | None = None
+) -> list[dict]:
     lanes = lanes if lanes is not None else discover_lanes(capture_root)
     return [lane_delta(capture_root, lane, since_ts) for lane in lanes]

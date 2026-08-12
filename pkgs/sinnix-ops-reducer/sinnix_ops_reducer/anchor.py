@@ -7,12 +7,19 @@ ANCHOR_SCHEMA = "sinnix-session-anchor-v1"
 ANCHOR_TTL = timedelta(hours=1)
 
 
-def reduce_anchor_event(event: Mapping[str, Any], observed_at: datetime, *, previous: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
+def reduce_anchor_event(
+    event: Mapping[str, Any],
+    observed_at: datetime,
+    *,
+    previous: Mapping[str, Any] | None = None,
+) -> dict[str, Any] | None:
     started = _parse(event.get("started_at"))
     resumed = _parse(event.get("resumed_at")) or observed_at
     if started is None or resumed - started < timedelta(minutes=30):
         return None
-    interval_id = str(event.get("interval_id") or f"{started.isoformat()}:{resumed.isoformat()}")
+    interval_id = str(
+        event.get("interval_id") or f"{started.isoformat()}:{resumed.isoformat()}"
+    )
     if previous and previous.get("interval_id") == interval_id:
         return dict(previous)
     observe = event.get("observe") if isinstance(event.get("observe"), Mapping) else {}
@@ -24,15 +31,29 @@ def reduce_anchor_event(event: Mapping[str, Any], observed_at: datetime, *, prev
         "expires_at": (resumed + ANCHOR_TTL).isoformat().replace("+00:00", "Z"),
         "brief": {
             "focused_project": observe.get("focused_project") or "unavailable",
-            "recent_commits": _refs(observe.get("recent_commits"), "git:recent-commits"),
-            "resumable_agents": _refs(observe.get("resumable_agents"), "polylogue:session-references"),
+            "recent_commits": _refs(
+                observe.get("recent_commits"), "git:recent-commits"
+            ),
+            "resumable_agents": _refs(
+                observe.get("resumable_agents"), "polylogue:session-references"
+            ),
             "scratch_paths": _refs(observe.get("scratch_paths"), "scratch:references"),
         },
-        "sources": {name: _availability(observe.get(key)) for name, key in (("activitywatch", "activitywatch"), ("polylogue", "polylogue"), ("git", "recent_commits"), ("scratch", "scratch_paths"))},
+        "sources": {
+            name: _availability(observe.get(key))
+            for name, key in (
+                ("activitywatch", "activitywatch"),
+                ("polylogue", "polylogue"),
+                ("git", "recent_commits"),
+                ("scratch", "scratch_paths"),
+            )
+        },
     }
 
 
-def expire_anchor(anchor: Mapping[str, Any] | None, observed_at: datetime) -> None | dict[str, Any]:
+def expire_anchor(
+    anchor: Mapping[str, Any] | None, observed_at: datetime
+) -> None | dict[str, Any]:
     if not anchor:
         return None
     expires = _parse(anchor.get("expires_at"))

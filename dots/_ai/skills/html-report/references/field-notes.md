@@ -1,6 +1,6 @@
 # Field notes
 
-Append-only log of things learned by *using* this skill. Every agent that
+Append-only log of things learned by _using_ this skill. Every agent that
 builds an artifact with it should consider adding an entry; most sessions will
 add none, and that is correct.
 
@@ -60,6 +60,7 @@ specific to its situation.
 > dropped.
 
 ### 2026-08-03 — `file://` links are dead when the report ships via Artifact
+
 **What happened:** operator correction on a report published via the `Artifact` tool: every
 `<a class="path" href="file:///...">` link was non-functional — clicking did nothing useful,
 since the page was served from claude.ai's Artifact hosting, not opened locally. The report
@@ -67,10 +68,10 @@ had bare path links with no `<template class="pop">` child, so there was no fall
 **Root cause / mechanism:** the skill's "openable path" pattern (SKILL.md, "Paths, popups, and
 code") assumes the reader opens the HTML file locally via `file://`, where such links resolve
 on the reader's own filesystem. That assumption silently breaks the moment the same artifact
-is *also* published via `Artifact` (which the skill's own workflow step 4 says to do by
+is _also_ published via `Artifact` (which the skill's own workflow step 4 says to do by
 default) — the Artifact-hosted copy runs in a browser sandbox with no access to the operator's
 local files, and `file://` navigation from an `https://` origin is blocked outright by the
-browser besides. A report that is *both* saved locally *and* published (the normal case now)
+browser besides. A report that is _both_ saved locally _and_ published (the normal case now)
 needs to work in both contexts, and only the popup half of the pattern survives Artifact
 hosting.
 **Fix or pattern:** treat the popup as load-bearing, not optional, for any `a.path` in a report
@@ -85,6 +86,7 @@ code" section now names it as the default path — manual excerpt-typing is the 
 quoting one specific passage rather than a file's head.
 
 ## 2026-08-03 — POP-TODO grep matches the template's own SLOT comment
+
 The shipping-check grep for `POP-TODO` fires on the stat-tiles SLOT comment
 ("the shipping check greps for the POP-TODO sentinel") even after every tile is
 filled — delete that comment block when filling the tiles, or the check

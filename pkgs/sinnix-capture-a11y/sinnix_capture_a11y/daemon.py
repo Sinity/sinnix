@@ -150,7 +150,9 @@ class A11yDaemon:
         try:
             self._writer.write(payload)
         except Exception:
-            logger.exception("sinnix-capture-a11y: failed to write %s record", payload.get("kind"))
+            logger.exception(
+                "sinnix-capture-a11y: failed to write %s record", payload.get("kind")
+            )
 
     def on_focus(self, event) -> None:
         acc = event.source
@@ -244,9 +246,15 @@ def run(
     # event ("object:state-changed:focused") -- toolkit AT-SPI2 bridges vary
     # in which one they actually emit.
     pyatspi.Registry.registerEventListener(daemon.on_focus, "focus:")
-    pyatspi.Registry.registerEventListener(daemon.on_focus, "object:state-changed:focused")
-    pyatspi.Registry.registerEventListener(daemon.on_text_changed, "object:text-changed:insert")
-    pyatspi.Registry.registerEventListener(daemon.on_text_changed, "object:text-changed:delete")
+    pyatspi.Registry.registerEventListener(
+        daemon.on_focus, "object:state-changed:focused"
+    )
+    pyatspi.Registry.registerEventListener(
+        daemon.on_text_changed, "object:text-changed:insert"
+    )
+    pyatspi.Registry.registerEventListener(
+        daemon.on_text_changed, "object:text-changed:delete"
+    )
 
     def _on_timeout():
         daemon.maybe_dump_subtree()

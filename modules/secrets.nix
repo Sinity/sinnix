@@ -139,9 +139,7 @@ in
   config = {
     # mkForce: Ensure these options are authoritative regardless of module import order
     sinnix.secrets.exportScript = lib.mkForce (if cfg.enable then secretsExportScript else "");
-    sinnix.secrets.paths = lib.mkForce (
-      if cfg.enable then secretPaths else { }
-    );
+    sinnix.secrets.paths = lib.mkForce (if cfg.enable then secretPaths else { });
 
     age = {
       # With impermanence, /etc/ssh and ~/.ssh are empty at activation time
