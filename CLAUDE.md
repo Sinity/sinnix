@@ -323,6 +323,10 @@ config in `secrets.nix` (repo root).
   (`profiles/cloud.nix`, disko, bootstrap via `nix run .#deploy-ethereal`,
   steady-state via colmena `apply-all`). Runs sinex `deploymentRole =
 "replica"` (postgres+NATS for remote thin workstations, no local capture).
+  **Status: placeholder** (operator, 2026-08-12) — the multi-host future it
+  represents hasn't arrived; do not design against it as a load-bearing
+  target (backup destination, always-on substrate, etc.) without an explicit
+  operator decision. Keep its config compiling; don't grow its role.
 - **sinnix-gw** — OpenWrt router, config generated from
   `hosts/sinnix-gw/default.nix` and pushed over SSH:
   `nix run .#router-deploy` (backup → opkg → UCI → health check).
