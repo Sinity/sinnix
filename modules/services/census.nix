@@ -41,12 +41,16 @@ mkServiceModule {
       };
       systemd.services.sinnix-census = {
         description = "Evidence-joined usage census";
-        serviceConfig = {
-          Type = "oneshot";
-          # Runs as the operator: the evidence lives in the user's atuin DB,
-          # polylogue archive, and user-manager journal.
-          User = config.sinnix.user.name;
-          ExecStart = "${scriptPkgs.sinnix-census}/bin/sinnix-census --window-days ${toString cfg.windowDays}";
+        serviceConfig = lib.sinnix.mkRuntimeServiceConfig {
+          runtimeInventory = config.sinnix.runtime.inventory;
+          unit = "sinnix-census.service";
+          overrides = {
+            Type = "oneshot";
+            # Runs as the operator: the evidence lives in the user's atuin DB,
+            # polylogue archive, and user-manager journal.
+            User = config.sinnix.user.name;
+            ExecStart = "${scriptPkgs.sinnix-census}/bin/sinnix-census --window-days ${toString cfg.windowDays}";
+          };
         };
       };
       systemd.timers.sinnix-census = {
