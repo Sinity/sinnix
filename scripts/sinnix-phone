@@ -91,7 +91,7 @@ pull)
   # Camera and downloads are the durable originals; the health-export folder
   # is where the Health Connect scheduled export lands (see bead sinnix-fmkb).
   # Pull only — never push back, and never delete on the phone.
-  mkdir -p "$LAKE_ROOT"/{camera,download,health}
+  mkdir -p "$LAKE_ROOT"/{camera,download,health,ambient}
   set +e
   rsync -av --ignore-existing -e "ssh -p $PHONE_SSH_PORT" \
     "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/DCIM/" "$LAKE_ROOT/camera/"
@@ -99,6 +99,12 @@ pull)
     "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/Download/" "$LAKE_ROOT/download/"
   rsync -av --ignore-existing -e "ssh -p $PHONE_SSH_PORT" \
     "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/HealthConnectExport/" "$LAKE_ROOT/health/" 2>/dev/null
+  # Continuous ambient audio chunks. --ignore-existing plus the fact that a
+  # chunk is only closed when the next one starts means the in-progress file
+  # gets skipped now and collected on the following run, rather than being
+  # copied half-written.
+  rsync -av --ignore-existing -e "ssh -p $PHONE_SSH_PORT" \
+    "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/sinnix-ambient/" "$LAKE_ROOT/ambient/" 2>/dev/null
   set -e
   du -sh "$LAKE_ROOT" 2>/dev/null
   ;;
