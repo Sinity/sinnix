@@ -1943,7 +1943,10 @@ def main() -> int:
     parser.add_argument(
         "--heavy-lease",
         type=Path,
-        default=Path.home() / ".local/state/sinnix/heavy-lease/owner.json",
+        # Path.home() raises outright when HOME is unset, which would turn a
+        # missing environment variable into a dead dashboard.
+        default=Path(os.environ.get("HOME", "/nonexistent"))
+        / ".local/state/sinnix/heavy-lease/owner.json",
         help="owner file of the heavy-work lease, when that subsystem is present",
     )
     parser.add_argument("--out", type=Path, required=True)
