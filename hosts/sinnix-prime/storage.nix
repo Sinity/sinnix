@@ -266,11 +266,15 @@ in
     # block-snapshot a live DB); disaster recovery is the logical pg_dump in
     # modules/services/sinex/bridge.nix, staged under the btrbk->borg path.
     # History/evidence: bd show sinnix-6b4
+    # Moved /sinex -> /state/sinex on 2026-08-12 (sinnix-eau taxonomy pass;
+    # stack was down, so no drain window needed). The old /realm/sinex
+    # snapshot source stays read-only during burn-in and is deleted only on
+    # explicit operator authorization.
     "/var/lib/sinex" = {
       device = "/dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a";
       fsType = "btrfs";
       options = [
-        "subvol=/sinex"
+        "subvol=/state/sinex"
         "compress=zstd:3"
         "noatime"
         "nofail"
@@ -484,7 +488,8 @@ in
         dev=/dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a
         tmp=$(mktemp -d)
         mount -o subvolid=5 "$dev" "$tmp"
-        root="$tmp/sinex"
+        install -d "$tmp/state"
+        root="$tmp/state/sinex"
         if ! btrfs subvolume show "$root" >/dev/null 2>&1; then
           btrfs subvolume create "$root"
           chattr +C "$root" || true
