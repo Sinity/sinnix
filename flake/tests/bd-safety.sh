@@ -61,6 +61,10 @@ assert_checkout_allowed 'git status'
 
 mutated="$test_root/mutated-hook"
 cp "$hook" "$mutated"
-sed -i 's/if \[\[ -n "\$bd_guard_reason" \]\]; then/if false; then/' "$mutated"
+# Quoting inside [[ -n ... ]] is formatter-owned; match either form, and
+# hard-fail if the mutation did not land -- a silently no-op mutation makes
+# this whole test vacuous.
+sed -i -E 's/if \[\[ -n "?\$bd_guard_reason"? \]\]; then/if false; then/' "$mutated"
+grep -q 'if false; then' "$mutated"
 mutated_input="{\"tool_input\":{\"command\":$(printf '%s' 'bd update sinnix-test --notes note' | jq -Rs .)}}"
 test -z "$(printf '%s\n' "$mutated_input" | "$mutated")"

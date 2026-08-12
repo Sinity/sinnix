@@ -13,8 +13,11 @@ for name in lane triage review judge; do
   printf '%s\n' "$frontmatter" | grep -q "^name: $name$"
   printf '%s\n' "$frontmatter" | grep -q '^model: '
   printf '%s\n' "$frontmatter" | grep -q '^effort: '
-  printf '%s\n' "$frontmatter" | grep -q '^tools: \['
-  printf '%s\n' "$frontmatter" | grep -q '^disallowedTools: \['
+  # Key presence only: YAML array layout (inline vs wrapped) is owned by
+  # the formatter, so anchoring on '[ ' broke on a reflow. Non-emptiness
+  # of the tool sets is covered by the receipt assertions below.
+  printf '%s\n' "$frontmatter" | grep -q '^tools:'
+  printf '%s\n' "$frontmatter" | grep -q '^disallowedTools:'
 done
 
 receipt=$(mktemp)
