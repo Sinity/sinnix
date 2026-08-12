@@ -45,8 +45,8 @@ let
   sinexHome = "${sinexRuntimeRoot}/home";
   sinexPostgresRoot = "${sinexRuntimeRoot}/postgresql";
   sinexPostgresDataDir = "${sinexPostgresRoot}/18";
-  # 2026-07-10: moved off /persist (worn MX500, double-writing every backup
-  # byte) to /realm; still inside the /realm btrbk→borg coverage.
+  # Lives on /realm, not /persist (worn MX500 would double-write every
+  # backup byte); still inside the /realm btrbk→borg coverage.
   sinexPostgresDumpRoot = "/realm/staging/sinex-postgres";
   databaseHost = "127.0.0.1";
   databasePort = 5432;
@@ -222,7 +222,7 @@ in
           # mkDefault) is pure noise on a localhost-only single-app DB:
           # ~100 log lines/hour from sinexctl/lynchpin short-lived
           # connections, which the syslog capture source then re-ingests
-          # into sinex's own dataset (journal self-noise, 2026-07-10 audit).
+          # into sinex's own dataset.
           postgresql.settings.log_connections = false;
           postgresql.settings.log_disconnections = false;
 
@@ -244,18 +244,18 @@ in
               # (sinnix.persistence.system.directories), the same boring
               # mechanism already used for /var/log/journal and dozens of
               # other paths — no bootstrapping concern, ordinary local-fs.target
-              # bind mount (sinnix-v3p, fixed 2026-07-08: previously wiped every
-              # reboot, losing in-flight confirmations and the DLQ).
+              # bind mount. Without this the dir sits on the ephemeral root
+              # and every reboot loses in-flight confirmations and the DLQ.
               dataDir = "/var/lib/nats";
               jetstreamMaxStore = "32G";
               # Express ONLY this host's genuine deltas against sinex's own
               # canonical topology (services.sinex.nats.bootstrapStreams.streams
-              # is now an attrset keyed by stream name whose fields sinex ships
-              # at mkDefault priority — sinex-dffy). Every field not set here is
-              # inherited from sinex's nixos/modules/nats.nix defaults, and any
-              # stream sinex adds later flows in automatically instead of being
-              # silently shadowed by a hand-copied mkForce list (the 2026-07-09
-              # 6-day sinexd outage). Do NOT re-declare byte-identical streams.
+              # is an attrset keyed by stream name whose fields sinex ships
+              # at mkDefault priority). Every field not set here is inherited
+              # from sinex's nixos/modules/nats.nix defaults, and any stream
+              # sinex adds later flows in automatically instead of being
+              # silently shadowed by a hand-copied mkForce list. Do NOT
+              # re-declare byte-identical streams.
               bootstrapStreams.streams = {
                 # natscli rejects --max-bytes above signed 32-bit range, and the
                 # live production stream already carries a 16 GiB cap; passing no
@@ -294,8 +294,8 @@ in
               # loopback-only; raise the transport ceiling so checkpoints can
               # persist while upstream trims checkpoint state size.
               extraSettings.max_payload = lib.mkDefault 8388608;
-              # The dedicated /cache NVMe was removed after sustained I/O
-              # failures. Keep JetStream under the normal NATS state root.
+              # Keep JetStream under the normal NATS state root, not a
+              # dedicated cache device.
               storeDir = "/var/lib/nats/jetstream";
               killPolicy = {
                 # Give JetStream enough bounded time to close a
@@ -330,13 +330,13 @@ in
               api = {
                 enable = runtimeEnabled;
                 autoGenerateTls = true;
-                # sinex-d4qg: the shared per-service pool default (4,
+                # The shared per-service pool default (4,
                 # database.connectionPool.maxConnections) starves the API's
-                # own traffic under real load -- confirmed live 2026-07-10:
-                # a single replay preview transaction over a real-volume
-                # scope held a connection long enough that even periodic
-                # telemetry sampling on the same pool started timing out.
-                # 16 matches sinex's own Rust-level PoolConfig::default()
+                # own traffic under real load: a single replay preview
+                # transaction over a real-volume scope can hold a connection
+                # long enough that periodic telemetry sampling on the same
+                # pool starts timing out. 16 matches sinex's own Rust-level
+                # PoolConfig::default()
                 # (crate/sinex-db/src/pool.rs) -- the value the shared
                 # default itself overrode down to 4 -- so this isn't a new
                 # number, it's reverting the API specifically to the
@@ -743,13 +743,11 @@ in
           wants = [ "network-online.target" ] ++ lib.optionals databasePrepared [ "postgresql.target" ];
         };
         # Maintenance timers follow the runtime TARGET, not the auto-start
-        # POLICY. The previous force-disable on manual-start hosts rendered
-        # these units masked, and on this host — where the runtime is
-        # manual-start by policy but in practice runs 24/7 — the postgres
-        # disaster-recovery dump was silently dead 2026-06-29 → 07-10 (11
-        # days without dumps; found by the backup audit). wantedBy pulls a
-        # timer up whenever sinex-runtime.target starts (manual or auto);
-        # PartOf stops it with the target; nothing is ever masked.
+        # POLICY: force-disabling on manual-start hosts masks the units even
+        # though this host's runtime is manual-start by policy but in
+        # practice runs 24/7. wantedBy pulls a timer up whenever
+        # sinex-runtime.target starts (manual or auto); PartOf stops it with
+        # the target; nothing is ever masked.
         systemd.timers =
           lib.genAttrs maintenanceTimerServiceNames (_: {
             wantedBy = lib.mkForce [ "sinex-runtime.target" ];
