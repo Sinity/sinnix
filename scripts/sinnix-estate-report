@@ -466,6 +466,8 @@ def build(F, holes, authored, out_path: Path):
             ("Work items", "measured (bd)"),
             ("Check counts", "measured (nix eval)" if F.get("checks") else "hole (skipped)"),
             ("Pilot results", "measured (protocol JSON)"),
+            ("Session chronicles", "authored, dated entries (commits-by-hour chart generated)"),
+            ("Risk register", "authored, dated entries"),
             ("Vocabulary, architecture, hosts, doctrine, runbook, failure catalog, why-layer",
              "authored — deliberately data-free framing"),
         ])
@@ -575,6 +577,7 @@ def build(F, holes, authored, out_path: Path):
   absorb collisions); this chart is generated from the live inventory, so
   budget changes redraw it:</p>
   {skyline(F['inventory'].get('slices', []))}
+  {sec('oom_ladder')}
   <h3>30-day stall calendar</h3>
   <p>5-second samples with whole-system memory-pressure "full" above 15%/min
   <span class="ev ev-measured">measured</span>; success for the tuning
@@ -587,6 +590,7 @@ def build(F, holes, authored, out_path: Path):
   <div class="tablewrap"><table><thead><tr><th>Day</th><th>Samples</th><th class="nosort">Top pressure sources (unit, peak full-avg60)</th></tr></thead>
   <tbody>{attr_rows or '<tr><td colspan=3>no qualifying days in window</td></tr>'}</tbody></table></div>
   {sec('governance_tail')}
+  {sec('governance_serialized')}
 </section>
 
 <section id="surfaces">
@@ -621,9 +625,17 @@ def build(F, holes, authored, out_path: Path):
   {sec('pilot')}
 </section>
 
+<section id="scripts">{sec('scripts')}</section>
+<section id="verification">{sec('verification')}</section>
 <section id="runbook">{sec('runbook')}</section>
 <section id="failures">{sec('failures')}</section>
 <section id="why">{sec('why')}</section>
+
+<section id="chronicle">
+  {sec('chronicle')}
+  <h3>Commits by hour (today, generated)</h3>
+  {bar_block([(h + ':00', n) for h, n in F['repo'].get('commits_today_by_hour', [])])}
+</section>
 
 <section id="open-work">
   <h2>Open work</h2>
@@ -631,6 +643,7 @@ def build(F, holes, authored, out_path: Path):
   {', '.join(f"P{p}×{n}" for p, n in F['beads'].get('open_by_priority', []))}.
   Current P1s:</p>
   <ul>{''.join(f'<li><code>{E(i["id"])}</code> — {E(i["title"])}</li>' for i in F['beads'].get('p1', [])) or '<li>none</li>'}</ul>
+  {sec('risks')}
 </section>
 
 <section id="provenance">
@@ -639,6 +652,7 @@ def build(F, holes, authored, out_path: Path):
   data-free; every number lives in a measured section or carries its own tag.</p>
   <div class="tablewrap"><table><thead><tr><th>Section</th><th class="nosort">Origin</th></tr></thead>
   <tbody>{prov_rows}</tbody></table></div>
+  {sec('method')}
   <p>Figures sidecar for <code>--verify</code>:
   <code>{E(str(out_path))}.data.json</code>.</p>
 </section>
