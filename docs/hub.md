@@ -11,21 +11,63 @@ annotations somewhere to go.
 
 ## Routes
 
-Everything below is on the hub port (8880 by default).
+Everything below is on the hub port (8880 by default), and every page carries
+the same nav, so the routes are reachable from each other rather than by URL.
 
-| Route       | What it is                                                           |
-| ----------- | -------------------------------------------------------------------- |
-| `/`         | Server-rendered dashboard: pressure, sources, storage, units, agents |
-| `/ai/`      | AI control panel: per-service state plus start/stop/restart          |
-| `/reports/` | The generated report tree, browsable and linkable                    |
-| `/ops/v1/*` | Reverse proxy onto the ops-reducer's read and action API             |
-| `/feedback` | Append-only spool for report annotations                             |
+| Route        | What it is                                                          |
+| ------------ | ------------------------------------------------------------------- |
+| `/`          | The three-second read: a verdict, six tiles, then supporting detail |
+| `/work/`     | What is actually running, named — see below                         |
+| `/services/` | Every attested runtime surface, grouped by resource class           |
+| `/ai/`       | The local AI backends and their activation semantics                |
+| `/reports/`  | The generated report tree, browsable and linkable                   |
+| `/ops/v1/*`  | Reverse proxy onto the ops-reducer's read and action API            |
+| `/feedback`  | Append-only spool for report annotations                            |
 
 The loopback web UIs get one port each rather than a subpath of the hub —
 `8881` Open WebUI, `8882` ComfyUI, `8883` KoboldCpp. They are single-page apps
 that emit absolute asset URLs and have no base-path support, so a `/ui/comfyui/`
 mount would half-work in the way that wastes an afternoon. One port each costs
 one firewall entry and always works.
+
+## The workload view
+
+`/work/` answers "what is this machine doing right now?" in sentences, not in a
+process list. It can, because the estate already names its own work:
+
+- **Project commands in flight** come from the project ledger the devshell
+  wrappers write — the same records lynchpin reads. A row is
+  "sinex is running `test`, in flight 3m 14s, developer-build".
+- **Scopes** are the transient units `sinnix-scope` creates. The unit name
+  carries the command class (`sinnix-build-…`, `sinnix-nix-build-…`), so a
+  scope is never anonymous, and the scope's leader process supplies the command
+  and working directory that turn it into "`xtask test -p sinexd` in `sinex`".
+  Launch wrappers (`env`, `nice`, `ionice`, the scope supervisor, `nix develop
+--command`) are stripped so the line reads as what was typed.
+- **Memory against the ceiling that binds it.** Agent scopes carry their own
+  8G/12G cap; a build scope does not, so the figure shown is against
+  `build.slice`'s. Slice budgets get their own card, because "how much of the
+  sacrificial budget is spent" is the question that predicts a stall.
+- **Agent-gateway jobs** are matched to their `sinnix-agent-job-*.scope` by job
+  id, so a live job shows its backend, model, work item and elapsed time, and
+  the ones whose launcher has exited are listed separately, with the reducer's
+  orphan policy on the ones that need a decision.
+- **The heavy-work lease**, when that subsystem is present on the host, heads
+  the page: who currently holds the right to run heavy work.
+
+Long-lived scopes are labelled as such rather than filtered out. A devshell
+Postgres or a Dolt server that has sat in `build.slice` for a week is not
+"nothing" — it is spending the same budget the next compile wants.
+
+### What the page cannot do
+
+Lifecycle control goes through the reducer's action API and nowhere else, so
+the page can only offer what that API accepts: `start`/`stop`/`restart` on an
+attested inventory unit that declares `observe.restartable`, and `interrupt` on
+an attested agent job. An ad-hoc `sinnix-scope` placement is neither, so a
+running compile is fully _visible_ and not stoppable from the hub. The page
+says so in place of the button. Making it stoppable is a reducer change — a
+scope-target admission rule with its own attestation — not a hub change.
 
 ## Why it cannot be seen from the LAN
 
@@ -67,7 +109,7 @@ here needs a privileged port.
 
 ## Why there is no second control plane
 
-The AI panel's buttons post to `/ops/v1/actions` — the ops-reducer's existing
+Every button on every page posts to `/ops/v1/actions` — the ops-reducer's existing
 bounded action API. That API already owns admission (targets must be attested
 runtime-inventory units that declare `observe.restartable`), optimistic
 concurrency (`expected_revision` must match the snapshot the operator saw),
@@ -79,11 +121,12 @@ they inherit the same gate and the same receipts as `restart`. Privilege comes
 from the workstation profile's existing polkit rule for `wheel` on
 `org.freedesktop.systemd1.*`; the hub introduces no new grant.
 
-The panel resolves every unit from `/etc/sinnix/runtime-inventory.json` — the
-same attested document the action API validates against — so it cannot offer a
-button the API would refuse for a reason the panel does not know about. A
+The pages resolve every unit from `/etc/sinnix/runtime-inventory.json` — the
+same attested document the action API validates against — so they cannot offer
+a button the API would refuse for a reason the page does not know about. A
 service whose module is not enabled renders as "not registered" rather than
-silently disappearing.
+silently disappearing, and a unit with no `observe.restartable` renders as "not
+restartable" rather than with a button that would 403.
 
 **The backends are socket-activated.** They sit behind `systemd-socket-proxyd`
 and exit after a 30s idle timeout, so _idle_ is the normal resting state, not a
@@ -123,13 +166,23 @@ The skill is unchanged. Adopting the line above is a later, optional edit.
 `sinnix-hub-render` runs on a timer (60s) and writes complete HTML: the browser
 fetches nothing to display state. A phone on a flaky link, or a page left open
 overnight, shows the estate as of a timestamp it prints, rather than an empty
-skeleton waiting on XHR. The only client-side logic is the action buttons and a
-three-line script that rewrites the frontend port links to whichever host you
-reached the hub on.
+skeleton waiting on XHR. Client-side logic is limited to the action buttons, the
+theme and text-size toggles, the services filter, and the three lines that
+rewrite the frontend port links to whichever host you reached the hub on.
 
-Inputs are the reducer snapshot, the runtime inventory, and a Nix-generated
-manifest. A missing input degrades the page — "estate state unavailable", with
-the links still working — rather than failing the unit.
+Inputs are the reducer snapshot, the runtime inventory, a Nix-generated
+manifest, live systemd state, and — for the workload view — the scope cgroups
+and their leader processes. A missing input degrades the page rather than
+failing the unit: with no reducer snapshot, `/work/` still shows live scopes
+straight from systemd, and `/` says plainly that it cannot tell you whether
+anything is wrong.
+
+The visual language is the estate's own: the same CSS custom properties, status
+tones, stat tiles, badges and A−/A+ controls as the generated reports, in the
+violet "ops" accent so the hub is distinguishable at a glance from a report.
+It is styled for the phone first — one column, ≥2.4rem touch targets, no
+horizontal scroll at 360px — and widens into columns on a desktop instead of
+stretching one long list across 4K.
 
 ## Operating it
 
