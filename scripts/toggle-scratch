@@ -131,7 +131,7 @@ EOF
 }
 
 resize_window_if_needed() {
-  local width_ratio height_ratio address monitors dims width height
+  local width_ratio height_ratio address monitors width height
   width_ratio=${WIDTH_RATIO:-}
   height_ratio=${HEIGHT_RATIO:-}
   address=${LAST_WINDOW_ADDRESS:-}
