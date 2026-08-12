@@ -48,7 +48,9 @@ shift || true
 case "$cmd" in
 status)
   echo "== phone =="
-  if ping -c1 -W3 "$PHONE_TS_IP" >/dev/null 2>&1; then
+  # TCP, not ICMP: a dozing Android drops pings while still accepting
+  # connections, so ping reports a false outage on a working link.
+  if timeout 5 bash -c "exec 3<>/dev/tcp/$PHONE_TS_IP/$PHONE_SSH_PORT" 2>/dev/null; then
     echo "tailnet   : reachable ($PHONE_TS_IP)"
   else
     echo "tailnet   : UNREACHABLE ($PHONE_TS_IP)"
