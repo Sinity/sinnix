@@ -30,6 +30,9 @@ mkServiceModule {
         name = "asciinema";
         path = recordingsDir;
         eventDriven = true;
+        # Session-based, not cadence-based: budget generously (daily) so an
+        # idle terminal day doesn't false-positive.
+        staleAfterSeconds = 86400;
       }
     ];
   };
