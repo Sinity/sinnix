@@ -60,11 +60,10 @@ mkFeatureModule {
               mouse_hide_wait = 60;
               wheel_scroll_multiplier = 5.0;
               touch_scroll_multiplier = 5.0;
-              # cursor_trail 3 -> 0 (2026-07-10, sinnix-878 phase 1). Phase 1
-              # CONCLUDED 2026-07-11: telemetry over the 07-10..07-11 boot
-              # shows 86 MB/h growth WITH the trail disabled — cursor_trail is
-              # exonerated. Keep it off while the globally patched kitty build
+              # cursor_trail=0: exonerated as the kitty idle-memory-leak
+              # trigger, but kept off while the globally patched kitty build
               # establishes a clean post-fix memory-slope baseline.
+              # History/evidence: bd show sinnix-878
               cursor_trail = 0;
               confirm_os_window_close = 0;
               allow_remote_control = "socket-only";
