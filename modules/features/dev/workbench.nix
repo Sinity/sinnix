@@ -39,6 +39,9 @@ mkFeatureModule {
         graphviz
         mermaid-cli
         android-tools
+        # Screen mirror/control for the phone; works over adb-tcp, so it
+        # reaches the device through the tailnet, not just USB.
+        scrcpy
         evtest
         gcc
         gdb
