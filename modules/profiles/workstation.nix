@@ -120,7 +120,9 @@ in
   config = lib.mkIf cfg.enable {
     assertions = [
       {
-        assertion = lib.all (token: !(lib.hasInfix token earlyoomAvoidPattern)) forbiddenEarlyoomAvoidTokens;
+        assertion = lib.all (
+          token: !(lib.hasInfix token earlyoomAvoidPattern)
+        ) forbiddenEarlyoomAvoidTokens;
         message = "earlyoom must not exempt agents, browsers, language runtimes, or generic shells";
       }
       {
@@ -196,7 +198,7 @@ in
       "vm.dirty_bytes" = 256 * 1024 * 1024;
 
       # Rebuild and Home Manager activation reload a large user unit/D-Bus
-      # surface in bursts. Keep inotify capacity high enough that dbus-broker
+      # surface in bursts. Keep inotify capacity high enough that the bus daemon
       # and the user manager can attach their watches instead of timing out
       # during switch activation.
       "fs.inotify.max_user_watches" = 2097152;

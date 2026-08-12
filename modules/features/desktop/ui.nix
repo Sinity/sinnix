@@ -105,7 +105,7 @@ mkFeatureModule {
         # Keep portal DBus activation files in the system profile only.
         # Hyprland's Home Manager module enables xdg.portal by default, which
         # duplicates the same service names under /etc/profiles/per-user and
-        # makes dbus-broker emit duplicate-name warnings on every reload.
+        # makes the bus daemon emit duplicate-name warnings on every reload.
         xdg.portal.enable = lib.mkForce false;
       };
 
