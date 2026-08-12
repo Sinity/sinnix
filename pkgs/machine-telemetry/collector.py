@@ -49,11 +49,11 @@ PROC_IO_FIELDS = (
     "syscw",
 )
 # /proc/vmstat keys captured verbatim as cumulative counters (consumers
-# compute deltas), same convention as the psi *_total_us columns. These are
-# the reclaim/refault/swap/OOM signals that the 2026-07-06 lag investigation
-# found invisible to telemetry: workingset_refault_file=967M and
-# pgscan_file=21.8e9 during the incident, with zero PSI-memory signal because
-# the box was still meeting demand via reclaim, just slowly.
+# compute deltas), same convention as the psi *_total_us columns: reclaim/
+# refault/swap/OOM signals that used to be invisible to telemetry even
+# during a real lag incident, since PSI-memory alone stays quiet while
+# reclaim is still (slowly) meeting demand.
+# History/evidence: bd show sinnix-fjq
 VMSTAT_FIELDS = (
     "workingset_refault_file",
     "workingset_refault_anon",
@@ -1867,15 +1867,12 @@ def systemctl_props(
     cmd = ["systemctl"]
     if user:
         if user_name:
-            # PAM-free user-manager access. The previous
-            # `--user --machine=<user>@` path rides systemd-stdio-bridge
-            # through a full PAM login on EVERY sample tick: a session
-            # scope + a run-pN transient unit + a lastlog2 write each time,
-            # ~32K journal lines/day of pure scaffolding — the single
-            # biggest journal noise source on the host (2026-07-10 audit)
-            # and the thing tripping the lastlog2 wear canary. setpriv
-            # switches uid without PAM, and dbus-broker admits the matching
-            # uid to the user bus directly.
+            # PAM-free user-manager access: `--user --machine=<user>@` rides
+            # systemd-stdio-bridge through a full PAM login (session scope +
+            # transient unit + lastlog2 write) on every sample tick. setpriv
+            # switches uid without PAM; dbus-broker admits the matching uid
+            # to the user bus directly.
+            # History/evidence: bd show sinnix-82m
             pw = pwd.getpwnam(user_name)
             cmd = [
                 "setpriv",
@@ -2030,11 +2027,11 @@ def insert_service_states(
 
 # journalctl -g pre-filters at the journald layer so a cursor-less backfill
 # over weeks of history doesn't have to pipe every uninteresting line through
-# Python. Patterns calibrated 2026-07-06 against this host's real incidents
-# (2026-06-30 earlyoom storm, 2026-07-04 79x-kitten storm) — see the earlyoom
-# message shape below; systemd-oomd and kernel-OOM patterns are best-effort
-# from documented formats since this host has not yet had a real kill from
-# either (raw_line is always kept so an imperfect field match loses nothing).
+# Python. The earlyoom pattern is calibrated against this host's real kill
+# storms; systemd-oomd and kernel-OOM patterns are best-effort from
+# documented formats (raw_line is always kept, so an imperfect match loses
+# nothing).
+# History/evidence: bd show sinnix-fjq
 KILL_EVENT_GREP = (
     r"sending (SIGTERM|SIGKILL) to process|"
     r"^Killed process|"
@@ -2576,14 +2573,12 @@ def main() -> int:
                     save_kill_event_cursor(conn, new_cursor)
                 next_kill_event = sample_start + args.kill_event_interval
             conn.commit()
-            # SQLite's PASSIVE autocheckpoints never shrink the WAL file, and
-            # they silently make no progress while any reader (lynchpin
-            # analysis queries over this DB) holds an older snapshot. Left
-            # alone, one long-reader episode grew the WAL to 1.3 GiB and it
-            # stayed there indefinitely (2026-07-10, sinnix-bdi). TRUNCATE
-            # both drains and shrinks it; with the 5s busy handler a blocked
-            # attempt degrades to a logged retry on the next interval instead
-            # of stalling sampling.
+            # SQLite's PASSIVE autocheckpoints never shrink the WAL file and
+            # silently stall while any reader (lynchpin analysis queries)
+            # holds an older snapshot. TRUNCATE both drains and shrinks it;
+            # the 5s busy handler degrades a blocked attempt to a logged
+            # retry next interval instead of stalling sampling.
+            # History/evidence: bd show sinnix-bdi
             if sample_start >= next_wal_checkpoint:
                 next_wal_checkpoint = sample_start + WAL_CHECKPOINT_INTERVAL_S
                 try:

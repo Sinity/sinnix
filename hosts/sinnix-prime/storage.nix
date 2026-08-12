@@ -25,11 +25,9 @@ let
     "ops.db"
     "daemon_events.db"
   ];
-  # The one-time copy-and-symlink migration (archive DB -> db/polylogue subvol)
-  # completed (sinnix-qs7, verified 2026-07-08: all polylogueDbFiles are live
-  # symlinks to polylogueDbRoot). Retired the WAL/sidecar-checking migration
-  # dance; kept only the steady-state sanity check + fresh-bootstrap symlink
-  # creation, which is all realm-scaffold needs going forward.
+  # One-time archive DB -> db/polylogue subvol migration is complete; only
+  # the steady-state sanity check + fresh-bootstrap symlink creation remain.
+  # History/evidence: bd show sinnix-qs7
   polylogueDbLinkScript = lib.concatMapStringsSep "\n" (
     name:
     let
@@ -57,23 +55,12 @@ let
   swapUnit = "${utils.escapeSystemdPath swapFile}.swap";
   swapSizeGiB = 8;
 
-  # Overflow tier of the tiered swap posture (sinnix-mys, 2026-07-10):
-  # zram (priority 100, modules/profiles/workstation.nix) absorbs bursts at
-  # RAM speed; this NVMe file (priority 10) takes sustained overflow so cold
-  # anon leaves RAM entirely instead of accumulating compressed. earlyoom is
-  # the deep emergency floor (-m3, swap gate 50%), no longer a hair trigger.
-  #
-  # Moved to /realm (Crucial P3 NVMe) 2026-07-09: previously lived at
-  # /swap/swapfile on the root MX500 SATA SSD. Once vm.swappiness went from
-  # 0 to 10 (see workstation.nix) to stop earlyoom killing brief rustc
-  # bursts, real swap activity started competing on the SAME wear-limited
-  # disk as Postgres data and the nix store, saturating it (measured 90ms
-  # write await, 59% util) and freezing terminals. The NVMe has no such
-  # wear-sensitivity flag and far higher throughput/lower latency, so this
-  # is a straightforward move, not a new tradeoff. Sized up from 4 to 8 GiB
-  # since a single large-crate rustc compile has been observed needing
-  # ~7-11 GiB RSS in this codebase and swap is no longer the scarce/wear-
-  # sensitive resource it was on the SATA disk.
+  # Overflow tier of the tiered swap posture: zram (priority 100,
+  # modules/profiles/workstation.nix) absorbs bursts at RAM speed; this NVMe
+  # file (priority 10) takes sustained overflow so cold anon leaves RAM
+  # entirely. Lives on /realm NVMe, not the wear-limited root SATA SSD, so
+  # swap I/O never competes with Postgres/nix-store writes on that disk.
+  # History/evidence: bd show sinnix-mys
   prepareSwapfile = pkgs.writeShellApplication {
     name = "sinnix-prime-prepare-swapfile";
     runtimeInputs = [
@@ -91,11 +78,10 @@ let
 
       # The swap dir must be its own btrfs subvolume, not a plain directory:
       # an active swapfile pins its extents, so `btrfs subvolume snapshot`
-      # of the containing subvolume fails with ETXTBSY. A plain dir here
-      # silently killed every btrbk /realm snapshot (and thus the Borg
-      # drain) from 2026-07-09T22:33 until diagnosed. Nested subvolumes are
-      # excluded from parent snapshots, which also keeps swap contents out
-      # of backups.
+      # of the containing subvolume fails with ETXTBSY. Nested subvolumes
+      # are excluded from parent snapshots, which also keeps swap contents
+      # out of backups.
+      # History/evidence: bd show sinnix-y37
       if [ -d "$swap_dir" ] && [ "$(stat --format=%i "$swap_dir")" != "256" ]; then
         if swapon --noheadings --raw --show=NAME | grep -qxF "${swapFile}"; then
           swapoff "${swapFile}"
@@ -273,28 +259,13 @@ in
       neededForBoot = true;
     };
 
-    # sinex operational substrate (PostgreSQL + sinex home + state) on a dedicated
-    # @sinex subvolume. Was previously a plain dir inside the EPHEMERAL @ root, so
-    # the Postgres data dir was re-initdb'd on every boot (a durability bug — sinex
-    # is meant to be durable). A dedicated top-level subvol survives the @-rollback,
-    # and `nodatacow` makes the DB write in-place instead of CoW-amplifying every
-    # random page write (~7× fewer writes, the dominant MX500 wear source). It is
-    # deliberately NOT in btrbk's snapshot set (block-snapshotting a live DB is
-    # unsafe). Durability is the persistent subvol itself; disaster recovery
-    # is the logical pg_dump backup wired in modules/services/sinex/bridge.nix
-    # (sinex-postgres-dump.service+.timer, daily, 14-dump retention, staged
-    # at /realm/staging/sinex-postgres which IS covered by the /realm
-    # btrbk→borg path) — added 2026-07-10 (344e38b), closing the FOLLOW-UP
-    # this comment used to describe.
-    # Migrated off the worn MX500 (~104% rated NAND) to the /realm NVMe on
-    # 2026-07-10 (sinnix-6b4): rsync'd 268G with services stopped for the
-    # final delta pass. The whole-mount `nodatacow` option is gone on
-    # purpose — postgresql/ carries chattr +C (inherited per-file, verified
-    # post-copy), so the DB keeps in-place writes and no-checksums
-    # semantics, while the 167G append-only blob store now gets zstd:3
-    # like the rest of the filesystem (268G source -> ~112G written).
-    # The old MX500 @sinex subvol was deleted 2026-08-11 after a month of
-    # NVMe burn-in (sinnix-6b4), reclaiming ~266G on the worn disk.
+    # Dedicated /sinex subvolume on /realm NVMe, not the ephemeral @ root, so
+    # Postgres data survives rollback. Per-file chattr +C (inherited, not a
+    # whole-mount nodatacow) keeps DB writes in-place while the append-only
+    # blob store still gets zstd:3. Excluded from btrbk (unsafe to
+    # block-snapshot a live DB); disaster recovery is the logical pg_dump in
+    # modules/services/sinex/bridge.nix, staged under the btrbk->borg path.
+    # History/evidence: bd show sinnix-6b4
     "/var/lib/sinex" = {
       device = "/dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a";
       fsType = "btrfs";
@@ -487,13 +458,12 @@ in
       };
     };
 
-    # Ensure the dedicated sinex subvolume exists on the /realm NVMe before
-    # /var/lib/sinex is mounted (retargeted 2026-08-11: it previously created
-    # the pre-migration @sinex on the MX500 — vestigial since sinnix-6b4).
-    # The btrfs top level (subvolid=5) is not normally mounted, so
-    # mount it transiently to create the child subvol with nodatacow. Idempotent:
-    # on an already-provisioned host @sinex already exists and this is a no-op;
-    # the guard keeps a fresh install / bare-metal restore booting.
+    # Ensure the dedicated sinex subvolume exists on the /realm NVMe (not the
+    # MX500) before /var/lib/sinex is mounted. The btrfs top level
+    # (subvolid=5) isn't normally mounted, so mount it transiently to create
+    # the child subvol with nodatacow; idempotent, so this is a no-op on an
+    # already-provisioned host and only matters for a fresh install/restore.
+    # History/evidence: bd show sinnix-6b4
     services.ensure-sinex-subvol = {
       description = "Ensure dedicated @sinex nodatacow subvolume exists on the root btrfs";
       requiredBy = [ "var-lib-sinex.mount" ];
