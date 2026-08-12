@@ -84,23 +84,14 @@ in
 
     };
 
-    services.dbus.implementation = "broker";
-    # NOTE: dbus-broker hardening removed - it needs setgroups() to drop privileges
-    # for spawned services. The ~@privileged syscall filter blocked this, causing
-    # crashes at boot. See: journalctl -b -3 | grep dbus-broker
-    # dbus-broker reloads have timed out during switch activation. Keep both
-    # live buses stable; unit changes can take effect on the next boot/login
-    # instead of failing the whole deployment.
-    systemd.services.dbus-broker = {
-      reloadIfChanged = lib.mkForce false;
-      restartIfChanged = lib.mkForce false;
-      stopIfChanged = lib.mkForce false;
-    };
-    systemd.user.services.dbus-broker = {
-      reloadIfChanged = lib.mkForce false;
-      restartIfChanged = lib.mkForce false;
-      stopIfChanged = lib.mkForce false;
-    };
+    # Bus implementation: the NixOS default (classic dbus-daemon). dbus-broker
+    # was used 2026-01 to 2026-08; its adoption rationale (a hardening sweep)
+    # was reverted for boot crashes, and it then cost two production crash
+    # bugs at shutdown (sinnix-not: fatal log-write on an orphaned journal
+    # socket + launcher surviving its dead child, ~15min shutdowns), two
+    # carried patches whose upstream PR (bus1/dbus-broker#457) was closed
+    # unmerged, and reload-suppression workarounds for switch-time timeouts.
+    # dbus-daemon logs non-fatally by design and needs none of that.
 
     # nsncd opens its compatibility socket at /var/run/nscd/socket. On the
     # current systemd/nixpkgs generation the upstream unit bind-mounts /run/nscd

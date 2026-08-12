@@ -104,14 +104,12 @@ rec {
   # processMatchers of surfaces that opt in via workload.earlyoomAvoid.
   # Entries are matched unanchored against /proc/<pid>/comm (15 chars max,
   # hence the truncated xdg-desktop-po), so keep every entry <=15 chars and
-  # drop entries whose process cannot exist on our hosts: dbus-daemon
-  # (core.nix forces dbus-broker), quickshell (noctalia v5 is a standalone
-  # binary), foot (not installed), dbus-broker-launch (substring-covered by
-  # dbus-broker and unmatchable at 18 chars anyway).
+  # drop entries whose process cannot exist on our hosts: quickshell
+  # (noctalia v5 is a standalone binary), foot (not installed).
   earlyoomEmergencyAvoidBase = [
     "systemd"
     "systemd-logind"
-    "dbus-broker"
+    "dbus-daemon"
     "sshd"
     "agetty"
     "uwsm"
