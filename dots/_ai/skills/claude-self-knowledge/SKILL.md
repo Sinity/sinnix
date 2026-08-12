@@ -39,9 +39,14 @@ the territory; its snapshot date is 2026-08-11.
   completion auto-notifies the parent (>=2.1.211) — never poll.
 - **Forks** (`/subtask`): inherit full conversation + system prompt + model
   (prompt-cache reuse); for context-heavy side-tasks; cannot nest.
-- **Agent teams** (experimental, env-gated here): teammates = full sessions,
-  shared task list + SendMessage mailboxes; no resume of in-process teammates;
-  one team per session; teammates don't inherit lead model.
+- **Agent teams** (adopted narrowly 2026-08-12, env-gated): a normal
+  coordination shape for READ-ONLY research/synthesis tasks — the blinded
+  pilot showed teams beat independent subagents there (3.45 vs 2.73 weighted,
+  faster critical path; protocol in git history of docs/agent-teams-pilot.json).
+  Implementation/write work keeps the ordinary subagent doctrine. Mechanics:
+  teammates = full sessions, shared task list + SendMessage mailboxes; no
+  resume of in-process teammates; one team per session; teammates don't
+  inherit lead model (explicit model per teammate, as with any dispatch).
 - **Agent definitions** (`.claude/agents/*.md`): body = the subagent's entire
   system prompt; frontmatter: `model`, `effort`, `tools`, `isolation:
 worktree`, `skills`, `memory`, `maxTurns`, hooks. Bake standing contracts

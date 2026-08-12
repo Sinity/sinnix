@@ -190,8 +190,11 @@ The standing rules:
   dispatches of every type and emits a visible confirmation on allowed ones.
 - **Forks are exempt**: they inherit context and model by design. Using a
   fork as a de-facto implementation lane violates the rule in disguise.
-- **Agent teams are experimental** (env-gated): coordinated parallel work,
-  not load-bearing process; teammates do not inherit the lead's model.
+- **Agent teams: narrowly adopted** (env-gated) for read-only
+  research/synthesis tasks — own blinded pilot verdict 2026-08-12
+  (adopt-qualified; see claude-self-knowledge skill). Implementation and
+  write-capable work keeps the subagent doctrine; teammates do not inherit
+  the lead's model.
 - **Never poll background agents** — completion notifications are automatic.
   Monitor only with an until-condition; ScheduleWakeup only for genuine
   wall-clock deadlines.
