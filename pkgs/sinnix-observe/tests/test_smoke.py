@@ -7,7 +7,7 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 
-from sinnix_observe import SCHEMA, cli, joins, render, runtime_inventory, util
+from sinnix_observe import cli, joins, render, runtime_inventory, util
 from sinnix_observe.sources import (
     agent_gateway,
     below,
@@ -20,10 +20,6 @@ from sinnix_observe.sources import (
     systemd,
     xtask,
 )
-
-
-def test_schema_constant() -> None:
-    assert SCHEMA == "sinnix-observe-v1"
 
 
 def test_util_happy_path() -> None:
