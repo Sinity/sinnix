@@ -105,20 +105,13 @@
             # Register the generation BEFORE activating: without the profile
             # entry, switch-to-configuration boot has no generation to point
             # the bootloader at, activation succeeds only in memory, and the
-            # next reboot silently resurrects the previous generation
-            # (2026-07-11 incident: taxonomy switch activated live, exit-4 on
-            # a failed unit meant nh never ran its profile step, reboot came
-            # back on the pre-taxonomy config and recreated retired paths).
+            # next reboot silently resurrects the previous generation.
             /run/wrappers/bin/sudo ${pkgs.nix}/bin/nix-env \
               --profile /nix/var/nix/profiles/system --set "$_toplevel_out"
             _rebuild_status=0
             /run/wrappers/bin/sudo "$_toplevel_out/bin/switch-to-configuration" switch || _rebuild_status=$?
             # switch-to-configuration exits non-zero whenever ANY unit fails
-            # to (re)start, even one wholly unrelated to this config change
-            # (sinnix-ihi, 2026-07-08: a pre-existing nvidia-container-
-            # toolkit-cdi-generator failure silently blocked profile/
-            # bootloader registration for 4+ days -- every switch looked
-            # successful but never advanced the boot generation).
+            # to (re)start, even one wholly unrelated to this config change.
             # Registering the built generation as the persistent boot
             # default is orthogonal to whether every service started
             # cleanly, so always do it as a separate step -- but keep the

@@ -1,7 +1,7 @@
 # Agent CLI wrapper variant registry — single source for the "which
-# client/backend/key-source/MCP-profile" axis that modules/features/dev/
-# agents/clis.nix used to hand-enumerate per wrapper (~17 variants, the same
-# four decisions repeated). Builder machinery (npm bootstrap, mkHermesConfig,
+# client/backend/key-source/MCP-profile" axis, rendered by
+# modules/features/dev/agents/clis.nix by mapping over this data instead of
+# hand-enumerating each wrapper. Builder machinery (npm bootstrap, mkHermesConfig,
 # mkClaudeCodeWrapper/mkCodexWrapper/mkHermesWrapper, the backend-env
 # builders) stays in backends.nix; this file only holds the data each
 # builder is parameterized with. Pure data, no `lib` needed — mirrors
