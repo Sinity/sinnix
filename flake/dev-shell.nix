@@ -19,7 +19,12 @@
         inherit inputs pkgs system;
       };
       nix = "${pkgs.nix}/bin/nix";
-      inherit (commandRegistry) rebuildServicePath localInputOverrideArgs;
+      inherit (commandRegistry)
+        rebuildServicePath
+        localInputOverrideArgs
+        avoidRepoCwdForActivation
+        switchFallback
+        ;
       resolveFlakeDir = ''
         _flake_dir="''${PRJ_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
       '';
@@ -70,6 +75,7 @@
           ${commandRegistry.rebuildLease name}
           ${commandRegistry.rebuildLock name}
           ${resolveFlakeDir}
+          ${avoidRepoCwdForActivation}
           ${localInputOverrideArgs}
           ${commandRegistry.rebuildDefaultArgs}
           ${scriptPkgs.sinnix-preflight}/bin/sinnix-preflight switch
@@ -80,59 +86,16 @@
             --quiet --collect --pipe --service-type=exec --wait \
             --setenv=PATH="${rebuildServicePath}:$PATH" \
             ${commandRegistry.rebuildContainmentFlags}
-            ${pkgs.coreutils}/bin/env -u FLAKE NH_FLAKE="''${_flake_dir}" \
+            ${pkgs.coreutils}/bin/env -u FLAKE NH_FLAKE="''${_invoke_flake_dir}" \
               ${pkgs.nh}/bin/nh os ${action} \
-              "''${_flake_dir}#sinnix-prime" \
+              "''${_invoke_flake_dir}#sinnix-prime" \
               --no-nom \
               --max-jobs "$rebuild_jobs" \
               --cores "$rebuild_cores" \
               "''${nh_extra_args[@]}" || _rebuild_status=$?
 
-          if [ "${action}" = "switch" ] && [ "$_rebuild_status" -ne 0 ] && [ "$_rebuild_status" -ne 130 ]; then
-            echo "sinnix ${name}: nh failed with status $_rebuild_status; trying exact toplevel activation fallback" >&2
-            _toplevel_drv="$(
-              SINNIX_REBUILD_ACTIVE=1 NIX_CONFIG="eval-cache = false" \
-                ${pkgs.nix}/bin/nix eval \
-                  "$_flake_dir#nixosConfigurations.sinnix-prime.config.system.build.toplevel.drvPath" \
-                  --raw \
-                  --impure \
-                  "''${nix_override_args[@]}"
-            )"
-            _toplevel_out="$(
-              SINNIX_REBUILD_ACTIVE=1 NIX_CONFIG="eval-cache = false" \
-                ${pkgs.nix}/bin/nix-store -r "$_toplevel_drv"
-            )"
-            # Register the generation BEFORE activating: without the profile
-            # entry, switch-to-configuration boot has no generation to point
-            # the bootloader at, activation succeeds only in memory, and the
-            # next reboot silently resurrects the previous generation
-            # (2026-07-11 incident: taxonomy switch activated live, exit-4 on
-            # a failed unit meant nh never ran its profile step, reboot came
-            # back on the pre-taxonomy config and recreated retired paths).
-            /run/wrappers/bin/sudo ${pkgs.nix}/bin/nix-env \
-              --profile /nix/var/nix/profiles/system --set "$_toplevel_out"
-            _rebuild_status=0
-            /run/wrappers/bin/sudo "$_toplevel_out/bin/switch-to-configuration" switch || _rebuild_status=$?
-            # switch-to-configuration exits non-zero whenever ANY unit fails
-            # to (re)start, even one wholly unrelated to this config change
-            # (sinnix-ihi, 2026-07-08: a pre-existing nvidia-container-
-            # toolkit-cdi-generator failure silently blocked profile/
-            # bootloader registration for 4+ days -- every switch looked
-            # successful but never advanced the boot generation).
-            # Registering the built generation as the persistent boot
-            # default is orthogonal to whether every service started
-            # cleanly, so always do it as a separate step -- but keep the
-            # real "switch" exit status (unless this step itself fails
-            # worse) so a genuine regression still surfaces instead of
-            # being silently masked.
-            _boot_status=0
-            /run/wrappers/bin/sudo "$_toplevel_out/bin/switch-to-configuration" boot || _boot_status=$?
-            if [ "$_boot_status" -ne 0 ]; then
-              _rebuild_status="$_boot_status"
-            fi
-          fi
-
           if [ "${action}" = "switch" ]; then
+            ${switchFallback name}
             ${commandRegistry.sinexCachePush}
           fi
 
