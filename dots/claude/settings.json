@@ -172,6 +172,11 @@
           },
           {
             "type": "command",
+            "command": "~/.claude/hooks/sessionstart-steering.sh",
+            "timeout": 8
+          },
+          {
+            "type": "command",
             "command": "polylogue-hook SessionStart --provider claude-code",
             "timeout": 5
           }
