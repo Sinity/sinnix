@@ -144,10 +144,23 @@ mkFeatureModule {
             silence_threshold = 200;
             silence_duration = 1.2;
           };
+          # Repointed at the shared whisper.cpp STT hub (sinnix-mke
+          # increment 1, modules/services/whisper.nix) instead of hermes's
+          # own embedded faster-whisper "base" model -- one transcription
+          # engine for the whole estate instead of two, and later engine
+          # swaps (Parakeet/Voxtral) become a base_url/model change here,
+          # not a hermes reconfiguration. api_key is a dummy literal: the
+          # hub is unauthenticated loopback-only, matching the sk-local
+          # convention used by the other local OpenAI-compatible lanes
+          # (flake/data/agent-lanes.nix).
           stt = {
             enabled = voiceEnabled;
-            provider = "local";
-            local.model = "base";
+            provider = "openai";
+            openai = {
+              base_url = "http://127.0.0.1:8090/v1";
+              api_key = "sk-local";
+              model = "whisper-1";
+            };
           };
           tts = {
             provider = "edge";
