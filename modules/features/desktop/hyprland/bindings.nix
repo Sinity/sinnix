@@ -104,13 +104,14 @@ in
     "SUPER, Print, Screenshot the whole screen, exec, noctalia msg screenshot-fullscreen"
 
     # F-key bindings
-    # `invert` was a silent no-op here: this host runs cm = "hdr" with
-    # render:non_shader_cm = 3, so decoration:screen_shader is off the render
-    # path entirely (measured by the s6ke.1 lane, corroborated live). Pressing
-    # this key did nothing. `ddc` writes the panel's own VCP 0x10 register,
-    # which is at least a real action -- whether it resets the ASBL timer is
-    # still unverified (sinnix-70eq).
     ", F3, Pulse the OLED panel to clear burn-in dimming, exec, asbl-no-moar once --mode invert --duration 0.05"
+
+    # Screen-shader playground. SHIFT+F4 is the way out of a shader that makes
+    # the screen unreadable, so it must stay bound to something that restores
+    # fp16 and damage tracking, not a bare screen_shader clear.
+    ", F4, Apply the next screen shader, exec, ${scriptPkgs.sinnix-shader}/bin/sinnix-shader next"
+    "SHIFT, F4, Clear the screen shader, exec, ${scriptPkgs.sinnix-shader}/bin/sinnix-shader off"
+    "SUPER, F4, Apply a random screen shader, exec, ${scriptPkgs.sinnix-shader}/bin/sinnix-shader random"
     ", F6, Toggle the WeeChat scratchpad, exec, uwsm app -- ${script "toggle-scratch"} weechat"
     ", F8, Toggle the raw-log scratchpad, exec, uwsm app -- ${script "toggle-scratch"} rawlog"
     ", F9, Emergency stop for runaway builds and background work, exec, sudo -n ${scriptPkgs.nuke-builds}/bin/nuke-builds"

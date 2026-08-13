@@ -197,6 +197,7 @@ mkServiceModule {
           inherit (cfg) port aiServices;
           reportsDir = cfg.reportsDir;
           feedbackDir = cfg.feedbackDir;
+          shadersDir = "${config.sinnix.paths.dotsRoot}/hypr/shaders";
           frontends = lib.mapAttrsToList (name: frontend: {
             inherit name;
             inherit (frontend) label port upstream;
