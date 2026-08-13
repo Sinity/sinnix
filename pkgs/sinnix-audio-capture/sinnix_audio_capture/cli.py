@@ -22,6 +22,7 @@ def _cmd_record(args: argparse.Namespace) -> int:
         capture_root=args.capture_root,
         pw_record_bin=args.pw_record_bin,
         pw_metadata_bin=args.pw_metadata_bin,
+        pw_dump_bin=args.pw_dump_bin,
         opusenc_bin=args.opusenc_bin,
         tee_socket_path=args.tee_socket,
     )
@@ -68,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
     _add_capture_root(record_parser)
     record_parser.add_argument("--pw-record-bin", default="pw-record")
     record_parser.add_argument("--pw-metadata-bin", default="pw-metadata")
+    record_parser.add_argument("--pw-dump-bin", default="pw-dump")
     record_parser.add_argument("--opusenc-bin", default="opusenc")
     record_parser.add_argument(
         "--tee-socket",

@@ -6,7 +6,14 @@
 # - sinnix-audio-recorder-mic / sinnix-audio-recorder-sink-monitor: two
 #   always-on `record` daemons, one per canonical channel
 #   (segment.CHANNEL_PROFILES). No VAD gating -- Opus DTX/VBR collapses
-#   silence at the codec level, so both run continuously from enablement.
+#   silence at the codec level, not the recorder's own logic. (This module's
+#   original claim that both lanes therefore "run continuously from
+#   enablement" was wrong in practice -- sinnix-500c found hourly segments
+#   collapsing to ~37.5s of actually-captured audio, root-caused to
+#   `pw-record --target <name>` not reliably attaching to the intended
+#   node on reconnect; recorder.py now resolves targets to a stable
+#   `object.serial` via pw-dump instead, see pipewire_defaults.py's
+#   `resolve_node_serial` docstring for the live evidence.)
 # - sinnix-audio-topology: a `pw-mon` Node/Port/Link event stream, the
 #   node/port attribution lane that replaces the per-node "captureNodes"
 #   escalation the package's docstring defers.
@@ -43,6 +50,7 @@ let
 
   pwRecordBin = "${pkgs.pipewire}/bin/pw-record";
   pwMetadataBin = "${pkgs.pipewire}/bin/pw-metadata";
+  pwDumpBin = "${pkgs.pipewire}/bin/pw-dump";
   pwMonBin = "${pkgs.pipewire}/bin/pw-mon";
   opusencBin = "${pkgs.opus-tools}/bin/opusenc";
   ffmpegBin = lib.getExe pkgs.ffmpeg;
@@ -78,6 +86,7 @@ let
               "--capture-root ${capturesRoot}"
               "--pw-record-bin ${pwRecordBin}"
               "--pw-metadata-bin ${pwMetadataBin}"
+              "--pw-dump-bin ${pwDumpBin}"
               "--opusenc-bin ${opusencBin}"
             ]
             ++ lib.optional (extraExecArgs != "") extraExecArgs
