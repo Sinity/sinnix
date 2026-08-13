@@ -85,6 +85,7 @@ let
   wifi = {
     ssid_2g = "sinnix-gw"; # 2.4 GHz SSID
     ssid_5g = "sinnix-gw-5g"; # 5 GHz SSID
+    ssid_iot = "sinnix-iot"; # 2.4 GHz, psk2/no-PMF, for ESP-class IoT devices (sinnix-agp8.3)
     # WPA3-SAE + WPA2-PSK mixed for broad compatibility
     psk = "@@WIFI_PSK@@";
     country = "PL"; # Regulatory domain (Poland, EU)
@@ -292,6 +293,26 @@ in
         ft_over_ds = false;
         ft_psk_generate_local = true;
         mobility_domain = "1a2b";
+      };
+
+      # IoT-scoped 2.4 GHz SSID (sinnix-agp8.3): sae-mixed's PMF/combined-RSN
+      # element breaks ESP-class wifi chips during final handshake/
+      # provisioning (diagnosed live via the Yeelight bulb failing at
+      # 99-100%; the manual out-of-band "michal" network worked instead,
+      # confirmed via `uci show wireless` -- it predates this config and is
+      # deliberately left untouched here, not imported). This SSID is the
+      # declared, IoT-dedicated equivalent: plain psk2, no PMF, 2.4 GHz only
+      # (ESP-class devices don't do 5 GHz, so no radio1 sibling). Same "lan"
+      # network as everything else -- VLAN segregation is a separate,
+      # deliberately unscoped decision per the bead.
+      iot_radio0 = mkSection "wifi-iface" {
+        device = "radio0";
+        network = "lan";
+        mode = "ap";
+        ssid = wifi.ssid_iot;
+        encryption = "psk2";
+        key = wifi.psk;
+        ieee80211w = 0; # PMF disabled -- the specific fix for the handshake failure
       };
 
       # 5 GHz radio — MT76x2
