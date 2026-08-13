@@ -124,6 +124,10 @@
     # seven months of per-device bandwidth. Nothing runs on the router.
     capture-router.enable = true;
     url-ledger.enable = true;
+    # Video special-case over the ledger: yt-dlp resolves video-hosting
+    # URLs into a real archived copy (sinnix-e8k9) instead of relying on
+    # Wayback/Common Crawl CDX coverage, which doesn't preserve video.
+    video-resolve.enable = true;
     below = {
       enable = true;
       collectIntervalSec = 5;

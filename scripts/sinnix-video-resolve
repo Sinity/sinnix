@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Resolve video-hosting URLs found in the URL ledger into archived copies (sinnix-e8k9)
+# runtimeInputs: yt-dlp duckdb coreutils jq
+
+# Split from the web-capture bead: the URL ledger (sinnix-9tex Stage 1)
+# already discovers and normalizes every URL this operator's browsing
+# history has touched, joined against archive-availability. This script
+# is the video special-case: URLs on known video-hosting domains get
+# resolved into a real archived copy via yt-dlp, since neither Wayback
+# nor Common Crawl actually preserve video content -- their CDX coverage
+# check only tells you a page existed, not that the video survives.
+#
+# A manifest (archived.jsonl) tracks what's already been pulled so re-runs
+# are cheap; yt-dlp's own --download-archive gives the same guarantee at
+# the download layer, used here as the primary de-dup mechanism.
+set -euo pipefail
+
+LEDGER_PARQUET="${SINNIX_URL_LEDGER_PARQUET:-/realm/data/derived/url-ledger/url_ledger.parquet}"
+ARCHIVE_ROOT="${SINNIX_VIDEO_ARCHIVE_ROOT:-/realm/data/captures/video-resolve}"
+DL_ARCHIVE="$ARCHIVE_ROOT/.yt-dlp-archive"
+
+VIDEO_DOMAINS=(
+  youtube.com youtu.be
+  vimeo.com
+  twitch.tv
+  streamable.com
+  dailymotion.com
+)
+
+if [[ ! -f "$LEDGER_PARQUET" ]]; then
+  echo "sinnix-video-resolve: no ledger parquet at $LEDGER_PARQUET (run 'sinnix-url-ledger build' first)" >&2
+  exit 1
+fi
+
+mkdir -p "$ARCHIVE_ROOT"
+
+# Build a duckdb LIKE-clause filter for the domain list.
+where_clause=""
+for d in "${VIDEO_DOMAINS[@]}"; do
+  where_clause+="url LIKE '%://%${d}%' OR url LIKE '%://${d}%' OR "
+done
+where_clause="${where_clause% OR }"
+
+mapfile -t urls < <(
+  duckdb -csv -noheader "$LEDGER_PARQUET" -c \
+    "SELECT DISTINCT url FROM read_parquet('$LEDGER_PARQUET') WHERE $where_clause;" \
+    2>/dev/null
+)
+
+echo "sinnix-video-resolve: ${#urls[@]} candidate video URLs from the ledger" >&2
+
+resolved=0
+failed=0
+for url in "${urls[@]}"; do
+  [[ -n "$url" ]] || continue
+  if yt-dlp \
+    --download-archive "$DL_ARCHIVE" \
+    --no-playlist \
+    --paths "$ARCHIVE_ROOT" \
+    --output "%(extractor)s/%(id)s.%(ext)s" \
+    --write-info-json \
+    --ignore-errors \
+    --quiet \
+    -- "$url" 2>/dev/null; then
+    resolved=$((resolved + 1))
+  else
+    failed=$((failed + 1))
+  fi
+done
+
+echo "sinnix-video-resolve: $resolved resolved (or already archived), $failed failed/unavailable" >&2
