@@ -33,7 +33,12 @@
       enable = true;
       tunnel = {
         enable = true;
-        approvedManifestHash = "7078f104e482052bd0f2f3728a3beb1eaba3985a3895962ca553562c0e2aa3a5";
+        # Repinned after sinnix-lpuv added capture_lanes/capture_query. The
+        # gate is a review checkpoint on what reaches remote ChatGPT, so this
+        # moves only alongside an inspection of the rendered tool list: all 16
+        # are read-only (list/read/query/status/tail/verify/diff/search/tree),
+        # and the capture pair is restricted to non-content-bearing lanes.
+        approvedManifestHash = "086480ac3f7af0ab8298a999b67b0004f98f0a006c4c29db9c900cf06bd9a84c";
         tunnelId = "tunnel_6a2eb972c3bc8191be437670f455ebd9";
       };
     };
