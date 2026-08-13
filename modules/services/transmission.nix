@@ -47,6 +47,17 @@ mkServiceModule {
       torrentPartialDir = "${torrentInbox}/tdown_partial";
     in
     {
+      # Declared here, next to the service that owns it, rather than in
+      # persistence.nix's "core system state (no owning module)" bucket
+      # where it used to live. It has an owning module -- this one -- so the
+      # bucket's own rule put it in the wrong place, and the effect was that
+      # reading transmission.nix looked like a service writing to /var/lib
+      # with no persistence at all. CLAUDE.md's contract is that new service
+      # state is declared in the same change as the service.
+      sinnix.persistence.system.directories = [
+        "/var/lib/transmission" # torrent state
+      ];
+
       services.transmission = {
         enable = true;
         # The router forwards 51413/TCP+UDP to this host, so admit the matching
