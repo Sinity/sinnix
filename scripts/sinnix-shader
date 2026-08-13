@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # @sinnix-package
 # description: Compose, apply and clear Hyprland screen shaders from the dots library
-# runtimeInputs: hyprland glslang
+# runtimeInputs: hyprland glslang systemd
 
 """Screen-shader playground for Hyprland.
 
@@ -23,11 +23,18 @@ only form stacking can take.
 Stages that resample `tex` themselves (chromatic, edges, bloom, vhs) read the
 *unmodified* screen, not the previous stage's output -- a single pass has no
 intermediate buffer to read back.
+
+Named compositions live in _presets.conf beside the stages. `play` cycles
+shaders or presets on an interval, optionally crossfading between them by
+generating both pipelines into one shader and mixing on `time`. It runs as a
+transient systemd unit whose ExecStopPost clears the screen, so even SIGKILL
+cannot leave the display modified.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import random
@@ -36,6 +43,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 RUNTIME = Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000")) / "sinnix" / "shader"
@@ -69,6 +77,10 @@ OPTIONAL_UNIFORMS = {
 
 DAMAGE_DEFAULT = 2
 
+# Each hyprctl call is a process spawn, and playback pays them per switch. What
+# this process has already put into a known state does not need re-issuing.
+SESSION = {"banner_cleared": False, "fp16_forced": False, "damage": None}
+
 
 def library() -> Path:
     override = os.environ.get("SINNIX_SHADER_DIR")
@@ -84,6 +96,31 @@ def stages() -> dict[str, Path]:
         if not path.name.startswith("_"):
             found[path.stem] = path
     return found
+
+
+def presets() -> dict[str, list[str]]:
+    path = library() / "_presets.conf"
+    found = {}
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return found
+    for line in text.splitlines():
+        line = line.split("#", 1)[0].strip()
+        if "=" in line:
+            name, _, members = line.partition("=")
+            if name.strip() and members.split():
+                found[name.strip()] = members.split()
+    return found
+
+
+def expand(names: list[str]) -> list[str]:
+    """Resolve preset names to their stages, leaving plain stage names alone."""
+    table = presets()
+    resolved = []
+    for name in names:
+        resolved.extend(table.get(name, [name]))
+    return resolved
 
 
 def describe(path: Path) -> str:
@@ -114,50 +151,72 @@ def option(name: str, field: str):
         return None
 
 
-def compose(names: list[str]) -> str:
+def chain(names: list[str], index: int) -> list[str]:
+    """The per-pixel pipeline for one set of stages, as GLSL statements."""
     available = stages()
-    unknown = [n for n in names if n not in available]
-    if unknown:
-        raise SystemExit(f"sinnix-shader: no such shader: {', '.join(unknown)}")
-
-    bodies = [available[n].read_text(encoding="utf-8") for n in names]
-    joined = "\n".join(bodies)
-
-    prelude_path = library() / "_prelude.glsl"
-    prelude = prelude_path.read_text(encoding="utf-8") if prelude_path.exists() else ""
-
-    # Declare an optional uniform only when a stage references it: an unused
-    # declaration Hyprland still resolves would make it warn about damage
-    # tracking for an effect that does not move.
-    declarations = [
-        text
-        for uniform, text in OPTIONAL_UNIFORMS.items()
-        if re.search(rf"\b{uniform}\b", joined)
-    ]
-
     warps = []
     shades = []
     for name in names:
         sym = symbol(name)
         source = available[name].read_text(encoding="utf-8")
         if re.search(rf"\bvec2\s+{sym}_warp\s*\(", source):
-            warps.append(f"    uv = {sym}_warp(uv);")
+            warps.append(f"    uv{index} = {sym}_warp(uv{index});")
         if re.search(rf"\bvec4\s+{sym}_shade\s*\(", source):
-            shades.append(f"    color = {sym}_shade(color, uv);")
+            shades.append(f"    c{index} = {sym}_shade(c{index}, uv{index});")
     if not warps and not shades:
         raise SystemExit(
-            "sinnix-shader: none of those stages define a _warp or _shade function"
+            f"sinnix-shader: {' + '.join(names)} defines no _warp or _shade function"
         )
+    return [
+        f"    vec2 uv{index} = v_texcoord;",
+        *warps,
+        f"    vec4 c{index} = texture(tex, uv{index});",
+        *shades,
+    ]
 
-    main = "\n".join(
-        ["void main() {", "    vec2 uv = v_texcoord;", *warps, "    vec4 color = texture(tex, uv);", *shades, "    fragColor = color;", "}"]
-    )
+
+def build(chains: list[list[str]], blend_seconds: float = 0.0) -> str:
+    available = stages()
+    unknown = [n for c in chains for n in c if n not in available]
+    if unknown:
+        raise SystemExit(f"sinnix-shader: no such shader: {', '.join(sorted(set(unknown)))}")
+
+    # A stage present in both chains must be emitted once or its functions are
+    # redefined.
+    seen: list[str] = []
+    for name in (n for c in chains for n in c):
+        if name not in seen:
+            seen.append(name)
+    joined = "\n".join(available[n].read_text(encoding="utf-8") for n in seen)
+
+    prelude_path = library() / "_prelude.glsl"
+    prelude = prelude_path.read_text(encoding="utf-8") if prelude_path.exists() else ""
+
+    body = [statement for index, names in enumerate(chains) for statement in chain(names, index)]
+    if len(chains) == 1:
+        body.append("    fragColor = c0;")
+        title = " + ".join(chains[0])
+    else:
+        # `time` restarts at 0 on every apply (Hyprland calls setInitialTime when
+        # the program is created), so the fade is measured from this apply.
+        body.append(f"    fragColor = mix(c0, c1, smoothstep(0.0, {blend_seconds:.3f}, time));")
+        title = f"{' + '.join(chains[0])} -> {' + '.join(chains[1])}"
+
+    main = "\n".join(["void main() {", *body, "}"])
+
+    # Declare an optional uniform only when it is referenced: an unused
+    # declaration Hyprland still resolves would make it warn about damage
+    # tracking for an effect that does not move.
+    scan = joined + main
+    declarations = [
+        text for uniform, text in OPTIONAL_UNIFORMS.items() if re.search(rf"\b{uniform}\b", scan)
+    ]
 
     # #version must be the very first token in an ES-profile shader: not even a
     # comment may precede it.
     header = [
         "#version 300 es",
-        f"// {' + '.join(names)}",
+        f"// {title}",
         "precision highp float;",
         "in vec2 v_texcoord;",
         "out vec4 fragColor;",
@@ -166,6 +225,10 @@ def compose(names: list[str]) -> str:
         *declarations,
     ]
     return "\n".join([*header, "", prelude, "", joined, "", main, ""])
+
+
+def compose(names: list[str]) -> str:
+    return build([names])
 
 
 def needs_live(source: str) -> set[str]:
@@ -205,6 +268,14 @@ def validate(source: str) -> str | None:
     binary = shutil.which("glslangValidator")
     if binary is None:
         return None
+
+    # A compile is ~40ms, which playback at a quarter-second interval would pay
+    # on every switch for sources it has already checked. The key is the whole
+    # composed text, so editing a stage invalidates it.
+    cache = RUNTIME / "validated" / hashlib.sha256(source.encode("utf-8")).hexdigest()
+    if cache.exists():
+        return None
+
     scratch = RUNTIME / "validate.frag"
     scratch.parent.mkdir(parents=True, exist_ok=True)
     scratch.write_text(source, encoding="utf-8")
@@ -213,6 +284,8 @@ def validate(source: str) -> str | None:
     )
     scratch.unlink(missing_ok=True)
     if result.returncode == 0:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.touch()
         return None
     return "\n".join(
         line for line in result.stdout.splitlines() if line.startswith(("ERROR", "WARNING"))
@@ -250,7 +323,13 @@ def cmd_list(_args: argparse.Namespace) -> int:
         source = path.read_text(encoding="utf-8")
         mark = "*" if needs_live(source) else " "
         print(f"{mark} {name.ljust(width)}  {describe(path)}")
-    print(f"\n* needs `animate on` (debug:damage_tracking 0) to move.")
+    print("\n* needs `animate on` (debug:damage_tracking 0) to move.")
+    table = presets()
+    if table:
+        width = max(len(n) for n in table)
+        print("\npresets:")
+        for name, members in table.items():
+            print(f"  {name.ljust(width)}  {' '.join(members)}")
     return 0
 
 
@@ -259,8 +338,17 @@ def cmd_show(args: argparse.Namespace) -> int:
     return 0
 
 
-def apply(names: list[str], animate: bool | None) -> int:
-    source = compose(names)
+def apply(
+    names: list[str],
+    animate: bool | None,
+    blend_from: list[str] | None = None,
+    blend_seconds: float = 0.0,
+) -> int:
+    names = expand(names)
+    if blend_from:
+        source = build([expand(blend_from), names], blend_seconds)
+    else:
+        source = build([names])
     live = needs_live(source)
 
     errors = validate(source)
@@ -271,7 +359,9 @@ def apply(names: list[str], animate: bool | None) -> int:
 
     state = baseline()
     RUNTIME.mkdir(parents=True, exist_ok=True)
-    dismiss_banner()
+    if not SESSION["banner_cleared"]:
+        dismiss_banner()
+        SESSION["banner_cleared"] = True
 
     # From here until the shader is applied, fp16 and damage tracking may be
     # changed with nothing on screen to justify them; a kill in that window must
@@ -299,14 +389,16 @@ def apply(names: list[str], animate: bool | None) -> int:
     # Decided outright on every apply: a static shader must not inherit the
     # per-frame redraw an animated one turned on.
     wanted_animation = animate is True or (bool(live) and animate is not False)
-    if wanted_animation:
-        hyprctl("keyword", "debug:damage_tracking", "0")
-    else:
-        hyprctl("keyword", "debug:damage_tracking", str(state.get("damage_tracking", DAMAGE_DEFAULT)))
+    damage = "0" if wanted_animation else str(state.get("damage_tracking", DAMAGE_DEFAULT))
+    if SESSION["damage"] != damage:
+        hyprctl("keyword", "debug:damage_tracking", damage)
+        SESSION["damage"] = damage
 
     # fp16 and the shader stage do not coexist on this host's HDR pipeline.
-    if option("render:use_fp16", "int") != 0:
-        hyprctl("keyword", "render:use_fp16", "0")
+    if not SESSION["fp16_forced"]:
+        if option("render:use_fp16", "int") != 0:
+            hyprctl("keyword", "render:use_fp16", "0")
+        SESSION["fp16_forced"] = True
 
     try:
         hyprctl("keyword", "decoration:screen_shader", str(composed))
@@ -339,8 +431,110 @@ def cmd_apply(args: argparse.Namespace) -> int:
     return apply(args.shader, animate)
 
 
-def cmd_off(_args: argparse.Namespace) -> int:
+PLAYBACK_UNIT = "sinnix-shader-playback.service"
+
+
+def playback_active() -> bool:
+    binary = shutil.which("systemctl")
+    if binary is None:
+        return False
+    result = subprocess.run(
+        [binary, "--user", "is-active", "--quiet", PLAYBACK_UNIT],
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def stop_playback() -> None:
+    binary = shutil.which("systemctl")
+    if binary is None or not playback_active():
+        return
+    subprocess.run(
+        [binary, "--user", "stop", PLAYBACK_UNIT], capture_output=True, check=False, timeout=20
+    )
+
+
+def cmd_play(args: argparse.Namespace) -> int:
+    run = shutil.which("systemd-run")
+    if run is None:
+        raise SystemExit("sinnix-shader: systemd-run is not on PATH")
+
+    sequence = args.shader or sorted(stages())
+    unknown = [n for n in sequence if n not in stages() and n not in presets()]
+    if unknown:
+        raise SystemExit(f"sinnix-shader: no such shader or preset: {', '.join(unknown)}")
+
+    stop_playback()
+
+    me = os.path.realpath(__file__)
+    command = [
+        run,
+        "--user",
+        "--collect",
+        "--quiet",
+        f"--unit={PLAYBACK_UNIT}",
+        f"--setenv=PATH={os.environ.get('PATH', '')}",
+        f"--setenv=SINNIX_SHADER_DIR={library()}",
+        # systemd runs ExecStopPost even when the loop is SIGKILLed, which is the
+        # only teardown a Python signal handler cannot provide.
+        f"--property=ExecStopPost={me} internal-clear",
+        me,
+        "internal-play",
+        f"--interval={args.interval}",
+        f"--crossfade={args.crossfade}",
+    ]
+    if args.random:
+        command.append("--random")
+    command.append("--")
+    command.extend(sequence)
+
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        print(result.stderr.strip(), file=sys.stderr)
+        return result.returncode
+
+    print(
+        f"playback: {len(sequence)} entries, {args.interval}s each"
+        + (f", {args.crossfade}s crossfade" if args.crossfade > 0 else "")
+        + (", shuffled" if args.random else "")
+    )
+    print("stop with `sinnix-shader off` or Shift+F4")
+    return 0
+
+
+def cmd_internal_play(args: argparse.Namespace) -> int:
+    sequence = list(args.shader)
+    order = list(range(len(sequence)))
+    previous: list[str] | None = None
+    while True:
+        if args.random:
+            random.shuffle(order)
+        for index in order:
+            entry = [sequence[index]]
+            if args.crossfade > 0 and previous is not None:
+                apply(entry, None, blend_from=previous, blend_seconds=args.crossfade)
+            else:
+                apply(entry, None)
+            previous = entry
+            sys.stdout.flush()
+            time.sleep(args.interval)
+
+
+def cmd_internal_clear(_args: argparse.Namespace) -> int:
     state = read_state()
+    clear_shader()
+    restore(state)
+    dismiss_banner()
+    STATE.unlink(missing_ok=True)
+    return 0
+
+
+def cmd_off(_args: argparse.Namespace) -> int:
+    # Read the baseline before stopping playback: the unit's ExecStopPost
+    # restores and then deletes it.
+    state = read_state()
+    stop_playback()
     clear_shader()
     restore(state)
     dismiss_banner()
@@ -394,6 +588,7 @@ def cmd_status(_args: argparse.Namespace) -> int:
     stages_applied = state.get("stages", []) if active else []
     print(f"shader          {active or '(none)'}")
     print(f"stages          {' + '.join(stages_applied) or ('(not ours)' if active else '-')}")
+    print(f"playback        {'running' if playback_active() else 'stopped'}")
     print(f"use_fp16        {option('render:use_fp16', 'int')}")
     print(f"damage_tracking {option('debug:damage_tracking', 'int')}  (0 = animation on)")
     print(f"library         {library()}")
@@ -428,6 +623,22 @@ def main() -> int:
     animate = sub.add_parser("animate", help="turn the time and pointer uniforms on or off")
     animate.add_argument("mode", choices=("on", "off"))
     animate.set_defaults(run=cmd_animate)
+
+    play = sub.add_parser("play", help="cycle through shaders or presets on an interval")
+    play.add_argument("shader", nargs="*", help="shaders/presets to cycle; default is the whole library")
+    play.add_argument("--interval", type=float, default=5.0, help="seconds per entry (default 5)")
+    play.add_argument("--crossfade", type=float, default=0.0, help="seconds to fade between entries")
+    play.add_argument("--random", action="store_true", help="reshuffle the order each pass")
+    play.set_defaults(run=cmd_play)
+
+    internal_play = sub.add_parser("internal-play", help=argparse.SUPPRESS)
+    internal_play.add_argument("shader", nargs="+")
+    internal_play.add_argument("--interval", type=float, default=5.0)
+    internal_play.add_argument("--crossfade", type=float, default=0.0)
+    internal_play.add_argument("--random", action="store_true")
+    internal_play.set_defaults(run=cmd_internal_play)
+
+    sub.add_parser("internal-clear", help=argparse.SUPPRESS).set_defaults(run=cmd_internal_clear)
 
     args = parser.parse_args()
     return args.run(args)
