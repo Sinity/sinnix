@@ -6,9 +6,6 @@
 # workloads are explicitly placed into lower-weight slices by
 # `sinnix-scope`: systemd slices, earlyoom policy, io.cost init, RAPL power
 # caps, and the interactive memory sysctls.
-#
-# Mirrors modules/profiles/cloud.nix's shape (enable-gated aggregate a host
-# opts into) rather than scattering `isDesktop` conditionals across modules.
 {
   lib,
   config,
@@ -67,22 +64,18 @@ let
       # the device's actual latency characteristics.
       for dev_path in /sys/block/*/; do
         dev=$(basename "$dev_path")
-        # Skip loop devices
         echo "$dev" | grep -q "^loop" && continue
-        # Skip if no queue/scheduler
         [ -f "$dev_path/queue/scheduler" ] || continue
 
         major_minor=$(cat "$dev_path/dev")
 
-        # NVMe uses 'none' by default which disables queue-based IO scheduling.
-        # Switch to mq-deadline so cgroup IOWeight can actually take effect.
         scheduler=$(cat "$dev_path/queue/scheduler")
         if echo "$scheduler" | grep -q "\[none\]"; then
           echo "mq-deadline" > "$dev_path/queue/scheduler" || true
         fi
 
-        # Activate iocost cost model — auto-calibrates from device latency.
-        # This makes IOWeight proportional and work-conserving rather than nominal.
+        # Auto-calibrate the cost model from device latency, making IOWeight
+        # proportional and work-conserving rather than nominal.
         printf '%s enable=1 ctrl=auto\n' "$major_minor" > /sys/fs/cgroup/io.cost.qos || true
       done
     '';
@@ -150,15 +143,11 @@ in
 
     systemd.settings.Manager.StatusUnitFormat = "name";
 
-    # No polkit password dialogs for wheel on service management and power
-    # actions (2026-07-10, operator request). Rationale: the 2026-07-06
-    # root-equivalence decision already accepts that every agent-as-sinity
-    # process is root-equivalent (NOPASSWD sudo + nix trusted-users), so a
-    # polkit prompt for `systemctl restart foo` is friction without a
-    # security boundary behind it — the same actor can `sudo systemctl`
-    # promptlessly. Scoped to systemd unit management + login1 power/session
-    # actions rather than a blanket YES so genuinely unusual actions
-    # (disk reformat via udisks, etc.) still surface.
+    # No polkit password dialogs for wheel on unit management and power
+    # actions: wheel already has NOPASSWD sudo, so the prompt is friction with
+    # no security boundary behind it. Deliberately scoped to systemd1 and
+    # login1 rather than a blanket YES, so genuinely unusual actions (disk
+    # reformat via udisks, etc.) still surface.
     security.polkit.extraConfig = ''
       polkit.addRule(function(action, subject) {
         if (!subject.isInGroup("wheel")) return undefined;
@@ -174,22 +163,21 @@ in
 
     boot.kernel.sysctl = {
       # swappiness=10 keeps anon memory resident and lets a brief allocation
-      # burst spill to swap instead of triggering an immediate earlyoom kill,
-      # without reverting to the sustained page-cache-hoarding regime that
-      # higher values caused. min_free_kbytes/watermark_scale_factor below
-      # hold a concrete free-page reserve for burst-alloc starvation.
+      # burst spill to swap instead of triggering an immediate earlyoom kill;
+      # higher values cause sustained page-cache hoarding.
+      # min_free_kbytes/watermark_scale_factor hold a concrete free-page
+      # reserve against burst-alloc starvation.
       "vm.swappiness" = 10;
       "vm.page-cluster" = 0;
-      # vfs_cache_pressure=100 (kernel default) reclaims file cache normally;
-      # a prior overshoot (1000) kept dentries/inodes permanently cold,
-      # forcing PID1 alone to re-read ~390 GiB/day of unit fragments.
+      # Kernel default; do not raise. At 1000 dentries/inodes stay permanently
+      # cold and PID1 alone re-reads hundreds of GiB/day of unit fragments.
       "vm.vfs_cache_pressure" = 100;
       "vm.min_free_kbytes" = 1048576;
       "vm.watermark_scale_factor" = 200;
-      # Keep Btrfs/NVMe writeback from accumulating multi-GiB dirty bursts.
-      # The Crucial P3 /realm drive has shown 30s NVMe command timeouts under
-      # mixed build/database writeback; bounded dirty bytes push back earlier
-      # and make stalls shorter and more attributable.
+      # Keep Btrfs/NVMe writeback from accumulating multi-GiB dirty bursts:
+      # the Crucial P3 /realm drive shows 30s NVMe command timeouts under
+      # mixed build/database writeback, and bounded dirty bytes push back
+      # earlier, making stalls shorter and more attributable.
       "vm.dirty_background_bytes" = 64 * 1024 * 1024;
       "vm.dirty_bytes" = 256 * 1024 * 1024;
 
@@ -253,30 +241,29 @@ in
       };
     };
 
-    # No periodic cache-drop machinery here: kernel LRU reclaim is the cache
-    # bound. A former drop_caches timer manufactured the pressure it claimed
-    # to relieve, since MemAvailable already counts reclaimable cache.
+    # No periodic cache-drop machinery: kernel LRU reclaim is the cache bound,
+    # and a drop_caches timer manufactures the pressure it claims to relieve
+    # since MemAvailable already counts reclaimable cache.
     services.earlyoom = {
       enable = true;
       enableNotifications = true;
       # earlyoom acts only when BOTH memory and swap are below threshold; the
       # memory gate is a % of MemAvailable+AnonPages (~26 GiB on this host).
       # -m3 is the emergency floor for true exhaustion, not the first
-      # responder: PSI-scoped oomd (below) and the swap tiers handle pressure
-      # first, and earlyoom itself generated the kill storms as first responder.
+      # responder — PSI-scoped oomd (below) and the swap tiers handle pressure
+      # first. As first responder earlyoom produces kill storms.
       freeMemThreshold = 3;
-      # freeSwapThreshold=50 lets a burst use up to ~4 GiB of fast NVMe/zram
-      # swap before earlyoom panics, while still firing well before swap is
-      # exhausted. The old ~10% default suppressed the kill until the
-      # compositor was already wedged on a slower swap substrate.
+      # Lets a burst use ~4 GiB of fast NVMe/zram swap before earlyoom panics,
+      # while still firing well before swap is exhausted. At the ~10% default
+      # the kill is suppressed until the compositor is already wedged on a
+      # slower swap substrate.
       freeSwapThreshold = 50;
       extraArgs = [
-        # No --prefer regex: victim steering was an arms race; at the -m3
-        # floor, oom_score-based choice is fine and slice-scoped oomd handles
-        # "kill the runaway build, not the desktop" at cgroup granularity.
-        # Only recovery-critical surfaces are avoided — agents remain
-        # eligible victims (process-name avoidance is not a containment
-        # boundary; per-scope MemoryHigh/MemoryMax is).
+        # No --prefer regex: at the -m3 floor oom_score-based choice is fine,
+        # and slice-scoped oomd handles "kill the runaway build, not the
+        # desktop" at cgroup granularity. Only recovery-critical surfaces are
+        # avoided — agents stay eligible victims, since process-name avoidance
+        # is not a containment boundary (per-scope MemoryHigh/Max is).
         "--avoid"
         earlyoomAvoidPattern
       ];
@@ -295,29 +282,27 @@ in
     systemd.oomd.enable = true;
 
     # Devshell/agent scratch belongs on /realm NVMe, not the RAM-backed /tmp
-    # tmpfs: per-shell TMPDIR dirs never get cross-session retention pruning,
-    # so heavy test fixtures accumulate and can pin tmpfs RAM. NVMe contents
-    # also survive reboots, so the age-based cleanup below is load-bearing.
+    # tmpfs: per-shell TMPDIR dirs get no cross-session pruning, so heavy test
+    # fixtures accumulate and can pin tmpfs RAM. NVMe contents survive
+    # reboots, which is what makes the age-based cleanup below load-bearing.
     environment.sessionVariables.TMPDIR = "/realm/tmp/shell";
     systemd.tmpfiles.rules = [
       "d /realm/tmp/shell 1777 root root 7d"
       # Claude Code bypasses TMPDIR for task output captures. Managed Claude
-      # wrappers point CLAUDE_CODE_TMPDIR here so 12+ concurrent subagents
-      # cannot fill the shared 6 GiB /tmp tmpfs again (sinnix-77w).
+      # wrappers point CLAUDE_CODE_TMPDIR here so concurrent subagents cannot
+      # fill the shared 6 GiB /tmp tmpfs.
       "d /realm/tmp/claude-code 0700 ${user} users 7d"
       # The designated home for ad-hoc session/agent output files (bead work
-      # notes, query dumps, one-off analysis). Root /realm/tmp stays unaged
-      # (operator decision 2026-08-02: manual sweeps only) — the aged subdir
-      # exists so new litter has somewhere to expire instead of accumulating
-      # at the root forever (1,237 top-level entries >30d as of 2026-08-02).
+      # notes, query dumps, one-off analysis). Root /realm/tmp stays unaged by
+      # operator decision — manual sweeps only — so this aged subdir gives new
+      # litter somewhere to expire instead of accumulating at the root.
       "d /realm/tmp/work 1777 root root 30d"
     ];
 
-    # nix.slice has no explicit unit here: it exists only as the implicit
-    # dash-hierarchy parent of nix-build.slice (systemd creates parent slices
-    # automatically), and it has exactly one child, so giving it its own
-    # CPUWeight/IOWeight (previously byte-identical to nix-build.slice's) had
-    # no sibling to compete against and did nothing.
+    # nix.slice has no explicit unit: it exists only as the implicit
+    # dash-hierarchy parent systemd creates for nix-build.slice, and with a
+    # single child its own CPUWeight/IOWeight would have no sibling to compete
+    # against.
     systemd.slices = lib.mapAttrs (_: sliceConfig: {
       inherit sliceConfig;
     }) runtimeInventory.slices.system;

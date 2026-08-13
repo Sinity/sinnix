@@ -11,8 +11,7 @@ let
     }) subFeatures;
 
   # Static capability metadata slot. Consumed by sweep modules
-  # (modules/dotfiles-sweep.nix, etc.) to centralize cross-cutting concerns.
-  # Currently used for:
+  # (modules/dotfiles-sweep.nix, etc.) to centralize cross-cutting concerns:
   #   meta.dotfiles.configFile = { "rel/in/xdg" = "rel/in/dots"; ... };
   #   meta.dotfiles.dataFile = { ... };
   # Entries may be strings (simple recursive symlink) or attrsets with
@@ -35,10 +34,11 @@ let
       # subFeatures = { vscode = { description = "VSCode"; default = true; }; ... }
       subFeatures ? { },
       meta ? { },
-      # Features are default-ON by contract (see comment below). defaultOn is
-      # an explicit escape hatch, not routine per-module tuning; optional
-      # background capabilities normally belong in the default-off service
-      # namespace instead.
+      # Features in modules/features/ are unconditionally part of a sinnix
+      # host's default character; hosts express exceptions via
+      # `sinnix.features.<path>.enable = false`. defaultOn is an explicit
+      # escape hatch, not routine tuning — optional background capabilities
+      # belong in the default-off service namespace instead.
       defaultOn ? true,
       configFn,
     }:
@@ -53,12 +53,6 @@ let
       # Use a recursive merge so nested attrs like `factorio.username`
       # coexist with generated `factorio.enable`.
       subFeatureOpts = mkSubFeatureOptions subFeatures;
-      # Features sitting in modules/features/ are unconditionally part of a
-      # sinnix host's default character. Hosts express exceptions via
-      # `sinnix.features.<path>.enable = false;`. Capabilities that are not
-      # part of the normal interactive character should be default-off
-      # services or omitted from the active module tree.
-      #
       # extraOptions must not define its own top-level `enable`: the `//`
       # merge below replaces it wholesale, silently discarding whatever a
       # caller declared there.

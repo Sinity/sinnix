@@ -265,9 +265,7 @@ let
     # User caches are regenerable and currently large enough to dominate
     # backup churn if included.
     "home/sinity/.cache"
-    # 2026-07-10 impermanence audit: pure regenerable caches/logs that were
-    # riding the hourly persist archives (npm cache 4.8G, nvim mason 1.2G,
-    # hyprland session logs 1G).
+    # Pure regenerable caches and logs, multi-GB each.
     "home/sinity/.npm/_cacache"
     "home/sinity/.local/share/nvim/mason"
     "home/sinity/.local/share/hyprland/logs"
@@ -277,10 +275,10 @@ let
   ];
 
   realmExcludes = [
-    # Re-acquirable media (taxonomy 2026-07-10, sinnix-4ib): Steam and model
-    # weights re-download; stashbox regenerable members carry their own
-    # provenance. Precious-small media (books, videos, substack, edu,
-    # music-audio-features, web-content) deliberately stays in coverage.
+    # Re-acquirable media: Steam and model weights re-download, and stashbox
+    # regenerable members carry their own provenance. Precious-small media
+    # (books, videos, substack, edu, music-audio-features, web-content)
+    # deliberately stays in coverage.
     "media/Steam"
     "media/model"
     "media/stashbox/models"
@@ -288,8 +286,7 @@ let
     "media/stashbox/analysis-cache"
     "media/stashbox/gpu-venv"
     # Top-level regenerable-cache root (sinex cargo/dev caches via the
-    # /var/cache/sinex bind, nix-build) — pure churn, never backup
-    # material (2026-07-10 impermanence audit).
+    # /var/cache/sinex bind, nix-build) — pure churn, never backup material.
     "cache"
     "**/inbox/monero"
     "**/node_modules"
@@ -793,9 +790,8 @@ in
     # never deleted by btrbk rotation; a snapshot leaves disk only after this
     # drain has either found or created the matching Borg archive.
 
-    # Backups are scheduled bulk I/O. Keep them below interactive work: the
-    # post-restore backup and metadata capture saturated /realm enough to make
-    # the desktop visibly stall even though the machine was otherwise healthy.
+    # Backups are scheduled bulk I/O and must stay below interactive work;
+    # unthrottled they saturate /realm enough to visibly stall the desktop.
     systemd.services.borgbackup-job-persist = {
       description = "Drain /persist btrbk snapshots into Borg";
       restartIfChanged = false;
@@ -1277,7 +1273,6 @@ in
       ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${btrfsImageRoot}
     '';
 
-    # Ensure directories exist
     # Borg chunk cache must survive reboots. / is ephemeral, so the default
     # ~/.cache/borg is lost on every boot, forcing a full re-read + re-chunk
     # of every file (616GB read for 2.4GB written — a 256:1 waste).

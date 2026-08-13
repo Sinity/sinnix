@@ -3,9 +3,8 @@
 # Root subvolume @ is deleted and recreated each boot (initrd in hosts/*/storage.nix).
 # Before wiping, the state is snapshotted as a safety net (never auto-pruned).
 #
-# This module defines sinnix.persistence options that other modules use to declare
-# their persistence needs colocated with their configuration. Declarations are
-# collected and wired into the impermanence module automatically.
+# Modules declare their persistence needs colocated with their configuration;
+# declarations are collected and wired into impermanence automatically.
 #
 # To declare persistence from any module:
 #   sinnix.persistence.system.directories = [ "/var/lib/myservice" ];
@@ -83,11 +82,9 @@ in
       directories = lib.mkDefault [ "/var/log" ];
     };
 
-    # ── Core system state (genuinely no owning module) ──────────────────
-    # Entries here must have NO module that owns them. transmission and
-    # tailscale used to sit in this list despite both having owning service
-    # modules; they now declare their own persistence, which is where
-    # someone reading those modules will look for it.
+    # ── Core system state (no owning module) ────────────────────────────
+    # Entries here must have no module that owns them; anything with an owning
+    # module declares its own persistence there.
     sinnix.persistence.system = {
       directories = [
         "/etc/ssh" # SSH host keys — agenix root of trust
@@ -160,8 +157,8 @@ in
       }
 
       # Telemetry (irreplaceable)
-      ".local/share/atuin" # shell history DB, 97 MB
-      ".local/share/activitywatch" # AW SQLite DB, 674 MB
+      ".local/share/atuin" # shell history DB
+      ".local/share/activitywatch" # AW SQLite DB
       ".config/activitywatch" # AW watcher configs (runtime-written)
       ".config/awatcher" # awatcher config.toml
 
@@ -176,15 +173,14 @@ in
       ".local/state/wireplumber"
 
       # Large installs
-      ".local/share/nvim" # Mason LSPs + treesitter, 1.6 GB
+      ".local/share/nvim" # Mason LSPs + treesitter
       ".local/state/nvim" # shada: recent files, marks, registers, search/cmd history, undo
       {
         directory = ".local/share/Steam";
         mode = "0750";
-      } # 65 GB game library
+      } # game library
 
-      # Nix user state. Eval/fetcher cache stays under ~/.cache/nix with the
-      # rest of XDG cache state now that the dedicated /cache NVMe is offline.
+      # Nix user state
       ".local/share/nix" # trusted-settings.json (cachix substituters)
 
       # UX state
@@ -192,7 +188,7 @@ in
       ".config/yazi" # file manager config (not HM managed)
       ".local/share/zoxide" # jump database
       ".local/share/direnv" # allowlist + env cache
-      "wallpaper" # ~106 MB
+      "wallpaper"
 
       # IRC
       ".config/weechat"
@@ -229,8 +225,8 @@ in
       ".local/share/uv" # uv-managed Python installs
       ".insightface" # InsightFace face-recognition models
       ".duckdb" # DuckDB extensions cache
-      ".local/share/hyprland" # Hyprland logs + state, ~1.1 GB
-      ".local/share/gh" # GitHub CLI extensions, ~37 MB
+      ".local/share/hyprland" # Hyprland logs + state
+      ".local/share/gh" # GitHub CLI extensions
 
       # Runtime state
       ".local/share/nats" # NATS CLI contexts and plugins

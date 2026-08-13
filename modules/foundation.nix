@@ -1,10 +1,7 @@
 # Unified System Foundation and Project Topology
 #
-# Provides:
-# - Primary user and machine identity
-# - Global filesystem paths and realm topology
-# - Project constellation mapping and environment variables
-# - System-wide localization (time, locale, console)
+# Primary user and machine identity, global filesystem paths and realm
+# topology, project constellation mapping, and system-wide localization.
 {
   lib,
   pkgs,

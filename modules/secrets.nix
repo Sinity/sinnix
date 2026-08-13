@@ -1,12 +1,8 @@
 # Agenix secret management with auto-discovery
 #
-# Auto-discovers .age files in secret/ directory and generates:
-# - age.secrets entries with appropriate permissions
-# - Environment export script for shell integration
-# - config.sinnix.secrets.paths for programmatic access
-#
-# Note: Uses builtins.readDir at eval time for auto-discovery. This adds
-# minor eval overhead but eliminates the need for a separate manifest file.
+# Auto-discovers .age files (via builtins.readDir at eval time, so no separate
+# manifest) and generates age.secrets entries with appropriate permissions, an
+# environment export script, and config.sinnix.secrets.paths.
 {
   lib,
   config,
@@ -16,15 +12,12 @@ let
   username = config.sinnix.user.name;
   primaryGroupName = config.users.users.${username}.group or username;
   userPasswordSecret = "${username}-password";
-  # Lives outside the flake checkout entirely (not just gitignored inside
-  # it) — encrypted ciphertext + the agenix recipient/inventory manifest
-  # shouldn't be at risk from repo-local git operations, and keeping them
-  # out of `inputs.self` means they're invisible to Nix's flake-source
-  # filtering by construction, not by convention.
+  # Outside the flake checkout entirely, not merely gitignored: ciphertext and
+  # the agenix recipient manifest stay clear of repo-local git operations and
+  # are invisible to Nix's flake-source filtering by construction.
   secretDir = /realm/data/secrets/sinnix/secret;
   cfg = config.sinnix.secrets;
 
-  # Auto-discover .age files - evaluated once per flake eval
   secretFiles =
     if cfg.enable && builtins.pathExists secretDir then
       lib.filterAttrs (name: _: lib.hasSuffix ".age" name) (builtins.readDir secretDir)
@@ -74,14 +67,10 @@ let
     "factorio-token".exportEnv = false;
     "wifi-psk".exportEnv = false;
     "pypi-recovery-codes".exportEnv = false;
-    # Blanket-exporting this to every shell silently overrides Claude Code's
-    # normal subscription auth for every `claude`/`claude -p` invocation on
-    # the host (confirmed live 2026-08-13: a low/zero-balance raw key broke
-    # jfiy.2's enrichment loop and this cartography script, invisibly, since
-    # neither was ever tested with a real `claude -p` call -- only
-    # shellcheck/nix-instantiate --parse). Nothing in this repo's own agent
-    # tooling reads ANTHROPIC_API_KEY from the environment; still available
-    # at /run/agenix/anthropic-api-key for anything that explicitly wants it.
+    # Exporting this to every shell silently overrides Claude Code's
+    # subscription auth for every `claude`/`claude -p` invocation on the host.
+    # Nothing here reads ANTHROPIC_API_KEY from the environment; it remains
+    # readable at /run/agenix/anthropic-api-key for anything that wants it.
     "anthropic-api-key".exportEnv = false;
   };
 
@@ -165,7 +154,6 @@ in
       secrets = if cfg.enable then secretSpecs else { };
     };
 
-    # Export decrypted secrets into shells via /etc/profile.d
     environment.etc."profile.d/agenix-secrets.sh" = lib.mkIf (cfg.enable && secretNames != [ ]) {
       mode = "0444";
       text = ''

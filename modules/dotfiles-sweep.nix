@@ -15,12 +15,6 @@
 #
 # String value ⇒ `{ source = <str>; recursive = false; force = false; }` (HM defaults).
 # Attrset value ⇒ merged onto the same defaults; only `source` is required.
-#
-# Co-locating dotfile declarations on the owning capability replaces the
-# previous pattern where each feature wired its own `xdg.configFile` blocks
-# inside `home-manager.users.<user>` lambdas. See dots/attic finding (2026-
-# 05-24): there are no truly orphan top-level dots/ subdirs; every active
-# subdir is consumed by some default-on feature via `mkDotsFile "/X/..."`.
 {
   config,
   lib,
@@ -34,28 +28,24 @@ let
     cap:
     (cap.enable or false) && (cap ? meta) && (cap.meta ? dotfiles) && (cap.meta.dotfiles or { }) != { };
 
-  # Two-level walk of features.<domain>.<name>
   featureCaps = lib.concatMap (domain: lib.attrValues (config.sinnix.features.${domain} or { })) (
     builtins.attrNames (config.sinnix.features or { })
   );
 
-  # One-level walk of services.<name>
   serviceCaps = lib.attrValues (config.sinnix.services or { });
 
   eligible = builtins.filter hasDotfileMeta (featureCaps ++ serviceCaps);
 
-  # Merge declarations from every eligible capability into a single attrset
-  # per HM target (configFile / dataFile). Right-most cap wins on collision;
-  # the byte-diff verification in Phase 7c catches accidental overwrites.
+  # Merges every eligible capability's declarations into one attrset per HM
+  # target; right-most capability wins on collision.
   mergeSlot = slot: lib.foldl' (acc: cap: acc // (cap.meta.dotfiles.${slot} or { })) { } eligible;
 
   configFileEntries = mergeSlot "configFile";
   dataFileEntries = mergeSlot "dataFile";
   homeFileEntries = mergeSlot "homeFile";
 
-  # Defaults match HM's own option defaults for xdg.configFile / xdg.dataFile.
-  # `recursive = false` means "treat <source> as a single symlink target";
-  # opt into per-file recursion explicitly via the attrset form when needed.
+  # HM's own defaults: `recursive = false` treats <source> as a single symlink
+  # target; opt into per-file recursion via the attrset form.
   defaults = {
     recursive = false;
     force = false;
