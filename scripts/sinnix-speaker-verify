@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Speaker verification (enroll/score) via SpeechBrain ECAPA-TDNN embeddings, built on mke's diarization substrate
+# runtimeInputs: python3Packages.speechbrain python3Packages.torchaudio python3Packages.numpy
+
+"""sinnix-speaker-verify: enrollment + cosine-similarity scoring against an
+enrolled voice centroid (sinnix-7oly).
+
+DESIGN NOTE, load-bearing: per the bead's own explicit framing, this is
+FRICTION AND ATTRIBUTION, never an authorization boundary -- replay and
+voice-cloning (this estate runs Kokoro TTS locally, F5-TTS is on the sinnix-w9l
+roadmap) both defeat voice as an authenticator. Callers must tier actions by
+blast radius and never gate a destructive/irreversible action on this score
+alone. See sinnix-7oly for the full tiering design.
+
+Usage:
+  sinnix-speaker-verify enroll <audio.wav> [--name operator]
+  sinnix-speaker-verify score <audio.wav> [--name operator]
+  sinnix-speaker-verify list
+
+Enrollment centroid stored at /realm/state/speaker-verify/<name>.json
+(embedding vector + metadata, not raw audio).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+STORE_DIR = Path("/realm/state/speaker-verify")
+
+
+def _load_model():
+    # Deferred import: keep --help fast, and let callers without the model
+    # deps installed still see usage.
+    from speechbrain.inference.speaker import EncoderClassifier
+
+    return EncoderClassifier.from_hparams(
+        source="speechbrain/spkrec-ecapa-voxceleb",
+        savedir="/realm/state/speaker-verify/.model-cache",
+    )
+
+
+def _embed(model, audio_path: str):
+    import torchaudio
+
+    signal, fs = torchaudio.load(audio_path)
+    if signal.shape[0] > 1:
+        signal = signal.mean(dim=0, keepdim=True)
+    if fs != 16000:
+        signal = torchaudio.functional.resample(signal, fs, 16000)
+    emb = model.encode_batch(signal)
+    return emb.squeeze().detach().cpu().numpy()
+
+
+def cmd_enroll(args: argparse.Namespace) -> int:
+    import numpy as np
+
+    model = _load_model()
+    audio_files = list(args.audio)  # snapshot before any mutation
+    embeddings = [_embed(model, path) for path in audio_files]
+    centroid = np.mean(embeddings, axis=0)
+    centroid = centroid / np.linalg.norm(centroid)
+
+    STORE_DIR.mkdir(parents=True, exist_ok=True)
+    out = STORE_DIR / f"{args.name}.json"
+    out.write_text(
+        json.dumps(
+            {
+                "name": args.name,
+                "centroid": centroid.tolist(),
+                "n_samples": len(audio_files),
+                "source_files": audio_files,
+            }
+        )
+    )
+    print(f"enrolled '{args.name}' from {len(audio_files)} sample(s) -> {out}")
+    return 0
+
+
+def cmd_score(args: argparse.Namespace) -> int:
+    import numpy as np
+
+    enrolled_path = STORE_DIR / f"{args.name}.json"
+    if not enrolled_path.exists():
+        print(f"error: no enrollment for '{args.name}' -- run enroll first", file=sys.stderr)
+        return 1
+    enrolled = json.loads(enrolled_path.read_text())
+    centroid = np.array(enrolled["centroid"])
+
+    model = _load_model()
+    emb = _embed(model, args.audio)
+    emb = emb / np.linalg.norm(emb)
+
+    similarity = float(np.dot(centroid, emb))
+    print(
+        json.dumps(
+            {
+                "name": args.name,
+                "audio": args.audio,
+                "cosine_similarity": round(similarity, 4),
+                "note": "friction/attribution signal only -- never an authorization boundary, see sinnix-7oly",
+            }
+        )
+    )
+    return 0
+
+
+def cmd_list(_: argparse.Namespace) -> int:
+    if not STORE_DIR.exists():
+        print("no enrollments")
+        return 0
+    for f in sorted(STORE_DIR.glob("*.json")):
+        data = json.loads(f.read_text())
+        print(f"{data['name']}: {data['n_samples']} sample(s), {f}")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    enroll = sub.add_parser("enroll", help="enroll a voice from one or more audio files")
+    enroll.add_argument("audio", nargs="+", help="audio file(s), any format torchaudio reads")
+    enroll.add_argument("--name", default="operator")
+    enroll.set_defaults(func=cmd_enroll)
+
+    score = sub.add_parser("score", help="score an audio file against an enrolled voice")
+    score.add_argument("audio")
+    score.add_argument("--name", default="operator")
+    score.set_defaults(func=cmd_score)
+
+    listp = sub.add_parser("list", help="list enrollments")
+    listp.set_defaults(func=cmd_list)
+
+    args = parser.parse_args()
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
