@@ -536,13 +536,9 @@ def cmd_init(domain, args):
         if "id" not in it:
             raise SystemExit(f"item missing id: {it}")
     if args.image_features:
-        # `explain` is the reason this engine bothers with feature vectors at
-        # all, and it is inert on items that carry none ("no items carry
-        # feature vectors; explain has nothing to work with"). sinnix-image-
-        # features exists precisely to produce them for image domains and
-        # names this script as its caller -- but nothing ever invoked it, so
-        # the only way to get features onto an image item was to hand-roll
-        # them per domain, which is what it was written to stop.
+        # `explain` is inert on items that carry no feature vectors, so
+        # populate them here from sinnix-image-features rather than leaving
+        # every image domain to hand-roll its own.
         missing = [it for it in items if it.get("image") and "features" not in it]
         computed = failed = 0
         for it in missing:

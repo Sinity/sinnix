@@ -66,12 +66,11 @@ DEFAULT_DERIVED_ROOT = Path("/realm/data/derived")
 DEFAULT_HISTORY_PATH = DEFAULT_CAPTURES_ROOT / "webhistory" / "gestalt" / "derived" / "full_history.ndjson"
 
 # ---------------------------------------------------------------------------
-# Conservative URL normalization (bead sinnix-xt8 design constraint: strip
-# fragment + tracking params only, KEEP the rest of the query string --
-# search/reddit/forum URLs are meaning-bearing. This is a simple denylist,
-# not a guess-everything heuristic, and intentionally separate from
-# lynchpin's `web_urls.normalize_url` (which is a more aggressive per-host
-# whitelist used for its own history dedup -- different job).
+# Conservative URL normalization: strip fragment + tracking params only,
+# KEEP the rest of the query string -- search/reddit/forum URLs are
+# meaning-bearing. A simple denylist, not a guess-everything heuristic, and
+# separate from lynchpin's `web_urls.normalize_url`, which is a more
+# aggressive per-host whitelist for its own history dedup.
 # ---------------------------------------------------------------------------
 
 # Any param starting with one of these prefixes is dropped, regardless of
@@ -714,10 +713,9 @@ COPY (
 """
     # duckdb's CLI only durably commits writes against the on-disk file when
     # driven via `-f <script>` -- piping the same SQL over stdin (even with
-    # a real filename argument) silently no-ops the writes on this duckdb
-    # build (v1.5.4; verified empirically while building this script: a
-    # stdin-piped `CREATE TABLE ...; COPY ...;` returns exit 0 but leaves
-    # an empty database file). `-bail` makes a mid-script SQL error a
+    # a real filename argument) silently no-ops the writes on duckdb v1.5.4:
+    # a stdin-piped `CREATE TABLE ...; COPY ...;` returns exit 0 and leaves
+    # an empty database file. `-bail` makes a mid-script SQL error a
     # non-zero exit instead of continuing past it.
     sql_script_path = derived_dir / ".build.sql"
     sql_script_path.write_text(sql, encoding="utf-8")

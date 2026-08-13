@@ -157,20 +157,41 @@ async def fire(reader, writer, payload: bytes, idx: int) -> tuple[int, str]:
 
 
 def classify(bodies: list[str]) -> str:
-    """Xiaomi answers with a code in the JSON; surface it rather than guessing."""
-    joined = " ".join(bodies).lower()
-    if '"code":0' in joined.replace(" ", ""):
-        return "SUCCESS"
-    for needle, verdict in (
-        ("quota", "QUOTA-EXHAUSTED"),
-        ("limit", "QUOTA-EXHAUSTED"),
-        ("not login", "TOKEN-INVALID"),
-        ("token", "TOKEN-INVALID"),
-        ("401", "TOKEN-INVALID"),
-    ):
-        if needle in joined:
-            return verdict
-    return "UNKNOWN"
+    """Read Xiaomi's own verdict fields rather than guessing from HTTP status.
+
+    A refused application still returns HTTP 200 with code=0/"success" -- that
+    pair only means the CALL was accepted. The verdict is data.apply_result,
+    and data.deadline carries the epoch of the next window.
+    """
+    joined = " ".join(bodies)
+    try:
+        start = joined.index("{")
+        payload = json.loads(joined[start:joined.rindex("}") + 1])
+    except (ValueError, json.JSONDecodeError):
+        low = joined.lower()
+        if "not login" in low or "401" in low:
+            return "TOKEN-INVALID"
+        return "UNKNOWN"
+
+    data = payload.get("data") or {}
+    result = data.get("apply_result")
+    if result == 1:
+        return "GRANTED"
+    if result == 3:
+        return "REFUSED-UNTIL-DEADLINE"
+    if payload.get("code") not in (0, None):
+        return f"ERROR-code-{payload.get('code')}"
+    return f"UNKNOWN-apply_result-{result}"
+
+
+def server_deadline(body: str) -> float | None:
+    """Epoch of the next window, as the server reports it."""
+    try:
+        start = body.index("{")
+        payload = json.loads(body[start:body.rindex("}") + 1])
+        return float((payload.get("data") or {}).get("deadline"))
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return None
 
 
 async def run(args: argparse.Namespace) -> int:

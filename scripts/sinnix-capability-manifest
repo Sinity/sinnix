@@ -49,24 +49,19 @@ find_scripts() {
   fi
 }
 
-# sinnix-3sng: derive dormantHosts from hosts/ + flake/nixos.nix instead of
-# a hardcoded jq literal, so a new/removed host cannot silently desync the
-# manifest. "Dormant" = a real NixOS host (has a `<name> = mkHost` entry in
-# flake/nixos.nix -- excludes sinnix-gw, which is an OpenWrt router pushed
-# over SSH via flake/router.nix, not a nixosConfigurations member) that
-# isn't the host this script is currently running on.
+# dormantHosts is derived from hosts/ + flake/nixos.nix so a new/removed host
+# cannot silently desync the manifest. "Dormant" = a real NixOS host (has a
+# `<name> = mkHost` entry in flake/nixos.nix -- excludes sinnix-gw, an OpenWrt
+# router pushed over SSH via flake/router.nix) that isn't the running host.
 find_dormant_hosts() {
   if [[ -d "$source_root/hosts" && -f "$source_root/flake/nixos.nix" ]]; then
     for dir in "$source_root/hosts"/*/; do
       host=$(basename "$dir")
       [[ "$host" == "$hostname" ]] && continue
-      # `if` rather than `rg -q ... && printf`: under set -e + pipefail, a
-      # trailing "&& cmd" whose left side is FALSE on the LAST loop
-      # iteration (the common case -- most hosts don't match) leaves that
-      # false exit status as find_dormant_hosts' own return value, which
-      # then poisons the `| jq` pipeline below and kills the whole script
-      # even though nothing actually went wrong (caught empirically: the
-      # capability-manifest Nix check failed silently with no stderr).
+      # `if` rather than `rg -q ... && printf`: under set -e + pipefail a
+      # trailing "&& cmd" that is false on the LAST loop iteration (the
+      # common case) becomes find_dormant_hosts' own return value and kills
+      # the script through the `| jq` pipeline below.
       if rg -q "^[[:space:]]*${host}[[:space:]]*=[[:space:]]*mkHost" "$source_root/flake/nixos.nix"; then
         printf '%s\n' "$host"
       fi
@@ -121,8 +116,8 @@ jq -n \
   --argjson dormantHosts "$dormant_hosts_json" \
   '{schema: $schema, generatedAt: $generatedAt, host: $hostname, sourceRevision: $sourceRevision, configurationRevision: $configurationRevision, authorities: {runtimeInventory: "runtime-inventory.json", systemd: "live-systemd", sourceTree: "source-declaration"}, features: $features, services: $services, scripts: $scripts, runtimeSurfaces: $surfaces, persistentAndRuntimePaths: $paths, dormantHosts: $dormantHosts, unknowns: [{scope: "service-source-to-runtime-surface", reason: "source declarations without an explicit runtime surface remain unknown until evaluated host evidence is available"}], inventorySchema: ($inventory.schema // "unknown")}' > "$tmp/manifest.json"
 
-# Structural check, not a specific literal host (sinnix-3sng): dormantHosts
-# is an array, and if non-empty every entry carries host+state.
+# Structural check, not a specific literal host: dormantHosts is an array,
+# and if non-empty every entry carries host+state.
 jq -e '(.schema == "sinnix-capability-manifest-v1") and (.runtimeSurfaces | type == "array") and (.dormantHosts | type == "array") and ((.dormantHosts | length == 0) or (.dormantHosts | all(has("host") and has("state"))))' "$tmp/manifest.json" >/dev/null
 
 if [[ "$output" == - ]]; then

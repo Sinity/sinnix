@@ -3,12 +3,12 @@
 # description: Detect a sinex flake input revision bump and pre-build + cache-push it asynchronously
 # runtimeInputs: bash coreutils jq @sinnix-scope @sinnix-sinex-cache-push
 #
-# sinnix-m9v: the desktop is already sinex's "builder of record" -- switch
-# publishes the sinex closure to sinity.cachix.org after every successful
-# activation (sinexCachePush, flake/command-registry.nix), but that only pays
-# off for REPEAT builds of the same input hash. The FIRST switch after any
-# sinex master bump still pays the full local compile cost synchronously, on
-# the interactive critical path.
+# The desktop is sinex's builder of record: `switch` publishes the sinex
+# closure to sinity.cachix.org after every successful activation
+# (sinexCachePush, flake/command-registry.nix), but that only pays off for
+# REPEAT builds of the same input hash -- the FIRST switch after a sinex
+# master bump would otherwise pay the full compile synchronously, on the
+# interactive critical path.
 #
 # This script is the oneshot body of a periodic timer (see
 # modules/services/sinex-cache-prebuild.nix). It diffs the sinex node's

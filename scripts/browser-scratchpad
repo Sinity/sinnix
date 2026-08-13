@@ -16,7 +16,6 @@ fi
 BASEDIR="$HOME/.local/share/browser-scratchpads/$SITE"
 mkdir -p "$BASEDIR"
 
-# Launch qutebrowser with isolated session
 exec qutebrowser \
   --basedir "$BASEDIR" \
   --qt-arg name "browser-$SITE" \

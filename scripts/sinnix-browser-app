@@ -1,15 +1,14 @@
 # @sinnix-package
-# description: Open a URL as a chromeless --app= Chrome window -- the browser-inversion front door (sinnix-r4u8)
+# description: Open a URL as a chromeless --app= Chrome window -- the browser-inversion front door
 # runtimeInputs: bash
 #!/usr/bin/env bash
-# Each resource is its own window, not a tab in a permanent tab bar --
-# closing the window is closing the "tab", with no mechanism for a pile
-# to accumulate. Toolbar/tab-strip hidden via Chrome's --app= mode;
-# extensions (Vimium C, the polylogue capture extension) still run inside
-# --app= windows -- only the browser chrome is hidden, not the
-# extension/content-script surface. Routes through sinnix-chrome (the
-# scoped-systemd-run launcher in modules/features/desktop/browser.nix) so
-# app windows land in the same cgroup accounting as normal Chrome.
+# Each resource is its own window rather than a tab in a permanent tab bar,
+# so closing the window is closing the "tab" and no pile can accumulate.
+# Chrome's --app= mode hides only the browser chrome: extensions (Vimium C,
+# the polylogue capture extension) still run inside these windows. Routes
+# through sinnix-chrome (the scoped-systemd-run launcher in
+# modules/features/desktop/browser.nix) so app windows land in the same
+# cgroup accounting as normal Chrome.
 set -euo pipefail
 
 if [ "$#" -lt 1 ]; then

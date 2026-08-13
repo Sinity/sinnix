@@ -166,7 +166,6 @@ OUT="$(env -u ANTHROPIC_API_KEY claude -p "$PROMPT" 2>&1)" || {
   exit 1
 }
 
-# Sanity: must contain all four section headers.
 if ! grep -q '^## Resume' <<<"$OUT" \
   || ! grep -q '^## Reverse-prompt questions' <<<"$OUT" \
   || ! grep -q '^## Drift' <<<"$OUT" \

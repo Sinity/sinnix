@@ -106,17 +106,16 @@ fi
 
 killed=0
 for proc in "${ALL_PROCS[@]}"; do
-  # Find PIDs matching exact process name (NOT -f which matches full command line!)
+  # -x (exact name), never -f: -f would match every process running from
+  # /nix/store and kill the world.
   pids=$(pgrep -x "$proc" 2>/dev/null || true)
 
   if [ -n "$pids" ]; then
     echo "  Killing $proc: $pids"
 
-    # SIGTERM first (give 0.5s to cleanup)
     kill -TERM $pids 2>/dev/null || true
     sleep 0.5
 
-    # SIGKILL stragglers
     for pid in $pids; do
       if kill -0 "$pid" 2>/dev/null; then
         kill -KILL "$pid" 2>/dev/null || true

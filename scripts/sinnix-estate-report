@@ -147,9 +147,9 @@ TIMER_DRIVEN = {"borgbackup-check", "borgbackup-job-persist", "borgbackup-job-re
     "sinnix-borg-drill", "capture-audio-index", "capture-kitty-scrollback", "url-ledger",
     "sinex-document-scan"}
 SOCKET_ACTIVATED = {"ollama", "litellm", "koboldcpp", "open-webui", "tts", "whisper", "comfyui"}
-# Surfaces the operator has acknowledged as intentionally down. Until the
-# acknowledged-outage surface (sinnix-vzja) lands in the inventory itself,
-# this list is the interim carrier; each entry names its reason.
+# Surfaces the operator has acknowledged as intentionally down; each entry
+# names its reason. Interim carrier until the inventory itself declares an
+# acknowledged-outage surface.
 ACKNOWLEDGED = {
     "sinexd": "event-platform repair in progress",
     "nats": "event-platform repair in progress",

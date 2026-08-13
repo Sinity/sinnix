@@ -62,24 +62,14 @@ scan_unpersisted() {
   fi
 }
 
-# The MemAvailable>=8GiB gate that used to live here is deliberately gone.
-#
-# It could not know what the rebuild was about to do: a one-line module
-# change compiles nothing and needs no headroom, while a nixpkgs bump
-# recompiles the world and would blow through any fixed threshold anyway.
-# So it blocked correct operations on a busy desktop while protecting
-# nothing on the runs that actually cost memory.
-#
-# The mechanism that does work is already in place and is not a
-# prediction: nix-build.slice carries MemoryHigh=22G / MemoryMax=28G (see
-# flake/data/runtime-defaults.nix), so a build is bounded while it runs
-# rather than gated on a guess before it starts. Every rebuild path routes
-# through that slice.
-#
-# It also failed unsafely. On 2026-08-13 it blocked three switches whose
-# exit status was masked by the caller's shell, so fixes were reported as
-# applied while the system stayed on an older generation -- a refusal that
-# is easy to miss is worse than no check.
+# There is deliberately no free-memory gate here. A fixed MemAvailable
+# threshold cannot know what the rebuild is about to do -- a one-line module
+# change compiles nothing, a nixpkgs bump blows through any threshold -- so
+# it blocks correct operations while protecting nothing on the runs that
+# actually cost memory, and a refusal whose exit status the caller's shell
+# masks silently leaves the system on an older generation. Boundedness comes
+# instead from nix-build.slice's MemoryHigh=22G / MemoryMax=28G (see
+# flake/data/runtime-defaults.nix), which every rebuild path routes through.
 
 check_disk() {
   local available

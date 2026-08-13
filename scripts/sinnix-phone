@@ -12,15 +12,12 @@
 # adbd over TCP does NOT survive a phone reboot; `sinnix-phone adb-restore`
 # re-enables it over USB. Everything else survives.
 #
-# CLIPBOARD IS ONE-WAY (desktop -> phone), NOT A BUG. Android blocks
-# clipboard READS from a backgrounded app (privacy restriction since Android
-# 10): `termux-clipboard-get` silently returns empty unless Termux is the
-# foreground app (verified live 2026-08-13). `termux-clipboard-set` has no
-# such restriction and works fine from a backgrounded ssh session. So
-# phone->desktop clipboard sync would need Termux kept foregrounded
-# continuously (bad UX) or an AccessibilityService-based reader (see
-# sinnix-uyvt.6) -- not attempted here. PRIMARY has no Android equivalent at
-# all, so there is nothing to sync for it; this covers CLIPBOARD only.
+# Clipboard is one-way (desktop -> phone). Android blocks clipboard READS
+# from a backgrounded app (since Android 10): `termux-clipboard-get`
+# silently returns empty unless Termux is the foreground app.
+# `termux-clipboard-set` has no such restriction. Phone->desktop sync would
+# need Termux kept foregrounded or an AccessibilityService-based reader.
+# PRIMARY has no Android equivalent; this covers CLIPBOARD only.
 set -euo pipefail
 
 PHONE_TS_IP="${SINNIX_PHONE_IP:-100.124.215.25}"
@@ -31,9 +28,8 @@ LAKE_ROOT="${SINNIX_PHONE_LAKE:-/realm/data/captures/phone}"
 
 # -F /dev/null + explicit identity, not ~/.ssh/config: under a sandboxed
 # systemd unit's ProtectHome, ssh rejects the Home-Manager ~/.ssh/config
-# symlink outright ("Bad owner or permissions", exit 255) -- the same trap
-# capture-router.nix hit. A script invoked by both a human and a timer
-# should not depend on interactive config either way.
+# symlink outright ("Bad owner or permissions", exit 255). A script invoked
+# by both a human and a timer should not depend on interactive config.
 ssh_phone_opts=(
   # -o Port=, not -p: this array is shared verbatim with scp_phone() below,
   # and scp's -p means "preserve file attributes" (a no-arg flag), not
@@ -45,25 +41,21 @@ ssh_phone_opts=(
   -o StrictHostKeyChecking=accept-new
   -o "UserKnownHostsFile=${SINNIX_PHONE_KNOWN_HOSTS:-$HOME/.ssh/known_hosts}"
   -o IdentitiesOnly=yes
-  # ssh-agent can hold a key that LOOKS like a match and still get "signing
-  # failed... agent refused operation" from it (observed live 2026-08-13,
-  # reproducible, agent had 12 keys loaded) -- IdentitiesOnly=yes restricts
-  # which identity FILES are tried but does not stop the agent from being
-  # asked first. Go straight to the key file; this identity doesn't need
+  # ssh-agent can hold a key that LOOKS like a match and still answer
+  # "signing failed... agent refused operation". IdentitiesOnly=yes restricts
+  # which identity FILES are tried but does not stop the agent being asked
+  # first, so go straight to the key file; this identity doesn't need
   # agent-forwarding semantics.
   -o IdentityAgent=none
   -i "${SINNIX_PHONE_IDENTITY:-$HOME/.ssh/id_ed25519}"
-  # Connection multiplexing (sinnix-uyvt.1 latency profiling, 2026-08-13):
-  # raw tailnet RTT to the phone is ~4-11ms, but each cold SSH handshake
-  # measured ~380-586ms -- multi-step commands like `pull` and `status` (list, then N
-  # scp pulls) were paying that cost 2-4x sequentially, dwarfing the actual
-  # network hop and accounting for most of a reported "1-2s" round-trip.
-  # ControlMaster reuses one authenticated connection for every ssh/scp
-  # call in a single script invocation; ControlPersist=120 keeps it alive
-  # briefly across quick successive commands (e.g. a human running `pull`
-  # right after `status`) without lingering indefinitely on a device that
-  # roams networks. %C is ssh's single-token hash of user+host+port, so the
-  # socket path can't grow unboundedly long.
+  # Connection multiplexing: raw tailnet RTT to the phone is ~4-11ms but a
+  # cold SSH handshake is ~380-586ms, and multi-step commands (`pull`,
+  # `status`) pay that 2-4x sequentially. ControlMaster reuses one
+  # authenticated connection for every ssh/scp call in a single invocation;
+  # ControlPersist=120 keeps it alive across quick successive commands
+  # without lingering on a device that roams networks. %C is ssh's
+  # single-token hash of user+host+port, so the socket path can't grow
+  # unboundedly long.
   -o ControlMaster=auto
   -o ControlPersist=120
   -o "ControlPath=${SINNIX_PHONE_SSH_CONTROL_DIR:-$HOME/.cache/sinnix-phone-ssh}/%C"
@@ -71,9 +63,7 @@ ssh_phone_opts=(
 mkdir -p "${SINNIX_PHONE_SSH_CONTROL_DIR:-$HOME/.cache/sinnix-phone-ssh}"
 # Same flags as a single shell-word, for rsync -e (which needs a word, not
 # an array) -- computed once at top level so every case branch can use it,
-# not just whichever one happens to run first (case branches are NOT
-# separate scopes; a `"$0" subcmd` re-invocation IS a separate process,
-# which is why this isn't computed inline inside `pull)` alone).
+# including a `"$0" subcmd` re-invocation, which is a separate process.
 rsync_ssh="ssh ${ssh_phone_opts[*]}"
 # shellcheck disable=SC2029  # client-side expansion is intended: callers
 # (clip-push) build the remote command with their own already-expanded args.
@@ -88,21 +78,17 @@ ensure_adb() {
   fi
 }
 
-# sinnix-uyvt.2.1 truncation fix (2026-08-13): the confirmed root cause of
-# ambient chunks truncating (mean 148s against a 300s target, 14/60 chunks
-# under 10s) was `appops get com.termux RECORD_AUDIO` reporting
-# MODE_FOREGROUND -- stock Android's default mic policy for an app without a
-# declared foregroundServiceType="microphone" service, which silently mutes
-# an in-progress recording the instant Termux drops out of foreground
-# importance (screen off, app switched). `appops set ... allow` overrides
-# this per-package and is confirmed to survive `am force-stop` (system
-# appops state, not app state, so it also survives app restarts and should
-# survive reboots -- appops.xml is system_server state). Also whitelists
-# Termux from Doze so a long idle period doesn't add CPU/network throttling
-# on top. Both are adb (shell-uid) operations -- Termux itself cannot grant
-# either. Re-run this after anything that might have reset system app
-# state (a MIUI/Android OS update, "reset app preferences", a fresh
-# adb-restore after reboot) rather than assuming it's still in effect.
+# Stock Android defaults RECORD_AUDIO to MODE_FOREGROUND for an app without
+# a declared foregroundServiceType="microphone" service, which silently
+# mutes an in-progress recording the instant Termux drops out of foreground
+# importance (screen off, app switched) -- ambient chunks truncate while
+# still landing on schedule. `appops set ... allow` overrides this
+# per-package and survives `am force-stop`, app restarts, and reboots
+# (appops.xml is system_server state). The Doze whitelist keeps a long idle
+# period from adding CPU/network throttling on top. Both are adb (shell-uid)
+# operations -- Termux itself cannot grant either. Re-run after anything
+# that might have reset system app state (a MIUI/Android OS update, "reset
+# app preferences", a fresh adb-restore after reboot).
 #
 # NOT handled here: MIUI's separate "Background autostart" permission
 # (Settings > Apps > Permissions > Background autostart), required for
@@ -110,10 +96,8 @@ ensure_adb() {
 # command -- MIUI stores it in com.miui.securitycenter's own private
 # database with no public API, only a UI toggle
 # (com.miui.securitycenter/.permcenter.autostart.AutoStartManagementActivity).
-# Verified enabled for Termux, Termux:API, and Termux:Boot 2026-08-13; if a
-# future factory-reset-adjacent event clears it, it needs re-toggling by
-# hand (or UI-automated via `adb shell input tap`, see git history for the
-# coordinates used) -- there is nothing this script can assert headlessly.
+# Nothing this script can assert headlessly; if it gets cleared it needs
+# re-toggling by hand.
 ensure_mic_exemptions() {
   adb_phone shell appops set com.termux RECORD_AUDIO allow >/dev/null 2>&1 || true
   adb_phone shell dumpsys deviceidle whitelist +com.termux >/dev/null 2>&1 || true
@@ -155,15 +139,11 @@ status)
   fi
   if ssh_phone 'true' >/dev/null 2>&1; then
     echo "ssh       : up (termux :$PHONE_SSH_PORT)"
-    # Ambient capture liveness (sinnix-uyvt.2.1 truncation fix, 2026-08-13):
-    # a chunk landing on schedule does NOT mean it's intact -- the root
-    # cause found here was RECORD_AUDIO silently gated to MODE_FOREGROUND
-    # (`appops get com.termux RECORD_AUDIO`), which truncated or zeroed
-    # chunks the moment Termux left the foreground while still producing a
-    # file every ~5min. Report the runit supervisor state plus the most
-    # recently CLOSED chunk's actual encoded duration so a regression shows
-    # up here instead of requiring someone to pull chunks and run ffprobe
-    # by hand.
+    # A chunk landing on schedule does NOT mean it's intact: RECORD_AUDIO
+    # gated to MODE_FOREGROUND (`appops get com.termux RECORD_AUDIO`)
+    # truncates or zeroes chunks while still producing a file every ~5min.
+    # Report the runit supervisor state plus the most recently CLOSED
+    # chunk's actual encoded duration so a regression shows up here.
     # Not just `sv status ambient`: SVDIR is exported by a profile.d script
     # sourced only in interactive/login shells, so a bare non-interactive
     # ssh command doesn't see it -- point `sv` at the service dir directly.
@@ -217,7 +197,7 @@ screenshot)
   ;;
 pull)
   # Camera and downloads are the durable originals; the health-export folder
-  # is where the Health Connect scheduled export lands (see bead sinnix-fmkb).
+  # is where the Health Connect scheduled export lands.
   # Pull only — never push back, and never delete on the phone.
   mkdir -p "$LAKE_ROOT"/{camera,download,health,ambient}
   set +e
@@ -237,19 +217,9 @@ pull)
   du -sh "$LAKE_ROOT" 2>/dev/null
   ;;
 drain)
-  # sinnix-uyvt.2.1's tiered-sync policy, revised 2026-08-13 (operator: "no
-  # need to charging gate"). This drains the RAW AUDIO tier specifically --
-  # large, not time-critical -- which the operator explicitly still wants
-  # wifi-gated ("we'd still want full data transferred on wifi, to be
-  # clear, eventually"), so that half of the original gate stays. Charging
-  # had no stated justification and is dropped: a phone that's been off
-  # wifi+charging for hours was already an accepted gap per the runtime
-  # surface's generous staleAfterSeconds, and charging specifically just
-  # delayed draining without protecting anything the wifi gate doesn't
-  # already cover (this is a network-cost/opportunism gate, not a battery
-  # one). A future always-on VAD-gated live stream (sinnix-uyvt.4, small by
-  # construction) is a SEPARATE tier this bead doesn't cover -- see uyvt.2.1
-  # notes for why it isn't built yet (no VAD tooling installed on-device).
+  # Drains the raw-audio tier: large and not time-critical, so it is
+  # wifi-gated. Deliberately not charging-gated -- this is a network-cost
+  # gate, not a battery one.
   if ! timeout 5 bash -c "exec 3<>/dev/tcp/$PHONE_TS_IP/$PHONE_SSH_PORT" 2>/dev/null; then
     echo "drain: phone unreachable, skipping"
     exit 0
@@ -263,23 +233,19 @@ drain)
   echo "drain: wifi confirmed, pulling"
   "$0" pull
 
-  # sinnix-uyvt.2.1 (3): device-side rotation. 37G free is finite; the phone
-  # needs a ring that provably never deletes a chunk the lake hasn't taken.
-  # --remove-source-files removes a source file only once rsync has
-  # confirmed it matches the destination -- whether that confirmation
-  # happened just now or on an earlier run (a file `pull`'s --ignore-existing
-  # skipped because it was already there is still confirmed-in-sync, so this
-  # is safe to run standalone). Scoped to ambient only: camera/downloads/
-  # health are the operator's originals, not a rotating buffer.
+  # Device-side rotation: the phone needs a ring that provably never deletes
+  # a chunk the lake hasn't taken. --remove-source-files removes a source
+  # file only once rsync has confirmed it matches the destination -- whether
+  # that confirmation happened just now or on an earlier run -- so this is
+  # safe to run standalone. Scoped to ambient only: camera/downloads/health
+  # are the operator's originals, not a rotating buffer.
   mkdir -p "$LAKE_ROOT/ambient"
   rsync -a --remove-source-files -e "$rsync_ssh" \
     "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/sinnix-ambient/" "$LAKE_ROOT/ambient/" 2>/dev/null
 
-  # This is a soft ring (bounded by drain cadence: at most ~1 interval's
-  # worth of chunks accumulate between drains) rather than a hard size cap.
-  # If drains stop happening for an extended stretch (phone never on wifi +
-  # charging), on-device growth is genuinely unbounded -- surface that
-  # rather than silently trusting the cadence to hold.
+  # A soft ring bounded by drain cadence, not a hard size cap. If drains
+  # stop happening for an extended stretch, on-device growth is genuinely
+  # unbounded -- surface that rather than trusting the cadence to hold.
   used_kb=$(ssh_phone "du -sk /sdcard/sinnix-ambient 2>/dev/null" | awk '{print $1}')
   if [ -n "${used_kb:-}" ] && [ "$used_kb" -gt 512000 ]; then
     echo "drain: WARNING -- /sdcard/sinnix-ambient is ${used_kb}KB and not shrinking after rotation; drains may have stalled"
@@ -297,8 +263,7 @@ adb-restore)
   ensure_mic_exemptions
   ;;
 mic-exempt)
-  # Standalone re-assertion of the ambient-capture mic exemptions (see
-  # ensure_mic_exemptions() above for what and why). Needs adb.
+  # Standalone re-assertion of the mic exemptions; needs adb.
   ensure_adb
   ensure_mic_exemptions
   echo "RECORD_AUDIO: $(adb_phone shell appops get com.termux RECORD_AUDIO | tr '\n' ' ')"
@@ -319,9 +284,9 @@ clip-push)
   ;;
 clip-watch)
   # Foreground loop, run under systemd (Type=simple). wl-paste -w blocks
-  # until the clipboard changes, so this is push-triggered, not polled --
-  # cheap and immediate. No loop-guard needed: this direction never writes
-  # back to the desktop clipboard, so there is nothing to echo.
+  # until the clipboard changes, so this is push-triggered, not polled. No
+  # loop-guard needed: this direction never writes back to the desktop
+  # clipboard, so there is nothing to echo.
   exec wl-paste --watch "$0" clip-push
   ;;
 *)

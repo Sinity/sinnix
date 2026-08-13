@@ -15,7 +15,6 @@
 
 set -euo pipefail
 
-# Defaults
 INTERVAL=120
 DURATION=0.05
 INTENSITY=1.5
@@ -61,14 +60,12 @@ Environment:
 EOF
 }
 
-# Load from environment if set
 INTERVAL="${ASBL_INTERVAL:-$INTERVAL}"
 DURATION="${ASBL_DURATION:-$DURATION}"
 INTENSITY="${ASBL_INTENSITY:-$INTENSITY}"
 BASELINE="${ASBL_BASELINE:-$BASELINE}"
 MODE="${ASBL_MODE:-$MODE}"
 
-# Parse args
 CMD="${1:-help}"
 [[ $# -gt 0 ]] && shift
 
@@ -171,17 +168,14 @@ pulse() {
     
     case "$MODE" in
         brightness)
-            # Phase 1: Dim (baseline / intensity)
             write_dim_shader
             hyprctl keyword decoration:screen_shader "$SHADER_FILE" >/dev/null 2>&1
             sleep "$half_duration"
             
-            # Phase 2: Overbrighten (baseline * intensity)
             write_overbrighten_shader
             hyprctl keyword decoration:screen_shader "$SHADER_FILE" >/dev/null 2>&1
             sleep "$half_duration"
             
-            # Phase 3: Return to baseline
             write_baseline_shader
             hyprctl keyword decoration:screen_shader "$SHADER_FILE" >/dev/null 2>&1
             ;;
@@ -213,15 +207,12 @@ pulse() {
             trap - RETURN
             ;;
         ddc)
-            # sinnix-70eq: nudge the panel's real brightness register instead
-            # of faking it in the render pipeline. Read the current setpoint
-            # first rather than assuming 50 -- restoring to a stale baseline
-            # would leave the panel dimmer/brighter than the operator set it.
-            # This bare $4 parse is correct ONLY because 0x10 is a continuous
-            # code, whose --brief line is "VCP 10 C 50 100" ($4 = setpoint).
-            # Simple-non-continuous codes emit hex instead ("VCP D6 SNC x01"),
-            # so do not generalise this into a shared read_vcp helper without
-            # the hex branch that capture-monitor.nix carries.
+            # Read the current setpoint rather than assuming 50: restoring a
+            # stale baseline would leave the panel off the operator's setting.
+            # The bare $4 parse is correct ONLY because 0x10 is a continuous
+            # code ("VCP 10 C 50 100"); simple-non-continuous codes emit hex
+            # ("VCP D6 SNC x01"), so a shared read_vcp helper would need the
+            # hex branch that capture-monitor.nix carries.
             local current_vcp10
             current_vcp10=$(ddcutil getvcp 10 --brief 2>/dev/null | awk '{print $4}')
             if [[ -z "$current_vcp10" ]]; then
@@ -247,7 +238,6 @@ case "$CMD" in
             exit 0
         fi
         echo "Starting ASBL reset loop ($MODE mode, ${INTERVAL}s interval)"
-        # Export vars for the loop process
         export ASBL_INTERVAL="$INTERVAL" ASBL_DURATION="$DURATION" ASBL_INTENSITY="$INTENSITY" ASBL_BASELINE="$BASELINE" ASBL_MODE="$MODE"
         "$0" loop &
         disown

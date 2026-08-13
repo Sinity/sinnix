@@ -3,8 +3,8 @@
 # description: Assert the level-1 node sets of /realm and /outer-realm match the taxonomy
 # runtimeInputs: bash coreutils
 #
-# Taxonomy source of truth: /realm/INVENTORY.md and /outer-realm/INVENTORY.md
-# (sinnix-4ib). Main nodes only at level 1 — anything unexpected at a root is
+# Taxonomy source of truth: /realm/INVENTORY.md and /outer-realm/INVENTORY.md.
+# Main nodes only at level 1 — anything unexpected at a root is
 # either debris to triage or a taxonomy change that must update the INVENTORY
 # and this manifest in the same commit.
 set -euo pipefail
@@ -37,10 +37,8 @@ check_root() {
   done
 }
 
-# /realm level-1 manifest. db/ still exists (holds .snapshots-polylogue,
-# historical btrbk backup history kept under the no-retention-ever standing
-# rule -- not burn-in residue, so it's not dropped here); sinex/ is gone
-# (subvolume deleted 2026-08-13, operator-authorized, sinnix-t7wg).
+# /realm level-1 manifest. db/ holds .snapshots-polylogue and historical btrbk
+# backup history, kept under the no-retention-ever standing rule.
 check_root /realm \
   project data media state staging db swap cache worktrees tmp inbox \
   INVENTORY.md .btrfs .Trash-1000

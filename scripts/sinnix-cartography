@@ -3,21 +3,16 @@
 # description: Skill cartography Layer 1 — mine polylogue/atuin/git evidence, synthesize a skill map via claude -p
 # runtimeInputs: bash coreutils findutils gnugrep jq claude-code atuin sqlite
 
-# sinnix-d0t Layer 1: evidence-based skill map, NOT self-report or agent
-# testimony. Per the bead's own 2026-08-11 rescope: atuin/git evidence little
-# object-level activity (operator directs agents, doesn't type code/commit) --
-# the RICH lanes are agent-orchestration practice, architectural judgment
-# (choice-points visible in polylogue dialogues), and domain knowledge from
-# discussion corpora. Correction patterns ("what the operator catches agents
-# on") are high-signal per the bead's own design and are mined explicitly.
+# Evidence-based skill map, NOT self-report or agent testimony. The rich
+# lanes are polylogue dialogues (agent-orchestration practice, architectural
+# choice-points, domain discussion) and especially correction patterns --
+# what the operator catches agents on. Atuin/git evidence is thin here: the
+# operator directs agents rather than typing code or committing directly.
 #
-# Same state-dump -> claude -p -> versioned-output shape as sinnix-enrich-dump
-# (sinnix-jfiy.2) -- deliberately consistent with that pattern rather than
-# inventing a new one.
+# Same state-dump -> claude -p -> versioned-output shape as sinnix-enrich-dump.
 #
 # Output: /realm/data/derived/cartography/<timestamp>/{evidence-bundle.json,skill-map.json}
-# Re-derivable at any time; this script never writes to polylogue's or
-# sinex's stores.
+# Re-derivable at any time; never writes to polylogue's or sinex's stores.
 
 set -euo pipefail
 
@@ -32,8 +27,8 @@ echo "sinnix-cartography: gathering evidence (last ${SINCE_DAYS}d) into $RUN_DIR
 # ---------------------------------------------------------------- evidence
 
 # 1. Correction patterns: operator messages that catch/correct an agent.
-#    High-signal per the bead's own definition. Bounded window + busy_timeout
-#    since index.db is a live-written sqlite the daemon may hold a WAL lock on.
+#    Bounded window + busy_timeout since index.db is a live-written sqlite
+#    the daemon may hold a WAL lock on.
 CORRECTIONS_JSON="$RUN_DIR/corrections.json"
 polylogue --since "${SINCE_DAYS} days ago" \
   find 'role:user AND (text:"no wait" OR text:"actually" OR text:"that.s wrong" OR text:"you are wrong" OR text:"incorrect")' \
@@ -49,14 +44,12 @@ timeout 60 polylogue --since "${SINCE_DAYS} days ago" facets --format json \
     echo '{"status":"unavailable","note":"facets query timed out or failed, see facets.stderr"}' > "$FACETS_JSON"
   }
 
-# 3. Atuin: tool vocabulary over time (thin evidence per rescope, still
-#    gathered honestly rather than skipped).
+# 3. Atuin: tool vocabulary over time (thin evidence, gathered anyway).
 ATUIN_JSON="$RUN_DIR/atuin-stats.json"
 atuin stats "${SINCE_DAYS} days" 2>"$RUN_DIR/atuin.stderr" > "$RUN_DIR/atuin-stats.txt" || true
 jq -Rn '{status:"text-only", note:"atuin stats has no --format json; raw text captured"}' > "$ATUIN_JSON"
 
-# 4. Git: languages/repos touched across the project constellation (thin
-#    evidence per rescope -- operator directs agents, rarely commits directly).
+# 4. Git: languages/repos touched across the project constellation.
 GIT_JSON="$RUN_DIR/git-activity.json"
 {
   echo '['

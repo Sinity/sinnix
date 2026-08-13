@@ -19,11 +19,10 @@ FALLBACK="${SINNIX_WALLPAPER_FALLBACK:-${WALLPAPER_DIR}/stash}"
 hour=$(date +%H)
 hour=$((10#$hour))
 
-# Mood boundaries. Day/night are the long-dwell windows on this OLED panel;
-# bias toward low-key, high-contrast imagery there (curation-time decision,
-# see `sinnix-wallpaper import`'s brightness heuristic) -- morning/evening
-# are shorter transitional windows where brighter imagery matters less for
-# burn-in exposure.
+# Mood boundaries. Day/night are the long-dwell windows on this OLED panel,
+# so they get low-key, high-contrast imagery (see `sinnix-wallpaper import`'s
+# brightness heuristic); morning/evening are short transitional windows where
+# brighter imagery matters less for burn-in exposure.
 if (( hour >= 5 && hour < 11 )); then
   mood="morning"
 elif (( hour >= 11 && hour < 17 )); then
@@ -43,10 +42,8 @@ mkdir -p "$WALLPAPER_DIR"
 # ~/wallpaper/{dark,light} unconditionally, so those links existing and
 # resolving to a directory that HAS images is a hard requirement, not a
 # nicety: when they dangle, Noctalia has nothing to rotate, the screen goes
-# static, and the panel's brightness limiter dims it. That is exactly what
-# happened on 2026-08-13 -- the corpus sets were never created, every run
-# skipped, and rotation silently stopped. Never leave a link dangling; fall
-# back to whatever is actually populated instead.
+# static, and the panel's brightness limiter dims it. Never leave a link
+# dangling; fall back to whatever is actually populated instead.
 has_images() {
   [[ -d "$1" ]] && find -L "$1" -maxdepth 2 -type f \
     \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) \

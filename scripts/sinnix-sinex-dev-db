@@ -6,11 +6,10 @@
 # The sinex devshell starts a per-checkout PostgreSQL under
 #   /var/cache/sinex/<user>/<checkout-hash>/dev-state/data/postgres
 # via `pg_ctl start`, which daemonizes the postmaster so it is reparented away
-# from the launching shell and outlives it. Before this helper, those instances
-# (postmaster + ~5 background workers = "six processes per checkout") survived
-# their devshells, burned 90s systemd stop-timeouts at shutdown, and pinned the
-# /var/lib/sinex + /var/cache/sinex mounts busy (sinnix reboot postmortem
-# sinnix-eaw / sinex-grlv).
+# from the launching shell and outlives it. Left alone, such an instance
+# (postmaster + ~5 background workers per checkout) burns a 90s systemd
+# stop-timeout at shutdown and pins the /var/lib/sinex + /var/cache/sinex
+# mounts busy.
 #
 # Two mechanisms, both implemented here:
 #

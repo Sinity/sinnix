@@ -20,7 +20,6 @@ RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
 mkdir -p "$CAPTURE_DIR"
 
-# Slugify title for filename
 slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g' | cut -c1-50
 }
@@ -40,10 +39,6 @@ capture_window() {
   local filename="${TIMESTAMP}-${HOSTNAME}-pid${pid}-win${win_id}-${title_slug}.ansi"
   local filepath="$CAPTURE_DIR/$filename"
 
-  # Capture with full ANSI escape codes
-  # --extent=all: screen + entire scrollback
-  # --ansi: preserve colors, bold, italic, etc.
-  # --add-wrap-markers: preserve line wrap info
   if kitty @ --to "unix:$socket" get-text --match="id:$win_id" --extent=all --ansi --add-wrap-markers > "$filepath" 2>/dev/null; then
     local lines
     lines=$(wc -l < "$filepath")
@@ -71,7 +66,6 @@ EOF
   fi
 }
 
-# Parse arguments
 CURRENT_ONLY=false
 
 while [[ $# -gt 0 ]]; do
@@ -101,7 +95,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Handle --current: only capture from current instance
 if [ "$CURRENT_ONLY" = true ]; then
   if [ -z "${KITTY_LISTEN_ON:-}" ]; then
     echo "Error: KITTY_LISTEN_ON not set. Run from within kitty." >&2
@@ -129,7 +122,6 @@ if [ "$CURRENT_ONLY" = true ]; then
   exit 1
 fi
 
-# Find all kitty sockets
 sockets=()
 while IFS= read -r -d '' socket; do
   sockets+=("$socket")
@@ -151,14 +143,10 @@ for socket in "${sockets[@]}"; do
   pid=$(basename "$socket" | sed 's/kitty-[^-]*-//')
   echo "● Instance pid:$pid"
 
-  # A socket file existing under a scanned glob does not mean the kitty
-  # process behind it is still alive -- a crashed/closed instance can
-  # leave its socket on disk. "cannot connect" here is that ordinary,
-  # expected case, not a capture failure: there is no window to capture.
-  # Caught live 2026-08-12: 10 of 16 scanned sockets were stale on a
-  # routine run, and counting each as a failure made every timer tick
-  # exit 1, which is why this lane had never actually run successfully
-  # via systemd despite the underlying capture logic working correctly.
+  # A socket file on disk does not mean its kitty process is alive: a
+  # crashed/closed instance leaves the socket behind. "cannot connect" is
+  # that ordinary case, not a capture failure -- most scanned sockets are
+  # routinely stale, so counting them as failures would fail every run.
   windows_json=$(kitty @ --to "unix:$socket" ls 2>/dev/null) || {
     echo "  ⚠ stale instance (no longer running), skipping"
     ((total_stale++)) || true
@@ -182,8 +170,6 @@ echo ""
 echo "Total: $total_captured window(s) captured, $total_failed failed, $total_stale stale instance(s) skipped"
 echo "Output: $CAPTURE_DIR"
 
-# Only a REAL capture failure (a live, reachable instance whose window
-# capture itself failed) fails the unit -- stale sockets are routine
-# and must never do so, or the timer would never succeed on a host that
-# has ever had a kitty window close since its last run.
+# Only a real capture failure (live, reachable instance whose window
+# capture failed) fails the unit; stale sockets must never do so.
 [ "$total_failed" -eq 0 ] || exit 1
