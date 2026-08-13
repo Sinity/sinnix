@@ -68,10 +68,13 @@ in
             message = "observed system services must receive the system health transition template";
           }
           {
+            # Delivered as a drop-in rather than a unit body: a user surface
+            # may be declared through home-manager or through the NixOS-level
+            # systemd.user.services, and only a drop-in merges with both.
             assertion =
-              config.home-manager.users.sinity.systemd.user.services.runtime-policy-user.Unit.OnFailure
-              == [ "sinnix-health-transition@%n" ];
-            message = "observed user services must receive the user health transition template";
+              config.home-manager.users.sinity.xdg.configFile
+              ? "systemd/user/runtime-policy-user.service.d/50-sinnix-health-transition.conf";
+            message = "observed user services must receive the user health transition drop-in";
           }
         ];
       };
