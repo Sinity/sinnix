@@ -18,7 +18,7 @@ Local coordinators
     -> transient systemd scope, manifest, cgroup, and bounded artifacts
 ```
 
-There is no gateway-owned HTTP server, SSE parser, listening port, PID-only job authority, repository registry, or command registry. The official OpenAI tunnel owns the remote connection and launches the MCP server over stdio. The gateway uses the official MCP Python SDK v2 for protocol parsing and typed tool schemas.
+The gateway owns no HTTP server and no listening port. The official OpenAI tunnel owns the remote connection and launches the MCP server over stdio. The gateway uses the official MCP Python SDK v2 for protocol parsing and typed tool schemas.
 
 ## Capability profiles
 
