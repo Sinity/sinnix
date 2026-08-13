@@ -1,0 +1,366 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Read-only kitty terminal contents + scrollback history over the hub, no tmux
+# runtimeInputs: kitty aha coreutils
+
+"""Terminal contents as a first-class remote surface (sinnix-qxm8).
+
+The operator should never have to learn tmux to read their own terminals
+remotely. This listens on a Unix socket behind the hub's reverse proxy
+(/terminals/*) and, using nothing but kitty's own remote-control protocol
+plus the scrollback captures sinnix-capture-kitty-scrollback already writes,
+serves:
+
+  * a live view -- current on-screen contents of any kitty window, from any
+    kitty instance on the host (each instance has its own control socket
+    under $XDG_RUNTIME_DIR/kitty-*);
+  * history -- the existing full-ANSI scrollback captures for that same
+    window, joined by (kitty_pid, window_id) which is exactly the filename
+    key sinnix-capture-kitty-scrollback already uses.
+
+NON-GOALS, deliberately: no tmux/screen/multiplexer of any kind; no second
+capture lane (scrollback capture already exists, this only reads it); no
+send-input path -- reading is safe, typing into a live session is not, and
+the estate's standing rule is never to inject into a live agent TUI while it
+is sampling. If a send-input surface is ever wanted, it needs its own
+deliberate action with its own confirmation, not a side effect of this.
+
+Deliberately minimal, matching sinnix-hub-feedback's own decisions:
+  * no auth beyond the tailnet boundary the hub already enforces;
+  * no database -- kitty's own `ls`/`get-text` and the scrollback capture's
+    files on disk are the only state;
+  * read-only end to end.
+"""
+
+from __future__ import annotations
+
+import argparse
+import html
+import json
+import os
+import re
+import signal
+import socket
+import socketserver
+import subprocess
+import sys
+import threading
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler
+from pathlib import Path
+from typing import Any
+
+SCHEMA = "sinnix-terminal-view-v1"
+KITTY_BIN = "kitty"
+AHA_BIN = "aha"
+
+# sinnix-capture-kitty-scrollback's own filename convention:
+#   <TIMESTAMP>-<host>-pid<pid>-win<id>-<title-slug>.ansi (+ .meta.json sibling)
+HISTORY_NAME_RE = re.compile(r"^(?P<ts>[^-]+)-(?P<host>[^-]+)-pid(?P<pid>\d+)-win(?P<winid>\d+)-")
+
+
+def discover_kitty_sockets() -> list[Path]:
+    runtime_dir = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+    if not runtime_dir.is_dir():
+        return []
+    return sorted(p for p in runtime_dir.glob("kitty-*") if p.is_socket())
+
+
+def kitty_ls(sock: Path) -> list[dict[str, Any]]:
+    try:
+        out = subprocess.run(
+            [KITTY_BIN, "@", "--to", f"unix:{sock}", "ls"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if out.returncode != 0:
+        return []
+    try:
+        return json.loads(out.stdout)
+    except json.JSONDecodeError:
+        return []
+
+
+def pid_from_socket(sock: Path) -> int | None:
+    # kitty-<user>-<pid>
+    m = re.match(r"^kitty-.*-(\d+)$", sock.name)
+    return int(m.group(1)) if m else None
+
+
+def list_windows() -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for sock in discover_kitty_sockets():
+        pid = pid_from_socket(sock)
+        for os_window in kitty_ls(sock):
+            for tab in os_window.get("tabs", []):
+                for win in tab.get("windows", []):
+                    rows.append(
+                        {
+                            "socket": str(sock),
+                            "kitty_pid": pid,
+                            "window_id": win.get("id"),
+                            "title": win.get("title") or tab.get("title") or "",
+                            "cwd": win.get("cwd", ""),
+                            "is_focused": bool(win.get("is_focused")),
+                            "lines": win.get("lines"),
+                        }
+                    )
+    return rows
+
+
+def find_socket_for_pid(pid: int) -> Path | None:
+    for sock in discover_kitty_sockets():
+        if pid_from_socket(sock) == pid:
+            return sock
+    return None
+
+
+def get_window_text(pid: int, window_id: int) -> str | None:
+    sock = find_socket_for_pid(pid)
+    if sock is None:
+        return None
+    try:
+        out = subprocess.run(
+            [
+                KITTY_BIN,
+                "@",
+                "--to",
+                f"unix:{sock}",
+                "get-text",
+                "--match",
+                f"id:{window_id}",
+                "--extent",
+                "screen",
+                "--ansi",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if out.returncode != 0:
+        return None
+    return out.stdout
+
+
+def ansi_to_html(ansi_text: str, title: str) -> str:
+    try:
+        out = subprocess.run(
+            [AHA_BIN, "--black", "--title", title],
+            input=ansi_text,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if out.returncode == 0 and out.stdout:
+            return out.stdout
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    # Fallback: plain <pre>, still readable, just no ANSI color.
+    return (
+        f"<!doctype html><html><head><meta charset='utf-8'><title>{html.escape(title)}</title>"
+        "<style>body{background:#111;color:#ddd;font-family:monospace}</style></head>"
+        f"<body><pre>{html.escape(ansi_text)}</pre></body></html>"
+    )
+
+
+def history_for(history_dir: Path, pid: int, window_id: int) -> list[dict[str, Any]]:
+    needle = f"-pid{pid}-win{window_id}-"
+    rows: list[dict[str, Any]] = []
+    if not history_dir.is_dir():
+        return rows
+    for meta_path in sorted(history_dir.glob("*.meta.json"), reverse=True):
+        if needle not in meta_path.name:
+            continue
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        rows.append(meta)
+    return rows[:50]
+
+
+INDEX_HTML = """<!doctype html>
+<html><head><meta charset="utf-8"><title>sinnix terminals</title>
+<style>
+  body{background:#111;color:#ddd;font-family:monospace;margin:0;display:flex;height:100vh}
+  #list{width:320px;overflow-y:auto;border-right:1px solid #333;padding:8px}
+  #view{flex:1;overflow:auto}
+  #view iframe{width:100%;height:100%;border:0;background:#111}
+  .win{padding:6px;border-bottom:1px solid #222;cursor:pointer}
+  .win:hover{background:#1a1a1a}
+  .win.focused{color:#8f8}
+  .title{font-weight:bold}
+  .cwd{color:#888;font-size:0.85em}
+  .hist{padding:2px 0 2px 12px;color:#88f;cursor:pointer;font-size:0.85em}
+  button{background:#222;color:#ddd;border:1px solid #444;padding:2px 8px;margin:4px 0;cursor:pointer}
+</style></head>
+<body>
+<div id="list">Loading...</div>
+<div id="view">Select a window on the left.</div>
+<script>
+async function load() {
+  const res = await fetch('/terminals/v1/windows');
+  const wins = await res.json();
+  const list = document.getElementById('list');
+  list.innerHTML = '';
+  for (const w of wins) {
+    const div = document.createElement('div');
+    div.className = 'win' + (w.is_focused ? ' focused' : '');
+    div.innerHTML = `<div class="title">${w.title || '(untitled)'}</div><div class="cwd">${w.cwd}</div>`;
+    div.onclick = () => showLive(w.kitty_pid, w.window_id);
+    list.appendChild(div);
+    const histBtn = document.createElement('div');
+    histBtn.className = 'hist';
+    histBtn.textContent = '↳ history';
+    histBtn.onclick = (e) => { e.stopPropagation(); showHistory(w.kitty_pid, w.window_id); };
+    list.appendChild(histBtn);
+  }
+}
+function showLive(pid, winId) {
+  document.getElementById('view').innerHTML =
+    `<iframe src="/terminals/v1/windows/${pid}/${winId}/content"></iframe>`;
+}
+async function showHistory(pid, winId) {
+  const res = await fetch(`/terminals/v1/windows/${pid}/${winId}/history`);
+  const entries = await res.json();
+  const view = document.getElementById('view');
+  view.innerHTML = '<div style="padding:8px">' + entries.map(e =>
+    `<div><a href="/terminals/v1/windows/${pid}/${winId}/history/${e.ansi_file}" target="_blank" style="color:#88f">${e.captured_at} -- ${e.title}</a></div>`
+  ).join('') + (entries.length ? '' : '<i>no scrollback captures yet for this window</i>') + '</div>';
+}
+load();
+setInterval(load, 15000);
+</script>
+</body></html>
+"""
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "sinnix-terminal-view/1"
+    protocol_version = "HTTP/1.1"
+
+    def _reply(self, status: int, body: bytes, content_type: str) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _json(self, status: int, value: Any) -> None:
+        self._reply(status, (json.dumps(value, sort_keys=True) + "\n").encode(), "application/json")
+
+    def do_GET(self) -> None:  # noqa: N802 (stdlib naming)
+        path = self.path.split("?", 1)[0]
+        history_dir: Path = self.server.history_dir  # type: ignore[attr-defined]
+
+        if path in ("/", "/terminals", "/terminals/"):
+            self._reply(HTTPStatus.OK, INDEX_HTML.encode(), "text/html; charset=utf-8")
+            return
+
+        if path == "/v1/windows" or path == "/terminals/v1/windows":
+            self._json(HTTPStatus.OK, list_windows())
+            return
+
+        m = re.match(r"^(?:/terminals)?/v1/windows/(\d+)/(\d+)/content$", path)
+        if m:
+            pid, win_id = int(m.group(1)), int(m.group(2))
+            text = get_window_text(pid, win_id)
+            if text is None:
+                self._json(HTTPStatus.NOT_FOUND, {"error": "window not found or kitty unreachable"})
+                return
+            self._reply(
+                HTTPStatus.OK,
+                ansi_to_html(text, f"kitty pid{pid} win{win_id}").encode(),
+                "text/html; charset=utf-8",
+            )
+            return
+
+        m = re.match(r"^(?:/terminals)?/v1/windows/(\d+)/(\d+)/history$", path)
+        if m:
+            pid, win_id = int(m.group(1)), int(m.group(2))
+            self._json(HTTPStatus.OK, history_for(history_dir, pid, win_id))
+            return
+
+        m = re.match(r"^(?:/terminals)?/v1/windows/(\d+)/(\d+)/history/([A-Za-z0-9._-]+\.ansi)$", path)
+        if m:
+            pid, win_id, fname = int(m.group(1)), int(m.group(2)), m.group(3)
+            # Confirm the requested file is one this window's own history lists
+            # (belt-and-suspenders against path tricks even though the regex
+            # already forbids '/' and '..').
+            entries = history_for(history_dir, pid, win_id)
+            if not any(e.get("ansi_file") == fname for e in entries):
+                self._json(HTTPStatus.NOT_FOUND, {"error": "not this window's history"})
+                return
+            target = history_dir / fname
+            try:
+                ansi_text = target.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                self._json(HTTPStatus.NOT_FOUND, {"error": "capture file missing"})
+                return
+            self._reply(
+                HTTPStatus.OK,
+                ansi_to_html(ansi_text, fname).encode(),
+                "text/html; charset=utf-8",
+            )
+            return
+
+        self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+
+    def log_message(self, *_args: object) -> None:
+        return
+
+
+class UnixHTTPServer(socketserver.ThreadingUnixStreamServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+    def get_request(self) -> tuple[socket.socket, tuple[str, int]]:
+        connection, _ = super().get_request()
+        return connection, ("unix", 0)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--socket", type=Path, required=True, help="Unix socket the hub reverse-proxies to")
+    parser.add_argument(
+        "--history-dir",
+        type=Path,
+        default=Path("/realm/data/captures/kitty-scrollback"),
+        help="Directory sinnix-capture-kitty-scrollback writes .ansi/.meta.json into",
+    )
+    args = parser.parse_args()
+
+    args.socket.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        args.socket.unlink()
+    except FileNotFoundError:
+        pass
+
+    server = UnixHTTPServer(str(args.socket), Handler)
+    server.history_dir = args.history_dir  # type: ignore[attr-defined]
+    os.chmod(args.socket, 0o666)
+
+    def shutdown(*_args: object) -> None:
+        threading.Thread(target=server.shutdown, daemon=True).start()
+
+    signal.signal(signal.SIGTERM, shutdown)
+    signal.signal(signal.SIGINT, shutdown)
+    print(f"sinnix-terminal-view: {args.socket} (history: {args.history_dir})", file=sys.stderr)
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()
+        try:
+            args.socket.unlink()
+        except FileNotFoundError:
+            pass
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -225,6 +225,7 @@ mkServiceModule {
       # side needs the uid at evaluation time.
       opsSocket = "{$SINNIX_HUB_RUNTIME}/sinnix/ops.sock";
       feedbackSocket = "{$SINNIX_HUB_RUNTIME}/sinnix/hub-feedback.sock";
+      terminalSocket = "{$SINNIX_HUB_RUNTIME}/sinnix/terminal-view.sock";
 
       frontendSites = lib.concatStringsSep "\n" (
         lib.mapAttrsToList (_name: frontend: ''
@@ -283,6 +284,13 @@ mkServiceModule {
 
           handle_path /feedback* {
             reverse_proxy unix/${feedbackSocket}
+          }
+
+          # Read-only kitty terminal contents + scrollback history
+          # (sinnix-qxm8). No auth beyond the tailnet boundary the rest of
+          # the hub already relies on -- this surface never accepts writes.
+          handle_path /terminals/* {
+            reverse_proxy unix/${terminalSocket}
           }
 
           handle {
@@ -365,11 +373,21 @@ mkServiceModule {
       environment.systemPackages = [
         scriptPkgs.sinnix-hub-render
         scriptPkgs.sinnix-hub-feedback
+        scriptPkgs.sinnix-terminal-view
       ];
 
       sinnix.runtime.surfaces = {
         hub-feedback = {
           unit = "sinnix-hub-feedback.service";
+          manager = "user";
+          resourceClass = "interactive-agent";
+          observe = {
+            enable = true;
+            restartable = true;
+          };
+        };
+        hub-terminal-view = {
+          unit = "sinnix-hub-terminal-view.service";
           manager = "user";
           resourceClass = "interactive-agent";
           observe = {
@@ -393,6 +411,7 @@ mkServiceModule {
         home.packages = [
           scriptPkgs.sinnix-hub-render
           scriptPkgs.sinnix-hub-feedback
+          scriptPkgs.sinnix-terminal-view
         ];
 
         systemd.user.services.sinnix-hub = {
@@ -438,6 +457,23 @@ mkServiceModule {
               "${scriptPkgs.sinnix-hub-feedback}/bin/sinnix-hub-feedback"
               "--socket %t/sinnix/hub-feedback.sock"
               "--spool-dir ${cfg.feedbackDir}"
+            ];
+            Restart = "on-failure";
+            RestartSec = "5s";
+            NoNewPrivileges = true;
+            UMask = "0022";
+          };
+          Install.WantedBy = [ "default.target" ];
+        };
+
+        systemd.user.services.sinnix-hub-terminal-view = {
+          Unit.Description = "Read-only kitty terminal contents + scrollback history over the hub";
+          Service = {
+            Type = "simple";
+            ExecStart = lib.concatStringsSep " " [
+              "${scriptPkgs.sinnix-terminal-view}/bin/sinnix-terminal-view"
+              "--socket %t/sinnix/terminal-view.sock"
+              "--history-dir /realm/data/captures/kitty-scrollback"
             ];
             Restart = "on-failure";
             RestartSec = "5s";
