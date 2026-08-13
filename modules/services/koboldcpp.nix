@@ -24,7 +24,10 @@ mkServiceModule {
       mode = "socket-proxy";
       publicEndpoint = "127.0.0.1:5001";
       backendEndpoint = "127.0.0.1:5002";
-      idleTimeout = "30s";
+      # Not directly measurable on this host: koboldcpp-cuda currently fails
+      # CUDA init (see ai-control.nix's koboldcppProxy for detail); picked
+      # from koboldcpp's role as the slow RAM-offloaded tier instead.
+      idleTimeout = "300s";
       exclusiveResource = "gpu-inference";
       dependsOn = [ "koboldcpp-proxy" ];
     };
@@ -95,14 +98,8 @@ mkServiceModule {
         after = [ "network.target" ];
         partOf = [ "koboldcpp-proxy.service" ];
         bindsTo = [ "koboldcpp-proxy.service" ];
-        conflicts = [
-          "ollama.service"
-          "ollama-proxy.service"
-          "whisper-server.service"
-          "whisper-proxy.service"
-          "llama-cpp.service"
-          "llama-cpp-proxy.service"
-        ];
+        # Conflicts= against every other GPU-inference backend is computed
+        # centrally in ai-control.nix's gpuInferenceConflicts.
         serviceConfig = lib.mkMerge [
           {
             User = user;

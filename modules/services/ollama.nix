@@ -26,7 +26,9 @@ mkServiceModule {
       mode = "socket-proxy";
       publicEndpoint = "127.0.0.1:11434";
       backendEndpoint = "127.0.0.1:11435";
-      idleTimeout = "30s";
+      # Measured 2026-08-13 (see ai-control.nix's ollamaProxy for detail):
+      # ~20-23s cold /api/generate round trip for the 7.2GB daily driver.
+      idleTimeout = "240s";
       exclusiveResource = "gpu-inference";
       dependsOn = [ "ollama-proxy" ];
       # Model pulls are exactly the long-running-consumer case the
@@ -185,14 +187,10 @@ mkServiceModule {
         {
           ollama.partOf = [ "ollama-proxy.service" ];
           ollama.bindsTo = [ "ollama-proxy.service" ];
-          ollama.conflicts = [
-            "koboldcpp.service"
-            "koboldcpp-proxy.service"
-            "whisper-server.service"
-            "whisper-proxy.service"
-            "llama-cpp.service"
-            "llama-cpp-proxy.service"
-          ];
+          # Conflicts= against every other GPU-inference backend is computed
+          # centrally in ai-control.nix's gpuInferenceConflicts (one
+          # symmetric matrix instead of N independently hand-maintained
+          # lists that could drift out of sync with each other).
           # Full override (mkForce): the upstream `script` is a plain
           # (non-mkForce) definition, so an un-forced override here would
           # concatenate rather than replace it.

@@ -19,11 +19,14 @@ mkServiceModule {
     unit = "podman-musicgen.service";
     resourceClass = "interactive-agent";
     activation = {
-      # See comfyui.nix: containerized GPU services have no socket-proxy
-      # front door, so this key is informational for the inventory; the
-      # actual exclusivity guarantee is the mutual systemd Conflicts= wired
-      # in modules/services/ai-control.nix (sinnix-joac).
+      mode = "socket-proxy";
+      publicEndpoint = "127.0.0.1:8010";
+      backendEndpoint = "127.0.0.1:8011";
+      # Disabled on this host -- see ai-control.nix's musicgenProxy for why
+      # this is estimated rather than measured.
+      idleTimeout = "900s";
       exclusiveResource = "gpu-inference";
+      dependsOn = [ "musicgen-proxy" ];
     };
     observe = {
       enable = true;
@@ -39,7 +42,12 @@ mkServiceModule {
     port = args.lib.mkOption {
       type = args.lib.types.port;
       default = 8010;
-      description = "Host port (bound to 127.0.0.1) for the MusicGen web/API.";
+      description = "PUBLIC host port (bound to 127.0.0.1) clients use -- the musicgen-proxy socket front door.";
+    };
+    backendPort = args.lib.mkOption {
+      type = args.lib.types.port;
+      default = 8011;
+      description = "PRIVATE host port the container itself publishes to; musicgen-proxy forwards here.";
     };
     containerPort = args.lib.mkOption {
       type = args.lib.types.port;
@@ -65,9 +73,21 @@ mkServiceModule {
       virtualisation.oci-containers.containers.musicgen = {
         inherit (cfg) image;
         autoStart = false; # on-demand / heavier
-        ports = [ "127.0.0.1:${toString cfg.port}:${toString cfg.containerPort}" ];
+        # Published on the PRIVATE backend port only -- clients always speak
+        # to cfg.port via musicgen-proxy (modules/services/ai-control.nix),
+        # never to the container directly.
+        ports = [ "127.0.0.1:${toString cfg.backendPort}:${toString cfg.containerPort}" ];
         volumes = [ "${dir}:/root/.cache/huggingface" ];
         extraOptions = [ "--device=nvidia.com/gpu=all" ];
+      };
+
+      # Bound to the socket proxy's lifecycle exactly like the native
+      # backends: an idle proxy exit tears down this container's cgroup.
+      # Conflicts= against every other GPU-inference backend is computed
+      # centrally in ai-control.nix's gpuInferenceConflicts.
+      systemd.services.podman-musicgen = {
+        partOf = [ "musicgen-proxy.service" ];
+        bindsTo = [ "musicgen-proxy.service" ];
       };
     };
 } args

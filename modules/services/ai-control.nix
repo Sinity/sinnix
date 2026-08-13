@@ -13,15 +13,18 @@ let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   systemdSocketProxyd = "${pkgs.systemd}/lib/systemd/systemd-socket-proxyd";
 
+  # `idleTimeout` is required (no default): every call site below has to
+  # state and justify its own number instead of silently inheriting a
+  # uniform 30s that only ever fit the smallest backend (sinnix-mba).
   mkProxy =
     {
       name,
       backendUnit,
       publicEndpoint,
       backendEndpoint,
+      idleTimeout,
       exclusiveResource ? null,
       dependsOn ? [ ],
-      conflicts ? [ ],
     }:
     {
       sockets.${name} = {
@@ -33,9 +36,8 @@ let
         description = "Idle-aware socket proxy for ${backendUnit}";
         requires = [ backendUnit ];
         after = [ backendUnit ];
-        conflicts = conflicts;
         serviceConfig = {
-          ExecStart = "${systemdSocketProxyd} --exit-idle-time=30s ${backendEndpoint}";
+          ExecStart = "${systemdSocketProxyd} --exit-idle-time=${idleTimeout} ${backendEndpoint}";
           Restart = "no";
         };
       };
@@ -50,8 +52,8 @@ let
             backendEndpoint
             exclusiveResource
             dependsOn
+            idleTimeout
             ;
-          idleTimeout = "30s";
         };
         observe = {
           enable = true;
@@ -65,73 +67,74 @@ let
     backendUnit = "ollama.service";
     publicEndpoint = "127.0.0.1:11434";
     backendEndpoint = "127.0.0.1:11435";
+    # Measured 2026-08-13: a cold /api/generate round trip for the 7.2GB
+    # daily-driver model (gemma4:12b-it-qat) took ~20-23s end to end (daemon
+    # start + weight load + first token). The 18GB qwen3:30b model overflows
+    # the 3080's 10GB VRAM and did not finish loading even after 300s -- it
+    # hit ollama's own 5-minute OLLAMA_LOAD_TIMEOUT before producing a
+    # token. That is a load-timeout problem, not an idle-timeout one, and is
+    # tracked separately (bd issue filed alongside this change) rather than
+    # fixed here. 240s is ~10x the measured daily-driver cost: an idle-out
+    # is never worse than a wasted reload for the model this host actually
+    # drives chat sessions with.
+    idleTimeout = "240s";
     exclusiveResource = "gpu-inference";
     dependsOn = [ "ollama" ];
-    conflicts = [
-      "koboldcpp.service"
-      "koboldcpp-proxy.service"
-      "whisper-server.service"
-      "whisper-proxy.service"
-      "llama-cpp.service"
-      "llama-cpp-proxy.service"
-    ];
   };
   koboldcppProxy = mkProxy {
     name = "koboldcpp-proxy";
     backendUnit = "koboldcpp.service";
     publicEndpoint = "127.0.0.1:5001";
     backendEndpoint = "127.0.0.1:5002";
+    # Could NOT be measured directly: koboldcpp-cuda on this host currently
+    # fails CUDA library init with `undefined symbol: cuMemCreate` from
+    # koboldcpp_cublas.so the moment a model is loaded -- a pre-existing
+    # environment breakage unrelated to this change (bd issue filed
+    # alongside this change; koboldcpp is currently non-functional for GPU
+    # inference regardless of idle timeout). Picked from koboldcpp's stated
+    # role instead: the deliberately-slow RAM-offloaded tier for GGUFs
+    # larger than ollama's daily driver (see koboldcpp.nix's header), so
+    # this is at least as generous as ollama's measured 240s.
+    idleTimeout = "300s";
     exclusiveResource = "gpu-inference";
     dependsOn = [ "koboldcpp" ];
-    conflicts = [
-      "ollama.service"
-      "ollama-proxy.service"
-      "whisper-server.service"
-      "whisper-proxy.service"
-      "llama-cpp.service"
-      "llama-cpp-proxy.service"
-    ];
   };
   whisperProxy = mkProxy {
     name = "whisper-proxy";
     backendUnit = "whisper-server.service";
     publicEndpoint = "127.0.0.1:8090";
     backendEndpoint = "127.0.0.1:8091";
+    # Measured 2026-08-13: a cold /v1/audio/transcriptions round trip for
+    # the configured base.en model (147MB) took ~2s end to end. An order of
+    # magnitude of headroom already exists at 30s -- kept unchanged.
+    idleTimeout = "30s";
     exclusiveResource = "gpu-inference";
     dependsOn = [ "whisper" ];
-    conflicts = [
-      "ollama.service"
-      "ollama-proxy.service"
-      "koboldcpp.service"
-      "koboldcpp-proxy.service"
-      "llama-cpp.service"
-      "llama-cpp-proxy.service"
-    ];
   };
   llamaCppProxy = mkProxy {
     name = "llama-cpp-proxy";
     backendUnit = "llama-cpp.service";
     publicEndpoint = "127.0.0.1:8081";
     backendEndpoint = "127.0.0.1:8082";
+    # Measured 2026-08-13: a cold /v1/rerank round trip for the 0.6B
+    # reranker took ~1-3s end to end, matching llama-cpp.nix's existing
+    # "reloads in about a second" note. 30s is already ~10-30x headroom --
+    # kept unchanged.
+    idleTimeout = "30s";
     exclusiveResource = "gpu-inference";
     dependsOn = [ "llama-cpp" ];
-    conflicts = [
-      "ollama.service"
-      "ollama-proxy.service"
-      "koboldcpp.service"
-      "koboldcpp-proxy.service"
-      "whisper-server.service"
-      "whisper-proxy.service"
-    ];
   };
   litellmProxy = mkProxy {
     name = "litellm-proxy";
     backendUnit = "litellm.service";
     publicEndpoint = "127.0.0.1:4000";
     backendEndpoint = "127.0.0.1:4001";
+    # litellm.nix belongs to a different lane in this change; left at the
+    # prior uniform default rather than guessed at.
+    idleTimeout = "30s";
     dependsOn = [ "ollama-proxy" ];
   };
-  # Deliberately no exclusiveResource / conflicts here: Kokoro is CPU-only
+  # Deliberately no exclusiveResource here: Kokoro is CPU-only
   # (modules/services/kokoro.nix) and must stay answerable regardless of
   # which CUDA backend, if any, currently holds gpu-inference.
   kokoroProxy = mkProxy {
@@ -139,76 +142,154 @@ let
     backendUnit = "podman-kokoro.service";
     publicEndpoint = "127.0.0.1:8890";
     backendEndpoint = "127.0.0.1:8891";
+    # kokoro.nix belongs to a different lane in this change; left at the
+    # prior uniform default rather than guessed at.
+    idleTimeout = "30s";
   };
 
   # ComfyUI, TTS (OpenedAI-Speech), MusicGen, and OCR are OCI containers with
-  # CDI GPU passthrough (modules/services/{comfyui,tts,musicgen,ocr}.nix)
-  # rather than native systemd services with their own .service/.socket pair,
-  # so they cannot join the mkProxy mesh above -- a container publishes its
-  # port directly and podman start/stop has no idle-aware backend for
-  # systemd-socket-proxyd to sit in front of. Forcing the socket-proxy shape
-  # onto them would not fit; the closest correct admission control is a
-  # mutual systemd Conflicts= against every native gpu-inference
-  # service/proxy pair and every other GPU container, so systemd itself
-  # refuses to run two resident at once -- the same hard guarantee the
-  # socket-proxy mesh gives the native backends, minus proxy idle-teardown
-  # (containers are all autoStart = false; sinnix-ai/the operator stops them
-  # explicitly). This generalizes the exact gap the operator found for
-  # llama-cpp (sinnix-w9l/e2fb0af) to the container lane (sinnix-joac).
-  gpuContainerUnits = {
-    comfyui = "podman-comfyui.service";
-    tts = "podman-openedai-speech.service";
-    musicgen = "podman-musicgen.service";
-    ocr = "podman-ocr.service";
+  # CDI GPU passthrough (modules/services/{comfyui,tts,musicgen,ocr}.nix).
+  # They were previously left off the mkProxy mesh on the theory that a
+  # container "has no idle-aware backend to proxy" -- that theory doesn't
+  # hold: `virtualisation.oci-containers` generates an ordinary
+  # systemd.services.podman-<name> unit, controllable exactly like
+  # ollama.service. The only real difference is that the container's own
+  # `ports` mapping has to move off the public port so systemd-socket-proxyd
+  # can sit in front of it, same as the native backends' `port` config
+  # moving off the socket-activated front door. All four now join the same
+  # public/backend split (flake/data/ports.nix) and the same
+  # partOf/bindsTo/idle-teardown shape as ollama/koboldcpp/whisper/llama-cpp.
+  comfyuiProxy = mkProxy {
+    name = "comfyui-proxy";
+    backendUnit = "podman-comfyui.service";
+    publicEndpoint = "127.0.0.1:8188";
+    backendEndpoint = "127.0.0.1:8189";
+    # Measured 2026-08-13: cold start to a 200 from `/` took ~105s. The
+    # mmartial/comfyui-nvidia-docker image re-resolves its Python venv on
+    # every launch and re-downloaded a 930MB torch wheel during this
+    # measurement even though a working torch was already installed --
+    # that reinstall-on-every-launch behavior is the dominant cost, before
+    # any checkpoint has even been loaded. 900s (15min) per the operator's
+    # ask for generous container timeouts: a real ComfyUI session (queueing
+    # a generation, waiting on output) is a long round trip on top of the
+    # cold start itself.
+    idleTimeout = "900s";
+    exclusiveResource = "gpu-inference";
+    dependsOn = [ "comfyui" ];
   };
-  gpuNativeUnits = [
-    "ollama.service"
-    "ollama-proxy.service"
-    "koboldcpp.service"
-    "koboldcpp-proxy.service"
-    "whisper-server.service"
-    "whisper-proxy.service"
-    "llama-cpp.service"
-    "llama-cpp-proxy.service"
-  ];
-  # (sinnix.services enable option, systemd unit name minus ".service") for
-  # every native gpu-inference unit -- both the backend and its proxy, since
-  # each proxy already carries its own Conflicts= against every other
-  # backend/proxy (the `conflicts` passed to mkProxy above) and would
-  # otherwise stay silently exempt from the container side of the matrix.
-  # whisper's option is "whisper" but its units are "whisper-server" /
-  # "whisper-proxy"; everything else matches its option name.
-  gpuNativeServiceUnits = [
-    { service = "ollama"; unit = "ollama"; }
-    { service = "ollama"; unit = "ollama-proxy"; }
-    { service = "koboldcpp"; unit = "koboldcpp"; }
-    { service = "koboldcpp"; unit = "koboldcpp-proxy"; }
-    { service = "whisper"; unit = "whisper-server"; }
-    { service = "whisper"; unit = "whisper-proxy"; }
-    { service = "llama-cpp"; unit = "llama-cpp"; }
-    { service = "llama-cpp"; unit = "llama-cpp-proxy"; }
-  ];
-  # Each side's Conflicts= addition is gated on its OWN service's enable
-  # flag only (never the peer's), matching the existing convention in
-  # ollama.nix/koboldcpp.nix/whisper.nix/llama-cpp.nix, which already list
-  # every native peer unconditionally: a Conflicts= entry naming a unit that
-  # never gets defined (peer disabled) is a harmless no-op in systemd, not
-  # an error, so there is nothing to gain by cross-referencing peer enable
-  # state and doing so would just make four more modules' correctness depend
+  ttsProxy = mkProxy {
+    name = "tts-proxy";
+    backendUnit = "podman-openedai-speech.service";
+    publicEndpoint = "127.0.0.1:8000";
+    backendEndpoint = "127.0.0.1:8001";
+    # Measured 2026-08-13: cold start to a 200 from /v1/audio/speech (Piper
+    # voice) took ~17s. XTTS voice cloning was not separately measured (a
+    # heavier model, likely slower); 300s covers headroom for both voices.
+    idleTimeout = "300s";
+    exclusiveResource = "gpu-inference";
+    dependsOn = [ "tts" ];
+  };
+  musicgenProxy = mkProxy {
+    name = "musicgen-proxy";
+    backendUnit = "podman-musicgen.service";
+    publicEndpoint = "127.0.0.1:8010";
+    backendEndpoint = "127.0.0.1:8011";
+    # Disabled on this host (musicgen.enable = false) -- not measured. Same
+    # all-in-one Gradio+PyTorch toolkit shape as ComfyUI
+    # (rsxdalv/tts-generation-webui vs. mmartial/comfyui-nvidia-docker), so
+    # treated as the same tier: 900s.
+    idleTimeout = "900s";
+    exclusiveResource = "gpu-inference";
+    dependsOn = [ "musicgen" ];
+  };
+  ocrProxy = mkProxy {
+    name = "ocr-proxy";
+    backendUnit = "podman-ocr.service";
+    publicEndpoint = "127.0.0.1:8020";
+    backendEndpoint = "127.0.0.1:8021";
+    # Disabled on this host (ocr.enable = false) -- not measured.
+    # marker-api's Surya weights are comparatively small (~1-2GB) next to
+    # ComfyUI's checkpoint tree, so treated like the tts container tier:
+    # 300s.
+    idleTimeout = "300s";
+    exclusiveResource = "gpu-inference";
+    dependsOn = [ "ocr" ];
+  };
+
+  # ── GPU-inference exclusivity mesh ───────────────────────────────────────
+  # Every backend below claims the GPU exclusively. Naming them once here and
+  # computing the pairwise Conflicts= matrix from that list means a newly
+  # admitted backend cannot land asymmetric -- llama-cpp shipped resident
+  # for two days before symmetric Conflicts= landed (sinnix-w9l/e2fb0af),
+  # and the same gap existed for the container lane until this change
+  # (sinnix-joac) folded it into the same mesh instead of a parallel
+  # container-only Conflicts= scheme. Each side's Conflicts= is gated on its
+  # OWN service's enable flag only (never the peer's): a Conflicts= entry
+  # naming a unit that never gets defined (peer disabled) is a harmless
+  # no-op in systemd, so there is nothing to gain by cross-referencing peer
+  # enable state, and doing so would make eight modules' correctness depend
   # on read-order.
-  containerGpuConflicts = lib.mapAttrsToList (
-    serviceName: unit:
-    lib.mkIf config.sinnix.services.${serviceName}.enable {
-      ${lib.removeSuffix ".service" unit}.conflicts =
-        gpuNativeUnits ++ (lib.remove unit (lib.attrValues gpuContainerUnits));
-    }
-  ) gpuContainerUnits;
-  nativeGpuContainerConflicts = map (
-    { service, unit }:
-    lib.mkIf config.sinnix.services.${service}.enable {
-      ${unit}.conflicts = lib.attrValues gpuContainerUnits;
-    }
-  ) gpuNativeServiceUnits;
+  gpuInferenceBackends = {
+    ollama = {
+      enable = config.sinnix.services.ollama.enable;
+      service = "ollama.service";
+      proxy = "ollama-proxy.service";
+    };
+    koboldcpp = {
+      enable = config.sinnix.services.koboldcpp.enable;
+      service = "koboldcpp.service";
+      proxy = "koboldcpp-proxy.service";
+    };
+    whisper = {
+      enable = config.sinnix.services.whisper.enable;
+      service = "whisper-server.service";
+      proxy = "whisper-proxy.service";
+    };
+    llama-cpp = {
+      enable = config.sinnix.services.llama-cpp.enable;
+      service = "llama-cpp.service";
+      proxy = "llama-cpp-proxy.service";
+    };
+    comfyui = {
+      enable = config.sinnix.services.comfyui.enable;
+      service = "podman-comfyui.service";
+      proxy = "comfyui-proxy.service";
+    };
+    tts = {
+      enable = config.sinnix.services.tts.enable;
+      service = "podman-openedai-speech.service";
+      proxy = "tts-proxy.service";
+    };
+    musicgen = {
+      enable = config.sinnix.services.musicgen.enable;
+      service = "podman-musicgen.service";
+      proxy = "musicgen-proxy.service";
+    };
+    ocr = {
+      enable = config.sinnix.services.ocr.enable;
+      service = "podman-ocr.service";
+      proxy = "ocr-proxy.service";
+    };
+  };
+  gpuInferenceConflicts = lib.mkMerge (
+    lib.mapAttrsToList (
+      name: backend:
+      lib.mkIf backend.enable (
+        let
+          peerUnits = lib.concatMap
+            (peerName: [
+              gpuInferenceBackends.${peerName}.service
+              gpuInferenceBackends.${peerName}.proxy
+            ])
+            (lib.filter (n: n != name) (lib.attrNames gpuInferenceBackends));
+        in
+        {
+          ${lib.removeSuffix ".service" backend.service}.conflicts = peerUnits;
+          ${lib.removeSuffix ".service" backend.proxy}.conflicts = peerUnits;
+        }
+      )
+    ) gpuInferenceBackends
+  );
 in
 {
   environment.systemPackages = [ scriptPkgs.sinnix-ai ];
@@ -219,19 +300,24 @@ in
     (lib.mkIf config.sinnix.services.litellm.enable litellmProxy.sockets)
     (lib.mkIf config.sinnix.services.kokoro.enable kokoroProxy.sockets)
     (lib.mkIf config.sinnix.services.llama-cpp.enable llamaCppProxy.sockets)
+    (lib.mkIf config.sinnix.services.comfyui.enable comfyuiProxy.sockets)
+    (lib.mkIf config.sinnix.services.tts.enable ttsProxy.sockets)
+    (lib.mkIf config.sinnix.services.musicgen.enable musicgenProxy.sockets)
+    (lib.mkIf config.sinnix.services.ocr.enable ocrProxy.sockets)
   ];
-  systemd.services = lib.mkMerge (
-    [
-      (lib.mkIf config.sinnix.services.ollama.enable ollamaProxy.services)
-      (lib.mkIf config.sinnix.services.koboldcpp.enable koboldcppProxy.services)
-      (lib.mkIf config.sinnix.services.whisper.enable whisperProxy.services)
-      (lib.mkIf config.sinnix.services.litellm.enable litellmProxy.services)
-      (lib.mkIf config.sinnix.services.kokoro.enable kokoroProxy.services)
-      (lib.mkIf config.sinnix.services.llama-cpp.enable llamaCppProxy.services)
-    ]
-    ++ containerGpuConflicts
-    ++ nativeGpuContainerConflicts
-  );
+  systemd.services = lib.mkMerge [
+    (lib.mkIf config.sinnix.services.ollama.enable ollamaProxy.services)
+    (lib.mkIf config.sinnix.services.koboldcpp.enable koboldcppProxy.services)
+    (lib.mkIf config.sinnix.services.whisper.enable whisperProxy.services)
+    (lib.mkIf config.sinnix.services.litellm.enable litellmProxy.services)
+    (lib.mkIf config.sinnix.services.kokoro.enable kokoroProxy.services)
+    (lib.mkIf config.sinnix.services.llama-cpp.enable llamaCppProxy.services)
+    (lib.mkIf config.sinnix.services.comfyui.enable comfyuiProxy.services)
+    (lib.mkIf config.sinnix.services.tts.enable ttsProxy.services)
+    (lib.mkIf config.sinnix.services.musicgen.enable musicgenProxy.services)
+    (lib.mkIf config.sinnix.services.ocr.enable ocrProxy.services)
+    gpuInferenceConflicts
+  ];
   sinnix.runtime.surfaces = lib.mkMerge [
     (lib.mkIf config.sinnix.services.ollama.enable {
       ollama-proxy = ollamaProxy.runtimeSurface;
@@ -250,6 +336,18 @@ in
     })
     (lib.mkIf config.sinnix.services.llama-cpp.enable {
       llama-cpp-proxy = llamaCppProxy.runtimeSurface;
+    })
+    (lib.mkIf config.sinnix.services.comfyui.enable {
+      comfyui-proxy = comfyuiProxy.runtimeSurface;
+    })
+    (lib.mkIf config.sinnix.services.tts.enable {
+      tts-proxy = ttsProxy.runtimeSurface;
+    })
+    (lib.mkIf config.sinnix.services.musicgen.enable {
+      musicgen-proxy = musicgenProxy.runtimeSurface;
+    })
+    (lib.mkIf config.sinnix.services.ocr.enable {
+      ocr-proxy = ocrProxy.runtimeSurface;
     })
   ];
 }

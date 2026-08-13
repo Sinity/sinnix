@@ -27,6 +27,8 @@ mkServiceModule {
       mode = "socket-proxy";
       publicEndpoint = "127.0.0.1:8081";
       backendEndpoint = "127.0.0.1:8082";
+      # Measured 2026-08-13: ~1-3s cold /v1/rerank round trip for the 0.6B
+      # reranker -- 30s is already ~10-30x headroom, kept unchanged.
       idleTimeout = "30s";
       exclusiveResource = "gpu-inference";
       dependsOn = [ "llama-cpp-proxy" ];
@@ -110,15 +112,8 @@ mkServiceModule {
         partOf = [ "llama-cpp-proxy.service" ];
         bindsTo = [ "llama-cpp-proxy.service" ];
         # Shared gpu-inference admission key: never run alongside the other
-        # CUDA inference backends, in either direction.
-        conflicts = [
-          "ollama.service"
-          "ollama-proxy.service"
-          "koboldcpp.service"
-          "koboldcpp-proxy.service"
-          "whisper-server.service"
-          "whisper-proxy.service"
-        ];
+        # CUDA inference backends, in either direction. Conflicts= itself is
+        # computed centrally in ai-control.nix's gpuInferenceConflicts.
       };
     };
 } args
