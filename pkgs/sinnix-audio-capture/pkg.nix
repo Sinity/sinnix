@@ -25,7 +25,7 @@ python3Packages.buildPythonApplication {
     runHook postCheck
   '';
   meta = {
-    description = "Always-on PipeWire audio capture (every source + sink-monitor): Opus archive tier, pw-mon topology stream, Silero VAD index-only lane, pause/gap CLI";
+    description = "Always-on PipeWire audio capture (every source and sink): Opus archive tier, pw-mon topology stream, Silero VAD index-only lane, pause/gap CLI";
     mainProgram = "sinnix-audio-capture";
     license = lib.licenses.mit;
   };

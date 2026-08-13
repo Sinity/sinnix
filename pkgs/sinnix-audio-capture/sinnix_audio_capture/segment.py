@@ -66,29 +66,25 @@ class ChannelProfile:
 # downsample; nothing can recover a band that was never captured.
 #
 # Cost is not the constraint: Opus DTX collapses true silence to a couple of
-# kbit/s, so a quiet or disconnected input costs almost nothing -- which is
-# what makes recording every source at once affordable.
-CHANNEL_PROFILES: dict[str, ChannelProfile] = {
-    "sink-monitor": ChannelProfile(
-        rate=48000, channels=2, bitrate_kbps=96, application="audio"
-    ),
-}
-
-SOURCE_RATE = 48000
-SOURCE_BITRATE_KBPS = 96
-# Used only when the node does not report `audio.channels`. Over-capturing a
-# mono device as stereo wastes a little space; under-capturing a stereo device
-# as mono downmixes two capsules into one irreversibly.
-FALLBACK_SOURCE_CHANNELS = 2
+# kbit/s, so a quiet, idle or disconnected device costs almost nothing --
+# which is what makes recording every source and every sink at once
+# affordable.
+DEVICE_RATE = 48000
+DEVICE_BITRATE_KBPS = 96
+# Used only when a node does not report `audio.channels` (Bluetooth sinks
+# often do not until they are running). Over-capturing a mono device as
+# stereo wastes a little space; under-capturing a stereo device as mono
+# downmixes two channels into one irreversibly.
+FALLBACK_DEVICE_CHANNELS = 2
 
 
-def source_profile(channels: int | None) -> ChannelProfile:
-    """Archive profile for one capture source, at the device's own channel
-    count (sources.py reads it from the node's `audio.channels`)."""
+def device_profile(channels: int | None) -> ChannelProfile:
+    """Archive profile for one device, at its own channel count (devices.py
+    reads it from the node's `audio.channels`)."""
     return ChannelProfile(
-        rate=SOURCE_RATE,
-        channels=channels if channels and channels > 0 else FALLBACK_SOURCE_CHANNELS,
-        bitrate_kbps=SOURCE_BITRATE_KBPS,
+        rate=DEVICE_RATE,
+        channels=channels if channels and channels > 0 else FALLBACK_DEVICE_CHANNELS,
+        bitrate_kbps=DEVICE_BITRATE_KBPS,
         application="audio",
     )
 
@@ -99,9 +95,37 @@ def hour_bucket_start(ts: float) -> float:
     return float(calendar.timegm((tm.tm_year, tm.tm_mon, tm.tm_mday, tm.tm_hour, 0, 0)))
 
 
-def segment_filename(channel: str, bucket_start_ts: float) -> str:
+def segment_filename(channel: str, bucket_start_ts: float, part: int = 1) -> str:
+    """`audio-<channel>-<UTC hour>.opus`, with a `-pN-` marker on every
+    segment of that hour after the first.
+
+    The marker only distinguishes segments; it is allocation order, and
+    mtime remains the authority on which part covers which minutes. It
+    goes BEFORE the timestamp so the stamp stays the last dash-separated
+    component, which is what indexer.segment_start_ts parses.
+    """
     stamp = time.strftime("%Y%m%dT%H0000Z", time.gmtime(bucket_start_ts))
-    return f"audio-{channel}-{stamp}.opus"
+    marker = "" if part <= 1 else f"p{part}-"
+    return f"audio-{channel}-{marker}{stamp}.opus"
+
+
+def free_segment_path(output_dir: Path, channel: str, bucket_start_ts: float) -> Path:
+    """The first segment path for this channel-hour that no file already
+    claims.
+
+    One hour can produce several segments: any restart mid-hour (a device
+    replug, a unit restart, a supervisor crash) opens a new one. Without a
+    distinct name the finalising rename would silently overwrite the part
+    already archived for that hour, which is captured data being destroyed
+    rather than appended to.
+    """
+    part = 1
+    while True:
+        candidate = output_dir / segment_filename(channel, bucket_start_ts, part)
+        partial = candidate.with_suffix(candidate.suffix + ".partial")
+        if not candidate.exists() and not partial.exists():
+            return candidate
+        part += 1
 
 
 def opusenc_argv(
@@ -168,7 +192,7 @@ class OpusSegmentWriter:
     def _open_segment(self, ts: float) -> None:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         bucket = hour_bucket_start(ts)
-        final_path = self.output_dir / segment_filename(self.channel, bucket)
+        final_path = free_segment_path(self.output_dir, self.channel, bucket)
         partial_path = final_path.with_suffix(final_path.suffix + ".partial")
         argv = self._argv_builder(partial_path)
         proc = self._popen(argv, stdin=subprocess.PIPE)
