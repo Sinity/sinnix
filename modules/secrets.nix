@@ -74,6 +74,15 @@ let
     "factorio-token".exportEnv = false;
     "wifi-psk".exportEnv = false;
     "pypi-recovery-codes".exportEnv = false;
+    # Blanket-exporting this to every shell silently overrides Claude Code's
+    # normal subscription auth for every `claude`/`claude -p` invocation on
+    # the host (confirmed live 2026-08-13: a low/zero-balance raw key broke
+    # jfiy.2's enrichment loop and this cartography script, invisibly, since
+    # neither was ever tested with a real `claude -p` call -- only
+    # shellcheck/nix-instantiate --parse). Nothing in this repo's own agent
+    # tooling reads ANTHROPIC_API_KEY from the environment; still available
+    # at /run/agenix/anthropic-api-key for anything that explicitly wants it.
+    "anthropic-api-key".exportEnv = false;
   };
 
   secretSpecs = lib.mapAttrs' (filename: _: {
