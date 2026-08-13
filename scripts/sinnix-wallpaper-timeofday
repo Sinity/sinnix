@@ -11,6 +11,10 @@ export LC_ALL=C
 # this also runs sanely when invoked by hand.
 CORPUS="${SINNIX_WALLPAPER_CORPUS:-/realm/media/wallpaper}"
 WALLPAPER_DIR="${HOME}/wallpaper"
+# Last-resort source for the dark/light links while the curated corpus is
+# still being filled. The flat legacy stash is the one directory guaranteed
+# to hold images today.
+FALLBACK="${SINNIX_WALLPAPER_FALLBACK:-${WALLPAPER_DIR}/stash}"
 
 hour=$(date +%H)
 hour=$((10#$hour))
@@ -35,11 +39,30 @@ target_light="${CORPUS}/sets/${mood}/light"
 
 mkdir -p "$WALLPAPER_DIR"
 
+# Noctalia's config.toml points directory_dark/directory_light at
+# ~/wallpaper/{dark,light} unconditionally, so those links existing and
+# resolving to a directory that HAS images is a hard requirement, not a
+# nicety: when they dangle, Noctalia has nothing to rotate, the screen goes
+# static, and the panel's brightness limiter dims it. That is exactly what
+# happened on 2026-08-13 -- the corpus sets were never created, every run
+# skipped, and rotation silently stopped. Never leave a link dangling; fall
+# back to whatever is actually populated instead.
+has_images() {
+  [[ -d "$1" ]] && find -L "$1" -maxdepth 2 -type f \
+    \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) \
+    -print -quit 2>/dev/null | read -r _
+}
+
 relink() {
   local link="$1" target="$2"
-  if [[ ! -d "$target" ]]; then
-    echo "sinnix-wallpaper-timeofday: missing set directory $target, skipping" >&2
-    return 1
+  if ! has_images "$target"; then
+    if has_images "$FALLBACK"; then
+      echo "sinnix-wallpaper-timeofday: $target unusable, falling back to $FALLBACK" >&2
+      target="$FALLBACK"
+    else
+      echo "sinnix-wallpaper-timeofday: neither $target nor $FALLBACK has images, leaving $link alone" >&2
+      return 1
+    fi
   fi
   local current=""
   if [[ -L "$link" ]]; then current=$(readlink -f "$link" 2>/dev/null || true); fi
