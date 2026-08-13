@@ -34,12 +34,13 @@
 # ── Why there is no second control plane ────────────────────────────────────
 # Every button on every page posts to the ops-reducer's existing action API
 # through a reverse-proxied path. That API owns admission (targets must be
-# attested runtime-inventory units or attested agent jobs), optimistic
+# attested runtime-inventory units, attested agent jobs, or name-shaped
+# live-verified `sinnix-scope` transient scopes — sinnix-pl37), optimistic
 # concurrency (expected_revision), idempotency keys, and receipts. The hub adds
 # no shell-out, no sudo, and no privileged helper: it is a view over a contract
-# that already existed. Where the contract cannot express something — an ad-hoc
-# `sinnix-scope` placement is neither an inventory unit nor an attested job —
-# the page says so instead of growing a private kill path.
+# that already existed. Where the contract still cannot express something (a
+# scope can be stopped but has no service definition to restart) the page says
+# so instead of growing a private kill path.
 {
   mkServiceModule,
   config,
