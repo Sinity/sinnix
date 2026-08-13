@@ -221,6 +221,19 @@ def test_failed_recorder_is_reported_and_retried_with_backoff(tmp_path: Path):
     assert set(sup._recorders) == {YETI}
 
 
+def test_failure_record_is_dropped_when_the_device_goes_away(tmp_path: Path):
+    sup = _supervisor(tmp_path, [])
+    yeti = AudioSource(node_name=YETI, media_class="Audio/Source")
+    sup.reconcile([yeti], now=100.0)
+    sup._recorders[YETI].stopped = True
+    sup._recorders[YETI].error = "RuntimeError: boom"
+    sup.reconcile([yeti], now=101.0)
+    assert sup.state_payload("change")["failed"]
+
+    sup.reconcile([], now=102.0)
+    assert sup.state_payload("change")["failed"] == []
+
+
 class _CapturingWriter:
     def __init__(self):
         self.records = []
