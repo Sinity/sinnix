@@ -61,6 +61,19 @@ mkServiceModule {
         # (daemon crashed, socket2 dropped) rather than legitimate idle.
         eventDriven = true;
         staleAfterSeconds = 300;
+        # A resolved focused window is this lane's whole product: without
+        # it a frame cannot be attributed to an application, a workspace,
+        # or a terminal session. The grim `-o`/`-g` conflict (sinnix-3w9n)
+        # let the lane run "active running" for its entire deployed life
+        # while writing only the records that had no window to resolve, so
+        # these fields were null in 100% of them. `monitor` is included
+        # because a frame with no output identity is equally unusable.
+        requiredPayloadFields = [
+          "window_class"
+          "workspace"
+          "geometry.width"
+          "monitor"
+        ];
       }
     ];
   };

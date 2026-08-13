@@ -206,6 +206,33 @@ in
                       lane stale when EITHER threshold is exceeded.
                     '';
                   };
+                  requiredPayloadFields = lib.mkOption {
+                    type = lib.types.listOf lib.types.str;
+                    default = [ ];
+                    example = [
+                      "window_class"
+                      "geometry.width"
+                    ];
+                    description = ''
+                      Dotted paths into a sinnix-capture-v1 record's `payload`
+                      that this lane claims to populate. The health sentinel
+                      samples the lane's most recent records and flags the lane
+                      `degenerate` when a declared field is null/empty in EVERY
+                      sampled record -- the "alive and writing at full cadence,
+                      but the data is unconditionally null" failure the
+                      staleness check cannot see (screen-frames shipped that way
+                      for its whole deployed life; see sinnix-3w9n).
+
+                      Declare only fields a healthy record always carries.
+                      Fields that are legitimately absent sometimes (an optional
+                      subtitle, a nullable parent id) must NOT be listed: the
+                      check is deliberately all-or-nothing so a partially
+                      populated field is never an alarm, which means a
+                      sometimes-null field simply makes the check unable to
+                      fire. Leave empty for lanes whose captures are not
+                      JSONL envelopes.
+                    '';
+                  };
                 };
               }
             );
