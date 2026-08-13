@@ -43,10 +43,14 @@ mkServiceModule {
       systemd.services.sinnix-video-resolve = {
         description = "Resolve video-hosting URLs from the URL ledger into archived copies";
         after = [ "sinnix-url-ledger.service" ];
-        serviceConfig = {
-          Type = "oneshot";
-          User = config.sinnix.user.name;
-          ExecStart = "${scriptPkgs.sinnix-video-resolve}/bin/sinnix-video-resolve";
+        serviceConfig = lib.sinnix.mkRuntimeServiceConfig {
+          runtimeInventory = config.sinnix.runtime.inventory;
+          unit = "sinnix-video-resolve.service";
+          overrides = {
+            Type = "oneshot";
+            User = config.sinnix.user.name;
+            ExecStart = "${scriptPkgs.sinnix-video-resolve}/bin/sinnix-video-resolve";
+          };
         };
       };
       systemd.timers.sinnix-video-resolve = {

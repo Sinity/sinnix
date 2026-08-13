@@ -46,12 +46,16 @@ mkServiceModule {
       };
       systemd.services.sinnix-url-ledger = {
         description = "URL visit x archive-snapshot coverage ledger";
-        serviceConfig = {
-          Type = "oneshot";
-          # Reads the operator's webhistory capture and writes into the
-          # operator-owned data lake.
-          User = config.sinnix.user.name;
-          ExecStart = "${scriptPkgs.sinnix-url-ledger}/bin/sinnix-url-ledger run --max-requests ${toString cfg.maxRequestsPerRun} --window-days ${toString cfg.windowDays}";
+        serviceConfig = lib.sinnix.mkRuntimeServiceConfig {
+          runtimeInventory = config.sinnix.runtime.inventory;
+          unit = "sinnix-url-ledger.service";
+          overrides = {
+            Type = "oneshot";
+            # Reads the operator's webhistory capture and writes into the
+            # operator-owned data lake.
+            User = config.sinnix.user.name;
+            ExecStart = "${scriptPkgs.sinnix-url-ledger}/bin/sinnix-url-ledger run --max-requests ${toString cfg.maxRequestsPerRun} --window-days ${toString cfg.windowDays}";
+          };
         };
       };
       systemd.timers.sinnix-url-ledger = {
