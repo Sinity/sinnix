@@ -18,7 +18,14 @@
 set -euo pipefail
 
 DEVICE_NAME="alsa_card.usb-FiiO_DigiHug_USB_Audio-01"
-TARGET_PROFILE_NAME="output:analog-stereo"
+# Duplex, not output-only (sinnix-3l3p): this card is also the mic-recorder's
+# input source (alsa_input.usb-FiiO_DigiHug_USB_Audio-01.analog-stereo).
+# Restoring output-only silently drops that source from the PipeWire graph --
+# pw-record blocks on "no target node available" and the mic-recorder unit
+# reports healthy while producing nothing. Live-caught 2026-08-13: this
+# watchdog's own output-only restore was the reason the mic recorder had been
+# stalled for ~15h, previously misdiagnosed as a Silero VAD bug.
+TARGET_PROFILE_NAME="output:analog-stereo+input:analog-stereo"
 
 # $1=capture_bin $2=capture_root, positional (matches capture-monitor-poll's
 # invocation shape) so this stays a plain @sinnix-package script rather than
