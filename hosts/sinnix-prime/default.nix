@@ -37,7 +37,7 @@
         # alongside an inspection of the rendered tool list. Every tool must
         # stay read-only, and the capture tools restricted to
         # non-content-bearing lanes.
-        approvedManifestHash = "086480ac3f7af0ab8298a999b67b0004f98f0a006c4c29db9c900cf06bd9a84c";
+        approvedManifestHash = "f32578b4984802eb77d97ae414b5bdc1dc3025cb4b7aba4cd101081001e41a41";
         tunnelId = "tunnel_6a2eb972c3bc8191be437670f455ebd9";
       };
     };
