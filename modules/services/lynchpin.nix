@@ -5,7 +5,7 @@
 # demand by AI agent runtimes via the stdio transport registered in
 # mcp-registry.nix.
 #
-# Substrate materialization is a daily oneshot systemd timer (Arc E.2).
+# Substrate materialization is a daily oneshot systemd timer.
 # When `enable = true` and `materializationTimer.enable = true`, the full DAG
 # runs daily and promotes results to the DuckDB substrate so observability
 # answers don't lag the week.
@@ -102,14 +102,13 @@ mkServiceModule {
         '';
       };
 
-      # Optional: daily substrate materialization (Arc E.2).
+      # Optional: daily substrate materialization.
       # Runs the full analysis DAG + promotes results to DuckDB. The
       # substrate is queryable by MCP clients immediately after.
       systemd.services.lynchpin-materialize = lib.mkIf cfg.materializationTimer.enable {
         description = "Lynchpin analysis DAG materialization";
-        # This unit has now silently failed nightly TWICE (CWD PermissionError,
-        # then a renamed CLI command rotting the ExecStart for weeks) — route
-        # failures to the desktop like the backup jobs do.
+        # A broken ExecStart here fails silently every night; route failures
+        # to the desktop like the backup jobs do.
         onFailure = [ "sinnix-service-failure-notify@%n.service" ];
         requires = [ "lynchpin-local-attrs.service" ];
         after = [
@@ -120,10 +119,9 @@ mkServiceModule {
           pkgs.git
         ];
         # The materialization CLI resolves `.lynchpin/` relative to its working
-        # directory (repo-rooted, like git). Without WorkingDirectory the unit
-        # ran from `/` and failed nightly with
-        # `PermissionError: [Errno 13] Permission denied: '.lynchpin'`, silently
-        # freezing the analysis substrate. Pin CWD and the root env vars.
+        # directory (repo-rooted, like git), so without WorkingDirectory the
+        # unit runs from `/` and dies on PermissionError. Pin CWD and the root
+        # env vars.
         serviceConfig = {
           Type = "oneshot";
           # `lynchpin.analysis materialize` is not a valid subcommand; the

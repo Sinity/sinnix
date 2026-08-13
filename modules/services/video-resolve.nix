@@ -1,11 +1,9 @@
-# Video special-case over the URL ledger (sinnix-e8k9, split from the
-# web-capture bead). Neither Wayback nor Common Crawl actually preserve
-# video content -- their CDX coverage check only proves a page existed,
-# not that the video survives -- so URLs on known video-hosting domains
-# get resolved into a real yt-dlp'd copy instead of relying on the
-# archive-availability join sinnix-url-ledger already does for everything
-# else. Runs after the ledger's own weekly build so it has a fresh
-# parquet to query.
+# Video special-case over the URL ledger. Neither Wayback nor Common Crawl
+# preserves video content -- their CDX coverage check only proves a page
+# existed, not that the video survives -- so URLs on known video-hosting
+# domains get resolved into a real yt-dlp'd copy instead of relying on the
+# archive-availability join sinnix-url-ledger does for everything else. Runs
+# after the ledger's weekly build so it has a fresh parquet to query.
 {
   mkServiceModule,
   config,

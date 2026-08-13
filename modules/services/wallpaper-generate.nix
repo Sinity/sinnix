@@ -1,21 +1,16 @@
-# Opt-in ComfyUI wallpaper generation batch (bd:sinnix-s6ke.3), off by
-# default and cheap to trigger: `sinnix wallpaper generate` runs it
-# on-demand, or enable this service for a periodic off-hours batch.
+# Opt-in ComfyUI wallpaper generation batch, off by default and cheap to
+# trigger: `sinnix wallpaper generate` runs it on-demand, or enable this
+# service for a periodic off-hours batch.
 #
 # The script (scripts/sinnix-wallpaper-generate) starts ComfyUI via the
-# existing `sinnix-ai` on-demand control plane, submits a small palette-
-# targeted txt2img batch, screens results with the same OLED brightness/
-# uniformity heuristic `sinnix-wallpaper import` uses, classifies survivors
-# straight into the corpus's time-of-day/theme-mode sets
-# (modules/features/desktop/wallpaper.nix), and always stops ComfyUI again
-# -- even on failure -- so a triggered batch never holds the GPU past its
-# own run. ComfyUI now carries a mutual systemd Conflicts= against every
-# other gpu-inference backend/container (ai-control.nix, sinnix-joac), so
-# systemd itself refuses a second resident GPU consumer even outside this
-# script's own start/stop bracket; this stop-in-finally remains the
-# well-behaved way to release the GPU promptly after a batch instead of
-# relying on that as the only guard. Runs under the "gpu-runtime" resource
-# class so it never serializes against builds.
+# `sinnix-ai` on-demand control plane, submits a small palette-targeted
+# txt2img batch, screens results with the same OLED brightness/uniformity
+# heuristic `sinnix-wallpaper import` uses, classifies survivors into the
+# corpus's time-of-day/theme-mode sets
+# (modules/features/desktop/wallpaper.nix), and always stops ComfyUI again --
+# even on failure -- so a triggered batch never holds the GPU past its own
+# run. Runs under the "gpu-runtime" resource class so it never serializes
+# against builds.
 {
   mkServiceModule,
   lib,

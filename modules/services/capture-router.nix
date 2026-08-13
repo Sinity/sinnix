@@ -1,33 +1,27 @@
-# capture-router: pull the router's own evidence of the network into the
-# lake (sinnix-zihb).
+# capture-router: pull the router's own evidence of the network into the lake.
 #
-# sinnix-gw is the estate's only whole-network vantage point -- every
-# device's traffic passes through it -- and until this lane, none of that
-# was kept anywhere. It already collects real signal locally:
-#   - a persistent syslog (/overlay/log/syslog + .old) that simply rotates
+# sinnix-gw is the estate's only whole-network vantage point. It collects
+# four kinds of signal locally:
+#   - a persistent syslog (/overlay/log/syslog + .old) that otherwise rotates
 #     away unharvested (dropbear auth, dnsmasq, hostapd, netifd events);
-#   - nlbwmon, with real longitudinal per-device bandwidth history already
-#     sitting in /overlay/nlbwmon (NOT /var/lib/nlbwmon, which the default
-#     anonymous UCI section points at and sits empty -- a live footgun in
-#     the stock config that the named `nlbwmon` section works around by
-#     pointing database_directory at the overlay instead);
+#   - nlbwmon per-device bandwidth history in /overlay/nlbwmon -- NOT
+#     /var/lib/nlbwmon, which the stock anonymous UCI section points at and
+#     which sits empty; the named `nlbwmon` section repoints
+#     database_directory at the overlay;
 #   - the DHCP lease table (/tmp/dhcp.leases, volatile -- lost on reboot);
-#   - per-AP wifi association state via `ubus call hostapd.<ap>
-#     get_clients`, which carries signal strength -- a real presence/
-#     room-location signal, kept as-is (not bucketed) per the design brief.
+#   - per-AP wifi association state via `ubus call hostapd.<ap> get_clients`,
+#     carrying signal strength, kept unbucketed as a presence signal.
 #
 # The R6220 is a 128MB-RAM MT7621 whose CPU budget already forced fq_codel
 # over CAKE (see hosts/sinnix-gw/default.nix), so this lane PULLS from prime
 # over ssh on an infrequent timer rather than running or installing anything
-# on the router, and it never touches dnsmasq query logging -- full DNS
-# query logs are both the CPU-heaviest and the single most sensitive stream
-# on the network.
+# on the router, and it never touches dnsmasq query logging -- full DNS query
+# logs are both the CPU-heaviest and the most sensitive stream on the network.
 #
-# See pkgs/capture-router/ for the poller (poll.sh, run locally on prime)
-# and the two remote scripts it pipes over ssh (remote-poll.sh,
-# remote-periods.sh) -- their headers document the syslog rotation-safety
-# design and the nlbwmon once-per-closed-month backfill, both verified
-# against the live router 2026-08-13.
+# See pkgs/capture-router/ for the poller (poll.sh, run locally on prime) and
+# the two remote scripts it pipes over ssh (remote-poll.sh,
+# remote-periods.sh); their headers document syslog rotation safety and the
+# nlbwmon once-per-closed-month backfill.
 {
   mkServiceModule,
   pkgs,
@@ -169,8 +163,7 @@ mkServiceModule {
                 ProtectHome = "read-only";
                 ReadWritePaths = [ routerRoot ];
                 # ssh needs a real TMPDIR for its own scratch use, and the
-                # session TMPDIR is read-only inside this namespace -- same
-                # trap documented in the clipboard and awair lanes.
+                # session TMPDIR is read-only inside this namespace.
                 Environment = [ "TMPDIR=/tmp" ];
                 PrivateTmp = true;
               };

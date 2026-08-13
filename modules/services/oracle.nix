@@ -1,17 +1,13 @@
 # Oracle daily reverse-prompting digest.
 #
-# Wraps `scripts/oracle` in a systemd user-style oneshot + timer. Disabled by
-# default — enable manually once cost calibration is in (target ~$0.10/run,
-# ≤$5/month). The unit invokes the script directly out of the live sinnix
-# checkout; no copy is made because the script's substrate paths are
-# host-specific anyway.
+# Wraps `scripts/oracle` in a systemd user-style oneshot + timer, disabled by
+# default (target cost ~$0.10/run, ≤$5/month). The unit invokes the script
+# directly out of the live sinnix checkout; no copy is made because the
+# script's substrate paths are host-specific anyway.
 #
 # Enable with:
 #   sinnix.services.oracle.enable = true;
 #   sinnix.services.oracle.timer.enable = true;
-#
-# Not yet wired into flake.nix — that's a separate decision once the MVP has
-# logged a few days of useful output.
 {
   mkServiceModule,
   lib,

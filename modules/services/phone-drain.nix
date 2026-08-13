@@ -1,11 +1,9 @@
-# sinnix-uyvt.2.1 (2): drain-on-a-schedule for the phone-side capture
-# lanes, gated on wifi rather than pulling manually. Wraps `sinnix-phone
-# drain` (scripts/sinnix-phone), which does the actual reachability/wifi
-# checks and skips quietly when conditions aren't met -- this unit just
-# provides the schedule. Charging gate dropped 2026-08-13 (operator: no
-# stated justification for it); wifi gate kept deliberately -- this is the
-# large/opportunistic raw-audio tier, not the (not yet built) small
-# always-on VAD-gated stream -- see sinnix-uyvt.4.
+# Drain-on-a-schedule for the phone-side capture lanes, gated on wifi rather
+# than pulled manually. Wraps `sinnix-phone drain` (scripts/sinnix-phone),
+# which does the actual reachability/wifi checks and skips quietly when
+# conditions aren't met -- this unit only provides the schedule. The wifi
+# gate is deliberate: this is the large/opportunistic raw-audio tier, not a
+# small always-on VAD-gated stream.
 {
   mkServiceModule,
   lib,
@@ -34,12 +32,11 @@ mkServiceModule {
       enable = true;
       restartable = true;
     };
-    # sinnix-uyvt.2.1 (4): a dead phone mic and a quiet room are otherwise
-    # indistinguishable -- this is a proxy on the LAKE side (when did the
-    # drain last actually land a new chunk), not a direct liveness check on
-    # the phone-side recorder, so the threshold is generous: the drain is
-    # conditional (wifi), and a phone off wifi for many hours is a real,
-    # non-alarming gap, not evidence the mic died.
+    # A dead phone mic and a quiet room are otherwise indistinguishable, so
+    # this watches the LAKE side (did the drain land a new chunk) rather than
+    # the phone-side recorder. The threshold is generous because the drain is
+    # wifi-conditional: a phone off wifi for hours is a real, non-alarming
+    # gap, not evidence the mic died.
     captures = [
       {
         name = "phone-ambient";

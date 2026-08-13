@@ -1,18 +1,12 @@
 # capture-netflow: L0 network flow metadata via kernel conntrack events.
 #
-# sinnix-0cqk asked for zeek-class flow metadata -- deliberately deferred
-# from the main capture program, not dead. This is the L0 slice of that:
-# 5-tuple + byte/packet counters + duration per connection, sourced from
-# `conntrack -E` (netlink conntrack events), which the kernel already
-# tracks for NAT/firewall state -- no packet capture, no TLS interception,
-# no payload of any kind. DNS query content and TLS SNI extraction need an
-# actual packet-inspection layer (tshark/scapy parsing DNS responses and
-# TLS ClientHello) -- a materially different mechanism from conntrack
-# events, and out of scope for this pass; DNS query logging specifically
-# also brushes against the standing caution recorded for the router's own
-# dnsmasq query log ("must never be permanently enabled -- both a CPU cost
-# and the most sensitive stream on the network"), so it needs its own
-# deliberate pass, not a drive-by addition here.
+# The L0 slice of zeek-class flow metadata: 5-tuple + byte/packet counters +
+# duration per connection, sourced from `conntrack -E` (netlink conntrack
+# events), which the kernel already tracks for NAT/firewall state -- no
+# packet capture, no TLS interception, no payload of any kind. DNS query
+# content and TLS SNI need a real packet-inspection layer (tshark/scapy over
+# DNS responses and the TLS ClientHello), a different mechanism entirely and
+# out of scope here.
 {
   mkServiceModule,
   pkgs,
@@ -47,26 +41,17 @@ let
       # not a live stream of every packet. `-o extended` gives numeric
       # ports/protocols instead of service-name lookups (no /etc/services
       # dependency, stable field positions).
-      # Field extraction is ONE awk pass, not a per-field grep chain, because
-      # of how the previous shape failed. Each field was pulled with
-      # `grep -oP ... | head -1` inside a command substitution; a conntrack
-      # record for a protocol with no ports (ICMP) makes that grep exit 1,
-      # `pipefail` promotes it to the pipeline's status, and `set -e` then
-      # killed the read loop on the first such packet. conntrack itself
-      # survived -- systemd sets IgnoreSIGPIPE=true for services, so instead
-      # of dying on the broken pipe it kept write()ing into a pipe with no
-      # reader forever. The unit stayed "active (running)" with zero bytes
-      # written and never restarted, because nothing ever crashed.
-      #
-      # awk exits 0 whether or not a key is present, so no protocol shape can
-      # tear the loop down. Keys appear twice (original and reply direction):
-      # take the first src/dst/port, and SUM packets/bytes across both.
+      # Field extraction must be ONE awk pass, never a per-field grep chain:
+      # a record for a portless protocol (ICMP) makes grep exit 1, pipefail
+      # promotes that to the pipeline status and set -e kills the read loop,
+      # while conntrack keeps running (systemd sets IgnoreSIGPIPE=true) --
+      # the unit then sits "active (running)" writing nothing, forever. awk
+      # exits 0 whether or not a key is present. Keys appear twice (original
+      # and reply direction): take the first src/dst/port, SUM packets/bytes.
       conntrack -E -e destroy -o extended,timestamp 2>/dev/null \
         | awk '{
-            # proto by pattern, not column index. The old code read $4, which
-            # with `-o timestamp` is the address-family NUMBER (2), not the
-            # L4 name -- every record was labelled "2". Column positions shift
-            # with the -o flags, so match the name instead.
+            # proto by pattern, not column index: column positions shift with
+            # the -o flags ($4 under `-o timestamp` is the address family).
             proto = ""; src = ""; dst = ""; sport = ""; dport = ""; pk = 0; by = 0
             for (i = 1; i <= NF; i++)
               if ($i ~ /^(tcp|udp|udplite|icmp|icmpv6|sctp|dccp|gre|unknown)$/) { proto = $i; break }
@@ -85,9 +70,9 @@ let
               printf "%s\t%s\t%s\t%s\t%s\t%d\t%d\n", proto, src, dst, sport, dport, pk, by
           }' \
         | while IFS="$(printf '\t')" read -r proto src dst sport dport packets bytes; do
-        # A malformed record must not take the stream down with it (that is
-        # the bug above in miniature). Report it to the journal and carry on,
-        # rather than `|| true`, which would make the loss invisible.
+        # A malformed record must not take the stream down with it. Report it
+        # to the journal and carry on, rather than `|| true`, which would make
+        # the loss invisible.
         if ! jq -nc \
           --arg proto "$proto" \
           --arg src "$src" \
@@ -142,13 +127,10 @@ mkServiceModule {
         "d ${laneDir} 0755 ${username} users -"
       ];
 
-      # Without these the lane records every flow with packets=0 bytes=0 --
-      # the counters that are its whole point. conntrack only reports
-      # per-flow accounting when nf_conntrack_acct is on, and it is off by
-      # default (measured on this host: both read 0). Flow-start timestamps
-      # come from nf_conntrack_timestamp; `-o timestamp` alone stamps when
-      # the DESTROY event was observed, which is the flow's END, so without
-      # this there is nothing to derive a duration from.
+      # Both default to off. Without nf_conntrack_acct every flow records
+      # packets=0 bytes=0 -- the counters that are the lane's whole point.
+      # Without nf_conntrack_timestamp there is no flow-START time: `-o
+      # timestamp` alone stamps the DESTROY event, so duration is underivable.
       boot.kernel.sysctl = {
         "net.netfilter.nf_conntrack_acct" = 1;
         "net.netfilter.nf_conntrack_timestamp" = 1;

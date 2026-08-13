@@ -13,25 +13,15 @@ let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   systemdSocketProxyd = "${pkgs.systemd}/lib/systemd/systemd-socket-proxyd";
 
-  # `idleTimeout` is required (no default): every call site below has to
-  # state and justify its own number instead of silently inheriting a
-  # uniform 30s that only ever fit the smallest backend (sinnix-mba).
-  #
-  # `readinessTimeout` is required for the same reason (design pass
-  # 2026-08-13). Verified live: systemd-socket-proxyd starts
-  # forwarding the instant this service's ExecStart runs, but every backend
-  # below binds its port only after loading weights -- anywhere from ~2s
-  # (llama-cpp, whisper) to ~105s (comfyui) -- and systemd-socket-proxyd
-  # does not retry. Every connection arriving during that window got a hard
-  # "connection refused" (proxy log: "Failed to connect to remote host:
-  # Connection refused") instead of a queue, because `requires`+`after`
-  # above only ever guaranteed unit-start ordering, not port-bind.
-  # `waitForBackend` blocks this service's own start -- and so blocks
-  # ExecStart -- until the backend actually accepts a TCP connection. The
-  # client's own connection meanwhile sits parked in the `.socket` unit's
-  # kernel accept backlog (that unit is independent of this service's
-  # state), so a cold request now waits roughly the load time and then
-  # succeeds instead of failing instantly.
+  # `idleTimeout` and `readinessTimeout` are required (no default): the right
+  # value differs per backend and a uniform one only ever fit the smallest.
+  # systemd-socket-proxyd starts forwarding as soon as ExecStart runs, but
+  # backends bind their port only after loading weights (~2s llama-cpp to
+  # ~105s comfyui) and the proxy does not retry, so cold connections got a
+  # hard "connection refused" -- `requires`+`after` guarantee unit-start
+  # ordering, not port-bind. `waitForBackend` blocks ExecStart until the
+  # backend accepts TCP; the client meanwhile waits in the `.socket` unit's
+  # kernel accept backlog, so a cold request is slow rather than failed.
   mkProxy =
     {
       name,
@@ -105,22 +95,12 @@ let
     backendUnit = "ollama.service";
     publicEndpoint = "127.0.0.1:11434";
     backendEndpoint = "127.0.0.1:11435";
-    # Measured 2026-08-13: a cold /api/generate round trip for the 7.2GB
-    # daily-driver model (gemma4:12b-it-qat) took ~20-23s end to end (daemon
-    # start + weight load + first token). The 18GB qwen3:30b model overflows
-    # the 3080's 10GB VRAM and did not finish loading even after 300s -- it
-    # hit ollama's own 5-minute OLLAMA_LOAD_TIMEOUT before producing a
-    # token. That is a load-timeout problem, not an idle-timeout one, and is
-    # tracked separately (bd issue filed alongside this change) rather than
-    # fixed here. 240s is ~10x the measured daily-driver cost: an idle-out
-    # is never worse than a wasted reload for the model this host actually
-    # drives chat sessions with.
+    # ~10x the cold-start cost of the daily-driver model (~20-23s); idling
+    # out is cheaper than a wasted reload.
     idleTimeout = "240s";
-    # Ollama is largely exempt from the cold-start-failure problem this
-    # readiness probe exists for: the daemon binds its port immediately and
-    # loads models lazily inside each request, rather than blocking the
-    # listener on weight-load like the llama.cpp-family backends. 30s is
-    # ample headroom for the daemon itself to come up.
+    # Ollama is largely exempt from the cold-start-failure problem this probe
+    # exists for: the daemon binds its port immediately and loads models
+    # lazily per request. 30s is ample for the daemon itself.
     readinessTimeout = 30;
     exclusiveResource = "gpu-inference";
     dependsOn = [ "ollama" ];
@@ -130,18 +110,12 @@ let
     backendUnit = "koboldcpp.service";
     publicEndpoint = "127.0.0.1:5001";
     backendEndpoint = "127.0.0.1:5002";
-    # Could NOT be measured directly: koboldcpp-cuda on this host currently
-    # fails CUDA library init with `undefined symbol: cuMemCreate` from
-    # koboldcpp_cublas.so the moment a model is loaded -- a pre-existing
-    # environment breakage unrelated to this change (bd issue filed
-    # alongside this change; koboldcpp is currently non-functional for GPU
-    # inference regardless of idle timeout). Picked from koboldcpp's stated
-    # role instead: the deliberately-slow RAM-offloaded tier for GGUFs
-    # larger than ollama's daily driver (see koboldcpp.nix's header), so
-    # this is at least as generous as ollama's measured 240s.
+    # Unmeasurable: koboldcpp-cuda here fails CUDA init with `undefined
+    # symbol: cuMemCreate` from koboldcpp_cublas.so on model load, so GPU
+    # inference is non-functional regardless of timeout. Sized from its role
+    # instead -- the deliberately-slow RAM-offloaded tier for GGUFs larger
+    # than ollama's daily driver -- so at least as generous as ollama's 240s.
     idleTimeout = "300s";
-    # Not measured directly (currently broken, see above); mirrors the
-    # idleTimeout headroom rationale rather than a real cold-start number.
     readinessTimeout = 300;
     exclusiveResource = "gpu-inference";
     dependsOn = [ "koboldcpp" ];
@@ -151,37 +125,26 @@ let
     backendUnit = "whisper-server.service";
     publicEndpoint = "127.0.0.1:8090";
     backendEndpoint = "127.0.0.1:8091";
-    # Measured 2026-08-13: a cold /v1/audio/transcriptions round trip for
-    # the configured base.en model (147MB) took ~2s end to end. An order of
-    # magnitude of headroom already exists at 30s -- kept unchanged.
+    # Cold start of the configured base.en model (147MB) is ~2s; 30s is an
+    # order of magnitude of headroom for both timeouts.
     idleTimeout = "30s";
-    # Measured 2026-08-13: cold /v1/audio/transcriptions bind-to-listen took
-    # ~2s. 30s is an order of magnitude of headroom, same figure as idleTimeout.
     readinessTimeout = 30;
     exclusiveResource = "gpu-inference";
     dependsOn = [ "whisper" ];
   };
-  # Deliberately no exclusiveResource here: the reranker runs CPU-pinned
-  # (gpuLayers = 0, hosts/sinnix-prime/default.nix) since 2026-08-13 --
-  # measured 435-571ms warm on CPU vs. 67-137ms on GPU. It does NOT hold
-  # zero VRAM (the CUDA-linked binary still allocates ~680-740MiB even at
-  # -ngl 0 -- see llama-cpp.nix's header), but that's far below the
-  # 1610MiB it held fully offloaded, so it still stays out of the
-  # gpu-inference mesh and coexists with a resident ollama/koboldcpp/whisper
-  # session instead of evicting/being evicted by one.
+  # No exclusiveResource: the reranker runs CPU-pinned (gpuLayers = 0,
+  # hosts/sinnix-prime/default.nix). It is not VRAM-free -- the CUDA-linked
+  # binary still allocates ~680-740MiB even at -ngl 0 -- but far below the
+  # ~1610MiB it held fully offloaded, so it stays out of the gpu-inference
+  # mesh and coexists with a resident ollama/koboldcpp/whisper session.
   llamaCppProxy = mkProxy {
     name = "llama-cpp-proxy";
     backendUnit = "llama-cpp.service";
     publicEndpoint = "127.0.0.1:8081";
     backendEndpoint = "127.0.0.1:8082";
-    # Measured 2026-08-13: a cold /v1/rerank round trip for the 0.6B
-    # reranker took ~1-3s end to end, matching llama-cpp.nix's existing
-    # "reloads in about a second" note. 30s is already ~10-30x headroom --
-    # kept unchanged.
+    # Cold /v1/rerank for the 0.6B reranker is ~1-3s; 30s is ~10-30x headroom
+    # for both timeouts.
     idleTimeout = "30s";
-    # Measured 2026-08-13: cold /v1/rerank bind-to-listen took ~1-3s (the
-    # ~2.5s window observed via the proxy's connection-refused errors before
-    # this probe existed). 30s is ample headroom.
     readinessTimeout = 30;
     dependsOn = [ "llama-cpp" ];
   };
@@ -190,58 +153,44 @@ let
     backendUnit = "litellm.service";
     publicEndpoint = "127.0.0.1:4000";
     backendEndpoint = "127.0.0.1:4001";
-    # litellm.nix belongs to a different lane in this change; left at the
-    # prior uniform default rather than guessed at.
+    # Lightweight gateway process, unmeasured; kept at the baseline default.
     idleTimeout = "30s";
-    # litellm.nix belongs to a different lane in this change; a lightweight
-    # gateway process, not measured -- left at the same uniform default.
     readinessTimeout = 30;
     dependsOn = [ "ollama-proxy" ];
   };
-  # Deliberately no exclusiveResource here: Kokoro is CPU-only
-  # (modules/services/kokoro.nix) and must stay answerable regardless of
-  # which CUDA backend, if any, currently holds gpu-inference.
+  # No exclusiveResource: Kokoro is CPU-only (modules/services/kokoro.nix)
+  # and must stay answerable regardless of which CUDA backend, if any,
+  # currently holds gpu-inference.
   kokoroProxy = mkProxy {
     name = "kokoro-proxy";
     backendUnit = "podman-kokoro.service";
     publicEndpoint = "127.0.0.1:8890";
     backendEndpoint = "127.0.0.1:8891";
-    # kokoro.nix belongs to a different lane in this change; left at the
-    # prior uniform default rather than guessed at.
+    # Unmeasured; kept at the baseline default.
     idleTimeout = "30s";
     readinessTimeout = 30;
   };
 
   # ComfyUI, TTS (OpenedAI-Speech), MusicGen, and OCR are OCI containers with
-  # CDI GPU passthrough (modules/services/{comfyui,tts,musicgen,ocr}.nix).
-  # They were previously left off the mkProxy mesh on the theory that a
-  # container "has no idle-aware backend to proxy" -- that theory doesn't
-  # hold: `virtualisation.oci-containers` generates an ordinary
-  # systemd.services.podman-<name> unit, controllable exactly like
-  # ollama.service. The only real difference is that the container's own
-  # `ports` mapping has to move off the public port so systemd-socket-proxyd
-  # can sit in front of it, same as the native backends' `port` config
-  # moving off the socket-activated front door. All four now join the same
-  # public/backend split (flake/data/ports.nix) and the same
-  # partOf/bindsTo/idle-teardown shape as ollama/koboldcpp/whisper/llama-cpp.
+  # CDI GPU passthrough (modules/services/{comfyui,tts,musicgen,ocr}.nix), but
+  # `virtualisation.oci-containers` generates an ordinary
+  # systemd.services.podman-<name> unit, so they proxy exactly like the native
+  # backends. The one container-specific requirement: the container's own
+  # `ports` mapping must sit on the backend port, leaving the public port to
+  # systemd-socket-proxyd.
   comfyuiProxy = mkProxy {
     name = "comfyui-proxy";
     backendUnit = "podman-comfyui.service";
     publicEndpoint = "127.0.0.1:8188";
     backendEndpoint = "127.0.0.1:8189";
-    # Measured 2026-08-13: cold start to a 200 from `/` took ~105s. The
+    # Cold start to a 200 from `/` is ~105s: the
     # mmartial/comfyui-nvidia-docker image re-resolves its Python venv on
-    # every launch and re-downloaded a 930MB torch wheel during this
-    # measurement even though a working torch was already installed --
-    # that reinstall-on-every-launch behavior is the dominant cost, before
-    # any checkpoint has even been loaded. 900s (15min) per the operator's
-    # ask for generous container timeouts: a real ComfyUI session (queueing
-    # a generation, waiting on output) is a long round trip on top of the
-    # cold start itself.
+    # every launch, re-downloading a ~930MB torch wheel, which dominates the
+    # cost before any checkpoint loads. 900s idle because a real ComfyUI
+    # session (queue a generation, wait on output) is a long round trip.
     idleTimeout = "900s";
-    # Same ~105s measurement as idleTimeout's comment above; 180s headroom
-    # without making every genuinely-cold request wait as long as the idle
-    # timeout before a stuck container fails loud instead of hanging silently.
+    # 180s readiness: headroom over the ~105s cold start, while still failing
+    # loud on a stuck container instead of hanging for the full idle timeout.
     readinessTimeout = 180;
     exclusiveResource = "gpu-inference";
     dependsOn = [ "comfyui" ];
@@ -251,11 +200,9 @@ let
     backendUnit = "podman-openedai-speech.service";
     publicEndpoint = "127.0.0.1:8000";
     backendEndpoint = "127.0.0.1:8001";
-    # Measured 2026-08-13: cold start to a 200 from /v1/audio/speech (Piper
-    # voice) took ~17s. XTTS voice cloning was not separately measured (a
-    # heavier model, likely slower); 300s covers headroom for both voices.
+    # Cold start to a 200 from /v1/audio/speech (Piper voice) is ~17s; XTTS
+    # voice cloning is heavier. 300s/60s covers headroom for both voices.
     idleTimeout = "300s";
-    # Same ~17s measurement as idleTimeout's comment above; 60s headroom.
     readinessTimeout = 60;
     exclusiveResource = "gpu-inference";
     dependsOn = [ "tts" ];
@@ -265,10 +212,8 @@ let
     backendUnit = "podman-musicgen.service";
     publicEndpoint = "127.0.0.1:8010";
     backendEndpoint = "127.0.0.1:8011";
-    # Disabled on this host (musicgen.enable = false) -- not measured. Same
-    # all-in-one Gradio+PyTorch toolkit shape as ComfyUI
-    # (rsxdalv/tts-generation-webui vs. mmartial/comfyui-nvidia-docker), so
-    # treated as the same tier: 900s.
+    # Unmeasured (disabled on this host). Same all-in-one Gradio+PyTorch
+    # toolkit shape as ComfyUI, so sized to the same tier.
     idleTimeout = "900s";
     readinessTimeout = 180;
     exclusiveResource = "gpu-inference";
@@ -279,10 +224,9 @@ let
     backendUnit = "podman-ocr.service";
     publicEndpoint = "127.0.0.1:8020";
     backendEndpoint = "127.0.0.1:8021";
-    # Disabled on this host (ocr.enable = false) -- not measured.
-    # marker-api's Surya weights are comparatively small (~1-2GB) next to
-    # ComfyUI's checkpoint tree, so treated like the tts container tier:
-    # 300s.
+    # Unmeasured (disabled on this host). marker-api's Surya weights are
+    # small (~1-2GB) next to ComfyUI's checkpoint tree, so sized to the tts
+    # container tier.
     idleTimeout = "300s";
     readinessTimeout = 60;
     exclusiveResource = "gpu-inference";
@@ -291,17 +235,12 @@ let
 
   # ── GPU-inference exclusivity mesh ───────────────────────────────────────
   # Every backend below claims the GPU exclusively. Naming them once here and
-  # computing the pairwise Conflicts= matrix from that list means a newly
-  # admitted backend cannot land asymmetric -- llama-cpp shipped resident
-  # for two days before symmetric Conflicts= landed (sinnix-w9l/e2fb0af),
-  # and the same gap existed for the container lane until this change
-  # (sinnix-joac) folded it into the same mesh instead of a parallel
-  # container-only Conflicts= scheme. Each side's Conflicts= is gated on its
-  # OWN service's enable flag only (never the peer's): a Conflicts= entry
-  # naming a unit that never gets defined (peer disabled) is a harmless
-  # no-op in systemd, so there is nothing to gain by cross-referencing peer
-  # enable state, and doing so would make eight modules' correctness depend
-  # on read-order.
+  # computing the pairwise Conflicts= matrix from that list keeps a newly
+  # admitted backend from landing asymmetric. Each side's Conflicts= is gated
+  # on its OWN service's enable flag only, never the peer's: a Conflicts=
+  # entry naming an undefined unit is a harmless no-op in systemd, and
+  # cross-referencing peer enable state would make eight modules' correctness
+  # depend on read-order.
   gpuInferenceBackends = {
     ollama = {
       enable = config.sinnix.services.ollama.enable;
@@ -318,8 +257,8 @@ let
       service = "whisper-server.service";
       proxy = "whisper-proxy.service";
     };
-    # llama-cpp (the reranker) is deliberately NOT a member: it runs
-    # CPU-pinned (gpuLayers = 0) and coexists with every backend below.
+    # llama-cpp (the reranker) is not a member: it runs CPU-pinned
+    # (gpuLayers = 0) and coexists with every backend here.
     comfyui = {
       enable = config.sinnix.services.comfyui.enable;
       service = "podman-comfyui.service";

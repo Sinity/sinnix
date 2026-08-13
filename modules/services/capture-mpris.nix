@@ -60,12 +60,8 @@ mkServiceModule {
         name = "mpris";
         path = mprisDir;
         eventDriven = true;
-        # Media listening is optional and intermittent -- unlike shell
-        # sessions or window tracking, a fully quiet week is a legitimate
-        # "the operator didn't play anything" outcome, not a broken daemon.
-        # Budget generously (7 days, matching the screenshot lane in
-        # capture-registry.nix) so staleness only fires on genuine capture
-        # failure, not on an ordinary media-quiet stretch.
+        # Media listening is optional and intermittent: a fully quiet week is
+        # a legitimate "nothing was played" outcome, not a broken daemon.
         staleAfterSeconds = 604800;
       }
     ];

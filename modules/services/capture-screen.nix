@@ -1,25 +1,21 @@
 # capture-screen: Hyprland-event + idle-pause + 30s-floor triggered
-# per-window screen frame capture (sinnix-9pd Phase 3a, 3.1-3.3)
+# per-window screen frame capture
 #
-# Frame-grab mechanism, the live black-frame regression found on
-# sinnix-prime during this lane's authorship, and the idle-pause heuristic
-# design are all documented in pkgs/capture-screen/sinnix_capture_screen/
-# daemon.py's module docstring -- read that before touching the mechanism.
-# Short version: Noctalia's own screenshot IPC (`noctalia msg
-# screenshot-*`) is whole-output/region-only with no scriptable raw-bytes
-# interface, so this collector drives `grim` directly -- the SAME
-# wlr-screencopy protocol Noctalia's native path uses. The fix behind the
-# closed sinnix-xuk/sinnix-kvc black-frame bugs was the compositor-side
-# `render:keep_unmodified_copy`/`render:use_shader_blur_blend` settings in
-# modules/features/desktop/hyprland/default.nix, not "use Noctalia's binary
-# instead of grim's" -- that setting applies to any wlr-screencopy client.
+# The frame-grab mechanism and idle-pause heuristic are documented in
+# pkgs/capture-screen/sinnix_capture_screen/daemon.py's module docstring --
+# read that before touching the mechanism. Short version: Noctalia's
+# screenshot IPC (`noctalia msg screenshot-*`) is whole-output/region-only
+# with no scriptable raw-bytes interface, so this collector drives `grim`
+# directly -- the SAME wlr-screencopy protocol Noctalia uses. Black frames
+# are a compositor-side problem, cured by
+# `render:keep_unmodified_copy`/`render:use_shader_blur_blend` in
+# modules/features/desktop/hyprland/default.nix, not by swapping grim out;
+# the setting applies to any wlr-screencopy client.
 #
-# DAILY-VOLUME THROTTLE GUARD (3.3): `--daily-ceiling-bytes` (default 1GB)
-# is a runaway-bug backstop, NOT a policy cap -- the operator's storage
-# stance is "keep full fidelity forever, add capacity" (see sinnix-9pd's
-# notes). It exists only to stop a stuck dedup/trigger loop from writing
-# unbounded data; it trips loudly (stderr, once per UTC day) and never
-# silently drops writes without saying so.
+# `--daily-ceiling-bytes` (default 1GB) is a runaway-bug backstop, NOT a
+# policy cap: it exists only to stop a stuck dedup/trigger loop from writing
+# unbounded data, and it trips loudly (stderr, once per UTC day) rather than
+# silently dropping writes.
 {
   mkServiceModule,
   config,
@@ -42,9 +38,8 @@ mkServiceModule {
     unit = "sinnix-capture-screen.service";
     manager = "user";
     # No explicit `kind`: real owned systemd .service unit -> defaults to
-    # "service", matching every sibling capture-* daemon (capture-a11y,
-    # capture-mpris). `kind = "capture"` is reserved for orphan
-    # surfaces with no real backing unit (capture-registry.nix).
+    # "service". `kind = "capture"` is reserved for orphan surfaces with no
+    # real backing unit (capture-registry.nix).
     resourceClass = "capture-runtime";
     observe = {
       enable = true;
@@ -61,13 +56,12 @@ mkServiceModule {
         # (daemon crashed, socket2 dropped) rather than legitimate idle.
         eventDriven = true;
         staleAfterSeconds = 300;
-        # A resolved focused window is this lane's whole product: without
-        # it a frame cannot be attributed to an application, a workspace,
-        # or a terminal session. The grim `-o`/`-g` conflict (sinnix-3w9n)
-        # let the lane run "active running" for its entire deployed life
-        # while writing only the records that had no window to resolve, so
-        # these fields were null in 100% of them. `monitor` is included
-        # because a frame with no output identity is equally unusable.
+        # A resolved focused window is this lane's whole product: without it
+        # a frame cannot be attributed to an application, a workspace, or a
+        # terminal session, and the daemon can keep reporting "active
+        # (running)" while every record it writes has these fields null.
+        # `monitor` is included because a frame with no output identity is
+        # equally unusable.
         requiredPayloadFields = [
           "window_class"
           "workspace"
@@ -81,7 +75,7 @@ mkServiceModule {
     periodicFloorSeconds = lib.mkOption {
       type = lib.types.int;
       default = 30;
-      description = "Maximum seconds between captures even with no window/workspace change (3.1's 30s floor).";
+      description = "Maximum seconds between captures even with no window/workspace change.";
     };
     idlePauseSeconds = lib.mkOption {
       type = lib.types.int;

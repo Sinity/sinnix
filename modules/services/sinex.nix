@@ -8,9 +8,9 @@
 #
 #   Development state: /realm/project/sinex/.sinex/state/ (workspace-local)
 #     xtask (sinex dev runner) defaults to SINEX_STATE_DIR which points at
-#     the workspace-local path. Home dirs (~/.local/state/sinex, ~/.config/sinex,
-#     ~/.config/xtask, ~/.local/share/nats etc.) were accumulated from past
-#     SINEX_STATE_DIR overrides and have been purged. Do not re-accumulate there.
+#     the workspace-local path. Do not accumulate sinex state in home dirs
+#     (~/.local/state/sinex, ~/.config/sinex, ~/.config/xtask,
+#     ~/.local/share/nats).
 #
 # ─── ENABLED WHEN ─────────────────────────────────────────────────────────────
 #

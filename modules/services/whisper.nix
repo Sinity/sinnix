@@ -1,9 +1,9 @@
 # whisper.cpp server (CUDA) — shared STT hub on 127.0.0.1:8090.
 #
-# The estate's single OpenAI-compatible /v1/audio/transcriptions endpoint
-# (sinnix-mke increment 1). whisper.cpp's own HTTP API is repointed at that
-# path via --inference-path so any OpenAI Whisper API client (hermes, the
-# phone, capture-audio) can hit it unmodified. The ggml model is
+# The estate's single OpenAI-compatible /v1/audio/transcriptions endpoint.
+# whisper.cpp's own HTTP API is repointed at that path via --inference-path
+# so any OpenAI Whisper API client (hermes, the phone, capture-audio) can
+# hit it unmodified. The ggml model is
 # auto-downloaded into model/whisper on first start if missing.
 #
 # Socket-activated behind the same idle-aware proxy pattern as
@@ -27,16 +27,9 @@ mkAiService {
   activation = {
     mode = "socket-proxy";
     backendEndpoint = "127.0.0.1:8091";
-    # Measured 2026-08-13: ~2s cold /v1/audio/transcriptions round trip for
-    # the base.en model (147MB) -- an order of magnitude of headroom
-    # already exists at 30s, so this stays unchanged.
     idleTimeout = "30s";
     exclusiveResource = "gpu-inference";
     dependsOn = [ "whisper-proxy" ];
-    # No long-running systemd consumer exists yet: hermes calls the public
-    # endpoint directly from a short-lived interactive CLI invocation, so
-    # there is nothing here today. The contract stays wired (default `[ ]`)
-    # for the capture-audio lane and phone ingest this bead adds later.
   };
   extraOptions = {
     model = args.lib.mkOption {
@@ -90,10 +83,8 @@ mkAiService {
             '';
             # --inference-path makes the native /inference route also answer
             # at the OpenAI Whisper API shape (multipart file/model/
-            # response_format in, {"text": "..."} out) so any OpenAI-client
-            # STT consumer (hermes, later Parakeet/Voxtral swap-ins) works
-            # unmodified against this hub. Bound to the private backend port
-            # only -- clients always speak to 8090 via whisper-proxy.
+            # response_format in, {"text": "..."} out). Bound to the private
+            # backend port only -- clients speak to 8090 via whisper-proxy.
             ExecStart = lib.concatStringsSep " " [
               "${pkgs.whisper-cpp-cuda}/bin/whisper-server"
               "--host 127.0.0.1"

@@ -1,25 +1,13 @@
 # Sinex bridge
 #
-# Carries the genuinely host-specific glue between sinnix's options and
-# upstream `services.sinex`:
-#
-# - selecting the Sinex runtime package from the flake input
-# - secrets paths + sinex user home location + database password binding
-# - storage placement (NATS state dir, runtime root)
-# - workstation deployment policy expressed through upstream options:
-#     services.sinex.runtime.target.{attachToMultiUser,manualStartOnly,
-#       includeDatabase,extraAfter}
-#     services.sinex.runtime.deferredStart.{enable,delay}
-#     services.sinex.runtime.restartPolicy.*
-#     services.sinex.bootstrap.restartPolicy
-#     services.sinex.nats.killPolicy.*
-#     services.sinex.database.setupWaitForPaths
-# - the activation-profile mapping from sinnix's `cfg.activationProfile`
-#   string to the runtime source/automaton `enable` flags
+# Host-specific glue between sinnix's options and upstream `services.sinex`:
+# runtime package selection, secrets/home/storage placement, workstation
+# deployment policy expressed through upstream options, and the mapping from
+# `cfg.activationProfile` to the runtime source/automaton enable flags.
 #
 # Auxiliary-unit gating (wantedBy stripping, sinex-runtime.target wants
 # graph, deferred-start timer, document-scan timer pinning) is owned by
-# upstream as of sinex#1306 and intentionally not duplicated here.
+# upstream and intentionally not duplicated here.
 {
   config,
   options,
@@ -35,18 +23,16 @@ let
   targetUserName = config.sinnix.user.name;
   targetUserHome = "/home/${targetUserName}";
   homeManagerServiceName = "home-manager-${targetUserName}";
-  # Sinex runtime state lives at /var/lib/sinex (NixOS convention for service
-  # state). The earlier /realm/data/captures/sinex layout misused the captures
-  # namespace — /realm/data/captures is for input data sinex *ingests*, not
-  # sinex's own operational substrate. On sinnix-prime this currently places
-  # the active substrate on the root SSD, not on /realm.
+  # Sinex's own operational substrate, distinct from /realm/data/captures
+  # (which is input data sinex *ingests*). On sinnix-prime this places the
+  # active substrate on the root SSD, not on /realm.
   sinexRuntimeRoot = "/var/lib/sinex";
   sinexStateRoot = "${sinexRuntimeRoot}/state";
   sinexHome = "${sinexRuntimeRoot}/home";
   sinexPostgresRoot = "${sinexRuntimeRoot}/postgresql";
   sinexPostgresDataDir = "${sinexPostgresRoot}/18";
-  # 2026-07-10: moved off /persist (worn MX500, double-writing every backup
-  # byte) to /realm; still inside the /realm btrbk→borg coverage.
+  # On /realm, not /persist: keeps dump bytes off the worn MX500 while
+  # staying inside the /realm btrbk→borg coverage.
   sinexPostgresDumpRoot = "/realm/staging/sinex-postgres";
   databaseHost = "127.0.0.1";
   databasePort = 5432;
@@ -101,9 +87,9 @@ in
         "sinex-blob-cas-sweep"
         "sinex-document-scan"
       ];
-      # Post-Wave-B fold all source bindings run inside sinexd, not per-source
-      # systemd units. ACL-granting target-access services must complete before
-      # sinexd starts so it can reach user-owned data paths and sockets.
+      # All source bindings run inside sinexd, so the ACL-granting
+      # target-access services must complete before sinexd starts for it to
+      # reach user-owned data paths and sockets.
       # sinex-document-target-access gates the separate one-shot document scan.
       targetAccessServiceBefore = {
         sinex-browser-target-access = [ "sinexd.service" ];
@@ -218,11 +204,9 @@ in
           # full_page_writes on: the nodatacow @sinex subvol has no btrfs
           # checksums, so FPW is the remaining torn-page defense.
           postgresql.settings.wal_compression = "lz4";
-          # Connection audit logging (sinex's module defaults these on via
-          # mkDefault) is pure noise on a localhost-only single-app DB:
-          # ~100 log lines/hour from sinexctl/lynchpin short-lived
-          # connections, which the syslog capture source then re-ingests
-          # into sinex's own dataset (journal self-noise, 2026-07-10 audit).
+          # Sinex defaults connection audit logging on; on a localhost-only
+          # single-app DB it is pure noise that the syslog capture source
+          # then re-ingests into sinex's own dataset.
           postgresql.settings.log_connections = false;
           postgresql.settings.log_disconnections = false;
 
@@ -236,23 +220,21 @@ in
               environment = sinexEnvironment;
               enable = runtimeEnabled;
               autoSetup = runtimeEnabled;
-              # dataDir/storeDir stay at the upstream default path, persisted
-              # via the standard impermanence bind mount below
-              # (sinnix.persistence.system.directories) rather than moved onto
-              # @sinex — no raw-subvolume bootstrapping needed here.
+              # dataDir/storeDir stay at the upstream default path, which
+              # hosts/sinnix-prime/storage.nix bind-mounts from
+              # /realm/state/nats — the realm state volume, not the /persist
+              # impermanence tree. Nothing here shows that; check storage.nix
+              # before assuming this state lives on root.
               dataDir = "/var/lib/nats";
               jetstreamMaxStore = "32G";
-              # Express ONLY this host's genuine deltas against sinex's own
-              # canonical topology (services.sinex.nats.bootstrapStreams.streams
-              # is now an attrset keyed by stream name whose fields sinex ships
-              # at mkDefault priority — sinex-dffy). Every field not set here is
-              # inherited from sinex's nixos/modules/nats.nix defaults, and any
-              # stream sinex adds later flows in automatically instead of being
-              # silently shadowed by a hand-copied mkForce list (the 2026-07-09
-              # 6-day sinexd outage). Do NOT re-declare byte-identical streams.
+              # Express ONLY this host's genuine deltas. The streams attrset is
+              # keyed by stream name and every field sinex ships lands at
+              # mkDefault, so unset fields inherit from sinex's nats.nix and
+              # streams sinex adds later flow in automatically. Re-declaring a
+              # byte-identical stream silently shadows that inheritance.
               bootstrapStreams.streams = {
                 # natscli rejects --max-bytes above signed 32-bit range, and the
-                # live production stream already carries a 16 GiB cap; passing no
+                # live stream already carries a 16 GiB cap; passing no
                 # --max-bytes leaves that cap intact instead of shrinking a
                 # near-full JetStream during activation. Raw retention is 7 days
                 # on this host vs sinex's 72h dev default.
@@ -283,13 +265,10 @@ in
                   maxMsgsPerSubject = 1;
                 };
               };
-              # Entity-enricher checkpoints currently exceed NATS' 1 MiB
-              # default payload limit during recovery. The local server is
-              # loopback-only; raise the transport ceiling so checkpoints can
-              # persist while upstream trims checkpoint state size.
+              # Entity-enricher checkpoints exceed NATS' 1 MiB default payload
+              # limit during recovery; the local server is loopback-only, so
+              # raise the transport ceiling rather than lose checkpoints.
               extraSettings.max_payload = lib.mkDefault 8388608;
-              # The dedicated /cache NVMe was removed after sustained I/O
-              # failures. Keep JetStream under the normal NATS state root.
               storeDir = "/var/lib/nats/jetstream";
               killPolicy = {
                 # Bounded but generous: JetStream needs real time to close a
@@ -323,19 +302,12 @@ in
               api = {
                 enable = runtimeEnabled;
                 autoGenerateTls = true;
-                # sinex-d4qg: the shared per-service pool default (4,
-                # database.connectionPool.maxConnections) starves the API's
-                # own traffic under real load -- confirmed live 2026-07-10:
-                # a single replay preview transaction over a real-volume
-                # scope held a connection long enough that even periodic
-                # telemetry sampling on the same pool started timing out.
-                # 16 matches sinex's own Rust-level PoolConfig::default()
-                # (crate/sinex-db/src/pool.rs) -- the value the shared
-                # default itself overrode down to 4 -- so this isn't a new
-                # number, it's reverting the API specifically to the
-                # upstream code's own judgment of a reasonable pool size.
-                # Automata and the event engine are untouched (still 4);
-                # they weren't observed under this kind of pressure.
+                # The shared per-service pool default (4,
+                # database.connectionPool.maxConnections) starves the API under
+                # real load: one long replay-preview transaction can time out
+                # concurrent telemetry sampling on the same pool. 16 is sinex's
+                # own Rust-level PoolConfig::default. Automata and the event
+                # engine stay at 4.
                 poolMaxConnections = 16;
               };
             };
@@ -404,12 +376,11 @@ in
 
               desktop = {
                 enable = runtimeEnabled && activationProfile.desktop;
-                # Disabled post-sinexd-collapse: the single daemon runs as the
-                # sinex system user without DISPLAY/XAUTHORITY, so the clipboard
-                # adapter cannot reach X11 and triggers a runtime-wide critical
-                # failure cascade. Re-enable when sinexd has per-binding env
-                # injection or the runtime degrades source-worker failures
-                # from "critical" to "binding-local".
+                # sinexd runs as the sinex system user without
+                # DISPLAY/XAUTHORITY, so the clipboard adapter cannot reach X11
+                # and triggers a runtime-wide critical failure cascade.
+                # Re-enable once sinexd has per-binding env injection or
+                # degrades source-worker failures to binding-local.
                 clipboard.enable = false;
               };
 
@@ -454,8 +425,6 @@ in
             };
 
             # Workstation runtime policy via upstream options.
-            # Sinex itself owns the wantedBy stripping, sinex-runtime.target
-            # wants graph, and deferred-start timer.
             runtime = {
               target = {
                 attachToMultiUser = false;
@@ -470,10 +439,9 @@ in
                 ];
               };
               deferredStart = {
-                # Always define the timer when the runtime is enabled so its
-                # shape (5min delay, sinex-runtime.target unit) is
-                # introspectable; gate timers.target installation on the
-                # host's auto-start policy.
+                # Define the timer whenever the runtime is enabled so its shape
+                # stays introspectable; only its timers.target installation is
+                # gated on the host's auto-start policy.
                 enable = runtimeEnabled;
                 autoStart = runtimeAutoStart;
                 delay = "5min";
@@ -495,30 +463,10 @@ in
         };
       })
 
-      # Workstation policy that sinex itself does not own:
-      #   - keep PostgreSQL/NATS below interactive priority; they are
-      #     long-lived capture substrate writers, not login/TTY-critical
-      #     services
-      #   - declare RequiresMountsFor on /var/lib/sinex for postgresql so
-      #     activation waits for the mount when /var/lib/sinex is a separate
-      #     filesystem
-      #   - retitle sinex-runtime.target to reflect the host's automation
-      #     model
-      #   - give notify-style source services enough time to acquire their
-      #     local data-source lease before the unit start deadline
-      #   - drop workstation-civil scheduler bias from one-shot maintenance
-      #     timers and force their next-fire semantics
-      #   - on desktop profiles, re-run sinex-desktop-target-access after every
-      #     nixos-rebuild switch because home-manager activation calls chmod 700
-      #     on the target home, maps the group bits to the POSIX ACL mask,
-      #     resetting mask::--x → mask::--- and nullifying the sinex traverse
-      #     grant. Foundation/replica hosts do not create that helper.
+      # Workstation policy that sinex itself does not own: resource class
+      # placement for PostgreSQL/NATS, mount ordering for /var/lib/sinex,
+      # maintenance-timer scheduling, and the post-activation ACL repair.
       (lib.mkIf runtimeEnabled {
-        # NATS JetStream state is mounted from /realm/state/nats by the
-        # workstation storage topology. Keeping it on the realm volume makes
-        # the ownership and backup boundary explicit instead of hiding it in
-        # the impermanence bind tree.
-
         sinnix.runtime.surfaces = {
           sinex-runtime = {
             unit = "sinex-runtime.target";
@@ -697,15 +645,14 @@ in
                 "GIT_CONFIG_COUNT=1"
                 "GIT_CONFIG_KEY_0=safe.directory"
                 "GIT_CONFIG_VALUE_0=/realm/project/sinex"
-                # Upstream Sinex now exposes these event-engine policies as
-                # runtime env vars rather than Nix module options.
+                # Event-engine policies are exposed as runtime env vars, not
+                # Nix module options.
                 "SINEX_EVENT_ENGINE_REJECT_INITIAL_REPLAY=false"
                 "SINEX_EVENT_ENGINE_STARTUP_CATCH_UP_MAX_CONCURRENT=1"
               ];
-              # Bounded drain window, matching the NATS killPolicy
-              # convention: forced kills replay cleanly via JetStream, so
-              # bounding activation stalls beats waiting on a daemon that
-              # may ignore SIGTERM.
+              # Bounded drain window: forced kills replay cleanly via
+              # JetStream, so bounding activation stalls beats waiting on a
+              # daemon that may ignore SIGTERM.
               serviceConfig.TimeoutStopSec = lib.mkForce "90s";
             };
           }
@@ -732,13 +679,10 @@ in
           wants = [ "network-online.target" ] ++ lib.optionals databasePrepared [ "postgresql.target" ];
         };
         # Maintenance timers follow the runtime TARGET, not the auto-start
-        # POLICY. The previous force-disable on manual-start hosts rendered
-        # these units masked, and on this host — where the runtime is
-        # manual-start by policy but in practice runs 24/7 — the postgres
-        # disaster-recovery dump was silently dead 2026-06-29 → 07-10 (11
-        # days without dumps; found by the backup audit). wantedBy pulls a
-        # timer up whenever sinex-runtime.target starts (manual or auto);
-        # PartOf stops it with the target; nothing is ever masked.
+        # POLICY: this host is manual-start by policy but runs 24/7, so gating
+        # timers on auto-start masks them and silently kills the DR dump.
+        # wantedBy pulls a timer up whenever sinex-runtime.target starts
+        # (manual or auto); PartOf stops it with the target.
         systemd.timers =
           lib.genAttrs maintenanceTimerServiceNames (_: {
             wantedBy = lib.mkForce [ "sinex-runtime.target" ];

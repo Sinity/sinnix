@@ -24,9 +24,6 @@ mkServiceModule {
       mode = "socket-proxy";
       publicEndpoint = "127.0.0.1:5001";
       backendEndpoint = "127.0.0.1:5002";
-      # Not directly measurable on this host: koboldcpp-cuda currently fails
-      # CUDA init (see ai-control.nix's koboldcppProxy for detail); picked
-      # from koboldcpp's role as the slow RAM-offloaded tier instead.
       idleTimeout = "300s";
       exclusiveResource = "gpu-inference";
       dependsOn = [ "koboldcpp-proxy" ];

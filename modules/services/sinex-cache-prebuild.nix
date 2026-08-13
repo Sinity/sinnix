@@ -1,29 +1,18 @@
-# Async pre-build + cachix push for sinex master moves (sinnix-m9v).
+# Async pre-build + cachix push for sinex master moves.
 #
-# The desktop is already sinex's "builder of record": after every successful
-# LOCAL `switch`, sinexCachePush (flake/command-registry.nix) publishes the
-# freshly activated sinex closure to sinity.cachix.org so REPEAT builds of the
-# same input hash substitute instead of recompiling. That covers only the
-# steady state -- the FIRST switch after any sinex master bump still pays
-# sinex's full local compile cost (8-11.5 GiB peak rustc RSS, historically)
-# synchronously, on the interactive critical path.
+# sinexCachePush (flake/command-registry.nix) publishes the sinex closure
+# after every successful local `switch`, which covers repeat builds of the
+# same input hash but leaves the FIRST switch after a sinex bump paying the
+# full local compile synchronously on the interactive critical path.
 #
 # This timer decouples that: it periodically diffs the sinex input's locked
-# revision in the live flake.lock against the last revision this host has
-# already prebuilt (see scripts/sinnix-sinex-cache-prebuild). When it has
-# moved -- via the routine `update` devshell command, or any other committed
-# flake.lock change -- it builds sinex at that exact locked revision under
-# sinnix-scope's `nix-build` command class (the same nix-build.slice-contained
-# path every other heavy build on this host uses)
-# and pushes the result to sinity.cachix.org via the same push logic `switch`
-# uses (scripts/sinnix-sinex-cache-push). By the time an operator/agent next
-# runs an interactive `switch`, the sinex build for that revision is usually
-# already substitutable from the cache.
+# revision in flake.lock against the last revision this host prebuilt (see
+# scripts/sinnix-sinex-cache-prebuild), and on a move builds that exact
+# revision under sinnix-scope's `nix-build` class and pushes it via
+# scripts/sinnix-sinex-cache-push.
 #
 # Runs as the operator's systemd --user manager: `nix build` needs no root,
 # and the cachix push needs the operator's ~/.config/cachix auth token.
-#
-# Enable with: sinnix.services.sinex-cache-prebuild.enable = true;
 {
   mkServiceModule,
   lib,
@@ -85,12 +74,9 @@ mkServiceModule {
           Service = {
             Type = "oneshot";
             ExecStart = "${prebuild}/bin/sinnix-sinex-cache-prebuild --flake-dir ${config.sinnix.paths.projectRoot} --system ${pkgs.stdenv.hostPlatform.system}";
-            # The flake.lock diff itself is nearly instant; when it detects a
-            # move, this unit's runtime becomes however long the sinex build
-            # takes (the build itself runs detached in its own sinnix-scope
-            # nix-build.slice scope). Bound generously so a genuinely wedged
-            # build still gets reaped, without killing a legitimate multi-GB
-            # Rust workspace compile.
+            # On a detected move this unit's runtime becomes the sinex build
+            # time, so bound generously: a wedged build still gets reaped
+            # without killing a legitimate multi-GB Rust workspace compile.
             TimeoutStartSec = "2h";
           };
         };

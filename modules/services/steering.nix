@@ -1,15 +1,15 @@
-# steering: the operator-instrumentation walking skeleton (sinnix-jfiy.1)
+# steering: the operator-instrumentation walking skeleton.
 #
 # Store: sqlite at /realm/state/steering/steering.sqlite (created by
 # sinnix-steer on first run; schema v1 in scripts/sinnix-steer). This lives on
 # the persistent /realm NVMe volume, not under the ephemeral root subvolume,
 # so no impermanence persistence entry is needed -- only a tmpfiles rule to
-# create the directory on first activation, same pattern as capture-awair.
+# create the directory on first activation.
 #
 # Two systemd user timers run the morning/evening rituals (each invokes
 # `claude -p` with store context, writes a review row, notifies via
 # notify-send); a third service runs the read-only cockpit (FastAPI+htmx,
-# pkgs/sinnix-cockpit) on loopback. Design of record: bd show sinnix-q20.
+# pkgs/sinnix-cockpit) on loopback.
 {
   mkServiceModule,
   pkgs,

@@ -71,12 +71,8 @@ mkServiceModule {
       exitNodeArg = lib.optionalString cfg.enableExitNode "--advertise-exit-node";
     in
     {
-      # Co-located with its owning service rather than sitting in
-      # persistence.nix's "core system state (no owning module)" bucket --
-      # this module IS the owner, so the bucket's own rule excluded it.
       # Losing this directory means re-authenticating the node and getting a
-      # new device identity on the tailnet, so its absence from here was
-      # exactly the kind of gap that reads as "nothing persists this".
+      # new device identity on the tailnet.
       sinnix.persistence.system.directories = [
         "/var/lib/tailscale" # auth keys and device identity
       ];
@@ -87,8 +83,8 @@ mkServiceModule {
         inherit (cfg) useRoutingFeatures;
         inherit (cfg) interfaceName;
         # Upstream only generates the tailscaled-autoconnect unit when
-        # authKeyFile is set; passing the key via extraUpFlags left that
-        # unit with no ExecStart (found live 2026-08-12, sinnix-is8).
+        # authKeyFile is set; passing the key via extraUpFlags instead leaves
+        # that unit with no ExecStart.
         authKeyFile = cfg.authKeyFile;
         extraUpFlags = lib.filter (s: s != "") [
           tagArg
@@ -98,8 +94,7 @@ mkServiceModule {
       };
 
       # No agenix ordering needed: agenix decrypts during system activation,
-      # before units start. (The previous requires/after on "agenix.service"
-      # referenced a unit that does not exist -- agenix is an activation
-      # script, not a service -- which made autoconnect fail to load.)
+      # before units start. There is no "agenix.service" to order against --
+      # it is an activation script, not a service.
     };
 } args

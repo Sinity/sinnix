@@ -3,20 +3,17 @@
 # replacement for the edge-tts cloud dependency (Microsoft's voice API):
 # hermes already ships a built-in "openai" TTS provider speaking this exact
 # wire shape, so pointing hermes's tts.openai.base_url at this hub
-# (modules/features/dev/agents/clis.nix) is a config repoint, not a hermes
-# patch (sinnix-w9l increment 1).
+# (modules/features/dev/agents/clis.nix) is a config repoint, not a patch.
 #
-# Deliberately CPU-only (the image bakes DEVICE=cpu/USE_GPU=false): Kokoro-82M
-# is fast enough on CPU that the gpu-inference admission key would only buy
-# queueing behind ollama/koboldcpp/whisper for no latency benefit, and the
-# operator wants TTS answerable even while a CUDA backend is resident. It
-# never requires, and never conflicts with, the shared GPU admission key.
+# CPU-only (the image bakes DEVICE=cpu/USE_GPU=false): Kokoro-82M is fast
+# enough on CPU that the gpu-inference admission key would only buy queueing
+# behind ollama/koboldcpp/whisper, and TTS must stay answerable while a CUDA
+# backend is resident. It never requires or conflicts with that key.
 #
 # Socket-activated behind the same idle-aware proxy pattern as
 # ollama/koboldcpp/whisper (modules/services/ai-control.nix): the public port
-# 8890 is the systemd socket front door (8880 belongs to sinnix-hub);
-# the backend container runs on a
-# private loopback port and exits after 30s idle.
+# 8890 is the systemd socket front door (8880 belongs to sinnix-hub); the
+# backend container runs on a private loopback port and exits after 30s idle.
 #
 # Digest-pinned OCI container; weights (~330MB) are baked into the image at
 # build time (no runtime download), and the image itself is stored under the
@@ -71,9 +68,9 @@ mkAiService {
         };
       };
 
-      # Bind the container to the proxy's lifecycle exactly like whisper's
-      # hand-written unit: a clean idle exit of kokoro-proxy tears this
-      # container down too, releasing its cgroup instead of idling resident.
+      # Bind the container to the proxy's lifecycle: a clean idle exit of
+      # kokoro-proxy tears this container down too, releasing its cgroup
+      # instead of idling resident.
       systemd.services.podman-kokoro = {
         partOf = [ "kokoro-proxy.service" ];
         bindsTo = [ "kokoro-proxy.service" ];

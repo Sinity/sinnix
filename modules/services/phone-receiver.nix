@@ -1,8 +1,7 @@
-# Persistent receiver for the phone's always-on telemetry push
-# (sinnix-uyvt.4 architecture correction, 2026-08-13): the phone maintains
-# one long-lived TCP connection to this service and streams structured
-# telemetry (battery, sensors, later VAD-gated audio) continuously, instead
-# of the discrete per-command SSH invocations the earlier increments used.
+# Persistent receiver for the phone's always-on telemetry push: the phone
+# maintains one long-lived TCP connection to this service and streams
+# structured telemetry (battery, sensors, later VAD-gated audio)
+# continuously.
 #
 # Binds the tailscale0 address only, same pattern as sinnix.services.hub --
 # never 0.0.0.0, opened per-interface so a LAN peer never reaches it.

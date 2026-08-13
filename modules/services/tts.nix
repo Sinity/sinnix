@@ -20,8 +20,6 @@ mkAiService {
   activation = {
     mode = "socket-proxy";
     backendEndpoint = "127.0.0.1:8001";
-    # See ai-control.nix's ttsProxy for the measured cold-start evidence
-    # behind this number.
     idleTimeout = "300s";
     exclusiveResource = "gpu-inference";
     dependsOn = [ "tts-proxy" ];
@@ -74,10 +72,10 @@ mkAiService {
 
       systemd.services.podman-openedai-speech = {
         serviceConfig.TimeoutStartSec = lib.mkForce "2min";
-        # Bound to the socket proxy's lifecycle exactly like the native
-        # backends: an idle proxy exit tears down this container's cgroup.
-        # Conflicts= against every other GPU-inference backend is computed
-        # centrally in ai-control.nix's gpuInferenceConflicts.
+        # Bound to the socket proxy's lifecycle: an idle proxy exit tears
+        # down this container's cgroup. Conflicts= against every other
+        # GPU-inference backend is computed centrally in ai-control.nix's
+        # gpuInferenceConflicts.
         partOf = [ "tts-proxy.service" ];
         bindsTo = [ "tts-proxy.service" ];
       };
