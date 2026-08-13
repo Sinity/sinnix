@@ -54,7 +54,7 @@ class ChannelProfile:
     application: str  # "voip" | "audio" -- see OPUS_APPLICATION_CTL_VALUE
 
 
-# Both channels are an ARCHIVE tier, not an ASR feed: the operator's standing
+# Every channel is an ARCHIVE tier, not an ASR feed: the operator's standing
 # requirement is high fidelity, overkill preferred.
 #
 # Do not lower these toward speech-optimised settings. Loss here is
@@ -66,15 +66,31 @@ class ChannelProfile:
 # downsample; nothing can recover a band that was never captured.
 #
 # Cost is not the constraint: Opus DTX collapses true silence to a couple of
-# kbit/s, so an unplugged or quiet mic costs almost nothing. Mono on the mic is
-# deliberate -- it is one capsule, and a synthesised second channel would be
-# fake data.
+# kbit/s, so a quiet or disconnected input costs almost nothing -- which is
+# what makes recording every source at once affordable.
 CHANNEL_PROFILES: dict[str, ChannelProfile] = {
-    "mic": ChannelProfile(rate=48000, channels=1, bitrate_kbps=96, application="audio"),
     "sink-monitor": ChannelProfile(
         rate=48000, channels=2, bitrate_kbps=96, application="audio"
     ),
 }
+
+SOURCE_RATE = 48000
+SOURCE_BITRATE_KBPS = 96
+# Used only when the node does not report `audio.channels`. Over-capturing a
+# mono device as stereo wastes a little space; under-capturing a stereo device
+# as mono downmixes two capsules into one irreversibly.
+FALLBACK_SOURCE_CHANNELS = 2
+
+
+def source_profile(channels: int | None) -> ChannelProfile:
+    """Archive profile for one capture source, at the device's own channel
+    count (sources.py reads it from the node's `audio.channels`)."""
+    return ChannelProfile(
+        rate=SOURCE_RATE,
+        channels=channels if channels and channels > 0 else FALLBACK_SOURCE_CHANNELS,
+        bitrate_kbps=SOURCE_BITRATE_KBPS,
+        application="audio",
+    )
 
 
 def hour_bucket_start(ts: float) -> float:

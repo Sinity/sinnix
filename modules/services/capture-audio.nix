@@ -1,23 +1,27 @@
-# Always-on dual-channel PipeWire audio capture
+# Always-on PipeWire audio capture: every source plus the sink monitor
 #
 # Four units backed by the sinnix-audio-capture Python package
 # (pkgs/sinnix-audio-capture, whose docstring carries the full design):
-# - sinnix-audio-recorder-mic / sinnix-audio-recorder-sink-monitor: two
-#   always-on `record` daemons, one per canonical channel
-#   (segment.CHANNEL_PROFILES). No VAD gating -- Opus DTX/VBR collapses
-#   silence at the codec level. `pw-record --target <name>` does not
-#   reliably reattach to the intended node on reconnect (segments silently
-#   truncate), so recorder.py resolves targets to a stable `object.serial`
-#   via pw-dump; see pipewire_defaults.py's `resolve_node_serial`.
+# - sinnix-audio-recorder-sources: one supervisor that keeps a recorder
+#   alive per live capture source, minus `excludeSourcePatterns`. The set
+#   of sources is a runtime fact (USB/Bluetooth devices come and go), so it
+#   cannot be a set of statically-declared units; the supervisor's own
+#   state lane plus a coverage livenessProbe are what make a source that
+#   is present-but-unrecorded visible.
+# - sinnix-audio-recorder-sink-monitor: the one channel that legitimately
+#   follows a default (the default sink's monitor ports).
+#   No VAD gating on either -- Opus DTX/VBR collapses silence at the codec
+#   level. `pw-record --target <name>` does not reliably reattach to the
+#   intended node on reconnect (segments silently truncate), so targets
+#   resolve to a stable `object.serial` via pw-dump; see
+#   pipewire_defaults.py's `resolve_node_serial`.
 # - sinnix-audio-topology: a `pw-mon` Node/Port/Link event stream providing
 #   node/port attribution.
 # - sinnix-audio-index: an hourly `index` timer running Silero VAD over
 #   recently-closed Opus segments -- index-only, never a gate; the
-#   26h-default lookback already covers a missed run.
-#
-# Two named units rather than a systemd template: there are exactly two
-# canonical channels by design, and per-unit `mkRuntimeServiceConfig` lookup
-# plus staleness budgets are simplest as two concrete surfaces.
+#   26h-default lookback already covers a missed run. It discovers channel
+#   directories rather than taking a fixed list, so per-source channels and
+#   the pre-existing `mic/` archive are both indexed.
 {
   mkServiceModule,
   lib,
@@ -32,10 +36,15 @@ let
   audioPkg = scriptPkgs.sinnix-audio-capture;
   capturesRoot = config.sinnix.paths.capturesRoot;
   audioDir = "${capturesRoot}/audio";
-  micDir = "${audioDir}/mic";
   sinkDir = "${audioDir}/sink-monitor";
+  sourcesDir = "${capturesRoot}/audio-sources";
   topologyDir = "${capturesRoot}/audio-topology";
   indexDir = "${capturesRoot}/audio-index";
+
+  cfg = config.sinnix.services.capture-audio;
+  excludeArgs = lib.concatMapStringsSep " " (
+    pattern: "--exclude ${lib.escapeShellArg pattern}"
+  ) cfg.excludeSourcePatterns;
 
   pwRecordBin = "${pkgs.pipewire}/bin/pw-record";
   pwMetadataBin = "${pkgs.pipewire}/bin/pw-metadata";
@@ -46,14 +55,15 @@ let
 
   mkRecorderService =
     {
-      channel,
-      dir,
-      extraExecArgs ? "",
+      name,
+      description,
+      execArgs,
+      dirs,
       runtimeDirectory ? null,
     }:
     {
       Unit = {
-        Description = "Sinnix audio capture: ${channel} channel (mic/sink-monitor -> hour-aligned Opus)";
+        Description = description;
         After = [
           "graphical-session.target"
           "pipewire.service"
@@ -64,28 +74,28 @@ let
       };
       Service = lib.sinnix.mkRuntimeServiceConfig {
         runtimeInventory = config.sinnix.runtime.inventory;
-        unit = "sinnix-audio-recorder-${channel}.service";
+        unit = "sinnix-audio-recorder-${name}.service";
         overrides = {
           Type = "simple";
           ExecStart = lib.concatStringsSep " " (
             [
               "${audioPkg}/bin/sinnix-audio-capture"
-              "record"
-              "--channel ${channel}"
+            ]
+            ++ execArgs
+            ++ [
               "--capture-root ${capturesRoot}"
               "--pw-record-bin ${pwRecordBin}"
               "--pw-metadata-bin ${pwMetadataBin}"
               "--pw-dump-bin ${pwDumpBin}"
               "--opusenc-bin ${opusencBin}"
             ]
-            ++ lib.optional (extraExecArgs != "") extraExecArgs
           );
           Restart = "on-failure";
           RestartSec = "5s";
           NoNewPrivileges = true;
           ProtectSystem = "strict";
           ProtectHome = "read-only";
-          ReadWritePaths = [ dir ];
+          ReadWritePaths = dirs;
           UMask = "0077";
         }
         // lib.optionalAttrs (runtimeDirectory != null) {
@@ -97,20 +107,37 @@ let
 in
 mkServiceModule {
   name = "capture-audio";
-  description = "Always-on dual-channel (mic + sink-monitor) PipeWire audio capture with pw-mon topology + Silero VAD index";
+  description = "Always-on PipeWire audio capture (every source + sink-monitor) with pw-mon topology + Silero VAD index";
+  extraOptions.excludeSourcePatterns = lib.mkOption {
+    type = lib.types.listOf lib.types.str;
+    default = [ "^alsa_input\\.usb-FiiO_DigiHug_USB_Audio" ];
+    description = ''
+      Capture sources never to record, as case-insensitive regexes matched
+      against a PipeWire node's `node.name` and `node.description`. Matching
+      on node.name rather than `object.serial` is deliberate: the serial is
+      reassigned on every replug, while node.name is derived from the ALSA
+      card id / USB path and survives one.
+
+      The default excludes the line-in on the FiiO DAC, which drives
+      speakers and has nothing connected to its input. Everything else
+      present is recorded: a source that is not recorded is data that does
+      not exist.
+    '';
+  };
   configFn =
     { ... }:
     {
       systemd.tmpfiles.rules = [
-        "d ${micDir} 0755 ${username} users -"
+        "d ${audioDir} 0755 ${username} users -"
         "d ${sinkDir} 0755 ${username} users -"
+        "d ${sourcesDir} 0755 ${username} users -"
         "d ${topologyDir} 0755 ${username} users -"
         "d ${indexDir} 0755 ${username} users -"
       ];
 
       sinnix.runtime.surfaces = {
-        capture-audio-recorder-mic = {
-          unit = "sinnix-audio-recorder-mic.service";
+        capture-audio-recorder-sources = {
+          unit = "sinnix-audio-recorder-sources.service";
           manager = "user";
           resourceClass = "capture-runtime";
           observe = {
@@ -119,13 +146,23 @@ mkServiceModule {
           };
           captures = [
             {
-              name = "audio-mic";
-              path = micDir;
+              # The supervisor's own state lane, not the audio directories:
+              # per-source channel dirs are dynamic, and pointing a staleness
+              # budget at their shared parent would let one healthy source
+              # mask every other source's silence.
+              name = "audio-sources";
+              path = sourcesDir;
               eventDriven = true;
-              # Hour-aligned segments (segment.SEGMENT_SECONDS): budget for
-              # one missed rotation before flagging stale, not just the
-              # rotation period itself.
-              staleAfterSeconds = 7200;
+              # The supervisor heartbeats into this lane every 10 minutes
+              # (sources.HEARTBEAT_SECONDS) even when nothing changes, so a
+              # quiet lane means a dead supervisor, not a quiet desktop.
+              staleAfterSeconds = 3600;
+              # Staleness cannot see the failure this lane exists to prevent:
+              # a source that is present in the graph and recorded by nobody.
+              livenessProbe = {
+                command = "${audioPkg}/bin/sinnix-audio-capture sources-probe --capture-root ${capturesRoot} --pw-dump-bin ${pwDumpBin} ${excludeArgs}";
+                timeoutSeconds = 15;
+              };
             }
           ];
         };
@@ -192,19 +229,33 @@ mkServiceModule {
         { ... }:
         {
           systemd.user.services = {
-            sinnix-audio-recorder-mic = mkRecorderService {
-              channel = "mic";
-              dir = micDir;
-              # Low-latency raw-PCM mirror off the mic channel only
-              # (recorder.py gates the tee on channel == "mic"); RuntimeDirectory
-              # gives the socket a writable %t path under ProtectSystem=strict
-              # without widening ReadWritePaths.
-              extraExecArgs = "--tee-socket %t/sinnix/audio/mic.pcm";
+            sinnix-audio-recorder-sources = mkRecorderService {
+              name = "sources";
+              description = "Sinnix audio capture: every PipeWire source (minus the blacklist) -> hour-aligned Opus";
+              execArgs = [
+                "record-sources"
+                "--tee-socket %t/sinnix/audio/mic.pcm"
+              ]
+              ++ lib.optional (excludeArgs != "") excludeArgs;
+              # The per-source channel directories are created at runtime, so
+              # the writable path is the parent, not an enumerable list.
+              dirs = [
+                audioDir
+                sourcesDir
+              ];
+              # Low-latency raw-PCM mirror of whichever source is the current
+              # default; RuntimeDirectory gives the socket a writable %t path
+              # under ProtectSystem=strict without widening ReadWritePaths.
               runtimeDirectory = "sinnix/audio";
             };
             sinnix-audio-recorder-sink-monitor = mkRecorderService {
-              channel = "sink-monitor";
-              dir = sinkDir;
+              name = "sink-monitor";
+              description = "Sinnix audio capture: sink-monitor channel (default sink's monitor ports -> hour-aligned Opus)";
+              execArgs = [
+                "record"
+                "--channel sink-monitor"
+              ];
+              dirs = [ sinkDir ];
             };
 
             sinnix-audio-topology = {

@@ -5,8 +5,8 @@ import time
 from pathlib import Path
 
 from sinnix_audio_capture.segment import (
-    OPUS_APPLICATION_CTL_VALUE,
     CHANNEL_PROFILES,
+    OPUS_APPLICATION_CTL_VALUE,
     OpusSegmentWriter,
     hour_bucket_start,
     opusenc_argv,
@@ -22,7 +22,12 @@ def test_hour_bucket_start_truncates_to_the_hour():
 
 def test_segment_filename_shape():
     bucket = float(calendar.timegm((2026, 8, 12, 14, 0, 0)))
-    assert segment_filename("mic", bucket) == "audio-mic-20260812T140000Z.opus"
+    # Per-source channel names contain dashes; the stamp is still the last
+    # dash-separated component, which is what indexer.segment_start_ts parses.
+    assert (
+        segment_filename("src-alsa-input-yeti", bucket)
+        == "audio-src-alsa-input-yeti-20260812T140000Z.opus"
+    )
 
 
 def test_opusenc_argv_sets_application_and_dtx_ctls():
@@ -30,7 +35,7 @@ def test_opusenc_argv_sets_application_and_dtx_ctls():
     # is asserted against the profile's own setting rather than a literal,
     # because which application a CHANNEL uses is a tuning decision while the
     # RENDERING of that decision is the contract.
-    profile = CHANNEL_PROFILES["mic"]
+    profile = CHANNEL_PROFILES["sink-monitor"]
     argv = opusenc_argv("opusenc", profile, Path("/tmp/out.opus.partial"))
     assert "--set-ctl-int" in argv
     assert f"4000={OPUS_APPLICATION_CTL_VALUE[profile.application]}" in argv
@@ -76,10 +81,10 @@ def _fake_popen(argv, stdin=None):
 
 
 def test_opus_segment_writer_rotates_on_hour_boundary(tmp_path: Path):
-    profile = CHANNEL_PROFILES["mic"]
+    profile = CHANNEL_PROFILES["sink-monitor"]
     writer = OpusSegmentWriter(
         output_dir=tmp_path,
-        channel="mic",
+        channel="src-alsa-input-yeti",
         argv_builder=lambda output_path: [
             "fake",
             *[f"noop-{k}={v}" for k, v in vars(profile).items()],
@@ -97,8 +102,8 @@ def test_opus_segment_writer_rotates_on_hour_boundary(tmp_path: Path):
 
     finished = sorted(p.name for p in tmp_path.glob("*.opus"))
     assert finished == [
-        "audio-mic-20260812T140000Z.opus",
-        "audio-mic-20260812T150000Z.opus",
+        "audio-src-alsa-input-yeti-20260812T140000Z.opus",
+        "audio-src-alsa-input-yeti-20260812T150000Z.opus",
     ]
     assert not list(tmp_path.glob("*.partial"))
 
@@ -106,7 +111,7 @@ def test_opus_segment_writer_rotates_on_hour_boundary(tmp_path: Path):
 def test_opus_segment_writer_maybe_rotate_on_quiet_hour(tmp_path: Path):
     writer = OpusSegmentWriter(
         output_dir=tmp_path,
-        channel="mic",
+        channel="src-alsa-input-yeti",
         argv_builder=lambda output_path: ["fake", str(output_path)],
         popen=_fake_popen,
     )
@@ -116,5 +121,5 @@ def test_opus_segment_writer_maybe_rotate_on_quiet_hour(tmp_path: Path):
     writer.write(b"x", ts=hour0 + 1)
     finished = writer.maybe_rotate(hour1 + 1)
     assert finished is not None
-    assert finished.name == "audio-mic-20260812T140000Z.opus"
+    assert finished.name == "audio-src-alsa-input-yeti-20260812T140000Z.opus"
     assert not writer.is_open

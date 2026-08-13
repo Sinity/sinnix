@@ -45,6 +45,26 @@ class SpeechSpan:
     end: float
 
 
+def discover_channels(capture_root: Path) -> list[str]:
+    """Channel directories under `<capture_root>/audio/` worth indexing.
+
+    Per-source channels are created at runtime as devices appear, so the
+    set cannot be a fixed list. Matching is restricted to the shapes this
+    package writes (`sink-monitor`, `src-*`, and `mic` from before capture
+    went per-source) so that neighbouring directories in the lake --
+    `legacy/`, `archive/`, `raw/` -- are never walked.
+    """
+    audio_dir = Path(capture_root) / "audio"
+    if not audio_dir.is_dir():
+        return []
+    return sorted(
+        p.name
+        for p in audio_dir.iterdir()
+        if p.is_dir()
+        and (p.name in ("mic", "sink-monitor") or p.name.startswith("src-"))
+    )
+
+
 def list_segments(channel_dir: Path, *, since_ts: float) -> list[Path]:
     """Real (non-`.partial`) segments modified at/after since_ts, oldest
     first -- so a crashed indexer resumes roughly where it left off."""
@@ -152,18 +172,21 @@ def _speech_spans_for_segment(model, pcm16_bytes: bytes) -> list[SpeechSpan]:
 def run_index_pass(
     *,
     capture_root: Path,
-    channels: tuple[str, ...] = ("mic", "sink-monitor"),
+    channels: tuple[str, ...] | None = None,
     since_ts: float,
     ffmpeg_bin: str = "ffmpeg",
     writer_factory=None,
 ) -> int:
     """Live entry point (`sinnix-audio-capture index`). Returns the number
-    of segments indexed."""
+    of segments indexed. `channels=None` indexes every channel directory
+    currently present."""
     from sinnix_capture.writer import CaptureWriter
 
     if writer_factory is None:
         writer_factory = lambda: CaptureWriter(capture_root, INDEX_LANE)  # noqa: E731
 
+    if channels is None:
+        channels = tuple(discover_channels(capture_root))
     writer = writer_factory()
     model = _load_model()
     indexed = 0
