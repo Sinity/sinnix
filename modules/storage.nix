@@ -37,14 +37,11 @@ in
 
   systemd.tmpfiles.rules = lib.mkAfter [
     "d ${realmRoot}/.Trash-${trashUid} 0700 ${username} ${primaryGroupName} -"
-    # Same XDG trash affordance on the backup/archive HDD: without a
-    # user-writable .Trash-1000 at the volume top, every trash attempt under
-    # /outer-realm fails (the mountpoint is root-owned, so the trasher
-    # cannot create it either) — this is what broke yazi deletion in the
-    # archive/inbox/misc dumping grounds.
-    # /neo-outer-realm is deliberately excluded: it is an automount and a
-    # boot-time tmpfiles touch would spin it up every boot; its .Trash-1000
-    # was created manually instead.
+    # XDG trash needs a user-writable .Trash-<uid> at the volume top: the
+    # mountpoint is root-owned, so the trasher cannot create one itself and
+    # every trash attempt under /outer-realm fails without this.
+    # /neo-outer-realm is excluded — it is an automount, and a boot-time
+    # tmpfiles touch would spin it up every boot.
     "d ${config.sinnix.paths.outerRealm}/.Trash-${trashUid} 0700 ${username} ${primaryGroupName} -"
   ];
 

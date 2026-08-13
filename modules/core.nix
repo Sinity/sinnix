@@ -84,13 +84,9 @@ in
 
     };
 
-    # Bus implementation: the NixOS default (classic dbus-daemon) — a
-    # deliberate choice, not an omission.
-
-    # nsncd opens its compatibility socket at /var/run/nscd/socket. On the
-    # current systemd/nixpkgs generation the upstream unit bind-mounts /run/nscd
-    # but still leaves the /var/run path read-only under ProtectSystem=strict,
-    # causing nss-user-lookup.target to fail repeatedly during boot.
+    # nsncd opens its compatibility socket at /var/run/nscd/socket, but the
+    # upstream unit bind-mounts only /run/nscd and leaves /var/run read-only
+    # under ProtectSystem=strict — nss-user-lookup.target then fails at boot.
     systemd.services.nscd.serviceConfig.ReadWritePaths = [
       "/run/nscd"
       "/var/run/nscd"
