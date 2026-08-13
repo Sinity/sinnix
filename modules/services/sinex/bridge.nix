@@ -38,6 +38,14 @@ let
   databasePort = 5432;
   databaseUser = "sinex";
   databaseName = "sinex_${sinexEnvironment}";
+  databaseAuthentication = ''
+    local   all             postgres                                peer
+    local   all             all                                     scram-sha-256
+    host    all             all             127.0.0.1/32            scram-sha-256
+    host    all             all             ::1/128                 scram-sha-256
+    host    all             all             0.0.0.0/0               reject
+    host    all             all             ::/0                    reject
+  '';
   databasePasswordFile = lib.attrByPath [ "sinnix" "secrets" "paths" "sinex-local-db" ] null config;
   natsCliMaxBytes = "2147483647";
   hostPrepared = cfg.prepareHost || cfg.enable || cfg.provisionDatabase;
@@ -198,6 +206,12 @@ in
       (lib.mkIf hostPrepared {
         services = {
           postgresql.dataDir = sinexPostgresDataDir;
+          # NixOS's own `authentication` default outranks whatever the sinex
+          # module supplies, so without mkForce the deployed pg_hba is
+          # upstream's permissive default rather than the policy above -- and
+          # nothing in the build says so. Force it until the pinned input
+          # carries a priority that loses to a host policy.
+          postgresql.authentication = lib.mkForce databaseAuthentication;
           # Compress full-page images in WAL: they dominate WAL volume on a
           # write-hot database and the data dir sits on the wear-limited
           # root SSD. lz4 is cheap CPU-wise and reload-safe. Keep
@@ -288,8 +302,13 @@ in
               port = databasePort;
               name = databaseName;
               user = databaseUser;
+              # Keep the production policy explicit instead of inheriting an
+              # upstream default. This governs application Unix-socket and
+              # loopback-TCP connections; the upstream module retains peer
+              # only for the postgresql-setup service account.
+              localAuth = "scram-sha-256";
               # Delay postgresql-setup until agenix has materialized the
-              # password file (no-op when localAuth = "trust").
+              # password file required by SCRAM authentication.
               setupWaitForPaths = lib.optional (
                 cfg.provisionDatabase
                 && databasePasswordFile != null
