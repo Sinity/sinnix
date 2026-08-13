@@ -45,6 +45,7 @@ in
     ./tests/ops-reducer.nix
     ./tests/quota.nix
     ./tests/noctalia.nix
+    ./tests/memory-audit.nix
   ];
 
   perSystem =
