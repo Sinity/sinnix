@@ -1,0 +1,283 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Fire the Xiaomi bootloader-unlock application so it ARRIVES at the Beijing-midnight quota reset
+# runtimeInputs: python3
+"""Timed submitter for Xiaomi's bootloader-unlock application (sinnix-9tc).
+
+WHY THIS EXISTS. Xiaomi gates bootloader unlocking behind a daily
+application quota that resets at 00:00 Beijing time (UTC+8) -- which is
+18:00 in Europe/Warsaw during CEST. Community reports put the pool at a few
+dozen slots globally, and it empties within seconds. The operator applied
+"within the first minute" through the Xiaomi Community app and still lost,
+which is the expected outcome: a human tapping a button in an Android app
+pays UI render, touch dispatch, app-side request construction and TLS
+handshake AFTER the reset instant. Tens of seconds late is not close.
+
+WHAT THIS DOES DIFFERENTLY. The application is an ordinary HTTPS POST whose
+only credential is the `new_bbs_serviceToken` cookie from a normal web login
+at https://c.mi.com/global -- no app, no device, no interception needed. So
+the request can be built ahead of time and released to ARRIVE at the reset
+instant rather than start then:
+
+  - true time from NTP, so a drifting local clock cannot bias the shot;
+  - TLS sessions opened and handshaked BEFORE the deadline, so the wire
+    carries only the request bytes at go-time;
+  - measured RTT, firing at target-(RTT/2) so the packet LANDS at 00:00
+    rather than departing then;
+  - several pre-warmed connections released together, because a single
+    request that hits a slow path loses to no purpose.
+
+This does not defeat the quota; it just stops losing to self-inflicted
+latency. If the pool is genuinely full in the first 50ms, nothing here helps.
+
+AUTHORIZATION NOTE. This unlocks the operator's own hardware. It sends one
+small burst per day at a published reset boundary -- deliberately NOT a
+retry loop, which would be abusive and would risk the account the unlock
+depends on.
+
+TOKEN. Read from --token-file, or $MI_BBS_TOKEN, or /run/agenix/mi-bbs-token.
+The cookie is session-scoped and expires; refresh it the same day you intend
+to fire. `--check` validates it without applying, which is the difference
+between finding out now and finding out at 18:00:00.
+"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import os
+import socket
+import ssl
+import struct
+import sys
+import time
+from datetime import datetime, timedelta, timezone
+
+HOST = "sgp-api.buy.mi.com"
+PATH = "/bbs/api/global/apply/bl-auth"
+PORT = 443
+BEIJING = timezone(timedelta(hours=8))
+
+# The Community app's own client identity. The endpoint is an app API; a
+# stock python User-Agent is an obvious tell and there is no upside to it.
+CLIENT_VERSION_CODE = "500411"
+CLIENT_VERSION_NAME = "5.4.11"
+USER_AGENT = "okhttp/4.12.0"
+
+
+def log(msg: str) -> None:
+    print(f"{datetime.now().isoformat(timespec='milliseconds')} {msg}", flush=True)
+
+
+def ntp_offset(server: str = "pool.ntp.org", samples: int = 4) -> float:
+    """Seconds to ADD to local time to get true time. 0.0 if NTP is unreachable.
+
+    Reported rather than silently assumed: a bad clock is exactly the failure
+    that would make a perfectly-written timer miss by seconds.
+    """
+    best: tuple[float, float] | None = None
+    for _ in range(samples):
+        try:
+            pkt = b"\x1b" + 47 * b"\0"
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(3)
+            t0 = time.time()
+            s.sendto(pkt, (server, 123))
+            data, _ = s.recvfrom(1024)
+            t3 = time.time()
+            s.close()
+            secs = struct.unpack("!12I", data)[10] - 2208988800
+            frac = struct.unpack("!12I", data)[11] / 2**32
+            server_time = secs + frac
+            rtt = t3 - t0
+            offset = server_time + rtt / 2 - t3
+            if best is None or rtt < best[0]:
+                best = (rtt, offset)
+        except Exception:
+            continue
+    if best is None:
+        return 0.0
+    return best[1]
+
+
+def next_reset(now_true: float, at_hour: int = 0) -> float:
+    """Unix time of the next Beijing-midnight quota reset."""
+    now = datetime.fromtimestamp(now_true, BEIJING)
+    target = now.replace(hour=at_hour, minute=0, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return target.timestamp()
+
+
+def build_request(token: str, device_id: str, is_retry: bool) -> bytes:
+    body = json.dumps({"is_retry": is_retry}, separators=(",", ":")).encode()
+    cookie = (
+        f"new_bbs_serviceToken={token};"
+        f"versionCode={CLIENT_VERSION_CODE};"
+        f"versionName={CLIENT_VERSION_NAME};"
+        f"deviceId={device_id};"
+    )
+    head = (
+        f"POST {PATH} HTTP/1.1\r\n"
+        f"Host: {HOST}\r\n"
+        f"Cookie: {cookie}\r\n"
+        f"Content-Type: application/json; charset=utf-8\r\n"
+        f"User-Agent: {USER_AGENT}\r\n"
+        f"Content-Length: {len(body)}\r\n"
+        f"Connection: keep-alive\r\n"
+        f"\r\n"
+    ).encode()
+    return head + body
+
+
+async def open_warm(ctx: ssl.SSLContext) -> tuple[asyncio.StreamReader, asyncio.StreamWriter, float]:
+    """Connect + handshake now, measure RTT, leave the socket idle and ready."""
+    t0 = time.monotonic()
+    reader, writer = await asyncio.open_connection(HOST, PORT, ssl=ctx, server_hostname=HOST)
+    rtt = time.monotonic() - t0
+    return reader, writer, rtt
+
+
+async def fire(reader, writer, payload: bytes, idx: int) -> tuple[int, str]:
+    try:
+        writer.write(payload)
+        await writer.drain()
+        raw = await asyncio.wait_for(reader.read(65536), timeout=20)
+    except Exception as exc:  # noqa: BLE001 - report, never swallow
+        return (-1, f"conn{idx}: transport error: {exc}")
+    text = raw.decode("utf-8", "replace")
+    status = -1
+    if text.startswith("HTTP/"):
+        try:
+            status = int(text.split(" ", 2)[1])
+        except (IndexError, ValueError):
+            status = -1
+    body = text.split("\r\n\r\n", 1)[1] if "\r\n\r\n" in text else text
+    return (status, f"conn{idx}: HTTP {status} {body.strip()[:400]}")
+
+
+def classify(bodies: list[str]) -> str:
+    """Xiaomi answers with a code in the JSON; surface it rather than guessing."""
+    joined = " ".join(bodies).lower()
+    if '"code":0' in joined.replace(" ", ""):
+        return "SUCCESS"
+    for needle, verdict in (
+        ("quota", "QUOTA-EXHAUSTED"),
+        ("limit", "QUOTA-EXHAUSTED"),
+        ("not login", "TOKEN-INVALID"),
+        ("token", "TOKEN-INVALID"),
+        ("401", "TOKEN-INVALID"),
+    ):
+        if needle in joined:
+            return verdict
+    return "UNKNOWN"
+
+
+async def run(args: argparse.Namespace) -> int:
+    token = args.token
+    if not token:
+        log("no token available (--token-file, $MI_BBS_TOKEN, or /run/agenix/mi-bbs-token)")
+        return 2
+
+    payload = build_request(token, args.device_id, is_retry=not args.first_try)
+
+    off = 0.0 if args.no_ntp else ntp_offset(args.ntp_server)
+    log(f"ntp offset {off * 1000:+.1f} ms" + ("" if off else " (unavailable or already exact)"))
+
+    now_true = time.time() + off
+    if args.check:
+        ctx = ssl.create_default_context()
+        r, w, rtt = await open_warm(ctx)
+        log(f"token check: rtt {rtt * 1000:.0f} ms")
+        status, detail = await fire(r, w, payload, 0)
+        w.close()
+        log(detail)
+        verdict = classify([detail])
+        log(f"verdict: {verdict}")
+        return 0 if verdict in ("SUCCESS", "QUOTA-EXHAUSTED") else 1
+
+    target = args.at_epoch or next_reset(now_true, args.hour)
+    log(f"target {datetime.fromtimestamp(target, BEIJING).isoformat()} Beijing "
+        f"({datetime.fromtimestamp(target).astimezone().isoformat()} local)")
+
+    lead = args.warm_lead
+    while (target - (time.time() + off)) > lead:
+        remaining = target - (time.time() + off)
+        time.sleep(min(30.0, max(0.5, remaining - lead)))
+
+    ctx = ssl.create_default_context()
+    warmed = await asyncio.gather(*(open_warm(ctx) for _ in range(args.connections)),
+                                  return_exceptions=True)
+    conns = [w for w in warmed if not isinstance(w, Exception)]
+    if not conns:
+        log("no connection could be pre-warmed; aborting rather than firing cold")
+        return 1
+    rtt_min = min(c[2] for c in conns)
+    log(f"{len(conns)} warm connections, min rtt {rtt_min * 1000:.0f} ms")
+
+    # Send early by half the RTT so the packet ARRIVES at the boundary.
+    release = target - rtt_min / 2 - args.lead_ms / 1000.0
+    while (time.time() + off) < release:
+        gap = release - (time.time() + off)
+        if gap > 0.005:
+            time.sleep(gap / 2)
+    log(f"release at {datetime.fromtimestamp(time.time() + off).isoformat(timespec='milliseconds')}")
+
+    results = await asyncio.gather(
+        *(fire(r, w, payload, i) for i, (r, w, _) in enumerate(conns))
+    )
+    for _, detail in results:
+        log(detail)
+    for _, w, _ in conns:
+        try:
+            w.close()
+        except Exception:
+            pass
+
+    verdict = classify([d for _, d in results])
+    log(f"verdict: {verdict}")
+    return 0 if verdict == "SUCCESS" else 1
+
+
+def read_token(explicit: str | None) -> str | None:
+    if explicit:
+        p = os.path.expanduser(explicit)
+        if os.path.exists(p):
+            return open(p).read().strip()
+        return explicit.strip()
+    if os.environ.get("MI_BBS_TOKEN"):
+        return os.environ["MI_BBS_TOKEN"].strip()
+    for path in ("/run/agenix/mi-bbs-token",):
+        if os.path.exists(path):
+            try:
+                return open(path).read().strip()
+            except OSError:
+                pass
+    return None
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--token-file", dest="token_file", help="file holding new_bbs_serviceToken")
+    ap.add_argument("--device-id", default="0000000000000000",
+                    help="deviceId cookie component; any stable value works")
+    ap.add_argument("--check", action="store_true",
+                    help="validate the token by applying NOW instead of waiting for the reset")
+    ap.add_argument("--hour", type=int, default=0, help="Beijing hour of the reset (default 0)")
+    ap.add_argument("--at-epoch", type=float, default=0.0, help="explicit unix target, overrides --hour")
+    ap.add_argument("--connections", type=int, default=4, help="pre-warmed connections released together")
+    ap.add_argument("--warm-lead", type=float, default=20.0, help="seconds before target to open connections")
+    ap.add_argument("--lead-ms", type=float, default=0.0, help="extra milliseconds to fire early")
+    ap.add_argument("--ntp-server", default="pool.ntp.org")
+    ap.add_argument("--no-ntp", action="store_true", help="trust the local clock (not recommended)")
+    ap.add_argument("--first-try", action="store_true", help="send is_retry=false")
+    args = ap.parse_args()
+    args.token = read_token(args.token_file)
+    try:
+        return asyncio.run(run(args))
+    except KeyboardInterrupt:
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main())
