@@ -1,44 +1,31 @@
 # Wallpaper corpus, CLI, and time-of-day set switching for Noctalia.
 #
 # Noctalia is the Material-You color authority (wallpaper -> palette ->
-# GTK/Qt/kitty/etc templates -> Hyprland border colors, see noctalia.nix); the
-# active wallpaper is not decoration here, it drives the whole system palette.
-# This module owns everything AROUND that pipeline without fighting it:
+# GTK/Qt/kitty templates -> Hyprland border colors, see noctalia.nix), so the
+# active wallpaper drives the whole system palette. This module owns the
+# corpus and scheduling around that pipeline:
 #
 #   - a curated corpus at `corpusRoot` (default /realm/media/wallpaper, off
-#     the wear-limited root SSD, alongside the lake's other media
-#     collections) organized as sets/<mood>/{dark,light} + a flat pool/ for
-#     imported-but-unclassified images + generated/ for the opt-in
-#     ComfyUI lane (see modules/services/wallpaper-generate.nix);
-#   - Noctalia v5's native per-mode wallpaper directories
-#     (config.toml: wallpaper.directory_dark / directory_light -- verified
-#     against the installed noctalia-5.0.0 binary's own config schema
-#     validator, not assumed) pointed at STABLE paths under ~/wallpaper
-#     (already the live, persisted, Noctalia-watched directory -- see
-#     modules/persistence.nix) so config.toml itself never needs to change;
-#   - a small time-of-day timer that retargets the ~/wallpaper/{dark,light}
-#     symlinks to sets/<mood>/{dark,light} every 15 minutes. Noctalia v5 has
-#     no native time-of-day wallpaper scheduling (verified: exhaustive in the
-#     shipped binary's `noctalia msg --help` command list has no such verb),
-#     so this is external, and deliberately does NOT touch config.toml --
-#     only the symlink targets move, so Noctalia's own Settings GUI can keep
-#     writing config.toml without racing this timer;
-#   - the `sinnix-wallpaper` CLI (current/next/prev/pin/unpin/import/status)
-#     wired over Noctalia's real IPC surface (`noctalia msg wallpaper-*`,
-#     `color-scheme-get`, `theme-mode-get` -- verified against the shipped
-#     binary's `noctalia msg --help`) plus the offline `noctalia theme`
-#     palette-preview subcommand.
+#     the wear-limited root SSD) organized as sets/<mood>/{dark,light}, plus a
+#     flat pool/ for imported-but-unclassified images and generated/ for the
+#     opt-in ComfyUI lane (modules/services/wallpaper-generate.nix);
+#   - Noctalia's per-mode wallpaper directories (config.toml:
+#     wallpaper.directory_{dark,light}) pointed at STABLE paths under
+#     ~/wallpaper (the live, persisted, Noctalia-watched directory) so
+#     config.toml itself never needs to change;
+#   - a time-of-day timer retargeting the ~/wallpaper/{dark,light} symlinks.
+#     Noctalia has no native time-of-day scheduling, so this is external, and
+#     it moves only symlink targets — never config.toml, which Noctalia's own
+#     Settings GUI writes and would race;
+#   - the `sinnix-wallpaper` CLI over Noctalia's IPC surface (`noctalia msg
+#     wallpaper-*`, `color-scheme-get`, `theme-mode-get`) plus the offline
+#     `noctalia theme` palette preview.
 #
-# OLED care (this is the FO48U, not a theory exercise): the time-of-day sets
-# exist so the operator can bias toward LOW-KEY, high-contrast imagery for
-# long-dwell modes (day/night) and reserve brighter imagery for
-# shorter-lived morning/evening windows; `sinnix-wallpaper import` runs a
-# brightness/uniformity heuristic (ImageMagick mean + stddev on a downscaled
-# grayscale render) and warns -- but does not block -- on images with large,
-# low-contrast bright regions, which are the OLED burn-in risk shape.
-# Animated wallpaper (mpvpaper) is deliberately NOT wired here: the sibling
-# research flagged it risk-first for this panel and the default is to skip
-# it entirely, not to gate it behind an option nobody asked for.
+# OLED care for the FO48U: the time-of-day sets let long-dwell modes
+# (day/night) bias toward low-key, high-contrast imagery; `sinnix-wallpaper
+# import` warns (does not block) on large low-contrast bright regions, the
+# burn-in risk shape. Animated wallpaper (mpvpaper) is not wired here — it is
+# a burn-in risk on this panel.
 {
   mkFeatureModule,
   lib,
@@ -104,12 +91,10 @@ mkFeatureModule {
       ]) cfg.moods;
     in
     {
-      # Every ancestor needs its own rule, and ancestors must come first.
-      # `sets` was previously undeclared, so tmpfiles created it implicitly as
-      # root inside a sinity-owned parent and then refused every leaf below it:
-      # "Detected unsafe path transition /realm/media/wallpaper (owned by
-      # sinity) -> /realm/media/wallpaper/sets (owned by root)". The timer has
-      # been firing into missing directories and exiting 0 ever since.
+      # Every ancestor needs its own rule, and ancestors must come first: an
+      # undeclared intermediate is created implicitly as root inside a
+      # sinity-owned parent, and tmpfiles then refuses every leaf below it
+      # ("Detected unsafe path transition ...").
       systemd.tmpfiles.rules = [
         "d ${cfg.corpusRoot} 0755 ${user} users -"
         "d ${cfg.corpusRoot}/sets 0755 ${user} users -"

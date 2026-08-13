@@ -1,10 +1,6 @@
-# Model Context Protocol (MCP) servers and AI-integrated tool settings
-#
-# Provides:
-# - MCP server wrappers (Firecrawl, Chrome DevTools, Polylogue, Lynchpin)
-# - MCP server registry and explicit lean/full/browser agent profiles
-# - Claude/Codex/Gemini dotfile linking and integration
-# - System monitoring tools (htop)
+# Model Context Protocol (MCP) servers and AI-integrated tool settings: server
+# wrappers, the lean/full/browser agent profiles, and Claude/Codex/Gemini
+# dotfile integration.
 #
 # Domain pieces live in sibling plain-nix helpers, imported below:
 # mcp-tools.nix (generic MCP wrappers), client-profiles.nix
@@ -190,10 +186,9 @@ mkFeatureModule {
           mkDotsFile = mkDotsFileFor config;
         in
         {
-          # htoprc lives in dots/htop/htoprc (live out-of-store symlink)
-          # instead of `programs.htop.settings`: no other module touches
-          # this option, so bypassing HM's settings-to-htoprc generator is
-          # safe and edits take effect without a rebuild.
+          # htoprc lives in dots/htop/htoprc (out-of-store symlink) instead of
+          # `programs.htop.settings`, so edits take effect without a rebuild.
+          # Safe only while no other module contributes to that option.
           programs.htop.enable = true;
           xdg.configFile."htop/htoprc".source = mkDotsFile "/htop/htoprc";
 

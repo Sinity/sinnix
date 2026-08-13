@@ -1,10 +1,5 @@
-# Shell Environment Configuration
-#
-# Unified shell experience with subFeatures for:
-# - zsh: Zsh + oh-my-zsh + completion + syntax highlighting
-# - utilities: CLI tools (bat, eza, fd, ripgrep) + session vars + config symlinks
-# - tmux: Terminal multiplexer with vi-mode
-# - prompt: Starship prompt + Atuin history + Zoxide + FZF
+# Shell environment: zsh, prompt (Starship/Atuin/Zoxide/FZF), CLI utilities
+# and session variables, and tmux — each a separately toggleable subFeature.
 {
   mkFeatureModule,
   lib,
@@ -57,9 +52,7 @@ mkFeatureModule {
       findFlakeRoot = pkgs.writeShellScriptBin "find-flake-root" (builtins.readFile ./find-flake-root.sh);
     in
     lib.mkMerge [
-      # ========================================
       # Zsh Configuration
-      # ========================================
       (lib.mkIf cfg.zsh.enable {
         home-manager.users.${user} =
           {
@@ -147,9 +140,7 @@ mkFeatureModule {
           };
       })
 
-      # ========================================
       # Prompt & History Tools (Starship, Atuin, Zoxide, FZF)
-      # ========================================
       (lib.mkIf cfg.prompt.enable {
         home-manager.users.${user} =
           {
@@ -162,14 +153,11 @@ mkFeatureModule {
             mkDotsFile = mkDotsFileFor config;
           in
           {
-            # Starship settings stay in Nix (not moved to dots/): Stylix's
-            # `stylix.targets.starship` merges live theme-derived
-            # `palette`/`palettes.base16` keys into this same
-            # `programs.starship.settings` attrset, and HM's starship module
-            # only supports generating starship.toml from the fully-merged
-            # settings (no raw-file passthrough). Bypassing the module would
-            # mean hand-copying the current palette into a static dots/ file,
-            # which would silently desync from future Stylix scheme changes.
+            # Starship settings stay in Nix rather than dots/: Stylix's
+            # `stylix.targets.starship` merges theme-derived palette keys into
+            # this same settings attrset, and HM's starship module has no
+            # raw-file passthrough. A static dots/ file would desync from
+            # future Stylix scheme changes.
             programs.starship = {
               enable = true;
               enableBashIntegration = true;
@@ -257,16 +245,11 @@ mkFeatureModule {
               };
             };
 
-            # Atuin History
-            #
-            # Settings live in dots/atuin/config.toml (live out-of-store
-            # symlink) instead of `programs.atuin.settings`: this host never
-            # sets `home.preferXdgDirectories` or enables the atuin daemon, so
-            # HM's atuin module contributes no other keys into the merged
-            # settings attrset here — safe to fully bypass the module's
-            # generated config file. If either of those get enabled later,
-            # revisit (they inject logs.dir/daemon settings into the same
-            # generated file).
+            # Atuin settings live in dots/atuin/config.toml (out-of-store
+            # symlink) instead of `programs.atuin.settings`. Safe only while
+            # `home.preferXdgDirectories` and the atuin daemon stay off — both
+            # inject logs.dir/daemon keys into the module-generated file that
+            # this bypasses.
             programs.atuin = {
               enable = true;
               enableNushellIntegration = false;
@@ -282,13 +265,10 @@ mkFeatureModule {
               enableNushellIntegration = true;
             };
 
-            # FZF (fuzzy finder)
-            #
-            # Kept as HM options, not moved to dots/: these fields render into
-            # `home.sessionVariables` (FZF_DEFAULT_COMMAND etc.), which HM
-            # exports globally (all shells/services), not just zsh. Sourcing
-            # them from a zsh-only dots/ file would narrow that to interactive
-            # zsh sessions — a real behavior change, not a pure config move.
+            # FZF stays in HM options rather than dots/: these fields render
+            # into `home.sessionVariables` (FZF_DEFAULT_COMMAND etc.), which HM
+            # exports to all shells and services. A zsh-only dots/ file would
+            # narrow that to interactive zsh sessions.
             programs.fzf = {
               enable = true;
               defaultCommand = "fd --hidden --strip-cwd-prefix --exclude .git";
@@ -307,9 +287,7 @@ mkFeatureModule {
           };
       })
 
-      # ========================================
       # CLI Utilities & Session Config
-      # ========================================
       (lib.mkIf cfg.utilities.enable {
         # Persistence for AI tools and dev caches (colocated with their config)
         sinnix.persistence.home = {
@@ -398,7 +376,6 @@ mkFeatureModule {
               ${lib.getExe pkgs.bat} cache --build 2>/dev/null || true
             '';
 
-            # Bash integration for direnv
             home.file.".bashrc" = {
               text = ''
                 # Only interactive bash shells should hook direnv. Running
@@ -425,9 +402,7 @@ mkFeatureModule {
           };
       })
 
-      # ========================================
       # Tmux Configuration
-      # ========================================
       (lib.mkIf cfg.tmux.enable {
         home-manager.users.${user} =
           { config, sinnix, ... }:
@@ -441,11 +416,11 @@ mkFeatureModule {
               mouse = true;
               prefix = "C-Space";
               terminal = "tmux-256color";
-              # Source user config via symlink for hot reload (no rebuild needed)
+              # Sourced from an out-of-store symlink so edits hot-reload
+              # without a rebuild.
               extraConfig = "source-file ~/.config/tmux/user.conf";
             };
 
-            # Symlink tmux user config for hot reload (edits apply without rebuild)
             xdg.configFile."tmux/user.conf".source =
               config.lib.file.mkOutOfStoreSymlink "${sinnix.paths.dotsRoot}/tmux/tmux.conf";
           };

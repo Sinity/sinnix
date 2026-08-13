@@ -19,13 +19,11 @@ let
   shellTmpRoot = "${sinnixCfg.paths.realmRoot}/tmp/shell";
 
   # Shared npm bootstrap prelude — delegates state-dir setup, first-run npm
-  # install, and launcher regeneration to the packaged
-  # sinnix-agent-npm-bootstrap script (scripts/sinnix-agent-npm-bootstrap).
-  # The long-lived agent process launches directly via the generated
-  # launch.sh, not through buildFHSEnv/bubblewrap, so sudo and other
-  # privileged helpers do not inherit no_new_privileges. `STATE` is
-  # recomputed here (not exported by the bootstrap subprocess) because the
-  # wrapper needs it below for the final agent-scope-exec/launch call.
+  # install, and launcher regeneration to scripts/sinnix-agent-npm-bootstrap.
+  # The agent launches directly via the generated launch.sh, not through
+  # buildFHSEnv/bubblewrap, so sudo and other privileged helpers do not
+  # inherit no_new_privileges. `STATE` is recomputed here because the
+  # bootstrap subprocess cannot export it back to the wrapper.
   mkNpmBootstrap =
     {
       stateDir,
@@ -34,14 +32,11 @@ let
     }:
     ''
       STATE="$HOME/.local/state/${stateDir}"
-      # Guarantee the NVMe scratch TMPDIR rather than trusting inheritance.
+      # Guarantee the NVMe scratch TMPDIR rather than trusting inheritance:
       # environment.sessionVariables.TMPDIR (profiles/workstation.nix) only
-      # reaches processes whose session imported it; a long-lived agent CLI
-      # started outside that path runs with TMPDIR unset, so every devshell
-      # and test run underneath it falls back to the 6 GiB /tmp tmpfs and
-      # refills it, silently truncating shell heredocs mid-write even though
-      # `systemctl --user show-environment` correctly shows the session
-      # variable set — inheritance, not the session variable, is the gap.
+      # reaches processes whose session imported it, so an agent CLI started
+      # outside that path runs with TMPDIR unset and everything beneath it
+      # fills the bounded /tmp tmpfs, truncating shell heredocs mid-write.
       if [ -z "''${TMPDIR:-}" ] && [ -d ${lib.escapeShellArg sinnixCfg.paths.realmRoot} ]; then
         export TMPDIR=${lib.escapeShellArg shellTmpRoot}
         ${pkgs.coreutils}/bin/install -d -m 1777 "$TMPDIR" 2>/dev/null || true
@@ -54,21 +49,17 @@ let
     '';
 
   # Resolves an agenix secret name to its runtime path, honoring a live
-  # config override under sinnix.secrets.paths.<name> the same way
-  # clis.nix's former per-secret `deepseekSecretPath` local did (that was
-  # `lib.attrByPath [ "sinnix" "secrets" "paths" name ] default config`;
-  # sinnixCfg here already IS `config.sinnix`, so the attrByPath drops the
-  # leading "sinnix" segment).
+  # config override under sinnix.secrets.paths.<name>. `sinnixCfg` already IS
+  # `config.sinnix`, hence the attrPath without a leading "sinnix" segment.
   resolveSecretPath =
     secretName: lib.attrByPath [ "secrets" "paths" secretName ] "/run/agenix/${secretName}" sinnixCfg;
 
-  # Shared backend-switch env builder for the claude-deepseek/claude-local
-  # wrappers (see flake/data/agent-lanes.nix claudeLanes): points Claude
-  # Code's native Anthropic-protocol client at a non-Anthropic endpoint and
-  # fans one model name out across every ANTHROPIC_*MODEL var Claude Code
-  # reads. `name` is the lane name (e.g. "deepseek"); it drives the
-  # intermediate shell variable name and the wrapper's own error-caller name
-  # so error text stays wrapper-specific without extra data fields.
+  # Backend-switch env builder for the claude-deepseek/claude-local wrappers
+  # (flake/data/agent-lanes.nix claudeLanes): points Claude Code's native
+  # Anthropic-protocol client at a non-Anthropic endpoint and fans one model
+  # name out across every ANTHROPIC_*MODEL var Claude Code reads. `name` is
+  # the lane name; it names the intermediate shell variable and the error
+  # caller, keeping error text wrapper-specific without extra data fields.
   mkClaudeBackendEnv =
     {
       name,
@@ -172,7 +163,7 @@ let
         # Claude Code does not use the ordinary TMPDIR for Bash/task output
         # captures. Its supported override is CLAUDE_CODE_TMPDIR; without it,
         # concurrent subagents accumulate under /tmp/claude-$UID and can
-        # exhaust the workstation's bounded /tmp tmpfs (sinnix-77w).
+        # exhaust the workstation's bounded /tmp tmpfs.
         if [ -z "''${CLAUDE_CODE_TMPDIR:-}" ]; then
           if [ -d "${sinnixCfg.paths.realmRoot}" ]; then
             export CLAUDE_CODE_TMPDIR=${lib.escapeShellArg claudeTmpRoot}
@@ -260,10 +251,9 @@ let
     force = true;
   };
   # Env-only prelude for Hermes wrappers. PATH/HERMES_HOME/HERMES_INSTALL_DIR
-  # must be exported here (not in a subprocess) because the final `exec` of
-  # the hermes binary below needs to inherit them. The actual clone/sync/
-  # scaffold bootstrap logic lives in scripts/sinnix-ensure-hermes, which
-  # runs as a subprocess relying on this already-exported PATH/env.
+  # must be exported here rather than in a subprocess: the final `exec` of the
+  # hermes binary inherits them, and scripts/sinnix-ensure-hermes (which does
+  # the clone/sync/scaffold) runs as a subprocess relying on this env.
   hermesBootstrap = ''
     export HERMES_HOME="''${HERMES_HOME:-$HOME/.hermes}"
     export HERMES_INSTALL_DIR="''${HERMES_INSTALL_DIR:-$HERMES_HOME/hermes-agent}"

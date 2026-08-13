@@ -62,11 +62,6 @@ mkFeatureModule {
 
       sinnixCfg = config.sinnix;
 
-      # The runtime path of the agenix-decrypted DeepSeek API key (read at
-      # launch by the claude-deepseek/codex-deepseek wrappers) is resolved
-      # by backends.nix's resolveSecretPath (sinnix.secrets.paths.<name>
-      # override lookup).
-
       jsonFormat = pkgs.formats.json { };
       yamlFormat = pkgs.formats.yaml { };
       inherit (helpers.data) mcpRegistry agentLanes;
@@ -144,15 +139,11 @@ mkFeatureModule {
             silence_threshold = 200;
             silence_duration = 1.2;
           };
-          # Repointed at the shared whisper.cpp STT hub (sinnix-mke
-          # increment 1, modules/services/whisper.nix) instead of hermes's
-          # own embedded faster-whisper "base" model -- one transcription
-          # engine for the whole estate instead of two, and later engine
-          # swaps (Parakeet/Voxtral) become a base_url/model change here,
-          # not a hermes reconfiguration. api_key is a dummy literal: the
-          # hub is unauthenticated loopback-only, matching the sk-local
-          # convention used by the other local OpenAI-compatible lanes
-          # (flake/data/agent-lanes.nix).
+          # Points at the shared whisper.cpp STT hub (modules/services/whisper.nix)
+          # rather than hermes's embedded faster-whisper, so one transcription
+          # engine serves the estate. api_key is a dummy literal: the hub is
+          # unauthenticated loopback-only (the sk-local convention used by the
+          # other local OpenAI-compatible lanes in flake/data/agent-lanes.nix).
           stt = {
             enabled = voiceEnabled;
             provider = "openai";
@@ -162,13 +153,10 @@ mkFeatureModule {
               model = "whisper-1";
             };
           };
-          # Repointed at the shared Kokoro-82M TTS hub (sinnix-w9l increment 1,
-          # modules/services/kokoro.nix) instead of hermes's built-in edge-tts
-          # provider (Microsoft's cloud voice API) -- Kokoro speaks the OpenAI
-          # TTS wire shape hermes already ships a built-in provider for
-          # (agent/tts_tool.py "openai"), so this is a config repoint, not a
-          # hermes patch. api_key is a dummy literal for the same reason as
-          # the stt block above: the hub is unauthenticated loopback-only.
+          # Points at the shared Kokoro-82M TTS hub (modules/services/kokoro.nix)
+          # rather than hermes's built-in edge-tts (Microsoft cloud): Kokoro
+          # speaks the OpenAI TTS wire shape hermes already supports, so no
+          # hermes patch is needed. api_key is a dummy literal — loopback-only.
           tts = {
             provider = "openai";
             openai = {
@@ -184,8 +172,7 @@ mkFeatureModule {
             non_interactive_local_changes = "stash";
           };
         };
-      # Base (non-profile) `hermes` config — not a registry lane, since
-      # there is nothing to vary it against (see agent-lanes.nix header).
+      # Base (non-profile) `hermes` config — not a registry lane.
       hermesConfigFile = mkHermesConfig {
         name = "default";
         toolsets = [ "hermes-cli" ];
@@ -207,11 +194,9 @@ mkFeatureModule {
         )
       ) agentLanes.hermesProfiles;
       # Extra launch-time shell for hermes-<name> wrappers whose model uses a
-      # custom (non-default) endpoint: OPENAI_BASE_URL always comes straight
-      # from the profile's own `model.base_url` (one source for the URL);
-      # OPENAI_API_KEY comes from an agenix secret (`preludeSecret`) via
-      # lib.sinnix.mkSecretLookup, or a static loopback dev token
-      # (`apiKeyLiteral`) for lanes with neither.
+      # custom endpoint: OPENAI_BASE_URL comes from the profile's own
+      # `model.base_url`; OPENAI_API_KEY from an agenix secret
+      # (`preludeSecret`) or a static loopback token (`apiKeyLiteral`).
       hermesWrapperExtraPrelude =
         name: profile:
         if profile ? preludeSecret then
@@ -230,16 +215,13 @@ mkFeatureModule {
           ''
         else
           "";
-      # Dedicated registry-driven MCP config consumed via `claude --mcp-config`.
+      # Registry-driven MCP config consumed via `claude --mcp-config`.
       # Claude Code 2.x does NOT read `mcpServers` from settings.json — only
-      # `.mcp.json` (project), `~/.claude.json` (user, managed by `claude mcp add`),
-      # or `--mcp-config <file>` recognise stdio servers. This file is the
-      # registry's connection point.
+      # `.mcp.json` (project), `~/.claude.json` (user), or `--mcp-config <file>`
+      # recognise stdio servers.
       #
-      # Only "full"/"lean"/"browser" are distinct MCP tiers — deepseek/local
-      # (see agent-lanes.nix claudeLanes) intentionally reuse "full"'s file,
-      # so this builds one config per distinct `mcpProfile` value rather than
-      # one per lane.
+      # Lanes share MCP tiers (deepseek/local reuse "full"'s file), so this
+      # builds one config per distinct `mcpProfile` value, not one per lane.
       claudeMcpFileBaseName = mcpProfile: if mcpProfile == "full" then "mcp" else "mcp-${mcpProfile}";
       claudeMcpProfiles = lib.unique (
         lib.mapAttrsToList (_: lane: lane.mcpProfile) agentLanes.claudeLanes
@@ -319,9 +301,8 @@ mkFeatureModule {
             directory = ".local/state/muse-code";
             mode = "0700";
           }
-          # Muse Code auth (Meta OAuth + api key), settings (incl. the local
-          # model_catalog row for the gateway-served contributor model), and
-          # the pre-agenix gateway-key fallback.
+          # Muse Code auth (Meta OAuth + api key) and settings, including the
+          # local model_catalog row for the gateway-served contributor model.
           {
             directory = ".config/muse";
             mode = "0700";
@@ -378,15 +359,10 @@ mkFeatureModule {
           };
 
           programs.zsh = {
-            # Derived from flake/data/agent-lanes.nix rather than hand-listed:
-            # every generated wrapper gets a self-alias (its own binName),
-            # except claude-lean (its file is named claude-lean specifically
-            # to dodge Claude Code's local-installer clobbering
-            # ~/.local/bin/claude on auto-update — see claudeLanes.lean in
-            # agent-lanes.nix) and the base `hermes` command, `grok`/`agy`
-            # vendor passthroughs, and `muse` (hardcoded remaps below since
-            # they have no registry lane of their own or point at a
-            # differently-named lane).
+            # Derived from flake/data/agent-lanes.nix: every generated wrapper
+            # gets a self-alias (its own binName). Exceptions are remapped by
+            # hand below — they have no registry lane, or point at a
+            # differently-named one.
             shellAliases =
               let
                 selfAlias = binName: lib.nameValuePair binName "~/.local/bin/${binName}";
@@ -406,13 +382,10 @@ mkFeatureModule {
               ))
               // (lib.listToAttrs (map selfAlias (lib.attrNames agentLanes.museLanes)))
               // {
-                # `claude` routes through claude-lean (NOT a bare
-                # ~/.local/bin/claude): Claude Code's native local-installer
-                # claims the literal path ~/.local/bin/claude and clobbers
-                # any symlink there on auto-update, which is what repeatedly
-                # broke the bare command. Suffixed names are never touched,
-                # so the wrapper lives at claude-lean and the alias points
-                # here.
+                # `claude` routes through claude-lean, never a bare
+                # ~/.local/bin/claude: Claude Code's native local-installer
+                # claims that literal path and clobbers any symlink there on
+                # auto-update. Suffixed names are never touched.
                 claude = "~/.local/bin/claude-lean";
                 gemini = "~/.local/bin/gemini";
                 grok = "~/.local/bin/grok-sinnix";
@@ -445,14 +418,13 @@ mkFeatureModule {
             mkdir -p $HOME/.config/claude
             ln -sfn .config/claude $HOME/.claude
             # settings.json is a plain writable file: the harness persists UI
-            # state (model, effort, plugin toggles) into it on every
-            # /model-style change, so a repo symlink would keep the tracked
-            # tree dirty. Durable policy lives in
-            # /etc/claude-code/managed-settings.json instead. Migrating from
-            # the pre-split symlink preserves the operator's live UI state:
-            # strip exactly the keys the managed file carries (self-derived,
-            # so the two layers cannot drift into double-firing hooks) and
-            # keep the rest. The seed covers only the fresh-machine case.
+            # state (model, effort, plugin toggles) into it, so a repo symlink
+            # would keep the tracked tree dirty. Durable policy lives in
+            # /etc/claude-code/managed-settings.json instead. If a symlink is
+            # found, its content is kept minus exactly the keys the managed
+            # file carries (derived from that file, so the two layers cannot
+            # drift into double-firing hooks). The seed is the fresh-machine
+            # case only.
             _claude_settings="$HOME/.config/claude/settings.json"
             _claude_managed="${sinnixCfg.paths.dotsRoot}/claude/managed-settings.json"
             if [ -L "$_claude_settings" ]; then
@@ -484,8 +456,8 @@ mkFeatureModule {
             '') (lib.attrNames hermesProfileConfigFiles)}
           '';
           # Codex/Gemini read the global instruction file directly; CLAUDE.md is
-          # flat (no @-transclusion), so a symlink replaces the old render step
-          # and can never go stale between activations.
+          # flat (no @-transclusion), so a symlink suffices and can never go
+          # stale between activations.
           home.activation.linkGlobalAgentInstructions = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
             mkdir -p "$HOME/.codex" "$HOME/.gemini"
             ln -sfn "$HOME/.config/claude/CLAUDE.md" "$HOME/.codex/AGENTS.md"
@@ -494,18 +466,14 @@ mkFeatureModule {
 
           # A single merged home.file set: static entries below plus one
           # generated entry per flake/data/agent-lanes.nix lane
-          # (claude/codex/hermes/muse). Kept as one `//`-merged assignment
-          # (rather than scattered home.file.".local/bin/x = ..." statements
-          # alongside it) because Nix attrpath merging inside one attrset
-          # literal only combines further dotted bindings under a prefix —
-          # mixing that with a direct `home.file = {...}` assignment for the
-          # same attribute is a duplicate-definition error, not a merge.
+          # (claude/codex/hermes/muse). It must stay one `//`-merged
+          # assignment: a direct `home.file = {...}` alongside sibling
+          # `home.file."x" = ...` bindings in the same attrset literal is a
+          # duplicate-definition error, not a merge.
           home.file =
             # One entry per claudeLanes lane (full/lean/browser get no
             # extraEnv; deepseek/local layer a backend switch via
-            # backends.nix's mkClaudeBackendEnv). "full" is named claude-full
-            # (not claude) so Claude Code's native local-installer can't
-            # clobber it; the `claude` alias points here.
+            # backends.nix's mkClaudeBackendEnv).
             (lib.mapAttrs' (
               name: lane:
               lib.nameValuePair ".local/bin/${lane.binName}" (
@@ -524,10 +492,8 @@ mkFeatureModule {
               )
             ) agentLanes.claudeLanes)
             # One entry per codexLanes lane. The layered <profile>.config.toml
-            # (generated in mcp.nix's client-profiles.nix) carries the model +
-            # model_provider + full MCP table for deepseek/local; the wrapper
-            # only supplies the provider API key env via backends.nix's
-            # mkCodexBackendEnv.
+            # (client-profiles.nix) carries model + model_provider + the MCP
+            # table; the wrapper only supplies the provider API key env.
             // (lib.mapAttrs' (
               name: lane:
               lib.nameValuePair ".local/bin/${lane.binName}" (

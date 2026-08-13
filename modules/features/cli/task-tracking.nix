@@ -49,9 +49,7 @@ mkFeatureModule {
         {
           xdg.dataHome = lib.mkDefault "${config.home.homeDirectory}/.local/share";
 
-          # Source shell integration
           programs.zsh.initContent = lib.mkAfter ''
-            # Taskwarrior shell aliases and helpers
             [ -f "${dotsRoot}/taskwarrior/shell-aliases.sh" ] && source "${dotsRoot}/taskwarrior/shell-aliases.sh"
             # Agent helpers only loaded when AGENT_NAME is set (Claude/Codex sessions)
             [ -n "''${AGENT_NAME:-}" ] && [ -f "${dotsRoot}/taskwarrior/agent-helpers.sh" ] && source "${dotsRoot}/taskwarrior/agent-helpers.sh"

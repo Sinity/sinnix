@@ -44,19 +44,11 @@ mkFeatureModule {
             enable = true;
             restartable = true;
           };
-          # Points DIRECTLY at AW's own SQLite DB (persisted home dir,
-          # already covered by the standard backup pipeline -- confirmed
-          # 2026-08-12, .local/share/activitywatch carries no backup
-          # exclude) -- same pattern as atuin's surface
-          # (modules/services/sinex/bridge.nix), which points straight at
-          # atuin's history.db rather than rolling it into a converted
-          # copy. An earlier pass here built a separate capture-aw-rollup
-          # lane (incremental REST poll -> JSONL) to fix the stale-surface
-          # bug; that was over-engineered for what the bug actually
-          # needed -- staleness visibility, not a format conversion durability
-          # was already covered by the backup pipeline, and lynchpin/any
-          # consumer can read AW's sqlite directly the same way it already
-          # reads atuin's. Retired per operator correction 2026-08-12.
+          # Points DIRECTLY at AW's own SQLite DB in the persisted home dir,
+          # which the standard backup pipeline already covers. Same pattern as
+          # atuin's surface (modules/services/sinex/bridge.nix), which points
+          # straight at history.db: consumers read the sqlite file, so no
+          # conversion or rollup lane is needed.
           captures = [
             {
               name = "activitywatch";
@@ -80,8 +72,8 @@ mkFeatureModule {
       home-manager.users.${user} =
         { pkgs, lib, ... }:
         {
-          # awatcher (Rust) handles both AFK and window tracking natively on Wayland
-          # Replaces legacy aw-watcher-afk (X11-only) and aw-watcher-window-wayland
+          # awatcher (Rust) handles both AFK and window tracking natively on
+          # Wayland; aw-watcher-afk is X11-only.
           services.activitywatch = {
             enable = true;
             package = pkgs.aw-server-rust;

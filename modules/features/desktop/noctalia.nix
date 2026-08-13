@@ -2,7 +2,7 @@
 #
 # Single shell surface that owns the bar, launcher, notifications, lock, OSD,
 # and wallpaper, and acts as the live Material-You color authority (wallpaper
-# palette -> app templates). Retires waybar, tofi, fnott, hyprlock, polkit-gnome.
+# palette -> app templates).
 #
 # Config follows the repo's dots/ convention: config.toml, plugins.toml, and
 # hooks.toml are curated fragments, while settings.toml is app-owned state.

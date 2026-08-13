@@ -1,44 +1,16 @@
-# Time-of-day color temperature grading via hyprsunset (CTM, not a shader).
+# Time-of-day color temperature grading via hyprsunset.
 #
-# MECHANISM CHOICE (sinnix-s6ke.1, measured 2026-08-13 on the live host, not
-# inferred). The obvious vehicle for time-of-day grading is hyprshade driving
-# `decoration:screen_shader`, and that is what the bead assumed. It does not
-# hold up here:
+# The grading is applied as a color transform matrix through
+# `hyprland-ctm-control-v1` (the interface Hyprland's
+# `render:non_shader_cm_interop` option describes), not through
+# `decoration:screen_shader`. Two consequences:
 #
-#   - Applying hyprshade's blue-light-filter (2600K, strength 1.0) through
-#     `hyprctl keyword decoration:screen_shader` changed the composited output
-#     by 0.08% -- screencopy blue-channel mean 78.09 -> 78.03 on identical
-#     static content. A 2600K filter should pull blue down by roughly 40%.
-#   - Its GPU cost was likewise unmeasurable: 96 interleaved 1Hz samples
-#     (ABAB, to cancel drift from llama-server and the screen-recorder) gave
-#     77.56W shader-off vs 78.73W shader-on at 4K120 with continuous
-#     full-screen damage, and identical SM occupancy. A real per-pixel pass
-#     over 8.3M pixels at 120Hz is not free; "free" means it did not run.
-#   - This host runs `cm = "hdr"` on the FO48U with `render:non_shader_cm = 3`
-#     -- Hyprland performing color management through the hardware pipeline
-#     rather than a fragment shader. The screen-shader stage is not on that
-#     path.
-#
-# hyprsunset instead applies a color transform matrix through
-# `hyprland-ctm-control-v1`, which is the interface Hyprland's own
-# `render:non_shader_cm_interop` option exists to describe ("non_shader_cm
-# interaction with ctm proto (hyprsunset and similar)"). Verified live: it
-# negotiated ctm-control v2, bound the DP-3 output, and applied the computed
-# matrix. Three consequences that matter beyond "it works":
-#
-#   - Zero GPU cost by construction. The transform happens in the display
+#   - Zero GPU cost by construction: the transform happens in the display
 #     pipeline at scanout, not in a per-pixel composite pass.
 #   - It does not tint captures. A screen shader sits in the composite path,
-#     so screenshots and the capture-screen recordings inherit its color --
-#     an evening grading profile would quietly stain months of the lake.
-#     A CTM is applied after capture, so recordings stay color-accurate
-#     while the operator's eyes get the warm grading.
-#   - It composes with HDR rather than fighting it, which is the whole
-#     reason the shader route failed.
-#
-# The gimmick-tier shader catalog (CRT, matrix, cyberpunk) is not adopted
-# here and, on this display configuration, could not be even if it were
-# wanted -- the shader stage those depend on is inert while HDR is on.
+#     so screenshots and capture-screen recordings would inherit its color and
+#     an evening grading profile would stain months of the lake. A CTM is
+#     applied after capture, so recordings stay color-accurate.
 {
   mkFeatureModule,
   lib,

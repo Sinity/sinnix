@@ -1,7 +1,7 @@
 # Docling — PDF/office document conversion to structured markdown, for the
-# data lake. Packaged straight from nixpkgs (pkgs.docling, confirmed present
-# at our pinned nixpkgs rev) rather than a uv-tool bootstrap script: Nix owns
-# the whole closure instead of a first-run install into ~/.local/share/uv.
+# data lake. Packaged straight from nixpkgs rather than a uv-tool bootstrap,
+# so Nix owns the whole closure instead of a first-run install into
+# ~/.local/share/uv.
 {
   mkFeatureModule,
   pkgs,
