@@ -25,6 +25,8 @@ in
       ", T, Thaw parked background work, exec, sinnix-pressure-park thaw"
       ", M, Pulse OLED ASBL, exec, asbl-no-moar once --mode invert --duration 0.05"
       ", H, Show display capture status, exec, sinnix-screenshot-control probe"
+      ", N, Neutral display color now, exec, hyprctl hyprsunset identity"
+      "SHIFT, N, Resume scheduled display color, exec, systemctl --user restart hyprsunset"
       ", Escape, Exit system controls, submap, reset"
       ", Return, Exit system controls, submap, reset"
     ];
