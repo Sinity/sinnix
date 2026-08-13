@@ -77,6 +77,31 @@ mkServiceModule {
         # asciinema lane so a day with the desktop asleep/idle doesn't
         # false-positive stale.
         staleAfterSeconds = 86400;
+        # sinnix-pev0: staleAfterSeconds alone took up to a full day to
+        # notice the actual 2026-08-13 incident (unit healthy, listeners
+        # registered, AT-SPI registry root at ChildCount=0 -- no application
+        # had published a tree at all, so the lane was structurally
+        # guaranteed to stay silent regardless of budget length). Poll the
+        # registry root directly on the sentinel's 1-minute cadence instead:
+        # exit 0 when something is published, exit 1 when the bus answers
+        # but ChildCount is 0 (confirmed-absent publisher), anything else
+        # (bus/socket missing, busctl error, non-numeric reply, timeout)
+        # means the probe couldn't tell -- reported as unknown, never
+        # silently healthy. Query verified live against the running bus
+        # 2026-08-13.
+        livenessProbe = {
+          command = lib.concatStringsSep "; " [
+            "uid=$(id -u ${username} 2>/dev/null) || exit 3"
+            "bus=/run/user/$uid/at-spi/bus_0"
+            "[ -S \"$bus\" ] || exit 3"
+            "reply=$(busctl --user --address=\"unix:path=$bus\" call org.a11y.atspi.Registry /org/a11y/atspi/accessible/root org.freedesktop.DBus.Properties Get ss org.a11y.atspi.Accessible ChildCount 2>/dev/null) || exit 3"
+            "count=$(printf '%s' \"$reply\" | awk '{print $NF}')"
+            "[ -n \"$count\" ] || exit 3"
+            "case \"$count\" in *[!0-9]*) exit 3 ;; esac"
+            "[ \"$count\" -gt 0 ] && exit 0 || exit 1"
+          ];
+          timeoutSeconds = 5;
+        };
       }
     ];
   };
