@@ -55,12 +55,17 @@ mkServiceModule {
     };
     ctxSize = args.lib.mkOption {
       type = args.lib.types.int;
-      default = 4096;
+      default = 0;
       description = ''
-        `--ctx-size` (KV-cache context window, tokens). Left unset upstream
-        loads the model's full training context, costing gigabytes of idle
-        KV cache; a reranker only ever sees one query/document pair at a
-        time, so a modest bound is enough.
+        `--ctx-size` (KV-cache context window, tokens). 0 means the
+        model's own trained context -- llama-server's own default, and the
+        right one here: cropping a reranker's context silently truncates
+        long documents and scores only their head.
+
+        llama.cpp allocates the KV cache up front for whatever this is set
+        to; it does not grow on demand. That is affordable only because
+        gpuLayers = 0 puts the cache in system RAM rather than the 10 GB
+        card. Raise gpuLayers and this bound starts costing VRAM again.
       '';
     };
     extraFlags = args.lib.mkOption {
