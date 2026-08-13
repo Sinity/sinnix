@@ -24,7 +24,10 @@ mkFeatureModule {
           enable = true;
           signing = {
             format = "ssh";
-            key = "/home/sinity/.ssh/id_ed25519_github.pub";
+            # Use the unencrypted private key directly. Pointing at its public
+            # half makes ssh-keygen ask gpg-agent for the private key, which can
+            # block unattended commits on cache expiry or pinentry failure.
+            key = "/home/sinity/.ssh/id_ed25519_github";
             signByDefault = true;
           };
           settings = {

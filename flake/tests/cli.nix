@@ -27,6 +27,12 @@ in
         name = "sinnix-runtime-fixture-root";
       };
 
+      cliCoreRuntimeSpec = mkFeatureTest {
+        name = "cli-core-runtime";
+        feature = "sinnix.features.cli.core.enable";
+        assertions = _config: [ ];
+      };
+
       cliPolylogueRuntimeSpec = mkFeatureTest {
         name = "cli-polylogue-runtime";
         feature = "sinnix.features.cli.polylogue.enable";
@@ -61,6 +67,24 @@ in
           import sys
           print(sys.executable)
           EOF
+        '';
+      };
+      cliCoreRuntime = mkHmRuntimeCheck system {
+        name = "cli-core-runtime-check";
+        spec = cliCoreRuntimeSpec;
+        nativeBuildInputs = [ pkgs.openssh ];
+        homeFiles = [ ".ssh/config" ];
+        script = ''
+          ssh_config="$HOME/.ssh/config"
+          ssh -G -F "$ssh_config" github.com > "$TMPDIR/github-ssh-config"
+          grep -qx 'batchmode yes' "$TMPDIR/github-ssh-config"
+          grep -qx 'identityagent none' "$TMPDIR/github-ssh-config"
+          grep -qx 'identityfile /home/sinity/.ssh/id_ed25519' "$TMPDIR/github-ssh-config"
+          grep -qx 'identitiesonly yes' "$TMPDIR/github-ssh-config"
+
+          # The wildcard keeps existing agent behavior for unrelated hosts.
+          ssh -G -F "$ssh_config" example.org > "$TMPDIR/default-ssh-config"
+          grep -qx 'addkeystoagent yes' "$TMPDIR/default-ssh-config"
         '';
       };
       cliTaskTrackingRuntime = mkHmRuntimeCheck system {
@@ -151,6 +175,10 @@ in
       };
     in
     {
+      checks = {
+        cli-core-runtime = cliCoreRuntime;
+      };
+
       checks = {
         cli-polylogue-runtime = cliPolylogueRuntime;
       };
