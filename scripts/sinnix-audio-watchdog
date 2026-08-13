@@ -19,14 +19,25 @@ set -euo pipefail
 
 DEVICE_NAME="alsa_card.usb-FiiO_DigiHug_USB_Audio-01"
 TARGET_PROFILE_NAME="output:analog-stereo"
-EVIDENCE_LOG="/realm/data/captures/machine/audio_watchdog.jsonl"
+
+# $1=capture_bin $2=capture_root, positional (matches capture-monitor-poll's
+# invocation shape) so this stays a plain @sinnix-package script rather than
+# needing its own inline pkgs.writeShellApplication wrapper.
+CAPTURE_BIN="$1"
+CAPTURE_ROOT="$2"
 
 log_evidence() {
     # $1=condition $2=action $3=detail
-    jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        --arg condition "$1" --arg action "$2" --arg detail "$3" \
-        '{ts: $ts, condition: $condition, action: $action, detail: $detail}' \
-        >>"$EVIDENCE_LOG"
+    #
+    # Routed through the shared sinnix-capture-v1 envelope (like every other
+    # lane) instead of a bespoke JSONL append -- this is deliberately an
+    # ANOMALY-ONLY writer (a run where audio is healthy logs nothing at all),
+    # which is why it is registered as a plain service/timer liveness surface
+    # below, not a captures[] lane: a captures[] staleness check would
+    # eventually alarm on healthy silence, which is exactly backwards here.
+    jq -nc --arg condition "$1" --arg action "$2" --arg detail "$3" \
+        '{condition: $condition, action: $action, detail: $detail}' \
+        | "$CAPTURE_BIN" write --capture-root "$CAPTURE_ROOT" --lane audio-watchdog
 }
 
 notify() {
