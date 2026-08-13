@@ -29,17 +29,16 @@ def run_grim(
     """Capture one PNG frame to stdout via grim (wlr-screencopy protocol).
 
     `geometry`, when given, is a grim `-g "X,Y WxH"`-style string cropping
-    to a single window's bounding box -- the per-window framing mechanism
-    (3.1) in the absence of a hyprland-toplevel-export protocol on this
-    Hyprland version. grim rejects `-o` together with `-g` ("-o and -g are
-    mutually exclusive"), and `-g` is already in the global compositor
-    coordinate space Hyprland's `at`/`size` report, so a geometry crop
-    replaces the output selector rather than narrowing it.
+    to a single window's bounding box -- the per-window framing mechanism, in
+    the absence of a hyprland-toplevel-export protocol on this Hyprland
+    version. grim rejects `-o` together with `-g` ("-o and -g are mutually
+    exclusive"), and `-g` is already in the global compositor coordinate space
+    Hyprland's `at`/`size` report, so a geometry crop replaces the output
+    selector rather than narrowing it.
 
     Returns `(png_bytes, None)` on success and `(None, reason)` on failure,
-    where `reason` carries grim's own stderr. Callers MUST log the reason:
-    swallowing it is what let the `-o`/`-g` conflict above degrade this
-    lane silently for its entire deployed lifetime."""
+    where `reason` carries grim's own stderr. Callers MUST log the reason;
+    swallowing it degrades this lane silently."""
     if geometry:
         cmd = [grim_bin, "-g", geometry, "-"]
     else:

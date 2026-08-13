@@ -76,11 +76,11 @@ def test_sysctl_drift_and_missing_probe_are_explicit(tmp_path):
 
 
 def test_generation_unknown_revision_is_always_flagged(tmp_path):
-    # sinnix-6ru: configurationRevision=="unknown" must be reported as a
-    # loud, error-severity finding even when the manifest's own `expected`
-    # value is also "unknown" (the self-referential case that silently
-    # "matched" before this fix, since both sides come from the same
-    # potentially-broken evaluation).
+    # configurationRevision=="unknown" must be reported as a loud,
+    # error-severity finding even when the manifest's own `expected` value is
+    # also "unknown": both sides come from the same potentially-broken
+    # evaluation, so a naive equality check would call that self-referential
+    # case a match.
     rows = run(
         tmp_path,
         {

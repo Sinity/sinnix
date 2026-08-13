@@ -7,8 +7,7 @@ switch outputs in the desktop shell, ...).
 
 `pw-metadata -n default` is a long-running subscription: on start it prints
 the current values, then one `update:` line every time a tracked key
-changes, for as long as the process runs. Sample line (captured live on
-sinnix-prime 2026-08-12):
+changes, for as long as the process runs. Sample lines:
 
     update: id:0 key:'default.audio.sink' value:'{"name":"bluez_output.AC_80_0A_D4_08_48.1"}' type:'Spa:String:JSON'
     update: id:0 key:'default.audio.source' value:'{"name":"alsa_input.usb-FiiO_DigiHug_USB_Audio-01.analog-stereo"}' type:'Spa:String:JSON'
@@ -85,10 +84,10 @@ def resolve_target(channel: str, targets: DefaultTargets) -> str | None:
     final `pw-record --target` value -- see that function's docstring for
     why `--target <name>` is not used directly. The sink-monitor channel
     targets the *sink* node's own name, unmodified: a sink's monitor ports
-    live on the sink node itself (there is no separate
-    `<sink-name>.monitor` node -- confirmed absent in a live `pw-dump` on
-    sinnix-prime 2026-08-13); a Capture-direction stream that resolves onto
-    the sink node attaches to its monitor ports automatically.
+    live on the sink node itself (there is no separate `<sink-name>.monitor`
+    node; it does not appear in `pw-dump`), and a Capture-direction stream
+    that resolves onto the sink node attaches to its monitor ports
+    automatically.
     """
     if channel == "mic":
         return targets.source
@@ -106,21 +105,18 @@ def resolve_node_serial(
     """Resolve a PipeWire node name to its stable `object.serial`, for use
     as a `pw-record --target` value.
 
-    sinnix-500c: `pw-record --target <node-name>` does *string* name
-    matching, and live measurement on sinnix-prime (2026-08-13) showed it
-    does not reliably attach a Capture-direction stream to the right node
-    once the initial connection is re-established mid-session -- the
-    stream instead falls back to WirePlumber's default-object auto-link
-    (silently landing on the *wrong* device: both the mic and sink-monitor
-    recorders ended up consuming the mic's own ALSA source) and, even when
-    the fallback happens to pick the right device, that fallback link is
-    serviced by a slow reconnect path rather than the real-time audio
-    graph -- observed via `strace` delivering PCM roughly once every 1-7s
-    instead of continuously, collapsing a wall-clock hour to ~37.5s of
-    actually-captured audio. Passing `--target <serial>` (a stable numeric
-    `object.serial`, resolved here from a live `pw-dump`) instead links
-    immediately via the normal real-time path with no such stall --
-    verified live for both the mic source and the sink monitor.
+    Do not pass a node name as `--target`. `pw-record --target <node-name>`
+    does *string* name matching and does not reliably attach a
+    Capture-direction stream to the right node once the connection is
+    re-established mid-session: the stream falls back to WirePlumber's
+    default-object auto-link, which silently lands on the wrong device (both
+    the mic and sink-monitor recorders end up consuming the mic's own ALSA
+    source), and even when the fallback picks the right device that link is
+    serviced by a slow reconnect path rather than the real-time audio graph,
+    delivering PCM in bursts seconds apart and losing most of the hour.
+    Passing `--target <serial>` (a stable numeric `object.serial`, resolved
+    here from a live `pw-dump`) links immediately via the normal real-time
+    path with no such stall.
 
     Returns None if `pw-dump` fails or no node with that name is currently
     present (transient race at startup/device-switch); callers should fall

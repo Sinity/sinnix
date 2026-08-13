@@ -1,8 +1,8 @@
 """Read-only access to the steering sqlite store.
 
-Schema is the same v1 defined in scripts/sinnix-steer (design of record:
-bd show sinnix-q20). Duplicated here rather than imported because sinnix-steer
-is a separate frontmatter-packaged script (no `.py` suffix, not importable as
+Schema is the same v1 defined in scripts/sinnix-steer. Duplicated here
+rather than imported because sinnix-steer is a separate frontmatter-packaged
+script (no `.py` suffix, not importable as
 a normal module from a different Nix derivation) — this module only ever
 SELECTs, never CREATEs or writes, so schema drift would show up immediately
 as a missing-column error rather than silent corruption.

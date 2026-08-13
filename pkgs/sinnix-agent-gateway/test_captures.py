@@ -30,9 +30,9 @@ def config(tmp_path: Path) -> GatewayConfig:
 
 
 def test_remote_readonly_cannot_see_clipboard_lane(tmp_path: Path) -> None:
-    """sinnix-lpuv's actual point: remote-readonly is served over the
-    OpenAI tunnel to ChatGPT, an external channel -- it must never see
-    content-bearing lanes even though it holds CAPTURE_READ."""
+    """remote-readonly is served over the OpenAI tunnel to ChatGPT, an
+    external channel, so it must never see content-bearing lanes even though
+    it holds CAPTURE_READ."""
     principal = Principal.for_profile("remote-readonly")
     assert principal.allowed_lanes is not None
     assert "clipboard" not in principal.allowed_lanes

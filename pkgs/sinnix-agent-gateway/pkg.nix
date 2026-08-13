@@ -142,11 +142,8 @@ python3Packages.buildPythonApplication {
   checkPhase = ''
     runHook preCheck
     export SINNIX_GATEWAY_TEST_EXECUTABLE="$out/bin/sinnix-agent-gateway"
-    # Bare `pytest` (default discovery), not a hardcoded file list -- the
-    # previous `pytest test_smoke.py` silently dropped test_captures.py
-    # when it was added (found live 2026-08-13, sinnix-lpuv): a new test
-    # file needing a pkg.nix edit to actually run is exactly the kind of
-    # drift this repo avoids elsewhere.
+    # Bare `pytest` (default discovery), not a hardcoded file list, so a new
+    # test file runs without needing a pkg.nix edit.
     pytest
     runHook postCheck
   '';

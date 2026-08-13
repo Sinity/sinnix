@@ -17,11 +17,10 @@ state_dir="$capture_root/.state"
 mkdir -p "$state_dir"
 
 # POSIX single-quote a value for safe embedding in a remote shell command
-# line. ssh flattens all trailing argv into one string that the remote
-# shell re-splits on whitespace, so local shell quoting does not survive
-# the hop by itself -- verified live 2026-08-13: an unquoted syslog first
-# line (containing spaces and single quotes from a firewall log message)
-# silently word-split into garbage positional args without this.
+# line. ssh flattens all trailing argv into one string that the remote shell
+# re-splits on whitespace, so local shell quoting does not survive the hop by
+# itself: without this, a syslog first line carrying spaces and single quotes
+# word-splits into garbage positional args on the router.
 sq() {
 	printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
 }

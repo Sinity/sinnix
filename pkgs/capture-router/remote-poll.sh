@@ -4,10 +4,9 @@
 #
 # Always emits leases, per-AP wifi associations, and the current nlbwmon
 # period. The syslog section is an incremental delta computed from the
-# watermark passed in as $1/$2; see capture-router.nix for the rotation-
-# safety design this implements (verified against the live router
-# 2026-08-13: busybox logread rotates by renaming syslog -> syslog.old and
-# starting a fresh syslog, i.e. copy-truncate, not append-only).
+# watermark passed in as $1/$2; see capture-router.nix for the rotation-safety
+# design this implements. busybox logread rotates by renaming syslog ->
+# syslog.old and starting a fresh syslog, i.e. copy-truncate, not append-only.
 set -e
 
 prev_offset="${1:-0}"

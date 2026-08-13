@@ -1,6 +1,6 @@
 """Searchability index over the raw Opus archive -- Silero VAD v6, index-only.
 
-Structural invariant (sinnix-nm7 supersession note, non-negotiable): this
+Structural invariant, non-negotiable: this
 module is imported and run *only* by the timer-driven
 `sinnix-audio-index.service`, never by the recorder units. The recorder's
 ExecStart chain has zero dependency on this module or on silero-vad/torch;

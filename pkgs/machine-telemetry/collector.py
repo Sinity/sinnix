@@ -49,10 +49,10 @@ PROC_IO_FIELDS = (
     "syscw",
 )
 # /proc/vmstat keys captured verbatim as cumulative counters (consumers
-# compute deltas), same convention as the psi *_total_us columns: reclaim/
-# refault/swap/OOM signals that used to be invisible to telemetry even
-# during a real lag incident, since PSI-memory alone stays quiet while
-# reclaim is still (slowly) meeting demand.
+# compute deltas), same convention as the psi *_total_us columns. These
+# reclaim/refault/swap/OOM signals are the only view of memory strain while
+# PSI-memory stays quiet, which it does as long as reclaim is still (slowly)
+# meeting demand.
 VMSTAT_FIELDS = (
     "workingset_refault_file",
     "workingset_refault_anon",
@@ -969,13 +969,13 @@ def insert_cgroup_pressure_stats(
 
 # NVML handle is initialized once at startup and reused; reads are direct
 # library calls (no subprocess), so 1 Hz sampling is cheap and per-sample
-# latency is sub-millisecond. nvidia-smi is no longer in the hot path.
+# latency is sub-millisecond.
 _nvml_handle: object | None = None
 _nvml_error: str | None = None
 # True only when pynvml itself is absent — a permanent condition, so we stop
 # retrying. An NVMLError at init (driver/libnvidia-ml not ready at boot) is
 # transient and must be retried, or a single bad startup permanently kills GPU
-# capture until the next service restart (the 2026-05-24 incident).
+# capture until the next service restart.
 _nvml_unavailable: bool = False
 _nvml_lock = threading.Lock()
 _nvml_last_init_attempt: float = 0.0
@@ -1131,8 +1131,8 @@ def gpu_sampler_thread(
             except Exception as exc:  # noqa: BLE001 - the sampler must outlive any probe/DB fault
                 # A bare exception here would silently kill the only writer to
                 # gpu_sample and freeze GPU telemetry with no signal — the same
-                # outage class (2026-05-24) the NVML self-heal addresses, but on
-                # the DB/probe path instead of the handle path. Log to stderr
+                # outage class the NVML self-heal addresses, but on the
+                # DB/probe path instead of the handle path. Log to stderr
                 # (captured by journald) and keep sampling; handle-level faults
                 # are recovered by the self-heal in gpu_metrics().
                 print(
@@ -1810,9 +1810,8 @@ def memory_metrics() -> dict[str, int | None]:
 def swap_tier_metrics() -> dict[str, object]:
     """Sample the tiered swap posture: zram compression economics + per-device
     occupancy. zram mm_stat answers "how much RAM is the compressed tier
-    actually costing vs holding" (the load-bearing number for the sinnix-mys
-    zram-return decision); /proc/swaps shows how pressure distributes across
-    the zram (prio 100) and NVMe-file (prio 10) tiers."""
+    actually costing vs holding"; /proc/swaps shows how pressure distributes
+    across the zram (prio 100) and NVMe-file (prio 10) tiers."""
     out: dict[str, object] = {
         "zram_orig_mb": None,
         "zram_compr_mb": None,
@@ -2065,10 +2064,8 @@ KILL_EVENT_PATTERNS = (
         ),
     ),
 )
-# First run (no stored cursor) backfills from here: journald is
-# Storage=persistent SystemMaxUse=32G and this predates the earliest incident
-# this issue was written to investigate. Only used once — every subsequent
-# run resumes from the persisted cursor regardless of this constant.
+# First run (no stored cursor) backfills from here. Used once only: every
+# subsequent run resumes from the persisted cursor regardless of this constant.
 KILL_EVENT_BACKFILL_SINCE = "2026-06-17"
 KILL_EVENT_SOURCE = "machine.kill_event"
 

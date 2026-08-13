@@ -233,9 +233,9 @@ def create_server(config: GatewayConfig, profile: str) -> MCPServer:
 
         @mcp.tool(title="List visible capture lanes", annotations=READ_ONLY_TOOL)
         def capture_lanes() -> dict[str, Any]:
-            """List the capture-data lanes this profile may query (sinnix-lpuv:
-            per-pipe permission model -- not every lane that exists on disk,
-            only the ones this connection's profile is allowed to see)."""
+            """List the capture-data lanes this profile may query -- not every
+            lane that exists on disk, only the ones this connection's profile
+            is allowed to see."""
             return runtime.execute("capture_lanes", runtime.captures.lanes_visible)
 
         @mcp.tool(title="Query capture data", annotations=READ_ONLY_TOOL)
