@@ -88,6 +88,37 @@ ensure_adb() {
   fi
 }
 
+# sinnix-uyvt.2.1 truncation fix (2026-08-13): the confirmed root cause of
+# ambient chunks truncating (mean 148s against a 300s target, 14/60 chunks
+# under 10s) was `appops get com.termux RECORD_AUDIO` reporting
+# MODE_FOREGROUND -- stock Android's default mic policy for an app without a
+# declared foregroundServiceType="microphone" service, which silently mutes
+# an in-progress recording the instant Termux drops out of foreground
+# importance (screen off, app switched). `appops set ... allow` overrides
+# this per-package and is confirmed to survive `am force-stop` (system
+# appops state, not app state, so it also survives app restarts and should
+# survive reboots -- appops.xml is system_server state). Also whitelists
+# Termux from Doze so a long idle period doesn't add CPU/network throttling
+# on top. Both are adb (shell-uid) operations -- Termux itself cannot grant
+# either. Re-run this after anything that might have reset system app
+# state (a MIUI/Android OS update, "reset app preferences", a fresh
+# adb-restore after reboot) rather than assuming it's still in effect.
+#
+# NOT handled here: MIUI's separate "Background autostart" permission
+# (Settings > Apps > Permissions > Background autostart), required for
+# Termux:Boot's BOOT_COMPLETED receiver to fire at all. That one has no adb
+# command -- MIUI stores it in com.miui.securitycenter's own private
+# database with no public API, only a UI toggle
+# (com.miui.securitycenter/.permcenter.autostart.AutoStartManagementActivity).
+# Verified enabled for Termux, Termux:API, and Termux:Boot 2026-08-13; if a
+# future factory-reset-adjacent event clears it, it needs re-toggling by
+# hand (or UI-automated via `adb shell input tap`, see git history for the
+# coordinates used) -- there is nothing this script can assert headlessly.
+ensure_mic_exemptions() {
+  adb_phone shell appops set com.termux RECORD_AUDIO allow >/dev/null 2>&1 || true
+  adb_phone shell dumpsys deviceidle whitelist +com.termux >/dev/null 2>&1 || true
+}
+
 usage() {
   cat <<'EOF'
 sinnix-phone <command>
@@ -99,7 +130,11 @@ sinnix-phone <command>
   pull          rsync camera + downloads + health exports into the lake
   drain         pull, but only if the phone is on wifi (for a timer)
   adb-connect   (re)attach adb over the tailnet
-  adb-restore   re-enable adbd TCP mode (requires the phone on USB)
+  adb-restore   re-enable adbd TCP mode (requires the phone on USB), then
+                re-assert the ambient-capture mic exemptions (see mic-exempt)
+  mic-exempt    re-assert RECORD_AUDIO appops override + Doze whitelist for
+                Termux (requires adb) -- rerun after anything that might
+                reset system app state
   clip-push     push the current desktop clipboard to the phone, once
   clip-watch    watch desktop clipboard, push on change (foreground loop)
   note [min]    mark+transcribe the last [min] minutes (default 3) of the
@@ -124,6 +159,36 @@ status)
   fi
   if ssh_phone 'true' >/dev/null 2>&1; then
     echo "ssh       : up (termux :$PHONE_SSH_PORT)"
+    # Ambient capture liveness (sinnix-uyvt.2.1 truncation fix, 2026-08-13):
+    # a chunk landing on schedule does NOT mean it's intact -- the root
+    # cause found here was RECORD_AUDIO silently gated to MODE_FOREGROUND
+    # (`appops get com.termux RECORD_AUDIO`), which truncated or zeroed
+    # chunks the moment Termux left the foreground while still producing a
+    # file every ~5min. Report the runit supervisor state plus the most
+    # recently CLOSED chunk's actual encoded duration so a regression shows
+    # up here instead of requiring someone to pull chunks and run ffprobe
+    # by hand.
+    # Not just `sv status ambient`: SVDIR is exported by a profile.d script
+    # sourced only in interactive/login shells, so a bare non-interactive
+    # ssh command doesn't see it -- point `sv` at the service dir directly.
+    sv_status=$(ssh_phone "sv status /data/data/com.termux/files/usr/var/service/ambient 2>&1" || true)
+    echo "ambient   : ${sv_status:-no runit supervisor found}"
+    # sed -n 2p, not 1p: the newest chunk is still being written by
+    # termux-microphone-record, so its duration is meaningless until the
+    # loop rotates past it.
+    latest_chunk=$(ssh_phone "ls -1t /sdcard/sinnix-ambient/*.m4a 2>/dev/null | sed -n 2p" || true)
+    if [ -n "${latest_chunk:-}" ]; then
+      tmp_chunk="$(mktemp --suffix=.m4a)"
+      if scp_phone "${PHONE_USER}@${PHONE_TS_IP}:${latest_chunk}" "$tmp_chunk" >/dev/null 2>&1; then
+        dur=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$tmp_chunk" 2>/dev/null || true)
+        echo "last chunk: $(basename "$latest_chunk") (${dur:-?}s, expect ~${AMBIENT_CHUNK_SECONDS:-300}s)"
+      else
+        echo "last chunk: $(basename "$latest_chunk") (couldn't pull to measure)"
+      fi
+      rm -f "$tmp_chunk"
+    else
+      echo "last chunk: none found"
+    fi
   else
     echo "ssh       : down — Termux may be stopped; open Termux, run: sshd"
   fi
@@ -233,6 +298,14 @@ adb-restore)
   adb tcpip 5555
   sleep 3
   adb connect "$ADB_TARGET"
+  ensure_mic_exemptions
+  ;;
+mic-exempt)
+  # Standalone re-assertion of the ambient-capture mic exemptions (see
+  # ensure_mic_exemptions() above for what and why). Needs adb.
+  ensure_adb
+  ensure_mic_exemptions
+  echo "RECORD_AUDIO: $(adb_phone shell appops get com.termux RECORD_AUDIO | tr '\n' ' ')"
   ;;
 clip-push)
   # text/* only -- termux-clipboard-set takes a string argument; pushing raw
