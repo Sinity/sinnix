@@ -323,6 +323,73 @@ def cmd_ritual(args: argparse.Namespace) -> int:
     return 0
 
 
+# ------------------------------------------------------------ calibration
+
+
+def cmd_calibration(args: argparse.Namespace) -> int:
+    """sinnix-q20 design principle (1): prediction-calibration as the spine.
+
+    Buckets resolved commitments by forecast_p and computes the actual
+    done-rate per bucket -- a forecaster is well-calibrated when the done-rate
+    in each bucket matches the bucket's forecast. This is the measurement
+    that converts plans from self-judgment into evidence (q20's own framing),
+    not a vanity chart.
+    """
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT forecast_p, status FROM commitments "
+        "WHERE status IN ('done', 'missed') AND forecast_p IS NOT NULL"
+    ).fetchall()
+
+    if not rows:
+        print("no resolved commitments with forecasts yet -- nothing to calibrate")
+        return 0
+
+    # Deliberately coarse buckets (Beeminder/Fatebook-style 10%-wide bins);
+    # finer bins would be noise given how few resolved forecasts exist early on.
+    buckets: dict[int, list[int]] = {}
+    for row in rows:
+        bucket = min(int(row["forecast_p"] * 10), 9)
+        buckets.setdefault(bucket, []).append(1 if row["status"] == "done" else 0)
+
+    print(f"{'forecast bucket':<18}{'n':<6}{'actual done-rate':<20}{'gap'}")
+    total_abs_gap = 0.0
+    total_n = 0
+    for bucket in sorted(buckets):
+        outcomes = buckets[bucket]
+        n = len(outcomes)
+        actual_rate = sum(outcomes) / n
+        forecast_mid = (bucket * 10 + 5) / 100
+        gap = actual_rate - forecast_mid
+        total_abs_gap += abs(gap) * n
+        total_n += n
+        print(
+            f"{bucket*10:>3}-{bucket*10+10:<3}%      {n:<6}{actual_rate:.0%}"
+            f"{'':<{20-len(f'{actual_rate:.0%}')}}"
+            f"{gap:+.0%}"
+        )
+
+    mean_abs_gap = total_abs_gap / total_n if total_n else 0.0
+    print(f"\nn={total_n} resolved forecasts, mean |gap|={mean_abs_gap:.0%}")
+    print(
+        "(gap = actual done-rate minus forecast midpoint; positive = "
+        "underconfident, negative = overconfident)"
+    )
+
+    if args.json:
+        result = [
+            {
+                "bucket_low": b * 10,
+                "bucket_high": b * 10 + 10,
+                "n": len(buckets[b]),
+                "actual_done_rate": sum(buckets[b]) / len(buckets[b]),
+            }
+            for b in sorted(buckets)
+        ]
+        print(json.dumps({"buckets": result, "n": total_n, "mean_abs_gap": mean_abs_gap}))
+    return 0
+
+
 # --------------------------------------------------------------------- export
 
 
@@ -478,6 +545,12 @@ def build_parser() -> argparse.ArgumentParser:
     ritual = sub.add_parser("ritual", help="run a steering ritual")
     ritual.add_argument("window", choices=["morning", "evening"])
     ritual.set_defaults(func=cmd_ritual)
+
+    calibration = sub.add_parser(
+        "calibration", help="forecast-vs-outcome calibration curve (sinnix-q20 spine)"
+    )
+    calibration.add_argument("--json", action="store_true")
+    calibration.set_defaults(func=cmd_calibration)
 
     export = sub.add_parser("export", help="export the store to JSONL")
     export.set_defaults(func=cmd_export)
