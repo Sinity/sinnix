@@ -216,6 +216,22 @@ in
             message = "Runtime inventory must describe the public and private llama-cpp activation endpoints";
           }
           {
+            # Cold-start fix (design pass 2026-08-13): the proxy must not
+            # start forwarding until the backend's port actually accepts a
+            # connection, or the client's parked request gets a hard refusal
+            # during the weight-load window instead of a queue.
+            assertion =
+              lib.hasInfix "wait-backend" config.systemd.services.llama-cpp-proxy.serviceConfig.ExecStartPre
+              && config.sinnix.runtime.inventory.surfaces.llama-cpp-proxy.activation.readinessTimeout == 30;
+            message = "llama-cpp-proxy must gate its socket proxy on backend readiness before forwarding";
+          }
+          {
+            assertion =
+              lib.hasInfix "wait-backend" config.systemd.services.comfyui-proxy.serviceConfig.ExecStartPre
+              && config.sinnix.runtime.inventory.surfaces.comfyui-proxy.activation.readinessTimeout == 180;
+            message = "comfyui-proxy must gate its socket proxy on backend readiness before forwarding, with a bound matching its measured cold-start cost";
+          }
+          {
             assertion = config.systemd.sockets.comfyui-proxy.listenStreams == [ "127.0.0.1:8188" ];
             message = "ComfyUI must expose only its socket-activated loopback front door";
           }
@@ -262,13 +278,16 @@ in
             message = "An idle ocr-proxy exit must tear down the OCR container cgroup";
           }
           {
-            # Full symmetry across all eight GPU-inference backends (four
-            # native, four containerized): every (service, proxy) pair must
-            # conflict with every other backend's (service, proxy) pair in
-            # both directions. An asymmetric conflict set is exactly the bug
-            # this framework exists to catch (llama-cpp shipped resident for
-            # two days before being wired in; the container lane had the
-            # same gap until it joined this same mesh).
+            # Full symmetry across all seven remaining GPU-inference
+            # backends (three native, four containerized): every
+            # (service, proxy) pair must conflict with every other backend's
+            # (service, proxy) pair in both directions. An asymmetric
+            # conflict set is exactly the bug this framework exists to catch
+            # (llama-cpp shipped resident for two days before being wired
+            # in; the container lane had the same gap until it joined this
+            # same mesh). llama-cpp itself is intentionally NOT a member
+            # since 2026-08-13 (CPU-pinned reranker, checked separately
+            # below) -- it must not appear in this map.
             assertion =
               let
                 backendUnits = {
@@ -283,10 +302,6 @@ in
                   whisper = [
                     "whisper-server.service"
                     "whisper-proxy.service"
-                  ];
-                  llama-cpp = [
-                    "llama-cpp.service"
-                    "llama-cpp-proxy.service"
                   ];
                   comfyui = [
                     "podman-comfyui.service"
@@ -322,7 +337,42 @@ in
                 ) (lib.attrNames backendUnits);
               in
               allSymmetric;
-            message = "Every GPU-inference backend's service and proxy units must conflict symmetrically with every other backend's";
+            message = "Every remaining GPU-inference backend's service and proxy units must conflict symmetrically with every other backend's";
+          }
+          {
+            # The reranker's deliberate exemption from the mesh, checked
+            # directly rather than trusted by omission: it must not appear
+            # in any GPU-large backend's Conflicts=, and it must not
+            # conflict with any of them either.
+            assertion =
+              let
+                gpuLargeUnits = [
+                  "ollama.service"
+                  "ollama-proxy.service"
+                  "koboldcpp.service"
+                  "koboldcpp-proxy.service"
+                  "whisper-server.service"
+                  "whisper-proxy.service"
+                  "podman-comfyui.service"
+                  "comfyui-proxy.service"
+                  "podman-openedai-speech.service"
+                  "tts-proxy.service"
+                  "podman-musicgen.service"
+                  "musicgen-proxy.service"
+                  "podman-ocr.service"
+                  "ocr-proxy.service"
+                ];
+                unitConflicts =
+                  unit: config.systemd.services.${lib.removeSuffix ".service" unit}.unitConfig.Conflicts or [ ];
+              in
+              lib.all (
+                unit:
+                !(lib.elem "llama-cpp.service" (unitConflicts unit))
+                && !(lib.elem "llama-cpp-proxy.service" (unitConflicts unit))
+              ) gpuLargeUnits
+              && (unitConflicts "llama-cpp") == [ ]
+              && (unitConflicts "llama-cpp-proxy") == [ ];
+            message = "llama-cpp (CPU-pinned reranker) must be absent from the gpu-inference conflicts mesh in both directions";
           }
         ];
       };
@@ -377,7 +427,7 @@ in
               .surfaces["llama-cpp"].activation.mode == "socket-proxy" and
               .surfaces["llama-cpp"].activation.backendEndpoint == "127.0.0.1:8082" and
               .surfaces["llama-cpp-proxy"].activation.publicEndpoint == "127.0.0.1:8081" and
-              .surfaces["llama-cpp-proxy"].activation.exclusiveResource == "gpu-inference" and
+              .surfaces["llama-cpp-proxy"].activation.exclusiveResource == null and
               .surfaces.comfyui.activation.mode == "socket-proxy" and
               .surfaces.comfyui.activation.backendEndpoint == "127.0.0.1:8189" and
               .surfaces["comfyui-proxy"].activation.publicEndpoint == "127.0.0.1:8188" and

@@ -16,6 +16,22 @@ let
   # `idleTimeout` is required (no default): every call site below has to
   # state and justify its own number instead of silently inheriting a
   # uniform 30s that only ever fit the smallest backend (sinnix-mba).
+  #
+  # `readinessTimeout` is required for the same reason (design pass
+  # 2026-08-13). Verified live: systemd-socket-proxyd starts
+  # forwarding the instant this service's ExecStart runs, but every backend
+  # below binds its port only after loading weights -- anywhere from ~2s
+  # (llama-cpp, whisper) to ~105s (comfyui) -- and systemd-socket-proxyd
+  # does not retry. Every connection arriving during that window got a hard
+  # "connection refused" (proxy log: "Failed to connect to remote host:
+  # Connection refused") instead of a queue, because `requires`+`after`
+  # above only ever guaranteed unit-start ordering, not port-bind.
+  # `waitForBackend` blocks this service's own start -- and so blocks
+  # ExecStart -- until the backend actually accepts a TCP connection. The
+  # client's own connection meanwhile sits parked in the `.socket` unit's
+  # kernel accept backlog (that unit is independent of this service's
+  # state), so a cold request now waits roughly the load time and then
+  # succeeds instead of failing instantly.
   mkProxy =
     {
       name,
@@ -23,9 +39,29 @@ let
       publicEndpoint,
       backendEndpoint,
       idleTimeout,
+      readinessTimeout,
       exclusiveResource ? null,
       dependsOn ? [ ],
     }:
+    let
+      backendParts = lib.splitString ":" backendEndpoint;
+      backendHost = lib.elemAt backendParts 0;
+      backendPort = lib.elemAt backendParts 1;
+      waitForBackend = pkgs.writeShellApplication {
+        name = "${name}-wait-backend";
+        runtimeInputs = [ pkgs.coreutils ];
+        text = ''
+          deadline=$((SECONDS + ${toString readinessTimeout}))
+          until (exec 3<>"/dev/tcp/${backendHost}/${backendPort}") 2>/dev/null; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "${name}: timed out after ${toString readinessTimeout}s waiting for ${backendUnit} to listen on ${backendEndpoint}" >&2
+              exit 1
+            fi
+            sleep 0.2
+          done
+        '';
+      };
+    in
     {
       sockets.${name} = {
         description = "Socket activation front door for ${backendUnit}";
@@ -37,6 +73,7 @@ let
         requires = [ backendUnit ];
         after = [ backendUnit ];
         serviceConfig = {
+          ExecStartPre = "${waitForBackend}/bin/${name}-wait-backend";
           ExecStart = "${systemdSocketProxyd} --exit-idle-time=${idleTimeout} ${backendEndpoint}";
           Restart = "no";
         };
@@ -53,6 +90,7 @@ let
             exclusiveResource
             dependsOn
             idleTimeout
+            readinessTimeout
             ;
         };
         observe = {
@@ -78,6 +116,12 @@ let
     # is never worse than a wasted reload for the model this host actually
     # drives chat sessions with.
     idleTimeout = "240s";
+    # Ollama is largely exempt from the cold-start-failure problem this
+    # readiness probe exists for: the daemon binds its port immediately and
+    # loads models lazily inside each request, rather than blocking the
+    # listener on weight-load like the llama.cpp-family backends. 30s is
+    # ample headroom for the daemon itself to come up.
+    readinessTimeout = 30;
     exclusiveResource = "gpu-inference";
     dependsOn = [ "ollama" ];
   };
@@ -96,6 +140,9 @@ let
     # larger than ollama's daily driver (see koboldcpp.nix's header), so
     # this is at least as generous as ollama's measured 240s.
     idleTimeout = "300s";
+    # Not measured directly (currently broken, see above); mirrors the
+    # idleTimeout headroom rationale rather than a real cold-start number.
+    readinessTimeout = 300;
     exclusiveResource = "gpu-inference";
     dependsOn = [ "koboldcpp" ];
   };
@@ -108,9 +155,20 @@ let
     # the configured base.en model (147MB) took ~2s end to end. An order of
     # magnitude of headroom already exists at 30s -- kept unchanged.
     idleTimeout = "30s";
+    # Measured 2026-08-13: cold /v1/audio/transcriptions bind-to-listen took
+    # ~2s. 30s is an order of magnitude of headroom, same figure as idleTimeout.
+    readinessTimeout = 30;
     exclusiveResource = "gpu-inference";
     dependsOn = [ "whisper" ];
   };
+  # Deliberately no exclusiveResource here: the reranker runs CPU-pinned
+  # (gpuLayers = 0, hosts/sinnix-prime/default.nix) since 2026-08-13 --
+  # measured 435-571ms warm on CPU vs. 67-137ms on GPU. It does NOT hold
+  # zero VRAM (the CUDA-linked binary still allocates ~680-740MiB even at
+  # -ngl 0 -- see llama-cpp.nix's header), but that's far below the
+  # 1610MiB it held fully offloaded, so it still stays out of the
+  # gpu-inference mesh and coexists with a resident ollama/koboldcpp/whisper
+  # session instead of evicting/being evicted by one.
   llamaCppProxy = mkProxy {
     name = "llama-cpp-proxy";
     backendUnit = "llama-cpp.service";
@@ -121,7 +179,10 @@ let
     # "reloads in about a second" note. 30s is already ~10-30x headroom --
     # kept unchanged.
     idleTimeout = "30s";
-    exclusiveResource = "gpu-inference";
+    # Measured 2026-08-13: cold /v1/rerank bind-to-listen took ~1-3s (the
+    # ~2.5s window observed via the proxy's connection-refused errors before
+    # this probe existed). 30s is ample headroom.
+    readinessTimeout = 30;
     dependsOn = [ "llama-cpp" ];
   };
   litellmProxy = mkProxy {
@@ -132,6 +193,9 @@ let
     # litellm.nix belongs to a different lane in this change; left at the
     # prior uniform default rather than guessed at.
     idleTimeout = "30s";
+    # litellm.nix belongs to a different lane in this change; a lightweight
+    # gateway process, not measured -- left at the same uniform default.
+    readinessTimeout = 30;
     dependsOn = [ "ollama-proxy" ];
   };
   # Deliberately no exclusiveResource here: Kokoro is CPU-only
@@ -145,6 +209,7 @@ let
     # kokoro.nix belongs to a different lane in this change; left at the
     # prior uniform default rather than guessed at.
     idleTimeout = "30s";
+    readinessTimeout = 30;
   };
 
   # ComfyUI, TTS (OpenedAI-Speech), MusicGen, and OCR are OCI containers with
@@ -174,6 +239,10 @@ let
     # a generation, waiting on output) is a long round trip on top of the
     # cold start itself.
     idleTimeout = "900s";
+    # Same ~105s measurement as idleTimeout's comment above; 180s headroom
+    # without making every genuinely-cold request wait as long as the idle
+    # timeout before a stuck container fails loud instead of hanging silently.
+    readinessTimeout = 180;
     exclusiveResource = "gpu-inference";
     dependsOn = [ "comfyui" ];
   };
@@ -186,6 +255,8 @@ let
     # voice) took ~17s. XTTS voice cloning was not separately measured (a
     # heavier model, likely slower); 300s covers headroom for both voices.
     idleTimeout = "300s";
+    # Same ~17s measurement as idleTimeout's comment above; 60s headroom.
+    readinessTimeout = 60;
     exclusiveResource = "gpu-inference";
     dependsOn = [ "tts" ];
   };
@@ -199,6 +270,7 @@ let
     # (rsxdalv/tts-generation-webui vs. mmartial/comfyui-nvidia-docker), so
     # treated as the same tier: 900s.
     idleTimeout = "900s";
+    readinessTimeout = 180;
     exclusiveResource = "gpu-inference";
     dependsOn = [ "musicgen" ];
   };
@@ -212,6 +284,7 @@ let
     # ComfyUI's checkpoint tree, so treated like the tts container tier:
     # 300s.
     idleTimeout = "300s";
+    readinessTimeout = 60;
     exclusiveResource = "gpu-inference";
     dependsOn = [ "ocr" ];
   };
@@ -245,11 +318,8 @@ let
       service = "whisper-server.service";
       proxy = "whisper-proxy.service";
     };
-    llama-cpp = {
-      enable = config.sinnix.services.llama-cpp.enable;
-      service = "llama-cpp.service";
-      proxy = "llama-cpp-proxy.service";
-    };
+    # llama-cpp (the reranker) is deliberately NOT a member: it runs
+    # CPU-pinned (gpuLayers = 0) and coexists with every backend below.
     comfyui = {
       enable = config.sinnix.services.comfyui.enable;
       service = "podman-comfyui.service";

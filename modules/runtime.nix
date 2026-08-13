@@ -318,6 +318,19 @@ in
               default = null;
               description = "Idle timeout after which an activated backend may stop.";
             };
+            readinessTimeout = lib.mkOption {
+              type = lib.types.nullOr lib.types.ints.positive;
+              default = null;
+              description = ''
+                Seconds a socket-proxy front door blocks its own start,
+                waiting for the backend to accept a TCP connection, before
+                giving up. Bounds the queueing window for a cold-start
+                request: without it, systemd-socket-proxyd starts
+                forwarding as soon as its unit starts, not once the
+                backend actually binds, so requests arriving mid-load get
+                refused instead of parked.
+              '';
+            };
             exclusiveResource = lib.mkOption {
               type = lib.types.nullOr lib.types.str;
               default = null;
