@@ -1,9 +1,4 @@
-# Log hygiene: Suppress cosmetic warnings and configure proper defaults
-#
-# Provides:
-# - XKB configuration to eliminate keyboard warnings
-# - D-Bus session config without deprecated eavesdropping policies
-# - Proper systemd service log levels
+# Log hygiene: suppress cosmetic warnings and quiet known-chatty services.
 {
   pkgs,
   lib,
@@ -12,8 +7,8 @@
 }:
 {
   config = {
-    # Fix D-Bus eavesdropping deprecation warnings
-    # The default NixOS config includes deprecated eavesdrop policies
+    # The NixOS default session config carries deprecated eavesdrop policies;
+    # this drop-in replaces them so D-Bus stops warning about them.
     services.dbus.packages = [
       (pkgs.writeTextFile {
         name = "dbus-session-local";
@@ -22,8 +17,7 @@
           <!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
            "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
           <busconfig>
-            <!-- Remove deprecated eavesdrop policies - modern D-Bus ignores them anyway -->
-            <!-- This suppresses warnings without changing behavior -->
+            <!-- Empty: modern D-Bus ignores eavesdrop policies anyway. -->
           </busconfig>
         '';
       })
@@ -31,9 +25,8 @@
 
     home-manager.users.${config.sinnix.user.name} = {
 
-      # User services log reduction for home-manager-managed services
       systemd.user.services = {
-        # Hypridle logs every idle state change - only log errors
+        # Hypridle logs every idle state change; keep errors only.
         hypridle.Service = {
           StandardOutput = "null";
           StandardError = "journal";
@@ -42,34 +35,28 @@
       };
     };
 
-    # Reduce systemd service logging noise for known-chatty services
     systemd.services = {
-      # NetworkManager dispatcher is chatty but usually doesn't need detailed logs
       NetworkManager-dispatcher.serviceConfig = {
         StandardOutput = lib.mkDefault "null";
         StandardError = lib.mkDefault "journal";
       };
 
-      # interception-tools (udevmon) logs JSON stats constantly = 21% of all logs
-      # Example spam: 176,431 messages in 3 days = 2,378 messages/hour
+      # udevmon logs JSON stats constantly (thousands of messages an hour).
       interception-tools.serviceConfig = {
-        # why mkForce: the keyboard/intercept-bounce stack re-enables
-        # journal output via mkDefault. Suppress it unconditionally;
-        # 176k messages over 3 days is pure noise.
+        # mkForce: the keyboard/intercept-bounce stack re-enables journal
+        # output via mkDefault.
         StandardOutput = lib.mkForce "null";
         StandardError = lib.mkDefault "journal";
       };
     };
 
-    # Configure systemd-logind to ignore power events (reduces log spam)
     services.logind.settings.Login = {
       HandleLidSwitch = lib.mkDefault "ignore";
       HandleLidSwitchExternalPower = lib.mkDefault "ignore";
       HandleLidSwitchDocked = lib.mkDefault "ignore";
     };
 
-    # Bluez experimental features already enabled, suppress probe failure logs
-    # These are expected when devices don't support all profiles
+    # Probe failures are expected when devices don't support all profiles.
     systemd.services.bluetooth.serviceConfig = {
       StandardOutput = lib.mkDefault "null";
       StandardError = lib.mkDefault "journal";

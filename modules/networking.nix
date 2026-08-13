@@ -1,12 +1,7 @@
 # Core networking configuration
 #
-# Provides:
-# - NetworkManager with systemd-resolved stub/cache
-# - DNS resolution via router (sinnix-gw handles DoH upstream to Cloudflare + Quad9)
-# - Hardened OpenSSH (no passwords, no root login, rate-limited, verbose logging)
-# - NTP via router with nixos.pool.ntp.org fallback
-# - Mosh for resilient remote sessions
-# - Bluetooth support with experimental features (desktop only)
+# NetworkManager plus a systemd-resolved stub, DNS and NTP pointed at the
+# router (sinnix-gw), hardened OpenSSH, mosh, and desktop Bluetooth.
 {
   lib,
   pkgs,
@@ -41,22 +36,19 @@ in
       networkmanager = {
         enable = true;
         dns = "systemd-resolved";
-        # DNS authority is on the router (sinnix-gw) which runs https-dns-proxy → Cloudflare DoH.
-        # DHCP advertises the router as DNS server; we accept that here.
-        # No need to override with ignore-auto-dns anymore.
+        # DNS authority is the router (sinnix-gw), which runs https-dns-proxy
+        # → Cloudflare DoH and advertises itself over DHCP.
       };
     };
 
-    # Don't gate boot on full network startup. nm-online -s waits for ALL
-    # autoconnect profiles to complete or time out (60s budget); cold-boot
-    # WiFi WPA handshake or DHCP renewal regularly trips that. On a
-    # desktop nothing critical depends on the unit — disabling avoids the
-    # boot-time failure that lingers in `systemctl --failed`.
+    # nm-online -s waits for every autoconnect profile to settle or time out
+    # (60s); a cold-boot WPA handshake or DHCP renewal regularly trips that,
+    # leaving a failed unit. Nothing on a desktop depends on it.
     systemd.services.NetworkManager-wait-online.enable = false;
 
     services = {
-      # systemd-resolved provides the local stub resolver and .lan handling.
-      # The router remains the DNS authority and already forwards upstream via DoH.
+      # Local stub resolver and .lan handling only; the router stays the DNS
+      # authority and forwards upstream via DoH.
       resolved = {
         enable = true;
         settings = {
@@ -67,10 +59,9 @@ in
             FallbackDNS = "";
             # Avahi owns local mDNS service discovery on this host.
             MulticastDNS = false;
-            # LAN name-spoofing surface with zero legitimate use on a
-            # workstation with proper DNS (router-authoritative + .lan via
-            # dnsmasq below); was listening on 0.0.0.0:5355 with nothing
-            # depending on it.
+            # LAN name-spoofing surface (listens on 0.0.0.0:5355) with no
+            # legitimate use here: DNS is router-authoritative and .lan is
+            # served by dnsmasq.
             LLMNR = false;
             # Resolve .lan names via the router's dnsmasq.
             Domains = [ "~lan" ];
@@ -78,8 +69,7 @@ in
         };
       };
 
-      # Use router as NTP server (it syncs via ntpd from upstream).
-      # Reduces external traffic and provides consistent time across the LAN.
+      # The router syncs upstream via ntpd; using it keeps LAN time consistent.
       timesyncd = {
         enable = true;
         servers = [ "192.168.1.1" ];
@@ -124,9 +114,9 @@ in
       settings = {
         Policy = {
           AutoEnable = true;
-          # Limit reconnection attempts for offline devices.
-          # Default (7) with AVDTP retries causes 60+ attempts/hour to
-          # powered-off headsets, flooding journal and dbus.
+          # The default (7) combined with AVDTP retries produces dozens of
+          # reconnect attempts an hour to powered-off devices, flooding the
+          # journal and dbus.
           ReconnectAttempts = lib.mkDefault 3;
         };
         General = {

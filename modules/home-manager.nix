@@ -31,7 +31,7 @@ in
       dotsRepoPath = config.sinnix.paths.dotsRoot;
       secretPaths = config.sinnix.secrets.paths;
       inherit (config) sinnix;
-      # Pre-bound mkDotsFile helper - modules just need: let mkDotsFile = mkDotsFileFor config;
+      # Pre-bound: modules use `let mkDotsFile = mkDotsFileFor config;`
       mkDotsFileFor = helpers.mkDotsFileFor config.sinnix;
     };
     users."${user}" = {
