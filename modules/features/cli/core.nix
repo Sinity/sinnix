@@ -170,6 +170,26 @@ mkFeatureModule {
             };
           };
 
+          # Desktop -> phone clipboard push (sinnix-uyvt.5). One-way only:
+          # Android blocks clipboard READS from a backgrounded app, so the
+          # phone->desktop half is not attempted here -- see the header
+          # comment in scripts/sinnix-phone. wl-paste --watch blocks on
+          # clipboard change, so this is push-triggered, not a poll loop.
+          systemd.user.services.sinnix-phone-clip-watch = {
+            Unit = {
+              Description = "Push desktop clipboard changes to the phone over the tailnet";
+              After = [ "graphical-session.target" ];
+              PartOf = [ "graphical-session.target" ];
+            };
+            Service = {
+              Type = "simple";
+              ExecStart = "${scriptPkgs.sinnix-phone}/bin/sinnix-phone clip-watch";
+              Restart = "on-failure";
+              RestartSec = "10s";
+            };
+            Install.WantedBy = [ "graphical-session.target" ];
+          };
+
           programs.bat = {
             enable = true;
             config.pager = "less -FR";

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # @sinnix-package
-# description: Reach the phone over the tailnet — status, shell, screen mirror, media pull
-# runtimeInputs: bash coreutils openssh rsync android-tools scrcpy iputils jq
+# description: Reach the phone over the tailnet — status, shell, screen mirror, media pull, clipboard push
+# runtimeInputs: bash coreutils openssh rsync android-tools scrcpy iputils jq wl-clipboard
+
 #
 # The phone (Redmi Note 11, unrooted) is a tailnet peer with two control
 # surfaces: Termux sshd on :8022 for shell/file work, and adbd on :5555 for
@@ -10,6 +11,16 @@
 #
 # adbd over TCP does NOT survive a phone reboot; `sinnix-phone adb-restore`
 # re-enables it over USB. Everything else survives.
+#
+# CLIPBOARD IS ONE-WAY (desktop -> phone), NOT A BUG. Android blocks
+# clipboard READS from a backgrounded app (privacy restriction since Android
+# 10): `termux-clipboard-get` silently returns empty unless Termux is the
+# foreground app (verified live 2026-08-13). `termux-clipboard-set` has no
+# such restriction and works fine from a backgrounded ssh session. So
+# phone->desktop clipboard sync would need Termux kept foregrounded
+# continuously (bad UX) or an AccessibilityService-based reader (see
+# sinnix-uyvt.6) -- not attempted here. PRIMARY has no Android equivalent at
+# all, so there is nothing to sync for it; this covers CLIPBOARD only.
 set -euo pipefail
 
 PHONE_TS_IP="${SINNIX_PHONE_IP:-100.124.215.25}"
@@ -39,6 +50,8 @@ sinnix-phone <command>
   pull          rsync camera + downloads + health exports into the lake
   adb-connect   (re)attach adb over the tailnet
   adb-restore   re-enable adbd TCP mode (requires the phone on USB)
+  clip-push     push the current desktop clipboard to the phone, once
+  clip-watch    watch desktop clipboard, push on change (foreground loop)
 EOF
 }
 
@@ -117,6 +130,27 @@ adb-restore)
   adb tcpip 5555
   sleep 3
   adb connect "$ADB_TARGET"
+  ;;
+clip-push)
+  # text/* only -- termux-clipboard-set takes a string argument; pushing raw
+  # image bytes (a screenshot copy, the common non-text case) would either
+  # error or silently set garbage text, so skip non-text content instead.
+  mime="$(wl-paste --list-types 2>/dev/null | head -1)"
+  case "$mime" in
+    text/*|"")
+      text="$(wl-paste -n 2>/dev/null || true)"
+      [ -n "$text" ] || exit 0
+      ssh_phone "termux-clipboard-set" -- "$text" 2>/dev/null || true
+      ;;
+    *) : ;; # non-text clipboard (image, etc.) -- nothing to push
+  esac
+  ;;
+clip-watch)
+  # Foreground loop, run under systemd (Type=simple). wl-paste -w blocks
+  # until the clipboard changes, so this is push-triggered, not polled --
+  # cheap and immediate. No loop-guard needed: this direction never writes
+  # back to the desktop clipboard, so there is nothing to echo.
+  exec wl-paste --watch "$0" clip-push
   ;;
 *)
   usage
