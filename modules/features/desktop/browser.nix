@@ -66,6 +66,12 @@ mkFeatureModule {
             "--remote-debugging-port=9222"
             "--remote-debugging-address=127.0.0.1"
             "--user-data-dir=${chromeUserDataDir}"
+            # Chrome-family apps register with AT-SPI but expose an empty tree
+            # unless renderer accessibility is forced on. Without it the
+            # capture-a11y lane sees focus events from Chrome windows with no
+            # readable content -- and Chrome is where most of the readable
+            # content on this desktop lives. See modules/services/capture-a11y.nix.
+            "--force-renderer-accessibility"
           ];
           chromePkg = pkgs.google-chrome.override {
             commandLineArgs = chromeArgs;

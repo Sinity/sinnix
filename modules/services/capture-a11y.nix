@@ -27,12 +27,13 @@
 # `cfg.enable` via mkServiceModule, so it has no effect when the lane is
 # off).
 #
-# Chromium/Electron gap: Chrome-family apps only populate their AT-SPI tree
-# when launched with `--force-renderer-accessibility` (or the
-# `ACCESSIBILITY_ENABLED=1` env var). That flag belongs on the Chrome
-# wrapper's `commandLineArgs` in modules/features/desktop/browser.nix
-# (`chromeArgs`) -- out of this module's scope, but Chrome/Electron windows
-# will show up as focus events with an empty subtree without it.
+# Toolkit opt-in: a running bus is necessary but not sufficient, because each
+# toolkit decides separately whether to publish a tree. Chrome-family apps
+# need `--force-renderer-accessibility` (now set on the Chrome wrapper's
+# `commandLineArgs` in modules/features/desktop/browser.nix) and Qt needs
+# `QT_LINUX_ACCESSIBILITY_ALWAYS_ON` (set below). Without those the registry
+# root sits at ChildCount=0 and the lane records nothing while every unit
+# involved reports healthy -- which is exactly how it ran for its first day.
 {
   mkServiceModule,
   config,
@@ -83,6 +84,27 @@ mkServiceModule {
     { cfg, ... }:
     {
       services.gnome.at-spi2-core.enable = true;
+
+      # Enabling the bus is necessary but not sufficient: toolkits still have
+      # to be told to publish a tree. Measured live 2026-08-13 -- the bus,
+      # launcher and registryd were all running and the daemon had been up 24h
+      # burning CPU, while the registry root reported ChildCount=0. Nothing was
+      # exposed, so the lane could never write a byte no matter how healthy
+      # every unit looked.
+      #
+      # Qt publishes only when asked; GTK3/4 follow the bus once NO_AT_BRIDGE
+      # and GTK_A11Y=none are absent (NixOS sets those two only while
+      # at-spi2-core is disabled, so flipping it above is enough there).
+      # Chrome/Electron additionally need --force-renderer-accessibility, set
+      # on the Chrome wrapper in modules/features/desktop/browser.nix.
+      #
+      # These are session variables, so already-running applications keep the
+      # environment they were launched with -- the lane goes live for a given
+      # app only once it restarts under a session that has these set.
+      environment.sessionVariables = {
+        QT_LINUX_ACCESSIBILITY_ALWAYS_ON = "1";
+        ACCESSIBILITY_ENABLED = "1";
+      };
 
       systemd.tmpfiles.rules = [
         "d ${laneDir} 0755 ${username} users -"
