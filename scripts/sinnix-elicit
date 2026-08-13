@@ -52,6 +52,7 @@ import math
 import os
 import random
 import shutil
+import subprocess
 import sys
 import uuid
 from pathlib import Path
@@ -534,6 +535,31 @@ def cmd_init(domain, args):
     for it in items:
         if "id" not in it:
             raise SystemExit(f"item missing id: {it}")
+    if args.image_features:
+        # `explain` is the reason this engine bothers with feature vectors at
+        # all, and it is inert on items that carry none ("no items carry
+        # feature vectors; explain has nothing to work with"). sinnix-image-
+        # features exists precisely to produce them for image domains and
+        # names this script as its caller -- but nothing ever invoked it, so
+        # the only way to get features onto an image item was to hand-roll
+        # them per domain, which is what it was written to stop.
+        missing = [it for it in items if it.get("image") and "features" not in it]
+        computed = failed = 0
+        for it in missing:
+            try:
+                out = subprocess.run(
+                    ["sinnix-image-features", it["image"]],
+                    capture_output=True, text=True, timeout=60, check=True,
+                )
+                it["features"] = json.loads(out.stdout)
+                computed += 1
+            except (subprocess.SubprocessError, json.JSONDecodeError, OSError) as exc:
+                # Report, never silently drop: an item quietly missing its
+                # features degrades `explain` in a way nothing surfaces.
+                print(f"  feature extraction failed for {it['id']}: {exc}", file=sys.stderr)
+                failed += 1
+        print(f"computed image features for {computed} item(s)"
+              + (f", {failed} failed" if failed else ""))
     domain.dir.mkdir(parents=True, exist_ok=True)
     domain.items_path.write_text(json.dumps(items, indent=2) + "\n")
     print(f"initialized domain '{domain.name}' with {len(items)} items at {domain.dir}")
@@ -690,6 +716,8 @@ def main():
     sp = add("init", cmd_init)
     sp.add_argument("--items", required=True, help="JSON list: [{id, label?, image?, description?, features?, prior?}]")
     sp.add_argument("--force", action="store_true")
+    sp.add_argument("--image-features", action="store_true",
+                    help="compute a feature vector for each item carrying an `image` path, via sinnix-image-features (without features, `explain` has nothing to fit)")
     sp = add("session", cmd_session)
     sp.add_argument("-n", "--pairs", type=int, default=20)
     add("ingest", cmd_ingest)
