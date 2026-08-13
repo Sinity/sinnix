@@ -40,6 +40,14 @@ final class Status {
   /** A chunk file that has not grown in this long is not really recording. */
   private static final long STALL_MILLIS = 90_000L;
 
+  /**
+   * Consecutive zero-amplitude heartbeats before the microphone counts as
+   * muted. Four samples is 80s at the current cadence -- long enough that a
+   * momentary handover between audio clients does not trip it, short enough
+   * that a chunk is never mostly silence before anyone notices.
+   */
+  private static final int MUTED_SAMPLES = 4;
+
   private Context ctx;
 
   private long serviceStartedAtMs;
@@ -52,6 +60,7 @@ final class Status {
   private long lastChunkSeconds;
   private long lastChunkBytes;
   private long lastChunkClosedAtMs;
+  private int lastChunkPeakAmplitude;
 
   private int chunksClosed;
   private int failures;
@@ -61,6 +70,10 @@ final class Status {
   private long lastGrowthAtMs;
   private long lastObservedBytes = -1;
   private boolean recording;
+
+  private int lastAmplitude = -1;
+  private int chunkPeakAmplitude;
+  private int silentSamples;
 
   synchronized void attach(Context context) {
     this.ctx = context.getApplicationContext();
@@ -85,6 +98,9 @@ final class Status {
     recording = true;
     lastObservedBytes = -1;
     lastGrowthAtMs = startedAtMs;
+    chunkPeakAmplitude = 0;
+    silentSamples = 0;
+    lastAmplitude = -1;
     write();
   }
 
@@ -93,17 +109,32 @@ final class Status {
     lastChunkBytes = file.length();
     lastChunkSeconds = Math.max(0L, (closedAtMs - startedAtMs) / 1000L);
     lastChunkClosedAtMs = closedAtMs;
+    lastChunkPeakAmplitude = chunkPeakAmplitude;
     chunksClosed++;
     recording = false;
     currentChunk = null;
     write();
   }
 
-  synchronized void heartbeat(long currentBytes, long elapsedSeconds) {
+  synchronized void heartbeat(long currentBytes, long elapsedSeconds, int amplitude) {
     currentChunkBytes = currentBytes;
     if (currentBytes > lastObservedBytes) {
       lastObservedBytes = currentBytes;
       lastGrowthAtMs = System.currentTimeMillis();
+    }
+    if (amplitude >= 0) {
+      lastAmplitude = amplitude;
+      if (amplitude > chunkPeakAmplitude) {
+        chunkPeakAmplitude = amplitude;
+      }
+      // Exactly zero, not "low". A working microphone reports its own noise
+      // floor even in a silent room; a run of exact zeroes is the platform
+      // substituting silence for audio it decided not to give us.
+      if (amplitude == 0) {
+        silentSamples++;
+      } else {
+        silentSamples = 0;
+      }
     }
     write();
   }
@@ -122,6 +153,11 @@ final class Status {
       return false;
     }
     return System.currentTimeMillis() - lastGrowthAtMs > STALL_MILLIS;
+  }
+
+  /** True when the recorder is nominally running but the microphone reads as silence. */
+  synchronized boolean muted() {
+    return recording && silentSamples >= MUTED_SAMPLES;
   }
 
   synchronized int chunksClosed() {
@@ -167,10 +203,15 @@ final class Status {
           currentChunkStartedAtMs == 0 || !recording
               ? 0
               : (System.currentTimeMillis() - currentChunkStartedAtMs) / 1000L);
+      o.put("current_chunk_peak_amplitude", chunkPeakAmplitude);
+      o.put("last_amplitude", lastAmplitude);
+      o.put("silent_samples", silentSamples);
+      o.put("muted", recording && silentSamples >= MUTED_SAMPLES);
       o.put("last_chunk", lastChunk == null ? JSONObject.NULL : lastChunk);
       o.put("last_chunk_seconds", lastChunkSeconds);
       o.put("last_chunk_bytes", lastChunkBytes);
       o.put("last_chunk_closed_at", isoOrNull(lastChunkClosedAtMs));
+      o.put("last_chunk_peak_amplitude", lastChunkPeakAmplitude);
       o.put("chunks_closed", chunksClosed);
       o.put("failures", failures);
       o.put("last_error", lastError == null ? JSONObject.NULL : lastError);
