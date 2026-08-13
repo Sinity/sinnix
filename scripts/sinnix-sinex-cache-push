@@ -3,12 +3,11 @@
 # description: Push a store path's sinex package closure to sinity.cachix.org in the background
 # runtimeInputs: bash coreutils gnugrep nix cachix systemd
 #
-# Shared push logic, factored out so both the interactive `switch` path
+# Shared push logic for both the interactive `switch` path
 # (flake/command-registry.nix's sinexCachePush, which passes
 # /run/current-system after a successful activation) and the async
-# sinex-cache-prebuild timer (sinnix-m9v, which passes a freshly `nix build`d
-# sinex output path) publish to sinity.cachix.org the exact same way instead
-# of maintaining two copies of the push command.
+# sinex-cache-prebuild timer (which passes a freshly `nix build`d sinex
+# output path).
 #
 # Best-effort: needs the operator's cachix auth token (~/.config/cachix). The
 # push itself runs as a detached background.slice unit so this command

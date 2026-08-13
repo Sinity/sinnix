@@ -346,26 +346,23 @@ fi
 # cannot keep a completed launcher scope alive indefinitely. Intentional
 # background xtask jobs bypass the scope above and retain their own lifecycle.
 #
-# Interactive launches (a real controlling terminal on stdin) skip the
+# Interactive launches (a real controlling terminal on stdin) MUST skip the
 # supervisor: `supervise_scope_command` backgrounds the target with `"$@" &`,
 # and bash — running non-interactively here, no job control (`-m`) — redirects
 # a backgrounded command's stdin from /dev/null per POSIX ("If job control is
 # not in effect... asynchronous commands... have standard input redirected
-# from /dev/null"). That silently broke every interactive agent CLI routed
-# through this scope (codex, claude, etc. all reported "stdin is not a
-# terminal") the same day this supervisor landed. The orphan-cleanup problem
-# this supervisor fixes is a background/headless-launch failure mode (a
-# checkout database, MCP server, or test worker outliving its unwatched
-# launcher) — an interactive session the operator is actively watching does
-# not need it, and normal terminal signal delivery (SIGHUP on terminal close,
-# Ctrl-C) already reaches the whole foreground process group without help.
+# from /dev/null"), so every interactive agent CLI routed through the scope
+# sees "stdin is not a terminal". The orphan-cleanup problem the supervisor
+# fixes is a background/headless failure mode anyway; an interactive session
+# already gets normal terminal signal delivery (SIGHUP on close, Ctrl-C)
+# across the whole foreground process group.
 if [ -t 0 ]; then
   :
 else
   scoped_command=("$0" --internal-supervise -- "${scoped_command[@]}")
 fi
 
-# sinnix-1ei: cgroup v2 memory.peak is a cumulative watermark since cgroup
+# cgroup v2 memory.peak is a cumulative watermark since cgroup
 # creation, never reset by the kernel -- for a long-lived slice like
 # nix-build.slice that shares one cgroup across every job ever run in it,
 # the column reports the slice's all-time high rather than any single job's
@@ -388,12 +385,12 @@ if [ "$slice" = "nix-build.slice" ]; then
   reset_slice_memory_peak
 fi
 
-# sinnix-1ei: job identity in the unit name (not a separate audit log --
-# telemetry.sqlite already joins process_memory_sample/cgroup_memory_sample
-# to the owning systemd unit by name, so encoding the real command here is
-# what makes that join carry class-level identity instead of just
-# "nix-build" for every job). Sanitized, length-capped: unit names have a
-# real character/length ceiling and the command can be arbitrarily long.
+# Job identity goes in the unit name because telemetry.sqlite joins
+# process_memory_sample/cgroup_memory_sample to the owning systemd unit by
+# name -- encoding the real command here is what makes that join carry job
+# identity instead of just "nix-build" for every job. Sanitized and
+# length-capped: unit names have a real character/length ceiling and the
+# command can be arbitrarily long.
 job_identity="$(basename -- "${scoped_command[0]:-$command_base}")"
 if [ "${#scoped_command[@]}" -gt 1 ]; then
   job_identity="${job_identity}-${scoped_command[1]}"

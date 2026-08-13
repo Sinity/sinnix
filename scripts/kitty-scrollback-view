@@ -36,13 +36,10 @@ case "${1:-}" in
     input="${1:?Usage: kitty-scrollback-view --html <file.ansi>}"
     output="${input%.ansi}.html"
 
-    # Convert ANSI to HTML with dark background
-    # Uses aha (ANSI HTML Adapter) if available, otherwise basic conversion
     if command -v aha &>/dev/null; then
       echo "Converting with aha..."
       aha --black --title "$(basename "$input")" < "$input" > "$output"
     else
-      # Fallback: wrap in pre with dark bg, use ansi2html if available
       if command -v ansi2html &>/dev/null; then
         ansi2html --bg=dark < "$input" > "$output"
       else

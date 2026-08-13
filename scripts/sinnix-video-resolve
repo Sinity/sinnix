@@ -3,13 +3,12 @@
 # description: Resolve video-hosting URLs found in the URL ledger into archived copies (sinnix-e8k9)
 # runtimeInputs: yt-dlp duckdb coreutils jq
 
-# Split from the web-capture bead: the URL ledger (sinnix-9tex Stage 1)
-# already discovers and normalizes every URL this operator's browsing
-# history has touched, joined against archive-availability. This script
-# is the video special-case: URLs on known video-hosting domains get
-# resolved into a real archived copy via yt-dlp, since neither Wayback
-# nor Common Crawl actually preserve video content -- their CDX coverage
-# check only tells you a page existed, not that the video survives.
+# The URL ledger discovers and normalizes every URL this operator's browsing
+# history has touched, joined against archive-availability. This script is
+# the video special-case: URLs on known video-hosting domains get resolved
+# into a real archived copy via yt-dlp, since neither Wayback nor Common
+# Crawl preserve video content -- their CDX coverage check only tells you a
+# page existed, not that the video survives.
 #
 # A manifest (archived.jsonl) tracks what's already been pulled so re-runs
 # are cheap; yt-dlp's own --download-archive gives the same guarantee at

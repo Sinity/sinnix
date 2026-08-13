@@ -6,16 +6,12 @@ set -euo pipefail
 
 export LC_ALL=C
 
-# Pin unit prefix: `sinnix-ai pin <name>` runs a transient --user unit that
-# holds one open TCP connection to the service's public (proxy) port, which
-# is what actually inhibits systemd-socket-proxyd's --exit-idle-time (the
-# idle timer only starts once the proxy has zero active connections; it does
-# not care whether traffic flows). RuntimeMaxSec on the transient unit is the
-# auto-release: systemd itself kills the holder and closes the connection
-# when the pin expires, no separate timer/daemon of ours required. Verified
-# empirically 2026-08-13 against kokoro-proxy (30s --exit-idle-time): a held
-# connection kept the backend resident past 50s, and closing it let the
-# proxy tear the backend down ~20-30s later, matching --exit-idle-time.
+# `sinnix-ai pin <name>` runs a transient --user unit holding one open TCP
+# connection to the service's public (proxy) port. That is what inhibits
+# systemd-socket-proxyd's --exit-idle-time: the idle timer only starts once
+# the proxy has zero active connections, regardless of traffic. RuntimeMaxSec
+# on the transient unit is the auto-release -- systemd kills the holder and
+# closes the connection, so no timer or daemon of ours is needed.
 PIN_PREFIX="sinnix-ai-pin-"
 DEFAULT_PIN_DURATION="2h"
 
@@ -161,13 +157,10 @@ cmd_status() {
   lookup "$1"
   echo "service: $REG_NAME — $REG_DESC"
   echo "unit:    $REG_UNIT ($(unit_state "$REG_UNIT"), $(autostart_state "$REG_UNIT"))"
-  # Probing the PUBLIC port is not a read: it is a connection to the
+  # Probing the PUBLIC port is not a read: it connects to the
   # socket-activation front door, so it STARTS the backend -- and for a
-  # gpu-inference member, starting it evicts whatever else was resident.
-  # Observed live 2026-08-13: a bare `sinnix-ai status ollama` activated
-  # ollama.service, whose Conflicts= SIGKILLed another agent's running
-  # ComfyUI workload. A status command must never cost someone their
-  # loaded model, so only probe a backend that is already up.
+  # gpu-inference member, starting it evicts whatever else was resident
+  # (Conflicts= SIGKILLs the peer). Only probe a backend already up.
   if [[ "$(unit_state "$REG_UNIT")" == active ]]; then
     echo "port:    127.0.0.1:$REG_PORT (responding: $(port_alive "$REG_PORT" "$REG_PROBE"))"
   elif has_proxy "$REG_NAME"; then

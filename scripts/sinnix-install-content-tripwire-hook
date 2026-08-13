@@ -4,10 +4,9 @@
 # runtimeInputs: bash git
 #
 # bd's own hooks are purely imperative per-checkout state (`bd hooks
-# install`, never a tracked/declared mechanism) -- there is no existing
-# repo convention for composing additional git hook content, so this script
-# IS that mechanism now: run it once per checkout (fresh clone, new
-# worktree) after `bd hooks install` has run. Idempotent -- safe to re-run.
+# install`), and there is no other repo convention for composing additional
+# git hook content -- so run this once per checkout (fresh clone, new
+# worktree) after `bd hooks install`. Idempotent, safe to re-run.
 set -euo pipefail
 
 repo_root=$(git rev-parse --show-toplevel)
@@ -27,9 +26,8 @@ fi
 cat >> "$hook_file" <<EOF
 
 $marker
-# Advisory only -- flags, never blocks (see the script's own docstring for
-# the doctrine reasoning). Appended outside bd's BEGIN/END markers so
-# 'bd hooks install' reruns don't clobber it.
+# Advisory only -- flags, never blocks. Appended outside bd's BEGIN/END
+# markers so 'bd hooks install' reruns don't clobber it.
 if command -v python3 >/dev/null 2>&1 && [[ -f "$repo_root/scripts/sinnix-content-tripwire" ]]; then
   cd "$repo_root" && python3 scripts/sinnix-content-tripwire || true
 fi

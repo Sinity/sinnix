@@ -3,7 +3,7 @@
 # description: Regenerate the maximalist OS cheatsheet (Hyprland binds, sinnix CLI, skills, qutebrowser, beads/git essentials, agent-dispatch idioms) as a searchable HTML page
 # runtimeInputs: python3 coreutils hyprland
 
-"""The cheatsheet as a program, not a document (sinnix-v034).
+"""The cheatsheet as a program, not a document.
 
 Every section is queried fresh at generation time -- Hyprland binds via
 `hyprctl binds -j` (live compositor state, so it reflects whatever is

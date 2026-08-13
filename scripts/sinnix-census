@@ -3,7 +3,7 @@
 # description: Evidence-joined usage census across sinnix-owned artifact classes
 # runtimeInputs: python3 systemd gnugrep
 
-"""Join declaration inventories against usage evidence (bead sinnix-yfr).
+"""Join declaration inventories against usage evidence.
 
 Design: .agent/scratch/2026-08-11-census-design.md. Read-only. Verdicts
 degrade to `unknown` when an evidence source is unavailable — absence of

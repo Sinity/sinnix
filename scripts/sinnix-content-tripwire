@@ -2,31 +2,23 @@
 # @sinnix-package
 # description: T1 dict/regex content tripwire -- flags, never blocks, for pre-commit review
 # runtimeInputs: bash coreutils git python3
-"""T1 tier of sinnix-021's content-gate design (sinnix-egress-scan is T0:
-mechanical secret-pattern scanning, auto-block, the only tier allowed to
-block). This tier is a HIGH-RECALL TRIPWIRE, never a verdict -- it flags
-matches for the committer's own review, it never rejects a commit. That's
-the repo's own standing anti-pattern rule: no script judges content by
-grepping for magic phrases; a tripwire that only flags is not "enforcing a
-process invariant by pattern-matching," it's assisting review, which the
-rule explicitly allows.
+"""T1 content tripwire (sinnix-egress-scan is T0: mechanical secret-pattern
+scanning, auto-block, the only tier allowed to block). This tier is a
+HIGH-RECALL TRIPWIRE, never a verdict -- it flags matches for the committer's
+own review and never rejects a commit, which is what keeps it clear of the
+repo rule against judging content by grepping for magic phrases.
 
-Scans two things per sinnix-021's incident-hardened rule ("T1 tripwire must
-scan COMMIT MESSAGES and PR/issue bodies, not just diff content -- metadata
-channels are publication surfaces"):
+Metadata channels are publication surfaces too, so this scans both:
   1. The staged diff content (git diff --cached)
   2. The commit message (COMMIT_EDITMSG, passed by prepare-commit-msg or
      read directly by pre-commit via .git/COMMIT_EDITMSG when available)
 
-Wire point priority #1 (this bead's own ordering): the beads export path
-(.beads/issues.jsonl) is "the proven near-miss vector" -- checked with
-elevated priority (reported first, separately) since a previous incident's
-root cause was exactly a tracker checkpoint commit message leaking
-repo-boundary metadata.
+The beads export path (.beads/issues.jsonl) is the proven near-miss vector --
+a tracker checkpoint commit message leaking repo-boundary metadata -- so it is
+reported first and separately.
 
-Dictionaries live in the lake (/realm/media/corpora/content-lists/), not
-the repo, per this bead's own data-placement decision -- this script holds
-only the gate logic and the pointer to where the lists live.
+Dictionaries live in the lake (/realm/media/corpora/content-lists/), not the
+repo; this script holds only the gate logic and the pointer to the lists.
 """
 import re
 import subprocess
@@ -141,9 +133,8 @@ def main():
         "flagged spans yourself; this never blocks the commit.",
         file=sys.stderr,
     )
-    # Advisory only -- never a non-zero exit, per the bead's own doctrine
-    # that T1 flags for judgment rather than enforcing. Only T0 (mechanical
-    # secret patterns, sinnix-egress-scan) is allowed to block.
+    # Advisory only -- never a non-zero exit. T1 flags for judgment; only T0
+    # (mechanical secret patterns, sinnix-egress-scan) is allowed to block.
     sys.exit(0)
 
 

@@ -6,10 +6,10 @@
 # default handler for text/* via modules/features/desktop/mime.nix; the matching
 # Hyprland float rule (app-id `sinnix-preview`) lives in hyprland/rules.nix.
 #
-# Replaces the previous behaviour where text MIME types fell back to nvim.desktop
-# (Terminal=true), which under bare Hyprland launched a headless, window-less,
-# immortal nvim per open. `setsid -f` detaches so the calling xdg-open/gio
-# returns immediately and nothing is left hanging.
+# `setsid -f` detaches so the calling xdg-open/gio returns immediately and
+# nothing is left hanging. Do not route text/* at a Terminal=true .desktop
+# entry (e.g. nvim.desktop): under bare Hyprland that launches a headless,
+# window-less, immortal process per open.
 set -euo pipefail
 
 if [ "$#" -eq 0 ]; then

@@ -2,15 +2,11 @@
 # description: Terminal-based ambient viewer for the reading stack -- run inside a pinned kitty window
 # runtimeInputs: bash @sinnix-reading-stack
 #!/usr/bin/env bash
-# This IS the "standing visibility" mechanism the reading-stack design docs
-# reference (see sinnix-reading-stack's own docstring for the psychological
-# reasoning). It is deliberately a plain terminal loop, not a Waybar/eww
-# module: Noctalia (this host's shell) has no scriptable per-widget IPC
-# investigated so far, whereas "a small window, pinned via a Hyprland
-# windowrule" is a mechanism already proven tonight (browser-inversion's
-# whole premise is that Hyprland windows/groups are the universal container
-# -- this is the same idea applied to a status widget instead of a browser
-# tab).
+# The "standing visibility" mechanism for the reading stack (see
+# sinnix-reading-stack's own docstring for the reasoning). A plain terminal
+# loop, not a Waybar/eww module: Noctalia (this host's shell) exposes no
+# scriptable per-widget IPC, whereas a small window pinned via a Hyprland
+# windowrule works.
 set -euo pipefail
 
 refresh_secs="${SINNIX_READING_STACK_REFRESH:-5}"

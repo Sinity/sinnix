@@ -3,7 +3,7 @@
 # description: Monitor org.freedesktop.Notifications via busctl and forward each Notify() call to sinnix-capture write
 # runtimeInputs: python3 systemd
 
-"""Desktop notification capture listener (sinnix-sz0c).
+"""Desktop notification capture listener.
 
 Runs ``busctl --user monitor --json=short org.freedesktop.Notifications`` as
 a long-lived subprocess, parses its one-JSON-object-per-line stream, and
@@ -12,18 +12,15 @@ desktop-notification client uses -- see the freedesktop.org Desktop
 Notifications spec) through ``sinnix-capture write`` as one envelope per
 notification.
 
-``busctl`` (systemd) was chosen over ``dbus-monitor`` or a Python D-Bus
-binding (dbus-python / dbus-next / jeepney) because it is already vendored
-transitively via systemd itself -- no new dependency for this repo -- and
-its ``--json=short`` mode gives one structured JSON object per D-Bus
-message, which is far more robust to parse than dbus-monitor's
-human-readable multi-line text format.
+``busctl`` needs no new dependency (it ships with systemd) and its
+``--json=short`` mode gives one structured JSON object per D-Bus message,
+unlike dbus-monitor's human-readable multi-line text.
 
 Only the ``Notify`` method call is forwarded. ``NotificationClosed`` /
 ``ActionInvoked`` signals and daemon-introspection calls
-(``GetCapabilities``, ``GetServerInformation``) are seen on the same
-monitor stream but are out of scope for this lane (see sinnix-sz0c) --
-its payload contract is app_name/summary/body/urgency/timestamp/actions.
+(``GetCapabilities``, ``GetServerInformation``) arrive on the same monitor
+stream but are out of scope; the payload contract is
+app_name/summary/body/urgency/timestamp/actions.
 """
 
 from __future__ import annotations

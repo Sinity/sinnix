@@ -96,11 +96,9 @@ def cmd_push(args: argparse.Namespace) -> int:
         "source_title": args.source_title or None,
         "pushed_at": time.time(),
     }
-    # De-dup by URL: re-pushing something already queued bumps it to the
-    # top (most-recent-first) instead of creating a second row -- matches
-    # the operator's explicit ask that duplicate pushes not be silently
-    # dropped elsewhere (clipboard), but a reading queue is a different
-    # object: the same link queued twice is one intention, not two.
+    # De-dup by URL: re-pushing something already queued bumps it to the top
+    # (most-recent-first) instead of creating a second row -- the same link
+    # queued twice is one intention, not two.
     items = [i for i in items if i.get("url") != entry["url"]]
     items.insert(0, entry)
     _save(items)

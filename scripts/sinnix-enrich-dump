@@ -4,15 +4,15 @@
 # runtimeInputs: bash coreutils findutils gnugrep jq claude-code atuin beads systemd
 set -euo pipefail
 
-# sinnix-jfiy.2: timer -> state-dump -> `claude -p` (enrichment-pass skill) ->
-# versioned outputs under /realm/data/derived/enrichment/. Single-writer
+# timer -> state-dump -> `claude -p` (enrichment-pass skill) -> versioned
+# outputs under /realm/data/derived/enrichment/. Single-writer
 # invariant: this script NEVER writes to polylogue's or sinex's stores, and
 # writes only under /realm/data/derived/enrichment/ (outputs) and
 # /realm/state/enrichment/ (watermark). Every other path it touches is
 # read-only.
 #
-# Substrate-independent by design (2026-08-11 fork verdict): inputs are read
-# from whatever files/commands happen to exist; an absent or empty source is
+# Substrate-independent by design: inputs are read from whatever
+# files/commands happen to exist; an absent or empty source is
 # not an error, it just means nothing changed there since the watermark (or
 # the source doesn't exist on this host yet) -- see dots/_ai/skills/
 # enrichment-pass/SKILL.md for how the model is told to handle that.
@@ -47,8 +47,7 @@ if command -v atuin >/dev/null 2>&1; then
   atuin search --after "$ATUIN_AFTER" "" >"$BUNDLE/atuin-tail.txt" 2>/dev/null || true
 fi
 
-# Polylogue hook-spool deltas. Path moved /realm/db/polylogue ->
-# /realm/state/polylogue on 2026-08-12 (sinnix-eau); use the current path.
+# Polylogue hook-spool deltas.
 POLYLOGUE_HOOKS_DIR="/realm/state/polylogue/hooks"
 if [[ -d "$POLYLOGUE_HOOKS_DIR" ]]; then
   : >"$BUNDLE/polylogue-hooks.jsonl"
@@ -107,8 +106,8 @@ OUT_DIR="$OUTPUT_ROOT/$DATE_DIR/$TIME_DIR"
 mkdir -p "$OUT_DIR"
 
 if [[ "$FAILED" -eq 1 ]] || [[ ! -s "$BUNDLE/narrative.md" ]] || [[ ! -s "$BUNDLE/state-delta.json" ]]; then
-  # Failure honesty (e8e class lesson): a failed or incomplete pass must
-  # leave a visible marker row, never silence.
+  # Failure honesty: a failed or incomplete pass must leave a visible
+  # marker row, never silence.
   jq -n \
     --arg schema "sinnix-enrichment-v1-failure" \
     --arg generated_at "$NOW_ISO" \

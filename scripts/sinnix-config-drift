@@ -223,15 +223,11 @@ def compare_generation(manifest: dict[str, Any], args: argparse.Namespace) -> li
         if live is None:
             return unavailable(check, expected, f"{check} manifest unavailable")
         if live == "unknown":
-            # sinnix-6ru: "unknown" means flake/nixos.nix's self.rev/self.dirtyRev
-            # were both absent at eval time (a git-metadata-less flake source,
-            # not a dirty-tree build) -- the live-drift tripwire this check
-            # exists to run is non-probative for this generation. `expected`
-            # is populated from the SAME configurationRevision field on the
-            # evaluation that produced this manifest, so an expected=="unknown"
-            # would otherwise compare equal to live=="unknown" and silently
-            # report a match, hiding exactly the failure this check is for.
-            # Always flag it, independent of what `expected` says.
+            # "unknown" means flake/nixos.nix's self.rev/self.dirtyRev were both
+            # absent at eval time, so the live-drift tripwire is non-probative
+            # for this generation. `expected` comes from the SAME field, so an
+            # expected=="unknown" would compare equal and silently report a
+            # match -- always flag it, independent of what `expected` says.
             return result(
                 check,
                 expected,

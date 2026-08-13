@@ -63,18 +63,10 @@ if [ ! -x "$STATE/npm/bin/$binary_name" ]; then
   npm install -g "$npm_package"
 fi
 
-# Every invocation of this bootstrap regenerates launch.sh unconditionally
-# (even when content is unchanged), and callers immediately execve() that
-# same path afterward. Writing in place raced a sibling process's execve()
-# against this process's open-for-write: the kernel returns ETXTBSY ("Text
-# file busy") for any execve() of a file currently open for writing, which
-# is unrelated to the flock above (that only serializes the npm reify step,
-# not exec-vs-write). Fanning out many concurrent agent invocations (e.g. a
-# large parallel audit wave) hits this reliably. Fix: write to a sibling
-# temp file and rename(2) into place. rename is atomic on the same
-# filesystem and never triggers ETXTBSY on the target, so concurrent
-# execve() callers always see either the fully-old or fully-new file, never
-# a partial write, and are never blocked by another process's write.
+# launch.sh is regenerated unconditionally and callers execve() it
+# immediately afterward, so it must be written via temp file + rename(2):
+# execve() of a file open for writing returns ETXTBSY. The flock above does
+# not cover this -- it only serializes npm's reify step, not exec-vs-write.
 launch_tmp="$STATE/launch.sh.tmp.$$"
 cat > "$launch_tmp" <<LAUNCHER
 #!/usr/bin/env bash
