@@ -767,15 +767,22 @@ in
         # Create persistent directories on NAND overlay
         mkdir -p /overlay/log /overlay/nlbwmon
 
-        # WAN connectivity watchdog: auto-reconnect if DHCP/WAN drops
-        mkdir -p /etc/cron.d
-        cat > /etc/cron.d/wan-watchdog << 'CRON_EOF'
-    # Ping 1.1.1.1 every 5 minutes; reconnect WAN on failure
-    */5 * * * * root ping -c 1 -W 5 1.1.1.1 >/dev/null 2>&1 || (logger -t wan-watchdog "WAN down, reconnecting..."; ifup wan)
-    CRON_EOF
-        /etc/init.d/cron enable 2>/dev/null || true
-        /etc/init.d/cron restart 2>/dev/null || true
-        echo "✓ WAN watchdog cron installed."
+        # The WAN watchdog that used to live here is deleted, not disabled.
+        # It never ran once: busybox crond reads /etc/crontabs (see
+        # /etc/init.d/cron), the entry was written to /etc/cron.d, and with
+        # /etc/crontabs empty the init script's start() bails, so no crond
+        # process exists at all. Verified live before removal -- 0 hits for
+        # wan-watchdog in 9 days of logread, /etc/crontabs empty.
+        #
+        # It was also the wrong idea even had it worked: it remediated
+        # unconditionally on ONE lost ping to a hardcoded 1.1.1.1, and "the
+        # internet is down" is self-announcing -- a watchdog adds nothing to
+        # a failure nobody can miss, while an `ifup wan` triggered by a
+        # single dropped packet can cause the outage it claims to fix.
+        #
+        # Worst of all it printed "✓ WAN watchdog cron installed", a receipt
+        # for work it never verified. A deploy step that reports success
+        # without checking is how this stayed invisible for months.
 
         # Reload wifi last (may briefly disconnect)
         wifi reload
