@@ -1,0 +1,11 @@
+pyproject.toml
+sinnix_deslop/__init__.py
+sinnix_deslop/cli.py
+sinnix_deslop/filter.py
+sinnix_deslop/phrases.txt
+sinnix_deslop.egg-info/PKG-INFO
+sinnix_deslop.egg-info/SOURCES.txt
+sinnix_deslop.egg-info/dependency_links.txt
+sinnix_deslop.egg-info/entry_points.txt
+sinnix_deslop.egg-info/top_level.txt
+tests/test_filter.py

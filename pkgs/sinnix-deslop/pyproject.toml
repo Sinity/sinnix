@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sinnix-deslop"
+version = "0.1.0"
+description = "Regex-based LLM-slop phrase stripper (sinnix-uou) -- reusable across generation lanes"
+requires-python = ">=3.11"
+
+[project.scripts]
+sinnix-deslop = "sinnix_deslop.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["sinnix_deslop*"]
+
+[tool.setuptools.package-data]
+sinnix_deslop = ["phrases.txt"]

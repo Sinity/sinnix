@@ -267,6 +267,8 @@ let
 
     sinnix-quota = pkgs.callPackage ../pkgs/sinnix-quota/pkg.nix { };
 
+    sinnix-deslop = pkgs.callPackage ../pkgs/sinnix-deslop/pkg.nix { };
+
     sinnix-capture = sinnixCaptureLib;
 
     sinnix-capture-a11y = pkgs.callPackage ../pkgs/sinnix-capture-a11y/pkg.nix {
