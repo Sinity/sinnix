@@ -29,7 +29,23 @@ PHONE_USER="${SINNIX_PHONE_USER:-u0_a398}"
 ADB_TARGET="${PHONE_TS_IP}:5555"
 LAKE_ROOT="${SINNIX_PHONE_LAKE:-/realm/data/captures/phone}"
 
-ssh_phone() { ssh -p "$PHONE_SSH_PORT" -o ConnectTimeout=10 "${PHONE_USER}@${PHONE_TS_IP}" "$@"; }
+# -F /dev/null + explicit identity, not ~/.ssh/config: under a sandboxed
+# systemd unit's ProtectHome, ssh rejects the Home-Manager ~/.ssh/config
+# symlink outright ("Bad owner or permissions", exit 255) -- the same trap
+# capture-router.nix hit. A script invoked by both a human and a timer
+# should not depend on interactive config either way.
+ssh_phone_opts=(
+  -p "$PHONE_SSH_PORT"
+  -F /dev/null
+  -o ConnectTimeout=10
+  -o StrictHostKeyChecking=accept-new
+  -o "UserKnownHostsFile=${SINNIX_PHONE_KNOWN_HOSTS:-$HOME/.ssh/known_hosts}"
+  -o IdentitiesOnly=yes
+  -i "${SINNIX_PHONE_IDENTITY:-$HOME/.ssh/id_ed25519}"
+)
+# shellcheck disable=SC2029  # client-side expansion is intended: callers
+# (clip-push) build the remote command with their own already-expanded args.
+ssh_phone() { ssh "${ssh_phone_opts[@]}" "${PHONE_USER}@${PHONE_TS_IP}" "$@"; }
 adb_phone() { ANDROID_SERIAL="$ADB_TARGET" adb "$@"; }
 
 ensure_adb() {
@@ -48,6 +64,7 @@ sinnix-phone <command>
   mirror        scrcpy screen mirror/control over the tailnet
   screenshot    grab the current screen to /realm/tmp/work/
   pull          rsync camera + downloads + health exports into the lake
+  drain         pull, but only if the phone is on wifi + charging (for a timer)
   adb-connect   (re)attach adb over the tailnet
   adb-restore   re-enable adbd TCP mode (requires the phone on USB)
   clip-push     push the current desktop clipboard to the phone, once
@@ -105,21 +122,47 @@ pull)
   # is where the Health Connect scheduled export lands (see bead sinnix-fmkb).
   # Pull only — never push back, and never delete on the phone.
   mkdir -p "$LAKE_ROOT"/{camera,download,health,ambient}
+  # Same sandbox-safe ssh flags as ssh_phone(), as one string for rsync -e
+  # (which needs a shell-word, not an array).
+  rsync_ssh="ssh ${ssh_phone_opts[*]}"
   set +e
-  rsync -av --ignore-existing -e "ssh -p $PHONE_SSH_PORT" \
+  rsync -av --ignore-existing -e "$rsync_ssh" \
     "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/DCIM/" "$LAKE_ROOT/camera/"
-  rsync -av --ignore-existing -e "ssh -p $PHONE_SSH_PORT" \
+  rsync -av --ignore-existing -e "$rsync_ssh" \
     "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/Download/" "$LAKE_ROOT/download/"
-  rsync -av --ignore-existing -e "ssh -p $PHONE_SSH_PORT" \
+  rsync -av --ignore-existing -e "$rsync_ssh" \
     "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/HealthConnectExport/" "$LAKE_ROOT/health/" 2>/dev/null
   # Continuous ambient audio chunks. --ignore-existing plus the fact that a
   # chunk is only closed when the next one starts means the in-progress file
   # gets skipped now and collected on the following run, rather than being
   # copied half-written.
-  rsync -av --ignore-existing -e "ssh -p $PHONE_SSH_PORT" \
+  rsync -av --ignore-existing -e "$rsync_ssh" \
     "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/sinnix-ambient/" "$LAKE_ROOT/ambient/" 2>/dev/null
   set -e
   du -sh "$LAKE_ROOT" 2>/dev/null
+  ;;
+drain)
+  # sinnix-uyvt.2.1's tiered-sync policy: bulk audio (and everything else
+  # this pulls) drains only on wifi + charging, never over 5G. Meant for a
+  # timer, not interactive use — skips quietly (exit 0) when conditions
+  # aren't met, since "phone isn't on wifi right now" isn't a failure.
+  if ! timeout 5 bash -c "exec 3<>/dev/tcp/$PHONE_TS_IP/$PHONE_SSH_PORT" 2>/dev/null; then
+    echo "drain: phone unreachable, skipping"
+    exit 0
+  fi
+  ensure_adb
+  charging=$(adb_phone shell dumpsys battery 2>/dev/null | grep -Eo '(AC|USB|Wireless) powered: true' | head -1)
+  wifi_state=$(ssh_phone termux-wifi-connectioninfo 2>/dev/null | jq -r '.supplicant_state // empty')
+  if [ -z "$charging" ]; then
+    echo "drain: not charging, skipping"
+    exit 0
+  fi
+  if [ "$wifi_state" != "COMPLETED" ]; then
+    echo "drain: not on wifi (state: ${wifi_state:-unknown}), skipping"
+    exit 0
+  fi
+  echo "drain: charging + wifi confirmed, pulling"
+  exec "$0" pull
   ;;
 adb-connect)
   adb connect "$ADB_TARGET"
