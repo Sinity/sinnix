@@ -1,0 +1,406 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Regenerate the maximalist OS cheatsheet (Hyprland binds, sinnix CLI, skills, qutebrowser, beads/git essentials, agent-dispatch idioms) as a searchable HTML page
+# runtimeInputs: python3 coreutils hyprland
+
+"""The cheatsheet as a program, not a document (sinnix-v034).
+
+Every section is queried fresh at generation time -- Hyprland binds via
+`hyprctl binds -j` (live compositor state, so it reflects whatever is
+actually bound right now, not what bindings.nix said at the last switch),
+the sinnix CLI surface via `sinnix help`, the shared skill list via each
+SKILL.md's own frontmatter, and qutebrowser's custom binds via a regex over
+its config.py. Only the beads/git-protocol essentials and the agent-dispatch
+idioms are curated by hand -- that content isn't queryable, it's judgment
+about what's worth surfacing.
+
+Bound to SUPER SHIFT+Slash (modules/features/desktop/hyprland/bindings.nix),
+which regenerates this file and opens it via the browser-inversion launcher
+pointed at the hub's local reports route. Re-running is cheap (~1s); nothing
+here is cached.
+
+Usage:
+  sinnix-cheatsheet [--output PATH]
+"""
+
+from __future__ import annotations
+
+import argparse
+import html
+import json
+import re
+import subprocess
+from datetime import datetime, timezone
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_OUTPUT = Path("/realm/data/derived/reports/cheatsheet.html")
+
+
+def esc(s: str) -> str:
+    return html.escape(s, quote=True)
+
+
+# ---------------------------------------------------------------------------
+# Section 1: Hyprland binds, live from the compositor
+# ---------------------------------------------------------------------------
+
+
+def collect_hypr_binds() -> list[dict]:
+    try:
+        raw = subprocess.run(
+            ["hyprctl", "binds", "-j"], capture_output=True, text=True, timeout=5, check=True
+        ).stdout
+    except Exception as exc:  # compositor not running, or hyprctl missing
+        return [{"error": str(exc)}]
+    binds = json.loads(raw)
+    rows = []
+    for b in binds:
+        desc = (b.get("description") or "").strip()
+        if not desc:
+            continue
+        mods = b.get("modmask")
+        mod_str = human_modmask(mods) if isinstance(mods, int) else (b.get("mod_raw") or "")
+        key = b.get("key") or b.get("key_original") or ""
+        submap = b.get("submap") or ""
+        dispatcher = b.get("dispatcher") or ""
+        arg = b.get("arg") or ""
+        combo = " + ".join(x for x in [mod_str, key] if x)
+        rows.append(
+            {
+                "combo": combo,
+                "desc": desc,
+                "submap": submap or "(global)",
+                "action": f"{dispatcher} {arg}".strip(),
+            }
+        )
+    # stable ordering: global first, then submaps alphabetically, then by combo
+    rows.sort(key=lambda r: (r["submap"] != "(global)", r["submap"], r["combo"]))
+    return rows
+
+
+_MODBITS = [
+    (1 << 0, "Shift"),
+    (1 << 2, "Ctrl"),
+    (1 << 3, "Alt"),
+    (1 << 6, "Super"),
+]
+
+
+def human_modmask(mask: int) -> str:
+    parts = [name for bit, name in _MODBITS if mask & bit]
+    return " ".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Section 2: sinnix CLI surface
+# ---------------------------------------------------------------------------
+
+
+def collect_sinnix_cli() -> list[dict]:
+    try:
+        out = subprocess.run(["sinnix", "help"], capture_output=True, text=True, timeout=10, check=True).stdout
+    except Exception:
+        return []
+    rows = []
+    for line in out.splitlines():
+        m = re.match(r"^  (\S+)\s+—\s+(.+)$", line)
+        if m:
+            rows.append({"cmd": m.group(1), "desc": m.group(2).strip()})
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# Section 3: shared skills
+# ---------------------------------------------------------------------------
+
+
+def collect_skills() -> list[dict]:
+    skills_dir = REPO_ROOT / "dots" / "_ai" / "skills"
+    rows = []
+    if not skills_dir.is_dir():
+        return rows
+    for skill_md in sorted(skills_dir.glob("*/SKILL.md")):
+        text = skill_md.read_text(errors="replace")
+        fm = re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)
+        if not fm:
+            continue
+        block = fm.group(1)
+        name_m = re.search(r"^name:\s*(.+)$", block, re.MULTILINE)
+        name = name_m.group(1).strip() if name_m else skill_md.parent.name
+        desc = extract_yaml_scalar(block, "description")
+        if desc:
+            rows.append({"name": name, "desc": desc})
+    rows.sort(key=lambda r: r["name"])
+    return rows
+
+
+def extract_yaml_scalar(block: str, key: str) -> str:
+    """Handle `key: value` and folded `key: >` / `key: |` scalars, good enough
+    for this repo's SKILL.md frontmatter shapes -- not a general YAML parser."""
+    lines = block.splitlines()
+    for i, line in enumerate(lines):
+        m = re.match(rf"^{key}:\s*(.*)$", line)
+        if not m:
+            continue
+        rest = m.group(1).strip()
+        if rest and rest not in (">", "|", ">-", "|-"):
+            return rest.strip('"')
+        # folded/literal block: collect indented continuation lines
+        collected = []
+        for cont in lines[i + 1 :]:
+            if cont.startswith("  ") and cont.strip():
+                collected.append(cont.strip())
+            elif not cont.strip():
+                continue
+            else:
+                break
+        return " ".join(collected)
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# Section 4: qutebrowser custom binds
+# ---------------------------------------------------------------------------
+
+
+def collect_qutebrowser_binds() -> list[dict]:
+    cfg = REPO_ROOT / "dots" / "qutebrowser" / "config.py"
+    rows = []
+    if not cfg.is_file():
+        return rows
+    text = cfg.read_text(errors="replace")
+    for m in re.finditer(r'config\.bind\("([^"]+)",\s*"([^"]+)"\)', text):
+        rows.append({"key": m.group(1), "action": m.group(2)})
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# Section 5 & 6: curated (not queryable -- judgment, not data)
+# ---------------------------------------------------------------------------
+
+BEADS_ESSENTIALS = [
+    ("bd ready", "Show issues ready to work (no blockers)"),
+    ("bd show <id>", "Detailed issue view with dependencies"),
+    ("bd update <id> --claim", "Claim an issue before starting work"),
+    ("bd update <id> --append-notes \"...\"", "Add to notes without clobbering the description (bd blocks replace-writes)"),
+    ("bd close <id> --reason \"...\"", "Close with an evidence-cited reason"),
+    ("bd dep add <issue> <depends-on>", "Add a dependency edge"),
+    ("bd search <query>", "Search issues by keyword"),
+    ("bd stats", "Project statistics (open/closed/blocked)"),
+    ("bd doctor", "Check for tracker integrity issues"),
+    ("bd memories <keyword>", "Search persistent bd-remember notes"),
+]
+
+GIT_PROTOCOL_ESSENTIALS = [
+    ("git status --short", "Never skip before a destructive op"),
+    ("git add <specific-path>", "Never `-A` or `.` -- stage by path"),
+    ("git commit -- <path>", "Pathspec the COMMIT, not just the add -- isolates from anything else staged in a shared checkout"),
+    ("git log --oneline -10", "Quick recent history"),
+    ("git stash -u", "Stash including untracked, before a risky checkout/reset"),
+]
+
+AGENT_DISPATCH_IDIOMS = [
+    ("fork", "Inherits full conversation + model. Use for context-heavy side-work. Cannot nest."),
+    ("fresh agent (e.g. general-purpose)", "No inherited context, but any model tier (opus/fable/etc). Needs a self-contained brief."),
+    ("agent team", "Adopted narrowly for READ-ONLY research/synthesis (own blinded pilot verdict). Write/implementation work stays subagent doctrine."),
+    ("Workflow tool", "Deterministic multi-agent orchestration script. Only on explicit user opt-in ('ultracode', explicit ask, or a named workflow)."),
+    ("ScheduleWakeup / Monitor", "Never poll a background agent -- completion notifies automatically. Use these only for genuine wall-clock waits."),
+]
+
+
+# ---------------------------------------------------------------------------
+# Rendering
+# ---------------------------------------------------------------------------
+
+CSS = """
+:root {
+  --bg:#f7f7f8; --bg-alt:#eef0f3; --fg:#1a1d21; --fg-dim:#5b6270;
+  --border:#d8dbe0; --accent:#3b5bdb; --accent-bg:#e8ecfc;
+  --code-bg:#eceef2; --fs:17px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:#15171a; --bg-alt:#1c1f24; --fg:#e6e8eb; --fg-dim:#9aa1ac;
+    --border:#2c3038; --accent:#7c93ff; --accent-bg:#232a44;
+    --code-bg:#1f2329;
+  }
+}
+:root[data-theme="dark"] {
+  --bg:#15171a; --bg-alt:#1c1f24; --fg:#e6e8eb; --fg-dim:#9aa1ac;
+  --border:#2c3038; --accent:#7c93ff; --accent-bg:#232a44;
+  --code-bg:#1f2329;
+}
+* { box-sizing:border-box; }
+body {
+  margin:0; background:var(--bg); color:var(--fg); font-size:var(--fs);
+  font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  line-height:1.5;
+}
+header { position:sticky; top:0; z-index:5; background:var(--bg); border-bottom:1px solid var(--border);
+  padding:0.9rem 1.5rem; display:flex; align-items:center; gap:1rem; flex-wrap:wrap; }
+header h1 { font-size:1.15rem; margin:0; }
+header .meta { color:var(--fg-dim); font-size:0.85rem; }
+#search { flex:1; min-width:14rem; padding:0.5rem 0.8rem; border-radius:0.4rem;
+  border:1px solid var(--border); background:var(--bg-alt); color:var(--fg); font-size:1rem; }
+button.toggle { border:1px solid var(--border); background:var(--bg-alt); color:var(--fg);
+  border-radius:0.4rem; padding:0.4rem 0.7rem; cursor:pointer; }
+main { max-width:80rem; margin:0 auto; padding:1.5rem; }
+section { margin-bottom:2.5rem; }
+section h2 { border-bottom:2px solid var(--accent); padding-bottom:0.3rem; }
+table { width:100%; border-collapse:collapse; font-size:0.95rem; }
+th, td { text-align:left; padding:0.45rem 0.7rem; border-bottom:1px solid var(--border); vertical-align:top; }
+th { color:var(--fg-dim); font-weight:600; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.03em; }
+tr.hidden { display:none; }
+code, .kbd { font-family:ui-monospace,"Cascadia Code",Menlo,Consolas,monospace; background:var(--code-bg);
+  padding:0.1rem 0.4rem; border-radius:0.3rem; font-size:0.9em; }
+.count { color:var(--fg-dim); font-size:0.85rem; font-weight:400; text-transform:none; letter-spacing:0; }
+footer { max-width:80rem; margin:0 auto; padding:1.5rem; color:var(--fg-dim); font-size:0.85rem; }
+"""
+
+JS = """
+const q = document.getElementById('search');
+const rows = Array.from(document.querySelectorAll('main tr[data-row]'));
+function applyFilter() {
+  const term = q.value.trim().toLowerCase();
+  let visible = 0;
+  for (const r of rows) {
+    const hit = !term || r.textContent.toLowerCase().includes(term);
+    r.classList.toggle('hidden', !hit);
+    if (hit) visible++;
+  }
+  document.getElementById('visible-count').textContent = visible;
+}
+q.addEventListener('input', applyFilter);
+document.addEventListener('keydown', (e) => {
+  if (e.key === '/' && document.activeElement !== q) { e.preventDefault(); q.focus(); }
+});
+document.getElementById('theme-toggle').addEventListener('click', () => {
+  const root = document.documentElement;
+  const cur = root.getAttribute('data-theme');
+  root.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
+});
+applyFilter();
+"""
+
+
+def render_table(headers: list[str], rows: list[list[str]]) -> str:
+    if not rows:
+        return "<p><em>Nothing to show.</em></p>"
+    thead = "".join(f"<th>{esc(h)}</th>" for h in headers)
+    body = ""
+    for r in rows:
+        cells = "".join(f"<td>{esc(c)}</td>" for c in r)
+        body += f"<tr data-row>{cells}</tr>\n"
+    return f"<table><thead><tr>{thead}</tr></thead><tbody>{body}</tbody></table>"
+
+
+def build_html(now_iso: str) -> str:
+    hypr = collect_hypr_binds()
+    cli = collect_sinnix_cli()
+    skills = collect_skills()
+    qb = collect_qutebrowser_binds()
+
+    total_rows = 0
+
+    if hypr and "error" in hypr[0]:
+        hypr_html = f"<p><em>Could not query the live compositor: {esc(hypr[0]['error'])}</em></p>"
+        hypr_count = 0
+    else:
+        rows = [[b["combo"], b["desc"], b["submap"], b["action"]] for b in hypr]
+        hypr_html = render_table(["Combo", "Description", "Submap", "Action"], rows)
+        hypr_count = len(rows)
+    total_rows += hypr_count
+
+    cli_rows = [[c["cmd"], c["desc"]] for c in cli]
+    cli_html = render_table(["Command", "Description"], cli_rows)
+    total_rows += len(cli_rows)
+
+    skill_rows = [[s["name"], s["desc"]] for s in skills]
+    skill_html = render_table(["Skill", "Description"], skill_rows)
+    total_rows += len(skill_rows)
+
+    qb_rows = [[q["key"], q["action"]] for q in qb]
+    qb_html = render_table(["Key", "Action"], qb_rows)
+    total_rows += len(qb_rows)
+
+    beads_html = render_table(["Command", "What"], [[c, d] for c, d in BEADS_ESSENTIALS])
+    total_rows += len(BEADS_ESSENTIALS)
+    git_html = render_table(["Command", "Why"], [[c, d] for c, d in GIT_PROTOCOL_ESSENTIALS])
+    total_rows += len(GIT_PROTOCOL_ESSENTIALS)
+    agent_html = render_table(["Mechanism", "When"], [[c, d] for c, d in AGENT_DISPATCH_IDIOMS])
+    total_rows += len(AGENT_DISPATCH_IDIOMS)
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sinnix Cheatsheet</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>{CSS}</style>
+</head>
+<body>
+<header>
+  <h1>Sinnix Cheatsheet</h1>
+  <span class="meta">generated {esc(now_iso)} &middot; <span id="visible-count">{total_rows}</span>/{total_rows} rows shown &middot; regenerate: <code>sinnix cheatsheet</code></span>
+  <input id="search" type="search" placeholder="Filter everything (press / to focus)&hellip;" autofocus>
+  <button class="toggle" id="theme-toggle">Toggle theme</button>
+</header>
+<main>
+<section id="hypr">
+  <h2>Hyprland binds <span class="count">({hypr_count} described, live from <code>hyprctl binds -j</code>)</span></h2>
+  {hypr_html}
+</section>
+<section id="cli">
+  <h2>sinnix CLI <span class="count">({len(cli_rows)} commands, live from <code>sinnix help</code>)</span></h2>
+  {cli_html}
+</section>
+<section id="skills">
+  <h2>Shared skills <span class="count">({len(skill_rows)}, live from dots/_ai/skills/*/SKILL.md)</span></h2>
+  {skill_html}
+</section>
+<section id="qutebrowser">
+  <h2>qutebrowser custom binds <span class="count">({len(qb_rows)}, live from dots/qutebrowser/config.py)</span></h2>
+  {qb_html}
+</section>
+<section id="beads">
+  <h2>Beads essentials <span class="count">(curated)</span></h2>
+  {beads_html}
+</section>
+<section id="git">
+  <h2>Git protocol essentials <span class="count">(curated)</span></h2>
+  {git_html}
+</section>
+<section id="agents">
+  <h2>Agent-dispatch idioms <span class="count">(curated)</span></h2>
+  {agent_html}
+</section>
+</main>
+<footer>
+  Regenerated on demand (SUPER SHIFT+Slash) by <code>scripts/sinnix-cheatsheet</code> (sinnix-v034). Every section above
+  except Beads/Git/Agent-dispatch is queried fresh each run, not cached.
+</footer>
+<script>{JS}</script>
+</body>
+</html>
+"""
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    args = ap.parse_args()
+
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    doc = build_html(now_iso)
+
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    tmp = args.output.with_suffix(".tmp")
+    tmp.write_text(doc)
+    tmp.rename(args.output)
+    print(str(args.output))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
