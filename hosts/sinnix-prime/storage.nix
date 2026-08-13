@@ -255,7 +255,7 @@ in
       neededForBoot = true;
     };
 
-    # Dedicated /sinex subvolume on /realm NVMe, not the ephemeral @ root, so
+    # Dedicated /state/sinex subvolume on /realm NVMe, not the ephemeral @ root, so
     # Postgres data survives rollback. Per-file chattr +C (inherited, not a
     # whole-mount nodatacow) keeps DB writes in-place while the append-only
     # blob store still gets zstd:3. Excluded from btrbk (unsafe to
