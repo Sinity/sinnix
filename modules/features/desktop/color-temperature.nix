@@ -42,6 +42,11 @@
 {
   mkFeatureModule,
   lib,
+  # Declared, not merely captured by the ellipsis: module args sourced from
+  # `_module.args` (pkgs among them) are injected only for formals the
+  # function actually names, so `...` alone leaves pkgs absent from @args and
+  # configFn's own `pkgs` destructure fails at eval time.
+  pkgs,
   ...
 }@args:
 mkFeatureModule {
