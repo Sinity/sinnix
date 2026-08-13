@@ -304,13 +304,17 @@ in
                 };
               };
 
-              animations.enabled = false;
+              # Animations are owned by modules/features/desktop/hyprland-animations.nix
+              # (default-on feature, MD3 curve set). This module deliberately
+              # sets nothing here: two authorities for one block is how the
+              # config stopped meaning what it said.
 
+              # Every bind carries a description (bindd family) so the
+              # SUPER+/ cheatsheet has something to render -- see bindings.nix.
               inherit (bindings)
-                bind
                 bindd
-                bindl
-                bindm
+                binddl
+                binddm
                 ;
               windowrule = rules.windowrule or [ ];
 
