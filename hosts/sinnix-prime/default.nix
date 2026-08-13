@@ -128,6 +128,9 @@
       daemon.autoStart = true;
     };
     machine-telemetry.enable = true;
+    # Operator steering walking skeleton (sinnix-jfiy.1): store + rituals +
+    # read-only cockpit at http://127.0.0.1:8791.
+    steering.enable = true;
     weechat-log-sealer.enable = true;
     # Backstop reaper for orphaned per-checkout sinex dev-postgres instances
     # (primary cleanup is sinnix-direnvrc's owner-watcher). See sinex-grlv.

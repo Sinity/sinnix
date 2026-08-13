@@ -263,6 +263,8 @@ let
 
     sinnix-ops-reducer = pkgs.callPackage ../pkgs/sinnix-ops-reducer/pkg.nix { };
 
+    sinnix-cockpit = pkgs.callPackage ../pkgs/sinnix-cockpit/pkg.nix { };
+
     sinnix-quota = pkgs.callPackage ../pkgs/sinnix-quota/pkg.nix { };
 
     sinnix-capture = sinnixCaptureLib;

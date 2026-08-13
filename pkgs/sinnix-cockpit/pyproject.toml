@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sinnix-cockpit"
+version = "0.1.0"
+description = "Read-only cockpit over the sinnix steering store (sinnix-jfiy.1 v0)"
+requires-python = ">=3.12"
+dependencies = ["fastapi", "uvicorn"]
+
+[project.scripts]
+sinnix-cockpit = "sinnix_cockpit.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["sinnix_cockpit*"]
