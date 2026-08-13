@@ -10,12 +10,9 @@ case "$mode" in
   *) echo "Usage: sinnix-preflight reboot|switch" >&2; exit 2 ;;
 esac
 
-meminfo="${SINNIX_PREFLIGHT_MEMINFO:-/proc/meminfo}"
-pressure="${SINNIX_PREFLIGHT_MEMORY_PRESSURE:-/proc/pressure/memory}"
 home_root="${SINNIX_PREFLIGHT_HOME_ROOT:-/home/sinity}"
 var_root="${SINNIX_PREFLIGHT_VARLIB_ROOT:-/var/lib}"
 persist_prefixes="${SINNIX_PREFLIGHT_PERSISTED_PREFIXES:-/persist:/realm}"
-min_mem_kib="${SINNIX_REBUILD_MIN_MEM_AVAILABLE_KB:-8388608}"
 min_nix_kib="${SINNIX_PREFLIGHT_MIN_NIX_FREE_KB:-5242880}"
 force="${SINNIX_PREFLIGHT_FORCE:-${SINNIX_REBUILD_SKIP_PRESSURE_PREFLIGHT:-0}}"
 worst=0
@@ -65,20 +62,24 @@ scan_unpersisted() {
   fi
 }
 
-check_memory() {
-  local available psi
-  available="$(awk '$1 == "MemAvailable:" {print $2}' "$meminfo" 2>/dev/null || echo 0)"
-  psi="$(awk '/some/ {for (i=1;i<=NF;i++) if ($i ~ /^avg60=/) {sub("avg60=", "", $i); print $i; exit}}' "$pressure" 2>/dev/null || echo 0)"
-  if [ "${SINNIX_REBUILD_SKIP_PRESSURE_PREFLIGHT:-0}" = 1 ]; then
-    report 1 memory-headroom "pressure check overridden; MemAvailable=${available:-0} KiB, PSI.some.avg60=${psi:-0}"
-    return
-  fi
-  if [ "${available:-0}" -lt "$min_mem_kib" ]; then
-    report 2 memory-headroom "MemAvailable=${available:-0} KiB, required=${min_mem_kib} KiB, PSI.some.avg60=${psi:-0}" "set SINNIX_REBUILD_SKIP_PRESSURE_PREFLIGHT=1 only for a deliberate override"
-  else
-    report 0 memory-headroom "MemAvailable=${available} KiB, PSI.some.avg60=${psi:-0}"
-  fi
-}
+# The MemAvailable>=8GiB gate that used to live here is deliberately gone.
+#
+# It could not know what the rebuild was about to do: a one-line module
+# change compiles nothing and needs no headroom, while a nixpkgs bump
+# recompiles the world and would blow through any fixed threshold anyway.
+# So it blocked correct operations on a busy desktop while protecting
+# nothing on the runs that actually cost memory.
+#
+# The mechanism that does work is already in place and is not a
+# prediction: nix-build.slice carries MemoryHigh=22G / MemoryMax=28G (see
+# flake/data/runtime-defaults.nix), so a build is bounded while it runs
+# rather than gated on a guess before it starts. Every rebuild path routes
+# through that slice.
+#
+# It also failed unsafely. On 2026-08-13 it blocked three switches whose
+# exit status was masked by the caller's shell, so fixes were reported as
+# applied while the system stayed on an older generation -- a refusal that
+# is easy to miss is worse than no check.
 
 check_disk() {
   local available
@@ -174,7 +175,6 @@ if [ "$mode" = reboot ]; then
   check_snapshot
   check_work
 else
-  check_memory
   check_disk
   check_concurrency
   check_generation
