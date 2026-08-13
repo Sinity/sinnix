@@ -58,8 +58,27 @@
     backend = 8891; # NB: the container listens on 8880 *inside* its namespace
   };
   openWebui = 8080;
-  comfyui = 8188;
-  tts = 8000; # OpenedAI-Speech bridge (container)
+  # ComfyUI, TTS, MusicGen, and OCR are OCI containers (CDI GPU passthrough).
+  # They joined the same public/backend socket-proxy shape as the native
+  # backends above in sinnix-w9l's container follow-up: the container now
+  # publishes on the PRIVATE backend port only, and systemd-socket-proxyd
+  # answers the PUBLIC port clients already know (modules/services/ai-control.nix).
+  comfyui = {
+    public = 8188;
+    backend = 8189;
+  };
+  tts = {
+    public = 8000; # OpenedAI-Speech bridge (container)
+    backend = 8001;
+  };
+  musicgen = {
+    public = 8010;
+    backend = 8011;
+  };
+  ocr = {
+    public = 8020;
+    backend = 8021;
+  };
   llamaCpp = {
     public = 8081; # reranker (/v1/rerank)
     backend = 8082;

@@ -17,12 +17,14 @@ mkAiService {
   endpoint = "127.0.0.1:8000";
   backendKind = "container";
   requiresCuda = true;
-  # No socket-proxy front door -- the container publishes 8000 directly, so
-  # this key is informational for the inventory; the actual exclusivity
-  # guarantee is the mutual systemd Conflicts= wired in
-  # modules/services/ai-control.nix (sinnix-joac).
   activation = {
+    mode = "socket-proxy";
+    backendEndpoint = "127.0.0.1:8001";
+    # See ai-control.nix's ttsProxy for the measured cold-start evidence
+    # behind this number.
+    idleTimeout = "300s";
     exclusiveResource = "gpu-inference";
+    dependsOn = [ "tts-proxy" ];
   };
   extraOptions = {
     autoStart = args.lib.mkOption {
@@ -59,7 +61,10 @@ mkAiService {
         inherit (cfg) image;
         inherit (cfg) autoStart;
         pull = "never";
-        ports = [ "127.0.0.1:8000:8000" ];
+        # Published on the PRIVATE backend port only -- clients always speak
+        # to 8000 via tts-proxy (modules/services/ai-control.nix), never to
+        # the container directly.
+        ports = [ "127.0.0.1:8001:8000" ];
         volumes = [
           "${ttsDir}/voices:/app/voices"
           "${ttsDir}/config:/app/config"
@@ -67,6 +72,14 @@ mkAiService {
         extraOptions = [ "--device=nvidia.com/gpu=all" ];
       };
 
-      systemd.services.podman-openedai-speech.serviceConfig.TimeoutStartSec = lib.mkForce "2min";
+      systemd.services.podman-openedai-speech = {
+        serviceConfig.TimeoutStartSec = lib.mkForce "2min";
+        # Bound to the socket proxy's lifecycle exactly like the native
+        # backends: an idle proxy exit tears down this container's cgroup.
+        # Conflicts= against every other GPU-inference backend is computed
+        # centrally in ai-control.nix's gpuInferenceConflicts.
+        partOf = [ "tts-proxy.service" ];
+        bindsTo = [ "tts-proxy.service" ];
+      };
     };
 } args

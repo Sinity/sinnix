@@ -27,6 +27,9 @@ mkAiService {
   activation = {
     mode = "socket-proxy";
     backendEndpoint = "127.0.0.1:8091";
+    # Measured 2026-08-13: ~2s cold /v1/audio/transcriptions round trip for
+    # the base.en model (147MB) -- an order of magnitude of headroom
+    # already exists at 30s, so this stays unchanged.
     idleTimeout = "30s";
     exclusiveResource = "gpu-inference";
     dependsOn = [ "whisper-proxy" ];
@@ -69,15 +72,8 @@ mkAiService {
         partOf = [ "whisper-proxy.service" ];
         bindsTo = [ "whisper-proxy.service" ];
         # Shared gpu-inference admission key: never run alongside the other
-        # CUDA inference backends, in either direction.
-        conflicts = [
-          "ollama.service"
-          "ollama-proxy.service"
-          "koboldcpp.service"
-          "koboldcpp-proxy.service"
-          "llama-cpp.service"
-          "llama-cpp-proxy.service"
-        ];
+        # CUDA inference backends, in either direction. Conflicts= itself is
+        # computed centrally in ai-control.nix's gpuInferenceConflicts.
         serviceConfig = lib.mkMerge [
           {
             User = user;

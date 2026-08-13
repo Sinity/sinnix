@@ -92,6 +92,9 @@ in
             sinnix.services.whisper.enable = true;
             sinnix.services.tts.enable = true;
             sinnix.services.llama-cpp.enable = true;
+            sinnix.services.comfyui.enable = true;
+            sinnix.services.musicgen.enable = true;
+            sinnix.services.ocr.enable = true;
           })
         ];
         assertions = config: [
@@ -213,11 +216,59 @@ in
             message = "Runtime inventory must describe the public and private llama-cpp activation endpoints";
           }
           {
-            # Full symmetry across all four GPU-inference backends: every
-            # (service, proxy) pair must conflict with every other backend's
-            # (service, proxy) pair in both directions. An asymmetric
-            # conflict set is exactly the bug this framework exists to catch
-            # (llama-cpp shipped resident for two days before being wired in).
+            assertion = config.systemd.sockets.comfyui-proxy.listenStreams == [ "127.0.0.1:8188" ];
+            message = "ComfyUI must expose only its socket-activated loopback front door";
+          }
+          {
+            assertion =
+              config.systemd.services.podman-comfyui.unitConfig.PartOf == [ "comfyui-proxy.service" ]
+              && config.systemd.services.podman-comfyui.unitConfig.BindsTo == [ "comfyui-proxy.service" ];
+            message = "An idle comfyui-proxy exit must tear down the ComfyUI container cgroup";
+          }
+          {
+            assertion =
+              lib.hasInfix "systemd-socket-proxyd" config.systemd.services.comfyui-proxy.serviceConfig.ExecStart
+              && lib.hasInfix "--exit-idle-time=900s" config.systemd.services.comfyui-proxy.serviceConfig.ExecStart;
+            message = "ComfyUI activation must use the idle-aware systemd socket proxy with its measured, generous timeout";
+          }
+          {
+            assertion = config.systemd.sockets.tts-proxy.listenStreams == [ "127.0.0.1:8000" ];
+            message = "TTS must expose only its socket-activated loopback front door";
+          }
+          {
+            assertion =
+              config.systemd.services.podman-openedai-speech.unitConfig.PartOf == [ "tts-proxy.service" ]
+              && config.systemd.services.podman-openedai-speech.unitConfig.BindsTo == [ "tts-proxy.service" ];
+            message = "An idle tts-proxy exit must tear down the TTS container cgroup";
+          }
+          {
+            assertion = config.systemd.sockets.musicgen-proxy.listenStreams == [ "127.0.0.1:8010" ];
+            message = "MusicGen must expose only its socket-activated loopback front door";
+          }
+          {
+            assertion =
+              config.systemd.services.podman-musicgen.unitConfig.PartOf == [ "musicgen-proxy.service" ]
+              && config.systemd.services.podman-musicgen.unitConfig.BindsTo == [ "musicgen-proxy.service" ];
+            message = "An idle musicgen-proxy exit must tear down the MusicGen container cgroup";
+          }
+          {
+            assertion = config.systemd.sockets.ocr-proxy.listenStreams == [ "127.0.0.1:8020" ];
+            message = "OCR must expose only its socket-activated loopback front door";
+          }
+          {
+            assertion =
+              config.systemd.services.podman-ocr.unitConfig.PartOf == [ "ocr-proxy.service" ]
+              && config.systemd.services.podman-ocr.unitConfig.BindsTo == [ "ocr-proxy.service" ];
+            message = "An idle ocr-proxy exit must tear down the OCR container cgroup";
+          }
+          {
+            # Full symmetry across all eight GPU-inference backends (four
+            # native, four containerized): every (service, proxy) pair must
+            # conflict with every other backend's (service, proxy) pair in
+            # both directions. An asymmetric conflict set is exactly the bug
+            # this framework exists to catch (llama-cpp shipped resident for
+            # two days before being wired in; the container lane had the
+            # same gap until it joined this same mesh).
             assertion =
               let
                 backendUnits = {
@@ -236,6 +287,22 @@ in
                   llama-cpp = [
                     "llama-cpp.service"
                     "llama-cpp-proxy.service"
+                  ];
+                  comfyui = [
+                    "podman-comfyui.service"
+                    "comfyui-proxy.service"
+                  ];
+                  tts = [
+                    "podman-openedai-speech.service"
+                    "tts-proxy.service"
+                  ];
+                  musicgen = [
+                    "podman-musicgen.service"
+                    "musicgen-proxy.service"
+                  ];
+                  ocr = [
+                    "podman-ocr.service"
+                    "ocr-proxy.service"
                   ];
                 };
                 unitConflicts =
@@ -310,7 +377,18 @@ in
               .surfaces["llama-cpp"].activation.mode == "socket-proxy" and
               .surfaces["llama-cpp"].activation.backendEndpoint == "127.0.0.1:8082" and
               .surfaces["llama-cpp-proxy"].activation.publicEndpoint == "127.0.0.1:8081" and
-              .surfaces["llama-cpp-proxy"].activation.exclusiveResource == "gpu-inference"
+              .surfaces["llama-cpp-proxy"].activation.exclusiveResource == "gpu-inference" and
+              .surfaces.comfyui.activation.mode == "socket-proxy" and
+              .surfaces.comfyui.activation.backendEndpoint == "127.0.0.1:8189" and
+              .surfaces["comfyui-proxy"].activation.publicEndpoint == "127.0.0.1:8188" and
+              .surfaces["comfyui-proxy"].activation.idleTimeout == "900s" and
+              .surfaces.tts.activation.mode == "socket-proxy" and
+              .surfaces.tts.activation.backendEndpoint == "127.0.0.1:8001" and
+              .surfaces["tts-proxy"].activation.publicEndpoint == "127.0.0.1:8000" and
+              .surfaces.musicgen.activation.mode == "socket-proxy" and
+              .surfaces["musicgen-proxy"].activation.publicEndpoint == "127.0.0.1:8010" and
+              .surfaces.ocr.activation.mode == "socket-proxy" and
+              .surfaces["ocr-proxy"].activation.publicEndpoint == "127.0.0.1:8020"
             ' inventory.json >/dev/null
             touch "$out"
           '';
