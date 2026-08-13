@@ -56,6 +56,14 @@ let
   borgStaleLockMinutes = 120;
   borgGlobalLock = "/run/lock/sinnix-borg.lock";
   borgStatusLog = "${config.sinnix.paths.capturesRoot}/machine/borg_status.jsonl";
+  sinexProjectPath = "${realmRoot}/project/sinex";
+  sinexBeadsDoltArchivePath = "project/sinex/.beads/dolt";
+  sinexBeadsIssuesArchivePath = "project/sinex/.beads/issues.jsonl";
+  sinexBeadsDrillLog = "${config.sinnix.paths.capturesRoot}/machine/borg_beads_drill.jsonl";
+  sinexBeadsArchivePaths = [
+    sinexBeadsDoltArchivePath
+    sinexBeadsIssuesArchivePath
+  ];
   borgArchiveMaxAgeSec = 6 * 60 * 60;
   borgSnapshotQueueMaxAgeSec = 6 * 60 * 60;
   borgDrainMinIntervalSec = 4 * 60 * 60;
@@ -296,6 +304,119 @@ let
     "**/*.pyc"
     "**/.Trash-1000"
   ];
+
+  # Borg excludes are glob patterns relative to /realm. Test both an item and
+  # its ancestors: excluding .beads or project/sinex excludes its children
+  # even when the protected item itself does not match the pattern directly.
+  borgGlobToRegex =
+    pattern:
+    let
+      globStarPlaceholder = "__SINNIX_BORG_GLOBSTAR__";
+      withGlobStarPlaceholder = lib.replaceStrings [ "**" ] [ globStarPlaceholder ] pattern;
+      escaped =
+        lib.replaceStrings
+          [
+            "\\"
+            "."
+            "+"
+            "("
+            ")"
+            "["
+            "]"
+            "{"
+            "}"
+            "^"
+            "$"
+            "|"
+          ]
+          [
+            "\\\\"
+            "\\."
+            "\\+"
+            "\\("
+            "\\)"
+            "\\["
+            "\\]"
+            "\\{"
+            "\\}"
+            "\\^"
+            "\\$"
+            "\\|"
+          ]
+          withGlobStarPlaceholder;
+      withSingleStar = lib.replaceStrings [ "*" ] [ "[^/]*" ] escaped;
+      withQuestion = lib.replaceStrings [ "?" ] [ "[^/]" ] withSingleStar;
+    in
+    "^${lib.replaceStrings [ globStarPlaceholder ] [ ".*" ] withQuestion}$";
+  protectedPathAndAncestors =
+    path:
+    let
+      parts = lib.splitString "/" path;
+    in
+    lib.genList (index: lib.concatStringsSep "/" (lib.take (index + 1) parts)) (builtins.length parts);
+  realmExcludeMatchesProtectedPath =
+    exclude:
+    lib.any (
+      path:
+      lib.any (candidate: builtins.match (borgGlobToRegex exclude) candidate != null) (
+        protectedPathAndAncestors path
+      )
+    ) sinexBeadsArchivePaths;
+
+  mkSinexBeadsDrillScript = ''
+    set -euo pipefail
+
+    archive_paths=(
+      ${lib.escapeShellArg sinexBeadsDoltArchivePath}
+      ${lib.escapeShellArg sinexBeadsIssuesArchivePath}
+    )
+
+    exec 9>${lib.escapeShellArg borgGlobalLock}
+    if ! flock -n 9; then
+      echo "another Borg operation is active; skipping Beads restore drill" >&2
+      exit 0
+    fi
+
+    mapfile -t archives < <(borg list --short --glob-archives 'realm-*' ${lib.escapeShellArg borgRepoRealm} | sort)
+    if [ "''${#archives[@]}" -eq 0 ]; then
+      echo "no realm Borg archive is available for the Sinex Beads restore drill" >&2
+      exit 1
+    fi
+    archive="''${archives[$(( ''${#archives[@]} - 1 ))]}"
+
+    for archive_path in "''${archive_paths[@]}"; do
+      borg list --short "${borgRepoRealm}::''${archive}" "$archive_path" | grep -Fxq "$archive_path"
+    done
+
+    restore_root="$(mktemp -d)"
+    cleanup() {
+      rm -rf "$restore_root"
+    }
+    trap cleanup EXIT
+
+    borg extract --destination "$restore_root" "${borgRepoRealm}::''${archive}" "''${archive_paths[@]}"
+
+    issues_path="$restore_root/${sinexBeadsIssuesArchivePath}"
+    dolt_path="$restore_root/${sinexBeadsDoltArchivePath}"
+    test -s "$issues_path"
+    jq -e -s 'length > 0' "$issues_path" >/dev/null
+    test -d "$dolt_path/.dolt"
+
+    source_git_head="$(${pkgs.git}/bin/git -C ${lib.escapeShellArg sinexProjectPath} rev-parse HEAD)"
+    dolt_commit="$(${pkgs.dolt}/bin/dolt --data-dir "$dolt_path" --use-db sinex log -n 1 --format json \
+      | jq -er 'first(.. | objects | .commit_hash? // empty)')"
+
+    install -d -m 0755 ${lib.escapeShellArg (builtins.dirOf sinexBeadsDrillLog)}
+    jq -nc \
+      --arg type sinex_beads_restore_drill \
+      --arg archive "$archive" \
+      --arg source_git_head "$source_git_head" \
+      --arg dolt_commit "$dolt_commit" \
+      --arg issues_jsonl_sha256 "$(sha256sum "$issues_path" | cut -d ' ' -f 1)" \
+      --arg ts "$(date -Iseconds)" \
+      '{ts:$ts,type:$type,archive:$archive,source_git_head:$source_git_head,dolt_commit:$dolt_commit,issues_jsonl_sha256:$issues_jsonl_sha256,ok:true}' \
+      | tee -a ${lib.escapeShellArg sinexBeadsDrillLog}
+  '';
 
   mkBorgStatusScript = ''
     set -euo pipefail
@@ -644,6 +765,18 @@ in
           }
         ];
       };
+      sinnix-borg-beads-drill = {
+        unit = "sinnix-borg-beads-drill.service";
+        resourceClass = "backup-maintenance";
+        captures = [
+          {
+            name = "borg-beads-drill";
+            path = sinexBeadsDrillLog;
+            eventDriven = true;
+            staleAfterSeconds = 1814400;
+          }
+        ];
+      };
     };
 
     environment.systemPackages = [
@@ -806,10 +939,17 @@ in
       };
     };
 
-    assertions = lib.optional (sinexBlobRepositoryPath != "") {
-      assertion = lib.hasInfix sinexBlobRepositoryPath config.systemd.services.borgbackup-job-sinex-blobs.script;
-      message = "Sinex CAS Borg backup must archive services.sinex.storage.blob.repositoryPath";
-    };
+    assertions =
+      lib.optional (sinexBlobRepositoryPath != "") {
+        assertion = lib.hasInfix sinexBlobRepositoryPath config.systemd.services.borgbackup-job-sinex-blobs.script;
+        message = "Sinex CAS Borg backup must archive services.sinex.storage.blob.repositoryPath";
+      }
+      ++ [
+        {
+          assertion = lib.all (exclude: !realmExcludeMatchesProtectedPath exclude) realmExcludes;
+          message = "The /realm Borg backup must not exclude Sinex .beads/dolt or .beads/issues.jsonl";
+        }
+      ];
 
     # Failure surfacing for the two borg verification/integrity units
     # (sinnix-borg-drill, borgbackup-check): a restore drill or repo check
@@ -1344,6 +1484,50 @@ in
         OnCalendar = "Wed 04:00:00";
         Persistent = true;
         RandomizedDelaySec = 1800;
+      };
+    };
+
+    # The realm archive is the production authority for Sinex's checkout,
+    # including the mutable Beads Dolt directory and tracked JSONL export.
+    # This drill lists both exact paths, extracts them into an ephemeral
+    # directory, validates their formats, and records archive/source commits.
+    systemd.services.sinnix-borg-beads-drill = {
+      description = "Restore drill for Sinex Beads Dolt and issues JSONL";
+      restartIfChanged = false;
+      reloadIfChanged = false;
+      stopIfChanged = false;
+      onFailure = [ "sinnix-service-failure-notify@%n.service" ];
+      after = [ outerRealmMountUnit ];
+      requires = [ outerRealmMountUnit ];
+      environment = {
+        BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
+        BORG_CACHE_DIR = borgCacheDir;
+      };
+      path = with pkgs; [
+        borgbackup
+        coreutils
+        dolt
+        git
+        gnugrep
+        jq
+        util-linux
+      ];
+      serviceConfig = {
+        Type = "oneshot";
+        PrivateTmp = true;
+        TimeoutStartSec = "30min";
+      }
+      // backupServiceConfig "sinnix-borg-beads-drill.service";
+      script = mkSinexBeadsDrillScript;
+    };
+
+    systemd.timers.sinnix-borg-beads-drill = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        # Follow the regular realm archive and stay clear of the repository
+        # integrity drill on Wednesday.
+        OnCalendar = "Thu 05:00:00";
+        Persistent = true;
       };
     };
 
