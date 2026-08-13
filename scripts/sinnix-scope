@@ -365,8 +365,43 @@ else
   scoped_command=("$0" --internal-supervise -- "${scoped_command[@]}")
 fi
 
+# sinnix-1ei: cgroup v2 memory.peak is a cumulative watermark since cgroup
+# creation, never reset by the kernel -- for a long-lived slice like
+# nix-build.slice that shares one cgroup across every job ever run in it,
+# the column reports the slice's all-time high rather than any single job's
+# peak, which makes per-job memory analysis over telemetry.sqlite's
+# cgroup_memory_sample table useless for that slice. Resetting it here, at
+# the moment a new job acquires the slice, turns the already-collected
+# column into a true per-job peak. Best-effort: a transient permission or
+# path miss must never block the job itself from launching.
+reset_slice_memory_peak() {
+  local peak_path
+  for peak_path in \
+    "/sys/fs/cgroup/nix.slice/$slice/memory.peak" \
+    "/sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/nix.slice/$slice/memory.peak"
+  do
+    [ -w "$peak_path" ] || continue
+    echo 0 > "$peak_path" 2>/dev/null || true
+  done
+}
+if [ "$slice" = "nix-build.slice" ]; then
+  reset_slice_memory_peak
+fi
+
+# sinnix-1ei: job identity in the unit name (not a separate audit log --
+# telemetry.sqlite already joins process_memory_sample/cgroup_memory_sample
+# to the owning systemd unit by name, so encoding the real command here is
+# what makes that join carry class-level identity instead of just
+# "nix-build" for every job). Sanitized, length-capped: unit names have a
+# real character/length ceiling and the command can be arbitrarily long.
+job_identity="$(basename -- "${scoped_command[0]:-$command_base}")"
+if [ "${#scoped_command[@]}" -gt 1 ]; then
+  job_identity="${job_identity}-${scoped_command[1]}"
+fi
+job_identity="$(printf '%s' "$job_identity" | tr -c 'A-Za-z0-9_.-' '-' | cut -c1-40)"
+
 if [ "${EUID:-$(id -u)}" -eq 0 ]; then
-  unit="${unit_override:-sinnix-${class}-$(date +%s%N)-$$}"
+  unit="${unit_override:-sinnix-${class}-${job_identity}-$(date +%s%N)-$$}"
   exec systemd-run \
     --scope \
     --quiet \
@@ -379,7 +414,7 @@ if [ "${EUID:-$(id -u)}" -eq 0 ]; then
 fi
 
 if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
-  unit="${unit_override:-sinnix-${class}-$(date +%s%N)-$$}"
+  unit="${unit_override:-sinnix-${class}-${job_identity}-$(date +%s%N)-$$}"
   exec systemd-run \
     --user \
     --scope \
