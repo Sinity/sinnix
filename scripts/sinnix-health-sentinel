@@ -28,8 +28,16 @@ mkdir -p "$(dirname "$state")" "$(dirname "$output")"
 [ -e "$output" ] || : > "$output"
 chmod 0664 "$state" "$output"
 
+# Every key emit() is ever called with this run, whether or not its status
+# changed -- the full-sweep path below uses this to prune state-file keys
+# the sentinel no longer emits (sinnix-o4ty: an earlier key-format change
+# left service:user:activitywatch.service orphaned in the state file
+# forever, since emit() only ever touches keys it currently sees).
+emitted_keys=()
+
 emit() {
   local key="$1" type="$2" unit="$3" status="$4" evidence="$5" previous
+  emitted_keys+=("$key")
   previous="$(jq -r --arg key "$key" '.[$key] // ""' "$state")"
   [ "$previous" = "$status" ] && return 0
   jq --arg key "$key" --arg status "$status" '.[$key] = $status' "$state" > "$state.tmp"
@@ -90,3 +98,14 @@ while IFS=$'\t' read -r manager unit; do
   [ "$active" = active ] || status=failed
   emit "service:$manager:$unit" service_failure "$unit" "$status" "manager=$manager;active_state=$active"
 done < <(jq -r '.observedServices[]? | select(.kind == "service") | [.manager,.unit] | @tsv' "$inventory")
+
+# Self-heal: drop any state-file key this run did not emit. Only the full
+# sweep above (never the single-key --failure-unit fast path) knows the
+# complete current emission-key universe, so pruning is safe here and only
+# here -- pruning after a --failure-unit call would wipe every other lane's
+# state on its next comparison, turning one failure event into a spurious
+# healthy->failed transition storm for everything else.
+keys_json="$(printf '%s\n' "${emitted_keys[@]:-}" | jq -R . | jq -s .)"
+jq --argjson keep "$keys_json" 'with_entries(select(.key as $k | $keep | index($k)))' "$state" > "$state.tmp"
+chmod 0664 "$state.tmp"
+mv -f "$state.tmp" "$state"
