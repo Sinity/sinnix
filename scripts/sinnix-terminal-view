@@ -3,33 +3,43 @@
 # description: Read-only kitty terminal contents + scrollback history over the hub, no tmux
 # runtimeInputs: kitty aha coreutils
 
-"""Terminal contents as a first-class remote surface (sinnix-qxm8).
+"""Terminal contents and control as a first-class remote surface (sinnix-qxm8).
 
-The operator should never have to learn tmux to read their own terminals
-remotely. This listens on a Unix socket behind the hub's reverse proxy
-(/terminals/*) and, using nothing but kitty's own remote-control protocol
-plus the scrollback captures sinnix-capture-kitty-scrollback already writes,
-serves:
+The operator should never have to learn tmux to read or drive their own
+terminals remotely. This listens on a Unix socket behind the hub's reverse
+proxy (/terminals/*) and, using nothing but kitty's own remote-control
+protocol plus the scrollback captures sinnix-capture-kitty-scrollback already
+writes, serves:
 
   * a live view -- current on-screen contents of any kitty window, from any
     kitty instance on the host (each instance has its own control socket
     under $XDG_RUNTIME_DIR/kitty-*);
   * history -- the existing full-ANSI scrollback captures for that same
     window, joined by (kitty_pid, window_id) which is exactly the filename
-    key sinnix-capture-kitty-scrollback already uses.
+    key sinnix-capture-kitty-scrollback already uses;
+  * control -- sending text and key presses into a live window via kitty's
+    own `send-text`/`send-key`, operator-initiated from the hub page. This is
+    the operator's own deliberate typing, routed through a browser instead of
+    a local keyboard -- it is not the "never inject into a live agent TUI
+    while it is sampling" case (that rule is about *automated* interruption
+    of a session an agent doesn't own; a human choosing to type into their
+    own window is the window's owner acting, same as sitting at the desk).
 
 NON-GOALS, deliberately: no tmux/screen/multiplexer of any kind; no second
 capture lane (scrollback capture already exists, this only reads it); no
-send-input path -- reading is safe, typing into a live session is not, and
-the estate's standing rule is never to inject into a live agent TUI while it
-is sampling. If a send-input surface is ever wanted, it needs its own
-deliberate action with its own confirmation, not a side effect of this.
+server-side shell-completion engine (real bash/zsh completion needs a shell
+process to ask, which is a much larger lift with its own correctness
+problems) -- the client-side autocomplete here is a plain per-window recently-
+sent-text history, cheap and genuinely useful, not a completion engine.
 
 Deliberately minimal, matching sinnix-hub-feedback's own decisions:
   * no auth beyond the tailnet boundary the hub already enforces;
   * no database -- kitty's own `ls`/`get-text` and the scrollback capture's
-    files on disk are the only state;
-  * read-only end to end.
+    files on disk are the only state; sent-text history lives in the
+    browser's own localStorage, not server state;
+  * synchronous, direct action for control (not a spooled/queued write like
+    sinnix-hub-feedback's annotations) -- send-text has to reach the window
+    now, queuing it for later would be actively wrong.
 """
 
 from __future__ import annotations
@@ -53,6 +63,7 @@ from typing import Any
 SCHEMA = "sinnix-terminal-view-v1"
 KITTY_BIN = "kitty"
 AHA_BIN = "aha"
+MAX_BODY = 1 << 16  # 64 KiB: a pasted command, not a file upload
 
 # sinnix-capture-kitty-scrollback's own filename convention:
 #   <TIMESTAMP>-<host>-pid<pid>-win<id>-<title-slug>.ansi (+ .meta.json sibling)
@@ -147,6 +158,53 @@ def get_window_text(pid: int, window_id: int) -> str | None:
     return out.stdout
 
 
+def send_text(pid: int, window_id: int, text: str) -> bool:
+    sock = find_socket_for_pid(pid)
+    if sock is None:
+        return False
+    try:
+        out = subprocess.run(
+            [KITTY_BIN, "@", "--to", f"unix:{sock}", "send-text", "--match", f"id:{window_id}", text],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return out.returncode == 0
+
+
+# Named key sends the UI offers as quick-action buttons -- kitty's send-key
+# syntax for control characters, not a full keymap.
+NAMED_KEYS = {
+    "enter": "enter",
+    "ctrl-c": "ctrl+c",
+    "ctrl-d": "ctrl+d",
+    "tab": "tab",
+    "up": "up",
+    "escape": "escape",
+}
+
+
+def send_key(pid: int, window_id: int, name: str) -> bool:
+    key = NAMED_KEYS.get(name)
+    if key is None:
+        return False
+    sock = find_socket_for_pid(pid)
+    if sock is None:
+        return False
+    try:
+        out = subprocess.run(
+            [KITTY_BIN, "@", "--to", f"unix:{sock}", "send-key", "--match", f"id:{window_id}", key],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return out.returncode == 0
+
+
 def ansi_to_html(ansi_text: str, title: str) -> str:
     try:
         out = subprocess.run(
@@ -198,11 +256,30 @@ INDEX_HTML = """<!doctype html>
   .cwd{color:#888;font-size:0.85em}
   .hist{padding:2px 0 2px 12px;color:#88f;cursor:pointer;font-size:0.85em}
   button{background:#222;color:#ddd;border:1px solid #444;padding:2px 8px;margin:4px 0;cursor:pointer}
+  #control{display:flex;gap:4px;padding:6px;border-top:1px solid #333;background:#161616}
+  #sendbox{flex:1;background:#111;color:#ddd;border:1px solid #444;padding:4px 6px;font-family:monospace}
+  #keys button{margin:0 2px}
 </style></head>
 <body>
 <div id="list">Loading...</div>
-<div id="view">Select a window on the left.</div>
+<div style="flex:1;display:flex;flex-direction:column">
+  <div id="view">Select a window on the left.</div>
+  <div id="control" style="display:none">
+    <input id="sendbox" list="sendhist" placeholder="type, Enter to send (kitty send-text)" autocomplete="off">
+    <datalist id="sendhist"></datalist>
+    <span id="keys">
+      <button data-key="enter">Enter</button>
+      <button data-key="ctrl-c">Ctrl-C</button>
+      <button data-key="ctrl-d">Ctrl-D</button>
+      <button data-key="tab">Tab</button>
+      <button data-key="up">Up</button>
+      <button data-key="escape">Esc</button>
+    </span>
+  </div>
+</div>
 <script>
+let current = null; // {pid, winId}
+
 async function load() {
   const res = await fetch('/terminals/v1/windows');
   const wins = await res.json();
@@ -221,11 +298,35 @@ async function load() {
     list.appendChild(histBtn);
   }
 }
+
+// Per-window recently-sent-text history in localStorage, feeding a <datalist>
+// autocomplete on the send box. Not a shell-completion engine -- just "what
+// did I type into this window before" recall, which is the cheap useful part.
+function histKey(pid, winId) { return `sinnix-terminal-sent:${pid}:${winId}`; }
+function loadHist(pid, winId) {
+  try { return JSON.parse(localStorage.getItem(histKey(pid, winId)) || '[]'); }
+  catch { return []; }
+}
+function pushHist(pid, winId, text) {
+  const h = loadHist(pid, winId).filter(x => x !== text);
+  h.unshift(text);
+  localStorage.setItem(histKey(pid, winId), JSON.stringify(h.slice(0, 50)));
+}
+function renderHistDatalist(pid, winId) {
+  const dl = document.getElementById('sendhist');
+  dl.innerHTML = loadHist(pid, winId).map(t => `<option value="${t.replace(/"/g, '&quot;')}">`).join('');
+}
+
 function showLive(pid, winId) {
+  current = { pid, winId };
   document.getElementById('view').innerHTML =
     `<iframe src="/terminals/v1/windows/${pid}/${winId}/content"></iframe>`;
+  document.getElementById('control').style.display = 'flex';
+  renderHistDatalist(pid, winId);
 }
 async function showHistory(pid, winId) {
+  current = null;
+  document.getElementById('control').style.display = 'none';
   const res = await fetch(`/terminals/v1/windows/${pid}/${winId}/history`);
   const entries = await res.json();
   const view = document.getElementById('view');
@@ -233,6 +334,30 @@ async function showHistory(pid, winId) {
     `<div><a href="/terminals/v1/windows/${pid}/${winId}/history/${e.ansi_file}" target="_blank" style="color:#88f">${e.captured_at} -- ${e.title}</a></div>`
   ).join('') + (entries.length ? '' : '<i>no scrollback captures yet for this window</i>') + '</div>';
 }
+
+async function sendPayload(payload) {
+  if (!current) return;
+  await fetch(`/terminals/v1/windows/${current.pid}/${current.winId}/send`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
+  });
+  // Re-render the live view shortly after so the effect is visible.
+  setTimeout(() => { if (current) showLive(current.pid, current.winId); }, 300);
+}
+
+document.getElementById('sendbox').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || !current) return;
+  const text = e.target.value;
+  if (!text) return;
+  pushHist(current.pid, current.winId, text);
+  renderHistDatalist(current.pid, current.winId);
+  sendPayload({ text: text + '\r' });
+  e.target.value = '';
+});
+document.getElementById('keys').addEventListener('click', (e) => {
+  const key = e.target.dataset.key;
+  if (key) sendPayload({ key });
+});
+
 load();
 setInterval(load, 15000);
 </script>
@@ -307,6 +432,39 @@ class Handler(BaseHTTPRequestHandler):
                 ansi_to_html(ansi_text, fname).encode(),
                 "text/html; charset=utf-8",
             )
+            return
+
+        self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+
+    def do_POST(self) -> None:  # noqa: N802 (stdlib naming)
+        path = self.path.split("?", 1)[0]
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        if length <= 0 or length > MAX_BODY:
+            self._json(HTTPStatus.BAD_REQUEST, {"error": "missing or oversized body"})
+            return
+        raw = self.rfile.read(length)
+        try:
+            body = json.loads(raw)
+        except json.JSONDecodeError:
+            self._json(HTTPStatus.BAD_REQUEST, {"error": "invalid json"})
+            return
+
+        m = re.match(r"^(?:/terminals)?/v1/windows/(\d+)/(\d+)/send$", path)
+        if m:
+            pid, win_id = int(m.group(1)), int(m.group(2))
+            text = body.get("text")
+            key = body.get("key")
+            if isinstance(text, str) and text:
+                ok = send_text(pid, win_id, text)
+            elif isinstance(key, str) and key:
+                ok = send_key(pid, win_id, key)
+            else:
+                self._json(HTTPStatus.BAD_REQUEST, {"error": "need 'text' or 'key'"})
+                return
+            if not ok:
+                self._json(HTTPStatus.NOT_FOUND, {"error": "window not found, kitty unreachable, or unknown key"})
+                return
+            self._json(HTTPStatus.OK, {"status": "sent"})
             return
 
         self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
