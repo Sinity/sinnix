@@ -23,13 +23,11 @@ let
     "--log-bounces"
     "--stats-json"
   ];
-  # 2026-08-12: scribe-tap dropped --context/--hypr-user (root-privileged
-  # compositor polling that never worked correctly on this host's real
-  # Hyprland runtime layout -- see the scribe-tap repo history, sinnix-mzsh).
-  # Window/app attribution is now a downstream timestamp-join against
-  # ActivityWatch, not something the capture process itself does. This
-  # invocation now also captures raw mouse/pointer events (motion, buttons,
-  # scroll) alongside keyboard content, unconditionally -- no flag needed.
+  # scribe-tap does no window/app attribution: root-privileged compositor
+  # polling does not work against this host's Hyprland runtime layout, so
+  # attribution is a downstream timestamp-join against ActivityWatch.
+  # Raw mouse/pointer events (motion, buttons, scroll) are captured alongside
+  # keyboard content unconditionally -- there is no flag for it.
   scribeCmd = lib.escapeShellArgs [
     "${scribePkg}/bin/scribe-tap"
     "--data-dir"
@@ -56,17 +54,11 @@ let
     capsCmd
     uinputCmd
   ];
-  # Separate job for pointer devices: 2026-08-12, scribe-tap gained raw
-  # mouse/pointer capture (motion, buttons, scroll), but this host's
-  # udevmon match only ever covered event-kbd nodes, so no mouse device
-  # was ever actually piped through it -- confirmed live via
-  # /dev/input/by-id (usb-Logitech_USB_Receiver-event-mouse exists,
-  # unmatched). Deliberately NOT reusing the keyboard `pipeline`:
-  # intercept-bounce's 40ms debounce window is tuned for keyboard chatter
-  # and would eat legitimate fast double-clicks/scroll ticks; caps2esc is
-  # a keyboard-specific remapper with no defined behavior for EV_REL/
-  # EV_ABS. Mouse events pass through unmodified other than scribe-tap's
-  # capture tap.
+  # Pointer devices need their own job rather than the keyboard `pipeline`:
+  # intercept-bounce's 40ms debounce window is tuned for keyboard chatter and
+  # would eat legitimate fast double-clicks/scroll ticks, and caps2esc is a
+  # keyboard-specific remapper with no defined behavior for EV_REL/EV_ABS.
+  # Mouse events pass through unmodified other than scribe-tap's capture tap.
   mousePipeline = lib.concatStringsSep " | " [
     interceptCmd
     scribeCmd

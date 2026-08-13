@@ -42,7 +42,5 @@
 
   swapDevices = [ ];
 
-  # Disk-IO bottleneck on a remote replica; let nix-daemon use both NVMe
-  # devices' bandwidth. nixos-anywhere generation will rewrite this.
   nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
 }

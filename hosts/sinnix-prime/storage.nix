@@ -16,10 +16,6 @@ let
   username = config.sinnix.user.name;
   primaryGroupName = config.users.users.${username}.group;
   polylogueArchiveRoot = "${capturesRoot}/polylogue";
-  # Moved /db/polylogue -> /state/polylogue on 2026-08-12 (sinnix-eau
-  # taxonomy pass; polylogued was down anyway, polylogue-hgfre). Old source
-  # retained read-only through burn-in; deletion + rmdir /realm/db need
-  # explicit operator authorization.
   polylogueDbRoot = "${realmRoot}/state/polylogue";
   polylogueDbFiles = [
     "index.db"
@@ -29,9 +25,8 @@ let
     "ops.db"
     "daemon_events.db"
   ];
-  # One-time archive DB -> polylogue subvol migration is complete; only
-  # the steady-state sanity check + fresh-bootstrap symlink creation remain.
-  # History/evidence: bd show sinnix-qs7
+  # Steady-state sanity check plus fresh-bootstrap symlink creation: each
+  # archive DB name must either be absent or already point at the subvol.
   polylogueDbLinkScript = lib.concatMapStringsSep "\n" (
     name:
     let
@@ -53,9 +48,9 @@ let
   polylogueShareMount = "/home/${username}/.local/share/polylogue";
 
   swapFile = "${realmRoot}/swap/swapfile";
-  # Generated unit name follows the swapfile PATH (systemd path escaping);
-  # the 2026-07-09 move to /realm changed it from swap-swapfile.swap, which
-  # silently orphaned the prepare/drain unit wiring below. Derive it.
+  # The generated unit name follows the swapfile PATH (systemd path escaping),
+  # so derive it rather than hardcoding: a change of swapFile would otherwise
+  # silently orphan the prepare/drain unit wiring below.
   swapUnit = "${utils.escapeSystemdPath swapFile}.swap";
   swapSizeGiB = 8;
 
@@ -64,7 +59,6 @@ let
   # file (priority 10) takes sustained overflow so cold anon leaves RAM
   # entirely. Lives on /realm NVMe, not the wear-limited root SATA SSD, so
   # swap I/O never competes with Postgres/nix-store writes on that disk.
-  # History/evidence: bd show sinnix-mys
   prepareSwapfile = pkgs.writeShellApplication {
     name = "sinnix-prime-prepare-swapfile";
     runtimeInputs = [
@@ -85,7 +79,6 @@ let
       # of the containing subvolume fails with ETXTBSY. Nested subvolumes
       # are excluded from parent snapshots, which also keeps swap contents
       # out of backups.
-      # History/evidence: bd show sinnix-y37
       if [ -d "$swap_dir" ] && [ "$(stat --format=%i "$swap_dir")" != "256" ]; then
         if swapon --noheadings --raw --show=NAME | grep -qxF "${swapFile}"; then
           swapoff "${swapFile}"
@@ -247,9 +240,8 @@ in
       ];
     };
 
-    # @var subvolume removed (B6): /var is now a plain dir inside @, populated
-    # by /persist bind-mounts declared in modules/persistence.nix. (The historical
-    # @var subvol is gone from disk as of 2026-06-12 — no top-level @var remains.)
+    # There is no @var subvol: /var is a plain dir inside @, populated by
+    # /persist bind-mounts declared in modules/persistence.nix.
 
     "/persist" = {
       device = "/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02";
@@ -269,11 +261,6 @@ in
     # blob store still gets zstd:3. Excluded from btrbk (unsafe to
     # block-snapshot a live DB); disaster recovery is the logical pg_dump in
     # modules/services/sinex/bridge.nix, staged under the btrbk->borg path.
-    # History/evidence: bd show sinnix-6b4
-    # Moved /sinex -> /state/sinex on 2026-08-12 (sinnix-eau taxonomy pass;
-    # stack was down, so no drain window needed). The old /realm/sinex
-    # snapshot source stays read-only during burn-in and is deleted only on
-    # explicit operator authorization.
     "/var/lib/sinex" = {
       device = "/dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a";
       fsType = "btrfs";
@@ -285,10 +272,8 @@ in
       ];
     };
 
-    # NATS JetStream state moved from the /persist impermanence tree to the
-    # realm state volume on 2026-08-07. The old /persist/var/lib/nats source
-    # remains untouched during burn-in and is removed only after explicit
-    # operator authorization.
+    # NATS JetStream state lives on the realm state volume, not the /persist
+    # impermanence tree.
     "/var/lib/nats" = {
       device = "${realmRoot}/state/nats";
       fsType = "none";
@@ -301,15 +286,12 @@ in
 
     # Sinex devshell build caches (CARGO_TARGET_DIR + per-checkout dev-state;
     # the /var/cache/sinex path itself is hardcoded by the sinex devshell and
-    # sinnix-direnvrc, so we relocate what backs it, not the path). Audit
-    # 2026-07-10 (sinnix impermanence sweep): 127 GiB of cargo target churn
-    # accumulated on the EPHEMERAL MX500 root within one 25h boot — maximum
-    # wear for zero benefit, since the root wipe destroys the warm cache
-    # every reboot and forces full recompiles that write it all again.
-    # Backing the path with /realm NVMe keeps caches warm across boots and
-    # moves the churn to the wear-tolerant disk; /realm/cache is excluded
-    # from the btrbk→borg pipeline (build caches are regenerable, see
-    # modules/backup.nix realmExcludes).
+    # sinnix-direnvrc, so we relocate what backs it, not the path). Left on the
+    # ephemeral MX500 root this is maximum wear for zero benefit: the boot wipe
+    # destroys the warm cache and forces full recompiles that write it all
+    # again. /realm NVMe keeps caches warm across boots on the wear-tolerant
+    # disk; /realm/cache is excluded from the btrbk→borg pipeline (build caches
+    # are regenerable, see modules/backup.nix realmExcludes).
     "/var/cache/sinex" = {
       device = "/realm/cache/sinex";
       fsType = "none";
@@ -329,9 +311,6 @@ in
       ];
     };
 
-    # The old Samsung 960 EVO cache/swap device is not part of the active
-    # storage topology. Cache consumers use root-backed defaults instead.
-
     "${realmRoot}" = {
       device = realmFsDevice;
       fsType = "btrfs";
@@ -339,7 +318,6 @@ in
         "subvol=/"
         "compress=zstd"
         # Capture lake is write-heavy; atime writes on read are pure waste.
-        # Matches root's noatime (was relatime — an unintentional divergence).
         "noatime"
         "lazytime"
         "nodiscard"
@@ -347,11 +325,11 @@ in
       ];
     };
 
-    # B9: /realm/home bind mount removed. /home/${username} is now ephemeral
-    # (part of @, wiped on every boot by B8 initrd script). Populated entirely
-    # from /persist bind-mounts (impermanence) + Home Manager activation.
+    # There is no /realm/home bind mount: /home/${username} is ephemeral (part
+    # of @, wiped every boot by the rollback-root initrd script) and populated
+    # from /persist bind-mounts plus Home Manager activation.
 
-    # 6TB HGST - reformatted from NTFS to btrfs
+    # 6TB HGST
     "${outerRealm}" = {
       device = "/dev/disk/by-uuid/250683a9-c13f-4546-a29b-a743f3babb43";
       fsType = "btrfs";
@@ -471,7 +449,6 @@ in
     # (subvolid=5) isn't normally mounted, so mount it transiently to create
     # the child subvol with nodatacow; idempotent, so this is a no-op on an
     # already-provisioned host and only matters for a fresh install/restore.
-    # History/evidence: bd show sinnix-6b4
     services.ensure-sinex-subvol = {
       description = "Ensure dedicated @sinex nodatacow subvolume exists on the root btrfs";
       requiredBy = [ "var-lib-sinex.mount" ];
@@ -499,10 +476,10 @@ in
           chattr +C "$root" || true
         fi
         # Pre-create the directory skeleton the sinex services' systemd mount
-        # namespacing (ReadWritePaths) requires to PRE-EXIST. On the old layout
-        # these were on @ and recreated each boot by tmpfiles; the bridge's
-        # tmpfiles now run before this mount, so create them here directly on the
-        # @sinex subvol (idempotent; ownership matches modules/services/sinex).
+        # namespacing (ReadWritePaths) requires to PRE-EXIST. The bridge's
+        # tmpfiles run before this mount, so they must be created here directly
+        # on the @sinex subvol (idempotent; ownership matches
+        # modules/services/sinex).
         install -d -o postgres -g postgres -m 0750 "$root/postgresql" "$root/postgresql/18"
         install -d -o sinex -g sinex -m 0711 "$root/home"
         install -d -o sinex -g sinex -m 0700 "$root/state" "$root/state/tls"
@@ -556,8 +533,8 @@ in
       "d ${realmRoot}/cache/sinex 0775 ${username} users -"
       # NATS JetStream state, backed up with the realm volume.
       "d ${realmRoot}/state/nats 0755 nats nats -"
-      # DB-backup staging (telemetry/polylogue sqlite, sinex pg dumps) —
-      # moved off /persist 2026-07-10; covered by the /realm borg job.
+      # DB-backup staging (telemetry/polylogue sqlite, sinex pg dumps),
+      # covered by the /realm borg job.
       "d ${realmRoot}/backup 0755 root root -"
       # Keep Stashbox state on /realm while preserving its stable XDG path.
       # Regenerable members stay outside frequent persist backup coverage.

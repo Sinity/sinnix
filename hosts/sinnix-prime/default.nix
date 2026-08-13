@@ -33,11 +33,10 @@
       enable = true;
       tunnel = {
         enable = true;
-        # Repinned after sinnix-lpuv added capture_lanes/capture_query. The
-        # gate is a review checkpoint on what reaches remote ChatGPT, so this
-        # moves only alongside an inspection of the rendered tool list: all 16
-        # are read-only (list/read/query/status/tail/verify/diff/search/tree),
-        # and the capture pair is restricted to non-content-bearing lanes.
+        # Review checkpoint on what reaches remote ChatGPT: move this hash only
+        # alongside an inspection of the rendered tool list. Every tool must
+        # stay read-only, and the capture tools restricted to
+        # non-content-bearing lanes.
         approvedManifestHash = "086480ac3f7af0ab8298a999b67b0004f98f0a006c4c29db9c900cf06bd9a84c";
         tunnelId = "tunnel_6a2eb972c3bc8191be437670f455ebd9";
       };
@@ -48,39 +47,25 @@
       autoStart = true;
     };
     terminal-capture.enable = true;
-    # Remote access over the tailnet (sinnix-is8, enabled 2026-08-12).
-    # tag:workstation must be authorized in the tailnet ACL tagOwners; the
-    # auth key lives in agenix (tailscale-authkey). Plain node: no exit-node
-    # or subnet-router role (deliberate).
+    # Remote access over the tailnet. tag:workstation must be authorized in the
+    # tailnet ACL tagOwners; the auth key lives in agenix (tailscale-authkey).
+    # Plain node: no exit-node or subnet-router role.
     tailscale = {
       enable = true;
       tags = [ "tag:workstation" ];
-      # Zero-blast-radius posture (operator burned by tailscale-owned DNS
-      # before): never touch DNS -- the router stays DNS authority -- and
-      # accept/advertise no routes. The join adds only the tailscale0
-      # interface + 100.64/10 peer routes; rollback = stop tailscaled.
+      # Zero-blast-radius posture: never touch DNS -- the router stays DNS
+      # authority -- and accept/advertise no routes, so the join adds only the
+      # tailscale0 interface + 100.64/10 peer routes.
       enableMagicDNS = false;
       useRoutingFeatures = "none";
     };
   };
 
-  # Mosh server, tailscale0-scoped only (sinnix-uyvt evaluation, 2026-08-13).
-  # NOT a general SSH replacement here: this operator's actual desktop<->phone
-  # SSH usage (scripts/sinnix-phone) is almost entirely non-interactive --
-  # rsync pulls, scripted `shell <cmd>` invocations, a one-shot clipboard
-  # push -- which Mosh does not accelerate (rsync still needs SSH transport;
-  # Mosh has no scripted/batch mode). The one interactive case
-  # (`sinnix-phone shell`) runs desktop-as-client -> phone-as-server, the
-  # REVERSE of Mosh's actual win: Mosh's roaming/prediction benefit protects
-  # a roaming CLIENT against a stable server, not a server that itself sleeps
-  # -- and the phone-as-server going to sleep/background breaks SSH and Mosh
-  # equally. So wiring a mosh-server on the phone side would add complexity
-  # for no measurable benefit against the workflow that actually exists.
-  # The desktop side is a different, genuine case: a future phone-as-client
-  # session into this always-on desktop (matching tonight's "mobile
-  # interface to the estate" direction) is exactly Mosh's classic win --
-  # cheap to enable now, unused until that workflow exists. Server only;
-  # no phone-side package installed for the reason above.
+  # Mosh server, tailscale0-scoped only, for phone-as-client sessions into this
+  # always-on desktop. Server side only: no mosh on the phone, because
+  # scripts/sinnix-phone drives the desktop->phone direction and Mosh does not
+  # help it (rsync still needs SSH transport, Mosh has no scripted/batch mode,
+  # and a sleeping phone-as-server breaks SSH and Mosh equally).
   environment.systemPackages = [ pkgs.mosh ];
   networking.firewall.interfaces.tailscale0.allowedUDPPortRanges = [
     { from = 60000; to = 61000; }
@@ -92,18 +77,14 @@
     # address only, and its ports are opened on tailscale0 alone -- the LAN
     # never sees it. Depends on tailscale above (asserted in the module).
     hub.enable = true;
-    # ── Capture-machinery program (2026-08-12) ──────────────────────────────
+    # ── Capture machinery ───────────────────────────────────────────────────
     capture-notifications.enable = true;
     capture-mpris.enable = true;
     capture-clipboard.enable = true;
     capture-primary.enable = true;
     capture-a11y.enable = true;
     capture-audio.enable = true;
-    # Phase 3a (sinnix-9pd): per-window screen frames + the always-on
-    # replay ring, promoted to default-on via this host enable per the
-    # mkServiceModule factory contract (services are default-off at the
-    # module level; hosts express the opt-in) rather than baking a
-    # non-standard default into the factory itself.
+    # Per-window screen frames plus the always-on replay ring.
     capture-screen.enable = true;
     capture-replay = {
       enable = true;
@@ -112,30 +93,27 @@
       target = "DP-3";
     };
     capture-kitty-scrollback.enable = true;
-    # Room air quality from the Awair Element's local API (sinnix-agp8) --
-    # the first capture lane covering the environment rather than the machine.
+    # Room air quality from the Awair Element's local API.
     capture-awair.enable = true;
-    # AORUS FO48U DDC/CI sensor poll (sinnix-70eq): power state, brightness/
-    # contrast drift, input source -- turns "is the screen on" into a
-    # measurement instead of an inference.
+    # AORUS FO48U DDC/CI sensor poll: power state, brightness/contrast drift,
+    # input source.
     capture-monitor.enable = true;
-    # L0 network flow metadata via kernel conntrack events (sinnix-0cqk):
-    # 5-tuple + byte/packet counters, no packet capture, no TLS interception.
+    # L0 network flow metadata via kernel conntrack events: 5-tuple +
+    # byte/packet counters, no packet capture, no TLS interception.
     capture-netflow.enable = true;
-    # Scheduled phone -> lake drain, wifi + charging gated (sinnix-uyvt.2.1).
+    # Scheduled phone -> lake drain, wifi + charging gated.
     phone-drain.enable = true;
-    # Persistent phone->prime telemetry push (sinnix-uyvt.4 architecture
-    # correction): the phone streams continuously over one long-lived
-    # connection instead of discrete per-command SSH invocations.
+    # Persistent phone->prime telemetry push: the phone streams continuously
+    # over one long-lived connection rather than per-command SSH invocations.
     phone-receiver.enable = true;
-    # Router telemetry pulled from prime on a timer (sinnix-zihb): syslog
-    # deltas, DHCP leases, wifi associations with signal, and nlbwmon's
-    # seven months of per-device bandwidth. Nothing runs on the router.
+    # Router telemetry pulled from prime on a timer: syslog deltas, DHCP
+    # leases, wifi associations with signal, and nlbwmon per-device bandwidth.
+    # Nothing runs on the router.
     capture-router.enable = true;
     url-ledger.enable = true;
-    # Video special-case over the ledger: yt-dlp resolves video-hosting
-    # URLs into a real archived copy (sinnix-e8k9) instead of relying on
-    # Wayback/Common Crawl CDX coverage, which doesn't preserve video.
+    # Video special-case over the ledger: yt-dlp resolves video-hosting URLs
+    # into a real archived copy. Wayback/Common Crawl CDX coverage does not
+    # preserve video.
     video-resolve.enable = true;
     below = {
       enable = true;
@@ -163,26 +141,25 @@
       # The promoted archive lives on the realm NVMe volume, not in the
       # impermanent home-directory default.
       dataDir = "/realm/state/polylogue";
-      # 2026-07-21 (polylogue-dcz5/04kl): embedding OFF until the 777K-vector
-      # content-hash rescue lands — the rebuilt embeddings tier is empty and
-      # daemon catch-up would re-embed the whole corpus through the paid
-      # Voyage API. Re-enable after polylogue-04kl executes.
+      # Embedding stays off until the content-hash rescue lands: the rebuilt
+      # embeddings tier is empty, so daemon catch-up would re-embed the whole
+      # corpus through the paid Voyage API.
       embedding.enable = false;
       daemon.autoStart = true;
     };
     machine-telemetry.enable = true;
-    # Operator steering walking skeleton (sinnix-jfiy.1): store + rituals +
-    # read-only cockpit at http://127.0.0.1:8791.
+    # Operator steering: store + rituals + read-only cockpit at
+    # http://127.0.0.1:8791.
     steering.enable = true;
     # Hourly state-dump -> claude -p (enrichment-pass skill) -> versioned
-    # derived outputs (sinnix-jfiy.2, first sinnix-qa2s increment).
+    # derived outputs.
     enrichment-loop.enable = true;
     weechat-log-sealer.enable = true;
-    # Backstop reaper for orphaned per-checkout sinex dev-postgres instances
-    # (primary cleanup is sinnix-direnvrc's owner-watcher). See sinex-grlv.
+    # Backstop reaper for orphaned per-checkout sinex dev-postgres instances;
+    # primary cleanup is sinnix-direnvrc's owner-watcher.
     sinex-dev-db-reaper.enable = true;
     # Pre-build + cachix-push sinex whenever its pinned input moves, off the
-    # interactive switch critical path. See sinnix-m9v.
+    # interactive switch critical path.
     sinex-cache-prebuild.enable = true;
     # Keep the optional AirVPN tunnel inactive; Transmission uses the normal
     # host network and the router's existing 51413 port forward.
@@ -209,24 +186,17 @@
       autoStart = false;
     };
     koboldcpp.enable = true; # all-in-one offload + native image gen :5001 (on-demand)
-    # llama-server :8081 serving the local reranker (/v1/rerank — an API
-    # ollama does not provide). 0.6b Q8, bounded ctx-size (see
+    # llama-server :8081 serving the local reranker (/v1/rerank — an API ollama
+    # does not provide). 0.6b Q8, bounded ctx-size (see
     # modules/services/llama-cpp.nix); the 4B Q4 GGUF sits on disk as the
-    # quality-tier swap. CPU-pinned (gpuLayers = 0): measured 2026-08-13 at
-    # 435-571ms warm for a 20-doc rerank on CPU vs. 67-137ms on GPU — well
-    # under a second either way. NOT zero VRAM, though: verified live that
-    # the CUDA-linked binary still holds ~680-740MiB even with
-    # --n-gpu-layers 0 (CUDA context/compute-buffer overhead, released
-    # cleanly on exit) -- smaller than the 1610MiB it held fully offloaded,
-    # but not the "0 VRAM" an earlier design pass assumed. Socket-activated
-    # on-demand, but outside the gpu-inference admission mesh
-    # (modules/services/ai-control.nix): it coexists with a resident
-    # ollama/koboldcpp/whisper session instead of evicting/being evicted by
-    # one, which is what made every retrieval turn pay a ~20s GPU reload.
-    # ~740MiB reranker + a 7.2GB daily-driver LLM + ~2GB desktop residency
-    # leaves the 10GB card with little headroom during a RAG turn -- worth
-    # revisiting with a non-CUDA llama-cpp build if that margin ever bites.
-    # Weekly evidence-joined usage census (bead sinnix-yfr).
+    # quality-tier swap. gpuLayers = 0 is not zero VRAM: the CUDA-linked binary
+    # still holds a few hundred MiB of context/compute-buffer even with
+    # --n-gpu-layers 0, released on exit. Socket-activated on demand but
+    # deliberately outside the gpu-inference admission mesh
+    # (modules/services/ai-control.nix), so it coexists with a resident
+    # ollama/koboldcpp/whisper session instead of making every retrieval turn
+    # pay a GPU reload.
+    # Weekly evidence-joined usage census.
     census.enable = true;
     llama-cpp = {
       enable = true;
@@ -250,15 +220,12 @@
   };
 
   # Hard memory ceiling for the collapsed sinexd daemon (event_engine + API +
-  # automata + hosted source bindings all run in one systemd unit, governed
-  # by exactly this resource block per nixos/modules/sources.nix). The
-  # upstream default only sets a soft MemoryHigh=8G throttle; memoryMax is
-  # null (uncapped) unless set here. A bulk re-import (the exact shape of the
-  # Phase C rebuild) is the highest-memory-pressure workload sinexd runs, so
-  # an unbounded leak/backlog spike would otherwise compete with Postgres for
-  # all 32G of host RAM until host-level earlyoom intervenes instead of a
-  # clean systemd-scoped restart. 14G leaves headroom for Postgres/NATS/the
-  # rest of the workstation stack on this 32G host (sinex-audit-nomemcap).
+  # automata + hosted source bindings all run in one systemd unit, governed by
+  # exactly this resource block per nixos/modules/sources.nix). Upstream sets
+  # only a soft MemoryHigh=8G throttle and leaves memoryMax null, so without
+  # this a leak or bulk-import backlog competes with Postgres for all 32G until
+  # host earlyoom fires instead of a clean systemd-scoped restart. 14G leaves
+  # headroom for Postgres/NATS and the rest of the stack on this 32G host.
   services.sinex.core.api.resources.memoryMax = "14G";
 
   # CUDA builds (ollama-cuda, koboldcpp/llama-cpp/whisper-cpp -cuda) are served
@@ -272,16 +239,11 @@
   systemd.services.systemd-tpm2-setup.enable = lib.mkForce false;
   systemd.services.systemd-tpm2-setup-early.enable = lib.mkForce false;
 
-  # Long-term journal on the /realm NVMe (2026-07-10, operator decision):
-  # the old posture (4G on the persisted MX500 root) was a wear compromise
-  # capping retention at ~2 weeks. The NVMe has no wear flag, btrfs zstd:3
-  # compresses journal files well beyond journald's per-field compression,
-  # and the operator wants long retention: 64G size cap, 365-day time cap.
-  # The nested subvol /realm/state/journal keeps journal churn out of the
-  # /realm btrbk→borg snapshots (sinex's syslog capture is the durable
-  # journal archive; this is the queryable window). Early boot: journald
-  # runs volatile in /run until realm mounts, then
-  # systemd-journal-flush.service moves logs over — the standard sequence.
+  # Long-term journal on the /realm NVMe rather than the wear-limited MX500
+  # root, so retention can be generous (64G size cap, 365-day time cap). The
+  # nested subvol /realm/state/journal keeps journal churn out of the /realm
+  # btrbk→borg snapshots; sinex's syslog capture is the durable archive and
+  # this is the queryable window.
   fileSystems."/var/log/journal" = {
     device = "/realm/state/journal";
     fsType = "none";
@@ -297,13 +259,10 @@
       Storage=persistent
       Compress=yes
       SyncIntervalSec=2min
-      # Persistent (not volatile) is deliberate, not drift: the journal is
-      # the forensic source for OOM/earlyoom kill events (sinnix-fjq's
-      # kill_event capture greps it). Retention is time-based (~1 year);
-      # the size cap is a backstop, not a preallocation. Interim posture:
-      # once sinex is trusted as the durable journal archive this local
-      # window shrinks back to weeks and the duplication ends.
-      # History/evidence: bd show sinnix-u63, bd show sinnix-fjq
+      # Persistent (not volatile) is deliberate: the journal is the forensic
+      # source for OOM/earlyoom kill events, which the kill_event capture
+      # greps out of it. Retention is time-based; the size cap is a backstop,
+      # not a preallocation.
       MaxRetentionSec=365day
       SystemMaxUse=64G
       SystemKeepFree=200G
@@ -321,7 +280,6 @@
   # writes; any evicted pages land on the NVMe swap tier, not the worn root
   # SSD. Heavy/large scratch belongs on /realm/tmp per policy, not here —
   # this tmpfs is sized for routine small-file churn, not build output.
-  # History/evidence: bd show sinnix-een
   boot.tmp.useTmpfs = true;
   boot.tmp.tmpfsSize = "6G";
 }
