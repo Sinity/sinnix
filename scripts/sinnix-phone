@@ -35,7 +35,11 @@ LAKE_ROOT="${SINNIX_PHONE_LAKE:-/realm/data/captures/phone}"
 # capture-router.nix hit. A script invoked by both a human and a timer
 # should not depend on interactive config either way.
 ssh_phone_opts=(
-  -p "$PHONE_SSH_PORT"
+  # -o Port=, not -p: this array is shared verbatim with scp_phone() below,
+  # and scp's -p means "preserve file attributes" (a no-arg flag), not
+  # port -- passing `-p 8022` to scp silently misparses 8022 as a stray
+  # filename argument. -o Port= means the same thing to both tools.
+  -o "Port=$PHONE_SSH_PORT"
   -F /dev/null
   -o ConnectTimeout=10
   -o StrictHostKeyChecking=accept-new
@@ -49,7 +53,22 @@ ssh_phone_opts=(
   # agent-forwarding semantics.
   -o IdentityAgent=none
   -i "${SINNIX_PHONE_IDENTITY:-$HOME/.ssh/id_ed25519}"
+  # Connection multiplexing (sinnix-uyvt.1 latency profiling, 2026-08-13):
+  # raw tailnet RTT to the phone is ~4-11ms, but each cold SSH handshake
+  # measured ~380-586ms -- multi-step commands like `note` (list, then N
+  # scp pulls) were paying that cost 2-4x sequentially, dwarfing the actual
+  # network hop and accounting for most of a reported "1-2s" round-trip.
+  # ControlMaster reuses one authenticated connection for every ssh/scp
+  # call in a single script invocation; ControlPersist=120 keeps it alive
+  # briefly across quick successive commands (e.g. a human running `note`
+  # right after `status`) without lingering indefinitely on a device that
+  # roams networks. %C is ssh's single-token hash of user+host+port, so the
+  # socket path can't grow unboundedly long.
+  -o ControlMaster=auto
+  -o ControlPersist=120
+  -o "ControlPath=${SINNIX_PHONE_SSH_CONTROL_DIR:-$HOME/.cache/sinnix-phone-ssh}/%C"
 )
+mkdir -p "${SINNIX_PHONE_SSH_CONTROL_DIR:-$HOME/.cache/sinnix-phone-ssh}"
 # Same flags as a single shell-word, for rsync -e (which needs a word, not
 # an array) -- computed once at top level so every case branch can use it,
 # not just whichever one happens to run first (case branches are NOT
@@ -59,6 +78,7 @@ rsync_ssh="ssh ${ssh_phone_opts[*]}"
 # shellcheck disable=SC2029  # client-side expansion is intended: callers
 # (clip-push) build the remote command with their own already-expanded args.
 ssh_phone() { ssh "${ssh_phone_opts[@]}" "${PHONE_USER}@${PHONE_TS_IP}" "$@"; }
+scp_phone() { scp "${ssh_phone_opts[@]}" "$@"; }
 adb_phone() { ANDROID_SERIAL="$ADB_TARGET" adb "$@"; }
 
 ensure_adb() {
@@ -303,11 +323,10 @@ note)
   for remote in "${selected[@]}"; do
     i=$((i + 1))
     local_clip="$work/chunk-$i.m4a"
-    scp -P "$PHONE_SSH_PORT" -F /dev/null \
-      -o "UserKnownHostsFile=${SINNIX_PHONE_KNOWN_HOSTS:-$HOME/.ssh/known_hosts}" \
-      -o IdentitiesOnly=yes -o IdentityAgent=none \
-      -i "${SINNIX_PHONE_IDENTITY:-$HOME/.ssh/id_ed25519}" \
-      "${PHONE_USER}@${PHONE_TS_IP}:${remote}" "$local_clip"
+    # scp_phone() reuses ssh_phone_opts, so this rides the same
+    # ControlMaster connection the preceding `ssh_phone "ls..."` call
+    # opened above -- no repeat handshake per chunk pulled.
+    scp_phone "${PHONE_USER}@${PHONE_TS_IP}:${remote}" "$local_clip"
     local_clips+=("$local_clip")
   done
 
