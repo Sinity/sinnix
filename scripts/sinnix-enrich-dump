@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Enrichment loop v0 — dump estate state, run the enrichment-pass skill, write versioned outputs
+# runtimeInputs: bash coreutils findutils gnugrep jq claude-code atuin beads systemd
+set -euo pipefail
+
+# sinnix-jfiy.2: timer -> state-dump -> `claude -p` (enrichment-pass skill) ->
+# versioned outputs under /realm/data/derived/enrichment/. Single-writer
+# invariant: this script NEVER writes to polylogue's or sinex's stores, and
+# writes only under /realm/data/derived/enrichment/ (outputs) and
+# /realm/state/enrichment/ (watermark). Every other path it touches is
+# read-only.
+#
+# Substrate-independent by design (2026-08-11 fork verdict): inputs are read
+# from whatever files/commands happen to exist; an absent or empty source is
+# not an error, it just means nothing changed there since the watermark (or
+# the source doesn't exist on this host yet) -- see dots/_ai/skills/
+# enrichment-pass/SKILL.md for how the model is told to handle that.
+
+WATERMARK_FILE="/realm/state/enrichment/last-run"
+OUTPUT_ROOT="/realm/data/derived/enrichment"
+
+NOW_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+FROM_ISO=""
+if [[ -f "$WATERMARK_FILE" ]]; then
+  FROM_ISO="$(cat "$WATERMARK_FILE")"
+fi
+ATUIN_AFTER="${FROM_ISO:-24 hours ago}"
+JOURNALCTL_SINCE="${FROM_ISO:-24 hours ago}"
+
+BUNDLE="$(mktemp -d)"
+trap 'rm -rf "$BUNDLE"' EXIT
+
+# ---------------------------------------------------------------- assemble
+
+if [[ -r /etc/sinnix/runtime-inventory.json ]]; then
+  cp /etc/sinnix/runtime-inventory.json "$BUNDLE/runtime-inventory.json"
+fi
+
+# Steering workspace beads export (future increment may create a dedicated
+# workspace at /realm/state/steering/.beads -- graceful no-op until then).
+if [[ -d /realm/state/steering/.beads ]]; then
+  bd export -C /realm/state/steering -o "$BUNDLE/steering-export.jsonl" 2>/dev/null || true
+fi
+
+if command -v atuin >/dev/null 2>&1; then
+  atuin search --after "$ATUIN_AFTER" "" >"$BUNDLE/atuin-tail.txt" 2>/dev/null || true
+fi
+
+# Polylogue hook-spool deltas. Path moved /realm/db/polylogue ->
+# /realm/state/polylogue on 2026-08-12 (sinnix-eau); use the current path.
+POLYLOGUE_HOOKS_DIR="/realm/state/polylogue/hooks"
+if [[ -d "$POLYLOGUE_HOOKS_DIR" ]]; then
+  : >"$BUNDLE/polylogue-hooks.jsonl"
+  if [[ -n "$FROM_ISO" ]]; then
+    find "$POLYLOGUE_HOOKS_DIR" -name '*.jsonl' -newermt "$FROM_ISO" -exec cat {} + \
+      >>"$BUNDLE/polylogue-hooks.jsonl" 2>/dev/null || true
+  else
+    find "$POLYLOGUE_HOOKS_DIR" -name '*.jsonl' -exec cat {} + \
+      >>"$BUNDLE/polylogue-hooks.jsonl" 2>/dev/null || true
+  fi
+fi
+
+# Raw Claude/Codex session JSONL deltas, mtime-filtered since the watermark.
+SESSIONS_DIR="$HOME/.claude/projects"
+if [[ -d "$SESSIONS_DIR" ]]; then
+  mkdir -p "$BUNDLE/session-deltas"
+  if [[ -n "$FROM_ISO" ]]; then
+    find "$SESSIONS_DIR" -name '*.jsonl' -newermt "$FROM_ISO" -print0 2>/dev/null
+  else
+    find "$SESSIONS_DIR" -name '*.jsonl' -newermt "24 hours ago" -print0 2>/dev/null
+  fi | while IFS= read -r -d '' f; do
+    cp "$f" "$BUNDLE/session-deltas/$(basename "$(dirname "$f")")-$(basename "$f")" 2>/dev/null || true
+  done
+fi
+
+# Lynchpin current-state product, only if fresh (<24h).
+LYNCHPIN_PACKS="/realm/project/sinity-lynchpin/.agent/scratch/current-state-packs"
+if [[ -d "$LYNCHPIN_PACKS" ]]; then
+  latest="$(find "$LYNCHPIN_PACKS" -name '*.json' -mtime -1 -print 2>/dev/null | sort | tail -1)"
+  if [[ -n "$latest" ]]; then
+    cp "$latest" "$BUNDLE/lynchpin-current-state.json"
+  fi
+fi
+
+journalctl -p warning --since="$JOURNALCTL_SINCE" --no-pager 2>/dev/null | tail -n 500 \
+  >"$BUNDLE/journald-warnings.txt" || true
+
+# ------------------------------------------------------------------ process
+
+PROMPT="You are running the sinnix enrichment pass (sinnix-jfiy.2). Load the \
+'enrichment-pass' skill (dots/_ai/skills/enrichment-pass/SKILL.md, linked at \
+~/.config/claude/skills/enrichment-pass) via the Skill tool and follow its \
+contract exactly: read whatever bundle files are present in \
+$BUNDLE (some may be absent or empty -- that means no change since the \
+watermark, not an error), then WRITE (using your Write tool) exactly two \
+files into that same directory: narrative.md and state-delta.json (schema \
+sinnix-enrichment-v1, per the skill). Window: from=${FROM_ISO:-null} to=$NOW_ISO. \
+Do not write anywhere else on the filesystem."
+
+FAILED=0
+OUT="$(env -u ANTHROPIC_API_KEY claude -p "$PROMPT" --output-format json 2>&1)" || FAILED=1
+
+DATE_DIR="$(date -u +%Y-%m-%d)"
+TIME_DIR="$(date -u +%H%M)"
+OUT_DIR="$OUTPUT_ROOT/$DATE_DIR/$TIME_DIR"
+mkdir -p "$OUT_DIR"
+
+if [[ "$FAILED" -eq 1 ]] || [[ ! -s "$BUNDLE/narrative.md" ]] || [[ ! -s "$BUNDLE/state-delta.json" ]]; then
+  # Failure honesty (e8e class lesson): a failed or incomplete pass must
+  # leave a visible marker row, never silence.
+  jq -n \
+    --arg schema "sinnix-enrichment-v1-failure" \
+    --arg generated_at "$NOW_ISO" \
+    --arg error "claude -p invocation failed or did not produce both required outputs: $OUT" \
+    '{schema: $schema, generated_at: $generated_at, error: $error}' \
+    >"$OUT_DIR/failure.json"
+  echo "sinnix-enrich-dump: FAILED, marker written to $OUT_DIR/failure.json" >&2
+  exit 1
+fi
+
+if ! jq -e '.schema == "sinnix-enrichment-v1" and (.inputs | type == "array")' \
+  "$BUNDLE/state-delta.json" >/dev/null 2>&1; then
+  jq -n \
+    --arg schema "sinnix-enrichment-v1-failure" \
+    --arg generated_at "$NOW_ISO" \
+    --arg error "state-delta.json failed schema validation" \
+    '{schema: $schema, generated_at: $generated_at, error: $error}' \
+    >"$OUT_DIR/failure.json"
+  echo "sinnix-enrich-dump: FAILED schema validation, marker written to $OUT_DIR/failure.json" >&2
+  exit 1
+fi
+
+cp "$BUNDLE/narrative.md" "$OUT_DIR/narrative.md"
+cp "$BUNDLE/state-delta.json" "$OUT_DIR/state-delta.json"
+
+# Provenance pointers, not copies of the raw evidence (the raw sources are
+# already durable elsewhere -- polylogue's own captures, session JSONL under
+# ~/.claude/projects, journald itself). This just records what was present
+# at bundle-assembly time and its rough size.
+{
+  echo "{"
+  first=1
+  for f in "$BUNDLE"/*; do
+    name="$(basename "$f")"
+    [[ "$name" == "narrative.md" || "$name" == "state-delta.json" ]] && continue
+    [[ "$first" -eq 0 ]] && echo ","
+    first=0
+    size="$(stat -c%s "$f" 2>/dev/null || echo 0)"
+    printf '  "%s": {"bytes": %s}' "$name" "$size"
+  done
+  echo ""
+  echo "}"
+} >"$OUT_DIR/provenance.json"
+
+mkdir -p "$(dirname "$WATERMARK_FILE")"
+echo "$NOW_ISO" >"$WATERMARK_FILE"
+
+echo "sinnix-enrich-dump: wrote $OUT_DIR (watermark advanced to $NOW_ISO)"
