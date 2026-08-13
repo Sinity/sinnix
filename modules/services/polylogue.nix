@@ -37,6 +37,18 @@ mkServiceModule {
       '';
     };
 
+    memoryBudgetGiB = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 16;
+      description = ''
+        Polylogued's cgroup memory budget in GiB. MemoryHigh is derived as
+        7/8 of this budget, leaving 1/8 for pre-limit throttling headroom;
+        MemoryMax is derived as 9/8, leaving another 1/8 for transient
+        bursts above the throttle. The value must be divisible by 8 so both
+        derived limits remain whole GiB values.
+      '';
+    };
+
     daemon = {
       host = lib.mkOption {
         type = lib.types.str;
@@ -124,14 +136,24 @@ mkServiceModule {
       # instead of serializing on GIL writer-commit contention; rollback is
       # repinning `.default`.
       polyloguePkg = inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.polylogue;
-      # One source of truth for the daemon's memory ceiling: used both for
-      # upstream's own service.memory* options and for the runtime surface
-      # declaration below, so the inventory cannot claim a limit the unit
-      # does not actually carry.
-      polyloguedMemoryHigh = "14G";
-      polyloguedMemoryMax = "18G";
+      # One source of truth for the daemon's memory ceiling, derived from a
+      # single budget knob and used both for upstream's own service.memory*
+      # options and for the runtime surface declaration, so the inventory
+      # cannot claim a limit the unit does not actually carry. MemoryHigh at
+      # 7/8 leaves throttling headroom below the ceiling; MemoryMax at 9/8
+      # leaves room for transient bursts above the throttle.
+      memoryBudgetBytes = cfg.memoryBudgetGiB * 1024 * 1024 * 1024;
+      polyloguedMemoryHigh = "${toString (cfg.memoryBudgetGiB * 7 / 8)}G";
+      polyloguedMemoryMax = "${toString (cfg.memoryBudgetGiB * 9 / 8)}G";
     in
     {
+      assertions = [
+        {
+          assertion = cfg.memoryBudgetGiB / 8 * 8 == cfg.memoryBudgetGiB;
+          message = "sinnix.services.polylogue.memoryBudgetGiB must be divisible by 8";
+        }
+      ];
+
       # ── Import the upstream Home Manager module ────────────────────
       home-manager.users.${userName} = {
         imports = [ inputs.polylogue.homeManagerModules.default ];
@@ -187,7 +209,10 @@ mkServiceModule {
             # The upstream unit does not pass its rendered TOML path to the
             # daemon process. Keep the service's startup-bound archive root
             # aligned with the generated user configuration.
-            Environment = [ "POLYLOGUE_ARCHIVE_ROOT=${cfg.dataDir}" ];
+            Environment = [
+              "POLYLOGUE_ARCHIVE_ROOT=${cfg.dataDir}"
+              "POLYLOGUE_MEMORY_BUDGET_BYTES=${toString memoryBudgetBytes}"
+            ];
           };
 
       };
