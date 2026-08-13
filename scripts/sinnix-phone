@@ -70,7 +70,7 @@ sinnix-phone <command>
   mirror        scrcpy screen mirror/control over the tailnet
   screenshot    grab the current screen to /realm/tmp/work/
   pull          rsync camera + downloads + health exports into the lake
-  drain         pull, but only if the phone is on wifi + charging (for a timer)
+  drain         pull, but only if the phone is on wifi (for a timer)
   adb-connect   (re)attach adb over the tailnet
   adb-restore   re-enable adbd TCP mode (requires the phone on USB)
   clip-push     push the current desktop clipboard to the phone, once
@@ -145,26 +145,30 @@ pull)
   du -sh "$LAKE_ROOT" 2>/dev/null
   ;;
 drain)
-  # sinnix-uyvt.2.1's tiered-sync policy: bulk audio (and everything else
-  # this pulls) drains only on wifi + charging, never over 5G. Meant for a
-  # timer, not interactive use — skips quietly (exit 0) when conditions
-  # aren't met, since "phone isn't on wifi right now" isn't a failure.
+  # sinnix-uyvt.2.1's tiered-sync policy, revised 2026-08-13 (operator: "no
+  # need to charging gate"). This drains the RAW AUDIO tier specifically --
+  # large, not time-critical -- which the operator explicitly still wants
+  # wifi-gated ("we'd still want full data transferred on wifi, to be
+  # clear, eventually"), so that half of the original gate stays. Charging
+  # had no stated justification and is dropped: a phone that's been off
+  # wifi+charging for hours was already an accepted gap per the runtime
+  # surface's generous staleAfterSeconds, and charging specifically just
+  # delayed draining without protecting anything the wifi gate doesn't
+  # already cover (this is a network-cost/opportunism gate, not a battery
+  # one). A future always-on VAD-gated live stream (sinnix-uyvt.4, small by
+  # construction) is a SEPARATE tier this bead doesn't cover -- see uyvt.2.1
+  # notes for why it isn't built yet (no VAD tooling installed on-device).
   if ! timeout 5 bash -c "exec 3<>/dev/tcp/$PHONE_TS_IP/$PHONE_SSH_PORT" 2>/dev/null; then
     echo "drain: phone unreachable, skipping"
     exit 0
   fi
   ensure_adb
-  charging=$(adb_phone shell dumpsys battery 2>/dev/null | grep -Eo '(AC|USB|Wireless) powered: true' | head -1)
   wifi_state=$(ssh_phone termux-wifi-connectioninfo 2>/dev/null | jq -r '.supplicant_state // empty')
-  if [ -z "$charging" ]; then
-    echo "drain: not charging, skipping"
-    exit 0
-  fi
   if [ "$wifi_state" != "COMPLETED" ]; then
     echo "drain: not on wifi (state: ${wifi_state:-unknown}), skipping"
     exit 0
   fi
-  echo "drain: charging + wifi confirmed, pulling"
+  echo "drain: wifi confirmed, pulling"
   "$0" pull
 
   # sinnix-uyvt.2.1 (3): device-side rotation. 37G free is finite; the phone

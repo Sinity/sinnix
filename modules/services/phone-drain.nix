@@ -1,8 +1,11 @@
 # sinnix-uyvt.2.1 (2): drain-on-a-schedule for the phone-side capture
-# lanes, gated on wifi + charging rather than pulling manually. Wraps
-# `sinnix-phone drain` (scripts/sinnix-phone), which does the actual
-# reachability/charging/wifi checks and skips quietly when conditions
-# aren't met -- this unit just provides the schedule.
+# lanes, gated on wifi rather than pulling manually. Wraps `sinnix-phone
+# drain` (scripts/sinnix-phone), which does the actual reachability/wifi
+# checks and skips quietly when conditions aren't met -- this unit just
+# provides the schedule. Charging gate dropped 2026-08-13 (operator: no
+# stated justification for it); wifi gate kept deliberately -- this is the
+# large/opportunistic raw-audio tier, not the (not yet built) small
+# always-on VAD-gated stream -- see sinnix-uyvt.4.
 {
   mkServiceModule,
   lib,
@@ -15,7 +18,7 @@ let
 in
 mkServiceModule {
   name = "phone-drain";
-  description = "Scheduled phone -> lake drain (wifi + charging gated)";
+  description = "Scheduled phone -> lake drain (wifi gated)";
   extraOptions = {
     intervalSec = lib.mkOption {
       type = lib.types.ints.positive;
@@ -35,8 +38,8 @@ mkServiceModule {
     # indistinguishable -- this is a proxy on the LAKE side (when did the
     # drain last actually land a new chunk), not a direct liveness check on
     # the phone-side recorder, so the threshold is generous: the drain is
-    # conditional (wifi + charging), and a phone off both for many hours is
-    # a real, non-alarming gap, not evidence the mic died.
+    # conditional (wifi), and a phone off wifi for many hours is a real,
+    # non-alarming gap, not evidence the mic died.
     captures = [
       {
         name = "phone-ambient";
@@ -50,7 +53,7 @@ mkServiceModule {
     { cfg, ... }:
     {
       systemd.user.services.sinnix-phone-drain = {
-        description = "Pull phone capture lanes into the data lake, if on wifi + charging";
+        description = "Pull phone capture lanes into the data lake, if on wifi";
         serviceConfig = {
           Type = "oneshot";
           ExecStart = "${scriptPkgs.sinnix-phone}/bin/sinnix-phone drain";
