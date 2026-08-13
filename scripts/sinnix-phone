@@ -148,6 +148,8 @@ sinnix-phone <command>
                 start it (needs adb: USB or tailnet)
   app-start     launch the app so its capture service comes back up
   app-grants    re-assert the shell-uid grants the app needs
+  app-soak [s]  acceptance test: sample screen/foreground/mute state over a
+                window, then measure every chunk closed in it (default 1200s)
   shell [cmd]   Termux shell over the tailnet (interactive when no cmd)
   mirror        scrcpy screen mirror/control over the tailnet
   screenshot    grab the current screen to /realm/tmp/work/
@@ -313,6 +315,78 @@ app-start)
   adb_any shell am start -n "$APP_ID/.MainActivity" >/dev/null 2>&1
   sleep 4
   "$0" app-status
+  ;;
+app-soak)
+  # Acceptance test for both hard cases at once: capture must survive the
+  # screen being off AND the phone being actively used. The second is the
+  # operator's flat requirement -- "capture not working when telephone is
+  # handled is not acceptable" -- and it is a genuinely different test, since
+  # foregroundServiceType="microphone" buys background mic access but does
+  # NOT win Android's concurrent-capture arbitration against a foreground app.
+  #
+  # Runs a window, samples what the phone was actually doing throughout (so
+  # "the phone was in use" is evidence rather than a claim), then measures
+  # every chunk closed inside it. Duration catches truncation; mean volume
+  # catches a stream that encoded at full bitrate out of a muted microphone.
+  seconds="${1:-1200}"
+  if ! adb_any get-state >/dev/null 2>&1; then
+    echo "app-soak: no adb transport" >&2
+    exit 1
+  fi
+  start_epoch=$(date -u +%s)
+  echo "== soak: ${seconds}s window, started $(date -u -d "@$start_epoch" +%H:%M:%SZ) =="
+  echo "use the phone during this window -- open apps, type, play audio, take a call"
+  echo
+  printf '%-10s %-9s %-6s %-7s %-7s %-10s %s\n' \
+    TIME SCREEN AGE RECORD MUTED AMPLITUDE FOREGROUND
+  while [ "$(date -u +%s)" -lt "$((start_epoch + seconds))" ]; do
+    soak_status=$(adb_any shell cat /sdcard/sinnix-ambient/status.json 2>/dev/null | tr -d '\r')
+    wake=$(adb_any shell dumpsys power 2>/dev/null | awk -F= '/mWakefulness=/{print $2; exit}' | tr -d '\r')
+    # Both spellings: dumpsys prints topResumedActivity in some states and only
+    # ResumedActivity in others (notably behind the keyguard).
+    top=$(adb_any shell dumpsys activity activities 2>/dev/null \
+      | awk -F'u0 ' '/[tT]opResumedActivity|ResumedActivity:/{print $2; exit}' \
+      | awk '{print $1}' | tr -d '\r}')
+    if echo "$soak_status" | jq -e . >/dev/null 2>&1; then
+      # Heartbeat age, not just the file's contents. A status.json left behind
+      # by a dead app still says recording=true forever, which is precisely
+      # the false-liveness reading this whole test exists to disprove.
+      age=$(( $(date -u +%s) - $(date -u -d "$(echo "$soak_status" | jq -r '.updated_at')" +%s) ))
+      if [ "$age" -gt 120 ]; then
+        printf '%-10s %-9s %-6s %s\n' "$(date -u +%H:%M:%SZ)" "${wake:-?}" "${age}s" \
+          "STALE -- app is not running, everything below it is a leftover"
+      else
+        printf '%-10s %-9s %-6s %-7s %-7s %-10s %s\n' \
+          "$(date -u +%H:%M:%SZ)" "${wake:-?}" "${age}s" \
+          "$(echo "$soak_status" | jq -r '.recording')" \
+          "$(echo "$soak_status" | jq -r '.muted // "n/a"')" \
+          "$(echo "$soak_status" | jq -r '.last_amplitude // "n/a"')" \
+          "${top:-?}"
+      fi
+    else
+      printf '%-10s %-9s %s\n' "$(date -u +%H:%M:%SZ)" "${wake:-?}" "NO STATUS -- app not installed or never started"
+    fi
+    sleep 60
+  done
+
+  echo
+  echo "== chunks closed during the window =="
+  workdir=$(mktemp -d)
+  printf '%-40s %10s %12s %s\n' CHUNK SECONDS BYTES MEAN_dB
+  adb_any shell ls -1 /sdcard/sinnix-ambient/ 2>/dev/null | tr -d '\r' | grep -E '^ambient-.*\.m4a$' | while read -r f; do
+    stamp="${f#ambient-}"; stamp="${stamp%.m4a}"
+    fe=$(date -u -d "${stamp:0:4}-${stamp:4:2}-${stamp:6:2} ${stamp:9:2}:${stamp:11:2}:${stamp:13:2}" +%s 2>/dev/null || echo 0)
+    [ "$fe" -ge "$start_epoch" ] || continue
+    adb_any pull "/sdcard/sinnix-ambient/$f" "$workdir/$f" >/dev/null 2>&1 || continue
+    dur=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$workdir/$f" 2>/dev/null)
+    vol=$(ffmpeg -nostdin -hide_banner -nostats -v info -i "$workdir/$f" -af volumedetect -f null - 2>&1 | awk -F': ' '/mean_volume/{print $2}')
+    printf '%-40s %10s %12s %s\n' "$f" "${dur:-?}" "$(stat -c%s "$workdir/$f")" "${vol:-?}"
+  done
+  rm -rf "$workdir"
+  echo
+  echo "PASS: every chunk at/near ${AMBIENT_CHUNK_SECONDS:-300}s, mean volume well above"
+  echo "digital silence, muted=false throughout, and a FOREGROUND column showing"
+  echo "apps other than dev.sinnix.phone."
   ;;
 app-grants)
   ensure_app_grants

@@ -54,7 +54,7 @@ nixpkgs revision as the rest of the flake.
 
 The APK is emitted **unsigned**. `sinnix-phone-app-install` signs it against a
 keystore at `~/.local/share/sinnix-phone-app/keystore.jks`, created on first
-use and persisted (`modules/features/cli/core.nix`). A key regenerated on
+use and persisted (`modules/services/phone-drain.nix`). A key regenerated on
 every source change would make each `adb install -r` fail with a signature
 mismatch and force an uninstall, which on Android also discards the app's
 runtime grants.
@@ -86,9 +86,66 @@ and uid scope, and the Doze whitelist. The two appop scopes are set separately
 because only one of them reverting is exactly what broke capture before.
 
 `RECORD_AUDIO` is deliberately *not* forced to appop `allow`. The default
-`MODE_FOREGROUND` is already satisfied while the microphone-typed foreground
-service is up; overriding it would mask a service regression rather than fix
-one.
+`MODE_FOREGROUND` should already be satisfied while the microphone-typed
+foreground service is up; overriding it would mask a service regression rather
+than fix one.
+
+On the appop scope split that broke the Termux arrangement: `appops get
+<pkg> RECORD_AUDIO` reports a **uid mode** and a **package mode** separately,
+only the package mode was ever set, and the uid mode reverted to `foreground`
+across a reboot. For this app that reversion should be harmless rather than
+fatal, because `foreground` is satisfied by a microphone-typed foreground
+service — that is the entire difference from Termux, which could not declare
+one. That claim is **not yet proven in isolation**: during the screen-off
+measurement the package mode had been manually set to `allow` beforehand, so
+the run does not separate "the foreground service satisfied it" from "the
+appop was open anyway". Uninstalling clears per-package appop state, so the
+next install is a clean test of it — `app-grants` will leave `RECORD_AUDIO` at
+its default deliberately.
+
+## Acceptance criteria
+
+Three cases, and they are genuinely different. The operator's requirement is
+that capture does not stop when the phone is merely used or restarted:
+
+1. **Screen off / app backgrounded.** Solved by
+   `foregroundServiceType="microphone"`. Verified: three consecutive chunks at
+   299.968s against a 300s target, mean volume -37.1 dB, while
+   `mWakefulness=Dozing` and the process held the platform's `M` (microphone)
+   capability.
+2. **Phone actively in use** — another app foreground, the operator typing,
+   audio playing. *"Capture not working when telephone is handled is not
+   acceptable."* **Not yet verified.** This is not implied by case 1; see the
+   arbitration limit below.
+3. **Reboot.** Not yet verified; resumes at first unlock (see Known limits).
+
+`sinnix-phone app-soak [seconds]` is the test for 1 and 2 together. It samples
+screen state, foreground app, heartbeat age, and mute state across a window,
+then measures every chunk closed inside it. It reports the foreground app per
+sample so "the phone was in use" is evidence rather than a claim, and refuses
+to read a stale `status.json` as liveness.
+
+### The arbitration limit
+
+`foregroundServiceType="microphone"` buys the right to keep the microphone
+while backgrounded or with the screen off. It does **not** win Android's
+concurrent-capture arbitration. When a foreground app opens the microphone,
+the platform can hand it the input and feed this service **digital silence** —
+no error, no exception, and the encoder keeps producing frames at the same
+bitrate. Chunk duration and file size stay perfect while the audio is nothing.
+
+That is why the service tracks `MediaRecorder.getMaxAmplitude()` per
+heartbeat. A live microphone in a silent room still reports its own noise
+floor, so a sustained run of *exact* zeroes means muted rather than quiet.
+Four consecutive zero samples (80s) is treated as a failure and cycles the
+recorder, and `muted` plus `last_amplitude` are published in `status.json`.
+
+Detection is not prevention. If Android decides a foreground app wins, cycling
+the recorder may not take the microphone back. Case 2 is therefore an
+empirical question about this device's policy, which is exactly why it has to
+be measured rather than reasoned about. Phone calls are a known hard stop:
+Android has blocked third-party call audio capture since Android 10, and no
+manifest declaration changes that.
 
 ## Liveness
 
@@ -144,3 +201,17 @@ discarding captured audio is not the device's call.
   MIUI refusing to deliver the boot broadcast at all.
 - Sensors, location, and battery/thermal are not captured yet. The app is the
   intended owner of those (`sinnix-uyvt.4`).
+- Phone calls stop capture. Android has blocked third-party capture of call
+  audio since Android 10; this is a platform decision, not a configuration
+  gap.
+
+## Service boundary
+
+`AmbientService` is drivable without the UI, which keeps it usable underneath
+a richer interface later (a sibling lane is designing one). The contract is:
+`ACTION_START` / `ACTION_STOP` intents, a single persisted intent bit in
+`Prefs` that boot and watchdog restarts consult, and `status.json` as the
+read model. `MainActivity` is only a client of that contract — it starts the
+service, toggles the preference, and renders `status.json`. Nothing in the
+capture path calls back into the activity, so replacing or extending the UI
+does not touch the recorder.

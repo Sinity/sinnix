@@ -316,17 +316,48 @@ public class AmbientService extends Service {
 
   private void heartbeat() {
     long size = currentPart == null ? 0 : currentPart.length();
-    status.heartbeat(size, elapsedChunkSeconds());
-    // A chunk whose file has stopped growing means the mic went silent at the
-    // platform level while the recorder still believes it is running -- the
-    // exact shape of the old truncation bug. Treat it as a failure and cycle.
+    status.heartbeat(size, elapsedChunkSeconds(), sampleAmplitude());
+
+    // A chunk whose file has stopped growing means the recorder has stopped
+    // producing frames while still believing it is running.
     if (status.stalled()) {
       Log.w(TAG, "chunk file stopped growing; cycling recorder");
       onRecorderError("chunk file stopped growing");
       return;
     }
+    // The more dangerous case, and the one file growth cannot see: Android's
+    // concurrent-capture arbitration hands the microphone to a foreground app
+    // and feeds this one digital silence instead. The encoder keeps running at
+    // the same bitrate, so the file grows exactly as it should while the audio
+    // is nothing. Amplitude is the only signal that separates them -- a live
+    // microphone in a silent room still reports its noise floor, so a
+    // sustained run of exact zeroes means muted, not quiet.
+    if (status.muted()) {
+      Log.w(TAG, "microphone reporting digital silence; cycling recorder");
+      onRecorderError("microphone muted (lost capture arbitration?)");
+      return;
+    }
     updateNotification();
     handler.postDelayed(this::heartbeat, HEARTBEAT_MILLIS);
+  }
+
+  /**
+   * Peak amplitude since the previous call, or -1 when unavailable.
+   *
+   * <p>Deliberately read once per heartbeat and nowhere else: the reading is
+   * destructive (it resets the running peak), so a second caller would blind
+   * the silence check.
+   */
+  private int sampleAmplitude() {
+    MediaRecorder r = recorder;
+    if (r == null) {
+      return -1;
+    }
+    try {
+      return r.getMaxAmplitude();
+    } catch (Exception e) {
+      return -1;
+    }
   }
 
   private long elapsedChunkSeconds() {
