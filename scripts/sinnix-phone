@@ -289,17 +289,37 @@ app-install)
   ensure_app_grants
   "$0" app-start
 
-  # Hand the microphone over. Termux's runit `ambient` service is the previous
-  # recorder; leaving it running would put two processes on one microphone,
-  # and Android gives the samples to one of them. runit's `down` file makes
-  # the retirement survive a reboot rather than lasting until the next boot.
+  # Retire Termux's runit `ambient` service, the previous recorder. Both
+  # recorders can hold the microphone at once -- measured: two AudioRecord
+  # clients, both State: Active, on separate input ports -- so the harm is not
+  # contention but provenance: they write the same `ambient-<UTC>.m4a` shape
+  # into the same directory, and the drain cannot tell whose chunk is whose.
+  #
+  # Over adb, not ssh: the install that just ran needs adb, while the phone's
+  # sshd is usually down, so an ssh-only retirement silently no-ops in exactly
+  # the case that reaches this line. Stopping the supervisor is not enough
+  # either -- `termux-microphone-record` is a separate Termux:API process and
+  # keeps the microphone until it is told to quit. `sv d` alone is not enough
+  # for the same reason: the run script ignores the TERM it sends and was
+  # observed opening a fresh recording six minutes later, so `sv k` follows it.
+  # The `down` file is what makes the retirement survive a reboot. Termux
+  # itself is left running -- its sshd is the transport the lake drain uses.
   echo "retiring the Termux recorder"
-  if ssh_phone 'true' >/dev/null 2>&1; then
-    ssh_phone 'touch /data/data/com.termux/files/usr/var/service/ambient/down; sv force-down /data/data/com.termux/files/usr/var/service/ambient >/dev/null 2>&1; termux-microphone-record -q >/dev/null 2>&1; true' || true
+  termux_prefix=/data/data/com.termux/files/usr
+  termux_retire="export PREFIX=$termux_prefix LD_LIBRARY_PATH=$termux_prefix/lib \
+PATH=$termux_prefix/bin:\$PATH HOME=/data/data/com.termux/files/home; \
+touch $termux_prefix/var/service/ambient/down; \
+sv d $termux_prefix/var/service/ambient >/dev/null 2>&1; \
+sv k $termux_prefix/var/service/ambient >/dev/null 2>&1; \
+termux-microphone-record -q >/dev/null 2>&1; true"
+  if adb_any shell "run-as com.termux sh -c '$termux_retire'" >/dev/null 2>&1; then
+    echo "  Termux ambient service is down and will stay down across reboots"
+  elif ssh_phone "$termux_retire" >/dev/null 2>&1; then
     echo "  Termux ambient service is down and will stay down across reboots"
   else
-    echo "  WARNING: no ssh to the phone, so the Termux recorder could not be" >&2
-    echo "  stopped. If it is still running, it will contend for the microphone." >&2
+    echo "  WARNING: the Termux recorder could not be stopped over adb or ssh." >&2
+    echo "  If it is still running, it will write chunks the drain cannot" >&2
+    echo "  distinguish from the app's. Check: sinnix-phone app-status" >&2
   fi
   ;;
 app-start)
