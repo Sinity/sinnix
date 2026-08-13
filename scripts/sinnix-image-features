@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Compute a richer classic-CV feature vector for one image, for sinnix-elicit item domains
+# runtimeInputs: imagemagick
+
+"""Image feature extraction for sinnix-elicit domains (sinnix-eb9c).
+
+sinnix-elicit's core engine is domain-neutral by design -- it knows nothing
+about images. This is the piece that gives image domains (wallpaper today,
+anything else later) a real, reusable feature vector instead of hand-rolled
+one-off scripting each time. Classic CV via ImageMagick, not an embedding
+model: no CLIP-class model is in this estate's local-models roster yet
+(checked flake/data/local-models.nix), and pulling one in just for this is
+its own decision -- scoped out here, not silently skipped. If/when a local
+embedding model exists, its output is a natural *addition* to this feature
+set (e.g. a handful of dominant PCA/UMAP dims from the embedding), not a
+replacement -- luminance/contrast/entropy/warmth stay meaningful and cheap
+even then.
+
+Features, all from `identify -format`, no second decode pass:
+  luminance    mean of the fx statistic (0..1)               -- existing
+  contrast     standard_deviation of the fx statistic          -- existing
+  saturation   mean saturation in HSL                          -- existing
+  entropy      Shannon entropy of the histogram (0..8ish)      -- NEW:
+               detail/complexity. A flat sky and a busy street
+               scene have very different entropy at the same
+               luminance/contrast, which the old feature set
+               could not distinguish.
+  warmth       mean hue folded onto a red<->blue axis (-1..1)  -- NEW:
+               positive = warm (red/orange dominant), negative
+               = cool (blue dominant). Distinct from saturation
+               (how vivid) and luminance (how bright).
+  aspect       width/height                                    -- existing
+  log_pixels   log(width*height)                                -- existing
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import subprocess
+import sys
+
+
+LUMA_FORMAT = "%[fx:mean]|%[fx:standard_deviation]|%[entropy]|%w|%h"
+# HSL-as-RGB channel trick: after -colorspace HSL, ImageMagick stores Hue in
+# the red channel and Saturation in the green channel (0..1 scale), so their
+# per-channel means are exactly what "%[fx:mean.saturation]" tried and failed
+# to express directly -- that channel-qualifier form isn't valid syntax on
+# this ImageMagick version.
+HSL_FORMAT = "%[fx:mean.r]|%[fx:mean.g]"
+
+
+def extract(path: str) -> dict[str, float]:
+    luma = subprocess.run(
+        ["identify", "-format", LUMA_FORMAT, path],
+        capture_output=True, text=True, timeout=30, check=True,
+    )
+    mean, stddev, entropy, w, h = luma.stdout.strip().split("|")
+    mean, stddev, entropy = float(mean), float(stddev), float(entropy)
+    width, height = int(w), int(h)
+
+    hsl = subprocess.run(
+        ["identify", "-colorspace", "HSL", "-format", HSL_FORMAT, path],
+        capture_output=True, text=True, timeout=30, check=True,
+    )
+    hue_s, sat_s = hsl.stdout.strip().split("|")
+    hue, sat = float(hue_s), float(sat_s)
+    # ImageMagick's mean.hue is 0..1 around the color wheel (0=red, 1/3=green,
+    # 2/3=blue, back to red at 1). Fold onto a warm<->cool axis: warm is
+    # anything within ~90 degrees of red (hue 0 or 1), cool is anything near
+    # cyan/blue (hue ~0.55-0.6). cos() over the doubled angle centered on red
+    # gives a smooth -1..1 axis without a wraparound discontinuity at hue=1.
+    warmth = math.cos(2 * math.pi * hue)
+    return {
+        "luminance": round(mean, 5),
+        "contrast": round(stddev, 5),
+        "saturation": round(sat, 5),
+        "hue": round(hue, 4),
+        "entropy": round(entropy, 4),
+        "warmth": round(warmth, 4),
+        "aspect": round(width / height, 3) if height else 0.0,
+        "log_pixels": round(math.log(max(width * height, 1)), 3),
+    }
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print("usage: sinnix-image-features <path>", file=sys.stderr)
+        return 2
+    print(json.dumps(extract(sys.argv[1])))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
