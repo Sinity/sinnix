@@ -23,7 +23,7 @@ in
       "SHIFT, R, Stop replay ring, exec, sinnix-replay-stop"
       ", P, Park background work, exec, sinnix-pressure-park auto"
       ", T, Thaw parked background work, exec, sinnix-pressure-park thaw"
-      ", M, Pulse OLED ASBL, exec, asbl-no-moar once --mode invert --duration 0.05"
+      ", M, Pulse OLED ASBL over DDC, exec, asbl-no-moar once --mode ddc --duration 0.3"
       ", H, Show display capture status, exec, sinnix-screenshot-control probe"
       ", N, Neutral display color now, exec, hyprctl hyprsunset identity"
       "SHIFT, N, Resume scheduled display color, exec, systemctl --user restart hyprsunset"
@@ -99,7 +99,13 @@ in
     "SUPER, Print, Screenshot the whole screen, exec, noctalia msg screenshot-fullscreen"
 
     # F-key bindings
-    ", F3, Pulse the OLED panel to clear burn-in dimming, exec, asbl-no-moar once --mode invert --duration 0.05"
+    # `invert` was a silent no-op here: this host runs cm = "hdr" with
+    # render:non_shader_cm = 3, so decoration:screen_shader is off the render
+    # path entirely (measured by the s6ke.1 lane, corroborated live). Pressing
+    # this key did nothing. `ddc` writes the panel's own VCP 0x10 register,
+    # which is at least a real action -- whether it resets the ASBL timer is
+    # still unverified (sinnix-70eq).
+    ", F3, Pulse the OLED panel over DDC to clear burn-in dimming, exec, asbl-no-moar once --mode ddc --duration 0.3"
     ", F6, Toggle the WeeChat scratchpad, exec, uwsm app -- ${script "toggle-scratch"} weechat"
     ", F8, Toggle the raw-log scratchpad, exec, uwsm app -- ${script "toggle-scratch"} rawlog"
     ", F9, Emergency stop for runaway builds and background work, exec, sudo -n ${scriptPkgs.nuke-builds}/bin/nuke-builds"
