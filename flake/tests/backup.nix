@@ -209,6 +209,35 @@ in
             }
           ];
 
+      sinexBeadsDrillScript =
+        rewriteBackupHook backupRuntimeEval.config.systemd.services.sinnix-borg-beads-drill.script
+          [
+            {
+              from = "/outer-realm/backup/borg-realm-v2";
+              to = "$TMPDIR/repos/borg-realm-v2";
+            }
+            {
+              from = "/run/lock/sinnix-borg.lock";
+              to = "$TMPDIR/state/sinnix-borg.lock";
+            }
+            {
+              from = "/realm/project/sinex";
+              to = "$TMPDIR/sinex-source";
+            }
+            {
+              from = "/realm/data";
+              to = "$TMPDIR/realm-data";
+            }
+            {
+              from = "${pkgs.git}/bin/git";
+              to = "$TMPDIR/mock-bin/git";
+            }
+            {
+              from = "${pkgs.dolt}/bin/dolt";
+              to = "$TMPDIR/mock-bin/dolt";
+            }
+          ];
+
       backupBorgHookRuntime = mkRuntimeCheck system {
         name = "backup-borg-hook-runtime-check";
         nativeBuildInputs = [
@@ -216,6 +245,7 @@ in
           pkgs.coreutils
           pkgs.findutils
           pkgs.gnugrep
+          pkgs.jq
           pkgs.util-linux
         ];
         script = ''
@@ -248,6 +278,7 @@ in
           source_path="''${@: -2:1}"
           target_path="''${@: -1}"
           mkdir -p "$target_path"
+          cp -a "$source_path/." "$target_path/"
           touch "$target_path/.mounted"
           printf '%s => %s\n' "$source_path" "$target_path" >> "$TMPDIR/logs/mount.log"
           EOF
@@ -274,10 +305,31 @@ in
               touch "$repo_path/config"
               ;;
             list)
-              repo="''${@: -1}"
-              repo_path="''${repo#file://}"
-              if [ -d "$repo_path/archives" ]; then
-                find "$repo_path/archives" -mindepth 1 -maxdepth 1 -type d -printf '%f\n'
+              archive_ref=""
+              for arg in "$@"; do
+                case "$arg" in
+                  *::*) archive_ref="$arg"; break ;;
+                esac
+              done
+              if [ -n "$archive_ref" ]; then
+                repo="''${archive_ref%%::*}"
+                archive="''${archive_ref##*::}"
+                repo_path="''${repo#file://}"
+                after_archive=0
+                for arg in "$@"; do
+                  if [ "$after_archive" -eq 0 ]; then
+                    [ "$arg" = "$archive_ref" ] && after_archive=1
+                    continue
+                  fi
+                  test -e "$repo_path/archives/$archive/$arg"
+                  printf '%s\n' "$arg"
+                done
+              else
+                repo="''${@: -1}"
+                repo_path="''${repo#file://}"
+                if [ -d "$repo_path/archives" ]; then
+                  find "$repo_path/archives" -mindepth 1 -maxdepth 1 -type d -printf '%f\n'
+                fi
               fi
               ;;
             create)
@@ -296,15 +348,32 @@ in
               cp -a "$source_path/." "$repo_path/archives/$archive/"
               ;;
             extract)
-              repo="$1"
-              archive="$2"
-              shift 2
-              test "$1" = "--destination"
-              destination="$2"
+              if [ "$1" = "--destination" ]; then
+                destination="$2"
+                archive_ref="$3"
+                shift 3
+                repo="''${archive_ref%%::*}"
+                archive="''${archive_ref##*::}"
+              else
+                repo="$1"
+                archive="$2"
+                archive="''${archive#::}"
+                shift 2
+                test "$1" = "--destination"
+                destination="$2"
+                shift 2
+              fi
               repo_path="''${repo#file://}"
-              archive="''${archive#::}"
               mkdir -p "$destination"
-              cp -a "$repo_path/archives/$archive/." "$destination/"
+              if [ "$#" -eq 0 ]; then
+                cp -a "$repo_path/archives/$archive/." "$destination/"
+              else
+                for archive_path in "$@"; do
+                  test -e "$repo_path/archives/$archive/$archive_path"
+                  mkdir -p "$(dirname "$destination/$archive_path")"
+                  cp -a "$repo_path/archives/$archive/$archive_path" "$destination/$archive_path"
+                done
+              fi
               ;;
             break-lock)
               ;;
@@ -332,21 +401,40 @@ in
           exit 1
           EOF
 
+          cat > "$TMPDIR/mock-bin/git" <<'EOF'
+          #!${pkgs.bash}/bin/bash
+          set -euo pipefail
+          test "$1" = "-C"
+          test "$3" = "rev-parse"
+          test "$4" = "HEAD"
+          printf '%s\n' synthetic-source-git-head
+          EOF
+
+          cat > "$TMPDIR/mock-bin/dolt" <<'EOF'
+          #!${pkgs.bash}/bin/bash
+          set -euo pipefail
+          printf '%s\n' '{"commits":[{"commit_hash":"synthetic-dolt-commit"}]}'
+          EOF
+
           chmod +x \
             "$TMPDIR/mock-bin/mountpoint" \
             "$TMPDIR/mock-bin/mount" \
             "$TMPDIR/mock-bin/umount" \
             "$TMPDIR/mock-bin/borg" \
             "$TMPDIR/mock-bin/btrfs" \
-            "$TMPDIR/mock-bin/pgrep"
+            "$TMPDIR/mock-bin/pgrep" \
+            "$TMPDIR/mock-bin/git" \
+            "$TMPDIR/mock-bin/dolt"
 
           export PATH="$TMPDIR/mock-bin:$PATH"
 
           mkdir -p \
             "$TMPDIR/realm-snapshots/realm.2026-04-02T010000" \
-            "$TMPDIR/realm-snapshots/realm.2026-04-02T011500" \
+            "$TMPDIR/realm-snapshots/realm.2026-04-02T011500/project/sinex/.beads/dolt/.dolt" \
             "$TMPDIR/persist-snapshots/persist.2026-04-02T010000" \
             "$TMPDIR/persist-snapshots/persist.2026-04-02T011500"
+          printf '{"id":"synthetic-bead"}\n' > "$TMPDIR/realm-snapshots/realm.2026-04-02T011500/project/sinex/.beads/issues.jsonl"
+          printf 'synthetic Dolt state\n' > "$TMPDIR/realm-snapshots/realm.2026-04-02T011500/project/sinex/.beads/dolt/.dolt/HEAD"
 
           cat > "$TMPDIR/run-realm-hook.sh" <<'EOF'
           #!${pkgs.bash}/bin/bash
@@ -372,15 +460,23 @@ in
           ${sinexBlobBorgScript}
           EOF
 
+          cat > "$TMPDIR/run-sinex-beads-drill.sh" <<'EOF'
+          #!${pkgs.bash}/bin/bash
+          set -euo pipefail
+          ${sinexBeadsDrillScript}
+          EOF
+
           chmod +x \
             "$TMPDIR/run-realm-hook.sh" \
             "$TMPDIR/run-persist-hook.sh" \
             "$TMPDIR/run-missing-realm-hook.sh" \
-            "$TMPDIR/run-sinex-blob-backup.sh"
+            "$TMPDIR/run-sinex-blob-backup.sh" \
+            "$TMPDIR/run-sinex-beads-drill.sh"
 
           "$TMPDIR/run-realm-hook.sh"
           "$TMPDIR/run-persist-hook.sh"
           "$TMPDIR/run-sinex-blob-backup.sh"
+          "$TMPDIR/run-sinex-beads-drill.sh"
 
           grep -q "$TMPDIR/realm-snapshots/realm.2026-04-02T011500 => $TMPDIR/bind/realm" "$TMPDIR/logs/mount.log"
           grep -q "$TMPDIR/persist-snapshots/persist.2026-04-02T011500 => $TMPDIR/bind/persist" "$TMPDIR/logs/mount.log"
@@ -396,6 +492,17 @@ in
           cmp "$TMPDIR/live-cas/objects/ab/cdef" "$TMPDIR/restore/objects/ab/cdef"
           grep -q "create .* $TMPDIR/live-cas" "$TMPDIR/logs/borg.log"
           ! grep -q "/realm/sinex/state/blob-repository" "$TMPDIR/logs/borg.log"
+          beads_drill_log="$(find "$TMPDIR/realm-data" -name borg_beads_drill.jsonl -print -quit)"
+          test -n "$beads_drill_log"
+          jq -e '
+            .type == "sinex_beads_restore_drill" and
+            .archive == "realm-realm.2026-04-02T011500" and
+            .source_git_head == "synthetic-source-git-head" and
+            .dolt_commit == "synthetic-dolt-commit" and
+            .ok == true
+          ' "$beads_drill_log" >/dev/null
+          grep -Fq "extract --destination $TMPDIR" "$TMPDIR/logs/borg.log"
+          grep -Fq "project/sinex/.beads/dolt project/sinex/.beads/issues.jsonl" "$TMPDIR/logs/borg.log"
 
           set +e
           "$TMPDIR/run-missing-realm-hook.sh" > "$TMPDIR/missing-realm.log" 2>&1
