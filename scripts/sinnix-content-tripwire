@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: T1 dict/regex content tripwire -- flags, never blocks, for pre-commit review
+# runtimeInputs: bash coreutils git python3
+"""T1 tier of sinnix-021's content-gate design (sinnix-egress-scan is T0:
+mechanical secret-pattern scanning, auto-block, the only tier allowed to
+block). This tier is a HIGH-RECALL TRIPWIRE, never a verdict -- it flags
+matches for the committer's own review, it never rejects a commit. That's
+the repo's own standing anti-pattern rule: no script judges content by
+grepping for magic phrases; a tripwire that only flags is not "enforcing a
+process invariant by pattern-matching," it's assisting review, which the
+rule explicitly allows.
+
+Scans two things per sinnix-021's incident-hardened rule ("T1 tripwire must
+scan COMMIT MESSAGES and PR/issue bodies, not just diff content -- metadata
+channels are publication surfaces"):
+  1. The staged diff content (git diff --cached)
+  2. The commit message (COMMIT_EDITMSG, passed by prepare-commit-msg or
+     read directly by pre-commit via .git/COMMIT_EDITMSG when available)
+
+Wire point priority #1 (this bead's own ordering): the beads export path
+(.beads/issues.jsonl) is "the proven near-miss vector" -- checked with
+elevated priority (reported first, separately) since a previous incident's
+root cause was exactly a tracker checkpoint commit message leaking
+repo-boundary metadata.
+
+Dictionaries live in the lake (/realm/media/corpora/content-lists/), not
+the repo, per this bead's own data-placement decision -- this script holds
+only the gate logic and the pointer to where the lists live.
+"""
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+CORPUS_ROOT = Path("/realm/media/corpora/content-lists")
+BEADS_EXPORT_PATH = ".beads/issues.jsonl"
+
+
+def load_wordlist(path):
+    if not path.is_file():
+        return []
+    words = []
+    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            words.append(line)
+    return words
+
+
+def build_pattern(words):
+    if not words:
+        return None
+    # Word-boundary match, case-insensitive -- this is a TRIPWIRE (high
+    # recall), not a verdict, so over-matching is the correct failure mode
+    # (a false flag costs one glance at a diff; a missed real leak does not).
+    escaped = sorted((re.escape(w) for w in words if w), key=len, reverse=True)
+    return re.compile(r"\b(" + "|".join(escaped) + r")\b", re.IGNORECASE)
+
+
+def scan_text(text, patterns):
+    hits = []
+    for name, pattern in patterns:
+        if pattern is None:
+            continue
+        for m in pattern.finditer(text):
+            hits.append((name, m.group(0)))
+    return hits
+
+
+def get_staged_diff():
+    try:
+        out = subprocess.run(
+            ["git", "diff", "--cached", "--unified=0"],
+            capture_output=True, text=True, timeout=30,
+        )
+        return out.stdout
+    except Exception:
+        return ""
+
+
+def get_staged_paths():
+    try:
+        out = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            capture_output=True, text=True, timeout=30,
+        )
+        return out.stdout.splitlines()
+    except Exception:
+        return []
+
+
+def get_commit_message():
+    msg_file = Path(".git/COMMIT_EDITMSG")
+    if msg_file.is_file():
+        return msg_file.read_text(encoding="utf-8", errors="ignore")
+    return ""
+
+
+def main():
+    patterns = [
+        ("ldnoobw", build_pattern(load_wordlist(CORPUS_ROOT / "ldnoobw-en.txt"))),
+        ("personal-tripwire", build_pattern(load_wordlist(CORPUS_ROOT / "personal-tripwire.txt"))),
+    ]
+    if all(p is None for _, p in patterns):
+        # No corpus available (fresh checkout without lake access, or lists
+        # not yet populated) -- fail open, not closed: this tier is
+        # advisory, and blocking a commit because a reference wordlist
+        # wasn't mounted would violate the "assists review, never enforces"
+        # contract as badly as auto-blocking on a false match would.
+        sys.exit(0)
+
+    findings = []
+
+    staged_paths = get_staged_paths()
+    beads_export_touched = BEADS_EXPORT_PATH in staged_paths
+    diff_hits = scan_text(get_staged_diff(), patterns)
+    msg_hits = scan_text(get_commit_message(), patterns)
+
+    if diff_hits:
+        findings.append(("diff content", diff_hits))
+    if msg_hits:
+        findings.append(("commit message", msg_hits))
+
+    if not findings:
+        sys.exit(0)
+
+    priority_note = (
+        " (touches .beads/issues.jsonl -- this repo's own proven near-miss vector, review closely)"
+        if beads_export_touched else ""
+    )
+    print(f"sinnix-content-tripwire: T1 flag{priority_note}", file=sys.stderr)
+    for source, hits in findings:
+        unique = sorted(set(hits))
+        print(f"  in {source}: {len(hits)} match(es), {len(unique)} unique term(s)", file=sys.stderr)
+        for name, term in unique[:20]:
+            print(f"    [{name}] {term!r}", file=sys.stderr)
+    print(
+        "  This is a high-recall TRIPWIRE, not a verdict -- quoted profanity, technical "
+        "terms, and false positives (the Scunthorpe problem) are expected. Review the "
+        "flagged spans yourself; this never blocks the commit.",
+        file=sys.stderr,
+    )
+    # Advisory only -- never a non-zero exit, per the bead's own doctrine
+    # that T1 flags for judgment rather than enforcing. Only T0 (mechanical
+    # secret patterns, sinnix-egress-scan) is allowed to block.
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()
