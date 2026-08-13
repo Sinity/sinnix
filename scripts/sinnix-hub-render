@@ -45,8 +45,10 @@ SCHEMA = "sinnix-hub-manifest-v1"
 LEASE_SCHEMA = "sinnix-heavy-lease-v1"
 
 # Transient scopes the estate creates on purpose. Agent-gateway jobs carry a
-# job id and are drivable through the reducer; sinnix-scope placements are
-# anonymous ad-hoc commands and are read-only here (see WORKLOAD_CONTROL_NOTE).
+# job id and are drivable through the reducer via the job_id target; plain
+# sinnix-scope placements are drivable too (sinnix-pl37), via the reducer's
+# scope target -- name-shape plus live-state admission, stop only. See
+# WORKLOAD_CONTROL_NOTE for what remains genuinely out of reach.
 AGENT_JOB_PREFIX = "sinnix-agent-job-"
 SCOPE_PREFIX = "sinnix-"
 
@@ -646,10 +648,11 @@ def log_card() -> str:
 # --------------------------------------------------------------------------
 
 WORKLOAD_CONTROL_NOTE = (
-    "Ad-hoc <code>sinnix-scope</code> placements are shown but not controllable "
-    "from here: the reducer's action API only accepts attested runtime-inventory "
-    "units and attested agent jobs, and an anonymous transient scope is neither. "
-    "Stop one from the terminal that owns it."
+    "Ad-hoc <code>sinnix-scope</code> placements can be stopped from here (the "
+    "reducer admits a scope target by name-shape plus live-state, not "
+    "pre-registration) but only stopped, not restarted or reconfigured -- a "
+    "scope has no service definition to relaunch from. Escalating past a plain "
+    "stop, if a placement ignores SIGTERM, still means the terminal that owns it."
 )
 
 
@@ -947,6 +950,10 @@ def scope_block(
         ]
         if entry.get("slice"):
             meta.append(f"<code>{esc(entry['slice'])}</code>")
+        controls = (
+            f"<button class=\"act danger\" onclick=\"act('stop','scope',"
+            f"'{esc(entry['unit'])}',this)\">stop</button>"
+        )
 
     elapsed = entry.get("elapsed")
     if elapsed is not None and elapsed > LONG_LIVED_SECONDS:

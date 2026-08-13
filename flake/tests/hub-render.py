@@ -225,6 +225,69 @@ inactive_controls = hub.lifecycle_controls(
 check("an inactive unit offers start alone", inactive_controls.count("<button"), 1)
 check("an inactive unit is not offered stop", "'stop'" in inactive_controls, False)
 
+# sinnix-pl37: a plain sinnix-scope placement (no job_id) is offered a stop
+# button targeting the reducer's scope admission path; a gateway-job scope
+# (job_id set, manifest attested) keeps its existing interrupt control and is
+# NOT offered a redundant scope-stop.
+plain_scope = hub.scope_block(
+    {
+        "unit": "sinnix-build-123-456.scope",
+        "manager": "user",
+        "job_id": None,
+        "class": "build",
+        "slice": "build.slice",
+        "memory": None,
+        "memory_high": None,
+        "memory_max": None,
+        "elapsed": 5.0,
+        "command": "xtask test",
+        "cwd": "/realm/project/sinex",
+        "project": "sinex",
+    },
+    {},
+    {},
+)
+check(
+    "a plain scope offers a stop button targeting its own unit name",
+    "act('stop','scope','sinnix-build-123-456.scope'" in plain_scope,
+    True,
+)
+job_scope = hub.scope_block(
+    {
+        "unit": "sinnix-agent-job-abc.scope",
+        "manager": "user",
+        "job_id": "abc",
+        "class": None,
+        "slice": "agent.slice",
+        "memory": None,
+        "memory_high": None,
+        "memory_max": None,
+        "elapsed": 5.0,
+        "command": "claude",
+        "cwd": None,
+        "project": None,
+    },
+    {
+        "abc": {
+            "backend": "claude",
+            "model": "sonnet",
+            "worktree": "/realm/worktrees/abc",
+            "declared": {},
+        }
+    },
+    {},
+)
+check(
+    "an attested gateway job offers interrupt",
+    "act('interrupt','job_id','abc'" in job_scope,
+    True,
+)
+check(
+    "an attested gateway job is not also offered a scope-stop button",
+    "act('stop','scope'" in job_scope,
+    False,
+)
+
 if failures:
     for failure in failures:
         print(f"FAIL {failure}", file=sys.stderr)
