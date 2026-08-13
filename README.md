@@ -156,7 +156,7 @@ the repository.
 | `dots/`     | Home Manager configuration and shared agent tooling                                         |
 | `scripts/`  | packaged operational tools with declared runtime dependencies                               |
 | `pkgs/`     | larger standalone packages maintained with the system                                       |
-| `docs/`     | current subsystem, bootstrap, and incident documentation                                    |
+| `docs/`     | current subsystem and bootstrap documentation                                               |
 
 ## Further reading
 
