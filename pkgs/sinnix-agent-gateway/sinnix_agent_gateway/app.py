@@ -11,6 +11,7 @@ from mcp.types import ToolAnnotations
 from .artifacts import ArtifactService
 from .audit import AuditService
 from .capabilities import Capability, Principal
+from .captures import CaptureService
 from .config import GatewayConfig
 from .jobs import JobService
 from .observe import ObserveService
@@ -50,6 +51,7 @@ class Runtime:
     audit: AuditService
     jobs: JobService
     observe: ObserveService
+    captures: CaptureService
 
     @classmethod
     def create(cls, config: GatewayConfig, profile: str) -> "Runtime":
@@ -64,6 +66,7 @@ class Runtime:
             audit=AuditService(config, principal),
             jobs=JobService(config, principal, artifacts),
             observe=ObserveService(config, principal),
+            captures=CaptureService(config, principal),
         )
 
     def execute(self, operation: str, callback: Callable[[], T]) -> T:
@@ -225,6 +228,27 @@ def create_server(config: GatewayConfig, profile: str) -> MCPServer:
     def audit_verify() -> dict[str, Any]:
         """Verify the complete tamper-evident audit hash chain."""
         return runtime.execute("audit_verify", runtime.audit.verify)
+
+    if Capability.CAPTURE_READ in runtime.principal.capabilities:
+
+        @mcp.tool(title="List visible capture lanes", annotations=READ_ONLY_TOOL)
+        def capture_lanes() -> dict[str, Any]:
+            """List the capture-data lanes this profile may query (sinnix-lpuv:
+            per-pipe permission model -- not every lane that exists on disk,
+            only the ones this connection's profile is allowed to see)."""
+            return runtime.execute("capture_lanes", runtime.captures.lanes_visible)
+
+        @mcp.tool(title="Query capture data", annotations=READ_ONLY_TOOL)
+        def capture_query(
+            lanes: list[str] | None = None, since: float = 0.0, limit: int = 100
+        ) -> dict[str, Any]:
+            """Query sinnix-capture-v1 envelope records. `lanes` omitted means
+            every lane this profile is allowed to see (never every lane on
+            disk); an explicit lane this profile isn't allowed to query is a
+            policy error, not a silent drop."""
+            return runtime.execute(
+                "capture_query", lambda: runtime.captures.query(lanes, since, limit)
+            )
 
     if Capability.JOB_START in runtime.principal.capabilities:
 

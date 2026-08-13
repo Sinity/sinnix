@@ -39,6 +39,8 @@ class GatewayConfig:
     observe_command: str = "sinnix-observe"
     max_result_bytes: int = 262_144
     approved_manifest_hash: str | None = None
+    capture_command: str = "sinnix-capture"
+    captures_root: Path = Path("/realm/data/captures")
 
     @classmethod
     def load(cls, path: Path | None) -> "GatewayConfig":
@@ -68,6 +70,8 @@ class GatewayConfig:
             observe_command=raw.get("observeCommand", "sinnix-observe"),
             max_result_bytes=int(raw.get("maxResultBytes", 262_144)),
             approved_manifest_hash=raw.get("approvedManifestHash"),
+            capture_command=raw.get("captureCommand", "sinnix-capture"),
+            captures_root=Path(raw.get("capturesRoot", "/realm/data/captures")),
         )
 
     def initialize_state(self) -> None:
