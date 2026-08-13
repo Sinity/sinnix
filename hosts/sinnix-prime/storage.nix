@@ -23,6 +23,10 @@ let
     "embeddings.db"
     "user.db"
     "ops.db"
+    # Empty since 2026-07-17 -- daemon events live in ops.db. Symlinked
+    # anyway so a future write lands on the subvol, but do not add it to a
+    # BACKUP tier: it archives as a ~71-byte artifact that reads as coverage
+    # while covering nothing. Confirmed 0 bytes on 2026-08-13.
     "daemon_events.db"
   ];
   # Steady-state sanity check plus fresh-bootstrap symlink creation: each
