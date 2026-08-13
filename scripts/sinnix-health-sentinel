@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Emit deduplicated runtime health transitions from inventory declarations
-# runtimeInputs: bash coreutils findutils gawk jq systemd
+# runtimeInputs: bash coreutils findutils gawk jq systemd sudo libnotify
 set -euo pipefail
 
 inventory=/etc/sinnix/runtime-inventory.json
@@ -35,6 +35,26 @@ chmod 0664 "$state" "$output"
 # forever, since emit() only ever touches keys it currently sees).
 emitted_keys=()
 
+# sinnix-<gap-id>: emit() previously only ever wrote to health-transitions.jsonl
+# and health-sentinel-state.json -- nothing in the repo ever read either file.
+# A real incident (sinnix-3l3p, the mic silently dead for ~15h) was caught
+# correctly and promptly here (stale transition fired within ~1min of crossing
+# the threshold) and then sat unconsumed in the log for the entire outage,
+# because detection never reached the operator. notify_desktop() closes that
+# gap the same way modules/backup.nix's borg-verify failure path already does
+# for a different alert class: bridge into every active graphical session's
+# D-Bus bus (a system-level oneshot has no session bus of its own).
+notify_desktop() {
+  local urgency="$1" title="$2" body="$3" uid bus
+  for bus in /run/user/*/bus; do
+    [ -S "$bus" ] || continue
+    uid="$(basename "$(dirname "$bus")")"
+    sudo -u "#$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=$bus" \
+      notify-send --urgency="$urgency" --app-name="sinnix-health-sentinel" "$title" "$body" \
+      2>/dev/null || true
+  done
+}
+
 emit() {
   local key="$1" type="$2" unit="$3" status="$4" evidence="$5" previous
   emitted_keys+=("$key")
@@ -48,6 +68,15 @@ emit() {
     --arg type "$type" --arg unit "$unit" --arg status "$status" --arg evidence "$evidence" \
     '{schema:"sinnix-health-transition-v1",ts:$ts,type:$type,unit:$unit,status:$status,ok:($status == "healthy"),evidence:$evidence}' \
     >> "$output"
+  if [ "$status" = "healthy" ]; then
+    # Only notify a recovery if we're the ones who ever announced the outage
+    # (skip notifying on first-ever "healthy" emit for a key, which is not a
+    # recovery -- previous being empty means this key has never transitioned
+    # before, i.e. steady-state startup, not "it came back").
+    [ -n "$previous" ] && notify_desktop normal "sinnix: $unit recovered" "$type -> healthy ($evidence)"
+  else
+    notify_desktop critical "sinnix: $unit $status" "$type: $evidence"
+  fi
 }
 
 if [ -n "$failure_unit" ]; then
