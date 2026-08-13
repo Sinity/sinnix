@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Detect and auto-restore the FiiO E10 DAC's silent profile-off dropout; surface the unrecoverable USB-bandwidth failure mode
-# runtimeInputs: coreutils pipewire jq libnotify
+# runtimeInputs: coreutils gawk gnugrep pipewire wireplumber jq libnotify
 
 # sinnix-nz1c: two live audio-path failures, both presenting as "audio is
 # broken / weirdly quiet" with no obvious cause. This watchdog runs on a
