@@ -112,6 +112,58 @@
       };
       apiKeyLiteral = "sk-local";
     };
+
+    # sinnix-z7v Hermes power-up, profiles 2/3 of 3 (director deferred — see
+    # below). Both point at the roster's existing MoE reasoning tiers, NOT
+    # true base models: a real local base-model pull needs a verified
+    # ollama/GGUF source (the only community tag found, kimsan0622/Qwen3-8B-
+    # Base, is unverified and a wrong tag fails a boot-time pull loudly, not
+    # silently — real risk, not laziness) and the alternative (Hyperbolic's
+    # Llama-3.1-405B-BASE API, the only confirmed big-base-model API per
+    # 2026-08-11 recon) needs a funded external account this module can't
+    # create. Both are legitimate blockers, not deferred-for-convenience;
+    # promote either lane in place here once one is resolved.
+    sampler = {
+      # Base-model exploration profile: minimal toolset (a sampler explores
+      # completions, it doesn't need web/file/delegation), MoE reasoning
+      # tier standing in for true base access until the above resolves.
+      toolsets = [ "hermes-cli" ];
+      model = {
+        default = "local-thinker";
+        provider = "custom";
+        base_url = "http://127.0.0.1:4000/v1";
+      };
+      apiKeyLiteral = "sk-local";
+      voiceEnabled = false;
+    };
+
+    oracle = {
+      # Research twin wired to nx0's evidence-and-verification pipeline
+      # (dots/_ai/workflows/deep-research.mjs) via the "research" MCP tier
+      # and delegation toolset — nx0 runs as a Workflow the operator invokes
+      # separately; this profile is oracle's own interactive counterpart,
+      # matching research's shape since both need the full evidence stack.
+      toolsets = [
+        "web"
+        "browser"
+        "file"
+        "skills"
+        "todo"
+        "memory"
+        "session_search"
+        "code_execution"
+        "delegation"
+        "clarify"
+      ];
+      mcpProfile = "browser";
+      reasoningEffort = "high";
+      delegation = {
+        max_iterations = 60;
+        max_concurrent_children = 6;
+        max_spawn_depth = 1;
+      };
+      voiceEnabled = false;
+    };
   };
 
   # Claude Code variants (mkClaudeCodeWrapper). `binName` is data, not
