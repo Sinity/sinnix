@@ -136,6 +136,34 @@ ensure_app_grants() {
   adb_any shell cmd deviceidle whitelist "+$APP_ID" >/dev/null 2>&1 || true
 }
 
+# Drain ambient chunks over adb.
+#
+# The rsync path needs the tailnet up and Termux's sshd running, and both are
+# routinely down at once -- the tailnet needs its own restart after a reboot,
+# and sshd only runs while Termux does. That is the same dependency the capture
+# app was written to escape, and leaving it in the drain means audio the app
+# reliably records still cannot reach the lake. adb is a second transport with
+# a different failure mode: over USB it works when the network does not.
+#
+# Copies only what the lake does not already hold, and never deletes on the
+# phone -- the rsync path's `--ignore-existing` semantics, kept deliberately so
+# whichever transport ran last does not change what the other one will do.
+drain_ambient_adb() {
+  local dest name pulled=0
+  dest="$LAKE_ROOT/ambient"
+  mkdir -p "$dest"
+  while IFS= read -r name; do
+    case "$name" in
+      '' | *.part | status.json*) continue ;;
+    esac
+    [ -e "$dest/$name" ] && continue
+    if adb_any pull "/sdcard/sinnix-ambient/$name" "$dest/$name" >/dev/null 2>&1; then
+      pulled=$((pulled + 1))
+    fi
+  done < <(adb_any shell 'ls /sdcard/sinnix-ambient/' 2>/dev/null | tr -d '\r')
+  echo "ambient: drained $pulled new chunk(s) over adb"
+}
+
 usage() {
   cat <<'EOF'
 sinnix-phone <command>
@@ -447,8 +475,15 @@ pull)
   # so "closed" is an explicit state here rather than something inferred
   # from mtime ordering. status.json is device-side liveness, not lake
   # content, and must never be drained -- see the exclusions below.
-  rsync -av --ignore-existing --exclude='*.part' --exclude='status.json*' -e "$rsync_ssh" \
-    "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/sinnix-ambient/" "$LAKE_ROOT/ambient/" 2>/dev/null
+  if ssh_phone 'true' >/dev/null 2>&1; then
+    rsync -av --ignore-existing --exclude='*.part' --exclude='status.json*' -e "$rsync_ssh" \
+      "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/sinnix-ambient/" "$LAKE_ROOT/ambient/" 2>/dev/null
+  elif adb_any get-state >/dev/null 2>&1; then
+    echo "ssh unavailable; draining ambient over adb instead"
+    drain_ambient_adb
+  else
+    echo "no transport to the phone: ambient chunks stay on the device" >&2
+  fi
   set -e
   du -sh "$LAKE_ROOT" 2>/dev/null
   "$0" ambient-audit
