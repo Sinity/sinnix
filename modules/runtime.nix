@@ -344,11 +344,9 @@ in
             # Long-running consumers of a socket-proxied surface MUST speak to
             # the publicEndpoint: traffic against the private backend port is
             # invisible to the proxy's idle timer, so mid-work the proxy
-            # idle-exits and tears the backend (and the consumer) down with it
-            # (observed 2026-08-11: ollama-model-loader killed at 0 bytes,
-            # twice). Declaring the consumer here renders its environment
-            # override automatically instead of leaving the fix as per-module
-            # folklore.
+            # idle-exits and tears the backend (and the consumer) down with it.
+            # Declaring the consumer here renders its environment override
+            # automatically.
             consumers = lib.mkOption {
               type = lib.types.listOf (
                 lib.types.submodule {
@@ -509,16 +507,14 @@ in
 
       # The failure bridge is a drop-in, not a unit body, because a user
       # surface may be declared in either of two option namespaces that never
-      # merge: home-manager's `systemd.user.services` (which writes
-      # ~/.config/systemd/user) or the NixOS-level `systemd.user.services`
-      # (which writes /etc/systemd/user). Injecting OnFailure as a unit body
-      # only merges for the former; for the latter home-manager emitted a
-      # standalone `[Unit] OnFailure=` file with no [Service] section, and
-      # ~/.config outranks /etc in the user manager's search path -- so the
-      # real unit became unreachable and the manager reported
-      # LoadState=bad-setting. sinnix-audio-watchdog and sinnix-phone-drain
-      # were both silently dead this way. A drop-in merges with whichever
-      # fragment exists, so the declaring namespace stops mattering.
+      # merge: home-manager's `systemd.user.services` (~/.config/systemd/user)
+      # or the NixOS-level `systemd.user.services` (/etc/systemd/user).
+      # Injecting OnFailure as a unit body merges only for the former; for the
+      # latter home-manager emits a standalone `[Unit] OnFailure=` file with no
+      # [Service] section, and ~/.config outranks /etc in the user manager's
+      # search path — the real unit becomes unreachable with
+      # LoadState=bad-setting. A drop-in merges with whichever fragment exists,
+      # so the declaring namespace stops mattering.
       xdg.configFile = lib.mapAttrs' (
         _name: surface:
         lib.nameValuePair "systemd/user/${surface.unit}.d/50-sinnix-health-transition.conf" {

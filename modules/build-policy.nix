@@ -1,7 +1,7 @@
 # Build and Nix daemon policy
 #
-# Keeps local builds bounded, cache restores parallel but not explosive, and
-# write-heavy scratch on root-backed /var/cache instead of /tmp or /realm.
+# Bounds local builds, keeps cache restores parallel, and puts write-heavy
+# build scratch on root-backed /var/cache rather than /tmp or /realm.
 {
   lib,
   config,
@@ -48,9 +48,9 @@ in
         ];
         netrc-file = "/etc/nix/netrc";
 
-        # Bounded parallelism: nix-build.slice's 22G/28G memory ceiling is
-        # the overcommit guard (the daemon and every build it spawns run
-        # inside it — see the nix-daemon Slice= below), not serialization.
+        # The overcommit guard is nix-build.slice's memory ceiling (the daemon
+        # and every build it spawns run inside it — see Slice= below), not
+        # these numbers.
         max-jobs = 4;
         cores = 16;
         builders-use-substitutes = true;
@@ -81,9 +81,8 @@ in
       gc = {
         automatic = true;
         dates = "weekly";
-        # `--delete-generations +N` is a nix-env flag, not nix-collect-garbage's —
-        # this silently failed every weekly run since at least 2026-07-04
-        # ("unrecognised flag"), letting 141 generations accumulate unbounded.
+        # `--delete-generations +N` is a nix-env flag; nix-collect-garbage
+        # rejects it as an unrecognised flag and the whole run silently fails.
         options = "--delete-older-than 30d";
       };
 
@@ -93,12 +92,10 @@ in
       };
     };
 
-    # sccache is intentionally NOT wired as RUSTC_WRAPPER. The only Rust
-    # consumers on this host (sinex, intercept-bounce, scribe-tap) use
-    # incremental compilation for fast warm rebuilds; sccache bypasses
-    # incremental and measured ~0 benefit (even slower on cold builds — see
-    # sinex .agent/scratch/048). Re-add here if a non-incremental Rust workload
-    # ever needs cross-checkout caching.
+    # sccache is not wired as RUSTC_WRAPPER: it bypasses incremental
+    # compilation, which every Rust consumer here relies on, and measured no
+    # benefit. Only worth revisiting for a non-incremental Rust workload
+    # needing cross-checkout caching.
 
     systemd.tmpfiles.rules = lib.mkAfter [
       "d /var/cache/nix-build 0755 root root -"
@@ -130,12 +127,10 @@ in
         requires = [ "sinnix-root-cache-attrs.service" ];
         after = [ "sinnix-root-cache-attrs.service" ];
         serviceConfig = {
-          # Place the daemon — and all build processes it spawns — into
-          # nix-build.slice so the slice's resource policy applies. The
-          # slice (flake/data/runtime-defaults.nix) is the single source of
-          # CPU/IO weights, the 22G/28G memory ceilings, and the PSI-scoped
-          # oomd kill policy; do not duplicate caps here (sinnix-3gb removed
-          # the unit-level MemoryHigh/Max copy that had drifted alongside).
+          # Places the daemon — and every build process it spawns — under the
+          # slice's resource policy. flake/data/runtime-defaults.nix is the
+          # single source of its CPU/IO weights, memory ceilings, and oomd
+          # policy; do not duplicate caps here.
           Slice = "nix-build.slice";
         };
       };

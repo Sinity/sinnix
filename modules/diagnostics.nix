@@ -1,10 +1,7 @@
 # System diagnostics and introspection tools
 #
-# Provides:
-# - Hardware introspection (hwinfo, lshw, smartmontools)
-# - Performance analysis (machine-experiment-run, hogkill, asbl-no-moar)
-# - Boot metrics capture (systemd-analyze, dmesg)
-# - Persistent journald logging with compression
+# Hardware introspection and performance-analysis tooling, boot-metrics
+# capture, journal indexing, and persistent journald logging.
 {
   pkgs,
   lib,
@@ -67,52 +64,44 @@ in
       ]
     );
 
-    # Logging and metrics (always on)
-    # Note: owned by user since this is for boot-metrics capture, not journald itself
+    # User-owned: these hold boot-metrics captures, not journald's own store.
     systemd.tmpfiles.rules = [
       "d ${journaldBaseDir} 0750 ${username} users -"
       "d ${bootMetricsDir} 0750 ${username} users -"
       "d ${journaldBaseDir}/index 0750 ${username} users -"
     ];
 
-    # Cross-host default. sinnix-prime overrides this wholesale via mkForce
-    # (hosts/sinnix-prime/default.nix) with tighter wear-endurance-tuned
-    # values, so this block is inert there by design — it remains the live
-    # policy on hosts (e.g. sinnix-ethereal) that don't override it. Not
-    # dead/duplicate config; each host owns its own value here deliberately.
+    # Cross-host default; sinnix-prime replaces it wholesale via mkForce with
+    # wear-endurance-tuned values.
     services.journald.extraConfig = ''
-      # Storage configuration
       Storage=persistent
       Compress=yes
 
-      # Corruption resilience: sync every 30s (default 5min), smaller files
-      # On power loss, at most 30s of logs lost; corruption affects max 100MB
+      # Corruption resilience: sync every 30s (default 5min) and keep files
+      # small, so power loss costs at most 30s of logs and 100MB of blast
+      # radius.
       SyncIntervalSec=30s
       SystemMaxFileSize=100M
 
-      # Size limits: Large allocation for long-term retention
       SystemMaxUse=50G
       SystemKeepFree=10G
 
-      # Time-based retention: DISABLED - size is the only limit
+      # Size is the only retention limit.
       MaxRetentionSec=0
 
-      # Rotate files daily to limit blast radius of corruption
+      # Rotate daily to limit the blast radius of corruption.
       MaxFileSec=1day
 
-      # Rate limiting: aggressive limits to prevent spam
       RateLimitIntervalSec=30s
       RateLimitBurst=500
 
-      # Forwarding to syslog disabled (we use journald native)
       ForwardToSyslog=no
     '';
 
     systemd.services.capture-boot-metrics = {
       description = "Capture boot metrics";
-      # Must wait for boot to fully complete — systemd-analyze requires
-      # FinishTimestampMonotonic != 0, which is only set after all boot
-      # services finish. With slow nofail mounts this can take 2+ min.
+      # systemd-analyze needs FinishTimestampMonotonic != 0, only set once
+      # every boot service has finished (2+ min with slow nofail mounts).
       after = [
         "systemd-journald.service"
         "multi-user.target"

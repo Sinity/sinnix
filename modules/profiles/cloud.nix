@@ -5,8 +5,7 @@
 # console, and firewall posture. Per-host configs still pick the actual
 # services (sinex role, tailscale tags, backups, etc.).
 #
-# Inert until explicitly enabled per host. Prime keeps `isDesktop = true`
-# and never imports this.
+# Inert until explicitly enabled per host.
 {
   config,
   lib,
