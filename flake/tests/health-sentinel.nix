@@ -69,13 +69,27 @@
             # The sidecar index carries no payload at all; the check must skip
             # it rather than read it as a lane full of degenerate records.
             printf '{"ts":1,"seq":1,"file":"live-20260813.jsonl"}\n' >> "$TMPDIR/payload-live/live-index.jsonl"
+            # Upstream-liveness probes (sinnix-pev0): staleness alone cannot
+            # tell "legitimately quiet" apart from "upstream publisher never
+            # registered". probe-absent starts with no marker file (exit 1,
+            # confirmed absent) and gains one partway through the run (exit
+            # 0, recovered) -- proving the absent state is a real transition,
+            # not just a value that happens to print once. probe-unknown
+            # always exits a code that is neither 0 nor 1 (simulating a
+            # probe that itself can't determine the answer -- a bus that's
+            # gone, malformed output). probe-timeout's command outlives its
+            # 1-second budget so `timeout` kills it (exit 124); a probe that
+            # times out MUST still surface as unknown, never as healthy by
+            # default -- that silent-success failure mode is the entire bug
+            # class this feature exists to close.
+            probe_marker="$TMPDIR/probe-marker"
             cat > "$TMPDIR/inventory.json" <<EOF_INVENTORY
-            {"captures":[{"name":"fixture","path":"$TMPDIR/capture","expectedCadenceSeconds":60},{"name":"ed-stale","path":"$TMPDIR/capture-ed-stale","expectedCadence":"event-driven","expectedStaleAfterSeconds":60},{"name":"ed-fresh","path":"$TMPDIR/capture-ed-fresh","expectedCadence":"event-driven","expectedStaleAfterSeconds":600},{"name":"payload-dead","path":"$TMPDIR/payload-dead","requiredPayloadFields":["window_class","geometry.width","monitor","note"]},{"name":"payload-live","path":"$TMPDIR/payload-live","requiredPayloadFields":["window_class","geometry.width","monitor","note"]}],"mounts":[{"path":"/fixture","warnPct":80,"failPct":95}],"observedServices":[{"kind":"service","manager":"system","unit":"fixture.service"}]}
+            {"captures":[{"name":"fixture","path":"$TMPDIR/capture","expectedCadenceSeconds":60},{"name":"ed-stale","path":"$TMPDIR/capture-ed-stale","expectedCadence":"event-driven","expectedStaleAfterSeconds":60},{"name":"ed-fresh","path":"$TMPDIR/capture-ed-fresh","expectedCadence":"event-driven","expectedStaleAfterSeconds":600},{"name":"payload-dead","path":"$TMPDIR/payload-dead","requiredPayloadFields":["window_class","geometry.width","monitor","note"]},{"name":"payload-live","path":"$TMPDIR/payload-live","requiredPayloadFields":["window_class","geometry.width","monitor","note"]},{"name":"probe-absent","path":"$TMPDIR/capture-ed-fresh","livenessProbe":{"command":"[ -e \"$probe_marker\" ] && exit 0 || exit 1","timeoutSeconds":5}},{"name":"probe-unknown","path":"$TMPDIR/capture-ed-fresh","livenessProbe":{"command":"exit 9","timeoutSeconds":5}},{"name":"probe-timeout","path":"$TMPDIR/capture-ed-fresh","livenessProbe":{"command":"sleep 5","timeoutSeconds":1}}],"mounts":[{"path":"/fixture","warnPct":80,"failPct":95}],"observedServices":[{"kind":"service","manager":"system","unit":"fixture.service"}]}
             EOF_INVENTORY
             "${sentinel}/bin/sinnix-health-sentinel" --inventory "$TMPDIR/inventory.json" --state "$TMPDIR/state/state.json" --output "$TMPDIR/state/events.jsonl" --check
             "${sentinel}/bin/sinnix-health-sentinel" --inventory "$TMPDIR/inventory.json" --state "$TMPDIR/state/state.json" --output "$TMPDIR/state/events.jsonl" --check
             jq -s -e '
-              length == 7
+              length == 10
               and any(.[]; .type == "capture_stale" and .unit == "fixture" and .status == "stale")
               and any(.[]; .type == "capture_stale" and .unit == "ed-stale" and .status == "stale")
               and any(.[]; .type == "capture_stale" and .unit == "ed-fresh" and .status == "healthy")
@@ -86,10 +100,19 @@
                 and .status == "degenerate" and .ok == false
                 and (.evidence | test("always_empty=window_class,geometry.width$")))
               and any(.[]; .type == "capture_payload" and .unit == "payload-live" and .ok)
+              and any(.[]; .type == "publisher_liveness" and .unit == "probe-absent" and .status == "publisher-absent" and .ok == false)
+              and any(.[]; .type == "publisher_liveness" and .unit == "probe-unknown" and .status == "unknown" and .ok == false)
+              and any(.[]; .type == "publisher_liveness" and .unit == "probe-timeout" and .status == "unknown" and .ok == false and (.evidence | test("probe_exit=124")))
             ' "$TMPDIR/state/events.jsonl" >/dev/null
             touch "$TMPDIR/capture/current"
+            touch "$probe_marker"
             "${sentinel}/bin/sinnix-health-sentinel" --inventory "$TMPDIR/inventory.json" --state "$TMPDIR/state/state.json" --output "$TMPDIR/state/events.jsonl" --check
-            jq -s -e 'length == 8 and any(.[]; .type == "capture_stale" and .unit == "fixture" and .status == "healthy") and any(.[]; .type == "service_failure" and .ok == false)' "$TMPDIR/state/events.jsonl" >/dev/null
+            jq -s -e '
+              length == 12
+              and any(.[]; .type == "capture_stale" and .unit == "fixture" and .status == "healthy")
+              and any(.[]; .type == "service_failure" and .ok == false)
+              and any(.[]; .type == "publisher_liveness" and .unit == "probe-absent" and .status == "healthy" and .ok)
+            ' "$TMPDIR/state/events.jsonl" >/dev/null
             touch "$out"
           '';
     };

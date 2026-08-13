@@ -72,8 +72,18 @@ emit() {
     # Only notify a recovery if we're the ones who ever announced the outage
     # (skip notifying on first-ever "healthy" emit for a key, which is not a
     # recovery -- previous being empty means this key has never transitioned
-    # before, i.e. steady-state startup, not "it came back").
-    [ -n "$previous" ] && notify_desktop normal "sinnix: $unit recovered" "$type -> healthy ($evidence)"
+    # before, i.e. steady-state startup, not "it came back"). Deliberately a
+    # real if/fi, not `[ -n "$previous" ] && notify_desktop ...`: that form's
+    # exit status becomes this if-branch's (and thus emit()'s) return value
+    # when the test is false, and `emit ...` is called as a bare statement
+    # throughout this script -- under `set -e` that silently killed the
+    # entire sentinel sweep on every key's first-ever transition to healthy,
+    # dropping every check still queued after it in that invocation (found
+    # while wiring sinnix-pev0's liveness probes: reproduced on unmodified
+    # master, not introduced by this change).
+    if [ -n "$previous" ]; then
+      notify_desktop normal "sinnix: $unit recovered" "$type -> healthy ($evidence)"
+    fi
   else
     notify_desktop critical "sinnix: $unit $status" "$type: $evidence"
   fi
@@ -145,6 +155,29 @@ while IFS=$'\t' read -r name path fields_json; do
   [ "$status" = healthy ] || [ "$status" = degenerate ] || continue
   emit "payload:$name" capture_payload "$name" "$status" "file=$newest_jsonl;${verdict#*$'\t'}"
 done < <(jq -r '.captures[]? | select((.requiredPayloadFields // []) != []) | [.name,.path,(.requiredPayloadFields | tojson)] | @tsv' "$inventory")
+
+# Upstream-liveness probes: staleness above can only ever say "no writes
+# lately", which cannot distinguish a legitimately quiet lane from one whose
+# upstream publisher never registered at all (sinnix-pev0: capture-a11y ran
+# 24h with a healthy unit and registered AT-SPI listeners while the registry
+# root's ChildCount stayed 0 -- structurally guaranteed to stay silent no
+# matter how long the budget). A lane may declare a cheap command answering
+# "is the thing I observe actually present?"; exit 0 means present, exit 1
+# means confirmed absent, anything else (including timeout's 124) means the
+# probe itself couldn't answer -- reported as unknown, never silently healthy.
+while IFS=$'\t' read -r name path command probe_timeout; do
+  [ -n "$name" ] || continue
+  if timeout "${probe_timeout}s" bash -c "$command" >/dev/null 2>&1; then
+    emit "publisher:$name" publisher_liveness "$name" healthy "path=$path"
+  else
+    rc=$?
+    if [ "$rc" -eq 1 ]; then
+      emit "publisher:$name" publisher_liveness "$name" publisher-absent "path=$path;probe_exit=$rc"
+    else
+      emit "publisher:$name" publisher_liveness "$name" unknown "path=$path;probe_exit=$rc"
+    fi
+  fi
+done < <(jq -r '.captures[]? | select(.livenessProbe != null) | [.name,.path,.livenessProbe.command,(.livenessProbe.timeoutSeconds // 5)] | @tsv' "$inventory")
 
 while IFS=$'\t' read -r path warn fail; do
   usage="$(df -P "$path" 2>/dev/null | awk 'NR == 2 {gsub(/%/,"",$5); print $5}' || true)"

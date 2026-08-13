@@ -75,6 +75,9 @@ let
           // lib.optionalAttrs ((capture.requiredPayloadFields or [ ]) != [ ]) {
             inherit (capture) requiredPayloadFields;
           }
+          // lib.optionalAttrs ((capture.livenessProbe or null) != null) {
+            inherit (capture) livenessProbe;
+          }
         ) surface.captures
       ) (lib.mapAttrs (_: normalizeSurface) surfaces)
     );

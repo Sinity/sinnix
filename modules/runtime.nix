@@ -206,6 +206,61 @@ in
                       lane stale when EITHER threshold is exceeded.
                     '';
                   };
+                  livenessProbe = lib.mkOption {
+                    type = lib.types.nullOr (
+                      lib.types.submodule {
+                        options = {
+                          command = lib.mkOption {
+                            type = lib.types.str;
+                            description = ''
+                              Shell snippet (run as `bash -c "$command"` under
+                              `timeout`) answering "is the thing this lane
+                              observes actually present and publishing?" --
+                              a check on the UPSTREAM source, distinct from
+                              whether the lane's own unit is active
+                              (systemctl is-active is already covered
+                              elsewhere and is precisely the check that
+                              missed sinnix-pev0's a11y incident: the unit,
+                              listeners, and bus were all healthy while the
+                              AT-SPI registry root had zero children
+                              published).
+
+                              Exit-code contract the sentinel relies on:
+                              0 = present, 1 = confirmed absent, anything
+                              else (including a timeout's 124) = unknown.
+                              A probe that cannot determine the answer must
+                              exit something other than 0 or 1 -- silently
+                              exiting 0 on failure is exactly the bug class
+                              this option exists to catch.
+                            '';
+                          };
+                          timeoutSeconds = lib.mkOption {
+                            type = lib.types.ints.positive;
+                            default = 5;
+                            description = ''
+                              Bound on the probe's runtime. The sentinel runs
+                              on a 1-minute cadence against every capture
+                              lane, so a hung probe must not hang the sweep;
+                              a timeout is reported as unknown, never healthy.
+                            '';
+                          };
+                        };
+                      }
+                    );
+                    default = null;
+                    description = ''
+                      Optional upstream-liveness probe. Most lanes have no
+                      cheap probe available -- leave this null and the lane
+                      behaves exactly as it did before this option existed.
+                      staleAfterSeconds alone can only detect "no writes
+                      recently"; it structurally cannot distinguish a
+                      legitimately quiet lane from one whose upstream
+                      publisher never registered in the first place, so
+                      lanes where that distinction is cheaply checkable
+                      should declare a probe here instead of relying solely
+                      on a longer budget.
+                    '';
+                  };
                   requiredPayloadFields = lib.mkOption {
                     type = lib.types.listOf lib.types.str;
                     default = [ ];
