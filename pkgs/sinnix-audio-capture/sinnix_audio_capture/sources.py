@@ -479,6 +479,12 @@ class SourceSupervisor:
     def reconcile(self, sources: list[AudioSource], *, now: float) -> None:
         live = {source.node_name: source for source in sources}
         self._excluded = {}
+        # A failure belongs to a device that is still here. Keeping the record
+        # after the device is gone would report a permanently failed source
+        # that nothing can retry.
+        self._failed = {
+            name: value for name, value in self._failed.items() if name in live
+        }
         wanted: dict[str, AudioSource] = {}
         for node_name, source in live.items():
             pattern = excluded_by(source, self.exclude_patterns)
