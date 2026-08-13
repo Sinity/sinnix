@@ -83,7 +83,11 @@ in
       directories = lib.mkDefault [ "/var/log" ];
     };
 
-    # ── Core system state (no owning module) ────────────────────────────
+    # ── Core system state (genuinely no owning module) ──────────────────
+    # Entries here must have NO module that owns them. transmission and
+    # tailscale used to sit in this list despite both having owning service
+    # modules; they now declare their own persistence, which is where
+    # someone reading those modules will look for it.
     sinnix.persistence.system = {
       directories = [
         "/etc/ssh" # SSH host keys — agenix root of trust
@@ -91,8 +95,6 @@ in
         "/var/lib/NetworkManager" # wired profiles, DHCP leases
         "/var/lib/nixos" # NixOS activation state
         "/var/lib/systemd" # timers, random-seed, rfkill, linger, timesync
-        "/var/lib/transmission" # torrent state
-        "/var/lib/tailscale" # auth keys and device identity
       ];
       files = [
         "/etc/machine-id" # dbus + journal continuity

@@ -71,6 +71,16 @@ mkServiceModule {
       exitNodeArg = lib.optionalString cfg.enableExitNode "--advertise-exit-node";
     in
     {
+      # Co-located with its owning service rather than sitting in
+      # persistence.nix's "core system state (no owning module)" bucket --
+      # this module IS the owner, so the bucket's own rule excluded it.
+      # Losing this directory means re-authenticating the node and getting a
+      # new device identity on the tailnet, so its absence from here was
+      # exactly the kind of gap that reads as "nothing persists this".
+      sinnix.persistence.system.directories = [
+        "/var/lib/tailscale" # auth keys and device identity
+      ];
+
       services.tailscale = {
         enable = true;
         openFirewall = true;
