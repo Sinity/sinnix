@@ -7,6 +7,10 @@
       # @sinnix-package
       # description: One-line description (required)
       # runtimeInputs: bash coreutils jq        (space-separated, may be empty)
+      #
+      # Every packaged script already gets coreutils, gawk, gnugrep, gnused,
+      # findutils, curl, jq and ffmpeg on PATH without asking. Declare only
+      # the non-obvious things (pipewire, android-tools, conntrack-tools).
       # tier: default                           (optional; default | heavy | dev)
 
   The script is copied into the Nix store with its shebang patched, so Python /
@@ -154,7 +158,34 @@ let
     let
       description = fields.description or (throw "script ${name}: frontmatter missing `description`");
       runtimeInputsRaw = splitWords (fields.runtimeInputs or "");
-      runtimeInputs = filter (p: p != null) (map (resolvePkg scriptPackages) runtimeInputsRaw);
+      declaredInputs = filter (p: p != null) (map (resolvePkg scriptPackages) runtimeInputsRaw);
+      # Every packaged script gets the ordinary shell toolkit whether or not
+      # it names it. Four separate production failures on 2026-08-13 were the
+      # same shape: a script invoked awk, ffmpeg, curl or wpctl, the
+      # frontmatter omitted it, the wrapper PATH lacked it, and the script
+      # died with exit 127 at runtime -- health-sentinel (7 days of silent
+      # false-positive disk checks), sinnix-phone drain, sinnix-phone note,
+      # and audio-watchdog (failing every 2 minutes since it was written).
+      # shellcheck cannot see this class: it does not know about frontmatter
+      # or the generated PATH.
+      #
+      # These cost nothing to include -- they are already in the system
+      # closure, so adding them to a wrapper's PATH adds a reference, not a
+      # download. Declaring them per-script was pure friction that bought no
+      # isolation on a single-user host. Frontmatter still exists and still
+      # matters: it is how a script asks for something NON-obvious (pipewire,
+      # android-tools, conntrack-tools), which is the part worth reviewing.
+      baseRuntimeInputs = with pkgs; [
+        coreutils
+        gawk
+        gnugrep
+        gnused
+        findutils
+        curl
+        jq
+        ffmpeg
+      ];
+      runtimeInputs = lib.unique (baseRuntimeInputs ++ declaredInputs);
       tier = fields.tier or "default";
       patchedScript =
         pkgs.runCommand "${name}-script"
