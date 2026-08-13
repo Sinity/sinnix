@@ -454,7 +454,7 @@ in
     # the child subvol with nodatacow; idempotent, so this is a no-op on an
     # already-provisioned host and only matters for a fresh install/restore.
     services.ensure-sinex-subvol = {
-      description = "Ensure dedicated @sinex nodatacow subvolume exists on the root btrfs";
+      description = "Ensure dedicated sinex nodatacow subvolume exists on the /realm NVMe";
       requiredBy = [ "var-lib-sinex.mount" ];
       before = [ "var-lib-sinex.mount" ];
       after = [ "local-fs-pre.target" ];
