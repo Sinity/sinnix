@@ -405,6 +405,16 @@ mkServiceModule {
             restartable = true;
           };
         };
+        elicit-autoingest = {
+          unit = "sinnix-elicit-autoingest.timer";
+          kind = "timer";
+          manager = "user";
+          resourceClass = "background-maintenance";
+          observe = {
+            enable = true;
+            restartable = true;
+          };
+        };
       };
 
       home-manager.users.${userName} = {
@@ -412,6 +422,7 @@ mkServiceModule {
           scriptPkgs.sinnix-hub-render
           scriptPkgs.sinnix-hub-feedback
           scriptPkgs.sinnix-terminal-view
+          scriptPkgs.sinnix-elicit
         ];
 
         systemd.user.services.sinnix-hub = {
@@ -505,6 +516,32 @@ mkServiceModule {
             OnStartupSec = "5s";
             OnUnitActiveSec = "${toString cfg.renderIntervalSeconds}s";
             AccuracySec = "5s";
+          };
+          Install.WantedBy = [ "timers.target" ];
+        };
+
+        # sinnix-elicit's comparison sessions (sinnix-eb9c) post to this same
+        # feedback spool. The operator's own question -- "why does this
+        # require a separate step?" after tapping through comparisons --
+        # is answered by draining and refitting on the same kind of timer
+        # sinnix-hub-render already uses, not a manual `ingest`+`explain`.
+        # `autoingest` is a no-op safe to run this often: `ingest` dedups by
+        # comparison id, and a refit only happens when something new landed.
+        systemd.user.services.sinnix-elicit-autoingest = {
+          Unit.Description = "Drain the hub feedback spool into every sinnix-elicit domain and refit";
+          Service = {
+            Type = "oneshot";
+            ExecStart = "${scriptPkgs.sinnix-elicit}/bin/sinnix-elicit autoingest";
+            NoNewPrivileges = true;
+          };
+        };
+
+        systemd.user.timers.sinnix-elicit-autoingest = {
+          Unit.Description = "Periodic sinnix-elicit spool drain + refit";
+          Timer = {
+            OnStartupSec = "10s";
+            OnUnitActiveSec = "120s";
+            AccuracySec = "10s";
           };
           Install.WantedBy = [ "timers.target" ];
         };
