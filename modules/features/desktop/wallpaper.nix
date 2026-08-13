@@ -103,12 +103,20 @@ mkFeatureModule {
       ]) cfg.moods;
     in
     {
-      systemd.tmpfiles.rules = moodDirs ++ [
+      # Every ancestor needs its own rule, and ancestors must come first.
+      # `sets` was previously undeclared, so tmpfiles created it implicitly as
+      # root inside a sinity-owned parent and then refused every leaf below it:
+      # "Detected unsafe path transition /realm/media/wallpaper (owned by
+      # sinity) -> /realm/media/wallpaper/sets (owned by root)". The timer has
+      # been firing into missing directories and exiting 0 ever since.
+      systemd.tmpfiles.rules = [
         "d ${cfg.corpusRoot} 0755 ${user} users -"
+        "d ${cfg.corpusRoot}/sets 0755 ${user} users -"
         "d ${cfg.corpusRoot}/pool 0755 ${user} users -"
         "d ${cfg.corpusRoot}/generated 0755 ${user} users -"
         "d ${cfg.corpusRoot}/generated/rejected 0755 ${user} users -"
-      ];
+      ]
+      ++ moodDirs;
 
       sinnix.runtime.surfaces.wallpaper-timeofday = {
         unit = "sinnix-wallpaper-timeofday.timer";
