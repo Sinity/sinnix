@@ -114,6 +114,9 @@
     # contrast drift, input source -- turns "is the screen on" into a
     # measurement instead of an inference.
     capture-monitor.enable = true;
+    # L0 network flow metadata via kernel conntrack events (sinnix-0cqk):
+    # 5-tuple + byte/packet counters, no packet capture, no TLS interception.
+    capture-netflow.enable = true;
     # Scheduled phone -> lake drain, wifi + charging gated (sinnix-uyvt.2.1).
     phone-drain.enable = true;
     # Router telemetry pulled from prime on a timer (sinnix-zihb): syslog
