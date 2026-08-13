@@ -377,6 +377,18 @@ config in `secrets.nix` (repo root).
   the NIXPKGS revision — an equally plausible-looking sha; do not read it as
   a sinnix commit. Generations older than 2026-07-10 predate the stamp and
   print nothing for `--configuration-revision`.
+- **A switch's exit code is not evidence it applied.** `sinnix-preflight`
+  can BLOCK a switch (exit 75) for memory headroom, nix storage, a
+  concurrent generation operation, or flake drift — this is correct
+  behaviour, and it means "I ran switch" and "the system changed" are
+  different claims. Shell shapes like `switch > log; echo $?; tail log`
+  report the exit status of the LAST command, so a blocked switch reads as
+  success; the same applies to any harness that reports a compound
+  command's status. The revision comparison above is the only check that
+  settles it, so make it after every switch rather than trusting a 0.
+  (Burned 2026-08-13: three switches were reported applied while the
+  system stayed on an older generation, because parallel agents had eaten
+  the memory headroom and the block was masked.)
 
 ## Maintenance Protocol
 
