@@ -242,6 +242,44 @@ chunk observed all evening was recorded in the seconds around a reinstall
 while the old recorder was still running, and the amplitude heartbeat caught
 it and cycled the recorder as designed.
 
+## Keeping the phone reachable
+
+The tailnet had been failing for an unglamorous reason: Tailscale was simply
+not running, and nothing restarted it. It was already Doze-whitelisted, which
+prevents it being *dozed* but does not start it. Two things were missing, and
+both are now set:
+
+- **Android always-on VPN**, `settings put global always_on_vpn_app
+  com.tailscale.ipn`. Lockdown is deliberately left off — with it, a phone
+  whose VPN is down has no network at all. The Settings screen reports
+  "Connected / Always on" once the VPN has been re-established after the
+  setting is applied; it does not retroactively adopt an existing session.
+- **MIUI background autostart** for Tailscale, which is what survives MIUI
+  killing the app. Sinnix Capture was enabled at the same time.
+
+`am force-stop` is not a test of either. Android deliberately never restarts a
+force-stopped app, so the case that matters — a reboot, or MIUI reclaiming the
+process — is not what force-stop reproduces.
+
+MIUI's autostart state has no adb setting and lives in
+`com.miui.securitycenter`'s private database, but the screen that owns it is
+driveable:
+
+```
+adb shell am start -n com.miui.securitycenter/com.miui.permcenter.autostart.AutoStartManagementActivity
+adb shell input swipe 540 1900 540 800 250          # scroll
+adb exec-out uiautomator dump /sdcard/ui.xml        # locate the row's bounds
+adb shell input tap <sliding_button x> <row y>      # toggle
+adb exec-out screencap -p                           # verify
+```
+
+Two traps. `uiautomator dump` can return a **stale window** — with VPN
+settings focused it returned the autostart list from an earlier state, so
+swipes went to a screen the dump was not showing. Cross-check against
+`dumpsys window | grep mCurrentFocus`, and trust a screenshot over a dump when
+they disagree. And the list re-sorts after every toggle, so coordinates must
+be re-derived rather than reused.
+
 ## Service boundary
 
 `AmbientService` is drivable without the UI, which keeps it usable underneath
