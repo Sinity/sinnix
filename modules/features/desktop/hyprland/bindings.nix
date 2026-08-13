@@ -48,6 +48,11 @@ in
     "SUPER, D, Open the app launcher, exec, noctalia msg panel-toggle launcher"
     "SUPER, Escape, Lock the session, exec, noctalia msg session lock"
     "SUPER, Slash, Show this keybind cheatsheet, exec, noctalia msg panel-toggle kenn/keybind-cheatsheet:cheatsheet"
+    # Maximalist companion to the plugin above: not just Hyprland binds, but
+    # the sinnix CLI, shared skills, qutebrowser binds, and curated
+    # beads/git/agent-dispatch references, all regenerated fresh on open
+    # (sinnix-v034). Regenerate-then-open, not a static file.
+    "SUPER SHIFT, Slash, Open the full sinnix cheatsheet, exec, ${script "sinnix-cheatsheet"} && ${script "browser-app"} http://127.0.0.1:8880/reports/cheatsheet.html"
     "SUPER, A, Jump to the oldest agent needing attention, exec, ${script "sinnix-attention"}"
     # Unified picker (sinnix-r4u8 browser-inversion front door): history +
     # bookmarks + clipboard + recent project dirs, one fuzzy surface.
