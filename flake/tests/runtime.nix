@@ -193,9 +193,17 @@ in
         assertions = _: [ ];
       };
       groupEvaluated = evalTestSpec system groupSpec;
-      groupBindingsJson = builtins.toJSON (
-        groupEvaluated.config.home-manager.users.sinity.wayland.windowManager.hyprland.settings.bind or [ ]
-      );
+      groupBindingsJson =
+        let
+          hyprSettings = groupEvaluated.config.home-manager.users.sinity.wayland.windowManager.hyprland.settings;
+        in
+        builtins.toJSON (
+          # Every bind family the module emits. These are the described
+          # variants (bindd/binddl/binddm) -- see hyprland/bindings.nix. A
+          # chord collision across families shadows just as silently as one
+          # within a family, so check them together.
+          (hyprSettings.bindd or [ ]) ++ (hyprSettings.binddl or [ ]) ++ (hyprSettings.binddm or [ ])
+        );
     in
     {
       checks.runtime-surface-policy =
