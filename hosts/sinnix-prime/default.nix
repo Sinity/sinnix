@@ -212,14 +212,26 @@
     # llama-server :8081 serving the local reranker (/v1/rerank — an API
     # ollama does not provide). 0.6b Q8, bounded ctx-size (see
     # modules/services/llama-cpp.nix); the 4B Q4 GGUF sits on disk as the
-    # quality-tier swap. Socket-activated on-demand behind the shared
-    # gpu-inference admission key (modules/services/ai-control.nix) — never
-    # resident alongside ollama/koboldcpp/whisper.
+    # quality-tier swap. CPU-pinned (gpuLayers = 0): measured 2026-08-13 at
+    # 435-571ms warm for a 20-doc rerank on CPU vs. 67-137ms on GPU — well
+    # under a second either way. NOT zero VRAM, though: verified live that
+    # the CUDA-linked binary still holds ~680-740MiB even with
+    # --n-gpu-layers 0 (CUDA context/compute-buffer overhead, released
+    # cleanly on exit) -- smaller than the 1610MiB it held fully offloaded,
+    # but not the "0 VRAM" an earlier design pass assumed. Socket-activated
+    # on-demand, but outside the gpu-inference admission mesh
+    # (modules/services/ai-control.nix): it coexists with a resident
+    # ollama/koboldcpp/whisper session instead of evicting/being evicted by
+    # one, which is what made every retrieval turn pay a ~20s GPU reload.
+    # ~740MiB reranker + a 7.2GB daily-driver LLM + ~2GB desktop residency
+    # leaves the 10GB card with little headroom during a RAG turn -- worth
+    # revisiting with a non-CUDA llama-cpp build if that margin ever bites.
     # Weekly evidence-joined usage census (bead sinnix-yfr).
     census.enable = true;
     llama-cpp = {
       enable = true;
       model = "qwen3-reranker-0.6b-q8_0.gguf";
+      gpuLayers = 0;
       extraFlags.reranking = true;
     };
     kokoro.enable = true; # Kokoro-82M TTS :8880 (CPU, on-demand) — replaces edge-tts

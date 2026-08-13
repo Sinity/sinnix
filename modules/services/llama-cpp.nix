@@ -1,16 +1,28 @@
-# llama.cpp HTTP server (CUDA) — raw GGUF endpoint for experiments and for
-# applying steering / abliteration control vectors via --control-vector.
+# llama.cpp HTTP server — raw GGUF endpoint for experiments and for applying
+# steering / abliteration control vectors via --control-vector.
 #
 # Enabled on sinnix-prime (hosts/sinnix-prime/default.nix) serving a 0.6B
 # reranker (/v1/rerank — an API ollama does not provide); koboldcpp remains
-# the everyday vehicle for general LLM/VLM chat. Socket-activated behind the
-# same idle-aware proxy pattern as ollama/koboldcpp/whisper
+# the everyday vehicle for general LLM/VLM chat. The host pins gpuLayers = 0:
+# measured 2026-08-13 the reranker answers in 435-571ms on pure CPU versus
+# 67-137ms on GPU, so it runs CPU-only and outside the gpu-inference
+# admission mesh — it can sit resident alongside ollama, koboldcpp, or any
+# other CUDA backend instead of evicting/being evicted by one. It does NOT
+# hold zero VRAM, though: the CUDA-linked binary still allocates
+# ~680-740MiB even with --n-gpu-layers 0 (verified live, released cleanly
+# on exit) -- far below the 1610MiB it held fully offloaded, but a real
+# cost worth remembering when reasoning about coexistence headroom on a
+# 10GB card. `package = pkgs.llama-cpp-cuda` below stays as-is: the CUDA
+# build runs on CPU with `-ngl 0` without a separate rebuild; a future GGUF
+# served through this module with gpuLayers > 0 would need to opt back into
+# the mesh. If the ~700MiB CUDA-context floor ever becomes a problem, a
+# genuinely CUDA-free build would remove it entirely -- not attempted here.
+# Socket-activated behind
+# the same idle-aware proxy pattern as ollama/koboldcpp/whisper
 # (modules/services/ai-control.nix): the public port 8081 is the systemd
 # socket front door, the backend runs on a private loopback port and exits
-# after idle. It shares the gpu-inference admission key (mutual systemd
-# Conflicts in all directions) so it never sits resident alongside another
-# CUDA backend. DynamicUser + ProtectSystem=strict is read-only, not hidden,
-# so it reads the model under /realm without extra bind mounts.
+# after idle. DynamicUser + ProtectSystem=strict is read-only, not hidden, so
+# it reads the model under /realm without extra bind mounts.
 {
   mkServiceModule,
   lib,
@@ -30,7 +42,6 @@ mkServiceModule {
       # Measured 2026-08-13: ~1-3s cold /v1/rerank round trip for the 0.6B
       # reranker -- 30s is already ~10-30x headroom, kept unchanged.
       idleTimeout = "30s";
-      exclusiveResource = "gpu-inference";
       dependsOn = [ "llama-cpp-proxy" ];
     };
     observe = {
@@ -111,9 +122,10 @@ mkServiceModule {
         wantedBy = lib.mkForce [ ];
         partOf = [ "llama-cpp-proxy.service" ];
         bindsTo = [ "llama-cpp-proxy.service" ];
-        # Shared gpu-inference admission key: never run alongside the other
-        # CUDA inference backends, in either direction. Conflicts= itself is
-        # computed centrally in ai-control.nix's gpuInferenceConflicts.
+        # CPU-pinned (gpuLayers = 0, set on the host): deliberately NOT in
+        # ai-control.nix's gpuInferenceConflicts mesh, so it can run
+        # alongside a resident ollama/koboldcpp/whisper session instead of
+        # evicting/being evicted by one.
       };
     };
 } args
