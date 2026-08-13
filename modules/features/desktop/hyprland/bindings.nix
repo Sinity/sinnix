@@ -112,6 +112,7 @@ in
     ", F4, Apply the next screen shader, exec, ${scriptPkgs.sinnix-shader}/bin/sinnix-shader next"
     "SHIFT, F4, Clear the screen shader, exec, ${scriptPkgs.sinnix-shader}/bin/sinnix-shader off"
     "SUPER, F4, Apply a random screen shader, exec, ${scriptPkgs.sinnix-shader}/bin/sinnix-shader random"
+    "SUPER SHIFT, F4, Start screen-shader playback, exec, ${scriptPkgs.sinnix-shader}/bin/sinnix-shader play --random --interval 6 --crossfade 1.5"
     ", F6, Toggle the WeeChat scratchpad, exec, uwsm app -- ${script "toggle-scratch"} weechat"
     ", F8, Toggle the raw-log scratchpad, exec, uwsm app -- ${script "toggle-scratch"} rawlog"
     ", F9, Emergency stop for runaway builds and background work, exec, sudo -n ${scriptPkgs.nuke-builds}/bin/nuke-builds"

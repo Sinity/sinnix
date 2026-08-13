@@ -133,6 +133,16 @@ order `sinnix-shader` uses. Measured cost of the animated case, from Hyprland's
 own `debug:overlay`: 120fps/1.05ms render becomes 118fps/1.12ms, and GPU draw
 moves about a watt.
 
+Shaders compose. Hyprland takes one path, so nothing stacks at the compositor,
+but `sinnix-shader apply a b c` generates a single fragment shader containing all
+of them — warps on the sampling coordinate, one texture fetch, then shades — and
+`_presets.conf` names the combinations worth keeping. `play` cycles shaders or
+presets on an interval, crossfading by generating both pipelines into one shader
+and mixing on `time`. It runs as a transient systemd unit whose `ExecStopPost`
+clears the screen, so a `SIGKILL` mid-cycle still restores the display; that is
+the one teardown a signal handler cannot promise, and it is why playback is a
+unit rather than a background process.
+
 Note that a screen shader cannot be verified by screenshotting. `grim` and
 screencopy do not observe the final shader stage on this host — a full-screen
 invert produces a byte-identical capture while whiting out the actual display.

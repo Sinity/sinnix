@@ -2161,8 +2161,26 @@ SHADER_CONTROL_NOTE = (
     "<code>hyprctl</code> would be the second control plane this estate does "
     "not have. So the page reports, and the commands below are what drives it — "
     "from a terminal, or from <kbd>F4</kbd> / <kbd>Shift+F4</kbd> / "
-    "<kbd>Super+F4</kbd>."
+    "<kbd>Super+F4</kbd> / <kbd>Super+Shift+F4</kbd>."
 )
+
+
+def shader_presets(manifest: dict[str, Any]) -> list[tuple[str, str]]:
+    directory = manifest.get("shadersDir")
+    if not directory:
+        return []
+    try:
+        text = (Path(directory) / "_presets.conf").read_text(encoding="utf-8")
+    except OSError:
+        return []
+    found = []
+    for line in text.splitlines():
+        line = line.split("#", 1)[0].strip()
+        if "=" in line:
+            name, _, members = line.partition("=")
+            if name.strip() and members.split():
+                found.append((name.strip(), " ".join(members.split())))
+    return found
 
 
 def shader_library(manifest: dict[str, Any]) -> list[dict[str, str]]:
@@ -2280,16 +2298,59 @@ def render_shaders(manifest: dict[str, Any], generated: str) -> str:
     )
 
     body += card(
-        "Stacking, and what stacks",
+        "Yes, they compose",
         "<p>Hyprland takes exactly one <code>decoration:screen_shader</code> path, "
-        "so nothing stacks at the compositor. <code>sinnix-shader apply a b c</code> "
-        "instead <em>composes</em> the named stages into one generated fragment "
-        "shader: every warp applied to the sampling coordinate in order, one "
-        "texture fetch, then every shade in order.</p>"
-        "<p class=\"sub\">A stage that resamples the screen itself — "
-        "<code>chromatic</code>, <code>edges</code>, <code>bloom</code>, "
-        "<code>vhs</code> — reads the original image, not the previous stage's "
-        "output. One pass has no intermediate buffer to read back.</p>",
+        "so nothing stacks at the compositor — but that is not the end of the "
+        "answer. <code>sinnix-shader apply a b c</code> <em>composes</em> the named "
+        "stages into one generated fragment shader: every warp applied to the "
+        "sampling coordinate in order, one texture fetch, then every shade in "
+        "order. Any number of stages, one pass.</p>"
+        "<p>Order is not decoration. <code>posterize filmgrain</code> lays grain "
+        "over a flat image; <code>filmgrain posterize</code> quantises the grain "
+        "away and looks like neither. Warps always land before shades regardless "
+        "of where they are named, because there is only one texture fetch to place "
+        "them around.</p>"
+        "<p class=\"sub\">The one real limit: a stage that resamples the screen "
+        "itself — <code>chromatic</code>, <code>edges</code>, <code>bloom</code>, "
+        "<code>sketch</code>, <code>vhs</code> — reads the original image, not the "
+        "previous stage's output, because one pass has no intermediate buffer to "
+        "read back. So <code>invert edges</code> traces edges of the "
+        "<em>un-inverted</em> screen and then inverts them. Stack at most one "
+        "resampling stage per composition and put it last if you want it to look "
+        "like what you asked for.</p>",
+        wide=True,
+    )
+
+    preset_rows = shader_presets(manifest)
+    if preset_rows:
+        body += card(
+            "Compositions worth keeping",
+            kv_table([(name, f"<code>{esc(members)}</code>") for name, members in preset_rows]),
+            subtitle=(
+                "Named in <code>_presets.conf</code> beside the stages, so they are "
+                "editable without a rebuild. Apply one by name: "
+                "<code>sinnix-shader apply television</code>."
+            ),
+            wide=True,
+        )
+
+    body += card(
+        "Playback",
+        "<p><code>sinnix-shader play</code> cycles the library — or a named set of "
+        "shaders and presets — on an interval. Fast intervals are their own effect: "
+        "at a quarter of a second the switching itself reads as animation, on stages "
+        "that hold perfectly still individually.</p>"
+        "<p><code>--crossfade</code> makes the transition continuous rather than a "
+        "cut. It is not a trick: both pipelines are generated into a single shader "
+        "and mixed on the <code>time</code> uniform, so the fade happens per-pixel "
+        "on the GPU, and it needs animation on for the same reason everything else "
+        "does.</p>"
+        "<p class=\"sub\">It runs as a transient systemd unit whose "
+        "<code>ExecStopPost</code> clears the screen — the one teardown a signal "
+        "handler cannot promise. <code>SIGKILL</code> on the loop still restores the "
+        "shader, fp16 and damage tracking; verified, not assumed. Steady-state cost "
+        "of switching four times a second is about 6% of one core, spent almost "
+        "entirely on <code>hyprctl</code> process spawns rather than on the GPU.</p>",
         wide=True,
     )
 
@@ -2345,8 +2406,10 @@ def render_shaders(manifest: dict[str, Any], generated: str) -> str:
             [
                 ("list", "<code>sinnix-shader list</code>"),
                 ("apply", "<code>sinnix-shader apply crt scanlines vignette</code>"),
+                ("a preset", "<code>sinnix-shader apply television</code>"),
                 ("flip through", "<code>sinnix-shader next</code> / <code>prev</code> / <code>random</code>"),
-                ("stop", "<code>sinnix-shader off</code>"),
+                ("playback", "<code>sinnix-shader play --interval 4 --crossfade 1</code>"),
+                ("stop everything", "<code>sinnix-shader off</code>"),
                 ("read the source", "<code>sinnix-shader show vhs</code>"),
                 (
                     "last resort",
