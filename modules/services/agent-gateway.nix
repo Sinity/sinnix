@@ -59,12 +59,20 @@ mkServiceModule {
   configFn =
     { cfg, ... }:
     let
-      agentController = "/home/${userName}/.config/hermes/skills/agent-orchestration/scripts/agent_job_control.sh";
+      # dotsRoot-direct, not the ~/.config/hermes/skills linkFarm hop: the
+      # same two-generation indirection the 2026-08-12 collapse wave removed
+      # elsewhere (sinnix-i7eb). Investigated first: the tunnel's
+      # approvedManifestHash only hashes the exposed MCP tool schemas
+      # (canonical_manifest() in cli.py, via tool.model_dump()) -- these
+      # script paths are an internal execution detail never included in a
+      # tool's name/description/inputSchema, so this change doesn't touch
+      # what the hash covers.
+      agentController = "${config.sinnix.paths.dotsRoot}/_ai/skills/agent-orchestration/scripts/agent_job_control.sh";
       configFile = jsonFormat.generate "sinnix-agent-gateway.json" {
         inherit (cfg) stateDir maxResultBytes;
         approvedManifestHash = cfg.tunnel.approvedManifestHash;
         runtimeInventory = "/etc/sinnix/runtime-inventory.json";
-        agentRunner = "/home/${userName}/.config/hermes/skills/agent-orchestration/scripts/run_agent_prompt.sh";
+        agentRunner = "${config.sinnix.paths.dotsRoot}/_ai/skills/agent-orchestration/scripts/run_agent_prompt.sh";
         inherit agentController;
         observeCommand = "${scriptPkgs.sinnix-observe}/bin/sinnix-observe";
         projects = config.sinnix.projects.entries;
