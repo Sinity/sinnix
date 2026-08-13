@@ -75,6 +75,8 @@ mkAiService {
           "ollama-proxy.service"
           "koboldcpp.service"
           "koboldcpp-proxy.service"
+          "llama-cpp.service"
+          "llama-cpp-proxy.service"
         ];
         serviceConfig = lib.mkMerge [
           {

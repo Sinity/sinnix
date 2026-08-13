@@ -72,6 +72,8 @@ let
       "koboldcpp-proxy.service"
       "whisper-server.service"
       "whisper-proxy.service"
+      "llama-cpp.service"
+      "llama-cpp-proxy.service"
     ];
   };
   koboldcppProxy = mkProxy {
@@ -86,6 +88,8 @@ let
       "ollama-proxy.service"
       "whisper-server.service"
       "whisper-proxy.service"
+      "llama-cpp.service"
+      "llama-cpp-proxy.service"
     ];
   };
   whisperProxy = mkProxy {
@@ -100,6 +104,24 @@ let
       "ollama-proxy.service"
       "koboldcpp.service"
       "koboldcpp-proxy.service"
+      "llama-cpp.service"
+      "llama-cpp-proxy.service"
+    ];
+  };
+  llamaCppProxy = mkProxy {
+    name = "llama-cpp-proxy";
+    backendUnit = "llama-cpp.service";
+    publicEndpoint = "127.0.0.1:8081";
+    backendEndpoint = "127.0.0.1:8082";
+    exclusiveResource = "gpu-inference";
+    dependsOn = [ "llama-cpp" ];
+    conflicts = [
+      "ollama.service"
+      "ollama-proxy.service"
+      "koboldcpp.service"
+      "koboldcpp-proxy.service"
+      "whisper-server.service"
+      "whisper-proxy.service"
     ];
   };
   litellmProxy = mkProxy {
@@ -127,6 +149,7 @@ in
     (lib.mkIf config.sinnix.services.whisper.enable whisperProxy.sockets)
     (lib.mkIf config.sinnix.services.litellm.enable litellmProxy.sockets)
     (lib.mkIf config.sinnix.services.kokoro.enable kokoroProxy.sockets)
+    (lib.mkIf config.sinnix.services.llama-cpp.enable llamaCppProxy.sockets)
   ];
   systemd.services = lib.mkMerge [
     (lib.mkIf config.sinnix.services.ollama.enable ollamaProxy.services)
@@ -134,6 +157,7 @@ in
     (lib.mkIf config.sinnix.services.whisper.enable whisperProxy.services)
     (lib.mkIf config.sinnix.services.litellm.enable litellmProxy.services)
     (lib.mkIf config.sinnix.services.kokoro.enable kokoroProxy.services)
+    (lib.mkIf config.sinnix.services.llama-cpp.enable llamaCppProxy.services)
   ];
   sinnix.runtime.surfaces = lib.mkMerge [
     (lib.mkIf config.sinnix.services.ollama.enable {
@@ -150,6 +174,9 @@ in
     })
     (lib.mkIf config.sinnix.services.kokoro.enable {
       kokoro-proxy = kokoroProxy.runtimeSurface;
+    })
+    (lib.mkIf config.sinnix.services.llama-cpp.enable {
+      llama-cpp-proxy = llamaCppProxy.runtimeSurface;
     })
   ];
 }

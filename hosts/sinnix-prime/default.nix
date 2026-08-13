@@ -210,8 +210,11 @@
     };
     koboldcpp.enable = true; # all-in-one offload + native image gen :5001 (on-demand)
     # llama-server :8081 serving the local reranker (/v1/rerank — an API
-    # ollama does not provide). 0.6b Q8 rides fully in VRAM next to other
-    # models; the 4B Q4 GGUF sits on disk as the quality-tier swap.
+    # ollama does not provide). 0.6b Q8, bounded ctx-size (see
+    # modules/services/llama-cpp.nix); the 4B Q4 GGUF sits on disk as the
+    # quality-tier swap. Socket-activated on-demand behind the shared
+    # gpu-inference admission key (modules/services/ai-control.nix) — never
+    # resident alongside ollama/koboldcpp/whisper.
     # Weekly evidence-joined usage census (bead sinnix-yfr).
     census.enable = true;
     llama-cpp = {
