@@ -207,7 +207,8 @@ mkServiceModule {
   surface = {
     unit = "sinnix-capture-primary.service";
     manager = "user";
-    kind = "capture";
+    # No explicit kind: see capture-clipboard.nix's identical comment
+    # (sinnix-gcuv, 2026-08-13) -- this sibling had the same mislabel.
     resourceClass = "capture-runtime";
     captures = [
       {

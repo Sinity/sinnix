@@ -174,7 +174,16 @@ mkServiceModule {
   surface = {
     unit = "sinnix-capture-clipboard.service";
     manager = "user";
-    kind = "capture";
+    # No explicit kind: real owned systemd .service unit -> defaults to
+    # "service", matching every sibling capture-* daemon (capture-a11y,
+    # capture-audio, capture-notifications, ...). `kind = "capture"` is
+    # reserved for orphan surfaces with no real backing unit
+    # (capture-registry.nix). This module had it wrong (sinnix-gcuv,
+    # 2026-08-13): the mislabel silently excluded a genuinely live,
+    # observe.enable=true daemon from sinnix-observe's managed-units view
+    # and from the Nix-level kind=="service" render lists in runtime.nix,
+    # making an active unit look absent to any consumer treating those as
+    # the live-state authority.
     resourceClass = "capture-runtime";
     captures = [
       {
