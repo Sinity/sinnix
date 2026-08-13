@@ -234,6 +234,16 @@ in
               environment = sinexEnvironment;
               enable = runtimeEnabled;
               autoSetup = runtimeEnabled;
+              # The capture bus carries raw material and controls admission.
+              # Keep its loopback listener encrypted and require the shared
+              # Sinex NKey, so an arbitrary local process cannot read or forge
+              # capture events. The matching private material is agenix-owned
+              # under the sinex-nats-* names configured in modules/secrets.nix.
+              tls.enable = true;
+              authorization.sharedClient = {
+                enable = true;
+                nkey = "UDUVCAYOTOC223CCR5FZOWVDFOJYZAQZ7ENQQVWU3ZTH52RFS233KYLI";
+              };
               # dataDir/storeDir stay at the upstream default path, which
               # hosts/sinnix-prime/storage.nix bind-mounts from
               # /realm/state/nats — the realm state volume, not the /persist
@@ -445,6 +455,17 @@ in
 
             # Workstation runtime policy via upstream options.
             runtime = {
+              nats = {
+                # The upstream module derives the tls:// endpoint from the
+                # managed server. Pin the remaining client contract here so
+                # malformed or missing credential wiring cannot fall back to
+                # an unauthenticated plaintext connection.
+                tls = {
+                  requireTls = true;
+                  caCertFile = config.sinnix.secrets.paths.sinex-nats-ca;
+                };
+                auth.nkeySeedFile = config.sinnix.secrets.paths.sinex-nats-client-nkey;
+              };
               target = {
                 attachToMultiUser = false;
                 manualStartOnly = true;

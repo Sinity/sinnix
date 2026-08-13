@@ -37,6 +37,10 @@ let
     "openai-api-key"
     "openai-tunnel-runtime-key"
     "sinex-api-admin-token"
+    "sinex-nats-ca"
+    "sinex-nats-client-nkey"
+    "sinex-nats-server-cert"
+    "sinex-nats-server-key"
   ];
 
   # Declarative per-secret overrides. Any secret NOT listed here falls back to
@@ -50,6 +54,33 @@ let
     "sinex-local-db" = {
       group = if config.users.groups ? postgres then "postgres" else primaryGroupName;
       mode = "0440";
+    };
+    # NATS reads its listener key directly; Sinexd reads the client seed and
+    # trust anchor. Keep each runtime credential available only to its owning
+    # service account and never export it into login shells.
+    "sinex-nats-server-cert" = {
+      owner = "nats";
+      group = "nats";
+      mode = "0440";
+      exportEnv = false;
+    };
+    "sinex-nats-server-key" = {
+      owner = "nats";
+      group = "nats";
+      mode = "0400";
+      exportEnv = false;
+    };
+    "sinex-nats-ca" = {
+      owner = "sinex";
+      group = "sinex";
+      mode = "0440";
+      exportEnv = false;
+    };
+    "sinex-nats-client-nkey" = {
+      owner = "sinex";
+      group = "sinex";
+      mode = "0400";
+      exportEnv = false;
     };
     ${userPasswordSecret} = {
       owner = "root";

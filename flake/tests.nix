@@ -47,6 +47,7 @@ in
     ./tests/quota.nix
     ./tests/noctalia.nix
     ./tests/memory-audit.nix
+    ./tests/sinex-nats-security.nix
   ];
 
   perSystem =
