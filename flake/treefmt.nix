@@ -1,6 +1,5 @@
 # Multi-formatter configuration via treefmt-nix
 #
-# Replaces the simple formatter.nix with a unified multi-formatter setup.
 # Run with: nix fmt
 # Check with: nix flake check (includes formatting check)
 _: {

@@ -1,8 +1,6 @@
 # Borg backup drain-hook runtime checks — exercises the realm/persist
 # btrbk-snapshot-drain shell logic (extracted from the systemd unit scripts)
 # against mocked mount/borg/btrfs binaries.
-#
-# Split out of the former flake/tests-runtime.nix monolith (sinnix-7bu).
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;

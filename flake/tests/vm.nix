@@ -1,6 +1,4 @@
 # QEMU NixOS VM integration checks (below, polylogue daemon, transmission).
-#
-# Split out of the former flake/tests-runtime.nix monolith (sinnix-7bu).
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;

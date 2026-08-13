@@ -1,17 +1,12 @@
 # PRIMARY-selection capture lane: static service-shape checks (unit
 # ExecStart/Environment/ReadWritePaths, runtime surface metadata).
 #
-# No runtime fixture here yet. The blocker documented earlier (the watch
-# script's writeShellApplication-baked PATH shadowing fixture fakes, plus
-# /usr/bin/env being absent in the sandbox) was solved for the clipboard
-# lane on 2026-08-12 -- see flake/tests/capture-clipboard.nix's stripped-
-# PATH copy + patchShebangs recipe. A primary-lane runtime fixture can
-# follow that recipe; it additionally needs the debounce collapsed (set
-# debounceMs to 0) so a single fixture invocation writes synchronously.
-# The watch script's actual runtime behavior (including the debounce
-# burst-collapse this module adds) was verified live against a real
-# Wayland session instead; see the module header and the commit history
-# for that evidence.
+# No runtime fixture here yet. One can follow the stripped-PATH copy +
+# patchShebangs recipe in flake/tests/capture-clipboard.nix, which solves
+# the writeShellApplication-baked PATH shadowing fixture fakes and the
+# missing /usr/bin/env in the sandbox; it additionally needs the debounce
+# collapsed (debounceMs = 0) so a single fixture invocation writes
+# synchronously.
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;

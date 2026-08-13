@@ -8,7 +8,7 @@
 # forces an IFD build and then fails during module merging (the derivation
 # attrset coerces to its store path string where a NixOS module is expected,
 # throwing "you're trying to define a value of type `string' rather than an
-# attribute set"). See sinnix-bw5.
+# attribute set").
 { inputs }:
 let
   libContext = import ./lib-context.nix { inherit inputs; };
@@ -19,10 +19,9 @@ let
   # Stamp the running generation with the sinnix repo commit so
   # `nixos-version --configuration-revision` supports the live-drift
   # tripwire (CLAUDE.md). Without this it falls back to the NIXPKGS
-  # revision, which reads like a plausible sinnix commit and cost a wrong
-  # drift diagnosis on 2026-07-10. Builds from a dirty tree get the
-  # `<rev>-dirty` marker; treat that as "commits since <rev> may or may not
-  # be live".
+  # revision, which reads like a plausible sinnix commit and invites a wrong
+  # drift diagnosis. Builds from a dirty tree get the `<rev>-dirty` marker;
+  # treat that as "commits since <rev> may or may not be live".
   revisionModule = {
     system.configurationRevision = inputs.self.rev or inputs.self.dirtyRev or "unknown";
   };

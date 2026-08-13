@@ -12,8 +12,8 @@
         touch $out/modules/services/example.nix
         touch $out/scripts/example-tool
         mkdir -p $out/.git
-        # sinnix-3sng fixture: only sinnix-ethereal is a real nixosConfigurations
-        # member -- sinnix-gw (OpenWrt, no mkHost entry) must NOT surface as a
+        # Only sinnix-ethereal is a real nixosConfigurations member in this
+        # fixture -- sinnix-gw (OpenWrt, no mkHost entry) must NOT surface as a
         # dormant host despite having a hosts/ directory. The real build
         # sandbox's ambient `hostname` never coincides with "sinnix-ethereal",
         # so it deterministically comes out dormant here regardless of host.
@@ -77,7 +77,7 @@
               (.services | length) == 1 and
               (.scripts | length) == 1 and
               (.runtimeSurfaces | length) == 2 and
-              # sinnix-3sng: derived, not a hardcoded literal -- sinnix-ethereal
+              # Derived, not a hardcoded literal -- sinnix-ethereal
               # is the fixtures only real nixosConfigurations member, and
               # sinnix-gw (hosts/ dir, no mkHost entry) must be excluded.
               (.dormantHosts | any(.host == "sinnix-ethereal")) and

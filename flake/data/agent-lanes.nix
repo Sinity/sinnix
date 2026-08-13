@@ -1,27 +1,20 @@
 # Agent CLI wrapper variant registry — single source for the "which
 # client/backend/key-source/MCP-profile" axis, rendered by
-# modules/features/dev/agents/clis.nix by mapping over this data instead of
-# hand-enumerating each wrapper. Builder machinery (npm bootstrap, mkHermesConfig,
-# mkClaudeCodeWrapper/mkCodexWrapper/mkHermesWrapper, the backend-env
-# builders) stays in backends.nix; this file only holds the data each
-# builder is parameterized with. Pure data, no `lib` needed — mirrors
-# flake/data/shared-agent-skills.nix's plain-value shape rather than
-# mcp-registry.nix/local-models.nix's `{ lib }: ...` shape, since nothing
-# here needs list/attrset helpers at the data-authoring layer (clis.nix does
-# the mapAttrs-ing).
+# modules/features/dev/agents/clis.nix. Builder machinery (npm bootstrap,
+# mkHermesConfig, mkClaudeCodeWrapper/mkCodexWrapper/mkHermesWrapper, the
+# backend-env builders) stays in backends.nix; this file only holds the data
+# each builder is parameterized with.
 {
   # Hermes profile configs (~/.hermes/profiles/<name>/config.yaml, rendered
   # by mkHermesConfig) and their matching hermes-<name> wrapper
   # (mkHermesWrapper { profile = name; }). The base, non-profile `hermes`
   # command (~/.hermes/config.yaml) is not a lane — it is a single fixed
-  # mkHermesConfig call in clis.nix, since there is nothing to vary it
-  # against.
+  # mkHermesConfig call in clis.nix.
   #
   # Fields:
   #   toolsets        - platform_toolsets.cli list (required).
   #   mcpProfile       - mcp-registry.nix profile tier feeding mcp_servers;
-  #                      defaults to "evidence" (mirrors the pre-registry
-  #                      default arg of mkHermesConfig) when omitted.
+  #                      defaults to "evidence" when omitted.
   #   reasoningEffort  - defaults to "medium" in mkHermesConfig when omitted.
   #   delegation       - overrides layered onto mkHermesConfig's default
   #                      { max_iterations=100; max_concurrent_children=3;
@@ -88,8 +81,8 @@
     };
 
     # Muse Spark contributor tier via the Vercel AI Gateway. Meta gates the
-    # tier server-side ("select countries") and does not serve it to this
-    # account directly; the gateway carries it at contributor list prices.
+    # tier server-side ("select countries") and will not serve this account
+    # directly; the gateway carries it at contributor list prices.
     muse = {
       toolsets = [ "hermes-cli" ];
       model = {
@@ -101,8 +94,7 @@
     };
 
     # Local Ollama hub via the LiteLLM gateway; model names live in
-    # litellm.nix's model_list. A profile (not an imperative `hermes config
-    # set` at launch) so the default config is never mutated.
+    # litellm.nix's model_list.
     local = {
       toolsets = [ "hermes-cli" ];
       model = {
@@ -113,20 +105,13 @@
       apiKeyLiteral = "sk-local";
     };
 
-    # sinnix-z7v Hermes power-up, profiles 2/3 of 3 (director deferred — see
-    # below). Both point at the roster's existing MoE reasoning tiers, NOT
-    # true base models: a real local base-model pull needs a verified
-    # ollama/GGUF source (the only community tag found, kimsan0622/Qwen3-8B-
-    # Base, is unverified and a wrong tag fails a boot-time pull loudly, not
-    # silently — real risk, not laziness) and the alternative (Hyperbolic's
-    # Llama-3.1-405B-BASE API, the only confirmed big-base-model API per
-    # 2026-08-11 recon) needs a funded external account this module can't
-    # create. Both are legitimate blockers, not deferred-for-convenience;
-    # promote either lane in place here once one is resolved.
+    # Base-model exploration profile. Points at the roster's MoE reasoning
+    # tier, NOT a true base model: no verified local base-model ollama/GGUF
+    # source exists (a wrong tag fails the boot-time pull), and the only
+    # confirmed big base-model API (Hyperbolic Llama-3.1-405B-BASE) needs a
+    # funded external account. Promote this lane in place once either lands.
+    # Minimal toolset: a sampler explores completions, not web/file/delegation.
     sampler = {
-      # Base-model exploration profile: minimal toolset (a sampler explores
-      # completions, it doesn't need web/file/delegation), MoE reasoning
-      # tier standing in for true base access until the above resolves.
       toolsets = [ "hermes-cli" ];
       model = {
         default = "local-thinker";
@@ -138,11 +123,9 @@
     };
 
     oracle = {
-      # Research twin wired to nx0's evidence-and-verification pipeline
-      # (dots/_ai/workflows/deep-research.mjs) via the "research" MCP tier
-      # and delegation toolset — nx0 runs as a Workflow the operator invokes
-      # separately; this profile is oracle's own interactive counterpart,
-      # matching research's shape since both need the full evidence stack.
+      # Interactive counterpart to the nx0 deep-research Workflow
+      # (dots/_ai/workflows/deep-research.mjs); mirrors the `research`
+      # profile's shape since both need the full evidence stack.
       toolsets = [
         "web"
         "browser"
@@ -166,14 +149,11 @@
     };
   };
 
-  # Claude Code variants (mkClaudeCodeWrapper). `binName` is data, not
-  # mechanically derived from the lane key, because the family is not
-  # regular: every wrapper is named `claude-<lane>` EXCEPT the upstream
-  # installer-clobber workaround already documented in clis.nix — the
-  # `claude` binary name is unsafe to own, so the "lean"/default lane's file
-  # is `claude-lean` and a separate `claude` shell alias points at it
-  # (rendered from claudeLanes + one explicit remap in clis.nix, not a
-  # per-lane self-alias like the other four).
+  # Claude Code variants (mkClaudeCodeWrapper). `binName` is explicit data
+  # because the family is not regular: every wrapper is `claude-<lane>`, but
+  # the bare `claude` name is unsafe to own (the upstream installer clobbers
+  # it, see clis.nix), so the default lane's file is `claude-lean` with a
+  # `claude` shell alias pointing at it.
   #
   # `mcpProfile` selects both the mcp-registry.nix tier and the
   # `~/.config/claude/<mcp file>.json` basename ("full" -> "mcp", otherwise
@@ -182,12 +162,9 @@
   #
   # `env`/`model` (only on deepseek/local) parameterize
   # backends.nix's mkClaudeBackendEnv: `env.baseUrl` sets ANTHROPIC_BASE_URL,
-  # `env.authToken` is either `{ secretName = "<agenix secret>"; }` (read via
-  # the same secret-resolution shape as lib.sinnix.mkSecretLookup) or
-  # `{ literal = "<static token>"; }` for the LiteLLM loopback gateway (no
-  # real key enforced, but Claude Code requires a non-empty token), and
-  # `model` fans out into ANTHROPIC_MODEL / ANTHROPIC_DEFAULT_*_MODEL /
-  # CLAUDE_CODE_SUBAGENT_MODEL.
+  # `env.authToken` is either `{ secretName = "<agenix secret>"; }` or
+  # `{ literal = "<static token>"; }`, and `model` fans out into
+  # ANTHROPIC_MODEL / ANTHROPIC_DEFAULT_*_MODEL / CLAUDE_CODE_SUBAGENT_MODEL.
   claudeLanes = {
     full = {
       binName = "claude-full";
@@ -214,9 +191,8 @@
     };
     # Local models through the real Claude Code harness, via the LiteLLM
     # gateway that translates Anthropic <-> OpenAI
-    # (modules/services/litellm.nix). Full/default MCP profile. Model names
-    # are defined in that module's model_list; keep `model` in sync with an
-    # entry there.
+    # (modules/services/litellm.nix). Keep `model` in sync with an entry in
+    # that module's model_list.
     local = {
       binName = "claude-local";
       mcpProfile = "full";
@@ -231,10 +207,7 @@
   };
 
   # Codex variants (mkCodexWrapper). Unlike Claude, the "lean"/default lane
-  # has no naming conflict, so its file is the bare client name; `binName`
-  # still carries this explicitly for the same reason as claudeLanes (no
-  # single mechanical rule covers both the bare-name default and the
-  # `codex-<lane>` others cleanly).
+  # has no naming conflict, so its file is the bare client name.
   #
   # `mcpProfile` is passed straight through as the codex `--profile` arg and
   # SINNIX_CODEX_PROFILE value; the matching `<profile>.config.toml` (model +

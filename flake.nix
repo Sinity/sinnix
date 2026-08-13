@@ -4,9 +4,9 @@
   nixConfig = {
     extra-substituters = [
       "https://numtide.cachix.org"
-      # CUDA builds (ollama-cuda, koboldcpp/llama-cpp/whisper-cpp with
-      # cudaSupport) are not reliably served by cache.nixos.org; this cache
-      # turns the nvcc compiles into downloads. See flake/overlay/package/local-ai.nix.
+      # cache.nixos.org does not reliably serve CUDA builds (ollama-cuda,
+      # koboldcpp/llama-cpp/whisper-cpp with cudaSupport); this cache turns
+      # those nvcc compiles into downloads. See flake/overlay/package/local-ai.nix.
       "https://cuda-maintainers.cachix.org"
     ];
     extra-trusted-public-keys = [
@@ -20,15 +20,12 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
-    # Same branch as `nixpkgs`, but NOT `follows`-ed and NOT bumped by routine
-    # `update` (see flake/dev-shell.nix's `update` command). Feeds the
-    # CUDA-narrowed AI package set (flake/overlay/package/local-ai.nix:
-    # llama-cpp/whisper-cpp/koboldcpp/ollama-cuda via pkgsForCudaArch.sm_86).
-    # Every `nixpkgs` rev bump invalidates those derivation hashes with no
-    # possible cache hit (cuda-maintainers/chaotic-nyx build different
-    # nixpkgs revs than this repo pins), forcing an hours-long from-source CUDA
-    # recompile on every routine flake update. Bump deliberately and rarely:
-    # `sinnix update nixpkgs-ai`.
+    # Same branch as `nixpkgs`, but deliberately NOT `follows`-ed and excluded
+    # from routine `update` (flake/dev-shell.nix). Feeds the CUDA-narrowed AI
+    # package set (flake/overlay/package/local-ai.nix, pkgsForCudaArch.sm_86);
+    # any rev bump invalidates those derivation hashes with no possible cache
+    # hit and forces an hours-long from-source CUDA recompile. Bump
+    # deliberately and rarely: `sinnix update nixpkgs-ai`.
     nixpkgs-ai.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     flake-parts = {
@@ -87,21 +84,17 @@
     # Sinex is sourced from GitHub so system deployments follow pushed upstream
     # history instead of implicitly consuming the local checkout state.
     #
-    # NOTE: nixpkgs is deliberately NOT `follows`. Sinex is a ~464K-LOC Rust
-    # workspace built from source by crane; if its nixpkgs followed sinnix's,
-    # every `nix flake update` would rehash its buildInputs and force a full
-    # recompile (peak ~11.5 GiB rustc RSS — the deploy-OOM saga). Pinning sinex
-    # to its OWN locked nixpkgs keeps the derivation hash stable across sinnix
-    # nixpkgs bumps, so a sinex rev is compiled at most once and substituted
-    # from sinity.cachix.org thereafter. Since sinex#883 disabled automatic
-    # hosted Actions, CI no longer populates that cache; the desktop is the
-    # builder of record and `switch` publishes the sinex closure back to
-    # sinity.cachix.org after a successful activation (sinexCachePush in
-    # flake/command-registry.nix) for ethereal, reinstalls, and post-GC
-    # rebuilds. Trade: a small amount of store duplication (sinex's
-    # glibc/openssl/systemd vs the system's). Bump sinex's nixpkgs
-    # deliberately via `nix flake update --flake github:Sinity/sinex`-style
-    # rev bumps, not implicitly through sinnix.
+    # nixpkgs is deliberately NOT `follows`. Sinex is a large Rust workspace
+    # built from source by crane; following sinnix's nixpkgs would rehash its
+    # buildInputs on every `nix flake update` and force a full recompile (peak
+    # ~11.5 GiB rustc RSS). Its OWN locked nixpkgs keeps the derivation hash
+    # stable across sinnix nixpkgs bumps, so a sinex rev is compiled at most
+    # once and substituted from sinity.cachix.org thereafter. That cache is
+    # populated by the desktop, not CI: `switch` publishes the sinex closure
+    # after a successful activation (sinexCachePush in
+    # flake/command-registry.nix). Cost: some store duplication (sinex's
+    # glibc/openssl/systemd vs the system's). Bump sinex's nixpkgs deliberately
+    # upstream, not implicitly through sinnix.
     sinex = {
       url = "git+https://github.com/Sinity/sinex?ref=master";
       inputs.agenix.follows = "agenix";
@@ -128,10 +121,8 @@
     nix-vscode-extensions.inputs.nixpkgs.follows = "nixpkgs";
 
     # Beads (`bd`) durable issue tracker for coding-agent work memory.
-    # Unpinned: track the default branch so `nix flake update beads` picks up
-    # releases without a manual version bump. Pinning to v1.0.4 left us three
-    # releases (~2.5 months) behind, missing fixes for defects we were working
-    # around locally -- including the auto-import guard our own patch carried.
+    # Unpinned deliberately: tracks the default branch so `nix flake update
+    # beads` picks up releases without a manual version bump.
     beads = {
       url = "github:gastownhall/beads";
       inputs.nixpkgs.follows = "nixpkgs";

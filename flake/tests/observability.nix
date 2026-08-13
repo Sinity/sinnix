@@ -1,8 +1,6 @@
 # sinnix-observe offline-report runtime check — synthesizes sinex xtask
 # history, Polylogue live-ingest, and `below` cgroup/process TSV fixtures and
 # asserts the merged JSON/human report shape.
-#
-# Split out of the former flake/tests-runtime.nix monolith (sinnix-7bu).
 { inputs, ... }:
 {
   perSystem =

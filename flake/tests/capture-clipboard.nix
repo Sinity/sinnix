@@ -103,8 +103,8 @@ in
 
             # A handler that performs its nested wl-paste before draining the
             # watch payload deadlocks here: the 128 KiB producer cannot reach
-            # the marker, while fake wl-paste waits for that marker. This is
-            # the same cycle that blocked kitty's UI thread in sinnix-tutt.
+            # the marker, while fake wl-paste waits for that marker. The same
+            # cycle blocks kitty's UI thread in production.
             export DRAIN_MARKER="$TMPDIR/watch-input-drained"
             python3 -c 'import os, pathlib, sys; sys.stdout.buffer.write(b"x" * 131072); sys.stdout.flush(); pathlib.Path(os.environ["DRAIN_MARKER"]).touch()' \
               | timeout 5 "$watch"
@@ -115,8 +115,8 @@ in
             envelope_file="$(find "$TMPDIR/captures/clipboard" -maxdepth 1 -name 'clipboard-*.jsonl' | head -n1)"
             jq -e '.payload.size == 3145728' "$envelope_file" >/dev/null
 
-            # Reset the isolated fixture after the large-payload regression;
-            # the remaining assertions exercise the original text/binary flow.
+            # Reset the isolated fixture after the large-payload case; the
+            # remaining assertions exercise the plain text/binary flow.
             rm -rf "$TMPDIR/captures/clipboard" "$TMPDIR/state"
             mkdir -p "$TMPDIR/state"
             printf 'hello from the fixture' > "$FIXTURE_DIR/content"

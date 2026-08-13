@@ -146,8 +146,7 @@ let
 
   # LiteLLM exposes chat/coding/reasoning models in a different order from
   # the ollama pull roster above (RAG/embedding models are never listed —
-  # they have no litellmName). Order preserved verbatim from the
-  # hand-maintained litellm.nix model_list this registry replaces.
+  # they have no litellmName).
   litellmOrder = [
     "local-chat"
     "local-vision"
@@ -195,16 +194,13 @@ rec {
     {
       file = "qwen3-reranker-0.6b-q8_0.gguf";
       url = "https://huggingface.co/dean2155/Qwen3-Reranker-0.6B-Q8_0-GGUF/resolve/main/qwen3-reranker-0.6b-q8_0.gguf";
-      # Authoritative size from the HF tree API (the in-flight download the
-      # registry lane observed was mid-pull, not the true size).
+      # Authoritative size from the HF tree API.
       expectedBytes = 639150304;
     }
     {
-      # Referenced in commit addb85c ("the 4B Q4 GGUF sits on disk as the
-      # quality-tier swap") as the higher-quality manual swap-in alternative
-      # to the 0.6b default above; removed from /realm/media/model/gguf
-      # since. Kept for registry completeness — re-populate url/expectedBytes
-      # if it's re-sideloaded.
+      # Higher-quality manual swap-in for the 0.6b default above. Not
+      # currently on disk under /realm/media/model/gguf — re-populate
+      # expectedBytes if it is re-sideloaded.
       file = "Qwen.Qwen3-Reranker-4B.Q4_K_M.gguf";
       url = "https://huggingface.co/DevQuasar/Qwen.Qwen3-Reranker-4B-GGUF/resolve/main/Qwen.Qwen3-Reranker-4B.Q4_K_M.gguf";
       expectedBytes = null; # populate from the completed download
