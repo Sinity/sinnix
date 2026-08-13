@@ -1,23 +1,19 @@
 #!/usr/bin/env bash
 # PreToolUse hook (matcher: Agent) — enforce explicit model on subagent
-# dispatches, AND (polylogue-u49yr) append a "dispatch_start" row to the
-# fanout dispatch ledger for every Agent-tool call, before the deny/warn
-# decision below. The deny-hook already intercepts this event; extending it
-# in place avoids a second process reading the same stdin payload.
+# dispatches, and append a "dispatch_start" row to the fanout dispatch ledger
+# for every Agent-tool call, before the deny/warn decision below. Both live in
+# one hook because a second process cannot read the same stdin payload.
 #
-# Policy (global CLAUDE.md, "Claude Code Dispatch Doctrine"), tightened
-# 2026-08-11 (operator directive: the prior "named agent types get a soft
-# warning only" exemption produced warnings the operator could not act on
-# and had no enforcement teeth, so it is removed):
+# Policy (global CLAUDE.md, "Claude Code Dispatch Doctrine"):
 #   - fork subagents: exempt (they inherit context+model by design)
 #   - EVERY other dispatch — named agent-definition types (review, lane,
 #     triage, judge, Explore, Plan, claude-code-guide, ...), teammate spawns
 #     (Agent calls carrying a `name`), and bespoke-prompt types
 #     (general-purpose, claude, or no subagent_type) — HARD DENY without an
 #     explicit `model` field at the call site. A named agent's own frontmatter
-#     `model:` no longer exempts the dispatch; the caller must still pass
-#     model explicitly, so every launch is auditable at the call site instead
-#     of only in a definition file the caller may not have open.
+#     `model:` does not exempt the dispatch; the caller must pass model
+#     explicitly, so every launch is auditable at the call site instead of
+#     only in a definition file the caller may not have open.
 #   - On ALLOW, emit a visible systemMessage confirming exactly which model
 #     the dispatch used, so the operator has affirmative feedback (not just
 #     an absence of a warning) for every launch, including from the
@@ -36,14 +32,12 @@
 #   inherited-model count:
 #     jq -s '[.[] | select(.type=="dispatch_start" and .model=="inherited")] | length' <ledger>
 set -euo pipefail
-# NOTE: deliberately NOT `python3 - <<'PY' ... PY` — that form redirects the
+# NOTE: must NOT be `python3 - <<'PY' ... PY` — that form redirects the
 # heredoc body onto python3's own stdin (it's how `python3 -` receives the
-# script to run), which consumes the hook payload before `sys.stdin.read()`
-# ever gets it. Discovered while wiring the ledger below: with the old form
-# `json.load(sys.stdin)` always hit EOF, so the deny path (and now the
-# ledger write) silently never fired even though the script "ran" and exited
-# 0. Building the script text via command substitution and passing it as a
-# `-c` argument leaves the original piped stdin intact for python to read.
+# script to run), consuming the hook payload before `json.load(sys.stdin)`
+# ever sees it, so the whole hook silently no-ops while exiting 0. Building
+# the script text via command substitution and passing it as a `-c` argument
+# leaves the piped stdin intact for python to read.
 PY_SCRIPT=$(
   cat <<'PY'
 import datetime as _dt
