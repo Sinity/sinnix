@@ -2294,16 +2294,48 @@ def render_shaders(manifest: dict[str, Any], generated: str) -> str:
     )
 
     body += card(
-        "Animation costs a redraw",
+        "Animation, and what it costs",
         "<p>Hyprland does expose a <code>time</code> uniform to screen shaders, "
         "and a pointer position — but it pins them to constants unless "
         "<code>debug:damage_tracking</code> is <code>0</code>, because with damage "
-        "tracking on it has no reason to redraw a screen that has not changed. "
-        "So animation is real, not faked, and it is bought by redrawing the whole "
+        "tracking on it has no reason to redraw a screen that has not changed. So "
+        "animation is real, not faked, and it is bought by redrawing the whole "
         "screen every frame for as long as it is on.</p>"
+        "<p>Measured on DP-3 at 3840×2160/120Hz, from Hyprland's own "
+        "<code>debug:overlay</code> frame metrics: <strong>120fps and 1.05ms "
+        "render</strong> with no shader, <strong>120fps and 0.96ms</strong> with a "
+        "static shader, <strong>118fps and 1.12ms</strong> with an animated one and "
+        "damage tracking off. The heaviest composition in the library "
+        "(<code>vhs + crt + scanlines</code>, animated) came in at 118fps and "
+        "1.06ms. GPU draw moved 76.7W to 77.8W. That is a real cost and a small "
+        "one — a full-screen fragment pass is not what troubles a 3080.</p>"
+        "<p class=\"sub\">Caveat on those numbers: the desktop was busy while they "
+        "were taken, so it was already redrawing near-continuously. On a genuinely "
+        "idle screen damage tracking would skip most frames, and the gap would be "
+        "wider — bounded above by 120 full-screen passes a second at the times "
+        "above.</p>"
         "<p class=\"sub\"><code>apply</code> turns it on by itself when a stage "
-        "needs it and <code>off</code> puts it back. Shaders marked "
+        "needs it and <code>off</code> puts it back; every apply decides the "
+        "setting outright, so a static shader never inherits it. Shaders marked "
         "<em>needs animation on</em> above are frozen without it, not broken.</p>",
+        wide=True,
+    )
+
+    body += card(
+        "The error banner",
+        "<p>A screen shader that reads <code>time</code> or a pointer uniform while "
+        "damage tracking is on makes Hyprland paint a red banner across the top of "
+        "the display: <em>\"Screen shader uses uniform 'time', which requires "
+        "debug:damage_tracking to be switched off\"</em>. Turning damage tracking "
+        "off <em>before</em> the shader is applied is what prevents it, and that is "
+        "the order <code>sinnix-shader</code> uses — the banner is avoided rather "
+        "than dismissed after the fact.</p>"
+        "<p class=\"sub\">A stage's uniforms are only declared when it actually "
+        "uses them, so the static shaders never trip the check at all. The overlay "
+        "has no expiry, so <code>apply</code> clears any banner still up from "
+        "earlier before it starts and <code>off</code> clears it on the way out; "
+        "anything visible after an apply belongs to that apply. The manual "
+        "equivalent is <code>hyprctl seterror disable</code>.</p>",
         wide=True,
     )
 
