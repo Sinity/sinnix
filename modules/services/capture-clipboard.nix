@@ -160,11 +160,11 @@ let
           '{category: "text", mime: $mime, text: $text, size: $size, source_window: $source_window}')"
       fi
 
-      write_args=(write --capture-root "$capture_root" --lane clipboard --payload "$payload")
+      write_args=(write --capture-root "$capture_root" --lane clipboard)
       if [ -n "$raw_ref" ]; then
         write_args+=(--raw-ref "$raw_ref")
       fi
-      exec sinnix-capture "''${write_args[@]}"
+      printf '%s' "$payload" | exec sinnix-capture "''${write_args[@]}"
     '';
   };
 in

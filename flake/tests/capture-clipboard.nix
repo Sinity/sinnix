@@ -98,7 +98,7 @@ in
 
             # ── Text capture ────────────────────────────────────────────
             printf 'text/plain;charset=utf-8\n' > "$FIXTURE_DIR/types"
-            printf 'hello from the fixture' > "$FIXTURE_DIR/content"
+            python3 -c 'import os, pathlib; (pathlib.Path(os.environ["FIXTURE_DIR"]) / "content").write_bytes(b"x" * 3145728)'
             printf '{"class": "kitty", "title": "test terminal"}' > "$FIXTURE_DIR/activewindow.json"
 
             # A handler that performs its nested wl-paste before draining the
@@ -110,11 +110,22 @@ in
               | timeout 5 "$watch"
             unset DRAIN_MARKER
 
+            index_file="$TMPDIR/captures/clipboard/clipboard-index.jsonl"
+            test "$(wc -l < "$index_file")" -eq 1
+            envelope_file="$(find "$TMPDIR/captures/clipboard" -maxdepth 1 -name 'clipboard-*.jsonl' | head -n1)"
+            jq -e '.payload.size == 3145728' "$envelope_file" >/dev/null
+
+            # Reset the isolated fixture after the large-payload regression;
+            # the remaining assertions exercise the original text/binary flow.
+            rm -rf "$TMPDIR/captures/clipboard" "$TMPDIR/state"
+            mkdir -p "$TMPDIR/state"
+            printf 'hello from the fixture' > "$FIXTURE_DIR/content"
+            "$watch"
+
             # Firing again with the *same* content must be a silent no-op
             # (consecutive-duplicate de-dup).
             "$watch"
 
-            index_file="$TMPDIR/captures/clipboard/clipboard-index.jsonl"
             test "$(wc -l < "$index_file")" -eq 1
 
             envelope_file="$(find "$TMPDIR/captures/clipboard" -maxdepth 1 -name 'clipboard-*.jsonl' | head -n1)"
