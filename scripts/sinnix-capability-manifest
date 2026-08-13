@@ -60,7 +60,16 @@ find_dormant_hosts() {
     for dir in "$source_root/hosts"/*/; do
       host=$(basename "$dir")
       [[ "$host" == "$hostname" ]] && continue
-      grep -qE "^[[:space:]]*${host}[[:space:]]*=[[:space:]]*mkHost" "$source_root/flake/nixos.nix" && printf '%s\n' "$host"
+      # `if` rather than `rg -q ... && printf`: under set -e + pipefail, a
+      # trailing "&& cmd" whose left side is FALSE on the LAST loop
+      # iteration (the common case -- most hosts don't match) leaves that
+      # false exit status as find_dormant_hosts' own return value, which
+      # then poisons the `| jq` pipeline below and kills the whole script
+      # even though nothing actually went wrong (caught empirically: the
+      # capability-manifest Nix check failed silently with no stderr).
+      if rg -q "^[[:space:]]*${host}[[:space:]]*=[[:space:]]*mkHost" "$source_root/flake/nixos.nix"; then
+        printf '%s\n' "$host"
+      fi
     done | sort
   fi
 }
