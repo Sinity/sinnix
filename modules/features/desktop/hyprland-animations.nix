@@ -1,12 +1,12 @@
-# Opt-in Hyprland animation polish. Disabled by default.
+# Sole authority for Hyprland animations.
 #
 # Ports the bezier curves + animation rules from end-4/dots-hyprland
-# (Material You / expressiveSpatial style). The base Hyprland module
-# currently has animations.enabled = false — this module overrides that
-# with lib.mkForce when the feature is enabled.
-#
-# Enable with:
-#   sinnix.features.desktop.hyprlandAnimations.enable = true;
+# (Material You / expressiveSpatial style). Default-on, like every feature;
+# hosts that want stock Hyprland animation instead set
+# sinnix.features.desktop.hyprlandAnimations.enable = false. The base
+# Hyprland module sets no animation options at all, so no mkForce is needed
+# and a future conflict will surface as an option collision rather than
+# silently losing to load order.
 {
   mkFeatureModule,
   lib,
@@ -28,10 +28,10 @@ mkFeatureModule {
     }:
     {
       home-manager.users.${user} =
-        { lib, ... }:
+        _:
         {
           wayland.windowManager.hyprland.settings = {
-            animations = lib.mkForce {
+            animations = {
               enabled = true;
               bezier = [
                 "expressiveFastSpatial, 0.42, 1.67, 0.21, 0.90"
