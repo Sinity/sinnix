@@ -24,7 +24,6 @@
 
   # Every capability in modules/features/ is default-on; this host expresses
   # only configuration detail (subfeatures and option values), not enables.
-  sinnix.features.desktop.hyprlandAnimations.enable = true;
   sinnix.features.dev.editors.vscode.enable = true;
   sinnix.features.dev.editors.antigravity.enable = true;
 
