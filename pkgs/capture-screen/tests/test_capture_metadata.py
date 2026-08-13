@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 
 from PIL import Image
+from sinnix_capture_screen import capture as capture_module
 from sinnix_capture_screen.capture import (
     build_frame_payload,
     encode_webp,
@@ -73,3 +74,42 @@ def test_image_to_phash_array_is_square_and_matches_requested_size() -> None:
     im = Image.new("RGB", (1920, 1080), color=(50, 100, 150))
     arr = image_to_phash_array(im, size=32)
     assert arr.shape == (32, 32)
+
+
+def test_run_grim_never_combines_output_and_geometry(monkeypatch) -> None:
+    """grim exits 1 with "-o and -g are mutually exclusive" when given both.
+
+    Emitting both is what made every window-resolved capture fail while the
+    unit stayed `active running` -- the only records this lane ever wrote
+    were the null-window ones that happened to omit -g.
+    """
+    seen: list[list[str]] = []
+
+    class _Proc:
+        stdout = b"png"
+
+    def fake_run(cmd, **_kwargs):
+        seen.append(cmd)
+        return _Proc()
+
+    monkeypatch.setattr(capture_module.subprocess, "run", fake_run)
+
+    png, err = capture_module.run_grim("grim", "DP-3", "23,23 800x600")
+    assert (png, err) == (b"png", None)
+    assert seen[-1] == ["grim", "-g", "23,23 800x600", "-"]
+
+    png, err = capture_module.run_grim("grim", "DP-3", None)
+    assert (png, err) == (b"png", None)
+    assert seen[-1] == ["grim", "-o", "DP-3", "-"]
+
+
+def test_run_grim_returns_stderr_as_failure_reason(monkeypatch) -> None:
+    def fake_run(cmd, **_kwargs):
+        raise capture_module.subprocess.CalledProcessError(
+            1, cmd, output=b"", stderr=b"-o and -g are mutually exclusive\n"
+        )
+
+    monkeypatch.setattr(capture_module.subprocess, "run", fake_run)
+    png, err = capture_module.run_grim("grim", "DP-3", None)
+    assert png is None
+    assert "mutually exclusive" in err

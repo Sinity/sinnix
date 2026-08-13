@@ -25,25 +25,37 @@ PHASH_IMAGE_SIZE = 32  # hash_size(8) * high_freq_factor(4), see hashing.phash64
 
 def run_grim(
     grim_bin: str, monitor: str, geometry: str | None, *, timeout: float = 5.0
-) -> bytes | None:
+) -> tuple[bytes | None, str | None]:
     """Capture one PNG frame to stdout via grim (wlr-screencopy protocol).
 
-    `geometry`, when given, is a grim `-g "X,Y WxHh"`-style string cropping
+    `geometry`, when given, is a grim `-g "X,Y WxH"`-style string cropping
     to a single window's bounding box -- the per-window framing mechanism
     (3.1) in the absence of a hyprland-toplevel-export protocol on this
-    Hyprland version. Returns None on any failure (missing binary, timeout,
-    non-zero exit, e.g. the output just went idle/disabled)."""
-    cmd = [grim_bin, "-o", monitor]
+    Hyprland version. grim rejects `-o` together with `-g` ("-o and -g are
+    mutually exclusive"), and `-g` is already in the global compositor
+    coordinate space Hyprland's `at`/`size` report, so a geometry crop
+    replaces the output selector rather than narrowing it.
+
+    Returns `(png_bytes, None)` on success and `(None, reason)` on failure,
+    where `reason` carries grim's own stderr. Callers MUST log the reason:
+    swallowing it is what let the `-o`/`-g` conflict above degrade this
+    lane silently for its entire deployed lifetime."""
     if geometry:
-        cmd += ["-g", geometry]
-    cmd.append("-")
+        cmd = [grim_bin, "-g", geometry, "-"]
+    else:
+        cmd = [grim_bin, "-o", monitor, "-"]
     try:
         proc = subprocess.run(cmd, capture_output=True, timeout=timeout, check=True)
-    except (OSError, subprocess.SubprocessError):
-        return None
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or b"").decode("utf-8", "replace").strip()
+        return None, f"exit {exc.returncode}: {stderr or '(no stderr)'}"
+    except subprocess.TimeoutExpired:
+        return None, f"timed out after {timeout}s"
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, f"{type(exc).__name__}: {exc}"
     if not proc.stdout:
-        return None
-    return proc.stdout
+        return None, "grim produced no output"
+    return proc.stdout, None
 
 
 def load_image(png_bytes: bytes) -> Image.Image:

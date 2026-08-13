@@ -203,11 +203,14 @@ def run(args: argparse.Namespace) -> int:
         ):
             grim_geometry = f"{geometry['x']},{geometry['y']} {geometry['width']}x{geometry['height']}"
 
-        png_bytes = capture.run_grim(args.grim_bin, monitor_name, grim_geometry)
+        png_bytes, grim_error = capture.run_grim(
+            args.grim_bin, monitor_name, grim_geometry
+        )
         if png_bytes is None:
             attempt_gate.record_failure(attempt_now)
             print(
-                f"sinnix-capture-screen: grim capture failed (trigger={trigger})",
+                f"sinnix-capture-screen: grim capture failed (trigger={trigger} "
+                f"monitor={monitor_name} geometry={grim_geometry}): {grim_error}",
                 file=sys.stderr,
             )
             return
