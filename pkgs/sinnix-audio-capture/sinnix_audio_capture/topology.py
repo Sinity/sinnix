@@ -6,8 +6,8 @@ MPRIS capture lane (modules/services/capture-mpris.nix) by timestamp.
 `-a` (--hide-params) drops the bulky SPA pod parameter dumps that make raw
 `pw-mon` output unusably heavy; `-p` (--print-separator) prints a blank
 line after every event, which is what makes this streamable line-by-line
-instead of needing to buffer the whole graph. Verified live on sinnix-prime
-2026-08-12 against `pw-mon -a -p`: an `added:`/`removed:` block looks like
+instead of needing to buffer the whole graph. An `added:`/`removed:` block
+looks like
 
     added:
         id: 49

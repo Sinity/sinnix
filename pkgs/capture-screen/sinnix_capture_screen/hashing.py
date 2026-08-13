@@ -97,9 +97,9 @@ def is_near_duplicate(
     prev_hash: int | None, new_hash: int, *, threshold: int = 4
 ) -> bool:
     """True when `new_hash` is within `threshold` Hamming bits of
-    `prev_hash` for the SAME window -- the per-window dedup gate from
-    sinnix-9pd 3.2. `prev_hash is None` (first frame ever seen for this
-    window) is never a duplicate."""
+    `prev_hash` for the SAME window -- the per-window dedup gate.
+    `prev_hash is None` (first frame ever seen for this window) is never a
+    duplicate."""
     if prev_hash is None:
         return False
     return hamming_distance(prev_hash, new_hash) <= threshold
@@ -172,8 +172,8 @@ class DailyThrottleGuard:
 
 
 # ---------------------------------------------------------------------------
-# 30-second periodic floor (3.1): long stretches with no window/workspace
-# change still get sampled.
+# 30-second periodic floor: long stretches with no window/workspace change
+# still get sampled.
 # ---------------------------------------------------------------------------
 
 
@@ -186,13 +186,11 @@ def should_capture_periodic(
 
 
 # ---------------------------------------------------------------------------
-# Idle-pause trigger: a simple idle-detection heuristic (cursor position
-# stops changing), approximating the "typing pause" trigger from 3.1. A true
-# keystroke-timing signal (`libinput debug-events`) needs the running
-# user's seat-ACL'd graphical session and its own subprocess/permission
-# shape -- see daemon.py's module docstring. This is deliberately the
-# "don't over-engineer" reading of the bead, not the full-fidelity
-# keystroke-timing version.
+# Idle-pause trigger: a simple idle-detection heuristic (cursor position stops
+# changing), approximating a "typing pause". A true keystroke-timing signal
+# (`libinput debug-events`) would need the running user's seat-ACL'd graphical
+# session and its own subprocess/permission shape -- see daemon.py's module
+# docstring.
 # ---------------------------------------------------------------------------
 
 

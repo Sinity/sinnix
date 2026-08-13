@@ -1,9 +1,7 @@
 """`sinnix-audio-capture pause <duration>` -- explicit gap records.
 
-Design call (sinnix-nm7 supersession note asked for a justified pick between
-two options): the recorder keeps running; `pause` only writes an index
-annotation. This is not a coin flip -- it is the direct consequence of two
-already-settled, non-negotiable invariants for this design:
+The recorder keeps running; `pause` only writes an index annotation. That
+follows from two non-negotiable invariants of this design:
 
   - "always-on, BOTH channels, from first enablement... the recorder unit
     must have ZERO dependency on any VAD library/model/binary" -- pause

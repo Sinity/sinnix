@@ -26,11 +26,10 @@ def test_segment_filename_shape():
 
 
 def test_opusenc_argv_sets_application_and_dtx_ctls():
-    # DTX and the output path are true for every profile; the application
-    # CTL is asserted against the profile's own setting rather than a
-    # literal, because which application a CHANNEL uses is a tuning
-    # decision (mic moved voip -> audio when the lane became an archive
-    # tier) while the RENDERING of that decision is the contract.
+    # DTX and the output path are true for every profile; the application CTL
+    # is asserted against the profile's own setting rather than a literal,
+    # because which application a CHANNEL uses is a tuning decision while the
+    # RENDERING of that decision is the contract.
     profile = CHANNEL_PROFILES["mic"]
     argv = opusenc_argv("opusenc", profile, Path("/tmp/out.opus.partial"))
     assert "--set-ctl-int" in argv

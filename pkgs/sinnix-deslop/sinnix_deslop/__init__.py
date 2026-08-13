@@ -1,8 +1,8 @@
-"""sinnix-deslop: regex-based LLM-slop phrase stripping (sinnix-uou).
+"""sinnix-deslop: regex-based LLM-slop phrase stripping.
 
-Output cleanup, never a generation-time gate (no-prose-grepping-for-
-ENFORCEMENT: this filters cosmetic prose after the fact, it does not police
-generation). Phrase list lives in phrases.txt as versioned data, not code.
+Output cleanup, never a generation-time gate: this filters cosmetic prose
+after the fact, it does not police generation. The phrase list lives in
+phrases.txt as versioned data, not code.
 """
 
 from .filter import Rule, deslop, load_rules

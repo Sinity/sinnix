@@ -43,7 +43,7 @@ PROFILE_CAPABILITIES: dict[str, frozenset[Capability]] = {
 }
 
 
-# sinnix-lpuv: per-pipe data-permission model, screenpipe-inspired. Holding
+# Per-pipe data-permission model. Holding
 # CAPTURE_READ (above) means "may query SOME capture lanes"; this table is
 # the finer-grained per-lane split PROFILE_CAPABILITIES can't express on its
 # own (that dict is profile -> broad category, not profile -> specific

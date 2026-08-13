@@ -188,14 +188,12 @@ def run_recorder(
         time.sleep(0.2)
         while not stop_event.is_set():
             target_name = resolve_target(channel, targets)
-            # Resolve to a stable object.serial rather than targeting by
-            # name (sinnix-500c): `--target <name>` does not reliably
-            # attach to the right node on reconnect and, even when it
-            # does, is serviced by a slow fallback path instead of the
-            # real-time graph -- see resolve_node_serial's docstring. Fall
-            # back to the raw name if resolution fails (pw-dump error, or
-            # the node isn't visible yet); that's the pre-fix behavior, not
-            # a regression.
+            # Resolve to a stable object.serial rather than targeting by name:
+            # `--target <name>` does not reliably attach to the right node on
+            # reconnect and, even when it does, is serviced by a slow fallback
+            # path instead of the real-time graph -- see resolve_node_serial's
+            # docstring. Fall back to the raw name if resolution fails (pw-dump
+            # error, or the node isn't visible yet).
             target = (
                 resolve_node_serial(pw_dump_bin, target_name, run=run)
                 or target_name

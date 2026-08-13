@@ -1,83 +1,40 @@
 """sinnix-capture-screen daemon: Hyprland-event + idle-pause + 30s-floor
 triggered per-window screen frame capture, p-hash deduped, WebP-encoded.
 
-FRAME-GRAB MECHANISM (read before touching this file) -- sinnix-9pd 3.1
-required "the Noctalia-native retained-screencopy path, NOT raw grim" per
-the closed sinnix-xuk/sinnix-kvc black-frame bugs, with an explicit
-fallback clause: "If Noctalia doesn't expose a scriptable screencopy
-interface you can drive programmatically, fall back to the wlr-screencopy
-protocol directly ... investigate precisely what the fix actually was
-before choosing your approach." That investigation, done at authorship
-time (2026-08-12):
+FRAME-GRAB MECHANISM (read before touching this file). Frames come from
+`grim`, not from Noctalia's own screenshot IPC. Noctalia's ScreenshotService
+exposes only whole-OUTPUT and REGION capture (`noctalia msg screenshot-region`
+/ `screenshot-fullscreen`), fire-and-forget to a fixed directory plus optional
+clipboard copy, with no raw-bytes-to-stdout mode and no per-window capture at
+all -- there is nothing there this daemon could drive per-window, per-trigger,
+at low latency, without disk and clipboard side effects on every capture.
 
-  - Noctalia v5 (github:noctalia-dev/noctalia-shell, pinned rev
-    3d7b9869) is a native C++/Qt app, not Quickshell-based. Its
-    ScreenshotService (src/capture/screenshot_service.{h,cpp}) only
-    exposes whole-OUTPUT and REGION capture via its IPC (`noctalia msg
-    screenshot-region` / `screenshot-fullscreen [monitor|all|pick]`) --
-    fire-and-forget, writes to a fixed configured directory + optional
-    clipboard copy, no raw-bytes-to-stdout mode and no per-WINDOW capture
-    at all (no hyprland-toplevel-export protocol is wired in its source --
-    only wlr-screencopy-unstable-v1 and wlr-foreign-toplevel-management).
-    There is no scriptable interface this daemon could drive per-window,
-    per-trigger, at low latency, without writing to disk + clipboard side
-    effects on every capture.
-  - So per the bead's own fallback clause: this daemon drives `grim`
-    directly. Critically, `grim` uses the SAME wlr-screencopy protocol
-    Noctalia's native path uses -- the two closed bugs' fix was NOT
-    "use Noctalia's binary instead of grim's", it was a Hyprland
-    COMPOSITOR-side render setting: `render:keep_unmodified_copy = 1`
-    (retain an unmodified SDR copy for screencopy clients) plus
-    `render:use_shader_blur_blend = true`
-    (modules/features/desktop/hyprland/default.nix), which sinnix-kvc's
-    closure evidence shows fixed BOTH grim/grimblast raw captures AND
-    Noctalia's native capture simultaneously -- sinnix-xuk's own closure
-    reason states "current diagnostic grim/grimblast raw captures are
-    non-black" once that setting was live. The setting is compositor-
-    global, applying to any wlr-screencopy client; it is not something
-    "Noctalia's binary" does that a `grim` invocation cannot. Per-window
-    framing (vs. Noctalia's output/region-only granularity) is done here
-    by cropping grim's capture to the focused window's geometry
-    (`hyprctl activewindow -j`'s `at`/`size`), which is the same
-    -g "X,Y WxH" mechanism grim already documents for slurp-driven region
-    capture.
+`grim` speaks the same wlr-screencopy protocol Noctalia's native path uses, so
+this is not a downgrade. The known black-frame failure is compositor-side, not
+client-side: it is fixed by `render:keep_unmodified_copy = 1` plus
+`render:use_shader_blur_blend = true`
+(modules/features/desktop/hyprland/default.nix), which is global to every
+wlr-screencopy client. That fix does not always hold -- the underlying
+Hyprland/NVIDIA HDR screencopy bug can recur even with both options set, with
+the signature "GBM: Failed to allocate a GBM buffer: format XR30 isn't
+supported by primary backend" in hyprland.log, and both grim and Noctalia go
+solid-color together when it does. This daemon does not try to fix that;
+`is_degenerate_frame()` (hashing.py) refuses to persist a flat single-color
+frame, and this module logs loudly and counts it as a capture-attempt failure
+rather than writing black frames into the lake forever.
 
-LIVE REGRESSION FOUND DURING THIS LANE'S AUTHORSHIP (2026-08-12, NOT fixed
-by this change -- explicitly out of this bead's CORE-tier scope, flagged
-for the coordinator/operator): re-testing on sinnix-prime live, BOTH grim
-(direct `grim -o DP-3`) and Noctalia's native `noctalia msg
-screenshot-fullscreen` currently produce solid single-color frames again.
-`hyprland.log` shows the exact sinnix-xuk GBM error signature reappearing:
-"GBM: Failed to allocate a GBM buffer: format XR30 isn't supported by
-primary backend" / "Couldn't allocate a gbm buffer ... format XR30" --
-live, right now, on this host, with `render:keep_unmodified_copy=1` and
-`render:use_shader_blur_blend=true` both confirmed still set
-(`hyprctl getoption`). This means the compositor-side fix that closed
-sinnix-xuk/sinnix-kvc is not currently holding -- either an intermittent
-recurrence of the same upstream Hyprland/NVIDIA HDR screencopy issue those
-bugs already documented as "not fully resolved" upstream, or a fresh
-regression. This daemon does NOT attempt to fix that live GPU/compositor
-bug (out of scope, needs a dedicated operator-present session per
-sinnix-xuk's own guidance); instead `is_degenerate_frame()` (hashing.py)
-refuses to persist a flat/single-color frame and this module logs loudly
-and counts it as a capture-attempt failure rather than silently writing
-black frames into the lake forever. See the worker report for the full
-live evidence (hyprland.log excerpt, `identify -verbose` stats).
+Per-window framing is done by cropping grim's capture to the focused window's
+geometry (`hyprctl activewindow -j`'s `at`/`size`) via grim's own
+-g "X,Y WxH" region mechanism.
 
-TYPING-PAUSE TRIGGER: the bead allows "a simple idle-detection heuristic
-... don't over-engineer this" if a keystroke-timing signal isn't cheaply
-available. It wasn't, cheaply, here: `libinput debug-events` needs to open
-/dev/input/event*, which is only unprivileged for a systemd --user service
-tied to the active graphical session's logind seat ACL -- building that
-whole subprocess/permission shape inside capture-screen just for
-a coarse pause signal would be exactly the over-engineering the bead
-warns against. Instead this daemon polls `hyprctl cursorpos` (already
-being called for other reasons) once per loop tick and fires
-`hashing.PauseDetector` when the cursor has been stationary for
-`--idle-pause-seconds`. This approximates "user stopped interacting", not
-literally "user stopped typing"; a keystroke-timed version is a natural
-follow-up once/if this daemon is rebuilt on the shared sinnix-capture
-input primitives.
+TYPING-PAUSE TRIGGER: a keystroke-timing signal is not cheaply available here.
+`libinput debug-events` needs to open /dev/input/event*, which is unprivileged
+only for a systemd --user service tied to the active graphical session's logind
+seat ACL -- a whole subprocess/permission shape for a coarse pause signal.
+Instead this daemon polls `hyprctl cursorpos` (already called for other
+reasons) once per loop tick and fires `hashing.PauseDetector` when the cursor
+has been stationary for `--idle-pause-seconds`. That approximates "user stopped
+interacting", not literally "user stopped typing".
 """
 
 from __future__ import annotations

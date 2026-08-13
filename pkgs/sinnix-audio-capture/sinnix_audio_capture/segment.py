@@ -1,9 +1,8 @@
 """Hour-aligned Opus segment writer.
 
-Design departure from the audio-capture bead's original sketch (recorded on
-sinnix-nm7): there is no lossless intermediate tier. `pw-record` output is
-piped directly into `opusenc` in raw-PCM mode -- Opus itself IS the raw/
-archive tier. `opusenc` has no `--application`/`--dtx` command-line flags
+There is no lossless intermediate tier: `pw-record` output is piped directly
+into `opusenc` in raw-PCM mode, so Opus itself IS the raw/archive tier.
+`opusenc` has no `--application`/`--dtx` command-line flags
 (verified against opus-tools v0.2 source, gitlab.xiph.org/xiph/opus-tools);
 both are set via `--set-ctl-int <request>=<value>` using the numeric
 request/value constants from upstream libopus's opus_defines.h:
@@ -11,16 +10,9 @@ request/value constants from upstream libopus's opus_defines.h:
     OPUS_SET_APPLICATION_REQUEST = 4000   OPUS_APPLICATION_VOIP  = 2048
     OPUS_SET_DTX_REQUEST         = 4016   OPUS_APPLICATION_AUDIO = 2049
 
-Live-verified on sinnix-prime 2026-08-12: encoding 2s of raw silence at
-16kHz/mono/24kbps with `--set-ctl-int 4000=2048 --set-ctl-int 4016=1`
-produced "Encoding using libopus 1.6.1 (VoIP)" and collapsed the actual
-bitrate to ~1.7kbit/s -- DTX is doing its job at the codec level, exactly as
-the bead's supersession note requires ("silence collapses via Opus DTX+VBR,
-not gating logic"). Those numbers are the settings as they were ON THAT
-DATE and are left as recorded; the mic profile has since moved to
-48kHz/mono/96kbps/audio (see CHANNEL_PROFILES below for why). The DTX
-finding is what that measurement establishes, and it is independent of
-rate and bitrate -- silence still collapses at the codec level.
+Silence collapses at the codec level through Opus DTX+VBR, independent of
+sample rate and bitrate, so this lane needs no gating logic to keep quiet
+stretches cheap.
 
 Segment rotation: `opusenc` finalizes a complete, valid Ogg Opus file only
 when its stdin reaches EOF, so the natural fsync-on-close point is closing
@@ -62,25 +54,21 @@ class ChannelProfile:
     application: str  # "voip" | "audio" -- see OPUS_APPLICATION_CTL_VALUE
 
 
-# Both channels are an ARCHIVE tier, not an ASR feed. The operator's
-# standing requirement (2026-08-13) is "fairly high fidelity, overkill
-# better than otherwise, human transparency at the very minimum".
+# Both channels are an ARCHIVE tier, not an ASR feed: the operator's standing
+# requirement is high fidelity, overkill preferred.
 #
-# mic was 16000/mono/24k/voip, chosen for speech intelligibility. That is
-# the wrong tier for an archive and the loss is irreversible at capture
-# time: a 16 kHz sample rate hard-caps audio bandwidth at 8 kHz, so
-# everything non-speech in the room -- music, environment, the timbre that
-# speaker identification (sinnix-7oly) and diarization depend on -- is
-# discarded before it is ever written. `voip` compounds it by applying
-# speech-optimised codec modes to what is really an ambient recording.
-# Downstream consumers can always downsample; nothing can recover a band
-# that was never captured.
+# Do not lower these toward speech-optimised settings. Loss here is
+# irreversible at capture time: a 16 kHz sample rate hard-caps audio bandwidth
+# at 8 kHz, discarding everything non-speech in the room -- music, environment,
+# the timbre speaker identification and diarization depend on -- before it is
+# ever written, and `application="voip"` applies speech-optimised codec modes
+# to what is really an ambient recording. Downstream consumers can always
+# downsample; nothing can recover a band that was never captured.
 #
-# Cost is not the constraint. At 48 kHz mono 96k the worst case is ~1.04
-# GB/day (~378 GB/year) of CONTINUOUS content, against 1.1 TB free on
-# /realm -- and Opus DTX collapses true silence to ~1.7 kbit/s, so an
-# unplugged or quiet mic costs almost nothing. Mono is deliberate: this is
-# one capsule, and a synthesised second channel would be fake data.
+# Cost is not the constraint: Opus DTX collapses true silence to a couple of
+# kbit/s, so an unplugged or quiet mic costs almost nothing. Mono on the mic is
+# deliberate -- it is one capsule, and a synthesised second channel would be
+# fake data.
 CHANNEL_PROFILES: dict[str, ChannelProfile] = {
     "mic": ChannelProfile(rate=48000, channels=1, bitrate_kbps=96, application="audio"),
     "sink-monitor": ChannelProfile(

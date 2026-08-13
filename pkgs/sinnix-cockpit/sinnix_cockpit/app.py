@@ -1,11 +1,9 @@
 """Read-only cockpit over the steering store: /today, /calibration, /activities.
 
-v0 scope (sinnix-jfiy.1): plain server-rendered HTML with a meta-refresh tag
-for liveness, no client-side JS framework. The design note names FastAPI+htmx
-as the shape; htmx itself is a static asset with no functional need here
-since every route is read-only (no forms, no partial-swap interactivity to
-justify pulling in a client-side library for a fully offline localhost
-service) — dropped for v0, revisit if a write-capable cockpit route lands.
+Plain server-rendered HTML with a meta-refresh tag for liveness, no
+client-side JS framework: every route is read-only, so there are no forms and
+no partial-swap interactivity to justify pulling a client-side library into a
+fully offline localhost service. Revisit if a write-capable route lands.
 """
 
 from __future__ import annotations

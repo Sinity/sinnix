@@ -61,9 +61,9 @@ def test_resolve_target_mic_uses_source():
 
 
 def test_resolve_target_sink_monitor_uses_bare_sink_name():
-    # sinnix-500c: `<sink-name>.monitor` is not a real PipeWire object --
-    # the monitor is exposed as ports on the sink node itself, confirmed
-    # absent from a live `pw-dump`. Targeting the sink node's own name
+    # `<sink-name>.monitor` is not a real PipeWire object -- the monitor is
+    # exposed as ports on the sink node itself, and no such node appears in
+    # `pw-dump`. Targeting the sink node's own name
     # (resolved to a serial by resolve_node_serial before use) is what
     # actually attaches a capture stream to its monitor ports.
     targets = DefaultTargets(sink="bluez_output.foo")

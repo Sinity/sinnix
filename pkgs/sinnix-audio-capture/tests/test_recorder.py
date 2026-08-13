@@ -7,11 +7,9 @@ from sinnix_audio_capture.segment import CHANNEL_PROFILES
 
 def test_pw_record_argv_mic_no_target():
     # Derived from the profile, not hardcoded: the invariant is that the
-    # renderer passes the profile through faithfully, not that the mic
-    # happens to be at some particular rate. Pinning the literal made this
-    # a fossilised copy of the config -- it failed when the archive tier
-    # was raised from 16 kHz to 48 kHz, which is a deliberate change, while
-    # never testing anything the renderer could actually get wrong.
+    # renderer passes the profile through faithfully, not that the mic happens
+    # to be at some particular rate. A pinned literal would only fossilise the
+    # config and break on deliberate retunes.
     profile = CHANNEL_PROFILES["mic"]
     argv = pw_record_argv("pw-record", profile, None)
     assert argv == [

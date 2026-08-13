@@ -23,10 +23,9 @@ SCOPE_UNIT_PATTERN = re.compile(
     r"^sinnix-(agent|build|background|gpu-runtime|nix-build|system)-\d+-\d+\.scope$"
 )
 
-# Scope targets intentionally support only the reversible verb for now (sinnix-
-# pl37 design note 2: prefer stop/terminate over raw SIGKILL; `systemctl stop`
-# on a scope sends SIGTERM then escalates to SIGKILL on timeout on its own --
-# a separate explicit kill/escalate verb is future work, not implemented here).
+# Scope targets support only the reversible verb: `systemctl stop` on a scope
+# sends SIGTERM and escalates to SIGKILL on its own timeout, so no explicit
+# kill/escalate verb exists here.
 SCOPE_ACTIONS = {"stop"}
 
 
@@ -346,7 +345,7 @@ class ActionService:
         """Admit a sinnix-scope transient unit: name-shape AND live-state, not
         either alone. A name match on a unit that has already exited (or never
         existed) is exactly the stale-target case expected_revision plus this
-        check must both reject -- see sinnix-pl37 design note 1."""
+        check must both reject."""
         if not SCOPE_UNIT_PATTERN.match(unit):
             raise ActionError(
                 "scope target does not match a sinnix-placed transient scope name",
@@ -466,8 +465,8 @@ class ActionService:
             command = [self.controller, "interrupt", "--job", job_id]
         elif resolved.get("kind") == "scope":
             # stop, not kill: systemctl stop on a scope sends SIGTERM to every
-            # process in it and escalates to SIGKILL on its own timeout -- the
-            # reversible-first semantics the bead asks for, for free.
+            # process in it and escalates to SIGKILL on its own timeout, which
+            # is the reversible-first semantics this action wants.
             command = [
                 "systemctl",
                 "--user" if resolved["manager"] == "user" else "--system",

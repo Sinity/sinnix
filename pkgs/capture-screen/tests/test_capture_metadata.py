@@ -23,8 +23,8 @@ def test_build_frame_payload_matches_bead_schema() -> None:
         sha256="deadbeef",
         trigger="hyprland-event",
     )
-    # sinnix-9pd 3.2: {ts, window_class, window_title, workspace, geometry,
-    # monitor, sha256} -- every required field present with the right value.
+    # {ts, window_class, window_title, workspace, geometry, monitor, sha256}
+    # -- every required field present with the right value.
     assert payload["ts"] == 1723459200.123
     assert payload["window_class"] == "kitty"
     assert payload["window_title"] == "sinex"

@@ -2,7 +2,7 @@
 
 Bumping SCHEMA_VERSION is an envelope-shape change (fields added/removed/
 retyped here), not a per-lane payload change -- coordinate with lynchpin's
-capture readers before bumping, per the sinnix-fjq precedent.
+capture readers before bumping.
 """
 
 from __future__ import annotations

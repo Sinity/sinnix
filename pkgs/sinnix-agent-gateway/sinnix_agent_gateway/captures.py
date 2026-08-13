@@ -9,8 +9,8 @@ from .config import GatewayConfig
 
 
 class CaptureService:
-    """sinnix-lpuv: per-pipe (per capture-lane) data-permission model over
-    the sinnix-capture-v1 envelope lake, screenpipe-inspired. Enforcement
+    """Per-pipe (per capture-lane) data-permission model over the
+    sinnix-capture-v1 envelope lake. Enforcement
     lives in Principal.filter_lanes/require_lane (capabilities.py); this
     service is the mechanical read path, matching ObserveService's
     shell-to-CLI pattern rather than reimplementing envelope parsing here.
