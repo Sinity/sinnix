@@ -1,0 +1,407 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Compose, apply and clear Hyprland screen shaders from the dots library
+# runtimeInputs: hyprland glslang
+
+"""Screen-shader playground for Hyprland.
+
+The library lives in ~/.config/hypr/shaders (an out-of-store symlink to the
+repo's dots/hypr/shaders), so editing a stage and re-running `apply` needs no
+rebuild.
+
+A stage file NAME.glsl is not a whole shader. It may define either or both of
+
+    vec2 NAME_warp(vec2 uv)            applied to the sampling coordinate
+    vec4 NAME_shade(vec4 c, vec2 uv)   applied to the sampled colour
+
+and this tool composes any number of them into one complete fragment shader:
+every warp in order, then one texture fetch, then every shade in order, each
+receiving the final warped coordinate. Hyprland accepts a single
+decoration:screen_shader path, so composition into one generated file is the
+only form stacking can take.
+
+Stages that resample `tex` themselves (chromatic, edges, bloom, vhs) read the
+*unmodified* screen, not the previous stage's output -- a single pass has no
+intermediate buffer to read back.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import random
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+RUNTIME = Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000")) / "sinnix" / "shader"
+STATE = RUNTIME / "state.json"
+
+# Hyprland pins `time` and the pointer uniforms to constants unless damage
+# tracking is off, because with damage tracking on it has no reason to redraw a
+# static screen. See Hyprland 0.55.4 src/render/OpenGL.cpp:1227.
+LIVE_UNIFORMS = {
+    "time",
+    "pointer_position",
+    "pointer_last_active",
+    "pointer_hidden",
+    "pointer_killing",
+    "pointer_shape",
+    "pointer_shape_previous",
+}
+
+OPTIONAL_UNIFORMS = {
+    "time": "uniform float time;",
+    "wl_output": "uniform int wl_output;",
+    "pointer_position": "uniform vec2 pointer_position;",
+    "pointer_size": "uniform float pointer_size;",
+    "pointer_last_active": "uniform float pointer_last_active;",
+    "pointer_inactive_timeout": "uniform float pointer_inactive_timeout;",
+    "pointer_hidden": "uniform int pointer_hidden;",
+    "pointer_killing": "uniform int pointer_killing;",
+    "pointer_shape": "uniform int pointer_shape;",
+    "pointer_shape_previous": "uniform int pointer_shape_previous;",
+}
+
+DAMAGE_DEFAULT = 2
+
+
+def library() -> Path:
+    override = os.environ.get("SINNIX_SHADER_DIR")
+    if override:
+        return Path(override)
+    config = os.environ.get("XDG_CONFIG_HOME") or f"{os.environ.get('HOME', '')}/.config"
+    return Path(config) / "hypr" / "shaders"
+
+
+def stages() -> dict[str, Path]:
+    found = {}
+    for path in sorted(library().glob("*.glsl")):
+        if not path.name.startswith("_"):
+            found[path.stem] = path
+    return found
+
+
+def describe(path: Path) -> str:
+    first = path.read_text(encoding="utf-8").splitlines()[:1]
+    if first and first[0].startswith("//"):
+        return first[0].lstrip("/ ").strip()
+    return ""
+
+
+def symbol(name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_]", "_", name)
+
+
+def hyprctl(*arguments: str) -> str:
+    binary = shutil.which("hyprctl")
+    if binary is None:
+        raise SystemExit("sinnix-shader: hyprctl is not on PATH; is Hyprland running?")
+    result = subprocess.run(
+        [binary, *arguments], capture_output=True, text=True, timeout=10, check=False
+    )
+    return result.stdout.strip()
+
+
+def option(name: str, field: str):
+    try:
+        return json.loads(hyprctl("getoption", name, "-j")).get(field)
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
+def compose(names: list[str]) -> str:
+    available = stages()
+    unknown = [n for n in names if n not in available]
+    if unknown:
+        raise SystemExit(f"sinnix-shader: no such shader: {', '.join(unknown)}")
+
+    bodies = [available[n].read_text(encoding="utf-8") for n in names]
+    joined = "\n".join(bodies)
+
+    prelude_path = library() / "_prelude.glsl"
+    prelude = prelude_path.read_text(encoding="utf-8") if prelude_path.exists() else ""
+
+    # Declare an optional uniform only when a stage references it: an unused
+    # declaration Hyprland still resolves would make it warn about damage
+    # tracking for an effect that does not move.
+    declarations = [
+        text
+        for uniform, text in OPTIONAL_UNIFORMS.items()
+        if re.search(rf"\b{uniform}\b", joined)
+    ]
+
+    warps = []
+    shades = []
+    for name in names:
+        sym = symbol(name)
+        source = available[name].read_text(encoding="utf-8")
+        if re.search(rf"\bvec2\s+{sym}_warp\s*\(", source):
+            warps.append(f"    uv = {sym}_warp(uv);")
+        if re.search(rf"\bvec4\s+{sym}_shade\s*\(", source):
+            shades.append(f"    color = {sym}_shade(color, uv);")
+    if not warps and not shades:
+        raise SystemExit(
+            "sinnix-shader: none of those stages define a _warp or _shade function"
+        )
+
+    main = "\n".join(
+        ["void main() {", "    vec2 uv = v_texcoord;", *warps, "    vec4 color = texture(tex, uv);", *shades, "    fragColor = color;", "}"]
+    )
+
+    # #version must be the very first token in an ES-profile shader: not even a
+    # comment may precede it.
+    header = [
+        "#version 300 es",
+        f"// {' + '.join(names)}",
+        "precision highp float;",
+        "in vec2 v_texcoord;",
+        "out vec4 fragColor;",
+        "uniform sampler2D tex;",
+        "uniform vec2 screen_size;",
+        *declarations,
+    ]
+    return "\n".join([*header, "", prelude, "", joined, "", main, ""])
+
+
+def needs_live(source: str) -> set[str]:
+    return {u for u in LIVE_UNIFORMS if re.search(rf"\b{u}\b", source)}
+
+
+def read_state() -> dict:
+    try:
+        return json.loads(STATE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def write_state(state: dict) -> None:
+    RUNTIME.mkdir(parents=True, exist_ok=True)
+    STATE.write_text(json.dumps(state), encoding="utf-8")
+
+
+def baseline() -> dict:
+    """Record what to put back, once, before anything is changed."""
+    state = read_state()
+    if "use_fp16" not in state:
+        state["use_fp16"] = option("render:use_fp16", "int")
+        state["damage_tracking"] = option("debug:damage_tracking", "int")
+        write_state(state)
+    return state
+
+
+def validate(source: str) -> str | None:
+    """Compile the composed shader offline, since Hyprland cannot be asked.
+
+    Hyprland defers applyScreenShader to the next render pass and, on this host,
+    logs nothing when the program fails to link -- it silently falls back to
+    passthrough. So a broken shader is indistinguishable from a subtle one at
+    the compositor. glslangValidator is the only machine-checkable gate.
+    """
+    binary = shutil.which("glslangValidator")
+    if binary is None:
+        return None
+    scratch = RUNTIME / "validate.frag"
+    scratch.parent.mkdir(parents=True, exist_ok=True)
+    scratch.write_text(source, encoding="utf-8")
+    result = subprocess.run(
+        [binary, "-S", "frag", str(scratch)], capture_output=True, text=True, check=False
+    )
+    scratch.unlink(missing_ok=True)
+    if result.returncode == 0:
+        return None
+    return "\n".join(
+        line for line in result.stdout.splitlines() if line.startswith(("ERROR", "WARNING"))
+    ) or result.stdout.strip()
+
+
+def clear_shader() -> None:
+    hyprctl("keyword", "decoration:screen_shader", "[[EMPTY]]")
+
+
+def restore(state: dict) -> None:
+    if state.get("use_fp16") is not None:
+        hyprctl("keyword", "render:use_fp16", str(state["use_fp16"]))
+    damage = state.get("damage_tracking")
+    hyprctl("keyword", "debug:damage_tracking", str(DAMAGE_DEFAULT if damage is None else damage))
+
+
+def cmd_list(_args: argparse.Namespace) -> int:
+    found = stages()
+    if not found:
+        print(f"sinnix-shader: no shaders in {library()}", file=sys.stderr)
+        return 1
+    width = max(len(n) for n in found)
+    for name, path in found.items():
+        source = path.read_text(encoding="utf-8")
+        mark = "*" if needs_live(source) else " "
+        print(f"{mark} {name.ljust(width)}  {describe(path)}")
+    print(f"\n* needs `animate on` (debug:damage_tracking 0) to move.")
+    return 0
+
+
+def cmd_show(args: argparse.Namespace) -> int:
+    print(compose(args.shader), end="")
+    return 0
+
+
+def apply(names: list[str], animate: bool | None) -> int:
+    source = compose(names)
+    live = needs_live(source)
+
+    errors = validate(source)
+    if errors:
+        print(errors, file=sys.stderr)
+        print(f"sinnix-shader: {' + '.join(names)} does not compile; nothing applied", file=sys.stderr)
+        return 1
+
+    state = baseline()
+    RUNTIME.mkdir(parents=True, exist_ok=True)
+
+    # Hyprland skips a keyword set whose value is unchanged, so each apply gets
+    # its own filename rather than rewriting one path in place.
+    serial = int(state.get("serial", 0)) + 1
+    composed = RUNTIME / f"composed-{serial}.glsl"
+    composed.write_text(source, encoding="utf-8")
+    for stale in RUNTIME.glob("composed-*.glsl"):
+        if stale != composed:
+            stale.unlink(missing_ok=True)
+
+    # Decided outright on every apply: a static shader must not inherit the
+    # per-frame redraw an animated one turned on.
+    wanted_animation = animate is True or (bool(live) and animate is not False)
+    if wanted_animation:
+        hyprctl("keyword", "debug:damage_tracking", "0")
+    else:
+        hyprctl("keyword", "debug:damage_tracking", str(state.get("damage_tracking", DAMAGE_DEFAULT)))
+
+    # fp16 and the shader stage do not coexist on this host's HDR pipeline.
+    if option("render:use_fp16", "int") != 0:
+        hyprctl("keyword", "render:use_fp16", "0")
+
+    try:
+        hyprctl("keyword", "decoration:screen_shader", str(composed))
+    except Exception:
+        clear_shader()
+        restore(state)
+        raise
+
+    state["serial"] = serial
+    state["stages"] = names
+    write_state(state)
+
+    print(f"applied: {' + '.join(names)}")
+    if wanted_animation:
+        print(
+            f"animation on: debug:damage_tracking 0 for {', '.join(sorted(live))}. "
+            "The whole screen now redraws every frame -- GPU load is continuous "
+            "until `sinnix-shader off`."
+        )
+    elif live:
+        print(f"frozen: {', '.join(sorted(live))} stays constant without `animate on`.")
+    return 0
+
+
+def cmd_apply(args: argparse.Namespace) -> int:
+    animate = True if args.animate else (False if args.no_animate else None)
+    return apply(args.shader, animate)
+
+
+def cmd_off(_args: argparse.Namespace) -> int:
+    state = read_state()
+    clear_shader()
+    restore(state)
+    STATE.unlink(missing_ok=True)
+    for stale in RUNTIME.glob("composed-*.glsl"):
+        stale.unlink(missing_ok=True)
+    if not state:
+        print(
+            "sinnix-shader: no saved baseline; shader cleared, "
+            f"debug:damage_tracking reset to Hyprland's default ({DAMAGE_DEFAULT})"
+        )
+    else:
+        print("off")
+    return 0
+
+
+def cmd_random(args: argparse.Namespace) -> int:
+    pool = list(stages())
+    if not pool:
+        print(f"sinnix-shader: no shaders in {library()}", file=sys.stderr)
+        return 1
+    return apply(random.sample(pool, min(args.count, len(pool))), None)
+
+
+def step(offset: int) -> int:
+    pool = list(stages())
+    if not pool:
+        print(f"sinnix-shader: no shaders in {library()}", file=sys.stderr)
+        return 1
+    current = read_state().get("stages") or []
+    index = pool.index(current[0]) + offset if current and current[0] in pool else 0
+    return apply([pool[index % len(pool)]], None)
+
+
+def cmd_animate(args: argparse.Namespace) -> int:
+    state = baseline()
+    if args.mode == "on":
+        hyprctl("keyword", "debug:damage_tracking", "0")
+        print("animation on: the whole screen redraws every frame")
+    else:
+        hyprctl("keyword", "debug:damage_tracking", str(state.get("damage_tracking", DAMAGE_DEFAULT)))
+        print("animation off")
+    return 0
+
+
+def cmd_status(_args: argparse.Namespace) -> int:
+    active = option("decoration:screen_shader", "str") or ""
+    if active in ("", "[[EMPTY]]"):
+        active = ""
+    state = read_state()
+    stages_applied = state.get("stages", []) if active else []
+    print(f"shader          {active or '(none)'}")
+    print(f"stages          {' + '.join(stages_applied) or ('(not ours)' if active else '-')}")
+    print(f"use_fp16        {option('render:use_fp16', 'int')}")
+    print(f"damage_tracking {option('debug:damage_tracking', 'int')}  (0 = animation on)")
+    print(f"library         {library()}")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("list", help="every shader in the library").set_defaults(run=cmd_list)
+    sub.add_parser("status", help="what is applied right now").set_defaults(run=cmd_status)
+    sub.add_parser("off", help="clear the shader and put fp16 and damage tracking back").set_defaults(run=cmd_off)
+
+    show = sub.add_parser("show", help="print the composed shader without applying it")
+    show.add_argument("shader", nargs="+")
+    show.set_defaults(run=cmd_show)
+
+    apply_parser = sub.add_parser("apply", help="compose and apply one or more shaders")
+    apply_parser.add_argument("shader", nargs="+")
+    apply_parser.add_argument("--animate", action="store_true", help="force damage tracking off")
+    apply_parser.add_argument("--no-animate", action="store_true", help="leave damage tracking alone")
+    apply_parser.set_defaults(run=cmd_apply)
+
+    rnd = sub.add_parser("random", help="apply a random pick from the library")
+    rnd.add_argument("count", nargs="?", type=int, default=1)
+    rnd.set_defaults(run=cmd_random)
+
+    sub.add_parser("next", help="apply the next shader in the library").set_defaults(run=lambda _a: step(1))
+    sub.add_parser("prev", help="apply the previous shader").set_defaults(run=lambda _a: step(-1))
+
+    animate = sub.add_parser("animate", help="turn the time and pointer uniforms on or off")
+    animate.add_argument("mode", choices=("on", "off"))
+    animate.set_defaults(run=cmd_animate)
+
+    args = parser.parse_args()
+    return args.run(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

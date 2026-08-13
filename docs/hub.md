@@ -4,10 +4,9 @@
 generated reports, a live dashboard, and a control panel for the local AI
 backends, reachable from a phone or the desktop and from nowhere else.
 
-Before it existed, a generated HTML report was a `file://` path — unlinkable,
-unreadable on a phone, and unable to send anything back. The hub makes each one
-a URL, puts the estate's current state on the same origin, and gives report
-annotations somewhere to go.
+It makes each generated report a URL rather than a `file://` path, puts the
+estate's current state on the same origin, and gives report annotations
+somewhere to go.
 
 ## Routes
 
@@ -20,6 +19,7 @@ the same nav, so the routes are reachable from each other rather than by URL.
 | `/work/`     | What is actually running, named — see below                         |
 | `/services/` | Every attested runtime surface, grouped by resource class           |
 | `/ai/`       | The local AI backends and their activation semantics                |
+| `/shaders/`  | The Hyprland screen-shader library, and which one is applied        |
 | `/reports/`  | The generated report tree, browsable and linkable                   |
 | `/ops/v1/*`  | Reverse proxy onto the ops-reducer's read and action API            |
 | `/feedback`  | Append-only spool for report annotations                            |
@@ -52,8 +52,6 @@ process list. It can, because the estate already names its own work:
   id, so a live job shows its backend, model, work item and elapsed time, and
   the ones whose launcher has exited are listed separately, with the reducer's
   orphan policy on the ones that need a decision.
-- **The heavy-work lease** is GONE from sinnix (removed as counterproductive; see bd memory heavy-work-lease-removed). The renderer still tolerates its absence, which heads
-  the page: who currently holds the right to run heavy work.
 
 Long-lived scopes are labelled as such rather than filtered out. A devshell
 Postgres or a Dolt server that has sat in `build.slice` for a week is not
@@ -107,6 +105,23 @@ Running the hub in the same manager reaches that socket, the operator-owned
 reports tree, and the action API without loosening a single permission. Nothing
 here needs a privileged port.
 
+## The shader page has no buttons
+
+`/shaders/` lists the screen-shader library in `dots/hypr/shaders`, describes
+each stage, and reports what Hyprland currently has applied — read live from
+`hyprctl getoption`, not from a manifest that could be stale.
+
+It stops there. Applying a shader is not a verb the reducer's action API has,
+and the doctrine below is the whole reason: a page that shelled out to
+`hyprctl` would be the second control plane. So the page prints the
+`sinnix-shader` commands and says why they are not buttons. The keyboard is the
+fast path anyway — `F4` cycles, `Shift+F4` clears — and `Shift+F4` matters,
+because a shader can make the screen unreadable and the way out must not depend
+on finding a terminal.
+
+Making it clickable is a reducer change: a shader target with its own
+attestation, the same shape the scope target took. It is not a hub change.
+
 ## Why there is no second control plane
 
 Every button on every page posts to `/ops/v1/actions` — the ops-reducer's existing
@@ -116,10 +131,10 @@ concurrency (`expected_revision` must match the snapshot the operator saw),
 idempotency keys, and durable receipts. The hub adds no shell-out, no `sudo`,
 and no privileged helper.
 
-`start` and `stop` were added to that verb set rather than built beside it, so
-they inherit the same gate and the same receipts as `restart`. Privilege comes
-from the workstation profile's existing polkit rule for `wheel` on
-`org.freedesktop.systemd1.*`; the hub introduces no new grant.
+`start`, `stop`, and `restart` are one verb set behind that gate, sharing the
+same admission and the same receipts. Privilege comes from the workstation
+profile's existing polkit rule for `wheel` on `org.freedesktop.systemd1.*`; the
+hub introduces no new grant.
 
 The pages resolve every unit from `/etc/sinnix/runtime-inventory.json` — the
 same attested document the action API validates against — so they cannot offer
@@ -158,8 +173,6 @@ can tell submissions apart without trusting client-supplied fields.
 The endpoint is write-only. There is no read route: serving the spool back would
 turn a sink into an exfiltration surface for the personal analysis those
 annotations describe.
-
-The skill is unchanged. Adopting the line above is a later, optional edit.
 
 ## Rendering
 

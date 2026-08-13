@@ -343,6 +343,11 @@ in
 
           services.hyprpaper.enable = lib.mkForce false;
 
+          xdg.configFile."hypr/shaders" = {
+            source = config.lib.file.mkOutOfStoreSymlink "${repoRoot}/dots/hypr/shaders";
+            force = true;
+          };
+
           xdg.configFile."hypr/hyprland.conf" = {
             force = true;
             # Home Manager's default onChange runs `hyprctl reload config-only`.

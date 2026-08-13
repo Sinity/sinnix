@@ -11,12 +11,13 @@ overnight, still shows the estate as of a timestamp it prints, rather than an
 empty skeleton waiting on XHR. Only the *action* buttons need JavaScript, and
 they talk to the ops-reducer's existing bounded action API.
 
-Four pages, one shell:
+Five pages, one shell:
 
   /           the three-second read: a verdict, a row of tiles, then detail
   /work/      what is *running* -- named workloads, not a process list
   /services/  every attested runtime surface, with lifecycle controls
   /ai/        the local AI backends and their activation semantics
+  /shaders/   the Hyprland screen-shader library, and what is applied
 
 Inputs (all read-only):
   --manifest    Nix-generated hub manifest (routes, AI roster, frontends)
@@ -585,6 +586,7 @@ PAGES = (
     ("/work/", "work"),
     ("/services/", "services"),
     ("/ai/", "ai"),
+    ("/shaders/", "shaders"),
     ("/reports/", "reports"),
 )
 
@@ -2149,6 +2151,190 @@ def resolve_ai_services(
     return resolved
 
 
+SHADER_LIVE_UNIFORMS = ("time", "pointer_position", "pointer_last_active")
+
+SHADER_CONTROL_NOTE = (
+    "There are no buttons on this page. Applying a screen shader is not a verb "
+    "the ops-reducer's action API has: that API admits lifecycle verbs on "
+    "attested runtime-inventory units and <code>interrupt</code> on agent jobs, "
+    "and a shader is neither. Giving the hub its own path to "
+    "<code>hyprctl</code> would be the second control plane this estate does "
+    "not have. So the page reports, and the commands below are what drives it — "
+    "from a terminal, or from <kbd>F4</kbd> / <kbd>Shift+F4</kbd> / "
+    "<kbd>Super+F4</kbd>."
+)
+
+
+def shader_library(manifest: dict[str, Any]) -> list[dict[str, str]]:
+    directory = manifest.get("shadersDir")
+    if not directory:
+        return []
+    found = []
+    for path in sorted(Path(directory).glob("*.glsl")):
+        if path.name.startswith("_"):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        lines = text.splitlines()
+        description = lines[0].lstrip("/ ").strip() if lines and lines[0].startswith("//") else ""
+        found.append(
+            {
+                "name": path.stem,
+                "description": description,
+                "warps": "yes" if f"{path.stem}_warp" in text else "",
+                "shades": "yes" if f"{path.stem}_shade" in text else "",
+                "live": ", ".join(u for u in SHADER_LIVE_UNIFORMS if u in text),
+            }
+        )
+    return found
+
+
+def hypr_option(name: str, field: str) -> Any:
+    binary = shutil.which("hyprctl")
+    if binary is None:
+        return None
+    try:
+        result = subprocess.run(
+            [binary, "getoption", name, "-j"], capture_output=True, text=True, timeout=10, check=False
+        )
+        return json.loads(result.stdout).get(field)
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError, ValueError):
+        return None
+
+
+def render_shaders(manifest: dict[str, Any], generated: str) -> str:
+    host = str(manifest.get("host", "sinnix"))
+    library = shader_library(manifest)
+
+    active = hypr_option("decoration:screen_shader", "str") or ""
+    if active == "[[EMPTY]]":
+        active = ""
+    damage = hypr_option("debug:damage_tracking", "int")
+    fp16 = hypr_option("render:use_fp16", "int")
+
+    state, _ = load_json(
+        Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000")) / "sinnix" / "shader" / "state.json"
+    )
+    applied = (state or {}).get("stages") or []
+
+    if active and applied:
+        headline = " + ".join(applied)
+        tone = "info"
+    elif active:
+        headline = "a shader not applied through sinnix-shader"
+        tone = "warn"
+    else:
+        headline = "none"
+        tone = "ok"
+
+    body = (
+        '<div class="tiles">'
+        + tile(str(len(library)), "shaders in library")
+        + tile(headline, "active", tone)
+        + tile(
+            "on" if damage == 0 else "off",
+            "animation",
+            "info" if damage == 0 else "",
+        )
+        + tile(str(fp16) if fp16 is not None else "—", "render:use_fp16", "" if fp16 == 0 else "warn")
+        + "</div>"
+    )
+
+    if hypr_option("decoration:screen_shader", "str") is None:
+        body += card(
+            "Hyprland not reachable",
+            '<p class="sub">This renderer could not run <code>hyprctl</code>, so the '
+            "state above is unknown rather than idle.</p>",
+            wide=True,
+        )
+
+    rows = ""
+    for entry in library:
+        meta = []
+        if entry["warps"] and entry["shades"]:
+            meta.append("warps and shades")
+        elif entry["warps"]:
+            meta.append("warps the sampling coordinate")
+        else:
+            meta.append("shades the sampled colour")
+        if entry["live"]:
+            meta.append(badge("needs animation on", "warn"))
+        if entry["name"] in applied and active:
+            meta.append(badge("applied", "ok"))
+        rows += row(
+            f"<strong>{esc(entry['name'])}</strong> — {esc(entry['description'])}",
+            meta,
+        )
+
+    body += card(
+        "The library",
+        rows or empty("no shaders found"),
+        subtitle=(
+            f"<code>{esc(manifest.get('shadersDir', ''))}</code>, reached through "
+            "<code>~/.config/hypr/shaders</code> as an out-of-store symlink: edit a "
+            "stage and re-apply, no rebuild."
+        ),
+        wide=True,
+    )
+
+    body += card(
+        "Stacking, and what stacks",
+        "<p>Hyprland takes exactly one <code>decoration:screen_shader</code> path, "
+        "so nothing stacks at the compositor. <code>sinnix-shader apply a b c</code> "
+        "instead <em>composes</em> the named stages into one generated fragment "
+        "shader: every warp applied to the sampling coordinate in order, one "
+        "texture fetch, then every shade in order.</p>"
+        "<p class=\"sub\">A stage that resamples the screen itself — "
+        "<code>chromatic</code>, <code>edges</code>, <code>bloom</code>, "
+        "<code>vhs</code> — reads the original image, not the previous stage's "
+        "output. One pass has no intermediate buffer to read back.</p>",
+        wide=True,
+    )
+
+    body += card(
+        "Animation costs a redraw",
+        "<p>Hyprland does expose a <code>time</code> uniform to screen shaders, "
+        "and a pointer position — but it pins them to constants unless "
+        "<code>debug:damage_tracking</code> is <code>0</code>, because with damage "
+        "tracking on it has no reason to redraw a screen that has not changed. "
+        "So animation is real, not faked, and it is bought by redrawing the whole "
+        "screen every frame for as long as it is on.</p>"
+        "<p class=\"sub\"><code>apply</code> turns it on by itself when a stage "
+        "needs it and <code>off</code> puts it back. Shaders marked "
+        "<em>needs animation on</em> above are frozen without it, not broken.</p>",
+        wide=True,
+    )
+
+    body += card(
+        "Driving it",
+        kv_table(
+            [
+                ("list", "<code>sinnix-shader list</code>"),
+                ("apply", "<code>sinnix-shader apply crt scanlines vignette</code>"),
+                ("flip through", "<code>sinnix-shader next</code> / <code>prev</code> / <code>random</code>"),
+                ("stop", "<code>sinnix-shader off</code>"),
+                ("read the source", "<code>sinnix-shader show vhs</code>"),
+                (
+                    "last resort",
+                    "<code>hyprctl keyword decoration:screen_shader '[[EMPTY]]'</code>",
+                ),
+            ]
+        ),
+        subtitle=SHADER_CONTROL_NOTE,
+        wide=True,
+    )
+
+    return page(
+        "shaders",
+        host,
+        [f"rendered {generated[11:19]}"],
+        "/shaders/",
+        body,
+    )
+
+
 def render_ai(
     manifest: dict[str, Any],
     inventory: dict[str, Any] | None,
@@ -2296,6 +2482,7 @@ def main() -> int:
         out / "services" / "index.html", render_services(manifest, inventory, generated)
     )
     write_atomic(out / "ai" / "index.html", render_ai(manifest, inventory, generated))
+    write_atomic(out / "shaders" / "index.html", render_shaders(manifest, generated))
     return 0
 
 
