@@ -1,9 +1,15 @@
 """Low-latency dual-use tee: mic PCM mirrored to a SEQPACKET socket.
 
-`$XDG_RUNTIME_DIR/sinnix/audio/mic.pcm` carries raw 16kHz mono s16le frames
-straight from the mic capture -- no resampling needed, because the mic
-channel is *already* captured at 16kHz mono for the Opus archive tier (see
-segment.CHANNEL_PROFILES["mic"]). One capture, two consumers.
+`$XDG_RUNTIME_DIR/sinnix/audio/mic.pcm` carries raw s16le frames straight
+from whichever recorded source PipeWire currently calls the default --
+the microphone the desktop itself would use. One capture, two consumers:
+the frames are the same bytes already going into the Opus archive, not a
+second `pw-record` stream.
+
+The sample rate and channel count therefore follow that device rather
+than being fixed, so consumers must read `<socket>.json`, which
+sources.SourceSupervisor rewrites whenever the default source changes,
+instead of assuming a format.
 
 This is a best-effort mirror, not a queue: archive liveness must never
 depend on a consumer being attached. The socket is `SOCK_SEQPACKET` +

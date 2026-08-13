@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from sinnix_audio_capture.pipewire_defaults import (
     DefaultTargets,
     parse_default_line,
@@ -55,9 +56,12 @@ def test_default_targets_apply_reports_change():
     assert targets.sink == "b"
 
 
-def test_resolve_target_mic_uses_source():
+def test_resolve_target_rejects_non_default_following_channels():
+    # Capture sources are pinned per-node by sources.py, never resolved
+    # through the default-source metadata.
     targets = DefaultTargets(source="alsa_input.foo")
-    assert resolve_target("mic", targets) == "alsa_input.foo"
+    with pytest.raises(ValueError):
+        resolve_target("src-alsa-input-foo", targets)
 
 
 def test_resolve_target_sink_monitor_uses_bare_sink_name():

@@ -1,9 +1,10 @@
 """Track PipeWire's default source/sink node names.
 
-The two canonical channels (`mic`, `sink-monitor`) must never hardcode a
-node name -- they resolve the *default* audio source/sink at capture time
-and react when the operator changes the active device (unplug a headset,
-switch outputs in the desktop shell, ...).
+The `sink-monitor` channel must never hardcode a node name -- it resolves
+the *default* audio sink at capture time and reacts when the operator
+switches outputs in the desktop shell. `default.audio.source` is tracked
+too, but only to tell sources.py which of the sources it is already
+recording is the one the desktop itself treats as the microphone.
 
 `pw-metadata -n default` is a long-running subscription: on start it prints
 the current values, then one `update:` line every time a tracked key
@@ -88,9 +89,12 @@ def resolve_target(channel: str, targets: DefaultTargets) -> str | None:
     node; it does not appear in `pw-dump`), and a Capture-direction stream
     that resolves onto the sink node attaches to its monitor ports
     automatically.
+
+    Capture sources do not go through here at all: they are enumerated and
+    pinned individually by sources.py. `default.audio.source` still matters
+    to that module, but only to pick which already-recording source is
+    mirrored to the low-latency tee.
     """
-    if channel == "mic":
-        return targets.source
     if channel == "sink-monitor":
         return targets.sink
     raise ValueError(f"unknown canonical audio channel: {channel!r}")
