@@ -23,6 +23,15 @@ mkServiceModule {
   surface = {
     unit = "podman-comfyui.service";
     resourceClass = "interactive-agent";
+    activation = {
+      # No socket-proxy front door -- the container publishes 8188 directly
+      # and podman start/stop has no idle-aware backend to proxy. The
+      # exclusivity guarantee comes from the mutual systemd Conflicts= wired
+      # in modules/services/ai-control.nix, not from this admission key
+      # alone; recorded here so the inventory/dashboards stop reporting
+      # ComfyUI as unguarded (sinnix-joac).
+      exclusiveResource = "gpu-inference";
+    };
     observe = {
       enable = true;
       restartable = true;

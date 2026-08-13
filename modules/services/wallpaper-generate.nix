@@ -9,9 +9,13 @@
 # straight into the corpus's time-of-day/theme-mode sets
 # (modules/features/desktop/wallpaper.nix), and always stops ComfyUI again
 # -- even on failure -- so a triggered batch never holds the GPU past its
-# own run. ComfyUI is not in the ai-control.nix gpu-inference socket-proxy
-# mesh today, so this is the only exclusivity guard for it; it runs under
-# the "gpu-runtime" resource class so it never serializes against builds.
+# own run. ComfyUI now carries a mutual systemd Conflicts= against every
+# other gpu-inference backend/container (ai-control.nix, sinnix-joac), so
+# systemd itself refuses a second resident GPU consumer even outside this
+# script's own start/stop bracket; this stop-in-finally remains the
+# well-behaved way to release the GPU promptly after a batch instead of
+# relying on that as the only guard. Runs under the "gpu-runtime" resource
+# class so it never serializes against builds.
 {
   mkServiceModule,
   lib,
