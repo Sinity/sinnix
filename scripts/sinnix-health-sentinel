@@ -188,17 +188,93 @@ while IFS=$'\t' read -r path warn fail; do
   emit "mount:$path" mount_capacity "$path" "$status" "usage_percent=$usage;warn_percent=$warn;fail_percent=$fail"
 done < <(jq -r '.mounts[]? | [.path,.warnPct,.failPct] | @tsv' "$inventory")
 
-while IFS=$'\t' read -r manager unit; do
-  [ -n "$unit" ] || continue
+# A system-manager sentinel process has no access to the user session bus
+# (no XDG_RUNTIME_DIR/DBUS_SESSION_BUS_ADDRESS), so `systemctl --user show`
+# fails outright for every manager=="user" surface -- the same bridge
+# problem notify_desktop() above already solves for D-Bus notifications.
+# Reuse the same mechanism: locate a live user session's bus socket and run
+# the query as that uid. A query that cannot reach ANY user bus is reported
+# "unknown", never silently coerced into "healthy" or "failed" -- a broken
+# probe must never masquerade as either a real pass or a real failure.
+query_unit_props() {
+  local manager="$1" unit="$2" bus uid out
   if [ "$manager" = user ]; then
-    active="$(systemctl --user show "$unit" -p ActiveState --value 2>/dev/null || echo unknown)"
-  else
-    active="$(systemctl show "$unit" -p ActiveState --value 2>/dev/null || echo unknown)"
+    for bus in /run/user/*/bus; do
+      [ -S "$bus" ] || continue
+      uid="$(basename "$(dirname "$bus")")"
+      [ "$uid" = 0 ] && continue
+      if out="$(sudo -u "#$uid" XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=$bus" \
+          systemctl --user show "$unit" -p ActiveState -p Type -p Result -p WantedBy 2>/dev/null)" && [ -n "$out" ]; then
+        printf '%s\n' "$out"
+        return 0
+      fi
+    done
+    return 1
   fi
-  status=healthy
-  [ "$active" = active ] || status=failed
-  emit "service:$manager:$unit" service_failure "$unit" "$status" "manager=$manager;active_state=$active"
-done < <(jq -r '.observedServices[]? | select(.kind == "service") | [.manager,.unit] | @tsv' "$inventory")
+  out="$(systemctl show "$unit" -p ActiveState -p Type -p Result -p WantedBy 2>/dev/null || true)"
+  [ -n "$out" ] || return 1
+  printf '%s\n' "$out"
+}
+
+while IFS=$'\t' read -r manager unit activation_mode; do
+  [ -n "$unit" ] || continue
+  active_state=
+  unit_type=
+  result=
+  wanted_by=
+  if props="$(query_unit_props "$manager" "$unit")"; then
+    while IFS='=' read -r key value; do
+      case "$key" in
+        ActiveState) active_state="$value" ;;
+        Type) unit_type="$value" ;;
+        Result) result="$value" ;;
+        WantedBy) wanted_by="$value" ;;
+      esac
+    done <<< "$props"
+  fi
+  # Resting-state expectation is derived from what systemd itself reports,
+  # never from a hardcoded unit list (a hardcoded list is exactly the
+  # fossilized-diff shape that rots the moment a new oneshot or on-demand
+  # backend is added):
+  #   - a oneshot judges itself by Result -- it is SUPPOSED to go inactive
+  #     once it finishes; ran-and-succeeded is healthy, anything else failed.
+  #   - a unit nothing pulls in at boot/login (WantedBy empty) is on-demand
+  #     by design -- socket-proxy-fronted AI backends (ai-control.nix) and
+  #     autoStart=false toggles (open-webui) both show this the same way,
+  #     so inactive is its correct resting state, not a failure. A surface
+  #     that also declares activation.mode=="socket-proxy" gets the same
+  #     verdict explicitly, in case a future socket-fronted backend is ever
+  #     still nominally WantedBy something. Either way "on-demand" only
+  #     excuses being inactive, not having crashed: Result must still say
+  #     the last run ended cleanly (or never ran), same as the oneshot
+  #     branch -- an on-demand backend that was OOM-killed or crashed mid
+  #     request is still a real failure, just one that happens to also be
+  #     idle right now.
+  #   - anything else that isn't active is a daemon that IS supposed to be
+  #     running and isn't.
+  if [ -z "$active_state" ]; then
+    status=unknown
+    evidence="manager=$manager;probe=unreachable"
+  elif [ "$active_state" = active ]; then
+    status=healthy
+    evidence="manager=$manager;active_state=$active_state"
+  elif [ "$active_state" = inactive ] && [ "$unit_type" = oneshot ]; then
+    status=healthy
+    [ "$result" = success ] || status=failed
+    evidence="manager=$manager;active_state=$active_state;type=oneshot;result=$result"
+  elif [ "$active_state" = inactive ] && { [ "$activation_mode" = socket-proxy ] || [ -z "$wanted_by" ]; }; then
+    status=healthy
+    [ "$result" = success ] || status=failed
+    evidence="manager=$manager;active_state=$active_state;activation_mode=$activation_mode;wanted_by=;on-demand;result=$result"
+  elif [ "$active_state" = inactive ] || [ "$active_state" = failed ]; then
+    status=failed
+    evidence="manager=$manager;active_state=$active_state;type=$unit_type;result=$result;wanted_by=$wanted_by"
+  else
+    status=unknown
+    evidence="manager=$manager;active_state=$active_state"
+  fi
+  emit "service:$manager:$unit" service_failure "$unit" "$status" "$evidence"
+done < <(jq -r '.observedServices[]? | select(.kind == "service") | [.manager,.unit,(.activationMode // "direct")] | @tsv' "$inventory")
 
 # Self-heal: drop any state-file key this run did not emit. Only the full
 # sweep above (never the single-key --failure-unit fast path) knows the
