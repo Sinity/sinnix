@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Emit deduplicated runtime health transitions from inventory declarations
-# runtimeInputs: bash coreutils findutils jq systemd
+# runtimeInputs: bash coreutils findutils gawk jq systemd
 set -euo pipefail
 
 inventory=/etc/sinnix/runtime-inventory.json
@@ -58,7 +58,7 @@ fi
 now="$(date +%s)"
 while IFS=$'\t' read -r name path cadence stale_after; do
   [ -n "$path" ] || continue
-  newest="$(find "$path" -type f -printf '%T@\n' 2>/dev/null | sort -nr | head -n 1 || true)"
+  newest="$(find "$path" -type f -printf '%T@\n' 2>/dev/null | sort -nr | { head -n 1; cat >/dev/null; } || true)"
   if [ -z "$newest" ]; then
     emit "capture:$name" capture_stale "$name" stale "path=$path;reason=no-file"
     continue
@@ -89,7 +89,7 @@ payload_sample_size=50
 payload_min_samples=5
 while IFS=$'\t' read -r name path fields_json; do
   [ -n "$path" ] || continue
-  newest_jsonl="$(find "$path" -maxdepth 1 -type f -name '*.jsonl' ! -name '*-index.jsonl' -printf '%T@\t%p\n' 2>/dev/null | sort -nr | head -n 1 | cut -f2- || true)"
+  newest_jsonl="$(find "$path" -maxdepth 1 -type f -name '*.jsonl' ! -name '*-index.jsonl' -printf '%T@\t%p\n' 2>/dev/null | sort -nr | { head -n 1; cat >/dev/null; } | cut -f2- || true)"
   # No records yet, too few to judge, or unreadable: say nothing. "Lane
   # produced nothing" is the staleness check's job on this same path, and
   # emitting a not-ok transition for it here would double-report one fault.
