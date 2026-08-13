@@ -36,6 +36,7 @@ in
     ./tests/observability.nix
     ./tests/cli.nix
     ./tests/git-languages.nix
+    ./tests/polylogue.nix
     ./tests/vm.nix
     ./tests/host-build.nix
     ./tests/runtime.nix
