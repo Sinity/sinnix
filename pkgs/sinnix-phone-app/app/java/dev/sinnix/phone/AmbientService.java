@@ -62,7 +62,27 @@ public class AmbientService extends Service {
   private MediaRecorder recorder;
   private File currentPart;
   private long chunkStartedAtMs;
-  private int samplingRate = 16000;
+  /**
+   * Capture rates in preference order. This is an archive lane, not an ASR feed:
+   * 16 kHz caps audio bandwidth at 8 kHz, discarding the room -- music,
+   * environment, the timbre diarization and speaker identification need --
+   * before it is ever written, and nothing downstream can recover a band that
+   * was never captured. Lower entries are degraded fallbacks, not alternatives.
+   *
+   * <p>48 kHz is deliberately absent. On the Redmi Note 11 it does not fail --
+   * it lies: {@code prepare()} and {@code start()} both succeed, the encoder
+   * emits full-bitrate frames, and every sample is zero (a 980 KB chunk
+   * measured at mean = max = -91.0 dB, against -35.3 dB mean / -7.0 dB peak
+   * for 16 kHz on the same microphone minutes earlier). 44.1 kHz captures
+   * normally. Two consequences worth keeping in mind before touching this:
+   * a capture rate is only known-good by measurement, never by the API
+   * accepting it, and a fallback ladder driven by exceptions cannot reach its
+   * lower rungs when the failure mode is silence. That is why
+   * {@link Status} watches amplitude -- it is the only detector that sees this.
+   */
+  private static final int[] SAMPLING_RATE_LADDER = {44100, 16000};
+
+  private int samplingRate = SAMPLING_RATE_LADDER[0];
 
   private final Status status = new Status();
 
@@ -189,6 +209,12 @@ public class AmbientService extends Service {
     String stamp = Status.utcStamp(System.currentTimeMillis());
     File part = new File(dir, "ambient-" + stamp + ".m4a.part");
 
+    // Start every chunk back at the preferred rate. A codec refusal is often
+    // transient (another app holding the encoder), and without this reset one
+    // such moment would degrade every remaining chunk until the service
+    // restarts. The cost when the refusal is permanent is one failed prepare()
+    // per rotation.
+    samplingRate = SAMPLING_RATE_LADDER[0];
     MediaRecorder r = newRecorder();
     r.setOutputFile(part.getAbsolutePath());
     r.setOnErrorListener((mr, what, extra) -> onRecorderError("error " + what + "/" + extra));
@@ -196,12 +222,16 @@ public class AmbientService extends Service {
       r.prepare();
       r.start();
     } catch (Exception first) {
-      // Not every codec path accepts 16 kHz AAC. Fall back once to the
-      // universally supported rate rather than dropping capture entirely.
+      // Not every codec path accepts every rate. Walk down the ladder rather
+      // than dropping capture entirely -- a degraded chunk beats a hole.
       release(r);
-      if (samplingRate == 16000) {
-        Log.w(TAG, "16 kHz recorder failed, falling back to 44.1 kHz", first);
-        samplingRate = 44100;
+      Exception last = first;
+      for (int rate : SAMPLING_RATE_LADDER) {
+        if (rate >= samplingRate) {
+          continue;
+        }
+        Log.w(TAG, samplingRate + " Hz recorder failed, falling back to " + rate + " Hz", last);
+        samplingRate = rate;
         MediaRecorder retry = newRecorder();
         retry.setOutputFile(part.getAbsolutePath());
         retry.setOnErrorListener((mr, what, extra) -> onRecorderError("error " + what + "/" + extra));
@@ -213,14 +243,12 @@ public class AmbientService extends Service {
           chunkStartedAtMs = System.currentTimeMillis();
           status.chunkOpened(part, chunkStartedAtMs, samplingRate);
           return true;
-        } catch (Exception second) {
+        } catch (Exception next) {
           release(retry);
-          status.recordFailure("recorder start failed: " + second);
-          part.delete();
-          return false;
+          last = next;
         }
       }
-      status.recordFailure("recorder start failed: " + first);
+      status.recordFailure("recorder start failed: " + last);
       part.delete();
       return false;
     }
@@ -240,9 +268,10 @@ public class AmbientService extends Service {
     r.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
     r.setAudioChannels(1);
     r.setAudioSamplingRate(samplingRate);
-    // ~1.8 MB per 5 min chunk, matching what the lake already holds, and
-    // plenty for the speech-recognition consumers downstream.
-    r.setAudioEncodingBitRate(48000);
+    // 96 kbps mono AAC, the same archive bitrate the desktop lane encodes at,
+    // so a phone chunk and a desktop chunk are the same grade of evidence.
+    // ~3.6 MB per 5 min chunk.
+    r.setAudioEncodingBitRate(96000);
     return r;
   }
 
