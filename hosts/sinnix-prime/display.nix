@@ -32,18 +32,17 @@ lib.mkMerge [
       ];
     };
     # Lock-screen PAM is declared by the Noctalia module
-    # (security.pam.services.noctalia); hyprlock is gone.
+    # (security.pam.services.noctalia).
 
     # DDC/CI to the monitor over the display cable. Without i2c-dev there are
-    # no /dev/i2c-* nodes and ddcutil cannot see the panel at all (verified
-    # 2026-08-13: "No /dev/i2c devices exist"). This is the only route to the
-    # FO48U's own controls -- brightness, and the OSD-side settings behind its
-    # ASBL dimming -- from software; the shader/brightness pulse in
-    # scripts/asbl-no-moar is a shader/brightness FLASH, which the operator
-    # finds annoying -- that is why it stays on a keybind (F3) rather than a
-    # timer, and why the wallpaper rotation carries the routine mitigation.
-    # A DDC brightness nudge (VCP 0x10) touches the panel's own register with
-    # no visible flash, which is the actual fix -- see bead sinnix-70eq.
+    # no /dev/i2c-* nodes and ddcutil cannot see the panel at all. VCP READS
+    # work and are what modules/services/capture-monitor.nix polls (power
+    # state, brightness/contrast drift, input source). VCP WRITES do not take
+    # on this panel: a brightness nudge (VCP 0x10) leaves the value unchanged,
+    # so DDC is not an ASBL mitigation -- that is the shader pulse in
+    # scripts/asbl-no-moar, which the operator finds annoying enough to keep on
+    # a keybind (F3) rather than a timer, with the wallpaper rotation carrying
+    # the routine mitigation.
     # The i2c group grants the operator access without sudo per call.
     boot.kernelModules = [ "i2c-dev" ];
     hardware.i2c.enable = true;
@@ -83,9 +82,7 @@ lib.mkMerge [
         ",3840x2160@120,auto,1"
       ];
 
-      # AORUS FO48U OLED on DP-3. 4K120 HDR/10-bit was verified live via
-      # hyprctl on 2026-06-11 after the Noctalia ext-workspace crash path was
-      # disabled.
+      # AORUS FO48U OLED on DP-3, 4K120 HDR/10-bit.
       wayland.windowManager.hyprland.settings.monitorv2 = [
         {
           output = "DP-3";
@@ -97,11 +94,11 @@ lib.mkMerge [
           sdrbrightness = 1.4;
           sdrsaturation = 1.0;
           # 0.2 (Hyprland's default) lifts the OLED black floor just enough
-          # that inactive-window opacity blends are actually visible —
-          # operator-preferred look (2026-07-13). With 0, dark regions crush
-          # to pure black and the configured inactive_opacity reads as
-          # opaque. 0.2 also matches what a lossy runtime `keyword monitor`
-          # reset produces, so screenshot flows can no longer flip the look.
+          # that inactive-window opacity blends stay visible. With 0, dark
+          # regions crush to pure black and the configured inactive_opacity
+          # reads as opaque. 0.2 also matches what a lossy runtime
+          # `keyword monitor` reset produces, so screenshot flows cannot flip
+          # the look.
           sdr_min_luminance = 0.2;
           sdr_max_luminance = 80;
           min_luminance = 0;

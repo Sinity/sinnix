@@ -53,8 +53,8 @@ let
     }
     # IoT endpoints get fixed addresses because they are POLLED by name-less
     # config: the Awair capture lane targets an IP directly, and a drifting
-    # lease silently breaks the lane. Both were found in the dynamic pool
-    # (2026-08-13); pinning them also makes `<name>.lan` stable for dnsmasq.
+    # lease silently breaks the lane. Pinning also makes `<name>.lan` stable
+    # for dnsmasq.
     {
       name = "awair";
       mac = "70:88:6b:14:1e:99";
@@ -85,7 +85,7 @@ let
   wifi = {
     ssid_2g = "sinnix-gw"; # 2.4 GHz SSID
     ssid_5g = "sinnix-gw-5g"; # 5 GHz SSID
-    ssid_iot = "sinnix-iot"; # 2.4 GHz, psk2/no-PMF, for ESP-class IoT devices (sinnix-agp8.3)
+    ssid_iot = "sinnix-iot"; # 2.4 GHz, psk2/no-PMF, for ESP-class IoT devices
     # WPA3-SAE + WPA2-PSK mixed for broad compatibility
     psk = "@@WIFI_PSK@@";
     country = "PL"; # Regulatory domain (Poland, EU)
@@ -154,10 +154,8 @@ in
     "adblock-fast"
     "luci-app-adblock-fast"
     # adblock-fast needs real coreutils, not busybox applets: without these it
-    # dies at "Sorting combined block-list" / "Failed to create block-list",
-    # which is silent unless you run its status command. Verified broken on
-    # 2026-08-13 -- the router had been advertising adblock while blocking
-    # nothing.
+    # dies at "Sorting combined block-list" / "Failed to create block-list" and
+    # blocks nothing, silently unless you run its status command.
     "gawk"
     "grep"
     "sed"
@@ -295,16 +293,13 @@ in
         mobility_domain = "1a2b";
       };
 
-      # IoT-scoped 2.4 GHz SSID (sinnix-agp8.3): sae-mixed's PMF/combined-RSN
-      # element breaks ESP-class wifi chips during final handshake/
-      # provisioning (diagnosed live via the Yeelight bulb failing at
-      # 99-100%; the manual out-of-band "michal" network worked instead,
-      # confirmed via `uci show wireless` -- it predates this config and is
-      # deliberately left untouched here, not imported). This SSID is the
-      # declared, IoT-dedicated equivalent: plain psk2, no PMF, 2.4 GHz only
-      # (ESP-class devices don't do 5 GHz, so no radio1 sibling). Same "lan"
-      # network as everything else -- VLAN segregation is a separate,
-      # deliberately unscoped decision per the bead.
+      # IoT-scoped 2.4 GHz SSID: sae-mixed's PMF/combined-RSN element breaks
+      # ESP-class wifi chips during final handshake/provisioning, so this one
+      # is plain psk2, no PMF, 2.4 GHz only (ESP-class devices don't do 5 GHz,
+      # hence no radio1 sibling). Same "lan" network as everything else --
+      # VLAN segregation is a separate, unscoped decision. Note the router also
+      # carries a manual out-of-band "michal" network that predates this config
+      # and is deliberately not imported here.
       iot_radio0 = mkSection "wifi-iface" {
         device = "radio0";
         network = "lan";
@@ -376,13 +371,10 @@ in
         # Local search domain pushes .lan names
         local_ttl = 60;
         # Service names, not just machine names. `hub.lan` is the estate's
-        # browser front door (modules/services/hub.nix on prime); giving it a
-        # name means the operator types a word instead of remembering which
-        # of prime's addresses is the tailnet one. These resolve on the LAN;
-        # the hub itself still only LISTENS on loopback + tailscale0, so a LAN
-        # client resolving the name still cannot reach it -- deliberate, and
-        # the reason `hub` also exists as a tailnet name via MagicDNS-less
-        # direct IP. Relax the hub's binding first if LAN reach is ever wanted.
+        # browser front door (modules/services/hub.nix on prime). These names
+        # resolve on the LAN, but the hub only LISTENS on loopback +
+        # tailscale0, so a LAN client resolving the name still cannot reach it
+        # -- relax the hub's binding first if LAN reach is ever wanted.
         address = [
           "/hub.lan/${lanSubnet}.10"
           "/reports.lan/${lanSubnet}.10"
@@ -743,7 +735,7 @@ in
         /etc/init.d/irqbalance enable 2>/dev/null || true
         /etc/init.d/irqbalance start 2>/dev/null || true
 
-        # Clean stale miniupnpd iptables firewall include (left over from -iptables variant)
+        # The -nftables variant needs no firewall include; drop any iptables one
         uci -q delete firewall.miniupnpd 2>/dev/null || true
         uci commit firewall 2>/dev/null || true
         if [ -f /etc/init.d/https-dns-proxy ]; then
@@ -767,22 +759,10 @@ in
         # Create persistent directories on NAND overlay
         mkdir -p /overlay/log /overlay/nlbwmon
 
-        # The WAN watchdog that used to live here is deleted, not disabled.
-        # It never ran once: busybox crond reads /etc/crontabs (see
-        # /etc/init.d/cron), the entry was written to /etc/cron.d, and with
-        # /etc/crontabs empty the init script's start() bails, so no crond
-        # process exists at all. Verified live before removal -- 0 hits for
-        # wan-watchdog in 9 days of logread, /etc/crontabs empty.
-        #
-        # It was also the wrong idea even had it worked: it remediated
-        # unconditionally on ONE lost ping to a hardcoded 1.1.1.1, and "the
-        # internet is down" is self-announcing -- a watchdog adds nothing to
-        # a failure nobody can miss, while an `ifup wan` triggered by a
-        # single dropped packet can cause the outage it claims to fix.
-        #
-        # Worst of all it printed "✓ WAN watchdog cron installed", a receipt
-        # for work it never verified. A deploy step that reports success
-        # without checking is how this stayed invisible for months.
+        # There is no cron job here on purpose: busybox crond reads
+        # /etc/crontabs (see /etc/init.d/cron), not /etc/cron.d, and with
+        # /etc/crontabs empty the init script's start() bails so no crond
+        # process runs at all. Anything scheduled must go to /etc/crontabs.
 
         # Reload wifi last (may briefly disconnect)
         wifi reload

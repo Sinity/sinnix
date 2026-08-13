@@ -23,7 +23,4 @@
       linkConfig.RequiredForOnline = "routable";
     };
   };
-
-  # Override the cloud profile's mkForce on TCP 22 only if extra ports are
-  # ever needed. Keep this list empty so the profile remains authoritative.
 }
