@@ -75,6 +75,8 @@ sinnix-phone <command>
   adb-restore   re-enable adbd TCP mode (requires the phone on USB)
   clip-push     push the current desktop clipboard to the phone, once
   clip-watch    watch desktop clipboard, push on change (foreground loop)
+  voicenote [s] record s seconds (default 30), transcribe via the STT hub,
+                land a dated note in the knowledgebase
 EOF
 }
 
@@ -223,6 +225,91 @@ clip-watch)
   # cheap and immediate. No loop-guard needed: this direction never writes
   # back to the desktop clipboard, so there is nothing to echo.
   exec wl-paste --watch "$0" clip-push
+  ;;
+voicenote)
+  # sinnix-uyvt.1 track 2 (async voice notes, NOT the live-dictation
+  # keyboard -- that's track 1, kaizo.co.WhisperVoiceKeyboard, already
+  # installed+enabled, verified fully on-device: it requests RECORD_AUDIO
+  # but NOT INTERNET, so it is structurally incapable of a cloud round-trip).
+  #
+  # Records SECONDS of phone mic via termux-microphone-record, pulls the
+  # clip, transcribes it against the estate's OpenAI-compatible STT hub
+  # (modules/services/whisper.nix, :8090), and lands a dated markdown note
+  # in the knowledgebase.
+  #
+  # ENGINE NOTE (bead's own explicit instruction): this targets whisper.cpp
+  # on :8090 as a stated v0 stopgap, NOT sinnix-mke's target engine
+  # (Parakeet TDT / Voxtral) -- mke's better-engine hub doesn't exist yet.
+  # Re-point WHISPER_URL below once mke lands; nothing else here should need
+  # to change (the hub is OpenAI-/v1/audio/transcriptions-compatible either
+  # way).
+  seconds="${1:-30}"
+  note_root="${SINNIX_KB_ROOT:-/realm/data/knowledgebase}"
+  # termux-microphone-record has no wav encoder (aac/amr_wb/amr_nb/opus only);
+  # aac in an .m4a container is what OpenAI-compatible transcription
+  # endpoints (incl. whisper.cpp's --inference-path shim) expect anyway.
+  remote_clip="/sdcard/sinnix-voicenote.m4a"
+  local_clip="/realm/tmp/work/voicenote-$(date +%Y%m%d-%H%M%S).m4a"
+  mkdir -p /realm/tmp/work
+
+  echo "voicenote: recording ${seconds}s on the phone (speak now)..."
+  # termux-microphone-record backgrounds itself as an Android foreground
+  # service, independent of the invoking shell -- but `ssh cmd` without a
+  # pty/nohup can still race the record call against session teardown, so
+  # start it, then poll -i for isRecording:true before returning control.
+  ssh_phone "rm -f $remote_clip; termux-microphone-record -f $remote_clip -l $seconds -e aac"
+  for _ in 1 2 3 4 5; do
+    if [ "$(ssh_phone "termux-microphone-record -i" | jq -r '.isRecording')" = "true" ]; then
+      break
+    fi
+    sleep 1
+  done
+  sleep "$seconds"
+  ssh_phone "termux-microphone-record -q >/dev/null 2>&1 || true"
+  sleep 1
+
+  echo "voicenote: pulling clip"
+  scp -P "$PHONE_SSH_PORT" -F /dev/null \
+    -o "UserKnownHostsFile=${SINNIX_PHONE_KNOWN_HOSTS:-$HOME/.ssh/known_hosts}" \
+    -o IdentitiesOnly=yes -i "${SINNIX_PHONE_IDENTITY:-$HOME/.ssh/id_ed25519}" \
+    "${PHONE_USER}@${PHONE_TS_IP}:${remote_clip}" "$local_clip"
+  ssh_phone "rm -f $remote_clip"
+
+  echo "voicenote: transcribing via the STT hub (:8090, whisper v0 stopgap)"
+  set +e
+  transcript_json=$(curl -sf -X POST "http://127.0.0.1:8090/v1/audio/transcriptions" \
+    -F "file=@${local_clip}" -F "model=whisper-1")
+  curl_status=$?
+  set -e
+  if [ "$curl_status" -ne 0 ]; then
+    echo "voicenote: STT hub unreachable at :8090 (curl exit $curl_status)." >&2
+    echo "  whisper.enable is set in host config but this looks like it hasn't" >&2
+    echo "  been switched live yet -- the audio clip is saved at $local_clip," >&2
+    echo "  re-run 'sinnix-phone shell' won't help; retry this command after switch." >&2
+    exit 1
+  fi
+  text=$(printf '%s' "$transcript_json" | jq -r '.text // empty')
+  if [ -z "$text" ]; then
+    echo "voicenote: transcription failed or empty. Raw response:" >&2
+    printf '%s\n' "$transcript_json" >&2
+    exit 1
+  fi
+
+  stamp="$(date +%Y-%m-%d_%H-%M-%S)"
+  note_path="${note_root}/voicenote.${stamp}.md"
+  {
+    echo "---"
+    echo "source: phone-voicenote"
+    echo "engine: whisper-v0-stopgap  # sinnix-uyvt.1: replace with sinnix-mke once its hub lands"
+    echo "recorded: ${stamp}"
+    echo "duration_s: ${seconds}"
+    echo "audio: ${local_clip}"
+    echo "---"
+    echo ""
+    printf '%s\n' "$text"
+  } > "$note_path"
+  echo "voicenote: wrote $note_path"
+  printf '%s\n' "$text"
   ;;
 *)
   usage
