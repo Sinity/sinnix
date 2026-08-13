@@ -707,6 +707,13 @@ def run_devices(
     stop_event: threading.Event | None = None,
 ) -> int:
     from .recorder import install_signal_stop_event
+    from .segment import promote_orphan_partials
+
+    # Before any recorder opens a segment: whatever `.partial` files exist now
+    # were left by a previous process, and only this window can tell them apart
+    # from live ones.
+    for path in promote_orphan_partials(Path(capture_root) / "audio"):
+        print(f"promoted orphaned segment {path.name}", flush=True)
 
     supervisor = DeviceSupervisor(
         capture_root=capture_root,
