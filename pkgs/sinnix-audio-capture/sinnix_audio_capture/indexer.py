@@ -48,11 +48,12 @@ class SpeechSpan:
 def discover_channels(capture_root: Path) -> list[str]:
     """Channel directories under `<capture_root>/audio/` worth indexing.
 
-    Per-source channels are created at runtime as devices appear, so the
+    Per-device channels are created at runtime as devices appear, so the
     set cannot be a fixed list. Matching is restricted to the shapes this
-    package writes (`sink-monitor`, `src-*`, and `mic` from before capture
-    went per-source) so that neighbouring directories in the lake --
-    `legacy/`, `archive/`, `raw/` -- are never walked.
+    package writes -- `src-*` and `snk-*`, plus `mic` and `sink-monitor`
+    from before capture went per-device -- so that neighbouring
+    directories in the lake (`legacy/`, `archive/`, `raw/`) are never
+    walked.
     """
     audio_dir = Path(capture_root) / "audio"
     if not audio_dir.is_dir():
@@ -61,7 +62,7 @@ def discover_channels(capture_root: Path) -> list[str]:
         p.name
         for p in audio_dir.iterdir()
         if p.is_dir()
-        and (p.name in ("mic", "sink-monitor") or p.name.startswith("src-"))
+        and (p.name in ("mic", "sink-monitor") or p.name.startswith(("src-", "snk-")))
     )
 
 

@@ -6,11 +6,9 @@ import logging
 import time
 from pathlib import Path
 
+from .devices import POLL_INTERVAL_SECONDS, probe_coverage, run_devices
 from .indexer import run_index_pass
 from .pause import parse_duration, write_gap_record
-from .recorder import run_recorder
-from .segment import CHANNEL_PROFILES
-from .sources import POLL_INTERVAL_SECONDS, probe_coverage, run_sources
 from .topology import run_topology
 
 
@@ -18,34 +16,31 @@ def _add_capture_root(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--capture-root", required=True, type=Path)
 
 
-def _add_exclude(parser: argparse.ArgumentParser) -> None:
+def _add_excludes(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
-        "--exclude",
+        "--exclude-source",
         action="append",
         default=[],
         metavar="REGEX",
-        help="Case-insensitive regex matched against a source's node.name and "
-        "node.description; matching sources are never recorded (repeatable)",
+        help="Case-insensitive regex matched against a capture source's "
+        "node.name and node.description; matches are never recorded (repeatable)",
+    )
+    parser.add_argument(
+        "--exclude-sink",
+        action="append",
+        default=[],
+        metavar="REGEX",
+        help="Same, for playback sinks (recorded through their monitor ports)",
     )
 
 
-def _cmd_record(args: argparse.Namespace) -> int:
-    return run_recorder(
-        channel=args.channel,
+def _cmd_record_devices(args: argparse.Namespace) -> int:
+    return run_devices(
         capture_root=args.capture_root,
+        exclude_sources=args.exclude_source,
+        exclude_sinks=args.exclude_sink,
+        asr_source_pattern=args.asr_source,
         pw_record_bin=args.pw_record_bin,
-        pw_metadata_bin=args.pw_metadata_bin,
-        pw_dump_bin=args.pw_dump_bin,
-        opusenc_bin=args.opusenc_bin,
-    )
-
-
-def _cmd_record_sources(args: argparse.Namespace) -> int:
-    return run_sources(
-        capture_root=args.capture_root,
-        exclude_patterns=args.exclude,
-        pw_record_bin=args.pw_record_bin,
-        pw_metadata_bin=args.pw_metadata_bin,
         pw_dump_bin=args.pw_dump_bin,
         opusenc_bin=args.opusenc_bin,
         tee_socket_path=args.tee_socket,
@@ -53,11 +48,14 @@ def _cmd_record_sources(args: argparse.Namespace) -> int:
     )
 
 
-def _cmd_sources_probe(args: argparse.Namespace) -> int:
+def _cmd_devices_probe(args: argparse.Namespace) -> int:
     code, detail = probe_coverage(
         capture_root=args.capture_root,
         pw_dump_bin=args.pw_dump_bin,
-        exclude_patterns=args.exclude,
+        exclude_patterns={
+            "source": args.exclude_source,
+            "sink": args.exclude_sink,
+        },
         max_age_seconds=args.max_age,
     )
     print(json.dumps(detail, sort_keys=True))
@@ -96,53 +94,45 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--verbose", action="store_true")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    record_parser = subparsers.add_parser(
-        "record",
-        help="Run the always-on recorder loop for one default-following channel",
+    devices_parser = subparsers.add_parser(
+        "record-devices",
+        help="Supervise one always-on recorder per live PipeWire source and sink",
     )
-    record_parser.add_argument(
-        "--channel", required=True, choices=sorted(CHANNEL_PROFILES)
+    _add_capture_root(devices_parser)
+    _add_excludes(devices_parser)
+    devices_parser.add_argument("--pw-record-bin", default="pw-record")
+    devices_parser.add_argument("--pw-dump-bin", default="pw-dump")
+    devices_parser.add_argument("--opusenc-bin", default="opusenc")
+    devices_parser.add_argument(
+        "--asr-source",
+        default=None,
+        metavar="REGEX",
+        help="Which capture source feeds the low-latency ASR tee. Names one "
+        "device for transcription only; it privileges no lane in the archive, "
+        "which records every device regardless",
     )
-    _add_capture_root(record_parser)
-    record_parser.add_argument("--pw-record-bin", default="pw-record")
-    record_parser.add_argument("--pw-metadata-bin", default="pw-metadata")
-    record_parser.add_argument("--pw-dump-bin", default="pw-dump")
-    record_parser.add_argument("--opusenc-bin", default="opusenc")
-    record_parser.set_defaults(func=_cmd_record)
-
-    sources_parser = subparsers.add_parser(
-        "record-sources",
-        help="Supervise one always-on recorder per live PipeWire capture source",
-    )
-    _add_capture_root(sources_parser)
-    _add_exclude(sources_parser)
-    sources_parser.add_argument("--pw-record-bin", default="pw-record")
-    sources_parser.add_argument("--pw-metadata-bin", default="pw-metadata")
-    sources_parser.add_argument("--pw-dump-bin", default="pw-dump")
-    sources_parser.add_argument("--opusenc-bin", default="opusenc")
-    sources_parser.add_argument(
+    devices_parser.add_argument(
         "--tee-socket",
         type=Path,
         default=None,
-        help="SEQPACKET socket path mirroring raw PCM from whichever recorded "
-        "source is PipeWire's current default (format published alongside it "
-        "as <socket>.json)",
+        help="SEQPACKET socket path mirroring raw PCM from the --asr-source "
+        "device (its format is published alongside as <socket>.json)",
     )
-    sources_parser.add_argument(
+    devices_parser.add_argument(
         "--poll-interval", type=float, default=POLL_INTERVAL_SECONDS
     )
-    sources_parser.set_defaults(func=_cmd_record_sources)
+    devices_parser.set_defaults(func=_cmd_record_devices)
 
     probe_parser = subparsers.add_parser(
-        "sources-probe",
-        help="Exit 0 if every non-excluded live source is being written to, "
+        "devices-probe",
+        help="Exit 0 if every non-excluded live device is being written to, "
         "1 if any is not, 2 if the graph could not be read",
     )
     _add_capture_root(probe_parser)
-    _add_exclude(probe_parser)
+    _add_excludes(probe_parser)
     probe_parser.add_argument("--pw-dump-bin", default="pw-dump")
     probe_parser.add_argument("--max-age", type=float, default=600.0)
-    probe_parser.set_defaults(func=_cmd_sources_probe)
+    probe_parser.set_defaults(func=_cmd_devices_probe)
 
     topology_parser = subparsers.add_parser(
         "topology",

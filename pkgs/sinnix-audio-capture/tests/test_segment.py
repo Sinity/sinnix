@@ -5,9 +5,9 @@ import time
 from pathlib import Path
 
 from sinnix_audio_capture.segment import (
-    CHANNEL_PROFILES,
     OPUS_APPLICATION_CTL_VALUE,
     OpusSegmentWriter,
+    device_profile,
     hour_bucket_start,
     opusenc_argv,
     segment_filename,
@@ -35,7 +35,7 @@ def test_opusenc_argv_sets_application_and_dtx_ctls():
     # is asserted against the profile's own setting rather than a literal,
     # because which application a CHANNEL uses is a tuning decision while the
     # RENDERING of that decision is the contract.
-    profile = CHANNEL_PROFILES["sink-monitor"]
+    profile = device_profile(2)
     argv = opusenc_argv("opusenc", profile, Path("/tmp/out.opus.partial"))
     assert "--set-ctl-int" in argv
     assert f"4000={OPUS_APPLICATION_CTL_VALUE[profile.application]}" in argv
@@ -51,11 +51,12 @@ def test_opusenc_application_ctl_mapping_is_correct():
     assert OPUS_APPLICATION_CTL_VALUE["audio"] == 2049
 
 
-def test_opusenc_argv_renders_each_profiles_application():
-    for name, profile in CHANNEL_PROFILES.items():
+def test_opusenc_argv_renders_the_profiles_application():
+    for channels in (1, 2):
+        profile = device_profile(channels)
         argv = opusenc_argv("opusenc", profile, Path("/tmp/out.opus.partial"))
         expected = OPUS_APPLICATION_CTL_VALUE[profile.application]
-        assert f"4000={expected}" in argv, f"{name} rendered the wrong application CTL"
+        assert f"4000={expected}" in argv
 
 
 class _FakeProc:
@@ -81,7 +82,7 @@ def _fake_popen(argv, stdin=None):
 
 
 def test_opus_segment_writer_rotates_on_hour_boundary(tmp_path: Path):
-    profile = CHANNEL_PROFILES["sink-monitor"]
+    profile = device_profile(2)
     writer = OpusSegmentWriter(
         output_dir=tmp_path,
         channel="src-alsa-input-yeti",
@@ -123,3 +124,40 @@ def test_opus_segment_writer_maybe_rotate_on_quiet_hour(tmp_path: Path):
     assert finished is not None
     assert finished.name == "audio-src-alsa-input-yeti-20260812T140000Z.opus"
     assert not writer.is_open
+
+
+def test_a_second_segment_in_one_hour_never_overwrites_the_first(tmp_path: Path):
+    # Any mid-hour restart (device replug, unit restart) opens a new segment
+    # for the same channel-hour. The finalising rename must not clobber the
+    # part already archived.
+    hour = float(calendar.timegm((2026, 8, 12, 14, 0, 0)))
+
+    def _write(payload: bytes) -> Path:
+        writer = OpusSegmentWriter(
+            output_dir=tmp_path,
+            channel="src-x",
+            argv_builder=lambda output_path: ["fake", str(output_path)],
+            popen=_fake_popen,
+        )
+        writer.write(payload, ts=hour + 60)
+        finished = writer.close()
+        assert finished is not None
+        return finished
+
+    first = _write(b"first-part")
+    second = _write(b"second-part")
+    third = _write(b"third-part")
+
+    assert first.name == "audio-src-x-20260812T140000Z.opus"
+    assert second.name == "audio-src-x-p2-20260812T140000Z.opus"
+    assert third.name == "audio-src-x-p3-20260812T140000Z.opus"
+    assert first.read_bytes() == b"first-part"
+    assert second.read_bytes() == b"second-part"
+
+
+def test_part_marked_segments_still_carry_a_parseable_stamp():
+    from sinnix_audio_capture.indexer import segment_start_ts
+
+    hour = float(calendar.timegm((2026, 8, 12, 14, 0, 0)))
+    name = segment_filename("src-x", hour, part=4)
+    assert segment_start_ts(Path("/tmp") / name) == hour

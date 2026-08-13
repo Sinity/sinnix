@@ -1,14 +1,16 @@
-"""Low-latency dual-use tee: mic PCM mirrored to a SEQPACKET socket.
+"""Low-latency dual-use tee: the ASR source's PCM on a SEQPACKET socket.
 
-`$XDG_RUNTIME_DIR/sinnix/audio/mic.pcm` carries raw s16le frames straight
-from whichever recorded source PipeWire currently calls the default --
-the microphone the desktop itself would use. One capture, two consumers:
-the frames are the same bytes already going into the Opus archive, not a
-second `pw-record` stream.
+`$XDG_RUNTIME_DIR/sinnix/audio/asr.pcm` carries raw s16le frames from the
+ONE capture source nominated for transcription (devices.py's
+`asr_source_pattern`). One capture, two consumers: the frames are the same
+bytes already going into that device's Opus archive, not a second
+`pw-record` stream.
 
-The sample rate and channel count therefore follow that device rather
-than being fixed, so consumers must read `<socket>.json`, which
-sources.SourceSupervisor rewrites whenever the default source changes,
+The nominated device is a transcription choice, not an archive one --
+every other source and sink is recorded exactly the same way whether or
+not it feeds this socket. Its sample rate and channel count follow that
+device rather than being fixed, so consumers must read `<socket>.json`,
+which DeviceSupervisor rewrites whenever the nominated device changes,
 instead of assuming a format.
 
 This is a best-effort mirror, not a queue: archive liveness must never
