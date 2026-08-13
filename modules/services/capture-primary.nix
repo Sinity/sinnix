@@ -78,6 +78,15 @@ let
       blob_dir="$lane_dir/blobs"
       trigger_file="$state_dir/last-trigger"
 
+      # wl-paste --watch supplies the new selection on stdin. Drain it before
+      # making any nested clipboard request, otherwise the selection owner can
+      # block forever writing a large selection while this handler waits for a
+      # second transfer from that same owner.
+      watch_input="$(mktemp)"
+      tmp_content="$(mktemp)"
+      trap 'rm -f "$watch_input" "$tmp_content"' EXIT
+      cat >"$watch_input"
+
       mkdir -p "$lane_dir" "$blob_dir" "$state_dir"
 
       # MIME preference order -- identical to the clipboard lane (see
@@ -113,8 +122,6 @@ let
 
       mime="$(pick_mime "$offered_types")"
 
-      tmp_content="$(mktemp)"
-      trap 'rm -f "$tmp_content"' EXIT
       if ! wl-paste --primary --no-newline --type "$mime" >"$tmp_content" 2>/dev/null; then
         exit 0
       fi
