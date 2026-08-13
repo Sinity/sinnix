@@ -25,11 +25,26 @@ in
         modules = [
           mountTmpfsRoots
           baseTestConfig
+          inputs.sinex.nixosModules.default
           (_: {
             networking.hostName = "backup-runtime";
+            services.sinex = {
+              stateRoot = "/var/lib/sinex/state";
+              storage.blob.repositoryPath = "/var/lib/sinex/state/blob-repository";
+            };
           })
         ];
-        assertions = _config: [ ];
+        assertions = config: [
+          {
+            assertion = lib.hasInfix config.services.sinex.storage.blob.repositoryPath config.systemd.services.borgbackup-job-sinex-blobs.script;
+            message = "Sinex blob Borg job must use the evaluated CAS repository path";
+          }
+          {
+            assertion =
+              !lib.hasInfix "/realm/sinex/state/blob-repository" config.systemd.services.borgbackup-job-sinex-blobs.script;
+            message = "Sinex blob Borg job must not retain the retired CAS source path";
+          }
+        ];
       };
       rewriteBackupHook =
         hook: replacements:
@@ -169,6 +184,31 @@ in
             }
           ];
 
+      sinexBlobBorgScript =
+        rewriteBackupHook backupRuntimeEval.config.systemd.services.borgbackup-job-sinex-blobs.script
+          [
+            {
+              from = "/outer-realm/backup/borg-sinex-blobs-v1";
+              to = "$TMPDIR/repos/borg-sinex-blobs-v1";
+            }
+            {
+              from = "/persist/root/.cache/borg";
+              to = "$TMPDIR/state/borg-cache";
+            }
+            {
+              from = "/run/lock/sinnix-borg.lock";
+              to = "$TMPDIR/state/sinnix-borg.lock";
+            }
+            {
+              from = "install -d -m 0700 -o root -g root";
+              to = "install -d -m 0700";
+            }
+            {
+              from = "/var/lib/sinex/state/blob-repository";
+              to = "$TMPDIR/live-cas";
+            }
+          ];
+
       backupBorgHookRuntime = mkRuntimeCheck system {
         name = "backup-borg-hook-runtime-check";
         nativeBuildInputs = [
@@ -188,7 +228,9 @@ in
             "$TMPDIR/state/borg-cache" \
             "$TMPDIR/realm-snapshots" \
             "$TMPDIR/persist-snapshots" \
-            "$TMPDIR/realm-empty"
+            "$TMPDIR/realm-empty" \
+            "$TMPDIR/live-cas/objects/ab"
+          printf 'production-shaped-cas-object\n' > "$TMPDIR/live-cas/objects/ab/cdef"
 
           cat > "$TMPDIR/mock-bin/mountpoint" <<'EOF'
           #!${pkgs.bash}/bin/bash
@@ -222,7 +264,9 @@ in
           #!${pkgs.bash}/bin/bash
           set -euo pipefail
           printf '%s\n' "$*" >> "$TMPDIR/logs/borg.log"
-          case "$1" in
+          command="$1"
+          shift
+          case "$command" in
             init)
               repo="''${@: -1}"
               repo_path="''${repo#file://}"
@@ -230,9 +274,37 @@ in
               touch "$repo_path/config"
               ;;
             list)
-              exit 2
+              repo="''${@: -1}"
+              repo_path="''${repo#file://}"
+              if [ -d "$repo_path/archives" ]; then
+                find "$repo_path/archives" -mindepth 1 -maxdepth 1 -type d -printf '%f\n'
+              fi
               ;;
             create)
+              archive=""
+              for arg in "$@"; do
+                case "$arg" in
+                  ::*) archive="''${arg#::}" ;;
+                esac
+              done
+              source_path="''${@: -1}"
+              repo="''${BORG_REPO:?BORG_REPO must be set}"
+              repo_path="''${repo#file://}"
+              test -n "$archive"
+              test -d "$source_path"
+              mkdir -p "$repo_path/archives/$archive"
+              cp -a "$source_path/." "$repo_path/archives/$archive/"
+              ;;
+            extract)
+              repo="$1"
+              archive="$2"
+              shift 2
+              test "$1" = "--destination"
+              destination="$2"
+              repo_path="''${repo#file://}"
+              archive="''${archive#::}"
+              mkdir -p "$destination"
+              cp -a "$repo_path/archives/$archive/." "$destination/"
               ;;
             break-lock)
               ;;
@@ -294,13 +366,21 @@ in
           ${missingRealmBorgDrainScript}
           EOF
 
+          cat > "$TMPDIR/run-sinex-blob-backup.sh" <<'EOF'
+          #!${pkgs.bash}/bin/bash
+          set -euo pipefail
+          ${sinexBlobBorgScript}
+          EOF
+
           chmod +x \
             "$TMPDIR/run-realm-hook.sh" \
             "$TMPDIR/run-persist-hook.sh" \
-            "$TMPDIR/run-missing-realm-hook.sh"
+            "$TMPDIR/run-missing-realm-hook.sh" \
+            "$TMPDIR/run-sinex-blob-backup.sh"
 
           "$TMPDIR/run-realm-hook.sh"
           "$TMPDIR/run-persist-hook.sh"
+          "$TMPDIR/run-sinex-blob-backup.sh"
 
           grep -q "$TMPDIR/realm-snapshots/realm.2026-04-02T011500 => $TMPDIR/bind/realm" "$TMPDIR/logs/mount.log"
           grep -q "$TMPDIR/persist-snapshots/persist.2026-04-02T011500 => $TMPDIR/bind/persist" "$TMPDIR/logs/mount.log"
@@ -310,6 +390,12 @@ in
           grep -q "create .*::persist-persist.2026-04-02T011500" "$TMPDIR/logs/borg.log"
           grep -q "subvolume delete $TMPDIR/realm-snapshots/realm.2026-04-02T010000" "$TMPDIR/logs/btrfs.log"
           grep -q "subvolume delete $TMPDIR/persist-snapshots/persist.2026-04-02T010000" "$TMPDIR/logs/btrfs.log"
+          archive_name="$(borg list --short file://$TMPDIR/repos/borg-sinex-blobs-v1)"
+          case "$archive_name" in sinex-blobs-*) ;; *) exit 1 ;; esac
+          borg extract "file://$TMPDIR/repos/borg-sinex-blobs-v1" "::$archive_name" --destination "$TMPDIR/restore"
+          cmp "$TMPDIR/live-cas/objects/ab/cdef" "$TMPDIR/restore/objects/ab/cdef"
+          grep -q "create .* $TMPDIR/live-cas" "$TMPDIR/logs/borg.log"
+          ! grep -q "/realm/sinex/state/blob-repository" "$TMPDIR/logs/borg.log"
 
           set +e
           "$TMPDIR/run-missing-realm-hook.sh" > "$TMPDIR/missing-realm.log" 2>&1
