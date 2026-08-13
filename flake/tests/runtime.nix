@@ -195,7 +195,8 @@ in
       groupEvaluated = evalTestSpec system groupSpec;
       groupBindingsJson =
         let
-          hyprSettings = groupEvaluated.config.home-manager.users.sinity.wayland.windowManager.hyprland.settings;
+          hyprSettings =
+            groupEvaluated.config.home-manager.users.sinity.wayland.windowManager.hyprland.settings;
         in
         builtins.toJSON (
           # Every bind family the module emits. These are the described
