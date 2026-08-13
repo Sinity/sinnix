@@ -18,10 +18,9 @@ def format_duration(seconds):
 
 
 def main():
-    # Read input from timewarrior
     lines = sys.stdin.readlines()
 
-    # Parse JSON data (timewarrior export returns array directly)
+    # timewarrior export returns the array directly
     intervals = json.loads("".join(lines))
 
     by_hour = defaultdict(int)
@@ -36,20 +35,16 @@ def main():
         if not start or not end:
             continue
 
-        # Parse timestamps
         start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
         end_dt = datetime.fromisoformat(end.replace("Z", "+00:00"))
         duration = (end_dt - start_dt).total_seconds()
 
-        # Track by hour of day
         hour = start_dt.hour
         by_hour[hour] += duration
 
-        # Track by day of week
         day = start_dt.strftime("%A")
         by_day[day] += duration
 
-        # Track by tag
         for tag in tags:
             tag_stats[tag] += duration
 
@@ -57,13 +52,11 @@ def main():
     print("Productivity Analysis")
     print("=" * 60)
 
-    # Most productive hours
     print("\nMost Productive Hours:")
     sorted_hours = sorted(by_hour.items(), key=lambda x: x[1], reverse=True)[:5]
     for hour, duration in sorted_hours:
         print(f"  {hour:02d}:00 - {hour + 1:02d}:00  {format_duration(duration):>15}")
 
-    # Most productive days
     print("\nTime by Day of Week:")
     day_order = [
         "Monday",
@@ -78,7 +71,6 @@ def main():
         if day in by_day:
             print(f"  {day:10} {format_duration(by_day[day]):>15}")
 
-    # Top tags
     print("\nTop Activities:")
     sorted_tags = sorted(tag_stats.items(), key=lambda x: x[1], reverse=True)[:10]
     for tag, duration in sorted_tags:

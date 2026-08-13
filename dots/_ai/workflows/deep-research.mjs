@@ -1,30 +1,20 @@
-// deep-research: exhaustive multi-agent research pipeline (sinnix-nx0).
+// deep-research: exhaustive multi-agent research pipeline.
 //
-// Deliberately beyond commercial-product depth: hosted "deep research"
-// products cap at 5-30 sources and one search strategy. This pipeline runs
-// N parallel searchers with DISTINCT query strategies, fetches FULL TEXT of
-// every source found (not a snippet), extracts claims with cheap local
-// lanes, adversarially verifies each claim (refutation attempt, not just a
-// confidence score), and synthesizes with a completeness critic that names
-// what's still uncovered -- closing the loop the other reference
-// implementations (GPT-Researcher, STORM, LangChain open_deep_research,
-// Local Deep Research) don't: none of them join against this estate's own
-// evidence planes (lake captures, polylogue AI-session history, lynchpin
-// analysis products) or use beads as the native output format instead of a
-// disposable report file.
-//
-// Studied before writing (per sinnix-nx0's own notes): GPT-Researcher's
-// planner/parallel-executors/publisher split (closest architecture to this
-// one), Stanford STORM's outline-first perspective-guided question asking
-// (the completeness-critic stage borrows this shape), Local Deep Research
-// as the fully-local reference point.
+// Runs N parallel searchers with DISTINCT query strategies, fetches FULL
+// TEXT of every source found (not a snippet), extracts claims with cheap
+// local lanes, adversarially verifies each claim (refutation attempt, not
+// just a confidence score), and synthesizes with a completeness critic that
+// names what's still uncovered. Unlike GPT-Researcher, STORM, LangChain
+// open_deep_research, and Local Deep Research, it joins against this
+// estate's own evidence planes (lake captures, polylogue AI-session history,
+// lynchpin analysis products) and emits beads rather than a disposable
+// report file.
 //
 // Usage: Workflow({ name: "deep-research", args: { question: "...",
 //   depthBudget: "standard" | "exhaustive", includeEstateEvidence: true } })
 //
 // depthBudget controls searcher count and verification-vote count, not
-// corpus size -- corpus size is "everything found", uncapped, per the
-// bead's explicit rejection of the 5-30-source commercial cap.
+// corpus size -- corpus size is "everything found", uncapped.
 
 export const meta = {
   name: 'deep-research',

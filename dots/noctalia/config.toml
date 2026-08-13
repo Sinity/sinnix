@@ -31,9 +31,9 @@ community_ids = ["zed", "yazi"]
 [wallpaper]
 enabled = true
 directory = "/home/sinity/wallpaper"
-# directory_dark/directory_light are real v5 keys (verified against the
-# installed noctalia-5.0.0 binary's own `noctalia config validate`, not
-# assumed). They point at STABLE paths -- ~/wallpaper/{dark,light} are
+# directory_dark/directory_light are real v5 keys (accepted by the installed
+# binary's own `noctalia config validate`). They point at STABLE paths --
+# ~/wallpaper/{dark,light} are
 # symlinks retargeted by the time-of-day timer in
 # modules/features/desktop/wallpaper.nix, so this file never needs to
 # change when the active time-of-day set rotates.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SubagentStop hook — appends a "dispatch_end" row to the fanout dispatch
-# ledger (polylogue-u49yr), pairing with the "dispatch_start" row the
-# PreToolUse(Agent) hook (pretooluse-agent-model.sh) writes on dispatch.
+# ledger, pairing with the "dispatch_start" row the PreToolUse(Agent) hook
+# (pretooluse-agent-model.sh) writes on dispatch.
 #
 # Completion telemetry (duration, token usage, last-message size) is
 # best-effort, derived from the subagent's own transcript_path when the

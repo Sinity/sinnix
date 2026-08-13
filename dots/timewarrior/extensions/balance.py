@@ -16,10 +16,9 @@ def format_duration(seconds):
 
 
 def main():
-    # Read input from timewarrior
     lines = sys.stdin.readlines()
 
-    # Parse JSON data (timewarrior export returns array directly)
+    # timewarrior export returns the array directly
     intervals = json.loads("".join(lines))
 
     work_time = 0
@@ -34,14 +33,12 @@ def main():
         if not start or not end:
             continue
 
-        # Calculate duration
         from datetime import datetime
 
         start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
         end_dt = datetime.fromisoformat(end.replace("Z", "+00:00"))
         duration = (end_dt - start_dt).total_seconds()
 
-        # Categorize
         if "work" in tags or any(t in tags for t in ["coding", "meetings", "admin"]):
             work_time += duration
         elif "personal" in tags or any(t in tags for t in ["exercise", "reading"]):
@@ -67,7 +64,6 @@ def main():
         )
         print(f"\nTotal:    {format_duration(total):>15}")
 
-        # Work-life balance score
         if work_time > 0:
             ratio = personal_time / work_time
             print(f"\nWork-Life Ratio: 1:{ratio:.2f}")
