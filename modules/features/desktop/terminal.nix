@@ -10,6 +10,7 @@ mkFeatureModule {
     "terminal"
   ];
   description = "Kitty terminal emulator";
+  meta.dotfiles.configFile."kitty/unwrap-urls.py" = "kitty/unwrap-urls.py";
   configFn =
     {
       config,
@@ -84,6 +85,11 @@ mkFeatureModule {
               map ctrl+shift+f12 debug_config
 
               map ctrl+shift+enter launch --type=tab --cwd=current
+
+              # detect_urls only sees one screen line at a time, so a URL a
+              # TUI wrapped itself (newline + indent) opens truncated. This
+              # rejoins those; see the kitten for the heuristic.
+              map ctrl+shift+e kitten hints --customize-processing ~/.config/kitty/unwrap-urls.py --type url --program default
             '';
           };
         };

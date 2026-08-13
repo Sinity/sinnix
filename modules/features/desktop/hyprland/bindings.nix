@@ -110,7 +110,7 @@ in
     # this key did nothing. `ddc` writes the panel's own VCP 0x10 register,
     # which is at least a real action -- whether it resets the ASBL timer is
     # still unverified (sinnix-70eq).
-    ", F3, Pulse the OLED panel over DDC to clear burn-in dimming, exec, asbl-no-moar once --mode ddc --duration 0.3"
+    ", F3, Pulse the OLED panel to clear burn-in dimming, exec, asbl-no-moar once --mode invert --duration 0.05"
     ", F6, Toggle the WeeChat scratchpad, exec, uwsm app -- ${script "toggle-scratch"} weechat"
     ", F8, Toggle the raw-log scratchpad, exec, uwsm app -- ${script "toggle-scratch"} rawlog"
     ", F9, Emergency stop for runaway builds and background work, exec, sudo -n ${scriptPkgs.nuke-builds}/bin/nuke-builds"
