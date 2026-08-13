@@ -256,3 +256,76 @@ def test_orphan_reap_requires_two_identical_cold_observations(tmp_path: Path) ->
         accepted["preconditions"]["resolved"]["orphan"]["policy"]["observation_count"]
         == 2
     )
+
+
+def test_scope_targets_admit_only_name_shaped_live_units_and_only_stop(
+    tmp_path: Path,
+) -> None:
+    inventory_path = tmp_path / "inventory.json"
+    inventory(inventory_path)
+    reducer = Reducer(
+        tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}
+    )
+    reducer.refresh()
+    live_units = {"sinnix-build-1786566375240889502-2296063.scope": "user"}
+    commands: list[list[str]] = []
+
+    def adapter(value, resolved):
+        commands.append(value["action"])
+        return {"status": "fixture", "manager": resolved.get("manager")}
+
+    actions = ActionService(
+        reducer.snapshot,
+        inventory_path,
+        tmp_path / "receipts.json",
+        adapter=adapter,
+        scope_prober=lambda unit: live_units.get(unit),
+    )
+    # A name that does not match the sinnix-scope launcher convention at all.
+    with pytest.raises(ActionError, match="does not match"):
+        actions.execute(
+            request(
+                "stop", {"scope": "some-other-unit.service"}, key="bad-shape"
+            )
+        )
+    # Name-shaped but not actually live (probe returns None) -- name alone is
+    # not trust.
+    with pytest.raises(ActionError, match="not a live"):
+        actions.execute(
+            request(
+                "stop",
+                {"scope": "sinnix-build-1-2.scope"},
+                key="not-live",
+            )
+        )
+    # Only "stop" is permitted on a scope target.
+    with pytest.raises(ActionError, match="only support stop"):
+        validate_request(
+            request(
+                "restart",
+                {"scope": "sinnix-build-1786566375240889502-2296063.scope"},
+                key="wrong-verb",
+            )
+        )
+    # A genuinely live, name-shaped scope is admitted and stopped.
+    accepted = actions.execute(
+        request(
+            "stop",
+            {"scope": "sinnix-build-1786566375240889502-2296063.scope"},
+            key="stop-scope",
+        )
+    )
+    assert accepted["adapter"]["manager"] == "user"
+    assert commands == ["stop"]
+    # Targeting both a unit and a scope at once is rejected at validation.
+    with pytest.raises(ActionError, match="exactly one"):
+        validate_request(
+            {
+                "action": "stop",
+                "target": {"unit": "safe", "scope": "sinnix-build-1-2.scope"},
+                "expected_revision": 1,
+                "idempotency_key": "both",
+                "operator_reason": "x",
+                "parameters": {},
+            }
+        )

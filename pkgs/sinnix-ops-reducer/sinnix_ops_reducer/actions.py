@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import secrets
 import subprocess
 import uuid
@@ -9,6 +10,24 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .reducer import atomic_json, now_iso
+
+# Ad-hoc `sinnix-scope` transient scopes (build.slice/agent.slice/etc placements
+# created by scripts/sinnix-scope, distinct from attested agent-gateway jobs
+# which use the `sinnix-agent-job-<id>.scope` namespace and the job_id target
+# instead). Admission for these is structural, not inventory-registered: the
+# name must match the launcher's own naming convention
+# (`sinnix-<commandClass>-<timestamp>-<pid>.scope`) AND the unit must resolve
+# live via systemctl (see _resolve_scope) -- name-matching alone is not trust,
+# a dead or renamed unit is rejected too.
+SCOPE_UNIT_PATTERN = re.compile(
+    r"^sinnix-(agent|build|background|gpu-runtime|nix-build|system)-\d+-\d+\.scope$"
+)
+
+# Scope targets intentionally support only the reversible verb for now (sinnix-
+# pl37 design note 2: prefer stop/terminate over raw SIGKILL; `systemctl stop`
+# on a scope sends SIGTERM then escalates to SIGKILL on timeout on its own --
+# a separate explicit kill/escalate verb is future work, not implemented here).
+SCOPE_ACTIONS = {"stop"}
 
 
 def focus_registered_session(job: dict[str, Any]) -> dict[str, Any]:
@@ -130,11 +149,15 @@ def validate_request(value: Any) -> dict[str, Any]:
     if action not in ACTIONS:
         raise ActionError("unknown action")
     target = value["target"]
-    if not isinstance(target, dict) or not target or set(target) - {"job_id", "unit"}:
-        raise ActionError("target must contain only job_id or unit")
-    if ("job_id" in target) == ("unit" in target):
+    if (
+        not isinstance(target, dict)
+        or not target
+        or set(target) - {"job_id", "unit", "scope"}
+    ):
+        raise ActionError("target must contain only job_id, unit, or scope")
+    if sum(key in target for key in ("job_id", "unit", "scope")) != 1:
         raise ActionError(
-            "target must identify exactly one attested job or runtime unit"
+            "target must identify exactly one attested job, runtime unit, or scope"
         )
     target = {key: _string(item, key, 256) for key, item in target.items()}
     expected = value["expected_revision"]
@@ -147,6 +170,8 @@ def validate_request(value: Any) -> dict[str, Any]:
         raise ActionError("parameters must be an object")
     if "job_id" in target and action not in {"focus", "interrupt"}:
         raise ActionError("job targets only support focus and interrupt")
+    if "scope" in target and action not in SCOPE_ACTIONS:
+        raise ActionError("scope targets only support stop")
     if action == "focus" and "unit" in target:
         raise ActionError("focus requires an attested job target")
     if (
@@ -213,12 +238,14 @@ class ActionService:
             Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]] | None
         ) = None,
         controller: str = "agent_job_control.sh",
+        scope_prober: Callable[[str], str | None] | None = None,
     ) -> None:
         self.snapshot = snapshot
         self.inventory_path = inventory_path
         self.receipts_path = receipts_path
         self.adapter = adapter or self._live_adapter
         self.controller = controller
+        self.scope_prober = scope_prober or self._live_scope_prober
         self.receipts: dict[str, dict[str, Any]] = self._load_receipts()
 
     def _load_receipts(self) -> dict[str, dict[str, Any]]:
@@ -293,6 +320,8 @@ class ActionService:
                 None,
             )
             return {"kind": "job", "job": job, "orphan": orphan}
+        if "scope" in target:
+            return self._resolve_scope(target["scope"])
         surfaces = self._inventory().get("surfaces", {})
         surface = surfaces.get(target["unit"])
         if not isinstance(surface, dict):
@@ -312,6 +341,46 @@ class ActionService:
         ).get("restartable", False):
             raise ActionError("runtime unit is not restartable", 403)
         return {"kind": "unit", "surface": surface}
+
+    def _resolve_scope(self, unit: str) -> dict[str, Any]:
+        """Admit a sinnix-scope transient unit: name-shape AND live-state, not
+        either alone. A name match on a unit that has already exited (or never
+        existed) is exactly the stale-target case expected_revision plus this
+        check must both reject -- see sinnix-pl37 design note 1."""
+        if not SCOPE_UNIT_PATTERN.match(unit):
+            raise ActionError(
+                "scope target does not match a sinnix-placed transient scope name",
+                403,
+            )
+        manager = self.scope_prober(unit)
+        if manager is None:
+            raise ActionError("scope unit is not a live sinnix-placed scope", 403)
+        return {"kind": "scope", "unit": unit, "manager": manager}
+
+    def _live_scope_prober(self, unit: str) -> str | None:
+        for manager in ("user", "system"):
+            command = ["systemctl"]
+            if manager == "user":
+                command.append("--user")
+            command += ["show", unit, "--property=LoadState,ActiveState"]
+            try:
+                result = subprocess.run(
+                    command, capture_output=True, text=True, timeout=5, check=False
+                )
+            except (OSError, subprocess.TimeoutExpired) as error:
+                raise ActionError(
+                    f"scope verification unavailable: {type(error).__name__}", 503
+                ) from error
+            if result.returncode != 0:
+                continue
+            properties = dict(
+                line.split("=", 1) for line in result.stdout.splitlines() if "=" in line
+            )
+            if properties.get("LoadState") == "loaded" and properties.get(
+                "ActiveState"
+            ) in {"active", "activating"}:
+                return manager
+        return None
 
     def execute(self, raw: Any) -> dict[str, Any]:
         request = validate_request(raw)
@@ -395,6 +464,16 @@ class ActionService:
         if action == "interrupt":
             job_id = resolved["job"]["job_id"]
             command = [self.controller, "interrupt", "--job", job_id]
+        elif resolved.get("kind") == "scope":
+            # stop, not kill: systemctl stop on a scope sends SIGTERM to every
+            # process in it and escalates to SIGKILL on its own timeout -- the
+            # reversible-first semantics the bead asks for, for free.
+            command = [
+                "systemctl",
+                "--user" if resolved["manager"] == "user" else "--system",
+                "stop",
+                resolved["unit"],
+            ]
         elif action in LIFECYCLE_ACTIONS:
             surface = resolved["surface"]
             manager = surface["manager"]
