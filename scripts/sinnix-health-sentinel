@@ -78,6 +78,45 @@ while IFS=$'\t' read -r name path cadence stale_after; do
   fi
 done < <(jq -r '.captures[]? | select(.expectedCadenceSeconds != null or .expectedStaleAfterSeconds != null) | [.name,.path,(.expectedCadenceSeconds // "null"),(.expectedStaleAfterSeconds // "null")] | @tsv' "$inventory")
 
+# Payload-degeneracy check: a lane can write at full cadence forever with
+# every meaningful field null, and every staleness check above will call it
+# healthy (screen-frames did exactly that, sinnix-3w9n). Lanes declare the
+# payload fields they always populate; a field that is null/empty in EVERY
+# sampled record is the signature of a broken producer, not of a quiet hour.
+# Deliberately all-or-nothing: any single populated record clears the lane,
+# so a legitimately-sometimes-null field can never raise a false alarm.
+payload_sample_size=50
+payload_min_samples=5
+while IFS=$'\t' read -r name path fields_json; do
+  [ -n "$path" ] || continue
+  newest_jsonl="$(find "$path" -maxdepth 1 -type f -name '*.jsonl' ! -name '*-index.jsonl' -printf '%T@\t%p\n' 2>/dev/null | sort -nr | head -n 1 | cut -f2- || true)"
+  # No records yet, too few to judge, or unreadable: say nothing. "Lane
+  # produced nothing" is the staleness check's job on this same path, and
+  # emitting a not-ok transition for it here would double-report one fault.
+  [ -n "$newest_jsonl" ] || continue
+  verdict="$(
+    tail -n "$payload_sample_size" "$newest_jsonl" \
+      | jq -sr --argjson fields "$fields_json" --argjson min "$payload_min_samples" '
+          def leaf($rec; $path):
+            $path | split(".") | reduce .[] as $k ($rec; if type == "object" then .[$k] else null end);
+          def degenerate: . == null or . == "" or . == {} or . == [];
+          map(select(type == "object") | .payload) as $payloads
+          | ($payloads | length) as $n
+          | if $n < $min then {status:"unknown", detail:"samples=\($n)"}
+            else
+              ($fields | map(select(. as $f | $payloads | all(leaf(.; $f) | degenerate)))) as $dead
+              | if ($dead | length) > 0
+                then {status:"degenerate", detail:"samples=\($n);always_empty=\($dead | join(","))"}
+                else {status:"healthy", detail:"samples=\($n)"}
+                end
+            end
+          | "\(.status)\t\(.detail)"' 2>/dev/null || true
+  )"
+  status="${verdict%%$'\t'*}"
+  [ "$status" = healthy ] || [ "$status" = degenerate ] || continue
+  emit "payload:$name" capture_payload "$name" "$status" "file=$newest_jsonl;${verdict#*$'\t'}"
+done < <(jq -r '.captures[]? | select((.requiredPayloadFields // []) != []) | [.name,.path,(.requiredPayloadFields | tojson)] | @tsv' "$inventory")
+
 while IFS=$'\t' read -r path warn fail; do
   usage="$(df -P "$path" 2>/dev/null | awk 'NR == 2 {gsub(/%/,"",$5); print $5}' || true)"
   [ -n "$usage" ] || usage=100

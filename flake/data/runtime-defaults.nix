@@ -72,6 +72,9 @@ let
           // lib.optionalAttrs ((capture.staleAfterSeconds or null) != null) {
             expectedStaleAfterSeconds = capture.staleAfterSeconds;
           }
+          // lib.optionalAttrs ((capture.requiredPayloadFields or [ ]) != [ ]) {
+            inherit (capture) requiredPayloadFields;
+          }
         ) surface.captures
       ) (lib.mapAttrs (_: normalizeSurface) surfaces)
     );

@@ -51,22 +51,45 @@
             # must stay healthy.
             touch -d @0 "$TMPDIR/capture-ed-stale/old"
             touch "$TMPDIR/capture-ed-fresh/current"
+            # Payload degeneracy: both lanes below write at full cadence and
+            # are perfectly fresh, so every staleness check calls them
+            # healthy. The `dead` lane's declared fields are null in every
+            # record (the screen-frames shape from sinnix-3w9n); the `live`
+            # lane populates them. `monitor` is populated in BOTH -- it must
+            # stay out of the degenerate lane's evidence, proving the check
+            # names the specific dead field rather than condemning the lane
+            # wholesale. `note` is null in one live record only, proving a
+            # sometimes-null field never raises an alarm.
+            mkdir -p "$TMPDIR/payload-dead" "$TMPDIR/payload-live"
+            for seq in 1 2 3 4 5 6; do
+              printf '{"schema":"sinnix-capture-v1","seq":%s,"payload":{"window_class":null,"geometry":{},"monitor":"DP-3","note":"x"}}\n' "$seq" >> "$TMPDIR/payload-dead/dead-20260813.jsonl"
+              printf '{"schema":"sinnix-capture-v1","seq":%s,"payload":{"window_class":"kitty","geometry":{"width":1920},"monitor":"DP-3","note":null}}\n' "$seq" >> "$TMPDIR/payload-live/live-20260813.jsonl"
+            done
+            printf '{"schema":"sinnix-capture-v1","seq":7,"payload":{"window_class":"kitty","geometry":{"width":1920},"monitor":"DP-3","note":"present"}}\n' >> "$TMPDIR/payload-live/live-20260813.jsonl"
+            # The sidecar index carries no payload at all; the check must skip
+            # it rather than read it as a lane full of degenerate records.
+            printf '{"ts":1,"seq":1,"file":"live-20260813.jsonl"}\n' >> "$TMPDIR/payload-live/live-index.jsonl"
             cat > "$TMPDIR/inventory.json" <<EOF_INVENTORY
-            {"captures":[{"name":"fixture","path":"$TMPDIR/capture","expectedCadenceSeconds":60},{"name":"ed-stale","path":"$TMPDIR/capture-ed-stale","expectedCadence":"event-driven","expectedStaleAfterSeconds":60},{"name":"ed-fresh","path":"$TMPDIR/capture-ed-fresh","expectedCadence":"event-driven","expectedStaleAfterSeconds":600}],"mounts":[{"path":"/fixture","warnPct":80,"failPct":95}],"observedServices":[{"kind":"service","manager":"system","unit":"fixture.service"}]}
+            {"captures":[{"name":"fixture","path":"$TMPDIR/capture","expectedCadenceSeconds":60},{"name":"ed-stale","path":"$TMPDIR/capture-ed-stale","expectedCadence":"event-driven","expectedStaleAfterSeconds":60},{"name":"ed-fresh","path":"$TMPDIR/capture-ed-fresh","expectedCadence":"event-driven","expectedStaleAfterSeconds":600},{"name":"payload-dead","path":"$TMPDIR/payload-dead","requiredPayloadFields":["window_class","geometry.width","monitor","note"]},{"name":"payload-live","path":"$TMPDIR/payload-live","requiredPayloadFields":["window_class","geometry.width","monitor","note"]}],"mounts":[{"path":"/fixture","warnPct":80,"failPct":95}],"observedServices":[{"kind":"service","manager":"system","unit":"fixture.service"}]}
             EOF_INVENTORY
             "${sentinel}/bin/sinnix-health-sentinel" --inventory "$TMPDIR/inventory.json" --state "$TMPDIR/state/state.json" --output "$TMPDIR/state/events.jsonl" --check
             "${sentinel}/bin/sinnix-health-sentinel" --inventory "$TMPDIR/inventory.json" --state "$TMPDIR/state/state.json" --output "$TMPDIR/state/events.jsonl" --check
             jq -s -e '
-              length == 5
+              length == 7
               and any(.[]; .type == "capture_stale" and .unit == "fixture" and .status == "stale")
               and any(.[]; .type == "capture_stale" and .unit == "ed-stale" and .status == "stale")
               and any(.[]; .type == "capture_stale" and .unit == "ed-fresh" and .status == "healthy")
               and any(.[]; .type == "mount_capacity" and .status == "failed")
               and any(.[]; .type == "service_failure" and .ok == false)
+              and any(.[];
+                .type == "capture_payload" and .unit == "payload-dead"
+                and .status == "degenerate" and .ok == false
+                and (.evidence | test("always_empty=window_class,geometry.width$")))
+              and any(.[]; .type == "capture_payload" and .unit == "payload-live" and .ok)
             ' "$TMPDIR/state/events.jsonl" >/dev/null
             touch "$TMPDIR/capture/current"
             "${sentinel}/bin/sinnix-health-sentinel" --inventory "$TMPDIR/inventory.json" --state "$TMPDIR/state/state.json" --output "$TMPDIR/state/events.jsonl" --check
-            jq -s -e 'length == 6 and any(.[]; .type == "capture_stale" and .unit == "fixture" and .status == "healthy") and any(.[]; .type == "service_failure" and .ok == false)' "$TMPDIR/state/events.jsonl" >/dev/null
+            jq -s -e 'length == 8 and any(.[]; .type == "capture_stale" and .unit == "fixture" and .status == "healthy") and any(.[]; .type == "service_failure" and .ok == false)' "$TMPDIR/state/events.jsonl" >/dev/null
             touch "$out"
           '';
     };
