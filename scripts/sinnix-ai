@@ -1,10 +1,23 @@
 #!/usr/bin/env bash
 # @sinnix-package
-# description: On-demand control plane for local AI services (list/status/start/stop/logs)
+# description: On-demand control plane for local AI services (list/status/start/stop/logs/pin)
 # runtimeInputs: bash coreutils systemd curl gnugrep gawk gnused jq
 set -euo pipefail
 
 export LC_ALL=C
+
+# Pin unit prefix: `sinnix-ai pin <name>` runs a transient --user unit that
+# holds one open TCP connection to the service's public (proxy) port, which
+# is what actually inhibits systemd-socket-proxyd's --exit-idle-time (the
+# idle timer only starts once the proxy has zero active connections; it does
+# not care whether traffic flows). RuntimeMaxSec on the transient unit is the
+# auto-release: systemd itself kills the holder and closes the connection
+# when the pin expires, no separate timer/daemon of ours required. Verified
+# empirically 2026-08-13 against kokoro-proxy (30s --exit-idle-time): a held
+# connection kept the backend resident past 50s, and closing it let the
+# proxy tear the backend down ~20-30s later, matching --exit-idle-time.
+PIN_PREFIX="sinnix-ai-pin-"
+DEFAULT_PIN_DURATION="2h"
 
 # Registry: name|unit|port|probe-path|description
 # Keep in sync with modules/services/*.nix (ports are module defaults).
@@ -32,12 +45,27 @@ commands:
   status [name]        Detail for one service (or GPU + active summary)
   start <name>...      Start service(s) (sudo systemctl start)
   stop <name>...       Stop service(s) and free VRAM
+  pin <name> [dur]     Keep service resident past its idle timeout (default: 2h)
+  unpin <name>         Release a pin early (idempotent; ok if not pinned)
   logs <name> [-n N]   Recent journal for a service (default 50 lines)
   gpu                  VRAM snapshot (nvidia-smi)
 
 Services are on-demand by design: start them when needed, stop them to
 reclaim VRAM. Registry lives in this script; ports are module defaults
 from sinnix modules/services/*.nix.
+
+Pinning: services fronted by an idle-aware socket proxy (see
+modules/services/ai-control.nix) tear down after a short idle window
+(currently 30s) once nothing is connected. `pin` holds one open
+connection to the service's public port for a bounded duration so it
+stays resident during a work session. Release is automatic (systemd
+RuntimeMaxSec on a transient --user unit kills the holder and closes
+the connection at the deadline), so a pin cannot outlive its duration
+and never survives a reboot or a killed shell as orphan state. Duration
+accepts bare seconds, or a number with s/m/h suffix (e.g. 30m, 2h). Services without
+an idle-aware proxy (comfyui, tts, musicgen, ocr, open-webui) don't
+idle-teardown in the first place, so pinning them is a no-op refused
+with an explanation.
 EOF
 }
 
@@ -65,14 +93,53 @@ port_alive() {
   curl -fsS -m 2 -o /dev/null "http://127.0.0.1:$1$2" 2>/dev/null && echo yes || echo no
 }
 
+has_proxy() { unit_installed "${1}-proxy.service"; }
+
+# Prints one of: "" (not pinned/no pin unit), "unknown" (active, no parsable
+# deadline), or a non-negative integer of seconds remaining. Live systemd
+# state is the only source of truth -- if the transient unit isn't active,
+# there is no pin, full stop; nothing here is read from a state file that
+# could disagree with reality.
+pin_remaining() {
+  local unit="${PIN_PREFIX}${1}.service"
+  systemctl --user is-active --quiet "$unit" 2>/dev/null || return 0
+  local desc deadline now remaining
+  desc=$(systemctl --user show -p Description --value "$unit" 2>/dev/null || true)
+  deadline=$(grep -oE 'until [0-9]+' <<<"$desc" | awk '{print $2}')
+  if [[ -z "$deadline" ]]; then echo "unknown"; return; fi
+  now=$(date +%s)
+  remaining=$(( deadline - now ))
+  (( remaining < 0 )) && remaining=0
+  echo "$remaining"
+}
+
+format_duration() {
+  local s="$1" h m
+  h=$(( s / 3600 )); m=$(( (s % 3600) / 60 )); s=$(( s % 60 ))
+  if (( h > 0 )); then printf '%dh%dm' "$h" "$m"
+  elif (( m > 0 )); then printf '%dm%ds' "$m" "$s"
+  else printf '%ds' "$s"
+  fi
+}
+
+pin_summary() {
+  local remaining
+  remaining=$(pin_remaining "$1")
+  if [[ -z "$remaining" ]]; then echo "-"
+  elif [[ "$remaining" == "unknown" ]]; then echo "pinned"
+  else echo "pinned(${remaining}s)"
+  fi
+}
+
 cmd_list() {
-  printf '%-11s %-13s %-6s %-10s %s\n' NAME STATE PORT START DESCRIPTION
+  printf '%-11s %-13s %-6s %-10s %-14s %s\n' NAME STATE PORT START PIN DESCRIPTION
   while IFS='|' read -r name unit port probe desc; do
     [[ -n "$name" ]] || continue
-    local state astart="-"
+    local state astart="-" pin
     state=$(unit_state "$unit")
     [[ "$state" == "not-installed" ]] || astart=$(autostart_state "$unit")
-    printf '%-11s %-13s %-6s %-10s %s\n' "$name" "$state" "$port" "$astart" "$desc"
+    pin=$(pin_summary "$name")
+    printf '%-11s %-13s %-6s %-10s %-14s %s\n' "$name" "$state" "$port" "$astart" "$pin" "$desc"
   done <<<"$REGISTRY"
 }
 
@@ -95,6 +162,19 @@ cmd_status() {
   echo "service: $REG_NAME — $REG_DESC"
   echo "unit:    $REG_UNIT ($(unit_state "$REG_UNIT"), $(autostart_state "$REG_UNIT"))"
   echo "port:    127.0.0.1:$REG_PORT (responding: $(port_alive "$REG_PORT" "$REG_PROBE"))"
+  if has_proxy "$REG_NAME"; then
+    local remaining
+    remaining=$(pin_remaining "$REG_NAME")
+    if [[ -z "$remaining" ]]; then
+      echo "pin:     not pinned (idle teardown active, ${REG_NAME}-proxy.service)"
+    elif [[ "$remaining" == "unknown" ]]; then
+      echo "pin:     pinned (remaining time unknown)"
+    else
+      echo "pin:     pinned, $(format_duration "$remaining") remaining"
+    fi
+  else
+    echo "pin:     n/a (no idle-aware proxy for this service)"
+  fi
   if unit_installed "$REG_UNIT"; then
     systemctl status --no-pager -n 5 "$REG_UNIT" 2>/dev/null | sed -n '1,12p' || true
   fi
@@ -128,6 +208,60 @@ cmd_stop() {
   done
 }
 
+parse_duration() {
+  local input="$1"
+  if [[ "$input" =~ ^([0-9]+)$ ]]; then
+    echo "${BASH_REMATCH[1]}"; return
+  fi
+  if [[ "$input" =~ ^([0-9]+)([smh])$ ]]; then
+    case "${BASH_REMATCH[2]}" in
+      s) echo "${BASH_REMATCH[1]}" ;;
+      m) echo "$(( BASH_REMATCH[1] * 60 ))" ;;
+      h) echo "$(( BASH_REMATCH[1] * 3600 ))" ;;
+    esac
+    return
+  fi
+  echo "invalid duration: ${input} (expected bare seconds, or Ns/Nm/Nh, e.g. 30m, 2h)" >&2
+  exit 1
+}
+
+cmd_pin() {
+  [[ $# -ge 1 ]] || { usage; exit 1; }
+  local name="$1" duration="${2:-$DEFAULT_PIN_DURATION}"
+  lookup "$name"
+  has_proxy "$REG_NAME" || {
+    echo "$REG_NAME has no idle-aware proxy (${REG_NAME}-proxy.service not installed) -- nothing auto-tears it down, so there is nothing to pin against" >&2
+    exit 1
+  }
+  local seconds; seconds=$(parse_duration "$duration")
+  local unit="${PIN_PREFIX}${REG_NAME}"
+  local deadline=$(( $(date +%s) + seconds ))
+  # Re-pinning replaces any existing pin (fresh deadline) rather than
+  # stacking; --collect garbage-collects the transient unit once it stops
+  # so repeated pin/unpin cycles never accumulate dead units.
+  if systemctl --user is-active --quiet "${unit}.service" 2>/dev/null; then
+    systemctl --user stop "${unit}.service" >/dev/null 2>&1 || true
+  fi
+  systemd-run --user --unit="$unit" --collect \
+    --description="sinnix-ai pin ${REG_NAME} until ${deadline}" \
+    --property="RuntimeMaxSec=${seconds}" \
+    -- bash -c "exec 9<>/dev/tcp/127.0.0.1/${REG_PORT} || exit 1; sleep infinity" \
+    >/dev/null
+  echo "pinned $REG_NAME: holding a connection on port $REG_PORT for ${duration} (releases automatically; unit: ${unit}.service)"
+}
+
+cmd_unpin() {
+  [[ $# -ge 1 ]] || { usage; exit 1; }
+  lookup "$1"
+  local unit="${PIN_PREFIX}${REG_NAME}.service"
+  if systemctl --user is-active --quiet "$unit" 2>/dev/null; then
+    systemctl --user stop "$unit"
+    echo "unpinned $REG_NAME (idle teardown resumes normally)"
+  else
+    echo "$REG_NAME was not pinned"
+  fi
+}
+
 cmd_logs() {
   lookup "$1"; shift
   local n=50
@@ -140,6 +274,8 @@ case "${1:-}" in
   status) shift; cmd_status "$@" ;;
   start) shift; cmd_start "$@" ;;
   stop) shift; cmd_stop "$@" ;;
+  pin) shift; cmd_pin "$@" ;;
+  unpin) shift; cmd_unpin "$@" ;;
   logs) shift; cmd_logs "$@" ;;
   gpu) cmd_gpu ;;
   -h|--help|help|"") usage ;;
