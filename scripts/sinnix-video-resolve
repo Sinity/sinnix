@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # @sinnix-package
-# description: Resolve video-hosting URLs found in the URL ledger into archived copies (sinnix-e8k9)
+# description: Resolve video-hosting URLs found in the URL ledger into archived copies
 # runtimeInputs: yt-dlp duckdb coreutils jq
 
 # The URL ledger discovers and normalizes every URL this operator's browsing
