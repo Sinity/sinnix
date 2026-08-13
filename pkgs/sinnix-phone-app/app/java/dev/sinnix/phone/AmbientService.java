@@ -69,18 +69,17 @@ public class AmbientService extends Service {
    * before it is ever written, and nothing downstream can recover a band that
    * was never captured. Lower entries are degraded fallbacks, not alternatives.
    *
-   * <p>48 kHz is deliberately absent. On the Redmi Note 11 it does not fail --
-   * it lies: {@code prepare()} and {@code start()} both succeed, the encoder
-   * emits full-bitrate frames, and every sample is zero (a 980 KB chunk
-   * measured at mean = max = -91.0 dB, against -35.3 dB mean / -7.0 dB peak
-   * for 16 kHz on the same microphone minutes earlier). 44.1 kHz captures
-   * normally. Two consequences worth keeping in mind before touching this:
-   * a capture rate is only known-good by measurement, never by the API
-   * accepting it, and a fallback ladder driven by exceptions cannot reach its
-   * lower rungs when the failure mode is silence. That is why
-   * {@link Status} watches amplitude -- it is the only detector that sees this.
+   * <p>Verified in the file rather than in the API's own account of itself:
+   * 48 kHz yields mean -37.4 dB / max -7.0 dB over a full 300s chunk. That
+   * check is the point. A chunk recorded while a second recorder held the
+   * microphone came back at mean = max = -91.0 dB -- digital silence at full
+   * bitrate and exact duration, with {@code prepare()} and {@code start()}
+   * both reporting success. Nothing structural separates those two files;
+   * only their samples do. The silence was contention, not the rate, and the
+   * amplitude heartbeat did catch it -- which is the argument for that
+   * detector, not for distrusting a rate the hardware honours.
    */
-  private static final int[] SAMPLING_RATE_LADDER = {44100, 16000};
+  private static final int[] SAMPLING_RATE_LADDER = {48000, 44100, 16000};
 
   private int samplingRate = SAMPLING_RATE_LADDER[0];
 
