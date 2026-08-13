@@ -96,12 +96,13 @@ only the package mode was ever set, and the uid mode reverted to `foreground`
 across a reboot. For this app that reversion should be harmless rather than
 fatal, because `foreground` is satisfied by a microphone-typed foreground
 service — that is the entire difference from Termux, which could not declare
-one. That claim is **not yet proven in isolation**: during the screen-off
-measurement the package mode had been manually set to `allow` beforehand, so
-the run does not separate "the foreground service satisfied it" from "the
-appop was open anyway". Uninstalling clears per-package appop state, so the
-next install is a clean test of it — `app-grants` will leave `RECORD_AUDIO` at
-its default deliberately.
+one. **Measured clean on 2026-08-13.** The install that followed an uninstall
+cleared per-package appop state, `app-grants` left `RECORD_AUDIO` at its
+default, and no package-scope override was set at any point. While the service
+recorded, `appops get dev.sinnix.phone RECORD_AUDIO` reported `Uid mode:
+RECORD_AUDIO: foreground` with the op itself `allow; running` — a uid mode of
+`foreground` and nothing else, granting live capture. A microphone-typed
+foreground service satisfies the appop on its own.
 
 ## Acceptance criteria
 
@@ -172,13 +173,38 @@ recorder rather than continuing to believe it is recording.
 ## Chunk convention
 
 Files are `/sdcard/sinnix-ambient/ambient-<UTC ISO basic>.m4a`, ~300s, mono
-16 kHz AAC at 48 kbps (~1.8 MB/chunk) — 16 kHz because every downstream
-consumer is speech recognition.
+48 kHz AAC at 96 kbps (~3.6 MB/chunk) — the same archive grade the desktop
+lane encodes at, so a phone chunk and a desktop chunk are the same class of
+evidence. This is an archive lane, not a speech-recognition feed: 16 kHz caps
+audio bandwidth at 8 kHz and discards the room — music, environment, the
+timbre diarization and speaker identification depend on — before anything is
+written, and nothing downstream recovers a band that was never captured.
+
+**Nothing structural distinguishes a chunk that captured sound from one that
+captured silence.** A recording that produced only zeroes still has full
+bitrate, exact duration, a valid container, and a `prepare()`/`start()` pair
+that both reported success. Only decoding the samples separates them, so
+`sinnix-phone ambient-audit` decodes every chunk as it lands and appends its
+duration, rate, mean and peak level to
+`/realm/data/captures/phone/ambient-levels.jsonl`, flagging anything at the
+-91 dB a stream of exact zeroes decodes to. `pull` runs it after each drain.
+Run against the Termux-era lake it found 29 of 111 chunks had captured nothing
+and 14 more did not decode at all.
 
 The file currently being written is named `*.m4a.part` and renamed only after
 the muxer closes it. The drain rsyncs with `--remove-source-files`, which
 would otherwise delete the open file and lose its trailing `moov` atom; the
 drain excludes `*.part` and `status.json`.
+
+The drain has two transports. rsync over the tailnet needs Termux's sshd
+running and the tailnet up — routinely both are down at once, which is the
+dependency the app itself was written to escape, and it left correctly
+recorded audio stranded on the device. When ssh does not answer and adb does
+(over USB, typically), the drain copies over adb instead. That path
+reproduces rsync's guarantee rather than trusting an exit status: a chunk is
+removed from the phone only once the lake holds a file of identical, non-zero
+size, and a lake copy *smaller* than the phone's is treated as a cut-short
+transfer and re-pulled, since a closed chunk never changes.
 
 A `.part` file found at service startup belongs to a recorder that died
 without closing its muxer. The service renames those to `*.m4a.orphan`, which
@@ -204,6 +230,17 @@ discarding captured audio is not the device's call.
 - Phone calls stop capture. Android has blocked third-party capture of call
   audio since Android 10; this is a platform decision, not a configuration
   gap.
+
+Not a limit, though it was expected to be: **another app using the microphone
+does not stop this one.** Measured 2026-08-13 with the camera recording video
+— its `AUDIO_SOURCE_CAMCORDER` client took the back mic while this service
+held the bottom mic, both listed `State: Active` on separate input ports in
+`dumpsys media.audio_policy`, and amplitude here was unchanged (2255 → 2134,
+`muted: false`). Earlier the same evening the Termux recorder and this service
+held the microphone simultaneously at different sample rates. The one silent
+chunk observed all evening was recorded in the seconds around a reinstall
+while the old recorder was still running, and the amplitude heartbeat caught
+it and cycled the recorder as designed.
 
 ## Service boundary
 
