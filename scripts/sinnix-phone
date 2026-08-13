@@ -357,7 +357,19 @@ app-status)
     fi
     rm -f "$tmp_chunk"
   else
-    echo "last chunk: none closed yet"
+    # No closed chunk on the phone is the NORMAL state after a successful
+    # drain, not a sign of trouble -- rotation removes each chunk once the
+    # lake holds it. Fall back to the lake's own measurement so this line
+    # keeps answering "is the audio real", which is what it is for.
+    ledger="$LAKE_ROOT/ambient-levels.jsonl"
+    last_measured=$(jq -rs 'group_by(.chunk) | map(last) | sort_by(.chunk) | last //
+      empty | "\(.chunk) (\(.duration_seconds // "?")s; mean \(.mean_db // "?") dB)"' \
+      "$ledger" 2>/dev/null)
+    if [ -n "$last_measured" ]; then
+      echo "last chunk: none on the phone (drained); newest in the lake: $last_measured"
+    else
+      echo "last chunk: none closed yet"
+    fi
   fi
   ;;
 app-install)
@@ -617,6 +629,13 @@ ambient-audit)
     added=$((added + 1))
   done < <(find "$LAKE_ROOT/ambient" -maxdepth 1 \( -name '*.m4a' -o -name '*.m4a.orphan' \) | sort)
   echo "ambient-audit: measured $added new chunk(s), $silent captured nothing"
+  # The ledger is append-only and a chunk may be measured more than once (a
+  # repaired transfer is a different file under the same name), so the newest
+  # record per chunk is the true one. Report that rather than raw line counts,
+  # which overstate the lake by however many re-measurements have happened.
+  jq -rs 'group_by(.chunk) | map(last)
+    | "  lake now: \(length) chunks, \([.[] | select(.captured_nothing)] | length) captured nothing, \(([.[] | select(.captured_nothing | not) | .duration_seconds // 0] | add / 3600 * 10 | round / 10)) hours of real audio"' \
+    "$ledger" 2>/dev/null || true
   if [ "$silent" -gt 0 ]; then
     echo "  silent chunks are listed in $ledger (captured_nothing: true)" >&2
   fi
