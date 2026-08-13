@@ -135,6 +135,12 @@ mkServiceModule {
       # run parallel instead of serializing on GIL writer-commit contention.
       # Rollback = repin `.default`.
       polyloguePkg = inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.polylogue;
+      # One source of truth for the daemon's memory ceiling: used both for
+      # upstream's own service.memory* options and for the runtime surface
+      # declaration below, so the inventory cannot claim a limit the unit
+      # does not actually carry.
+      polyloguedMemoryHigh = "14G";
+      polyloguedMemoryMax = "18G";
       # 2026-07-10: moved off /persist (worn MX500) to /realm; still inside
       # the /realm btrbk→borg coverage.
       # Ordered most-irreplaceable first. A run that dies partway (the 2h
@@ -160,6 +166,26 @@ mkServiceModule {
         programs.polylogued = {
           enable = true;
           package = polyloguePkg;
+
+          # Set through upstream's OWN options, not just via
+          # mkRuntimeServiceConfig below, because the two collide on
+          # priority: upstream assigns MemoryMax as a plain value (default
+          # "2G", nix/lib/settings.nix serviceDirectives) while
+          # mkRuntimeServiceConfig returns mkDefault, and plain beats
+          # mkDefault. The surface's declared 18G lost silently to 2G.
+          #
+          # That was not cosmetic. polylogued self-terminates when its mmap
+          # budget reaches the cgroup limit -- it logs
+          # mmap_budget_at_or_above_cgroup_limit and exits cleanly on
+          # SIGTERM -- so a 2G ceiling produced start -> ~90s ->
+          # self-terminate -> restart, 188 times in three hours on
+          # 2026-08-13, ingesting almost nothing. Nothing surfaced it: the
+          # inventory recorded what the surface DECLARED, and the health
+          # sentinel was separately blind to user units.
+          service = {
+            memoryHigh = polyloguedMemoryHigh;
+            memoryMax = polyloguedMemoryMax;
+          };
           # The daemon runs the free-threaded build; the PATH CLI stays the
           # standard-CPython polylogue-cli wrapper — without this the two
           # collide on bin/polylogue in the home profile.
@@ -211,8 +237,8 @@ mkServiceModule {
           manager = "user";
           resourceClass = "capture-runtime";
           resources = {
-            MemoryHigh = "14G";
-            MemoryMax = "18G";
+            MemoryHigh = polyloguedMemoryHigh;
+            MemoryMax = polyloguedMemoryMax;
           };
           observe = {
             enable = true;
