@@ -6,9 +6,14 @@
   lib,
   pkgs,
   scriptPkgs,
+  # attrsOf { path; ... } from config.sinnix.projects.entries (foundation.nix)
+  # -- rendering from this instead of a hardcoded literal list means a new
+  # declared project constellation member shows up here for free (sinnix-0dbc).
+  projectEntries,
 }:
 let
   serenaVersion = "1.5.3";
+  serenaProjectPaths = map (e: e.path) (lib.attrValues projectEntries);
   serenaRuntimePath = lib.makeBinPath [
     pkgs.bash
     pkgs.coreutils
@@ -20,7 +25,13 @@ let
     pkgs.rust-analyzer
     pkgs.uv
   ];
-  serenaConfigFile = pkgs.writeText "serena_config.yml" ''
+  # Split at "projects:" so the rendered list's indentation is an explicit
+  # literal ("  - path") rather than relying on Nix's multi-line-string
+  # dedent through an embedded ${...} interpolation -- dedent only strips
+  # the LITERAL source's common leading whitespace per line, so a
+  # multi-line interpolated value's own internal newlines don't inherit
+  # it, which silently mis-indents every list item after the first.
+  serenaConfigFile = pkgs.writeText "serena_config.yml" (''
     language_backend: LSP
     line_ending: lf
     gui_log_window: false
@@ -48,11 +59,7 @@ let
       - __pycache__
     project_serena_folder_location: "$projectDir/.serena"
     projects:
-      - /realm/project/sinex
-      - /realm/project/polylogue
-      - /realm/project/sinity-lynchpin
-      - /realm/project/sinnix
-  '';
+  '' + lib.concatMapStringsSep "\n" (p: "  - ${p}") serenaProjectPaths + "\n");
   # Thin per-commandName Nix wrapper: exports every Nix-time value the
   # bootstrap/dispatch logic needs (version pin, generated config store
   # path, uv/python/cmp store paths, runtime PATH) as env vars, then

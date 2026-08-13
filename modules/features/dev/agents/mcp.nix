@@ -93,7 +93,10 @@ mkFeatureModule {
       tomlFormat = pkgs.formats.toml { };
       inherit (helpers.data) mcpRegistry;
 
-      serena = import ./serena.nix { inherit lib pkgs scriptPkgs; };
+      serena = import ./serena.nix {
+        inherit lib pkgs scriptPkgs;
+        projectEntries = config.sinnix.projects.entries;
+      };
       browser = import ./browser.nix {
         inherit
           lib
