@@ -154,6 +154,8 @@ sinnix-phone <command>
   mirror        scrcpy screen mirror/control over the tailnet
   screenshot    grab the current screen to /realm/tmp/work/
   pull          rsync camera + downloads + health exports into the lake
+  ambient-audit decode every undecoded ambient chunk in the lake and record
+                its real duration and level (runs at the end of `pull`)
   drain         pull, but only if the phone is on wifi (for a timer)
   adb-connect   (re)attach adb over the tailnet
   adb-restore   re-enable adbd TCP mode (requires the phone on USB), then
@@ -449,6 +451,55 @@ pull)
     "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/sinnix-ambient/" "$LAKE_ROOT/ambient/" 2>/dev/null
   set -e
   du -sh "$LAKE_ROOT" 2>/dev/null
+  "$0" ambient-audit
+  ;;
+ambient-audit)
+  # A chunk that captured nothing is byte-for-byte plausible: full bitrate,
+  # exact duration, valid container. One was produced on 2026-08-13 while a
+  # second recorder held the microphone, and neither the file size, the
+  # duration, nor the container told anyone. Only decoding the samples does,
+  # so the lake records the level at intake and a dead capture window becomes
+  # something visible in the data rather than something to be suspected later.
+  ledger="$LAKE_ROOT/ambient-levels.jsonl"
+  mkdir -p "$LAKE_ROOT/ambient"
+  touch "$ledger"
+  # One pass to learn what has already been measured; re-decoding the whole
+  # lake on every drain would grow without bound.
+  seen=$(jq -r '.chunk' "$ledger" 2>/dev/null | sort -u)
+  added=0
+  silent=0
+  while IFS= read -r chunk; do
+    name=$(basename "$chunk")
+    if printf '%s\n' "$seen" | grep -qxF "$name"; then
+      continue
+    fi
+    # A chunk this tool cannot decode is a finding, not an error: `set -e`
+    # plus `pipefail` would otherwise abort the whole audit on the first
+    # truncated file, which is precisely the file worth recording.
+    duration=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$chunk" 2>/dev/null </dev/null || true)
+    rate=$(ffprobe -v error -select_streams a:0 -show_entries stream=sample_rate -of default=nw=1:nk=1 "$chunk" 2>/dev/null </dev/null || true)
+    levels=$(ffmpeg -nostdin -hide_banner -nostats -i "$chunk" -af volumedetect -f null - 2>&1 |
+      awk '/mean_volume:/ {mean=$(NF-1)} /max_volume:/ {max=$(NF-1)} END {print mean, max}' || true)
+    mean=${levels% *}
+    max=${levels#* }
+    # -91 dB is what a stream of exact zeroes decodes to; anything at or below
+    # it captured no sound at all, however healthy the file looks.
+    dead=false
+    case "$max" in
+      -9[1-9]*|-inf) dead=true; silent=$((silent + 1)) ;;
+    esac
+    jq -nc --arg chunk "$name" --arg dur "${duration:-}" --arg rate "${rate:-}" \
+      --arg mean "${mean:-}" --arg max "${max:-}" --argjson dead "$dead" \
+      '{chunk: $chunk, duration_seconds: ($dur | tonumber? // null),
+        sample_rate: ($rate | tonumber? // null),
+        mean_db: ($mean | tonumber? // null), max_db: ($max | tonumber? // null),
+        captured_nothing: $dead}' >>"$ledger"
+    added=$((added + 1))
+  done < <(find "$LAKE_ROOT/ambient" -maxdepth 1 \( -name '*.m4a' -o -name '*.m4a.orphan' \) | sort)
+  echo "ambient-audit: measured $added new chunk(s), $silent captured nothing"
+  if [ "$silent" -gt 0 ]; then
+    echo "  silent chunks are listed in $ledger (captured_nothing: true)" >&2
+  fi
   ;;
 drain)
   # Drains the raw-audio tier: large and not time-critical, so it is
