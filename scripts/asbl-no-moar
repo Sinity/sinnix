@@ -217,6 +217,11 @@ pulse() {
             # of faking it in the render pipeline. Read the current setpoint
             # first rather than assuming 50 -- restoring to a stale baseline
             # would leave the panel dimmer/brighter than the operator set it.
+            # This bare $4 parse is correct ONLY because 0x10 is a continuous
+            # code, whose --brief line is "VCP 10 C 50 100" ($4 = setpoint).
+            # Simple-non-continuous codes emit hex instead ("VCP D6 SNC x01"),
+            # so do not generalise this into a shared read_vcp helper without
+            # the hex branch that capture-monitor.nix carries.
             local current_vcp10
             current_vcp10=$(ddcutil getvcp 10 --brief 2>/dev/null | awk '{print $4}')
             if [[ -z "$current_vcp10" ]]; then
