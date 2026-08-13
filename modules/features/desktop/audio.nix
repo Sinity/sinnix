@@ -44,6 +44,7 @@ mkFeatureModule {
       config,
       lib,
       pkgs,
+      helpers,
       ...
     }:
     {
@@ -157,5 +158,41 @@ mkFeatureModule {
         }
         table.insert(alsa_monitor.rules, rule)
       '';
+
+      # Pre-create with operator ownership: /realm/data/captures/machine/ is
+      # root:users 755, so the watchdog (running as the operator) can't
+      # create a new file there itself, only append to one that already
+      # exists with the right owner (verified live 2026-08-13: a bare run
+      # hit "Permission denied" creating the file for the first time).
+      systemd.tmpfiles.rules = [
+        "f /realm/data/captures/machine/audio_watchdog.jsonl 0644 ${config.sinnix.user.name} users -"
+      ];
+
+      # sinnix-nz1c fix (1) + (3): the FiiO's profile has been observed
+      # silently flipping to `off` for reasons that don't have a single known
+      # trigger (idle policy, suspend/resume, USB re-enumeration are all
+      # candidates), so this polls rather than reacting to one specific
+      # event. It restores the profile automatically when that happens, and
+      # surfaces (but cannot fix -- it's real USB bus contention) the ALSA
+      # start-error loop and the default-sink-zero-volume failure shape.
+      # Fix (2), moving the DAC to the bus-2 xHCI controller, is a physical
+      # change for the operator, not something this can do.
+      systemd.user.services.sinnix-audio-watchdog = {
+        description = "Detect/restore FiiO DAC profile-off dropout; surface USB bandwidth failures";
+        serviceConfig = {
+          Type = "oneshot";
+          ExecStart = "${(helpers.mkSinnixPackagesFor pkgs).sinnix-audio-watchdog}/bin/sinnix-audio-watchdog";
+        };
+      };
+
+      systemd.user.timers.sinnix-audio-watchdog = {
+        description = "Periodic FiiO DAC health check";
+        wantedBy = [ "timers.target" ];
+        timerConfig = {
+          OnBootSec = "1min";
+          OnUnitActiveSec = "2min";
+          AccuracySec = "10s";
+        };
+      };
     };
 } args
