@@ -60,7 +60,10 @@
   openWebui = 8080;
   comfyui = 8188;
   tts = 8000; # OpenedAI-Speech bridge (container)
-  llamaCpp = 8081; # reranker (/v1/rerank)
+  llamaCpp = {
+    public = 8081; # reranker (/v1/rerank)
+    backend = 8082;
+  };
 
   # ── Other ────────────────────────────────────────────────────────────────
   chromeDevtools = 9222; # live Chrome remote-debugging port

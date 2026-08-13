@@ -100,6 +100,8 @@ mkServiceModule {
           "ollama-proxy.service"
           "whisper-server.service"
           "whisper-proxy.service"
+          "llama-cpp.service"
+          "llama-cpp-proxy.service"
         ];
         serviceConfig = lib.mkMerge [
           {

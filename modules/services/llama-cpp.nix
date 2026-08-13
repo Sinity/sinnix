@@ -1,10 +1,16 @@
 # llama.cpp HTTP server (CUDA) — raw GGUF endpoint for experiments and for
 # applying steering / abliteration control vectors via --control-vector.
 #
-# Opt-in (disabled by default in the host); koboldcpp already bundles llama.cpp
-# for everyday use. Enable this when you want a clean llama-server with explicit
-# sampling/control-vector flags. DynamicUser + ProtectSystem=strict is read-only,
-# not hidden, so it reads the model under /realm without extra bind mounts.
+# Enabled on sinnix-prime (hosts/sinnix-prime/default.nix) serving a 0.6B
+# reranker (/v1/rerank — an API ollama does not provide); koboldcpp remains
+# the everyday vehicle for general LLM/VLM chat. Socket-activated behind the
+# same idle-aware proxy pattern as ollama/koboldcpp/whisper
+# (modules/services/ai-control.nix): the public port 8081 is the systemd
+# socket front door, the backend runs on a private loopback port and exits
+# after idle. It shares the gpu-inference admission key (mutual systemd
+# Conflicts in all directions) so it never sits resident alongside another
+# CUDA backend. DynamicUser + ProtectSystem=strict is read-only, not hidden,
+# so it reads the model under /realm without extra bind mounts.
 {
   mkServiceModule,
   lib,
@@ -17,6 +23,14 @@ mkServiceModule {
   surface = {
     unit = "llama-cpp.service";
     resourceClass = "interactive-agent";
+    activation = {
+      mode = "socket-proxy";
+      publicEndpoint = "127.0.0.1:8081";
+      backendEndpoint = "127.0.0.1:8082";
+      idleTimeout = "30s";
+      exclusiveResource = "gpu-inference";
+      dependsOn = [ "llama-cpp-proxy" ];
+    };
     observe = {
       enable = true;
       restartable = true;
@@ -37,6 +51,17 @@ mkServiceModule {
       type = args.lib.types.str;
       default = "";
       description = "Control-vector GGUF filename under model/control-vectors to apply (empty = none).";
+    };
+    ctxSize = args.lib.mkOption {
+      type = args.lib.types.int;
+      default = 4096;
+      description = ''
+        `--ctx-size` (KV-cache context window, tokens). Left unset upstream
+        this loads the model's full training context, which is what
+        inflated the reranker's VRAM footprint to ~5.6 GB idle; a reranker
+        only ever sees one query/document pair at a time, so a modest bound
+        is enough headroom without paying for context it never uses.
+      '';
     };
     extraFlags = args.lib.mkOption {
       type = args.lib.types.attrsOf args.lib.types.anything;
@@ -61,9 +86,13 @@ mkServiceModule {
         package = pkgs.llama-cpp-cuda;
         settings = {
           host = "127.0.0.1";
-          port = 8081;
+          # 8081 is reserved for the socket-activated front door
+          # (llama-cpp-proxy). Keep the daemon on a private loopback port so
+          # clients cannot bypass lifecycle admission and idle teardown.
+          port = 8082;
           flash-attn = "on";
           n-gpu-layers = cfg.gpuLayers;
+          ctx-size = cfg.ctxSize;
         }
         // lib.optionalAttrs (cfg.model != "") {
           model = "${modelRoot}/gguf/${cfg.model}";
@@ -72,6 +101,24 @@ mkServiceModule {
           control-vector = "${modelRoot}/control-vectors/${cfg.controlVector}";
         }
         // cfg.extraFlags;
+      };
+
+      systemd.services.llama-cpp = {
+        # On-demand, socket-activated via llama-cpp-proxy — never resident
+        # at boot, never holds VRAM while idle.
+        wantedBy = lib.mkForce [ ];
+        partOf = [ "llama-cpp-proxy.service" ];
+        bindsTo = [ "llama-cpp-proxy.service" ];
+        # Shared gpu-inference admission key: never run alongside the other
+        # CUDA inference backends, in either direction.
+        conflicts = [
+          "ollama.service"
+          "ollama-proxy.service"
+          "koboldcpp.service"
+          "koboldcpp-proxy.service"
+          "whisper-server.service"
+          "whisper-proxy.service"
+        ];
       };
     };
 } args

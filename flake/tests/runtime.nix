@@ -91,6 +91,7 @@ in
             sinnix.services.open-webui.enable = true;
             sinnix.services.whisper.enable = true;
             sinnix.services.tts.enable = true;
+            sinnix.services.llama-cpp.enable = true;
           })
         ];
         assertions = config: [
@@ -187,6 +188,75 @@ in
               && lib.hasInfix "podman" config.systemd.services.podman-openedai-speech.serviceConfig.ExecStart;
             message = "The AI factory must leave the container launch visible";
           }
+          {
+            assertion = config.systemd.sockets.llama-cpp-proxy.listenStreams == [ "127.0.0.1:8081" ];
+            message = "llama-cpp must expose only its socket-activated loopback front door";
+          }
+          {
+            assertion =
+              config.systemd.services.llama-cpp.unitConfig.PartOf == [ "llama-cpp-proxy.service" ]
+              && config.systemd.services.llama-cpp.unitConfig.BindsTo == [ "llama-cpp-proxy.service" ];
+            message = "An idle llama-cpp-proxy exit must tear down the llama-cpp backend cgroup";
+          }
+          {
+            assertion =
+              lib.hasInfix "systemd-socket-proxyd" config.systemd.services.llama-cpp-proxy.serviceConfig.ExecStart
+              && lib.hasInfix "--exit-idle-time=30s" config.systemd.services.llama-cpp-proxy.serviceConfig.ExecStart;
+            message = "llama-cpp activation must use the idle-aware systemd socket proxy";
+          }
+          {
+            assertion =
+              config.sinnix.runtime.inventory.surfaces.llama-cpp.activation.backendEndpoint == "127.0.0.1:8082"
+              &&
+                config.sinnix.runtime.inventory.surfaces.llama-cpp-proxy.activation.publicEndpoint
+                == "127.0.0.1:8081";
+            message = "Runtime inventory must describe the public and private llama-cpp activation endpoints";
+          }
+          {
+            # Full symmetry across all four GPU-inference backends: every
+            # (service, proxy) pair must conflict with every other backend's
+            # (service, proxy) pair in both directions. An asymmetric
+            # conflict set is exactly the bug this framework exists to catch
+            # (llama-cpp shipped resident for two days before being wired in).
+            assertion =
+              let
+                backendUnits = {
+                  ollama = [
+                    "ollama.service"
+                    "ollama-proxy.service"
+                  ];
+                  koboldcpp = [
+                    "koboldcpp.service"
+                    "koboldcpp-proxy.service"
+                  ];
+                  whisper = [
+                    "whisper-server.service"
+                    "whisper-proxy.service"
+                  ];
+                  llama-cpp = [
+                    "llama-cpp.service"
+                    "llama-cpp-proxy.service"
+                  ];
+                };
+                unitConflicts =
+                  unit: config.systemd.services.${lib.removeSuffix ".service" unit}.unitConfig.Conflicts;
+                allSymmetric = lib.all (
+                  backendA:
+                  lib.all (
+                    backendB:
+                    backendA == backendB
+                    || lib.all (
+                      unitA:
+                      lib.all (
+                        unitB: lib.elem unitB (unitConflicts unitA) && lib.elem unitA (unitConflicts unitB)
+                      ) backendUnits.${backendB}
+                    ) backendUnits.${backendA}
+                  ) (lib.attrNames backendUnits)
+                ) (lib.attrNames backendUnits);
+              in
+              allSymmetric;
+            message = "Every GPU-inference backend's service and proxy units must conflict symmetrically with every other backend's";
+          }
         ];
       };
       aiActivationEvaluated = evalTestSpec system aiActivationSpec;
@@ -236,7 +306,11 @@ in
               .surfaces.ollama.activation.backendEndpoint == "127.0.0.1:11435" and
               .surfaces["ollama-proxy"].activation.publicEndpoint == "127.0.0.1:11434" and
               .surfaces["koboldcpp-proxy"].activation.exclusiveResource == "gpu-inference" and
-              .surfaces.litellm.activation.dependsOn == ["ollama-proxy"]
+              .surfaces.litellm.activation.dependsOn == ["ollama-proxy"] and
+              .surfaces["llama-cpp"].activation.mode == "socket-proxy" and
+              .surfaces["llama-cpp"].activation.backendEndpoint == "127.0.0.1:8082" and
+              .surfaces["llama-cpp-proxy"].activation.publicEndpoint == "127.0.0.1:8081" and
+              .surfaces["llama-cpp-proxy"].activation.exclusiveResource == "gpu-inference"
             ' inventory.json >/dev/null
             touch "$out"
           '';

@@ -190,6 +190,8 @@ mkServiceModule {
             "koboldcpp-proxy.service"
             "whisper-server.service"
             "whisper-proxy.service"
+            "llama-cpp.service"
+            "llama-cpp-proxy.service"
           ];
           # Full override (mkForce): the upstream `script` is a plain
           # (non-mkForce) definition, so an un-forced override here would
