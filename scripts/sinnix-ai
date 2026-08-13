@@ -161,7 +161,20 @@ cmd_status() {
   lookup "$1"
   echo "service: $REG_NAME — $REG_DESC"
   echo "unit:    $REG_UNIT ($(unit_state "$REG_UNIT"), $(autostart_state "$REG_UNIT"))"
-  echo "port:    127.0.0.1:$REG_PORT (responding: $(port_alive "$REG_PORT" "$REG_PROBE"))"
+  # Probing the PUBLIC port is not a read: it is a connection to the
+  # socket-activation front door, so it STARTS the backend -- and for a
+  # gpu-inference member, starting it evicts whatever else was resident.
+  # Observed live 2026-08-13: a bare `sinnix-ai status ollama` activated
+  # ollama.service, whose Conflicts= SIGKILLed another agent's running
+  # ComfyUI workload. A status command must never cost someone their
+  # loaded model, so only probe a backend that is already up.
+  if [[ "$(unit_state "$REG_UNIT")" == active ]]; then
+    echo "port:    127.0.0.1:$REG_PORT (responding: $(port_alive "$REG_PORT" "$REG_PROBE"))"
+  elif has_proxy "$REG_NAME"; then
+    echo "port:    127.0.0.1:$REG_PORT (not probed — connecting would start it and evict any resident peer)"
+  else
+    echo "port:    127.0.0.1:$REG_PORT (not probed — backend is not running)"
+  fi
   if has_proxy "$REG_NAME"; then
     local remaining
     remaining=$(pin_remaining "$REG_NAME")
