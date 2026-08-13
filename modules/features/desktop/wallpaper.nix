@@ -88,6 +88,7 @@ mkFeatureModule {
   configFn =
     {
       cfg,
+      config,
       lib,
       pkgs,
       helpers,
@@ -144,14 +145,23 @@ mkFeatureModule {
 
           systemd.user.services.sinnix-wallpaper-timeofday = {
             Unit.Description = "Retarget ~/wallpaper/{dark,light} to the current time-of-day set";
-            Service = {
-              Type = "oneshot";
-              Environment = [
-                "SINNIX_WALLPAPER_CORPUS=${cfg.corpusRoot}"
-                "SINNIX_WALLPAPER_MOODS=${lib.concatStringsSep "," cfg.moods}"
-                "SINNIX_NOCTALIA_BIN=${noctaliaPkg}/bin/noctalia"
-              ];
-              ExecStart = "${scriptPkgs.sinnix-wallpaper-timeofday}/bin/sinnix-wallpaper-timeofday";
+            Service = lib.sinnix.mkRuntimeServiceConfig {
+              runtimeInventory = config.sinnix.runtime.inventory;
+              # The registered surface unit is the *timer*
+              # (sinnix-wallpaper-timeofday.timer, kind = "timer"), so
+              # `unit =` lookup would throw -- resolve the class's
+              # serviceConfig directly instead (same pattern as
+              # weechat-log-sealer.nix).
+              resourceClass = "background-maintenance";
+              overrides = {
+                Type = "oneshot";
+                Environment = [
+                  "SINNIX_WALLPAPER_CORPUS=${cfg.corpusRoot}"
+                  "SINNIX_WALLPAPER_MOODS=${lib.concatStringsSep "," cfg.moods}"
+                  "SINNIX_NOCTALIA_BIN=${noctaliaPkg}/bin/noctalia"
+                ];
+                ExecStart = "${scriptPkgs.sinnix-wallpaper-timeofday}/bin/sinnix-wallpaper-timeofday";
+              };
             };
           };
 

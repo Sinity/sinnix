@@ -189,13 +189,17 @@ mkFeatureModule {
       # unit count.
       systemd.user.services.sinnix-audio-watchdog = {
         description = "Detect/restore FiiO DAC profile-off dropout; surface USB bandwidth failures";
-        serviceConfig = {
-          Type = "oneshot";
-          ExecStart = lib.concatStringsSep " " [
-            "${(helpers.mkSinnixPackagesFor pkgs).sinnix-audio-watchdog}/bin/sinnix-audio-watchdog"
-            "${(helpers.mkSinnixPackagesFor pkgs).sinnix-capture}/bin/sinnix-capture"
-            config.sinnix.paths.capturesRoot
-          ];
+        serviceConfig = lib.sinnix.mkRuntimeServiceConfig {
+          runtimeInventory = config.sinnix.runtime.inventory;
+          unit = "sinnix-audio-watchdog.service";
+          overrides = {
+            Type = "oneshot";
+            ExecStart = lib.concatStringsSep " " [
+              "${(helpers.mkSinnixPackagesFor pkgs).sinnix-audio-watchdog}/bin/sinnix-audio-watchdog"
+              "${(helpers.mkSinnixPackagesFor pkgs).sinnix-capture}/bin/sinnix-capture"
+              config.sinnix.paths.capturesRoot
+            ];
+          };
         };
       };
 

@@ -114,6 +114,7 @@ mkFeatureModule {
   configFn =
     {
       cfg,
+      config,
       lib,
       pkgs,
       user,
@@ -154,9 +155,13 @@ mkFeatureModule {
               PartOf = [ "graphical-session.target" ];
               After = [ "graphical-session.target" ];
             };
-            Service = {
-              ExecStart = "${pkgs.hyprsunset}/bin/hyprsunset";
-              Restart = "on-failure";
+            Service = lib.sinnix.mkRuntimeServiceConfig {
+              runtimeInventory = config.sinnix.runtime.inventory;
+              unit = "hyprsunset.service";
+              overrides = {
+                ExecStart = "${pkgs.hyprsunset}/bin/hyprsunset";
+                Restart = "on-failure";
+              };
             };
             Install.WantedBy = [ "graphical-session.target" ];
           };
