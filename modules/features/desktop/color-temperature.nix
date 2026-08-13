@@ -7,10 +7,10 @@
 #
 #   - Zero GPU cost by construction: the transform happens in the display
 #     pipeline at scanout, not in a per-pixel composite pass.
-#   - It does not tint captures. A screen shader sits in the composite path,
-#     so screenshots and capture-screen recordings would inherit its color and
-#     an evening grading profile would stain months of the lake. A CTM is
-#     applied after capture, so recordings stay color-accurate.
+#   - It does not tint captures -- but neither would a shader here, so this
+#     is not a reason to prefer one. grim (which capture-screen uses) does
+#     not observe the shader stage on this host: a full-screen invert
+#     changes a grim capture by nothing while visibly inverting the panel.
 {
   mkFeatureModule,
   lib,
