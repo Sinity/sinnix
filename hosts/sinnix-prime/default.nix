@@ -111,6 +111,9 @@
     # Nothing runs on the router.
     capture-router.enable = true;
     url-ledger.enable = true;
+    # Daily run at the Xiaomi quota reset (sinnix-9tc). Self-terminating:
+    # stops for good once the unlock is granted.
+    mi-unlock.enable = true;
     # Video special-case over the ledger: yt-dlp resolves video-hosting URLs
     # into a real archived copy. Wayback/Common Crawl CDX coverage does not
     # preserve video.
