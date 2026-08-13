@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Reach the phone over the tailnet — status, shell, screen mirror, media pull, clipboard push
-# runtimeInputs: bash coreutils openssh rsync android-tools scrcpy iputils jq wl-clipboard
+# runtimeInputs: bash coreutils openssh rsync android-tools scrcpy iputils jq wl-clipboard gawk ffmpeg curl
 
 #
 # The phone (Redmi Note 11, unrooted) is a tailnet peer with two control
