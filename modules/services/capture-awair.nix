@@ -2,14 +2,12 @@
 #
 # The device serves unauthenticated JSON on the LAN at
 # http://<ip>/air-data/latest -- no cloud account, no API key, no rate limit
-# beyond politeness. That makes air quality one of the cheapest real sensor
-# streams available to the estate, and it is the only one covering the room
+# beyond politeness. It is the estate's only sensor lane covering the room
 # itself rather than the machine in it.
 #
-# Discovery note: the device does not answer ICMP and so is invisible to a
-# plain `nmap -sn` sweep; it was found in the router's DHCP lease table
-# (`ssh sinnix-gw cat /tmp/dhcp.leases`). Prefer the lease table over a ping
-# sweep when hunting for IoT endpoints on this network.
+# The device does not answer ICMP, so it is invisible to a plain `nmap -sn`
+# sweep; find it in the router's DHCP lease table
+# (`ssh sinnix-gw cat /tmp/dhcp.leases`) instead.
 {
   mkServiceModule,
   pkgs,
@@ -78,8 +76,7 @@ mkServiceModule {
     unit = "sinnix-capture-awair.service";
     manager = "user";
     # No explicit kind: the surface is the oneshot .service (the timer only
-    # triggers it), so the default "service" is correct and the suffix
-    # assertion in modules/runtime.nix enforces exactly that.
+    # triggers it), so the default "service" is correct.
     resourceClass = "capture-runtime";
     observe = {
       enable = true;
@@ -124,8 +121,7 @@ mkServiceModule {
                 ProtectSystem = "strict";
                 ProtectHome = "read-only";
                 ReadWritePaths = [ laneDir ];
-                # The session TMPDIR is read-only inside this namespace; see
-                # the clipboard lane's fix for the same trap.
+                # The session TMPDIR is read-only inside this namespace.
                 Environment = [ "TMPDIR=/tmp" ];
                 PrivateTmp = true;
               };

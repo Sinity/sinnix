@@ -121,7 +121,7 @@ mkServiceModule {
         # IPv6 route instead of letting Transmission listen on [::].
         bind-address-ipv6 = "::1";
         peer-port = cfg.forwardedPort;
-        # Port forwarding is now handled by AirVPN, not UPnP
+        # AirVPN supplies the forwarded port; UPnP would fight it.
         port-forwarding-enabled = false;
       };
 

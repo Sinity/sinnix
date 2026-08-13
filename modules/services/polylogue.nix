@@ -1,22 +1,11 @@
 # Polylogue — AI conversation archive daemon (user-mode)
 #
 # Thin wrapper over polylogue's upstream Home Manager module
-# (inputs.polylogue.homeManagerModules.default). The upstream module
-# defines programs.polylogued.* options, renders polylogue.toml, and
-# creates the polylogued user unit. This module adds sinnix-specific
-# wiring that the upstream cannot know about:
-#
-#   - ``sinnix.runtime.surfaces`` registration (resource class, observe)
-#
-# Everything else — archive/daemon/embedding/logging settings,
-# systemd hardening — is delegated to upstream.
-#
-# Consumer site (hosts/sinnix-prime/default.nix):
-#
-#     polylogue = {
-#       enable = true;
-#       dataDir = "/realm/data/captures/polylogue";  # optional override
-#     };
+# (inputs.polylogue.homeManagerModules.default), which defines
+# programs.polylogued.*, renders polylogue.toml, and creates the polylogued
+# user unit. This module adds the sinnix-specific wiring upstream cannot
+# know about: option surface, package pinning, and runtime-surface
+# registration. Everything else is delegated to upstream.
 {
   mkServiceModule,
   lib,
@@ -131,9 +120,9 @@ mkServiceModule {
       ...
     }:
     let
-      # Free-threaded 3.14t build so daemon thread-parse fan-outs actually
-      # run parallel instead of serializing on GIL writer-commit contention.
-      # Rollback = repin `.default`.
+      # Free-threaded build so daemon thread-parse fan-outs run parallel
+      # instead of serializing on GIL writer-commit contention; rollback is
+      # repinning `.default`.
       polyloguePkg = inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.polylogue;
       # One source of truth for the daemon's memory ceiling: used both for
       # upstream's own service.memory* options and for the runtime surface
@@ -141,24 +130,9 @@ mkServiceModule {
       # does not actually carry.
       polyloguedMemoryHigh = "14G";
       polyloguedMemoryMax = "18G";
-      # 2026-07-10: moved off /persist (worn MX500) to /realm; still inside
-      # the /realm btrbk→borg coverage.
-      # Ordered most-irreplaceable first. A run that dies partway (the 2h
-      # TimeoutStartSec, an OOM, a reboot) then still leaves the tiers that
-      # cannot be rebuilt covered. The 2026-07-30 failure did the opposite:
-      # alphabetical order spent the whole window on the two large derived
-      # tiers and was killed before reaching source.db, so the run following a
-      # full index rebuild -- exactly when a durable-tier snapshot matters
-      # most -- captured no durable tier at all.
-      #
-      # `daemon_events.db` is deliberately absent: it has been a 0-byte file
-      # with no tables since 2026-07-17 (daemon events live in ops.db), and
-      # backing it up produced a 71-byte artifact every run that reads as
-      # coverage while covering nothing.
     in
     {
       # ── Import the upstream Home Manager module ────────────────────
-      #     This defines programs.polylogued.* and creates the unit.
       home-manager.users.${userName} = {
         imports = [ inputs.polylogue.homeManagerModules.default ];
         systemd.user.startServices = lib.mkForce "sd-switch";
@@ -167,21 +141,13 @@ mkServiceModule {
           enable = true;
           package = polyloguePkg;
 
-          # Set through upstream's OWN options, not just via
-          # mkRuntimeServiceConfig below, because the two collide on
-          # priority: upstream assigns MemoryMax as a plain value (default
-          # "2G", nix/lib/settings.nix serviceDirectives) while
-          # mkRuntimeServiceConfig returns mkDefault, and plain beats
-          # mkDefault. The surface's declared 18G lost silently to 2G.
-          #
-          # That was not cosmetic. polylogued self-terminates when its mmap
-          # budget reaches the cgroup limit -- it logs
-          # mmap_budget_at_or_above_cgroup_limit and exits cleanly on
-          # SIGTERM -- so a 2G ceiling produced start -> ~90s ->
-          # self-terminate -> restart, 188 times in three hours on
-          # 2026-08-13, ingesting almost nothing. Nothing surfaced it: the
-          # inventory recorded what the surface DECLARED, and the health
-          # sentinel was separately blind to user units.
+          # Must be set through upstream's OWN options, not only via
+          # mkRuntimeServiceConfig below: upstream assigns MemoryMax as a plain
+          # value (default "2G") while mkRuntimeServiceConfig returns
+          # mkDefault, and plain beats mkDefault. polylogued self-terminates
+          # once its mmap budget reaches the cgroup limit, so losing to 2G
+          # turns into a silent ~90s start/self-terminate/restart loop that
+          # ingests nothing.
           service = {
             memoryHigh = polyloguedMemoryHigh;
             memoryMax = polyloguedMemoryMax;
@@ -227,10 +193,8 @@ mkServiceModule {
       };
 
       # ── Runtime-surface registration (sinnix-specific) ─────────────
-      # Three differently-named units (none equal to the "polylogue"
-      # service name itself), so this stays a direct attrset rather than
-      # the single-surface `surface` factory argument — same pattern as
-      # machine-telemetry.nix's backup/timer surfaces.
+      # A direct attrset rather than the single-surface `surface` factory
+      # argument: the unit name differs from the "polylogue" service name.
       sinnix.runtime.surfaces = {
         polylogued = {
           unit = "polylogued.service";

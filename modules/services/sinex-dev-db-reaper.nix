@@ -14,8 +14,6 @@
 # Runs as the operator's systemd --user manager because the dev-postgres
 # instances are owned by that uid; the sweep needs to read their /proc and
 # signal them.
-#
-# Enable with: sinnix.services.sinex-dev-db-reaper.enable = true;
 {
   mkServiceModule,
   lib,
@@ -77,10 +75,8 @@ mkServiceModule {
           Unit.Description = "Reap orphaned sinex dev-postgres instances";
           Service = lib.sinnix.mkRuntimeServiceConfig {
             runtimeInventory = config.sinnix.runtime.inventory;
-            # The registered surface unit is the *timer*
-            # (sinex-dev-db-reaper.timer, kind = "timer"), so `unit =`
-            # lookup would throw -- resolve the class's serviceConfig
-            # directly instead.
+            # The registered surface unit is the *timer*, so a `unit =` lookup
+            # would throw -- resolve the class's serviceConfig directly.
             resourceClass = "background-maintenance";
             overrides = {
               Type = "oneshot";

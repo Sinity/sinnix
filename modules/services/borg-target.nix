@@ -1,15 +1,10 @@
 # Borg backup target selector.
 #
-# Inert scaffolding for off-site backup destinations. Declares the
-# `sinnix.services.borg.target` option without modifying the existing
-# `modules/backup.nix` monolith (which is wired tightly for sinnix-prime
-# local btrbk+borg). When a host opts into a non-local target, the
-# resolved repo URI + auxiliary settings are exposed via
-# `config.sinnix.services.borg.resolved.*` for downstream consumers
-# (future ethereal-side borg jobs, or a refactor of backup.nix) to
-# read.
-#
-# Default = local → zero behavior change on existing hosts.
+# Declaration-only: selects an off-site backup destination and exposes the
+# resolved repo URI plus auxiliary settings via
+# `config.sinnix.services.borg.resolved.*`. It drives nothing itself —
+# `modules/backup.nix` owns sinnix-prime's local btrbk+borg pipeline, and the
+# default target `local` leaves that untouched.
 {
   config,
   lib,

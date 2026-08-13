@@ -1,14 +1,8 @@
-# Periodic kitty terminal scrollback capture (sinnix-9pd Phase 3a, 3.5)
+# Periodic kitty terminal scrollback capture
 #
-# scripts/kitty-scrollback-capture (full-ANSI-fidelity scrollback dump via
-# `kitty @ get-text`) existed only as a manually-triggered PATH script --
-# nothing ever ran it, so the "kitty-scrollback" lane registered in
-# capture-registry.nix was permanently stale despite that registry's
-# staleAfterSeconds implying a roughly-daily cadence. This module revives
-# it as a real capture surface: a systemd --user timer runs the same
-# script on a fixed cadence, replacing the orphan registry entry (which
-# is removed from capture-registry.nix in the same change) with a real
-# owning unit the health sentinel can actually track.
+# A systemd --user timer drives scripts/kitty-scrollback-capture (full-ANSI
+# scrollback dump via `kitty @ get-text`) on a fixed cadence, giving the
+# kitty-scrollback lane a real owning unit the health sentinel can track.
 {
   mkServiceModule,
   lib,
@@ -46,8 +40,7 @@ mkServiceModule {
         name = "kitty-scrollback";
         path = scrollbackDir;
         eventDriven = true;
-        # Same staleness budget as the orphan entry this replaces --
-        # no kitty windows open for a full day is itself a real signal
+        # No kitty windows open for a full day is itself a real signal
         # (host idle/away), not just a quiet capture lane.
         staleAfterSeconds = 86400;
       }

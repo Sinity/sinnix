@@ -27,8 +27,6 @@ mkServiceModule {
       mode = "socket-proxy";
       publicEndpoint = "127.0.0.1:8188";
       backendEndpoint = "127.0.0.1:8189";
-      # See ai-control.nix's comfyuiProxy for the measured cold-start
-      # evidence behind this number.
       idleTimeout = "900s";
       exclusiveResource = "gpu-inference";
       dependsOn = [ "comfyui-proxy" ];
@@ -96,10 +94,10 @@ mkServiceModule {
         extraOptions = [ "--device=nvidia.com/gpu=all" ];
       };
 
-      # Bound to the socket proxy's lifecycle exactly like the native
-      # backends: an idle proxy exit tears down this container's cgroup
-      # (VRAM release). Conflicts= against every other GPU-inference backend
-      # is computed centrally in ai-control.nix's gpuInferenceConflicts.
+      # Bound to the socket proxy's lifecycle: an idle proxy exit tears down
+      # this container's cgroup (VRAM release). Conflicts= against every other
+      # GPU-inference backend is computed centrally in ai-control.nix's
+      # gpuInferenceConflicts.
       systemd.services.podman-comfyui = {
         partOf = [ "comfyui-proxy.service" ];
         bindsTo = [ "comfyui-proxy.service" ];

@@ -12,18 +12,12 @@
 # the signal (what the operator was reading/re-reading), not noise to
 # suppress.
 #
-# It DOES debounce, though, for a different reason than dedup: empirically
-# (2026-08-12, live session, `wl-paste --primary --watch` against both a
-# keyboard-driven Shift+Right selection-extend and address-bar text
-# selection) a single logical selection action fires the watch command
-# repeatedly in rapid succession -- e.g. 4 keypresses produced 7 fire
-# events within ~40ms, several with byte-identical trailing content as the
-# selection settled. The protocol/toolkit re-offers the selection on every
-# internal extend step, not just once at gesture-end. A short debounce
-# (see `debounceMs`) collapses each such burst into one capture of the
-# settled selection, without touching the no-dedup policy above (a burst
-# collapsing to one write is not content-based dedup -- two genuinely
-# separate selections a few seconds apart still both get captured).
+# It DOES debounce, for a different reason than dedup: toolkits re-offer
+# PRIMARY on every internal extend step, not once at gesture-end, so one
+# logical selection fires the watch command several times within tens of
+# milliseconds. A short debounce (see `debounceMs`) collapses each burst
+# into one capture of the settled selection, which is not content-based
+# dedup -- two separate selections a few seconds apart still both land.
 #
 # The debounce is implemented per-invocation (no long-lived coordinator):
 # each fire snapshots the current PRIMARY content immediately (cheap -- a
@@ -35,10 +29,6 @@
 # Content handling reuses the clipboard lane's MIME-preference and
 # binary/text classification logic verbatim (PRIMARY is almost always
 # plain text, but can carry the same rich formats an explicit copy would).
-#
-# Privacy note: same posture as every other capture lane -- this captures
-# the operator's own selections to their own local lake; sensitivity is
-# handled at consumption time, not capture time.
 {
   mkServiceModule,
   lib,
@@ -207,18 +197,17 @@ mkServiceModule {
   surface = {
     unit = "sinnix-capture-primary.service";
     manager = "user";
-    # No explicit kind: see capture-clipboard.nix's identical comment
-    # (sinnix-gcuv, 2026-08-13) -- this sibling had the same mislabel.
+    # No explicit kind: real owned .service unit, so it defaults to "service"
+    # -- see capture-clipboard.nix for why the default matters.
     resourceClass = "capture-runtime";
     captures = [
       {
         name = "primary";
         path = laneDir;
         eventDriven = true;
-        # PRIMARY-selection activity depends entirely on whether the
-        # operator is doing text-heavy reading/selecting -- genuinely
-        # intermittent, same as the clipboard and mpris lanes. Matches
-        # their week-long budget (capture-registry.nix / capture-mpris.nix).
+        # PRIMARY activity depends entirely on whether the operator is doing
+        # text-heavy reading/selecting -- genuinely intermittent, so a
+        # week-long budget, same as the clipboard and mpris lanes.
         staleAfterSeconds = 604800;
       }
     ];
@@ -257,8 +246,7 @@ mkServiceModule {
                   "SINNIX_CAPTURE_PRIMARY_STATE_DIR=${stateDir}"
                   "SINNIX_CAPTURE_PRIMARY_DEBOUNCE_MS=${toString cfg.debounceMs}"
                   # Session TMPDIR (/realm/tmp/shell) is read-only inside the
-                  # strict sandbox; mktemp failed on every event (2026-08-12,
-                  # same fix as capture-clipboard).
+                  # strict sandbox, so mktemp fails on every event.
                   "TMPDIR=/tmp"
                 ];
                 PrivateTmp = true;

@@ -1,34 +1,23 @@
-# Always-on dual-channel PipeWire audio capture (sinnix-nm7)
+# Always-on dual-channel PipeWire audio capture
 #
 # Four units backed by the sinnix-audio-capture Python package
-# (pkgs/sinnix-audio-capture, see its package docstring for the full
-# design/departures record):
+# (pkgs/sinnix-audio-capture, whose docstring carries the full design):
 # - sinnix-audio-recorder-mic / sinnix-audio-recorder-sink-monitor: two
 #   always-on `record` daemons, one per canonical channel
 #   (segment.CHANNEL_PROFILES). No VAD gating -- Opus DTX/VBR collapses
-#   silence at the codec level, not the recorder's own logic. (This module's
-#   original claim that both lanes therefore "run continuously from
-#   enablement" was wrong in practice -- sinnix-500c found hourly segments
-#   collapsing to ~37.5s of actually-captured audio, root-caused to
-#   `pw-record --target <name>` not reliably attaching to the intended
-#   node on reconnect; recorder.py now resolves targets to a stable
-#   `object.serial` via pw-dump instead, see pipewire_defaults.py's
-#   `resolve_node_serial` docstring for the live evidence.)
-# - sinnix-audio-topology: a `pw-mon` Node/Port/Link event stream, the
-#   node/port attribution lane that replaces the per-node "captureNodes"
-#   escalation the package's docstring defers.
+#   silence at the codec level. `pw-record --target <name>` does not
+#   reliably reattach to the intended node on reconnect (segments silently
+#   truncate), so recorder.py resolves targets to a stable `object.serial`
+#   via pw-dump; see pipewire_defaults.py's `resolve_node_serial`.
+# - sinnix-audio-topology: a `pw-mon` Node/Port/Link event stream providing
+#   node/port attribution.
 # - sinnix-audio-index: an hourly `index` timer running Silero VAD over
 #   recently-closed Opus segments -- index-only, never a gate; the
-#   26h-default lookback (package default) already covers a missed run.
+#   26h-default lookback already covers a missed run.
 #
-# Two named units, not a systemd template, deliberately: there are exactly
-# two canonical channels by design (not an open set), and per-unit
-# `lib.sinnix.mkRuntimeServiceConfig` unit lookup plus runtime-surface
-# staleness budgets are simplest expressed as two concrete surfaces.
-#
-# Supersedes modules/features/desktop/audio-capture.nix (the
-# sinnix-audio-daemon + sinnix-asr-server WebRTC-VAD-gated cloud-ASR lane),
-# retired in the same change (sinnix-nm7's NixOS-module-wiring cutover).
+# Two named units rather than a systemd template: there are exactly two
+# canonical channels by design, and per-unit `mkRuntimeServiceConfig` lookup
+# plus staleness budgets are simplest as two concrete surfaces.
 {
   mkServiceModule,
   lib,

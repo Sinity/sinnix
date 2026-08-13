@@ -1,16 +1,13 @@
 # enrichment-loop: timer -> state dump -> claude -p (enrichment-pass skill)
-# -> versioned derived outputs (sinnix-jfiy.2, first concrete increment of
-# sinnix-qa2s). Deliberately sinex/polylogue-store-independent (2026-08-11
-# fork verdict): read-only on every input, writes only under
-# /realm/data/derived/enrichment/ (outputs) and /realm/state/enrichment/
-# (watermark) -- both persistent /realm NVMe paths, not the ephemeral root
-# subvolume, so tmpfiles rules suffice (no impermanence entry needed, same
-# reasoning as capture-awair/steering).
+# -> versioned derived outputs. Independent of the sinex/polylogue stores:
+# read-only on every input, writes only under /realm/data/derived/enrichment/
+# (outputs) and /realm/state/enrichment/ (watermark) -- both persistent /realm
+# NVMe paths, not the ephemeral root subvolume, so tmpfiles rules suffice and
+# no impermanence entry is needed.
 #
-# This is derived data, not raw capture -- no `captures[]` entry on the
-# runtime surface (that field is for the capture-lane staleness sentinel;
-# outputs here are re-derivable from their inputs by design, so losing a run
-# is not the kind of gap that sentinel exists to catch).
+# This is derived data, not raw capture, so the runtime surface carries no
+# `captures[]` entry: outputs are re-derivable from their inputs, so a lost
+# run is not the kind of gap the capture-staleness sentinel exists to catch.
 {
   mkServiceModule,
   pkgs,
@@ -64,9 +61,7 @@ mkServiceModule {
               overrides = {
                 Type = "oneshot";
                 ExecStart = "${dump}/bin/sinnix-enrich-dump";
-                # Same sandbox-vs-TMPDIR trap as every other capture-class
-                # lane this session hit (clipboard, primary, awair): the
-                # interactive session's TMPDIR is read-only under
+                # The interactive session's TMPDIR is read-only under
                 # ProtectSystem=strict, so mktemp needs its own writable tmp.
                 Environment = [ "TMPDIR=/tmp" ];
                 PrivateTmp = true;

@@ -1,8 +1,7 @@
-# URL x visit x archive-snapshot coverage ledger -- Stage 1 (bead sinnix-xt8).
-# Weekly evidence join: browser-history URLs against public archive CDX
-# indexes (Wayback, Common Crawl, Memento). Read-only against third-party
-# archive APIs; no crawling, no SavePageNow -- see the bead for Stage 2
-# (sinnix-9tex), which acts on the coverage gaps this produces.
+# URL x visit x archive-snapshot coverage ledger. Weekly evidence join:
+# browser-history URLs against public archive CDX indexes (Wayback, Common
+# Crawl, Memento). Read-only against third-party archive APIs; no crawling,
+# no SavePageNow -- it reports coverage gaps, it does not act on them.
 {
   mkServiceModule,
   config,

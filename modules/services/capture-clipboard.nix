@@ -19,11 +19,8 @@
 # - Attributes the source window via `hyprctl activewindow -j`.
 # - Appends one sinnix-capture-v1 envelope via `sinnix-capture write`.
 #
-# Privacy note: this lane captures everything copied to the clipboard,
-# including passwords and secrets pasted during normal use. That is
-# accepted/expected per the estate's raw-capture-first doctrine --
-# sensitivity is handled at consumption time, not capture time. Do not
-# add redaction logic here.
+# This lane captures everything copied, secrets included, by design:
+# sensitivity is handled at consumption time. Do not add redaction here.
 {
   mkServiceModule,
   lib,
@@ -175,15 +172,10 @@ mkServiceModule {
     unit = "sinnix-capture-clipboard.service";
     manager = "user";
     # No explicit kind: real owned systemd .service unit -> defaults to
-    # "service", matching every sibling capture-* daemon (capture-a11y,
-    # capture-audio, capture-notifications, ...). `kind = "capture"` is
-    # reserved for orphan surfaces with no real backing unit
-    # (capture-registry.nix). This module had it wrong (sinnix-gcuv,
-    # 2026-08-13): the mislabel silently excluded a genuinely live,
-    # observe.enable=true daemon from sinnix-observe's managed-units view
-    # and from the Nix-level kind=="service" render lists in runtime.nix,
-    # making an active unit look absent to any consumer treating those as
-    # the live-state authority.
+    # "service". `kind = "capture"` is reserved for orphan surfaces with no
+    # backing unit (capture-registry.nix); mislabelling here would drop a
+    # live daemon from sinnix-observe's managed-units view and from
+    # runtime.nix's kind=="service" render lists.
     resourceClass = "capture-runtime";
     captures = [
       {
@@ -192,8 +184,6 @@ mkServiceModule {
         eventDriven = true;
         # Genuinely bursty/idle-tolerant: an operator can go a full week
         # without copying anything new (travel, laptop-only stretches).
-        # Matches the week-long budget capture-registry.nix already uses
-        # for the other idle-tolerant lane (screenshot).
         staleAfterSeconds = 604800;
       }
     ];
@@ -232,10 +222,8 @@ mkServiceModule {
                   "SINNIX_CAPTURE_CLIPBOARD_STATE_DIR=${stateDir}"
                   # The session exports TMPDIR=/realm/tmp/shell, which is
                   # read-only inside this unit's ProtectSystem=strict
-                  # namespace -- every mktemp failed and the lane captured
-                  # nothing while active (2026-08-12, same sandbox-kills-
-                  # capture class as sinnix-60k7). Pin tmp inside the
-                  # sandbox instead.
+                  # namespace, so every mktemp fails and the lane silently
+                  # captures nothing. Pin tmp inside the sandbox instead.
                   "TMPDIR=/tmp"
                 ];
                 PrivateTmp = true;

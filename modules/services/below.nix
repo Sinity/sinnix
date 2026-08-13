@@ -3,12 +3,10 @@
 # Records system state continuously for post-mortem debugging.
 # Use `below replay` to investigate what happened at any point in time.
 #
-# Data stored under storeDir (defaults to /realm/data/captures/machine/below
-# — same realm subtree as the rest of machine telemetry). Earlier installs
-# wrote to /var/log/below; the rollover lives in the dotfile/agent retrospective
-# trail. Retention is indefinite: at 1 s with dict-compress (chunk-32, ~8.8×
-# over plain zstd) this is ~720 MB/day = ~260 GB/year. Export via:
-# below dump -O json/csv. Excluded from Borg in modules/backup.nix.
+# Data stored under storeDir, alongside the rest of machine telemetry.
+# Retention is indefinite: at 1 s with dict-compress (chunk-32, ~8.8× over
+# plain zstd) this is ~720 MB/day = ~260 GB/year. Export via
+# `below dump -O json/csv`. Excluded from Borg in modules/backup.nix.
 {
   mkServiceModule,
   lib,
@@ -55,9 +53,8 @@ mkServiceModule {
         scriptPkgs.sinnix-observe
       ];
 
-      # below 0.11+ reads store_dir/log_dir from /etc/below/below.conf;
-      # the --store-dir CLI flag was removed. Generate the config so data
-      # stays on the configured storeDir (e.g. /realm on prime).
+      # below 0.11+ has no --store-dir flag; store_dir/log_dir come only from
+      # /etc/below/below.conf, so it must be generated here.
       environment.etc."below/below.conf".text = ''
         store_dir = "${cfg.storeDir}/store"
         log_dir = "${cfg.storeDir}"

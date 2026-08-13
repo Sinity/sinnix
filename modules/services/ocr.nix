@@ -20,8 +20,6 @@ mkServiceModule {
       mode = "socket-proxy";
       publicEndpoint = "127.0.0.1:8020";
       backendEndpoint = "127.0.0.1:8021";
-      # Disabled on this host -- see ai-control.nix's ocrProxy for why this
-      # is estimated rather than measured.
       idleTimeout = "300s";
       exclusiveResource = "gpu-inference";
       dependsOn = [ "ocr-proxy" ];
@@ -79,10 +77,10 @@ mkServiceModule {
         extraOptions = [ "--device=nvidia.com/gpu=all" ];
       };
 
-      # Bound to the socket proxy's lifecycle exactly like the native
-      # backends: an idle proxy exit tears down this container's cgroup.
-      # Conflicts= against every other GPU-inference backend is computed
-      # centrally in ai-control.nix's gpuInferenceConflicts.
+      # Bound to the socket proxy's lifecycle: an idle proxy exit tears down
+      # this container's cgroup. Conflicts= against every other GPU-inference
+      # backend is computed centrally in ai-control.nix's
+      # gpuInferenceConflicts.
       systemd.services.podman-ocr = {
         partOf = [ "ocr-proxy.service" ];
         bindsTo = [ "ocr-proxy.service" ];

@@ -4,11 +4,6 @@
 # live on durable /realm (NOT the wear-limited root SSD); CUDA via the prebuilt
 # `ollama-cuda`. Automatic VRAM<->RAM offload handles models that don't fully fit
 # the 3080's 10 GB.
-#
-# DynamicUser note: the upstream unit sets DynamicUser=true *and* User=. When
-# User= names an existing static account, systemd uses that account, which is
-# what lets the daemon write the /realm models dir. We point it at the human
-# user so the dir it owns (created via tmpfiles below) is writable.
 {
   mkServiceModule,
   lib,
@@ -26,8 +21,6 @@ mkServiceModule {
       mode = "socket-proxy";
       publicEndpoint = "127.0.0.1:11434";
       backendEndpoint = "127.0.0.1:11435";
-      # Measured 2026-08-13 (see ai-control.nix's ollamaProxy for detail):
-      # ~20-23s cold /api/generate round trip for the 7.2GB daily driver.
       idleTimeout = "240s";
       exclusiveResource = "gpu-inference";
       dependsOn = [ "ollama-proxy" ];
@@ -74,14 +67,12 @@ mkServiceModule {
       modelsDir = "${config.sinnix.paths.mediaRoot}/model/ollama";
       ollamaBin = lib.getExe pkgs.ollama-cuda;
       awkBin = lib.getExe pkgs.gawk;
-      # Upstream's ollama-model-loader (nixpkgs services.ollama.loadModels)
-      # pulls every tag in one `parallel` invocation with no per-model retry,
-      # so a single transient transfer flake aborts the whole oneshot
-      # mid-list while LiteLLM keeps advertising the now-missing model.
-      # Replace the generated script with one that retries each tag
-      # independently (bounded backoff), keeps going on exhaustion instead
-      # of aborting, then verifies the full roster against `ollama list` and
-      # names exactly which tags are still missing before failing the unit.
+      # Upstream's ollama-model-loader pulls every tag in one `parallel`
+      # invocation with no per-model retry, so a single transient transfer
+      # flake aborts the whole oneshot mid-list while LiteLLM keeps
+      # advertising the now-missing model. This replacement retries each tag
+      # independently, continues past exhaustion, and verifies the full
+      # roster before failing the unit.
       modelLoaderScript = ''
         declare -a models=( ${lib.escapeShellArgs cfg.loadModels} )
         declare -a delays=(10 30 60 120)
@@ -188,9 +179,7 @@ mkServiceModule {
           ollama.partOf = [ "ollama-proxy.service" ];
           ollama.bindsTo = [ "ollama-proxy.service" ];
           # Conflicts= against every other GPU-inference backend is computed
-          # centrally in ai-control.nix's gpuInferenceConflicts (one
-          # symmetric matrix instead of N independently hand-maintained
-          # lists that could drift out of sync with each other).
+          # centrally in ai-control.nix's gpuInferenceConflicts.
           # Full override (mkForce): the upstream `script` is a plain
           # (non-mkForce) definition, so an un-forced override here would
           # concatenate rather than replace it.

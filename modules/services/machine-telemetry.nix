@@ -259,17 +259,14 @@ mkServiceModule {
         '';
       };
 
-      # Activation hook: append one JSONL line per NixOS generation
-      # activation to ${dataDir}/generations.jsonl. Lynchpin reads this
-      # to join telemetry rows back to the sinnix configuration revision
-      # that produced them — answers "what changed at generation N?"
-      # without git archaeology. Lives here (not in the lynchpin module)
-      # because machine-telemetry owns the captures/machine namespace
+      # Append one JSONL line per NixOS generation activation, letting
+      # Lynchpin join telemetry rows back to the sinnix revision that
+      # produced them. Lives here rather than in the lynchpin module because
+      # machine-telemetry owns the captures/machine namespace
       # unconditionally; lynchpin is an opt-in consumer.
       #
-      # Append-only. Failures degrade silently (|| true) because the
-      # activation must succeed even if /realm is unavailable
-      # (e.g. recovery boot).
+      # Failures degrade silently (|| true) because activation must succeed
+      # even if /realm is unavailable (e.g. recovery boot).
       system.activationScripts.lynchpinGenerationLog = lib.stringAfter [ "var" ] ''
         LOG_FILE="${dataDir}/generations.jsonl"
         ${pkgs.coreutils}/bin/mkdir -p "$(${pkgs.coreutils}/bin/dirname "$LOG_FILE")" 2>/dev/null || true
@@ -301,12 +298,10 @@ mkServiceModule {
         ];
         path = [
           pkgs.coreutils
-          # pkgs.bind ships only the daemon (named, rndc, etc.); nslookup +
-          # dig live in the split bind.dnsutils output. Without dnsutils on
-          # PATH the network probe's `nslookup example.com` invocation
-          # returns exit 127, the collector records gap_codes_json carrying
-          # network.dns_probe_failed on every sample, and the substrate row
-          # looks like DNS is down. Keep both for ad-hoc operator debug paths.
+          # pkgs.bind ships only the daemon; nslookup and dig live in the
+          # split bind.dnsutils output. Without dnsutils the network probe's
+          # nslookup exits 127 and every sample records
+          # network.dns_probe_failed as though DNS were down.
           pkgs.bind
           pkgs.bind.dnsutils
           pkgs.curl

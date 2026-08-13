@@ -1,12 +1,9 @@
 # capture-monitor: poll the AORUS FO48U over DDC/CI into the capture lake.
 #
-# sinnix-70eq asked for the monitor to be a sensor, independent of whether
-# the DDC brightness-nudge ASBL defeat (scripts/asbl-no-moar -m ddc) actually
-# works: VCP 0xD6 (power mode) turns "is the screen on" from an inference
-# into a measurement that joins to ActivityWatch idle state; 0x10/0x12
-# (brightness/contrast) drift over time would evidence ASBL directly instead
-# of guessing at it; 0x60 (input source) records which machine currently
-# owns the panel.
+# Treats the monitor as a sensor: VCP 0xD6 (power mode) turns "is the screen
+# on" from an inference into a measurement that joins to ActivityWatch idle
+# state; 0x10/0x12 (brightness/contrast) drift evidences ASBL directly; 0x60
+# (input source) records which machine currently owns the panel.
 #
 # ddcutil is slow -- each VCP read/write is a real i2c transaction, observed
 # at ~0.5-0.6s round-trip on this host, and a poll needs four of them. Keep
@@ -49,7 +46,7 @@ let
         exit 1
       }
 
-      # --brief has two shapes depending on VCP feature type, confirmed live:
+      # --brief has two shapes depending on VCP feature type:
       #   continuous (0x10, 0x12):     "VCP 10 C 50 100"   -- $4 is decimal
       #   simple non-continuous (0xd6, 0x60): "VCP D6 SNC x01" -- $4 is hex
       read_vcp() {
@@ -142,10 +139,9 @@ mkServiceModule {
                 ProtectSystem = "strict";
                 ProtectHome = "read-only";
                 ReadWritePaths = [ laneDir ];
-                # /dev/i2c-* is group-owned (i2c); the service inherits the
-                # operator's supplementary groups via systemd --user, same
-                # as any other user-session process -- no DeviceAllow needed
-                # since nothing here sets PrivateDevices.
+                # /dev/i2c-* is group-owned (i2c) and the service inherits the
+                # operator's supplementary groups via systemd --user, so no
+                # DeviceAllow is needed as long as PrivateDevices stays unset.
                 Environment = [ "TMPDIR=/tmp" ];
                 PrivateTmp = true;
               };

@@ -1,30 +1,20 @@
-# Always-on NVENC screen replay ring (sinnix-9pd Phase 3a, 3.4)
+# Always-on NVENC screen replay ring
 #
-# Promotes the manual, Steam-gated "F10 replay buffer" toggle out of
-# modules/features/desktop/gaming.nix into a real capture surface: it now
-# runs continuously via a systemd --user service tied to
-# graphical-session.target, the same lifecycle every other capture-*
-# daemon uses, instead of only existing while a game session manually
-# started it. This is the operator's REPLAY RING design (sinnix-9pd,
-# 2026-08-11g): gpu-screen-recorder keeps the last `ringSeconds` of
-# screen+audio in memory and touches disk only when told to save
-# ("clip that") -- so unlike every other capture-* lane this one is
-# expected to sit silent for long stretches; that's a working idle
-# state, not a stall.
+# A systemd --user service tied to graphical-session.target, the same
+# lifecycle every other capture-* daemon uses: gpu-screen-recorder keeps the
+# last `ringSeconds` of screen+audio in memory and touches disk only when
+# told to save ("clip that"). Unlike every other capture-* lane this one is
+# expected to sit silent for long stretches; that is a working idle state.
 #
-# CAPABILITY WIRING: `programs.gpu-screen-recorder.enable` installs a
-# setcap (cap_sys_admin) wrapper for `gsr-kms-server`, letting
-# gpu-screen-recorder grab the screen directly via KMS instead of going
-# through the xdg-desktop-portal ScreenCast API. That distinction is why
-# this module needs the NixOS `programs.*` option at all: a portal-backed
-# capture blocks on an interactive permission dialog the first time it
-# runs, which is tolerable for the old manual F10 keybind (a human is
-# right there to click Allow) but fatal for a service that's meant to
-# start unattended at login and just sit there ready. KMS capture also
-# needs no portal round-trip per save, so SIGUSR1-triggered saves stay
-# fast. The setcap wrapper lands in `/run/wrappers/bin`, which is why
-# ExecStart's PATH below is widened to include it -- gpu-screen-recorder
-# resolves `gsr-kms-server` by name, not by a hardcoded store path.
+# CAPABILITY WIRING: `programs.gpu-screen-recorder.enable` installs a setcap
+# (cap_sys_admin) wrapper for `gsr-kms-server`, letting gpu-screen-recorder
+# grab the screen via KMS instead of the xdg-desktop-portal ScreenCast API.
+# That is why the NixOS `programs.*` option is needed: portal-backed capture
+# blocks on an interactive permission dialog, fatal for a service meant to
+# start unattended at login, and it would add a portal round-trip per save.
+# The setcap wrapper lands in `/run/wrappers/bin`, which is why ExecStart's
+# PATH below includes it -- gpu-screen-recorder resolves `gsr-kms-server` by
+# name, not by store path.
 {
   mkServiceModule,
   lib,
@@ -71,7 +61,7 @@ mkServiceModule {
     ringSeconds = lib.mkOption {
       type = lib.types.ints.positive;
       default = 1800;
-      description = "Ring buffer depth in seconds (default 30 minutes, per the operator's REPLAY RING design note in sinnix-9pd).";
+      description = "Ring buffer depth in seconds (default 30 minutes).";
     };
     fps = lib.mkOption {
       type = lib.types.ints.positive;
@@ -96,9 +86,8 @@ mkServiceModule {
       {
         name = "replay";
         path = replayDir;
-        # Save-on-hotkey only -- a fully quiet week with nothing clipped
-        # is a legitimate outcome, same reasoning as the screenshot lane
-        # in capture-registry.nix, so it gets the same 7-day budget.
+        # Save-on-hotkey only -- a fully quiet week with nothing clipped is a
+        # legitimate outcome.
         eventDriven = true;
         staleAfterSeconds = 604800;
       }

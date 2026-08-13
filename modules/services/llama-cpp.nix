@@ -1,29 +1,18 @@
 # llama.cpp HTTP server — raw GGUF endpoint for experiments and for applying
 # steering / abliteration control vectors via --control-vector.
 #
-# Enabled on sinnix-prime (hosts/sinnix-prime/default.nix) serving a 0.6B
-# reranker (/v1/rerank — an API ollama does not provide); koboldcpp remains
-# the everyday vehicle for general LLM/VLM chat. The host pins gpuLayers = 0:
-# measured 2026-08-13 the reranker answers in 435-571ms on pure CPU versus
-# 67-137ms on GPU, so it runs CPU-only and outside the gpu-inference
-# admission mesh — it can sit resident alongside ollama, koboldcpp, or any
-# other CUDA backend instead of evicting/being evicted by one. It does NOT
-# hold zero VRAM, though: the CUDA-linked binary still allocates
-# ~680-740MiB even with --n-gpu-layers 0 (verified live, released cleanly
-# on exit) -- far below the 1610MiB it held fully offloaded, but a real
-# cost worth remembering when reasoning about coexistence headroom on a
-# 10GB card -- it leaves ~240MiB once the desktop baseline and the 7.2GB
-# daily-driver model are accounted for, which defeats the point of moving
-# the reranker off the GPU at all. So the package now FOLLOWS gpuLayers
-# (see below): CPU build at 0, CUDA build otherwise. A future GGUF served
-# through this module with gpuLayers > 0 gets the CUDA build automatically
-# and would need to opt back into the exclusivity mesh.
-# Socket-activated behind
-# the same idle-aware proxy pattern as ollama/koboldcpp/whisper
-# (modules/services/ai-control.nix): the public port 8081 is the systemd
-# socket front door, the backend runs on a private loopback port and exits
-# after idle. DynamicUser + ProtectSystem=strict is read-only, not hidden, so
-# it reads the model under /realm without extra bind mounts.
+# On sinnix-prime this serves a 0.6B reranker (/v1/rerank — an API ollama
+# does not provide) with gpuLayers = 0, which keeps it CPU-only and outside
+# ai-control.nix's gpu-inference admission mesh, so it can sit resident
+# alongside ollama or koboldcpp. The package FOLLOWS gpuLayers (see below);
+# a future GGUF served here with gpuLayers > 0 gets the CUDA build
+# automatically and would need to opt back into the exclusivity mesh.
+#
+# Socket-activated behind the same idle-aware proxy pattern as
+# ollama/koboldcpp/whisper (modules/services/ai-control.nix): port 8081 is
+# the systemd socket front door, the backend runs on a private loopback port
+# and exits after idle. DynamicUser + ProtectSystem=strict is read-only, not
+# hidden, so it reads the model under /realm without extra bind mounts.
 {
   mkServiceModule,
   lib,
@@ -40,8 +29,6 @@ mkServiceModule {
       mode = "socket-proxy";
       publicEndpoint = "127.0.0.1:8081";
       backendEndpoint = "127.0.0.1:8082";
-      # Measured 2026-08-13: ~1-3s cold /v1/rerank round trip for the 0.6B
-      # reranker -- 30s is already ~10-30x headroom, kept unchanged.
       idleTimeout = "30s";
       dependsOn = [ "llama-cpp-proxy" ];
     };
@@ -71,10 +58,9 @@ mkServiceModule {
       default = 4096;
       description = ''
         `--ctx-size` (KV-cache context window, tokens). Left unset upstream
-        this loads the model's full training context, which is what
-        inflated the reranker's VRAM footprint to ~5.6 GB idle; a reranker
-        only ever sees one query/document pair at a time, so a modest bound
-        is enough headroom without paying for context it never uses.
+        loads the model's full training context, costing gigabytes of idle
+        KV cache; a reranker only ever sees one query/document pair at a
+        time, so a modest bound is enough.
       '';
     };
     extraFlags = args.lib.mkOption {
@@ -97,20 +83,13 @@ mkServiceModule {
     {
       services.llama-cpp = {
         enable = true;
-        # The package follows gpuLayers rather than being pinned to CUDA.
-        # Measured 2026-08-13: the CUDA-linked binary holds 676-742 MiB of
-        # VRAM even at --n-gpu-layers 0, because a CUDA context and its
-        # compute buffers are allocated by the build, not by the offload
-        # setting. That is not a rounding error here -- desktop baseline
-        # (~2060 MiB) + that context + the 7.2 GB daily-driver model leaves
-        # ~240 MiB on a 10 GB card, which defeats the entire reason the
-        # reranker was moved off the GPU: to be resident ALONGSIDE an LLM
-        # instead of evicting it.
-        #
-        # At gpuLayers = 0 there is nothing for CUDA to do, so the CPU build
-        # is not a downgrade -- it is the same computation without the
-        # context. Rerank latency is already sub-second on CPU (435-571 ms
-        # for 20 docs, measured), which is what made the move correct.
+        # The package must follow gpuLayers rather than being pinned to CUDA:
+        # a CUDA-linked binary allocates its context and compute buffers at
+        # build/link time, not per offload setting, so it still holds
+        # ~700 MiB of VRAM at --n-gpu-layers 0. On a 10 GB card that erases
+        # the headroom this service exists to preserve. At gpuLayers = 0 CUDA
+        # has nothing to do, so the CPU build is the same computation
+        # without the context.
         package = if cfg.gpuLayers == 0 then pkgs.llama-cpp else pkgs.llama-cpp-cuda;
         settings = {
           host = "127.0.0.1";
@@ -137,10 +116,6 @@ mkServiceModule {
         wantedBy = lib.mkForce [ ];
         partOf = [ "llama-cpp-proxy.service" ];
         bindsTo = [ "llama-cpp-proxy.service" ];
-        # CPU-pinned (gpuLayers = 0, set on the host): deliberately NOT in
-        # ai-control.nix's gpuInferenceConflicts mesh, so it can run
-        # alongside a resident ollama/koboldcpp/whisper session instead of
-        # evicting/being evicted by one.
       };
     };
 } args

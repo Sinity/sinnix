@@ -52,12 +52,10 @@ mkServiceModule {
       scriptPath = "${ircRoot}/scripts/seal_logs.py";
     in
     {
-      # The sealer timer owns the surface declaration above; the IRC capture
-      # lane itself is written continuously by weechat (outside this repo's
-      # process management), so register it here where ircRoot is in scope
-      # rather than restructuring the static `surface` block. List-typed
-      # options merge across definitions, so this appends to the timer's
-      # (empty) captures list instead of replacing it.
+      # The IRC capture lane is written continuously by weechat, outside this
+      # repo's process management; registered here because ircRoot is only in
+      # scope inside configFn. List-typed options merge across definitions, so
+      # this appends to the timer's captures list rather than replacing it.
       sinnix.runtime.surfaces.weechat-log-sealer.captures = [
         {
           name = "comms-irc";
@@ -78,10 +76,8 @@ mkServiceModule {
           };
           Service = lib.sinnix.mkRuntimeServiceConfig {
             runtimeInventory = config.sinnix.runtime.inventory;
-            # The registered surface unit is the *timer*
-            # (weechat-log-sealer.timer, kind = "timer"), so `unit =`
-            # lookup would throw -- resolve the class's serviceConfig
-            # directly instead.
+            # The registered surface unit is the *timer*, so a `unit =` lookup
+            # would throw -- resolve the class's serviceConfig directly.
             resourceClass = "background-maintenance";
             overrides = {
               Type = "oneshot";

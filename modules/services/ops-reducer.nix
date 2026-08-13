@@ -81,8 +81,8 @@ mkServiceModule {
           };
           Service = {
             Type = "simple";
-            # --agent-controller: dotsRoot-direct, not the ~/.config/hermes/skills
-            # linkFarm hop -- same collapse as agent-gateway.nix (sinnix-i7eb).
+            # --agent-controller: dotsRoot-direct, not the
+            # ~/.config/hermes/skills linkFarm hop.
             ExecStart = "${reducer}/bin/sinnix-ops-reducer --runtime-dir %t --state-dir ${stateDir} --inventory /etc/sinnix/runtime-inventory.json --ambient-product /realm/project/sinity-lynchpin/.lynchpin/generated/analysis/ambient_intelligence.json --anchor-events %t/sinnix/afk-resume.json --hyprland-events %t/sinnix/hyprland-events --agent-controller ${config.sinnix.paths.dotsRoot}/_ai/skills/agent-orchestration/scripts/agent_job_control.sh --observe-command ${observe}/bin/sinnix-observe --interval ${toString cfg.intervalSeconds}";
             Restart = "on-failure";
             RestartSec = "2s";

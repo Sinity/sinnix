@@ -1,7 +1,6 @@
-# Usage census — evidence-joined audit of sinnix-owned artifact classes
-# (bead sinnix-yfr; design recorded on the bead). Read-only joins of
-# declaration inventories vs atuin/polylogue/journald evidence; JSONL to the
-# machine capture lake. Absence of an evidence source degrades verdicts to
+# Usage census — evidence-joined audit of sinnix-owned artifact classes.
+# Read-only joins of declaration inventories vs atuin/polylogue/journald
+# evidence; JSONL to the machine capture lake. Absence of an evidence source degrades verdicts to
 # `unknown`, never to a false `unused`.
 {
   mkServiceModule,
