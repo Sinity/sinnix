@@ -100,8 +100,37 @@ APP_ID="dev.sinnix.phone"
 # app-related goes through this rather than adb_phone, because the app's
 # liveness must be answerable without Termux, without sshd, and without the
 # tailnet -- those are the layers that kept failing.
+ADB_RESOLVED="${ADB_RESOLVED:-}"
+
+# Resolve the transport once, in the CALLER's shell.
+#
+# Each unresolved adb_any call spends up to 8s failing to reach a tailnet that
+# is down, and a per-file loop makes two or three calls per chunk -- a drain of
+# thirty chunks took forty minutes almost entirely in that timeout. Memoizing
+# inside adb_any cannot fix it, because most calls are command substitutions
+# and a subshell's assignment dies with the subshell. Callers that loop should
+# resolve first; everything after is a direct adb invocation.
+adb_resolve() {
+  [ -n "$ADB_RESOLVED" ] && return 0
+  if ANDROID_SERIAL="$ADB_TARGET" adb get-state >/dev/null 2>&1; then
+    ADB_RESOLVED="$ADB_TARGET"
+    return 0
+  fi
+  timeout 8 adb connect "$ADB_TARGET" >/dev/null 2>&1 || true
+  if ANDROID_SERIAL="$ADB_TARGET" adb get-state >/dev/null 2>&1; then
+    ADB_RESOLVED="$ADB_TARGET"
+    return 0
+  fi
+  ADB_RESOLVED=$(adb devices | awk '$2 == "device" && $1 !~ /:/ { print $1; exit }')
+  [ -n "$ADB_RESOLVED" ]
+}
+
 adb_any() {
   local serial
+  if [ -n "$ADB_RESOLVED" ]; then
+    ANDROID_SERIAL="$ADB_RESOLVED" adb "$@"
+    return
+  fi
   if ANDROID_SERIAL="$ADB_TARGET" adb get-state >/dev/null 2>&1; then
     ANDROID_SERIAL="$ADB_TARGET" adb "$@"
     return
@@ -149,19 +178,62 @@ ensure_app_grants() {
 # phone -- the rsync path's `--ignore-existing` semantics, kept deliberately so
 # whichever transport ran last does not change what the other one will do.
 drain_ambient_adb() {
-  local dest name pulled=0
+  local dest name local_size remote_size pulled=0 repaired=0
+  adb_resolve || return 1
   dest="$LAKE_ROOT/ambient"
   mkdir -p "$dest"
   while IFS= read -r name; do
     case "$name" in
       '' | *.part | status.json*) continue ;;
     esac
-    [ -e "$dest/$name" ] && continue
+    remote_size=$(adb_any shell "stat -c %s '/sdcard/sinnix-ambient/$name'" 2>/dev/null </dev/null | tr -d '\r')
+    if [ -e "$dest/$name" ]; then
+      # A closed chunk never changes, so a lake copy smaller than the phone's
+      # is a transfer that was cut short, not a different recording. Skipping
+      # anything already present would leave it truncated permanently; the
+      # lake held one such chunk at 311392 of 1844320 bytes.
+      local_size=$(stat -c %s "$dest/$name" 2>/dev/null || echo 0)
+      if [ -z "$remote_size" ] || [ "$local_size" -ge "$remote_size" ]; then
+        continue
+      fi
+      if adb_any pull "/sdcard/sinnix-ambient/$name" "$dest/$name" >/dev/null 2>&1; then
+        repaired=$((repaired + 1))
+      fi
+      continue
+    fi
     if adb_any pull "/sdcard/sinnix-ambient/$name" "$dest/$name" >/dev/null 2>&1; then
       pulled=$((pulled + 1))
     fi
   done < <(adb_any shell 'ls /sdcard/sinnix-ambient/' 2>/dev/null | tr -d '\r')
-  echo "ambient: drained $pulled new chunk(s) over adb"
+  echo "ambient: drained $pulled new chunk(s) over adb, repaired $repaired truncated"
+}
+
+# Device-side rotation for the adb transport.
+#
+# The rsync path uses --remove-source-files, which unlinks a source only after
+# rsync has confirmed the destination matches. This reproduces that guarantee
+# rather than trusting the pull's exit status: a chunk is removed from the
+# phone only when the lake holds a file of identical, non-zero size. Anything
+# that fails the comparison stays on the device, where the next drain can try
+# again -- the failure mode is a full /sdcard, not lost audio.
+rotate_ambient_adb() {
+  local dest name local_size remote_size removed=0
+  adb_resolve || return 1
+  dest="$LAKE_ROOT/ambient"
+  while IFS= read -r name; do
+    case "$name" in
+      '' | *.part | status.json*) continue ;;
+    esac
+    [ -f "$dest/$name" ] || continue
+    local_size=$(stat -c %s "$dest/$name" 2>/dev/null || echo 0)
+    # `adb shell` reads stdin, and this loop's stdin is the file list; without
+    # the redirect it consumes the list and the loop ends after one chunk.
+    remote_size=$(adb_any shell "stat -c %s '/sdcard/sinnix-ambient/$name'" 2>/dev/null </dev/null | tr -d '\r')
+    if [ -n "$remote_size" ] && [ "$remote_size" -gt 0 ] && [ "$local_size" = "$remote_size" ]; then
+      adb_any shell "rm -f '/sdcard/sinnix-ambient/$name'" >/dev/null 2>&1 </dev/null && removed=$((removed + 1))
+    fi
+  done < <(adb_any shell 'ls /sdcard/sinnix-ambient/' 2>/dev/null | tr -d '\r')
+  echo "ambient: released $removed chunk(s) from the phone (verified in the lake)"
 }
 
 usage() {
@@ -464,18 +536,27 @@ pull)
   # Pull only — never push back, and never delete on the phone.
   mkdir -p "$LAKE_ROOT"/{camera,download,health,ambient}
   set +e
-  rsync -av --ignore-existing -e "$rsync_ssh" \
-    "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/DCIM/" "$LAKE_ROOT/camera/"
-  rsync -av --ignore-existing -e "$rsync_ssh" \
-    "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/Download/" "$LAKE_ROOT/download/"
-  rsync -av --ignore-existing -e "$rsync_ssh" \
-    "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/HealthConnectExport/" "$LAKE_ROOT/health/" 2>/dev/null
+  # One reachability check for all four lanes. Without it each rsync spends its
+  # own connect timeout failing the same way and prints the same error three
+  # times before the ambient lane gets to try a transport that works.
+  ssh_up=false
+  ssh_phone 'true' >/dev/null 2>&1 && ssh_up=true
+  if [ "$ssh_up" = true ]; then
+    rsync -av --ignore-existing -e "$rsync_ssh" \
+      "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/DCIM/" "$LAKE_ROOT/camera/"
+    rsync -av --ignore-existing -e "$rsync_ssh" \
+      "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/Download/" "$LAKE_ROOT/download/"
+    rsync -av --ignore-existing -e "$rsync_ssh" \
+      "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/HealthConnectExport/" "$LAKE_ROOT/health/" 2>/dev/null
+  else
+    echo "ssh unavailable: camera, downloads and health exports need it and are skipped"
+  fi
   # Continuous ambient audio chunks. The capture app names the file it is
   # still writing `*.m4a.part` and renames it only after the muxer closes,
   # so "closed" is an explicit state here rather than something inferred
   # from mtime ordering. status.json is device-side liveness, not lake
   # content, and must never be drained -- see the exclusions below.
-  if ssh_phone 'true' >/dev/null 2>&1; then
+  if [ "$ssh_up" = true ]; then
     rsync -av --ignore-existing --exclude='*.part' --exclude='status.json*' -e "$rsync_ssh" \
       "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/sinnix-ambient/" "$LAKE_ROOT/ambient/" 2>/dev/null
   elif adb_any get-state >/dev/null 2>&1; then
@@ -500,12 +581,16 @@ ambient-audit)
   touch "$ledger"
   # One pass to learn what has already been measured; re-decoding the whole
   # lake on every drain would grow without bound.
-  seen=$(jq -r '.chunk' "$ledger" 2>/dev/null | sort -u)
+  # Keyed on size as well as name: a chunk repaired from a truncated transfer
+  # keeps its name but is a different file, and its old measurement describes
+  # audio that was never fully there.
+  seen=$(jq -r '"\(.chunk) \(.bytes // 0)"' "$ledger" 2>/dev/null | sort -u)
   added=0
   silent=0
   while IFS= read -r chunk; do
     name=$(basename "$chunk")
-    if printf '%s\n' "$seen" | grep -qxF "$name"; then
+    bytes=$(stat -c %s "$chunk" 2>/dev/null || echo 0)
+    if printf '%s\n' "$seen" | grep -qxF "$name $bytes"; then
       continue
     fi
     # A chunk this tool cannot decode is a finding, not an error: `set -e`
@@ -523,9 +608,9 @@ ambient-audit)
     case "$max" in
       -9[1-9]*|-inf) dead=true; silent=$((silent + 1)) ;;
     esac
-    jq -nc --arg chunk "$name" --arg dur "${duration:-}" --arg rate "${rate:-}" \
+    jq -nc --arg chunk "$name" --argjson bytes "${bytes:-0}" --arg dur "${duration:-}" --arg rate "${rate:-}" \
       --arg mean "${mean:-}" --arg max "${max:-}" --argjson dead "$dead" \
-      '{chunk: $chunk, duration_seconds: ($dur | tonumber? // null),
+      '{chunk: $chunk, bytes: $bytes, duration_seconds: ($dur | tonumber? // null),
         sample_rate: ($rate | tonumber? // null),
         mean_db: ($mean | tonumber? // null), max_db: ($max | tonumber? // null),
         captured_nothing: $dead}' >>"$ledger"
@@ -541,6 +626,18 @@ drain)
   # wifi-gated. Deliberately not charging-gated -- this is a network-cost
   # gate, not a battery one.
   if ! timeout 5 bash -c "exec 3<>/dev/tcp/$PHONE_TS_IP/$PHONE_SSH_PORT" 2>/dev/null; then
+    # No tailnet. That is the normal state after a phone reboot and whenever
+    # Termux is not running, and it used to end the drain -- so audio the app
+    # had recorded correctly sat on the device indefinitely. adb is a separate
+    # transport: if it answers (USB, typically), drain through it. The wifi
+    # gate below exists to keep a large transfer off metered data, and a USB
+    # cable is not metered, so it does not apply here.
+    if adb_any get-state >/dev/null 2>&1; then
+      echo "drain: no tailnet, draining over adb"
+      "$0" pull
+      rotate_ambient_adb
+      exit 0
+    fi
     echo "drain: phone unreachable, skipping"
     exit 0
   fi
