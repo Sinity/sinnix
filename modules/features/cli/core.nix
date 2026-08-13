@@ -138,6 +138,18 @@ mkFeatureModule {
             enableDefaultConfig = false;
             settings = {
               "*".AddKeysToAgent = "yes";
+              # GitHub automation must never depend on gpg-agent cache state or
+              # pinentry. The dedicated transport key is unencrypted and
+              # intentionally available to unattended local agents.
+              "github.com" = {
+                HostName = "github.com";
+                User = "git";
+                IdentityFile = "/home/sinity/.ssh/id_ed25519";
+                IdentitiesOnly = true;
+                IdentityAgent = "none";
+                BatchMode = true;
+                AddKeysToAgent = "no";
+              };
               # Router: `ssh sinnix-gw` just works
               "sinnix-gw" = {
                 HostName = "192.168.1.1";
