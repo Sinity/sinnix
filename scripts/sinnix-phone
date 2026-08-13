@@ -43,6 +43,12 @@ ssh_phone_opts=(
   -o IdentitiesOnly=yes
   -i "${SINNIX_PHONE_IDENTITY:-$HOME/.ssh/id_ed25519}"
 )
+# Same flags as a single shell-word, for rsync -e (which needs a word, not
+# an array) -- computed once at top level so every case branch can use it,
+# not just whichever one happens to run first (case branches are NOT
+# separate scopes; a `"$0" subcmd` re-invocation IS a separate process,
+# which is why this isn't computed inline inside `pull)` alone).
+rsync_ssh="ssh ${ssh_phone_opts[*]}"
 # shellcheck disable=SC2029  # client-side expansion is intended: callers
 # (clip-push) build the remote command with their own already-expanded args.
 ssh_phone() { ssh "${ssh_phone_opts[@]}" "${PHONE_USER}@${PHONE_TS_IP}" "$@"; }
@@ -122,9 +128,6 @@ pull)
   # is where the Health Connect scheduled export lands (see bead sinnix-fmkb).
   # Pull only — never push back, and never delete on the phone.
   mkdir -p "$LAKE_ROOT"/{camera,download,health,ambient}
-  # Same sandbox-safe ssh flags as ssh_phone(), as one string for rsync -e
-  # (which needs a shell-word, not an array).
-  rsync_ssh="ssh ${ssh_phone_opts[*]}"
   set +e
   rsync -av --ignore-existing -e "$rsync_ssh" \
     "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/DCIM/" "$LAKE_ROOT/camera/"
@@ -162,7 +165,29 @@ drain)
     exit 0
   fi
   echo "drain: charging + wifi confirmed, pulling"
-  exec "$0" pull
+  "$0" pull
+
+  # sinnix-uyvt.2.1 (3): device-side rotation. 37G free is finite; the phone
+  # needs a ring that provably never deletes a chunk the lake hasn't taken.
+  # --remove-source-files removes a source file only once rsync has
+  # confirmed it matches the destination -- whether that confirmation
+  # happened just now or on an earlier run (a file `pull`'s --ignore-existing
+  # skipped because it was already there is still confirmed-in-sync, so this
+  # is safe to run standalone). Scoped to ambient only: camera/downloads/
+  # health are the operator's originals, not a rotating buffer.
+  mkdir -p "$LAKE_ROOT/ambient"
+  rsync -a --remove-source-files -e "$rsync_ssh" \
+    "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/sinnix-ambient/" "$LAKE_ROOT/ambient/" 2>/dev/null
+
+  # This is a soft ring (bounded by drain cadence: at most ~1 interval's
+  # worth of chunks accumulate between drains) rather than a hard size cap.
+  # If drains stop happening for an extended stretch (phone never on wifi +
+  # charging), on-device growth is genuinely unbounded -- surface that
+  # rather than silently trusting the cadence to hold.
+  used_kb=$(ssh_phone "du -sk /sdcard/sinnix-ambient 2>/dev/null" | awk '{print $1}')
+  if [ -n "${used_kb:-}" ] && [ "$used_kb" -gt 512000 ]; then
+    echo "drain: WARNING -- /sdcard/sinnix-ambient is ${used_kb}KB and not shrinking after rotation; drains may have stalled"
+  fi
   ;;
 adb-connect)
   adb connect "$ADB_TARGET"
