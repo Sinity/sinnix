@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: sinnix-deslop
+Version: 0.1.0
+Summary: Regex-based LLM-slop phrase stripper (sinnix-uou) -- reusable across generation lanes
+Requires-Python: >=3.11

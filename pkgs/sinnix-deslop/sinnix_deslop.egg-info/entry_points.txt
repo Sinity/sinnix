@@ -1,0 +1,2 @@
+[console_scripts]
+sinnix-deslop = sinnix_deslop.cli:main

@@ -1,0 +1,61 @@
+# sinnix-deslop phrase inventory — v1 (2026-08-13, sinnix-uou)
+#
+# Curated GPT-ism / LLM-slop phrase list, community-sourced (ST
+# Response-Processing pattern, r/LocalLLaMA "AI slop" megathreads, common
+# instruction-tuned-model tics). One regex per line (Python re, IGNORECASE),
+# blank lines and lines starting with # ignored. This is output CLEANUP —
+# applied post-hoc to generated prose — never a generation-time gate.
+#
+# Format: <regex>\t<replacement-or-empty-for-strip>
+# A replacement of literal "STRIP_SENTENCE" removes the whole containing
+# sentence, not just the matched span (for stock disclaimer/hedge sentences
+# that add no content).
+
+# --- stock hedges / disclaimers -------------------------------------------
+\bit'?s important to (?:note|remember|understand) that\b\s*
+\bi (?:cannot|can't) (?:stress|emphasize) (?:this )?enough\b[:,]?\s*
+\bas an ai(?: language model)?\b,?\s*
+\bi'?m (?:just |only )?an ai\b,?\s*
+\bi (?:don'?t|do not) have (?:personal )?(?:opinions|feelings|beliefs)\b.*	STRIP_SENTENCE
+\bplease note that\b\s*
+\bit'?s worth (?:noting|mentioning) that\b\s*
+
+# --- throat-clearing openers ------------------------------------------------
+^(?:certainly|absolutely|of course|great question)!?\s*
+^(?:sure|okay|alright)[,!]\s*((?:here'?s|let'?s|i'?ll)\b)	\1
+\blet'?s dive (?:in|into)\b	let's look at
+\blet'?s explore\b	let's look at
+
+# --- vague-grandiosity filler ----------------------------------------------
+\bin (?:today'?s|this) ever-evolving (?:landscape|world)\b
+\bin the (?:realm|world|landscape) of\b	in
+\ba testament to\b	evidence of
+\bstands as a (?:testament|reminder)\b	shows
+\bit'?s a (?:journey|adventure)\b.*	STRIP_SENTENCE
+\bunlock(?:s|ing)? (?:the|its) (?:full )?potential\b
+\bpush(?:es|ing)? the boundaries\b
+
+# --- overused verbs/nouns ---------------------------------------------------
+\bdelve(?:s|d|ing)? into\b	look at
+\bnavigate(?:s|d|ing)? the (?:complexit(?:y|ies)|challenges) of\b	handle
+\bfoster(?:s|ing)? (?:a sense of|an environment of)\b	build
+\bharness(?:es|ing)? the power of\b	use
+\btapestry\b
+\bmyriad of\b	many
+\bplethora of\b	many
+\bin the tapestry of\b	in
+
+# --- false-balance / non-answers -------------------------------------------
+\bit(?:'s| is) (?:a )?complex (?:issue|topic|question) with (?:no|many) (?:easy|simple) answers?\b.*	STRIP_SENTENCE
+\bultimately,? (?:it|the answer) depends on\b	it depends on
+
+# --- closing filler ----------------------------------------------------------
+\bi hope this helps!?\s*$
+\blet me know if you have any (?:other |further )?questions!?\s*$
+\bfeel free to (?:ask|reach out) if\b.*$	STRIP_SENTENCE
+\bin conclusion,?\s*
+\bto (?:sum(?:marize)?|wrap) (?:up|things up),?\s*
+
+# --- apology loops (agent-facing specifically) ------------------------------
+\bi apologize for (?:the|any) (?:confusion|inconvenience)\b.*?[.!]\s*
+\byou'?re (?:absolutely|completely) right,? (?:i apologize|my apologies|sorry)\b[,.]?\s*

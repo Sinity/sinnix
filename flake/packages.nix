@@ -26,6 +26,7 @@
         "sinnix-agent-environment-doc"
         "sinnix-agent-gateway"
         "sinnix-capability-manifest"
+        "sinnix-deslop"
         "sinnix-observe"
         "tunnel-client"
       ];
