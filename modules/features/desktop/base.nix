@@ -1,8 +1,5 @@
-# Core Desktop Foundation
-#
-# Provides:
-# - Systemd-managed user services (network/bluetooth applets, clipboard)
-# - Wayland session environment and auto-start logic
+# Core desktop foundation: systemd-managed user services (network/bluetooth
+# applets, clipboard) and the Wayland session environment.
 #
 # Launcher, notifications, and the polkit agent are owned by Noctalia
 # (see noctalia.nix); clipboard stays here (clipse).

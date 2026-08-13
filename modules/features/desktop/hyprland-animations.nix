@@ -1,12 +1,9 @@
 # Sole authority for Hyprland animations.
 #
-# Ports the bezier curves + animation rules from end-4/dots-hyprland
-# (Material You / expressiveSpatial style). Default-on, like every feature;
-# hosts that want stock Hyprland animation instead set
-# sinnix.features.desktop.hyprlandAnimations.enable = false. The base
-# Hyprland module sets no animation options at all, so no mkForce is needed
-# and a future conflict will surface as an option collision rather than
-# silently losing to load order.
+# Bezier curves + animation rules ported from end-4/dots-hyprland (Material
+# You / expressiveSpatial style). The base Hyprland module sets no animation
+# options at all, so no mkForce is needed and a future conflict surfaces as an
+# option collision rather than silently losing to load order.
 {
   mkFeatureModule,
   lib,

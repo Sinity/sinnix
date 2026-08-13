@@ -55,21 +55,14 @@ let
   mcpPolylogueText = ''
     #!${pkgs.runtimeShell}
     set -euo pipefail
-    # The polylogue repo's .claude/settings.json pins
-    # POLYLOGUE_ARCHIVE_ROOT to the cloud-lane fixture
-    # (/tmp/polylogue-archive) for CI/cloud agents. That env leaks into
-    # locally-launched MCP servers and would point recall at an empty
-    # archive. Drop any leaked override that doesn't resolve to a real
-    # directory (not just the one known cloud-lane literal — an exact-string
-    # check alone would leave a long-lived MCP server stuck pointing at the
-    # cloud fixture for its entire process lifetime whenever it had been
-    # spawned with the leak present; checking existence instead of one
-    # hardcoded path catches any stale/wrong leaked override, though it
-    # still can't un-stick a server process already running with
-    # the leak baked into its own inherited environment — that needs the
-    # MCP connection itself restarted) so recall resolves the operator's
-    # real live archive (an intentional override to any real path is
-    # preserved).
+    # The polylogue repo's .claude/settings.json pins POLYLOGUE_ARCHIVE_ROOT
+    # to the cloud-lane fixture (/tmp/polylogue-archive), and that env leaks
+    # into locally-launched MCP servers, pointing recall at an empty archive.
+    # Drop any leaked override that does not resolve to a real directory —
+    # testing existence rather than the one known literal also catches other
+    # stale overrides, while preserving a deliberate override to a real path.
+    # It cannot un-stick a server process already running with the leak in its
+    # inherited environment; that needs the MCP connection restarted.
     if [ -n "''${POLYLOGUE_ARCHIVE_ROOT:-}" ] && [ ! -d "''${POLYLOGUE_ARCHIVE_ROOT}" ]; then
       unset POLYLOGUE_ARCHIVE_ROOT
     fi

@@ -249,9 +249,9 @@ mkFeatureModule {
           gpu-screen-recorder-gtk
           ffmpeg
           yt-dlp
-          # Safe clipboard->yt-dlp watcher; replaces the deadlock-prone
-          # `wl-paste -w sh -c 'url="$(wl-paste)"; ... yt-dlp'` one-liner that
-          # froze single-instance kitty by never draining wl-paste's pipe.
+          # Clipboard->yt-dlp watcher. It must drain wl-paste's pipe; a
+          # `wl-paste -w sh -c '...'` one-liner that leaves it undrained
+          # freezes single-instance kitty.
           scriptPkgs.ytdlp-clip-watch
         ];
       })

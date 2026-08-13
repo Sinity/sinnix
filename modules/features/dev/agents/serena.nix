@@ -6,9 +6,8 @@
   lib,
   pkgs,
   scriptPkgs,
-  # attrsOf { path; ... } from config.sinnix.projects.entries (foundation.nix)
-  # -- rendering from this instead of a hardcoded literal list means a new
-  # declared project constellation member shows up here for free (sinnix-0dbc).
+  # attrsOf { path; ... } from config.sinnix.projects.entries (foundation.nix),
+  # so a newly declared project constellation member shows up here for free.
   projectEntries,
 }:
 let
@@ -26,11 +25,10 @@ let
     pkgs.uv
   ];
   # Split at "projects:" so the rendered list's indentation is an explicit
-  # literal ("  - path") rather than relying on Nix's multi-line-string
-  # dedent through an embedded ${...} interpolation -- dedent only strips
-  # the LITERAL source's common leading whitespace per line, so a
-  # multi-line interpolated value's own internal newlines don't inherit
-  # it, which silently mis-indents every list item after the first.
+  # literal ("  - path"). Nix's multi-line-string dedent strips common leading
+  # whitespace from the LITERAL source only, so an interpolated multi-line
+  # value's own newlines don't inherit it and every list item after the first
+  # would be mis-indented.
   serenaConfigFile = pkgs.writeText "serena_config.yml" (''
     language_backend: LSP
     line_ending: lf
@@ -61,12 +59,9 @@ let
     projects:
   '' + lib.concatMapStringsSep "\n" (p: "  - ${p}") serenaProjectPaths + "\n");
   # Thin per-commandName Nix wrapper: exports every Nix-time value the
-  # bootstrap/dispatch logic needs (version pin, generated config store
-  # path, uv/python/cmp store paths, runtime PATH) as env vars, then
-  # execs the packaged script that owns the actual logic
-  # (scripts/sinnix-serena-wrapper). Mirrors the
-  # SINNIX_MCP_CHROME_DEVTOOLS_BIN handoff used for
-  # mcp-chrome-devtools-private in browser.nix.
+  # bootstrap/dispatch logic needs (version pin, generated config store path,
+  # uv/python/cmp store paths, runtime PATH) as env vars, then execs
+  # scripts/sinnix-serena-wrapper, which owns the actual logic.
   mkSerenaWrapper = commandName: ''
     #!${pkgs.runtimeShell}
     set -euo pipefail

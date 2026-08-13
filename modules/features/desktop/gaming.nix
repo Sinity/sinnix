@@ -116,7 +116,6 @@ mkFeatureModule {
       };
     in
     lib.mkMerge [
-      # Steam with gamescope
       (lib.mkIf cfg.steam.enable {
         programs.steam = {
           enable = true;
@@ -149,7 +148,6 @@ mkFeatureModule {
             MANGOHUD = "1";
           };
 
-          # MangoHud overlay configuration
           xdg.configFile."MangoHud/MangoHud.conf".text = ''
             # Position & appearance
             position=top-left
@@ -178,9 +176,6 @@ mkFeatureModule {
             fps_limit=0,60,120
             no_display
           '';
-
-          # Persistence for Proton GE versions
-          # (Steam library itself is already persisted)
         };
 
         # Persist shader caches and Proton GE across reboots

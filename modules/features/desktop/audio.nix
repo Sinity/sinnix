@@ -1,10 +1,5 @@
-# System audio configuration
-#
-# Configures PipeWire audio subsystem with:
-# - PipeWire/WirePlumber for audio routing
-# - Bluetooth audio (A2DP, SBC-XQ, mSBC)
-# - Real-time priority for low latency
-# - USB DAC quantum settings
+# System audio: PipeWire/WirePlumber routing, Bluetooth (A2DP, SBC-XQ, mSBC),
+# real-time priority, and USB DAC quantum settings.
 #
 # ── sinnix-prime signal path (not obvious from the device names) ────────────
 # The Teufel Ultima 40 Aktiv speakers are wired by ANALOG AUX to the FiiO
@@ -12,11 +7,10 @@
 # speakers, not headphones. The motherboard's own analog output does not work
 # on this host, which is why the USB DAC carries everything.
 #
-# Two failure modes seen live 2026-08-13, both presenting as "audio is broken
-# / weirdly quiet" with no obvious cause:
-#   1. The FiiO card's profile silently ends up `off`, so its sink disappears
-#      entirely and playback lands on some other device. Recover with
-#      `wpctl status` then `pw-cli set-param <device-id> Profile
+# Two failure modes present as "audio is broken / weirdly quiet":
+#   1. The FiiO card's profile ends up `off`, so its sink disappears and
+#      playback lands on some other device. Recover with `wpctl status` then
+#      `pw-cli set-param <device-id> Profile
 #      '{ index: <output:analog-stereo index>, save: true }'`.
 #   2. ALSA refuses to start the FiiO with "Start error: No space left on
 #      device" in a ~1Hz loop. Despite the wording this is USB ISOCHRONOUS
@@ -25,8 +19,8 @@
 #      phone. Freeing bus-1 load stops it; moving the DAC to the bus-2 xHCI
 #      controller would isolate it permanently.
 # The Ultima 40 is ALSO Bluetooth-pairable (7C:96:D2:C2:A3:E7). Connecting it
-# over BT while the aux path is live contends for the same speakers and was
-# observed to trigger failure mode 2 -- prefer one path at a time.
+# over BT while the aux path is live contends for the same speakers and can
+# trigger failure mode 2 -- prefer one path at a time.
 {
   mkFeatureModule,
   lib,
