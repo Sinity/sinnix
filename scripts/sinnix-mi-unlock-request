@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # @sinnix-package
 # description: Fire the Xiaomi bootloader-unlock application so it ARRIVES at the Beijing-midnight quota reset
-# runtimeInputs: python3
+# runtimeInputs: python3 websocat
 """Timed submitter for Xiaomi's bootloader-unlock application (sinnix-9tc).
 
 WHY THIS EXISTS. Xiaomi gates bootloader unlocking behind a daily
@@ -194,6 +194,42 @@ def server_deadline(body: str) -> float | None:
         return None
 
 
+
+async def observe_window(args, payload_for, offset: float) -> int:
+    """Probe before the window, then fire on it.
+
+    The operator's experiment: the gate is ASSUMED to open exactly at the
+    deadline, but nobody has checked whether it opens early, late, or after
+    some service finishes initialising. Probing at fixed offsets and
+    recording when apply_result changes answers that from evidence. The
+    probes are cheap and the pool is already exhausted before the window, so
+    they cost nothing but tell us where the edge really is.
+    """
+    ctx = ssl.create_default_context()
+
+    r, w, _ = await open_warm(ctx)
+    _, first = await fire(r, w, payload_for(True), 0)
+    w.close()
+    log(f"pre-probe: {first}")
+    target = server_deadline(first) or (time.time() + offset + 60)
+    log(f"window from the server: {datetime.fromtimestamp(target).astimezone().isoformat()}")
+
+    for lead in (1800, 60, 5, 1):
+        when = target - lead
+        while (time.time() + offset) < when:
+            time.sleep(min(20.0, max(0.2, when - (time.time() + offset))))
+        try:
+            r, w, _ = await open_warm(ctx)
+            _, body = await fire(r, w, payload_for(True), 0)
+            w.close()
+            log(f"T-{lead}s: {classify([body])} :: {body[body.find('{'):][:180]}")
+        except Exception as exc:  # noqa: BLE001
+            log(f"T-{lead}s probe failed: {exc}")
+
+    args.at_epoch = target
+    return await run(args)
+
+
 async def run(args: argparse.Namespace) -> int:
     token = args.token
     if not token:
@@ -260,6 +296,53 @@ async def run(args: argparse.Namespace) -> int:
     return 0 if verdict == "SUCCESS" else 1
 
 
+
+def token_from_browser(cdp_port: int = 9222) -> str | None:
+    """Pull new_bbs_serviceToken from the live Chrome profile via CDP.
+
+    The cookie is HttpOnly, so `document.cookie` cannot see it and neither
+    can page-level JS -- CDP's Network.getCookies is the only route. It is
+    also session-scoped, so a value captured yesterday is worthless at the
+    window; this exists so the token is fetched at fire time instead of
+    stored.
+    """
+    import subprocess
+    import urllib.request
+
+    def _targets() -> list[dict]:
+        with urllib.request.urlopen(f"http://127.0.0.1:{cdp_port}/json/list", timeout=5) as r:
+            return json.loads(r.read())
+
+    try:
+        pages = [t for t in _targets() if t.get("type") == "page" and "c.mi.com" in (t.get("url") or "")]
+        if not pages:
+            # No open page on the origin: cookies are per-origin, so make one.
+            urllib.request.urlopen(
+                f"http://127.0.0.1:{cdp_port}/json/new?https://c.mi.com/global", timeout=10
+            ).read()
+            time.sleep(4)
+            pages = [t for t in _targets() if t.get("type") == "page" and "c.mi.com" in (t.get("url") or "")]
+        if not pages:
+            return None
+        ws = pages[0]["webSocketDebuggerUrl"]
+        req = json.dumps({
+            "id": 1,
+            "method": "Network.getCookies",
+            "params": {"urls": ["https://c.mi.com/"]},
+        })
+        out = subprocess.run(
+            ["websocat", "-n1", "-B", "4000000", ws],
+            input=req + "\n", capture_output=True, text=True, timeout=20,
+        ).stdout
+        cookies = json.loads(out).get("result", {}).get("cookies", [])
+        for c in cookies:
+            if c.get("name") == "new_bbs_serviceToken" and c.get("value"):
+                return c["value"]
+    except Exception as exc:  # noqa: BLE001 - report, never fall through silently
+        log(f"browser token lookup failed: {exc}")
+    return None
+
+
 def read_token(explicit: str | None) -> str | None:
     if explicit:
         p = os.path.expanduser(explicit)
@@ -268,6 +351,10 @@ def read_token(explicit: str | None) -> str | None:
         return explicit.strip()
     if os.environ.get("MI_BBS_TOKEN"):
         return os.environ["MI_BBS_TOKEN"].strip()
+    tok = token_from_browser()
+    if tok:
+        log(f"token pulled live from the browser ({len(tok)} chars)")
+        return tok
     for path in ("/run/agenix/mi-bbs-token",):
         if os.path.exists(path):
             try:
@@ -292,9 +379,18 @@ def main() -> int:
     ap.add_argument("--ntp-server", default="pool.ntp.org")
     ap.add_argument("--no-ntp", action="store_true", help="trust the local clock (not recommended)")
     ap.add_argument("--first-try", action="store_true", help="send is_retry=false")
+    ap.add_argument("--observe-window", action="store_true",
+                    help="probe at T-30m/-60s/-5s/-1s to find where the gate really opens, then fire on the server's own deadline")
     args = ap.parse_args()
     args.token = read_token(args.token_file)
     try:
+        if args.observe_window:
+            if not args.token:
+                print("no token available", file=sys.stderr)
+                return 2
+            off = 0.0 if args.no_ntp else ntp_offset(args.ntp_server)
+            payload_for = lambda retry: build_request(args.token, args.device_id, retry)  # noqa: E731
+            return asyncio.run(observe_window(args, payload_for, off))
         return asyncio.run(run(args))
     except KeyboardInterrupt:
         return 130
