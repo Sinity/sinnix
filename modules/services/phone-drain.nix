@@ -49,6 +49,15 @@ mkServiceModule {
   configFn =
     { cfg, ... }:
     {
+      # Signing key for the phone capture app, which produces everything this
+      # drain collects (pkgs/sinnix-phone-app, docs/phone-capture.md). Android
+      # identifies an app by its signing certificate, so losing this key turns
+      # every future install into a signature conflict resolvable only by
+      # uninstalling -- which also discards the app's runtime grants. It is
+      # deliberately outside the Nix store: a key rebuilt whenever the sources
+      # change would defeat the point of a stable identity.
+      sinnix.persistence.home.directories = [ ".local/share/sinnix-phone-app" ];
+
       systemd.user.services.sinnix-phone-drain = {
         description = "Pull phone capture lanes into the data lake, if on wifi";
         serviceConfig = {
