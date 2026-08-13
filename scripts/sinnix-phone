@@ -12,6 +12,14 @@
 # adbd over TCP does NOT survive a phone reboot; `sinnix-phone adb-restore`
 # re-enables it over USB. Everything else survives.
 #
+# Ambient audio is produced by the Sinnix Capture app (pkgs/sinnix-phone-app),
+# not by Termux. Termux remains the drain transport and the clipboard/wifi
+# surface, but it cannot hold the microphone: only an app declaring
+# foregroundServiceType="microphone" keeps recording once the screen goes off,
+# which is why the Termux recorder truncated chunks and never came back after
+# a reboot (sinnix-hcjq). `app-install` retires Termux's runit `ambient`
+# service with a `down` file so the two never contend for the mic.
+#
 # Clipboard is one-way (desktop -> phone). Android blocks clipboard READS
 # from a backgrounded app (since Android 10): `termux-clipboard-get`
 # silently returns empty unless Termux is the foreground app.
@@ -71,43 +79,75 @@ ssh_phone() { ssh "${ssh_phone_opts[@]}" "${PHONE_USER}@${PHONE_TS_IP}" "$@"; }
 scp_phone() { scp "${ssh_phone_opts[@]}" "$@"; }
 adb_phone() { ANDROID_SERIAL="$ADB_TARGET" adb "$@"; }
 
+# `adb connect` to an unreachable host never returns on its own -- it is not
+# a bounded handshake, it retries until something interrupts it. The phone
+# roams networks and its tailnet is frequently down, so every connect attempt
+# here is time-boxed; without that a status check hangs indefinitely instead
+# of reporting "adb down".
 ensure_adb() {
   if ! ANDROID_SERIAL="$ADB_TARGET" adb get-state >/dev/null 2>&1; then
-    adb connect "$ADB_TARGET" >/dev/null 2>&1 || true
+    timeout 8 adb connect "$ADB_TARGET" >/dev/null 2>&1 || true
     sleep 1
   fi
 }
 
-# Stock Android defaults RECORD_AUDIO to MODE_FOREGROUND for an app without
-# a declared foregroundServiceType="microphone" service, which silently
-# mutes an in-progress recording the instant Termux drops out of foreground
-# importance (screen off, app switched) -- ambient chunks truncate while
-# still landing on schedule. `appops set ... allow` overrides this
-# per-package and survives `am force-stop`, app restarts, and reboots
-# (appops.xml is system_server state). The Doze whitelist keeps a long idle
-# period from adding CPU/network throttling on top. Both are adb (shell-uid)
-# operations -- Termux itself cannot grant either. Re-run after anything
-# that might have reset system app state (a MIUI/Android OS update, "reset
-# app preferences", a fresh adb-restore after reboot).
-#
-# NOT handled here: MIUI's separate "Background autostart" permission
-# (Settings > Apps > Permissions > Background autostart), required for
-# Termux:Boot's BOOT_COMPLETED receiver to fire at all. That one has no adb
-# command -- MIUI stores it in com.miui.securitycenter's own private
-# database with no public API, only a UI toggle
-# (com.miui.securitycenter/.permcenter.autostart.AutoStartManagementActivity).
-# Nothing this script can assert headlessly; if it gets cleared it needs
-# re-toggling by hand.
-ensure_mic_exemptions() {
-  adb_phone shell appops set com.termux RECORD_AUDIO allow >/dev/null 2>&1 || true
-  adb_phone shell dumpsys deviceidle whitelist +com.termux >/dev/null 2>&1 || true
+APP_ID="dev.sinnix.phone"
+
+# adb over whichever transport is actually up. adbd's TCP mode does not
+# survive a phone reboot, and after one the tailnet is often down too (the VPN
+# service needs its own restart), so the USB cable is frequently the only
+# working transport at exactly the moment something needs checking. Everything
+# app-related goes through this rather than adb_phone, because the app's
+# liveness must be answerable without Termux, without sshd, and without the
+# tailnet -- those are the layers that kept failing.
+adb_any() {
+  local serial
+  if ANDROID_SERIAL="$ADB_TARGET" adb get-state >/dev/null 2>&1; then
+    ANDROID_SERIAL="$ADB_TARGET" adb "$@"
+    return
+  fi
+  timeout 8 adb connect "$ADB_TARGET" >/dev/null 2>&1 || true
+  if ANDROID_SERIAL="$ADB_TARGET" adb get-state >/dev/null 2>&1; then
+    ANDROID_SERIAL="$ADB_TARGET" adb "$@"
+    return
+  fi
+  serial=$(adb devices | awk '$2 == "device" && $1 !~ /:/ { print $1; exit }')
+  if [ -n "$serial" ]; then
+    ANDROID_SERIAL="$serial" adb "$@"
+    return
+  fi
+  return 1
+}
+
+# The grants the app needs that only shell-uid can make. RECORD_AUDIO is
+# deliberately NOT forced to `allow` here: the app declares
+# foregroundServiceType="microphone", so the default MODE_FOREGROUND is
+# already satisfied whenever its foreground service is up. That is the whole
+# reason an app works where the Termux script did not, and overriding the
+# appop would hide a regression in the service rather than fix one.
+# MANAGE_EXTERNAL_STORAGE is set at both package and uid scope because the two
+# are separate modes and only one of them reverting is what silently broke
+# capture before (sinnix-hcjq).
+ensure_app_grants() {
+  adb_any shell pm grant "$APP_ID" android.permission.RECORD_AUDIO >/dev/null 2>&1 || true
+  adb_any shell pm grant "$APP_ID" android.permission.POST_NOTIFICATIONS >/dev/null 2>&1 || true
+  adb_any shell appops set "$APP_ID" MANAGE_EXTERNAL_STORAGE allow >/dev/null 2>&1 || true
+  adb_any shell appops set --uid "$APP_ID" MANAGE_EXTERNAL_STORAGE allow >/dev/null 2>&1 || true
+  adb_any shell cmd deviceidle whitelist "+$APP_ID" >/dev/null 2>&1 || true
 }
 
 usage() {
   cat <<'EOF'
 sinnix-phone <command>
 
-  status        tailnet reachability, adb + ssh liveness, battery, storage
+  status        tailnet reachability, adb + ssh liveness, capture app,
+                battery, storage
+  app-status    ambient capture liveness: heartbeat age, recording state,
+                and the newest closed chunk's real duration and volume
+  app-install   build, sign, and sideload the capture app, then grant and
+                start it (needs adb: USB or tailnet)
+  app-start     launch the app so its capture service comes back up
+  app-grants    re-assert the shell-uid grants the app needs
   shell [cmd]   Termux shell over the tailnet (interactive when no cmd)
   mirror        scrcpy screen mirror/control over the tailnet
   screenshot    grab the current screen to /realm/tmp/work/
@@ -115,10 +155,7 @@ sinnix-phone <command>
   drain         pull, but only if the phone is on wifi (for a timer)
   adb-connect   (re)attach adb over the tailnet
   adb-restore   re-enable adbd TCP mode (requires the phone on USB), then
-                re-assert the ambient-capture mic exemptions (see mic-exempt)
-  mic-exempt    re-assert RECORD_AUDIO appops override + Doze whitelist for
-                Termux (requires adb) -- rerun after anything that might
-                reset system app state
+                re-assert the capture app's grants (see app-grants)
   clip-push     push the current desktop clipboard to the phone, once
   clip-watch    watch desktop clipboard, push on change (foreground loop)
 EOF
@@ -138,36 +175,11 @@ status)
     echo "tailnet   : UNREACHABLE ($PHONE_TS_IP)"
   fi
   if ssh_phone 'true' >/dev/null 2>&1; then
-    echo "ssh       : up (termux :$PHONE_SSH_PORT)"
-    # A chunk landing on schedule does NOT mean it's intact: RECORD_AUDIO
-    # gated to MODE_FOREGROUND (`appops get com.termux RECORD_AUDIO`)
-    # truncates or zeroes chunks while still producing a file every ~5min.
-    # Report the runit supervisor state plus the most recently CLOSED
-    # chunk's actual encoded duration so a regression shows up here.
-    # Not just `sv status ambient`: SVDIR is exported by a profile.d script
-    # sourced only in interactive/login shells, so a bare non-interactive
-    # ssh command doesn't see it -- point `sv` at the service dir directly.
-    sv_status=$(ssh_phone "sv status /data/data/com.termux/files/usr/var/service/ambient 2>&1" || true)
-    echo "ambient   : ${sv_status:-no runit supervisor found}"
-    # sed -n 2p, not 1p: the newest chunk is still being written by
-    # termux-microphone-record, so its duration is meaningless until the
-    # loop rotates past it.
-    latest_chunk=$(ssh_phone "ls -1t /sdcard/sinnix-ambient/*.m4a 2>/dev/null | sed -n 2p" || true)
-    if [ -n "${latest_chunk:-}" ]; then
-      tmp_chunk="$(mktemp --suffix=.m4a)"
-      if scp_phone "${PHONE_USER}@${PHONE_TS_IP}:${latest_chunk}" "$tmp_chunk" >/dev/null 2>&1; then
-        dur=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$tmp_chunk" 2>/dev/null || true)
-        echo "last chunk: $(basename "$latest_chunk") (${dur:-?}s, expect ~${AMBIENT_CHUNK_SECONDS:-300}s)"
-      else
-        echo "last chunk: $(basename "$latest_chunk") (couldn't pull to measure)"
-      fi
-      rm -f "$tmp_chunk"
-    else
-      echo "last chunk: none found"
-    fi
+    echo "ssh       : up (termux :$PHONE_SSH_PORT) — drain transport"
   else
-    echo "ssh       : down — Termux may be stopped; open Termux, run: sshd"
+    echo "ssh       : down — drain blocked; open Termux, run: sshd"
   fi
+  "$0" app-status
   ensure_adb
   if ANDROID_SERIAL="$ADB_TARGET" adb get-state >/dev/null 2>&1; then
     echo "adb       : up ($ADB_TARGET)"
@@ -178,6 +190,133 @@ status)
   else
     echo "adb       : down — run: sinnix-phone adb-restore (needs USB)"
   fi
+  ;;
+app-status)
+  # Ambient capture liveness, as reported by the capture app itself.
+  #
+  # Two independent readings, because either one alone lies. status.json says
+  # what the app believes; its own staleness says whether the app is still
+  # there to believe anything. And neither answers whether the bytes are
+  # audio, so the newest CLOSED chunk is measured with ffprobe -- a recorder
+  # muted by the platform still produces a file every five minutes, which is
+  # exactly how the truncation bug hid.
+  echo "== capture app =="
+  if ! adb_any get-state >/dev/null 2>&1; then
+    echo "app       : UNKNOWN — no adb transport (tailnet down and no USB cable?)"
+    exit 0
+  fi
+  installed=$(adb_any shell pm list packages "$APP_ID" 2>/dev/null | tr -d '\r')
+  if [ -z "$installed" ]; then
+    echo "app       : NOT INSTALLED — run: sinnix-phone app-install"
+    exit 0
+  fi
+  status_json=$(adb_any shell cat "/sdcard/sinnix-ambient/status.json" 2>/dev/null | tr -d '\r')
+  if [ -z "$status_json" ] || ! echo "$status_json" | jq -e . >/dev/null 2>&1; then
+    echo "app       : installed, but no readable status.json — service never started?"
+    echo "            run: sinnix-phone app-start"
+    exit 0
+  fi
+
+  updated=$(echo "$status_json" | jq -r '.updated_at')
+  age=$(( $(date -u +%s) - $(date -u -d "$updated" +%s) ))
+  recording=$(echo "$status_json" | jq -r '.recording')
+  shared=$(echo "$status_json" | jq -r '.chunk_dir_is_shared')
+  echo "app       : $(echo "$status_json" | jq -r '.package') v$(echo "$status_json" | jq -r '.app_version')"
+  # The app refreshes status.json every 20s while alive, so anything past a
+  # couple of minutes means the process is gone, not merely idle.
+  if [ "$age" -gt 120 ]; then
+    echo "heartbeat : STALE — ${age}s since last update (app not running)"
+  else
+    echo "heartbeat : ${age}s ago"
+  fi
+  echo "recording : $recording (chunk $(echo "$status_json" | jq -r '.current_chunk_elapsed_seconds')s/$(echo "$status_json" | jq -r '.chunk_seconds_target')s, $(echo "$status_json" | jq -r '.chunks_closed') closed since start)"
+  if [ "$shared" != "true" ]; then
+    echo "chunk dir : $(echo "$status_json" | jq -r '.chunk_dir') — NOT drainable, all-files access missing"
+  fi
+  failures=$(echo "$status_json" | jq -r '.failures')
+  if [ "$failures" != "0" ]; then
+    echo "failures  : $failures — last: $(echo "$status_json" | jq -r '.last_error')"
+  fi
+
+  latest_chunk=$(adb_any shell "ls -1t /sdcard/sinnix-ambient/*.m4a 2>/dev/null | head -1" | tr -d '\r')
+  if [ -n "${latest_chunk:-}" ]; then
+    tmp_chunk="$(mktemp --suffix=.m4a)"
+    if adb_any pull "$latest_chunk" "$tmp_chunk" >/dev/null 2>&1; then
+      dur=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$tmp_chunk" 2>/dev/null || true)
+      # volumedetect reports at info level, so -v error (the right choice for
+      # ffprobe above) would silently swallow the number and leave the
+      # silence check permanently blank.
+      vol=$(ffmpeg -hide_banner -nostats -v info -i "$tmp_chunk" -af volumedetect -f null - 2>&1 | awk -F': ' '/mean_volume/{print $2}')
+      echo "last chunk: $(basename "$latest_chunk") (${dur:-?}s, expect ~${AMBIENT_CHUNK_SECONDS:-300}s; mean ${vol:-?})"
+    else
+      echo "last chunk: $(basename "$latest_chunk") (couldn't pull to measure)"
+    fi
+    rm -f "$tmp_chunk"
+  else
+    echo "last chunk: none closed yet"
+  fi
+  ;;
+app-install)
+  # Sideload the capture app and re-assert the shell-uid grants. Safe to
+  # re-run: a stable signing key makes this an upgrade, so runtime grants and
+  # the capture-enabled preference survive.
+  #
+  # THE PHONE MUST BE UNLOCKED. MIUI routes every adb install through its own
+  # com.miui.permcenter.install.AdbInstallActivity confirmation dialog, which
+  # cannot be shown over the keyguard, so the install is auto-cancelled with
+  # INSTALL_FAILED_USER_RESTRICTED. Nothing on this side can work around it.
+  if ! adb_any get-state >/dev/null 2>&1; then
+    echo "app-install: no adb transport — plug in USB or run adb-restore" >&2
+    exit 1
+  fi
+  serial=$(adb_any shell getprop ro.serialno 2>/dev/null | tr -d '\r')
+  echo "installing to ${serial:-unknown device}"
+  install_log="$(mktemp)"
+  if ! ANDROID_SERIAL="$serial" nix run "${SINNIX_FLAKE_DIR:-/realm/project/sinnix}#sinnix-phone-app-install" 2>&1 | tee "$install_log"; then
+    :
+  fi
+  if grep -q INSTALL_FAILED_USER_RESTRICTED "$install_log"; then
+    rm -f "$install_log"
+    echo >&2
+    echo "app-install: MIUI refused the install (INSTALL_FAILED_USER_RESTRICTED)." >&2
+    echo "  Unlock the phone screen and run this again. MIUI shows its own adb" >&2
+    echo "  install confirmation, and that dialog cannot appear over the keyguard." >&2
+    exit 1
+  fi
+  rm -f "$install_log"
+  ensure_app_grants
+  "$0" app-start
+
+  # Hand the microphone over. Termux's runit `ambient` service is the previous
+  # recorder; leaving it running would put two processes on one microphone,
+  # and Android gives the samples to one of them. runit's `down` file makes
+  # the retirement survive a reboot rather than lasting until the next boot.
+  echo "retiring the Termux recorder"
+  if ssh_phone 'true' >/dev/null 2>&1; then
+    ssh_phone 'touch /data/data/com.termux/files/usr/var/service/ambient/down; sv force-down /data/data/com.termux/files/usr/var/service/ambient >/dev/null 2>&1; termux-microphone-record -q >/dev/null 2>&1; true' || true
+    echo "  Termux ambient service is down and will stay down across reboots"
+  else
+    echo "  WARNING: no ssh to the phone, so the Termux recorder could not be" >&2
+    echo "  stopped. If it is still running, it will contend for the microphone." >&2
+  fi
+  ;;
+app-start)
+  # Starting the foreground service directly from adb is refused (the service
+  # is not exported, and exporting it would let any app on the phone drive the
+  # microphone). Launching the activity is permitted and starts the service
+  # from inside the app, which is why the app has a headless recovery path at
+  # all -- the thing Termux never had.
+  if ! adb_any get-state >/dev/null 2>&1; then
+    echo "app-start: no adb transport" >&2
+    exit 1
+  fi
+  adb_any shell am start -n "$APP_ID/.MainActivity" >/dev/null 2>&1
+  sleep 4
+  "$0" app-status
+  ;;
+app-grants)
+  ensure_app_grants
+  echo "grants re-asserted for $APP_ID"
   ;;
 shell)
   if [ "$#" -eq 0 ]; then ssh_phone; else ssh_phone "$@"; fi
@@ -207,11 +346,12 @@ pull)
     "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/Download/" "$LAKE_ROOT/download/"
   rsync -av --ignore-existing -e "$rsync_ssh" \
     "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/HealthConnectExport/" "$LAKE_ROOT/health/" 2>/dev/null
-  # Continuous ambient audio chunks. --ignore-existing plus the fact that a
-  # chunk is only closed when the next one starts means the in-progress file
-  # gets skipped now and collected on the following run, rather than being
-  # copied half-written.
-  rsync -av --ignore-existing -e "$rsync_ssh" \
+  # Continuous ambient audio chunks. The capture app names the file it is
+  # still writing `*.m4a.part` and renames it only after the muxer closes,
+  # so "closed" is an explicit state here rather than something inferred
+  # from mtime ordering. status.json is device-side liveness, not lake
+  # content, and must never be drained -- see the exclusions below.
+  rsync -av --ignore-existing --exclude='*.part' --exclude='status.json*' -e "$rsync_ssh" \
     "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/sinnix-ambient/" "$LAKE_ROOT/ambient/" 2>/dev/null
   set -e
   du -sh "$LAKE_ROOT" 2>/dev/null
@@ -239,8 +379,15 @@ drain)
   # that confirmation happened just now or on an earlier run -- so this is
   # safe to run standalone. Scoped to ambient only: camera/downloads/health
   # are the operator's originals, not a rotating buffer.
+  #
+  # The exclusions are load-bearing rather than cosmetic. --remove-source-files
+  # deletes each source once it is confirmed transferred; applied to the chunk
+  # the recorder currently holds open, that unlinks the file out from under a
+  # live descriptor and the trailing moov atom is written into nothing, losing
+  # the chunk. And deleting status.json would erase the phone's own liveness
+  # report every time a drain ran.
   mkdir -p "$LAKE_ROOT/ambient"
-  rsync -a --remove-source-files -e "$rsync_ssh" \
+  rsync -a --remove-source-files --exclude='*.part' --exclude='status.json*' -e "$rsync_ssh" \
     "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/sinnix-ambient/" "$LAKE_ROOT/ambient/" 2>/dev/null
 
   # A soft ring bounded by drain cadence, not a hard size cap. If drains
@@ -260,13 +407,7 @@ adb-restore)
   adb tcpip 5555
   sleep 3
   adb connect "$ADB_TARGET"
-  ensure_mic_exemptions
-  ;;
-mic-exempt)
-  # Standalone re-assertion of the mic exemptions; needs adb.
-  ensure_adb
-  ensure_mic_exemptions
-  echo "RECORD_AUDIO: $(adb_phone shell appops get com.termux RECORD_AUDIO | tr '\n' ' ')"
+  ensure_app_grants
   ;;
 clip-push)
   # text/* only -- termux-clipboard-set takes a string argument; pushing raw

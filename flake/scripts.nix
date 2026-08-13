@@ -18,6 +18,7 @@ let
   inherit (pkgs) lib;
 
   sinnixCaptureLib = pkgs.callPackage ../pkgs/sinnix-capture/pkg.nix { };
+  phoneAppPackage = pkgs.callPackage ../pkgs/sinnix-phone-app/pkg.nix { };
   discovery = import ./script-discovery.nix {
     inherit lib pkgs;
     siblingExtras = {
@@ -279,6 +280,12 @@ let
     };
 
     sinnix-capture-screen = pkgs.callPackage ../pkgs/capture-screen/pkg.nix { };
+
+    # The Android capture app. `sinnix-phone-app` is the unsigned APK;
+    # `sinnix-phone-app-install` signs it with the host-local keystore and
+    # sideloads it over adb.
+    sinnix-phone-app = phoneAppPackage;
+    sinnix-phone-app-install = phoneAppPackage.install;
 
     sinnix-agent-environment-doc = pkgs.writeShellApplication {
       name = "sinnix-agent-environment-doc";

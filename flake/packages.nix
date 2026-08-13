@@ -28,6 +28,8 @@
         "sinnix-capability-manifest"
         "sinnix-deslop"
         "sinnix-observe"
+        "sinnix-phone-app"
+        "sinnix-phone-app-install"
         "tunnel-client"
       ];
     in
