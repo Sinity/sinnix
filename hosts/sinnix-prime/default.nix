@@ -1,4 +1,4 @@
-{ inputs, lib, ... }:
+{ inputs, lib, pkgs, ... }:
 {
   imports = [
     ./boot.nix
@@ -57,6 +57,31 @@
       enableMagicDNS = false;
       useRoutingFeatures = "none";
     };
+  };
+
+  # Mosh server, tailscale0-scoped only (sinnix-uyvt evaluation, 2026-08-13).
+  # NOT a general SSH replacement here: this operator's actual desktop<->phone
+  # SSH usage (scripts/sinnix-phone) is almost entirely non-interactive --
+  # rsync pulls, scripted `shell <cmd>` invocations, a one-shot clipboard
+  # push -- which Mosh does not accelerate (rsync still needs SSH transport;
+  # Mosh has no scripted/batch mode). The one interactive case
+  # (`sinnix-phone shell`) runs desktop-as-client -> phone-as-server, the
+  # REVERSE of Mosh's actual win: Mosh's roaming/prediction benefit protects
+  # a roaming CLIENT against a stable server, not a server that itself sleeps
+  # -- and the phone-as-server going to sleep/background breaks SSH and Mosh
+  # equally. So wiring a mosh-server on the phone side would add complexity
+  # for no measurable benefit against the workflow that actually exists.
+  # The desktop side is a different, genuine case: a future phone-as-client
+  # session into this always-on desktop (matching tonight's "mobile
+  # interface to the estate" direction) is exactly Mosh's classic win --
+  # cheap to enable now, unused until that workflow exists. Server only;
+  # no phone-side package installed for the reason above.
+  environment.systemPackages = [ pkgs.mosh ];
+  networking.firewall.interfaces.tailscale0.allowedUDPPortRanges = [
+    { from = 60000; to = 61000; }
+  ];
+
+  sinnix.services = {
     # Browser front door to the estate: reports, the reducer's current-state
     # dashboard, and the AI control panel. Binds loopback plus the tailscale0
     # address only, and its ports are opened on tailscale0 alone -- the LAN
