@@ -37,12 +37,12 @@ check_root() {
   done
 }
 
-# /realm level-1 manifest. db/ and sinex/ are burn-in residue: both moved
-# into state/ on 2026-08-12 (sinnix-eau) with sources retained read-only;
-# drop them from this list in the same change that deletes the sources
-# (explicit operator authorization required).
+# /realm level-1 manifest. db/ still exists (holds .snapshots-polylogue,
+# historical btrbk backup history kept under the no-retention-ever standing
+# rule -- not burn-in residue, so it's not dropped here); sinex/ is gone
+# (subvolume deleted 2026-08-13, operator-authorized, sinnix-t7wg).
 check_root /realm \
-  project data media state staging db sinex swap cache worktrees tmp inbox \
+  project data media state staging db swap cache worktrees tmp inbox \
   INVENTORY.md .btrfs .Trash-1000
 
 check_root /outer-realm \
