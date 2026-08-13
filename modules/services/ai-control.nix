@@ -140,6 +140,75 @@ let
     publicEndpoint = "127.0.0.1:8890";
     backendEndpoint = "127.0.0.1:8891";
   };
+
+  # ComfyUI, TTS (OpenedAI-Speech), MusicGen, and OCR are OCI containers with
+  # CDI GPU passthrough (modules/services/{comfyui,tts,musicgen,ocr}.nix)
+  # rather than native systemd services with their own .service/.socket pair,
+  # so they cannot join the mkProxy mesh above -- a container publishes its
+  # port directly and podman start/stop has no idle-aware backend for
+  # systemd-socket-proxyd to sit in front of. Forcing the socket-proxy shape
+  # onto them would not fit; the closest correct admission control is a
+  # mutual systemd Conflicts= against every native gpu-inference
+  # service/proxy pair and every other GPU container, so systemd itself
+  # refuses to run two resident at once -- the same hard guarantee the
+  # socket-proxy mesh gives the native backends, minus proxy idle-teardown
+  # (containers are all autoStart = false; sinnix-ai/the operator stops them
+  # explicitly). This generalizes the exact gap the operator found for
+  # llama-cpp (sinnix-w9l/e2fb0af) to the container lane (sinnix-joac).
+  gpuContainerUnits = {
+    comfyui = "podman-comfyui.service";
+    tts = "podman-openedai-speech.service";
+    musicgen = "podman-musicgen.service";
+    ocr = "podman-ocr.service";
+  };
+  gpuNativeUnits = [
+    "ollama.service"
+    "ollama-proxy.service"
+    "koboldcpp.service"
+    "koboldcpp-proxy.service"
+    "whisper-server.service"
+    "whisper-proxy.service"
+    "llama-cpp.service"
+    "llama-cpp-proxy.service"
+  ];
+  # (sinnix.services enable option, systemd unit name minus ".service") for
+  # every native gpu-inference unit -- both the backend and its proxy, since
+  # each proxy already carries its own Conflicts= against every other
+  # backend/proxy (the `conflicts` passed to mkProxy above) and would
+  # otherwise stay silently exempt from the container side of the matrix.
+  # whisper's option is "whisper" but its units are "whisper-server" /
+  # "whisper-proxy"; everything else matches its option name.
+  gpuNativeServiceUnits = [
+    { service = "ollama"; unit = "ollama"; }
+    { service = "ollama"; unit = "ollama-proxy"; }
+    { service = "koboldcpp"; unit = "koboldcpp"; }
+    { service = "koboldcpp"; unit = "koboldcpp-proxy"; }
+    { service = "whisper"; unit = "whisper-server"; }
+    { service = "whisper"; unit = "whisper-proxy"; }
+    { service = "llama-cpp"; unit = "llama-cpp"; }
+    { service = "llama-cpp"; unit = "llama-cpp-proxy"; }
+  ];
+  # Each side's Conflicts= addition is gated on its OWN service's enable
+  # flag only (never the peer's), matching the existing convention in
+  # ollama.nix/koboldcpp.nix/whisper.nix/llama-cpp.nix, which already list
+  # every native peer unconditionally: a Conflicts= entry naming a unit that
+  # never gets defined (peer disabled) is a harmless no-op in systemd, not
+  # an error, so there is nothing to gain by cross-referencing peer enable
+  # state and doing so would just make four more modules' correctness depend
+  # on read-order.
+  containerGpuConflicts = lib.mapAttrsToList (
+    serviceName: unit:
+    lib.mkIf config.sinnix.services.${serviceName}.enable {
+      ${lib.removeSuffix ".service" unit}.conflicts =
+        gpuNativeUnits ++ (lib.remove unit (lib.attrValues gpuContainerUnits));
+    }
+  ) gpuContainerUnits;
+  nativeGpuContainerConflicts = map (
+    { service, unit }:
+    lib.mkIf config.sinnix.services.${service}.enable {
+      ${unit}.conflicts = lib.attrValues gpuContainerUnits;
+    }
+  ) gpuNativeServiceUnits;
 in
 {
   environment.systemPackages = [ scriptPkgs.sinnix-ai ];
@@ -151,14 +220,18 @@ in
     (lib.mkIf config.sinnix.services.kokoro.enable kokoroProxy.sockets)
     (lib.mkIf config.sinnix.services.llama-cpp.enable llamaCppProxy.sockets)
   ];
-  systemd.services = lib.mkMerge [
-    (lib.mkIf config.sinnix.services.ollama.enable ollamaProxy.services)
-    (lib.mkIf config.sinnix.services.koboldcpp.enable koboldcppProxy.services)
-    (lib.mkIf config.sinnix.services.whisper.enable whisperProxy.services)
-    (lib.mkIf config.sinnix.services.litellm.enable litellmProxy.services)
-    (lib.mkIf config.sinnix.services.kokoro.enable kokoroProxy.services)
-    (lib.mkIf config.sinnix.services.llama-cpp.enable llamaCppProxy.services)
-  ];
+  systemd.services = lib.mkMerge (
+    [
+      (lib.mkIf config.sinnix.services.ollama.enable ollamaProxy.services)
+      (lib.mkIf config.sinnix.services.koboldcpp.enable koboldcppProxy.services)
+      (lib.mkIf config.sinnix.services.whisper.enable whisperProxy.services)
+      (lib.mkIf config.sinnix.services.litellm.enable litellmProxy.services)
+      (lib.mkIf config.sinnix.services.kokoro.enable kokoroProxy.services)
+      (lib.mkIf config.sinnix.services.llama-cpp.enable llamaCppProxy.services)
+    ]
+    ++ containerGpuConflicts
+    ++ nativeGpuContainerConflicts
+  );
   sinnix.runtime.surfaces = lib.mkMerge [
     (lib.mkIf config.sinnix.services.ollama.enable {
       ollama-proxy = ollamaProxy.runtimeSurface;

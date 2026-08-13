@@ -18,6 +18,13 @@ mkServiceModule {
   surface = {
     unit = "podman-musicgen.service";
     resourceClass = "interactive-agent";
+    activation = {
+      # See comfyui.nix: containerized GPU services have no socket-proxy
+      # front door, so this key is informational for the inventory; the
+      # actual exclusivity guarantee is the mutual systemd Conflicts= wired
+      # in modules/services/ai-control.nix (sinnix-joac).
+      exclusiveResource = "gpu-inference";
+    };
     observe = {
       enable = true;
       restartable = true;

@@ -17,6 +17,13 @@ mkAiService {
   endpoint = "127.0.0.1:8000";
   backendKind = "container";
   requiresCuda = true;
+  # No socket-proxy front door -- the container publishes 8000 directly, so
+  # this key is informational for the inventory; the actual exclusivity
+  # guarantee is the mutual systemd Conflicts= wired in
+  # modules/services/ai-control.nix (sinnix-joac).
+  activation = {
+    exclusiveResource = "gpu-inference";
+  };
   extraOptions = {
     autoStart = args.lib.mkOption {
       type = args.lib.types.bool;
