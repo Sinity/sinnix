@@ -119,6 +119,10 @@
     capture-netflow.enable = true;
     # Scheduled phone -> lake drain, wifi + charging gated (sinnix-uyvt.2.1).
     phone-drain.enable = true;
+    # Persistent phone->prime telemetry push (sinnix-uyvt.4 architecture
+    # correction): the phone streams continuously over one long-lived
+    # connection instead of discrete per-command SSH invocations.
+    phone-receiver.enable = true;
     # Router telemetry pulled from prime on a timer (sinnix-zihb): syslog
     # deltas, DHCP leases, wifi associations with signal, and nlbwmon's
     # seven months of per-device bandwidth. Nothing runs on the router.

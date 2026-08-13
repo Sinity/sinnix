@@ -64,4 +64,5 @@
 
   # ── Other ────────────────────────────────────────────────────────────────
   chromeDevtools = 9222; # live Chrome remote-debugging port
+  phoneStream = 8940; # persistent phone->prime telemetry push (tailscale0 only)
 }
