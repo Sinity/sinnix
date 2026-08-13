@@ -86,6 +86,10 @@
     # Room air quality from the Awair Element's local API (sinnix-agp8) --
     # the first capture lane covering the environment rather than the machine.
     capture-awair.enable = true;
+    # AORUS FO48U DDC/CI sensor poll (sinnix-70eq): power state, brightness/
+    # contrast drift, input source -- turns "is the screen on" into a
+    # measurement instead of an inference.
+    capture-monitor.enable = true;
     # Router telemetry pulled from prime on a timer (sinnix-zihb): syslog
     # deltas, DHCP leases, wifi associations with signal, and nlbwmon's
     # seven months of per-device bandwidth. Nothing runs on the router.
