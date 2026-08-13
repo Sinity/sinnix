@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Disable ASBL (Automatic Screen Brightness Limiting) on monitors
-# runtimeInputs: coreutils procps bc jq hyprland
+# runtimeInputs: coreutils procps bc jq hyprland ddcutil
 # asbl-no-moar - Prevent OLED/LCD ASBL by periodically pulsing screen brightness
 #
 # Usage: asbl-no-moar [start|stop|status|toggle|once] [options]
@@ -10,7 +10,7 @@
 #   -i, --interval SECS    Interval between pulses (default: 120)
 #   -d, --duration SECS    Duration of each pulse (default: 0.05)
 #   -v, --intensity MULT   Brightness multiplier (default: 1.25)
-#   -m, --mode MODE        Pulse mode: brightness, dim, invert (default: brightness)
+#   -m, --mode MODE        Pulse mode: brightness, dim, invert, ddc (default: brightness)
 #   --restore-fp16         Restore Hyprland FP16 after invert pulse
 
 set -euo pipefail
@@ -42,7 +42,18 @@ Options:
   -d, --duration SECS    Pulse duration in seconds (Default: $DURATION)
   -v, --intensity MULT   Brightness multiplier for pulse (Default: $INTENSITY)
   -b, --baseline MULT    Baseline brightness multiplier (Default: $BASELINE)
-  -m, --mode MODE        Mode: brightness, dim, invert (Default: $MODE)
+  -m, --mode MODE        Mode: brightness, dim, invert, ddc (Default: $MODE)
+
+DDC mode (sinnix-70eq, HYPOTHESIS -- untested whether this actually resets
+the FO48U's ASBL timer, unlike the other modes which are known to work):
+nudges VCP 0x10 (brightness) by 1 and back via ddcutil instead of a
+compositor shader. Touches the panel's own brightness register rather than
+faking it in the render pipeline, so there is no visible flash -- but each
+ddcutil round-trip takes ~0.5-1.2s (two i2c transactions), so keep the
+interval well above that and expect brief real (not synthetic) brightness
+motion. Requires i2c-dev loaded and DDC/CI support (see hosts/sinnix-prime/
+display.nix). NOT wired into any automatic timer/service by default --
+invoke manually (\`asbl-no-moar once -m ddc\`) to test before trusting it.
       --restore-fp16     Restore Hyprland render:use_fp16 after invert pulse
 
 Environment:
@@ -200,6 +211,22 @@ pulse() {
             sleep "$DURATION"
             cleanup_invert
             trap - RETURN
+            ;;
+        ddc)
+            # sinnix-70eq: nudge the panel's real brightness register instead
+            # of faking it in the render pipeline. Read the current setpoint
+            # first rather than assuming 50 -- restoring to a stale baseline
+            # would leave the panel dimmer/brighter than the operator set it.
+            local current_vcp10
+            current_vcp10=$(ddcutil getvcp 10 --brief 2>/dev/null | awk '{print $4}')
+            if [[ -z "$current_vcp10" ]]; then
+                echo "asbl-no-moar: ddc mode -- could not read VCP 0x10, skipping pulse" >&2
+                return 0
+            fi
+            local nudged=$((current_vcp10 >= 100 ? current_vcp10 - 1 : current_vcp10 + 1))
+            ddcutil setvcp 10 "$nudged" >/dev/null 2>&1 || true
+            sleep "$DURATION"
+            ddcutil setvcp 10 "$current_vcp10" >/dev/null 2>&1 || true
             ;;
     esac
 }
