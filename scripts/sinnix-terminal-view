@@ -1,19 +1,30 @@
 #!/usr/bin/env python3
 # @sinnix-package
-# description: Read-only kitty terminal contents + scrollback history over the hub, no tmux
+# description: Live kitty terminal streams, contents and scrollback over the hub, no tmux
 # runtimeInputs: kitty aha coreutils
 
 """Terminal contents and control as a first-class remote surface (sinnix-qxm8).
 
 The operator should never have to learn tmux to read or drive their own
 terminals remotely. This listens on a Unix socket behind the hub's reverse
-proxy (/terminals/*) and, using nothing but kitty's own remote-control
-protocol plus the scrollback captures sinnix-capture-kitty-scrollback already
-writes, serves:
+proxy (/terminals/*) and, using nothing but the recorders and captures this
+host already runs -- asciinema on every shell, kitty's own remote-control
+protocol, and the scrollback captures sinnix-capture-kitty-scrollback already
+writes -- serves:
 
-  * a live view -- current on-screen contents of any kitty window, from any
-    kitty instance on the host (each instance has its own control socket
-    under $XDG_RUNTIME_DIR/kitty-*);
+  * a live stream -- the browser and the desktop window showing the same PTY
+    at the same time, not a periodic snapshot. Every kitty shell already runs
+    under asciinema (that is how the capture lake is written); asciinema's
+    `session` mode writes that recording *and* serves the same byte stream
+    live, so the mirror is the recorder already present rather than a new
+    mechanism. A viewer joining late is sent the current screen first, so the
+    browser opens on what the window shows now. This is why there is still no
+    multiplexer here: the PTY stays exactly where it was, owned by the same
+    kitty window, and nothing has to be attached, detached, or learned;
+
+  * a snapshot -- current on-screen contents via kitty's own remote control,
+    for any window without a live stream (each kitty instance has its own
+    control socket under $XDG_RUNTIME_DIR/kitty-*);
   * history -- the existing full-ANSI scrollback captures for that same
     window, joined by (kitty_pid, window_id) which is exactly the filename
     key sinnix-capture-kitty-scrollback already uses;
@@ -46,6 +57,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import http.client
 import json
 import os
 import re
@@ -103,6 +115,7 @@ def pid_from_socket(sock: Path) -> int | None:
 
 def list_windows() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    streams = live_streams()
     for sock in discover_kitty_sockets():
         pid = pid_from_socket(sock)
         for os_window in kitty_ls(sock):
@@ -117,6 +130,7 @@ def list_windows() -> list[dict[str, Any]]:
                             "cwd": win.get("cwd", ""),
                             "is_focused": bool(win.get("is_focused")),
                             "lines": win.get("lines"),
+                            "live": (pid, win.get("id")) in streams,
                         }
                     )
     return rows
@@ -205,6 +219,93 @@ def send_key(pid: int, window_id: int, name: str) -> bool:
     return out.returncode == 0
 
 
+def live_streams() -> dict[tuple[int, int], int]:
+    """Map (kitty_pid, window_id) -> the asciinema live-stream port for that window.
+
+    sinnix-captured-shell runs every kitty shell under `asciinema session
+    --stream-local`, which serves the session's own PTY live on an ephemeral
+    loopback port. Nothing writes that port down: the recorder inherited
+    KITTY_PID/KITTY_WINDOW_ID from the window it belongs to, so the process
+    table already states which window each stream is, and the listening socket
+    already states which port. Reading both back is exact and self-healing --
+    a dead recorder simply stops appearing.
+    """
+    streams: dict[tuple[int, int], int] = {}
+    for proc in Path("/proc").iterdir():
+        if not proc.name.isdigit():
+            continue
+        try:
+            if (proc / "comm").read_text().strip() != "asciinema":
+                continue
+            env = dict(
+                item.split("=", 1)
+                for item in (proc / "environ").read_bytes().decode("utf-8", "replace").split("\0")
+                if "=" in item
+            )
+        except OSError:
+            continue
+        try:
+            key = (int(env["KITTY_PID"]), int(env["KITTY_WINDOW_ID"]))
+        except (KeyError, ValueError):
+            continue
+        port = listening_port(int(proc.name))
+        if port is not None:
+            streams[key] = port
+    return streams
+
+
+def listening_port(pid: int) -> int | None:
+    """The IPv4 port `pid` is listening on, via its socket inodes in /proc."""
+    inodes: set[str] = set()
+    try:
+        for fd in (Path("/proc") / str(pid) / "fd").iterdir():
+            try:
+                target = os.readlink(fd)
+            except OSError:
+                continue
+            if target.startswith("socket:["):
+                inodes.add(target[len("socket:[") : -1])
+    except OSError:
+        return None
+    if not inodes:
+        return None
+    try:
+        lines = Path("/proc/net/tcp").read_text().splitlines()[1:]
+    except OSError:
+        return None
+    for line in lines:
+        fields = line.split()
+        # st == 0A is TCP_LISTEN; field 9 is the socket inode.
+        if len(fields) < 10 or fields[3] != "0A" or fields[9] not in inodes:
+            continue
+        return int(fields[1].split(":")[1], 16)
+    return None
+
+
+# asciinema serves its own player page; these are the only two things in it
+# that assume the stream sits at the server root, which it does not once the
+# hub proxies it under a per-window path.
+PLAYER_WS_SRC = "loc.host + '/ws'"
+PLAYER_WS_PROXIED = "loc.host + loc.pathname + 'ws'"
+PLAYER_FONT_SRC = 'url("/SymbolsNerdFont'
+PLAYER_FONT_PROXIED = 'url("SymbolsNerdFont'
+
+
+def fetch_upstream(port: int, path: str) -> tuple[int, str, bytes] | None:
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request("GET", path)
+        response = conn.getresponse()
+        return response.status, response.getheader("Content-Type", "application/octet-stream"), response.read()
+    except (OSError, http.client.HTTPException):
+        return None
+    finally:
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001 -- best-effort close of a dead connection
+            pass
+
+
 def ansi_to_html(ansi_text: str, title: str) -> str:
     try:
         out = subprocess.run(
@@ -288,9 +389,16 @@ async function load() {
   for (const w of wins) {
     const div = document.createElement('div');
     div.className = 'win' + (w.is_focused ? ' focused' : '');
-    div.innerHTML = `<div class="title">${w.title || '(untitled)'}</div><div class="cwd">${w.cwd}</div>`;
-    div.onclick = () => showLive(w.kitty_pid, w.window_id);
+    div.innerHTML = `<div class="title">${w.live ? '● ' : ''}${w.title || '(untitled)'}</div><div class="cwd">${w.cwd}</div>`;
+    div.onclick = () => (w.live ? showStream(w.kitty_pid, w.window_id) : showLive(w.kitty_pid, w.window_id));
     list.appendChild(div);
+    if (w.live) {
+      const snapBtn = document.createElement('div');
+      snapBtn.className = 'hist';
+      snapBtn.textContent = '↳ snapshot';
+      snapBtn.onclick = (e) => { e.stopPropagation(); showLive(w.kitty_pid, w.window_id); };
+      list.appendChild(snapBtn);
+    }
     const histBtn = document.createElement('div');
     histBtn.className = 'hist';
     histBtn.textContent = '↳ history';
@@ -317,8 +425,21 @@ function renderHistDatalist(pid, winId) {
   dl.innerHTML = loadHist(pid, winId).map(t => `<option value="${t.replace(/"/g, '&quot;')}">`).join('');
 }
 
+// The live stream is the same PTY the desktop window is showing, rendered by
+// asciinema's own player -- so it needs no refresh, and must not be reloaded
+// on send (that would drop the WebSocket mid-session).
+function showStream(pid, winId) {
+  current = { pid, winId, streaming: true };
+  document.getElementById('view').innerHTML =
+    `<iframe src="/terminals/v1/live/${pid}/${winId}/"></iframe>`;
+  document.getElementById('control').style.display = 'flex';
+  renderHistDatalist(pid, winId);
+}
+
+// Fallback for windows with no live stream (a shell started before streaming
+// was wired in, or one not launched through sinnix-captured-shell).
 function showLive(pid, winId) {
-  current = { pid, winId };
+  current = { pid, winId, streaming: false };
   document.getElementById('view').innerHTML =
     `<iframe src="/terminals/v1/windows/${pid}/${winId}/content"></iframe>`;
   document.getElementById('control').style.display = 'flex';
@@ -340,8 +461,11 @@ async function sendPayload(payload) {
   await fetch(`/terminals/v1/windows/${current.pid}/${current.winId}/send`, {
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
   });
-  // Re-render the live view shortly after so the effect is visible.
-  setTimeout(() => { if (current) showLive(current.pid, current.winId); }, 300);
+  // The stream shows the effect on its own; only the snapshot view needs a
+  // re-render to become visible.
+  if (!current.streaming) {
+    setTimeout(() => { if (current) showLive(current.pid, current.winId); }, 300);
+  }
 }
 
 document.getElementById('sendbox').addEventListener('keydown', (e) => {
@@ -379,6 +503,95 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, status: int, value: Any) -> None:
         self._reply(status, (json.dumps(value, sort_keys=True) + "\n").encode(), "application/json")
 
+    def _serve_live(self, pid: int, win_id: int, rest: str | None) -> None:
+        """Proxy this window's own asciinema live stream: player page, its
+        assets, and the WebSocket the player reads the terminal from."""
+        port = live_streams().get((pid, win_id))
+        if port is None:
+            self._json(HTTPStatus.NOT_FOUND, {"error": "no live stream for this window"})
+            return
+
+        if rest is None:
+            # Relative redirect: the browser resolves it against the URL it
+            # actually asked for, which is the only place the hub's /terminals
+            # prefix is still known -- the proxy has already stripped it here.
+            self.send_response(HTTPStatus.MOVED_PERMANENTLY)
+            self.send_header("Location", f"{win_id}/")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
+        asset = rest.lstrip("/")
+
+        if asset == "ws":
+            self._relay_websocket(port)
+            return
+
+        upstream = fetch_upstream(port, f"/{asset}")
+        if upstream is None:
+            self._json(HTTPStatus.BAD_GATEWAY, {"error": "live stream unreachable"})
+            return
+        status, content_type, body = upstream
+
+        if not asset:
+            page = body.decode("utf-8", "replace")
+            if PLAYER_WS_SRC not in page:
+                self._json(
+                    HTTPStatus.BAD_GATEWAY,
+                    {"error": "asciinema's player page no longer matches the expected shape; "
+                              "the stream URL rewrite in sinnix-terminal-view needs updating"},
+                )
+                return
+            body = (
+                page.replace(PLAYER_WS_SRC, PLAYER_WS_PROXIED)
+                .replace(PLAYER_FONT_SRC, PLAYER_FONT_PROXIED)
+                .encode()
+            )
+
+        self._reply(status, body, content_type)
+
+    def _relay_websocket(self, port: int) -> None:
+        """Splice this connection onto the recorder's /ws.
+
+        Nothing here interprets the stream: the player and asciinema speak
+        their own protocol (v1.alis) to each other and this only carries the
+        bytes, so a protocol change upstream needs no change here.
+        """
+        self.close_connection = True
+        try:
+            upstream = socket.create_connection(("127.0.0.1", port), timeout=10)
+        except OSError:
+            self._json(HTTPStatus.BAD_GATEWAY, {"error": "live stream unreachable"})
+            return
+
+        request = ["GET /ws HTTP/1.1", f"Host: 127.0.0.1:{port}"]
+        request += [
+            f"{name}: {value}"
+            for name, value in self.headers.items()
+            if name.lower() not in ("host", "content-length")
+        ]
+        upstream.sendall(("\r\n".join(request) + "\r\n\r\n").encode())
+
+        client = self.connection
+
+        def pump(src: socket.socket, dst: socket.socket) -> None:
+            try:
+                while chunk := src.recv(65536):
+                    dst.sendall(chunk)
+            except OSError:
+                pass
+            finally:
+                for sock in (src, dst):
+                    try:
+                        sock.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
+
+        upward = threading.Thread(target=pump, args=(client, upstream), daemon=True)
+        upward.start()
+        pump(upstream, client)
+        upward.join(timeout=5)
+
     def do_GET(self) -> None:  # noqa: N802 (stdlib naming)
         path = self.path.split("?", 1)[0]
         history_dir: Path = self.server.history_dir  # type: ignore[attr-defined]
@@ -389,6 +602,11 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/v1/windows" or path == "/terminals/v1/windows":
             self._json(HTTPStatus.OK, list_windows())
+            return
+
+        m = re.match(r"^(?:/terminals)?/v1/live/(\d+)/(\d+)(?P<rest>/[A-Za-z0-9._-]*)?$", path)
+        if m:
+            self._serve_live(int(m.group(1)), int(m.group(2)), m.group("rest"))
             return
 
         m = re.match(r"^(?:/terminals)?/v1/windows/(\d+)/(\d+)/content$", path)
