@@ -122,6 +122,25 @@ on finding a terminal.
 Making it clickable is a reducer change: a shader target with its own
 attestation, the same shape the scope target took. It is not a hub change.
 
+The page also carries the two facts that are easy to get wrong about screen
+shaders here, because there is nowhere better to put them. Hyprland pins the
+`time` and pointer uniforms to constants unless `debug:damage_tracking` is `0`,
+so animation is real but costs a full-screen redraw per frame; and a shader that
+reads those uniforms *while* damage tracking is on makes Hyprland paint a red
+error banner across the top of the display. Turning damage tracking off before
+applying avoids the banner rather than dismissing it afterwards, which is the
+order `sinnix-shader` uses. Measured cost of the animated case, from Hyprland's
+own `debug:overlay`: 120fps/1.05ms render becomes 118fps/1.12ms, and GPU draw
+moves about a watt.
+
+Note that a screen shader cannot be verified by screenshotting. `grim` and
+screencopy do not observe the final shader stage on this host — a full-screen
+invert produces a byte-identical capture while whiting out the actual display.
+They *do* see the error overlay and the debug overlay, which is why both are
+usable as instruments. Shader compilation is checked with `glslangValidator`
+before anything reaches the display instead, because Hyprland defers the compile
+to the next render pass and logs nothing when it fails.
+
 ## Why there is no second control plane
 
 Every button on every page posts to `/ops/v1/actions` — the ops-reducer's existing
