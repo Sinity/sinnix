@@ -160,21 +160,14 @@ let
       runtimeInputsRaw = splitWords (fields.runtimeInputs or "");
       declaredInputs = filter (p: p != null) (map (resolvePkg scriptPackages) runtimeInputsRaw);
       # Every packaged script gets the ordinary shell toolkit whether or not
-      # it names it. Four separate production failures on 2026-08-13 were the
-      # same shape: a script invoked awk, ffmpeg, curl or wpctl, the
-      # frontmatter omitted it, the wrapper PATH lacked it, and the script
-      # died with exit 127 at runtime -- health-sentinel (7 days of silent
-      # false-positive disk checks), sinnix-phone drain, sinnix-phone note,
-      # and audio-watchdog (failing every 2 minutes since it was written).
-      # shellcheck cannot see this class: it does not know about frontmatter
-      # or the generated PATH.
-      #
-      # These cost nothing to include -- they are already in the system
-      # closure, so adding them to a wrapper's PATH adds a reference, not a
-      # download. Declaring them per-script was pure friction that bought no
-      # isolation on a single-user host. Frontmatter still exists and still
-      # matters: it is how a script asks for something NON-obvious (pipewire,
-      # android-tools, conntrack-tools), which is the part worth reviewing.
+      # it names it. An omitted-but-used tool dies with exit 127 at runtime,
+      # and shellcheck cannot see that class — it knows nothing about
+      # frontmatter or the generated PATH. These cost nothing: they are
+      # already in the system closure, so a wrapper PATH entry adds a
+      # reference, not a download, and per-script declaration bought no
+      # isolation on a single-user host. Frontmatter is still how a script
+      # asks for something NON-obvious (pipewire, android-tools,
+      # conntrack-tools), which is the part worth reviewing.
       baseRuntimeInputs = with pkgs; [
         coreutils
         gawk

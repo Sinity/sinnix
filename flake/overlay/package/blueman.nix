@@ -1,13 +1,13 @@
-# recheck: when nixpkgs's obex_data_server ships its D-Bus activation file
-# already named org.openobex.service (verified 2026-08-12: stock 0.4.6 still
-# ships the misnamed obex-data-server.service, and D-Bus activation looks
-# the file up by bus name, so the rename is load-bearing for OBEX receive),
-# or if the session stops honoring /etc/xdg/autostart (verified 2026-08-12:
-# xdg-desktop-autostart.target is ACTIVE here via systemd's generator, and
-# blueman-applet is already launched deliberately by the session -- without
-# the autostart removal a duplicate applet starts at every login). Both
-# halves are deliberate permanent policy with the above as their concrete
-# recheck conditions.
+# Two deliberate, permanent workarounds:
+#   - obex_data_server 0.4.6 ships its D-Bus activation file misnamed as
+#     obex-data-server.service; activation looks the file up by bus name, so
+#     the rename to org.openobex.service is load-bearing for OBEX receive.
+#   - xdg-desktop-autostart.target is active here via systemd's generator and
+#     the session already launches blueman-applet deliberately, so without
+#     the autostart removal a duplicate applet starts at every login.
+#
+# recheck: when nixpkgs's obex_data_server ships the correctly named
+# activation file, or if the session stops honoring /etc/xdg/autostart.
 _: final: prev:
 let
   fixedObexDataServer = prev.obex_data_server.overrideAttrs (old: {

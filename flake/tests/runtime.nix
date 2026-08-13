@@ -216,7 +216,7 @@ in
             message = "Runtime inventory must describe the public and private llama-cpp activation endpoints";
           }
           {
-            # Cold-start fix (design pass 2026-08-13): the proxy must not
+            # Cold start: the proxy must not
             # start forwarding until the backend's port actually accepts a
             # connection, or the client's parked request gets a hard refusal
             # during the weight-load window instead of a queue.
@@ -278,16 +278,13 @@ in
             message = "An idle ocr-proxy exit must tear down the OCR container cgroup";
           }
           {
-            # Full symmetry across all seven remaining GPU-inference
-            # backends (three native, four containerized): every
-            # (service, proxy) pair must conflict with every other backend's
-            # (service, proxy) pair in both directions. An asymmetric
-            # conflict set is exactly the bug this framework exists to catch
-            # (llama-cpp shipped resident for two days before being wired
-            # in; the container lane had the same gap until it joined this
-            # same mesh). llama-cpp itself is intentionally NOT a member
-            # since 2026-08-13 (CPU-pinned reranker, checked separately
-            # below) -- it must not appear in this map.
+            # Full symmetry across all seven GPU-inference backends (three
+            # native, four containerized): every (service, proxy) pair must
+            # conflict with every other backend's (service, proxy) pair in
+            # both directions. An asymmetric conflict set is exactly the bug
+            # this check exists to catch. llama-cpp is intentionally NOT a
+            # member (CPU-pinned reranker, checked separately below) -- it
+            # must not appear in this map.
             assertion =
               let
                 backendUnits = {

@@ -16,11 +16,11 @@
 # without going through pkgsForCudaArch first.
 #
 # `aiPkgs` is instantiated from the separate `nixpkgs-ai` flake input (see
-# flake.nix), not from `prev`/the shared system `pkgs`. Routine `nix flake
-# update` bumps the shared `nixpkgs` constantly; if these packages were built
-# from it, every bump would invalidate these derivation hashes and force a
-# from-source CUDA recompile with no possible cache hit. nixpkgs-ai is bumped
-# only deliberately (`sinnix update nixpkgs-ai`).
+# flake.nix), not from `prev`/the shared system `pkgs`: routine `nix flake
+# update` bumps the shared `nixpkgs` constantly, and any bump would
+# invalidate these derivation hashes and force a from-source CUDA recompile
+# with no possible cache hit. nixpkgs-ai is bumped only deliberately
+# (`sinnix update nixpkgs-ai`).
 { inputs, ... }:
 final: _prev:
 let

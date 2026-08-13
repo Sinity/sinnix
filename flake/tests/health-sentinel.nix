@@ -9,13 +9,9 @@
       scriptRegistry = import ../scripts.nix { inherit inputs pkgs; };
       sentinel = scriptRegistry.packageSet.sinnix-health-sentinel;
       sentinelSource = ../../scripts/sinnix-health-sentinel;
-      # The runCommand sandbox has no /usr/bin/env (verified: a fixture
-      # written with `#!/usr/bin/env bash` fails to exec with ENOENT),
-      # unlike an interactive nix-shell where /usr/bin/env is a host
-      # bind-mount. The
-      # df/systemctl fixtures below need a shebang systemd can actually
-      # find, hence the store path spliced in directly via Nix
-      # interpolation rather than relying on env(1).
+      # The runCommand sandbox has no /usr/bin/env, so a fixture shebang of
+      # `#!/usr/bin/env bash` fails to exec with ENOENT. The df/systemctl
+      # fixtures below splice the bash store path in directly instead.
       fixtureBash = "${pkgs.bash}/bin/bash";
     in
     {
@@ -35,15 +31,9 @@
             # (shellcheck, shebang patching, PATH wiring) still succeeds --
             # every functional assertion below runs against the raw script
             # instead. writeShellApplication's wrapper (script-discovery.nix)
-            # always prepends its OWN runtimeInputs -- including the real
-            # store systemd/coreutils -- ahead of whatever PATH the caller
-            # already set, by design (that prepend is itself the fix for a
-            # class of missing-tool production bugs; see that file's
-            # baseRuntimeInputs comment). That means the wrapped binary can
-            # never be made to see this file's df/systemctl fixtures no
-            # matter how PATH is exported beforehand, so a fixture-driven
-            # functional check has to run the raw script with this test's
-            # own PATH intact.
+            # always prepends its OWN runtimeInputs ahead of the caller's
+            # PATH, so the wrapped binary can never see this file's
+            # df/systemctl fixtures however PATH is exported beforehand.
             : "${sentinel}"
             mkdir -p "$TMPDIR/bin" "$TMPDIR/capture" "$TMPDIR/state"
             mkdir -p "$TMPDIR/capture-ed-stale" "$TMPDIR/capture-ed-fresh"
@@ -53,36 +43,29 @@
             printf '/dev/fixture 100 96 4 96%% /fixture\n'
             EOF_DF
             chmod +x "$TMPDIR/bin/df"
-            # sinnix-z1tg fixtures: the real sentinel now judges a service's
-            # resting state from ActiveState/Type/Result/WantedBy instead of
-            # treating every non-"active" state as failed. Each unit below
-            # stands in for one of the resting-state shapes the periodic
-            # sweep must tell apart without a hardcoded unit list:
+            # The sentinel judges a service's resting state from
+            # ActiveState/Type/Result/WantedBy, with no hardcoded unit list.
+            # Each fixture below stands in for one resting-state shape:
             #   fixture.service           -- WantedBy set, down: a daemon
-            #                                 that should be running and
-            #                                 isn't (the original fixture).
+            #                                 that should be running, isn't.
             #   oneshot-done.service      -- Type=oneshot, Result=success:
             #                                 ran and exited cleanly.
             #   oneshot-failed.service    -- Type=oneshot, Result=exit-code:
             #                                 ran and failed.
-            #   backend-idle.service      -- WantedBy empty (nothing pulls
-            #                                 it in): an on-demand backend
-            #                                 idled out cleanly, exactly the
-            #                                 ai-control.nix shape.
-            #   backend-crashed.service   -- WantedBy empty but Result is
-            #                                 not success: "on-demand"
-            #                                 excuses being inactive, not
-            #                                 having crashed.
+            #   backend-idle.service      -- WantedBy empty: an on-demand
+            #                                 backend idled out cleanly
+            #                                 (the ai-control.nix shape).
+            #   backend-crashed.service   -- WantedBy empty but Result not
+            #                                 success: "on-demand" excuses
+            #                                 being inactive, not crashing.
             #   socket-proxy-declared.service -- WantedBy still set, but the
             #                                 inventory declares
-            #                                 activation.mode=="socket-proxy"
-            #                                 explicitly: that declaration
-            #                                 alone must be enough.
-            #   usersurf.service          -- manager=="user": no live user
-            #                                 session bus exists in this
-            #                                 sandbox, proving a query that
-            #                                 cannot reach the user manager
-            #                                 reports "unknown", never a
+            #                                 activation.mode=="socket-proxy":
+            #                                 that declaration alone suffices.
+            #   usersurf.service          -- manager=="user" with no live
+            #                                 session bus in the sandbox: an
+            #                                 unreachable user manager must
+            #                                 report "unknown", never a
             #                                 silent "healthy" or "failed".
             cat > "$TMPDIR/bin/systemctl" <<'EOF_SYSTEMCTL'
             #!${fixtureBash}
@@ -108,21 +91,19 @@
             EOF_SYSTEMCTL
             chmod +x "$TMPDIR/bin/systemctl"
             touch -d @0 "$TMPDIR/capture/old"
-            # Event-driven lanes carry no numeric cadence (expectedCadenceSeconds
-            # is absent), only an absolute expectedStaleAfterSeconds budget. A
-            # write older than that budget must be flagged stale even though
-            # there is no cadence to compare against; a write inside the budget
-            # must stay healthy.
+            # Event-driven lanes carry no expectedCadenceSeconds, only an
+            # absolute expectedStaleAfterSeconds budget: a write older than
+            # the budget must be flagged stale with no cadence to compare
+            # against; a write inside it must stay healthy.
             touch -d @0 "$TMPDIR/capture-ed-stale/old"
             touch "$TMPDIR/capture-ed-fresh/current"
-            # Payload degeneracy: both lanes below write at full cadence and
-            # are perfectly fresh, so every staleness check calls them
-            # healthy. The `dead` lane's declared fields are null in every
-            # record (the screen-frames shape from sinnix-3w9n); the `live`
-            # lane populates them. `monitor` is populated in BOTH -- it must
-            # stay out of the degenerate lane's evidence, proving the check
-            # names the specific dead field rather than condemning the lane
-            # wholesale. `note` is null in one live record only, proving a
+            # Payload degeneracy: both lanes write at full cadence and are
+            # fresh, so staleness alone calls them healthy. The `dead` lane's
+            # declared fields are null in every record; `live` populates
+            # them. `monitor` is populated in BOTH -- it must stay out of the
+            # degenerate lane's evidence, proving the check names the
+            # specific dead field rather than condemning the lane wholesale.
+            # `note` is null in one live record only, proving a
             # sometimes-null field never raises an alarm.
             mkdir -p "$TMPDIR/payload-dead" "$TMPDIR/payload-live"
             for seq in 1 2 3 4 5 6; do
@@ -133,19 +114,15 @@
             # The sidecar index carries no payload at all; the check must skip
             # it rather than read it as a lane full of degenerate records.
             printf '{"ts":1,"seq":1,"file":"live-20260813.jsonl"}\n' >> "$TMPDIR/payload-live/live-index.jsonl"
-            # Upstream-liveness probes (sinnix-pev0): staleness alone cannot
-            # tell "legitimately quiet" apart from "upstream publisher never
-            # registered". probe-absent starts with no marker file (exit 1,
-            # confirmed absent) and gains one partway through the run (exit
-            # 0, recovered) -- proving the absent state is a real transition,
-            # not just a value that happens to print once. probe-unknown
-            # always exits a code that is neither 0 nor 1 (simulating a
-            # probe that itself can't determine the answer -- a bus that's
-            # gone, malformed output). probe-timeout's command outlives its
-            # 1-second budget so `timeout` kills it (exit 124); a probe that
-            # times out MUST still surface as unknown, never as healthy by
-            # default -- that silent-success failure mode is the entire bug
-            # class this feature exists to close.
+            # Upstream-liveness probes: staleness alone cannot tell
+            # "legitimately quiet" apart from "publisher never registered".
+            # probe-absent starts with no marker file (exit 1) and gains one
+            # partway through the run (exit 0), so the absent state is proven
+            # a real transition rather than a value that prints once.
+            # probe-unknown exits neither 0 nor 1 (a probe that itself cannot
+            # determine the answer). probe-timeout outlives its 1-second
+            # budget so `timeout` kills it (exit 124); a probe that times out
+            # MUST surface as unknown, never healthy by default.
             probe_marker="$TMPDIR/probe-marker"
             cat > "$TMPDIR/inventory.json" <<EOF_INVENTORY
             {"captures":[{"name":"fixture","path":"$TMPDIR/capture","expectedCadenceSeconds":60},{"name":"ed-stale","path":"$TMPDIR/capture-ed-stale","expectedCadence":"event-driven","expectedStaleAfterSeconds":60},{"name":"ed-fresh","path":"$TMPDIR/capture-ed-fresh","expectedCadence":"event-driven","expectedStaleAfterSeconds":600},{"name":"payload-dead","path":"$TMPDIR/payload-dead","requiredPayloadFields":["window_class","geometry.width","monitor","note"]},{"name":"payload-live","path":"$TMPDIR/payload-live","requiredPayloadFields":["window_class","geometry.width","monitor","note"]},{"name":"probe-absent","path":"$TMPDIR/capture-ed-fresh","livenessProbe":{"command":"[ -e \"$probe_marker\" ] && exit 0 || exit 1","timeoutSeconds":5}},{"name":"probe-unknown","path":"$TMPDIR/capture-ed-fresh","livenessProbe":{"command":"exit 9","timeoutSeconds":5}},{"name":"probe-timeout","path":"$TMPDIR/capture-ed-fresh","livenessProbe":{"command":"sleep 5","timeoutSeconds":1}}],"mounts":[{"path":"/fixture","warnPct":80,"failPct":95}],"observedServices":[{"kind":"service","manager":"system","unit":"fixture.service"},{"kind":"service","manager":"system","unit":"oneshot-done.service"},{"kind":"service","manager":"system","unit":"oneshot-failed.service"},{"kind":"service","manager":"system","unit":"backend-idle.service"},{"kind":"service","manager":"system","unit":"backend-crashed.service"},{"kind":"service","manager":"system","unit":"socket-proxy-declared.service","activationMode":"socket-proxy"},{"kind":"service","manager":"user","unit":"usersurf.service"}]}

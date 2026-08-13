@@ -1,18 +1,11 @@
 # Loopback/tailnet port allocations for sinnix-prime, in one place.
 #
-# WHY THIS FILE EXISTS. Ports were previously written as literals wherever a
-# service happened to need one. On 2026-08-13 two services landed in the same
-# session both claiming 8880 (the web hub and the Kokoro TTS proxy); the
-# collision only surfaced at activation, as
-# `kokoro-proxy.socket: Address already in use`. Nothing in eval could have
-# caught it, because nothing knew both numbers existed.
-#
-# This is the same shape the repo already uses for resource classes in
-# runtime-defaults.nix: declare the facts once as data, assert over them at
-# eval time, and let modules consume by name. A module that says
-# `ports.kokoro.public` cannot silently collide with one that says
-# `ports.hub.self`, and adding a duplicate fails the build rather than the
-# machine.
+# WHY THIS FILE EXISTS. Ports written as literals at each use site collide
+# silently: nothing at eval time knows both numbers exist, so the first
+# symptom is an activation-time `Address already in use` on whichever unit
+# loses the race. Declared once as data and asserted over at eval time (the
+# same shape as runtime-defaults.nix's resource classes), a duplicate fails
+# the build instead of the machine, and modules consume ports by name.
 #
 # CONVENTION. Every entry is a loopback port unless a comment says otherwise.
 # Socket-activated AI backends follow the docs/local-ai-activation.md pattern:
@@ -58,11 +51,11 @@
     backend = 8891; # NB: the container listens on 8880 *inside* its namespace
   };
   openWebui = 8080;
-  # ComfyUI, TTS, MusicGen, and OCR are OCI containers (CDI GPU passthrough).
-  # They joined the same public/backend socket-proxy shape as the native
-  # backends above in sinnix-w9l's container follow-up: the container now
-  # publishes on the PRIVATE backend port only, and systemd-socket-proxyd
-  # answers the PUBLIC port clients already know (modules/services/ai-control.nix).
+  # ComfyUI, TTS, MusicGen, and OCR are OCI containers (CDI GPU passthrough)
+  # in the same public/backend socket-proxy shape as the native backends
+  # above: the container publishes on the PRIVATE backend port only, and
+  # systemd-socket-proxyd answers the PUBLIC port clients already know
+  # (modules/services/ai-control.nix).
   comfyui = {
     public = 8188;
     backend = 8189;

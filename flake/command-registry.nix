@@ -14,12 +14,11 @@ let
     pkgs.systemd
     pkgs.util-linux
   ];
-  # Prefer the live git checkout at runtime over a bare `${inputs.self}`
-  # fallback: a Nix-store copy of the flake has no `.git` dir, so any rebuild
-  # using it as `--flake` stamps configurationRevision "unknown" instead of a
-  # real rev, silently defeating the live-drift tripwire. Only fall back to
-  # the store copy as a genuine last resort, and warn loudly when that
-  # happens.
+  # Prefer the live git checkout over a bare `${inputs.self}` fallback: a
+  # Nix-store copy of the flake has no `.git` dir, so a rebuild using it as
+  # `--flake` stamps configurationRevision "unknown", silently defeating the
+  # live-drift tripwire. Fall back to the store copy only as a last resort,
+  # and warn loudly when that happens.
   resolveFlakeDir = ''
     _flake_dir="''${SINNIX_FLAKE_DIR:-''${NH_FLAKE:-''${FLAKE:-''${PRJ_ROOT:-}}}}"
     if [ -z "$_flake_dir" ]; then
@@ -62,13 +61,11 @@ let
       append_override_arg lynchpin "$SINNIX_LYNCHPIN_OVERRIDE"
     fi
     # --impure: modules/secrets.nix reads agenix secrets from
-    # /realm/data/secrets/sinnix, outside the flake source (moved out of git
-    # 2026-07 -- see that module). Pure flake evaluation cannot see paths
-    # outside the flake's own store copy at all (builtins.pathExists/readDir
-    # on such a path silently returns false/empty rather than erroring, so
-    # this failure mode is silent: a system with zero secrets configured,
-    # not a build error). This is a real host-local-data dependency, not a
-    # purity shortcut being taken for convenience.
+    # /realm/data/secrets/sinnix, outside the flake source. Pure evaluation
+    # cannot see paths outside the flake's store copy, and fails silently
+    # doing so (builtins.pathExists/readDir return false/empty rather than
+    # erroring) — the symptom is a system with zero secrets, not a build
+    # error.
     nh_extra_args=(-- --impure)
     if [ "''${#nix_override_args[@]}" -gt 0 ]; then
       nh_extra_args+=("''${nix_override_args[@]}")
@@ -102,12 +99,12 @@ let
     fi
   '';
   # NOT a ''...'' block: this is spliced mid-line into a backslash-continued
-  # systemd-run invocation at each call site. A ''...'' string's own trailing
-  # newline plus the call site's template newline produced a blank line in
-  # the middle of the continued command, which bash treats as a broken
-  # continuation — systemd-run silently got zero command args (2026-07-06
-  # incident). concatStringsSep has no trailing separator, so this can't
-  # reproduce that regardless of how it's indented at the call site.
+  # systemd-run invocation at each call site. A ''...'' string's trailing
+  # newline plus the call site's own newline yields a blank line in the
+  # middle of the continued command, which bash treats as a broken
+  # continuation — systemd-run then silently gets zero command args.
+  # concatStringsSep has no trailing separator, so it cannot reproduce that
+  # however it is indented at the call site.
   rebuildContainmentFlags =
     lib.concatStringsSep " \\\n    " [
       ''--setenv=NIX_CONFIG="eval-cache = false"''
@@ -117,14 +114,12 @@ let
       "-p IOSchedulingClass=idle"
     ]
     + " \\";
-  # sinex CI no longer auto-pushes package builds to sinity.cachix.org, so
-  # the desktop compiles the sinex workspace locally on every input bump.
-  # Publish the freshly activated closure back to the cache after a
-  # successful switch so ethereal/reinstalls/post-GC rebuilds substitute
-  # instead of repeating that build. The push command
+  # Nothing else populates sinity.cachix.org: the desktop compiles the sinex
+  # workspace locally on every input bump, so publish the freshly activated
+  # closure after a successful switch and let ethereal/reinstalls/post-GC
+  # rebuilds substitute instead of repeating the build. The push command
   # (scripts/sinnix-sinex-cache-push) is shared with the async
-  # sinex-cache-prebuild timer, which decouples the FIRST switch after a
-  # sinex master bump from paying that compile cost synchronously.
+  # sinex-cache-prebuild timer.
   sinexCachePush = ''
     if [ "$_rebuild_status" -eq 0 ]; then
       ${scriptPkgs.sinnix-sinex-cache-push}/bin/sinnix-sinex-cache-push /run/current-system || true

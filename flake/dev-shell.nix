@@ -188,7 +188,7 @@
         # secrets.nix + secret/*.age live outside the checkout at
         # /realm/data/secrets/sinnix (see modules/secrets.nix) — cd there so
         # RULES defaults to ./secrets.nix and relative FILE args like
-        # `secret/foo.age` keep resolving exactly as before the move.
+        # `secret/foo.age` resolve.
         agenix = pkgs.writeShellScriptBin "agenix" ''
           cd /realm/data/secrets/sinnix && exec ${inputs.agenix.packages.${system}.default}/bin/agenix "$@"
         '';

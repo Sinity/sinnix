@@ -16,16 +16,14 @@ _: {
   perSystem =
     { pkgs, lib, ... }:
     let
-      # Load the openwrt library
       openwrtLib = import ../modules/lib/openwrt.nix { inherit lib; };
 
-      # Load router config
       routerCfg = import ../hosts/sinnix-gw/default.nix { inherit lib; };
 
-      # Build the UCI apply script (fragment — no shebang, no set)
+      # UCI apply script: a fragment — no shebang, no `set`.
       uciScript = openwrtLib.mkUciScript routerCfg.uci;
 
-      # Build the opkg install script (standalone — has shebang + set -eu)
+      # opkg install script: standalone — has shebang + set -eu.
       pkgScript = openwrtLib.mkOpkgScript routerCfg.packages;
 
       # ─────────────────────────────────────────────────────────────

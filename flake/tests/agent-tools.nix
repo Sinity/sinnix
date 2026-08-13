@@ -1,6 +1,4 @@
 # Agent CLI wrapper / MCP profile runtime checks (Claude, Codex, Gemini).
-#
-# Split out of the former flake/tests-runtime.nix monolith (sinnix-7bu).
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;
@@ -462,8 +460,7 @@ in
 
             # Rendered profile configs must match the registry's own computed
             # selection -- membership is derived from mcp-registry.nix at eval
-            # time, never frozen as literals (a frozen copy went stale and sat
-            # red when agent-control moved profiles).
+            # time, never frozen as literals.
             for pair in \
               "mcp.json full" "mcp-lean.json lean" "mcp-browser.json browser"; do
               file="''${pair%% *}"; profile="''${pair##* }"

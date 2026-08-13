@@ -225,7 +225,7 @@ inactive_controls = hub.lifecycle_controls(
 check("an inactive unit offers start alone", inactive_controls.count("<button"), 1)
 check("an inactive unit is not offered stop", "'stop'" in inactive_controls, False)
 
-# sinnix-pl37: a plain sinnix-scope placement (no job_id) is offered a stop
+# A plain sinnix-scope placement (no job_id) is offered a stop
 # button targeting the reducer's scope admission path; a gateway-job scope
 # (job_id set, manifest attested) keeps its existing interrupt control and is
 # NOT offered a redundant scope-stop.

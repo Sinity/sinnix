@@ -1,7 +1,5 @@
 # Kitty/PTY terminal-capture recorder runtime checks (asciinema wrapper +
 # session/event JSON shape, including a forced-nonzero-exit variant).
-#
-# Split out of the former flake/tests-runtime.nix monolith (sinnix-7bu).
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;

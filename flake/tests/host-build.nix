@@ -1,6 +1,4 @@
 # Full host toplevel build checks (sinnix-prime, sinnix-ethereal).
-#
-# Split out of the former flake/tests-runtime.nix monolith (sinnix-7bu).
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;

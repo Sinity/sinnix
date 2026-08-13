@@ -14,12 +14,8 @@ let
     runtimeDefaults = import ./data/runtime-defaults.nix { inherit lib; };
     localModels = import ./data/local-models.nix { inherit lib; };
     agentLanes = import ./data/agent-lanes.nix;
-    # Single allocation table for loopback/tailnet ports. Evaluating it here
-    # also runs the uniqueness assertion below, so a duplicate port fails the
-    # flake rather than the machine (see the file header for the collision
-    # that motivated it).
     # checkedPorts, not the raw table: consuming the data is what forces the
-    # uniqueness assertion, so a duplicate cannot slip through by being
+    # uniqueness assertion below, so a duplicate cannot slip through by being
     # lazily never evaluated.
     ports = checkedPorts;
   };

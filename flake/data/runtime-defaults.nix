@@ -215,9 +215,9 @@ rec {
         IOWeight = 300;
         # Bound each transient agent independently. A runaway tool child must
         # sacrifice only its owning agent scope before global earlyoom starts
-        # selecting desktop processes. Keep agent.slice itself uncapped: the
-        # 2026-06-18 shared ceiling coupled every interactive session and
-        # froze healthy agents behind one busy peer.
+        # selecting desktop processes. Keep agent.slice itself uncapped: a
+        # shared ceiling couples every interactive session and freezes
+        # healthy agents behind one busy peer.
         MemoryHigh = "8G";
         MemoryMax = "12G";
       };
@@ -233,8 +233,8 @@ rec {
         IOAccounting = true;
         IOWeight = 2;
         # Shutdown debris cap: sacrificial scopes (e.g. per-checkout sinex
-        # dev-postgres in nix-build scopes) get 15s after SIGTERM then
-        # SIGKILL, not the 90s default — this state is regenerable by design.
+        # dev-postgres) get 15s after SIGTERM then SIGKILL, not the 90s
+        # default — their state is regenerable by design.
         TimeoutStopSec = "15s";
       };
       envDefaults = {
@@ -258,8 +258,8 @@ rec {
         IOAccounting = true;
         IOWeight = 1;
         # Shutdown debris cap: sacrificial scopes (e.g. per-checkout sinex
-        # dev-postgres in nix-build scopes) get 15s after SIGTERM then
-        # SIGKILL, not the 90s default — this state is regenerable by design.
+        # dev-postgres) get 15s after SIGTERM then SIGKILL, not the 90s
+        # default — their state is regenerable by design.
         TimeoutStopSec = "15s";
       };
       envDefaults = { };
@@ -293,8 +293,8 @@ rec {
         IOAccounting = true;
         IOWeight = 2;
         # Shutdown debris cap: sacrificial scopes (e.g. per-checkout sinex
-        # dev-postgres in nix-build scopes) get 15s after SIGTERM then
-        # SIGKILL, not the 90s default — this state is regenerable by design.
+        # dev-postgres) get 15s after SIGTERM then SIGKILL, not the 90s
+        # default — their state is regenerable by design.
         TimeoutStopSec = "15s";
       };
       envDefaults = { };
@@ -308,10 +308,10 @@ rec {
         IOWeight = 1;
         MemoryHigh = "2G";
         MemoryMax = "4G";
-        # PSI-scoped oomd (sinnix-3gb): sacrificial work is killed at cgroup
-        # granularity when ITS OWN memory pressure stalls it, instead of
-        # letting global earlyoom pick victims. 50%/30s (not the 10%/5s
-        # defaults) so only a genuinely wedged scope dies, not a busy one.
+        # PSI-scoped oomd: kill sacrificial work at cgroup granularity when
+        # ITS OWN memory pressure stalls it, rather than letting global
+        # earlyoom pick victims. 50%/30s (not the 10%/5s defaults) so only a
+        # genuinely wedged scope dies, not a busy one.
         ManagedOOMMemoryPressure = "kill";
         ManagedOOMMemoryPressureLimit = "50%";
         ManagedOOMMemoryPressureDurationSec = "30s";
@@ -323,10 +323,10 @@ rec {
         # still leaving room for the desktop and always-on data services.
         MemoryHigh = "22G";
         MemoryMax = "28G";
-        # PSI-scoped oomd (sinnix-3gb): sacrificial work is killed at cgroup
-        # granularity when ITS OWN memory pressure stalls it, instead of
-        # letting global earlyoom pick victims. 50%/30s (not the 10%/5s
-        # defaults) so only a genuinely wedged scope dies, not a busy one.
+        # PSI-scoped oomd: kill sacrificial work at cgroup granularity when
+        # ITS OWN memory pressure stalls it, rather than letting global
+        # earlyoom pick victims. 50%/30s (not the 10%/5s defaults) so only a
+        # genuinely wedged scope dies, not a busy one.
         ManagedOOMMemoryPressure = "kill";
         ManagedOOMMemoryPressureLimit = "50%";
         ManagedOOMMemoryPressureDurationSec = "30s";
@@ -372,10 +372,10 @@ rec {
         IOWeight = 1;
         MemoryHigh = "2G";
         MemoryMax = "4G";
-        # PSI-scoped oomd (sinnix-3gb): sacrificial work is killed at cgroup
-        # granularity when ITS OWN memory pressure stalls it, instead of
-        # letting global earlyoom pick victims. 50%/30s (not the 10%/5s
-        # defaults) so only a genuinely wedged scope dies, not a busy one.
+        # PSI-scoped oomd: kill sacrificial work at cgroup granularity when
+        # ITS OWN memory pressure stalls it, rather than letting global
+        # earlyoom pick victims. 50%/30s (not the 10%/5s defaults) so only a
+        # genuinely wedged scope dies, not a busy one.
         ManagedOOMMemoryPressure = "kill";
         ManagedOOMMemoryPressureLimit = "50%";
         ManagedOOMMemoryPressureDurationSec = "30s";
@@ -393,10 +393,10 @@ rec {
         IOWeight = 2;
         MemoryHigh = "22G";
         MemoryMax = "28G";
-        # PSI-scoped oomd (sinnix-3gb): sacrificial work is killed at cgroup
-        # granularity when ITS OWN memory pressure stalls it, instead of
-        # letting global earlyoom pick victims. 50%/30s (not the 10%/5s
-        # defaults) so only a genuinely wedged scope dies, not a busy one.
+        # PSI-scoped oomd: kill sacrificial work at cgroup granularity when
+        # ITS OWN memory pressure stalls it, rather than letting global
+        # earlyoom pick victims. 50%/30s (not the 10%/5s defaults) so only a
+        # genuinely wedged scope dies, not a busy one.
         ManagedOOMMemoryPressure = "kill";
         ManagedOOMMemoryPressureLimit = "50%";
         ManagedOOMMemoryPressureDurationSec = "30s";
@@ -407,10 +407,10 @@ rec {
         IOWeight = 2;
         MemoryHigh = "22G";
         MemoryMax = "28G";
-        # PSI-scoped oomd (sinnix-3gb): sacrificial work is killed at cgroup
-        # granularity when ITS OWN memory pressure stalls it, instead of
-        # letting global earlyoom pick victims. 50%/30s (not the 10%/5s
-        # defaults) so only a genuinely wedged scope dies, not a busy one.
+        # PSI-scoped oomd: kill sacrificial work at cgroup granularity when
+        # ITS OWN memory pressure stalls it, rather than letting global
+        # earlyoom pick victims. 50%/30s (not the 10%/5s defaults) so only a
+        # genuinely wedged scope dies, not a busy one.
         ManagedOOMMemoryPressure = "kill";
         ManagedOOMMemoryPressureLimit = "50%";
         ManagedOOMMemoryPressureDurationSec = "30s";

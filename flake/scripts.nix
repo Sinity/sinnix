@@ -157,14 +157,10 @@ let
     # devshells, agent lanes) gets server capability unconditionally.
     beads =
       let
-        # No local patches: beads-server-auto-import-empty-check.patch was
-        # dropped at the v1.0.4 -> v1.1.2 bump. Upstream now carries its own
-        # guard for the same defect (a stale issues.jsonl re-imposed over
-        # newer Dolt rows on every mutating command after a branch switch) --
-        # see the GetStatistics emptiness guard and its "cf. PR #3630"
-        # comment in cmd/bd/auto_import_upgrade.go. Our patch no longer
-        # applies cleanly against the rewritten function and produced a
-        # non-compiling tree, which is itself the signal that it is obsolete.
+        # No local patches. Upstream carries its own guard for the stale
+        # issues.jsonl defect (a stale file re-imposed over newer Dolt rows
+        # on every mutating command after a branch switch) -- the
+        # GetStatistics emptiness guard in cmd/bd/auto_import_upgrade.go.
         beadsBase = pkgs.callPackage (inputs.beads + "/default.nix") {
           self = inputs.beads;
           buildGoModule = pkgs.buildGo126Module;
@@ -194,11 +190,10 @@ let
     };
 
     # polylogue's own postFixup wraps polylogue/polylogued/polylogue-mcp with
-    # PYTHONPATH/PYTHONHOME/… unset (it does NOT cover polylogue-hook, which
-    # ships as an unwrapped console_scripts entry point — a narrower version
-    # of the same leak class as polylogue-xikl, since hook subprocesses run
-    # from arbitrary agent-devshell environments). Use symlink trees to
-    # expose only the intended commands per package.
+    # PYTHONPATH/PYTHONHOME/… unset, but does NOT cover polylogue-hook, which
+    # ships as an unwrapped console_scripts entry point and runs from
+    # arbitrary agent-devshell environments. Use symlink trees to expose only
+    # the intended commands per package.
     polylogue-cli = pkgs.runCommand "polylogue-cli" { } ''
       mkdir -p "$out/bin"
       ln -s "${polylogueSrc}/bin/polylogue" "$out/bin/polylogue"
