@@ -1,14 +1,10 @@
 # Dev feature runtime checks: git/delta tooling and language toolchains.
 #
-# dev-git-runtime is promoted into the default `checks` tier (sinnix-7bu): it
-# evaluates the small dev.git feature module (git + delta only) and asserts a
-# handful of `git config --get` values plus `delta --version` — cheap
-# relative to dev-languages-runtime, which pulls a much larger closure
-# (python3.withPackages, nodejs, sqlite, gh) via the full HM home path and
-# used to live in the heavyChecks quarantine tier (promoted 2026-08-12:
-# measured ~22s, and the tier never ran anywhere, letting red checks hide).
-#
-# Split out of the former flake/tests-runtime.nix monolith (sinnix-7bu).
+# dev-git-runtime sits in the default `checks` tier: it evaluates the small
+# dev.git feature module (git + delta only) and asserts a handful of
+# `git config --get` values plus `delta --version` — cheap relative to
+# dev-languages-runtime, which pulls a much larger closure
+# (python3.withPackages, nodejs, sqlite, gh) via the full HM home path.
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;

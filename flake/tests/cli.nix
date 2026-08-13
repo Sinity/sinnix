@@ -1,12 +1,9 @@
 # CLI feature runtime checks: Polylogue CLI wrapper and task-tracking
 # (taskwarrior/timewarrior) integration.
 #
-# cli-polylogue-runtime is promoted into the default `checks` tier
-# (sinnix-7bu): it evaluates the cli.polylogue feature module through the
-# full sinnix config tree and only smoke-tests `--help` output with a
-# minimal coreutils/gnugrep closure.
-#
-# Split out of the former flake/tests-runtime.nix monolith (sinnix-7bu).
+# cli-polylogue-runtime sits in the default `checks` tier: it evaluates the
+# cli.polylogue feature module through the full sinnix config tree and only
+# smoke-tests `--help` output with a minimal coreutils/gnugrep closure.
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;
