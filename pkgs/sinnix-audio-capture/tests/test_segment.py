@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 
 from sinnix_audio_capture.segment import (
+    OPUS_APPLICATION_CTL_VALUE,
     CHANNEL_PROFILES,
     OpusSegmentWriter,
     hour_bucket_start,
@@ -25,18 +26,32 @@ def test_segment_filename_shape():
 
 
 def test_opusenc_argv_sets_application_and_dtx_ctls():
+    # DTX and the output path are true for every profile; the application
+    # CTL is asserted against the profile's own setting rather than a
+    # literal, because which application a CHANNEL uses is a tuning
+    # decision (mic moved voip -> audio when the lane became an archive
+    # tier) while the RENDERING of that decision is the contract.
     profile = CHANNEL_PROFILES["mic"]
     argv = opusenc_argv("opusenc", profile, Path("/tmp/out.opus.partial"))
     assert "--set-ctl-int" in argv
-    assert "4000=2048" in argv  # OPUS_SET_APPLICATION_REQUEST -> VOIP
+    assert f"4000={OPUS_APPLICATION_CTL_VALUE[profile.application]}" in argv
     assert "4016=1" in argv  # OPUS_SET_DTX_REQUEST -> enabled
     assert argv[-1] == "/tmp/out.opus.partial"
 
 
-def test_opusenc_argv_sink_monitor_uses_audio_application():
-    profile = CHANNEL_PROFILES["sink-monitor"]
-    argv = opusenc_argv("opusenc", profile, Path("/tmp/out.opus.partial"))
-    assert "4000=2049" in argv  # OPUS_APPLICATION_AUDIO
+def test_opusenc_application_ctl_mapping_is_correct():
+    # The mapping itself IS a real external contract (libopus header
+    # values), so it is pinned to literals on purpose -- unlike which
+    # channel happens to select which application.
+    assert OPUS_APPLICATION_CTL_VALUE["voip"] == 2048
+    assert OPUS_APPLICATION_CTL_VALUE["audio"] == 2049
+
+
+def test_opusenc_argv_renders_each_profiles_application():
+    for name, profile in CHANNEL_PROFILES.items():
+        argv = opusenc_argv("opusenc", profile, Path("/tmp/out.opus.partial"))
+        expected = OPUS_APPLICATION_CTL_VALUE[profile.application]
+        assert f"4000={expected}" in argv, f"{name} rendered the wrong application CTL"
 
 
 class _FakeProc:
