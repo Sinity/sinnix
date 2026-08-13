@@ -13,11 +13,19 @@
   pkgs,
   lib,
   config,
+  options,
   helpers,
   ...
 }:
 let
   inherit (config.sinnix.paths) realmRoot;
+  # Sinex publishes this path into every generated runtime/maintenance unit as
+  # SINEX_CONTENT_STORE_PATH. Borg must consume the same evaluated topology,
+  # rather than reconstructing a backing-subvolume path that can drift after a
+  # storage move.
+  sinexBlobRepositoryPath = lib.optionalString (
+    options.services ? sinex
+  ) config.services.sinex.storage.blob.repositoryPath;
   borgRepoRoot = "${config.sinnix.paths.outerRealm}/backup";
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
 
@@ -744,25 +752,19 @@ in
     };
 
     # ─── Sinex blob-repository Borg job ───
-    # The capture blob store (/realm/sinex/state/blob-repository, ~167G of
-    # append-only content-addressed files) lives on a NESTED subvolume, so it
-    # is invisible to the /realm btrbk snapshots the realm job drains — the
-    # 2026-07-10 backup audit found the original captured data had NO backup
-    # path at all (and never had one on the old @sinex subvol either). A CAS
-    # of immutable files needs no snapshot for consistency: back it up live,
-    # daily. Persistent=true so a missed run catches up after downtime —
-    # unlike the hourly drains, a whole missed day here is a real gap.
-    systemd.services.borgbackup-job-sinex-blobs = {
+    # A CAS lives outside the /realm snapshot stream, so Borg reads the live
+    # evaluated content-store path. Immutable objects make this safe without a
+    # snapshot; `RequiresMountsFor` keeps the source mount authoritative.
+    systemd.services.borgbackup-job-sinex-blobs = lib.mkIf (sinexBlobRepositoryPath != "") {
       description = "Back up sinex blob repository into Borg";
       restartIfChanged = false;
       after = [
-        "realm.mount"
         outerRealmMountUnit
       ];
       requires = [
-        "realm.mount"
         outerRealmMountUnit
       ];
+      unitConfig.RequiresMountsFor = [ sinexBlobRepositoryPath ];
       serviceConfig = (backupServiceConfig "borgbackup-job-sinex-blobs.service") // {
         Type = "oneshot";
         TimeoutStopSec = "15s";
@@ -790,7 +792,7 @@ in
           --compression auto,zstd,1 \
           --lock-wait ${toString borgLockWaitSec} \
           "::$archive_name" \
-          /realm/sinex/state/blob-repository
+          ${lib.escapeShellArg sinexBlobRepositoryPath}
         echo "sinex blob backup complete: $archive_name"
       '';
     };
@@ -802,6 +804,11 @@ in
         RandomizedDelaySec = "10min";
         Persistent = true;
       };
+    };
+
+    assertions = lib.optional (sinexBlobRepositoryPath != "") {
+      assertion = lib.hasInfix sinexBlobRepositoryPath config.systemd.services.borgbackup-job-sinex-blobs.script;
+      message = "Sinex CAS Borg backup must archive services.sinex.storage.blob.repositoryPath";
     };
 
     # Failure surfacing for the two borg verification/integrity units
