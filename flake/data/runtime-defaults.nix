@@ -96,6 +96,7 @@ let
         workload = surface.workload;
         type = surfaceType surface;
         restartable = surface.observe.restartable;
+        activationMode = surface.activation.mode;
       })
       (
         lib.filterAttrs (_: surface: surface.observe.enable) (lib.mapAttrs (_: normalizeSurface) surfaces)

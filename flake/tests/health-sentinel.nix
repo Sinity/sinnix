@@ -8,6 +8,15 @@
       pkgs = inputs.nixpkgs.legacyPackages.${system};
       scriptRegistry = import ../scripts.nix { inherit inputs pkgs; };
       sentinel = scriptRegistry.packageSet.sinnix-health-sentinel;
+      sentinelSource = ../../scripts/sinnix-health-sentinel;
+      # The runCommand sandbox has no /usr/bin/env (verified: a fixture
+      # written with `#!/usr/bin/env bash` fails to exec with ENOENT),
+      # unlike an interactive nix-shell where /usr/bin/env is a host
+      # bind-mount. The
+      # df/systemctl fixtures below need a shebang systemd can actually
+      # find, hence the store path spliced in directly via Nix
+      # interpolation rather than relying on env(1).
+      fixtureBash = "${pkgs.bash}/bin/bash";
     in
     {
       checks.health-sentinel =
@@ -22,27 +31,82 @@
           }
           ''
             export PATH="$TMPDIR/bin:$PATH"
+            # Exercise the packaged binary once, purely to prove packaging
+            # (shellcheck, shebang patching, PATH wiring) still succeeds --
+            # every functional assertion below runs against the raw script
+            # instead. writeShellApplication's wrapper (script-discovery.nix)
+            # always prepends its OWN runtimeInputs -- including the real
+            # store systemd/coreutils -- ahead of whatever PATH the caller
+            # already set, by design (that prepend is itself the fix for a
+            # class of missing-tool production bugs; see that file's
+            # baseRuntimeInputs comment). That means the wrapped binary can
+            # never be made to see this file's df/systemctl fixtures no
+            # matter how PATH is exported beforehand, so a fixture-driven
+            # functional check has to run the raw script with this test's
+            # own PATH intact.
+            : "${sentinel}"
             mkdir -p "$TMPDIR/bin" "$TMPDIR/capture" "$TMPDIR/state"
             mkdir -p "$TMPDIR/capture-ed-stale" "$TMPDIR/capture-ed-fresh"
             cat > "$TMPDIR/bin/df" <<'EOF_DF'
-            #!/usr/bin/env bash
+            #!${fixtureBash}
             printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
             printf '/dev/fixture 100 96 4 96%% /fixture\n'
             EOF_DF
             chmod +x "$TMPDIR/bin/df"
+            # sinnix-z1tg fixtures: the real sentinel now judges a service's
+            # resting state from ActiveState/Type/Result/WantedBy instead of
+            # treating every non-"active" state as failed. Each unit below
+            # stands in for one of the resting-state shapes the periodic
+            # sweep must tell apart without a hardcoded unit list:
+            #   fixture.service           -- WantedBy set, down: a daemon
+            #                                 that should be running and
+            #                                 isn't (the original fixture).
+            #   oneshot-done.service      -- Type=oneshot, Result=success:
+            #                                 ran and exited cleanly.
+            #   oneshot-failed.service    -- Type=oneshot, Result=exit-code:
+            #                                 ran and failed.
+            #   backend-idle.service      -- WantedBy empty (nothing pulls
+            #                                 it in): an on-demand backend
+            #                                 idled out cleanly, exactly the
+            #                                 ai-control.nix shape.
+            #   backend-crashed.service   -- WantedBy empty but Result is
+            #                                 not success: "on-demand"
+            #                                 excuses being inactive, not
+            #                                 having crashed.
+            #   socket-proxy-declared.service -- WantedBy still set, but the
+            #                                 inventory declares
+            #                                 activation.mode=="socket-proxy"
+            #                                 explicitly: that declaration
+            #                                 alone must be enough.
+            #   usersurf.service          -- manager=="user": no live user
+            #                                 session bus exists in this
+            #                                 sandbox, proving a query that
+            #                                 cannot reach the user manager
+            #                                 reports "unknown", never a
+            #                                 silent "healthy" or "failed".
             cat > "$TMPDIR/bin/systemctl" <<'EOF_SYSTEMCTL'
-            #!/usr/bin/env bash
-            if [ -e "$TMPDIR/down" ]; then
-              printf 'inactive\n'
-            else
-              printf 'active\n'
-            fi
+            #!${fixtureBash}
+            shift # drop "show"
+            unit="$1"; shift
+            case "$unit" in
+              fixture.service)
+                active=inactive; type=simple; result=success; wanted=multi-user.target ;;
+              oneshot-done.service)
+                active=inactive; type=oneshot; result=success; wanted= ;;
+              oneshot-failed.service)
+                active=inactive; type=oneshot; result=exit-code; wanted= ;;
+              backend-idle.service)
+                active=inactive; type=exec; result=success; wanted= ;;
+              backend-crashed.service)
+                active=inactive; type=exec; result=exit-code; wanted= ;;
+              socket-proxy-declared.service)
+                active=inactive; type=exec; result=success; wanted=multi-user.target ;;
+              *)
+                active=active; type=simple; result=success; wanted=multi-user.target ;;
+            esac
+            printf 'ActiveState=%s\nType=%s\nResult=%s\nWantedBy=%s\n' "$active" "$type" "$result" "$wanted"
             EOF_SYSTEMCTL
             chmod +x "$TMPDIR/bin/systemctl"
-            # Simulate the observed fixture.service being down for the whole
-            # run so the service_failure assertions below have something to
-            # match; nothing else in this fixture flips it back up.
-            touch "$TMPDIR/down"
             touch -d @0 "$TMPDIR/capture/old"
             # Event-driven lanes carry no numeric cadence (expectedCadenceSeconds
             # is absent), only an absolute expectedStaleAfterSeconds budget. A
@@ -84,17 +148,23 @@
             # class this feature exists to close.
             probe_marker="$TMPDIR/probe-marker"
             cat > "$TMPDIR/inventory.json" <<EOF_INVENTORY
-            {"captures":[{"name":"fixture","path":"$TMPDIR/capture","expectedCadenceSeconds":60},{"name":"ed-stale","path":"$TMPDIR/capture-ed-stale","expectedCadence":"event-driven","expectedStaleAfterSeconds":60},{"name":"ed-fresh","path":"$TMPDIR/capture-ed-fresh","expectedCadence":"event-driven","expectedStaleAfterSeconds":600},{"name":"payload-dead","path":"$TMPDIR/payload-dead","requiredPayloadFields":["window_class","geometry.width","monitor","note"]},{"name":"payload-live","path":"$TMPDIR/payload-live","requiredPayloadFields":["window_class","geometry.width","monitor","note"]},{"name":"probe-absent","path":"$TMPDIR/capture-ed-fresh","livenessProbe":{"command":"[ -e \"$probe_marker\" ] && exit 0 || exit 1","timeoutSeconds":5}},{"name":"probe-unknown","path":"$TMPDIR/capture-ed-fresh","livenessProbe":{"command":"exit 9","timeoutSeconds":5}},{"name":"probe-timeout","path":"$TMPDIR/capture-ed-fresh","livenessProbe":{"command":"sleep 5","timeoutSeconds":1}}],"mounts":[{"path":"/fixture","warnPct":80,"failPct":95}],"observedServices":[{"kind":"service","manager":"system","unit":"fixture.service"}]}
+            {"captures":[{"name":"fixture","path":"$TMPDIR/capture","expectedCadenceSeconds":60},{"name":"ed-stale","path":"$TMPDIR/capture-ed-stale","expectedCadence":"event-driven","expectedStaleAfterSeconds":60},{"name":"ed-fresh","path":"$TMPDIR/capture-ed-fresh","expectedCadence":"event-driven","expectedStaleAfterSeconds":600},{"name":"payload-dead","path":"$TMPDIR/payload-dead","requiredPayloadFields":["window_class","geometry.width","monitor","note"]},{"name":"payload-live","path":"$TMPDIR/payload-live","requiredPayloadFields":["window_class","geometry.width","monitor","note"]},{"name":"probe-absent","path":"$TMPDIR/capture-ed-fresh","livenessProbe":{"command":"[ -e \"$probe_marker\" ] && exit 0 || exit 1","timeoutSeconds":5}},{"name":"probe-unknown","path":"$TMPDIR/capture-ed-fresh","livenessProbe":{"command":"exit 9","timeoutSeconds":5}},{"name":"probe-timeout","path":"$TMPDIR/capture-ed-fresh","livenessProbe":{"command":"sleep 5","timeoutSeconds":1}}],"mounts":[{"path":"/fixture","warnPct":80,"failPct":95}],"observedServices":[{"kind":"service","manager":"system","unit":"fixture.service"},{"kind":"service","manager":"system","unit":"oneshot-done.service"},{"kind":"service","manager":"system","unit":"oneshot-failed.service"},{"kind":"service","manager":"system","unit":"backend-idle.service"},{"kind":"service","manager":"system","unit":"backend-crashed.service"},{"kind":"service","manager":"system","unit":"socket-proxy-declared.service","activationMode":"socket-proxy"},{"kind":"service","manager":"user","unit":"usersurf.service"}]}
             EOF_INVENTORY
-            "${sentinel}/bin/sinnix-health-sentinel" --inventory "$TMPDIR/inventory.json" --state "$TMPDIR/state/state.json" --output "$TMPDIR/state/events.jsonl" --check
-            "${sentinel}/bin/sinnix-health-sentinel" --inventory "$TMPDIR/inventory.json" --state "$TMPDIR/state/state.json" --output "$TMPDIR/state/events.jsonl" --check
+            bash "${sentinelSource}" --inventory "$TMPDIR/inventory.json" --state "$TMPDIR/state/state.json" --output "$TMPDIR/state/events.jsonl" --check
+            bash "${sentinelSource}" --inventory "$TMPDIR/inventory.json" --state "$TMPDIR/state/state.json" --output "$TMPDIR/state/events.jsonl" --check
             jq -s -e '
-              length == 10
+              length == 16
               and any(.[]; .type == "capture_stale" and .unit == "fixture" and .status == "stale")
               and any(.[]; .type == "capture_stale" and .unit == "ed-stale" and .status == "stale")
               and any(.[]; .type == "capture_stale" and .unit == "ed-fresh" and .status == "healthy")
               and any(.[]; .type == "mount_capacity" and .status == "failed")
-              and any(.[]; .type == "service_failure" and .ok == false)
+              and any(.[]; .type == "service_failure" and .unit == "fixture.service" and .status == "failed" and .ok == false)
+              and any(.[]; .type == "service_failure" and .unit == "oneshot-done.service" and .status == "healthy" and .ok)
+              and any(.[]; .type == "service_failure" and .unit == "oneshot-failed.service" and .status == "failed" and .ok == false)
+              and any(.[]; .type == "service_failure" and .unit == "backend-idle.service" and .status == "healthy" and .ok)
+              and any(.[]; .type == "service_failure" and .unit == "backend-crashed.service" and .status == "failed" and .ok == false)
+              and any(.[]; .type == "service_failure" and .unit == "socket-proxy-declared.service" and .status == "healthy" and .ok)
+              and any(.[]; .type == "service_failure" and .unit == "usersurf.service" and .status == "unknown" and .ok == false)
               and any(.[];
                 .type == "capture_payload" and .unit == "payload-dead"
                 and .status == "degenerate" and .ok == false
@@ -106,11 +176,11 @@
             ' "$TMPDIR/state/events.jsonl" >/dev/null
             touch "$TMPDIR/capture/current"
             touch "$probe_marker"
-            "${sentinel}/bin/sinnix-health-sentinel" --inventory "$TMPDIR/inventory.json" --state "$TMPDIR/state/state.json" --output "$TMPDIR/state/events.jsonl" --check
+            bash "${sentinelSource}" --inventory "$TMPDIR/inventory.json" --state "$TMPDIR/state/state.json" --output "$TMPDIR/state/events.jsonl" --check
             jq -s -e '
-              length == 12
+              length == 18
               and any(.[]; .type == "capture_stale" and .unit == "fixture" and .status == "healthy")
-              and any(.[]; .type == "service_failure" and .ok == false)
+              and any(.[]; .type == "service_failure" and .unit == "fixture.service" and .ok == false)
               and any(.[]; .type == "publisher_liveness" and .unit == "probe-absent" and .status == "healthy" and .ok)
             ' "$TMPDIR/state/events.jsonl" >/dev/null
             touch "$out"

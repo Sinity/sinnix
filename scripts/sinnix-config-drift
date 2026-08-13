@@ -92,11 +92,48 @@ def compare_sysctls(manifest: dict[str, Any], proc_root: Path) -> list[dict[str,
     return rows
 
 
+def user_manager_prefix() -> list[str] | None:
+    """Locate a live user-session bus to bridge a root process into the user
+    systemd manager. sinnix-config-drift.service runs as root
+    (modules/runtime.nix), which has no XDG_RUNTIME_DIR/DBUS_SESSION_BUS_ADDRESS
+    of its own, so a bare `systemctl --user show` always fails for a
+    manager=="user" check -- the same bridge problem
+    scripts/sinnix-health-sentinel's notify_desktop() already solves for
+    D-Bus notifications. Reuse the same mechanism: run the query as the
+    owning uid of a live session bus. uid 0 is skipped -- a root user-manager
+    instance (e.g. via lingering) is not the operator's session and would
+    not carry the slices this check verifies.
+    """
+    try:
+        run_entries = sorted(Path("/run/user").iterdir())
+    except OSError:
+        return None
+    for entry in run_entries:
+        if entry.name == "0":
+            continue
+        bus = entry / "bus"
+        if not bus.is_socket():
+            continue
+        return [
+            "sudo",
+            "-u",
+            f"#{entry.name}",
+            f"XDG_RUNTIME_DIR={entry}",
+            f"DBUS_SESSION_BUS_ADDRESS=unix:path={bus}",
+        ]
+    return None
+
+
 def systemctl_show(systemctl: str, unit: str, manager: str, properties: list[str]) -> dict[str, str] | None:
-    argv = [systemctl]
+    prefix: list[str] = []
+    argv_tail = [systemctl]
     if manager == "user":
-        argv.append("--user")
-    argv += ["show", unit]
+        bridge = user_manager_prefix()
+        if bridge is None:
+            return None
+        prefix = bridge
+        argv_tail.append("--user")
+    argv = prefix + argv_tail + ["show", unit]
     for prop in properties:
         argv += ["-p", prop]
     code, stdout, _ = command(argv)
