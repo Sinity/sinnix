@@ -57,6 +57,22 @@ mkFeatureModule {
         gnupg.agent = {
           enable = true;
           enableSSHSupport = true;
+          # gpg-agent re-encrypts every key it takes into its own keystore
+          # under a passphrase it imposes, then re-prompts through pinentry
+          # once the cache expires -- upstream defaults are 30 minutes, 2
+          # hours hard. On this host that gate protects nothing: local agents
+          # already run with sudo NOPASSWD and as nix trusted-users, and
+          # ~/.ssh/id_ed25519 is unencrypted on disk, so anything that could
+          # see the prompt could read the key directly. All it produced was
+          # an interactive dialog interrupting unattended work.
+          #
+          # The agent is kept (it holds the nixos-anywhere deploy keys, which
+          # have no file backing under ~/.ssh and would be destroyed by
+          # clearing it) but stops re-asking within a boot.
+          settings = {
+            default-cache-ttl-ssh = 34560000;
+            max-cache-ttl-ssh = 34560000;
+          };
         };
       };
 
@@ -137,7 +153,13 @@ mkFeatureModule {
             enable = true;
             enableDefaultConfig = false;
             settings = {
-              "*".AddKeysToAgent = "yes";
+              # Was "yes", which imported every key ssh touched into
+              # gpg-agent's keystore -- and gpg-agent will not accept a key
+              # without imposing a passphrase on it, so each new host
+              # produced a pinentry dialog. ssh reads the unencrypted
+              # IdentityFile directly instead; the agent keeps serving the
+              # keys already in it.
+              "*".AddKeysToAgent = "no";
               # GitHub automation must never depend on gpg-agent cache state or
               # pinentry. The dedicated transport key is unencrypted and
               # intentionally available to unattended local agents.
