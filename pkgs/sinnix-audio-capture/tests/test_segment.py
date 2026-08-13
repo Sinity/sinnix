@@ -10,6 +10,7 @@ from sinnix_audio_capture.segment import (
     device_profile,
     hour_bucket_start,
     opusenc_argv,
+    promote_orphan_partials,
     segment_filename,
 )
 
@@ -161,3 +162,26 @@ def test_part_marked_segments_still_carry_a_parseable_stamp():
     hour = float(calendar.timegm((2026, 8, 12, 14, 0, 0)))
     name = segment_filename("src-x", hour, part=4)
     assert segment_start_ts(Path("/tmp") / name) == hour
+
+
+def test_orphaned_partials_are_archived_without_overwriting(tmp_path):
+    """A segment left by a dead recorder must reach the archive, and must not
+    land on one that was finalised properly."""
+    channel_dir = tmp_path / "src-x"
+    channel_dir.mkdir()
+    (channel_dir / "audio-src-x-20260812T140000Z.opus").write_bytes(b"archived")
+    (channel_dir / "audio-src-x-20260812T140000Z.opus.partial").write_bytes(b"orphan-a")
+    (channel_dir / "audio-src-x-p2-20260812T140000Z.opus.partial").write_bytes(b"orphan-b")
+    (channel_dir / "device.json").write_bytes(b"{}")
+
+    promoted = promote_orphan_partials(tmp_path)
+
+    assert (channel_dir / "audio-src-x-20260812T140000Z.opus").read_bytes() == b"archived"
+    assert not list(channel_dir.glob("*.partial"))
+    assert sorted(p.read_bytes() for p in channel_dir.glob("*.opus")) == [
+        b"archived",
+        b"orphan-a",
+        b"orphan-b",
+    ]
+    assert all(p.name.startswith("audio-src-x-p") for p in promoted)
+    assert (channel_dir / "device.json").exists()

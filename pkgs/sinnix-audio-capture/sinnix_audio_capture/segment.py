@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import calendar
 import os
+import re
 import subprocess
 import time
 from collections.abc import Callable
@@ -126,6 +127,53 @@ def free_segment_path(output_dir: Path, channel: str, bucket_start_ts: float) ->
         if not candidate.exists() and not partial.exists():
             return candidate
         part += 1
+
+
+SEGMENT_NAME_RE = re.compile(
+    r"^audio-(?P<channel>.+?)-(?:p\d+-)?(?P<stamp>\d{8}T\d{6}Z)\.opus$"
+)
+
+
+def promote_orphan_partials(audio_dir: Path) -> list[Path]:
+    """Move `.partial` files left by a dead recorder into the archive.
+
+    Nothing but a live encoder writes that suffix, so any `.partial` present
+    before this process opens its first segment belongs to a recorder that
+    died -- a crash, a unit restart, an activation. Left alone it stays
+    invisible forever: the indexer skips `*.opus.partial` precisely so it
+    never reads a file still being written, which means an orphan is captured
+    audio that nothing will ever look at. Four such files had been sitting in
+    the lake for over a day, one of them 68s of ordinary room audio that
+    decodes fine.
+
+    Promoted rather than repaired, because Ogg is a streaming container: a
+    segment cut mid-write is missing nothing but its remaining minutes, and
+    decodes as-is. It is renamed through `free_segment_path`, so an orphan can
+    never land on top of a segment that was archived properly.
+
+    Must be called before any segment is opened; a `.partial` belonging to
+    THIS process would otherwise be renamed out from under its own encoder.
+    """
+    promoted: list[Path] = []
+    if not audio_dir.is_dir():
+        return promoted
+    for partial in sorted(audio_dir.glob("*/*.opus.partial")):
+        match = SEGMENT_NAME_RE.match(partial.name.removesuffix(".partial"))
+        if match is None:
+            continue
+        try:
+            bucket = float(
+                calendar.timegm(time.strptime(match["stamp"], "%Y%m%dT%H%M%SZ"))
+            )
+        except ValueError:
+            continue
+        dest = free_segment_path(partial.parent, match["channel"], bucket)
+        try:
+            partial.rename(dest)
+        except OSError:
+            continue
+        promoted.append(dest)
+    return promoted
 
 
 def opusenc_argv(
