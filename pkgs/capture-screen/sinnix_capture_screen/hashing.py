@@ -1,5 +1,6 @@
-"""Pure decision logic for capture-screen: p-hash dedup, degenerate-frame
-detection, the daily-volume throttle guard, and the idle-pause trigger.
+"""Pure decision logic for capture-screen: attempt rate limiting, p-hash
+dedup, degenerate-frame detection, the daily-volume throttle guard, and the
+idle-pause trigger.
 
 Every function/class here is pixel-array or plain-value in, plain-value out
 -- no subprocess calls, no filesystem, no Wayland/Hyprland IO -- so the
@@ -13,6 +14,35 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 import numpy as np
+
+
+@dataclass
+class CaptureAttemptGate:
+    """Bound expensive screencopy attempts during event bursts and failures."""
+
+    min_interval_seconds: float = 1.0
+    failure_backoff_seconds: float = 30.0
+    _last_attempt_ts: float | None = None
+    _blocked_until_ts: float = 0.0
+
+    def allow(self, now: float) -> bool:
+        if now < self._blocked_until_ts:
+            return False
+        if (
+            self._last_attempt_ts is not None
+            and now - self._last_attempt_ts < self.min_interval_seconds
+        ):
+            return False
+        self._last_attempt_ts = now
+        return True
+
+    def record_failure(self, now: float) -> None:
+        self._blocked_until_ts = max(
+            self._blocked_until_ts, now + self.failure_backoff_seconds
+        )
+
+    def record_success(self) -> None:
+        self._blocked_until_ts = 0.0
 
 # ---------------------------------------------------------------------------
 # Perceptual hash (DCT-based pHash, the same construction as the widely-used

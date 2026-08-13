@@ -93,6 +93,7 @@ from pathlib import Path
 
 from . import capture, hypr
 from .hashing import (
+    CaptureAttemptGate,
     DailyThrottleGuard,
     PauseDetector,
     ThrottleState,
@@ -169,6 +170,7 @@ def run(args: argparse.Namespace) -> int:
     )
 
     pause_detector = PauseDetector(idle_seconds=args.idle_pause_seconds)
+    attempt_gate = CaptureAttemptGate()
     last_hash_by_window: dict[str, int] = {}
     last_capture_ts: float | None = None
     seq = 0
@@ -176,6 +178,9 @@ def run(args: argparse.Namespace) -> int:
 
     def do_capture(trigger: str) -> None:
         nonlocal last_capture_ts, seq
+        attempt_now = time.monotonic()
+        if not attempt_gate.allow(attempt_now):
+            return
         now = time.time()
         last_capture_ts = now
         window = hypr.get_active_window(read_json)
@@ -188,6 +193,7 @@ def run(args: argparse.Namespace) -> int:
         if monitor_name is None and monitors:
             monitor_name = monitors[0].get("name")
         if monitor_name is None:
+            attempt_gate.record_failure(attempt_now)
             return
 
         geometry = window.get("geometry") if window else {}
@@ -199,6 +205,7 @@ def run(args: argparse.Namespace) -> int:
 
         png_bytes = capture.run_grim(args.grim_bin, monitor_name, grim_geometry)
         if png_bytes is None:
+            attempt_gate.record_failure(attempt_now)
             print(
                 f"sinnix-capture-screen: grim capture failed (trigger={trigger})",
                 file=sys.stderr,
@@ -208,6 +215,7 @@ def run(args: argparse.Namespace) -> int:
         im = capture.load_image(png_bytes)
         gray = capture.image_to_phash_array(im)
         if is_degenerate_frame(gray):
+            attempt_gate.record_failure(attempt_now)
             print(
                 f"sinnix-capture-screen: refusing degenerate (flat/black) frame -- "
                 f"trigger={trigger} monitor={monitor_name} window={_window_key(window)}. "
@@ -225,6 +233,7 @@ def run(args: argparse.Namespace) -> int:
             threshold=args.dedup_hamming_threshold,
         ):
             last_hash_by_window[window_key] = new_hash
+            attempt_gate.record_success()
             return
         last_hash_by_window[window_key] = new_hash
 
@@ -260,7 +269,7 @@ def run(args: argparse.Namespace) -> int:
             sha256=sha256,
             trigger=trigger,
         )
-        capture.write_frame(
+        written_path = capture.write_frame(
             payload=payload,
             webp_bytes=webp_bytes,
             capture_root=args.capture_root,
@@ -268,6 +277,10 @@ def run(args: argparse.Namespace) -> int:
             sinnix_capture_bin=args.sinnix_capture_bin,
             filename=filename,
         )
+        if written_path is None:
+            attempt_gate.record_failure(attempt_now)
+        else:
+            attempt_gate.record_success()
 
     try:
         while True:
@@ -282,11 +295,14 @@ def run(args: argparse.Namespace) -> int:
                     )
                     return 1
                 buf += chunk
+                capture_for_event_burst = False
                 while b"\n" in buf:
                     line, buf = buf.split(b"\n", 1)
                     text = line.decode("utf-8", "replace")
                     if hypr.is_trigger_event(text):
-                        do_capture("hyprland-event")
+                        capture_for_event_burst = True
+                if capture_for_event_burst:
+                    do_capture("hyprland-event")
 
             now = time.time()
             pos = hypr.get_cursor_pos(read_json)

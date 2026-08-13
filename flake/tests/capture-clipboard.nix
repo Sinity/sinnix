@@ -66,6 +66,9 @@ in
             #!/usr/bin/env bash
             set -euo pipefail
             if [ "''${1:-}" = "--list-types" ]; then
+              if [ -n "''${DRAIN_MARKER:-}" ]; then
+                while [ ! -e "$DRAIN_MARKER" ]; do sleep 0.01; done
+              fi
               cat "$FIXTURE_DIR/types"
               exit 0
             fi
@@ -97,7 +100,15 @@ in
             printf 'text/plain;charset=utf-8\n' > "$FIXTURE_DIR/types"
             printf 'hello from the fixture' > "$FIXTURE_DIR/content"
             printf '{"class": "kitty", "title": "test terminal"}' > "$FIXTURE_DIR/activewindow.json"
-            "$watch"
+
+            # A handler that performs its nested wl-paste before draining the
+            # watch payload deadlocks here: the 128 KiB producer cannot reach
+            # the marker, while fake wl-paste waits for that marker. This is
+            # the same cycle that blocked kitty's UI thread in sinnix-tutt.
+            export DRAIN_MARKER="$TMPDIR/watch-input-drained"
+            python3 -c 'import os, pathlib, sys; sys.stdout.buffer.write(b"x" * 131072); sys.stdout.flush(); pathlib.Path(os.environ["DRAIN_MARKER"]).touch()' \
+              | timeout 5 "$watch"
+            unset DRAIN_MARKER
 
             # Firing again with the *same* content must be a silent no-op
             # (consecutive-duplicate de-dup).

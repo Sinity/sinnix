@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from PIL import Image
 from sinnix_capture_screen.hashing import (
+    CaptureAttemptGate,
     DailyThrottleGuard,
     PauseDetector,
     hamming_distance,
@@ -12,6 +13,35 @@ from sinnix_capture_screen.hashing import (
     phash64,
     should_capture_periodic,
 )
+
+
+def test_capture_attempt_gate_coalesces_a_31_event_burst() -> None:
+    gate = CaptureAttemptGate(min_interval_seconds=1.0)
+
+    attempts = sum(gate.allow(100.0) for _ in range(31))
+
+    assert attempts == 1
+
+
+def test_capture_attempt_gate_backs_off_after_failure_then_recovers() -> None:
+    gate = CaptureAttemptGate(
+        min_interval_seconds=1.0, failure_backoff_seconds=30.0
+    )
+    assert gate.allow(100.0) is True
+    gate.record_failure(100.0)
+
+    assert gate.allow(101.0) is False
+    assert gate.allow(129.999) is False
+    assert gate.allow(130.0) is True
+
+
+def test_capture_attempt_gate_resumes_at_normal_rate_after_success() -> None:
+    gate = CaptureAttemptGate(min_interval_seconds=1.0)
+    assert gate.allow(100.0) is True
+    gate.record_success()
+
+    assert gate.allow(100.999) is False
+    assert gate.allow(101.0) is True
 
 # ---------------------------------------------------------------------------
 # phash64 / hamming_distance / is_near_duplicate
