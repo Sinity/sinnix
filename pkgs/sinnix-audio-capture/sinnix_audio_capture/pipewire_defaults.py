@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 
 _LINE_RE = re.compile(
@@ -76,10 +78,71 @@ class DefaultTargets:
 
 
 def resolve_target(channel: str, targets: DefaultTargets) -> str | None:
-    """PipeWire `--target` value for a canonical channel, or None if the
-    relevant default isn't known yet (nothing to connect to)."""
+    """The PipeWire node *name* a canonical channel should capture from, or
+    None if the relevant default isn't known yet (nothing to connect to).
+
+    This is a node name to look up (via `resolve_node_serial`), not the
+    final `pw-record --target` value -- see that function's docstring for
+    why `--target <name>` is not used directly. The sink-monitor channel
+    targets the *sink* node's own name, unmodified: a sink's monitor ports
+    live on the sink node itself (there is no separate
+    `<sink-name>.monitor` node -- confirmed absent in a live `pw-dump` on
+    sinnix-prime 2026-08-13); a Capture-direction stream that resolves onto
+    the sink node attaches to its monitor ports automatically.
+    """
     if channel == "mic":
         return targets.source
     if channel == "sink-monitor":
-        return f"{targets.sink}.monitor" if targets.sink else None
+        return targets.sink
     raise ValueError(f"unknown canonical audio channel: {channel!r}")
+
+
+def resolve_node_serial(
+    pw_dump_bin: str,
+    node_name: str,
+    *,
+    run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+) -> str | None:
+    """Resolve a PipeWire node name to its stable `object.serial`, for use
+    as a `pw-record --target` value.
+
+    sinnix-500c: `pw-record --target <node-name>` does *string* name
+    matching, and live measurement on sinnix-prime (2026-08-13) showed it
+    does not reliably attach a Capture-direction stream to the right node
+    once the initial connection is re-established mid-session -- the
+    stream instead falls back to WirePlumber's default-object auto-link
+    (silently landing on the *wrong* device: both the mic and sink-monitor
+    recorders ended up consuming the mic's own ALSA source) and, even when
+    the fallback happens to pick the right device, that fallback link is
+    serviced by a slow reconnect path rather than the real-time audio
+    graph -- observed via `strace` delivering PCM roughly once every 1-7s
+    instead of continuously, collapsing a wall-clock hour to ~37.5s of
+    actually-captured audio. Passing `--target <serial>` (a stable numeric
+    `object.serial`, resolved here from a live `pw-dump`) instead links
+    immediately via the normal real-time path with no such stall --
+    verified live for both the mic source and the sink monitor.
+
+    Returns None if `pw-dump` fails or no node with that name is currently
+    present (transient race at startup/device-switch); callers should fall
+    back to targeting by name in that case rather than blocking forever.
+    """
+    try:
+        proc = run([pw_dump_bin], capture_output=True, text=True, check=True)
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    try:
+        objects = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(objects, list):
+        return None
+    for obj in objects:
+        if not isinstance(obj, dict) or obj.get("type") != "PipeWire:Interface:Node":
+            continue
+        info = obj.get("info") or {}
+        props = info.get("props") or {}
+        if props.get("node.name") == node_name:
+            serial = props.get("object.serial")
+            if serial is not None:
+                return str(serial)
+    return None

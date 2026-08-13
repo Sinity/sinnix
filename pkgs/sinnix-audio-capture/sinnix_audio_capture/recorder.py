@@ -26,7 +26,12 @@ import threading
 import time
 from pathlib import Path
 
-from .pipewire_defaults import DefaultTargets, parse_default_line, resolve_target
+from .pipewire_defaults import (
+    DefaultTargets,
+    parse_default_line,
+    resolve_node_serial,
+    resolve_target,
+)
 from .segment import (
     CHANNEL_PROFILES,
     ChannelProfile,
@@ -137,10 +142,12 @@ def run_recorder(
     capture_root: Path,
     pw_record_bin: str = "pw-record",
     pw_metadata_bin: str = "pw-metadata",
+    pw_dump_bin: str = "pw-dump",
     opusenc_bin: str = "opusenc",
     tee_socket_path: Path | None = None,
     stop_event: threading.Event | None = None,
     popen=subprocess.Popen,
+    run=subprocess.run,
 ) -> int:
     if channel not in CHANNEL_PROFILES:
         raise ValueError(f"unknown canonical audio channel: {channel!r}")
@@ -180,7 +187,21 @@ def run_recorder(
         # resolution -- see pw_record_argv -- if nothing has arrived yet).
         time.sleep(0.2)
         while not stop_event.is_set():
-            target = resolve_target(channel, targets)
+            target_name = resolve_target(channel, targets)
+            # Resolve to a stable object.serial rather than targeting by
+            # name (sinnix-500c): `--target <name>` does not reliably
+            # attach to the right node on reconnect and, even when it
+            # does, is serviced by a slow fallback path instead of the
+            # real-time graph -- see resolve_node_serial's docstring. Fall
+            # back to the raw name if resolution fails (pw-dump error, or
+            # the node isn't visible yet); that's the pre-fix behavior, not
+            # a regression.
+            target = (
+                resolve_node_serial(pw_dump_bin, target_name, run=run)
+                or target_name
+                if target_name
+                else None
+            )
             argv = pw_record_argv(pw_record_bin, profile, target)
             proc = popen(argv, stdout=subprocess.PIPE)
             restart_requested.clear()
