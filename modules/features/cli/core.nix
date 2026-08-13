@@ -29,18 +29,15 @@ mkFeatureModule {
           unzip
           wget
           # age: same crypto as agenix. Kept system-wide so the master-key
-          # escrow blob (see knowledgebase docs/sinnix-key-recovery.md) can be
-          # created and, more importantly, decrypted during disaster recovery
-          # without fetching tools.
+          # escrow blob (knowledgebase docs/sinnix-key-recovery.md) can be
+          # decrypted during disaster recovery without fetching tools.
           age
-          # Modern CLI replacements
           eza
           bat
           fd
           lnav
           dua
           bandwhich
-          # Even more modern tools
           micro
           bottom
           gping
@@ -57,18 +54,13 @@ mkFeatureModule {
         gnupg.agent = {
           enable = true;
           enableSSHSupport = true;
-          # gpg-agent re-encrypts every key it takes into its own keystore
-          # under a passphrase it imposes, then re-prompts through pinentry
-          # once the cache expires -- upstream defaults are 30 minutes, 2
-          # hours hard. On this host that gate protects nothing: local agents
-          # already run with sudo NOPASSWD and as nix trusted-users, and
-          # ~/.ssh/id_ed25519 is unencrypted on disk, so anything that could
-          # see the prompt could read the key directly. All it produced was
-          # an interactive dialog interrupting unattended work.
-          #
-          # The agent is kept (it holds the nixos-anywhere deploy keys, which
-          # have no file backing under ~/.ssh and would be destroyed by
-          # clearing it) but stops re-asking within a boot.
+          # Effectively-infinite SSH cache TTLs. gpg-agent re-prompts through
+          # pinentry once its cache expires (upstream: 30 minutes soft, 2 hours
+          # hard), which interrupts unattended work and protects nothing here:
+          # local agents already have sudo NOPASSWD and nix trusted-users, and
+          # ~/.ssh/id_ed25519 is unencrypted on disk. The agent itself must
+          # stay — it holds the nixos-anywhere deploy keys, which have no file
+          # backing under ~/.ssh and would be destroyed by clearing it.
           settings = {
             default-cache-ttl-ssh = 34560000;
             max-cache-ttl-ssh = 34560000;
@@ -93,10 +85,9 @@ mkFeatureModule {
       # Prevent PAM from starting keyring on login (conflicts with gpg-agent SSH)
       security.pam.services.login.enableGnomeKeyring = lib.mkForce false;
 
-      # Drop pam_lastlog2 from the login stack: last-login display is
-      # worthless on this single-operator host, it issues a root-SSD SQLite
+      # Drop pam_lastlog2 from the login stack: it issues a root-SSD SQLite
       # write on every session open, and its SQLite access has no busy
-      # timeout, so concurrent agent session storms failed PAM session setup
+      # timeout, so concurrent agent session storms fail PAM session setup
       # outright. (mkForce: upstream pam.nix asserts enable = true.)
       security.pam.services.login.rules.session.lastlog.enable = lib.mkForce false;
 
@@ -153,12 +144,11 @@ mkFeatureModule {
             enable = true;
             enableDefaultConfig = false;
             settings = {
-              # Was "yes", which imported every key ssh touched into
-              # gpg-agent's keystore -- and gpg-agent will not accept a key
-              # without imposing a passphrase on it, so each new host
-              # produced a pinentry dialog. ssh reads the unencrypted
-              # IdentityFile directly instead; the agent keeps serving the
-              # keys already in it.
+              # "yes" would import every key ssh touches into gpg-agent's
+              # keystore, and gpg-agent will not accept a key without imposing
+              # a passphrase on it — one pinentry dialog per new host. ssh
+              # reads the unencrypted IdentityFile directly instead; the agent
+              # keeps serving the keys already in it.
               "*".AddKeysToAgent = "no";
               # GitHub automation must never depend on gpg-agent cache state or
               # pinentry. The dedicated transport key is unencrypted and
@@ -172,7 +162,6 @@ mkFeatureModule {
                 BatchMode = true;
                 AddKeysToAgent = "no";
               };
-              # Router: `ssh sinnix-gw` just works
               "sinnix-gw" = {
                 HostName = "192.168.1.1";
                 User = "root";
@@ -192,11 +181,10 @@ mkFeatureModule {
             };
           };
 
-          # Desktop -> phone clipboard push (sinnix-uyvt.5). One-way only:
-          # Android blocks clipboard READS from a backgrounded app, so the
-          # phone->desktop half is not attempted here -- see the header
-          # comment in scripts/sinnix-phone. wl-paste --watch blocks on
-          # clipboard change, so this is push-triggered, not a poll loop.
+          # Desktop -> phone clipboard push. One-way only: Android blocks
+          # clipboard READS from a backgrounded app (see the header comment in
+          # scripts/sinnix-phone). wl-paste --watch blocks on clipboard change,
+          # so this is push-triggered, not a poll loop.
           systemd.user.services.sinnix-phone-clip-watch = {
             Unit = {
               Description = "Push desktop clipboard changes to the phone over the tailnet";
@@ -221,8 +209,8 @@ mkFeatureModule {
           programs.broot = {
             enable = true;
             enableZshIntegration = true;
-            # Home Manager owns ~/.config/broot now. Keep the custom skin, modal
-            # mode, special paths, and verbs in the canonical dots JSON source.
+            # Home Manager owns ~/.config/broot; the custom skin, modal mode,
+            # special paths, and verbs stay in the dots JSON source.
             settings = builtins.fromJSON (builtins.readFile ../../../dots/broot/conf.hjson);
           };
 
