@@ -10,7 +10,7 @@
 #   -i, --interval SECS    Interval between pulses (default: 120)
 #   -d, --duration SECS    Duration of each pulse (default: 0.05)
 #   -v, --intensity MULT   Brightness multiplier (default: 1.25)
-#   -m, --mode MODE        Pulse mode: brightness, dim, invert, ddc (default: brightness)
+#   -m, --mode MODE        Pulse mode: ctm (works under HDR), brightness, dim, invert, ddc (default: ctm)
 #   --restore-fp16         Restore Hyprland FP16 after invert pulse
 
 set -euo pipefail
@@ -20,7 +20,7 @@ INTERVAL=120
 DURATION=0.05
 INTENSITY=1.5
 BASELINE=1.25
-MODE="brightness"
+MODE="ctm"
 SHADER_FILE="/tmp/asbl-pulse.glsl"
 RESTORE_FP16="${ASBL_RESTORE_FP16:-0}"
 
@@ -42,7 +42,7 @@ Options:
   -d, --duration SECS    Pulse duration in seconds (Default: $DURATION)
   -v, --intensity MULT   Brightness multiplier for pulse (Default: $INTENSITY)
   -b, --baseline MULT    Baseline brightness multiplier (Default: $BASELINE)
-  -m, --mode MODE        Mode: brightness, dim, invert, ddc (Default: $MODE)
+  -m, --mode MODE        Mode: ctm, brightness, dim, invert, ddc (Default: $MODE)
 
 DDC mode (sinnix-70eq, HYPOTHESIS -- untested whether this actually resets
 the FO48U's ASBL timer, unlike the other modes which are known to work):
@@ -211,6 +211,42 @@ pulse() {
             sleep "$DURATION"
             cleanup_invert
             trap - RETURN
+            ;;
+        ctm)
+            # The only pulse mode measured to actually work on this display.
+            #
+            # `brightness` and `invert` drive decoration:screen_shader, which
+            # is OFF the render path while this host runs cm = "hdr" with
+            # render:non_shader_cm = 3 -- measured at 0.08% output change, i.e.
+            # nothing (see modules/features/desktop/color-temperature.nix).
+            # `ddc` writes VCP 0x10 +/-1, a 1% step that is both imperceptible
+            # and slower than its own duration; measured 2026-08-13, the
+            # panel's VCP read 50 before and after, so F3 was a silent no-op.
+            #
+            # hyprsunset applies a colour transform matrix through
+            # hyprland-ctm-control-v1, which composes with HDR instead of
+            # being bypassed by it -- the same mechanism that visibly grades
+            # the screen in the evening. Swinging gamma through it produces a
+            # real luminance change at scanout, which is what an ASBL reset
+            # needs. It also does not touch captures: a CTM applies after
+            # screencopy, so this pulse cannot stain screenshots or the
+            # capture-screen recordings the way a shader flash would.
+            local original_gamma
+            original_gamma=$(hyprctl hyprsunset gamma 2>/dev/null | tr -cd '0-9')
+            if [[ -z "$original_gamma" ]]; then
+                echo "asbl-no-moar: ctm mode -- hyprsunset not answering, skipping pulse" >&2
+                return 0
+            fi
+            # Restore even if interrupted; leaving the panel dark would be a
+            # far worse failure than not pulsing at all.
+            restore_gamma() { hyprctl hyprsunset gamma "$original_gamma" >/dev/null 2>&1 || true; }
+            trap restore_gamma RETURN INT TERM
+            hyprctl hyprsunset gamma 40 >/dev/null 2>&1
+            sleep "$half_duration"
+            hyprctl hyprsunset gamma 100 >/dev/null 2>&1
+            sleep "$half_duration"
+            restore_gamma
+            trap - RETURN INT TERM
             ;;
         ddc)
             # sinnix-70eq: nudge the panel's real brightness register instead
