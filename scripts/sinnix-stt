@@ -80,7 +80,14 @@ MODEL_SET = [
     (EMBEDDING, f"{RELEASES}/speaker-recongition-models/nemo_en_titanet_small.onnx", "file"),
     (
         SILERO,
-        "https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx",
+        # Pinned to a commit, not master. The phone app fetches this same file
+        # at build time and pins it (pkgs/sinnix-phone-app/pkg.nix); one VAD
+        # behaviour across the estate only holds if both sides fetch the same
+        # bytes, and a floating ref would silently end that the next time
+        # upstream changes the model. Verified identical today: md5
+        # 302cb198a7bb0400c62b73db2942737f on both sides.
+        "https://github.com/snakers4/silero-vad/raw/"
+        "76e3dc408eb2a5c655c34e230d2d5459b4439daa/src/silero_vad/data/silero_vad.onnx",
         "file",
     ),
 ]
