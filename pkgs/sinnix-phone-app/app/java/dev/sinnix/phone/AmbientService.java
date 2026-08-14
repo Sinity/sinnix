@@ -308,7 +308,24 @@ public class AmbientService extends Service {
       status.recordFailure("rename failed for " + part.getName());
       return;
     }
-    status.chunkClosed(finalFile, chunkStartedAtMs, System.currentTimeMillis());
+    long closedAt = System.currentTimeMillis();
+    int peak = status.chunkPeak();
+    status.chunkClosed(finalFile, chunkStartedAtMs, closedAt);
+    // The chunk itself leaves the phone on the next drain, so the coverage
+    // record has to outlive it: the ribbon and the hole list are reductions of
+    // these lines, not of the directory listing. Peak amplitude travels with
+    // it because a chunk that captured nothing is otherwise indistinguishable
+    // from one that captured a quiet room.
+    Events.record(
+        this,
+        "chunk_closed",
+        "chunk", finalFile.getName(),
+        "started_at", Status.utcStamp(chunkStartedAtMs),
+        "seconds", Math.max(0L, (closedAt - chunkStartedAtMs) / 1000L),
+        "bytes", finalFile.length(),
+        "peak_amplitude", peak,
+        "captured_nothing", peak == 0,
+        "sampling_rate", samplingRate);
   }
 
   private static String stripPart(String name) {
@@ -417,7 +434,7 @@ public class AmbientService extends Service {
         PendingIntent.getActivity(
             this,
             0,
-            new Intent(this, MainActivity.class),
+            new Intent(this, HomeActivity.class),
             PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
 
     Notification.Builder b =

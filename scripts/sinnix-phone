@@ -446,7 +446,7 @@ app-start)
     echo "app-start: no adb transport" >&2
     exit 1
   fi
-  adb_any shell am start -n "$APP_ID/.MainActivity" >/dev/null 2>&1
+  adb_any shell am start -n "$APP_ID/.HomeActivity" >/dev/null 2>&1
   sleep 4
   "$0" app-status
   ;;
