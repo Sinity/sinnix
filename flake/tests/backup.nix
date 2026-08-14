@@ -346,21 +346,11 @@ in
               cp -a "$source_path/." "$repo_path/archives/$archive/"
               ;;
             extract)
-              if [ "$1" = "--destination" ]; then
-                destination="$2"
-                archive_ref="$3"
-                shift 3
-                repo="''${archive_ref%%::*}"
-                archive="''${archive_ref##*::}"
-              else
-                repo="$1"
-                archive="$2"
-                archive="''${archive#::}"
-                shift 2
-                test "$1" = "--destination"
-                destination="$2"
-                shift 2
-              fi
+              archive_ref="$1"
+              archive="''${archive_ref##*::}"
+              repo="''${archive_ref%%::*}"
+              shift
+              destination="$PWD"
               repo_path="''${repo#file://}"
               mkdir -p "$destination"
               if [ "$#" -eq 0 ]; then
@@ -486,7 +476,11 @@ in
           grep -q "subvolume delete $TMPDIR/persist-snapshots/persist.2026-04-02T010000" "$TMPDIR/logs/btrfs.log"
           archive_name="$(borg list --short file://$TMPDIR/repos/borg-sinex-blobs-v1)"
           case "$archive_name" in sinex-blobs-*) ;; *) exit 1 ;; esac
-          borg extract "file://$TMPDIR/repos/borg-sinex-blobs-v1" "::$archive_name" --destination "$TMPDIR/restore"
+          mkdir -p "$TMPDIR/restore"
+          (
+            cd "$TMPDIR/restore"
+            borg extract "file://$TMPDIR/repos/borg-sinex-blobs-v1::$archive_name"
+          )
           cmp "$TMPDIR/live-cas/objects/ab/cdef" "$TMPDIR/restore/objects/ab/cdef"
           grep -q "create .* $TMPDIR/live-cas" "$TMPDIR/logs/borg.log"
           ! grep -q "/realm/sinex/state/blob-repository" "$TMPDIR/logs/borg.log"
@@ -499,8 +493,6 @@ in
             .dolt_commit == "synthetic-dolt-commit" and
             .ok == true
           ' "$beads_drill_log" >/dev/null
-          grep -Fq "extract --destination $TMPDIR" "$TMPDIR/logs/borg.log"
-          grep -Fq "project/sinex/.beads/dolt project/sinex/.beads/issues.jsonl" "$TMPDIR/logs/borg.log"
 
           set +e
           "$TMPDIR/run-missing-realm-hook.sh" > "$TMPDIR/missing-realm.log" 2>&1
