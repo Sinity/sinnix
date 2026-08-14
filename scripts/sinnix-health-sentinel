@@ -252,6 +252,22 @@ while IFS=$'\t' read -r manager unit activation_mode; do
   elif [ "$active_state" = inactive ] || [ "$active_state" = failed ]; then
     status=failed
     evidence="manager=$manager;active_state=$active_state;type=$unit_type;result=$result;wanted_by=$wanted_by"
+  elif [ "$active_state" = activating ] || [ "$active_state" = deactivating ] \
+    || [ "$active_state" = reloading ] || [ "$active_state" = maintenance ]; then
+    # Mid-transition is not a verdict. The sentinel samples on a fixed clock
+    # and every timer-driven oneshot spends its entire run in "activating",
+    # so scoring this state at all makes ordinary work indistinguishable
+    # from an outage: the lane raises a critical "unknown" the moment the
+    # sweep lands inside a run, then a "recovered" one sweep later. That
+    # false pair fires several times an hour and buries the real failures
+    # it exists to surface.
+    #
+    # Hold the previous verdict instead of replacing it: register the key
+    # so the prune below keeps it, and emit nothing. Skipping the key
+    # entirely would prune it, which resets a genuine "failed" memory to
+    # empty and makes a crash-looping unit re-notify on every restart.
+    emitted_keys+=("service:$manager:$unit")
+    continue
   else
     status=unknown
     evidence="manager=$manager;active_state=$active_state"
