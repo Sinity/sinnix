@@ -18,6 +18,17 @@
   <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
   <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
 
+  <!-- The location lane: coarse only. Fine location would buy precision this
+       lane has no use for — the question is which place, not which chair. -->
+  <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+  <!-- Health Connect read grants, per record type. Absent Health Connect is an
+       ordinary outcome (it is a separate APK on Android 13) and the lane says
+       so rather than failing. -->
+  <uses-permission android:name="android.permission.health.READ_STEPS" />
+  <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+  <uses-permission android:name="android.permission.health.READ_SLEEP" />
+
   <!--
     Chunks must land in a directory a second app (Termux sshd, which the
     desktop drain rsyncs through) can read. Scoped storage closes every other
@@ -142,6 +153,40 @@
         android:exported="false"
         android:foregroundServiceType="microphone"
         android:stopWithTask="false" />
+
+    <!--
+      The speech lane. A second microphone-typed service rather than a mode of
+      the first: they answer different questions at different rates (archive
+      grade against recogniser grade) and one of them is off by default, which
+      a shared service would have made awkward to express.
+    -->
+    <service
+        android:name=".capture.SpeechService"
+        android:exported="false"
+        android:foregroundServiceType="microphone"
+        android:stopWithTask="false" />
+
+    <!--
+      Capture before first unlock. directBootAware is the whole point: this is
+      the only component that exists at all between power-on and the operator
+      typing their PIN, which is the window every reboot used to lose.
+    -->
+    <service
+        android:name=".capture.DirectBootService"
+        android:exported="false"
+        android:directBootAware="true"
+        android:foregroundServiceType="microphone"
+        android:stopWithTask="false" />
+
+    <receiver
+        android:name=".capture.LockedBootReceiver"
+        android:exported="true"
+        android:directBootAware="true">
+      <intent-filter android:priority="999">
+        <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+        <action android:name="android.intent.action.USER_UNLOCKED" />
+      </intent-filter>
+    </receiver>
 
     <receiver
         android:name=".capture.BootReceiver"

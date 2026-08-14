@@ -11,6 +11,7 @@ import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.provideContent
+import androidx.glance.appwidget.updateAll
 import androidx.glance.background
 import androidx.glance.layout.Alignment
 import androidx.glance.layout.Column
@@ -28,6 +29,9 @@ import dev.sinnix.phone.sync.Inbox
 import dev.sinnix.phone.ui.mark.MarkActivity
 import dev.sinnix.phone.ui.talk.TalkActivity
 import dev.sinnix.phone.ui.theme.Palette
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 /**
@@ -43,6 +47,28 @@ import org.json.JSONObject
  * and Mark are the verbs whose whole value is costing nothing to reach.
  */
 class SinnixWidget : GlanceAppWidget() {
+
+    companion object {
+        /**
+         * Redraw, from whatever just changed what the widget says.
+         *
+         * The provider declares `updatePeriodMillis="0"` deliberately: the
+         * framework's minimum is thirty minutes and it wakes the device to
+         * deliver it, which for a surface whose content changes on chunk
+         * close and inbox arrival would be both too slow and too expensive.
+         * Pushing on the event is cheaper and always current.
+         */
+        fun refresh(ctx: Context) {
+            CoroutineScope(Dispatchers.Default).launch {
+                try {
+                    SinnixWidget().updateAll(ctx)
+                } catch (e: Exception) {
+                    // No widget placed, or the host is gone. Not a fault: the
+                    // app works perfectly well without one on the home screen.
+                }
+            }
+        }
+    }
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val status = Status.read(context)

@@ -183,6 +183,9 @@ class InboxWatcher(context: Context) {
     companion object {
         /** The backstop: called from the watchdog alarm and on app resume. */
         fun sweepOnce(ctx: Context) {
+            // The estate line on the widget comes from inbox/glance.json, so a
+            // drain is the other event that changes what it says.
+            dev.sinnix.phone.ui.widget.SinnixWidget.refresh(ctx)
             val shown = Inbox.drainNotifications(ctx)
             if (shown > 0) {
                 Events.record(

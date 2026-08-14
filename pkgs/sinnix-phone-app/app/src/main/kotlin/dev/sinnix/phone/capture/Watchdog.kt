@@ -51,6 +51,13 @@ class WatchdogReceiver : BroadcastReceiver() {
         // is the only thing still running on a schedule, and receipts arriving
         // from prime should not be invisible just because the microphone is off.
         InboxWatcher.sweepOnce(ctx)
+        // Everything else periodic rides this same wakeup rather than adding
+        // alarms of its own — see Scheduler for why that is the whole design.
+        dev.sinnix.phone.core.Scheduler.tick(ctx)
+
+        // The speech lane is a separate service with the same mortality as the
+        // recorder, so the sweep that revives one revives the other.
+        if (Prefs.speechLane(ctx)) SpeechService.start(ctx)
 
         if (!Prefs.enabled(ctx)) return
         if (AmbientService.running) return

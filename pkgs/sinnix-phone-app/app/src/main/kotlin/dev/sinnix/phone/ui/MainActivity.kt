@@ -69,6 +69,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         Notifications.ensureChannels(this)
         askForNotificationsOnce()
+        // Decks registered here rather than as a side effect of visiting the
+        // Bench: InstrumentActivity.launchOne resolves a deck id through this
+        // registry, so a deck launched from a notification or an alarm would
+        // otherwise resolve to nothing unless the operator happened to have
+        // opened the shelf first.
+        dev.sinnix.phone.decks.Decks.available(this)
+        if (Prefs.speechLane(this)) dev.sinnix.phone.capture.SpeechService.start(this)
 
         setContent {
             SinnixTheme {
@@ -202,6 +209,8 @@ private fun AppScaffold(startRoute: String?) {
             composable(Destination.INSTRUMENTS.route) { InstrumentsScreen(nav) }
             composable(Destination.CAPTURE.route) { CaptureScreen(nav) }
             composable("grants") { GrantsScreen(nav) }
+            composable("settings") { dev.sinnix.phone.ui.settings.SettingsScreen(nav) }
+            composable("sleep") { dev.sinnix.phone.ui.sleep.SleepRitualScreen(nav) }
             composable("ritual") { RitualScreen(nav) }
             composable("resolve") { ResolveScreen(nav) }
             composable("ready") { ReadyQueueScreen(nav) }

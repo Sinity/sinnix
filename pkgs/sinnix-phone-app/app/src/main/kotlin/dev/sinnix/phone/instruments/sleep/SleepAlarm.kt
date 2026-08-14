@@ -61,6 +61,30 @@ object SleepAlarm {
         }
     }
 
+    /** Disarm: the alarm and every follow-up it would have scheduled. */
+    fun cancel(ctx: Context) {
+        val am = ctx.getSystemService(AlarmManager::class.java) ?: return
+        am.cancel(
+            PendingIntent.getBroadcast(
+                ctx,
+                REQUEST_WAKE,
+                Intent(ctx, SleepAlarmReceiver::class.java).putExtra(EXTRA_OFFSET_MIN, 0),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+        )
+        FOLLOW_UPS.forEach { minutes ->
+            am.cancel(
+                PendingIntent.getBroadcast(
+                    ctx,
+                    REQUEST_FOLLOWUP + minutes,
+                    Intent(ctx, SleepAlarmReceiver::class.java).putExtra(EXTRA_OFFSET_MIN, minutes),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                )
+            )
+        }
+        Events.record(ctx, "sleep_alarm_cancelled")
+    }
+
     /**
      * Anchor the protocol to a real alarm clock.
      *
