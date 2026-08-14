@@ -5,6 +5,8 @@ import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 
 /**
@@ -31,17 +33,32 @@ final class AmbientSensors implements SensorEventListener {
   /** One record a minute: fine enough for circadian work, coarse enough to ignore. */
   private static final long WINDOW_MILLIS = 60_000L;
 
-  /** 5 Hz. A minute-scale mean does not improve above this; battery does. */
-  private static final int SAMPLING_PERIOD_US = 200_000;
+  /**
+   * How much of each minute the sensors are actually listened to.
+   *
+   * <p>Duty-cycled rather than rate-limited because neither lever the API
+   * offers works on this device: the sampling period is only a hint and this
+   * platform answers every request with 50 Hz, and the BMI220 reports no
+   * batching FIFO, so a report-latency window changes nothing. Measured: 3000
+   * accelerometer callbacks a minute either way.
+   *
+   * <p>Ten seconds is plenty to characterise a minute of stillness or motion,
+   * and it cuts the callbacks by six. What is lost is a movement that both
+   * starts and ends inside the unsampled fifty seconds; what is gained is a
+   * lane that can run all day.
+   */
+  private static final long SAMPLE_WINDOW_MILLIS = 10_000L;
 
-  /** Let the sensor hub hold a window's worth before waking the CPU. */
-  private static final int BATCH_LATENCY_US = 60_000_000;
+  /** Only a hint on this platform, kept because it costs nothing where it is honoured. */
+  private static final int SAMPLING_PERIOD_US = 200_000;
 
   private final Context ctx;
   private final SensorManager sensors;
   private final Sensor light;
   private final Sensor accelerometer;
 
+  private final Handler handler = new Handler(Looper.getMainLooper());
+  private boolean listening;
   private long windowStartedAtMs;
 
   private int luxSamples;
@@ -64,39 +81,42 @@ final class AmbientSensors implements SensorEventListener {
     if (sensors == null) {
       return;
     }
-    windowStartedAtMs = System.currentTimeMillis();
-    // Explicit period and batch window, not SENSOR_DELAY_NORMAL: that
-    // constant is only a hint, and this device answered it with 50 Hz --
-    // 3000 accelerometer callbacks a minute, every minute, all day, to
-    // produce one RMS. The period below asks for 5 Hz, and the batch window
-    // lets the sensor hub buffer a minute of samples and wake the CPU once
-    // instead of fifty times a second. Where the hub cannot batch, the
-    // platform falls back to delivering continuously, which is no worse than
-    // what was happening before.
-    if (light != null) {
-      sensors.registerListener(this, light, SAMPLING_PERIOD_US, BATCH_LATENCY_US);
-    }
-    if (accelerometer != null) {
-      sensors.registerListener(this, accelerometer, SAMPLING_PERIOD_US, BATCH_LATENCY_US);
-    }
     Log.i(
         AmbientService.TAG,
         "sensors: light=" + (light != null) + " accelerometer=" + (accelerometer != null));
+    openWindow();
   }
 
   void stop() {
-    if (sensors != null) {
-      sensors.unregisterListener(this);
+    handler.removeCallbacksAndMessages(null);
+    closeWindow();
+  }
+
+  /** Listen for a slice, then sleep until the next minute. */
+  private void openWindow() {
+    windowStartedAtMs = System.currentTimeMillis();
+    if (light != null) {
+      sensors.registerListener(this, light, SAMPLING_PERIOD_US);
     }
+    if (accelerometer != null) {
+      sensors.registerListener(this, accelerometer, SAMPLING_PERIOD_US);
+    }
+    listening = true;
+    handler.postDelayed(this::closeWindow, SAMPLE_WINDOW_MILLIS);
+  }
+
+  private void closeWindow() {
+    if (!listening) {
+      return;
+    }
+    sensors.unregisterListener(this);
+    listening = false;
     flush(System.currentTimeMillis());
+    handler.postDelayed(this::openWindow, Math.max(1L, WINDOW_MILLIS - SAMPLE_WINDOW_MILLIS));
   }
 
   @Override
   public void onSensorChanged(SensorEvent event) {
-    long now = System.currentTimeMillis();
-    if (now - windowStartedAtMs >= WINDOW_MILLIS) {
-      flush(now);
-    }
     switch (event.sensor.getType()) {
       case Sensor.TYPE_LIGHT:
         float lux = event.values[0];
