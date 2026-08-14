@@ -72,7 +72,7 @@ final class Events {
     long now = System.currentTimeMillis();
     try {
       if (!record.has("ts")) {
-        record.put("ts", Status.utcStamp(now));
+        record.put("ts", Status.isoStamp(now));
       }
     } catch (JSONException e) {
       Log.w(AmbientService.TAG, "event missing a usable ts", e);

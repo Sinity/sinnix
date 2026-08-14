@@ -198,7 +198,7 @@ public final class CaptureActivity extends Screen {
       LinearLayout c = column();
       c.setBackground(gradeBackground(Grade.BROKEN));
       c.setPadding(dp(10), dp(8), dp(10), dp(8));
-      c.addView(mono(h.hours() + " h from " + Status.utcStamp(h.startMs), 11, Grade.BROKEN.color));
+      c.addView(mono(h.hours() + " h from " + Status.isoStamp(h.startMs), 11, Grade.BROKEN.color));
       // A hole with a cause is a fact; a hole without one is a mystery
       // somebody has to reconstruct later, which is how sinnix-hcjq happened.
       c.addView(mono(h.cause, 11, TEXT_FAINT));

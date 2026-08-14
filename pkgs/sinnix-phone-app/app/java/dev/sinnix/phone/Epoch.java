@@ -95,7 +95,7 @@ final class Epoch {
         new Epoch(
             "e" + generation,
             Build.FINGERPRINT,
-            Status.utcStamp(System.currentTimeMillis()),
+            Status.isoStamp(System.currentTimeMillis()),
             UNCALIBRATED,
             UNCALIBRATED);
     opened.write(ctx);

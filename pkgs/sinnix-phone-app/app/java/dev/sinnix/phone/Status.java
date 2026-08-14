@@ -198,7 +198,7 @@ final class Status {
       o.put("schema", SCHEMA);
       o.put("app_version", BuildId.VERSION);
       o.put("package", ctx.getPackageName());
-      o.put("updated_at", iso(System.currentTimeMillis()));
+      o.put("updated_at", isoStamp(System.currentTimeMillis()));
       o.put("service_running", AmbientService.running);
       o.put("recording", recording);
       o.put("chunk_dir", dir.getAbsolutePath());
@@ -230,7 +230,7 @@ final class Status {
       o.put("last_error_at", isoOrNull(lastErrorAtMs));
       o.put("screen_interactive", screenInteractive());
       o.put("battery_percent", batteryPercent());
-      o.put("boot_at", iso(System.currentTimeMillis() - android.os.SystemClock.elapsedRealtime()));
+      o.put("boot_at", isoStamp(System.currentTimeMillis() - android.os.SystemClock.elapsedRealtime()));
     } catch (Exception e) {
       Log.w(AmbientService.TAG, "status assembly failed", e);
       return;
@@ -277,10 +277,11 @@ final class Status {
   }
 
   private static Object isoOrNull(long ms) {
-    return ms == 0 ? JSONObject.NULL : iso(ms);
+    return ms == 0 ? JSONObject.NULL : isoStamp(ms);
   }
 
-  private static String iso(long ms) {
+  /** Extended ISO-8601, the shape every timestamp FIELD uses (filenames use utcStamp). */
+  static String isoStamp(long ms) {
     SimpleDateFormat f = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US);
     f.setTimeZone(TimeZone.getTimeZone("UTC"));
     return f.format(new Date(ms));
