@@ -244,8 +244,24 @@ emit() {
 }
 
 if [ -n "$failure_unit" ]; then
+  # Speak the sweep's key, not a private one. This path used to write
+  # "service:<unit>" while the sweep writes "service:<manager>:<unit>", so
+  # the two never saw each other's state: the sweep's prune deleted the
+  # fast-path key on its very next run, which meant the SAME unit failing
+  # again always looked like a first-ever transition and notified again,
+  # and the recovery -- recorded by the sweep under its own key -- never
+  # paired with the outage the operator was actually told about. Observed
+  # 2026-08-14 on borgbackup-status.service: two critical notifications,
+  # no recovery, while the sweep held it healthy the whole time.
+  case "$failure_unit" in
+    *.*) ;;
+    *) failure_unit="$failure_unit.service" ;;
+  esac
+  failure_manager="$(jq -r --arg unit "$failure_unit" \
+    'first(.observedServices[]? | select(.unit == $unit) | .manager) // "system"' "$inventory")"
   force_confirm=1
-  emit "service:$failure_unit" service_failure "$failure_unit" failed "result=${failure_result:-unknown}"
+  emit "service:$failure_manager:$failure_unit" service_failure "$failure_unit" failed \
+    "manager=$failure_manager;source=onfailure;result=${failure_result:-unknown}"
   exit 0
 fi
 
