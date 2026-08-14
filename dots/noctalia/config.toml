@@ -39,6 +39,14 @@ enable_builtin_templates = true
 # also config-provider aware (it detects hyprland.lua vs hyprland.conf and
 # writes the matching include), so it is the one piece of this desktop already
 # ready for the Lua migration.
+#
+# NOTE, learned the hard way within an hour of writing the layer warning at
+# the top of this file: adding it HERE is not enough. The state layer carries
+# its own builtin_ids and wins, so the template kept not running until
+# "hyprland" was added to ~/.local/state/noctalia/settings.toml as well. That
+# file is the GUI's and is not tracked here, so this entry records the intent
+# and survives a state reset -- it does not by itself make the template run.
+# Check `noctalia config export merged`, not this file, to see what is live.
 builtin_ids = ["gtk3", "gtk4", "hyprland", "kitty", "qt"]
 enable_community_templates = true
 community_ids = ["zed", "yazi"]
