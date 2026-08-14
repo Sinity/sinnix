@@ -78,10 +78,14 @@ def transcribe(wav: bytes, *, timeout: float = 60.0) -> dict | None:
     """
     boundary = uuid.uuid4().hex
     body = (
-        f"--{boundary}\r\n"
-        'Content-Disposition: form-data; name="file"; filename="utterance.wav"\r\n'
-        "Content-Type: audio/wav\r\n\r\n"
-    ).encode() + wav + f"\r\n--{boundary}--\r\n".encode()
+        (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="file"; filename="utterance.wav"\r\n'
+            "Content-Type: audio/wav\r\n\r\n"
+        ).encode()
+        + wav
+        + f"\r\n--{boundary}--\r\n".encode()
+    )
     req = urllib.request.Request(
         STT_ENDPOINT,
         data=body,
@@ -118,7 +122,9 @@ class SpeechLane:
             obj["error"] = "speech line carried no audio"
             return obj
         if seconds > MAX_UTTERANCE_SECONDS:
-            obj["error"] = f"utterance of {seconds:.0f}s exceeds the {MAX_UTTERANCE_SECONDS}s ceiling"
+            obj["error"] = (
+                f"utterance of {seconds:.0f}s exceeds the {MAX_UTTERANCE_SECONDS}s ceiling"
+            )
             return obj
 
         try:

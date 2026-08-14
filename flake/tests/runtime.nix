@@ -160,16 +160,13 @@ in
             message = "An idle stt-proxy exit must tear down the STT backend cgroup";
           }
           {
-            assertion =
-              lib.hasInfix "systemd-socket-proxyd" config.systemd.services.stt-proxy.serviceConfig.ExecStart;
+            assertion = lib.hasInfix "systemd-socket-proxyd" config.systemd.services.stt-proxy.serviceConfig.ExecStart;
             message = "STT activation must use the idle-aware systemd socket proxy";
           }
           {
             assertion =
               config.sinnix.runtime.inventory.surfaces.stt.activation.backendEndpoint == "127.0.0.1:8091"
-              &&
-                config.sinnix.runtime.inventory.surfaces.stt-proxy.activation.publicEndpoint
-                == "127.0.0.1:8090";
+              && config.sinnix.runtime.inventory.surfaces.stt-proxy.activation.publicEndpoint == "127.0.0.1:8090";
             message = "Runtime inventory must describe the public and private STT activation endpoints";
           }
           {

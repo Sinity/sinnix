@@ -1,4 +1,9 @@
-{ inputs, lib, pkgs, ... }:
+{
+  inputs,
+  lib,
+  pkgs,
+  ...
+}:
 {
   imports = [
     ./boot.nix
@@ -68,7 +73,10 @@
   # and a sleeping phone-as-server breaks SSH and Mosh equally).
   environment.systemPackages = [ pkgs.mosh ];
   networking.firewall.interfaces.tailscale0.allowedUDPPortRanges = [
-    { from = 60000; to = 61000; }
+    {
+      from = 60000;
+      to = 61000;
+    }
   ];
 
   sinnix.services = {

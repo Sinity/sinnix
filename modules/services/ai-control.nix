@@ -287,12 +287,10 @@ let
       name: backend:
       lib.mkIf backend.enable (
         let
-          peerUnits = lib.concatMap
-            (peerName: [
-              gpuInferenceBackends.${peerName}.service
-              gpuInferenceBackends.${peerName}.proxy
-            ])
-            (lib.filter (n: n != name) (lib.attrNames gpuInferenceBackends));
+          peerUnits = lib.concatMap (peerName: [
+            gpuInferenceBackends.${peerName}.service
+            gpuInferenceBackends.${peerName}.proxy
+          ]) (lib.filter (n: n != name) (lib.attrNames gpuInferenceBackends));
         in
         {
           ${lib.removeSuffix ".service" backend.service}.conflicts = peerUnits;
