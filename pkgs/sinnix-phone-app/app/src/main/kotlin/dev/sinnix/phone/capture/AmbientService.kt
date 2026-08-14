@@ -54,6 +54,8 @@ class AmbientService : Service() {
     private val status = Status()
     private var sensors: AmbientSensors? = null
     private var inbox: InboxWatcher? = null
+    private var passive: PassiveLanes? = null
+    private var location: dev.sinnix.phone.ingress.LocationLane? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -77,6 +79,13 @@ class AmbientService : Service() {
         liveStatus = status
         sensors = AmbientSensors(this).also { it.start() }
         inbox = InboxWatcher(this).also { it.start() }
+        passive = PassiveLanes(this)
+        location = dev.sinnix.phone.ingress.LocationLane(this).also { it.start() }
+        // The capture preference lives in credential-protected storage, which
+        // a locked boot cannot read. Mirroring it here — from the one place
+        // that only runs when capture is actually meant to be on — is what
+        // lets the pre-unlock recorder know whether to run at all.
+        DirectBoot.mirror(this, dev.sinnix.phone.core.Prefs.enabled(this))
         sweepOrphans()
     }
 
@@ -140,6 +149,7 @@ class AmbientService : Service() {
         }
         sensors?.stop()
         inbox?.stop()
+        location?.stop()
         thread.quitSafely()
         wakeLock?.takeIf { it.isHeld }?.release()
         liveStatus = null
@@ -279,6 +289,9 @@ class AmbientService : Service() {
             // was wrong when this whole failure mode was discovered.
             Notifications.clearAlert(this)
         }
+        // A closed chunk changes the ribbon and the unbroken count, which is
+        // most of what the widget says.
+        dev.sinnix.phone.ui.widget.SinnixWidget.refresh(this)
     }
 
     private fun onRecorderError(detail: String) {
@@ -302,6 +315,10 @@ class AmbientService : Service() {
     private fun heartbeat() {
         val size = currentPart?.length() ?: 0L
         status.heartbeat(size, elapsedChunkSeconds(), sampleAmplitude())
+        // Two lanes that need no schedule of their own: this process is
+        // already awake, so power and sleep-estimate readings are free here
+        // and would cost a wakeup anywhere else.
+        passive?.tick()
 
         // A chunk whose file has stopped growing means the recorder has stopped
         // producing frames while still believing it is running.

@@ -87,4 +87,9 @@ dependencies {
     implementation(libs.androidx.glance.material3)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.okhttp)
+    // Silero VAD, so the phone gates speech with the same engine the desktop
+    // does rather than an energy threshold that would stream every passing car.
+    implementation(libs.onnxruntime.android)
+    // Read the band's data directly; the scheduled export never lands.
+    implementation(libs.androidx.health.connect)
 }

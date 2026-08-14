@@ -52,6 +52,19 @@ Every record carries `speech_seconds` against `audio_seconds`, so **silence is
 measured rather than assumed**. "Nobody said anything in this hour" is a
 finding with a number behind it, not a gap where a transcript should be.
 
+And the number is worth stating plainly, because it settles what this corpus
+is. The first full pass covered **57.5 hours of audio and found 28 seconds of
+speech across 12 files — 0.013% of everything recorded.** The archive is a
+recording of empty rooms and sleeping, which is exactly what the operator said
+it would be before any of this ran.
+
+That is not an argument against the lane; it is the argument for the gate. A
+corpus that is 99.987% silence is cheap to keep and cheap to search precisely
+because nothing decodes the silence, and an engine that hallucinated over it
+would have produced 57 hours of invented conversation. What it does mean is
+that the value here is forward-looking: the always-on speech lane and the
+voice notes, not archaeology on the backlog.
+
 ## Using it
 
 ```

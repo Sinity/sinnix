@@ -196,6 +196,7 @@ fun CaptureScreen(nav: NavController) {
         }
 
         VerbButton("Grants", Modifier.fillMaxWidth()) { nav.navigate("grants") }
+        VerbButton("Settings", Modifier.fillMaxWidth()) { nav.navigate("settings") }
 
         Card {
             SectionLabel("Control")
