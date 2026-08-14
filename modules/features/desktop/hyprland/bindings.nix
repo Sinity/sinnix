@@ -112,6 +112,13 @@ in
     "SUPER, F4, Apply a random screen shader, exec, ${scriptPkgs.sinnix-shader}/bin/sinnix-shader random"
     "SUPER SHIFT, F4, Start screen-shader playback, exec, ${scriptPkgs.sinnix-shader}/bin/sinnix-shader play --random --interval 6 --crossfade 1.5"
     ", F6, Toggle the WeeChat scratchpad, exec, uwsm app -- ${script "toggle-scratch"} weechat"
+    # The agent browser lives on a hidden special workspace and is otherwise
+    # invisible; this is the only way to look at what an agent is doing in it.
+    # A plain toggle rather than a scratchpad script because the window is
+    # already parked there by a windowrule -- nothing needs launching, only
+    # showing. Sits between the other two F-key scratchpads on purpose: it is
+    # the same gesture for the same kind of thing.
+    ", F7, Toggle the agent browser into view, togglespecialworkspace, agentbrowser"
     ", F8, Toggle the raw-log scratchpad, exec, uwsm app -- ${script "toggle-scratch"} rawlog"
     ", F9, Emergency stop for runaway builds and background work, exec, sudo -n ${scriptPkgs.nuke-builds}/bin/nuke-builds"
 

@@ -129,8 +129,6 @@ mkFeatureModule {
       inherit (serena) serenaConfigFile mkSerenaWrapper;
       inherit (browser)
         mcpChromeDevtoolsBin
-        mcpChromeDevtoolsPrivateBin
-        mcpChromeDevtoolsPrivateVisibleBin
         desktopControlScripts
         ;
       inherit (mcpTools)
@@ -299,14 +297,6 @@ mkFeatureModule {
             };
             ".local/bin/mcp-chrome-devtools" = {
               source = "${mcpChromeDevtoolsBin}/bin/mcp-chrome-devtools";
-              force = true;
-            };
-            ".local/bin/mcp-chrome-devtools-private" = {
-              source = "${mcpChromeDevtoolsPrivateBin}/bin/mcp-chrome-devtools-private";
-              force = true;
-            };
-            ".local/bin/mcp-chrome-devtools-private-visible" = {
-              source = "${mcpChromeDevtoolsPrivateVisibleBin}/bin/mcp-chrome-devtools-private-visible";
               force = true;
             };
             ".local/bin/sinnix-chrome-control" = {

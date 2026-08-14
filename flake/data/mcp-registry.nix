@@ -167,27 +167,6 @@ let
       ];
     };
 
-    chrome-devtools-private = {
-      transport = "stdio";
-      tier = "browser-mcp";
-      command = "mcp-chrome-devtools-private";
-      clients = [
-        "claude"
-        "codex"
-        "gemini"
-      ];
-    };
-
-    chrome-devtools-private-visible = {
-      transport = "stdio";
-      tier = "browser-mcp";
-      command = "mcp-chrome-devtools-private-visible";
-      clients = [
-        "claude"
-        "codex"
-        "gemini"
-      ];
-    };
   };
 
   profileTiers = {
