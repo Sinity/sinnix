@@ -19,6 +19,15 @@ object Prefs {
     private const val KEY_EMA_PER_DAY = "ema_per_day"
     private const val KEY_LISTENER_ACK = "notification_listener_acknowledged"
     private const val KEY_AUTOSTART_ATTESTED_AT = "miui_autostart_attested_at"
+    private const val KEY_SPEECH = "speech_lane_enabled"
+    private const val KEY_RECEIVER = "receiver_host"
+    private const val KEY_LOCATION = "location_lane_enabled"
+    private const val KEY_HEALTH = "health_lane_enabled"
+    private const val KEY_SLEEP_DETECT = "sleep_detect_enabled"
+    private const val KEY_POWER = "power_lane_enabled"
+    private const val KEY_WAKE_HOUR = "wake_hour"
+    private const val KEY_WAKE_MINUTE = "wake_minute"
+    private const val KEY_WAKE_ARMED = "wake_armed"
 
     /**
      * The estate's own address. A default rather than a setting the operator
@@ -82,4 +91,76 @@ object Prefs {
 
     fun setAutostartAttestedAt(ctx: Context, ms: Long) =
         prefs(ctx).edit().putLong(KEY_AUTOSTART_ATTESTED_AT, ms).apply()
+
+    /**
+     * The always-on speech lane. **Off by default, and that is the point.**
+     *
+     * Every other lane here records something about the device or the room.
+     * This one takes what was said and puts it on a wire to another machine
+     * the moment it is said. That is a different kind of thing to switch on,
+     * so nothing switches it on but the operator.
+     */
+    fun speechLane(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_SPEECH, false)
+
+    fun setSpeechLane(ctx: Context, value: Boolean) =
+        prefs(ctx).edit().putBoolean(KEY_SPEECH, value).apply()
+
+    /**
+     * Where the speech receiver listens.
+     *
+     * Its own setting rather than derived from the hub URL: the hub is HTTP
+     * through Caddy and the receiver is a raw TCP socket on a different port,
+     * so one address standing for both would break the moment either moved.
+     */
+    fun receiverHost(ctx: Context): String =
+        prefs(ctx).getString(KEY_RECEIVER, DEFAULT_RECEIVER) ?: DEFAULT_RECEIVER
+
+    fun setReceiverHost(ctx: Context, value: String) =
+        prefs(ctx).edit().putString(KEY_RECEIVER, value).apply()
+
+    fun locationLane(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_LOCATION, false)
+
+    fun setLocationLane(ctx: Context, value: Boolean) =
+        prefs(ctx).edit().putBoolean(KEY_LOCATION, value).apply()
+
+    fun healthLane(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_HEALTH, false)
+
+    fun setHealthLane(ctx: Context, value: Boolean) =
+        prefs(ctx).edit().putBoolean(KEY_HEALTH, value).apply()
+
+    /** Sleep inferred from the phone's own signals. Cheap, so on by default. */
+    fun sleepDetect(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_SLEEP_DETECT, true)
+
+    fun setSleepDetect(ctx: Context, value: Boolean) =
+        prefs(ctx).edit().putBoolean(KEY_SLEEP_DETECT, value).apply()
+
+    /** Battery and thermal as events. Free — the service already reads both. */
+    fun powerLane(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_POWER, true)
+
+    fun setPowerLane(ctx: Context, value: Boolean) =
+        prefs(ctx).edit().putBoolean(KEY_POWER, value).apply()
+
+    /** The sleep-inertia protocol's wake time, and whether it is armed. */
+    fun wakeHour(ctx: Context): Int = prefs(ctx).getInt(KEY_WAKE_HOUR, 7)
+
+    fun wakeMinute(ctx: Context): Int = prefs(ctx).getInt(KEY_WAKE_MINUTE, 0)
+
+    fun wakeArmed(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_WAKE_ARMED, false)
+
+    fun setWake(ctx: Context, hour: Int, minute: Int, armed: Boolean) =
+        prefs(ctx)
+            .edit()
+            .putInt(KEY_WAKE_HOUR, hour.coerceIn(0, 23))
+            .putInt(KEY_WAKE_MINUTE, minute.coerceIn(0, 59))
+            .putBoolean(KEY_WAKE_ARMED, armed)
+            .apply()
+
+    /**
+     * The receiver's address, defaulted to prime's tailnet name.
+     *
+     * Cleartext and unauthenticated, like the hub, because the tailnet is the
+     * boundary — see the network-security config for why that is a considered
+     * position rather than a leftover.
+     */
+    const val DEFAULT_RECEIVER = "sinnix-prime:8940"
 }

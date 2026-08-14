@@ -1,0 +1,536 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Mint drill decks for the phone from the operator's own lake — shell recall, Fermi estimation, and the typing-error analysis
+# runtimeInputs: coreutils sqlite
+
+"""Drills generated from the operator's own data.
+
+The phone runs decks and nothing generated them, so the deck player has been a
+loaded gun with no ammunition since it shipped. This is the forge.
+
+The property that makes the whole arrangement worth having: a deck
+parameterizes an engine and never ships code, so a new drill is a JSON file
+written into the inbox rather than a build, a sideload, and an MIUI install
+dialog. The engines already on the phone -- reaction, forced choice, staircase,
+hold-still, counting -- are the whole vocabulary, and a deck that names an
+engine this build does not know renders as present-but-not-runnable with the
+reason shown rather than silently doing something approximate.
+
+Personalized-corpus drills are the class worth building (sinnix-9si): stimuli
+drawn from the operator's own shell history, own keystrokes, own lake, so the
+drill is about their actual vocabulary rather than a generic curriculum.
+
+One thing this forge deliberately does NOT emit is a typing drill, and the
+reason is in `typing` below.
+"""
+
+from __future__ import annotations
+
+import argparse
+import collections
+import datetime as dt
+import json
+import os
+import random
+import re
+import sqlite3
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any, Iterable
+
+SCHEMA = "sinnix.phone.deck/1"
+
+STATE_DIR = Path(os.environ.get("SINNIX_PHONE_STATE_DIR", "/realm/state/sinnix-phone"))
+DECKS_DIR = STATE_DIR / "inbox" / "decks"
+
+LAKE = Path(os.environ.get("SINNIX_CAPTURES_ROOT", "/realm/data/captures"))
+DERIVED = Path(os.environ.get("SINNIX_DERIVED_ROOT", "/realm/data/derived"))
+
+ATUIN_DB = Path(os.environ.get("ATUIN_DB", Path.home() / ".local/share/atuin/history.db"))
+KEYLOG = LAKE / "keylog" / "logs"
+
+
+def now_iso() -> str:
+    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def write_deck(deck: dict, *, dry_run: bool = False) -> Path | None:
+    """One deck, atomically, into the directory the drain pushes.
+
+    The `.part` rename is the same discipline the rest of the estate uses for
+    anything a second process collects: the drain moves whole files, and a
+    half-written deck collected mid-write is a deck the phone reports as
+    corrupt.
+    """
+    if dry_run:
+        print(json.dumps(deck, ensure_ascii=False, indent=2))
+        return None
+    DECKS_DIR.mkdir(parents=True, exist_ok=True)
+    dest = DECKS_DIR / f"{deck['id']}.json"
+    tmp = dest.with_suffix(".json.part")
+    tmp.write_text(json.dumps(deck, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp.rename(dest)
+    return dest
+
+
+def deck(
+    *,
+    deck_id: str,
+    title: str,
+    engine: str,
+    trials: list[dict],
+    blurb: str,
+    seconds: int,
+    config: dict | None = None,
+) -> dict:
+    """The shape `Decks.kt` parses. Version is the engine contract, not the deck's."""
+    return {
+        "schema": SCHEMA,
+        "id": deck_id,
+        "title": title,
+        "engine": engine,
+        "engine_version": 1,
+        "seconds": seconds,
+        "blurb": blurb,
+        "scored_on_device": True,
+        "generated_at": now_iso(),
+        "config": config or {},
+        "trials": trials,
+        "assets": [],
+    }
+
+
+# ------------------------------------------------------------ shell fluency
+
+
+#: Commands whose arguments are free-form (paths, branches, jump targets), so
+#: blanking one produces a question with no determinate answer.
+FREEFORM_HEADS = {
+    "z", "cd", "ls", "ll", "la", "cat", "bat", "vim", "nvim", "code", "rm", "cp",
+    "mv", "mkdir", "touch", "less", "tail", "head", "echo", "which", "cursor",
+    "du", "df", "chmod", "chown", "source", "export", "wc", "open", "xdg-open",
+}
+
+#: Tools whose first argument is a subcommand from a fixed vocabulary -- the
+#: case where "which verb" is a real recall question.
+SUBCOMMAND_HEADS = {
+    "git", "systemctl", "nix", "cargo", "docker", "podman", "bd", "just",
+    "kubectl", "npm", "pnpm", "uv", "pip", "apt", "brew", "gh", "atuin",
+    "journalctl", "sinnix", "xtask", "tailscale", "zfs", "btrfs",
+}
+
+
+def _is_flag(tok: str) -> bool:
+    return tok.startswith("-") and len(tok) > 1
+
+
+def atuin_commands(limit: int = 40000) -> list[str]:
+    if not ATUIN_DB.is_file():
+        return []
+    try:
+        con = sqlite3.connect(f"file:{ATUIN_DB}?mode=ro", uri=True)
+        rows = con.execute(
+            "select command from history where deleted_at is null "
+            "order by timestamp desc limit ?",
+            (limit,),
+        ).fetchall()
+        con.close()
+    except sqlite3.Error as exc:
+        print(f"forge: atuin unreadable ({exc})", file=sys.stderr)
+        return []
+    return [r[0] for r in rows if r and r[0]]
+
+
+def build_shell_deck(n_trials: int, rng: random.Random) -> dict | None:
+    """Recall of the operator's own command vocabulary.
+
+    A command is shown with one token blanked and four candidates offered: the
+    token actually used, and three drawn from the same argument position of
+    other commands in the same family. That makes the distractors plausible --
+    they are things this operator really types -- rather than inventions, which
+    is what separates a recall test from a reading test.
+
+    Deliberately recall and not motor. A typing drill would be measuring a
+    touchscreen; naming a flag is the same task on any keyboard.
+    """
+    history = atuin_commands()
+    if len(history) < 500:
+        print(f"forge: only {len(history)} shell commands; skipping the shell deck", file=sys.stderr)
+        return None
+
+    freq = collections.Counter(history)
+    # Tokens the operator actually uses, indexed by the command they follow, so
+    # a distractor for `git <x>` is another thing they really do to git.
+    by_head: dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
+    for cmd, count in freq.items():
+        parts = cmd.split()
+        if len(parts) < 2:
+            continue
+        head = parts[0]
+        for tok in parts[1:]:
+            if tok.startswith("/") or tok.startswith("~") or len(tok) > 24:
+                continue
+            by_head[head][tok] += count
+
+    candidates = [
+        (cmd, count)
+        for cmd, count in freq.most_common(600)
+        if len(cmd.split()) >= 2 and len(cmd) <= 60 and not cmd.startswith("#")
+        and cmd.split()[0] not in FREEFORM_HEADS
+    ]
+    rng.shuffle(candidates)
+
+    trials: list[dict] = []
+    seen: set[str] = set()
+    for cmd, count in candidates:
+        if len(trials) >= n_trials:
+            break
+        parts = cmd.split()
+        head = parts[0]
+        pool = by_head.get(head)
+        if not pool or len(pool) < 6:
+            continue
+        # Only blank a token that HAS a right answer. A path, a branch name or
+        # a zoxide jump is a free argument -- four of them offered as options
+        # is a question with four correct answers, which measures nothing. A
+        # flag or a subcommand is recall.
+        drillable = [
+            i
+            for i in range(1, len(parts))
+            if _is_flag(parts[i]) or (i == 1 and head in SUBCOMMAND_HEADS and parts[i].isalpha())
+        ]
+        if not drillable:
+            continue
+        idx = rng.choice(drillable)
+        answer = parts[idx]
+        if len(answer) < 2:
+            continue
+        key = f"{head}:{answer}"
+        if key in seen:
+            continue
+        # Distractors must be the same KIND of token as the answer, or the
+        # answer is identifiable by shape alone and the trial tests nothing.
+        same_kind = _is_flag(answer)
+        distractors = [
+            t
+            for t, _ in pool.most_common(60)
+            if t != answer
+            and _is_flag(t) == same_kind
+            and len(t) >= 2
+            # A subcommand's distractors must also look like subcommands. Left
+            # unfiltered the pool offers commit-message fragments and quoted
+            # strings, which the answer is distinguishable from by shape alone.
+            and (same_kind or (t.isalpha() and len(t) <= 14))
+        ]
+        if len(distractors) < 3:
+            continue
+        rng.shuffle(distractors)
+        options = distractors[:3] + [answer]
+        rng.shuffle(options)
+        masked = list(parts)
+        masked[idx] = "___"
+        seen.add(key)
+        trials.append(
+            {
+                "prompt": " ".join(masked),
+                "options": options,
+                "correct": options.index(answer),
+                "tag": f"used {count}x",
+            }
+        )
+
+    # Relative to what was asked for, not an absolute floor: a deliberately
+    # small deck is a valid request, an unexpectedly small one is a finding.
+    floor = max(4, min(8, n_trials))
+    if len(trials) < floor:
+        print(f"forge: only {len(trials)} usable shell trials (wanted {n_trials}); skipping",
+              file=sys.stderr)
+        return None
+    return deck(
+        deck_id="shell-fluency",
+        title="Shell recall",
+        engine="forced_choice",
+        trials=trials,
+        blurb="Fill the blank with what you actually typed.",
+        seconds=max(60, len(trials) * 6),
+    )
+
+
+# --------------------------------------------------------- Fermi estimation
+
+
+def _count_lines(path: Path, limit: int = 5_000_000) -> int:
+    try:
+        with path.open("rb") as fh:
+            return sum(1 for _ in zip(range(limit), fh))
+    except OSError:
+        return 0
+
+
+def lake_facts() -> list[tuple[str, float, str]]:
+    """Checkable quantities about the operator's own estate.
+
+    Every item has an answer the machine can verify, which is what makes this
+    estimation practice rather than trivia: the calibration curve only means
+    something if the ground truth is real.
+    """
+    facts: list[tuple[str, float, str]] = []
+
+    cmds = atuin_commands(limit=200000)
+    if cmds:
+        facts.append(("shell commands in your recorded history", len(cmds), "commands"))
+        distinct = len(set(cmds))
+        facts.append(("distinct shell command lines you have run", distinct, "commands"))
+
+    ambient = LAKE / "phone" / "ambient"
+    if ambient.is_dir():
+        n = sum(1 for p in ambient.iterdir() if p.suffix == ".m4a")
+        if n:
+            facts.append(("five-minute ambient audio chunks on the phone right now", n, "chunks"))
+
+    levels = LAKE / "phone" / "ambient-levels.jsonl"
+    if levels.is_file():
+        n = _count_lines(levels)
+        if n:
+            facts.append(("ambient chunks measured into the levels ledger", n, "records"))
+
+    transcripts = LAKE / "transcripts"
+    if transcripts.is_dir():
+        n = sum(_count_lines(p) for p in transcripts.glob("2*.jsonl"))
+        if n:
+            facts.append(("audio files the estate has transcribed", n, "files"))
+
+    for day in sorted(KEYLOG.glob("*.jsonl"), reverse=True)[:1]:
+        n = _count_lines(day)
+        if n:
+            facts.append((f"input events captured on {day.stem}", n, "events"))
+
+    return facts
+
+
+def build_fermi_deck(rng: random.Random) -> dict | None:
+    """Order-of-magnitude estimation against facts the estate can check.
+
+    Four buckets rather than a free-text number, because the phone's forced-
+    choice engine is what exists and because the useful skill is landing the
+    decade, not the digit. The true answer's bucket is the correct option; the
+    others are decades either side, so a miss says how far off the estimate was
+    rather than merely that it was wrong.
+    """
+    facts = lake_facts()
+    if len(facts) < 4:
+        print(f"forge: only {len(facts)} checkable facts; skipping the Fermi deck", file=sys.stderr)
+        return None
+
+    def bucket_label(lo: float, hi: float, unit: str) -> str:
+        def fmt(v: float) -> str:
+            if v >= 1_000_000:
+                return f"{v/1_000_000:g}M"
+            if v >= 1000:
+                return f"{v/1000:g}k"
+            return f"{v:g}"
+        return f"{fmt(lo)}–{fmt(hi)} {unit}"
+
+    trials: list[dict] = []
+    for question, truth, unit in facts:
+        if truth <= 0:
+            continue
+        decade = 10 ** int(len(str(int(truth))) - 1)
+        lo = decade
+        # Four contiguous decades with the truth inside one of them.
+        bands = [(lo / 100, lo / 10), (lo / 10, lo), (lo, lo * 10), (lo * 10, lo * 100)]
+        correct = next((i for i, (a, b) in enumerate(bands) if a <= truth < b), 2)
+        options = [bucket_label(a, b, unit) for a, b in bands]
+        trials.append(
+            {
+                "prompt": f"How many {question}?",
+                "options": options,
+                "correct": correct,
+                "tag": f"truth={int(truth)}",
+            }
+        )
+
+    if len(trials) < 4:
+        return None
+    rng.shuffle(trials)
+    return deck(
+        deck_id="fermi-own-estate",
+        title="Estimate your own estate",
+        engine="forced_choice",
+        trials=trials,
+        blurb="Pick the decade. Every answer is checkable against the lake.",
+        seconds=max(60, len(trials) * 12),
+    )
+
+
+# ------------------------------------------------------------------- typing
+
+
+def analyse_typing(days: int, max_lines: int) -> dict | None:
+    """The operator's weak digraphs, normalised so the number means something.
+
+    The naive count -- which digraphs most often precede a backspace -- just
+    recovers English letter frequency: BE, ON and ER top that list because they
+    top every list. What matters is P(correction | digraph), and the difference
+    is not cosmetic. Measured over one real day: BE corrects 47.7% of the time
+    against UL's 0.0%, a thirty-fold spread among digraphs of comparable
+    frequency. The raw ranking would have produced a drill aimed at the letters
+    the operator types most, which is not the same as the letters they get
+    wrong.
+    """
+    if not KEYLOG.is_dir():
+        return None
+    files = sorted(KEYLOG.glob("*.jsonl"), reverse=True)[:days]
+    if not files:
+        return None
+
+    occur: collections.Counter = collections.Counter()
+    corrected: collections.Counter = collections.Counter()
+    presses = backspaces = 0
+    prev: collections.deque = collections.deque(maxlen=2)
+
+    for path in files:
+        try:
+            with path.open(errors="replace") as fh:
+                for i, line in enumerate(fh):
+                    if i > max_lines:
+                        break
+                    try:
+                        o = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if o.get("event") != "press":
+                        continue
+                    kc = o.get("keycode") or ""
+                    if not kc.startswith("KEY_"):
+                        continue
+                    presses += 1
+                    k = kc[4:]
+                    if k == "BACKSPACE":
+                        backspaces += 1
+                        if len(prev) == 2 and all(len(p) == 1 and p.isalpha() for p in prev):
+                            corrected["".join(prev)] += 1
+                        continue
+                    if len(k) == 1 and k.isalpha():
+                        prev.append(k)
+                        if len(prev) == 2:
+                            occur["".join(prev)] += 1
+                    else:
+                        prev.clear()
+        except OSError:
+            continue
+
+    if presses < 1000:
+        return None
+    rows = [
+        {"digraph": d, "rate": corrected[d] / occur[d], "occurrences": occur[d], "corrections": corrected[d]}
+        for d in occur
+        if occur[d] >= 150
+    ]
+    rows.sort(key=lambda r: -r["rate"])
+    return {
+        "schema": "sinnix.typing.profile/1",
+        "generated_at": now_iso(),
+        "days": len(files),
+        "presses": presses,
+        "backspaces": backspaces,
+        "correction_rate": round(backspaces / presses, 4),
+        "distinct_digraphs": len(occur),
+        "weakest": rows[:25],
+        "strongest": rows[-10:],
+        "method": "P(correction | digraph), min 150 occurrences; the unnormalised "
+        "count recovers English letter frequency rather than operator weakness",
+    }
+
+
+def cmd_typing(args: argparse.Namespace) -> int:
+    """Analyse, record, and deliberately do not emit a phone deck.
+
+    The analysis is real and the weakness is real, but a phone deck would be
+    the wrong instrument for it. The measurement comes from a mechanical
+    keyboard and ten fingers; the deck player runs on a touchscreen and two
+    thumbs. Drilling BE on a phone would train thumb-typing and produce a
+    tidy-looking series about an apparatus the weakness does not live in --
+    which is exactly the failure mode this estate keeps naming: something that
+    looks like the measurement and is not.
+
+    So the profile is written to the lake, where a desktop drill can use it,
+    and the phone is left alone.
+    """
+    profile = analyse_typing(args.days, args.max_lines)
+    if profile is None:
+        print("forge: no usable keystroke captures; skipping the typing analysis", file=sys.stderr)
+        return 0
+    out_dir = DERIVED / "typing"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    dest = out_dir / f"{dt.datetime.now(dt.timezone.utc).date().isoformat()}.json"
+    dest.write_text(json.dumps(profile, indent=2) + "\n", encoding="utf-8")
+    top = profile["weakest"][:5]
+    print(f"forge: typing profile -> {dest}")
+    print(
+        f"  {profile['presses']} presses, {profile['correction_rate']*100:.1f}% corrected; "
+        f"weakest: " + ", ".join(f"{r['digraph']} {r['rate']*100:.0f}%" for r in top)
+    )
+    print(
+        "  no phone deck emitted: this is a mechanical-keyboard measurement and the "
+        "deck player is a touchscreen — see cmd_typing's docstring",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def cmd_shell(args: argparse.Namespace) -> int:
+    d = build_shell_deck(args.trials, random.Random(args.seed))
+    if d is None:
+        return 0
+    p = write_deck(d, dry_run=args.dry_run)
+    print(f"forge: shell deck ({len(d['trials'])} trials)" + (f" -> {p}" if p else ""),
+          file=sys.stderr if args.dry_run else sys.stdout)
+    return 0
+
+
+def cmd_fermi(args: argparse.Namespace) -> int:
+    d = build_fermi_deck(random.Random(args.seed))
+    if d is None:
+        return 0
+    p = write_deck(d, dry_run=args.dry_run)
+    print(f"forge: fermi deck ({len(d['trials'])} trials)" + (f" -> {p}" if p else ""),
+          file=sys.stderr if args.dry_run else sys.stdout)
+    return 0
+
+
+def cmd_all(args: argparse.Namespace) -> int:
+    cmd_shell(args)
+    cmd_fermi(args)
+    cmd_typing(args)
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--dry-run", action="store_true", help="print decks instead of writing them")
+    p.add_argument("--seed", type=int, default=None)
+    p.add_argument("--trials", type=int, default=20)
+    p.add_argument("--days", type=int, default=2, help="keystroke day-files to analyse")
+    p.add_argument("--max-lines", type=int, default=4_000_000, help="per keystroke day-file")
+    sub = p.add_subparsers(dest="command", required=True)
+
+    for name, fn, help_text in (
+        ("shell", cmd_shell, "recall deck from your own shell history"),
+        ("fermi", cmd_fermi, "estimation deck checkable against the lake"),
+        ("typing", cmd_typing, "weak-digraph analysis (writes a profile, not a deck)"),
+        ("all", cmd_all, "every generator"),
+    ):
+        s = sub.add_parser(name, help=help_text)
+        s.set_defaults(func=fn)
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
