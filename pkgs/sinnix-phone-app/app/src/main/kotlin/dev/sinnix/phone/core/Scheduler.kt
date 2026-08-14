@@ -28,7 +28,6 @@ import kotlin.random.Random
 object Scheduler {
 
     private const val KEY_LAST_EMA = "last_ema_at"
-    private const val KEY_LAST_HEALTH = "last_health_sync"
     private const val KEY_EMA_SLOT = "ema_slot_today"
 
     /** Called from the watchdog receiver, every ~10 minutes. */
@@ -80,21 +79,25 @@ object Scheduler {
     /**
      * Pull whatever the band has written since the last look.
      *
-     * Hourly rather than every tick: Health Connect writes in batches when the
-     * band syncs, so asking six times an hour would mostly be asking a
-     * database that has not changed.
+     * Every tick, not hourly. It used to be hourly on the reasoning that
+     * Health Connect writes in batches when the band syncs, so asking more
+     * often would mostly ask a database that had not changed -- true, and
+     * irrelevant: the query is against a local database and costs nothing,
+     * while the hour it saved was an hour of latency on every reading. Ten
+     * minutes is now the whole phone-side lag, and the rest is Mi Fitness's
+     * own band-sync cadence, which is not ours to set.
+     *
+     * Nothing is stamped here any more. The lane keeps its own changes token
+     * and only advances it on a successful read, which is what makes a failed
+     * or unpermitted sync retry instead of silently skipping the window it
+     * could not read -- the old stamp was written BEFORE the attempt, so an
+     * hour's data was dropped every time a sync failed for any reason.
      */
     private fun maybeSyncHealth(ctx: Context) {
         if (!Prefs.healthLane(ctx)) return
-        val p = prefs(ctx)
-        val now = System.currentTimeMillis()
-        val last = p.getLong(KEY_LAST_HEALTH, 0L)
-        if (now - last < HEALTH_INTERVAL_MILLIS) return
-        p.edit().putLong(KEY_LAST_HEALTH, now).apply()
-
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val n = HealthLane.sync(ctx, if (last == 0L) now - 7 * 86_400_000L else last)
+                val n = HealthLane.sync(ctx)
                 if (n > 0) Log.i(Storage.TAG, "health lane: $n record(s)")
             } catch (e: Exception) {
                 Log.w(Storage.TAG, "health sync failed", e)
@@ -104,7 +107,6 @@ object Scheduler {
 
     private const val WAKING_START_HOUR = 9
     private const val WAKING_END_HOUR = 23
-    private const val HEALTH_INTERVAL_MILLIS = 60 * 60_000L
 
     /**
      * Short, answerable in one word, and about right now.

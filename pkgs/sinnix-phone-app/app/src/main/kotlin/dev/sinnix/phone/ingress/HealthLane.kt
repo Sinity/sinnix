@@ -22,6 +22,9 @@ import androidx.health.connect.client.records.StepsRecord
 import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
 import androidx.health.connect.client.records.Vo2MaxRecord
 import androidx.health.connect.client.records.WeightRecord
+import androidx.health.connect.client.changes.DeletionChange
+import androidx.health.connect.client.changes.UpsertionChange
+import androidx.health.connect.client.request.ChangesTokenRequest
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import dev.sinnix.phone.core.Events
@@ -108,13 +111,34 @@ object HealthLane {
             else -> "not installed"
         }
 
+
+    private const val PREFS = "sinnix-phone-health"
+    private const val KEY_TOKEN = "changes_token"
+    private const val BACKFILL_DAYS = 30L
+
+    private fun prefs(ctx: Context) = ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
     /**
-     * Pull whatever is new since [sinceMs] and write it to the events plane.
+     * Pull everything Health Connect has gained since the last successful read.
+     *
+     * Driven by a CHANGES TOKEN rather than a timestamp cursor, and the
+     * difference is not cosmetic. Health Connect indexes a record by when the
+     * measurement happened, but Mi Fitness only writes when the band syncs --
+     * so a sync at 21:44 inserts a whole day of readings stamped 08:00, 08:01,
+     * 08:02. A cursor over measurement time asks "anything since 20:44?" and
+     * gets nothing, then advances past the window, and that day is lost
+     * permanently. The changes feed is ordered by INSERTION, so late-arriving
+     * backfill is exactly what it is designed to deliver.
+     *
+     * The token only advances on a successful read. A sync that fails, or one
+     * that runs before permissions exist, leaves the token where it was and
+     * retries the same changes next tick -- the previous version stamped its
+     * cursor BEFORE attempting, so every failure silently dropped an hour.
      *
      * Returns how many records landed, so a caller can tell "nothing new" from
      * "nothing readable" — two states an empty return would conflate.
      */
-    suspend fun sync(ctx: Context, sinceMs: Long): Int {
+    suspend fun sync(ctx: Context): Int {
         if (!Prefs.healthLane(ctx)) return 0
         if (HealthConnectClient.getSdkStatus(ctx) != HealthConnectClient.SDK_AVAILABLE) {
             Events.record(ctx, "lane_blocked", "lane", "health", "reason", availability(ctx))
@@ -149,216 +173,211 @@ object HealthLane {
             if (granted.isEmpty()) return 0
         }
 
-        val start = Instant.ofEpochMilli(sinceMs).coerceAtLeast(Instant.now().minus(30, ChronoUnit.DAYS))
-        val range = TimeRangeFilter.between(start, Instant.now())
-        var written = 0
+        val stored = prefs(ctx).getString(KEY_TOKEN, null)
+        return if (stored == null) backfill(ctx, client) else incremental(ctx, client, stored)
+    }
 
-        written += read(ctx, client, range, StepsRecord::class, "health_steps") { r ->
-            arrayOf(
-                "count", r.count,
-                "start", Stamps.iso(r.startTime.toEpochMilli()),
-                "end", Stamps.iso(r.endTime.toEpochMilli()),
-                "source", r.metadata.dataOrigin.packageName,
-            )
-        }
-
-        // The full sample series, not a summary of it. One row per RECORD
-        // (Health Connect already batches samples into records), carrying every
-        // sample's time and value as parallel arrays. Mean/min/max ride along
-        // because they are free and most queries want them, but they are no
-        // longer the only thing that survives.
-        written += read(ctx, client, range, HeartRateRecord::class, "health_heart_rate") { r ->
-            val bpms = r.samples.map { it.beatsPerMinute }
-            arrayOf(
-                "samples", bpms.size,
-                "bpm", JSONArray(bpms),
-                "sample_times", JSONArray(r.samples.map { Stamps.iso(it.time.toEpochMilli()) }),
-                "mean_bpm", if (bpms.isEmpty()) null else bpms.average(),
-                "min_bpm", bpms.minOrNull(),
-                "max_bpm", bpms.maxOrNull(),
-                "start", Stamps.iso(r.startTime.toEpochMilli()),
-                "end", Stamps.iso(r.endTime.toEpochMilli()),
-                "source", r.metadata.dataOrigin.packageName,
-            )
-        }
-
-        // Stages by name and boundary, which is the entire point of wearing the
-        // band overnight. The previous version wrote `stages: 42` -- a count of
-        // things it had just decided not to record.
-        written += read(ctx, client, range, SleepSessionRecord::class, "health_sleep") { r ->
-            val stages = JSONArray()
-            r.stages.forEach { s ->
-                stages.put(
-                    org.json.JSONObject()
-                        .put("stage", stageName(s.stage))
-                        .put("start", Stamps.iso(s.startTime.toEpochMilli()))
-                        .put("end", Stamps.iso(s.endTime.toEpochMilli()))
-                        .put("minutes", (s.endTime.toEpochMilli() - s.startTime.toEpochMilli()) / 60_000L)
-                )
+    /**
+     * First run, or recovery after an expired token: sweep a wide window by
+     * measurement time, then take a token so every later run is incremental.
+     *
+     * The token is taken BEFORE the sweep on purpose. Anything inserted during
+     * the sweep is then delivered again by the changes feed rather than falling
+     * between the two -- a duplicate is a nuisance, a hole is not recoverable.
+     */
+    private suspend fun backfill(ctx: Context, client: HealthConnectClient): Int {
+        val token =
+            try {
+                client.getChangesToken(ChangesTokenRequest(recordTypes = TYPES.toSet()))
+            } catch (e: Exception) {
+                Events.record(ctx, "lane_blocked", "lane", "health", "reason", "token: ${e.message}")
+                return 0
             }
-            arrayOf(
-                "start", Stamps.iso(r.startTime.toEpochMilli()),
-                "end", Stamps.iso(r.endTime.toEpochMilli()),
-                "minutes", (r.endTime.toEpochMilli() - r.startTime.toEpochMilli()) / 60_000L,
-                "stage_count", r.stages.size,
-                "stages", stages,
-                "title", r.title,
-                "source", r.metadata.dataOrigin.packageName,
-            )
+        val range =
+            TimeRangeFilter.between(Instant.now().minus(BACKFILL_DAYS, ChronoUnit.DAYS), Instant.now())
+        var written = 0
+        TYPES.forEach { type ->
+            written +=
+                try {
+                    val page = client.readRecords(ReadRecordsRequest(type, range))
+                    page.records.count { emit(ctx, it) }
+                } catch (e: Exception) {
+                    Log.w(Storage.TAG, "health: ${type.simpleName} unreadable", e)
+                    0
+                }
         }
+        prefs(ctx).edit().putString(KEY_TOKEN, token).apply()
+        Events.record(ctx, "health_backfill", "records", written, "days", BACKFILL_DAYS)
+        return written
+    }
 
-        written += read(ctx, client, range, OxygenSaturationRecord::class, "health_spo2") { r ->
-            arrayOf(
-                "percentage", r.percentage.value,
-                "time", Stamps.iso(r.time.toEpochMilli()),
-                "source", r.metadata.dataOrigin.packageName,
-            )
+    /** Everything inserted since the stored token, following `hasMore` to the end. */
+    private suspend fun incremental(ctx: Context, client: HealthConnectClient, startToken: String): Int {
+        var token = startToken
+        var written = 0
+        var deleted = 0
+        while (true) {
+            val response =
+                try {
+                    client.getChanges(token)
+                } catch (e: Exception) {
+                    Log.w(Storage.TAG, "health: changes unreadable", e)
+                    return written
+                }
+            if (response.changesTokenExpired) {
+                // Health Connect drops tokens after ~30 days of not being
+                // asked. Falling back to a window sweep is the documented
+                // recovery and re-establishes a token in the same pass.
+                Events.record(ctx, "health_token_expired", "action", "backfill")
+                prefs(ctx).edit().remove(KEY_TOKEN).apply()
+                return written + backfill(ctx, client)
+            }
+            response.changes.forEach { change ->
+                when (change) {
+                    is UpsertionChange -> if (emit(ctx, change.record)) written++
+                    is DeletionChange -> deleted++
+                    else -> Unit
+                }
+            }
+            token = response.nextChangesToken
+            if (!response.hasMore) break
         }
-
-        written += read(ctx, client, range, HeartRateVariabilityRmssdRecord::class, "health_hrv") { r ->
-            arrayOf(
-                "rmssd_ms", r.heartRateVariabilityMillis,
-                "time", Stamps.iso(r.time.toEpochMilli()),
-                "source", r.metadata.dataOrigin.packageName,
-            )
-        }
-
-        written += read(ctx, client, range, RespiratoryRateRecord::class, "health_respiratory_rate") { r ->
-            arrayOf(
-                "breaths_per_minute", r.rate,
-                "time", Stamps.iso(r.time.toEpochMilli()),
-                "source", r.metadata.dataOrigin.packageName,
-            )
-        }
-
-        written += read(ctx, client, range, RestingHeartRateRecord::class, "health_resting_heart_rate") { r ->
-            arrayOf(
-                "bpm", r.beatsPerMinute,
-                "time", Stamps.iso(r.time.toEpochMilli()),
-                "source", r.metadata.dataOrigin.packageName,
-            )
-        }
-
-        written += read(ctx, client, range, ActiveCaloriesBurnedRecord::class, "health_active_calories") { r ->
-            arrayOf(
-                "kcal", r.energy.inKilocalories,
-                "start", Stamps.iso(r.startTime.toEpochMilli()),
-                "end", Stamps.iso(r.endTime.toEpochMilli()),
-                "source", r.metadata.dataOrigin.packageName,
-            )
-        }
-
-        written += read(ctx, client, range, TotalCaloriesBurnedRecord::class, "health_total_calories") { r ->
-            arrayOf(
-                "kcal", r.energy.inKilocalories,
-                "start", Stamps.iso(r.startTime.toEpochMilli()),
-                "end", Stamps.iso(r.endTime.toEpochMilli()),
-                "source", r.metadata.dataOrigin.packageName,
-            )
-        }
-
-        written += read(ctx, client, range, DistanceRecord::class, "health_distance") { r ->
-            arrayOf(
-                "meters", r.distance.inMeters,
-                "start", Stamps.iso(r.startTime.toEpochMilli()),
-                "end", Stamps.iso(r.endTime.toEpochMilli()),
-                "source", r.metadata.dataOrigin.packageName,
-            )
-        }
-
-        written += read(ctx, client, range, SpeedRecord::class, "health_speed") { r ->
-            arrayOf(
-                "samples", r.samples.size,
-                "mps", JSONArray(r.samples.map { it.speed.inMetersPerSecond }),
-                "sample_times", JSONArray(r.samples.map { Stamps.iso(it.time.toEpochMilli()) }),
-                "start", Stamps.iso(r.startTime.toEpochMilli()),
-                "end", Stamps.iso(r.endTime.toEpochMilli()),
-                "source", r.metadata.dataOrigin.packageName,
-            )
-        }
-
-        written += read(ctx, client, range, ElevationGainedRecord::class, "health_elevation") { r ->
-            arrayOf(
-                "meters", r.elevation.inMeters,
-                "start", Stamps.iso(r.startTime.toEpochMilli()),
-                "end", Stamps.iso(r.endTime.toEpochMilli()),
-                "source", r.metadata.dataOrigin.packageName,
-            )
-        }
-
-        written += read(ctx, client, range, ExerciseSessionRecord::class, "health_exercise") { r ->
-            arrayOf(
-                "type", r.exerciseType,
-                "title", r.title,
-                "notes", r.notes,
-                "start", Stamps.iso(r.startTime.toEpochMilli()),
-                "end", Stamps.iso(r.endTime.toEpochMilli()),
-                "minutes", (r.endTime.toEpochMilli() - r.startTime.toEpochMilli()) / 60_000L,
-                "source", r.metadata.dataOrigin.packageName,
-            )
-        }
-
-        written += read(ctx, client, range, Vo2MaxRecord::class, "health_vo2max") { r ->
-            arrayOf(
-                "ml_per_min_per_kg", r.vo2MillilitersPerMinuteKilogram,
-                "measurement_method", r.measurementMethod,
-                "time", Stamps.iso(r.time.toEpochMilli()),
-                "source", r.metadata.dataOrigin.packageName,
-            )
-        }
-
-        written += read(ctx, client, range, BodyTemperatureRecord::class, "health_body_temperature") { r ->
-            arrayOf(
-                "celsius", r.temperature.inCelsius,
-                "time", Stamps.iso(r.time.toEpochMilli()),
-                "source", r.metadata.dataOrigin.packageName,
-            )
-        }
-
-        written += read(ctx, client, range, BloodPressureRecord::class, "health_blood_pressure") { r ->
-            arrayOf(
-                "systolic_mmhg", r.systolic.inMillimetersOfMercury,
-                "diastolic_mmhg", r.diastolic.inMillimetersOfMercury,
-                "time", Stamps.iso(r.time.toEpochMilli()),
-                "source", r.metadata.dataOrigin.packageName,
-            )
-        }
-
-        written += read(ctx, client, range, WeightRecord::class, "health_weight") { r ->
-            arrayOf(
-                "kg", r.weight.inKilograms,
-                "time", Stamps.iso(r.time.toEpochMilli()),
-                "source", r.metadata.dataOrigin.packageName,
-            )
-        }
-
+        // Only now, and only because every page above was read without
+        // throwing. A token advanced past unread changes is data loss with no
+        // symptom.
+        prefs(ctx).edit().putString(KEY_TOKEN, token).apply()
+        if (deleted > 0) Events.record(ctx, "health_deletions", "count", deleted)
         return written
     }
 
     /**
-     * One reader for every type.
+     * One record to one event, dispatched on its own type.
      *
-     * A type the device never writes reads back empty rather than throwing, and
-     * a type whose permission was refused throws and is logged as unreadable --
-     * neither takes the other sixteen down with it, which is why each call is
-     * wrapped rather than the whole sync.
+     * Returns false for a type nobody has written an emitter for, so an
+     * unhandled type is counted as unhandled rather than counted as captured.
      */
-    private suspend fun <T : Record> read(
-        ctx: Context,
-        client: HealthConnectClient,
-        range: TimeRangeFilter,
-        type: KClass<T>,
-        kind: String,
-        fields: (T) -> Array<Any?>,
-    ): Int =
-        try {
-            val page = client.readRecords(ReadRecordsRequest(type, range))
-            page.records.forEach { r -> Events.record(ctx, kind, *fields(r)) }
-            page.records.size
-        } catch (e: Exception) {
-            Log.w(Storage.TAG, "health: $kind unreadable", e)
-            0
+    private fun emit(ctx: Context, r: Record): Boolean {
+        val src = r.metadata.dataOrigin.packageName
+        when (r) {
+            is StepsRecord ->
+                Events.record(ctx, "health_steps",
+                    "count", r.count,
+                    "start", Stamps.iso(r.startTime.toEpochMilli()),
+                    "end", Stamps.iso(r.endTime.toEpochMilli()), "source", src)
+
+            // The full sample series, not a summary of it. Mean/min/max ride
+            // along because they are free and most queries want them, but they
+            // are no longer the only thing that survives.
+            is HeartRateRecord -> {
+                val bpms = r.samples.map { it.beatsPerMinute }
+                Events.record(ctx, "health_heart_rate",
+                    "samples", bpms.size,
+                    "bpm", JSONArray(bpms),
+                    "sample_times", JSONArray(r.samples.map { Stamps.iso(it.time.toEpochMilli()) }),
+                    "mean_bpm", if (bpms.isEmpty()) null else bpms.average(),
+                    "min_bpm", bpms.minOrNull(),
+                    "max_bpm", bpms.maxOrNull(),
+                    "start", Stamps.iso(r.startTime.toEpochMilli()),
+                    "end", Stamps.iso(r.endTime.toEpochMilli()), "source", src)
+            }
+
+            // Stages by name and boundary, which is the entire point of wearing
+            // the band overnight. The previous version wrote `stages: 42` -- a
+            // count of things it had just decided not to record.
+            is SleepSessionRecord -> {
+                val stages = JSONArray()
+                r.stages.forEach { st ->
+                    stages.put(
+                        org.json.JSONObject()
+                            .put("stage", stageName(st.stage))
+                            .put("start", Stamps.iso(st.startTime.toEpochMilli()))
+                            .put("end", Stamps.iso(st.endTime.toEpochMilli()))
+                            .put("minutes", (st.endTime.toEpochMilli() - st.startTime.toEpochMilli()) / 60_000L))
+                }
+                Events.record(ctx, "health_sleep",
+                    "start", Stamps.iso(r.startTime.toEpochMilli()),
+                    "end", Stamps.iso(r.endTime.toEpochMilli()),
+                    "minutes", (r.endTime.toEpochMilli() - r.startTime.toEpochMilli()) / 60_000L,
+                    "stage_count", r.stages.size, "stages", stages,
+                    "title", r.title, "source", src)
+            }
+
+            is OxygenSaturationRecord ->
+                Events.record(ctx, "health_spo2", "percentage", r.percentage.value,
+                    "time", Stamps.iso(r.time.toEpochMilli()), "source", src)
+
+            is HeartRateVariabilityRmssdRecord ->
+                Events.record(ctx, "health_hrv", "rmssd_ms", r.heartRateVariabilityMillis,
+                    "time", Stamps.iso(r.time.toEpochMilli()), "source", src)
+
+            is RespiratoryRateRecord ->
+                Events.record(ctx, "health_respiratory_rate", "breaths_per_minute", r.rate,
+                    "time", Stamps.iso(r.time.toEpochMilli()), "source", src)
+
+            is RestingHeartRateRecord ->
+                Events.record(ctx, "health_resting_heart_rate", "bpm", r.beatsPerMinute,
+                    "time", Stamps.iso(r.time.toEpochMilli()), "source", src)
+
+            is ActiveCaloriesBurnedRecord ->
+                Events.record(ctx, "health_active_calories", "kcal", r.energy.inKilocalories,
+                    "start", Stamps.iso(r.startTime.toEpochMilli()),
+                    "end", Stamps.iso(r.endTime.toEpochMilli()), "source", src)
+
+            is TotalCaloriesBurnedRecord ->
+                Events.record(ctx, "health_total_calories", "kcal", r.energy.inKilocalories,
+                    "start", Stamps.iso(r.startTime.toEpochMilli()),
+                    "end", Stamps.iso(r.endTime.toEpochMilli()), "source", src)
+
+            is DistanceRecord ->
+                Events.record(ctx, "health_distance", "meters", r.distance.inMeters,
+                    "start", Stamps.iso(r.startTime.toEpochMilli()),
+                    "end", Stamps.iso(r.endTime.toEpochMilli()), "source", src)
+
+            is SpeedRecord ->
+                Events.record(ctx, "health_speed",
+                    "samples", r.samples.size,
+                    "mps", JSONArray(r.samples.map { it.speed.inMetersPerSecond }),
+                    "sample_times", JSONArray(r.samples.map { Stamps.iso(it.time.toEpochMilli()) }),
+                    "start", Stamps.iso(r.startTime.toEpochMilli()),
+                    "end", Stamps.iso(r.endTime.toEpochMilli()), "source", src)
+
+            is ElevationGainedRecord ->
+                Events.record(ctx, "health_elevation", "meters", r.elevation.inMeters,
+                    "start", Stamps.iso(r.startTime.toEpochMilli()),
+                    "end", Stamps.iso(r.endTime.toEpochMilli()), "source", src)
+
+            is ExerciseSessionRecord ->
+                Events.record(ctx, "health_exercise",
+                    "type", r.exerciseType, "title", r.title, "notes", r.notes,
+                    "start", Stamps.iso(r.startTime.toEpochMilli()),
+                    "end", Stamps.iso(r.endTime.toEpochMilli()),
+                    "minutes", (r.endTime.toEpochMilli() - r.startTime.toEpochMilli()) / 60_000L,
+                    "source", src)
+
+            is Vo2MaxRecord ->
+                Events.record(ctx, "health_vo2max",
+                    "ml_per_min_per_kg", r.vo2MillilitersPerMinuteKilogram,
+                    "measurement_method", r.measurementMethod,
+                    "time", Stamps.iso(r.time.toEpochMilli()), "source", src)
+
+            is BodyTemperatureRecord ->
+                Events.record(ctx, "health_body_temperature", "celsius", r.temperature.inCelsius,
+                    "time", Stamps.iso(r.time.toEpochMilli()), "source", src)
+
+            is BloodPressureRecord ->
+                Events.record(ctx, "health_blood_pressure",
+                    "systolic_mmhg", r.systolic.inMillimetersOfMercury,
+                    "diastolic_mmhg", r.diastolic.inMillimetersOfMercury,
+                    "time", Stamps.iso(r.time.toEpochMilli()), "source", src)
+
+            is WeightRecord ->
+                Events.record(ctx, "health_weight", "kg", r.weight.inKilograms,
+                    "time", Stamps.iso(r.time.toEpochMilli()), "source", src)
+
+            else -> return false
         }
+        return true
+    }
 
     private fun stageName(stage: Int): String =
         when (stage) {
