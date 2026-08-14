@@ -165,6 +165,19 @@ acquires a voice-activated foot-gun.
 titanet speaker embedding, both ONNX, both CPU. It produces speaker *turns*
 (`spk0`, `spk1`), not names.
 
+**It carries a trustworthiness verdict, because clustering always returns an
+answer.** Run over a 300 s ambient chunk holding 5.4 seconds of speech, it
+reported seventeen speakers — it had clustered room noise into confident
+structure. The check that separates that from a real two-speaker recording is
+not the diarizer's own numbers, since it believes itself in both cases, but its
+numbers against the VAD's: a voice needs roughly three seconds to be separable,
+so the speaker count must be supportable by the speech the VAD actually found,
+and the diarizer's total must not wildly exceed it.
+
+A first attempt tested total diarized time and median turn length instead.
+Both passed the noise and failed the genuine recording — a plausible threshold
+on the wrong quantity is not a weaker check, it is an inverted one.
+
 Enrollment — "is this the operator?" — is deliberately kept separate rather
 than fused into the transcript. The raw audio is retained, so identity can be
 recomputed at any time, and a labelling mistake baked into a transcript would
