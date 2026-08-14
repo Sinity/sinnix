@@ -134,6 +134,15 @@ network, with no wifi or charging gate. Those gates belong to the bulk archive
 drain, where the concern is metered data for gigabytes of audio; an utterance
 is kilobytes and the whole point is that it works when you walk away.
 
+**The lane is on by default and is meant to stay on**, on the same terms as
+every other capture in the estate: started at boot, revived by the watchdog,
+restarted when the app is opened. An earlier version shipped it
+off-by-default on the theory that streaming speech was a categorically
+different thing to switch on. That was the wrong posture here and the operator
+corrected it — a capture lane that has to be switched on is a capture lane with
+gaps in it, and a lane that quietly stops after a reboot is not always-on, it is
+intermittent and nobody has noticed yet.
+
 ## What this lane deliberately does not do
 
 **It does not dispatch agents.** An always-on microphone that can drive agents

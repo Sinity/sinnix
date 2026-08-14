@@ -93,14 +93,21 @@ object Prefs {
         prefs(ctx).edit().putLong(KEY_AUTOSTART_ATTESTED_AT, ms).apply()
 
     /**
-     * The always-on speech lane. **Off by default, and that is the point.**
+     * The always-on speech lane. On by default, like every other capture here.
      *
-     * Every other lane here records something about the device or the room.
-     * This one takes what was said and puts it on a wire to another machine
-     * the moment it is said. That is a different kind of thing to switch on,
-     * so nothing switches it on but the operator.
+     * An earlier version of this shipped off-by-default with a comment about
+     * how it "puts what was said on a wire" and so nothing but the operator
+     * should switch it on. That was the wrong posture for this estate and the
+     * operator said so: capture lanes are meant to be on, and to stay on. The
+     * toggle exists because a switch is useful, not because the default should
+     * be silence.
+     *
+     * "On" here means what it means for the recorder: started at boot, revived
+     * by the watchdog, restarted when the app is opened. A lane that quietly
+     * stops after a reboot is not an always-on lane, it is an intermittent one
+     * that nobody has noticed yet.
      */
-    fun speechLane(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_SPEECH, false)
+    fun speechLane(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_SPEECH, true)
 
     fun setSpeechLane(ctx: Context, value: Boolean) =
         prefs(ctx).edit().putBoolean(KEY_SPEECH, value).apply()

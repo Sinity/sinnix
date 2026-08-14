@@ -347,10 +347,11 @@ internal differences.
 Beyond ambient audio and the passive light/motion sampler:
 
 - **Speech** — Silero VAD over a second recorder; on a speech region the
-  utterance streams to prime's receiver, on any network. Off by default: every
-  other lane records something about the device or the room, this one puts what
-  was said on a wire the moment it is said, so nothing switches it on but the
-  operator. See docs/speech.md for what it deliberately does not do.
+  utterance streams to prime's receiver, on any network. **On, and meant to
+  stay on**, like every other capture here: started at boot, revived by the
+  watchdog, restarted when the app is opened. The toggle exists because a
+  switch is useful, not because the default should be silence. See
+  docs/speech.md for what it deliberately does not do.
 - **Location** — framework `LocationManager.FUSED_PROVIDER` with geofence
   transitions. No Play Services: Android 12 promoted the fused provider into
   the framework, which the design had assumed was a Google dependency.
