@@ -205,6 +205,17 @@ Overlays vs packages: override/patch an existing nixpkgs package → overlay
 file; new standalone tool → usually a script under `scripts/` (see below),
 or `pkgs/<name>/` for real derivations.
 
+`sinnix.services.stt` (`modules/services/stt.nix`, `scripts/sinnix-stt`,
+docs/speech.md) is the estate's speech-to-text stack: Parakeet TDT 0.6B v3 via
+sherpa-onnx behind the same OpenAI-compatible `/v1/audio/transcriptions` port
+whisper.cpp used, with Silero VAD in front and sherpa's pyannote diarizer
+beside it. It replaced whisper, which is deleted rather than kept as a
+fallback (`sinnix-mke`). It is **CPU-only and deliberately outside the
+`gpu-inference` admission mesh** — measured RTF 0.113 on dense speech and
+0.002 over a VAD-gated ambient chunk, which is fast enough that transcription
+never has to queue behind a resident model. Do not "fix" that by adding CUDA
+or the admission key; the runtime test asserts it stays out of the mesh.
+
 `pkgs/sinnix-phone-app/` is the odd one out: an Android app (Sinnix — the
 estate's phone-side member: capture, instruments, ingress, and a remote for
 prime). Kotlin/Compose built through Gradle against a license-accepting
