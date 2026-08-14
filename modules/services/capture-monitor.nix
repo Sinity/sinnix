@@ -142,7 +142,21 @@ mkServiceModule {
                 # /dev/i2c-* is group-owned (i2c) and the service inherits the
                 # operator's supplementary groups via systemd --user, so no
                 # DeviceAllow is needed as long as PrivateDevices stays unset.
-                Environment = [ "TMPDIR=/tmp" ];
+                #
+                # ddcutil persists its dynamic-sleep-adjustment table under
+                # $XDG_CACHE_HOME/ddcutil, and ProtectHome=read-only makes
+                # that write fail on every single VCP access -- five
+                # "Read-only file system" errors per poll, forever, and a
+                # DSA table that can never carry timing knowledge from one
+                # poll to the next. Point the cache at the runtime dir,
+                # which survives across runs of this oneshot and is the only
+                # writable location the sandbox leaves it.
+                Environment = [
+                  "TMPDIR=/tmp"
+                  "XDG_CACHE_HOME=%t/sinnix-capture-monitor"
+                ];
+                RuntimeDirectory = "sinnix-capture-monitor";
+                RuntimeDirectoryPreserve = "yes";
                 PrivateTmp = true;
               };
             };

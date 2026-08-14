@@ -142,6 +142,18 @@ mkServiceModule {
               ];
               Restart = "on-failure";
               RestartSec = "5s";
+              # An ordinary `systemctl --user stop` returns instantly, but a
+              # stop raced against compositor teardown does not: at reboot
+              # the Wayland/DRM surfaces this recorder holds disappear before
+              # its own SIGTERM lands, and it blocks (measured: the full
+              # 90s DefaultTimeoutStopSec, then SIGKILL, on the 2026-08-14
+              # reboot). The race is not ours to win -- PartOf ordering
+              # cannot guarantee we are torn down before the compositor that
+              # owns our capture source -- so bound what it costs. Fifteen
+              # seconds is far beyond the sub-second healthy path and turns a
+              # hung recorder from a minute and a half of shutdown into a
+              # blip.
+              TimeoutStopSec = "15s";
               # This unit deliberately carries NO mount-namespace sandboxing
               # (no ProtectSystem/ProtectHome/PrivateTmp/ReadWritePaths) and
               # NoNewPrivileges stays off: a systemd *user* manager is
