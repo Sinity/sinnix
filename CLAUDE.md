@@ -205,12 +205,18 @@ Overlays vs packages: override/patch an existing nixpkgs package → overlay
 file; new standalone tool → usually a script under `scripts/` (see below),
 or `pkgs/<name>/` for real derivations.
 
-`pkgs/sinnix-phone-app/` is the odd one out: an Android APK (Sinnix Capture,
-the phone's ambient audio recorder), built with aapt2/javac/d8 directly rather
-than Gradle, against a license-accepting re-import of the same nixpkgs. It is
-emitted unsigned and signed at install time against a persistent host-local
-keystore. Operate it through `sinnix-phone app-*`; see `docs/phone-capture.md`
-for why the microphone foreground service is the whole point.
+`pkgs/sinnix-phone-app/` is the odd one out: an Android app (Sinnix — the
+estate's phone-side member: capture, instruments, ingress, and a remote for
+prime). Kotlin/Compose built through Gradle against a license-accepting
+re-import of the same nixpkgs, made reproducible by the nixpkgs Gradle setup
+hook plus a committed `deps.json` recorded through `mitm-cache` — regenerate it
+with the derivation's `mitmCache.updateScript` after any dependency change. It
+is emitted unsigned and signed at install time against a persistent host-local
+keystore, which is what keeps `adb install -r` an upgrade rather than an
+uninstall that discards runtime grants. Prime's half of its dual transport is
+`scripts/sinnix-phone-dispatcher`, served at the hub's `/phone/v1/*` and also
+driven by the drain. Operate it through `sinnix phone app-*`; see
+`docs/phone.md`.
 
 **Input pinning rules (cache-hit engineering — do not "fix" these):**
 

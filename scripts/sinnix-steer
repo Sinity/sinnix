@@ -410,6 +410,81 @@ def cmd_export(args: argparse.Namespace) -> int:
     return 0
 
 
+# ------------------------------------------------------------------- phone
+
+
+def cmd_export_phone(args: argparse.Namespace) -> int:
+    """Render the store for the phone's three steering screens.
+
+    Shaped by what those screens draw — a menu to pick from, commitments to
+    resolve, a queue to spend — rather than by the store's tables. The phone
+    holds this as a file pushed by the drain and may be looking at a copy that
+    is hours old, so every consumer renders staleness; giving it rows to join
+    would make it a second reader of the schema, and then the schema could not
+    move without breaking a device that is not here.
+    """
+    conn = get_db()
+
+    menu = [
+        {
+            "id": r["id"],
+            "title": r["name"],
+            "kind": r["kind"],
+            "minutes": r["est_minutes"],
+            "energy": r["energy_tier"],
+        }
+        for r in conn.execute(
+            "SELECT * FROM activities WHERE kind != 'experiment' ORDER BY kind, name"
+        )
+    ]
+
+    commitments = [
+        {
+            "id": r["id"],
+            "title": r["text"],
+            "forecast": (
+                f"{int(r['forecast_p'] * 100)}%" if r["forecast_p"] is not None else ""
+            ),
+            "created_at": r["created_at"],
+        }
+        for r in conn.execute(
+            "SELECT * FROM commitments WHERE status = 'open' ORDER BY created_at DESC LIMIT 20"
+        )
+    ]
+
+    # The ready queue is the spend-a-stack surface: pre-composed outward
+    # actions, one card each. Until the queue has its own table (sinnix-jfiy.2)
+    # it is the open commitments that carry a window ending today — which is
+    # the same set the operator would have called "ready" by hand.
+    today = datetime.now(timezone.utc).date().isoformat()
+    ready = [
+        {
+            "id": r["id"],
+            "card": r["text"],
+            "send_token": r["id"],
+        }
+        for r in conn.execute(
+            "SELECT * FROM commitments WHERE status = 'open' AND window_end IS NOT NULL "
+            "AND window_end <= ? ORDER BY window_end",
+            (today + "T23:59:59+00:00",),
+        )
+    ]
+
+    print(
+        json.dumps(
+            {
+                "schema": "sinnix.phone.steering/1",
+                "generated_at": now_iso(),
+                "menu": menu,
+                "commitments": commitments,
+                "ready_queue": ready,
+            },
+            indent=2,
+        )
+    )
+    return 0
+
+
 # ----------------------------------------------------------------------- seed
 
 SEED_ACTIVITIES: list[dict] = [
@@ -554,6 +629,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     export = sub.add_parser("export", help="export the store to JSONL")
     export.set_defaults(func=cmd_export)
+
+    export_phone = sub.add_parser(
+        "export-phone", help="render the store as the phone's steering.json"
+    )
+    export_phone.set_defaults(func=cmd_export_phone)
 
     seed = sub.add_parser("seed", help="idempotently seed standing activities + the sleep experiment")
     seed.set_defaults(func=cmd_seed)

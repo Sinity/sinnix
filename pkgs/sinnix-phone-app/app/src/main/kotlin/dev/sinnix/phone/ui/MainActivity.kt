@@ -34,6 +34,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import dev.sinnix.phone.capture.AmbientService
+import dev.sinnix.phone.capture.Status
 import dev.sinnix.phone.core.Events
 import dev.sinnix.phone.core.Notifications
 import dev.sinnix.phone.core.Prefs
@@ -84,18 +85,51 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Opening the app is itself a repair path.
+     * Opening the app is itself a repair path, and it repairs two different
+     * things.
      *
-     * The watchdog alarm is a ten-minute sweep; a person who opens the app
-     * because something felt wrong should not wait out the rest of that
-     * interval. This is the cheapest keepalive in the design and, in practice,
-     * the one that fires most.
+     * The obvious one: a dead service is restarted here rather than at the next
+     * ten-minute watchdog sweep, because a person who opened the app because
+     * something felt wrong should not wait out the rest of that interval.
+     *
+     * The subtle one, and the reason this is not just `if (!running) start()`:
+     * a microphone-typed foreground service started from the **background**
+     * runs without the while-in-use capability, and the platform responds by
+     * silencing its recording rather than refusing it. `MY_PACKAGE_REPLACED`
+     * starts the service from the background on every upgrade, so the state
+     * this produces is a service that is genuinely running, genuinely writing
+     * full-bitrate chunks, and recording exact zeroes — with logcat saying
+     * "App op 27 missing, silencing record" and nothing else complaining.
+     *
+     * Cycling the recorder cannot fix that; the capability is decided when the
+     * service starts, not when the recorder opens. Restarting the service
+     * while an activity is in the foreground is the fix, and this is the only
+     * place in the app that is reliably in the foreground.
      */
     override fun onResume() {
         super.onResume()
-        if (Prefs.enabled(this) && !AmbientService.running) {
-            AmbientService.start(this)
-            Events.record(this, "capture_toggle", "state", "started", "by", "home_resume")
+        if (Prefs.enabled(this)) {
+            val muted = Status.read(this)?.optBoolean("muted", false) == true
+            when {
+                !AmbientService.running -> {
+                    AmbientService.start(this)
+                    Events.record(this, "capture_toggle", "state", "started", "by", "home_resume")
+                }
+                muted -> {
+                    AmbientService.stop(this)
+                    // A short gap so the old service has torn down before the
+                    // new one asks for the microphone; starting into a
+                    // still-live service would re-use the capability-less one.
+                    window.decorView.postDelayed({ AmbientService.start(this) }, 700)
+                    Events.record(
+                        this,
+                        "capture_toggle",
+                        "state", "restarted",
+                        "by", "foreground_reclaim",
+                        "reason", "muted service cannot regain the microphone without a foreground start",
+                    )
+                }
+            }
         }
         InboxWatcher.sweepOnce(this)
     }

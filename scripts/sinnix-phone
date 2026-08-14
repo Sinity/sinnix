@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Reach the phone over the tailnet — status, shell, screen mirror, media pull, clipboard push
-# runtimeInputs: bash coreutils openssh rsync android-tools scrcpy iputils jq wl-clipboard gawk ffmpeg curl
+# runtimeInputs: bash coreutils openssh rsync android-tools scrcpy iputils jq wl-clipboard gawk ffmpeg curl @sinnix-phone-dispatcher
 
 #
 # The phone (Redmi Note 11, unrooted) is a tailnet peer with two control
@@ -33,6 +33,7 @@ PHONE_SSH_PORT="${SINNIX_PHONE_SSH_PORT:-8022}"
 PHONE_USER="${SINNIX_PHONE_USER:-u0_a398}"
 ADB_TARGET="${PHONE_TS_IP}:5555"
 LAKE_ROOT="${SINNIX_PHONE_LAKE:-/realm/data/captures/phone}"
+PHONE_STATE="${SINNIX_PHONE_STATE_DIR:-/realm/state/sinnix-phone}"
 
 # -F /dev/null + explicit identity, not ~/.ssh/config: under a sandboxed
 # systemd unit's ProtectHome, ssh rejects the Home-Manager ~/.ssh/config
@@ -92,6 +93,9 @@ ensure_adb() {
 }
 
 APP_ID="dev.sinnix.phone"
+# The launcher activity, named once. Every headless recovery path goes through
+# it, so a rename that misses this line is a silent capture outage.
+APP_ACTIVITY="${SINNIX_PHONE_APP_ACTIVITY:-.ui.MainActivity}"
 
 # adb over whichever transport is actually up. adbd's TCP mode does not
 # survive a phone reboot, and after one the tailnet is often down too (the VPN
@@ -264,6 +268,61 @@ drain_estate() {
   echo "estate: drained $pulled file(s) over adb"
 }
 
+# Push prime's half of the estate to the phone.
+#
+# The drain was pull-only, and that asymmetry is what made the steering
+# surfaces unbuildable: the phone can render a ready queue it has, and it had
+# no way to ever have one. This is the return channel, and it is deliberately
+# files rather than a listening port -- the phone leaves the house, roams
+# networks, and spends most of its life unreachable, and a file that arrives
+# whenever contact happens survives all three.
+#
+# What goes down: glance.json and steering.json (state, replaced every drain),
+# receipts and notifications (one-shot, deleted by the app once shown), and
+# drill decks (data that turns into instruments).
+push_estate() {
+  local src="$PHONE_STATE/inbox"
+  sinnix-phone-dispatcher push >/dev/null 2>&1 || true
+  [ -d "$src" ] || return 0
+
+  if [ "${1:-}" = "ssh" ]; then
+    ssh_phone "mkdir -p /sdcard/sinnix-phone/inbox" >/dev/null 2>&1 || true
+    rsync -a -e "$rsync_ssh" \
+      "$src/" "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/sinnix-phone/inbox/" 2>/dev/null || true
+    echo "estate: pushed over ssh"
+    return 0
+  fi
+
+  adb_resolve || return 1
+  adb_any shell "mkdir -p /sdcard/sinnix-phone/inbox/receipts /sdcard/sinnix-phone/inbox/notify /sdcard/sinnix-phone/inbox/decks" >/dev/null 2>&1 </dev/null
+  local pushed=0 rel
+  # `adb push <dir>` merges rather than mirrors, which is what is wanted here:
+  # the app deletes each receipt as it renders it, and a mirroring push would
+  # resurrect every receipt the operator has already seen.
+  while IFS= read -r file; do
+    rel="${file#"$src"/}"
+    if adb_any push "$file" "/sdcard/sinnix-phone/inbox/$rel" >/dev/null 2>&1; then
+      pushed=$((pushed + 1))
+      # One-shots are handed over, not shared: leaving a receipt on prime after
+      # the phone holds it would re-deliver it on the next drain forever.
+      case "$rel" in
+        receipts/* | notify/*) rm -f "$file" ;;
+      esac
+    fi
+  done < <(find "$src" -type f ! -name '*.part')
+  echo "estate: pushed $pushed file(s) over adb"
+}
+
+# Hand collected intents to prime.
+#
+# Runs after the collect half, on whatever the drain just landed. The
+# dispatcher is idempotent on send_token, so an intent that also went out live
+# executes once and still gets its receipt -- which is why this can run
+# unconditionally rather than trying to work out what the phone already did.
+dispatch_intents() {
+  sinnix-phone-dispatcher dispatch --outbox "$LAKE_ROOT/estate/outbox" || true
+}
+
 rotate_ambient_adb() {
   local dest name local_size remote_size removed=0
   adb_resolve || return 1
@@ -305,6 +364,7 @@ sinnix-phone <command>
   ambient-audit decode every undecoded ambient chunk in the lake and record
                 its real duration and level (runs at the end of `pull`)
   drain         pull, but only if the phone is on wifi (for a timer)
+  push          refresh and send prime's estate half to the phone (no pull)
   adb-connect   (re)attach adb over the tailnet
   adb-restore   re-enable adbd TCP mode (requires the phone on USB), then
                 re-assert the capture app's grants (see app-grants)
@@ -490,11 +550,28 @@ app-start)
   # microphone). Launching the activity is permitted and starts the service
   # from inside the app, which is why the app has a headless recovery path at
   # all -- the thing Termux never had.
+  #
+  # It is also the only path that gets the microphone back. A mic-typed
+  # foreground service started from the BACKGROUND -- which is what
+  # MY_PACKAGE_REPLACED does on every upgrade -- runs without the while-in-use
+  # capability, and the platform silences its recording rather than failing it:
+  # "App op 27 missing, silencing record" in logcat, exact zeroes in the file,
+  # and a status.json that says recording=true throughout. Bringing an activity
+  # to the foreground is what grants the capability.
   if ! adb_any get-state >/dev/null 2>&1; then
     echo "app-start: no adb transport" >&2
     exit 1
   fi
-  adb_any shell am start -n "$APP_ID/.HomeActivity" >/dev/null 2>&1
+  # NOT redirected to /dev/null. `am start` reports a missing activity in its
+  # own output with exit status 0, so a silent launch turns a renamed activity
+  # into a capture outage nobody is told about -- which is exactly what
+  # happened when the app's launcher moved to .ui.MainActivity.
+  start_out=$(adb_any shell am start -n "$APP_ID/$APP_ACTIVITY" 2>&1 | tr -d '\r')
+  if printf '%s' "$start_out" | grep -qi 'error'; then
+    echo "app-start: could not launch $APP_ID/$APP_ACTIVITY" >&2
+    printf '%s\n' "$start_out" >&2
+    exit 1
+  fi
   sleep 4
   "$0" app-status
   ;;
@@ -627,9 +704,12 @@ pull)
   fi
   if [ "$ssh_up" = true ]; then
     drain_estate ssh
+    push_estate ssh
   elif adb_any get-state >/dev/null 2>&1; then
     drain_estate
+    push_estate
   fi
+  dispatch_intents
   set -e
   du -sh "$LAKE_ROOT" 2>/dev/null
   "$0" ambient-audit
@@ -745,6 +825,19 @@ drain)
   used_kb=$(ssh_phone "du -sk /sdcard/sinnix-ambient 2>/dev/null" | awk '{print $1}')
   if [ -n "${used_kb:-}" ] && [ "$used_kb" -gt 512000 ]; then
     echo "drain: WARNING -- /sdcard/sinnix-ambient is ${used_kb}KB and not shrinking after rotation; drains may have stalled"
+  fi
+  ;;
+push)
+  # The push half on its own, for when something on prime should reach the
+  # phone now rather than at the next drain -- a receipt worth interrupting
+  # for, a deck just generated.
+  if ssh_phone 'true' >/dev/null 2>&1; then
+    push_estate ssh
+  elif adb_any get-state >/dev/null 2>&1; then
+    push_estate
+  else
+    echo "push: phone unreachable; the next drain will carry it" >&2
+    sinnix-phone-dispatcher push >/dev/null 2>&1 || true
   fi
   ;;
 adb-connect)
