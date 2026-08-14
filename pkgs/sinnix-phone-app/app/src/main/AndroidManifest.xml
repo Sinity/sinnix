@@ -49,6 +49,24 @@
   <uses-permission android:name="android.permission.health.READ_WEIGHT" />
 
   <!--
+    The two that are not record types, and that decide whether the lane sees
+    anything worth having.
+
+    READ_HEALTH_DATA_HISTORY: without it Health Connect silently truncates every
+    read to the last 30 days. That is not a policy we chose; it is the platform
+    default for apps that have not asked. With it, the full retained history is
+    readable, which for this device includes the Galaxy Watch 5 era still
+    resident from Samsung Health.
+
+    READ_HEALTH_DATA_IN_BACKGROUND: the lane runs from a watchdog broadcast
+    receiver, so it is backgrounded by definition. It happens to work without
+    this today, and would stop returning anything the moment the provider began
+    enforcing it, which is the failure shape this estate keeps finding.
+  -->
+  <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_HISTORY" />
+  <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND" />
+
+  <!--
     Chunks must land in a directory a second app (Termux sshd, which the
     desktop drain rsyncs through) can read. Scoped storage closes every other
     option: the app-private external dir is unreadable by other apps since
