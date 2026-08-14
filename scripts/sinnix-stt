@@ -122,13 +122,26 @@ def cmd_models(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------- transcribing
 
 
+class Undecodable(Exception):
+    """The file is not audio this tool can read.
+
+    A real and recurring class rather than an anomaly: 27 of 464 chunks in the
+    lake have no decodable stream at all — recorders killed before their muxer
+    wrote a header. That is a finding about capture, not an error in
+    transcription, so it is recorded and carried rather than raised to the top
+    and allowed to end a batch on its first bad file.
+    """
+
+
 def to_wav(src: Path, dest: Path) -> float:
     """16 kHz mono, which is what the recogniser wants. Returns duration."""
-    subprocess.run(
+    proc = subprocess.run(
         ["ffmpeg", "-nostdin", "-v", "error", "-i", str(src), "-ac", "1", "-ar", "16000",
          "-y", str(dest)],
-        check=True,
+        capture_output=True, text=True,
     )
+    if proc.returncode != 0 or not dest.is_file() or dest.stat().st_size == 0:
+        raise Undecodable((proc.stderr or "ffmpeg produced nothing").strip()[-300:])
     out = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
          str(dest)],
@@ -153,7 +166,20 @@ def transcribe_file(path: Path, *, vad: bool = True) -> dict:
     """
     with tempfile.TemporaryDirectory() as tmp:
         wav = Path(tmp) / "in.wav"
-        audio_seconds = to_wav(path, wav)
+        try:
+            audio_seconds = to_wav(path, wav)
+        except Undecodable as exc:
+            return {
+                "schema": SCHEMA,
+                "file": path.name,
+                "undecodable": True,
+                "error": str(exc),
+                "audio_seconds": None,
+                "speech_seconds": 0,
+                "segments": [],
+                "text": "",
+                "transcribed_at": now_iso(),
+            }
 
         common = [
             f"--encoder={PARAKEET}/encoder.int8.onnx",
@@ -317,6 +343,7 @@ def cmd_lake(args: argparse.Namespace) -> int:
     lanes = [args.lane] if args.lane else list(LANES)
     done = 0
     with_speech = 0
+    undecodable = 0
 
     for lane in lanes:
         root = LANES.get(lane)
@@ -354,10 +381,19 @@ def cmd_lake(args: argparse.Namespace) -> int:
                     + "\n"
                 )
             done += 1
-            if record.get("speech_seconds", 0) > 0:
+            if record.get("undecodable"):
+                undecodable += 1
+            elif record.get("speech_seconds", 0) > 0:
                 with_speech += 1
 
-    print(f"stt: transcribed {done} file(s), {with_speech} contained speech")
+    tail = f", {undecodable} undecodable" if undecodable else ""
+    print(f"stt: transcribed {done} file(s), {with_speech} contained speech{tail}")
+    if undecodable:
+        print(
+            "  undecodable files are recorded in the transcript lane with "
+            "undecodable=true — they are a capture finding, not a transcription failure",
+            file=sys.stderr,
+        )
     return 0
 
 
@@ -391,14 +427,19 @@ def cmd_diarize(args: argparse.Namespace) -> int:
         return 1
     with tempfile.TemporaryDirectory() as tmp:
         wav = Path(tmp) / "in.wav"
-        to_wav(Path(args.file), wav)
+        try:
+            to_wav(Path(args.file), wav)
+        except Undecodable as exc:
+            print(f"stt: {args.file} is not decodable audio: {exc}", file=sys.stderr)
+            return 1
         argv = [
             "sherpa-onnx-offline-speaker-diarization",
             f"--clustering.num-clusters={args.speakers}" if args.speakers
             else f"--clustering.cluster-threshold={args.threshold}",
             f"--segmentation.pyannote-model={SEGMENTATION}",
             f"--embedding.model={EMBEDDING}",
-            f"--num-threads={THREADS}",
+            f"--segmentation.num-threads={THREADS}",
+            f"--embedding.num-threads={THREADS}",
             str(wav),
         ]
         proc = subprocess.run(argv, capture_output=True, text=True)
