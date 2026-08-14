@@ -12,8 +12,10 @@
 let
   # Chrome DevTools MCP — vendored npm package built via mkNodeCliPackage.
   # Attaches to the user's running Chrome on the loopback debug port
-  # (configured by modules/features/desktop/browser.nix:47). Private agent
-  # browsers use mcp-chrome-devtools-private instead of this live profile.
+  # (configured by modules/features/desktop/browser.nix:47). This is the only
+  # browser MCP: agents share the operator's profile so their session is his
+  # session, and isolate by opening their own window instead of their own
+  # browser (sinnix-chrome-control agent-window).
   mcpChromeDevtoolsBin = pkgs.writeShellScriptBin "mcp-chrome-devtools" ''
     set -euo pipefail
     target="''${SINNIX_CHROME_DEVTOOLS_URL-http://127.0.0.1:9222}"
@@ -32,16 +34,6 @@ let
   # sessions cannot fight over a Chrome profile lock. It is headless by
   # default; set SINNIX_AGENT_CHROME_HEADLESS=0 when a visible private
   # browser window is desired for operator inspection.
-  mcpChromeDevtoolsPrivateBin = pkgs.writeShellScriptBin "mcp-chrome-devtools-private" ''
-    set -euo pipefail
-    export SINNIX_MCP_CHROME_DEVTOOLS_BIN=${lib.escapeShellArg "${scriptPkgs.mcp-chrome-devtools}/bin/mcp-chrome-devtools"}
-    exec ${scriptPkgs.sinnix-mcp-chrome-devtools-private}/bin/sinnix-mcp-chrome-devtools-private "$@"
-  '';
-  mcpChromeDevtoolsPrivateVisibleBin = pkgs.writeShellScriptBin "mcp-chrome-devtools-private-visible" ''
-    set -euo pipefail
-    export SINNIX_AGENT_CHROME_HEADLESS=0
-    exec ${mcpChromeDevtoolsPrivateBin}/bin/mcp-chrome-devtools-private "$@"
-  '';
   # Live dots path, not `inputs.self + ...`: a store copy would mean a rebuild
   # before any edit to these control scripts could be exercised. Consumers must
   # reference this via mkOutOfStoreSymlink rather than string interpolation, or
@@ -51,8 +43,6 @@ in
 {
   inherit
     mcpChromeDevtoolsBin
-    mcpChromeDevtoolsPrivateBin
-    mcpChromeDevtoolsPrivateVisibleBin
     desktopControlScripts
     ;
 }

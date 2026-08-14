@@ -159,16 +159,23 @@ Load the shared `writing-style` skill when writing or editing human-facing prose
 Browser, desktop, and terminal control are normal local capabilities on this
 machine. Interpret user language directly:
 
-- **"your browser" / "an agent browser"** → use an agent-private Chrome through
-  `sinnix-chrome-control --target private`. This private profile is seeded from
-  the live Chrome profile by default, so agents can use authenticated state
-  without opening tabs or navigating in the user's visible browser. Use
-  `--target private-visible` when the user should be able to see the agent
-  browser.
-- **"my browser" / "the real browser" / "my tabs"** → use the user's live Chrome
-  profile through `sinnix-chrome-control --target live`. This is a high-authority
-  surface: it can see authenticated pages/cookies and non-active tabs via
-  `127.0.0.1:9222`.
+- **There is ONE browser** — the user's own Chrome, on `127.0.0.1:9222`, driven
+  by `sinnix-chrome-control`. Agents share his profile deliberately: wherever
+  he is authenticated, so are they, with nothing to seed and nothing that goes
+  stale. The former agent-private profile is deleted, along with headless mode
+  (headless announces itself in the User-Agent and loses to bot checks that a
+  real window passes).
+- **"your browser" / "an agent browser"** → `sinnix-chrome-control agent-window
+  [--url ...]`. Opens a NEW WINDOW and parks it on the hidden
+  `special:agentbrowser` workspace, so it takes no focus and touches none of
+  his tabs. Isolation is per-window now, not per-profile. Hidden windows still
+  run JS and still screenshot — verified — because CDP goes through the
+  renderer, not the compositor. **F7** shows or hides it; do not activate it
+  for him, just say it is there.
+- **"my browser" / "the real browser" / "my tabs"** → the same Chrome, but act
+  on his EXISTING pages (`list-tabs`, then operate on a specific page id).
+  High-authority: authenticated pages, cookies, non-active tabs. Never
+  navigate or close a page he is using unless he asked for exactly that.
 - **"desktop" / "window" / "screen"** → use Hyprland and screenshot helpers:
   `sinnix-hypr-control`, `sinnix-keyboard-control`, and
   `sinnix-screenshot-control`.
@@ -196,9 +203,9 @@ Prefer native non-interactive runtimes for unattended work; use Kitty only
 when a human needs a visible, interruptible process. Launch commands, auth
 rules, and mode constraints live in the `agent-orchestration` skill
 (`references/runtime-modes.md`). Standing rules: set model/effort per run,
-never inherit stale defaults; the `private-visible` browser profile is shared
-by concurrent agents — own explicit page target ids, never activate another
-agent's target; Kitty workers keep focus and route to other workspaces
+never inherit stale defaults; the browser is shared by every concurrent agent
+AND by the operator — own explicit page target ids, never activate another
+agent's target, never touch a page you did not open; Kitty workers keep focus and route to other workspaces
 silently; never inject model/effort changes into a live agent TUI while it is
 sampling.
 

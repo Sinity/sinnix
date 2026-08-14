@@ -1,59 +1,55 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Chrome DevTools Protocol (CDP) remote control for Google Chrome.
-# The live target expects the user's Chrome on --remote-debugging-port=9222.
-# Private targets launch agent-owned profiles on separate ports. A missing
-# profile is initially seeded from live Chrome so agents can authenticate; an
-# existing private profile is preserved across restart. Replacing it is a
-# separate, explicitly destructive operation.
+# Chrome DevTools Protocol (CDP) remote control for the operator's Chrome,
+# which exposes --remote-debugging-port=9222.
 # Uses curl for HTTP endpoints and websocat for WebSocket CDP commands.
 
-TARGET="live"
+# ONE browser: the operator's own Chrome, on the CDP port it already exposes.
+#
+# There used to be a second, "private" Chrome with its own profile seeded from
+# the live one. It is gone, and the reason is the seeding: `private-sync-state`
+# only ever populated a MISSING profile, so from the day it was created the
+# copy drifted -- rotated cookies went stale, expiring sessions expired, and a
+# site the operator logged into afterwards was simply not logged in for the
+# agent. "If I am authenticated somewhere, you are too" is not achievable with
+# a snapshot; it is only achievable by sharing the profile, which is what this
+# does now. Auth is identical because it is the same cookie jar, not a copy of
+# one, and there is nothing to re-seed or keep in sync.
+#
+# Headlessness went with it. Headless Chrome announces itself in its own
+# User-Agent ("HeadlessChrome/..."), so a bot check needs no cleverness to spot
+# it, and the rest of the headless surface (no GPU-backed WebGL renderer,
+# empty navigator.plugins, missing window.chrome) is an arms race that is lost
+# by default. A real window in a real browser answers all of it honestly.
+#
+# What replaces the isolation is a WINDOW, not a profile: `agent-window` opens
+# a new browser window and parks it on a hidden Hyprland workspace, so agent
+# work neither steals focus nor touches the operator's tabs. F7 brings it into
+# view. Blast radius is unchanged in any way that matters -- an agent on this
+# machine is already root-equivalent by accepted design and could read the
+# cookie database directly.
 CDP_HOST="${CDP_HOST:-127.0.0.1}"
-LIVE_CDP_PORT="${LIVE_CDP_PORT:-9222}"
-PRIVATE_CDP_PORT="${PRIVATE_CDP_PORT:-9223}"
-PRIVATE_VISIBLE_CDP_PORT="${PRIVATE_VISIBLE_CDP_PORT:-9224}"
-PRIVATE_PROFILE_DIR="${SINNIX_AGENT_CHROME_PROFILE:-/realm/cache/browser/private-live-state-control}"
-PRIVATE_VISIBLE_PROFILE_DIR="${SINNIX_AGENT_CHROME_VISIBLE_PROFILE:-/realm/cache/browser/private-live-state-visible-control}"
-LIVE_PROFILE_DIR="${SINNIX_AGENT_CHROME_LIVE_PROFILE:-$HOME/.config/chrome-ws}"
-SEED_FROM_LIVE="${SINNIX_AGENT_CHROME_SEED_FROM_LIVE:-1}"
-CHROME_BIN="${SINNIX_AGENT_CHROME_EXECUTABLE:-google-chrome-stable}"
-CDP_PORT="$LIVE_CDP_PORT"
+CDP_PORT="${CDP_PORT:-9222}"
 CDP_BASE="http://${CDP_HOST}:${CDP_PORT}"
 
-set_target() {
-  TARGET="$1"
-  case "$TARGET" in
-  live)
-    CDP_PORT="$LIVE_CDP_PORT"
-    ;;
-  private)
-    CDP_PORT="$PRIVATE_CDP_PORT"
-    ;;
-  private-visible)
-    CDP_PORT="$PRIVATE_VISIBLE_CDP_PORT"
-    ;;
-  *)
-    echo "unknown target: $TARGET" >&2
-    exit 2
-    ;;
-  esac
-  CDP_BASE="http://${CDP_HOST}:${CDP_PORT}"
-}
+# The hidden workspace agent windows are parked on, and the key that shows it.
+# Must match modules/features/desktop/hyprland/{rules,bindings}.nix.
+AGENT_WORKSPACE="${SINNIX_AGENT_BROWSER_WORKSPACE:-special:agentbrowser}"
+SUMMON_BINDING="F7"
 
 usage() {
   cat <<'USAGE'
-Usage: sinnix-chrome-control [--target live|private|private-visible] <command> [options]
+Usage: sinnix-chrome-control <command> [options]
+
+Drives the operator's own Chrome, so the agent is authenticated wherever the
+operator is. Do agent work in an `agent-window`, which is parked on a hidden
+workspace (F7 shows it) and leaves the operator's tabs alone.
 
 Commands:
-  status                          Probe the selected target
-  private-start [--visible] [--url <url>]
-                                  Start a private Chrome target; seed only a missing profile
-  private-sync-state [--visible]  Seed only a missing private profile; preserve an existing profile
-  private-reseed-state --yes [--visible]
-                                  DESTRUCTIVE: replace selected profile state from live Chrome
-  private-stop [--visible]        Stop the private Chrome target
+  status                          Probe the browser
+  agent-window [--url <url>]      Open a new window and park it on the hidden
+                                  agent workspace; prints its page id
   list                            List all open pages (id, title, url, type)
   list-tabs                       List only page-type targets
   info <page_id>                  Get detailed info for a page
@@ -97,8 +93,8 @@ Commands:
                                   Poll a JS expression until it returns truthy
 
 Examples:
-  sinnix-chrome-control --target private private-start --url https://example.com
-  sinnix-chrome-control --target private list
+  sinnix-chrome-control agent-window --url https://example.com
+  sinnix-chrome-control list
   sinnix-chrome-control screenshot <id> --out /tmp/page.png
   sinnix-chrome-control evaluate <id> --js 'document.title'
   sinnix-chrome-control new-tab --background --url https://example.com
@@ -123,10 +119,6 @@ need_cmd websocat
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-  --target)
-    set_target "${2:?missing target}"
-    shift 2
-    ;;
   --target=*)
     set_target "${1#--target=}"
     shift
@@ -141,264 +133,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-target_profile_dir() {
-  if [[ $TARGET == "private-visible" ]]; then
-    printf '%s\n' "$PRIVATE_VISIBLE_PROFILE_DIR"
-  else
-    printf '%s\n' "$PRIVATE_PROFILE_DIR"
-  fi
-}
-
-target_headless_flag() {
-  if [[ $TARGET == "private" ]]; then
-    printf '%s\n' "--headless=new"
-  fi
-}
-
-chrome_pid_file() {
-  printf '%s/chrome.pid\n' "$(target_profile_dir)"
-}
-
-cleanup_stale_private_locks() {
-  local profile_dir lock target pid
-  profile_dir="$(target_profile_dir)"
-  lock="$profile_dir/SingletonLock"
-  [[ -L $lock ]] || return 0
-  target="$(readlink "$lock" 2>/dev/null || true)"
-  pid="${target##*-}"
-  if [[ $pid =~ ^[0-9]+$ ]] && ! kill -0 "$pid" 2>/dev/null; then
-    rm -f "$profile_dir"/SingletonLock "$profile_dir"/SingletonCookie "$profile_dir"/SingletonSocket
-  fi
-}
-
-private_profile_in_use() {
-  local profile_dir pid_file pid
-  profile_dir="$(target_profile_dir)"
-  pid_file="$(chrome_pid_file)"
-  if [[ -f $pid_file ]]; then
-    pid="$(cat "$pid_file")"
-    if [[ -n $pid ]] && kill -0 "$pid" 2>/dev/null; then
-      return 0
-    fi
-  fi
-  [[ -e $profile_dir/SingletonLock ]]
-}
-
-sync_private_state_from_live() {
-  local visible=0 profile_dir reseed=0 confirmed=0
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-    --visible)
-      visible=1
-      shift
-      ;;
-    --reseed)
-      reseed=1
-      shift
-      ;;
-    --yes)
-      confirmed=1
-      shift
-      ;;
-    *)
-      echo "unknown arg: $1" >&2
-      exit 2
-      ;;
-    esac
-  done
-
-  if [[ $visible -eq 1 ]]; then
-    set_target private-visible
-  elif [[ $TARGET == "live" ]]; then
-    set_target private
-  fi
-  if [[ $TARGET == "live" ]]; then
-    echo "refusing to sync live browser target onto itself" >&2
-    exit 2
-  fi
-
-  profile_dir="$(target_profile_dir)"
-  # A prior private Chrome crash can leave SingletonLock behind. Clear a lock
-  # only when its recorded owner is gone before treating an existing profile as
-  # an intentional no-op; otherwise a normal restart would preserve the state
-  # but fail to launch Chrome.
-  cleanup_stale_private_locks
-  if [[ $reseed -eq 1 && $confirmed -ne 1 ]]; then
-    echo "refusing destructive reseed without --yes: $profile_dir" >&2
-    exit 2
-  fi
-  if [[ $reseed -eq 0 && -d $profile_dir ]]; then
-    echo "preserved existing $TARGET Chrome profile: $profile_dir (use private-reseed-state --yes to replace it)"
-    return 0
-  fi
-
-  if [[ $SEED_FROM_LIVE == "0" ]]; then
-    echo "private Chrome state sync disabled by SINNIX_AGENT_CHROME_SEED_FROM_LIVE=0"
-    return 0
-  fi
-
-  [[ -d $LIVE_PROFILE_DIR ]] || {
-    echo "live Chrome profile not found: $LIVE_PROFILE_DIR" >&2
-    exit 1
-  }
-
-  if private_profile_in_use; then
-    echo "refusing to sync while $TARGET Chrome profile is in use: $profile_dir" >&2
-    exit 2
-  fi
-
-  need_cmd rsync
-  mkdir -p "$profile_dir"
-
-  if [[ $reseed -eq 1 ]]; then
-    echo "DESTRUCTIVE reseed: replacing selected $TARGET Chrome profile state from live Chrome: $profile_dir"
-  else
-    echo "seeding missing $TARGET Chrome profile state from live Chrome: $profile_dir"
-  fi
-
-  sync_live_profile_path "Local State"
-  sync_live_profile_path "Default/Cookies"
-  sync_live_profile_path "Default/Network/Cookies"
-  sync_live_profile_path "Default/Local Storage"
-  sync_live_profile_path "Default/Session Storage"
-  sync_live_profile_path "Default/IndexedDB"
-  sync_live_profile_path "Default/Web Data"
-  # Deliberately do not sync Default/Local Extension Settings: that directory
-  # holds extension chrome.storage.local data, including Polylogue's recovery
-  # checkpoint. An explicit reseed is destructive for browser auth state, but
-  # it must not silently erase the ledger that explains that recovery is needed.
-
-  echo "seeded live Chrome profile state into $TARGET profile: $profile_dir"
-}
-
-sync_live_profile_path() {
-  local rel src dst
-  rel="$1"
-  src="$LIVE_PROFILE_DIR/$rel"
-  dst="$(target_profile_dir)/$rel"
-  [[ -e $src ]] || return 0
-
-  mkdir -p "$(dirname "$dst")"
-  if [[ -d $src ]]; then
-    mkdir -p "$dst"
-    rsync -a --delete "$src"/ "$dst"/
-  else
-    rsync -a "$src" "$dst"
-  fi
-}
-
 target_status() {
   if curl -fsS --max-time 2 "${CDP_BASE}/json/version" | jq .; then
     return 0
   fi
-  echo "unavailable: ${TARGET} (${CDP_BASE})" >&2
+  echo "unavailable: ${CDP_BASE}" >&2
   return 1
-}
-
-start_private_chrome() {
-  local visible=0 url="about:blank" profile_dir pid_file headless_arg
-  local launch_args=()
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-    --visible)
-      visible=1
-      shift
-      ;;
-    --url)
-      url="${2:?missing url}"
-      shift 2
-      ;;
-    *)
-      echo "unknown arg: $1" >&2
-      exit 2
-      ;;
-    esac
-  done
-
-  if [[ $visible -eq 1 ]]; then
-    set_target private-visible
-  elif [[ $TARGET == "live" ]]; then
-    set_target private
-  fi
-
-  if curl -fsS --max-time 1 "${CDP_BASE}/json/version" >/dev/null 2>&1; then
-    target_status
-    return 0
-  fi
-
-  profile_dir="$(target_profile_dir)"
-  pid_file="$(chrome_pid_file)"
-  # Ordinary restart preserves an existing profile (and its extension-origin
-  # IndexedDB). The initial authenticated seed is only permitted before the
-  # profile directory exists.
-  sync_private_state_from_live
-  mkdir -p "$profile_dir"
-  headless_arg="$(target_headless_flag)"
-
-  launch_args=(
-    --remote-debugging-address="$CDP_HOST"
-    --remote-debugging-port="$CDP_PORT"
-    --user-data-dir="$profile_dir"
-    --no-first-run
-    --no-default-browser-check
-  )
-  if [[ -n $headless_arg ]]; then
-    launch_args+=("$headless_arg" --no-startup-window)
-  else
-    launch_args+=("$url")
-  fi
-
-  setsid "$CHROME_BIN" "${launch_args[@]}" >"$profile_dir/chrome.log" 2>&1 &
-  printf '%s\n' "$!" >"$pid_file"
-
-  for _ in {1..50}; do
-    if curl -fsS --max-time 1 "${CDP_BASE}/json/version" >/dev/null 2>&1; then
-      if [[ -n $headless_arg ]]; then
-        curl -fsS -X PUT "${CDP_BASE}/json/new?${url}" >/dev/null
-      fi
-      target_status
-      return 0
-    fi
-    sleep 0.1
-  done
-
-  echo "private Chrome did not become ready: ${CDP_BASE}" >&2
-  exit 1
-}
-
-stop_private_chrome() {
-  local visible=0 pid_file pid
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-    --visible)
-      visible=1
-      shift
-      ;;
-    *)
-      echo "unknown arg: $1" >&2
-      exit 2
-      ;;
-    esac
-  done
-  if [[ $visible -eq 1 ]]; then
-    set_target private-visible
-  elif [[ $TARGET == "live" ]]; then
-    set_target private
-  fi
-  if [[ $TARGET == "live" ]]; then
-    echo "refusing to stop live browser target" >&2
-    exit 2
-  fi
-  pid_file="$(chrome_pid_file)"
-  if [[ -f $pid_file ]]; then
-    pid="$(cat "$pid_file")"
-    if [[ -n $pid ]] && kill "$pid" 2>/dev/null; then
-      rm -f "$pid_file"
-      echo "stopped: $TARGET"
-      return 0
-    fi
-  fi
-  echo "no managed private Chrome pid for $TARGET"
 }
 
 # ── CDP WebSocket helpers ──────────────────────────────────────────────
@@ -478,21 +218,83 @@ status)
   target_status
   ;;
 
-private-start)
-  start_private_chrome "$@"
+# Open a new browser WINDOW and hide it on the agent workspace.
+#
+# This is the isolation boundary now that the profile is shared: agents work
+# in their own window, so they never navigate a tab the operator is reading
+# and never take focus. What they DO share is the cookie jar, which is the
+# entire point -- the operator's logins are the agent's logins, with nothing
+# to sync and nothing to go stale.
+#
+# The window is identified by DIFFING Hyprland's client list across the
+# creation, not by matching a class or a title. Every window of one Chrome
+# process carries the same class, so a windowrule cannot tell this window from
+# the operator's; and a title match would race the page's own title changes.
+# The address that appears is unambiguous, and `movetoworkspacesilent` moves
+# it without pulling the operator's view along with it.
+#
+# A failure to park is reported but not fatal: a visible agent window is
+# untidy, whereas failing the command would lose a window that is already open
+# and already authenticated.
+agent-window)
+  url="about:blank"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --url)
+      url="${2:?missing url}"
+      shift 2
+      ;;
+    *)
+      echo "unknown arg: $1" >&2
+      exit 2
+      ;;
+    esac
+  done
+
+  ws_url=$(get_browser_ws_url)
+  [[ -n $ws_url ]] || {
+    echo "browser websocket unavailable: ${CDP_BASE}" >&2
+    exit 1
+  }
+
+  before=""
+  if command -v hyprctl >/dev/null 2>&1; then
+    before=$(hyprctl clients -j 2>/dev/null | jq -r '.[].address' | sort)
+  fi
+
+  params=$(jq -nc --arg url "$url" '{url: $url, newWindow: true}')
+  response=$(cdp_send "$ws_url" "Target.createTarget" "$params")
+  if jq -e '.error' >/dev/null 2>&1 <<<"$response"; then
+    jq . <<<"$response" >&2
+    exit 1
+  fi
+  page_id=$(jq -r '.result.targetId' <<<"$response")
+
+  parked="false"
+  if [[ -n $before ]]; then
+    for _ in {1..40}; do
+      sleep 0.1
+      after=$(hyprctl clients -j 2>/dev/null | jq -r '.[].address' | sort)
+      addr=$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | head -n 1)
+      [[ -n $addr ]] || continue
+      if hyprctl dispatch movetoworkspacesilent "${AGENT_WORKSPACE},address:${addr}" >/dev/null 2>&1; then
+        parked="true"
+      fi
+      break
+    done
+  fi
+
+  jq -nc --arg id "$page_id" --arg url "$url" --argjson parked "$parked" \
+    --arg ws "$AGENT_WORKSPACE" --arg key "$SUMMON_BINDING" \
+    '{id: $id, url: $url, parked: $parked, workspace: $ws, show_with: $key}'
+  if [[ $parked != "true" ]]; then
+    echo "note: window opened but could not be parked on ${AGENT_WORKSPACE}; it is visible" >&2
+  fi
   ;;
 
-private-sync-state)
-  sync_private_state_from_live "$@"
-  ;;
 
-private-reseed-state)
-  sync_private_state_from_live --reseed "$@"
-  ;;
 
-private-stop)
-  stop_private_chrome "$@"
-  ;;
+
 
 list | list-tabs)
   filter="."
@@ -533,7 +335,7 @@ new-tab)
   if [[ $background -eq 1 ]]; then
     ws_url=$(get_browser_ws_url)
     [[ -n $ws_url ]] || {
-      echo "browser websocket unavailable for ${TARGET} (${CDP_BASE})" >&2
+      echo "browser websocket unavailable: ${CDP_BASE}" >&2
       exit 1
     }
     params=$(jq -nc --arg url "$url" '{url: $url, background: true}')
@@ -602,7 +404,7 @@ load-extension)
   }
   ws_url=$(get_browser_ws_url)
   [[ -n $ws_url ]] || {
-    echo "browser websocket unavailable for ${TARGET} (${CDP_BASE})" >&2
+    echo "browser websocket unavailable: ${CDP_BASE}" >&2
     exit 1
   }
 
@@ -1220,7 +1022,7 @@ wait-selector)
     echo "wait-selector requires page_id and --selector" >&2
     exit 2
   }
-  "$0" --target "$TARGET" await "$page_id" \
+  "$0" await "$page_id" \
     --js "document.querySelector($(jq -nc --arg selector "$selector" '$selector')) !== null" \
     --timeout-sec "$timeout_sec" \
     --interval-ms "$interval_ms"

@@ -28,7 +28,7 @@ The scripts are installed on Sinnix as stable `~/.local/bin/sinnix-*` commands
 for ambient use by agents. The source files below remain the maintenance copy.
 Run `sinnix-observe` first when you need a correlated runtime inventory. Use
 the individual control helpers below to probe browser and desktop availability.
-For browser work, prefer `sinnix-chrome-control --target live|private|private-visible`.
+For browser work, use `sinnix-chrome-control` — one browser, the operator's own.
 Use the browser MCP profile (`claude-browser`/`codex-browser`) only when the
 shell CDP helper is too small for the task.
 
@@ -116,30 +116,29 @@ Source: `scripts/chrome-control.sh`
 Examples:
 
 ```bash
-# Probe the user's live Chrome CDP endpoint
-sinnix-chrome-control --target live status
+# Probe the browser (the operator's own Chrome; there is no second one)
+sinnix-chrome-control status
 
-# Start and use an agent-owned private browser profile
-sinnix-chrome-control --target private private-start --url https://example.com
-sinnix-chrome-control --target private list-tabs
-sinnix-chrome-control --target private new-tab --background --url https://example.com
+# Open an agent window, hidden on special:agentbrowser. Prints its page id.
+# Authenticated exactly where the operator is, because it IS his profile.
+sinnix-chrome-control agent-window --url https://example.com
 
-# Use a visible private browser when the operator should inspect it
-sinnix-chrome-control --target private-visible private-start --url https://example.com
+# See everything open, the operator's tabs included
+sinnix-chrome-control list-tabs
 
 # Wait for an element and read page text
-sinnix-chrome-control --target private wait-selector <page_id> --selector 'main'
-sinnix-chrome-control --target private get-text <page_id>
+sinnix-chrome-control wait-selector <page_id> --selector 'main'
+sinnix-chrome-control get-text <page_id>
 
 # Attach local context without a file-picker dialog
-sinnix-chrome-control --target private upload-files <page_id> \
+sinnix-chrome-control upload-files <page_id> \
   --selector 'input[type=file]' --file /path/to/context.md
 ```
 
 ### Browser Focus Safety
 
 - Prefer the browser CLI or CDP API over visible UI automation.
-- Treat `private-visible` as shared across concurrent agents. Own explicit page
+- Treat the browser as shared across concurrent agents AND the operator. Own explicit page
   target IDs and keep work on background CDP targets.
 - Use `new-tab --background` for new work and `upload-files` for attachments;
   neither requires activating a tab or opening a native file picker.
@@ -147,8 +146,10 @@ sinnix-chrome-control --target private upload-files <page_id> \
   known page target and selector instead.
 - When an operation genuinely depends on OS focus, inspect Hyprland's focused
   window immediately before sending input and verify focus again afterward.
-- Use `private` for unattended work. Use `private-visible` only when the
-  operator needs to inspect the agent browser.
+- Use `agent-window` for all agent work; it parks on the hidden workspace, and
+  F7 is how the operator looks at it. Operate on his existing pages only when
+  he asked for that specific thing — the profile is shared, so a stray
+  navigation lands in his session, not a sandbox.
 
 ## Notes
 
