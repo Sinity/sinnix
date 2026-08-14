@@ -342,6 +342,34 @@ internal differences.
   produce. MIUI may revoke the binding silently, so connect and disconnect are
   written as events and a gap explains itself.
 
+## The lanes it now carries
+
+Beyond ambient audio and the passive light/motion sampler:
+
+- **Speech** — Silero VAD over a second recorder; on a speech region the
+  utterance streams to prime's receiver, on any network. Off by default: every
+  other lane records something about the device or the room, this one puts what
+  was said on a wire the moment it is said, so nothing switches it on but the
+  operator. See docs/speech.md for what it deliberately does not do.
+- **Location** — framework `LocationManager.FUSED_PROVIDER` with geofence
+  transitions. No Play Services: Android 12 promoted the fused provider into
+  the framework, which the design had assumed was a Google dependency.
+- **Health Connect**, read directly rather than through the scheduled export —
+  `captures/phone/health` had been an empty directory the whole time because
+  that export never lands.
+- **Power** — battery, charging and thermal as events rather than only a
+  `status.json` field. `thermal_headroom` comes back null on this device
+  because it does not implement `getThermalHeadroom`, and is recorded as null
+  rather than as a plausible number.
+- **Sleep inference** from motion, light, screen and charging — an estimate
+  independent of any band.
+
+**Direct Boot**: a `directBootAware` service buffers into device-protected
+storage and migrates on unlock, so a phone rebooted and left locked captures
+instead of waiting for a human. Unverified — confirming it requires leaving the
+phone locked after a reboot and then checking the timeline without unlocking
+it, which is the condition under test.
+
 ## Known limits
 
 - **Reboot resumes at first unlock, not at power-on.** The device uses
