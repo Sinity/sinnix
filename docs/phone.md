@@ -27,15 +27,15 @@ links out to it rather than repeating it.
 
 ## Where it lives
 
-| Piece | Path |
-| --- | --- |
-| App source | `pkgs/sinnix-phone-app/app/src/main/` |
-| Build + install packaging | `pkgs/sinnix-phone-app/pkg.nix`, `deps.json` |
-| Desktop control surface | `scripts/sinnix-phone` |
-| Prime's half of the transport | `scripts/sinnix-phone-dispatcher` |
-| Steering export for the phone | `scripts/sinnix-steer export-phone` |
-| Scheduled bidirectional drain | `modules/services/phone-drain.nix` |
-| Live-plane route + unit | `modules/services/hub.nix` (`/phone/v1/*`) |
+| Piece                         | Path                                         |
+| ----------------------------- | -------------------------------------------- |
+| App source                    | `pkgs/sinnix-phone-app/app/src/main/`        |
+| Build + install packaging     | `pkgs/sinnix-phone-app/pkg.nix`, `deps.json` |
+| Desktop control surface       | `scripts/sinnix-phone`                       |
+| Prime's half of the transport | `scripts/sinnix-phone-dispatcher`            |
+| Steering export for the phone | `scripts/sinnix-steer export-phone`          |
+| Scheduled bidirectional drain | `modules/services/phone-drain.nix`           |
+| Live-plane route + unit       | `modules/services/hub.nix` (`/phone/v1/*`)   |
 
 ## Build
 
@@ -104,7 +104,7 @@ runtime permissions, `MANAGE_EXTERNAL_STORAGE` as an appop at **both** package
 and uid scope, and the Doze whitelist. The two appop scopes are set separately
 because only one of them reverting is exactly what broke capture before.
 
-`RECORD_AUDIO` is deliberately *not* forced to appop `allow`. The default
+`RECORD_AUDIO` is deliberately _not_ forced to appop `allow`. The default
 `MODE_FOREGROUND` is already satisfied while a microphone-typed foreground
 service is up — measured clean on 2026-08-13, uid mode `foreground` with the op
 reading `allow; running` and no package-scope override anywhere. Overriding it
@@ -145,19 +145,19 @@ lie.
 
 ### Contracts
 
-| File | Direction | Writer → reader |
-| --- | --- | --- |
-| `ambient-*.m4a` | out | AmbientService → drain → lake |
-| `status.json` | out | app → `app-status`, tile, capture screen |
-| `events/events-*.jsonl` | out | every screen → drain → lake |
-| `outbox/intent-*.json` | out | app → drain → dispatcher |
-| `outbox/{voice,trace,shared}-*` + `.json` | out | app → drain → lake |
-| `epoch.json` | local | instruments only |
-| `inbox/glance.json` | in | dispatcher → drain → home + widget |
-| `inbox/steering.json` | in | `sinnix-steer export-phone` → drain → steering trio |
-| `inbox/receipts/*.json` | in | dispatcher → notification, then deleted |
-| `inbox/notify/*.json` | in | estate → notification, then deleted |
-| `inbox/decks/*` | in | prime → the instrument shelf |
+| File                                      | Direction | Writer → reader                                     |
+| ----------------------------------------- | --------- | --------------------------------------------------- |
+| `ambient-*.m4a`                           | out       | AmbientService → drain → lake                       |
+| `status.json`                             | out       | app → `app-status`, tile, capture screen            |
+| `events/events-*.jsonl`                   | out       | every screen → drain → lake                         |
+| `outbox/intent-*.json`                    | out       | app → drain → dispatcher                            |
+| `outbox/{voice,trace,shared}-*` + `.json` | out       | app → drain → lake                                  |
+| `epoch.json`                              | local     | instruments only                                    |
+| `inbox/glance.json`                       | in        | dispatcher → drain → home + widget                  |
+| `inbox/steering.json`                     | in        | `sinnix-steer export-phone` → drain → steering trio |
+| `inbox/receipts/*.json`                   | in        | dispatcher → notification, then deleted             |
+| `inbox/notify/*.json`                     | in        | estate → notification, then deleted                 |
+| `inbox/decks/*`                           | in        | prime → the instrument shelf                        |
 
 The two device directories are deliberately separate. `/sdcard/sinnix-ambient`
 has exactly one meaning to the drain — audio, rotated and deleted once the lake
@@ -189,7 +189,7 @@ drain rsyncs with `--remove-source-files` and would otherwise delete the open
 file and lose its trailing `moov` atom.
 
 A `.part` found at service startup belongs to a recorder that died without
-closing its muxer; those are renamed to `*.m4a.orphan`, which the drain *does*
+closing its muxer; those are renamed to `*.m4a.orphan`, which the drain _does_
 collect. Renamed rather than deleted: an MP4 without its `moov` atom is not
 playable but the samples are still there, and discarding captured audio is not
 the device's call.
@@ -198,19 +198,19 @@ the device's call.
 
 Every serious failure this program has hit had the same shape:
 
-| Failure | What "healthy" looked like |
-| --- | --- |
-| Termux truncation | chunks landed every 5 min (148s of audio inside) |
-| Reboot death | all visible policy state survived; capture didn't |
-| Arbitration mute | perfect duration, full bitrate, valid container — digital silence |
-| MIUI grant revocation | no event, no error, discovered at the next failure |
+| Failure               | What "healthy" looked like                                        |
+| --------------------- | ----------------------------------------------------------------- |
+| Termux truncation     | chunks landed every 5 min (148s of audio inside)                  |
+| Reboot death          | all visible policy state survived; capture didn't                 |
+| Arbitration mute      | perfect duration, full bitrate, valid container — digital silence |
+| MIUI grant revocation | no event, no error, discovered at the next failure                |
 
 Exception-driven error handling is structurally blind here: nothing throws. So
 the app judges itself by evidence of the product rather than health of the
 process, at three cadences:
 
 - **Amplitude, every 20s.** A live microphone in a silent room still reports
-  its own noise floor, so a run of *exact* zeroes means muted rather than
+  its own noise floor, so a run of _exact_ zeroes means muted rather than
   quiet. Four consecutive zero samples (80s) cycles the recorder.
 - **File growth, every 20s.** A chunk file that has not grown for 90s means the
   recorder stopped producing frames while still believing it is running.
@@ -275,7 +275,7 @@ sampled is worth more than the fifth one at 21:00); then the declared energy
 state; and never an auditory instrument without headphones — it is not in the
 deck at all rather than offered and refused.
 
-**Five engines cover everything**, and an instrument is a *configuration* of
+**Five engines cover everything**, and an instrument is a _configuration_ of
 one: reaction, forced choice, staircase, hold-still, counting. That is what
 makes decks possible — prime writes JSON into `inbox/decks/`, the shelf gains
 an instrument, and no app release happens. A deck names an engine and a version;
@@ -285,7 +285,7 @@ looks like the real instrument and is not.
 
 Three timing decisions carry the reaction engine, and none is optional: the
 stimulus is timestamped in a `Choreographer` frame callback (when the frame was
-*presented*, not when composition asked); the response is
+_presented_, not when composition asked); the response is
 `MotionEvent.getEventTime()` (the digitizer's clock, not the handler's); and
 the epoch's touch offset is subtracted only if calibrated, with the record
 saying which. Two fingers discard a trial. `onPause` mid-trial discards and
@@ -325,7 +325,7 @@ internal differences.
   else. It is also the sanctioned workaround for Android's
   background-clipboard-read ban — sharing is push-shaped and always allowed,
   which gets the phone→desktop direction without an AccessibilityService.
-  Shared `content://` URIs are *copied*, not referenced: the permission grant
+  Shared `content://` URIs are _copied_, not referenced: the permission grant
   dies with the Activity, and a drain half an hour later would find nothing.
 - **Mark.** One tap, a timestamped word, three-second budget from a cold phone
   — hence a sheet rather than a screen, a tile, and a widget button. The
@@ -367,7 +367,7 @@ internal differences.
 ## Keeping the phone reachable
 
 The tailnet had been failing because Tailscale simply was not running and
-nothing restarted it. Doze-whitelisting prevents it being *dozed*; it does not
+nothing restarted it. Doze-whitelisting prevents it being _dozed_; it does not
 start it. Two things fix that and both are set: Android always-on VPN
 (`settings put global always_on_vpn_app com.tailscale.ipn`, lockdown
 deliberately off — with it a phone whose VPN is down has no network at all),

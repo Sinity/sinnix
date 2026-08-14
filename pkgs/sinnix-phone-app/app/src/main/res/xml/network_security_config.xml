@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext is permitted, and that is a considered position rather than a
+  leftover default.
+
+  The only host this app talks to is the hub on prime, which serves plain HTTP
+  by deliberate decision (docs/hub.md): `tailscale serve` would provide TLS but
+  needs MagicDNS and tailnet-wide cert provisioning, and this tailnet runs with
+  MagicDNS off under a standing "never touch DNS" posture. Plain HTTP inside
+  WireGuard is the honest trade — the transport is already authenticated and
+  encrypted below the application layer, and the tailnet is the security
+  boundary for every other estate surface too.
+
+  Not scoped to a domain, because the hub's address is a tailnet name and a
+  tailnet IP, and neither is a fact this public repository should carry. The
+  app reaches exactly one configured base URL and speaks to nothing else.
+-->
+<network-security-config>
+  <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
