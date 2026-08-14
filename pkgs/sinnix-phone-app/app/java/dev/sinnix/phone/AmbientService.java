@@ -85,6 +85,15 @@ public class AmbientService extends Service {
 
   private final Status status = new Status();
 
+  /**
+   * Light and motion, sampled alongside the audio.
+   *
+   * <p>Attached here rather than given its own schedule because this process
+   * is already awake continuously; passive context should add a listener, not
+   * a reason to wake the phone.
+   */
+  private AmbientSensors sensors;
+
   @Override
   public IBinder onBind(Intent intent) {
     return null;
@@ -107,6 +116,8 @@ public class AmbientService extends Service {
     wakeLock.acquire();
 
     status.attach(this);
+    sensors = new AmbientSensors(this);
+    sensors.start();
     sweepOrphans();
   }
 
@@ -179,6 +190,9 @@ public class AmbientService extends Service {
             closeChunk();
             status.serviceStopped();
           });
+    }
+    if (sensors != null) {
+      sensors.stop();
     }
     if (thread != null) {
       thread.quitSafely();

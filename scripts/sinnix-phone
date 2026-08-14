@@ -216,6 +216,54 @@ drain_ambient_adb() {
 # phone only when the lake holds a file of identical, non-zero size. Anything
 # that fails the comparison stays on the device, where the next drain can try
 # again -- the failure mode is a full /sdcard, not lost audio.
+# Collect the app's own estate: its event log and anything queued for prime.
+#
+# The audio lane is not the whole capture any more. The app records what it
+# observed -- chunk closes, holes, grant transitions, sensor windows,
+# instrument runs -- into append-only day files, and that record is what makes
+# prime able to score rather than merely store. Left on the phone it is a
+# diary nobody reads.
+#
+# Today's event file is copied and LEFT IN PLACE: it is still being appended
+# to, and taking it would truncate the day at whatever second the drain ran.
+# Older day files are complete, so they are moved. Outbox entries are one-shot
+# requests and are moved as soon as the lake holds them.
+drain_estate() {
+  local dest today name pulled=0
+  dest="$LAKE_ROOT/estate"
+  mkdir -p "$dest/events" "$dest/outbox"
+  today="events-$(date -u +%Y%m%d).jsonl"
+
+  if [ "${1:-}" = "ssh" ]; then
+    rsync -a --ignore-existing -e "$rsync_ssh" \
+      "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/sinnix-phone/events/" "$dest/events/" 2>/dev/null || true
+    rsync -a --remove-source-files -e "$rsync_ssh" \
+      "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/sinnix-phone/outbox/" "$dest/outbox/" 2>/dev/null || true
+    # Today's file is re-copied every drain because it grew; --ignore-existing
+    # above would keep the first, shorter version forever.
+    rsync -a -e "$rsync_ssh" \
+      "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/sinnix-phone/events/$today" "$dest/events/" 2>/dev/null || true
+    echo "estate: drained over ssh"
+    return 0
+  fi
+
+  adb_resolve || return 1
+  for sub in events outbox; do
+    while IFS= read -r name; do
+      [ -z "$name" ] && continue
+      if adb_any pull "/sdcard/sinnix-phone/$sub/$name" "$dest/$sub/$name" >/dev/null 2>&1; then
+        pulled=$((pulled + 1))
+        # Never delete the file still being written; every other one has been
+        # confirmed present in the lake by the pull that just succeeded.
+        if [ "$sub" = "outbox" ] || [ "$name" != "$today" ]; then
+          adb_any shell "rm -f '/sdcard/sinnix-phone/$sub/$name'" >/dev/null 2>&1 </dev/null
+        fi
+      fi
+    done < <(adb_any shell "ls /sdcard/sinnix-phone/$sub/ 2>/dev/null" 2>/dev/null </dev/null | tr -d '\r')
+  done
+  echo "estate: drained $pulled file(s) over adb"
+}
+
 rotate_ambient_adb() {
   local dest name local_size remote_size removed=0
   adb_resolve || return 1
@@ -576,6 +624,11 @@ pull)
     drain_ambient_adb
   else
     echo "no transport to the phone: ambient chunks stay on the device" >&2
+  fi
+  if [ "$ssh_up" = true ]; then
+    drain_estate ssh
+  elif adb_any get-state >/dev/null 2>&1; then
+    drain_estate
   fi
   set -e
   du -sh "$LAKE_ROOT" 2>/dev/null
