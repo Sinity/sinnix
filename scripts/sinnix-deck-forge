@@ -332,22 +332,34 @@ def build_fermi_deck(rng: random.Random) -> dict | None:
             return f"{v:g}"
         return f"{fmt(lo)}–{fmt(hi)} {unit}"
 
+    asof = dt.datetime.now(dt.timezone.utc).date().isoformat()
     trials: list[dict] = []
     for question, truth, unit in facts:
         if truth <= 0:
             continue
         decade = 10 ** int(len(str(int(truth))) - 1)
-        lo = decade
-        # Four contiguous decades with the truth inside one of them.
-        bands = [(lo / 100, lo / 10), (lo / 10, lo), (lo, lo * 10), (lo * 10, lo * 100)]
-        correct = next((i for i, (a, b) in enumerate(bands) if a <= truth < b), 2)
+        # WHERE the true decade sits in the ladder is randomised per trial.
+        # Anchoring it at a fixed index -- which an earlier version did, putting
+        # every answer at position 2 -- turns a forced-choice instrument into a
+        # test of whether the operator noticed the pattern, and two runs is all
+        # that takes. The bands stay contiguous decades so a miss still says how
+        # many orders of magnitude the estimate was out by.
+        pos = rng.randrange(4)
+        start = decade / (10 ** pos)
+        bands = [(start * 10 ** i, start * 10 ** (i + 1)) for i in range(4)]
+        correct = next((i for i, (a, b) in enumerate(bands) if a <= truth < b), pos)
         options = [bucket_label(a, b, unit) for a, b in bands]
         trials.append(
             {
-                "prompt": f"How many {question}?",
+                # Time-anchored, because every one of these counts grows. An
+                # unanchored "how many audio files has the estate transcribed"
+                # was true when the deck was written and wrong a day later --
+                # and a calibration item with a wrong ground truth does not
+                # merely fail to teach, it poisons the curve it feeds.
+                "prompt": f"How many {question}, as of {asof}?",
                 "options": options,
                 "correct": correct,
-                "tag": f"truth={int(truth)}",
+                "tag": f"truth={int(truth)} asof={asof}",
             }
         )
 
