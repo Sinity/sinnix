@@ -44,15 +44,26 @@ mkFeatureModule {
             enable = true;
             restartable = true;
           };
-          # Points DIRECTLY at AW's own SQLite DB in the persisted home dir,
+          # Points DIRECTLY at AW's own SQLite state in the persisted home dir,
           # which the standard backup pipeline already covers. Same pattern as
           # atuin's surface (modules/services/sinex/bridge.nix), which points
           # straight at history.db: consumers read the sqlite file, so no
           # conversion or rollup lane is needed.
+          #
+          # The lane watches the DB DIRECTORY, not sqlite.db itself. aw-server
+          # runs the database in WAL mode, so a live write lands in
+          # sqlite.db-wal and leaves sqlite.db's mtime untouched until the next
+          # checkpoint -- which is opportunistic, not scheduled. Watching the
+          # file alone therefore measures checkpoint cadence and calls it
+          # capture health (observed 2026-08-14: "quiet for over an hour" paged
+          # while aw-server was serving events seconds old, sqlite.db 5 min
+          # behind sqlite.db-wal). The sentinel takes the NEWEST file under the
+          # path, so the directory reads whichever of db/-wal/-shm the server
+          # touched last -- the honest witness that AW is still writing.
           captures = [
             {
               name = "activitywatch";
-              path = "/home/${config.sinnix.user.name}/.local/share/activitywatch/aw-server-rust/sqlite.db";
+              path = "/home/${config.sinnix.user.name}/.local/share/activitywatch/aw-server-rust";
               eventDriven = true;
               staleAfterSeconds = 3600;
             }
