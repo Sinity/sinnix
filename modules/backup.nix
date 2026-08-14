@@ -403,8 +403,9 @@ let
     test -d "$dolt_path/.dolt"
 
     source_git_head="$(${pkgs.git}/bin/git -c safe.directory=${lib.escapeShellArg sinexProjectPath} -C ${lib.escapeShellArg sinexProjectPath} rev-parse HEAD)"
-    dolt_commit="$(${pkgs.dolt}/bin/dolt --data-dir "$dolt_path" --use-db sinex log -n 1 --format json \
-      | jq -er 'first(.. | objects | .commit_hash? // empty)')"
+    dolt_commit="$(${pkgs.dolt}/bin/dolt --data-dir "$dolt_path" --use-db sinex sql \
+      -q 'SELECT commit_hash FROM dolt_log LIMIT 1' -r json \
+      | jq -er '.rows[0].commit_hash // empty')"
 
     install -d -m 0755 ${lib.escapeShellArg (builtins.dirOf sinexBeadsDrillLog)}
     jq -nc \

@@ -405,7 +405,7 @@ in
           cat > "$TMPDIR/mock-bin/dolt" <<'EOF'
           #!${pkgs.bash}/bin/bash
           set -euo pipefail
-          printf '%s\n' '{"commits":[{"commit_hash":"synthetic-dolt-commit"}]}'
+          printf '%s\n' '{"rows":[{"commit_hash":"synthetic-dolt-commit"}]}'
           EOF
 
           chmod +x \
