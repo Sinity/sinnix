@@ -92,10 +92,18 @@
     capture-primary.enable = true;
     capture-a11y.enable = true;
     capture-audio.enable = true;
-    # Per-window screen frames plus the always-on replay ring.
+    # Per-window screen frames. The always-on replay ring is off: on the
+    # 2026-08-14 reboot it was the only user unit to miss its stop timeout,
+    # and its SIGKILL at the 90s mark is the log line that immediately
+    # unblocked the graphical session target, Hyprland, and ~30 other units
+    # that had piled up behind it -- one stuck recorder, the whole reboot.
+    # Set against that: the ring has produced exactly one saved clip since
+    # it was introduced, so it was costing a minute and a half of every
+    # reboot for a feature that is not being used. Re-enable when the
+    # save-on-hotkey path is something the day actually reaches for.
     capture-screen.enable = true;
     capture-replay = {
-      enable = true;
+      enable = false;
       # Single panel on this host; gsr needs the connector name (see the
       # target option's description for why "focused" cannot work).
       target = "DP-3";
