@@ -1,7 +1,8 @@
 """Persistent TCP receiver for the phone's always-on telemetry push.
 
 Protocol: newline-delimited JSON. Each line is a JSON object with at least
-``kind`` (a short string naming the stream, e.g. "battery", "sensor") and
+``kind`` (a short string naming the stream, e.g. "battery", "sensor",
+"speech") and
 ``ts`` (ISO-8601 UTC). Every field is passed through into the capture
 envelope's payload verbatim; this receiver's only job is demuxing by
 ``kind`` into a per-kind capture lane (``phone-<kind>``) so downstream
@@ -27,6 +28,17 @@ from pathlib import Path
 
 from sinnix_capture.writer import CaptureWriter
 
+from .speech import MAX_UTTERANCE_SECONDS, SpeechLane
+
+#: asyncio's StreamReader defaults to a 64 KiB line limit, which is ample for a
+#: battery reading and far too small for an utterance: a speech line carries
+#: base64 PCM, so its size follows directly from the duration ceiling the
+#: speech lane enforces. Deriving one from the other means raising the ceiling
+#: cannot silently start killing connections -- which is exactly what happened
+#: the first time a real utterance was pushed at this receiver.
+_PCM_BYTES_PER_SECOND = 16000 * 2  # 16 kHz, mono, s16le
+_READ_LIMIT = int(MAX_UTTERANCE_SECONDS * _PCM_BYTES_PER_SECOND * 4 / 3) + (1 << 16)
+
 log = logging.getLogger("sinnix-phone-receiver")
 
 _KIND_ALLOWLIST_PATTERN = None  # no restriction; any kind gets its own lane
@@ -42,6 +54,11 @@ class Demuxer:
     def __init__(self, capture_root: Path) -> None:
         self.capture_root = capture_root
         self._writers: dict[str, CaptureWriter] = {}
+        # One kind gets special handling, and only one: speech carries audio
+        # rather than a reading, so it is written to the lake and transcribed
+        # before its envelope is worth anything. Everything else stays on the
+        # deliberately dumb path above.
+        self._speech = SpeechLane(capture_root)
 
     def writer_for(self, lane: str) -> CaptureWriter:
         w = self._writers.get(lane)
@@ -63,6 +80,8 @@ class Demuxer:
             log.warning("dropped non-object line")
             return
         kind = str(obj.get("kind", "unknown"))
+        if kind == "speech":
+            obj = self._speech.ingest(obj)
         lane = _lane_name(kind)
         writer = self.writer_for(lane)
         writer.write(obj)
@@ -77,7 +96,14 @@ async def handle_client(
     log.info("client connected: %s", peer)
     try:
         while True:
-            line = await reader.readline()
+            try:
+                line = await reader.readline()
+            except ValueError:
+                # Over the limit even so. The module's own rule applies: a
+                # single bad line must never take down a connection carrying
+                # everything else the phone is sending.
+                log.warning("dropped an oversized line from %s", peer)
+                continue
             if not line:
                 break
             try:
@@ -92,7 +118,7 @@ async def handle_client(
 async def run(host: str, port: int, capture_root: Path) -> None:
     demux = Demuxer(capture_root)
     server = await asyncio.start_server(
-        lambda r, w: handle_client(r, w, demux), host=host, port=port
+        lambda r, w: handle_client(r, w, demux), host=host, port=port, limit=_READ_LIMIT
     )
     addrs = ", ".join(str(s.getsockname()) for s in server.sockets or [])
     log.info("listening on %s, capture_root=%s", addrs, capture_root)

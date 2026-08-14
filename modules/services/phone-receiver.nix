@@ -18,6 +18,22 @@ let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   receiverPkg = scriptPkgs.sinnix-phone-receiver;
   capturesRoot = config.sinnix.paths.capturesRoot;
+
+  # The kinds the phone actually pushes. Named rather than inferred because
+  # each one needs a directory the receiver's user can write: the captures root
+  # is root-owned, and CaptureWriter creates `<root>/phone-<kind>` on first
+  # write. Nothing ever reached this service before, so that permission error
+  # had never once been hit -- the first real utterance found it immediately.
+  # A kind not listed here still parses and is still logged; only its lane
+  # cannot be created, which is a loud failure rather than a silent one.
+  streamKinds = [
+    "speech"
+    "battery"
+    "thermal"
+    "location"
+    "health"
+    "sensor"
+  ];
   tailscaleInterface = "tailscale0";
   port = helpers.data.ports.phoneStream;
 
@@ -71,6 +87,21 @@ mkServiceModule {
       ];
 
       networking.firewall.interfaces.${tailscaleInterface}.allowedTCPPorts = [ port ];
+
+      # One directory per stream kind, owned by the user the receiver runs as.
+      # The captures root is root-owned and CaptureWriter creates its lane
+      # directory on first write, so without these the very first line of every
+      # kind dies with EACCES -- which is exactly what happened the first time
+      # anything was ever pushed at this service.
+      systemd.tmpfiles.rules = map (
+        kind: "d ${capturesRoot}/phone-${kind} 0755 ${username} users -"
+      ) streamKinds
+      ++ [
+        # Raw utterance audio, kept whether or not transcription succeeded:
+        # audio can be re-transcribed by a better engine later, a transcript
+        # cannot be un-lost.
+        "d ${capturesRoot}/phone/speech 0755 ${username} users -"
+      ];
 
       home-manager.users.${username} =
         { ... }:
