@@ -286,9 +286,23 @@ push_estate() {
   [ -d "$src" ] || return 0
 
   if [ "${1:-}" = "ssh" ]; then
-    ssh_phone "mkdir -p /sdcard/sinnix-phone/inbox" >/dev/null 2>&1 || true
-    rsync -a -e "$rsync_ssh" \
+    ssh_phone "mkdir -p /sdcard/sinnix-phone/inbox/receipts /sdcard/sinnix-phone/inbox/notify /sdcard/sinnix-phone/inbox/decks" >/dev/null 2>&1 || true
+    # State: replaced every drain, so a plain copy is right. glance.json and
+    # steering.json are snapshots -- the phone should always hold the newest.
+    rsync -a --exclude='receipts/' --exclude='notify/' -e "$rsync_ssh" \
       "$src/" "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/sinnix-phone/inbox/" 2>/dev/null || true
+    # One-shots: handed over, not shared. --remove-source-files unlinks a source
+    # only after rsync has confirmed the destination matches, which is the same
+    # guarantee the adb path reproduces by hand. Without it prime keeps every
+    # receipt forever and re-pushes it on every drain, and since the app deletes
+    # each one as it renders it, the operator gets the same notification again
+    # every half hour -- observed: one voice receipt shown twice, 99 seconds
+    # apart, from a single scoring run.
+    for one in receipts notify; do
+      [ -d "$src/$one" ] || continue
+      rsync -a --remove-source-files -e "$rsync_ssh" \
+        "$src/$one/" "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/sinnix-phone/inbox/$one/" 2>/dev/null || true
+    done
     echo "estate: pushed over ssh"
     return 0
   fi
