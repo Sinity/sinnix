@@ -143,7 +143,7 @@ mkServiceModule {
             processMatchers = [ "sinnix-agent-job-" ];
           };
           captures = [
-            {
+            ({
               name = "agent-job-manifests";
               path = "${cfg.stateDir}/jobs";
               eventDriven = true;
@@ -161,9 +161,37 @@ mkServiceModule {
               # all. The sentinel skips lanes that declare neither a cadence
               # nor a budget, which is exactly the intended treatment.
               #
-              # Reachability is a real question and needs a livenessProbe,
-              # tracked in sinnix-oig5.
+              # What silence CANNOT tell us, the probe below can (sinnix-oig5).
             }
+            // lib.optionalAttrs cfg.tunnel.enable {
+              # Reachability, asked directly instead of inferred from silence.
+              #
+              # /readyz rather than /healthz: the tunnel client answers "live"
+              # as soon as its process is up, but "ready" only once it holds a
+              # working control-plane connection -- and a gateway that is
+              # running but disconnected is exactly the state this lane could
+              # not previously distinguish from an unused one.
+              #
+              # Exit codes are chosen for how the sentinel reads them: 0 is
+              # healthy, 1 means the source is absent (the honest verdict when
+              # the endpoint answers wrong or not at all), and anything else
+              # means the probe itself could not answer. curl is addressed by
+              # store path because the probe runs under `bash -c` in the user
+              # session, where the sentinel's own runtimeInputs are not on
+              # PATH; the explicit exit 9 keeps a missing binary from
+              # masquerading as a missing gateway.
+              #
+              # Only declared when the tunnel is enabled. Without it there is
+              # no remote gateway to be unreachable, so there would be nothing
+              # for a probe to answer.
+              livenessProbe = {
+                command =
+                  "command -v ${pkgs.curl}/bin/curl >/dev/null || exit 9; "
+                  + "${pkgs.curl}/bin/curl -sf -m 5 -o /dev/null "
+                  + "http://127.0.0.1:${toString cfg.tunnel.healthPort}/readyz || exit 1";
+                timeoutSeconds = 10;
+              };
+            })
           ];
         };
       }
