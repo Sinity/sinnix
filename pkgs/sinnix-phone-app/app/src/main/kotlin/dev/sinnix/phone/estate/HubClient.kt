@@ -23,7 +23,7 @@ import org.json.JSONObject
  * deleted the app would keep working at drain cadence.
  *
  * Timeouts are short and deliberate. A phone that has left the house should
- * discover that in two seconds and fall back, not spin on a socket for thirty
+ * discover that in a few seconds and fall back, not spin on a socket for thirty
  * while a screen shows nothing.
  */
 class HubClient(context: Context) {
@@ -32,7 +32,10 @@ class HubClient(context: Context) {
 
     private val http =
         OkHttpClient.Builder()
-            .connectTimeout(2, TimeUnit.SECONDS)
+            // 4s, not 2: the first call after the screen wakes pays a DNS
+            // resolve through the VPN, and a phone that is genuinely at home
+            // should not be told it is away because the resolver was cold.
+            .connectTimeout(4, TimeUnit.SECONDS)
             .readTimeout(6, TimeUnit.SECONDS)
             .writeTimeout(6, TimeUnit.SECONDS)
             .callTimeout(10, TimeUnit.SECONDS)
@@ -106,6 +109,11 @@ class HubClient(context: Context) {
                 if (!r.isSuccessful) null else r.body?.string()?.let { JSONObject(it) }
             }
         } catch (e: IOException) {
+            // Logged rather than swallowed. "unreachable" is an honest thing
+            // for the UI to say and a useless thing to debug from: a phone off
+            // the tailnet, a DNS miss and a cleartext-policy refusal all look
+            // identical on screen and are three different fixes.
+            Log.i(Storage.TAG, "hub unreachable at $url: ${e.javaClass.simpleName}: ${e.message}")
             null
         } catch (e: Exception) {
             Log.w(Storage.TAG, "hub GET $url failed oddly", e)

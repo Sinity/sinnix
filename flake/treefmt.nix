@@ -47,6 +47,11 @@ _: {
         "secret/*"
         # Prettier can't parse personas.yaml (unicode box-drawing in comments)
         "dots/claude/skills/persona/personas.yaml"
+        # The phone app's Gradle dependency lock is written by mitm-cache's
+        # update script, wholesale, every time it runs. Formatting it would
+        # make every regeneration a several-hundred-line diff against a file
+        # nobody reads by hand.
+        "pkgs/sinnix-phone-app/deps.json"
       ];
     };
   };
