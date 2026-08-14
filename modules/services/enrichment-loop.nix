@@ -72,10 +72,20 @@ mkServiceModule {
                   stateDir
                   outputRoot
                 ];
-                # 3-minute budget: a `claude -p` round trip plus dump/verify
-                # overhead comfortably fits; a wedged invocation should not
-                # hold the scope open indefinitely.
-                TimeoutStartSec = "180s";
+                # The 3-minute budget this used to carry did not fit. A day
+                # of measured runs (2026-08-14) lands between 1m40s and
+                # 3m00s with no error exits at all -- every failure was the
+                # ceiling itself, and the last four of five runs timed out
+                # as the estate dump grew. A limit the healthy path is
+                # already touching is not a runaway guard, it is a coin
+                # flip, and each loss costs a full pass plus a critical
+                # notification.
+                #
+                # 10 minutes sits well clear of the observed distribution
+                # while still bounding a genuinely wedged `claude -p`, and
+                # stays under the hourly timer interval so a slow pass can
+                # never overlap its successor.
+                TimeoutStartSec = "600s";
               };
             };
           };
