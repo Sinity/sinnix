@@ -505,8 +505,82 @@ def cmd_diarize(args: argparse.Namespace) -> int:
                 {"start": float(m.group(1)), "end": float(m.group(2)),
                  "speaker": f"spk{int(m.group(3))}"}
             )
-    print(json.dumps({"schema": SCHEMA, "file": Path(args.file).name, "turns": turns}, indent=2))
+
+    # The VAD's own answer for how much speech is in this file, which is the
+    # honest denominator for "can that many speakers be in here". Cheap enough
+    # to always pay: RTF 0.002 over an ambient chunk.
+    speech_seconds = transcribe_file(Path(args.file)).get("speech_seconds") or 0.0
+    verdict = diarization_verdict(turns, speech_seconds)
+    out = {
+        "schema": SCHEMA,
+        "file": Path(args.file).name,
+        "speakers": len({t["speaker"] for t in turns}),
+        "vad_speech_seconds": speech_seconds,
+        "turns": turns,
+        **verdict,
+    }
+    print(json.dumps(out, indent=2))
     return 0
+
+
+def diarization_verdict(turns: list[dict], speech_seconds: float) -> dict:
+    """Whether the speaker count means anything.
+
+    Clustering always returns an answer. Run over a 300 s ambient chunk holding
+    5.4 s of speech it returned SEVENTEEN speakers -- it had clustered room
+    noise into confident structure, which is the failure mode this whole
+    program keeps meeting: not an error, a plausible-looking result that is
+    entirely fictional.
+
+    The test that separates that from a real two-speaker recording is not the
+    diarizer's own numbers -- it believes itself in both cases -- but its
+    numbers against the VAD's. Two things follow from the speech actually
+    present:
+
+    * a speaker needs a few seconds of speech to be a speaker at all, so the
+      count has to be supportable by the speech the VAD found;
+    * the diarizer's own total should not wildly exceed the VAD's, because
+      when it does it is segmenting something the VAD did not consider speech.
+
+    A first attempt used total diarized time and median turn length instead.
+    Both passed the noise and failed the genuine recording, which is worth
+    keeping in the record: a plausible threshold on the wrong quantity is not
+    a weaker check, it is an inverted one.
+    """
+    if not turns:
+        return {"trustworthy": False, "caveat": "no speech regions found"}
+    speakers = len({t["speaker"] for t in turns})
+    diarized = sum(t["end"] - t["start"] for t in turns)
+
+    if speech_seconds <= 0:
+        return {"trustworthy": False, "caveat": "the VAD found no speech in this file"}
+    supportable = max(1, int(speech_seconds // SECONDS_PER_SPEAKER))
+    if speakers > supportable:
+        return {
+            "trustworthy": False,
+            "caveat": (
+                f"{speakers} speakers claimed over {speech_seconds:.1f}s of speech — "
+                f"at least {SECONDS_PER_SPEAKER:.0f}s each, {supportable} is the most "
+                "this file could hold"
+            ),
+        }
+    if diarized > speech_seconds * DIARIZED_OVERSHOOT:
+        return {
+            "trustworthy": False,
+            "caveat": (
+                f"diarizer segmented {diarized:.1f}s where the VAD found {speech_seconds:.1f}s — "
+                "it is following something the VAD did not call speech"
+            ),
+        }
+    return {"trustworthy": True, "caveat": None}
+
+
+#: A voice needs roughly this long to be separable from another one.
+SECONDS_PER_SPEAKER = 3.0
+
+#: How far the diarizer's total may exceed the VAD's before it is clustering
+#: something the VAD did not consider speech at all.
+DIARIZED_OVERSHOOT = 3.0
 
 
 # ------------------------------------------------------------------- the hub
