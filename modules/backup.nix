@@ -391,7 +391,10 @@ let
     }
     trap cleanup EXIT
 
-    borg extract --destination "$restore_root" "${borgRepoRealm}::''${archive}" "''${archive_paths[@]}"
+    (
+      cd "$restore_root"
+      borg extract "${borgRepoRealm}::''${archive}" "''${archive_paths[@]}"
+    )
 
     issues_path="$restore_root/${sinexBeadsIssuesArchivePath}"
     dolt_path="$restore_root/${sinexBeadsDoltArchivePath}"
