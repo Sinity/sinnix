@@ -95,18 +95,18 @@ the turns of one conversation would be the only real cost.
 Discovered from disk, not hard-coded — the desktop capture root holds three
 generations at once and only one is live:
 
-| Lane | Path | In a default pass |
-| --- | --- | --- |
-| `phone` | `captures/phone/ambient` | yes |
-| `voice` | `captures/phone/estate/outbox` | yes |
-| `src-*` | `captures/audio/src-…` (microphones) | yes |
-| `snk-*` | `captures/audio/snk-…` (what the machine played) | no |
-| — | `captures/audio/{mic,sink-monitor}` | retired 2026-08-13 |
-| — | `captures/audio/legacy` | retired 2026-05-21 |
+| Lane    | Path                                             | In a default pass  |
+| ------- | ------------------------------------------------ | ------------------ |
+| `phone` | `captures/phone/ambient`                         | yes                |
+| `voice` | `captures/phone/estate/outbox`                   | yes                |
+| `src-*` | `captures/audio/src-…` (microphones)             | yes                |
+| `snk-*` | `captures/audio/snk-…` (what the machine played) | no                 |
+| —       | `captures/audio/{mic,sink-monitor}`              | retired 2026-08-13 |
+| —       | `captures/audio/legacy`                          | retired 2026-05-21 |
 
 Sinks are excluded by default deliberately. A source lane is a recording of a
 room, which is what this program is about; a sink lane is everything the
-machine *played*, so transcribing it by default would fill the corpus with the
+machine _played_, so transcribing it by default would fill the corpus with the
 scripts of every video watched. They remain available by name.
 
 **Undecodable files are carried as findings, not errors.** 27 of 464 lake
@@ -125,7 +125,7 @@ happen to it in an order that is the design:
    is trustworthy. A transcript cannot be un-lost. If the later steps fail, the
    recording survives them.
 2. **It is transcribed inline** through the hub, not by a later batch pass,
-   because the point of this lane is that speaking reaches prime *now*.
+   because the point of this lane is that speaking reaches prime _now_.
 3. **The transcript is written to the capture lane** as an envelope joinable
    with everything else the phone sends.
 
@@ -146,7 +146,7 @@ The mechanism that would filter that is speaker conditioning, and the
 distinction matters: this is a **noise filter, not an authenticator**. Voice is
 not a strong authenticator and the estate can synthesise the operator's own
 voice locally, so treating a voiceprint as authorisation would be theatre. The
-question it answers is only *whether an utterance is a command at all*.
+question it answers is only _whether an utterance is a command at all_.
 
 `scripts/sinnix-speaker-verify` exists (ECAPA-TDNN via speechbrain) and is
 **verified functional but measured NOT discriminative**: a different-source
@@ -162,7 +162,7 @@ acquires a voice-activated foot-gun.
 ## Diarization
 
 `sherpa-onnx-offline-speaker-diarization` — pyannote segmentation plus a
-titanet speaker embedding, both ONNX, both CPU. It produces speaker *turns*
+titanet speaker embedding, both ONNX, both CPU. It produces speaker _turns_
 (`spk0`, `spk1`), not names.
 
 **It carries a trustworthiness verdict, because clustering always returns an
@@ -189,12 +189,12 @@ be much harder to undo than one recomputed on demand.
 verified on every service start. Weights are not source and do not belong in
 the Nix store; the estate already keeps model files under `/realm/media/model`.
 
-| Model | Size | Role |
-| --- | --- | --- |
-| `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8` | 465 MB | recognition |
-| `nemo_en_titanet_small.onnx` | 38 MB | speaker embedding |
-| `sherpa-onnx-pyannote-segmentation-3-0` | 7 MB | speaker segmentation |
-| `silero_vad.onnx` | 2 MB | voice activity |
+| Model                                        | Size   | Role                 |
+| -------------------------------------------- | ------ | -------------------- |
+| `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8` | 465 MB | recognition          |
+| `nemo_en_titanet_small.onnx`                 | 38 MB  | speaker embedding    |
+| `sherpa-onnx-pyannote-segmentation-3-0`      | 7 MB   | speaker segmentation |
+| `silero_vad.onnx`                            | 2 MB   | voice activity       |
 
 An earlier attempt at Parakeet went through a NeMo pip venv and left 5.5 GB of
 torch and CUDA wheels under `/realm/media/model/parakeet` with no model weights

@@ -93,15 +93,14 @@ mkServiceModule {
       # directory on first write, so without these the very first line of every
       # kind dies with EACCES -- which is exactly what happened the first time
       # anything was ever pushed at this service.
-      systemd.tmpfiles.rules = map (
-        kind: "d ${capturesRoot}/phone-${kind} 0755 ${username} users -"
-      ) streamKinds
-      ++ [
-        # Raw utterance audio, kept whether or not transcription succeeded:
-        # audio can be re-transcribed by a better engine later, a transcript
-        # cannot be un-lost.
-        "d ${capturesRoot}/phone/speech 0755 ${username} users -"
-      ];
+      systemd.tmpfiles.rules =
+        map (kind: "d ${capturesRoot}/phone-${kind} 0755 ${username} users -") streamKinds
+        ++ [
+          # Raw utterance audio, kept whether or not transcription succeeded:
+          # audio can be re-transcribed by a better engine later, a transcript
+          # cannot be un-lost.
+          "d ${capturesRoot}/phone/speech 0755 ${username} users -"
+        ];
 
       home-manager.users.${username} =
         { ... }:

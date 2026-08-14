@@ -127,9 +127,15 @@ async def run(host: str, port: int, capture_root: Path) -> None:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="%(asctime)s %(levelname)s %(message)s")
+    logging.basicConfig(
+        level=logging.INFO,
+        stream=sys.stderr,
+        format="%(asctime)s %(levelname)s %(message)s",
+    )
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host", required=True, help="bind address (tailscale0 IP, never 0.0.0.0)")
+    parser.add_argument(
+        "--host", required=True, help="bind address (tailscale0 IP, never 0.0.0.0)"
+    )
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--capture-root", type=Path, required=True)
     args = parser.parse_args()

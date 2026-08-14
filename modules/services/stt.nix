@@ -146,5 +146,4 @@ mkAiService {
       description = "Seconds between lake transcription passes.";
     };
   };
-}
-  args
+} args
