@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.health.connect.client.PermissionController
 import androidx.navigation.NavController
 import dev.sinnix.phone.capture.SpeechService
 import dev.sinnix.phone.core.Events
@@ -72,6 +73,30 @@ fun SettingsScreen(nav: NavController) {
                 Prefs.setLocationLane(ctx, false)
                 location = false
             }
+        }
+
+    // Health Connect keeps its own permission state, so this is its contract
+    // rather than the platform's RequestPermission. The result is written as
+    // a grant transition for the same reason the notification listener's is:
+    // a silent revocation should explain the gap it causes, not leave it to
+    // be reconstructed months later. Unlike the location lane above, a denial
+    // does NOT switch the lane off -- HealthLane already reports its own
+    // blocked state as an event, and a lane that disables itself on refusal
+    // is a lane nobody notices is off.
+    val askHealth =
+        rememberLauncherForActivityResult(
+            PermissionController.createRequestPermissionResultContract()
+        ) { granted: Set<String> ->
+            Events.record(
+                ctx,
+                "grant_transition",
+                "grant",
+                "health_connect",
+                "granted",
+                granted.containsAll(HealthLane.PERMISSIONS),
+                "granted_count",
+                granted.size,
+            )
         }
 
     Column(
@@ -120,6 +145,10 @@ fun SettingsScreen(nav: NavController) {
                 health = on
                 Prefs.setHealthLane(ctx, on)
                 Events.record(ctx, "lane_toggle", "lane", "health", "enabled", on)
+                // Same shape as the location lane: switching a lane on asks
+                // for what it needs, instead of leaving the operator to
+                // discover separately that it is on and starved.
+                if (on) askHealth.launch(HealthLane.PERMISSIONS)
             }
 
             LaneRow(
@@ -214,16 +243,29 @@ fun SettingsScreen(nav: NavController) {
 
         Card {
             SectionLabel("Grants this screen cannot make")
+            // ASK for the health permissions, rather than opening the Health
+            // Connect settings screen and hoping. The old button did the
+            // latter, which cannot work: an app that has never issued a
+            // request does not appear in Health Connect's app list, so the
+            // operator arrived at a screen with nothing on it to grant. The
+            // request contract is the only route that puts the app in front
+            // of the consent dialog. Falls back to the settings intent when
+            // Health Connect is not installed, where there is nothing to
+            // request from.
             VerbButton("Health Connect permissions", Modifier.fillMaxWidth()) {
                 try {
-                    ctx.startActivity(Intent("androidx.health.ACTION_HEALTH_CONNECT_SETTINGS"))
+                    askHealth.launch(HealthLane.PERMISSIONS)
                 } catch (e: Exception) {
-                    ctx.startActivity(
-                        Intent(
-                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                            Uri.parse("package:${ctx.packageName}"),
+                    try {
+                        ctx.startActivity(Intent("androidx.health.ACTION_HEALTH_CONNECT_SETTINGS"))
+                    } catch (e2: Exception) {
+                        ctx.startActivity(
+                            Intent(
+                                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                Uri.parse("package:${ctx.packageName}"),
+                            )
                         )
-                    )
+                    }
                 }
             }
             VerbButton("Exact alarms", Modifier.fillMaxWidth()) {

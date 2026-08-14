@@ -261,6 +261,42 @@
       </intent-filter>
     </service>
 
+    <!--
+      Health Connect's permissions rationale target.
+
+      Not optional decoration: Health Connect refuses to LIST an app, and so
+      refuses to hold permissions for it, unless the app answers this action.
+      Without it the app declares android.permission.health.* in this file,
+      Health Connect never shows it in "App permissions", and HealthLane can
+      never be granted anything, which is exactly the state the Band 10
+      arrived to on 2026-08-14. `pm grant` cannot substitute: on Android 13
+      Health Connect is a separate APK holding its own permission state, so
+      the platform grant call accepts these names and silently does nothing.
+
+      The VIEW_PERMISSION_USAGE alias is the Android 14+ spelling of the same
+      requirement, declared now so an OS upgrade does not silently re-dark the
+      lane.
+    -->
+    <activity
+        android:name=".ingress.HealthPermissionsRationaleActivity"
+        android:exported="true"
+        android:excludeFromRecents="true"
+        android:label="@string/health_rationale_label">
+      <intent-filter>
+        <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+      </intent-filter>
+    </activity>
+    <activity-alias
+        android:name=".ingress.HealthPermissionsRationaleAlias"
+        android:exported="true"
+        android:targetActivity=".ingress.HealthPermissionsRationaleActivity"
+        android:permission="android.permission.START_VIEW_PERMISSION_USAGE">
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+        <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+      </intent-filter>
+    </activity-alias>
+
     <!-- Home-screen widget: the estate line, the capture ribbon, and the two
          verbs that must not cost a launch. -->
     <receiver

@@ -47,6 +47,17 @@ mkServiceModule {
         cadenceSeconds = 1800;
         staleAfterSeconds = 86400;
       }
+      # The phone's own system log. Same wifi-conditional reasoning as the
+      # ambient lane above, so the same generous budget: this measures whether
+      # the DRAIN is landing anything, and a phone off wifi overnight is an
+      # ordinary gap. It is adb-only, which is the narrower dependency of the
+      # two transports, hence not a tighter budget than ambient's.
+      {
+        name = "phone-logcat";
+        path = "/realm/data/captures/phone/logcat";
+        cadenceSeconds = 1800;
+        staleAfterSeconds = 86400;
+      }
     ];
   };
   configFn =
