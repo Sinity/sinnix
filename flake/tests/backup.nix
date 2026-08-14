@@ -392,6 +392,10 @@ in
           cat > "$TMPDIR/mock-bin/git" <<'EOF'
           #!${pkgs.bash}/bin/bash
           set -euo pipefail
+          if [ "$1" = "-c" ]; then
+            test "$2" = "safe.directory=$TMPDIR/sinex-source"
+            shift 2
+          fi
           test "$1" = "-C"
           test "$3" = "rev-parse"
           test "$4" = "HEAD"
