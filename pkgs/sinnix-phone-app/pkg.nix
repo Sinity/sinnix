@@ -54,8 +54,8 @@ let
 
   # compileSdk. targetSdk stays at 33 (app/build.gradle.kts explains why); the
   # compile platform is free to be newer, and current AndroidX requires 35.
-  platformVersion = "35";
-  buildToolsVersion = "35.0.0";
+  platformVersion = "36";
+  buildToolsVersion = "36.0.0";
 
   androidComposition = androidPkgs.androidenv.composeAndroidPackages {
     platformVersions = [ platformVersion ];

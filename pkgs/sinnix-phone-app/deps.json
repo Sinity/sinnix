@@ -407,12 +407,22 @@
   "dl/android/maven2/androidx/graphics/graphics-path/1.0.1/graphics-path-1.0.1": {
    "aar": "sha256-jKQDK215s1HwtZrUtYDt27lCPhZS98lYgwaH8e7i7AM="
   },
-  "dl/android/maven2/androidx/health/connect#connect-client/1.1.0-alpha07": {
-   "module": "sha256-a5KkktJjVm3YIc/j15VHv9hKaRyIXI9gCBxy0rfZTlU=",
-   "pom": "sha256-fJLwxB8pqRHhvPfcqZcBn7cVd8b6e9uu0oUPzWTTKd0="
+  "dl/android/maven2/androidx/health/connect#connect-client-external-protobuf/1.1.0": {
+   "jar": "sha256-b1QYRxIoqA8Wun3pw+j4xCxYI4wPSf1w1LQ6sYf85QI=",
+   "module": "sha256-H4w9hzRmVBMOQFJU04K0hn3PvI5oWdKXtcMsRUkGBF8=",
+   "pom": "sha256-hivPc+pxXKmAw09l7wyJyPOY45ToXyQP/0qQLF1SCdg="
   },
-  "dl/android/maven2/androidx/health/connect/connect-client/1.1.0-alpha07/connect-client-1.1.0-alpha07": {
-   "aar": "sha256-hdTD4DaClPN9zeYgcD8ElWicAiWgo3cf9EkzdmK1i1E="
+  "dl/android/maven2/androidx/health/connect#connect-client-proto/1.1.0": {
+   "jar": "sha256-KRE35o5HUhrplubA+sPWQ395QnTxCw5NRhZ2MiWx0hg=",
+   "module": "sha256-1X3ZnSzX4aUhK3P+U5YZAK6t2qJ0EJnErKKiLJCg9Fw=",
+   "pom": "sha256-OEoVYlw7dsjFZdPZhl59A2D8GKS1d9RUcQ4pdNdeGds="
+  },
+  "dl/android/maven2/androidx/health/connect#connect-client/1.1.0": {
+   "module": "sha256-XrvGu1sGljQnwGlQUzT8M5iQ+IyEgj3pg0tmbzIJZrQ=",
+   "pom": "sha256-KdHFW/0edE8maYgUNCvXYQqLRPtj49uGnBvvIBgqHzI="
+  },
+  "dl/android/maven2/androidx/health/connect/connect-client/1.1.0/connect-client-1.1.0": {
+   "aar": "sha256-zhYBrw72cexqdrDynSryKsxXjkCMcQfQjqIwZ9OCJZM="
   },
   "dl/android/maven2/androidx/interpolator#interpolator/1.0.0": {
    "pom": "sha256-DdwHzDlpn0js2eyJS1gwwPCeIugpWSlO3zchciTIi3s="

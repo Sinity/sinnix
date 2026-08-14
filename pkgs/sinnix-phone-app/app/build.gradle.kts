@@ -6,16 +6,15 @@ plugins {
 
 android {
     namespace = "dev.sinnix.phone"
-    // 35 because current AndroidX (core-ktx 1.16, Compose 1.8) refuses to be
-    // compiled against anything older. Unrelated to targetSdk, which is a
-    // behaviour opt-in and stays at 33.
-    compileSdk = 35
+    // 36 because androidx.health.connect 1.1.0 refuses to be depended on by
+    // anything compiled against less. Unrelated to targetSdk, which is a
+    // behaviour opt-in and stays at 33 for the BOOT_COMPLETED reason below.
+    compileSdk = 36
 
     // Pinned to what pkg.nix installs. Left unset, AGP picks its own default
     // and the build fails inside the sandbox with a missing-component error
-    // that reads like a network problem instead of a version mismatch. 35.0.0
-    // is AGP 8.10's floor, not a preference.
-    buildToolsVersion = "35.0.0"
+    // that reads like a network problem instead of a version mismatch.
+    buildToolsVersion = "36.0.0"
 
     defaultConfig {
         applicationId = "dev.sinnix.phone"
