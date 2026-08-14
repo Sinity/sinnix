@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import fcntl
 import json
 import os
 import re
@@ -361,6 +362,23 @@ def cmd_lake(args: argparse.Namespace) -> int:
         print("stt: models missing — run `sinnix stt models`", file=sys.stderr)
         return 1
     TRANSCRIPT_DIR.mkdir(parents=True, exist_ok=True)
+
+    # One pass at a time. The ledger is read once at the start and appended to
+    # as work completes, so two overlapping passes each see an empty ledger for
+    # the same files and both transcribe them -- which is exactly what happened
+    # when a manual run overlapped the timer: 212 of 345 chunks were
+    # transcribed twice. Readers dedupe, so the data stayed correct; the cost
+    # was doing every chunk twice and writing a log that says so.
+    #
+    # Non-blocking: a second pass exits rather than queueing, because the work
+    # is idempotent and the next timer tick is thirty minutes away.
+    lock_path = TRANSCRIPT_DIR / ".lake.lock"
+    lock = lock_path.open("w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        print("stt: another lake pass is running; leaving it to that one")
+        return 0
     seen = ledger_seen()
     available = lanes()
     selected = [args.lane] if args.lane else default_lanes()
