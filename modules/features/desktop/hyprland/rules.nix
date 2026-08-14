@@ -164,6 +164,25 @@ let
         inactive = 0.70;
       };
     })
+    # The browser gets the same focus differentiation as the terminal.
+    #
+    # Not cosmetic symmetry: the whole point of dimming unfocused windows is
+    # that "which window am I typing into" is answerable at a glance, and a
+    # browser that stays fully opaque while everything around it fades is the
+    # one window the cue does not cover. It was left out because kitty's rule
+    # started life as a replacement for a kitty-specific IPC script, not
+    # because the browser was judged to want opaque.
+    #
+    # Slightly less dimming than kitty's 0.70: page content is arbitrary
+    # imagery rather than text on a flat background, and the same alpha reads
+    # as considerably murkier over a photo than over a terminal.
+    (mkRule "chrome-focus-opacity" {
+      class = "^(google-chrome|google-chrome-unstable|chromium-browser|Chromium)$";
+      opacity = {
+        active = 1.0;
+        inactive = 0.82;
+      };
+    })
     # Ambient reading-stack widget (sinnix-reading-stack-widget): pinned
     # (visible on every workspace) in a small corner window -- this IS the
     # "standing visibility" mechanism the reading-stack design depends on
