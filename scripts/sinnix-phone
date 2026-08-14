@@ -477,7 +477,7 @@ sinnix-phone <command>
   shell [cmd]   Termux shell over the tailnet (interactive when no cmd)
   mirror        scrcpy screen mirror/control over the tailnet
   screenshot    grab the current screen to /realm/tmp/work/
-  pull          rsync camera + downloads + health exports into the lake
+  pull          rsync camera + downloads into the lake, drain the system log
   ambient-audit decode every undecoded ambient chunk in the lake and record
                 its real duration and level (runs at the end of `pull`)
   drain         pull, but only if the phone is on wifi (for a timer)
@@ -787,10 +787,17 @@ screenshot)
   echo "$out"
   ;;
 pull)
-  # Camera and downloads are the durable originals; the health-export folder
-  # is where the Health Connect scheduled export lands.
+  # Camera and downloads are the durable originals.
+  #
+  # The Health Connect zip-export lane is GONE, not disabled. It rsynced
+  # /sdcard/HealthConnectExport/ into the lake and never once moved a file --
+  # it depended on the operator configuring a scheduled export inside another
+  # app, on a schedule that app controlled, which is the shape of a lane that
+  # reports nothing and looks configured. HealthLane in the capture app now
+  # reads Health Connect directly and lands 471 records through the events
+  # plane, so the export folder has nothing left to be the fallback for.
   # Pull only — never push back, and never delete on the phone.
-  mkdir -p "$LAKE_ROOT"/{camera,download,health,ambient,logcat}
+  mkdir -p "$LAKE_ROOT"/{camera,download,ambient,logcat}
   set +e
   # The system log first: it is adb-only and small, and it is the lane that
   # explains the others when they fail.
@@ -809,10 +816,8 @@ pull)
       "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/DCIM/" "$LAKE_ROOT/camera/"
     rsync -av --ignore-existing -e "$rsync_ssh" \
       "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/Download/" "$LAKE_ROOT/download/"
-    rsync -av --ignore-existing -e "$rsync_ssh" \
-      "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/HealthConnectExport/" "$LAKE_ROOT/health/" 2>/dev/null
   else
-    echo "ssh unavailable: camera, downloads and health exports need it and are skipped"
+    echo "ssh unavailable: camera and downloads need it and are skipped"
   fi
   # Continuous ambient audio chunks. The capture app names the file it is
   # still writing `*.m4a.part` and renames it only after the muxer closes,
