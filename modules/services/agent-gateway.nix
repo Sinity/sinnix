@@ -147,7 +147,22 @@ mkServiceModule {
               name = "agent-job-manifests";
               path = "${cfg.stateDir}/jobs";
               eventDriven = true;
-              staleAfterSeconds = 3600;
+              # Gateway jobs are started by the operator asking a remote
+              # agent for something, so silence here measures how recently
+              # the operator felt like it -- nothing about health. The old
+              # 1h budget declared eventDriven and then scored the lane as
+              # if it had a cadence, which guarantees a permanent false
+              # "stale" the moment a day goes by without a remote request
+              # (observed 2026-08-14: 7.8 days quiet, last job 2026-08-06).
+              # A week matches the capture-replay precedent for the same
+              # shape of lane: human-initiated, silence is legitimate.
+              #
+              # Note this budget can never answer "is the gateway actually
+              # reachable" -- an unused gateway and a broken one look
+              # identical from the jobs directory. That question needs a
+              # livenessProbe, which the sentinel supports and this surface
+              # does not yet declare (sinnix-oig5).
+              staleAfterSeconds = 604800;
             }
           ];
         };

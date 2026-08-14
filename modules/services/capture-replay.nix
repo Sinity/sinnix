@@ -142,17 +142,23 @@ mkServiceModule {
               ];
               Restart = "on-failure";
               RestartSec = "5s";
-              # An ordinary `systemctl --user stop` returns instantly, but a
-              # stop raced against compositor teardown does not: at reboot
-              # the Wayland/DRM surfaces this recorder holds disappear before
-              # its own SIGTERM lands, and it blocks (measured: the full
-              # 90s DefaultTimeoutStopSec, then SIGKILL, on the 2026-08-14
-              # reboot). The race is not ours to win -- PartOf ordering
-              # cannot guarantee we are torn down before the compositor that
-              # owns our capture source -- so bound what it costs. Fifteen
-              # seconds is far beyond the sub-second healthy path and turns a
-              # hung recorder from a minute and a half of shutdown into a
-              # blip.
+              # This recorder can ignore SIGTERM indefinitely, and when it
+              # does it does not stall alone. On the 2026-08-14 reboot it was
+              # the ONLY user unit to miss its stop timeout; the graphical
+              # session target, Hyprland, PipeWire, D-Bus and ~30 other units
+              # all reported "Stopped" in the same second its SIGKILL landed,
+              # 90s after its SIGTERM. uwsm's own session teardown was
+              # waiting on that target too, so the login scope burned a
+              # second parallel 90s. One stuck recorder, the whole reboot.
+              #
+              # The trigger is not reproducible on a healthy host: a plain
+              # stop, a stop with gsr-kms-server killed first, and a bare
+              # SIGTERM to the main pid all exit in ~0.5s. The instance that
+              # hung had run 1d21h with a full ring and 162M swapped out,
+              # which is suggestive and not proof -- so do not pretend to
+              # have fixed the cause. Bound the blast radius instead: 15s is
+              # 30x the observed healthy path, and caps what a wedged
+              # recorder can cost a reboot.
               TimeoutStopSec = "15s";
               # This unit deliberately carries NO mount-namespace sandboxing
               # (no ProtectSystem/ProtectHome/PrivateTmp/ReadWritePaths) and
