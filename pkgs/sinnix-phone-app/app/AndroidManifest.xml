@@ -83,6 +83,22 @@
       </intent-filter>
     </receiver>
 
+    <!--
+      Quick-settings tile: capture state without unlocking. Exported and
+      permission-guarded is the required shape; only SystemUI may bind it.
+      It reports state and opens the app; it deliberately cannot stop capture.
+    -->
+    <service
+        android:name=".CaptureTileService"
+        android:exported="true"
+        android:icon="@android:drawable/ic_btn_speak_now"
+        android:label="Sinnix capture"
+        android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+      <intent-filter>
+        <action android:name="android.service.quicksettings.action.QS_TILE" />
+      </intent-filter>
+    </service>
+
     <receiver android:name=".WatchdogReceiver" android:exported="false" />
 
   </application>

@@ -19,6 +19,11 @@ public class BootReceiver extends BroadcastReceiver {
   public void onReceive(Context ctx, Intent intent) {
     String action = intent == null ? null : intent.getAction();
     Log.i(AmbientService.TAG, "boot receiver: " + action);
+    // Recorded before the enabled check, and recorded even when capture is
+    // meant to be off: a reboot is the only real test of MIUI autostart, and
+    // the grants screen infers that grant from whether a chunk follows this
+    // line. A boot that produced no event at all is itself the finding.
+    Events.record(ctx, "boot", "action", String.valueOf(action), "enabled", Prefs.enabled(ctx));
     if (!Prefs.enabled(ctx)) {
       return;
     }
