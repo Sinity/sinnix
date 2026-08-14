@@ -326,6 +326,12 @@ public class AmbientService extends Service {
         "peak_amplitude", peak,
         "captured_nothing", peak == 0,
         "sampling_rate", samplingRate);
+    if (peak > 0) {
+      // A chunk with sound in it is the only thing that retires the alarm:
+      // "the service is running again" is exactly the claim that was wrong
+      // when this whole failure mode was discovered.
+      Notifications.clearAlert(this);
+    }
   }
 
   private static String stripPart(String name) {
@@ -348,6 +354,11 @@ public class AmbientService extends Service {
   private void onRecorderError(String detail) {
     Log.w(TAG, "recorder error: " + detail);
     status.recordFailure(detail);
+    Events.record(this, "capture_failure", "detail", detail);
+    // Interrupt, because this class of failure otherwise announces itself
+    // days later as a hole in the archive. Withdrawn again as soon as a chunk
+    // closes with sound in it.
+    Notifications.alertCaptureBroken(this, detail);
     handler.post(
         () -> {
           handler.removeCallbacksAndMessages(null);
@@ -423,13 +434,7 @@ public class AmbientService extends Service {
 
   private Notification buildNotification(String detail) {
     NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && nm.getNotificationChannel(CHANNEL_ID) == null) {
-      NotificationChannel channel =
-          new NotificationChannel(CHANNEL_ID, "Ambient capture", NotificationManager.IMPORTANCE_LOW);
-      channel.setShowBadge(false);
-      channel.setSound(null, null);
-      nm.createNotificationChannel(channel);
-    }
+    Notifications.ensureChannels(this);
     PendingIntent open =
         PendingIntent.getActivity(
             this,

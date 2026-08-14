@@ -37,27 +37,29 @@ what is possible:
 Nothing below is blocked by the build. Where a limit is stated, it should be
 read as "not worth that machinery yet", and revisited when something is.
 
-Two consequences that decide features rather than styling:
+**Nothing here is a capability limit.** The APK contains no third-party code
+today because nothing has needed any; TFLite, MediaPipe or a resource tree for
+widgets are each available at the cost described above. Instruments are chosen
+by what is worth measuring, not by what the current derivation happens to
+compile.
 
-- **No model runs on the phone today.** The on-device toolkits (MediaPipe,
-  ML Kit, TFLite) are AARs with native libraries and, for ML Kit, a Play
-  Services dependency — squarely in the "real machinery" tier above. Nothing
-  makes them impossible; none has yet been worth that.
+The one division that *is* principled: **the phone reduces, prime scores.**
+Not because the phone cannot compute — camera2 hands over YUV buffers and a
+per-frame mean or band-power is a plain loop, with or without a model — but
+because prime holds the history, the correlates and the compute to say what a
+number means. A finger-on-lens PPG run sends tens of floats per second rather
+than video, because the reduction is the measurement; the same shape covers
+tremor, sway, light exposure and audio thresholds.
 
-  The working division of labour makes that easy to live with: **the phone
-  owns stimulus timing and raw capture, prime owns scoring.** Prime has the
-  CPU, the models, and the operator's whole history to compare a number
-  against, so almost every instrument is better off scored there regardless of
-  what the APK could contain.
+Where a model genuinely helps — locating a face landmark, a gaze vector, an
+iris boundary — vendoring one is a decision to make on the instrument's
+merits, not a wall to route around.
 
-  The eye and face instruments — pupillometry, saccades, blink, face-video
-  pulse — are dropped on their own merits rather than on the build: each needs
-  continuous video shipped to prime, a large stream to move and store for a
-  measurement that says comparatively little. Worth revisiting if the value
-  ever justifies the pipe.
-- **No app widget.** `AppWidgetProvider` requires `RemoteViews`, which requires
-  an XML resource tree. The quick-settings tile and the notification cover the
-  same ground and need no resources.
+There is no home-screen widget for the same reason and with the same caveat:
+`AppWidgetProvider` needs `RemoteViews`, which needs a resource tree the build
+does not currently produce. The quick-settings tile and the ongoing
+notification already cover that ground, so the resource tree has not been
+worth adding — not that it could not be.
 
 ## No network code
 
