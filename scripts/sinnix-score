@@ -1,0 +1,756 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Score the traces the phone hands to prime — PPG, tremor, sway, interoception, voice — and send the receipt back
+# runtimeInputs: coreutils @sinnix-stt
+
+"""The half of the phone's promise that prime has to keep.
+
+The app's design splits the work: the phone owns stimulus timing and raw
+signal, prime owns scoring. Anything the phone can compute from its own event
+stream shows a number immediately; anything needing real signal processing
+ships a trace and the operator is told a receipt will come back.
+
+Until now nothing sent one. Traces landed in the lake and stopped, so every
+hold-still instrument — pulse, tremor, sway, interoception — ended on a
+promise that was never kept. The delivery path was already built and tested
+end to end; only the arithmetic was missing. This is the arithmetic.
+
+Dependency-free on purpose. The signal processing here is a few hundred
+samples of interpolation, a radix-2 FFT over at most a few thousand points,
+and some peak picking; pulling numpy in for that would add a large closure to
+a script that runs for a second at a time, and the rest of the estate's
+Python scripts are stdlib-only for the same reason.
+
+The honesty rule that shapes every scorer: a trace can be too short, too
+irregular, or too noisy to carry the number it is supposed to carry, and the
+right output then is a receipt that says so. A confident heart rate computed
+from a trace that was mostly finger-shuffle is worse than no heart rate,
+because the operator has no way to tell the two apart afterwards.
+"""
+
+from __future__ import annotations
+
+import argparse
+import cmath
+import datetime as dt
+import json
+import math
+import os
+import re
+import shutil
+import subprocess
+import sys
+import uuid
+from pathlib import Path
+from typing import Any, Iterable, Sequence
+
+SCHEMA = "sinnix.phone.score/1"
+RECEIPT_SCHEMA = "sinnix.phone.receipt/1"
+
+STATE_DIR = Path(os.environ.get("SINNIX_PHONE_STATE_DIR", "/realm/state/sinnix-phone"))
+LAKE_ROOT = Path(os.environ.get("SINNIX_PHONE_LAKE", "/realm/data/captures/phone"))
+
+OUTBOX = LAKE_ROOT / "estate" / "outbox"
+EVENTS = LAKE_ROOT / "estate" / "events"
+SCORES = LAKE_ROOT / "scores"
+LEDGER = SCORES / "scored.jsonl"
+
+# Same push directory the dispatcher writes to. Deliberately not a second
+# mechanism: the drain already carries this directory to the phone and the app
+# already renders and deletes what it finds there.
+RECEIPTS_DIR = STATE_DIR / "inbox" / "receipts"
+
+
+def now_iso() -> str:
+    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def parse_stamp(s: str | None) -> float:
+    """Both stamp shapes the estate has written, as epoch seconds.
+
+    Records before 2026-08-14 carry the compact filename stamp in `ts` because
+    the event writer reached for the wrong helper. The log is append-only, so
+    a parser that only knew extended ISO would silently drop that history.
+    """
+    if not s:
+        return 0.0
+    for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y%m%dT%H%M%SZ"):
+        try:
+            return dt.datetime.strptime(s, fmt).replace(tzinfo=dt.timezone.utc).timestamp()
+        except ValueError:
+            continue
+    return 0.0
+
+
+# ------------------------------------------------------------------ signal
+
+
+def _fft(x: list[complex]) -> list[complex]:
+    """Iterative radix-2 Cooley-Tukey. Input is padded to a power of two."""
+    n = len(x)
+    if n <= 1:
+        return x
+    j = 0
+    x = list(x)
+    for i in range(1, n):
+        bit = n >> 1
+        while j & bit:
+            j ^= bit
+            bit >>= 1
+        j |= bit
+        if i < j:
+            x[i], x[j] = x[j], x[i]
+    length = 2
+    while length <= n:
+        ang = -2 * math.pi / length
+        wl = cmath.exp(1j * ang)
+        for i in range(0, n, length):
+            w = 1 + 0j
+            for k in range(i, i + length // 2):
+                u = x[k]
+                v = x[k + length // 2] * w
+                x[k] = u + v
+                x[k + length // 2] = u - v
+                w *= wl
+        length <<= 1
+    return x
+
+
+def resample_uniform(t: Sequence[float], y: Sequence[float], rate_hz: float) -> list[float]:
+    """Linear interpolation onto a uniform grid.
+
+    Necessary rather than fussy: camera frames and sensor callbacks do not
+    arrive on a clock, and every frequency-domain step below assumes they did.
+    The phone records real per-sample timestamps precisely so this can be done
+    honestly instead of assuming a nominal rate.
+    """
+    if len(t) < 2:
+        return []
+    span = t[-1] - t[0]
+    n = int(span * rate_hz)
+    if n < 2:
+        return []
+    out: list[float] = []
+    j = 0
+    for i in range(n):
+        target = t[0] + i / rate_hz
+        while j + 2 < len(t) and t[j + 1] < target:
+            j += 1
+        t0, t1 = t[j], t[j + 1]
+        if t1 <= t0:
+            out.append(y[j])
+            continue
+        frac = (target - t0) / (t1 - t0)
+        out.append(y[j] + frac * (y[j + 1] - y[j]))
+    return out
+
+
+def moving_average(y: Sequence[float], window: int) -> list[float]:
+    if window <= 1 or window > len(y):
+        return list(y)
+    out: list[float] = []
+    acc = sum(y[:window])
+    half = window // 2
+    for i in range(len(y)):
+        lo, hi = i - half, i - half + window
+        if lo < 0 or hi > len(y):
+            lo = max(0, min(lo, len(y) - window))
+            acc_local = sum(y[lo : lo + window])
+            out.append(acc_local / window)
+        else:
+            out.append(sum(y[lo:hi]) / window)
+    return out
+
+
+def bandpass(y: Sequence[float], rate_hz: float, low_hz: float, high_hz: float) -> list[float]:
+    """Difference of two moving averages.
+
+    A crude band-pass, and adequate here: the pass band is an octave and a half
+    wide and the thing being rejected is a slow baseline drift (the finger
+    settling, the ambient light changing) plus per-frame noise. A designed IIR
+    would buy sharper skirts that this measurement cannot use.
+    """
+    if rate_hz <= 0 or not y:
+        return []
+    lo_w = max(2, int(rate_hz / max(low_hz, 1e-6)))
+    hi_w = max(2, int(rate_hz / max(high_hz, 1e-6)))
+    slow = moving_average(y, lo_w)
+    fast = moving_average(y, hi_w)
+    return [f - s for f, s in zip(fast, slow)]
+
+
+def find_peaks(y: Sequence[float], rate_hz: float, refractory_s: float) -> list[int]:
+    """Local maxima above the RMS, no two closer than the refractory window."""
+    if not y:
+        return []
+    rms = math.sqrt(sum(v * v for v in y) / len(y)) or 1e-9
+    gap = max(1, int(refractory_s * rate_hz))
+    peaks: list[int] = []
+    for i in range(1, len(y) - 1):
+        if y[i] <= y[i - 1] or y[i] < y[i + 1] or y[i] < rms * 0.5:
+            continue
+        if peaks and i - peaks[-1] < gap:
+            if y[i] > y[peaks[-1]]:
+                peaks[-1] = i
+            continue
+        peaks.append(i)
+    return peaks
+
+
+def spectrum(y: Sequence[float], rate_hz: float) -> tuple[list[float], list[float]]:
+    """One-sided magnitude spectrum, Hann-windowed, zero-padded to 2^k."""
+    n = len(y)
+    if n < 8:
+        return [], []
+    size = 1 << (n - 1).bit_length()
+    mean = sum(y) / n
+    windowed = [
+        (y[i] - mean) * (0.5 - 0.5 * math.cos(2 * math.pi * i / (n - 1))) for i in range(n)
+    ] + [0.0] * (size - n)
+    spec = _fft([complex(v, 0.0) for v in windowed])
+    half = size // 2
+    mags = [abs(spec[i]) / n for i in range(half)]
+    freqs = [i * rate_hz / size for i in range(half)]
+    return freqs, mags
+
+
+def stdev(xs: Sequence[float]) -> float:
+    if len(xs) < 2:
+        return 0.0
+    m = sum(xs) / len(xs)
+    return math.sqrt(sum((x - m) ** 2 for x in xs) / (len(xs) - 1))
+
+
+# ------------------------------------------------------------------- traces
+
+
+def read_csv(path: Path) -> tuple[list[str], list[list[str]]]:
+    rows: list[list[str]] = []
+    header: list[str] = []
+    with path.open(encoding="utf-8", errors="replace") as fh:
+        for i, line in enumerate(fh):
+            parts = line.rstrip("\n").split(",")
+            if i == 0:
+                header = parts
+                continue
+            if parts and parts[0]:
+                rows.append(parts)
+    return header, rows
+
+
+def score_ppg(path: Path) -> dict:
+    """Heart rate and its variability from a finger-on-lens trace.
+
+    The measurand is the pulsatile component of light absorbed by the
+    fingertip, which is a very small ripple on a very large baseline, so the
+    band-pass matters more than the peak picker.
+    """
+    _, rows = read_csv(path)
+    t: list[float] = []
+    y: list[float] = []
+    for r in rows:
+        try:
+            t.append(int(r[0]) / 1e9)
+            y.append(float(r[1]))
+        except (ValueError, IndexError):
+            continue
+    if len(t) < 60:
+        return {"ok": False, "reason": f"only {len(t)} samples; a pulse needs a real trace"}
+
+    dts = [t[i + 1] - t[i] for i in range(len(t) - 1) if t[i + 1] > t[i]]
+    if not dts:
+        return {"ok": False, "reason": "timestamps do not advance"}
+    dts.sort()
+    median_dt = dts[len(dts) // 2]
+    rate = 1.0 / median_dt if median_dt > 0 else 0.0
+    jitter_cv = stdev(dts) / median_dt if median_dt else 0.0
+    duration = t[-1] - t[0]
+
+    if rate < 10:
+        return {
+            "ok": False,
+            "reason": f"frame rate {rate:.1f} Hz is too low to resolve a pulse",
+            "sample_rate_hz": round(rate, 2),
+        }
+
+    grid = resample_uniform(t, y, rate)
+    filtered = bandpass(grid, rate, 0.7, 3.5)
+    peaks = find_peaks(filtered, rate, refractory_s=0.35)
+    ibis = [(peaks[i + 1] - peaks[i]) / rate for i in range(len(peaks) - 1)]
+    # Physiologically possible inter-beat intervals only: 40-200 bpm. A gap
+    # outside that is a missed or doubled beat, and averaging it in would move
+    # the variability numbers far more than the rate.
+    ibis = [x for x in ibis if 0.3 <= x <= 1.5]
+
+    if len(ibis) < 15:
+        return {
+            "ok": False,
+            "reason": f"only {len(ibis)} usable beats in {duration:.0f}s — hold still, cover the lens fully",
+            "sample_rate_hz": round(rate, 2),
+            "jitter_cv": round(jitter_cv, 3),
+            "duration_s": round(duration, 1),
+        }
+
+    mean_ibi = sum(ibis) / len(ibis)
+    diffs = [ibis[i + 1] - ibis[i] for i in range(len(ibis) - 1)]
+    rmssd = math.sqrt(sum(d * d for d in diffs) / len(diffs)) * 1000
+    sdnn = stdev(ibis) * 1000
+
+    # A trace whose beat intervals scatter this much is finger movement, not
+    # heart-rate variability, and RMSSD would read as a spectacular result.
+    trustworthy = sdnn < 250 and jitter_cv < 0.5
+    return {
+        "ok": True,
+        "hr_bpm": round(60.0 / mean_ibi, 1),
+        "rmssd_ms": round(rmssd, 1),
+        "sdnn_ms": round(sdnn, 1),
+        "beats": len(ibis) + 1,
+        "duration_s": round(duration, 1),
+        "sample_rate_hz": round(rate, 2),
+        "jitter_cv": round(jitter_cv, 3),
+        "trustworthy": trustworthy,
+        "caveat": None if trustworthy else "interval scatter suggests movement, not variability",
+    }
+
+
+def _imu_series(path: Path) -> tuple[list[float], list[tuple[float, float, float]], float, float]:
+    _, rows = read_csv(path)
+    t: list[float] = []
+    xyz: list[tuple[float, float, float]] = []
+    for r in rows:
+        if len(r) < 5 or r[1] != "accel":
+            continue
+        try:
+            t.append(int(r[0]) / 1e9)
+            xyz.append((float(r[2]), float(r[3]), float(r[4])))
+        except ValueError:
+            continue
+    if len(t) < 32:
+        return t, xyz, 0.0, 0.0
+    dts = sorted(t[i + 1] - t[i] for i in range(len(t) - 1) if t[i + 1] > t[i])
+    median_dt = dts[len(dts) // 2] if dts else 0.0
+    rate = 1.0 / median_dt if median_dt else 0.0
+    return t, xyz, rate, t[-1] - t[0]
+
+
+def score_tremor(path: Path) -> dict:
+    """Where the hand's involuntary oscillation sits, and how much of it there is.
+
+    Physiological tremor lives around 8-12 Hz and enhanced/pathological tremor
+    lower, so the band that matters is 4-12 Hz. Sampling at SENSOR_DELAY_FASTEST
+    is what makes that band resolvable at all — the usual 50 Hz UI rate puts
+    Nyquist at 25 Hz and aliases the top of it.
+    """
+    t, xyz, rate, duration = _imu_series(path)
+    if rate <= 0:
+        return {"ok": False, "reason": f"only {len(t)} accelerometer samples"}
+    if rate < 30:
+        return {"ok": False, "reason": f"{rate:.0f} Hz sampling cannot resolve a 4-12 Hz band"}
+
+    mags = [math.sqrt(x * x + y * y + z * z) for x, y, z in xyz]
+    grid = resample_uniform(t, mags, rate)
+    if len(grid) < 64:
+        return {"ok": False, "reason": "trace too short after resampling"}
+    freqs, mags_spec = spectrum(grid, rate)
+    if not freqs:
+        return {"ok": False, "reason": "spectrum unavailable"}
+
+    band = [(f, m) for f, m in zip(freqs, mags_spec) if 3.0 <= f <= 15.0]
+    if not band:
+        return {"ok": False, "reason": "no energy in the tremor band"}
+    peak_hz, peak_mag = max(band, key=lambda p: p[1])
+    power_4_12 = sum(m * m for f, m in zip(freqs, mags_spec) if 4.0 <= f <= 12.0)
+    total = sum(m * m for f, m in zip(freqs, mags_spec) if f >= 0.5) or 1e-12
+
+    return {
+        "ok": True,
+        "peak_hz": round(peak_hz, 2),
+        "peak_magnitude": round(peak_mag, 5),
+        "band_power_4_12": round(power_4_12, 6),
+        "band_fraction": round(power_4_12 / total, 4),
+        "samples": len(t),
+        "sample_rate_hz": round(rate, 1),
+        "duration_s": round(duration, 1),
+    }
+
+
+def score_sway(path: Path) -> dict:
+    """Postural sway, measured in acceleration rather than displacement.
+
+    Deliberately not double-integrated to a position: integrating consumer
+    accelerometer noise twice produces a drift that dwarfs the sway, and the
+    resulting "path length in millimetres" would be a number with a unit and
+    no meaning. Path length and the 95% ellipse are computed on the low-passed
+    horizontal acceleration, and the record says so.
+    """
+    t, xyz, rate, duration = _imu_series(path)
+    if rate <= 0:
+        return {"ok": False, "reason": f"only {len(t)} accelerometer samples"}
+
+    xs = resample_uniform(t, [p[0] for p in xyz], rate)
+    ys = resample_uniform(t, [p[1] for p in xyz], rate)
+    if len(xs) < 32:
+        return {"ok": False, "reason": "trace too short after resampling"}
+    # Sway is slow; anything above a few Hz is tremor or handling noise.
+    win = max(2, int(rate / 3.0))
+    xs = [v - m for v, m in zip(xs, moving_average(xs, max(2, int(rate * 5))))]
+    ys = [v - m for v, m in zip(ys, moving_average(ys, max(2, int(rate * 5))))]
+    xs = moving_average(xs, win)
+    ys = moving_average(ys, win)
+
+    path_len = sum(
+        math.hypot(xs[i + 1] - xs[i], ys[i + 1] - ys[i]) for i in range(len(xs) - 1)
+    )
+    mx = sum(xs) / len(xs)
+    my = sum(ys) / len(ys)
+    cxx = sum((v - mx) ** 2 for v in xs) / len(xs)
+    cyy = sum((v - my) ** 2 for v in ys) / len(ys)
+    cxy = sum((a - mx) * (b - my) for a, b in zip(xs, ys)) / len(xs)
+    # Eigenvalues of the 2x2 covariance, closed form; the 95% ellipse is the
+    # chi-square(2) 95th percentile (5.991) scaled by the principal axes.
+    tr, det = cxx + cyy, cxx * cyy - cxy * cxy
+    disc = max(0.0, tr * tr / 4 - det)
+    l1 = tr / 2 + math.sqrt(disc)
+    l2 = max(0.0, tr / 2 - math.sqrt(disc))
+    area = math.pi * 5.991 * math.sqrt(max(l1, 0.0) * l2)
+
+    return {
+        "ok": True,
+        "units": "m/s^2 (acceleration, not displacement)",
+        "path_length": round(path_len, 4),
+        "path_length_per_s": round(path_len / duration, 5) if duration else None,
+        "ellipse_area_95": round(area, 6),
+        "duration_s": round(duration, 1),
+        "sample_rate_hz": round(rate, 1),
+        "samples": len(t),
+    }
+
+
+# ------------------------------------------------------------- interoception
+
+
+def recent_events(days: int = 3) -> list[dict]:
+    out: list[dict] = []
+    if not EVENTS.is_dir():
+        return out
+    cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
+    for f in sorted(EVENTS.glob("events-*.jsonl")):
+        try:
+            if dt.datetime.fromtimestamp(f.stat().st_mtime, dt.timezone.utc) < cutoff:
+                continue
+            for line in f.read_text(encoding="utf-8", errors="replace").splitlines():
+                try:
+                    out.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+        except OSError:
+            continue
+    return out
+
+
+def score_interoception(trace_path: Path, ppg: dict, started_at: float) -> dict | None:
+    """Schandry accuracy, against the pulse the phone recorded at the same time.
+
+    This is the pairing that normally keeps interoceptive accuracy in a lab:
+    the operator counts the beats they feel, and the camera on the same device
+    records what the heart actually did. Without the simultaneous PPG there is
+    no truth to score against, so this returns None rather than a guess.
+    """
+    if not ppg.get("ok") or not ppg.get("trustworthy"):
+        return None
+    runs = [
+        e
+        for e in recent_events()
+        if e.get("kind") == "instrument_run" and e.get("instrument") == "interoception"
+    ]
+    if not runs:
+        return None
+    # The run whose start is nearest this trace: they were recorded together.
+    best = min(runs, key=lambda e: abs(parse_stamp(e.get("started_at") or e.get("ts")) - started_at))
+    if abs(parse_stamp(best.get("started_at") or best.get("ts")) - started_at) > 900:
+        return None
+
+    counted = best.get("counted") or []
+    windows = best.get("window_ms") or []
+    if not counted or len(counted) != len(windows):
+        return None
+    hr = ppg["hr_bpm"] / 60.0
+    errors = []
+    for c, w_ms in zip(counted, windows):
+        actual = hr * (w_ms / 1000.0)
+        if actual <= 0:
+            continue
+        errors.append(abs(float(c) - actual) / actual)
+    if not errors:
+        return None
+    return {
+        "ok": True,
+        "accuracy": round(1.0 - sum(errors) / len(errors), 3),
+        "windows": len(errors),
+        "hr_bpm_reference": ppg["hr_bpm"],
+        "counted": counted,
+        "epoch": best.get("epoch"),
+    }
+
+
+# ---------------------------------------------------------------- receipts
+
+
+def emit_receipt(kind: str, title: str, body: str, send_token: str | None, route: str | None) -> None:
+    """The same shape and directory the dispatcher writes.
+
+    Not a second mechanism: the drain already carries this directory to the
+    phone and the app already renders what it finds and deletes it.
+    """
+    RECEIPTS_DIR.mkdir(parents=True, exist_ok=True)
+    name = f"{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}.json"
+    payload = {
+        "schema": RECEIPT_SCHEMA,
+        "kind": kind,
+        "title": title,
+        "body": body,
+        "send_token": send_token,
+        "route": route,
+        "at": now_iso(),
+    }
+    tmp = RECEIPTS_DIR / (name + ".part")
+    tmp.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    tmp.rename(RECEIPTS_DIR / name)
+
+
+def transcribe(path: Path) -> dict | None:
+    """The whole transcript record, not just its text.
+
+    speech_seconds is the field that matters as much as the words: a note the
+    engine transcribed to nothing and a note the engine could not read are
+    different outcomes, and collapsing both to an empty string would tell the
+    operator "could not be transcribed" about a recording that was simply
+    silent.
+    """
+    exe = shutil.which("sinnix-stt")
+    if exe is None:
+        return None
+    proc = subprocess.run([exe, "transcribe", str(path)], capture_output=True, text=True, timeout=600)
+    if proc.returncode != 0:
+        return None
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return None
+
+
+# -------------------------------------------------------------------- ledger
+
+
+def ledger_seen() -> set[tuple[str, int]]:
+    seen: set[tuple[str, int]] = set()
+    if not LEDGER.is_file():
+        return seen
+    for line in LEDGER.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            o = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        seen.add((o.get("file", ""), int(o.get("bytes") or 0)))
+    return seen
+
+
+def sidecar_for(path: Path) -> dict:
+    side = path.with_name(path.name + ".json")
+    if not side.is_file():
+        return {}
+    try:
+        return json.loads(side.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def score_blob(path: Path) -> dict:
+    """One blob to one record. The sidecar says what it is; the name is a fallback."""
+    meta = sidecar_for(path)
+    kind = meta.get("kind") or ""
+    mode = meta.get("mode") or ""
+    instrument = meta.get("instrument") or ""
+    started_at = parse_stamp(meta.get("recorded_at") or meta.get("ts"))
+
+    record: dict[str, Any] = {
+        "schema": SCHEMA,
+        "file": path.name,
+        "bytes": path.stat().st_size,
+        "kind": kind or ("voice" if path.name.startswith("voice-") else "unknown"),
+        "instrument": instrument,
+        "mode": mode,
+        "epoch": meta.get("epoch"),
+        "recorded_at": meta.get("recorded_at"),
+        "scored_at": now_iso(),
+    }
+
+    if path.suffix == ".m4a" or path.name.startswith("voice-"):
+        tr = transcribe(path)
+        record["kind"] = "voice"
+        if tr is None:
+            record["ok"] = False
+            record["reason"] = "transcription unavailable"
+            return record
+        record["transcript"] = (tr.get("text") or "").strip()
+        record["speech_seconds"] = tr.get("speech_seconds")
+        record["audio_seconds"] = tr.get("audio_seconds")
+        record["ok"] = True
+        if not record["transcript"]:
+            record["reason"] = "no speech in the recording"
+        return record
+
+    if path.suffix != ".csv":
+        record["ok"] = False
+        record["reason"] = f"no scorer for {path.suffix or 'this shape'}"
+        return record
+
+    if mode == "ppg" or instrument in ("ppg", "interoception"):
+        ppg = score_ppg(path)
+        record["ppg"] = ppg
+        record["ok"] = ppg.get("ok", False)
+        if not ppg.get("ok"):
+            record["reason"] = ppg.get("reason")
+        intero = score_interoception(path, ppg, started_at)
+        if intero:
+            record["interoception"] = intero
+        return record
+
+    if mode == "imu_sway" or instrument == "sway":
+        sway = score_sway(path)
+        record["sway"] = sway
+        record["ok"] = sway.get("ok", False)
+        record["reason"] = sway.get("reason")
+        return record
+
+    if mode == "imu" or instrument == "tremor":
+        tremor = score_tremor(path)
+        record["tremor"] = tremor
+        record["ok"] = tremor.get("ok", False)
+        record["reason"] = tremor.get("reason")
+        return record
+
+    record["ok"] = False
+    record["reason"] = f"unrecognised trace mode {mode!r}"
+    return record
+
+
+def receipt_for(record: dict) -> tuple[str, str]:
+    """What the operator is told. One line, and honest about failure."""
+    kind = record.get("kind")
+    if kind == "voice":
+        if not record.get("ok"):
+            return ("Voice note", record.get("reason") or "could not be transcribed")
+        text = record.get("transcript") or ""
+        if text:
+            return ("Voice note", text[:400])
+        secs = record.get("audio_seconds")
+        return ("Voice note", f"{secs:.0f}s recorded, no speech in it" if secs else "no speech in it")
+    if not record.get("ok"):
+        return ("Could not score", record.get("reason") or "the trace did not carry the signal")
+    if "ppg" in record:
+        p = record["ppg"]
+        line = f"{p['hr_bpm']} bpm · RMSSD {p['rmssd_ms']} ms · SDNN {p['sdnn_ms']} ms"
+        if not p.get("trustworthy"):
+            line += f" — {p.get('caveat')}"
+        if "interoception" in record:
+            line += f"\nInteroception accuracy {record['interoception']['accuracy']}"
+        return ("Pulse", line)
+    if "tremor" in record:
+        t = record["tremor"]
+        return ("Tremor", f"peak {t['peak_hz']} Hz · {int(t['band_fraction'] * 100)}% of power in 4–12 Hz")
+    if "sway" in record:
+        s = record["sway"]
+        return ("Sway", f"path {s['path_length_per_s']} per second · 95% ellipse {s['ellipse_area_95']}")
+    return ("Scored", "no summary available")
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    outbox = Path(args.outbox)
+    SCORES.mkdir(parents=True, exist_ok=True)
+    if not outbox.is_dir():
+        print(f"score: no outbox at {outbox}")
+        return 0
+    seen = ledger_seen()
+    scored = failed = 0
+
+    candidates = sorted(
+        p
+        for p in outbox.iterdir()
+        if p.is_file() and p.suffix in (".csv", ".m4a") and not p.name.endswith(".part")
+    )
+    for path in candidates:
+        size = path.stat().st_size
+        if (path.name, size) in seen:
+            continue
+        if args.limit and scored + failed >= args.limit:
+            break
+        record = score_blob(path)
+
+        day = dt.datetime.now(dt.timezone.utc).date().isoformat()
+        with (SCORES / f"{day}.jsonl").open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        with LEDGER.open("a", encoding="utf-8") as fh:
+            fh.write(
+                json.dumps(
+                    {"file": path.name, "bytes": size, "ok": record.get("ok"), "at": now_iso()}
+                )
+                + "\n"
+            )
+        if not args.no_receipt:
+            title, body = receipt_for(record)
+            emit_receipt(
+                record.get("kind") or "score",
+                title,
+                body,
+                meta_token(path),
+                "instruments",
+            )
+        if record.get("ok"):
+            scored += 1
+        else:
+            failed += 1
+
+    print(f"score: scored {scored}, {failed} could not be scored")
+    if failed:
+        print(
+            "  unscorable traces are recorded with a reason — a trace that did not "
+            "carry its signal is a finding, not a gap",
+            file=sys.stderr,
+        )
+    return 0
+
+
+def meta_token(path: Path) -> str | None:
+    return sidecar_for(path).get("send_token")
+
+
+def cmd_one(args: argparse.Namespace) -> int:
+    print(json.dumps(score_blob(Path(args.file)), indent=2, ensure_ascii=False))
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description=__doc__)
+    sub = p.add_subparsers(dest="command", required=True)
+
+    run = sub.add_parser("run", help="score whatever the drain has landed")
+    run.add_argument("--outbox", default=str(OUTBOX))
+    run.add_argument("--limit", type=int, default=0)
+    run.add_argument("--no-receipt", action="store_true", help="score without telling the phone")
+    run.set_defaults(func=cmd_run)
+
+    one = sub.add_parser("one", help="score a single file and print the record")
+    one.add_argument("file")
+    one.set_defaults(func=cmd_one)
+
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
