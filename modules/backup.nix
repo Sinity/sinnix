@@ -165,6 +165,24 @@ let
 
       ${mkBorgCommonScript repo repoPath}
 
+      install -d -m 0700 -o root -g root ${lib.escapeShellArg borgDrainStateRoot}
+
+      # The coalescing gate runs FIRST, before the global Borg lock. A wake
+      # inside the min-interval window has no work to do, so it must cost a
+      # single stat -- not a lock acquisition that contends with whatever real
+      # Borg operation is running. This is what makes a frequent retry timer
+      # free: see the drain timers for why the retry granularity matters.
+      stamp=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.stamp"}
+      now="$(date +%s)"
+      if [ -e "$stamp" ]; then
+        last="$(stat -c %Y "$stamp")"
+        age=$((now - last))
+        if [ "$age" -lt ${toString minIntervalSec} ]; then
+          echo "Last ${label} Borg drain was $age seconds ago; keeping snapshots queued for coalescing"
+          exit 0
+        fi
+      fi
+
       acquire_borg_global_lock_or_skip "${label} Borg drain"
 
       cleanup_snapshot_bind_mount() {
@@ -176,23 +194,11 @@ let
 
       install -d -m 0700 -o root -g root ${lib.escapeShellArg repoPath}
       install -d -m 0700 -o root -g root ${lib.escapeShellArg bindTarget}
-      install -d -m 0700 -o root -g root ${lib.escapeShellArg borgDrainStateRoot}
 
       recover_stale_borg_locks
 
       if [ ! -e ${lib.escapeShellArg "${repoPath}/config"} ]; then
         with_borg_lock borg init --encryption repokey-blake2 "$BORG_REPO"
-      fi
-
-      stamp=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.stamp"}
-      now="$(date +%s)"
-      if [ -e "$stamp" ]; then
-        last="$(stat -c %Y "$stamp")"
-        age=$((now - last))
-        if [ "$age" -lt ${toString minIntervalSec} ]; then
-          echo "Last ${label} Borg drain was $age seconds ago; keeping snapshots queued for coalescing"
-          exit 0
-        fi
       fi
 
       trap cleanup_snapshot_bind_mount EXIT
@@ -869,17 +875,28 @@ in
       };
     };
 
+    # The drain timers are RETRY granularity, not work cadence: how often a
+    # drain actually copies anything is set by borgDrainMinIntervalSec (4h),
+    # and a wake inside that window exits after one stat without touching the
+    # Borg lock. What the timer period buys is recovery margin. A drain that
+    # loses the global lock race skips outright and waits for its next wake,
+    # while the health budget (borgArchiveMaxAgeSec / borgSnapshotQueueMaxAgeSec,
+    # 6h) starts counting from the last SUCCESS -- so the 4h floor leaves only
+    # ~2h of slack. At the old hourly period two consecutive lock races spent
+    # most of it and a third breached the budget; at 20 minutes, six retries
+    # fit in the same slack. Both stay off btrbk's :00/:30 wakes and off each
+    # other so the two drains never race for the lock they now rarely take.
     systemd.timers.borgbackup-job-persist = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
-        OnCalendar = "*-*-* *:20:00";
+        OnCalendar = "*-*-* *:05,25,45:00";
         Persistent = false;
       };
     };
     systemd.timers.borgbackup-job-realm = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
-        OnCalendar = "*-*-* *:35:00";
+        OnCalendar = "*-*-* *:15,35,55:00";
         Persistent = false;
       };
     };

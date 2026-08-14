@@ -49,9 +49,20 @@ let
       failPct = 90;
     }
     {
+      # /neo-outer-realm is a bulk media archive, not a service write path:
+      # nothing on it is a live database, a snapshot queue, or a backup
+      # destination, so "nearly full" is its normal working state rather than
+      # an incident. The /realm thresholds exist because a full /realm stalls
+      # capture lanes and Postgres; neither failure mode exists here, and an
+      # 80/90 pair on a 13T drive pages at 1.3T free. Give it a band that
+      # actually means something: warn where a large addition could still be
+      # refused, fail where writes are genuinely at risk. On 13T each point is
+      # ~130G, so 97/98 is 390G/260G free -- and the warn line sits ABOVE the
+      # 95% the drive already reads, because a warning that is true the moment
+      # it is declared is a permanent page, not a warning.
       path = cfg.paths.neoOuterRealm;
-      warnPct = 80;
-      failPct = 90;
+      warnPct = 97;
+      failPct = 98;
     }
   ];
 
