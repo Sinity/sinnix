@@ -301,16 +301,38 @@ def cmd_transcribe(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------- the lake
 
 
-#: Where audio lives, and what to call the lane it came from. The phone lane is
-#: the only continuously healthy one at the time of writing; the desktop lanes
-#: are included because they are meant to be, and a pipeline that silently
-#: skipped them would hide their repair.
-LANES = {
-    "phone": CAPTURES / "phone" / "ambient",
-    "voice": CAPTURES / "phone" / "estate" / "outbox",
-    "desktop-mic": CAPTURES / "audio" / "mic",
-    "desktop-sink": CAPTURES / "audio" / "sink-monitor",
-}
+def lanes() -> dict[str, Path]:
+    """Where audio lives, discovered rather than hard-coded.
+
+    The desktop capture root holds three generations at once and only one is
+    live: per-device `src-`/`snk-` directories (current), `mic/` and
+    `sink-monitor/` (retired 2026-08-13), and `legacy/` (retired 2026-05-21).
+    Naming the live ones in a constant would have meant transcribing retired
+    directories forever and silently missing a device that appeared after this
+    file was written -- so the per-device lanes are discovered from disk, and
+    the retired roots are simply not in the pattern.
+    """
+    found: dict[str, Path] = {
+        "phone": CAPTURES / "phone" / "ambient",
+        "voice": CAPTURES / "phone" / "estate" / "outbox",
+    }
+    audio = CAPTURES / "audio"
+    if audio.is_dir():
+        for d in sorted(audio.iterdir()):
+            if d.is_dir() and (d.name.startswith("src-") or d.name.startswith("snk-")):
+                found[d.name] = d
+    return found
+
+
+def default_lanes() -> list[str]:
+    """What a scheduled pass transcribes when nobody names a lane.
+
+    Sources and the phone: those are recordings of a room, which is what this
+    program is about. Sink lanes are what the machine PLAYED -- every video,
+    every track -- and transcribing them by default would fill the lane with
+    other people's scripts. They remain available by name.
+    """
+    return [n for n in lanes() if not n.startswith("snk-")]
 
 AUDIO_SUFFIXES = {".m4a", ".opus", ".wav", ".flac", ".mp3", ".ogg"}
 
@@ -340,13 +362,14 @@ def cmd_lake(args: argparse.Namespace) -> int:
         return 1
     TRANSCRIPT_DIR.mkdir(parents=True, exist_ok=True)
     seen = ledger_seen()
-    lanes = [args.lane] if args.lane else list(LANES)
+    available = lanes()
+    selected = [args.lane] if args.lane else default_lanes()
     done = 0
     with_speech = 0
     undecodable = 0
 
-    for lane in lanes:
-        root = LANES.get(lane)
+    for lane in selected:
+        root = available.get(lane)
         if root is None or not root.is_dir():
             continue
         files = sorted(
@@ -408,6 +431,16 @@ def _day_of(path: Path) -> str:
         s = m.group(1)
         return f"{s[:4]}-{s[4:6]}-{s[6:]}"
     return dt.datetime.fromtimestamp(path.stat().st_mtime, dt.timezone.utc).date().isoformat()
+
+
+def cmd_lanes(args: argparse.Namespace) -> int:
+    default = set(default_lanes())
+    for name, root in lanes().items():
+        n = sum(1 for p in root.iterdir() if p.suffix.lower() in AUDIO_SUFFIXES) if root.is_dir() else 0
+        mark = "*" if name in default else " "
+        print(f" {mark} {name:<70} {n:>6} files")
+    print("\n * = transcribed by a default pass")
+    return 0
 
 
 # --------------------------------------------------------------- diarization
@@ -592,9 +625,16 @@ def build_parser() -> argparse.ArgumentParser:
     tr.set_defaults(func=cmd_transcribe)
 
     lake = sub.add_parser("lake", help="transcribe whatever the lake holds and has not seen")
-    lake.add_argument("--lane", choices=sorted(LANES))
+    lake.add_argument(
+        "--lane",
+        help="one lane by name; default is every source lane plus the phone "
+        "(see `sinnix stt lanes`)",
+    )
     lake.add_argument("--limit", type=int, default=0)
     lake.set_defaults(func=cmd_lake)
+
+    ls = sub.add_parser("lanes", help="list the audio lanes this host has")
+    ls.set_defaults(func=cmd_lanes)
 
     di = sub.add_parser("diarize", help="who spoke when")
     di.add_argument("file")
