@@ -212,6 +212,18 @@ in
           # nothing in the build says so. Force it until the pinned input
           # carries a priority that loses to a host policy.
           postgresql.authentication = lib.mkForce databaseAuthentication;
+
+          # Upstream validates nats.conf at build time by running
+          # `nats-server --config ... -t`, which parses the TLS block and
+          # opens the certificate and key. Those are agenix paths under
+          # /run/agenix, so they cannot exist inside a build sandbox and the
+          # check fails on a configuration that is correct at runtime. This
+          # option exists for exactly that case ("when the config can't be
+          # checked during build time"). The cost is real -- a syntax error in
+          # the NATS settings now surfaces when the unit starts rather than
+          # when the system builds -- and it is the price of keeping the
+          # listener's credentials out of the world-readable store.
+          nats.validateConfig = false;
           # Compress full-page images in WAL: they dominate WAL volume on a
           # write-hot database and the data dir sits on the wear-limited
           # root SSD. lz4 is cheap CPU-wise and reload-safe. Keep
