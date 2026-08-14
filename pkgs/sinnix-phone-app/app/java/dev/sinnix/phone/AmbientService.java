@@ -205,7 +205,12 @@ public class AmbientService extends Service {
       status.recordFailure("no writable chunk directory (all-files access not granted?)");
       return false;
     }
-    String stamp = Status.isoStamp(System.currentTimeMillis());
+    // utcStamp, NOT isoStamp: this is a FILENAME. Extended ISO carries colons,
+    // which sdcardfs rejects outright -- every open fails with EPERM and the
+    // recorder logs a start failure per attempt while looking otherwise
+    // healthy. The lake's ambient-<UTC basic>.m4a convention depends on this
+    // shape too.
+    String stamp = Status.utcStamp(System.currentTimeMillis());
     File part = new File(dir, "ambient-" + stamp + ".m4a.part");
 
     // Start every chunk back at the preferred rate. A codec refusal is often
