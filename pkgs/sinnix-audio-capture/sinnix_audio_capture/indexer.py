@@ -22,11 +22,23 @@ Each pass:
      relative-seconds) plus a `raw_ref` pointing at the segment file --
      the index never replaces or duplicates the raw audio, only points at
      it (capture-lake convention).
+
+Each envelope also carries how much audio the segment actually contained.
+That number is free here -- step 2 already decodes the whole segment, so the
+sample count is in hand and was previously thrown away -- and it is the one
+measurement that would have caught sinnix-500c. That bug collapsed every
+hourly segment to ~37.5s of real audio for days while the units stayed
+active, the files kept appearing on schedule, and the freshness budget stayed
+satisfied; nothing in the estate compared a segment's *content* against the
+wall-clock window it covered, so nothing alarmed. Recording `decoded_seconds`
+and `coverage` per segment is what makes that class of silent shortfall
+visible to a consumer at all.
 """
 
 from __future__ import annotations
 
 import calendar
+import re
 import subprocess
 import time
 from collections.abc import Callable
@@ -37,6 +49,13 @@ from .segment import hour_bucket_start
 
 INDEX_LANE = "audio-index"
 VAD_SAMPLE_RATE = 16000
+
+#: s16le mono -- two bytes per sample.
+_BYTES_PER_SAMPLE = 2
+
+#: A mid-hour restart writes `...-p2-<stamp>.opus`. The stamp is still the
+#: hour bucket, so such a file's real open time is unknown from its name.
+_PART_SUFFIX_RE = re.compile(r"-p\d+-\d{8}T\d{6}Z\.opus$")
 
 
 @dataclass(frozen=True)
@@ -124,16 +143,44 @@ def decode_to_pcm16k_mono(
     return result.stdout
 
 
+def decoded_seconds_from_pcm(pcm: bytes) -> float:
+    """How much audio the segment actually held, from the decode step's own output."""
+    return len(pcm) / _BYTES_PER_SAMPLE / VAD_SAMPLE_RATE
+
+
+def observed_span_seconds(segment_path: Path, segment_start: float) -> float | None:
+    """The wall-clock window a closed segment covered, or None when unknowable.
+
+    A segment's mtime is when its muxer closed, so `mtime - start` is the
+    window it was open for -- the honest denominator for coverage, and one
+    that stays correct for the final segment of a lane as well as full hours.
+
+    None for a `-pN` part file: its stamp is the hour bucket rather than the
+    moment the recorder restarted, so the span would be overstated and the
+    coverage would read as a shortfall that never happened. Reporting nothing
+    beats reporting a number that is wrong in the alarming direction.
+    """
+    if _PART_SUFFIX_RE.search(segment_path.name):
+        return None
+    try:
+        span = segment_path.stat().st_mtime - segment_start
+    except OSError:
+        return None
+    return span if span > 0 else None
+
+
 def build_index_payload(
     *,
     channel: str,
     segment_path: Path,
     segment_start: float,
     speech_spans: list[SpeechSpan],
+    decoded_seconds: float | None = None,
+    span_seconds: float | None = None,
 ) -> dict:
     """Pure payload builder -- speech_spans is injected so this is testable
     without a live VAD model."""
-    return {
+    payload = {
         "kind": "speech-index",
         "channel": channel,
         "segment": segment_path.name,
@@ -143,6 +190,15 @@ def build_index_payload(
             for span in speech_spans
         ],
     }
+    if decoded_seconds is not None:
+        payload["decoded_seconds"] = round(decoded_seconds, 1)
+        # Coverage only when there is a defensible denominator. An absent
+        # field says "not measured"; a fabricated one would say "measured
+        # and fine", which is the failure mode this whole field exists for.
+        if span_seconds:
+            payload["span_seconds"] = round(span_seconds, 1)
+            payload["coverage"] = round(decoded_seconds / span_seconds, 4)
+    return payload
 
 
 def _load_model():
@@ -196,11 +252,14 @@ def run_index_pass(
         for segment_path in list_segments(channel_dir, since_ts=since_ts):
             pcm = decode_to_pcm16k_mono(ffmpeg_bin, segment_path)
             spans = _speech_spans_for_segment(model, pcm)
+            segment_start = segment_start_ts(segment_path)
             payload = build_index_payload(
                 channel=channel,
                 segment_path=segment_path,
-                segment_start=segment_start_ts(segment_path),
+                segment_start=segment_start,
                 speech_spans=spans,
+                decoded_seconds=decoded_seconds_from_pcm(pcm),
+                span_seconds=observed_span_seconds(segment_path, segment_start),
             )
             writer.write(payload, raw_ref=str(segment_path))
             indexed += 1

@@ -1,5 +1,5 @@
 # sinnix-ai — on-demand control plane for the local AI services
-# (whisper, tts, kokoro, ollama, litellm, llama-cpp, koboldcpp, comfyui,
+# (stt, tts, kokoro, ollama, litellm, llama-cpp, koboldcpp, comfyui,
 # musicgen, ocr, open-webui). The script carries the service registry; this
 # module only installs it. See scripts/sinnix-ai.
 {
@@ -120,23 +120,30 @@ let
     exclusiveResource = "gpu-inference";
     dependsOn = [ "koboldcpp" ];
   };
-  whisperProxy = mkProxy {
-    name = "whisper-proxy";
-    backendUnit = "whisper-server.service";
+  # No exclusiveResource, and that is the point of the engine change. Parakeet
+  # int8 through sherpa-onnx transcribes on the CPU fast enough that
+  # speech-to-text never needs the GPU (measured on this host: RTF 0.113 on
+  # dense speech, 0.002 over a VAD-gated ambient chunk), so unlike the
+  # whisper.cpp service it replaces, it is not in the gpu-inference mesh and a
+  # transcription can run while a model is resident. The always-on speech lane
+  # is exactly the consumer that would otherwise have queued behind an LLM.
+  sttProxy = mkProxy {
+    name = "stt-proxy";
+    backendUnit = "sinnix-stt.service";
     publicEndpoint = "127.0.0.1:8090";
     backendEndpoint = "127.0.0.1:8091";
-    # Cold start of the configured base.en model (147MB) is ~2s; 30s is an
-    # order of magnitude of headroom for both timeouts.
-    idleTimeout = "30s";
-    readinessTimeout = 30;
-    exclusiveResource = "gpu-inference";
-    dependsOn = [ "whisper" ];
+    # Cold start loads a 650MB encoder, ~2s. The idle window is long because
+    # nothing scarce is being held and re-loading it between the turns of one
+    # conversation would be the only real cost here.
+    idleTimeout = "300s";
+    readinessTimeout = 60;
+    dependsOn = [ "stt" ];
   };
   # No exclusiveResource: the reranker runs CPU-pinned (gpuLayers = 0,
   # hosts/sinnix-prime/default.nix). It is not VRAM-free -- the CUDA-linked
   # binary still allocates ~680-740MiB even at -ngl 0 -- but far below the
   # ~1610MiB it held fully offloaded, so it stays out of the gpu-inference
-  # mesh and coexists with a resident ollama/koboldcpp/whisper session.
+  # mesh and coexists with a resident ollama/koboldcpp session.
   llamaCppProxy = mkProxy {
     name = "llama-cpp-proxy";
     backendUnit = "llama-cpp.service";
@@ -252,11 +259,6 @@ let
       service = "koboldcpp.service";
       proxy = "koboldcpp-proxy.service";
     };
-    whisper = {
-      enable = config.sinnix.services.whisper.enable;
-      service = "whisper-server.service";
-      proxy = "whisper-proxy.service";
-    };
     # llama-cpp (the reranker) is not a member: it runs CPU-pinned
     # (gpuLayers = 0) and coexists with every backend here.
     comfyui = {
@@ -305,7 +307,7 @@ in
   systemd.sockets = lib.mkMerge [
     (lib.mkIf config.sinnix.services.ollama.enable ollamaProxy.sockets)
     (lib.mkIf config.sinnix.services.koboldcpp.enable koboldcppProxy.sockets)
-    (lib.mkIf config.sinnix.services.whisper.enable whisperProxy.sockets)
+    (lib.mkIf config.sinnix.services.stt.enable sttProxy.sockets)
     (lib.mkIf config.sinnix.services.litellm.enable litellmProxy.sockets)
     (lib.mkIf config.sinnix.services.kokoro.enable kokoroProxy.sockets)
     (lib.mkIf config.sinnix.services.llama-cpp.enable llamaCppProxy.sockets)
@@ -317,7 +319,7 @@ in
   systemd.services = lib.mkMerge [
     (lib.mkIf config.sinnix.services.ollama.enable ollamaProxy.services)
     (lib.mkIf config.sinnix.services.koboldcpp.enable koboldcppProxy.services)
-    (lib.mkIf config.sinnix.services.whisper.enable whisperProxy.services)
+    (lib.mkIf config.sinnix.services.stt.enable sttProxy.services)
     (lib.mkIf config.sinnix.services.litellm.enable litellmProxy.services)
     (lib.mkIf config.sinnix.services.kokoro.enable kokoroProxy.services)
     (lib.mkIf config.sinnix.services.llama-cpp.enable llamaCppProxy.services)
@@ -334,8 +336,8 @@ in
     (lib.mkIf config.sinnix.services.koboldcpp.enable {
       koboldcpp-proxy = koboldcppProxy.runtimeSurface;
     })
-    (lib.mkIf config.sinnix.services.whisper.enable {
-      whisper-proxy = whisperProxy.runtimeSurface;
+    (lib.mkIf config.sinnix.services.stt.enable {
+      stt-proxy = sttProxy.runtimeSurface;
     })
     (lib.mkIf config.sinnix.services.litellm.enable {
       litellm-proxy = litellmProxy.runtimeSurface;

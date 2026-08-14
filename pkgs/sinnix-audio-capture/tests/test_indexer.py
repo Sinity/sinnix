@@ -7,7 +7,9 @@ from pathlib import Path
 from sinnix_audio_capture.indexer import (
     SpeechSpan,
     build_index_payload,
+    decoded_seconds_from_pcm,
     list_segments,
+    observed_span_seconds,
     segment_start_ts,
 )
 
@@ -62,3 +64,70 @@ def test_build_index_payload_converts_spans_to_absolute_time():
             {"start": 1010.0, "end": 1012.0},
         ],
     }
+
+
+def test_decoded_seconds_from_pcm_counts_s16le_mono_16k():
+    # One second of 16kHz mono s16le is 32000 bytes.
+    assert decoded_seconds_from_pcm(b"\x00" * 32000) == 1.0
+    assert decoded_seconds_from_pcm(b"") == 0.0
+
+
+def test_observed_span_uses_close_time_minus_start(tmp_path: Path):
+    seg = tmp_path / "audio-mic-20260812T140000Z.opus"
+    seg.write_bytes(b"x")
+    start = calendar.timegm((2026, 8, 12, 14, 0, 0))
+    os.utime(seg, (start + 3600, start + 3600))
+    assert observed_span_seconds(seg, start) == 3600.0
+
+
+def test_observed_span_is_none_for_a_part_file(tmp_path: Path):
+    # A -pN file's stamp is the hour bucket, not when the recorder restarted,
+    # so any span derived from it would overstate the window and report a
+    # shortfall that never happened.
+    seg = tmp_path / "audio-mic-p2-20260812T140000Z.opus"
+    seg.write_bytes(b"x")
+    start = calendar.timegm((2026, 8, 12, 14, 0, 0))
+    os.utime(seg, (start + 1800, start + 1800))
+    assert observed_span_seconds(seg, start) is None
+
+
+def test_payload_reports_coverage_when_the_span_is_known():
+    payload = build_index_payload(
+        channel="mic",
+        segment_path=Path("audio-mic-20260812T140000Z.opus"),
+        segment_start=1000.0,
+        speech_spans=[],
+        decoded_seconds=3567.9,
+        span_seconds=3600.0,
+    )
+    assert payload["decoded_seconds"] == 3567.9
+    assert payload["span_seconds"] == 3600.0
+    assert payload["coverage"] == 0.9911
+
+
+def test_payload_reports_the_sinnix_500c_shortfall_as_near_zero_coverage():
+    # The regression this field exists to make visible: an hourly segment
+    # holding 37.5s of audio while every other health signal looked fine.
+    payload = build_index_payload(
+        channel="mic",
+        segment_path=Path("audio-mic-20260812T140000Z.opus"),
+        segment_start=1000.0,
+        speech_spans=[],
+        decoded_seconds=37.5,
+        span_seconds=3600.0,
+    )
+    assert payload["coverage"] == 0.0104
+
+
+def test_payload_omits_coverage_rather_than_inventing_a_denominator():
+    payload = build_index_payload(
+        channel="mic",
+        segment_path=Path("audio-mic-p2-20260812T140000Z.opus"),
+        segment_start=1000.0,
+        speech_spans=[],
+        decoded_seconds=540.0,
+        span_seconds=None,
+    )
+    assert payload["decoded_seconds"] == 540.0
+    assert "coverage" not in payload
+    assert "span_seconds" not in payload

@@ -89,7 +89,7 @@ in
             sinnix.services.koboldcpp.enable = true;
             sinnix.services.litellm.enable = true;
             sinnix.services.open-webui.enable = true;
-            sinnix.services.whisper.enable = true;
+            sinnix.services.stt.enable = true;
             sinnix.services.tts.enable = true;
             sinnix.services.llama-cpp.enable = true;
             sinnix.services.comfyui.enable = true;
@@ -145,45 +145,42 @@ in
           }
           {
             assertion =
-              config.systemd.services.whisper-server.serviceConfig.ExecStart != null
-              && lib.hasInfix "whisper-server" config.systemd.services.whisper-server.serviceConfig.ExecStart;
-            message = "The AI factory must leave the native whisper command visible";
+              config.systemd.services.sinnix-stt.serviceConfig.ExecStart != null
+              && lib.hasInfix "sinnix-stt" config.systemd.services.sinnix-stt.serviceConfig.ExecStart;
+            message = "The AI factory must leave the native STT command visible";
           }
           {
-            assertion = config.systemd.sockets.whisper-proxy.listenStreams == [ "127.0.0.1:8090" ];
-            message = "Whisper must expose only its socket-activated loopback front door (the shared STT hub)";
-          }
-          {
-            assertion =
-              config.systemd.services.whisper-server.unitConfig.PartOf == [ "whisper-proxy.service" ]
-              && config.systemd.services.whisper-server.unitConfig.BindsTo == [ "whisper-proxy.service" ];
-            message = "An idle whisper-proxy exit must tear down the whisper backend cgroup";
+            assertion = config.systemd.sockets.stt-proxy.listenStreams == [ "127.0.0.1:8090" ];
+            message = "The STT hub must expose only its socket-activated loopback front door";
           }
           {
             assertion =
-              lib.hasInfix "systemd-socket-proxyd" config.systemd.services.whisper-proxy.serviceConfig.ExecStart
-              && lib.hasInfix "--exit-idle-time=30s" config.systemd.services.whisper-proxy.serviceConfig.ExecStart;
-            message = "Whisper activation must use the idle-aware systemd socket proxy";
-          }
-          {
-            assertion = lib.hasInfix "--inference-path /v1/audio/transcriptions" config.systemd.services.whisper-server.serviceConfig.ExecStart;
-            message = "The whisper hub must answer the OpenAI-compatible transcriptions route";
+              config.systemd.services.sinnix-stt.unitConfig.PartOf == [ "stt-proxy.service" ]
+              && config.systemd.services.sinnix-stt.unitConfig.BindsTo == [ "stt-proxy.service" ];
+            message = "An idle stt-proxy exit must tear down the STT backend cgroup";
           }
           {
             assertion =
-              config.sinnix.runtime.inventory.surfaces.whisper.activation.backendEndpoint == "127.0.0.1:8091"
+              lib.hasInfix "systemd-socket-proxyd" config.systemd.services.stt-proxy.serviceConfig.ExecStart;
+            message = "STT activation must use the idle-aware systemd socket proxy";
+          }
+          {
+            assertion =
+              config.sinnix.runtime.inventory.surfaces.stt.activation.backendEndpoint == "127.0.0.1:8091"
               &&
-                config.sinnix.runtime.inventory.surfaces.whisper-proxy.activation.publicEndpoint
+                config.sinnix.runtime.inventory.surfaces.stt-proxy.activation.publicEndpoint
                 == "127.0.0.1:8090";
-            message = "Runtime inventory must describe the public and private whisper activation endpoints";
+            message = "Runtime inventory must describe the public and private STT activation endpoints";
           }
           {
+            # The inverse of the assertion this replaces, and it is the point
+            # of the engine change rather than an omission: Parakeet runs on
+            # the CPU, so speech-to-text must NOT hold the gpu-inference key
+            # and must stay available while a model is resident.
             assertion =
-              lib.elem "whisper-server.service" config.systemd.services.ollama.unitConfig.Conflicts
-              && lib.elem "whisper-server.service" config.systemd.services.koboldcpp.unitConfig.Conflicts
-              && lib.elem "ollama.service" config.systemd.services.whisper-server.unitConfig.Conflicts
-              && lib.elem "koboldcpp.service" config.systemd.services.whisper-server.unitConfig.Conflicts;
-            message = "The STT hub and GPU inference backends must be mutually exclusive (shared gpu-inference admission key)";
+              !(lib.elem "sinnix-stt.service" config.systemd.services.ollama.unitConfig.Conflicts)
+              && !(lib.elem "sinnix-stt.service" config.systemd.services.koboldcpp.unitConfig.Conflicts);
+            message = "The CPU-only STT hub must stay outside the gpu-inference admission mesh";
           }
           {
             assertion =
@@ -296,10 +293,6 @@ in
                     "koboldcpp.service"
                     "koboldcpp-proxy.service"
                   ];
-                  whisper = [
-                    "whisper-server.service"
-                    "whisper-proxy.service"
-                  ];
                   comfyui = [
                     "podman-comfyui.service"
                     "comfyui-proxy.service"
@@ -348,8 +341,6 @@ in
                   "ollama-proxy.service"
                   "koboldcpp.service"
                   "koboldcpp-proxy.service"
-                  "whisper-server.service"
-                  "whisper-proxy.service"
                   "podman-comfyui.service"
                   "comfyui-proxy.service"
                   "podman-openedai-speech.service"

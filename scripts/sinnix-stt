@@ -1,0 +1,578 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: The estate's speech-to-text stack — VAD-gated Parakeet transcription, diarization, and the OpenAI-compatible hub
+# runtimeInputs: coreutils ffmpeg sherpa-onnx curl gnutar bzip2
+
+"""Speech to text, for a machine that listens all day.
+
+Engine: NVIDIA Parakeet TDT 0.6B v3 (int8 ONNX) through sherpa-onnx. This
+replaces whisper.cpp, which the operator retired -- the decision is recorded in
+sinnix-mke and the reasons are measurable rather than fashionable:
+
+  * Quality. 6.32 WER against whisper base.en's far worse, across 25 European
+    languages including Polish rather than English only.
+  * No silence hallucination. whisper famously invents "Thank you." over a
+    quiet room; a lane that records a silent flat all night would fill with
+    sentences nobody said. Measured here: a real 300 s ambient chunk produced
+    zero segments rather than zero-confidence fiction.
+  * Speed, and the architectural consequence. Measured on this host's CPU:
+    RTF 0.113 on dense speech, RTF 0.002 over a VAD-gated ambient chunk --
+    0.74 s to process 300 s of audio. That is fast enough on CPU that the
+    stack never touches the GPU, so transcription cannot contend with the
+    resident LLM tier. sinnix-mke budgeted 1.5 GB of VRAM for this; the
+    measurement says it needs none, which is strictly better.
+
+The VAD gate is what makes an always-on lane affordable. Silero v6 finds the
+speech regions and only those reach the recogniser, so a day of mostly-silent
+ambient audio costs seconds rather than hours, and the transcript records how
+much of the audio was actually speech -- "nobody said anything" is a finding,
+not a gap.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from typing import Any, Iterable
+
+SCHEMA = "sinnix.transcript/1"
+
+MODEL_ROOT = Path(os.environ.get("SINNIX_STT_MODEL_ROOT", "/realm/media/model/sherpa"))
+PARAKEET = MODEL_ROOT / "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+SILERO = MODEL_ROOT / "silero_vad.onnx"
+SEGMENTATION = MODEL_ROOT / "sherpa-onnx-pyannote-segmentation-3-0" / "model.onnx"
+EMBEDDING = MODEL_ROOT / "nemo_en_titanet_small.onnx"
+
+CAPTURES = Path(os.environ.get("SINNIX_CAPTURES_ROOT", "/realm/data/captures"))
+TRANSCRIPT_DIR = CAPTURES / "transcripts"
+LEDGER = TRANSCRIPT_DIR / "transcribed.jsonl"
+
+# Threads for the recogniser. The measurement above used 12 on a 16-core part;
+# leaving headroom matters because this runs opportunistically alongside
+# whatever the operator is actually doing.
+THREADS = int(os.environ.get("SINNIX_STT_THREADS", "10"))
+
+RELEASES = "https://github.com/k2-fsa/sherpa-onnx/releases/download"
+
+#: The model set, as (destination, url, kind). Fetched rather than vendored in
+#: the Nix store: half a gigabyte of weights is not source, and the estate
+#: already keeps model files under /realm/media/model.
+MODEL_SET = [
+    (
+        PARAKEET,
+        f"{RELEASES}/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2",
+        "tar",
+    ),
+    (
+        SEGMENTATION.parent,
+        f"{RELEASES}/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2",
+        "tar",
+    ),
+    (EMBEDDING, f"{RELEASES}/speaker-recongition-models/nemo_en_titanet_small.onnx", "file"),
+    (
+        SILERO,
+        "https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx",
+        "file",
+    ),
+]
+
+
+def now_iso() -> str:
+    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def models_present() -> bool:
+    return all(
+        p.exists()
+        for p in (
+            PARAKEET / "encoder.int8.onnx",
+            PARAKEET / "tokens.txt",
+            SILERO,
+            SEGMENTATION,
+            EMBEDDING,
+        )
+    )
+
+
+def cmd_models(args: argparse.Namespace) -> int:
+    MODEL_ROOT.mkdir(parents=True, exist_ok=True)
+    for dest, url, kind in MODEL_SET:
+        if dest.exists() and not args.force:
+            print(f"have {dest.name}")
+            continue
+        print(f"fetching {dest.name} …")
+        if kind == "tar":
+            with tempfile.NamedTemporaryFile(suffix=".tar.bz2") as tmp:
+                subprocess.run(["curl", "-sL", "-o", tmp.name, url], check=True)
+                subprocess.run(["tar", "xj", "-C", str(MODEL_ROOT), "-f", tmp.name], check=True)
+        else:
+            subprocess.run(["curl", "-sL", "-o", str(dest), url], check=True)
+    print("ok" if models_present() else "INCOMPLETE", "-", MODEL_ROOT)
+    return 0 if models_present() else 1
+
+
+# --------------------------------------------------------------- transcribing
+
+
+def to_wav(src: Path, dest: Path) -> float:
+    """16 kHz mono, which is what the recogniser wants. Returns duration."""
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-i", str(src), "-ac", "1", "-ar", "16000",
+         "-y", str(dest)],
+        check=True,
+    )
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+         str(dest)],
+        capture_output=True, text=True,
+    )
+    try:
+        return float(out.stdout.strip())
+    except ValueError:
+        return 0.0
+
+
+#: The VAD binary prints one line per speech region: `start -- end: text`.
+_SEG_RE = re.compile(r"^([0-9.]+)\s*--\s*([0-9.]+):\s*(.+)$")
+
+
+def transcribe_file(path: Path, *, vad: bool = True) -> dict:
+    """One audio file to a transcript record.
+
+    VAD-gated by default. Without the gate a silent hour still costs an hour of
+    encoder time; with it, only the speech is decoded and the record carries
+    how much speech there was, so silence is measured rather than assumed.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        wav = Path(tmp) / "in.wav"
+        audio_seconds = to_wav(path, wav)
+
+        common = [
+            f"--encoder={PARAKEET}/encoder.int8.onnx",
+            f"--decoder={PARAKEET}/decoder.int8.onnx",
+            f"--joiner={PARAKEET}/joiner.int8.onnx",
+            f"--tokens={PARAKEET}/tokens.txt",
+            "--model-type=nemo_transducer",
+            f"--num-threads={THREADS}",
+        ]
+        if vad:
+            argv = ["sherpa-onnx-vad-with-offline-asr", f"--silero-vad-model={SILERO}",
+                    *common, str(wav)]
+        else:
+            argv = ["sherpa-onnx-offline", *common, str(wav)]
+
+        started = dt.datetime.now()
+        proc = subprocess.run(argv, capture_output=True, text=True)
+        elapsed = (dt.datetime.now() - started).total_seconds()
+
+    if proc.returncode != 0:
+        return {
+            "schema": SCHEMA,
+            "file": path.name,
+            "error": (proc.stderr or "").strip()[-400:],
+            "audio_seconds": audio_seconds,
+            "transcribed_at": now_iso(),
+        }
+
+    segments = _parse_segments(proc.stdout, vad=vad)
+    speech_seconds = round(sum(s["end"] - s["start"] for s in segments), 2)
+    return {
+        "schema": SCHEMA,
+        "file": path.name,
+        "engine": "parakeet-tdt-0.6b-v3-int8",
+        "audio_seconds": round(audio_seconds, 3),
+        "speech_seconds": speech_seconds,
+        "segments": segments,
+        "text": " ".join(s["text"] for s in segments).strip(),
+        "rtf": round(elapsed / audio_seconds, 4) if audio_seconds else None,
+        "transcribed_at": now_iso(),
+    }
+
+
+def _parse_segments(stdout: str, *, vad: bool) -> list[dict]:
+    """Pull segments out of sherpa-onnx's human-readable output.
+
+    The VAD binary prints `start -- end` then the text; the plain offline
+    binary prints one JSON object per input file. Two shapes, one parser,
+    because the caller should not have to know which binary ran.
+    """
+    segments: list[dict] = []
+    if not vad:
+        for line in stdout.splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                o = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            text = (o.get("text") or "").strip()
+            if not text:
+                continue
+            stamps = o.get("timestamps") or [0.0]
+            durations = o.get("durations") or [0.0]
+            segments.append(
+                {
+                    "start": round(float(stamps[0]), 2),
+                    "end": round(float(stamps[-1]) + float(durations[-1] if durations else 0), 2),
+                    "text": text,
+                    "words": _words(o),
+                }
+            )
+        return segments
+
+    for raw in stdout.splitlines():
+        m = _SEG_RE.match(raw.strip())
+        if not m:
+            continue
+        segments.append(
+            {
+                "start": round(float(m.group(1)), 2),
+                "end": round(float(m.group(2)), 2),
+                "text": m.group(3).strip(),
+                "words": [],
+            }
+        )
+    return segments
+
+
+def _words(o: dict) -> list[dict]:
+    tokens = o.get("tokens") or []
+    stamps = o.get("timestamps") or []
+    durs = o.get("durations") or []
+    out = []
+    for i, tok in enumerate(tokens):
+        if i >= len(stamps):
+            break
+        out.append(
+            {
+                "w": tok,
+                "t": round(float(stamps[i]), 2),
+                "d": round(float(durs[i]), 2) if i < len(durs) else None,
+            }
+        )
+    return out
+
+
+def cmd_transcribe(args: argparse.Namespace) -> int:
+    if not models_present():
+        print("stt: models missing — run `sinnix stt models`", file=sys.stderr)
+        return 1
+    for f in args.files:
+        record = transcribe_file(Path(f), vad=not args.no_vad)
+        print(json.dumps(record, ensure_ascii=False, indent=2 if args.pretty else None))
+    return 0
+
+
+# ---------------------------------------------------------------- the lake
+
+
+#: Where audio lives, and what to call the lane it came from. The phone lane is
+#: the only continuously healthy one at the time of writing; the desktop lanes
+#: are included because they are meant to be, and a pipeline that silently
+#: skipped them would hide their repair.
+LANES = {
+    "phone": CAPTURES / "phone" / "ambient",
+    "voice": CAPTURES / "phone" / "estate" / "outbox",
+    "desktop-mic": CAPTURES / "audio" / "mic",
+    "desktop-sink": CAPTURES / "audio" / "sink-monitor",
+}
+
+AUDIO_SUFFIXES = {".m4a", ".opus", ".wav", ".flac", ".mp3", ".ogg"}
+
+
+def ledger_seen() -> set[tuple[str, int]]:
+    """What has already been transcribed, keyed on name AND size.
+
+    Size is part of the key for the same reason the ambient audit keys on it: a
+    chunk repaired from a truncated transfer keeps its name and is a different
+    file, and its old transcript describes audio that was never fully there.
+    """
+    seen: set[tuple[str, int]] = set()
+    if not LEDGER.is_file():
+        return seen
+    for line in LEDGER.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            o = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        seen.add((o.get("file", ""), int(o.get("bytes") or 0)))
+    return seen
+
+
+def cmd_lake(args: argparse.Namespace) -> int:
+    if not models_present():
+        print("stt: models missing — run `sinnix stt models`", file=sys.stderr)
+        return 1
+    TRANSCRIPT_DIR.mkdir(parents=True, exist_ok=True)
+    seen = ledger_seen()
+    lanes = [args.lane] if args.lane else list(LANES)
+    done = 0
+    with_speech = 0
+
+    for lane in lanes:
+        root = LANES.get(lane)
+        if root is None or not root.is_dir():
+            continue
+        files = sorted(
+            p for p in root.iterdir()
+            if p.is_file() and p.suffix.lower() in AUDIO_SUFFIXES
+        )
+        for path in files:
+            size = path.stat().st_size
+            if (path.name, size) in seen:
+                continue
+            if args.limit and done >= args.limit:
+                break
+            record = transcribe_file(path)
+            record["lane"] = lane
+            record["bytes"] = size
+
+            day = _day_of(path)
+            out = TRANSCRIPT_DIR / f"{day}.jsonl"
+            with out.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+            with LEDGER.open("a", encoding="utf-8") as fh:
+                fh.write(
+                    json.dumps(
+                        {
+                            "file": path.name,
+                            "bytes": size,
+                            "lane": lane,
+                            "speech_seconds": record.get("speech_seconds", 0),
+                            "at": now_iso(),
+                        }
+                    )
+                    + "\n"
+                )
+            done += 1
+            if record.get("speech_seconds", 0) > 0:
+                with_speech += 1
+
+    print(f"stt: transcribed {done} file(s), {with_speech} contained speech")
+    return 0
+
+
+def _day_of(path: Path) -> str:
+    """The UTC day a recording belongs to, from its name where possible.
+
+    Falls back to mtime. Named-derived is preferred because a file the drain
+    moved yesterday still belongs to the day it was recorded.
+    """
+    m = re.search(r"(\d{8})T\d{6}Z", path.name)
+    if m:
+        s = m.group(1)
+        return f"{s[:4]}-{s[4:6]}-{s[6:]}"
+    return dt.datetime.fromtimestamp(path.stat().st_mtime, dt.timezone.utc).date().isoformat()
+
+
+# --------------------------------------------------------------- diarization
+
+
+def cmd_diarize(args: argparse.Namespace) -> int:
+    """Who spoke when.
+
+    Speaker turns, not speaker names. Enrollment (is this the operator?) is a
+    separate question handled by sinnix-speaker-verify, and it is deliberately
+    not fused here: the raw audio is kept, so identity can be recomputed
+    retroactively at any time, and a labelling mistake baked into the
+    transcript would be much harder to undo than one recomputed on demand.
+    """
+    if not SEGMENTATION.is_file():
+        print("stt: segmentation model missing — run `sinnix stt models`", file=sys.stderr)
+        return 1
+    with tempfile.TemporaryDirectory() as tmp:
+        wav = Path(tmp) / "in.wav"
+        to_wav(Path(args.file), wav)
+        argv = [
+            "sherpa-onnx-offline-speaker-diarization",
+            f"--clustering.num-clusters={args.speakers}" if args.speakers
+            else f"--clustering.cluster-threshold={args.threshold}",
+            f"--segmentation.pyannote-model={SEGMENTATION}",
+            f"--embedding.model={EMBEDDING}",
+            f"--num-threads={THREADS}",
+            str(wav),
+        ]
+        proc = subprocess.run(argv, capture_output=True, text=True)
+    if proc.returncode != 0:
+        print(proc.stderr.strip()[-600:], file=sys.stderr)
+        return 1
+    turns = []
+    for line in proc.stdout.splitlines():
+        m = re.match(r"\s*([0-9.]+)\s*--\s*([0-9.]+)\s+speaker_(\d+)", line)
+        if m:
+            turns.append(
+                {"start": float(m.group(1)), "end": float(m.group(2)),
+                 "speaker": f"spk{int(m.group(3))}"}
+            )
+    print(json.dumps({"schema": SCHEMA, "file": Path(args.file).name, "turns": turns}, indent=2))
+    return 0
+
+
+# ------------------------------------------------------------------- the hub
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    """An OpenAI-compatible /v1/audio/transcriptions endpoint.
+
+    The shape exists so every client the estate already has -- hermes, the
+    phone, anything speaking the OpenAI audio API -- keeps working across the
+    engine change without being touched. This is the interface whisper.cpp
+    used to serve on this port; the engine behind it is the only thing that
+    changed.
+    """
+    import socketserver
+    from http import HTTPStatus
+    from http.server import BaseHTTPRequestHandler
+
+    if not models_present():
+        print("stt: models missing — run `sinnix stt models`", file=sys.stderr)
+        return 1
+
+    class Handler(BaseHTTPRequestHandler):
+        server_version = "sinnix-stt/1"
+
+        def log_message(self, fmt: str, *a: Any) -> None:
+            sys.stderr.write("stt: " + (fmt % a) + "\n")
+
+        def _json(self, status: HTTPStatus, payload: Any) -> None:
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self) -> None:  # noqa: N802
+            if self.path.rstrip("/") in ("/health", ""):
+                self._json(HTTPStatus.OK, {"ok": True, "engine": "parakeet-tdt-0.6b-v3-int8"})
+            else:
+                self._json(HTTPStatus.NOT_FOUND, {"error": "no such route"})
+
+        def do_POST(self) -> None:  # noqa: N802
+            if not self.path.rstrip("/").endswith("/audio/transcriptions"):
+                self._json(HTTPStatus.NOT_FOUND, {"error": "no such route"})
+                return
+            length = int(self.headers.get("Content-Length") or 0)
+            ctype = self.headers.get("Content-Type") or ""
+            body = self.rfile.read(length)
+            audio = _multipart_file(body, ctype)
+            if audio is None:
+                self._json(HTTPStatus.BAD_REQUEST, {"error": "expected a multipart file field"})
+                return
+            with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as tmp:
+                tmp.write(audio)
+                tmp_path = Path(tmp.name)
+            try:
+                record = transcribe_file(tmp_path)
+            finally:
+                tmp_path.unlink(missing_ok=True)
+            # The OpenAI response shape is {"text": ...}; the extra fields are
+            # additive and ignored by clients that do not know them.
+            self._json(
+                HTTPStatus.OK,
+                {
+                    "text": record.get("text", ""),
+                    "segments": record.get("segments", []),
+                    "engine": record.get("engine"),
+                    "speech_seconds": record.get("speech_seconds"),
+                },
+            )
+
+    class Server(socketserver.ThreadingUnixStreamServer if args.socket else socketserver.ThreadingTCPServer):
+        daemon_threads = True
+        allow_reuse_address = True
+
+        def get_request(self):  # type: ignore[override]
+            if args.socket:
+                request, _ = socketserver.ThreadingUnixStreamServer.get_request(self)
+                return request, ("unix", 0)
+            return socketserver.ThreadingTCPServer.get_request(self)
+
+    if args.socket:
+        sock_path = Path(args.socket)
+        sock_path.parent.mkdir(parents=True, exist_ok=True)
+        sock_path.unlink(missing_ok=True)
+        server = Server(str(sock_path), Handler)
+        os.chmod(sock_path, 0o600)
+        print(f"stt: serving on {sock_path}", file=sys.stderr)
+    else:
+        host, _, port = args.listen.rpartition(":")
+        server = Server((host or "127.0.0.1", int(port)), Handler)
+        print(f"stt: serving on {args.listen}", file=sys.stderr)
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()
+        if args.socket:
+            Path(args.socket).unlink(missing_ok=True)
+    return 0
+
+
+def _multipart_file(body: bytes, ctype: str) -> bytes | None:
+    """Pull the file part out of a multipart body.
+
+    Hand-rolled because Python removed `cgi` in 3.13 and the alternative is a
+    dependency for one field. The parse is deliberately narrow: find the part
+    whose disposition carries a filename, return its bytes.
+    """
+    m = re.search(r"boundary=([^;]+)", ctype)
+    if not m:
+        return None
+    boundary = b"--" + m.group(1).strip('"').encode()
+    for part in body.split(boundary):
+        head, sep, payload = part.partition(b"\r\n\r\n")
+        if not sep or b"filename=" not in head:
+            continue
+        return payload.rstrip(b"\r\n-")
+    return None
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description=__doc__)
+    sub = p.add_subparsers(dest="command", required=True)
+
+    models = sub.add_parser("models", help="fetch or verify the model set")
+    models.add_argument("--force", action="store_true")
+    models.set_defaults(func=cmd_models)
+
+    tr = sub.add_parser("transcribe", help="transcribe one or more files to JSON")
+    tr.add_argument("files", nargs="+")
+    tr.add_argument("--no-vad", action="store_true", help="decode everything, not just speech")
+    tr.add_argument("--pretty", action="store_true")
+    tr.set_defaults(func=cmd_transcribe)
+
+    lake = sub.add_parser("lake", help="transcribe whatever the lake holds and has not seen")
+    lake.add_argument("--lane", choices=sorted(LANES))
+    lake.add_argument("--limit", type=int, default=0)
+    lake.set_defaults(func=cmd_lake)
+
+    di = sub.add_parser("diarize", help="who spoke when")
+    di.add_argument("file")
+    di.add_argument("--speakers", type=int, default=0, help="known speaker count, if any")
+    di.add_argument("--threshold", type=float, default=0.5)
+    di.set_defaults(func=cmd_diarize)
+
+    serve = sub.add_parser("serve", help="the OpenAI-compatible hub")
+    serve.add_argument("--socket")
+    serve.add_argument("--listen", default="127.0.0.1:8091")
+    serve.set_defaults(func=cmd_serve)
+
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

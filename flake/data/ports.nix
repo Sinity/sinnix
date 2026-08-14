@@ -42,7 +42,7 @@
     public = 4000;
     backend = 4001;
   };
-  whisper = {
+  stt = {
     public = 8090; # OpenAI-compatible /v1/audio/transcriptions (STT hub)
     backend = 8091;
   };
