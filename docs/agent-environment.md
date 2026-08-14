@@ -82,17 +82,17 @@ Servers: context7, github, lynchpin, polylogue, sinex.
 ### browser (claude)
 
 Tiers: remote-core, recall, deep-evidence, code-semantic, browser-mcp.
-Servers: chrome-devtools, chrome-devtools-private, chrome-devtools-private-visible, context7, firecrawl, github, lynchpin, polylogue, serena, sinex.
+Servers: chrome-devtools, context7, firecrawl, github, lynchpin, polylogue, serena, sinex.
 
 ### browser (codex)
 
 Tiers: remote-core, recall, deep-evidence, code-semantic, browser-mcp.
-Servers: chrome-devtools, chrome-devtools-private, chrome-devtools-private-visible, context7, github, lynchpin, polylogue, serena, sinex.
+Servers: chrome-devtools, context7, github, lynchpin, polylogue, serena, sinex.
 
 ### browser (gemini)
 
 Tiers: remote-core, recall, deep-evidence, code-semantic, browser-mcp.
-Servers: chrome-devtools, chrome-devtools-private, chrome-devtools-private-visible, context7, github, lynchpin, polylogue, serena, sinex.
+Servers: chrome-devtools, context7, github, lynchpin, polylogue, serena, sinex.
 
 ### browser (antigravity)
 
@@ -160,8 +160,6 @@ Servers: agent-control, context7, github, polylogue, sinex.
 | --------------------------------- | --------------- | --------- | ------------------------------------- | ------------------------------------------ |
 | `agent-control`                   | `agent-control` | `stdio`   | `sinnix-agent-control-mcp`            | claude, codex, gemini, antigravity, hermes |
 | `chrome-devtools`                 | `browser-mcp`   | `stdio`   | `mcp-chrome-devtools`                 | claude, codex, gemini                      |
-| `chrome-devtools-private`         | `browser-mcp`   | `stdio`   | `mcp-chrome-devtools-private`         | claude, codex, gemini                      |
-| `chrome-devtools-private-visible` | `browser-mcp`   | `stdio`   | `mcp-chrome-devtools-private-visible` | claude, codex, gemini                      |
 | `context7`                        | `remote-core`   | `http`    | `https://mcp.context7.com/mcp`        | claude, codex, gemini, antigravity, hermes |
 | `firecrawl`                       | `browser-mcp`   | `stdio`   | `mcp-firecrawl`                       | claude, hermes                             |
 | `github`                          | `remote-core`   | `stdio`   | `npx`                                 | claude, codex, gemini, antigravity, hermes |
