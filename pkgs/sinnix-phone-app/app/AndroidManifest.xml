@@ -56,6 +56,12 @@
     -->
     <activity android:name=".CaptureActivity" android:exported="false" />
     <activity android:name=".GrantsActivity" android:exported="false" />
+    <!-- Fullscreen: the whole surface is the response target, so anything
+         the system draws over it is a target the operator might hit. -->
+    <activity
+        android:name=".PvtActivity"
+        android:exported="false"
+        android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen" />
 
     <!--
       foregroundServiceType="microphone" is the whole reason this app
