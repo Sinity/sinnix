@@ -161,12 +161,115 @@ adb_any() {
 # MANAGE_EXTERNAL_STORAGE is set at both package and uid scope because the two
 # are separate modes and only one of them reverting is what silently broke
 # capture before (sinnix-hcjq).
+#
+# Every runtime permission the manifest declares is granted here, not just the
+# ones a particular lane needed on the day it was written. The app is the
+# estate's capture agent on this device; enumerating a subset means a lane
+# added later is dark until someone remembers this function exists.
+#
+# The notification listener is the case that proves it. `PhoneNotificationListener`
+# was written, declared in the manifest, and never bound, because nothing ever
+# put it in `enabled_notification_listeners` -- so the inbound-comms timeline
+# recorded nothing from the day it was built until 2026-08-14. `allow_listener`
+# needs no root and shows no dialog, so there was never a reason for it to be
+# manual. MIUI also revokes listener bindings silently, which is why this is
+# re-asserted on every install and adb restore rather than done once.
 ensure_app_grants() {
-  adb_any shell pm grant "$APP_ID" android.permission.RECORD_AUDIO >/dev/null 2>&1 || true
-  adb_any shell pm grant "$APP_ID" android.permission.POST_NOTIFICATIONS >/dev/null 2>&1 || true
+  local perm
+  for perm in \
+    RECORD_AUDIO \
+    POST_NOTIFICATIONS \
+    CAMERA \
+    ACCESS_COARSE_LOCATION \
+    READ_EXTERNAL_STORAGE; do
+    adb_any shell pm grant "$APP_ID" "android.permission.$perm" >/dev/null 2>&1 || true
+  done
   adb_any shell appops set "$APP_ID" MANAGE_EXTERNAL_STORAGE allow >/dev/null 2>&1 || true
   adb_any shell appops set --uid "$APP_ID" MANAGE_EXTERNAL_STORAGE allow >/dev/null 2>&1 || true
   adb_any shell cmd deviceidle whitelist "+$APP_ID" >/dev/null 2>&1 || true
+  adb_any shell cmd notification allow_listener \
+    "$APP_ID/$APP_ID.ingress.PhoneNotificationListener" >/dev/null 2>&1 || true
+
+  # Health Connect permissions are deliberately absent: on Android 13 they are
+  # held by the Health Connect APK rather than the platform, so `pm grant`
+  # accepts them and silently does nothing. They are granted once through the
+  # Health Connect consent UI and survive app upgrades, which is why they are
+  # not this function's job -- see docs/phone.md.
+}
+
+# Device-level capture settings that are not app grants and do not survive a
+# reboot on their own.
+#
+# The logcat ring buffers ship at 256 KiB for `main`, which on this phone holds
+# roughly four hours -- the reason a question about install failures earlier
+# today could not be answered at all: the evidence had already rotated out. 64
+# MiB per buffer is the largest the shell can set without root and costs only
+# RAM that logd already reserves lazily. `persist.logd.size` would make it
+# survive a reboot but is refused to the shell uid, so this is re-asserted on
+# every adb attach instead of being set once.
+#
+# Notification history is Android's own second witness beside the app's
+# listener. It defaults off, which is how a week of notifications turned out to
+# be unrecoverable rather than merely un-drained.
+ensure_device_capture_settings() {
+  local buf
+  for buf in main system crash kernel; do
+    adb_any logcat -b "$buf" -G 64M >/dev/null 2>&1 || true
+  done
+  adb_any shell settings put secure notification_history_enabled 1 >/dev/null 2>&1 || true
+}
+
+# Drain the phone's system log into the lake.
+#
+# Raising the ring buffers above only buys time; without this the log is never
+# captured at all and every question about the phone's own behaviour -- why an
+# install failed, when a service was killed, what MIUI revoked -- is answerable
+# only inside whatever window has not yet rotated out. Asked one such question
+# on 2026-08-14, the answer was that the evidence had rotated at 15:04.
+#
+# `-T <ts>` resumes from the last line already drained, so repeated runs append
+# rather than duplicate. The cursor is kept per device in the lake beside the
+# data, and a missing or unusable cursor falls back to the whole buffer: after
+# a reboot the ring is fresh and the old timestamp is in the future relative to
+# its contents, which logcat answers with silence rather than an error. Losing
+# a duplicate is cheaper than losing a boot, so the fallback re-dumps.
+#
+# Written as raw threadtime lines, not JSON. The format is stable, greppable,
+# and every Android tool already speaks it; parsing it here would invent a
+# schema the rest of the estate has no use for.
+drain_logcat_adb() {
+  local dest cursor since day out lines
+  adb_resolve || return 1
+  dest="$LAKE_ROOT/logcat"
+  cursor="$PHONE_STATE/logcat.cursor"
+  mkdir -p "$dest" "$(dirname "$cursor")"
+  day="$(date -u +%Y%m%d)"
+  out="$dest/logcat-$day.txt"
+
+  since=""
+  [ -s "$cursor" ] && since="$(cat "$cursor")"
+
+  # -b all: main is the app chatter, but system/crash/kernel carry the
+  # package-manager, OOM and driver events that explain an outage.
+  if [ -n "$since" ]; then
+    adb_any logcat -b all -d -v threadtime -v UTC -v year -T "$since" 2>/dev/null >>"$out" || true
+  else
+    adb_any logcat -b all -d -v threadtime -v UTC -v year 2>/dev/null >>"$out" || true
+  fi
+
+  # The cursor is the last real log line's timestamp. Blank lines and the
+  # `--------- beginning of` banners logcat interleaves are not lines it will
+  # accept back as -T, so they are filtered before the tail is taken.
+  lines="$(grep -cE '^[0-9]{4}-[0-9]{2}-[0-9]{2} ' "$out" 2>/dev/null || echo 0)"
+  grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2} ' "$out" 2>/dev/null \
+    | tail -n 1 \
+    | awk '{ print $1 " " $2 }' > "$cursor.tmp" || true
+  if [ -s "$cursor.tmp" ]; then
+    mv -f "$cursor.tmp" "$cursor"
+  else
+    rm -f "$cursor.tmp"
+  fi
+  echo "logcat: $lines lines in $out"
 }
 
 # Drain ambient chunks over adb.
@@ -523,6 +626,7 @@ app-install)
   fi
   rm -f "$install_log"
   ensure_app_grants
+  ensure_device_capture_settings
   "$0" app-start
 
   # Retire Termux's runit `ambient` service, the previous recorder. Both
@@ -663,7 +767,8 @@ app-soak)
   ;;
 app-grants)
   ensure_app_grants
-  echo "grants re-asserted for $APP_ID"
+  ensure_device_capture_settings
+  echo "grants re-asserted for $APP_ID; device capture settings re-applied"
   ;;
 shell)
   if [ "$#" -eq 0 ]; then ssh_phone; else ssh_phone "$@"; fi
@@ -685,8 +790,15 @@ pull)
   # Camera and downloads are the durable originals; the health-export folder
   # is where the Health Connect scheduled export lands.
   # Pull only — never push back, and never delete on the phone.
-  mkdir -p "$LAKE_ROOT"/{camera,download,health,ambient}
+  mkdir -p "$LAKE_ROOT"/{camera,download,health,ambient,logcat}
   set +e
+  # The system log first: it is adb-only and small, and it is the lane that
+  # explains the others when they fail.
+  if adb_any get-state >/dev/null 2>&1; then
+    drain_logcat_adb
+  else
+    echo "adb unavailable: system log not drained (its buffer will rotate)"
+  fi
   # One reachability check for all four lanes. Without it each rsync spends its
   # own connect timeout failing the same way and prints the same error three
   # times before the ambient lane gets to try a transport that works.
@@ -856,6 +968,7 @@ push)
   ;;
 adb-connect)
   adb connect "$ADB_TARGET"
+  ensure_device_capture_settings
   ;;
 adb-restore)
   echo "Phone must be on USB with debugging authorized."
@@ -864,6 +977,7 @@ adb-restore)
   sleep 3
   adb connect "$ADB_TARGET"
   ensure_app_grants
+  ensure_device_capture_settings
   ;;
 clip-push)
   # text/* only -- termux-clipboard-set takes a string argument; pushing raw

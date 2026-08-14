@@ -125,12 +125,30 @@ object Prefs {
     fun setReceiverHost(ctx: Context, value: String) =
         prefs(ctx).edit().putString(KEY_RECEIVER, value).apply()
 
-    fun locationLane(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_LOCATION, false)
+    /**
+     * Every capture lane in this file defaults ON, including these two.
+     *
+     * They used to default off, and the cost was not theoretical: the health
+     * lane shipped fully written and produced nothing at all, so the Band 10
+     * arrived to an empty `captures/phone/health` and the gap looked like a
+     * pipeline problem rather than an unflipped boolean. A lane that has to be
+     * switched on has a hole in it running back to the day it was written,
+     * and nobody discovers that until they go looking for the data.
+     *
+     * Off is not the safe default here. The estate exists to capture; a lane
+     * that is built and wired and then left dark is a bug with a settings
+     * screen in front of it. Where a lane genuinely cannot run -- no Health
+     * Connect installed, permission not granted -- the lane says so as an
+     * event (`lane_blocked`), which is the honest way to be silent. The
+     * toggles stay so a lane can be turned OFF deliberately; what changed is
+     * which way they point when nobody has touched them.
+     */
+    fun locationLane(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_LOCATION, true)
 
     fun setLocationLane(ctx: Context, value: Boolean) =
         prefs(ctx).edit().putBoolean(KEY_LOCATION, value).apply()
 
-    fun healthLane(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_HEALTH, false)
+    fun healthLane(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_HEALTH, true)
 
     fun setHealthLane(ctx: Context, value: Boolean) =
         prefs(ctx).edit().putBoolean(KEY_HEALTH, value).apply()
