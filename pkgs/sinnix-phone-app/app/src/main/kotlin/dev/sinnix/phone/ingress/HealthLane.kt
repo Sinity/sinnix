@@ -32,7 +32,6 @@ import dev.sinnix.phone.core.Prefs
 import dev.sinnix.phone.core.Stamps
 import dev.sinnix.phone.core.Storage
 import java.time.Instant
-import java.time.temporal.ChronoUnit
 import kotlin.reflect.KClass
 import org.json.JSONArray
 
@@ -102,7 +101,19 @@ object HealthLane {
             WeightRecord::class,
         )
 
-    val PERMISSIONS: Set<String> = TYPES.map { HealthPermission.getReadPermission(it) }.toSet()
+    /**
+     * Every read permission, plus the two that are not record types.
+     *
+     * HISTORY is what lifts Health Connect's silent 30-day truncation, and
+     * BACKGROUND is what keeps the lane readable from the watchdog receiver it
+     * actually runs in. Both are in the set rather than treated as optional so
+     * a missing one is NAMED in lane_blocked instead of quietly halving what
+     * the lane can see.
+     */
+    val PERMISSIONS: Set<String> =
+        TYPES.map { HealthPermission.getReadPermission(it) }.toSet() +
+            HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY +
+            HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND
 
     fun availability(ctx: Context): String =
         when (HealthConnectClient.getSdkStatus(ctx)) {
@@ -114,7 +125,25 @@ object HealthLane {
 
     private const val PREFS = "sinnix-phone-health"
     private const val KEY_TOKEN = "changes_token"
-    private const val BACKFILL_DAYS = 30L
+    private const val KEY_BACKFILL_GEN = "backfill_generation"
+
+    /**
+     * Bump this to re-sweep everything Health Connect holds.
+     *
+     * Generation 1 swept 30 days, because that is all a client without
+     * READ_HEALTH_DATA_HISTORY is permitted to see. Generation 2 sweeps with no
+     * lower bound at all, which with that permission granted reaches the whole
+     * retained history -- on this device that includes Samsung Health records
+     * from the Galaxy Watch 5 era, predating the band entirely.
+     *
+     * A re-sweep deliberately RE-EMITS records already captured. That is the
+     * point: the operator asked for the old data alongside what we hold so the
+     * two can be compared, and a lane that refuses to repeat itself cannot
+     * answer "did this change?". Every event carries both the record's own
+     * timestamps and the emit time, so duplicates are separable downstream and
+     * a re-read is never destructive.
+     */
+    private const val BACKFILL_GENERATION = 2
 
     private fun prefs(ctx: Context) = ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -174,7 +203,15 @@ object HealthLane {
         }
 
         val stored = prefs(ctx).getString(KEY_TOKEN, null)
-        return if (stored == null) backfill(ctx, client) else incremental(ctx, client, stored)
+        val gen = prefs(ctx).getInt(KEY_BACKFILL_GEN, 0)
+        // A widened window is indistinguishable from a first run as far as the
+        // sweep is concerned, so the generation drives both. This is what makes
+        // "pull more history" a constant change rather than a manual re-install.
+        return if (stored == null || gen < BACKFILL_GENERATION) {
+            backfill(ctx, client)
+        } else {
+            incremental(ctx, client, stored)
+        }
     }
 
     /**
@@ -193,8 +230,10 @@ object HealthLane {
                 Events.record(ctx, "lane_blocked", "lane", "health", "reason", "token: ${e.message}")
                 return 0
             }
-        val range =
-            TimeRangeFilter.between(Instant.now().minus(BACKFILL_DAYS, ChronoUnit.DAYS), Instant.now())
+        // No lower bound. `before` asks for everything up to now, so the window
+        // is whatever Health Connect still retains rather than a number we
+        // guessed -- and guessing is how the previous 30 hid the Samsung era.
+        val range = TimeRangeFilter.before(Instant.now())
         var written = 0
         TYPES.forEach { type ->
             written +=
@@ -206,8 +245,8 @@ object HealthLane {
                     0
                 }
         }
-        prefs(ctx).edit().putString(KEY_TOKEN, token).apply()
-        Events.record(ctx, "health_backfill", "records", written, "days", BACKFILL_DAYS)
+        prefs(ctx).edit().putString(KEY_TOKEN, token).putInt(KEY_BACKFILL_GEN, BACKFILL_GENERATION).apply()
+        Events.record(ctx, "health_backfill", "records", written, "generation", BACKFILL_GENERATION, "window", "all")
         return written
     }
 
