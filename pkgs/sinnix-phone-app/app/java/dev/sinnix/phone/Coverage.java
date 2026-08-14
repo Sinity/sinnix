@@ -73,15 +73,32 @@ final class Coverage {
     return f;
   }
 
+  /**
+   * Parse either timestamp shape the log contains.
+   *
+   * <p>Records written before 2026-08-14 carry the compact filename stamp
+   * ({@code 20260814T002141Z}) because the event writer reached for the wrong
+   * helper; everything since carries extended ISO. The log is append-only, so
+   * the old lines cannot be rewritten -- and a reducer that silently returned
+   * 0 for them would drop real coverage on the floor and show an empty ribbon
+   * over a week that was fully captured.
+   */
   static long parseStamp(String stamp) {
     if (stamp == null || stamp.isEmpty()) {
       return 0L;
     }
+    SimpleDateFormat fmt = stamp.indexOf('-') > 0 ? stampFormat() : compactStampFormat();
     try {
-      return stampFormat().parse(stamp).getTime();
+      return fmt.parse(stamp).getTime();
     } catch (ParseException e) {
       return 0L;
     }
+  }
+
+  private static SimpleDateFormat compactStampFormat() {
+    SimpleDateFormat f = new SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'", Locale.US);
+    f.setTimeZone(TimeZone.getTimeZone("UTC"));
+    return f;
   }
 
   private static long hourFloor(long ms) {

@@ -205,7 +205,7 @@ public class AmbientService extends Service {
       status.recordFailure("no writable chunk directory (all-files access not granted?)");
       return false;
     }
-    String stamp = Status.utcStamp(System.currentTimeMillis());
+    String stamp = Status.isoStamp(System.currentTimeMillis());
     File part = new File(dir, "ambient-" + stamp + ".m4a.part");
 
     // Start every chunk back at the preferred rate. A codec refusal is often
@@ -320,7 +320,7 @@ public class AmbientService extends Service {
         this,
         "chunk_closed",
         "chunk", finalFile.getName(),
-        "started_at", Status.utcStamp(chunkStartedAtMs),
+        "started_at", Status.isoStamp(chunkStartedAtMs),
         "seconds", Math.max(0L, (closedAt - chunkStartedAtMs) / 1000L),
         "bytes", finalFile.length(),
         "peak_amplitude", peak,
