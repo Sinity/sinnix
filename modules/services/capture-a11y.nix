@@ -74,7 +74,14 @@ mkServiceModule {
         livenessProbe = {
           command = lib.concatStringsSep "; " [
             "uid=$(id -u ${username} 2>/dev/null) || exit 3"
-            "bus=/run/user/$uid/at-spi/bus_0"
+            # at-spi-bus-launcher names this socket "bus"; the "bus_0"
+            # spelling belongs to the per-display launcher shape and does
+            # not exist here, so the probe could never find the socket and
+            # reported unknown forever (observed 2026-08-14: the lane was
+            # capturing normally while its own liveness probe exited 3 on
+            # every sweep). Accept either rather than pinning the spelling.
+            "bus=/run/user/$uid/at-spi/bus"
+            "[ -S \"$bus\" ] || bus=/run/user/$uid/at-spi/bus_0"
             "[ -S \"$bus\" ] || exit 3"
             "reply=$(busctl --user --address=\"unix:path=$bus\" call org.a11y.atspi.Registry /org/a11y/atspi/accessible/root org.freedesktop.DBus.Properties Get ss org.a11y.atspi.Accessible ChildCount 2>/dev/null) || exit 3"
             "count=$(printf '%s' \"$reply\" | awk '{print $NF}')"
