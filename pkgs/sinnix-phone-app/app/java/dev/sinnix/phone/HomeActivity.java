@@ -108,6 +108,8 @@ public final class HomeActivity extends Screen {
     root.addView(spacer(dp(8)));
     root.addView(navRow("reaction check  ·  2 min", PvtActivity.class));
     root.addView(spacer(dp(8)));
+    root.addView(navRow("talk", TalkActivity.class));
+    root.addView(spacer(dp(8)));
 
     // An external Intent rather than a WebView: the hub is prime's surface,
     // and the system browser already holds the session and the extensions.
