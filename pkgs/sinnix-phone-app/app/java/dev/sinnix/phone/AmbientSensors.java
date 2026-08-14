@@ -31,6 +31,12 @@ final class AmbientSensors implements SensorEventListener {
   /** One record a minute: fine enough for circadian work, coarse enough to ignore. */
   private static final long WINDOW_MILLIS = 60_000L;
 
+  /** 5 Hz. A minute-scale mean does not improve above this; battery does. */
+  private static final int SAMPLING_PERIOD_US = 200_000;
+
+  /** Let the sensor hub hold a window's worth before waking the CPU. */
+  private static final int BATCH_LATENCY_US = 60_000_000;
+
   private final Context ctx;
   private final SensorManager sensors;
   private final Sensor light;
@@ -59,14 +65,19 @@ final class AmbientSensors implements SensorEventListener {
       return;
     }
     windowStartedAtMs = System.currentTimeMillis();
-    // SENSOR_DELAY_NORMAL, and nothing faster: the measurand is a minute-scale
-    // average, so a higher rate would buy resolution that is discarded on the
-    // next line while costing wakeups on a phone that must last the day.
+    // Explicit period and batch window, not SENSOR_DELAY_NORMAL: that
+    // constant is only a hint, and this device answered it with 50 Hz --
+    // 3000 accelerometer callbacks a minute, every minute, all day, to
+    // produce one RMS. The period below asks for 5 Hz, and the batch window
+    // lets the sensor hub buffer a minute of samples and wake the CPU once
+    // instead of fifty times a second. Where the hub cannot batch, the
+    // platform falls back to delivering continuously, which is no worse than
+    // what was happening before.
     if (light != null) {
-      sensors.registerListener(this, light, SensorManager.SENSOR_DELAY_NORMAL);
+      sensors.registerListener(this, light, SAMPLING_PERIOD_US, BATCH_LATENCY_US);
     }
     if (accelerometer != null) {
-      sensors.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_NORMAL);
+      sensors.registerListener(this, accelerometer, SAMPLING_PERIOD_US, BATCH_LATENCY_US);
     }
     Log.i(
         AmbientService.TAG,

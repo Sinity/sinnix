@@ -44,6 +44,15 @@ public final class HomeActivity extends Screen {
   @Override
   protected void onResume() {
     super.onResume();
+    // Opening the app is also how capture is recovered. Nothing else on the
+    // phone reliably restarts the service once it has been stopped: the boot
+    // receiver only fires at boot, and the watchdog alarm is a ten-minute
+    // backstop, so without this a stop costs up to ten minutes of audio and
+    // the obvious remedy -- open the app -- does nothing.
+    if (Prefs.enabled(this) && !AmbientService.running) {
+      AmbientService.start(this);
+      Events.record(this, "capture_toggle", "to", "started", "by", "home_resume");
+    }
     refresh();
   }
 
