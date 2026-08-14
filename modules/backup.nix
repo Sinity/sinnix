@@ -402,7 +402,7 @@ let
     jq -e -s 'length > 0' "$issues_path" >/dev/null
     test -d "$dolt_path/.dolt"
 
-    source_git_head="$(${pkgs.git}/bin/git -C ${lib.escapeShellArg sinexProjectPath} rev-parse HEAD)"
+    source_git_head="$(${pkgs.git}/bin/git -c safe.directory=${lib.escapeShellArg sinexProjectPath} -C ${lib.escapeShellArg sinexProjectPath} rev-parse HEAD)"
     dolt_commit="$(${pkgs.dolt}/bin/dolt --data-dir "$dolt_path" --use-db sinex log -n 1 --format json \
       | jq -er 'first(.. | objects | .commit_hash? // empty)')"
 
