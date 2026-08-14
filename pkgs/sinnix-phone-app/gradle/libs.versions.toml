@@ -9,7 +9,19 @@ navigationCompose = "2.9.0"
 okhttp = "4.12.0"
 glance = "1.1.1"
 onnxruntime = "1.20.0"
-healthConnect = "1.1.0-alpha07"
+# 1.1.0 is the GA release; 1.1.0-alpha07 was a mid-development snapshot that
+# happened to be pinned here and never revisited. There is no 1.0.x stable at
+# all -- the published line runs 1.0.0-alpha04..11, then 1.1.0-alpha01 onward to
+# 1.1.0, then 1.2.0-alphas -- so "go to the last stable" means going FORWARD.
+#
+# It matters because the alpha reported SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED
+# against the shipping provider, so the lane's own settings row read "Currently:
+# needs update" and every sync returned before reading a single record. The
+# provider is not the end we can move: on Android 13 it is a Play Store APK, and
+# the installed 2026.07.09.00 (versionCode 268669) is the newest Play offers --
+# its listing shows Uninstall/Open with no Update button. A GA client is the one
+# that is expected to work against the GA provider.
+healthConnect = "1.1.0"
 coroutines = "1.10.2"
 
 [libraries]

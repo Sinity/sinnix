@@ -94,7 +94,14 @@ object Scheduler {
      * hour's data was dropped every time a sync failed for any reason.
      */
     private fun maybeSyncHealth(ctx: Context) {
-        if (!Prefs.healthLane(ctx)) return
+        if (!Prefs.healthLane(ctx)) {
+            Log.i(Storage.TAG, "health lane: off, skipping")
+            return
+        }
+        // Unconditional, because the absence of any health event was
+        // indistinguishable from the tick never running -- and it turned out
+        // to be worth knowing which.
+        Log.i(Storage.TAG, "health lane: syncing")
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val n = HealthLane.sync(ctx)
