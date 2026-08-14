@@ -62,6 +62,7 @@
         android:name=".PvtActivity"
         android:exported="false"
         android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen" />
+    <activity android:name=".TalkActivity" android:exported="false" />
 
     <!--
       foregroundServiceType="microphone" is the whole reason this app

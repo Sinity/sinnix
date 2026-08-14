@@ -44,6 +44,14 @@ public final class PvtActivity extends Activity {
   /** Above this, the trial is a lapse -- the conventional PVT threshold. */
   private static final int LAPSE_MS = 500;
 
+  /**
+   * A stimulus nobody answers is recorded at this ceiling and the run moves
+   * on. Without it a missed trial waits forever: the counter climbs, the run
+   * never ends, and the operator's only exit is to kill the app -- which
+   * throws away every trial already completed.
+   */
+  private static final int NO_RESPONSE_MS = 10_000;
+
   private enum Phase {
     /** Waiting out the interstimulus interval; a tap here is a false start. */
     ARMED,
@@ -129,6 +137,7 @@ public final class PvtActivity extends Activity {
               if (phase == Phase.STIMULUS && stimulusFrameNanos == 0) {
                 stimulusFrameNanos = frameTimeNanos;
                 view.startCounter();
+                handler.postDelayed(this::onNoResponse, NO_RESPONSE_MS);
               }
             });
   }
@@ -166,6 +175,18 @@ public final class PvtActivity extends Activity {
       default:
         // ignore taps during feedback
     }
+  }
+
+  /** Ceiling-scored: a missed trial is data about vigilance, not a gap. */
+  private void onNoResponse() {
+    if (phase != Phase.STIMULUS) {
+      return;
+    }
+    reactions.add(NO_RESPONSE_MS);
+    trial++;
+    view.setMessage("no response");
+    phase = Phase.FEEDBACK;
+    handler.postDelayed(this::nextOrFinish, 700);
   }
 
   /** A two-finger tap means "that one did not count" and costs nothing. */
