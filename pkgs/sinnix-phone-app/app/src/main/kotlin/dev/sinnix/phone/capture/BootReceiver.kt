@@ -26,8 +26,13 @@ class BootReceiver : BroadcastReceiver() {
         // and the grants screen infers that grant from whether a chunk follows
         // this line. A boot that produced no event at all is itself the finding.
         Events.record(ctx, "boot", "action", action.toString(), "enabled", Prefs.enabled(ctx))
-        if (!Prefs.enabled(ctx)) return
         Watchdog.schedule(ctx)
+        // The speech lane comes back on its own schedule, not the recorder's:
+        // it has its own preference, and gating it behind capture_enabled would
+        // silently tie two independent lanes together. Started before the
+        // recorder's own check for the same reason.
+        if (Prefs.speechLane(ctx)) SpeechService.start(ctx)
+        if (!Prefs.enabled(ctx)) return
         AmbientService.start(ctx)
     }
 }
