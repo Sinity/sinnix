@@ -30,6 +30,12 @@ android {
 
         versionCode = 2
         versionName = "0.2.0"
+
+        // One ABI, because there is one device. onnxruntime ships native
+        // libraries for four architectures and three of them are for phones
+        // this app will never be installed on -- carrying them cost 64 MB of a
+        // 104 MB APK, on a sideloaded build that is copied over adb.
+        ndk { abiFilters += "arm64-v8a" }
     }
 
     buildTypes {
