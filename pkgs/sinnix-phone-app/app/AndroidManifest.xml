@@ -34,12 +34,13 @@
 
   <application
       android:label="Sinnix Capture"
+      android:theme="@android:style/Theme.Material.NoActionBar"
       android:icon="@android:drawable/ic_btn_speak_now"
       android:allowBackup="false"
       android:hasFragileUserData="true">
 
     <activity
-        android:name=".MainActivity"
+        android:name=".HomeActivity"
         android:exported="true"
         android:launchMode="singleTop">
       <intent-filter>
@@ -47,6 +48,14 @@
         <category android:name="android.intent.category.LAUNCHER" />
       </intent-filter>
     </activity>
+
+    <!--
+      Both are internal destinations reached from Home. Not exported: they
+      drive the recorder, and an exported activity is a control surface any
+      app on the phone could invoke.
+    -->
+    <activity android:name=".CaptureActivity" android:exported="false" />
+    <activity android:name=".GrantsActivity" android:exported="false" />
 
     <!--
       foregroundServiceType="microphone" is the whole reason this app

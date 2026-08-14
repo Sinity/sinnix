@@ -25,7 +25,7 @@ supported way to hold the microphone with the screen off on modern Android,
 and it can only be declared in an app's manifest. That single capability is
 what makes this an app rather than a script.
 
-A second, unplanned benefit: `am start -n dev.sinnix.phone/.MainActivity`
+A second, unplanned benefit: `am start -n dev.sinnix.phone/.HomeActivity`
 works from the desktop, so capture has a headless recovery path. The same
 command against Termux returns "Activity class does not exist" whenever the
 screen is locked.
@@ -41,12 +41,17 @@ screen is locked.
 
 ## Build toolchain
 
-No Gradle. Gradle resolves dependencies from the network at build time, which
-a Nix derivation cannot do without vendoring a dependency lock, and it buys
-nothing here because the app has no third-party dependencies at all — only
-platform APIs, with the UI built in code so there are no layout resources to
-compile. The derivation therefore calls the four tools underneath Gradle
-directly: `aapt2 link` for the manifest, `javac`, `d8`, `zipalign`.
+No Gradle — because there is nothing to resolve, not because it could not be
+made to work. The app uses only platform APIs and builds its UI in code, so
+there are no dependencies and no layout resources, and the derivation calls the
+four tools underneath Gradle directly: `aapt2 link` for the manifest, `javac`,
+`d8`, `zipalign`.
+
+Adding a dependency later is a question of how much machinery it earns, not of
+possibility: nixpkgs ships `fetchmavenartifact` for pinning a single artifact,
+and a Gradle setup hook that records a whole build's fetches through
+`mitm-cache`. A plain JAR is nearly free; an AAR carrying resources would mean
+reintroducing `aapt2` resource merging, which is the first real cost.
 
 The Android SDK is unfree and license-gated, so `pkg.nix` re-imports nixpkgs
 via `pkgs.path` with `android_sdk.accept_license = true`, keeping the same
@@ -286,7 +291,7 @@ be re-derived rather than reused.
 a richer interface later (a sibling lane is designing one). The contract is:
 `ACTION_START` / `ACTION_STOP` intents, a single persisted intent bit in
 `Prefs` that boot and watchdog restarts consult, and `status.json` as the
-read model. `MainActivity` is only a client of that contract — it starts the
+read model. `HomeActivity` is only a client of that contract — it starts the
 service, toggles the preference, and renders `status.json`. Nothing in the
 capture path calls back into the activity, so replacing or extending the UI
 does not touch the recorder.

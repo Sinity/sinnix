@@ -57,4 +57,30 @@ final class Storage {
     File dir = chunkDir(ctx);
     return dir != null && !SHARED_DIR.equals(dir.getAbsolutePath());
   }
+
+  /**
+   * The app's own estate, separate from the recorder's lane.
+   *
+   * <p>Kept apart from {@link #SHARED_DIR} because that directory has one
+   * meaning to the drain -- audio chunks, rotated and deleted once the lake
+   * holds them -- and the app's records are neither. Mixing them would make
+   * the drain's `--remove-source-files` a hazard to the event log.
+   */
+  static final String ESTATE_DIR = "/sdcard/sinnix-phone";
+
+  /** {@code <estate>/<name>}, created on demand, or null if nothing is writable. */
+  static File estateDir(Context ctx, String name) {
+    File base = new File(ESTATE_DIR);
+    if (!haveAllFilesAccess() || !(base.isDirectory() || base.mkdirs()) || !base.canWrite()) {
+      // Same degradation as the chunk path: an app-private location keeps the
+      // record intact even though the drain cannot reach it.
+      base = new File(ctx.getExternalFilesDir(null), "estate");
+    }
+    File dir = name == null ? base : new File(base, name);
+    if (dir.isDirectory() || dir.mkdirs()) {
+      return dir;
+    }
+    Log.w(AmbientService.TAG, "no writable estate directory at " + dir);
+    return null;
+  }
 }

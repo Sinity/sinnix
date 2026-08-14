@@ -104,6 +104,18 @@ final class Status {
     write();
   }
 
+  /**
+   * Peak amplitude seen during the open chunk.
+   *
+   * <p>Read before {@link #chunkClosed}, which rolls it into the last-chunk
+   * fields and starts the next one over. Zero across a whole chunk means the
+   * microphone produced no sample at all -- the failure that looks exactly
+   * like success from the file's side.
+   */
+  synchronized int chunkPeak() {
+    return chunkPeakAmplitude;
+  }
+
   synchronized void chunkClosed(File file, long startedAtMs, long closedAtMs) {
     lastChunk = file.getName();
     lastChunkBytes = file.length();
