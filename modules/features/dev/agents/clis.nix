@@ -139,9 +139,12 @@ mkFeatureModule {
             silence_threshold = 200;
             silence_duration = 1.2;
           };
-          # Points at the shared whisper.cpp STT hub (modules/services/whisper.nix)
-          # rather than hermes's embedded faster-whisper, so one transcription
-          # engine serves the estate. api_key is a dummy literal: the hub is
+          # Points at the shared STT hub (modules/services/stt.nix, Parakeet
+          # TDT) rather than hermes's embedded faster-whisper, so one
+          # transcription engine serves the estate. The hub ignores the model
+          # field -- it has one engine -- but the name is kept honest rather
+          # than left saying "whisper-1" about something that is not whisper.
+          # api_key is a dummy literal: the hub is
           # unauthenticated loopback-only (the sk-local convention used by the
           # other local OpenAI-compatible lanes in flake/data/agent-lanes.nix).
           stt = {
@@ -150,7 +153,7 @@ mkFeatureModule {
             openai = {
               base_url = "http://127.0.0.1:8090/v1";
               api_key = "sk-local";
-              model = "whisper-1";
+              model = "parakeet-tdt-0.6b-v3";
             };
           };
           # Points at the shared Kokoro-82M TTS hub (modules/services/kokoro.nix)

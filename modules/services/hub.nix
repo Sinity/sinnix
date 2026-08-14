@@ -108,7 +108,7 @@ mkServiceModule {
     aiServices = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [
-        "whisper"
+        "stt"
         "tts"
         "ollama"
         "litellm"

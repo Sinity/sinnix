@@ -108,7 +108,6 @@ mkFeatureModule {
       # AI coding tools
       (lib.mkIf cfg.ai.enable {
         home-manager.users.${user}.home.packages = [
-          pkgs.whisper-cpp
           pkgs.gh
           pkgs.delta
           pkgs.jetbrains-mono
