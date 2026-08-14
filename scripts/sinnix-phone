@@ -272,6 +272,71 @@ drain_logcat_adb() {
   echo "logcat: $lines lines in $out"
 }
 
+# Drain ActivityWatch Android into the lake.
+#
+# The phone has run aw-server-android since 2026-08-12 with usage-stats access
+# granted, quietly accumulating the one signal the estate had no phone-side
+# equivalent of: which app was in the foreground, and when the screen was
+# unlocked. Nothing had ever read it. Eleven days of it were sitting in the
+# app's private database when this lane was written, back to 2026-08-03 --
+# aw-android backfills from UsageStatsManager, so its history predates its own
+# installation.
+#
+# Its HTTP API binds 127.0.0.1 only, so the tailnet cannot reach it directly;
+# `adb forward` is the tunnel, which is why this is an adb lane rather than an
+# ssh one. The app must be running to answer, and Android will have killed it
+# whenever it feels like -- so the drain starts it first. That is safe to do
+# repeatedly and costs a launch; the DATA does not depend on the process having
+# been up, because UsageStatsManager is the system's record and aw-android
+# reads it retroactively.
+#
+# Events are re-fetched whole rather than incrementally. Both buckets are small
+# (about a thousand events over eleven days), the API's cursor semantics are
+# per-bucket and awkward, and a full fetch of something this size is cheaper
+# than being subtly wrong about a watermark. Written as one file per bucket per
+# day, so a re-fetch overwrites rather than accumulating duplicates.
+drain_activitywatch_adb() {
+  local dest port day out buckets n total=0
+  adb_resolve || return 1
+  dest="$LAKE_ROOT/activitywatch"
+  port="${SINNIX_PHONE_AW_PORT:-15600}"
+  mkdir -p "$dest"
+  day="$(date -u +%Y%m%d)"
+
+  adb_any shell monkey -p net.activitywatch.android -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
+  sleep 4
+  adb_any forward "tcp:$port" tcp:5600 >/dev/null 2>&1 || {
+    echo "activitywatch: could not forward the port"
+    return 1
+  }
+
+  buckets="$(curl -s -m 10 "http://127.0.0.1:$port/api/0/buckets/" | jq -r 'keys[]?' 2>/dev/null || true)"
+  if [ -z "$buckets" ]; then
+    echo "activitywatch: no buckets (is the app running?)"
+    adb_any forward --remove "tcp:$port" >/dev/null 2>&1 || true
+    return 1
+  fi
+
+  while IFS= read -r b; do
+    [ -n "$b" ] || continue
+    out="$dest/$b-$day.jsonl"
+    if curl -s -m 60 "http://127.0.0.1:$port/api/0/buckets/$b/events?limit=-1" \
+      | jq -c --arg bucket "$b" '.[]? | . + {bucket: $bucket}' > "$out.tmp" 2>/dev/null; then
+      mv -f "$out.tmp" "$out"
+      n=$(wc -l < "$out")
+      total=$((total + n))
+      echo "activitywatch: $b -> $n events"
+    else
+      rm -f "$out.tmp"
+      echo "activitywatch: $b unreadable" >&2
+    fi
+  done <<< "$buckets"
+
+  adb_any forward --remove "tcp:$port" >/dev/null 2>&1 || true
+  echo "activitywatch: $total events in $dest"
+}
+
+
 # Drain ambient chunks over adb.
 #
 # The rsync path needs the tailnet up and Termux's sshd running, and both are
@@ -478,6 +543,7 @@ sinnix-phone <command>
   mirror        scrcpy screen mirror/control over the tailnet
   screenshot    grab the current screen to /realm/tmp/work/
   pull          rsync camera + downloads into the lake, drain the system log
+                and ActivityWatch (foreground app + unlocks)
   ambient-audit decode every undecoded ambient chunk in the lake and record
                 its real duration and level (runs at the end of `pull`)
   drain         pull, but only if the phone is on wifi (for a timer)
@@ -797,14 +863,15 @@ pull)
   # reads Health Connect directly and lands 471 records through the events
   # plane, so the export folder has nothing left to be the fallback for.
   # Pull only — never push back, and never delete on the phone.
-  mkdir -p "$LAKE_ROOT"/{camera,download,ambient,logcat}
+  mkdir -p "$LAKE_ROOT"/{camera,download,ambient,logcat,activitywatch}
   set +e
   # The system log first: it is adb-only and small, and it is the lane that
   # explains the others when they fail.
   if adb_any get-state >/dev/null 2>&1; then
     drain_logcat_adb
+    drain_activitywatch_adb
   else
-    echo "adb unavailable: system log not drained (its buffer will rotate)"
+    echo "adb unavailable: system log and ActivityWatch not drained"
   fi
   # One reachability check for all four lanes. Without it each rsync spends its
   # own connect timeout failing the same way and prints the same error three
