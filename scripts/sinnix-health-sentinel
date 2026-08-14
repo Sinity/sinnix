@@ -48,36 +48,203 @@ notify_desktop() {
   done
 }
 
+# How many consecutive sweeps must agree before a change is believed. The
+# sentinel samples on a fixed clock against a live machine, so a single
+# disagreeing sample is as likely to be a race as a fault: a capture lane
+# rotating its output file, an audio device between stream attachments, a
+# publisher that has not finished registering since login. Every one of
+# those self-clears within a sweep and none of them is worth a critical
+# desktop notification. Requiring two agreeing samples costs one interval of
+# latency on a real fault -- irrelevant for anything a human then has to go
+# look at -- and removes the entire class.
+confirm_samples=2
+
+# key -> readable phrase for the units the caller passes as $unit, which are
+# either systemd unit names or lane names.
+humanize_duration() {
+  local s="$1"
+  if [ "$s" -lt 60 ]; then printf '%ss' "$s"
+  elif [ "$s" -lt 3600 ]; then printf '%dm' "$((s / 60))"
+  elif [ "$s" -lt 86400 ]; then printf '%dh %dm' "$((s / 3600))" "$(((s % 3600) / 60))"
+  else printf '%dd %dh' "$((s / 86400))" "$(((s % 86400) / 3600))"
+  fi
+}
+
+evidence_field() {
+  # evidence is a ";"-joined key=value list; pull one value out of it.
+  printf '%s' "$1" | tr ';' '\n' | awk -F= -v k="$2" '$1 == k { sub(/^[^=]*=/, ""); print; exit }'
+}
+
+# Turn (type, unit, status, evidence) into a title and a body a human can act
+# on. The raw evidence string is a debugging carrier -- "manager=user;
+# active_state=failed;type=oneshot;result=timeout;wanted_by=" tells you
+# nothing at a glance about what broke or where to look -- so it stays in the
+# JSONL ledger and out of the notification. Prints "title<TAB>body".
+describe() {
+  local type="$1" unit="$2" status="$3" evidence="$4" title body
+  local manager result age budget usage warn fail rc
+  manager="$(evidence_field "$evidence" manager)"
+  case "$type:$status" in
+    service_failure:healthy)
+      title="$unit is running again"
+      body="Recovered on its own; nothing to do." ;;
+    service_failure:failed)
+      result="$(evidence_field "$evidence" result)"
+      title="$unit stopped working"
+      case "$result" in
+        timeout) body="Its last run hit the unit's time limit and was killed." ;;
+        exit-code) body="Its last run exited with an error." ;;
+        oom-kill) body="It was killed for running out of memory." ;;
+        signal|core-dump) body="It was killed by a signal." ;;
+        *) body="It is not running and was not meant to be stopped." ;;
+      esac
+      if [ "$manager" = user ]; then
+        body="$body"$'\n'"Look: journalctl --user -u $unit -e"
+      else
+        body="$body"$'\n'"Look: journalctl -u $unit -e"
+      fi ;;
+    service_failure:unknown)
+      title="Cannot tell whether $unit is healthy"
+      body="The sentinel could not read its state, so this is neither a pass nor a failure." ;;
+    capture_stale:healthy)
+      age="$(evidence_field "$evidence" age_seconds)"
+      title="$unit lane is recording again"
+      body="Newest file is $(humanize_duration "${age:-0}") old." ;;
+    capture_stale:stale)
+      age="$(evidence_field "$evidence" age_seconds)"
+      budget="$(evidence_field "$evidence" stale_after_seconds)"
+      title="$unit lane has gone quiet"
+      if [ -n "$age" ]; then
+        body="Nothing written for $(humanize_duration "$age")"
+        [ -n "$budget" ] && [ "$budget" != null ] \
+          && body="$body, past its $(humanize_duration "$budget") budget"
+        body="$body."
+      else
+        body="The lane directory holds no files at all."
+      fi
+      body="$body"$'\n'"Path: $(evidence_field "$evidence" path)" ;;
+    capture_payload:degenerate)
+      title="$unit lane is writing empty records"
+      body="It is producing files on schedule, but the fields it promises to fill are null in every recent record -- a broken producer, not a quiet hour." ;;
+    capture_payload:healthy)
+      title="$unit lane is writing real data again"
+      body="Recent records carry the fields the lane declares." ;;
+    publisher_liveness:healthy)
+      title="$unit lane has its source back"
+      body="The thing this lane observes is publishing again." ;;
+    publisher_liveness:publisher-absent)
+      title="Nothing is publishing to the $unit lane"
+      body="The lane and its unit are fine; the source it watches is not there, so it will stay silent until that returns." ;;
+    publisher_liveness:unknown)
+      rc="$(evidence_field "$evidence" probe_exit)"
+      title="The $unit liveness check could not answer"
+      body="The probe itself failed (exit ${rc:-?}), so this says nothing about the lane. Fix the probe before reading anything into it." ;;
+    mount_capacity:healthy)
+      title="$unit has room again"
+      body="Now at $(evidence_field "$evidence" usage_percent)% used." ;;
+    mount_capacity:*)
+      usage="$(evidence_field "$evidence" usage_percent)"
+      warn="$(evidence_field "$evidence" warn_percent)"
+      fail="$(evidence_field "$evidence" fail_percent)"
+      title="$unit is ${usage}% full"
+      if [ "$status" = failed ]; then
+        body="Past the ${fail}% line where writes start to be at risk."
+      else
+        body="Past the ${warn}% warning line (fails at ${fail}%)."
+      fi ;;
+    *)
+      title="$unit: $status"
+      body="$type" ;;
+  esac
+  printf '%s\t%s' "$title" "$body"
+}
+
+# Set for the --failure-unit fast path, where systemd is REPORTING a failure
+# rather than the sentinel sampling for one. An OnFailure= hook fires exactly
+# once, so requiring a second agreeing observation would discard the most
+# authoritative signal the sentinel ever receives.
+force_confirm=0
+
 emit() {
-  local key="$1" type="$2" unit="$3" status="$4" evidence="$5" previous
+  local key="$1" type="$2" unit="$3" status="$4" evidence="$5"
+  local confirmed pending streak described title body
   emitted_keys+=("$key")
-  previous="$(jq -r --arg key "$key" '.[$key] // ""' "$state")"
-  [ "$previous" = "$status" ] && return 0
-  jq --arg key "$key" --arg status "$status" '.[$key] = $status' "$state" > "$state.tmp"
+
+  # State values are objects: the believed status plus the candidate that is
+  # currently accumulating agreement against it. Older state files hold a
+  # bare status string, so read both shapes.
+  confirmed="$(jq -r --arg key "$key" '(.[$key] | if type == "object" then .status else . end) // ""' "$state")"
+  pending="$(jq -r --arg key "$key" '(.[$key] | if type == "object" then (.pending // "") else "" end)' "$state")"
+  streak="$(jq -r --arg key "$key" '(.[$key] | if type == "object" then (.streak // 0) else 0 end)' "$state")"
+
+  if [ "$status" = "$confirmed" ]; then
+    # Agrees with what we believe. Drop any half-accumulated candidate: a
+    # fault must be witnessed on CONSECUTIVE sweeps, not merely twice ever,
+    # or a lane that blips once an hour eventually pages anyway.
+    if [ -n "$pending" ]; then
+      jq --arg key "$key" --arg status "$status" \
+        '.[$key] = {status: $status}' "$state" > "$state.tmp"
+      chmod 0664 "$state.tmp"
+      mv -f "$state.tmp" "$state"
+    fi
+    return 0
+  fi
+
+  if [ "$status" = "$pending" ]; then
+    streak=$((streak + 1))
+  else
+    streak=1
+  fi
+
+  # A key we have never seen settling into "healthy" is startup, not a
+  # recovery: believe it at once and say nothing. Anything else has to earn
+  # its transition.
+  if [ -z "$confirmed" ] && [ "$status" = healthy ]; then
+    streak="$confirm_samples"
+  fi
+  [ "$force_confirm" -eq 1 ] && streak="$confirm_samples"
+
+  if [ "$streak" -lt "$confirm_samples" ]; then
+    jq --arg key "$key" --arg confirmed "$confirmed" --arg pending "$status" \
+      --argjson streak "$streak" \
+      '.[$key] = {status: $confirmed, pending: $pending, streak: $streak}' "$state" > "$state.tmp"
+    chmod 0664 "$state.tmp"
+    mv -f "$state.tmp" "$state"
+    return 0
+  fi
+
+  jq --arg key "$key" --arg status "$status" '.[$key] = {status: $status}' "$state" > "$state.tmp"
   chmod 0664 "$state.tmp"
   mv -f "$state.tmp" "$state"
   jq -cn \
     --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --arg type "$type" --arg unit "$unit" --arg status "$status" --arg evidence "$evidence" \
-    '{schema:"sinnix-health-transition-v1",ts:$ts,type:$type,unit:$unit,status:$status,ok:($status == "healthy"),evidence:$evidence}' \
+    --argjson confirmed_after "$confirm_samples" \
+    '{schema:"sinnix-health-transition-v1",ts:$ts,type:$type,unit:$unit,status:$status,ok:($status == "healthy"),evidence:$evidence,confirmed_after_samples:$confirmed_after}' \
     >> "$output"
+
+  described="$(describe "$type" "$unit" "$status" "$evidence")"
+  title="${described%%$'\t'*}"
+  body="${described#*$'\t'}"
+
   if [ "$status" = "healthy" ]; then
-    # Only notify a recovery if we announced the outage: an empty $previous
+    # Only notify a recovery if we announced the outage: an empty $confirmed
     # means this key has never transitioned before (steady-state startup),
     # not "it came back". Must be a real if/fi, not
-    # `[ -n "$previous" ] && notify_desktop ...`: that form's exit status
+    # `[ -n "$confirmed" ] && notify_desktop ...`: that form's exit status
     # becomes emit()'s return value when the test is false, and emit is
     # called as a bare statement throughout -- under `set -e` that kills the
     # whole sweep on a key's first-ever transition to healthy.
-    if [ -n "$previous" ]; then
-      notify_desktop normal "sinnix: $unit recovered" "$type -> healthy ($evidence)"
+    if [ -n "$confirmed" ]; then
+      notify_desktop normal "$title" "$body"
     fi
   else
-    notify_desktop critical "sinnix: $unit $status" "$type: $evidence"
+    notify_desktop critical "$title" "$body"
   fi
 }
 
 if [ -n "$failure_unit" ]; then
+  force_confirm=1
   emit "service:$failure_unit" service_failure "$failure_unit" failed "result=${failure_result:-unknown}"
   exit 0
 fi
@@ -153,9 +320,50 @@ done < <(jq -r '.captures[]? | select((.requiredPayloadFields // []) != []) | [.
 # "is the thing I observe actually present?"; exit 0 means present, exit 1
 # means confirmed absent, anything else (including timeout's 124) means the
 # probe itself couldn't answer -- reported as unknown, never silently healthy.
-while IFS=$'\t' read -r name path command probe_timeout; do
+#
+# The probes MUST run inside the operator's session, not in this unit's own
+# context. Every lane that declares one observes a user-session publisher
+# (PipeWire, AT-SPI), and the sentinel is a system oneshot running as root
+# with no XDG_RUNTIME_DIR and no session bus -- exactly the gap
+# query_unit_props() below documents for `systemctl --user`. Run as root, the
+# PipeWire coverage probe cannot reach the user's pw-dump and exits 2 forever,
+# so the lane reported a permanent "unknown" that looked like a broken
+# publisher rather than a probe that was never asked in a context where it
+# could answer. Reuse the same bridge: locate a live session bus, become that
+# uid, and hand the probe the session env it needs.
+run_probe_in_user_session() {
+  local probe_timeout="$1" command="$2" bus uid
+  for bus in /run/user/*/bus; do
+    [ -S "$bus" ] || continue
+    uid="$(basename "$(dirname "$bus")")"
+    [ "$uid" = 0 ] && continue
+    timeout "${probe_timeout}s" sudo -u "#$uid" \
+      XDG_RUNTIME_DIR="/run/user/$uid" \
+      DBUS_SESSION_BUS_ADDRESS="unix:path=$bus" \
+      bash -c "$command"
+    return $?
+  done
+  # No session to ask. Not "absent" -- unanswerable, which the caller's
+  # non-1 branch already reports as unknown.
+  return 3
+}
+
+# Records arrive as one compact JSON object per line, NOT via @tsv like the
+# loops above. A probe command is arbitrary shell text, and @tsv escapes
+# backslashes: the PipeWire coverage probe carries the regex
+# '^alsa_input\.usb-FiiO_DigiHug_USB_Audio', which @tsv delivered as
+# '\\.', so the exclusion silently stopped matching, the excluded device
+# came back as uncovered, and the lane reported a confirmed-absent publisher
+# forever while the probe passed every time it was run by hand. Any field
+# that is going to be executed must survive transport verbatim.
+while IFS= read -r record; do
+  [ -n "$record" ] || continue
+  name="$(jq -r '.name' <<< "$record")"
+  path="$(jq -r '.path' <<< "$record")"
+  command="$(jq -r '.command' <<< "$record")"
+  probe_timeout="$(jq -r '.timeout' <<< "$record")"
   [ -n "$name" ] || continue
-  if timeout "${probe_timeout}s" bash -c "$command" >/dev/null 2>&1; then
+  if run_probe_in_user_session "$probe_timeout" "$command" >/dev/null 2>&1; then
     emit "publisher:$name" publisher_liveness "$name" healthy "path=$path"
   else
     rc=$?
@@ -165,7 +373,8 @@ while IFS=$'\t' read -r name path command probe_timeout; do
       emit "publisher:$name" publisher_liveness "$name" unknown "path=$path;probe_exit=$rc"
     fi
   fi
-done < <(jq -r '.captures[]? | select(.livenessProbe != null) | [.name,.path,.livenessProbe.command,(.livenessProbe.timeoutSeconds // 5)] | @tsv' "$inventory")
+done < <(jq -c '.captures[]? | select(.livenessProbe != null)
+  | {name, path, command: .livenessProbe.command, timeout: (.livenessProbe.timeoutSeconds // 5)}' "$inventory")
 
 while IFS=$'\t' read -r path warn fail; do
   usage="$(df -P "$path" 2>/dev/null | awk 'NR == 2 {gsub(/%/,"",$5); print $5}' || true)"
