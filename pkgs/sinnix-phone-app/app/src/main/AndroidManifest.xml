@@ -78,6 +78,24 @@
   <uses-feature android:name="android.hardware.camera" android:required="false" />
   <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
 
+  <!--
+    Package visibility for Health Connect. Android 11 filters which packages an
+    app targeting SDK 30+ can even see, and without this the Health Connect
+    client's provider lookup returns nothing, so getSdkStatus reports
+    SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED for a provider that is installed,
+    enabled, current, and exporting the very service being looked for.
+
+    That symptom sent this chase a long way in the wrong direction: "update
+    required" reads as a version problem, so the client was moved off a
+    1.1.0-alpha to GA and compileSdk raised to 36 before anyone checked the
+    numbers. The client's own DEFAULT_PROVIDER_MIN_VERSION_CODE is 68623 and
+    the installed provider is versionCode 268669. The version test was never
+    close to failing. It was visibility the whole time.
+  -->
+  <queries>
+    <package android:name="com.google.android.apps.healthdata" />
+  </queries>
+
   <application
       android:label="@string/app_name"
       android:theme="@style/Theme.Sinnix"
