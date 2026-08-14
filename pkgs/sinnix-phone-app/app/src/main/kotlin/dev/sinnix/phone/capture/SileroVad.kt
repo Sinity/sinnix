@@ -23,8 +23,8 @@ import java.nio.LongBuffer
  * is nowhere near the tailnet; a model that needed one download first would
  * have made "always on" mean "always on once you have been home".
  *
- * Silero's contract, which the shapes below encode: 512 samples per window at
- * 16 kHz (32 ms), a carried 2×1×128 state, and one probability out. The state
+ * Silero's contract, which the shapes below encode: 576 samples per window at
+ * 16 kHz (36 ms), a carried 2×1×128 state, and one probability out. The state
  * is why this is a class rather than a function — the model is recurrent, and
  * feeding windows through a fresh state each time would make every window a
  * cold start and every boundary wrong.
@@ -101,8 +101,19 @@ class SileroVad(ctx: Context) : AutoCloseable {
     companion object {
         const val MODEL_NAME = "silero_vad.onnx"
 
-        /** Silero's window at 16 kHz. Not a tunable — the model was traced at this size. */
-        const val WINDOW = 512
+        /**
+         * Silero's window at 16 kHz, and emphatically not a tunable — the
+         * model is traced at this size and a different one does not error, it
+         * just stops working.
+         *
+         * v6 moved this from v5's 512 to 576, which is the kind of change that
+         * produces no exception and no warning. Measured against known-clean
+         * speech through this exact model: at 512 the peak probability over a
+         * whole utterance is 0.0028 and nothing ever crosses the threshold; at
+         * 576 it is 1.0 and 92% of windows fire. The lane had been listening
+         * perfectly and detecting nothing.
+         */
+        const val WINDOW = 576
 
         const val SAMPLE_RATE = 16_000
     }

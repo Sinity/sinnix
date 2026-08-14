@@ -149,6 +149,15 @@ class SpeechService : Service() {
         var silentWindows = 0
         var speechWindows = 0
 
+        // Liveness for the lane itself. Without it a speech lane that hears
+        // digital silence is indistinguishable from a quiet room -- which is
+        // the exact failure this app has already been bitten by twice on the
+        // ambient side, and the reason the amplitude heartbeat exists there.
+        var windowsSeen = 0L
+        var peakSeen = 0
+        var maxProbability = 0f
+        var lastReportAt = System.currentTimeMillis()
+
         recorder.startRecording()
         Log.i(Storage.TAG, "speech lane listening")
 
@@ -160,6 +169,35 @@ class SpeechService : Service() {
                 if (read < window.size) java.util.Arrays.fill(window, read, window.size, 0f)
 
                 val p = vad.probability(window)
+
+                windowsSeen++
+                for (i in 0 until read) {
+                    val a = kotlin.math.abs(shorts[i].toInt())
+                    if (a > peakSeen) peakSeen = a
+                }
+                if (p > maxProbability) maxProbability = p
+                val nowMs = System.currentTimeMillis()
+                if (nowMs - lastReportAt >= REPORT_MILLIS) {
+                    // A peak of exactly zero across a whole minute is the
+                    // platform handing this client silence, not a silent room:
+                    // a live microphone reports its own noise floor.
+                    Events.record(
+                        this,
+                        "speech_lane_health",
+                        "windows", windowsSeen,
+                        "peak_amplitude", peakSeen,
+                        "max_probability", maxProbability.toDouble(),
+                        "muted", peakSeen == 0,
+                    )
+                    Log.i(
+                        Storage.TAG,
+                        "speech lane: $windowsSeen windows, peak $peakSeen, max p=$maxProbability",
+                    )
+                    windowsSeen = 0
+                    peakSeen = 0
+                    maxProbability = 0f
+                    lastReportAt = nowMs
+                }
 
                 if (!inSpeech) {
                     preRoll.addLast(shorts.copyOf(read))
@@ -331,20 +369,23 @@ class SpeechService : Service() {
          *  than entering it, or a breath mid-word ends the utterance. */
         private const val NEG_THRESHOLD = 0.35f
 
-        /** ~96 ms of speech before the lane believes it. Rejects a door click. */
+        /** ~108 ms of speech before the lane believes it. Rejects a door click. */
         private const val MIN_SPEECH_WINDOWS = 3
 
-        /** ~0.6 s of quiet before an utterance is considered finished — longer
+        /** ~0.7 s of quiet before an utterance is considered finished — longer
          *  than the pause inside a sentence, shorter than the one between. */
         private const val HANGOVER_WINDOWS = 20
 
-        /** ~0.5 s kept before onset, because a detector always fires late. */
+        /** ~0.6 s kept before onset, because a detector always fires late. */
         private const val PRE_ROLL_WINDOWS = 16
 
         /** The receiver's line limit is derived from 120 s; stay under it. */
         private const val MAX_UTTERANCE_SAMPLES = SileroVad.SAMPLE_RATE * 110
 
         private const val CONNECT_TIMEOUT_MS = 2_000
+
+        /** How often the lane says what it is actually hearing. */
+        private const val REPORT_MILLIS = 60_000L
 
         fun start(ctx: Context) {
             if (!Prefs.speechLane(ctx)) return
