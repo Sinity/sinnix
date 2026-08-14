@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Compose owns every pixel inside the window; these themes only decide what the
+  window itself is. Dark is not a mode here — the estate has one look, and a
+  light phone app beside a dark hub would read as a different system.
+-->
+<resources>
+  <style name="Theme.Sinnix" parent="@android:style/Theme.Material.NoActionBar">
+    <item name="android:windowBackground">@color/estate_background</item>
+    <item name="android:statusBarColor">@android:color/transparent</item>
+    <item name="android:navigationBarColor">@android:color/transparent</item>
+    <item name="android:windowLightStatusBar">false</item>
+    <item name="android:windowLightNavigationBar">false</item>
+  </style>
+
+  <!-- Instrument runners. System chrome drawn over a full-screen response
+       surface is a target the operator might hit mid-trial. -->
+  <style name="Theme.Sinnix.Fullscreen" parent="Theme.Sinnix">
+    <item name="android:windowFullscreen">true</item>
+    <item name="android:windowContentOverlay">@null</item>
+  </style>
+
+  <!-- Mark and share ingress: a sheet over whatever was on screen. It must not
+       read as "the app opened" — that is the whole three-second budget. -->
+  <style name="Theme.Sinnix.Sheet" parent="Theme.Sinnix">
+    <item name="android:windowIsTranslucent">true</item>
+    <item name="android:windowBackground">@android:color/transparent</item>
+    <item name="android:windowContentOverlay">@null</item>
+    <item name="android:windowNoTitle">true</item>
+    <item name="android:windowIsFloating">false</item>
+    <item name="android:backgroundDimEnabled">true</item>
+  </style>
+</resources>

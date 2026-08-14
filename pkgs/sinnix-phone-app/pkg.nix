@@ -1,23 +1,29 @@
-# Sinnix Capture — the on-device Android capture app.
+# Sinnix — the estate's phone-side member, built as a normal Android app.
 #
-# Built without Gradle, deliberately. Gradle wants to resolve dependencies
-# from the network at build time, which a Nix derivation cannot do without a
-# vendored dependency lock, and none of that machinery buys anything here: the
-# app has no third-party dependencies at all, only platform APIs. So the build
-# is the four tools underneath Gradle, invoked directly — aapt2 to link the
-# manifest, javac to compile, d8 to dex, zipalign to align.
+# This used to be a Gradle-free build (aapt2 + javac + d8 by hand) because the
+# app had nothing to resolve. That stopped being true when the app grew a UI
+# worth the name: Compose, Glance and an HTTP client are not "a plain JAR on
+# the javac classpath", and hand-rolling framework views to avoid a dependency
+# lock was paying a permanent interface cost to avoid a one-time build cost.
 #
-# The APK is emitted UNSIGNED. Signing happens in sinnix-phone-app-install
-# against a keystore that lives outside the store (see that script for why):
-# a key regenerated on every source change would make every `adb install -r`
-# fail with a signature mismatch and force an uninstall, which on Android also
-# throws away the app's runtime permission grants.
+# So this is Gradle, made reproducible the way nixpkgs supports: the Gradle
+# setup hook drives the build, and `gradle.fetchDeps` records every artifact
+# fetch through mitm-cache into the committed deps.json. Regenerate that
+# lockfile after any dependency change with:
+#
+#   $(nix-build /realm/project/sinnix -A packages.x86_64-linux.sinnix-phone-app.mitmCache.updateScript)
+#
+# The APK is still emitted UNSIGNED, and that is still load-bearing: signing
+# happens in sinnix-phone-app-install against a keystore outside the store, so
+# `adb install -r` stays an upgrade rather than a forced uninstall — which on
+# Android also discards the app's runtime grants.
 {
   lib,
   stdenv,
   pkgs,
   writeShellApplication,
   android-tools,
+  gradle,
 }:
 
 let
@@ -32,8 +38,10 @@ let
     };
   };
 
-  platformVersion = "33";
-  buildToolsVersion = "34.0.0";
+  # compileSdk. targetSdk stays at 33 (app/build.gradle.kts explains why); the
+  # compile platform is free to be newer, and current AndroidX requires 35.
+  platformVersion = "35";
+  buildToolsVersion = "35.0.0";
 
   androidComposition = androidPkgs.androidenv.composeAndroidPackages {
     platformVersions = [ platformVersion ];
@@ -46,73 +54,106 @@ let
 
   sdkRoot = "${androidComposition.androidsdk}/libexec/android-sdk";
   buildTools = "${sdkRoot}/build-tools/${buildToolsVersion}";
-  androidJar = "${sdkRoot}/platforms/android-${platformVersion}/android.jar";
 
   jdk = androidPkgs.jdk17_headless;
 
-  apk = stdenv.mkDerivation {
+  apk = stdenv.mkDerivation (finalAttrs: {
     pname = "sinnix-phone-app";
-    version = "0.1.0";
-    src = ./app;
+    version = "0.2.0";
+    src = lib.cleanSourceWith {
+      src = ./.;
+      # pkg.nix and deps.json are build inputs of the derivation, not sources
+      # of the app; including them would rebuild the APK whenever a comment in
+      # this file moved.
+      filter =
+        path: type:
+        let
+          base = baseNameOf path;
+        in
+        !(builtins.elem base [
+          "pkg.nix"
+          "deps.json"
+          ".gradle"
+          "build"
+        ]);
+    };
 
     nativeBuildInputs = [
+      gradle
       jdk
-      androidPkgs.zip
     ];
 
-    dontConfigure = true;
+    mitmCache = gradle.fetchDeps {
+      pkg = finalAttrs.finalPackage;
+      data = ./deps.json;
+    };
 
-    buildPhase = ''
-      runHook preBuild
+    dontConfigure = false;
 
-      # Resources: none. Everything the UI needs is either built in code or a
-      # framework resource (@android:drawable/...), so aapt2 only has to link
-      # the manifest. That is what keeps this build Gradle-free.
-      ${buildTools}/aapt2 link \
-        -I ${androidJar} \
-        --manifest AndroidManifest.xml \
-        --min-sdk-version 29 \
-        --target-sdk-version ${platformVersion} \
-        -o base.apk
+    # AGP resolves the SDK from the environment; there is no local.properties
+    # in the source tree because that file is a per-developer artifact and this
+    # build has exactly one "developer".
+    env = {
+      ANDROID_HOME = sdkRoot;
+      ANDROID_SDK_ROOT = sdkRoot;
+      JAVA_HOME = jdk;
+    };
 
-      mkdir -p classes dex
-      find java -name '*.java' > sources.txt
-      javac -nowarn -encoding UTF-8 --release 11 \
-        -classpath ${androidJar} \
-        -d classes @sources.txt
-
-      find classes -name '*.class' > classes.txt
-      ${buildTools}/d8 \
-        --release \
-        --lib ${androidJar} \
-        --min-api 29 \
-        --output dex \
-        @classes.txt
-
-      (cd dex && zip -q -X ../base.apk classes.dex)
-
-      ${buildTools}/zipalign -p -f 4 base.apk sinnix-capture-unsigned.apk
-
-      runHook postBuild
+    # AGP insists on a writable analytics/preferences directory before it will
+    # even apply its plugin, and neither the build sandbox nor the mitm-cache
+    # update sandbox has a HOME. Runs in both, because both need it.
+    preBuild = ''
+      export HOME="''${TMPDIR:-/tmp}/android-home"
+      export ANDROID_USER_HOME="$HOME/.android"
+      mkdir -p "$ANDROID_USER_HOME"
     '';
+
+    gradleFlags = [
+      "-Dorg.gradle.java.home=${jdk}"
+      # AGP otherwise pulls a prebuilt aapt2 from Maven, which is a dynamically
+      # linked binary against a libc that does not exist here. The SDK's copy is
+      # already patched by androidenv.
+      "-Pandroid.aapt2FromMavenOverride=${buildTools}/aapt2"
+    ];
+
+    gradleBuildTask = ":app:assembleRelease";
+
+    # The default (nixDownloadDeps) resolves declared configurations, which is
+    # not the same set as "what an Android build actually fetches" — AGP pulls
+    # r8, the lint model and several tool jars during task execution. Running
+    # the real build under the recording proxy is the only way to capture them.
+    gradleUpdateTask = ":app:assembleRelease";
+
+    # Compose's compiler plugin and AGP both dislike being run in parallel
+    # inside the sandbox for a single-module project, and there is nothing to
+    # gain: one module, one variant.
+    enableParallelBuilding = false;
+    enableParallelUpdating = false;
+
+    doCheck = false;
 
     installPhase = ''
       runHook preInstall
       mkdir -p "$out"
-      cp sinnix-capture-unsigned.apk "$out/sinnix-capture-unsigned.apk"
+      cp app/build/outputs/apk/release/app-release-unsigned.apk \
+        "$out/sinnix-capture-unsigned.apk"
       runHook postInstall
     '';
 
     passthru = {
-      inherit androidJar buildTools jdk;
+      inherit buildTools jdk;
       applicationId = "dev.sinnix.phone";
     };
 
     meta = {
-      description = "Sinnix Capture: Android foreground-service ambient audio capture for the operator's phone";
+      description = "Sinnix: the estate's phone-side app — ambient capture, instruments, ingress and the estate remote";
       platforms = lib.platforms.linux;
+      sourceProvenance = with lib.sourceTypes; [
+        fromSource
+        binaryBytecode # mitm cache
+      ];
     };
-  };
+  });
 
   install = writeShellApplication {
     name = "sinnix-phone-app-install";
@@ -121,7 +162,7 @@ let
       jdk
     ];
     text = ''
-      # Sign and sideload Sinnix Capture.
+      # Sign and sideload Sinnix.
       #
       # The signing key is generated once, outside the Nix store, and reused
       # forever. That is the point: Android identifies an app by its signing

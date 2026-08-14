@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The window-level colours only. The palette Compose draws with lives in
+  ui/theme/Palette.kt; these four exist because a window background, a widget
+  and a notification are painted by the framework before any composition runs.
+-->
+<resources>
+  <color name="estate_background">#FF0B0C0D</color>
+  <color name="estate_surface">#FF141618</color>
+  <color name="estate_accent">#FF8B7CF6</color>
+  <color name="estate_text">#FFE8E6E3</color>
+</resources>
