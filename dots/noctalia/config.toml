@@ -1,13 +1,21 @@
 # Noctalia shell configuration.
 #
 # Writable + live-editable: this file is symlinked out-of-store into
-# ~/.config/noctalia/config.toml (see modules/features/desktop/noctalia.nix).
-# Noctalia reads AND writes it, so changes in the Settings GUI persist back
-# here and edits here apply on the next reload — no rebuild needed.
+# ~/.config/noctalia/config.toml (see modules/features/desktop/noctalia.nix),
+# so edits here apply on the next reload with no rebuild.
 #
-# v5 is alpha: these keys are a best-effort seed. The Settings GUI rewrites the
-# file in its full, correct schema the first time you change anything there.
-# Bar too small on this 4K display? Settings -> Bar -> Scale (it saves here).
+# It is the BASE layer, not the only one. Noctalia merges this with
+# ~/.local/state/noctalia/settings.toml, and the state file WINS. That is where
+# the Settings GUI persists — despite this file being writable, the GUI does
+# not write back to it. So a value set in the GUI silently overrides whatever
+# is written here, and the two can disagree indefinitely without any symptom:
+# the bar sat at position="top" in this file while running at the bottom for
+# however long, because the state layer said bottom (noticed 2026-08-14).
+#
+# Practical rule: treat this file as the declared intent and check
+# `noctalia config export merged` for what is actually in force. When they
+# disagree and this file is the one that is wrong, fix it here rather than
+# leaving the repo describing a desktop that does not exist.
 
 [shell.screenshot]
 save_to_file = true
@@ -24,7 +32,14 @@ wallpaper_scheme = "vibrant"
 
 [theme.templates]
 enable_builtin_templates = true
-builtin_ids = ["gtk3", "gtk4", "kitty", "qt"]
+# hyprland is in this list because it was missing, and its absence made
+# ~/.config/hypr/noctalia.conf a dead file: hyprland/default.nix sources that
+# path for wallpaper-derived colours, and nothing ever generated it, so it
+# still held only its seed comment. Noctalia's builtin hyprland template is
+# also config-provider aware (it detects hyprland.lua vs hyprland.conf and
+# writes the matching include), so it is the one piece of this desktop already
+# ready for the Lua migration.
+builtin_ids = ["gtk3", "gtk4", "hyprland", "kitty", "qt"]
 enable_community_templates = true
 community_ids = ["zed", "yazi"]
 
@@ -49,9 +64,12 @@ recursive = true
 
 # Bars are defined as [bar.<name>] tables (the default bar is "default").
 # thickness is the bar height in px; Noctalia's default is 34, which is tiny on
-# the 48" 4K panel at scale 1. Raise it here or in Settings -> Bar (persists here).
+# the 48" 4K panel at scale 1. Raise it here or in Settings -> Bar (which
+# persists to the state layer described at the top of this file, not here).
 [bar.default]
-position = "top"
+# Bottom, matching both the operator's intent and what has actually been
+# running; this file said "top" and was simply overridden and never noticed.
+position = "bottom"
 thickness = 56
 
 [notification]
