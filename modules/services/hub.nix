@@ -227,6 +227,7 @@ mkServiceModule {
       opsSocket = "{$SINNIX_HUB_RUNTIME}/sinnix/ops.sock";
       feedbackSocket = "{$SINNIX_HUB_RUNTIME}/sinnix/hub-feedback.sock";
       terminalSocket = "{$SINNIX_HUB_RUNTIME}/sinnix/terminal-view.sock";
+      phoneSocket = "{$SINNIX_HUB_RUNTIME}/sinnix/phone-dispatcher.sock";
 
       frontendSites = lib.concatStringsSep "\n" (
         lib.mapAttrsToList (_name: frontend: ''
@@ -292,6 +293,17 @@ mkServiceModule {
           # the hub already relies on -- this surface never accepts writes.
           handle_path /terminals/* {
             reverse_proxy unix/${terminalSocket}
+          }
+
+          # The phone's live plane. Everything it carries also works through
+          # the wifi-gated drain, so this route removes a wait rather than
+          # enabling a capability -- and the app labels which path each action
+          # actually took. Deliberately NOT behind the same-origin gate above:
+          # a native client sends no Origin header, and the gate exists to stop
+          # a browser on another site from posting here, which is not a shape
+          # this route can be reached in.
+          handle_path /phone/* {
+            reverse_proxy unix/${phoneSocket}
           }
 
           handle {
@@ -375,11 +387,21 @@ mkServiceModule {
         scriptPkgs.sinnix-hub-render
         scriptPkgs.sinnix-hub-feedback
         scriptPkgs.sinnix-terminal-view
+        scriptPkgs.sinnix-phone-dispatcher
       ];
 
       sinnix.runtime.surfaces = {
         hub-feedback = {
           unit = "sinnix-hub-feedback.service";
+          manager = "user";
+          resourceClass = "interactive-agent";
+          observe = {
+            enable = true;
+            restartable = true;
+          };
+        };
+        phone-dispatcher = {
+          unit = "sinnix-phone-dispatcher.service";
           manager = "user";
           resourceClass = "interactive-agent";
           observe = {
@@ -474,6 +496,26 @@ mkServiceModule {
             RestartSec = "5s";
             NoNewPrivileges = true;
             UMask = "0022";
+          };
+          Install.WantedBy = [ "default.target" ];
+        };
+
+        systemd.user.services.sinnix-phone-dispatcher = {
+          Unit.Description = "Prime's live half of the phone's dual transport";
+          Service = {
+            Type = "simple";
+            # sinnix-steer owns the steering schema and this service shells out
+            # to it; the ops reducer socket it reads is in the same runtime dir.
+            Environment = [ "PATH=/run/wrappers/bin:/run/current-system/sw/bin" ];
+            ExecStart = lib.concatStringsSep " " [
+              "${scriptPkgs.sinnix-phone-dispatcher}/bin/sinnix-phone-dispatcher"
+              "serve"
+              "--socket %t/sinnix/phone-dispatcher.sock"
+            ];
+            Restart = "on-failure";
+            RestartSec = "5s";
+            NoNewPrivileges = true;
+            UMask = "0077";
           };
           Install.WantedBy = [ "default.target" ];
         };
