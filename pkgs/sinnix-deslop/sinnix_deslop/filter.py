@@ -23,7 +23,11 @@ def load_rules(path: str | None = None) -> list[Rule]:
     Blank lines and lines starting with '#' are ignored.
     """
     if path is None:
-        text = importlib.resources.files("sinnix_deslop").joinpath("phrases.txt").read_text()
+        text = (
+            importlib.resources.files("sinnix_deslop")
+            .joinpath("phrases.txt")
+            .read_text()
+        )
     else:
         with open(path, encoding="utf-8") as f:
             text = f.read()
@@ -40,7 +44,9 @@ def load_rules(path: str | None = None) -> list[Rule]:
         try:
             pattern = re.compile(pattern_src, re.IGNORECASE | re.MULTILINE)
         except re.error as e:
-            raise ValueError(f"phrases.txt:{lineno}: invalid regex {pattern_src!r}: {e}") from e
+            raise ValueError(
+                f"phrases.txt:{lineno}: invalid regex {pattern_src!r}: {e}"
+            ) from e
         rules.append(Rule(pattern=pattern, replacement=replacement))
     return rules
 

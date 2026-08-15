@@ -15,10 +15,10 @@ inferred it says so. The device-specific facts live in bead `sinnix-uyvt`.
 
 A phone worth controlling has **both**, because each covers the other's gaps:
 
-| Surface | Reach | Good for | Dies when |
-| --- | --- | --- | --- |
+| Surface                           | Reach            | Good for                                       | Dies when                       |
+| --------------------------------- | ---------------- | ---------------------------------------------- | ------------------------------- |
 | `adb` over TCP (`adb tcpip 5555`) | any tailnet peer | packages, settings, input, screencap, UI dumps | phone reboots (TCP mode resets) |
-| Termux `sshd` (:8022) | any tailnet peer | real shell, rsync, scripted work | Termux is killed or uninstalled |
+| Termux `sshd` (:8022)             | any tailnet peer | real shell, rsync, scripted work               | Termux is killed or uninstalled |
 
 `adb tcpip` binds all interfaces, so it rides the tailnet with no extra work —
 this is the single highest-leverage move for remote phone control. Two adb
@@ -39,7 +39,7 @@ adb shell cat /sdcard/.ui.xml | tr '>' '\n' \
 ```
 
 **The polling-tap trap** (cost real time to find): a loop that re-taps while
-waiting for an install to finish will *cancel* it — the button under that
+waiting for an install to finish will _cancel_ it — the button under that
 coordinate becomes CANCEL once the dialog advances. Tap once, then poll with
 `pm list packages` only. Never tap inside a wait loop.
 
@@ -50,13 +50,13 @@ type went to Termux, not the installer).
 
 ## MIUI / HyperOS traps
 
-**Installing apps.** There are *two* independent blockers, and conflating them
+**Installing apps.** There are _two_ independent blockers, and conflating them
 wastes hours:
 
 1. **Package verifier** — makes the installer hang forever on "Installing…".
    `settings put global package_verifier_enable 0` and
    `verifier_verify_adb_installs 0` clear it.
-2. **The MIUI gate proper** — `adb install` of a *genuinely new* package
+2. **The MIUI gate proper** — `adb install` of a _genuinely new_ package
    returns `INSTALL_FAILED_USER_RESTRICTED` regardless of the verifier.
    Reinstalling an app that already exists succeeds. No user restriction is
    set (`dumpsys user` shows none) — it is HyperOS's own Mi-account-gated
@@ -64,7 +64,7 @@ wastes hours:
    60 seconds of their time and unblocks everything unattended.
 
 MIUI also interposes `com.miui.permcenter.privacymanager.SpecialPermissionInterceptActivity`
-("Danger / Install dangerous apps") *before* the system installer. Expect a
+("Danger / Install dangerous apps") _before_ the system installer. Expect a
 two-dialog sequence: MIUI OK → system INSTALL.
 
 **Background killing.** MIUI kills long-running apps aggressively. In escalating
@@ -86,19 +86,19 @@ tunnel is down, the wrong trade for a phone.
 (termux-play-store/termux-apps#29). `termux-battery-status` works from a
 bundled subset; `termux-sensor` and most of the 69-command API surface refuse.
 The F-Droid/GitHub build is required for the sensor plane — and the app and
-its addons must come from the *same* source, since signatures must match.
+its addons must come from the _same_ source, since signatures must match.
 
 ## Settings levers worth knowing
 
-| Setting | Why it matters |
-| --- | --- |
-| `global audio_safe_volume_state` | `3` = EU headphone cap ACTIVE — max slider still sounds quiet. `1` disables. |
-| `global bluetooth_disable_absolute_volume` | Common cause of very quiet BT headsets. |
-| `system screen_off_timeout`, `global stay_on_while_plugged_in` | Keeping a phone awake on AC is what makes it reliably drivable. |
-| `global window/transition/animator_*_scale` | `0.5` is the snappiness sweet spot; `0` breaks some transitions. |
-| `secure ui_night_mode 2` + `cmd uimode night yes` | Both, not either. |
-| `appops set <pkg> POST_NOTIFICATION ignore` | Per-app notification kill without touching the app. |
-| `appops set <pkg> GET_USAGE_STATS allow` | What ActivityWatch-class apps actually need; usually the missed step. |
+| Setting                                                        | Why it matters                                                               |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `global audio_safe_volume_state`                               | `3` = EU headphone cap ACTIVE — max slider still sounds quiet. `1` disables. |
+| `global bluetooth_disable_absolute_volume`                     | Common cause of very quiet BT headsets.                                      |
+| `system screen_off_timeout`, `global stay_on_while_plugged_in` | Keeping a phone awake on AC is what makes it reliably drivable.              |
+| `global window/transition/animator_*_scale`                    | `0.5` is the snappiness sweet spot; `0` breaks some transitions.             |
+| `secure ui_night_mode 2` + `cmd uimode night yes`              | Both, not either.                                                            |
+| `appops set <pkg> POST_NOTIFICATION ignore`                    | Per-app notification kill without touching the app.                          |
+| `appops set <pkg> GET_USAGE_STATS allow`                       | What ActivityWatch-class apps actually need; usually the missed step.        |
 
 ## Debloating without breaking things
 
@@ -111,7 +111,7 @@ Two rules learned the hard way:
 - **Spare the unlock stack.** On Xiaomi, keep `com.xiaomi.account`,
   `com.xiaomi.finddevice`, and the cloud services — bootloader unlock requires
   a linked Mi account and Find Device. Removing them forecloses rooting later.
-- **Prefer evidence over vibes.** Diff the *previous phone's* package census
+- **Prefer evidence over vibes.** Diff the _previous phone's_ package census
   against the current device to find orphans; a device switch strands whole
   vendor stacks (a Samsung watch-manager + health-plugin + Smart Switch set
   survived onto a Xiaomi and was pure dead weight).

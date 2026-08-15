@@ -156,17 +156,17 @@ Servers: agent-control, context7, github, polylogue, sinex.
 
 ## MCP servers
 
-| Server                            | Tier            | Transport | Command or URL                        | Clients                                    |
-| --------------------------------- | --------------- | --------- | ------------------------------------- | ------------------------------------------ |
-| `agent-control`                   | `agent-control` | `stdio`   | `sinnix-agent-control-mcp`            | claude, codex, gemini, antigravity, hermes |
-| `chrome-devtools`                 | `browser-mcp`   | `stdio`   | `mcp-chrome-devtools`                 | claude, codex, gemini                      |
-| `context7`                        | `remote-core`   | `http`    | `https://mcp.context7.com/mcp`        | claude, codex, gemini, antigravity, hermes |
-| `firecrawl`                       | `browser-mcp`   | `stdio`   | `mcp-firecrawl`                       | claude, hermes                             |
-| `github`                          | `remote-core`   | `stdio`   | `npx`                                 | claude, codex, gemini, antigravity, hermes |
-| `lynchpin`                        | `deep-evidence` | `stdio`   | `mcp-lynchpin`                        | codex, claude, gemini, antigravity, hermes |
-| `polylogue`                       | `recall`        | `stdio`   | `mcp-polylogue`                       | codex, claude, gemini, antigravity, hermes |
-| `serena`                          | `code-semantic` | `stdio`   | `serena`                              | codex, claude, gemini, antigravity         |
-| `sinex`                           | `recall`        | `stdio`   | `mcp-sinex`                           | codex, claude, gemini, antigravity, hermes |
+| Server            | Tier            | Transport | Command or URL                 | Clients                                    |
+| ----------------- | --------------- | --------- | ------------------------------ | ------------------------------------------ |
+| `agent-control`   | `agent-control` | `stdio`   | `sinnix-agent-control-mcp`     | claude, codex, gemini, antigravity, hermes |
+| `chrome-devtools` | `browser-mcp`   | `stdio`   | `mcp-chrome-devtools`          | claude, codex, gemini                      |
+| `context7`        | `remote-core`   | `http`    | `https://mcp.context7.com/mcp` | claude, codex, gemini, antigravity, hermes |
+| `firecrawl`       | `browser-mcp`   | `stdio`   | `mcp-firecrawl`                | claude, hermes                             |
+| `github`          | `remote-core`   | `stdio`   | `npx`                          | claude, codex, gemini, antigravity, hermes |
+| `lynchpin`        | `deep-evidence` | `stdio`   | `mcp-lynchpin`                 | codex, claude, gemini, antigravity, hermes |
+| `polylogue`       | `recall`        | `stdio`   | `mcp-polylogue`                | codex, claude, gemini, antigravity, hermes |
+| `serena`          | `code-semantic` | `stdio`   | `serena`                       | codex, claude, gemini, antigravity         |
+| `sinex`           | `recall`        | `stdio`   | `mcp-sinex`                    | codex, claude, gemini, antigravity, hermes |
 
 ## Agent definitions
 

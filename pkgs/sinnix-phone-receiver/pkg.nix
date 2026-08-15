@@ -1,4 +1,8 @@
-{ lib, python3Packages, sinnix-capture-lib }:
+{
+  lib,
+  python3Packages,
+  sinnix-capture-lib,
+}:
 
 python3Packages.buildPythonApplication {
   pname = "sinnix-phone-receiver";

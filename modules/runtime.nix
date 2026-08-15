@@ -526,19 +526,22 @@ in
       # search path — the real unit becomes unreachable with
       # LoadState=bad-setting. A drop-in merges with whichever fragment exists,
       # so the declaring namespace stops mattering.
-      xdg.configFile = lib.mapAttrs' (
-        _name: surface:
-        lib.nameValuePair "systemd/user/${surface.unit}.d/50-sinnix-health-transition.conf" {
-          text = ''
-            [Unit]
-            OnFailure=sinnix-health-transition@%n
-          '';
-        }
-      ) (
-        lib.filterAttrs (
-          _: surface: surface.manager == "user" && surface.kind == "service" && surface.observe.enable
-        ) surfaces
-      );
+      xdg.configFile =
+        lib.mapAttrs'
+          (
+            _name: surface:
+            lib.nameValuePair "systemd/user/${surface.unit}.d/50-sinnix-health-transition.conf" {
+              text = ''
+                [Unit]
+                OnFailure=sinnix-health-transition@%n
+              '';
+            }
+          )
+          (
+            lib.filterAttrs (
+              _: surface: surface.manager == "user" && surface.kind == "service" && surface.observe.enable
+            ) surfaces
+          );
     };
   };
 }

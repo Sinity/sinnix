@@ -166,7 +166,7 @@ machine. Interpret user language directly:
   (headless announces itself in the User-Agent and loses to bot checks that a
   real window passes).
 - **"your browser" / "an agent browser"** → `sinnix-chrome-control agent-window
-  [--url ...]`. Opens a NEW WINDOW and parks it on the hidden
+[--url ...]`. Opens a NEW WINDOW and parks it on the hidden
   `special:agentbrowser` workspace, so it takes no focus and touches none of
   his tabs. Isolation is per-window now, not per-profile. Hidden windows still
   run JS and still screenshot — verified — because CDP goes through the

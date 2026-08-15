@@ -143,55 +143,57 @@ mkServiceModule {
             processMatchers = [ "sinnix-agent-job-" ];
           };
           captures = [
-            ({
-              name = "agent-job-manifests";
-              path = "${cfg.stateDir}/jobs";
-              eventDriven = true;
-              # Deliberately NO staleness budget. Gateway jobs exist because
-              # the operator asked a remote agent for something, so silence
-              # measures how recently they felt like it and says nothing
-              # about health -- an unused gateway and a broken one are
-              # indistinguishable from this directory. The old 1h budget
-              # declared eventDriven and then scored the lane as if it had a
-              # cadence, so a quiet week read as an outage (observed
-              # 2026-08-14: 7.8 days quiet, last job 2026-08-06). Raising
-              # the number only moves the false alarm further out; there is
-              # no duration of silence here that is genuinely suspicious,
-              # so the honest declaration is to make no staleness claim at
-              # all. The sentinel skips lanes that declare neither a cadence
-              # nor a budget, which is exactly the intended treatment.
-              #
-              # What silence CANNOT tell us, the probe below can (sinnix-oig5).
-            }
-            // lib.optionalAttrs cfg.tunnel.enable {
-              # Reachability, asked directly instead of inferred from silence.
-              #
-              # /readyz rather than /healthz: the tunnel client answers "live"
-              # as soon as its process is up, but "ready" only once it holds a
-              # working control-plane connection -- and a gateway that is
-              # running but disconnected is exactly the state this lane could
-              # not previously distinguish from an unused one.
-              #
-              # Exit codes are chosen for how the sentinel reads them: 0 is
-              # healthy, 1 means the source is absent (the honest verdict when
-              # the endpoint answers wrong or not at all), and anything else
-              # means the probe itself could not answer. curl is addressed by
-              # store path because the probe runs under `bash -c` in the user
-              # session, where the sentinel's own runtimeInputs are not on
-              # PATH; the explicit exit 9 keeps a missing binary from
-              # masquerading as a missing gateway.
-              #
-              # Only declared when the tunnel is enabled. Without it there is
-              # no remote gateway to be unreachable, so there would be nothing
-              # for a probe to answer.
-              livenessProbe = {
-                command =
-                  "command -v ${pkgs.curl}/bin/curl >/dev/null || exit 9; "
-                  + "${pkgs.curl}/bin/curl -sf -m 5 -o /dev/null "
-                  + "http://127.0.0.1:${toString cfg.tunnel.healthPort}/readyz || exit 1";
-                timeoutSeconds = 10;
-              };
-            })
+            (
+              {
+                name = "agent-job-manifests";
+                path = "${cfg.stateDir}/jobs";
+                eventDriven = true;
+                # Deliberately NO staleness budget. Gateway jobs exist because
+                # the operator asked a remote agent for something, so silence
+                # measures how recently they felt like it and says nothing
+                # about health -- an unused gateway and a broken one are
+                # indistinguishable from this directory. The old 1h budget
+                # declared eventDriven and then scored the lane as if it had a
+                # cadence, so a quiet week read as an outage (observed
+                # 2026-08-14: 7.8 days quiet, last job 2026-08-06). Raising
+                # the number only moves the false alarm further out; there is
+                # no duration of silence here that is genuinely suspicious,
+                # so the honest declaration is to make no staleness claim at
+                # all. The sentinel skips lanes that declare neither a cadence
+                # nor a budget, which is exactly the intended treatment.
+                #
+                # What silence CANNOT tell us, the probe below can (sinnix-oig5).
+              }
+              // lib.optionalAttrs cfg.tunnel.enable {
+                # Reachability, asked directly instead of inferred from silence.
+                #
+                # /readyz rather than /healthz: the tunnel client answers "live"
+                # as soon as its process is up, but "ready" only once it holds a
+                # working control-plane connection -- and a gateway that is
+                # running but disconnected is exactly the state this lane could
+                # not previously distinguish from an unused one.
+                #
+                # Exit codes are chosen for how the sentinel reads them: 0 is
+                # healthy, 1 means the source is absent (the honest verdict when
+                # the endpoint answers wrong or not at all), and anything else
+                # means the probe itself could not answer. curl is addressed by
+                # store path because the probe runs under `bash -c` in the user
+                # session, where the sentinel's own runtimeInputs are not on
+                # PATH; the explicit exit 9 keeps a missing binary from
+                # masquerading as a missing gateway.
+                #
+                # Only declared when the tunnel is enabled. Without it there is
+                # no remote gateway to be unreachable, so there would be nothing
+                # for a probe to answer.
+                livenessProbe = {
+                  command =
+                    "command -v ${pkgs.curl}/bin/curl >/dev/null || exit 9; "
+                    + "${pkgs.curl}/bin/curl -sf -m 5 -o /dev/null "
+                    + "http://127.0.0.1:${toString cfg.tunnel.healthPort}/readyz || exit 1";
+                  timeoutSeconds = 10;
+                };
+              }
+            )
           ];
         };
       }

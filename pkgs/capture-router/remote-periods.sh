@@ -6,6 +6,6 @@
 # immutable.
 set -e
 for p in "$@"; do
-	echo "===NLBW_PERIOD:$p==="
-	nlbw -c csv -t "$p" 2>/dev/null || true
+  echo "===NLBW_PERIOD:$p==="
+  nlbw -c csv -t "$p" 2>/dev/null || true
 done

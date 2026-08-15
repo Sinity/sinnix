@@ -29,35 +29,39 @@ let
   # whitespace from the LITERAL source only, so an interpolated multi-line
   # value's own newlines don't inherit it and every list item after the first
   # would be mis-indented.
-  serenaConfigFile = pkgs.writeText "serena_config.yml" (''
-    language_backend: LSP
-    line_ending: lf
-    gui_log_window: false
-    web_dashboard: true
-    web_dashboard_open_on_launch: false
-    web_dashboard_listen_address: 127.0.0.1
-    web_dashboard_trusted_hosts:
-      - 127.0.0.1
-      - localhost
-    log_level: 20
-    trace_lsp_communication: false
-    tool_timeout: 240
-    default_max_tool_answer_chars: 150000
-    symbol_info_budget: 10
-    base_modes:
-      - interactive
-      - editing
-    default_modes: []
-    ignored_paths:
-      - .direnv
-      - .git
-      - .venv
-      - node_modules
-      - target
-      - __pycache__
-    project_serena_folder_location: "$projectDir/.serena"
-    projects:
-  '' + lib.concatMapStringsSep "\n" (p: "  - ${p}") serenaProjectPaths + "\n");
+  serenaConfigFile = pkgs.writeText "serena_config.yml" (
+    ''
+      language_backend: LSP
+      line_ending: lf
+      gui_log_window: false
+      web_dashboard: true
+      web_dashboard_open_on_launch: false
+      web_dashboard_listen_address: 127.0.0.1
+      web_dashboard_trusted_hosts:
+        - 127.0.0.1
+        - localhost
+      log_level: 20
+      trace_lsp_communication: false
+      tool_timeout: 240
+      default_max_tool_answer_chars: 150000
+      symbol_info_budget: 10
+      base_modes:
+        - interactive
+        - editing
+      default_modes: []
+      ignored_paths:
+        - .direnv
+        - .git
+        - .venv
+        - node_modules
+        - target
+        - __pycache__
+      project_serena_folder_location: "$projectDir/.serena"
+      projects:
+    ''
+    + lib.concatMapStringsSep "\n" (p: "  - ${p}") serenaProjectPaths
+    + "\n"
+  );
   # Thin per-commandName Nix wrapper: exports every Nix-time value the
   # bootstrap/dispatch logic needs (version pin, generated config store path,
   # uv/python/cmp store paths, runtime PATH) as env vars, then execs

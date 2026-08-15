@@ -171,12 +171,16 @@ def test_orphaned_partials_are_archived_without_overwriting(tmp_path):
     channel_dir.mkdir()
     (channel_dir / "audio-src-x-20260812T140000Z.opus").write_bytes(b"archived")
     (channel_dir / "audio-src-x-20260812T140000Z.opus.partial").write_bytes(b"orphan-a")
-    (channel_dir / "audio-src-x-p2-20260812T140000Z.opus.partial").write_bytes(b"orphan-b")
+    (channel_dir / "audio-src-x-p2-20260812T140000Z.opus.partial").write_bytes(
+        b"orphan-b"
+    )
     (channel_dir / "device.json").write_bytes(b"{}")
 
     promoted = promote_orphan_partials(tmp_path)
 
-    assert (channel_dir / "audio-src-x-20260812T140000Z.opus").read_bytes() == b"archived"
+    assert (
+        channel_dir / "audio-src-x-20260812T140000Z.opus"
+    ).read_bytes() == b"archived"
     assert not list(channel_dir.glob("*.partial"))
     assert sorted(p.read_bytes() for p in channel_dir.glob("*.opus")) == [
         b"archived",

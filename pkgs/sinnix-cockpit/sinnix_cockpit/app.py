@@ -90,11 +90,17 @@ def calibration() -> str:
     buckets = store.calibration_buckets(conn)
     total_scored = sum(b["n"] for b in buckets)
     if total_scored == 0:
-        body = '<p class="empty">No scored (done/missed + forecasted) commitments yet.</p>'
+        body = (
+            '<p class="empty">No scored (done/missed + forecasted) commitments yet.</p>'
+        )
     else:
         rows = []
         for b in buckets:
-            actual = f"{b['actual_rate'] * 100:.0f}%" if b["actual_rate"] is not None else "—"
+            actual = (
+                f"{b['actual_rate'] * 100:.0f}%"
+                if b["actual_rate"] is not None
+                else "—"
+            )
             rows.append(
                 f"<tr><td>{b['label']}</td><td>{b['n']}</td><td>{actual}</td></tr>"
             )

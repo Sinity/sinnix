@@ -24,9 +24,7 @@ def test_capture_attempt_gate_coalesces_a_31_event_burst() -> None:
 
 
 def test_capture_attempt_gate_backs_off_after_failure_then_recovers() -> None:
-    gate = CaptureAttemptGate(
-        min_interval_seconds=1.0, failure_backoff_seconds=30.0
-    )
+    gate = CaptureAttemptGate(min_interval_seconds=1.0, failure_backoff_seconds=30.0)
     assert gate.allow(100.0) is True
     gate.record_failure(100.0)
 
@@ -42,6 +40,7 @@ def test_capture_attempt_gate_resumes_at_normal_rate_after_success() -> None:
 
     assert gate.allow(100.999) is False
     assert gate.allow(101.0) is True
+
 
 # ---------------------------------------------------------------------------
 # phash64 / hamming_distance / is_near_duplicate

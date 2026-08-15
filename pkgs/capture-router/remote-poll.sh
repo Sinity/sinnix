@@ -17,8 +17,8 @@ cat /tmp/dhcp.leases 2>/dev/null || true
 
 echo "===ASSOC==="
 for ap in phy0-ap0 phy0-ap1 phy1-ap0 phy1-ap1; do
-	printf '%s\t' "$ap"
-	ubus -S call "hostapd.$ap" get_clients 2>/dev/null || echo '{}'
+  printf '%s\t' "$ap"
+  ubus -S call "hostapd.$ap" get_clients 2>/dev/null || echo '{}'
 done
 
 echo "===NLBW_PERIODS==="
@@ -29,33 +29,33 @@ nlbw -c csv 2>/dev/null || true
 
 echo "===SYSLOG==="
 cur_first="$(head -n1 /overlay/log/syslog 2>/dev/null || true)"
-cur_size="$(wc -c < /overlay/log/syslog 2>/dev/null || echo 0)"
+cur_size="$(wc -c </overlay/log/syslog 2>/dev/null || echo 0)"
 
 if [ -z "$prev_first_line" ]; then
-	# First-ever poll: backfill the whole of syslog.old once (the only time
-	# it is read in full), then all of current syslog.
-	if [ -f /overlay/log/syslog.old ]; then
-		cat /overlay/log/syslog.old
-	fi
-	cat /overlay/log/syslog 2>/dev/null || true
-	new_offset="$cur_size"
+  # First-ever poll: backfill the whole of syslog.old once (the only time
+  # it is read in full), then all of current syslog.
+  if [ -f /overlay/log/syslog.old ]; then
+    cat /overlay/log/syslog.old
+  fi
+  cat /overlay/log/syslog 2>/dev/null || true
+  new_offset="$cur_size"
 elif [ "$cur_first" = "$prev_first_line" ] && [ "$cur_size" -ge "$prev_offset" ]; then
-	# Same file, grew normally: tail just the new bytes.
-	if [ "$cur_size" -gt "$prev_offset" ]; then
-		tail -c "+$((prev_offset + 1))" /overlay/log/syslog
-	fi
-	new_offset="$cur_size"
+  # Same file, grew normally: tail just the new bytes.
+  if [ "$cur_size" -gt "$prev_offset" ]; then
+    tail -c "+$((prev_offset + 1))" /overlay/log/syslog
+  fi
+  new_offset="$cur_size"
 else
-	# Rotated. The unread tail from before rotation is now at the end of
-	# syslog.old (confirm identity via its first line before trusting the
-	# offset into it), then take the whole fresh syslog.
-	old_first="$(head -n1 /overlay/log/syslog.old 2>/dev/null || true)"
-	old_size="$(wc -c < /overlay/log/syslog.old 2>/dev/null || echo 0)"
-	if [ "$old_first" = "$prev_first_line" ] && [ "$old_size" -gt "$prev_offset" ]; then
-		tail -c "+$((prev_offset + 1))" /overlay/log/syslog.old
-	fi
-	cat /overlay/log/syslog 2>/dev/null || true
-	new_offset="$cur_size"
+  # Rotated. The unread tail from before rotation is now at the end of
+  # syslog.old (confirm identity via its first line before trusting the
+  # offset into it), then take the whole fresh syslog.
+  old_first="$(head -n1 /overlay/log/syslog.old 2>/dev/null || true)"
+  old_size="$(wc -c </overlay/log/syslog.old 2>/dev/null || echo 0)"
+  if [ "$old_first" = "$prev_first_line" ] && [ "$old_size" -gt "$prev_offset" ]; then
+    tail -c "+$((prev_offset + 1))" /overlay/log/syslog.old
+  fi
+  cat /overlay/log/syslog 2>/dev/null || true
+  new_offset="$cur_size"
 fi
 
 echo "===END==="

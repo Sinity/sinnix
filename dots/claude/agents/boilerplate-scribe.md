@@ -88,6 +88,7 @@ For completion: "Done." or "Done. Also updated X, Y, Z."
 ## Quality Checks
 
 Before finishing:
+
 - Imports added for any new types used?
 - All references updated (not just the primary location)?
 - Matches surrounding code style?

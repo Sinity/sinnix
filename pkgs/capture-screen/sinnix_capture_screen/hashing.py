@@ -44,6 +44,7 @@ class CaptureAttemptGate:
     def record_success(self) -> None:
         self._blocked_until_ts = 0.0
 
+
 # ---------------------------------------------------------------------------
 # Perceptual hash (DCT-based pHash, the same construction as the widely-used
 # `imagehash.phash`: resize to hash_size*high_freq_factor, DCT-II, keep the

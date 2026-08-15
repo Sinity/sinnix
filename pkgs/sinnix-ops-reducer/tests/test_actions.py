@@ -284,9 +284,7 @@ def test_scope_targets_admit_only_name_shaped_live_units_and_only_stop(
     # A name that does not match the sinnix-scope launcher convention at all.
     with pytest.raises(ActionError, match="does not match"):
         actions.execute(
-            request(
-                "stop", {"scope": "some-other-unit.service"}, key="bad-shape"
-            )
+            request("stop", {"scope": "some-other-unit.service"}, key="bad-shape")
         )
     # Name-shaped but not actually live (probe returns None) -- name alone is
     # not trust.

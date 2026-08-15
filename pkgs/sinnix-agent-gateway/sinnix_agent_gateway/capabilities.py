@@ -120,7 +120,9 @@ class Principal:
                 f"(allowed: {sorted(self.allowed_lanes)})"
             )
 
-    def filter_lanes(self, requested: list[str] | None, available: list[str]) -> list[str]:
+    def filter_lanes(
+        self, requested: list[str] | None, available: list[str]
+    ) -> list[str]:
         """Resolve the effective lane list for a query: explicit request
         intersected with what's allowed, or the full allowed set when no
         lanes were explicitly requested (never silently defaults to
