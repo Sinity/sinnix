@@ -163,25 +163,35 @@ def classify(bodies: list[str]) -> str:
     pair only means the CALL was accepted. The verdict is data.apply_result,
     and data.deadline carries the epoch of the next window.
     """
-    joined = " ".join(bodies)
-    try:
-        start = joined.index("{")
-        payload = json.loads(joined[start:joined.rindex("}") + 1])
-    except (ValueError, json.JSONDecodeError):
-        low = joined.lower()
-        if "not login" in low or "401" in low:
-            return "TOKEN-INVALID"
-        return "UNKNOWN"
+    results: list[object] = []
+    errors: list[object] = []
+    token_invalid = False
+    for body in bodies:
+        try:
+            start = body.index("{")
+            payload = json.loads(body[start:body.rindex("}") + 1])
+        except (ValueError, json.JSONDecodeError):
+            low = body.lower()
+            token_invalid = token_invalid or "not login" in low or "401" in low
+            continue
 
-    data = payload.get("data") or {}
-    result = data.get("apply_result")
-    if result == 1:
-        return "GRANTED"
-    if result == 3:
+        data = payload.get("data") or {}
+        result = data.get("apply_result")
+        results.append(result)
+        if result == 1:
+            return "GRANTED"
+        if payload.get("code") not in (0, None):
+            errors.append(payload.get("code"))
+
+    if token_invalid:
+        return "TOKEN-INVALID"
+    if 3 in results:
         return "REFUSED-UNTIL-DEADLINE"
-    if payload.get("code") not in (0, None):
-        return f"ERROR-code-{payload.get('code')}"
-    return f"UNKNOWN-apply_result-{result}"
+    if errors:
+        return f"ERROR-code-{errors[0]}"
+    if results:
+        return f"UNKNOWN-apply_result-{results[0]}"
+    return "UNKNOWN"
 
 
 def server_deadline(body: str) -> float | None:
@@ -214,7 +224,11 @@ async def observe_window(args, payload_for, offset: float) -> int:
     target = server_deadline(first) or (time.time() + offset + 60)
     log(f"window from the server: {datetime.fromtimestamp(target).astimezone().isoformat()}")
 
-    for lead in (1800, 60, 5, 1):
+    # T-1s is too late for the subsequent TLS pre-warm: the probe itself
+    # consumes the warm lead and pushes the burst past the boundary. T-5s
+    # is the final observation; run() then opens the warm sockets and sends
+    # at target-(RTT/2).
+    for lead in (1800, 60, 5):
         when = target - lead
         while (time.time() + offset) < when:
             time.sleep(min(20.0, max(0.2, when - (time.time() + offset))))
@@ -251,7 +265,10 @@ async def run(args: argparse.Namespace) -> int:
         log(detail)
         verdict = classify([detail])
         log(f"verdict: {verdict}")
-        return 0 if verdict in ("SUCCESS", "QUOTA-EXHAUSTED") else 1
+        # `classify` uses the endpoint's actual result vocabulary.  A token
+        # check is valid both when the account is already granted and when
+        # the current quota window is closed.
+        return 0 if verdict in ("GRANTED", "REFUSED-UNTIL-DEADLINE") else 1
 
     target = args.at_epoch or next_reset(now_true, args.hour)
     log(f"target {datetime.fromtimestamp(target, BEIJING).isoformat()} Beijing "
@@ -293,7 +310,10 @@ async def run(args: argparse.Namespace) -> int:
 
     verdict = classify([d for _, d in results])
     log(f"verdict: {verdict}")
-    return 0 if verdict == "SUCCESS" else 1
+    # `GRANTED` is the endpoint's successful terminal result.  Keep this
+    # aligned with the sentinel writer in the systemd runner: a grant must
+    # stop future daily attempts.
+    return 0 if verdict == "GRANTED" else 1
 
 
 

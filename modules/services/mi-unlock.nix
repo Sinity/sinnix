@@ -75,7 +75,10 @@ mkServiceModule {
             ConditionPathExists = "!%S/sinnix-mi-unlock/granted";
           };
           Service = {
-            Type = "oneshot";
+            # The process intentionally waits for the quota boundary after
+            # it has started.  Keep activation asynchronous so a config
+            # switch does not block on the daily observation window.
+            Type = "simple";
             StateDirectory = "sinnix-mi-unlock";
             ExecStart = "${runner}/bin/sinnix-mi-unlock-run";
             # A failed application is the ordinary outcome while the pool is
