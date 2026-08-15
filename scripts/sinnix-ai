@@ -24,6 +24,7 @@ kokoro|podman-kokoro|8890|/health|Kokoro-82M TTS (CPU, OpenAI-compatible, contai
 ollama|ollama|11434|/api/tags|Ollama LLM/VLM hub (CUDA)
 litellm|litellm|4000|/health/liveliness|LiteLLM gateway (Anthropic<->OpenAI, fronts Ollama)
 llama-cpp|llama-cpp|8081|/health|llama.cpp HTTP server (CUDA, GGUF)
+muse-glimmer|muse-glimmer|8083|/v1/models|Muse Glimmer 30B hybrid llama.cpp server
 koboldcpp|koboldcpp|5001|/api/v1/info|koboldcpp all-in-one (text/vision/SD, GGUF)
 comfyui|podman-comfyui|8188|/system_stats|ComfyUI image/video generation (container)
 musicgen|podman-musicgen|8010|/|MusicGen/Bark text-to-audio (container)

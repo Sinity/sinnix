@@ -4,7 +4,10 @@
     { system, ... }:
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
-      hooksJson = import ../../modules/features/dev/agents/hooks.nix { inherit pkgs; };
+      hooksJson = import ../../modules/features/dev/agents/hooks.nix {
+        inherit pkgs;
+        dotsRoot = inputs.self + "/dots";
+      };
     in
     {
       checks.agent-hook-parity =
