@@ -23,6 +23,7 @@
               pkgs.findutils
               pkgs.jq
               pkgs.gawk
+              pkgs.python3
             ];
           }
           ''
@@ -69,6 +70,7 @@
             #                                 silent "healthy" or "failed".
             cat > "$TMPDIR/bin/systemctl" <<'EOF_SYSTEMCTL'
             #!${fixtureBash}
+            if [ "''${1:-}" = "--user" ]; then shift; fi
             shift # drop "show"
             unit="$1"; shift
             case "$unit" in
@@ -84,12 +86,35 @@
                 active=inactive; type=exec; result=exit-code; wanted= ;;
               socket-proxy-declared.service)
                 active=inactive; type=exec; result=success; wanted=multi-user.target ;;
+              usersurf.service)
+                exit 1 ;;
               *)
                 active=active; type=simple; result=success; wanted=multi-user.target ;;
             esac
             printf 'ActiveState=%s\nType=%s\nResult=%s\nWantedBy=%s\n' "$active" "$type" "$result" "$wanted"
             EOF_SYSTEMCTL
             chmod +x "$TMPDIR/bin/systemctl"
+            cat > "$TMPDIR/bin/sudo" <<'EOF_SUDO'
+            #!${fixtureBash}
+            if [ "''${1:-}" = "-u" ]; then shift 2; fi
+            while [[ "''${1:-}" == *=* ]]; do
+              export "$1"
+              shift
+            done
+            exec "$@"
+            EOF_SUDO
+            chmod +x "$TMPDIR/bin/sudo"
+            mkdir -p "$TMPDIR/user-bus/1000"
+            python3 - "$TMPDIR/user-bus/1000/bus" <<'PY_USER_BUS' &
+            import socket, sys
+            server = socket.socket(socket.AF_UNIX)
+            server.bind(sys.argv[1])
+            server.listen(1)
+            server.accept()
+            PY_USER_BUS
+            user_bus_pid=$!
+            trap 'kill "$user_bus_pid" 2>/dev/null || true' EXIT
+            export SINNIX_HEALTH_SENTINEL_USER_BUS_ROOT="$TMPDIR/user-bus"
             touch -d @0 "$TMPDIR/capture/old"
             # Event-driven lanes carry no expectedCadenceSeconds, only an
             # absolute expectedStaleAfterSeconds budget: a write older than
@@ -153,6 +178,7 @@
             ' "$TMPDIR/state/events.jsonl" >/dev/null
             touch "$TMPDIR/capture/current"
             touch "$probe_marker"
+            bash "${sentinelSource}" --inventory "$TMPDIR/inventory.json" --state "$TMPDIR/state/state.json" --output "$TMPDIR/state/events.jsonl" --check
             bash "${sentinelSource}" --inventory "$TMPDIR/inventory.json" --state "$TMPDIR/state/state.json" --output "$TMPDIR/state/events.jsonl" --check
             jq -s -e '
               length == 18

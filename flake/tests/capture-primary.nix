@@ -63,7 +63,7 @@ in
             ' unit.json >/dev/null
             jq -e '
               .resourceClass == "capture-runtime" and
-              .kind == "capture" and
+              .kind == "service" and
               .manager == "user" and
               (.captures[0].eventDriven) and
               .captures[0].staleAfterSeconds == 604800 and

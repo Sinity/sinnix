@@ -10,6 +10,7 @@ state="$runtime_root/health-sentinel-state.json"
 output="$runtime_root/health-transitions.jsonl"
 failure_unit=
 failure_result=
+user_bus_root="${SINNIX_HEALTH_SENTINEL_USER_BUS_ROOT:-/run/user}"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -39,7 +40,7 @@ emitted_keys=()
 # mechanism modules/backup.nix's borg-verify failure path uses).
 notify_desktop() {
   local urgency="$1" title="$2" body="$3" uid bus
-  for bus in /run/user/*/bus; do
+  for bus in "$user_bus_root"/*/bus; do
     [ -S "$bus" ] || continue
     uid="$(basename "$(dirname "$bus")")"
     sudo -u "#$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=$bus" \
@@ -349,7 +350,7 @@ done < <(jq -r '.captures[]? | select((.requiredPayloadFields // []) != []) | [.
 # uid, and hand the probe the session env it needs.
 run_probe_in_user_session() {
   local probe_timeout="$1" command="$2" bus uid
-  for bus in /run/user/*/bus; do
+  for bus in "$user_bus_root"/*/bus; do
     [ -S "$bus" ] || continue
     uid="$(basename "$(dirname "$bus")")"
     [ "$uid" = 0 ] && continue
@@ -412,7 +413,7 @@ done < <(jq -r '.mounts[]? | [.path,.warnPct,.failPct] | @tsv' "$inventory")
 query_unit_props() {
   local manager="$1" unit="$2" bus uid out
   if [ "$manager" = user ]; then
-    for bus in /run/user/*/bus; do
+    for bus in "$user_bus_root"/*/bus; do
       [ -S "$bus" ] || continue
       uid="$(basename "$(dirname "$bus")")"
       [ "$uid" = 0 ] && continue

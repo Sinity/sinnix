@@ -69,19 +69,20 @@ in
       cliCoreRuntime = mkHmRuntimeCheck system {
         name = "cli-core-runtime-check";
         spec = cliCoreRuntimeSpec;
-        nativeBuildInputs = [ pkgs.openssh ];
+        nativeBuildInputs = [ pkgs.openssh.out ];
         homeFiles = [ ".ssh/config" ];
         script = ''
           ssh_config="$HOME/.ssh/config"
           ssh -G -F "$ssh_config" github.com > "$TMPDIR/github-ssh-config"
           grep -qx 'batchmode yes' "$TMPDIR/github-ssh-config"
           grep -qx 'identityagent none' "$TMPDIR/github-ssh-config"
-          grep -qx 'identityfile /home/sinity/.ssh/id_ed25519' "$TMPDIR/github-ssh-config"
+          grep -qx "identityfile $HOME/.ssh/id_ed25519" "$TMPDIR/github-ssh-config"
           grep -qx 'identitiesonly yes' "$TMPDIR/github-ssh-config"
 
-          # The wildcard keeps existing agent behavior for unrelated hosts.
+          # The wildcard prevents unrelated hosts from importing keys into
+          # gpg-agent as well.
           ssh -G -F "$ssh_config" example.org > "$TMPDIR/default-ssh-config"
-          grep -qx 'addkeystoagent yes' "$TMPDIR/default-ssh-config"
+          grep -qx 'addkeystoagent false' "$TMPDIR/default-ssh-config"
         '';
       };
       cliTaskTrackingRuntime = mkHmRuntimeCheck system {

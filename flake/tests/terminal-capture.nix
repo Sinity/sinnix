@@ -160,6 +160,10 @@ in
                   command_path="$2"
                   shift 2
                   ;;
+                --output-file)
+                  output_path="$2"
+                  shift 2
+                  ;;
                 --*)
                   if (($# >= 2)) && [[ "$2" != --* ]]; then
                     shift 2

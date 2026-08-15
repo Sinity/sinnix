@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from sinnix_agent_gateway.capabilities import Capability, PolicyError, Principal
 from sinnix_agent_gateway.captures import CaptureService
 from sinnix_agent_gateway.config import GatewayConfig
@@ -61,13 +60,14 @@ def test_capture_lanes_tool_lists_only_allowed_lanes_not_every_lane_on_disk(
     result = service.lanes_visible()
 
     assert result["lanes"] == ["mpris", "router"]  # not clipboard
-    assert result["total_lanes_on_disk"] == 3  # honest about what exists but isn't shown
+    assert (
+        result["total_lanes_on_disk"] == 3
+    )  # honest about what exists but isn't shown
 
 
-def test_filter_lanes_denies_explicit_out_of_scope_request_rather_than_silently_dropping(
-    tmp_path: Path,
-) -> None:
-    cfg = config(tmp_path)
+def test_filter_lanes_denies_explicit_out_of_scope_request_rather_than_silently_dropping() -> (
+    None
+):
     principal = Principal.for_profile("remote-readonly")
 
     # An explicit ask for a denied lane is a policy error, not a silently

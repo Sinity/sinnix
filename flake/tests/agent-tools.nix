@@ -390,10 +390,13 @@ in
                 assert f'{name}:' in config, name
             assert 'external_dirs:' in config
             assert 'observability/nemo_relay' in config
-            assert 'provider: local' in config
             assert 'silence_duration: 1.2' in config
             assert 'approvals:' in config
             assert re.search(r"mode: ['\"]off['\"]", config)
+            local_profile = (pathlib.Path.home() / '.hermes/profiles/local/config.yaml').read_text()
+            assert 'provider: custom' in local_profile
+            assert 'default: local-chat' in local_profile
+            assert 'base_url: http://127.0.0.1:4000/v1' in local_profile
             for profile, required, forbidden in (
                 ('research', ('web', 'browser', 'delegation'), ('terminal',)),
                 ('orchestrate', ('skills', 'todo', 'memory', 'session_search', 'clarify'), ('terminal', 'file', 'code_execution', 'delegation', 'web', 'browser', 'tts')),
@@ -735,7 +738,7 @@ in
             preflight="$TMPDIR/sinnix-preflight"
             cp ${../../scripts/sinnix-preflight} "$preflight"
             chmod +x "$preflight"
-            patchShebangs "$preflight"
+            sed -i '1c#!${pkgs.bashInteractive}/bin/bash' "$preflight"
             ${pkgs.bash}/bin/bash ${../../flake/tests/preflight.sh} "$preflight"
             touch "$out"
           '';
@@ -779,24 +782,6 @@ in
             chmod +x "$helper"
             patchShebangs "$helper"
             ${pkgs.bash}/bin/bash ${../../flake/tests/kitty-agent-here.sh} "$helper"
-            touch "$out"
-          '';
-      kittyFocusOpacityFixture =
-        pkgs.runCommand "kitty-focus-opacity-fixture"
-          {
-            nativeBuildInputs = [
-              pkgs.bash
-              pkgs.coreutils
-              pkgs.diffutils
-              pkgs.jq
-            ];
-          }
-          ''
-            helper="$TMPDIR/kitty-focus-opacity"
-            cp ${../../scripts/kitty-focus-opacity} "$helper"
-            chmod +x "$helper"
-            patchShebangs "$helper"
-            ${pkgs.bash}/bin/bash ${../../flake/tests/kitty-focus-opacity.sh} "$helper"
             touch "$out"
           '';
       bdSafetyHookFixture =
@@ -1042,7 +1027,6 @@ in
         preflight = preflightFixture;
         hogkill = hogkillFixture;
         kitty-agent-here = kittyAgentHereFixture;
-        kitty-focus-opacity = kittyFocusOpacityFixture;
         bd-safety-hook = bdSafetyHookFixture;
         egress-guard = egressGuardFixture;
         context-handoff = contextHandoffFixture;

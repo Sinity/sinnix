@@ -23,6 +23,7 @@ Prose-level leaks (paragraphs under a surviving heading) are NOT caught —
 for sections that were restructured, read the diff; this tool bounds the
 damage, it does not replace judgment.
 """
+
 import argparse
 import json
 import re
@@ -32,16 +33,23 @@ from pathlib import Path
 
 def headings(path: Path):
     text = path.read_text(errors="replace")
-    return [re.sub(r"<[^>]+>", "", h).strip()
-            for h in re.findall(r"<h[23][^>]*>(.*?)</h[23]>", text, re.S)]
+    return [
+        re.sub(r"<[^>]+>", "", h).strip()
+        for h in re.findall(r"<h[23][^>]*>(.*?)</h[23]>", text, re.S)
+    ]
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("old", type=Path)
     ap.add_argument("new", type=Path)
-    ap.add_argument("--rename", action="append", default=[],
-                    metavar="OLD=NEW", help="declared heading rename")
+    ap.add_argument(
+        "--rename",
+        action="append",
+        default=[],
+        metavar="OLD=NEW",
+        help="declared heading rename",
+    )
     args = ap.parse_args()
     if not args.old.exists() or not args.new.exists():
         print("both files must exist", file=sys.stderr)
@@ -79,10 +87,15 @@ def main():
                 if family.startswith("_") or not isinstance(val, dict):
                     continue
                 for key, v in val.items():
-                    if isinstance(v, list) and len(v) > 2 and \
-                            key.replace("_", " ")[:12] not in new_text.lower():
-                        warnings.append(f"{family}.{key}: collected "
-                                        f"({len(v)} items) — confirm it is rendered")
+                    if (
+                        isinstance(v, list)
+                        and len(v) > 2
+                        and key.replace("_", " ")[:12] not in new_text.lower()
+                    ):
+                        warnings.append(
+                            f"{family}.{key}: collected "
+                            f"({len(v)} items) — confirm it is rendered"
+                        )
         except Exception as exc:
             warnings.append(f"sidecar unreadable: {exc}")
 
@@ -90,11 +103,13 @@ def main():
         print(f"WARN {w}")
     if leaks:
         print(f"LEAKED {len(leaks)} heading(s) from {args.old.name}:")
-        for l in leaks:
-            print(f"  - {l}")
+        for heading in leaks:
+            print(f"  - {heading}")
         return 1
-    print(f"subsumption holds: {len(old_h)} predecessor headings all present "
-          f"({len(renames)} declared rename(s))")
+    print(
+        f"subsumption holds: {len(old_h)} predecessor headings all present "
+        f"({len(renames)} declared rename(s))"
+    )
     return 0
 
 

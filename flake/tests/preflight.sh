@@ -33,6 +33,8 @@ grep -Fq 'BLOCK snapshot-headroom: free=100 KiB' <<<"$output"
 ! grep -Fq 'private.bin' <<<"$output"
 
 set +e
+printf '#!%s\nexit 0\n' "$(command -v bash)" >"$tmp/bin/pgrep"
+chmod +x "$tmp/bin/pgrep"
 SINNIX_PREFLIGHT_MEMINFO="$tmp/meminfo" "$preflight" switch >/dev/null 2>&1
 status=$?
 set -e
