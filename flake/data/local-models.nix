@@ -97,6 +97,18 @@ let
         generalist this host can run via partial offload.
       '';
     }
+    {
+      ollamaTag = "muse-glimmer";
+      litellmName = "local-glimmer";
+      role = "general-reasoning-hybrid-dense";
+      expectedBytes = null;
+      notes = ''
+        Official Muse Glimmer 30B Q4 deployment (about 17 GB). Ollama's CUDA
+        backend splits the dense model between RTX 3080 VRAM and system RAM.
+        Reasoning tier for local agent jobs and batch work; use local-glimmer
+        through LiteLLM.
+      '';
+    }
     # Experimental embedding pulls (HF GGUF, community/official builds) —
     # kept LAST in the ollama pull order so an unsupported-architecture pull
     # failure cannot block the core roster above. Verify each actually loads
@@ -154,6 +166,7 @@ let
     "local-coder-moe"
     "local-reasoner"
     "local-thinker"
+    "local-glimmer"
     "local-reader"
     "local-multimodal-moe"
   ];
