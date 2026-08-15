@@ -216,6 +216,14 @@ fallback (`sinnix-mke`). It is **CPU-only and deliberately outside the
 never has to queue behind a resident model. Do not "fix" that by adding CUDA
 or the admission key; the runtime test asserts it stays out of the mesh.
 
+`sinnix.services.muse-glimmer` (`modules/services/muse-glimmer.nix`) serves
+the official Muse Glimmer 30B Q4 GGUF directly through llama.cpp. It is a
+socket-activated, GPU-exclusive hybrid CPU/GPU service with a 1536 MiB fit
+margin and a 32K single-slot context. The model is intentionally separate
+from both the Ollama roster and the existing llama.cpp reranker because the
+current Ollama package does not load Glimmer's architecture; LiteLLM exposes
+the direct endpoint as `local-glimmer`.
+
 `pkgs/sinnix-phone-app/` is the odd one out: an Android app (Sinnix — the
 estate's phone-side member: capture, instruments, ingress, and a remote for
 prime). Kotlin/Compose built through Gradle against a license-accepting

@@ -98,13 +98,16 @@ let
       '';
     }
     {
-      ollamaTag = "muse-glimmer";
+      ollamaTag = null;
       litellmName = "local-glimmer";
       role = "general-reasoning-hybrid-dense";
       expectedBytes = null;
+      litellmModel = "openai/muse-glimmer";
+      litellmApiBase = "http://127.0.0.1:8083/v1";
       notes = ''
-        Official Muse Glimmer 30B Q4 deployment (about 17 GB). Ollama's CUDA
-        backend splits the dense model between RTX 3080 VRAM and system RAM.
+        Official Muse Glimmer 30B Q4 deployment (about 17 GB), served by the
+        dedicated llama.cpp endpoint. Its fit policy places as many layers as
+        possible on the RTX 3080 and keeps the remainder in system RAM.
         Reasoning tier for local agent jobs and batch work; use local-glimmer
         through LiteLLM.
       '';
@@ -179,7 +182,7 @@ rec {
   inherit models ollamaApiBase;
 
   # modules/services/ollama.nix `loadModels` default: plain ordered tag list.
-  ollamaLoadModels = map (m: m.ollamaTag) models;
+  ollamaLoadModels = map (m: m.ollamaTag) (lib.filter (m: m.ollamaTag != null) models);
 
   # modules/services/litellm.nix `settings.model_list`.
   litellmModelList = map (
@@ -190,8 +193,8 @@ rec {
     {
       model_name = name;
       litellm_params = {
-        model = "ollama_chat/${m.ollamaTag}";
-        api_base = ollamaApiBase;
+        model = if m ? litellmModel then m.litellmModel else "ollama_chat/${m.ollamaTag}";
+        api_base = if m ? litellmApiBase then m.litellmApiBase else ollamaApiBase;
       };
     }
   ) litellmOrder;
@@ -217,6 +220,11 @@ rec {
       file = "Qwen.Qwen3-Reranker-4B.Q4_K_M.gguf";
       url = "https://huggingface.co/DevQuasar/Qwen.Qwen3-Reranker-4B-GGUF/resolve/main/Qwen.Qwen3-Reranker-4B.Q4_K_M.gguf";
       expectedBytes = null; # populate from the completed download
+    }
+    {
+      file = "muse-glimmer-30B-kquant-17gb.gguf";
+      url = "https://huggingface.co/meta-models/Muse-Glimmer-30B-GGUF/resolve/main/muse-glimmer-30B-kquant-17gb.gguf";
+      expectedBytes = 16756681056;
     }
   ];
 }

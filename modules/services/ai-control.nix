@@ -1,6 +1,6 @@
 # sinnix-ai — on-demand control plane for the local AI services
-# (stt, tts, kokoro, ollama, litellm, llama-cpp, koboldcpp, comfyui,
-# musicgen, ocr, open-webui). The script carries the service registry; this
+# (stt, tts, kokoro, ollama, litellm, llama-cpp, muse-glimmer, koboldcpp,
+# comfyui, musicgen, ocr, open-webui). The script carries the service registry; this
 # module only installs it. See scripts/sinnix-ai.
 {
   config,
@@ -155,6 +155,16 @@ let
     readinessTimeout = 30;
     dependsOn = [ "llama-cpp" ];
   };
+  museGlimmerProxy = mkProxy {
+    name = "muse-glimmer-proxy";
+    backendUnit = "muse-glimmer.service";
+    publicEndpoint = "127.0.0.1:8083";
+    backendEndpoint = "127.0.0.1:8084";
+    idleTimeout = "900s";
+    readinessTimeout = 600;
+    exclusiveResource = "gpu-inference";
+    dependsOn = [ "muse-glimmer" ];
+  };
   litellmProxy = mkProxy {
     name = "litellm-proxy";
     backendUnit = "litellm.service";
@@ -254,6 +264,11 @@ let
       service = "ollama.service";
       proxy = "ollama-proxy.service";
     };
+    muse-glimmer = {
+      enable = config.sinnix.services.muse-glimmer.enable;
+      service = "muse-glimmer.service";
+      proxy = "muse-glimmer-proxy.service";
+    };
     koboldcpp = {
       enable = config.sinnix.services.koboldcpp.enable;
       service = "koboldcpp.service";
@@ -309,6 +324,7 @@ in
     (lib.mkIf config.sinnix.services.litellm.enable litellmProxy.sockets)
     (lib.mkIf config.sinnix.services.kokoro.enable kokoroProxy.sockets)
     (lib.mkIf config.sinnix.services.llama-cpp.enable llamaCppProxy.sockets)
+    (lib.mkIf config.sinnix.services.muse-glimmer.enable museGlimmerProxy.sockets)
     (lib.mkIf config.sinnix.services.comfyui.enable comfyuiProxy.sockets)
     (lib.mkIf config.sinnix.services.tts.enable ttsProxy.sockets)
     (lib.mkIf config.sinnix.services.musicgen.enable musicgenProxy.sockets)
@@ -321,6 +337,7 @@ in
     (lib.mkIf config.sinnix.services.litellm.enable litellmProxy.services)
     (lib.mkIf config.sinnix.services.kokoro.enable kokoroProxy.services)
     (lib.mkIf config.sinnix.services.llama-cpp.enable llamaCppProxy.services)
+    (lib.mkIf config.sinnix.services.muse-glimmer.enable museGlimmerProxy.services)
     (lib.mkIf config.sinnix.services.comfyui.enable comfyuiProxy.services)
     (lib.mkIf config.sinnix.services.tts.enable ttsProxy.services)
     (lib.mkIf config.sinnix.services.musicgen.enable musicgenProxy.services)
@@ -345,6 +362,9 @@ in
     })
     (lib.mkIf config.sinnix.services.llama-cpp.enable {
       llama-cpp-proxy = llamaCppProxy.runtimeSurface;
+    })
+    (lib.mkIf config.sinnix.services.muse-glimmer.enable {
+      muse-glimmer-proxy = museGlimmerProxy.runtimeSurface;
     })
     (lib.mkIf config.sinnix.services.comfyui.enable {
       comfyui-proxy = comfyuiProxy.runtimeSurface;

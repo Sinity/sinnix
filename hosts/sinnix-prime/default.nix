@@ -239,6 +239,10 @@
       gpuLayers = 0;
       extraFlags.reranking = true;
     };
+    muse-glimmer = {
+      enable = true;
+      model = "muse-glimmer-30B-kquant-17gb.gguf";
+    };
     kokoro.enable = true; # Kokoro-82M TTS :8880 (CPU, on-demand) — replaces edge-tts
     stt.enable = true; # speech-to-text :8090 — Parakeet TDT, CPU-only, on-demand
     comfyui = {
