@@ -41,7 +41,22 @@ in
   # llama-cpp's `cudaSupport`, which would silently no-op this
   # override if the old attr name is simply ignored rather than erroring.
   koboldcpp-cuda = aiPkgs.pkgsForCudaArch.sm_86.koboldcpp.override { cublasSupport = true; };
-  llama-cpp-cuda = aiPkgs.pkgsForCudaArch.sm_86.llama-cpp.override { cudaSupport = true; };
+  # Muse Glimmer support landed after the nixpkgs-ai package snapshot. Keep
+  # the existing CUDA package recipe and replace only its pinned upstream
+  # source until nixpkgs-ai carries b10353 or newer.
+  llama-cpp-cuda =
+    (aiPkgs.pkgsForCudaArch.sm_86.llama-cpp.override { cudaSupport = true; }).overrideAttrs
+      (_old: {
+        # llama.cpp embeds this value as a C++ integer in build-info.cpp.
+        version = "10353";
+        src = final.fetchFromGitHub {
+          owner = "ggml-org";
+          repo = "llama.cpp";
+          rev = "b10353";
+          hash = "sha256-MQP91lL8zQLYcnYw5GlkMvH5sXiES+C6L4/1G3Y6TPY=";
+        };
+        npmDepsHash = "sha256-2Q7XhaLAArmviOLdQsNbYTfdyDE5pW9lR26cRHEVl9k=";
+      });
   # Prebuilt top-level attribute upstream; narrow it the same way so
   # services/ollama.nix's `pkgs.ollama-cuda` references pick this up for free.
   ollama-cuda = aiPkgs.pkgsForCudaArch.sm_86.ollama-cuda;
