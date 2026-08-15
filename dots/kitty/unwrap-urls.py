@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import re
 
-
 URL_RE = re.compile(r"(?:https?|ftp|file)://[^\s<>\"'`]+")
 
 # A continuation is one run of URL-legal characters; internal spaces mean prose.

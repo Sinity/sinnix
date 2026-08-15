@@ -292,10 +292,6 @@ agent-window)
   fi
   ;;
 
-
-
-
-
 list | list-tabs)
   filter="."
   [[ $cmd == "list-tabs" ]] && filter='map(select(.type == "page"))'

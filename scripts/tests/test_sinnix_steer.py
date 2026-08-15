@@ -83,7 +83,9 @@ def test_activity_menu_filters_by_energy_or_any(tmp_path, monkeypatch, capsys):
         steer.cmd_activity_add(args)
     capsys.readouterr()
 
-    menu_args = steer.build_parser().parse_args(["activity", "menu", "--energy", "low", "--json"])
+    menu_args = steer.build_parser().parse_args(
+        ["activity", "menu", "--energy", "low", "--json"]
+    )
     steer.cmd_activity_menu(menu_args)
     out = capsys.readouterr().out
     assert "read a book" in out

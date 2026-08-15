@@ -25,7 +25,9 @@ def test_replaces_delve():
 
 
 def test_strip_sentence_removes_whole_sentence():
-    out = deslop("The cache is warm. I don't have personal opinions on this. The result is fast.")
+    out = deslop(
+        "The cache is warm. I don't have personal opinions on this. The result is fast."
+    )
     assert "personal opinions" not in out
     assert "cache is warm" in out
     assert "result is fast" in out

@@ -51,7 +51,11 @@ source since the last run (the watermark), not that the source is broken:
      ],
      "narrative_ref": "narrative.md",
      "flags": [
-       { "kind": "unhealthy-surface", "severity": "warning", "ref": "runtime-inventory.json#/surfaces/foo" }
+       {
+         "kind": "unhealthy-surface",
+         "severity": "warning",
+         "ref": "runtime-inventory.json#/surfaces/foo"
+       }
      ]
    }
    ```
@@ -74,5 +78,5 @@ source since the last run (the watermark), not that the source is broken:
   write `state-delta.json` with your best-effort `inputs`/`flags`, and note
   the problem in `narrative.md` rather than producing nothing. (The dump
   script itself has a separate hard failure-marker path for when the `claude
-  -p` invocation fails entirely — this invariant is about *your* output being
-  honest when you *do* run, not a duplicate of that mechanism.)
+-p` invocation fails entirely — this invariant is about _your_ output being
+  honest when you _do_ run, not a duplicate of that mechanism.)

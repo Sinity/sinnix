@@ -73,7 +73,9 @@ class CaptureService:
             return {
                 "available": False,
                 "failure_class": "collector_failed",
-                "reason": result.stderr[:2000] if result.stderr else "sinnix-capture query failed",
+                "reason": result.stderr[:2000]
+                if result.stderr
+                else "sinnix-capture query failed",
             }
 
         try:
@@ -85,7 +87,9 @@ class CaptureService:
                 "reason": "sinnix-capture query did not return valid JSON",
             }
 
-        records = payload.get("records", payload) if isinstance(payload, dict) else payload
+        records = (
+            payload.get("records", payload) if isinstance(payload, dict) else payload
+        )
         if isinstance(records, list):
             records = records[: max(0, limit)]
 

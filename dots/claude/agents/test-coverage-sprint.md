@@ -39,6 +39,7 @@ Execute in strict phase order. Do NOT skip phases.
 ### Phase 1: Baseline & Blocking Failures (MUST complete first)
 
 1. **Detect project type:**
+
    ```bash
    # Python
    [ -f pyproject.toml ] || [ -f setup.py ] && echo "python"
@@ -49,6 +50,7 @@ Execute in strict phase order. Do NOT skip phases.
    ```
 
 2. **Get baseline coverage:**
+
    ```bash
    # Python (pytest-cov)
    uv run pytest --cov=<package> --cov-report=term-missing --ignore=tests/test_external.py 2>&1 | tail -60
@@ -73,14 +75,15 @@ Execute in strict phase order. Do NOT skip phases.
 
 Score each uncovered/low-coverage module:
 
-| Criterion | Weight |
-|-----------|--------|
-| 0% coverage | +3 |
-| Business logic (not UI) | +2 |
-| External integrations | +1 |
-| Pure utilities | +1 |
+| Criterion               | Weight |
+| ----------------------- | ------ |
+| 0% coverage             | +3     |
+| Business logic (not UI) | +2     |
+| External integrations   | +1     |
+| Pure utilities          | +1     |
 
 **Skip** (low ROI):
+
 - UI/presentation layers
 - Generated code
 - Vendor/third-party
@@ -104,6 +107,7 @@ For each target module:
    - Match naming conventions
 
 5. **Run tests immediately after writing:**
+
    ```bash
    uv run pytest tests/test_<new_module>.py -v
    ```
@@ -115,16 +119,19 @@ For each target module:
 ### Phase 4: Verification
 
 1. **Full regression:**
+
    ```bash
    uv run pytest tests/ --ignore=tests/test_external.py
    ```
 
 2. **Final coverage:**
+
    ```bash
    uv run pytest tests/ --cov=<package> --cov-report=term --ignore=tests/test_external.py
    ```
 
 3. **Report results:**
+
    ```
    ## Coverage Sprint Results
 
@@ -148,6 +155,7 @@ For each target module:
 ## Test Patterns Library
 
 ### Service/Repository Tests
+
 ```python
 class TestServiceName:
     @pytest.fixture
@@ -164,6 +172,7 @@ class TestServiceName:
 ```
 
 ### Utility/Formatter Tests
+
 ```python
 class TestFormatFunction:
     def test_formats_normal_input(self):
@@ -177,6 +186,7 @@ class TestFormatFunction:
 ```
 
 ### Database-Dependent Tests
+
 ```python
 def test_roundtrip(self, workspace_env, storage_repository):
     db_path = workspace_env["state_root"] / "app" / "app.db"
@@ -214,6 +224,7 @@ When a test fails unexpectedly:
 ## Escalation
 
 Stop and return to parent agent if:
+
 - Cannot determine project type
 - No existing test patterns to follow
 - Architectural ambiguity about what to test

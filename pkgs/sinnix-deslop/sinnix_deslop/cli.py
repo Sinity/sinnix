@@ -12,7 +12,11 @@ def main() -> int:
     ap = argparse.ArgumentParser(prog="sinnix-deslop", description=__doc__)
     ap.add_argument("file", nargs="?", help="file to clean (default: stdin)")
     ap.add_argument("--rules", help="override path to a phrases.txt-format rule file")
-    ap.add_argument("--in-place", action="store_true", help="rewrite the input file instead of printing")
+    ap.add_argument(
+        "--in-place",
+        action="store_true",
+        help="rewrite the input file instead of printing",
+    )
     args = ap.parse_args()
 
     rules = load_rules(args.rules)

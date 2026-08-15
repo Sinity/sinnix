@@ -249,11 +249,10 @@ Each of these exists because its absence shipped a real defect:
    automated check above.
 6. **When revising or superseding an existing report, run
    `generators/check-superset.py OLD.html NEW.html`** (with `--rename
-   "old=new"` for each deliberately retitled section) and ship only on exit
-   0. LLM iteration smears: regeneration-from-memory silently drops whatever
+"old=new"` for each deliberately retitled section) and ship only on exit 0. LLM iteration smears: regeneration-from-memory silently drops whatever
    wasn't actively recalled — a real lineage lost seven units including two
    whole sections before this check existed (2026-08-12). Every dropped
-   heading must be either restored or a *declared* rename; "I rewrote it
+   heading must be either restored or a _declared_ rename; "I rewrote it
    better" is what the leak looks like from the inside.
 
 ## Data-derived reports (when the content came from a system)

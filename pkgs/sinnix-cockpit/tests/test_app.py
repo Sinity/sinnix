@@ -4,7 +4,6 @@ import sqlite3
 
 import pytest
 from fastapi.testclient import TestClient
-
 from sinnix_cockpit import store
 from sinnix_cockpit.app import app
 
