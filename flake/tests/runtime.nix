@@ -80,6 +80,11 @@ in
       };
       evaluated = evalTestSpec system spec;
       inventoryJson = builtins.toJSON evaluated.config.sinnix.runtime.inventory;
+      localModels = import ../data/local-models.nix { inherit lib; };
+      localModelRosterJson = builtins.toJSON {
+        models = localModels.models;
+        inherit (localModels) ollamaLoadModels litellmModelList;
+      };
       aiActivationSpec = mkFeatureTest {
         name = "ai-activation";
         feature = "sinnix.features.cli.polylogue.enable";
@@ -425,6 +430,22 @@ in
               .surfaces.ocr.activation.mode == "socket-proxy" and
               .surfaces["ocr-proxy"].activation.publicEndpoint == "127.0.0.1:8020"
             ' inventory.json >/dev/null
+            touch "$out"
+          '';
+      checks.local-model-roster =
+        pkgs.runCommand "local-model-roster-check"
+          {
+            nativeBuildInputs = [ pkgs.jq ];
+          }
+          ''
+            cat > roster.json <<'EOF_ROSTER'
+            ${localModelRosterJson}
+            EOF_ROSTER
+            jq -e '
+              any(.models[]; .ollamaTag == "muse-glimmer" and .litellmName == "local-glimmer" and .role == "general-reasoning-hybrid-dense") and
+              any(.ollamaLoadModels[]; . == "muse-glimmer") and
+              any(.litellmModelList[]; .model_name == "local-glimmer" and .litellm_params.model == "ollama_chat/muse-glimmer")
+            ' roster.json >/dev/null
             touch "$out"
           '';
       checks.hyprland-groups =
