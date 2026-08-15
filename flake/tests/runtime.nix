@@ -97,6 +97,7 @@ in
             sinnix.services.stt.enable = true;
             sinnix.services.tts.enable = true;
             sinnix.services.llama-cpp.enable = true;
+            sinnix.services.muse-glimmer.enable = true;
             sinnix.services.comfyui.enable = true;
             sinnix.services.musicgen.enable = true;
             sinnix.services.ocr.enable = true;
@@ -193,6 +194,21 @@ in
           {
             assertion = config.systemd.sockets.llama-cpp-proxy.listenStreams == [ "127.0.0.1:8081" ];
             message = "llama-cpp must expose only its socket-activated loopback front door";
+          }
+          {
+            assertion =
+              config.systemd.sockets.muse-glimmer-proxy.listenStreams == [ "127.0.0.1:8083" ]
+              &&
+                config.sinnix.runtime.inventory.surfaces.muse-glimmer-proxy.activation.backendEndpoint
+                == "127.0.0.1:8084";
+            message = "Muse Glimmer must expose its dedicated socket-activated loopback endpoint";
+          }
+          {
+            assertion =
+              lib.hasInfix "--fit-target 1536" config.systemd.services.muse-glimmer.serviceConfig.ExecStart
+              && lib.hasInfix "--ctx-size 32768" config.systemd.services.muse-glimmer.serviceConfig.ExecStart
+              && lib.hasInfix "--parallel 1" config.systemd.services.muse-glimmer.serviceConfig.ExecStart;
+            message = "Muse Glimmer must retain the bounded hybrid inference profile";
           }
           {
             assertion =
@@ -311,6 +327,10 @@ in
                     "podman-ocr.service"
                     "ocr-proxy.service"
                   ];
+                  muse-glimmer = [
+                    "muse-glimmer.service"
+                    "muse-glimmer-proxy.service"
+                  ];
                 };
                 unitConflicts =
                   unit: config.systemd.services.${lib.removeSuffix ".service" unit}.unitConfig.Conflicts;
@@ -351,6 +371,8 @@ in
                   "musicgen-proxy.service"
                   "podman-ocr.service"
                   "ocr-proxy.service"
+                  "muse-glimmer.service"
+                  "muse-glimmer-proxy.service"
                 ];
                 unitConflicts =
                   unit: config.systemd.services.${lib.removeSuffix ".service" unit}.unitConfig.Conflicts or [ ];
@@ -442,9 +464,9 @@ in
             ${localModelRosterJson}
             EOF_ROSTER
             jq -e '
-              any(.models[]; .ollamaTag == "muse-glimmer" and .litellmName == "local-glimmer" and .role == "general-reasoning-hybrid-dense") and
-              any(.ollamaLoadModels[]; . == "muse-glimmer") and
-              any(.litellmModelList[]; .model_name == "local-glimmer" and .litellm_params.model == "ollama_chat/muse-glimmer")
+              any(.models[]; .ollamaTag == null and .litellmName == "local-glimmer" and .role == "general-reasoning-hybrid-dense") and
+              (any(.ollamaLoadModels[]; . == "muse-glimmer") | not) and
+              any(.litellmModelList[]; .model_name == "local-glimmer" and .litellm_params.model == "openai/muse-glimmer" and .litellm_params.api_base == "http://127.0.0.1:8083/v1")
             ' roster.json >/dev/null
             touch "$out"
           '';

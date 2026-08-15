@@ -76,6 +76,10 @@
     public = 8081; # reranker (/v1/rerank)
     backend = 8082;
   };
+  museGlimmer = {
+    public = 8083; # direct OpenAI-compatible Glimmer endpoint
+    backend = 8084;
+  };
 
   # ── Other ────────────────────────────────────────────────────────────────
   chromeDevtools = 9222; # live Chrome remote-debugging port
