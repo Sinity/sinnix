@@ -200,7 +200,9 @@ mkServiceModule {
     {
       systemd.tmpfiles.rules = [
         "d ${realmRoot}/db 0755 root root -"
-        "d ${dataRoot} 0755 root users -"
+        # Group-writable: operator-run producers (sinnix-census) create files
+        # here, which 0755 blocks even though appends would succeed.
+        "d ${dataRoot} 0775 root users -"
         "d ${dataDir}/experiments 0775 root users -"
         "d ${dataDir}/legacy 0775 root users -"
         "d ${backupRoot} 0700 ${username} users -"
