@@ -9,6 +9,7 @@ import androidx.health.connect.client.records.BloodPressureRecord
 import androidx.health.connect.client.records.BodyTemperatureRecord
 import androidx.health.connect.client.records.DistanceRecord
 import androidx.health.connect.client.records.ElevationGainedRecord
+import androidx.health.connect.client.records.ExerciseRouteResult
 import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.HeartRateRecord
 import androidx.health.connect.client.records.HeartRateVariabilityRmssdRecord
@@ -22,6 +23,8 @@ import androidx.health.connect.client.records.StepsRecord
 import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
 import androidx.health.connect.client.records.Vo2MaxRecord
 import androidx.health.connect.client.records.WeightRecord
+import androidx.health.connect.client.records.metadata.Device
+import androidx.health.connect.client.records.metadata.Metadata
 import androidx.health.connect.client.changes.DeletionChange
 import androidx.health.connect.client.changes.UpsertionChange
 import androidx.health.connect.client.request.ChangesTokenRequest
@@ -113,7 +116,8 @@ object HealthLane {
     val PERMISSIONS: Set<String> =
         TYPES.map { HealthPermission.getReadPermission(it) }.toSet() +
             HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY +
-            HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND
+            HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND +
+            "android.permission.health.READ_EXERCISE_ROUTES"
 
     fun availability(ctx: Context): String =
         when (HealthConnectClient.getSdkStatus(ctx)) {
@@ -124,26 +128,27 @@ object HealthLane {
 
 
     private const val PREFS = "sinnix-phone-health"
-    private const val KEY_TOKEN = "changes_token"
-    private const val KEY_BACKFILL_GEN = "backfill_generation"
+    private const val KEY_LEGACY_TOKEN = "changes_token"
 
     /**
      * Bump this to re-sweep everything Health Connect holds.
      *
      * Generation 1 swept 30 days, because that is all a client without
-     * READ_HEALTH_DATA_HISTORY is permitted to see. Generation 2 sweeps with no
-     * lower bound at all, which with that permission granted reaches the whole
-     * retained history -- on this device that includes Samsung Health records
-     * from the Galaxy Watch 5 era, predating the band entirely.
+     * READ_HEALTH_DATA_HISTORY is permitted to see. Generation 2 removed the
+     * lower bound -- and then read exactly one page per type, because
+     * readRecords defaults to 1,000 records and nothing followed pageToken.
+     * The lake shows the fingerprint: 1,390 Samsung heart-rate records is the
+     * ~390 already held plus one full page, with the span in between silently
+     * absent while the min/max timestamps made coverage look continuous.
+     * Generation 3 exists to re-run that sweep with pagination actually
+     * followed to the end.
      *
      * A re-sweep deliberately RE-EMITS records already captured. That is the
-     * point: the operator asked for the old data alongside what we hold so the
-     * two can be compared, and a lane that refuses to repeat itself cannot
-     * answer "did this change?". Every event carries both the record's own
-     * timestamps and the emit time, so duplicates are separable downstream and
-     * a re-read is never destructive.
+     * point: every event carries the record's Health Connect id, modification
+     * time and the emit time, so a re-read is separable downstream and never
+     * destructive.
      */
-    private const val BACKFILL_GENERATION = 2
+    private const val BACKFILL_GENERATION = 3
 
     private fun prefs(ctx: Context) = ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -202,32 +207,49 @@ object HealthLane {
             if (granted.isEmpty()) return 0
         }
 
-        val stored = prefs(ctx).getString(KEY_TOKEN, null)
-        val gen = prefs(ctx).getInt(KEY_BACKFILL_GEN, 0)
-        // A widened window is indistinguishable from a first run as far as the
-        // sweep is concerned, so the generation drives both. This is what makes
-        // "pull more history" a constant change rather than a manual re-install.
-        return if (stored == null || gen < BACKFILL_GENERATION) {
-            backfill(ctx, client)
-        } else {
-            incremental(ctx, client, stored)
+        // One retirement of the old single-token, whole-lane state. From here
+        // every type carries its own token and its own sweep-complete flag, so
+        // one failing or permission-revoked type stalls itself and nothing
+        // else -- and a DeletionChange arrives on a feed that knows its type,
+        // which the combined feed deliberately withholds for privacy.
+        prefs(ctx).edit().remove(KEY_LEGACY_TOKEN).apply()
+
+        var written = 0
+        TYPES.forEach { type ->
+            written +=
+                if (!prefs(ctx).getBoolean(sweptKey(type), false)) {
+                    sweep(ctx, client, type)
+                } else {
+                    incremental(ctx, client, type)
+                }
         }
+        return written
     }
 
+    private fun sweptKey(type: KClass<out Record>) = "swept:$BACKFILL_GENERATION:${type.simpleName}"
+    private fun tokenKey(type: KClass<out Record>) = "token:${type.simpleName}"
+
     /**
-     * First run, or recovery after an expired token: sweep a wide window by
-     * measurement time, then take a token so every later run is incremental.
+     * Full-history sweep of one type: every page until pageToken runs out.
      *
-     * The token is taken BEFORE the sweep on purpose. Anything inserted during
-     * the sweep is then delivered again by the changes feed rather than falling
-     * between the two -- a duplicate is a nuisance, a hole is not recoverable.
+     * The changes token is taken BEFORE the sweep on purpose. Anything
+     * inserted during the sweep is then delivered again by the changes feed
+     * rather than falling between the two -- a duplicate is a nuisance, a hole
+     * is not recoverable.
+     *
+     * Nothing is persisted unless the LAST page was read: a sweep that threw
+     * on page three runs again in full next tick, because "swept" must mean
+     * "to the end", not "started". The generation-2 importer marked itself complete
+     * after one unpaged read per type, which is how five months of apparent
+     * coverage turned out to be two disconnected blocks.
      */
-    private suspend fun backfill(ctx: Context, client: HealthConnectClient): Int {
+    private suspend fun sweep(ctx: Context, client: HealthConnectClient, type: KClass<out Record>): Int {
         val token =
             try {
-                client.getChangesToken(ChangesTokenRequest(recordTypes = TYPES.toSet()))
+                client.getChangesToken(ChangesTokenRequest(recordTypes = setOf(type)))
             } catch (e: Exception) {
-                Events.record(ctx, "lane_blocked", "lane", "health", "reason", "token: ${e.message}")
+                Events.record(ctx, "lane_blocked", "lane", "health",
+                    "reason", "token ${type.simpleName}: ${e.message}")
                 return 0
             }
         // No lower bound. `before` asks for everything up to now, so the window
@@ -235,46 +257,57 @@ object HealthLane {
         // guessed -- and guessing is how the previous 30 hid the Samsung era.
         val range = TimeRangeFilter.before(Instant.now())
         var written = 0
-        TYPES.forEach { type ->
-            written +=
-                try {
-                    val page = client.readRecords(ReadRecordsRequest(type, range))
-                    page.records.count { emit(ctx, it) }
-                } catch (e: Exception) {
-                    Log.w(Storage.TAG, "health: ${type.simpleName} unreadable", e)
-                    0
-                }
+        var pages = 0
+        try {
+            var pageToken: String? = null
+            do {
+                val page = client.readRecords(ReadRecordsRequest(type, range, pageToken = pageToken))
+                pages++
+                written += page.records.count { emit(ctx, it) }
+                pageToken = page.pageToken
+            } while (pageToken != null)
+        } catch (e: Exception) {
+            Log.w(Storage.TAG, "health: ${type.simpleName} sweep failed on page ${pages + 1}", e)
+            Events.record(ctx, "health_sweep_failed", "type", type.simpleName,
+                "pages_read", pages, "records_emitted", written, "reason", e.message)
+            return written
         }
-        prefs(ctx).edit().putString(KEY_TOKEN, token).putInt(KEY_BACKFILL_GEN, BACKFILL_GENERATION).apply()
-        Events.record(ctx, "health_backfill", "records", written, "generation", BACKFILL_GENERATION, "window", "all")
+        prefs(ctx).edit().putString(tokenKey(type), token).putBoolean(sweptKey(type), true).apply()
+        Events.record(ctx, "health_backfill", "type", type.simpleName, "records", written,
+            "pages", pages, "generation", BACKFILL_GENERATION, "window", "all")
         return written
     }
 
-    /** Everything inserted since the stored token, following `hasMore` to the end. */
-    private suspend fun incremental(ctx: Context, client: HealthConnectClient, startToken: String): Int {
-        var token = startToken
+    /** Everything inserted for one type since its stored token, following `hasMore` to the end. */
+    private suspend fun incremental(ctx: Context, client: HealthConnectClient, type: KClass<out Record>): Int {
+        var token = prefs(ctx).getString(tokenKey(type), null)
+            ?: return sweep(ctx, client, type)
         var written = 0
-        var deleted = 0
         while (true) {
             val response =
                 try {
                     client.getChanges(token)
                 } catch (e: Exception) {
-                    Log.w(Storage.TAG, "health: changes unreadable", e)
+                    Log.w(Storage.TAG, "health: ${type.simpleName} changes unreadable", e)
                     return written
                 }
             if (response.changesTokenExpired) {
                 // Health Connect drops tokens after ~30 days of not being
                 // asked. Falling back to a window sweep is the documented
                 // recovery and re-establishes a token in the same pass.
-                Events.record(ctx, "health_token_expired", "action", "backfill")
-                prefs(ctx).edit().remove(KEY_TOKEN).apply()
-                return written + backfill(ctx, client)
+                Events.record(ctx, "health_token_expired", "type", type.simpleName, "action", "sweep")
+                prefs(ctx).edit().remove(tokenKey(type)).remove(sweptKey(type)).apply()
+                return written + sweep(ctx, client, type)
             }
             response.changes.forEach { change ->
                 when (change) {
                     is UpsertionChange -> if (emit(ctx, change.record)) written++
-                    is DeletionChange -> deleted++
+                    // The id is the entire value of a deletion: it is what
+                    // lets a downstream store tombstone the right record
+                    // instead of holding a count of unidentifiable losses.
+                    is DeletionChange ->
+                        Events.record(ctx, "health_deletion",
+                            "type", type.simpleName, "record_id", change.recordId)
                     else -> Unit
                 }
             }
@@ -284,8 +317,7 @@ object HealthLane {
         // Only now, and only because every page above was read without
         // throwing. A token advanced past unread changes is data loss with no
         // symptom.
-        prefs(ctx).edit().putString(KEY_TOKEN, token).apply()
-        if (deleted > 0) Events.record(ctx, "health_deletions", "count", deleted)
+        prefs(ctx).edit().putString(tokenKey(type), token).apply()
         return written
     }
 
@@ -295,14 +327,62 @@ object HealthLane {
      * Returns false for a type nobody has written an emitter for, so an
      * unhandled type is counted as unhandled rather than counted as captured.
      */
+    /**
+     * The identity block every event carries, straight off the record's
+     * Health Connect metadata.
+     *
+     * `record_id` is what makes two reads of one record recognizable as one
+     * record: the band's overnight session is UPDATED as Mi Fitness refines
+     * it, and the changes feed re-delivers each revision. Without the id the
+     * lake shows three sleeps where there was one night growing -- which is
+     * exactly what the 2026-08-16 rows show. `modified` orders the revisions,
+     * `recording_method` separates a sensor reading from a manual entry, and
+     * the device fields distinguish a Galaxy Watch record from one Samsung
+     * Health synthesized itself.
+     */
+    private fun meta(r: Record): Array<Any?> {
+        val m = r.metadata
+        return arrayOf(
+            "source", m.dataOrigin.packageName,
+            "record_id", m.id,
+            "modified", Stamps.iso(m.lastModifiedTime.toEpochMilli()),
+            "client_record_id", m.clientRecordId,
+            "client_record_version", m.clientRecordVersion,
+            "recording_method", recordingMethodName(m.recordingMethod),
+            "device_manufacturer", m.device?.manufacturer,
+            "device_model", m.device?.model,
+            "device_type", m.device?.let { deviceTypeName(it.type) },
+        )
+    }
+
+    private fun recordingMethodName(method: Int): String =
+        when (method) {
+            Metadata.RECORDING_METHOD_ACTIVELY_RECORDED -> "actively_recorded"
+            Metadata.RECORDING_METHOD_AUTOMATICALLY_RECORDED -> "automatically_recorded"
+            Metadata.RECORDING_METHOD_MANUAL_ENTRY -> "manual_entry"
+            else -> "unknown"
+        }
+
+    private fun deviceTypeName(type: Int): String =
+        when (type) {
+            Device.TYPE_WATCH -> "watch"
+            Device.TYPE_PHONE -> "phone"
+            Device.TYPE_SCALE -> "scale"
+            Device.TYPE_RING -> "ring"
+            Device.TYPE_HEAD_MOUNTED -> "head_mounted"
+            Device.TYPE_FITNESS_BAND -> "fitness_band"
+            Device.TYPE_CHEST_STRAP -> "chest_strap"
+            Device.TYPE_SMART_DISPLAY -> "smart_display"
+            else -> "unknown"
+        }
+
     private fun emit(ctx: Context, r: Record): Boolean {
-        val src = r.metadata.dataOrigin.packageName
         when (r) {
             is StepsRecord ->
                 Events.record(ctx, "health_steps",
                     "count", r.count,
                     "start", Stamps.iso(r.startTime.toEpochMilli()),
-                    "end", Stamps.iso(r.endTime.toEpochMilli()), "source", src)
+                    "end", Stamps.iso(r.endTime.toEpochMilli()), *meta(r))
 
             // The full sample series, not a summary of it. Mean/min/max ride
             // along because they are free and most queries want them, but they
@@ -317,7 +397,7 @@ object HealthLane {
                     "min_bpm", bpms.minOrNull(),
                     "max_bpm", bpms.maxOrNull(),
                     "start", Stamps.iso(r.startTime.toEpochMilli()),
-                    "end", Stamps.iso(r.endTime.toEpochMilli()), "source", src)
+                    "end", Stamps.iso(r.endTime.toEpochMilli()), *meta(r))
             }
 
             // Stages by name and boundary, which is the entire point of wearing
@@ -338,39 +418,39 @@ object HealthLane {
                     "end", Stamps.iso(r.endTime.toEpochMilli()),
                     "minutes", (r.endTime.toEpochMilli() - r.startTime.toEpochMilli()) / 60_000L,
                     "stage_count", r.stages.size, "stages", stages,
-                    "title", r.title, "source", src)
+                    "title", r.title, *meta(r))
             }
 
             is OxygenSaturationRecord ->
                 Events.record(ctx, "health_spo2", "percentage", r.percentage.value,
-                    "time", Stamps.iso(r.time.toEpochMilli()), "source", src)
+                    "time", Stamps.iso(r.time.toEpochMilli()), *meta(r))
 
             is HeartRateVariabilityRmssdRecord ->
                 Events.record(ctx, "health_hrv", "rmssd_ms", r.heartRateVariabilityMillis,
-                    "time", Stamps.iso(r.time.toEpochMilli()), "source", src)
+                    "time", Stamps.iso(r.time.toEpochMilli()), *meta(r))
 
             is RespiratoryRateRecord ->
                 Events.record(ctx, "health_respiratory_rate", "breaths_per_minute", r.rate,
-                    "time", Stamps.iso(r.time.toEpochMilli()), "source", src)
+                    "time", Stamps.iso(r.time.toEpochMilli()), *meta(r))
 
             is RestingHeartRateRecord ->
                 Events.record(ctx, "health_resting_heart_rate", "bpm", r.beatsPerMinute,
-                    "time", Stamps.iso(r.time.toEpochMilli()), "source", src)
+                    "time", Stamps.iso(r.time.toEpochMilli()), *meta(r))
 
             is ActiveCaloriesBurnedRecord ->
                 Events.record(ctx, "health_active_calories", "kcal", r.energy.inKilocalories,
                     "start", Stamps.iso(r.startTime.toEpochMilli()),
-                    "end", Stamps.iso(r.endTime.toEpochMilli()), "source", src)
+                    "end", Stamps.iso(r.endTime.toEpochMilli()), *meta(r))
 
             is TotalCaloriesBurnedRecord ->
                 Events.record(ctx, "health_total_calories", "kcal", r.energy.inKilocalories,
                     "start", Stamps.iso(r.startTime.toEpochMilli()),
-                    "end", Stamps.iso(r.endTime.toEpochMilli()), "source", src)
+                    "end", Stamps.iso(r.endTime.toEpochMilli()), *meta(r))
 
             is DistanceRecord ->
                 Events.record(ctx, "health_distance", "meters", r.distance.inMeters,
                     "start", Stamps.iso(r.startTime.toEpochMilli()),
-                    "end", Stamps.iso(r.endTime.toEpochMilli()), "source", src)
+                    "end", Stamps.iso(r.endTime.toEpochMilli()), *meta(r))
 
             is SpeedRecord ->
                 Events.record(ctx, "health_speed",
@@ -378,12 +458,12 @@ object HealthLane {
                     "mps", JSONArray(r.samples.map { it.speed.inMetersPerSecond }),
                     "sample_times", JSONArray(r.samples.map { Stamps.iso(it.time.toEpochMilli()) }),
                     "start", Stamps.iso(r.startTime.toEpochMilli()),
-                    "end", Stamps.iso(r.endTime.toEpochMilli()), "source", src)
+                    "end", Stamps.iso(r.endTime.toEpochMilli()), *meta(r))
 
             is ElevationGainedRecord ->
                 Events.record(ctx, "health_elevation", "meters", r.elevation.inMeters,
                     "start", Stamps.iso(r.startTime.toEpochMilli()),
-                    "end", Stamps.iso(r.endTime.toEpochMilli()), "source", src)
+                    "end", Stamps.iso(r.endTime.toEpochMilli()), *meta(r))
 
             is ExerciseSessionRecord ->
                 Events.record(ctx, "health_exercise",
@@ -391,27 +471,40 @@ object HealthLane {
                     "start", Stamps.iso(r.startTime.toEpochMilli()),
                     "end", Stamps.iso(r.endTime.toEpochMilli()),
                     "minutes", (r.endTime.toEpochMilli() - r.startTime.toEpochMilli()) / 60_000L,
-                    "source", src)
+                    "segments", r.segments.size, "laps", r.laps.size,
+                    // A route written by another app returns ConsentRequired
+                    // from a background read no matter what is granted; the
+                    // per-route consent is a foreground UI act. So this field
+                    // is a pending-work marker, not a route: "consent_required"
+                    // means GPS points exist and are one deliberate tap away
+                    // from being lost with the session's retention.
+                    "route",
+                    when (r.exerciseRouteResult) {
+                        is ExerciseRouteResult.Data -> "data"
+                        is ExerciseRouteResult.ConsentRequired -> "consent_required"
+                        else -> "none"
+                    },
+                    *meta(r))
 
             is Vo2MaxRecord ->
                 Events.record(ctx, "health_vo2max",
                     "ml_per_min_per_kg", r.vo2MillilitersPerMinuteKilogram,
                     "measurement_method", r.measurementMethod,
-                    "time", Stamps.iso(r.time.toEpochMilli()), "source", src)
+                    "time", Stamps.iso(r.time.toEpochMilli()), *meta(r))
 
             is BodyTemperatureRecord ->
                 Events.record(ctx, "health_body_temperature", "celsius", r.temperature.inCelsius,
-                    "time", Stamps.iso(r.time.toEpochMilli()), "source", src)
+                    "time", Stamps.iso(r.time.toEpochMilli()), *meta(r))
 
             is BloodPressureRecord ->
                 Events.record(ctx, "health_blood_pressure",
                     "systolic_mmhg", r.systolic.inMillimetersOfMercury,
                     "diastolic_mmhg", r.diastolic.inMillimetersOfMercury,
-                    "time", Stamps.iso(r.time.toEpochMilli()), "source", src)
+                    "time", Stamps.iso(r.time.toEpochMilli()), *meta(r))
 
             is WeightRecord ->
                 Events.record(ctx, "health_weight", "kg", r.weight.inKilograms,
-                    "time", Stamps.iso(r.time.toEpochMilli()), "source", src)
+                    "time", Stamps.iso(r.time.toEpochMilli()), *meta(r))
 
             else -> return false
         }
