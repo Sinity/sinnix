@@ -26,6 +26,7 @@ object Prefs {
     private const val KEY_SLEEP_DETECT = "sleep_detect_enabled"
     private const val KEY_POWER = "power_lane_enabled"
     private const val KEY_HR_LIVE = "hr_live_lane_enabled"
+    private const val KEY_USAGE = "usage_lane_enabled"
     private const val KEY_WAKE_HOUR = "wake_hour"
     private const val KEY_WAKE_MINUTE = "wake_minute"
     private const val KEY_WAKE_ARMED = "wake_armed"
@@ -159,6 +160,12 @@ object Prefs {
 
     fun setSleepDetect(ctx: Context, value: Boolean) =
         prefs(ctx).edit().putBoolean(KEY_SLEEP_DETECT, value).apply()
+
+    /** App/screen/keyguard history from the system's usage ledger. */
+    fun usageLane(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_USAGE, true)
+
+    fun setUsageLane(ctx: Context, value: Boolean) =
+        prefs(ctx).edit().putBoolean(KEY_USAGE, value).apply()
 
     /** Live heart rate over BLE HRS, straight from the band. */
     fun heartRateLane(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_HR_LIVE, true)

@@ -56,6 +56,7 @@ class AmbientService : Service() {
     private var inbox: InboxWatcher? = null
     private var passive: PassiveLanes? = null
     private var heartRate: HeartRateLane? = null
+    private var usage: UsageLane? = null
     private var location: dev.sinnix.phone.ingress.LocationLane? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -82,6 +83,7 @@ class AmbientService : Service() {
         inbox = InboxWatcher(this).also { it.start() }
         passive = PassiveLanes(this)
         heartRate = HeartRateLane(this)
+        usage = UsageLane(this)
         location = dev.sinnix.phone.ingress.LocationLane(this).also { it.start() }
         // The capture preference lives in credential-protected storage, which
         // a locked boot cannot read. Mirroring it here — from the one place
@@ -323,6 +325,7 @@ class AmbientService : Service() {
         // and would cost a wakeup anywhere else.
         passive?.tick()
         heartRate?.tick()
+        usage?.tick()
 
         // A chunk whose file has stopped growing means the recorder has stopped
         // producing frames while still believing it is running.

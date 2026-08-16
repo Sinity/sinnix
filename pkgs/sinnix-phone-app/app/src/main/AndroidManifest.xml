@@ -6,7 +6,8 @@
   standing acceptance criterion. Raising the target needs a Direct Boot design
   first, not a version bump.
 -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
   <!-- Capture -->
   <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -58,10 +59,23 @@
        ConsentRequired by design), so today this permission only makes the
        route's existence visible. The lane records that state honestly. -->
   <uses-permission android:name="android.permission.health.READ_EXERCISE_ROUTES" />
+  <uses-permission android:name="android.permission.health.READ_FLOORS_CLIMBED" />
+  <uses-permission android:name="android.permission.health.READ_SKIN_TEMPERATURE" />
+  <uses-permission android:name="android.permission.health.READ_BLOOD_GLUCOSE" />
+  <uses-permission android:name="android.permission.health.READ_BODY_FAT" />
+  <uses-permission android:name="android.permission.health.READ_BASAL_METABOLIC_RATE" />
+  <uses-permission android:name="android.permission.health.READ_HEIGHT" />
+  <uses-permission android:name="android.permission.health.READ_HYDRATION" />
   <!-- Live heart rate from the band over the standard BLE Heart Rate
        Service. Connect only, to an already-bonded device: no scan, no
        location entanglement. -->
   <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+  <!-- The system's own app/screen/keyguard ledger, replacing the
+       ActivityWatch watcher. Special appop, not a runtime grant:
+       `appops set dev.sinnix.phone GET_USAGE_STATS allow`. -->
+  <uses-permission
+      android:name="android.permission.PACKAGE_USAGE_STATS"
+      tools:ignore="ProtectedPermissions" />
 
   <!--
     The two that are not record types, and that decide whether the lane sees
