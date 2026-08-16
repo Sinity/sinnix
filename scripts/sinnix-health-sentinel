@@ -104,6 +104,9 @@ describe() {
       else
         body="$body"$'\n'"Look: journalctl -u $unit -e"
       fi ;;
+    service_failure:acknowledged)
+      title="$unit is down, as expected"
+      body="A known outage, acknowledged in the runtime inventory: $(evidence_field "$evidence" acknowledged_ref)" ;;
     service_failure:unknown)
       title="Cannot tell whether $unit is healthy"
       body="The sentinel could not read its state, so this is neither a pass nor a failure." ;;
@@ -246,7 +249,12 @@ emit() {
   title="${described%%$'\t'*}"
   body="${described#*$'\t'}"
 
-  if [ "$status" = "healthy" ]; then
+  if [ "$status" = "acknowledged" ]; then
+    # Recorded in the ledger, never paged: the operator already knows, and
+    # a notification for a known outage is exactly the noise the
+    # acknowledgement exists to remove.
+    :
+  elif [ "$status" = "healthy" ]; then
     # Only notify a recovery if we announced the outage: an empty $confirmed
     # means this key has never transitioned before (steady-state startup),
     # not "it came back". Must be a real if/fi, not
@@ -499,7 +507,7 @@ query_unit_props() {
   printf '%s\n' "$out"
 }
 
-while IFS=$'\t' read -r manager unit activation_mode; do
+while IFS=$'\t' read -r manager unit activation_mode acknowledged_down acknowledged_ref; do
   [ -n "$unit" ] || continue
   active_state=
   unit_type=
@@ -567,8 +575,17 @@ while IFS=$'\t' read -r manager unit activation_mode; do
     status=unknown
     evidence="manager=$manager;active_state=$active_state"
   fi
+  # An acknowledged outage is expected, so it must not be scored as a
+  # failure -- but it is deliberately NOT silenced: the surface still emits,
+  # carrying its acknowledgement reference, so it appears in the ledger and
+  # in `sinnix observe` as known-down rather than disappearing. An ack that
+  # outlives its reason should be embarrassing to look at, not invisible.
+  if [ "$acknowledged_down" = true ] && [ "$status" = failed ]; then
+    status=acknowledged
+    evidence="$evidence;acknowledged_ref=$acknowledged_ref"
+  fi
   emit "service:$manager:$unit" service_failure "$unit" "$status" "$evidence"
-done < <(jq -r '.observedServices[]? | select(.kind == "service") | [.manager,.unit,(.activationMode // "direct")] | @tsv' "$inventory")
+done < <(jq -r '.observedServices[]? | select(.kind == "service") | [.manager,.unit,(.activationMode // "direct"),((.acknowledged.down // false) | tostring),(.acknowledged.ref // "")] | @tsv' "$inventory")
 
 # Sockets, which the service sweep above structurally cannot see. A socket's
 # healthy resting state is "listening" -- it is the front door, and unlike the

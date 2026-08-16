@@ -17,6 +17,12 @@ let
           enable = false;
           restartable = false;
         };
+        acknowledged = {
+          down = false;
+          reason = "";
+          since = "";
+          ref = "";
+        };
         captures = [ ];
         activation = {
           mode = "direct";
@@ -97,6 +103,7 @@ let
         type = surfaceType surface;
         restartable = surface.observe.restartable;
         activationMode = surface.activation.mode;
+        acknowledged = surface.acknowledged;
       })
       (
         lib.filterAttrs (_: surface: surface.observe.enable) (lib.mapAttrs (_: normalizeSurface) surfaces)
