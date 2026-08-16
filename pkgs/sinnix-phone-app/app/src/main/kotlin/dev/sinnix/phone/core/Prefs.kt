@@ -27,6 +27,7 @@ object Prefs {
     private const val KEY_POWER = "power_lane_enabled"
     private const val KEY_HR_LIVE = "hr_live_lane_enabled"
     private const val KEY_USAGE = "usage_lane_enabled"
+    private const val KEY_STREAM_EVENTS = "stream_events_enabled"
     private const val KEY_WAKE_HOUR = "wake_hour"
     private const val KEY_WAKE_MINUTE = "wake_minute"
     private const val KEY_WAKE_ARMED = "wake_armed"
@@ -160,6 +161,12 @@ object Prefs {
 
     fun setSleepDetect(ctx: Context, value: Boolean) =
         prefs(ctx).edit().putBoolean(KEY_SLEEP_DETECT, value).apply()
+
+    /** Live mirror of new event lines to prime's receiver. */
+    fun streamEvents(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_STREAM_EVENTS, true)
+
+    fun setStreamEvents(ctx: Context, value: Boolean) =
+        prefs(ctx).edit().putBoolean(KEY_STREAM_EVENTS, value).apply()
 
     /** App/screen/keyguard history from the system's usage ledger. */
     fun usageLane(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_USAGE, true)
