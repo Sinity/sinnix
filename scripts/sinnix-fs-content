@@ -209,7 +209,15 @@ def walk(roots: list[str], out_path: Path, progress_every: int) -> int:
 def materialize(jsonl: Path, db: Path, parquet: Path) -> None:
     sql = f"""
 DROP TABLE IF EXISTS files;
-CREATE TABLE files AS SELECT * FROM read_json_auto('{jsonl}', ignore_errors=true);
+CREATE TABLE files AS
+SELECT *,
+  -- Prose a person reads. This is the corpus that enters text embedding and
+  -- per-file classification.
+  ext IN ('.md','.markdown','.txt','.html','.htm','.pdf','.epub','.rst') AS document_like,
+  -- Tabular: classifiable, but not prose. Clusters and embeds differently, so
+  -- it stays out of the text corpus by default rather than diluting it.
+  ext IN ('.csv','.tsv') AS data_like
+FROM read_json_auto('{jsonl}', ignore_errors=true);
 
 -- The point of the whole exercise: one row per piece of content that exists
 -- in more than one place, with every place it exists.
@@ -228,6 +236,18 @@ CREATE VIEW scattered_names AS
 SELECT name, count(*) AS copies, count(DISTINCT dir) AS dirs, list(DISTINCT dir) AS where_
 FROM files GROUP BY name HAVING count(DISTINCT dir) > 2
 ORDER BY count(DISTINCT dir) DESC;
+
+-- The population split, so a coverage query never has to restate the
+-- predicate. Structured-data rows (export payloads, archive internals) are
+-- neither document_like nor data_like and are characterised at container
+-- level, never queued per file.
+DROP VIEW IF EXISTS population;
+CREATE VIEW population AS
+SELECT CASE WHEN document_like THEN 'document'
+            WHEN data_like     THEN 'tabular'
+            ELSE 'structured-data' END AS population,
+       count(*) AS files, sum(bytes) AS bytes
+FROM files GROUP BY 1;
 
 COPY (SELECT * FROM files) TO '{parquet}' (FORMAT PARQUET);
 """
