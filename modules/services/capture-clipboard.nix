@@ -171,11 +171,6 @@ mkServiceModule {
   surface = {
     unit = "sinnix-capture-clipboard.service";
     manager = "user";
-    # No explicit kind: real owned systemd .service unit -> defaults to
-    # "service". `kind = "capture"` is reserved for orphan surfaces with no
-    # backing unit (capture-registry.nix); mislabelling here would drop a
-    # live daemon from sinnix-observe's managed-units view and from
-    # runtime.nix's kind=="service" render lists.
     resourceClass = "capture-runtime";
     captures = [
       {

@@ -20,25 +20,24 @@ in
 mkServiceModule {
   name = "terminal-capture";
   description = "Advanced terminal session recording and telemetry";
-  surface = {
-    unit = "sinnix-captured-shell";
-    manager = "user";
-    kind = "capture";
-    resourceClass = "capture-runtime";
-    captures = [
-      {
-        name = "asciinema";
-        path = recordingsDir;
-        eventDriven = true;
-        # Session-based, not cadence-based: budget generously (daily) so an
-        # idle terminal day doesn't false-positive.
-        staleAfterSeconds = 86400;
-      }
-    ];
-  };
   configFn =
     { pkgs, ... }:
     {
+      # A lane, not a surface. The writer is sinnix-captured-shell, a script
+      # the terminal launches -- there is no unit here to own a surface, and
+      # declaring one meant putting a script's name in a field typed "systemd
+      # unit name".
+      sinnix.runtime.captures = [
+        {
+          name = "asciinema";
+          path = recordingsDir;
+          eventDriven = true;
+          # Session-based, not cadence-based: budget generously (daily) so an
+          # idle terminal day doesn't false-positive.
+          staleAfterSeconds = 86400;
+        }
+      ];
+
       environment.systemPackages = [
         pkgs.asciinema
         pkgs.jq

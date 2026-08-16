@@ -280,18 +280,10 @@ def main() -> int:
                 # timers/sockets log their trigger/incoming events too.
                 n = journal_count(unit, args.window_days, meta.get("manager") == "user",
                                   r"Started|Starting|Triggering|Incoming|Listening|Reached")
-            elif kind == "capture":
-                # capture surfaces attest via their capture files: fresh
-                # mtime within the window = the surface is producing.
-                cutoff = now - args.window_days * 86400
-                fresh = 0
-                for cpath in meta.get("captures", []):
-                    try:
-                        if cpath and Path(cpath).exists() and Path(cpath).stat().st_mtime > cutoff:
-                            fresh += 1
-                    except OSError:
-                        pass
-                n = fresh or None
+            elif kind == "scope":
+                # Transient scopes are named by prefix, not by a unit that
+                # journalctl can be asked about directly.
+                n = None
             ev = {"atuin": None, "polylogue": None, "journald": {"n": n} if n else None}
             rows.append({"class": "services", "name": name,
                          "declared_in": meta["declared_in"],

@@ -1,38 +1,26 @@
-# Orphan capture-path registry
+# Capture lanes with no owning systemd unit.
 #
-# Some capture lanes have no owning systemd unit in this repo: the write
-# path is a manual hotkey script, an external cron/Takeout-style artifact,
-# or a probe tool invoked ad hoc. Those lanes still need a runtime surface
-# so the health sentinel (sinnix-health-sentinel) and introspection
-# (/etc/sinnix/runtime-inventory.json) can see their write freshness --
-# this module's sole job is registering those orphan paths. It does not
-# run, own, or manage the underlying capture process; each capture's
-# `unit` field here is a synthetic identity for the inventory, not a real
-# systemd unit.
+# Some lanes are written by things that are not units: a hotkey script, an
+# ad-hoc probe, an artifact dropped in by hand. They still need a freshness
+# budget, because "nothing has written this lane in a week" is a failure that
+# looks exactly like a quiet week.
 #
-# Lanes covered:
-# - screenshot: screenshot-color-lab.sh (desktop-control-plane skill),
-#   triggered via the Hyprland "Show display capture status" probe binding
-#   and ad hoc agent/operator screenshot capture, not a daemon.
+# They used to be declared as runtime SURFACES with a synthetic `unit` string,
+# which meant a field typed "systemd unit name" held a shell script's name for
+# a whole category, guarded by a `kind = "capture"` carve-out in the assertion
+# that checks unit names and re-checked in every consumer that walks surfaces.
+# sinnix.runtime.captures exists so a lane can simply be a lane.
 { config, ... }:
-let
-  capturesRoot = config.sinnix.paths.capturesRoot;
-in
 {
-  sinnix.runtime.surfaces = {
-    capture-screenshot = {
-      unit = "sinnix-capture-screenshot";
-      kind = "capture";
-      dynamic = true;
-      resourceClass = "system";
-      captures = [
-        {
-          name = "screenshot";
-          path = "${capturesRoot}/screenshot";
-          eventDriven = true;
-          staleAfterSeconds = 604800;
-        }
-      ];
-    };
-  };
+  sinnix.runtime.captures = [
+    {
+      # screenshot-color-lab.sh (desktop-control-plane skill), fired from the
+      # Hyprland "Show display capture status" binding and by ad-hoc operator
+      # or agent screenshots. Never a daemon.
+      name = "screenshot";
+      path = "${config.sinnix.paths.capturesRoot}/screenshot";
+      eventDriven = true;
+      staleAfterSeconds = 604800;
+    }
+  ];
 }

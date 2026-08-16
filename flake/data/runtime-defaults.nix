@@ -59,34 +59,39 @@ let
         classResources // lib.filterAttrs (_: value: value != null) normalized.resources;
     };
 
+  # One lane, normalized for the inventory. Split out of captureRows so the
+  # same shape is produced whether the lane hangs off a runtime surface or
+  # stands alone in sinnix.runtime.captures -- a consumer reading the
+  # flattened list cannot tell, and should not need to.
+  captureRow =
+    capture:
+    {
+      inherit (capture) name path;
+    }
+    // lib.optionalAttrs ((capture.cadenceSeconds or null) != null) {
+      expectedCadenceSeconds = capture.cadenceSeconds;
+    }
+    // lib.optionalAttrs (capture.eventDriven or false) {
+      expectedCadence = "event-driven";
+    }
+    // lib.optionalAttrs ((capture.staleAfterSeconds or null) != null) {
+      expectedStaleAfterSeconds = capture.staleAfterSeconds;
+    }
+    // lib.optionalAttrs ((capture.requiredPayloadFields or [ ]) != [ ]) {
+      inherit (capture) requiredPayloadFields;
+    }
+    // lib.optionalAttrs ((capture.livenessProbe or null) != null) {
+      inherit (capture) livenessProbe;
+    };
+
   captureRows =
-    surfaces:
-    lib.concatLists (
-      lib.mapAttrsToList (
-        _name: surface:
-        map (
-          capture:
-          {
-            inherit (capture) name path;
-          }
-          // lib.optionalAttrs (capture.cadenceSeconds != null) {
-            expectedCadenceSeconds = capture.cadenceSeconds;
-          }
-          // lib.optionalAttrs capture.eventDriven {
-            expectedCadence = "event-driven";
-          }
-          // lib.optionalAttrs ((capture.staleAfterSeconds or null) != null) {
-            expectedStaleAfterSeconds = capture.staleAfterSeconds;
-          }
-          // lib.optionalAttrs ((capture.requiredPayloadFields or [ ]) != [ ]) {
-            inherit (capture) requiredPayloadFields;
-          }
-          // lib.optionalAttrs ((capture.livenessProbe or null) != null) {
-            inherit (capture) livenessProbe;
-          }
-        ) surface.captures
-      ) (lib.mapAttrs (_: normalizeSurface) surfaces)
-    );
+    surfaces: standalone:
+    (lib.concatLists (
+      lib.mapAttrsToList (_name: surface: map captureRow surface.captures) (
+        lib.mapAttrs (_: normalizeSurface) surfaces
+      )
+    ))
+    ++ map captureRow standalone;
 
   observedServiceRows =
     surfaces:
@@ -458,6 +463,7 @@ rec {
       surfaces ? baseSurfaces,
       mounts ? [ ],
       backups ? { },
+      captures ? [ ],
     }:
     {
       schema = "sinnix-runtime-inventory-v1";
@@ -471,6 +477,6 @@ rec {
       surfaces = lib.mapAttrs (_: effectiveSurface classes) surfaces;
       inherit mounts backups;
       observedServices = observedServiceRows surfaces;
-      captures = captureRows surfaces;
+      captures = captureRows surfaces captures;
     };
 }
