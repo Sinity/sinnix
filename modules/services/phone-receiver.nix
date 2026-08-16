@@ -67,19 +67,23 @@ mkServiceModule {
       enable = true;
       restartable = true;
     };
-    # One entry per stream kind. Declaring none meant five of the six lanes
-    # sat at zero files with nothing able to notice: the sentinel cannot
-    # report on a lane that was never declared.
+    # Only `speech`. streamKinds below is what this receiver ACCEPTS, not what
+    # the phone sends: SpeechService is the app's sole user of the stream port,
+    # and every other kind -- battery, thermal, location, health, sensor --
+    # goes to the app's own event log and reaches the lake through
+    # sinnix-phone-drain instead. Declaring the other five would register
+    # capture lanes nothing is designed to write, which is a standing false
+    # alarm rather than monitoring.
     #
-    # eventDriven with no staleness budget, because the phone pushes when it
-    # has something and silence measures the phone's activity, not this
-    # service's health. What that cannot catch, `lane-empty` in
-    # sinnix-sandbox-audit does.
-    captures = map (kind: {
-      name = "phone-${kind}";
-      path = "${capturesRoot}/phone-${kind}";
-      eventDriven = true;
-    }) streamKinds;
+    # eventDriven with no staleness budget: the phone pushes when it has
+    # something, so silence measures the operator's day, not this service.
+    captures = [
+      {
+        name = "phone-speech";
+        path = "${capturesRoot}/phone-speech";
+        eventDriven = true;
+      }
+    ];
   };
   configFn =
     { config, ... }:

@@ -70,6 +70,18 @@ mkServiceModule {
         cadenceSeconds = 1800;
         staleAfterSeconds = 86400;
       }
+      # The app's own event log, and the lane that actually carries the phone's
+      # telemetry: battery, health (heart rate, sleep, SpO2, steps), location,
+      # thermal, notifications, and the lane_blocked records that say when one
+      # of those stopped and why. It reaches the lake through this drain rather
+      # than the stream receiver, and was undeclared -- so the single richest
+      # phone lane was the one nothing was watching.
+      {
+        name = "phone-estate-events";
+        path = "/realm/data/captures/phone/estate/events";
+        cadenceSeconds = 1800;
+        staleAfterSeconds = 86400;
+      }
     ];
   };
   configFn =
