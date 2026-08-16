@@ -142,37 +142,18 @@ mkServiceModule {
               ];
               Restart = "on-failure";
               RestartSec = "5s";
-              # This recorder can ignore SIGTERM indefinitely, and when it
-              # does it does not stall alone. On the 2026-08-14 reboot it was
-              # the ONLY user unit to miss its stop timeout; the graphical
-              # session target, Hyprland, PipeWire, D-Bus and ~30 other units
-              # all reported "Stopped" in the same second its SIGKILL landed,
-              # 90s after its SIGTERM. uwsm's own session teardown was
-              # waiting on that target too, so the login scope burned a
-              # second parallel 90s. One stuck recorder, the whole reboot.
-              #
-              # The trigger is not reproducible on a healthy host: a plain
-              # stop, a stop with gsr-kms-server killed first, and a bare
-              # SIGTERM to the main pid all exit in ~0.5s. The instance that
-              # hung had run 1d21h with a full ring and 162M swapped out,
-              # which is suggestive and not proof -- so do not pretend to
-              # have fixed the cause. Bound the blast radius instead: 15s is
-              # 30x the observed healthy path, and caps what a wedged
-              # recorder can cost a reboot.
+              # This recorder can ignore SIGTERM and stall a whole reboot
+              # behind its stop timeout (observed once, not reproducible on a
+              # healthy host). Cause unknown, so bound the blast radius: 15s
+              # is well clear of the ~0.5s healthy path.
               TimeoutStopSec = "15s";
-              # This unit deliberately carries NO mount-namespace sandboxing
-              # (no ProtectSystem/ProtectHome/PrivateTmp/ReadWritePaths) and
-              # NoNewPrivileges stays off: a systemd *user* manager is
-              # unprivileged, so any mount-namespace directive forces a child
-              # USER namespace first, which demotes the cap_sys_admin the
-              # NixOS setcap wrapper grants gsr-kms-server to
-              # namespace-relative -- while DRM_IOCTL_MODE_GETFB2 checks
-              # CAP_SYS_ADMIN against the INITIAL user namespace. The kernel
-              # then returns framebuffers with zeroed GEM handles and the
-              # recorder captures nothing ("drmfb handle is NULL" loop).
-              # Every individual sandbox directive reproduces this and
-              # PrivateUsers=false does not opt out: sandboxing this unit
-              # and capturing the screen are mutually exclusive.
+              # NO mount-namespace sandboxing, and NoNewPrivileges stays off.
+              # A user manager is unprivileged, so any such directive forces a
+              # child user namespace, demoting gsr-kms-server's cap_sys_admin
+              # to namespace-relative -- while DRM_IOCTL_MODE_GETFB2 checks it
+              # against the initial namespace. The recorder then captures
+              # nothing. Sandboxing this unit and capturing the screen are
+              # mutually exclusive; PrivateUsers=false does not opt out.
               UMask = "0077";
             };
           };

@@ -338,13 +338,9 @@ def token_from_browser(cdp_port: int = 9222) -> str | None:
         if not pages:
             # No open page on the origin: cookies are per-origin, so make one.
             #
-            # PUT, not GET. Chrome made /json/new PUT-only (crbug 1145518,
-            # shipped in Chrome 111) as a DNS-rebinding defence, and urlopen
-            # with no data body sends GET -- so this returned "405 Method Not
-            # Allowed", token_from_browser reported "no token available", and
-            # every daily run since has failed at the window without ever
-            # submitting. First noticed 2026-08-14; the failure is in the
-            # journal for every prior run too.
+            # PUT, not GET: Chrome made /json/new PUT-only (crbug 1145518)
+            # as a DNS-rebinding defence, and urlopen with no body sends GET,
+            # which gets a 405.
             urllib.request.urlopen(
                 urllib.request.Request(
                     f"http://127.0.0.1:{cdp_port}/json/new?https://c.mi.com/global",

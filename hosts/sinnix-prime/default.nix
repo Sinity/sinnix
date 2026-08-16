@@ -168,18 +168,10 @@
       # embeddings tier is empty, so daemon catch-up would re-embed the whole
       # corpus through the paid Voyage API.
       embedding.enable = false;
-      # The daemon cannot start at all: since 2026-08-07 every launch dies
-      # ~12s in on DurableChangeTrainError ("source durable tier immutable
-      # archive identity differs from historical train v27"), and
-      # Restart=on-failure with no start limit turns that into a permanent
-      # loop -- 100 restarts in the 20 minutes it was up after the
-      # 2026-08-14 reboot, ~7s CPU and up to 1.1G RSS each, and the single
-      # largest journal producer on the host. Ingestion had already stalled
-      # around 2026-07-27 (cursor lag 269.7h at the last healthy health
-      # check), so nothing is being given up by parking it: the Claude and
-      # Codex hooks keep spooling into ~/.local/share/polylogue/hooks
-      # independently of the daemon and will be ingested when it can run.
-      # Re-enable with the storage fix (sinnix-qh6s).
+      # Every launch dies on DurableChangeTrainError (archive identity vs
+      # historical train), and Restart=on-failure turns that into a restart
+      # loop. Nothing is lost by parking it: the Claude/Codex hooks spool
+      # independently and get ingested when it can run again (sinnix-qh6s).
       daemon.autoStart = false;
     };
     machine-telemetry.enable = true;

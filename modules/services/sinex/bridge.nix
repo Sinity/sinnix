@@ -329,15 +329,11 @@ in
               # loopback-TCP connections; the upstream module retains peer
               # only for the postgresql-setup service account.
               localAuth = "scram-sha-256";
-              # Deliberately NOT sinex's setupWaitForPaths: that option renders
-              # ConditionPathIsReadable=, which is not a systemd condition at
-              # all. systemd therefore ignored it -- so the gate never gated
-              # anything -- and logged "Unknown key 'ConditionPathIsReadable'
-              # in section [Unit], ignoring" on every reparse: 65,577 warnings
-              # in 24 hours on 2026-08-16, the single largest journal producer
-              # on this host. The equivalent condition is declared below with a
-              # key systemd actually implements. Drop this override once sinex
-              # fixes the option upstream.
+              # Deliberately NOT sinex's setupWaitForPaths: it renders
+              # ConditionPathIsReadable=, which systemd does not implement, so
+              # the gate never gated anything and warned on every reparse. The
+              # equivalent condition is declared below with a real key. Drop
+              # this override once sinex fixes the option upstream.
               setupWaitForPaths = [ ];
             };
 

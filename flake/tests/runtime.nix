@@ -123,13 +123,10 @@ in
           in
           [
             {
-              # The defect that killed muse-glimmer's front door on
-              # 2026-08-16: a backend carrying BindsTo= (or Requires=) on its
-              # proxy makes ANY backend start pull the proxy in outside socket
-              # activation, where systemd-socket-proxyd has no listen fds,
-              # exits 1, and -- via that same edge -- takes the backend down
-              # with it. PartOf= alone gives the idle teardown with no start
-              # dependency, so the edge must never point back up.
+              # Guards the PartOf-not-BindsTo invariant from ai-control's
+              # mkProxy (see there for the mechanism): the edge must never
+              # point back up, or a backend start pulls the proxy in outside
+              # socket activation and both die.
               assertion = builtins.all (
                 proxyName:
                 builtins.all (

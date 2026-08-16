@@ -386,8 +386,8 @@ done < <(jq -r '.captures[]? | select((.requiredPayloadFields // []) != []) | [.
 # sudo writes three PAM lines to the journal, and there are ~46 probes per
 # sweep on a fixed one-minute clock. The probe records travel as NDJSON on
 # stdin rather than as arguments, so an arbitrary shell command survives
-# transport verbatim -- see the escaping note below, which cost a lane its
-# publisher signal once already. Prints "name<TAB>exit_code" per probe.
+# transport verbatim -- see the escaping note below. Prints
+# "name<TAB>exit_code" per probe.
 run_probes_in_user_session() {
   local payload="$1" bus uid jq_bin timeout_bin
   jq_bin="$(command -v jq)"
