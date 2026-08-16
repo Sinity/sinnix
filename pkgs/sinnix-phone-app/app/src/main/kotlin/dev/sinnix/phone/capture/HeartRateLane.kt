@@ -56,13 +56,40 @@ class HeartRateLane(context: Context) {
     private var lastState = ""
     private var ticksUntilRetry = 0
 
+    /**
+     * All Bluetooth work happens here, never on the caller's thread.
+     *
+     * Every entry point into the BT stack is a binder call that can block --
+     * and on 2026-08-16 one did, for minutes, freezing the service handler
+     * thread that also drives the audio heartbeat: the capture lane's health
+     * checks stopped because a WATCH's radio stack was slow. The heartbeat
+     * only ever hands this executor a job; if the previous job is still stuck
+     * in the stack, `busy` makes the tick a no-op instead of a queue that
+     * grows behind a wedged binder.
+     */
+    private val worker = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "hr-live").apply { isDaemon = true }
+    }
+    private val busy = java.util.concurrent.atomic.AtomicBoolean(false)
+
     private val bpm = mutableListOf<Int>()
     private val at = mutableListOf<Long>()
     private var lastFlushMs = 0L
 
     fun tick() {
+        if (!busy.compareAndSet(false, true)) return
+        worker.execute {
+            try {
+                tickInner()
+            } finally {
+                busy.set(false)
+            }
+        }
+    }
+
+    private fun tickInner() {
         if (!Prefs.heartRateLane(ctx)) {
-            if (gatt != null) stop()
+            if (gatt != null) stopInner()
             return
         }
         flushIfDue()
@@ -117,8 +144,13 @@ class HeartRateLane(context: Context) {
         }
     }
 
-    @SuppressLint("MissingPermission")
+    /** Service teardown: hand the close to the worker like everything else. */
     fun stop() {
+        worker.execute { stopInner() }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun stopInner() {
         flush()
         try {
             gatt?.close()
