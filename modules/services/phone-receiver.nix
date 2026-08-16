@@ -67,11 +67,19 @@ mkServiceModule {
       enable = true;
       restartable = true;
     };
-    # No `captures[]` entry: this surface demuxes into dynamically-named
-    # phone-<kind> lanes rather than one fixed lane, so a single static
-    # staleAfterSeconds entry doesn't fit the sentinel's per-lane model.
-    # Fast-follow: register one captures[] entry per known kind (battery,
-    # sensor) once the phone-side client's kind set stabilizes.
+    # One entry per stream kind. Declaring none meant five of the six lanes
+    # sat at zero files with nothing able to notice: the sentinel cannot
+    # report on a lane that was never declared.
+    #
+    # eventDriven with no staleness budget, because the phone pushes when it
+    # has something and silence measures the phone's activity, not this
+    # service's health. What that cannot catch, `lane-empty` in
+    # sinnix-sandbox-audit does.
+    captures = map (kind: {
+      name = "phone-${kind}";
+      path = "${capturesRoot}/phone-${kind}";
+      eventDriven = true;
+    }) streamKinds;
   };
   configFn =
     { config, ... }:

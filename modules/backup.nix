@@ -493,10 +493,21 @@ let
         '{ts:$ts,type:$type,label:$label,state:$state,run_id:$run_id,deadline_epoch:$deadline}' \
         >> ${lib.escapeShellArg borgStatusLog}
       tmp=${lib.escapeShellArg borgIntegrityTransitionState}.tmp
-      jq --arg label "$label" --arg state "$state" '.[$label] = $state' \
-        ${lib.escapeShellArg borgIntegrityTransitionState} > "$tmp" 2>/dev/null \
-        || jq -cn --arg label "$label" --arg state "$state" '{($label):$state}' \
-        > "$tmp"
+      # Branch on the file existing, not on jq failing. Falling back to a
+      # single-entry object is right on first run and destructive on a corrupt
+      # one -- it would drop every other label's transition state and then mv
+      # that over the original. A parse failure is reported and the file left
+      # alone instead.
+      if [ -s ${lib.escapeShellArg borgIntegrityTransitionState} ]; then
+        if ! jq --arg label "$label" --arg state "$state" '.[$label] = $state' \
+          ${lib.escapeShellArg borgIntegrityTransitionState} > "$tmp"; then
+          rm -f "$tmp"
+          echo "borgbackup-status: integrity transition state is unreadable; leaving it intact and not recording $label=$state" >&2
+          return 0
+        fi
+      else
+        jq -cn --arg label "$label" --arg state "$state" '{($label):$state}' > "$tmp"
+      fi
       if [ -s "$tmp" ]; then
         mv "$tmp" ${lib.escapeShellArg borgIntegrityTransitionState}
       fi
@@ -601,13 +612,26 @@ let
       glob="$3"
       count="$(find "$dir" -maxdepth 1 -mindepth 1 -type d -name "$glob" | wc -l)"
       oldest="$(oldest_snapshot_epoch "$dir" "$glob" || true)"
-      if [ -z "$oldest" ]; then
-        age=0
-      else
+
+      # An empty `oldest` means one of two very different things, and reporting
+      # both as age=0 made every probe failure read as a fresh queue. With
+      # snapshots present, failing to date the oldest is a broken probe (dir
+      # unreadable, naming convention changed, date rejected) and must not
+      # claim health.
+      probe_failed=0
+      age=0
+      if [ -z "$oldest" ] && [ "$count" -gt 0 ]; then
+        probe_failed=1
+      elif [ -n "$oldest" ]; then
         age=$((now - oldest))
       fi
 
-      if [ "$age" -le ${toString borgSnapshotQueueMaxAgeSec} ]; then
+      if [ "$probe_failed" -eq 1 ]; then
+        ok=false
+        state=unknown
+        message="snapshot queue present but its age could not be determined"
+        status=1
+      elif [ "$age" -le ${toString borgSnapshotQueueMaxAgeSec} ]; then
         ok=true
         state=healthy
         message="snapshot queue fresh"

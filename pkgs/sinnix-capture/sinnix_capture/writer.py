@@ -66,8 +66,14 @@ class CaptureWriter:
                     except (json.JSONDecodeError, KeyError, TypeError, ValueError):
                         continue
                     highest = max(highest, seq)
-        except OSError:
+        except FileNotFoundError:
+            # No index yet: 0 is the correct starting point.
             return 0
+        except OSError:
+            # The index exists but cannot be read (permissions, EIO). Returning
+            # 0 here would do exactly what this function exists to prevent:
+            # restart the sequence over numbers already on disk. Fail instead.
+            raise
         return highest
 
     def _read_seq(self) -> int:

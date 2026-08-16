@@ -245,6 +245,16 @@ def discover_history_paths(path: Path) -> list[Path]:
 # ---------------------------------------------------------------------------
 
 
+class ProviderUnavailable(Exception):
+    """A provider cannot answer for the rest of this run.
+
+    Distinct from a per-URL error: when the thing a provider needs before it
+    can answer anything (Common Crawl's collection list, say) is unreachable,
+    retrying it per URL spends the run's request budget on a host that is not
+    going to answer.
+    """
+
+
 @dataclass
 class ProviderResult:
     status: str  # "ok" | "error" | "unavailable"
@@ -341,18 +351,37 @@ class CommonCrawlProvider:
         self.cache_dir = cache_dir
         self.collinfo_cache_max_age_seconds = collinfo_cache_max_age_seconds
         self._collections: list[dict] | None = None
+        # Remembered across queries so an unreachable collinfo is paid for
+        # once per run rather than once per URL.
+        self._collections_error: str | None = None
 
     def _load_collections(self) -> list[dict]:
         if self._collections is not None:
             return self._collections
+        if self._collections_error is not None:
+            raise ProviderUnavailable(self._collections_error)
         cache_path = (self.cache_dir / "collinfo.json") if self.cache_dir else None
         if cache_path and cache_path.exists():
             age = time.time() - cache_path.stat().st_mtime
             if age < self.collinfo_cache_max_age_seconds:
                 self._collections = json.loads(cache_path.read_text(encoding="utf-8"))
                 return self._collections
-        status, body = http_get(self.collinfo_url)
-        collections = json.loads(body.decode("utf-8"))
+        try:
+            status, body = http_get(self.collinfo_url)
+            collections = json.loads(body.decode("utf-8"))
+        except (
+            urllib.error.URLError,
+            socket.timeout,
+            TimeoutError,
+            OSError,
+            json.JSONDecodeError,
+        ) as error:
+            # index.commoncrawl.org has been refusing connections outright
+            # while data.commoncrawl.org still publishes; when the collection
+            # list cannot be fetched at all, no URL in this run can be
+            # resolved through this provider, so stop trying.
+            self._collections_error = str(error)
+            raise ProviderUnavailable(self._collections_error) from error
         if cache_path:
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             cache_path.write_text(json.dumps(collections), encoding="utf-8")
@@ -362,6 +391,8 @@ class CommonCrawlProvider:
     def query(self, normalized_url: str) -> ProviderResult:
         try:
             collections = self._load_collections()
+        except ProviderUnavailable as error:
+            return ProviderResult(status="error", error=f"collinfo unavailable: {error}")
         except (urllib.error.URLError, socket.timeout, TimeoutError, OSError, json.JSONDecodeError) as error:
             return ProviderResult(status="error", error=f"collinfo fetch failed: {error}")
         # collinfo.json is already newest-first per Common Crawl's publishing
