@@ -585,6 +585,14 @@ let
         --arg ts "$(date -Iseconds)" \
         '{ts:$ts,type:$type,label:$label,ok:$ok,state:$state,run_id:$run_id,deadline_epoch:$deadline_epoch,age_sec:$age,max_age_sec:$max_age,message:$message}' \
         >> ${lib.escapeShellArg borgStatusLog}
+
+      # Say it out loud too. This unit exits 1 by design when it finds a red
+      # condition, but it used to record the reason only in the JSONL, so the
+      # journal showed a bare "status=1/FAILURE" with no line explaining it --
+      # the one place an operator looks first.
+      if [ "$ok" = false ]; then
+        echo "borgbackup-status: $label is ''${state:-red}: $message (age ''${age}s, budget ${toString borgArchiveMaxAgeSec}s)" >&2
+      fi
     }
 
     check_queue() {
@@ -1024,6 +1032,7 @@ in
         coreutils
         findutils
         gnugrep
+        jq
         procps
         util-linux
       ];
@@ -1050,7 +1059,6 @@ in
         }
         start_epoch="$(date +%s)"
         deadline_epoch=$((start_epoch + 3 * 3600))
-        write_integrity_receipt running
         finish_integrity_receipt() {
           rc="$?"
           if [ "$rc" -eq 0 ]; then
@@ -1060,7 +1068,14 @@ in
           fi
           exit "$rc"
         }
+        # Armed BEFORE the first receipt write: when jq was missing from this
+        # unit's path, the "running" write died with 127 before the trap
+        # existed, so no receipt was written at all -- not even a failed one.
+        # borgbackup-status then reported "integrity check receipt is
+        # missing" and went red for two weeks while the backups themselves
+        # were fine.
         trap finish_integrity_receipt EXIT
+        write_integrity_receipt running
         recover_stale_borg_locks
         ${mkBorgCommonScript borgRepoRealm borgRepoRealmPath}
         recover_stale_borg_locks
@@ -1251,6 +1266,7 @@ in
         btrfs-progs
         coreutils
         findutils
+        jq
       ];
       script = ''
         set -euo pipefail
@@ -1258,22 +1274,67 @@ in
         stamp="$(date -u +%Y%m%dT%H%M%SZ)"
         install -d -m 0700 -o root -g root "${btrfsImageRoot}"
 
+        # Orphans from a run that died mid-capture. btrfs-image writes to
+        # "$out.tmp" and only renames on success, and the 30-day prune below
+        # only matches finished images, so a failed run used to leave
+        # multi-gigabyte .tmp files on the backup drive indefinitely (one
+        # from 2026-07-04 was still there in August).
+        find "${btrfsImageRoot}" -type f -name '*.btrfs-image.tmp' -mtime +1 -delete
+
+        record_status() {
+          jq -cn \
+            --arg ts "$(date -Iseconds)" \
+            --arg type btrfs_metadata_image \
+            --arg label "$1" \
+            --arg state "$2" \
+            --argjson attempts "$3" \
+            --arg message "$4" \
+            '{ts:$ts,type:$type,label:$label,ok:($state == "healthy"),state:$state,attempts:$attempts,message:$message}' \
+            >> ${lib.escapeShellArg borgStatusLog}
+        }
+
+        # btrfs-image walks a MOUNTED, actively-written filesystem: there is
+        # no consistent-view mode for one, and a tree block whose generation
+        # advances between the parent-pointer read and the child read aborts
+        # the walk with "parent transid verify failed" / "child eb corrupted".
+        # That is a race against concurrent writes, not on-disk damage (the
+        # device error counters stay at zero throughout), so it is worth
+        # retrying rather than failing the run -- a quieter moment succeeds.
         capture_image() {
           label="$1"
           device="$2"
           out="${btrfsImageRoot}/$label-$stamp.btrfs-image"
           tmp="$out.tmp"
+          attempt=1
+
+          while [ "$attempt" -le 3 ]; do
+            rm -f "$tmp"
+            if btrfs-image -c 9 "$device" "$tmp"; then
+              chmod 0600 "$tmp"
+              mv "$tmp" "$out"
+              record_status "$label" healthy "$attempt" "metadata image captured"
+              return 0
+            fi
+            echo "btrfs-metadata-image-backup: $label attempt $attempt failed (live-filesystem race or real error)" >&2
+            attempt=$((attempt + 1))
+            sleep 60
+          done
 
           rm -f "$tmp"
-          btrfs-image -c 9 "$device" "$tmp"
-          chmod 0600 "$tmp"
-          mv "$tmp" "$out"
+          record_status "$label" red 3 "metadata image failed three times; check btrfs device stats for real corruption"
+          echo "btrfs-metadata-image-backup: $label failed after 3 attempts" >&2
+          return 1
         }
 
-        capture_image realm /dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a
-        capture_image persist /dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02
+        # Per-label accounting: realm succeeded and persist failed on
+        # 2026-08-16 and the unit reported nothing but total failure, which
+        # hid that persist imaging had been broken since 2026-08-02.
+        rc=0
+        capture_image realm /dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a || rc=1
+        capture_image persist /dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02 || rc=1
 
         find "${btrfsImageRoot}" -type f -name '*.btrfs-image' -mtime +30 -delete
+        exit "$rc"
       '';
     };
     systemd.timers.btrfs-metadata-image-backup = {
