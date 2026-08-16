@@ -200,11 +200,16 @@ mkServiceModule {
     {
       systemd.tmpfiles.rules = [
         "d ${realmRoot}/db 0755 root root -"
-        # Group-writable: operator-run producers (sinnix-census) create files
-        # here, which 0755 blocks even though appends would succeed.
-        "d ${dataRoot} 0775 root users -"
-        "d ${dataDir}/experiments 0775 root users -"
-        "d ${dataDir}/legacy 0775 root users -"
+        # Operator-owned like the rest of the lake, and group-writable so the
+        # root daemons and operator producers that share this namespace can
+        # both create files. It must NOT be root-owned under an
+        # operator-owned parent: systemd-tmpfiles refuses such a directory
+        # outright ("Detected unsafe path transition ... during
+        # canonicalization"), which silently stops it managing this path at
+        # all.
+        "d ${dataRoot} 0775 ${username} users -"
+        "d ${dataDir}/experiments 0775 ${username} users -"
+        "d ${dataDir}/legacy 0775 ${username} users -"
         "d ${backupRoot} 0700 ${username} users -"
       ];
 

@@ -60,11 +60,17 @@ mkServiceModule {
         log_dir = "${cfg.storeDir}"
       '';
 
+      # Owned by the operator like the rest of the capture lake, even though
+      # the daemon writing here runs as root (root ignores the permissions).
+      # A root-owned directory under an operator-owned parent is not merely
+      # untidy: systemd-tmpfiles refuses to touch it at all ("Detected unsafe
+      # path transition ... during canonicalization"), so its mode and
+      # ownership silently stop being maintained.
       systemd.tmpfiles.rules = [
-        "d ${cfg.storeDir} 0755 root root -"
-        "d ${cfg.storeDir}/store 0755 root root -"
-        "d ${cfg.storeDir}/home 0755 root root -"
-        "d ${cfg.storeDir}/cache 0755 root root -"
+        "d ${cfg.storeDir} 0755 ${config.sinnix.user.name} users -"
+        "d ${cfg.storeDir}/store 0755 ${config.sinnix.user.name} users -"
+        "d ${cfg.storeDir}/home 0755 ${config.sinnix.user.name} users -"
+        "d ${cfg.storeDir}/cache 0755 ${config.sinnix.user.name} users -"
         "d ${cfg.storeDir}/state 0755 root root -"
       ];
 

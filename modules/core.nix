@@ -59,8 +59,15 @@ in
         "d ${paths.realmRoot} 0755 root root -"
         "d ${paths.outerRealm} 0755 root root -"
         "d ${paths.outerRealm}/inbox 0755 ${username} users -"
-        "d ${paths.dataRoot} 0755 root root -"
-        "d ${paths.capturesRoot} 0755 root root -"
+        # The lake is the operator's, like every other root in this list.
+        # These two were the outliers at root:root, which meant any capture
+        # producer running as the operator could not create its own lane
+        # directory: sinnix-census, sinnix-url-ledger and sinnix-video-resolve
+        # had each never written a single file while their timers reported
+        # success. Root daemons that write here are unaffected -- root ignores
+        # directory permissions.
+        "d ${paths.dataRoot} 0755 ${username} users -"
+        "d ${paths.capturesRoot} 0755 ${username} users -"
         "d ${paths.capturesRoot}/shell 0755 ${username} users -"
         "d ${paths.capturesRoot}/shell/zsh 0700 ${username} users -"
         "d ${paths.capturesRoot}/comms 0755 ${username} users -"
