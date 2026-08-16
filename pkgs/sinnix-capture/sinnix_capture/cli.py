@@ -10,12 +10,32 @@ from .writer import CaptureWriter
 
 
 def _cmd_write(args: argparse.Namespace) -> int:
-    payload = (
-        json.loads(args.payload) if args.payload is not None else json.load(sys.stdin)
-    )
     writer = CaptureWriter(args.capture_root, args.lane)
-    envelope = writer.write(payload, raw_ref=args.raw_ref)
-    print(json.dumps(envelope, sort_keys=True))
+
+    def emit(payload: dict) -> None:
+        envelope = writer.write(payload, raw_ref=args.raw_ref)
+        if args.print_envelope:
+            print(json.dumps(envelope, sort_keys=True))
+
+    if args.stream:
+        if args.payload is not None:
+            print("--stream and --payload are mutually exclusive", file=sys.stderr)
+            return 2
+        # One long-lived writer draining NDJSON, so a high-rate lane pays one
+        # process start rather than one per record. A malformed line must not
+        # take the stream down with it -- report it and keep draining, the
+        # same contract the per-record callers have.
+        for line in sys.stdin:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                emit(json.loads(line))
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                print(f"sinnix-capture: dropped a record: {exc}", file=sys.stderr)
+        return 0
+
+    emit(json.loads(args.payload) if args.payload is not None else json.load(sys.stdin))
     return 0
 
 
@@ -39,6 +59,19 @@ def main(argv: list[str] | None = None) -> int:
         "--raw-ref",
         default=None,
         help="Pointer to a raw artifact this record summarizes",
+    )
+    write_p.add_argument(
+        "--stream",
+        action="store_true",
+        help="Drain NDJSON payloads from stdin, one record per line, until EOF",
+    )
+    # Off by default: under systemd this stdout goes straight to the journal,
+    # so every captured record was being stored twice -- once in the lane file
+    # and once on the root disk's persistent journal.
+    write_p.add_argument(
+        "--print-envelope",
+        action="store_true",
+        help="Print each written envelope to stdout (interactive/debug use)",
     )
     write_p.set_defaults(func=_cmd_write)
 
