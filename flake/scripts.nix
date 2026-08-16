@@ -23,6 +23,10 @@ let
     inherit lib pkgs;
     siblingExtras = {
       sinnix-capture = sinnixCaptureLib;
+      # The estate's bd, not nixpkgs'. A script naming bare `beads` in its
+      # frontmatter gets pkgs.beads (1.0.3), whose `export` has no -C flag --
+      # which failed as a usage dump swallowed by `|| true`.
+      beads = externalPackages.beads;
     };
   };
   discovered = discovery.discover (inputs.self + "/scripts");

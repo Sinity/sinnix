@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Enrichment loop v0 — dump estate state, run the enrichment-pass skill, write versioned outputs
-# runtimeInputs: bash coreutils findutils gnugrep jq claude-code atuin beads systemd
+# runtimeInputs: bash coreutils findutils gnugrep jq claude-code atuin @beads systemd
 set -euo pipefail
 
 # timer -> state-dump -> `claude -p` (enrichment-pass skill) -> versioned
@@ -87,7 +87,7 @@ note_input_error() {
 }
 
 # bd rewrites its own store on every call (dolt reimport, lockfile,
-# last-touched), so this needs /realm/state/steering writable, not just readable.
+# last-touched), so the unit needs /realm/state/steering writable too.
 if [[ -d /realm/state/steering/.beads ]]; then
   if ! bd_err="$(bd export -C /realm/state/steering -o "$BUNDLE/steering-export.jsonl" 2>&1)"; then
     note_input_error steering-export "$(tail -c 500 <<<"$bd_err")"
