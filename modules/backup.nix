@@ -74,8 +74,44 @@ let
       inherit unit;
     };
 
+  # Exclusion patterns are written relative to the archive root, but borg
+  # matches them against the FULL SOURCE PATH it walks -- the bind mount, e.g.
+  # run/borgbackup-snapshot-inputs/realm/cache/... (borg strips the leading
+  # separator). A bare `cache` must match from the start of that path and never
+  # can, so every plain-path exclusion in realmExcludes was inert. Only the
+  # `**/...` entries worked, because `**` absorbs the bind prefix -- and since
+  # every visibly-working example had that shape, the broken ones read as
+  # normal.
+  #
+  # Measured 2026-08-16 in archive realm-realm.20260816T223000+0200:
+  # `cache` 73,805 entries present, `media/Steam/steamapps` 92,639 present,
+  # while `**/node_modules`, `**/target` and `**/.venv` were each 0. Roughly
+  # 870G of explicitly-excluded regenerable data (cache 280G, media/model 120G,
+  # media/Steam 103G, stashbox caches 84G, genome cache 285G, container layers
+  # 23G) had been replicating into a 1.9T repository.
+  #
+  # Reproduced and fixed in a throwaway repo before landing: `--exclude cache`
+  # left cache/sub/f in the archive, while the same pattern qualified with the
+  # source path removed it.
+  #
+  # Qualified patterns stay in the default fnmatch style rather than becoming
+  # `pp:` path prefixes, and that is load-bearing rather than incidental: `pp:`
+  # is a LITERAL prefix with no globbing, and the persist list contains
+  # wildcard entries (`.config/chrome-ws/*Cache*`). Measured both ways -- `pp:`
+  # left the GPUCache directory in the archive, plain fnmatch excluded it, and
+  # both handled a literal directory correctly. fnmatch also matches "from the
+  # start of the full path to just before a path separator", so a qualified
+  # directory covers everything beneath it.
+  #
+  # `**/...` patterns pass through unchanged: they are deliberately
+  # match-anywhere and qualifying them would defeat that.
   mkBorgExcludeArgs =
-    exclude: lib.concatMapStringsSep " " (pattern: "--exclude ${lib.escapeShellArg pattern}") exclude;
+    root: exclude:
+    let
+      rootRelative = lib.removePrefix "/" root;
+      qualify = pattern: if lib.hasPrefix "**" pattern then pattern else "${rootRelative}/${pattern}";
+    in
+    lib.concatMapStringsSep " " (pattern: "--exclude ${lib.escapeShellArg (qualify pattern)}") exclude;
 
   borgRetentionArgs = [
     "--keep-within"
@@ -247,7 +283,7 @@ let
           --lock-wait ${toString borgLockWaitSec} \
           --exclude-caches \
           --exclude-if-present .nobackup \
-          ${mkBorgExcludeArgs exclude} \
+          ${mkBorgExcludeArgs bindTarget exclude} \
           "::$archive_name" ${lib.escapeShellArg "${bindTarget}/./"}; then
           cleanup_snapshot_bind_mount
         else
