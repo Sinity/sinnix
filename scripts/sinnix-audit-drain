@@ -10,7 +10,7 @@ set -euo pipefail
 # rules decide what the kernel emits, the drain keeps all of it.
 
 LANE="${SINNIX_AUDIT_LANE:-/realm/data/captures/audit}"
-WATERMARK="${SINNIX_AUDIT_WATERMARK:-/realm/state/audit-drain/last-run}"
+WATERMARK="${SINNIX_AUDIT_WATERMARK:-/realm/state/cursors/audit-drain/last-run}"
 
 mkdir -p "$LANE" "$(dirname "$WATERMARK")"
 

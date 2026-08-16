@@ -13,7 +13,7 @@ let
   username = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   auditLane = "${config.sinnix.paths.capturesRoot}/audit";
-  auditState = "/realm/state/audit-drain";
+  auditState = "/realm/state/cursors/audit-drain";
 in
 mkServiceModule {
   name = "sandbox-audit";

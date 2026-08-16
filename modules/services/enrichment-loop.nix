@@ -1,7 +1,7 @@
 # enrichment-loop: timer -> state dump -> claude -p (enrichment-pass skill)
 # -> versioned derived outputs. Independent of the sinex/polylogue stores:
 # read-only on every input, writes only under /realm/data/derived/enrichment/
-# (outputs) and /realm/state/enrichment/ (watermark) -- both persistent /realm
+# (outputs) and /realm/state/cursors/enrichment/ (watermark) -- both persistent /realm
 # NVMe paths, not the ephemeral root subvolume, so tmpfiles rules suffice and
 # no impermanence entry is needed.
 #
@@ -21,7 +21,7 @@ let
   homeDir = "/home/${username}";
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   dump = scriptPkgs.sinnix-enrich-dump;
-  stateDir = "/realm/state/enrichment";
+  stateDir = "/realm/state/cursors/enrichment";
   outputRoot = "/realm/data/derived/enrichment";
 in
 mkServiceModule {

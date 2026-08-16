@@ -33,7 +33,7 @@ let
   sinexPostgresDataDir = "${sinexPostgresRoot}/18";
   # On /realm, not /persist: keeps dump bytes off the worn MX500 while
   # staying inside the /realm btrbk→borg coverage.
-  sinexPostgresDumpRoot = "/realm/staging/sinex-postgres";
+  sinexPostgresDumpRoot = "/realm/state/db-dumps/sinex-postgres";
   databaseHost = "127.0.0.1";
   databasePort = 5432;
   databaseUser = "sinex";

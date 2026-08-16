@@ -44,7 +44,7 @@ let
 
   laneDir = "${config.sinnix.paths.capturesRoot}/primary";
   blobDir = "${laneDir}/blobs";
-  stateDir = "${config.sinnix.paths.stateRoot}/sinnix-capture-primary";
+  stateDir = "${config.sinnix.paths.stateRoot}/cursors/capture-primary";
 
   primaryWatch = pkgs.writeShellApplication {
     name = "sinnix-capture-primary-watch";
