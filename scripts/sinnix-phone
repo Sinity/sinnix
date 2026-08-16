@@ -923,10 +923,26 @@ pull)
     fi
   fi
   if [ "$ssh_up" = true ]; then
-    rsync -av --ignore-existing -e "$rsync_ssh" \
-      "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/DCIM/" "$LAKE_ROOT/camera/"
-    rsync -av --ignore-existing -e "$rsync_ssh" \
-      "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/Download/" "$LAKE_ROOT/download/"
+    # Best-effort, and deliberately not fatal. DCIM and Download are shared
+    # media roots: Termux reads them only with MANAGE_EXTERNAL_STORAGE, while
+    # the app's own /sdcard/sinnix-* trees need no such grant. So a refusal
+    # here says one Android permission is missing, not that the drain failed
+    # -- yet rsync's exit 23 was becoming the whole unit's status, and
+    # sinnix-phone-drain went red every 30 minutes while successfully draining
+    # logcat, ActivityWatch, ambient audio, and the estate lanes. A unit that
+    # reports failure for something it did not fail at trains everyone to
+    # ignore it.
+    #
+    # Loud, though, not swallowed: without the warning this reads as "nothing
+    # new to mirror", and DCIM has in fact mirrored nothing since 2025-11.
+    for media in DCIM:camera Download:download; do
+      remote="${media%%:*}"
+      local_dir="${media##*:}"
+      if ! rsync -av --ignore-existing -e "$rsync_ssh" \
+        "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/${remote}/" "$LAKE_ROOT/${local_dir}/"; then
+        echo "phone: /sdcard/${remote} not mirrored -- grant Termux all-files access (MANAGE_EXTERNAL_STORAGE) to restore it" >&2
+      fi
+    done
   else
     echo "ssh unavailable: camera and downloads need it and are skipped"
   fi
@@ -949,7 +965,13 @@ pull)
   # stale. adb-only, and non-fatal: a phone reachable over ssh but not adb
   # should still drain everything else.
   if adb_any get-state >/dev/null 2>&1; then
-    "$0" health-sync >/dev/null 2>&1 || echo "drain: health-sync skipped (Mi Fitness not driveable)" >&2
+    # health-sync is NOT called here any more: it drives Mi Fitness's UI on
+    # screen, and a phone that visibly opens an app every half hour is not
+    # acceptable ambient behaviour (operator veto, 2026-08-16). It remains
+    # available as an explicit `sinnix phone health-sync` for on-demand use
+    # until an invisible trigger (forced JobScheduler job or the Xiaomi cloud
+    # collector, sinnix-ogll) replaces it.
+    :
   fi
   if [ "$ssh_up" = true ]; then
     drain_estate ssh

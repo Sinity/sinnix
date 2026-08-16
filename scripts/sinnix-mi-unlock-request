@@ -326,10 +326,21 @@ async def run(args: argparse.Namespace) -> int:
 
     verdict = classify([d for _, d in results])
     log(f"verdict: {verdict}")
-    # `GRANTED` is the endpoint's successful terminal result.  Keep this
-    # aligned with the sentinel writer in the systemd runner: a grant must
-    # stop future daily attempts.
-    return 0 if verdict == "GRANTED" else 1
+    # Three outcomes, three codes, because two of them are not failures.
+    #
+    # 0  GRANTED -- the endpoint's successful terminal result.  Keep this
+    #    aligned with the sentinel writer in the systemd runner: a grant must
+    #    stop future daily attempts.
+    # 75 REFUSED-UNTIL-DEADLINE -- the server's ordinary "not in this quota
+    #    window" answer, which is what almost every run gets and is in no
+    #    sense a fault.  It used to return 1, so the unit went red every
+    #    single day for working exactly as designed; the unit declares
+    #    SuccessExitStatus=75 so systemd agrees.  EX_TEMPFAIL, from
+    #    sysexits.h: try again later.
+    # 1  anything else -- a genuine failure worth a red unit.
+    if verdict == "GRANTED":
+        return 0
+    return 75 if verdict == "REFUSED-UNTIL-DEADLINE" else 1
 
 
 
