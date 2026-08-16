@@ -313,7 +313,15 @@ while IFS=$'\t' read -r name path cadence stale_after; do
   else
     emit "capture:$name" capture_stale "$name" healthy "path=$path;age_seconds=$age;cadence_seconds=$cadence;stale_after_seconds=$stale_after"
   fi
-done < <(jq -r '.captures[]? | select(.expectedCadenceSeconds != null or .expectedStaleAfterSeconds != null) | [.name,.path,(.expectedCadenceSeconds // "null"),(.expectedStaleAfterSeconds // "null")] | @tsv' "$inventory")
+# Every declared lane, including those with neither a cadence nor a budget.
+# Those used to be filtered out here, which meant the MOST broken state a lane
+# can be in -- declared, wired, and never having produced a single file -- was
+# the one state that raised nothing. Five lanes were in exactly that state on
+# 2026-08-16, four of them with a path that did not exist at all. An age-based
+# verdict still needs a budget (both checks above are already guarded on
+# having one), but "has this lane ever produced anything" needs no budget to
+# answer and is the question worth asking of an unbudgeted lane.
+done < <(jq -r '.captures[]? | [.name,.path,(.expectedCadenceSeconds // "null"),(.expectedStaleAfterSeconds // "null")] | @tsv' "$inventory")
 
 # Payload-degeneracy check: a lane can write at full cadence forever with
 # every meaningful field null, and every staleness check above will call it
