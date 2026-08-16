@@ -313,8 +313,10 @@ class SpeechService : Service() {
      * fresh connect per utterance costs a handshake on a link whose RTT is
      * single-digit milliseconds and removes an entire class of silent failure.
      */
-    private fun stream(line: JSONObject): Boolean {
-        val target = Prefs.receiverHost(this)
+    private fun stream(line: JSONObject): Boolean =
+        Prefs.receiverCandidates(this).any { streamTo(it, line) }
+
+    private fun streamTo(target: String, line: JSONObject): Boolean {
         val host = target.substringBeforeLast(':', target)
         val port = target.substringAfterLast(':', "8940").toIntOrNull() ?: 8940
         return try {
