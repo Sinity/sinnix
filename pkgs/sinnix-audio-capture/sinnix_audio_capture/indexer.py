@@ -38,6 +38,7 @@ visible to a consumer at all.
 from __future__ import annotations
 
 import calendar
+import json
 import re
 import subprocess
 import time
@@ -226,6 +227,62 @@ def _speech_spans_for_segment(model, pcm16_bytes: bytes) -> list[SpeechSpan]:
     ]
 
 
+def already_indexed_refs(capture_root: Path, *, since_ts: float) -> set[str]:
+    """Segment paths this lane has already written an envelope for.
+
+    The lookback window is NOT a de-duplication mechanism, and treating it as
+    one is an arithmetic trap: the timer fires hourly while the default
+    lookback is 26 hours (deliberately, so a missed run still catches up), so
+    every pass re-decoded and re-VADed the same ~26 hours of audio. On
+    2026-08-16 that produced 4481 records covering 431 distinct segments --
+    roughly ten duplicates each -- and a pass took ~66 minutes, so the next
+    hourly trigger arrived before the previous one finished and the service
+    sat permanently `activating`, burning a core on work it had already done
+    and holding up home-manager activation behind it.
+
+    Idempotence belongs here rather than in the window: with it, the 26h
+    lookback goes back to meaning what it says (catch up after a missed run)
+    and costs a directory scan instead of a re-decode.
+
+    Only the lane files that can overlap the window are read, so this stays
+    cheap as the lane grows.
+    """
+    lane_dir = Path(capture_root) / INDEX_LANE
+    if not lane_dir.is_dir():
+        return set()
+    # One day of slack on each side: segments are bucketed by their own start
+    # hour in UTC, and a pass near a day boundary writes into the neighbouring
+    # file.
+    first_day = time.gmtime(since_ts - 86400)
+    days = set()
+    day = calendar.timegm(first_day)
+    now = time.time() + 86400
+    while day <= now:
+        days.add(time.strftime("%Y%m%d", time.gmtime(day)))
+        day += 86400
+
+    refs: set[str] = set()
+    for name in sorted(days):
+        path = lane_dir / f"{INDEX_LANE}-{name}.jsonl"
+        try:
+            with open(path) as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        ref = json.loads(line).get("raw_ref")
+                    except json.JSONDecodeError:
+                        # A torn final line from a killed writer is not a
+                        # reason to re-index the whole window.
+                        continue
+                    if ref:
+                        refs.add(ref)
+        except FileNotFoundError:
+            continue
+    return refs
+
+
 def run_index_pass(
     *,
     capture_root: Path,
@@ -244,12 +301,17 @@ def run_index_pass(
 
     if channels is None:
         channels = tuple(discover_channels(capture_root))
+    seen = already_indexed_refs(Path(capture_root), since_ts=since_ts)
     writer = writer_factory()
     model = _load_model()
     indexed = 0
     for channel in channels:
         channel_dir = Path(capture_root) / "audio" / channel
         for segment_path in list_segments(channel_dir, since_ts=since_ts):
+            # raw_ref is written as str(segment_path) below; compare on the
+            # same string so a pass never re-decodes what it already recorded.
+            if str(segment_path) in seen:
+                continue
             pcm = decode_to_pcm16k_mono(ffmpeg_bin, segment_path)
             spans = _speech_spans_for_segment(model, pcm)
             segment_start = segment_start_ts(segment_path)
