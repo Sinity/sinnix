@@ -374,17 +374,35 @@ done < <(jq -r '.captures[]? | select((.requiredPayloadFields // []) != []) | [.
 # publisher rather than a probe that was never asked in a context where it
 # could answer. Reuse the same bridge: locate a live session bus, become that
 # uid, and hand the probe the session env it needs.
-run_probe_in_user_session() {
-  local probe_timeout="$1" command="$2" bus uid
+# All probes in ONE sudo, for the same reason the unit query batches: each
+# sudo writes three PAM lines to the journal, and there are ~46 probes per
+# sweep on a fixed one-minute clock. The probe records travel as NDJSON on
+# stdin rather than as arguments, so an arbitrary shell command survives
+# transport verbatim -- see the escaping note below, which cost a lane its
+# publisher signal once already. Prints "name<TAB>exit_code" per probe.
+run_probes_in_user_session() {
+  local payload="$1" bus uid jq_bin timeout_bin
+  jq_bin="$(command -v jq)"
+  timeout_bin="$(command -v timeout)"
   for bus in "$user_bus_root"/*/bus; do
     [ -S "$bus" ] || continue
     uid="$(basename "$(dirname "$bus")")"
     [ "$uid" = 0 ] && continue
-    timeout "${probe_timeout}s" sudo -u "#$uid" \
+    printf '%s' "$payload" | sudo -u "#$uid" \
       XDG_RUNTIME_DIR="/run/user/$uid" \
       DBUS_SESSION_BUS_ADDRESS="unix:path=$bus" \
-      bash -c "$command"
-    return $?
+      bash -c '
+        jq_bin="$1"; timeout_bin="$2"
+        while IFS= read -r record; do
+          [ -n "$record" ] || continue
+          name="$("$jq_bin" -r .name <<< "$record")"
+          command="$("$jq_bin" -r .command <<< "$record")"
+          probe_timeout="$("$jq_bin" -r .timeout <<< "$record")"
+          "$timeout_bin" "''${probe_timeout}s" bash -c "$command" >/dev/null 2>&1
+          printf "%s\t%s\n" "$name" "$?"
+        done
+      ' _ "$jq_bin" "$timeout_bin"
+    return 0
   done
   # No session to ask. Not "absent" -- unanswerable, which the caller's
   # non-1 branch already reports as unknown.
@@ -399,25 +417,36 @@ run_probe_in_user_session() {
 # came back as uncovered, and the lane reported a confirmed-absent publisher
 # forever while the probe passed every time it was run by hand. Any field
 # that is going to be executed must survive transport verbatim.
-while IFS= read -r record; do
-  [ -n "$record" ] || continue
-  name="$(jq -r '.name' <<< "$record")"
-  path="$(jq -r '.path' <<< "$record")"
-  command="$(jq -r '.command' <<< "$record")"
-  probe_timeout="$(jq -r '.timeout' <<< "$record")"
-  [ -n "$name" ] || continue
-  if run_probe_in_user_session "$probe_timeout" "$command" >/dev/null 2>&1; then
-    emit "publisher:$name" publisher_liveness "$name" healthy "path=$path"
-  else
-    rc=$?
-    if [ "$rc" -eq 1 ]; then
+probe_records="$(jq -c '.captures[]? | select(.livenessProbe != null)
+  | {name, path, command: .livenessProbe.command, timeout: (.livenessProbe.timeoutSeconds // 5)}' "$inventory")"
+
+if [ -n "$probe_records" ]; then
+  declare -A probe_exit=()
+  probe_batch_ran=1
+  probe_results="$(run_probes_in_user_session "$probe_records"$'\n')" || probe_batch_ran=0
+  if [ "$probe_batch_ran" -eq 1 ]; then
+    while IFS=$'\t' read -r probe_name probe_rc; do
+      [ -n "$probe_name" ] || continue
+      probe_exit["$probe_name"]="$probe_rc"
+    done <<< "$probe_results"
+  fi
+
+  while IFS= read -r record; do
+    [ -n "$record" ] || continue
+    name="$(jq -r '.name' <<< "$record")"
+    path="$(jq -r '.path' <<< "$record")"
+    [ -n "$name" ] || continue
+    # A probe missing from the batch never ran: unanswerable, not absent.
+    rc="${probe_exit[$name]:-3}"
+    if [ "$rc" -eq 0 ]; then
+      emit "publisher:$name" publisher_liveness "$name" healthy "path=$path"
+    elif [ "$rc" -eq 1 ]; then
       emit "publisher:$name" publisher_liveness "$name" publisher-absent "path=$path;probe_exit=$rc"
     else
       emit "publisher:$name" publisher_liveness "$name" unknown "path=$path;probe_exit=$rc"
     fi
-  fi
-done < <(jq -c '.captures[]? | select(.livenessProbe != null)
-  | {name, path, command: .livenessProbe.command, timeout: (.livenessProbe.timeoutSeconds // 5)}' "$inventory")
+  done <<< "$probe_records"
+fi
 
 while IFS=$'\t' read -r path warn fail; do
   usage="$(df -P "$path" 2>/dev/null | awk 'NR == 2 {gsub(/%/,"",$5); print $5}' || true)"
