@@ -230,24 +230,35 @@ object HealthLane {
 
         rateLimited = false
         var written = 0
-        for (type in TYPES) {
-            written +=
-                if (!prefs(ctx).getBoolean(sweptKey(type), false)) {
-                    sweep(ctx, client, type)
-                } else {
-                    incremental(ctx, client, type)
-                }
-            // Health Connect enforces a rolling API quota, and the first
-            // full-history sweep is big enough to hit it (StepsRecord alone:
-            // 1,592 pages). Once one call is rejected for quota, every later
-            // call this tick will be too -- the first run proved it with
-            // sixteen identical token failures in two seconds. Stop the tick
-            // and let the next one continue from the persisted page cursor.
-            if (rateLimited) {
-                Events.record(ctx, "lane_blocked", "lane", "health",
-                    "reason", "rate limited; resuming next tick")
-                break
-            }
+        // Fresh data first, history second. The full-history sweeps are
+        // hundreds of quota windows deep (StepsRecord alone: 254,720 records
+        // before the first rate limit), and a tick that starts with them
+        // spends its whole quota on February before reading last night's
+        // sleep. Incrementals are a handful of calls for the swept types, so
+        // they run first and the day's readings land every tick no matter
+        // how far the backfill still has to crawl.
+        val (swept, unswept) = TYPES.partition { prefs(ctx).getBoolean(sweptKey(it), false) }
+        for (type in swept) {
+            written += incremental(ctx, client, type)
+            if (rateLimited) break
+        }
+        // Steps sweeps LAST. It is the largest history by an order of
+        // magnitude and the least dense signal per record; every other type
+        // that finishes its sweep graduates to cheap incrementals, so the
+        // sooner sleep and heart rate get their turn at the quota, the sooner
+        // each new night lands within a tick of Mi Fitness writing it.
+        for (type in unswept.sortedBy { it == StepsRecord::class }) {
+            // Health Connect enforces a rolling API quota. Once one call is
+            // rejected for quota, every later call this tick will be too --
+            // the first run proved it with sixteen identical token failures
+            // in two seconds. Stop the tick and let the next one continue
+            // from the persisted page cursor.
+            if (rateLimited) break
+            written += sweep(ctx, client, type)
+        }
+        if (rateLimited) {
+            Events.record(ctx, "lane_blocked", "lane", "health",
+                "reason", "rate limited; resuming next tick")
         }
         return written
     }
