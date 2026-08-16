@@ -37,9 +37,6 @@ mkServiceModule {
   surface = {
     unit = "sinnix-capture-screen.service";
     manager = "user";
-    # No explicit `kind`: real owned systemd .service unit -> defaults to
-    # "service". `kind = "capture"` is reserved for orphan surfaces with no
-    # real backing unit (capture-registry.nix).
     resourceClass = "capture-runtime";
     observe = {
       enable = true;

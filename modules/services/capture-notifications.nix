@@ -32,10 +32,6 @@ mkServiceModule {
   surface = {
     unit = "sinnix-capture-notifications.service";
     manager = "user";
-    # No explicit `kind`: this owns a real .service unit, so it defaults to
-    # "service". `kind = "capture"` is for surfaces with no backing unit;
-    # setting it here would silently drop the unit from runtime.nix's
-    # OnFailure health-transition wiring (which filters kind == "service").
     resourceClass = "capture-runtime";
     observe = {
       enable = true;

@@ -44,7 +44,9 @@ def managed_units(manager: str) -> list[str]:
     for surface in surfaces().values():
         if surface.get("manager", "system") != manager:
             continue
-        if surface.get("kind", "service") in {"capture", "slice"}:
+        # Neither is a unit you can restart: a slice is a cgroup container,
+        # and a scope names transient children by prefix.
+        if surface.get("kind", "service") in {"slice", "scope"}:
             continue
         unit = surface.get("unit")
         if unit:

@@ -133,7 +133,11 @@ mkServiceModule {
         agent-gateway-jobs = {
           unit = "sinnix-agent-job-.scope";
           manager = "user";
-          kind = "capture";
+          # A scope, not a "capture". This carried kind = "capture" only to
+          # dodge the unit-suffix assertion, and it never needed to: these are
+          # real transient systemd scopes and the name ends in .scope. The
+          # surface owns its lane in the ordinary way.
+          kind = "scope";
           dynamic = true;
           resourceClass = "interactive-agent";
           observe.enable = true;

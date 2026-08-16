@@ -32,7 +32,7 @@ let
     ) surfaceUnitKeys
   );
   kindUnitMismatches = builtins.filter (
-    surface: surface.kind != "capture" && !(lib.hasSuffix ".${surface.kind}" surface.unit)
+    surface: !(lib.hasSuffix ".${surface.kind}" surface.unit)
   ) surfaceRows;
   unreferencedAcknowledgements = lib.mapAttrsToList (name: _: name) (
     lib.filterAttrs (
@@ -86,9 +86,127 @@ let
     drillLog = "${cfg.paths.capturesRoot}/machine/borg_drill.jsonl";
   };
 
+  # One shape for a capture lane, used in two places: inline on a runtime
+  # surface that owns its own lane, and standalone in sinnix.runtime.captures
+  # for a lane whose writer is not a systemd unit at all. Those used to be the
+  # same option, which forced three surfaces to put a shell script's name in a
+  # field typed "systemd unit name" and carved a `kind = "capture"` hole in the
+  # assertion that checks it. A lane is not a unit; now it does not have to
+  # pretend to be one.
+  captureLaneType = lib.types.submodule {
+    options = {
+      name = lib.mkOption { type = lib.types.str; };
+      path = lib.mkOption { type = lib.types.str; };
+      cadenceSeconds = lib.mkOption {
+        type = lib.types.nullOr lib.types.int;
+        default = null;
+      };
+      eventDriven = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+      };
+      staleAfterSeconds = lib.mkOption {
+        type = lib.types.nullOr lib.types.int;
+        default = null;
+        description = ''
+          Absolute staleness budget in seconds, independent of
+          cadenceSeconds. Event-driven lanes (eventDriven = true)
+          have no numeric cadence for the sentinel's 2*cadence
+          staleness check, so this is the only signal that flags
+          them stale when writes stop. Lanes with a numeric
+          cadenceSeconds may set this too; the sentinel flags a
+          lane stale when EITHER threshold is exceeded.
+        '';
+      };
+      livenessProbe = lib.mkOption {
+        type = lib.types.nullOr (
+          lib.types.submodule {
+            options = {
+              command = lib.mkOption {
+                type = lib.types.str;
+                description = ''
+                  Shell snippet (run as `bash -c "$command"` under
+                  `timeout`) answering "is the thing this lane
+                  observes actually present and publishing?" --
+                  a check on the UPSTREAM source, distinct from
+                  whether the lane's own unit is active
+                  (systemctl is-active is already covered
+                  elsewhere and is precisely the check that
+                  missed sinnix-pev0's a11y incident: the unit,
+                  listeners, and bus were all healthy while the
+                  AT-SPI registry root had zero children
+                  published).
+
+                  Exit-code contract the sentinel relies on:
+                  0 = present, 1 = confirmed absent, anything
+                  else (including a timeout's 124) = unknown.
+                  A probe that cannot determine the answer must
+                  exit something other than 0 or 1 -- silently
+                  exiting 0 on failure is exactly the bug class
+                  this option exists to catch.
+                '';
+              };
+              timeoutSeconds = lib.mkOption {
+                type = lib.types.ints.positive;
+                default = 5;
+                description = ''
+                  Bound on the probe's runtime. The sentinel runs
+                  on a 1-minute cadence against every capture
+                  lane, so a hung probe must not hang the sweep;
+                  a timeout is reported as unknown, never healthy.
+                '';
+              };
+            };
+          }
+        );
+        default = null;
+        description = ''
+          Optional upstream-liveness probe. Most lanes have no
+          cheap probe available -- leave this null and the lane
+          behaves exactly as it did before this option existed.
+          staleAfterSeconds alone can only detect "no writes
+          recently"; it structurally cannot distinguish a
+          legitimately quiet lane from one whose upstream
+          publisher never registered in the first place, so
+          lanes where that distinction is cheaply checkable
+          should declare a probe here instead of relying solely
+          on a longer budget.
+        '';
+      };
+      requiredPayloadFields = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        example = [
+          "window_class"
+          "geometry.width"
+        ];
+        description = ''
+          Dotted paths into a sinnix-capture-v1 record's `payload`
+          that this lane claims to populate. The health sentinel
+          samples the lane's most recent records and flags the lane
+          `degenerate` when a declared field is null/empty in EVERY
+          sampled record -- the "alive and writing at full cadence,
+          but the data is unconditionally null" failure the
+          staleness check cannot see (screen-frames shipped that way
+          for its whole deployed life; see sinnix-3w9n).
+
+          Declare only fields a healthy record always carries.
+          Fields that are legitimately absent sometimes (an optional
+          subtitle, a nullable parent id) must NOT be listed: the
+          check is deliberately all-or-nothing so a partially
+          populated field is never an alarm, which means a
+          sometimes-null field simply makes the check unable to
+          fire. Leave empty for lanes whose captures are not
+          JSONL envelopes.
+        '';
+      };
+    };
+  };
+
   runtimeInventory = runtimeDefaults.mkInventory {
     hostname = config.networking.hostName;
     inherit surfaces;
+    captures = config.sinnix.runtime.captures;
     mounts = mountMonitoring;
     backups = backupInventory;
   };
@@ -117,10 +235,17 @@ in
               "timer"
               "target"
               "slice"
-              "capture"
+              "scope"
             ];
             default = "service";
-            description = "Runtime surface kind.";
+            description = ''
+              Runtime surface kind. Every value here is a real systemd unit
+              type, and the assertion below enforces that `unit` ends in it.
+              There is deliberately no "capture" member: a lane whose writer
+              is not a unit belongs in sinnix.runtime.captures, not here with
+              a synthetic unit name that makes the `unit` field mean two
+              different things depending on this one.
+            '';
           };
           resourceClass = lib.mkOption {
             type = lib.types.enum resourceClassNames;
@@ -230,117 +355,7 @@ in
             };
           };
           captures = lib.mkOption {
-            type = lib.types.listOf (
-              lib.types.submodule {
-                options = {
-                  name = lib.mkOption { type = lib.types.str; };
-                  path = lib.mkOption { type = lib.types.str; };
-                  cadenceSeconds = lib.mkOption {
-                    type = lib.types.nullOr lib.types.int;
-                    default = null;
-                  };
-                  eventDriven = lib.mkOption {
-                    type = lib.types.bool;
-                    default = false;
-                  };
-                  staleAfterSeconds = lib.mkOption {
-                    type = lib.types.nullOr lib.types.int;
-                    default = null;
-                    description = ''
-                      Absolute staleness budget in seconds, independent of
-                      cadenceSeconds. Event-driven lanes (eventDriven = true)
-                      have no numeric cadence for the sentinel's 2*cadence
-                      staleness check, so this is the only signal that flags
-                      them stale when writes stop. Lanes with a numeric
-                      cadenceSeconds may set this too; the sentinel flags a
-                      lane stale when EITHER threshold is exceeded.
-                    '';
-                  };
-                  livenessProbe = lib.mkOption {
-                    type = lib.types.nullOr (
-                      lib.types.submodule {
-                        options = {
-                          command = lib.mkOption {
-                            type = lib.types.str;
-                            description = ''
-                              Shell snippet (run as `bash -c "$command"` under
-                              `timeout`) answering "is the thing this lane
-                              observes actually present and publishing?" --
-                              a check on the UPSTREAM source, distinct from
-                              whether the lane's own unit is active
-                              (systemctl is-active is already covered
-                              elsewhere and is precisely the check that
-                              missed sinnix-pev0's a11y incident: the unit,
-                              listeners, and bus were all healthy while the
-                              AT-SPI registry root had zero children
-                              published).
-
-                              Exit-code contract the sentinel relies on:
-                              0 = present, 1 = confirmed absent, anything
-                              else (including a timeout's 124) = unknown.
-                              A probe that cannot determine the answer must
-                              exit something other than 0 or 1 -- silently
-                              exiting 0 on failure is exactly the bug class
-                              this option exists to catch.
-                            '';
-                          };
-                          timeoutSeconds = lib.mkOption {
-                            type = lib.types.ints.positive;
-                            default = 5;
-                            description = ''
-                              Bound on the probe's runtime. The sentinel runs
-                              on a 1-minute cadence against every capture
-                              lane, so a hung probe must not hang the sweep;
-                              a timeout is reported as unknown, never healthy.
-                            '';
-                          };
-                        };
-                      }
-                    );
-                    default = null;
-                    description = ''
-                      Optional upstream-liveness probe. Most lanes have no
-                      cheap probe available -- leave this null and the lane
-                      behaves exactly as it did before this option existed.
-                      staleAfterSeconds alone can only detect "no writes
-                      recently"; it structurally cannot distinguish a
-                      legitimately quiet lane from one whose upstream
-                      publisher never registered in the first place, so
-                      lanes where that distinction is cheaply checkable
-                      should declare a probe here instead of relying solely
-                      on a longer budget.
-                    '';
-                  };
-                  requiredPayloadFields = lib.mkOption {
-                    type = lib.types.listOf lib.types.str;
-                    default = [ ];
-                    example = [
-                      "window_class"
-                      "geometry.width"
-                    ];
-                    description = ''
-                      Dotted paths into a sinnix-capture-v1 record's `payload`
-                      that this lane claims to populate. The health sentinel
-                      samples the lane's most recent records and flags the lane
-                      `degenerate` when a declared field is null/empty in EVERY
-                      sampled record -- the "alive and writing at full cadence,
-                      but the data is unconditionally null" failure the
-                      staleness check cannot see (screen-frames shipped that way
-                      for its whole deployed life; see sinnix-3w9n).
-
-                      Declare only fields a healthy record always carries.
-                      Fields that are legitimately absent sometimes (an optional
-                      subtitle, a nullable parent id) must NOT be listed: the
-                      check is deliberately all-or-nothing so a partially
-                      populated field is never an alarm, which means a
-                      sometimes-null field simply makes the check unable to
-                      fire. Leave empty for lanes whose captures are not
-                      JSONL envelopes.
-                    '';
-                  };
-                };
-              }
-            );
+            type = lib.types.listOf captureLaneType;
             default = [ ];
             description = "Capture outputs produced by this runtime surface.";
           };
@@ -427,6 +442,21 @@ in
     );
     default = { };
     description = "Enabled runtime units and capture surfaces declared by owning modules.";
+  };
+
+  # Lanes with no owning systemd unit: a hotkey script, a shell wrapper the
+  # terminal launches, an external artifact drop. They still need freshness
+  # budgets, because "nothing writes this lane" is the failure that looks
+  # exactly like silence -- but they are not units, and giving them a
+  # `unit` field was a lie every consumer had to know about.
+  options.sinnix.runtime.captures = lib.mkOption {
+    type = lib.types.listOf captureLaneType;
+    default = [ ];
+    description = ''
+      Capture lanes that no runtime surface owns. Declared here rather than as
+      a surface with a synthetic unit name, so the sentinel and the inventory
+      see their freshness without anything having to special-case them.
+    '';
   };
 
   options.sinnix.runtime.inventory = lib.mkOption {
