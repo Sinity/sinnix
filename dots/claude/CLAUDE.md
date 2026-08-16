@@ -452,10 +452,7 @@ patterns, workflows) lives in each project's `CLAUDE.md`.
 - **Alternate backends**: `claude-deepseek`/`codex-deepseek` (agenix
   `deepseek-api-key`); `claude-local`/`codex-local`/`hermes-local` (local
   Ollama hub via LiteLLM `127.0.0.1:4000`; model names live once in
-  `litellm.nix`); `muse-contrib`/`hermes-muse` (Muse Spark contributor tier
-  via the Vercel AI Gateway, agenix `vercel-ai-gateway-key` — Meta gates the
-  tier server-side; **prompts/completions on it may train Meta models — keep
-  confidential material off it**). LiteLLM stays local-models-only; remote
+  `litellm.nix`). LiteLLM stays local-models-only; remote
   backends are wired per-wrapper with agenix keys.
 - **Shared skills** live in `dots/_ai/skills/` (sinnix repo) and are linked
   into `~/.config/claude/skills`, `~/.codex/skills`, `~/.gemini/skills`.

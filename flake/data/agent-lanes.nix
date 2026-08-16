@@ -22,13 +22,9 @@
   #   voiceEnabled     - defaults to true in mkHermesConfig when omitted.
   #   model            - overrides mkHermesConfig's default
   #                      { default="gpt-5.6-terra"; provider="openai-codex"; }.
-  #                      For custom-endpoint lanes (muse, local) this also
+  #                      For custom-endpoint lanes (local, sampler) this also
   #                      supplies `model.base_url`, reused by the wrapper's
   #                      OPENAI_BASE_URL export so the URL has one source.
-  #   preludeSecret    - agenix secret name resolved into OPENAI_API_KEY via
-  #                      lib.sinnix.mkSecretLookup before launch (custom
-  #                      OpenAI-compatible endpoints prefer OPENAI_API_KEY —
-  #                      hermes-agent issue #560).
   #   apiKeyLiteral    - static (non-secret) OPENAI_API_KEY value for
   #                      loopback gateways that need a non-empty token but
   #                      enforce no real auth (LiteLLM on 127.0.0.1).
@@ -78,19 +74,6 @@
         "clarify"
         "tts"
       ];
-    };
-
-    # Muse Spark contributor tier via the Vercel AI Gateway. Meta gates the
-    # tier server-side ("select countries") and will not serve this account
-    # directly; the gateway carries it at contributor list prices.
-    muse = {
-      toolsets = [ "hermes-cli" ];
-      model = {
-        default = "meta/muse-spark-1.2-contributor";
-        provider = "custom";
-        base_url = "https://ai-gateway.vercel.sh/v1";
-      };
-      preludeSecret = "vercel-ai-gateway-key";
     };
 
     # Local Ollama hub via the LiteLLM gateway; model names live in
@@ -246,19 +229,6 @@
         varName = "LITELLM_LOCAL_KEY";
         literal = "sk-local";
       };
-    };
-  };
-
-  # Muse lanes: thin passthrough wrappers around vendor-managed/gateway
-  # scripts (the scripts themselves stay in scripts/, packaged normally).
-  # `script` is both the scriptPkgs attribute name and the packaged binary
-  # name for both lanes today.
-  museLanes = {
-    muse-code = {
-      script = "sinnix-muse-code-bootstrap";
-    };
-    muse-contrib = {
-      script = "muse-contrib";
     };
   };
 

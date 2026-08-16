@@ -154,8 +154,6 @@ hermes-local --model local-coder
 
 The same wrappers can select `local-coder`, `local-reasoner`, `local-thinker`, or the multimodal model. Glimmer is a useful choice for bounded batch work, extraction, judging, and autonomous jobs. `local-coder` is the better first choice for interactive coding because it stays GPU-resident and avoids the 30B hybrid cold path.
 
-The `muse-contrib` and `hermes-muse` lanes are remote Muse Spark contributor access through the Vercel AI Gateway. They are not local inference and should not be confused with `local-glimmer`.
-
 ## Open WebUI
 
 Open WebUI is available at `http://127.0.0.1:8080`. Its current configuration points directly at Ollama and uses the roster's embedding model for document chat. It does not currently list Glimmer because Glimmer is behind the LiteLLM gateway rather than Ollama. Use the direct Glimmer endpoint or LiteLLM for Glimmer sessions.

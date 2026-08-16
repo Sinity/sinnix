@@ -316,8 +316,8 @@ skills`, `~/.codex/skills`, `~/.gemini/skills`) are linkFarms over it.
   `claude` aliases `claude-lean` because the upstream installer clobbers the
   bare path). The per-client/backend variant axis (which MCP tier, which
   model/backend, which key source — hermes profiles, claude/codex
-  full/lean/browser/deepseek/local lanes, the muse-code/muse-contrib
-  passthroughs) is pure data in `flake/data/agent-lanes.nix`
+  full/lean/browser/deepseek/local lanes) is pure data in
+  `flake/data/agent-lanes.nix`
   (`helpers.data.agentLanes`); `clis.nix` renders it by mapping over the
   registry, `backends.nix` supplies the shared backend-env builders
   (`mkClaudeBackendEnv`/`mkCodexBackendEnv`) the deepseek/local lanes
