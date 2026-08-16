@@ -102,10 +102,15 @@ class HeartRateLane(context: Context) {
             ticksUntilRetry = RETRY_TICKS
             return
         }
-        // autoConnect=true: the request parks in the controller and completes
-        // whenever the band is in range. Direct connects time out in ~30s and
-        // would need a scan (and its permission) to be retried sensibly.
-        gatt = band.connectGatt(ctx, true, callback, BluetoothDevice.TRANSPORT_LE)
+        // DIRECT connect, not autoConnect. autoConnect waits for an
+        // advertisement from the device -- and a band already connected to Mi
+        // Fitness never advertises, so the pending connect never completed
+        // and the lane sat silent (observed on first deploy). A direct
+        // connect joins the existing ACL immediately, which is the ordinary
+        // state of a worn band next to its phone; when the band is genuinely
+        // out of range it fails in ~30s and the tick cadence retries.
+        state("connecting")
+        gatt = band.connectGatt(ctx, false, callback, BluetoothDevice.TRANSPORT_LE)
         if (gatt == null) {
             state("connect-rejected")
             ticksUntilRetry = RETRY_TICKS
@@ -134,12 +139,27 @@ class HeartRateLane(context: Context) {
                     state("connected")
                     g.discoverServices()
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                    // With autoConnect the stack keeps trying on its own;
-                    // record the transition and leave the gatt in place.
-                    if (connected) state("disconnected")
+                    // A direct connect that drops or fails is finished; close
+                    // it and let the tick cadence open a fresh one. A DROPPED
+                    // session retries within a minute -- the band walked out
+                    // of range mid-stream. A connect that never succeeded
+                    // backs off to ten minutes: on this band it means LE is
+                    // not connectable at all (Mi Fitness owns it over classic
+                    // Bluetooth, and LE only comes up with the band's share-HR
+                    // setting), and a per-minute retry is 3,000 identical
+                    // failure events a day.
+                    val wasConnected = connected
+                    state(if (wasConnected) "disconnected" else "connect-failed")
                     connected = false
                     subscribed = false
                     flush()
+                    try {
+                        g.close()
+                    } catch (e: Exception) {
+                        Log.w(Storage.TAG, "hr-live: close failed", e)
+                    }
+                    gatt = null
+                    ticksUntilRetry = if (wasConnected) SHORT_RETRY_TICKS else RETRY_TICKS
                 }
             }
 
@@ -252,5 +272,6 @@ class HeartRateLane(context: Context) {
         private val CCCD = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
         private const val FLUSH_MILLIS = 60_000L
         private const val RETRY_TICKS = 30 // 30 heartbeats at 20s = 10 minutes
+        private const val SHORT_RETRY_TICKS = 3 // one minute, for transient drops
     }
 }
