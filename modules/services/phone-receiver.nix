@@ -14,26 +14,10 @@
   ...
 }@args:
 let
-  cfg = config.sinnix.services.phone-receiver;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   receiverPkg = scriptPkgs.sinnix-phone-receiver;
   capturesRoot = config.sinnix.paths.capturesRoot;
 
-  # The kinds the phone actually pushes. Named rather than inferred because
-  # each one needs a directory the receiver's user can write: the captures root
-  # is root-owned, and CaptureWriter creates `<root>/phone-<kind>` on first
-  # write. Nothing ever reached this service before, so that permission error
-  # had never once been hit -- the first real utterance found it immediately.
-  # A kind not listed here still parses and is still logged; only its lane
-  # cannot be created, which is a loud failure rather than a silent one.
-  streamKinds = [
-    "speech"
-    "battery"
-    "thermal"
-    "location"
-    "health"
-    "sensor"
-  ];
   tailscaleInterface = "tailscale0";
   port = helpers.data.ports.phoneStream;
 
@@ -67,13 +51,14 @@ mkServiceModule {
       enable = true;
       restartable = true;
     };
-    # Only `speech`. streamKinds below is what this receiver ACCEPTS, not what
-    # the phone sends: SpeechService is the app's sole user of the stream port,
-    # and every other kind -- battery, thermal, location, health, sensor --
-    # goes to the app's own event log and reaches the lake through
-    # sinnix-phone-drain instead. Declaring the other five would register
-    # capture lanes nothing is designed to write, which is a standing false
-    # alarm rather than monitoring.
+    # Only `speech`. The receiver's protocol accepts more kinds than that --
+    # battery, thermal, location, health, sensor all parse -- but SpeechService
+    # is the app's sole user of the stream port, and every other kind goes to
+    # the app's own event log and reaches the lake through sinnix-phone-drain
+    # instead. Declaring the other five would register capture lanes nothing is
+    # designed to write, which is a standing false alarm rather than
+    # monitoring. A kind that ever does start arriving here creates its own
+    # lane on first write and can be declared then.
     #
     # eventDriven with no staleness budget: the phone pushes when it has
     # something, so silence measures the operator's day, not this service.
@@ -100,19 +85,23 @@ mkServiceModule {
 
       networking.firewall.interfaces.${tailscaleInterface}.allowedTCPPorts = [ port ];
 
-      # One directory per stream kind, owned by the user the receiver runs as.
-      # The captures root is root-owned and CaptureWriter creates its lane
-      # directory on first write, so without these the very first line of every
-      # kind dies with EACCES -- which is exactly what happened the first time
-      # anything was ever pushed at this service.
-      systemd.tmpfiles.rules =
-        map (kind: "d ${capturesRoot}/phone-${kind} 0755 ${username} users -") streamKinds
-        ++ [
-          # Raw utterance audio, kept whether or not transcription succeeded:
-          # audio can be re-transcribed by a better engine later, a transcript
-          # cannot be un-lost.
-          "d ${capturesRoot}/phone/speech 0755 ${username} users -"
-        ];
+      # Only the lanes something actually writes. This used to pre-create one
+      # directory per accepted stream kind, because the captures root was
+      # root-owned and CaptureWriter's own mkdir died with EACCES on the first
+      # line of every kind. The root is owned by the user now
+      # (modules/core.nix), so that workaround has no reason left -- and it
+      # was leaving five permanently-empty directories (phone-battery,
+      # -thermal, -location, -health, -sensor) in the lake for kinds that
+      # reach it through sinnix-phone-drain instead, which is precisely the
+      # standing false alarm the surface declaration above declines to make.
+      # A kind that ever does arrive here creates its own lane on first write.
+      systemd.tmpfiles.rules = [
+        "d ${capturesRoot}/phone-speech 0755 ${username} users -"
+        # Raw utterance audio, kept whether or not transcription succeeded:
+        # audio can be re-transcribed by a better engine later, a transcript
+        # cannot be un-lost.
+        "d ${capturesRoot}/phone/speech 0755 ${username} users -"
+      ];
 
       home-manager.users.${username} =
         { ... }:

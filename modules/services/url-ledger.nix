@@ -18,7 +18,6 @@ mkServiceModule {
     let
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
       stateDir = "${config.sinnix.paths.capturesRoot}/url-ledger/state";
-      cdxRawDir = "${config.sinnix.paths.capturesRoot}/url-ledger/cdx-raw";
       derivedDir = "${config.sinnix.paths.dataRoot}/derived/url-ledger";
     in
     {
@@ -56,7 +55,13 @@ mkServiceModule {
             ExecStart = "${scriptPkgs.sinnix-url-ledger}/bin/sinnix-url-ledger run --max-requests ${toString cfg.maxRequestsPerRun} --max-seconds ${toString cfg.maxSecondsPerRun} --window-days ${toString cfg.windowDays}";
             # The script stops itself at maxSecondsPerRun; this is the backstop
             # for a wedged provider socket, not the normal bound.
-            RuntimeMaxSec = cfg.maxSecondsPerRun + 900;
+            #
+            # TimeoutStartSec, not RuntimeMaxSec: systemd ignores RuntimeMaxSec
+            # for Type=oneshot and says so on every start ("RuntimeMaxSec= has
+            # no effect in combination with Type=oneshot"), so the backstop was
+            # not armed at all. A oneshot spends its whole life "starting", and
+            # TimeoutStartSec is the bound that applies there.
+            TimeoutStartSec = cfg.maxSecondsPerRun + 900;
           };
         };
       };
