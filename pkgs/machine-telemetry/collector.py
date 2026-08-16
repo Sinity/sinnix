@@ -19,6 +19,9 @@ SCHEMA_VERSION = 5
 # writer connection; see the checkpoint block at the bottom of the heartbeat
 # loop for why the implicit autocheckpoint is not enough here.
 WAL_CHECKPOINT_INTERVAL_S = 900.0
+# See gpu_sampler_thread: long checkpoint stalls are normal on this DB, and a
+# dropped sample is worse than a late one.
+GPU_SAMPLER_BUSY_TIMEOUT_S = 60.0
 UTC = dt.timezone.utc
 DISKSTAT_FIELDS = (
     "reads_completed",
@@ -1092,7 +1095,16 @@ def gpu_sampler_thread(
     # Dedicated thread with its own SQLite connection: high-frequency GPU
     # samples land in gpu_sample without contending with the main heartbeat
     # writer. WAL mode permits concurrent writers.
-    conn = sqlite3.connect(db_path, timeout=5.0)
+    #
+    # The busy timeout is generous on purpose. WAL still serialises writers,
+    # and on this host the WAL runs to hundreds of thousands of frames because
+    # checkpoints keep losing to a concurrent reader -- a stall longer than a
+    # few seconds is routine, not exceptional. At 5s the sampler simply
+    # DROPPED those samples ("sample failed: OperationalError('database is
+    # locked')", thousands a day), which is silent data loss in the lane whose
+    # entire job is not to have gaps. Waiting costs at most a delayed sample
+    # on a thread that does nothing else.
+    conn = sqlite3.connect(db_path, timeout=GPU_SAMPLER_BUSY_TIMEOUT_S)
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA synchronous=NORMAL;")
     try:
