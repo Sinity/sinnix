@@ -22,6 +22,14 @@ WAL_CHECKPOINT_INTERVAL_S = 900.0
 # See gpu_sampler_thread: long checkpoint stalls are normal on this DB, and a
 # dropped sample is worse than a late one.
 GPU_SAMPLER_BUSY_TIMEOUT_S = 60.0
+# The main writer's busy timeout, and it is really the CHECKPOINT's timeout.
+# Python's sqlite3 default is 5s; a wal_checkpoint(TRUNCATE) on this database
+# takes far longer than that -- measured 2026-08-16, 12.05s to drain a WAL of
+# only 6.3 MB, because the cost is scattered page writes into a 27 GB main
+# file, not the length of the WAL. At 5s the checkpoint hit the timeout every
+# single time, copied what it could, and returned SQLITE_BUSY with a partial
+# frame count.
+DB_BUSY_TIMEOUT_S = 60.0
 UTC = dt.timezone.utc
 DISKSTAT_FIELDS = (
     "reads_completed",
@@ -1083,6 +1091,14 @@ def gpu_metrics() -> tuple[dict[str, object], list[str]]:
         with _nvml_lock:
             _nvml_handle = None
     return result, gaps
+
+
+def wal_size_bytes(db_path: str) -> int:
+    """Size of the -wal sidecar, or 0 when it is absent/unreadable."""
+    try:
+        return os.path.getsize(f"{db_path}-wal")
+    except OSError:
+        return 0
 
 
 def gpu_sampler_thread(
@@ -2241,7 +2257,7 @@ def main() -> int:
     }
     manifest.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
 
-    with sqlite3.connect(db) as conn:
+    with sqlite3.connect(db, timeout=DB_BUSY_TIMEOUT_S) as conn:
         init_db(conn)
         if args.network_probe_once:
             inserted = insert_network_sample(
@@ -2576,19 +2592,45 @@ def main() -> int:
                     save_kill_event_cursor(conn, new_cursor)
                 next_kill_event = sample_start + args.kill_event_interval
             conn.commit()
-            # SQLite's PASSIVE autocheckpoints never shrink the WAL file and
-            # silently stall while any reader (lynchpin analysis queries)
-            # holds an older snapshot. TRUNCATE both drains and shrinks it;
-            # the 5s busy handler degrades a blocked attempt to a logged
-            # retry next interval instead of stalling sampling.
+            # PASSIVE autocheckpoints drain the WAL but never shrink the
+            # file; TRUNCATE does both, so it runs here on a schedule.
+            #
+            # Its first return value is SQLITE_BUSY, which this used to report
+            # as "blocked by concurrent reader". That reading was wrong and
+            # cost an investigation: a checkpoint also returns BUSY when it
+            # simply runs out of busy-timeout, and that is what was happening
+            # every time. Verified 2026-08-16 -- the only process with this
+            # database open is this one, and a TRUNCATE measured 12.05s
+            # against a 6.3 MB WAL, because the work is scattered page writes
+            # into a 27 GB main file rather than anything proportional to the
+            # WAL. Against the old 5s default it could never finish, so it
+            # copied a partial prefix and gave up, every interval, forever --
+            # which is how the WAL reached 300 MB and writers began timing out
+            # against it.
+            #
+            # Hence DB_BUSY_TIMEOUT_S on this connection, and elapsed time in
+            # the log: if this ever reports BUSY again, the question is
+            # whether the checkpoint is slower than the timeout or genuinely
+            # contended, and only the duration distinguishes them.
             if sample_start >= next_wal_checkpoint:
                 next_wal_checkpoint = sample_start + WAL_CHECKPOINT_INTERVAL_S
+                wal_before = wal_size_bytes(str(db))
+                checkpoint_started = time.monotonic()
                 try:
                     ck = conn.execute("PRAGMA wal_checkpoint(TRUNCATE);").fetchone()
+                    elapsed = time.monotonic() - checkpoint_started
                     if ck and ck[0]:
                         print(
-                            "wal-checkpoint: blocked by concurrent reader "
-                            f"(log_frames={ck[1]} checkpointed={ck[2]}); retrying next interval",
+                            "wal-checkpoint: BUSY after "
+                            f"{elapsed:.1f}s (log_frames={ck[1]} checkpointed={ck[2]}, "
+                            f"wal={wal_before / 1e6:.1f}MB); either slower than the "
+                            f"{DB_BUSY_TIMEOUT_S:.0f}s timeout or genuinely contended",
+                            flush=True,
+                        )
+                    elif elapsed > 5.0:
+                        print(
+                            f"wal-checkpoint: drained {wal_before / 1e6:.1f}MB "
+                            f"in {elapsed:.1f}s",
                             flush=True,
                         )
                 except sqlite3.Error as exc:
