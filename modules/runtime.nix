@@ -34,6 +34,17 @@ let
   kindUnitMismatches = builtins.filter (
     surface: surface.kind != "capture" && !(lib.hasSuffix ".${surface.kind}" surface.unit)
   ) surfaceRows;
+  unreferencedAcknowledgements = lib.mapAttrsToList (name: _: name) (
+    lib.filterAttrs (
+      _: surface:
+      surface.acknowledged.down
+      && (
+        surface.acknowledged.reason == ""
+        || surface.acknowledged.since == ""
+        || surface.acknowledged.ref == ""
+      )
+    ) surfaces
+  );
   commandRows = lib.mapAttrsToList (name: command: {
     inherit name;
     inherit (command) resourceClass;
@@ -188,6 +199,34 @@ in
               type = lib.types.bool;
               default = false;
               description = "Whether operators may restart this surface directly.";
+            };
+          };
+          # A machine-readable carrier for "yes, this is down, we know".
+          # Without one, every fresh agent session rediscovers an intentional
+          # outage as an emergency and re-reports it. An acknowledgement is
+          # not a mute: the surface still appears, in its own section, with
+          # the reason and the tracking reference attached, so a stale ack is
+          # visible rather than a permanent silence.
+          acknowledged = {
+            down = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = "This surface is expected to be down; do not report it as a failure.";
+            };
+            reason = lib.mkOption {
+              type = lib.types.str;
+              default = "";
+              description = "Why it is down, in one line, for a human reading a status page.";
+            };
+            since = lib.mkOption {
+              type = lib.types.str;
+              default = "";
+              description = "ISO date the acknowledgement was made, so its age is auditable.";
+            };
+            ref = lib.mkOption {
+              type = lib.types.str;
+              default = "";
+              description = "Tracking reference (Beads id) for the work that ends the outage.";
             };
           };
           captures = lib.mkOption {
@@ -412,6 +451,15 @@ in
           + lib.concatMapStringsSep ", " (
             surface: "${surface.name}:${surface.kind}:${surface.unit}"
           ) kindUnitMismatches;
+      }
+      {
+        # An acknowledgement without a reason and a tracking reference is
+        # just a mute, and a mute is how an intentional outage quietly
+        # becomes a forgotten one.
+        assertion = unreferencedAcknowledgements == [ ];
+        message =
+          "sinnix.runtime.surfaces acknowledged outages must carry reason, since and ref: "
+          + lib.concatStringsSep ", " unreferencedAcknowledgements;
       }
       {
         assertion = unknownCommandClasses == [ ];

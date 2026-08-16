@@ -253,6 +253,62 @@ def test_render_human_minimal() -> None:
     out = render.render_human(report)
     assert "live pressure" in out
     assert "below hint" in out
+    # No acknowledgements declared, so the section must not appear at all --
+    # an empty "acknowledged outages" heading reads as a claim that nothing
+    # is known-down, which is a different statement from staying silent.
+    assert "acknowledged outages" not in out
+
+
+def test_render_human_surfaces_acknowledged_outages() -> None:
+    report = {
+        "schema": "sinnix-observe-v1",
+        "generated_at": "2026-05-19T00:00:00+00:00",
+        "window": {"since": "10 min ago", "duration": "10 min"},
+        "live_pressure": {"cpu": {"raw": ""}, "memory": {"raw": ""}, "io": {"raw": ""}},
+        "blocked_tasks": [],
+        "storage": {
+            "mounts": [],
+            "discard_queues": [],
+            "fstrim_timer": {},
+            "fstrim_service": {},
+        },
+        "systemd_units": [],
+        "resource_slices": [],
+        "chrome_io": {},
+        "sinex_xtask_history": {"db": None, "rows": []},
+        "polylogue_live_attempts": {"db": None, "rows": []},
+        "below": {"cgroup_peaks": [], "process_peaks": []},
+        "workload_rows": [],
+        "gaps_summary": {},
+        "runtime_inventory": {
+            "surfaces": {
+                "polylogued": {
+                    "unit": "polylogued.service",
+                    "acknowledged": {
+                        "down": True,
+                        "reason": "storage migration blocks every start",
+                        "since": "2026-08-14",
+                        "ref": "sinnix-qh6s",
+                    },
+                },
+                "ollama": {
+                    "unit": "ollama.service",
+                    "acknowledged": {
+                        "down": False,
+                        "reason": "",
+                        "since": "",
+                        "ref": "",
+                    },
+                },
+            }
+        },
+    }
+    out = render.render_human(report)
+    assert "acknowledged outages" in out
+    assert "sinnix-qh6s" in out
+    assert "storage migration blocks every start" in out
+    # A surface that is NOT acknowledged must not be listed as known-down.
+    assert "ollama.service" not in out
 
 
 def test_cli_parse_args_defaults() -> None:
