@@ -511,7 +511,12 @@ prefetch_user_props() {
 query_unit_props() {
   local manager="$1" unit="$2" bus uid out
   if [ "$manager" = user ]; then
-    prefetch_user_props
+    # NOTE: no prefetch call here. query_unit_props is invoked inside a
+    # `$(...)` command substitution, which runs in a subshell -- populating
+    # the cache from here would fill a subshell's copy and throw it away on
+    # return, re-running the batch for every single unit. The prefetch is
+    # done once in the main shell before the sweeps; a subshell inherits the
+    # cache but cannot write it back.
     if [ -n "${user_props_cache[$unit]:-}" ]; then
       printf '%s' "${user_props_cache[$unit]}"
       return 0
@@ -535,6 +540,9 @@ query_unit_props() {
   [ -n "$out" ] || return 1
   printf '%s\n' "$out"
 }
+
+# Once, in the main shell (see the note in query_unit_props).
+prefetch_user_props
 
 while IFS=$'\t' read -r manager unit activation_mode acknowledged_down acknowledged_ref; do
   [ -n "$unit" ] || continue
