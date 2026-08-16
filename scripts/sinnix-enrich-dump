@@ -8,12 +8,12 @@ set -euo pipefail
 # outputs under /realm/data/derived/enrichment/.
 #
 # Single-writer invariant: writes only the output root and the watermark at
-# /realm/state/enrichment/; never polylogue's or sinex's stores.
+# /realm/state/cursors/enrichment/; never polylogue's or sinex's stores.
 #
 # Every input is optional. Absent or empty means nothing changed since the
 # watermark, not a fault -- the skill tells the model to treat it that way.
 
-WATERMARK_FILE="/realm/state/enrichment/last-run"
+WATERMARK_FILE="/realm/state/cursors/enrichment/last-run"
 OUTPUT_ROOT="/realm/data/derived/enrichment"
 
 # Pinned rather than inherited from interactive settings. Opus by measurement,

@@ -36,7 +36,7 @@ let
 
   laneDir = "${config.sinnix.paths.capturesRoot}/clipboard";
   blobDir = "${laneDir}/blobs";
-  stateDir = "${config.sinnix.paths.stateRoot}/sinnix-capture-clipboard";
+  stateDir = "${config.sinnix.paths.stateRoot}/cursors/capture-clipboard";
 
   clipboardWatch = pkgs.writeShellApplication {
     name = "sinnix-capture-clipboard-watch";

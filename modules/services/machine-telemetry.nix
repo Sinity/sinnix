@@ -23,7 +23,7 @@ let
   dbPath = "${dbRoot}/telemetry.sqlite";
   # Lives on /realm, not /persist (worn MX500); still inside the /realm
   # btrbk→borg coverage.
-  backupRoot = "/realm/staging/machine-telemetry";
+  backupRoot = "/realm/state/db-dumps/machine-telemetry";
   manifestPath = "${dataDir}/manifest.json";
   username = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
