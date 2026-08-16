@@ -1,4 +1,4 @@
-# URL x visit x archive-snapshot coverage ledger. Weekly evidence join:
+# URL x visit x archive-snapshot coverage ledger. Daily evidence join:
 # browser-history URLs against public archive CDX indexes (Wayback, Common
 # Crawl, Memento). Read-only against third-party archive APIs; no crawling,
 # no SavePageNow -- it reports coverage gaps, it does not act on them.
@@ -12,7 +12,7 @@
 }@args:
 mkServiceModule {
   name = "url-ledger";
-  description = "Weekly URL visit x archive-snapshot coverage ledger";
+  description = "Daily URL visit x archive-snapshot coverage ledger";
   configFn =
     { cfg, ... }:
     let
@@ -28,7 +28,7 @@ mkServiceModule {
         observe.enable = true;
         workload = {
           class = "sacrificial";
-          rationale = "Weekly read-only join against public archive CDX APIs; rerunnable at will.";
+          rationale = "Read-only join against public archive indexes; rerunnable at will.";
         };
         captures = [
           {
@@ -53,14 +53,17 @@ mkServiceModule {
             # Reads the operator's webhistory capture and writes into the
             # operator-owned data lake.
             User = config.sinnix.user.name;
-            ExecStart = "${scriptPkgs.sinnix-url-ledger}/bin/sinnix-url-ledger run --max-requests ${toString cfg.maxRequestsPerRun} --window-days ${toString cfg.windowDays}";
+            ExecStart = "${scriptPkgs.sinnix-url-ledger}/bin/sinnix-url-ledger run --max-requests ${toString cfg.maxRequestsPerRun} --max-seconds ${toString cfg.maxSecondsPerRun} --window-days ${toString cfg.windowDays}";
+            # The script stops itself at maxSecondsPerRun; this is the backstop
+            # for a wedged provider socket, not the normal bound.
+            RuntimeMaxSec = cfg.maxSecondsPerRun + 900;
           };
         };
       };
       systemd.timers.sinnix-url-ledger = {
         wantedBy = [ "timers.target" ];
         timerConfig = {
-          OnCalendar = "weekly";
+          OnCalendar = "daily";
           Persistent = true;
           RandomizedDelaySec = "2h";
         };
@@ -69,8 +72,22 @@ mkServiceModule {
   extraOptions = {
     maxRequestsPerRun = args.lib.mkOption {
       type = args.lib.types.int;
-      default = 2000;
-      description = "Bound on provider CDX queries per weekly run (resolve is resumable across runs).";
+      default = 200000;
+      description = ''
+        Backstop bound on provider queries per run. maxSecondsPerRun is the
+        real control; this only catches a pathologically fast failure loop.
+
+        The old pairing of 2000 queries with a weekly timer could not finish:
+        540k history URLs across two live providers is ~1.1M queries, which at
+        2000 a week is measured in centuries. Resolve is resumable, so the
+        backfill converges only if a run's budget is a meaningful fraction of
+        the work.
+      '';
+    };
+    maxSecondsPerRun = args.lib.mkOption {
+      type = args.lib.types.int;
+      default = 7200;
+      description = "Wall-clock budget per run. Bounds what actually matters -- that a run finishes inside its own interval -- since query cost varies by two orders of magnitude.";
     };
     windowDays = args.lib.mkOption {
       type = args.lib.types.int;

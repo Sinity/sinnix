@@ -16,8 +16,8 @@ Pipeline (three subcommands, chained by `run`):
 
   ingest   history file(s) -> state/urls.jsonl (distinct normalized URL,
            all visit timestamps -- not just first/last).
-  resolve  state/urls.jsonl -> query Wayback CDX, Common Crawl CDX, and the
-           Memento TimeTravel aggregator for each not-yet-resolved URL;
+  resolve  state/urls.jsonl -> query Wayback CDX, the Common Crawl columnar
+           index, and the Memento aggregator for each not-yet-resolved URL;
            cache raw responses under <captures>/url-ledger/cdx-raw/<date>/
            <provider>/ (dated-snapshot convention, precedent: sinnix-0h2 /
            lynchpin raindrop_archive.py) and append to
@@ -27,10 +27,16 @@ Pipeline (three subcommands, chained by `run`):
            visit timestamps, per-provider snapshot timestamps, and the
            nearest archived snapshot to each visit.
 
-Resumability: `resolve` is bounded per invocation (--max-requests) and
-skips any (url, provider) pair already terminally resolved in
-state/resolution.jsonl, so a killed run or a weekly timer tick just picks
-up where the last one left off -- no re-querying of already-resolved URLs.
+Resumability: `resolve` is bounded per invocation (--max-seconds, with
+--max-requests as a backstop) and skips any (url, provider) pair already
+terminally resolved in state/resolution.jsonl, so a killed run or the next
+timer tick picks up where the last left off.
+
+Common Crawl note (see `CommonCrawlProvider`): index.commoncrawl.org, which
+served both collinfo.json and every CDX endpoint, refuses connections outright.
+data.commoncrawl.org still publishes, so the provider reads the columnar index
+files directly -- cluster.idx cached locally and binary-searched, then one
+ranged GET of the block it points at.
 
 Memento note (see `MementoProvider` docstring): the only public Memento
 aggregator (timetravel.mementoweb.org) was discontinued in 2025. The
@@ -44,9 +50,11 @@ from __future__ import annotations
 
 import argparse
 import calendar
+import gzip
 import hashlib
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -326,22 +334,33 @@ class WaybackProvider:
 
 
 class CommonCrawlProvider:
-    """Common Crawl CDX index. Queried across the N most-recently-published
-    collections (default 3) rather than the full ~120-collection archive:
-    querying every collection for every URL would multiply request volume
-    ~40x for a still-incomplete history-coverage picture, since Common
-    Crawl's crawl selection is itself a sample of the web, not a
-    site-directed archive like Wayback. This is a documented scope choice,
-    not full Common Crawl coverage -- widen via --common-crawl-collections
-    if the operator wants deeper (slower) backfill.
+    """Common Crawl coverage, read from the published index files.
+
+    NOT the CDX API. index.commoncrawl.org -- which served both collinfo.json
+    and every per-collection CDX endpoint -- refuses TCP connections outright,
+    while data.commoncrawl.org keeps publishing (crawls through CC-MAIN-2026-30
+    verified present). There is no drop-in URL for the query API because it was
+    a service, not a file; what data.commoncrawl.org offers instead is the raw
+    columnar index, which is what this walks:
+
+      collections/<id>/indexes/cluster.idx    sorted SURT -> (shard, offset, len)
+      collections/<id>/indexes/cdx-NNNNN.gz   the blocks it points into
+
+    cluster.idx is ~100 MB per collection, so it is cached on disk once and
+    binary-searched locally; a lookup is then a single ranged GET of the ~250 KB
+    block that can contain the key. Queried across the N most-recently-published
+    collections rather than the full archive -- Common Crawl is a sample of the
+    web, not a site-directed archive, so more collections buy less than their
+    request cost. Widen with --common-crawl-collections.
     """
 
     name = "commoncrawl"
     default_delay_seconds = 1.0
+    DATA_BASE = "https://data.commoncrawl.org/cc-index/collections"
 
     def __init__(
         self,
-        collinfo_url: str = "https://index.commoncrawl.org/collinfo.json",
+        collinfo_url: str = "https://data.commoncrawl.org/cc-index/collections/index.html",
         collection_count: int = 3,
         cache_dir: Path | None = None,
         collinfo_cache_max_age_seconds: int = 7 * 86400,
@@ -350,87 +369,208 @@ class CommonCrawlProvider:
         self.collection_count = collection_count
         self.cache_dir = cache_dir
         self.collinfo_cache_max_age_seconds = collinfo_cache_max_age_seconds
-        self._collections: list[dict] | None = None
-        # Remembered across queries so an unreachable collinfo is paid for
-        # once per run rather than once per URL.
+        self._collections: list[str] | None = None
+        # Remembered across queries so an unreachable index is paid for once
+        # per run rather than once per URL.
         self._collections_error: str | None = None
+        self._cluster_paths: dict[str, Path] = {}
 
-    def _load_collections(self) -> list[dict]:
+    # -- collection discovery -------------------------------------------------
+
+    def _load_collections(self) -> list[str]:
         if self._collections is not None:
             return self._collections
         if self._collections_error is not None:
             raise ProviderUnavailable(self._collections_error)
-        cache_path = (self.cache_dir / "collinfo.json") if self.cache_dir else None
+        cache_path = (self.cache_dir / "collections.json") if self.cache_dir else None
         if cache_path and cache_path.exists():
             age = time.time() - cache_path.stat().st_mtime
             if age < self.collinfo_cache_max_age_seconds:
                 self._collections = json.loads(cache_path.read_text(encoding="utf-8"))
                 return self._collections
         try:
-            status, body = http_get(self.collinfo_url)
-            collections = json.loads(body.decode("utf-8"))
-        except (
-            urllib.error.URLError,
-            socket.timeout,
-            TimeoutError,
-            OSError,
-            json.JSONDecodeError,
-        ) as error:
-            # index.commoncrawl.org has been refusing connections outright
-            # while data.commoncrawl.org still publishes; when the collection
-            # list cannot be fetched at all, no URL in this run can be
-            # resolved through this provider, so stop trying.
+            _status, body = http_get(self.collinfo_url)
+        except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as error:
             self._collections_error = str(error)
             raise ProviderUnavailable(self._collections_error) from error
+        ids = sorted(
+            set(re.findall(r"CC-MAIN-\d{4}-\d{2}", body.decode("utf-8", errors="replace"))),
+            reverse=True,
+        )
+        if not ids:
+            self._collections_error = f"no collections listed at {self.collinfo_url}"
+            raise ProviderUnavailable(self._collections_error)
         if cache_path:
             cache_path.parent.mkdir(parents=True, exist_ok=True)
-            cache_path.write_text(json.dumps(collections), encoding="utf-8")
-        self._collections = collections
-        return collections
+            cache_path.write_text(json.dumps(ids), encoding="utf-8")
+        self._collections = ids
+        return ids
+
+    # -- cluster.idx ----------------------------------------------------------
+
+    def _cluster_index(self, collection: str) -> Path:
+        """Local copy of a collection's cluster.idx, downloaded once.
+
+        Fetching it whole (~100 MB) beats binary-searching it over HTTP: the
+        search costs ~11 ranged requests per URL, so the file pays for itself
+        after the first handful of lookups and every one after is local.
+        """
+        cached = self._cluster_paths.get(collection)
+        if cached is not None:
+            return cached
+        if self.cache_dir is None:
+            raise ProviderUnavailable("common crawl lookup needs a cache directory")
+        path = self.cache_dir / f"{collection}-cluster.idx"
+        if not path.exists() or path.stat().st_size == 0:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            url = f"{self.DATA_BASE}/{collection}/indexes/cluster.idx"
+            tmp = path.with_suffix(".idx.tmp")
+            try:
+                request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+                with urllib.request.urlopen(request, timeout=600) as response:  # noqa: S310
+                    declared = response.headers.get("Content-Length")
+                    with tmp.open("wb") as out:
+                        while True:
+                            chunk = response.read(1 << 20)
+                            if not chunk:
+                                break
+                            out.write(chunk)
+            except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as error:
+                tmp.unlink(missing_ok=True)
+                raise ProviderUnavailable(f"cluster.idx fetch failed for {collection}: {error}") from error
+            # A short read here does not fail, it lies: the file is a sorted
+            # index and a truncated one still binary-searches, just to the
+            # wrong block. Refuse it rather than answer from it.
+            written = tmp.stat().st_size
+            if declared is not None and written != int(declared):
+                tmp.unlink(missing_ok=True)
+                raise ProviderUnavailable(
+                    f"cluster.idx for {collection} truncated: got {written} of {declared} bytes"
+                )
+            tmp.replace(path)
+        self._cluster_paths[collection] = path
+        self._prune_stale_clusters()
+        return path
+
+    def _prune_stale_clusters(self) -> None:
+        """Drop cluster.idx files for collections no longer being queried.
+
+        Common Crawl publishes a new collection roughly monthly, so without
+        this the cache grows ~100 MB a month forever. These are regenerable
+        caches, not captured data -- a dropped one is re-fetched on demand.
+        """
+        if self.cache_dir is None or self._collections is None:
+            return
+        keep = set(self._collections[: self.collection_count])
+        for stale in self.cache_dir.glob("CC-MAIN-*-cluster.idx"):
+            collection = stale.name[: -len("-cluster.idx")]
+            if collection not in keep:
+                stale.unlink(missing_ok=True)
+                self._cluster_paths.pop(collection, None)
+
+    @staticmethod
+    def _surt(normalized_url: str) -> str | None:
+        """SURT key as Common Crawl writes it: reversed host, then the path.
+
+        www is stripped because CC canonicalizes it away -- a lookup for
+        `com,example)/` returns both example.com and www.example.com captures.
+        """
+        try:
+            parts = urlsplit(normalized_url)
+        except ValueError:
+            return None
+        host = (parts.hostname or "").lower()
+        if not host:
+            return None
+        if host.startswith("www."):
+            host = host[4:]
+        reversed_host = ",".join(reversed(host.split(".")))
+        path = parts.path or "/"
+        key = f"{reversed_host})" + path
+        if parts.query:
+            key += f"?{parts.query}"
+        return key
+
+    @staticmethod
+    def _block_for(cluster_path: Path, key: str) -> tuple[str, int, int] | None:
+        """Binary-search the sorted cluster.idx for the block covering `key`.
+
+        Seeks to a midpoint, skips to the next line boundary, and compares the
+        SURT prefix; the answer is the LAST line whose key is <= ours, since
+        each line marks where its block begins.
+        """
+        size = cluster_path.stat().st_size
+        with cluster_path.open("rb") as handle:
+            lo, hi = 0, size
+            candidate: bytes | None = None
+            while lo < hi:
+                mid = (lo + hi) // 2
+                handle.seek(mid)
+                if mid:
+                    handle.readline()  # discard the partial line
+                pos = handle.tell()
+                line = handle.readline()
+                if not line:
+                    hi = mid
+                    continue
+                entry_key = line.split(b"\t", 1)[0].split(b" ", 1)[0].decode("utf-8", "replace")
+                if entry_key <= key:
+                    candidate = line
+                    lo = pos + len(line)
+                else:
+                    hi = mid
+            if candidate is None:
+                handle.seek(0)
+                candidate = handle.readline()
+        fields = candidate.decode("utf-8", "replace").rstrip("\n").split("\t")
+        if len(fields) < 4:
+            return None
+        try:
+            return fields[1], int(fields[2]), int(fields[3])
+        except ValueError:
+            return None
 
     def query(self, normalized_url: str) -> ProviderResult:
         try:
             collections = self._load_collections()
         except ProviderUnavailable as error:
-            return ProviderResult(status="error", error=f"collinfo unavailable: {error}")
-        except (urllib.error.URLError, socket.timeout, TimeoutError, OSError, json.JSONDecodeError) as error:
-            return ProviderResult(status="error", error=f"collinfo fetch failed: {error}")
-        # collinfo.json is already newest-first per Common Crawl's publishing
-        # convention; take defensively-sorted top N by `to` timestamp.
-        ranked = sorted(collections, key=lambda c: c.get("to", ""), reverse=True)
-        selected = ranked[: self.collection_count]
+            return ProviderResult(status="error", error=f"cc index unavailable: {error}")
+        key = self._surt(normalized_url)
+        if key is None:
+            return ProviderResult(status="unavailable", error="no SURT key for url")
         all_snapshots: set[str] = set()
-        raw_pages = []
-        for collection in selected:
-            cdx_api = collection.get("cdx-api")
-            if not cdx_api:
-                continue
-            query = urlencode({"url": normalized_url, "output": "json", "limit": "1000"})
+        raw_pages: list[dict] = []
+        for collection in collections[: self.collection_count]:
             try:
-                status, body = http_get(f"{cdx_api}?{query}")
-            except urllib.error.HTTPError as error:
-                if error.code == 404:
-                    # Common Crawl returns 404 for "no captures found", not
-                    # an error -- this is the CC CDX API's designed empty-set
-                    # signal, so treat it as a resolved-empty query.
+                cluster_path = self._cluster_index(collection)
+            except ProviderUnavailable as error:
+                return ProviderResult(status="error", error=str(error))
+            located = self._block_for(cluster_path, key)
+            if located is None:
+                continue
+            shard, offset, length = located
+            url = f"{self.DATA_BASE}/{collection}/indexes/{shard}"
+            request = urllib.request.Request(
+                url,
+                headers={"User-Agent": USER_AGENT, "Range": f"bytes={offset}-{offset + length - 1}"},
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:  # noqa: S310
+                    block = gzip.decompress(response.read())
+            except (urllib.error.URLError, socket.timeout, TimeoutError, OSError, gzip.BadGzipFile) as error:
+                return ProviderResult(status="error", error=f"{collection}: {error}")
+            prefix = key if key.endswith("/") else key
+            for line in block.decode("utf-8", errors="replace").splitlines():
+                if not line.startswith(prefix):
                     continue
-                return ProviderResult(status="error", error=f"{collection.get('id')}: HTTP {error.code}")
-            except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as error:
-                return ProviderResult(status="error", error=f"{collection.get('id')}: {error}")
-            # Common Crawl CDX is newline-delimited JSON objects, not a
-            # single JSON array like Wayback's `output=json`.
-            for line in body.decode("utf-8", errors="replace").splitlines():
-                line = line.strip()
-                if not line:
+                fields = line.split(" ", 2)
+                if len(fields) < 3:
                     continue
+                all_snapshots.add(fields[1])
                 try:
-                    row = json.loads(line)
+                    raw_pages.append(json.loads(fields[2]))
                 except json.JSONDecodeError:
                     continue
-                ts = row.get("timestamp")
-                if ts:
-                    all_snapshots.add(ts)
-                raw_pages.append(row)
         return ProviderResult(status="ok", snapshots=sorted(all_snapshots), raw=raw_pages)
 
 
@@ -550,12 +690,24 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     resolved_now = 0
     already_resolved = 0
     errors = 0
+    # Wall clock is the honest bound. A request count does not describe what
+    # actually needs bounding -- that a run finishes inside its own interval --
+    # because requests differ in cost by orders of magnitude (a cached
+    # cluster.idx lookup is ~0.2s, a Wayback timeout is 20s). max_requests
+    # stays as a backstop, but this is what normally stops a run.
+    started_at = time.monotonic()
+    deadline = started_at + args.max_seconds if args.max_seconds > 0 else None
+    stopped_on = "exhausted input"
 
     with urls_path.open("r", encoding="utf-8") as handle, resolution_path.open(
         "a", encoding="utf-8"
     ) as out:
         for line in handle:
+            if deadline is not None and time.monotonic() >= deadline:
+                stopped_on = f"time budget ({args.max_seconds}s)"
+                break
             if requests_made >= args.max_requests:
+                stopped_on = f"request budget ({args.max_requests})"
                 break
             line = line.strip()
             if not line:
@@ -563,6 +715,9 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             record = json.loads(line)
             normalized_url = record["url"]
             for provider_name, provider in providers.items():
+                if deadline is not None and time.monotonic() >= deadline:
+                    stopped_on = f"time budget ({args.max_seconds}s)"
+                    break
                 if requests_made >= args.max_requests:
                     break
                 key = (normalized_url, provider_name)
@@ -605,10 +760,11 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 else:
                     resolved_now += 1
 
+    elapsed = time.monotonic() - started_at
     print(
-        f"sinnix-url-ledger resolve: {requests_made} provider queries "
+        f"sinnix-url-ledger resolve: {requests_made} provider queries in {elapsed:.0f}s "
         f"({resolved_now} resolved, {errors} transient errors, "
-        f"{already_resolved} already resolved / skipped)"
+        f"{already_resolved} already resolved / skipped); stopped on {stopped_on}"
     )
     return 0
 
@@ -802,7 +958,8 @@ def build_parser() -> argparse.ArgumentParser:
         choices=list(PROVIDERS),
         help="Restrict to one provider (repeatable). Default: all providers.",
     )
-    resolve.add_argument("--max-requests", type=int, default=2000, help="Bound provider queries per run (default: %(default)s)")
+    resolve.add_argument("--max-requests", type=int, default=200000, help="Backstop bound on provider queries per run (default: %(default)s)")
+    resolve.add_argument("--max-seconds", type=int, default=7200, help="Wall-clock budget per run in seconds; 0 disables (default: %(default)s)")
     resolve.add_argument("--common-crawl-collections", type=int, default=3)
     resolve.add_argument("--memento-base-url", default="http://timetravel.mementoweb.org/timemap/link")
     resolve.add_argument(
@@ -830,7 +987,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--cdx-raw-root", default=str(DEFAULT_CAPTURES_ROOT / "url-ledger" / "cdx-raw"))
     run.add_argument("--derived-root", default=str(DEFAULT_DERIVED_ROOT / "url-ledger"))
     run.add_argument("--provider", action="append", choices=list(PROVIDERS))
-    run.add_argument("--max-requests", type=int, default=2000)
+    run.add_argument("--max-requests", type=int, default=200000)
+    run.add_argument("--max-seconds", type=int, default=7200)
     run.add_argument("--common-crawl-collections", type=int, default=3)
     run.add_argument("--memento-base-url", default="http://timetravel.mementoweb.org/timemap/link")
     run.add_argument("--rate-limit-seconds", action="append", default=[], metavar="PROVIDER=SECONDS")
