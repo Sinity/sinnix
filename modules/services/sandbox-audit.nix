@@ -102,14 +102,31 @@ mkServiceModule {
           # Successful execs are already captured three times over by lanes
           # that carry far more context -- Atuin shell history, asciinema
           # terminal recordings, and agent session transcripts -- so the
-          # blanket rule bought no evidence those lanes lack. FAILED execs
-          # are the part none of them record, and are the signature of the
-          # missing-binary class this estate keeps hitting (the swallowed
-          # gawk, the absent wsdd). That is a few records a day, not 82M.
-          "-a always,exit -F arch=b64 -S execve -F auid>=1000 -F auid!=-1 -F success=0 -k sinnix-exec-failed"
+          # blanket rule bought no evidence those lanes lack.
+          #
+          # Nor is "all FAILED execs" a viable narrowing, which measurement
+          # settled rather than reasoning: 1771 of 1771 sampled failures were
+          # exit=-2 (ENOENT), because a shell resolving a bare command name
+          # execve()s it against every PATH entry until one hits. That is a
+          # second firehose wearing the first one's clothes.
+          #
+          # A refusal is the event with security meaning: something tried to
+          # run a binary it was not permitted to run. EACCES and EPERM only,
+          # which is rare enough to read.
+          "-a always,exit -F arch=b64 -S execve -F auid>=1000 -F auid!=-1 -F exit=-EACCES -k sinnix-exec-refused"
+          "-a always,exit -F arch=b64 -S execve -F auid>=1000 -F auid!=-1 -F exit=-EPERM -k sinnix-exec-refused"
           "-a always,exit -F arch=b64 -S setuid,setgid,setreuid,setregid -F auid>=1000 -F auid!=-1 -k sinnix-privchange"
           # System-shape changes worth reconstructing after the fact.
-          "-a always,exit -F arch=b64 -S mount,umount2 -k sinnix-mount"
+          #
+          # auid-scoped for the same reason the exec rules are. Unscoped, this
+          # recorded systemd building a mount namespace for every sandboxed
+          # unit start: 4.4 million records, of which a 5 MB sample was 100%
+          # `(capture-awair)` -- a unit that starts every 60 seconds and costs
+          # ~120 mount/umount2 calls each time. None of that is a change to
+          # the system's shape; it is the sandbox working. A mount a person or
+          # an agent performs carries their loginuid, and that is the one this
+          # rule exists to reconstruct.
+          "-a always,exit -F arch=b64 -S mount,umount2 -F auid>=1000 -F auid!=-1 -k sinnix-mount"
           "-a always,exit -F arch=b64 -S init_module,finit_module,delete_module -k sinnix-module"
           "-a always,exit -F arch=b64 -S clock_settime,settimeofday -k sinnix-time"
         ]
