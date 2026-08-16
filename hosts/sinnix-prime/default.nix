@@ -289,8 +289,15 @@
   };
   services.journald = {
     storage = lib.mkForce "persistent";
+    # Set through the options rather than repeated in extraConfig below.
+    # NixOS emits its own RateLimitInterval=/RateLimitBurst= lines from these,
+    # so restating them in extraConfig produced a journald.conf carrying each
+    # key twice with DIFFERENT values (burst 10000 then 500) plus the
+    # deprecated RateLimitInterval= spelling. Last-wins resolved it, but
+    # nothing readable said which value was in force.
+    rateLimitInterval = lib.mkForce "30s";
+    rateLimitBurst = lib.mkForce 500;
     extraConfig = lib.mkForce ''
-      Storage=persistent
       Compress=yes
       SyncIntervalSec=2min
       # Persistent (not volatile) is deliberate: the journal is the forensic
@@ -302,8 +309,6 @@
       SystemKeepFree=200G
       SystemMaxFileSize=128M
       MaxFileSec=1week
-      RateLimitIntervalSec=30s
-      RateLimitBurst=500
       ForwardToSyslog=no
     '';
   };
