@@ -1,0 +1,313 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Walk the estate's filesystems into a queryable inventory (JSONL + DuckDB/Parquet)
+# runtimeInputs: python3 duckdb coreutils
+
+"""A queryable index of what is on this machine's disks.
+
+The estate has ~4 TB across /realm and /outer-realm and no way to answer
+"what is this, who writes it, is it a copy of something else" without walking
+it by hand every time. This builds the index once and makes it a dataset.
+
+Two layers, deliberately:
+
+  MECHANICAL (this script)   one row per directory: sizes, counts, mtime
+                             range, owners, an extension histogram and a
+                             sample of names. Cheap, exhaustive, re-runnable.
+  CHARACTERISED (agents)     prose per directory: what it actually is, who
+                             writes it, whether it duplicates something else.
+                             Written into a separate table so a re-scan never
+                             destroys it.
+
+Keeping those apart is the whole design. A scan must be free to re-run nightly;
+a judgement about what a directory is for costs real attention and must
+survive. They join on the path.
+
+Storage follows the url-ledger precedent: JSONL is the append-only source of
+truth (diffable, re-ingestable, survives a DuckDB version bump) and DuckDB +
+Parquet are the materialisation you query.
+
+Directories are the unit. A file-level index of this estate would be tens of
+millions of rows to answer questions that are all really about directories;
+per-directory aggregates plus a sample answers them at a thousandth the size.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import pwd
+import grp
+import stat
+import subprocess
+import sys
+import time
+from collections import Counter
+from pathlib import Path
+
+SCHEMA = "sinnix-fs-inventory-v1"
+
+DEFAULT_ROOTS = ["/realm", "/outer-realm"]
+
+# Pruned: opaque by construction (a borg repo is deduplicated chunks, a .git
+# object store is content-addressed blobs), or someone else's index already
+# describes them better than a walk could. Recorded as a single node with
+# prune_reason set, never silently skipped -- an absent directory and a
+# deliberately-unwalked one must not look the same.
+PRUNE_NAMES = {
+    # btrfs snapshot root. Snapshots reflink the same extents, so walking it
+    # counts the estate once per snapshot: measured 29.3 TB across 1.18M
+    # directories on a filesystem holding 2.8 TB, which is 69% of every
+    # directory on the machine and none of it distinct content.
+    ".btrfs",
+    ".git",
+    "node_modules",
+    ".direnv",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    "target",  # rust build output; size recorded, contents meaningless
+    ".cargo",
+    "venv",
+    ".venv",
+}
+
+# A borg repository: data/ + config + index.*, all deduplicated chunks.
+BORG_MARKERS = {"config", "data", "hints.1", "integrity.1"}
+
+SAMPLE_NAMES = 12
+TOP_EXTENSIONS = 15
+
+
+
+def safe(value):
+    """Filenames on this estate are not all valid UTF-8.
+
+    os.scandir hands back surrogate escapes for undecodable bytes, and
+    json.dumps then refuses to encode them -- killing a whole-filesystem walk
+    over one badly-named file. Replace the unencodable parts rather than skip
+    the entry: the name is degraded, the record survives.
+    """
+    if isinstance(value, str):
+        return value.encode("utf-8", "replace").decode("utf-8")
+    if isinstance(value, dict):
+        return {safe(k): safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [safe(v) for v in value]
+    return value
+
+def is_borg_repo(entries: list[os.DirEntry]) -> bool:
+    names = {e.name for e in entries}
+    return "config" in names and "data" in names and any(n.startswith("index.") for n in names)
+
+
+def owner_of(st: os.stat_result) -> tuple[str, str]:
+    try:
+        user = pwd.getpwuid(st.st_uid).pw_name
+    except KeyError:
+        user = str(st.st_uid)
+    try:
+        group = grp.getgrgid(st.st_gid).gr_name
+    except KeyError:
+        group = str(st.st_gid)
+    return user, group
+
+
+def scan(roots: list[str], max_depth: int, out_path: Path, progress_every: int) -> int:
+    """Breadth-first walk, one JSONL record per directory.
+
+    BFS rather than DFS so a truncated run still describes the shallow
+    structure completely -- the part a reader needs first -- instead of one
+    deep spur and nothing else.
+    """
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    written = 0
+    started = time.monotonic()
+
+    with out_path.open("w", encoding="utf-8") as out:
+        queue: list[tuple[str, int]] = [(r, 0) for r in roots if os.path.isdir(r)]
+        while queue:
+            path, depth = queue.pop(0)
+            try:
+                st = os.lstat(path)
+            except OSError as exc:
+                out.write(json.dumps({"schema": SCHEMA, "path": path, "depth": depth,
+                                      "error": str(exc)}) + "\n")
+                written += 1
+                continue
+
+            try:
+                with os.scandir(path) as it:
+                    entries = list(it)
+            except PermissionError:
+                out.write(json.dumps({"schema": SCHEMA, "path": path, "depth": depth,
+                                      "error": "permission denied"}) + "\n")
+                written += 1
+                continue
+            except OSError as exc:
+                out.write(json.dumps({"schema": SCHEMA, "path": path, "depth": depth,
+                                      "error": str(exc)}) + "\n")
+                written += 1
+                continue
+
+            files: list[os.DirEntry] = []
+            dirs: list[os.DirEntry] = []
+            links = 0
+            for e in entries:
+                try:
+                    if e.is_symlink():
+                        links += 1
+                    elif e.is_dir(follow_symlinks=False):
+                        dirs.append(e)
+                    else:
+                        files.append(e)
+                except OSError:
+                    continue
+
+            direct_bytes = 0
+            mtimes: list[float] = []
+            ext_counter: Counter[str] = Counter()
+            biggest: list[tuple[int, str]] = []
+            for e in files:
+                try:
+                    est = e.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                direct_bytes += est.st_size
+                mtimes.append(est.st_mtime)
+                ext = Path(e.name).suffix.lower() or "(none)"
+                ext_counter[ext] += 1
+                biggest.append((est.st_size, e.name))
+            biggest.sort(reverse=True)
+
+            user, group = owner_of(st)
+            prune_reason = None
+            if is_borg_repo(files + dirs):
+                prune_reason = "borg repository (deduplicated chunks)"
+            elif os.path.basename(path) in PRUNE_NAMES and depth > 0:
+                prune_reason = f"pruned by name: {os.path.basename(path)}"
+            elif max_depth >= 0 and depth >= max_depth:
+                prune_reason = f"max depth {max_depth}"
+
+            record = {
+                "schema": SCHEMA,
+                "path": path,
+                "parent": os.path.dirname(path) if depth else None,
+                "name": os.path.basename(path) or path,
+                "depth": depth,
+                "direct_files": len(files),
+                "direct_dirs": len(dirs),
+                "direct_symlinks": links,
+                "direct_bytes": direct_bytes,
+                "mtime_min": min(mtimes) if mtimes else None,
+                "mtime_max": max(mtimes) if mtimes else None,
+                "dir_mtime": st.st_mtime,
+                "mode": stat.filemode(st.st_mode),
+                "owner": user,
+                "group": group,
+                "extensions": dict(ext_counter.most_common(TOP_EXTENSIONS)),
+                "sample_names": [e.name for e in files[:SAMPLE_NAMES]],
+                "biggest_files": [{"bytes": b, "name": n} for b, n in biggest[:5]],
+                "child_dirs": [e.name for e in dirs[:40]],
+                "prune_reason": prune_reason,
+            }
+            out.write(json.dumps(safe(record), ensure_ascii=False) + "\n")
+            written += 1
+
+            if progress_every and written % progress_every == 0:
+                print(f"  {written} dirs, {time.monotonic()-started:.0f}s, at depth {depth}",
+                      file=sys.stderr)
+
+            if prune_reason is None:
+                for e in dirs:
+                    queue.append((os.path.join(path, e.name), depth + 1))
+
+    print(f"sinnix-fs-inventory: {written} directories in {time.monotonic()-started:.0f}s "
+          f"-> {out_path}")
+    return written
+
+
+def materialize(jsonl: Path, db: Path, parquet: Path) -> None:
+    """JSONL -> DuckDB + Parquet, with the rolled-up subtree sizes.
+
+    direct_bytes is what a directory holds itself; total_bytes is it plus
+    everything under it. The rollup is done here rather than during the walk
+    because it needs the whole tree, and doing it in SQL keeps the walk a
+    single pass that can be interrupted.
+    """
+    sql = f"""
+INSTALL json; LOAD json;
+DROP TABLE IF EXISTS nodes;
+CREATE TABLE nodes AS SELECT * FROM read_json_auto('{jsonl}', ignore_errors=true);
+
+-- Recursive rollup: every node accumulates its own bytes plus its descendants'.
+DROP TABLE IF EXISTS rollup;
+CREATE TABLE rollup AS
+WITH RECURSIVE descend(root, path, direct_bytes) AS (
+    SELECT path AS root, path, COALESCE(direct_bytes, 0) FROM nodes
+    UNION ALL
+    SELECT d.root, n.path, COALESCE(n.direct_bytes, 0)
+    FROM descend d JOIN nodes n ON n.parent = d.path
+)
+SELECT root AS path, SUM(direct_bytes) AS total_bytes, COUNT(*) AS subtree_dirs
+FROM descend GROUP BY root;
+
+DROP VIEW IF EXISTS inventory;
+CREATE VIEW inventory AS
+SELECT n.*, r.total_bytes, r.subtree_dirs
+FROM nodes n LEFT JOIN rollup r USING (path);
+
+COPY (SELECT * FROM inventory) TO '{parquet}' (FORMAT PARQUET);
+"""
+    db.parent.mkdir(parents=True, exist_ok=True)
+    db.unlink(missing_ok=True)
+    # -f, not stdin: the DuckDB CLI reads nothing from a plain pipe and still
+    # exits 0, so piping produced an empty database and a success message.
+    script = db.parent / ".materialize.sql"
+    script.write_text(sql, encoding="utf-8")
+    proc = subprocess.run(["duckdb", str(db), "-f", str(script)], text=True,
+                          capture_output=True, check=False)
+    script.unlink(missing_ok=True)
+    if proc.returncode != 0:
+        print(proc.stdout, file=sys.stderr)
+        print(proc.stderr, file=sys.stderr)
+        raise SystemExit(f"duckdb failed ({proc.returncode})")
+    # Verify rather than announce: a materialisation that silently produced
+    # nothing is exactly the failure this whole inventory exists to surface.
+    check = subprocess.run(["duckdb", str(db), "-noheader", "-list", "-c",
+                            "SELECT count(*) FROM inventory"],
+                           text=True, capture_output=True, check=False)
+    rows = check.stdout.strip()
+    if check.returncode != 0 or not rows.isdigit() or int(rows) == 0:
+        raise SystemExit(f"materialize produced no rows (duckdb said: {rows!r} "
+                         f"{check.stderr.strip()})")
+    if not parquet.exists() or parquet.stat().st_size == 0:
+        raise SystemExit(f"parquet missing or empty: {parquet}")
+    print(f"sinnix-fs-inventory: materialized {rows} rows -> {db}, {parquet}")
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--root", action="append", default=None,
+                    help=f"Filesystem root to walk (repeatable). Default: {DEFAULT_ROOTS}")
+    ap.add_argument("--out-dir", default="/realm/data/derived/inventory")
+    ap.add_argument("--max-depth", type=int, default=-1,
+                    help="Stop descending past this depth; -1 for unlimited")
+    ap.add_argument("--progress-every", type=int, default=2000)
+    ap.add_argument("--scan-only", action="store_true")
+    args = ap.parse_args()
+
+    roots = args.root or DEFAULT_ROOTS
+    out_dir = Path(args.out_dir)
+    jsonl = out_dir / "nodes.jsonl"
+
+    scan(roots, args.max_depth, jsonl, args.progress_every)
+    if not args.scan_only:
+        materialize(jsonl, out_dir / "inventory.duckdb", out_dir / "nodes.parquet")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
