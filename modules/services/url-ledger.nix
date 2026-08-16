@@ -44,6 +44,14 @@ mkServiceModule {
       };
       systemd.services.sinnix-url-ledger = {
         description = "URL visit x archive-snapshot coverage ledger";
+        # A switch must not restart this, and must not wait for it. It is a
+        # daily oneshot with a two-hour budget, so a plain restart makes every
+        # `switch` block for up to 2h15m in activation while the ledger grinds
+        # through its provider queue -- observed 2026-08-17, holding the
+        # transaction with video-resolve queued behind it. The next timer
+        # firing picks up the new code, which is all a periodic job needs.
+        # Same reasoning as the borg drain jobs in modules/backup.nix.
+        restartIfChanged = false;
         serviceConfig = lib.sinnix.mkRuntimeServiceConfig {
           runtimeInventory = config.sinnix.runtime.inventory;
           unit = "sinnix-url-ledger.service";

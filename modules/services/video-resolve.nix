@@ -41,6 +41,11 @@ mkServiceModule {
       };
       systemd.services.sinnix-video-resolve = {
         description = "Resolve video-hosting URLs from the URL ledger into archived copies";
+        # Weekly oneshot that shells out to yt-dlp for as long as the queue
+        # takes; a switch has no business restarting it or waiting on it. It
+        # was also queued behind sinnix-url-ledger in the same blocked
+        # activation, since it is ordered after it.
+        restartIfChanged = false;
         # Ordering only, and only within a shared transaction -- which two
         # independent timers never have, so this alone never sequenced
         # anything. The real dependency is the artifact: the script exits 1
