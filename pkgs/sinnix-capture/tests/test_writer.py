@@ -63,3 +63,35 @@ def test_raw_ref_is_preserved(tmp_path: Path) -> None:
     writer = CaptureWriter(tmp_path, "lane-d")
     envelope = writer.write({"n": 1}, raw_ref="/realm/data/captures/lane-d/raw/1.bin")
     assert envelope["raw_ref"] == "/realm/data/captures/lane-d/raw/1.bin"
+
+
+def test_empty_seq_file_recovers_from_index_without_reusing_numbers(
+    tmp_path: Path,
+) -> None:
+    # Reproduces the 2026-08-16 lane bricking: a process killed between
+    # truncating and writing the counter leaves it zero-byte, and every
+    # later write died on int(''), which Restart=on-failure escalated into
+    # a start-limit-hit that never started again.
+    writer = CaptureWriter(tmp_path, "lane-r")
+    for i in range(3):
+        writer.write({"n": i})
+    (tmp_path / "lane-r" / "lane-r.seq").write_text("")
+
+    recovered = CaptureWriter(tmp_path, "lane-r").write({"n": "after"})
+
+    # 4, not 1: restarting the sequence would hand out numbers already on
+    # disk, which downstream cannot tell apart from a replayed record.
+    assert recovered["seq"] == 4
+    index_path = tmp_path / "lane-r" / "lane-r-index.jsonl"
+    seqs = [json.loads(line)["seq"] for line in index_path.read_text().splitlines()]
+    assert seqs == [1, 2, 3, 4]
+    assert len(seqs) == len(set(seqs))
+
+
+def test_unparsable_seq_file_recovers_from_index(tmp_path: Path) -> None:
+    writer = CaptureWriter(tmp_path, "lane-s")
+    writer.write({"n": 1})
+    writer.write({"n": 2})
+    (tmp_path / "lane-s" / "lane-s.seq").write_text("not a number")
+
+    assert CaptureWriter(tmp_path, "lane-s").write({"n": 3})["seq"] == 3
