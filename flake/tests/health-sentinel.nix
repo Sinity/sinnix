@@ -71,8 +71,29 @@
             cat > "$TMPDIR/bin/systemctl" <<'EOF_SYSTEMCTL'
             #!${fixtureBash}
             if [ "''${1:-}" = "--user" ]; then shift; fi
+            # Recovery verbs the socket sweep issues against a latched socket.
+            case "''${1:-}" in
+              reset-failed|start) exit 0 ;;
+            esac
             shift # drop "show"
-            unit="$1"; shift
+            # `show` takes MANY units: the sentinel batches every user-manager
+            # unit into one call to keep sudo (and its three PAM journal lines
+            # per invocation) off the per-unit path. Collect the unit
+            # arguments, drop the -p property flags, and emit one Id=-keyed
+            # block per unit separated by a blank line, exactly as systemctl
+            # does.
+            units=()
+            while [ "$#" -gt 0 ]; do
+              case "$1" in
+                -p) shift 2 ;;
+                -*) shift ;;
+                *) units+=("$1"); shift ;;
+              esac
+            done
+            first=1
+            for unit in "''${units[@]}"; do
+              [ "$first" -eq 1 ] || printf '\n'
+              first=0
             case "$unit" in
               fixture.service)
                 active=inactive; type=simple; result=success; wanted=multi-user.target ;;
@@ -88,10 +109,13 @@
                 active=inactive; type=exec; result=success; wanted=multi-user.target ;;
               usersurf.service)
                 exit 1 ;;
+              proxy-latched.socket)
+                active=failed; type=simple; result=trigger-limit-hit; wanted=sockets.target ;;
               *)
                 active=active; type=simple; result=success; wanted=multi-user.target ;;
             esac
-            printf 'ActiveState=%s\nType=%s\nResult=%s\nWantedBy=%s\n' "$active" "$type" "$result" "$wanted"
+            printf 'Id=%s\nActiveState=%s\nType=%s\nResult=%s\nWantedBy=%s\n' "$unit" "$active" "$type" "$result" "$wanted"
+            done
             EOF_SYSTEMCTL
             chmod +x "$TMPDIR/bin/systemctl"
             cat > "$TMPDIR/bin/sudo" <<'EOF_SUDO'
@@ -150,12 +174,12 @@
             # MUST surface as unknown, never healthy by default.
             probe_marker="$TMPDIR/probe-marker"
             cat > "$TMPDIR/inventory.json" <<EOF_INVENTORY
-            {"captures":[{"name":"fixture","path":"$TMPDIR/capture","expectedCadenceSeconds":60},{"name":"ed-stale","path":"$TMPDIR/capture-ed-stale","expectedCadence":"event-driven","expectedStaleAfterSeconds":60},{"name":"ed-fresh","path":"$TMPDIR/capture-ed-fresh","expectedCadence":"event-driven","expectedStaleAfterSeconds":600},{"name":"payload-dead","path":"$TMPDIR/payload-dead","requiredPayloadFields":["window_class","geometry.width","monitor","note"]},{"name":"payload-live","path":"$TMPDIR/payload-live","requiredPayloadFields":["window_class","geometry.width","monitor","note"]},{"name":"probe-absent","path":"$TMPDIR/capture-ed-fresh","livenessProbe":{"command":"[ -e \"$probe_marker\" ] && exit 0 || exit 1","timeoutSeconds":5}},{"name":"probe-unknown","path":"$TMPDIR/capture-ed-fresh","livenessProbe":{"command":"exit 9","timeoutSeconds":5}},{"name":"probe-timeout","path":"$TMPDIR/capture-ed-fresh","livenessProbe":{"command":"sleep 5","timeoutSeconds":1}}],"mounts":[{"path":"/fixture","warnPct":80,"failPct":95}],"observedServices":[{"kind":"service","manager":"system","unit":"fixture.service"},{"kind":"service","manager":"system","unit":"oneshot-done.service"},{"kind":"service","manager":"system","unit":"oneshot-failed.service"},{"kind":"service","manager":"system","unit":"backend-idle.service"},{"kind":"service","manager":"system","unit":"backend-crashed.service"},{"kind":"service","manager":"system","unit":"socket-proxy-declared.service","activationMode":"socket-proxy"},{"kind":"service","manager":"user","unit":"usersurf.service"}]}
+            {"captures":[{"name":"fixture","path":"$TMPDIR/capture","expectedCadenceSeconds":60},{"name":"ed-stale","path":"$TMPDIR/capture-ed-stale","expectedCadence":"event-driven","expectedStaleAfterSeconds":60},{"name":"ed-fresh","path":"$TMPDIR/capture-ed-fresh","expectedCadence":"event-driven","expectedStaleAfterSeconds":600},{"name":"payload-dead","path":"$TMPDIR/payload-dead","requiredPayloadFields":["window_class","geometry.width","monitor","note"]},{"name":"payload-live","path":"$TMPDIR/payload-live","requiredPayloadFields":["window_class","geometry.width","monitor","note"]},{"name":"probe-absent","path":"$TMPDIR/capture-ed-fresh","livenessProbe":{"command":"[ -e \"$probe_marker\" ] && exit 0 || exit 1","timeoutSeconds":5}},{"name":"probe-unknown","path":"$TMPDIR/capture-ed-fresh","livenessProbe":{"command":"exit 9","timeoutSeconds":5}},{"name":"probe-timeout","path":"$TMPDIR/capture-ed-fresh","livenessProbe":{"command":"sleep 5","timeoutSeconds":1}}],"mounts":[{"path":"/fixture","warnPct":80,"failPct":95}],"observedServices":[{"kind":"service","manager":"system","unit":"fixture.service"},{"kind":"service","manager":"system","unit":"oneshot-done.service"},{"kind":"service","manager":"system","unit":"oneshot-failed.service"},{"kind":"service","manager":"system","unit":"backend-idle.service"},{"kind":"service","manager":"system","unit":"backend-crashed.service"},{"kind":"service","manager":"system","unit":"socket-proxy-declared.service","activationMode":"socket-proxy"},{"kind":"service","manager":"user","unit":"usersurf.service"},{"kind":"socket","manager":"system","unit":"proxy-listening.socket"},{"kind":"socket","manager":"system","unit":"proxy-latched.socket"}]}
             EOF_INVENTORY
             bash "${sentinelSource}" --inventory "$TMPDIR/inventory.json" --state "$TMPDIR/state/state.json" --output "$TMPDIR/state/events.jsonl" --check
             bash "${sentinelSource}" --inventory "$TMPDIR/inventory.json" --state "$TMPDIR/state/state.json" --output "$TMPDIR/state/events.jsonl" --check
             jq -s -e '
-              length == 16
+              length == 18
               and any(.[]; .type == "capture_stale" and .unit == "fixture" and .status == "stale")
               and any(.[]; .type == "capture_stale" and .unit == "ed-stale" and .status == "stale")
               and any(.[]; .type == "capture_stale" and .unit == "ed-fresh" and .status == "healthy")
@@ -167,6 +191,12 @@
               and any(.[]; .type == "service_failure" and .unit == "backend-crashed.service" and .status == "failed" and .ok == false)
               and any(.[]; .type == "service_failure" and .unit == "socket-proxy-declared.service" and .status == "healthy" and .ok)
               and any(.[]; .type == "service_failure" and .unit == "usersurf.service" and .status == "unknown" and .ok == false)
+              and any(.[]; .type == "socket_failure" and .unit == "proxy-listening.socket" and .status == "healthy" and .ok)
+              and any(.[];
+                .type == "socket_failure" and .unit == "proxy-latched.socket"
+                and .status == "healthy" and .ok
+                and (.evidence | test("result=trigger-limit-hit"))
+                and (.evidence | test("recovered=reset-failed\\+start")))
               and any(.[];
                 .type == "capture_payload" and .unit == "payload-dead"
                 and .status == "degenerate" and .ok == false
@@ -181,7 +211,7 @@
             bash "${sentinelSource}" --inventory "$TMPDIR/inventory.json" --state "$TMPDIR/state/state.json" --output "$TMPDIR/state/events.jsonl" --check
             bash "${sentinelSource}" --inventory "$TMPDIR/inventory.json" --state "$TMPDIR/state/state.json" --output "$TMPDIR/state/events.jsonl" --check
             jq -s -e '
-              length == 18
+              length == 20
               and any(.[]; .type == "capture_stale" and .unit == "fixture" and .status == "healthy")
               and any(.[]; .type == "service_failure" and .unit == "fixture.service" and .ok == false)
               and any(.[]; .type == "publisher_liveness" and .unit == "probe-absent" and .status == "healthy" and .ok)
