@@ -43,7 +43,6 @@ from pathlib import Path
 from typing import Any, Iterable
 
 SCHEMA = "sinnix-hub-manifest-v1"
-LEASE_SCHEMA = "sinnix-heavy-lease-v1"
 
 # Transient scopes the estate creates on purpose. Agent-gateway jobs carry a
 # job id and are drivable through the reducer via the job_id target; plain
@@ -856,22 +855,31 @@ def slice_rows(state: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
-def lease_state(lease_path: Path) -> tuple[str, str, str]:
-    """(tone, headline, detail) for the heavy-work lease."""
-    owner, error = load_json(lease_path)
-    if owner is None:
-        if lease_path.parent.exists():
-            return "muted", "No heavy-work lease held", "nothing currently claims the right to run heavy work"
-        return "muted", "Heavy-work lease not in use", esc(error or "")
-    if owner.get("schema") != LEASE_SCHEMA:
-        return "warn", "Heavy-work lease unreadable", f"owner file is not {LEASE_SCHEMA}"
-    holder = owner.get("project") or owner.get("job_id") or "unknown holder"
-    work_item = owner.get("work_item")
-    detail = f"work item {esc(work_item)}" if work_item else "no work item declared"
-    since = owner.get("at") or owner.get("acquired_at")
-    if since:
-        detail += f" · since {esc(since)}"
-    return "info", f"Heavy-work lease held by <strong>{esc(holder)}</strong>", detail
+def work_verdict(
+    in_flight: list[Any], heavy: list[Any], failed_recent: int
+) -> tuple[str, str, str]:
+    """(tone, headline, detail) for the work page's lead banner.
+
+    This slot used to report the heavy-work lease, which was deliberately
+    removed from sinnix -- so the page's most prominent line had become a
+    permanent "Heavy-work lease not in use" about a subsystem that no longer
+    exists, occupying the spot where the actual verdict belongs. The tiles
+    below already carry the real numbers; this says what they mean.
+    """
+    if failed_recent:
+        return (
+            "bad",
+            f"{failed_recent} of the last 10 runs failed",
+            "check the project ledger below",
+        )
+    if in_flight:
+        detail = f"{len(heavy)} of them heavy" if heavy else "none of them heavy"
+        return (
+            "info",
+            f"{len(in_flight)} command{'s' if len(in_flight) != 1 else ''} in flight",
+            detail,
+        )
+    return "muted", "Nothing running", "no scopes in flight and no recent failures"
 
 
 def ledger_rows(state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1176,7 +1184,6 @@ def render_work(
     manifest: dict[str, Any],
     snapshot: dict[str, Any] | None,
     inventory: dict[str, Any] | None,
-    lease_path: Path,
     generated: str,
 ) -> str:
     host = str(manifest.get("host", "sinnix"))
@@ -1185,12 +1192,12 @@ def render_work(
     state = (snapshot or {}).get("state")
     state = state if isinstance(state, dict) else {}
 
-    tone, headline, detail = lease_state(lease_path)
     heavy = [entry for entry in scopes if entry.get("class") in HEAVY_CLASSES]
     agents = [entry for entry in scopes if entry.get("job_id") or entry.get("class") == "agent"]
     in_flight = running_ledger(state)
     recent = ledger_rows(state)[:10]
     failed_recent = sum(1 for entry in recent if entry.get("status") == "failed")
+    tone, headline, detail = work_verdict(in_flight, heavy, failed_recent)
     body = (
         f'<div class="verdict {tone if tone != "muted" else ""}">'
         f"<p>{headline}.</p>"
@@ -2540,15 +2547,6 @@ def main() -> int:
     parser.add_argument(
         "--inventory", type=Path, default=Path("/etc/sinnix/runtime-inventory.json")
     )
-    parser.add_argument(
-        "--heavy-lease",
-        type=Path,
-        # Path.home() raises outright when HOME is unset, which would turn a
-        # missing environment variable into a dead dashboard.
-        default=Path(os.environ.get("HOME", "/nonexistent"))
-        / ".local/state/sinnix/heavy-lease/owner.json",
-        help="owner file of the heavy-work lease, when that subsystem is present",
-    )
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
 
@@ -2571,7 +2569,7 @@ def main() -> int:
     )
     write_atomic(
         out / "work" / "index.html",
-        render_work(manifest, snapshot, inventory, args.heavy_lease, generated),
+        render_work(manifest, snapshot, inventory, generated),
     )
     write_atomic(
         out / "services" / "index.html", render_services(manifest, inventory, generated)

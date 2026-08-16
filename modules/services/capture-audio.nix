@@ -67,13 +67,21 @@ mkServiceModule {
   extraOptions = {
     excludeSourcePatterns = lib.mkOption {
       type = lib.types.listOf lib.types.str;
-      default = [ "^alsa_input\\.usb-FiiO_DigiHug_USB_Audio" ];
+      default = [ "^alsa_input[.]usb-FiiO_DigiHug_USB_Audio" ];
       description = ''
         Capture sources never to record, as case-insensitive regexes matched
         against a PipeWire node's `node.name` and `node.description`. Matching
         on node.name rather than `object.serial` is deliberate: the serial is
         reassigned on every replug, while node.name is derived from the ALSA
         card id / USB path and survives one.
+
+        Write a literal dot as `[.]`, not `\.`. These patterns land in a
+        systemd unit's ExecStart, where systemd parses `\.` as an escape
+        sequence, does not recognise it, and logs "Ignoring unknown escape
+        sequences" on every daemon-reload -- 206 times in 24 hours -- while
+        handing the process a pattern that is not quite the one written here.
+        A character class needs no backslash and survives the transport
+        unchanged.
 
         The default excludes the line-in on the FiiO DAC, which has nothing
         connected to its input. It does not touch that same DAC's playback
@@ -96,7 +104,7 @@ mkServiceModule {
     };
     asrSourcePattern = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
-      default = "^alsa_input\\.usb-Blue_Microphones_Yeti";
+      default = "^alsa_input[.]usb-Blue_Microphones_Yeti";
       description = ''
         Which capture source feeds the low-latency ASR tee socket, as a
         regex matched like the exclusion patterns.

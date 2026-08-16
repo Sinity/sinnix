@@ -150,8 +150,6 @@ with tempfile.TemporaryDirectory() as directory:
         str(root / "inventory.json"),
         "--snapshot",
         str(root / "absent.json"),
-        "--heavy-lease",
-        str(root / "absent-lease.json"),
         "--out",
         str(root / "www"),
     ]
