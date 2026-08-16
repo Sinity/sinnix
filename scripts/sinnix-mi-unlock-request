@@ -224,11 +224,12 @@ async def observe_window(args, payload_for, offset: float) -> int:
     target = server_deadline(first) or (time.time() + offset + 60)
     log(f"window from the server: {datetime.fromtimestamp(target).astimezone().isoformat()}")
 
-    # T-1s is too late for the subsequent TLS pre-warm: the probe itself
-    # consumes the warm lead and pushes the burst past the boundary. T-5s
-    # is the final observation; run() then opens the warm sockets and sends
-    # at target-(RTT/2).
-    for lead in (1800, 60, 5):
+    # The last probe must leave run()'s FULL warm lead intact. T-1s cost the
+    # 2026-08-15 shot (released +1.9s); T-5s cost the 2026-08-16 shot
+    # (released +4.0s) because a stalled handshake consumed the remaining
+    # margin. T-60s is the final observation; run() then has ~40s of slack
+    # before it opens the warm sockets at target-warm_lead.
+    for lead in (1800, 60):
         when = target - lead
         while (time.time() + offset) < when:
             time.sleep(min(20.0, max(0.2, when - (time.time() + offset))))
@@ -279,15 +280,30 @@ async def run(args: argparse.Namespace) -> int:
         remaining = target - (time.time() + off)
         time.sleep(min(30.0, max(0.5, remaining - lead)))
 
+    # No barrier on the warm-up: on 2026-08-16 one stalled handshake held an
+    # asyncio.gather for 8s and pushed the whole burst 4s past the boundary.
+    # Open every connection as its own task and fire with whatever is warm by
+    # T-1s; a straggler is abandoned, not waited for.
     ctx = ssl.create_default_context()
-    warmed = await asyncio.gather(*(open_warm(ctx) for _ in range(args.connections)),
-                                  return_exceptions=True)
-    conns = [w for w in warmed if not isinstance(w, Exception)]
+    tasks = [asyncio.ensure_future(open_warm(ctx)) for _ in range(args.connections)]
+    warm_cutoff = max(0.0, (target - 1.0) - (time.time() + off))
+    done, pending = await asyncio.wait(tasks, timeout=warm_cutoff)
+    for t in pending:
+        t.cancel()
+    conns = []
+    for t in done:
+        try:
+            conns.append(t.result())
+        except Exception as exc:  # noqa: BLE001 - a failed warm-up is per-connection news
+            log(f"warm connection failed: {exc}")
+    if pending:
+        log(f"{len(pending)} connection(s) not warm by T-1s; abandoned")
     if not conns:
         log("no connection could be pre-warmed; aborting rather than firing cold")
         return 1
     rtt_min = min(c[2] for c in conns)
-    log(f"{len(conns)} warm connections, min rtt {rtt_min * 1000:.0f} ms")
+    log(f"{len(conns)} warm connections, rtts "
+        + "/".join(f"{c[2] * 1000:.0f}" for c in conns) + " ms")
 
     # Send early by half the RTT so the packet ARRIVES at the boundary.
     release = target - rtt_min / 2 - args.lead_ms / 1000.0
