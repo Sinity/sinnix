@@ -98,10 +98,27 @@ object Events {
         return recent(ctx, days).filter { it.optString("kind") in wanted }
     }
 
+    /**
+     * Reading a whole day file into parsed objects was an OOM once the
+     * Health Connect backfill wrote a quarter-million records into one day:
+     * a 101 MB file became several hundred MB of JSONObjects inside a 256 MB
+     * art heap, and the process crash-looped from whichever allocation
+     * happened next (observed from both the home screen's offer policy and
+     * the speech lane's 24-byte tensor alloc). Every caller of recent() wants
+     * the newest slice, so each file contributes at most its final TAIL_BYTES
+     * -- an ordinary day is far smaller than the cap and unaffected.
+     */
+    private const val TAIL_BYTES = 4L shl 20
+
     private fun readInto(file: File, out: MutableList<JSONObject>) {
         if (!file.isFile) return
         try {
             RandomAccessFile(file, "r").use { input ->
+                if (input.length() > TAIL_BYTES) {
+                    input.seek(input.length() - TAIL_BYTES)
+                    // Mid-line landing is certain; drop the partial line.
+                    input.readLine()
+                }
                 while (true) {
                     val line = input.readLine() ?: break
                     if (line.isEmpty() || line.length > MAX_LINE_BYTES) continue
