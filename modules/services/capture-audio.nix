@@ -276,6 +276,16 @@ mkServiceModule {
             sinnix-audio-index = {
               Unit = {
                 Description = "Sinnix audio capture: Silero VAD index pass over recently-closed Opus segments";
+                # Timer-driven batch work, so activation must not run it.
+                # sd-switch starts changed units and WAITS for the job, and a
+                # oneshot's job is not done until the whole pass is -- a VAD
+                # sweep over a day of Opus segments outlives
+                # home-manager-sinity.service's 5-minute activation timeout,
+                # which then fails the whole activation (repeatedly, on
+                # 2026-08-16). There is no running daemon here to keep
+                # current: the next hourly trigger picks up the new binary by
+                # itself.
+                X-SwitchMethod = "keep-old";
               };
               Service = lib.sinnix.mkRuntimeServiceConfig {
                 runtimeInventory = config.sinnix.runtime.inventory;
