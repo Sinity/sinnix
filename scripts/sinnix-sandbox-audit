@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Report gaps between what the estate declares and what it actually does — confinement, empty lanes, units that never succeed
-# runtimeInputs: bash coreutils findutils gnugrep jq systemd
+# runtimeInputs: bash coreutils findutils gawk gnugrep jq systemd audit
 set -euo pipefail
 
 # Every check here answers one question: does a declaration match reality?
@@ -46,6 +46,25 @@ emit() {
     '{timestamp:$ts, unit:$unit, manager:$manager, kind:$kind, path:$path, detail:$detail}' \
     >>"$findings"
 }
+
+# The audit subsystem can be switched off underneath every rule in it, and
+# nothing about the resulting silence looks different from "nothing was
+# denied". That is not hypothetical: on 2026-08-16 restarting journald turned
+# kernel auditing off -- the old journald had enabled it and disables it on
+# stop, and the new one, correctly configured NOT to enable it, left it
+# off -- so auditd stayed active, its rules stayed loaded, and the log went
+# to exactly zero bytes. A measurement taken in that window read as a
+# spectacular success for a narrowing that had barely landed.
+#
+# auditctl -s is the only thing that distinguishes a quiet lane from a deaf
+# one, so ask it before believing any silence downstream.
+if command -v auditctl >/dev/null 2>&1; then
+  audit_enabled="$(auditctl -s 2>/dev/null | awk '$1 == "enabled" { print $2 }')"
+  if [[ "$audit_enabled" == "0" ]]; then
+    emit system auditd.service audit-disabled /var/log/audit/audit.log \
+      "kernel auditing is disabled (auditctl -s reports enabled 0); every rule is loaded and recording nothing. Re-enable with 'auditctl -e 1'."
+  fi
+fi
 
 # A path is writable if it sits under some ReadWritePaths entry. Under
 # ProtectSystem=strict the whole hierarchy is read-only, so absence from that
