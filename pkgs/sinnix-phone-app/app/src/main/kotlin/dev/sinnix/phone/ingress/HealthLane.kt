@@ -5,9 +5,16 @@ import android.util.Log
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.ActiveCaloriesBurnedRecord
+import androidx.health.connect.client.records.BasalMetabolicRateRecord
+import androidx.health.connect.client.records.BloodGlucoseRecord
 import androidx.health.connect.client.records.BloodPressureRecord
+import androidx.health.connect.client.records.BodyFatRecord
 import androidx.health.connect.client.records.BodyTemperatureRecord
 import androidx.health.connect.client.records.DistanceRecord
+import androidx.health.connect.client.records.FloorsClimbedRecord
+import androidx.health.connect.client.records.HeightRecord
+import androidx.health.connect.client.records.HydrationRecord
+import androidx.health.connect.client.records.SkinTemperatureRecord
 import androidx.health.connect.client.records.ElevationGainedRecord
 import androidx.health.connect.client.records.ExerciseRouteResult
 import androidx.health.connect.client.records.ExerciseSessionRecord
@@ -102,6 +109,13 @@ object HealthLane {
             BodyTemperatureRecord::class,
             BloodPressureRecord::class,
             WeightRecord::class,
+            FloorsClimbedRecord::class,
+            SkinTemperatureRecord::class,
+            BloodGlucoseRecord::class,
+            BodyFatRecord::class,
+            BasalMetabolicRateRecord::class,
+            HeightRecord::class,
+            HydrationRecord::class,
         )
 
     /**
@@ -599,6 +613,54 @@ object HealthLane {
             is WeightRecord ->
                 Events.record(ctx, "health_weight", "kg", r.weight.inKilograms,
                     "time", Stamps.iso(r.time.toEpochMilli()), *meta(r))
+
+            is FloorsClimbedRecord ->
+                Events.record(ctx, "health_floors_climbed", "floors", r.floors,
+                    "start", Stamps.iso(r.startTime.toEpochMilli()),
+                    "end", Stamps.iso(r.endTime.toEpochMilli()), *meta(r))
+
+            // Baseline plus per-delta series, mirroring how HR keeps its
+            // samples: the deltas are the measurement, the baseline is the
+            // reference they are relative to.
+            is SkinTemperatureRecord -> {
+                val deltas = JSONArray()
+                r.deltas.forEach { d ->
+                    deltas.put(
+                        org.json.JSONObject()
+                            .put("time", Stamps.iso(d.time.toEpochMilli()))
+                            .put("delta_celsius", d.delta.inCelsius))
+                }
+                Events.record(ctx, "health_skin_temperature",
+                    "baseline_celsius", r.baseline?.inCelsius,
+                    "deltas", deltas,
+                    "start", Stamps.iso(r.startTime.toEpochMilli()),
+                    "end", Stamps.iso(r.endTime.toEpochMilli()), *meta(r))
+            }
+
+            is BloodGlucoseRecord ->
+                Events.record(ctx, "health_blood_glucose",
+                    "mmol_per_l", r.level.inMillimolesPerLiter,
+                    "specimen_source", r.specimenSource,
+                    "relation_to_meal", r.relationToMeal,
+                    "time", Stamps.iso(r.time.toEpochMilli()), *meta(r))
+
+            is BodyFatRecord ->
+                Events.record(ctx, "health_body_fat", "percent", r.percentage.value,
+                    "time", Stamps.iso(r.time.toEpochMilli()), *meta(r))
+
+            is BasalMetabolicRateRecord ->
+                Events.record(ctx, "health_basal_metabolic_rate",
+                    "kcal_per_day", r.basalMetabolicRate.inKilocaloriesPerDay,
+                    "time", Stamps.iso(r.time.toEpochMilli()), *meta(r))
+
+            is HeightRecord ->
+                Events.record(ctx, "health_height", "meters", r.height.inMeters,
+                    "time", Stamps.iso(r.time.toEpochMilli()), *meta(r))
+
+            is HydrationRecord ->
+                Events.record(ctx, "health_hydration", "liters", r.volume.inLiters,
+                    "start", Stamps.iso(r.startTime.toEpochMilli()),
+                    "end", Stamps.iso(r.endTime.toEpochMilli()), *meta(r))
 
             else -> return false
         }
