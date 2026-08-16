@@ -294,6 +294,14 @@ let
     # Top-level regenerable-cache root (sinex cargo/dev caches via the
     # /var/cache/sinex bind, nix-build) — pure churn, never backup material.
     "cache"
+    # 285G of public reference downloads: GRCh38 reference (156G), PGS Catalog
+    # (101G), kraken2, dbSNP, snpEff, GWAS sumstats. Re-acquirable from their
+    # upstreams exactly like media/model, and matched by neither "cache"
+    # (top-level only) nor "**/.cache" (dot-prefixed only), so it had been
+    # replicating into borg-realm-v2 in full. The irreplaceable half of that
+    # tree — genotype/, holding the 70G of raw FASTQ reads that cannot be
+    # regenerated without re-sequencing — stays in coverage deliberately.
+    "data/self/genome/cache"
     "**/inbox/monero"
     "**/node_modules"
     "**/target"
