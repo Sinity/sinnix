@@ -10,7 +10,7 @@
     sinnix <name> [args...]  execs the matching script package's binary
 
   Name resolution prefers an exact registry match (covers scripts that are
-  not `sinnix-`-prefixed, e.g. `muse-contrib`, `oracle`, `rawlog`), then
+  not `sinnix-`-prefixed, e.g. `oracle`, `rawlog`), then
   falls back to a `sinnix-<name>` prefix lookup (`sinnix rerank` ->
   `sinnix-rerank`). Unknown names get a substring-based "did you mean"
   suggestion list rather than a bare failure.

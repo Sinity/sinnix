@@ -181,7 +181,7 @@ mkFeatureModule {
         toolsets = [ "hermes-cli" ];
       };
       # One mkHermesConfig call per flake/data/agent-lanes.nix hermesProfiles
-      # entry, keyed by profile name (research/orchestrate/mirror/muse/local).
+      # entry, keyed by profile name (research/orchestrate/mirror/local/...).
       hermesProfileConfigFiles = lib.mapAttrs (
         name: profile:
         mkHermesConfig (
@@ -198,20 +198,11 @@ mkFeatureModule {
       ) agentLanes.hermesProfiles;
       # Extra launch-time shell for hermes-<name> wrappers whose model uses a
       # custom endpoint: OPENAI_BASE_URL comes from the profile's own
-      # `model.base_url`; OPENAI_API_KEY from an agenix secret
-      # (`preludeSecret`) or a static loopback token (`apiKeyLiteral`).
+      # `model.base_url`; OPENAI_API_KEY from a static loopback token
+      # (`apiKeyLiteral`).
       hermesWrapperExtraPrelude =
-        name: profile:
-        if profile ? preludeSecret then
-          ''
-            ${lib.sinnix.mkSecretLookup {
-              secretName = profile.preludeSecret;
-              varName = "OPENAI_API_KEY";
-              caller = "hermes-${name}";
-            }}
-            export OPENAI_BASE_URL="${profile.model.base_url}"
-          ''
-        else if profile ? apiKeyLiteral then
+        _name: profile:
+        if profile ? apiKeyLiteral then
           ''
             export OPENAI_BASE_URL="${profile.model.base_url}"
             export OPENAI_API_KEY="${profile.apiKeyLiteral}"
@@ -300,16 +291,6 @@ mkFeatureModule {
           ".local/state/claude-code"
           ".local/state/codex"
           ".local/state/gemini"
-          {
-            directory = ".local/state/muse-code";
-            mode = "0700";
-          }
-          # Muse Code auth (Meta OAuth + api key) and settings, including the
-          # local model_catalog row for the gateway-served contributor model.
-          {
-            directory = ".config/muse";
-            mode = "0700";
-          }
           ".local/state/sinnix/agent-jobs"
           {
             directory = ".grok";
@@ -383,7 +364,6 @@ mkFeatureModule {
                   lib.attrNames agentLanes.hermesProfiles
                 )
               ))
-              // (lib.listToAttrs (map selfAlias (lib.attrNames agentLanes.museLanes)))
               // {
                 # `claude` routes through claude-lean, never a bare
                 # ~/.local/bin/claude: Claude Code's native local-installer
@@ -396,7 +376,6 @@ mkFeatureModule {
                 hermes = "~/.local/bin/hermes";
                 hermes-acp = "~/.local/bin/hermes-acp";
                 hermes-update = "~/.local/bin/hermes-update";
-                muse = "~/.local/bin/muse-code";
               };
           };
 
@@ -469,7 +448,7 @@ mkFeatureModule {
 
           # A single merged home.file set: static entries below plus one
           # generated entry per flake/data/agent-lanes.nix lane
-          # (claude/codex/hermes/muse). It must stay one `//`-merged
+          # (claude/codex/hermes). It must stay one `//`-merged
           # assignment: a direct `home.file = {...}` alongside sibling
           # `home.file."x" = ...` bindings in the same attrset literal is a
           # duplicate-definition error, not a merge.
@@ -518,14 +497,6 @@ mkFeatureModule {
                 extraPrelude = hermesWrapperExtraPrelude name profile;
               })
             ) agentLanes.hermesProfiles)
-            # museLanes: thin passthrough wrappers around packaged scripts.
-            // (lib.mapAttrs' (
-              name: lane:
-              lib.nameValuePair ".local/bin/${name}" {
-                source = "${scriptPkgs.${lane.script}}/bin/${lane.script}";
-                force = true;
-              }
-            ) agentLanes.museLanes)
             // {
               ".local/bin/gemini" = {
                 text = ''

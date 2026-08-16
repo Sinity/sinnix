@@ -10,6 +10,15 @@ in
       pkgs = inputs.nixpkgs.legacyPackages.${system};
       runtimeDefaults = import ../data/runtime-defaults.nix { inherit lib; };
       mcpRegistry = import ../data/mcp-registry.nix { inherit lib; };
+      agentLanes = import ../data/agent-lanes.nix;
+      # Derived from the lane registry rather than hand-listed: every declared
+      # lane must produce an installed wrapper, and adding or retiring a lane
+      # must not require editing this file in several places.
+      laneWrapperFiles = map (binName: ".local/bin/${binName}") (
+        (map (lane: lane.binName) (lib.attrValues agentLanes.claudeLanes))
+        ++ (map (lane: lane.binName) (lib.attrValues agentLanes.codexLanes))
+        ++ (map (name: "hermes-${name}") (lib.attrNames agentLanes.hermesProfiles))
+      );
       expectedProfileServers =
         client: profiles:
         builtins.toJSON (
@@ -112,31 +121,15 @@ in
           pkgs.python3
           pkgs.zsh
         ];
-        homeFiles = [
+        homeFiles = laneWrapperFiles ++ [
           ".gemini/settings.json"
           ".gemini/config/mcp_config.json"
           ".gemini/config/skills"
           ".gemini/config/AGENTS.md"
-          ".local/bin/claude-full"
-          ".local/bin/claude-lean"
-          ".local/bin/claude-browser"
-          ".local/bin/claude-deepseek"
-          ".local/bin/claude-local"
-          ".local/bin/codex"
-          ".local/bin/codex-full"
-          ".local/bin/codex-browser"
-          ".local/bin/codex-deepseek"
-          ".local/bin/codex-local"
           ".local/bin/gemini"
           ".local/bin/grok-sinnix"
           ".local/bin/agy-sinnix"
-          ".local/bin/muse-code"
-          ".local/bin/muse-contrib"
           ".local/bin/hermes"
-          ".local/bin/hermes-research"
-          ".local/bin/hermes-orchestrate"
-          ".local/bin/hermes-mirror"
-          ".local/bin/hermes-muse"
           ".local/bin/serena"
           ".local/bin/serena-hooks"
           ".local/bin/bd-prime-if-present"
@@ -343,20 +336,17 @@ in
             test "$(readlink -f "$HOME/.gemini/config/mcp_config.json")" = ${agentToolsAntigravityMcpConfigSource}
             mkdir -p "$HOME/.hermes"
             cp ${agentToolsHermesConfigSource} "$HOME/.hermes/config.yaml"
-            for profile in research orchestrate mirror muse local; do
-              mkdir -p "$HOME/.hermes/profiles/$profile"
-              ln -s ../../auth.json "$HOME/.hermes/profiles/$profile/auth.json"
-              ln -s ../../.env "$HOME/.hermes/profiles/$profile/.env"
-              ln -s ../../SOUL.md "$HOME/.hermes/profiles/$profile/SOUL.md"
-            done
-            cp ${agentToolsHermesProfileConfigSources.research} "$HOME/.hermes/profiles/research/config.yaml"
-            cp ${agentToolsHermesProfileConfigSources.orchestrate} "$HOME/.hermes/profiles/orchestrate/config.yaml"
-            cp ${agentToolsHermesProfileConfigSources.mirror} "$HOME/.hermes/profiles/mirror/config.yaml"
-            cp ${agentToolsHermesProfileConfigSources.muse} "$HOME/.hermes/profiles/muse/config.yaml"
-            cp ${agentToolsHermesProfileConfigSources.local} "$HOME/.hermes/profiles/local/config.yaml"
-            chmod 600 "$HOME/.hermes/config.yaml" "$HOME/.hermes/profiles/research/config.yaml" \
-              "$HOME/.hermes/profiles/orchestrate/config.yaml" "$HOME/.hermes/profiles/mirror/config.yaml" \
-              "$HOME/.hermes/profiles/muse/config.yaml" "$HOME/.hermes/profiles/local/config.yaml"
+            chmod 600 "$HOME/.hermes/config.yaml"
+            ${lib.concatStringsSep "\n" (
+              lib.mapAttrsToList (name: source: ''
+                mkdir -p "$HOME/.hermes/profiles/${name}"
+                ln -s ../../auth.json "$HOME/.hermes/profiles/${name}/auth.json"
+                ln -s ../../.env "$HOME/.hermes/profiles/${name}/.env"
+                ln -s ../../SOUL.md "$HOME/.hermes/profiles/${name}/SOUL.md"
+                cp ${source} "$HOME/.hermes/profiles/${name}/config.yaml"
+                chmod 600 "$HOME/.hermes/profiles/${name}/config.yaml"
+              '') agentToolsHermesProfileConfigSources
+            )}
             chmod 644 "$HOME/.codex/config.toml"
             chmod 644 "$HOME/.codex/full.config.toml"
             chmod 644 "$HOME/.codex/lean.config.toml"
@@ -422,26 +412,11 @@ in
             PYCODE
 
             for wrapper in \
-              "$HOME/.local/bin/claude-full" \
-              "$HOME/.local/bin/claude-lean" \
-              "$HOME/.local/bin/claude-browser" \
-              "$HOME/.local/bin/claude-deepseek" \
-              "$HOME/.local/bin/claude-local" \
-              "$HOME/.local/bin/codex" \
-              "$HOME/.local/bin/codex-full" \
-              "$HOME/.local/bin/codex-browser" \
-              "$HOME/.local/bin/codex-deepseek" \
-              "$HOME/.local/bin/codex-local" \
+              ${lib.concatMapStringsSep " \\\n              " (f: ''"$HOME/${f}"'') laneWrapperFiles} \
               "$HOME/.local/bin/gemini" \
               "$HOME/.local/bin/grok-sinnix" \
               "$HOME/.local/bin/agy-sinnix" \
-              "$HOME/.local/bin/muse-code" \
-              "$HOME/.local/bin/muse-contrib" \
               "$HOME/.local/bin/hermes" \
-              "$HOME/.local/bin/hermes-research" \
-              "$HOME/.local/bin/hermes-orchestrate" \
-              "$HOME/.local/bin/hermes-mirror" \
-              "$HOME/.local/bin/hermes-muse" \
               "$HOME/.local/bin/serena" \
               "$HOME/.local/bin/serena-hooks" \
               "$HOME/.local/bin/bd-prime-if-present"; do

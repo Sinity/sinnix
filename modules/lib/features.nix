@@ -209,13 +209,13 @@ let
   # Leaves the resolved value exported in `varName` (defaults to the secret's
   # derived env-var name).
   #
-  # Usage: mkSecretLookup { secretName = "vercel-ai-gateway-key"; varName = "OPENAI_API_KEY"; caller = "hermes-muse"; }
+  # Usage: mkSecretLookup { secretName = "deepseek-api-key"; varName = "OPENAI_API_KEY"; caller = "hermes-deepseek"; }
   mkSecretLookup =
     {
       # Bare secret name as it appears under secret/<name>.age and
       # /run/agenix/<name> (see modules/secrets.nix auto-discovery).
       secretName,
-      # Wrapper/script name used in the error message, e.g. "hermes-muse".
+      # Wrapper/script name used in the error message, e.g. "hermes-deepseek".
       caller,
       # Shell variable the resolved value ends up exported in.
       varName ? secretEnvName secretName,
