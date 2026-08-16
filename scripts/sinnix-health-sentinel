@@ -428,9 +428,60 @@ done < <(jq -r '.mounts[]? | [.path,.warnPct,.failPct] | @tsv' "$inventory")
 # the query as that uid. A query that cannot reach ANY user bus is reported
 # "unknown", never silently coerced into "healthy" or "failed" -- a broken
 # probe must never masquerade as either a real pass or a real failure.
+# One `sudo systemctl --user show` for every user-manager unit at once,
+# rather than one per unit. Each sudo writes three PAM session lines to the
+# journal, so the per-unit shape cost ~120 journal records per sweep -- about
+# 19k every three hours, making this sentinel the second-loudest producer on
+# the host, all of it on the wear-limited root disk. systemctl accepts many
+# units in one call and separates them with a blank line, keyed by Id=.
+declare -A user_props_cache=()
+user_props_prefetched=0
+
+prefetch_user_props() {
+  [ "$user_props_prefetched" -eq 1 ] && return 0
+  user_props_prefetched=1
+
+  local bus uid out line block block_id
+  local -a units=()
+  mapfile -t units < <(jq -r '.observedServices[]? | select(.manager == "user") | .unit' "$inventory")
+  [ "${#units[@]}" -gt 0 ] || return 0
+
+  for bus in "$user_bus_root"/*/bus; do
+    [ -S "$bus" ] || continue
+    uid="$(basename "$(dirname "$bus")")"
+    out="$(sudo -u "#$uid" XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=$bus" \
+      systemctl --user show "${units[@]}" -p Id -p ActiveState -p Type -p Result -p WantedBy 2>/dev/null)" || continue
+    [ -n "$out" ] || continue
+
+    block=""
+    block_id=""
+    while IFS= read -r line; do
+      if [ -z "$line" ]; then
+        [ -n "$block_id" ] && user_props_cache["$block_id"]="$block"
+        block=""
+        block_id=""
+        continue
+      fi
+      [ "${line%%=*}" = Id ] && block_id="${line#Id=}"
+      block+="$line"$'\n'
+    done <<< "$out"
+    [ -n "$block_id" ] && user_props_cache["$block_id"]="$block"
+    return 0
+  done
+  return 0
+}
+
 query_unit_props() {
   local manager="$1" unit="$2" bus uid out
   if [ "$manager" = user ]; then
+    prefetch_user_props
+    if [ -n "${user_props_cache[$unit]:-}" ]; then
+      printf '%s' "${user_props_cache[$unit]}"
+      return 0
+    fi
+    # Not in the batch (a unit added since the inventory was written, or the
+    # batch could not run at all): fall back to the per-unit query rather
+    # than reporting a reachable unit as unknown.
     for bus in "$user_bus_root"/*/bus; do
       [ -S "$bus" ] || continue
       uid="$(basename "$(dirname "$bus")")"
