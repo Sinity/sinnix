@@ -52,6 +52,12 @@
   <uses-permission android:name="android.permission.health.READ_BODY_TEMPERATURE" />
   <uses-permission android:name="android.permission.health.READ_BLOOD_PRESSURE" />
   <uses-permission android:name="android.permission.health.READ_WEIGHT" />
+  <!-- Plural READ, singular WRITE is Health Connect's own naming asymmetry;
+       this is the read side. Route POINTS still need a per-route foreground
+       consent for sessions other apps wrote (background reads return
+       ConsentRequired by design), so today this permission only makes the
+       route's existence visible. The lane records that state honestly. -->
+  <uses-permission android:name="android.permission.health.READ_EXERCISE_ROUTES" />
 
   <!--
     The two that are not record types, and that decide whether the lane sees
