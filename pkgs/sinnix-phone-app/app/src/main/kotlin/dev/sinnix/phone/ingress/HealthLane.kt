@@ -364,7 +364,15 @@ object HealthLane {
                 val page = client.readRecords(ReadRecordsRequest(type, range, pageToken = pageToken))
                 pages++
                 written += page.records.count { emit(ctx, it) }
-                pageToken = page.pageToken
+                // The client's pageToken is nullable but, on the Android 13
+                // APK-provider path, never null: it is copied straight off a
+                // proto3 string field (ProtoToReadRecordsResponse.kt), whose
+                // absent-value is "". Passing "" back in reads page one again,
+                // so a null-only loop condition re-walks the whole history
+                // forever -- measured 2026-08-17 as one heart-rate record
+                // emitted 473 times, an 18-second full-history cycle sustained
+                // for hours, and a 3.3 GB day file.
+                pageToken = page.pageToken?.takeUnless { it.isEmpty() }
                 p.edit().putString(resumePageKey(type), pageToken)
                     .putInt(resumeCountKey(type), written)
                     .putInt(resumePagesKey(type), pages).commit()
