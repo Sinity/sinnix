@@ -489,7 +489,13 @@ class CommonCrawlProvider:
         key = f"{reversed_host})" + path
         if parts.query:
             key += f"?{parts.query}"
-        return key
+        # Lowercase the WHOLE key, path and query included, and lowercase
+        # percent-escapes with it. Common Crawl canonicalizes this way without
+        # exception (18,000 keys sampled across six blocks: zero uppercase), so
+        # preserving path case silently misses every URL that has any -- which
+        # is most deep links. Bare domains hid it, their path being just "/".
+        key = re.sub(r"%[0-9A-Fa-f]{2}", lambda m: m.group(0).lower(), key)
+        return key.lower()
 
     @staticmethod
     def _block_for(cluster_path: Path, key: str) -> tuple[str, int, int] | None:
@@ -500,25 +506,48 @@ class CommonCrawlProvider:
         each line marks where its block begins.
         """
         size = cluster_path.stat().st_size
+
+        def key_of(raw: bytes) -> str:
+            return raw.split(b"\t", 1)[0].split(b" ", 1)[0].decode("utf-8", "replace")
+
         with cluster_path.open("rb") as handle:
+            # Narrow to a byte window, then walk it. The bisection alone is not
+            # enough: it converges on an offset, and because lines vary in
+            # length the last line it happened to READ can sit several lines
+            # before the true predecessor -- which silently returns a block the
+            # key is not in, and therefore zero captures.
             lo, hi = 0, size
-            candidate: bytes | None = None
-            while lo < hi:
+            while hi - lo > 4096:
                 mid = (lo + hi) // 2
                 handle.seek(mid)
-                if mid:
-                    handle.readline()  # discard the partial line
+                handle.readline()  # discard the partial line
                 pos = handle.tell()
                 line = handle.readline()
                 if not line:
                     hi = mid
                     continue
-                entry_key = line.split(b"\t", 1)[0].split(b" ", 1)[0].decode("utf-8", "replace")
-                if entry_key <= key:
-                    candidate = line
-                    lo = pos + len(line)
+                if key_of(line) <= key:
+                    lo = pos
                 else:
                     hi = mid
+            # Walk forward from the window start, keeping the last entry whose
+            # key is <= ours; each entry marks where its block begins.
+            #
+            # No line is discarded here: `lo` is always a line START (0, or a
+            # position taken after skipping a partial line), and the line there
+            # is the one already known to satisfy <= key. Skipping it can leave
+            # the walk with nothing and fall through to the first block of the
+            # whole index -- which reports zero captures for a real page.
+            handle.seek(lo)
+            candidate: bytes | None = None
+            while True:
+                line = handle.readline()
+                if not line:
+                    break
+                if key_of(line) <= key:
+                    candidate = line
+                else:
+                    break
             if candidate is None:
                 handle.seek(0)
                 candidate = handle.readline()
