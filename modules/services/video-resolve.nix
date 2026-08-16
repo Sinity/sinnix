@@ -20,6 +20,7 @@ mkServiceModule {
     let
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
       archiveRoot = "${config.sinnix.paths.capturesRoot}/video-resolve";
+      ledgerParquet = "${config.sinnix.paths.dataRoot}/derived/url-ledger/url_ledger.parquet";
     in
     {
       sinnix.runtime.surfaces.video-resolve = {
@@ -40,7 +41,15 @@ mkServiceModule {
       };
       systemd.services.sinnix-video-resolve = {
         description = "Resolve video-hosting URLs from the URL ledger into archived copies";
+        # Ordering only, and only within a shared transaction -- which two
+        # independent timers never have, so this alone never sequenced
+        # anything. The real dependency is the artifact: the script exits 1
+        # when the ledger parquet is absent, so a run that lands before the
+        # ledger has ever built reports a failure for a precondition it does
+        # not own. The condition below turns that into a skip, which is what
+        # "my input does not exist yet" actually is.
         after = [ "sinnix-url-ledger.service" ];
+        unitConfig.ConditionPathExists = [ ledgerParquet ];
         serviceConfig = lib.sinnix.mkRuntimeServiceConfig {
           runtimeInventory = config.sinnix.runtime.inventory;
           unit = "sinnix-video-resolve.service";

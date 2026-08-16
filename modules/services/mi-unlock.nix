@@ -81,6 +81,13 @@ mkServiceModule {
             Type = "simple";
             StateDirectory = "sinnix-mi-unlock";
             ExecStart = "${runner}/bin/sinnix-mi-unlock-run";
+            # 75 (EX_TEMPFAIL) is the request script's code for
+            # REFUSED-UNTIL-DEADLINE: the server's ordinary "not in this quota
+            # window" answer, which is what nearly every run gets. Without
+            # this the unit reported failure daily for behaving exactly as
+            # designed, and a real fault would have been indistinguishable
+            # from the routine one. 1 still means a genuine failure.
+            SuccessExitStatus = "75";
             # A failed application is the ordinary outcome while the pool is
             # exhausted; retrying within the same day cannot help and would
             # only add requests, so there is deliberately no Restart.
