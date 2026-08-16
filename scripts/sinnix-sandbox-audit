@@ -1,16 +1,25 @@
 #!/usr/bin/env bash
 # @sinnix-package
-# description: Report units whose sandbox prevents them writing what they declare, and capture lanes that have never produced
+# description: Report gaps between what the estate declares and what it actually does — confinement, empty lanes, units that never succeed
 # runtimeInputs: bash coreutils findutils gnugrep jq systemd
 set -euo pipefail
 
-# Sandboxing fails silently: a unit denied a write logs nothing, and its
-# capture lane just stays empty. Rather than kernel auditing every EROFS, this
-# compares each surface's DECLARED outputs against the write surface its unit
-# actually has, and checks whether the lane ever produced anything.
+# Every check here answers one question: does a declaration match reality?
+# That gap is silent by construction -- a denied write logs nothing, an empty
+# lane looks like a quiet one, and a unit that never finishes is not "failed".
+#
+#   confined-from-own-output  the unit cannot write the path it declares
+#   lane-missing / lane-empty  the declared path has never held anything
+#   agent-transcript-loss      a hardened unit execs an agent CLI it cannot log
+#   never-succeeded            a timer-driven unit with no completion on record
+#   lane-abandoned             capture data belonging to no declared surface
 
 INVENTORY="${SINNIX_RUNTIME_INVENTORY:-/etc/sinnix/runtime-inventory.json}"
 OUT="${SINNIX_SANDBOX_AUDIT_OUT:-/realm/data/captures/machine/sandbox-audit.jsonl}"
+CAPTURES_ROOT="${SINNIX_CAPTURES_ROOT:-/realm/data/captures}"
+# Journal retention bounds what "never" can mean here; say so in the finding
+# rather than implying the unit has never run since it was written.
+SINCE_WINDOW="${SINNIX_AUDIT_SINCE:-7 days ago}"
 NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 QUIET=0
 [[ "${1:-}" == "--quiet" ]] && QUIET=1
@@ -102,6 +111,55 @@ while IFS=$'\t' read -r unit manager; do
       "unit execs an agent CLI under mount-namespace hardening but cannot write the transcript directory"
   fi
 done < <(jq -r '.surfaces | to_entries[] | [.value.unit // "", .value.manager // "system"] | @tsv' "$INVENTORY")
+
+# A timer-driven unit that has never once succeeded is the inverse of an empty
+# lane: the declaration is fine, the work never finishes. Nothing else notices,
+# because "not currently failed" and "has never completed" look identical.
+while IFS=$'\t' read -r unit manager acknowledged; do
+  [[ -z "$unit" ]] && continue
+  # An acknowledged outage is a decision already recorded, with a tracking
+  # reference. Re-reporting it is how a checker teaches people to ignore it.
+  [[ "$acknowledged" == "true" ]] && continue
+  timer="${unit%.service}.timer"
+  scope=()
+  [[ "$manager" == "user" ]] && scope=(--user)
+  systemctl "${scope[@]}" list-unit-files "$timer" &>/dev/null || continue
+  systemctl "${scope[@]}" cat "$timer" &>/dev/null || continue
+  # NOT `grep -q`: it exits on the first match, journalctl dies on SIGPIPE, and
+  # under `set -o pipefail` the pipeline then reports failure -- which reads as
+  # "never succeeded" for every healthy unit. Consume the whole stream.
+  if ! journalctl "${scope[@]}" -u "$unit" --since "$SINCE_WINDOW" --no-pager 2>/dev/null \
+    | grep -E "Deactivated successfully|Finished " >/dev/null; then
+    emit "$manager" "$unit" "never-succeeded" "$timer" \
+      "timer-driven unit with no successful completion in the journal since $SINCE_WINDOW"
+  fi
+done < <(jq -r '.surfaces | to_entries[]
+         | [.value.unit // "", .value.manager // "system",
+            (.value.acknowledged.down // false | tostring)] | @tsv' "$INVENTORY")
+
+# Capture directories nobody declares. A lane that outlives the module that
+# created it keeps its data out of every freshness and coverage check, and
+# reads as estate data while belonging to nothing.
+declared_paths="$(jq -r '.surfaces[] | (.captures // [])[] | .path // empty' "$INVENTORY")"
+while IFS= read -r dir; do
+  [[ -z "$dir" ]] && continue
+  covered=0
+  while IFS= read -r decl; do
+    [[ -z "$decl" ]] && continue
+    if [[ "$decl" == "$dir" || "$decl" == "$dir"/* || "$dir" == "$decl"/* ]]; then
+      covered=1
+      break
+    fi
+  done <<<"$declared_paths"
+  [[ "$covered" -eq 1 ]] && continue
+  # Undeclared alone is weak evidence -- plenty of lanes are written by
+  # producers outside the runtime inventory. Undeclared AND untouched for a
+  # month is the abandoned-lane shape worth a human look.
+  if [[ -z "$(find "$dir" -mindepth 1 -mtime -30 -print -quit 2>/dev/null)" ]]; then
+    emit "-" "-" "lane-abandoned" "$dir" \
+      "capture directory with no declaring surface and no write in 30 days"
+  fi
+done < <(find "$CAPTURES_ROOT" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
 
 count="$(wc -l <"$findings" 2>/dev/null || echo 0)"
 mkdir -p "$(dirname "$OUT")"
