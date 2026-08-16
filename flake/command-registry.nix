@@ -364,19 +364,35 @@ in
       script = ''
         ${resolveFlakeDir}
         cd "$_flake_dir"
+        # Every tool runs, then the command reports. Under `set -e` a failing
+        # first tool aborted the whole script, so a red deadnix meant statix
+        # and shellcheck simply never executed -- two thirds of this command's
+        # advertised surface was dark for as long as any deadnix warning
+        # stood, and the output looked like a normal short failure rather than
+        # a skipped suite. Whoever fixes one tool deserves to see the others.
+        lint_failed=""
+
         echo "Running deadnix..."
-        ${pkgs.deadnix}/bin/deadnix --fail --no-lambda-arg --no-lambda-pattern-names .
+        ${pkgs.deadnix}/bin/deadnix --fail --no-lambda-arg --no-lambda-pattern-names . \
+          || lint_failed="$lint_failed deadnix"
+
         echo "Running statix..."
-        ${pkgs.statix}/bin/statix check
+        ${pkgs.statix}/bin/statix check || lint_failed="$lint_failed statix"
 
         echo "Running shellcheck on packaged/runtime scripts..."
         shellcheck_targets="$(${pkgs.ripgrep}/bin/rg -Il '^#!.*\\b(bash|sh|zsh)\\b' scripts || true)"
         if [ -n "$shellcheck_targets" ]; then
           while IFS= read -r target; do
-            [ -n "$target" ] && ${pkgs.shellcheck}/bin/shellcheck "$target"
+            [ -n "$target" ] || continue
+            ${pkgs.shellcheck}/bin/shellcheck "$target" || lint_failed="$lint_failed shellcheck:$target"
           done <<<"$shellcheck_targets"
         fi
 
+        if [ -n "$lint_failed" ]; then
+          echo
+          echo "Lint FAILED:$lint_failed"
+          exit 1
+        fi
         echo "Linting complete!"
       '';
     };

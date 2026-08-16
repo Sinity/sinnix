@@ -39,8 +39,7 @@ let
     url = "https://github.com/snakers4/silero-vad/raw/76e3dc408eb2a5c655c34e230d2d5459b4439daa/src/silero_vad/data/silero_vad.onnx";
     hash = "sha256-GhU6IvRQnikqlOZ9b5uF6N6yW0mIaCt+F0xlJ52HiOM=";
   };
-in
-let
+
   # The Android SDK is unfree and license-gated, so it needs its own nixpkgs
   # instantiation rather than the repo's shared one. pkgs.path keeps that
   # pinned to exactly the same nixpkgs revision the rest of the flake uses.
