@@ -287,35 +287,11 @@ in
                 dim_inactive = false;
                 dim_strength = 0.0;
 
-                # Blur is OFF, and the reason is a measurement rather than a
-                # taste. Hyprland blurs the whole rectangle of a layer
-                # surface, and Noctalia anchors its notification layer
-                # full-height (576x2083 on DP-3) so toasts can stack --- so
-                # every notification painted a dimmed column down the screen
-                # behind and below the card. Confirmed by controlled capture:
-                # with blur off, matched screenshots taken with and without a
-                # toast are byte-identical inside that rectangle; with it on,
-                # every pixel there is pulled toward a local mean.
-                #
-                # The normal fix is a scoped layerrule pairing blur with
-                # ignore_alpha so transparent pixels are skipped. That is not
-                # expressible here: Hyprland 0.56.1 runs the hyprlang config
-                # provider (deprecated since 0.55 in favour of Lua), and in
-                # hyprlang `layerrule` has lost its matcher entirely --- the
-                # parser accepts blur/ignore_alpha/no_anim/xray/dim_around/
-                # order/animation as fields and rejects namespace, match,
-                # class and monitor as unknown, so a rule cannot be aimed at
-                # anything and an unscoped one matches nothing. Verified by
-                # probing the parser, which reports an unknown field
-                # differently from a bad value. It is the same wall that
-                # dropped the bar-layer blur below.
-                #
-                # What this costs: blur behind the inactive kitty window,
-                # which is why the HDR screencopy block above bothers to
-                # preserve it. Restoring it needs the Lua provider, which
-                # needs a home-manager newer than this flake's April-2025 pin
-                # --- tracked in sinnix-nzr9. Until then a legible desktop
-                # beats a blurred one.
+                # Hyprland blurs a layer surface's whole rect, and Noctalia's
+                # notification layer is full-height, so toasts dim a column
+                # behind them. The scoped fix (layerrule + ignore_alpha) is
+                # unexpressible: hyprlang's layerrule has no matcher, so a
+                # rule cannot be aimed. Needs the Lua provider (sinnix-nzr9).
                 blur.enabled = false;
 
                 shadow = {

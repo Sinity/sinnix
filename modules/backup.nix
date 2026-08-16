@@ -1274,11 +1274,9 @@ in
         stamp="$(date -u +%Y%m%dT%H%M%SZ)"
         install -d -m 0700 -o root -g root "${btrfsImageRoot}"
 
-        # Orphans from a run that died mid-capture. btrfs-image writes to
-        # "$out.tmp" and only renames on success, and the 30-day prune below
-        # only matches finished images, so a failed run used to leave
-        # multi-gigabyte .tmp files on the backup drive indefinitely (one
-        # from 2026-07-04 was still there in August).
+        # btrfs-image writes to "$out.tmp" and renames only on success, and
+        # the 30-day prune below matches finished images only, so a dead run
+        # leaves multi-GB orphans indefinitely.
         find "${btrfsImageRoot}" -type f -name '*.btrfs-image.tmp' -mtime +1 -delete
 
         record_status() {
@@ -1326,9 +1324,8 @@ in
           return 1
         }
 
-        # Per-label accounting: realm succeeded and persist failed on
-        # 2026-08-16 and the unit reported nothing but total failure, which
-        # hid that persist imaging had been broken since 2026-08-02.
+        # Per-label accounting: a combined exit code hides which target is
+        # actually broken.
         rc=0
         capture_image realm /dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a || rc=1
         capture_image persist /dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02 || rc=1

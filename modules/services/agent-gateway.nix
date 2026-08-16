@@ -148,21 +148,12 @@ mkServiceModule {
                 name = "agent-job-manifests";
                 path = "${cfg.stateDir}/jobs";
                 eventDriven = true;
-                # Deliberately NO staleness budget. Gateway jobs exist because
-                # the operator asked a remote agent for something, so silence
-                # measures how recently they felt like it and says nothing
-                # about health -- an unused gateway and a broken one are
-                # indistinguishable from this directory. The old 1h budget
-                # declared eventDriven and then scored the lane as if it had a
-                # cadence, so a quiet week read as an outage (observed
-                # 2026-08-14: 7.8 days quiet, last job 2026-08-06). Raising
-                # the number only moves the false alarm further out; there is
-                # no duration of silence here that is genuinely suspicious,
-                # so the honest declaration is to make no staleness claim at
-                # all. The sentinel skips lanes that declare neither a cadence
-                # nor a budget, which is exactly the intended treatment.
-                #
-                # What silence CANNOT tell us, the probe below can (sinnix-oig5).
+                # Deliberately NO staleness budget: silence here measures how
+                # recently the operator asked for something, not health, so an
+                # unused gateway and a broken one look identical. No duration
+                # of silence is genuinely suspicious, so make no claim -- the
+                # sentinel skips lanes declaring neither cadence nor budget.
+                # What silence cannot tell us, the probe below can (sinnix-oig5).
               }
               // lib.optionalAttrs cfg.tunnel.enable {
                 # Reachability, asked directly instead of inferred from silence.

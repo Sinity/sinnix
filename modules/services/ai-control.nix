@@ -13,26 +13,18 @@ let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   systemdSocketProxyd = "${pkgs.systemd}/lib/systemd/systemd-socket-proxyd";
 
-  # Backends declare `partOf = [ "<name>-proxy.service" ]` and NOTHING
-  # stronger. PartOf= propagates stop/restart only, which is what frees the
-  # GPU when the proxy idles out. BindsTo= (which every backend used to carry
-  # alongside it) additionally implies Requires=, so starting a backend by any
-  # path -- `sinnix ai start`, its own Restart=on-failure -- also started the
-  # proxy directly, outside socket activation. systemd-socket-proxyd then had
-  # no inherited listen fds, exited 1 with "Didn't get any sockets passed in",
-  # and BindsTo= propagated that failure straight back into the backend. On
-  # 2026-08-16 that flap burned muse-glimmer-proxy.socket's activation budget
-  # and left port 8083 refusing every connection until a manual reset.
+  # Backends declare `partOf` and NOTHING stronger. PartOf propagates
+  # stop/restart only, which frees the GPU when the proxy idles out. BindsTo
+  # also implies Requires, so any backend start pulls in the proxy outside
+  # socket activation, where systemd-socket-proxyd has no listen fds, exits 1,
+  # and propagates that failure back into the backend.
   #
-  # `idleTimeout` and `readinessTimeout` are required (no default): the right
-  # value differs per backend and a uniform one only ever fit the smallest.
-  # systemd-socket-proxyd starts forwarding as soon as ExecStart runs, but
-  # backends bind their port only after loading weights (~2s llama-cpp to
-  # ~105s comfyui) and the proxy does not retry, so cold connections got a
-  # hard "connection refused" -- `requires`+`after` guarantee unit-start
-  # ordering, not port-bind. `waitForBackend` blocks ExecStart until the
-  # backend accepts TCP; the client meanwhile waits in the `.socket` unit's
-  # kernel accept backlog, so a cold request is slow rather than failed.
+  # idleTimeout/readinessTimeout have no default: the right value differs per
+  # backend. The proxy forwards as soon as ExecStart runs, but backends bind
+  # their port only after loading weights (~2s to ~105s) and it does not
+  # retry -- requires+after order unit starts, not port binds. waitForBackend
+  # gates ExecStart on a real TCP accept, so a cold request is slow, not
+  # refused.
   mkProxy =
     {
       name,

@@ -233,14 +233,10 @@ mkServiceModule {
             enable = true;
             restartable = true;
           };
-          # Parked since 2026-08-14. Every start dies ~12s in with
-          # DurableChangeTrainError: the durable tier and the live tier
-          # disagree on archive identity and the startup check refuses to
-          # proceed. The repair is migration surgery in the polylogue repo,
-          # not something sinnix owns, and until it lands the unit would
-          # restart-loop forever. Acknowledged so agents stop rediscovering
-          # it as an emergency -- it still shows as known-down, with this
-          # reference, rather than vanishing from the health surface.
+          # Parked: the durable and live tiers disagree on archive identity
+          # and the startup check refuses to proceed. The repair is migration
+          # surgery in the polylogue repo. Acknowledged rather than silenced,
+          # so it stays visible as known-down.
           acknowledged = {
             down = true;
             reason = "DurableChangeTrainError blocks every start; AI-session ingestion is down pending polylogue-side migration repair";

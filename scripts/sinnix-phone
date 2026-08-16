@@ -198,19 +198,11 @@ ensure_app_grants() {
 }
 
 # Device-level capture settings that are not app grants and do not survive a
-# reboot on their own.
-#
-# The logcat ring buffers ship at 256 KiB for `main`, which on this phone holds
-# roughly four hours -- the reason a question about install failures earlier
-# today could not be answered at all: the evidence had already rotated out. 64
-# MiB per buffer is the largest the shell can set without root and costs only
-# RAM that logd already reserves lazily. `persist.logd.size` would make it
-# survive a reboot but is refused to the shell uid, so this is re-asserted on
-# every adb attach instead of being set once.
-#
-# Notification history is Android's own second witness beside the app's
-# listener. It defaults off, which is how a week of notifications turned out to
-# be unrecoverable rather than merely un-drained.
+# reboot. Ring buffers ship at 256 KiB (~4h on this phone); 64 MiB is the most
+# the shell can set without root. `persist.logd.size` would persist it but is
+# refused to the shell uid, so re-assert on every adb attach. Notification
+# history is Android's own second witness beside the app listener; it
+# defaults off.
 ensure_device_capture_settings() {
   local buf
   for buf in main system crash kernel; do
@@ -219,24 +211,13 @@ ensure_device_capture_settings() {
   adb_any shell settings put secure notification_history_enabled 1 >/dev/null 2>&1 || true
 }
 
-# Drain the phone's system log into the lake.
+# Drain the phone's system log into the lake. Bigger ring buffers only buy
+# time; without this the log is never captured at all.
 #
-# Raising the ring buffers above only buys time; without this the log is never
-# captured at all and every question about the phone's own behaviour -- why an
-# install failed, when a service was killed, what MIUI revoked -- is answerable
-# only inside whatever window has not yet rotated out. Asked one such question
-# on 2026-08-14, the answer was that the evidence had rotated at 15:04.
-#
-# `-T <ts>` resumes from the last line already drained, so repeated runs append
-# rather than duplicate. The cursor is kept per device in the lake beside the
-# data, and a missing or unusable cursor falls back to the whole buffer: after
-# a reboot the ring is fresh and the old timestamp is in the future relative to
-# its contents, which logcat answers with silence rather than an error. Losing
-# a duplicate is cheaper than losing a boot, so the fallback re-dumps.
-#
-# Written as raw threadtime lines, not JSON. The format is stable, greppable,
-# and every Android tool already speaks it; parsing it here would invent a
-# schema the rest of the estate has no use for.
+# `-T <ts>` resumes from the last drained line. A missing or future cursor (a
+# fresh ring after reboot) falls back to a full dump -- logcat answers a future
+# timestamp with silence, and losing a duplicate is cheaper than losing a boot.
+# Raw threadtime lines, not JSON: every Android tool already speaks the format.
 drain_logcat_adb() {
   local dest cursor since day out lines
   adb_resolve || return 1
@@ -272,29 +253,16 @@ drain_logcat_adb() {
   echo "logcat: $lines lines in $out"
 }
 
-# Drain ActivityWatch Android into the lake.
+# Drain ActivityWatch Android into the lake: foreground app and screen-unlock,
+# the one signal with no phone-side equivalent elsewhere.
 #
-# The phone has run aw-server-android since 2026-08-12 with usage-stats access
-# granted, quietly accumulating the one signal the estate had no phone-side
-# equivalent of: which app was in the foreground, and when the screen was
-# unlocked. Nothing had ever read it. Eleven days of it were sitting in the
-# app's private database when this lane was written, back to 2026-08-03 --
-# aw-android backfills from UsageStatsManager, so its history predates its own
-# installation.
+# Its HTTP API binds 127.0.0.1 only, hence `adb forward` rather than ssh. The
+# app must be running to answer and Android kills it freely, so the drain
+# starts it first -- safe repeatedly, and the DATA does not depend on uptime
+# because aw-android reads UsageStatsManager retroactively.
 #
-# Its HTTP API binds 127.0.0.1 only, so the tailnet cannot reach it directly;
-# `adb forward` is the tunnel, which is why this is an adb lane rather than an
-# ssh one. The app must be running to answer, and Android will have killed it
-# whenever it feels like -- so the drain starts it first. That is safe to do
-# repeatedly and costs a launch; the DATA does not depend on the process having
-# been up, because UsageStatsManager is the system's record and aw-android
-# reads it retroactively.
-#
-# Events are re-fetched whole rather than incrementally. Both buckets are small
-# (about a thousand events over eleven days), the API's cursor semantics are
-# per-bucket and awkward, and a full fetch of something this size is cheaper
-# than being subtly wrong about a watermark. Written as one file per bucket per
-# day, so a re-fetch overwrites rather than accumulating duplicates.
+# Re-fetched whole per bucket/day rather than incrementally: the dataset is
+# small, cursor semantics are awkward, and an overwrite cannot duplicate.
 drain_activitywatch_adb() {
   local dest port day out buckets n total=0
   adb_resolve || return 1
@@ -695,21 +663,13 @@ app-install)
   ensure_device_capture_settings
   "$0" app-start
 
-  # Retire Termux's runit `ambient` service, the previous recorder. Both
-  # recorders can hold the microphone at once -- measured: two AudioRecord
-  # clients, both State: Active, on separate input ports -- so the harm is not
-  # contention but provenance: they write the same `ambient-<UTC>.m4a` shape
-  # into the same directory, and the drain cannot tell whose chunk is whose.
-  #
-  # Over adb, not ssh: the install that just ran needs adb, while the phone's
-  # sshd is usually down, so an ssh-only retirement silently no-ops in exactly
-  # the case that reaches this line. Stopping the supervisor is not enough
-  # either -- `termux-microphone-record` is a separate Termux:API process and
-  # keeps the microphone until it is told to quit. `sv d` alone is not enough
-  # for the same reason: the run script ignores the TERM it sends and was
-  # observed opening a fresh recording six minutes later, so `sv k` follows it.
-  # The `down` file is what makes the retirement survive a reboot. Termux
-  # itself is left running -- its sshd is the transport the lake drain uses.
+  # Retire Termux's runit `ambient` service. Both recorders can hold the mic
+  # at once and write the same `ambient-<UTC>.m4a` shape, so the hazard is
+  # provenance, not contention. Over adb because the phone's sshd is usually
+  # down. `sv d` is not enough -- termux-microphone-record is a separate
+  # process that ignores the TERM -- so `sv k` and a `down` file follow, which
+  # is also what makes it survive a reboot. Termux itself stays up: its sshd
+  # is the drain's transport.
   echo "retiring the Termux recorder"
   termux_prefix=/data/data/com.termux/files/usr
   termux_retire="export PREFIX=$termux_prefix LD_LIBRARY_PATH=$termux_prefix/lib \
@@ -914,19 +874,14 @@ pull)
   ;;
 ambient-audit)
   # A chunk that captured nothing is byte-for-byte plausible: full bitrate,
-  # exact duration, valid container. One was produced on 2026-08-13 while a
-  # second recorder held the microphone, and neither the file size, the
-  # duration, nor the container told anyone. Only decoding the samples does,
-  # so the lake records the level at intake and a dead capture window becomes
-  # something visible in the data rather than something to be suspected later.
+  # exact duration, valid container. Only decoding the samples reveals it, so
+  # the level is recorded at intake and a dead window becomes visible data
+  # rather than a later suspicion.
   ledger="$LAKE_ROOT/ambient-levels.jsonl"
   mkdir -p "$LAKE_ROOT/ambient"
   touch "$ledger"
-  # One pass to learn what has already been measured; re-decoding the whole
-  # lake on every drain would grow without bound.
   # Keyed on size as well as name: a chunk repaired from a truncated transfer
-  # keeps its name but is a different file, and its old measurement describes
-  # audio that was never fully there.
+  # keeps its name but is a different file.
   seen=$(jq -r '"\(.chunk) \(.bytes // 0)"' "$ledger" 2>/dev/null | sort -u)
   added=0
   silent=0
