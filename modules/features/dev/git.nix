@@ -118,8 +118,20 @@ mkFeatureModule {
           };
         };
 
+        # AGENTS.md is a committed symlink to CLAUDE.md in this estate's repos
+        # but noise in everyone else's; result* are the symlinks `nix build`
+        # drops into whatever directory it was run from.
+        #
+        # The result* entries belong here rather than in each repo because they
+        # are a property of the tool, not of any project: every repo that has
+        # remembered them spells them differently (result, result-*, result*,
+        # /result) and the ones that matter most are third-party checkouts
+        # nobody will edit -- a dbus-broker worktree was showing result and
+        # result-man as committable untracked entries for exactly that reason.
         home.file.".config/git/ignore_global".text = ''
           AGENTS.md
+          result
+          result-*
         '';
 
         home.file.".local/bin/git-cleanup-merged-pr-branches" = {
