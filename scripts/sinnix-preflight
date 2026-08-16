@@ -150,13 +150,6 @@ check_work() {
   fi
 }
 
-check_concurrency() {
-  if pgrep -af 'nh os (switch|boot)|nixos-rebuild|nix.*--profile.*/nix/var/nix/profiles/system' >/dev/null 2>&1; then
-    report 2 concurrent-switch "another generation operation is running" "wait for the existing switch or boot operation"
-  else
-    report 0 concurrent-switch "no concurrent generation operation observed"
-  fi
-}
 
 if [ "$mode" = reboot ]; then
   scan_unpersisted
@@ -166,7 +159,20 @@ if [ "$mode" = reboot ]; then
   check_work
 else
   check_disk
-  check_concurrency
+  # There is deliberately no concurrency check here. flock on
+  # /tmp/sinnix-switch.lock is the real mutual exclusion, every rebuild path
+  # takes it (flake/command-registry.nix rebuildLock), and it is taken BEFORE
+  # this preflight runs -- so by the time we are executing, a competing
+  # activation has already been queued behind the lock and there is nothing
+  # left to detect.
+  #
+  # What the old check did instead was `pgrep -af 'nh os (switch|boot)|...'`,
+  # which matches any process whose COMMAND LINE CONTAINS that text: a grep,
+  # an editor, a shell history line, an agent's wait loop. On 2026-08-17 it
+  # blocked a legitimate switch (exit 75) because a background
+  # `until ! pgrep -f 'nh os switch'` loop was running -- a process whose only
+  # crime was mentioning the string. A real mutex plus a text probe layered on
+  # top is strictly worse than the mutex alone.
   check_generation
   check_flake
 fi

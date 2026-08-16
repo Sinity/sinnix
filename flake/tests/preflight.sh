@@ -32,12 +32,21 @@ grep -Fq 'BLOCK nvidia-pairing: module=570.1, userspace=560.1' <<<"$output"
 grep -Fq 'BLOCK snapshot-headroom: free=100 KiB' <<<"$output"
 ! grep -Fq 'private.bin' <<<"$output"
 
+# switch mode blocks on a REAL condition and FORCE overrides it. This used to
+# stub `pgrep` to exit 0 and assert that the resulting "concurrent switch"
+# verdict blocked -- which tested the detection mechanism rather than the
+# behaviour, and kept passing while that mechanism false-positived on any
+# process whose command line merely mentioned "nh os switch". The nix-storage
+# floor is a genuine blocker with a genuine threshold, so demand more free
+# space than any machine has.
 set +e
-printf '#!%s\nexit 0\n' "$(command -v bash)" >"$tmp/bin/pgrep"
-chmod +x "$tmp/bin/pgrep"
-SINNIX_PREFLIGHT_MEMINFO="$tmp/meminfo" "$preflight" switch >/dev/null 2>&1
+switch_output="$(SINNIX_PREFLIGHT_MIN_NIX_FREE_KB=999999999999 \
+  SINNIX_PREFLIGHT_MEMINFO="$tmp/meminfo" "$preflight" switch 2>&1)"
 status=$?
 set -e
 [ "$status" -eq 75 ]
-SINNIX_PREFLIGHT_FORCE=1 SINNIX_PREFLIGHT_MEMINFO="$tmp/meminfo" "$preflight" switch >/dev/null
+grep -Fq 'BLOCK nix-storage' <<<"$switch_output"
+
+SINNIX_PREFLIGHT_FORCE=1 SINNIX_PREFLIGHT_MIN_NIX_FREE_KB=999999999999 \
+  SINNIX_PREFLIGHT_MEMINFO="$tmp/meminfo" "$preflight" switch >/dev/null
 echo 'preflight fixture passed'
