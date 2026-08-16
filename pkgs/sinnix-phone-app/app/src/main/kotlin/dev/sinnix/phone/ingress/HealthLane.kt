@@ -117,7 +117,20 @@ object HealthLane {
         TYPES.map { HealthPermission.getReadPermission(it) }.toSet() +
             HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY +
             HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND +
-            "android.permission.health.READ_EXERCISE_ROUTES"
+            ROUTES_PERMISSION
+
+    /**
+     * The grants that getGrantedPermissions can actually report.
+     *
+     * Exercise-route access is a tri-state Health Connect keeps to itself
+     * ("Additional access" -> Always allow / Ask every time / Don't allow):
+     * with Always allow set and working, the permission still never appears
+     * in the granted set, so counting it made the lane report "1 of 20
+     * missing" forever. It stays in PERMISSIONS so the request dialog OFFERS
+     * it; the truth about route access is carried per record by the `route`
+     * field, which is the only place Health Connect states it.
+     */
+    val QUERYABLE_PERMISSIONS: Set<String> = PERMISSIONS - ROUTES_PERMISSION
 
     fun availability(ctx: Context): String =
         when (HealthConnectClient.getSdkStatus(ctx)) {
@@ -127,6 +140,7 @@ object HealthLane {
         }
 
 
+    private const val ROUTES_PERMISSION = "android.permission.health.READ_EXERCISE_ROUTES"
     private const val PREFS = "sinnix-phone-health"
     private const val KEY_LEGACY_TOKEN = "changes_token"
 
@@ -192,13 +206,13 @@ object HealthLane {
             } catch (e: Exception) {
                 emptySet<String>()
             }
-        val missing = PERMISSIONS - granted
+        val missing = QUERYABLE_PERMISSIONS - granted
         if (missing.isNotEmpty()) {
             Events.record(
                 ctx,
                 "lane_blocked",
                 "lane", "health",
-                "reason", "${missing.size} of ${PERMISSIONS.size} read grants missing",
+                "reason", "${missing.size} of ${QUERYABLE_PERMISSIONS.size} read grants missing",
                 // Named, not counted. "3 of 17 missing" sends someone to the
                 // Health Connect UI to work out WHICH three; the names make a
                 // partial grant actionable from the log alone.

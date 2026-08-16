@@ -58,6 +58,10 @@
        ConsentRequired by design), so today this permission only makes the
        route's existence visible. The lane records that state honestly. -->
   <uses-permission android:name="android.permission.health.READ_EXERCISE_ROUTES" />
+  <!-- Live heart rate from the band over the standard BLE Heart Rate
+       Service. Connect only, to an already-bonded device: no scan, no
+       location entanglement. -->
+  <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
   <!--
     The two that are not record types, and that decide whether the lane sees

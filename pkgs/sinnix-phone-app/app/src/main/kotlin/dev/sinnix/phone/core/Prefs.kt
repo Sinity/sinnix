@@ -25,6 +25,7 @@ object Prefs {
     private const val KEY_HEALTH = "health_lane_enabled"
     private const val KEY_SLEEP_DETECT = "sleep_detect_enabled"
     private const val KEY_POWER = "power_lane_enabled"
+    private const val KEY_HR_LIVE = "hr_live_lane_enabled"
     private const val KEY_WAKE_HOUR = "wake_hour"
     private const val KEY_WAKE_MINUTE = "wake_minute"
     private const val KEY_WAKE_ARMED = "wake_armed"
@@ -158,6 +159,12 @@ object Prefs {
 
     fun setSleepDetect(ctx: Context, value: Boolean) =
         prefs(ctx).edit().putBoolean(KEY_SLEEP_DETECT, value).apply()
+
+    /** Live heart rate over BLE HRS, straight from the band. */
+    fun heartRateLane(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_HR_LIVE, true)
+
+    fun setHeartRateLane(ctx: Context, value: Boolean) =
+        prefs(ctx).edit().putBoolean(KEY_HR_LIVE, value).apply()
 
     /** Battery and thermal as events. Free — the service already reads both. */
     fun powerLane(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_POWER, true)

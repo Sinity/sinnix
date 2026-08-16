@@ -55,6 +55,7 @@ class AmbientService : Service() {
     private var sensors: AmbientSensors? = null
     private var inbox: InboxWatcher? = null
     private var passive: PassiveLanes? = null
+    private var heartRate: HeartRateLane? = null
     private var location: dev.sinnix.phone.ingress.LocationLane? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -80,6 +81,7 @@ class AmbientService : Service() {
         sensors = AmbientSensors(this).also { it.start() }
         inbox = InboxWatcher(this).also { it.start() }
         passive = PassiveLanes(this)
+        heartRate = HeartRateLane(this)
         location = dev.sinnix.phone.ingress.LocationLane(this).also { it.start() }
         // The capture preference lives in credential-protected storage, which
         // a locked boot cannot read. Mirroring it here — from the one place
@@ -149,6 +151,7 @@ class AmbientService : Service() {
         }
         sensors?.stop()
         inbox?.stop()
+        heartRate?.stop()
         location?.stop()
         thread.quitSafely()
         wakeLock?.takeIf { it.isHeld }?.release()
@@ -319,6 +322,7 @@ class AmbientService : Service() {
         // already awake, so power and sleep-estimate readings are free here
         // and would cost a wakeup anywhere else.
         passive?.tick()
+        heartRate?.tick()
 
         // A chunk whose file has stopped growing means the recorder has stopped
         // producing frames while still believing it is running.
