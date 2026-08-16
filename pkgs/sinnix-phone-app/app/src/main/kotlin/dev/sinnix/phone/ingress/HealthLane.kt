@@ -214,65 +214,112 @@ object HealthLane {
         // which the combined feed deliberately withholds for privacy.
         prefs(ctx).edit().remove(KEY_LEGACY_TOKEN).apply()
 
+        rateLimited = false
         var written = 0
-        TYPES.forEach { type ->
+        for (type in TYPES) {
             written +=
                 if (!prefs(ctx).getBoolean(sweptKey(type), false)) {
                     sweep(ctx, client, type)
                 } else {
                     incremental(ctx, client, type)
                 }
+            // Health Connect enforces a rolling API quota, and the first
+            // full-history sweep is big enough to hit it (StepsRecord alone:
+            // 1,592 pages). Once one call is rejected for quota, every later
+            // call this tick will be too -- the first run proved it with
+            // sixteen identical token failures in two seconds. Stop the tick
+            // and let the next one continue from the persisted page cursor.
+            if (rateLimited) {
+                Events.record(ctx, "lane_blocked", "lane", "health",
+                    "reason", "rate limited; resuming next tick")
+                break
+            }
         }
         return written
     }
 
+    /** Set when Health Connect rejects a call for quota; cleared each sync(). */
+    private var rateLimited = false
+
+    private fun isRateLimit(e: Exception) =
+        e.message?.contains("quota", ignoreCase = true) == true ||
+            e.message?.contains("rate limit", ignoreCase = true) == true
+
     private fun sweptKey(type: KClass<out Record>) = "swept:$BACKFILL_GENERATION:${type.simpleName}"
     private fun tokenKey(type: KClass<out Record>) = "token:${type.simpleName}"
+    private fun resumePageKey(type: KClass<out Record>) = "sweep_page:$BACKFILL_GENERATION:${type.simpleName}"
+    private fun resumeTokenKey(type: KClass<out Record>) = "sweep_token:$BACKFILL_GENERATION:${type.simpleName}"
+    private fun resumeCountKey(type: KClass<out Record>) = "sweep_count:$BACKFILL_GENERATION:${type.simpleName}"
+    private fun resumePagesKey(type: KClass<out Record>) = "sweep_pages:$BACKFILL_GENERATION:${type.simpleName}"
 
     /**
-     * Full-history sweep of one type: every page until pageToken runs out.
+     * Full-history sweep of one type: every page until pageToken runs out,
+     * resumable across ticks.
      *
-     * The changes token is taken BEFORE the sweep on purpose. Anything
-     * inserted during the sweep is then delivered again by the changes feed
-     * rather than falling between the two -- a duplicate is a nuisance, a hole
-     * is not recoverable.
+     * The changes token is taken at the START of the whole sweep -- before
+     * the first page, persisted so a resumed sweep reuses it. Anything
+     * inserted while the sweep crawls is then delivered again by the changes
+     * feed rather than falling between the two -- a duplicate is a nuisance,
+     * a hole is not recoverable.
      *
-     * Nothing is persisted unless the LAST page was read: a sweep that threw
-     * on page three runs again in full next tick, because "swept" must mean
-     * "to the end", not "started". The generation-2 importer marked itself complete
-     * after one unpaged read per type, which is how five months of apparent
-     * coverage turned out to be two disconnected blocks.
+     * The page cursor is persisted after EVERY page. Health Connect enforces
+     * a rolling API quota, and the first gen-3 run proved the retained
+     * history is bigger than one quota window: StepsRecord ran 1,592 pages
+     * and 254,720 records before the quota cut it off. Without a cursor the
+     * next tick would restart from page one -- re-emitting a quarter-million
+     * duplicate events per attempt and burning the whole quota to get no
+     * further. With it, each tick continues where the quota stopped the
+     * last one.
+     *
+     * "Swept" is still only written after the LAST page: a paused sweep is
+     * unfinished and stays visibly unfinished. The generation-2 importer
+     * marked itself complete after one unpaged read per type, which is how
+     * five months of apparent coverage turned out to be two disconnected
+     * blocks.
      */
     private suspend fun sweep(ctx: Context, client: HealthConnectClient, type: KClass<out Record>): Int {
-        val token =
-            try {
-                client.getChangesToken(ChangesTokenRequest(recordTypes = setOf(type)))
-            } catch (e: Exception) {
-                Events.record(ctx, "lane_blocked", "lane", "health",
-                    "reason", "token ${type.simpleName}: ${e.message}")
-                return 0
-            }
+        val p = prefs(ctx)
+        var token = p.getString(resumeTokenKey(type), null)
+        if (token == null) {
+            token =
+                try {
+                    client.getChangesToken(ChangesTokenRequest(recordTypes = setOf(type)))
+                } catch (e: Exception) {
+                    rateLimited = rateLimited || isRateLimit(e)
+                    Events.record(ctx, "lane_blocked", "lane", "health",
+                        "reason", "token ${type.simpleName}: ${e.message}")
+                    return 0
+                }
+            p.edit().putString(resumeTokenKey(type), token).apply()
+        }
         // No lower bound. `before` asks for everything up to now, so the window
         // is whatever Health Connect still retains rather than a number we
         // guessed -- and guessing is how the previous 30 hid the Samsung era.
         val range = TimeRangeFilter.before(Instant.now())
-        var written = 0
-        var pages = 0
+        var written = p.getInt(resumeCountKey(type), 0)
+        var pages = p.getInt(resumePagesKey(type), 0)
+        var pageToken: String? = p.getString(resumePageKey(type), null)
         try {
-            var pageToken: String? = null
             do {
                 val page = client.readRecords(ReadRecordsRequest(type, range, pageToken = pageToken))
                 pages++
                 written += page.records.count { emit(ctx, it) }
                 pageToken = page.pageToken
+                p.edit().putString(resumePageKey(type), pageToken)
+                    .putInt(resumeCountKey(type), written)
+                    .putInt(resumePagesKey(type), pages).apply()
             } while (pageToken != null)
         } catch (e: Exception) {
-            Log.w(Storage.TAG, "health: ${type.simpleName} sweep failed on page ${pages + 1}", e)
+            rateLimited = rateLimited || isRateLimit(e)
+            Log.w(Storage.TAG, "health: ${type.simpleName} sweep paused on page ${pages + 1}", e)
             Events.record(ctx, "health_sweep_failed", "type", type.simpleName,
-                "pages_read", pages, "records_emitted", written, "reason", e.message)
+                "pages_read", pages, "records_emitted", written,
+                "resumable", true, "reason", e.message)
             return written
         }
-        prefs(ctx).edit().putString(tokenKey(type), token).putBoolean(sweptKey(type), true).apply()
+        p.edit().putString(tokenKey(type), token).putBoolean(sweptKey(type), true)
+            .remove(resumePageKey(type)).remove(resumeTokenKey(type))
+            .remove(resumeCountKey(type)).remove(resumePagesKey(type)).apply()
         Events.record(ctx, "health_backfill", "type", type.simpleName, "records", written,
             "pages", pages, "generation", BACKFILL_GENERATION, "window", "all")
         return written
@@ -288,6 +335,7 @@ object HealthLane {
                 try {
                     client.getChanges(token)
                 } catch (e: Exception) {
+                    rateLimited = rateLimited || isRateLimit(e)
                     Log.w(Storage.TAG, "health: ${type.simpleName} changes unreadable", e)
                     return written
                 }
