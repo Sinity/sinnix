@@ -149,15 +149,35 @@ Boundary rules:
   creates `sinnix.services.<name>`; hosts opt in. The optional `surface`
   argument auto-registers the unit in `sinnix.runtime.surfaces` so resource
   governance is co-located with the declaration.
+- **AI backends use a third factory.** `mkAiService { name, description, unit,
+endpoint, activation, backendKind, requiresCuda, ... }` wraps
+  `mkServiceModule` and additionally builds the surface, the socket-proxy
+  activation, and the `meta.ai` block. Used by `stt`, `tts`, `kokoro`,
+  `open-webui`. Reach for it for anything that is a model endpoint; reach for
+  `mkServiceModule` for everything else.
 - `subFeatures = { x = { description; default; }; ... }` generates nested
   `<feature>.x.enable` toggles (see `features/dev/shell.nix`).
 - `meta.dotfiles.{configFile,dataFile,homeFile}` entries are collected by
   `modules/dotfiles-sweep.nix` into HM out-of-store symlinks pointing at
   `dots/<rel>`. String value ⇒ simple symlink; attrset ⇒
   `{ source; recursive; force; }`.
-- Composite-module exception: `features/desktop/hyprland/` does not use
-  `mkFeatureModule` (multi-file, tightly coupled system+HM config). Reserve
-  that shape for WM-level complexity.
+- **Modules that use no factory — the complete list.** A factory bypass is a
+  cost every reader pays, so the set is enumerated here and adding to it needs
+  a reason of the same shape as these:
+  - `features/desktop/hyprland/` — multi-file, tightly coupled system+HM
+    config. Reserve that shape for WM-level complexity.
+  - `services/ml-containers.nix` — shared container _runtime_ (podman storage,
+    CDI, digest pinning) that the AI services depend on; it configures a
+    substrate rather than owning a unit.
+  - `services/sinex.nix` + `services/sinex/bridge.nix` — glue onto an upstream
+    flake's own `services.sinex` module, so the option surface is upstream's
+    to shape, not `mkServiceModule`'s.
+  - `services/ai-control.nix` — installs `scripts/sinnix-ai`, which carries the
+    service registry itself; there is no unit here to declare.
+  - `services/capture-registry.nix` — declares `sinnix.runtime.captures`
+    entries for lanes with no owning unit. Not a service at all.
+  - `features/dev/agents/*.nix` except `clis.nix` and `mcp.nix` — plain-Nix
+    helpers imported directly by those two, not auto-imported modules.
 - Hermetic tests for modules live in `flake/tests-runtime.nix` using
   `flake/test-lib.nix` (`mkFeatureTest`, `mkHmRuntimeCheck`, `mkVmCheck`,
   `sanitizedInputs`, `mountTmpfsRoots`).
@@ -174,7 +194,14 @@ One contract governs unit placement and observability:
   sacrificial MemoryHigh=22G/Max=28G), and the env allowlist.
 - Modules declare `sinnix.runtime.surfaces.<name> = { unit, manager, kind,
 resourceClass, observe, captures }`. Eval-time assertions reject duplicate
-  units, kind/suffix mismatches, and unknown classes.
+  units, kind/suffix mismatches, and unknown classes. `kind` is always a real
+  systemd unit type and `unit` always ends in it — there is no exemption.
+- A capture lane whose writer is **not** a unit (a hotkey script, a shell
+  wrapper) goes in `sinnix.runtime.captures` instead: same lane fields, no
+  `unit`. Both sources flatten into one `.captures` array in the inventory, so
+  the sentinel and every other consumer see one kind of lane. Do not invent a
+  synthetic unit name to fit a lane into a surface — that is what this option
+  exists to prevent.
 - `lib.sinnix.mkRuntimeServiceConfig { runtimeInventory; unit; }` resolves a
   unit to its class serviceConfig (as mkDefault) and **throws on unknown
   units** — register the surface first.

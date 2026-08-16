@@ -55,7 +55,12 @@ mkServiceModule {
         wants = [ "network-online.target" ];
         serviceConfig = {
           Type = "oneshot";
-          ExecStart = "${pkgs.bash}/bin/bash -lc '${oracleScript}'";
+          # outputDir is passed through, not merely declared. It used to be an
+          # option with a type, a default and a description saying where
+          # digests are written -- that nothing read, so setting it did
+          # nothing. An option that silently ignores you is worse than no
+          # option; the script has taken --output all along.
+          ExecStart = "${pkgs.bash}/bin/bash -lc '${oracleScript} --output-dir ${lib.escapeShellArg cfg.outputDir}'";
           TimeoutStartSec = 600;
         };
       };

@@ -71,33 +71,6 @@ in
       "d ${journaldBaseDir}/index 0750 ${username} users -"
     ];
 
-    # Cross-host default; sinnix-prime replaces it wholesale via mkForce with
-    # wear-endurance-tuned values.
-    services.journald.extraConfig = ''
-      Storage=persistent
-      Compress=yes
-
-      # Corruption resilience: sync every 30s (default 5min) and keep files
-      # small, so power loss costs at most 30s of logs and 100MB of blast
-      # radius.
-      SyncIntervalSec=30s
-      SystemMaxFileSize=100M
-
-      SystemMaxUse=50G
-      SystemKeepFree=10G
-
-      # Size is the only retention limit.
-      MaxRetentionSec=0
-
-      # Rotate daily to limit the blast radius of corruption.
-      MaxFileSec=1day
-
-      RateLimitIntervalSec=30s
-      RateLimitBurst=500
-
-      ForwardToSyslog=no
-    '';
-
     systemd.services.capture-boot-metrics = {
       description = "Capture boot metrics";
       # systemd-analyze needs FinishTimestampMonotonic != 0, only set once
