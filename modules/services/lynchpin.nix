@@ -62,6 +62,21 @@ mkServiceModule {
     let
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
       localRoot = "${cfg.repoRoot}/.lynchpin";
+      # github_context shells out to `gh`, which authenticates from
+      # GITHUB_TOKEN. A systemd unit sources no profile.d, so the agenix
+      # export every interactive shell gets is not there -- resolve the
+      # secret explicitly and exec the CLI.
+      materializeEntrypoint = pkgs.writeShellApplication {
+        name = "lynchpin-materialize-entrypoint";
+        runtimeInputs = [ pkgs.coreutils ];
+        text = ''
+          ${lib.sinnix.mkSecretLookup {
+            secretName = "github-token";
+            caller = "lynchpin-materialize";
+          }}
+          exec ${scriptPkgs.lynchpin-python}/bin/lynchpin-python -m lynchpin.cli.materialize --all
+        '';
+      };
       localHotDirs = [
         "cache"
         "duck"
@@ -117,6 +132,11 @@ mkServiceModule {
         ];
         path = [
           pkgs.git
+          # github_context calls `gh` via shutil.which and records
+          # "gh_not_found" for every repo when it is absent -- which is
+          # exactly what it did, nightly, unnoticed, until a different
+          # failure earlier in the DAG stopped it from getting this far.
+          pkgs.gh
         ];
         # The materialization CLI resolves `.lynchpin/` relative to its working
         # directory (repo-rooted, like git), so without WorkingDirectory the
@@ -127,7 +147,7 @@ mkServiceModule {
           # `lynchpin.analysis materialize` is not a valid subcommand; the
           # transparent-DAG runner is lynchpin.cli.materialize (requires
           # explicit --all).
-          ExecStart = "${scriptPkgs.lynchpin-python}/bin/lynchpin-python -m lynchpin.cli.materialize --all";
+          ExecStart = "${materializeEntrypoint}/bin/lynchpin-materialize-entrypoint";
           User = "sinity";
           Group = "users";
           WorkingDirectory = cfg.repoRoot;
