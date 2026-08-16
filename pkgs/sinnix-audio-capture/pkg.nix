@@ -15,6 +15,13 @@ python3Packages.buildPythonApplication {
   # of the package (segment rotation, default-target resolution, topology
   # parsing, pause/gap records) stays pure and importable without them.
   dependencies = [
+    # numpy is not imported by this package, but torch's C extension probes
+    # for it at import time and prints "Failed to initialize NumPy: No module
+    # named 'numpy'" on every index pass without it. That warning is not
+    # cosmetic: it means torch's numpy bridge is absent, so any tensor path
+    # that round-trips through numpy (silero-vad's own helpers included)
+    # would raise rather than degrade.
+    python3Packages.numpy
     python3Packages.silero-vad
     sinnix-capture-lib
   ];

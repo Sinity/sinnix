@@ -4,6 +4,7 @@ import calendar
 import os
 from pathlib import Path
 
+from sinnix_audio_capture import indexer
 from sinnix_audio_capture.indexer import (
     SpeechSpan,
     build_index_payload,
@@ -131,3 +132,79 @@ def test_payload_omits_coverage_rather_than_inventing_a_denominator():
     assert payload["decoded_seconds"] == 540.0
     assert "coverage" not in payload
     assert "span_seconds" not in payload
+
+
+def _fake_vad(monkeypatch):
+    """Neutralize the parts of a pass that need torch and ffmpeg.
+
+    Everything else -- segment listing, the raw_ref the writer records, and
+    the skip decision under test -- runs for real, including the actual
+    CaptureWriter, because the de-duplication reads the lane files that
+    writer produces.
+    """
+    monkeypatch.setattr(indexer, "_load_model", lambda: object())
+    monkeypatch.setattr(
+        indexer, "decode_to_pcm16k_mono", lambda _bin, _path: b"\x00" * 32000
+    )
+    monkeypatch.setattr(indexer, "_speech_spans_for_segment", lambda _model, _pcm: [])
+
+
+def _write_segment(capture_root: Path, name: str) -> Path:
+    channel_dir = capture_root / "audio" / "mic"
+    channel_dir.mkdir(parents=True, exist_ok=True)
+    path = channel_dir / name
+    path.write_bytes(b"x")
+    return path
+
+
+def _lane_records(capture_root: Path) -> list[str]:
+    lane_dir = capture_root / "audio-index"
+    return [
+        line
+        for path in sorted(lane_dir.glob("audio-index-2*.jsonl"))
+        for line in path.read_text().splitlines()
+        if line.strip()
+    ]
+
+
+def test_index_pass_does_not_reindex_a_segment_it_already_wrote(
+    tmp_path: Path, monkeypatch
+):
+    """The lookback window is not a de-duplicator.
+
+    The timer fires hourly with a 26-hour lookback, so without this every
+    pass re-decoded a full day of audio: 4481 records over 431 distinct
+    segments in one day on 2026-08-16, with a pass taking longer than the
+    interval that triggered it.
+    """
+    _fake_vad(monkeypatch)
+    _write_segment(tmp_path, "audio-mic-20260812T100000Z.opus")
+
+    first = indexer.run_index_pass(capture_root=tmp_path, channels=("mic",), since_ts=0)
+    second = indexer.run_index_pass(
+        capture_root=tmp_path, channels=("mic",), since_ts=0
+    )
+
+    assert first == 1
+    assert second == 0
+    assert len(_lane_records(tmp_path)) == 1
+
+
+def test_index_pass_still_indexes_a_segment_it_has_not_seen(
+    tmp_path: Path, monkeypatch
+):
+    """Anti-vacuity for the test above: the skip must be per-segment.
+
+    A de-duplication that skipped everything once the lane was non-empty
+    would satisfy the previous test perfectly while silently ending
+    indexing forever.
+    """
+    _fake_vad(monkeypatch)
+    _write_segment(tmp_path, "audio-mic-20260812T100000Z.opus")
+    indexer.run_index_pass(capture_root=tmp_path, channels=("mic",), since_ts=0)
+
+    _write_segment(tmp_path, "audio-mic-20260812T110000Z.opus")
+    added = indexer.run_index_pass(capture_root=tmp_path, channels=("mic",), since_ts=0)
+
+    assert added == 1
+    assert len(_lane_records(tmp_path)) == 2
