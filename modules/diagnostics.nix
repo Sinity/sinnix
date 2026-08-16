@@ -62,6 +62,10 @@ in
         scriptPkgs."sinnix-free-headroom"
         scriptPkgs.machine-experiment-run
         scriptPkgs.syslog-index
+        # On PATH for its `restore` mode: rebuilding a queryable journal from
+        # the archive is a thing a person does by hand, at the moment they
+        # need history the live journal no longer has.
+        scriptPkgs.sinnix-journal-archive
       ]
     );
 
