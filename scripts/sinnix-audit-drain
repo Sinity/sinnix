@@ -40,10 +40,20 @@ fi
 # auditd wrote 5.8 GB, and every record in those windows was permanently
 # unrecoverable. On a real failure the watermark stays put and the unit goes
 # red, so the next run re-reads the same window.
-err_file="$(mktemp)"
-trap 'rm -f "$err_file"' EXIT
+#
+# Streamed through a temp FILE rather than a shell variable. A single
+# catch-up run over a large window slurped 4.1 million records into `raw`
+# and peaked at 7.4 GB RSS -- on a 32 GB host that is an OOM waiting for
+# the right moment, and the whole point of this unit is to be the thing
+# that still works when something else has gone wrong. The scratch file
+# lives beside the watermark (NVMe), not in TMPDIR, which is a small tmpfs
+# here.
+scratch_dir="$(dirname "$WATERMARK")"
+err_file="$(mktemp "$scratch_dir/drain-err.XXXXXX")"
+raw_file="$(mktemp "$scratch_dir/drain-raw.XXXXXX")"
+trap 'rm -f "$err_file" "$raw_file"' EXIT
 set +e
-raw="$(ausearch "${START_ARG[@]}" --format raw 2>"$err_file")"
+ausearch "${START_ARG[@]}" --format raw >"$raw_file" 2>"$err_file"
 ausearch_rc=$?
 set -e
 
@@ -57,18 +67,18 @@ if [[ "$ausearch_rc" -gt 1 || -s "$err_file" ]]; then
   exit 1
 fi
 
-if [[ -z "$raw" ]]; then
+if [[ ! -s "$raw_file" ]]; then
   echo "$NOW_EPOCH" >"$WATERMARK"
   echo "sinnix-audit-drain: no new records"
   exit 0
 fi
 
-printf '%s\n' "$raw" >>"$RAW_OUT"
+cat "$raw_file" >>"$RAW_OUT"
 
 # Structured projection. Every key=value on the record is preserved -- the
 # point is to keep the whole record, not a chosen subset -- with the audit
 # event id lifted out so records belonging to one event can be grouped.
-count="$(printf '%s\n' "$raw" | python3 -c '
+count="$(python3 -c '
 import json, re, sys, datetime
 
 FIELD = re.compile(r"([a-zA-Z0-9_-]+)=(\"[^\"]*\"|\S+)")
@@ -98,7 +108,12 @@ for line in sys.stdin:
     sys.stdout.write(json.dumps(rec, separators=(",", ":")) + "\n")
     n += 1
 sys.stderr.write(str(n))
-' 2>&1 >>"$JSON_OUT" || echo 0)"
+' <"$raw_file" 2>&1 >>"$JSON_OUT")" || {
+  # Same rule as the ausearch guard above: a projection that died has not
+  # archived the window, so the watermark must not move past it.
+  echo "sinnix-audit-drain: structured projection failed; watermark held at ${SINCE:-<unset>}" >&2
+  exit 1
+}
 
 echo "$NOW_EPOCH" >"$WATERMARK"
 echo "sinnix-audit-drain: archived $count records to $RAW_OUT / $JSON_OUT"

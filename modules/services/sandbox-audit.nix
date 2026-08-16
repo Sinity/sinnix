@@ -118,15 +118,19 @@ mkServiceModule {
           "-a always,exit -F arch=b64 -S setuid,setgid,setreuid,setregid -F auid>=1000 -F auid!=-1 -k sinnix-privchange"
           # System-shape changes worth reconstructing after the fact.
           #
-          # auid-scoped for the same reason the exec rules are. Unscoped, this
-          # recorded systemd building a mount namespace for every sandboxed
-          # unit start: 4.4 million records, of which a 5 MB sample was 100%
-          # `(capture-awair)` -- a unit that starts every 60 seconds and costs
-          # ~120 mount/umount2 calls each time. None of that is a change to
-          # the system's shape; it is the sandbox working. A mount a person or
-          # an agent performs carries their loginuid, and that is the one this
-          # rule exists to reconstruct.
-          "-a always,exit -F arch=b64 -S mount,umount2 -F auid>=1000 -F auid!=-1 -k sinnix-mount"
+          # There is deliberately NO mount/umount2 rule. It recorded systemd
+          # building a mount namespace for every sandboxed unit start -- 4.4
+          # million records, dominated by capture-awair and capture-monitor,
+          # which start every 60s and 300s at ~120 mount calls each. Scoping
+          # it by auid does not separate that from a real mount, which
+          # measurement showed after reasoning had predicted otherwise: both
+          # of those units live in the operator's user manager, so their
+          # namespace setup carries auid=1000 exactly like a mount the
+          # operator typed. The syscall cannot tell the two apart on this
+          # host, and the question the rule was meant to answer -- what is
+          # mounted, and when did that change -- is answered directly by
+          # /proc/self/mountinfo and by systemd's own *.mount unit
+          # transitions in the journal.
           "-a always,exit -F arch=b64 -S init_module,finit_module,delete_module -k sinnix-module"
           "-a always,exit -F arch=b64 -S clock_settime,settimeofday -k sinnix-time"
         ]
@@ -145,6 +149,12 @@ mkServiceModule {
       # the 3272000 records in the hour, which is what a "readable journal"
       # loses to.
       services.journald.audit = lib.mkIf cfg.kernelAudit false;
+      # Audit=false alone is not enough, which is only visible by measuring:
+      # it stops journald turning kernel auditing ON, but journald still
+      # RECEIVES every record through this socket, which NixOS wants
+      # unconditionally. With the setting flipped and the socket still up,
+      # 789 audit records still reached the journal in 90 seconds.
+      systemd.sockets.systemd-journald-audit.wantedBy = lib.mkIf cfg.kernelAudit (lib.mkForce [ ]);
 
       # auditd ships with no size ceiling, so its log grows without bound on
       # whatever filesystem /var/log lives on -- here the wear-limited root
