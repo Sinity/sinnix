@@ -55,6 +55,7 @@ mkServiceModule {
   configFn =
     {
       cfg,
+      config,
       lib,
       pkgs,
       ...
@@ -158,6 +159,34 @@ mkServiceModule {
           # 4-hour timeout — the full DAG can be heavy.
           TimeoutStartSec = 14400;
         };
+      };
+
+      # The webhistory lane belongs here, to the unit that actually fills it.
+      # It used to be declared in capture-registry.nix against a
+      # `sinnix-capture-webhistory` unit that does not exist, which is how a
+      # lane could carry a 48h staleness budget with nothing on any schedule
+      # able to keep it -- see sinnix-ksws. Registering the surface also puts
+      # this daily job in front of the health sentinel, which it was not.
+      sinnix.runtime.surfaces.lynchpin-materialize = lib.mkIf cfg.materializationTimer.enable {
+        unit = "lynchpin-materialize.service";
+        resourceClass = "background-maintenance";
+        observe.enable = true;
+        workload = {
+          class = "sacrificial";
+          rationale = "Daily analysis DAG and browser-history capture; rerunnable at will.";
+        };
+        captures = [
+          {
+            name = "webhistory";
+            path = "${config.sinnix.paths.capturesRoot}/webhistory";
+            eventDriven = true;
+            # Two days against a daily timer: one missed run is tolerable,
+            # two is worth surfacing. The hard deadline is far longer --
+            # Chrome drops visits after ~90 days -- so this is an early
+            # warning, not the edge of data loss.
+            staleAfterSeconds = 172800;
+          }
+        ];
       };
 
       systemd.timers.lynchpin-materialize = lib.mkIf cfg.materializationTimer.enable {

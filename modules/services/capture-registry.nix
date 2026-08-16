@@ -11,9 +11,6 @@
 # systemd unit.
 #
 # Lanes covered:
-# - webhistory: chrome-snapshot.sh (/realm/data/captures/webhistory), a
-#   manually-scheduled Chrome History DB snapshot script that lives outside
-#   this repo.
 # - screenshot: screenshot-color-lab.sh (desktop-control-plane skill),
 #   triggered via the Hyprland "Show display capture status" probe binding
 #   and ad hoc agent/operator screenshot capture, not a daemon.
@@ -23,20 +20,6 @@ let
 in
 {
   sinnix.runtime.surfaces = {
-    capture-webhistory = {
-      unit = "sinnix-capture-webhistory";
-      kind = "capture";
-      dynamic = true;
-      resourceClass = "system";
-      captures = [
-        {
-          name = "webhistory";
-          path = "${capturesRoot}/webhistory";
-          eventDriven = true;
-          staleAfterSeconds = 172800;
-        }
-      ];
-    };
     capture-screenshot = {
       unit = "sinnix-capture-screenshot";
       kind = "capture";
