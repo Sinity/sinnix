@@ -18,6 +18,7 @@ let
 
   journaldBaseDir = "${capturesRoot}/syslog";
   bootMetricsDir = "${journaldBaseDir}/boot-metrics";
+  journalArchiveDir = "${journaldBaseDir}/journal";
 
   coreDiagnostics = with pkgs; [
     hwinfo
@@ -120,11 +121,71 @@ in
       };
     };
 
+    # The journal is the estate's least durable capture and nothing said so:
+    # /realm/state/journal is its own btrfs subvolume, snapshots do not cross
+    # subvolume boundaries, and so every borg archive of /realm back to
+    # 2026-03 held `state/journal` as an EMPTY DIRECTORY. Meanwhile
+    # MaxRetentionSec=365day is subordinate to SystemMaxUse=64G, so under the
+    # 2026-08 audit firehose the real window collapsed to 6.5 hours. A year of
+    # history was evicted with no copy anywhere. This copies sealed files into
+    # the lake, which is an ordinary directory under /realm/data and therefore
+    # inside borg coverage -- and into precisely the path syslog-index below
+    # already scans, which had been reporting "journal_files: 0" since it was
+    # written because nothing ever populated it.
+    sinnix.runtime.surfaces.journal-archive = {
+      unit = "sinnix-journal-archive.service";
+      resourceClass = "observability";
+      observe.enable = true;
+      captures = [
+        {
+          name = "syslog-journal";
+          path = journalArchiveDir;
+          # Cadence is the timer's, but a sealed file only appears when
+          # journald rotates one, which at normal volume is not every run.
+          # Budget generously: silence here means "the journal is quiet",
+          # which is the good case.
+          eventDriven = true;
+          staleAfterSeconds = 604800;
+        }
+      ];
+    };
+
+    systemd.services.sinnix-journal-archive = {
+      description = "Copy sealed journal files into the capture lake";
+      after = [
+        "local-fs.target"
+        "systemd-journald.service"
+      ];
+      unitConfig.RequiresMountsFor = [ journaldBaseDir ];
+      serviceConfig = lib.sinnix.mkRuntimeServiceConfig {
+        runtimeInventory = config.sinnix.runtime.inventory;
+        unit = "sinnix-journal-archive.service";
+        overrides = {
+          Type = "oneshot";
+          ExecStart = "${scriptPkgs.sinnix-journal-archive}/bin/sinnix-journal-archive";
+        };
+      };
+    };
+
+    systemd.timers.sinnix-journal-archive = {
+      description = "Rescue sealed journal files before journald evicts them";
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnBootSec = "2min";
+        # Deliberately more frequent than the hourly indexer beside it: this
+        # one races journald's eviction, and the cost of a run that finds
+        # nothing new is a directory listing.
+        OnUnitActiveSec = "15min";
+        AccuracySec = "1min";
+      };
+    };
+
     systemd.services.syslog-index = {
       description = "Build no-loss syslog/journal capture indexes";
       after = [
         "local-fs.target"
         "systemd-journald.service"
+        "sinnix-journal-archive.service"
       ];
       unitConfig.RequiresMountsFor = [ journaldBaseDir ];
       serviceConfig = {
