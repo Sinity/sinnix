@@ -228,7 +228,13 @@ let
     in
     ''
       if [ -n "''${${envName}:-}" ]; then
-        ${varName}="''${${envName}}"
+        ${
+          # When the caller wants the secret in its own derived env var, the
+          # value is already exactly where it belongs -- emitting
+          # `FOO="$FOO"` here is a self-assignment shellcheck rejects
+          # (SC2269), which fails any writeShellApplication caller.
+          if varName == envName then ":" else ''${varName}="''${${envName}}"''
+        }
       elif [ -r ${path} ]; then
         ${varName}="$(<${path})"
       else
