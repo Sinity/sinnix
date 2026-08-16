@@ -982,18 +982,59 @@ health-sync)
   # link entirely. Anything unexpected aborts rather than taps.
   adb_resolve || { echo "health-sync: no adb transport" >&2; exit 1; }
   ui_dump="/sdcard/sinnix-health-sync.xml"
+  # Every tap below is located by label from a fresh UI dump; there are no
+  # coordinate constants. The first version tapped where the Device tab sits
+  # on the home screen -- but Mi Fitness restores whatever screen it last
+  # showed, and on 2026-08-16 that tap landed on Settings' "Sign out" and put
+  # an account-signout confirmation on screen. A navigation tap is as capable
+  # of destruction as an action tap, so both get the same discipline.
+  locate_label() {
+    # Always exits 0: under the script-wide `set -euo pipefail`, a no-match
+    # grep would otherwise fail the caller's assignment and kill the whole
+    # run BEFORE the "not tapping blind" message -- which is exactly how the
+    # first version died silently instead of reporting what it saw.
+    adb_any shell uiautomator dump "$ui_dump" >/dev/null 2>&1 || true
+    adb_any shell cat "$ui_dump" 2>/dev/null | tr '<' '\n' \
+      | grep -F "text=\"$1\"" \
+      | grep -oE 'bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' | head -1 \
+      | grep -oE '[0-9]+' | paste -sd' ' || true
+  }
+  # Force-stopped first so the app opens on its home tab rather than on
+  # whatever screen it was left showing. The restored-state screen is
+  # unpredictable, and unpredictable is exactly what a scripted tap cannot
+  # be aimed at.
+  adb_any shell am force-stop com.xiaomi.wearable >/dev/null 2>&1 || true
   adb_any shell am start -n com.xiaomi.wearable/com.xiaomi.fitness.main.MainActivity \
     >/dev/null 2>&1 || adb_any shell monkey -p com.xiaomi.wearable \
     -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
-  sleep 6
-  # Device tab: third of four in the bottom navigation.
-  adb_any shell input tap 675 2132 >/dev/null 2>&1 || true
-  sleep 5
+  sleep 10
+  # The bottom navigation's labels are zero-bounds nodes (the visible text is
+  # composed elsewhere), so the Device tab cannot be located by label. What
+  # the dump does expose is the nav row itself -- a full-width
+  # HorizontalScrollView of four equal cells, Device third -- so the tap point
+  # is derived from that row's measured bounds at 5/8 width. Two guards make
+  # this safe where a constant was not: the screen must LOOK like home (the
+  # "Workout" label present, which Settings and dialogs lack) before any tap,
+  # and the Sync label must be found afterwards or nothing more is touched.
   adb_any shell uiautomator dump "$ui_dump" >/dev/null 2>&1 || true
-  sync_bounds="$(adb_any shell cat "$ui_dump" 2>/dev/null | tr '<' '\n' \
-    | grep -F 'text="Sync"' \
+  home_xml="$(adb_any shell cat "$ui_dump" 2>/dev/null || true)"
+  if ! echo "$home_xml" | grep -qF 'text="Workout"'; then
+    echo "health-sync: Mi Fitness did not open on its home screen; not tapping blind" >&2
+    exit 1
+  fi
+  nav_bounds="$(echo "$home_xml" | tr '<' '\n' \
+    | grep -F 'HorizontalScrollView' \
     | grep -oE 'bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' | head -1 \
-    | grep -oE '[0-9]+' | paste -sd' ')"
+    | grep -oE '[0-9]+' | paste -sd' ' || true)"
+  if [ -z "$nav_bounds" ]; then
+    echo "health-sync: no bottom navigation row found; not tapping blind" >&2
+    exit 1
+  fi
+  adb_any shell input tap \
+    "$(echo "$nav_bounds" | awk '{print int($1 + ($3 - $1) * 5 / 8)}')" \
+    "$(echo "$nav_bounds" | awk '{print int(($2 + $4) / 2)}')" >/dev/null 2>&1 || true
+  sleep 5
+  sync_bounds="$(locate_label "Sync")"
   if [ -z "$sync_bounds" ]; then
     echo "health-sync: no Sync control on screen; not tapping blind" >&2
     exit 1
