@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Report which large directories backup actually keeps, and which regenerable ones are still untagged
+# runtimeInputs: bash coreutils findutils gnugrep gawk borgbackup
+set -euo pipefail
+
+# Backup membership is decided by a property the directory carries, not by a
+# path in a list: CACHEDIR.TAG (the bford.info standard, written unprompted by
+# cargo/uv/ruff/pytest/mypy) or .nobackup (regenerable scratch that is not a
+# cache). Untagged means kept, so the failure direction is over-preservation.
+#
+# The cost of that safe default is silent waste, and this reports it: big
+# directories that are being archived, with the cache-shaped ones called out.
+# It deliberately does NOT reimplement borg's exclude patterns -- duplicating
+# that logic would create a second source of truth that drifts from the first.
+# For an authoritative answer use --dry-run, which asks borg itself.
+
+ROOT="${SINNIX_CACHE_AUDIT_ROOT:-/realm}"
+THRESHOLD_GB="${SINNIX_CACHE_AUDIT_THRESHOLD:-5}"
+DEPTH="${SINNIX_CACHE_AUDIT_DEPTH:-4}"
+DRY_RUN=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --root) ROOT="$2"; shift 2 ;;
+    --threshold) THRESHOLD_GB="$2"; shift 2 ;;
+    --depth) DEPTH="$2"; shift 2 ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    -h|--help)
+      cat <<'EOF'
+sinnix-cache-audit [--root DIR] [--threshold GB] [--depth N] [--dry-run]
+
+  --dry-run  ask borg exactly what it would archive (authoritative, slow)
+
+Without --dry-run this reports directories above the size threshold and
+whether each carries a CACHEDIR.TAG or .nobackup marker. Marker-less entries
+are being backed up; judge whether that is right for each one.
+EOF
+      exit 0 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+if [[ "$DRY_RUN" == 1 ]]; then
+  echo "Asking borg what it would archive under $ROOT (this walks the tree; expect minutes)..."
+  export BORG_PASSCOMMAND="cat /run/agenix/borg-passphrase"
+  export BORG_REPO="${BORG_REPO:-/outer-realm/backup/borg-realm-v2}"
+  borg create --dry-run --list --filter=+ \
+    --exclude-caches --exclude-if-present .nobackup \
+    "::audit-dry-run" "$ROOT" 2>&1 | head -100
+  exit 0
+fi
+
+threshold_kb=$((THRESHOLD_GB * 1024 * 1024))
+
+# Unreadable directories are counted as zero by du, so an unprivileged run
+# silently under-reports exactly the large root-owned trees this is meant to
+# find -- /realm/media/model measured 35G as the user and 120G as root. The
+# errors are surfaced rather than discarded, and a short count of them is a
+# warning that the totals below are floors, not measurements.
+du_errors="$(mktemp)"
+du_output="$(mktemp)"
+trap 'rm -f "$du_errors" "$du_output"' EXIT
+
+# du exits 1 when it could not read something, which is a partial result to be
+# reported, not a failure to abort on -- but under `set -e` with pipefail that
+# status killed this script before it could print the very warning describing
+# it, giving a silent exit 1 with a truncated table. Exit >1 is still a real
+# failure. Run du on its own so the two cases stay distinguishable.
+# -x keeps a walk of /realm from wandering onto another filesystem.
+set +e
+du -x --max-depth="$DEPTH" --block-size=1K "$ROOT" >"$du_output" 2>"$du_errors"
+du_rc=$?
+set -e
+if [[ "$du_rc" -gt 1 ]]; then
+  echo "sinnix-cache-audit: du failed (exit $du_rc)" >&2
+  cat "$du_errors" >&2
+  exit 1
+fi
+
+printf '%-11s %-9s %s\n' "SIZE" "MARKER" "DIRECTORY"
+printf '%-11s %-9s %s\n' "-----------" "---------" "---------"
+
+awk -v t="$threshold_kb" '$1 >= t { size=$1; sub(/^[0-9]+[ \t]+/, "", $0); print size" "$0 }' "$du_output" \
+  | sort -rn \
+  | while read -r size dir; do
+      [[ -z "${dir:-}" ]] && continue
+      # .btrfs is snapshot reflink accounting, not real occupancy -- counting it
+      # double-reports every byte it shares with the live tree.
+      case "$dir" in */.btrfs|*/.btrfs/*) continue ;; esac
+
+      if [[ -e "$dir/CACHEDIR.TAG" ]]; then
+        marker="cachedir"
+      elif [[ -e "$dir/.nobackup" ]]; then
+        marker="nobackup"
+      else
+        marker="unmarked"
+      fi
+
+      human="$(numfmt --to=iec --from-unit=1024 "$size")"
+      printf '%-11s %-9s %s\n' "$human" "$marker" "$dir"
+    done
+
+if [[ -s "$du_errors" ]]; then
+  denied="$(grep -c 'Permission denied' "$du_errors" || true)"
+  echo
+  echo "WARNING: du could not read $denied path(s); every size above is a LOWER BOUND."
+  echo "         Re-run with sudo for real numbers. First few:"
+  head -3 "$du_errors" | sed 's/^/           /'
+fi
+
+cat <<'EOF'
+
+MARKER meanings:
+  cachedir  CACHEDIR.TAG present -- excluded from backup, safe to delete
+  nobackup  .nobackup present    -- excluded from backup, regenerable scratch
+  unmarked  neither marker
+
+"unmarked" does NOT prove a directory is archived: the exclude list in
+modules/backup.nix still drops some by path (media/Steam shows unmarked here
+and is excluded anyway). This column reports markers only,
+because reimplementing borg's pattern matching would create a second source of
+truth. Run --dry-run when you need the authoritative answer.
+
+An unmarked directory that is genuinely regenerable wants a marker. One
+holding irreplaceable or expensive-to-recompute data is correct as-is; leave
+it alone. Anything that cost money or many hours to produce stays unmarked
+even though it is technically reproducible -- that is the distinction markers
+exist to preserve.
+EOF

@@ -386,6 +386,29 @@ config in `secrets.nix` (repo root).
 - Backups: btrbk snapshots (producer) are deleted only after the hourly Borg
   drain proves a matching archive on `/outer-realm` (durability gate). Status
   JSONL: `/realm/data/captures/machine/borg_status.jsonl`.
+- **Backup membership is a property the directory carries, not a path in a
+  list.** A directory is excluded when it holds `CACHEDIR.TAG` (the
+  bford.info standard, which cargo/uv/ruff/pytest/mypy write unprompted) or
+  `.nobackup` (sinnix's marker for regenerable scratch that is not a cache);
+  `borg create` honours both via `--exclude-caches` / `--exclude-if-present`.
+  Untagged means kept, so an unclassified new dataset is over-preserved
+  rather than silently lost. **Mark new caches; do not extend
+  `realmExcludes`** — that list is now only a safety net for things that
+  cannot self-describe (`node_modules`, an untagged `target`). Path rules
+  silently stop applying the moment something is named unexpectedly:
+  `"cache"` matched only `/realm/cache` while `data/self/genome/cache` put
+  285G of public reference downloads into every archive for months, and
+  `.lynchpin/cache` and `.sinex/trybuild-target` slipped past for the same
+  reason.
+- Three preservation classes decide the marker. **Irreplaceable** (raw
+  captures, sequencing reads) and **expensive-derived** — regenerable in
+  principle but it cost money or many hours, e.g. paid cloud compute — both
+  stay unmarked and backed up. Only **true cache**, re-acquired seamlessly
+  and free when missing, gets a marker; a directory called cache that does
+  not regenerate seamlessly is misfiled, and the fix is to make it seamless
+  or reclassify it. `sinnix-cache-audit` lists large directories with their
+  marker state (`--dry-run` asks borg itself, which is authoritative); run it
+  with sudo, since unreadable paths make every size a lower bound.
 
 ## Verification & Checks
 
