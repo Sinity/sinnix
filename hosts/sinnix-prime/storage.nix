@@ -511,7 +511,6 @@ in
       ];
       script = ''
         install -d -m 0700 -o ${username} -g ${primaryGroupName} ${polylogueArchiveRoot}
-        install -d -m 0755 -o root -g root ${realmRoot}/db
         if ! btrfs subvolume show ${lib.escapeShellArg polylogueDbRoot} >/dev/null 2>&1; then
           btrfs subvolume create ${lib.escapeShellArg polylogueDbRoot}
           chattr +C ${lib.escapeShellArg polylogueDbRoot} || true
@@ -527,7 +526,6 @@ in
     tmpfiles.rules = lib.mkAfter [
       "d /swap 0750 root root -"
       "d ${polylogueArchiveRoot} 0700 ${username} ${primaryGroupName} -"
-      "d ${realmRoot}/db 0755 root root -"
       "d /home/${username}/.local/share 0700 ${username} ${primaryGroupName} -"
       "d ${polylogueShareMount} 0700 ${username} ${primaryGroupName} -"
       # NVMe-backed regenerable-cache root (bind-mount source for

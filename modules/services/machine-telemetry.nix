@@ -199,7 +199,6 @@ mkServiceModule {
     in
     {
       systemd.tmpfiles.rules = [
-        "d ${realmRoot}/db 0755 root root -"
         # Operator-owned like the rest of the lake, and group-writable so the
         # root daemons and operator producers that share this namespace can
         # both create files. It must NOT be root-owned under an
@@ -227,7 +226,6 @@ mkServiceModule {
         ];
         serviceConfig.Type = "oneshot";
         script = ''
-          install -d -m 0755 -o root -g root ${realmRoot}/db
           install -d -m 0755 -o root -g users ${dataRoot}
           if ! btrfs subvolume show ${lib.escapeShellArg dbRoot} >/dev/null 2>&1; then
             btrfs subvolume create ${lib.escapeShellArg dbRoot}
