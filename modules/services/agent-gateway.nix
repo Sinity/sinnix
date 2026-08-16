@@ -259,8 +259,15 @@ mkServiceModule {
             NoNewPrivileges = true;
             PrivateTmp = true;
             ProtectSystem = "strict";
-            ProtectHome = "read-only";
-            ReadWritePaths = [ cfg.stateDir ];
+            # launch_agent() fork/execs claude/codex inside this namespace, so
+            # the child inherits this write surface. Unreachable today (the
+            # tunnel runs remote-readonly, which lacks JOB_START) but the
+            # sandbox must not be what decides whether a transcript survives.
+            ProtectHome = false;
+            ReadWritePaths = [
+              cfg.stateDir
+            ]
+            ++ lib.sinnix.systemd.agentRuntimeWritePaths { home = "/home/${userName}"; };
             UMask = "0077";
           };
           Install.WantedBy = lib.optionals cfg.tunnel.autoStart [ "default.target" ];

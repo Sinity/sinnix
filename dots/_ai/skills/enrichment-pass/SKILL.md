@@ -54,7 +54,8 @@ source since the last run (the watermark), not that the source is broken:
        {
          "kind": "unhealthy-surface",
          "severity": "warning",
-         "ref": "runtime-inventory.json#/surfaces/foo"
+         "ref": "runtime-inventory.json#/surfaces/foo",
+         "summary": "One sentence: what is wrong and why it matters."
        }
      ]
    }
@@ -67,6 +68,42 @@ source since the last run (the watermark), not that the source is broken:
    (a failed/degraded runtime surface, a repeated error pattern in journald,
    an open commitment that looks stale) — empty array is a valid, honest
    output when nothing stands out.
+
+   `severity` MUST be one of `info`, `warning`, `error`, `critical`.
+   `summary` is REQUIRED: one sentence, specific enough to act on.
+
+### `kind` is a closed vocabulary
+
+`kind` MUST be exactly one of the values below. Do not coin new ones, do not
+pluralise, do not add qualifiers — pick the closest match and put the nuance in
+`summary`. If genuinely nothing fits, use `other`.
+
+| kind                       | use for                                                  |
+| -------------------------- | -------------------------------------------------------- |
+| `unhealthy-surface`        | a runtime surface reporting degraded/down                |
+| `failed-unit`              | a systemd unit in a failed state                         |
+| `service-churn`            | restart loops, crash loops, flapping                     |
+| `invalid-unit-config`      | a unit file systemd rejects or warns about               |
+| `journal-storm`            | one message repeated enough to crowd the log             |
+| `repeated-error-pattern`   | a recurring error that is not a single-message flood     |
+| `resource-pressure`        | memory/disk/IO pressure, OOM kills, capacity limits      |
+| `filesystem-fault`         | read-only remounts, corruption, mount failures           |
+| `capture-gap`              | a capture lane stale, thin, truncated, or losing records |
+| `backup-fault`             | a backup or verification job failing                     |
+| `data-loss`                | records confirmed dropped or unrecoverable               |
+| `open-commitment`          | a tracked intention that looks stale or unmet            |
+| `unverified-change`        | a change landed but not yet exercised by its real path   |
+| `operator-action-required` | needs a human: credentials, consent, a decision          |
+| `bundle-incomplete`        | an input was absent, unreadable, or only partly read     |
+| `self-degraded`            | this pass itself was impaired (tool failure, truncation) |
+| `other`                    | nothing above fits; explain fully in `summary`           |
+
+Why this is closed: across the first 27 passes an open `kind` field produced 96
+distinct values, including seven separate spellings of "the journal is flooded"
+(`journal-storm`, `journal-flood`, `log-spam`, `log-flood`, `journald-noise`,
+`journal-warning-flood`, `log-flooded-by-single-warning`). Free-text kinds make
+the flags unaggregatable across runs, which defeats the point of emitting
+structured output alongside the prose.
 
 ## Invariants (do not violate)
 
