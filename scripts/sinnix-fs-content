@@ -1,0 +1,269 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Index content-bearing files across the estate — hashes, titles, excerpts — to find what is strewn where
+# runtimeInputs: python3 duckdb coreutils
+
+"""File-level index of the things a person wrote or collected.
+
+The directory inventory answers "how big is this and who owns it". It cannot
+answer the question that actually matters for reorganising an estate: *which
+files belong together but are not stored together*. That is a content
+question, and it needs content.
+
+Scope is deliberately narrow. There are tens of millions of files on this
+machine and almost all of them are uninteresting in bulk -- capture stream
+records, media blobs, build output, package trees. What is interesting is the
+~60k documents: markdown notes, text dumps, PDFs, spreadsheets, the debris of
+years of half-finished organisation. Those are the ones that turn up in six
+places at once, and there are few enough to index individually.
+
+Three things per file make the strewn-ness visible:
+
+  sha256    exact duplicates, wherever they sit. This is the one that proves
+            "the same file is in six places" rather than suggesting it.
+  title     for markdown/HTML, the first heading; for the rest, the filename.
+            Lets near-duplicates and topic clusters surface by name.
+  head      the first few hundred characters, so a later pass can classify
+            what a thing IS without re-reading 60k files off disk.
+
+Excluded on purpose, with the reason recorded rather than silently dropped:
+anything inside a capture lane (those are streams, described by their lane),
+media, build output, and VCS internals.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+SCHEMA = "sinnix-fs-content-v1"
+
+CONTENT_EXTS = {
+    ".md", ".markdown", ".txt", ".org", ".rst", ".adoc",
+    ".pdf", ".docx", ".odt", ".rtf", ".epub",
+    ".csv", ".tsv", ".tex", ".bib",
+    ".html", ".htm",
+    ".json", ".yaml", ".yml", ".toml", ".ini", ".conf",
+}
+
+# Streams and blobs, not documents. A capture lane's contents are described by
+# the lane; indexing each record would drown the signal in telemetry.
+EXCLUDE_DIR_PARTS = {
+    ".git", "node_modules", "target", ".venv", "venv", "__pycache__",
+    ".direnv", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".cargo",
+    "site-packages", ".cache", "share/doc",
+}
+EXCLUDE_PREFIXES = (
+    # btrfs snapshot root. Every snapshot mirrors the whole estate, so without
+    # this the index is mostly copies of itself: measured 3.85M of 4.43M files
+    # and 203 GB of 263 GB. It also produces phantom findings — a stray-file
+    # search over the polluted index reported 821 hits where 8 were real.
+    "/realm/.btrfs/",
+    "/realm/data/captures/",
+    "/realm/media/",
+    "/realm/cache/",
+    "/realm/tmp/shell/",
+    "/realm/worktrees/",
+    "/nix/store/",
+)
+
+# A JSON/CSV bigger than this is data, not a document; a markdown bigger than
+# this is a generated dump. Hash and record it, but do not read it in.
+MAX_READ_BYTES = 2 << 20
+HEAD_CHARS = 400
+
+H1 = re.compile(r"^\s{0,3}#\s+(.+?)\s*$", re.M)
+TITLE_TAG = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
+YAML_TITLE = re.compile(r"^title:\s*(.+?)\s*$", re.M)
+
+
+
+def safe(value):
+    """Filenames on this estate are not all valid UTF-8.
+
+    os.scandir hands back surrogate escapes for undecodable bytes, and
+    json.dumps then refuses to encode them -- killing a whole-filesystem walk
+    over one badly-named file. Replace the unencodable parts rather than skip
+    the entry: the name is degraded, the record survives.
+    """
+    if isinstance(value, str):
+        return value.encode("utf-8", "replace").decode("utf-8")
+    if isinstance(value, dict):
+        return {safe(k): safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [safe(v) for v in value]
+    return value
+
+def excluded(path: str) -> str | None:
+    if path.startswith(EXCLUDE_PREFIXES):
+        return "bulk lane (stream, media, cache or build)"
+    parts = set(Path(path).parts)
+    hit = parts & EXCLUDE_DIR_PARTS
+    if hit:
+        return f"inside {sorted(hit)[0]}"
+    return None
+
+
+def extract(path: Path, size: int, ext: str) -> tuple[str | None, str | None]:
+    """(title, head) — best effort, never fatal."""
+    if size > MAX_READ_BYTES or ext in {".pdf", ".docx", ".odt", ".epub", ".rtf"}:
+        return None, None
+    try:
+        raw = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None, None
+    title = None
+    if ext in {".md", ".markdown"}:
+        if raw.startswith("---"):
+            end = raw.find("\n---", 3)
+            if end > 0:
+                m = YAML_TITLE.search(raw[:end])
+                if m:
+                    title = m.group(1)
+        if not title:
+            m = H1.search(raw)
+            title = m.group(1) if m else None
+    elif ext in {".html", ".htm"}:
+        m = TITLE_TAG.search(raw)
+        title = " ".join(m.group(1).split()) if m else None
+    head = " ".join(raw[:HEAD_CHARS * 3].split())[:HEAD_CHARS] or None
+    return title, head
+
+
+def sha256_of(path: Path, size: int) -> str | None:
+    """Full hash for small files; head+tail+size for large ones.
+
+    A full hash of a 500 MB export costs minutes and buys nothing here: the
+    question is whether two paths hold the same thing, and head+tail+size
+    answers it with no realistic collision among documents.
+    """
+    h = hashlib.sha256()
+    try:
+        with path.open("rb") as f:
+            if size <= 8 << 20:
+                for chunk in iter(lambda: f.read(1 << 20), b""):
+                    h.update(chunk)
+            else:
+                h.update(f.read(1 << 20))
+                f.seek(-(1 << 20), os.SEEK_END)
+                h.update(f.read(1 << 20))
+                h.update(str(size).encode())
+    except OSError:
+        return None
+    return h.hexdigest()
+
+
+def walk(roots: list[str], out_path: Path, progress_every: int) -> int:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    written = 0
+    skipped = 0
+    started = time.monotonic()
+    with out_path.open("w", encoding="utf-8") as out:
+        for root in roots:
+            for dirpath, dirnames, filenames in os.walk(root, topdown=True):
+                if excluded(dirpath + "/"):
+                    dirnames[:] = []
+                    skipped += len(filenames)
+                    continue
+                dirnames[:] = [d for d in dirnames if d not in EXCLUDE_DIR_PARTS]
+                for fn in filenames:
+                    ext = Path(fn).suffix.lower()
+                    if ext not in CONTENT_EXTS:
+                        continue
+                    p = Path(dirpath) / fn
+                    try:
+                        st = p.stat()
+                    except OSError:
+                        continue
+                    if not st.st_size:
+                        continue
+                    title, head = extract(p, st.st_size, ext)
+                    out.write(json.dumps(safe({
+                        "schema": SCHEMA,
+                        "path": str(p),
+                        "dir": dirpath,
+                        "name": fn,
+                        "ext": ext,
+                        "bytes": st.st_size,
+                        "mtime": st.st_mtime,
+                        "sha256": sha256_of(p, st.st_size),
+                        "title": title,
+                        "head": head,
+                    }), ensure_ascii=False) + "\n")
+                    written += 1
+                    if progress_every and written % progress_every == 0:
+                        print(f"  {written} files, {time.monotonic()-started:.0f}s",
+                              file=sys.stderr)
+    print(f"sinnix-fs-content: {written} files ({skipped} in excluded trees) "
+          f"in {time.monotonic()-started:.0f}s -> {out_path}")
+    return written
+
+
+def materialize(jsonl: Path, db: Path, parquet: Path) -> None:
+    sql = f"""
+DROP TABLE IF EXISTS files;
+CREATE TABLE files AS SELECT * FROM read_json_auto('{jsonl}', ignore_errors=true);
+
+-- The point of the whole exercise: one row per piece of content that exists
+-- in more than one place, with every place it exists.
+DROP VIEW IF EXISTS duplicates;
+CREATE VIEW duplicates AS
+SELECT sha256, count(*) AS copies, sum(bytes) AS total_bytes,
+       min(bytes) AS unit_bytes, list(path) AS paths, min(name) AS a_name
+FROM files WHERE sha256 IS NOT NULL
+GROUP BY sha256 HAVING count(*) > 1
+ORDER BY (count(*)-1) * min(bytes) DESC;
+
+-- Same name in many directories: near-duplicates the hash cannot catch,
+-- because someone edited one copy.
+DROP VIEW IF EXISTS scattered_names;
+CREATE VIEW scattered_names AS
+SELECT name, count(*) AS copies, count(DISTINCT dir) AS dirs, list(DISTINCT dir) AS where_
+FROM files GROUP BY name HAVING count(DISTINCT dir) > 2
+ORDER BY count(DISTINCT dir) DESC;
+
+COPY (SELECT * FROM files) TO '{parquet}' (FORMAT PARQUET);
+"""
+    db.parent.mkdir(parents=True, exist_ok=True)
+    db.unlink(missing_ok=True)
+    script = db.parent / ".content.sql"
+    script.write_text(sql, encoding="utf-8")
+    proc = subprocess.run(["duckdb", str(db), "-f", str(script)],
+                          text=True, capture_output=True, check=False)
+    script.unlink(missing_ok=True)
+    if proc.returncode != 0:
+        print(proc.stdout, file=sys.stderr)
+        print(proc.stderr, file=sys.stderr)
+        raise SystemExit(f"duckdb failed ({proc.returncode})")
+    check = subprocess.run(["duckdb", str(db), "-noheader", "-list", "-c",
+                            "SELECT count(*) FROM files"],
+                           text=True, capture_output=True, check=False)
+    rows = check.stdout.strip()
+    if not rows.isdigit() or int(rows) == 0:
+        raise SystemExit(f"materialize produced no rows ({rows!r} {check.stderr.strip()})")
+    print(f"sinnix-fs-content: materialized {rows} rows -> {db}, {parquet}")
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--root", action="append", default=None)
+    ap.add_argument("--out-dir", default="/realm/data/derived/inventory")
+    ap.add_argument("--progress-every", type=int, default=5000)
+    args = ap.parse_args()
+    roots = args.root or ["/realm", "/outer-realm"]
+    out_dir = Path(args.out_dir)
+    jsonl = out_dir / "files.jsonl"
+    walk(roots, jsonl, args.progress_every)
+    materialize(jsonl, out_dir / "content.duckdb", out_dir / "files.parquet")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
