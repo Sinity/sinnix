@@ -45,17 +45,63 @@ class CaptureWriter:
         self._seq_lock_path = self.lane_dir / f"{lane}.seq.lock"
         self._index_path = self.lane_dir / f"{lane}-index.jsonl"
 
+    def _highest_indexed_seq(self) -> int:
+        """Largest seq the sidecar index has actually seen.
+
+        The recovery authority when the counter file is unreadable. Falling
+        back to 0 instead would restart the sequence and hand out numbers
+        already on disk, which is precisely what the counter exists to
+        prevent -- a duplicate seq is indistinguishable from a replayed
+        record downstream.
+        """
+        highest = 0
+        try:
+            with open(self._index_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        seq = int(json.loads(line)["seq"])
+                    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+                        continue
+                    highest = max(highest, seq)
+        except OSError:
+            return 0
+        return highest
+
+    def _read_seq(self) -> int:
+        """Current counter, repaired from the index if it is unusable.
+
+        The counter file can legitimately be found empty: a process killed
+        between truncating and writing it (a systemd restart during
+        activation, say) leaves a zero-byte file, and every subsequent write
+        then died on int('') -- which bricked the lane, because
+        Restart=on-failure turned it into a start-limit-hit that no longer
+        starts at all.
+        """
+        try:
+            text = self._seq_path.read_text().strip()
+        except (OSError, ValueError):
+            return self._highest_indexed_seq()
+        if not text:
+            return self._highest_indexed_seq()
+        try:
+            return int(text)
+        except ValueError:
+            return self._highest_indexed_seq()
+
     def _next_seq(self) -> int:
         with open(self._seq_lock_path, "a+") as lock_f:
             fcntl.flock(lock_f, fcntl.LOCK_EX)
             try:
-                current = (
-                    int(self._seq_path.read_text().strip())
-                    if self._seq_path.exists()
-                    else 0
-                )
-                seq = current + 1
-                self._seq_path.write_text(str(seq))
+                seq = self._read_seq() + 1
+                # Written through a temp file and renamed: a rename is atomic,
+                # so a reader (or a killed writer) never observes a truncated
+                # counter, which is how this file went empty in the first place.
+                tmp_path = self._seq_path.with_suffix(".seq.tmp")
+                tmp_path.write_text(str(seq))
+                os.replace(tmp_path, self._seq_path)
                 return seq
             finally:
                 fcntl.flock(lock_f, fcntl.LOCK_UN)
