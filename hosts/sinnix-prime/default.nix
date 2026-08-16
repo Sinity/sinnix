@@ -180,7 +180,12 @@
     steering.enable = true;
     # Periodic state-dump -> claude -p (enrichment-pass skill) -> versioned
     # derived outputs.
-    enrichment-loop.enable = true;
+    #
+    # PAUSED (temporary, operator call 2026-08-17): the hourly Opus pass
+    # burns ~500k tokens a run — 12–18M/day of subscription quota — and the
+    # first measured day made that visible. Re-enable as-is, or with a
+    # cheaper model / longer cadence, once the quota tradeoff is decided.
+    enrichment-loop.enable = false;
     # Kernel audit capture plus the check that no unit is sandboxed out of
     # writing its own declared output.
     sandbox-audit.enable = true;
