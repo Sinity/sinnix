@@ -411,3 +411,17 @@ it over USB. Everything the app does is designed around that: `status.json` is
 read over whichever adb transport is up, USB included, so liveness never
 depends on Termux, sshd, or the tailnet — precisely the layers that kept
 failing.
+
+**Never start Termux's supervisor through `adb shell run-as`.** A process
+tree started that way runs in the `runas_app` SELinux domain, which is denied
+`/storage` outright while carrying every group and permission that suggests
+otherwise — the resulting sshd answers rsync with empty listings and exit 0,
+and the drain reports success while moving nothing (four drains lost on
+2026-08-16). The correct repair for a dead sshd is to restart the **app**:
+`am force-stop com.termux`, `am start -n com.termux/com.termux.app.TermuxActivity`
+— the session sources `~/.profile`, which starts `runsvdir` and raises `sshd`
+in the app's own `untrusted_app` domain. If an old blind tree still holds
+:8022, kill it first (`run-as com.termux kill <pids>` is fine for killing;
+it is only starting daemons that must not happen there). The drain now probes
+`test -r /sdcard/sinnix-phone` over ssh and treats a storage-blind transport
+as down.

@@ -906,8 +906,22 @@ pull)
   # One reachability check for all four lanes. Without it each rsync spends its
   # own connect timeout failing the same way and prints the same error three
   # times before the ambient lane gets to try a transport that works.
+  #
+  # Reachable is not sufficient: the probe reads a real /sdcard path, because
+  # an sshd whose process tree lacks the storage view answers every rsync with
+  # an empty listing and exit 0. That is not hypothetical -- an sshd started
+  # via `adb run-as` lands in the runas_app SELinux domain, which is denied
+  # /storage outright while holding every DAC group that suggests otherwise,
+  # and four consecutive drains reported "drained over ssh" while moving
+  # nothing (2026-08-16). A blind transport must be treated as down.
   ssh_up=false
-  ssh_phone 'true' >/dev/null 2>&1 && ssh_up=true
+  if ssh_phone 'true' >/dev/null 2>&1; then
+    if ssh_phone 'test -r /sdcard/sinnix-phone' >/dev/null 2>&1; then
+      ssh_up=true
+    else
+      echo "ssh up but storage-blind (SELinux domain? restart Termux app): treating as down"
+    fi
+  fi
   if [ "$ssh_up" = true ]; then
     rsync -av --ignore-existing -e "$rsync_ssh" \
       "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/DCIM/" "$LAKE_ROOT/camera/"
