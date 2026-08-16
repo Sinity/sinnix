@@ -323,6 +323,16 @@ let
     # tree — genotype/, holding the 70G of raw FASTQ reads that cannot be
     # regenerated without re-sequencing — stays in coverage deliberately.
     "data/self/genome/cache"
+    # 23G of podman OCI layers (the graphroot set in services/ml-containers.nix,
+    # deliberately on /realm rather than the wear-limited root). Images are
+    # re-pullable by digest and the modules that use them pin those digests, so
+    # this is the same class as media/model and the caches above -- it simply
+    # was not named, and had been replicating in full. Checked before
+    # excluding: the whole 23G is overlay/ image layers, and volumes/ is
+    # EMPTY -- these containers keep their data on bind mounts under
+    # /realm/media and /realm/state, which stay in coverage. If a named
+    # volume ever appears here, this exclusion starts dropping real state.
+    "state/containers"
     "**/inbox/monero"
     "**/node_modules"
     "**/target"

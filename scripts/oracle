@@ -12,18 +12,25 @@
 # Usage:
 #   oracle                       # today, default output path
 #   oracle --date 2026-05-24     # specific day
-#   oracle --output PATH         # override output path
+#   oracle --output PATH         # override the output FILE
+#   oracle --output-dir DIR      # override the output DIRECTORY (date-stamped name)
 #   oracle --show                # also cat to stdout after writing
 set -euo pipefail
 
 DATE="$(date -I)"
 OUTPUT=""
+OUTPUT_DIR=""
 SHOW=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --date) DATE="$2"; shift 2 ;;
     --output) OUTPUT="$2"; shift 2 ;;
+    # A directory, with the date-stamped filename left to this script -- which
+    # is what a caller on a timer actually wants, and what the systemd unit
+    # passes. --output names one file; the two are not interchangeable, and
+    # the unit used to declare a directory option that reached neither.
+    --output-dir) OUTPUT_DIR="$2"; shift 2 ;;
     --show) SHOW=1; shift ;;
     -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
     *) echo "oracle: unknown arg: $1" >&2; exit 2 ;;
@@ -31,7 +38,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$OUTPUT" ]]; then
-  OUTPUT="$HOME/.local/share/oracle/${DATE}.md"
+  OUTPUT="${OUTPUT_DIR:-$HOME/.local/share/oracle}/${DATE}.md"
 fi
 mkdir -p "$(dirname "$OUTPUT")"
 
