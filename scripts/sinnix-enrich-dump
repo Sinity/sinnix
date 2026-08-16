@@ -22,10 +22,6 @@ OUTPUT_ROOT="/realm/data/derived/enrichment"
 # path and failing steering export.
 MODEL="${SINNIX_ENRICH_MODEL:-opus}"
 
-# The watermark only advances on success, so a run after an outage sees a
-# window hours wide. Cap the bundle, keeping the most recent lines.
-HOOKS_LINE_CAP="${SINNIX_ENRICH_HOOKS_CAP:-5000}"
-
 NOW_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 FROM_ISO=""
 if [[ -f "$WATERMARK_FILE" ]]; then
@@ -103,29 +99,16 @@ if command -v atuin >/dev/null 2>&1; then
   atuin search --after "$SINCE_ISO" "" >"$BUNDLE/atuin-tail.txt" 2>/dev/null || true
 fi
 
-# Polylogue hook-spool deltas.
-#
-# mtime selects candidate files; the per-record timestamp then selects the
-# rows actually in-window. mtime alone over-read this input ~5x.
+# Polylogue hook-spool deltas. mtime selects candidate files; the per-record
+# timestamp then selects the rows actually in-window (mtime alone over-read
+# this ~33x). Uncapped -- the model reads by offset, so a wide window costs
+# turns rather than truncated evidence.
 POLYLOGUE_HOOKS_DIR="/realm/state/polylogue/hooks"
-HOOKS_TRUNCATED=0
 if [[ -d "$POLYLOGUE_HOOKS_DIR" ]]; then
   : >"$BUNDLE/polylogue-hooks.jsonl"
   find "$POLYLOGUE_HOOKS_DIR" -name '*.jsonl' -newermt "$SINCE_ISO" -exec cat {} + 2>/dev/null \
     | jq -c --arg s "$SINCE_ISO" 'select((.timestamp // "") >= $s)' 2>/dev/null \
-      >"$BUNDLE/.hooks-window.jsonl" || true
-  if [[ -f "$BUNDLE/.hooks-window.jsonl" ]]; then
-    hooks_lines="$(wc -l <"$BUNDLE/.hooks-window.jsonl")"
-    if [[ "$hooks_lines" -gt "$HOOKS_LINE_CAP" ]]; then
-      HOOKS_TRUNCATED=1
-      printf '{"_note":"TRUNCATED: %s in-window records, showing the most recent %s"}\n' \
-        "$hooks_lines" "$HOOKS_LINE_CAP" >>"$BUNDLE/polylogue-hooks.jsonl"
-      tail -n "$HOOKS_LINE_CAP" "$BUNDLE/.hooks-window.jsonl" >>"$BUNDLE/polylogue-hooks.jsonl"
-    else
-      cat "$BUNDLE/.hooks-window.jsonl" >>"$BUNDLE/polylogue-hooks.jsonl"
-    fi
-    rm -f "$BUNDLE/.hooks-window.jsonl"
-  fi
+      >>"$BUNDLE/polylogue-hooks.jsonl" || true
 fi
 
 # Raw Claude/Codex session JSONL deltas, filtered per-record like the hook
@@ -162,8 +145,10 @@ else
   note_input_error lynchpin-current-state "no current-state product newer than $SINCE_ISO in: ${LYNCHPIN_DIRS[*]}"
 fi
 
-journalctl -p warning --since="$SINCE_ISO" --no-pager 2>/dev/null | tail -n 500 \
-  >"$BUNDLE/journald-warnings.txt" || true
+# Uncapped. A 500-line tail meant one repeated message could consume the whole
+# input and hide every other warning in the window -- which it did.
+journalctl -p warning --since="$SINCE_ISO" --no-pager \
+  >"$BUNDLE/journald-warnings.txt" 2>/dev/null || true
 
 # ------------------------------------------------------------------ process
 
@@ -258,7 +243,6 @@ jq -n \
   --arg model "$MODEL" \
   --arg window_from "${FROM_ISO:-}" \
   --arg window_to "$NOW_ISO" \
-  --argjson hooks_truncated "$([[ "$HOOKS_TRUNCATED" -eq 1 ]] && echo true || echo false)" \
   --argjson inputs "${INPUTS_JSON:-{\}}" \
   --argjson input_errors "$(jq -sc '.' "$INPUT_ERRORS" 2>/dev/null || echo '[]')" \
   --argjson usage "$(usage_json)" \
@@ -267,7 +251,6 @@ jq -n \
      generated_at: $generated_at,
      model: $model,
      window: { from: (if $window_from == "" then null else $window_from end), to: $window_to },
-     hooks_truncated: $hooks_truncated,
      inputs: $inputs,
      input_errors: $input_errors,
      usage: $usage
