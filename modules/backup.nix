@@ -463,6 +463,8 @@ let
   backupNestedSubvolumeCoverage = {
     "swap" =
       "regenerable swapfile, deliberately not backup material";
+    "home/sinity/.cache" =
+      "regenerable cache, deliberately not backup material (a subvolume so its churn stays out of the snapshot)";
     "state/journal" =
       "sinnix-journal-archive copies sealed journal content, de-flooded, to ${config.sinnix.paths.capturesRoot}/syslog/journal, which is an ordinary directory inside the snapshot";
     "state/machine-telemetry" =
@@ -725,6 +727,13 @@ let
 
       while IFS= read -r subvol; do
         [ -n "$subvol" ] || continue
+        # btrfs prints paths relative to the FILESYSTEM root, not to the volume
+        # asked about, so /persist's entries arrive as `@persist/state/...`
+        # while /realm's (its own filesystem root) arrive bare. Strip the
+        # leading `@subvol/` so the patterns and the coverage table below can
+        # be written once, against the path a person would recognise.
+        subvol="''${subvol#@*/}"
+
         case "$subvol" in
           # The snapshots themselves and btrbk's own working tree.
           .btrfs/*) continue ;;

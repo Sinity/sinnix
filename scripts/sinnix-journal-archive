@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Archive sealed journal files into the capture lake, de-flooded and compressed
+# runtimeInputs: bash coreutils findutils systemd zstd
+set -euo pipefail
+
+# The journal was the estate's least durable capture, and nothing said so.
+#
+# Two independent facts combined into total loss. First, /realm/state/journal
+# is its own btrfs SUBVOLUME, and a btrfs snapshot does not cross subvolume
+# boundaries -- so every borg archive of /realm contained `state/journal` as
+# an empty directory. Verified against archives back to 2026-03: one entry,
+# the directory itself. The journal had never once been backed up.
+#
+# Second, retention is a lie the size cap tells. journald was configured with
+# MaxRetentionSec=365day, but SystemMaxUse=64G is evaluated first, so the real
+# window is however long it takes to write 64 GB. Under the 2026-08 audit
+# firehose (~40 GiB/day into the journal) that was about a day and a half: on
+# 2026-08-16 the oldest surviving entry was 6.5 HOURS old. A year of history
+# had been evicted with no error, no warning, and no copy anywhere.
+#
+# So sealed journal content goes into the capture lake, which is an ordinary
+# directory under /realm/data and therefore inside borg coverage -- and into
+# precisely the path syslog-index scans, which had been reporting
+# "journal_files: 0" since it was written because nothing populated it.
+#
+# TWO deliberate choices about the format:
+#
+#   Audit records are dropped. They are not journal content; they are auditd's
+#   content, which reaches the lake through its own drain and its own lane.
+#   Carrying them here would duplicate the exact firehose that caused the
+#   loss -- one sealed 88 MB file from 2026-08-16 held 141086 entries of which
+#   14 were not audit.
+#
+#   The archive is the journal EXPORT stream, zstd-compressed, rather than a
+#   copy of the .journal file or a rebuilt one. Journal files are
+#   preallocated: rebuilding those same 14 entries produces an 8 MB file,
+#   while the compressed export is 3 KB. Export is systemd's own documented
+#   interchange format, so nothing is lost -- `restore` below turns it back
+#   into a directory journalctl reads directly.
+#
+# Only SEALED files are read. journald names an archived file
+# `system@<seqnum>-<realtime>.journal` and never writes it again; the two
+# without an `@` (system.journal, user-1000.journal) are still being appended
+# to. They get archived on their next rotation.
+
+JOURNAL_ROOT="${SINNIX_JOURNAL_ROOT:-/var/log/journal}"
+LANE="${SINNIX_JOURNAL_LANE:-/realm/data/captures/syslog/journal}"
+
+# Everything except _TRANSPORT=audit. journalctl has no "not equal" match, and
+# matches on one field OR together, so the exclusion is spelled as the list of
+# transports that are kept. A transport absent from this list is dropped, so
+# it is deliberately exhaustive rather than illustrative.
+KEEP_TRANSPORTS=(
+  _TRANSPORT=journal
+  _TRANSPORT=stdout
+  _TRANSPORT=syslog
+  _TRANSPORT=kernel
+  _TRANSPORT=driver
+)
+
+journal_remote_bin() {
+  # Not on PATH: systemd ships it under lib/systemd. Resolve it relative to
+  # journalctl so it comes from the same systemd as everything else here.
+  local journalctl_path lib_path
+  journalctl_path="$(readlink -f "$(command -v journalctl)")"
+  lib_path="$(dirname "$(dirname "$journalctl_path")")/lib/systemd/systemd-journal-remote"
+  if [[ -x "$lib_path" ]]; then
+    printf '%s' "$lib_path"
+    return 0
+  fi
+  if [[ -x /run/current-system/sw/lib/systemd/systemd-journal-remote ]]; then
+    printf '%s' /run/current-system/sw/lib/systemd/systemd-journal-remote
+    return 0
+  fi
+  return 1
+}
+
+cmd_archive() {
+  [[ -d "$JOURNAL_ROOT" ]] || {
+    echo "sinnix-journal-archive: no journal directory at $JOURNAL_ROOT" >&2
+    exit 1
+  }
+
+  local archived=0 skipped=0 active=0 entries=0
+  local src rel base dest n
+
+  while IFS= read -r -d '' src; do
+    rel="${src#"$JOURNAL_ROOT"/}"
+    base="$(basename "$src")"
+
+    # No '@' means journald is still appending to it.
+    if [[ "$base" != *@* ]]; then
+      active=$((active + 1))
+      continue
+    fi
+
+    dest="$LANE/$rel.export.zst"
+    # A sealed file is immutable, so an existing archive of it is final.
+    if [[ -f "$dest" ]]; then
+      skipped=$((skipped + 1))
+      continue
+    fi
+
+    mkdir -p "$(dirname "$dest")"
+    # Written to a temp name and renamed: a run killed mid-write must not
+    # leave a truncated archive that the existence check above then accepts
+    # forever.
+    journalctl --file "$src" "${KEEP_TRANSPORTS[@]}" -o export 2>/dev/null \
+      | zstd -q -19 -o "$dest.part" -f
+    mv "$dest.part" "$dest"
+
+    n="$(zstd -qdc "$dest" | grep -c '^__CURSOR=' || true)"
+    entries=$((entries + n))
+    archived=$((archived + 1))
+  done < <(find "$JOURNAL_ROOT" -type f -name '*.journal' -print0)
+
+  find "$LANE" -type f -name '*.part' -mmin +60 -delete 2>/dev/null || true
+
+  echo "sinnix-journal-archive: archived $archived file(s) holding $entries entries, already present $skipped, still active $active"
+}
+
+cmd_restore() {
+  # Rebuild a directory journalctl can read straight from the archive:
+  #   sinnix-journal-archive restore /realm/tmp/work/journal-restore
+  #   journalctl -D /realm/tmp/work/journal-restore --since ...
+  local out="${1:?usage: sinnix-journal-archive restore <output-dir>}"
+  local remote
+  remote="$(journal_remote_bin)" || {
+    echo "sinnix-journal-archive: systemd-journal-remote not found" >&2
+    exit 1
+  }
+
+  mkdir -p "$out"
+  local count=0 src name
+  while IFS= read -r -d '' src; do
+    name="$(basename "$src" .export.zst)"
+    [[ -f "$out/$name" ]] && continue
+    zstd -qdc "$src" | "$remote" --output="$out/$name" - >/dev/null 2>&1 || true
+    count=$((count + 1))
+  done < <(find "$LANE" -type f -name '*.export.zst' -print0)
+
+  echo "sinnix-journal-archive: restored $count file(s) into $out"
+  echo "  journalctl -D $out --no-pager"
+}
+
+case "${1:-archive}" in
+  archive) cmd_archive ;;
+  restore)
+    shift
+    cmd_restore "$@"
+    ;;
+  *)
+    echo "usage: sinnix-journal-archive [archive|restore <dir>]" >&2
+    exit 2
+    ;;
+esac
