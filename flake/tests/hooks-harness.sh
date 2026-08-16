@@ -50,6 +50,26 @@ printf '%s' "$bash_deny" | jq -e '.hookSpecificOutput.permissionDecision == "den
 test -z "$(run_hook "$hooks_dir/pretooluse-bash.sh" '{"tool_input":{"command":"printf \"safe\""}}')"
 test -z "$(run_hook "$hooks_dir/pretooluse-bash.sh" 'not-json' 2>/dev/null)"
 
+# A shell glob over /nix/store makes the shell stat ~219k entries before the
+# command runs; it has exhausted host memory twice. Deny the unquoted glob,
+# keep concrete store paths and lazily-expanded quoted patterns working.
+store_glob_payload=$(jq -n --arg c 'rg -n pattern /nix/store/*/share/doc/home-manager/*.html' '{tool_input:{command:$c}}')
+store_glob_deny=$(run_hook "$hooks_dir/pretooluse-bash.sh" "$store_glob_payload")
+printf '%s' "$store_glob_deny" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+store_path_payload=$(jq -n --arg c 'cat /nix/store/abc123-foo/bin/x' '{tool_input:{command:$c}}')
+test -z "$(run_hook "$hooks_dir/pretooluse-bash.sh" "$store_path_payload")"
+store_find_payload=$(jq -n --arg c "find /nix/store -maxdepth 1 -name '*home-manager*'" '{tool_input:{command:$c}}')
+test -z "$(run_hook "$hooks_dir/pretooluse-bash.sh" "$store_find_payload")"
+# A commit message or doc describing the hazard must be able to quote the
+# pattern, so heredoc bodies are exempt -- but only until the heredoc closes.
+store_heredoc_body=$(printf 'git commit -F - <<%sEOF%s\nfix: a pattern like /nix/store/*/share/doc/pkg/*.html stats the whole store\nEOF\n' "'" "'")
+store_heredoc_payload=$(jq -n --arg c "$store_heredoc_body" '{tool_input:{command:$c}}')
+test -z "$(run_hook "$hooks_dir/pretooluse-bash.sh" "$store_heredoc_payload")"
+store_after_heredoc=$(printf 'cat <<%sEOF%s\ntext\nEOF\nls /nix/store/*\n' "'" "'")
+store_after_payload=$(jq -n --arg c "$store_after_heredoc" '{tool_input:{command:$c}}')
+store_after_deny=$(run_hook "$hooks_dir/pretooluse-bash.sh" "$store_after_payload")
+printf '%s' "$store_after_deny" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+
 # Empty-payload smoke call: must exit clean and silent. Runs against its
 # own scratch state so its ledger rows cannot pollute the dedup/report
 # counts below.

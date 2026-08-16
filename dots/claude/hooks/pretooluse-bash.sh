@@ -119,4 +119,41 @@ if echo "$CMD" | grep -qE 'git\s+push\s+.*(-f(\s|$)|--force(\s|$))'; then
   exit 0
 fi
 
+# Block shell glob expansion over /nix/store.
+#
+# /nix/store holds ~219k top-level entries on this host, on the SATA SSD. A
+# pattern like /nix/store/*/share/doc/pkg/*.html makes the SHELL readdir all
+# of them and then opendir one subpath per entry, building the match list in
+# RAM before the command it was written for ever runs. Twice now that has
+# taken the machine down: most recently 8.3 GB RSS + 11.8 GB swap held by a
+# zsh stuck in D state for 22 minutes, exhausting all 19 GB of swap and
+# driving memory PSI to 51 while an unrelated agent session did nothing wrong
+# but wait. The command in that incident was an `rg`, which is why it reads
+# like a ripgrep problem; ripgrep never started.
+#
+# Matches only an unquoted glob in the segment right after /nix/store/, so a
+# concrete store path stays allowed, and so does a quoted pattern handed to a
+# tool that expands it lazily itself (find -name, rg --glob).
+#
+# Heredoc bodies are stripped first: a commit message or doc that describes
+# this very hazard must be able to quote the pattern. Found by dogfooding —
+# the commit introducing this guard was blocked by it.
+CMD_NO_HEREDOC=$(printf '%s' "$CMD" | awk '
+  BEGIN { term = "" }
+  term != "" { if ($0 == term) { term = "" } ; next }
+  {
+    line = $0
+    if (match(line, /<<-?[[:space:]]*'"'"'?"?[A-Za-z_][A-Za-z0-9_]*'"'"'?"?/)) {
+      tag = substr(line, RSTART, RLENGTH)
+      gsub(/^<<-?[[:space:]]*/, "", tag)
+      gsub(/['"'"'"]/, "", tag)
+      term = tag
+    }
+    print line
+  }')
+if echo "$CMD_NO_HEREDOC" | grep -qE "(^|[^'\"])/nix/store/[^[:space:]'\"]*[*?]"; then
+  emit_deny "Shell glob over /nix/store blocked: ~219k entries make the shell stat the whole store before your command runs (this has OOMed the host twice). Use 'find /nix/store -maxdepth 1 -name PATTERN' which streams, or resolve the one store path first (nix eval --raw, readlink, nix-locate) and search under that."
+  exit 0
+fi
+
 exit 0
