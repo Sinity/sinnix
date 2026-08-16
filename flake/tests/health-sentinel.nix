@@ -174,13 +174,21 @@
             # MUST surface as unknown, never healthy by default.
             probe_marker="$TMPDIR/probe-marker"
             cat > "$TMPDIR/inventory.json" <<EOF_INVENTORY
-            {"captures":[{"name":"fixture","path":"$TMPDIR/capture","expectedCadenceSeconds":60},{"name":"ed-stale","path":"$TMPDIR/capture-ed-stale","expectedCadence":"event-driven","expectedStaleAfterSeconds":60},{"name":"ed-fresh","path":"$TMPDIR/capture-ed-fresh","expectedCadence":"event-driven","expectedStaleAfterSeconds":600},{"name":"payload-dead","path":"$TMPDIR/payload-dead","requiredPayloadFields":["window_class","geometry.width","monitor","note"]},{"name":"payload-live","path":"$TMPDIR/payload-live","requiredPayloadFields":["window_class","geometry.width","monitor","note"]},{"name":"probe-absent","path":"$TMPDIR/capture-ed-fresh","livenessProbe":{"command":"[ -e \"$probe_marker\" ] && exit 0 || exit 1","timeoutSeconds":5}},{"name":"probe-unknown","path":"$TMPDIR/capture-ed-fresh","livenessProbe":{"command":"exit 9","timeoutSeconds":5}},{"name":"probe-timeout","path":"$TMPDIR/capture-ed-fresh","livenessProbe":{"command":"sleep 5","timeoutSeconds":1}}],"mounts":[{"path":"/fixture","warnPct":80,"failPct":95}],"observedServices":[{"kind":"service","manager":"system","unit":"fixture.service"},{"kind":"service","manager":"system","unit":"oneshot-done.service"},{"kind":"service","manager":"system","unit":"oneshot-failed.service"},{"kind":"service","manager":"system","unit":"backend-idle.service"},{"kind":"service","manager":"system","unit":"backend-crashed.service"},{"kind":"service","manager":"system","unit":"socket-proxy-declared.service","activationMode":"socket-proxy"},{"kind":"service","manager":"user","unit":"usersurf.service"},{"kind":"socket","manager":"system","unit":"proxy-listening.socket"},{"kind":"socket","manager":"system","unit":"proxy-latched.socket"}]}
+            {"captures":[{"name":"fixture","path":"$TMPDIR/capture","expectedCadenceSeconds":60},{"name":"ed-stale","path":"$TMPDIR/capture-ed-stale","expectedCadence":"event-driven","expectedStaleAfterSeconds":60},{"name":"ed-fresh","path":"$TMPDIR/capture-ed-fresh","expectedCadence":"event-driven","expectedStaleAfterSeconds":600},{"name":"payload-dead","path":"$TMPDIR/payload-dead","requiredPayloadFields":["window_class","geometry.width","monitor","note"]},{"name":"payload-live","path":"$TMPDIR/payload-live","requiredPayloadFields":["window_class","geometry.width","monitor","note"]},{"name":"probe-absent","path":"$TMPDIR/capture-ed-fresh","livenessProbe":{"command":"[ -e \"$probe_marker\" ] && exit 0 || exit 1","timeoutSeconds":5}},{"name":"probe-unknown","path":"$TMPDIR/capture-ed-fresh","livenessProbe":{"command":"exit 9","timeoutSeconds":5}},{"name":"probe-timeout","path":"$TMPDIR/capture-ed-fresh","livenessProbe":{"command":"sleep 5","timeoutSeconds":1}},{"name":"unbudgeted-never-wrote","path":"$TMPDIR/does-not-exist"}],"mounts":[{"path":"/fixture","warnPct":80,"failPct":95}],"observedServices":[{"kind":"service","manager":"system","unit":"fixture.service"},{"kind":"service","manager":"system","unit":"oneshot-done.service"},{"kind":"service","manager":"system","unit":"oneshot-failed.service"},{"kind":"service","manager":"system","unit":"backend-idle.service"},{"kind":"service","manager":"system","unit":"backend-crashed.service"},{"kind":"service","manager":"system","unit":"socket-proxy-declared.service","activationMode":"socket-proxy"},{"kind":"service","manager":"user","unit":"usersurf.service"},{"kind":"socket","manager":"system","unit":"proxy-listening.socket"},{"kind":"socket","manager":"system","unit":"proxy-latched.socket"}]}
             EOF_INVENTORY
             bash "${sentinelSource}" --inventory "$TMPDIR/inventory.json" --state "$TMPDIR/state/state.json" --output "$TMPDIR/state/events.jsonl" --check
             bash "${sentinelSource}" --inventory "$TMPDIR/inventory.json" --state "$TMPDIR/state/state.json" --output "$TMPDIR/state/events.jsonl" --check
             jq -s -e '
-              length == 18
+              length == 24
               and any(.[]; .type == "capture_stale" and .unit == "fixture" and .status == "stale")
+              # Lanes declaring neither cadence nor budget used to be filtered
+              # out of the staleness sweep entirely, so "declared, wired, never
+              # produced a single file" -- the most broken a lane can be --
+              # raised nothing. They are all tracked now: one with data reads
+              # healthy (no budget to violate), one with none reads stale.
+              and any(.[];
+                .type == "capture_stale" and .unit == "unbudgeted-never-wrote"
+                and .status == "stale" and (.evidence | test("reason=no-file")))
               and any(.[]; .type == "capture_stale" and .unit == "ed-stale" and .status == "stale")
               and any(.[]; .type == "capture_stale" and .unit == "ed-fresh" and .status == "healthy")
               and any(.[]; .type == "mount_capacity" and .status == "failed")
@@ -211,7 +219,7 @@
             bash "${sentinelSource}" --inventory "$TMPDIR/inventory.json" --state "$TMPDIR/state/state.json" --output "$TMPDIR/state/events.jsonl" --check
             bash "${sentinelSource}" --inventory "$TMPDIR/inventory.json" --state "$TMPDIR/state/state.json" --output "$TMPDIR/state/events.jsonl" --check
             jq -s -e '
-              length == 20
+              length == 26
               and any(.[]; .type == "capture_stale" and .unit == "fixture" and .status == "healthy")
               and any(.[]; .type == "service_failure" and .unit == "fixture.service" and .ok == false)
               and any(.[]; .type == "publisher_liveness" and .unit == "probe-absent" and .status == "healthy" and .ok)
