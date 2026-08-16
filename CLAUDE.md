@@ -206,15 +206,15 @@ file; new standalone tool → usually a script under `scripts/` (see below),
 or `pkgs/<name>/` for real derivations.
 
 `sinnix.services.stt` (`modules/services/stt.nix`, `scripts/sinnix-stt`,
-docs/speech.md) is the estate's speech-to-text stack: Parakeet TDT 0.6B v3 via
-sherpa-onnx behind the same OpenAI-compatible `/v1/audio/transcriptions` port
-whisper.cpp used, with Silero VAD in front and sherpa's pyannote diarizer
-beside it. It replaced whisper, which is deleted rather than kept as a
-fallback (`sinnix-mke`). It is **CPU-only and deliberately outside the
-`gpu-inference` admission mesh** — measured RTF 0.113 on dense speech and
-0.002 over a VAD-gated ambient chunk, which is fast enough that transcription
-never has to queue behind a resident model. Do not "fix" that by adding CUDA
-or the admission key; the runtime test asserts it stays out of the mesh.
+docs/speech.md) is the estate's speech stack, served OpenAI-compatible at
+`/v1/audio/transcriptions`. Four sherpa-onnx models, all under
+`/realm/media/model/sherpa` and fetched on first start: Parakeet TDT 0.6B v3
+(int8) transcribes, Silero VAD gates, pyannote segmentation 3.0 diarizes, and
+NeMo TitaNet-small embeds speakers for verification. It is **CPU-only and
+deliberately outside the `gpu-inference` admission mesh** — it is fast enough
+on CPU (RTF ~0.1 on dense speech) that transcription never has to queue behind
+a resident model. Do not "fix" that by adding CUDA or the admission key; the
+runtime test asserts it stays out of the mesh.
 
 `sinnix.services.muse-glimmer` (`modules/services/muse-glimmer.nix`) serves
 the official Muse Glimmer 30B Q4 GGUF directly through llama.cpp. It is a
@@ -247,9 +247,8 @@ driven by the drain. Operate it through `sinnix phone app-*`; see
   `update nixpkgs-ai`.
 - `sinex` deliberately does NOT follow sinnix's nixpkgs, so its derivation
   hash stays stable across sinnix nixpkgs bumps and each sinex rev is
-  compiled at most once. sinex CI no longer pushes to sinity.cachix.org
-  (sinex#883 disabled automatic hosted Actions): the desktop is the builder
-  of record, and `switch` publishes the sinex closure to the cache after a
+  compiled at most once. The desktop is the builder of record — nothing in
+  sinex CI publishes to sinity.cachix.org — and `switch` publishes the sinex closure to the cache after a
   successful activation (`sinexCachePush`, flake/command-registry.nix, backed
   by the shared `scripts/sinnix-sinex-cache-push` push logic). The FIRST
   switch after a sinex master bump no longer pays that compile synchronously:
@@ -309,8 +308,7 @@ skills`, `~/.codex/skills`, `~/.gemini/skills`) are linkFarms over it.
   Codex-only system skills: `dots/codex/skills/.system/`.
 - MCP registry: `flake/data/mcp-registry.nix` (servers, tiers,
   lean/evidence/full/browser profiles, per-client render). Wiring + agent CLI
-  wrappers live in `modules/features/dev/agents/` (regrouped from the former
-  `agent-tools.nix`/`mcp-servers.nix`, sinnix-9u6): `clis.nix`
+  wrappers live in `modules/features/dev/agents/`: `clis.nix`
   (`sinnix.features.dev.agentTools`) + `backends.nix` own the CLI wrapper
   builders (npm-bootstrapped into `~/.local/state/<agent>/npm`, self-updating;
   `claude` aliases `claude-lean` because the upstream installer clobbers the
@@ -425,9 +423,8 @@ config in `secrets.nix` (repo root).
   success; the same applies to any harness that reports a compound
   command's status. The revision comparison above is the only check that
   settles it, so make it after every switch rather than trusting a 0.
-  (Burned 2026-08-13: three switches were reported applied while the
-  system stayed on an older generation, because parallel agents had eaten
-  the memory headroom and the block was masked.)
+  This is not hypothetical: switches have been reported applied while the
+  system stayed on an older generation.
 
 ## Maintenance Protocol
 
