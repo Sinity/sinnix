@@ -83,7 +83,6 @@ mkServiceModule {
         after = [ "ollama.service" ];
         requires = [ "ollama-proxy.service" ];
         partOf = [ "litellm-proxy.service" ];
-        bindsTo = [ "litellm-proxy.service" ];
         wantedBy = lib.mkIf (!cfg.autoStart) (lib.mkForce [ ]);
       };
     };

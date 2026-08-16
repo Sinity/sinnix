@@ -120,7 +120,6 @@ mkServiceModule {
         # at boot, never holds VRAM while idle.
         wantedBy = lib.mkForce [ ];
         partOf = [ "llama-cpp-proxy.service" ];
-        bindsTo = [ "llama-cpp-proxy.service" ];
       };
     };
 } args

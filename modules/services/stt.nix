@@ -82,7 +82,6 @@ mkAiService {
         wantedBy = [ ]; # on-demand, socket-activated via stt-proxy
         after = [ "network.target" ];
         partOf = [ "stt-proxy.service" ];
-        bindsTo = [ "stt-proxy.service" ];
         serviceConfig = lib.mkMerge [
           {
             User = user;

@@ -73,7 +73,6 @@ mkAiService {
       # instead of idling resident.
       systemd.services.podman-kokoro = {
         partOf = [ "kokoro-proxy.service" ];
-        bindsTo = [ "kokoro-proxy.service" ];
       };
     };
 } args

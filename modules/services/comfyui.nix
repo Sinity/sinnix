@@ -100,7 +100,6 @@ mkServiceModule {
       # gpuInferenceConflicts.
       systemd.services.podman-comfyui = {
         partOf = [ "comfyui-proxy.service" ];
-        bindsTo = [ "comfyui-proxy.service" ];
       };
     };
 } args

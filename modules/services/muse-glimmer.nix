@@ -90,7 +90,6 @@ mkServiceModule {
         wantedBy = [ ];
         after = [ "network.target" ];
         partOf = [ "muse-glimmer-proxy.service" ];
-        bindsTo = [ "muse-glimmer-proxy.service" ];
         serviceConfig = lib.mkMerge [
           {
             User = user;

@@ -13,6 +13,17 @@ let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   systemdSocketProxyd = "${pkgs.systemd}/lib/systemd/systemd-socket-proxyd";
 
+  # Backends declare `partOf = [ "<name>-proxy.service" ]` and NOTHING
+  # stronger. PartOf= propagates stop/restart only, which is what frees the
+  # GPU when the proxy idles out. BindsTo= (which every backend used to carry
+  # alongside it) additionally implies Requires=, so starting a backend by any
+  # path -- `sinnix ai start`, its own Restart=on-failure -- also started the
+  # proxy directly, outside socket activation. systemd-socket-proxyd then had
+  # no inherited listen fds, exited 1 with "Didn't get any sockets passed in",
+  # and BindsTo= propagated that failure straight back into the backend. On
+  # 2026-08-16 that flap burned muse-glimmer-proxy.socket's activation budget
+  # and left port 8083 refusing every connection until a manual reset.
+  #
   # `idleTimeout` and `readinessTimeout` are required (no default): the right
   # value differs per backend and a uniform one only ever fit the smallest.
   # systemd-socket-proxyd starts forwarding as soon as ExecStart runs, but
@@ -57,6 +68,17 @@ let
         description = "Socket activation front door for ${backendUnit}";
         wantedBy = [ "sockets.target" ];
         listenStreams = [ publicEndpoint ];
+        socketConfig = {
+          # systemd's default (200 triggers in 2s) is sized for cheap
+          # short-lived handlers. A cold model load holds the accept backlog
+          # for as long as readinessTimeout, and an impatient client retrying
+          # without backoff can spend that budget in one burst -- after which
+          # the socket is dead for good, with no automatic recovery anywhere.
+          # Allow a generous burst over a long window instead: the limit
+          # exists to catch a genuine activation loop, not client impatience.
+          TriggerLimitIntervalSec = "60s";
+          TriggerLimitBurst = 2000;
+        };
       };
       services.${name} = {
         description = "Idle-aware socket proxy for ${backendUnit}";

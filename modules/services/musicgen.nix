@@ -85,7 +85,6 @@ mkServiceModule {
       # gpuInferenceConflicts.
       systemd.services.podman-musicgen = {
         partOf = [ "musicgen-proxy.service" ];
-        bindsTo = [ "musicgen-proxy.service" ];
       };
     };
 } args
