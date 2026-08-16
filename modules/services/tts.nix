@@ -77,7 +77,6 @@ mkAiService {
         # GPU-inference backend is computed centrally in ai-control.nix's
         # gpuInferenceConflicts.
         partOf = [ "tts-proxy.service" ];
-        bindsTo = [ "tts-proxy.service" ];
       };
     };
 } args

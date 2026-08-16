@@ -103,290 +103,331 @@ in
             sinnix.services.ocr.enable = true;
           })
         ];
-        assertions = config: [
-          {
-            assertion = config.systemd.sockets.ollama-proxy.listenStreams == [ "127.0.0.1:11434" ];
-            message = "Ollama must expose only its socket-activated loopback front door";
-          }
-          {
-            assertion = config.systemd.services.ollama.unitConfig.PartOf == [ "ollama-proxy.service" ];
-            message = "Stopping an idle Ollama proxy must stop its backend";
-          }
-          {
-            assertion = config.systemd.services.ollama.unitConfig.BindsTo == [ "ollama-proxy.service" ];
-            message = "An idle proxy exit must tear down the Ollama backend cgroup";
-          }
-          {
-            assertion = lib.hasInfix "systemd-socket-proxyd" config.systemd.services.ollama-proxy.serviceConfig.ExecStart;
-            message = "Ollama activation must use the systemd socket proxy";
-          }
-          {
-            assertion = lib.hasInfix "--exit-idle-time=30s" config.systemd.services.ollama-proxy.serviceConfig.ExecStart;
-            message = "AI activation must have a bounded idle timeout";
-          }
-          {
-            assertion =
-              lib.elem "ollama.service" config.systemd.services.koboldcpp.unitConfig.Conflicts
-              && lib.elem "koboldcpp.service" config.systemd.services.ollama.unitConfig.Conflicts;
-            message = "GPU inference backends must be mutually exclusive";
-          }
-          {
-            assertion =
-              config.sinnix.runtime.inventory.surfaces.ollama.activation.backendEndpoint == "127.0.0.1:11435"
-              &&
-                config.sinnix.runtime.inventory.surfaces.ollama-proxy.activation.publicEndpoint
-                == "127.0.0.1:11434";
-            message = "Runtime inventory must describe the public and private AI activation endpoints";
-          }
-          {
-            assertion =
-              config.sinnix.runtime.inventory.surfaces.litellm.activation.dependsOn == [ "ollama-proxy" ];
-            message = "LiteLLM activation must retain the Ollama socket dependency";
-          }
-          {
-            assertion =
-              config.sinnix.runtime.inventory.surfaces.open-webui.activation.publicEndpoint == "127.0.0.1:8080"
-              && config.sinnix.runtime.inventory.surfaces.tts.activation.publicEndpoint == "127.0.0.1:8000";
-            message = "The AI factory must preserve direct loopback endpoints for representative services";
-          }
-          {
-            assertion =
-              config.systemd.services.sinnix-stt.serviceConfig.ExecStart != null
-              && lib.hasInfix "sinnix-stt" config.systemd.services.sinnix-stt.serviceConfig.ExecStart;
-            message = "The AI factory must leave the native STT command visible";
-          }
-          {
-            assertion = config.systemd.sockets.stt-proxy.listenStreams == [ "127.0.0.1:8090" ];
-            message = "The STT hub must expose only its socket-activated loopback front door";
-          }
-          {
-            assertion =
-              config.systemd.services.sinnix-stt.unitConfig.PartOf == [ "stt-proxy.service" ]
-              && config.systemd.services.sinnix-stt.unitConfig.BindsTo == [ "stt-proxy.service" ];
-            message = "An idle stt-proxy exit must tear down the STT backend cgroup";
-          }
-          {
-            assertion = lib.hasInfix "systemd-socket-proxyd" config.systemd.services.stt-proxy.serviceConfig.ExecStart;
-            message = "STT activation must use the idle-aware systemd socket proxy";
-          }
-          {
-            assertion =
-              config.sinnix.runtime.inventory.surfaces.stt.activation.backendEndpoint == "127.0.0.1:8091"
-              && config.sinnix.runtime.inventory.surfaces.stt-proxy.activation.publicEndpoint == "127.0.0.1:8090";
-            message = "Runtime inventory must describe the public and private STT activation endpoints";
-          }
-          {
-            # The inverse of the assertion this replaces, and it is the point
-            # of the engine change rather than an omission: Parakeet runs on
-            # the CPU, so speech-to-text must NOT hold the gpu-inference key
-            # and must stay available while a model is resident.
-            assertion =
-              !(lib.elem "sinnix-stt.service" config.systemd.services.ollama.unitConfig.Conflicts)
-              && !(lib.elem "sinnix-stt.service" config.systemd.services.koboldcpp.unitConfig.Conflicts);
-            message = "The CPU-only STT hub must stay outside the gpu-inference admission mesh";
-          }
-          {
-            assertion =
-              config.systemd.services.podman-openedai-speech.serviceConfig.ExecStart != null
-              && lib.hasInfix "podman" config.systemd.services.podman-openedai-speech.serviceConfig.ExecStart;
-            message = "The AI factory must leave the container launch visible";
-          }
-          {
-            assertion = config.systemd.sockets.llama-cpp-proxy.listenStreams == [ "127.0.0.1:8081" ];
-            message = "llama-cpp must expose only its socket-activated loopback front door";
-          }
-          {
-            assertion =
-              config.systemd.sockets.muse-glimmer-proxy.listenStreams == [ "127.0.0.1:8083" ]
-              &&
-                config.sinnix.runtime.inventory.surfaces.muse-glimmer-proxy.activation.backendEndpoint
-                == "127.0.0.1:8084";
-            message = "Muse Glimmer must expose its dedicated socket-activated loopback endpoint";
-          }
-          {
-            assertion =
-              lib.hasInfix "--fit-target 1536" config.systemd.services.muse-glimmer.serviceConfig.ExecStart
-              && lib.hasInfix "--ctx-size 32768" config.systemd.services.muse-glimmer.serviceConfig.ExecStart
-              && lib.hasInfix "--parallel 1" config.systemd.services.muse-glimmer.serviceConfig.ExecStart;
-            message = "Muse Glimmer must retain the bounded hybrid inference profile";
-          }
-          {
-            assertion =
-              config.systemd.services.llama-cpp.unitConfig.PartOf == [ "llama-cpp-proxy.service" ]
-              && config.systemd.services.llama-cpp.unitConfig.BindsTo == [ "llama-cpp-proxy.service" ];
-            message = "An idle llama-cpp-proxy exit must tear down the llama-cpp backend cgroup";
-          }
-          {
-            assertion =
-              lib.hasInfix "systemd-socket-proxyd" config.systemd.services.llama-cpp-proxy.serviceConfig.ExecStart
-              && lib.hasInfix "--exit-idle-time=30s" config.systemd.services.llama-cpp-proxy.serviceConfig.ExecStart;
-            message = "llama-cpp activation must use the idle-aware systemd socket proxy";
-          }
-          {
-            assertion =
-              config.sinnix.runtime.inventory.surfaces.llama-cpp.activation.backendEndpoint == "127.0.0.1:8082"
-              &&
-                config.sinnix.runtime.inventory.surfaces.llama-cpp-proxy.activation.publicEndpoint
-                == "127.0.0.1:8081";
-            message = "Runtime inventory must describe the public and private llama-cpp activation endpoints";
-          }
-          {
-            # Cold start: the proxy must not
-            # start forwarding until the backend's port actually accepts a
-            # connection, or the client's parked request gets a hard refusal
-            # during the weight-load window instead of a queue.
-            assertion =
-              lib.hasInfix "wait-backend" config.systemd.services.llama-cpp-proxy.serviceConfig.ExecStartPre
-              && config.sinnix.runtime.inventory.surfaces.llama-cpp-proxy.activation.readinessTimeout == 30;
-            message = "llama-cpp-proxy must gate its socket proxy on backend readiness before forwarding";
-          }
-          {
-            assertion =
-              lib.hasInfix "wait-backend" config.systemd.services.comfyui-proxy.serviceConfig.ExecStartPre
-              && config.sinnix.runtime.inventory.surfaces.comfyui-proxy.activation.readinessTimeout == 180;
-            message = "comfyui-proxy must gate its socket proxy on backend readiness before forwarding, with a bound matching its measured cold-start cost";
-          }
-          {
-            assertion = config.systemd.sockets.comfyui-proxy.listenStreams == [ "127.0.0.1:8188" ];
-            message = "ComfyUI must expose only its socket-activated loopback front door";
-          }
-          {
-            assertion =
-              config.systemd.services.podman-comfyui.unitConfig.PartOf == [ "comfyui-proxy.service" ]
-              && config.systemd.services.podman-comfyui.unitConfig.BindsTo == [ "comfyui-proxy.service" ];
-            message = "An idle comfyui-proxy exit must tear down the ComfyUI container cgroup";
-          }
-          {
-            assertion =
-              lib.hasInfix "systemd-socket-proxyd" config.systemd.services.comfyui-proxy.serviceConfig.ExecStart
-              && lib.hasInfix "--exit-idle-time=900s" config.systemd.services.comfyui-proxy.serviceConfig.ExecStart;
-            message = "ComfyUI activation must use the idle-aware systemd socket proxy with its measured, generous timeout";
-          }
-          {
-            assertion = config.systemd.sockets.tts-proxy.listenStreams == [ "127.0.0.1:8000" ];
-            message = "TTS must expose only its socket-activated loopback front door";
-          }
-          {
-            assertion =
-              config.systemd.services.podman-openedai-speech.unitConfig.PartOf == [ "tts-proxy.service" ]
-              && config.systemd.services.podman-openedai-speech.unitConfig.BindsTo == [ "tts-proxy.service" ];
-            message = "An idle tts-proxy exit must tear down the TTS container cgroup";
-          }
-          {
-            assertion = config.systemd.sockets.musicgen-proxy.listenStreams == [ "127.0.0.1:8010" ];
-            message = "MusicGen must expose only its socket-activated loopback front door";
-          }
-          {
-            assertion =
-              config.systemd.services.podman-musicgen.unitConfig.PartOf == [ "musicgen-proxy.service" ]
-              && config.systemd.services.podman-musicgen.unitConfig.BindsTo == [ "musicgen-proxy.service" ];
-            message = "An idle musicgen-proxy exit must tear down the MusicGen container cgroup";
-          }
-          {
-            assertion = config.systemd.sockets.ocr-proxy.listenStreams == [ "127.0.0.1:8020" ];
-            message = "OCR must expose only its socket-activated loopback front door";
-          }
-          {
-            assertion =
-              config.systemd.services.podman-ocr.unitConfig.PartOf == [ "ocr-proxy.service" ]
-              && config.systemd.services.podman-ocr.unitConfig.BindsTo == [ "ocr-proxy.service" ];
-            message = "An idle ocr-proxy exit must tear down the OCR container cgroup";
-          }
-          {
-            # Full symmetry across all seven GPU-inference backends (three
-            # native, four containerized): every (service, proxy) pair must
-            # conflict with every other backend's (service, proxy) pair in
-            # both directions. An asymmetric conflict set is exactly the bug
-            # this check exists to catch. llama-cpp is intentionally NOT a
-            # member (CPU-pinned reranker, checked separately below) -- it
-            # must not appear in this map.
-            assertion =
-              let
-                backendUnits = {
-                  ollama = [
+        assertions =
+          config:
+          let
+            # Every socket-proxy surface, read from the inventory rather than
+            # listed here, so a new backend is covered the day it is declared.
+            proxySurfaces = lib.filterAttrs (
+              _: surface:
+              (surface.activation.mode or "direct") == "socket-proxy" && (surface.kind or "service") == "socket"
+            ) config.sinnix.runtime.inventory.surfaces;
+            proxyNames = map (lib.removeSuffix ".socket") (
+              lib.mapAttrsToList (_: surface: surface.unit) proxySurfaces
+            );
+            backendUnitsOf =
+              proxyName:
+              lib.filter (unit: lib.elem "${proxyName}.service" (config.systemd.services.${unit}.partOf or [ ])) (
+                lib.attrNames config.systemd.services
+              );
+          in
+          [
+            {
+              # The defect that killed muse-glimmer's front door on
+              # 2026-08-16: a backend carrying BindsTo= (or Requires=) on its
+              # proxy makes ANY backend start pull the proxy in outside socket
+              # activation, where systemd-socket-proxyd has no listen fds,
+              # exits 1, and -- via that same edge -- takes the backend down
+              # with it. PartOf= alone gives the idle teardown with no start
+              # dependency, so the edge must never point back up.
+              assertion = builtins.all (
+                proxyName:
+                builtins.all (
+                  backend:
+                  !(lib.elem "${proxyName}.service" (config.systemd.services.${backend}.bindsTo or [ ]))
+                  && !(lib.elem "${proxyName}.service" (config.systemd.services.${backend}.requires or [ ]))
+                ) (backendUnitsOf proxyName)
+              ) proxyNames;
+              message = "A socket-proxy backend must not declare BindsTo=/Requires= on its own proxy: that starts the proxy without socket activation and cascades its failure back into the backend";
+            }
+            {
+              # Without an explicit limit the default is 200 activations in
+              # 2s, which a client retrying through a cold model load can
+              # spend in one burst -- after which systemd latches the socket
+              # into failed permanently and the public port refuses
+              # everything.
+              assertion = builtins.all (
+                proxyName:
+                (config.systemd.sockets.${proxyName}.socketConfig.TriggerLimitBurst or null) != null
+                && (config.systemd.sockets.${proxyName}.socketConfig.TriggerLimitIntervalSec or null) != null
+              ) proxyNames;
+              message = "Every socket-proxy front door must set an explicit activation trigger limit rather than inheriting systemd's short default window";
+            }
+            {
+              assertion = config.systemd.sockets.ollama-proxy.listenStreams == [ "127.0.0.1:11434" ];
+              message = "Ollama must expose only its socket-activated loopback front door";
+            }
+            {
+              assertion = config.systemd.services.ollama.partOf == [ "ollama-proxy.service" ];
+              message = "Stopping an idle Ollama proxy must stop its backend";
+            }
+            {
+              assertion = lib.hasInfix "systemd-socket-proxyd" config.systemd.services.ollama-proxy.serviceConfig.ExecStart;
+              message = "Ollama activation must use the systemd socket proxy";
+            }
+            {
+              assertion = lib.hasInfix "--exit-idle-time=30s" config.systemd.services.ollama-proxy.serviceConfig.ExecStart;
+              message = "AI activation must have a bounded idle timeout";
+            }
+            {
+              assertion =
+                lib.elem "ollama.service" config.systemd.services.koboldcpp.unitConfig.Conflicts
+                && lib.elem "koboldcpp.service" config.systemd.services.ollama.unitConfig.Conflicts;
+              message = "GPU inference backends must be mutually exclusive";
+            }
+            {
+              assertion =
+                config.sinnix.runtime.inventory.surfaces.ollama.activation.backendEndpoint == "127.0.0.1:11435"
+                &&
+                  config.sinnix.runtime.inventory.surfaces.ollama-proxy.activation.publicEndpoint
+                  == "127.0.0.1:11434";
+              message = "Runtime inventory must describe the public and private AI activation endpoints";
+            }
+            {
+              assertion =
+                config.sinnix.runtime.inventory.surfaces.litellm.activation.dependsOn == [ "ollama-proxy" ];
+              message = "LiteLLM activation must retain the Ollama socket dependency";
+            }
+            {
+              assertion =
+                config.sinnix.runtime.inventory.surfaces.open-webui.activation.publicEndpoint == "127.0.0.1:8080"
+                && config.sinnix.runtime.inventory.surfaces.tts.activation.publicEndpoint == "127.0.0.1:8000";
+              message = "The AI factory must preserve direct loopback endpoints for representative services";
+            }
+            {
+              assertion =
+                config.systemd.services.sinnix-stt.serviceConfig.ExecStart != null
+                && lib.hasInfix "sinnix-stt" config.systemd.services.sinnix-stt.serviceConfig.ExecStart;
+              message = "The AI factory must leave the native STT command visible";
+            }
+            {
+              assertion = config.systemd.sockets.stt-proxy.listenStreams == [ "127.0.0.1:8090" ];
+              message = "The STT hub must expose only its socket-activated loopback front door";
+            }
+            {
+              assertion = config.systemd.services.sinnix-stt.partOf == [ "stt-proxy.service" ];
+              message = "An idle stt-proxy exit must tear down the STT backend cgroup";
+            }
+            {
+              assertion = lib.hasInfix "systemd-socket-proxyd" config.systemd.services.stt-proxy.serviceConfig.ExecStart;
+              message = "STT activation must use the idle-aware systemd socket proxy";
+            }
+            {
+              assertion =
+                config.sinnix.runtime.inventory.surfaces.stt.activation.backendEndpoint == "127.0.0.1:8091"
+                && config.sinnix.runtime.inventory.surfaces.stt-proxy.activation.publicEndpoint == "127.0.0.1:8090";
+              message = "Runtime inventory must describe the public and private STT activation endpoints";
+            }
+            {
+              # The inverse of the assertion this replaces, and it is the point
+              # of the engine change rather than an omission: Parakeet runs on
+              # the CPU, so speech-to-text must NOT hold the gpu-inference key
+              # and must stay available while a model is resident.
+              assertion =
+                !(lib.elem "sinnix-stt.service" config.systemd.services.ollama.unitConfig.Conflicts)
+                && !(lib.elem "sinnix-stt.service" config.systemd.services.koboldcpp.unitConfig.Conflicts);
+              message = "The CPU-only STT hub must stay outside the gpu-inference admission mesh";
+            }
+            {
+              assertion =
+                config.systemd.services.podman-openedai-speech.serviceConfig.ExecStart != null
+                && lib.hasInfix "podman" config.systemd.services.podman-openedai-speech.serviceConfig.ExecStart;
+              message = "The AI factory must leave the container launch visible";
+            }
+            {
+              assertion = config.systemd.sockets.llama-cpp-proxy.listenStreams == [ "127.0.0.1:8081" ];
+              message = "llama-cpp must expose only its socket-activated loopback front door";
+            }
+            {
+              assertion =
+                config.systemd.sockets.muse-glimmer-proxy.listenStreams == [ "127.0.0.1:8083" ]
+                &&
+                  config.sinnix.runtime.inventory.surfaces.muse-glimmer-proxy.activation.backendEndpoint
+                  == "127.0.0.1:8084";
+              message = "Muse Glimmer must expose its dedicated socket-activated loopback endpoint";
+            }
+            {
+              assertion =
+                lib.hasInfix "--fit-target 1536" config.systemd.services.muse-glimmer.serviceConfig.ExecStart
+                && lib.hasInfix "--ctx-size 32768" config.systemd.services.muse-glimmer.serviceConfig.ExecStart
+                && lib.hasInfix "--parallel 1" config.systemd.services.muse-glimmer.serviceConfig.ExecStart;
+              message = "Muse Glimmer must retain the bounded hybrid inference profile";
+            }
+            {
+              assertion = config.systemd.services.llama-cpp.partOf == [ "llama-cpp-proxy.service" ];
+              message = "An idle llama-cpp-proxy exit must tear down the llama-cpp backend cgroup";
+            }
+            {
+              assertion =
+                lib.hasInfix "systemd-socket-proxyd" config.systemd.services.llama-cpp-proxy.serviceConfig.ExecStart
+                && lib.hasInfix "--exit-idle-time=30s" config.systemd.services.llama-cpp-proxy.serviceConfig.ExecStart;
+              message = "llama-cpp activation must use the idle-aware systemd socket proxy";
+            }
+            {
+              assertion =
+                config.sinnix.runtime.inventory.surfaces.llama-cpp.activation.backendEndpoint == "127.0.0.1:8082"
+                &&
+                  config.sinnix.runtime.inventory.surfaces.llama-cpp-proxy.activation.publicEndpoint
+                  == "127.0.0.1:8081";
+              message = "Runtime inventory must describe the public and private llama-cpp activation endpoints";
+            }
+            {
+              # Cold start: the proxy must not
+              # start forwarding until the backend's port actually accepts a
+              # connection, or the client's parked request gets a hard refusal
+              # during the weight-load window instead of a queue.
+              assertion =
+                lib.hasInfix "wait-backend" config.systemd.services.llama-cpp-proxy.serviceConfig.ExecStartPre
+                && config.sinnix.runtime.inventory.surfaces.llama-cpp-proxy.activation.readinessTimeout == 30;
+              message = "llama-cpp-proxy must gate its socket proxy on backend readiness before forwarding";
+            }
+            {
+              assertion =
+                lib.hasInfix "wait-backend" config.systemd.services.comfyui-proxy.serviceConfig.ExecStartPre
+                && config.sinnix.runtime.inventory.surfaces.comfyui-proxy.activation.readinessTimeout == 180;
+              message = "comfyui-proxy must gate its socket proxy on backend readiness before forwarding, with a bound matching its measured cold-start cost";
+            }
+            {
+              assertion = config.systemd.sockets.comfyui-proxy.listenStreams == [ "127.0.0.1:8188" ];
+              message = "ComfyUI must expose only its socket-activated loopback front door";
+            }
+            {
+              assertion =
+                config.systemd.services.podman-comfyui.unitConfig.PartOf == [ "comfyui-proxy.service" ]
+                && config.systemd.services.podman-comfyui.unitConfig.BindsTo == [ "comfyui-proxy.service" ];
+              message = "An idle comfyui-proxy exit must tear down the ComfyUI container cgroup";
+            }
+            {
+              assertion =
+                lib.hasInfix "systemd-socket-proxyd" config.systemd.services.comfyui-proxy.serviceConfig.ExecStart
+                && lib.hasInfix "--exit-idle-time=900s" config.systemd.services.comfyui-proxy.serviceConfig.ExecStart;
+              message = "ComfyUI activation must use the idle-aware systemd socket proxy with its measured, generous timeout";
+            }
+            {
+              assertion = config.systemd.sockets.tts-proxy.listenStreams == [ "127.0.0.1:8000" ];
+              message = "TTS must expose only its socket-activated loopback front door";
+            }
+            {
+              assertion =
+                config.systemd.services.podman-openedai-speech.unitConfig.PartOf == [ "tts-proxy.service" ]
+                && config.systemd.services.podman-openedai-speech.unitConfig.BindsTo == [ "tts-proxy.service" ];
+              message = "An idle tts-proxy exit must tear down the TTS container cgroup";
+            }
+            {
+              assertion = config.systemd.sockets.musicgen-proxy.listenStreams == [ "127.0.0.1:8010" ];
+              message = "MusicGen must expose only its socket-activated loopback front door";
+            }
+            {
+              assertion =
+                config.systemd.services.podman-musicgen.unitConfig.PartOf == [ "musicgen-proxy.service" ]
+                && config.systemd.services.podman-musicgen.unitConfig.BindsTo == [ "musicgen-proxy.service" ];
+              message = "An idle musicgen-proxy exit must tear down the MusicGen container cgroup";
+            }
+            {
+              assertion = config.systemd.sockets.ocr-proxy.listenStreams == [ "127.0.0.1:8020" ];
+              message = "OCR must expose only its socket-activated loopback front door";
+            }
+            {
+              assertion =
+                config.systemd.services.podman-ocr.unitConfig.PartOf == [ "ocr-proxy.service" ]
+                && config.systemd.services.podman-ocr.unitConfig.BindsTo == [ "ocr-proxy.service" ];
+              message = "An idle ocr-proxy exit must tear down the OCR container cgroup";
+            }
+            {
+              # Full symmetry across all seven GPU-inference backends (three
+              # native, four containerized): every (service, proxy) pair must
+              # conflict with every other backend's (service, proxy) pair in
+              # both directions. An asymmetric conflict set is exactly the bug
+              # this check exists to catch. llama-cpp is intentionally NOT a
+              # member (CPU-pinned reranker, checked separately below) -- it
+              # must not appear in this map.
+              assertion =
+                let
+                  backendUnits = {
+                    ollama = [
+                      "ollama.service"
+                      "ollama-proxy.service"
+                    ];
+                    koboldcpp = [
+                      "koboldcpp.service"
+                      "koboldcpp-proxy.service"
+                    ];
+                    comfyui = [
+                      "podman-comfyui.service"
+                      "comfyui-proxy.service"
+                    ];
+                    tts = [
+                      "podman-openedai-speech.service"
+                      "tts-proxy.service"
+                    ];
+                    musicgen = [
+                      "podman-musicgen.service"
+                      "musicgen-proxy.service"
+                    ];
+                    ocr = [
+                      "podman-ocr.service"
+                      "ocr-proxy.service"
+                    ];
+                    muse-glimmer = [
+                      "muse-glimmer.service"
+                      "muse-glimmer-proxy.service"
+                    ];
+                  };
+                  unitConflicts =
+                    unit: config.systemd.services.${lib.removeSuffix ".service" unit}.unitConfig.Conflicts;
+                  allSymmetric = lib.all (
+                    backendA:
+                    lib.all (
+                      backendB:
+                      backendA == backendB
+                      || lib.all (
+                        unitA:
+                        lib.all (
+                          unitB: lib.elem unitB (unitConflicts unitA) && lib.elem unitA (unitConflicts unitB)
+                        ) backendUnits.${backendB}
+                      ) backendUnits.${backendA}
+                    ) (lib.attrNames backendUnits)
+                  ) (lib.attrNames backendUnits);
+                in
+                allSymmetric;
+              message = "Every remaining GPU-inference backend's service and proxy units must conflict symmetrically with every other backend's";
+            }
+            {
+              # The reranker's deliberate exemption from the mesh, checked
+              # directly rather than trusted by omission: it must not appear
+              # in any GPU-large backend's Conflicts=, and it must not
+              # conflict with any of them either.
+              assertion =
+                let
+                  gpuLargeUnits = [
                     "ollama.service"
                     "ollama-proxy.service"
-                  ];
-                  koboldcpp = [
                     "koboldcpp.service"
                     "koboldcpp-proxy.service"
-                  ];
-                  comfyui = [
                     "podman-comfyui.service"
                     "comfyui-proxy.service"
-                  ];
-                  tts = [
                     "podman-openedai-speech.service"
                     "tts-proxy.service"
-                  ];
-                  musicgen = [
                     "podman-musicgen.service"
                     "musicgen-proxy.service"
-                  ];
-                  ocr = [
                     "podman-ocr.service"
                     "ocr-proxy.service"
-                  ];
-                  muse-glimmer = [
                     "muse-glimmer.service"
                     "muse-glimmer-proxy.service"
                   ];
-                };
-                unitConflicts =
-                  unit: config.systemd.services.${lib.removeSuffix ".service" unit}.unitConfig.Conflicts;
-                allSymmetric = lib.all (
-                  backendA:
-                  lib.all (
-                    backendB:
-                    backendA == backendB
-                    || lib.all (
-                      unitA:
-                      lib.all (
-                        unitB: lib.elem unitB (unitConflicts unitA) && lib.elem unitA (unitConflicts unitB)
-                      ) backendUnits.${backendB}
-                    ) backendUnits.${backendA}
-                  ) (lib.attrNames backendUnits)
-                ) (lib.attrNames backendUnits);
-              in
-              allSymmetric;
-            message = "Every remaining GPU-inference backend's service and proxy units must conflict symmetrically with every other backend's";
-          }
-          {
-            # The reranker's deliberate exemption from the mesh, checked
-            # directly rather than trusted by omission: it must not appear
-            # in any GPU-large backend's Conflicts=, and it must not
-            # conflict with any of them either.
-            assertion =
-              let
-                gpuLargeUnits = [
-                  "ollama.service"
-                  "ollama-proxy.service"
-                  "koboldcpp.service"
-                  "koboldcpp-proxy.service"
-                  "podman-comfyui.service"
-                  "comfyui-proxy.service"
-                  "podman-openedai-speech.service"
-                  "tts-proxy.service"
-                  "podman-musicgen.service"
-                  "musicgen-proxy.service"
-                  "podman-ocr.service"
-                  "ocr-proxy.service"
-                  "muse-glimmer.service"
-                  "muse-glimmer-proxy.service"
-                ];
-                unitConflicts =
-                  unit: config.systemd.services.${lib.removeSuffix ".service" unit}.unitConfig.Conflicts or [ ];
-              in
-              lib.all (
-                unit:
-                !(lib.elem "llama-cpp.service" (unitConflicts unit))
-                && !(lib.elem "llama-cpp-proxy.service" (unitConflicts unit))
-              ) gpuLargeUnits
-              && (unitConflicts "llama-cpp") == [ ]
-              && (unitConflicts "llama-cpp-proxy") == [ ];
-            message = "llama-cpp (CPU-pinned reranker) must be absent from the gpu-inference conflicts mesh in both directions";
-          }
-        ];
+                  unitConflicts =
+                    unit: config.systemd.services.${lib.removeSuffix ".service" unit}.unitConfig.Conflicts or [ ];
+                in
+                lib.all (
+                  unit:
+                  !(lib.elem "llama-cpp.service" (unitConflicts unit))
+                  && !(lib.elem "llama-cpp-proxy.service" (unitConflicts unit))
+                ) gpuLargeUnits
+                && (unitConflicts "llama-cpp") == [ ]
+                && (unitConflicts "llama-cpp-proxy") == [ ];
+              message = "llama-cpp (CPU-pinned reranker) must be absent from the gpu-inference conflicts mesh in both directions";
+            }
+          ];
       };
       aiActivationEvaluated = evalTestSpec system aiActivationSpec;
       groupSpec = mkFeatureTest {

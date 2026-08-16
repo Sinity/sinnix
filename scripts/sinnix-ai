@@ -18,7 +18,7 @@ DEFAULT_PIN_DURATION="2h"
 # Registry: name|unit|port|probe-path|description
 # Keep in sync with modules/services/*.nix (ports are module defaults).
 REGISTRY="$(cat <<'EOF'
-whisper|whisper-server|8090|/|whisper.cpp STT server (CUDA, large-v3-turbo)
+stt|sinnix-stt|8090|/|Speech-to-text hub (Parakeet TDT via sherpa-onnx, CPU)
 tts|podman-openedai-speech|8000|/v1/models|OpenedAI-Speech TTS (Piper + XTTS, container)
 kokoro|podman-kokoro|8890|/health|Kokoro-82M TTS (CPU, OpenAI-compatible, container)
 ollama|ollama|11434|/api/tags|Ollama LLM/VLM hub (CUDA)
@@ -59,10 +59,9 @@ stays resident during a work session. Release is automatic (systemd
 RuntimeMaxSec on a transient --user unit kills the holder and closes
 the connection at the deadline), so a pin cannot outlive its duration
 and never survives a reboot or a killed shell as orphan state. Duration
-accepts bare seconds, or a number with s/m/h suffix (e.g. 30m, 2h). Services without
-an idle-aware proxy (comfyui, tts, musicgen, ocr, open-webui) don't
-idle-teardown in the first place, so pinning them is a no-op refused
-with an explanation.
+accepts bare seconds, or a number with s/m/h suffix (e.g. 30m, 2h). Services
+without an idle-aware proxy (open-webui) don't idle-teardown in the first
+place, so pinning them is a no-op refused with an explanation.
 EOF
 }
 
@@ -194,6 +193,14 @@ cmd_start() {
     lookup "$name"
     unit_installed "$REG_UNIT" || { echo "$name: unit $REG_UNIT not installed on this host (enable its sinnix module)" >&2; exit 1; }
     echo "starting $REG_NAME ($REG_UNIT)..."
+    # Bring the front door up first, and clear any latched failure on it: a
+    # socket that has hit its activation trigger limit stays failed until
+    # something resets it, and then the public port refuses every connection
+    # no matter how healthy the backend is.
+    if has_proxy "$REG_NAME"; then
+      sudo systemctl reset-failed "${REG_NAME}-proxy.socket" "${REG_NAME}-proxy.service" 2>/dev/null || true
+      sudo systemctl start "${REG_NAME}-proxy.socket"
+    fi
     sudo systemctl start "$REG_UNIT"
     local i
     for i in $(seq 1 30); do
@@ -210,6 +217,12 @@ cmd_stop() {
   for name in "$@"; do
     lookup "$name"
     echo "stopping $REG_NAME ($REG_UNIT)..."
+    # Stop the proxy first: PartOf= carries the stop down to the backend, and
+    # leaving a live proxy behind would just re-summon it. The .socket stays
+    # listening so the next request cold-starts normally.
+    if has_proxy "$REG_NAME"; then
+      sudo systemctl stop "${REG_NAME}-proxy.service"
+    fi
     sudo systemctl stop "$REG_UNIT"
     echo "$REG_NAME: $(unit_state "$REG_UNIT")"
   done

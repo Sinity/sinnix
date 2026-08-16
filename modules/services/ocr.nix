@@ -83,7 +83,6 @@ mkServiceModule {
       # gpuInferenceConflicts.
       systemd.services.podman-ocr = {
         partOf = [ "ocr-proxy.service" ];
-        bindsTo = [ "ocr-proxy.service" ];
       };
     };
 } args

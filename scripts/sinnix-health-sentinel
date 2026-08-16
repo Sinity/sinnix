@@ -107,6 +107,24 @@ describe() {
     service_failure:unknown)
       title="Cannot tell whether $unit is healthy"
       body="The sentinel could not read its state, so this is neither a pass nor a failure." ;;
+    socket_failure:healthy)
+      title="$unit is listening again"
+      if [ "$(evidence_field "$evidence" recovered)" = "reset-failed+start" ]; then
+        body="It had latched into failed and refused every connection; the sentinel reset and restarted it."$'\n'"If this keeps happening, something behind it is failing to activate: journalctl -u ${unit%.socket}.service -e"
+      else
+        body="Recovered on its own; nothing to do."
+      fi ;;
+    socket_failure:failed)
+      result="$(evidence_field "$evidence" result)"
+      title="$unit is not accepting connections"
+      case "$result" in
+        trigger-limit-hit) body="It hit systemd's activation rate limit and latched into failed, so its public port now refuses everything." ;;
+        *) body="The front-door socket is down, so nothing can reach the service behind it." ;;
+      esac
+      body="$body"$'\n'"Look: journalctl -u $unit -e" ;;
+    socket_failure:unknown)
+      title="Cannot tell whether $unit is listening"
+      body="The sentinel could not read its state, so this is neither a pass nor a failure." ;;
     capture_stale:healthy)
       age="$(evidence_field "$evidence" age_seconds)"
       title="$unit lane is recording again"
@@ -500,6 +518,49 @@ while IFS=$'\t' read -r manager unit activation_mode; do
   fi
   emit "service:$manager:$unit" service_failure "$unit" "$status" "$evidence"
 done < <(jq -r '.observedServices[]? | select(.kind == "service") | [.manager,.unit,(.activationMode // "direct")] | @tsv' "$inventory")
+
+# Sockets, which the service sweep above structurally cannot see. A socket's
+# healthy resting state is "listening" -- it is the front door, and unlike the
+# backends behind it there is no legitimate reason for it to be down.
+#
+# trigger-limit-hit is special and is why this sweep exists: systemd latches
+# the socket into failed after too many activations in too short a window and
+# never re-arms it, so the public port refuses every connection forever while
+# the backend behind it looks perfectly healthy. Recovery is exactly
+# `reset-failed` + `start` with nothing at stake, so do it -- but say so,
+# because a socket that keeps needing this is reporting a real fault upstream.
+while IFS=$'\t' read -r manager unit; do
+  [ -n "$unit" ] || continue
+  active_state=
+  result=
+  if props="$(query_unit_props "$manager" "$unit")"; then
+    while IFS='=' read -r key value; do
+      case "$key" in
+        ActiveState) active_state="$value" ;;
+        Result) result="$value" ;;
+      esac
+    done <<< "$props"
+  fi
+  if [ -z "$active_state" ]; then
+    status=unknown
+    evidence="manager=$manager;probe=unreachable"
+  elif [ "$active_state" = active ]; then
+    status=healthy
+    evidence="manager=$manager;active_state=$active_state"
+  else
+    status=failed
+    evidence="manager=$manager;active_state=$active_state;result=$result"
+    if [ "$result" = trigger-limit-hit ] && [ "$manager" = system ]; then
+      if systemctl reset-failed "$unit" 2>/dev/null && systemctl start "$unit" 2>/dev/null; then
+        status=healthy
+        evidence="$evidence;recovered=reset-failed+start"
+      else
+        evidence="$evidence;recovery=failed"
+      fi
+    fi
+  fi
+  emit "socket:$manager:$unit" socket_failure "$unit" "$status" "$evidence"
+done < <(jq -r '.observedServices[]? | select(.kind == "socket") | [.manager,.unit] | @tsv' "$inventory")
 
 # Self-heal: drop any state-file key this run did not emit. Only the full
 # sweep above (never the single-key --failure-unit fast path) knows the

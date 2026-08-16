@@ -94,7 +94,6 @@ mkServiceModule {
         wantedBy = [ ]; # on-demand
         after = [ "network.target" ];
         partOf = [ "koboldcpp-proxy.service" ];
-        bindsTo = [ "koboldcpp-proxy.service" ];
         # Conflicts= against every other GPU-inference backend is computed
         # centrally in ai-control.nix's gpuInferenceConflicts.
         serviceConfig = lib.mkMerge [
