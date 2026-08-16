@@ -256,6 +256,11 @@ in
       LYNCHPIN_REPO_ROOT = cfg.projects.lynchpin;
       SINEX_ROOT = cfg.projects.sinex;
       POLYLOGUE_ROOT = cfg.projects.polylogue;
+      # Verification run history is the one polylogue artifact that outlives a
+      # checkout, so it belongs in the data lake rather than per-checkout state.
+      # Every worktree and lane inherits this, which is what makes cross-lane
+      # comparison possible at all.
+      POLYLOGUE_VERIFY_HISTORY_PATH = "/realm/data/captures/dev/polylogue/verify-history.jsonl";
       SINNIX_ROOT = cfg.projects.sinnix;
       KNOWLEDGEBASE_ROOT = cfg.projects.knowledgebase;
     };
