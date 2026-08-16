@@ -93,7 +93,7 @@ fun SettingsScreen(nav: NavController) {
                 "grant",
                 "health_connect",
                 "granted",
-                granted.containsAll(HealthLane.PERMISSIONS),
+                granted.containsAll(HealthLane.QUERYABLE_PERMISSIONS),
                 "granted_count",
                 granted.size,
             )
