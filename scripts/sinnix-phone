@@ -219,7 +219,7 @@ ensure_device_capture_settings() {
 # timestamp with silence, and losing a duplicate is cheaper than losing a boot.
 # Raw threadtime lines, not JSON: every Android tool already speaks the format.
 drain_logcat_adb() {
-  local dest cursor since day out lines
+  local dest cursor since day out lines total before pull_ok
   adb_resolve || return 1
   dest="$LAKE_ROOT/logcat"
   cursor="$PHONE_STATE/logcat.cursor"
@@ -232,16 +232,24 @@ drain_logcat_adb() {
 
   # -b all: main is the app chatter, but system/crash/kernel carry the
   # package-manager, OOM and driver events that explain an outage.
+  #
+  # $out is the whole day's file, so count what THIS run appended rather than
+  # its cumulative total -- a failed pull would otherwise report the stale
+  # total and read as a successful drain.
+  before=$(grep -cE '^[0-9]{4}-[0-9]{2}-[0-9]{2} ' "$out" 2>/dev/null || echo 0)
+  pull_ok=1
   if [ -n "$since" ]; then
-    adb_any logcat -b all -d -v threadtime -v UTC -v year -T "$since" 2>/dev/null >>"$out" || true
+    adb_any logcat -b all -d -v threadtime -v UTC -v year -T "$since" 2>/dev/null >>"$out" || pull_ok=0
   else
-    adb_any logcat -b all -d -v threadtime -v UTC -v year 2>/dev/null >>"$out" || true
+    adb_any logcat -b all -d -v threadtime -v UTC -v year 2>/dev/null >>"$out" || pull_ok=0
   fi
+  [ "$pull_ok" -eq 1 ] || echo "  WARNING: adb logcat pull failed; nothing new drained" >&2
 
   # The cursor is the last real log line's timestamp. Blank lines and the
   # `--------- beginning of` banners logcat interleaves are not lines it will
   # accept back as -T, so they are filtered before the tail is taken.
-  lines="$(grep -cE '^[0-9]{4}-[0-9]{2}-[0-9]{2} ' "$out" 2>/dev/null || echo 0)"
+  total="$(grep -cE '^[0-9]{4}-[0-9]{2}-[0-9]{2} ' "$out" 2>/dev/null || echo 0)"
+  lines=$(( total - before ))
   grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2} ' "$out" 2>/dev/null \
     | tail -n 1 \
     | awk '{ print $1 " " $2 }' > "$cursor.tmp" || true
@@ -250,7 +258,7 @@ drain_logcat_adb() {
   else
     rm -f "$cursor.tmp"
   fi
-  echo "logcat: $lines lines in $out"
+  echo "logcat: $lines new lines ($total total) in $out"
 }
 
 # Drain ActivityWatch Android into the lake: foreground app and screen-unlock,
