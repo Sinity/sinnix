@@ -460,3 +460,45 @@ def test_gateway_rows_use_attested_nested_manifest_fields() -> None:
     assert rows[0]["cgroup"] == "/agent.slice/j"
     assert rows[0]["metrics"]["work_item"] == "sinnix-056.6"
     assert rows[0]["metrics"]["resource_overrides"]["MemoryHigh"] == "2G"
+
+
+def test_sqlite_failure_is_recorded_not_swallowed(tmp_path):
+    """An unreadable database must not look like an empty one.
+
+    sqlite_rows returns [] on failure so one bad database cannot take the
+    whole observation down -- which is right, and was also the entire bug:
+    the empty list was the only signal, so a query that could not run and a
+    table with no rows produced identical output.
+    """
+    from sinnix_observe.sources import sqlite_util
+
+    sqlite_util.clear_sqlite_errors()
+    missing = tmp_path / "not-a-database.db"
+    missing.write_text("this is not sqlite")
+
+    rows = sqlite_util.sqlite_rows(missing, "select 1")
+
+    assert rows == []
+    errors = sqlite_util.sqlite_errors()
+    assert len(errors) == 1
+    assert str(missing) in errors[0]["db"]
+    assert errors[0]["error"]
+
+
+def test_successful_read_records_no_error(tmp_path):
+    """Anti-vacuity for the test above: the accumulator must stay empty on
+    the happy path, or 'errors is empty' would mean nothing."""
+    import sqlite3
+
+    from sinnix_observe.sources import sqlite_util
+
+    db = tmp_path / "real.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute("create table t (a integer)")
+        conn.execute("insert into t values (7)")
+
+    sqlite_util.clear_sqlite_errors()
+    rows = sqlite_util.sqlite_rows(db, "select a from t")
+
+    assert rows == [{"a": 7}]
+    assert sqlite_util.sqlite_errors() == []

@@ -17,6 +17,7 @@ from .sources.below import collect_below
 from .sources.chrome import collect_chrome_io
 from .sources.drift import collect_config_drift
 from .sources.polylogue import collect_polylogue_live_attempts
+from .sources.sqlite_util import clear_sqlite_errors, sqlite_errors
 from .sources.pressure import collect_blocked_tasks, collect_pressure
 from .sources.storage import collect_storage
 from .sources.systemd import (
@@ -33,6 +34,7 @@ DEFAULT_LIMIT = int(os.environ.get("SINNIX_OBSERVE_LIMIT", "10"))
 
 
 def collect_report(args: argparse.Namespace) -> dict[str, Any]:
+    clear_sqlite_errors()
     pressure = collect_pressure(args.offline)
     blocked = collect_blocked_tasks(args.offline)
     storage = collect_storage(args.offline)
@@ -67,6 +69,10 @@ def collect_report(args: argparse.Namespace) -> dict[str, Any]:
                 "unavailable_count": config_drift.get("unavailable_count", 0),
             },
             "below": {"available": below.get("available")},
+            # A query that could not run used to render as a source with no
+            # rows -- indistinguishable from a source that genuinely had none.
+            # Empty here means every read succeeded.
+            "sqlite_errors": sqlite_errors(),
         },
         "live_pressure": pressure,
         "blocked_tasks": blocked,
