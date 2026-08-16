@@ -223,9 +223,30 @@ let
         cleanup_snapshot_bind_mount || true
         mount --bind "$snapshot_path" ${lib.escapeShellArg bindTarget}
 
+        # Membership by property, not by path. The exclude list below is a
+        # safety net for things that do not self-describe; these two flags are
+        # the primary mechanism, and they evaluate a directory borg has never
+        # seen before.
+        #
+        # --exclude-caches honours CACHEDIR.TAG (bford.info/cachedir/spec.html),
+        # which cargo, uv, ruff, pytest and mypy already write unprompted --
+        # 94 directories under /realm carry one today, and the path list was
+        # missing several of them purely because of what they were named
+        # (.lynchpin/cache is not .cache; .sinex/trybuild-target is not target;
+        # data/self/genome/cache was 285G of exactly this).
+        #
+        # .nobackup is the estate's marker for regenerable-but-not-a-cache:
+        # scratch trees where CACHEDIR.TAG would be a lie about what the
+        # directory is.
+        #
+        # Untagged means backed up. A new dataset is therefore over-preserved
+        # rather than silently lost, which is the correct direction for the
+        # failure to point.
         if with_borg_lock borg create \
           --compression auto,zstd,1 \
           --lock-wait ${toString borgLockWaitSec} \
+          --exclude-caches \
+          --exclude-if-present .nobackup \
           ${mkBorgExcludeArgs exclude} \
           "::$archive_name" ${lib.escapeShellArg "${bindTarget}/./"}; then
           cleanup_snapshot_bind_mount
@@ -432,6 +453,21 @@ let
       '{ts:$ts,type:$type,archive:$archive,source_git_head:$source_git_head,dolt_commit:$dolt_commit,issues_jsonl_sha256:$issues_jsonl_sha256,ok:true}' \
       | tee -a ${lib.escapeShellArg sinexBeadsDrillLog}
   '';
+
+  # Nested subvolumes that btrbk cannot snapshot, mapped to the durable path
+  # that DOES cover them. A subvolume absent from this table is reported red
+  # by check_nested_subvolume_coverage below -- the point of the table is that
+  # every one of these has been looked at, not that alarms have been silenced.
+  # An entry here is a claim about where the data survives, and is wrong the
+  # moment that path stops being written.
+  backupNestedSubvolumeCoverage = {
+    "swap" =
+      "regenerable swapfile, deliberately not backup material";
+    "state/journal" =
+      "sinnix-journal-archive copies sealed journal content, de-flooded, to ${config.sinnix.paths.capturesRoot}/syslog/journal, which is an ordinary directory inside the snapshot";
+    "state/machine-telemetry" =
+      "machine-telemetry-sqlite-backup writes logical dumps to /realm/staging/machine-telemetry, which is inside the snapshot";
+  };
 
   mkBorgStatusScript = ''
     set -euo pipefail
@@ -668,6 +704,72 @@ let
     check_archive realm
     check_queue persist ${lib.escapeShellArg persistSnapshots} 'persist.*'
     check_queue realm ${lib.escapeShellArg realmSnapshots} 'realm.*'
+
+    # A btrfs snapshot does not cross subvolume boundaries. btrbk snapshots
+    # `subvolume .` of /realm and /persist, so every NESTED subvolume is
+    # captured as an empty directory -- silently, with a successful archive
+    # and a green freshness check, because "the archive exists and is recent"
+    # says nothing about what is inside it.
+    #
+    # That is not theoretical. On 2026-08-16 /realm/state/journal was found to
+    # have never been backed up: archives back to 2026-03 held `state/journal`
+    # as one directory entry and nothing else. Nobody had looked inside,
+    # because nothing had a reason to.
+    #
+    # So each nested subvolume must either be listed below with the durable
+    # path that actually covers it, or it is reported red. There is no state
+    # in which a nested subvolume is quietly fine.
+    check_nested_subvolume_coverage() {
+      label="$1"
+      root="$2"
+
+      while IFS= read -r subvol; do
+        [ -n "$subvol" ] || continue
+        case "$subvol" in
+          # The snapshots themselves and btrbk's own working tree.
+          .btrfs/*) continue ;;
+          # Staging trees whose whole purpose is to BE a copy of something
+          # else. Flagging them would report the backup mechanism as
+          # unbacked-up, which is true and useless.
+          backup/*) continue ;;
+        esac
+
+        covered=""
+        case "$subvol" in
+${lib.concatStringsSep "\n" (
+  lib.mapAttrsToList (
+    path: reason: "          ${path}) covered=${lib.escapeShellArg reason} ;;"
+  ) backupNestedSubvolumeCoverage
+)}
+        esac
+
+        if [ -n "$covered" ]; then
+          ok=true
+          state=healthy
+          message="nested subvolume not in the snapshot, covered by: $covered"
+        else
+          ok=false
+          state=red
+          message="nested subvolume is NOT in any snapshot and has no declared durable copy; btrfs snapshots do not cross subvolume boundaries, so it archives as an empty directory"
+          status=1
+          echo "borgbackup-status: $root/$subvol is not backed up at all" >&2
+        fi
+
+        jq -cn \
+          --arg type nested_subvolume_coverage \
+          --arg label "$label" \
+          --arg subvolume "$subvol" \
+          --arg message "$message" \
+          --argjson ok "$ok" \
+          --arg state "$state" \
+          --arg ts "$(date -Iseconds)" \
+          '{ts:$ts,type:$type,label:$label,subvolume:$subvolume,ok:$ok,state:$state,message:$message}' \
+          >> ${lib.escapeShellArg borgStatusLog}
+      done < <(btrfs subvolume list -o "$root" 2>/dev/null | awk '{print $NF}')
+    }
+
+    check_nested_subvolume_coverage realm ${lib.escapeShellArg realmRoot}
+    check_nested_subvolume_coverage persist /persist
 
     exit "$status"
   '';
@@ -1256,8 +1358,10 @@ in
       // backupServiceConfig "borgbackup-status.service";
       path = with pkgs; [
         borgbackup
+        btrfs-progs
         coreutils
         findutils
+        gawk
         gnugrep
         jq
         util-linux
