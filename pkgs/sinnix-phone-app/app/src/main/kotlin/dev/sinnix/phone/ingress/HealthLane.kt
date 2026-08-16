@@ -186,7 +186,28 @@ object HealthLane {
      * Returns how many records landed, so a caller can tell "nothing new" from
      * "nothing readable" — two states an empty return would conflate.
      */
+    /**
+     * One sync at a time, ever. The scheduler launches sync on every
+     * watchdog tick, and a quota-bound backfill sweep runs far longer than
+     * one tick -- so without this gate a second sync starts while the first
+     * is mid-sweep, both interleave through the shared page cursor, and the
+     * pagination re-walks the same pages endlessly. Measured on 2026-08-16:
+     * one heart-rate record emitted 188 times, a 1.4 GB day file that was
+     * mostly duplicates, and every re-walked page paid for out of the same
+     * rate quota the real sweep was starving on.
+     */
+    private val syncRunning = java.util.concurrent.atomic.AtomicBoolean(false)
+
     suspend fun sync(ctx: Context): Int {
+        if (!syncRunning.compareAndSet(false, true)) return 0
+        try {
+            return syncInner(ctx)
+        } finally {
+            syncRunning.set(false)
+        }
+    }
+
+    private suspend fun syncInner(ctx: Context): Int {
         if (!Prefs.healthLane(ctx)) return 0
         if (HealthConnectClient.getSdkStatus(ctx) != HealthConnectClient.SDK_AVAILABLE) {
             Events.record(ctx, "lane_blocked", "lane", "health", "reason", availability(ctx))
