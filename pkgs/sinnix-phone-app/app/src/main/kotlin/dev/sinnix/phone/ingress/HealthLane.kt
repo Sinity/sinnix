@@ -212,7 +212,7 @@ object HealthLane {
         // one failing or permission-revoked type stalls itself and nothing
         // else -- and a DeletionChange arrives on a feed that knows its type,
         // which the combined feed deliberately withholds for privacy.
-        prefs(ctx).edit().remove(KEY_LEGACY_TOKEN).apply()
+        prefs(ctx).edit().remove(KEY_LEGACY_TOKEN).commit()
 
         rateLimited = false
         var written = 0
@@ -290,7 +290,7 @@ object HealthLane {
                         "reason", "token ${type.simpleName}: ${e.message}")
                     return 0
                 }
-            p.edit().putString(resumeTokenKey(type), token).apply()
+            p.edit().putString(resumeTokenKey(type), token).commit()
         }
         // No lower bound. `before` asks for everything up to now, so the window
         // is whatever Health Connect still retains rather than a number we
@@ -307,7 +307,7 @@ object HealthLane {
                 pageToken = page.pageToken
                 p.edit().putString(resumePageKey(type), pageToken)
                     .putInt(resumeCountKey(type), written)
-                    .putInt(resumePagesKey(type), pages).apply()
+                    .putInt(resumePagesKey(type), pages).commit()
             } while (pageToken != null)
         } catch (e: Exception) {
             rateLimited = rateLimited || isRateLimit(e)
@@ -319,7 +319,7 @@ object HealthLane {
         }
         p.edit().putString(tokenKey(type), token).putBoolean(sweptKey(type), true)
             .remove(resumePageKey(type)).remove(resumeTokenKey(type))
-            .remove(resumeCountKey(type)).remove(resumePagesKey(type)).apply()
+            .remove(resumeCountKey(type)).remove(resumePagesKey(type)).commit()
         Events.record(ctx, "health_backfill", "type", type.simpleName, "records", written,
             "pages", pages, "generation", BACKFILL_GENERATION, "window", "all")
         return written
@@ -344,7 +344,7 @@ object HealthLane {
                 // asked. Falling back to a window sweep is the documented
                 // recovery and re-establishes a token in the same pass.
                 Events.record(ctx, "health_token_expired", "type", type.simpleName, "action", "sweep")
-                prefs(ctx).edit().remove(tokenKey(type)).remove(sweptKey(type)).apply()
+                prefs(ctx).edit().remove(tokenKey(type)).remove(sweptKey(type)).commit()
                 return written + sweep(ctx, client, type)
             }
             response.changes.forEach { change ->
@@ -365,7 +365,7 @@ object HealthLane {
         // Only now, and only because every page above was read without
         // throwing. A token advanced past unread changes is data loss with no
         // symptom.
-        prefs(ctx).edit().putString(tokenKey(type), token).apply()
+        prefs(ctx).edit().putString(tokenKey(type), token).commit()
         return written
     }
 
