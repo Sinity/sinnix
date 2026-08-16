@@ -17,8 +17,8 @@ from .sources.below import collect_below
 from .sources.chrome import collect_chrome_io
 from .sources.drift import collect_config_drift
 from .sources.polylogue import collect_polylogue_live_attempts
-from .sources.sqlite_util import clear_sqlite_errors, sqlite_errors
 from .sources.pressure import collect_blocked_tasks, collect_pressure
+from .sources.sqlite_util import clear_sqlite_errors, sqlite_errors
 from .sources.storage import collect_storage
 from .sources.systemd import (
     collect_resource_slices,
