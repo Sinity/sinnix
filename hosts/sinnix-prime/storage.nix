@@ -528,17 +528,6 @@ in
       "d /swap 0750 root root -"
       "d ${polylogueArchiveRoot} 0700 ${username} ${primaryGroupName} -"
       "d ${realmRoot}/db 0755 root root -"
-      # The data lake is the operator's, not root's. These two roots had been
-      # created ad-hoc as root:root, which meant every operator-run capture
-      # producer that tries to mkdir its own lane directory under
-      # /realm/data/captures failed with PermissionError -- sinnix-census,
-      # sinnix-url-ledger and sinnix-video-resolve had each never produced a
-      # single file, while their timers reported success. Declaring the roots
-      # with the right owner fixes the class rather than each producer.
-      # Root daemons that write here (machine-telemetry, borg status) are
-      # unaffected: root ignores directory permissions.
-      "d ${realmRoot}/data 0755 ${username} ${primaryGroupName} -"
-      "d ${capturesRoot} 0755 ${username} ${primaryGroupName} -"
       "d /home/${username}/.local/share 0700 ${username} ${primaryGroupName} -"
       "d ${polylogueShareMount} 0700 ${username} ${primaryGroupName} -"
       # NVMe-backed regenerable-cache root (bind-mount source for
