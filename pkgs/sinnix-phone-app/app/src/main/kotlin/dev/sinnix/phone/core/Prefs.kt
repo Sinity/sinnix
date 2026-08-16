@@ -209,4 +209,20 @@ object Prefs {
      * position rather than a leftover.
      */
     const val DEFAULT_RECEIVER = "sinnix-prime:8940"
+
+    /**
+     * The receiver targets to try, in order.
+     *
+     * The MagicDNS name stopped resolving on this phone on 2026-08-14 --
+     * Tailscale was up, the tailnet route worked, and every stream to the
+     * name silently failed for two days while a connect to the raw tailnet
+     * address succeeded. The name stays first because names survive IP
+     * reassignment; the literal address is the fallback that survives DNS.
+     */
+    fun receiverCandidates(ctx: Context): List<String> {
+        val configured = receiverHost(ctx)
+        val fallback = "100.114.9.64:8940"
+        return if (configured == fallback) listOf(configured)
+        else listOf(configured, fallback)
+    }
 }

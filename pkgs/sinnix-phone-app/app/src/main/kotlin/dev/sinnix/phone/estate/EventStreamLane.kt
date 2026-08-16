@@ -135,8 +135,10 @@ class EventStreamLane(context: Context) {
         prefs().edit().putString(KEY_FILE, name).putLong(KEY_OFFSET, offset).apply()
 
     /** One connection, all pending lines, each wrapped under the mirror kind. */
-    private fun send(lines: List<String>): Boolean {
-        val target = Prefs.receiverHost(ctx)
+    private fun send(lines: List<String>): Boolean =
+        Prefs.receiverCandidates(ctx).any { sendTo(it, lines) }
+
+    private fun sendTo(target: String, lines: List<String>): Boolean {
         val host = target.substringBeforeLast(':', target)
         val port = target.substringAfterLast(':', "8940").toIntOrNull() ?: 8940
         return try {
