@@ -5,7 +5,7 @@
     extra-substituters = [
       "https://numtide.cachix.org"
       # cache.nixos.org does not reliably serve CUDA builds (ollama-cuda,
-      # koboldcpp/llama-cpp/whisper-cpp with cudaSupport); this cache turns
+      # koboldcpp/llama-cpp with cudaSupport); this cache turns
       # those nvcc compiles into downloads. See flake/overlay/package/local-ai.nix.
       "https://cuda-maintainers.cachix.org"
     ];

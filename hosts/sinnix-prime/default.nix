@@ -224,7 +224,7 @@
     # --n-gpu-layers 0, released on exit. Socket-activated on demand but
     # deliberately outside the gpu-inference admission mesh
     # (modules/services/ai-control.nix), so it coexists with a resident
-    # ollama/koboldcpp/whisper session instead of making every retrieval turn
+    # ollama/koboldcpp session instead of making every retrieval turn
     # pay a GPU reload.
     # Weekly evidence-joined usage census.
     census.enable = true;
@@ -262,7 +262,7 @@
   # headroom for Postgres/NATS and the rest of the stack on this 32G host.
   services.sinex.core.api.resources.memoryMax = "14G";
 
-  # CUDA builds (ollama-cuda, koboldcpp/llama-cpp/whisper-cpp -cuda) are served
+  # CUDA builds (ollama-cuda, koboldcpp/llama-cpp -cuda) are served
   # by this cache; without it they compile locally. Trusted at switch time.
   nix.settings.substituters = [ "https://cuda-maintainers.cachix.org" ];
   nix.settings.trusted-public-keys = [
