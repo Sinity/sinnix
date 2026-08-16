@@ -84,9 +84,29 @@ mkServiceModule {
           # that loses data silently; EPERM is its capability-shaped twin.
           "-a always,exit -F arch=b64 -S openat,creat,mkdirat,renameat2,unlinkat,truncate -F exit=-EROFS -k sinnix-denied"
           "-a always,exit -F arch=b64 -S openat,creat,mkdirat,renameat2,unlinkat,truncate -F exit=-EPERM -k sinnix-denied"
-          # Process and privilege telemetry: what ran, as whom, and who
-          # changed identity to run it.
-          "-a always,exit -F arch=b64 -S execve -F auid>=1000 -F auid!=-1 -k sinnix-exec"
+          # Process and privilege telemetry: what FAILED to run, and who
+          # changed identity to run something.
+          #
+          # success=0 is load-bearing, not a narrowing of convenience. The
+          # unqualified form of this rule (every execve by any uid>=1000)
+          # emitted 3.27 MILLION records per hour on 2026-08-16 -- ~57k/min,
+          # five records apiece with a full hex PROCTITLE -- because an
+          # agent workstation spawns processes at that rate all day. It cost
+          # 23 GiB/day on the wear-limited root SSD via auditd's own log,
+          # plus a duplicate copy in the journal, and it held the kernel's
+          # audit backlog wait at 54s (backlog_wait_time_actual), meaning
+          # every exec on the box was being throttled behind it. None of it
+          # was ever read: the drain harvested 554 records that day out of
+          # roughly 82 million emitted.
+          #
+          # Successful execs are already captured three times over by lanes
+          # that carry far more context -- Atuin shell history, asciinema
+          # terminal recordings, and agent session transcripts -- so the
+          # blanket rule bought no evidence those lanes lack. FAILED execs
+          # are the part none of them record, and are the signature of the
+          # missing-binary class this estate keeps hitting (the swallowed
+          # gawk, the absent wsdd). That is a few records a day, not 82M.
+          "-a always,exit -F arch=b64 -S execve -F auid>=1000 -F auid!=-1 -F success=0 -k sinnix-exec-failed"
           "-a always,exit -F arch=b64 -S setuid,setgid,setreuid,setregid -F auid>=1000 -F auid!=-1 -k sinnix-privchange"
           # System-shape changes worth reconstructing after the fact.
           "-a always,exit -F arch=b64 -S mount,umount2 -k sinnix-mount"
@@ -96,6 +116,30 @@ mkServiceModule {
         ++ lib.optionals cfg.auditEACCES [
           "-a always,exit -F arch=b64 -S openat,creat,mkdirat,renameat2,unlinkat,truncate -F exit=-EACCES -k sinnix-denied"
         ];
+      };
+
+      # Every kernel audit record was being written TWICE: once by auditd to
+      # /var/log/audit/audit.log, and once by journald, which subscribes to
+      # the same netlink socket whenever services.journald.audit is on (it
+      # defaults to "keep"). auditd is the consumer with the tooling
+      # (ausearch, the drain, the lake), so it keeps the records; the journal
+      # keeps none. This is also what stops audit volume from crowding out
+      # everything else in `journalctl` -- on 2026-08-16 audit was 3270224 of
+      # the 3272000 records in the hour, which is what a "readable journal"
+      # loses to.
+      services.journald.audit = lib.mkIf cfg.kernelAudit false;
+
+      # auditd ships with no size ceiling, so its log grows without bound on
+      # whatever filesystem /var/log lives on -- here the wear-limited root
+      # SSD, where it had reached 5.8 GB in six hours. The lake is the
+      # durable copy (the drain archives every record before rotation can
+      # reach it), so these logs only need to cover the window between
+      # drains. 8 x 64 MiB is several months of the narrowed rule set above
+      # while capping the root disk at half a gigabyte.
+      security.auditd.settings = lib.mkIf cfg.kernelAudit {
+        max_log_file = 64;
+        num_logs = 8;
+        max_log_file_action = "rotate";
       };
 
       systemd.services.sinnix-audit-drain = lib.mkIf cfg.kernelAudit {

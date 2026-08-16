@@ -22,12 +22,41 @@ SINCE="$(cat "$WATERMARK" 2>/dev/null || true)"
 NOW_EPOCH="$(date +%s)"
 
 if [[ -n "$SINCE" ]]; then
-  START_ARG=(-ts "$(date -d "@$SINCE" +%m/%d/%Y)" "$(date -d "@$SINCE" +%H:%M:%S)")
+  # %y, NOT %Y. ausearch takes a TWO-digit year and rejects a four-digit one
+  # outright ("Invalid start date (08/16/2026). Month, Day, and Year are
+  # required."), exiting 1 -- the same code it uses for "nothing matched".
+  # So the drain silently archived nothing for as long as a watermark had
+  # existed, advancing past each unread window on every run.
+  START_ARG=(-ts "$(date -d "@$SINCE" +%m/%d/%y)" "$(date -d "@$SINCE" +%H:%M:%S)")
 else
   START_ARG=(-ts today)
 fi
 
-raw="$(ausearch "${START_ARG[@]}" --format raw 2>/dev/null || true)"
+# ausearch exits 1 for "nothing matched" and >1 for a real failure, and the
+# two must never collapse into each other. They used to: `|| true` with
+# stderr discarded turned every failure into the empty-result path, which
+# then ADVANCED THE WATERMARK past records it had not archived. On
+# 2026-08-16 that reported "no new records" hourly for seven hours while
+# auditd wrote 5.8 GB, and every record in those windows was permanently
+# unrecoverable. On a real failure the watermark stays put and the unit goes
+# red, so the next run re-reads the same window.
+err_file="$(mktemp)"
+trap 'rm -f "$err_file"' EXIT
+set +e
+raw="$(ausearch "${START_ARG[@]}" --format raw 2>"$err_file")"
+ausearch_rc=$?
+set -e
+
+# Exit status alone is not enough to tell failure from an empty window:
+# ausearch reports a malformed -ts argument with exit 1, the very code it
+# uses for "nothing matched". Anything on stderr therefore counts as a
+# failure too -- it is silent on a genuinely empty window.
+if [[ "$ausearch_rc" -gt 1 || -s "$err_file" ]]; then
+  echo "sinnix-audit-drain: ausearch failed (exit $ausearch_rc); watermark held at ${SINCE:-<unset>}" >&2
+  cat "$err_file" >&2
+  exit 1
+fi
+
 if [[ -z "$raw" ]]; then
   echo "$NOW_EPOCH" >"$WATERMARK"
   echo "sinnix-audit-drain: no new records"
