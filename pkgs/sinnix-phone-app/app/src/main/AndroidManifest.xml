@@ -10,6 +10,11 @@
 
   <!-- Capture -->
   <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Lets TransportGuard restart Termux's sshd when MIUI has stopped it.
+         Requires allow-external-apps=true in termux.properties on the device;
+         without it the intent is refused and the guard reports rather than
+         repairs. -->
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
   <uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -111,6 +116,7 @@
     close to failing. It was visibility the whole time.
   -->
   <queries>
+        <package android:name="com.termux" />
     <package android:name="com.google.android.apps.healthdata" />
   </queries>
 
