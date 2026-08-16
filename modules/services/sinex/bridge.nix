@@ -329,13 +329,16 @@ in
               # loopback-TCP connections; the upstream module retains peer
               # only for the postgresql-setup service account.
               localAuth = "scram-sha-256";
-              # Delay postgresql-setup until agenix has materialized the
-              # password file required by SCRAM authentication.
-              setupWaitForPaths = lib.optional (
-                cfg.provisionDatabase
-                && databasePasswordFile != null
-                && config.services.sinex.database.localAuth != "trust"
-              ) databasePasswordFile;
+              # Deliberately NOT sinex's setupWaitForPaths: that option renders
+              # ConditionPathIsReadable=, which is not a systemd condition at
+              # all. systemd therefore ignored it -- so the gate never gated
+              # anything -- and logged "Unknown key 'ConditionPathIsReadable'
+              # in section [Unit], ignoring" on every reparse: 65,577 warnings
+              # in 24 hours on 2026-08-16, the single largest journal producer
+              # on this host. The equivalent condition is declared below with a
+              # key systemd actually implements. Drop this override once sinex
+              # fixes the option upstream.
+              setupWaitForPaths = [ ];
             };
 
             core = {
@@ -574,6 +577,21 @@ in
         };
 
         systemd.services = lib.mkMerge [
+          # The gate sinex's setupWaitForPaths was meant to be, spelled with a
+          # condition systemd implements. agenix writes the file with its
+          # content in place, so existence is the materialization signal, and
+          # an unmet condition SKIPS the unit rather than failing it -- the
+          # same semantics the original intended.
+          (lib.mkIf
+            (
+              cfg.provisionDatabase
+              && databasePasswordFile != null
+              && config.services.sinex.database.localAuth != "trust"
+            )
+            {
+              postgresql-setup.unitConfig.ConditionPathExists = [ databasePasswordFile ];
+            }
+          )
           {
             postgresql = {
               unitConfig.RequiresMountsFor = [ sinexRuntimeRoot ];
