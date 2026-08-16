@@ -5,84 +5,164 @@
 set -euo pipefail
 
 # timer -> state-dump -> `claude -p` (enrichment-pass skill) -> versioned
-# outputs under /realm/data/derived/enrichment/. Single-writer
-# invariant: this script NEVER writes to polylogue's or sinex's stores, and
-# writes only under /realm/data/derived/enrichment/ (outputs) and
-# /realm/state/enrichment/ (watermark). Every other path it touches is
-# read-only.
+# outputs under /realm/data/derived/enrichment/.
 #
-# Substrate-independent by design: inputs are read from whatever
-# files/commands happen to exist; an absent or empty source is
-# not an error, it just means nothing changed there since the watermark (or
-# the source doesn't exist on this host yet) -- see dots/_ai/skills/
-# enrichment-pass/SKILL.md for how the model is told to handle that.
+# Single-writer invariant: writes only the output root and the watermark at
+# /realm/state/enrichment/; never polylogue's or sinex's stores.
+#
+# Every input is optional. Absent or empty means nothing changed since the
+# watermark, not a fault -- the skill tells the model to treat it that way.
 
 WATERMARK_FILE="/realm/state/enrichment/last-run"
 OUTPUT_ROOT="/realm/data/derived/enrichment"
+
+# Pinned rather than inherited from interactive settings. Opus by measurement,
+# not default: on an identical bundle it raised 7 flags to Sonnet's 5 and
+# Haiku's 1, and was the only tier to catch this script's own dead lynchpin
+# path and failing steering export.
+MODEL="${SINNIX_ENRICH_MODEL:-opus}"
+
+# The watermark only advances on success, so a run after an outage sees a
+# window hours wide. Cap the bundle, keeping the most recent lines.
+HOOKS_LINE_CAP="${SINNIX_ENRICH_HOOKS_CAP:-5000}"
 
 NOW_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 FROM_ISO=""
 if [[ -f "$WATERMARK_FILE" ]]; then
   FROM_ISO="$(cat "$WATERMARK_FILE")"
 fi
-ATUIN_AFTER="${FROM_ISO:-24 hours ago}"
-JOURNALCTL_SINCE="${FROM_ISO:-24 hours ago}"
+# One absolute instant drives every filter; unlike "24 hours ago" it is also
+# usable as a jq comparand.
+SINCE_ISO="${FROM_ISO:-$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)}"
 
 BUNDLE="$(mktemp -d)"
 trap 'rm -rf "$BUNDLE"' EXIT
 
+# Computed up front so the signal handler can write a marker into it:
+# TimeoutStartSec kills used to leave no trace at all.
+OUT_DIR="$OUTPUT_ROOT/$(date -u +%Y-%m-%d)/$(date -u +%H%M)"
+
+write_failure() {
+  mkdir -p "$OUT_DIR"
+  jq -n \
+    --arg schema "sinnix-enrichment-v1-failure" \
+    --arg generated_at "$NOW_ISO" \
+    --arg model "$MODEL" \
+    --arg error "$1" \
+    --argjson result "${2:-null}" \
+    '{schema: $schema, generated_at: $generated_at, model: $model, error: $error, result: $result}' \
+    >"$OUT_DIR/failure.json"
+}
+
+on_signal() {
+  write_failure "terminated by signal before completing (TimeoutStartSec or manual stop)"
+  echo "sinnix-enrich-dump: terminated, marker written to $OUT_DIR/failure.json" >&2
+  exit 143
+}
+trap on_signal TERM INT
+
 # ---------------------------------------------------------------- assemble
 
+# Health slice, not the whole 125KB inventory. The contract only asks what the
+# inventory flags as unhealthy, and shipping it whole is most of the ~579k-token
+# floor a pass costs even on an empty window. The full file stays readable at
+# /etc for drill-down.
 if [[ -r /etc/sinnix/runtime-inventory.json ]]; then
-  cp /etc/sinnix/runtime-inventory.json "$BUNDLE/runtime-inventory.json"
+  jq '{
+        source: "/etc/sinnix/runtime-inventory.json",
+        note: "health slice; read the source path for full detail",
+        acknowledged_down: [ .surfaces | to_entries[]
+                             | select(.value.acknowledged.down == true)
+                             | {name: .key, unit: .value.unit, acknowledged: .value.acknowledged} ],
+        surfaces: [ .surfaces | to_entries[]
+                    | {name: .key, unit: .value.unit, manager: .value.manager,
+                       resourceClass: .value.resourceClass,
+                       captures: [ (.value.captures // [])[] | {name, path, staleAfterSeconds, eventDriven} ]} ]
+      }' /etc/sinnix/runtime-inventory.json >"$BUNDLE/runtime-inventory.json" 2>/dev/null \
+    || cp /etc/sinnix/runtime-inventory.json "$BUNDLE/runtime-inventory.json"
 fi
 
-# Steering workspace beads export (future increment may create a dedicated
-# workspace at /realm/state/steering/.beads -- graceful no-op until then).
+# Absent inputs are normal; inputs that FAIL are not, and a bare `|| true`
+# makes the two indistinguishable. Record why each one is missing.
+INPUT_ERRORS="$BUNDLE/.input-errors.jsonl"
+: >"$INPUT_ERRORS"
+note_input_error() {
+  jq -nc --arg source "$1" --arg error "$2" '{source: $source, error: $error}' >>"$INPUT_ERRORS"
+}
+
+# bd rewrites its own store on every call (dolt reimport, lockfile,
+# last-touched), so this needs /realm/state/steering writable, not just readable.
 if [[ -d /realm/state/steering/.beads ]]; then
-  bd export -C /realm/state/steering -o "$BUNDLE/steering-export.jsonl" 2>/dev/null || true
+  if ! bd_err="$(bd export -C /realm/state/steering -o "$BUNDLE/steering-export.jsonl" 2>&1)"; then
+    note_input_error steering-export "$(tail -c 500 <<<"$bd_err")"
+    rm -f "$BUNDLE/steering-export.jsonl"
+  fi
 fi
 
 if command -v atuin >/dev/null 2>&1; then
-  atuin search --after "$ATUIN_AFTER" "" >"$BUNDLE/atuin-tail.txt" 2>/dev/null || true
+  atuin search --after "$SINCE_ISO" "" >"$BUNDLE/atuin-tail.txt" 2>/dev/null || true
 fi
 
 # Polylogue hook-spool deltas.
+#
+# mtime selects candidate files; the per-record timestamp then selects the
+# rows actually in-window. mtime alone over-read this input ~5x.
 POLYLOGUE_HOOKS_DIR="/realm/state/polylogue/hooks"
+HOOKS_TRUNCATED=0
 if [[ -d "$POLYLOGUE_HOOKS_DIR" ]]; then
   : >"$BUNDLE/polylogue-hooks.jsonl"
-  if [[ -n "$FROM_ISO" ]]; then
-    find "$POLYLOGUE_HOOKS_DIR" -name '*.jsonl' -newermt "$FROM_ISO" -exec cat {} + \
-      >>"$BUNDLE/polylogue-hooks.jsonl" 2>/dev/null || true
-  else
-    find "$POLYLOGUE_HOOKS_DIR" -name '*.jsonl' -exec cat {} + \
-      >>"$BUNDLE/polylogue-hooks.jsonl" 2>/dev/null || true
+  find "$POLYLOGUE_HOOKS_DIR" -name '*.jsonl' -newermt "$SINCE_ISO" -exec cat {} + 2>/dev/null \
+    | jq -c --arg s "$SINCE_ISO" 'select((.timestamp // "") >= $s)' 2>/dev/null \
+      >"$BUNDLE/.hooks-window.jsonl" || true
+  if [[ -f "$BUNDLE/.hooks-window.jsonl" ]]; then
+    hooks_lines="$(wc -l <"$BUNDLE/.hooks-window.jsonl")"
+    if [[ "$hooks_lines" -gt "$HOOKS_LINE_CAP" ]]; then
+      HOOKS_TRUNCATED=1
+      printf '{"_note":"TRUNCATED: %s in-window records, showing the most recent %s"}\n' \
+        "$hooks_lines" "$HOOKS_LINE_CAP" >>"$BUNDLE/polylogue-hooks.jsonl"
+      tail -n "$HOOKS_LINE_CAP" "$BUNDLE/.hooks-window.jsonl" >>"$BUNDLE/polylogue-hooks.jsonl"
+    else
+      cat "$BUNDLE/.hooks-window.jsonl" >>"$BUNDLE/polylogue-hooks.jsonl"
+    fi
+    rm -f "$BUNDLE/.hooks-window.jsonl"
   fi
 fi
 
-# Raw Claude/Codex session JSONL deltas, mtime-filtered since the watermark.
+# Raw Claude/Codex session JSONL deltas, filtered per-record like the hook
+# spool. Files with nothing in-window are dropped rather than implying coverage.
 SESSIONS_DIR="$HOME/.claude/projects"
 if [[ -d "$SESSIONS_DIR" ]]; then
   mkdir -p "$BUNDLE/session-deltas"
-  if [[ -n "$FROM_ISO" ]]; then
-    find "$SESSIONS_DIR" -name '*.jsonl' -newermt "$FROM_ISO" -print0 2>/dev/null
-  else
-    find "$SESSIONS_DIR" -name '*.jsonl' -newermt "24 hours ago" -print0 2>/dev/null
-  fi | while IFS= read -r -d '' f; do
-    cp "$f" "$BUNDLE/session-deltas/$(basename "$(dirname "$f")")-$(basename "$f")" 2>/dev/null || true
-  done
+  find "$SESSIONS_DIR" -name '*.jsonl' -newermt "$SINCE_ISO" -print0 2>/dev/null \
+    | while IFS= read -r -d '' f; do
+      dest="$BUNDLE/session-deltas/$(basename "$(dirname "$f")")-$(basename "$f")"
+      jq -c --arg s "$SINCE_ISO" 'select((.timestamp // "") >= $s)' "$f" \
+        >"$dest" 2>/dev/null || true
+      [[ -s "$dest" ]] || rm -f "$dest"
+    done
 fi
 
-# Lynchpin current-state product, only if fresh (<24h).
-LYNCHPIN_PACKS="/realm/project/sinity-lynchpin/.agent/scratch/current-state-packs"
-if [[ -d "$LYNCHPIN_PACKS" ]]; then
-  latest="$(find "$LYNCHPIN_PACKS" -name '*.json' -mtime -1 -print 2>/dev/null | sort | tail -1)"
-  if [[ -n "$latest" ]]; then
-    cp "$latest" "$BUNDLE/lynchpin-current-state.json"
-  fi
+# Lynchpin current-state product, only if fresh (<24h). Both known output
+# locations, and markdown as well as json -- the packs directory has only ever
+# held .md, so globbing .json alone could never match anything.
+LYNCHPIN_DIRS=(
+  "/realm/project/sinity-lynchpin/.agent/scratch/current-state-packs"
+  "/realm/project/sinity-lynchpin/.lynchpin/generated"
+)
+latest=""
+for d in "${LYNCHPIN_DIRS[@]}"; do
+  [[ -d "$d" ]] || continue
+  candidate="$(find "$d" -maxdepth 1 -type f \( -name '*current-state*.md' -o -name '*current-state*.json' -o -name '*-pack.md' \) \
+    -newermt "$SINCE_ISO" -print 2>/dev/null | sort | tail -1)"
+  [[ -n "$candidate" ]] && latest="$candidate"
+done
+if [[ -n "$latest" ]]; then
+  cp "$latest" "$BUNDLE/lynchpin-current-state.${latest##*.}"
+else
+  note_input_error lynchpin-current-state "no current-state product newer than $SINCE_ISO in: ${LYNCHPIN_DIRS[*]}"
 fi
 
-journalctl -p warning --since="$JOURNALCTL_SINCE" --no-pager 2>/dev/null | tail -n 500 \
+journalctl -p warning --since="$SINCE_ISO" --no-pager 2>/dev/null | tail -n 500 \
   >"$BUNDLE/journald-warnings.txt" || true
 
 # ------------------------------------------------------------------ process
@@ -97,62 +177,104 @@ files into that same directory: narrative.md and state-delta.json (schema \
 sinnix-enrichment-v1, per the skill). Window: from=${FROM_ISO:-null} to=$NOW_ISO. \
 Do not write anywhere else on the filesystem."
 
+# Separate streams so the result JSON stays parseable. Task is denied: the
+# contract needs no delegation, and subagent fan-out makes the pass unbounded.
+RESULT_JSON="$BUNDLE/.claude-result.json"
+STDERR_LOG="$BUNDLE/.claude-stderr.log"
 FAILED=0
-OUT="$(env -u ANTHROPIC_API_KEY claude -p "$PROMPT" --output-format json 2>&1)" || FAILED=1
+env -u ANTHROPIC_API_KEY claude -p "$PROMPT" \
+  --model "$MODEL" \
+  --disallowed-tools Task \
+  --output-format json \
+  >"$RESULT_JSON" 2>"$STDERR_LOG" || FAILED=1
 
-DATE_DIR="$(date -u +%Y-%m-%d)"
-TIME_DIR="$(date -u +%H%M)"
-OUT_DIR="$OUTPUT_ROOT/$DATE_DIR/$TIME_DIR"
+# Both paths account for usage: a pass costs quota whether or not it produces.
+usage_json() {
+  jq -n --slurpfile r "$RESULT_JSON" '
+    ($r[0] // {}) as $x |
+    ($x.modelUsage // {}) as $m |
+    {
+      session_id: $x.session_id,
+      num_turns: $x.num_turns,
+      duration_ms: $x.duration_ms,
+      duration_api_ms: $x.duration_api_ms,
+      total_cost_usd: $x.total_cost_usd,
+      per_model: ($m | with_entries(.value |= {
+        input: (.inputTokens // 0),
+        output: (.outputTokens // 0),
+        cache_read: (.cacheReadInputTokens // 0),
+        cache_create: (.cacheCreationInputTokens // 0)
+      })),
+      total_tokens: ([ $m[] | (.inputTokens // 0) + (.outputTokens // 0)
+                       + (.cacheReadInputTokens // 0) + (.cacheCreationInputTokens // 0) ]
+                     | add // 0)
+    }' 2>/dev/null || echo 'null'
+}
+
+fail_with() {
+  write_failure "$1" "$(jq -n \
+    --slurpfile r "$RESULT_JSON" \
+    --arg stderr "$(tail -c 4000 "$STDERR_LOG" 2>/dev/null || true)" \
+    --argjson usage "$(usage_json)" \
+    '{result: ($r[0] // null), stderr: $stderr, usage: $usage}' 2>/dev/null || echo null)"
+  echo "sinnix-enrich-dump: FAILED ($1), marker written to $OUT_DIR/failure.json" >&2
+  exit 1
+}
+
 mkdir -p "$OUT_DIR"
 
 if [[ "$FAILED" -eq 1 ]] || [[ ! -s "$BUNDLE/narrative.md" ]] || [[ ! -s "$BUNDLE/state-delta.json" ]]; then
   # Failure honesty: a failed or incomplete pass must leave a visible
   # marker row, never silence.
-  jq -n \
-    --arg schema "sinnix-enrichment-v1-failure" \
-    --arg generated_at "$NOW_ISO" \
-    --arg error "claude -p invocation failed or did not produce both required outputs: $OUT" \
-    '{schema: $schema, generated_at: $generated_at, error: $error}' \
-    >"$OUT_DIR/failure.json"
-  echo "sinnix-enrich-dump: FAILED, marker written to $OUT_DIR/failure.json" >&2
-  exit 1
+  fail_with "claude -p invocation failed or did not produce both required outputs"
 fi
 
 if ! jq -e '.schema == "sinnix-enrichment-v1" and (.inputs | type == "array")' \
   "$BUNDLE/state-delta.json" >/dev/null 2>&1; then
-  jq -n \
-    --arg schema "sinnix-enrichment-v1-failure" \
-    --arg generated_at "$NOW_ISO" \
-    --arg error "state-delta.json failed schema validation" \
-    '{schema: $schema, generated_at: $generated_at, error: $error}' \
-    >"$OUT_DIR/failure.json"
-  echo "sinnix-enrich-dump: FAILED schema validation, marker written to $OUT_DIR/failure.json" >&2
-  exit 1
+  fail_with "state-delta.json failed schema validation"
 fi
 
 cp "$BUNDLE/narrative.md" "$OUT_DIR/narrative.md"
 cp "$BUNDLE/state-delta.json" "$OUT_DIR/state-delta.json"
 
-# Provenance pointers, not copies of the raw evidence (the raw sources are
-# already durable elsewhere -- polylogue's own captures, session JSONL under
-# ~/.claude/projects, journald itself). This just records what was present
-# at bundle-assembly time and its rough size.
-{
-  echo "{"
-  first=1
+# Pointers and cost, not copies -- the raw sources are durable elsewhere.
+# `du -sb` rather than `stat -c%s` so session-deltas reports its contents
+# rather than its directory entry.
+INPUTS_JSON="$(
   for f in "$BUNDLE"/*; do
+    [[ -e "$f" ]] || continue
     name="$(basename "$f")"
-    [[ "$name" == "narrative.md" || "$name" == "state-delta.json" ]] && continue
-    [[ "$first" -eq 0 ]] && echo ","
-    first=0
-    size="$(stat -c%s "$f" 2>/dev/null || echo 0)"
-    printf '  "%s": {"bytes": %s}' "$name" "$size"
-  done
-  echo ""
-  echo "}"
-} >"$OUT_DIR/provenance.json"
+    case "$name" in
+      narrative.md | state-delta.json) continue ;;
+    esac
+    size="$(du -sb "$f" 2>/dev/null | cut -f1)"
+    jq -n --arg n "$name" --argjson b "${size:-0}" '{($n): {bytes: $b}}'
+  done | jq -s 'add // {}'
+)"
+
+jq -n \
+  --arg schema "sinnix-enrichment-provenance-v1" \
+  --arg generated_at "$NOW_ISO" \
+  --arg model "$MODEL" \
+  --arg window_from "${FROM_ISO:-}" \
+  --arg window_to "$NOW_ISO" \
+  --argjson hooks_truncated "$([[ "$HOOKS_TRUNCATED" -eq 1 ]] && echo true || echo false)" \
+  --argjson inputs "${INPUTS_JSON:-{\}}" \
+  --argjson input_errors "$(jq -sc '.' "$INPUT_ERRORS" 2>/dev/null || echo '[]')" \
+  --argjson usage "$(usage_json)" \
+  '{
+     schema: $schema,
+     generated_at: $generated_at,
+     model: $model,
+     window: { from: (if $window_from == "" then null else $window_from end), to: $window_to },
+     hooks_truncated: $hooks_truncated,
+     inputs: $inputs,
+     input_errors: $input_errors,
+     usage: $usage
+   }' >"$OUT_DIR/provenance.json"
 
 mkdir -p "$(dirname "$WATERMARK_FILE")"
 echo "$NOW_ISO" >"$WATERMARK_FILE"
 
-echo "sinnix-enrich-dump: wrote $OUT_DIR (watermark advanced to $NOW_ISO)"
+tokens="$(jq -r '.usage.total_tokens // "?"' "$OUT_DIR/provenance.json" 2>/dev/null || echo '?')"
+echo "sinnix-enrich-dump: wrote $OUT_DIR (model=$MODEL tokens=$tokens, watermark advanced to $NOW_ISO)"

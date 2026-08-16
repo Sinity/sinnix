@@ -186,9 +186,12 @@
     # Operator steering: store + rituals + read-only cockpit at
     # http://127.0.0.1:8791.
     steering.enable = true;
-    # Hourly state-dump -> claude -p (enrichment-pass skill) -> versioned
+    # Periodic state-dump -> claude -p (enrichment-pass skill) -> versioned
     # derived outputs.
     enrichment-loop.enable = true;
+    # Kernel audit capture plus the check that no unit is sandboxed out of
+    # writing its own declared output.
+    sandbox-audit.enable = true;
     weechat-log-sealer.enable = true;
     # Backstop reaper for orphaned per-checkout sinex dev-postgres instances;
     # primary cleanup is sinnix-direnvrc's owner-watcher.

@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Report units whose sandbox prevents them writing what they declare, and capture lanes that have never produced
+# runtimeInputs: bash coreutils findutils gnugrep jq systemd
+set -euo pipefail
+
+# Sandboxing fails silently: a unit denied a write logs nothing, and its
+# capture lane just stays empty. Rather than kernel auditing every EROFS, this
+# compares each surface's DECLARED outputs against the write surface its unit
+# actually has, and checks whether the lane ever produced anything.
+
+INVENTORY="${SINNIX_RUNTIME_INVENTORY:-/etc/sinnix/runtime-inventory.json}"
+OUT="${SINNIX_SANDBOX_AUDIT_OUT:-/realm/data/captures/machine/sandbox-audit.jsonl}"
+NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+QUIET=0
+[[ "${1:-}" == "--quiet" ]] && QUIET=1
+
+[[ -r "$INVENTORY" ]] || {
+  echo "sinnix-sandbox-audit: no runtime inventory at $INVENTORY" >&2
+  exit 1
+}
+
+show_prop() {
+  # $1=manager $2=unit $3=property -> bare value
+  local scope=()
+  [[ "$1" == "user" ]] && scope=(--user)
+  systemctl "${scope[@]}" show "$2" -p "$3" --value 2>/dev/null || true
+}
+
+findings="$(mktemp)"
+trap 'rm -f "$findings"' EXIT
+
+emit() {
+  jq -nc \
+    --arg ts "$NOW" --arg unit "$2" --arg manager "$1" --arg kind "$3" \
+    --arg path "$4" --arg detail "$5" \
+    '{timestamp:$ts, unit:$unit, manager:$manager, kind:$kind, path:$path, detail:$detail}' \
+    >>"$findings"
+}
+
+# A path is writable if it sits under some ReadWritePaths entry. Under
+# ProtectSystem=strict the whole hierarchy is read-only, so absence from that
+# list is decisive; under weaker modes only /usr, /boot and /etc are.
+covered_by() {
+  local path="$1" rw="$2" entry
+  for entry in $rw; do
+    entry="${entry#-}"
+    entry="${entry#+}"
+    [[ -z "$entry" ]] && continue
+    [[ "$path" == "$entry" || "$path" == "$entry"/* ]] && return 0
+  done
+  return 1
+}
+
+while IFS=$'\t' read -r _name unit manager path; do
+  [[ -z "$unit" ]] && continue
+
+  protect_system="$(show_prop "$manager" "$unit" ProtectSystem)"
+  protect_home="$(show_prop "$manager" "$unit" ProtectHome)"
+  rw_paths="$(show_prop "$manager" "$unit" ReadWritePaths)"
+  state_dir="$(show_prop "$manager" "$unit" StateDirectory)"
+
+  # StateDirectory is implicitly writable.
+  [[ -n "$state_dir" ]] && rw_paths="$rw_paths /var/lib/$state_dir"
+
+  hardened=0
+  [[ "$protect_system" == "strict" || "$protect_system" == "full" ]] && hardened=1
+  [[ "$protect_home" == "yes" || "$protect_home" == "read-only" ]] && hardened=1
+
+  if [[ "$hardened" -eq 1 ]] && ! covered_by "$path" "$rw_paths"; then
+    emit "$manager" "$unit" "confined-from-own-output" "$path" \
+      "ProtectSystem=$protect_system ProtectHome=$protect_home ReadWritePaths='$rw_paths' does not cover this declared capture path"
+  fi
+
+  if [[ ! -e "$path" ]]; then
+    emit "$manager" "$unit" "lane-missing" "$path" "declared capture path does not exist"
+  elif [[ -d "$path" ]] && [[ -z "$(find "$path" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
+    emit "$manager" "$unit" "lane-empty" "$path" "declared capture lane has never held a file"
+  elif [[ -f "$path" ]] && [[ ! -s "$path" ]]; then
+    emit "$manager" "$unit" "lane-empty" "$path" "declared capture file is zero bytes"
+  fi
+done < <(
+  jq -r '.surfaces | to_entries[] | .value as $s | ($s.captures // [])[]
+         | select(.path != null)
+         | [$s.unit // "", $s.manager // "system", .path] | @tsv' "$INVENTORY" \
+    | awk -F'\t' '{print "-\t"$1"\t"$2"\t"$3}'
+)
+
+# Any hardened unit that can exec an agent CLI must be able to persist that
+# agent's transcript, or the run vanishes with no error anywhere.
+while IFS=$'\t' read -r unit manager; do
+  [[ -z "$unit" ]] && continue
+  exec_line="$(show_prop "$manager" "$unit" ExecStart)"
+  grep -qE '\b(claude|codex|gemini)\b' <<<"$exec_line" || continue
+  protect_home="$(show_prop "$manager" "$unit" ProtectHome)"
+  protect_system="$(show_prop "$manager" "$unit" ProtectSystem)"
+  rw_paths="$(show_prop "$manager" "$unit" ReadWritePaths)"
+  [[ "$protect_system" == "strict" || "$protect_system" == "full" \
+    || "$protect_home" == "yes" || "$protect_home" == "read-only" ]] || continue
+  if ! covered_by "$HOME/.claude" "$rw_paths"; then
+    emit "$manager" "$unit" "agent-transcript-loss" "$HOME/.claude" \
+      "unit execs an agent CLI under mount-namespace hardening but cannot write the transcript directory"
+  fi
+done < <(jq -r '.surfaces | to_entries[] | [.value.unit // "", .value.manager // "system"] | @tsv' "$INVENTORY")
+
+count="$(wc -l <"$findings" 2>/dev/null || echo 0)"
+mkdir -p "$(dirname "$OUT")"
+if [[ "$count" -gt 0 ]]; then
+  cat "$findings" >>"$OUT"
+  if [[ "$QUIET" -eq 0 ]]; then
+    jq -r '"\(.kind)\t\(.unit)\t\(.path)\t\(.detail)"' "$findings"
+  fi
+  # Journal at warning level so the sentinel and `journalctl -p warning` see it.
+  while IFS= read -r line; do
+    printf 'sinnix-sandbox-audit: %s\n' \
+      "$(jq -r '"\(.kind) \(.unit) \(.path): \(.detail)"' <<<"$line")" >&2
+  done <"$findings"
+else
+  [[ "$QUIET" -eq 0 ]] && echo "sinnix-sandbox-audit: no findings"
+fi
+exit 0

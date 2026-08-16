@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Archive all kernel audit records into the capture lake, raw plus structured JSONL
+# runtimeInputs: bash coreutils gnugrep jq audit python3 systemd
+set -euo pipefail
+
+# auditd's own log rotates and is binary-adjacent; the lake keeps it the way it
+# keeps syslog. Every record since the watermark is archived verbatim, and a
+# structured projection is written beside it for querying. No key filter: the
+# rules decide what the kernel emits, the drain keeps all of it.
+
+LANE="${SINNIX_AUDIT_LANE:-/realm/data/captures/audit}"
+WATERMARK="${SINNIX_AUDIT_WATERMARK:-/realm/state/audit-drain/last-run}"
+
+mkdir -p "$LANE" "$(dirname "$WATERMARK")"
+
+DAY="$(date -u +%Y-%m-%d)"
+RAW_OUT="$LANE/audit-$DAY.log"
+JSON_OUT="$LANE/audit-$DAY.jsonl"
+
+SINCE="$(cat "$WATERMARK" 2>/dev/null || true)"
+NOW_EPOCH="$(date +%s)"
+
+if [[ -n "$SINCE" ]]; then
+  START_ARG=(-ts "$(date -d "@$SINCE" +%m/%d/%Y)" "$(date -d "@$SINCE" +%H:%M:%S)")
+else
+  START_ARG=(-ts today)
+fi
+
+raw="$(ausearch "${START_ARG[@]}" --format raw 2>/dev/null || true)"
+if [[ -z "$raw" ]]; then
+  echo "$NOW_EPOCH" >"$WATERMARK"
+  echo "sinnix-audit-drain: no new records"
+  exit 0
+fi
+
+printf '%s\n' "$raw" >>"$RAW_OUT"
+
+# Structured projection. Every key=value on the record is preserved -- the
+# point is to keep the whole record, not a chosen subset -- with the audit
+# event id lifted out so records belonging to one event can be grouped.
+count="$(printf '%s\n' "$raw" | python3 -c '
+import json, re, sys, datetime
+
+FIELD = re.compile(r"([a-zA-Z0-9_-]+)=(\"[^\"]*\"|\S+)")
+HDR = re.compile(r"audit\((\d+)\.(\d+):(\d+)\):")
+drained = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+n = 0
+for line in sys.stdin:
+    line = line.rstrip("\n")
+    if not line or line.startswith("----"):
+        continue
+    hdr = HDR.search(line)
+    rec = {"drained_at": drained, "raw": line}
+    if hdr:
+        secs, msecs, serial = hdr.groups()
+        rec["event_time"] = datetime.datetime.fromtimestamp(
+            int(secs), datetime.timezone.utc
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        rec["event_epoch"] = float(f"{secs}.{msecs}")
+        rec["event_id"] = int(serial)
+    fields = {}
+    for key, value in FIELD.findall(line):
+        if key == "msg" and value.startswith("audit("):
+            continue
+        fields[key] = value[1:-1] if value.startswith("\"") else value
+    rec["type"] = fields.pop("type", None)
+    rec["fields"] = fields
+    sys.stdout.write(json.dumps(rec, separators=(",", ":")) + "\n")
+    n += 1
+sys.stderr.write(str(n))
+' 2>&1 >>"$JSON_OUT" || echo 0)"
+
+echo "$NOW_EPOCH" >"$WATERMARK"
+echo "sinnix-audit-drain: archived $count records to $RAW_OUT / $JSON_OUT"

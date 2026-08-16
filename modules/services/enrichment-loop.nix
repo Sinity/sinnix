@@ -18,6 +18,7 @@
 }@args:
 let
   username = config.sinnix.user.name;
+  homeDir = "/home/${username}";
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   dump = scriptPkgs.sinnix-enrich-dump;
   stateDir = "/realm/state/enrichment";
@@ -67,24 +68,20 @@ mkServiceModule {
                 PrivateTmp = true;
                 NoNewPrivileges = true;
                 ProtectSystem = "strict";
-                ProtectHome = "read-only";
+                # Off so claude can write its session transcript; the write
+                # surface is ReadWritePaths, which ProtectSystem=strict pins.
+                ProtectHome = false;
                 ReadWritePaths = [
                   stateDir
                   outputRoot
-                ];
-                # The 3-minute budget this used to carry did not fit. A day
-                # of measured runs (2026-08-14) lands between 1m40s and
-                # 3m00s with no error exits at all -- every failure was the
-                # ceiling itself, and the last four of five runs timed out
-                # as the estate dump grew. A limit the healthy path is
-                # already touching is not a runaway guard, it is a coin
-                # flip, and each loss costs a full pass plus a critical
-                # notification.
-                #
-                # 10 minutes sits well clear of the observed distribution
-                # while still bounding a genuinely wedged `claude -p`, and
-                # stays under the hourly timer interval so a slow pass can
-                # never overlap its successor.
+                  # bd rewrites its store on export, so a read-only steering
+                  # workspace makes that input fail rather than be absent.
+                  "/realm/state/steering"
+                ]
+                ++ lib.sinnix.systemd.agentRuntimeWritePaths { home = homeDir; };
+                # Clear of the observed run distribution (healthy passes run
+                # 1-3min) but under the hourly interval, so a slow pass still
+                # cannot overlap its successor.
                 TimeoutStartSec = "600s";
               };
             };
