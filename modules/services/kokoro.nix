@@ -7,11 +7,11 @@
 #
 # CPU-only (the image bakes DEVICE=cpu/USE_GPU=false): Kokoro-82M is fast
 # enough on CPU that the gpu-inference admission key would only buy queueing
-# behind ollama/koboldcpp/whisper, and TTS must stay answerable while a CUDA
+# behind ollama/koboldcpp/llama-cpp, and TTS must stay answerable while a CUDA
 # backend is resident. It never requires or conflicts with that key.
 #
 # Socket-activated behind the same idle-aware proxy pattern as
-# ollama/koboldcpp/whisper (modules/services/ai-control.nix): the public port
+# ollama/koboldcpp/llama-cpp (modules/services/ai-control.nix): the public port
 # 8890 is the systemd socket front door (8880 belongs to sinnix-hub); the
 # backend container runs on a private loopback port and exits after 30s idle.
 #

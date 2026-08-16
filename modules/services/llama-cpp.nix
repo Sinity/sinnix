@@ -9,7 +9,7 @@
 # automatically and would need to opt back into the exclusivity mesh.
 #
 # Socket-activated behind the same idle-aware proxy pattern as
-# ollama/koboldcpp/whisper (modules/services/ai-control.nix): port 8081 is
+# ollama/koboldcpp/muse-glimmer (modules/services/ai-control.nix): port 8081 is
 # the systemd socket front door, the backend runs on a private loopback port
 # and exits after idle. DynamicUser + ProtectSystem=strict is read-only, not
 # hidden, so it reads the model under /realm without extra bind mounts.
