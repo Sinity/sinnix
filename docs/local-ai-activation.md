@@ -41,7 +41,7 @@ The GPU services share an exclusive `gpu-inference` resource. Ollama, Glimmer, K
 
 ## Muse Glimmer
 
-Glimmer is served directly by llama.cpp because the packaged Ollama build does not load its architecture. The CUDA package is pinned to upstream llama.cpp `b10353` until nixpkgs-ai carries the support. The service loads the official 17 GB Q4 GGUF from `/realm/media/model/gguf/muse-glimmer-30B-kquant-17gb.gguf` with these fixed runtime settings:
+Glimmer is served directly by llama.cpp because the packaged Ollama build does not load its architecture. The CUDA package is pinned to upstream llama.cpp `b10353` until nixpkgs-ai carries the support. The service loads the official 17 GB Q4 GGUF from `/realm/library/models/gguf/muse-glimmer-30B-kquant-17gb.gguf` with these fixed runtime settings:
 
 - `--n-gpu-layers auto` and `--fit on` place as many layers as fit in the RTX 3080 and keep the rest in system RAM.
 - `--fit-target 1536` leaves approximately 1.5 GiB of VRAM for the desktop and transient buffers.
