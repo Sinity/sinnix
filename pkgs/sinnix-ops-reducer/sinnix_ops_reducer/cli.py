@@ -42,6 +42,16 @@ def main() -> None:
         "--inventory", type=Path, default=Path("/etc/sinnix/runtime-inventory.json")
     )
     parser.add_argument(
+        "--hub-manifest",
+        type=Path,
+        default=None,
+        help=(
+            "Nix-generated hub manifest (routes, AI roster, frontends) the "
+            "server-rendered pages read; absent means a host with no hub, "
+            "whose pages still render from the inventory and the snapshot."
+        ),
+    )
+    parser.add_argument(
         "--agent-controller",
         default=os.environ.get(
             "SINNIX_AGENT_CONTROLLER",
@@ -71,4 +81,12 @@ def main() -> None:
         controller=args.agent_controller,
     )
     fds = list(range(3, 3 + int(os.environ.get("LISTEN_FDS", "0"))))
-    serve(reducer, token, fds, args.interval, actions)
+    serve(
+        reducer,
+        token,
+        fds,
+        args.interval,
+        actions,
+        hub_manifest=args.hub_manifest,
+        inventory_path=args.inventory,
+    )

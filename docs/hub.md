@@ -205,19 +205,33 @@ annotations describe.
 
 ## Rendering
 
-`sinnix-hub-render` runs on a timer (60s) and writes complete HTML: the browser
-fetches nothing to display state. A phone on a flaky link, or a page left open
-overnight, shows the estate as of a timestamp it prints, rather than an empty
-skeleton waiting on XHR. Client-side logic is limited to the action buttons, the
-theme and text-size toggles, the services filter, and the three lines that
-rewrite the frontend port links to whichever host you reached the hub on.
+The ops-reducer renders every page on request and Caddy reverse-proxies the
+page paths to its Unix socket; only `/reports/` is served off disk. Each
+response is complete HTML: the browser fetches nothing to display state. A phone
+on a flaky link, or a page left open overnight, shows the estate as of a
+timestamp it prints, rather than an empty skeleton waiting on XHR. Client-side
+logic is limited to the action buttons, the theme and text-size toggles, the
+services filter, and the three lines that rewrite the frontend port links to
+whichever host you reached the hub on.
 
-Inputs are the reducer snapshot, the runtime inventory, a Nix-generated
+Rendering on request replaced a `sinnix-hub-render` timer that wrote the same
+pages to static files every 60 seconds. The reducer already held the state those
+pages show, so the timer bought nothing but staleness: a page is now as current
+as the moment it was asked for.
+
+Inputs are the reducer's live snapshot, the runtime inventory, a Nix-generated
 manifest, live systemd state, and — for the workload view — the scope cgroups
 and their leader processes. A missing input degrades the page rather than
-failing the unit: with no reducer snapshot, `/work/` still shows live scopes
+failing the request: with no reducer snapshot, `/work/` still shows live scopes
 straight from systemd, and `/` says plainly that it cannot tell you whether
 anything is wrong.
+
+Serving the pages over the reducer's Unix socket is what keeps the auth model
+intact. The reducer treats that socket as authorized — it is 0600 in the
+operator's runtime directory — and still demands a bearer token on its loopback
+TCP listener, so the page routes expose exactly what the action API already
+exposed there. POSTs to `/ops/*` keep the same-origin gate and the reducer's
+`expected_revision` check unchanged.
 
 The visual language is the estate's own: the same CSS custom properties, status
 tones, stat tiles, badges and A−/A+ controls as the generated reports, in the
@@ -229,14 +243,14 @@ stretching one long list across 4K.
 ## Operating it
 
 ```
-systemctl --user status sinnix-hub sinnix-hub-feedback sinnix-hub-render.timer
-systemctl --user start sinnix-hub-render          # re-render now
+systemctl --user status sinnix-hub sinnix-hub-feedback sinnix-ops-reducer
 journalctl --user -u sinnix-hub -n 50             # Caddy errors only; access logs are off
+journalctl --user -u sinnix-ops-reducer -n 50     # page rendering and the action API
 ```
 
-State lives in `/realm/state/sinnix-hub` (rendered pages plus Caddy's scratch)
-and holds nothing that is not regenerated on the next render, so it is on the
-NVMe volume rather than the wear-limited root and needs no persistence entry.
+State lives in `/realm/state/sinnix-hub` (Caddy's own scratch and the access
+log) and holds nothing that is not regenerated, so it is on the NVMe volume
+rather than the wear-limited root and needs no persistence entry.
 
 ## Deliberately not included
 

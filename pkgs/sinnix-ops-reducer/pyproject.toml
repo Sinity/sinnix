@@ -9,3 +9,9 @@ sinnix-ops-reducer = "sinnix_ops_reducer.cli:main"
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
+
+# Explicit, because the pages subpackage must ship with the module: flat-layout
+# auto-discovery would find it today, but silently dropping the renderer if that
+# ever changes is a failure that only shows up as a 500 on the hub.
+[tool.setuptools.packages.find]
+include = ["sinnix_ops_reducer*"]

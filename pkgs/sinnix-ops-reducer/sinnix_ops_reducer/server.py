@@ -10,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from . import pages
 from .actions import ActionError, ActionService
 from .reducer import Reducer
 
@@ -40,9 +41,36 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _write_html(self, status: int, body: str) -> None:
+        payload = body.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
     @property
     def reducer(self) -> Reducer:
         return self.server.reducer  # type: ignore[attr-defined]
+
+    def _serve_page(self, path: str) -> None:
+        """One hub page, rendered from the live snapshot at request time.
+
+        The snapshot is this process's own, not a file re-read: a page shows
+        what the reducer currently believes, which is the whole reason the
+        pages moved here from a timer.
+        """
+        snapshot = self.reducer.snapshot()
+        error = None
+        if not snapshot:
+            snapshot = None
+            error = "the reducer has not published a snapshot yet"
+        manifest = pages.load_manifest(self.server.hub_manifest)  # type: ignore[attr-defined]
+        inventory, _ = pages.load_json(self.server.inventory_path)  # type: ignore[attr-defined]
+        self._write_html(
+            HTTPStatus.OK, pages.render(path, manifest, snapshot, inventory, error)
+        )
 
     def _authorized(self) -> bool:
         if self.server.is_unix:  # type: ignore[attr-defined]
@@ -61,7 +89,9 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authorized():
             self._write(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
             return
-        if self.path == "/v1/health":
+        if pages.is_page_route(self.path):
+            self._serve_page(self.path)
+        elif self.path == "/v1/health":
             self._write(HTTPStatus.OK, self.reducer.health())
         elif self.path == "/v1/snapshot":
             try:
@@ -101,8 +131,16 @@ class Handler(BaseHTTPRequestHandler):
                 self._write(HTTPStatus.NOT_FOUND, {"error": "not_found"})
             else:
                 self._write(HTTPStatus.OK, receipt)
-        else:
+        elif self.path.startswith("/v1/"):
             self._write(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+        else:
+            # Everything that is not the JSON API is a browser asking for a
+            # page that does not exist; answer in the language it asked in.
+            self._write_html(
+                HTTPStatus.NOT_FOUND,
+                "<!doctype html><title>not found</title>"
+                "<p>No such page. <a href=\"/\">Back to the estate.</a></p>\n",
+            )
 
     def do_POST(self) -> None:
         if not self._authorized():
@@ -138,12 +176,20 @@ def serve(
     fds: list[int],
     interval: float,
     actions: ActionService,
+    hub_manifest: Path | None = None,
+    inventory_path: Path = Path("/etc/sinnix/runtime-inventory.json"),
 ) -> None:
+    def stamp(server: ThreadingHTTPServer, is_unix: bool) -> None:
+        server.reducer = reducer  # type: ignore[attr-defined]
+        server.token = token  # type: ignore[attr-defined]
+        server.is_unix = is_unix  # type: ignore[attr-defined]
+        server.hub_manifest = hub_manifest  # type: ignore[attr-defined]
+        server.inventory_path = inventory_path  # type: ignore[attr-defined]
+
     reducer.refresh()
     http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    http.reducer = reducer  # type: ignore[attr-defined]
     reducer.actions = actions  # type: ignore[attr-defined]
-    http.token = token  # type: ignore[attr-defined]
+    stamp(http, False)
     servers: list[ThreadingHTTPServer] = []
     if fds:
         for fd in fds:
@@ -151,13 +197,11 @@ def serve(
             sock = socket.fromfd(
                 fd, socket.AF_UNIX if is_unix else socket.AF_INET, socket.SOCK_STREAM
             )
-            if len(servers) == 0:
+            if is_unix:
                 unix = UnixServer("sinnix", Handler, bind_and_activate=False)
                 unix.socket = sock
                 unix.server_address = sock.getsockname()
-                unix.reducer = reducer  # type: ignore[attr-defined]
-                unix.token = token  # type: ignore[attr-defined]
-                unix.is_unix = True  # type: ignore[attr-defined]
+                stamp(unix, True)
                 servers.append(unix)
             else:
                 inet = ThreadingHTTPServer(
@@ -165,13 +209,10 @@ def serve(
                 )
                 inet.socket = sock
                 inet.server_address = sock.getsockname()
-                inet.reducer = reducer  # type: ignore[attr-defined]
-                inet.token = token  # type: ignore[attr-defined]
-                inet.is_unix = False  # type: ignore[attr-defined]
+                stamp(inet, False)
                 servers.append(inet)
         http.server_close()
     else:
-        http.is_unix = False  # type: ignore[attr-defined]
         servers = [http]
     for server in servers:
         threading.Thread(target=server.serve_forever, daemon=True).start()
