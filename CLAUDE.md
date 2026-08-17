@@ -19,17 +19,12 @@
 - Reconfirm no compatibility aliases/shims are introduced.
 - Reconfirm existing scripts/skills were checked before adding new helpers.
 - Reconfirm commit boundary is coherent and validated.
-- For live desktop/system repairs, if the user asks to apply or switch now,
-  run `switch` directly. Do not insert `check --no-build` first; `switch`
-  already evaluates/builds before activation.
-- For Sinnix NixOS config edits, do not run standalone `nix eval`,
-  `nix build`, or flake-check probes as agent hygiene unless the user
-  explicitly asks for that diagnostic. They are slow on this host and repeat
-  work that `switch` performs through the intended resource wrapper.
-- If `switch` already evaluated/built and failed only during activation, fix the
-  activation blocker and rerun `switch`. Do not add an intervening
-  `check --no-build`; it repeats evidence already gathered while delaying
-  recovery and adding load to a possibly degraded host.
+- `switch` already evaluates and builds before it activates, so never wrap it
+  in hygiene probes: no `check --no-build` before (or between) attempts, and
+  no standalone `nix eval`/`nix build`/flake-check runs on config edits
+  unless the user asks for that diagnostic. They are slow on this host and
+  repeat work `switch` performs through the intended resource wrapper. If
+  `switch` fails during activation, fix the blocker and rerun `switch`.
 
 ## Beads Issue Tracking
 
@@ -232,39 +227,6 @@ Overlays vs packages: override/patch an existing nixpkgs package → overlay
 file; new standalone tool → usually a script under `scripts/` (see below),
 or `pkgs/<name>/` for real derivations.
 
-`sinnix.services.stt` (`modules/services/stt.nix`, `scripts/sinnix-stt`,
-docs/speech.md) is the estate's speech stack, served OpenAI-compatible at
-`/v1/audio/transcriptions`. Four sherpa-onnx models, all under
-`/realm/media/model/sherpa` and fetched on first start: Parakeet TDT 0.6B v3
-(int8) transcribes, Silero VAD gates, pyannote segmentation 3.0 diarizes, and
-NeMo TitaNet-small embeds speakers for verification. It is **CPU-only and
-deliberately outside the `gpu-inference` admission mesh** — it is fast enough
-on CPU (RTF ~0.1 on dense speech) that transcription never has to queue behind
-a resident model. Do not "fix" that by adding CUDA or the admission key; the
-runtime test asserts it stays out of the mesh.
-
-`sinnix.services.muse-glimmer` (`modules/services/muse-glimmer.nix`) serves
-the official Muse Glimmer 30B Q4 GGUF directly through llama.cpp. It is a
-socket-activated, GPU-exclusive hybrid CPU/GPU service with a 1536 MiB fit
-margin and a 32K single-slot context. The model is intentionally separate
-from both the Ollama roster and the existing llama.cpp reranker because the
-current Ollama package does not load Glimmer's architecture. Its CUDA
-llama.cpp package is pinned to upstream b10353 until nixpkgs-ai carries that
-support; LiteLLM exposes the direct endpoint as `local-glimmer`.
-
-`pkgs/sinnix-phone-app/` is the odd one out: an Android app (Sinnix — the
-estate's phone-side member: capture, instruments, ingress, and a remote for
-prime). Kotlin/Compose built through Gradle against a license-accepting
-re-import of the same nixpkgs, made reproducible by the nixpkgs Gradle setup
-hook plus a committed `deps.json` recorded through `mitm-cache` — regenerate it
-with the derivation's `mitmCache.updateScript` after any dependency change. It
-is emitted unsigned and signed at install time against a persistent host-local
-keystore, which is what keeps `adb install -r` an upgrade rather than an
-uninstall that discards runtime grants. Prime's half of its dual transport is
-`scripts/sinnix-phone-dispatcher`, served at the hub's `/phone/v1/*` and also
-driven by the drain. Operate it through `sinnix phone app-*`; see
-`docs/phone.md`.
-
 **Input pinning rules (cache-hit engineering — do not "fix" these):**
 
 - `nixpkgs-ai` is a second, unfollowed nixos-unstable pin feeding the
@@ -275,9 +237,10 @@ driven by the drain. Operate it through `sinnix phone app-*`; see
 - `sinex` deliberately does NOT follow sinnix's nixpkgs, so its derivation
   hash stays stable across sinnix nixpkgs bumps and each sinex rev is
   compiled at most once. The desktop is the builder of record — nothing in
-  sinex CI publishes to sinity.cachix.org — and `switch` publishes the sinex closure to the cache after a
-  successful activation (`sinexCachePush`, flake/command-registry.nix, backed
-  by the shared `scripts/sinnix-sinex-cache-push` push logic). The FIRST
+  sinex CI publishes to sinity.cachix.org — and `switch` publishes the sinex
+  closure to the cache after a successful activation (`sinexCachePush`,
+  flake/command-registry.nix, backed by the shared
+  `scripts/sinnix-sinex-cache-push` push logic). The FIRST
   switch after a sinex master bump no longer pays that compile synchronously:
   `sinnix.services.sinex-cache-prebuild` (`modules/services/sinex-cache-prebuild.nix`,
   enabled on sinnix-prime) is a periodic timer that diffs flake.lock's sinex
@@ -287,6 +250,41 @@ driven by the drain. Operate it through `sinnix phone app-*`; see
   yt-polisher come from GitHub so deploys don't consume local checkout state.
   One-off local testing: `SINNIX_{SINEX,POLYLOGUE,LYNCHPIN}_OVERRIDE=<path>
 switch` (wired as `--override-input --no-write-lock-file`).
+
+## Notable Services & Packages
+
+Surfaces with standing design decisions an agent might otherwise "fix":
+
+- `sinnix.services.stt` (`modules/services/stt.nix`, `scripts/sinnix-stt`,
+  docs/speech.md) is the estate's speech stack, served OpenAI-compatible at
+  `/v1/audio/transcriptions`. Four sherpa-onnx models under
+  `/realm/media/model/sherpa`, fetched on first start: Parakeet TDT 0.6B v3
+  (int8) transcribes, Silero VAD gates, pyannote segmentation 3.0 diarizes,
+  and NeMo TitaNet-small embeds speakers for verification. It is **CPU-only
+  and deliberately outside the `gpu-inference` admission mesh**: fast enough
+  on CPU (RTF ~0.1 on dense speech) that transcription never queues behind a
+  resident model. Do not "fix" that by adding CUDA or the admission key; the
+  runtime test asserts it stays out of the mesh.
+- `sinnix.services.muse-glimmer` (`modules/services/muse-glimmer.nix`) serves
+  the official Muse Glimmer 30B Q4 GGUF directly through llama.cpp:
+  socket-activated, GPU-exclusive hybrid CPU/GPU, 1536 MiB fit margin, 32K
+  single-slot context. Deliberately separate from both the Ollama roster and
+  the llama.cpp reranker because the current Ollama package does not load
+  Glimmer's architecture. Its CUDA llama.cpp package is pinned to upstream
+  b10353 until nixpkgs-ai carries that support; LiteLLM exposes the endpoint
+  as `local-glimmer`.
+- `pkgs/sinnix-phone-app/` is an Android app (Sinnix, the estate's phone-side
+  member: capture, instruments, ingress, and a remote for prime).
+  Kotlin/Compose built through Gradle against a license-accepting re-import
+  of the same nixpkgs, made reproducible by the nixpkgs Gradle setup hook
+  plus a committed `deps.json` recorded through `mitm-cache`; regenerate with
+  the derivation's `mitmCache.updateScript` after any dependency change. The
+  APK is emitted unsigned and signed at install time against a persistent
+  host-local keystore, which keeps `adb install -r` an upgrade rather than an
+  uninstall that discards runtime grants. Prime's half of its dual transport
+  is `scripts/sinnix-phone-dispatcher`, served at the hub's `/phone/v1/*` and
+  also driven by the drain. Operate it through `sinnix phone app-*`; see
+  `docs/phone.md`.
 
 ## Scripts
 
@@ -333,25 +331,23 @@ full `sinnix-<name>`) — it needs zero wiring when a new script is added.
 - Shared skills live in `dots/_ai/skills/`; agent trees (`~/.config/claude/
 skills`, `~/.codex/skills`, `~/.gemini/skills`) are linkFarms over it.
   Codex-only system skills: `dots/codex/skills/.system/`.
-- MCP registry: `flake/data/mcp-registry.nix` (servers, tiers,
-  lean/evidence/full/browser profiles, per-client render). Wiring + agent CLI
-  wrappers live in `modules/features/dev/agents/`: `clis.nix`
-  (`sinnix.features.dev.agentTools`) + `backends.nix` own the CLI wrapper
-  builders (npm-bootstrapped into `~/.local/state/<agent>/npm`, self-updating;
-  `claude` aliases `claude-lean` because the upstream installer clobbers the
-  bare path). The per-client/backend variant axis (which MCP tier, which
-  model/backend, which key source — hermes profiles, claude/codex
-  full/lean/browser/deepseek/local lanes) is pure data in
-  `flake/data/agent-lanes.nix`
-  (`helpers.data.agentLanes`); `clis.nix` renders it by mapping over the
-  registry, `backends.nix` supplies the shared backend-env builders
-  (`mkClaudeBackendEnv`/`mkCodexBackendEnv`) the deepseek/local lanes
-  parameterize. `mcp.nix` (`sinnix.features.dev.mcp-servers`) +
-  `mcp-tools.nix`/`client-profiles.nix`/`serena.nix`/`browser.nix`/
-  `hooks.nix` own the MCP registry wiring and per-client (Codex/Gemini)
-  config generation. Only `clis.nix`/`mcp.nix` are real NixOS modules; the
-  sibling files are plain-nix
-  helpers imported directly, not auto-imported.
+- Agent CLI / MCP data lives in `flake/data/`: `mcp-registry.nix` (servers,
+  tiers, lean/evidence/full/browser profiles, per-client render) and
+  `agent-lanes.nix` (`helpers.data.agentLanes` — the per-client/backend
+  variant axis: which MCP tier, which model/backend, which key source;
+  hermes profiles, claude/codex full/lean/browser/deepseek/local lanes).
+- Wiring lives in `modules/features/dev/agents/`. `clis.nix`
+  (`sinnix.features.dev.agentTools`) renders the lane registry into CLI
+  wrappers (npm-bootstrapped into `~/.local/state/<agent>/npm`,
+  self-updating; `claude` aliases `claude-lean` because the upstream
+  installer clobbers the bare path); `backends.nix` supplies the shared
+  backend-env builders (`mkClaudeBackendEnv`/`mkCodexBackendEnv`) the
+  deepseek/local lanes parameterize. `mcp.nix`
+  (`sinnix.features.dev.mcp-servers`) plus `mcp-tools.nix`/
+  `client-profiles.nix`/`serena.nix`/`browser.nix`/`hooks.nix` own the MCP
+  registry wiring and per-client (Codex/Gemini) config generation. Only
+  `clis.nix`/`mcp.nix` are real NixOS modules; the sibling files are
+  plain-nix helpers imported directly, not auto-imported.
 - Agent gateway: `modules/services/agent-gateway.nix` renders one canonical
   project contract and one official-SDK stdio MCP implementation with
   `remote-readonly`, `local-agent-control`, and `remote-operator` profiles.
@@ -385,9 +381,9 @@ config in `secrets.nix` (repo root).
   plane: where the action API cannot express a target the page says so rather
   than growing a private kill path — `/shaders/` is entirely buttonless for
   exactly that reason, since applying a screen shader is not an action verb.
-  It binds loopback plus the
-  tailscale0 address via an explicit Caddy `bind` (site addresses alone
-  collapse to a `:PORT` wildcard) and opens its ports on tailscale0 only.
+  It binds loopback plus the tailscale0 address via an explicit Caddy `bind`
+  (site addresses alone collapse to a `:PORT` wildcard) and opens its ports
+  on tailscale0 only.
 - **sinnix-ethereal** — Hetzner AX42 headless replica
   (`profiles/cloud.nix`, disko, bootstrap via `nix run .#deploy-ethereal`,
   steady-state via colmena `apply-all`). Runs sinex `deploymentRole =
