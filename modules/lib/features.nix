@@ -88,7 +88,11 @@ let
       surface ? null,
       meta ? { },
       # Declarative scheduled-oneshot job. Attrset or function of the module
-      # args, with keys:
+      # args. NOTE for the function form: the module system injects
+      # _module.args entries (pkgs among them) only for formals the module
+      # FILE names, so a job/surface function using pkgs requires the file's
+      # own argument pattern to declare pkgs even if nothing else there uses
+      # it. Keys:
       #   execStart (required)  full ExecStart string
       #   timer                 { onCalendar | intervalSec, onBootSec,
       #                           persistent, randomizedDelaySec, accuracySec }

@@ -4,6 +4,11 @@
 # degrades verdicts to `unknown`, never to a false `unused`.
 {
   mkServiceModule,
+  # Named although only the job function below uses it: the module system
+  # injects _module.args entries (pkgs among them) only for formals the FILE
+  # names, so a function-form job/surface that wants pkgs needs it declared
+  # here, not just in its own pattern.
+  pkgs,
   ...
 }@args:
 mkServiceModule {
