@@ -98,7 +98,7 @@ def user_manager_prefix() -> list[str] | None:
     (modules/runtime.nix), which has no XDG_RUNTIME_DIR/DBUS_SESSION_BUS_ADDRESS
     of its own, so a bare `systemctl --user show` always fails for a
     manager=="user" check -- the same bridge problem
-    scripts/sinnix-health-sentinel's notify_desktop() already solves for
+    sinnix_lib.notify's notify_desktop() already solves for
     D-Bus notifications. Reuse the same mechanism: run the query as the
     owning uid of a live session bus. uid 0 is skipped -- a root user-manager
     instance (e.g. via lingering) is not the operator's session and would

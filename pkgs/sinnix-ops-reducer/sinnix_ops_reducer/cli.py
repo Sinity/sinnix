@@ -1,17 +1,94 @@
 from __future__ import annotations
 
 import argparse
+import http.client
+import json
 import os
+import socket
+import sys
 from pathlib import Path
 
+from . import health
 from .actions import ActionService
 from .ambient import product_source
 from .feedback import CoalescingTrigger, FeedbackSpool
 from .reducer import Reducer, observe_source
-from .server import ensure_token, serve
+from .server import FAILURE_PATH, ensure_token, serve
+
+
+class UnixConnection(http.client.HTTPConnection):
+    """HTTP over the reducer's Unix socket, so the fast path speaks to the
+    running process rather than to its state file behind its back."""
+
+    def __init__(self, path: str, timeout: float = 5.0) -> None:
+        super().__init__("localhost", timeout=timeout)
+        self.path = path
+
+    def connect(self) -> None:
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(self.timeout)
+        self.sock.connect(self.path)
+
+
+def post_failure(socket_path: Path, unit: str, result: str) -> bool:
+    body = json.dumps({"unit": unit, "result": result})
+    try:
+        connection = UnixConnection(str(socket_path))
+        connection.request(
+            "POST", FAILURE_PATH, body, {"Content-Type": "application/json"}
+        )
+        response = connection.getresponse()
+        response.read()
+        return response.status < 400
+    except (OSError, http.client.HTTPException):
+        return False
+    finally:
+        try:
+            connection.close()
+        except (OSError, NameError, UnboundLocalError):
+            pass
+
+
+def emit_failure_command(argv: list[str]) -> int:
+    """`sinnix-ops-reducer emit-failure` -- what systemd's OnFailure= runs.
+
+    It posts to the reducer first so that one process owns the dedup state; if
+    the reducer is down (which is itself a moment when units fail) it writes the
+    same transition directly, under the same lock and to the same files, so a
+    failure is never lost to the recorder being the thing that failed.
+    """
+    parser = argparse.ArgumentParser(prog="sinnix-ops-reducer emit-failure")
+    parser.add_argument("--unit", required=True)
+    parser.add_argument("--result", default="unknown")
+    parser.add_argument(
+        "--socket",
+        type=Path,
+        default=Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000"))
+        / "sinnix"
+        / "ops.sock",
+    )
+    parser.add_argument(
+        "--inventory", type=Path, default=Path("/etc/sinnix/runtime-inventory.json")
+    )
+    args = parser.parse_args(argv)
+    if post_failure(args.socket, args.unit, args.result):
+        return 0
+    try:
+        inventory = json.loads(args.inventory.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        inventory = {}
+    health.emit_failure(args.unit, args.result, inventory)
+    print(
+        f"sinnix-ops-reducer: recorded {args.unit} failure directly; "
+        "the reducer was unreachable",
+        file=sys.stderr,
+    )
+    return 0
 
 
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "emit-failure":
+        raise SystemExit(emit_failure_command(sys.argv[2:]))
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--runtime-dir",

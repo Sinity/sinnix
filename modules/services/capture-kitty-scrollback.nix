@@ -2,7 +2,7 @@
 #
 # A systemd --user timer drives scripts/kitty-scrollback-capture (full-ANSI
 # scrollback dump via `kitty @ get-text`) on a fixed cadence, giving the
-# kitty-scrollback lane a real owning unit the health sentinel can track.
+# kitty-scrollback lane a real owning unit the health sweep can track.
 {
   mkServiceModule,
   mkCaptureLane,
