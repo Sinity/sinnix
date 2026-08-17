@@ -130,11 +130,19 @@ def scan(roots: list[str], max_depth: int, out_path: Path, progress_every: int) 
         queue: list[tuple[str, int]] = [(r, 0) for r in roots if os.path.isdir(r)]
         while queue:
             path, depth = queue.pop(0)
+            # error rows MUST carry "parent" like ordinary rows do -- without
+            # it, the rollup's recursive join (n.parent = d.path) never links
+            # an error row to its ancestors, has_error never propagates, and
+            # subtree_complete reads true for a subtree that was never fully
+            # seen. Found by testing against a real permission wall
+            # (/realm/media/model/ollama/blobs, root:root 0700): the flag came
+            # back true until this was added.
+            parent = os.path.dirname(path) if depth else None
             try:
                 st = os.lstat(path)
             except OSError as exc:
-                out.write(json.dumps({"schema": SCHEMA, "path": path, "depth": depth,
-                                      "error": str(exc)}) + "\n")
+                out.write(json.dumps({"schema": SCHEMA, "path": path, "parent": parent,
+                                      "depth": depth, "error": str(exc)}) + "\n")
                 written += 1
                 continue
 
@@ -142,13 +150,13 @@ def scan(roots: list[str], max_depth: int, out_path: Path, progress_every: int) 
                 with os.scandir(path) as it:
                     entries = list(it)
             except PermissionError:
-                out.write(json.dumps({"schema": SCHEMA, "path": path, "depth": depth,
-                                      "error": "permission denied"}) + "\n")
+                out.write(json.dumps({"schema": SCHEMA, "path": path, "parent": parent,
+                                      "depth": depth, "error": "permission denied"}) + "\n")
                 written += 1
                 continue
             except OSError as exc:
-                out.write(json.dumps({"schema": SCHEMA, "path": path, "depth": depth,
-                                      "error": str(exc)}) + "\n")
+                out.write(json.dumps({"schema": SCHEMA, "path": path, "parent": parent,
+                                      "depth": depth, "error": str(exc)}) + "\n")
                 written += 1
                 continue
 
@@ -243,20 +251,40 @@ DROP TABLE IF EXISTS nodes;
 CREATE TABLE nodes AS SELECT * FROM read_json_auto('{jsonl}', ignore_errors=true);
 
 -- Recursive rollup: every node accumulates its own bytes plus its descendants'.
+--
+-- total_bytes used to be silently a FLOOR wherever a permission-denied leaf
+-- sat in the subtree: the leaf's own direct_bytes is 0 (its contents were
+-- never seen), that 0 gets summed like any other, and nothing on the parent
+-- row said the number was incomplete. Measured live: /realm/media/model
+-- reported 35G that way while the true size (readable only as root) is 120G
+-- -- a 3.4x undercount with no marker distinguishing it from a directory that
+-- actually is 35G. subtree_complete/incomplete_reason close that gap: any
+-- error anywhere in the subtree flips the root's subtree_complete to false and
+-- names one reason, so total_bytes can be read as "at least this much" instead
+-- of mistaken for a total.
 DROP TABLE IF EXISTS rollup;
 CREATE TABLE rollup AS
-WITH RECURSIVE descend(root, path, direct_bytes) AS (
-    SELECT path AS root, path, COALESCE(direct_bytes, 0) FROM nodes
+WITH RECURSIVE descend(root, path, direct_bytes, has_error, error_path) AS (
+    SELECT path AS root, path, COALESCE(direct_bytes, 0),
+           error IS NOT NULL, CASE WHEN error IS NOT NULL THEN path END
+    FROM nodes
     UNION ALL
-    SELECT d.root, n.path, COALESCE(n.direct_bytes, 0)
+    SELECT d.root, n.path, COALESCE(n.direct_bytes, 0),
+           n.error IS NOT NULL, CASE WHEN n.error IS NOT NULL THEN n.path END
     FROM descend d JOIN nodes n ON n.parent = d.path
 )
-SELECT root AS path, SUM(direct_bytes) AS total_bytes, COUNT(*) AS subtree_dirs
+SELECT root AS path,
+       SUM(direct_bytes) AS total_bytes,
+       COUNT(*) AS subtree_dirs,
+       NOT bool_or(has_error) AS subtree_complete,
+       CASE WHEN bool_or(has_error)
+            THEN 'unreadable: ' || any_value(error_path) FILTER (WHERE has_error)
+       END AS incomplete_reason
 FROM descend GROUP BY root;
 
 DROP VIEW IF EXISTS inventory;
 CREATE VIEW inventory AS
-SELECT n.*, r.total_bytes, r.subtree_dirs
+SELECT n.*, r.total_bytes, r.subtree_dirs, r.subtree_complete, r.incomplete_reason
 FROM nodes n LEFT JOIN rollup r USING (path);
 
 COPY (SELECT * FROM inventory) TO '{parquet}' (FORMAT PARQUET);
