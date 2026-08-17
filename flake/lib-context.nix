@@ -5,6 +5,11 @@ let
   featureLib = import ../modules/lib/features.nix { inherit lib; };
   systemdLib = import ../modules/lib/systemd-hardening.nix { inherit lib; };
   overlayLib = import ../modules/lib/overlay-helpers.nix { inherit lib; };
+  # mkCaptureLane builds ON mkServiceModule (callers do
+  # `mkServiceModule (mkCaptureLane { ... }) args`) rather than wrapping it,
+  # so it needs no reference to mkServiceModule itself -- just lib, like
+  # featureLib/systemdLib/overlayLib.
+  captureLaneLib = import ../modules/lib/capture-lane.nix { inherit lib; };
 
   # Pure data tables under flake/data/ are evaluated once at flake-init and
   # shared by reference across every host evaluation. NixOS modules consume
@@ -58,6 +63,7 @@ let
   mkSharedSpecialArgs = specialInputs: {
     inputs = specialInputs;
     inherit (featureLib) mkFeatureModule mkServiceModule mkAiService;
+    inherit (captureLaneLib) mkCaptureLane;
     helpers = {
       inherit (featureLib) mkDotsFileFor;
       mkSinnixPackagesFor =
