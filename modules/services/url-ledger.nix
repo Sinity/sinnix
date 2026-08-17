@@ -72,4 +72,30 @@ mkServiceModule {
         restartIfChanged = false;
       };
     };
+  extraOptions = {
+    maxRequestsPerRun = args.lib.mkOption {
+      type = args.lib.types.int;
+      default = 200000;
+      description = ''
+        Backstop bound on provider queries per run. maxSecondsPerRun is the
+        real control; this only catches a pathologically fast failure loop.
+
+        The old pairing of 2000 queries with a weekly timer could not finish:
+        540k history URLs across two live providers is ~1.1M queries, which at
+        2000 a week is measured in centuries. Resolve is resumable, so the
+        backfill converges only if a run's budget is a meaningful fraction of
+        the work.
+      '';
+    };
+    maxSecondsPerRun = args.lib.mkOption {
+      type = args.lib.types.int;
+      default = 7200;
+      description = "Wall-clock budget per run. Bounds what actually matters -- that a run finishes inside its own interval -- since query cost varies by two orders of magnitude.";
+    };
+    windowDays = args.lib.mkOption {
+      type = args.lib.types.int;
+      default = 30;
+      description = "Coverage window in days for the nearest-snapshot-to-visit join.";
+    };
+  };
 } args
