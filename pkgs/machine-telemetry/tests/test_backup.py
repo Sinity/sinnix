@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sqlite3
 import subprocess
 import threading
@@ -72,3 +73,30 @@ def test_failed_backup_removes_all_temporary_sidecars(tmp_path: Path) -> None:
 
     assert result.returncode != 0
     assert not list(tmp_path.glob("*.tmp*"))
+
+
+def test_backup_sweeps_orphaned_sidecar_from_a_prior_crashed_run(
+    tmp_path: Path,
+) -> None:
+    # A run under a different (e.g. earlier timestamp-derived) name was
+    # killed before its own `finally: cleanup()` ran, leaving a sidecar this
+    # run's per-run cleanup() -- scoped to its own raw_path -- cannot see.
+    source = tmp_path / "source.sqlite"
+    output = tmp_path / "telemetry-later.sqlite.zst"
+    seed_database(source)
+    orphan = tmp_path / "telemetry-earlier.sqlite.tmp-journal"
+    orphan.write_bytes(b"stale")
+    old = time.time() - 7200
+    os.utime(orphan, (old, old))
+
+    result = subprocess.run(
+        [str(SCRIPT), str(source), str(output)],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert output.exists()
+    assert not orphan.exists()
