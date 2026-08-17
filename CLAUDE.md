@@ -150,6 +150,28 @@ endpoint, activation, backendKind, requiresCuda, ... }` wraps
   activation, and the `meta.ai` block. Used by `stt`, `tts`, `kokoro`,
   `open-webui`. Reach for it for anything that is a model endpoint; reach for
   `mkServiceModule` for everything else.
+- **Scheduled oneshots use the factory's `job` argument** — execStart,
+  timer, manager, unitName (for pre-prefix unit names), resourceClass
+  (user-manager class application), serviceConfig/unit passthroughs. One
+  idiom for every oneshot-on-a-timer service; no hand-written
+  systemd.services/timers pairs and no HM-format user units for scheduled
+  jobs. `surface` and `job` may be attrsets or functions of the module args
+  (function form: the module FILE must name `pkgs` in its own pattern for a
+  job that uses it — _module.args inject only named formals). Documented
+  structural exceptions only: mi-unlock's deadline-waiting simple service,
+  second units inside sandbox-audit/machine-telemetry/stt.
+- **Capture lanes use `mkCaptureLane`** (`modules/lib/capture-lane.nix`,
+  composed as `mkServiceModule (mkCaptureLane { ... }) args`): poll and
+  stream modes, lane/tmpfiles/captures/surface synthesis, shared hardening.
+  The five non-fitting capture modules are enumerated in its header.
+- **Failure reporting is a property of registration.** One template,
+  `sinnix-unit-failure-notify@` (system + user twins, one body, declared in
+  runtime.nix), auto-attached to every observed surface and every generated
+  job. Never hand-wire a second failure-notify mechanism.
+- `pkgs/sinnix-lib` (python module `sinnix_lib`) is the shared library:
+  atomic_json, ledger + the one receipt schema, flock, notify, systemd show
+  parser, spool (durable inbox, exactly-once). Python packages depend on
+  it; never re-implement these helpers.
 - `subFeatures = { x = { description; default; }; ... }` generates nested
   `<feature>.x.enable` toggles (see `features/dev/shell.nix`).
 - `meta.dotfiles.{configFile,dataFile,homeFile}` entries are collected by
