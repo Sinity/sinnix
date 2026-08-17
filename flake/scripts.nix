@@ -18,7 +18,7 @@ let
   inherit (pkgs) lib;
 
   sinnixCaptureLib = pkgs.callPackage ../pkgs/sinnix-capture/pkg.nix { };
-  phoneAppPackage = pkgs.callPackage ../pkgs/sinnix-phone-app/pkg.nix { };
+  phoneAppPackage = pkgs.callPackage (inputs.phone-app + "/pkg.nix") { };
   discovery = import ./script-discovery.nix {
     inherit lib pkgs;
     siblingExtras = {

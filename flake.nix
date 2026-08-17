@@ -81,6 +81,15 @@
       inputs.polylogueSrc.follows = "polylogue";
     };
 
+    # The phone app, extracted to its own repo (operator decision,
+    # sinnix-svvz Phase 4). Sourced from GitHub like sinex/polylogue so
+    # deploys follow pushed history; non-flake — sinnix's flake/scripts.nix
+    # calls its pkg.nix directly, same pattern as beads.
+    phone-app = {
+      url = "github:Sinity/sinnix-phone-app";
+      flake = false;
+    };
+
     # The personal steering workspace (its own git repo with its own beads).
     # Source of the sinnix-steer CLI; sinnix carries only the packaging
     # wrapper (flake/scripts.nix), so the whole steering concern lives in

@@ -29,8 +29,8 @@ links out to it rather than repeating it.
 
 | Piece                         | Path                                         |
 | ----------------------------- | -------------------------------------------- |
-| App source                    | `pkgs/sinnix-phone-app/app/src/main/`        |
-| Build + install packaging     | `pkgs/sinnix-phone-app/pkg.nix`, `deps.json` |
+| App source                    | github:Sinity/sinnix-phone-app (`app/src/main/`) |
+| Build + install packaging     | phone-app repo `pkg.nix`, `deps.json`; flake input wired in flake/scripts.nix |
 | Desktop control surface       | `scripts/sinnix-phone`                       |
 | Prime's half of the transport | `scripts/sinnix-phone-dispatcher`            |
 | Steering export for the phone | `scripts/sinnix-steer export-phone`          |

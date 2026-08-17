@@ -273,8 +273,9 @@ Surfaces with standing design decisions an agent might otherwise "fix":
   Glimmer's architecture. Its CUDA llama.cpp package is pinned to upstream
   b10353 until nixpkgs-ai carries that support; LiteLLM exposes the endpoint
   as `local-glimmer`.
-- `pkgs/sinnix-phone-app/` is an Android app (Sinnix, the estate's phone-side
-  member: capture, instruments, ingress, and a remote for prime).
+- The phone app (Sinnix, `dev.sinnix.phone`) lives in its own repo,
+  github:Sinity/sinnix-phone-app, consumed as the non-flake `phone-app`
+  input (capture, instruments, ingress, and a remote for prime).
   Kotlin/Compose built through Gradle against a license-accepting re-import
   of the same nixpkgs, made reproducible by the nixpkgs Gradle setup hook
   plus a committed `deps.json` recorded through `mitm-cache`; regenerate with
