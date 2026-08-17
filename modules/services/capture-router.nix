@@ -24,6 +24,7 @@
 # nlbwmon once-per-closed-month backfill.
 {
   mkServiceModule,
+  mkCaptureLane,
   pkgs,
   lib,
   config,
@@ -35,6 +36,7 @@ let
   capturesRoot = config.sinnix.paths.machineRoot;
   routerRoot = "${capturesRoot}/router";
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
+  cfg = config.sinnix.services.capture-router;
 
   remotePollScript = pkgs.writeText "capture-router-remote-poll.sh" (
     builtins.readFile ../../pkgs/capture-router/remote-poll.sh
@@ -55,7 +57,7 @@ let
     text = builtins.readFile ../../pkgs/capture-router/poll.sh;
   };
 in
-mkServiceModule {
+mkServiceModule (mkCaptureLane {
   name = "capture-router";
   description = "Pull sinnix-gw's syslog, nlbwmon, DHCP leases, and wifi associations into the capture lake";
   extraOptions = {
@@ -86,99 +88,64 @@ mkServiceModule {
       '';
     };
   };
-  surface = {
-    unit = "sinnix-capture-router.service";
-    manager = "user";
-    resourceClass = "capture-runtime";
-    observe = {
-      enable = true;
-      restartable = true;
-    };
-    captures = [
-      {
-        name = "router-leases";
-        path = "${routerRoot}/leases";
-        cadenceSeconds = 1800;
-        # Leases are a volatile snapshot (lost on router reboot); a gap
-        # here means the lane broke or the router is unreachable, not that
-        # nothing happened, since some lease always exists once any device
-        # has ever joined.
-        staleAfterSeconds = 7200;
-      }
-      {
-        name = "router-associations";
-        path = "${routerRoot}/associations";
-        cadenceSeconds = 1800;
-        # An empty association list is completely normal (nobody home /
-        # everyone off wifi) -- but the poll itself still always produces a
-        # record, empty or not, so staleness here still correctly means
-        # "the poll stopped happening".
-        staleAfterSeconds = 7200;
-      }
-      {
-        name = "router-nlbw";
-        path = "${routerRoot}/nlbw";
-        cadenceSeconds = 1800;
-        staleAfterSeconds = 7200;
-      }
-      {
-        name = "router-syslog";
-        path = "${routerRoot}/syslog";
-        cadenceSeconds = 1800;
-        # No staleAfterSeconds: genuinely silent intervals are normal on a
-        # quiet home LAN, and poll.sh deliberately writes no envelope at
-        # all for an empty syslog delta (unlike the other three sub-lanes),
-        # so cadence-based staleness would false-positive on ordinary quiet
-        # nights rather than signal a broken lane.
-      }
-    ];
-  };
-  configFn =
-    { cfg, config, ... }:
+  mode = "poll";
+  inherit username;
+  laneDir = routerRoot;
+  captures = [
     {
-      systemd.tmpfiles.rules = [
-        "d ${routerRoot} 0755 ${username} users -"
-      ];
-
-      home-manager.users.${username} =
-        { ... }:
-        {
-          systemd.user.services.sinnix-capture-router = {
-            Unit.Description = "Pull sinnix-gw telemetry (syslog, nlbwmon, leases, associations) into the capture lake";
-            Service = lib.sinnix.mkRuntimeServiceConfig {
-              runtimeInventory = config.sinnix.runtime.inventory;
-              unit = "sinnix-capture-router.service";
-              overrides = {
-                Type = "oneshot";
-                ExecStart = lib.concatStringsSep " " [
-                  "${poller}/bin/capture-router-poll"
-                  cfg.host
-                  "${scriptPkgs.sinnix-capture}/bin/sinnix-capture"
-                  routerRoot
-                  "${remotePollScript}"
-                  "${remotePeriodsScript}"
-                ];
-                NoNewPrivileges = true;
-                ProtectSystem = "strict";
-                ProtectHome = "read-only";
-                ReadWritePaths = [ routerRoot ];
-                # ssh needs a real TMPDIR for its own scratch use, and the
-                # session TMPDIR is read-only inside this namespace.
-                Environment = [ "TMPDIR=/tmp" ];
-                PrivateTmp = true;
-              };
-            };
-          };
-
-          systemd.user.timers.sinnix-capture-router = {
-            Unit.Description = "Periodic trigger for the router telemetry capture";
-            Timer = {
-              OnBootSec = "5min";
-              OnUnitActiveSec = "${toString cfg.intervalSec}s";
-              AccuracySec = "30s";
-            };
-            Install.WantedBy = [ "timers.target" ];
-          };
-        };
-    };
-} args
+      name = "router-leases";
+      path = "${routerRoot}/leases";
+      cadenceSeconds = 1800;
+      # Leases are a volatile snapshot (lost on router reboot); a gap
+      # here means the lane broke or the router is unreachable, not that
+      # nothing happened, since some lease always exists once any device
+      # has ever joined.
+      staleAfterSeconds = 7200;
+    }
+    {
+      name = "router-associations";
+      path = "${routerRoot}/associations";
+      cadenceSeconds = 1800;
+      # An empty association list is completely normal (nobody home /
+      # everyone off wifi) -- but the poll itself still always produces a
+      # record, empty or not, so staleness here still correctly means
+      # "the poll stopped happening".
+      staleAfterSeconds = 7200;
+    }
+    {
+      name = "router-nlbw";
+      path = "${routerRoot}/nlbw";
+      cadenceSeconds = 1800;
+      staleAfterSeconds = 7200;
+    }
+    {
+      name = "router-syslog";
+      path = "${routerRoot}/syslog";
+      cadenceSeconds = 1800;
+      # No staleAfterSeconds: genuinely silent intervals are normal on a
+      # quiet home LAN, and poll.sh deliberately writes no envelope at
+      # all for an empty syslog delta (unlike the other three sub-lanes),
+      # so cadence-based staleness would false-positive on ordinary quiet
+      # nights rather than signal a broken lane.
+    }
+  ];
+  execStart = lib.concatStringsSep " " [
+    "${poller}/bin/capture-router-poll"
+    cfg.host
+    "${scriptPkgs.sinnix-capture}/bin/sinnix-capture"
+    routerRoot
+    "${remotePollScript}"
+    "${remotePeriodsScript}"
+  ];
+  # ssh needs a real TMPDIR for its own scratch use, and the session TMPDIR
+  # is read-only inside this namespace.
+  environment = [ "TMPDIR=/tmp" ];
+  privateTmp = true;
+  timer = {
+    intervalSec = cfg.intervalSec;
+    onBootSec = "5min";
+    accuracySec = "30s";
+  };
+  unitDescription = "Pull sinnix-gw telemetry (syslog, nlbwmon, leases, associations) into the capture lake";
+  timerDescription = "Periodic trigger for the router telemetry capture";
+}) args
