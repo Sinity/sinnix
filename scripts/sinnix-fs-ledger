@@ -151,7 +151,7 @@ FROM subject_state GROUP BY state ORDER BY paths DESC;
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--index-dir", type=Path, default=Path("/realm/data/derived/inventory"),
+    ap.add_argument("--index-dir", type=Path, default=Path("/realm/state/fs-index"),
                      help="directory holding judgments.jsonl, inventory.duckdb, content.duckdb")
     args = ap.parse_args()
 

@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # timer -> state-dump -> `claude -p` (enrichment-pass skill) -> versioned
-# outputs under /realm/data/derived/enrichment/.
+# outputs under /realm/data/reports/enrichment/.
 #
 # Single-writer invariant: writes only the output root and the watermark at
 # /realm/state/cursors/enrichment/; never polylogue's or sinex's stores.
@@ -14,7 +14,7 @@ set -euo pipefail
 # watermark, not a fault -- the skill tells the model to treat it that way.
 
 WATERMARK_FILE="/realm/state/cursors/enrichment/last-run"
-OUTPUT_ROOT="/realm/data/derived/enrichment"
+OUTPUT_ROOT="/realm/data/reports/enrichment"
 
 # Pinned rather than inherited from interactive settings. Opus by measurement,
 # not default: on an identical bundle it raised 7 flags to Sonnet's 5 and

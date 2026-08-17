@@ -320,7 +320,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--root", action="append", default=None,
                     help=f"Filesystem root to walk (repeatable). Default: {DEFAULT_ROOTS}")
-    ap.add_argument("--out-dir", default="/realm/data/derived/inventory")
+    ap.add_argument("--out-dir", default="/realm/state/fs-index")
     ap.add_argument("--max-depth", type=int, default=-1,
                     help="Stop descending past this depth; -1 for unlimited")
     ap.add_argument("--progress-every", type=int, default=2000)
