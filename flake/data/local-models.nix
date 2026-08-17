@@ -202,7 +202,7 @@ rec {
   # modules/services/open-webui.nix `RAG_EMBEDDING_MODEL`.
   ragEmbeddingOllamaTag = (lib.findFirst (m: m.role == "rag-embedding") null models).ollamaTag;
 
-  # Sideloaded GGUF files under /realm/media/model/gguf (not pulled through
+  # Sideloaded GGUF files under /realm/library/models/gguf (not pulled through
   # ollama). Consumed by modules/services/llama-cpp.nix's reranker endpoint;
   # hosts/sinnix-prime picks the active one via `llama-cpp.model`. Data only
   # today — no fetch/verify machinery reads this list yet.
@@ -215,7 +215,7 @@ rec {
     }
     {
       # Higher-quality manual swap-in for the 0.6b default above. Not
-      # currently on disk under /realm/media/model/gguf — re-populate
+      # currently on disk under /realm/library/models/gguf — re-populate
       # expectedBytes if it is re-sideloaded.
       file = "Qwen.Qwen3-Reranker-4B.Q4_K_M.gguf";
       url = "https://huggingface.co/DevQuasar/Qwen.Qwen3-Reranker-4B-GGUF/resolve/main/Qwen.Qwen3-Reranker-4B.Q4_K_M.gguf";

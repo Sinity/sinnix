@@ -194,9 +194,9 @@ be much harder to undo than one recomputed on demand.
 
 ## Models
 
-~690 MB under `/realm/media/model/sherpa`, fetched by `sinnix stt models` and
+~690 MB under `/realm/library/models/sherpa`, fetched by `sinnix stt models` and
 verified on every service start. Weights are not source and do not belong in
-the Nix store; the estate already keeps model files under `/realm/media/model`.
+the Nix store; the estate already keeps model files under `/realm/library/models`.
 
 | Model                                        | Size   | Role                 |
 | -------------------------------------------- | ------ | -------------------- |
