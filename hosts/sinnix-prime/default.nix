@@ -124,13 +124,12 @@
     capture-netflow.enable = true;
     # Scheduled phone -> lake drain, wifi + charging gated.
     phone-drain.enable = true;
-    # The other half of the phone's hold-still instruments: score the traces
-    # the drain lands (pulse, tremor, sway, interoception, voice) and send the
-    # receipt back through the same inbox the drain already pushes.
-    phone-score.enable = true;
-    # Persistent phone->prime telemetry push: the phone streams continuously
-    # over one long-lived connection rather than per-command SSH invocations.
-    phone-receiver.enable = true;
+    # The other half of the phone's hold-still instruments (score the traces
+    # the drain lands: pulse, tremor, sway, interoception, voice) and the
+    # persistent phone->prime telemetry push both used to be separate
+    # opt-in services here. As of 2026-08-17 (sinnix-tjqi) both live inside
+    # sinnix-phone-dispatcher, which runs whenever hub.enable does (above) --
+    # there is no separate toggle left to set.
     # Router telemetry pulled from prime on a timer: syslog deltas, DHCP
     # leases, wifi associations with signal, and nlbwmon per-device bandwidth.
     # Nothing runs on the router.
