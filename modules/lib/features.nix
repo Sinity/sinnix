@@ -82,9 +82,28 @@ let
       name,
       description,
       extraOptions ? { },
+      # Attrset, or a function of the module args (config, cfg, pkgs, ...) —
+      # the function form exists so a surface can reference config-derived
+      # paths without being pushed down into configFn.
       surface ? null,
       meta ? { },
-      configFn,
+      # Declarative scheduled-oneshot job. Attrset or function of the module
+      # args, with keys:
+      #   execStart (required)  full ExecStart string
+      #   timer                 { onCalendar | intervalSec, onBootSec,
+      #                           persistent, randomizedDelaySec, accuracySec }
+      #                         omit for a service with no timer
+      #   manager ? "system"    "system" | "user"
+      #   user                  system-manager User= (evidence lives in a
+      #                         user's own stores)
+      #   serviceConfig ? { }   extra overrides merged over the generated ones
+      #   path, environment, description   passed through to the unit
+      # The unit is always sinnix-<name>.service; system-manager jobs get
+      # their resource class via mkRuntimeServiceConfig (register the
+      # surface), user-manager jobs write plain serviceConfig, matching
+      # existing per-manager practice.
+      job ? null,
+      configFn ? (_: { }),
     }:
     args@{ config, lib, ... }:
     let
@@ -98,15 +117,70 @@ let
         meta = mkMetaOption meta;
       };
       cfg = lib.getAttrFromPath servicePath config;
+      moduleArgs = args // {
+        inherit cfg;
+      };
+      resolve = v: if builtins.isFunction v then v moduleArgs else v;
+      surfaceValue = resolve surface;
+      jobValue = resolve job;
+      unitName = "sinnix-${name}";
+      mkJobConfig =
+        j:
+        let
+          manager = j.manager or "system";
+          timerConfig = lib.optionalAttrs (j ? timer) (
+            lib.filterAttrs (_: v: v != null) {
+              OnCalendar = j.timer.onCalendar or null;
+              OnUnitActiveSec = if j.timer ? intervalSec then "${toString j.timer.intervalSec}s" else null;
+              OnBootSec = j.timer.onBootSec or null;
+              Persistent = if j.timer.persistent or false then true else null;
+              RandomizedDelaySec = j.timer.randomizedDelaySec or null;
+              AccuracySec = j.timer.accuracySec or null;
+            }
+          );
+          overrides = {
+            Type = "oneshot";
+            ExecStart = j.execStart;
+          }
+          // lib.optionalAttrs (j ? user) { User = j.user; }
+          // (j.serviceConfig or { });
+          serviceBody = {
+            description = j.description or description;
+            serviceConfig =
+              if manager == "system" then
+                lib.sinnix.mkRuntimeServiceConfig {
+                  runtimeInventory = config.sinnix.runtime.inventory;
+                  unit = "${unitName}.service";
+                  inherit overrides;
+                }
+              else
+                overrides;
+          }
+          // lib.optionalAttrs (j ? path) { path = j.path; }
+          // lib.optionalAttrs (j ? environment) { environment = j.environment; };
+          timerBody = {
+            wantedBy = [ "timers.target" ];
+            inherit timerConfig;
+          };
+          units =
+            {
+              services.${unitName} = serviceBody;
+            }
+            // lib.optionalAttrs (j ? timer) {
+              timers.${unitName} = timerBody;
+            };
+        in
+        if manager == "user" then { systemd.user = units; } else { systemd = units; };
     in
     {
       options = lib.setAttrByPath servicePath optionsForPath;
       config = lib.mkIf cfg.enable (
         lib.mkMerge [
-          (lib.optionalAttrs (surface != null) {
-            sinnix.runtime.surfaces.${name} = surface;
+          (lib.optionalAttrs (surfaceValue != null) {
+            sinnix.runtime.surfaces.${name} = surfaceValue;
           })
-          (configFn (args // { inherit cfg; }))
+          (lib.optionalAttrs (jobValue != null) (mkJobConfig jobValue))
+          (configFn moduleArgs)
         ]
       );
     };
