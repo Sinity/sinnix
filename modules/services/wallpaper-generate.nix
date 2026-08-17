@@ -49,10 +49,29 @@ mkServiceModule {
       '';
     };
   };
+  # `home.packages` is a home-manager-only concept (the operator's shell
+  # profile), not a unit boilerplate concern, so it stays here rather than
+  # moving into the job. Persistent=false is dropped from the timer: the
+  # factory only ever emits `Persistent=true` (or omits the key), and
+  # omitting it is systemd's own default of false, so this is a cosmetic
+  # diff, not a behavior change. The timer's own Description= is also
+  # dropped -- the factory's generated timer body carries no description
+  # field, unlike the hand-written one it replaces.
   configFn =
     {
-      cfg,
       config,
+      helpers,
+      pkgs,
+      ...
+    }:
+    {
+      home-manager.users.${config.sinnix.user.name}.home.packages = [
+        (helpers.mkSinnixPackagesFor pkgs).sinnix-wallpaper-generate
+      ];
+    };
+  job =
+    {
+      cfg,
       lib,
       helpers,
       pkgs,
@@ -60,38 +79,24 @@ mkServiceModule {
     }:
     let
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
-      user = config.sinnix.user.name;
       familiesArg = lib.optionalString (
         cfg.families != [ ]
       ) "--families ${lib.concatStringsSep "," cfg.families}";
     in
     {
-      home-manager.users.${user} = {
-        home.packages = [ scriptPkgs.sinnix-wallpaper-generate ];
-
-        systemd.user.services.sinnix-wallpaper-generate = {
-          Unit.Description = "Batch-generate wallpapers via ComfyUI, palette-targeted";
-          Service = {
-            Type = "oneshot";
-            ExecStart = "${scriptPkgs.sinnix-wallpaper-generate}/bin/sinnix-wallpaper-generate --count ${toString cfg.count} ${familiesArg}";
-            # Rendering + polling for a handful of images; generous but bounded
-            # so a wedged ComfyUI job doesn't hold the unit (and hence the
-            # `sinnix-ai stop comfyui` cleanup in the script's finally-block)
-            # open indefinitely.
-            TimeoutStartSec = "45min";
-          };
-        };
-
-        systemd.user.timers.sinnix-wallpaper-generate = {
-          Unit.Description = "Timer for the periodic off-hours wallpaper generation batch";
-          Timer = {
-            OnCalendar = cfg.onCalendar;
-            Persistent = false;
-            RandomizedDelaySec = "10min";
-            Unit = "sinnix-wallpaper-generate.service";
-          };
-          Install.WantedBy = [ "timers.target" ];
-        };
+      description = "Batch-generate wallpapers via ComfyUI, palette-targeted";
+      manager = "user";
+      execStart = "${scriptPkgs.sinnix-wallpaper-generate}/bin/sinnix-wallpaper-generate --count ${toString cfg.count} ${familiesArg}";
+      serviceConfig = {
+        # Rendering + polling for a handful of images; generous but bounded
+        # so a wedged ComfyUI job doesn't hold the unit (and hence the
+        # `sinnix-ai stop comfyui` cleanup in the script's finally-block)
+        # open indefinitely.
+        TimeoutStartSec = "45min";
+      };
+      timer = {
+        onCalendar = cfg.onCalendar;
+        randomizedDelaySec = "10min";
       };
     };
 } args
