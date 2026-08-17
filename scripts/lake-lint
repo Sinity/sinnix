@@ -50,9 +50,13 @@ check_root /outer-realm \
   archive-staged \
   .Trash-1000
 
-# /realm/data level-1 manifest (personal lake only).
+# /realm/data level-1 manifest (personal lake only). accounts/ is the one
+# place ownership-as-directory bends to loss profile: other people's
+# personal exports (e.g. twitter-archives) are not re-acquirable the way a
+# public dataset is, so they sit here rather than in library/, despite the
+# owner not being the operator (estate charter Section 3).
 check_root /realm/data \
-  captures exports self knowledgebase derived secrets INVENTORY.md
+  captures exports self knowledgebase derived secrets accounts INVENTORY.md
 
 if [ "$status" -eq 0 ]; then
   echo "lake-lint: all roots match taxonomy"
