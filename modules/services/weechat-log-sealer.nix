@@ -48,7 +48,7 @@ mkServiceModule {
     }:
     let
       userName = config.sinnix.user.name;
-      ircRoot = "${config.sinnix.paths.commsRoot}/comms/irc";
+      ircRoot = "${config.sinnix.paths.commsRoot}/irc";
       scriptPath = "${ircRoot}/scripts/seal_logs.py";
     in
     {

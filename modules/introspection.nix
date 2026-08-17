@@ -101,7 +101,7 @@ let
         machine = machineRoot;
         activitywatch = "${activityRoot}/activitywatch/activitywatch";
         shell = "${activityRoot}/shell";
-        comms = "${commsRoot}/comms";
+        comms = commsRoot;
         webhistory = "${activityRoot}/webhistory";
         kitty-scrollback = "${activityRoot}/kitty-scrollback";
       };
