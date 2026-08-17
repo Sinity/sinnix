@@ -35,9 +35,18 @@ small burst per day at a published reset boundary -- deliberately NOT a
 retry loop, which would be abusive and would risk the account the unlock
 depends on.
 
+TWO ENDPOINTS, TWO QUESTIONS. `apply/bl-auth` answers "did I get a slot in
+this window" (apply_result 1 granted, 3 pool exhausted, 4 blocked).
+`user/bl-switch/state` answers "may this account apply at all" (button_state
+1 may apply, 2 blocked until a date, 3 account under 30 days old). They are
+independent: an eligible account still loses a full pool, and reading the
+first to answer the second is what made "ineligible account" look like a
+diagnosis for three days of refusals. Only the boundary burst applies;
+everything else reads state.
+
 TOKEN. Read from --token-file, or $MI_BBS_TOKEN, or /run/agenix/mi-bbs-token.
 The cookie is session-scoped and expires; refresh it the same day you intend
-to fire. `--check` validates it without applying, which is the difference
+to fire. `--check` reads state and applies nothing, which is the difference
 between finding out now and finding out at 18:00:00.
 """
 from __future__ import annotations
@@ -55,6 +64,7 @@ from datetime import datetime, timedelta, timezone
 
 HOST = "sgp-api.buy.mi.com"
 PATH = "/bbs/api/global/apply/bl-auth"
+STATE_PATH = "/bbs/api/global/user/bl-switch/state"
 PORT = 443
 BEIJING = timezone(timedelta(hours=8))
 
@@ -130,6 +140,59 @@ def build_request(token: str, device_id: str, is_retry: bool) -> bytes:
     return head + body
 
 
+def build_state_request(token: str, device_id: str) -> bytes:
+    """A GET of the account's own unlock eligibility. Reads nothing else.
+
+    This is the endpoint the probes must use. It reports whether the ACCOUNT
+    may apply, which is a different question from whether the daily pool has
+    slots left, and unlike the apply POST it is not an application: probing
+    with a real application risks Xiaomi's documented too-frequent-retry
+    penalty (a ten-day account block) to learn something this answers for
+    free.
+    """
+    cookie = (
+        f"new_bbs_serviceToken={token};"
+        f"versionCode={CLIENT_VERSION_CODE};"
+        f"versionName={CLIENT_VERSION_NAME};"
+        f"deviceId={device_id};"
+    )
+    return (
+        f"GET {STATE_PATH} HTTP/1.1\r\n"
+        f"Host: {HOST}\r\n"
+        f"Cookie: {cookie}\r\n"
+        f"User-Agent: {USER_AGENT}\r\n"
+        f"Connection: keep-alive\r\n"
+        f"\r\n"
+    ).encode()
+
+
+def describe_state(body: str) -> str:
+    """Xiaomi's account-side verdict in words.
+
+    Measured 2026-08-17: button_state 1 / is_pass 4 / deadline 0 while the
+    apply endpoint was answering apply_result 3. The two are independent --
+    an eligible account still loses a full pool -- and conflating them is
+    what made 'ineligible account' look like a plausible diagnosis for three
+    days.
+    """
+    try:
+        start = body.index("{")
+        data = json.loads(body[start:body.rindex("}") + 1]).get("data") or {}
+    except (ValueError, json.JSONDecodeError):
+        return f"STATE-UNPARSEABLE :: {body.strip()[:120]}"
+
+    button = data.get("button_state")
+    words = {
+        1: "may apply",
+        2: f"account blocked until {data.get('deadline_format') or '?'}",
+        3: "account younger than 30 days",
+    }.get(button, f"unknown button_state {button}")
+    granted = " ALREADY GRANTED" if data.get("is_pass") == 1 else ""
+    return (f"account: {words}{granted} "
+            f"(button_state={button} is_pass={data.get('is_pass')} "
+            f"function_switch={data.get('function_switch')})")
+
+
 async def open_warm(ctx: ssl.SSLContext) -> tuple[asyncio.StreamReader, asyncio.StreamWriter, float]:
     """Connect + handshake now, measure RTT, leave the socket idle and ready."""
     t0 = time.monotonic()
@@ -185,6 +248,8 @@ def classify(bodies: list[str]) -> str:
 
     if token_invalid:
         return "TOKEN-INVALID"
+    if 4 in results:
+        return "BLOCKED"
     if 3 in results:
         return "REFUSED-UNTIL-DEADLINE"
     if errors:
@@ -194,35 +259,39 @@ def classify(bodies: list[str]) -> str:
     return "UNKNOWN"
 
 
-def server_deadline(body: str) -> float | None:
-    """Epoch of the next window, as the server reports it."""
-    try:
-        start = body.index("{")
-        payload = json.loads(body[start:body.rindex("}") + 1])
-        return float((payload.get("data") or {}).get("deadline"))
-    except (ValueError, TypeError, json.JSONDecodeError):
-        return None
+async def observe_window(args, offset: float) -> int:
+    """Confirm eligibility before the window, then fire on it.
 
-
-
-async def observe_window(args, payload_for, offset: float) -> int:
-    """Probe before the window, then fire on it.
-
-    The operator's experiment: the gate is ASSUMED to open exactly at the
-    deadline, but nobody has checked whether it opens early, late, or after
-    some service finishes initialising. Probing at fixed offsets and
-    recording when apply_result changes answers that from evidence. The
-    probes are cheap and the pool is already exhausted before the window, so
-    they cost nothing but tell us where the edge really is.
+    These probes read `bl-switch/state`, never the apply endpoint. Until
+    2026-08-17 they sent real applications, which answered a question the
+    state endpoint answers for free while spending attempts against an
+    endpoint whose documented penalty for frequent retries is a ten-day
+    account block. What the probes are for now is the precondition: a token
+    that still works and an account that is still permitted to apply, known
+    before the one shot that matters rather than after it.
     """
     ctx = ssl.create_default_context()
+    state_payload = build_state_request(args.token, args.device_id)
 
-    r, w, _ = await open_warm(ctx)
-    _, first = await fire(r, w, payload_for(True), 0)
-    w.close()
-    log(f"pre-probe: {first}")
-    target = server_deadline(first) or (time.time() + offset + 60)
-    log(f"window from the server: {datetime.fromtimestamp(target).astimezone().isoformat()}")
+    async def probe(label: str) -> str | None:
+        try:
+            r, w, _ = await open_warm(ctx)
+            _, body = await fire(r, w, state_payload, 0)
+            w.close()
+            log(f"{label}: {describe_state(body)}")
+            return body
+        except Exception as exc:  # noqa: BLE001
+            log(f"{label} probe failed: {exc}")
+            return None
+
+    await probe("pre-probe")
+
+    # The window is Beijing midnight. It used to be read from the apply
+    # response's own deadline field, which the state endpoint does not carry
+    # (it reports 0 for an unblocked account) -- and which only ever restated
+    # the same boundary anyway.
+    target = args.at_epoch or next_reset(time.time() + offset, args.hour)
+    log(f"window: {datetime.fromtimestamp(target).astimezone().isoformat()}")
 
     # The last probe must leave run()'s FULL warm lead intact. T-1s cost the
     # 2026-08-15 shot (released +1.9s); T-5s cost the 2026-08-16 shot
@@ -233,13 +302,7 @@ async def observe_window(args, payload_for, offset: float) -> int:
         when = target - lead
         while (time.time() + offset) < when:
             time.sleep(min(20.0, max(0.2, when - (time.time() + offset))))
-        try:
-            r, w, _ = await open_warm(ctx)
-            _, body = await fire(r, w, payload_for(True), 0)
-            w.close()
-            log(f"T-{lead}s: {classify([body])} :: {body[body.find('{'):][:180]}")
-        except Exception as exc:  # noqa: BLE001
-            log(f"T-{lead}s probe failed: {exc}")
+        await probe(f"T-{lead}s")
 
     args.at_epoch = target
     return await run(args)
@@ -258,18 +321,18 @@ async def run(args: argparse.Namespace) -> int:
 
     now_true = time.time() + off
     if args.check:
+        # Reads state; sends no application. This used to fire the apply POST,
+        # so the documented "validates it without applying" was false and every
+        # check spent an attempt against the endpoint that penalises frequent
+        # retries.
         ctx = ssl.create_default_context()
         r, w, rtt = await open_warm(ctx)
-        log(f"token check: rtt {rtt * 1000:.0f} ms")
-        status, detail = await fire(r, w, payload, 0)
+        log(f"state check: rtt {rtt * 1000:.0f} ms")
+        _, detail = await fire(r, w, build_state_request(token, args.device_id), 0)
         w.close()
-        log(detail)
-        verdict = classify([detail])
-        log(f"verdict: {verdict}")
-        # `classify` uses the endpoint's actual result vocabulary.  A token
-        # check is valid both when the account is already granted and when
-        # the current quota window is closed.
-        return 0 if verdict in ("GRANTED", "REFUSED-UNTIL-DEADLINE") else 1
+        verdict = describe_state(detail[detail.find("{"):] if "{" in detail else detail)
+        log(verdict)
+        return 0 if "button_state=1" in verdict else 1
 
     target = args.at_epoch or next_reset(now_true, args.hour)
     log(f"target {datetime.fromtimestamp(target, BEIJING).isoformat()} Beijing "
@@ -425,7 +488,7 @@ def main() -> int:
     ap.add_argument("--device-id", default="0000000000000000",
                     help="deviceId cookie component; any stable value works")
     ap.add_argument("--check", action="store_true",
-                    help="validate the token by applying NOW instead of waiting for the reset")
+                    help="report token validity and account eligibility now; sends no application")
     ap.add_argument("--hour", type=int, default=0, help="Beijing hour of the reset (default 0)")
     ap.add_argument("--at-epoch", type=float, default=0.0, help="explicit unix target, overrides --hour")
     ap.add_argument("--connections", type=int, default=4, help="pre-warmed connections released together")
@@ -444,8 +507,7 @@ def main() -> int:
                 print("no token available", file=sys.stderr)
                 return 2
             off = 0.0 if args.no_ntp else ntp_offset(args.ntp_server)
-            payload_for = lambda retry: build_request(args.token, args.device_id, retry)  # noqa: E731
-            return asyncio.run(observe_window(args, payload_for, off))
+            return asyncio.run(observe_window(args, off))
         return asyncio.run(run(args))
     except KeyboardInterrupt:
         return 130
