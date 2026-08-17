@@ -85,6 +85,11 @@
   #   mutually exclusive (systemd itself allows both, but every existing
   #   lane picks one); set onBootSec = null to use onStartupSec instead.
   timer ? { },
+  # After= for the poll-mode oneshot service itself, not the timer (most
+  # pollers need nothing here since the timer alone gates when they run;
+  # capture-kitty-scrollback needs graphical-session.target because its
+  # writer talks to a running kitty).
+  pollAfter ? [ ],
 
   # --- mode = "stream" ---
   target ? "graphical-session.target",
@@ -182,7 +187,9 @@ let
           {
             home-manager.users.${username} = {
               systemd.user.services.${unitName} = {
-                Unit.Description = unitDescription;
+                Unit = {
+                  Description = unitDescription;
+                } // lib.optionalAttrs (pollAfter != [ ]) { After = pollAfter; };
                 Service = lib.sinnix.mkRuntimeServiceConfig {
                   runtimeInventory = config.sinnix.runtime.inventory;
                   inherit unit;
@@ -195,7 +202,13 @@ let
                   let
                     onStartupSec = timer.onStartupSec or null;
                   in
-                  { OnUnitActiveSec = "${toString timer.intervalSec}s"; }
+                  {
+                    OnUnitActiveSec =
+                      if (timer.onUnitActiveSec or null) != null then
+                        timer.onUnitActiveSec
+                      else
+                        "${toString timer.intervalSec}s";
+                  }
                   // (
                     if onStartupSec != null then
                       { OnStartupSec = onStartupSec; }
