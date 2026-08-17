@@ -50,47 +50,34 @@ mkServiceModule {
       restartable = false;
     };
   };
-  configFn =
+  job =
+    { cfg, config, ... }:
     {
-      cfg,
-      config,
-      ...
-    }:
-    let
-      userName = config.sinnix.user.name;
-    in
-    {
-      # Small marker file recording the last sinex revision this host has
-      # already prebuilt + pushed; not declaring it wipes the cache-warmth
-      # bookkeeping on every reboot and forces a redundant rebuild the first
-      # time the timer fires post-boot.
-      sinnix.persistence.home.directories = [
-        ".local/state/sinnix/sinex-cache-prebuild"
-      ];
-
-      home-manager.users.${userName} = {
-        systemd.user.services.sinex-cache-prebuild = {
-          Unit.Description = "Detect a sinex input bump and pre-build + cache-push it";
-          Service = {
-            Type = "oneshot";
-            ExecStart = "${prebuild}/bin/sinnix-sinex-cache-prebuild --flake-dir ${config.sinnix.paths.projectRoot} --system ${pkgs.stdenv.hostPlatform.system}";
-            # On a detected move this unit's runtime becomes the sinex build
-            # time, so bound generously: a wedged build still gets reaped
-            # without killing a legitimate multi-GB Rust workspace compile.
-            TimeoutStartSec = "2h";
-          };
-        };
-
-        systemd.user.timers.sinex-cache-prebuild = {
-          Unit.Description = "Periodic sinex input-bump check for pre-building + cache-push";
-          Timer = {
-            OnCalendar = cfg.onCalendar;
-            Persistent = true;
-            RandomizedDelaySec = "2min";
-            Unit = "sinex-cache-prebuild.service";
-          };
-          Install.WantedBy = [ "timers.target" ];
-        };
+      # Unit predates the sinnix- prefix; keep its name.
+      unitName = "sinex-cache-prebuild";
+      manager = "user";
+      description = "Detect a sinex input bump and pre-build + cache-push it";
+      execStart = "${prebuild}/bin/sinnix-sinex-cache-prebuild --flake-dir ${config.sinnix.paths.projectRoot} --system ${pkgs.stdenv.hostPlatform.system}";
+      serviceConfig = {
+        # On a detected move this unit's runtime becomes the sinex build
+        # time, so bound generously: a wedged build still gets reaped
+        # without killing a legitimate multi-GB Rust workspace compile.
+        TimeoutStartSec = "2h";
+      };
+      timer = {
+        description = "Periodic sinex input-bump check for pre-building + cache-push";
+        onCalendar = cfg.onCalendar;
+        persistent = true;
+        randomizedDelaySec = "2min";
       };
     };
+  configFn = _: {
+    # Small marker file recording the last sinex revision this host has
+    # already prebuilt + pushed; not declaring it wipes the cache-warmth
+    # bookkeeping on every reboot and forces a redundant rebuild the first
+    # time the timer fires post-boot.
+    sinnix.persistence.home.directories = [
+      ".local/state/sinnix/sinex-cache-prebuild"
+    ];
+  };
 } args

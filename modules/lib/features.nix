@@ -102,10 +102,18 @@ let
       #                         user's own stores)
       #   serviceConfig ? { }   extra overrides merged over the generated ones
       #   path, environment, description   passed through to the unit
-      # The unit is always sinnix-<name>.service; system-manager jobs get
-      # their resource class via mkRuntimeServiceConfig (register the
-      # surface), user-manager jobs write plain serviceConfig, matching
-      # existing per-manager practice.
+      #   unitName              override of the generated unit base name, for
+      #                         units that predate the sinnix- prefix; the
+      #                         default is sinnix-<name>
+      #   resourceClass         user-manager only: apply this class's
+      #                         serviceConfig via mkRuntimeServiceConfig's
+      #                         direct-class form (no unit lookup)
+      #   unit ? { }            extra unit-level attrs merged into the
+      #                         generated service (after, requires,
+      #                         unitConfig, restartIfChanged, ...)
+      #   timer.description     Description= on the generated timer
+      # System-manager jobs get their resource class via
+      # mkRuntimeServiceConfig (register the surface first).
       job ? null,
       configFn ? (_: { }),
     }:
@@ -127,10 +135,10 @@ let
       resolve = v: if builtins.isFunction v then v moduleArgs else v;
       surfaceValue = resolve surface;
       jobValue = resolve job;
-      unitName = "sinnix-${name}";
       mkJobConfig =
         j:
         let
+          unitName = j.unitName or "sinnix-${name}";
           manager = j.manager or "system";
           timerConfig = lib.optionalAttrs (j ? timer) (
             lib.filterAttrs (_: v: v != null) {
@@ -168,6 +176,12 @@ let
                   unit = "${unitName}.service";
                   inherit overrides;
                 }
+              else if j ? resourceClass then
+                lib.sinnix.mkRuntimeServiceConfig {
+                  runtimeInventory = config.sinnix.runtime.inventory;
+                  inherit (j) resourceClass;
+                  inherit overrides;
+                }
               else
                 overrides;
           }
@@ -175,10 +189,14 @@ let
             onFailure = lib.mkDefault [ "sinnix-unit-failure-notify@%n.service" ];
           }
           // lib.optionalAttrs (j ? path) { path = j.path; }
-          // lib.optionalAttrs (j ? environment) { environment = j.environment; };
+          // lib.optionalAttrs (j ? environment) { environment = j.environment; }
+          // (j.unit or { });
           timerBody = {
             wantedBy = [ "timers.target" ];
             inherit timerConfig;
+          }
+          // lib.optionalAttrs (j ? timer && j.timer ? description) {
+            description = j.timer.description;
           };
           units =
             {

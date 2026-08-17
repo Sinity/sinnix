@@ -60,44 +60,27 @@ mkServiceModule {
       restartable = false;
     };
   };
-  configFn =
+  job =
+    { cfg, ... }:
     {
-      cfg,
-      config,
-      ...
-    }:
-    let
-      userName = config.sinnix.user.name;
-    in
-    {
-      home-manager.users.${userName} = {
-        systemd.user.services.sinex-dev-db-reaper = {
-          Unit.Description = "Reap orphaned sinex dev-postgres instances";
-          Service = lib.sinnix.mkRuntimeServiceConfig {
-            runtimeInventory = config.sinnix.runtime.inventory;
-            # The registered surface unit is the *timer*, so a `unit =` lookup
-            # would throw -- resolve the class's serviceConfig directly.
-            resourceClass = "background-maintenance";
-            overrides = {
-              Type = "oneshot";
-              ExecStart = "${reaper}/bin/sinnix-sinex-dev-db reap --idle-secs ${toString cfg.idleSeconds}";
-              # A wedged instance escalates SIGINT→SIGQUIT→SIGKILL internally with
-              # bounded waits; cap the whole sweep so a stuck unit cannot linger.
-              TimeoutStartSec = "5min";
-            };
-          };
-        };
-
-        systemd.user.timers.sinex-dev-db-reaper = {
-          Unit.Description = "Periodic reap of orphaned sinex dev-postgres";
-          Timer = {
-            OnCalendar = cfg.onCalendar;
-            Persistent = true;
-            RandomizedDelaySec = "2min";
-            Unit = "sinex-dev-db-reaper.service";
-          };
-          Install.WantedBy = [ "timers.target" ];
-        };
+      # Unit predates the sinnix- prefix; keep its name.
+      unitName = "sinex-dev-db-reaper";
+      manager = "user";
+      description = "Reap orphaned sinex dev-postgres instances";
+      # The registered surface unit is the *timer*, so the service resolves
+      # its class directly rather than by unit lookup.
+      resourceClass = "background-maintenance";
+      execStart = "${reaper}/bin/sinnix-sinex-dev-db reap --idle-secs ${toString cfg.idleSeconds}";
+      serviceConfig = {
+        # A wedged instance escalates SIGINT→SIGQUIT→SIGKILL internally with
+        # bounded waits; cap the whole sweep so a stuck unit cannot linger.
+        TimeoutStartSec = "5min";
+      };
+      timer = {
+        description = "Periodic reap of orphaned sinex dev-postgres";
+        onCalendar = cfg.onCalendar;
+        persistent = true;
+        randomizedDelaySec = "2min";
       };
     };
 } args
