@@ -205,7 +205,10 @@ let
 
       ${mkBorgCommonScript repo repoPath}
 
-      install -d -m 0700 -o root -g root ${lib.escapeShellArg borgDrainStateRoot}
+      # 0755, not 0700: the reducer health sweep runs as the operator and
+      # watches the marker files here as capture lanes; timestamps are not
+      # secrets, and an unreadable lane reads as stale forever.
+      install -d -m 0755 -o root -g root ${lib.escapeShellArg borgDrainStateRoot}
 
       # The coalescing gate runs FIRST, before the global Borg lock. A wake
       # inside the min-interval window has no work to do, so it must cost a
@@ -958,7 +961,7 @@ in
         # as the btrbk drain jobs' "$label.last-success" (mkSnapshotDrainScript
         # above) -- without it, sinex-blobs had zero freshness gating despite
         # being on a daily timer just like persist/realm are on their 4h floor.
-        install -d -m 0700 -o root -g root ${lib.escapeShellArg borgDrainStateRoot}
+        install -d -m 0755 -o root -g root ${lib.escapeShellArg borgDrainStateRoot}
         marker=${lib.escapeShellArg "${borgDrainStateRoot}/sinex-blobs.last-success"}
         {
           printf 'archive=%s\n' "$archive_name"
@@ -1026,7 +1029,7 @@ in
         run_id="''${INVOCATION_ID:-borg-check-$(date +%s)}"
         write_integrity_receipt() {
           state="$1"
-          install -d -m 0700 ${lib.escapeShellArg borgDrainStateRoot}
+          install -d -m 0755 ${lib.escapeShellArg borgDrainStateRoot}
           jq -cn \
             --arg operation_kind integrity_check \
             --arg run_id "$run_id" \

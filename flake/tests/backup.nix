@@ -73,6 +73,10 @@ in
               to = "install -d -m 0700";
             }
             {
+              from = "install -d -m 0755 -o root -g root";
+              to = "install -d -m 0755";
+            }
+            {
               from = "${pkgs.util-linux}/bin/mountpoint";
               to = "$TMPDIR/mock-bin/mountpoint";
             }
@@ -115,6 +119,10 @@ in
             {
               from = "install -d -m 0700 -o root -g root";
               to = "install -d -m 0700";
+            }
+            {
+              from = "install -d -m 0755 -o root -g root";
+              to = "install -d -m 0755";
             }
             {
               from = "${pkgs.util-linux}/bin/mountpoint";
@@ -161,6 +169,10 @@ in
               to = "install -d -m 0700";
             }
             {
+              from = "install -d -m 0755 -o root -g root";
+              to = "install -d -m 0755";
+            }
+            {
               from = "${pkgs.util-linux}/bin/mountpoint";
               to = "$TMPDIR/mock-bin/mountpoint";
             }
@@ -200,6 +212,10 @@ in
             {
               from = "install -d -m 0700 -o root -g root";
               to = "install -d -m 0700";
+            }
+            {
+              from = "install -d -m 0755 -o root -g root";
+              to = "install -d -m 0755";
             }
             {
               from = "/var/lib/sinex/state/blob-repository";
