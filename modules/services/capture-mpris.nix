@@ -11,6 +11,7 @@
 # position, why writes shell out to the sinnix-capture CLI).
 {
   mkServiceModule,
+  mkCaptureLane,
   lib,
   pkgs,
   config,
@@ -22,6 +23,7 @@ let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   capturesRoot = config.sinnix.paths.activityRoot;
   mprisDir = "${capturesRoot}/mpris";
+  cfg = config.sinnix.services.capture-mpris;
 
   monitor = pkgs.writeTextFile {
     name = "capture-mpris-monitor";
@@ -33,7 +35,7 @@ let
     + builtins.readFile ../../pkgs/capture-mpris/monitor.py;
   };
 in
-mkServiceModule {
+mkServiceModule (mkCaptureLane {
   name = "capture-mpris";
   description = "MPRIS media-player track/status capture with playback heartbeat";
   extraOptions = {
@@ -47,57 +49,14 @@ mkServiceModule {
       '';
     };
   };
-  surface = {
-    unit = "sinnix-capture-mpris.service";
-    manager = "user";
-    resourceClass = "capture-runtime";
-    observe = {
-      enable = true;
-      restartable = true;
-    };
-    captures = [
-      {
-        name = "mpris";
-        path = mprisDir;
-        eventDriven = true;
-        # Media listening is optional and intermittent: a fully quiet week is
-        # a legitimate "nothing was played" outcome, not a broken daemon.
-        staleAfterSeconds = 604800;
-      }
-    ];
-  };
-  configFn =
-    { cfg, config, ... }:
-    {
-      systemd.tmpfiles.rules = [
-        "d ${mprisDir} 0755 ${username} users -"
-      ];
-
-      home-manager.users.${username} =
-        { ... }:
-        {
-          systemd.user.services.sinnix-capture-mpris = {
-            Unit = {
-              Description = "MPRIS media-player track/status capture with playback heartbeat";
-              After = [ "graphical-session.target" ];
-              PartOf = [ "graphical-session.target" ];
-            };
-            Service = lib.sinnix.mkRuntimeServiceConfig {
-              runtimeInventory = config.sinnix.runtime.inventory;
-              unit = "sinnix-capture-mpris.service";
-              overrides = {
-                Type = "simple";
-                ExecStart = "${monitor}/bin/capture-mpris-monitor --capture-root ${capturesRoot} --lane mpris --playerctl-bin ${pkgs.playerctl}/bin/playerctl --sinnix-capture-bin ${scriptPkgs.sinnix-capture}/bin/sinnix-capture --heartbeat-interval ${toString cfg.heartbeatIntervalSec}";
-                Restart = "on-failure";
-                RestartSec = "5s";
-                NoNewPrivileges = true;
-                ProtectSystem = "strict";
-                ProtectHome = "read-only";
-                ReadWritePaths = [ mprisDir ];
-              };
-            };
-            Install.WantedBy = [ "graphical-session.target" ];
-          };
-        };
-    };
-} args
+  inherit username;
+  laneDir = mprisDir;
+  mode = "stream";
+  captureName = "mpris";
+  eventDriven = true;
+  # Media listening is optional and intermittent: a fully quiet week is a
+  # legitimate "nothing was played" outcome, not a broken daemon.
+  staleAfterSeconds = 604800;
+  execStart = "${monitor}/bin/capture-mpris-monitor --capture-root ${capturesRoot} --lane mpris --playerctl-bin ${pkgs.playerctl}/bin/playerctl --sinnix-capture-bin ${scriptPkgs.sinnix-capture}/bin/sinnix-capture --heartbeat-interval ${toString cfg.heartbeatIntervalSec}";
+  unitDescription = "MPRIS media-player track/status capture with playback heartbeat";
+}) args
