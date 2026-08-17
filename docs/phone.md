@@ -139,6 +139,15 @@ intent twice, and an intent that also went out live arrives again by design;
 prime records every executed token, and a repeat is a no-op that still emits
 its receipt.
 
+A third channel exists alongside these two, and it is not an intent plane at
+all: the phone's always-on telemetry push (speech, the app's event mirror)
+streams newline-delimited JSON straight into a persistent tailscale0 TCP
+listener, demuxed by `kind` into `phone-<kind>` capture lanes. It used to be
+its own unit (`sinnix-phone-receiver`); as of 2026-08-17 it is a second
+server thread inside `sinnix-phone-dispatcher serve` (sinnix-tjqi) — same
+port, protocol, and lane layout, just one fewer always-running process. See
+docs/speech.md for what that lane deliberately does and does not do.
+
 **Actions are the one thing never queued.** `start`/`stop`/`restart` on a live
 unit is a decision about right now; executing it half an hour later against a
 machine nobody looked at is a different and worse action than the one that was
@@ -352,9 +361,10 @@ internal differences.
 Beyond ambient audio and the passive light/motion sampler:
 
 - **Speech** — Silero VAD over a second recorder; on a speech region the
-  utterance streams to prime's receiver, on any network. **On, and meant to
-  stay on**, like every other capture here: started at boot, revived by the
-  watchdog, restarted when the app is opened. The toggle exists because a
+  utterance streams to prime's dispatcher (the always-on telemetry channel
+  described under "The two planes" above), on any network. **On, and meant
+  to stay on**, like every other capture here: started at boot, revived by
+  the watchdog, restarted when the app is opened. The toggle exists because a
   switch is useful, not because the default should be silence. See
   docs/speech.md for what it deliberately does not do.
 - **Location** — framework `LocationManager.FUSED_PROVIDER` with geofence
