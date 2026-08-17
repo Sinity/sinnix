@@ -527,7 +527,7 @@ mkServiceModule {
             ExecStart = lib.concatStringsSep " " [
               "${scriptPkgs.sinnix-terminal-view}/bin/sinnix-terminal-view"
               "--socket %t/sinnix/terminal-view.sock"
-              "--history-dir /realm/data/captures/kitty-scrollback"
+              "--history-dir /realm/data/activity/kitty-scrollback"
             ];
             Restart = "on-failure";
             RestartSec = "5s";

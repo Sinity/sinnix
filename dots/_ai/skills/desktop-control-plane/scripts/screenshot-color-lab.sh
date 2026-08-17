@@ -23,7 +23,7 @@ Commands:
       Apply manual correction transform for washed-out captures.
 
 Defaults:
-  out-dir: /realm/data/captures/screenshot
+  out-dir: /realm/data/activity/screenshot
   brightness: 105
   saturation: 125
   gamma: 0.90
@@ -83,7 +83,7 @@ probe)
 capture-output | capture-area)
   need_cmd hyprctl
   need_cmd jq
-  out_dir="/realm/data/captures/screenshot"
+  out_dir="/realm/data/activity/screenshot"
   name="$(now_stamp)"
   fix_hdr=0
   brightness=105

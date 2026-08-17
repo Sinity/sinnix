@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-REPORT = Path("/realm/data/captures/machine/config-drift.jsonl")
+REPORT = Path("/realm/data/machine/config-drift.jsonl")
 
 
 def collect_config_drift(path: Path = REPORT) -> dict[str, Any]:
