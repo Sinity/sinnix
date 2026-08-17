@@ -273,7 +273,7 @@ def write_markdown(result: dict, path: Path) -> None:
 
 def default_output_dir() -> Path:
     stamp = dt.datetime.now().strftime("%Y%m%d")
-    return Path("/realm/data/exports/chatlog/raw") / f"chatgpt-share-{stamp}"
+    return Path("/realm/data/ai/chatlog/raw") / f"chatgpt-share-{stamp}"
 
 
 def parse_args() -> argparse.Namespace:

@@ -334,11 +334,11 @@ mkFeatureModule {
               force = true;
             };
             ".local/share/polylogue/inbox/chatgpt" = {
-              source = config.lib.file.mkOutOfStoreSymlink "/realm/data/exports/chatlog/raw/chatgpt";
+              source = config.lib.file.mkOutOfStoreSymlink "/realm/data/ai/chatlog/raw/chatgpt";
               force = true;
             };
             ".local/share/polylogue/inbox/claude" = {
-              source = config.lib.file.mkOutOfStoreSymlink "/realm/data/exports/chatlog/raw/claude";
+              source = config.lib.file.mkOutOfStoreSymlink "/realm/data/ai/chatlog/raw/claude";
               force = true;
             };
           };

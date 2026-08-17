@@ -46,7 +46,7 @@ from typing import Any, Iterable
 
 SCHEMA = "sinnix.transcript/1"
 
-MODEL_ROOT = Path(os.environ.get("SINNIX_STT_MODEL_ROOT", "/realm/media/model/sherpa"))
+MODEL_ROOT = Path(os.environ.get("SINNIX_STT_MODEL_ROOT", "/realm/library/models/sherpa"))
 PARAKEET = MODEL_ROOT / "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
 SILERO = MODEL_ROOT / "silero_vad.onnx"
 SEGMENTATION = MODEL_ROOT / "sherpa-onnx-pyannote-segmentation-3-0" / "model.onnx"
@@ -65,7 +65,7 @@ RELEASES = "https://github.com/k2-fsa/sherpa-onnx/releases/download"
 
 #: The model set, as (destination, url, kind). Fetched rather than vendored in
 #: the Nix store: half a gigabyte of weights is not source, and the estate
-#: already keeps model files under /realm/media/model.
+#: already keeps model files under /realm/library/models.
 MODEL_SET = [
     (
         PARAKEET,
