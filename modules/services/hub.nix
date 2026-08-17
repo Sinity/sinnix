@@ -1,10 +1,9 @@
 # Sinnix hub — the operator's browser front door to the estate, reachable from
 # the tailnet and nowhere else.
 #
-# Three units, all in the user manager, all default-off until a host opts in:
+# Two units, both in the user manager, both default-off until a host opts in:
 #
 #   sinnix-hub.service          Caddy: static serving + reverse proxying
-#   sinnix-hub-render.service   periodic server-side render of the pages
 #   sinnix-hub-feedback.service append-only spool for report annotations
 #
 # ── Why the user manager ────────────────────────────────────────────────────
@@ -13,6 +12,21 @@
 # operator. Running the hub in the same manager lets it reach that socket, the
 # operator-owned reports tree, and the reducer's bounded action API without
 # loosening a single permission. Nothing here needs a privileged port.
+#
+# ── Where the pages come from ───────────────────────────────────────────────
+# Caddy serves no HTML of its own beyond /reports/. Every page is rendered on
+# request by the ops-reducer, which already holds the state the pages show, and
+# Caddy reverse-proxies the page paths to the reducer's Unix socket. There used
+# to be a `sinnix-hub-render` timer writing the same pages to static files every
+# 60 seconds; a page is now as current as the moment it was asked for, and there
+# is no window in which the hub describes an estate that has since moved on.
+#
+# Auth is unchanged by that move. The reducer treats its Unix socket as
+# authorized (it is 0600 in the operator's runtime dir) and still demands a
+# bearer token on its loopback TCP listener, so proxying the page paths through
+# the socket exposes exactly what the action API already exposed there and
+# nothing more: the same-origin gate below and the reducer's own
+# expected_revision check remain the whole admission story for POSTs.
 #
 # ── Why it cannot be seen from the LAN ──────────────────────────────────────
 # Two independent layers, either of which alone would suffice:
@@ -106,12 +120,6 @@ mkServiceModule {
       '';
     };
 
-    renderIntervalSeconds = lib.mkOption {
-      type = lib.types.int;
-      default = 60;
-      description = "How often the dashboard and AI panel are re-rendered.";
-    };
-
     aiServices = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [
@@ -190,7 +198,6 @@ mkServiceModule {
     { cfg, ... }:
     let
       tailscaleInterface = config.sinnix.services.tailscale.interfaceName;
-      wwwDir = "${cfg.stateDir}/www";
 
       # Only republish a frontend whose owning service is actually enabled.
       activeFrontends = lib.filterAttrs (
@@ -325,9 +332,16 @@ mkServiceModule {
             reverse_proxy unix/${phoneSocket}
           }
 
+          # The pages themselves. Rendered on request by the ops-reducer from
+          # the state it already holds -- no prefix stripping here, unlike
+          # /ops/* above: the reducer routes on the page path itself.
+          redir /work /work/
+          redir /services /services/
+          redir /ai /ai/
+          redir /shaders /shaders/
+
           handle {
-            root * ${wwwDir}
-            file_server
+            reverse_proxy unix/${opsSocket}
           }
         }
 
@@ -403,6 +417,15 @@ mkServiceModule {
           '';
         }
         {
+          assertion = config.sinnix.services.ops-reducer.enable;
+          message = ''
+            sinnix.services.hub requires sinnix.services.ops-reducer.enable —
+            every page except /reports/ is rendered by the reducer on request,
+            and every button posts to its action API. Without it the hub is a
+            proxy to nothing.
+          '';
+        }
+        {
           assertion =
             let
               ports = [ cfg.port ] ++ (lib.mapAttrsToList (_: f: f.port) cfg.frontends);
@@ -411,6 +434,10 @@ mkServiceModule {
           message = "sinnix.services.hub: the hub port and every frontend port must be distinct.";
         }
       ];
+
+      # The pages are rendered by the reducer, which needs the manifest this
+      # module owns the content of.
+      sinnix.services.ops-reducer.hubManifest = manifest;
 
       # Per-interface, not networking.firewall.allowedTCPPorts: tailscale0 is
       # not a trusted interface under useRoutingFeatures = "none", so this is
@@ -423,7 +450,6 @@ mkServiceModule {
 
       systemd.tmpfiles.rules = [
         "d ${cfg.stateDir} 0755 ${userName} users -"
-        "d ${wwwDir} 0755 ${userName} users -"
         "d ${cfg.feedbackDir} 0755 ${userName} users -"
         # Absorbed from the retired sinnix-phone-receiver module. The
         # CaptureWriter/SpeechLane ports in the dispatcher script also
@@ -438,7 +464,6 @@ mkServiceModule {
       ];
 
       environment.systemPackages = [
-        scriptPkgs.sinnix-hub-render
         scriptPkgs.sinnix-hub-feedback
         scriptPkgs.sinnix-terminal-view
         scriptPkgs.sinnix-phone-dispatcher
@@ -523,16 +548,6 @@ mkServiceModule {
             restartable = true;
           };
         };
-        hub-render = {
-          unit = "sinnix-hub-render.timer";
-          kind = "timer";
-          manager = "user";
-          resourceClass = "background-maintenance";
-          observe = {
-            enable = true;
-            restartable = true;
-          };
-        };
         elicit-autoingest = {
           unit = "sinnix-elicit-autoingest.timer";
           kind = "timer";
@@ -547,7 +562,6 @@ mkServiceModule {
 
       home-manager.users.${userName} = {
         home.packages = [
-          scriptPkgs.sinnix-hub-render
           scriptPkgs.sinnix-hub-feedback
           scriptPkgs.sinnix-terminal-view
           scriptPkgs.sinnix-elicit
@@ -556,10 +570,15 @@ mkServiceModule {
         systemd.user.services.sinnix-hub = {
           Unit = {
             Description = "Sinnix tailnet hub (Caddy)";
-            After = [ "sinnix-hub-feedback.service" ];
+            After = [
+              "sinnix-hub-feedback.service"
+              "sinnix-ops-reducer.socket"
+            ];
+            # The reducer renders every page Caddy does not serve off disk, so
+            # its socket has to exist before the proxy takes a request.
             Wants = [
               "sinnix-hub-feedback.service"
-              "sinnix-hub-render.timer"
+              "sinnix-ops-reducer.socket"
             ];
           };
           Service = {
@@ -654,37 +673,11 @@ mkServiceModule {
           Install.WantedBy = [ "default.target" ];
         };
 
-        systemd.user.services.sinnix-hub-render = {
-          Unit.Description = "Render the Sinnix hub dashboard and AI control panel";
-          Service = {
-            Type = "oneshot";
-            # /run/current-system/sw/bin carries systemctl and nvidia-smi; the
-            # script's own runtimeInputs are prefixed ahead of it by the wrapper.
-            Environment = [ "PATH=/run/wrappers/bin:/run/current-system/sw/bin" ];
-            ExecStart = lib.concatStringsSep " " [
-              "${scriptPkgs.sinnix-hub-render}/bin/sinnix-hub-render"
-              "--manifest ${manifest}"
-              "--out ${wwwDir}"
-            ];
-            NoNewPrivileges = true;
-          };
-        };
-
-        systemd.user.timers.sinnix-hub-render = {
-          Unit.Description = "Periodic re-render of the Sinnix hub pages";
-          Timer = {
-            OnStartupSec = "5s";
-            OnUnitActiveSec = "${toString cfg.renderIntervalSeconds}s";
-            AccuracySec = "5s";
-          };
-          Install.WantedBy = [ "timers.target" ];
-        };
-
         # sinnix-elicit's comparison sessions (sinnix-eb9c) post to this same
         # feedback spool. The operator's own question -- "why does this
         # require a separate step?" after tapping through comparisons --
-        # is answered by draining and refitting on the same kind of timer
-        # sinnix-hub-render already uses, not a manual `ingest`+`explain`.
+        # is answered by draining and refitting on a short timer, not a
+        # manual `ingest`+`explain`.
         # `autoingest` is a no-op safe to run this often: `ingest` dedups by
         # comparison id, and a refit only happens when something new landed.
         systemd.user.services.sinnix-elicit-autoingest = {

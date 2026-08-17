@@ -83,7 +83,12 @@ mkServiceModule {
             Type = "simple";
             # --agent-controller: dotsRoot-direct, not the
             # ~/.config/hermes/skills linkFarm hop.
-            ExecStart = "${reducer}/bin/sinnix-ops-reducer --runtime-dir %t --state-dir ${stateDir} --inventory /etc/sinnix/runtime-inventory.json --ambient-product /realm/project/sinity-lynchpin/.lynchpin/generated/analysis/ambient_intelligence.json --anchor-events %t/sinnix/afk-resume.json --hyprland-events %t/sinnix/hyprland-events --agent-controller ${config.sinnix.paths.dotsRoot}/_ai/skills/agent-orchestration/scripts/agent_job_control.sh --observe-command ${observe}/bin/sinnix-observe --interval ${toString cfg.intervalSeconds}";
+            ExecStart = "${reducer}/bin/sinnix-ops-reducer --runtime-dir %t --state-dir ${stateDir} --inventory /etc/sinnix/runtime-inventory.json --ambient-product /realm/project/sinity-lynchpin/.lynchpin/generated/analysis/ambient_intelligence.json --anchor-events %t/sinnix/afk-resume.json --hyprland-events %t/sinnix/hyprland-events --agent-controller ${config.sinnix.paths.dotsRoot}/_ai/skills/agent-orchestration/scripts/agent_job_control.sh --observe-command ${observe}/bin/sinnix-observe --interval ${toString cfg.intervalSeconds}${lib.optionalString (cfg.hubManifest != null) " --hub-manifest ${cfg.hubManifest}"}";
+            # nvidia-smi, journalctl, systemctl and hyprctl are what the pages
+            # probe the live host with; /run/current-system/sw/bin is where
+            # they are, and the pages render on request rather than from a
+            # timer's PATH.
+            Environment = [ "PATH=/run/wrappers/bin:/run/current-system/sw/bin" ];
             Restart = "on-failure";
             RestartSec = "2s";
             NoNewPrivileges = true;
@@ -104,6 +109,17 @@ mkServiceModule {
       type = lib.types.int;
       default = 10;
       description = "Minimum interval between bounded sinnix-observe reads.";
+    };
+
+    hubManifest = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = null;
+      description = ''
+        Hub manifest (routes, AI roster, frontends) the server-rendered pages
+        read. Set by `sinnix.services.hub`, which owns that content; null on a
+        host with no hub, whose pages still render from the runtime inventory
+        and the reducer's own snapshot.
+      '';
     };
   };
 } args
