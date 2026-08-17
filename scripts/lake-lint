@@ -37,10 +37,12 @@ check_root() {
   done
 }
 
-# /realm level-1 manifest. db/ holds .snapshots-polylogue and historical btrbk
-# backup history, kept under the no-retention-ever standing rule.
+# /realm level-1 manifest. backup/ holds explicit backup landings (the
+# polylogue consolidation and its live-store snapshot, 2026-08-16); staging/
+# and db/ were dissolved into state/{db-dumps,cursors} and removed outright
+# respectively -- their absence here is deliberate, not an omission.
 check_root /realm \
-  project data media state staging db swap cache worktrees tmp inbox \
+  project data media state backup swap cache worktrees tmp inbox \
   INVENTORY.md .btrfs .Trash-1000
 
 check_root /outer-realm \
