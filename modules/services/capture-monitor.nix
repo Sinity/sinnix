@@ -10,6 +10,7 @@
 # the interval generous; this is not a lane to tighten for freshness.
 {
   mkServiceModule,
+  mkCaptureLane,
   pkgs,
   lib,
   config,
@@ -21,6 +22,7 @@ let
   capturesRoot = config.sinnix.paths.machineRoot;
   laneDir = "${capturesRoot}/monitor";
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
+  cfg = config.sinnix.services.capture-monitor;
 
   poller = pkgs.writeShellApplication {
     name = "capture-monitor-poll";
@@ -78,9 +80,47 @@ let
     '';
   };
 in
-mkServiceModule {
+mkServiceModule (mkCaptureLane {
   name = "capture-monitor";
   description = "AORUS FO48U DDC/CI sensor capture: power state, brightness/contrast drift, input source";
+  inherit username laneDir;
+  mode = "poll";
+  captureName = "monitor";
+  cadenceSeconds = 300;
+  # A gap here means the panel is off, unplugged, or DDC broke -- all worth
+  # surfacing, but on a slower clock than a live sensor: normal sleep/wake
+  # or an input switch can legitimately silence a poll or two.
+  staleAfterSeconds = 3600;
+  execStart = lib.concatStringsSep " " [
+    "${poller}/bin/capture-monitor-poll"
+    "${scriptPkgs.sinnix-capture}/bin/sinnix-capture"
+    capturesRoot
+  ];
+  # /dev/i2c-* is group-owned (i2c) and the service inherits the operator's
+  # supplementary groups via systemd --user, so no DeviceAllow is needed as
+  # long as PrivateDevices stays unset.
+  #
+  # ddcutil persists its dynamic-sleep-adjustment table under
+  # $XDG_CACHE_HOME/ddcutil, and ProtectHome=read-only makes that write fail
+  # on every single VCP access -- five "Read-only file system" errors per
+  # poll, forever, and a DSA table that can never carry timing knowledge
+  # from one poll to the next. Point the cache at the runtime dir, which
+  # survives across runs of this oneshot and is the only writable location
+  # the sandbox leaves it.
+  environment = [
+    "TMPDIR=/tmp"
+    "XDG_CACHE_HOME=%t/sinnix-capture-monitor"
+  ];
+  runtimeDirectory = "sinnix-capture-monitor";
+  runtimeDirectoryPreserve = "yes";
+  privateTmp = true;
+  timer = {
+    intervalSec = cfg.intervalSec;
+    onBootSec = "3min";
+    accuracySec = "30s";
+  };
+  unitDescription = "Poll the AORUS FO48U over DDC/CI into the capture lake";
+  timerDescription = "Periodic trigger for the monitor DDC/CI capture";
   extraOptions = {
     intervalSec = lib.mkOption {
       type = lib.types.ints.positive;
@@ -92,85 +132,4 @@ mkServiceModule {
       '';
     };
   };
-  surface = {
-    unit = "sinnix-capture-monitor.service";
-    manager = "user";
-    resourceClass = "capture-runtime";
-    observe = {
-      enable = true;
-      restartable = true;
-    };
-    captures = [
-      {
-        name = "monitor";
-        path = laneDir;
-        cadenceSeconds = 300;
-        # A gap here means the panel is off, unplugged, or DDC broke --
-        # all worth surfacing, but on a slower clock than a live sensor:
-        # normal sleep/wake or an input switch can legitimately silence a
-        # poll or two.
-        staleAfterSeconds = 3600;
-      }
-    ];
-  };
-  configFn =
-    { cfg, config, ... }:
-    {
-      systemd.tmpfiles.rules = [
-        "d ${laneDir} 0755 ${username} users -"
-      ];
-
-      home-manager.users.${username} =
-        { ... }:
-        {
-          systemd.user.services.sinnix-capture-monitor = {
-            Unit.Description = "Poll the AORUS FO48U over DDC/CI into the capture lake";
-            Service = lib.sinnix.mkRuntimeServiceConfig {
-              runtimeInventory = config.sinnix.runtime.inventory;
-              unit = "sinnix-capture-monitor.service";
-              overrides = {
-                Type = "oneshot";
-                ExecStart = lib.concatStringsSep " " [
-                  "${poller}/bin/capture-monitor-poll"
-                  "${scriptPkgs.sinnix-capture}/bin/sinnix-capture"
-                  capturesRoot
-                ];
-                NoNewPrivileges = true;
-                ProtectSystem = "strict";
-                ProtectHome = "read-only";
-                ReadWritePaths = [ laneDir ];
-                # /dev/i2c-* is group-owned (i2c) and the service inherits the
-                # operator's supplementary groups via systemd --user, so no
-                # DeviceAllow is needed as long as PrivateDevices stays unset.
-                #
-                # ddcutil persists its dynamic-sleep-adjustment table under
-                # $XDG_CACHE_HOME/ddcutil, and ProtectHome=read-only makes
-                # that write fail on every single VCP access -- five
-                # "Read-only file system" errors per poll, forever, and a
-                # DSA table that can never carry timing knowledge from one
-                # poll to the next. Point the cache at the runtime dir,
-                # which survives across runs of this oneshot and is the only
-                # writable location the sandbox leaves it.
-                Environment = [
-                  "TMPDIR=/tmp"
-                  "XDG_CACHE_HOME=%t/sinnix-capture-monitor"
-                ];
-                RuntimeDirectory = "sinnix-capture-monitor";
-                RuntimeDirectoryPreserve = "yes";
-                PrivateTmp = true;
-              };
-            };
-          };
-
-          systemd.user.timers.sinnix-capture-monitor = {
-            Unit.Description = "Periodic trigger for the monitor DDC/CI capture";
-            Timer = {
-              OnBootSec = "3min";
-              OnUnitActiveSec = "${toString cfg.intervalSec}s";
-              AccuracySec = "30s";
-            };
-            Install.WantedBy = [ "timers.target" ];
-          };
-        };
-    };
-} args
+}) args
