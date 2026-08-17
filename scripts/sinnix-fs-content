@@ -111,14 +111,23 @@ def excluded(path: str) -> str | None:
     return None
 
 
-def extract(path: Path, size: int, ext: str) -> tuple[str | None, str | None]:
-    """(title, head) — best effort, never fatal."""
+def extract(path: Path, size: int, ext: str) -> tuple[str | None, str | None, str | None]:
+    """(title, head, error) — best effort, never fatal, but never silent either.
+
+    Returns the reason in the third slot instead of swallowing it. A file that
+    could not be read used to be indistinguishable from a file with no title:
+    both produced (None, None). That is the same shape as the estate's other
+    silent-success bugs -- the sibling scanner sinnix-fs-inventory already gets
+    this right by writing an explicit permission-denied row.
+    """
     if size > MAX_READ_BYTES or ext in {".pdf", ".docx", ".odt", ".epub", ".rtf"}:
-        return None, None
+        return None, None, None
     try:
         raw = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None, None
+    except PermissionError:
+        return None, None, "permission denied"
+    except OSError as exc:
+        return None, None, f"read failed: {exc.__class__.__name__}"
     title = None
     if ext in {".md", ".markdown"}:
         if raw.startswith("---"):
@@ -134,7 +143,7 @@ def extract(path: Path, size: int, ext: str) -> tuple[str | None, str | None]:
         m = TITLE_TAG.search(raw)
         title = " ".join(m.group(1).split()) if m else None
     head = " ".join(raw[:HEAD_CHARS * 3].split())[:HEAD_CHARS] or None
-    return title, head
+    return title, head, None
 
 
 def sha256_of(path: Path, size: int) -> str | None:
@@ -155,14 +164,17 @@ def sha256_of(path: Path, size: int) -> str | None:
                 f.seek(-(1 << 20), os.SEEK_END)
                 h.update(f.read(1 << 20))
                 h.update(str(size).encode())
-    except OSError:
-        return None
+    except PermissionError:
+        return "ERR:permission denied"
+    except OSError as exc:
+        return f"ERR:{exc.__class__.__name__}"
     return h.hexdigest()
 
 
 def walk(roots: list[str], out_path: Path, progress_every: int) -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     written = 0
+    errored = 0
     skipped = 0
     started = time.monotonic()
     with out_path.open("w", encoding="utf-8") as out:
@@ -180,11 +192,34 @@ def walk(roots: list[str], out_path: Path, progress_every: int) -> int:
                     p = Path(dirpath) / fn
                     try:
                         st = p.stat()
-                    except OSError:
+                    except PermissionError:
+                        # An unreadable file used to `continue` -- it vanished
+                        # from the index entirely, indistinguishable from a file
+                        # that does not exist. Emit a row saying so instead; a
+                        # visible hole is information, a missing row is not.
+                        out.write(json.dumps(safe({
+                            "schema": SCHEMA, "path": str(p), "dir": dirpath,
+                            "name": fn, "ext": ext, "error": "permission denied",
+                        }), ensure_ascii=False) + "\n")
+                        errored += 1
+                        continue
+                    except OSError as exc:
+                        out.write(json.dumps(safe({
+                            "schema": SCHEMA, "path": str(p), "dir": dirpath,
+                            "name": fn, "ext": ext,
+                            "error": f"stat failed: {exc.__class__.__name__}",
+                        }), ensure_ascii=False) + "\n")
+                        errored += 1
                         continue
                     if not st.st_size:
                         continue
-                    title, head = extract(p, st.st_size, ext)
+                    title, head, read_error = extract(p, st.st_size, ext)
+                    digest = sha256_of(p, st.st_size)
+                    if isinstance(digest, str) and digest.startswith("ERR:"):
+                        read_error = read_error or digest[4:]
+                        digest = None
+                    if read_error:
+                        errored += 1
                     out.write(json.dumps(safe({
                         "schema": SCHEMA,
                         "path": str(p),
@@ -193,16 +228,21 @@ def walk(roots: list[str], out_path: Path, progress_every: int) -> int:
                         "ext": ext,
                         "bytes": st.st_size,
                         "mtime": st.st_mtime,
-                        "sha256": sha256_of(p, st.st_size),
+                        "sha256": digest,
                         "title": title,
                         "head": head,
+                        "error": read_error,
                     }), ensure_ascii=False) + "\n")
                     written += 1
                     if progress_every and written % progress_every == 0:
                         print(f"  {written} files, {time.monotonic()-started:.0f}s",
                               file=sys.stderr)
-    print(f"sinnix-fs-content: {written} files ({skipped} in excluded trees) "
-          f"in {time.monotonic()-started:.0f}s -> {out_path}")
+    # errored is reported separately from skipped: `skipped` is deliberate
+    # prune-exclusion, `errored` is the scanner failing to see something it was
+    # asked to see. Conflating them is how an unreadable subtree reads as an
+    # intentionally-excluded one.
+    print(f"sinnix-fs-content: {written} files ({skipped} in excluded trees, "
+          f"{errored} unreadable) in {time.monotonic()-started:.0f}s -> {out_path}")
     return written
 
 
