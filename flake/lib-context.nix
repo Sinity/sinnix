@@ -63,7 +63,9 @@ let
   mkSharedSpecialArgs = specialInputs: {
     inputs = specialInputs;
     inherit (featureLib) mkFeatureModule mkServiceModule mkAiService;
-    inherit (captureLaneLib) mkCaptureLane;
+    # capture-lane.nix exports the factory function directly (not wrapped in
+    # an attrset), so this is a plain binding, not an inherit-from-set.
+    mkCaptureLane = captureLaneLib;
     helpers = {
       inherit (featureLib) mkDotsFileFor;
       mkSinnixPackagesFor =
