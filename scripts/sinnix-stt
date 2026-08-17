@@ -54,6 +54,7 @@ EMBEDDING = MODEL_ROOT / "nemo_en_titanet_small.onnx"
 
 CAPTURES = Path(os.environ.get("SINNIX_CAPTURES_ROOT", "/realm/data/captures"))
 ACTIVITY = Path(os.environ.get("SINNIX_ACTIVITY_ROOT", "/realm/data/activity"))
+MACHINE = Path(os.environ.get("SINNIX_MACHINE_ROOT", "/realm/data/machine"))
 TRANSCRIPT_DIR = ACTIVITY / "transcripts"
 LEDGER = TRANSCRIPT_DIR / "transcribed.jsonl"
 
@@ -322,8 +323,8 @@ def lanes() -> dict[str, Path]:
     the retired roots are simply not in the pattern.
     """
     found: dict[str, Path] = {
-        "phone": CAPTURES / "phone" / "ambient",
-        "voice": CAPTURES / "phone" / "estate" / "outbox",
+        "phone": MACHINE / "phone" / "ambient",
+        "voice": MACHINE / "phone" / "estate" / "outbox",
     }
     audio = ACTIVITY / "audio"
     if audio.is_dir():
