@@ -1,7 +1,8 @@
 # steering: the operator-instrumentation walking skeleton.
 #
-# Store: sqlite at /realm/state/steering/steering.sqlite (created by
-# sinnix-steer on first run; schema v1 in scripts/sinnix-steer). This lives on
+# Store: sqlite at /realm/project/steering/steering.sqlite (created by
+# sinnix-steer on first run; the CLI source lives in the steering workspace
+# itself, consumed via the `steering` flake input). This lives on
 # the persistent /realm NVMe volume, not under the ephemeral root subvolume,
 # so no impermanence persistence entry is needed -- only a tmpfiles rule to
 # create the directory on first activation.
@@ -24,7 +25,7 @@ let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   steer = scriptPkgs.sinnix-steer;
   cockpit = scriptPkgs.sinnix-cockpit;
-  stateDir = "/realm/state/steering";
+  stateDir = "/realm/project/steering";
   exportDir = "${capturesRoot}/steering";
 in
 mkServiceModule {
@@ -102,7 +103,7 @@ mkServiceModule {
           ];
 
           # Shared env: both rituals and export need to agree on store/export
-          # paths with the CLI's own defaults (scripts/sinnix-steer).
+          # paths with the CLI's own defaults (sinnix-steer in the steering workspace).
           systemd.user.services.sinnix-steering-morning = {
             Unit.Description = "Morning steering ritual (root-probe + decide-once intentions)";
             Service = lib.sinnix.mkRuntimeServiceConfig {

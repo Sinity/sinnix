@@ -23,6 +23,9 @@ let
     inherit lib pkgs;
     siblingExtras = {
       sinnix-capture = sinnixCaptureLib;
+      # Source lives in the steering workspace input; scripts naming
+      # @sinnix-steer (the phone dispatcher) resolve to the wrapper below.
+      sinnix-steer = externalPackages.sinnix-steer;
       # The estate's bd, not nixpkgs'. A script naming bare `beads` in its
       # frontmatter gets pkgs.beads (1.0.3), whose `export` has no -C flag --
       # which failed as a usage dump swallowed by `|| true`.
@@ -267,6 +270,23 @@ let
     # locks, notify, systemd probes, spools. Python packages here depend on
     # it instead of carrying private copies of these helpers.
     sinnix-lib = pkgs.callPackage ../pkgs/sinnix-lib/pkg.nix { };
+
+    # Steering CLI: source lives in the steering workspace (a non-flake
+    # git+file input), packaging lives here — the same split as lynchpin's
+    # python. Runtime deps mirror the frontmatter the script carried while
+    # it lived under scripts/ (python3 claude-code libnotify).
+    sinnix-steer = pkgs.writeShellApplication {
+      name = "sinnix-steer";
+      runtimeInputs = [
+        pkgs.python3
+        pkgs.claude-code
+        pkgs.libnotify
+      ];
+      text = ''
+        exec python3 ${inputs.steering}/sinnix-steer "$@"
+      '';
+      meta.description = "Steering store CLI — intentions, forecasts, activities, rituals";
+    };
 
     sinnix-cockpit = pkgs.callPackage ../pkgs/sinnix-cockpit/pkg.nix { };
 
