@@ -30,7 +30,7 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timezone
 
-EVENTS_DEFAULT = "/realm/data/captures/phone/estate/events"
+EVENTS_DEFAULT = "/realm/data/machine/phone/estate/events"
 META_KINDS = {"health_backfill", "health_sweep_failed", "health_deletion", "health_token_expired"}
 PAGINATED_GENERATION = 3
 

@@ -54,7 +54,7 @@ from typing import Any
 SCHEMA = "sinnix.phone.receipt/1"
 
 STATE_DIR = Path(os.environ.get("SINNIX_PHONE_STATE_DIR", "/realm/state/sinnix-phone"))
-LAKE_ROOT = Path(os.environ.get("SINNIX_PHONE_LAKE", "/realm/data/captures/phone"))
+LAKE_ROOT = Path(os.environ.get("SINNIX_PHONE_LAKE", "/realm/data/machine/phone"))
 
 # What the drain pushes to the device. Written here, moved by the drain; the
 # app deletes each file once it has rendered it.
