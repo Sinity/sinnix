@@ -31,6 +31,7 @@
 # plain text, but can carry the same rich formats an explicit copy would).
 {
   mkServiceModule,
+  mkCaptureLane,
   lib,
   pkgs,
   config,
@@ -178,8 +179,9 @@ let
       printf '%s' "$payload" | exec sinnix-capture "''${write_args[@]}"
     '';
   };
+  cfg = config.sinnix.services.capture-primary;
 in
-mkServiceModule {
+mkServiceModule (mkCaptureLane {
   name = "capture-primary";
   description = "Continuous Wayland PRIMARY-selection capture lane (wl-paste --primary --watch -> sinnix-capture)";
   extraOptions = {
@@ -194,76 +196,34 @@ mkServiceModule {
       '';
     };
   };
-  surface = {
-    unit = "sinnix-capture-primary.service";
-    manager = "user";
-    # No explicit kind: real owned .service unit, so it defaults to "service"
-    # -- see capture-clipboard.nix for why the default matters.
-    resourceClass = "capture-runtime";
-    captures = [
-      {
-        name = "primary";
-        path = laneDir;
-        eventDriven = true;
-        # PRIMARY activity depends entirely on whether the operator is doing
-        # text-heavy reading/selecting -- genuinely intermittent, so a
-        # week-long budget, same as the clipboard and mpris lanes.
-        staleAfterSeconds = 604800;
-      }
-    ];
-    observe = {
-      enable = true;
-      restartable = true;
-    };
-  };
-  configFn =
-    { cfg, ... }:
-    {
-      systemd.tmpfiles.rules = [
-        "d ${laneDir} 0700 ${username} users -"
-        "d ${blobDir} 0700 ${username} users -"
-        "d ${stateDir} 0700 ${username} users -"
-      ];
-
-      home-manager.users.${username} = {
-        systemd.user.services.sinnix-capture-primary = {
-          Unit = {
-            Description = "Wayland PRIMARY-selection capture lane";
-            After = [ "graphical-session.target" ];
-            PartOf = [ "graphical-session.target" ];
-          };
-          Service = (
-            lib.sinnix.mkRuntimeServiceConfig {
-              runtimeInventory = config.sinnix.runtime.inventory;
-              unit = "sinnix-capture-primary.service";
-              overrides = {
-                Type = "simple";
-                ExecStart = "${pkgs.wl-clipboard}/bin/wl-paste --primary --watch ${primaryWatch}/bin/sinnix-capture-primary-watch";
-                Restart = "on-failure";
-                RestartSec = "5s";
-                Environment = [
-                  "SINNIX_CAPTURE_ROOT=${config.sinnix.paths.activityRoot}"
-                  "SINNIX_CAPTURE_PRIMARY_STATE_DIR=${stateDir}"
-                  "SINNIX_CAPTURE_PRIMARY_DEBOUNCE_MS=${toString cfg.debounceMs}"
-                  # Session TMPDIR (/realm/tmp/shell) is read-only inside the
-                  # strict sandbox, so mktemp fails on every event.
-                  "TMPDIR=/tmp"
-                ];
-                PrivateTmp = true;
-                NoNewPrivileges = true;
-                ProtectSystem = "strict";
-                ProtectHome = "read-only";
-                ReadWritePaths = [
-                  laneDir
-                  blobDir
-                  stateDir
-                ];
-                UMask = "0077";
-              };
-            }
-          );
-          Install.WantedBy = [ "graphical-session.target" ];
-        };
-      };
-    };
-} args
+  inherit username laneDir;
+  mode = "stream";
+  captureName = "primary";
+  eventDriven = true;
+  # PRIMARY activity depends entirely on whether the operator is doing
+  # text-heavy reading/selecting -- genuinely intermittent, so a week-long
+  # budget, same as the clipboard and mpris lanes.
+  staleAfterSeconds = 604800;
+  tmpfilesRules = [
+    "d ${laneDir} 0700 ${username} users -"
+    "d ${blobDir} 0700 ${username} users -"
+    "d ${stateDir} 0700 ${username} users -"
+  ];
+  writablePaths = [
+    laneDir
+    blobDir
+    stateDir
+  ];
+  execStart = "${pkgs.wl-clipboard}/bin/wl-paste --primary --watch ${primaryWatch}/bin/sinnix-capture-primary-watch";
+  environment = [
+    "SINNIX_CAPTURE_ROOT=${config.sinnix.paths.activityRoot}"
+    "SINNIX_CAPTURE_PRIMARY_STATE_DIR=${stateDir}"
+    "SINNIX_CAPTURE_PRIMARY_DEBOUNCE_MS=${toString cfg.debounceMs}"
+    # Session TMPDIR (/realm/tmp/shell) is read-only inside the strict
+    # sandbox, so mktemp fails on every event.
+    "TMPDIR=/tmp"
+  ];
+  privateTmp = true;
+  umask = "0077";
+  unitDescription = "Wayland PRIMARY-selection capture lane";
+}) args
