@@ -125,7 +125,7 @@ mkServiceModule {
         description = "Lynchpin analysis DAG materialization";
         # A broken ExecStart here fails silently every night; route failures
         # to the desktop like the backup jobs do.
-        onFailure = [ "sinnix-service-failure-notify@%n.service" ];
+        onFailure = [ "sinnix-unit-failure-notify@%n.service" ];
         requires = [ "lynchpin-local-attrs.service" ];
         after = [
           "network.target"

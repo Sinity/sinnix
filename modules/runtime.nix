@@ -15,6 +15,31 @@ let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   resourceClassNames = builtins.attrNames runtimeDefaults.classes;
 
+  # The estate's single failure-report path: a unit that enters `failed`
+  # reports itself, so nothing has to poll it. It routes through the sentinel
+  # rather than appending to the ledger directly, which keeps one schema and
+  # one dedup state for both the OnFailure path and the sweep -- when they
+  # kept separate keys the same unit re-notified on every failure and its
+  # recovery never paired with the outage (sinnix-health-sentinel, 2026-08-14).
+  # One body, two templates: a user-manager unit cannot OnFailure into a
+  # system template, and only the systemctl scope differs.
+  unitFailureNotify = pkgs.writeShellApplication {
+    name = "sinnix-unit-failure-notify";
+    runtimeInputs = [
+      pkgs.systemd
+      scriptPkgs.sinnix-health-sentinel
+    ];
+    text = ''
+      unit="$1"
+      if [ "''${2:-}" = "--user" ]; then
+        result="$(systemctl --user show "$unit" -p Result --value 2>/dev/null || true)"
+      else
+        result="$(systemctl show "$unit" -p Result --value 2>/dev/null || true)"
+      fi
+      exec sinnix-health-sentinel --failure-unit "$unit" --failure-result "''${result:-unknown}"
+    '';
+  };
+
   surfaces = config.sinnix.runtime.surfaces;
   surfaceRows = lib.mapAttrsToList (name: surface: {
     inherit name;
@@ -536,11 +561,11 @@ in
                 ExecStart = "${scriptPkgs.sinnix-health-sentinel}/bin/sinnix-health-sentinel --check";
               };
             };
-            "sinnix-health-transition@" = {
-              description = "Record an inventory health transition for %i";
+            "sinnix-unit-failure-notify@" = {
+              description = "Record + surface the failure of %i";
               serviceConfig = {
                 Type = "oneshot";
-                ExecStart = "${scriptPkgs.sinnix-health-sentinel}/bin/sinnix-health-sentinel --failure-unit %i";
+                ExecStart = "${unitFailureNotify}/bin/sinnix-unit-failure-notify %I";
               };
             };
             sinnix-config-drift = {
@@ -558,7 +583,7 @@ in
               (
                 _name: surface:
                 lib.nameValuePair (lib.removeSuffix ".service" surface.unit) {
-                  unitConfig.OnFailure = [ "sinnix-health-transition@%n" ];
+                  unitConfig.OnFailure = [ "sinnix-unit-failure-notify@%n" ];
                 }
               )
               (
@@ -586,11 +611,11 @@ in
       };
     };
     home-manager.users.${cfg.user.name} = {
-      systemd.user.services."sinnix-health-transition@" = {
-        Unit.Description = "Record a user-manager health transition for %i";
+      systemd.user.services."sinnix-unit-failure-notify@" = {
+        Unit.Description = "Record + surface the failure of user unit %i";
         Service = {
           Type = "oneshot";
-          ExecStart = "${scriptPkgs.sinnix-health-sentinel}/bin/sinnix-health-sentinel --failure-unit %i";
+          ExecStart = "${unitFailureNotify}/bin/sinnix-unit-failure-notify %I --user";
         };
       };
 
@@ -608,10 +633,10 @@ in
         lib.mapAttrs'
           (
             _name: surface:
-            lib.nameValuePair "systemd/user/${surface.unit}.d/50-sinnix-health-transition.conf" {
+            lib.nameValuePair "systemd/user/${surface.unit}.d/50-sinnix-unit-failure-notify.conf" {
               text = ''
                 [Unit]
-                OnFailure=sinnix-health-transition@%n
+                OnFailure=sinnix-unit-failure-notify@%n
               '';
             }
           )
