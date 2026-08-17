@@ -179,6 +179,9 @@ let
     moduleArgs:
     let
       inherit (moduleArgs) config;
+      # The extended lib (lib.sinnix.*) exists only on the module args; the
+      # file-level lib this factory was imported with is plain nixpkgs lib.
+      inherit (moduleArgs) lib;
     in
     lib.mkMerge [
       { systemd.tmpfiles.rules = resolvedTmpfilesRules; }
