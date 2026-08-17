@@ -95,6 +95,10 @@ PHONE_SSH_PORT="${SINNIX_PHONE_SSH_PORT:-8022}"
 PHONE_USER="${SINNIX_PHONE_USER:-u0_a398}"
 ADB_TARGET="${PHONE_TS_IP}:5555"
 LAKE_ROOT="${SINNIX_PHONE_LAKE:-/realm/data/machine/phone}"
+# The receiver's own lane for the app's mirrored event stream. A sibling of
+# LAKE_ROOT rather than a child, because the receiver names lanes after the
+# `kind` the phone sends and files them at the captures root it was given.
+MIRROR_LANE="${SINNIX_PHONE_MIRROR_LANE:-$(dirname "$LAKE_ROOT")/phone-estate_event}"
 PHONE_STATE="${SINNIX_PHONE_STATE_DIR:-/realm/state/sinnix-phone}"
 
 # -F /dev/null + explicit identity, not ~/.ssh/config: under a sandboxed
@@ -491,26 +495,6 @@ dispatch_intents() {
   sinnix-phone-dispatcher dispatch --outbox "$LAKE_ROOT/estate/outbox" || true
 }
 
-rotate_ambient_adb() {
-  local dest name local_size remote_size removed=0
-  adb_resolve || return 1
-  dest="$LAKE_ROOT/ambient"
-  while IFS= read -r name; do
-    case "$name" in
-      '' | *.part | status.json*) continue ;;
-    esac
-    [ -f "$dest/$name" ] || continue
-    local_size=$(stat -c %s "$dest/$name" 2>/dev/null || echo 0)
-    # `adb shell` reads stdin, and this loop's stdin is the file list; without
-    # the redirect it consumes the list and the loop ends after one chunk.
-    remote_size=$(adb_any shell "stat -c %s '/sdcard/sinnix-ambient/$name'" 2>/dev/null </dev/null | tr -d '\r')
-    if [ -n "$remote_size" ] && [ "$remote_size" -gt 0 ] && [ "$local_size" = "$remote_size" ]; then
-      adb_any shell "rm -f '/sdcard/sinnix-ambient/$name'" >/dev/null 2>&1 </dev/null && removed=$((removed + 1))
-    fi
-  done < <(adb_any shell 'ls /sdcard/sinnix-ambient/' 2>/dev/null | tr -d '\r')
-  echo "ambient: released $removed chunk(s) from the phone (verified in the lake)"
-}
-
 usage() {
   cat <<'EOF'
 sinnix-phone <command>
@@ -585,7 +569,33 @@ app-status)
   # exactly how the truncation bug hid.
   echo "== capture app =="
   if ! adb_any get-state >/dev/null 2>&1; then
-    echo "app       : UNKNOWN — no adb transport (tailnet down and no USB cable?)"
+    # No adb is exactly when this question matters most, and prime is not
+    # actually blind: the app mirrors every event line to the receiver within
+    # a heartbeat, so the lake holds the app's own account of itself up to
+    # about twenty seconds ago. Weaker than status.json (it cannot say what
+    # the app believes RIGHT NOW) and much better than "UNKNOWN".
+    echo "app       : no adb transport — answering from the mirrored event lane"
+    # One pass, and defensive about shape: the mirror also carries lines the
+    # phone could not parse (wrapped as `unparsed`) and its own gap markers,
+    # so an event without a `kind` is normal and must not abort the query.
+    mirror=$(jq -rs '
+      [ .[].payload.event | select(type == "object") ] as $e
+      | ($e | map(select(.ts)) | sort_by(.ts) | last) as $last
+      | if $last == null then "" else
+          "ts\t\($last.ts)",
+          ($e | map(select(.kind == "chunk_closed")) | last | if . then "chunk\t\(.chunk)" else empty end),
+          ($e | map(select((.kind // "") | startswith("chunk_upload"))) | last
+             | if . then "upload\t\(.kind)\(if .reason then " — \(.reason)" else "" end)" else empty end)
+        end' "$MIRROR_LANE"/phone-estate_event-*.jsonl 2>/dev/null)
+    if [ -z "$mirror" ]; then
+      echo "            and the mirror is empty too — phone offline, or capture stopped"
+      exit 0
+    fi
+    mirror_ts=$(echo "$mirror" | awk -F'\t' '$1 == "ts" { print $2 }')
+    echo "mirror    : $(( $(date -u +%s) - $(date -u -d "$mirror_ts" +%s) ))s since the phone's last event"
+    echo "$mirror" | awk -F'\t' '
+      $1 == "chunk"  { printf "last chunk: %s (closed, per the phone)\n", $2 }
+      $1 == "upload" { printf "uploads   : %s\n", $2 }'
     exit 0
   fi
   installed=$(adb_any shell pm list packages "$APP_ID" 2>/dev/null | tr -d '\r')
@@ -1092,20 +1102,19 @@ ambient-audit)
   fi
   ;;
 drain)
-  # Drains the raw-audio tier: large and not time-critical, so it is
-  # wifi-gated. Deliberately not charging-gated -- this is a network-cost
-  # gate, not a battery one.
+  # Everything the phone does NOT ship itself: the system log, the camera and
+  # Downloads mirrors, ActivityWatch, and the estate's events/outbox. Ambient
+  # audio left this list on 2026-08-17 -- the app uploads its own chunks now,
+  # which is why what remains is small. The wifi gate stays anyway, because
+  # the camera mirror can still be a large transfer.
   if ! timeout 5 bash -c "exec 3<>/dev/tcp/$PHONE_TS_IP/$PHONE_SSH_PORT" 2>/dev/null; then
-    # No tailnet. That is the normal state after a phone reboot and whenever
-    # Termux is not running, and it used to end the drain -- so audio the app
-    # had recorded correctly sat on the device indefinitely. adb is a separate
-    # transport: if it answers (USB, typically), drain through it. The wifi
-    # gate below exists to keep a large transfer off metered data, and a USB
-    # cable is not metered, so it does not apply here.
+    # No tailnet, which is the normal state after a phone reboot and whenever
+    # Termux is not running. adb is a separate transport: if it answers (USB,
+    # typically), drain through it. The wifi gate below is a network-cost
+    # gate and a USB cable is not metered, so it does not apply here.
     if adb_any get-state >/dev/null 2>&1; then
       echo "drain: no tailnet, draining over adb"
       "$0" pull
-      rotate_ambient_adb
       exit 0
     fi
     echo "drain: phone unreachable, skipping"

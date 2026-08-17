@@ -1,12 +1,16 @@
-# Drain-on-a-schedule for the phone lanes, gated on wifi rather than pulled
-# manually. Bidirectional since the app became the estate's phone-side member:
-# the same run collects chunks, events and outbox intents, pushes prime's
-# glance/steering/receipts/decks down, and hands the collected intents to
-# sinnix-phone-dispatcher. Wraps `sinnix-phone drain` (scripts/sinnix-phone),
-# which does the actual reachability/wifi checks and skips quietly when
-# conditions aren't met -- this unit only provides the schedule. The wifi
-# gate is deliberate: this is the large/opportunistic raw-audio tier, not a
-# small always-on VAD-gated stream.
+# Drain-on-a-schedule for everything the phone does NOT ship itself: the
+# system log, the camera and Downloads mirrors, ActivityWatch, and the
+# estate's events and outbox intents -- collected in the same run that pushes
+# prime's glance/steering/receipts/decks down and hands the collected intents
+# to sinnix-phone-dispatcher. Wraps `sinnix-phone drain`
+# (scripts/sinnix-phone), which does the reachability and wifi checks and
+# skips quietly when conditions aren't met; this unit only provides the
+# schedule.
+#
+# Ambient audio left this list on 2026-08-17: the capture app uploads each
+# finished chunk itself and deletes it only after prime verifies the hash,
+# which is why the largest tier this used to carry is no longer here. The
+# wifi gate stays -- the camera mirror can still be a large transfer.
 {
   mkServiceModule,
   lib,
@@ -35,23 +39,16 @@ mkServiceModule {
       enable = true;
       restartable = true;
     };
-    # A dead phone mic and a quiet room are otherwise indistinguishable, so
-    # this watches the LAKE side (did the drain land a new chunk) rather than
-    # the phone-side recorder. The threshold is generous because the drain is
-    # wifi-conditional: a phone off wifi for hours is a real, non-alarming
-    # gap, not evidence the mic died.
+    # The ambient lane is NOT declared here any more: the app uploads its own
+    # chunks to sinnix-phone-dispatcher, so the lane is watched beside that
+    # unit (modules/services/hub.nix) rather than beside a drain that no
+    # longer touches those files.
     captures = [
-      {
-        name = "phone-ambient";
-        path = "/realm/data/machine/phone/ambient";
-        cadenceSeconds = 1800;
-        staleAfterSeconds = 86400;
-      }
-      # The phone's own system log. Same wifi-conditional reasoning as the
-      # ambient lane above, so the same generous budget: this measures whether
-      # the DRAIN is landing anything, and a phone off wifi overnight is an
-      # ordinary gap. It is adb-only, which is the narrower dependency of the
-      # two transports, hence not a tighter budget than ambient's.
+      # The phone's own system log, wifi-conditional like everything this unit
+      # still moves: this measures whether the DRAIN is landing anything, and
+      # a phone off wifi overnight is an ordinary gap rather than a fault. It
+      # is adb-only, the narrower of the two transports, which is a reason for
+      # a generous budget rather than a tight one.
       {
         name = "phone-logcat";
         path = "/realm/data/machine/phone/logcat";
