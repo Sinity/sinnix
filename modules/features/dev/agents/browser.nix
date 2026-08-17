@@ -27,13 +27,6 @@ let
       --browserUrl "$target" \
       "$@"
   '';
-  # Agent-owned Chrome DevTools MCP. This gives agents the same DevTools tool
-  # shape as the user's live Chrome, but against a private persistent profile
-  # seeded from live Chrome state before launch. It stays separate from the
-  # shell CDP helper's private profile so concurrent MCP and shell browser
-  # sessions cannot fight over a Chrome profile lock. It is headless by
-  # default; set SINNIX_AGENT_CHROME_HEADLESS=0 when a visible private
-  # browser window is desired for operator inspection.
   # Live dots path, not `inputs.self + ...`: a store copy would mean a rebuild
   # before any edit to these control scripts could be exercised. Consumers must
   # reference this via mkOutOfStoreSymlink rather than string interpolation, or
