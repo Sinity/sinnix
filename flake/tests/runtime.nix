@@ -38,6 +38,34 @@ in
             systemd.services.runtime-policy-system = { };
             home-manager.users.sinity.systemd.user.services.runtime-policy-user = { };
           })
+          (
+            { mkServiceModule, ... }:
+            {
+              imports = [
+                (mkServiceModule {
+                  name = "failure-attach-plain";
+                  description = "Generated job whose surface is not observed";
+                  surface = {
+                    unit = "sinnix-failure-attach-plain.service";
+                    resourceClass = "background-maintenance";
+                  };
+                  job.execStart = "/bin/true";
+                })
+                (mkServiceModule {
+                  name = "failure-attach-observed";
+                  description = "Generated job whose surface is observed";
+                  surface = {
+                    unit = "sinnix-failure-attach-observed.service";
+                    resourceClass = "background-maintenance";
+                    observe.enable = true;
+                  };
+                  job.execStart = "/bin/true";
+                })
+              ];
+              sinnix.services.failure-attach-plain.enable = true;
+              sinnix.services.failure-attach-observed.enable = true;
+            }
+          )
         ];
         assertions = config: [
           {
@@ -75,6 +103,24 @@ in
               config.home-manager.users.sinity.xdg.configFile
               ? "systemd/user/runtime-policy-user.service.d/50-sinnix-unit-failure-notify.conf";
             message = "observed user services must receive the user failure-notify drop-in";
+          }
+          {
+            # A generated job reports its own failure even when nothing
+            # observes it, which is the whole point of attaching at
+            # registration rather than per module.
+            assertion =
+              config.systemd.services.sinnix-failure-attach-plain.onFailure
+              == [ "sinnix-unit-failure-notify@%n.service" ];
+            message = "generated jobs must attach the failure-notify template";
+          }
+          {
+            # ...and exactly once: an observed job inherits it from its
+            # surface instead of naming the same dependency a second time.
+            assertion =
+              config.systemd.services.sinnix-failure-attach-observed.onFailure == [ ]
+              && config.systemd.services.sinnix-failure-attach-observed.unitConfig.OnFailure
+                == [ "sinnix-unit-failure-notify@%n" ];
+            message = "an observed job must carry the failure-notify template once, via its surface";
           }
         ];
       };

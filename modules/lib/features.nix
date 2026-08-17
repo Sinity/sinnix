@@ -148,6 +148,17 @@ let
           }
           // lib.optionalAttrs (j ? user) { User = j.user; }
           // (j.serviceConfig or { });
+          # Failure reporting is a property of unit registration, not of each
+          # module remembering to ask for it: a generated job attaches the
+          # estate's failure-notify template itself, in its own manager.
+          # Skipped when this job's own surface already carries it --
+          # modules/runtime.nix attaches the same template to every observed
+          # surface, and a unit naming one dependency twice is noise.
+          surfaceCoversFailure =
+            surfaceValue != null
+            && (surfaceValue.unit or null) == "${unitName}.service"
+            && (surfaceValue.manager or "system") == manager
+            && (surfaceValue.observe.enable or false);
           serviceBody = {
             description = j.description or description;
             serviceConfig =
@@ -159,6 +170,9 @@ let
                 }
               else
                 overrides;
+          }
+          // lib.optionalAttrs (!surfaceCoversFailure) {
+            onFailure = lib.mkDefault [ "sinnix-unit-failure-notify@%n.service" ];
           }
           // lib.optionalAttrs (j ? path) { path = j.path; }
           // lib.optionalAttrs (j ? environment) { environment = j.environment; };
