@@ -166,7 +166,7 @@ mkServiceModule {
       # `sinnix-capture-webhistory` unit that does not exist, which is how a
       # lane could carry a 48h staleness budget with nothing on any schedule
       # able to keep it -- see sinnix-ksws. Registering the surface also puts
-      # this daily job in front of the health sentinel, which it was not.
+      # this daily job in front of the health sweep, which it was not.
       sinnix.runtime.surfaces.lynchpin-materialize = lib.mkIf cfg.materializationTimer.enable {
         unit = "lynchpin-materialize.service";
         resourceClass = "background-maintenance";

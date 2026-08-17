@@ -216,15 +216,22 @@ resourceClass, observe, captures }`. Eval-time assertions reject duplicate
 - A capture lane whose writer is **not** a unit (a hotkey script, a shell
   wrapper) goes in `sinnix.runtime.captures` instead: same lane fields, no
   `unit`. Both sources flatten into one `.captures` array in the inventory, so
-  the sentinel and every other consumer see one kind of lane. Do not invent a
+  the health sweep and every other consumer see one kind of lane. Do not invent a
   synthetic unit name to fit a lane into a surface — that is what this option
   exists to prevent.
 - `lib.sinnix.mkRuntimeServiceConfig { runtimeInventory; unit; }` resolves a
   unit to its class serviceConfig (as mkDefault) and **throws on unknown
   units** — register the surface first.
 - The whole inventory is serialized to `/etc/sinnix/runtime-inventory.json`,
-  consumed at runtime by `sinnix-scope`, `sinnix-observe`, and machine
-  telemetry. When adding a daemon: declare the surface, apply
+  consumed at runtime by `sinnix-scope`, `sinnix-observe`, machine telemetry,
+  and the ops-reducer's health sweep — the inventory-driven check (lane
+  staleness, payload degeneracy, liveness probes, mount capacity, unit resting
+  state) that writes `sinnix-health-transition-v1` lines to
+  `/run/sinnix/health-transitions.jsonl` and notifies the desktop. It used to
+  be a root oneshot on a one-minute timer (`sinnix-health-sentinel`); it now
+  runs on the reducer's own 60s tick, inside the operator's session, sharing
+  one dedup state with the `sinnix-unit-failure-notify@` OnFailure path.
+  When adding a daemon: declare the surface, apply
   `mkRuntimeServiceConfig`, done — no ad-hoc Nice/IOWeight overrides.
 - Concurrency is governed by slice memory caps and weights, not
   serialization; the only build-path lock is `/tmp/sinnix-switch.lock`, a
@@ -397,10 +404,12 @@ config in `secrets.nix` (repo root).
   volume. Journald capped 4G persistent (OOM forensics). fTPM broken →
   systemd-tpm2-setup masked. `sinnix.services.hub`
   (`modules/services/hub.nix`, docs/hub.md) is the browser front door:
-  Caddy in the user manager serving `/reports/` plus five server-rendered
-  pages — estate verdict, `/work/` (semantic workload view over scopes, the
-  project ledger and gateway jobs), `/services/`, `/ai/`, `/shaders/` — whose
-  buttons post to the ops-reducer's bounded action API. No second control
+  Caddy in the user manager serving `/reports/` off disk and proxying every
+  other path to the ops-reducer, which renders five pages on request from the
+  state it already holds — estate verdict, `/work/` (semantic workload view
+  over scopes, the project ledger and gateway jobs), `/services/`, `/ai/`,
+  `/shaders/` — and whose buttons post to that same reducer's bounded action
+  API. No second control
   plane: where the action API cannot express a target the page says so rather
   than growing a private kill path — `/shaders/` is entirely buttonless for
   exactly that reason, since applying a screen shader is not an action verb.

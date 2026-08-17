@@ -91,6 +91,12 @@ mkServiceModule {
             Environment = [ "PATH=/run/wrappers/bin:/run/current-system/sw/bin" ];
             Restart = "on-failure";
             RestartSec = "2s";
+            # sd_notify from the reducer's own loop, so a wedged refresh or a
+            # sweep that never returns is restarted rather than sitting there
+            # answering nothing. The loop pings once per interval, well inside
+            # this budget.
+            NotifyAccess = "main";
+            WatchdogSec = "120s";
             NoNewPrivileges = true;
             ProtectSystem = "strict";
             ProtectHome = "read-only";
@@ -100,6 +106,9 @@ mkServiceModule {
               # The annotation spool the /feedback route appends to. Nothing
               # else under /realm/data is writable from here.
               cfg.feedbackDir
+              # The health sweep's transition ledger and dedup state, shared
+              # with the root-run failure template (runtime.nix).
+              "/run/sinnix"
             ];
             UMask = "0077";
           };

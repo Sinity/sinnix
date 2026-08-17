@@ -40,7 +40,6 @@ in
     ./tests/vm.nix
     ./tests/host-build.nix
     ./tests/runtime.nix
-    ./tests/health-sentinel.nix
     ./tests/capability-manifest.nix
     ./tests/ops-reducer.nix
     ./tests/quota.nix

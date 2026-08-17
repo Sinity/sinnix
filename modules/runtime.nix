@@ -16,27 +16,36 @@ let
   resourceClassNames = builtins.attrNames runtimeDefaults.classes;
 
   # The estate's single failure-report path: a unit that enters `failed`
-  # reports itself, so nothing has to poll it. It routes through the sentinel
-  # rather than appending to the ledger directly, which keeps one schema and
-  # one dedup state for both the OnFailure path and the sweep -- when they
-  # kept separate keys the same unit re-notified on every failure and its
-  # recovery never paired with the outage (sinnix-health-sentinel, 2026-08-14).
+  # reports itself, so nothing has to poll it. It routes into the ops-reducer,
+  # which owns the health sweep, rather than appending to the ledger directly:
+  # one schema and one dedup state for both the OnFailure path and the sweep.
+  # When they kept separate keys the same unit re-notified on every failure and
+  # its recovery never paired with the outage (2026-08-14, on
+  # borgbackup-status.service). `emit-failure` posts to the running reducer and
+  # falls back to writing the same transition itself when the reducer is down,
+  # which is exactly a moment when units fail.
+  #
+  # umask 0002 because this runs as root while the reducer runs as the
+  # operator: both write the same two files in /run/sinnix, which is setgid
+  # `users` for that reason.
+  #
   # One body, two templates: a user-manager unit cannot OnFailure into a
   # system template, and only the systemctl scope differs.
   unitFailureNotify = pkgs.writeShellApplication {
     name = "sinnix-unit-failure-notify";
     runtimeInputs = [
       pkgs.systemd
-      scriptPkgs.sinnix-health-sentinel
+      scriptPkgs.sinnix-ops-reducer
     ];
     text = ''
+      umask 0002
       unit="$1"
       if [ "''${2:-}" = "--user" ]; then
         result="$(systemctl --user show "$unit" -p Result --value 2>/dev/null || true)"
       else
         result="$(systemctl show "$unit" -p Result --value 2>/dev/null || true)"
       fi
-      exec sinnix-health-sentinel --failure-unit "$unit" --failure-result "''${result:-unknown}"
+      exec sinnix-ops-reducer emit-failure --unit "$unit" --result "''${result:-unknown}"
     '';
   };
 
@@ -207,7 +216,7 @@ let
         ];
         description = ''
           Dotted paths into a sinnix-capture-v1 record's `payload`
-          that this lane claims to populate. The health sentinel
+          that this lane claims to populate. The reducer's health sweep
           samples the lane's most recent records and flags the lane
           `degenerate` when a declared field is null/empty in EVERY
           sampled record -- the "alive and writing at full cadence,
@@ -533,12 +542,15 @@ in
       mode = "0444";
     };
     environment.systemPackages = [
-      scriptPkgs.sinnix-health-sentinel
       scriptPkgs.sinnix-config-drift
       scriptPkgs.sinnix-preflight
       scriptPkgs.sinnix-capability-manifest
     ];
-    systemd.tmpfiles.rules = [ "d /run/sinnix 0775 root users -" ];
+    # setgid: the health transition ledger and its dedup state are written by
+    # the ops-reducer (as the operator) and, when the reducer is down, by the
+    # root-run failure template. Group `users` inherited by both is what keeps
+    # the second writer from locking the first out of its own state file.
+    systemd.tmpfiles.rules = [ "d /run/sinnix 2775 root users -" ];
     # Consumer entries from activation.consumers render as forced environment
     # overrides (front-door routing; see the consumers option comment),
     # merged with the sentinel/observe units.
@@ -554,13 +566,6 @@ in
       ++ [
         (
           {
-            sinnix-health-sentinel = {
-              description = "Inventory-driven runtime health sentinel";
-              serviceConfig = {
-                Type = "oneshot";
-                ExecStart = "${scriptPkgs.sinnix-health-sentinel}/bin/sinnix-health-sentinel --check";
-              };
-            };
             "sinnix-unit-failure-notify@" = {
               description = "Record + surface the failure of %i";
               serviceConfig = {
@@ -594,14 +599,6 @@ in
         )
       ]
     );
-    systemd.timers.sinnix-health-sentinel = {
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnBootSec = "1min";
-        OnUnitActiveSec = "1min";
-        Persistent = true;
-      };
-    };
     systemd.timers.sinnix-config-drift = {
       wantedBy = [ "timers.target" ];
       timerConfig = {

@@ -264,7 +264,9 @@ let
       inherit defaultRuntimeInventoryJson;
     };
 
-    sinnix-ops-reducer = pkgs.callPackage ../pkgs/sinnix-ops-reducer/pkg.nix { };
+    sinnix-ops-reducer = pkgs.callPackage ../pkgs/sinnix-ops-reducer/pkg.nix {
+      inherit sinnix-lib;
+    };
 
     # Shared Python library (importable, not a CLI): atomic state, ledgers,
     # locks, notify, systemd probes, spools. Python packages here depend on

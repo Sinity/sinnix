@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import json
+import os
 import secrets
 import socket
+import sys
 import threading
 import time
 from http import HTTPStatus
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from . import pages
+from . import health, pages
 from .actions import ActionError, ActionService
 from .feedback import MAX_BODY as FEEDBACK_MAX_BODY
 from .feedback import SCHEMA as FEEDBACK_SCHEMA
@@ -18,6 +21,7 @@ from .feedback import FeedbackSpool
 from .reducer import Reducer
 
 FEEDBACK_PATH = "/feedback"
+FAILURE_PATH = "/v1/health/failure"
 
 
 def ensure_token(path: Path) -> str:
@@ -103,6 +107,29 @@ class Handler(BaseHTTPRequestHandler):
         )
         self._write_feedback(HTTPStatus.CREATED, {"schema": FEEDBACK_SCHEMA, **result})
 
+    def _record_failure(self) -> None:
+        """systemd's OnFailure hook, routed into the process that owns the
+        dedup state so the fast path and the sweep cannot drift apart."""
+        try:
+            length = int(self.headers.get("Content-Length", "-1"))
+            if length < 0 or length > 4096:
+                raise ValueError("request body is missing or too large")
+            request = json.loads(self.rfile.read(length))
+            unit = str(request["unit"])
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+            self._write(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
+        inventory, _ = pages.load_json(self.server.inventory_path)  # type: ignore[attr-defined]
+        # A fresh emitter per event: emitted_keys is the prune's universe and
+        # the fast path must never contribute to it.
+        health.emit_failure(
+            unit,
+            str(request.get("result") or "unknown"),
+            inventory or {},
+            self.server.emitter_factory(),  # type: ignore[attr-defined]
+        )
+        self._write(HTTPStatus.CREATED, {"status": "recorded", "unit": unit})
+
     def do_OPTIONS(self) -> None:
         # application/json is not a CORS-simple content type, so every elicit
         # judgment is preflighted before it is posted.
@@ -176,6 +203,20 @@ class Handler(BaseHTTPRequestHandler):
             )
         elif self.path == "/v1/health":
             self._write(HTTPStatus.OK, self.reducer.health())
+        elif self.path == "/v1/health/lanes":
+            # The sweep's believed status per key, as the state file holds it:
+            # what the sentinel's state file answered, from the process that
+            # now owns it.
+            self._write(
+                HTTPStatus.OK,
+                {
+                    "schema": health.SCHEMA,
+                    "ledger": str(health.ledger_path()),
+                    "keys": health.current_state(
+                        self.server.emitter_factory().state  # type: ignore[attr-defined]
+                    ),
+                },
+            )
         elif self.path == "/v1/snapshot":
             try:
                 value = json.loads(
@@ -232,6 +273,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == FEEDBACK_PATH:
             self._spool_feedback()
             return
+        if self.path == FAILURE_PATH:
+            self._record_failure()
+            return
         if self.path != "/v1/actions":
             self._write(HTTPStatus.NOT_FOUND, {"error": "not_found"})
             return
@@ -247,6 +291,43 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, *_args: object) -> None:
         return
+
+
+def notify_systemd(message: str) -> None:
+    """sd_notify without libsystemd: it is a datagram to $NOTIFY_SOCKET."""
+    address = os.environ.get("NOTIFY_SOCKET")
+    if not address:
+        return
+    if address.startswith("@"):  # abstract namespace
+        address = "\0" + address[1:]
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
+            sock.connect(address)
+            sock.sendall(message.encode())
+    except OSError:
+        return
+
+
+def watchdog_period() -> float:
+    """Half of WatchdogSec, systemd's own recommended keepalive interval."""
+    try:
+        usec = int(os.environ.get("WATCHDOG_USEC", "0"))
+    except ValueError:
+        return 0.0
+    return usec / 2_000_000 if usec > 0 else 0.0
+
+
+def run_sweep(
+    inventory_path: Path, emitter_factory: Callable[[], health.Emitter]
+) -> None:
+    """One health sweep, isolated: a broken probe or an unreadable inventory
+    must not take the reducer's snapshot loop down with it."""
+    try:
+        inventory, _ = pages.load_json(inventory_path)
+        if inventory:
+            health.sweep(inventory, emitter_factory())
+    except Exception as error:  # a sweep is advisory; the reducer is not
+        print(f"sinnix-ops-reducer: health sweep failed: {error}", file=sys.stderr)
 
 
 class UnixServer(ThreadingHTTPServer):
@@ -265,6 +346,8 @@ def serve(
     hub_manifest: Path | None = None,
     inventory_path: Path = Path("/etc/sinnix/runtime-inventory.json"),
     feedback: FeedbackSpool | None = None,
+    emitter_factory: Callable[[], health.Emitter] = health.Emitter,
+    sweep_interval: float = health.SWEEP_INTERVAL_SECONDS,
 ) -> None:
     def stamp(server: ThreadingHTTPServer, is_unix: bool) -> None:
         server.reducer = reducer  # type: ignore[attr-defined]
@@ -273,6 +356,7 @@ def serve(
         server.hub_manifest = hub_manifest  # type: ignore[attr-defined]
         server.inventory_path = inventory_path  # type: ignore[attr-defined]
         server.feedback = feedback  # type: ignore[attr-defined]
+        server.emitter_factory = emitter_factory  # type: ignore[attr-defined]
 
     reducer.refresh()
     http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -304,10 +388,27 @@ def serve(
         servers = [http]
     for server in servers:
         threading.Thread(target=server.serve_forever, daemon=True).start()
+    notify_systemd("READY=1")
+    watchdog = watchdog_period()
+    last_sweep = 0.0
+    last_ping = 0.0
     try:
         while True:
             time.sleep(interval)
             reducer.refresh()
+            # The health sweep is deliberately slower than the snapshot: it
+            # shells out to df, systemctl and every lane's liveness probe, and
+            # its confirm-2 debounce is defined in sweeps, so its cadence is
+            # what "two agreeing samples" means in wall-clock terms.
+            if time.monotonic() - last_sweep >= sweep_interval:
+                last_sweep = time.monotonic()
+                run_sweep(inventory_path, emitter_factory)
+            # Pinged from the loop, not a timer thread: the point of the
+            # watchdog is that a wedged refresh is noticed, and a keepalive on
+            # its own thread would keep ticking through exactly that.
+            if watchdog and time.monotonic() - last_ping >= watchdog:
+                last_ping = time.monotonic()
+                notify_systemd("WATCHDOG=1")
     finally:
         for server in servers:
             server.shutdown()
