@@ -345,7 +345,7 @@ emit_json() {
 
 trajectory() {
   local pid="$1" start_ticks db row min max latest first_at last_at
-  db="${SINNIX_HOGKILL_TELEMETRY_DB:-/realm/data/captures/machine/telemetry.sqlite}"
+  db="${SINNIX_HOGKILL_TELEMETRY_DB:-/realm/data/machine/telemetry.sqlite}"
   [ -r "$db" ] || { echo "trajectory: unavailable (telemetry database missing)"; return 0; }
   start_ticks="$(awk '{print $22}' "$proc_root/$pid/stat" 2>/dev/null || true)"
   [ -n "$start_ticks" ] || { echo "trajectory: unavailable (process identity missing)"; return 0; }

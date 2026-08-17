@@ -15,7 +15,7 @@ set -euo pipefail
 #   lane-abandoned             capture data belonging to no declared surface
 
 INVENTORY="${SINNIX_RUNTIME_INVENTORY:-/etc/sinnix/runtime-inventory.json}"
-OUT="${SINNIX_SANDBOX_AUDIT_OUT:-/realm/data/captures/machine/sandbox-audit.jsonl}"
+OUT="${SINNIX_SANDBOX_AUDIT_OUT:-/realm/data/machine/sandbox-audit.jsonl}"
 CAPTURES_ROOT="${SINNIX_CAPTURES_ROOT:-/realm/data/captures}"
 # Journal retention bounds what "never" can mean here; say so in the finding
 # rather than implying the unit has never run since it was written.

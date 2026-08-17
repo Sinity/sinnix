@@ -10,7 +10,7 @@ activities, and reviews only; the ready-queue and root-elicitation tables are
 follow-on work (sinnix-jfiy.2+), not built here.
 
 Store: sqlite at /realm/state/steering/steering.sqlite (created on first run).
-Export: daily JSONL to /realm/data/captures/steering/ (raw-forever doctrine).
+Export: daily JSONL to /realm/data/activity/steering/ (raw-forever doctrine).
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from pathlib import Path
 STORE_DIR = Path(os.environ.get("SINNIX_STEERING_STATE_DIR", "/realm/state/steering"))
 STORE_PATH = STORE_DIR / "steering.sqlite"
 EXPORT_DIR = Path(
-    os.environ.get("SINNIX_STEERING_EXPORT_DIR", "/realm/data/captures/steering")
+    os.environ.get("SINNIX_STEERING_EXPORT_DIR", "/realm/data/activity/steering")
 )
 
 SCHEMA = """

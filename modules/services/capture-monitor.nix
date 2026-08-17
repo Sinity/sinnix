@@ -18,7 +18,7 @@
 }@args:
 let
   username = config.sinnix.user.name;
-  inherit (config.sinnix.paths) capturesRoot;
+  capturesRoot = config.sinnix.paths.machineRoot;
   laneDir = "${capturesRoot}/monitor";
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
 

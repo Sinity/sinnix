@@ -37,7 +37,7 @@ let
   username = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   a11yDaemon = scriptPkgs.sinnix-capture-a11y;
-  inherit (config.sinnix.paths) capturesRoot;
+  capturesRoot = config.sinnix.paths.activityRoot;
   laneDir = "${capturesRoot}/a11y";
 in
 mkServiceModule {

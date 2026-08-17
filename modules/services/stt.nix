@@ -60,7 +60,7 @@ mkAiService {
     {
       systemd.tmpfiles.rules = [
         "d ${modelDir} 0755 ${user} users -"
-        "d ${config.sinnix.paths.capturesRoot}/transcripts 0755 ${user} users -"
+        "d ${config.sinnix.paths.activityRoot}/transcripts 0755 ${user} users -"
       ];
 
       environment.systemPackages = [ scriptPkgs.sinnix-stt ];

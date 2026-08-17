@@ -14,9 +14,9 @@
   ...
 }@args:
 let
-  inherit (config.sinnix.paths) capturesRoot realmRoot;
+  inherit (config.sinnix.paths) realmRoot;
   hostName = config.networking.hostName;
-  dataRoot = "${capturesRoot}/machine";
+  dataRoot = config.sinnix.paths.machineRoot;
   dataDir = dataRoot;
   legacyDbPath = "${dataDir}/telemetry.sqlite";
   dbRoot = "${realmRoot}/state/machine-telemetry";

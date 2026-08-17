@@ -7,13 +7,13 @@ set -euo pipefail
 # Capture all kitty terminal scrollbacks with full ANSI fidelity.
 # Iterates over ALL kitty instances (each has its own socket).
 #
-# Outputs: /realm/data/captures/kitty-scrollback/<timestamp>-<pid>-win<id>-<title_slug>.ansi
+# Outputs: /realm/data/activity/kitty-scrollback/<timestamp>-<pid>-win<id>-<title_slug>.ansi
 #
 # Usage:
 #   kitty-scrollback-capture           # Capture all windows from all instances
 #   kitty-scrollback-capture --current # Capture current window only
 
-CAPTURE_DIR="${KITTY_SCROLLBACK_DIR:-/realm/data/captures/kitty-scrollback}"
+CAPTURE_DIR="${KITTY_SCROLLBACK_DIR:-/realm/data/activity/kitty-scrollback}"
 TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
 HOSTNAME=$(hostname)
 RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"

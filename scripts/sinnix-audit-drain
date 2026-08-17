@@ -9,7 +9,7 @@ set -euo pipefail
 # structured projection is written beside it for querying. No key filter: the
 # rules decide what the kernel emits, the drain keeps all of it.
 
-LANE="${SINNIX_AUDIT_LANE:-/realm/data/captures/audit}"
+LANE="${SINNIX_AUDIT_LANE:-/realm/data/activity/audit}"
 WATERMARK="${SINNIX_AUDIT_WATERMARK:-/realm/state/cursors/audit-drain/last-run}"
 
 mkdir -p "$LANE" "$(dirname "$WATERMARK")"

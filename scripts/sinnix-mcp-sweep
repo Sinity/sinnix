@@ -18,7 +18,7 @@ Usage: sinnix-mcp-sweep [--orphans-only] [--dry-run] [--quiet]
 
 Reap orphaned MCP and language-server helper processes left behind by agent
 session exits. Writes JSONL evidence to
-/realm/data/captures/machine/agent-mcp-sweep/sweep.jsonl.
+/realm/data/machine/agent-mcp-sweep/sweep.jsonl.
 EOF
       exit 0
       ;;
@@ -30,7 +30,7 @@ EOF
   shift
 done
 
-capture_dir="${SINNIX_MCP_SWEEP_CAPTURE_DIR:-/realm/data/captures/machine/agent-mcp-sweep}"
+capture_dir="${SINNIX_MCP_SWEEP_CAPTURE_DIR:-/realm/data/machine/agent-mcp-sweep}"
 proc_root="${SINNIX_MCP_SWEEP_PROC_ROOT:-/proc}"
 job_state_dir="${SINNIX_AGENT_JOB_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/sinnix/agent-jobs}"
 if ! mkdir -p "$capture_dir" 2>/dev/null; then

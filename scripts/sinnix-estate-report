@@ -31,7 +31,7 @@ import sys
 from pathlib import Path
 
 DEFAULT_OUTPUT = "/realm/data/derived/reports/sinnix-estate.html"
-TELEMETRY_DB = "/realm/data/captures/machine/telemetry.sqlite"
+TELEMETRY_DB = "/realm/data/machine/telemetry.sqlite"
 INVENTORY = "/etc/sinnix/runtime-inventory.json"
 
 E = html.escape

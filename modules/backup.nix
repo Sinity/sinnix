@@ -55,11 +55,11 @@ let
   borgCacheDir = "/persist/root/.cache/borg";
   borgStaleLockMinutes = 120;
   borgGlobalLock = "/run/lock/sinnix-borg.lock";
-  borgStatusLog = "${config.sinnix.paths.capturesRoot}/machine/borg_status.jsonl";
+  borgStatusLog = "${config.sinnix.paths.machineRoot}/borg_status.jsonl";
   sinexProjectPath = "${realmRoot}/project/sinex";
   sinexBeadsDoltArchivePath = "project/sinex/.beads/dolt";
   sinexBeadsIssuesArchivePath = "project/sinex/.beads/issues.jsonl";
-  sinexBeadsDrillLog = "${config.sinnix.paths.capturesRoot}/machine/borg_beads_drill.jsonl";
+  sinexBeadsDrillLog = "${config.sinnix.paths.machineRoot}/borg_beads_drill.jsonl";
   sinexBeadsArchivePaths = [
     sinexBeadsDoltArchivePath
     sinexBeadsIssuesArchivePath
@@ -889,7 +889,7 @@ in
         captures = [
           {
             name = "borg-drill";
-            path = "${config.sinnix.paths.capturesRoot}/machine/borg_drill.jsonl";
+            path = "${config.sinnix.paths.machineRoot}/borg_drill.jsonl";
             eventDriven = true;
             # sinnix-borg-drill.timer runs weekly (604800s); budget 3x
             # cadence so one missed/delayed run doesn't false-positive.

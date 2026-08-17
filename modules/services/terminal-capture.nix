@@ -14,7 +14,7 @@
 let
   username = config.sinnix.user.name;
   repoRoot = config.sinnix.paths.projectRoot;
-  inherit (config.sinnix.paths) capturesRoot;
+  capturesRoot = config.sinnix.paths.activityRoot;
   recordingsDir = "${capturesRoot}/asciinema";
 in
 mkServiceModule {

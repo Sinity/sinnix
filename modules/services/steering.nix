@@ -20,7 +20,7 @@
 }@args:
 let
   username = config.sinnix.user.name;
-  inherit (config.sinnix.paths) capturesRoot;
+  capturesRoot = config.sinnix.paths.activityRoot;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   steer = scriptPkgs.sinnix-steer;
   cockpit = scriptPkgs.sinnix-cockpit;

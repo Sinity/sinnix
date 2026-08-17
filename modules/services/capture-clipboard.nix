@@ -34,7 +34,7 @@ let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   captureCli = scriptPkgs.sinnix-capture;
 
-  laneDir = "${config.sinnix.paths.capturesRoot}/clipboard";
+  laneDir = "${config.sinnix.paths.activityRoot}/clipboard";
   blobDir = "${laneDir}/blobs";
   stateDir = "${config.sinnix.paths.stateRoot}/cursors/capture-clipboard";
 
@@ -213,7 +213,7 @@ mkServiceModule {
                 Restart = "on-failure";
                 RestartSec = "5s";
                 Environment = [
-                  "SINNIX_CAPTURE_ROOT=${config.sinnix.paths.capturesRoot}"
+                  "SINNIX_CAPTURE_ROOT=${config.sinnix.paths.activityRoot}"
                   "SINNIX_CAPTURE_CLIPBOARD_STATE_DIR=${stateDir}"
                   # The session exports TMPDIR=/realm/tmp/shell, which is
                   # read-only inside this unit's ProtectSystem=strict

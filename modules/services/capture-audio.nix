@@ -32,7 +32,14 @@ let
   username = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   audioPkg = scriptPkgs.sinnix-audio-capture;
-  capturesRoot = config.sinnix.paths.capturesRoot;
+  # The whole audio family (audio + audio-devices + audio-topology +
+  # audio-index) shares one --capture-root argument with the CLI deriving
+  # each lane's subdirectory internally (pkgs/sinnix-audio-capture), so it
+  # cannot be split across activityRoot/machineRoot without CLI surgery.
+  # Kept whole under activityRoot per the charter's dominant-container rule
+  # (2026-08-17 subject recut) -- audio-devices/audio-topology would
+  # otherwise sit in machineRoot per the charter's literal table.
+  capturesRoot = config.sinnix.paths.activityRoot;
   audioDir = "${capturesRoot}/audio";
   devicesDir = "${capturesRoot}/audio-devices";
   topologyDir = "${capturesRoot}/audio-topology";

@@ -10,7 +10,7 @@ set -euo pipefail
 #   kitty-scrollback-view --last           # View most recent capture
 #   kitty-scrollback-view --html <file>    # Export to HTML with dark bg
 
-CAPTURE_DIR="${KITTY_SCROLLBACK_DIR:-/realm/data/captures/kitty-scrollback}"
+CAPTURE_DIR="${KITTY_SCROLLBACK_DIR:-/realm/data/activity/kitty-scrollback}"
 
 case "${1:-}" in
   --list|-l)

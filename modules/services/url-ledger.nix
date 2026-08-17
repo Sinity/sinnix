@@ -17,7 +17,7 @@ mkServiceModule {
     { cfg, ... }:
     let
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
-      stateDir = "${config.sinnix.paths.capturesRoot}/url-ledger/state";
+      stateDir = "${config.sinnix.paths.activityRoot}/url-ledger/state";
       derivedDir = "${config.sinnix.paths.dataRoot}/derived/url-ledger";
     in
     {

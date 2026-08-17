@@ -42,7 +42,7 @@ let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   captureCli = scriptPkgs.sinnix-capture;
 
-  laneDir = "${config.sinnix.paths.capturesRoot}/primary";
+  laneDir = "${config.sinnix.paths.activityRoot}/primary";
   blobDir = "${laneDir}/blobs";
   stateDir = "${config.sinnix.paths.stateRoot}/cursors/capture-primary";
 
@@ -242,7 +242,7 @@ mkServiceModule {
                 Restart = "on-failure";
                 RestartSec = "5s";
                 Environment = [
-                  "SINNIX_CAPTURE_ROOT=${config.sinnix.paths.capturesRoot}"
+                  "SINNIX_CAPTURE_ROOT=${config.sinnix.paths.activityRoot}"
                   "SINNIX_CAPTURE_PRIMARY_STATE_DIR=${stateDir}"
                   "SINNIX_CAPTURE_PRIMARY_DEBOUNCE_MS=${toString cfg.debounceMs}"
                   # Session TMPDIR (/realm/tmp/shell) is read-only inside the
