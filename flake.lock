@@ -868,6 +868,22 @@
         "type": "github"
       }
     },
+    "phone-app": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1787003929,
+        "narHash": "sha256-GI01PAkHlcQQuhtPIUSdjFYTyYQfMWiTjIB18lQ8pT8=",
+        "owner": "Sinity",
+        "repo": "sinnix-phone-app",
+        "rev": "821b4384709ef60e28a0400a1b3cc506c10c4a30",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Sinity",
+        "repo": "sinnix-phone-app",
+        "type": "github"
+      }
+    },
     "polylogue": {
       "inputs": {
         "nixpkgs": [
@@ -929,6 +945,7 @@
         "nixpkgs": "nixpkgs_4",
         "nixpkgs-ai": "nixpkgs-ai",
         "noctalia": "noctalia",
+        "phone-app": "phone-app",
         "polylogue": "polylogue",
         "scribe-tap": "scribe-tap",
         "sinex": "sinex",
