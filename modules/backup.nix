@@ -37,7 +37,6 @@ let
   borgRealmSnapshotBind = "${borgSnapshotBindRoot}/realm";
   borgDrainStateRoot = "/persist/root/.cache/borg-drain";
   borgIntegrityReceipt = "${borgDrainStateRoot}/integrity-check.json";
-  borgIntegrityTransitionState = "${borgDrainStateRoot}/integrity-status-state.json";
 
   # Borg Configuration
   borgRepoPersistPath = "${borgRepoRoot}/borg-persist-v1";
@@ -55,7 +54,6 @@ let
   borgCacheDir = "/persist/root/.cache/borg";
   borgStaleLockMinutes = 120;
   borgGlobalLock = "/run/lock/sinnix-borg.lock";
-  borgStatusLog = "${config.sinnix.paths.machineRoot}/borg_status.jsonl";
   sinexProjectPath = "${realmRoot}/project/sinex";
   sinexBeadsDoltArchivePath = "project/sinex/.beads/dolt";
   sinexBeadsIssuesArchivePath = "project/sinex/.beads/issues.jsonl";
@@ -524,256 +522,74 @@ let
       | tee -a ${lib.escapeShellArg sinexBeadsDrillLog}
   '';
 
-  mkBorgStatusScript = ''
-    set -euo pipefail
+  # Freshness for the three archive markers (persist/realm/sinex-blobs) and
+  # the integrity receipt is now expressed as capture lanes on their owning
+  # surfaces (staleAfterSeconds against the marker/receipt file). What a
+  # plain staleness check cannot see -- a stalled snapshot queue, an
+  # integrity run stuck past its own deadline -- goes through the reducer's
+  # livenessProbe exit-code contract instead (0 = fine, 1 = confirmed
+  # problem, anything else = the probe itself could not tell, never read as
+  # healthy). These two probe scripts implement that; the borgbackup-status
+  # oneshot + hourly timer that used to run this logic as a bespoke unit
+  # (writing borg_status.jsonl, zero consumers outside itself) is retired.
+  mkSnapshotQueueProbeScript = ''
+    now="$(${pkgs.coreutils}/bin/date +%s)"
 
-    install -d -m 0755 ${lib.escapeShellArg (builtins.dirOf borgStatusLog)}
-    now="$(date +%s)"
-    status=0
-
-    json_escape() {
-      jq -Rsa .
-    }
-
-    integrity_state() {
-      if [ ! -s ${lib.escapeShellArg borgIntegrityReceipt} ]; then
-        printf '%s\n' missing
-        return
-      fi
-
-      if ! jq -e '
-        (.operation_kind == "integrity_check") and
-        (.run_id | type == "string" and length > 0) and
-        (.expected_jobs | type == "array") and
-        (.start_epoch | type == "number") and
-        (.deadline_epoch | type == "number") and
-        (.state | type == "string")
-      ' ${lib.escapeShellArg borgIntegrityReceipt} >/dev/null 2>&1; then
-        printf '%s\n' missing
-        return
-      fi
-
-      jq -r --argjson now "$now" '
-        if .state == "running" and $now <= .deadline_epoch then "maintenance"
-        elif .state == "running" then "expired"
-        elif .state == "completed" then "completed"
-        elif .state == "failed" then "failed"
-        else "missing"
-        end
-      ' ${lib.escapeShellArg borgIntegrityReceipt}
-    }
-
-    integrity_covers() {
-      label="$1"
-      jq -e --arg label "$label" '.expected_jobs | index($label) != null' \
-        ${lib.escapeShellArg borgIntegrityReceipt} >/dev/null 2>&1
-    }
-
-    record_transition() {
-      label="$1"
-      state="$2"
-      run_id="$3"
-      deadline="$4"
-      previous=""
-      if [ -s ${lib.escapeShellArg borgIntegrityTransitionState} ]; then
-        previous="$(jq -r --arg label "$label" '.[$label] // empty' ${lib.escapeShellArg borgIntegrityTransitionState})"
-      fi
-      if [ "$previous" = "$state" ]; then
-        return
-      fi
-      install -d -m 0700 ${lib.escapeShellArg borgDrainStateRoot}
-      jq -cn \
-        --arg type notification_transition \
-        --arg label "$label" \
-        --arg state "$state" \
-        --arg run_id "$run_id" \
-        --argjson deadline "$deadline" \
-        --arg ts "$(date -Iseconds)" \
-        '{ts:$ts,type:$type,label:$label,state:$state,run_id:$run_id,deadline_epoch:$deadline}' \
-        >> ${lib.escapeShellArg borgStatusLog}
-      tmp=${lib.escapeShellArg borgIntegrityTransitionState}.tmp
-      # Branch on the file existing, not on jq failing. Falling back to a
-      # single-entry object is right on first run and destructive on a corrupt
-      # one -- it would drop every other label's transition state and then mv
-      # that over the original. A parse failure is reported and the file left
-      # alone instead.
-      if [ -s ${lib.escapeShellArg borgIntegrityTransitionState} ]; then
-        if ! jq --arg label "$label" --arg state "$state" '.[$label] = $state' \
-          ${lib.escapeShellArg borgIntegrityTransitionState} > "$tmp"; then
-          rm -f "$tmp"
-          echo "borgbackup-status: integrity transition state is unreadable; leaving it intact and not recording $label=$state" >&2
-          return 0
-        fi
-      else
-        jq -cn --arg label "$label" --arg state "$state" '{($label):$state}' > "$tmp"
-      fi
-      if [ -s "$tmp" ]; then
-        mv "$tmp" ${lib.escapeShellArg borgIntegrityTransitionState}
-      fi
-    }
-
-    latest_archive_epoch() {
-      label="$1"
-      marker=${lib.escapeShellArg borgDrainStateRoot}/"$label.last-success"
-      stamp=${lib.escapeShellArg borgDrainStateRoot}/"$label.stamp"
-
-      if [ -s "$marker" ]; then
-        sed -n 's/^epoch=//p' "$marker" | tail -n 1
-      elif [ -e "$stamp" ]; then
-        stat -c %Y "$stamp"
-      fi
-    }
-
-    oldest_snapshot_epoch() {
+    oldest_epoch() {
       dir="$1"
       glob="$2"
-      find "$dir" -maxdepth 1 -mindepth 1 -type d -name "$glob" -printf "%f\n" \
-        | sort \
-        | head -n 1 \
-        | sed -E 's/^[^.]+\.([0-9]{8})T([0-9]{6})([+-][0-9]{4})$/\1 \2 \3/' \
-        | while read -r day time tz; do
-            [ -n "''${day:-}" ] || continue
-            date -d "''${day:0:4}-''${day:4:2}-''${day:6:2} ''${time:0:2}:''${time:2:2}:''${time:4:2} $tz" +%s
+      ${pkgs.findutils}/bin/find "$dir" -maxdepth 1 -mindepth 1 -type d -name "$glob" -printf '%f\n' 2>/dev/null \
+        | ${pkgs.coreutils}/bin/sort \
+        | ${pkgs.coreutils}/bin/head -n 1 \
+        | ${pkgs.gnused}/bin/sed -E 's/^[^.]+\.([0-9]{8})T([0-9]{6})([+-][0-9]{4})$/\1 \2 \3/' \
+        | while IFS=' ' read -r day time tz; do
+            [ -n "$day" ] || continue
+            ${pkgs.coreutils}/bin/date -d "''${day:0:4}-''${day:4:2}-''${day:6:2} ''${time:0:2}:''${time:2:2}:''${time:4:2} $tz" +%s
           done
     }
 
-    check_archive() {
-      label="$1"
-      max_age="''${2:-${toString borgArchiveMaxAgeSec}}"
-      latest_status=0
-      latest="$(latest_archive_epoch "$label")" || latest_status=$?
-      if [ -z "$latest" ]; then
-        age=-1
-        ok=false
-        if [ "$latest_status" -eq 0 ]; then
-          message="no successful Borg drain marker found"
-        else
-          message="Borg drain marker unreadable"
-        fi
-        status=1
-      else
-        age=$((now - latest))
-        integrity="$(integrity_state)"
-        run_id=""
-        deadline=0
-        if [ -s ${lib.escapeShellArg borgIntegrityReceipt} ]; then
-          run_id="$(jq -r '.run_id // empty' ${lib.escapeShellArg borgIntegrityReceipt})"
-          deadline="$(jq -r '.deadline_epoch // 0' ${lib.escapeShellArg borgIntegrityReceipt})"
-        fi
-        if [ "$integrity" = maintenance ] && integrity_covers "$label"; then
-          ok=true
-          state=maintenance
-          message="integrity check in planned maintenance"
-        elif [ "$integrity" = failed ] || [ "$integrity" = expired ] || [ "$integrity" = missing ]; then
-          ok=false
-          state=red
-          message="integrity check receipt is $integrity"
-          status=1
-        elif [ "$age" -le "$max_age" ]; then
-          ok=true
-          state=healthy
-          message="archive fresh"
-        else
-          ok=false
-          state=red
-          message="latest archive too old"
-          status=1
-        fi
-
-        record_transition "$label" "$state" "$run_id" "$deadline"
-      fi
-
-      jq -cn \
-        --arg type archive_freshness \
-        --arg label "$label" \
-        --arg message "$message" \
-        --argjson ok "$ok" \
-        --argjson age "$age" \
-        --argjson max_age "$max_age" \
-        --arg state "''${state:-red}" \
-        --arg run_id "''${run_id:-}" \
-        --argjson deadline_epoch "''${deadline:-0}" \
-        --arg ts "$(date -Iseconds)" \
-        '{ts:$ts,type:$type,label:$label,ok:$ok,state:$state,run_id:$run_id,deadline_epoch:$deadline_epoch,age_sec:$age,max_age_sec:$max_age,message:$message}' \
-        >> ${lib.escapeShellArg borgStatusLog}
-
-      # Say it out loud too. This unit exits 1 by design when it finds a red
-      # condition, but it used to record the reason only in the JSONL, so the
-      # journal showed a bare "status=1/FAILURE" with no line explaining it --
-      # the one place an operator looks first.
-      if [ "$ok" = false ]; then
-        echo "borgbackup-status: $label is ''${state:-red}: $message (age ''${age}s, budget ''${max_age}s)" >&2
-      fi
+    # Returns 0 (empty or within budget), 1 (over budget -- drain stalled),
+    # or 2 (snapshots present but their age could not be determined: a
+    # broken probe, never read as healthy).
+    check_one() {
+      dir="$1"
+      glob="$2"
+      count="$(${pkgs.findutils}/bin/find "$dir" -maxdepth 1 -mindepth 1 -type d -name "$glob" 2>/dev/null | ${pkgs.coreutils}/bin/wc -l)"
+      [ "$count" -eq 0 ] && return 0
+      oldest="$(oldest_epoch "$dir" "$glob")"
+      [ -z "$oldest" ] && return 2
+      age=$((now - oldest))
+      [ "$age" -gt ${toString borgSnapshotQueueMaxAgeSec} ] && return 1
+      return 0
     }
 
-    check_queue() {
-      label="$1"
-      dir="$2"
-      glob="$3"
-      count="$(find "$dir" -maxdepth 1 -mindepth 1 -type d -name "$glob" | wc -l)"
-      oldest="$(oldest_snapshot_epoch "$dir" "$glob" || true)"
+    check_one ${lib.escapeShellArg persistSnapshots} 'persist.*'
+    persist_rc=$?
+    check_one ${lib.escapeShellArg realmSnapshots} 'realm.*'
+    realm_rc=$?
 
-      # An empty `oldest` means one of two very different things, and reporting
-      # both as age=0 made every probe failure read as a fresh queue. With
-      # snapshots present, failing to date the oldest is a broken probe (dir
-      # unreadable, naming convention changed, date rejected) and must not
-      # claim health.
-      probe_failed=0
-      age=0
-      if [ -z "$oldest" ] && [ "$count" -gt 0 ]; then
-        probe_failed=1
-      elif [ -n "$oldest" ]; then
-        age=$((now - oldest))
-      fi
+    if [ "$persist_rc" -eq 2 ] || [ "$realm_rc" -eq 2 ]; then
+      exit 3
+    fi
+    if [ "$persist_rc" -eq 1 ] || [ "$realm_rc" -eq 1 ]; then
+      exit 1
+    fi
+    exit 0
+  '';
 
-      if [ "$probe_failed" -eq 1 ]; then
-        ok=false
-        state=unknown
-        message="snapshot queue present but its age could not be determined"
-        status=1
-      elif [ "$age" -le ${toString borgSnapshotQueueMaxAgeSec} ]; then
-        ok=true
-        state=healthy
-        message="snapshot queue fresh"
-      else
-        ok=false
-        state=red
-        message="snapshot queue too old"
-        status=1
-      fi
-
-      jq -cn \
-        --arg type snapshot_queue \
-        --arg label "$label" \
-        --arg message "$message" \
-        --argjson ok "$ok" \
-        --argjson count "$count" \
-        --argjson age "$age" \
-        --argjson max_age ${toString borgSnapshotQueueMaxAgeSec} \
-        --arg state "$state" \
-        --arg ts "$(date -Iseconds)" \
-        '{ts:$ts,type:$type,label:$label,ok:$ok,state:$state,count:$count,oldest_age_sec:$age,max_age_sec:$max_age,message:$message}' \
-        >> ${lib.escapeShellArg borgStatusLog}
-    }
-
-    check_archive persist
-    check_archive realm
-    check_archive sinex-blobs ${toString borgDailyArchiveMaxAgeSec}
-    check_queue persist ${lib.escapeShellArg persistSnapshots} 'persist.*'
-    check_queue realm ${lib.escapeShellArg realmSnapshots} 'realm.*'
-
-    # root-snapshots is deliberately NOT gated here. Its source is the
-    # initrd's pre-wipe root snapshot, produced once per BOOT rather than on
-    # a content-change cadence -- a long uptime with no reboot means no new
-    # snapshot exists to archive, which is the healthy case, not staleness.
-    # An age-since-last-archive freshness check would false-positive exactly
-    # when the host is most stable. It is also the one Borg repo
-    # borgbackup-verify does not repository-check (only persist/realm/
-    # sinex-blobs) and has no marker-writing convention today, so extending
-    # this gate to it needs those two additions first, not just another
-    # check_archive call replicating a cadence model that does not apply.
-
-    exit "$status"
+  mkIntegrityStuckProbeScript = ''
+    receipt=${lib.escapeShellArg borgIntegrityReceipt}
+    # No receipt yet is the capture lane's own staleness check to make (or,
+    # before the first weekly run, its calm not-yet-run state) -- this probe
+    # answers one narrower question, whether an IN-PROGRESS run has overrun
+    # its own deadline.
+    [ -s "$receipt" ] || exit 0
+    now="$(${pkgs.coreutils}/bin/date +%s)"
+    result="$(${pkgs.jq}/bin/jq -r --argjson now "$now" \
+      'if (.state == "running") and ($now > (.deadline_epoch // 0)) then "stuck" else "ok" end' \
+      "$receipt" 2>/dev/null)" || exit 3
+    [ "$result" = stuck ] && exit 1
+    exit 0
   '';
 
   btrbkConfig = ''
@@ -834,6 +650,16 @@ in
           enable = true;
           restartable = false;
         };
+        captures = [
+          {
+            name = "borg-persist-archive";
+            path = "${borgDrainStateRoot}/persist.last-success";
+            eventDriven = true;
+            # Same budget the retired borgbackup-status "persist"
+            # archive_freshness check used: 3x the 4h drain floor.
+            staleAfterSeconds = borgArchiveMaxAgeSec;
+          }
+        ];
       };
       borgbackup-job-realm = {
         unit = "borgbackup-job-realm.service";
@@ -842,6 +668,43 @@ in
           enable = true;
           restartable = false;
         };
+        captures = [
+          {
+            name = "borg-realm-archive";
+            path = "${borgDrainStateRoot}/realm.last-success";
+            eventDriven = true;
+            staleAfterSeconds = borgArchiveMaxAgeSec;
+          }
+          {
+            # The btrbk snapshot queue (persist AND realm, both checked by
+            # the probe below) has no owning unit of its own -- it is a
+            # property of the drain state this job and borgbackup-job-persist
+            # share. Landed here rather than split across both surfaces,
+            # since realm is the heavier of the two volumes and the one that
+            # has actually stalled before (drains contend for one global
+            # Borg lock, so a stall on either queue means the same lock
+            # contention regardless of which volume's job reports it).
+            #
+            # `path` is deliberately the small drain-state directory (a
+            # handful of marker/stamp files), NOT the snapshot directories
+            # themselves: those are full btrfs subvolume trees (potentially
+            # many GB / millions of files each), and the sweep's
+            # newest_mtime does a plain os.walk over every capture path on a
+            # 60s clock -- pointing it at a live snapshot tree would re-stat
+            # the entire /realm or /persist dataset every minute. No
+            # staleAfterSeconds: the drain-state directory always holds a
+            # file once the first drain has ever succeeded, so plain
+            # presence is enough; the real freshness question here is
+            # answered by the probe below, not by this path's mtime.
+            name = "borg-snapshot-queue";
+            path = borgDrainStateRoot;
+            eventDriven = true;
+            livenessProbe = {
+              command = mkSnapshotQueueProbeScript;
+              timeoutSeconds = 15;
+            };
+          }
+        ];
       };
       borgbackup-job-sinex-blobs = {
         unit = "borgbackup-job-sinex-blobs.service";
@@ -850,6 +713,17 @@ in
           enable = true;
           restartable = false;
         };
+        captures = [
+          {
+            name = "borg-sinex-blobs-archive";
+            path = "${borgDrainStateRoot}/sinex-blobs.last-success";
+            eventDriven = true;
+            # sinex-blobs runs on its own daily 05:40 timer, not the 4h-floor
+            # persist/realm drain cadence, so it keeps the daily budget the
+            # retired borgbackup-status check used for it (3x cadence).
+            staleAfterSeconds = borgDailyArchiveMaxAgeSec;
+          }
+        ];
       };
       borgbackup-verify = {
         unit = "borgbackup-verify.service";
@@ -867,37 +741,29 @@ in
             # cadence so one missed/delayed run doesn't false-positive.
             staleAfterSeconds = 1814400;
           }
+          {
+            name = "borg-integrity-receipt";
+            path = borgIntegrityReceipt;
+            eventDriven = true;
+            # Same 3x-weekly-cadence budget as the drill lane above: the
+            # receipt only updates on a verify run.
+            staleAfterSeconds = 1814400;
+            # Staleness alone reads a run stuck mid-check (state=="running"
+            # well past its own deadline_epoch, the case the retired
+            # borgbackup-status integrity-state machinery covered) as merely
+            # "not yet stale" until the weekly budget itself expires --
+            # days later. The probe answers that narrower question directly.
+            # completed/failed states exit 0 here: a failed run already
+            # fires OnFailure from the unit itself.
+            livenessProbe = {
+              command = mkIntegrityStuckProbeScript;
+              timeoutSeconds = 10;
+            };
+          }
         ];
       };
       borgbackup-maintenance = {
         unit = "borgbackup-maintenance.service";
-        resourceClass = "backup-maintenance";
-        observe = {
-          enable = true;
-          restartable = false;
-        };
-      };
-      borgbackup-status = {
-        unit = "borgbackup-status.service";
-        resourceClass = "backup-maintenance";
-        observe = {
-          enable = true;
-          restartable = false;
-        };
-        captures = [
-          {
-            name = "borg-status";
-            path = borgStatusLog;
-            eventDriven = true;
-            # borgbackup-status.timer runs hourly (3600s); budget 3x cadence
-            # so one missed/delayed run doesn't false-positive.
-            staleAfterSeconds = 10800;
-          }
-        ];
-      };
-      borgbackup-status-timer = {
-        unit = "borgbackup-status.timer";
-        kind = "timer";
         resourceClass = "backup-maintenance";
         observe = {
           enable = true;
@@ -1087,7 +953,8 @@ in
           ${lib.escapeShellArg sinexBlobRepositoryPath}
         echo "sinex blob backup complete: $archive_name"
 
-        # borgbackup-status gates freshness off this marker, same convention
+        # The borg-sinex-blobs-archive capture lane (this surface's
+        # captures, above) gates freshness off this marker, same convention
         # as the btrbk drain jobs' "$label.last-success" (mkSnapshotDrainScript
         # above) -- without it, sinex-blobs had zero freshness gating despite
         # being on a daily timer just like persist/realm are on their 4h floor.
@@ -1182,9 +1049,9 @@ in
         # Armed BEFORE the first receipt write: when jq was missing from this
         # unit's path, the "running" write died with 127 before the trap
         # existed, so no receipt was written at all -- not even a failed one.
-        # borgbackup-status then reported "integrity check receipt is
-        # missing" and went red for two weeks while the backups themselves
-        # were fine. The trap only ever writes "failed" -- "completed" is
+        # The freshness check reading this receipt then reported it missing
+        # and went red for two weeks while the backups themselves were fine.
+        # The trap only ever writes "failed" -- "completed" is
         # written explicitly once the repository checks below succeed, so a
         # later drill failure (which is a separate concern, not part of
         # expected_jobs) does not retroactively flip a completed integrity
@@ -1334,44 +1201,6 @@ in
       };
     };
 
-    systemd.services.borgbackup-status = {
-      description = "Check Borg backup freshness and snapshot queue age";
-      restartIfChanged = false;
-      after = [
-        "persist.mount"
-        "realm.mount"
-        outerRealmMountUnit
-      ];
-      requires = [
-        "persist.mount"
-        "realm.mount"
-        outerRealmMountUnit
-      ];
-      serviceConfig = {
-        Type = "oneshot";
-        TimeoutStopSec = "15s";
-        TimeoutStartSec = "30s";
-      }
-      // backupServiceConfig "borgbackup-status.service";
-      path = with pkgs; [
-        borgbackup
-        coreutils
-        findutils
-        gnugrep
-        jq
-        util-linux
-      ];
-      script = mkBorgStatusScript;
-    };
-    systemd.timers.borgbackup-status = {
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnCalendar = "hourly";
-        Persistent = true;
-        RandomizedDelaySec = "10min";
-      };
-    };
-
     # Borg is file-level recovery. Keep compact Btrfs metadata images off the
     # source filesystems so a future tree/chunk/extent repair has native
     # metadata evidence instead of only a file archive.
@@ -1397,7 +1226,6 @@ in
         btrfs-progs
         coreutils
         findutils
-        jq
       ];
       script = ''
         set -euo pipefail
@@ -1409,18 +1237,6 @@ in
         # the 30-day prune below matches finished images only, so a dead run
         # leaves multi-GB orphans indefinitely.
         find "${btrfsImageRoot}" -type f -name '*.btrfs-image.tmp' -mtime +1 -delete
-
-        record_status() {
-          jq -cn \
-            --arg ts "$(date -Iseconds)" \
-            --arg type btrfs_metadata_image \
-            --arg label "$1" \
-            --arg state "$2" \
-            --argjson attempts "$3" \
-            --arg message "$4" \
-            '{ts:$ts,type:$type,label:$label,ok:($state == "healthy"),state:$state,attempts:$attempts,message:$message}' \
-            >> ${lib.escapeShellArg borgStatusLog}
-        }
 
         # btrfs-image walks a MOUNTED, actively-written filesystem: there is
         # no consistent-view mode for one, and a tree block whose generation
@@ -1441,7 +1257,6 @@ in
             if btrfs-image -c 9 "$device" "$tmp"; then
               chmod 0600 "$tmp"
               mv "$tmp" "$out"
-              record_status "$label" healthy "$attempt" "metadata image captured"
               return 0
             fi
             echo "btrfs-metadata-image-backup: $label attempt $attempt failed (live-filesystem race or real error)" >&2
@@ -1450,7 +1265,6 @@ in
           done
 
           rm -f "$tmp"
-          record_status "$label" red 3 "metadata image failed three times; check btrfs device stats for real corruption"
           echo "btrfs-metadata-image-backup: $label failed after 3 attempts" >&2
           return 1
         }
