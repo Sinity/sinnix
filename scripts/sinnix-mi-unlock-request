@@ -201,7 +201,7 @@ async def open_warm(ctx: ssl.SSLContext) -> tuple[asyncio.StreamReader, asyncio.
     return reader, writer, rtt
 
 
-async def fire(reader, writer, payload: bytes, idx: int) -> tuple[int, str]:
+async def fire(reader, writer, payload: bytes, idx: int | str) -> tuple[int, str]:
     try:
         writer.write(payload)
         await writer.drain()
@@ -314,7 +314,17 @@ async def run(args: argparse.Namespace) -> int:
         log("no token available (--token-file, $MI_BBS_TOKEN, or /run/agenix/mi-bbs-token)")
         return 2
 
-    payload = build_request(token, args.device_id, is_retry=not args.first_try)
+    # Four identical payloads answered one question four times. The burst now
+    # splits between is_retry true and false, whose difference is undocumented
+    # and untestable outside the window (a request made while the window is
+    # shut answers 3 whatever it carries). Same number of requests, one more
+    # answer.
+    if args.first_try is None:
+        variants = [("retry", True), ("first", False)]
+    else:
+        variants = [("first", False)] if args.first_try else [("retry", True)]
+    payloads = [(name, build_request(token, args.device_id, is_retry=flag))
+                for name, flag in variants]
 
     off = 0.0 if args.no_ntp else ntp_offset(args.ntp_server)
     log(f"ntp offset {off * 1000:+.1f} ms" + ("" if off else " (unavailable or already exact)"))
@@ -377,7 +387,9 @@ async def run(args: argparse.Namespace) -> int:
     log(f"release at {datetime.fromtimestamp(time.time() + off).isoformat(timespec='milliseconds')}")
 
     results = await asyncio.gather(
-        *(fire(r, w, payload, i) for i, (r, w, _) in enumerate(conns))
+        *(fire(r, w, payloads[i % len(payloads)][1],
+               f"{i}-{payloads[i % len(payloads)][0]}")
+          for i, (r, w, _) in enumerate(conns))
     )
     for _, detail in results:
         log(detail)
@@ -524,9 +536,12 @@ def main() -> int:
     ap.add_argument("--lead-ms", type=float, default=0.0, help="extra milliseconds to fire early")
     ap.add_argument("--ntp-server", default="pool.ntp.org")
     ap.add_argument("--no-ntp", action="store_true", help="trust the local clock (not recommended)")
-    ap.add_argument("--first-try", action="store_true", help="send is_retry=false")
+    ap.add_argument("--first-try", dest="first_try", action="store_const", const=True, default=None,
+                    help="send only is_retry=false (default: split the burst between both)")
+    ap.add_argument("--retry-only", dest="first_try", action="store_const", const=False,
+                    help="send only is_retry=true")
     ap.add_argument("--observe-window", action="store_true",
-                    help="probe at T-30m/-60s/-5s/-1s to find where the gate really opens, then fire on the server's own deadline")
+                    help="confirm token and account eligibility at T-30m/-60s, then fire on the window")
     args = ap.parse_args()
     args.token = read_token(args.token_file)
     if not args.device_id:
