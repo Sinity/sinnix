@@ -54,7 +54,9 @@
 import { MiHealthClient, XiaomiAuth } from "./upstream/src/xiaomi/client.ts";
 
 const STATE_DIR = process.env.XIAOMI_WITNESS_STATE ?? "/realm/state/xiaomi-witness";
-const LANE_DIR = process.env.XIAOMI_WITNESS_LANE ?? "/realm/data/captures/xiaomi-cloud";
+// The service passes both of these; the defaults are for running this file by
+// hand and deliberately name the same places the module does.
+const LANE_DIR = process.env.XIAOMI_WITNESS_LANE ?? "/realm/data/health/xiaomi-cloud";
 const BASE = process.env.MI_HEALTH_BASE ?? "https://de.hlth.io.mi.com";
 // Seven days, not three. The cloud is the SLOW plane, measured 2026-08-17:
 // Health Connect held band data from an hour ago while Xiaomi's servers had
