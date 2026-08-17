@@ -832,13 +832,23 @@ in
           restartable = false;
         };
       };
-      borgbackup-check = {
-        unit = "borgbackup-check.service";
+      borgbackup-verify = {
+        unit = "borgbackup-verify.service";
         resourceClass = "backup-maintenance";
         observe = {
           enable = true;
           restartable = false;
         };
+        captures = [
+          {
+            name = "borg-drill";
+            path = "${config.sinnix.paths.machineRoot}/borg_drill.jsonl";
+            eventDriven = true;
+            # borgbackup-verify.timer runs weekly (604800s); budget 3x
+            # cadence so one missed/delayed run doesn't false-positive.
+            staleAfterSeconds = 1814400;
+          }
+        ];
       };
       borgbackup-maintenance = {
         unit = "borgbackup-maintenance.service";
@@ -882,20 +892,6 @@ in
       borgbackup-root-snapshots = {
         unit = "borgbackup-root-snapshots.service";
         resourceClass = "backup-maintenance";
-      };
-      sinnix-borg-drill = {
-        unit = "sinnix-borg-drill.service";
-        resourceClass = "backup-maintenance";
-        captures = [
-          {
-            name = "borg-drill";
-            path = "${config.sinnix.paths.machineRoot}/borg_drill.jsonl";
-            eventDriven = true;
-            # sinnix-borg-drill.timer runs weekly (604800s); budget 3x
-            # cadence so one missed/delayed run doesn't false-positive.
-            staleAfterSeconds = 1814400;
-          }
-        ];
       };
       sinnix-borg-beads-drill = {
         unit = "sinnix-borg-beads-drill.service";
@@ -1093,9 +1089,9 @@ in
         }
       ];
 
-    # Failure surfacing for the two borg verification/integrity units
-    # (sinnix-borg-drill, borgbackup-check): a restore drill or repo check
-    # that fails silently is worse than none. Appends a `service_failure`
+    # Failure surfacing for the borg verification/integrity unit
+    # (borgbackup-verify): a repo check or restore drill that fails silently
+    # is worse than none. Appends a `service_failure`
     # event to the existing borgStatusLog JSONL (same file/consumer path as
     # the archive_freshness/snapshot_queue events above) and best-effort
     # desktop-notifies the active graphical session.
@@ -1132,16 +1128,25 @@ in
       '';
     };
 
-    # Weekly integrity check — verify repo metadata and detect bit rot on the HDD.
-    systemd.services.borgbackup-check = {
-      description = "Borg backup integrity check";
+    # Weekly integrity check — verify repo metadata and detect bit rot on the
+    # HDD, then run the bounded restore drill in the same window. Merged into
+    # one unit (was borgbackup-check.service + sinnix-borg-drill.service,
+    # sinnix-borg-drill.timer Wed 04:00 retired) so the two weekly borg-heavy
+    # jobs no longer contend for the HDD on separate schedules.
+    systemd.services.borgbackup-verify = {
+      description = "Borg backup integrity check and bounded restore drill";
       restartIfChanged = false;
       onFailure = [ "sinnix-service-failure-notify@%n.service" ];
       serviceConfig = {
         Type = "oneshot";
         TimeoutStopSec = "15s";
+        # Repository checks are capped at 3h (1800+7200+1800s) by their own
+        # --max-duration budgets; the drill's borg check --verify-data on a
+        # multi-GB archive can take tens of minutes more on HDD. 12h total,
+        # matching the retired sinnix-borg-drill.service's own allowance.
+        TimeoutStartSec = "12h";
       }
-      // backupServiceConfig "borgbackup-check.service";
+      // backupServiceConfig "borgbackup-verify.service";
       environment.BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
       environment.BORG_CACHE_DIR = borgCacheDir;
       path = with pkgs; [
@@ -1165,7 +1170,7 @@ in
           jq -cn \
             --arg operation_kind integrity_check \
             --arg run_id "$run_id" \
-            --argjson expected_jobs '["persist","realm"]' \
+            --argjson expected_jobs '["persist","realm","sinex-blobs"]' \
             --argjson start_epoch "$start_epoch" \
             --argjson deadline_epoch "$deadline_epoch" \
             --arg state "$state" \
@@ -1176,13 +1181,9 @@ in
         }
         start_epoch="$(date +%s)"
         deadline_epoch=$((start_epoch + 3 * 3600))
-        finish_integrity_receipt() {
+        receipt_failure_trap() {
           rc="$?"
-          if [ "$rc" -eq 0 ]; then
-            write_integrity_receipt completed
-          else
-            write_integrity_receipt failed
-          fi
+          write_integrity_receipt failed
           exit "$rc"
         }
         # Armed BEFORE the first receipt write: when jq was missing from this
@@ -1190,8 +1191,12 @@ in
         # existed, so no receipt was written at all -- not even a failed one.
         # borgbackup-status then reported "integrity check receipt is
         # missing" and went red for two weeks while the backups themselves
-        # were fine.
-        trap finish_integrity_receipt EXIT
+        # were fine. The trap only ever writes "failed" -- "completed" is
+        # written explicitly once the repository checks below succeed, so a
+        # later drill failure (which is a separate concern, not part of
+        # expected_jobs) does not retroactively flip a completed integrity
+        # check back to failed.
+        trap receipt_failure_trap EXIT
         write_integrity_receipt running
         recover_stale_borg_locks
         ${mkBorgCommonScript borgRepoRealm borgRepoRealmPath}
@@ -1205,9 +1210,25 @@ in
         ${pkgs.borgbackup}/bin/borg check --repository-only --max-duration 1800 ${borgRepoPersist}
         ${pkgs.borgbackup}/bin/borg check --repository-only --max-duration 7200 ${borgRepoRealm}
         ${pkgs.borgbackup}/bin/borg check --repository-only --max-duration 1800 ${borgRepoSinexBlobs}
+
+        trap - EXIT
+        write_integrity_receipt completed
+
+        # Bounded restore drill (was sinnix-borg-drill.service, its own
+        # weekly timer). Runs the same packaged script the manual
+        # `sinnix borg-drill [--verify-data]` verb uses, so borg_drill.jsonl
+        # receipts land exactly as before. The repository checks above
+        # release the global Borg lock here (by closing fd 9) before
+        # invoking it: the drill script does its own `exec 9>...; flock -n`
+        # in a fresh process against the same lock file, which would
+        # otherwise always see the lock as already held by this script and
+        # skip -- a re-entrant flock is per-open-file-description, not
+        # per-process-tree.
+        exec 9>&-
+        ${scriptPkgs.sinnix-borg-drill}/bin/sinnix-borg-drill
       '';
     };
-    systemd.timers.borgbackup-check = {
+    systemd.timers.borgbackup-verify = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
         OnCalendar = "Sun 06:17:00";
@@ -1625,59 +1646,6 @@ in
       };
     };
 
-    # Weekly bounded Borg verification drill.
-    #
-    # Full `borg check --verify-data` archive drills have proven able to run for
-    # most of a day on the local HDD. The scheduled drill instead uses Borg's
-    # resumable `--repository-only --max-duration` mode so integrity checking
-    # progresses without monopolizing the host. Full archive-data verification
-    # remains available as an explicit manual `sinnix-borg-drill --verify-data`
-    # command.
-    systemd.services.sinnix-borg-drill = {
-      description = "Borg bounded verification drill";
-      # Detach from nixos-rebuild switch: this is a multi-hour oneshot;
-      # switch-to-configuration must not block waiting for it to finish
-      # when the unit hash changes or the Persistent=true timer wants to
-      # catch up. The timer schedules invocations on its own cadence.
-      restartIfChanged = false;
-      reloadIfChanged = false;
-      stopIfChanged = false;
-      onFailure = [ "sinnix-service-failure-notify@%n.service" ];
-      after = [
-        "network.target"
-      ];
-      environment = {
-        BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
-        BORG_CACHE_DIR = borgCacheDir;
-        SINNIX_BORG_GLOBAL_LOCK = borgGlobalLock;
-      };
-      path = with pkgs; [
-        borgbackup
-        coreutils
-        jq
-        util-linux
-      ];
-      serviceConfig = {
-        Type = "oneshot";
-        ExecStart = "${scriptPkgs.sinnix-borg-drill}/bin/sinnix-borg-drill";
-        # `borg check --verify-data` on a multi-GB archive can take
-        # tens of minutes on HDDs; allow up to 12 hours total across repos.
-        TimeoutStartSec = "12h";
-      }
-      // backupServiceConfig "sinnix-borg-drill.service";
-    };
-
-    systemd.timers.sinnix-borg-drill = {
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        # Weekly, offset from `borgbackup-check.timer` (Sun 06:17) so the
-        # two heavy borg jobs do not contend for the HDD.
-        OnCalendar = "Wed 04:00:00";
-        Persistent = true;
-        RandomizedDelaySec = 1800;
-      };
-    };
-
     # The realm archive is the production authority for Sinex's checkout,
     # including the mutable Beads Dolt directory and tracked JSONL export.
     # This drill lists both exact paths, extracts them into an ephemeral
@@ -1716,7 +1684,7 @@ in
       wantedBy = [ "timers.target" ];
       timerConfig = {
         # Follow the regular realm archive and stay clear of the repository
-        # integrity drill on Wednesday.
+        # integrity check and restore drill on Sunday (borgbackup-verify).
         OnCalendar = "Thu 05:00:00";
         Persistent = true;
       };

@@ -8,6 +8,11 @@
 # across runs, so this avoids surprise multi-hour archive data verification
 # while still advancing repository integrity coverage over time.
 #
+# Scheduled invocation now happens inside borgbackup-verify.service (weekly,
+# after its own repository integrity checks) rather than a standalone timer.
+# This script remains both that callee and the manual verb:
+# `sinnix borg-drill [--verify-data]`.
+#
 # Required environment:
 #   BORG_PASSCOMMAND  — how to fetch the passphrase (set by the systemd unit)
 #
