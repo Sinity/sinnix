@@ -258,7 +258,7 @@ Surfaces with standing design decisions an agent might otherwise "fix":
 - `sinnix.services.stt` (`modules/services/stt.nix`, `scripts/sinnix-stt`,
   docs/speech.md) is the estate's speech stack, served OpenAI-compatible at
   `/v1/audio/transcriptions`. Four sherpa-onnx models under
-  `/realm/media/model/sherpa`, fetched on first start: Parakeet TDT 0.6B v3
+  `/realm/library/models/sherpa`, fetched on first start: Parakeet TDT 0.6B v3
   (int8) transcribes, Silero VAD gates, pyannote segmentation 3.0 diarizes,
   and NeMo TitaNet-small embeds speakers for verification. It is **CPU-only
   and deliberately outside the `gpu-inference` admission mesh**: fast enough
