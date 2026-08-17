@@ -408,6 +408,27 @@ mkServiceModule {
             enable = true;
             restartable = true;
           };
+          # The ambient archive lands HERE now, not through the drain: the
+          # capture app uploads each finished chunk to this service and
+          # deletes its copy only once the hash comes back verified. The lane
+          # is declared beside the unit that receives it so the thing that
+          # can fail is the thing being watched -- it sat on phone-drain
+          # until 2026-08-17, which by then was a unit that no longer touched
+          # these files.
+          #
+          # Two hours, where the pull-era budget was a day. A chunk closes
+          # every five minutes and ships within a heartbeat, so the only
+          # honest reasons for silence are a phone off wifi or genuinely not
+          # recording -- and both of those are worth hearing about long
+          # before tomorrow.
+          captures = [
+            {
+              name = "phone-ambient";
+              path = "/realm/data/machine/phone/ambient";
+              cadenceSeconds = 300;
+              staleAfterSeconds = 7200;
+            }
+          ];
         };
         hub-terminal-view = {
           unit = "sinnix-hub-terminal-view.service";
