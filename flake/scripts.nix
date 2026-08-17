@@ -263,6 +263,11 @@ let
 
     sinnix-ops-reducer = pkgs.callPackage ../pkgs/sinnix-ops-reducer/pkg.nix { };
 
+    # Shared Python library (importable, not a CLI): atomic state, ledgers,
+    # locks, notify, systemd probes, spools. Python packages here depend on
+    # it instead of carrying private copies of these helpers.
+    sinnix-lib = pkgs.callPackage ../pkgs/sinnix-lib/pkg.nix { };
+
     sinnix-cockpit = pkgs.callPackage ../pkgs/sinnix-cockpit/pkg.nix { };
 
     sinnix-quota = pkgs.callPackage ../pkgs/sinnix-quota/pkg.nix { };
