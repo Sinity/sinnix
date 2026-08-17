@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # @sinnix-package
 # description: Prime's half of the phone's dual transport — the live JSON API and the drained-intent dispatcher
-# runtimeInputs: coreutils @sinnix-steer
+# runtimeInputs: coreutils @sinnix-steer @sinnix-score
 
 """The estate's answer to the phone.
 
@@ -323,6 +323,38 @@ def mark_token(token: str, result: str) -> None:
     (TOKENS_DIR / token).write_text(f"{now_iso()} {result}\n", encoding="utf-8")
 
 
+def _score_worker() -> None:
+    """Run `sinnix-score run` in the background and put its outcome in the journal.
+
+    Fire-and-forget on purpose: the intent that triggered this already
+    returned its own receipt, and scoring is a separate promise (the receipt
+    a hold-still instrument tells the operator will "come back later"). A
+    failure here must not fail the intent, and it does not need to be
+    retried explicitly -- `sinnix-score run` re-scans the whole outbox and
+    dedups against its own ledger, so the very next trace to arrive re-tries
+    anything this pass dropped.
+    """
+    exe = shutil.which("sinnix-score")
+    if exe is None:
+        print("phone-dispatcher: score: sinnix-score is not on PATH", file=sys.stderr)
+        return
+    try:
+        proc = subprocess.run([exe, "run"], capture_output=True, text=True, timeout=600)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print(f"phone-dispatcher: score: sinnix-score run did not complete: {exc}", file=sys.stderr)
+        return
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()
+        print(f"phone-dispatcher: score: sinnix-score run exited {proc.returncode}: {detail}", file=sys.stderr)
+    elif proc.stdout.strip():
+        print(f"phone-dispatcher: score: {proc.stdout.strip()}", file=sys.stderr)
+
+
+def trigger_score() -> None:
+    """Score whatever just landed, without making the caller wait for it."""
+    threading.Thread(target=_score_worker, daemon=True, name="phone-score").start()
+
+
 def execute(intent: dict) -> dict:
     """Run one intent. Returns what the phone should be told.
 
@@ -405,6 +437,15 @@ def execute(intent: dict) -> dict:
         # events plane and the blob drain; there is nothing for prime to do
         # except acknowledge that they arrived.
         result = {"ok": True, "recorded": kind}
+        if kind in ("voice_note", "trace"):
+            # The intent's arrival is the signal that a trace or a voice note
+            # landed in the outbox (this JSON is the acknowledgment; the blob
+            # itself came in beside it, over whichever plane delivered this
+            # intent). There used to be a timer for this
+            # (sinnix.services.phone-score, 900s); scoring on arrival is
+            # strictly faster and no more expensive, since sinnix-score run
+            # is already a cheap no-op sweep when there is nothing new.
+            trigger_score()
     else:
         result = {"ok": False, "detail": f"unknown intent kind {kind!r}"}
 
