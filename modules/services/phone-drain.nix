@@ -1,5 +1,5 @@
 # Drain-on-a-schedule for everything the phone does NOT ship itself: the
-# system log, the camera and Downloads mirrors, ActivityWatch, and the
+# system log, the camera and Downloads mirrors, and the
 # estate's events and outbox intents -- collected in the same run that pushes
 # prime's glance/steering/receipts/decks down and hands the collected intents
 # to sinnix-phone-dispatcher. Wraps `sinnix-phone drain`
@@ -52,18 +52,6 @@ mkServiceModule {
       {
         name = "phone-logcat";
         path = "/realm/data/machine/phone/logcat";
-        cadenceSeconds = 1800;
-        staleAfterSeconds = 86400;
-      }
-      # Foreground app and screen unlocks, drained out of ActivityWatch
-      # Android. This is the phone's half of the signal the desktop has had
-      # from ActivityWatch all along, and it had been accumulating unread
-      # since 2026-08-12 -- eleven days of it, because aw-android backfills
-      # from UsageStatsManager and so its history predates its own install.
-      # Same wifi-conditional budget as the other phone lanes.
-      {
-        name = "phone-activitywatch";
-        path = "/realm/data/machine/phone/activitywatch";
         cadenceSeconds = 1800;
         staleAfterSeconds = 86400;
       }
