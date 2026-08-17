@@ -43,14 +43,15 @@ process to ask, which is a much larger lift with its own correctness
 problems) -- the client-side autocomplete here is a plain per-window recently-
 sent-text history, cheap and genuinely useful, not a completion engine.
 
-Deliberately minimal, matching sinnix-hub-feedback's own decisions:
+Deliberately minimal, matching the hub feedback spool's own decisions
+(now the reducer's /feedback route):
   * no auth beyond the tailnet boundary the hub already enforces;
   * no database -- kitty's own `ls`/`get-text` and the scrollback capture's
     files on disk are the only state; sent-text history lives in the
     browser's own localStorage, not server state;
   * synchronous, direct action for control (not a spooled/queued write like
-    sinnix-hub-feedback's annotations) -- send-text has to reach the window
-    now, queuing it for later would be actively wrong.
+    the feedback annotations) -- send-text has to reach the window now,
+    queuing it for later would be actively wrong.
 """
 
 from __future__ import annotations
