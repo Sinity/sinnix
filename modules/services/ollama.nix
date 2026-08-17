@@ -64,7 +64,7 @@ mkServiceModule {
     }:
     let
       user = config.sinnix.user.name;
-      modelsDir = "${config.sinnix.paths.mediaRoot}/model/ollama";
+      modelsDir = "${config.sinnix.paths.modelsRoot}/ollama";
       ollamaBin = lib.getExe pkgs.ollama-cuda;
       awkBin = lib.getExe pkgs.gawk;
       # Upstream's ollama-model-loader pulls every tag in one `parallel`
@@ -164,7 +164,7 @@ mkServiceModule {
       systemd.tmpfiles.rules = [
         # Shared parent owned by the human user; ollama subdir owned by the
         # ollama service account (0755 keeps the parent traversable).
-        "d ${config.sinnix.paths.mediaRoot}/model 0755 ${user} users -"
+        "d ${config.sinnix.paths.modelsRoot} 0755 ${user} users -"
         "d ${modelsDir} 0755 ollama ollama -"
       ];
 

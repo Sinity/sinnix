@@ -5,7 +5,7 @@
 # active wallpaper drives the whole system palette. This module owns the
 # corpus and scheduling around that pipeline:
 #
-#   - a curated corpus at `corpusRoot` (default /realm/media/wallpaper, off
+#   - a curated corpus at `corpusRoot` (default /realm/library/media/wallpaper, off
 #     the wear-limited root SSD) organized as sets/<mood>/{dark,light}, plus a
 #     flat pool/ for imported-but-unclassified images and generated/ for the
 #     opt-in ComfyUI lane (modules/services/wallpaper-generate.nix);
@@ -42,7 +42,7 @@ mkFeatureModule {
   extraOptions = {
     corpusRoot = lib.mkOption {
       type = lib.types.str;
-      default = "/realm/media/wallpaper";
+      default = "/realm/library/media/wallpaper";
       description = ''
         Canonical wallpaper corpus: sets/<mood>/{dark,light} (curated,
         time-of-day x theme-mode), pool/ (imported, not yet classified), and

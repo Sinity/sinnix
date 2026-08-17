@@ -6,7 +6,7 @@ set -euo pipefail
 
 export LC_ALL=C
 
-CORPUS="${SINNIX_WALLPAPER_CORPUS:-/realm/media/wallpaper}"
+CORPUS="${SINNIX_WALLPAPER_CORPUS:-/realm/library/media/wallpaper}"
 WALLPAPER_DIR="${HOME}/wallpaper"
 CONFIG_TOML="${XDG_CONFIG_HOME:-$HOME/.config}/noctalia/config.toml"
 NOCTALIA_BIN="${SINNIX_NOCTALIA_BIN:-noctalia}"
@@ -32,7 +32,7 @@ commands:
                              requires sinnix.services.wallpaper-generate.enable)
   status                    Corpus counts, active set, timers
 
-Corpus root defaults to /realm/media/wallpaper (override via
+Corpus root defaults to /realm/library/media/wallpaper (override via
 SINNIX_WALLPAPER_CORPUS). Live directory: ~/wallpaper (dark/light are
 symlinks retargeted by the time-of-day timer -- see
 modules/features/desktop/wallpaper.nix).

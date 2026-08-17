@@ -44,7 +44,7 @@ mkAiService {
     }:
     let
       user = config.sinnix.user.name;
-      ttsDir = "${config.sinnix.paths.mediaRoot}/model/tts";
+      ttsDir = "${config.sinnix.paths.modelsRoot}/tts";
     in
     {
       sinnix.ml.containerRuntime.enable = true;

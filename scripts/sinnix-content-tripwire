@@ -17,7 +17,7 @@ The beads export path (.beads/issues.jsonl) is the proven near-miss vector --
 a tracker checkpoint commit message leaking repo-boundary metadata -- so it is
 reported first and separately.
 
-Dictionaries live in the lake (/realm/media/corpora/content-lists/), not the
+Dictionaries live in the lake (/realm/library/datasets/corpora/content-lists/), not the
 repo; this script holds only the gate logic and the pointer to the lists.
 """
 import re
@@ -25,7 +25,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-CORPUS_ROOT = Path("/realm/media/corpora/content-lists")
+CORPUS_ROOT = Path("/realm/library/datasets/corpora/content-lists")
 BEADS_EXPORT_PATH = ".beads/issues.jsonl"
 
 

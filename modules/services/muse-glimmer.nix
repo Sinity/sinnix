@@ -47,7 +47,7 @@ mkServiceModule {
     }:
     let
       user = config.sinnix.user.name;
-      modelRoot = "${config.sinnix.paths.mediaRoot}/model";
+      modelRoot = "${config.sinnix.paths.modelsRoot}";
       args' = lib.escapeShellArgs [
         "${pkgs.llama-cpp-cuda}/bin/llama-server"
         "--model"

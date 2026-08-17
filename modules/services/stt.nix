@@ -55,7 +55,7 @@ mkAiService {
     }:
     let
       user = config.sinnix.user.name;
-      modelDir = "${config.sinnix.paths.mediaRoot}/model/sherpa";
+      modelDir = "${config.sinnix.paths.modelsRoot}/sherpa";
     in
     {
       systemd.tmpfiles.rules = [
