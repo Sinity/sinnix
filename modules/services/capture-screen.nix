@@ -18,6 +18,7 @@
 # silently dropping writes.
 {
   mkServiceModule,
+  mkCaptureLane,
   config,
   lib,
   helpers,
@@ -30,44 +31,37 @@ let
   screenDaemon = scriptPkgs.sinnix-capture-screen;
   capturesRoot = config.sinnix.paths.activityRoot;
   laneDir = "${capturesRoot}/screen-frames";
+  cfg = config.sinnix.services.capture-screen;
 in
-mkServiceModule {
+mkServiceModule (mkCaptureLane {
   name = "capture-screen";
   description = "Per-window screen frame capture: Hyprland events + idle-pause + 30s floor, p-hash dedup, WebP q80";
-  surface = {
-    unit = "sinnix-capture-screen.service";
-    manager = "user";
-    resourceClass = "capture-runtime";
-    observe = {
-      enable = true;
-      restartable = true;
-    };
-    captures = [
-      {
-        name = "screen-frames";
-        path = laneDir;
-        # Event-driven (Hyprland window/workspace changes + idle-pause),
-        # not pure cadence -- but the 30s periodic floor means a frame is
-        # attempted at least every 30s regardless, so staleness past a few
-        # multiples of that floor is a real signal something's wrong
-        # (daemon crashed, socket2 dropped) rather than legitimate idle.
-        eventDriven = true;
-        staleAfterSeconds = 300;
-        # A resolved focused window is this lane's whole product: without it
-        # a frame cannot be attributed to an application, a workspace, or a
-        # terminal session, and the daemon can keep reporting "active
-        # (running)" while every record it writes has these fields null.
-        # `monitor` is included because a frame with no output identity is
-        # equally unusable.
-        requiredPayloadFields = [
-          "window_class"
-          "workspace"
-          "geometry.width"
-          "monitor"
-        ];
-      }
-    ];
+  inherit username laneDir;
+  mode = "stream";
+  captureName = "screen-frames";
+  # Event-driven (Hyprland window/workspace changes + idle-pause), not pure
+  # cadence -- but the 30s periodic floor means a frame is attempted at
+  # least every 30s regardless, so staleness past a few multiples of that
+  # floor is a real signal something's wrong (daemon crashed, socket2
+  # dropped) rather than legitimate idle.
+  eventDriven = true;
+  staleAfterSeconds = 300;
+  # A resolved focused window is this lane's whole product: without it a
+  # frame cannot be attributed to an application, a workspace, or a
+  # terminal session, and the daemon can keep reporting "active (running)"
+  # while every record it writes has these fields null. `monitor` is
+  # included because a frame with no output identity is equally unusable.
+  requiredPayloadFields = [
+    "window_class"
+    "workspace"
+    "geometry.width"
+    "monitor"
+  ];
+  startLimit = {
+    intervalSec = 300;
+    burst = 5;
   };
+  umask = "0077";
   extraOptions = {
     periodicFloorSeconds = lib.mkOption {
       type = lib.types.int;
@@ -100,63 +94,31 @@ mkServiceModule {
       description = "Runaway-bug backstop on daily write volume (default 1GB), NOT a policy cap -- see module docstring.";
     };
   };
-  configFn =
-    { cfg, ... }:
-    {
-      systemd.tmpfiles.rules = [
-        "d ${laneDir} 0700 ${username} users -"
-      ];
-
-      home-manager.users.${username} = {
-        systemd.user.services.sinnix-capture-screen = {
-          Unit = {
-            Description = "Per-window screen frame capture (Hyprland events + idle-pause + 30s floor)";
-            After = [ "graphical-session.target" ];
-            PartOf = [ "graphical-session.target" ];
-            StartLimitIntervalSec = 300;
-            StartLimitBurst = 5;
-          };
-          Service = lib.sinnix.mkRuntimeServiceConfig {
-            runtimeInventory = config.sinnix.runtime.inventory;
-            unit = "sinnix-capture-screen.service";
-            overrides = {
-              Type = "simple";
-              ExecStart = lib.escapeShellArgs [
-                "${screenDaemon}/bin/sinnix-capture-screen"
-                "--capture-root"
-                capturesRoot
-                "--lane"
-                "screen-frames"
-                "--grim-bin"
-                "${pkgs.grim}/bin/grim"
-                "--hyprctl-bin"
-                "${pkgs.hyprland}/bin/hyprctl"
-                "--sinnix-capture-bin"
-                "${scriptPkgs.sinnix-capture}/bin/sinnix-capture"
-                "--periodic-floor-seconds"
-                (toString cfg.periodicFloorSeconds)
-                "--idle-pause-seconds"
-                (toString cfg.idlePauseSeconds)
-                "--dedup-hamming-threshold"
-                (toString cfg.dedupHammingThreshold)
-                "--max-width"
-                (toString cfg.maxWidth)
-                "--quality"
-                (toString cfg.quality)
-                "--daily-ceiling-bytes"
-                (toString cfg.dailyCeilingBytes)
-              ];
-              Restart = "on-failure";
-              RestartSec = "5s";
-              NoNewPrivileges = true;
-              ProtectSystem = "strict";
-              ProtectHome = "read-only";
-              ReadWritePaths = [ laneDir ];
-              UMask = "0077";
-            };
-          };
-          Install.WantedBy = [ "graphical-session.target" ];
-        };
-      };
-    };
-} args
+  tmpfilesRules = [ "d ${laneDir} 0700 ${username} users -" ];
+  execStart = lib.escapeShellArgs [
+    "${screenDaemon}/bin/sinnix-capture-screen"
+    "--capture-root"
+    capturesRoot
+    "--lane"
+    "screen-frames"
+    "--grim-bin"
+    "${pkgs.grim}/bin/grim"
+    "--hyprctl-bin"
+    "${pkgs.hyprland}/bin/hyprctl"
+    "--sinnix-capture-bin"
+    "${scriptPkgs.sinnix-capture}/bin/sinnix-capture"
+    "--periodic-floor-seconds"
+    (toString cfg.periodicFloorSeconds)
+    "--idle-pause-seconds"
+    (toString cfg.idlePauseSeconds)
+    "--dedup-hamming-threshold"
+    (toString cfg.dedupHammingThreshold)
+    "--max-width"
+    (toString cfg.maxWidth)
+    "--quality"
+    (toString cfg.quality)
+    "--daily-ceiling-bytes"
+    (toString cfg.dailyCeilingBytes)
+  ];
+  unitDescription = "Per-window screen frame capture (Hyprland events + idle-pause + 30s floor)";
+}) args
