@@ -75,6 +75,9 @@ in
         "d ${paths.exportsRoot} 0755 ${username} users -"
         "d ${paths.selfRoot} 0755 ${username} users -"
         "d ${paths.mediaRoot} 0755 ${username} users -"
+        "d ${paths.dataRoot}/records 0755 ${username} users -"
+        "d ${paths.dataRoot}/records/lastpass 0755 ${username} users -"
+        "d ${paths.dataRoot}/records/lastpass/raw 0755 ${username} users -"
         "d ${paths.capturesRoot}/activitywatch 0755 ${username} users -"
         "d ${paths.capturesRoot}/activitywatch/raw 0755 ${username} users -"
         "d ${paths.capturesRoot}/audio 0755 ${username} users -"
@@ -84,8 +87,6 @@ in
         "d ${paths.capturesRoot}/keylog 0700 ${username} users -"
         "d ${paths.capturesRoot}/screenshot 0755 ${username} users -"
         "d ${paths.capturesRoot}/screenshot/mpv 0755 ${username} users -"
-        "d ${paths.exportsRoot}/lastpass 0755 ${username} users -"
-        "d ${paths.exportsRoot}/lastpass/raw 0755 ${username} users -"
         "d /var/run/nscd 0755 nscd nscd -"
       ];
 
