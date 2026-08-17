@@ -12,6 +12,7 @@
 # `sinnix-capture write --lane notifications`.
 {
   mkServiceModule,
+  mkCaptureLane,
   config,
   lib,
   pkgs,
@@ -26,63 +27,27 @@ let
   lane = "notifications";
   laneDir = "${config.sinnix.paths.activityRoot}/${lane}";
 in
-mkServiceModule {
+mkServiceModule (mkCaptureLane {
   name = "capture-notifications";
   description = "Desktop notification capture: org.freedesktop.Notifications D-Bus monitor -> sinnix-capture";
-  surface = {
-    unit = "sinnix-capture-notifications.service";
-    manager = "user";
-    resourceClass = "capture-runtime";
-    observe = {
-      enable = true;
-      restartable = true;
-    };
-    captures = [
-      {
-        name = lane;
-        path = laneDir;
-        eventDriven = true;
-        # Event-driven with no numeric cadence, so staleAfterSeconds is the
-        # sentinel's only signal (see modules/runtime.nix). Notifications are
-        # legitimately bursty and can go silent for many hours (screen off,
-        # DND, a quiet afternoon), so anything tighter than a daily
-        # "did anything write today" budget false-positives routinely.
-        staleAfterSeconds = 86400;
-      }
-    ];
-  };
-  configFn =
-    { pkgs, ... }:
-    {
-      # laneDir lives under /realm, a persistent volume outside impermanence's
-      # reach, so no sinnix.persistence entry is needed -- tmpfiles alone
-      # provisions capture lanes.
-      systemd.tmpfiles.rules = [
-        "d ${laneDir} 0700 ${userName} users -"
-      ];
-
-      home-manager.users.${userName} = {
-        systemd.user.services.sinnix-capture-notifications = {
-          Unit = {
-            Description = "Forward desktop notifications (org.freedesktop.Notifications) to sinnix-capture";
-            After = [ "default.target" ];
-          };
-          Service = lib.sinnix.mkRuntimeServiceConfig {
-            runtimeInventory = config.sinnix.runtime.inventory;
-            unit = "sinnix-capture-notifications.service";
-            overrides = {
-              Type = "simple";
-              ExecStart = "${listener}/bin/sinnix-capture-notifications-listener --capture-bin ${captureCli}/bin/sinnix-capture --capture-root ${config.sinnix.paths.activityRoot} --lane ${lane}";
-              Restart = "on-failure";
-              RestartSec = "5s";
-              NoNewPrivileges = true;
-              ProtectSystem = "strict";
-              ProtectHome = "read-only";
-              ReadWritePaths = [ laneDir ];
-            };
-          };
-          Install.WantedBy = [ "default.target" ];
-        };
-      };
-    };
-} args
+  # laneDir lives under /realm, a persistent volume outside impermanence's
+  # reach, so no sinnix.persistence entry is needed -- tmpfiles alone
+  # provisions capture lanes.
+  username = userName;
+  inherit laneDir;
+  mode = "stream";
+  captureName = lane;
+  eventDriven = true;
+  # Event-driven with no numeric cadence, so staleAfterSeconds is the
+  # sentinel's only signal (see modules/runtime.nix). Notifications are
+  # legitimately bursty and can go silent for many hours (screen off, DND,
+  # a quiet afternoon), so anything tighter than a daily "did anything write
+  # today" budget false-positives routinely.
+  staleAfterSeconds = 86400;
+  tmpfilesRules = [ "d ${laneDir} 0700 ${userName} users -" ];
+  writablePaths = [ laneDir ];
+  target = "default.target";
+  partOf = false;
+  execStart = "${listener}/bin/sinnix-capture-notifications-listener --capture-bin ${captureCli}/bin/sinnix-capture --capture-root ${config.sinnix.paths.activityRoot} --lane ${lane}";
+  unitDescription = "Forward desktop notifications (org.freedesktop.Notifications) to sinnix-capture";
+}) args
