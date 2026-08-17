@@ -62,40 +62,35 @@ mkServiceModule {
       }
     ];
   };
-  configFn =
+  # The timer's own Description= is dropped: the factory's generated timer
+  # body carries no description field, unlike the hand-written one it
+  # replaces -- cosmetic only, doesn't affect scheduling.
+  job =
     { cfg, ... }:
     {
-      # Token + write-on-change hash state. 0700: the token file is a live
-      # Xiaomi account credential.
-      systemd.tmpfiles.rules = [
-        "d ${stateDir} 0700 sinity users -"
-        "d ${laneDir} 0755 sinity users -"
-      ];
-
-      systemd.user.services.sinnix-xiaomi-witness = {
-        description = "Xiaomi cloud health witness sync pass";
-        serviceConfig = {
-          Type = "oneshot";
-          ExecStart = lib.getExe scriptPkgs.sinnix-xiaomi-witness;
-          # The module declares this lane to the runtime inventory and creates
-          # its directory, so it must also be what the writer uses. It was
-          # not: both sides carried the same literal independently, and when
-          # the lane moved, the declaration followed and the writer did not.
-          Environment = [
-            "XIAOMI_WITNESS_LANE=${laneDir}"
-            "XIAOMI_WITNESS_STATE=${stateDir}"
-          ];
-        };
+      description = "Xiaomi cloud health witness sync pass";
+      manager = "user";
+      execStart = lib.getExe scriptPkgs.sinnix-xiaomi-witness;
+      # The module declares this lane to the runtime inventory and creates
+      # its directory, so it must also be what the writer uses. It was
+      # not: both sides carried the same literal independently, and when
+      # the lane moved, the declaration followed and the writer did not.
+      environment = {
+        XIAOMI_WITNESS_LANE = laneDir;
+        XIAOMI_WITNESS_STATE = stateDir;
       };
-
-      systemd.user.timers.sinnix-xiaomi-witness = {
-        description = "Periodic trigger for the Xiaomi cloud witness";
-        wantedBy = [ "timers.target" ];
-        timerConfig = {
-          OnBootSec = "3min";
-          OnUnitActiveSec = "${toString cfg.intervalSec}s";
-          AccuracySec = "5min";
-        };
+      timer = {
+        onBootSec = "3min";
+        intervalSec = cfg.intervalSec;
+        accuracySec = "5min";
       };
     };
+  configFn = _: {
+    # Token + write-on-change hash state. 0700: the token file is a live
+    # Xiaomi account credential.
+    systemd.tmpfiles.rules = [
+      "d ${stateDir} 0700 sinity users -"
+      "d ${laneDir} 0755 sinity users -"
+    ];
+  };
 } args
