@@ -11,6 +11,7 @@ import signal
 import sqlite3
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -20,11 +21,47 @@ class BackupCancelled(Exception):
 
 cancel_requested = False
 FULL_INTEGRITY_PAGE_LIMIT = 100_000
+# Every sidecar cleanup() ever creates ends in one of these compound
+# suffixes: raw_path (".tmp"), its journal/WAL siblings (".tmp-journal",
+# ".tmp-wal"), and compressed_path (output suffix + ".tmp", e.g. ".zst.tmp",
+# which already ends in plain ".tmp").
+STALE_SIDECAR_SUFFIXES = (".tmp", ".tmp-journal", ".tmp-wal")
+# Grace window applied only when no completed backup exists yet to anchor
+# the threshold against (first-ever run in a directory) -- guards against
+# sweeping a concurrently in-flight run's just-created tmp file.
+STALE_SIDECAR_GRACE_SECONDS = 3600
 
 
 def request_cancel(_signum: int, _frame: object) -> None:
     global cancel_requested
     cancel_requested = True
+
+
+def sweep_stale_sidecars(output_path: Path) -> None:
+    """Remove .tmp/.tmp-journal/.tmp-wal debris left by a run that was
+    killed (OOM, reboot, SIGKILL) before its own `finally: cleanup()` could
+    run. Each run's raw_path embeds a caller-chosen unique name (typically a
+    timestamp), so a later run's own per-run cleanup() -- scoped to its own
+    raw_path -- never revisits an earlier run's leftovers. This directory-wide
+    sweep is what actually reclaims them, bounded to files older than the
+    newest completed backup so it never touches a run genuinely in flight."""
+    parent = output_path.parent
+    if not parent.is_dir():
+        return
+    completed = [p for p in parent.glob(f"*{output_path.suffix}") if p.is_file()]
+    threshold = max(
+        (p.stat().st_mtime for p in completed),
+        default=time.time() - STALE_SIDECAR_GRACE_SECONDS,
+    )
+    for path in parent.iterdir():
+        if not path.is_file() or not path.name.endswith(STALE_SIDECAR_SUFFIXES):
+            continue
+        try:
+            if path.stat().st_mtime >= threshold:
+                continue
+            path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def backup_database(source_path: Path, output_path: Path) -> None:
@@ -39,8 +76,9 @@ def backup_database(source_path: Path, output_path: Path) -> None:
             except FileNotFoundError:
                 pass
 
-    cleanup()
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    sweep_stale_sidecars(output_path)
+    cleanup()
     source: sqlite3.Connection | None = None
     target: sqlite3.Connection | None = None
     try:
