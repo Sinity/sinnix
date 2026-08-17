@@ -357,12 +357,15 @@ let
     # measured: borg stops recursing into an excluded directory, so a `+`
     # pattern for the subtree never gets the chance to match, and the archive
     # ends at `media` with nothing beneath it.
-    "media/Steam/steamapps"
-    "media/model"
-    "media/stashbox/models"
-    "media/stashbox/generated"
-    "media/stashbox/analysis-cache"
-    "media/stashbox/gpu-venv"
+    # media/model and the four media/stashbox/* caches used to be listed here
+    # too. They are dropped, not repointed: each now carries a CACHEDIR.TAG
+    # (commit 2dfa8ae6), and --exclude-caches below already excludes them by
+    # that property regardless of where they live -- which is the whole
+    # point of a property-based marker surviving the media/ -> library/media/
+    # move for free. Steam has no such marker (games do not self-tag as
+    # caches), so it is the one entry still named by path, repointed to its
+    # new location.
+    "library/media/Steam/steamapps"
     # Top-level regenerable-cache root (sinex cargo/dev caches via the
     # /var/cache/sinex bind, nix-build) — pure churn, never backup material.
     "cache"

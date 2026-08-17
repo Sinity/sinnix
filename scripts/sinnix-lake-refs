@@ -50,11 +50,14 @@ REPOS = {
     "polylogue": Path("/realm/project/polylogue"),
 }
 
-# Only these three lake roots: they are what Phase C/D of the estate
-# reorganisation actually moves. A broader /realm/... pattern would also
-# match state/, worktrees/, cache/ -- none of which are being reorganised,
-# and matching them would bury the signal in noise nobody asked for.
-PATH_RE = re.compile(r"/realm/(?:data|media|inbox)/[A-Za-z0-9_./+-]*[A-Za-z0-9_/+-]")
+# These four lake roots: what the estate reorganisation actually moves.
+# media/ stays watched even after the library/ recut lands, so a reference
+# that was never updated off the old root shows up as broken rather than
+# silently falling outside the tool's view. A broader /realm/... pattern
+# would also match state/, worktrees/, cache/ -- none of which are being
+# reorganised, and matching them would bury the signal in noise nobody asked
+# for.
+PATH_RE = re.compile(r"/realm/(?:data|media|inbox|library)/[A-Za-z0-9_./+-]*[A-Za-z0-9_/+-]")
 
 COSMETIC_EXTS = {".md"}
 COSMETIC_PREFIXES = ("#", "//", "*", '"""', "'''")

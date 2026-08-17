@@ -67,7 +67,9 @@ EXCLUDE_PREFIXES = (
     # search over the polluted index reported 821 hits where 8 were real.
     "/realm/.btrfs/",
     "/realm/data/captures/",
-    "/realm/media/",
+    "/realm/library/media/",
+    "/realm/library/models/",
+    "/realm/library/datasets/",
     "/realm/cache/",
     "/realm/tmp/shell/",
     "/realm/worktrees/",

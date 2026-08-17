@@ -54,15 +54,22 @@ in
             };
             mediaRoot = mkOption {
               type = types.str;
-              default = "${config.realmRoot}/media";
+              default = "${config.realmRoot}/library/media";
+              description = "Consumption media: Steam, books, videos, substack, wallpaper, edu, stashbox. Re-acquirable, ownership='others' -- was /realm/media until the library/ recut (2026-08-17); everything under it is loss-tolerant the same way libraryRoot as a whole is.";
+            };
+            datasetsRoot = mkOption {
+              type = types.str;
+              default = "${config.realmRoot}/library/datasets";
+              description = "Third-party reference corpora acquired for compute (reddit dumps, hf-datasets): re-acquirable, ownership='others'.";
+            };
+            modelsRoot = mkOption {
+              type = types.str;
+              default = "${config.realmRoot}/library/models";
+              description = "Model weights (ollama, gguf, embeddings, sherpa, tts, whisper, ...): re-acquirable, ownership='others'. Was mediaRoot/model until the library/ recut split it out with its own root, since it was previously a subdirectory of media rather than a peer.";
             };
             stateRoot = mkOption {
               type = types.str;
               default = "${config.realmRoot}/state";
-            };
-            stagingRoot = mkOption {
-              type = types.str;
-              default = "${config.realmRoot}/staging";
             };
             outerRealm = mkOption {
               type = types.str;

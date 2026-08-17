@@ -83,7 +83,7 @@ mkServiceModule {
       ...
     }:
     let
-      modelRoot = "${config.sinnix.paths.mediaRoot}/model";
+      modelRoot = "${config.sinnix.paths.modelsRoot}";
     in
     {
       services.llama-cpp = {

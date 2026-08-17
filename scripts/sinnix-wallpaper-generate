@@ -204,7 +204,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--count", type=int, default=1, help="images per family (default 1)")
     parser.add_argument("--families", default=",".join(FAMILIES), help="comma-separated family names")
-    parser.add_argument("--corpus", default=os.environ.get("SINNIX_WALLPAPER_CORPUS", "/realm/media/wallpaper"))
+    parser.add_argument("--corpus", default=os.environ.get("SINNIX_WALLPAPER_CORPUS", "/realm/library/media/wallpaper"))
     parser.add_argument("--width", type=int, default=1920)
     parser.add_argument("--height", type=int, default=1080)
     parser.add_argument("--checkpoint", default=None, help="override the ComfyUI checkpoint filename")

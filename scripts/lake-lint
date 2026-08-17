@@ -42,7 +42,7 @@ check_root() {
 # and db/ were dissolved into state/{db-dumps,cursors} and removed outright
 # respectively -- their absence here is deliberate, not an omission.
 check_root /realm \
-  project data media state backup swap cache worktrees tmp inbox \
+  project data library state backup swap cache worktrees tmp inbox \
   INVENTORY.md .btrfs .Trash-1000
 
 check_root /outer-realm \

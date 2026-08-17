@@ -9,7 +9,7 @@ export LC_ALL=C
 # Config: modules/features/desktop/wallpaper.nix seeds these into the
 # systemd unit and the login session; fall back to the module defaults so
 # this also runs sanely when invoked by hand.
-CORPUS="${SINNIX_WALLPAPER_CORPUS:-/realm/media/wallpaper}"
+CORPUS="${SINNIX_WALLPAPER_CORPUS:-/realm/library/media/wallpaper}"
 WALLPAPER_DIR="${HOME}/wallpaper"
 # Last-resort source for the dark/light links while the curated corpus is
 # still being filled. The flat legacy stash is the one directory guaranteed
