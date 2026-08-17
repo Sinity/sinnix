@@ -134,12 +134,20 @@ class ChunkUploader(context: Context) {
      * of those must leave the local copy in place.
      */
     private fun upload(name: String, body: ByteArray): Boolean {
-        val base = Prefs.hubBaseUrl(ctx).trimEnd('/')
-        val url = "$base$ROUTE?lane=ambient&name=$name"
+        val digest = sha256(body)
+        // Each candidate base in turn: the MagicDNS name resolves on this
+        // phone about as reliably as it did for the receiver, which is to say
+        // it stopped one day and nothing said so. Re-uploading to the second
+        // base after the first failed is free, because prime answers a chunk
+        // it already holds with ok rather than a conflict.
+        return Prefs.hubCandidates(ctx).any { base -> uploadTo("$base$ROUTE?lane=ambient&name=$name", digest, body) }
+    }
+
+    private fun uploadTo(url: String, digest: String, body: ByteArray): Boolean {
         val request =
             Request.Builder()
                 .url(url)
-                .header("X-Sinnix-Sha256", sha256(body))
+                .header("X-Sinnix-Sha256", digest)
                 .post(body.toRequestBody(OCTETS))
                 .build()
         return try {
