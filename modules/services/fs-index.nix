@@ -62,19 +62,13 @@ mkServiceModule {
         persistent = true;
         randomizedDelaySec = "1h";
       };
+      unit = {
+        # This walks multiple TB and would otherwise hold a `switch` in
+        # activation for its entire run. The next scheduled firing picks up
+        # new code.
+        restartIfChanged = false;
+      };
     };
-  # restartIfChanged=false is not expressible through the job argument
-  # (mkServiceModule's mkJobConfig only emits description/serviceConfig/
-  # path/environment on the service), so it's declared here as an
-  # independent definition on the same unit -- the module system merges
-  # disjoint fields of the same systemd.services.<name> submodule across
-  # separate config blocks. Same reasoning as the url-ledger and borg-drain
-  # oneshots: this walks multiple TB and would otherwise hold a `switch` in
-  # activation for its entire run. The next scheduled firing picks up new
-  # code.
-  configFn = _: {
-    systemd.services.sinnix-fs-index.restartIfChanged = false;
-  };
   extraOptions = {
     schedule = args.lib.mkOption {
       type = args.lib.types.str;

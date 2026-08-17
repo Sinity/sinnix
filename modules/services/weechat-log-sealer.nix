@@ -6,9 +6,8 @@
 # ``${capturesRoot}/comms/irc/scripts/seal_logs.py`` so the user can
 # edit it inplace; this module just schedules it.
 #
-# See ``/realm/data/captures/comms/irc/scripts/seal_logs.py`` for the
-# 2-day buffer rationale (avoids racing weechat fds across midnight on
-# dormant channels).
+# See the seal_logs.py header for the 2-day buffer rationale (avoids
+# racing weechat fds across midnight on dormant channels).
 {
   mkServiceModule,
   lib,
@@ -29,78 +28,59 @@ mkServiceModule {
       '';
     };
   };
-  surface = {
-    unit = "weechat-log-sealer.timer";
-    manager = "user";
-    kind = "timer";
-    resourceClass = "background-maintenance";
-    observe = {
-      enable = true;
-      restartable = false;
-    };
-  };
-  configFn =
+  surface =
+    { config, ... }:
     {
-      cfg,
-      config,
-      pkgs,
-      ...
-    }:
-    let
-      userName = config.sinnix.user.name;
-      ircRoot = "${config.sinnix.paths.commsRoot}/irc";
-      scriptPath = "${ircRoot}/scripts/seal_logs.py";
-    in
-    {
+      unit = "weechat-log-sealer.timer";
+      manager = "user";
+      kind = "timer";
+      resourceClass = "background-maintenance";
+      observe = {
+        enable = true;
+        restartable = false;
+      };
       # The IRC capture lane is written continuously by weechat, outside this
-      # repo's process management; registered here because ircRoot is only in
-      # scope inside configFn. List-typed options merge across definitions, so
-      # this appends to the timer's captures list rather than replacing it.
-      sinnix.runtime.surfaces.weechat-log-sealer.captures = [
+      # repo's process management; it rides the timer's surface because that
+      # is the unit this module owns.
+      captures = [
         {
           name = "comms-irc";
-          path = ircRoot;
+          path = "${config.sinnix.paths.commsRoot}/irc";
           eventDriven = true;
           staleAfterSeconds = 3600;
         }
       ];
-
-      home-manager.users.${userName} = {
-        systemd.user.services.weechat-log-sealer = {
-          Unit = {
-            Description = "Hash-seal weechat IRC logs older than 2 days";
-            # The captures dir lives on /realm; don't bother running until
-            # it's mounted. The user manager surfaces system mounts via the
-            # ``mounts.target`` user target.
-            After = [ "default.target" ];
-          };
-          Service = lib.sinnix.mkRuntimeServiceConfig {
-            runtimeInventory = config.sinnix.runtime.inventory;
-            # The registered surface unit is the *timer*, so a `unit =` lookup
-            # would throw -- resolve the class's serviceConfig directly.
-            resourceClass = "background-maintenance";
-            overrides = {
-              Type = "oneshot";
-              ExecStart = "${pkgs.python3}/bin/python3 ${scriptPath} ${ircRoot}";
-              # Bound runtime so a stuck mount doesn't pin a stale unit.
-              TimeoutStartSec = "10min";
-            };
-          };
-        };
-
-        systemd.user.timers.weechat-log-sealer = {
-          Unit.Description = "Daily seal of weechat IRC logs";
-          Timer = {
-            OnCalendar = cfg.onCalendar;
-            # Catch up if the machine was off when the run was due.
-            Persistent = true;
-            Unit = "weechat-log-sealer.service";
-            # Spread across the first 5 minutes after the calendar trigger
-            # so two same-host timers don't pile on simultaneously.
-            RandomizedDelaySec = "5min";
-          };
-          Install.WantedBy = [ "timers.target" ];
-        };
+    };
+  job =
+    { cfg, config, ... }:
+    let
+      ircRoot = "${config.sinnix.paths.commsRoot}/irc";
+    in
+    {
+      # Unit predates the sinnix- prefix; keep its name.
+      unitName = "weechat-log-sealer";
+      manager = "user";
+      description = "Hash-seal weechat IRC logs older than 2 days";
+      # The registered surface unit is the *timer*, so the service resolves
+      # its class directly rather than by unit lookup.
+      resourceClass = "background-maintenance";
+      execStart = "${pkgs.python3}/bin/python3 ${ircRoot}/scripts/seal_logs.py ${ircRoot}";
+      serviceConfig = {
+        # Bound runtime so a stuck mount doesn't pin a stale unit.
+        TimeoutStartSec = "10min";
+      };
+      unit = {
+        # The captures dir lives on /realm; don't bother running until it's
+        # mounted. The user manager surfaces system mounts via default.target.
+        after = [ "default.target" ];
+      };
+      timer = {
+        description = "Daily seal of weechat IRC logs";
+        onCalendar = cfg.onCalendar;
+        # Catch up if the machine was off when the run was due; spread across
+        # five minutes so same-host timers don't pile on simultaneously.
+        persistent = true;
+        randomizedDelaySec = "5min";
       };
     };
 } args

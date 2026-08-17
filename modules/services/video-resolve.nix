@@ -45,25 +45,15 @@ mkServiceModule {
       persistent = true;
       randomizedDelaySec = "3h";
     };
-  };
-  # None of these are expressible through the job argument, so they're
-  # declared here as independent definitions on the same unit -- the module
-  # system merges disjoint fields of the same systemd.services.<name>
-  # submodule across separate config blocks.
-  configFn = _: {
-    systemd.services.sinnix-video-resolve = {
+    unit = {
       # Weekly oneshot that shells out to yt-dlp for as long as the queue
-      # takes; a switch has no business restarting it or waiting on it. It
-      # was also queued behind sinnix-url-ledger in the same blocked
-      # activation, since it is ordered after it.
+      # takes; a switch has no business restarting it or waiting on it.
       restartIfChanged = false;
       # Ordering only, and only within a shared transaction -- which two
-      # independent timers never have, so this alone never sequenced
-      # anything. The real dependency is the artifact: the script exits 1
-      # when the ledger parquet is absent, so a run that lands before the
-      # ledger has ever built reports a failure for a precondition it does
-      # not own. The condition below turns that into a skip, which is what
-      # "my input does not exist yet" actually is.
+      # independent timers never have. The real dependency is the artifact:
+      # the script exits 1 when the ledger parquet is absent, so the
+      # condition turns "my input does not exist yet" into a skip instead
+      # of a reported failure.
       after = [ "sinnix-url-ledger.service" ];
       unitConfig.ConditionPathExists = [ ledgerParquet ];
     };

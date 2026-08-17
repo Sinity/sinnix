@@ -63,45 +63,13 @@ mkServiceModule {
         persistent = true;
         randomizedDelaySec = "2h";
       };
+      unit = {
+        # A switch must not restart or wait on this: a daily oneshot with a
+        # two-hour budget held an activation for 2h15m on 2026-08-17, with
+        # video-resolve queued behind it. The next timer firing picks up new
+        # code, which is all a periodic job needs. Same reasoning as the
+        # borg drain jobs in modules/backup.nix.
+        restartIfChanged = false;
+      };
     };
-  # restartIfChanged=false is not expressible through the job argument, so
-  # it's declared here as an independent definition on the same unit -- the
-  # module system merges disjoint fields of the same systemd.services.<name>
-  # submodule across separate config blocks. A switch must not restart this,
-  # and must not wait for it. It is a daily oneshot with a two-hour budget,
-  # so a plain restart makes every `switch` block for up to 2h15m in
-  # activation while the ledger grinds through its provider queue --
-  # observed 2026-08-17, holding the transaction with video-resolve queued
-  # behind it. The next timer firing picks up the new code, which is all a
-  # periodic job needs. Same reasoning as the borg drain jobs in
-  # modules/backup.nix.
-  configFn = _: {
-    systemd.services.sinnix-url-ledger.restartIfChanged = false;
-  };
-  extraOptions = {
-    maxRequestsPerRun = args.lib.mkOption {
-      type = args.lib.types.int;
-      default = 200000;
-      description = ''
-        Backstop bound on provider queries per run. maxSecondsPerRun is the
-        real control; this only catches a pathologically fast failure loop.
-
-        The old pairing of 2000 queries with a weekly timer could not finish:
-        540k history URLs across two live providers is ~1.1M queries, which at
-        2000 a week is measured in centuries. Resolve is resumable, so the
-        backfill converges only if a run's budget is a meaningful fraction of
-        the work.
-      '';
-    };
-    maxSecondsPerRun = args.lib.mkOption {
-      type = args.lib.types.int;
-      default = 7200;
-      description = "Wall-clock budget per run. Bounds what actually matters -- that a run finishes inside its own interval -- since query cost varies by two orders of magnitude.";
-    };
-    windowDays = args.lib.mkOption {
-      type = args.lib.types.int;
-      default = 30;
-      description = "Coverage window in days for the nearest-snapshot-to-visit join.";
-    };
-  };
 } args
