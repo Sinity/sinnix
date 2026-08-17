@@ -23,6 +23,7 @@
 # sensitivity is handled at consumption time. Do not add redaction here.
 {
   mkServiceModule,
+  mkCaptureLane,
   lib,
   pkgs,
   config,
@@ -165,77 +166,37 @@ let
     '';
   };
 in
-mkServiceModule {
+mkServiceModule (mkCaptureLane {
   name = "capture-clipboard";
   description = "Continuous Wayland clipboard capture lane (wl-paste --watch -> sinnix-capture)";
-  surface = {
-    unit = "sinnix-capture-clipboard.service";
-    manager = "user";
-    resourceClass = "capture-runtime";
-    captures = [
-      {
-        name = "clipboard";
-        path = laneDir;
-        eventDriven = true;
-        # Genuinely bursty/idle-tolerant: an operator can go a full week
-        # without copying anything new (travel, laptop-only stretches).
-        staleAfterSeconds = 604800;
-      }
-    ];
-    observe = {
-      enable = true;
-      restartable = true;
-    };
-  };
-  configFn =
-    { ... }:
-    {
-      systemd.tmpfiles.rules = [
-        "d ${laneDir} 0700 ${username} users -"
-        "d ${blobDir} 0700 ${username} users -"
-        "d ${stateDir} 0700 ${username} users -"
-      ];
-
-      home-manager.users.${username} = {
-        systemd.user.services.sinnix-capture-clipboard = {
-          Unit = {
-            Description = "Wayland clipboard capture lane";
-            After = [ "graphical-session.target" ];
-            PartOf = [ "graphical-session.target" ];
-          };
-          Service = (
-            lib.sinnix.mkRuntimeServiceConfig {
-              runtimeInventory = config.sinnix.runtime.inventory;
-              unit = "sinnix-capture-clipboard.service";
-              overrides = {
-                Type = "simple";
-                ExecStart = "${pkgs.wl-clipboard}/bin/wl-paste --watch ${clipboardWatch}/bin/sinnix-capture-clipboard-watch";
-                Restart = "on-failure";
-                RestartSec = "5s";
-                Environment = [
-                  "SINNIX_CAPTURE_ROOT=${config.sinnix.paths.activityRoot}"
-                  "SINNIX_CAPTURE_CLIPBOARD_STATE_DIR=${stateDir}"
-                  # The session exports TMPDIR=/realm/tmp/shell, which is
-                  # read-only inside this unit's ProtectSystem=strict
-                  # namespace, so every mktemp fails and the lane silently
-                  # captures nothing. Pin tmp inside the sandbox instead.
-                  "TMPDIR=/tmp"
-                ];
-                PrivateTmp = true;
-                NoNewPrivileges = true;
-                ProtectSystem = "strict";
-                ProtectHome = "read-only";
-                ReadWritePaths = [
-                  laneDir
-                  blobDir
-                  stateDir
-                ];
-                UMask = "0077";
-              };
-            }
-          );
-          Install.WantedBy = [ "graphical-session.target" ];
-        };
-      };
-    };
-} args
+  inherit username laneDir;
+  mode = "stream";
+  captureName = "clipboard";
+  eventDriven = true;
+  # Genuinely bursty/idle-tolerant: an operator can go a full week without
+  # copying anything new (travel, laptop-only stretches).
+  staleAfterSeconds = 604800;
+  tmpfilesRules = [
+    "d ${laneDir} 0700 ${username} users -"
+    "d ${blobDir} 0700 ${username} users -"
+    "d ${stateDir} 0700 ${username} users -"
+  ];
+  writablePaths = [
+    laneDir
+    blobDir
+    stateDir
+  ];
+  execStart = "${pkgs.wl-clipboard}/bin/wl-paste --watch ${clipboardWatch}/bin/sinnix-capture-clipboard-watch";
+  environment = [
+    "SINNIX_CAPTURE_ROOT=${config.sinnix.paths.activityRoot}"
+    "SINNIX_CAPTURE_CLIPBOARD_STATE_DIR=${stateDir}"
+    # The session exports TMPDIR=/realm/tmp/shell, which is read-only
+    # inside this unit's ProtectSystem=strict namespace, so every mktemp
+    # fails and the lane silently captures nothing. Pin tmp inside the
+    # sandbox instead.
+    "TMPDIR=/tmp"
+  ];
+  privateTmp = true;
+  umask = "0077";
+  unitDescription = "Wayland clipboard capture lane";
+}) args
