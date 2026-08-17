@@ -47,6 +47,11 @@
       };
     };
     ops-reducer.enable = true;
+    # Band data from Xiaomi's cloud, beside the phone's Health Connect lane.
+    # A capture lane, so it is on and stays on (the login token lives in
+    # /realm/state/xiaomi-witness; re-login is agent-drivable through the
+    # operator's browser session).
+    xiaomi-witness.enable = true;
     transmission = {
       enable = true;
       autoStart = true;

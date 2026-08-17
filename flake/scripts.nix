@@ -285,6 +285,10 @@ let
 
     sinnix-capture-screen = pkgs.callPackage ../pkgs/capture-screen/pkg.nix { };
 
+    # Xiaomi cloud health witness: pinned GPL-3 upstream client + our
+    # orchestration entry, run under Bun (pkgs/sinnix-xiaomi-witness).
+    sinnix-xiaomi-witness = pkgs.callPackage ../pkgs/sinnix-xiaomi-witness/pkg.nix { };
+
     # The Android capture app. `sinnix-phone-app` is the unsigned APK;
     # `sinnix-phone-app-install` signs it with the host-local keystore and
     # sideloads it over adb.
