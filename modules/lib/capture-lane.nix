@@ -13,7 +13,9 @@
 # supply only what actually varies (the writer's ExecStart, cadence/staleness
 # budgets, and any lane-specific overrides) and get back the `{ name;
 # description; extraOptions; surface; configFn; }` attrset mkServiceModule
-# expects -- call it as `mkServiceModule (mkCaptureLane { ... }) args`.
+# expects (poll mode also returns `job`, so mkServiceModule renders its
+# unit+timer itself) -- call it as `mkServiceModule (mkCaptureLane { ... })
+# args`.
 #
 # Deliberately NOT covered here (see modules/services/*.nix for why each
 # stays hand-rolled): capture-audio (three cooperating units sharing one
@@ -162,10 +164,6 @@ let
     // lib.optionalAttrs (umask != null) { UMask = umask; }
     // lib.optionalAttrs privateTmp { PrivateTmp = true; };
 
-  pollOverrides = baseOverrides // {
-    Type = "oneshot";
-  };
-
   streamOverrides =
     baseOverrides
     // {
@@ -174,6 +172,48 @@ let
       RestartSec = restart.delaySec;
     }
     // serviceOverrides;
+
+  # poll mode hands its unit+timer generation to mkServiceModule's `job`
+  # mechanism (see modules/lib/features.nix's mkJobConfig) instead of
+  # hand-writing home-manager systemd.user.{services,timers} -- this factory
+  # supplies only what's capture-specific (ExecStart, hardening, tmpfiles,
+  # captures[]/surface); job owns the OnFailure wiring, resource-class
+  # resolution, and unit shape. That lands the poll lane at NixOS-level
+  # `systemd.user.*` (/etc/systemd/user) rather than home-manager's per-user
+  # tree; modules/runtime.nix's failure-notify drop-in is keyed on
+  # `surface.unit`/`manager`/`observe.enable`, not on which of those two
+  # namespaces declared the unit, so observability is unaffected.
+  #
+  # job.timer has no OnStartupSec (only OnBootSec) and no raw-duration
+  # passthrough for OnUnitActiveSec (only a computed-from-seconds
+  # `intervalSec`) -- capture-kitty-scrollback needs both (a timer that
+  # fires relative to the user session's systemd startup, not machine boot,
+  # on a raw "Nmin" cadence). Rather than extend the factory for one caller,
+  # that lane's service still goes through job (byte-identical hardening and
+  # resource-class resolution to its siblings) while its timer stays a
+  # direct `systemd.user.timers` passthrough here, reusing the same unit
+  # name job already generates for the service half.
+  pollTimerViaJob = mode == "poll" && (timer.onStartupSec or null) == null;
+
+  jobServiceConfig = builtins.removeAttrs baseOverrides [ "ExecStart" ] // serviceOverrides;
+
+  pollJob = lib.optionalAttrs (mode == "poll") (
+    {
+      inherit execStart manager resourceClass;
+      description = unitDescription;
+      serviceConfig = jobServiceConfig;
+    }
+    // lib.optionalAttrs (pollAfter != [ ]) { unit = { after = pollAfter; }; }
+    // lib.optionalAttrs pollTimerViaJob {
+      timer = {
+        intervalSec = timer.intervalSec;
+        onBootSec = timer.onBootSec or "2min";
+        accuracySec = timer.accuracySec or null;
+        persistent = timer.persistent or false;
+        description = timerDescription;
+      };
+    }
+  );
 
   configFn =
     moduleArgs:
@@ -187,43 +227,21 @@ let
       { systemd.tmpfiles.rules = resolvedTmpfilesRules; }
       (
         if mode == "poll" then
-          {
-            home-manager.users.${username} = {
-              systemd.user.services.${unitName} = {
-                Unit = {
-                  Description = unitDescription;
-                } // lib.optionalAttrs (pollAfter != [ ]) { After = pollAfter; };
-                Service = lib.sinnix.mkRuntimeServiceConfig {
-                  runtimeInventory = config.sinnix.runtime.inventory;
-                  inherit unit;
-                  overrides = pollOverrides // serviceOverrides;
-                };
-              };
-              systemd.user.timers.${unitName} = {
-                Unit.Description = timerDescription;
-                Timer =
-                  let
-                    onStartupSec = timer.onStartupSec or null;
-                  in
-                  {
-                    OnUnitActiveSec =
-                      if (timer.onUnitActiveSec or null) != null then
-                        timer.onUnitActiveSec
-                      else
-                        "${toString timer.intervalSec}s";
-                  }
-                  // (
-                    if onStartupSec != null then
-                      { OnStartupSec = onStartupSec; }
-                    else
-                      { OnBootSec = timer.onBootSec or "2min"; }
-                  )
-                  // lib.optionalAttrs ((timer.accuracySec or null) != null) {
-                    AccuracySec = timer.accuracySec;
-                  }
-                  // lib.optionalAttrs (timer.persistent or false) { Persistent = true; };
-                Install.WantedBy = [ "timers.target" ];
-              };
+          lib.optionalAttrs (!pollTimerViaJob) {
+            # capture-kitty-scrollback's timer passthrough -- see pollJob
+            # comment above. Matches the shape mkJobConfig itself would
+            # render, just with the two knobs it can't express.
+            systemd.user.timers.${unitName} = {
+              description = timerDescription;
+              wantedBy = [ "timers.target" ];
+              timerConfig = {
+                OnUnitActiveSec = timer.onUnitActiveSec;
+                OnStartupSec = timer.onStartupSec;
+              }
+              // lib.optionalAttrs ((timer.accuracySec or null) != null) {
+                AccuracySec = timer.accuracySec;
+              }
+              // lib.optionalAttrs (timer.persistent or false) { Persistent = true; };
             };
           }
         else
@@ -256,3 +274,4 @@ in
 {
   inherit name description extraOptions surface configFn;
 }
+// lib.optionalAttrs (mode == "poll") { job = pollJob; }
