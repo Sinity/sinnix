@@ -28,6 +28,8 @@ object Prefs {
     private const val KEY_HR_LIVE = "hr_live_lane_enabled"
     private const val KEY_USAGE = "usage_lane_enabled"
     private const val KEY_STREAM_EVENTS = "stream_events_enabled"
+    private const val KEY_UPLOAD_CHUNKS = "upload_chunks_enabled"
+    private const val KEY_UPLOAD_METERED = "upload_chunks_metered"
     private const val KEY_WAKE_HOUR = "wake_hour"
     private const val KEY_WAKE_MINUTE = "wake_minute"
     private const val KEY_WAKE_ARMED = "wake_armed"
@@ -167,6 +169,34 @@ object Prefs {
 
     fun setStreamEvents(ctx: Context, value: Boolean) =
         prefs(ctx).edit().putBoolean(KEY_STREAM_EVENTS, value).apply()
+
+    /**
+     * The phone ships its own finalized ambient chunks to prime.
+     *
+     * On, like every lane here: an archive that only moves when something
+     * else remembers to come and take it is an archive with holes in it, and
+     * this one had them -- the drain's ssh transport dies with Termux, which
+     * does not survive a reboot.
+     */
+    fun uploadChunks(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_UPLOAD_CHUNKS, true)
+
+    fun setUploadChunks(ctx: Context, value: Boolean) =
+        prefs(ctx).edit().putBoolean(KEY_UPLOAD_CHUNKS, value).apply()
+
+    /**
+     * Whether that upload may also run on a metered network.
+     *
+     * The one default-OFF switch in this file, and not for privacy: continuous
+     * audio is ~43 MB an hour, and a phone that spends a day on cellular would
+     * spend a data plan on files that are in no hurry. Chunks wait on the
+     * device until wifi; they do not expire and nothing downstream needs them
+     * within the hour. The live lanes (speech, events) push regardless -- they
+     * are kilobytes and their value is their latency.
+     */
+    fun uploadOnMetered(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_UPLOAD_METERED, false)
+
+    fun setUploadOnMetered(ctx: Context, value: Boolean) =
+        prefs(ctx).edit().putBoolean(KEY_UPLOAD_METERED, value).apply()
 
     /** App/screen/keyguard history from the system's usage ledger. */
     fun usageLane(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_USAGE, true)

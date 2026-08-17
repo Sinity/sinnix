@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -43,6 +44,7 @@ import socketserver
 import subprocess
 import sys
 import threading
+import urllib.parse
 import uuid
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
@@ -67,6 +69,26 @@ DECKS_DIR = INBOX_DIR / "decks"
 TOKENS_DIR = STATE_DIR / "tokens"
 
 MAX_BODY = 8 << 20  # a shared image can be large; an intent never is
+
+# Bulk capture files the phone uploads itself, rather than waiting to be
+# pulled. A 5-minute ambient chunk is ~3.6 MB; the cap is generous enough for
+# a long orphan recovered after a crash and small enough that a confused
+# client cannot fill the disk in one request.
+MAX_UPLOAD = 128 << 20
+
+# Where an upload may land, keyed by the lane the phone names. An allowlist
+# rather than a path parameter: the phone chooses the file NAME, and a client
+# that could also choose the directory could write anywhere this service can.
+UPLOAD_LANES = {
+    "ambient": LAKE_ROOT / "ambient",
+    "camera": LAKE_ROOT / "camera",
+}
+
+# Chunk names are minted by the app from a UTC stamp
+# (`ambient-20260817T103201Z.m4a`, `.orphan` when a crash truncated one).
+# Anchored, no separators, no dots-only: a name that does not match is a bug
+# on the phone, not a file to guess at.
+UPLOAD_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 TOKEN_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 
@@ -423,6 +445,78 @@ def land_shared(intent: dict) -> dict:
         return {"ok": False, "detail": str(exc)}
 
 
+# ------------------------------------------------------------------ uploads
+
+
+def store_upload(lane: str, name: str, body: bytes, declared_sha: str | None) -> tuple[HTTPStatus, dict]:
+    """Land a capture file the phone pushed, or say precisely why not.
+
+    This is the phone's own half of the ambient archive: the app uploads a
+    chunk as soon as it is finalized and deletes its copy once this answers
+    ok, which is why the answer has to be trustworthy in both directions. A
+    false ok costs the only copy of that audio.
+
+    So the write is the same shape as every durable write in this estate --
+    into a sibling `.part`, fsynced, renamed -- and the hash is verified
+    BEFORE the rename rather than trusted. The adb transport this replaces
+    had to carry explicit truncated-transfer repair logic; a checksum the
+    sender computed over the file it still holds turns that whole class of
+    failure into one honest 422.
+
+    Re-uploading a chunk already here is a success, not a conflict. The phone
+    legitimately retries when an ok is lost on the way back, and a retry that
+    answered 409 would strand the file on the device forever.
+    """
+    directory = UPLOAD_LANES.get(lane)
+    if directory is None:
+        return HTTPStatus.NOT_FOUND, {"ok": False, "detail": f"no upload lane {lane!r}"}
+    if not UPLOAD_NAME_RE.match(name):
+        return HTTPStatus.BAD_REQUEST, {"ok": False, "detail": "unacceptable file name"}
+    if not body:
+        return HTTPStatus.BAD_REQUEST, {"ok": False, "detail": "empty body"}
+
+    digest = hashlib.sha256(body).hexdigest()
+    if declared_sha and declared_sha.lower() != digest:
+        return HTTPStatus.UNPROCESSABLE_ENTITY, {
+            "ok": False,
+            "detail": "sha256 mismatch; transfer was corrupted or truncated",
+            "expected": declared_sha.lower(),
+            "received": digest,
+            "bytes": len(body),
+        }
+
+    target = directory / name
+    if target.exists() and target.stat().st_size == len(body):
+        return HTTPStatus.OK, {
+            "ok": True,
+            "duplicate": True,
+            "bytes": len(body),
+            "sha256": digest,
+            "path": str(target),
+        }
+
+    part = directory / f"{name}.part"
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        with part.open("wb") as fh:
+            fh.write(body)
+            fh.flush()
+            os.fsync(fh.fileno())
+        part.replace(target)
+    except OSError as exc:
+        part.unlink(missing_ok=True)
+        return HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "detail": str(exc)}
+
+    return HTTPStatus.OK, {
+        "ok": True,
+        "duplicate": False,
+        "bytes": len(body),
+        "sha256": digest,
+        "path": str(target),
+        "at": now_iso(),
+    }
+
+
 # ---------------------------------------------------------------- file plane
 
 
@@ -526,9 +620,30 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._send(HTTPStatus.NOT_FOUND, {"ok": False, "detail": "no such route"})
 
+    def _query(self) -> dict[str, str]:
+        _, _, raw = self.path.partition("?")
+        return {k: v[0] for k, v in urllib.parse.parse_qs(raw).items() if v}
+
     def do_POST(self) -> None:  # noqa: N802
         route = self._route()
         length = int(self.headers.get("Content-Length") or 0)
+
+        # Uploads are raw bytes, so they branch before the JSON parse below --
+        # and before MAX_BODY, which sizes an intent, not an archive file.
+        if route == "/chunk":
+            if length > MAX_UPLOAD:
+                self._send(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"ok": False, "bytes": length})
+                return
+            query = self._query()
+            status, payload = store_upload(
+                query.get("lane", "ambient"),
+                query.get("name", ""),
+                self.rfile.read(length),
+                self.headers.get("X-Sinnix-Sha256"),
+            )
+            self._send(status, payload)
+            return
+
         if length > MAX_BODY:
             self._send(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"ok": False})
             return

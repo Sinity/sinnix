@@ -58,6 +58,7 @@ class AmbientService : Service() {
     private var heartRate: HeartRateLane? = null
     private var usage: UsageLane? = null
     private var eventStream: dev.sinnix.phone.estate.EventStreamLane? = null
+    private var chunkUploader: ChunkUploader? = null
     private var location: dev.sinnix.phone.ingress.LocationLane? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -86,6 +87,7 @@ class AmbientService : Service() {
         heartRate = HeartRateLane(this)
         usage = UsageLane(this)
         eventStream = dev.sinnix.phone.estate.EventStreamLane(this)
+        chunkUploader = ChunkUploader(this)
         location = dev.sinnix.phone.ingress.LocationLane(this).also { it.start() }
         // The capture preference lives in credential-protected storage, which
         // a locked boot cannot read. Mirroring it here — from the one place
@@ -329,6 +331,9 @@ class AmbientService : Service() {
         heartRate?.tick()
         usage?.tick()
         eventStream?.tick()
+        // Ships only chunks the recorder has already closed, so it can never
+        // race the file this heartbeat is measuring.
+        chunkUploader?.tick()
 
         // A chunk whose file has stopped growing means the recorder has stopped
         // producing frames while still believing it is running.
