@@ -265,13 +265,15 @@ object HealthLane {
 
         rateLimited = false
         var written = 0
-        // Fresh data first, history second. The full-history sweeps are
-        // hundreds of quota windows deep (StepsRecord alone: 254,720 records
-        // before the first rate limit), and a tick that starts with them
-        // spends its whole quota on February before reading last night's
-        // sleep. Incrementals are a handful of calls for the swept types, so
+        // Fresh data first, history second. A tick that starts with the
+        // sweeps spends its quota on history before reading last night's
+        // sleep; incrementals are a handful of calls for the swept types, so
         // they run first and the day's readings land every tick no matter
-        // how far the backfill still has to crawl.
+        // how far a backfill still has to crawl. (The provider's retained
+        // history is actually small -- a few thousand heart-rate records, one
+        // page of steps; the "254,720 StepsRecord records" this comment once
+        // cited were the empty-pageToken loop re-reading one page 1,592
+        // times.)
         val (swept, unswept) = TYPES.partition { prefs(ctx).getBoolean(sweptKey(it), false) }
         for (type in swept) {
             written += incremental(ctx, client, type)
@@ -322,14 +324,14 @@ object HealthLane {
      * feed rather than falling between the two -- a duplicate is a nuisance,
      * a hole is not recoverable.
      *
-     * The page cursor is persisted after EVERY page. Health Connect enforces
-     * a rolling API quota, and the first gen-3 run proved the retained
-     * history is bigger than one quota window: StepsRecord ran 1,592 pages
-     * and 254,720 records before the quota cut it off. Without a cursor the
-     * next tick would restart from page one -- re-emitting a quarter-million
-     * duplicate events per attempt and burning the whole quota to get no
-     * further. With it, each tick continues where the quota stopped the
-     * last one.
+     * The page cursor is persisted after EVERY page, so a sweep the rolling
+     * API quota interrupts resumes where it stopped instead of restarting
+     * from page one. (Historical note: the numbers that once justified this
+     * -- "StepsRecord ran 1,592 pages and 254,720 records" -- were the
+     * empty-pageToken loop below re-reading a single ~162-record page 1,592
+     * times. The real retained history fits in a handful of pages per type;
+     * the cursor is still correct, it is just no longer load-bearing for
+     * quarter-million-record histories that never existed.)
      *
      * "Swept" is still only written after the LAST page: a paused sweep is
      * unfinished and stays visibly unfinished. The generation-2 importer
