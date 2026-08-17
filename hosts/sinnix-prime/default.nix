@@ -136,6 +136,10 @@
     # Nothing runs on the router.
     capture-router.enable = true;
     url-ledger.enable = true;
+    # Weekly re-walk of /realm and /outer-realm into the queryable
+    # inventory/content/judgment-ledger index at data/derived/inventory.
+    # Was a manual one-shot from 2026-08-16 until this; see fs-index.nix.
+    fs-index.enable = true;
     # Daily run at the Xiaomi quota reset (sinnix-9tc). Self-terminating:
     # stops for good once the unlock is granted.
     mi-unlock.enable = true;
