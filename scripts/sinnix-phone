@@ -106,10 +106,10 @@ PHONE_STATE="${SINNIX_PHONE_STATE_DIR:-/realm/state/sinnix-phone}"
 # symlink outright ("Bad owner or permissions", exit 255). A script invoked
 # by both a human and a timer should not depend on interactive config.
 ssh_phone_opts=(
-  # -o Port=, not -p: this array is shared verbatim with scp_phone() below,
-  # and scp's -p means "preserve file attributes" (a no-arg flag), not
-  # port -- passing `-p 8022` to scp silently misparses 8022 as a stray
-  # filename argument. -o Port= means the same thing to both tools.
+  # -o Port=, not -p: the array must stay safe for every OpenSSH tool --
+  # scp's -p means "preserve file attributes" (a no-arg flag), not port, so
+  # `-p 8022` would silently misparse 8022 as a stray filename argument.
+  # -o Port= means the same thing everywhere.
   -o "Port=$PHONE_SSH_PORT"
   -F /dev/null
   -o ConnectTimeout=10
@@ -143,7 +143,6 @@ rsync_ssh="ssh ${ssh_phone_opts[*]}"
 # shellcheck disable=SC2029  # client-side expansion is intended: callers
 # (clip-push) build the remote command with their own already-expanded args.
 ssh_phone() { ssh "${ssh_phone_opts[@]}" "${PHONE_USER}@${PHONE_TS_IP}" "$@"; }
-scp_phone() { scp "${ssh_phone_opts[@]}" "$@"; }
 adb_phone() { ANDROID_SERIAL="$ADB_TARGET" adb "$@"; }
 
 # `adb connect` to an unreachable host never returns on its own -- it is not
@@ -513,7 +512,6 @@ sinnix-phone <command>
   mirror        scrcpy screen mirror/control over the tailnet
   screenshot    grab the current screen to /realm/tmp/work/
   pull          rsync camera + downloads into the lake, drain the system log
-                and ActivityWatch (foreground app + unlocks)
   ambient-audit decode every undecoded ambient chunk in the lake and record
                 its real duration and level (runs at the end of `pull`)
   pull-ambient  rescue chunks the app could not upload (the app ships them
