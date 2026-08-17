@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Regenerate a MANIFEST.json file inventory (path/size/mtime/sha256) for an export tree
+# runtimeInputs: bash coreutils python3
+
+# The lake's export trees carry MANIFEST.json inventories so a snapshot's
+# integrity and completeness can be checked years later. The original
+# health/raw manifest was written by an uncommitted one-off in January 2026
+# and immediately went stale (it also listed itself, with a hash it cannot
+# have); this is the durable replacement. The manifest never includes
+# itself: a file cannot carry its own digest, and the manifest is derived
+# state, not export content.
+
+set -euo pipefail
+
+root="${1:-}"
+if [ -z "$root" ] || [ ! -d "$root" ]; then
+  echo "usage: sinnix-export-manifest <export-tree-root>" >&2
+  exit 64
+fi
+
+python3 - "$root" <<'PY'
+import hashlib
+import json
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+root = Path(sys.argv[1]).resolve()
+entries = []
+for path in sorted(p for p in root.rglob("*") if p.is_file()):
+    rel = path.relative_to(root).as_posix()
+    if rel == "MANIFEST.json":
+        continue
+    stat = path.stat()
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    entries.append(
+        {
+            "path": rel,
+            "size": stat.st_size,
+            "mtime": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+            "sha256": digest.hexdigest(),
+        }
+    )
+
+manifest = {
+    "generated_at": datetime.now(timezone.utc).isoformat(),
+    "generator": "sinnix-export-manifest",
+    "root": str(root),
+    "entry_count": len(entries),
+    "total_bytes": sum(e["size"] for e in entries),
+    "entries": entries,
+}
+target = root / "MANIFEST.json"
+tmp = root / ".MANIFEST.json.tmp"
+tmp.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+os.replace(tmp, target)
+print(f"{target}: {len(entries)} entries, {manifest['total_bytes']} bytes inventoried")
+PY
