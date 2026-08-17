@@ -56,7 +56,8 @@ check_root /outer-realm \
 # public dataset is, so they sit here rather than in library/, despite the
 # owner not being the operator (estate charter Section 3).
 check_root /realm/data \
-  captures exports self knowledgebase derived secrets accounts INVENTORY.md
+  captures exports self knowledgebase derived secrets accounts \
+  activity ai code INVENTORY.md
 
 if [ "$status" -eq 0 ]; then
   echo "lake-lint: all roots match taxonomy"
