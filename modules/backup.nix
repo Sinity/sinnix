@@ -66,6 +66,12 @@ let
   ];
   borgArchiveMaxAgeSec = 6 * 60 * 60;
   borgSnapshotQueueMaxAgeSec = 6 * 60 * 60;
+  # sinex-blobs runs on its own daily timer (05:40), not the 4h-floor
+  # persist/realm drain cadence, so it needs its own budget rather than
+  # sharing borgArchiveMaxAgeSec: budget 3x cadence so one missed/delayed
+  # run doesn't false-positive, same convention as the capture
+  # staleAfterSeconds entries below.
+  borgDailyArchiveMaxAgeSec = 3 * 24 * 60 * 60;
   borgDrainMinIntervalSec = 4 * 60 * 60;
   backupServiceConfig =
     unit:
@@ -633,6 +639,7 @@ let
 
     check_archive() {
       label="$1"
+      max_age="''${2:-${toString borgArchiveMaxAgeSec}}"
       latest_status=0
       latest="$(latest_archive_epoch "$label")" || latest_status=$?
       if [ -z "$latest" ]; then
@@ -662,7 +669,7 @@ let
           state=red
           message="integrity check receipt is $integrity"
           status=1
-        elif [ "$age" -le ${toString borgArchiveMaxAgeSec} ]; then
+        elif [ "$age" -le "$max_age" ]; then
           ok=true
           state=healthy
           message="archive fresh"
@@ -682,7 +689,7 @@ let
         --arg message "$message" \
         --argjson ok "$ok" \
         --argjson age "$age" \
-        --argjson max_age ${toString borgArchiveMaxAgeSec} \
+        --argjson max_age "$max_age" \
         --arg state "''${state:-red}" \
         --arg run_id "''${run_id:-}" \
         --argjson deadline_epoch "''${deadline:-0}" \
@@ -695,7 +702,7 @@ let
       # journal showed a bare "status=1/FAILURE" with no line explaining it --
       # the one place an operator looks first.
       if [ "$ok" = false ]; then
-        echo "borgbackup-status: $label is ''${state:-red}: $message (age ''${age}s, budget ${toString borgArchiveMaxAgeSec}s)" >&2
+        echo "borgbackup-status: $label is ''${state:-red}: $message (age ''${age}s, budget ''${max_age}s)" >&2
       fi
     }
 
@@ -751,8 +758,20 @@ let
 
     check_archive persist
     check_archive realm
+    check_archive sinex-blobs ${toString borgDailyArchiveMaxAgeSec}
     check_queue persist ${lib.escapeShellArg persistSnapshots} 'persist.*'
     check_queue realm ${lib.escapeShellArg realmSnapshots} 'realm.*'
+
+    # root-snapshots is deliberately NOT gated here. Its source is the
+    # initrd's pre-wipe root snapshot, produced once per BOOT rather than on
+    # a content-change cadence -- a long uptime with no reboot means no new
+    # snapshot exists to archive, which is the healthy case, not staleness.
+    # An age-since-last-archive freshness check would false-positive exactly
+    # when the host is most stable. It is also the one Borg repo
+    # borgbackup-verify does not repository-check (only persist/realm/
+    # sinex-blobs) and has no marker-writing convention today, so extending
+    # this gate to it needs those two additions first, not just another
+    # check_archive call replicating a cadence model that does not apply.
 
     exit "$status"
   '';
@@ -1030,9 +1049,11 @@ in
       description = "Back up sinex blob repository into Borg";
       restartIfChanged = false;
       after = [
+        "persist.mount"
         outerRealmMountUnit
       ];
       requires = [
+        "persist.mount"
         outerRealmMountUnit
       ];
       unitConfig.RequiresMountsFor = [ sinexBlobRepositoryPath ];
@@ -1065,6 +1086,18 @@ in
           "::$archive_name" \
           ${lib.escapeShellArg sinexBlobRepositoryPath}
         echo "sinex blob backup complete: $archive_name"
+
+        # borgbackup-status gates freshness off this marker, same convention
+        # as the btrbk drain jobs' "$label.last-success" (mkSnapshotDrainScript
+        # above) -- without it, sinex-blobs had zero freshness gating despite
+        # being on a daily timer just like persist/realm are on their 4h floor.
+        install -d -m 0700 -o root -g root ${lib.escapeShellArg borgDrainStateRoot}
+        marker=${lib.escapeShellArg "${borgDrainStateRoot}/sinex-blobs.last-success"}
+        {
+          printf 'archive=%s\n' "$archive_name"
+          printf 'epoch=%s\n' "$(date +%s)"
+        } > "$marker.tmp"
+        mv "$marker.tmp" "$marker"
       '';
     };
 
@@ -1239,6 +1272,7 @@ in
     systemd.services.borgbackup-maintenance = {
       description = "Prune and compact Borg backup repositories";
       restartIfChanged = false;
+      onFailure = [ "sinnix-service-failure-notify@%n.service" ];
       after = [
         outerRealmMountUnit
       ];
