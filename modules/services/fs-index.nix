@@ -21,7 +21,9 @@ mkServiceModule {
     { cfg, ... }:
     let
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
-      indexDir = "${config.sinnix.paths.dataRoot}/derived/inventory";
+      # Regenerable machine artifact (inventory.duckdb, judgments.jsonl), not
+      # operator data -- lives on the state side, not under data/.
+      indexDir = "${config.sinnix.paths.stateRoot}/fs-index";
     in
     {
       sinnix.runtime.surfaces.fs-index = {

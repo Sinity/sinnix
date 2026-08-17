@@ -188,7 +188,7 @@ def main() -> int:
 
     p_scan = sub.add_parser("scan", help="emit the reference map as JSONL")
     p_scan.add_argument("--out", type=Path,
-                         default=Path("/realm/data/derived/inventory/lake_refs.jsonl"))
+                         default=Path("/realm/state/fs-index/lake_refs.jsonl"))
     p_scan.set_defaults(func=cmd_scan)
 
     p_check = sub.add_parser("check", help="fail if any live reference path is missing")

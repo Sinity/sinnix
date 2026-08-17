@@ -352,7 +352,7 @@ COPY (SELECT * FROM files) TO '{parquet}' (FORMAT PARQUET);
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--root", action="append", default=None)
-    ap.add_argument("--out-dir", default="/realm/data/derived/inventory")
+    ap.add_argument("--out-dir", default="/realm/state/fs-index")
     ap.add_argument("--progress-every", type=int, default=5000)
     args = ap.parse_args()
     roots = args.root or ["/realm", "/outer-realm"]
