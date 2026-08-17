@@ -342,7 +342,22 @@ let
     # regenerable members carry their own provenance. Precious-small media
     # (books, videos, substack, edu, music-audio-features, web-content)
     # deliberately stays in coverage.
-    "media/Steam"
+    # steamapps, not media/Steam: the games are 98G of the 103G and Steam
+    # re-downloads them, but the remaining ~5G is client state that CONTAINS
+    # media/Steam/userdata -- Steam Cloud save files and game recordings, which
+    # no reinstall recreates.
+    #
+    # While the plain-path patterns were inert, userdata was being backed up by
+    # accident (145 entries measured in archive realm-realm.20260816T223000).
+    # Repairing the patterns immediately dropped it, which is the whole hazard
+    # of fixing a rule that was never doing anything: whatever it was quietly
+    # over-preserving starts disappearing on the same commit.
+    #
+    # Excluding the parent and re-including the child does NOT work here --
+    # measured: borg stops recursing into an excluded directory, so a `+`
+    # pattern for the subtree never gets the chance to match, and the archive
+    # ends at `media` with nothing beneath it.
+    "media/Steam/steamapps"
     "media/model"
     "media/stashbox/models"
     "media/stashbox/generated"
