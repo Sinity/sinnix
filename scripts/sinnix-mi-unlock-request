@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # @sinnix-package
 # description: Fire the Xiaomi bootloader-unlock application so it ARRIVES at the Beijing-midnight quota reset
-# runtimeInputs: python3 websocat
+# runtimeInputs: python3 websocat android-tools
 """Timed submitter for Xiaomi's bootloader-unlock application (sinnix-9tc).
 
 WHY THIS EXISTS. Xiaomi gates bootloader unlocking behind a daily
@@ -461,6 +461,34 @@ def token_from_browser(cdp_port: int = 9222) -> str | None:
     return None
 
 
+def device_id_from_phone(timeout: float = 10.0) -> str | None:
+    """The phone's android_id, for the deviceId cookie component.
+
+    The default is sixteen zeroes, which is the right SHAPE and an obviously
+    synthetic VALUE. Measured 2026-08-17, `bl-switch/state` answers
+    identically to both, so the field is not validated there; whether the
+    apply endpoint reads it is only observable once a day, so this sends the
+    real one on the grounds that it costs an adb call made half an hour
+    before the shot and removes the last knob still set to a placeholder.
+    """
+    import re
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["adb", "shell", "settings", "get", "secure", "android_id"],
+            capture_output=True, text=True, timeout=timeout,
+        ).stdout.strip()
+    except Exception as exc:  # noqa: BLE001 - a missing phone is not fatal here
+        log(f"device id: adb unavailable ({exc}); using placeholder")
+        return None
+    match = re.fullmatch(r"[0-9a-f]{16}", out)
+    if not match:
+        log("device id: no android_id from the phone; using placeholder")
+        return None
+    return out
+
+
 def read_token(explicit: str | None) -> str | None:
     if explicit:
         p = os.path.expanduser(explicit)
@@ -485,8 +513,8 @@ def read_token(explicit: str | None) -> str | None:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--token-file", dest="token_file", help="file holding new_bbs_serviceToken")
-    ap.add_argument("--device-id", default="0000000000000000",
-                    help="deviceId cookie component; any stable value works")
+    ap.add_argument("--device-id", default=None,
+                    help="deviceId cookie component; defaults to the phone's android_id over adb")
     ap.add_argument("--check", action="store_true",
                     help="report token validity and account eligibility now; sends no application")
     ap.add_argument("--hour", type=int, default=0, help="Beijing hour of the reset (default 0)")
@@ -501,6 +529,11 @@ def main() -> int:
                     help="probe at T-30m/-60s/-5s/-1s to find where the gate really opens, then fire on the server's own deadline")
     args = ap.parse_args()
     args.token = read_token(args.token_file)
+    if not args.device_id:
+        # Resolved here, not at the boundary: an adb call is cheap but it can
+        # hang, and nothing may hang inside the warm-up.
+        args.device_id = device_id_from_phone() or "0000000000000000"
+    log(f"device id: {args.device_id[:4]}...{args.device_id[-4:]}")
     try:
         if args.observe_window:
             if not args.token:
