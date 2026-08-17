@@ -24,7 +24,7 @@ let
   captureCli = scriptPkgs.sinnix-capture;
   listener = scriptPkgs.sinnix-capture-notifications-listener;
   lane = "notifications";
-  laneDir = "${config.sinnix.paths.capturesRoot}/${lane}";
+  laneDir = "${config.sinnix.paths.activityRoot}/${lane}";
 in
 mkServiceModule {
   name = "capture-notifications";
@@ -72,7 +72,7 @@ mkServiceModule {
             unit = "sinnix-capture-notifications.service";
             overrides = {
               Type = "simple";
-              ExecStart = "${listener}/bin/sinnix-capture-notifications-listener --capture-bin ${captureCli}/bin/sinnix-capture --capture-root ${config.sinnix.paths.capturesRoot} --lane ${lane}";
+              ExecStart = "${listener}/bin/sinnix-capture-notifications-listener --capture-bin ${captureCli}/bin/sinnix-capture --capture-root ${config.sinnix.paths.activityRoot} --lane ${lane}";
               Restart = "on-failure";
               RestartSec = "5s";
               NoNewPrivileges = true;

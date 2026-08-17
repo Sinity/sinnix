@@ -17,7 +17,7 @@ mkServiceModule {
     { cfg, ... }:
     let
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
-      jsonlPath = "${config.sinnix.paths.capturesRoot}/machine/usage-census.jsonl";
+      jsonlPath = "${config.sinnix.paths.machineRoot}/usage-census.jsonl";
     in
     {
       sinnix.runtime.surfaces.census = {

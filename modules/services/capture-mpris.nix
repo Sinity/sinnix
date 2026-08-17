@@ -20,7 +20,7 @@
 let
   username = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
-  capturesRoot = config.sinnix.paths.capturesRoot;
+  capturesRoot = config.sinnix.paths.activityRoot;
   mprisDir = "${capturesRoot}/mpris";
 
   monitor = pkgs.writeTextFile {

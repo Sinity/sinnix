@@ -12,7 +12,7 @@
 }:
 let
   inherit (config.sinnix.machine) isDesktop;
-  inherit (config.sinnix.paths) capturesRoot;
+  capturesRoot = config.sinnix.paths.machineRoot;
   username = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
 

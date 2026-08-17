@@ -83,7 +83,7 @@ let
       "/persist/.btrfs/snapshot"
     ];
     backupTargets = [ ];
-    drillLog = "${cfg.paths.capturesRoot}/machine/borg_drill.jsonl";
+    drillLog = "${cfg.paths.machineRoot}/borg_drill.jsonl";
   };
 
   # One shape for a capture lane, used in two places: inline on a runtime
@@ -549,7 +549,7 @@ in
               wants = [ "local-fs.target" ];
               serviceConfig = {
                 Type = "oneshot";
-                ExecStart = "${scriptPkgs.sinnix-config-drift}/bin/sinnix-config-drift --manifest /etc/sinnix/config.json --output ${cfg.paths.capturesRoot}/machine/config-drift.jsonl";
+                ExecStart = "${scriptPkgs.sinnix-config-drift}/bin/sinnix-config-drift --manifest /etc/sinnix/config.json --output ${cfg.paths.machineRoot}/config-drift.jsonl";
               };
             };
           }

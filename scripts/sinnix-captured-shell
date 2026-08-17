@@ -7,7 +7,7 @@ if [[ -z "$shell_bin" || ! -x "$shell_bin" ]]; then
   shell_bin="$(command -v zsh)"
 fi
 
-capture_root="${SINNIX_CAPTURE_ROOT:-/realm/data/captures/asciinema}"
+capture_root="${SINNIX_CAPTURE_ROOT:-/realm/data/activity/asciinema}"
 capture_disabled="${SINNIX_CAPTURE_DISABLE:-}"
 
 json_escape() {

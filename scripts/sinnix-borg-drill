@@ -27,7 +27,7 @@ DEFAULT_REPOS=(
   "file:///outer-realm/backup/borg-persist-v1"
   "file:///outer-realm/backup/borg-realm-v2"
 )
-LOG_FILE="/realm/data/captures/machine/borg_drill.jsonl"
+LOG_FILE="/realm/data/machine/borg_drill.jsonl"
 WITHIN_DAYS=30
 MAX_DURATION=1800
 VERIFY_DATA=0

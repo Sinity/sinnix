@@ -378,7 +378,7 @@ def main() -> int:
             return 75
 
     host = socket.gethostname()
-    root = Path(args.root) if args.root else Path("/realm/data/captures/machine") / "experiments"
+    root = Path(args.root) if args.root else Path("/realm/data/machine") / "experiments"
     run_id = f"{dt.datetime.now(dt.UTC).strftime('%Y%m%dT%H%M%SZ')}-{args.workload}-{uuid.uuid4().hex[:8]}"
     run_dir = root / run_id
     run_dir.mkdir(parents=True, exist_ok=False)

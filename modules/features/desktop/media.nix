@@ -47,7 +47,7 @@ mkFeatureModule {
       ...
     }:
     let
-      inherit (config.sinnix.paths) capturesRoot;
+      capturesRoot = config.sinnix.paths.activityRoot;
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
     in
     lib.mkMerge [

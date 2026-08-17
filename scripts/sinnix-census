@@ -24,7 +24,7 @@ from pathlib import Path
 
 HOME = Path.home()
 REPO = Path(os.environ.get("SINNIX_REPO", "/realm/project/sinnix"))
-CAPTURES = Path("/realm/data/captures/machine")
+CAPTURES = Path("/realm/data/machine")
 SECRET_DIR = Path("/realm/data/secrets/sinnix/secret")
 INVENTORY = Path("/etc/sinnix/runtime-inventory.json")
 

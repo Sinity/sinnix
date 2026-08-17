@@ -18,7 +18,7 @@
       # Hyprland "Show display capture status" binding and by ad-hoc operator
       # or agent screenshots. Never a daemon.
       name = "screenshot";
-      path = "${config.sinnix.paths.capturesRoot}/screenshot";
+      path = "${config.sinnix.paths.activityRoot}/screenshot";
       eventDriven = true;
       staleAfterSeconds = 604800;
     }

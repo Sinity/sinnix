@@ -706,7 +706,7 @@ def main() -> int:
     parser.add_argument(
         "--history-dir",
         type=Path,
-        default=Path("/realm/data/captures/kitty-scrollback"),
+        default=Path("/realm/data/activity/kitty-scrollback"),
         help="Directory sinnix-capture-kitty-scrollback writes .ansi/.meta.json into",
     )
     args = parser.parse_args()

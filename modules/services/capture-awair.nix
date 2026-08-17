@@ -18,8 +18,8 @@
 }@args:
 let
   username = config.sinnix.user.name;
-  inherit (config.sinnix.paths) capturesRoot;
-  laneDir = "${capturesRoot}/awair";
+  inherit (config.sinnix.paths) healthRoot;
+  laneDir = "${healthRoot}/environment";
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
 
   poller = pkgs.writeShellApplication {
@@ -46,7 +46,7 @@ let
       echo "$payload" | jq -e 'has("score")' >/dev/null
 
       echo "$payload" | "$capture_bin" write \
-        --capture-root "$capture_root" --lane awair
+        --capture-root "$capture_root" --lane environment
     '';
   };
 in
@@ -84,7 +84,7 @@ mkServiceModule {
     };
     captures = [
       {
-        name = "awair";
+        name = "environment";
         path = laneDir;
         cadenceSeconds = 60;
         # Unlike media or clipboard lanes, silence here is never legitimate:
@@ -115,7 +115,7 @@ mkServiceModule {
                   "${poller}/bin/capture-awair-poll"
                   cfg.host
                   "${scriptPkgs.sinnix-capture}/bin/sinnix-capture"
-                  capturesRoot
+                  healthRoot
                 ];
                 NoNewPrivileges = true;
                 ProtectSystem = "strict";

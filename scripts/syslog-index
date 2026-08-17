@@ -2,7 +2,7 @@
 # @sinnix-package
 # description: Build a no-loss index for canonical syslog/journal captures
 # runtimeInputs: python3 systemd coreutils
-"""Build derived indexes for /realm/data/captures/syslog.
+"""Build derived indexes for /realm/data/machine/syslog.
 
 The index is not a summary replacement. It records where raw journal and
 boot-metric files live, with enough metadata to navigate them quickly. Raw logs
@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 SCHEMA = "sinnix-syslog-index-v1"
-DEFAULT_ROOT = Path("/realm/data/captures/syslog")
+DEFAULT_ROOT = Path("/realm/data/machine/syslog")
 OUTPUT_MODE = 0o640
 
 

@@ -178,7 +178,7 @@ mkServiceModule {
         captures = [
           {
             name = "webhistory";
-            path = "${config.sinnix.paths.capturesRoot}/webhistory";
+            path = "${config.sinnix.paths.activityRoot}/webhistory";
             eventDriven = true;
             # Two days against a daily timer: one missed run is tolerable,
             # two is worth surfacing. The hard deadline is far longer --

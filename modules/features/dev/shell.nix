@@ -44,7 +44,7 @@ mkFeatureModule {
     let
       nixosConfig = config;
       sinnixCfg = nixosConfig.sinnix;
-      capturesRoot = sinnixCfg.paths.capturesRoot;
+      capturesRoot = sinnixCfg.paths.activityRoot;
       cliCoreEnabled = nixosConfig.sinnix.features.cli.core.enable;
 
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;

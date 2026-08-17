@@ -28,7 +28,7 @@ let
   username = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   screenDaemon = scriptPkgs.sinnix-capture-screen;
-  inherit (config.sinnix.paths) capturesRoot;
+  capturesRoot = config.sinnix.paths.activityRoot;
   laneDir = "${capturesRoot}/screen-frames";
 in
 mkServiceModule {

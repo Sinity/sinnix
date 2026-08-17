@@ -307,7 +307,7 @@ def collect(manifest: dict[str, Any], args: argparse.Namespace) -> list[dict[str
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", default="/etc/sinnix/config.json")
-    parser.add_argument("--output", default="/realm/data/captures/machine/config-drift.jsonl")
+    parser.add_argument("--output", default="/realm/data/machine/config-drift.jsonl")
     parser.add_argument("--proc-root", default="/")
     parser.add_argument("--systemctl", default="systemctl")
     parser.add_argument("--current-system", default="/run/current-system")

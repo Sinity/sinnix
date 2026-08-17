@@ -42,6 +42,32 @@ in
             capturesRoot = mkOption {
               type = types.str;
               default = "${config.dataRoot}/captures";
+              description = "Undifferentiated ambient capture lanes not yet given a subject home. Most former capturesRoot lanes moved to activityRoot/machineRoot/healthRoot/commsRoot/aiRoot in the 2026-08-17 subject recut -- new lanes land here first, then get a subject once one is clear.";
+            };
+            activityRoot = mkOption {
+              type = types.str;
+              default = "${config.dataRoot}/activity";
+              description = "Ambient personal-activity capture: input devices, window/app focus, terminal, media playback, notifications, URL visits. The estate charter's largest capturesRoot absorber.";
+            };
+            machineRoot = mkOption {
+              type = types.str;
+              default = "${config.dataRoot}/machine";
+              description = "Host/device telemetry: machine-telemetry, syslog, netflow, router, monitor DDC, audio device/topology streams, the phone app's own lane.";
+            };
+            healthRoot = mkOption {
+              type = types.str;
+              default = "${config.dataRoot}/health";
+              description = "Body/environment physiology: Awair air quality (as health/environment), Xiaomi cloud health witness, phone health/battery/thermal.";
+            };
+            commsRoot = mkOption {
+              type = types.str;
+              default = "${config.dataRoot}/comms";
+              description = "Communications capture (IRC logs, etc).";
+            };
+            aiRoot = mkOption {
+              type = types.str;
+              default = "${config.dataRoot}/ai";
+              description = "AI chat/dialogue archives and analyses, including the live polylogue capture lane.";
             };
             exportsRoot = mkOption {
               type = types.str;
@@ -267,7 +293,7 @@ in
       # checkout, so it belongs in the data lake rather than per-checkout state.
       # Every worktree and lane inherits this, which is what makes cross-lane
       # comparison possible at all.
-      POLYLOGUE_VERIFY_HISTORY_PATH = "/realm/data/captures/dev/polylogue/verify-history.jsonl";
+      POLYLOGUE_VERIFY_HISTORY_PATH = "/realm/data/activity/dev/polylogue/verify-history.jsonl";
       SINNIX_ROOT = cfg.projects.sinnix;
       KNOWLEDGEBASE_ROOT = cfg.projects.knowledgebase;
     };

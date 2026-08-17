@@ -9,7 +9,7 @@
 }:
 let
   cfg = config.sinnix;
-  capturesRoot = cfg.paths.capturesRoot;
+  inherit (cfg.paths) activityRoot machineRoot commsRoot;
 
   # ── Collect enabled features ────────────────────────────────────────
   collectEnabled =
@@ -93,17 +93,17 @@ let
       stateVersion = config.system.stateVersion;
       inherit enabledFeatures enabledServices;
       captures.directories = {
-        asciinema = "${capturesRoot}/asciinema";
-        screenshot = "${capturesRoot}/screenshot";
-        audio = "${capturesRoot}/audio";
-        keylog = "${capturesRoot}/keylog";
-        syslog = "${capturesRoot}/syslog";
-        machine = "${capturesRoot}/machine";
-        activitywatch = "${capturesRoot}/activitywatch";
-        shell = "${capturesRoot}/shell";
-        comms = "${capturesRoot}/comms";
-        webhistory = "${capturesRoot}/webhistory";
-        kitty-scrollback = "${capturesRoot}/kitty-scrollback";
+        asciinema = "${activityRoot}/asciinema";
+        screenshot = "${activityRoot}/screenshot";
+        audio = "${activityRoot}/audio";
+        keylog = "${activityRoot}/keylog";
+        syslog = "${machineRoot}/syslog";
+        machine = machineRoot;
+        activitywatch = "${activityRoot}/activitywatch/activitywatch";
+        shell = "${activityRoot}/shell";
+        comms = "${commsRoot}/comms";
+        webhistory = "${activityRoot}/webhistory";
+        kitty-scrollback = "${activityRoot}/kitty-scrollback";
       };
       firewallPorts = {
         tcp = config.networking.firewall.allowedTCPPorts;
