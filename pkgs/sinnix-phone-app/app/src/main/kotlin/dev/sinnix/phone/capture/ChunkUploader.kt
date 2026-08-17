@@ -140,10 +140,25 @@ class ChunkUploader(context: Context) {
         // it stopped one day and nothing said so. Re-uploading to the second
         // base after the first failed is free, because prime answers a chunk
         // it already holds with ok rather than a conflict.
-        return Prefs.hubCandidates(ctx).any { base -> uploadTo("$base$ROUTE?lane=ambient&name=$name", digest, body) }
+        //
+        // Only the LAST candidate's reason is reported, and only if every one
+        // failed. A first attempt that fails and a second that works is a
+        // successful upload, not a blocked lane; saying otherwise would file
+        // a `chunk_upload_blocked` event beside every single chunk this phone
+        // ships, which is how a signal stops being read.
+        var reason: String? = null
+        for (base in Prefs.hubCandidates(ctx)) {
+            when (val outcome = uploadTo("$base$ROUTE?lane=ambient&name=$name", digest, body)) {
+                null -> return true
+                else -> reason = outcome
+            }
+        }
+        note(reason)
+        return false
     }
 
-    private fun uploadTo(url: String, digest: String, body: ByteArray): Boolean {
+    /** Null on success; otherwise the reason this base did not take it. */
+    private fun uploadTo(url: String, digest: String, body: ByteArray): String? {
         val request =
             Request.Builder()
                 .url(url)
@@ -153,13 +168,11 @@ class ChunkUploader(context: Context) {
         return try {
             http.newCall(request).execute().use { response ->
                 val text = response.body?.string().orEmpty()
-                val ok = response.isSuccessful && JSONObject(text).optBoolean("ok", false)
-                if (!ok) note("prime refused ${response.code}: ${text.take(200)}")
-                ok
+                if (response.isSuccessful && JSONObject(text).optBoolean("ok", false)) null
+                else "prime refused ${response.code}: ${text.take(200)}"
             }
         } catch (e: Exception) {
-            note("unreachable: ${e.javaClass.simpleName}")
-            false
+            "unreachable: ${e.javaClass.simpleName}"
         }
     }
 
