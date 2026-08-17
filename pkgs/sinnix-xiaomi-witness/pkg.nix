@@ -32,10 +32,12 @@ stdenvNoCC.mkDerivation {
   installPhase = ''
     runHook preInstall
     mkdir -p $out/share/sinnix-xiaomi-witness $out/bin
-    cp witness-sync.ts $out/share/sinnix-xiaomi-witness/
+    cp witness-sync.ts witness-login.ts $out/share/sinnix-xiaomi-witness/
     cp -r $upstream $out/share/sinnix-xiaomi-witness/upstream
     makeWrapper ${lib.getExe bun} $out/bin/sinnix-xiaomi-witness \
       --add-flags "run $out/share/sinnix-xiaomi-witness/witness-sync.ts"
+    makeWrapper ${lib.getExe bun} $out/bin/sinnix-xiaomi-witness-login \
+      --add-flags "run $out/share/sinnix-xiaomi-witness/witness-login.ts"
     runHook postInstall
   '';
 
