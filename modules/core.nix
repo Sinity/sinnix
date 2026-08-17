@@ -56,7 +56,6 @@ in
 
     systemd = {
       tmpfiles.rules = lib.mkAfter [
-        "d ${paths.realmRoot} 0755 root root -"
         "d ${paths.outerRealm} 0755 root root -"
         "d ${paths.outerRealm}/inbox 0755 ${username} users -"
         # The lake is the operator's, like every other root in this list.
@@ -66,6 +65,30 @@ in
         # had each never written a single file while their timers reported
         # success. Root daemons that write here are unaffected -- root ignores
         # directory permissions.
+        #
+        # GOTCHA these rules cannot fix: tmpfiles `d` applies ownership only
+        # when it CREATES the directory; an existing root-owned dir is left
+        # exactly as found (repair semantics belong to `z`, which this list
+        # deliberately avoids -- blanket re-chowning live trees every boot is
+        # its own hazard). A directory that existed before its rule, or was
+        # created root-side (a sudo mkdir, a recut), keeps its wrong owner
+        # until someone chowns it once. 2026-08-17: exactly that had
+        # re-sprinkled root ownership across /realm, /realm/state,
+        # /realm/library, /realm/tmp/{work,shell}, and five recut subject
+        # roots; repaired by one-shot chown, and the roots are declared below
+        # so new hosts start correct. Service-state dirs root daemons own
+        # (state/journal, state/containers, backup targets, swap, .btrfs)
+        # stay root on purpose.
+        "d ${paths.realmRoot} 0755 ${username} users -"
+        "d /realm/state 0755 ${username} users -"
+        "d /realm/library 0755 ${username} users -"
+        "d /realm/library/datasets 0755 ${username} users -"
+        "d /realm/tmp/work 0755 ${username} users -"
+        "d /realm/tmp/shell 0755 ${username} users -"
+        "d ${paths.dataRoot}/accounts 0755 ${username} users -"
+        "d ${paths.dataRoot}/code 0755 ${username} users -"
+        "d ${paths.dataRoot}/reports 0755 ${username} users -"
+        "d ${paths.dataRoot}/notes 0755 ${username} users -"
         "d ${paths.dataRoot} 0755 ${username} users -"
         "d ${paths.capturesRoot} 0755 ${username} users -"
         "d ${paths.activityRoot} 0755 ${username} users -"
