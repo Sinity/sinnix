@@ -23,7 +23,12 @@
 let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   stateDir = "/realm/state/xiaomi-witness";
-  laneDir = "/realm/data/captures/xiaomi-cloud";
+  # Under health/, where the 2026-08-17 subject recut moved this lane's files
+  # while the service was running -- the writer kept its old captures/ path and
+  # would have split the lane in two on the next changed envelope. A literal,
+  # like stateDir above, because this `let` runs outside the module's config
+  # scope; point it at paths.healthRoot once that option lands.
+  laneDir = "/realm/data/health/xiaomi-cloud";
 in
 mkServiceModule {
   name = "xiaomi-witness";
@@ -72,6 +77,14 @@ mkServiceModule {
         serviceConfig = {
           Type = "oneshot";
           ExecStart = lib.getExe scriptPkgs.sinnix-xiaomi-witness;
+          # The module declares this lane to the runtime inventory and creates
+          # its directory, so it must also be what the writer uses. It was
+          # not: both sides carried the same literal independently, and when
+          # the lane moved, the declaration followed and the writer did not.
+          Environment = [
+            "XIAOMI_WITNESS_LANE=${laneDir}"
+            "XIAOMI_WITNESS_STATE=${stateDir}"
+          ];
         };
       };
 
