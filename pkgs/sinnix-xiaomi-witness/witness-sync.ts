@@ -20,35 +20,38 @@
 // evidence), an identical re-read is not. Raw fidelity: the `data` field
 // is the complete parsed API item, never a reduction of it.
 //
-// Three planes, all measured against this account (EU, de shard):
+// Two planes, both measured against this account (EU, de shard):
 // - AGGREGATED (vendor_sleep / vendor_*_day): get_aggregated_fitness_data_
 //   by_time daily summaries. Own uid works as relative_uid;
 //   get_latest_fitness_data and relatives/* are family-care surfaces
 //   answering -8/-6 for self and are not used.
 // - RAW (vendor_raw_*): get_fitness_data_by_time returns the band's dense
 //   series -- ~2-minute heart rate, continuous SpO2 and stress, 5-minute
-//   steps/calories, per-night sleep objects with avg_breath -- densities
-//   Health Connect never sees. Each record carries the writing device id
-//   in `sid` (the phone's synthetic records use an "hlth.gen_" prefix),
-//   which is also how the band's device id is DISCOVERED here.
-// - FDS (vendor_sleep_details): per-sleep-segment blob files keyed by
-//   (wake_up_time, timezone, daily-type 8) holding the minute-level
-//   nighttime HR/SpO2 series. gen_download_url requires did = the BAND'S
-//   sid -- upstream passes the user id there, which answers -6 "device
-//   not exist" for self access (verified 2026-08-17); the sid variant
-//   mints a real FDS URL. Blobs arrive AES-wrapped only when the
-//   response carries obj_key; otherwise gzip/zlib/raw.
+//   steps/calories, and a per-night sleep object carrying the complete
+//   minute-level stage transition list plus avg_breath and sleep_efficiency.
+//   Each record names its writing device in `sid` (the phone's synthetic
+//   records use an "hlth.gen_" prefix).
+//
+// Both planes are kept, because neither derives from the other. Checked
+// field by field 2026-08-17: the aggregates carry vendor-COMPUTED numbers
+// with no raw counterpart -- personalized heart-rate zone durations,
+// abnormal_hr_count, lack_spo2_count, the stress band histogram, and the
+// sleep_score -- and the raw plane carries the samples the aggregates
+// reduce. Dropping either would lose data that cannot be recomputed here.
+//
+// There WAS a third plane. Xiaomi's FDS blob store serves per-night detail
+// files, and this file used to fetch them: mint a signed URL from
+// gen_download_url (did = the band's sid, not the user id -- upstream's
+// version answers -6 "device not exist" for self access), download, AES-
+// unwrap under the response's obj_key, parse. It never once returned a
+// blob. A 200-key sweep over every anchor x type-byte combination found no
+// object for any night: this band does not upload them. The capability that
+// path existed to deliver -- minute-level sleep staging -- arrives on the
+// raw plane instead, in vendor_raw_sleep's `items[]`. So it is gone rather
+// than "armed": a request per sleep segment per pass, forever, for data
+// already in hand.
 
-import { decodeFdsAes, MiHealthClient, XiaomiAuth } from "./upstream/src/xiaomi/client.ts";
-import {
-  FDS_ALL_DAY_FILE_TYPE,
-  FDS_SLEEP_DAILY_TYPE,
-  decompressOrRawFdsContent,
-  genDataIdKeyBytes,
-  normalizeTimezoneTo15Min,
-  parseAllDaySleepBytes,
-} from "./upstream/src/xiaomi/fds.ts";
-import { createHash } from "node:crypto";
+import { MiHealthClient, XiaomiAuth } from "./upstream/src/xiaomi/client.ts";
 
 const STATE_DIR = process.env.XIAOMI_WITNESS_STATE ?? "/realm/state/xiaomi-witness";
 const LANE_DIR = process.env.XIAOMI_WITNESS_LANE ?? "/realm/data/captures/xiaomi-cloud";
@@ -60,6 +63,12 @@ const PARSER_VERSION = 2;
 // single_*, energy, vitality, training_load, sleep_breathing, weight and
 // exercise all answer empty). An unknown key is a normal per-lane failure,
 // so extending this list is safe.
+//
+// `intensity` was here and is not: three days of fetching produced exactly
+// one record, whose value was `{time}` -- a timestamp with no measurement
+// attached. An endpoint that answers with the shape of data but none of it
+// is worse than one that answers empty, because it mints a lane that looks
+// alive on every dashboard that counts lanes.
 const RAW_KEYS = [
   "heart_rate",
   "sleep",
@@ -67,7 +76,6 @@ const RAW_KEYS = [
   "spo2",
   "stress",
   "calories",
-  "intensity",
   "resting_heart_rate",
   "valid_stand",
 ];
@@ -170,10 +178,7 @@ async function lane<T extends { time?: number }>(name: string, run: () => Promis
 
 // -- Aggregated plane -------------------------------------------------------
 
-type SleepSegment = { bedtime?: number; wake_up_time?: number; timezone?: number };
-type SleepItem = { time?: number; segment_details?: SleepSegment[] };
-
-const sleepItems = await lane<SleepItem>("vendor_sleep", () => client.getSleep(uid, WINDOW_DAYS));
+await lane("vendor_sleep", () => client.getSleep(uid, WINDOW_DAYS));
 await lane("vendor_hr_day", () => client.getHeartRate(uid, WINDOW_DAYS));
 await lane("vendor_spo2_day", () => client.getSpo2History(uid, WINDOW_DAYS));
 await lane("vendor_steps_day", () => client.getSteps(uid, WINDOW_DAYS));
@@ -222,84 +227,6 @@ for (const key of RAW_KEYS) {
     }
   } catch (error) {
     fetchFailed(`vendor_raw_${key}`, error);
-  }
-}
-
-// -- FDS plane --------------------------------------------------------------
-
-function urlSafeB64(input: Uint8Array): string {
-  return Buffer.from(input).toString("base64").replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
-}
-
-async function fetchSleepDetails(sid: string, wakeUpTime: number, timezone: number): Promise<Uint8Array | null> {
-  const key = genDataIdKeyBytes(
-    wakeUpTime,
-    normalizeTimezoneTo15Min(timezone),
-    FDS_SLEEP_DAILY_TYPE,
-    FDS_ALL_DAY_FILE_TYPE,
-  );
-  const suffix = `${urlSafeB64(key)}_${urlSafeB64(createHash("sha1").update(String(uid)).digest())}`;
-  const response = await client.request("GET", "/healthapp/service/gen_download_url", {
-    did: sid,
-    relative_uid: uid,
-    items: [{ timestamp: wakeUpTime, suffix }],
-  });
-  const info = (response.result as Record<string, unknown> | undefined)?.[`${suffix}_${wakeUpTime}`] as
-    | Record<string, unknown>
-    | undefined;
-  const url = typeof info?.url === "string" ? info.url : "";
-  if (!url) return null;
-  const blob = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-  // gen_download_url mints signed URLs without checking existence; storage
-  // 404 means the app never uploaded this blob. Band 10 measured 2026-08-17:
-  // no night in a 200-key (anchor x type-byte) sweep existed -- its
-  // nighttime series live on the raw plane instead (~1/min heart rate, SpO2
-  // during sleep, captured above as vendor_raw_*). The lane stays armed for
-  // firmware that resumes uploading; absence is a normal state, not a
-  // failure.
-  if (blob.status === 404) return null;
-  if (!blob.ok) throw new Error(`FDS download HTTP ${blob.status}`);
-  const content = new Uint8Array(await blob.arrayBuffer());
-  const objKey = typeof info?.obj_key === "string" ? info.obj_key : "";
-  return objKey ? new Uint8Array(decodeFdsAes(content, objKey)) : decompressOrRawFdsContent(content);
-}
-
-// One blob per sleep segment (long sleep or nap). A missing blob is a
-// normal state for a fresh night, not a failure. Raw-first: the decrypted
-// bytes ride along base64 even when the parser cannot read them, so a
-// future firmware format bump costs analysis, never data.
-for (const item of sleepItems) {
-  for (const segment of item.segment_details ?? []) {
-    if (!segment.wake_up_time) continue;
-    try {
-      let content: Uint8Array | null = null;
-      let usedSid: string | null = null;
-      for (const sid of bandSids) {
-        content = await fetchSleepDetails(sid, segment.wake_up_time, segment.timezone ?? 0);
-        if (content) {
-          usedSid = sid;
-          break;
-        }
-      }
-      if (!content) continue;
-      const parsed = parseAllDaySleepBytes(content);
-      await record(
-        "vendor_sleep_details",
-        isoDay(segment.wake_up_time),
-        {
-          sid: usedSid,
-          bedtime: segment.bedtime ?? null,
-          wake_up_time: segment.wake_up_time,
-          timezone: segment.timezone ?? null,
-          report: parsed?.report ?? null,
-          records: parsed?.records ?? null,
-          raw_b64: Buffer.from(content).toString("base64"),
-        },
-        String(segment.wake_up_time),
-      );
-    } catch (error) {
-      fetchFailed("vendor_sleep_details", error);
-    }
   }
 }
 
