@@ -381,6 +381,15 @@ class Emitter:
 
 
 def newest_mtime(path: Path) -> float | None:
+    """Newest write under *path*, which may be a single file: five of the
+    borg lanes point at marker/ledger FILES, and os.walk over a file yields
+    nothing -- the bash sentinel's `find` handled both shapes, and losing
+    that silently read every file lane as stale (caught live 2026-08-18)."""
+    try:
+        if path.is_file():
+            return path.stat().st_mtime
+    except OSError:
+        return None
     newest: float | None = None
     for root, _directories, files in os.walk(path):
         for name in files:

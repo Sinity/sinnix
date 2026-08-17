@@ -346,3 +346,14 @@ def test_evidence_fields_survive_a_round_trip() -> None:
     assert title == "x.service stopped working"
     assert "time limit" in body
     assert "journalctl --user -u x.service -e" in body
+
+
+def test_newest_mtime_handles_file_lane_paths(tmp_path):
+    """Marker/ledger lanes point at files; os.walk alone yields nothing for
+    them. Mutation: dropping the is_file branch fails this."""
+    from sinnix_ops_reducer.health import newest_mtime
+
+    lane_file = tmp_path / "persist.last-success"
+    lane_file.write_text("ok\n")
+    assert newest_mtime(lane_file) == lane_file.stat().st_mtime
+    assert newest_mtime(tmp_path / "absent.jsonl") is None
