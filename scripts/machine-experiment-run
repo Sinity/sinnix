@@ -190,7 +190,7 @@ _QUIET_BLOCKING_UNITS = [
     "borgbackup-job-persist.service",
     "borgbackup-job-realm.service",
     "borgbackup-maintenance.service",
-    "borgbackup-check.service",
+    "borgbackup-verify.service",
     "btrfs-scrub--.service",
     "btrfs-scrub-realm.service",
     "btrfs-scrub-outer\\x2drealm.service",
