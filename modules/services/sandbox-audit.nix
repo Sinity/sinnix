@@ -182,19 +182,6 @@ mkServiceModule {
         };
       };
 
-      systemd.services.sinnix-sandbox-audit = {
-        description = "Check no unit is confined out of its declared output";
-        serviceConfig = lib.sinnix.mkRuntimeServiceConfig {
-          runtimeInventory = config.sinnix.runtime.inventory;
-          unit = "sinnix-sandbox-audit.service";
-          overrides = {
-            Type = "oneshot";
-            ExecStart = "${scriptPkgs.sinnix-sandbox-audit}/bin/sinnix-sandbox-audit --quiet";
-            TimeoutStartSec = "300s";
-          };
-        };
-      };
-
       systemd.timers.sinnix-audit-drain = lib.mkIf cfg.kernelAudit {
         description = "Periodic kernel audit drain";
         wantedBy = [ "timers.target" ];
@@ -204,15 +191,25 @@ mkServiceModule {
           AccuracySec = "1min";
         };
       };
-
-      systemd.timers.sinnix-sandbox-audit = {
-        description = "Periodic confinement-vs-declared-output check";
-        wantedBy = [ "timers.target" ];
-        timerConfig = {
-          OnBootSec = "15min";
-          OnUnitActiveSec = "${toString cfg.intervalMinutes}min";
-          AccuracySec = "5min";
-        };
+    };
+  # The check unit's ExecStart/timer are factory-owned below (its unit name
+  # "sinnix-sandbox-audit" matches this module's own name, unlike the
+  # audit-drain unit above, so it's the one half of this two-unit module the
+  # job argument can address). The timer's own Description= is dropped: the
+  # factory's generated timer body carries no description field, unlike the
+  # hand-written one it replaces -- cosmetic only, doesn't affect scheduling.
+  job =
+    { cfg, ... }:
+    {
+      description = "Check no unit is confined out of its declared output";
+      execStart = "${scriptPkgs.sinnix-sandbox-audit}/bin/sinnix-sandbox-audit --quiet";
+      serviceConfig = {
+        TimeoutStartSec = "300s";
+      };
+      timer = {
+        onBootSec = "15min";
+        intervalSec = cfg.intervalMinutes * 60;
+        accuracySec = "5min";
       };
     };
 } args
