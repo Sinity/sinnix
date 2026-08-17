@@ -73,6 +73,7 @@
   runtimeDirectory ? null,
   runtimeDirectoryPreserve ? null,
   umask ? null,
+  privateTmp ? false,
   # Merged last over the generated Service overrides -- escape hatch for a
   # lane-specific knob (capture-monitor's XDG_CACHE_HOME, capture-a11y's
   # GI_TYPELIB_PATH) that doesn't warrant its own factory parameter.
@@ -100,6 +101,12 @@
   # lane needs beyond the unit itself (capture-a11y's at-spi2-core enable,
   # environment.sessionVariables).
   extraConfig ? (_: { }),
+  # Per-lane unit descriptions, since existing lanes phrase the service's
+  # own Unit.Description (what the daemon/oneshot does) and a poll lane's
+  # timer Description (why it fires) more specifically than the top-level
+  # `description` mkServiceModule shows in `sinnix services list`.
+  unitDescription ? description,
+  timerDescription ? "Periodic trigger for ${description}",
 }:
 let
   unitName = "sinnix-${name}";
@@ -147,7 +154,8 @@ let
     // lib.optionalAttrs (
       runtimeDirectoryPreserve != null
     ) { RuntimeDirectoryPreserve = runtimeDirectoryPreserve; }
-    // lib.optionalAttrs (umask != null) { UMask = umask; };
+    // lib.optionalAttrs (umask != null) { UMask = umask; }
+    // lib.optionalAttrs privateTmp { PrivateTmp = true; };
 
   pollOverrides = baseOverrides // {
     Type = "oneshot";
@@ -174,7 +182,7 @@ let
           {
             home-manager.users.${username} = {
               systemd.user.services.${unitName} = {
-                Unit.Description = description;
+                Unit.Description = unitDescription;
                 Service = lib.sinnix.mkRuntimeServiceConfig {
                   runtimeInventory = config.sinnix.runtime.inventory;
                   inherit unit;
@@ -182,7 +190,7 @@ let
                 };
               };
               systemd.user.timers.${unitName} = {
-                Unit.Description = "Periodic trigger for ${description}";
+                Unit.Description = timerDescription;
                 Timer =
                   let
                     onStartupSec = timer.onStartupSec or null;
@@ -208,7 +216,7 @@ let
               systemd.user.services.${unitName} = {
                 Unit =
                   {
-                    Description = description;
+                    Description = unitDescription;
                     After = [ target ] ++ extraAfter;
                   }
                   // lib.optionalAttrs partOf { PartOf = [ target ]; }

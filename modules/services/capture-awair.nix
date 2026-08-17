@@ -10,6 +10,7 @@
 # (`ssh sinnix-gw cat /tmp/dhcp.leases`) instead.
 {
   mkServiceModule,
+  mkCaptureLane,
   pkgs,
   lib,
   config,
@@ -21,6 +22,7 @@ let
   inherit (config.sinnix.paths) healthRoot;
   laneDir = "${healthRoot}/environment";
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
+  cfg = config.sinnix.services.capture-awair;
 
   poller = pkgs.writeShellApplication {
     name = "capture-awair-poll";
@@ -50,9 +52,32 @@ let
     '';
   };
 in
-mkServiceModule {
+mkServiceModule (mkCaptureLane {
   name = "capture-awair";
   description = "Awair Element air-quality capture (local API, no cloud)";
+  inherit username laneDir;
+  mode = "poll";
+  captureName = "environment";
+  cadenceSeconds = 60;
+  # Unlike media or clipboard lanes, silence here is never legitimate: the
+  # room always has air. A gap means the device is unplugged, off the
+  # network, or the lane is broken -- all worth surfacing.
+  staleAfterSeconds = 900;
+  execStart = lib.concatStringsSep " " [
+    "${poller}/bin/capture-awair-poll"
+    cfg.host
+    "${scriptPkgs.sinnix-capture}/bin/sinnix-capture"
+    healthRoot
+  ];
+  environment = [ "TMPDIR=/tmp" ];
+  privateTmp = true;
+  timer = {
+    intervalSec = cfg.intervalSec;
+    onBootSec = "2min";
+    accuracySec = "10s";
+  };
+  unitDescription = "Poll the Awair Element local API into the capture lake";
+  timerDescription = "Periodic trigger for the Awair air-quality capture";
   extraOptions = {
     host = lib.mkOption {
       type = lib.types.str;
@@ -72,71 +97,4 @@ mkServiceModule {
       '';
     };
   };
-  surface = {
-    unit = "sinnix-capture-awair.service";
-    manager = "user";
-    # No explicit kind: the surface is the oneshot .service (the timer only
-    # triggers it), so the default "service" is correct.
-    resourceClass = "capture-runtime";
-    observe = {
-      enable = true;
-      restartable = true;
-    };
-    captures = [
-      {
-        name = "environment";
-        path = laneDir;
-        cadenceSeconds = 60;
-        # Unlike media or clipboard lanes, silence here is never legitimate:
-        # the room always has air. A gap means the device is unplugged, off
-        # the network, or the lane is broken -- all worth surfacing.
-        staleAfterSeconds = 900;
-      }
-    ];
-  };
-  configFn =
-    { cfg, config, ... }:
-    {
-      systemd.tmpfiles.rules = [
-        "d ${laneDir} 0755 ${username} users -"
-      ];
-
-      home-manager.users.${username} =
-        { ... }:
-        {
-          systemd.user.services.sinnix-capture-awair = {
-            Unit.Description = "Poll the Awair Element local API into the capture lake";
-            Service = lib.sinnix.mkRuntimeServiceConfig {
-              runtimeInventory = config.sinnix.runtime.inventory;
-              unit = "sinnix-capture-awair.service";
-              overrides = {
-                Type = "oneshot";
-                ExecStart = lib.concatStringsSep " " [
-                  "${poller}/bin/capture-awair-poll"
-                  cfg.host
-                  "${scriptPkgs.sinnix-capture}/bin/sinnix-capture"
-                  healthRoot
-                ];
-                NoNewPrivileges = true;
-                ProtectSystem = "strict";
-                ProtectHome = "read-only";
-                ReadWritePaths = [ laneDir ];
-                # The session TMPDIR is read-only inside this namespace.
-                Environment = [ "TMPDIR=/tmp" ];
-                PrivateTmp = true;
-              };
-            };
-          };
-
-          systemd.user.timers.sinnix-capture-awair = {
-            Unit.Description = "Periodic trigger for the Awair air-quality capture";
-            Timer = {
-              OnBootSec = "2min";
-              OnUnitActiveSec = "${toString cfg.intervalSec}s";
-              AccuracySec = "10s";
-            };
-            Install.WantedBy = [ "timers.target" ];
-          };
-        };
-    };
-} args
+}) args
