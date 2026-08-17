@@ -28,12 +28,24 @@ No auth, same as the rest of the hub: the tailnet is the boundary. Unlike the
 feedback spool this surface does execute things, but everything it can execute
 is something the operator's own account could do from a shell on this machine,
 and every agent on this host is already root-equivalent.
+
+A third channel lives in this same process, started by the same `serve`
+command: the phone's persistent always-on telemetry push (speech, the app's
+event mirror) used to be a separate unit, `sinnix-phone-receiver`, listening
+on its own tailscale0 TCP port. It moved in here (sinnix-tjqi) because it was
+already the dispatcher's sibling in everything but process boundary -- same
+host, same tailnet, same "the app connects, prime demuxes" shape -- and a
+second always-running Python process bought nothing a second thread did not.
+The wire protocol, port, and on-disk lane layout are unchanged; the app was
+not touched.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
 import datetime as dt
+import fcntl
 import hashlib
 import json
 import os
@@ -41,10 +53,14 @@ import re
 import shutil
 import socket
 import socketserver
+import struct
 import subprocess
 import sys
 import threading
+import time
+import urllib.error
 import urllib.parse
+import urllib.request
 import uuid
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
@@ -577,6 +593,334 @@ def cmd_notify(args: argparse.Namespace) -> int:
     return 0
 
 
+# --------------------------------------------------------- phone-stream plane
+#
+# The persistent TCP receiver for the phone's always-on push, absorbed from
+# the retired `sinnix-phone-receiver` unit (sinnix-tjqi). Protocol: newline-
+# delimited JSON, one line in -> one envelope written, demuxed by `kind` into
+# a per-kind capture lane (`phone-<kind>`) under `--capture-root`
+# (sinnix.paths.machineRoot, NOT this script's own LAKE_ROOT -- the two roots
+# are deliberately different subjects). Deliberately dumb: no backpressure,
+# no batching, no reconnect logic -- that lives entirely on the phone-side
+# client, which owns retry policy for a link that sleeps and roams. A
+# malformed or oversized line is logged and dropped, not fatal: a single bad
+# line must never take down a connection carrying everything else the phone
+# is sending.
+#
+# CaptureWriter/build_envelope below are a deliberate duplicate of
+# pkgs/sinnix-capture/sinnix_capture/{writer,envelope}.py, not an import: a
+# script under scripts/ only gets CLI tools on PATH via runtimeInputs, not a
+# Python package's site-packages, and pulling that package in would be the
+# first non-stdlib dependency this script has. Both sides are stdlib-only, so
+# the duplication is inert unless the envelope shape changes -- coordinate
+# with lynchpin before touching either copy.
+
+_CAPTURE_SCHEMA = "sinnix-capture-v1"
+_CAPTURE_SCHEMA_VERSION = 1
+
+#: The estate's STT hub. Loopback: this process and the hub are the same host.
+_STT_ENDPOINT = "http://127.0.0.1:8090/v1/audio/transcriptions"
+
+#: Anything longer than this in one utterance is a VAD that failed open, and
+#: decoding it would block the connection for everything behind it.
+_MAX_UTTERANCE_SECONDS = 120
+
+#: asyncio's StreamReader (the original receiver's transport) defaults to a
+#: 64 KiB line limit, ample for a battery reading and far too small for an
+#: utterance: a speech line carries base64 PCM, so its size follows directly
+#: from the duration ceiling above. Deriving one from the other means raising
+#: the ceiling cannot silently start dropping connections.
+_PCM_BYTES_PER_SECOND = 16000 * 2  # 16 kHz, mono, s16le
+_PHONE_STREAM_READ_LIMIT = int(_MAX_UTTERANCE_SECONDS * _PCM_BYTES_PER_SECOND * 4 / 3) + (1 << 16)
+
+
+def _capture_atomic_append(path: Path, line: str) -> None:
+    with open(path, "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            f.write(line)
+            f.flush()
+            os.fsync(f.fileno())
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def _capture_build_envelope(*, lane: str, ts: float, host: str, seq: int, payload: dict, raw_ref: str | None) -> dict:
+    return {
+        "schema": _CAPTURE_SCHEMA,
+        "schema_version": _CAPTURE_SCHEMA_VERSION,
+        "lane": lane,
+        "ts": ts,
+        "host": host,
+        "seq": seq,
+        "payload": payload,
+        "raw_ref": raw_ref,
+    }
+
+
+class CaptureWriter:
+    """Appends sinnix-capture-v1 records under `{capture_root}/{lane}/`. See
+    pkgs/sinnix-capture/sinnix_capture/writer.py for the canonical version and
+    its layout/recovery commentary; this is a byte-for-byte port."""
+
+    def __init__(self, capture_root: Path | str, lane: str, host: str | None = None) -> None:
+        self.lane = lane
+        self.host = host or socket.gethostname()
+        self.lane_dir = Path(capture_root) / lane
+        self.lane_dir.mkdir(parents=True, exist_ok=True)
+        self._seq_path = self.lane_dir / f"{lane}.seq"
+        self._seq_lock_path = self.lane_dir / f"{lane}.seq.lock"
+        self._index_path = self.lane_dir / f"{lane}-index.jsonl"
+
+    def _highest_indexed_seq(self) -> int:
+        highest = 0
+        try:
+            with open(self._index_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        seq = int(json.loads(line)["seq"])
+                    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+                        continue
+                    highest = max(highest, seq)
+        except FileNotFoundError:
+            return 0
+        return highest
+
+    def _read_seq(self) -> int:
+        try:
+            text = self._seq_path.read_text().strip()
+        except (OSError, ValueError):
+            return self._highest_indexed_seq()
+        if not text:
+            return self._highest_indexed_seq()
+        try:
+            return int(text)
+        except ValueError:
+            return self._highest_indexed_seq()
+
+    def _next_seq(self) -> int:
+        with open(self._seq_lock_path, "a+") as lock_f:
+            fcntl.flock(lock_f, fcntl.LOCK_EX)
+            try:
+                seq = self._read_seq() + 1
+                tmp_path = self._seq_path.with_suffix(".seq.tmp")
+                tmp_path.write_text(str(seq))
+                os.replace(tmp_path, self._seq_path)
+                return seq
+            finally:
+                fcntl.flock(lock_f, fcntl.LOCK_UN)
+
+    def _record_path(self, ts: float) -> Path:
+        day = time.strftime("%Y%m%d", time.gmtime(ts))
+        return self.lane_dir / f"{self.lane}-{day}.jsonl"
+
+    def write(self, payload: dict, raw_ref: str | None = None, ts: float | None = None) -> dict:
+        ts = time.time() if ts is None else ts
+        seq = self._next_seq()
+        envelope = _capture_build_envelope(
+            lane=self.lane, ts=ts, host=self.host, seq=seq, payload=payload, raw_ref=raw_ref
+        )
+        record_path = self._record_path(ts)
+        _capture_atomic_append(record_path, json.dumps(envelope, sort_keys=True) + "\n")
+        index_entry = {"ts": ts, "seq": seq, "file": record_path.name}
+        _capture_atomic_append(self._index_path, json.dumps(index_entry, sort_keys=True) + "\n")
+        return envelope
+
+
+def _phone_stream_lane_name(kind: str) -> str:
+    safe = "".join(c if (c.isalnum() or c in "-_") else "-" for c in kind.strip())
+    return f"phone-{safe or 'unknown'}"
+
+
+def _phone_stream_wav_bytes(pcm: bytes, rate: int) -> bytes:
+    """Wrap raw mono 16-bit PCM in a WAV header (44 bytes of arithmetic; the
+    phone sends PCM because its VAD already works on samples, not a container)."""
+    return (
+        b"RIFF"
+        + struct.pack("<I", 36 + len(pcm))
+        + b"WAVEfmt "
+        + struct.pack("<IHHIIHH", 16, 1, 1, rate, rate * 2, 2, 16)
+        + b"data"
+        + struct.pack("<I", len(pcm))
+        + pcm
+    )
+
+
+def _phone_stream_transcribe(wav: bytes, *, timeout: float = 60.0) -> dict | None:
+    """Hand a WAV to the STT hub. None means the hub did not answer -- not a
+    lost utterance, since the audio is already on disk by the time this runs."""
+    boundary = uuid.uuid4().hex
+    body = (
+        (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="file"; filename="utterance.wav"\r\n'
+            "Content-Type: audio/wav\r\n\r\n"
+        ).encode()
+        + wav
+        + f"\r\n--{boundary}--\r\n".encode()
+    )
+    req = urllib.request.Request(
+        _STT_ENDPOINT,
+        data=body,
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8", "replace"))
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        print(f"phone-dispatcher: phone-stream: stt hub did not answer: {exc}", file=sys.stderr)
+        return None
+
+
+class _PhoneSpeechLane:
+    """Where utterances land: audio to the lake first, then transcribed
+    through the same Parakeet endpoint everything else uses, then the
+    transcript joins the capture lane as an envelope. What deliberately does
+    NOT happen here is agent dispatch -- see pkgs/sinnix-phone-receiver's
+    speech.py module docstring for why an always-on mic stays record-only."""
+
+    def __init__(self, capture_root: Path) -> None:
+        self.blob_dir = capture_root / "phone" / "speech"
+        self.blob_dir.mkdir(parents=True, exist_ok=True)
+
+    def ingest(self, obj: dict) -> dict:
+        payload = obj.pop("audio_b64", None)
+        rate = int(obj.get("rate") or 16000)
+        seconds = float(obj.get("seconds") or 0)
+
+        if not payload:
+            obj["error"] = "speech line carried no audio"
+            return obj
+        if seconds > _MAX_UTTERANCE_SECONDS:
+            obj["error"] = f"utterance of {seconds:.0f}s exceeds the {_MAX_UTTERANCE_SECONDS}s ceiling"
+            return obj
+
+        try:
+            pcm = base64.b64decode(payload)
+        except (ValueError, TypeError) as exc:
+            obj["error"] = f"undecodable audio payload: {exc}"
+            return obj
+
+        stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        name = f"speech-{stamp}-{uuid.uuid4().hex[:8]}.wav"
+        wav = _phone_stream_wav_bytes(pcm, rate)
+
+        # Written before transcription, deliberately: the recording must
+        # survive a transcription failure.
+        part = self.blob_dir / (name + ".part")
+        part.write_bytes(wav)
+        part.rename(self.blob_dir / name)
+        obj["audio_file"] = name
+        obj["bytes"] = len(wav)
+
+        result = _phone_stream_transcribe(wav)
+        if result is None:
+            obj["transcribed"] = False
+            return obj
+        obj["transcribed"] = True
+        obj["text"] = result.get("text", "")
+        obj["speech_seconds"] = result.get("speech_seconds")
+        obj["engine"] = result.get("engine")
+        if obj["text"]:
+            print(f"phone-dispatcher: phone-stream: utterance ({seconds:.1f}s): {obj['text'][:120]}", file=sys.stderr)
+        return obj
+
+
+class _PhoneStreamDemuxer:
+    def __init__(self, capture_root: Path) -> None:
+        self.capture_root = capture_root
+        self._writers: dict[str, CaptureWriter] = {}
+        self._speech = _PhoneSpeechLane(capture_root)
+
+    def _writer_for(self, lane: str) -> CaptureWriter:
+        w = self._writers.get(lane)
+        if w is None:
+            w = CaptureWriter(self.capture_root, lane, host="phone")
+            self._writers[lane] = w
+        return w
+
+    def ingest_line(self, line: str) -> None:
+        line = line.strip()
+        if not line:
+            return
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            print(f"phone-dispatcher: phone-stream: dropped malformed line ({len(line)} bytes)", file=sys.stderr)
+            return
+        if not isinstance(obj, dict):
+            print("phone-dispatcher: phone-stream: dropped non-object line", file=sys.stderr)
+            return
+        kind = str(obj.get("kind", "unknown"))
+        if kind == "speech":
+            obj = self._speech.ingest(obj)
+        lane = _phone_stream_lane_name(kind)
+        self._writer_for(lane).write(obj)
+
+
+class _PhoneStreamHandler(socketserver.StreamRequestHandler):
+    def handle(self) -> None:
+        peer = self.client_address
+        demux: _PhoneStreamDemuxer = self.server.demux  # type: ignore[attr-defined]
+        print(f"phone-dispatcher: phone-stream: client connected: {peer}", file=sys.stderr)
+        try:
+            while True:
+                raw = self.rfile.readline(_PHONE_STREAM_READ_LIMIT + 1)
+                if not raw:
+                    break
+                if raw.endswith(b"\n"):
+                    line = raw[:-1]
+                    if len(line) > _PHONE_STREAM_READ_LIMIT:
+                        print(
+                            f"phone-dispatcher: phone-stream: dropped an oversized line "
+                            f"({len(line)} bytes) from {peer}",
+                            file=sys.stderr,
+                        )
+                        continue
+                    try:
+                        demux.ingest_line(line.decode("utf-8", "replace"))
+                    except Exception as exc:  # noqa: BLE001 - one bad line must not kill the connection
+                        print(f"phone-dispatcher: phone-stream: error ingesting line from {peer}: {exc}", file=sys.stderr)
+                    continue
+                if len(raw) <= _PHONE_STREAM_READ_LIMIT:
+                    # Fewer bytes than the cap and still no terminator: the
+                    # connection closed mid-line.
+                    break
+                # Over the cap with no terminator yet: drain until the real
+                # line ends, then drop the whole thing. A single bad line
+                # must never take down a connection carrying everything else
+                # the phone is sending.
+                print(f"phone-dispatcher: phone-stream: dropped an oversized line from {peer}", file=sys.stderr)
+                while True:
+                    more = self.rfile.readline(1 << 16)
+                    if not more or more.endswith(b"\n"):
+                        break
+        finally:
+            print(f"phone-dispatcher: phone-stream: client disconnected: {peer}", file=sys.stderr)
+
+
+class _PhoneStreamServer(socketserver.ThreadingTCPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def __init__(self, host: str, port: int, capture_root: Path) -> None:
+        self.demux = _PhoneStreamDemuxer(capture_root)
+        super().__init__((host, port), _PhoneStreamHandler)
+
+
+def start_phone_stream_server(host: str, port: int, capture_root: Path) -> _PhoneStreamServer:
+    """Start the always-on telemetry receiver as a background thread of this process."""
+    server = _PhoneStreamServer(host, port, capture_root)
+    thread = threading.Thread(target=server.serve_forever, daemon=True, name="phone-stream")
+    thread.start()
+    print(f"phone-dispatcher: phone-stream: listening on {host}:{port}, capture_root={capture_root}", file=sys.stderr)
+    return server
+
+
 # ---------------------------------------------------------------- live plane
 
 
@@ -693,8 +1037,26 @@ def cmd_serve(args: argparse.Namespace) -> int:
     # this machine has business executing the phone's intents.
     os.chmod(sock_path, 0o600)
 
+    # The always-on telemetry receiver, absorbed from the retired
+    # sinnix-phone-receiver unit. Optional at the CLI level (a host/dev run
+    # without a resolved tailscale0 address can still serve the live JSON
+    # API), but the systemd unit always passes all three.
+    phone_stream_server = None
+    if args.phone_stream_host and args.phone_stream_port and args.capture_root:
+        phone_stream_server = start_phone_stream_server(
+            args.phone_stream_host, args.phone_stream_port, Path(args.capture_root)
+        )
+    else:
+        print(
+            "phone-dispatcher: phone-stream: no --phone-stream-host/--phone-stream-port/"
+            "--capture-root given, the always-on telemetry receiver is disabled",
+            file=sys.stderr,
+        )
+
     def shutdown(_signum: int, _frame: Any) -> None:
         threading.Thread(target=server.shutdown, daemon=True).start()
+        if phone_stream_server is not None:
+            threading.Thread(target=phone_stream_server.shutdown, daemon=True).start()
 
     import signal
 
@@ -706,6 +1068,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
     finally:
         server.server_close()
         sock_path.unlink(missing_ok=True)
+        if phone_stream_server is not None:
+            phone_stream_server.server_close()
     return 0
 
 
@@ -713,13 +1077,30 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    serve = sub.add_parser("serve", help="the live plane: JSON over a Unix socket")
+    serve = sub.add_parser(
+        "serve", help="the live plane (Unix socket) plus the always-on telemetry receiver (TCP)"
+    )
     serve.add_argument(
         "--socket",
         default=os.environ.get(
             "SINNIX_PHONE_DISPATCHER_SOCKET",
             f"{os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')}/sinnix/phone-dispatcher.sock",
         ),
+    )
+    serve.add_argument(
+        "--phone-stream-host",
+        default=os.environ.get("SINNIX_PHONE_STREAM_HOST", ""),
+        help="tailscale0 bind address for the always-on telemetry receiver (never 0.0.0.0)",
+    )
+    serve.add_argument(
+        "--phone-stream-port",
+        type=int,
+        default=int(os.environ.get("SINNIX_PHONE_STREAM_PORT", "0") or 0),
+    )
+    serve.add_argument(
+        "--capture-root",
+        default=os.environ.get("SINNIX_PHONE_CAPTURE_ROOT", ""),
+        help="sinnix.paths.machineRoot -- where phone-<kind> capture lanes are written",
     )
     serve.set_defaults(func=cmd_serve)
 

@@ -52,6 +52,13 @@
 let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   userName = config.sinnix.user.name;
+  # Where the phone's always-on telemetry push (speech, the app's event
+  # mirror) lands, demuxed by the dispatcher's embedded TCP receiver
+  # (absorbed from the retired sinnix-phone-receiver, sinnix-tjqi). Host/
+  # device telemetry's subject root, not this module's own reportsDir/
+  # feedbackDir -- see modules/foundation.nix.
+  phoneLaneRoot = config.sinnix.paths.machineRoot;
+  phoneStreamPort = helpers.data.ports.phoneStream;
 in
 mkServiceModule {
   name = "hub";
@@ -359,6 +366,30 @@ mkServiceModule {
         echo "sinnix-hub: ${tailscaleInterface} has no IPv4 address; refusing to start" >&2
         exit 1
       '';
+
+      # The dispatcher's embedded telemetry receiver binds tailscale0
+      # directly (it is a raw TCP listener, not something Caddy fronts), so
+      # it needs its own resolved-address file on the dispatcher unit's own
+      # ExecStartPre -- ported unchanged from the retired
+      # sinnix-phone-receiver module.
+      resolveBindPhoneStream = pkgs.writeShellScript "sinnix-phone-dispatcher-resolve-bind" ''
+        set -euo pipefail
+        target="$1"
+        ${pkgs.coreutils}/bin/mkdir -p "$(${pkgs.coreutils}/bin/dirname "$target")"
+        for _ in $(${pkgs.coreutils}/bin/seq 1 60); do
+          address="$(${pkgs.iproute2}/bin/ip -4 -o addr show dev ${tailscaleInterface} 2>/dev/null \
+            | ${pkgs.gawk}/bin/awk '{print $4}' \
+            | ${pkgs.coreutils}/bin/cut -d/ -f1 \
+            | ${pkgs.coreutils}/bin/head -n1)"
+          if [ -n "''${address:-}" ]; then
+            ${pkgs.coreutils}/bin/printf 'SINNIX_PHONE_STREAM_HOST=%s\n' "$address" > "$target"
+            exit 0
+          fi
+          ${pkgs.coreutils}/bin/sleep 2
+        done
+        echo "sinnix-phone-dispatcher: ${tailscaleInterface} has no IPv4 address; refusing to start" >&2
+        exit 1
+      '';
     in
     {
       assertions = [
@@ -386,6 +417,7 @@ mkServiceModule {
       # the only place these ports are reachable from.
       networking.firewall.interfaces.${tailscaleInterface}.allowedTCPPorts = [
         cfg.port
+        phoneStreamPort
       ]
       ++ lib.mapAttrsToList (_: frontend: frontend.port) activeFrontends;
 
@@ -393,6 +425,16 @@ mkServiceModule {
         "d ${cfg.stateDir} 0755 ${userName} users -"
         "d ${wwwDir} 0755 ${userName} users -"
         "d ${cfg.feedbackDir} 0755 ${userName} users -"
+        # Absorbed from the retired sinnix-phone-receiver module. The
+        # CaptureWriter/SpeechLane ports in the dispatcher script also
+        # mkdir(parents=True) these lazily on first write, but declaring them
+        # keeps ownership/mode explicit rather than inherited from whatever
+        # umask the dispatcher happens to run under.
+        "d ${phoneLaneRoot}/phone-speech 0755 ${userName} users -"
+        # Raw utterance audio, kept whether or not transcription succeeded:
+        # audio can be re-transcribed by a better engine later, a transcript
+        # cannot be un-lost.
+        "d ${phoneLaneRoot}/phone/speech 0755 ${userName} users -"
       ];
 
       environment.systemPackages = [
@@ -433,12 +475,42 @@ mkServiceModule {
           # honest reasons for silence are a phone off wifi or genuinely not
           # recording -- and both of those are worth hearing about long
           # before tomorrow.
+          #
+          # phone-speech and phone-estate_event moved here from the retired
+          # sinnix-phone-receiver surface (sinnix-tjqi): the dispatcher's
+          # embedded TCP receiver is what writes them now, so the lane
+          # declaration sits beside the unit that can actually fail to write
+          # it, same reasoning as phone-ambient above. Fields unchanged.
           captures = [
             {
               name = "phone-ambient";
               path = "/realm/data/machine/phone/ambient";
               cadenceSeconds = 300;
               staleAfterSeconds = 7200;
+            }
+            {
+              # eventDriven with no staleness budget: the phone pushes when
+              # it has something to say, so silence measures the operator's
+              # day rather than this service.
+              name = "phone-speech";
+              path = "${phoneLaneRoot}/phone-speech";
+              eventDriven = true;
+            }
+            {
+              # The app's live event mirror. `sinnix-phone app-status`
+              # answers from this lane when adb is down, which is when the
+              # question matters most, so the lane's freshness is something
+              # the estate should notice going stale rather than discover
+              # while debugging a silent phone.
+              #
+              # Half an hour, against a mirror that flushes every 20 seconds:
+              # the budget has to absorb an ordinary phone-off-the-tailnet
+              # stretch without crying, while still being far tighter than
+              # the drain's day.
+              name = "phone-estate_event";
+              path = "${phoneLaneRoot}/phone-estate_event";
+              cadenceSeconds = 20;
+              staleAfterSeconds = 1800;
             }
           ];
         };
@@ -534,16 +606,28 @@ mkServiceModule {
         };
 
         systemd.user.services.sinnix-phone-dispatcher = {
-          Unit.Description = "Prime's live half of the phone's dual transport";
+          Unit.Description = "Prime's live half of the phone's dual transport, plus the always-on telemetry receiver";
           Service = {
             Type = "simple";
             # sinnix-steer owns the steering schema and this service shells out
             # to it; the ops reducer socket it reads is in the same runtime dir.
+            # sinnix-score is likewise shelled out to, on trace/voice_note
+            # arrival (sinnix-tjqi) -- both resolve through the same PATH.
             Environment = [ "PATH=/run/wrappers/bin:/run/current-system/sw/bin" ];
+            # Resolves the tailnet bind address for the embedded telemetry
+            # receiver (SINNIX_PHONE_STREAM_HOST), same pattern as the hub's
+            # own resolveBind above and the retired sinnix-phone-receiver
+            # unit it replaces. Optional-EnvironmentFile for the same reason:
+            # systemd loads it before ExecStartPre runs, so it must not be
+            # required on a cold start.
+            ExecStartPre = "${resolveBindPhoneStream} %t/sinnix/phone-dispatcher-bind.env";
+            EnvironmentFile = "-%t/sinnix/phone-dispatcher-bind.env";
             ExecStart = lib.concatStringsSep " " [
               "${scriptPkgs.sinnix-phone-dispatcher}/bin/sinnix-phone-dispatcher"
               "serve"
               "--socket %t/sinnix/phone-dispatcher.sock"
+              "--phone-stream-port ${toString phoneStreamPort}"
+              "--capture-root ${phoneLaneRoot}"
             ];
             Restart = "on-failure";
             RestartSec = "5s";
