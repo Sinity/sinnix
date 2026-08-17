@@ -91,6 +91,8 @@ sinnix phone app-grants     # re-assert shell-uid grants
 sinnix phone app-soak [s]   # acceptance test: screen/foreground/mute + chunk measurement
 sinnix phone drain          # the bidirectional sync, wifi-gated
 sinnix phone push           # send prime's half now, without pulling
+sinnix phone pull-ambient   # rescue chunks the app's uploader could not ship
+sinnix phone health-sync    # drive Mi Fitness's Sync button on demand (UI automation)
 ```
 
 `app-install` needs adb over USB or the tailnet, **and the phone must be
@@ -147,7 +149,7 @@ lie.
 
 | File                                      | Direction | Writer → reader                                     |
 | ----------------------------------------- | --------- | --------------------------------------------------- |
-| `ambient-*.m4a`                           | out       | AmbientService → drain → lake                       |
+| `ambient-*.m4a`                           | out       | AmbientService → app upload (`/chunk`) → lake       |
 | `status.json`                             | out       | app → `app-status`, tile, capture screen            |
 | `events/events-*.jsonl`                   | out       | every screen → drain → lake                         |
 | `outbox/intent-*.json`                    | out       | app → drain → dispatcher                            |
@@ -160,9 +162,12 @@ lie.
 | `inbox/decks/*`                           | in        | prime → the instrument shelf                        |
 
 The two device directories are deliberately separate. `/sdcard/sinnix-ambient`
-has exactly one meaning to the drain — audio, rotated and deleted once the lake
-holds it — and `--remove-source-files` pointed at an event log is a data-loss
-bug waiting for its first drain.
+belongs to the app's own uploader: each closed chunk is POSTed to the
+dispatcher's `/chunk` route, sha256-verified against what prime wrote, and
+deleted locally only on an ok. The drain never touches that directory —
+delete-after-transfer pointed at an event log is a data-loss bug waiting for
+its first drain — and `sinnix phone pull-ambient` rescues by hand anything the
+uploader could not ship.
 
 ## Capture
 
@@ -185,12 +190,12 @@ Files are `ambient-<UTC ISO basic>.m4a`. The compact stamp is not a style
 choice: sdcardfs rejects colons outright, so an extended-ISO filename fails
 every open with EPERM while the recorder looks healthy. The file being written
 is `*.m4a.part` and is renamed only after the muxer closes it, because the
-drain rsyncs with `--remove-source-files` and would otherwise delete the open
-file and lose its trailing `moov` atom.
+uploader deletes each chunk once prime acknowledges it and must never ship an
+open file still waiting for its trailing `moov` atom.
 
 A `.part` found at service startup belongs to a recorder that died without
-closing its muxer; those are renamed to `*.m4a.orphan`, which the drain _does_
-collect. Renamed rather than deleted: an MP4 without its `moov` atom is not
+closing its muxer; those are renamed to `*.m4a.orphan`, which the uploader
+_does_ ship. Renamed rather than deleted: an MP4 without its `moov` atom is not
 playable but the samples are still there, and discarding captured audio is not
 the device's call.
 
