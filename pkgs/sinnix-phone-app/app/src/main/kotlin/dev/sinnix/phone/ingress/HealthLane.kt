@@ -265,6 +265,12 @@ object HealthLane {
 
         rateLimited = false
         var written = 0
+        // A type whose read permission is not granted can never be swept, and
+        // asking anyway cost 72 identical `lane_blocked` events per type per
+        // day -- six ungranted types, 432 events, all restating a fact that
+        // does not change until someone taps a toggle. Skipped here and named
+        // once in the state record below.
+        val ungranted = TYPES.filter { HealthPermission.getReadPermission(it) in missing }.toSet()
         // Fresh data first, history second. A tick that starts with the
         // sweeps spends its quota on history before reading last night's
         // sleep; incrementals are a handful of calls for the swept types, so
@@ -274,7 +280,8 @@ object HealthLane {
         // page of steps; the "254,720 StepsRecord records" this comment once
         // cited were the empty-pageToken loop re-reading one page 1,592
         // times.)
-        val (swept, unswept) = TYPES.partition { prefs(ctx).getBoolean(sweptKey(it), false) }
+        val queryable = TYPES.filterNot { it in ungranted }
+        val (swept, unswept) = queryable.partition { prefs(ctx).getBoolean(sweptKey(it), false) }
         for (type in swept) {
             written += incremental(ctx, client, type)
             if (rateLimited) break
@@ -297,6 +304,30 @@ object HealthLane {
             Events.record(ctx, "lane_blocked", "lane", "health",
                 "reason", "rate limited; resuming next tick")
         }
+
+        // The lane's own state, every tick, because completion was previously
+        // knowable ONLY from the one-shot `health_backfill` record a type
+        // emits the instant it finishes. Miss that line -- an uninstall, a
+        // day-file nobody kept, a receipt that never fired for a reason still
+        // unexplained -- and "has this type's history been read to the end?"
+        // becomes unanswerable forever, which is exactly the state the lake
+        // was found in on 2026-08-17: ten types reading incrementally, and no
+        // receipt anywhere proving any of them ever swept.
+        //
+        // A state record cannot be missed that way. It restates what is true
+        // now, so the newest one always answers the question, and it costs one
+        // line per tick against the 432 it replaces.
+        val p = prefs(ctx)
+        Events.record(
+            ctx,
+            "health_lane_state",
+            "generation", BACKFILL_GENERATION,
+            "swept", JSONArray(queryable.filter { p.getBoolean(sweptKey(it), false) }.map { it.simpleName }),
+            "unswept", JSONArray(queryable.filterNot { p.getBoolean(sweptKey(it), false) }.map { it.simpleName }),
+            "ungranted", JSONArray(ungranted.map { it.simpleName }),
+            "rate_limited", rateLimited,
+            "records", written,
+        )
         return written
     }
 

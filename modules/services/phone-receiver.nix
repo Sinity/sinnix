@@ -1,7 +1,13 @@
-# Persistent receiver for the phone's always-on telemetry push: the phone
-# maintains one long-lived TCP connection to this service and streams
-# structured telemetry (battery, sensors, later VAD-gated audio)
-# continuously.
+# The always-listening end of the phone's push: line-delimited JSON, one lane
+# per `kind`, currently VAD-gated speech utterances and the app's mirrored
+# event stream.
+#
+# The service is persistent; the CONNECTIONS are not, and this header claimed
+# otherwise until 2026-08-17. The app opens a fresh socket per flush and
+# closes it, deliberately -- a phone sleeps, roams and changes networks
+# mid-sentence, so a socket held across all of that is usually stale in a way
+# neither end has noticed. Nothing here needs changing for that; it just is
+# not the design the first paragraph used to describe.
 #
 # Binds the tailscale0 address only, same pattern as sinnix.services.hub --
 # never 0.0.0.0, opened per-interface so a LAN peer never reaches it.
@@ -16,7 +22,10 @@
 let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   receiverPkg = scriptPkgs.sinnix-phone-receiver;
-  capturesRoot = config.sinnix.paths.machineRoot;
+  # The receiver files each lane under the root it was given; since the
+  # subject recut that is machineRoot, and the local name says so rather than
+  # still saying "captures".
+  laneRoot = config.sinnix.paths.machineRoot;
 
   tailscaleInterface = "tailscale0";
   port = helpers.data.ports.phoneStream;
@@ -51,22 +60,37 @@ mkServiceModule {
       enable = true;
       restartable = true;
     };
-    # Only `speech`. The receiver's protocol accepts more kinds than that --
-    # battery, thermal, location, health, sensor all parse -- but SpeechService
-    # is the app's sole user of the stream port, and every other kind goes to
-    # the app's own event log and reaches the lake through sinnix-phone-drain
-    # instead. Declaring the other five would register capture lanes nothing is
-    # designed to write, which is a standing false alarm rather than
-    # monitoring. A kind that ever does start arriving here creates its own
-    # lane on first write and can be declared then.
-    #
-    # eventDriven with no staleness budget: the phone pushes when it has
-    # something, so silence measures the operator's day, not this service.
+    # Two of the kinds this port accepts, and only two. The protocol parses
+    # more (battery, thermal, location, health, sensor), but nothing sends
+    # them -- those readings go to the app's own event log, which arrives here
+    # wrapped as `estate_event` and separately through the drain. Declaring a
+    # lane nothing writes is a standing false alarm rather than monitoring; a
+    # kind that does start arriving creates its lane on first write and can be
+    # declared then.
     captures = [
       {
+        # eventDriven with no staleness budget: the phone pushes when it has
+        # something to say, so silence measures the operator's day rather
+        # than this service.
         name = "phone-speech";
-        path = "${capturesRoot}/phone-speech";
+        path = "${laneRoot}/phone-speech";
         eventDriven = true;
+      }
+      {
+        # The app's live event mirror. Undeclared until 2026-08-17 because
+        # nothing read it -- a complete lane with no consumer. It has one now:
+        # `sinnix-phone app-status` answers from this lane when adb is down,
+        # which is when the question matters most, so the lane's freshness is
+        # something the estate should notice going stale rather than discover
+        # while debugging a silent phone.
+        #
+        # Half an hour, against a mirror that flushes every 20 seconds: the
+        # budget has to absorb an ordinary phone-off-the-tailnet stretch
+        # without crying, while still being far tighter than the drain's day.
+        name = "phone-estate_event";
+        path = "${laneRoot}/phone-estate_event";
+        cadenceSeconds = 20;
+        staleAfterSeconds = 1800;
       }
     ];
   };
@@ -96,11 +120,11 @@ mkServiceModule {
       # standing false alarm the surface declaration above declines to make.
       # A kind that ever does arrive here creates its own lane on first write.
       systemd.tmpfiles.rules = [
-        "d ${capturesRoot}/phone-speech 0755 ${username} users -"
+        "d ${laneRoot}/phone-speech 0755 ${username} users -"
         # Raw utterance audio, kept whether or not transcription succeeded:
         # audio can be re-transcribed by a better engine later, a transcript
         # cannot be un-lost.
-        "d ${capturesRoot}/phone/speech 0755 ${username} users -"
+        "d ${laneRoot}/phone/speech 0755 ${username} users -"
       ];
 
       home-manager.users.${username} =
@@ -118,7 +142,7 @@ mkServiceModule {
                 Type = "simple";
                 ExecStartPre = "${resolveBind} %t/sinnix/phone-receiver-bind.env";
                 EnvironmentFile = "-%t/sinnix/phone-receiver-bind.env";
-                ExecStart = "${receiverPkg}/bin/sinnix-phone-receiver --host \${SINNIX_PHONE_RECEIVER_BIND} --port ${toString port} --capture-root ${capturesRoot}";
+                ExecStart = "${receiverPkg}/bin/sinnix-phone-receiver --host \${SINNIX_PHONE_RECEIVER_BIND} --port ${toString port} --capture-root ${laneRoot}";
                 Restart = "on-failure";
                 RestartSec = "5s";
               };
