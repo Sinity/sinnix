@@ -935,19 +935,11 @@ pull)
   # Recovery, when it is needed, is a chunk sitting on the device because
   # uploads are failing; the app says why in `chunk_upload_blocked`, and
   # `pull-ambient` below moves them by hand.
-  # Mi Fitness exports to Health Connect only when told to, so tell it before
-  # draining rather than after -- otherwise every drain carries data one cycle
-  # stale. adb-only, and non-fatal: a phone reachable over ssh but not adb
-  # should still drain everything else.
-  if adb_any get-state >/dev/null 2>&1; then
-    # health-sync is NOT called here any more: it drives Mi Fitness's UI on
-    # screen, and a phone that visibly opens an app every half hour is not
-    # acceptable ambient behaviour (operator veto, 2026-08-16). It remains
-    # available as an explicit `sinnix phone health-sync` for on-demand use
-    # until an invisible trigger (forced JobScheduler job or the Xiaomi cloud
-    # collector, sinnix-ogll) replaces it.
-    :
-  fi
+  # The drain deliberately does NOT force a Mi Fitness sync. Mi Fitness
+  # writes Health Connect on its own roughly hourly (measured 2026-08-17),
+  # the Xiaomi cloud witness covers the vendor plane, and driving the UI
+  # every half hour was operator-vetoed (2026-08-16). `sinnix phone
+  # health-sync` stays as the on-demand backfill/repair verb.
   if [ "$ssh_up" = true ]; then
     drain_estate ssh
     push_estate ssh
@@ -961,16 +953,15 @@ pull)
   "$0" ambient-audit
   ;;
 health-sync)
-  # Make Mi Fitness export to Health Connect.
+  # Force Mi Fitness to export to Health Connect NOW.
   #
-  # The band records heart rate continuously (1-minute interval) and Mi Fitness
-  # holds it, but it only WRITES to Health Connect when its Sync button is
-  # pressed -- not on a schedule, and not merely on being launched (both
-  # measured 2026-08-16: a launch-only nudge added nothing, one Sync tap
-  # backfilled ~15 hours as 893- and 900-sample records). Nothing else in the
-  # chain was at fault: the band setting, Mi Fitness's Health Connect
-  # authorisation, and this app's read grant were all correct and verified the
-  # whole time, which is why two days of heart rate simply were not there.
+  # Not required for freshness: Mi Fitness writes Health Connect on its own,
+  # roughly hourly (measured 2026-08-17 via record `modified` timestamps,
+  # several while the operator was asleep -- this falsified the earlier
+  # belief that the Sync button was the only HC-write trigger). What the
+  # button uniquely does is an immediate backfill: one tap on 2026-08-16
+  # landed ~15 hours as 893- and 900-sample records, where a launch-only
+  # nudge and a forced SyncJobService run each added nothing.
   #
   # There is no exported sync service or intent to call, so this drives the
   # button. It is deliberately paranoid about it: the element is located by
