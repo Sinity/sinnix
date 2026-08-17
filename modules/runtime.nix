@@ -550,7 +550,16 @@ in
     # the ops-reducer (as the operator) and, when the reducer is down, by the
     # root-run failure template. Group `users` inherited by both is what keeps
     # the second writer from locking the first out of its own state file.
-    systemd.tmpfiles.rules = [ "d /run/sinnix 2775 root users -" ];
+    systemd.tmpfiles.rules = [
+      "d /run/sinnix 2775 root users -"
+      # The two shared files, made group-writable wherever they came from:
+      # the root-run failure template can create them before the reducer ever
+      # does, and a live switch inherits whatever the previous generation
+      # left. `z` is a no-op when the path does not exist.
+      "z /run/sinnix/health-transitions.jsonl 0664 root users -"
+      "z /run/sinnix/health-sentinel-state.json 0664 root users -"
+      "z /run/sinnix/health-sentinel-state.json.lock 0664 root users -"
+    ];
     # Consumer entries from activation.consumers render as forced environment
     # overrides (front-door routing; see the consumers option comment),
     # merged with the sentinel/observe units.
