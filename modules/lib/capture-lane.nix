@@ -184,19 +184,13 @@ let
   # `surface.unit`/`manager`/`observe.enable`, not on which of those two
   # namespaces declared the unit, so observability is unaffected.
   #
-  # job.timer has no OnStartupSec (only OnBootSec) and no raw-duration
-  # passthrough for OnUnitActiveSec (only a computed-from-seconds
-  # `intervalSec`) -- capture-kitty-scrollback needs both (a timer that
-  # fires relative to the user session's systemd startup, not machine boot,
-  # on a raw "Nmin" cadence). Rather than extend the factory for one caller,
-  # that lane's service still goes through job (byte-identical hardening and
-  # resource-class resolution to its siblings) while its timer stays a
-  # direct `systemd.user.timers` passthrough here, reusing the same unit
-  # name job already generates for the service half.
-  pollTimerViaJob = mode == "poll" && (timer.onStartupSec or null) == null;
-
   jobServiceConfig = builtins.removeAttrs baseOverrides [ "ExecStart" ] // serviceOverrides;
 
+  # Every poll timer routes through job: the factory expresses both the
+  # computed (intervalSec) and raw (onUnitActiveSec) cadences and both the
+  # boot-relative (onBootSec) and session-relative (onStartupSec) anchors,
+  # so no lane needs a hand-written timer. onBootSec defaults to "2min"
+  # only when the lane gave no anchor of its own.
   pollJob = lib.optionalAttrs (mode == "poll") (
     {
       inherit execStart manager resourceClass;
@@ -204,14 +198,17 @@ let
       serviceConfig = jobServiceConfig;
     }
     // lib.optionalAttrs (pollAfter != [ ]) { unit = { after = pollAfter; }; }
-    // lib.optionalAttrs pollTimerViaJob {
-      timer = {
-        intervalSec = timer.intervalSec;
-        onBootSec = timer.onBootSec or "2min";
-        accuracySec = timer.accuracySec or null;
-        persistent = timer.persistent or false;
-        description = timerDescription;
-      };
+    // {
+      timer =
+        {
+          accuracySec = timer.accuracySec or null;
+          persistent = timer.persistent or false;
+          description = timerDescription;
+        }
+        // lib.optionalAttrs (timer ? intervalSec) { inherit (timer) intervalSec; }
+        // lib.optionalAttrs (timer ? onUnitActiveSec) { inherit (timer) onUnitActiveSec; }
+        // lib.optionalAttrs (timer ? onStartupSec) { inherit (timer) onStartupSec; }
+        // lib.optionalAttrs (!(timer ? onStartupSec)) { onBootSec = timer.onBootSec or "2min"; };
     }
   );
 
@@ -227,23 +224,7 @@ let
       { systemd.tmpfiles.rules = resolvedTmpfilesRules; }
       (
         if mode == "poll" then
-          lib.optionalAttrs (!pollTimerViaJob) {
-            # capture-kitty-scrollback's timer passthrough -- see pollJob
-            # comment above. Matches the shape mkJobConfig itself would
-            # render, just with the two knobs it can't express.
-            systemd.user.timers.${unitName} = {
-              description = timerDescription;
-              wantedBy = [ "timers.target" ];
-              timerConfig = {
-                OnUnitActiveSec = timer.onUnitActiveSec;
-                OnStartupSec = timer.onStartupSec;
-              }
-              // lib.optionalAttrs ((timer.accuracySec or null) != null) {
-                AccuracySec = timer.accuracySec;
-              }
-              // lib.optionalAttrs (timer.persistent or false) { Persistent = true; };
-            };
-          }
+          { }
         else
           {
             home-manager.users.${username} = {
