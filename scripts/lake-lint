@@ -57,7 +57,8 @@ check_root /outer-realm \
 # owner not being the operator (estate charter Section 3).
 check_root /realm/data \
   captures exports self knowledgebase derived secrets accounts \
-  activity ai code decisions comms health machine records INVENTORY.md
+  activity ai code decisions comms health machine records notes reports \
+  INVENTORY.md
 
 if [ "$status" -eq 0 ]; then
   echo "lake-lint: all roots match taxonomy"
