@@ -94,7 +94,7 @@ PHONE_TS_IP="${SINNIX_PHONE_IP:-$(resolve_phone_host || true)}"
 PHONE_SSH_PORT="${SINNIX_PHONE_SSH_PORT:-8022}"
 PHONE_USER="${SINNIX_PHONE_USER:-u0_a398}"
 ADB_TARGET="${PHONE_TS_IP}:5555"
-LAKE_ROOT="${SINNIX_PHONE_LAKE:-/realm/data/captures/phone}"
+LAKE_ROOT="${SINNIX_PHONE_LAKE:-/realm/data/machine/phone}"
 PHONE_STATE="${SINNIX_PHONE_STATE_DIR:-/realm/state/sinnix-phone}"
 
 # -F /dev/null + explicit identity, not ~/.ssh/config: under a sandboxed
