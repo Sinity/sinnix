@@ -14,69 +14,67 @@
   pkgs,
   ...
 }@args:
+let
+  scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
+  # Regenerable machine artifact (inventory.duckdb, judgments.jsonl), not
+  # operator data -- lives on the state side, not under data/.
+  indexDir = "${config.sinnix.paths.stateRoot}/fs-index";
+in
 mkServiceModule {
   name = "fs-index";
   description = "Periodic filesystem inventory, content scan and judgment-ledger materialization";
-  configFn =
+  surface = {
+    unit = "sinnix-fs-index.service";
+    resourceClass = "background-maintenance";
+    observe.enable = true;
+    workload = {
+      class = "sacrificial";
+      rationale = "Full re-walk of /realm and /outer-realm; rerunnable at will, next timer firing recovers a killed run.";
+    };
+    captures = [
+      {
+        name = "fs-index";
+        path = indexDir;
+        eventDriven = true;
+      }
+    ];
+  };
+  job =
     { cfg, ... }:
-    let
-      scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
-      # Regenerable machine artifact (inventory.duckdb, judgments.jsonl), not
-      # operator data -- lives on the state side, not under data/.
-      indexDir = "${config.sinnix.paths.stateRoot}/fs-index";
-    in
     {
-      sinnix.runtime.surfaces.fs-index = {
-        unit = "sinnix-fs-index.service";
-        resourceClass = "background-maintenance";
-        observe.enable = true;
-        workload = {
-          class = "sacrificial";
-          rationale = "Full re-walk of /realm and /outer-realm; rerunnable at will, next timer firing recovers a killed run.";
-        };
-        captures = [
-          {
-            name = "fs-index";
-            path = indexDir;
-            eventDriven = true;
-          }
-        ];
+      description = "Rebuild the filesystem inventory, content scan and judgment ledger";
+      user = config.sinnix.user.name;
+      # Three scripts, one unit: the ledger step reads the scan's own
+      # DuckDB output, so splitting into three units would need a
+      # dependency chain for no benefit -- nothing else consumes the
+      # scan without the ledger materialized on top of it.
+      execStart = pkgs.writeShellScript "sinnix-fs-index-run" ''
+        set -euo pipefail
+        ${scriptPkgs.sinnix-fs-inventory}/bin/sinnix-fs-inventory --out-dir ${lib.escapeShellArg indexDir}
+        ${scriptPkgs.sinnix-fs-content}/bin/sinnix-fs-content --out-dir ${lib.escapeShellArg indexDir}
+        ${scriptPkgs.sinnix-fs-ledger}/bin/sinnix-fs-ledger --index-dir ${lib.escapeShellArg indexDir}
+      '';
+      serviceConfig = {
+        TimeoutStartSec = cfg.maxSecondsPerRun;
       };
-      systemd.services.sinnix-fs-index = {
-        description = "Rebuild the filesystem inventory, content scan and judgment ledger";
-        # Same reasoning as the url-ledger and borg-drain oneshots: this walks
-        # multiple TB and would otherwise hold a `switch` in activation for
-        # its entire run. The next scheduled firing picks up new code.
-        restartIfChanged = false;
-        serviceConfig = lib.sinnix.mkRuntimeServiceConfig {
-          runtimeInventory = config.sinnix.runtime.inventory;
-          unit = "sinnix-fs-index.service";
-          overrides = {
-            Type = "oneshot";
-            User = config.sinnix.user.name;
-            # Three scripts, one unit: the ledger step reads the scan's own
-            # DuckDB output, so splitting into three units would need a
-            # dependency chain for no benefit -- nothing else consumes the
-            # scan without the ledger materialized on top of it.
-            ExecStart = pkgs.writeShellScript "sinnix-fs-index-run" ''
-              set -euo pipefail
-              ${scriptPkgs.sinnix-fs-inventory}/bin/sinnix-fs-inventory --out-dir ${lib.escapeShellArg indexDir}
-              ${scriptPkgs.sinnix-fs-content}/bin/sinnix-fs-content --out-dir ${lib.escapeShellArg indexDir}
-              ${scriptPkgs.sinnix-fs-ledger}/bin/sinnix-fs-ledger --index-dir ${lib.escapeShellArg indexDir}
-            '';
-            TimeoutStartSec = cfg.maxSecondsPerRun;
-          };
-        };
-      };
-      systemd.timers.sinnix-fs-index = {
-        wantedBy = [ "timers.target" ];
-        timerConfig = {
-          OnCalendar = cfg.schedule;
-          Persistent = true;
-          RandomizedDelaySec = "1h";
-        };
+      timer = {
+        onCalendar = cfg.schedule;
+        persistent = true;
+        randomizedDelaySec = "1h";
       };
     };
+  # restartIfChanged=false is not expressible through the job argument
+  # (mkServiceModule's mkJobConfig only emits description/serviceConfig/
+  # path/environment on the service), so it's declared here as an
+  # independent definition on the same unit -- the module system merges
+  # disjoint fields of the same systemd.services.<name> submodule across
+  # separate config blocks. Same reasoning as the url-ledger and borg-drain
+  # oneshots: this walks multiple TB and would otherwise hold a `switch` in
+  # activation for its entire run. The next scheduled firing picks up new
+  # code.
+  configFn = _: {
+    systemd.services.sinnix-fs-index.restartIfChanged = false;
+  };
   extraOptions = {
     schedule = args.lib.mkOption {
       type = args.lib.types.str;
