@@ -316,7 +316,6 @@ mkFeatureModule {
             scriptPkgs.beads
             scriptPkgs.sinnix-scope
             scriptPkgs.sinnix-agent-scope-exec
-            scriptPkgs.chatgpt-share-export
             scriptPkgs.sinnix-agent-control-mcp
             scriptPkgs.sinnix-attention
             scriptPkgs.sinnix-context-handoff

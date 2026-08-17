@@ -45,12 +45,6 @@ _: {
         "result"
         ".direnv/*"
         "secret/*"
-        # The estate report embeds CSS, JavaScript, and HTML as generated
-        # strings; Prettier would rewrite the single published JSON artifact
-        # without changing the report itself.
-        "docs/estate-report-content.json"
-        # Prettier can't parse personas.yaml (unicode box-drawing in comments)
-        "dots/claude/skills/persona/personas.yaml"
         # The phone app's Gradle dependency lock is written by mitm-cache's
         # update script, wholesale, every time it runs. Formatting it would
         # make every regeneration a several-hundred-line diff against a file

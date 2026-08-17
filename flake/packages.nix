@@ -13,7 +13,6 @@
       publicPackageNames = [
         "beads"
         "ccusage"
-        "chatgpt-share-export"
         "lynchpin-cli"
         "lynchpin-python"
         "mcp-chrome-devtools"
