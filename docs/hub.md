@@ -194,14 +194,23 @@ report served by the hub and from one opened straight off disk as `file://`
 (`Origin: null`), as long as the hub is reachable and the URL is absolute in the
 `file://` case.
 
-Submissions land in `/realm/data/derived/hub-feedback/<UTC-date>.jsonl`, one
-JSON object per line, each wrapping the payload in an envelope carrying the
-receive time, the referring page, and a sequence number — so a consuming agent
-can tell submissions apart without trusting client-supplied fields.
+`/feedback` is a route on the ops-reducer, reached through the same reverse
+proxy as the pages. Submissions land in
+`/realm/data/derived/hub-feedback/<UTC-date>.jsonl`, one JSON object per line,
+each wrapping the payload in an envelope carrying the receive time, the
+referring page, and a sequence number — so a consuming agent can tell
+submissions apart without trusting client-supplied fields. That file format is
+the contract and is unchanged from the retired `sinnix-hub-feedback` daemon.
 
 The endpoint is write-only. There is no read route: serving the spool back would
 turn a sink into an exfiltration surface for the personal analysis those
 annotations describe.
+
+A `sinnix-elicit-v1` record arriving in the spool starts the drain
+(`sinnix-elicit autoingest`, as a transient `sinnix-elicit-autoingest` unit)
+instead of a 120s timer looking for one. The trigger coalesces: a comparison
+session is a burst of one POST per judgment, and the Bradley-Terry refit happens
+once, a few seconds after the last tap, rather than once per tap.
 
 ## Rendering
 
@@ -243,7 +252,7 @@ stretching one long list across 4K.
 ## Operating it
 
 ```
-systemctl --user status sinnix-hub sinnix-hub-feedback sinnix-ops-reducer
+systemctl --user status sinnix-hub sinnix-ops-reducer
 journalctl --user -u sinnix-hub -n 50             # Caddy errors only; access logs are off
 journalctl --user -u sinnix-ops-reducer -n 50     # page rendering and the action API
 ```

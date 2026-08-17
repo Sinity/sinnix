@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .actions import ActionService
 from .ambient import product_source
+from .feedback import CoalescingTrigger, FeedbackSpool
 from .reducer import Reducer, observe_source
 from .server import ensure_token, serve
 
@@ -40,6 +41,24 @@ def main() -> None:
     parser.add_argument("--hyprland-events", type=Path, default=None)
     parser.add_argument(
         "--inventory", type=Path, default=Path("/etc/sinnix/runtime-inventory.json")
+    )
+    parser.add_argument(
+        "--feedback-dir",
+        type=Path,
+        default=Path("/realm/data/derived/hub-feedback"),
+        help=(
+            "Spool directory for annotations posted to /feedback: one "
+            "append-only JSONL file per UTC day, which agents read directly."
+        ),
+    )
+    parser.add_argument(
+        "--elicit-command",
+        default=None,
+        help=(
+            "Command run (coalesced) when a sinnix-elicit record lands in the "
+            "feedback spool, replacing the periodic drain. Given as a full "
+            "argv, space-separated; absent means nothing is triggered."
+        ),
     )
     parser.add_argument(
         "--hub-manifest",
@@ -80,6 +99,12 @@ def main() -> None:
         args.state_dir / "action-receipts.json",
         controller=args.agent_controller,
     )
+    elicit = (
+        CoalescingTrigger(args.elicit_command.split())
+        if args.elicit_command
+        else None
+    )
+    feedback = FeedbackSpool(args.feedback_dir, elicit=elicit)
     fds = list(range(3, 3 + int(os.environ.get("LISTEN_FDS", "0"))))
     serve(
         reducer,
@@ -89,4 +114,5 @@ def main() -> None:
         actions,
         hub_manifest=args.hub_manifest,
         inventory_path=args.inventory,
+        feedback=feedback,
     )

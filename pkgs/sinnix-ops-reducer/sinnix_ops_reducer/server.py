@@ -12,7 +12,12 @@ from typing import Any
 
 from . import pages
 from .actions import ActionError, ActionService
+from .feedback import MAX_BODY as FEEDBACK_MAX_BODY
+from .feedback import SCHEMA as FEEDBACK_SCHEMA
+from .feedback import FeedbackSpool
 from .reducer import Reducer
+
+FEEDBACK_PATH = "/feedback"
 
 
 def ensure_token(path: Path) -> str:
@@ -40,6 +45,74 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _cors(self) -> None:
+        """Only the feedback route carries these.
+
+        A generated report is often opened straight off disk as file://, whose
+        Origin is null, and the handback must work from there. The action API
+        deliberately gets the opposite treatment -- the hub's Caddy site
+        refuses a cross-origin POST to /ops/* outright -- so these headers stay
+        on the write-only sink and nowhere near a route that can change state.
+        """
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+
+    def _write_feedback(self, status: int, value: dict[str, Any]) -> None:
+        body = json.dumps(value, sort_keys=True).encode() + b"\n"
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self._cors()
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _spool_feedback(self) -> None:
+        spool: FeedbackSpool | None = self.server.feedback  # type: ignore[attr-defined]
+        if spool is None:
+            self._write_feedback(
+                HTTPStatus.NOT_FOUND, {"error": "no feedback spool configured"}
+            )
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "-1"))
+        except ValueError:
+            length = -1
+        if length < 0:
+            self._write_feedback(
+                HTTPStatus.LENGTH_REQUIRED, {"error": "Content-Length required"}
+            )
+            return
+        if length > FEEDBACK_MAX_BODY:
+            self._write_feedback(
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                {"error": f"payload exceeds {FEEDBACK_MAX_BODY} bytes"},
+            )
+            return
+        raw = self.rfile.read(length)
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            self._write_feedback(HTTPStatus.BAD_REQUEST, {"error": f"invalid JSON: {error}"})
+            return
+        result = spool.append(
+            payload,
+            self.headers.get("Referer") or self.headers.get("X-Hub-Page"),
+            self.headers.get("User-Agent"),
+        )
+        self._write_feedback(HTTPStatus.CREATED, {"schema": FEEDBACK_SCHEMA, **result})
+
+    def do_OPTIONS(self) -> None:
+        # application/json is not a CORS-simple content type, so every elicit
+        # judgment is preflighted before it is posted.
+        if self.path != FEEDBACK_PATH:
+            self._write(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+            return
+        self.send_response(HTTPStatus.NO_CONTENT)
+        self._cors()
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def _write_html(self, status: int, body: str) -> None:
         payload = body.encode("utf-8")
@@ -91,6 +164,16 @@ class Handler(BaseHTTPRequestHandler):
             return
         if pages.is_page_route(self.path):
             self._serve_page(self.path)
+        elif self.path == FEEDBACK_PATH:
+            # Health only. There is deliberately no way to read the spool back.
+            self._write_feedback(
+                HTTPStatus.OK,
+                {
+                    "schema": FEEDBACK_SCHEMA,
+                    "status": "ready",
+                    "accepts": "POST application/json",
+                },
+            )
         elif self.path == "/v1/health":
             self._write(HTTPStatus.OK, self.reducer.health())
         elif self.path == "/v1/snapshot":
@@ -146,6 +229,9 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authorized():
             self._write(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
             return
+        if self.path == FEEDBACK_PATH:
+            self._spool_feedback()
+            return
         if self.path != "/v1/actions":
             self._write(HTTPStatus.NOT_FOUND, {"error": "not_found"})
             return
@@ -178,6 +264,7 @@ def serve(
     actions: ActionService,
     hub_manifest: Path | None = None,
     inventory_path: Path = Path("/etc/sinnix/runtime-inventory.json"),
+    feedback: FeedbackSpool | None = None,
 ) -> None:
     def stamp(server: ThreadingHTTPServer, is_unix: bool) -> None:
         server.reducer = reducer  # type: ignore[attr-defined]
@@ -185,6 +272,7 @@ def serve(
         server.is_unix = is_unix  # type: ignore[attr-defined]
         server.hub_manifest = hub_manifest  # type: ignore[attr-defined]
         server.inventory_path = inventory_path  # type: ignore[attr-defined]
+        server.feedback = feedback  # type: ignore[attr-defined]
 
     reducer.refresh()
     http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
