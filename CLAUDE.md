@@ -439,8 +439,11 @@ config in `secrets.nix` (repo root).
   declared is wiped on reboot. New service state ⇒ add a persistence entry in
   the same change.
 - Backups: btrbk snapshots (producer) are deleted only after the hourly Borg
-  drain proves a matching archive on `/outer-realm` (durability gate). Status
-  JSONL: `/realm/data/captures/machine/borg_status.jsonl`.
+  drain proves a matching archive on `/outer-realm` (durability gate). Borg
+  freshness (archive markers, snapshot-queue lag, integrity-receipt state) is
+  watched as ops-reducer health lanes declared on the owning surfaces in
+  `modules/backup.nix`, not a bespoke checker; drill evidence still lands in
+  `borg_drill.jsonl`.
 - **Backup membership is a property the directory carries, not a path in a
   list.** A directory is excluded when it holds `CACHEDIR.TAG` (the
   bford.info standard, which cargo/uv/ruff/pytest/mypy write unprompted) or
