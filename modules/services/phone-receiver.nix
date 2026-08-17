@@ -16,7 +16,7 @@
 let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   receiverPkg = scriptPkgs.sinnix-phone-receiver;
-  capturesRoot = config.sinnix.paths.capturesRoot;
+  capturesRoot = config.sinnix.paths.machineRoot;
 
   tailscaleInterface = "tailscale0";
   port = helpers.data.ports.phoneStream;

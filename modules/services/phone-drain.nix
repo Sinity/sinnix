@@ -43,7 +43,7 @@ mkServiceModule {
     captures = [
       {
         name = "phone-ambient";
-        path = "/realm/data/captures/phone/ambient";
+        path = "/realm/data/machine/phone/ambient";
         cadenceSeconds = 1800;
         staleAfterSeconds = 86400;
       }
@@ -54,7 +54,7 @@ mkServiceModule {
       # two transports, hence not a tighter budget than ambient's.
       {
         name = "phone-logcat";
-        path = "/realm/data/captures/phone/logcat";
+        path = "/realm/data/machine/phone/logcat";
         cadenceSeconds = 1800;
         staleAfterSeconds = 86400;
       }
@@ -66,7 +66,7 @@ mkServiceModule {
       # Same wifi-conditional budget as the other phone lanes.
       {
         name = "phone-activitywatch";
-        path = "/realm/data/captures/phone/activitywatch";
+        path = "/realm/data/machine/phone/activitywatch";
         cadenceSeconds = 1800;
         staleAfterSeconds = 86400;
       }
@@ -78,7 +78,7 @@ mkServiceModule {
       # phone lane was the one nothing was watching.
       {
         name = "phone-estate-events";
-        path = "/realm/data/captures/phone/estate/events";
+        path = "/realm/data/machine/phone/estate/events";
         cadenceSeconds = 1800;
         staleAfterSeconds = 86400;
       }
