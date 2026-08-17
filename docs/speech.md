@@ -116,9 +116,10 @@ They are recorded with `undecodable: true` and a reason.
 
 ## The always-on speech lane
 
-`sinnix-phone-receiver` (port 8940, tailnet only) accepts newline-delimited
-JSON from the phone. A `speech` line carries base64 PCM, and three things
-happen to it in an order that is the design:
+`sinnix-phone-dispatcher` (which absorbed the retired receiver; port 8940 on
+the tailnet only) accepts newline-delimited JSON from the phone. A `speech`
+line carries base64 PCM, and three things happen to it in an order that is
+the design:
 
 1. **The audio is written to the lake first.** Raw audio can be re-transcribed
    by a better engine, re-diarized, or attributed to a speaker once enrollment

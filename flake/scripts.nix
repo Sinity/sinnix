@@ -304,10 +304,6 @@ let
       sinnix-capture-lib = sinnix-capture;
     };
 
-    sinnix-phone-receiver = pkgs.callPackage ../pkgs/sinnix-phone-receiver/pkg.nix {
-      sinnix-capture-lib = sinnix-capture;
-    };
-
     sinnix-capture-screen = pkgs.callPackage ../pkgs/capture-screen/pkg.nix { };
 
     # Xiaomi cloud health witness: pinned GPL-3 upstream client + our
