@@ -32,7 +32,7 @@ links out to it rather than repeating it.
 | App source                    | github:Sinity/sinnix-phone-app (`app/src/main/`) |
 | Build + install packaging     | phone-app repo `pkg.nix`, `deps.json`; flake input wired in flake/scripts.nix |
 | Desktop control surface       | `scripts/sinnix-phone`                       |
-| Prime's half of the transport | `scripts/sinnix-phone-dispatcher`            |
+| Prime's half of the transport | `pkgs/sinnix-phone-dispatcher`               |
 | Steering export for the phone | `scripts/sinnix-steer export-phone`          |
 | Scheduled bidirectional drain | `modules/services/phone-drain.nix`           |
 | Live-plane route + unit       | `modules/services/hub.nix` (`/phone/v1/*`)   |

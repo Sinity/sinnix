@@ -312,7 +312,7 @@ Surfaces with standing design decisions an agent might otherwise "fix":
   APK is emitted unsigned and signed at install time against a persistent
   host-local keystore, which keeps `adb install -r` an upgrade rather than an
   uninstall that discards runtime grants. Prime's half of its dual transport
-  is `scripts/sinnix-phone-dispatcher`, served at the hub's `/phone/v1/*` and
+  is `pkgs/sinnix-phone-dispatcher`, served at the hub's `/phone/v1/*` and
   also driven by the drain. Operate it through `sinnix phone app-*`; see
   `docs/phone.md`.
 

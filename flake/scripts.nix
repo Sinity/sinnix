@@ -24,8 +24,13 @@ let
     siblingExtras = {
       sinnix-capture = sinnixCaptureLib;
       # Source lives in the steering workspace input; scripts naming
-      # @sinnix-steer (the phone dispatcher) resolve to the wrapper below.
+      # @sinnix-steer resolve to the wrapper below.
       sinnix-steer = externalPackages.sinnix-steer;
+      # sinnix-phone-dispatcher moved out of scripts/ into a real Python
+      # package (sinnix-svvz); scripts/sinnix-phone still names
+      # @sinnix-phone-dispatcher in its own runtimeInputs and resolves here,
+      # same pattern as sinnix-steer above.
+      sinnix-phone-dispatcher = externalPackages.sinnix-phone-dispatcher;
       # The estate's bd, not nixpkgs'. A script naming bare `beads` in its
       # frontmatter gets pkgs.beads (1.0.3), whose `export` has no -C flag --
       # which failed as a usage dump swallowed by `|| true`.
@@ -304,6 +309,20 @@ let
 
     sinnix-audio-capture = pkgs.callPackage ../pkgs/sinnix-audio-capture/pkg.nix {
       sinnix-capture-lib = sinnix-capture;
+    };
+
+    # Prime's half of the phone's dual transport (docs/phone.md). Moved out
+    # of scripts/ (sinnix-svvz) so it can depend on sinnix-capture's writer
+    # instead of carrying a private stdlib-only port of it. steerPackage/
+    # scorePackage replace the retired script frontmatter's `runtimeInputs:
+    # coreutils @sinnix-steer @sinnix-score` -- a buildPythonApplication has
+    # no writeShellApplication wrapper of its own to carry those, so pkg.nix
+    # puts them on the built console_script's PATH directly.
+    sinnix-phone-dispatcher = pkgs.callPackage ../pkgs/sinnix-phone-dispatcher/pkg.nix {
+      sinnix-capture-lib = sinnix-capture;
+      inherit sinnix-lib;
+      steerPackage = sinnix-steer;
+      scorePackage = discovered.registry.sinnix-score.package;
     };
 
     sinnix-capture-screen = pkgs.callPackage ../pkgs/capture-screen/pkg.nix { };
