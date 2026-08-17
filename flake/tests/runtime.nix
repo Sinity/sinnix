@@ -64,8 +64,8 @@ in
           {
             assertion =
               config.systemd.services.runtime-policy-system.unitConfig.OnFailure
-              == [ "sinnix-health-transition@%n" ];
-            message = "observed system services must receive the system health transition template";
+              == [ "sinnix-unit-failure-notify@%n" ];
+            message = "observed system services must receive the system failure-notify template";
           }
           {
             # Delivered as a drop-in rather than a unit body: a user surface
@@ -73,8 +73,8 @@ in
             # systemd.user.services, and only a drop-in merges with both.
             assertion =
               config.home-manager.users.sinity.xdg.configFile
-              ? "systemd/user/runtime-policy-user.service.d/50-sinnix-health-transition.conf";
-            message = "observed user services must receive the user health transition drop-in";
+              ? "systemd/user/runtime-policy-user.service.d/50-sinnix-unit-failure-notify.conf";
+            message = "observed user services must receive the user failure-notify drop-in";
           }
         ];
       };

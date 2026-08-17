@@ -1122,45 +1122,6 @@ in
         }
       ];
 
-    # Failure surfacing for the borg verification/integrity unit
-    # (borgbackup-verify): a repo check or restore drill that fails silently
-    # is worse than none. Appends a `service_failure`
-    # event to the existing borgStatusLog JSONL (same file/consumer path as
-    # the archive_freshness/snapshot_queue events above) and best-effort
-    # desktop-notifies the active graphical session.
-    systemd.services."sinnix-service-failure-notify@" = {
-      description = "Record + surface a failed backup-verification unit (%i)";
-      serviceConfig.Type = "oneshot";
-      path = [
-        pkgs.coreutils
-        pkgs.jq
-        pkgs.systemd
-        pkgs.sudo
-        pkgs.libnotify
-      ];
-      script = ''
-        set -euo pipefail
-        unit="%I"
-        result="$(systemctl show "$unit" -p Result --value 2>/dev/null || echo unknown)"
-        install -d -m 0755 ${lib.escapeShellArg (builtins.dirOf borgStatusLog)}
-        jq -cn \
-          --arg type service_failure \
-          --arg unit "$unit" \
-          --arg result "$result" \
-          --arg ts "$(date -Iseconds)" \
-          '{ts:$ts,type:$type,unit:$unit,result:$result,ok:false,message:"unit entered failed state"}' \
-          >> ${lib.escapeShellArg borgStatusLog}
-
-        user_uid="$(id -u ${lib.escapeShellArg config.sinnix.user.name} 2>/dev/null || true)"
-        if [ -n "$user_uid" ] && [ -S "/run/user/$user_uid/bus" ]; then
-          sudo -u ${lib.escapeShellArg config.sinnix.user.name} \
-            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$user_uid/bus" \
-            notify-send --urgency=critical "Backup verification failed" "$unit: $result" \
-            || true
-        fi
-      '';
-    };
-
     # Weekly integrity check — verify repo metadata and detect bit rot on the
     # HDD, then run the bounded restore drill in the same window. Merged into
     # one unit (was borgbackup-check.service + sinnix-borg-drill.service,
@@ -1169,7 +1130,6 @@ in
     systemd.services.borgbackup-verify = {
       description = "Borg backup integrity check and bounded restore drill";
       restartIfChanged = false;
-      onFailure = [ "sinnix-service-failure-notify@%n.service" ];
       serviceConfig = {
         Type = "oneshot";
         TimeoutStopSec = "15s";
@@ -1272,7 +1232,6 @@ in
     systemd.services.borgbackup-maintenance = {
       description = "Prune and compact Borg backup repositories";
       restartIfChanged = false;
-      onFailure = [ "sinnix-service-failure-notify@%n.service" ];
       after = [
         outerRealmMountUnit
       ];
@@ -1689,7 +1648,10 @@ in
       restartIfChanged = false;
       reloadIfChanged = false;
       stopIfChanged = false;
-      onFailure = [ "sinnix-service-failure-notify@%n.service" ];
+      # Declared per-unit rather than inherited: this drill is deliberately
+      # not an observed surface (its evidence is the drill log, not unit
+      # state), so modules/runtime.nix's surface-driven attachment skips it.
+      onFailure = [ "sinnix-unit-failure-notify@%n.service" ];
       after = [ outerRealmMountUnit ];
       requires = [ outerRealmMountUnit ];
       environment = {
