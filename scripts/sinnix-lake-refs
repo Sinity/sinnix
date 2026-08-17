@@ -1,0 +1,199 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Generate and check the estate's hardcoded /realm/data|media|inbox path references
+# runtimeInputs: python3 ripgrep coreutils
+
+"""Every literal /realm/{data,media,inbox}/... path in sinnix, lynchpin and
+polylogue, as a regenerable JSONL map -- and a check that fails when one of
+those paths does not exist on disk.
+
+Why this exists: a filesystem reorganisation this size (measured 2026-08-17:
+roughly 80 indirected reference sites against ~131 hardcoded literals across
+three repos) is precisely the scale at which "we updated every reference" is
+a hope, not a fact. sinnix.paths.capturesRoot and lynchpin's config.py handle
+the indirected half automatically; this tool is for the half that bypasses
+them -- scripts/*, lynchpin/sources/*.py, and the two files
+(materialization.py, source_contracts.py) that independently duplicate the
+same path strings, where a miss produces a silent mismatch instead of an
+error.
+
+Two subcommands:
+
+  scan    walk sinnix/lynchpin/polylogue source trees, ripgrep for literal
+          /realm/{data,media,inbox}/... path strings, emit one JSONL row per
+          occurrence: repo, file, line, path, kind (nix / py / sh literal;
+          "cosmetic" for comments/docstrings vs "live" for code).
+  check   re-run scan, then stat() every live-kind path's longest existing
+          ancestor. A path that doesn't exist is either a typo, a lane that
+          moved without updating every reader, or genuinely dead code -- all
+          three are worth a human looking, so this reports rather than
+          silently ignoring.
+
+Deliberately narrow: this is not a general dead-code or refactoring tool. It
+only looks for the one shape that has actually hurt this estate --
+/realm/data, /realm/media, /realm/inbox path literals -- because that is the
+scope of the reorganisation this was built for.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+REPOS = {
+    "sinnix": Path("/realm/project/sinnix"),
+    "lynchpin": Path("/realm/project/sinity-lynchpin"),
+    "polylogue": Path("/realm/project/polylogue"),
+}
+
+# Only these three lake roots: they are what Phase C/D of the estate
+# reorganisation actually moves. A broader /realm/... pattern would also
+# match state/, worktrees/, cache/ -- none of which are being reorganised,
+# and matching them would bury the signal in noise nobody asked for.
+PATH_RE = re.compile(r"/realm/(?:data|media|inbox)/[A-Za-z0-9_./+-]*[A-Za-z0-9_/+-]")
+
+COSMETIC_EXTS = {".md"}
+COSMETIC_PREFIXES = ("#", "//", "*", '"""', "'''")
+
+
+def classify_line(line: str) -> str:
+    stripped = line.strip()
+    if stripped.startswith(COSMETIC_PREFIXES):
+        return "cosmetic"
+    return "live"
+
+
+def scan_repo(name: str, root: Path) -> list[dict]:
+    if not root.is_dir():
+        return []
+    # Source files only, and only source files -- explicitly, not by
+    # excluding known-noisy extensions one at a time. First attempt used -uu
+    # (include hidden/gitignored) to catch generated files that might carry a
+    # stale baked-in path, and it swept in a lynchpin runtime cache directory
+    # of its own (.lynchpin/{cache,generated}) full of captured JSON blobs --
+    # data whose VALUES happen to contain path-shaped strings, not code that
+    # reads a path. That produced 98,871 "live" references against the
+    # roughly 131 the manual survey found; the true population is code, so
+    # code is what gets searched.
+    proc = subprocess.run(
+        ["rg", "--line-number", "--no-heading",
+         "--glob", "*.nix", "--glob", "*.py", "--glob", "*.sh",
+         "--glob", "scripts/*", "--glob", "!scripts/*.*",
+         "--glob", "!.git/**", "--glob", "!node_modules/**",
+         "--glob", "!result/**", "--glob", "!result-*/**",
+         PATH_RE.pattern, str(root)],
+        capture_output=True, text=True,
+    )
+    if proc.returncode not in (0, 1):  # 1 = no matches, not an error
+        print(f"sinnix-lake-refs: rg failed on {name}: {proc.stderr}", file=sys.stderr)
+        return []
+    rows = []
+    # Split strictly on "\n", not str.splitlines(): a matched line containing
+    # a literal \r (a minified/bundled JS blob did, in practice) makes
+    # splitlines() -- which treats \r as a line break too -- fragment one rg
+    # record into several fake ones with no file:line: prefix, and the next
+    # int(lineno) then blows up on a chunk of the file's own content.
+    for line in proc.stdout.split("\n"):
+        if not line:
+            continue
+        try:
+            file_part, lineno, text = line.split(":", 2)
+        except ValueError:
+            continue
+        if not lineno.isdigit():
+            continue
+        ext = Path(file_part).suffix
+        kind = "cosmetic" if ext in COSMETIC_EXTS else classify_line(text)
+        for m in PATH_RE.finditer(text):
+            rows.append({
+                "repo": name,
+                "file": file_part,
+                "line": int(lineno),
+                "path": m.group(0).rstrip("/,;)\"'"),
+                "kind": kind,
+            })
+    return rows
+
+
+def scan() -> list[dict]:
+    rows: list[dict] = []
+    for name, root in REPOS.items():
+        rows.extend(scan_repo(name, root))
+    return rows
+
+
+def existing_ancestor(path: str) -> Path | None:
+    """The longest prefix of `path` that exists, or None if even /realm/data
+    style roots are gone -- returns None only in a scenario worth flagging
+    loudly, since those roots should always exist."""
+    p = Path(path)
+    while len(p.parts) > 2:  # stop above bare "/realm"
+        if p.exists():
+            return p
+        p = p.parent
+    return None
+
+
+def cmd_scan(args: argparse.Namespace) -> int:
+    rows = scan()
+    out = args.out
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("w", encoding="utf-8") as f:
+        for r in rows:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    live = sum(1 for r in rows if r["kind"] == "live")
+    print(f"sinnix-lake-refs: {len(rows)} references ({live} live, "
+          f"{len(rows) - live} cosmetic) -> {out}")
+    return 0
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    rows = scan()
+    live = [r for r in rows if r["kind"] == "live"]
+    unique_paths = sorted({r["path"] for r in live})
+    missing: list[tuple[str, Path | None]] = []
+    for path in unique_paths:
+        if not Path(path).exists():
+            missing.append((path, existing_ancestor(path)))
+
+    if not missing:
+        print(f"sinnix-lake-refs: OK -- {len(unique_paths)} distinct live "
+              f"paths across {len(live)} references, all exist")
+        return 0
+
+    print(f"sinnix-lake-refs: {len(missing)} of {len(unique_paths)} live "
+          f"paths do not exist:", file=sys.stderr)
+    for path, ancestor in missing:
+        sites = [r for r in live if r["path"] == path]
+        where = ", ".join(f"{r['repo']}:{r['file']}:{r['line']}" for r in sites[:3])
+        more = f" (+{len(sites)-3} more)" if len(sites) > 3 else ""
+        print(f"  {path}", file=sys.stderr)
+        print(f"    nearest existing ancestor: {ancestor or '(none -- /realm itself?)'}",
+              file=sys.stderr)
+        print(f"    referenced at: {where}{more}", file=sys.stderr)
+    return 1
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__,
+                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p_scan = sub.add_parser("scan", help="emit the reference map as JSONL")
+    p_scan.add_argument("--out", type=Path,
+                         default=Path("/realm/data/derived/inventory/lake_refs.jsonl"))
+    p_scan.set_defaults(func=cmd_scan)
+
+    p_check = sub.add_parser("check", help="fail if any live reference path is missing")
+    p_check.set_defaults(func=cmd_check)
+
+    args = ap.parse_args()
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
