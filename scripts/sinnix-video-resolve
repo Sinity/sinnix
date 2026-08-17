@@ -15,7 +15,7 @@
 # the download layer, used here as the primary de-dup mechanism.
 set -euo pipefail
 
-LEDGER_PARQUET="${SINNIX_URL_LEDGER_PARQUET:-/realm/data/derived/url-ledger/url_ledger.parquet}"
+LEDGER_PARQUET="${SINNIX_URL_LEDGER_PARQUET:-/realm/data/activity/url-ledger/url_ledger.parquet}"
 ARCHIVE_ROOT="${SINNIX_VIDEO_ARCHIVE_ROOT:-/realm/data/activity/video-resolve}"
 DL_ARCHIVE="$ARCHIVE_ROOT/.yt-dlp-archive"
 

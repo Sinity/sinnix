@@ -20,7 +20,7 @@ mkServiceModule {
     let
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
       archiveRoot = "${config.sinnix.paths.activityRoot}/video-resolve";
-      ledgerParquet = "${config.sinnix.paths.dataRoot}/derived/url-ledger/url_ledger.parquet";
+      ledgerParquet = "${config.sinnix.paths.activityRoot}/url-ledger/url_ledger.parquet";
     in
     {
       sinnix.runtime.surfaces.video-resolve = {
