@@ -502,6 +502,12 @@ def store_upload(lane: str, name: str, body: bytes, declared_sha: str | None) ->
             fh.write(body)
             fh.flush()
             os.fsync(fh.fileno())
+        # Match the lane's existing files rather than whatever umask this
+        # service happens to run under: these sit beside chunks the drain's
+        # rsync landed at 0660, and a lane where half the files are readable
+        # by the group and half are not is a bug waiting for its first
+        # group-reading consumer.
+        part.chmod(0o660)
         part.replace(target)
     except OSError as exc:
         part.unlink(missing_ok=True)

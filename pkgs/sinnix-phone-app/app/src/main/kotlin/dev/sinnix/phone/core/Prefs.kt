@@ -255,4 +255,24 @@ object Prefs {
         return if (configured == fallback) listOf(configured)
         else listOf(configured, fallback)
     }
+
+    /**
+     * The hub base URLs to try, in order -- the same lesson as
+     * [receiverCandidates], which the hub did not get until 2026-08-17.
+     *
+     * The receiver learned to fall back to the raw tailnet address when
+     * MagicDNS stopped resolving; the hub URL kept a single name, so every
+     * HTTP call the app made -- glance, steering, jobs, intents, job answers,
+     * ops actions -- died on UnknownHostException and fell back to the file
+     * plane. Silently, because falling back is what those calls are supposed
+     * to do when prime is unreachable, and a DNS miss is indistinguishable
+     * from an absent prime unless something looks at the exception. Measured
+     * from the phone: `ping sinnix-prime` -> unknown host, GET on
+     * http://100.114.9.64:8880/phone/v1/ping -> 200.
+     */
+    fun hubCandidates(ctx: Context): List<String> {
+        val configured = hubBaseUrl(ctx).trimEnd('/')
+        val fallback = "http://100.114.9.64:8880"
+        return if (configured == fallback) listOf(configured) else listOf(configured, fallback)
+    }
 }

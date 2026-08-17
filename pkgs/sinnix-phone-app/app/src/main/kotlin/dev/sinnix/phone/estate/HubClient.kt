@@ -44,7 +44,14 @@ class HubClient(context: Context) {
             .retryOnConnectionFailure(false)
             .build()
 
-    private val base: String get() = Prefs.hubBaseUrl(ctx).trimEnd('/')
+    /**
+     * Every request takes a PATH and is tried against each candidate base in
+     * turn, so a MagicDNS miss costs one failed connect rather than the whole
+     * control plane. The first base that answers wins; nothing is cached,
+     * because the phone that could not resolve the name a minute ago is
+     * routinely the same phone that can now.
+     */
+    private val bases: List<String> get() = Prefs.hubCandidates(ctx)
 
     /**
      * Reachability, measured rather than assumed.
@@ -55,23 +62,23 @@ class HubClient(context: Context) {
      */
     fun ping(): Long? {
         val started = System.nanoTime()
-        val body = get("$base$PHONE/ping") ?: return null
+        val body = get("$PHONE/ping") ?: return null
         return if (body.optBoolean("ok", true)) (System.nanoTime() - started) / 1_000_000 else null
     }
 
-    fun glance(): JSONObject? = get("$base$PHONE/glance")
+    fun glance(): JSONObject? = get("$PHONE/glance")
 
-    fun steering(): JSONObject? = get("$base$PHONE/steering")
+    fun steering(): JSONObject? = get("$PHONE/steering")
 
-    fun jobs(): JSONArray? = get("$base$PHONE/jobs")?.optJSONArray("jobs")
+    fun jobs(): JSONArray? = get("$PHONE/jobs")?.optJSONArray("jobs")
 
     /** Post an intent. The same object the outbox would have written. */
-    fun postIntent(intent: JSONObject): JSONObject? = post("$base$PHONE/intent", intent)
+    fun postIntent(intent: JSONObject): JSONObject? = post("$PHONE/intent", intent)
 
     /** Answer an agent's question. */
     fun answerJob(jobId: String, answer: String): JSONObject? =
         post(
-            "$base$PHONE/job-answer",
+            "$PHONE/job-answer",
             JSONObject().put("job_id", jobId).put("answer", answer),
         )
 
@@ -82,7 +89,7 @@ class HubClient(context: Context) {
      * a phone-specific mirror, so the app cannot show a unit the action API
      * would refuse for a reason the phone does not know about.
      */
-    fun snapshot(): JSONObject? = get("$base/ops/v1/snapshot")
+    fun snapshot(): JSONObject? = get("/ops/v1/snapshot")
 
     /**
      * Run one bounded action.
@@ -94,7 +101,7 @@ class HubClient(context: Context) {
      */
     fun action(target: String, verb: String, expectedRevision: String?): JSONObject? =
         post(
-            "$base/ops/v1/actions",
+            "/ops/v1/actions",
             JSONObject().apply {
                 put("target", target)
                 put("action", verb)
@@ -103,7 +110,20 @@ class HubClient(context: Context) {
             },
         )
 
-    private fun get(url: String): JSONObject? =
+    private fun get(path: String): JSONObject? =
+        bases.firstNotNullOfOrNull { getFrom(it + path) }
+
+    /**
+     * Trying the second base after the first failed can deliver an intent
+     * twice -- a 5xx from a prime that already executed it looks exactly like
+     * one that did not. That is safe here and only here: every verb this
+     * carries is keyed by send_token on the dispatcher, which records executed
+     * tokens and re-emits the receipt for a repeat instead of acting again.
+     */
+    private fun post(path: String, body: JSONObject): JSONObject? =
+        bases.firstNotNullOfOrNull { postTo(it + path, body) }
+
+    private fun getFrom(url: String): JSONObject? =
         try {
             http.newCall(Request.Builder().url(url).get().build()).execute().use { r ->
                 if (!r.isSuccessful) null else r.body?.string()?.let { JSONObject(it) }
@@ -120,7 +140,7 @@ class HubClient(context: Context) {
             null
         }
 
-    private fun post(url: String, body: JSONObject): JSONObject? =
+    private fun postTo(url: String, body: JSONObject): JSONObject? =
         try {
             val req =
                 Request.Builder()

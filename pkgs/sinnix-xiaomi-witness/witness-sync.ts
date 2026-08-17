@@ -56,7 +56,13 @@ import { MiHealthClient, XiaomiAuth } from "./upstream/src/xiaomi/client.ts";
 const STATE_DIR = process.env.XIAOMI_WITNESS_STATE ?? "/realm/state/xiaomi-witness";
 const LANE_DIR = process.env.XIAOMI_WITNESS_LANE ?? "/realm/data/captures/xiaomi-cloud";
 const BASE = process.env.MI_HEALTH_BASE ?? "https://de.hlth.io.mi.com";
-const WINDOW_DAYS = Number(process.env.XIAOMI_WITNESS_WINDOW_DAYS ?? "3");
+// Seven days, not three. The cloud is the SLOW plane, measured 2026-08-17:
+// Health Connect held band data from an hour ago while Xiaomi's servers had
+// nothing newer than the previous afternoon, and forcing Mi Fitness's own
+// sync job moved neither. A window has to outlast however long the app
+// takes to upload, because a day that ages past its edge is never fetched
+// at all -- the fetch is windowed, so a gap here is permanent, not late.
+const WINDOW_DAYS = Number(process.env.XIAOMI_WITNESS_WINDOW_DAYS ?? "7");
 const PARSER_VERSION = 2;
 
 // Keys the raw plane actually serves for this band (probed 2026-08-17;
