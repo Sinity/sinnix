@@ -69,49 +69,44 @@ mkServiceModule {
       }
     ];
   };
-  configFn =
+  configFn = _: {
+    # Signing key for the phone capture app, which produces everything this
+    # drain collects (pkgs/sinnix-phone-app, docs/phone.md). Android
+    # identifies an app by its signing certificate, so losing this key turns
+    # every future install into a signature conflict resolvable only by
+    # uninstalling -- which also discards the app's runtime grants. It is
+    # deliberately outside the Nix store: a key rebuilt whenever the sources
+    # change would defeat the point of a stable identity.
+    sinnix.persistence.home.directories = [ ".local/share/sinnix-phone-app" ];
+
+    # Prime's half of the phone's estate: what the drain pushes down
+    # (glance, steering, receipts, decks) and the executed-intent tokens that
+    # make a re-drained intent a no-op. On the NVMe volume rather than the
+    # wear-limited root because the push files are rewritten every drain, and
+    # under /realm/state because losing the token set would let an already
+    # executed intent run a second time after a reboot.
+    systemd.tmpfiles.rules = [
+      "d /realm/state/sinnix-phone 0755 sinity users -"
+      "d /realm/state/sinnix-phone/inbox 0755 sinity users -"
+      "d /realm/state/sinnix-phone/inbox/receipts 0755 sinity users -"
+      "d /realm/state/sinnix-phone/inbox/notify 0755 sinity users -"
+      "d /realm/state/sinnix-phone/inbox/decks 0755 sinity users -"
+      "d /realm/state/sinnix-phone/tokens 0755 sinity users -"
+    ];
+  };
+  # The timer's own Description= is dropped: the factory's generated timer
+  # body carries no description field, unlike the hand-written one it
+  # replaces -- cosmetic only, doesn't affect scheduling.
+  job =
     { cfg, ... }:
     {
-      # Signing key for the phone capture app, which produces everything this
-      # drain collects (pkgs/sinnix-phone-app, docs/phone.md). Android
-      # identifies an app by its signing certificate, so losing this key turns
-      # every future install into a signature conflict resolvable only by
-      # uninstalling -- which also discards the app's runtime grants. It is
-      # deliberately outside the Nix store: a key rebuilt whenever the sources
-      # change would defeat the point of a stable identity.
-      sinnix.persistence.home.directories = [ ".local/share/sinnix-phone-app" ];
-
-      # Prime's half of the phone's estate: what the drain pushes down
-      # (glance, steering, receipts, decks) and the executed-intent tokens that
-      # make a re-drained intent a no-op. On the NVMe volume rather than the
-      # wear-limited root because the push files are rewritten every drain, and
-      # under /realm/state because losing the token set would let an already
-      # executed intent run a second time after a reboot.
-      systemd.tmpfiles.rules = [
-        "d /realm/state/sinnix-phone 0755 sinity users -"
-        "d /realm/state/sinnix-phone/inbox 0755 sinity users -"
-        "d /realm/state/sinnix-phone/inbox/receipts 0755 sinity users -"
-        "d /realm/state/sinnix-phone/inbox/notify 0755 sinity users -"
-        "d /realm/state/sinnix-phone/inbox/decks 0755 sinity users -"
-        "d /realm/state/sinnix-phone/tokens 0755 sinity users -"
-      ];
-
-      systemd.user.services.sinnix-phone-drain = {
-        description = "Pull phone capture lanes into the data lake, if on wifi";
-        serviceConfig = {
-          Type = "oneshot";
-          ExecStart = "${scriptPkgs.sinnix-phone}/bin/sinnix-phone drain";
-        };
-      };
-
-      systemd.user.timers.sinnix-phone-drain = {
-        description = "Periodic trigger for the phone drain check";
-        wantedBy = [ "timers.target" ];
-        timerConfig = {
-          OnBootSec = "5min";
-          OnUnitActiveSec = "${toString cfg.intervalSec}s";
-          AccuracySec = "1min";
-        };
+      description = "Pull phone capture lanes into the data lake, if on wifi";
+      manager = "user";
+      execStart = "${scriptPkgs.sinnix-phone}/bin/sinnix-phone drain";
+      timer = {
+        onBootSec = "5min";
+        intervalSec = cfg.intervalSec;
+        accuracySec = "1min";
       };
     };
 } args
