@@ -5,6 +5,7 @@
 # kitty-scrollback lane a real owning unit the health sentinel can track.
 {
   mkServiceModule,
+  mkCaptureLane,
   lib,
   pkgs,
   config,
@@ -16,8 +17,9 @@ let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   capturesRoot = config.sinnix.paths.activityRoot;
   scrollbackDir = "${capturesRoot}/kitty-scrollback";
+  cfg = config.sinnix.services.capture-kitty-scrollback;
 in
-mkServiceModule {
+mkServiceModule (mkCaptureLane {
   name = "capture-kitty-scrollback";
   description = "Periodic full-ANSI kitty terminal scrollback capture";
   extraOptions = {
@@ -27,62 +29,25 @@ mkServiceModule {
       description = "Minutes between scrollback capture runs.";
     };
   };
-  surface = {
-    unit = "sinnix-capture-kitty-scrollback.service";
-    manager = "user";
-    resourceClass = "capture-runtime";
-    observe = {
-      enable = true;
-      restartable = false;
-    };
-    captures = [
-      {
-        name = "kitty-scrollback";
-        path = scrollbackDir;
-        eventDriven = true;
-        # No kitty windows open for a full day is itself a real signal
-        # (host idle/away), not just a quiet capture lane.
-        staleAfterSeconds = 86400;
-      }
-    ];
+  inherit username;
+  laneDir = scrollbackDir;
+  mode = "poll";
+  captureName = "kitty-scrollback";
+  eventDriven = true;
+  # No kitty windows open for a full day is itself a real signal (host
+  # idle/away), not just a quiet capture lane.
+  staleAfterSeconds = 86400;
+  # Not restartable: this is a oneshot triggered by the timer, not a
+  # long-running daemon a restart could bring back.
+  restartable = false;
+  execStart = "${scriptPkgs.kitty-scrollback-capture}/bin/kitty-scrollback-capture";
+  environment = [ "KITTY_SCROLLBACK_DIR=${scrollbackDir}" ];
+  pollAfter = [ "graphical-session.target" ];
+  timer = {
+    onUnitActiveSec = "${toString cfg.intervalMinutes}min";
+    onStartupSec = "2min";
+    persistent = true;
   };
-  configFn =
-    { cfg, config, ... }:
-    {
-      systemd.tmpfiles.rules = [
-        "d ${scrollbackDir} 0755 ${username} users -"
-      ];
-
-      home-manager.users.${username} = {
-        systemd.user.services.sinnix-capture-kitty-scrollback = {
-          Unit = {
-            Description = "Full-ANSI kitty terminal scrollback capture";
-            After = [ "graphical-session.target" ];
-          };
-          Service = lib.sinnix.mkRuntimeServiceConfig {
-            runtimeInventory = config.sinnix.runtime.inventory;
-            unit = "sinnix-capture-kitty-scrollback.service";
-            overrides = {
-              Type = "oneshot";
-              Environment = "KITTY_SCROLLBACK_DIR=${scrollbackDir}";
-              ExecStart = "${scriptPkgs.kitty-scrollback-capture}/bin/kitty-scrollback-capture";
-              NoNewPrivileges = true;
-              ProtectSystem = "strict";
-              ProtectHome = "read-only";
-              ReadWritePaths = [ scrollbackDir ];
-            };
-          };
-        };
-
-        systemd.user.timers.sinnix-capture-kitty-scrollback = {
-          Unit.Description = "Periodic trigger for kitty scrollback capture";
-          Timer = {
-            OnUnitActiveSec = "${toString cfg.intervalMinutes}min";
-            OnStartupSec = "2min";
-            Persistent = true;
-          };
-          Install.WantedBy = [ "timers.target" ];
-        };
-      };
-    };
-} args
+  unitDescription = "Full-ANSI kitty terminal scrollback capture";
+  timerDescription = "Periodic trigger for kitty scrollback capture";
+}) args
