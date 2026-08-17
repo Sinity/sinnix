@@ -261,6 +261,18 @@ mkServiceModule {
         }
 
         (hub) {
+          # Usage evidence for the estate's own audits (capture doctrine):
+          # the global logger above stays at ERROR for Caddy's own
+          # diagnostics, so without a dedicated access logger page usage is
+          # otherwise unmeasurable.
+          log {
+            output file ${cfg.stateDir}/access.log {
+              roll_size 10mb
+              roll_keep 5
+            }
+            level INFO
+          }
+
           redir /reports /reports/
           handle_path /reports/* {
             root * ${cfg.reportsDir}
