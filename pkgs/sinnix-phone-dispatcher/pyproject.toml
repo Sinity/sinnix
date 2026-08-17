@@ -1,0 +1,18 @@
+[project]
+name = "sinnix-phone-dispatcher"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+[project.scripts]
+sinnix-phone-dispatcher = "sinnix_phone_dispatcher.cli:main"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+# Explicit, same reasoning as sinnix-ops-reducer's pyproject: flat-layout
+# auto-discovery would find every submodule today, but silently dropping one
+# later is a failure that only shows up as a missing route or a dead lane at
+# runtime, not a build error.
+[tool.setuptools.packages.find]
+include = ["sinnix_phone_dispatcher*"]

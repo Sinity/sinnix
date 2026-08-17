@@ -616,10 +616,14 @@ mkServiceModule {
           Unit.Description = "Prime's live half of the phone's dual transport, plus the always-on telemetry receiver";
           Service = {
             Type = "simple";
-            # sinnix-steer owns the steering schema and this service shells out
-            # to it; the ops reducer socket it reads is in the same runtime dir.
-            # sinnix-score is likewise shelled out to, on trace/voice_note
-            # arrival (sinnix-tjqi) -- both resolve through the same PATH.
+            # sinnix-steer/sinnix-score are shelled out to (steering rituals,
+            # scoring on trace/voice_note arrival, sinnix-tjqi) via the
+            # package's own wrapped PATH now (pkgs/sinnix-phone-dispatcher's
+            # pkg.nix makeWrapperArgs), not this Environment -- packaging the
+            # dispatcher (sinnix-svvz) traded the scripts/ registry's
+            # writeShellApplication runtimeInputs wrapper for that mechanism.
+            # Kept as the baseline PATH anything else this process shells out
+            # to inherits.
             Environment = [ "PATH=/run/wrappers/bin:/run/current-system/sw/bin" ];
             # Resolves the tailnet bind address for the embedded telemetry
             # receiver (SINNIX_PHONE_STREAM_HOST), same pattern as the hub's
@@ -638,6 +642,15 @@ mkServiceModule {
             ];
             Restart = "on-failure";
             RestartSec = "5s";
+            # sd_notify from the serve loop's own thread (server.py), same
+            # qokz/ops-reducer pattern: a wedged HTTP server or a hung
+            # phone-stream receiver is restarted rather than sitting there
+            # answering nothing. Type stays simple rather than notify --
+            # READY does not gate start ordering here any more than it does
+            # for the reducer, and the value wanted is the crash detection
+            # WatchdogSec buys, not a start-order dependency on it.
+            NotifyAccess = "main";
+            WatchdogSec = "60s";
             NoNewPrivileges = true;
             UMask = "0077";
           };
