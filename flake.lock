@@ -932,6 +932,7 @@
         "polylogue": "polylogue",
         "scribe-tap": "scribe-tap",
         "sinex": "sinex",
+        "steering": "steering",
         "stylix": "stylix",
         "treefmt-nix": "treefmt-nix_2",
         "yt-polisher": "yt-polisher"
@@ -1053,6 +1054,23 @@
         "ref": "release-26.05",
         "repo": "nixpkgs",
         "type": "github"
+      }
+    },
+    "steering": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1787002153,
+        "narHash": "sha256-xtpP2JQkCQYxxe+GANnxAkiz9TihZ6CFt8YRaKbzpZI=",
+        "ref": "master",
+        "rev": "0a1350d75aa268006a1a23b6c9278cef392cb40d",
+        "revCount": 2,
+        "type": "git",
+        "url": "file:///realm/project/steering"
+      },
+      "original": {
+        "ref": "master",
+        "type": "git",
+        "url": "file:///realm/project/steering"
       }
     },
     "stylix": {

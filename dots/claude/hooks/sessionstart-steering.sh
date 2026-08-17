@@ -5,7 +5,7 @@
 # Exits silently when the steering workspace is absent or bd unavailable.
 set -euo pipefail
 
-STEER_BEADS="/realm/state/steering/.beads"
+STEER_BEADS="/realm/project/steering/.beads"
 [ -d "$STEER_BEADS" ] || exit 0
 command -v bd >/dev/null 2>&1 || exit 0
 
@@ -14,7 +14,7 @@ export BEADS_DIR="$STEER_BEADS"
 ready=$(bd ready 2>/dev/null | head -20) || exit 0
 [ -n "$ready" ] || exit 0
 
-echo "# Personal Steering (workspace: /realm/state/steering — bd via BEADS_DIR)"
+echo "# Personal Steering (workspace: /realm/project/steering — bd via BEADS_DIR)"
 echo "Open intentions/activities (agent: surface these when relevant; the"
 echo "operator steers, you hold state — never nag, always know):"
 echo "$ready"

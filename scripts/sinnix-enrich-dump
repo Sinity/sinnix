@@ -87,9 +87,9 @@ note_input_error() {
 }
 
 # bd rewrites its own store on every call (dolt reimport, lockfile,
-# last-touched), so the unit needs /realm/state/steering writable too.
-if [[ -d /realm/state/steering/.beads ]]; then
-  if ! bd_err="$(bd export -C /realm/state/steering -o "$BUNDLE/steering-export.jsonl" 2>&1)"; then
+# last-touched), so the unit needs /realm/project/steering writable too.
+if [[ -d /realm/project/steering/.beads ]]; then
+  if ! bd_err="$(bd export -C /realm/project/steering -o "$BUNDLE/steering-export.jsonl" 2>&1)"; then
     note_input_error steering-export "$(tail -c 500 <<<"$bd_err")"
     rm -f "$BUNDLE/steering-export.jsonl"
   fi

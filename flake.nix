@@ -81,6 +81,15 @@
       inputs.polylogueSrc.follows = "polylogue";
     };
 
+    # The personal steering workspace (its own git repo with its own beads).
+    # Source of the sinnix-steer CLI; sinnix carries only the packaging
+    # wrapper (flake/scripts.nix), so the whole steering concern lives in
+    # one place. Non-flake: it is a workspace, not a project with outputs.
+    steering = {
+      url = "git+file:///realm/project/steering?ref=master";
+      flake = false;
+    };
+
     # Sinex is sourced from GitHub so system deployments follow pushed upstream
     # history instead of implicitly consuming the local checkout state.
     #

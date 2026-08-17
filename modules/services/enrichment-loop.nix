@@ -76,7 +76,7 @@ mkServiceModule {
                   outputRoot
                   # bd rewrites its store on export, so a read-only steering
                   # workspace makes that input fail rather than be absent.
-                  "/realm/state/steering"
+                  "/realm/project/steering"
                 ]
                 ++ lib.sinnix.systemd.agentRuntimeWritePaths { home = homeDir; };
                 # Clear of the observed run distribution (healthy passes run
