@@ -579,7 +579,7 @@ in
               description = "Record + surface the failure of %i";
               serviceConfig = {
                 Type = "oneshot";
-                ExecStart = "${unitFailureNotify}/bin/sinnix-unit-failure-notify %I";
+                ExecStart = "${unitFailureNotify}/bin/sinnix-unit-failure-notify %i";
               };
             };
             sinnix-config-drift = {
@@ -597,7 +597,7 @@ in
               (
                 _name: surface:
                 lib.nameValuePair (lib.removeSuffix ".service" surface.unit) {
-                  unitConfig.OnFailure = [ "sinnix-unit-failure-notify@%n" ];
+                  unitConfig.OnFailure = [ "sinnix-unit-failure-notify@%n.service" ];
                 }
               )
               (
@@ -621,7 +621,7 @@ in
         Unit.Description = "Record + surface the failure of user unit %i";
         Service = {
           Type = "oneshot";
-          ExecStart = "${unitFailureNotify}/bin/sinnix-unit-failure-notify %I --user";
+          ExecStart = "${unitFailureNotify}/bin/sinnix-unit-failure-notify %i --user";
         };
       };
 
@@ -642,7 +642,7 @@ in
             lib.nameValuePair "systemd/user/${surface.unit}.d/50-sinnix-unit-failure-notify.conf" {
               text = ''
                 [Unit]
-                OnFailure=sinnix-unit-failure-notify@%n
+                OnFailure=sinnix-unit-failure-notify@%n.service
               '';
             }
           )
