@@ -258,7 +258,7 @@ let
     need_active below.service
     need_active machine-telemetry.service
 
-    telemetry_db="/realm/data/captures/machine/telemetry.sqlite"
+    telemetry_db="/realm/data/machine/telemetry.sqlite"
     [ -s "$telemetry_db" ]
 
     now="$(${pkgs.coreutils}/bin/date +%s)"
@@ -268,7 +268,7 @@ let
       exit 1
     fi
 
-    ${pkgs.findutils}/bin/find /realm/data/captures/machine/below/store -type f | ${pkgs.gnugrep}/bin/grep -q .
+    ${pkgs.findutils}/bin/find /realm/data/machine/below/store -type f | ${pkgs.gnugrep}/bin/grep -q .
 
     session_id="inactive"
     if [ "$(${pkgs.systemd}/bin/systemctl is-active transmission.service)" = "active" ]; then

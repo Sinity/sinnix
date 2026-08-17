@@ -523,8 +523,8 @@ in
             rewrite =
               builtins.replaceStrings
                 [
-                  "/realm/data/captures/machine/borg_status.jsonl"
-                  "/realm/data/captures/machine"
+                  "/realm/data/machine/borg_status.jsonl"
+                  "/realm/data/machine"
                   "/persist/root/.cache/borg-drain/integrity-check.json"
                   "/persist/root/.cache/borg-drain/integrity-status-state.json"
                   "/persist/root/.cache/borg-drain"
