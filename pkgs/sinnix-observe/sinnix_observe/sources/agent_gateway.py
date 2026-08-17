@@ -90,7 +90,7 @@ def _polylogue_sessions(
 ) -> tuple[dict[str, dict[str, Any]], str | None]:
     db = Path(
         os.environ.get(
-            "SINNIX_POLYLOGUE_INDEX_DB", "/realm/data/captures/polylogue/index.db"
+            "SINNIX_POLYLOGUE_INDEX_DB", "/realm/data/ai/polylogue/index.db"
         )
     )
     if not db.is_file():

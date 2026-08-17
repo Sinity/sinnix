@@ -9,13 +9,16 @@
 let
   inherit (config.sinnix.paths)
     realmRoot
-    capturesRoot
+    aiRoot
     outerRealm
     neoOuterRealm
     ;
   username = config.sinnix.user.name;
   primaryGroupName = config.users.users.${username}.group;
-  polylogueArchiveRoot = "${capturesRoot}/polylogue";
+  # Moved off capturesRoot 2026-08-17 (estate charter subject recut: "ai/
+  # absorbs ... captures/polylogue"). polylogued.service was not running at
+  # move time (confirmed: unit not found), so no live daemon held this open.
+  polylogueArchiveRoot = "${aiRoot}/polylogue";
   polylogueDbRoot = "${realmRoot}/state/polylogue";
   polylogueDbFiles = [
     "index.db"
